@@ -36,6 +36,7 @@ import gc
 sys.path.insert(0, str(Path(__file__).parent))
 
 from utils.tiling import (
+    calculate_tile_size_for_target,
     create_fov_directory_structure,
     needs_tiling,
     save_tile_positions,
@@ -156,8 +157,8 @@ def main():
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed for reproducibility')
     # New tiling and multiprocessing arguments
-    parser.add_argument('--tile_size', type=int, default=2048,
-                        help='FOV tile size for splitting large images')
+    parser.add_argument('--target_fovs', type=int, default=100,
+                        help='Target number of FOV tiles (tile size computed dynamically)')
     parser.add_argument('--batch_size', type=int, default=None,
                         help='Batch size for multiprocessing (default: auto from CPU count)')
     parser.add_argument('--multiprocess', action='store_true', default=False,
@@ -202,20 +203,22 @@ def main():
     print(f"Max K: {args.max_k}")
     print(f"Cap: {args.cap}")
     print(f"Seed: {args.seed}")
-    print(f"Tile size: {args.tile_size}")
+    print(f"Target FOVs: {args.target_fovs}")
     print(f"Multiprocess: {args.multiprocess}")
     print(f"Batch size: {args.batch_size}")
     print()
 
-    # Get image dimensions to check if tiling is needed
+    # Get image dimensions and compute tile size for target FOV count
     height, width = get_image_dimensions(args.tiff_dir, args.fov_name)
+    tile_size = calculate_tile_size_for_target(height, width, args.target_fovs)
     print(f"Image dimensions: {width}x{height}")
+    print(f"Computed tile size: {tile_size}px (targeting ~{args.target_fovs} FOVs)")
 
-    do_tiling = needs_tiling(height, width, args.tile_size)
+    do_tiling = needs_tiling(height, width, tile_size)
     tile_positions = None
 
     if do_tiling:
-        n_rows, n_cols = calculate_tile_grid(height, width, args.tile_size)
+        n_rows, n_cols = calculate_tile_grid(height, width, tile_size)
         n_tiles = n_rows * n_cols
         print(f"Tiling enabled: {n_rows}x{n_cols} = {n_tiles} tiles")
 
@@ -248,7 +251,7 @@ def main():
             channel_tiffs=channel_tiffs,
             cell_mask=cell_mask,
             output_dir=tiled_dir,
-            tile_size=args.tile_size,
+            tile_size=tile_size,
             patient_id=args.fov_name
         )
 
@@ -259,7 +262,7 @@ def main():
         print(f"Created {len(fovs)} FOV tiles: {fovs[:3]}{'...' if len(fovs) > 3 else ''}")
     else:
         fovs = [args.fov_name]
-        print(f"No tiling needed (image fits in {args.tile_size}x{args.tile_size})")
+        print(f"No tiling needed (image fits in {tile_size}x{tile_size})")
 
     print()
 
@@ -294,10 +297,6 @@ def main():
     else:
         print(f"Sequential processing: {len(fovs)} FOV(s)")
 
-    # Warn if tile count is very high
-    if len(fovs) > 100:
-        print(f"WARNING: High tile count ({len(fovs)}). Consider increasing tile_size.")
-        print(f"  Current: {args.tile_size}. For 50k images, use 4096-8192.")
     print()
 
     # =========================================================================
@@ -444,7 +443,7 @@ def main():
             tile_positions=tile_positions,
             output_path=Path(tile_positions_path),
             patient_id=args.fov_name,
-            tile_size=args.tile_size,
+            tile_size=tile_size,
             original_height=height,
             original_width=width
         )
@@ -464,7 +463,8 @@ def main():
         'pc_chan_avg_som_cluster_name': pc_chan_avg_som_cluster_name,
         'pc_chan_avg_meta_cluster_name': pc_chan_avg_meta_cluster_name,
         'is_tiled': do_tiling,
-        'tile_size': args.tile_size if do_tiling else None,
+        'tile_size': tile_size if do_tiling else None,
+        'target_fovs': args.target_fovs,
         'tile_positions_path': tile_positions_path,
         'original_height': height,
         'original_width': width
@@ -490,7 +490,8 @@ def main():
         print(f"  Channels used: {len(channels)}")
         print(f"  FOVs processed: {len(fovs)}")
         if do_tiling:
-            print(f"  Tiling: {len(fovs)} tiles from {args.fov_name}")
+            print(f"  Tiling: {len(fovs)} tiles from {args.fov_name} (target: {args.target_fovs})")
+            print(f"  Computed tile size: {tile_size}px")
             print(f"  Original dimensions: {width}x{height}")
 
     print()

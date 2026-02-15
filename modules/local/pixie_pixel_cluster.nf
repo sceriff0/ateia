@@ -9,7 +9,7 @@ nextflow.enable.dsl = 2
  * Based on: https://github.com/angelolab/pixie (ark-analysis 0.6.4)
  *
  * Features:
- *   - Automatic FOV tiling for large images (>2048x2048)
+ *   - Dynamic FOV tiling targeting ~100 FOVs per image
  *   - Multiprocessing support for parallel tile processing
  *   - Batch size auto-calculated from allocated CPUs
  *
@@ -58,7 +58,7 @@ process PIXIE_PIXEL_CLUSTER {
     // Calculate batch_size with memory-aware cap (original pixie uses batch_size=5 max)
     def raw_batch = params.pixie_batch_size ?: Math.max(1, (task.cpus / 4).intValue())
     def batch_size = Math.min(raw_batch, 5)  // Cap at 5 to prevent OOM with spawn multiprocessing
-    def tile_size = params.pixie_tile_size ?: 2048
+    def target_fovs = params.pixie_target_fovs ?: 100
     def multiprocess_flag = params.pixie_multiprocess != false ? '--multiprocess' : ''
     """
     # Log input sizes for tracing
@@ -73,7 +73,7 @@ process PIXIE_PIXEL_CLUSTER {
 
     echo "Sample: ${meta.patient_id}"
     echo "Channels for clustering: ${channels_arg}"
-    echo "Tile size: ${tile_size}"
+    echo "Target FOVs: ${target_fovs}"
     echo "Batch size: ${batch_size}"
     echo "Multiprocessing: ${multiprocess_flag ? 'enabled' : 'disabled'}"
 
@@ -101,7 +101,7 @@ process PIXIE_PIXEL_CLUSTER {
         --max_k ${params.pixie_max_k} \\
         --cap ${params.pixie_cap} \\
         --seed ${params.pixie_seed} \\
-        --tile_size ${tile_size} \\
+        --target_fovs ${target_fovs} \\
         --batch_size ${batch_size} \\
         ${multiprocess_flag} \\
         ${args}

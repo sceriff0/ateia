@@ -1,7 +1,8 @@
 """FOV Tiling Utilities for Pixie Clustering.
 
-This module provides functions to split large images into 2048x2048 FOV tiles
+This module provides functions to split large images into FOV tiles
 for efficient processing with Pixie's multiprocessing capabilities.
+Tile size is computed dynamically to target ~100 FOVs per image.
 
 The tiling approach allows Pixie to process multiple FOVs in parallel using
 its internal multiprocessing (multiprocess=True, batch_size=N).
@@ -35,6 +36,7 @@ from numpy.typing import NDArray
 __all__ = [
     "TileInfo",
     "calculate_tile_grid",
+    "calculate_tile_size_for_target",
     "split_image_to_fov_tiles",
     "create_fov_directory_structure",
     "needs_tiling",
@@ -61,6 +63,45 @@ class TileInfo:
     def from_dict(cls, d: dict) -> "TileInfo":
         """Create TileInfo from dictionary."""
         return cls(**d)
+
+
+def calculate_tile_size_for_target(
+    height: int,
+    width: int,
+    target_fovs: int = 100,
+    min_tile_size: int = 512
+) -> int:
+    """Calculate tile size to produce approximately target_fovs tiles.
+
+    Computes the tile size such that ceil(H/ts) * ceil(W/ts) is close to
+    target_fovs. A minimum tile size floor prevents degenerate tiles on
+    small images.
+
+    Parameters
+    ----------
+    height : int
+        Image height in pixels.
+    width : int
+        Image width in pixels.
+    target_fovs : int
+        Desired number of FOV tiles (default 100).
+    min_tile_size : int
+        Minimum tile size in pixels (default 512).
+
+    Returns
+    -------
+    int
+        Computed tile size in pixels.
+
+    Raises
+    ------
+    ValueError
+        If target_fovs is not positive.
+    """
+    if target_fovs <= 0:
+        raise ValueError(f"target_fovs must be positive, got {target_fovs}")
+    tile_size = int(math.sqrt(height * width / target_fovs))
+    return max(tile_size, min_tile_size)
 
 
 def calculate_tile_grid(
