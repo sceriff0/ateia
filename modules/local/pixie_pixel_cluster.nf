@@ -96,7 +96,7 @@ process PIXIE_PIXEL_CLUSTER {
         --output_dir . \\
         --channels ${channels_arg} \\
         --blur_factor ${params.pixie_blur_factor} \\
-        --subset_proportion ${params.pixie_subset_proportion} \\
+        --subset_proportion ${ params.pixie_subset_proportion / task.attempt } \\
         --num_passes ${params.pixie_num_passes} \\
         --max_k ${params.pixie_max_k} \\
         --cap ${params.pixie_cap} \\
