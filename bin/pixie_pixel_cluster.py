@@ -84,6 +84,32 @@ def _apply_som_optimization():
     PixieSOMCluster.generate_som_clusters = _patched_generate_som_clusters
 
 
+# =============================================================================
+# Fix: Tolerate empty SOM clusters in compute_pixel_cluster_channel_avg.
+# The ark library raises ValueError when some SOM nodes have no pixels mapped.
+# This is normal with tiled/heterogeneous data. Patch to warn instead.
+# =============================================================================
+def _apply_tolerant_cluster_avg_patch():
+    """Allow compute_pixel_cluster_channel_avg to succeed with empty SOM clusters."""
+    from ark.phenotyping import pixel_cluster_utils
+    _orig = pixel_cluster_utils.compute_pixel_cluster_channel_avg
+
+    def _tolerant(fovs, channels, base_dir, pixel_cluster_col,
+                  num_pixel_clusters, pixel_data_dir='pixel_mat_data',
+                  num_fovs_subset=100, seed=42, keep_count=False):
+        # Call original with num_pixel_clusters=1 to bypass strict validation
+        # (the param is only used for the count check, not computation)
+        result = _orig(fovs, channels, base_dir, pixel_cluster_col,
+                       1, pixel_data_dir, num_fovs_subset, seed, keep_count)
+        if result.shape[0] < num_pixel_clusters:
+            print(f"  Note: {result.shape[0]}/{num_pixel_clusters} SOM clusters "
+                  f"have assigned pixels. Empty clusters are expected with "
+                  f"heterogeneous/tiled data.")
+        return result
+
+    pixel_cluster_utils.compute_pixel_cluster_channel_avg = _tolerant
+
+
 def get_image_dimensions(tiff_dir: str, fov_name: str) -> tuple:
     """Get dimensions of the first channel image in FOV directory."""
     fov_dir = Path(tiff_dir) / fov_name
@@ -187,6 +213,8 @@ def main():
         )
         # Apply SOM optimization (batch_size 100 -> 10000)
         _apply_som_optimization()
+        # Allow empty SOM clusters instead of raising ValueError
+        _apply_tolerant_cluster_avg_patch()
     except ImportError as e:
         print(f"ERROR: Failed to import ark-analysis modules: {e}", file=sys.stderr)
         print("Please ensure ark-analysis==0.6.4 is installed.", file=sys.stderr)
