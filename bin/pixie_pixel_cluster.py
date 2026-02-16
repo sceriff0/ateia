@@ -126,6 +126,18 @@ def align_norm_vals_channel_order(base_dir: str, norm_vals_name: str, channels: 
     else:
         print("  Normalization column order already matches requested channels.")
 
+    # Fix zero/NaN normalization values that would cause Inf/NaN in
+    # PixelSOMCluster.normalize_data -> segfault in pyFlowSOM.som()
+    row = norm_vals.iloc[0]
+    bad_cols = row[(row == 0) | row.isna()].index.tolist()
+    if bad_cols:
+        EPSILON = 1e-10
+        print(f"  WARNING: Normalization values are zero/NaN for channels: {bad_cols}")
+        print(f"  Replacing with epsilon ({EPSILON}) to prevent segfault in pyFlowSOM.")
+        for col in bad_cols:
+            norm_vals.at[0, col] = EPSILON
+        feather.write_dataframe(norm_vals, norm_vals_path, compression='uncompressed')
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -318,8 +330,8 @@ def main():
         blur_factor=args.blur_factor,
         subset_proportion=args.subset_proportion,
         seed=args.seed,
-        multiprocess=True, #use_multiprocess,
-        batch_size=5 #batch_size
+        multiprocess=use_multiprocess,
+        batch_size=batch_size
     )
     print("  Pixel matrix created successfully.")
     align_norm_vals_channel_order(base_dir, norm_vals_name, channels)

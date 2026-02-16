@@ -42,6 +42,36 @@ from utils.tiling import load_tile_positions, TileInfo
 
 
 # =============================================================================
+# Fix: Monkey-patch PixieConsensusCluster.scale_data to handle constant columns.
+# scipy.stats.zscore produces NaN for constant columns (std=0), which causes
+# AgglomerativeClustering to fail with "Input X contains NaN".
+# =============================================================================
+def _patched_scale_data(self):
+    """z-scores and caps input_data, replacing NaN from constant columns with 0."""
+    from scipy.stats import zscore
+
+    self.input_data[self.columns] = self.input_data[self.columns].apply(zscore)
+
+    # Constant columns produce NaN after z-score (0/0). Replace with 0,
+    # which is the z-score mean -- correct for non-discriminative columns.
+    nan_mask = self.input_data[self.columns].isna()
+    if nan_mask.any().any():
+        nan_cols = [c for c in self.columns if nan_mask[c].any()]
+        print(f"  Note: z-score produced NaN in {len(nan_cols)} constant columns. Replacing with 0.")
+        self.input_data[self.columns] = self.input_data[self.columns].fillna(0)
+
+    self.input_data[self.columns] = self.input_data[self.columns].clip(
+        lower=-self.cap, upper=self.cap
+    )
+
+
+def _apply_consensus_cluster_fix():
+    """Apply the monkey-patch to PixieConsensusCluster."""
+    from ark.phenotyping.cluster_helpers import PixieConsensusCluster
+    PixieConsensusCluster.scale_data = _patched_scale_data
+
+
+# =============================================================================
 # Tiled c2pc Data Creation (for images split into tiles)
 # =============================================================================
 
@@ -436,6 +466,9 @@ def main():
         print(f"ERROR: Failed to import ark-analysis modules: {e}", file=sys.stderr)
         print("Please ensure ark-analysis==0.6.4 is installed.", file=sys.stderr)
         sys.exit(1)
+
+    # Patch scale_data to handle NaN from z-score of constant columns
+    _apply_consensus_cluster_fix()
 
     # Load pixel clustering parameters
     print("Loading pixel clustering parameters...")
