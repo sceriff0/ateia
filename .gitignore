@@ -1,5 +1,8 @@
 valis_lib/*
 *.pyc
 pixie-main/*
+<<<<<<< HEAD
+=======
 tests/__pycache__/*
+>>>>>>> main
 notebooks/*

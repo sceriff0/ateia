@@ -12,6 +12,8 @@ include { QUANTIFY              } from '../../modules/local/quantify'
 include { MERGE_QUANT_CSVS      } from '../../modules/local/quantify'
 include { PHENOTYPE             } from '../../modules/local/phenotype'
 include { MERGE_AND_PYRAMID     } from '../../modules/local/merge_and_pyramid'
+include { PIXIE_PIXEL_CLUSTER   } from '../../modules/local/pixie_pixel_cluster'
+include { PIXIE_CELL_CLUSTER    } from '../../modules/local/pixie_cell_cluster'
 
 def withDebugView(channel, Closure formatter) {
     return params.debug_channels ? channel.view(formatter) : channel
@@ -151,6 +153,103 @@ workflow POSTPROCESSING {
     )
 
     // ========================================================================
+    // PIXIE CLUSTERING (optional, runs in PARALLEL with PHENOTYPE)
+    // Data-driven unsupervised cell clustering using Pixie
+    // ========================================================================
+    // IMPORTANT: Channel definitions must be OUTSIDE the if block for proper dataflow subscription
+    // Only process invocations go inside the if block
+
+    // Convert channels param to list (do this unconditionally for channel definition)
+    def pixie_channels_list = params.pixie_channels instanceof List ?
+        params.pixie_channels :
+        (params.pixie_channels ?: '').toString()
+            .replaceAll(/[\[\]']/, '')
+            .tokenize(',')
+            .collect { it.trim() }
+            .findAll { it }  // Remove empty strings
+
+    def pixie_channel_count = pixie_channels_list.size()
+
+    log.info "PIXIE SETUP: pixie_channels_list=${pixie_channels_list}, count=${pixie_channel_count}, enabled=${params.pixie_enabled}"
+
+    // Define Pixie channel OUTSIDE if block (required for proper dataflow subscription)
+    // Uses same proven pattern as ch_split_grouped (which successfully feeds MERGE_AND_PYRAMID)
+    ch_for_pixie_pixel = SPLIT_CHANNELS.out.channels
+        .flatMap { meta, tiffs ->
+            def tiff_list = tiffs instanceof List ? tiffs : [tiffs]
+            tiff_list.collect { tiff ->
+                [meta.patient_id, tiff.baseName, tiff]
+            }
+        }
+        .filter { _patient_id, marker, _tiff ->
+            // Case-insensitive match against pixie_channels_list
+            pixie_channels_list.any { ch -> ch.equalsIgnoreCase(marker) }
+        }
+        .unique { patient_id, marker, _tiff -> [patient_id, marker] }
+        .map { patient_id, _marker, tiff -> [patient_id, tiff] }
+        .groupTuple(by: 0)  // Simple grouping - no groupKey (which can block)
+        .map { patient_id, tiffs ->
+            def patient_meta = [
+                patient_id: patient_id,
+                id: patient_id,
+                is_reference: true
+            ]
+            [patient_id, patient_meta, tiffs]
+        }
+        .join(
+            SEGMENT.out.cell_mask.map { meta, mask -> [meta.patient_id, mask] }
+        )
+        .map { _patient_id, meta, channel_tiffs, mask ->
+            [meta, channel_tiffs, mask]
+        }
+
+    if (params.pixie_enabled) {
+        // Validate required parameter
+        if (!params.pixie_channels || pixie_channels_list.isEmpty()) {
+            error "ERROR: params.pixie_channels is required when pixie_enabled=true. " +
+                  "Provide a list of channels, e.g.: --pixie_channels \"['CD3','CD4','CD8']\""
+        }
+
+        log.info "PIXIE: channels=${pixie_channels_list}, count=${pixie_channel_count}"
+
+        PIXIE_PIXEL_CLUSTER(
+            ch_for_pixie_pixel,
+            pixie_channels_list
+        )
+
+        // Cell clustering needs: pixel data + cluster profiles + cell table + mask + params + tile positions
+        // Handle optional tile_positions (not all runs use tiling)
+        ch_tile_positions = PIXIE_PIXEL_CLUSTER.out.tile_positions
+            .map { meta, positions -> [meta.patient_id, positions] }
+
+        ch_for_pixie_cell = PIXIE_PIXEL_CLUSTER.out.pixel_data
+            .map { meta, data -> [meta.patient_id, meta, data] }
+            .join(
+                PIXIE_PIXEL_CLUSTER.out.cluster_profiles.map { meta, profiles -> [meta.patient_id, profiles] }
+            )
+            .join(
+                MERGE_QUANT_CSVS.out.merged_csv.map { meta, csv -> [meta.patient_id, csv] }
+            )
+            .join(
+                SEGMENT.out.cell_mask.map { meta, mask -> [meta.patient_id, mask] }
+            )
+            .join(
+                PIXIE_PIXEL_CLUSTER.out.cell_params.map { meta, params_file -> [meta.patient_id, params_file] }
+            )
+            .join(
+                ch_tile_positions,
+                remainder: true  // Allow missing tile_positions for non-tiled runs
+            )
+            .map { patient_id, meta, pixel_data, cluster_profiles, cell_table, mask, cell_params, tile_positions ->
+                // Handle null tile_positions for non-tiled runs
+                def tile_pos = tile_positions ?: file('NO_TILE_POSITIONS')
+                [meta, pixel_data, cluster_profiles, cell_table, mask, cell_params, tile_pos]
+            }
+
+        PIXIE_CELL_CLUSTER(ch_for_pixie_cell)
+    }
+
+    // ========================================================================
     // MERGE - Combine split channel TIFFs with segmentation mask (per patient)
     // ========================================================================
     // Group split channel TIFFs by patient for merging
@@ -207,7 +306,9 @@ workflow POSTPROCESSING {
     // ========================================================================
     // Use collectFile() for non-blocking aggregation (enables patient-level parallelism)
     // The join chain is kept (it's per-patient and doesn't block other patients)
-    ch_checkpoint_csv = PHENOTYPE.out.csv
+
+    // Base checkpoint data (always present)
+    ch_base_checkpoint = PHENOTYPE.out.csv
         .map { meta, csv ->
             def published_path = "${params.outdir}/${meta.patient_id}/phenotype/${csv.name}"
             [meta.patient_id, published_path]
@@ -232,6 +333,43 @@ workflow POSTPROCESSING {
             def published_path = "${params.outdir}/${meta.patient_id}/pyramid/${pyramid.name}"
             [meta.patient_id, published_path]
         })
+
+    // Conditionally add Pixie outputs to checkpoint
+    if (params.pixie_enabled) {
+        ch_checkpoint_csv = ch_base_checkpoint
+            .join(PIXIE_CELL_CLUSTER.out.cell_table_clustered.map { meta, csv ->
+                def published_path = "${params.outdir}/${meta.patient_id}/pixie/cell_clustering/cell_output/${csv.name}"
+                [meta.patient_id, published_path]
+            })
+            .join(PIXIE_CELL_CLUSTER.out.geojson.map { meta, geojson ->
+                def published_path = "${params.outdir}/${meta.patient_id}/pixie/cell_clustering/cell_output/${geojson.name}"
+                [meta.patient_id, published_path]
+            })
+            .join(PIXIE_CELL_CLUSTER.out.mapping_json.map { meta, mapping ->
+                def published_path = "${params.outdir}/${meta.patient_id}/pixie/cell_clustering/cell_output/${mapping.name}"
+                [meta.patient_id, published_path]
+            })
+            .map { patient_id, pheno_csv, pheno_geojson, pheno_map, merged_csv, cell_mask, pyramid, pixie_csv, pixie_geojson, pixie_mapping ->
+                "${patient_id},${pheno_csv},${pheno_geojson},${pheno_map},${merged_csv},${cell_mask},${pyramid},${pixie_csv},${pixie_geojson},${pixie_mapping}"
+            }
+            .collectFile(
+                name: 'postprocessed.csv',
+                newLine: true,
+                storeDir: "${params.outdir}/csv",
+                seed: 'patient_id,phenotype_csv,phenotype_geojson,phenotype_mapping,merged_csv,cell_mask,pyramid,pixie_cell_table,pixie_geojson,pixie_mapping'
+            )
+    } else {
+        ch_checkpoint_csv = ch_base_checkpoint
+            .map { patient_id, pheno_csv, pheno_geojson, pheno_map, merged_csv, cell_mask, pyramid ->
+                "${patient_id},${pheno_csv},${pheno_geojson},${pheno_map},${merged_csv},${cell_mask},${pyramid}"
+            }
+            .collectFile(
+                name: 'postprocessed.csv',
+                newLine: true,
+                storeDir: "${params.outdir}/csv",
+                seed: 'patient_id,phenotype_csv,phenotype_geojson,phenotype_mapping,merged_csv,cell_mask,pyramid'
+            )
+    }
         .map { patient_id, pheno_csv, pheno_geojson, pheno_map, merged_csv, cell_mask, pyramid ->
             "${patient_id},${pheno_csv},${pheno_geojson},${pheno_map},${merged_csv},${cell_mask},${pyramid}"
         }
@@ -250,6 +388,13 @@ workflow POSTPROCESSING {
         .mix(MERGE_QUANT_CSVS.out.size_log)
         .mix(PHENOTYPE.out.size_log)
         .mix(MERGE_AND_PYRAMID.out.size_log)
+
+    // Add Pixie size logs if enabled
+    if (params.pixie_enabled) {
+        ch_size_logs = ch_size_logs
+            .mix(PIXIE_PIXEL_CLUSTER.out.size_log)
+            .mix(PIXIE_CELL_CLUSTER.out.size_log)
+    }
 
     emit:
     checkpoint_csv = ch_checkpoint_csv
