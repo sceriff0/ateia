@@ -5,8 +5,6 @@ process ESTIMATE_FEATURE_DISTANCES {
     label 'process_medium'
     container "${params.container.registration}"
 
-    publishDir "${params.outdir}/${meta.patient_id}/${params.registration_method}/feature_distances", mode: 'copy', pattern: "*.{json,png}"
-
     // Measures feature distances BEFORE and AFTER registration for a single image
     // Detects and matches features in (ref vs moving), then (ref vs registered)
     // Computes pixel-level distances between matched features as TRE metric
@@ -27,14 +25,14 @@ process ESTIMATE_FEATURE_DISTANCES {
     script:
     def args = task.ext.args ?: ''
     def detector = params.feature_detector ?: 'superpoint'
-    def max_dim = params.feature_max_dim ?: 2048
+    def max_dim = params.feature_max_dim ?: 1024
     def n_features = params.feature_n_features ?: 5000
     def prefix = meta.channels.join('_')
     """
     # Log input sizes for tracing (sum of reference + moving + registered, -L follows symlinks)
-    ref_bytes=\$(stat -L --printf="%s" ${reference})
-    mov_bytes=\$(stat -L --printf="%s" ${moving})
-    reg_bytes=\$(stat -L --printf="%s" ${registered})
+    ref_bytes=\$(stat -L --printf="%s" ${reference} 2>/dev/null || echo 0)
+    mov_bytes=\$(stat -L --printf="%s" ${moving} 2>/dev/null || echo 0)
+    reg_bytes=\$(stat -L --printf="%s" ${registered} 2>/dev/null || echo 0)
     total_bytes=\$((ref_bytes + mov_bytes + reg_bytes))
     echo "${task.process},${meta.patient_id},${reference.name}+${moving.name}+${registered.name},\${total_bytes}" > ${meta.patient_id}_${registered.simpleName}.ESTIMATE_FEATURE_DISTANCES.size.csv
 

@@ -53,6 +53,9 @@ from validation import log_image_stats, detect_wrapped_values
 
 # Module-level logger
 logger = get_logger(__name__)
+
+__all__ = ["main"]
+
 from progress import PhaseReporter, ProgressTracker
 from registration_errors import (
     ErrorSeverity,
@@ -84,6 +87,31 @@ from valis.non_rigid_registrars import OpticalFlowWarper, NonRigidTileRegistrar
 # Note: AffineOptimizerMattesMI removed - requires SimpleITK with Elastix bindings
 # which is not available in this environment. Registration still works via
 # SuperPoint/SuperGlue feature matching without the affine optimizer refinement.
+
+# Memory mode presets - bundles feature detector, matcher, and dimension settings
+MEMORY_PRESETS = {
+    "high": {
+        "feature_detector_cls": feature_detectors.SuperPointFD,
+        "matcher": feature_matcher.SuperGlueMatcher(),
+        "max_processed_image_dim_px": 1024,  # Higher resolution for better feature detection (RAM impact)
+        "max_non_rigid_registration_dim_px": 4096,  # Higher resolution for more accurate non-rigid registration (RAM impact)
+        "num_features": 5000,
+    },
+    "low": {
+        # Feature detection
+        #"feature_detector_cls": feature_detectors.BriskFD,
+        #"matcher": feature_matcher.Matcher(),  # RANSAC-based
+        "feature_detector_cls": feature_detectors.SuperPointFD,
+        "matcher": feature_matcher.SuperGlueMatcher(),
+        "num_features": 5000,  
+        # Image dimensions (biggest memory impact)
+        "max_processed_image_dim_px": 256,
+        "max_non_rigid_registration_dim_px": 1024,  # Reduced from 1024 (4x RAM reduction)
+        # Tiled registration
+        "tile_wh": 512,  # Smaller tiles = lower peak RAM
+        "tile_buffer": 100,  # Reduced from 200
+    },
+}
 
 
 
@@ -348,10 +376,8 @@ def valis_registration(
     out: str,
     reference: Optional[str] = None,
     reference_markers: Optional[List[str]] = None,
-    max_processed_image_dim_px: int = 512,
-    max_non_rigid_dim_px: int = 2048,
+    memory_mode: str = "high",
     micro_reg_fraction: float = 0.125,
-    num_features: int = 5000,
     max_image_dim_px: int = 4000,
     skip_micro_registration: bool = False,
     parallel_warping: bool = False,
@@ -373,14 +399,11 @@ def valis_registration(
         Filename of reference image (takes precedence over reference_markers)
     reference_markers : list of str, optional
         Markers to identify reference image (legacy fallback). Default: ['DAPI', 'SMA']
-    max_processed_image_dim_px : int, optional
-        Maximum image dimension for rigid registration. Default: 512
-    max_non_rigid_dim_px : int, optional
-        Maximum dimension for non-rigid registration. Default: 2048
+    memory_mode : str, optional
+        Memory preset: "high" (SuperPoint/SuperGlue, 1024/4096px) or
+        "low" (BRISK/RANSAC, 256/1024px). Default: "high"
     micro_reg_fraction : float, optional
         Fraction of image size for micro-registration. Default: 0.125
-    num_features : int, optional
-        Number of SuperPoint features to detect. Default: 5000
     max_image_dim_px : int, optional
         Maximum image dimension for caching (controls RAM usage). Default: 4000
     skip_micro_registration : bool, optional
@@ -403,6 +426,18 @@ def valis_registration(
     int
         Exit code (0 for success)
     """
+    # Unpack memory preset
+    preset = MEMORY_PRESETS[memory_mode]
+    max_processed_image_dim_px = preset["max_processed_image_dim_px"]
+    max_non_rigid_dim_px = preset["max_non_rigid_registration_dim_px"]
+    num_features = preset["num_features"]
+    feature_detector_cls = preset["feature_detector_cls"]
+    matcher = preset["matcher"]
+    # New preset keys with fallbacks to CLI args/defaults
+    preset_tile_wh = preset.get("tile_wh", tile_size)
+    preset_tile_buffer = preset.get("tile_buffer", 200)
+    preset_max_image_dim = preset.get("max_image_dim_px", max_image_dim_px)
+
     # Initialize phase reporter for structured progress tracking
     reporter = PhaseReporter()
 
@@ -434,15 +469,18 @@ def valis_registration(
     results_dir = os.path.dirname(out)
 
     # ========================================================================
-    # VALIS Parameters - Use provided values or defaults
+    # VALIS Parameters - Determined by memory_mode preset
     # ========================================================================
     logger.info("=" * 70)
     logger.info("VALIS Registration Configuration")
     logger.info("=" * 70)
-    logger.info(f"Rigid resolution: {max_processed_image_dim_px}px")
-    logger.info(f"Non-rigid resolution: {max_non_rigid_dim_px}px")
+    logger.info(f"Memory mode: {memory_mode}")
+    logger.info(f"  Feature detector: {feature_detector_cls.__name__}")
+    logger.info(f"  Matcher: {type(matcher).__name__}")
+    logger.info(f"  Rigid resolution: {max_processed_image_dim_px}px")
+    logger.info(f"  Non-rigid resolution: {max_non_rigid_dim_px}px")
+    logger.info(f"  Number of features: {num_features}")
     logger.info(f"Micro-registration fraction: {micro_reg_fraction}")
-    logger.info(f"Feature detector: SuperPoint with {num_features} features")
     logger.info("=" * 70)
 
     # Find reference image
@@ -477,7 +515,7 @@ def valis_registration(
     logger.info(f"Memory optimization parameters:")
     logger.info(f"  max_processed_image_dim_px: {max_processed_image_dim_px} (controls analysis resolution)")
     logger.info(f"  max_non_rigid_registration_dim_px: {max_non_rigid_dim_px} (controls non-rigid accuracy)")
-    logger.info(f"  max_image_dim_px: {max_image_dim_px} (limits cached image size for RAM control)")
+    logger.info(f"  max_image_dim_px: {preset_max_image_dim} (limits cached image size for RAM control)")
 
     # ========================================================================
     # Configure Non-Rigid Registration Strategy
@@ -486,8 +524,8 @@ def valis_registration(
     # but better performance for large images. Each tile is registered independently and
     # displacement fields are stitched together.
     if use_tiled_registration:
-        logger.info(f"  Non-rigid registrar: NonRigidTileRegistrar (tile_size={tile_size}px)")
-        non_rigid_registrar = NonRigidTileRegistrar(tile_wh=tile_size, tile_buffer=200)
+        logger.info(f"  Non-rigid registrar: NonRigidTileRegistrar (tile_wh={preset_tile_wh}px, tile_buffer={preset_tile_buffer})")
+        non_rigid_registrar = NonRigidTileRegistrar(tile_wh=preset_tile_wh, tile_buffer=preset_tile_buffer)
     else:
         logger.info(f"  Non-rigid registrar: OpticalFlowWarper (default)")
         non_rigid_registrar = OpticalFlowWarper()
@@ -510,11 +548,11 @@ def valis_registration(
         # Image size parameters - tuned for memory efficiency
         "max_processed_image_dim_px": max_processed_image_dim_px,
         "max_non_rigid_registration_dim_px": max_non_rigid_dim_px,
-        "max_image_dim_px": max_image_dim_px,
+        "max_image_dim_px": preset_max_image_dim,
 
-        # Feature detection - SuperPoint/SuperGlue (best for multi-modal)
-        "feature_detector_cls": feature_detectors.SuperPointFD,
-        "matcher": feature_matcher.SuperGlueMatcher(),
+        # Feature detection - determined by memory_mode preset
+        "feature_detector_cls": feature_detector_cls,
+        "matcher": matcher,
 
         # Non-rigid registration - handles local deformations after rigid alignment
         "non_rigid_registrar_cls": type(non_rigid_registrar),
@@ -890,14 +928,12 @@ def parse_args() -> argparse.Namespace:
                         help='Markers to identify reference image (legacy fallback)')
 
     # Registration parameters
-    parser.add_argument('--max-processed-dim', type=int, default=512,
-                        help='Maximum image dimension for rigid registration')
-    parser.add_argument('--max-non-rigid-dim', type=int, default=2048,
-                        help='Maximum dimension for non-rigid registration')
+    parser.add_argument('--memory-mode', type=str, default='high',
+                        choices=['high', 'low'],
+                        help='Memory preset. "high": SuperPoint/SuperGlue, 1024/4096px dimensions. '
+                             '"low": BRISK/RANSAC, 256/1024px dimensions.')
     parser.add_argument('--micro-reg-fraction', type=float, default=0.125,
                         help='Fraction of image size for micro-registration')
-    parser.add_argument('--num-features', type=int, default=5000,
-                        help='Number of SuperPoint features to detect')
     parser.add_argument('--max-image-dim', type=int, default=4000,
                         help='Maximum image dimension for caching (controls RAM usage)')
     parser.add_argument('--skip-micro-registration', action='store_true',
@@ -935,10 +971,8 @@ def main() -> int:
             out=args.out,
             reference=args.reference,
             reference_markers=args.reference_markers,
-            max_processed_image_dim_px=args.max_processed_dim,
-            max_non_rigid_dim_px=args.max_non_rigid_dim,
+            memory_mode=args.memory_mode,
             micro_reg_fraction=args.micro_reg_fraction,
-            num_features=args.num_features,
             max_image_dim_px=args.max_image_dim,
             skip_micro_registration=args.skip_micro_registration,
             parallel_warping=args.parallel_warping,

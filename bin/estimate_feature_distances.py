@@ -30,48 +30,27 @@ import matplotlib.pyplot as plt
 sys.path.insert(0, str(Path(__file__).parent / 'utils'))
 
 # Import from shared library modules
-from logger import log_progress
+from logger import get_logger
 from image_utils import load_image_grayscale
+from registration_utils import (
+    build_feature_detector,
+    build_feature_matcher,
+    match_feature_points,
+)
+
+logger = get_logger(__name__)
+
+__all__ = ["main"]
+
+
+def log_progress(message: str) -> None:
+    """Compatibility wrapper for existing progress output."""
+    logger.info(message)
 
 # Disable numba caching
 os.environ['NUMBA_DISABLE_JIT'] = '0'
 os.environ['NUMBA_CACHE_DIR'] = '/tmp/numba_cache'
 os.environ['NUMBA_DISABLE_CACHING'] = '1'
-
-from valis import feature_detectors
-from valis import feature_matcher
-
-
-def get_feature_detector(detector_type: str = "superpoint"):
-    """Get feature detector instance."""
-    detector_type = detector_type.lower()
-
-    if detector_type == "superpoint":
-        return feature_detectors.SuperPointFD()
-    elif detector_type == "disk":
-        return feature_detectors.DiskFD()
-    elif detector_type == "dedode":
-        return feature_detectors.DeDoDeFD()
-    elif detector_type == "brisk":
-        return feature_detectors.BriskFD()
-    else:
-        raise ValueError(f"Unknown detector type: {detector_type}")
-
-
-def get_feature_matcher(detector_type: str = "superpoint"):
-    """Get feature matcher instance."""
-    detector_type = detector_type.lower()
-
-    if detector_type == "superpoint":
-        return feature_matcher.SuperGlueMatcher()
-    elif detector_type in ["disk", "dedode"]:
-        return feature_matcher.LightGlueMatcher()
-    else:
-        return feature_matcher.Matcher(
-            match_filter_method='USAC_MAGSAC',
-            ransac_thresh=7
-        )
-
 
 def compute_feature_distances(
     ref_kp: np.ndarray,
@@ -207,14 +186,14 @@ def process_image_pair(
 
     # Initialize detector and matcher
     log_progress(f"\n[1/5] Initializing feature detector: {detector_type}")
-    detector = get_feature_detector(detector_type)
-    matcher = get_feature_matcher(detector_type)
+    detector = build_feature_detector(detector_type, logger=logger)
+    matcher = build_feature_matcher(detector_type, logger=logger)
 
     # Load and process reference image
     log_progress(f"\n[2/5] Processing reference image...")
     log_progress(f"  Reference: {Path(reference_path).name}")
     log_progress(f"  Extracting DAPI channel (channel 0) for feature detection...")
-    reference_img = load_image_grayscale(reference_path, max_dim=None)
+    reference_img = load_image_grayscale(reference_path, max_dim=max_dim)
 
     log_progress("  Detecting reference features...")
     ref_kp, ref_desc = detector.detect_and_compute(reference_img)
@@ -224,7 +203,7 @@ def process_image_pair(
     log_progress(f"\n[3/5] Processing moving image (BEFORE registration)...")
     log_progress(f"  Moving: {Path(moving_path).name}")
     log_progress(f"  Extracting DAPI channel (channel 0) for feature detection...")
-    moving_img = load_image_grayscale(moving_path, max_dim=None)
+    moving_img = load_image_grayscale(moving_path, max_dim=max_dim)
 
     # Detect features in moving image
     log_progress("  Detecting features in moving image...")
@@ -233,23 +212,15 @@ def process_image_pair(
 
     # Match BEFORE registration
     log_progress("  Matching features (BEFORE registration)...")
-    if isinstance(matcher, feature_matcher.SuperGlueMatcher) or \
-       (hasattr(feature_matcher, 'LightGlueMatcher') and isinstance(matcher, feature_matcher.LightGlueMatcher)):
-        _, filtered_match_info_before, _, _ = matcher.match_images(
-            img1=reference_img,
-            desc1=ref_desc,
-            kp1_xy=ref_kp,
-            img2=moving_img,
-            desc2=mov_desc,
-            kp2_xy=mov_kp
-        )
-    else:
-        _, filtered_match_info_before, _, _ = matcher.match_images(
-            desc1=ref_desc,
-            kp1_xy=ref_kp,
-            desc2=mov_desc,
-            kp2_xy=mov_kp
-        )
+    _, filtered_match_info_before, _, _ = match_feature_points(
+        matcher,
+        reference_img,
+        ref_desc,
+        ref_kp,
+        moving_img,
+        mov_desc,
+        mov_kp,
+    )
 
     n_matches_before = filtered_match_info_before.n_matches if hasattr(filtered_match_info_before, 'n_matches') else len(filtered_match_info_before.matched_kp1_xy)
     mean_desc_distance_before = filtered_match_info_before.distance if hasattr(filtered_match_info_before, 'distance') else 0.0
@@ -267,7 +238,7 @@ def process_image_pair(
     log_progress(f"\n[4/5] Processing registered image (AFTER registration)...")
     log_progress(f"  Registered: {Path(registered_path).name}")
     log_progress(f"  Extracting DAPI channel (channel 0) for feature detection...")
-    registered_img = load_image_grayscale(registered_path, max_dim=None)
+    registered_img = load_image_grayscale(registered_path, max_dim=max_dim)
 
     # Detect features in registered image
     log_progress("  Detecting features in registered image...")
@@ -276,23 +247,15 @@ def process_image_pair(
 
     # Match AFTER registration
     log_progress("  Matching features (AFTER registration)...")
-    if isinstance(matcher, feature_matcher.SuperGlueMatcher) or \
-       (hasattr(feature_matcher, 'LightGlueMatcher') and isinstance(matcher, feature_matcher.LightGlueMatcher)):
-        _, filtered_match_info_after, _, _ = matcher.match_images(
-            img1=reference_img,
-            desc1=ref_desc,
-            kp1_xy=ref_kp,
-            img2=registered_img,
-            desc2=reg_desc,
-            kp2_xy=reg_kp
-        )
-    else:
-        _, filtered_match_info_after, _, _ = matcher.match_images(
-            desc1=ref_desc,
-            kp1_xy=ref_kp,
-            desc2=reg_desc,
-            kp2_xy=reg_kp
-        )
+    _, filtered_match_info_after, _, _ = match_feature_points(
+        matcher,
+        reference_img,
+        ref_desc,
+        ref_kp,
+        registered_img,
+        reg_desc,
+        reg_kp,
+    )
 
     n_matches_after = filtered_match_info_after.n_matches if hasattr(filtered_match_info_after, 'n_matches') else len(filtered_match_info_after.matched_kp1_xy)
     mean_desc_distance_after = filtered_match_info_after.distance if hasattr(filtered_match_info_after, 'distance') else 0.0

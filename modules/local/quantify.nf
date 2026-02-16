@@ -15,8 +15,6 @@ process QUANTIFY {
 
     container 'docker://bolt3x/attend_image_analysis:quantification_gpu'
 
-    //publishDir "${params.outdir}/${meta.patient_id}/quantification/by_marker", mode: 'copy'
-
     input:
     tuple val(meta), path(channel_tiff), path(seg_mask)
 
@@ -35,8 +33,8 @@ process QUANTIFY {
     def channel_name = channel_tiff.simpleName
     """
     # Log input sizes for tracing (sum of channel_tiff + seg_mask, -L follows symlinks)
-    tiff_bytes=\$(stat -L --printf="%s" ${channel_tiff})
-    mask_bytes=\$(stat -L --printf="%s" ${seg_mask})
+    tiff_bytes=\$(stat -L --printf="%s" ${channel_tiff} 2>/dev/null || echo 0)
+    mask_bytes=\$(stat -L --printf="%s" ${seg_mask} 2>/dev/null || echo 0)
     total_bytes=\$((tiff_bytes + mask_bytes))
     echo "${task.process},${meta.id},${channel_tiff.name}+${seg_mask.name},\${total_bytes}" > ${meta.id}.QUANTIFY.size.csv
 
@@ -81,8 +79,6 @@ process MERGE_QUANT_CSVS {
     label 'process_low'
 
     container 'docker://bolt3x/attend_image_analysis:quantification_gpu'
-
-    publishDir "${params.outdir}/${meta.patient_id}/quantification", mode: 'copy'
 
     input:
     tuple val(meta), path(individual_csvs)
@@ -148,8 +144,8 @@ process MERGE_QUANT_CSVS {
                       'convex_area', 'axis_major_length', 'axis_minor_length']
 
     # Merge marker columns from other CSVs
-    # FIX BUG #7: Use left join to preserve all cells from reference
-    # Fill missing values with 0 (cell not detected in that channel)
+    # Use left join to preserve all cells from the reference
+    # Fill missing values with 0 (cell not detected in this channel)
     print("\\nValidating CSV compatibility...")
     reference_cells = set(reference_csv[1]['label'])
 
@@ -160,10 +156,10 @@ process MERGE_QUANT_CSVS {
         extra = other_cells - reference_cells
 
         if missing:
-            print(f"  ⚠️  {csv_file.name}: Missing {len(missing)} cells from reference")
+            print(f"  WARNING: {csv_file.name}: Missing {len(missing)} cells from reference")
             print(f"     These cells will have 0 intensity for this channel")
         if extra:
-            print(f"  ⚠️  {csv_file.name}: Has {len(extra)} extra cells not in reference")
+            print(f"  WARNING: {csv_file.name}: Has {len(extra)} extra cells not in reference")
             print(f"     Extra cells will be ignored (not in segmentation mask)")
 
         # Get only marker columns (exclude morphology and DAPI if present)
@@ -173,7 +169,6 @@ process MERGE_QUANT_CSVS {
             # Select label + marker columns
             merge_df = df[['label'] + marker_cols]
 
-            # FIX BUG #7: Use left join to keep all reference cells
             # Cells missing from this channel will have NaN, which we fill with 0
             merged = merged.merge(merge_df, on='label', how='left')
 
@@ -186,12 +181,12 @@ process MERGE_QUANT_CSVS {
     # Validate no cells were lost (should never happen with left join)
     cells_lost = len(reference_csv[1]) - len(merged)
     if cells_lost > 0:
-        print(f"\\n❌ CRITICAL ERROR: Lost {cells_lost} cells during merge!")
+        print(f"\\nCRITICAL ERROR: Lost {cells_lost} cells during merge")
         print(f"  Reference had {len(reference_csv[1])} cells, merged has {len(merged)}")
         print(f"  This should not happen with left join - investigation needed")
         sys.exit(1)
     else:
-        print(f"\\n✓ All {len(merged)} cells from reference preserved")
+        print(f"\\nAll {len(merged)} cells from reference preserved")
 
     # Reorder columns: morphology first, then DAPI, then other markers
     morpho_present = [col for col in morphology_cols if col in merged.columns]
@@ -217,7 +212,7 @@ process MERGE_QUANT_CSVS {
 
     # Save merged CSV
     merged.to_csv('merged_quant.csv', index=False)
-    print(f"\\n✓ Merged CSV saved: {len(merged)} cells, {len(merged.columns)} columns")
+    print(f"\\nMerged CSV saved: {len(merged)} cells, {len(merged.columns)} columns")
     print(f"  Final columns: {', '.join(merged.columns)}")
 
     # Write versions file

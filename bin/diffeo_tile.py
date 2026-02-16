@@ -12,6 +12,7 @@ Usage:
                    --reference ref.tiff --affine affine.tiff \
                    --output-prefix tile_diffeo_0001
 """
+from __future__ import annotations
 
 import argparse
 import gc
@@ -30,6 +31,8 @@ sys.path.insert(0, str(Path(__file__).parent / 'utils'))
 from logger import get_logger, configure_logging
 
 logger = get_logger(__name__)
+
+__all__ = ["main"]
 
 # CPU imports with availability check
 try:
@@ -219,7 +222,12 @@ def process_diffeo_tile(
         else:
             result = affine_crop
 
-        del ref_crop, affine_crop, ref_mem, affine_mem
+        del ref_crop, affine_crop
+        # Explicitly close memory maps before deletion to prevent SIGBUS on BeeGFS
+        for mmap_arr in [ref_mem, affine_mem]:
+            if hasattr(mmap_arr, '_mmap') and mmap_arr._mmap is not None:
+                mmap_arr._mmap.close()
+        del ref_mem, affine_mem
         gc.collect()
         return result, tile_meta
 
@@ -262,7 +270,12 @@ def process_diffeo_tile(
             result = affine_crop
 
     # Clean up
-    del ref_crop, affine_crop, ref_mem, affine_mem
+    del ref_crop, affine_crop
+    # Explicitly close memory maps before deletion to prevent SIGBUS on BeeGFS
+    for mmap_arr in [ref_mem, affine_mem]:
+        if hasattr(mmap_arr, '_mmap') and mmap_arr._mmap is not None:
+            mmap_arr._mmap.close()
+    del ref_mem, affine_mem
     gc.collect()
 
     return result, tile_meta

@@ -15,6 +15,10 @@ include { MERGE_AND_PYRAMID     } from '../../modules/local/merge_and_pyramid'
 include { PIXIE_PIXEL_CLUSTER   } from '../../modules/local/pixie_pixel_cluster'
 include { PIXIE_CELL_CLUSTER    } from '../../modules/local/pixie_cell_cluster'
 
+def withDebugView(channel, Closure formatter) {
+    return params.debug_channels ? channel.view(formatter) : channel
+}
+
 /*
 ========================================================================================
     SUBWORKFLOW:POSTPROCESSING
@@ -65,8 +69,10 @@ workflow POSTPROCESSING {
     // ========================================================================
     // QUANTIFICATION - Join channels with their patient's mask
     // ========================================================================
-    ch_split_output = SPLIT_CHANNELS.out.channels
-        .view { meta, tiffs -> "SPLIT_CHANNELS output: meta.patient_id=${meta.patient_id}, tiffs=${tiffs*.name}" }
+    ch_split_output = withDebugView(
+        SPLIT_CHANNELS.out.channels,
+        { meta, tiffs -> "SPLIT_CHANNELS output: patient=${meta.patient_id}, tiffs=${tiffs*.name}" }
+    )
 
     ch_flatmapped = ch_split_output
         .flatMap { meta, tiffs ->
@@ -81,26 +87,39 @@ workflow POSTPROCESSING {
                 [channel_meta, tiff]
             }
         }
-        .view { meta, tiff -> "After flatMap: meta.id=${meta.id}, channel=${meta.channel_name}, tiff=${tiff.name}" }
+    ch_flatmapped = withDebugView(
+        ch_flatmapped,
+        { meta, tiff -> "After flatMap: id=${meta.id}, channel=${meta.channel_name}, tiff=${tiff.name}" }
+    )
 
     ch_for_combine = ch_flatmapped
         .map { meta, tiff -> [meta.patient_id, meta, tiff] }
-        .view { patient_id, _meta, _tiff -> "Before combine: key=${patient_id}, channel=${_meta.channel_name}" }
+    ch_for_combine = withDebugView(
+        ch_for_combine,
+        { patient_id, _meta, _tiff -> "Before combine: key=${patient_id}, channel=${_meta.channel_name}" }
+    )
 
     ch_mask = SEGMENT.out.cell_mask
         .map { meta, mask -> [meta.patient_id, mask] }
-        .view { patient_id, _mask -> "Mask available: key=${patient_id}, mask=${_mask.name}" }
+    ch_mask = withDebugView(
+        ch_mask,
+        { patient_id, _mask -> "Mask available: key=${patient_id}, mask=${_mask.name}" }
+    )
 
     ch_for_quant = ch_for_combine
         .combine(ch_mask, by: 0)
-        .view { patient_id, _meta, _tiff, _mask -> "After combine: patient=${patient_id}, channel=${_meta.channel_name}" }
         .map { _patient_id, meta, tiff, mask -> [meta, tiff, mask] }
+    ch_for_quant = withDebugView(
+        ch_for_quant,
+        { meta, _tiff, _mask -> "After combine: patient=${meta.patient_id}, channel=${meta.channel_name}" }
+    )
 
     QUANTIFY(ch_for_quant)
 
     // ========================================================================
     // MERGE - Group CSVs by patient_id
     // Deduplicate by patient_id + marker (take first occurrence if same marker appears multiple times)
+    // Use groupKey for streaming - emits as soon as channels_count items collected
     // ========================================================================
     ch_grouped_csvs = QUANTIFY.out.individual_csv
         .map { meta, csv ->
@@ -108,11 +127,18 @@ workflow POSTPROCESSING {
             [[meta.patient_id, marker], meta, csv]  // Key by [patient_id, marker]
         }
         .unique { entry -> entry[0] }  // Keep only first occurrence of each [patient_id, marker] pair
-        .map { key, meta, csv -> [key[0], meta, csv] }  // Restore to [patient_id, meta, csv]
+        .map { key, meta, csv ->
+            // Use groupKey for streaming if channels_count is available
+            def gkey = meta.channels_count
+                ? groupKey(key[0], meta.channels_count)
+                : key[0]
+            [gkey, meta, csv]
+        }
         .groupTuple(by: 0)
         .map { patient_id, metas, csvs ->
             def meta = metas[0].clone()
-            meta.id = patient_id
+            // Extract actual patient_id from groupKey wrapper if needed
+            meta.id = patient_id.toString()
             [meta, csvs]
         }
 
@@ -229,21 +255,31 @@ workflow POSTPROCESSING {
     // Group split channel TIFFs by patient for merging
     // SPLIT_CHANNELS already handles DAPI filtering correctly
     // Deduplicate by patient_id + marker to avoid duplicate channel names
+    // Use groupKey for streaming - emits as soon as channels_count items collected
     ch_split_grouped = SPLIT_CHANNELS.out.channels
         .flatMap { meta, tiffs ->
             // Normalize to List and create entries keyed by [patient_id, marker]
+            // Carry channels_count for groupKey
             def tiff_list = tiffs instanceof List ? tiffs : [tiffs]
             tiff_list.collect { tiff ->
-                [meta.patient_id, tiff.baseName, tiff]
+                [meta.patient_id, meta.channels_count, tiff.baseName, tiff]
             }
         }
-        .unique { patient_id, marker, _tiff -> [patient_id, marker] }  // Keep first occurrence of each patient+marker
-        .map { patient_id, _marker, tiff -> [patient_id, tiff] }
+        .unique { patient_id, _channels_count, marker, _tiff -> [patient_id, marker] }  // Keep first occurrence of each patient+marker
+        .map { patient_id, channels_count, _marker, tiff ->
+            // Use groupKey for streaming if channels_count is available
+            def gkey = channels_count
+                ? groupKey(patient_id, channels_count)
+                : patient_id
+            [gkey, tiff]
+        }
         .groupTuple(by: 0)
         .map { patient_id, tiffs ->
             // Create patient-level metadata
+            // Extract actual patient_id from groupKey wrapper
+            def pid = patient_id.toString()
             def patient_meta = [
-                patient_id: patient_id,
+                patient_id: pid,
                 is_reference: false  // Not relevant at patient level
             ]
             [patient_meta, tiffs]
@@ -334,6 +370,15 @@ workflow POSTPROCESSING {
                 seed: 'patient_id,phenotype_csv,phenotype_geojson,phenotype_mapping,merged_csv,cell_mask,pyramid'
             )
     }
+        .map { patient_id, pheno_csv, pheno_geojson, pheno_map, merged_csv, cell_mask, pyramid ->
+            "${patient_id},${pheno_csv},${pheno_geojson},${pheno_map},${merged_csv},${cell_mask},${pyramid}"
+        }
+        .collectFile(
+            name: 'postprocessed.csv',
+            newLine: true,
+            storeDir: "./csv",
+            seed: 'patient_id,phenotype_csv,phenotype_geojson,phenotype_mapping,merged_csv,cell_mask,pyramid'
+        )
 
     // Collect size logs from all postprocessing processes
     ch_size_logs = Channel.empty()

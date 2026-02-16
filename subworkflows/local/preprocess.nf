@@ -71,12 +71,12 @@ workflow PREPROCESSING {
         .collectFile(
             name: 'preprocessed.csv',
             newLine: true,
-            storeDir: "${params.outdir}/csv",
+            storeDir: "./csv",
             seed: 'patient_id,preprocessed_image,is_reference,channels'
         )
 
     // Collect size logs from all processes
-    ch_size_logs = channel.empty()
+    ch_size_logs = Channel.empty()
         .mix(CONVERT_IMAGE.out.size_log)
         .mix(PREPROCESS.out.size_log)
 

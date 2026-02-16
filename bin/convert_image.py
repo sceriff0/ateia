@@ -8,20 +8,22 @@ Supports:
 - TIFF/OME-TIFF via bioio-tifffile/bioio-ome-tiff
 - NDPI/NDPIS (Hamamatsu) via tifffile
 """
+from __future__ import annotations
 
-import logging
 import argparse
+import sys
 from pathlib import Path
 from typing import List, Tuple, Optional
 
 import numpy as np
 import tifffile
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+sys.path.insert(0, str(Path(__file__).parent / 'utils'))
+from logger import configure_logging, get_logger
+
+logger = get_logger(__name__)
+
+__all__ = ["main"]
 
 PIXEL_SIZE_UM = 0.325
 
@@ -65,14 +67,30 @@ def read_image_bioio(file_path: Path) -> Tuple[np.ndarray, dict]:
 
     # Check if 'S' dimension should be treated as channels
     # This happens when image has 'S' but 'C' is 1 or not meaningful
+    image_data = None  # Will be set below
     if 'S' in dim_order and (num_channels == 1 or 'C' not in dim_order):
         s_count = img.dims.S
         if s_count > 1:
             logger.info(f"Detected 'S' dimension ({s_count}) used as channels instead of 'C' ({num_channels})")
             num_channels = s_count
+
+            # If there's a singleton C dimension, squeeze it out to avoid
+            # having two 'C' characters in the dimension order
+            if 'C' in dim_order and img.dims.C == 1:
+                c_pos = dim_order.index('C')
+                image_data = np.squeeze(img.data, axis=c_pos)
+                dim_order = dim_order[:c_pos] + dim_order[c_pos+1:]
+                logger.info(f"Squeezed singleton C dimension at position {c_pos}")
+            else:
+                image_data = img.data
+
             # Remap dimension order for downstream processing (treat S as C)
             dim_order = dim_order.replace('S', 'C')
             logger.info(f"Remapped dimension order: {dim_order}")
+
+    # Load data if not already loaded during S dimension handling
+    if image_data is None:
+        image_data = img.data
 
     ps = img.physical_pixel_sizes
     pixel_size_x = ps.X if ps.X is not None else PIXEL_SIZE_UM
@@ -81,8 +99,6 @@ def read_image_bioio(file_path: Path) -> Tuple[np.ndarray, dict]:
 
     logger.info(f"Pixel sizes - X: {pixel_size_x}, Y: {pixel_size_y}, Z: {pixel_size_z}")
     logger.info(f"Channel names from file: {img.channel_names}")
-
-    image_data = img.data  # TCZYX order (or TSZYX if S is used)
 
     metadata = {
         'num_channels': num_channels,
@@ -300,22 +316,56 @@ def convert_to_ome_tiff(
     px_y = metadata.get('physical_pixel_size_y', pixel_size_um)
     px_z = metadata.get('physical_pixel_size_z')
     
-    # Normalize dimensions
+    # Normalize dimensions to standard OME-TIFF order (C before spatial dims)
+    # Handle case where C is at the end (e.g., TZYXC from S dimension remapping)
+    if 'C' in original_dims and original_dims.endswith('C'):
+        # Move C from end to before spatial dimensions
+        c_pos = original_dims.index('C')
+        # Find where Y starts (spatial dimensions)
+        y_pos = original_dims.index('Y')
+
+        # Transpose: move C axis to position just before Y
+        axes_list = list(range(image_data.ndim))
+        axes_list.remove(c_pos)
+        axes_list.insert(y_pos, c_pos)
+        image_data = np.transpose(image_data, axes_list)
+
+        # Rebuild dimension string
+        dims_list = list(original_dims)
+        dims_list.remove('C')
+        dims_list.insert(y_pos, 'C')
+        original_dims = ''.join(dims_list)
+        logger.info(f"Transposed C to standard position: {original_dims}, shape: {image_data.shape}")
+
     if original_dims == 'TCZYX':
         c_axis = 1
         if image_data.shape[0] == 1:
             image_data = image_data[0]
             original_dims = 'CZYX'
             c_axis = 0
+    elif original_dims == 'TZCYX':
+        c_axis = 2
+        # Squeeze T if singleton
+        if image_data.shape[0] == 1:
+            image_data = image_data[0]
+            original_dims = 'ZCYX'
+            c_axis = 1
+    elif original_dims == 'ZCYX':
+        c_axis = 1
     elif original_dims in ('CZYX', 'CYX'):
         c_axis = 0
     else:
-        c_axis = 0
-    
+        # Try to find C axis position
+        c_axis = original_dims.index('C') if 'C' in original_dims else 0
+
     # Squeeze Z if singleton
     if original_dims == 'CZYX' and image_data.shape[1] == 1:
         image_data = image_data[:, 0, :, :]
         original_dims = 'CYX'
+    elif original_dims == 'ZCYX' and image_data.shape[0] == 1:
+        image_data = image_data[0]
+        original_dims = 'CYX'
+        c_axis = 0
     
     # Rearrange channels
     if channel_names != output_channels:
@@ -360,65 +410,75 @@ def convert_to_ome_tiff(
     # Verify
     with tifffile.TiffFile(output_filename) as tif:
         if tif.ome_metadata:
-            logger.info("✓ OME-XML metadata present")
+            logger.info("OME-XML metadata present")
         else:
-            logger.warning("⚠ No OME metadata in saved file")
+            logger.warning("No OME metadata found in saved file")
     
     return output_filename, output_channels
 
 
-def main():
+def parse_args() -> argparse.Namespace:
+    """Parse CLI arguments."""
     parser = argparse.ArgumentParser(
         description='Convert microscopy images to OME-TIFF'
     )
     parser.add_argument('--input_file', type=str, required=True)
     parser.add_argument('--output_dir', type=str, required=True)
     parser.add_argument('--patient_id', type=str, required=True)
-    parser.add_argument('--channels', type=str, default=None,
-                        help='Comma-separated channel names (optional, will read from file if not specified)')
+    parser.add_argument(
+        '--channels',
+        type=str,
+        default=None,
+        help='Comma-separated channel names (optional, reads metadata when omitted)'
+    )
     parser.add_argument('--pixel_size', type=float, default=PIXEL_SIZE_UM)
-    
-    args = parser.parse_args()
-    
+    return parser.parse_args()
+
+
+def main() -> int:
+    """Run conversion CLI."""
+    configure_logging()
+    args = parse_args()
+
     input_path = Path(args.input_file)
     output_dir = Path(args.output_dir)
     channel_names = None
     if args.channels:
         channel_names = [ch.strip() for ch in args.channels.split(',')]
-    
+
     if not input_path.exists():
         logger.error(f"Input file not found: {input_path}")
         return 1
-    
+
     logger.info("=" * 70)
-    logger.info("Image Converter (Bio-Formats enabled)")
+    logger.info("Image Converter")
     logger.info("=" * 70)
     logger.info(f"Input: {input_path}")
     if channel_names:
         logger.info(f"Channels (override): {channel_names}")
     else:
-        logger.info("Channels: will read from file metadata")
+        logger.info("Channels: read from image metadata")
     logger.info("=" * 70)
-    
+
     try:
         output_path, output_channels = convert_to_ome_tiff(
             input_path, output_dir, args.patient_id, channel_names, args.pixel_size
         )
-    except Exception as e:
-        logger.error(f"Conversion failed: {e}")
-        raise
-    
+    except Exception as exc:
+        logger.error(f"Conversion failed: {exc}")
+        return 1
+
     logger.info("=" * 70)
-    logger.info(f"✓ Output: {output_path}")
-    logger.info(f"✓ Channel order: {output_channels}")
+    logger.info(f"Output: {output_path}")
+    logger.info(f"Channel order: {output_channels}")
     logger.info("=" * 70)
-    
-    # Write channels file for Nextflow
-    channels_file = output_dir / f"{args.patient_id}_channels.txt"
+
+    # Write channels file for Nextflow metadata propagation
+    channels_file = output_dir / f"{args.patient_id}_{input_path.stem}_channels.txt"
     channels_file.write_text(','.join(output_channels))
-    
+
     return 0
 
 
 if __name__ == '__main__':
-    exit(main())
+    raise SystemExit(main())

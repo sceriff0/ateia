@@ -1,6 +1,7 @@
 process CONVERT_IMAGE {
     tag "${meta.patient_id}"
-
+    label 'process_medium'
+    
     container 'docker://bolt3x/attend_image_analysis:convert_bioformats_2'
 
     input:
@@ -21,7 +22,7 @@ process CONVERT_IMAGE {
     def channels = meta.channels.join(',')
     """
     # Log input size for tracing (-L follows symlinks)
-    input_bytes=\$(stat -L --printf="%s" ${image_file})
+    input_bytes=\$(stat -L --printf="%s" ${image_file} 2>/dev/null || echo 0)
     echo "${task.process},${meta.patient_id},${image_file.name},\${input_bytes}" > ${meta.patient_id}_${image_file.simpleName}.CONVERT_IMAGE.size.csv
 
     convert_image.py \\
@@ -45,7 +46,7 @@ process CONVERT_IMAGE {
     def channels = meta.channels.join(',')
     """
     touch ${prefix}.ome.tif
-    echo "${channels}" > ${prefix}_channels.txt
+    echo "${channels}" > ${prefix}_${image_file.simpleName}_channels.txt
     echo "STUB,${meta.patient_id},stub,0" > ${meta.patient_id}_${image_file.simpleName}.CONVERT_IMAGE.size.csv
 
     cat <<-END_VERSIONS > versions.yml

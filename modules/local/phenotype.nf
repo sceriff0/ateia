@@ -15,8 +15,6 @@ process PHENOTYPE {
 
     container 'docker://bolt3x/attend_image_analysis:quantification_gpu'
 
-    publishDir "${params.outdir}/${meta.patient_id}/phenotype", mode: 'copy'
-
     input:
     tuple val(meta), path(quant_csv)
     path(phenotype_config)
@@ -38,7 +36,7 @@ process PHENOTYPE {
     def pixel_size = params.pixel_size ?: 0.325
     """
     # Log input size for tracing (-L follows symlinks)
-    input_bytes=\$(stat -L --printf="%s" ${quant_csv})
+    input_bytes=\$(stat -L --printf="%s" ${quant_csv} 2>/dev/null || echo 0)
     echo "${task.process},${meta.patient_id},${quant_csv.name},\${input_bytes}" > ${meta.patient_id}.PHENOTYPE.size.csv
 
     echo "Sample: ${meta.patient_id}"

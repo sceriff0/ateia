@@ -18,10 +18,10 @@ process PAD_IMAGES {
     script:
     def args = task.ext.args ?: ''
     def prefix = task.ext.prefix ?: "${meta.patient_id}"
-    def pad_mode = params.gpu_reg_pad_mode ?: 'constant'
+    def pad_mode = params.pad_mode ?: 'constant'
     """
     # Log input size for tracing (-L follows symlinks)
-    input_bytes=\$(stat -L --printf="%s" ${preprocessed_file})
+    input_bytes=\$(stat -L --printf="%s" ${preprocessed_file} 2>/dev/null || echo 0)
     echo "${task.process},${meta.patient_id},${preprocessed_file.name},\${input_bytes}" > ${meta.patient_id}_${preprocessed_file.simpleName}.PAD_IMAGES.size.csv
 
     # Read max dimensions from file

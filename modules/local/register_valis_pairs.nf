@@ -28,17 +28,16 @@ process REGISTER_VALIS_PAIRS {
     def args = task.ext.args ?: ''
     // Get reference filename for --reference argument
     def ref_filename = reference.name
-    def max_processed_dim = params.reg_max_processed_dim ?: 1800
-    def max_non_rigid_dim = params.reg_max_non_rigid_dim ?: 3500
+    // Memory mode controls feature detector, matcher, and dimension settings
+    def memory_mode = params.memory_mode ?: 'high'
     def micro_reg_fraction = params.reg_micro_reg_fraction ?: 0.5
-    def num_features = params.reg_num_features ?: 5000
     def max_image_dim = params.reg_max_image_dim ?: 6000
     def skip_micro = params.skip_micro_registration ? '--skip-micro-registration' : ''
 
     """
     # Log input sizes for tracing (sum of reference + moving, -L follows symlinks)
-    ref_bytes=\$(stat -L --printf="%s" ${reference})
-    mov_bytes=\$(stat -L --printf="%s" ${moving})
+    ref_bytes=\$(stat -L --printf="%s" ${reference} 2>/dev/null || echo 0)
+    mov_bytes=\$(stat -L --printf="%s" ${moving} 2>/dev/null || echo 0)
     total_bytes=\$((ref_bytes + mov_bytes))
     echo "${task.process},${meta.patient_id},${reference.name}+${moving.name},\${total_bytes}" > ${meta.patient_id}_${moving.simpleName}.REGISTER_VALIS_PAIRS.size.csv
 
@@ -76,10 +75,8 @@ process REGISTER_VALIS_PAIRS {
         --input-dir preprocessed \\
         --out registered_slides \\
         --reference ${ref_filename} \\
-        --max-processed-dim ${max_processed_dim} \\
-        --max-non-rigid-dim ${max_non_rigid_dim} \\
+        --memory-mode ${memory_mode} \\
         --micro-reg-fraction ${micro_reg_fraction} \\
-        --num-features ${num_features} \\
         --max-image-dim ${max_image_dim} \\
         ${skip_micro} \\
         ${args}

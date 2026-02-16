@@ -32,13 +32,12 @@ process SPLIT_CHANNELS {
     script:
     def args = task.ext.args ?: ''
     def ref_flag = is_reference ? "--is-reference" : ""
-    // FIX BUG #5: Add defensive null check for meta.channels
     // Pass channel names from metadata if available and valid
     def channel_args = (meta.channels && meta.channels instanceof List && !meta.channels.isEmpty()) ?
         "--channels ${meta.channels.join(' ')}" : ""
     """
     # Log input size for tracing (-L follows symlinks)
-    input_bytes=\$(stat -L --printf="%s" ${registered_image})
+    input_bytes=\$(stat -L --printf="%s" ${registered_image} 2>/dev/null || echo 0)
     echo "${task.process},${meta.patient_id},${registered_image.name},\${input_bytes}" > ${meta.patient_id}_${registered_image.simpleName}.SPLIT_CHANNELS.size.csv
 
     echo "Sample: ${meta.patient_id}"

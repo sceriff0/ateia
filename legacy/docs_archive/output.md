@@ -1,4 +1,4 @@
-# ATEIA Pipeline Output Structure
+# MIRAGE Pipeline Output Structure
 
 ## Table of Contents
 
@@ -328,7 +328,7 @@ patient_id,is_reference,phenotype_csv,phenotype_mask,phenotype_mapping,merged_cs
 P001,true,/results/P001/phenotyping/phenotypes_data.csv,...
 ```
 
-**Use:** Restart from results step
+**Use:** Manifest of postprocessing outputs for downstream reporting and archiving.
 
 ---
 
