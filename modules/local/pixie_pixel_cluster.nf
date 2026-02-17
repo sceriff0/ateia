@@ -30,8 +30,6 @@ process PIXIE_PIXEL_CLUSTER {
 
     container 'docker://bolt3x/attend_image_analysis:pixie'
 
-    publishDir "${params.outdir}/${meta.patient_id}/pixie/pixel_clustering", mode: 'copy'
-
     input:
     tuple val(meta), path(channel_tiffs), path(cell_mask)
     val(channels)

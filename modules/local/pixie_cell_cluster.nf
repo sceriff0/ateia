@@ -27,8 +27,6 @@ process PIXIE_CELL_CLUSTER {
 
     container 'docker://bolt3x/attend_image_analysis:pixie'
 
-    publishDir "${params.outdir}/${meta.patient_id}/pixie/cell_clustering", mode: 'copy'
-
     input:
     tuple val(meta), path(pixel_data_dir), path(cluster_profiles), path(cell_table), path(cell_mask), path(cell_params), path(tile_positions)
 
