@@ -38,7 +38,8 @@ workflow VALIS_ADAPTER {
             def all_files = all_items.collect { item -> item[1] }
             def all_metas = all_items.collect { item -> item[0] }
 
-            tuple(patient_id, ref_file, all_files, all_metas)
+            def meta = [patient_id: patient_id]
+            tuple(meta, patient_id, ref_file, all_files, all_metas)
         }
 
     // ========================================================================

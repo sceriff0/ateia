@@ -15,7 +15,8 @@ process REGISTER {
 
     input:
     // Use stageAs to avoid filename collision when reference is included in preproc_files
-    tuple val(patient_id), path(reference, stageAs: 'ref/*'), path(preproc_files, stageAs: 'input_?/*'), val(all_metas)
+    // meta carries patient_id for publishDir consistency across all processes
+    tuple val(meta), val(patient_id), path(reference, stageAs: 'ref/*'), path(preproc_files, stageAs: 'input_?/*'), val(all_metas)
 
     output:
     tuple val(patient_id), path("registered_slides/*_registered.ome.tiff"), val(all_metas), emit: registered
@@ -130,6 +131,13 @@ process REGISTER {
         exit 1
     fi
 
+    # Clean up intermediate files (boost doesn't track script-generated working files)
+    echo "=== Cleaning up intermediate files to save disk space ==="
+    find preprocessed -maxdepth 1 -type f -delete
+    rm -rf preprocessed/deformation_fields preprocessed/masks preprocessed/overlaps \
+           preprocessed/rigid_registration preprocessed/non_rigid_registration preprocessed/processed
+    rm -rf input_* ref
+
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         python: \$(python --version 2>&1 | sed 's/Python //')
@@ -140,8 +148,8 @@ process REGISTER {
     stub:
     // Generate output files matching input count with proper naming pattern
     // VALIS adapter expects: {patient_id}_{markers}_corrected_registered.ome.tiff
-    def output_files = all_metas.collect { meta ->
-        def markers = meta.channels.join('_')
+    def output_files = all_metas.collect { m ->
+        def markers = m.channels.join('_')
         "${patient_id}_${markers}_corrected_registered.ome.tiff"
     }
     def touch_commands = output_files.collect { "touch registered_slides/${it}" }.join('\n    ')
