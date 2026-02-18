@@ -355,7 +355,7 @@ workflow POSTPROCESSING {
             .collectFile(
                 name: 'postprocessed.csv',
                 newLine: true,
-                storeDir: "${params.outdir}/csv",
+                storeDir: "./csv",
                 seed: 'patient_id,phenotype_csv,phenotype_geojson,phenotype_mapping,merged_csv,cell_mask,pyramid,pixie_cell_table,pixie_geojson,pixie_mapping'
             )
     } else {
@@ -366,19 +366,10 @@ workflow POSTPROCESSING {
             .collectFile(
                 name: 'postprocessed.csv',
                 newLine: true,
-                storeDir: "${params.outdir}/csv",
+                storeDir: "./csv",
                 seed: 'patient_id,phenotype_csv,phenotype_geojson,phenotype_mapping,merged_csv,cell_mask,pyramid'
             )
     }
-        .map { patient_id, pheno_csv, pheno_geojson, pheno_map, merged_csv, cell_mask, pyramid ->
-            "${patient_id},${pheno_csv},${pheno_geojson},${pheno_map},${merged_csv},${cell_mask},${pyramid}"
-        }
-        .collectFile(
-            name: 'postprocessed.csv',
-            newLine: true,
-            storeDir: "./csv",
-            seed: 'patient_id,phenotype_csv,phenotype_geojson,phenotype_mapping,merged_csv,cell_mask,pyramid'
-        )
 
     // Collect size logs from all postprocessing processes
     ch_size_logs = Channel.empty()

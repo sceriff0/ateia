@@ -22,7 +22,6 @@ process SPLIT_CHANNELS {
 
     output:
     tuple val(meta), path("*.tiff", includeInputs: false), emit: channels
-    path "channel_names.txt"                              , emit: channel_manifest, optional: true
     path "versions.yml"                                   , emit: versions
     path("*.size.csv")                                    , emit: size_log
 
@@ -66,7 +65,6 @@ process SPLIT_CHANNELS {
         meta.channels.drop(1).collect { "touch ${it}.tiff" }.join('\n    ') :
         'touch Marker1.tiff'}
 
-    ls -1 *.tiff | sort > channel_names.txt
     echo "STUB,${meta.patient_id},stub,0" > ${meta.patient_id}_${registered_image.simpleName}.SPLIT_CHANNELS.size.csv
 
     cat <<-END_VERSIONS > versions.yml
