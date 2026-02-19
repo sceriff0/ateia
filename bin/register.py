@@ -80,6 +80,7 @@ from valis.micro_rigid_registrar import MicroRigidRegistrar
 from valis import feature_detectors
 from valis import feature_matcher
 from valis import preprocessing
+from valis import warp_tools as valis_warp_tools
 
 # Non-rigid registrars - OpticalFlowWarper is default, NonRigidTileRegistrar for large images
 from valis.non_rigid_registrars import OpticalFlowWarper, NonRigidTileRegistrar
@@ -520,15 +521,17 @@ def valis_registration(
     # ========================================================================
     # Configure Non-Rigid Registration Strategy
     # ========================================================================
-    # NonRigidTileRegistrar: Processes tiles in parallel, same accuracy as OpticalFlowWarper
-    # but better performance for large images. Each tile is registered independently and
-    # displacement fields are stitched together.
+    # Always use OpticalFlowWarper. VALIS internally auto-switches to
+    # NonRigidTileRegistrar when estimated memory > 10GB (see TILER_THRESH_GB
+    # in valis_lib/registration.py). Explicitly passing NonRigidTileRegistrar
+    # triggers a bug: its fwd_dxdy is always a pyvips.Image, but the Slide
+    # setter silently rejects pyvips, leaving fwd_dxdy=None. This causes
+    # measure_error() to report identical rigid/non-rigid errors.
     if use_tiled_registration:
-        logger.info(f"  Non-rigid registrar: NonRigidTileRegistrar (tile_wh={preset_tile_wh}px, tile_buffer={preset_tile_buffer})")
-        non_rigid_registrar = NonRigidTileRegistrar(tile_wh=preset_tile_wh, tile_buffer=preset_tile_buffer)
-    else:
-        logger.info(f"  Non-rigid registrar: OpticalFlowWarper (default)")
-        non_rigid_registrar = OpticalFlowWarper()
+        logger.warning("  --use-tiled-registration is deprecated: VALIS auto-tiles when needed.")
+        logger.warning("  Using OpticalFlowWarper instead (VALIS will auto-tile if memory requires it).")
+    logger.info(f"  Non-rigid registrar: OpticalFlowWarper (VALIS auto-tiles if memory > 10GB)")
+    non_rigid_registrar = OpticalFlowWarper()
 
     # ========================================================================
     # Affine Optimizer - Disabled (requires SimpleITK with Elastix bindings)
@@ -580,6 +583,116 @@ def valis_registration(
         _, _, error_df = registrar.register()
         logger.info("Initial registration completed")
         logger.info(f"\nRegistration errors:\n{error_df}")
+
+        # ---- Safety net: repair missing fwd_dxdy ----
+        # NonRigidTileRegistrar produces fwd_dxdy as pyvips.Image, but the
+        # Slide setter silently rejects pyvips types. Recompute from bk_dxdy.
+        repaired_count = 0
+        for slide_name, slide_obj in registrar.slide_dict.items():
+            if slide_obj.bk_dxdy is not None and slide_obj.fwd_dxdy is None:
+                bk = slide_obj.bk_dxdy
+                if isinstance(bk, np.ndarray):
+                    logger.warning(f"  [{slide_name}] fwd_dxdy is None — recomputing from bk_dxdy inverse")
+                    slide_obj.fwd_dxdy = valis_warp_tools.get_inverse_field(bk)
+                    repaired_count += 1
+                else:
+                    logger.warning(f"  [{slide_name}] fwd_dxdy is None and bk_dxdy is pyvips — cannot repair in-place")
+        if repaired_count > 0:
+            logger.info(f"  Repaired fwd_dxdy for {repaired_count} slides — re-measuring error")
+            error_df = registrar.measure_error()
+            logger.info(f"\nCorrected registration errors:\n{error_df}")
+
+        # ---- Displacement field diagnostics ----
+        # Diagnose why rigid and non-rigid errors may be identical
+        logger.info("\n" + "=" * 70)
+        logger.info("DISPLACEMENT FIELD DIAGNOSTICS")
+        logger.info("=" * 70)
+        ref_slide = registrar.get_ref_slide()
+        logger.info(f"Reference slide: {ref_slide.name}")
+        logger.info(f"Non-rigid bbox: {getattr(registrar, '_non_rigid_bbox', 'NOT SET')}")
+        logger.info(f"Full displacement shape: {getattr(registrar, '_full_displacement_shape_rc', 'NOT SET')}")
+
+        import pyvips
+
+        def _report_dxdy(name, field_name, dxdy, stored):
+            """Report displacement field type, shape, and magnitude."""
+            if dxdy is None:
+                level = "warning" if field_name == "fwd_dxdy" else "info"
+                msg = f"  [{name}] {field_name}: None"
+                if field_name == "fwd_dxdy":
+                    msg += " *** NON-RIGID POINT WARPING WILL BE SKIPPED ***"
+                getattr(logger, level)(msg)
+            elif isinstance(dxdy, np.ndarray):
+                logger.info(
+                    f"  [{name}] {field_name}: numpy shape={dxdy.shape}, "
+                    f"max_abs_dx={np.abs(dxdy[0]).max():.4f}, max_abs_dy={np.abs(dxdy[1]).max():.4f}, "
+                    f"mean_abs_dx={np.abs(dxdy[0]).mean():.4f}, mean_abs_dy={np.abs(dxdy[1]).mean():.4f}"
+                )
+            elif isinstance(dxdy, pyvips.Image):
+                # pyvips.Image — extract stats without loading entire field into memory
+                logger.info(
+                    f"  [{name}] {field_name}: pyvips.Image {dxdy.width}x{dxdy.height} bands={dxdy.bands} "
+                    f"(stored_dxdy={stored})"
+                )
+                try:
+                    stats = dxdy.stats()
+                    # stats() returns a 2D array: columns = bands+1, rows = [min, max, sum, sum^2, mean, stdev]
+                    # Band 0 (first col) is all-band summary, band 1 = dx, band 2 = dy
+                    dx_min = stats(1, 0)[0]   # band 1 min
+                    dx_max = stats(2, 0)[0]   # band 1 max
+                    dx_mean = stats(5, 0)[0]  # band 1 mean (row 5, col 0 = all-band)
+                    dy_min = stats(1, 1)[0]   # band 2 min
+                    dy_max = stats(2, 1)[0]   # band 2 max
+                    # Actually, pyvips stats() returns (cols=bands+1, rows=7):
+                    # Row 0=min, 1=max, 2=sum, 3=sum^2, 4=mean, 5=sd, 6=count
+                    # Col 0=all, Col 1=band0(dx), Col 2=band1(dy)
+                    stats_np = np.array([[stats(x, y)[0] for y in range(stats.height)] for x in range(stats.width)])
+                    # stats_np shape: (bands+1, 7)  — col 0=all, col 1=dx, col 2=dy; row 0=min,1=max,4=mean
+                    if stats_np.shape[0] >= 3:
+                        logger.info(
+                            f"           dx: min={stats_np[1,0]:.4f}, max={stats_np[1,1]:.4f}, mean={stats_np[1,4]:.4f}"
+                        )
+                        logger.info(
+                            f"           dy: min={stats_np[2,0]:.4f}, max={stats_np[2,1]:.4f}, mean={stats_np[2,4]:.4f}"
+                        )
+                    else:
+                        logger.info(f"           stats shape: {stats_np.shape} (unexpected)")
+                except Exception as e:
+                    logger.info(f"           Could not read stats: {e}")
+            else:
+                logger.info(f"  [{name}] {field_name}: type={type(dxdy).__name__} (stored_dxdy={stored})")
+
+        for slide_name, slide_obj in registrar.slide_dict.items():
+            is_ref = (slide_name == ref_slide.name)
+            stored = getattr(slide_obj, 'stored_dxdy', False)
+
+            # Check bk_dxdy
+            try:
+                bk = slide_obj.bk_dxdy
+            except Exception as e:
+                bk = None
+                logger.info(f"  [{slide_name}] bk_dxdy: ERROR reading: {e}")
+
+            # Check fwd_dxdy
+            try:
+                fwd = slide_obj.fwd_dxdy
+            except Exception as e:
+                fwd = None
+                logger.info(f"  [{slide_name}] fwd_dxdy: ERROR reading: {e}")
+
+            if is_ref:
+                logger.info(f"  [{slide_name}] REFERENCE — bk_dxdy={'set' if bk is not None else 'None'}, fwd_dxdy={'set' if fwd is not None else 'None'}")
+                continue
+
+            # Check if displacement files exist on disk (tiled registration)
+            if stored:
+                bk_f, fwd_f = slide_obj.get_displacement_f()
+                logger.info(f"  [{slide_name}] stored_dxdy=True, bk_file={os.path.exists(bk_f)}, fwd_file={os.path.exists(fwd_f)}")
+
+            _report_dxdy(slide_name, "bk_dxdy", bk, stored)
+            _report_dxdy(slide_name, "fwd_dxdy", fwd, stored)
+
+        logger.info("=" * 70)
     except MemoryError as e:
         logger.error(f"\n[FAIL] Memory exhausted during registration: {e}")
         raise
