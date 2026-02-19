@@ -493,13 +493,8 @@ def run_phenotyping_pipeline(
     logger.info(f"Markers: {markers}")
     logger.info(f"Number of cells: {len(cell_df)}")
 
-    # Convert percentile parameters if passed as percentages
-    if quality_percentile > 1:
-        logger.info(f"Converting quality_percentile from {quality_percentile}% to {quality_percentile/100}")
-        quality_percentile = quality_percentile / 100.0
-    if noise_percentile > 1:
-        logger.info(f"Converting noise_percentile from {noise_percentile}% to {noise_percentile/100}")
-        noise_percentile = noise_percentile / 100.0
+    # quality_percentile and noise_percentile are used directly with np.percentile
+    # e.g., quality_percentile=1 means filter at the 1st percentile (remove bottom 1%)
 
     # Reorder columns (keep available ones)
     base_cols = ['y', 'x', 'eccentricity', 'perimeter', 'convex_area', 'area',
@@ -787,7 +782,7 @@ def parse_args() -> argparse.Namespace:
         '--quality_percentile',
         type=float,
         default=1.0,
-        help='Percentile for quality filtering (DAPI/area)'
+        help='Percentile threshold for quality filtering — cells below this percentile of DAPI/area are removed (e.g., 1 = remove bottom 1%%)'
     )
     parser.add_argument(
         '--noise_percentile',
