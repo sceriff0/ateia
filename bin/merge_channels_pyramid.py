@@ -186,7 +186,7 @@ def downsample_image(image: np.ndarray, factor: int) -> np.ndarray:
 def calculate_pyramid_levels(
     height: int,
     width: int,
-    min_size: int = 256,
+    min_size: int = 64,
     max_levels: int = 10,
     scale_factor: int = 2
 ) -> List[Tuple[int, int]]:
@@ -341,7 +341,7 @@ def write_pyramidal_ome_tiff(
     # Calculate pyramid levels
     levels = calculate_pyramid_levels(
         height, width,
-        min_size=tile_size,
+        min_size=64,
         max_levels=pyramid_resolutions,
         scale_factor=pyramid_scale
     )

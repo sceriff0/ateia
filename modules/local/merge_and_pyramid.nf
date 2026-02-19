@@ -39,7 +39,7 @@ process MERGE_AND_PYRAMID {
     // Parameters are centralized in nextflow.config; keep conservative fallbacks.
     def pixel_size_x = params.pixel_size ?: 0.325
     def pixel_size_y = params.pixel_size ?: 0.325
-    def pyramid_resolutions = params.pyramid_resolutions ?: 5
+    def pyramid_resolutions = params.pyramid_resolutions ?: 8
     def pyramid_scale = params.pyramid_scale ?: 2
     def tile_size = params.tilex ?: 256
     def compression = params.compression ?: 'lzw'

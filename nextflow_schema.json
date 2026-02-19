@@ -249,8 +249,8 @@
         },
         "pyramid_resolutions": {
             "type": "integer",
-            "description": "Pipeline parameter `pyramid_resolutions`.",
-            "default": 3
+            "description": "Number of pyramid resolution levels for OME-TIFF output. Higher values enable faster overview rendering in QuPath.",
+            "default": 8
         },
         "pyramid_scale": {
             "type": "integer",

@@ -18,7 +18,7 @@ nextflow_workflow {
                 pixel_size = 0.325
                 pheno_quality_percentile = 0.05
                 pheno_noise_percentile = 0.95
-                pyramid_resolutions = 3
+                pyramid_resolutions = 8
                 pyramid_scale = 2
                 tilex = 256
                 compression = 'lzw'
@@ -54,7 +54,7 @@ nextflow_workflow {
                 pixel_size = 0.325
                 pheno_quality_percentile = 0.05
                 pheno_noise_percentile = 0.95
-                pyramid_resolutions = 3
+                pyramid_resolutions = 8
                 pyramid_scale = 2
                 tilex = 256
                 compression = 'lzw'
@@ -92,7 +92,7 @@ nextflow_workflow {
                 pixel_size = 0.325
                 pheno_quality_percentile = 0.05
                 pheno_noise_percentile = 0.95
-                pyramid_resolutions = 3
+                pyramid_resolutions = 8
                 pyramid_scale = 2
                 tilex = 256
                 compression = 'lzw'
@@ -126,7 +126,7 @@ nextflow_workflow {
                 pixel_size = 0.325
                 pheno_quality_percentile = 0.05
                 pheno_noise_percentile = 0.95
-                pyramid_resolutions = 3
+                pyramid_resolutions = 8
                 pyramid_scale = 2
                 tilex = 256
                 compression = 'lzw'
@@ -164,7 +164,7 @@ nextflow_workflow {
                 pixel_size = 0.325
                 pheno_quality_percentile = 0.05
                 pheno_noise_percentile = 0.95
-                pyramid_resolutions = 3
+                pyramid_resolutions = 8
                 pyramid_scale = 2
                 tilex = 256
                 compression = 'lzw'
@@ -200,7 +200,7 @@ nextflow_workflow {
                 pixel_size = 0.325
                 pheno_quality_percentile = 0.05
                 pheno_noise_percentile = 0.95
-                pyramid_resolutions = 3
+                pyramid_resolutions = 8
                 pyramid_scale = 2
                 tilex = 256
                 compression = 'lzw'
