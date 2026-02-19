@@ -182,17 +182,10 @@ def normalize_dapi(
     logger.info("Normalizing DAPI channel...")
     logger.info(f"  Percentiles: [{pmin}, {pmax}]")
 
-    # Convert to float32 if needed (saves memory vs float64)
-    if dapi_image.dtype != np.float32:
-        logger.info(f"  Converting from {dapi_image.dtype} to float32 to save memory")
-        dapi_image = dapi_image.astype(np.float32)
-
-    # CSBDeep normalize clips to percentiles and scales to [0, 1]
+    # CSBDeep normalize clips to percentiles and scales to [0, 1].
+    # It internally converts to float32 via x.astype(float32, copy=True),
+    # so pre-converting here would just create a redundant full-image copy.
     normalized = normalize(dapi_image, pmin, pmax, axis=(0, 1))
-
-    # Ensure float32 output
-    if normalized.dtype != np.float32:
-        normalized = normalized.astype(np.float32)
 
     logger.info(f"  Normalized range: [{normalized.min():.4f}, {normalized.max():.4f}]")
 
@@ -369,8 +362,9 @@ def segment_nuclei(
 
     elapsed = time.time() - start_time
 
-    n_nuclei = len(np.unique(nuclei_labels)) - 1  # Subtract background (0)
-    n_cells = len(np.unique(cell_labels)) - 1
+    # StarDist labels are dense 0..N; .max() avoids np.unique's full-array sort copy
+    n_nuclei = int(nuclei_labels.max())
+    n_cells = int(cell_labels.max())
 
     logger.info(f"  Nuclei detected: {n_nuclei}")
     logger.info(f"  Cells (after expansion): {n_cells}")
@@ -440,6 +434,7 @@ def run_segmentation(
 
     # 2. Normalize using CSBDeep
     normalized_dapi = normalize_dapi(dapi_image, pmin=pmin, pmax=pmax)
+    del dapi_image  # Free uint16 original — only normalized float32 needed from here
 
     # 3. Load StarDist model
     model = load_stardist_model(model_dir, model_name, use_gpu=use_gpu)
@@ -451,6 +446,7 @@ def run_segmentation(
         n_tiles=n_tiles,
         expand_distance=expand_distance
     )
+    del normalized_dapi, model  # Free float32 image + TF weights before save phase
 
     # 5. Save outputs
     basename = Path(image_path).stem
@@ -461,9 +457,11 @@ def run_segmentation(
     logger.info("Saving segmentation masks...")
     logger.info(f"  Nuclei mask: {nuclei_mask_path.name}")
     tifffile.imwrite(nuclei_mask_path, nuclei_mask, compression='zlib')
+    del nuclei_mask  # Free before writing cell mask
 
     logger.info(f"  Cell mask: {cell_mask_path.name}")
     tifffile.imwrite(cell_mask_path, cell_mask, compression='zlib')
+    del cell_mask
 
     logger.info("")
     logger.info("=" * 80)
