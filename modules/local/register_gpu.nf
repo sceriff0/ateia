@@ -14,34 +14,6 @@ process GPU_REGISTER {
 
     container 'docker://bolt3x/attend_image_analysis:debug_diffeo'
 
-    // Retry memory-related failures with reduced crop sizes
-    errorStrategy { task.exitStatus in [137, 139, 140, 143] ? 'retry' : 'finish' }
-    maxRetries 3
-
-    // Dynamic resource allocation based on input file size
-    // Small: <10 GB, Medium: 10-30 GB, Large: >30 GB
-    memory {
-        def size = moving.size()
-        check_max(
-            size < 10.GB ? 128.GB * task.attempt :   // Small images
-            size < 30.GB ? 256.GB * task.attempt :   // Medium images
-            388.GB * task.attempt,                   // Large images
-            'memory'
-        )
-    }
-
-    time {
-        def size = moving.size()
-        check_max(
-            size < 10.GB ? 2.h * task.attempt :      // Small images
-            size < 30.GB ? 3.h * task.attempt :      // Medium images
-            6.h * task.attempt,                      // Large images
-            'time'
-        )
-    }
-
-    cpus { check_max( 2 * task.attempt, 'cpus' ) }
-
     clusterOptions "--gres=gpu:${params.gpu_type}"
 
     input:

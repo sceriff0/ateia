@@ -13,15 +13,6 @@ process SEGMENT {
 
     container 'docker://bolt3x/attend_image_analysis:segmentation_gpu'
 
-    // Dynamic memory based on input size; n_tiles retry scaling reduces per-tile memory
-    cpus 2
-    memory {
-        check_max(
-            Math.max(32.GB as long, (merged_file.size() * 3 as long)) * task.attempt,
-            'memory'
-        )
-    }
-
     //publishDir "${params.outdir}/${meta.patient_id}/segmentation", mode: 'copy', overwrite: true
 
     input:

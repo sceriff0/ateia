@@ -13,30 +13,6 @@ process CPU_REGISTER {
 
     container 'docker://bolt3x/attend_image_analysis:debug_diffeo'
 
-    // Dynamic resource allocation based on input file size (follows GPU_REGISTER pattern)
-    cpus { check_max( 16, 'cpus' ) }
-    memory {
-        def size = moving.size()
-        check_max(
-            size < 5.GB  ? 64.GB  * task.attempt :
-            size < 15.GB ? 128.GB * task.attempt :
-            256.GB * task.attempt,
-            'memory'
-        )
-    }
-    time {
-        def size = moving.size()
-        check_max(
-            size < 5.GB  ? 4.h  * task.attempt :
-            size < 15.GB ? 8.h  * task.attempt :
-            16.h * task.attempt,
-            'time'
-        )
-    }
-
-    errorStrategy { task.exitStatus in [137, 104] ? 'retry' : 'finish' }
-    maxRetries 2
-
     input:
     tuple val(meta), path(reference), path(moving)
 

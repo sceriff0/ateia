@@ -3,11 +3,6 @@ process CONVERT_IMAGE {
 
     container 'docker://bolt3x/attend_image_analysis:convert_bioformats_2'
 
-    // Dynamic resource allocation — single-threaded tool
-    cpus 1
-    memory { check_max( 16.GB * task.attempt, 'memory' ) }
-    time   { check_max( 2.h  * task.attempt, 'time'   ) }
-
     input:
     tuple val(meta), path(image_file)
 
