@@ -11,9 +11,18 @@ nextflow.enable.dsl = 2
  */
 process SPLIT_CHANNELS {
     tag "${meta.patient_id}"
-    label 'process_medium'
 
     container 'docker://bolt3x/attend_image_analysis:preprocess'
+
+    // Dynamic resource allocation — single-threaded channel extraction
+    cpus 1
+    memory {
+        check_max(
+            Math.max(8.GB as long, (registered_image.size() * 3 as long)) * task.attempt,
+            'memory'
+        )
+    }
+    time { check_max( 2.h * task.attempt, 'time' ) }
 
     //publishDir "${params.outdir}/${meta.patient_id}/channels", mode: 'copy'
 

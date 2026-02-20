@@ -12,6 +12,16 @@ process PREPROCESS {
 
     container 'docker://bolt3x/attend_image_analysis:preprocess'
 
+    // Dynamic resource allocation — match CPUs to pool workers
+    cpus   params.preproc_pool_workers
+    memory {
+        check_max(
+            Math.max(16.GB as long, (ome_tiff.size() * 4 as long)) * task.attempt,
+            'memory'
+        )
+    }
+    time { check_max( 3.h * task.attempt, 'time' ) }
+
     input:
     tuple val(meta), path(ome_tiff)
 
@@ -41,7 +51,7 @@ process PREPROCESS {
         --output_dir . \\
         --channels ${channels} \\
         --fov_size ${params.preproc_tile_size} \\
-        --n_workers ${params.preproc_pool_workers} \\
+        --n_workers ${task.cpus} \\
         --n_iter ${params.preproc_n_iter} \\
         --overlap ${overlap} \\
         ${skip_dapi_flag} \\

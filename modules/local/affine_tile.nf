@@ -11,9 +11,18 @@
  */
 process AFFINE_TILE {
     tag "${meta.patient_id}_${tile_id}"
-    label 'process_medium'
 
     container 'docker://bolt3x/attend_image_analysis:debug_diffeo'
+
+    // Dynamic resource allocation — single-threaded tile processor
+    cpus 1
+    memory {
+        check_max(
+            Math.max(8.GB as long, ((reference.size() + moving.size()) * 2 as long)) * task.attempt,
+            'memory'
+        )
+    }
+    time { check_max( 20.min * task.attempt, 'time' ) }
 
     input:
     tuple val(meta), val(tile_id), path(tile_plan), path(reference), path(moving)

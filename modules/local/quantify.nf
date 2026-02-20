@@ -11,9 +11,17 @@ nextflow.enable.dsl = 2
  */
 process QUANTIFY {
     tag "${meta.patient_id} - ${channel_tiff.simpleName}"
-    label 'process_medium'
 
     container 'docker://bolt3x/attend_image_analysis:quantification_gpu'
+
+    // Dynamic resource allocation — single channel + mask
+    cpus 1
+    memory {
+        check_max(
+            Math.max(8.GB as long, ((channel_tiff.size() + seg_mask.size()) * 3 as long)) * task.attempt,
+            'memory'
+        )
+    }
 
     input:
     tuple val(meta), path(channel_tiff), path(seg_mask)
