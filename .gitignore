@@ -1,6 +1,7 @@
 valis_lib/*
 *.pyc
 pixie-main/*
+traces/*
 <<<<<<< HEAD
 =======
 tests/__pycache__/*
