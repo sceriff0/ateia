@@ -18,8 +18,8 @@ nextflow_process {
                 pixel_size = 0.325
                 pyramid_resolutions = 8
                 pyramid_scale = 2
-                tilex = 256
-                compression = 'lzw'
+                tilex = 512
+                compression = 'zstd'
             }
             process {
                 """
@@ -64,8 +64,8 @@ nextflow_process {
                 pixel_size = 0.325
                 pyramid_resolutions = 8
                 pyramid_scale = 2
-                tilex = 256
-                compression = 'lzw'
+                tilex = 512
+                compression = 'zstd'
             }
             process {
                 """
@@ -104,8 +104,8 @@ nextflow_process {
                 pixel_size = 0.325
                 pyramid_resolutions = 8
                 pyramid_scale = 2
-                tilex = 256
-                compression = 'lzw'
+                tilex = 512
+                compression = 'zstd'
             }
             process {
                 """
@@ -148,8 +148,8 @@ nextflow_process {
                 pixel_size = 0.325
                 pyramid_resolutions = 8
                 pyramid_scale = 2
-                tilex = 256
-                compression = 'lzw'
+                tilex = 512
+                compression = 'zstd'
             }
             process {
                 """
@@ -189,8 +189,8 @@ nextflow_process {
                 pixel_size = 0.325
                 pyramid_resolutions = 8
                 pyramid_scale = 2
-                tilex = 256
-                compression = 'lzw'
+                tilex = 512
+                compression = 'zstd'
             }
             process {
                 """

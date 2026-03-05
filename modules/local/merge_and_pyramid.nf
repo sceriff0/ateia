@@ -42,7 +42,7 @@ process MERGE_AND_PYRAMID {
     def pyramid_resolutions = params.pyramid_resolutions ?: 8
     def pyramid_scale = params.pyramid_scale ?: 2
     def tile_size = params.tilex ?: 256
-    def compression = params.compression ?: 'lzw'
+    def compression = params.compression ?: 'zstd'
 
     """
     # Log input size for tracing (sum of channels/ dir + seg_mask, -L follows symlinks)

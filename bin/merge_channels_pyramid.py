@@ -27,6 +27,12 @@ except ImportError:
     def detect_wrapped_values(data, **kwargs): return False, 0, 0.0
     def validate_image_range(data, stage, **kwargs): return True, data
 
+try:
+    import zarr
+    HAS_ZARR = True
+except ImportError:
+    HAS_ZARR = False
+
 os.environ['NUMBA_DISABLE_JIT'] = '0'
 os.environ['NUMBA_CACHE_DIR'] = tempfile.gettempdir() + '/numba_cache'
 os.environ['NUMBA_DISABLE_CACHING'] = '1'
@@ -312,8 +318,9 @@ def write_pyramidal_ome_tiff(
     physical_size_y: float = 0.325,
     pyramid_resolutions: int = 5,
     pyramid_scale: int = 2,
-    tile_size: int = 256,
-    compression: str = 'lzw'
+    tile_size: int = 512,
+    compression: str = 'zstd',
+    compressionargs: Optional[Dict] = None,
 ):
     """
     Write a pyramidal OME-TIFF with proper QuPath-compatible structure.
@@ -336,8 +343,13 @@ def write_pyramidal_ome_tiff(
         tile_size: Tile size for efficient access
         compression: Compression algorithm
     """
+    # Defensive cast: float→uint16 for QuPath compatibility
+    if data.dtype in (np.float32, np.float64):
+        log("  Casting float data to uint16 for QuPath compatibility")
+        data = np.clip(data, 0, 65535).astype(np.uint16)
+
     num_channels, height, width = data.shape
-    
+
     # Calculate pyramid levels
     levels = calculate_pyramid_levels(
         height, width,
@@ -368,6 +380,8 @@ def write_pyramidal_ome_tiff(
         photometric='minisblack',
         resolutionunit='CENTIMETER',
     )
+    if compressionargs:
+        options['compressionargs'] = compressionargs
 
     with tifffile.TiffWriter(output_path, bigtiff=True, ome=True) as tif:
         # Write base resolution with all channels
@@ -445,6 +459,22 @@ def verify_ome_tiff(path: str):
             log("  WARNING: No OME-XML metadata found!")
 
 
+def _read_channel_file(path: str) -> np.ndarray:
+    """Read single-channel TIFF via zarr when available, else tifffile.imread()."""
+    if HAS_ZARR:
+        try:
+            store = tifffile.imread(str(path), aszarr=True)
+            z = zarr.open(store, mode='r')
+            arr = z[0] if isinstance(z, zarr.hierarchy.Group) else z
+            data = np.asarray(arr)
+            if hasattr(store, 'close'):
+                store.close()
+            return data
+        except Exception as e:
+            log(f"    zarr read failed ({e}), falling back to imread")
+    return tifffile.imread(str(path))
+
+
 def merge_channels(
     input_dir: str,
     output_path: str,
@@ -455,8 +485,9 @@ def merge_channels(
     physical_size_y: float = 0.325,
     pyramid_resolutions: int = 5,
     pyramid_scale: int = 2,
-    tile_size: int = 256,
-    compression: str = 'lzw'
+    tile_size: int = 512,
+    compression: str = 'zstd',
+    compressionargs: Optional[Dict] = None,
 ):
     """
     Merge all single-channel TIFF files into a single pyramidal OME-TIFF.
@@ -548,7 +579,7 @@ def merge_channels(
     # Load channel files
     for channel_file in channel_files:
         log(f"  Loading: {channel_file.stem}")
-        channel_data = tifffile.imread(str(channel_file))
+        channel_data = _read_channel_file(str(channel_file))
         if channel_data.ndim > 2:
             channel_data = channel_data.squeeze()
 
@@ -572,7 +603,7 @@ def merge_channels(
     # Load mask channels
     for mask_type, mask_path in masks_info:
         log(f"  Loading {mask_type} mask...")
-        mask_data = tifffile.imread(mask_path)
+        mask_data = _read_channel_file(mask_path)
         if mask_data.ndim > 2:
             mask_data = mask_data.squeeze()
 
@@ -634,7 +665,8 @@ def merge_channels(
         pyramid_resolutions=pyramid_resolutions,
         pyramid_scale=pyramid_scale,
         tile_size=tile_size,
-        compression=compression
+        compression=compression,
+        compressionargs=compressionargs,
     )
 
     # Clean up
@@ -690,19 +722,25 @@ def parse_args() -> argparse.Namespace:
                         help='Number of pyramid levels (default: 5)')
     parser.add_argument('--pyramid-scale', type=int, default=2,
                         help='Downscaling factor between levels (default: 2)')
-    parser.add_argument('--tile-size', type=int, default=256,
-                        help='Tile size (default: 256)')
-    parser.add_argument('--compression', type=str, default='lzw',
-                        choices=['lzw', 'zlib', 'jpeg', 'none'],
-                        help='Compression algorithm (default: lzw)')
+    parser.add_argument('--tile-size', type=int, default=512,
+                        help='Tile size (default: 512)')
+    parser.add_argument('--compression', type=str, default='zstd',
+                        choices=['lzw', 'zlib', 'zstd', 'jpeg', 'none'],
+                        help='Compression algorithm (default: zstd)')
     return parser.parse_args()
 
 
 def main() -> int:
     """Run merge and pyramid CLI."""
     configure_logging()
+    log(f"zarr available: {HAS_ZARR}")
     args = parse_args()
     compression = None if args.compression == 'none' else args.compression
+
+    # Set compression-specific arguments
+    compressionargs = None
+    if compression == 'zstd':
+        compressionargs = {'level': 2}  # Fast decompression for QuPath
 
     try:
         merge_channels(
@@ -717,6 +755,7 @@ def main() -> int:
             pyramid_scale=args.pyramid_scale,
             tile_size=args.tile_size,
             compression=compression,
+            compressionargs=compressionargs,
         )
         log("Complete!")
         return 0
