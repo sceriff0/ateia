@@ -343,10 +343,15 @@ def write_pyramidal_ome_tiff(
         tile_size: Tile size for efficient access
         compression: Compression algorithm
     """
-    # Defensive cast: float→uint16 for QuPath compatibility
+    # Defensive cast: float→uint16 for QuPath compatibility (per-channel to limit RAM)
     if data.dtype in (np.float32, np.float64):
-        log("  Casting float data to uint16 for QuPath compatibility")
-        data = np.clip(data, 0, 65535).astype(np.uint16)
+        log("  Casting float data to uint16 for QuPath compatibility (per-channel)")
+        out = np.empty(data.shape, dtype=np.uint16)
+        for c in range(data.shape[0]):
+            out[c] = np.clip(data[c], 0, 65535).astype(np.uint16)
+        data = out
+        del out
+        gc.collect()
 
     num_channels, height, width = data.shape
 
@@ -572,8 +577,11 @@ def merge_channels(
     log("-" * 50)
     log("Pass 2: Loading channels into memory...")
     
-    # Create output array
-    output_data = np.zeros((num_output_channels, height, width), dtype=dtype)
+    # Create output array – use uint16 when input is float to avoid
+    # a massive bulk cast later (which would triple peak RAM).
+    out_dtype = np.uint16 if dtype in (np.float32, np.float64) else dtype
+    need_float_cast = dtype in (np.float32, np.float64)
+    output_data = np.zeros((num_output_channels, height, width), dtype=out_dtype)
     output_idx = 0
 
     # Load channel files
@@ -595,6 +603,9 @@ def merge_channels(
             if has_wrapped:
                 log(f"    WARNING: {wrap_count} potential wrapped negative pixels ({wrap_pct:.4f}%) in {channel_file.stem}")
 
+        # Cast per-channel to avoid bulk float→uint16 copy on the full CYX array
+        if need_float_cast:
+            channel_data = np.clip(channel_data, 0, 65535).astype(np.uint16)
         output_data[output_idx] = channel_data
         output_idx += 1
         del channel_data
@@ -625,22 +636,22 @@ def merge_channels(
         # This would cause label IDs > 65535 to overflow/wrap around
         if mask_type == 'segmentation' and mask_data.dtype == np.uint32:
             # Keep segmentation masks as uint32 to preserve all label IDs
-            log(f"    WARNING: Segmentation mask is uint32 but channel dtype is {dtype}")
+            log(f"    WARNING: Segmentation mask is uint32 but channel dtype is {out_dtype}")
             log(f"    Keeping mask as uint32 to avoid label ID overflow")
             # This means the output array needs to support uint32 for this channel
             # We'll need to handle this specially - for now, clip to max value
-            if dtype in [np.uint8, np.uint16]:
-                max_val = np.iinfo(dtype).max
+            if out_dtype in [np.uint8, np.uint16]:
+                max_val = np.iinfo(out_dtype).max
                 if mask_data.max() > max_val:
-                    log(f"    ERROR: Mask has labels up to {mask_data.max()} but dtype {dtype} max is {max_val}")
+                    log(f"    ERROR: Mask has labels up to {mask_data.max()} but dtype {out_dtype} max is {max_val}")
                     log(f"    Clipping mask values to {max_val} - this may cause data loss!")
-                    mask_data = np.clip(mask_data, 0, max_val).astype(dtype)
+                    mask_data = np.clip(mask_data, 0, max_val).astype(out_dtype)
                 else:
-                    mask_data = mask_data.astype(dtype)
+                    mask_data = mask_data.astype(out_dtype)
             else:
-                mask_data = mask_data.astype(dtype)
-        elif mask_data.dtype != dtype:
-            mask_data = mask_data.astype(dtype)
+                mask_data = mask_data.astype(out_dtype)
+        elif mask_data.dtype != out_dtype:
+            mask_data = mask_data.astype(out_dtype)
 
         output_data[output_idx] = mask_data
         output_idx += 1
