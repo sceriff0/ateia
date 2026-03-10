@@ -7,6 +7,7 @@ Supports:
 - LIF (Leica) via bioio-lif
 - TIFF/OME-TIFF via bioio-tifffile/bioio-ome-tiff
 - NDPI/NDPIS (Hamamatsu) via tifffile
+- HDF5 (.h5, .hdf5) via h5py
 """
 from __future__ import annotations
 
@@ -30,6 +31,7 @@ PIXEL_SIZE_UM = 0.325
 # Format detection
 BIOIO_NATIVE_FORMATS = {'.nd2', '.czi', '.lif', '.tif', '.tiff'}
 TIFFFILE_FORMATS = {'.ndpi', '.ndpis'}  # Hamamatsu formats readable by tifffile
+HDF5_FORMATS = {'.h5', '.hdf5'}
 
 
 def get_file_format(file_path: Path) -> str:
@@ -42,6 +44,9 @@ def get_file_format(file_path: Path) -> str:
 
     if suffix in TIFFFILE_FORMATS:
         return 'tifffile'
+
+    if suffix in HDF5_FORMATS:
+        return 'hdf5'
 
     if suffix in BIOIO_NATIVE_FORMATS:
         return 'bioio'
@@ -247,6 +252,104 @@ def read_image_tifffile(file_path: Path) -> Tuple[np.ndarray, dict]:
     return image_data, metadata
 
 
+def _find_first_image_dataset(group):
+    """Recursively find the first image-like dataset in an HDF5 group."""
+    import h5py
+
+    for key in group:
+        item = group[key]
+        if isinstance(item, h5py.Dataset):
+            if item.ndim >= 2 and np.issubdtype(item.dtype, np.number):
+                return item
+        elif isinstance(item, h5py.Group):
+            result = _find_first_image_dataset(item)
+            if result is not None:
+                return result
+    return None
+
+
+def _extract_h5_pixel_sizes(h5obj) -> Tuple[float, float, Optional[float]]:
+    """Extract pixel size metadata from HDF5 attributes."""
+    px_x = PIXEL_SIZE_UM
+    px_y = PIXEL_SIZE_UM
+    px_z = None
+
+    for attr_name in ('element_size_um', 'pixel_size', 'resolution', 'pixelSize'):
+        if attr_name in h5obj.attrs:
+            val = h5obj.attrs[attr_name]
+            if hasattr(val, '__len__'):
+                if len(val) >= 2:
+                    px_y, px_x = float(val[-2]), float(val[-1])
+                if len(val) >= 3:
+                    px_z = float(val[-3])
+            else:
+                px_x = px_y = float(val)
+            break
+
+    return px_x, px_y, px_z
+
+
+def read_image_h5(file_path: Path) -> Tuple[np.ndarray, dict]:
+    """Read HDF5 microscopy image (single stacked dataset, typically CYX)."""
+    import h5py
+
+    logger.info(f"Reading with h5py: {file_path.name}")
+
+    with h5py.File(file_path, 'r') as f:
+        ds = _find_first_image_dataset(f)
+        if ds is None:
+            raise ValueError(f"No image dataset found in HDF5 file: {file_path}")
+
+        logger.info(f"Found dataset '{ds.name}': shape={ds.shape}, dtype={ds.dtype}")
+        image_data = ds[()]
+
+        # Extract pixel sizes from dataset attrs, then root attrs as fallback
+        px_x, px_y, px_z = _extract_h5_pixel_sizes(ds)
+        if px_x == PIXEL_SIZE_UM:
+            px_x, px_y, px_z = _extract_h5_pixel_sizes(f)
+
+        # Extract channel names from attributes if available
+        channel_names = None
+        for obj in (ds, f):
+            if 'channel_names' in obj.attrs:
+                cn = obj.attrs['channel_names']
+                if hasattr(cn, '__len__') and len(cn) > 0:
+                    channel_names = [str(n) for n in cn]
+                    break
+
+        # Determine axes from dimensionality
+        if image_data.ndim == 2:
+            image_data = image_data[np.newaxis, ...]
+            axes = 'CYX'
+        elif image_data.ndim == 3:
+            # Heuristic: if last dim is small relative to first, it's YXC
+            if image_data.shape[-1] <= 10 and image_data.shape[0] > image_data.shape[-1]:
+                image_data = np.moveaxis(image_data, -1, 0)
+            axes = 'CYX'
+        elif image_data.ndim == 4:
+            axes = 'ZCYX'
+        else:
+            axes = 'TCZYX'
+
+        num_channels = image_data.shape[axes.index('C')]
+
+    logger.info(f"Final shape: {image_data.shape}, axes: {axes}")
+    logger.info(f"Pixel sizes - X: {px_x}, Y: {px_y}, Z: {px_z}")
+    if channel_names:
+        logger.info(f"Channel names from file: {channel_names}")
+
+    metadata = {
+        'num_channels': num_channels,
+        'physical_pixel_size_x': px_x,
+        'physical_pixel_size_y': px_y,
+        'physical_pixel_size_z': px_z,
+        'channel_names_from_file': channel_names,
+        'original_dims': axes,
+    }
+
+    return image_data, metadata
+
+
 def read_image(file_path: Path) -> Tuple[np.ndarray, dict]:
     """Read image using appropriate reader."""
     format_type = get_file_format(file_path)
@@ -254,6 +357,8 @@ def read_image(file_path: Path) -> Tuple[np.ndarray, dict]:
 
     if format_type == 'tifffile':
         return read_image_tifffile(file_path)
+    elif format_type == 'hdf5':
+        return read_image_h5(file_path)
     else:
         return read_image_bioio(file_path)
 
