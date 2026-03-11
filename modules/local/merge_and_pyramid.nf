@@ -16,8 +16,6 @@ nextflow.enable.dsl = 2
 ----------------------------------------------------------------------------------------
 */
 
-pythion afhaofoaf
-
 process MERGE_AND_PYRAMID {
     tag "${meta.patient_id}"
     label 'process_high'
