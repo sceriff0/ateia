@@ -48,7 +48,6 @@ sys.path.insert(0, str(Path(__file__).parent / 'utils'))
 # Local utilities
 from image_utils import ensure_dir
 from logger import get_logger
-from metadata import get_channel_names
 from validation import log_image_stats, detect_wrapped_values
 
 # Module-level logger

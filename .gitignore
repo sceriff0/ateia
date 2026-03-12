@@ -2,8 +2,6 @@ valis_lib/*
 *.pyc
 pixie-main/*
 traces/*
-<<<<<<< HEAD
-=======
 tests/__pycache__/*
->>>>>>> main
+mirage_app/*
 notebooks/*

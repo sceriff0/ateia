@@ -35,7 +35,6 @@ sys.path.insert(0, str(Path(__file__).parent / 'utils'))
 # Import from utils modules for DRY principle
 from logger import get_logger, configure_logging
 from metadata import (
-    get_channel_names,
     create_ome_xml,
     extract_channel_names_from_ome,
     extract_channel_names_from_filename

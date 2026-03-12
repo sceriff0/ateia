@@ -19,7 +19,7 @@ process REGISTER {
     tuple val(meta), val(patient_id), path(reference, stageAs: 'ref/*'), path(preproc_files, stageAs: 'input_?/*'), val(all_metas)
 
     output:
-    tuple val(patient_id), path("registered_slides/*_registered.ome.tiff"), val(all_metas), emit: registered
+    tuple val(patient_id), path("registered_slides/*_registered.ome.tiff"), val(all_metas), path("channels_manifest.json"), emit: registered
     path "versions.yml"                                                                    , emit: versions
     path("*.size.csv")                                                                     , emit: size_log
     path("preprocessed/data/*.csv")                                                        , emit: summary, optional: true
@@ -131,6 +131,32 @@ process REGISTER {
         exit 1
     fi
 
+    # Extract channel names from OME metadata of registered files into a manifest
+    # convert_image guarantees OME-XML metadata is always present in pipeline images
+    echo "=== Creating channels manifest from OME metadata ==="
+    python3 -c "
+import tifffile, json, os, xml.etree.ElementTree as ET
+manifest = {}
+for f in sorted(os.listdir('registered_slides')):
+    if not f.endswith('_registered.ome.tiff'):
+        continue
+    path = os.path.join('registered_slides', f)
+    with tifffile.TiffFile(path) as tif:
+        if tif.ome_metadata:
+            root = ET.fromstring(tif.ome_metadata)
+            ns = {'ome': 'http://www.openmicroscopy.org/Schemas/OME/2016-06'}
+            channels = root.findall('.//ome:Channel', ns) or root.findall('.//{*}Channel')
+            names = [ch.get('Name') or ch.get('ID', f'Channel_{i}') for i, ch in enumerate(channels)]
+            manifest[f] = names
+        else:
+            raise RuntimeError(f'No OME metadata in registered file: {f}')
+with open('channels_manifest.json', 'w') as fp:
+    json.dump(manifest, fp)
+print(f'Channels manifest: {len(manifest)} files')
+for fname, chs in manifest.items():
+    print(f'  {fname}: {chs}')
+"
+
     # Clean up intermediate files (boost doesn't track script-generated working files)
     echo "=== Cleaning up intermediate files to save disk space ==="
     find preprocessed -maxdepth 1 -type f -delete
@@ -147,15 +173,20 @@ process REGISTER {
 
     stub:
     // Generate output files matching input count with proper naming pattern
-    // VALIS adapter expects: {patient_id}_{markers}_corrected_registered.ome.tiff
     def output_files = all_metas.collect { m ->
         def markers = m.channels.join('_')
         "${patient_id}_${markers}_corrected_registered.ome.tiff"
     }
     def touch_commands = output_files.collect { "touch registered_slides/${it}" }.join('\n    ')
+    // Build stub manifest JSON mapping filenames to their channel names
+    def manifest_map = [all_metas, output_files].transpose().collectEntries { m, fname ->
+        [(fname): m.channels]
+    }
+    def manifest_json = groovy.json.JsonOutput.toJson(manifest_map)
     """
     mkdir -p registered_slides
     ${touch_commands}
+    echo '${manifest_json}' > channels_manifest.json
     echo "STUB,${patient_id},stub,0" > ${patient_id}.REGISTER.size.csv
 
     cat <<-END_VERSIONS > versions.yml
