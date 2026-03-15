@@ -329,8 +329,43 @@ workflow REGISTRATION {
         ch_size_logs = ch_size_logs.mix(ESTIMATE_FEATURE_DISTANCES.out.size_log)
     }
 
+    // Collect versions from all registration processes
+    ch_versions = Channel.empty()
+
+    if (params.padding) {
+        ch_versions = ch_versions
+            .mix(GET_IMAGE_DIMS.out.versions.first())
+            .mix(PAD_IMAGES.out.versions.first())
+    }
+
+    switch(method) {
+        case 'valis':
+            ch_versions = ch_versions.mix(VALIS_ADAPTER.out.versions)
+            break
+        case 'valis_pairs':
+            ch_versions = ch_versions.mix(VALIS_PAIRS_ADAPTER.out.versions)
+            break
+        case 'gpu':
+            ch_versions = ch_versions.mix(GPU_ADAPTER.out.versions)
+            break
+        case 'cpu':
+            ch_versions = ch_versions.mix(CPU_ADAPTER.out.versions)
+            break
+        case 'cpu_tiled':
+            ch_versions = ch_versions.mix(CPU_TILED_ADAPTER.out.versions)
+            break
+    }
+
+    if (!params.skip_registration_qc) {
+        ch_versions = ch_versions.mix(GENERATE_REGISTRATION_QC.out.versions.first())
+    }
+    if (params.enable_feature_error) {
+        ch_versions = ch_versions.mix(ESTIMATE_FEATURE_DISTANCES.out.versions.first())
+    }
+
     emit:
     registered = ch_registered
     checkpoint_csv = ch_checkpoint_csv
     size_logs = ch_size_logs
+    versions = ch_versions
 }

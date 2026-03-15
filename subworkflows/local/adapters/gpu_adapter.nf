@@ -27,7 +27,12 @@ workflow GPU_ADAPTER {
     ch_all = PUBLISH_REFERENCE_GPU.out.published.concat(GPU_REGISTER.out.registered)
     ch_size_logs = GPU_REGISTER.out.size_log
 
+    ch_versions = Channel.empty()
+        .mix(GPU_REGISTER.out.versions.first())
+        .mix(PUBLISH_REFERENCE_GPU.out.versions.first())
+
     emit:
     registered = ch_all
     size_logs = ch_size_logs
+    versions = ch_versions
 }

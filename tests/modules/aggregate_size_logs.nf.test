@@ -1,0 +1,84 @@
+nextflow_process {
+
+    name "Test AGGREGATE_SIZE_LOGS process"
+    script "modules/local/aggregate_size_logs.nf"
+    process "AGGREGATE_SIZE_LOGS"
+
+    tag "modules"
+    tag "modules_local"
+    tag "aggregate_size_logs"
+
+    test("Should aggregate size CSVs - stub") {
+
+        options "-stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    file('${projectDir}/tests/testdata/sample_size_log1.csv', checkIfExists: true),
+                    file('${projectDir}/tests/testdata/sample_size_log2.csv', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.aggregated },
+                { assert process.out.versions }
+            )
+        }
+    }
+
+    test("Should preserve aggregated output format - stub") {
+
+        options "-stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    file('${projectDir}/tests/testdata/sample_size_log1.csv', checkIfExists: true),
+                    file('${projectDir}/tests/testdata/sample_size_log2.csv', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { with(process.out.aggregated) {
+                    assert size() == 1
+                    assert get(0).toString().endsWith('input_sizes.csv')
+                }}
+            )
+        }
+    }
+
+    test("Should emit versions.yml - stub") {
+
+        options "-stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    file('${projectDir}/tests/testdata/sample_size_log1.csv', checkIfExists: true),
+                    file('${projectDir}/tests/testdata/sample_size_log2.csv', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.versions },
+                { assert snapshot(process.out.versions).match() }
+            )
+        }
+    }
+}

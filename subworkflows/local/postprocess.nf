@@ -413,7 +413,24 @@ workflow POSTPROCESSING {
             .mix(PIXIE_CELL_CLUSTER.out.size_log)
     }
 
+    // Collect versions from all postprocessing processes
+    ch_versions = Channel.empty()
+        .mix(SEGMENT.out.versions.first())
+        .mix(EXTRACT_CELL_PROPERTIES.out.versions.first())
+        .mix(SPLIT_CHANNELS.out.versions.first())
+        .mix(QUANTIFY.out.versions.first())
+        .mix(MERGE_QUANT_CSVS.out.versions.first())
+        .mix(PHENOTYPE.out.versions.first())
+        .mix(MERGE_AND_PYRAMID.out.versions.first())
+
+    if (params.pixie_enabled) {
+        ch_versions = ch_versions
+            .mix(PIXIE_PIXEL_CLUSTER.out.versions.first())
+            .mix(PIXIE_CELL_CLUSTER.out.versions.first())
+    }
+
     emit:
     checkpoint_csv = ch_checkpoint_csv
     size_logs = ch_size_logs
+    versions = ch_versions
 }

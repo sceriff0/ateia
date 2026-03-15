@@ -11,6 +11,7 @@ nextflow.enable.dsl = 2
  */
 process QUANTIFY {
     tag "${meta.patient_id} - ${meta.channel_name}"
+    label 'process_low'
 
     container 'bolt3x/attend_image_analysis:quantification_gpu'
 

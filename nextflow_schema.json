@@ -4,422 +4,569 @@
     "title": "MIRAGE WSI Processing Pipeline Parameters",
     "description": "Schema synchronized with nextflow.config canonical params surface.",
     "type": "object",
-    "properties": {
-        "allow_auto_reference": {
-            "type": "boolean",
-            "description": "Pipeline parameter `allow_auto_reference`.",
-            "default": false
-        },
-        "compression": {
-            "type": "string",
-            "description": "Pipeline parameter `compression`.",
-            "default": "lzw",
-            "enum": [
-                "lzw",
-                "zlib",
-                "jpeg",
-                "none"
-            ]
-        },
-        "cpu_reg_affine_crop_size": {
-            "type": "integer",
-            "description": "Pipeline parameter `cpu_reg_affine_crop_size`.",
-            "default": 10000
-        },
-        "cpu_reg_diffeo_crop_size": {
-            "type": "integer",
-            "description": "Pipeline parameter `cpu_reg_diffeo_crop_size`.",
-            "default": 2000
-        },
-        "cpu_reg_inv_tol": {
-            "type": "number",
-            "description": "Pipeline parameter `cpu_reg_inv_tol`.",
-            "default": 1e-06
-        },
-        "cpu_reg_n_features": {
-            "type": "integer",
-            "description": "Pipeline parameter `cpu_reg_n_features`.",
-            "default": 5000
-        },
-        "cpu_reg_opt_tol": {
-            "type": "number",
-            "description": "Pipeline parameter `cpu_reg_opt_tol`.",
-            "default": 1e-06
-        },
-        "cpu_reg_overlap_percent": {
-            "type": "number",
-            "description": "Pipeline parameter `cpu_reg_overlap_percent`.",
-            "default": 40.0
-        },
-        "debug_channels": {
-            "type": "boolean",
-            "description": "Pipeline parameter `debug_channels`.",
-            "default": false
-        },
-        "dry_run": {
-            "type": "boolean",
-            "description": "Pipeline parameter `dry_run`.",
-            "default": false
-        },
-        "enable_feature_error": {
-            "type": "boolean",
-            "description": "Pipeline parameter `enable_feature_error`.",
-            "default": false
-        },
-        "enable_trace": {
-            "type": "boolean",
-            "description": "Pipeline parameter `enable_trace`.",
-            "default": true
-        },
-        "feature_detector": {
-            "type": "string",
-            "description": "Pipeline parameter `feature_detector`.",
-            "default": "superpoint",
-            "enum": [
-                "superpoint",
-                "disk",
-                "dedode",
-                "brisk",
-                "vgg"
-            ]
-        },
-        "feature_max_dim": {
-            "type": "integer",
-            "description": "Pipeline parameter `feature_max_dim`.",
-            "default": 2048
-        },
-        "feature_n_features": {
-            "type": "integer",
-            "description": "Pipeline parameter `feature_n_features`.",
-            "default": 5000
-        },
-        "gpu_reg_affine_crop_size": {
-            "type": "integer",
-            "description": "Pipeline parameter `gpu_reg_affine_crop_size`.",
-            "default": 10000
-        },
-        "gpu_reg_diffeo_crop_size": {
-            "type": "integer",
-            "description": "Pipeline parameter `gpu_reg_diffeo_crop_size`.",
-            "default": 2000
-        },
-        "gpu_reg_inv_tol": {
-            "type": "number",
-            "description": "Pipeline parameter `gpu_reg_inv_tol`.",
-            "default": 1e-06
-        },
-        "gpu_reg_n_features": {
-            "type": "integer",
-            "description": "Pipeline parameter `gpu_reg_n_features`.",
-            "default": 5000
-        },
-        "gpu_reg_n_workers": {
-            "type": "integer",
-            "description": "Pipeline parameter `gpu_reg_n_workers`.",
-            "default": 8
-        },
-        "gpu_reg_opt_tol": {
-            "type": "number",
-            "description": "Pipeline parameter `gpu_reg_opt_tol`.",
-            "default": 1e-06
-        },
-        "gpu_reg_overlap_percent": {
-            "type": "number",
-            "description": "Pipeline parameter `gpu_reg_overlap_percent`.",
-            "default": 40.0
-        },
-        "gpu_type": {
-            "type": "string",
-            "description": "Pipeline parameter `gpu_type`.",
-            "default": "nvidia_h200:1"
-        },
-        "input": {
-            "type": "string",
-            "description": "Pipeline parameter `input`.",
-            "default": ""
-        },
-        "max_cpus": {
-            "type": "integer",
-            "description": "Pipeline parameter `max_cpus`.",
-            "default": 64
-        },
-        "max_memory": {
-            "type": "string",
-            "description": "Pipeline parameter `max_memory`.",
-            "default": "700.GB"
-        },
-        "max_time": {
-            "type": "string",
-            "description": "Pipeline parameter `max_time`.",
-            "default": "240.h"
-        },
-        "memory_mode": {
-            "type": "string",
-            "description": "Pipeline parameter `memory_mode`.",
-            "default": "high"
-        },
-        "outdir": {
-            "type": "string",
-            "description": "Pipeline parameter `outdir`.",
-            "default": "./results"
-        },
-        "pad_mode": {
-            "type": "string",
-            "description": "Pipeline parameter `pad_mode`.",
-            "default": "constant",
-            "enum": [
-                "constant",
-                "edge",
-                "reflect",
-                "symmetric"
-            ]
-        },
-        "padding": {
-            "type": "boolean",
-            "description": "Pipeline parameter `padding`.",
-            "default": false
-        },
-        "pheno_noise_percentile": {
-            "type": "integer",
-            "description": "Pipeline parameter `pheno_noise_percentile`.",
-            "default": 5
-        },
-        "pheno_quality_percentile": {
-            "type": "integer",
-            "description": "Pipeline parameter `pheno_quality_percentile`.",
-            "default": 95
-        },
-        "phenotype_config": {
-            "type": [
-                "string",
-                "null"
-            ],
-            "description": "Pipeline parameter `phenotype_config`.",
-            "default": null
-        },
-        "pixel_size": {
-            "type": "number",
-            "description": "Pipeline parameter `pixel_size`.",
-            "default": 0.325
-        },
-        "preproc_autotune": {
-            "type": "boolean",
-            "description": "Pipeline parameter `preproc_autotune`.",
-            "default": false
-        },
-        "preproc_n_iter": {
-            "type": "integer",
-            "description": "Pipeline parameter `preproc_n_iter`.",
-            "default": 100
-        },
-        "preproc_no_darkfield": {
-            "type": "boolean",
-            "description": "Pipeline parameter `preproc_no_darkfield`.",
-            "default": false
-        },
-        "preproc_overlap": {
-            "type": "integer",
-            "description": "Pipeline parameter `preproc_overlap`.",
-            "default": 0
-        },
-        "preproc_pool_workers": {
-            "type": "integer",
-            "description": "Pipeline parameter `preproc_pool_workers`.",
-            "default": 4
-        },
-        "preproc_skip_dapi": {
-            "type": "boolean",
-            "description": "Pipeline parameter `preproc_skip_dapi`.",
-            "default": true
-        },
-        "preproc_tile_size": {
-            "type": "integer",
-            "description": "Pipeline parameter `preproc_tile_size`.",
-            "default": 1950
-        },
-        "preprocess_qc_scale_factor": {
-            "type": "number",
-            "description": "Pipeline parameter `preprocess_qc_scale_factor`.",
-            "default": 0.25
-        },
-        "publish_dir_mode": {
-            "type": "string",
-            "description": "Pipeline parameter `publish_dir_mode`.",
-            "default": "copy"
-        },
-        "pyramid_resolutions": {
-            "type": "integer",
-            "description": "Number of pyramid resolution levels for OME-TIFF output. Higher values enable faster overview rendering in QuPath.",
-            "default": 8
-        },
-        "pyramid_scale": {
-            "type": "integer",
-            "description": "Pipeline parameter `pyramid_scale`.",
-            "default": 2
-        },
-        "qc_scale_factor": {
-            "type": "number",
-            "description": "Pipeline parameter `qc_scale_factor`.",
-            "default": 0.25
-        },
-        "quant_min_area": {
-            "type": "integer",
-            "description": "Pipeline parameter `quant_min_area`.",
-            "default": 10
-        },
-        "reg_max_image_dim": {
-            "type": "integer",
-            "description": "Pipeline parameter `reg_max_image_dim`.",
-            "default": 4000
-        },
-        "reg_micro_reg_fraction": {
-            "type": "number",
-            "description": "Pipeline parameter `reg_micro_reg_fraction`.",
-            "default": 0.125
-        },
-        "reg_n_workers": {
-            "type": "integer",
-            "description": "Pipeline parameter `reg_n_workers`.",
-            "default": 8
-        },
-        "reg_parallel_warping": {
-            "type": "boolean",
-            "description": "Pipeline parameter `reg_parallel_warping`.",
-            "default": false
-        },
-        "reg_reference_markers": {
-            "type": "array",
-            "description": "Pipeline parameter `reg_reference_markers`.",
-            "default": [
-                "DAPI",
-                "FITC"
-            ]
-        },
-        "reg_tile_size": {
-            "type": "integer",
-            "description": "Pipeline parameter `reg_tile_size`.",
-            "default": 2048
-        },
-        "reg_use_tiled_registration": {
-            "type": "boolean",
-            "description": "Pipeline parameter `reg_use_tiled_registration`.",
-            "default": true
-        },
-        "registration_method": {
-            "type": "string",
-            "description": "Pipeline parameter `registration_method`.",
-            "default": "valis",
-            "enum": [
-                "valis",
-                "valis_pairs",
-                "gpu",
-                "cpu",
-                "cpu_tiled"
-            ]
-        },
-        "seg_expand_distance": {
-            "type": "integer",
-            "description": "Pipeline parameter `seg_expand_distance`.",
-            "default": 10
-        },
-        "seg_gpu": {
-            "type": "boolean",
-            "description": "Pipeline parameter `seg_gpu`.",
-            "default": true
-        },
-        "seg_n_tiles_x": {
-            "type": "integer",
-            "description": "Pipeline parameter `seg_n_tiles_x`.",
-            "default": 16
-        },
-        "seg_n_tiles_y": {
-            "type": "integer",
-            "description": "Pipeline parameter `seg_n_tiles_y`.",
-            "default": 16
-        },
-        "seg_pmax": {
-            "type": "number",
-            "description": "Pipeline parameter `seg_pmax`.",
-            "default": 99.8
-        },
-        "seg_pmin": {
-            "type": "number",
-            "description": "Pipeline parameter `seg_pmin`.",
-            "default": 1.0
-        },
-        "segmentation_model": {
-            "type": "string",
-            "description": "Pipeline parameter `segmentation_model`.",
-            "default": "stardist_full_e200_lr00001_aug1_seed10_es50p0.001_rlr0.5p50"
-        },
-        "segmentation_model_dir": {
-            "type": "string",
-            "description": "Pipeline parameter `segmentation_model_dir`.",
-            "default": "/hpcnfs/scratch/P_DIMA_ATTEND/models/"
-        },
-        "skip_micro_registration": {
-            "type": "boolean",
-            "description": "Pipeline parameter `skip_micro_registration`.",
-            "default": true
-        },
-        "skip_registration_qc": {
-            "type": "boolean",
-            "description": "Pipeline parameter `skip_registration_qc`.",
-            "default": false
-        },
-        "slurm_account": {
-            "type": [
-                "string",
-                "null"
-            ],
-            "description": "Pipeline parameter `slurm_account`.",
-            "default": null
-        },
-        "slurm_partition": {
-            "type": [
-                "string",
-                "null"
-            ],
-            "description": "Pipeline parameter `slurm_partition`.",
-            "default": null
-        },
-        "slurm_qos": {
-            "type": [
-                "string",
-                "null"
-            ],
-            "description": "Pipeline parameter `slurm_qos`.",
-            "default": null
-        },
-        "step": {
-            "type": "string",
-            "description": "Pipeline parameter `step`.",
-            "default": "preprocessing",
-            "enum": [
-                "preprocessing",
-                "registration",
-                "postprocessing"
-            ]
-        },
-        "tilex": {
-            "type": "integer",
-            "description": "Pipeline parameter `tilex`.",
-            "default": 512
-        },
-        "tiley": {
-            "type": "integer",
-            "description": "Pipeline parameter `tiley`.",
-            "default": 512
-        },
-        "trace_dir": {
-            "type": "string",
-            "description": "Pipeline parameter `trace_dir`.",
-            "default": ".trace"
+    "definitions": {
+        "input_output_options": {
+            "title": "Input/output options",
+            "type": "object",
+            "required": ["step"],
+            "properties": {
+                "input": {
+                    "type": ["string", "null"],
+                    "description": "Path to input samplesheet or directory.",
+                    "default": null
+                },
+                "outdir": {
+                    "type": ["string", "null"],
+                    "description": "Output directory for pipeline results.",
+                    "default": null
+                },
+                "step": {
+                    "type": "string",
+                    "description": "Pipeline step to execute.",
+                    "default": "preprocessing",
+                    "enum": [
+                        "preprocessing",
+                        "registration",
+                        "postprocessing",
+                        "copy_results"
+                    ]
+                },
+                "savedir": {
+                    "type": ["string", "null"],
+                    "description": "Save directory for copy_results step.",
+                    "default": null
+                },
+                "publish_dir_mode": {
+                    "type": "string",
+                    "description": "Method for publishing output files.",
+                    "default": "copy"
+                }
+            }
+        },
+        "preprocessing_options": {
+            "title": "Preprocessing options",
+            "type": "object",
+            "properties": {
+                "preproc_tile_size": {
+                    "type": "integer",
+                    "description": "Tile size for preprocessing.",
+                    "default": 1950
+                },
+                "preproc_skip_dapi": {
+                    "type": "boolean",
+                    "description": "Skip DAPI channel during preprocessing.",
+                    "default": true
+                },
+                "preproc_autotune": {
+                    "type": "boolean",
+                    "description": "Enable autotune for preprocessing.",
+                    "default": false
+                },
+                "preproc_n_iter": {
+                    "type": "integer",
+                    "description": "Number of iterations for preprocessing.",
+                    "default": 100
+                },
+                "preproc_pool_workers": {
+                    "type": "integer",
+                    "description": "Number of pool workers for preprocessing.",
+                    "default": 3
+                },
+                "preproc_overlap": {
+                    "type": "integer",
+                    "description": "Tile overlap for preprocessing.",
+                    "default": 0
+                },
+                "preproc_no_darkfield": {
+                    "type": "boolean",
+                    "description": "Disable darkfield correction in preprocessing.",
+                    "default": false
+                },
+                "preprocess_qc_scale_factor": {
+                    "type": "number",
+                    "description": "Scale factor for preprocessing QC images.",
+                    "default": 0.25
+                },
+                "pixel_size": {
+                    "type": "number",
+                    "description": "Pixel size in micrometers.",
+                    "default": 0.325
+                }
+            }
+        },
+        "registration_options": {
+            "title": "Registration options",
+            "type": "object",
+            "properties": {
+                "registration_method": {
+                    "type": "string",
+                    "description": "Registration method to use.",
+                    "default": "valis",
+                    "enum": [
+                        "valis",
+                        "valis_pairs",
+                        "gpu",
+                        "cpu",
+                        "cpu_tiled"
+                    ]
+                },
+                "padding": {
+                    "type": "boolean",
+                    "description": "Enable padding during registration.",
+                    "default": false
+                },
+                "pad_mode": {
+                    "type": "string",
+                    "description": "Padding mode for registration.",
+                    "default": "constant",
+                    "enum": [
+                        "constant",
+                        "edge",
+                        "reflect",
+                        "symmetric"
+                    ]
+                },
+                "skip_registration_qc": {
+                    "type": "boolean",
+                    "description": "Skip registration quality control.",
+                    "default": false
+                },
+                "qc_scale_factor": {
+                    "type": "number",
+                    "description": "Scale factor for registration QC images.",
+                    "default": 0.25
+                },
+                "enable_feature_error": {
+                    "type": "boolean",
+                    "description": "Enable feature error detection during registration.",
+                    "default": false
+                },
+                "feature_detector": {
+                    "type": "string",
+                    "description": "Feature detector algorithm for registration.",
+                    "default": "superpoint",
+                    "enum": [
+                        "superpoint",
+                        "disk",
+                        "dedode",
+                        "brisk",
+                        "vgg"
+                    ]
+                },
+                "feature_max_dim": {
+                    "type": "integer",
+                    "description": "Maximum image dimension for feature detection.",
+                    "default": 1024
+                },
+                "feature_n_features": {
+                    "type": "integer",
+                    "description": "Number of features to detect.",
+                    "default": 5000
+                },
+                "reg_reference_markers": {
+                    "type": "array",
+                    "description": "Reference markers for registration.",
+                    "default": ["DAPI", "FITC"]
+                },
+                "reg_micro_reg_fraction": {
+                    "type": "number",
+                    "description": "Fraction for micro registration.",
+                    "default": 0.125
+                },
+                "reg_max_image_dim": {
+                    "type": "integer",
+                    "description": "Maximum image dimension for registration.",
+                    "default": 4000
+                },
+                "memory_mode": {
+                    "type": "string",
+                    "description": "Memory mode for registration.",
+                    "default": "high"
+                },
+                "skip_micro_registration": {
+                    "type": "boolean",
+                    "description": "Skip micro registration step.",
+                    "default": true
+                },
+                "allow_auto_reference": {
+                    "type": "boolean",
+                    "description": "Allow automatic reference selection.",
+                    "default": false
+                },
+                "reg_parallel_warping": {
+                    "type": "boolean",
+                    "description": "Enable parallel warping during registration.",
+                    "default": false
+                },
+                "reg_n_workers": {
+                    "type": "integer",
+                    "description": "Number of workers for registration.",
+                    "default": 8
+                },
+                "reg_use_tiled_registration": {
+                    "type": "boolean",
+                    "description": "Use tiled registration approach.",
+                    "default": true
+                },
+                "reg_tile_size": {
+                    "type": "integer",
+                    "description": "Tile size for tiled registration.",
+                    "default": 2048
+                }
+            }
+        },
+        "registration_gpu_options": {
+            "title": "Registration GPU options",
+            "type": "object",
+            "properties": {
+                "gpu_reg_affine_crop_size": {
+                    "type": "integer",
+                    "description": "Crop size for GPU affine registration.",
+                    "default": 10000
+                },
+                "gpu_reg_diffeo_crop_size": {
+                    "type": "integer",
+                    "description": "Crop size for GPU diffeomorphic registration.",
+                    "default": 2000
+                },
+                "gpu_reg_overlap_percent": {
+                    "type": "number",
+                    "description": "Overlap percentage for GPU registration.",
+                    "default": 40.0
+                },
+                "gpu_reg_n_features": {
+                    "type": "integer",
+                    "description": "Number of features for GPU registration.",
+                    "default": 5000
+                },
+                "gpu_reg_n_workers": {
+                    "type": "integer",
+                    "description": "Number of workers for GPU registration.",
+                    "default": 8
+                },
+                "gpu_reg_opt_tol": {
+                    "type": "number",
+                    "description": "Optimization tolerance for GPU registration.",
+                    "default": 1e-06
+                },
+                "gpu_reg_inv_tol": {
+                    "type": "number",
+                    "description": "Inverse tolerance for GPU registration.",
+                    "default": 1e-06
+                }
+            }
+        },
+        "registration_cpu_options": {
+            "title": "Registration CPU options",
+            "type": "object",
+            "properties": {
+                "cpu_reg_affine_crop_size": {
+                    "type": "integer",
+                    "description": "Crop size for CPU affine registration.",
+                    "default": 10000
+                },
+                "cpu_reg_diffeo_crop_size": {
+                    "type": "integer",
+                    "description": "Crop size for CPU diffeomorphic registration.",
+                    "default": 2000
+                },
+                "cpu_reg_overlap_percent": {
+                    "type": "number",
+                    "description": "Overlap percentage for CPU registration.",
+                    "default": 40.0
+                },
+                "cpu_reg_n_features": {
+                    "type": "integer",
+                    "description": "Number of features for CPU registration.",
+                    "default": 5000
+                },
+                "cpu_reg_opt_tol": {
+                    "type": "number",
+                    "description": "Optimization tolerance for CPU registration.",
+                    "default": 1e-06
+                },
+                "cpu_reg_inv_tol": {
+                    "type": "number",
+                    "description": "Inverse tolerance for CPU registration.",
+                    "default": 1e-06
+                }
+            }
+        },
+        "segmentation_options": {
+            "title": "Segmentation options",
+            "type": "object",
+            "properties": {
+                "seg_gpu": {
+                    "type": "boolean",
+                    "description": "Use GPU for segmentation.",
+                    "default": true
+                },
+                "seg_pmin": {
+                    "type": "number",
+                    "description": "Minimum percentile for segmentation normalization.",
+                    "default": 1.0
+                },
+                "seg_pmax": {
+                    "type": "number",
+                    "description": "Maximum percentile for segmentation normalization.",
+                    "default": 99.8
+                },
+                "seg_n_tiles_y": {
+                    "type": "integer",
+                    "description": "Number of tiles in Y direction for segmentation.",
+                    "default": 16
+                },
+                "seg_n_tiles_x": {
+                    "type": "integer",
+                    "description": "Number of tiles in X direction for segmentation.",
+                    "default": 16
+                },
+                "seg_expand_distance": {
+                    "type": "integer",
+                    "description": "Expansion distance for segmentation labels.",
+                    "default": 10
+                },
+                "segmentation_model": {
+                    "type": "string",
+                    "description": "Name of the segmentation model.",
+                    "default": "stardist_full_e200_lr00001_aug1_seed10_es50p0.001_rlr0.5p50"
+                },
+                "segmentation_model_dir": {
+                    "type": ["string", "null"],
+                    "description": "Directory containing segmentation models.",
+                    "default": null
+                }
+            }
+        },
+        "quantification_options": {
+            "title": "Quantification options",
+            "type": "object",
+            "properties": {
+                "quant_min_area": {
+                    "type": "integer",
+                    "description": "Minimum cell area for quantification.",
+                    "default": 10
+                }
+            }
+        },
+        "phenotyping_options": {
+            "title": "Phenotyping options",
+            "type": "object",
+            "properties": {
+                "phenotype_config": {
+                    "type": ["string", "null"],
+                    "description": "Path to phenotype configuration file.",
+                    "default": null
+                },
+                "pheno_quality_percentile": {
+                    "type": "integer",
+                    "description": "Quality percentile threshold for phenotyping.",
+                    "default": 1
+                },
+                "pheno_noise_percentile": {
+                    "type": "integer",
+                    "description": "Noise percentile threshold for phenotyping.",
+                    "default": 5
+                }
+            }
+        },
+        "pixie_options": {
+            "title": "Pixie clustering options",
+            "type": "object",
+            "properties": {
+                "pixie_enabled": {
+                    "type": "boolean",
+                    "description": "Enable Pixie clustering.",
+                    "default": false
+                },
+                "pixie_channels": {
+                    "type": "array",
+                    "description": "Channels for Pixie clustering.",
+                    "default": ["CD45", "CD3", "CD4", "CD8", "FOXP3", "GZMB", "CD14", "CD163", "SMA", "PANCK", "VIMENTIN"]
+                },
+                "pixie_blur_factor": {
+                    "type": "integer",
+                    "description": "Gaussian blur sigma for pixel preprocessing.",
+                    "default": 2
+                },
+                "pixie_subset_proportion": {
+                    "type": "number",
+                    "description": "Fraction of pixels for SOM training.",
+                    "default": 0.05
+                },
+                "pixie_num_passes": {
+                    "type": "integer",
+                    "description": "Number of SOM training passes.",
+                    "default": 1
+                },
+                "pixie_max_k": {
+                    "type": "integer",
+                    "description": "Maximum number of meta-clusters.",
+                    "default": 20
+                },
+                "pixie_cap": {
+                    "type": "integer",
+                    "description": "Z-score capping value for clustering.",
+                    "default": 3
+                },
+                "pixie_seed": {
+                    "type": "integer",
+                    "description": "Random seed for reproducibility.",
+                    "default": 4
+                },
+                "pixie_pixel_cluster_col": {
+                    "type": "string",
+                    "description": "Pixel cluster column for cell clustering.",
+                    "default": "pixel_meta_cluster_rename"
+                },
+                "pixie_target_fovs": {
+                    "type": "integer",
+                    "description": "Target number of FOV tiles.",
+                    "default": 100
+                },
+                "pixie_multiprocess": {
+                    "type": "boolean",
+                    "description": "Enable multiprocessing for Pixie.",
+                    "default": false
+                },
+                "pixie_batch_size": {
+                    "type": "integer",
+                    "description": "Batch size for sequential processing.",
+                    "default": 1
+                }
+            }
+        },
+        "output_options": {
+            "title": "Output options",
+            "type": "object",
+            "properties": {
+                "tilex": {
+                    "type": "integer",
+                    "description": "Tile width for OME-TIFF output.",
+                    "default": 512
+                },
+                "tiley": {
+                    "type": "integer",
+                    "description": "Tile height for OME-TIFF output.",
+                    "default": 512
+                },
+                "pyramid_resolutions": {
+                    "type": "integer",
+                    "description": "Number of pyramid resolution levels for OME-TIFF output.",
+                    "default": 8
+                },
+                "pyramid_scale": {
+                    "type": "integer",
+                    "description": "Scale factor between pyramid levels.",
+                    "default": 2
+                },
+                "compression": {
+                    "type": "string",
+                    "description": "Compression algorithm for OME-TIFF output.",
+                    "default": "zstd",
+                    "enum": [
+                        "lzw",
+                        "zlib",
+                        "jpeg",
+                        "zstd",
+                        "none"
+                    ]
+                }
+            }
+        },
+        "pipeline_control": {
+            "title": "Pipeline control",
+            "type": "object",
+            "properties": {
+                "dry_run": {
+                    "type": "boolean",
+                    "description": "Run pipeline in dry-run mode without executing processes.",
+                    "default": false
+                },
+                "debug_channels": {
+                    "type": "boolean",
+                    "description": "Enable debug output for channels.",
+                    "default": false
+                },
+                "cleanup_work": {
+                    "type": "boolean",
+                    "description": "Automatically remove work directory after successful completion.",
+                    "default": true
+                },
+                "enable_trace": {
+                    "type": "boolean",
+                    "description": "Enable detailed execution tracing.",
+                    "default": true
+                },
+                "trace_dir": {
+                    "type": "string",
+                    "description": "Directory for trace outputs.",
+                    "default": ".trace"
+                }
+            }
+        },
+        "cluster_options": {
+            "title": "Cluster options",
+            "type": "object",
+            "properties": {
+                "slurm_partition": {
+                    "type": ["string", "null"],
+                    "description": "SLURM partition to submit jobs to.",
+                    "default": null
+                },
+                "slurm_account": {
+                    "type": ["string", "null"],
+                    "description": "SLURM account for job submission.",
+                    "default": null
+                },
+                "slurm_qos": {
+                    "type": ["string", "null"],
+                    "description": "SLURM quality of service.",
+                    "default": null
+                },
+                "gpu_type": {
+                    "type": "string",
+                    "description": "GPU type specification for SLURM.",
+                    "default": "nvidia_h200:1"
+                }
+            }
+        },
+        "resource_limits": {
+            "title": "Resource limits",
+            "type": "object",
+            "properties": {
+                "max_memory": {
+                    "type": "string",
+                    "description": "Maximum memory limit.",
+                    "default": "700.GB"
+                },
+                "max_cpus": {
+                    "type": "integer",
+                    "description": "Maximum CPU limit.",
+                    "default": 128
+                },
+                "max_time": {
+                    "type": "string",
+                    "description": "Maximum time limit.",
+                    "default": "240.h"
+                }
+            }
         }
     },
-    "required": [
-        "outdir",
-        "step"
+    "allOf": [
+        { "$ref": "#/definitions/input_output_options" },
+        { "$ref": "#/definitions/preprocessing_options" },
+        { "$ref": "#/definitions/registration_options" },
+        { "$ref": "#/definitions/registration_gpu_options" },
+        { "$ref": "#/definitions/registration_cpu_options" },
+        { "$ref": "#/definitions/segmentation_options" },
+        { "$ref": "#/definitions/quantification_options" },
+        { "$ref": "#/definitions/phenotyping_options" },
+        { "$ref": "#/definitions/pixie_options" },
+        { "$ref": "#/definitions/output_options" },
+        { "$ref": "#/definitions/pipeline_control" },
+        { "$ref": "#/definitions/cluster_options" },
+        { "$ref": "#/definitions/resource_limits" }
     ],
     "additionalProperties": true
 }

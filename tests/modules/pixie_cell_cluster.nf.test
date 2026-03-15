@@ -1,0 +1,208 @@
+nextflow_process {
+
+    name "Test PIXIE_CELL_CLUSTER process"
+    script "modules/local/pixie_cell_cluster.nf"
+    process "PIXIE_CELL_CLUSTER"
+
+    tag "modules"
+    tag "modules_local"
+    tag "pixie_cell_cluster"
+
+    test("Should run cell clustering - stub") {
+
+        options "-stub"
+
+        when {
+            params {
+                pixie_pixel_cluster_col = 'pixel_meta_cluster'
+                pixie_max_k             = 20
+                pixie_cap               = 3
+                pixie_seed              = 42
+                pixel_size              = 0.5
+            }
+            process {
+                """
+                // Create minimal stub input files
+                def pixel_data_dir = file("${workDir}/pixel_mat_data")
+                pixel_data_dir.mkdirs()
+                file("${workDir}/pixel_mat_data/P001.feather").text = "stub"
+
+                def cluster_profiles = [
+                    file('${projectDir}/tests/testdata/sample_DAPI_intensity.csv', checkIfExists: true),
+                    file('${projectDir}/tests/testdata/sample_PANCK_intensity.csv', checkIfExists: true)
+                ]
+
+                input[0] = [
+                    [
+                        patient_id: 'P001'
+                    ],
+                    pixel_data_dir,
+                    cluster_profiles,
+                    file('${projectDir}/tests/testdata/sample_merged_quant.csv', checkIfExists: true),
+                    file('${projectDir}/tests/testdata/P001_cell_mask.npy', checkIfExists: true),
+                    file('${projectDir}/tests/testdata/sample_feature_distances.json', checkIfExists: true),
+                    []
+                ]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.cluster_counts },
+                { assert process.out.som_weights },
+                { assert process.out.cluster_profiles },
+                { assert process.out.cluster_mapping },
+                { assert process.out.cell_table_clustered },
+                { assert process.out.geojson },
+                { assert process.out.classifications },
+                { assert process.out.mapping_json },
+                { assert process.out.versions }
+            )
+        }
+    }
+
+    test("Should preserve metadata - stub") {
+
+        options "-stub"
+
+        when {
+            params {
+                pixie_pixel_cluster_col = 'pixel_meta_cluster'
+                pixie_max_k             = 20
+                pixie_cap               = 3
+                pixie_seed              = 42
+                pixel_size              = 0.5
+            }
+            process {
+                """
+                def pixel_data_dir = file("${workDir}/pixel_mat_data")
+                pixel_data_dir.mkdirs()
+                file("${workDir}/pixel_mat_data/P001.feather").text = "stub"
+
+                def cluster_profiles = [
+                    file('${projectDir}/tests/testdata/sample_DAPI_intensity.csv', checkIfExists: true),
+                    file('${projectDir}/tests/testdata/sample_PANCK_intensity.csv', checkIfExists: true)
+                ]
+
+                input[0] = [
+                    [
+                        patient_id: 'P001',
+                        custom_field: 'preserved'
+                    ],
+                    pixel_data_dir,
+                    cluster_profiles,
+                    file('${projectDir}/tests/testdata/sample_merged_quant.csv', checkIfExists: true),
+                    file('${projectDir}/tests/testdata/P001_cell_mask.npy', checkIfExists: true),
+                    file('${projectDir}/tests/testdata/sample_feature_distances.json', checkIfExists: true),
+                    []
+                ]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { with(process.out.cluster_counts) {
+                    assert get(0).get(0).patient_id == 'P001'
+                    assert get(0).get(0).custom_field == 'preserved'
+                }}
+            )
+        }
+    }
+
+    test("Should emit versions.yml - stub") {
+
+        options "-stub"
+
+        when {
+            params {
+                pixie_pixel_cluster_col = 'pixel_meta_cluster'
+                pixie_max_k             = 20
+                pixie_cap               = 3
+                pixie_seed              = 42
+                pixel_size              = 0.5
+            }
+            process {
+                """
+                def pixel_data_dir = file("${workDir}/pixel_mat_data")
+                pixel_data_dir.mkdirs()
+                file("${workDir}/pixel_mat_data/P001.feather").text = "stub"
+
+                def cluster_profiles = [
+                    file('${projectDir}/tests/testdata/sample_DAPI_intensity.csv', checkIfExists: true),
+                    file('${projectDir}/tests/testdata/sample_PANCK_intensity.csv', checkIfExists: true)
+                ]
+
+                input[0] = [
+                    [
+                        patient_id: 'P001'
+                    ],
+                    pixel_data_dir,
+                    cluster_profiles,
+                    file('${projectDir}/tests/testdata/sample_merged_quant.csv', checkIfExists: true),
+                    file('${projectDir}/tests/testdata/P001_cell_mask.npy', checkIfExists: true),
+                    file('${projectDir}/tests/testdata/sample_feature_distances.json', checkIfExists: true),
+                    []
+                ]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.versions },
+                { assert snapshot(process.out.versions).match() }
+            )
+        }
+    }
+
+    test("Should skip when ext.when is false") {
+
+        options "-stub"
+
+        when {
+            params {
+                pixie_pixel_cluster_col = 'pixel_meta_cluster'
+                pixie_max_k             = 20
+                pixie_cap               = 3
+                pixie_seed              = 42
+                pixel_size              = 0.5
+            }
+            process {
+                """
+                task.ext.when = false
+
+                def pixel_data_dir = file("${workDir}/pixel_mat_data")
+                pixel_data_dir.mkdirs()
+                file("${workDir}/pixel_mat_data/P001.feather").text = "stub"
+
+                def cluster_profiles = [
+                    file('${projectDir}/tests/testdata/sample_DAPI_intensity.csv', checkIfExists: true),
+                    file('${projectDir}/tests/testdata/sample_PANCK_intensity.csv', checkIfExists: true)
+                ]
+
+                input[0] = [
+                    [
+                        patient_id: 'P001'
+                    ],
+                    pixel_data_dir,
+                    cluster_profiles,
+                    file('${projectDir}/tests/testdata/sample_merged_quant.csv', checkIfExists: true),
+                    file('${projectDir}/tests/testdata/P001_cell_mask.npy', checkIfExists: true),
+                    file('${projectDir}/tests/testdata/sample_feature_distances.json', checkIfExists: true),
+                    []
+                ]
+                """
+            }
+        }
+
+        then {
+            // Process should be skipped but not fail
+            assert process.success
+        }
+    }
+}

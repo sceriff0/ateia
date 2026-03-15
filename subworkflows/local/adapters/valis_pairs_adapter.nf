@@ -27,7 +27,12 @@ workflow VALIS_PAIRS_ADAPTER {
     ch_all = PUBLISH_REFERENCE_VALIS_PAIRS.out.published.concat(REGISTER_VALIS_PAIRS.out.registered)
     ch_size_logs = REGISTER_VALIS_PAIRS.out.size_log
 
+    ch_versions = Channel.empty()
+        .mix(REGISTER_VALIS_PAIRS.out.versions.first())
+        .mix(PUBLISH_REFERENCE_VALIS_PAIRS.out.versions.first())
+
     emit:
     registered = ch_all
     size_logs = ch_size_logs
+    versions = ch_versions
 }

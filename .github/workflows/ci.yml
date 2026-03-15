@@ -302,7 +302,6 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
-    continue-on-error: true
 
     steps:
       - name: Checkout repository
@@ -342,8 +341,8 @@ jobs:
             echo "nf-test stub failed"
             exit 1
           fi
-          # Lint uses continue-on-error, so we just report
-          if [ "${{ needs.lint.result }}" != "success" ]; then
-            echo "WARNING: Lint had issues (non-blocking)"
+          if [ "${{ needs.lint.result }}" != "success" ] && [ "${{ needs.lint.result }}" != "skipped" ]; then
+            echo "Lint failed"
+            exit 1
           fi
           echo "All required tests passed!"

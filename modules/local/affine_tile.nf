@@ -11,6 +11,7 @@
  */
 process AFFINE_TILE {
     tag "${meta.patient_id}_${tile_id}"
+    label 'process_low'
 
     container 'bolt3x/attend_image_analysis:debug_diffeo'
 

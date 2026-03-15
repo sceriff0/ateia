@@ -1,0 +1,55 @@
+{
+    "_comment_io": "=== Input/Output ===",
+    "input": "/path/to/samplesheet.csv",
+    "outdir": "/path/to/results",
+    "step": "postprocessing",
+
+    "_comment_seg": "=== Segmentation ===",
+    "seg_gpu": true,
+    "seg_pmin": 1.0,
+    "seg_pmax": 99.8,
+    "seg_n_tiles_y": 16,
+    "seg_n_tiles_x": 16,
+    "seg_expand_distance": 10,
+    "segmentation_model_dir": null,
+    "segmentation_model": "stardist_full_e200_lr00001_aug1_seed10_es50p0.001_rlr0.5p50",
+
+    "_comment_quant": "=== Quantification ===",
+    "quant_min_area": 10,
+
+    "_comment_pheno": "=== Phenotyping ===",
+    "phenotype_config": null,
+    "pheno_quality_percentile": 1,
+    "pheno_noise_percentile": 5,
+
+    "_comment_pixie": "=== Pixie Clustering (Optional) ===",
+    "pixie_enabled": false,
+    "pixie_channels": ["CD45", "CD3", "CD4", "CD8", "FOXP3", "GZMB", "CD14", "CD163", "SMA", "PANCK", "VIMENTIN"],
+    "pixie_blur_factor": 2,
+    "pixie_subset_proportion": 0.05,
+    "pixie_num_passes": 1,
+    "pixie_max_k": 20,
+    "pixie_cap": 3,
+    "pixie_seed": 4,
+    "pixie_pixel_cluster_col": "pixel_meta_cluster_rename",
+    "pixie_target_fovs": 100,
+    "pixie_multiprocess": false,
+    "pixie_batch_size": 1,
+
+    "_comment_output": "=== Image Output / Pyramid ===",
+    "tilex": 512,
+    "tiley": 512,
+    "pyramid_resolutions": 8,
+    "pyramid_scale": 2,
+    "compression": "zstd",
+    "publish_dir_mode": "copy",
+
+    "_comment_resources": "=== Resource Limits ===",
+    "max_memory": "700.GB",
+    "max_cpus": 128,
+    "max_time": "240.h",
+
+    "_comment_trace": "=== Tracing ===",
+    "enable_trace": true,
+    "trace_dir": ".trace"
+}

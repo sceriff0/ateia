@@ -15,9 +15,10 @@ process COPY_RESULTS {
     output:
     path("transfer.log"), emit: log
     path("verification.log"), emit: verification
+    path "versions.yml"     , emit: versions
 
     when:
-    destination_dir && destination_dir != source_dir
+    task.ext.when == null || task.ext.when
 
     script:
     def parallel_jobs = task.cpus ?: 4
@@ -127,11 +128,21 @@ process COPY_RESULTS {
     echo "========================================"
     echo "Complete: \$(date)"
     echo "========================================"
+
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        bash: \$(bash --version | head -n1 | sed 's/GNU bash, version //')
+    END_VERSIONS
     """
 
     stub:
     """
     echo "STUB: Would copy data from ${source_dir} to ${destination_dir}" > transfer.log
     echo "STUB: All files verified" > verification.log
+
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        bash: \$(bash --version | head -n1 | sed 's/GNU bash, version //')
+    END_VERSIONS
     """
 }

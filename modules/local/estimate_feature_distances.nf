@@ -3,7 +3,7 @@ nextflow.enable.dsl = 2
 process ESTIMATE_FEATURE_DISTANCES {
     tag "${meta.patient_id}_${meta.channels.join('_')}"
     label 'process_medium'
-    container "${params.container.registration}"
+    container 'cdgatenbee/valis-wsi:1.0.0'
 
     // Measures feature distances BEFORE and AFTER registration for a single image
     // Detects and matches features in (ref vs moving), then (ref vs registered)

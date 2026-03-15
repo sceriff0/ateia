@@ -80,8 +80,14 @@ workflow PREPROCESSING {
         .mix(CONVERT_IMAGE.out.size_log)
         .mix(PREPROCESS.out.size_log)
 
+    // Collect versions from all processes
+    ch_versions = Channel.empty()
+        .mix(CONVERT_IMAGE.out.versions.first())
+        .mix(PREPROCESS.out.versions.first())
+
     emit:
     preprocessed = ch_preprocessed_with_meta
     checkpoint_csv = ch_checkpoint_csv
     size_logs = ch_size_logs
+    versions = ch_versions
 }

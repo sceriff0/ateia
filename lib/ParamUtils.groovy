@@ -1,7 +1,7 @@
 class ParamUtils {
 
     static void validateStep(String step) {
-        def valid = ['preprocessing', 'registration', 'postprocessing']
+        def valid = ['preprocessing', 'registration', 'postprocessing', 'copy_results']
         if (!(step in valid)) {
             throw new IllegalArgumentException("Invalid --step '${step}'. Valid values: ${valid}")
         }

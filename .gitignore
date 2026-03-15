@@ -1,8 +1,50 @@
+# Vendored libraries
 valis_lib/*
-*.pyc
 pixie-main/*
-traces/*
-tests/__pycache__/*
+
+# Python
+*.pyc
+**/__pycache__/
+
+# Nextflow runtime
+.nextflow/
+.nextflow.log*
+work/
+results/
+test_results*/
+
+# Testing
+.nf-test/
+.nf-test.log
+.pytest_cache/
+
+# Traces
+traces/
+.trace/
+
+# Site-specific configs (secrets — never push to GitHub)
+conf/ieo.config
+conf/*_site.config
+
+# Generated docs
+site/
+
+# Application
 mirage_app/*
+
+# Notebooks (analysis, not pipeline)
 notebooks/*
-.*
+
+# macOS
+*.DS_Store
+
+# Internal AI/debug docs (not user-facing)
+CLAUDE.md
+DATAFLOW_ANALYSIS.md
+
+# Legacy (deprecated modules/docs)
+legacy/
+
+# IDE
+.idea/
+.vscode/

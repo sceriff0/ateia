@@ -11,8 +11,9 @@ nextflow.enable.dsl = 2
  */
 process SPLIT_CHANNELS {
     tag "${meta.patient_id}"
+    label 'process_medium'
 
-    container 'bolt3x/attend_image_analysis:preprocess'
+    container 'bolt3x/attend_image_analysis:quantification_gpu'
 
     //publishDir "${params.outdir}/${meta.patient_id}/channels", mode: 'copy'
 

@@ -1,0 +1,43 @@
+/*
+========================================================================================
+    Site-specific Configuration Template
+========================================================================================
+    Copy this file to conf/<your_site>.config, customize, then run:
+
+        nextflow run . -profile slurm,singularity -c conf/<your_site>.config \
+            -params-file params/full_pipeline.json
+
+    OR add a named profile in nextflow.config:
+        profiles { mysite { includeConfig 'conf/mysite.config' } }
+
+    Then run:
+        nextflow run . -profile mysite,singularity -params-file params/full_pipeline.json
+========================================================================================
+*/
+
+params {
+    // Output directory for results
+    outdir                 = '/path/to/results'
+
+    // Segmentation model location
+    segmentation_model_dir = '/path/to/models/'
+    segmentation_model     = 'your_stardist_model_name'
+
+    // SLURM settings (set to null if not using SLURM)
+    slurm_partition        = null
+    slurm_account          = null
+    slurm_qos              = null
+
+    // GPU type for SLURM (used by segmentation)
+    gpu_type               = 'nvidia_a100:1'
+}
+
+// Singularity bind paths (adjust to your site)
+singularity {
+    runOptions = '--writable-tmpfs --bind /path/to/models'
+}
+
+// Seqera Platform / Tower (optional monitoring)
+tower {
+    enabled = false
+}

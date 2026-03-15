@@ -10,6 +10,7 @@
  */
 process CPU_REGISTER {
     tag "${meta.patient_id}"
+    label 'process_high'
 
     container 'bolt3x/attend_image_analysis:debug_diffeo'
 

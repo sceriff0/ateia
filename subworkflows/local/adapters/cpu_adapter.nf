@@ -27,7 +27,12 @@ workflow CPU_ADAPTER {
     ch_all = PUBLISH_REFERENCE_CPU.out.published.concat(CPU_REGISTER.out.registered)
     ch_size_logs = CPU_REGISTER.out.size_log
 
+    ch_versions = Channel.empty()
+        .mix(CPU_REGISTER.out.versions.first())
+        .mix(PUBLISH_REFERENCE_CPU.out.versions.first())
+
     emit:
     registered = ch_all
     size_logs = ch_size_logs
+    versions = ch_versions
 }

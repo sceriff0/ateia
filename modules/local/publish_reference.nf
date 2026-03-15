@@ -1,6 +1,7 @@
 process PUBLISH_REFERENCE {
     tag "${meta.id ?: meta.patient_id}"
     label 'process_single'
+    container null
 
     input:
     tuple val(meta), path(image)
@@ -8,6 +9,9 @@ process PUBLISH_REFERENCE {
     output:
     tuple val(meta), path(image), emit: published
     path "versions.yml"          , emit: versions
+
+    when:
+    task.ext.when == null || task.ext.when
 
     script:
     """

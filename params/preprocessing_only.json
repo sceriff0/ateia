@@ -1,0 +1,34 @@
+{
+    "_comment_io": "=== Input/Output ===",
+    "input": "/path/to/samplesheet.csv",
+    "outdir": "/path/to/results",
+    "step": "preprocessing",
+
+    "_comment_preproc": "=== Preprocessing ===",
+    "preproc_tile_size": 1950,
+    "preproc_skip_dapi": true,
+    "preproc_autotune": false,
+    "preproc_n_iter": 100,
+    "preproc_pool_workers": 3,
+    "preproc_overlap": 0,
+    "preproc_no_darkfield": false,
+    "preprocess_qc_scale_factor": 0.25,
+    "pixel_size": 0.325,
+
+    "_comment_output": "=== Image Output / Pyramid ===",
+    "tilex": 512,
+    "tiley": 512,
+    "pyramid_resolutions": 8,
+    "pyramid_scale": 2,
+    "compression": "zstd",
+    "publish_dir_mode": "copy",
+
+    "_comment_resources": "=== Resource Limits ===",
+    "max_memory": "700.GB",
+    "max_cpus": 128,
+    "max_time": "240.h",
+
+    "_comment_trace": "=== Tracing ===",
+    "enable_trace": true,
+    "trace_dir": ".trace"
+}

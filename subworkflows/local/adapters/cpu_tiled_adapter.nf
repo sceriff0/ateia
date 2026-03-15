@@ -171,8 +171,17 @@ workflow CPU_TILED_ADAPTER {
         .mix(DIFFEO_TILE.out.size_log)
         .mix(STITCH_DIFFEO.out.size_log)
 
+    ch_versions = Channel.empty()
+        .mix(COMPUTE_TILE_PLAN.out.versions.first())
+        .mix(AFFINE_TILE.out.versions.first())
+        .mix(STITCH_AFFINE.out.versions.first())
+        .mix(DIFFEO_TILE.out.versions.first())
+        .mix(STITCH_DIFFEO.out.versions.first())
+        .mix(PUBLISH_REFERENCE_CPU_TILED.out.versions.first())
+
     emit:
     registered = ch_all
     size_logs = ch_size_logs
+    versions = ch_versions
     // QC generation is now decoupled - handled by GENERATE_REGISTRATION_QC module
 }
