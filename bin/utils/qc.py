@@ -31,7 +31,7 @@ from numpy.typing import NDArray
 from skimage.transform import rescale
 
 from logger import get_logger
-from metadata import get_channel_names
+from metadata import extract_channel_names_from_ome
 from registration_utils import autoscale
 
 __all__ = [
@@ -277,9 +277,9 @@ def create_registration_qc(
     if reg_img.ndim == 2:
         reg_img = reg_img[np.newaxis, ...]
 
-    # Find DAPI channels
-    ref_channels = get_channel_names(reference_path.name)
-    reg_channels = get_channel_names(registered_path.name)
+    # Find DAPI channels from OME metadata (convert_image guarantees OME-XML is always present)
+    ref_channels = extract_channel_names_from_ome(reference_path)
+    reg_channels = extract_channel_names_from_ome(registered_path)
 
     # Find DAPI index (default to first channel if not found)
     ref_dapi_idx = next(

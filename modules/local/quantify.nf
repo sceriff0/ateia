@@ -10,7 +10,7 @@ nextflow.enable.dsl = 2
  * Output: Per-channel quantification CSV with cell measurements
  */
 process QUANTIFY {
-    tag "${meta.patient_id} - ${channel_tiff.simpleName}"
+    tag "${meta.patient_id} - ${meta.channel_name}"
 
     container 'docker://bolt3x/attend_image_analysis:quantification_gpu'
 
@@ -28,8 +28,8 @@ process QUANTIFY {
     script:
     def args = task.ext.args ?: ''
     def prefix = task.ext.prefix ?: "${meta.patient_id}"
-    // Extract channel name from filename (split_multichannel.py creates files like "PANCK.tiff")
-    def channel_name = channel_tiff.simpleName
+    // Channel name from CSV metadata (set in postprocess.nf from meta.channels)
+    def channel_name = meta.channel_name
     """
     # Log input sizes for tracing (sum of channel_tiff + seg_mask, -L follows symlinks)
     tiff_bytes=\$(stat -L --printf="%s" ${channel_tiff} 2>/dev/null || echo 0)
