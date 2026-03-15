@@ -12,11 +12,10 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Tuple, Optional
+from typing import Optional
 
 import numpy as np
 import pandas as pd
-from skimage.measure import regionprops_table
 from numpy.typing import NDArray
 
 # Add parent directory to path to import lib modules
@@ -30,99 +29,10 @@ logger = get_logger(__name__)
 
 
 __all__ = [
-    "compute_morphology",
     "compute_channel_intensity",
     "quantify_single_channel",
     "run_quantification",
 ]
-
-
-def compute_morphology(
-    mask: NDArray,
-    min_area: int = 0
-) -> Tuple[Optional[pd.DataFrame], Optional[NDArray], Optional[NDArray]]:
-    """Compute morphological properties for all cells.
-
-    Parameters
-    ----------
-    mask : ndarray, shape (Y, X)
-        Segmentation mask with cell labels (background=0, cells>=1).
-    min_area : int, default=0
-        Minimum cell area in pixels. Cells smaller than this are excluded.
-
-    Returns
-    -------
-    props_df : DataFrame or None
-        Morphological properties indexed by label with columns:
-        - label: Cell label ID
-        - y, x: Centroid coordinates
-        - area: Cell area in pixels
-        - eccentricity: Shape eccentricity (0=circle, 1=line)
-        - perimeter: Cell perimeter length
-        - convex_area: Area of convex hull
-        - axis_major_length, axis_minor_length: Ellipse fit axes
-        Returns None if no valid cells found.
-    mask_filtered : ndarray or None
-        Binary mask containing only cells meeting area threshold.
-        Returns None if no valid cells found.
-    valid_labels : ndarray or None
-        Array of label IDs for cells that passed filtering.
-        Returns None if no valid cells found.
-
-    Notes
-    -----
-    This function filters cells by area and computes morphological features
-    using scikit-image's regionprops. The filtering removes artifacts and
-    debris that don't meet size criteria.
-
-    Examples
-    --------
-    >>> mask = np.array([[0, 1, 1], [0, 1, 1], [2, 2, 0]])
-    >>> props_df, mask_filt, valid = compute_morphology(mask, min_area=2)
-    >>> print(props_df['area'].values)
-    [4 2]
-
-    See Also
-    --------
-    skimage.measure.regionprops_table : Underlying morphology computation
-    compute_channel_intensity : Intensity measurements per cell
-    """
-    logger.debug(f"Computing morphology: mask shape={mask.shape}, min_area={min_area}")
-    mask = np.ascontiguousarray(mask.squeeze())
-
-    # Filter cells by area
-    labels, counts = np.unique(mask, return_counts=True)
-    valid_labels = labels[(labels != 0) & (counts > min_area)]
-
-    if len(valid_labels) == 0:
-        logger.warning("[WARN] No valid cells found after area filtering")
-        return None, None, None
-
-    # Create filtered mask
-    mask_filtered = np.where(np.isin(mask, valid_labels), mask, 0)
-
-    if np.all(mask_filtered == 0):
-        logger.warning("[WARN] Filtered mask is empty")
-        return None, None, None
-
-    # Compute morphological properties
-    logger.debug("Computing morphological properties...")
-    props = regionprops_table(
-        mask_filtered,
-        properties=[
-            'label', 'centroid', 'area',
-            'eccentricity', 'perimeter',
-            'convex_area', 'axis_major_length', 'axis_minor_length'
-        ]
-    )
-    props_df = pd.DataFrame(props).set_index('label')
-    props_df.rename(
-        columns={'centroid-0': 'y', 'centroid-1': 'x'},
-        inplace=True
-    )
-
-    logger.debug(f"Found {len(props_df)} valid cells")
-    return props_df, mask_filtered, valid_labels
 
 
 def compute_channel_intensity(
@@ -208,7 +118,10 @@ def quantify_single_channel(
     channel_name: str,
     min_area: int = 0
 ) -> pd.DataFrame:
-    """Quantify a single channel.
+    """Quantify a single channel (intensity only).
+
+    Morphology is computed separately by EXTRACT_CELL_PROPERTIES.
+    This function only computes mean intensity per cell.
 
     Parameters
     ----------
@@ -224,31 +137,33 @@ def quantify_single_channel(
     Returns
     -------
     DataFrame
-        Morphological properties + channel intensity for all cells.
+        Intensity per cell with columns: label, {channel_name}.
     """
-    # Compute morphology
-    props_df, mask_filtered, valid_labels = compute_morphology(mask, min_area)
+    mask = np.ascontiguousarray(mask.squeeze())
 
-    if props_df is None:
+    # Filter cells by area (same logic as extract_cell_properties)
+    labels, counts = np.unique(mask, return_counts=True)
+    valid_labels = labels[(labels != 0) & (counts > min_area)]
+
+    if len(valid_labels) == 0:
+        logger.warning("[WARN] No valid cells found after area filtering")
         return pd.DataFrame()
 
-    # Compute intensity for this channel
+    mask_filtered = np.where(np.isin(mask, valid_labels), mask, 0)
+
+    if np.all(mask_filtered == 0):
+        logger.warning("[WARN] Filtered mask is empty")
+        return pd.DataFrame()
+
+    # Compute intensity for this channel (no morphology — that's done once upstream)
     intensity_series = compute_channel_intensity(
         mask_filtered, channel_image, valid_labels, channel_name
     )
-    
-    # Add intensity to morphology dataframe
-    result_df = props_df.copy()
-    result_df[channel_name] = intensity_series
 
-    # Reset index to make 'label' a column
-    result_df = result_df.reset_index()
-    
-    # Reorder: label first, then morphology, then intensity
-    morpho_cols = ['label', 'y', 'x', 'area', 'eccentricity', 'perimeter',
-                   'convex_area', 'axis_major_length', 'axis_minor_length']
-    cols_order = morpho_cols + [channel_name]
-    result_df = result_df[cols_order]
+    result_df = pd.DataFrame({
+        'label': valid_labels,
+        channel_name: intensity_series.values,
+    })
 
     return result_df
 
@@ -280,11 +195,8 @@ def run_quantification(
     Returns
     -------
     pd.DataFrame
-        Quantification results with columns:
-        - label: Cell ID
-        - y, x: Centroid coordinates
-        - area, eccentricity, perimeter, etc.: Morphology features
-        - {channel_name}: Mean intensity for this channel
+        Quantification results with columns: label, {channel_name}.
+        Morphology is computed separately by EXTRACT_CELL_PROPERTIES.
 
     Raises
     ------
@@ -292,34 +204,6 @@ def run_quantification(
         If mask_path or channel_path does not exist.
     ValueError
         If mask and channel have incompatible shapes.
-
-    Notes
-    -----
-    This function orchestrates the complete quantification pipeline:
-    1. Load segmentation mask and channel image
-    2. Validate shapes match
-    3. Compute morphology and filter by area
-    4. Compute mean intensities per cell
-    5. Save results to CSV
-
-    If no valid cells are found, an empty CSV with proper column
-    headers is created.
-
-    Examples
-    --------
-    >>> run_quantification(
-    ...     mask_path="seg/P001_mask.npy",
-    ...     channel_path="channels/P001_CD3.tif",
-    ...     output_path="quant/P001_CD3_quant.csv",
-    ...     min_area=10,
-    ...     channel_name="CD3"
-    ... )
-
-    See Also
-    --------
-    compute_morphology : Morphology computation
-    compute_channel_intensity : Intensity computation
-    quantify_single_channel : Core quantification logic
     """
     # Use provided channel name, or extract from filename as fallback
     if channel_name is None:
@@ -379,11 +263,8 @@ def run_quantification(
         logger.info(f"[OK] Saved {len(result_df)} cells to {output_path}")
     else:
         logger.warning("[WARN] No results to save")
-        # Create empty CSV with expected columns
-        empty_df = pd.DataFrame(columns=[
-            'label', 'y', 'x', 'area', 'eccentricity', 'perimeter',
-            'convex_area', 'axis_major_length', 'axis_minor_length', channel_name
-        ])
+        # Create empty CSV with expected columns (intensity-only)
+        empty_df = pd.DataFrame(columns=['label', channel_name])
         empty_df.to_csv(output_path, index=False)
 
     logger.info("Quantification complete")
@@ -459,30 +340,14 @@ def run_quantification_gpu(
 
     if len(valid_labels) == 0:
         logger.warning("No valid cells found")
-        empty_df = pd.DataFrame(columns=[
-            'label', 'y', 'x', 'area', 'eccentricity', 'perimeter',
-            'convex_area', 'axis_major_length', 'axis_minor_length', channel_name
-        ])
+        empty_df = pd.DataFrame(columns=['label', channel_name])
         empty_df.to_csv(output_path, index=False)
         return empty_df
 
     # Filter mask
     mask_filtered = cp.where(cp.isin(mask_gpu, valid_labels), mask_gpu, 0)
 
-    # Compute morphology on GPU
-    logger.info("Computing morphology (GPU)...")
-    props = gpu_regionprops_table(
-        mask_filtered,
-        properties=[
-            'label', 'centroid', 'area', 'eccentricity', 'perimeter',
-            'convex_area', 'axis_major_length', 'axis_minor_length'
-        ]
-    )
-    props_cpu = {k: (v.get() if isinstance(v, cp.ndarray) else v) for k, v in props.items()}
-    props_df = pd.DataFrame(props_cpu)
-    props_df.rename(columns={'centroid-0': 'y', 'centroid-1': 'x'}, inplace=True)
-
-    # Compute intensity
+    # Compute intensity only (morphology is done by EXTRACT_CELL_PROPERTIES)
     logger.info("Computing intensity (GPU)...")
     flat_mask = mask_filtered.ravel()
     flat_channel = channel_gpu.ravel().astype(cp.float64)
@@ -493,14 +358,11 @@ def run_quantification_gpu(
     means = cp.where(count_per_label != 0, sum_per_label / count_per_label, 0.0)
     intensities = means[valid_labels]
 
-    # Create result dataframe
-    props_df[channel_name] = intensities.get()
-
-    # Reorder columns
-    morpho_cols = ['label', 'y', 'x', 'area', 'eccentricity', 'perimeter',
-                   'convex_area', 'axis_major_length', 'axis_minor_length']
-    cols_order = morpho_cols + [channel_name]
-    result_df = props_df[cols_order]
+    # Create result dataframe (intensity-only)
+    result_df = pd.DataFrame({
+        'label': valid_labels.get(),
+        channel_name: intensities.get(),
+    })
 
     # Save
     logger.info(f"Saving: {output_path}")

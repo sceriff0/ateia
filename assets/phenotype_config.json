@@ -41,7 +41,7 @@
     {
       "name": "CD8 T regulatory",
       "priority": 13,
-      "rules": { "CD45": "+", "CD3": "+", "CD8": "+", "CD4": "-", "FOXP3": "+" }
+      "rules": { "CD45": "+", "CD3": "+", "CD8": "+", "CD4": "-", "FOXP3": "+", "GZMB": "-" }
     },
     {
       "name": "activated T cytotoxic",

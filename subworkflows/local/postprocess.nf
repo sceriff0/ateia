@@ -6,14 +6,15 @@ nextflow.enable.dsl = 2
 ========================================================================================
 */
 
-include { SEGMENT               } from '../../modules/local/segment'
-include { SPLIT_CHANNELS        } from '../../modules/local/split_channels'
-include { QUANTIFY              } from '../../modules/local/quantify'
-include { MERGE_QUANT_CSVS      } from '../../modules/local/quantify'
-include { PHENOTYPE             } from '../../modules/local/phenotype'
-include { MERGE_AND_PYRAMID     } from '../../modules/local/merge_and_pyramid'
-include { PIXIE_PIXEL_CLUSTER   } from '../../modules/local/pixie_pixel_cluster'
-include { PIXIE_CELL_CLUSTER    } from '../../modules/local/pixie_cell_cluster'
+include { SEGMENT                  } from '../../modules/local/segment'
+include { EXTRACT_CELL_PROPERTIES } from '../../modules/local/extract_cell_properties'
+include { SPLIT_CHANNELS           } from '../../modules/local/split_channels'
+include { QUANTIFY                 } from '../../modules/local/quantify'
+include { MERGE_QUANT_CSVS         } from '../../modules/local/quantify'
+include { PHENOTYPE                } from '../../modules/local/phenotype'
+include { MERGE_AND_PYRAMID        } from '../../modules/local/merge_and_pyramid'
+include { PIXIE_PIXEL_CLUSTER      } from '../../modules/local/pixie_pixel_cluster'
+include { PIXIE_CELL_CLUSTER       } from '../../modules/local/pixie_cell_cluster'
 
 def withDebugView(channel, Closure formatter) {
     return params.debug_channels ? channel.view(formatter) : channel
@@ -60,7 +61,13 @@ workflow POSTPROCESSING {
     SEGMENT(ch_references)
 
     // ========================================================================
-    // CHANNEL SPLITTING - Split all multichannel images
+    // CELL PROPERTIES - Extract morphology + contours from mask (runs in PARALLEL with SPLIT_CHANNELS)
+    // Computes regionprops ONCE instead of N times in QUANTIFY
+    // ========================================================================
+    EXTRACT_CELL_PROPERTIES(SEGMENT.out.cell_mask)
+
+    // ========================================================================
+    // CHANNEL SPLITTING - Split all multichannel images (runs in PARALLEL with EXTRACT_CELL_PROPERTIES)
     // ========================================================================
     SPLIT_CHANNELS(
         ch_registered.map { meta, file -> [meta, file, meta.is_reference] }
@@ -142,13 +149,31 @@ workflow POSTPROCESSING {
             [meta, csvs]
         }
 
-    MERGE_QUANT_CSVS(ch_grouped_csvs)
+    // Join grouped intensity CSVs with morphology.csv from EXTRACT_CELL_PROPERTIES
+    ch_morphology = EXTRACT_CELL_PROPERTIES.out.morphology
+        .map { meta, csv -> [meta.patient_id, csv] }
+
+    ch_for_merge = ch_grouped_csvs
+        .map { meta, csvs -> [meta.patient_id, meta, csvs] }
+        .join(ch_morphology, by: 0)
+        .map { _patient_id, meta, csvs, morphology_csv -> [meta, csvs, morphology_csv] }
+
+    MERGE_QUANT_CSVS(ch_for_merge)
 
     // ========================================================================
-    // PHENOTYPING - Run on merged CSV with configurable rules
+    // PHENOTYPING - Run on merged CSV with contours for polygon GeoJSON
     // ========================================================================
+    // Join merged CSV with pre-computed contours from EXTRACT_CELL_PROPERTIES
+    ch_contours = EXTRACT_CELL_PROPERTIES.out.contours
+        .map { meta, json_file -> [meta.patient_id, json_file] }
+
+    ch_for_phenotype = MERGE_QUANT_CSVS.out.merged_csv
+        .map { meta, csv -> [meta.patient_id, meta, csv] }
+        .join(ch_contours, by: 0)
+        .map { _patient_id, meta, csv, contours_json -> [meta, csv, contours_json] }
+
     PHENOTYPE(
-        MERGE_QUANT_CSVS.out.merged_csv,
+        ch_for_phenotype,
         phenotype_config_ch.first()  // .first() converts to value channel for reuse across samples
     )
 
@@ -374,6 +399,7 @@ workflow POSTPROCESSING {
     // Collect size logs from all postprocessing processes
     ch_size_logs = Channel.empty()
         .mix(SEGMENT.out.size_log)
+        .mix(EXTRACT_CELL_PROPERTIES.out.size_log)
         .mix(SPLIT_CHANNELS.out.size_log)
         .mix(QUANTIFY.out.size_log)
         .mix(MERGE_QUANT_CSVS.out.size_log)

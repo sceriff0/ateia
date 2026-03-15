@@ -16,7 +16,7 @@ process PHENOTYPE {
     container 'docker://bolt3x/attend_image_analysis:quantification_gpu'
 
     input:
-    tuple val(meta), path(quant_csv)
+    tuple val(meta), path(quant_csv), path(contours_json)
     path(phenotype_config)
 
     output:
@@ -46,6 +46,7 @@ process PHENOTYPE {
         --cell_data ${quant_csv} \\
         -o pheno \\
         --config ${phenotype_config} \\
+        --contours_json ${contours_json} \\
         --pixel_size ${pixel_size} \\
         --quality_percentile ${params.pheno_quality_percentile} \\
         --noise_percentile ${params.pheno_noise_percentile} \\

@@ -80,7 +80,7 @@ process MERGE_QUANT_CSVS {
     container 'docker://bolt3x/attend_image_analysis:quantification_gpu'
 
     input:
-    tuple val(meta), path(individual_csvs)
+    tuple val(meta), path(individual_csvs), path(morphology_csv)
 
     output:
     tuple val(meta), path("merged_quant.csv"), emit: merged_csv
@@ -100,103 +100,82 @@ process MERGE_QUANT_CSVS {
     import sys
     import os
 
-    # Log input size for tracing (sum of all CSV files)
+    # Log input size for tracing (sum of all CSV files + morphology)
     csv_files = sorted(Path('.').glob('*_quant.csv'))
-    total_bytes = sum(f.stat().st_size for f in csv_files)
+    morphology_size = Path('${morphology_csv}').stat().st_size
+    total_bytes = sum(f.stat().st_size for f in csv_files) + morphology_size
     with open('${meta.patient_id}.MERGE_QUANT_CSVS.size.csv', 'w') as f:
         f.write(f"${task.process},${meta.patient_id},csvs/,{total_bytes}\\n")
 
     print("Sample: ${meta.patient_id}")
 
-    # Load all individual CSVs
+    # Load morphology (computed once by EXTRACT_CELL_PROPERTIES)
+    morphology = pd.read_csv('${morphology_csv}')
+    print(f"Morphology: {len(morphology)} cells, {len(morphology.columns)} columns")
+
+    # Load all intensity CSVs (each has only: label, <marker>)
     csv_files = sorted(Path('.').glob('*_quant.csv'))
 
     if not csv_files:
         print("ERROR: No quantification CSVs found", file=sys.stderr)
         sys.exit(1)
 
-    print(f"Merging {len(csv_files)} quantification CSVs...")
+    print(f"Merging {len(csv_files)} intensity CSVs with morphology...")
 
-    # Identify which CSV is from the reference (contains DAPI)
-    reference_csv = None
-    other_csvs = []
+    # Start with morphology as the base table
+    merged = morphology.copy()
+    morphology_cells = set(merged['label'])
 
+    # Merge each intensity CSV by label (left join on morphology)
     for csv_file in csv_files:
         df = pd.read_csv(csv_file)
-        if 'DAPI' in df.columns:
-            reference_csv = (csv_file, df)
-            print(f"  - {csv_file.name}: REFERENCE with DAPI")
-        else:
-            other_csvs.append((csv_file, df))
-            print(f"  - {csv_file.name}: {len(df.columns)-8} markers")  # -8 for morphology columns
+        marker_cols = [col for col in df.columns if col != 'label']
 
-    if reference_csv is None:
-        print("ERROR: No reference CSV with DAPI column found", file=sys.stderr)
-        sys.exit(1)
+        if not marker_cols:
+            print(f"  WARNING: {csv_file.name}: No marker columns found, skipping")
+            continue
 
-    # Start with reference dataframe (has all morphological features + DAPI)
-    merged = reference_csv[1].copy()
-    print(f"\\nStarting with reference: {len(merged)} cells, {len(merged.columns)} columns")
-
-    # Morphological and metadata columns to exclude from merging (already in reference)
-    morphology_cols = ['label', 'y', 'x', 'area', 'eccentricity', 'perimeter',
-                      'convex_area', 'axis_major_length', 'axis_minor_length']
-
-    # Merge marker columns from other CSVs
-    # Use left join to preserve all cells from the reference
-    # Fill missing values with 0 (cell not detected in this channel)
-    print("\\nValidating CSV compatibility...")
-    reference_cells = set(reference_csv[1]['label'])
-
-    for csv_file, df in other_csvs:
-        # Validate cell labels match
-        other_cells = set(df['label'])
-        missing = reference_cells - other_cells
-        extra = other_cells - reference_cells
+        # Validate cell labels
+        intensity_cells = set(df['label'])
+        missing = morphology_cells - intensity_cells
+        extra = intensity_cells - morphology_cells
 
         if missing:
-            print(f"  WARNING: {csv_file.name}: Missing {len(missing)} cells from reference")
-            print(f"     These cells will have 0 intensity for this channel")
+            print(f"  WARNING: {csv_file.name}: Missing {len(missing)} cells from morphology")
         if extra:
-            print(f"  WARNING: {csv_file.name}: Has {len(extra)} extra cells not in reference")
-            print(f"     Extra cells will be ignored (not in segmentation mask)")
+            print(f"  WARNING: {csv_file.name}: Has {len(extra)} extra cells (will be ignored)")
 
-        # Get only marker columns (exclude morphology and DAPI if present)
-        marker_cols = [col for col in df.columns if col not in morphology_cols and col != 'DAPI']
+        merge_df = df[['label'] + marker_cols]
+        merged = merged.merge(merge_df, on='label', how='left')
 
-        if marker_cols:
-            # Select label + marker columns
-            merge_df = df[['label'] + marker_cols]
+        for col in marker_cols:
+            merged[col] = merged[col].fillna(0.0)
 
-            # Cells missing from this channel will have NaN, which we fill with 0
-            merged = merged.merge(merge_df, on='label', how='left')
+        print(f"  + {', '.join(marker_cols)} from {csv_file.name}")
 
-            # Fill NaN with 0 (cell not detected in this channel = no signal)
-            for col in marker_cols:
-                merged[col] = merged[col].fillna(0.0)
-
-            print(f"  + Added {len(marker_cols)} markers from {csv_file.name}")
-
-    # Validate no cells were lost (should never happen with left join)
-    cells_lost = len(reference_csv[1]) - len(merged)
+    # Validate no cells were lost
+    cells_lost = len(morphology) - len(merged)
     if cells_lost > 0:
-        print(f"\\nCRITICAL ERROR: Lost {cells_lost} cells during merge")
-        print(f"  Reference had {len(reference_csv[1])} cells, merged has {len(merged)}")
-        print(f"  This should not happen with left join - investigation needed")
+        print(f"\\nCRITICAL ERROR: Lost {cells_lost} cells during merge", file=sys.stderr)
         sys.exit(1)
     else:
-        print(f"\\nAll {len(merged)} cells from reference preserved")
+        print(f"\\nAll {len(merged)} cells preserved")
 
-    # Reorder columns: morphology first, then DAPI, then other markers
+    # Reorder columns: morphology first, then DAPI, then other markers sorted
+    morphology_cols = ['label', 'y', 'x', 'area', 'eccentricity', 'perimeter',
+                      'convex_area', 'axis_major_length', 'axis_minor_length']
     morpho_present = [col for col in morphology_cols if col in merged.columns]
-    marker_cols_all = [col for col in merged.columns if col not in morphology_cols and col != 'DAPI']
+    marker_cols_all = [col for col in merged.columns if col not in morphology_cols]
 
-    final_column_order = morpho_present + ['DAPI'] + sorted(marker_cols_all)
+    # Put DAPI first among markers if present
+    if 'DAPI' in marker_cols_all:
+        marker_cols_all.remove('DAPI')
+        final_column_order = morpho_present + ['DAPI'] + sorted(marker_cols_all)
+    else:
+        final_column_order = morpho_present + sorted(marker_cols_all)
     merged = merged[final_column_order]
 
     # Add required columns for Pixie cell clustering
-    # fov: Field of view identifier (use patient_id)
-    # cell_size: Cell size in pixels (copy from 'area' column)
     merged['fov'] = '${meta.patient_id}'
     if 'area' in merged.columns:
         merged['cell_size'] = merged['area']

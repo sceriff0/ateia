@@ -528,10 +528,36 @@ features.eachWithIndex { featureElement, idx ->
     try {
         def feature = featureElement.getAsJsonObject()
         def geometry = feature.get("geometry").getAsJsonObject()
+        def geomType = geometry.get("type").getAsString()
         def coords = geometry.get("coordinates").getAsJsonArray()
 
-        def x_px = coords.get(0).getAsDouble()
-        def y_px = coords.get(1).getAsDouble()
+        // Build ROI based on geometry type (Polygon or Point)
+        def roi
+        def x_px
+        def y_px
+
+        if (geomType == "Polygon") {
+            // Polygon: coordinates is [ring] where ring is [[x,y], [x,y], ...]
+            def ring = coords.get(0).getAsJsonArray()
+            def xCoords = new double[ring.size()]
+            def yCoords = new double[ring.size()]
+            for (int p = 0; p < ring.size(); p++) {
+                def pt = ring.get(p).getAsJsonArray()
+                xCoords[p] = pt.get(0).getAsDouble()
+                yCoords[p] = pt.get(1).getAsDouble()
+            }
+            roi = ROIs.createPolygonROI(xCoords, yCoords, plane)
+            x_px = roi.getCentroidX()
+            y_px = roi.getCentroidY()
+        } else {
+            // Point: coordinates is [x, y]
+            x_px = coords.get(0).getAsDouble()
+            y_px = coords.get(1).getAsDouble()
+            roi = ROIs.createEllipseROI(
+                x_px - radius, y_px - radius,
+                radius * 2, radius * 2, plane
+            )
+        }
 
         def props = feature.get("properties")?.getAsJsonObject()
         def classification = props?.get("classification")?.getAsJsonObject()
@@ -547,7 +573,7 @@ features.eachWithIndex { featureElement, idx ->
             def combinedName = "${existingClassName} | ${className}"
             def combinedClass = getPathClass(combinedName)
 
-            def merged = PathObjects.createDetectionObject(existingDet.getROI(), combinedClass)
+            def merged = PathObjects.createDetectionObject(roi, combinedClass)
 
             // Copy all existing measurements
             def existingML = existingDet.getMeasurementList()
@@ -582,10 +608,6 @@ features.eachWithIndex { featureElement, idx ->
         } else {
             // NEW: create fresh detection
             def pathClass = getPathClass(className)
-            def roi = ROIs.createEllipseROI(
-                x_px - radius, y_px - radius,
-                radius * 2, radius * 2, plane
-            )
 
             def detection = PathObjects.createDetectionObject(roi, pathClass)
 

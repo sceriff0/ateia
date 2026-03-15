@@ -44,19 +44,6 @@ __all__ = [
 # CONFIGURATION
 # =============================================================================
 
-# Default markers and cutoffs
-DEFAULT_MARKERS = [
-    'CD163', 'CD14', 'CD45', 'CD3', 'CD8', 'CD4', 'FOXP3',
-    'PANCK', 'VIMENTIN', 'SMA', 'L1CAM', 'PAX2', 'CD74',
-    'GZMB', 'PD1', 'PDL1'
-]
-
-DEFAULT_CUTOFFS = [
-    0.7, 0.9, 0.4, 0.2, 0.4, 0.9, 1.3,
-    0.2, 0.2, 0.2, 0.3, 1.0, 1.3,
-    1.2, 1.5, 0.4
-]
-
 # Phenotype colors for QuPath visualization (RGB) - used as fallback
 PHENOTYPE_COLORS = {
     "Background": (0, 0, 0),
@@ -276,6 +263,7 @@ def export_to_geojson(
     cell_id_col: str = 'label',
     exclude_background: bool = True,
     measurement_cols: Optional[List[str]] = None,
+    contours: Optional[Dict[str, List[List[float]]]] = None,
 ) -> Tuple[int, Dict]:
     """
     Export phenotyped cells to QuPath-compatible GeoJSON.
@@ -300,7 +288,10 @@ def export_to_geojson(
         Skip cells with phenotype "Background" or "Unknown".
     measurement_cols : list, optional
         Columns to include as measurements. If None, includes all numeric columns.
-    
+    contours : dict, optional
+        Pre-computed cell contours mapping str(label) -> [[x,y], ...] polygon ring.
+        If provided, cells with contours get Polygon geometry; others fall back to Point.
+
     Returns
     -------
     num_exported : int
@@ -368,14 +359,24 @@ def export_to_geojson(
                 except (ValueError, TypeError):
                     pass
 
+        # Determine geometry: Polygon if contour available, else Point
+        cell_label_str = str(int(cell_id)) if pd.notna(cell_id) else str(idx)
+        if contours and cell_label_str in contours:
+            geometry = {
+                "type": "Polygon",
+                "coordinates": [contours[cell_label_str]],
+            }
+        else:
+            geometry = {
+                "type": "Point",
+                "coordinates": [x, y],
+            }
+
         # Create GeoJSON feature (coordinates in pixels for QuPath)
         feature = {
             "type": "Feature",
             "id": str(cell_id),
-            "geometry": {
-                "type": "Point",
-                "coordinates": [x, y]
-            },
+            "geometry": geometry,
             "properties": {
                 "objectType": "detection",
                 "classification": {
@@ -450,9 +451,7 @@ def export_classifications(
 
 def run_phenotyping_pipeline(
     cell_df: pd.DataFrame,
-    config: dict = None,
-    markers: list = None,
-    cutoffs: list = None,
+    config: dict,
     quality_percentile: float = 1.0,
     noise_percentile: float = 0.01
 ) -> Tuple[pd.DataFrame, Dict[int, str]]:
@@ -462,13 +461,8 @@ def run_phenotyping_pipeline(
     ----------
     cell_df : DataFrame
         Cell data with marker intensities and morphological features.
-    config : dict, optional
+    config : dict
         Phenotype configuration with 'thresholds' and 'phenotypes' keys.
-        If provided, markers/cutoffs parameters are ignored.
-    markers : list, optional
-        DEPRECATED: List of marker names for phenotyping. Use config instead.
-    cutoffs : list, optional
-        DEPRECATED: Expression cutoffs for each marker. Use config instead.
     quality_percentile : float, optional
         Percentile for quality filtering.
     noise_percentile : float, optional
@@ -481,13 +475,7 @@ def run_phenotyping_pipeline(
     phenotype_mapping : dict
         Mapping of phenotype number to name.
     """
-    # Determine markers from config or legacy parameters
-    if config is not None:
-        markers = list(config['thresholds'].keys())
-    elif markers is None:
-        markers = DEFAULT_MARKERS
-    if cutoffs is None and config is None:
-        cutoffs = DEFAULT_CUTOFFS
+    markers = list(config['thresholds'].keys())
 
     logger.info("Starting phenotyping pipeline")
     logger.info(f"Markers: {markers}")
@@ -570,126 +558,9 @@ def run_phenotyping_pipeline(
         df_nn["Count"] = dfz_all.iloc[:, :col_num_last_marker + 1].ge(0).sum(axis=1)
         df_nn["z_sum"] = dfz_all.iloc[:, :col_num_last_marker + 1].sum(axis=1)
 
-    # Phenotyping based on marker expression
+    # Phenotyping based on marker expression using config rules
     logger.info("Assigning phenotypes")
-
-    if config is not None:
-        # Use config-driven phenotyping
-        df_nn = apply_phenotype_rules(df_nn, config)
-    else:
-        # Legacy hardcoded phenotyping (for backward compatibility)
-        logger.warning("Using legacy hardcoded phenotyping rules. Consider using --config instead.")
-        marker_cutoffs = dict(zip(markers[:len(cutoffs)], cutoffs))
-        df_nn['pheno_markers'] = [[] for _ in range(len(df_nn))]
-
-        # Mark positive cells for each marker
-        for marker, cutoff in marker_cutoffs.items():
-            if marker in df_nn.columns:
-                sel = df_nn[df_nn[marker] >= cutoff]
-                sel_idx = sel.index
-                for idx in sel_idx:
-                    df_nn.at[idx, 'pheno_markers'].append(marker)
-
-        # Assign phenotypes based on marker combinations
-        df_nn['phenotype'] = 'Unknown'
-
-        # Immune compartment (CD45+)
-        df_nn.loc[
-            df_nn['pheno_markers'].apply(lambda x: "CD45" in x),
-            'phenotype'
-        ] = "Immune"
-
-        # T cell subsets (CD45+ CD3+)
-        df_nn.loc[
-            df_nn['pheno_markers'].apply(
-                lambda x: "CD45" in x and "CD3" in x and "CD4" in x and
-                "FOXP3" in x and "CD8" not in x
-            ),
-            'phenotype'
-        ] = "CD4 T regulatory"
-
-        df_nn.loc[
-            df_nn['pheno_markers'].apply(
-                lambda x: "CD45" in x and "CD3" in x and "CD4" in x and
-                "FOXP3" not in x and "CD8" not in x
-            ),
-            'phenotype'
-        ] = "T helper"
-
-        df_nn.loc[
-            df_nn['pheno_markers'].apply(
-                lambda x: "CD45" in x and "CD3" in x and "GZMB" not in x and
-                "FOXP3" not in x and "CD8" in x and "CD4" not in x
-            ),
-            'phenotype'
-        ] = "T cytotoxic"
-
-        df_nn.loc[
-            df_nn['pheno_markers'].apply(
-                lambda x: "CD45" in x and "CD3" in x and "GZMB" not in x and
-                "FOXP3" in x and "CD8" in x and "CD4" not in x
-            ),
-            'phenotype'
-        ] = "CD8 T regulatory"
-
-        df_nn.loc[
-            df_nn['pheno_markers'].apply(
-                lambda x: "CD45" in x and "CD3" in x and "GZMB" in x and
-                "CD8" in x and "CD4" not in x
-            ),
-            'phenotype'
-        ] = "activated T cytotoxic"
-
-        # Macrophages (CD45+ CD3-)
-        df_nn.loc[
-            df_nn['pheno_markers'].apply(
-                lambda x: "CD45" in x and "CD3" not in x and "CD14" in x and "CD163" in x
-            ),
-            'phenotype'
-        ] = "Macrophages"
-
-        df_nn.loc[
-            df_nn['pheno_markers'].apply(
-                lambda x: "CD45" in x and "CD3" not in x and "CD14" in x and "CD163" not in x
-            ),
-            'phenotype'
-        ] = "M1"
-
-        df_nn.loc[
-            df_nn['pheno_markers'].apply(
-                lambda x: "CD45" in x and "CD3" not in x and "CD14" not in x and "CD163" in x
-            ),
-            'phenotype'
-        ] = "M2"
-
-        # Stroma (CD45-)
-        df_nn.loc[
-            df_nn['pheno_markers'].apply(lambda x: "CD45" not in x),
-            'phenotype'
-        ] = "Stroma"
-
-        df_nn.loc[
-            df_nn['pheno_markers'].apply(lambda x: "CD45" not in x and "SMA" in x),
-            'phenotype'
-        ] = "Stroma"
-
-        # Tumor (CD45- SMA-)
-        df_nn.loc[
-            df_nn['pheno_markers'].apply(
-                lambda x: "CD45" not in x and "SMA" not in x and "PANCK" in x
-            ),
-            'phenotype'
-        ] = "PANCK+ Tumor"
-        
-        df_nn.loc[
-            df_nn['pheno_markers'].apply(
-                lambda x: "CD45" not in x and "SMA" not in x and "VIMENTIN" in x
-            ),
-            'phenotype'
-        ] = "VIM+ Tumor"
-        
-
-        logger.info(f"Phenotype distribution:\n{df_nn['phenotype'].value_counts()}")
+    df_nn = apply_phenotype_rules(df_nn, config)
 
     # Add numeric phenotype labels
     pheno_complete = df_nn['phenotype'].value_counts().index.values
@@ -762,21 +633,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--config',
         type=str,
-        default=None,
+        required=True,
         help='Path to phenotype configuration JSON file (thresholds and rules)'
-    )
-    parser.add_argument(
-        '--markers',
-        nargs='+',
-        default=DEFAULT_MARKERS,
-        help='DEPRECATED: Use --config instead. List of marker names for phenotyping'
-    )
-    parser.add_argument(
-        '--cutoffs',
-        nargs='+',
-        type=float,
-        default=DEFAULT_CUTOFFS,
-        help='DEPRECATED: Use --config instead. Expression cutoffs for each marker'
     )
     parser.add_argument(
         '--quality_percentile',
@@ -789,6 +647,14 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.01,
         help='Percentile for noise removal'
+    )
+
+    # Cell contours for polygon GeoJSON
+    parser.add_argument(
+        '--contours_json',
+        type=str,
+        default=None,
+        help='Path to pre-computed contours JSON (from extract_cell_properties.py)'
     )
 
     # Output options
@@ -827,17 +693,21 @@ def main() -> int:
     
     logger.info(f"Loaded {len(cell_df)} cells")
 
-    # Load phenotype config if provided
-    config = None
-    if args.config:
-        config = load_phenotype_config(args.config)
+    # Load phenotype config (required)
+    config = load_phenotype_config(args.config)
+
+    # Load pre-computed contours if provided
+    contours = None
+    if args.contours_json:
+        logger.info(f"Loading contours: {args.contours_json}")
+        with open(args.contours_json, 'r') as f:
+            contours = json.load(f)
+        logger.info(f"Loaded contours for {len(contours)} cells")
 
     # Run phenotyping
     phenotypes_df, phenotype_mapping = run_phenotyping_pipeline(
         cell_df,
         config=config,
-        markers=args.markers,
-        cutoffs=args.cutoffs,
         quality_percentile=args.quality_percentile,
         noise_percentile=args.noise_percentile
     )
@@ -866,6 +736,7 @@ def main() -> int:
         phenotype_col='phenotype',
         cell_id_col=args.cell_id_col,
         exclude_background=not args.include_unknown,
+        contours=contours,
     )
 
     # Export classifications JSON (for QuPath color setup)
