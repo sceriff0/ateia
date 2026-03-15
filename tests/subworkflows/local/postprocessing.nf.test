@@ -222,4 +222,57 @@ nextflow_workflow {
             )
         }
     }
+
+    test("Should run full postprocessing on reference image - real") {
+
+        tag "real"
+        tag "slow"
+
+        when {
+            params {
+                outdir = "$outputDir"
+                seg_gpu = false
+                pixel_size = 0.325
+                pheno_quality_percentile = 0.05
+                pheno_noise_percentile = 0.95
+                pyramid_resolutions = 4
+                pyramid_scale = 2
+                tilex = 512
+                compression = 'zstd'
+                pixie_enabled = false
+                debug_channels = false
+            }
+            workflow {
+                """
+                input[0] = Channel.fromList([
+                    [[patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK', 'SMA']],
+                     file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)]
+                ])
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                // Checkpoint CSV created with expected structure
+                { with(workflow.out.checkpoint_csv) {
+                    assert size() == 1
+                    def csv = get(0)
+                    assert csv.exists()
+                    assert csv.name == 'postprocessed.csv'
+                    def lines = csv.readLines()
+                    // Header + at least 1 data row
+                    assert lines.size() >= 2
+                    // Validate header contains expected columns
+                    def header = lines[0]
+                    assert header.contains('patient_id')
+                    assert header.contains('phenotype_csv')
+                    assert header.contains('merged_csv')
+                    assert header.contains('cell_mask')
+                    assert header.contains('pyramid')
+                }}
+            )
+        }
+    }
 }

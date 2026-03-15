@@ -12,7 +12,7 @@ nextflow.enable.dsl = 2
 process QUANTIFY {
     tag "${meta.patient_id} - ${meta.channel_name}"
 
-    container 'docker://bolt3x/attend_image_analysis:quantification_gpu'
+    container 'bolt3x/attend_image_analysis:quantification_gpu'
 
     input:
     tuple val(meta), path(channel_tiff), path(seg_mask)
@@ -77,7 +77,7 @@ process MERGE_QUANT_CSVS {
     tag "${meta.patient_id}"
     label 'process_low'
 
-    container 'docker://bolt3x/attend_image_analysis:quantification_gpu'
+    container 'bolt3x/attend_image_analysis:quantification_gpu'
 
     input:
     tuple val(meta), path(individual_csvs), path(morphology_csv)

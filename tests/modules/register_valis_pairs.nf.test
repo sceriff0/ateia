@@ -165,4 +165,38 @@ nextflow_process {
             assert process.success
         }
     }
+
+    test("Should run pairwise VALIS registration - real") {
+
+        tag "real"
+        tag "slow"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [
+                        patient_id: 'P001',
+                        is_reference: false,
+                        channels: ['DAPI', 'PANCK', 'SMA']
+                    ],
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.registered },
+                { with(process.out.registered) {
+                    assert size() == 1
+                    assert get(0).get(0).patient_id == 'P001'
+                    assert get(0).get(1).toString().contains('_registered')
+                }}
+            )
+        }
+    }
 }

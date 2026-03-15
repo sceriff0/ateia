@@ -242,4 +242,60 @@ nextflow_process {
             assert process.success
         }
     }
+
+    test("Should stitch diffeo tiles from real data") {
+
+        tag "real"
+        tag "slow"
+
+        when {
+            process {
+                """
+                def tilePlanFile = file('tile_plan.json')
+                tilePlanFile.text = '''
+                {
+                    "version": "1.0",
+                    "image_shape": [3, 512, 512],
+                    "dtype": "float32",
+                    "diffeo_crop_size": 128,
+                    "overlap_percent": 40.0,
+                    "affine_tiles": [],
+                    "diffeo_tiles": [
+                        {"tile_id": "diffeo_0_0", "row": 0, "col": 0, "y_start": 0, "y_end": 128, "x_start": 0, "x_end": 128}
+                    ]
+                }
+                '''
+
+                // Create tiles directory with a sample tile
+                def tilesDir = file('tiles')
+                tilesDir.mkdir()
+
+                input[0] = [
+                    [
+                        patient_id: 'P001',
+                        id: 'P001_mov1',
+                        is_reference: false,
+                        channels: ['DAPI', 'PANCK', 'SMA']
+                    ],
+                    tilePlanFile,
+                    file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true),
+                    tilesDir
+                ]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.registered },
+                { assert process.out.versions },
+                { with(process.out.registered) {
+                    assert size() == 1
+                    assert get(0).get(0).patient_id == 'P001'
+                    assert get(0).get(1).toString().endsWith('_registered.ome.tiff')
+                }}
+            )
+        }
+    }
 }

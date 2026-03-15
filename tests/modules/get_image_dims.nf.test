@@ -160,4 +160,42 @@ nextflow_process {
             assert process.success
         }
     }
+
+    test("Should extract 128x128 dimensions from test image - real") {
+
+        tag "real"
+        tag "slow"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [
+                        patient_id: 'P001',
+                        is_reference: true,
+                        channels: ['DAPI', 'PANCK', 'SMA']
+                    ],
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.dims },
+                { assert process.out.versions },
+                // Meta preservation
+                { assert process.out.dims.get(0).get(0).patient_id == 'P001' },
+                { assert process.out.dims.get(0).get(0).is_reference == true },
+                { assert process.out.dims.get(0).get(0).channels == ['DAPI', 'PANCK', 'SMA'] },
+                // Dims file contains expected 128x128 dimensions
+                {
+                    def dimsContent = process.out.dims.get(0).get(1).text.trim()
+                    assert dimsContent.contains('128 128')
+                }
+            )
+        }
+    }
 }

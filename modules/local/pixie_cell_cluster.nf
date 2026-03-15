@@ -25,7 +25,7 @@ process PIXIE_CELL_CLUSTER {
     tag "${meta.patient_id}"
     label 'process_high'
 
-    container 'docker://bolt3x/attend_image_analysis:pixie'
+    container 'bolt3x/attend_image_analysis:pixie'
 
     input:
     tuple val(meta), path(pixel_data_dir), path(cluster_profiles), path(cell_table), path(cell_mask), path(cell_params), path(tile_positions)

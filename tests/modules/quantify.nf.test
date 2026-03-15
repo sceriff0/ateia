@@ -58,13 +58,15 @@ nextflow_process {
             assertAll(
                 { assert process.success },
                 { assert process.out.individual_csv },
-                // Validate CSV content
+                // Validate CSV content - intensity only (label + marker columns)
                 {
                     def csvFile = process.out.individual_csv.get(0).get(1)
                     def lines = path(csvFile).readLines()
                     assert lines.size() > 1, "CSV should have header + data rows"
-                    def header = lines[0]
-                    assert header.contains('label'), "CSV should have label column"
+                    def header = lines[0].split(',')
+                    assert header.size() == 2, "CSV should have exactly 2 columns (label + marker), got ${header.size()}: ${header}"
+                    assert header[0] == 'label', "First column should be 'label'"
+                    assert lines.size() - 1 > 0, "CSV should have at least one data row"
                 },
                 // Metadata preserved
                 { assert process.out.individual_csv.get(0).get(0).patient_id == 'P001' }
@@ -94,10 +96,11 @@ nextflow_process {
                 input[0] = [
                     [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA'], is_reference: true],
                     [
-                        file('$projectDir/tests/testdata/sample_DAPI_quant.csv', checkIfExists: true),
-                        file('$projectDir/tests/testdata/sample_PANCK_quant.csv', checkIfExists: true),
-                        file('$projectDir/tests/testdata/sample_SMA_quant.csv', checkIfExists: true)
-                    ]
+                        file('$projectDir/tests/testdata/sample_DAPI_intensity.csv', checkIfExists: true),
+                        file('$projectDir/tests/testdata/sample_PANCK_intensity.csv', checkIfExists: true),
+                        file('$projectDir/tests/testdata/sample_SMA_intensity.csv', checkIfExists: true)
+                    ],
+                    file('$projectDir/tests/testdata/sample_morphology.csv', checkIfExists: true)
                 ]
                 """
             }
@@ -126,10 +129,11 @@ nextflow_process {
                 input[0] = [
                     [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA'], is_reference: true],
                     [
-                        file('$projectDir/tests/testdata/sample_DAPI_quant.csv', checkIfExists: true),
-                        file('$projectDir/tests/testdata/sample_PANCK_quant.csv', checkIfExists: true),
-                        file('$projectDir/tests/testdata/sample_SMA_quant.csv', checkIfExists: true)
-                    ]
+                        file('$projectDir/tests/testdata/sample_DAPI_intensity.csv', checkIfExists: true),
+                        file('$projectDir/tests/testdata/sample_PANCK_intensity.csv', checkIfExists: true),
+                        file('$projectDir/tests/testdata/sample_SMA_intensity.csv', checkIfExists: true)
+                    ],
+                    file('$projectDir/tests/testdata/sample_morphology.csv', checkIfExists: true)
                 ]
                 """
             }
@@ -139,14 +143,31 @@ nextflow_process {
             assertAll(
                 { assert process.success },
                 { assert process.out.merged_csv },
-                // Validate merged CSV has data and channel columns
+                // Validate merged CSV has exactly 20 data rows (matching morphology input)
                 {
                     def csvFile = process.out.merged_csv.get(0).get(1)
                     def lines = path(csvFile).readLines()
-                    assert lines.size() > 1, "Merged CSV should have header + data"
-                    def header = lines[0].toLowerCase()
-                    // Should contain columns for merged channels
-                    assert header.contains('label'), "Merged CSV should have label column"
+                    assert lines.size() == 21, "Merged CSV should have 1 header + 20 data rows, got ${lines.size()}"
+                },
+                // Validate header contains morphology + intensity columns
+                {
+                    def csvFile = process.out.merged_csv.get(0).get(1)
+                    def header = path(csvFile).readLines()[0].toLowerCase()
+                    assert header.contains('fov'), "Merged CSV should have 'fov' column"
+                    assert header.contains('cell_size'), "Merged CSV should have 'cell_size' column"
+                    assert header.contains('label'), "Merged CSV should have 'label' column"
+                    assert header.contains('dapi'), "Merged CSV should have 'DAPI' column"
+                    assert header.contains('panck'), "Merged CSV should have 'PANCK' column"
+                    assert header.contains('sma'), "Merged CSV should have 'SMA' column"
+                },
+                // Validate no empty values in first data row
+                {
+                    def csvFile = process.out.merged_csv.get(0).get(1)
+                    def firstDataRow = path(csvFile).readLines()[1]
+                    def values = firstDataRow.split(',')
+                    values.each { val ->
+                        assert val != null && val.trim() != '', "First data row should have no empty values, got: ${firstDataRow}"
+                    }
                 },
                 // Metadata preserved
                 { assert process.out.merged_csv.get(0).get(0).patient_id == 'P001' },

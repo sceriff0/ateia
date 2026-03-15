@@ -207,4 +207,50 @@ nextflow_process {
             assert process.success
         }
     }
+
+    test("Should estimate feature distances on real images") {
+
+        tag "real"
+        tag "slow"
+
+        when {
+            params {
+                container = [registration: 'docker://bolt3x/attend_image_analysis:debug_diffeo']
+                feature_detector = 'superpoint'
+                feature_max_dim = 2048
+                feature_n_features = 5000
+                outdir = "$outputDir"
+                registration_method = 'valis'
+            }
+            process {
+                """
+                input[0] = [
+                    [
+                        patient_id: 'P001',
+                        is_reference: false,
+                        channels: ['DAPI', 'PANCK', 'SMA']
+                    ],
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.distance_metrics },
+                { assert process.out.versions },
+                { with(process.out.distance_metrics) {
+                    assert size() == 1
+                    assert get(0).get(1).toString().endsWith('_feature_distances.json')
+                    def jsonText = get(0).get(1).toFile().text
+                    def json = new groovy.json.JsonSlurper().parseText(jsonText)
+                    assert json != null
+                }}
+            )
+        }
+    }
 }

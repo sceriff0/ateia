@@ -219,4 +219,53 @@ nextflow_process {
             assert process.success
         }
     }
+
+    test("Should create pyramidal OME-TIFF from 3 channels + mask - real") {
+
+        tag "real"
+        tag "slow"
+
+        when {
+            params {
+                outdir = "$outputDir"
+                pixel_size = 0.325
+                pyramid_resolutions = 3
+                pyramid_scale = 2
+                tilex = 128
+                compression = 'zstd'
+            }
+            process {
+                """
+                input[0] = [
+                    [
+                        patient_id: 'P001',
+                        is_reference: true,
+                        channels: ['DAPI', 'PANCK', 'SMA']
+                    ],
+                    [
+                        file('$projectDir/tests/testdata/sample_DAPI.tif', checkIfExists: true),
+                        file('$projectDir/tests/testdata/sample_PANCK.tif', checkIfExists: true),
+                        file('$projectDir/tests/testdata/sample_SMA.tif', checkIfExists: true)
+                    ],
+                    file('$projectDir/tests/testdata/P001_cell_mask.npy', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.pyramid },
+                { assert process.out.versions },
+                // Meta preservation
+                { assert process.out.pyramid.get(0).get(0).patient_id == 'P001' },
+                { assert process.out.pyramid.get(0).get(0).is_reference == true },
+                { assert process.out.pyramid.get(0).get(0).channels == ['DAPI', 'PANCK', 'SMA'] },
+                // Output file is non-trivial and has correct name
+                { assert process.out.pyramid.get(0).get(1).size() > 1000 },
+                { assert process.out.pyramid.get(0).get(1).name.endsWith('pyramid.ome.tiff') }
+            )
+        }
+    }
 }

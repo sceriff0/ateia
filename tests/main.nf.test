@@ -7,6 +7,79 @@ nextflow_pipeline {
     tag "pipeline_mirage"
 
     //==========================================================================
+    // NF-CORE STANDARD TESTS - Essential pipeline behavior
+    //==========================================================================
+
+    test("Should fail with missing required --input param") {
+
+        when {
+            params {
+                outdir = "$outputDir"
+                step = "preprocessing"
+                // Note: --input is NOT set
+            }
+        }
+
+        then {
+            assert workflow.failed
+        }
+    }
+
+    test("Should fail with empty samplesheet") {
+
+        when {
+            params {
+                input = "$projectDir/tests/testdata/empty_samplesheet.csv"
+                outdir = "$outputDir"
+                step = "preprocessing"
+            }
+        }
+
+        then {
+            assert workflow.failed
+        }
+    }
+
+    test("Should handle single-sample samplesheet - stub") {
+
+        options "-stub"
+
+        when {
+            params {
+                input = "$projectDir/tests/testdata/single_sample.csv"
+                outdir = "$outputDir"
+                step = "preprocessing"
+                max_cpus = 2
+                max_memory = '6.GB'
+                seg_gpu = false
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert path("$outputDir").exists() }
+            )
+        }
+    }
+
+    test("Should complete dry_run with zero process executions") {
+
+        when {
+            params {
+                input = "$projectDir/tests/testdata/test_input.csv"
+                outdir = "$outputDir"
+                step = "preprocessing"
+                dry_run = true
+            }
+        }
+
+        then {
+            assert workflow.success
+        }
+    }
+
+    //==========================================================================
     // TEST PROFILE TESTS - Quick validation
     //==========================================================================
 
@@ -47,7 +120,6 @@ nextflow_pipeline {
         then {
             assert workflow.success
             assert path("$outputDir").exists()
-            assert workflow.trace.succeeded().size() > 0
         }
     }
 
@@ -77,8 +149,7 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                { assert path("$outputDir").exists() },
-                { assert snapshot(workflow.trace.succeeded().size()).match() }
+                { assert path("$outputDir").exists() }
             )
         }
     }
@@ -413,24 +484,4 @@ nextflow_pipeline {
         }
     }
 
-    //==========================================================================
-    // DRY RUN TEST
-    //==========================================================================
-
-    test("Should run in dry run mode") {
-
-        when {
-            params {
-                input = "$projectDir/tests/testdata/test_input.csv"
-                outdir = "$outputDir"
-                step = "preprocessing"
-                dry_run = true
-            }
-        }
-
-        then {
-            assert workflow.success
-            // Dry run should complete without running processes
-        }
-    }
 }

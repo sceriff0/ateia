@@ -11,7 +11,7 @@ process REGISTER_VALIS_PAIRS {
     tag "${meta.patient_id}"
     label 'process_high'
 
-    container 'docker://cdgatenbee/valis-wsi:1.0.0'
+    container 'cdgatenbee/valis-wsi:1.0.0'
 
     input:
     tuple val(meta), path(reference), path(moving)

@@ -91,4 +91,55 @@ nextflow_process {
             }
         }
     }
+
+    test("Should split 3-channel image into DAPI, PANCK, SMA - real") {
+
+        tag "real"
+        tag "slow"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [
+                        patient_id: 'P001',
+                        channels: ['DAPI', 'PANCK', 'SMA'],
+                        is_reference: true
+                    ],
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    true  // is_reference flag
+                ]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.channels },
+                { assert process.out.versions },
+                // Meta preservation
+                { assert process.out.channels.get(0).get(0).patient_id == 'P001' },
+                { assert process.out.channels.get(0).get(0).channels == ['DAPI', 'PANCK', 'SMA'] },
+                // Should produce 3 output files
+                {
+                    def files = process.out.channels.get(0).get(1)
+                    assert files instanceof List
+                    assert files.size() == 3
+                },
+                // Each file should be non-trivial (> 100 bytes)
+                {
+                    def files = process.out.channels.get(0).get(1)
+                    files.each { f -> assert f.size() > 100 }
+                },
+                // File names should include channel names
+                {
+                    def fileNames = process.out.channels.get(0).get(1)*.name.sort()
+                    assert fileNames.any { it.contains('DAPI') }
+                    assert fileNames.any { it.contains('PANCK') }
+                    assert fileNames.any { it.contains('SMA') }
+                }
+            )
+        }
+    }
 }

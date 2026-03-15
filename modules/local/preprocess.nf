@@ -10,7 +10,7 @@
 process PREPROCESS {
     tag "${meta.patient_id}"
 
-    container 'docker://bolt3x/attend_image_analysis:preprocess'
+    container 'bolt3x/attend_image_analysis:preprocess'
 
     input:
     tuple val(meta), path(ome_tiff)

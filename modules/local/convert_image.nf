@@ -1,7 +1,7 @@
 process CONVERT_IMAGE {
     tag "${meta.patient_id}"
 
-    container 'docker://bolt3x/attend_image_analysis:convert_bioformats_2'
+    container 'bolt3x/attend_image_analysis:convert_bioformats_2'
 
     input:
     tuple val(meta), path(image_file)
@@ -16,7 +16,10 @@ process CONVERT_IMAGE {
 
     script:
     def args = task.ext.args ?: ''
-    def prefix = task.ext.prefix ?: "${meta.patient_id}"
+    // Include original filename identity to avoid collisions when multiple images
+    // share patient_id + channels (e.g., reference and moving tissue sections)
+    def slide_id = image_file.simpleName.replaceFirst("^${meta.patient_id}_?", '')
+    def prefix = task.ext.prefix ?: (slide_id ? "${meta.patient_id}_${slide_id}" : "${meta.patient_id}")
     def pixel_size = params.pixel_size ?: '0.325'
     def channels = meta.channels.join(',')
     """
@@ -42,7 +45,8 @@ process CONVERT_IMAGE {
     """
 
     stub:
-    def prefix = task.ext.prefix ?: "${meta.patient_id}"
+    def slide_id = image_file.simpleName.replaceFirst("^${meta.patient_id}_?", '')
+    def prefix = task.ext.prefix ?: (slide_id ? "${meta.patient_id}_${slide_id}" : "${meta.patient_id}")
     def channels = meta.channels.join(',')
     """
     touch ${prefix}.ome.tif

@@ -139,4 +139,43 @@ nextflow_process {
             assert process.success
         }
     }
+
+    test("Should compute tile plan from real images") {
+
+        tag "real"
+        tag "slow"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [
+                        patient_id: 'P001',
+                        id: 'P001_mov1',
+                        is_reference: false,
+                        channels: ['DAPI', 'PANCK', 'SMA']
+                    ],
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.plan },
+                { assert process.out.versions },
+                { with(process.out.plan) {
+                    assert size() == 1
+                    assert get(0).get(0).patient_id == 'P001'
+                    assert get(0).get(1).toString().endsWith('tile_plan.json')
+                    def jsonText = get(0).get(1).toFile().text
+                    def json = new groovy.json.JsonSlurper().parseText(jsonText)
+                    assert json != null
+                }}
+            )
+        }
+    }
 }

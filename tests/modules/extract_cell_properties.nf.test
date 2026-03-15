@@ -1,0 +1,146 @@
+nextflow_process {
+
+    name "Test EXTRACT_CELL_PROPERTIES process"
+    script "modules/local/extract_cell_properties.nf"
+    process "EXTRACT_CELL_PROPERTIES"
+
+    tag "modules"
+    tag "modules_local"
+    tag "extract_cell_properties"
+
+    test("Should extract morphology and contours - stub") {
+
+        options "-stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA']],
+                    file('$projectDir/tests/testdata/P001_cell_mask.npy', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            assert process.success
+            assert process.out.morphology
+            assert process.out.contours
+            assert process.out.versions
+
+            with(process.out.morphology) {
+                assert size() == 1
+                assert get(0).get(0).patient_id == 'P001'
+                assert get(0).get(1).toString().endsWith('morphology.csv')
+            }
+
+            with(process.out.contours) {
+                assert size() == 1
+                assert get(0).get(0).patient_id == 'P001'
+                assert get(0).get(1).toString().endsWith('contours.json')
+            }
+
+            assert snapshot(process.out.versions).match()
+        }
+    }
+
+    test("Should produce valid morphology CSV and contours JSON - real") {
+
+        tag "real"
+        tag "slow"
+
+        when {
+            params {
+                quant_min_area = 50
+            }
+            process {
+                """
+                input[0] = [
+                    [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA']],
+                    file('$projectDir/tests/testdata/P001_cell_mask.npy', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.morphology },
+                { assert process.out.contours },
+                // Validate morphology CSV has header + data rows
+                {
+                    def csvFile = process.out.morphology.get(0).get(1)
+                    def lines = path(csvFile).readLines()
+                    assert lines.size() > 1, "morphology.csv should have header + data rows"
+                },
+                // Validate expected columns
+                {
+                    def csvFile = process.out.morphology.get(0).get(1)
+                    def header = path(csvFile).readLines()[0]
+                    def expected = ['label', 'y', 'x', 'area', 'eccentricity', 'perimeter',
+                                    'convex_area', 'axis_major_length', 'axis_minor_length']
+                    expected.each { col ->
+                        assert header.contains(col), "morphology.csv missing column: ${col}"
+                    }
+                },
+                // Validate all labels are positive integers
+                {
+                    def csvFile = process.out.morphology.get(0).get(1)
+                    def lines = path(csvFile).readLines()
+                    def headerCols = lines[0].split(',').toList()
+                    def labelIdx = headerCols.indexOf('label')
+                    lines[1..-1].each { line ->
+                        def label = line.split(',')[labelIdx] as int
+                        assert label > 0, "Label should be a positive integer, got: ${label}"
+                    }
+                },
+                // Validate all area values > 0
+                {
+                    def csvFile = process.out.morphology.get(0).get(1)
+                    def lines = path(csvFile).readLines()
+                    def headerCols = lines[0].split(',').toList()
+                    def areaIdx = headerCols.indexOf('area')
+                    lines[1..-1].each { line ->
+                        def area = line.split(',')[areaIdx] as double
+                        assert area > 0, "Area should be > 0, got: ${area}"
+                    }
+                },
+                // Validate contours.json is valid JSON
+                {
+                    def jsonFile = process.out.contours.get(0).get(1)
+                    def content = path(jsonFile).text
+                    new groovy.json.JsonSlurper().parseText(content)
+                },
+                // Metadata preserved
+                { assert process.out.morphology.get(0).get(0).patient_id == 'P001' },
+                { assert process.out.contours.get(0).get(0).patient_id == 'P001' }
+            )
+        }
+    }
+
+    test("Should respect when condition") {
+
+        options "-stub"
+
+        when {
+            process {
+                """
+                // Set ext.when to false
+                ext.when = false
+
+                input[0] = [
+                    [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA']],
+                    file('$projectDir/tests/testdata/P001_cell_mask.npy', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            // Process should be skipped
+            assert process.success
+        }
+    }
+}

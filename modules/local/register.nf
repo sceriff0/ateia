@@ -11,7 +11,7 @@ process REGISTER {
     tag "${patient_id}"
     label 'process_high'
 
-    container 'docker://cdgatenbee/valis-wsi:1.0.0'
+    container 'cdgatenbee/valis-wsi:1.0.0'
 
     input:
     // Use stageAs to avoid filename collision when reference is included in preproc_files

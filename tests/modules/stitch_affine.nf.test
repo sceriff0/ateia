@@ -237,4 +237,59 @@ nextflow_process {
             assert process.success
         }
     }
+
+    test("Should stitch affine tiles from real data") {
+
+        tag "real"
+        tag "slow"
+
+        when {
+            process {
+                """
+                def tilePlanFile = file('tile_plan.json')
+                tilePlanFile.text = '''
+                {
+                    "version": "1.0",
+                    "image_shape": [3, 512, 512],
+                    "dtype": "float32",
+                    "affine_crop_size": 256,
+                    "overlap_percent": 40.0,
+                    "affine_tiles": [
+                        {"tile_id": "affine_0_0", "row": 0, "col": 0, "y_start": 0, "y_end": 256, "x_start": 0, "x_end": 256}
+                    ],
+                    "diffeo_tiles": []
+                }
+                '''
+
+                // Create tiles directory with a sample tile
+                def tilesDir = file('tiles')
+                tilesDir.mkdir()
+
+                input[0] = [
+                    [
+                        patient_id: 'P001',
+                        id: 'P001_mov1',
+                        is_reference: false,
+                        channels: ['DAPI', 'PANCK', 'SMA']
+                    ],
+                    tilePlanFile,
+                    tilesDir
+                ]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.affine },
+                { assert process.out.versions },
+                { with(process.out.affine) {
+                    assert size() == 1
+                    assert get(0).get(0).patient_id == 'P001'
+                    assert get(0).get(1).toString().endsWith('_affine.tiff')
+                }}
+            )
+        }
+    }
 }

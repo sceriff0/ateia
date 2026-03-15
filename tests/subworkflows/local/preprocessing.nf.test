@@ -160,4 +160,61 @@ nextflow_workflow {
             )
         }
     }
+
+    test("Should preprocess two images with valid outputs - real") {
+
+        tag "real"
+        tag "slow"
+
+        when {
+            params {
+                outdir = "$outputDir"
+                preproc_tile_size = 256
+                preproc_n_iter = 1
+            }
+            workflow {
+                """
+                input[0] = Channel.fromList([
+                    [[patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK', 'SMA']],
+                     file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)],
+                    [[patient_id: 'P001', is_reference: false, channels: ['DAPI', 'PANCK', 'SMA']],
+                     file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)]
+                ])
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                // Preprocessed outputs exist with real data (> 1000 bytes each)
+                { with(workflow.out.preprocessed) {
+                    assert size() == 2
+                    get(0).get(1).with { assert it.size() > 1000 }
+                    get(1).get(1).with { assert it.size() > 1000 }
+                }},
+                // Metadata preserved
+                { with(workflow.out.preprocessed) {
+                    def patient_ids = collect { it[0].patient_id }
+                    assert patient_ids.every { it == 'P001' }
+                }},
+                // Checkpoint CSV exists and has correct structure
+                { with(workflow.out.checkpoint_csv) {
+                    assert size() == 1
+                    def csv = get(0)
+                    assert csv.exists()
+                    assert csv.name == 'preprocessed.csv'
+                    def lines = csv.readLines()
+                    // Header + at least 2 data rows
+                    assert lines.size() >= 3
+                    // Validate header columns
+                    def header = lines[0]
+                    assert header.contains('patient_id')
+                    assert header.contains('preprocessed_image')
+                    assert header.contains('is_reference')
+                    assert header.contains('channels')
+                }}
+            )
+        }
+    }
 }

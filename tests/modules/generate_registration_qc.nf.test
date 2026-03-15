@@ -179,4 +179,46 @@ nextflow_process {
             assert process.success
         }
     }
+
+    test("Should generate QC images from real data") {
+
+        tag "real"
+        tag "slow"
+
+        when {
+            params {
+                qc_scale_factor = 0.25
+            }
+            process {
+                """
+                input[0] = [
+                    [
+                        patient_id: 'P001',
+                        is_reference: false,
+                        channels: ['DAPI', 'PANCK', 'SMA']
+                    ],
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.qc },
+                { assert process.out.qc_fullres },
+                { assert process.out.versions },
+                { with(process.out.qc) {
+                    assert size() == 1
+                    assert get(0).get(1).toFile().size() > 100
+                }},
+                { with(process.out.qc_fullres) {
+                    assert size() == 1
+                    assert get(0).get(1).toFile().size() > 100
+                }}
+            )
+        }
+    }
 }

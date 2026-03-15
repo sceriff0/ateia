@@ -238,4 +238,64 @@ nextflow_workflow {
             )
         }
     }
+
+    test("Should register images using tiled approach - real") {
+
+        tag "real"
+        tag "slow"
+
+        when {
+            workflow {
+                """
+                def refMeta = [
+                    patient_id: 'P001',
+                    id: 'P001_ref',
+                    is_reference: true,
+                    channels: ['DAPI', 'PANCK', 'SMA']
+                ]
+                def movMeta = [
+                    patient_id: 'P001',
+                    id: 'P001_mov1',
+                    is_reference: false,
+                    channels: ['DAPI', 'PANCK', 'SMA']
+                ]
+
+                def refFile = file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                def movFile = file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)
+
+                input[0] = Channel.of([
+                    'P001',
+                    [refMeta, refFile],
+                    [[refMeta, refFile], [movMeta, movFile]]
+                ])
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                // Should have both reference and registered moving image
+                { with(workflow.out.registered) {
+                    assert size() == 2
+                }},
+                // Stitched output files exist with real data
+                { with(workflow.out.registered) {
+                    assert get(0).get(1) != null
+                    assert get(1).get(1) != null
+                }},
+                // patient_id preserved in all outputs
+                { with(workflow.out.registered) {
+                    def patient_ids = collect { it[0].patient_id }
+                    assert patient_ids.every { it == 'P001' }
+                }},
+                // Reference image is present in outputs
+                { with(workflow.out.registered) {
+                    def refOutput = collect().find { it[0].is_reference }
+                    assert refOutput != null
+                    assert refOutput[0].patient_id == 'P001'
+                }}
+            )
+        }
+    }
 }

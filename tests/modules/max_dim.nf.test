@@ -135,4 +135,39 @@ nextflow_process {
             assert process.success
         }
     }
+
+    test("Should compute max dims from two 128x128 images - real") {
+
+        tag "real"
+        tag "slow"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    'P001',
+                    [
+                        file('$projectDir/tests/testdata/sample_dims.txt', checkIfExists: true)
+                    ]
+                ]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.max_dims_file },
+                { assert process.out.versions },
+                // Patient ID preserved
+                { assert process.out.max_dims_file.get(0).get(0) == 'P001' },
+                // Output contains correct max dimensions (both images are 128x128)
+                {
+                    def content = process.out.max_dims_file.get(0).get(1).text.trim()
+                    assert content.contains('MAX_HEIGHT 128')
+                    assert content.contains('MAX_WIDTH 128')
+                }
+            )
+        }
+    }
 }

@@ -20,7 +20,7 @@ process MERGE_AND_PYRAMID {
     tag "${meta.patient_id}"
     label 'process_high'
 
-    container 'docker://bolt3x/attend_image_analysis:merge'
+    container 'bolt3x/attend_image_analysis:merge'
 
     input:
     tuple val(meta), path(split_channels, stageAs: 'channels/*'), path(seg_mask)

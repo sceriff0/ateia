@@ -59,13 +59,18 @@ workflow VALIS_ADAPTER {
 
     ch_registered = REGISTER.out.registered
         .flatMap { patient_id, reg_files, metas, manifest_file ->
+            // Normalize to lists — Nextflow unwraps single-element globs/vals
+            // to bare Path/Map objects, breaking .size() and .collect()
+            def files_list = reg_files instanceof List ? reg_files : [reg_files]
+            def metas_list = metas instanceof List ? metas : [metas]
+
             // Sanity check: file count must match metadata count
-            if (reg_files.size() != metas.size()) {
+            if (files_list.size() != metas_list.size()) {
                 def error_msg = """
                 ❌ VALIS adapter: File count mismatch for patient ${patient_id}
-                📍 Expected ${metas.size()} files but got ${reg_files.size()}
-                📋 Metadata entries: ${metas.collect { it.channels.join('_') }.join(', ')}
-                📋 Files: ${reg_files.collect { it.name }.join(', ')}
+                📍 Expected ${metas_list.size()} files but got ${files_list.size()}
+                📋 Metadata entries: ${metas_list.collect { it.channels.join('_') }.join(', ')}
+                📋 Files: ${files_list.collect { it.name }.join(', ')}
                 """.stripIndent()
                 throw new Exception(error_msg)
             }
@@ -74,26 +79,26 @@ workflow VALIS_ADAPTER {
             def manifest = new groovy.json.JsonSlurper().parseText(manifest_file.text)
 
             // Build lookup: sorted channel signature (from CSV meta) -> meta
-            def channel_key_to_meta = metas.collectEntries { meta ->
+            def channel_key_to_meta = metas_list.collectEntries { meta ->
                 // IMPORTANT: Use toSorted() instead of sort() to avoid mutating meta.channels
                 def key = meta.channels.toSorted().join('_').toLowerCase()
                 [(key): meta]
             }
 
             // Guard against duplicate channel signatures (would silently overwrite)
-            if (channel_key_to_meta.size() != metas.size()) {
-                def signatures = metas.collect { it.channels.toSorted().join('_').toLowerCase() }
+            if (channel_key_to_meta.size() != metas_list.size()) {
+                def signatures = metas_list.collect { it.channels.toSorted().join('_').toLowerCase() }
                 def duplicates = signatures.groupBy { it }.findAll { _, v -> v.size() > 1 }.keySet()
                 throw new Exception("""
                 ❌ VALIS adapter: Duplicate channel signatures for patient ${patient_id}
-                📍 ${metas.size()} slides but only ${channel_key_to_meta.size()} unique channel sets
+                📍 ${metas_list.size()} slides but only ${channel_key_to_meta.size()} unique channel sets
                 📋 Duplicated: ${duplicates.join(', ')}
                 💡 Each slide must have a unique combination of channels
                 """.stripIndent())
             }
 
             // Match each registered file by its OME channel signature
-            reg_files.collect { reg_file ->
+            files_list.collect { reg_file ->
                 def ome_channels = manifest[reg_file.name]
                 if (!ome_channels) {
                     def error_msg = """

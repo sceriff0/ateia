@@ -12,7 +12,7 @@ nextflow.enable.dsl = 2
 process SPLIT_CHANNELS {
     tag "${meta.patient_id}"
 
-    container 'docker://bolt3x/attend_image_analysis:preprocess'
+    container 'bolt3x/attend_image_analysis:preprocess'
 
     //publishDir "${params.outdir}/${meta.patient_id}/channels", mode: 'copy'
 

@@ -27,7 +27,8 @@ nextflow_process {
                         is_reference: true,
                         channels: ['DAPI', 'PANCK', 'SMA']
                     ],
-                    file('$projectDir/tests/testdata/sample_merged_quant.csv', checkIfExists: true)
+                    file('$projectDir/tests/testdata/sample_merged_quant.csv', checkIfExists: true),
+                    file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true)
                 ]
                 """
             }
@@ -64,7 +65,8 @@ nextflow_process {
                         is_reference: true,
                         channels: ['DAPI', 'PANCK', 'SMA']
                     ],
-                    file('$projectDir/tests/testdata/sample_merged_quant.csv', checkIfExists: true)
+                    file('$projectDir/tests/testdata/sample_merged_quant.csv', checkIfExists: true),
+                    file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true)
                 ]
                 """
             }
@@ -113,7 +115,8 @@ nextflow_process {
                         channels: ['DAPI', 'PANCK'],
                         custom_field: 'test_value'
                     ],
-                    file('$projectDir/tests/testdata/sample_merged_quant.csv', checkIfExists: true)
+                    file('$projectDir/tests/testdata/sample_merged_quant.csv', checkIfExists: true),
+                    file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true)
                 ]
                 """
             }
@@ -150,7 +153,8 @@ nextflow_process {
                         is_reference: true,
                         channels: ['DAPI', 'PANCK', 'SMA']
                     ],
-                    file('$projectDir/tests/testdata/sample_merged_quant.csv', checkIfExists: true)
+                    file('$projectDir/tests/testdata/sample_merged_quant.csv', checkIfExists: true),
+                    file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true)
                 ]
                 """
             }
@@ -161,6 +165,62 @@ nextflow_process {
                 { assert process.success },
                 { assert process.out.versions },
                 { assert snapshot(process.out.versions).match() }
+            )
+        }
+    }
+
+    test("Should produce valid phenotype outputs - real") {
+
+        tag "real"
+
+        when {
+            params {
+                outdir = "$outputDir"
+                pixel_size = 0.325
+                pheno_quality_percentile = 0.05
+                pheno_noise_percentile = 0.95
+            }
+            process {
+                """
+                input[0] = [
+                    [
+                        patient_id: 'P001',
+                        is_reference: true,
+                        channels: ['DAPI', 'PANCK', 'SMA']
+                    ],
+                    file('$projectDir/tests/testdata/sample_merged_quant.csv', checkIfExists: true),
+                    file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                // All 4 outputs exist
+                { assert process.out.csv },
+                { assert process.out.geojson },
+                { assert process.out.classifications },
+                { assert process.out.mapping },
+                // phenotypes_data.csv has header + data rows
+                {
+                    def csvFile = process.out.csv.get(0).get(1)
+                    def lines = path(csvFile).readLines()
+                    assert lines.size() > 1, "phenotypes_data.csv should have header + data rows, got ${lines.size()} lines"
+                },
+                // phenotypes.geojson is valid JSON
+                {
+                    def geojsonFile = process.out.geojson.get(0).get(1)
+                    def content = path(geojsonFile).text
+                    def parsed = new groovy.json.JsonSlurper().parseText(content)
+                    assert parsed != null, "phenotypes.geojson should be valid JSON"
+                },
+                // Metadata preserved
+                {
+                    assert process.out.csv.get(0).get(0).patient_id == 'P001'
+                    assert process.out.csv.get(0).get(0).channels == ['DAPI', 'PANCK', 'SMA']
+                }
             )
         }
     }
@@ -187,7 +247,8 @@ nextflow_process {
                         is_reference: true,
                         channels: ['DAPI', 'PANCK', 'SMA']
                     ],
-                    file('$projectDir/tests/testdata/sample_merged_quant.csv', checkIfExists: true)
+                    file('$projectDir/tests/testdata/sample_merged_quant.csv', checkIfExists: true),
+                    file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true)
                 ]
                 """
             }

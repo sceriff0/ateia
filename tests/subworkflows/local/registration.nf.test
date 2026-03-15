@@ -266,4 +266,53 @@ nextflow_workflow {
             assert workflow.failed
         }
     }
+
+    test("Should register images using CPU method - real") {
+
+        tag "real"
+        tag "slow"
+
+        when {
+            params {
+                outdir = "$outputDir"
+                skip_registration_qc = true
+                padding = false
+                enable_feature_error = false
+            }
+            workflow {
+                """
+                input[0] = Channel.fromList([
+                    [[patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK', 'SMA']],
+                     file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)],
+                    [[patient_id: 'P001', is_reference: false, channels: ['DAPI', 'PANCK', 'SMA']],
+                     file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)]
+                ])
+                input[1] = 'cpu'
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                // Registered outputs exist
+                { with(workflow.out.registered) {
+                    assert size() == 2
+                    // At least one output file exists with real data
+                    assert get(0).get(1) != null
+                    assert get(1).get(1) != null
+                }},
+                // patient_id preserved in all outputs
+                { with(workflow.out.registered) {
+                    def patient_ids = collect { it[0].patient_id }
+                    assert patient_ids.every { it == 'P001' }
+                }},
+                // Checkpoint CSV created
+                { with(workflow.out.checkpoint_csv) {
+                    assert size() == 1
+                    assert get(0).exists()
+                }}
+            )
+        }
+    }
 }

@@ -12,7 +12,7 @@ process GPU_REGISTER {
     tag "${meta.patient_id}"
     label 'gpu'
 
-    container 'docker://bolt3x/attend_image_analysis:debug_diffeo'
+    container 'bolt3x/attend_image_analysis:debug_diffeo'
 
     clusterOptions "--gres=gpu:${params.gpu_type}"
 

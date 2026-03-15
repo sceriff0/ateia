@@ -47,7 +47,7 @@ jobs:
 
       - name: Run Python unit tests
         run: |
-          pytest -v tests/ --ignore=tests/testdata --ignore=tests/modules --ignore=tests/subworkflows \
+          pytest -v tests/ --ignore=tests/testdata --ignore=tests/modules --ignore=tests/subworkflows --ignore=tests/integration \
             --cov=bin --cov-report=xml --cov-report=term-missing
 
       - name: Upload coverage
@@ -59,7 +59,7 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
 
   # ============================================================================
-  # Nextflow stub tests (fast, no containers needed for most)
+  # Nextflow stub tests + validation (fast, every push/PR)
   # ============================================================================
   nextflow-stub:
     name: NF ${{ matrix.nextflow-version }} stub
@@ -67,7 +67,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        nextflow-version: ['23.04.0', '24.04.0', 'latest-everything']
+        nextflow-version: ['25.04.0', 'latest-everything']
 
     steps:
       - name: Checkout repository
@@ -124,17 +124,11 @@ jobs:
             .nextflow.log
 
   # ============================================================================
-  # nf-test suite
+  # nf-test stub suite (fast, every push/PR)
   # ============================================================================
-  nf-test:
-    name: nf-test ${{ matrix.profile }}
+  nf-test-stub:
+    name: nf-test (stub)
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        profile: ['docker']
-        # Singularity requires privileged runner, skip for now
-        # profile: ['docker', 'singularity']
 
     steps:
       - name: Checkout repository
@@ -162,14 +156,7 @@ jobs:
           version: 'latest-everything'
 
       - name: Set up Docker
-        if: matrix.profile == 'docker'
         uses: docker/setup-buildx-action@v3
-
-      - name: Set up Singularity
-        if: matrix.profile == 'singularity'
-        uses: eWaterCycle/setup-singularity@v7
-        with:
-          singularity-version: 3.8.3
 
       - name: Install Python for test data generation
         uses: actions/setup-python@v5
@@ -188,15 +175,123 @@ jobs:
           sudo mv nf-test /usr/local/bin/
           nf-test version
 
-      - name: Run nf-test suite
+      - name: Run nf-test stub suite
         run: |
-          nf-test test --profile test,${{ matrix.profile }} --verbose
+          nf-test test --profile test,docker --verbose
 
       - name: Upload nf-test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: nf-test-results-${{ matrix.profile }}
+          name: nf-test-stub-results
+          path: |
+            .nf-test/
+            tests/output/
+
+  # ============================================================================
+  # nf-test real suite (runs on push to main/dev only)
+  # ============================================================================
+  nf-test-real:
+    name: nf-test (real)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Cache Nextflow
+        uses: actions/cache@v4
+        with:
+          path: ~/.nextflow
+          key: ${{ runner.os }}-nextflow-real-${{ hashFiles('**/*.nf') }}
+          restore-keys: |
+            ${{ runner.os }}-nextflow-
+
+      - name: Install Nextflow
+        uses: nf-core/setup-nextflow@v2
+        with:
+          version: 'latest-everything'
+
+      - name: Set up Docker
+        uses: docker/setup-buildx-action@v3
+
+      - name: Install Python for test data generation
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Generate test data
+        run: |
+          pip install numpy tifffile
+          python tests/testdata/generate_complete_testdata.py
+
+      - name: Install nf-test
+        run: |
+          curl -fsSL https://code.askimed.com/install/nf-test | bash -s -- -v ${{ env.NFTEST_VERSION }}
+          sudo mv nf-test /usr/local/bin/
+          nf-test version
+
+      - name: Run nf-test real suite
+        run: |
+          nf-test test --profile test,docker --tag real --verbose
+
+      - name: Upload nf-test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nf-test-real-results
+          path: |
+            .nf-test/
+            tests/output/
+
+  # ============================================================================
+  # nf-test integration suite (manual trigger only)
+  # ============================================================================
+  nf-test-integration:
+    name: nf-test (integration)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Nextflow
+        uses: nf-core/setup-nextflow@v2
+        with:
+          version: 'latest-everything'
+
+      - name: Set up Docker
+        uses: docker/setup-buildx-action@v3
+
+      - name: Install Python for test data generation
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Generate test data
+        run: |
+          pip install numpy tifffile
+          python tests/testdata/generate_complete_testdata.py
+
+      - name: Install nf-test
+        run: |
+          curl -fsSL https://code.askimed.com/install/nf-test | bash -s -- -v ${{ env.NFTEST_VERSION }}
+          sudo mv nf-test /usr/local/bin/
+          nf-test version
+
+      - name: Run nf-test integration suite
+        run: |
+          nf-test test --profile test,docker --tag integration --verbose
+
+      - name: Upload nf-test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nf-test-integration-results
           path: |
             .nf-test/
             tests/output/
@@ -207,6 +302,7 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    continue-on-error: true
 
     steps:
       - name: Checkout repository
@@ -221,14 +317,14 @@ jobs:
 
       - name: Run nf-core lint
         run: |
-          nf-core lint . || echo "Linting completed with warnings"
+          nf-core lint .
 
   # ============================================================================
   # All tests passed gate
   # ============================================================================
   all-tests:
     name: All Tests
-    needs: [python-tests, nextflow-stub, nf-test, lint]
+    needs: [python-tests, nextflow-stub, nf-test-stub, lint]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -242,12 +338,12 @@ jobs:
             echo "Nextflow stub tests failed"
             exit 1
           fi
-          if [ "${{ needs.nf-test.result }}" != "success" ] && [ "${{ needs.nf-test.result }}" != "skipped" ]; then
-            echo "nf-test failed"
+          if [ "${{ needs.nf-test-stub.result }}" != "success" ] && [ "${{ needs.nf-test-stub.result }}" != "skipped" ]; then
+            echo "nf-test stub failed"
             exit 1
           fi
-          if [ "${{ needs.lint.result }}" != "success" ] && [ "${{ needs.lint.result }}" != "skipped" ]; then
-            echo "Lint failed"
-            exit 1
+          # Lint uses continue-on-error, so we just report
+          if [ "${{ needs.lint.result }}" != "success" ]; then
+            echo "WARNING: Lint had issues (non-blocking)"
           fi
-          echo "All tests passed!"
+          echo "All required tests passed!"

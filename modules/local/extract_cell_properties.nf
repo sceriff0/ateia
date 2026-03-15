@@ -15,7 +15,7 @@ process EXTRACT_CELL_PROPERTIES {
     tag "${meta.patient_id}"
     label 'process_medium'
 
-    container 'docker://bolt3x/attend_image_analysis:quantification_gpu'
+    container 'bolt3x/attend_image_analysis:quantification_gpu'
 
     input:
     tuple val(meta), path(cell_mask)

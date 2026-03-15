@@ -39,6 +39,9 @@ nextflow_process {
 
     test("Should apply BaSiC correction - real") {
 
+        tag "real"
+        tag "slow"
+
         when {
             params {
                 preproc_tile_size = 256
@@ -63,12 +66,15 @@ nextflow_process {
             assertAll(
                 { assert process.success },
                 { assert process.out.preprocessed },
+                { assert process.out.versions },
+                // Meta preservation
                 { assert process.out.preprocessed.get(0).get(0).patient_id == 'P001' },
-                { assert process.out.preprocessed.get(0).get(1).exists() },
-                { assert snapshot(
-                    process.out.preprocessed.get(0).get(0),  // metadata
-                    process.out.versions
-                ).match() }
+                { assert process.out.preprocessed.get(0).get(0).is_reference == true },
+                { assert process.out.preprocessed.get(0).get(0).channels == ['DAPI', 'PANCK', 'SMA'] },
+                // Output file exists and is non-trivial
+                { assert process.out.preprocessed.get(0).get(1).size() > 1000 },
+                // Output file ends with _corrected.ome.tif
+                { assert process.out.preprocessed.get(0).get(1).name.endsWith('_corrected.ome.tif') }
             )
         }
     }

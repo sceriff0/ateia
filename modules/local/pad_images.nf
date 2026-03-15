@@ -2,7 +2,7 @@ process PAD_IMAGES {
     tag "${meta.patient_id}"
     label 'process_medium'
 
-    container 'docker://bolt3x/attend_image_analysis:preprocess'
+    container 'bolt3x/attend_image_analysis:preprocess'
 
     input:
     tuple val(meta), path(preprocessed_file), path(max_dims_file)

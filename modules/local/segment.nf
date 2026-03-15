@@ -11,7 +11,7 @@ process SEGMENT {
     tag "${meta.patient_id}"
     label "${params.seg_gpu ? 'gpu' : 'process_high'}"
 
-    container 'docker://bolt3x/attend_image_analysis:segmentation_gpu'
+    container 'bolt3x/attend_image_analysis:segmentation_gpu'
 
     //publishDir "${params.outdir}/${meta.patient_id}/segmentation", mode: 'copy', overwrite: true
 

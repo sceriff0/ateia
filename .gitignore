@@ -5,3 +5,4 @@ traces/*
 tests/__pycache__/*
 mirage_app/*
 notebooks/*
+.*

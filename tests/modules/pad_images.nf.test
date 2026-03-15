@@ -206,4 +206,44 @@ nextflow_process {
             assert process.success
         }
     }
+
+    test("Should pad real image to target dimensions") {
+
+        tag "real"
+        tag "slow"
+
+        when {
+            params {
+                gpu_reg_pad_mode = 'constant'
+            }
+            process {
+                """
+                input[0] = [
+                    [
+                        patient_id: 'P001',
+                        is_reference: true,
+                        channels: ['DAPI', 'PANCK', 'SMA']
+                    ],
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    file('$projectDir/tests/testdata/sample_max_dims.txt', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            def inputSize = file('$projectDir/tests/testdata/P001_ref.ome.tiff').size()
+            assertAll(
+                { assert process.success },
+                { assert process.out.padded },
+                { assert process.out.versions },
+                { with(process.out.padded) {
+                    assert size() == 1
+                    assert get(0).get(0).patient_id == 'P001'
+                    assert get(0).get(1).toString().endsWith('_padded.ome.tif')
+                    assert get(0).get(1).toFile().size() > inputSize
+                }}
+            )
+        }
+    }
 }

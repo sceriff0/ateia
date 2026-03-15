@@ -13,7 +13,7 @@ process DIFFEO_TILE {
     tag "${meta.patient_id}_${tile_id}"
     label 'process_low'
 
-    container 'docker://bolt3x/attend_image_analysis:debug_diffeo'
+    container 'bolt3x/attend_image_analysis:debug_diffeo'
 
     input:
     tuple val(meta), val(tile_id), path(tile_plan), path(reference), path(affine_image)

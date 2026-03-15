@@ -173,4 +173,42 @@ nextflow_process {
             assert process.success
         }
     }
+
+    test("Should run VALIS batch registration - real") {
+
+        tag "real"
+        tag "slow"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    'P001',
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    [
+                        file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true),
+                        file('$projectDir/tests/testdata/P001_mov2.ome.tiff', checkIfExists: true)
+                    ],
+                    [
+                        [patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK', 'SMA']],
+                        [patient_id: 'P001', is_reference: false, channels: ['DAPI', 'PANCK', 'SMA']],
+                        [patient_id: 'P001', is_reference: false, channels: ['DAPI', 'PANCK', 'SMA']]
+                    ]
+                ]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.registered },
+                { assert process.out.versions },
+                { with(process.out.registered) {
+                    assert size() == 1
+                    assert get(0).get(0) == 'P001'
+                }}
+            )
+        }
+    }
 }

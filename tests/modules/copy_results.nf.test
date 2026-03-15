@@ -99,4 +99,33 @@ nextflow_process {
             assert process.success
         }
     }
+
+    test("Should copy results and create transfer log - real") {
+
+        tag "real"
+        tag "slow"
+
+        when {
+            process {
+                """
+                input[0] = true  // results_ready trigger
+                input[1] = "$projectDir/tests/testdata"  // source_dir
+                input[2] = "$outputDir/copied_results"    // destination_dir
+                input[3] = false
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.log },
+                { with(process.out.log) {
+                    assert size() == 1
+                    assert get(0).toString().endsWith('transfer.log')
+                    assert get(0).toFile().size() > 0
+                }}
+            )
+        }
+    }
 }

@@ -8,22 +8,31 @@ Creates realistic test data including:
 - Both valid and invalid test cases for validation testing
 """
 import os
+import json
 import numpy as np
 import tifffile
 from pathlib import Path
 
-OUT_DIR = Path(__file__).parent
-OUT_DIR.mkdir(exist_ok=True)
+# Deterministic seed — ensures identical test data across runs and CI environments
+np.random.seed(42)
 
-print("Generating comprehensive test data...")
+OUT_DIR = Path(__file__).parent
+EXPECTED_DIR = OUT_DIR / 'expected'
+OUT_DIR.mkdir(exist_ok=True)
+EXPECTED_DIR.mkdir(exist_ok=True)
+
+print("Generating comprehensive test data (seed=42)...")
 
 # =============================================================================
 # 1. Generate realistic multi-channel OME-TIFF images
 # =============================================================================
 
-def create_multichannel_image(filename, size=(128, 128), n_channels=3,
+def create_multichannel_image(filename, size=(128, 128), channel_names=None,
                               add_noise=True, shift=(0, 0)):
     """Create a realistic multi-channel OME-TIFF with synthetic cell-like structures."""
+    if channel_names is None:
+        channel_names = ['DAPI', 'PANCK', 'SMA']
+    n_channels = len(channel_names)
     channels = []
 
     for ch in range(n_channels):
@@ -70,19 +79,19 @@ def create_multichannel_image(filename, size=(128, 128), n_channels=3,
         filename,
         multichannel,
         photometric='minisblack',
-        metadata={'axes': 'CYX', 'Channel': {'Name': ['DAPI', 'PANCK', 'SMA'][:n_channels]}}
+        metadata={'axes': 'CYX', 'Channel': {'Name': channel_names}}
     )
-    print(f"  Created {filename} - shape: {multichannel.shape}")
+    print(f"  Created {filename} - shape: {multichannel.shape}, channels: {channel_names}")
     return multichannel
 
-# Patient P001 - Reference and 2 moving images
+# Patient P001 - Reference and 2 moving images (each with unique marker panel, sharing DAPI)
 print("\n1. Creating multi-channel OME-TIFF images...")
-create_multichannel_image(OUT_DIR / 'P001_ref.ome.tiff', n_channels=3, shift=(0, 0))
-create_multichannel_image(OUT_DIR / 'P001_mov1.ome.tiff', n_channels=3, shift=(5, 5))
-create_multichannel_image(OUT_DIR / 'P001_mov2.ome.tiff', n_channels=3, shift=(-3, 4))
+create_multichannel_image(OUT_DIR / 'P001_ref.ome.tiff',  channel_names=['DAPI', 'PANCK', 'SMA'],      shift=(0, 0))
+create_multichannel_image(OUT_DIR / 'P001_mov1.ome.tiff', channel_names=['DAPI', 'CD3', 'CD8'],        shift=(5, 5))
+create_multichannel_image(OUT_DIR / 'P001_mov2.ome.tiff', channel_names=['DAPI', 'VIMENTIN', 'CD45'],  shift=(-3, 4))
 
 # Patient P002 - Single slide (reference only)
-create_multichannel_image(OUT_DIR / 'P002_ref.ome.tiff', n_channels=3, shift=(0, 0))
+create_multichannel_image(OUT_DIR / 'P002_ref.ome.tiff',  channel_names=['DAPI', 'PANCK', 'SMA'],      shift=(0, 0))
 
 # =============================================================================
 # 2. Generate segmentation masks
@@ -133,8 +142,8 @@ TESTDATA_ABS = str(OUT_DIR.resolve())
 with open(OUT_DIR / 'valid_preprocessing.csv', 'w') as f:
     f.write('patient_id,path_to_file,is_reference,channels\n')
     f.write(f'P001,{TESTDATA_ABS}/P001_ref.ome.tiff,true,DAPI|PANCK|SMA\n')
-    f.write(f'P001,{TESTDATA_ABS}/P001_mov1.ome.tiff,false,DAPI|PANCK|SMA\n')
-    f.write(f'P001,{TESTDATA_ABS}/P001_mov2.ome.tiff,false,DAPI|PANCK|SMA\n')
+    f.write(f'P001,{TESTDATA_ABS}/P001_mov1.ome.tiff,false,DAPI|CD3|CD8\n')
+    f.write(f'P001,{TESTDATA_ABS}/P001_mov2.ome.tiff,false,DAPI|VIMENTIN|CD45\n')
     f.write(f'P002,{TESTDATA_ABS}/P002_ref.ome.tiff,true,DAPI|PANCK|SMA\n')
 print(f"  Created valid_preprocessing.csv")
 
@@ -142,7 +151,7 @@ print(f"  Created valid_preprocessing.csv")
 with open(OUT_DIR / 'valid_checkpoint_registration.csv', 'w') as f:
     f.write('patient_id,preprocessed_image,is_reference,channels\n')
     f.write(f'P001,{TESTDATA_ABS}/P001_ref.ome.tiff,true,DAPI|PANCK|SMA\n')
-    f.write(f'P001,{TESTDATA_ABS}/P001_mov1.ome.tiff,false,DAPI|PANCK|SMA\n')
+    f.write(f'P001,{TESTDATA_ABS}/P001_mov1.ome.tiff,false,DAPI|CD3|CD8\n')
 print(f"  Created valid_checkpoint_registration.csv")
 
 # 3c. Valid checkpoint CSV for postprocessing step
@@ -160,15 +169,15 @@ print("\n4. Creating invalid input CSVs for validation tests...")
 with open(OUT_DIR / 'invalid_multi_ref.csv', 'w') as f:
     f.write('patient_id,path_to_file,is_reference,channels\n')
     f.write(f'P001,{TESTDATA_ABS}/P001_ref.ome.tiff,true,DAPI|PANCK|SMA\n')
-    f.write(f'P001,{TESTDATA_ABS}/P001_mov1.ome.tiff,true,DAPI|PANCK|SMA\n')  # SECOND REF!
-    f.write(f'P001,{TESTDATA_ABS}/P001_mov2.ome.tiff,false,DAPI|PANCK|SMA\n')
+    f.write(f'P001,{TESTDATA_ABS}/P001_mov1.ome.tiff,true,DAPI|CD3|CD8\n')  # SECOND REF!
+    f.write(f'P001,{TESTDATA_ABS}/P001_mov2.ome.tiff,false,DAPI|VIMENTIN|CD45\n')
 print(f"  Created invalid_multi_ref.csv (multiple references)")
 
 # 4b. No reference per patient
 with open(OUT_DIR / 'invalid_no_ref.csv', 'w') as f:
     f.write('patient_id,path_to_file,is_reference,channels\n')
-    f.write(f'P001,{TESTDATA_ABS}/P001_mov1.ome.tiff,false,DAPI|PANCK|SMA\n')
-    f.write(f'P001,{TESTDATA_ABS}/P001_mov2.ome.tiff,false,DAPI|PANCK|SMA\n')
+    f.write(f'P001,{TESTDATA_ABS}/P001_mov1.ome.tiff,false,DAPI|CD3|CD8\n')
+    f.write(f'P001,{TESTDATA_ABS}/P001_mov2.ome.tiff,false,DAPI|VIMENTIN|CD45\n')
 print(f"  Created invalid_no_ref.csv (no reference)")
 
 # 4c. DAPI not in channel 0 (pre-converted OME-TIFF input)
@@ -208,7 +217,7 @@ print("\n5. Creating test.config input CSV...")
 with open(OUT_DIR / 'test_input.csv', 'w') as f:
     f.write('patient_id,path_to_file,is_reference,channels\n')
     f.write(f'P001,{TESTDATA_ABS}/P001_ref.ome.tiff,true,DAPI|PANCK|SMA\n')
-    f.write(f'P001,{TESTDATA_ABS}/P001_mov1.ome.tiff,false,DAPI|PANCK|SMA\n')
+    f.write(f'P001,{TESTDATA_ABS}/P001_mov1.ome.tiff,false,DAPI|CD3|CD8\n')
 print(f"  Created test_input.csv for test profile")
 
 print("\n" + "="*70)
@@ -237,11 +246,8 @@ print("  - invalid_file_not_found.csv")
 print("\n6. Creating additional test fixtures for module tests...")
 
 # 6a. Merged quantification CSV for phenotype tests
-import json
-
 with open(OUT_DIR / 'sample_merged_quant.csv', 'w') as f:
     f.write('label,centroid_x,centroid_y,area,perimeter,eccentricity,major_axis,minor_axis,solidity,DAPI,PANCK,SMA\n')
-    np.random.seed(42)
     for i in range(1, 21):
         cx = np.random.uniform(10, 118)
         cy = np.random.uniform(10, 118)
@@ -389,8 +395,124 @@ print("  - sample_phenotypes.geojson")
 print("  - sample_feature_metrics.json")
 print("  - sample_DAPI.tif, sample_PANCK.tif, sample_SMA.tif")
 print("  - sample_channels.txt")
+# =============================================================================
+# 7. Fixtures for updated postprocessing: EXTRACT_CELL_PROPERTIES, intensity-only
+#    QUANTIFY, MERGE_QUANT_CSVS with morphology, PHENOTYPE with contours
+# =============================================================================
+print("\n7. Creating postprocessing fixtures (updated architecture)...")
+
+# 7a. Morphology CSV from EXTRACT_CELL_PROPERTIES (matches 20-cell mask)
+morphology_columns = ['label', 'y', 'x', 'area', 'eccentricity', 'perimeter',
+                      'convex_area', 'axis_major_length', 'axis_minor_length']
+morphology_rows = []
+for i in range(1, 21):
+    row = {
+        'label': i,
+        'y': round(np.random.uniform(10, 118), 1),
+        'x': round(np.random.uniform(10, 118), 1),
+        'area': int(np.random.randint(150, 350)),
+        'eccentricity': round(np.random.uniform(0.3, 0.7), 3),
+        'perimeter': round(np.random.uniform(45, 75), 1),
+        'convex_area': int(np.random.randint(160, 370)),
+        'axis_major_length': round(np.random.uniform(12, 25), 1),
+        'axis_minor_length': round(np.random.uniform(8, 18), 1),
+    }
+    morphology_rows.append(row)
+
+with open(OUT_DIR / 'sample_morphology.csv', 'w') as f:
+    f.write(','.join(morphology_columns) + '\n')
+    for row in morphology_rows:
+        f.write(','.join(str(row[c]) for c in morphology_columns) + '\n')
+print("  Created sample_morphology.csv (20 cells, morphology only)")
+
+# 7b. Contours JSON from EXTRACT_CELL_PROPERTIES
+contours = {}
+for i in range(1, 21):
+    cx = morphology_rows[i-1]['x']
+    cy = morphology_rows[i-1]['y']
+    r = np.random.uniform(5, 10)
+    n_pts = 8
+    angles = np.linspace(0, 2*np.pi, n_pts, endpoint=False)
+    coords = [[round(cx + r * np.cos(a), 1), round(cy + r * np.sin(a), 1)] for a in angles]
+    coords.append(coords[0])  # close polygon
+    contours[str(i)] = {"coordinates": coords}
+
+with open(OUT_DIR / 'sample_contours.json', 'w') as f:
+    json.dump(contours, f, indent=2)
+print("  Created sample_contours.json (20 cell polygons)")
+
+# 7c. Intensity-only CSVs (new QUANTIFY format: just label + marker)
+for ch_name, base_intensity in [('DAPI', 8000), ('PANCK', 4000), ('SMA', 2000)]:
+    with open(OUT_DIR / f'sample_{ch_name}_intensity.csv', 'w') as f:
+        f.write(f'label,{ch_name}\n')
+        for i in range(1, 21):
+            val = round(base_intensity + np.random.uniform(-1000, 3000), 1)
+            f.write(f'{i},{val}\n')
+    print(f"  Created sample_{ch_name}_intensity.csv (20 cells, intensity only)")
+
+# 7d. Empty samplesheet (header only, for validation tests)
+with open(OUT_DIR / 'empty_samplesheet.csv', 'w') as f:
+    f.write('patient_id,path_to_file,is_reference,channels\n')
+print("  Created empty_samplesheet.csv")
+
+# 7e. Single sample samplesheet (for single-sample tests)
+with open(OUT_DIR / 'single_sample.csv', 'w') as f:
+    f.write('patient_id,path_to_file,is_reference,channels\n')
+    f.write(f'P001,{TESTDATA_ABS}/P001_ref.ome.tiff,true,DAPI|PANCK|SMA\n')
+print("  Created single_sample.csv")
+
+# =============================================================================
+# 8. Golden reference files in tests/testdata/expected/
+# =============================================================================
+print("\n8. Creating golden reference files in expected/...")
+
+# 8a. Expected channel list
+with open(EXPECTED_DIR / 'channels_3ch.txt', 'w') as f:
+    f.write('DAPI\nPANCK\nSMA\n')
+print("  Created expected/channels_3ch.txt")
+
+# 8b. Expected dimensions output
+with open(EXPECTED_DIR / 'dims_128x128.txt', 'w') as f:
+    f.write('P001_ref.ome.tiff 128 128\n')
+print("  Created expected/dims_128x128.txt")
+
+# 8c. Expected max dimensions
+with open(EXPECTED_DIR / 'max_dims_128.txt', 'w') as f:
+    f.write('MAX_HEIGHT 128\nMAX_WIDTH 128\n')
+print("  Created expected/max_dims_128.txt")
+
+# 8d. Expected merged quant columns (fov + cell_size + morphology + markers)
+with open(EXPECTED_DIR / 'merged_quant_columns.txt', 'w') as f:
+    f.write('fov,cell_size,label,y,x,area,eccentricity,perimeter,convex_area,axis_major_length,axis_minor_length,DAPI,PANCK,SMA\n')
+print("  Created expected/merged_quant_columns.txt")
+
+# 8e. Expected morphology columns
+with open(EXPECTED_DIR / 'morphology_columns.txt', 'w') as f:
+    f.write(','.join(morphology_columns) + '\n')
+print("  Created expected/morphology_columns.txt")
+
+# 8f. Expected intensity CSV columns (template — substitute channel name)
+with open(EXPECTED_DIR / 'intensity_csv_columns.txt', 'w') as f:
+    f.write('label,{CHANNEL}\n')
+print("  Created expected/intensity_csv_columns.txt")
+
+# 8g. Expected preprocessing checkpoint columns
+with open(EXPECTED_DIR / 'preproc_checkpoint_columns.txt', 'w') as f:
+    f.write('patient_id,preprocessed_image,is_reference,channels\n')
+print("  Created expected/preproc_checkpoint_columns.txt")
+
+# 8h. Expected registration checkpoint columns
+with open(EXPECTED_DIR / 'reg_checkpoint_columns.txt', 'w') as f:
+    f.write('patient_id,registered_image,is_reference,channels\n')
+print("  Created expected/reg_checkpoint_columns.txt")
+
+print("\n" + "=" * 70)
+print("All test data generation complete!")
+print("=" * 70)
+
 print("\nThese files can be used to test:")
 print("  1. Full pipeline execution with -profile test")
 print("  2. Individual process testing with nf-test")
 print("  3. Input validation and error handling")
 print("  4. Module-level unit tests")
+print("  5. Golden file comparison for output correctness")

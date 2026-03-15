@@ -169,4 +169,41 @@ nextflow_process {
             assert process.success
         }
     }
+
+    test("Should generate preprocessing QC images - real") {
+
+        tag "real"
+        tag "slow"
+
+        when {
+            params {
+                preprocess_qc_scale_factor = 0.25
+            }
+            process {
+                """
+                input[0] = [
+                    [
+                        patient_id: 'P001',
+                        is_reference: true,
+                        channels: ['DAPI', 'PANCK', 'SMA']
+                    ],
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.qc },
+                { with(process.out.qc) {
+                    assert size() == 1
+                    assert get(0).get(0).patient_id == 'P001'
+                    assert get(0).get(1).every { it.toString().endsWith('.png') }
+                    assert get(0).get(1).every { it.toFile().size() > 100 }
+                }}
+            )
+        }
+    }
 }

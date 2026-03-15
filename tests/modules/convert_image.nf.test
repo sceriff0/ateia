@@ -169,4 +169,47 @@ nextflow_process {
             assert process.success
         }
     }
+
+    test("Should convert OME-TIFF with correct channels - real") {
+
+        tag "real"
+        tag "slow"
+
+        when {
+            params {
+                pixel_size = 0.325
+            }
+            process {
+                """
+                input[0] = [
+                    [
+                        patient_id: 'P001',
+                        is_reference: true,
+                        channels: ['DAPI', 'PANCK', 'SMA']
+                    ],
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.ome_tiff },
+                { assert process.out.versions },
+                // Meta preservation
+                { assert process.out.ome_tiff.get(0).get(0).patient_id == 'P001' },
+                { assert process.out.ome_tiff.get(0).get(0).is_reference == true },
+                { assert process.out.ome_tiff.get(0).get(0).channels == ['DAPI', 'PANCK', 'SMA'] },
+                // OME-TIFF output is non-trivial
+                { assert process.out.ome_tiff.get(0).get(1).size() > 1000 },
+                // channels.txt content matches expected channel names
+                {
+                    def channelsContent = process.out.ome_tiff.get(0).get(2).text.trim()
+                    assert channelsContent == "DAPI\nPANCK\nSMA"
+                }
+            )
+        }
+    }
 }
