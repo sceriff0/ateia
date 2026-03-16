@@ -13,7 +13,7 @@ process SPLIT_CHANNELS {
     tag "${meta.patient_id}"
     label 'process_medium'
 
-    container 'bolt3x/attend_image_analysis:quantification_gpu'
+    container 'bolt3x/attend_image_analysis:preprocess'
 
     //publishDir "${params.outdir}/${meta.patient_id}/channels", mode: 'copy'
 

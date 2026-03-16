@@ -2,7 +2,7 @@ process MAX_DIM {
     tag "${patient_id}"
     label 'process_single'
 
-    container 'cdgatenbee/valis-wsi:1.0.0'
+    container 'bolt3x/attend_image_analysis:preprocess'
 
     input:
     tuple val(patient_id), path(dims_files)
