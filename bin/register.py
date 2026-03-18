@@ -1048,8 +1048,8 @@ def parse_args() -> argparse.Namespace:
 
     # Registration parameters
     parser.add_argument('--memory-mode', type=str, default='high',
-                        choices=['high', 'low'],
-                        help='Memory preset. "high": SuperPoint/SuperGlue, 1024/4096px dimensions. '
+                        choices=['high', 'medium', 'low'],
+                        help='Memory preset. "high": SuperPoint/SuperGlue, 2048/4096px dimensions. (medium is same with 1048/4096px) '
                              '"low": BRISK/RANSAC, 256/1024px dimensions.')
     parser.add_argument('--micro-reg-fraction', type=float, default=0.125,
                         help='Fraction of image size for micro-registration')
