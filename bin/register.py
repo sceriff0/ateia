@@ -93,7 +93,14 @@ MEMORY_PRESETS = {
     "high": {
         "feature_detector_cls": feature_detectors.SuperPointFD,
         "matcher": feature_matcher.SuperGlueMatcher(),
-        "max_processed_image_dim_px": 2048 #1024,  # Higher resolution for better feature detection (RAM impact)
+        "max_processed_image_dim_px": 2048, #1024,  # Higher resolution for better feature detection (RAM impact)
+        "max_non_rigid_registration_dim_px": 4096,  # Higher resolution for more accurate non-rigid registration (RAM impact)
+        "num_features": 5000,
+    },
+    "medium": {
+        "feature_detector_cls": feature_detectors.SuperPointFD,
+        "matcher": feature_matcher.SuperGlueMatcher(),
+        "max_processed_image_dim_px": 1024,  # Higher resolution for better feature detection (RAM impact)
         "max_non_rigid_registration_dim_px": 4096,  # Higher resolution for more accurate non-rigid registration (RAM impact)
         "num_features": 5000,
     },
