@@ -142,9 +142,9 @@ workflow MIRAGE {
         ch_versions = ch_versions.mix(POSTPROCESSING.out.versions)
     }
 
-    CUSTOM_DUMPSOFTWAREVERSIONS(
+    /*CUSTOM_DUMPSOFTWAREVERSIONS(
         ch_versions.unique().collectFile(name: 'collated_versions.yml')
-    )
+    )*/
 
     /* -------------------- TRACE AGGREGATION -------------------- */
 
