@@ -131,6 +131,13 @@ process REGISTER {
         exit 1
     fi
 
+    # Strict check: all input slides must produce a registered output
+    if [ "\$output_count" -ne "\$file_count" ]; then
+        echo "ERROR: Output count mismatch — expected \$file_count registered files but got \$output_count"
+        echo "VALIS failed to warp some slides. Check the logs above for details."
+        exit 1
+    fi
+
     # Extract channel names from OME metadata of registered files into a manifest
     # convert_image guarantees OME-XML metadata is always present in pipeline images
     echo "=== Creating channels manifest from OME metadata ==="
