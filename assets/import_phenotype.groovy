@@ -26,7 +26,6 @@ import qupath.lib.objects.PathObjects
 import qupath.lib.objects.classes.PathClass
 import qupath.lib.roi.ROIs
 import qupath.lib.regions.ImagePlane
-import qupath.lib.gui.dialogs.Dialogs
 import com.google.gson.JsonParser
 
 // ============================================================================
@@ -104,7 +103,7 @@ println "=" * 60
 // Check image
 def imageData = getCurrentImageData()
 if (imageData == null) {
-    Dialogs.showErrorMessage("Error", "Please open an image first!")
+    Dialogs.showErrorNotification("Error", "Please open an image first!")
     return
 }
 
@@ -116,13 +115,11 @@ println "Pixel size: ${pixelSize} µm"
 // Check existing detections
 def existingDetections = getDetectionObjects()
 if (existingDetections.size() > 0) {
-    def choice = Dialogs.showChoiceDialog(
+    def confirm = Dialogs.showConfirmDialog(
         "Existing detections",
-        "Found ${existingDetections.size()} existing detections.\nWhat would you like to do?",
-        ["Clear all & import fresh", "Cancel"] as String[],
-        "Clear all & import fresh"
+        "Found ${existingDetections.size()} existing detections.\nClear all and import fresh?"
     )
-    if (choice == null || choice == "Cancel") {
+    if (!confirm) {
         println "Cancelled."
         registerToggle()
         return
@@ -133,7 +130,18 @@ if (existingDetections.size() > 0) {
 }
 
 // Prompt for GeoJSON file
-def geojsonFile = Dialogs.promptForFile("Select GeoJSON file", null, "GeoJSON", ".geojson")
+def geojsonFile = null
+def latch = new java.util.concurrent.CountDownLatch(1)
+javafx.application.Platform.runLater {
+    def fc = new javafx.stage.FileChooser()
+    fc.setTitle("Select GeoJSON file")
+    fc.getExtensionFilters().add(
+        new javafx.stage.FileChooser.ExtensionFilter("GeoJSON", "*.geojson")
+    )
+    geojsonFile = fc.showOpenDialog(null)
+    latch.countDown()
+}
+latch.await()
 if (geojsonFile == null) {
     println "Cancelled."
     registerToggle()
