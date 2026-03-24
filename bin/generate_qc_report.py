@@ -25,7 +25,7 @@ def parse_args():
     p.add_argument("--registration-qc",  default="registration_qc/", help="Directory of registration QC PNGs")
     p.add_argument("--feature-distances",default="feature_dist/",     help="Directory of feature-distance JSONs")
     p.add_argument("--valis-summary",    default="valis_summary/",    help="Directory of Valis summary CSVs")
-    p.add_argument("--phenotype-data",   default="phenotype/",        help="Directory of phenotype CSVs")
+    p.add_argument("--postprocess-qc",   default="postprocess_qc/",   help="Directory of postprocessing QC PNGs")
     p.add_argument("--versions",         default=None,                help="Path to collated versions.yml")
     p.add_argument("--output",           default="mirage_qc_report.html", help="Output HTML path")
     p.add_argument("--data-dir",         default="mirage_qc_data/",   help="Directory to copy input data into")
@@ -319,21 +319,9 @@ def registration_qc_section(reg_dir, feat_dir, valis_dir):
     return section("Registration QC", "\n".join(parts))
 
 
-def phenotype_section(phenotype_dir):
-    csvs = list_files(phenotype_dir, "*.csv")
-    if not csvs:
-        return section("Phenotyping Summary", '<p class="empty-notice">No phenotype CSVs found.</p>')
-    body = (
-        "<table><thead><tr><th>File</th><th>Rows</th></tr></thead><tbody>"
-    )
-    for cp in csvs:
-        try:
-            n = count_csv_rows(cp)
-        except Exception:
-            n = "error"
-        body += f"<tr><td>{Path(cp).name}</td><td>{n}</td></tr>"
-    body += "</tbody></table>"
-    return section("Phenotyping Summary", body)
+def postprocess_qc_section(postprocess_dir):
+    pngs = list_files(postprocess_dir, "*.png")
+    return section("Postprocessing QC", img_grid(pngs))
 
 # ---------------------------------------------------------------------------
 # Data copy
@@ -356,7 +344,7 @@ def copy_data(args):
     copy_glob(args.registration_qc,   "*.png",  "registration_qc")
     copy_glob(args.feature_distances, "*.json", "feature_dist")
     copy_glob(args.valis_summary,     "*.csv",  "valis_summary")
-    copy_glob(args.phenotype_data,    "*.csv",  "phenotype")
+    copy_glob(args.postprocess_qc,    "*.png",  "postprocess_qc")
 
 # ---------------------------------------------------------------------------
 # Main
@@ -374,7 +362,7 @@ def main():
         args.feature_distances,
         args.valis_summary,
     ))
-    html_parts.append(phenotype_section(args.phenotype_data))
+    html_parts.append(postprocess_qc_section(args.postprocess_qc))
     html_parts.append(html_footer())
 
     out_path = Path(args.output)

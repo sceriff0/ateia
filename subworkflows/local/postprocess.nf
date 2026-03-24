@@ -1,5 +1,7 @@
 nextflow.enable.dsl = 2
 
+import static ParamUtils.*
+
 /*
 ========================================================================================
     IMPORT MODULES
@@ -11,10 +13,11 @@ include { EXTRACT_CELL_PROPERTIES } from '../../modules/local/extract_cell_prope
 include { SPLIT_CHANNELS           } from '../../modules/local/split_channels'
 include { QUANTIFY                 } from '../../modules/local/quantify'
 include { MERGE_QUANT_CSVS         } from '../../modules/local/quantify'
-include { PHENOTYPE                } from '../../modules/local/phenotype'
+include { EXPORT_GEOJSON            } from '../../modules/local/export_geojson'
 include { MERGE_AND_PYRAMID        } from '../../modules/local/merge_and_pyramid'
-include { PIXIE_PIXEL_CLUSTER      } from '../../modules/local/pixie_pixel_cluster'
-include { PIXIE_CELL_CLUSTER       } from '../../modules/local/pixie_cell_cluster'
+include { PIXIE_PIXEL_CLUSTER           } from '../../modules/local/pixie_pixel_cluster'
+include { PIXIE_CELL_CLUSTER            } from '../../modules/local/pixie_cell_cluster'
+include { GENERATE_POSTPROCESSING_QC    } from '../../modules/local/generate_postprocessing_qc'
 
 def withDebugView(channel, Closure formatter) {
     return params.debug_channels ? channel.view(formatter) : channel
@@ -26,14 +29,15 @@ def withDebugView(channel, Closure formatter) {
 ========================================================================================
     Description:
         Segments reference image, splits multichannel images to single channels,
-        quantifies marker intensities per cell, merges results, and assigns phenotypes.
+        quantifies marker intensities per cell, merges results, and exports
+        QuPath-compatible GeoJSON with raw measurements for FlowPath gating.
 
     Input:
         ch_registered: Channel of [meta, file] tuples for registered images
 
     Output:
-        phenotype_csv: Phenotyped cell data CSV
-        phenotype_geojson: QuPath-compatible GeoJSON with cell detections
+        geojson: QuPath-compatible GeoJSON with cell detections and raw measurements
+        cell_csv: Cell data CSV with raw intensities and z-scores
         merged_csv: Merged quantification CSV
         cell_mask: Cell segmentation mask
 ========================================================================================
@@ -44,13 +48,6 @@ workflow POSTPROCESSING {
     ch_registered       // Channel of [meta, file] tuples
 
     main:
-
-    // ========================================================================
-    // PHENOTYPE CONFIG - Resolve config file (custom or default)
-    // ========================================================================
-    phenotype_config_ch = params.phenotype_config
-        ? Channel.fromPath(params.phenotype_config, checkIfExists: true)
-        : Channel.fromPath("${projectDir}/assets/phenotype_config.json", checkIfExists: true)
 
     // ========================================================================
     // SEGMENTATION - Process reference images only
@@ -161,37 +158,28 @@ workflow POSTPROCESSING {
     MERGE_QUANT_CSVS(ch_for_merge)
 
     // ========================================================================
-    // PHENOTYPING - Run on merged CSV with contours for polygon GeoJSON
+    // GEOJSON EXPORT - Export cell data with raw measurements for FlowPath
     // ========================================================================
     // Join merged CSV with pre-computed contours from EXTRACT_CELL_PROPERTIES
     ch_contours = EXTRACT_CELL_PROPERTIES.out.contours
         .map { meta, json_file -> [meta.patient_id, json_file] }
 
-    ch_for_phenotype = MERGE_QUANT_CSVS.out.merged_csv
+    ch_for_export = MERGE_QUANT_CSVS.out.merged_csv
         .map { meta, csv -> [meta.patient_id, meta, csv] }
         .join(ch_contours, by: 0)
         .map { _patient_id, meta, csv, contours_json -> [meta, csv, contours_json] }
 
-    PHENOTYPE(
-        ch_for_phenotype,
-        phenotype_config_ch.first()  // .first() converts to value channel for reuse across samples
-    )
+    EXPORT_GEOJSON(ch_for_export)
 
     // ========================================================================
-    // PIXIE CLUSTERING (optional, runs in PARALLEL with PHENOTYPE)
+    // PIXIE CLUSTERING (optional, runs in PARALLEL with EXPORT_GEOJSON)
     // Data-driven unsupervised cell clustering using Pixie
     // ========================================================================
     // IMPORTANT: Channel definitions must be OUTSIDE the if block for proper dataflow subscription
     // Only process invocations go inside the if block
 
     // Convert channels param to list (do this unconditionally for channel definition)
-    def pixie_channels_list = params.pixie_channels instanceof List ?
-        params.pixie_channels :
-        (params.pixie_channels ?: '').toString()
-            .replaceAll(/[\[\]']/, '')
-            .tokenize(',')
-            .collect { it.trim() }
-            .findAll { it }  // Remove empty strings
+    def pixie_channels_list = ParamUtils.parseListParam(params.pixie_channels)
 
     def pixie_channel_count = pixie_channels_list.size()
 
@@ -327,23 +315,37 @@ workflow POSTPROCESSING {
     MERGE_AND_PYRAMID(ch_for_merge)
 
     // ========================================================================
+    // POSTPROCESSING QC (optional, runs in PARALLEL with MERGE_AND_PYRAMID)
+    // ========================================================================
+    ch_postprocess_qc = Channel.empty()
+    if (!params.skip_postprocessing_qc) {
+        // Join cell mask with merged CSV for QC visualization
+        ch_for_postprocess_qc = SEGMENT.out.cell_mask
+            .map { meta, mask -> [meta.patient_id, meta, mask] }
+            .join(
+                MERGE_QUANT_CSVS.out.merged_csv.map { meta, csv -> [meta.patient_id, csv] },
+                by: 0
+            )
+            .map { _patient_id, meta, mask, csv -> [meta, mask, csv] }
+
+        GENERATE_POSTPROCESSING_QC(ch_for_postprocess_qc)
+        ch_postprocess_qc = GENERATE_POSTPROCESSING_QC.out.qc.map { meta, pngs -> pngs }
+    }
+
+    // ========================================================================
     // CHECKPOINT - Collect all outputs by patient
     // ========================================================================
     // Use collectFile() for non-blocking aggregation (enables patient-level parallelism)
     // The join chain is kept (it's per-patient and doesn't block other patients)
 
     // Base checkpoint data (always present)
-    ch_base_checkpoint = PHENOTYPE.out.csv
+    ch_base_checkpoint = EXPORT_GEOJSON.out.csv
         .map { meta, csv ->
-            def published_path = "${params.outdir}/${meta.patient_id}/phenotype/${csv.name}"
+            def published_path = "${params.outdir}/${meta.patient_id}/geojson/${csv.name}"
             [meta.patient_id, published_path]
         }
-        .join(PHENOTYPE.out.geojson.map { meta, geojson ->
-            def published_path = "${params.outdir}/${meta.patient_id}/phenotype/${geojson.name}"
-            [meta.patient_id, published_path]
-        })
-        .join(PHENOTYPE.out.mapping.map { meta, map ->
-            def published_path = "${params.outdir}/${meta.patient_id}/phenotype/${map.name}"
+        .join(EXPORT_GEOJSON.out.geojson.map { meta, geojson ->
+            def published_path = "${params.outdir}/${meta.patient_id}/geojson/${geojson.name}"
             [meta.patient_id, published_path]
         })
         .join(MERGE_QUANT_CSVS.out.merged_csv.map { meta, csv ->
@@ -374,25 +376,25 @@ workflow POSTPROCESSING {
                 def published_path = "${params.outdir}/${meta.patient_id}/pixie/cell_clustering/cell_output/${mapping.name}"
                 [meta.patient_id, published_path]
             })
-            .map { patient_id, pheno_csv, pheno_geojson, pheno_map, merged_csv, cell_mask, pyramid, pixie_csv, pixie_geojson, pixie_mapping ->
-                "${patient_id},${pheno_csv},${pheno_geojson},${pheno_map},${merged_csv},${cell_mask},${pyramid},${pixie_csv},${pixie_geojson},${pixie_mapping}"
+            .map { patient_id, cell_csv, cell_geojson, merged_csv, cell_mask, pyramid, pixie_csv, pixie_geojson, pixie_mapping ->
+                "${patient_id},${cell_csv},${cell_geojson},${merged_csv},${cell_mask},${pyramid},${pixie_csv},${pixie_geojson},${pixie_mapping}"
             }
             .collectFile(
                 name: 'postprocessed.csv',
                 newLine: true,
                 storeDir: "./csv",
-                seed: 'patient_id,phenotype_csv,phenotype_geojson,phenotype_mapping,merged_csv,cell_mask,pyramid,pixie_cell_table,pixie_geojson,pixie_mapping'
+                seed: 'patient_id,cell_csv,cell_geojson,merged_csv,cell_mask,pyramid,pixie_cell_table,pixie_geojson,pixie_mapping'
             )
     } else {
         ch_checkpoint_csv = ch_base_checkpoint
-            .map { patient_id, pheno_csv, pheno_geojson, pheno_map, merged_csv, cell_mask, pyramid ->
-                "${patient_id},${pheno_csv},${pheno_geojson},${pheno_map},${merged_csv},${cell_mask},${pyramid}"
+            .map { patient_id, cell_csv, cell_geojson, merged_csv, cell_mask, pyramid ->
+                "${patient_id},${cell_csv},${cell_geojson},${merged_csv},${cell_mask},${pyramid}"
             }
             .collectFile(
                 name: 'postprocessed.csv',
                 newLine: true,
                 storeDir: "./csv",
-                seed: 'patient_id,phenotype_csv,phenotype_geojson,phenotype_mapping,merged_csv,cell_mask,pyramid'
+                seed: 'patient_id,cell_csv,cell_geojson,merged_csv,cell_mask,pyramid'
             )
     }
 
@@ -403,7 +405,7 @@ workflow POSTPROCESSING {
         .mix(SPLIT_CHANNELS.out.size_log)
         .mix(QUANTIFY.out.size_log)
         .mix(MERGE_QUANT_CSVS.out.size_log)
-        .mix(PHENOTYPE.out.size_log)
+        .mix(EXPORT_GEOJSON.out.size_log)
         .mix(MERGE_AND_PYRAMID.out.size_log)
 
     // Add Pixie size logs if enabled
@@ -413,6 +415,12 @@ workflow POSTPROCESSING {
             .mix(PIXIE_CELL_CLUSTER.out.size_log)
     }
 
+    // Add postprocessing QC size logs if enabled
+    if (!params.skip_postprocessing_qc) {
+        ch_size_logs = ch_size_logs
+            .mix(GENERATE_POSTPROCESSING_QC.out.size_log)
+    }
+
     // Collect versions from all postprocessing processes
     ch_versions = Channel.empty()
         .mix(SEGMENT.out.versions.first())
@@ -420,7 +428,7 @@ workflow POSTPROCESSING {
         .mix(SPLIT_CHANNELS.out.versions.first())
         .mix(QUANTIFY.out.versions.first())
         .mix(MERGE_QUANT_CSVS.out.versions.first())
-        .mix(PHENOTYPE.out.versions.first())
+        .mix(EXPORT_GEOJSON.out.versions.first())
         .mix(MERGE_AND_PYRAMID.out.versions.first())
 
     if (params.pixie_enabled) {
@@ -429,8 +437,14 @@ workflow POSTPROCESSING {
             .mix(PIXIE_CELL_CLUSTER.out.versions.first())
     }
 
+    if (!params.skip_postprocessing_qc) {
+        ch_versions = ch_versions
+            .mix(GENERATE_POSTPROCESSING_QC.out.versions.first())
+    }
+
     emit:
-    checkpoint_csv = ch_checkpoint_csv
-    size_logs = ch_size_logs
-    versions = ch_versions
+    checkpoint_csv    = ch_checkpoint_csv
+    postprocess_qc    = ch_postprocess_qc
+    size_logs         = ch_size_logs
+    versions          = ch_versions
 }

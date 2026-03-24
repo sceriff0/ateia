@@ -10,7 +10,7 @@
 process AGGREGATE_SIZE_LOGS {
     tag "aggregate"
     label 'process_single'
-    container null
+    container null  // Simple CSV concatenation: no dependencies, runs on executor node
 
     input:
     path(size_csvs)

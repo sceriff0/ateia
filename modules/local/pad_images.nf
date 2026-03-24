@@ -17,7 +17,6 @@ process PAD_IMAGES {
 
     script:
     def args = task.ext.args ?: ''
-    def prefix = task.ext.prefix ?: "${meta.patient_id}"
     def pad_mode = params.pad_mode ?: 'constant'
     """
     # Log input size for tracing (-L follows symlinks)
@@ -46,7 +45,6 @@ process PAD_IMAGES {
     """
 
     stub:
-    def prefix = task.ext.prefix ?: "${meta.patient_id}"
     """
     touch ${preprocessed_file.simpleName}_padded.ome.tif
     echo "STUB,${meta.patient_id},stub,0" > ${meta.patient_id}_${preprocessed_file.simpleName}.PAD_IMAGES.size.csv

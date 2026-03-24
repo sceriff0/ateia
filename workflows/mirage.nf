@@ -8,7 +8,7 @@ include { PREPROCESSING       } from '../subworkflows/local/preprocess'
 include { REGISTRATION        } from '../subworkflows/local/registration'
 include { POSTPROCESSING      } from '../subworkflows/local/postprocess'
 include { AGGREGATE_SIZE_LOGS         } from '../modules/local/aggregate_size_logs'
-include { CUSTOM_DUMPSOFTWAREVERSIONS } from '../modules/local/dump_software_versions'
+include { GENERATE_QC_REPORT          } from '../modules/local/generate_qc_report'
 
 import static CsvUtils.*
 import static ParamUtils.*
@@ -127,24 +127,47 @@ workflow MIRAGE {
         POSTPROCESSING(ch_for_postprocessing)
     }
 
-    /* -------------------- VERSION COLLECTION -------------------- */
+    /* -------------------- FINAL QC REPORT -------------------- */
 
-    // Collect software versions from all active subworkflows
-    ch_versions = Channel.empty()
+    // Aggregate QC outputs from all steps into a single HTML report
+    if (!params.skip_final_qc_report) {
+        // Collect QC outputs from each step (empty channels for steps not run)
+        def ch_preprocess_qc_pngs  = Channel.empty()
+        def ch_registration_qc_pngs = Channel.empty()
+        def ch_feature_dist_jsons   = Channel.empty()
+        def ch_postprocess_qc_pngs  = Channel.empty()
+        def ch_versions             = Channel.empty()
 
-    if (params.step == 'preprocessing') {
-        ch_versions = ch_versions.mix(PREPROCESSING.out.versions)
-    }
-    if (params.step in ['preprocessing', 'registration']) {
-        ch_versions = ch_versions.mix(REGISTRATION.out.versions)
-    }
-    if (params.step in ['preprocessing', 'registration', 'postprocessing']) {
-        ch_versions = ch_versions.mix(POSTPROCESSING.out.versions)
-    }
+        if (params.step == 'preprocessing') {
+            ch_preprocess_qc_pngs = ch_preprocess_qc_pngs.mix(PREPROCESSING.out.preprocess_qc)
+            ch_versions = ch_versions.mix(PREPROCESSING.out.versions)
+        }
+        if (params.step in ['preprocessing', 'registration']) {
+            ch_registration_qc_pngs = ch_registration_qc_pngs
+                .mix(REGISTRATION.out.qc.map { meta, files -> files })
+            ch_feature_dist_jsons = ch_feature_dist_jsons
+                .mix(REGISTRATION.out.error_metrics.map { meta, files -> files })
+            ch_versions = ch_versions.mix(REGISTRATION.out.versions)
+        }
+        if (params.step in ['preprocessing', 'registration', 'postprocessing']) {
+            ch_postprocess_qc_pngs = ch_postprocess_qc_pngs.mix(POSTPROCESSING.out.postprocess_qc)
+            ch_versions = ch_versions.mix(POSTPROCESSING.out.versions)
+        }
 
-    /*CUSTOM_DUMPSOFTWAREVERSIONS(
-        ch_versions.unique().collectFile(name: 'collated_versions.yml')
-    )*/
+        // Collate versions into a single file
+        ch_collated_versions = ch_versions
+            .unique()
+            .collectFile(name: 'collated_versions.yml')
+
+        GENERATE_QC_REPORT(
+            ch_preprocess_qc_pngs.collect().ifEmpty([]),
+            ch_registration_qc_pngs.collect().ifEmpty([]),
+            ch_feature_dist_jsons.collect().ifEmpty([]),
+            Channel.empty().collect().ifEmpty([]),       // valis_summary (collected from registration adapter if available)
+            ch_postprocess_qc_pngs.collect().ifEmpty([]),
+            ch_collated_versions
+        )
+    }
 
     /* -------------------- TRACE AGGREGATION -------------------- */
 

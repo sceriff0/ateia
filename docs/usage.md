@@ -193,14 +193,6 @@ Pass a template with `-params-file params/full_pipeline.json` and override indiv
 |---|---|---|
 | `quant_min_area` | `10` | Minimum cell area in pixels to retain for quantification |
 
-### Phenotyping
-
-| Parameter | Default | Description |
-|---|---|---|
-| `phenotype_config` | `null` | Path to YAML/JSON rule file defining phenotype gates |
-| `pheno_quality_percentile` | `1` | Percentile threshold for quality filtering |
-| `pheno_noise_percentile` | `5` | Percentile threshold for noise filtering |
-
 ### Pixie Clustering (Optional)
 
 | Parameter | Default | Description |

@@ -16,8 +16,6 @@ nextflow_workflow {
                 outdir = "$outputDir"
                 seg_gpu = false
                 pixel_size = 0.325
-                pheno_quality_percentile = 0.05
-                pheno_noise_percentile = 0.95
                 pyramid_resolutions = 8
                 pyramid_scale = 2
                 tilex = 512
@@ -52,8 +50,6 @@ nextflow_workflow {
                 outdir = "$outputDir"
                 seg_gpu = false
                 pixel_size = 0.325
-                pheno_quality_percentile = 0.05
-                pheno_noise_percentile = 0.95
                 pyramid_resolutions = 8
                 pyramid_scale = 2
                 tilex = 512
@@ -90,8 +86,6 @@ nextflow_workflow {
                 outdir = "$outputDir"
                 seg_gpu = false
                 pixel_size = 0.325
-                pheno_quality_percentile = 0.05
-                pheno_noise_percentile = 0.95
                 pyramid_resolutions = 8
                 pyramid_scale = 2
                 tilex = 512
@@ -124,8 +118,6 @@ nextflow_workflow {
                 outdir = "$outputDir"
                 seg_gpu = false
                 pixel_size = 0.325
-                pheno_quality_percentile = 0.05
-                pheno_noise_percentile = 0.95
                 pyramid_resolutions = 8
                 pyramid_scale = 2
                 tilex = 512
@@ -162,8 +154,6 @@ nextflow_workflow {
                 outdir = "$outputDir"
                 seg_gpu = false
                 pixel_size = 0.325
-                pheno_quality_percentile = 0.05
-                pheno_noise_percentile = 0.95
                 pyramid_resolutions = 8
                 pyramid_scale = 2
                 tilex = 512
@@ -198,8 +188,6 @@ nextflow_workflow {
                 outdir = "$outputDir"
                 seg_gpu = false
                 pixel_size = 0.325
-                pheno_quality_percentile = 0.05
-                pheno_noise_percentile = 0.95
                 pyramid_resolutions = 8
                 pyramid_scale = 2
                 tilex = 512
@@ -233,8 +221,6 @@ nextflow_workflow {
                 outdir = "$outputDir"
                 seg_gpu = false
                 pixel_size = 0.325
-                pheno_quality_percentile = 0.05
-                pheno_noise_percentile = 0.95
                 pyramid_resolutions = 4
                 pyramid_scale = 2
                 tilex = 512
@@ -267,7 +253,7 @@ nextflow_workflow {
                     // Validate header contains expected columns
                     def header = lines[0]
                     assert header.contains('patient_id')
-                    assert header.contains('phenotype_csv')
+                    assert header.contains('cell_csv')
                     assert header.contains('merged_csv')
                     assert header.contains('cell_mask')
                     assert header.contains('pyramid')

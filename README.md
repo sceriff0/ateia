@@ -6,7 +6,7 @@
 
 ## Introduction
 
-MIRAGE is a Nextflow DSL2 pipeline for whole slide image (WSI) processing. It supports multiplex fluorescence imaging workflows end-to-end: illumination correction, multi-modal registration, cell segmentation, single-cell marker quantification, and rule-based phenotyping. The pipeline is designed for HPC SLURM environments but also runs locally via Docker or Singularity.
+MIRAGE is a Nextflow DSL2 pipeline for whole slide image (WSI) processing. It supports multiplex fluorescence imaging workflows end-to-end: illumination correction, multi-modal registration, cell segmentation, single-cell marker quantification, and QuPath-compatible GeoJSON export for interactive gating via FlowPath. The pipeline is designed for HPC SLURM environments but also runs locally via Docker or Singularity.
 
 ## Pipeline Summary
 
@@ -20,7 +20,7 @@ MIRAGE is a Nextflow DSL2 pipeline for whole slide image (WSI) processing. It su
    - `cpu_tiled` — memory-constrained tiled CPU pairwise registration
 4. **Cell segmentation** (`SEGMENT`) — Nuclear and cell segmentation via [StarDist](https://github.com/stardist/stardist); outputs GeoJSON contours per patient
 5. **Single-cell marker quantification** (`QUANTIFY`) — Extracts per-cell intensity statistics across all registered channels; outputs CSV tables
-6. **Rule-based cell phenotyping** (`PHENOTYPE`) — Assigns cell phenotype labels from a user-supplied configuration; outputs annotated CSV and GeoJSON
+6. **QuPath GeoJSON export** (`EXPORT_GEOJSON`) — Exports all cells with raw marker intensities and morphological measurements in QuPath-native GeoJSON format for interactive gating via FlowPath
 7. **Optional: Pixie unsupervised clustering** — Pixel- and cell-level clustering via [ark-analysis/Pixie](https://github.com/angelolab/pixie); enabled with `--pixie_enabled true`
 8. **Pyramidal OME-TIFF export** — Assembles all registered channels into a tiled, multi-resolution OME-TIFF for visualization (e.g., QuPath, napari)
 9. **Quality control reporting** — QC overlays and metrics are generated at the preprocessing and registration steps

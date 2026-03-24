@@ -48,7 +48,6 @@ process PIXIE_CELL_CLUSTER {
 
     script:
     def args = task.ext.args ?: ''
-    def prefix = task.ext.prefix ?: "${meta.patient_id}"
     """
     # Log input sizes for tracing
     pixel_bytes=\$(du -sLb ${pixel_data_dir} 2>/dev/null | cut -f1 || echo 0)
@@ -101,7 +100,6 @@ process PIXIE_CELL_CLUSTER {
     """
 
     stub:
-    def prefix = task.ext.prefix ?: "${meta.patient_id}"
     """
     mkdir -p cell_output
     mkdir -p cell_masks

@@ -58,7 +58,9 @@ workflow PREPROCESSING {
     ch_preprocessed_with_meta = PREPROCESS.out.preprocessed
 
     // Generate QC images (PNG per channel) for visual inspection
-    // GENERATE_PREPROCESS_QC ( ch_preprocessed_with_meta )
+    if (!params.skip_preprocess_qc) {
+        GENERATE_PREPROCESS_QC ( ch_preprocessed_with_meta )
+    }
 
     // Generate checkpoint CSV for restart from preprocessing step
     // Use collectFile() for non-blocking aggregation (enables patient-level parallelism)
@@ -85,9 +87,18 @@ workflow PREPROCESSING {
         .mix(CONVERT_IMAGE.out.versions.first())
         .mix(PREPROCESS.out.versions.first())
 
+    // Collect QC outputs (if enabled)
+    ch_preprocess_qc = Channel.empty()
+    if (!params.skip_preprocess_qc) {
+        ch_preprocess_qc = GENERATE_PREPROCESS_QC.out.qc.map { meta, pngs -> pngs }
+        ch_size_logs = ch_size_logs.mix(GENERATE_PREPROCESS_QC.out.size_log)
+        ch_versions = ch_versions.mix(GENERATE_PREPROCESS_QC.out.versions.first())
+    }
+
     emit:
-    preprocessed = ch_preprocessed_with_meta
+    preprocessed   = ch_preprocessed_with_meta
     checkpoint_csv = ch_checkpoint_csv
-    size_logs = ch_size_logs
-    versions = ch_versions
+    preprocess_qc  = ch_preprocess_qc
+    size_logs      = ch_size_logs
+    versions       = ch_versions
 }

@@ -28,7 +28,6 @@ process QUANTIFY {
 
     script:
     def args = task.ext.args ?: ''
-    def prefix = task.ext.prefix ?: "${meta.patient_id}"
     // Channel name from CSV metadata (set in postprocess.nf from meta.channels)
     def channel_name = meta.channel_name
     """
@@ -48,7 +47,6 @@ process QUANTIFY {
         --mask_file ${seg_mask} \\
         --outdir . \\
         --output_file ${meta.id}_quant.csv \\
-        --min_area ${params.quant_min_area} \\
         ${args}
 
     cat <<-END_VERSIONS > versions.yml
@@ -60,7 +58,6 @@ process QUANTIFY {
     """
 
     stub:
-    def prefix = task.ext.prefix ?: "${meta.patient_id}"
     """
     touch ${meta.id}_quant.csv
     echo "STUB,${meta.id},stub,0" > ${meta.id}.QUANTIFY.size.csv
@@ -93,116 +90,28 @@ process MERGE_QUANT_CSVS {
 
     script:
     def args = task.ext.args ?: ''
-    def prefix = task.ext.prefix ?: "${meta.patient_id}"
     """
-    #!/usr/bin/env python3
-    import pandas as pd
-    from pathlib import Path
-    import sys
-    import os
+    # Log input size for tracing
+    total_bytes=\$(find . -name '*_quant.csv' -exec stat -L --printf="%s\\n" {} + 2>/dev/null | awk '{sum+=\$1} END {print sum}')
+    morph_bytes=\$(stat -L --printf="%s" ${morphology_csv} 2>/dev/null || echo 0)
+    total_bytes=\$((total_bytes + morph_bytes))
+    echo "${task.process},${meta.patient_id},csvs/,\${total_bytes}" > ${meta.patient_id}.MERGE_QUANT_CSVS.size.csv
 
-    # Log input size for tracing (sum of all CSV files + morphology)
-    csv_files = sorted(Path('.').glob('*_quant.csv'))
-    morphology_size = Path('${morphology_csv}').stat().st_size
-    total_bytes = sum(f.stat().st_size for f in csv_files) + morphology_size
-    with open('${meta.patient_id}.MERGE_QUANT_CSVS.size.csv', 'w') as f:
-        f.write(f"${task.process},${meta.patient_id},csvs/,{total_bytes}\\n")
+    merge_quant_csvs.py \\
+        --csvs-dir . \\
+        --morphology ${morphology_csv} \\
+        --patient-id ${meta.patient_id} \\
+        --output merged_quant.csv \\
+        ${args}
 
-    print("Sample: ${meta.patient_id}")
-
-    # Load morphology (computed once by EXTRACT_CELL_PROPERTIES)
-    morphology = pd.read_csv('${morphology_csv}')
-    print(f"Morphology: {len(morphology)} cells, {len(morphology.columns)} columns")
-
-    # Load all intensity CSVs (each has only: label, <marker>)
-    csv_files = sorted(Path('.').glob('*_quant.csv'))
-
-    if not csv_files:
-        print("ERROR: No quantification CSVs found", file=sys.stderr)
-        sys.exit(1)
-
-    print(f"Merging {len(csv_files)} intensity CSVs with morphology...")
-
-    # Start with morphology as the base table
-    merged = morphology.copy()
-    morphology_cells = set(merged['label'])
-
-    # Merge each intensity CSV by label (left join on morphology)
-    for csv_file in csv_files:
-        df = pd.read_csv(csv_file)
-        marker_cols = [col for col in df.columns if col != 'label']
-
-        if not marker_cols:
-            print(f"  WARNING: {csv_file.name}: No marker columns found, skipping")
-            continue
-
-        # Validate cell labels
-        intensity_cells = set(df['label'])
-        missing = morphology_cells - intensity_cells
-        extra = intensity_cells - morphology_cells
-
-        if missing:
-            print(f"  WARNING: {csv_file.name}: Missing {len(missing)} cells from morphology")
-        if extra:
-            print(f"  WARNING: {csv_file.name}: Has {len(extra)} extra cells (will be ignored)")
-
-        merge_df = df[['label'] + marker_cols]
-        merged = merged.merge(merge_df, on='label', how='left')
-
-        for col in marker_cols:
-            merged[col] = merged[col].fillna(0.0)
-
-        print(f"  + {', '.join(marker_cols)} from {csv_file.name}")
-
-    # Validate no cells were lost
-    cells_lost = len(morphology) - len(merged)
-    if cells_lost > 0:
-        print(f"\\nCRITICAL ERROR: Lost {cells_lost} cells during merge", file=sys.stderr)
-        sys.exit(1)
-    else:
-        print(f"\\nAll {len(merged)} cells preserved")
-
-    # Reorder columns: morphology first, then DAPI, then other markers sorted
-    morphology_cols = ['label', 'y', 'x', 'area', 'eccentricity', 'perimeter',
-                      'convex_area', 'axis_major_length', 'axis_minor_length']
-    morpho_present = [col for col in morphology_cols if col in merged.columns]
-    marker_cols_all = [col for col in merged.columns if col not in morphology_cols]
-
-    # Put DAPI first among markers if present
-    if 'DAPI' in marker_cols_all:
-        marker_cols_all.remove('DAPI')
-        final_column_order = morpho_present + ['DAPI'] + sorted(marker_cols_all)
-    else:
-        final_column_order = morpho_present + sorted(marker_cols_all)
-    merged = merged[final_column_order]
-
-    # Add required columns for Pixie cell clustering
-    merged['fov'] = '${meta.patient_id}'
-    if 'area' in merged.columns:
-        merged['cell_size'] = merged['area']
-
-    # Update column order to put fov first, then cell_size near the beginning
-    cols = merged.columns.tolist()
-    for col_to_move in ['cell_size', 'fov']:
-        if col_to_move in cols:
-            cols.remove(col_to_move)
-            cols = [col_to_move] + cols
-    merged = merged[cols]
-
-    # Save merged CSV
-    merged.to_csv('merged_quant.csv', index=False)
-    print(f"\\nMerged CSV saved: {len(merged)} cells, {len(merged.columns)} columns")
-    print(f"  Final columns: {', '.join(merged.columns)}")
-
-    # Write versions file
-    with open('versions.yml', 'w') as f:
-        f.write('"${task.process}":\\n')
-        f.write(f'    python: {sys.version.split()[0]}\\n')
-        f.write(f'    pandas: {pd.__version__}\\n')
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        python: \$(python --version 2>&1 | sed 's/Python //')
+        pandas: \$(python -c "import pandas; print(pandas.__version__)" 2>/dev/null || echo "unknown")
+    END_VERSIONS
     """
 
     stub:
-    def prefix = task.ext.prefix ?: "${meta.patient_id}"
     """
     touch merged_quant.csv
     echo "STUB,${meta.patient_id},stub,0" > ${meta.patient_id}.MERGE_QUANT_CSVS.size.csv

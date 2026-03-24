@@ -17,11 +17,6 @@
     "_comment_quant": "=== Quantification ===",
     "quant_min_area": 10,
 
-    "_comment_pheno": "=== Phenotyping ===",
-    "phenotype_config": null,
-    "pheno_quality_percentile": 1,
-    "pheno_noise_percentile": 5,
-
     "_comment_pixie": "=== Pixie Clustering (Optional) ===",
     "pixie_enabled": false,
     "pixie_channels": ["CD45", "CD3", "CD4", "CD8", "FOXP3", "GZMB", "CD14", "CD163", "SMA", "PANCK", "VIMENTIN"],

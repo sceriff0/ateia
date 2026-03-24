@@ -364,8 +364,10 @@ workflow REGISTRATION {
     }
 
     emit:
-    registered = ch_registered
-    checkpoint_csv = ch_checkpoint_csv
-    size_logs = ch_size_logs
-    versions = ch_versions
+    registered       = ch_registered
+    checkpoint_csv   = ch_checkpoint_csv
+    qc               = ch_qc
+    error_metrics    = ch_error_metrics
+    size_logs        = ch_size_logs
+    versions         = ch_versions
 }

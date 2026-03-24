@@ -8,6 +8,9 @@
  * Output: Registered OME-TIFF files aligned to reference coordinate space
  */
 process REGISTER {
+    // Uses patient_id (not meta.patient_id) because this is a fan-in process:
+    // multiple per-slide metas are grouped into a single patient-level invocation.
+    // patient_id is the grouping key; all_metas carries the per-slide metadata list.
     tag "${patient_id}"
     label 'process_high'
 
@@ -141,28 +144,9 @@ process REGISTER {
     # Extract channel names from OME metadata of registered files into a manifest
     # convert_image guarantees OME-XML metadata is always present in pipeline images
     echo "=== Creating channels manifest from OME metadata ==="
-    python3 -c "
-import tifffile, json, os, xml.etree.ElementTree as ET
-manifest = {}
-for f in sorted(os.listdir('registered_slides')):
-    if not f.endswith('_registered.ome.tiff'):
-        continue
-    path = os.path.join('registered_slides', f)
-    with tifffile.TiffFile(path) as tif:
-        if tif.ome_metadata:
-            root = ET.fromstring(tif.ome_metadata)
-            ns = {'ome': 'http://www.openmicroscopy.org/Schemas/OME/2016-06'}
-            channels = root.findall('.//ome:Channel', ns) or root.findall('.//{*}Channel')
-            names = [ch.get('Name') or ch.get('ID', f'Channel_{i}') for i, ch in enumerate(channels)]
-            manifest[f] = names
-        else:
-            raise RuntimeError(f'No OME metadata in registered file: {f}')
-with open('channels_manifest.json', 'w') as fp:
-    json.dump(manifest, fp)
-print(f'Channels manifest: {len(manifest)} files')
-for fname, chs in manifest.items():
-    print(f'  {fname}: {chs}')
-"
+    create_channels_manifest.py \\
+        --input-dir registered_slides \\
+        --output channels_manifest.json
 
     # Clean up intermediate files (boost doesn't track script-generated working files)
     echo "=== Cleaning up intermediate files to save disk space ==="

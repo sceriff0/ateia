@@ -27,13 +27,12 @@
                     "enum": [
                         "preprocessing",
                         "registration",
-                        "postprocessing",
-                        "copy_results"
+                        "postprocessing"
                     ]
                 },
                 "savedir": {
                     "type": ["string", "null"],
-                    "description": "Save directory for copy_results step.",
+                    "description": "Save directory for archiving results.",
                     "default": null
                 },
                 "publish_dir_mode": {
@@ -86,6 +85,11 @@
                     "type": "number",
                     "description": "Scale factor for preprocessing QC images.",
                     "default": 0.25
+                },
+                "skip_preprocess_qc": {
+                    "type": "boolean",
+                    "description": "Skip preprocessing quality control image generation.",
+                    "default": false
                 },
                 "pixel_size": {
                     "type": "number",
@@ -346,27 +350,16 @@
                     "type": "integer",
                     "description": "Minimum cell area for quantification.",
                     "default": 10
-                }
-            }
-        },
-        "phenotyping_options": {
-            "title": "Phenotyping options",
-            "type": "object",
-            "properties": {
-                "phenotype_config": {
-                    "type": ["string", "null"],
-                    "description": "Path to phenotype configuration file.",
-                    "default": null
                 },
-                "pheno_quality_percentile": {
-                    "type": "integer",
-                    "description": "Quality percentile threshold for phenotyping.",
-                    "default": 1
+                "skip_postprocessing_qc": {
+                    "type": "boolean",
+                    "description": "Skip postprocessing quality control (segmentation overlay, cell stats, intensity distributions).",
+                    "default": false
                 },
-                "pheno_noise_percentile": {
-                    "type": "integer",
-                    "description": "Noise percentile threshold for phenotyping.",
-                    "default": 5
+                "skip_final_qc_report": {
+                    "type": "boolean",
+                    "description": "Skip generation of the final aggregated HTML QC report.",
+                    "default": false
                 }
             }
         },
@@ -561,7 +554,6 @@
         { "$ref": "#/definitions/registration_cpu_options" },
         { "$ref": "#/definitions/segmentation_options" },
         { "$ref": "#/definitions/quantification_options" },
-        { "$ref": "#/definitions/phenotyping_options" },
         { "$ref": "#/definitions/pixie_options" },
         { "$ref": "#/definitions/output_options" },
         { "$ref": "#/definitions/pipeline_control" },

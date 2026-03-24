@@ -458,7 +458,7 @@ def get_ome_metadata(filepath: str | Path) -> Dict[str, Any]:
                         px_size = pixels.get('PhysicalSizeX')
                         if px_size:
                             metadata['pixel_size_um'] = float(px_size)
-                except:
+                except (ET.ParseError, ValueError, TypeError) as e:
                     metadata['pixel_size_um'] = None
             else:
                 metadata['ome_xml'] = None

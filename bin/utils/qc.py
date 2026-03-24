@@ -267,6 +267,12 @@ def create_registration_qc(
 
     logger.info(f"Creating QC composite: {output_path.name}")
 
+    # Validate input files exist
+    if not reference_path.exists():
+        raise FileNotFoundError(f"Reference image not found: {reference_path}")
+    if not registered_path.exists():
+        raise FileNotFoundError(f"Registered image not found: {registered_path}")
+
     # Load images
     ref_img = tifffile.imread(str(reference_path))
     reg_img = tifffile.imread(str(registered_path))

@@ -1,7 +1,7 @@
 nextflow.enable.dsl = 2
 
 process ESTIMATE_FEATURE_DISTANCES {
-    tag "${meta.patient_id}_${meta.channels.join('_')}"
+    tag "${meta.patient_id}"
     label 'process_medium'
     container 'cdgatenbee/valis-wsi:1.0.0'
 

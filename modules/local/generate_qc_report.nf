@@ -9,7 +9,7 @@ process GENERATE_QC_REPORT {
     path(registration_qc_pngs, stageAs: 'registration_qc/*')
     path(feature_distance_jsons, stageAs: 'feature_dist/*')
     path(valis_summary_csvs, stageAs: 'valis_summary/*')
-    path(phenotype_csvs, stageAs: 'phenotype/*')
+    path(postprocess_qc_pngs, stageAs: 'postprocess_qc/*')
     path(versions_yml)
 
     output:
@@ -28,7 +28,7 @@ process GENERATE_QC_REPORT {
         --registration-qc registration_qc/ \\
         --feature-distances feature_dist/ \\
         --valis-summary valis_summary/ \\
-        --phenotype-data phenotype/ \\
+        --postprocess-qc postprocess_qc/ \\
         --versions ${versions_yml} \\
         --output mirage_qc_report.html \\
         --data-dir mirage_qc_data/ \\

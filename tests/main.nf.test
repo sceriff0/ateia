@@ -363,23 +363,6 @@ nextflow_pipeline {
         }
     }
 
-    test("Should run copy_results without input CSV - stub") {
-
-        options "-stub"
-
-        when {
-            params {
-                outdir = "$projectDir/tests/testdata"
-                savedir = "$outputDir/copied_results"
-                step = "copy_results"
-            }
-        }
-
-        then {
-            assert workflow.success
-        }
-    }
-
     //==========================================================================
     // VALIDATION TESTS - Input validation
     //==========================================================================

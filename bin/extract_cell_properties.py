@@ -2,7 +2,7 @@
 """Extract cell morphology and contours from a segmentation mask.
 
 Computes regionprops (morphology) and polygon contours once per mask,
-so downstream processes (QUANTIFY, PHENOTYPE) don't need to recompute them.
+so downstream processes (QUANTIFY, EXPORT_GEOJSON) don't need to recompute them.
 
 Outputs:
     - morphology.csv: Per-cell morphological properties
@@ -83,7 +83,7 @@ def extract_morphology(
             'label', 'centroid', 'area',
             'eccentricity', 'perimeter',
             'convex_area', 'axis_major_length', 'axis_minor_length',
-            'bbox',
+            'solidity', 'bbox',
         ],
     )
     props_df = pd.DataFrame(props).set_index('label')
@@ -99,7 +99,7 @@ def extract_morphology(
 def extract_contours(
     mask_filtered: NDArray,
     props_df: pd.DataFrame,
-    simplify_tolerance: float = 1.0,
+    simplify_tolerance: float = 0.5,
 ) -> Dict[str, List[List[float]]]:
     """Extract simplified polygon contours for each cell.
 
@@ -145,6 +145,9 @@ def extract_contours(
         contour[:, 0] += minr  # y offset
         contour[:, 1] += minc  # x offset
 
+        # Convert from skimage center-of-pixel to ImageJ/QuPath corner-of-pixel convention
+        contour += 0.5
+
         # Simplify with Douglas-Peucker
         simplified = approximate_polygon(contour, tolerance=simplify_tolerance)
 
@@ -159,7 +162,7 @@ def extract_contours(
 
         # Convert from (y, x) to (x, y) for GeoJSON and round for compact JSON
         contours_dict[str(label)] = [
-            [round(float(pt[1]), 2), round(float(pt[0]), 2)]
+            [round(float(pt[1]), 4), round(float(pt[0]), 4)]
             for pt in simplified
         ]
 
@@ -171,7 +174,7 @@ def run_extraction(
     mask_path: str,
     outdir: str,
     min_area: int = 0,
-    simplify_tolerance: float = 1.0,
+    simplify_tolerance: float = 0.5,
 ) -> Tuple[Optional[pd.DataFrame], Optional[Dict]]:
     """Run full extraction pipeline: morphology + contours.
 
@@ -211,7 +214,7 @@ def run_extraction(
         logger.warning("No valid cells found — writing empty outputs")
         empty_df = pd.DataFrame(columns=[
             'label', 'y', 'x', 'area', 'eccentricity', 'perimeter',
-            'convex_area', 'axis_major_length', 'axis_minor_length',
+            'convex_area', 'axis_major_length', 'axis_minor_length', 'solidity',
         ])
         morphology_path = str(Path(outdir) / 'morphology.csv')
         contours_path = str(Path(outdir) / 'contours.json')
@@ -228,7 +231,7 @@ def run_extraction(
     morphology_out = props_df.reset_index()
     morpho_cols = [
         'label', 'y', 'x', 'area', 'eccentricity', 'perimeter',
-        'convex_area', 'axis_major_length', 'axis_minor_length',
+        'convex_area', 'axis_major_length', 'axis_minor_length', 'solidity',
     ]
     morphology_out = morphology_out[morpho_cols]
     morphology_out.to_csv(morphology_path, index=False)
@@ -264,7 +267,7 @@ def parse_args():
         help='Minimum cell area in pixels',
     )
     parser.add_argument(
-        '--simplify_tolerance', type=float, default=1.0,
+        '--simplify_tolerance', type=float, default=0.5,
         help='Douglas-Peucker contour simplification tolerance in pixels',
     )
     return parser.parse_args()

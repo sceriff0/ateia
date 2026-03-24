@@ -50,7 +50,6 @@ process PIXIE_PIXEL_CLUSTER {
 
     script:
     def args = task.ext.args ?: ''
-    def prefix = task.ext.prefix ?: "${meta.patient_id}"
     def fov_name = meta.patient_id
     def channels_arg = channels.join(' ')
     // Calculate batch_size with memory-aware cap (original pixie uses batch_size=5 max)
@@ -114,7 +113,6 @@ process PIXIE_PIXEL_CLUSTER {
     """
 
     stub:
-    def prefix = task.ext.prefix ?: "${meta.patient_id}"
     """
     mkdir -p pixel_output/pixel_mat_data
     mkdir -p pixel_masks

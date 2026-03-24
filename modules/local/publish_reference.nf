@@ -1,7 +1,7 @@
 process PUBLISH_REFERENCE {
     tag "${meta.id ?: meta.patient_id}"
     label 'process_single'
-    container null
+    container null  // Pass-through process: no computation, runs on executor node
 
     input:
     tuple val(meta), path(image)
