@@ -1,6 +1,6 @@
 process GENERATE_PREPROCESS_QC {
     tag "${meta.patient_id}"
-    label 'process_low'
+    label 'process_medium'
 
     container 'bolt3x/attend_image_analysis:preprocess'
 
