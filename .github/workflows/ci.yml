@@ -305,7 +305,7 @@ jobs:
 
       - name: Run nf-core lint
         run: |
-          nf-core lint .
+          nf-core lint
 
   # ============================================================================
   # All tests passed gate
