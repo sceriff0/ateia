@@ -12,10 +12,11 @@ import sys
 from pathlib import Path
 
 # Add parent directory to path to import lib modules
-import sys
 sys.path.insert(0, str(Path(__file__).parent / 'utils'))
 
 from logger import get_logger, configure_logging
+from image_utils import ensure_dir
+from constants import BIGTIFF_THRESHOLD
 
 import numpy as np
 import tifffile
@@ -169,7 +170,7 @@ def pad_single_image(
 
     # Calculate file size to determine if BigTIFF is needed
     estimated_size = padded_img.nbytes
-    use_bigtiff = estimated_size > 2**32  # 4GB limit
+    use_bigtiff = estimated_size > BIGTIFF_THRESHOLD
 
     if use_bigtiff:
         logger.info(f"  Using BigTIFF format (estimated size: {estimated_size / (1024**3):.2f} GB)")

@@ -9,12 +9,13 @@ directory and writes a JSON manifest mapping filename to channel names.
 import argparse
 import json
 import os
-import xml.etree.ElementTree as ET
+import sys
+from pathlib import Path
 
 import tifffile
 
-
-OME_NAMESPACE = {"ome": "http://www.openmicroscopy.org/Schemas/OME/2016-06"}
+sys.path.insert(0, str(Path(__file__).parent / 'utils'))
+from metadata import extract_channel_names_from_ome
 
 
 def parse_args():
@@ -34,22 +35,6 @@ def parse_args():
     return parser.parse_args()
 
 
-def extract_channel_names(filepath):
-    """Extract channel names from OME-XML metadata of a TIFF file."""
-    with tifffile.TiffFile(filepath) as tif:
-        if not tif.ome_metadata:
-            raise RuntimeError(f"No OME metadata in registered file: {filepath}")
-
-        root = ET.fromstring(tif.ome_metadata)
-        channels = root.findall(".//ome:Channel", OME_NAMESPACE) or root.findall(
-            ".//{*}Channel"
-        )
-        return [
-            ch.get("Name") or ch.get("ID", f"Channel_{i}")
-            for i, ch in enumerate(channels)
-        ]
-
-
 def main():
     args = parse_args()
 
@@ -58,7 +43,10 @@ def main():
         if not filename.endswith("_registered.ome.tiff"):
             continue
         filepath = os.path.join(args.input_dir, filename)
-        manifest[filename] = extract_channel_names(filepath)
+        names = extract_channel_names_from_ome(filepath)
+        if not names:
+            raise RuntimeError(f"No OME metadata in registered file: {filepath}")
+        manifest[filename] = names
 
     with open(args.output, "w") as fp:
         json.dump(manifest, fp)

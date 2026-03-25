@@ -1,5 +1,3 @@
-nextflow.enable.dsl = 2
-
 /*
  * SPLIT_CHANNELS - Split multi-channel TIFF into individual channels
  *
@@ -14,8 +12,6 @@ process SPLIT_CHANNELS {
     label 'process_medium'
 
     container 'bolt3x/attend_image_analysis:preprocess'
-
-    //publishDir "${params.outdir}/${meta.patient_id}/channels", mode: 'copy'
 
     input:
     tuple val(meta), path(registered_image), val(is_reference)

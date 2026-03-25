@@ -15,9 +15,7 @@ This page documents the active canonical parameter surface.
 | `input` | `''` | Required for `preprocessing`, `registration`, `postprocessing` |
 | `outdir` | `./results` | Main output root |
 | `savedir` | `null` | Optional archive destination |
-| `copy_delete_source` | `false` | Deletes source only after verified copy |
-| `step` | `preprocessing` | `preprocessing`, `registration`, `postprocessing`, `copy_results` |
-| `registration_method` | `valis` | `valis`, `valis_pairs`, `gpu`, `cpu`, `cpu_tiled` |
+| `step` | `preprocessing` | `preprocessing`, `registration`, `postprocessing` |
 | `debug_channels` | `false` | Enables debug channel `.view` output |
 | `dry_run` | `false` | Validation-only mode |
 

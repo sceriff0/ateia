@@ -33,7 +33,7 @@ process REGISTER {
     script:
     def args = task.ext.args ?: ''
     // Extract reference filename from the staged path (ref/filename.tif)
-    def ref_filename = reference ? reference.name.replaceAll(/^ref\//, '') : ''
+    def ref_filename = reference ? reference.name : ''
     def ref_arg = ref_filename ? "--reference ${ref_filename}" :
                   params.reg_reference_markers ? "--reference-markers ${params.reg_reference_markers.join(' ')}" : ''
     // Memory mode controls feature detector, matcher, and dimension settings
@@ -53,12 +53,14 @@ process REGISTER {
     def tile_size = params.reg_tile_size ?: 2048
 
     """
-    # Log input size for tracing (sum of all input files, -L follows symlinks)
+    # === LOG INPUT SIZES ===
+    # Sum all input OME-TIFF file sizes for resource tracing
     total_bytes=\$(find -L ref input_* -maxdepth 1 -type f \\( -name "*.ome.tif" -o -name "*.ome.tiff" \\) -exec stat -L --printf="%s\\n" {} + 2>/dev/null | awk '{sum+=\$1} END {print sum}')
     echo "${task.process},${patient_id},inputs/,\${total_bytes:-0}" > ${patient_id}.REGISTER.size.csv
 
     mkdir -p registered_slides preprocessed
 
+    # === PRINT REGISTRATION SETTINGS ===
     echo "========================================================================"
     echo "VALIS Registration - Attempt ${task.attempt}"
     echo "========================================================================"
@@ -68,23 +70,22 @@ process REGISTER {
     echo "  - skip_micro_registration: ${skip_micro ? 'YES' : 'NO'}"
     if [ ${task.attempt} -gt 5 ]; then
         echo ""
-        echo "  ⚠️  RETRY MODE (attempt 5+): Micro-registration disabled to reduce memory usage"
+        echo "  WARNING: RETRY MODE (attempt 5+): Micro-registration disabled to reduce memory usage"
     fi
     echo "========================================================================"
 
-    # Copy files (dereferencing symlinks) to preprocessed/ to avoid VALIS symlink path resolution issues
-    # VALIS loses track of src_f when working with symlinks
-    # Using parallel copy to speed up large file transfers
+    # === STAGE INPUT FILES ===
+    # Copy files (dereferencing symlinks) into preprocessed/ because VALIS
+    # loses track of src_f when working with Nextflow symlinks.
     echo "=== Copying input files to preprocessed/ ==="
 
-    # Collect all ome.tif files from ref and input_* directories
+    # Collect all OME-TIFF files from staged ref/ and input_*/ directories
     find -L ref input_* -maxdepth 1 -type f \\( -name "*.ome.tif" -o -name "*.ome.tiff" \\) 2>/dev/null > /tmp/files_to_copy.txt || true
 
     echo "Files to copy:"
     cat /tmp/files_to_copy.txt
 
-    # Use xargs with multiple parallel processes for faster copying
-    # Use cp -n (no-clobber) to skip files that already exist (handles case where reference is also in input files)
+    # Parallel hard-link copy; cp -Ln skips duplicates (reference may also be in input files)
     cat /tmp/files_to_copy.txt | xargs -P ${task.cpus} -I {} sh -c '
         dest="preprocessed/\$(basename "{}")"
         cp -Ln "{}" "\$dest" 2>/dev/null && echo "Copied: {}" || echo "Skipped (already exists): {}"
@@ -93,7 +94,7 @@ process REGISTER {
     echo "=== Contents of preprocessed/ ==="
     ls -lh preprocessed/
 
-    # Verify we have actual files (not symlinks)
+    # Verify we have actual files (not empty directory)
     file_count=\$(find preprocessed -type f -name '*.ome.tif*' | wc -l)
     echo "Total files copied: \$file_count"
 
@@ -104,6 +105,7 @@ process REGISTER {
         exit 1
     fi
 
+    # === RUN VALIS REGISTRATION ===
     echo "=== Running registration ==="
     echo "Command: register.py --input-dir preprocessed --out registered_slides ${ref_arg}"
 
@@ -121,10 +123,11 @@ process REGISTER {
         --tile-size ${tile_size} \\
         ${args}
 
+    # === VALIDATE OUTPUTS ===
     echo "=== Contents of registered_slides/ ==="
     ls -lh registered_slides/ || echo "Directory is empty or doesn't exist"
 
-    # Verify outputs were created
+    # Check that registration produced output files
     output_count=\$(find registered_slides -type f -name '*_registered.ome.tiff' 2>/dev/null | wc -l)
     echo "Total registered files created: \$output_count"
 
@@ -134,26 +137,28 @@ process REGISTER {
         exit 1
     fi
 
-    # Strict check: all input slides must produce a registered output
+    # Strict check: every input slide must produce a corresponding registered output
     if [ "\$output_count" -ne "\$file_count" ]; then
         echo "ERROR: Output count mismatch — expected \$file_count registered files but got \$output_count"
         echo "VALIS failed to warp some slides. Check the logs above for details."
         exit 1
     fi
 
-    # Extract channel names from OME metadata of registered files into a manifest
-    # convert_image guarantees OME-XML metadata is always present in pipeline images
+    # === GENERATE CHANNELS MANIFEST ===
+    # Extract channel names from OME-XML metadata of registered files.
+    # convert_image guarantees OME-XML metadata is always present in pipeline images.
     echo "=== Creating channels manifest from OME metadata ==="
     create_channels_manifest.py \\
         --input-dir registered_slides \\
         --output channels_manifest.json
 
-    # Clean up intermediate files (boost doesn't track script-generated working files)
+    # === CLEANUP INTERMEDIATES ===
+    # Remove working copies to reclaim disk space. Do NOT delete staged inputs
+    # (input_*, ref) — Nextflow needs them intact for retries.
     echo "=== Cleaning up intermediate files to save disk space ==="
     find preprocessed -maxdepth 1 -type f -delete
     rm -rf preprocessed/deformation_fields preprocessed/masks preprocessed/overlaps \
            preprocessed/rigid_registration preprocessed/non_rigid_registration preprocessed/processed
-    rm -rf input_* ref
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":

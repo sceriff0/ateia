@@ -37,7 +37,6 @@
 - `preprocessing`: runs all downstream stages
 - `registration`: starts from preprocessed checkpoint
 - `postprocessing`: starts from registered checkpoint
-- `copy_results`: copy/archive only
 
 ## Tracing
 

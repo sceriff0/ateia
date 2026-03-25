@@ -268,4 +268,58 @@ nextflow_process {
             )
         }
     }
+
+    test("Should produce pyramid file significantly larger than sum of inputs - regression") {
+
+        tag "real"
+        tag "slow"
+        tag "regression"
+
+        when {
+            params {
+                outdir = "$outputDir"
+                pixel_size = 0.325
+                pyramid_resolutions = 3
+                pyramid_scale = 2
+                tilex = 128
+                compression = 'zstd'
+            }
+            process {
+                """
+                input[0] = [
+                    [
+                        patient_id: 'P001',
+                        is_reference: true,
+                        channels: ['DAPI', 'PANCK', 'SMA']
+                    ],
+                    [
+                        file('$projectDir/tests/testdata/sample_DAPI.tif', checkIfExists: true),
+                        file('$projectDir/tests/testdata/sample_PANCK.tif', checkIfExists: true),
+                        file('$projectDir/tests/testdata/sample_SMA.tif', checkIfExists: true)
+                    ],
+                    file('$projectDir/tests/testdata/P001_cell_mask.npy', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                // Pyramid should contain multiple resolution levels (multi-resolution OME-TIFF)
+                // File should be substantial — at least 10KB for 128x128 with 3 channels + mask + 3 pyramid levels
+                {
+                    def pyramidSize = process.out.pyramid.get(0).get(1).size()
+                    assert pyramidSize > 10_000, "Pyramid OME-TIFF should be > 10KB, got ${pyramidSize} bytes"
+                },
+                // Size log should have been generated with non-zero input size
+                {
+                    def sizeLogFile = process.out.size_log.get(0)
+                    def content = path(sizeLogFile).text
+                    assert content.contains('MERGE_AND_PYRAMID'), "Size log should reference process name"
+                    assert content.contains('P001'), "Size log should reference patient ID"
+                }
+            )
+        }
+    }
 }

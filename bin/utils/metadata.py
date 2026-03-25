@@ -19,6 +19,7 @@ register_gpu.py, merge_registered.py, etc.).
 
 from __future__ import annotations
 
+import logging
 import os
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -29,7 +30,6 @@ import tifffile
 
 __all__ = [
     "get_channel_names",
-    "get_channel_names_from_image",
     "extract_channel_names_from_ome",
     "extract_channel_names_from_filename",
     "extract_markers_from_filename",
@@ -224,8 +224,7 @@ def extract_channel_names_from_ome(filepath: str | Path) -> List[str]:
             return names
 
     except Exception as e:
-        # Silently fail and return empty list
-        # Caller can fall back to filename parsing
+        logging.getLogger(__name__).debug(f"OME metadata parsing failed: {e}")
         return []
 
 

@@ -69,10 +69,6 @@ P001,/results/P001/registered/P001_registered.ome.tiff,true,DAPI|CD3|CD8|CD4
 P001,/results/P001/registered/P001_panel2_registered.ome.tiff,false,DAPI|PANCK|SMA|VIMENTIN
 ```
 
-### Step: `copy_results`
-
-No input CSV required. Pass `--outdir` (source) and `--savedir` (destination).
-
 ### Validation Rules
 
 - Exactly one `is_reference = true` row per `patient_id` at the `preprocessing` step.
@@ -102,10 +98,8 @@ Pass a template with `-params-file params/full_pipeline.json` and override indiv
 |---|---|---|
 | `input` | `''` | Path to samplesheet CSV (required for preprocessing, registration, postprocessing) |
 | `outdir` | `./results` | Output root directory |
-| `savedir` | `null` | Archive destination for `copy_results` step |
-| `copy_delete_source` | `false` | Delete source after verified copy |
-| `step` | `preprocessing` | Pipeline entry point: `preprocessing`, `registration`, `postprocessing`, `copy_results` |
-| `registration_method` | `valis` | Registration algorithm: `valis`, `valis_pairs`, `gpu`, `cpu`, `cpu_tiled` |
+| `savedir` | `null` | Optional archive destination |
+| `step` | `preprocessing` | Pipeline entry point: `preprocessing`, `registration`, `postprocessing` |
 | `dry_run` | `false` | Validate inputs only, do not execute tasks |
 | `debug_channels` | `false` | Enable `.view` debug output on channels |
 

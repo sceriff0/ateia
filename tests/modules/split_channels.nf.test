@@ -142,4 +142,53 @@ nextflow_process {
             )
         }
     }
+
+    test("Should skip DAPI for non-reference images - real") {
+
+        tag "real"
+        tag "slow"
+        tag "regression"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [
+                        patient_id: 'P001',
+                        channels: ['DAPI', 'PANCK', 'SMA'],
+                        is_reference: false
+                    ],
+                    file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true),
+                    false  // NOT reference
+                ]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.channels },
+                // Non-reference should produce 2 files (PANCK + SMA), NOT DAPI
+                {
+                    def files = process.out.channels.get(0).get(1)
+                    assert files instanceof List
+                    assert files.size() == 2, "Non-reference should have 2 channels (no DAPI), got ${files.size()}"
+                },
+                // Verify DAPI is NOT in output
+                {
+                    def fileNames = process.out.channels.get(0).get(1)*.name
+                    assert !fileNames.any { it.toUpperCase().contains('DAPI') },
+                        "DAPI should NOT be in non-reference output, got: ${fileNames}"
+                },
+                // Each channel file should have non-trivial content
+                {
+                    def files = process.out.channels.get(0).get(1)
+                    files.each { f ->
+                        assert f.size() > 100, "Channel file ${f.name} should be > 100 bytes"
+                    }
+                }
+            )
+        }
+    }
 }

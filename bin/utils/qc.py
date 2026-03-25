@@ -162,13 +162,6 @@ def create_dapi_overlay(
 
     # Create RGB composite in BGR order (for OpenCV)
     rgb_bgr = np.zeros((h, w, 3), dtype=np.uint8)
-    rgb_bgr[:, :, 0] = reg_down   # Blue = 0
-    rgb_bgr[:, :, 1] = ref_down   # Green = reference
-    rgb_bgr[:, :, 2] = 0          # Red = registered
-
-    # Wait, the convention in your code is actually:
-    # Red = registered, Green = reference
-    # Let me fix this to match existing behavior
     rgb_bgr[:, :, 2] = reg_down   # Red = registered (BGR so index 2 is Red)
     rgb_bgr[:, :, 1] = ref_down   # Green = reference
     rgb_bgr[:, :, 0] = 0          # Blue = 0

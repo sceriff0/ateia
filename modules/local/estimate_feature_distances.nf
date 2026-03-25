@@ -1,5 +1,3 @@
-nextflow.enable.dsl = 2
-
 process ESTIMATE_FEATURE_DISTANCES {
     tag "${meta.patient_id}"
     label 'process_medium'

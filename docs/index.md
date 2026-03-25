@@ -3,9 +3,8 @@
 MIRAGE is a Nextflow DSL2 pipeline for multiplex microscopy processing:
 
 1. Preprocessing (image conversion and illumination correction)
-2. Registration (multiple methods, including tiled CPU)
-3. Postprocessing (segmentation, quantification, phenotyping, pyramid export)
-4. Result copy/archival (`copy_results`)
+2. Registration (VALIS whole-slide image registration)
+3. Postprocessing (segmentation, quantification, GeoJSON export, pyramid export)
 
 This site is the canonical documentation surface for running and maintaining the pipeline.
 
@@ -19,9 +18,7 @@ This site is the canonical documentation surface for running and maintaining the
 
 ## Canonical Runtime Surface
 
-- `--step`: `preprocessing`, `registration`, `postprocessing`, `copy_results`
-- `--registration_method`: `valis`, `valis_pairs`, `gpu`, `cpu`, `cpu_tiled`
-- `copy_results` does not require `--input`; it requires `--outdir` and `--savedir`
+- `--step`: `preprocessing`, `registration`, `postprocessing`
 
 ## Source of Truth
 

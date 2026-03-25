@@ -31,6 +31,7 @@ from stardist.models import StarDist2D
 from numpy.typing import NDArray
 
 from image_utils import ensure_dir
+from validation import clip_negative_values
 
 logger = get_logger(__name__)
 
@@ -114,11 +115,7 @@ def extract_dapi_channel(
             # Load single channel into RAM
             dapi_image = np.array(image_memmap, copy=True)
             # Clip negative values from interpolation artifacts (e.g., bicubic overshoot)
-            if np.issubdtype(dapi_image.dtype, np.signedinteger) or np.issubdtype(dapi_image.dtype, np.floating):
-                neg_count = np.sum(dapi_image < 0)
-                if neg_count > 0:
-                    logger.warning(f"  Clipping {neg_count} negative values to 0 (interpolation artifacts)")
-                    dapi_image = np.clip(dapi_image, 0, None)
+            dapi_image = clip_negative_values(dapi_image, logger, stage_name="extract_dapi")
         elif image_memmap.ndim == 3:
             # Multichannel image (C, Y, X) format
             logger.info(f"  - Multichannel image with {n_channels} channels")
@@ -133,11 +130,7 @@ def extract_dapi_channel(
             logger.info(f"  - Extracting DAPI channel (index {dapi_channel_index}) - memory efficient")
             dapi_image = np.array(image_memmap[dapi_channel_index, :, :], copy=True)
             # Clip negative values from interpolation artifacts (e.g., bicubic overshoot)
-            if np.issubdtype(dapi_image.dtype, np.signedinteger) or np.issubdtype(dapi_image.dtype, np.floating):
-                neg_count = np.sum(dapi_image < 0)
-                if neg_count > 0:
-                    logger.warning(f"  Clipping {neg_count} negative values to 0 (interpolation artifacts)")
-                    dapi_image = np.clip(dapi_image, 0, None)
+            dapi_image = clip_negative_values(dapi_image, logger, stage_name="extract_dapi")
             logger.info(f"  - Extracted DAPI channel (index {dapi_channel_index})")
         else:
             raise ValueError(

@@ -41,6 +41,9 @@ notebooks/*
 # Internal AI/debug docs (not user-facing)
 CLAUDE.md
 DATAFLOW_ANALYSIS.md
+.citadel
+.planning
+.claude
 
 # Legacy (deprecated modules/docs)
 legacy/

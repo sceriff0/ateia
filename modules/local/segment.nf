@@ -9,11 +9,9 @@
  */
 process SEGMENT {
     tag "${meta.patient_id}"
-    label "${params.seg_gpu ? 'gpu' : 'process_high'}"
+    label 'process_high'
 
     container 'bolt3x/attend_image_analysis:segmentation_gpu'
-
-    //publishDir "${params.outdir}/${meta.patient_id}/segmentation", mode: 'copy', overwrite: true
 
     input:
     tuple val(meta), path(merged_file)
@@ -33,6 +31,7 @@ process SEGMENT {
     def use_gpu_flag = params.seg_gpu ? '--use-gpu' : ''
     def pmin = params.seg_pmin ?: 1.0
     def pmax = params.seg_pmax ?: 99.8
+    def dapi_check = (meta.channels && meta.channels.size() > 0) ? meta.channels[0].toUpperCase() : 'UNKNOWN'
 
     // Increase n_tiles on retry to reduce per-tile memory usage
     def n_tiles_y = (params.seg_n_tiles_y ?: 1) * Math.pow(4, task.attempt - 1) as Integer
@@ -46,7 +45,7 @@ process SEGMENT {
     echo "Attempt: ${task.attempt} - Using n_tiles_y=${n_tiles_y}, n_tiles_x=${n_tiles_x}"
 
     # Runtime validation: DAPI must be in channel 0 for segmentation
-    if [ "${meta.channels ? meta.channels[0].toUpperCase() : 'UNKNOWN'}" != "DAPI" ]; then
+    if [ "${dapi_check}" != "DAPI" ]; then
         echo "ERROR: DAPI must be in channel 0 for segmentation"
         echo "Found channels: ${meta.channels ? meta.channels.join(', ') : 'Unknown'}"
         echo "Channel 0: ${meta.channels ? meta.channels[0] : 'Unknown'}"

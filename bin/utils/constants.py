@@ -19,6 +19,7 @@ __all__ = [
     "DEFAULT_TILE_SIZE",
     "DEFAULT_PYRAMID_SCALE",
     "DEFAULT_PYRAMID_LEVELS",
+    "BIGTIFF_THRESHOLD",
     # Exit codes
     "ExitCode",
     # File patterns
@@ -45,6 +46,9 @@ DEFAULT_PIXEL_SIZE: float = 0.325  # Microns per pixel
 DEFAULT_TILE_SIZE: int = 512  # Tile dimensions for pyramidal TIFF
 DEFAULT_PYRAMID_SCALE: int = 2  # Scale factor between pyramid levels
 DEFAULT_PYRAMID_LEVELS: int = 3  # Number of pyramid resolution levels
+
+# TIFF format
+BIGTIFF_THRESHOLD: int = 2**32  # 4GB limit for standard TIFF; use BigTIFF above this
 
 # Registration
 DEFAULT_FEATURE_COUNT: int = 5000  # Number of features for detection

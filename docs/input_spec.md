@@ -53,10 +53,6 @@ P001,/results/P001/registered/P001_registered.ome.tiff,true,DAPI|CD3|CD8|CD4
 P001,/results/P001/registered/P001_panel2_registered.ome.tiff,false,DAPI|PANCK|SMA|VIMENTIN
 ```
 
-## `--step copy_results`
-
-No CSV is required.
-
 Required runtime args:
 
 - `--outdir`

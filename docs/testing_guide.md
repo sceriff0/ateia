@@ -20,7 +20,7 @@ bash tests/run_validation_tests.sh
 ```bash
 nf-test test tests/main.nf.test
 nf-test test tests/subworkflows/local/registration.nf.test
-nf-test test tests/modules/copy_results.nf.test
+nf-test test tests/modules/quantify.nf.test
 ```
 
 ## What `check_param_consistency.py` Validates

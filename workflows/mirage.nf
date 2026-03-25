@@ -90,8 +90,9 @@ workflow MIRAGE {
     /* -------------------- PREPROCESSING -------------------- */
 
     // Pre-count images and channels per patient for streaming groupTuple operations
-    def patient_counts = CsvUtils.countImagesPerPatient(params.input)
-    def channel_counts = CsvUtils.countChannelsPerPatient(params.input)
+    // (called after null-guard above ensures params.input is valid)
+    def patient_counts = params.input ? CsvUtils.countImagesPerPatient(params.input) : [:]
+    def channel_counts = params.input ? CsvUtils.countChannelsPerPatient(params.input) : [:]
 
     if (params.step == 'preprocessing') {
         def ch_input = loadInputChannel(params.input, 'path_to_file', patient_counts, channel_counts)
@@ -108,10 +109,7 @@ workflow MIRAGE {
             ? loadInputChannel(params.input, 'preprocessed_image', patient_counts, channel_counts)
             : PREPROCESSING.out.preprocessed  // Direct channel - enables patient-level parallelism!
 
-        REGISTRATION(
-            ch_for_registration,
-            params.registration_method
-        )
+        REGISTRATION(ch_for_registration)
     }
 
     /* -------------------- POSTPROCESSING -------------------- */

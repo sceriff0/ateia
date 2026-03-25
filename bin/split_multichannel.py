@@ -21,37 +21,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent / 'utils'))
 
 from logger import get_logger, configure_logging
+from image_utils import normalize_image_dimensions, ensure_dir
+from metadata import extract_channel_names_from_ome
+from validation import clip_negative_values
 
 logger = get_logger(__name__)
 
 __all__ = ["main"]
-
-
-def get_ome_channel_names(tiff_path):
-    """Try to extract channel names from OME-TIFF metadata."""
-    try:
-        with tifffile.TiffFile(tiff_path) as tif:
-            if tif.ome_metadata:
-                import xml.etree.ElementTree as ET
-                root = ET.fromstring(tif.ome_metadata)
-                ns = {'ome': 'http://www.openmicroscopy.org/Schemas/OME/2016-06'}
-
-                channels = root.findall('.//ome:Channel', ns)
-                if not channels:
-                    # Try without namespace
-                    channels = root.findall('.//{*}Channel')
-
-                names = []
-                for ch in channels:
-                    name = ch.get('Name') or ch.get('ID', f'Channel_{len(names)}')
-                    names.append(name)
-
-                if names:
-                    return names
-    except Exception as e:
-        logger.warning(f"Could not parse OME metadata: {e}")
-
-    return None
 
 
 def split_multichannel_tiff(input_path, output_dir, is_reference=False, channel_names=None):
@@ -82,45 +58,16 @@ def split_multichannel_tiff(input_path, output_dir, is_reference=False, channel_
     logger.info(f"  Image shape: {img.shape}, dtype: {img.dtype}")
 
     # Clip negative values (VALIS warping artifact)
-    img_min = float(img.min())
-    img_max = float(img.max())
-    if img_min < 0:
-        neg_count = int(np.sum(img < 0))
-        neg_pct = 100 * neg_count / img.size
-        logger.warning(f"Clipping {neg_count} negatives ({neg_pct:.4f}%), min was {img_min:.2f}")
-        img = np.clip(img, 0, None)
-        logger.info(f"  After clipping: min={float(img.min()):.2f}, max={float(img.max()):.2f}")
-    else:
-        logger.info(f"  Input clean: min={img_min:.2f}, max={img_max:.2f}")
+    img = clip_negative_values(img, logger, stage_name="split_multichannel")
 
-    # Determine array layout and number of channels
-    if img.ndim == 2:
-        # Single channel image
-        logger.info("  Single-channel image")
-        img = img[np.newaxis, ...]  # Add channel dimension
-        n_channels = 1
-    elif img.ndim == 3:
-        # Could be (C, Y, X) or (Y, X, C)
-        # Assume smallest dimension is channels
-        if img.shape[0] < img.shape[1] and img.shape[0] < img.shape[2]:
-            # (C, Y, X) format
-            n_channels = img.shape[0]
-            logger.info(f"  Format: (C, Y, X) with {n_channels} channels")
-        elif img.shape[2] < img.shape[0] and img.shape[2] < img.shape[1]:
-            # (Y, X, C) format - transpose to (C, Y, X)
-            img = np.transpose(img, (2, 0, 1))
-            n_channels = img.shape[0]
-            logger.info(f"  Format: (Y, X, C) with {n_channels} channels - transposed")
-        else:
-            # Ambiguous - assume (C, Y, X)
-            n_channels = img.shape[0]
-            logger.info(f"  Assuming format: (C, Y, X) with {n_channels} channels")
-    else:
-        raise ValueError(f"Unexpected number of dimensions: {img.ndim}")
+    # Normalize to (C, H, W) format
+    data = normalize_image_dimensions(img)
+    n_channels = data.shape[0]
+    logger.info(f"  Normalized to (C, H, W) with {n_channels} channels")
 
     # Get channel names
     if channel_names is None:
-        channel_names = get_ome_channel_names(input_path)
+        channel_names = extract_channel_names_from_ome(input_path) or None
 
     if channel_names is None:
         channel_names = [f"Channel_{i}" for i in range(n_channels)]
@@ -137,7 +84,7 @@ def split_multichannel_tiff(input_path, output_dir, is_reference=False, channel_
             channel_names = channel_names[:n_channels]
 
     # Create output directory
-    os.makedirs(output_dir, exist_ok=True)
+    ensure_dir(output_dir)
 
     # Save each channel (skip DAPI if not reference)
     saved_paths = []
@@ -157,7 +104,7 @@ def split_multichannel_tiff(input_path, output_dir, is_reference=False, channel_
         clean_name = "".join(c if c.isalnum() or c in '-_' else '_' for c in name)
         output_path = os.path.join(output_dir, f"{clean_name}.tiff")
 
-        channel_data = img[i]
+        channel_data = data[i]
         tifffile.imwrite(output_path, channel_data, bigtiff=True, compression='zlib')
 
         saved_paths.append(output_path)

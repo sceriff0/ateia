@@ -1,14 +1,14 @@
 process MAX_DIM {
-    tag "${patient_id}"
+    tag "${meta.patient_id}"
     label 'process_single'
 
     container 'bolt3x/attend_image_analysis:preprocess'
 
     input:
-    tuple val(patient_id), path(dims_files)
+    tuple val(meta), path(dims_files)
 
     output:
-    tuple val(patient_id), path("${patient_id}_max_dims.txt"), emit: max_dims_file
+    tuple val(meta), path("${meta.patient_id}_max_dims.txt"), emit: max_dims_file
     path "versions.yml"                                       , emit: versions
 
     when:
@@ -47,7 +47,7 @@ for dims_file in dims_files:
         max_w = max(max_w, w)
 
 # Save max dimensions
-with open('${patient_id}_max_dims.txt', 'w') as f:
+with open('${meta.patient_id}_max_dims.txt', 'w') as f:
     f.write(f"MAX_HEIGHT {max_h}\\n")
     f.write(f"MAX_WIDTH {max_w}\\n")
 
@@ -62,8 +62,8 @@ EOF
 
     stub:
     """
-    echo "MAX_HEIGHT 10000" > ${patient_id}_max_dims.txt
-    echo "MAX_WIDTH 10000" >> ${patient_id}_max_dims.txt
+    echo "MAX_HEIGHT 10000" > ${meta.patient_id}_max_dims.txt
+    echo "MAX_WIDTH 10000" >> ${meta.patient_id}_max_dims.txt
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":

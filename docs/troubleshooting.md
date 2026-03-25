@@ -4,27 +4,12 @@
 
 Use only supported enums:
 
-- Step: `preprocessing`, `registration`, `postprocessing`, `copy_results`
-- Registration: `valis`, `valis_pairs`, `gpu`, `cpu`, `cpu_tiled`
+- Step: `preprocessing`, `registration`, `postprocessing`
+- Registration: `valis`
 
 ## `--input` Validation Errors
 
-`--input` is required for:
-
-- `preprocessing`
-- `registration`
-- `postprocessing`
-
-`copy_results` does not use CSV input.
-
-## `copy_results` Path Errors
-
-Common causes:
-
-- Missing `--savedir`
-- `savedir` equals `outdir`
-- `savedir` nested inside `outdir`
-- Missing source directory
+`--input` is required for all steps (`preprocessing`, `registration`, `postprocessing`).
 
 ## Out-of-Memory / Runtime Failures
 

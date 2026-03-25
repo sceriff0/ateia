@@ -73,6 +73,58 @@ nextflow_process {
             )
         }
     }
+    test("Should produce non-negative intensity values with correct cell count - regression") {
+
+        tag "real"
+        tag "slow"
+        tag "regression"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA']],
+                    file('$projectDir/tests/testdata/sample_DAPI.tif', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_cell_mask.npy', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                // Cell count should match mask (20 cells, some may be filtered by min_area)
+                {
+                    def csvFile = process.out.individual_csv.get(0).get(1)
+                    def lines = path(csvFile).readLines()
+                    def cellCount = lines.size() - 1
+                    assert cellCount > 0, "Must have at least one cell"
+                    assert cellCount <= 20, "Should not exceed 20 cells from synthetic mask"
+                },
+                // All intensity values should be non-negative (DAPI synthetic range: 8000-15000)
+                {
+                    def csvFile = process.out.individual_csv.get(0).get(1)
+                    def lines = path(csvFile).readLines()
+                    def header = lines[0].split(',')
+                    def valueIdx = 1  // second column is the intensity
+                    lines[1..-1].each { line ->
+                        def val = line.split(',')[valueIdx] as double
+                        assert val >= 0, "Intensity must be >= 0, got ${val}"
+                    }
+                },
+                // Labels should be positive integers matching mask labels
+                {
+                    def csvFile = process.out.individual_csv.get(0).get(1)
+                    def lines = path(csvFile).readLines()
+                    lines[1..-1].each { line ->
+                        def label = line.split(',')[0] as int
+                        assert label > 0, "Label must be > 0 (background excluded)"
+                    }
+                }
+            )
+        }
+    }
 }
 
 nextflow_process {

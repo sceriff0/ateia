@@ -1,5 +1,3 @@
-nextflow.enable.dsl = 2
-
 /*
  * QUANTIFY - Marker intensity quantification
  *
@@ -35,7 +33,7 @@ process QUANTIFY {
     tiff_bytes=\$(stat -L --printf="%s" ${channel_tiff} 2>/dev/null || echo 0)
     mask_bytes=\$(stat -L --printf="%s" ${seg_mask} 2>/dev/null || echo 0)
     total_bytes=\$((tiff_bytes + mask_bytes))
-    echo "${task.process},${meta.id},${channel_tiff.name}+${seg_mask.name},\${total_bytes}" > ${meta.id}.QUANTIFY.size.csv
+    echo "${task.process},${meta.patient_id},${channel_tiff.name}+${seg_mask.name},\${total_bytes}" > ${meta.id}.QUANTIFY.size.csv
 
     echo "Sample: ${meta.patient_id}"
     echo "Channel: ${channel_name}"

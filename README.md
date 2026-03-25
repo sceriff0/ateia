@@ -21,8 +21,7 @@ MIRAGE is a Nextflow DSL2 pipeline for whole slide image (WSI) processing. It su
 4. **Cell segmentation** (`SEGMENT`) — Nuclear and cell segmentation via [StarDist](https://github.com/stardist/stardist); outputs GeoJSON contours per patient
 5. **Single-cell marker quantification** (`QUANTIFY`) — Extracts per-cell intensity statistics across all registered channels; outputs CSV tables
 6. **QuPath GeoJSON export** (`EXPORT_GEOJSON`) — Exports all cells with raw marker intensities and morphological measurements in QuPath-native GeoJSON format for interactive gating via FlowPath
-7. **Optional: Pixie unsupervised clustering** — Pixel- and cell-level clustering via [ark-analysis/Pixie](https://github.com/angelolab/pixie); enabled with `--pixie_enabled true`
-8. **Pyramidal OME-TIFF export** — Assembles all registered channels into a tiled, multi-resolution OME-TIFF for visualization (e.g., QuPath, napari)
+7. **Pyramidal OME-TIFF export** — Assembles all registered channels into a tiled, multi-resolution OME-TIFF for visualization (e.g., QuPath, napari)
 9. **Quality control reporting** — QC overlays and metrics are generated at the preprocessing and registration steps
 
 ## Quick Start
@@ -118,5 +117,4 @@ Core dependencies include:
 - **VALIS** — Gatenbee et al. (2023), *Nature Communications* — [https://doi.org/10.1038/s41467-023-40218-9](https://doi.org/10.1038/s41467-023-40218-9)
 - **StarDist** — Schmidt et al. (2018), *MICCAI* — [https://doi.org/10.1007/978-3-030-00934-2_30](https://doi.org/10.1007/978-3-030-00934-2_30)
 - **BaSiCPy** — Peng et al. (2017), *Nature Communications* — [https://doi.org/10.1038/ncomms14836](https://doi.org/10.1038/ncomms14836)
-- **Pixie/ark-analysis** — Angelo Lab — [https://github.com/angelolab/pixie](https://github.com/angelolab/pixie)
 - **Nextflow** — Di Tommaso et al. (2017), *Nature Biotechnology* — [https://doi.org/10.1038/nbt.3820](https://doi.org/10.1038/nbt.3820)

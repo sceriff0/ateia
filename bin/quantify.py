@@ -431,12 +431,14 @@ def main():
     # Ensure output directory exists
     ensure_dir(args.outdir)
 
+    # Derive effective channel name once for consistency
+    effective_channel_name = args.channel_name or Path(args.channel_tiff).stem.split('_')[-1]
+
     # Determine output path
     if args.output_file:
         output_path = os.path.join(args.outdir, args.output_file)
     else:
-        channel_name = Path(args.channel_tiff).stem
-        output_path = os.path.join(args.outdir, f"{channel_name}_quant.csv")
+        output_path = os.path.join(args.outdir, f"{effective_channel_name}_quant.csv")
 
     # Run quantification (CPU mode)
     # Note: GPU mode removed - use GPU container if GPU acceleration needed
@@ -446,7 +448,7 @@ def main():
         channel_path=args.channel_tiff,
         output_path=output_path,
         min_area=args.min_area,
-        channel_name=args.channel_name
+        channel_name=effective_channel_name
     )
 
     return 0

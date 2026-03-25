@@ -10,7 +10,7 @@
 process AGGREGATE_SIZE_LOGS {
     tag "aggregate"
     label 'process_single'
-    container null  // Simple CSV concatenation: no dependencies, runs on executor node
+    container 'ubuntu:22.04'
 
     input:
     path(size_csvs)

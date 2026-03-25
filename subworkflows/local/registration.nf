@@ -1,5 +1,3 @@
-nextflow.enable.dsl = 2
-
 /*
 ========================================================================================
     IMPORT MODULES
@@ -12,10 +10,6 @@ include { PAD_IMAGES                        } from '../../modules/local/pad_imag
 include { GENERATE_REGISTRATION_QC          } from '../../modules/local/generate_registration_qc'
 
 include { VALIS_ADAPTER                     } from './adapters/valis_adapter'
-include { VALIS_PAIRS_ADAPTER               } from './adapters/valis_pairs_adapter'
-include { GPU_ADAPTER                       } from './adapters/gpu_adapter'
-include { CPU_ADAPTER                       } from './adapters/cpu_adapter'
-include { CPU_TILED_ADAPTER                 } from './adapters/cpu_tiled_adapter'
 
 include { ESTIMATE_FEATURE_DISTANCES        } from '../../modules/local/estimate_feature_distances'
 
@@ -29,7 +23,7 @@ include { ESTIMATE_FEATURE_DISTANCES        } from '../../modules/local/estimate
         - params.skip_registration_qc: true | false (skip QC generation)
         - params.qc_scale_factor: float (QC downsampling factor, default 0.25)
         - params.enable_feature_error: true | false (enable feature-based TRE)
-        - method: 'valis' | 'valis_pairs' | 'gpu' | 'cpu' | 'cpu_tiled'
+        - method: 'valis'
 
     Input:
         ch_preprocessed: Channel of [meta, file] tuples
@@ -58,7 +52,6 @@ include { ESTIMATE_FEATURE_DISTANCES        } from '../../modules/local/estimate
 workflow REGISTRATION {
     take:
     ch_preprocessed
-    method
 
     main:
     // ========================================================================
@@ -145,35 +138,8 @@ workflow REGISTRATION {
     //   - Runs registration
     //   - Converts output back to [meta, file] standard format
 
-    switch(method) {
-        case 'valis':
-            VALIS_ADAPTER(ch_grouped)
-            ch_registered = VALIS_ADAPTER.out.registered
-            break
-
-        case 'valis_pairs':
-            VALIS_PAIRS_ADAPTER(ch_grouped)
-            ch_registered = VALIS_PAIRS_ADAPTER.out.registered
-            break
-
-        case 'gpu':
-            GPU_ADAPTER(ch_grouped)
-            ch_registered = GPU_ADAPTER.out.registered
-            break
-
-        case 'cpu':
-            CPU_ADAPTER(ch_grouped)
-            ch_registered = CPU_ADAPTER.out.registered
-            break
-
-        case 'cpu_tiled':
-            CPU_TILED_ADAPTER(ch_grouped)
-            ch_registered = CPU_TILED_ADAPTER.out.registered
-            break
-
-        default:
-            error "Invalid registration method: '${method}'. Supported: valis, valis_pairs, gpu, cpu, cpu_tiled"
-    }
+    VALIS_ADAPTER(ch_grouped)
+    ch_registered = VALIS_ADAPTER.out.registered
 
     // ========================================================================
     // STEP 3b: GENERATE QC (Method-independent)
@@ -286,7 +252,7 @@ workflow REGISTRATION {
         .collectFile(
             name: 'registered.csv',
             newLine: true,
-            storeDir: "./csv",
+            storeDir: "${params.outdir}/csv",
             seed: 'patient_id,registered_image,is_reference,channels'
         )
 
@@ -300,24 +266,8 @@ workflow REGISTRATION {
             .mix(PAD_IMAGES.out.size_log)
     }
 
-    // Add size logs from the active registration adapter
-    switch(method) {
-        case 'valis':
-            ch_size_logs = ch_size_logs.mix(VALIS_ADAPTER.out.size_logs)
-            break
-        case 'valis_pairs':
-            ch_size_logs = ch_size_logs.mix(VALIS_PAIRS_ADAPTER.out.size_logs)
-            break
-        case 'gpu':
-            ch_size_logs = ch_size_logs.mix(GPU_ADAPTER.out.size_logs)
-            break
-        case 'cpu':
-            ch_size_logs = ch_size_logs.mix(CPU_ADAPTER.out.size_logs)
-            break
-        case 'cpu_tiled':
-            ch_size_logs = ch_size_logs.mix(CPU_TILED_ADAPTER.out.size_logs)
-            break
-    }
+    // Add size logs from the registration adapter
+    ch_size_logs = ch_size_logs.mix(VALIS_ADAPTER.out.size_logs)
 
     // Add size logs from QC processes (if enabled)
     if (!params.skip_registration_qc) {
@@ -338,23 +288,7 @@ workflow REGISTRATION {
             .mix(PAD_IMAGES.out.versions.first())
     }
 
-    switch(method) {
-        case 'valis':
-            ch_versions = ch_versions.mix(VALIS_ADAPTER.out.versions)
-            break
-        case 'valis_pairs':
-            ch_versions = ch_versions.mix(VALIS_PAIRS_ADAPTER.out.versions)
-            break
-        case 'gpu':
-            ch_versions = ch_versions.mix(GPU_ADAPTER.out.versions)
-            break
-        case 'cpu':
-            ch_versions = ch_versions.mix(CPU_ADAPTER.out.versions)
-            break
-        case 'cpu_tiled':
-            ch_versions = ch_versions.mix(CPU_TILED_ADAPTER.out.versions)
-            break
-    }
+    ch_versions = ch_versions.mix(VALIS_ADAPTER.out.versions)
 
     if (!params.skip_registration_qc) {
         ch_versions = ch_versions.mix(GENERATE_REGISTRATION_QC.out.versions.first())

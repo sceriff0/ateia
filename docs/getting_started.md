@@ -28,16 +28,9 @@ nextflow run main.nf \
   -profile slurm
 ```
 
-## Quick Run: Copy Results to Archive
+## Archiving Results
 
-```bash
-nextflow run main.nf \
-  --step copy_results \
-  --outdir results \
-  --savedir /path/to/archive \
-  --copy_delete_source false \
-  -profile slurm
-```
+To archive results, use standard file tools (e.g., `rsync`) to copy `--outdir` to your archive location.
 
 ## Dry Validation Only
 

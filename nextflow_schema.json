@@ -1,6 +1,5 @@
 {
     "$schema": "http://json-schema.org/draft-07/schema",
-    "$id": "https://raw.githubusercontent.com/your-org/mirage/main/nextflow_schema.json",
     "title": "MIRAGE WSI Processing Pipeline Parameters",
     "description": "Schema synchronized with nextflow.config canonical params surface.",
     "type": "object",
@@ -8,7 +7,7 @@
         "input_output_options": {
             "title": "Input/output options",
             "type": "object",
-            "required": ["step"],
+            "required": ["step", "input", "outdir"],
             "properties": {
                 "input": {
                     "type": ["string", "null"],
@@ -185,7 +184,8 @@
                 "memory_mode": {
                     "type": "string",
                     "description": "Memory mode for registration.",
-                    "default": "high"
+                    "default": "medium",
+                    "enum": ["low", "medium", "high"]
                 },
                 "skip_micro_registration": {
                     "type": "boolean",
@@ -216,83 +216,6 @@
                     "type": "integer",
                     "description": "Tile size for tiled registration.",
                     "default": 2048
-                }
-            }
-        },
-        "registration_gpu_options": {
-            "title": "Registration GPU options",
-            "type": "object",
-            "properties": {
-                "gpu_reg_affine_crop_size": {
-                    "type": "integer",
-                    "description": "Crop size for GPU affine registration.",
-                    "default": 10000
-                },
-                "gpu_reg_diffeo_crop_size": {
-                    "type": "integer",
-                    "description": "Crop size for GPU diffeomorphic registration.",
-                    "default": 2000
-                },
-                "gpu_reg_overlap_percent": {
-                    "type": "number",
-                    "description": "Overlap percentage for GPU registration.",
-                    "default": 40.0
-                },
-                "gpu_reg_n_features": {
-                    "type": "integer",
-                    "description": "Number of features for GPU registration.",
-                    "default": 5000
-                },
-                "gpu_reg_n_workers": {
-                    "type": "integer",
-                    "description": "Number of workers for GPU registration.",
-                    "default": 8
-                },
-                "gpu_reg_opt_tol": {
-                    "type": "number",
-                    "description": "Optimization tolerance for GPU registration.",
-                    "default": 1e-06
-                },
-                "gpu_reg_inv_tol": {
-                    "type": "number",
-                    "description": "Inverse tolerance for GPU registration.",
-                    "default": 1e-06
-                }
-            }
-        },
-        "registration_cpu_options": {
-            "title": "Registration CPU options",
-            "type": "object",
-            "properties": {
-                "cpu_reg_affine_crop_size": {
-                    "type": "integer",
-                    "description": "Crop size for CPU affine registration.",
-                    "default": 10000
-                },
-                "cpu_reg_diffeo_crop_size": {
-                    "type": "integer",
-                    "description": "Crop size for CPU diffeomorphic registration.",
-                    "default": 2000
-                },
-                "cpu_reg_overlap_percent": {
-                    "type": "number",
-                    "description": "Overlap percentage for CPU registration.",
-                    "default": 40.0
-                },
-                "cpu_reg_n_features": {
-                    "type": "integer",
-                    "description": "Number of features for CPU registration.",
-                    "default": 5000
-                },
-                "cpu_reg_opt_tol": {
-                    "type": "number",
-                    "description": "Optimization tolerance for CPU registration.",
-                    "default": 1e-06
-                },
-                "cpu_reg_inv_tol": {
-                    "type": "number",
-                    "description": "Inverse tolerance for CPU registration.",
-                    "default": 1e-06
                 }
             }
         },
@@ -360,72 +283,6 @@
                     "type": "boolean",
                     "description": "Skip generation of the final aggregated HTML QC report.",
                     "default": false
-                }
-            }
-        },
-        "pixie_options": {
-            "title": "Pixie clustering options",
-            "type": "object",
-            "properties": {
-                "pixie_enabled": {
-                    "type": "boolean",
-                    "description": "Enable Pixie clustering.",
-                    "default": false
-                },
-                "pixie_channels": {
-                    "type": "array",
-                    "description": "Channels for Pixie clustering.",
-                    "default": ["CD45", "CD3", "CD4", "CD8", "FOXP3", "GZMB", "CD14", "CD163", "SMA", "PANCK", "VIMENTIN"]
-                },
-                "pixie_blur_factor": {
-                    "type": "integer",
-                    "description": "Gaussian blur sigma for pixel preprocessing.",
-                    "default": 2
-                },
-                "pixie_subset_proportion": {
-                    "type": "number",
-                    "description": "Fraction of pixels for SOM training.",
-                    "default": 0.05
-                },
-                "pixie_num_passes": {
-                    "type": "integer",
-                    "description": "Number of SOM training passes.",
-                    "default": 1
-                },
-                "pixie_max_k": {
-                    "type": "integer",
-                    "description": "Maximum number of meta-clusters.",
-                    "default": 20
-                },
-                "pixie_cap": {
-                    "type": "integer",
-                    "description": "Z-score capping value for clustering.",
-                    "default": 3
-                },
-                "pixie_seed": {
-                    "type": "integer",
-                    "description": "Random seed for reproducibility.",
-                    "default": 4
-                },
-                "pixie_pixel_cluster_col": {
-                    "type": "string",
-                    "description": "Pixel cluster column for cell clustering.",
-                    "default": "pixel_meta_cluster_rename"
-                },
-                "pixie_target_fovs": {
-                    "type": "integer",
-                    "description": "Target number of FOV tiles.",
-                    "default": 100
-                },
-                "pixie_multiprocess": {
-                    "type": "boolean",
-                    "description": "Enable multiprocessing for Pixie.",
-                    "default": false
-                },
-                "pixie_batch_size": {
-                    "type": "integer",
-                    "description": "Batch size for sequential processing.",
-                    "default": 1
                 }
             }
         },
@@ -550,11 +407,8 @@
         { "$ref": "#/definitions/input_output_options" },
         { "$ref": "#/definitions/preprocessing_options" },
         { "$ref": "#/definitions/registration_options" },
-        { "$ref": "#/definitions/registration_gpu_options" },
-        { "$ref": "#/definitions/registration_cpu_options" },
         { "$ref": "#/definitions/segmentation_options" },
         { "$ref": "#/definitions/quantification_options" },
-        { "$ref": "#/definitions/pixie_options" },
         { "$ref": "#/definitions/output_options" },
         { "$ref": "#/definitions/pipeline_control" },
         { "$ref": "#/definitions/cluster_options" },

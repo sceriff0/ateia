@@ -1,0 +1,249 @@
+nextflow_process {
+
+    name "Test EXPORT_GEOJSON process"
+    script "modules/local/export_geojson.nf"
+    process "EXPORT_GEOJSON"
+
+    tag "modules"
+    tag "modules_local"
+    tag "export_geojson"
+
+    test("Should export GeoJSON and CSV - stub") {
+
+        options "-stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA']],
+                    file('$projectDir/tests/testdata/sample_merged_quant.csv', checkIfExists: true),
+                    file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.geojson },
+                { assert process.out.csv },
+                { assert process.out.versions },
+                { with(process.out.geojson) {
+                    assert size() == 1
+                    assert get(0).get(0).patient_id == 'P001'
+                    assert get(0).get(1).toString().endsWith('cells.geojson')
+                }},
+                { with(process.out.csv) {
+                    assert size() == 1
+                    assert get(0).get(1).toString().endsWith('cells_data.csv')
+                }}
+            )
+        }
+    }
+
+    test("Should preserve metadata - stub") {
+
+        options "-stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [patient_id: 'P002', channels: ['DAPI', 'PANCK'], custom_field: 'preserved'],
+                    file('$projectDir/tests/testdata/sample_merged_quant.csv', checkIfExists: true),
+                    file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { with(process.out.geojson) {
+                    assert get(0).get(0).patient_id == 'P002'
+                    assert get(0).get(0).custom_field == 'preserved'
+                }}
+            )
+        }
+    }
+
+    test("Should emit versions.yml - stub") {
+
+        options "-stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA']],
+                    file('$projectDir/tests/testdata/sample_merged_quant.csv', checkIfExists: true),
+                    file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.versions },
+                { assert snapshot(process.out.versions).match() }
+            )
+        }
+    }
+
+    test("Should skip when ext.when is false") {
+
+        options "-stub"
+
+        when {
+            process {
+                """
+                task.ext.when = false
+
+                input[0] = [
+                    [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA']],
+                    file('$projectDir/tests/testdata/sample_merged_quant.csv', checkIfExists: true),
+                    file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            assert process.success
+        }
+    }
+
+    test("Should produce valid GeoJSON with cell features - real") {
+
+        tag "real"
+        tag "slow"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA']],
+                    file('$projectDir/tests/testdata/sample_merged_quant.csv', checkIfExists: true),
+                    file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.geojson },
+                { assert process.out.csv },
+                // GeoJSON is valid JSON and has correct structure
+                {
+                    def geojsonFile = process.out.geojson.get(0).get(1)
+                    def geojson = new groovy.json.JsonSlurper().parseText(path(geojsonFile).text)
+                    assert geojson.type == 'FeatureCollection', "Root type must be FeatureCollection"
+                    assert geojson.features != null, "Must have features array"
+                    assert geojson.features.size() > 0, "Must have at least one cell feature"
+                },
+                // Each feature has a polygon geometry
+                {
+                    def geojsonFile = process.out.geojson.get(0).get(1)
+                    def geojson = new groovy.json.JsonSlurper().parseText(path(geojsonFile).text)
+                    geojson.features.each { feature ->
+                        assert feature.geometry != null, "Feature must have geometry"
+                        assert feature.geometry.type == 'Polygon', "Geometry must be Polygon, got: ${feature.geometry.type}"
+                        assert feature.geometry.coordinates != null, "Polygon must have coordinates"
+                        assert feature.geometry.coordinates[0].size() >= 4, "Polygon ring must have >= 4 points (closed)"
+                    }
+                },
+                // Each feature has QuPath-compatible properties with measurements
+                {
+                    def geojsonFile = process.out.geojson.get(0).get(1)
+                    def geojson = new groovy.json.JsonSlurper().parseText(path(geojsonFile).text)
+                    def firstFeature = geojson.features[0]
+                    assert firstFeature.properties != null, "Feature must have properties"
+                    // QuPath uses measurement array format: [{name: ..., value: ...}, ...]
+                    assert firstFeature.properties.measurements != null, "Must have measurements"
+                    assert firstFeature.properties.measurements instanceof List, "Measurements must be array"
+                    assert firstFeature.properties.measurements.size() > 0, "Must have at least one measurement"
+                    // Verify measurement structure
+                    def firstMeasurement = firstFeature.properties.measurements[0]
+                    assert firstMeasurement.name != null, "Measurement must have name"
+                    assert firstMeasurement.value != null, "Measurement must have value"
+                },
+                // Feature count matches cell count from input CSV (minus header, minus background)
+                {
+                    def geojsonFile = process.out.geojson.get(0).get(1)
+                    def geojson = new groovy.json.JsonSlurper().parseText(path(geojsonFile).text)
+                    def csvFile = process.out.csv.get(0).get(1)
+                    def csvLines = path(csvFile).readLines()
+                    def csvCellCount = csvLines.size() - 1  // minus header
+                    // GeoJSON cell count should match CSV cell count
+                    assert geojson.features.size() == csvCellCount,
+                        "GeoJSON features (${geojson.features.size()}) should match CSV rows (${csvCellCount})"
+                },
+                // Output CSV has expected columns and non-empty values
+                {
+                    def csvFile = process.out.csv.get(0).get(1)
+                    def lines = path(csvFile).readLines()
+                    assert lines.size() > 1, "CSV should have header + data rows"
+                    def header = lines[0].toLowerCase()
+                    assert header.contains('label'), "CSV must have label column"
+                },
+                // Metadata preserved
+                { assert process.out.geojson.get(0).get(0).patient_id == 'P001' }
+            )
+        }
+    }
+
+    test("Should include marker intensities in GeoJSON measurements - real") {
+
+        tag "real"
+        tag "slow"
+        tag "regression"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA']],
+                    file('$projectDir/tests/testdata/sample_merged_quant.csv', checkIfExists: true),
+                    file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                // Verify marker names appear in measurements
+                {
+                    def geojsonFile = process.out.geojson.get(0).get(1)
+                    def geojson = new groovy.json.JsonSlurper().parseText(path(geojsonFile).text)
+                    def firstFeature = geojson.features[0]
+                    def measurementNames = firstFeature.properties.measurements*.name
+                    // At least some marker-related measurements should be present
+                    assert measurementNames.size() > 0, "Must have measurements"
+                },
+                // Verify measurement values are numeric and non-negative
+                {
+                    def geojsonFile = process.out.geojson.get(0).get(1)
+                    def geojson = new groovy.json.JsonSlurper().parseText(path(geojsonFile).text)
+                    geojson.features.take(5).each { feature ->
+                        feature.properties.measurements.each { m ->
+                            assert m.value instanceof Number, "Measurement '${m.name}' value must be numeric, got: ${m.value?.class}"
+                            // Intensities should not be negative
+                            if (m.name.toLowerCase().contains('mean') || m.name.toLowerCase().contains('intensity')) {
+                                assert m.value >= 0, "Intensity measurement '${m.name}' must be >= 0, got: ${m.value}"
+                            }
+                        }
+                    }
+                }
+            )
+        }
+    }
+}

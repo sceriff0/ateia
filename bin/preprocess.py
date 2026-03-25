@@ -374,20 +374,16 @@ def preprocess_multichannel_image(
         if not has_ome:
             logger.warning("[WARN] No OME metadata in saved file")
 
-    verify_img = tifffile.imread(output_path)
-    if verify_img.ndim == 3:
-        logger.debug(f"  Verification: shape={verify_img.shape}")
-
-    # CHECKPOINT 1: Verify saved file has no negatives
-    logger.info("[CHECKPOINT 1] Verifying saved preprocessed file...")
-    verify_min = float(verify_img.min())
-    verify_max = float(verify_img.max())
+    # CHECKPOINT 1: Verify preprocessed data has no negatives (use in-memory array, no re-read)
+    logger.info("[CHECKPOINT 1] Verifying preprocessed data...")
+    verify_min = float(preprocessed.min())
+    verify_max = float(preprocessed.max())
     if verify_min < 0:
-        neg_count = int(np.sum(verify_img < 0))
-        neg_pct = 100 * neg_count / verify_img.size
-        logger.error(f"[CHECKPOINT 1 FAIL] Saved file has {neg_count} negatives ({neg_pct:.4f}%), min={verify_min}")
+        neg_count = int(np.sum(preprocessed < 0))
+        neg_pct = 100 * neg_count / preprocessed.size
+        logger.error(f"[CHECKPOINT 1 FAIL] Preprocessed data has {neg_count} negatives ({neg_pct:.4f}%), min={verify_min}")
     else:
-        logger.info(f"[CHECKPOINT 1 OK] No negatives in saved file. min={verify_min:.2f}, max={verify_max:.2f}")
+        logger.info(f"[CHECKPOINT 1 OK] No negatives. min={verify_min:.2f}, max={verify_max:.2f}")
 
     return preprocessed
 
@@ -524,9 +520,8 @@ def main():
 
     logger.info(f"Preprocessing completed successfully. Output: {output_path}")
 
-    # Write dimensions to file for downstream processes
-    img = tifffile.imread(output_path)
-    shape = img.shape if img.ndim == 3 else (1, img.shape[0], img.shape[1])
+    # Write dimensions to file for downstream processes (use in-memory shape, no re-read)
+    shape = preprocessed.shape if preprocessed.ndim == 3 else (1, preprocessed.shape[0], preprocessed.shape[1])
     dims_filename = f"{base}_dims.txt"
     dims_path = os.path.join(args.output_dir, dims_filename)
     with open(dims_path, 'w') as f:

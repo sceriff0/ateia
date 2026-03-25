@@ -246,4 +246,49 @@ nextflow_process {
             )
         }
     }
+
+    test("Should produce padded image larger than input - regression") {
+
+        tag "real"
+        tag "slow"
+        tag "regression"
+
+        when {
+            params {
+                gpu_reg_pad_mode = 'constant'
+            }
+            process {
+                """
+                input[0] = [
+                    [
+                        patient_id: 'P001',
+                        is_reference: true,
+                        channels: ['DAPI', 'PANCK', 'SMA']
+                    ],
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    file('$projectDir/tests/testdata/sample_max_dims.txt', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                // Padded file should be significantly larger than input (128x128 → 256x256)
+                // Input is ~99KB for 128x128x3, output should be ~4x larger for 256x256x3
+                {
+                    def paddedSize = process.out.padded.get(0).get(1).toFile().size()
+                    assert paddedSize > 200_000, "Padded image (256x256) should be > 200KB, got ${paddedSize}"
+                },
+                // Size log should record the operation
+                { assert process.out.size_log },
+                // Metadata preserved through padding
+                {
+                    assert process.out.padded.get(0).get(0).patient_id == 'P001'
+                    assert process.out.padded.get(0).get(0).channels == ['DAPI', 'PANCK', 'SMA']
+                }
+            )
+        }
+    }
 }

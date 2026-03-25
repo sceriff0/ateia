@@ -120,6 +120,84 @@ nextflow_process {
         }
     }
 
+    test("Should produce correct cell count and valid morphology values - regression") {
+
+        tag "real"
+        tag "slow"
+        tag "regression"
+
+        when {
+            params {
+                quant_min_area = 0
+            }
+            process {
+                """
+                input[0] = [
+                    [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA']],
+                    file('$projectDir/tests/testdata/P001_cell_mask.npy', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                // Cell count should match synthetic mask (20 cells)
+                {
+                    def csvFile = process.out.morphology.get(0).get(1)
+                    def lines = path(csvFile).readLines()
+                    def cellCount = lines.size() - 1
+                    assert cellCount == 20, "Expected 20 cells from synthetic mask, got ${cellCount}"
+                },
+                // All centroids should be within image bounds (128x128)
+                {
+                    def csvFile = process.out.morphology.get(0).get(1)
+                    def lines = path(csvFile).readLines()
+                    def headerCols = lines[0].split(',').toList()
+                    def yIdx = headerCols.indexOf('y')
+                    def xIdx = headerCols.indexOf('x')
+                    lines[1..-1].each { line ->
+                        def vals = line.split(',')
+                        def y = vals[yIdx] as double
+                        def x = vals[xIdx] as double
+                        assert y >= 0 && y < 128, "Centroid Y=${y} out of bounds [0, 128)"
+                        assert x >= 0 && x < 128, "Centroid X=${x} out of bounds [0, 128)"
+                    }
+                },
+                // Eccentricity should be in [0, 1] range
+                {
+                    def csvFile = process.out.morphology.get(0).get(1)
+                    def lines = path(csvFile).readLines()
+                    def headerCols = lines[0].split(',').toList()
+                    def eccIdx = headerCols.indexOf('eccentricity')
+                    lines[1..-1].each { line ->
+                        def ecc = line.split(',')[eccIdx] as double
+                        assert ecc >= 0 && ecc <= 1, "Eccentricity=${ecc} out of range [0, 1]"
+                    }
+                },
+                // Contours JSON should have entries for all cells in morphology
+                {
+                    def jsonFile = process.out.contours.get(0).get(1)
+                    def contours = new groovy.json.JsonSlurper().parseText(path(jsonFile).text)
+                    def csvFile = process.out.morphology.get(0).get(1)
+                    def cellCount = path(csvFile).readLines().size() - 1
+                    assert contours.size() == cellCount,
+                        "Contours (${contours.size()}) should match cell count (${cellCount})"
+                },
+                // Each contour should be a closed polygon (first == last point)
+                {
+                    def jsonFile = process.out.contours.get(0).get(1)
+                    def contours = new groovy.json.JsonSlurper().parseText(path(jsonFile).text)
+                    contours.each { label, ring ->
+                        assert ring.size() >= 4, "Polygon for cell ${label} needs >= 4 points, got ${ring.size()}"
+                        assert ring[0] == ring[-1], "Polygon for cell ${label} must be closed (first==last)"
+                    }
+                }
+            )
+        }
+    }
+
     test("Should respect when condition") {
 
         options "-stub"
