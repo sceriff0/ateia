@@ -16,7 +16,7 @@ nextflow_process {
             process {
                 """
                 input[0] = [
-                    'P001',
+                    [patient_id: 'P001'],
                     file('$projectDir/tests/testdata/sample_dims.txt', checkIfExists: true)
                 ]
                 """
@@ -30,7 +30,7 @@ nextflow_process {
                 { assert process.out.versions },
                 { with(process.out.max_dims_file) {
                     assert size() == 1
-                    assert get(0).get(0) == 'P001'
+                    assert get(0).get(0).patient_id == 'P001'
                     assert get(0).get(1).toString().endsWith('_max_dims.txt')
                 }}
             )
@@ -45,7 +45,7 @@ nextflow_process {
             process {
                 """
                 input[0] = [
-                    'P001',
+                    [patient_id: 'P001'],
                     [
                         file('$projectDir/tests/testdata/sample_dims.txt', checkIfExists: true)
                     ]
@@ -70,7 +70,7 @@ nextflow_process {
             process {
                 """
                 input[0] = [
-                    'P002',
+                    [patient_id: 'P002'],
                     file('$projectDir/tests/testdata/sample_dims.txt', checkIfExists: true)
                 ]
                 """
@@ -81,7 +81,7 @@ nextflow_process {
             assertAll(
                 { assert process.success },
                 { with(process.out.max_dims_file) {
-                    assert get(0).get(0) == 'P002'
+                    assert get(0).get(0).patient_id == 'P002'
                     assert get(0).get(1).toString().contains('P002')
                 }}
             )
@@ -96,7 +96,7 @@ nextflow_process {
             process {
                 """
                 input[0] = [
-                    'P001',
+                    [patient_id: 'P001'],
                     file('$projectDir/tests/testdata/sample_dims.txt', checkIfExists: true)
                 ]
                 """
@@ -123,7 +123,7 @@ nextflow_process {
                 task.ext.when = false
 
                 input[0] = [
-                    'P001',
+                    [patient_id: 'P001'],
                     file('$projectDir/tests/testdata/sample_dims.txt', checkIfExists: true)
                 ]
                 """
@@ -145,7 +145,7 @@ nextflow_process {
             process {
                 """
                 input[0] = [
-                    'P001',
+                    [patient_id: 'P001'],
                     [
                         file('$projectDir/tests/testdata/sample_dims.txt', checkIfExists: true)
                     ]
@@ -160,7 +160,7 @@ nextflow_process {
                 { assert process.out.max_dims_file },
                 { assert process.out.versions },
                 // Patient ID preserved
-                { assert process.out.max_dims_file.get(0).get(0) == 'P001' },
+                { assert process.out.max_dims_file.get(0).get(0).patient_id == 'P001' },
                 // Output contains correct max dimensions (both images are 128x128)
                 {
                     def content = process.out.max_dims_file.get(0).get(1).text.trim()

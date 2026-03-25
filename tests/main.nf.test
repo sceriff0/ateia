@@ -215,8 +215,6 @@ nextflow_pipeline {
                 input = "$projectDir/tests/testdata/valid_checkpoint_registration.csv"
                 outdir = "$outputDir"
                 step = "registration"
-                registration_method = "valis"
-
                 max_cpus = 2
                 max_memory = '6.GB'
                 skip_registration_qc = true
@@ -228,93 +226,7 @@ nextflow_pipeline {
         }
     }
 
-    test("Should run registration with GPU method - stub") {
-
-        options "-stub"
-
-        when {
-            params {
-                input = "$projectDir/tests/testdata/valid_checkpoint_registration.csv"
-                outdir = "$outputDir"
-                step = "registration"
-                registration_method = "gpu"
-
-                max_cpus = 2
-                max_memory = '6.GB'
-                skip_registration_qc = true
-            }
-        }
-
-        then {
-            assert workflow.success
-        }
-    }
-
-    test("Should run registration with CPU method - stub") {
-
-        options "-stub"
-
-        when {
-            params {
-                input = "$projectDir/tests/testdata/valid_checkpoint_registration.csv"
-                outdir = "$outputDir"
-                step = "registration"
-                registration_method = "cpu"
-
-                max_cpus = 2
-                max_memory = '6.GB'
-                skip_registration_qc = true
-            }
-        }
-
-        then {
-            assert workflow.success
-        }
-    }
-
-    test("Should run registration with VALIS pairwise method - stub") {
-
-        options "-stub"
-
-        when {
-            params {
-                input = "$projectDir/tests/testdata/valid_checkpoint_registration.csv"
-                outdir = "$outputDir"
-                step = "registration"
-                registration_method = "valis_pairs"
-
-                max_cpus = 2
-                max_memory = '6.GB'
-                skip_registration_qc = true
-            }
-        }
-
-        then {
-            assert workflow.success
-        }
-    }
-
-    test("Should run registration with CPU tiled method - stub") {
-
-        options "-stub"
-
-        when {
-            params {
-                input = "$projectDir/tests/testdata/valid_checkpoint_registration.csv"
-                outdir = "$outputDir"
-                step = "registration"
-                registration_method = "cpu_tiled"
-
-                max_cpus = 2
-                max_memory = '6.GB'
-                skip_registration_qc = true
-            }
-        }
-
-        then {
-            assert workflow.success
-        }
-    }
+    // Legacy registration methods (gpu, cpu, valis_pairs, cpu_tiled) moved to legacy/
 
     test("Should run registration with padding - stub") {
 

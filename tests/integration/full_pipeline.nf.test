@@ -72,8 +72,6 @@ nextflow_pipeline {
                 input = "$projectDir/tests/testdata/valid_checkpoint_registration.csv"
                 outdir = "$outputDir"
                 step = "registration"
-                registration_method = "cpu"
-
                 max_cpus = 2
                 max_memory = '6.GB'
                 skip_registration_qc = true

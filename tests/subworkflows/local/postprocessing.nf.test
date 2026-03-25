@@ -225,7 +225,6 @@ nextflow_workflow {
                 pyramid_scale = 2
                 tilex = 512
                 compression = 'zstd'
-                pixie_enabled = false
                 debug_channels = false
             }
             workflow {

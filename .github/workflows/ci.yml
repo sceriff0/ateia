@@ -142,14 +142,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-nextflow-
 
-      - name: Cache nf-test
-        uses: actions/cache@v4
-        with:
-          path: .nf-test
-          key: ${{ runner.os }}-nf-test-${{ hashFiles('**/*.nf.test') }}
-          restore-keys: |
-            ${{ runner.os }}-nf-test-
-
       - name: Install Nextflow
         uses: nf-core/setup-nextflow@v2
         with:
@@ -170,10 +162,9 @@ jobs:
           python tests/testdata/generate_complete_testdata.py
 
       - name: Install nf-test
-        run: |
-          curl -fsSL https://code.askimed.com/install/nf-test | bash -s -- -v ${{ env.NFTEST_VERSION }}
-          sudo mv nf-test /usr/local/bin/
-          nf-test version
+        uses: nf-core/setup-nf-test@v1
+        with:
+          version: ${{ env.NFTEST_VERSION }}
 
       - name: Run nf-test stub suite
         run: |
@@ -228,10 +219,9 @@ jobs:
           python tests/testdata/generate_complete_testdata.py
 
       - name: Install nf-test
-        run: |
-          curl -fsSL https://code.askimed.com/install/nf-test | bash -s -- -v ${{ env.NFTEST_VERSION }}
-          sudo mv nf-test /usr/local/bin/
-          nf-test version
+        uses: nf-core/setup-nf-test@v1
+        with:
+          version: ${{ env.NFTEST_VERSION }}
 
       - name: Run nf-test real suite
         run: |
@@ -278,10 +268,9 @@ jobs:
           python tests/testdata/generate_complete_testdata.py
 
       - name: Install nf-test
-        run: |
-          curl -fsSL https://code.askimed.com/install/nf-test | bash -s -- -v ${{ env.NFTEST_VERSION }}
-          sudo mv nf-test /usr/local/bin/
-          nf-test version
+        uses: nf-core/setup-nf-test@v1
+        with:
+          version: ${{ env.NFTEST_VERSION }}
 
       - name: Run nf-test integration suite
         run: |

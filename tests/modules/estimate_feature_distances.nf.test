@@ -19,7 +19,6 @@ nextflow_process {
                 feature_max_dim = 2048
                 feature_n_features = 5000
                 outdir = "$outputDir"
-                registration_method = 'valis'
             }
             process {
                 """
@@ -58,7 +57,6 @@ nextflow_process {
                 feature_max_dim = 2048
                 feature_n_features = 5000
                 outdir = "$outputDir"
-                registration_method = 'valis'
             }
             process {
                 """
@@ -102,7 +100,6 @@ nextflow_process {
                 feature_max_dim = 2048
                 feature_n_features = 5000
                 outdir = "$outputDir"
-                registration_method = 'valis'
             }
             process {
                 """
@@ -143,7 +140,6 @@ nextflow_process {
                 feature_max_dim = 2048
                 feature_n_features = 5000
                 outdir = "$outputDir"
-                registration_method = 'valis'
             }
             process {
                 """
@@ -181,7 +177,6 @@ nextflow_process {
                 feature_max_dim = 2048
                 feature_n_features = 5000
                 outdir = "$outputDir"
-                registration_method = 'valis'
             }
             process {
                 """
@@ -220,7 +215,6 @@ nextflow_process {
                 feature_max_dim = 2048
                 feature_n_features = 5000
                 outdir = "$outputDir"
-                registration_method = 'valis'
             }
             process {
                 """

@@ -25,7 +25,7 @@ nextflow_workflow {
                     [[patient_id: 'P001', is_reference: false, channels: ['DAPI', 'PANCK']],
                      file('$projectDir/tests/testdata/P001_mov1.ome.tiff')]
                 ])
-                input[1] = 'valis'
+                // REGISTRATION now takes only ch_preprocessed (VALIS-only)
                 """
             }
         }
@@ -39,65 +39,7 @@ nextflow_workflow {
         }
     }
 
-    test("Should run GPU registration - stub") {
-
-        options "-stub"
-
-        when {
-            params {
-                skip_registration_qc = true
-                padding = false
-            }
-            workflow {
-                """
-                input[0] = Channel.fromList([
-                    [[patient_id: 'P001', is_reference: true, channels: ['DAPI']],
-                     file('$projectDir/tests/testdata/P001_ref.ome.tiff')],
-                    [[patient_id: 'P001', is_reference: false, channels: ['DAPI']],
-                     file('$projectDir/tests/testdata/P001_mov1.ome.tiff')]
-                ])
-                input[1] = 'gpu'
-                """
-            }
-        }
-
-        then {
-            assertAll(
-                { assert workflow.success },
-                { assert workflow.out.checkpoint_csv }
-            )
-        }
-    }
-
-    test("Should run CPU registration - stub") {
-
-        options "-stub"
-
-        when {
-            params {
-                skip_registration_qc = true
-                padding = false
-            }
-            workflow {
-                """
-                input[0] = Channel.fromList([
-                    [[patient_id: 'P001', is_reference: true, channels: ['DAPI']],
-                     file('$projectDir/tests/testdata/P001_ref.ome.tiff')],
-                    [[patient_id: 'P001', is_reference: false, channels: ['DAPI']],
-                     file('$projectDir/tests/testdata/P001_mov1.ome.tiff')]
-                ])
-                input[1] = 'cpu'
-                """
-            }
-        }
-
-        then {
-            assertAll(
-                { assert workflow.success },
-                { assert workflow.out.checkpoint_csv }
-            )
-        }
-    }
+    // Legacy GPU/CPU registration tests moved to legacy/
 
     test("Should handle multi-patient registration - stub") {
 
@@ -118,7 +60,7 @@ nextflow_workflow {
                     [[patient_id: 'P002', is_reference: true, channels: ['DAPI']],
                      file('$projectDir/tests/testdata/P002_ref.ome.tiff')]
                 ])
-                input[1] = 'valis'
+                // REGISTRATION now takes only ch_preprocessed (VALIS-only)
                 """
             }
         }
@@ -133,27 +75,8 @@ nextflow_workflow {
         }
     }
 
-    test("Should fail with invalid registration method") {
-
-        when {
-            params {
-                skip_registration_qc = true
-            }
-            workflow {
-                """
-                input[0] = Channel.fromList([
-                    [[patient_id: 'P001', is_reference: true, channels: ['DAPI']],
-                     file('$projectDir/tests/testdata/P001_ref.ome.tiff')]
-                ])
-                input[1] = 'invalid_method'
-                """
-            }
-        }
-
-        then {
-            assert workflow.failed
-        }
-    }
+    // Invalid method test removed — REGISTRATION no longer takes method param
+    // Method validation happens at mirage.nf level via ParamUtils.validateRegistrationMethod
 
     test("Should handle padding workflow - stub") {
 
@@ -172,7 +95,7 @@ nextflow_workflow {
                     [[patient_id: 'P001', is_reference: false, channels: ['DAPI']],
                      file('$projectDir/tests/testdata/P001_mov1.ome.tiff')]
                 ])
-                input[1] = 'valis'
+                // REGISTRATION now takes only ch_preprocessed (VALIS-only)
                 """
             }
         }
@@ -202,7 +125,7 @@ nextflow_workflow {
                     [[patient_id: 'P001', is_reference: false, channels: ['DAPI']],
                      file('$projectDir/tests/testdata/P001_mov1.ome.tiff')]
                 ])
-                input[1] = 'valis'
+                // REGISTRATION now takes only ch_preprocessed (VALIS-only)
                 """
             }
         }
@@ -234,7 +157,7 @@ nextflow_workflow {
                     [[patient_id: 'P001', is_reference: false, channels: ['DAPI']],
                      file('$projectDir/tests/testdata/P001_mov1.ome.tiff')]
                 ])
-                input[1] = 'valis'
+                // REGISTRATION now takes only ch_preprocessed (VALIS-only)
                 """
             }
         }
@@ -257,7 +180,7 @@ nextflow_workflow {
                     [[patient_id: 'P001', is_reference: false, channels: ['DAPI']],
                      file('$projectDir/tests/testdata/P001_ref.ome.tiff')]
                 ])
-                input[1] = 'valis'
+                // REGISTRATION now takes only ch_preprocessed (VALIS-only)
                 """
             }
         }
@@ -267,7 +190,7 @@ nextflow_workflow {
         }
     }
 
-    test("Should register images using CPU method - real") {
+    test("Should register images using VALIS - real") {
 
         tag "real"
         tag "slow"
@@ -287,7 +210,7 @@ nextflow_workflow {
                     [[patient_id: 'P001', is_reference: false, channels: ['DAPI', 'PANCK', 'SMA']],
                      file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)]
                 ])
-                input[1] = 'cpu'
+                // REGISTRATION now takes only ch_preprocessed (VALIS-only)
                 """
             }
         }

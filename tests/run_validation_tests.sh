@@ -153,8 +153,7 @@ run_test \
     "Valid checkpoint CSV for registration step" \
     "pass" \
     "$TESTDATA_DIR/valid_checkpoint_registration.csv" \
-    --step registration \
-    --registration_method gpu
+    --step registration
 
 # Test 6.2: Invalid - missing required column
 run_test \
