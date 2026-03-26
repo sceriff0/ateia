@@ -2,7 +2,7 @@
 
 ## Samplesheet (Input CSV)
 
-MIRAGE uses a CSV manifest as `--input`. The required columns differ by `--step`.
+MIRAGE uses a CSV manifest as `--input`. The required columns differ by `--start`.
 
 ### Step: `preprocessing`
 
@@ -99,7 +99,8 @@ Pass a template with `-params-file params/full_pipeline.json` and override indiv
 | `input` | `''` | Path to samplesheet CSV (required for preprocessing, registration, postprocessing) |
 | `outdir` | `./results` | Output root directory |
 | `savedir` | `null` | Optional archive destination |
-| `step` | `preprocessing` | Pipeline entry point: `preprocessing`, `registration`, `postprocessing` |
+| `start` | `preprocessing` | Pipeline entry point: `preprocessing`, `registration`, `postprocessing` |
+| `stop` | `null` | Pipeline step to stop after. When null, runs to end. Values: `preprocessing`, `registration`, `postprocessing` |
 | `dry_run` | `false` | Validate inputs only, do not execute tasks |
 | `debug_channels` | `false` | Enable `.view` debug output on channels |
 
@@ -144,29 +145,6 @@ Pass a template with `-params-file params/full_pipeline.json` and override indiv
 | `reg_n_workers` | `8` | Number of VALIS worker threads |
 | `reg_use_tiled_registration` | `true` | Use tiled registration in VALIS |
 | `reg_tile_size` | `2048` | Tile size for VALIS tiled registration |
-
-### Registration — GPU Pairwise
-
-| Parameter | Default | Description |
-|---|---|---|
-| `gpu_reg_affine_crop_size` | `10000` | Crop size for affine registration |
-| `gpu_reg_diffeo_crop_size` | `2000` | Crop size for diffeomorphic registration |
-| `gpu_reg_overlap_percent` | `40.0` | Tile overlap percentage |
-| `gpu_reg_n_features` | `5000` | Number of features for matching |
-| `gpu_reg_n_workers` | `8` | Number of GPU worker threads |
-| `gpu_reg_opt_tol` | `1e-6` | Optimization convergence tolerance |
-| `gpu_reg_inv_tol` | `1e-6` | Inversion convergence tolerance |
-
-### Registration — CPU Pairwise / Tiled
-
-| Parameter | Default | Description |
-|---|---|---|
-| `cpu_reg_affine_crop_size` | `10000` | Crop size for affine registration |
-| `cpu_reg_diffeo_crop_size` | `2000` | Crop size for diffeomorphic registration |
-| `cpu_reg_overlap_percent` | `40.0` | Tile overlap percentage |
-| `cpu_reg_n_features` | `5000` | Number of features for matching |
-| `cpu_reg_opt_tol` | `1e-6` | Optimization convergence tolerance |
-| `cpu_reg_inv_tol` | `1e-6` | Inversion convergence tolerance |
 
 ### Segmentation
 
@@ -229,14 +207,13 @@ Pass a template with `-params-file params/full_pipeline.json` and override indiv
 
 ## Example Commands
 
-### Full pipeline with GPU registration
+### Full pipeline
 
 ```bash
 nextflow run main.nf \
   --input samplesheet.csv \
   --outdir results \
-  --step preprocessing \
-  --registration_method gpu \
+  --start preprocessing \
   -profile slurm \
   -params-file params/full_pipeline.json
 ```
@@ -246,8 +223,7 @@ nextflow run main.nf \
 ```bash
 nextflow run main.nf \
   --input results/csv/preprocessed.csv \
-  --step registration \
-  --registration_method valis \
+  --start registration \
   --outdir results \
   -profile slurm \
   -resume
@@ -258,7 +234,7 @@ nextflow run main.nf \
 ```bash
 nextflow run main.nf \
   --input results/csv/registered.csv \
-  --step postprocessing \
+  --start postprocessing \
   --outdir results \
   -profile slurm \
   -resume
@@ -269,7 +245,7 @@ nextflow run main.nf \
 ```bash
 nextflow run main.nf \
   --input results/csv/registered.csv \
-  --step postprocessing \
+  --start postprocessing \
   --pixie_enabled true \
   --outdir results \
   -profile slurm
@@ -280,7 +256,7 @@ nextflow run main.nf \
 ```bash
 nextflow run main.nf \
   --input samplesheet.csv \
-  --step preprocessing \
+  --start preprocessing \
   --dry_run true
 ```
 
@@ -316,7 +292,7 @@ nextflow run main.nf \
   -profile slurm \
   --input samplesheet.csv \
   --outdir results \
-  --step preprocessing
+  --start preprocessing
 ```
 
 A minimal site config might look like:
@@ -340,7 +316,7 @@ Nextflow caches completed tasks in the `work/` directory. Add `-resume` to any c
 ```bash
 nextflow run main.nf -resume \
   --input samplesheet.csv \
-  --step preprocessing \
+  --start preprocessing \
   --outdir results \
   -profile slurm
 ```

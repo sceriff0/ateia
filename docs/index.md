@@ -18,7 +18,7 @@ This site is the canonical documentation surface for running and maintaining the
 
 ## Canonical Runtime Surface
 
-- `--step`: `preprocessing`, `registration`, `postprocessing`
+- `--start`: `preprocessing`, `registration`, `postprocessing`
 
 ## Source of Truth
 

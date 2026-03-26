@@ -37,7 +37,7 @@ P002,/data/P002_mov1.nd2,false,DAPI|CD3|CD8
 ```bash
 nextflow run main.nf \
   --input tests/fixtures/valid_input.csv \
-  --step preprocessing \
+  --start preprocessing \
   --outdir test_output
 ```
 
@@ -70,7 +70,7 @@ Violations found:
 ```bash
 nextflow run main.nf \
   --input tests/fixtures/invalid_multi_ref.csv \
-  --step preprocessing \
+  --start preprocessing \
   --outdir test_output
 # Should fail immediately after parsing CSV
 ```
@@ -134,7 +134,7 @@ DAPI is in position: 1
 ```bash
 nextflow run main.nf \
   --input tests/fixtures/invalid_dapi_position.csv \
-  --step preprocessing \
+  --start preprocessing \
   --outdir test_output
 ```
 
@@ -153,10 +153,10 @@ P001,/data/P001.ome.tiff,true,DAPI|PANCK|SMA  # ✅ DAPI first!
 
 ## Issue #3: Results Step Removed
 
-The legacy `--step results` entrypoint has been removed.
+The legacy `--start results` entrypoint has been removed.
 Use one of:
-- `--step postprocessing` with `registered.csv` input
-- `--step copy_results` to copy an existing `--outdir` to `--savedir`
+- `--start postprocessing` with `registered.csv` input
+- `--start copy_results` to copy an existing `--outdir` to `--savedir`
 
 ---
 
@@ -192,7 +192,7 @@ P001,/data/P001_mov1_preprocessed.ome.tiff,false,DAPI|PANCK|SMA
 ```bash
 nextflow run main.nf \
   --input tests/fixtures/valid_checkpoint_registration.csv \
-  --step registration \
+  --start registration \
   --outdir test_output
 ```
 
@@ -360,7 +360,7 @@ mkdir -p "$OUTPUT"
 echo "[TEST 1.1] Valid input - one reference per patient"
 nextflow run main.nf \
   --input "$FIXTURES/valid_input.csv" \
-  --step preprocessing \
+  --start preprocessing \
   --outdir "$OUTPUT/test_1_1" \
   --dry_run true
 if [ $? -eq 0 ]; then
@@ -374,7 +374,7 @@ fi
 echo "[TEST 1.2] Invalid - multiple references per patient"
 if nextflow run main.nf \
   --input "$FIXTURES/invalid_multi_ref.csv" \
-  --step preprocessing \
+  --start preprocessing \
   --outdir "$OUTPUT/test_1_2" 2>&1 | grep -q "Multiple reference images found"; then
   echo "✅ PASS - Correctly detected multiple references"
 else
@@ -386,7 +386,7 @@ fi
 echo "[TEST 1.3] Invalid - no reference per patient"
 if nextflow run main.nf \
   --input "$FIXTURES/invalid_no_ref.csv" \
-  --step preprocessing \
+  --start preprocessing \
   --outdir "$OUTPUT/test_1_3" 2>&1 | grep -q "No reference image found"; then
   echo "✅ PASS - Correctly detected missing reference"
 else
@@ -398,7 +398,7 @@ fi
 echo "[TEST 2.2] Invalid - DAPI not in channel 0"
 if nextflow run main.nf \
   --input "$FIXTURES/invalid_dapi_position.csv" \
-  --step preprocessing \
+  --start preprocessing \
   --outdir "$OUTPUT/test_2_2" 2>&1 | grep -q "DAPI must be in channel 0"; then
   echo "✅ PASS - Correctly detected DAPI position error"
 else
@@ -410,7 +410,7 @@ fi
 echo "[TEST 6.2] Invalid checkpoint - missing required column"
 if nextflow run main.nf \
   --input "$FIXTURES/invalid_checkpoint_missing_col.csv" \
-  --step registration \
+  --start registration \
   --outdir "$OUTPUT/test_6_2" 2>&1 | grep -q "Missing required column"; then
   echo "✅ PASS - Correctly detected missing column"
 else
@@ -422,7 +422,7 @@ fi
 echo "[TEST 6.3] Invalid checkpoint - malformed is_reference"
 if nextflow run main.nf \
   --input "$FIXTURES/invalid_checkpoint_bad_ref.csv" \
-  --step registration \
+  --start registration \
   --outdir "$OUTPUT/test_6_3" 2>&1 | grep -q "Invalid is_reference value"; then
   echo "✅ PASS - Correctly detected invalid is_reference"
 else

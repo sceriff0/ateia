@@ -1,10 +1,28 @@
 class ParamUtils {
 
-    static void validateStep(String step) {
-        def valid = ['preprocessing', 'registration', 'postprocessing']
-        if (!(step in valid)) {
-            throw new IllegalArgumentException("Invalid --step '${step}'. Valid values: ${valid}")
+    static final List STEP_ORDER = ['preprocessing', 'registration', 'postprocessing']
+
+    static void validateStart(String start) {
+        if (!(start in STEP_ORDER)) {
+            throw new IllegalArgumentException("Invalid --start '${start}'. Valid values: ${STEP_ORDER}")
         }
+    }
+
+    static void validateStop(String stop, String start) {
+        if (!(stop in STEP_ORDER)) {
+            throw new IllegalArgumentException("Invalid --stop '${stop}'. Valid values: ${STEP_ORDER}")
+        }
+        if (STEP_ORDER.indexOf(stop) < STEP_ORDER.indexOf(start)) {
+            throw new IllegalArgumentException("--stop '${stop}' cannot come before --start '${start}'. Pipeline order: ${STEP_ORDER.join(' → ')}")
+        }
+    }
+
+    /**
+     * Check whether a given pipeline step should run, based on --start and --stop.
+     */
+    static boolean shouldRun(String targetStep, String start, String stop) {
+        def idx = STEP_ORDER.indexOf(targetStep)
+        return idx >= STEP_ORDER.indexOf(start) && idx <= STEP_ORDER.indexOf(stop)
     }
 
     static void validateRegistrationMethod(String method) {

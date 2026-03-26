@@ -14,7 +14,7 @@ nextflow_pipeline {
             params {
                 input = "$projectDir/tests/testdata/valid_preprocessing.csv"
                 outdir = "$outputDir"
-                step = "preprocessing"
+                start = "preprocessing"
 
                 max_cpus = 2
                 max_memory = '6.GB'
@@ -71,7 +71,7 @@ nextflow_pipeline {
             params {
                 input = "$projectDir/tests/testdata/valid_checkpoint_registration.csv"
                 outdir = "$outputDir"
-                step = "registration"
+                start = "registration"
                 max_cpus = 2
                 max_memory = '6.GB'
                 skip_registration_qc = true
@@ -123,7 +123,7 @@ nextflow_pipeline {
             params {
                 input = "$projectDir/tests/testdata/valid_checkpoint_postprocessing.csv"
                 outdir = "$outputDir"
-                step = "postprocessing"
+                start = "postprocessing"
 
                 max_cpus = 2
                 max_memory = '6.GB'
@@ -163,7 +163,7 @@ nextflow_pipeline {
             params {
                 input = "$projectDir/tests/testdata/valid_preprocessing.csv"
                 outdir = "$outputDir"
-                step = "preprocessing"
+                start = "preprocessing"
 
                 max_cpus = 2
                 max_memory = '6.GB'
@@ -216,7 +216,7 @@ nextflow_pipeline {
             params {
                 input = "$projectDir/tests/testdata/valid_preprocessing.csv"
                 outdir = "$outputDir"
-                step = "preprocessing"
+                start = "preprocessing"
 
                 max_cpus = 2
                 max_memory = '6.GB'

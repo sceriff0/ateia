@@ -2,7 +2,8 @@
     "_comment_io": "=== Input/Output ===",
     "input": "/path/to/samplesheet.csv",
     "outdir": "/path/to/results",
-    "step": "preprocessing",
+    "start": "preprocessing",
+    "stop": "preprocessing",
 
     "_comment_preproc": "=== Preprocessing ===",
     "preproc_tile_size": 1950,

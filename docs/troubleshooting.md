@@ -1,6 +1,6 @@
 # Troubleshooting
 
-## `Invalid --step` or `Invalid --registration_method`
+## `Invalid --start` or `Invalid --registration_method`
 
 Use only supported enums:
 
@@ -15,8 +15,7 @@ Use only supported enums:
 
 Actions:
 
-1. Lower memory pressure by switching method (for example `valis` -> `gpu` or `cpu_tiled`).
-2. Increase global caps (`max_memory`, `max_time`).
+1. Increase global caps (`max_memory`, `max_time`).
 3. Check process-specific settings in `conf/modules.config`.
 4. Resume with `-resume` after adjustments.
 

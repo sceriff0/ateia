@@ -63,7 +63,7 @@ nf-test test -stub                                  # Stub mode (fast)
 ```bash
 nextflow run . -profile test,docker -stub           # Stub mode
 nextflow run . -profile test,docker                 # Full run
-nextflow run . -profile test,docker --step registration  # Specific step
+nextflow run . -profile test,docker --start registration  # Specific step
 ```
 
 ### Validation Tests
@@ -133,7 +133,7 @@ run_test \
     "Invalid my case" \
     "fail" \
     "$TESTDATA_DIR/invalid_my_case.csv" \
-    --step preprocessing \
+    --start preprocessing \
     "Expected error text"
 ```
 

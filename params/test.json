@@ -2,7 +2,7 @@
     "_comment_io": "=== Input/Output ===",
     "input": "tests/data/samplesheet.csv",
     "outdir": "./test_results",
-    "step": "preprocessing",
+    "start": "preprocessing",
 
     "_comment_workflow": "=== Workflow Control ===",
     "dry_run": false,

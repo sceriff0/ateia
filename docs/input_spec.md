@@ -1,8 +1,8 @@
 # Input Format
 
-MIRAGE uses CSV manifests. Required columns depend on `--step`.
+MIRAGE uses CSV manifests. Required columns depend on `--start`.
 
-## `--step preprocessing`
+## `--start preprocessing`
 
 Required columns:
 
@@ -19,7 +19,7 @@ P001,/data/P001_panel1.nd2,true,DAPI|CD3|CD8|CD4
 P001,/data/P001_panel2.nd2,false,DAPI|PANCK|SMA|VIMENTIN
 ```
 
-## `--step registration`
+## `--start registration`
 
 Required columns:
 
@@ -36,7 +36,7 @@ P001,/results/P001/preprocessed/P001_corrected.ome.tif,true,DAPI|CD3|CD8|CD4
 P001,/results/P001/preprocessed/P001_panel2_corrected.ome.tif,false,DAPI|PANCK|SMA|VIMENTIN
 ```
 
-## `--step postprocessing`
+## `--start postprocessing`
 
 Required columns:
 

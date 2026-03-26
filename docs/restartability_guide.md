@@ -15,7 +15,7 @@ MIRAGE is checkpoint-driven. Each major stage writes a CSV that can be used as i
 ```bash
 nextflow run main.nf \
   --input input.csv \
-  --step preprocessing \
+  --start preprocessing \
   --registration_method gpu \
   --outdir results
 ```
@@ -25,7 +25,7 @@ nextflow run main.nf \
 ```bash
 nextflow run main.nf \
   --input results/csv/preprocessed.csv \
-  --step registration \
+  --start registration \
   --registration_method cpu_tiled \
   --outdir results
 ```
@@ -35,6 +35,6 @@ nextflow run main.nf \
 ```bash
 nextflow run main.nf \
   --input results/csv/registered.csv \
-  --step postprocessing \
+  --start postprocessing \
   --outdir results
 ```

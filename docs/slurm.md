@@ -7,7 +7,7 @@ nextflow run main.nf \
   -profile slurm \
   --input input.csv \
   --outdir results \
-  --registration_method gpu \
+  --registration_method valis \
   --slurm_partition gpu \
   --slurm_account <account>
 ```
@@ -32,8 +32,8 @@ Process-level defaults and retries are defined in `conf/modules.config`.
 ```bash
 nextflow run main.nf -profile slurm -resume \
   --input results/csv/preprocessed.csv \
-  --step registration \
-  --registration_method gpu \
+  --start registration \
+  --registration_method valis \
   --outdir results
 ```
 

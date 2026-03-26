@@ -15,7 +15,7 @@ nextflow_pipeline {
         when {
             params {
                 outdir = "$outputDir"
-                step = "preprocessing"
+                start = "preprocessing"
                 // Note: --input is NOT set
             }
         }
@@ -31,7 +31,7 @@ nextflow_pipeline {
             params {
                 input = "$projectDir/tests/testdata/empty_samplesheet.csv"
                 outdir = "$outputDir"
-                step = "preprocessing"
+                start = "preprocessing"
             }
         }
 
@@ -48,7 +48,7 @@ nextflow_pipeline {
             params {
                 input = "$projectDir/tests/testdata/single_sample.csv"
                 outdir = "$outputDir"
-                step = "preprocessing"
+                start = "preprocessing"
                 max_cpus = 2
                 max_memory = '6.GB'
                 seg_gpu = false
@@ -69,7 +69,7 @@ nextflow_pipeline {
             params {
                 input = "$projectDir/tests/testdata/test_input.csv"
                 outdir = "$outputDir"
-                step = "preprocessing"
+                start = "preprocessing"
                 dry_run = true
             }
         }
@@ -89,7 +89,7 @@ nextflow_pipeline {
             params {
                 input = "$projectDir/tests/testdata/test_input.csv"
                 outdir = "$outputDir"
-                step = "preprocessing"
+                start = "preprocessing"
                 max_cpus = 2
                 max_memory = '6.GB'
                 seg_gpu = false
@@ -110,7 +110,7 @@ nextflow_pipeline {
             params {
                 input = "$projectDir/tests/testdata/test_input.csv"
                 outdir = "$outputDir"
-                step = "preprocessing"
+                start = "preprocessing"
                 max_cpus = 2
                 max_memory = '6.GB'
                 seg_gpu = false
@@ -135,7 +135,7 @@ nextflow_pipeline {
             params {
                 input = "$projectDir/tests/testdata/test_input.csv"
                 outdir = "$outputDir"
-                step = "preprocessing"
+                start = "preprocessing"
 
                 max_cpus = 2
                 max_memory = '6.GB'
@@ -162,7 +162,7 @@ nextflow_pipeline {
             params {
                 input = "$projectDir/tests/testdata/valid_preprocessing.csv"
                 outdir = "$outputDir"
-                step = "preprocessing"
+                start = "preprocessing"
 
                 max_cpus = 2
                 max_memory = '6.GB'
@@ -190,7 +190,7 @@ nextflow_pipeline {
             params {
                 input = "$projectDir/tests/testdata/valid_checkpoint_registration.csv"
                 outdir = "$outputDir"
-                step = "registration"
+                start = "registration"
 
                 max_cpus = 2
                 max_memory = '6.GB'
@@ -214,7 +214,7 @@ nextflow_pipeline {
             params {
                 input = "$projectDir/tests/testdata/valid_checkpoint_registration.csv"
                 outdir = "$outputDir"
-                step = "registration"
+                start = "registration"
                 max_cpus = 2
                 max_memory = '6.GB'
                 skip_registration_qc = true
@@ -236,7 +236,7 @@ nextflow_pipeline {
             params {
                 input = "$projectDir/tests/testdata/valid_checkpoint_registration.csv"
                 outdir = "$outputDir"
-                step = "registration"
+                start = "registration"
                 padding = true
 
                 max_cpus = 2
@@ -262,7 +262,7 @@ nextflow_pipeline {
             params {
                 input = "$projectDir/tests/testdata/valid_checkpoint_postprocessing.csv"
                 outdir = "$outputDir"
-                step = "postprocessing"
+                start = "postprocessing"
 
                 max_cpus = 2
                 max_memory = '6.GB'
@@ -279,13 +279,13 @@ nextflow_pipeline {
     // VALIDATION TESTS - Input validation
     //==========================================================================
 
-    test("Should fail with invalid step") {
+    test("Should fail with invalid start") {
 
         when {
             params {
                 input = "$projectDir/tests/testdata/test_input.csv"
                 outdir = "$outputDir"
-                step = "invalid_step_name"
+                start = "invalid_step_name"
             }
         }
 
@@ -301,7 +301,7 @@ nextflow_pipeline {
             params {
                 input = "$projectDir/tests/testdata/valid_checkpoint_registration.csv"
                 outdir = "$outputDir"
-                step = "registration"
+                start = "registration"
                 registration_method = "invalid_method"
             }
         }
@@ -317,7 +317,7 @@ nextflow_pipeline {
             params {
                 input = "$projectDir/tests/testdata/invalid_no_dapi.csv"
                 outdir = "$outputDir"
-                step = "preprocessing"
+                start = "preprocessing"
             }
         }
 
@@ -332,7 +332,7 @@ nextflow_pipeline {
             params {
                 input = "$projectDir/tests/testdata/invalid_no_ref.csv"
                 outdir = "$outputDir"
-                step = "preprocessing"
+                start = "preprocessing"
                 allow_auto_reference = false
             }
         }
@@ -350,7 +350,7 @@ nextflow_pipeline {
             params {
                 input = "$projectDir/tests/testdata/invalid_no_ref.csv"
                 outdir = "$outputDir"
-                step = "preprocessing"
+                start = "preprocessing"
                 allow_auto_reference = true
 
                 max_cpus = 2
@@ -370,12 +370,149 @@ nextflow_pipeline {
             params {
                 input = "$projectDir/tests/testdata/invalid_checkpoint_missing_col.csv"
                 outdir = "$outputDir"
-                step = "registration"
+                start = "registration"
             }
         }
 
         then {
             assert workflow.failed
+        }
+    }
+
+    //==========================================================================
+    // STOP PARAMETER TESTS
+    //==========================================================================
+
+    test("Should fail with invalid --stop value") {
+
+        when {
+            params {
+                input = "$projectDir/tests/testdata/test_input.csv"
+                outdir = "$outputDir"
+                start = "preprocessing"
+                stop = "invalid_stop"
+            }
+        }
+
+        then {
+            assert workflow.failed
+        }
+    }
+
+    test("Should fail when --stop is before --start") {
+
+        when {
+            params {
+                input = "$projectDir/tests/testdata/valid_checkpoint_registration.csv"
+                outdir = "$outputDir"
+                start = "registration"
+                stop = "preprocessing"
+            }
+        }
+
+        then {
+            assert workflow.failed
+        }
+    }
+
+    test("Should run only preprocessing when stop=preprocessing - stub") {
+
+        options "-stub"
+
+        when {
+            params {
+                input = "$projectDir/tests/testdata/test_input.csv"
+                outdir = "$outputDir"
+                start = "preprocessing"
+                stop = "preprocessing"
+
+                max_cpus = 2
+                max_memory = '6.GB'
+                seg_gpu = false
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert path("$outputDir/csv/preprocessed.csv").exists() },
+                // Registration and postprocessing must NOT have run
+                { assert !path("$outputDir/csv/registered.csv").exists() },
+                { assert !path("$outputDir/csv/postprocessed.csv").exists() }
+            )
+        }
+    }
+
+    test("Should run preprocessing+registration when stop=registration - stub") {
+
+        options "-stub"
+
+        when {
+            params {
+                input = "$projectDir/tests/testdata/test_input.csv"
+                outdir = "$outputDir"
+                start = "preprocessing"
+                stop = "registration"
+
+                max_cpus = 2
+                max_memory = '6.GB'
+                seg_gpu = false
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert path("$outputDir/csv/preprocessed.csv").exists() },
+                { assert path("$outputDir/csv/registered.csv").exists() },
+                // Postprocessing must NOT have run
+                { assert !path("$outputDir/csv/postprocessed.csv").exists() }
+            )
+        }
+    }
+
+    test("Should run only registration when start=registration stop=registration - stub") {
+
+        options "-stub"
+
+        when {
+            params {
+                input = "$projectDir/tests/testdata/valid_checkpoint_registration.csv"
+                outdir = "$outputDir"
+                start = "registration"
+                stop = "registration"
+
+                max_cpus = 2
+                max_memory = '6.GB'
+                skip_registration_qc = true
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert path("$outputDir/csv/registered.csv").exists() },
+                // Preprocessing and postprocessing must NOT have run
+                { assert !path("$outputDir/csv/preprocessed.csv").exists() },
+                { assert !path("$outputDir/csv/postprocessed.csv").exists() }
+            )
+        }
+    }
+
+    test("Should complete dry_run with stop parameter") {
+
+        when {
+            params {
+                input = "$projectDir/tests/testdata/test_input.csv"
+                outdir = "$outputDir"
+                start = "preprocessing"
+                stop = "registration"
+                dry_run = true
+            }
+        }
+
+        then {
+            assert workflow.success
         }
     }
 

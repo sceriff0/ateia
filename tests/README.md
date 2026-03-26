@@ -402,7 +402,7 @@ run_test \
     "My new validation test" \
     "fail" \
     "$TESTDATA_DIR/my_invalid_input.csv" \
-    --step preprocessing \
+    --start preprocessing \
     "Expected error message"
 ```
 

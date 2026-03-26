@@ -4,7 +4,7 @@
 
 - Nextflow (DSL2-capable)
 - Container runtime (`singularity` or `docker`)
-- CSV input with required columns for your selected `--step`
+- CSV input with required columns for your selected `--start`
 
 ## Quick Run: Full Pipeline
 
@@ -12,7 +12,7 @@
 nextflow run main.nf \
   --input input.csv \
   --outdir results \
-  --step preprocessing \
+  --start preprocessing \
   --registration_method gpu \
   -profile slurm
 ```
@@ -22,7 +22,7 @@ nextflow run main.nf \
 ```bash
 nextflow run main.nf \
   --input results/csv/preprocessed.csv \
-  --step registration \
+  --start registration \
   --registration_method cpu_tiled \
   --outdir results \
   -profile slurm
@@ -37,7 +37,7 @@ To archive results, use standard file tools (e.g., `rsync`) to copy `--outdir` t
 ```bash
 nextflow run main.nf \
   --input input.csv \
-  --step preprocessing \
+  --start preprocessing \
   --dry_run true
 ```
 

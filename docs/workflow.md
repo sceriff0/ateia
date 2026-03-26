@@ -24,12 +24,6 @@
 - Merge channels and produce pyramidal OME-TIFF
 - Emit checkpoint: `results/csv/postprocessed.csv`
 
-## 4. Copy Results
-
-- Archive/copy full output tree from `outdir` to `savedir`
-- Optional source deletion only if `--copy_delete_source true`
-- Path preflight checks prevent unsafe copy/delete configurations
-
 ## Workflow Control
 
 `main.nf` orchestrates step-specific entrypoints:

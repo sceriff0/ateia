@@ -106,14 +106,14 @@ run_test \
     "Valid input - one reference per patient" \
     "pass" \
     "$TESTDATA_DIR/valid_preprocessing.csv" \
-    --step preprocessing
+    --start preprocessing
 
 # Test 1.2: Invalid - multiple references per patient
 run_test \
     "Invalid - multiple references per patient" \
     "fail" \
     "$TESTDATA_DIR/invalid_multi_ref.csv" \
-    --step preprocessing \
+    --start preprocessing \
     "Multiple reference images found"
 
 # Test 1.3: Invalid - no reference per patient
@@ -121,7 +121,7 @@ run_test \
     "Invalid - no reference per patient" \
     "fail" \
     "$TESTDATA_DIR/invalid_no_ref.csv" \
-    --step preprocessing \
+    --start preprocessing \
     "No reference image found"
 
 # Test 2.1: Valid - DAPI in any position
@@ -132,7 +132,7 @@ run_test \
     "Invalid - DAPI not in channel 0" \
     "fail" \
     "$TESTDATA_DIR/invalid_dapi_position.csv" \
-    --step preprocessing \
+    --start preprocessing \
     "DAPI must be in channel 0"
 
 # Test 2.3: Valid - DAPI in channel 0
@@ -140,7 +140,7 @@ run_test \
     "Valid - DAPI in channel 0" \
     "pass" \
     "$TESTDATA_DIR/valid_preprocessing.csv" \
-    --step preprocessing
+    --start preprocessing
 
 echo ""
 echo "=========================================="
@@ -153,14 +153,14 @@ run_test \
     "Valid checkpoint CSV for registration step" \
     "pass" \
     "$TESTDATA_DIR/valid_checkpoint_registration.csv" \
-    --step registration
+    --start registration
 
 # Test 6.2: Invalid - missing required column
 run_test \
     "Invalid checkpoint - missing required column" \
     "fail" \
     "$TESTDATA_DIR/invalid_checkpoint_missing_col.csv" \
-    --step registration \
+    --start registration \
     "Missing required column"
 
 # Test 6.3: Invalid - malformed is_reference value
@@ -168,7 +168,7 @@ run_test \
     "Invalid checkpoint - malformed is_reference" \
     "fail" \
     "$TESTDATA_DIR/invalid_checkpoint_bad_ref.csv" \
-    --step registration \
+    --start registration \
     "Invalid is_reference value"
 
 # Test 6.4: Invalid - file does not exist
@@ -176,7 +176,7 @@ run_test \
     "Invalid - file not found" \
     "fail" \
     "$TESTDATA_DIR/invalid_file_not_found.csv" \
-    --step preprocessing \
+    --start preprocessing \
     "does not exist"
 
 # Test 6.5: Invalid - missing DAPI channel
@@ -184,7 +184,7 @@ run_test \
     "Invalid - missing DAPI channel" \
     "fail" \
     "$TESTDATA_DIR/invalid_no_dapi.csv" \
-    --step preprocessing \
+    --start preprocessing \
     "DAPI channel not found"
 
 echo ""

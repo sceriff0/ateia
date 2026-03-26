@@ -2,7 +2,7 @@
     "_comment_io": "=== Input/Output ===",
     "input": "/path/to/samplesheet.csv",
     "outdir": "/path/to/results",
-    "step": "postprocessing",
+    "start": "postprocessing",
 
     "_comment_seg": "=== Segmentation ===",
     "seg_gpu": true,

@@ -15,7 +15,8 @@ This page documents the active canonical parameter surface.
 | `input` | `''` | Required for `preprocessing`, `registration`, `postprocessing` |
 | `outdir` | `./results` | Main output root |
 | `savedir` | `null` | Optional archive destination |
-| `step` | `preprocessing` | `preprocessing`, `registration`, `postprocessing` |
+| `start` | `preprocessing` | Pipeline entry point: `preprocessing`, `registration`, `postprocessing` |
+| `stop` | `null` | Pipeline step to stop after. Default: null (runs to end). Values: `preprocessing`, `registration`, `postprocessing` |
 | `debug_channels` | `false` | Enables debug channel `.view` output |
 | `dry_run` | `false` | Validation-only mode |
 
@@ -52,22 +53,6 @@ This page documents the active canonical parameter surface.
   - `reg_n_workers`
   - `reg_use_tiled_registration`
   - `reg_tile_size`
-- GPU pairwise:
-  - `gpu_reg_affine_crop_size`
-  - `gpu_reg_diffeo_crop_size`
-  - `gpu_reg_overlap_percent`
-  - `gpu_reg_n_features`
-  - `gpu_reg_n_workers`
-  - `gpu_reg_opt_tol`
-  - `gpu_reg_inv_tol`
-- CPU pairwise/tiled:
-  - `cpu_reg_affine_crop_size`
-  - `cpu_reg_diffeo_crop_size`
-  - `cpu_reg_overlap_percent`
-  - `cpu_reg_n_features`
-  - `cpu_reg_opt_tol`
-  - `cpu_reg_inv_tol`
-
 ## Postprocessing
 
 - Segmentation:

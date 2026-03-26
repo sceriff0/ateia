@@ -2,7 +2,8 @@
     "_comment_io": "=== Input/Output ===",
     "input": "/path/to/samplesheet.csv",
     "outdir": "/path/to/results",
-    "step": "registration",
+    "start": "registration",
+    "stop": "registration",
 
     "_comment_reg_common": "=== Registration (Common) ===",
     "registration_method": "valis",

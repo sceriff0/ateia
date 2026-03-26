@@ -7,7 +7,7 @@
         "input_output_options": {
             "title": "Input/output options",
             "type": "object",
-            "required": ["step", "input", "outdir"],
+            "required": ["start", "input", "outdir"],
             "properties": {
                 "input": {
                     "type": ["string", "null"],
@@ -19,14 +19,25 @@
                     "description": "Output directory for pipeline results.",
                     "default": null
                 },
-                "step": {
+                "start": {
                     "type": "string",
-                    "description": "Pipeline step to execute.",
+                    "description": "Pipeline step to start from.",
                     "default": "preprocessing",
                     "enum": [
                         "preprocessing",
                         "registration",
                         "postprocessing"
+                    ]
+                },
+                "stop": {
+                    "type": ["string", "null"],
+                    "description": "Pipeline step to stop after. If null, runs to the end.",
+                    "default": null,
+                    "enum": [
+                        "preprocessing",
+                        "registration",
+                        "postprocessing",
+                        null
                     ]
                 },
                 "savedir": {

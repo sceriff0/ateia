@@ -12,12 +12,7 @@ MIRAGE is a Nextflow DSL2 pipeline for whole slide image (WSI) processing. It su
 
 1. **Image format conversion** — Input images are read from any Bio-Formats-compatible format and staged as OME-TIFF for downstream processing
 2. **Illumination correction** (`PREPROCESS`) — Per-channel flatfield/darkfield correction via the BaSiC algorithm ([BaSiCPy](https://github.com/peng-lab/BaSiCPy)); produces corrected OME-TIFF per image
-3. **Multi-modal image registration** (`REGISTER`) — Aligns all panels for a patient to a shared coordinate space; supports five methods selectable via `--registration_method`:
-   - `valis` — graph-based whole-stack registration via [VALIS](https://github.com/MathOnco/valis)
-   - `valis_pairs` — pairwise VALIS-style registration
-   - `gpu` — pairwise affine + diffeomorphic registration (GPU-accelerated)
-   - `cpu` — pairwise affine + diffeomorphic registration (CPU)
-   - `cpu_tiled` — memory-constrained tiled CPU pairwise registration
+3. **Multi-modal image registration** (`REGISTER`) — Aligns all panels for a patient to a shared coordinate space using `valis` (graph-based whole-stack registration via [VALIS](https://github.com/MathOnco/valis))
 4. **Cell segmentation** (`SEGMENT`) — Nuclear and cell segmentation via [StarDist](https://github.com/stardist/stardist); outputs GeoJSON contours per patient
 5. **Single-cell marker quantification** (`QUANTIFY`) — Extracts per-cell intensity statistics across all registered channels; outputs CSV tables
 6. **QuPath GeoJSON export** (`EXPORT_GEOJSON`) — Exports all cells with raw marker intensities and morphological measurements in QuPath-native GeoJSON format for interactive gating via FlowPath
@@ -39,12 +34,15 @@ MIRAGE is a Nextflow DSL2 pipeline for whole slide image (WSI) processing. It su
 
 ### Full pipeline from raw images
 
+Use `--start` to choose the entry point and `--stop` to terminate early at a given step. Both accept `preprocessing`, `registration`, or `postprocessing`. If `--stop` is omitted, the pipeline runs through to the end.
+
 ```bash
 nextflow run main.nf \
   --input samplesheet.csv \
   --outdir results \
-  --step preprocessing \
-  --registration_method gpu \
+  --start preprocessing \
+  --stop registration \
+  --registration_method valis \
   -profile slurm \
   -params-file params/full_pipeline.json
 ```
@@ -54,8 +52,8 @@ nextflow run main.nf \
 ```bash
 nextflow run main.nf \
   --input results/csv/preprocessed.csv \
-  --step registration \
-  --registration_method cpu_tiled \
+  --start registration \
+  --registration_method valis \
   --outdir results \
   -profile slurm \
   -resume
@@ -66,21 +64,10 @@ nextflow run main.nf \
 ```bash
 nextflow run main.nf \
   --input results/csv/registered.csv \
-  --step postprocessing \
+  --start postprocessing \
   --outdir results \
   -profile slurm \
   -resume
-```
-
-### Copy results to archive
-
-```bash
-nextflow run main.nf \
-  --step copy_results \
-  --outdir results \
-  --savedir /path/to/archive \
-  --copy_delete_source false \
-  -profile slurm
 ```
 
 ### Dry-run (validation only)
@@ -88,7 +75,7 @@ nextflow run main.nf \
 ```bash
 nextflow run main.nf \
   --input samplesheet.csv \
-  --step preprocessing \
+  --start preprocessing \
   --dry_run true
 ```
 
