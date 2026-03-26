@@ -64,7 +64,7 @@ def extract_morphology(
     mask = np.ascontiguousarray(mask.squeeze())
 
     labels, counts = np.unique(mask, return_counts=True)
-    valid_labels = labels[(labels != 0) & (counts > min_area)]
+    valid_labels = labels[(labels != 0) & (counts >= min_area)]
 
     if len(valid_labels) == 0:
         logger.warning("No valid cells found after area filtering")
@@ -130,8 +130,13 @@ def extract_contours(
     for label, row in props_df.iterrows():
         minr, minc, maxr, maxc = int(row['bbox-0']), int(row['bbox-1']), int(row['bbox-2']), int(row['bbox-3'])
 
-        # Crop binary mask for this cell
-        binary_crop = (mask_filtered[minr:maxr, minc:maxc] == label).astype(np.uint8)
+        # Crop binary mask for this cell, padded by 1px to ensure closed contours
+        # for cells touching the image border (find_contours returns open contours
+        # at array edges, which would produce incorrect polygon geometry)
+        binary_crop = np.pad(
+            (mask_filtered[minr:maxr, minc:maxc] == label).astype(np.uint8),
+            pad_width=1, mode='constant', constant_values=0
+        )
         contour_list = find_contours(binary_crop, level=0.5)
 
         if not contour_list:
@@ -141,9 +146,9 @@ def extract_contours(
         # Take the longest contour (outer boundary)
         contour = max(contour_list, key=len)
 
-        # Offset back to full image coordinates
-        contour[:, 0] += minr  # y offset
-        contour[:, 1] += minc  # x offset
+        # Offset back to full image coordinates (subtract 1 for padding, add bbox origin)
+        contour[:, 0] += minr - 1  # y offset
+        contour[:, 1] += minc - 1  # x offset
 
         # Convert from skimage center-of-pixel to ImageJ/QuPath corner-of-pixel convention
         contour += 0.5
@@ -151,8 +156,8 @@ def extract_contours(
         # Simplify with Douglas-Peucker
         simplified = approximate_polygon(contour, tolerance=simplify_tolerance)
 
-        # Need at least 4 vertices for a valid polygon (3 + closing point)
-        if len(simplified) < 3:
+        # Need at least 4 vertices for a valid polygon (3 unique + closing point)
+        if len(simplified) < 4:
             skipped += 1
             continue
 

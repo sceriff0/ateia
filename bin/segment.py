@@ -85,14 +85,15 @@ def extract_dapi_channel(
                 raise ValueError(f"TIFF file appears corrupted: {multichannel_image_path}")
             source = tif.pages[0]
 
-        if len(source.shape) == 2:
+        image_shape = source.shape
+        if len(image_shape) == 2:
             # Single channel
-            image_shape = source.shape
             n_channels = 1
+        elif len(image_shape) == 3:
+            # For OME series: shape is (C, Y, X); for raw pages fallback: use asarray
+            n_channels = image_shape[0]
         else:
-            # Multichannel
-            image_shape = source.shape
-            n_channels = image_shape[0] if len(image_shape) == 3 else 1
+            n_channels = 1
 
         image_dtype = source.dtype
 
@@ -118,6 +119,7 @@ def extract_dapi_channel(
             dapi_image = clip_negative_values(dapi_image, logger, stage_name="extract_dapi")
         elif image_memmap.ndim == 3:
             # Multichannel image (C, Y, X) format
+            n_channels = image_memmap.shape[0]
             logger.info(f"  - Multichannel image with {n_channels} channels")
 
             if dapi_channel_index >= n_channels:

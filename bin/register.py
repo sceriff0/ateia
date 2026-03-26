@@ -791,8 +791,12 @@ def valis_registration(
     logger.info(f"  - Slide dict keys: {list(registrar.slide_dict.keys())}")
 
     # Check if non-rigid registration succeeded by examining displacement fields
+    # Only check moving slides (reference may have identity displacement fields)
     non_rigid_available = False
+    ref_name = registrar.get_ref_slide().name
     for slide_name, slide_obj in registrar.slide_dict.items():
+        if slide_name == ref_name:
+            continue
         has_bk = hasattr(slide_obj, 'bk_dxdy') and slide_obj.bk_dxdy is not None
         has_fwd = hasattr(slide_obj, 'fwd_dxdy') and slide_obj.fwd_dxdy is not None
         has_stored = hasattr(slide_obj, 'stored_dxdy') and slide_obj.stored_dxdy
@@ -847,7 +851,7 @@ def valis_registration(
     slide_name_to_path: Dict[str, str] = {}
     for f in registrar.original_img_list:
         basename = os.path.basename(f)
-        slide_name = basename.replace('.ome.tif', '').replace('.ome.tiff', '')
+        slide_name = basename.replace('.ome.tiff', '').replace('.ome.tif', '')
         slide_name_to_path[slide_name] = f
 
     logger.info(f"\nWarping {len(registrar.slide_dict)} slides to: {out}")

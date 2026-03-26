@@ -269,11 +269,35 @@ def preprocess_multichannel_image(
     logger.info(f"Loading multichannel image from {image_path}")
 
     # Read and log input file metadata
+    # Extract pixel size from input OME metadata (fallback to 0.325 µm)
+    pixel_size_x = 0.325
+    pixel_size_y = 0.325
     with tifffile.TiffFile(image_path) as tif:
         has_ome = hasattr(tif, 'ome_metadata') and tif.ome_metadata
         has_physical_size = has_ome and 'PhysicalSizeX' in tif.ome_metadata
         if has_ome:
             logger.debug(f"  Input metadata: OME=True, PhysicalSize={has_physical_size}")
+            if has_physical_size:
+                try:
+                    import xml.etree.ElementTree as ET
+                    ome_xml = tif.ome_metadata
+                    root = ET.fromstring(ome_xml) if isinstance(ome_xml, str) else None
+                    if root is not None:
+                        ns = {'ome': 'http://www.openmicroscopy.org/Schemas/OME/2016-06'}
+                        pixels = root.find('.//ome:Pixels', ns)
+                        if pixels is None:
+                            # Try without namespace
+                            pixels = root.find('.//{*}Pixels')
+                        if pixels is not None:
+                            px = pixels.get('PhysicalSizeX')
+                            py = pixels.get('PhysicalSizeY')
+                            if px:
+                                pixel_size_x = float(px)
+                            if py:
+                                pixel_size_y = float(py)
+                            logger.info(f"  Extracted pixel size from OME: X={pixel_size_x}, Y={pixel_size_y} µm")
+                except Exception as e:
+                    logger.warning(f"  Failed to parse pixel size from OME metadata: {e}, using default 0.325 µm")
         else:
             logger.warning("  [WARN] Input file has no OME metadata")
 
@@ -335,6 +359,13 @@ def preprocess_multichannel_image(
 
     preprocessed = np.stack(preprocessed_channels, axis=0)
 
+    # Cast back to original dtype (BaSiC outputs float32, but downstream expects uint16)
+    if preprocessed.dtype != multichannel_stack.dtype:
+        logger.info(f"Casting from {preprocessed.dtype} back to {multichannel_stack.dtype}")
+        preprocessed = np.clip(preprocessed, np.iinfo(multichannel_stack.dtype).min,
+                               np.iinfo(multichannel_stack.dtype).max) if np.issubdtype(multichannel_stack.dtype, np.integer) else preprocessed
+        preprocessed = preprocessed.astype(multichannel_stack.dtype)
+
     # Log output statistics after all processing
     log_image_stats(preprocessed, "after_basic_correction", logger)
 
@@ -347,13 +378,13 @@ def preprocess_multichannel_image(
     metadata = {
         'axes': 'CYX',
         'Channel': {'Name': channel_names[:preprocessed.shape[0]]},
-        'PhysicalSizeX': 0.325,
+        'PhysicalSizeX': pixel_size_x,
         'PhysicalSizeXUnit': 'µm',
-        'PhysicalSizeY': 0.325,
+        'PhysicalSizeY': pixel_size_y,
         'PhysicalSizeYUnit': 'µm'
     }
 
-    logger.debug(f"  OME metadata: axes={metadata['axes']}, pixel_size=0.325µm")
+    logger.debug(f"  OME metadata: axes={metadata['axes']}, pixel_size={pixel_size_x}x{pixel_size_y}µm")
 
     tifffile.imwrite(
         output_path,
@@ -506,7 +537,7 @@ def main():
         'get_darkfield': not args.no_darkfield
     }
 
-    preprocess_multichannel_image(
+    preprocessed = preprocess_multichannel_image(
         image_path=image_path,
         channel_names=channel_names,
         output_path=output_path,

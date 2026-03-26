@@ -91,8 +91,8 @@ def split_multichannel_tiff(input_path, output_dir, is_reference=False, channel_
     skipped_count = 0
 
     for i, name in enumerate(channel_names):
-        # Check if this is DAPI channel
-        is_dapi = name.upper() == 'DAPI'
+        # Check if this is DAPI channel (by name or by position 0 when using fallback names)
+        is_dapi = name.upper() == 'DAPI' or (i == 0 and name.startswith('Channel_'))
 
         # Skip DAPI if this is not the reference image
         if is_dapi and not is_reference:

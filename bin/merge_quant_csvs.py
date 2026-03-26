@@ -69,8 +69,9 @@ def merge_intensities(
         merge_df = df[['label'] + marker_cols]
         merged = merged.merge(merge_df, on='label', how='left')
 
-        for col in marker_cols:
-            merged[col] = merged[col].fillna(0.0)
+        # Leave missing intensities as NaN (not 0.0) so downstream tools can
+        # distinguish genuinely zero intensity from cells absent in this channel
+        # (e.g. cells excluded by min_area filter in quantify.py)
 
         logger.info("  + %s from %s", ', '.join(marker_cols), csv_file.name)
 

@@ -88,8 +88,14 @@ def compute_zscores(df: pd.DataFrame, marker_cols: List[str]) -> pd.DataFrame:
         index=marker_data.index,
         columns=marker_data.columns,
     )
-    # Replace NaN z-scores (from constant columns) with 0
-    z_values = z_values.fillna(0.0)
+    # For constant columns (std=0), zscore produces NaN for all rows — replace with 0.
+    # But preserve NaN for cells that had missing raw data (those should stay NaN).
+    for col in marker_cols:
+        is_missing_raw = marker_data[col].isna()
+        col_std = marker_data[col].std()
+        is_constant_col = col_std == 0 or pd.isna(col_std)
+        if is_constant_col:
+            z_values.loc[~is_missing_raw, col] = 0.0
 
     for col in marker_cols:
         df[f'{col}_zscore'] = z_values[col]
@@ -109,9 +115,9 @@ def build_measurements(
     """
     measurements = []
 
-    # Centroid in micrometers
-    x_px = float(row.get('x', 0))
-    y_px = float(row.get('y', 0))
+    # Centroid in micrometers (apply +0.5 for corner-of-pixel convention consistency)
+    x_px = float(row.get('x', 0)) + 0.5
+    y_px = float(row.get('y', 0)) + 0.5
     measurements.append({"name": "Centroid X µm", "value": round(x_px * pixel_size, 3)})
     measurements.append({"name": "Centroid Y µm", "value": round(y_px * pixel_size, 3)})
 
@@ -126,17 +132,19 @@ def build_measurements(
     if pd.notna(area):
         measurements.append({"name": "Area µm²", "value": round(float(area) * pixel_size * pixel_size, 3)})
 
-    for morph_col, display_name in [
-        ('eccentricity', 'Eccentricity'),
-        ('perimeter', 'Perimeter'),
-        ('solidity', 'Solidity'),
-        ('convex_area', 'Convex Area'),
-        ('axis_major_length', 'Major Axis Length'),
-        ('axis_minor_length', 'Minor Axis Length'),
+    # Length measurements converted to µm, area measurements to µm²
+    # Dimensionless ratios (eccentricity, solidity) kept as-is
+    for morph_col, display_name, unit_factor in [
+        ('eccentricity', 'Eccentricity', 1.0),
+        ('perimeter', 'Perimeter µm', pixel_size),
+        ('solidity', 'Solidity', 1.0),
+        ('convex_area', 'Convex Area µm²', pixel_size * pixel_size),
+        ('axis_major_length', 'Major Axis Length µm', pixel_size),
+        ('axis_minor_length', 'Minor Axis Length µm', pixel_size),
     ]:
         val = row.get(morph_col)
         if pd.notna(val):
-            measurements.append({"name": display_name, "value": round(float(val), 4)})
+            measurements.append({"name": display_name, "value": round(float(val) * unit_factor, 4)})
 
     return measurements
 
@@ -186,6 +194,12 @@ def export_geojson(
             skipped += 1
             continue
 
+        # Apply 0.5px offset to match corner-of-pixel convention used by polygon contours
+        # (regionprops centroids are center-of-pixel; contours in extract_cell_properties
+        # are shifted by +0.5 for QuPath/ImageJ compatibility)
+        x_px_corner = float(x_px) + 0.5
+        y_px_corner = float(y_px) + 0.5
+
         cell_id = row.get('label', idx)
         cell_label_str = str(int(cell_id)) if pd.notna(cell_id) else str(idx)
 
@@ -198,7 +212,7 @@ def export_geojson(
         else:
             geometry = {
                 "type": "Point",
-                "coordinates": [float(x_px), float(y_px)],
+                "coordinates": [x_px_corner, y_px_corner],
             }
 
         # Build measurements array (QuPath native format)

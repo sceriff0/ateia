@@ -474,7 +474,21 @@ def convert_to_ome_tiff(
     
     # Rearrange channels
     if channel_names != output_channels:
-        indices = [channel_names.index(ch) for ch in output_channels]
+        # Check for duplicate channel names (index() would silently return first match)
+        if len(set(channel_names)) != len(channel_names):
+            logger.warning(f"Duplicate channel names detected: {channel_names}")
+            # Build index map using enumerate to handle duplicates correctly
+            name_to_indices = {}
+            for i, ch in enumerate(channel_names):
+                name_to_indices.setdefault(ch, []).append(i)
+            indices = []
+            used = {ch: 0 for ch in channel_names}
+            for ch in output_channels:
+                idx = name_to_indices[ch][used[ch]]
+                used[ch] += 1
+                indices.append(idx)
+        else:
+            indices = [channel_names.index(ch) for ch in output_channels]
         image_data = np.take(image_data, indices, axis=c_axis)
         logger.info(f"Rearranged channels: {channel_names} -> {output_channels}")
     
