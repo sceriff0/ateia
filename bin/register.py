@@ -120,8 +120,28 @@ MEMORY_PRESETS = {
 
 
 
-def estimate_jvm_memory(input_dir: str, default_gb: int = 16) -> int:
-    """Estimate JVM memory based on input file sizes.
+def _get_system_memory_gb() -> Optional[int]:
+    """Return total system memory in GB, or None if unavailable."""
+    try:
+        import shutil
+        total = shutil.disk_usage('/').total  # fallback, not what we want
+        # Try /proc/meminfo (Linux)
+        with open('/proc/meminfo') as f:
+            for line in f:
+                if line.startswith('MemTotal:'):
+                    return int(line.split()[1]) // (1024 * 1024)
+    except Exception:
+        pass
+    try:
+        pages = os.sysconf('SC_PHYS_PAGES')
+        page_size = os.sysconf('SC_PAGE_SIZE')
+        return (pages * page_size) // (1024 ** 3)
+    except Exception:
+        return None
+
+
+def estimate_jvm_memory(input_dir: str, default_gb: int = 16, override_gb: Optional[int] = None) -> int:
+    """Estimate JVM memory based on input file sizes and system memory.
 
     Parameters
     ----------
@@ -129,12 +149,18 @@ def estimate_jvm_memory(input_dir: str, default_gb: int = 16) -> int:
         Directory containing input files
     default_gb : int
         Default memory allocation in GB
+    override_gb : int, optional
+        Explicit JVM heap size in GB (overrides auto-estimation)
 
     Returns
     -------
     int
         Recommended JVM heap size in GB
     """
+    if override_gb is not None and override_gb > 0:
+        logger.info(f"Using explicit JVM heap size: {override_gb} GB")
+        return override_gb
+
     total_size_gb = 0.0
     try:
         for f in os.listdir(input_dir):
@@ -142,10 +168,12 @@ def estimate_jvm_memory(input_dir: str, default_gb: int = 16) -> int:
                 fpath = os.path.join(input_dir, f)
                 total_size_gb += os.path.getsize(fpath) / (1024 ** 3)
 
-        # Rule of thumb: JVM needs ~2x the largest file size for processing
-        # Minimum 8GB, maximum 64GB
-        recommended = max(8, min(64, int(total_size_gb * 2 + 4)))
-        logger.info(f"Input files total: {total_size_gb:.1f} GB, recommending {recommended} GB JVM heap")
+        # Cap at 75% of system memory (leave room for Python/vips), minimum 8GB
+        sys_mem = _get_system_memory_gb()
+        max_heap = int(sys_mem * 0.75) if sys_mem else 64
+        recommended = max(8, min(max_heap, int(total_size_gb * 3 + 8)))
+        logger.info(f"Input files total: {total_size_gb:.1f} GB, system RAM: {sys_mem or '?'} GB, "
+                     f"recommending {recommended} GB JVM heap (cap: {max_heap} GB)")
         return recommended
     except Exception as e:
         logger.info(f"Could not estimate JVM memory: {e}, using default {default_gb} GB")
@@ -390,6 +418,7 @@ def valis_registration(
     tile_size: int = 512,
     image_type: str = "auto",
     interp_method: str = "bilinear",
+    jvm_heap_gb: Optional[int] = None,
 ) -> int:
     """Perform VALIS registration on preprocessed images.
 
@@ -458,7 +487,7 @@ def valis_registration(
     logger.info(f"  Valid: {len(valid_slides)}, Invalid: {len(invalid_slides)}")
 
     # Initialize JVM with adaptive memory sizing
-    jvm_mem_gb = estimate_jvm_memory(input_dir, default_gb=16)
+    jvm_mem_gb = estimate_jvm_memory(input_dir, default_gb=16, override_gb=jvm_heap_gb)
     logger.info(f"Initializing JVM with {jvm_mem_gb}GB heap...")
     registration.init_jvm(mem_gb=jvm_mem_gb)
     logger.info(f"JVM initialized with {jvm_mem_gb}GB heap")
@@ -1080,6 +1109,9 @@ def parse_args() -> argparse.Namespace:
                         choices=['bilinear', 'bicubic', 'nearest'],
                         help='Interpolation method for warping. bilinear recommended for '
                              'quantification (no negative overshoot), bicubic for visual quality.')
+    parser.add_argument('--jvm-heap-gb', type=int, default=None,
+                        help='Explicit JVM heap size in GB (overrides auto-estimation). '
+                             'Useful for scaling on retries.')
 
     return parser.parse_args()
 
@@ -1105,6 +1137,7 @@ def main() -> int:
             tile_size=args.tile_size,
             image_type=args.image_type,
             interp_method=args.interp_method,
+            jvm_heap_gb=args.jvm_heap_gb,
         )
     except Exception as e:
         logger.error(f"[FAIL] Registration failed: {e}")

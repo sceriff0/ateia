@@ -48,6 +48,8 @@ process REGISTER {
     // Performance options
     def parallel_warping = params.reg_parallel_warping ? '--parallel-warping' : ''
     def n_workers = params.reg_n_workers ?: 4
+    // JVM heap scales with retry attempts: base 32GB + 16GB per attempt
+    def jvm_heap_gb = params.reg_jvm_heap_gb ?: (32 + 16 * task.attempt)
     // Advanced registration options
     def use_tiled = params.reg_use_tiled_registration ? '--use-tiled-registration' : ''
     def tile_size = params.reg_tile_size ?: 2048
@@ -121,6 +123,7 @@ process REGISTER {
         --n-workers ${n_workers} \\
         ${use_tiled} \\
         --tile-size ${tile_size} \\
+        --jvm-heap-gb ${jvm_heap_gb} \\
         ${args}
 
     # === VALIDATE OUTPUTS ===
