@@ -852,7 +852,7 @@ def valis_registration(
     slide_name_to_path: Dict[str, str] = {}
     for f in registrar.original_img_list:
         basename = os.path.basename(f)
-        slide_name = basename.replace('.ome.tiff', '').replace('.ome.tif', '').replace('_corrected', '')
+        slide_name = basename.replace('.ome.tiff', '').replace('.ome.tif', '')
         slide_name_to_path[slide_name] = f
 
     logger.info(f"\nWarping {len(registrar.slide_dict)} slides to: {out}")
@@ -888,7 +888,8 @@ def valis_registration(
                     continue
 
                 src_path = slide_name_to_path[slide_name]
-                out_path = os.path.join(out, f"{slide_name}_registered.ome.tiff")
+                out_name = slide_name.replace('_corrected', '')
+                out_path = os.path.join(out, f"{out_name}_registered.ome.tiff")
 
                 future = executor.submit(
                     warp_single_slide,
@@ -929,7 +930,8 @@ def valis_registration(
                 continue
 
             src_path = slide_name_to_path[slide_name]
-            out_path = os.path.join(out, f"{slide_name}_registered.ome.tiff")
+            out_name = slide_name.replace('_corrected', '')
+            out_path = os.path.join(out, f"{out_name}_registered.ome.tiff")
 
             # Retry context for transient failures (conservative: 2 attempts, 2s delay)
             retry_ctx = RetryContext(
