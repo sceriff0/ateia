@@ -490,11 +490,12 @@ def valis_registration(
     # Find reference image
     if reference:
         # Modern approach: use specified reference filename
-        logger.info(f"Using specified reference image: {reference}")
-        ref_image_path = os.path.join(input_dir, reference)
+        ref_basename = os.path.basename(reference)
+        logger.info(f"Using specified reference image: {ref_basename}")
+        ref_image_path = os.path.join(input_dir, ref_basename)
         if not os.path.exists(ref_image_path):
             raise FileNotFoundError(f"Specified reference image not found: {ref_image_path}")
-        ref_image = reference
+        ref_image = ref_basename
     else:
         # Legacy approach: search by markers
         logger.info(f"Searching for reference image with markers: {reference_markers}")
@@ -851,7 +852,7 @@ def valis_registration(
     slide_name_to_path: Dict[str, str] = {}
     for f in registrar.original_img_list:
         basename = os.path.basename(f)
-        slide_name = basename.replace('.ome.tiff', '').replace('.ome.tif', '')
+        slide_name = basename.replace('.ome.tiff', '').replace('.ome.tif', '').replace('_corrected', '')
         slide_name_to_path[slide_name] = f
 
     logger.info(f"\nWarping {len(registrar.slide_dict)} slides to: {out}")

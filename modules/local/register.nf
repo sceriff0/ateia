@@ -171,7 +171,7 @@ process REGISTER {
     // Generate output files matching input count with proper naming pattern
     def output_files = all_metas.collect { m ->
         def markers = m.channels.join('_')
-        "${patient_id}_${markers}_corrected_registered.ome.tiff"
+        "${patient_id}_${markers}_registered.ome.tiff"
     }
     def touch_commands = output_files.collect { "touch registered_slides/${it}" }.join('\n    ')
     // Build stub manifest JSON mapping filenames to their channel names

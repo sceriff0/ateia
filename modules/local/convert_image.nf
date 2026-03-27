@@ -17,10 +17,7 @@ process CONVERT_IMAGE {
 
     script:
     def args = task.ext.args ?: ''
-    // Include original filename identity to avoid collisions when multiple images
-    // share patient_id + channels (e.g., reference and moving tissue sections)
-    def slide_id = image_file.simpleName.replaceFirst("^${meta.patient_id}_?", '')
-    def prefix = task.ext.prefix ?: (slide_id ? "${meta.patient_id}_${slide_id}" : "${meta.patient_id}")
+    def prefix = task.ext.prefix ?: meta.patient_id
     def pixel_size = params.pixel_size ?: '0.325'
     def channels = meta.channels.join(',')
     """
@@ -46,12 +43,11 @@ process CONVERT_IMAGE {
     """
 
     stub:
-    def slide_id = image_file.simpleName.replaceFirst("^${meta.patient_id}_?", '')
-    def prefix = task.ext.prefix ?: (slide_id ? "${meta.patient_id}_${slide_id}" : "${meta.patient_id}")
+    def prefix = task.ext.prefix ?: meta.patient_id
     def channels = meta.channels.join(',')
     """
     touch ${prefix}.ome.tif
-    echo "${channels}" > ${prefix}_${image_file.simpleName}_channels.txt
+    echo "${channels}" > ${prefix}_channels.txt
     echo "STUB,${meta.patient_id},stub,0" > ${meta.patient_id}_${image_file.simpleName}.CONVERT_IMAGE.size.csv
 
     cat <<-END_VERSIONS > versions.yml
