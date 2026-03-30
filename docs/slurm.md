@@ -31,7 +31,7 @@ Process-level defaults and retries are defined in `conf/modules.config`.
 
 ```bash
 nextflow run main.nf -profile slurm -resume \
-  --input results/csv/preprocessed.csv \
+  --input results/P001/csv/preprocessed.csv \
   --start registration \
   --registration_method valis \
   --outdir results

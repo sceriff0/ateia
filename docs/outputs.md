@@ -6,11 +6,11 @@ All outputs are written under `--outdir` (default `./results`).
 
 ```text
 results/
-  csv/
-    preprocessed.csv
-    registered.csv
-    postprocessed.csv
   <patient_id>/
+    csv/
+      preprocessed.csv
+      registered.csv
+      postprocessed.csv
     preprocessed/
     registered/
     qc/
@@ -27,7 +27,7 @@ Multiple patients are processed in parallel. Each patient gets its own subdirect
 
 ---
 
-## Checkpoint CSVs (`results/csv/`)
+## Checkpoint CSVs (`results/{patient_id}/csv/`)
 
 These files are generated at the end of each major step and serve as `--input` for downstream checkpoint runs.
 

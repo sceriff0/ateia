@@ -28,11 +28,12 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // Checkpoint CSV created
-                { assert path("$outputDir/csv/preprocessed.csv").exists() },
-                // Validate checkpoint has correct structure and content
+                // Per-patient checkpoint CSVs created
+                { assert path("$outputDir/P001/csv/preprocessed.csv").exists() },
+                { assert path("$outputDir/P002/csv/preprocessed.csv").exists() },
+                // Validate P001 checkpoint has correct structure and content
                 {
-                    def checkpoint = path("$outputDir/csv/preprocessed.csv")
+                    def checkpoint = path("$outputDir/P001/csv/preprocessed.csv")
                     def lines = checkpoint.readLines()
                     assert lines.size() >= 2, "Checkpoint should have header + data"
                     def header = lines[0]
@@ -41,9 +42,9 @@ nextflow_pipeline {
                     assert header.contains('is_reference'), "Missing is_reference column"
                     assert header.contains('channels'), "Missing channels column"
                 },
-                // Verify file paths in checkpoint point to real files
+                // Verify file paths in P001 checkpoint point to real files
                 {
-                    def checkpoint = path("$outputDir/csv/preprocessed.csv")
+                    def checkpoint = path("$outputDir/P001/csv/preprocessed.csv")
                     def lines = checkpoint.readLines()
                     def headerCols = lines[0].split(',')
                     def imgColIdx = headerCols.findIndexOf { it.trim() == 'preprocessed_image' }
@@ -51,13 +52,6 @@ nextflow_pipeline {
                         def imgPath = lines[i].split(',')[imgColIdx].trim()
                         assert path(imgPath).exists(), "Preprocessed image should exist: ${imgPath}"
                     }
-                },
-                // Verify both patients present (P001, P002)
-                {
-                    def checkpoint = path("$outputDir/csv/preprocessed.csv")
-                    def content = checkpoint.text
-                    assert content.contains('P001'), "P001 should be in checkpoint"
-                    assert content.contains('P002'), "P002 should be in checkpoint"
                 }
             )
         }
@@ -81,11 +75,11 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // Registration checkpoint created
-                { assert path("$outputDir/csv/registered.csv").exists() },
+                // Per-patient registration checkpoint created
+                { assert path("$outputDir/P001/csv/registered.csv").exists() },
                 // Validate checkpoint structure
                 {
-                    def checkpoint = path("$outputDir/csv/registered.csv")
+                    def checkpoint = path("$outputDir/P001/csv/registered.csv")
                     def lines = checkpoint.readLines()
                     assert lines.size() >= 2, "Checkpoint should have header + data"
                     def header = lines[0]
@@ -96,7 +90,7 @@ nextflow_pipeline {
                 },
                 // Verify registered image paths point to real files
                 {
-                    def checkpoint = path("$outputDir/csv/registered.csv")
+                    def checkpoint = path("$outputDir/P001/csv/registered.csv")
                     def lines = checkpoint.readLines()
                     def headerCols = lines[0].split(',')
                     def imgColIdx = headerCols.findIndexOf { it.trim() == 'registered_image' }
@@ -107,7 +101,7 @@ nextflow_pipeline {
                 },
                 // Patient ID consistency
                 {
-                    def checkpoint = path("$outputDir/csv/registered.csv")
+                    def checkpoint = path("$outputDir/P001/csv/registered.csv")
                     def content = checkpoint.text
                     assert content.contains('P001'), "P001 should be in checkpoint"
                 }
@@ -177,31 +171,41 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                { assert path("$outputDir/csv/preprocessed.csv").exists() },
-                // Verify P001 and P002 both have entries but don't cross-contaminate
+                // Per-patient checkpoint CSVs exist
+                { assert path("$outputDir/P001/csv/preprocessed.csv").exists() },
+                { assert path("$outputDir/P002/csv/preprocessed.csv").exists() },
+                // P001 CSV has at least 1 data row
                 {
-                    def checkpoint = path("$outputDir/csv/preprocessed.csv")
+                    def checkpoint = path("$outputDir/P001/csv/preprocessed.csv")
+                    def lines = checkpoint.readLines()
+                    assert lines.size() >= 2, "P001 checkpoint should have header + data"
+                },
+                // P002 CSV has at least 1 data row
+                {
+                    def checkpoint = path("$outputDir/P002/csv/preprocessed.csv")
+                    def lines = checkpoint.readLines()
+                    assert lines.size() >= 2, "P002 checkpoint should have header + data"
+                },
+                // Verify P001 CSV only contains P001 entries
+                {
+                    def checkpoint = path("$outputDir/P001/csv/preprocessed.csv")
                     def lines = checkpoint.readLines()
                     def headerCols = lines[0].split(',')
                     def pidIdx = headerCols.findIndexOf { it.trim() == 'patient_id' }
-                    def imgIdx = headerCols.findIndexOf { it.trim() == 'preprocessed_image' }
-
-                    def p001_images = []
-                    def p002_images = []
                     for (int i = 1; i < lines.size(); i++) {
-                        def cols = lines[i].split(',')
-                        def pid = cols[pidIdx].trim()
-                        def img = cols[imgIdx].trim()
-                        if (pid == 'P001') p001_images.add(img)
-                        else if (pid == 'P002') p002_images.add(img)
+                        def pid = lines[i].split(',')[pidIdx].trim()
+                        assert pid == 'P001', "P001 CSV should only contain P001 entries, found: ${pid}"
                     }
-
-                    assert p001_images.size() >= 1, "P001 should have preprocessed images"
-                    assert p002_images.size() >= 1, "P002 should have preprocessed images"
-
-                    // Cross-contamination check: P001 paths should not appear in P002 entries
-                    p001_images.each { img ->
-                        assert !p002_images.contains(img), "P001 image should not appear in P002: ${img}"
+                },
+                // Verify P002 CSV only contains P002 entries
+                {
+                    def checkpoint = path("$outputDir/P002/csv/preprocessed.csv")
+                    def lines = checkpoint.readLines()
+                    def headerCols = lines[0].split(',')
+                    def pidIdx = headerCols.findIndexOf { it.trim() == 'patient_id' }
+                    for (int i = 1; i < lines.size(); i++) {
+                        def pid = lines[i].split(',')[pidIdx].trim()
+                        assert pid == 'P002', "P002 CSV should only contain P002 entries, found: ${pid}"
                     }
                 }
             )
@@ -227,15 +231,9 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // Checkpoint CSV exists
-                { assert path("$outputDir/csv/preprocessed.csv").exists() },
-                // Verify multiple patients are processed (P001, P002 in test data)
-                {
-                    def checkpoint = path("$outputDir/csv/preprocessed.csv")
-                    def lines = checkpoint.readLines()
-                    // Header + at least 2 data rows (one per patient)
-                    assert lines.size() >= 3, "Should have outputs for multiple patients"
-                }
+                // Per-patient checkpoint CSVs exist for both patients
+                { assert path("$outputDir/P001/csv/preprocessed.csv").exists() },
+                { assert path("$outputDir/P002/csv/preprocessed.csv").exists() }
             )
         }
     }

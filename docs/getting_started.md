@@ -21,7 +21,7 @@ nextflow run main.nf \
 
 ```bash
 nextflow run main.nf \
-  --input results/csv/preprocessed.csv \
+  --input results/P001/csv/preprocessed.csv \
   --start registration \
   --registration_method cpu_tiled \
   --outdir results \
@@ -43,7 +43,7 @@ nextflow run main.nf \
 
 ## First Checks After Launch
 
-1. Verify `results/csv/` checkpoint CSVs are created.
+1. Verify `results/{patient_id}/csv/` checkpoint CSVs are created.
 2. Confirm your chosen registration method outputs in `results/<patient_id>/registered/`.
 3. Confirm postprocessing outputs in `results/<patient_id>/`.
 

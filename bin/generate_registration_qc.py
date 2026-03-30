@@ -207,7 +207,7 @@ def process_single_image(
     """
     try:
         # Generate base output path from registered image name
-        base_name = registered_path.stem.replace('.ome', '')
+        base_name = registered_path.stem.removesuffix('.ome')
         output_path = output_dir / f"{base_name}_QC_RGB.tif"
 
         # Call library function (eliminates code duplication)

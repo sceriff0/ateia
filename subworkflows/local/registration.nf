@@ -223,9 +223,15 @@ workflow REGISTRATION {
     // ========================================================================
     // STEP 4: CHECKPOINT
     // ========================================================================
-    // Use collectFile() for non-blocking aggregation (enables patient-level parallelism)
+    // Per-patient checkpoint CSV using collectFile() closure form
     ch_checkpoint_csv = ch_registered
-        .map { meta, file ->
+        .collectFile(
+            newLine: true,
+            storeDir: "${params.outdir}",
+            seed: 'patient_id,registered_image,is_reference,channels'
+        ) { tuple ->
+            def meta = tuple[0]
+            def file = tuple[1]
             // Construct the path where the file will be published
             // Must match the publishDir configuration in modules.config
             //
@@ -247,14 +253,8 @@ workflow REGISTRATION {
             def relative_path = is_work_hash ? filename : "${parent_name}/${filename}"
 
             def published_path = "${params.outdir}/${meta.patient_id}/registered/${relative_path}"
-            "${meta.patient_id},${published_path},${meta.is_reference},${meta.channels.join('|')}"
+            ["${meta.patient_id}/csv/registered.csv", "${meta.patient_id},${published_path},${meta.is_reference},${meta.channels.join('|')}"]
         }
-        .collectFile(
-            name: 'registered.csv',
-            newLine: true,
-            storeDir: "${params.outdir}/csv",
-            seed: 'patient_id,registered_image,is_reference,channels'
-        )
 
     // Collect size logs from all registration processes
     ch_size_logs = Channel.empty()
@@ -302,6 +302,7 @@ workflow REGISTRATION {
     checkpoint_csv   = ch_checkpoint_csv
     qc               = ch_qc
     error_metrics    = ch_error_metrics
+    valis_summary    = VALIS_ADAPTER.out.summary
     size_logs        = ch_size_logs
     versions         = ch_versions
 }

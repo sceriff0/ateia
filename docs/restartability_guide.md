@@ -24,7 +24,7 @@ nextflow run main.nf \
 
 ```bash
 nextflow run main.nf \
-  --input results/csv/preprocessed.csv \
+  --input results/P001/csv/preprocessed.csv \
   --start registration \
   --registration_method cpu_tiled \
   --outdir results
@@ -34,7 +34,7 @@ nextflow run main.nf \
 
 ```bash
 nextflow run main.nf \
-  --input results/csv/registered.csv \
+  --input results/P001/csv/registered.csv \
   --start postprocessing \
   --outdir results
 ```

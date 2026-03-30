@@ -109,15 +109,20 @@ def generate_seg_overlay(
         scale = max_dim / max(mask.shape)
         new_h = int(mask.shape[0] * scale)
         new_w = int(mask.shape[1] * scale)
-        # Use simple slicing for fast downsampling of boundary image
-        step_h = max(1, mask.shape[0] // new_h)
-        step_w = max(1, mask.shape[1] // new_w)
-        boundaries = boundaries[::step_h, ::step_w]
+        # Use proper resampling to avoid jagged boundary artifacts
+        from skimage.transform import resize as skimage_resize
+        boundaries = skimage_resize(
+            boundaries.astype(np.float32), (new_h, new_w),
+            order=1, anti_aliasing=True, preserve_range=True
+        ) > 0.5  # Threshold back to binary after interpolation
         logger.info(f"  Downsampled to {boundaries.shape[1]}x{boundaries.shape[0]} (scale={scale:.3f})")
+
+    # Count actual cells (unique non-zero labels), not max label value
+    n_cells = len(np.unique(mask)) - 1  # subtract background (0)
 
     fig, ax = plt.subplots(1, 1, figsize=(10, 10))
     ax.imshow(boundaries, cmap='gray', interpolation='nearest')
-    ax.set_title(f"Cell Boundaries ({np.max(mask)} cells)")
+    ax.set_title(f"Cell Boundaries ({n_cells} cells)")
     ax.axis('off')
     fig.tight_layout()
     fig.savefig(str(output_path), dpi=150, bbox_inches='tight')

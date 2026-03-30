@@ -60,20 +60,20 @@ workflow PREPROCESSING {
         GENERATE_PREPROCESS_QC ( ch_preprocessed_with_meta )
     }
 
-    // Generate checkpoint CSV for restart from preprocessing step
-    // Use collectFile() for non-blocking aggregation (enables patient-level parallelism)
+    // Generate per-patient checkpoint CSV for restart from preprocessing step
+    // Use collectFile() closure form to create separate files per patient_id
     ch_checkpoint_csv = ch_preprocessed_with_meta
-        .map { meta, image_file ->
+        .collectFile(
+            newLine: true,
+            storeDir: "${params.outdir}",
+            seed: 'patient_id,preprocessed_image,is_reference,channels'
+        ) { tuple ->
+            def meta = tuple[0]
+            def image_file = tuple[1]
             def image_path = "${params.outdir}/${meta.patient_id}/preprocessed/${image_file.name}"
             def channels = meta.channels.join('|')
-            "${meta.patient_id},${image_path},${meta.is_reference},${channels}"
+            ["${meta.patient_id}/csv/preprocessed.csv", "${meta.patient_id},${image_path},${meta.is_reference},${channels}"]
         }
-        .collectFile(
-            name: 'preprocessed.csv',
-            newLine: true,
-            storeDir: "${params.outdir}/csv",
-            seed: 'patient_id,preprocessed_image,is_reference,channels'
-        )
 
     // Collect size logs from all processes
     ch_size_logs = Channel.empty()

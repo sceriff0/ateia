@@ -140,6 +140,7 @@ workflow MIRAGE {
         def ch_preprocess_qc_pngs  = Channel.empty()
         def ch_registration_qc_pngs = Channel.empty()
         def ch_feature_dist_jsons   = Channel.empty()
+        def ch_valis_summary_csvs   = Channel.empty()
         def ch_postprocess_qc_pngs  = Channel.empty()
         def ch_versions             = Channel.empty()
 
@@ -152,6 +153,8 @@ workflow MIRAGE {
                 .mix(REGISTRATION.out.qc.map { meta, files -> files })
             ch_feature_dist_jsons = ch_feature_dist_jsons
                 .mix(REGISTRATION.out.error_metrics.map { meta, files -> files })
+            ch_valis_summary_csvs = ch_valis_summary_csvs
+                .mix(REGISTRATION.out.valis_summary)
             ch_versions = ch_versions.mix(REGISTRATION.out.versions)
         }
         if (run('postprocessing')) {
@@ -168,7 +171,7 @@ workflow MIRAGE {
             ch_preprocess_qc_pngs.collect().ifEmpty([]),
             ch_registration_qc_pngs.collect().ifEmpty([]),
             ch_feature_dist_jsons.collect().ifEmpty([]),
-            Channel.empty().collect().ifEmpty([]),       // valis_summary (collected from registration adapter if available)
+            ch_valis_summary_csvs.collect().ifEmpty([]),
             ch_postprocess_qc_pngs.collect().ifEmpty([]),
             ch_collated_versions
         )

@@ -19,7 +19,7 @@ process GENERATE_PREPROCESS_QC {
     def args = task.ext.args ?: ''
     def prefix = task.ext.prefix ?: "${meta.patient_id}"
     def scale_factor = params.preprocess_qc_scale_factor ?: 0.25
-    def channels = meta.channels.join(' ')
+    def channels = meta.channels.collect { "\"${it}\"" }.join(' ')
     """
     # Log input size for tracing (-L follows symlinks)
     input_bytes=\$(stat -L --printf="%s" ${preprocessed} 2>/dev/null || echo 0)

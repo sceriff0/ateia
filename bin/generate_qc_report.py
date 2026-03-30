@@ -44,10 +44,19 @@ def list_files(directory, pattern="*"):
 
 
 def img_to_b64(path):
-    """Return a data URI string for a PNG file."""
+    """Return a data URI string for an image file (PNG or TIFF)."""
+    ext = Path(path).suffix.lower()
+    mime_types = {
+        ".png": "image/png",
+        ".tif": "image/tiff",
+        ".tiff": "image/tiff",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+    }
+    mime = mime_types.get(ext, "image/png")
     with open(path, "rb") as fh:
         data = base64.b64encode(fh.read()).decode("ascii")
-    return f"data:image/png;base64,{data}"
+    return f"data:{mime};base64,{data}"
 
 
 def parse_versions_yml(path):

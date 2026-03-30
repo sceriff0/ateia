@@ -98,7 +98,7 @@ nextflow_pipeline {
 
         then {
             assert workflow.success
-            assert path("$outputDir/csv/preprocessed.csv").exists()
+            assert path("$outputDir/P001/csv/preprocessed.csv").exists()
         }
     }
 
@@ -435,10 +435,10 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                { assert path("$outputDir/csv/preprocessed.csv").exists() },
+                { assert path("$outputDir/P001/csv/preprocessed.csv").exists() },
                 // Registration and postprocessing must NOT have run
-                { assert !path("$outputDir/csv/registered.csv").exists() },
-                { assert !path("$outputDir/csv/postprocessed.csv").exists() }
+                { assert !path("$outputDir/P001/csv/registered.csv").exists() },
+                { assert !path("$outputDir/P001/csv/postprocessed.csv").exists() }
             )
         }
     }
@@ -463,10 +463,10 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                { assert path("$outputDir/csv/preprocessed.csv").exists() },
-                { assert path("$outputDir/csv/registered.csv").exists() },
+                { assert path("$outputDir/P001/csv/preprocessed.csv").exists() },
+                { assert path("$outputDir/P001/csv/registered.csv").exists() },
                 // Postprocessing must NOT have run
-                { assert !path("$outputDir/csv/postprocessed.csv").exists() }
+                { assert !path("$outputDir/P001/csv/postprocessed.csv").exists() }
             )
         }
     }
@@ -491,10 +491,10 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                { assert path("$outputDir/csv/registered.csv").exists() },
+                { assert path("$outputDir/P001/csv/registered.csv").exists() },
                 // Preprocessing and postprocessing must NOT have run
-                { assert !path("$outputDir/csv/preprocessed.csv").exists() },
-                { assert !path("$outputDir/csv/postprocessed.csv").exists() }
+                { assert !path("$outputDir/P001/csv/preprocessed.csv").exists() },
+                { assert !path("$outputDir/P001/csv/postprocessed.csv").exists() }
             )
         }
     }

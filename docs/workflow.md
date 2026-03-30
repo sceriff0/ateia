@@ -7,14 +7,14 @@
 - Convert/normalize source images
 - Correct illumination artifacts
 - Split channels
-- Emit checkpoint: `results/csv/preprocessed.csv`
+- Emit checkpoint: `results/{patient_id}/csv/preprocessed.csv`
 
 ## 2. Registration
 
 - Group by patient
 - Select reference image
 - Register moving images to reference using selected method
-- Emit checkpoint: `results/csv/registered.csv`
+- Emit checkpoint: `results/{patient_id}/csv/registered.csv`
 
 ## 3. Postprocessing
 
@@ -22,7 +22,7 @@
 - Quantification
 - Phenotyping
 - Merge channels and produce pyramidal OME-TIFF
-- Emit checkpoint: `results/csv/postprocessed.csv`
+- Emit checkpoint: `results/{patient_id}/csv/postprocessed.csv`
 
 ## Workflow Control
 

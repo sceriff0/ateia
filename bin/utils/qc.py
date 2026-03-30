@@ -135,6 +135,14 @@ def create_dapi_overlay(
     create_registration_qc : High-level QC generation function
     autoscale_for_display : Scaling function used internally
     """
+    # Validate matching shapes
+    if reference_dapi.shape != registered_dapi.shape:
+        raise ValueError(
+            f"Shape mismatch: reference DAPI {reference_dapi.shape} != "
+            f"registered DAPI {registered_dapi.shape}. "
+            f"Images must have the same dimensions after registration."
+        )
+
     # Autoscale each channel independently
     ref_scaled = autoscale_for_display(reference_dapi, method="minmax")
     reg_scaled = autoscale_for_display(registered_dapi, method="minmax")
@@ -283,12 +291,25 @@ def create_registration_qc(
     # Find DAPI index (default to first channel if not found)
     ref_dapi_idx = next(
         (i for i, ch in enumerate(ref_channels) if "DAPI" in ch.upper()),
-        0
+        None
     )
+    if ref_dapi_idx is None:
+        logger.warning(
+            f"No DAPI channel found in reference image {reference_path.name} "
+            f"(channels: {ref_channels}). Falling back to channel 0."
+        )
+        ref_dapi_idx = 0
+
     reg_dapi_idx = next(
         (i for i, ch in enumerate(reg_channels) if "DAPI" in ch.upper()),
-        0
+        None
     )
+    if reg_dapi_idx is None:
+        logger.warning(
+            f"No DAPI channel found in registered image {registered_path.name} "
+            f"(channels: {reg_channels}). Falling back to channel 0."
+        )
+        reg_dapi_idx = 0
 
     logger.debug(f"Reference DAPI: channel {ref_dapi_idx} ({ref_channels[ref_dapi_idx]})")
     logger.debug(f"Registered DAPI: channel {reg_dapi_idx} ({reg_channels[reg_dapi_idx]})")

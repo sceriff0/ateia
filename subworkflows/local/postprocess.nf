@@ -267,15 +267,14 @@ workflow POSTPROCESSING {
         })
 
     ch_checkpoint_csv = ch_base_checkpoint
-        .map { patient_id, cell_csv, cell_geojson, merged_csv, cell_mask, pyramid ->
-            "${patient_id},${cell_csv},${cell_geojson},${merged_csv},${cell_mask},${pyramid}"
-        }
         .collectFile(
-            name: 'postprocessed.csv',
             newLine: true,
-            storeDir: "${params.outdir}/csv",
+            storeDir: "${params.outdir}",
             seed: 'patient_id,cell_csv,cell_geojson,merged_csv,cell_mask,pyramid'
-        )
+        ) { tuple ->
+            def patient_id = tuple[0]
+            ["${patient_id}/csv/postprocessed.csv", "${patient_id},${tuple[1]},${tuple[2]},${tuple[3]},${tuple[4]},${tuple[5]}"]
+        }
 
     // Collect size logs from all postprocessing processes
     ch_size_logs = Channel.empty()
