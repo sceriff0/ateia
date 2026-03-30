@@ -125,7 +125,8 @@ def extract_contours(
     logger.info(f"Extracting contours for {len(props_df)} cells (tolerance={simplify_tolerance})...")
 
     contours_dict: Dict[str, List[List[float]]] = {}
-    skipped = 0
+    skipped_no_contour = 0
+    skipped_too_simple = 0
 
     for label, row in props_df.iterrows():
         minr, minc, maxr, maxc = int(row['bbox-0']), int(row['bbox-1']), int(row['bbox-2']), int(row['bbox-3'])
@@ -140,7 +141,7 @@ def extract_contours(
         contour_list = find_contours(binary_crop, level=0.5)
 
         if not contour_list:
-            skipped += 1
+            skipped_no_contour += 1
             continue
 
         # Take the longest contour (outer boundary)
@@ -158,7 +159,7 @@ def extract_contours(
 
         # Need at least 4 vertices for a valid polygon (3 unique + closing point)
         if len(simplified) < 4:
-            skipped += 1
+            skipped_too_simple += 1
             continue
 
         # Close the ring (first == last) for GeoJSON compliance
@@ -171,7 +172,9 @@ def extract_contours(
             for pt in simplified
         ]
 
-    logger.info(f"Extracted {len(contours_dict)} contours, skipped {skipped}")
+    skipped = skipped_no_contour + skipped_too_simple
+    logger.info(f"Extracted {len(contours_dict)} contours, skipped {skipped} "
+                f"({skipped_no_contour} no contour, {skipped_too_simple} too few vertices)")
     return contours_dict
 
 
@@ -216,7 +219,7 @@ def run_extraction(
     props_df, mask_filtered, valid_labels = extract_morphology(mask, min_area)
 
     if props_df is None:
-        logger.warning("No valid cells found — writing empty outputs")
+        logger.warning("No valid cells found after min_area filtering — writing empty outputs")
         empty_df = pd.DataFrame(columns=[
             'label', 'y', 'x', 'area', 'eccentricity', 'perimeter',
             'convex_area', 'axis_major_length', 'axis_minor_length', 'solidity',

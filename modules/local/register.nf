@@ -44,12 +44,12 @@ process REGISTER {
     // - Exit 1 (general failure): would benefit from skipping on attempt 2
     // - Exit 137 (OOM): give it 2 attempts before skipping micro-reg
     // Strategy: skip micro-registration on attempt 3+ (allows 2 attempts with micro-reg)
-    def skip_micro = (task.attempt > 4 || params.skip_micro_registration) ? '--skip-micro-registration' : ''
+    def skip_micro = (task.attempt > 2 || params.skip_micro_registration) ? '--skip-micro-registration' : ''
     // Performance options
     def parallel_warping = params.reg_parallel_warping ? '--parallel-warping' : ''
     def n_workers = params.reg_n_workers ?: 4
     // JVM heap scales with retry attempts: base 32GB + 16GB per attempt
-    def jvm_heap_gb = params.reg_jvm_heap_gb ?: (32 + 16 * task.attempt)
+    def jvm_heap_gb = Math.min(params.reg_jvm_heap_gb ?: (32 + 16 * task.attempt), task.memory.toGiga() - 4)
     // Advanced registration options
     def use_tiled = params.reg_use_tiled_registration ? '--use-tiled-registration' : ''
     def tile_size = params.reg_tile_size ?: 2048

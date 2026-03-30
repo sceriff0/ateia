@@ -72,6 +72,11 @@ def compute_feature_distances(
     statistics : dict
         Statistical summary of the distances
     """
+    # Guard against zero matches
+    if len(ref_kp) == 0:
+        logger.warning("No feature matches found — skipping distance computation")
+        return None, None
+
     # Compute Euclidean distances
     distances = np.linalg.norm(ref_kp - mov_kp, axis=1)
 
@@ -232,7 +237,11 @@ def process_image_pair(
         filtered_match_info_before.matched_kp1_xy,
         filtered_match_info_before.matched_kp2_xy
     )
-    log_progress(f"    Mean distance: {before_stats['mean']:.2f} pixels")
+    if before_stats is None:
+        log_progress("    No feature matches before registration — cannot compute distances")
+        before_stats = {"mean": 0.0, "median": 0.0, "std": 0.0, "min": 0.0, "max": 0.0}
+    else:
+        log_progress(f"    Mean distance: {before_stats['mean']:.2f} pixels")
 
     # Load registered image (AFTER registration)
     log_progress(f"\n[4/5] Processing registered image (AFTER registration)...")
@@ -267,7 +276,11 @@ def process_image_pair(
         filtered_match_info_after.matched_kp1_xy,
         filtered_match_info_after.matched_kp2_xy
     )
-    log_progress(f"    Mean TRE: {after_stats['mean']:.2f} pixels")
+    if after_stats is None:
+        log_progress("    No feature matches after registration — cannot compute TRE")
+        after_stats = {"mean": 0.0, "median": 0.0, "std": 0.0, "min": 0.0, "max": 0.0}
+    else:
+        log_progress(f"    Mean TRE: {after_stats['mean']:.2f} pixels")
 
     # Compute improvement metrics
     log_progress(f"\n[5/5] Computing improvement metrics...")
@@ -280,9 +293,14 @@ def process_image_pair(
     log_progress(f"  Distance reduction: {improvement['distance_reduction_pixels']:.2f} pixels ({improvement['distance_reduction_percent']:.1f}%)")
     log_progress(f"  Match count change: {improvement['match_count_increase']:+d}")
 
-    # Save histogram
+    # Save histogram (guard against None when zero matches)
     histogram_path = f"{output_prefix}_distance_histogram.png"
-    save_distance_histogram(before_distances, after_distances, histogram_path, output_prefix)
+    save_distance_histogram(
+        before_distances if before_distances is not None else np.array([]),
+        after_distances if after_distances is not None else np.array([]),
+        histogram_path,
+        output_prefix
+    )
 
     # Compile results
     results = {

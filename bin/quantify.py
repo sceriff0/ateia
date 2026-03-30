@@ -143,7 +143,7 @@ def quantify_single_channel(
 
     # Filter cells by area (same logic as extract_cell_properties)
     labels, counts = np.unique(mask, return_counts=True)
-    valid_labels = labels[(labels != 0) & (counts > min_area)]
+    valid_labels = labels[(labels != 0) & (counts >= min_area)]
 
     if len(valid_labels) == 0:
         logger.warning("[WARN] No valid cells found after area filtering")
@@ -336,7 +336,7 @@ def run_quantification_gpu(
 
     # Filter by area
     labels, counts = cp.unique(mask_gpu, return_counts=True)
-    valid_labels = labels[(labels != 0) & (counts > min_area)]
+    valid_labels = labels[(labels != 0) & (counts >= min_area)]
 
     if len(valid_labels) == 0:
         logger.warning("No valid cells found")

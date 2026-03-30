@@ -92,7 +92,7 @@ def split_multichannel_tiff(input_path, output_dir, is_reference=False, channel_
 
     for i, name in enumerate(channel_names):
         # Check if this is DAPI channel (by name or by position 0 when using fallback names)
-        is_dapi = name.upper() == 'DAPI' or (i == 0 and name.startswith('Channel_'))
+        is_dapi = name.upper() == 'DAPI'
 
         # Skip DAPI if this is not the reference image
         if is_dapi and not is_reference:
@@ -102,6 +102,17 @@ def split_multichannel_tiff(input_path, output_dir, is_reference=False, channel_
 
         # Clean the channel name for use as filename
         clean_name = "".join(c if c.isalnum() or c in '-_' else '_' for c in name)
+
+        # Detect filename collisions from sanitization (e.g. "CD3-105" and "CD3_105")
+        candidate_path = os.path.join(output_dir, f"{clean_name}.tiff")
+        if os.path.exists(candidate_path):
+            suffix = 2
+            while os.path.exists(os.path.join(output_dir, f"{clean_name}_{suffix}.tiff")):
+                suffix += 1
+            logger.warning(f"  Filename collision: '{name}' sanitized to '{clean_name}' which already exists, "
+                           f"using '{clean_name}_{suffix}' instead")
+            clean_name = f"{clean_name}_{suffix}"
+
         output_path = os.path.join(output_dir, f"{clean_name}.tiff")
 
         channel_data = data[i]

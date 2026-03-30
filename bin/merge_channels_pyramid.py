@@ -635,21 +635,11 @@ def merge_channels(
         # CRITICAL FIX: Don't downcast segmentation masks (uint32) to uint16
         # This would cause label IDs > 65535 to overflow/wrap around
         if mask_type == 'segmentation' and mask_data.dtype == np.uint32:
-            # Keep segmentation masks as uint32 to preserve all label IDs
-            log(f"    WARNING: Segmentation mask is uint32 but channel dtype is {out_dtype}")
-            log(f"    Keeping mask as uint32 to avoid label ID overflow")
-            # This means the output array needs to support uint32 for this channel
-            # We'll need to handle this specially - for now, clip to max value
-            if out_dtype in [np.uint8, np.uint16]:
-                max_val = np.iinfo(out_dtype).max
-                if mask_data.max() > max_val:
-                    log(f"    ERROR: Mask has labels up to {mask_data.max()} but dtype {out_dtype} max is {max_val}")
-                    log(f"    Clipping mask values to {max_val} - this may cause data loss!")
-                    mask_data = np.clip(mask_data, 0, max_val).astype(out_dtype)
-                else:
-                    mask_data = mask_data.astype(out_dtype)
-            else:
-                mask_data = mask_data.astype(out_dtype)
+            if out_dtype in [np.uint8, np.uint16] and mask_data.max() > np.iinfo(out_dtype).max:
+                log(f"    WARNING: Segmentation mask has {int(mask_data.max())} labels, "
+                    f"promoting output dtype from {out_dtype} to uint32 to preserve all label IDs")
+                out_dtype = np.uint32
+            mask_data = mask_data.astype(out_dtype)
         elif mask_data.dtype != out_dtype:
             mask_data = mask_data.astype(out_dtype)
 

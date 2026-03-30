@@ -51,13 +51,19 @@ workflow POSTPROCESSING {
     ch_references = ch_registered
         .filter { meta, file -> meta.is_reference }
 
+    ch_references.ifEmpty {
+        error "No reference images found (is_reference=true). Cannot run segmentation."
+    }
+
     SEGMENT(ch_references)
+
+    def ch_cell_mask = SEGMENT.out.cell_mask
 
     // ========================================================================
     // CELL PROPERTIES - Extract morphology + contours from mask (runs in PARALLEL with SPLIT_CHANNELS)
     // Computes regionprops ONCE instead of N times in QUANTIFY
     // ========================================================================
-    EXTRACT_CELL_PROPERTIES(SEGMENT.out.cell_mask)
+    EXTRACT_CELL_PROPERTIES(ch_cell_mask)
 
     // ========================================================================
     // CHANNEL SPLITTING - Split all multichannel images (runs in PARALLEL with EXTRACT_CELL_PROPERTIES)
@@ -99,7 +105,7 @@ workflow POSTPROCESSING {
         { patient_id, _meta, _tiff -> "Before combine: key=${patient_id}, channel=${_meta.channel_name}" }
     )
 
-    ch_mask = SEGMENT.out.cell_mask
+    ch_mask = ch_cell_mask
         .map { meta, mask -> [meta.patient_id, mask] }
     ch_mask = withDebugView(
         ch_mask,
@@ -197,6 +203,7 @@ workflow POSTPROCESSING {
             // Extract actual patient_id from groupKey wrapper
             def pid = patient_id.toString()
             def patient_meta = [
+                id: pid,
                 patient_id: pid,
                 is_reference: false  // Not relevant at patient level
             ]
@@ -207,7 +214,7 @@ workflow POSTPROCESSING {
     ch_for_pyramid_merge = ch_split_grouped
         .map { meta, tiffs -> [meta.patient_id, meta, tiffs] }
         .join(
-            SEGMENT.out.cell_mask.map { meta, mask -> [meta.patient_id, mask] },
+            ch_cell_mask.map { meta, mask -> [meta.patient_id, mask] },
             by: 0
         )
         .map { _patient_id, meta, split_tiffs, cell_mask ->
@@ -225,7 +232,7 @@ workflow POSTPROCESSING {
     ch_postprocess_qc = Channel.empty()
     if (!params.skip_postprocessing_qc) {
         // Join cell mask with merged CSV for QC visualization
-        ch_for_postprocess_qc = SEGMENT.out.cell_mask
+        ch_for_postprocess_qc = ch_cell_mask
             .map { meta, mask -> [meta.patient_id, meta, mask] }
             .join(
                 MERGE_QUANT_CSVS.out.merged_csv.map { meta, csv -> [meta.patient_id, csv] },
@@ -257,7 +264,7 @@ workflow POSTPROCESSING {
             def published_path = "${params.outdir}/${meta.patient_id}/quantification/${csv.name}"
             [meta.patient_id, published_path]
         })
-        .join(SEGMENT.out.cell_mask.map { meta, mask ->
+        .join(ch_cell_mask.map { meta, mask ->
             def published_path = "${params.outdir}/${meta.patient_id}/segmentation/${mask.name}"
             [meta.patient_id, published_path]
         })

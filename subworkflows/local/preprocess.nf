@@ -40,7 +40,7 @@ workflow PREPROCESSING {
     ch_for_preprocess = CONVERT_IMAGE.out.ome_tiff
         .map { meta, ome_file, channels_file ->
             // Read output channels from file (DAPI will be first)
-            def output_channels = channels_file.text.trim().split(',')
+            def output_channels = channels_file.text.trim().split(',').toList()
 
             // Update meta with output channel order
             def updated_meta = meta.clone()

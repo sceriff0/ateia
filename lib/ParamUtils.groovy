@@ -22,6 +22,7 @@ class ParamUtils {
      */
     static boolean shouldRun(String targetStep, String start, String stop) {
         def idx = STEP_ORDER.indexOf(targetStep)
+        if (idx == -1) throw new IllegalArgumentException("Unknown step: '${targetStep}'. Valid: ${STEP_ORDER}")
         return idx >= STEP_ORDER.indexOf(start) && idx <= STEP_ORDER.indexOf(stop)
     }
 
@@ -55,9 +56,9 @@ class ParamUtils {
             return param.collect { it.toString().trim() }.findAll { it }
         }
         return (param ?: '').toString()
-            .replaceAll(/[\[\]']/, '')
+            .replaceAll(/^\[|\]$/, '')    // strip outer brackets only
             .tokenize(',')
-            .collect { it.trim() }
+            .collect { it.trim().replaceAll(/^['"]|['"]$/, '') }  // strip surrounding quotes per element
             .findAll { it }
     }
 }

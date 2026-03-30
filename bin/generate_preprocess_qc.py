@@ -176,8 +176,8 @@ def generate_preprocess_qc(
     if img_stack.ndim == 2:
         img_stack = np.expand_dims(img_stack, axis=0)
 
-    # Handle (Y, X, C) format
-    if img_stack.ndim == 3 and img_stack.shape[2] <= len(channel_names):
+    # Handle (Y, X, C) format — only transpose if last dim matches channels AND first dim does not
+    if img_stack.ndim == 3 and img_stack.shape[2] == len(channel_names) and img_stack.shape[0] != len(channel_names):
         logger.info("Transposing from (Y, X, C) to (C, Y, X)")
         img_stack = np.transpose(img_stack, (2, 0, 1))
 

@@ -247,7 +247,7 @@ def _process_single_channel_from_stack(
         fov_size=fov_size,
         autotune=autotune,
         n_iter=n_iter,
-        #**basic_kwargs
+        **basic_kwargs
     )
     return channel_index, corrected, True
 
@@ -314,7 +314,7 @@ def preprocess_multichannel_image(
     if multichannel_stack.ndim == 2:
         logger.debug("  Converting 2D to 3D (adding channel dimension)")
         multichannel_stack = np.expand_dims(multichannel_stack, axis=0)
-    elif multichannel_stack.ndim == 3 and multichannel_stack.shape[2] == len(channel_names):
+    elif multichannel_stack.ndim == 3 and multichannel_stack.shape[2] == len(channel_names) and multichannel_stack.shape[0] != len(channel_names):
         logger.debug("  Transposing from (Y, X, C) to (C, Y, X)")
         multichannel_stack = np.transpose(multichannel_stack, (2, 0, 1))
 
@@ -322,6 +322,8 @@ def preprocess_multichannel_image(
     logger.info(f"Processing {n_channels} channels ({H}x{W}) with {n_workers} workers")
 
     if n_channels != len(channel_names):
+        if n_channels < len(channel_names):
+            logger.warning(f"Image has {n_channels} channels but {len(channel_names)} channel names provided. Truncating channel names.")
         channel_names = channel_names[:n_channels] + [f"Channel_{i}" for i in range(len(channel_names), n_channels)]
 
     results = {}

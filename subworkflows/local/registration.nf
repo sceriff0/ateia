@@ -69,20 +69,25 @@ workflow REGISTRATION {
                 [key, dims]
             }
             .groupTuple()
+            .map { key, dims_list ->
+                [ [patient_id: key.toString()], dims_list ]
+            }
 
         MAX_DIM(ch_grouped_dims)
 
-        // MAX_DIM outputs [patient_id, max_dims_file]
+        // MAX_DIM outputs [meta, max_dims_file]
         // Combine each individual image with its patient's max_dims_file
         ch_to_pad = ch_preprocessed
             .map { meta, file -> [meta.patient_id, meta, file] }
-            .combine(MAX_DIM.out.max_dims_file, by: 0)
+            .combine(MAX_DIM.out.max_dims_file.map { meta, f -> [meta.patient_id, f] }, by: 0)
             .map { patient_id, meta, file, max_dims -> [meta, file, max_dims] }
 
         PAD_IMAGES(ch_to_pad)
         ch_images = PAD_IMAGES.out.padded
+        ch_images_for_error = ch_images.map { it }
     } else {
         ch_images = ch_preprocessed
+        ch_images_for_error = ch_images.map { it }
     }
 
     // ========================================================================
@@ -189,14 +194,14 @@ workflow REGISTRATION {
             .filter { meta, file -> !meta.is_reference }
             .map { meta, reg_file -> [meta.patient_id, meta.channels.toSorted().join('|'), meta, reg_file] }
             .join(
-                ch_images
+                ch_images_for_error
                     .filter { meta, file -> !meta.is_reference }
                     .map { meta, mov_file -> [meta.patient_id, meta.channels.toSorted().join('|'), mov_file] },
                 by: [0, 1]
             )
             .map { patient_id, channels, meta, reg_file, mov_file -> [patient_id, meta, reg_file, mov_file] }
             .combine(
-                ch_images
+                ch_images_for_error
                     .filter { meta, file -> meta.is_reference }
                     .map { meta, ref_file -> [meta.patient_id, ref_file] },
                 by: 0
@@ -249,7 +254,7 @@ workflow REGISTRATION {
             def parent_name = file_path.parent?.name ?: ''
 
             // If parent name is NOT a Nextflow work hash (30 hex chars), it's a real subdirectory
-            def is_work_hash = parent_name.length() == 30 && parent_name.matches(/^[0-9a-f]{30}$/)
+            def is_work_hash = parent_name.length() == 32 && parent_name.matches(/^[0-9a-f]{32}$/)
             def relative_path = is_work_hash ? filename : "${parent_name}/${filename}"
 
             def published_path = "${params.outdir}/${meta.patient_id}/registered/${relative_path}"

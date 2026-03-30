@@ -66,8 +66,8 @@ process PREPROCESS {
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        python: \$(python --version 2>&1 | sed 's/Python //')
-        numpy: unknown
+        python: "stub"
+        numpy: "stub"
     END_VERSIONS
     """
 }

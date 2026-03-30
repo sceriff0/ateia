@@ -41,7 +41,7 @@ process QUANTIFY {
     # Run quantification on this single channel TIFF
     quantify.py \\
         --channel_tiff ${channel_tiff} \\
-        --channel-name ${channel_name} \\
+        --channel-name '${channel_name}' \\
         --mask_file ${seg_mask} \\
         --outdir . \\
         --output_file ${meta.id}_quant.csv \\
@@ -96,7 +96,7 @@ process MERGE_QUANT_CSVS {
     echo "${task.process},${meta.patient_id},csvs/,\${total_bytes}" > ${meta.patient_id}.MERGE_QUANT_CSVS.size.csv
 
     merge_quant_csvs.py \\
-        --csvs-dir . \\
+        --csv-files ${individual_csvs} \\
         --morphology ${morphology_csv} \\
         --patient-id ${meta.patient_id} \\
         --output merged_quant.csv \\

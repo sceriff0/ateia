@@ -1,5 +1,30 @@
 class CsvUtils {
 
+    private static List<String> parseCsvLine(String line) {
+        def fields = []
+        def current = new StringBuilder()
+        boolean inQuotes = false
+        for (int i = 0; i < line.length(); i++) {
+            char c = line.charAt(i)
+            if (c == '"' as char) {
+                // Handle escaped quotes ("") inside quoted fields
+                if (inQuotes && i + 1 < line.length() && line.charAt(i + 1) == '"' as char) {
+                    current.append('"')
+                    i++  // skip the second quote
+                } else {
+                    inQuotes = !inQuotes
+                }
+            } else if (c == ',' as char && !inQuotes) {
+                fields << current.toString().trim()
+                current = new StringBuilder()
+            } else {
+                current.append(c)
+            }
+        }
+        fields << current.toString().trim()
+        return fields
+    }
+
     /**
      * Count images per patient from a CSV file.
      * Returns a Map of patient_id -> count
@@ -12,12 +37,12 @@ class CsvUtils {
         def lines = file.readLines()
         if (lines.size() < 2) return [:]  // Header only or empty
 
-        def header = lines[0].split(',')*.trim()
+        def header = parseCsvLine(lines[0])
         def patientIdx = header.findIndexOf { it == 'patient_id' }
         if (patientIdx == -1) return [:]
 
         lines.drop(1).each { line ->
-            def cols = line.split(',')
+            def cols = parseCsvLine(line)
             if (cols.size() > patientIdx) {
                 def patientId = cols[patientIdx].trim()
                 counts[patientId]++
@@ -39,17 +64,17 @@ class CsvUtils {
         def lines = file.readLines()
         if (lines.size() < 2) return [:]  // Header only or empty
 
-        def header = lines[0].split(',')*.trim()
+        def header = parseCsvLine(lines[0])
         def patientIdx = header.findIndexOf { it == 'patient_id' }
         def channelsIdx = header.findIndexOf { it == 'channels' }
         if (patientIdx == -1 || channelsIdx == -1) return [:]
 
         lines.drop(1).each { line ->
-            def cols = line.split(',')
-            if (cols.size() > channelsIdx) {
+            def cols = parseCsvLine(line)
+            if (cols.size() > Math.max(patientIdx, channelsIdx)) {
                 def patientId = cols[patientIdx].trim()
-                def channels = cols[channelsIdx].split('\\|')*.trim()
-                channelSets[patientId].addAll(channels)
+                def channels = cols[channelsIdx].split('\\|')*.trim().findAll { it }
+                channelSets[patientId].addAll(channels*.toUpperCase())
             }
         }
 
@@ -80,6 +105,10 @@ class CsvUtils {
                 """.stripIndent())
         }
 
+        if (meta.channels[0].toUpperCase() != 'DAPI') {
+            throw new IllegalArgumentException("DAPI must be the first channel for sample ${meta.patient_id}, found: ${meta.channels[0]}")
+        }
+
         return meta
     }
 
@@ -108,7 +137,7 @@ class CsvUtils {
         if (lines.isEmpty())
             throw new RuntimeException("CSV is empty: ${csv}")
 
-        def header = lines.first()?.split(',')*.trim()
+        def header = parseCsvLine(lines.first())
 
         required_cols.each {
             if (!(it in header))

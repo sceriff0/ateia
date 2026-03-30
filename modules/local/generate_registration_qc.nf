@@ -9,7 +9,7 @@ process GENERATE_REGISTRATION_QC {
 
     output:
     tuple val(meta), path("qc/*_QC_RGB.{png,tif}"), emit: qc
-    tuple val(meta), path("qc/*_QC_RGB_fullres.tif"), emit: qc_fullres
+    tuple val(meta), path("qc/*_QC_RGB_fullres.tif"), optional: true, emit: qc_fullres
     path "versions.yml"                           , emit: versions
     path("*.size.csv")                            , emit: size_log
 

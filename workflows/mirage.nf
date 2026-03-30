@@ -163,7 +163,7 @@ workflow MIRAGE {
         }
 
         // Collate versions into a single file
-        ch_collated_versions = ch_versions
+        def ch_collated_versions = ch_versions
             .unique()
             .collectFile(name: 'collated_versions.yml')
 

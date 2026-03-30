@@ -31,11 +31,20 @@ MORPHOLOGY_COLS = [
 ]
 
 
-def load_intensity_csvs(csvs_dir: Path) -> list[Path]:
-    """Find and return sorted list of per-channel quantification CSVs."""
-    csv_files = sorted(csvs_dir.glob('*_quant.csv'))
+def load_intensity_csvs(csvs_dir: Path | None = None, csv_files_list: list[str] | None = None) -> list[Path]:
+    """Find and return sorted list of per-channel quantification CSVs.
+
+    Either provide explicit file paths via csv_files_list, or a directory
+    to glob via csvs_dir.
+    """
+    if csv_files_list:
+        csv_files = [Path(f) for f in csv_files_list]
+    elif csvs_dir is not None:
+        csv_files = sorted(csvs_dir.glob('*_quant.csv'))
+    else:
+        csv_files = []
     if not csv_files:
-        logger.error("No quantification CSVs found in %s", csvs_dir)
+        logger.error("No quantification CSVs found")
         sys.exit(1)
     return csv_files
 
@@ -82,7 +91,7 @@ def reorder_columns(merged: pd.DataFrame, patient_id: str) -> pd.DataFrame:
     """Reorder columns and add fov/cell_size for downstream analysis."""
     # Separate morphology and marker columns
     morpho_present = [col for col in MORPHOLOGY_COLS if col in merged.columns]
-    marker_cols_all = [col for col in merged.columns if col not in MORPHOLOGY_COLS]
+    marker_cols_all = [col for col in merged.columns if col not in MORPHOLOGY_COLS and col not in ('fov', 'cell_size')]
 
     # Put DAPI first among markers if present
     if 'DAPI' in marker_cols_all:
@@ -114,8 +123,12 @@ def main() -> None:
         description='Merge per-channel quantification CSVs with morphology.',
     )
     parser.add_argument(
-        '--csvs-dir', type=Path, required=True,
+        '--csvs-dir', type=Path, required=False, default=None,
         help='Directory to glob for *_quant.csv files',
+    )
+    parser.add_argument(
+        '--csv-files', nargs='*', default=None,
+        help='Explicit list of CSV files to merge (alternative to --csvs-dir)',
     )
     parser.add_argument(
         '--morphology', type=Path, required=True,
@@ -140,7 +153,7 @@ def main() -> None:
     logger.info("Morphology: %d cells, %d columns", len(morphology), len(morphology.columns))
 
     # Find and merge intensity CSVs
-    csv_files = load_intensity_csvs(args.csvs_dir)
+    csv_files = load_intensity_csvs(csvs_dir=args.csvs_dir, csv_files_list=args.csv_files)
     logger.info("Merging %d intensity CSVs with morphology...", len(csv_files))
 
     merged = merge_intensities(morphology, csv_files)

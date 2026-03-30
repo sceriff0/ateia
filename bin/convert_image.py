@@ -431,14 +431,13 @@ def convert_to_ome_tiff(
 
         # Transpose: move C axis to position just before Y
         axes_list = list(range(image_data.ndim))
-        axes_list.remove(c_pos)
-        axes_list.insert(y_pos, c_pos)
-        image_data = np.transpose(image_data, axes_list)
-
-        # Rebuild dimension string
         dims_list = list(original_dims)
+        axes_list.remove(c_pos)
         dims_list.remove('C')
-        dims_list.insert(y_pos, 'C')
+        new_y_pos = dims_list.index('Y')
+        axes_list.insert(new_y_pos, c_pos)
+        dims_list.insert(new_y_pos, 'C')
+        image_data = np.transpose(image_data, axes_list)
         original_dims = ''.join(dims_list)
         logger.info(f"Transposed C to standard position: {original_dims}, shape: {image_data.shape}")
 
