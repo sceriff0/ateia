@@ -78,6 +78,7 @@ def generate_seg_overlay(
     mask: np.ndarray,
     output_path: Path,
     logger: Optional[logging.Logger] = None,
+    n_cells_from_csv: Optional[int] = None,
 ) -> Path:
     """Generate a segmentation boundary overlay image.
 
@@ -117,8 +118,8 @@ def generate_seg_overlay(
         ) > 0.5  # Threshold back to binary after interpolation
         logger.info(f"  Downsampled to {boundaries.shape[1]}x{boundaries.shape[0]} (scale={scale:.3f})")
 
-    # Count actual cells (unique non-zero labels), not max label value
-    n_cells = len(np.unique(mask)) - 1  # subtract background (0)
+    # Count cells from the CSV (post-filtering count), not from raw mask labels
+    n_cells = n_cells_from_csv if n_cells_from_csv is not None else len(np.unique(mask)) - 1
 
     fig, ax = plt.subplots(1, 1, figsize=(10, 10))
     ax.imshow(boundaries, cmap='gray', interpolation='nearest')
@@ -318,7 +319,7 @@ def generate_postprocessing_qc(
     # Load segmentation mask
     logger.info(f"Loading mask: {mask_path}")
     mask = load_mask(mask_path)
-    logger.info(f"Mask shape: {mask.shape}, dtype: {mask.dtype}, unique labels: {np.max(mask)}")
+    logger.info(f"Mask shape: {mask.shape}, dtype: {mask.dtype}, unique labels: {len(np.unique(mask)) - 1}")
 
     # Load merged CSV
     logger.info(f"Loading CSV: {csv_path}")
@@ -327,7 +328,7 @@ def generate_postprocessing_qc(
 
     # 1. Segmentation overlay
     seg_path = output_dir / f"{prefix}_seg_overlay.png"
-    generate_seg_overlay(mask, seg_path, logger)
+    generate_seg_overlay(mask, seg_path, logger, n_cells_from_csv=len(df))
     output_files.append(seg_path)
 
     # 2. Cell statistics

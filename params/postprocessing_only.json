@@ -14,9 +14,6 @@
     "segmentation_model_dir": null,
     "segmentation_model": "stardist_full_e200_lr00001_aug1_seed10_es50p0.001_rlr0.5p50",
 
-    "_comment_quant": "=== Quantification ===",
-    "quant_min_area": 10,
-
     "_comment_pixie": "=== Pixie Clustering (Optional) ===",
     "pixie_enabled": false,
     "pixie_channels": ["CD45", "CD3", "CD4", "CD8", "FOXP3", "GZMB", "CD14", "CD163", "SMA", "PANCK", "VIMENTIN"],

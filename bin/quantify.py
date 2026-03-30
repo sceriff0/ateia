@@ -116,7 +116,6 @@ def quantify_single_channel(
     mask: NDArray,
     channel_image: NDArray,
     channel_name: str,
-    min_area: int = 0
 ) -> pd.DataFrame:
     """Quantify a single channel (intensity only).
 
@@ -131,8 +130,6 @@ def quantify_single_channel(
         Channel intensity image.
     channel_name : str
         Name of the channel/marker.
-    min_area : int, optional
-        Minimum cell area filter.
 
     Returns
     -------
@@ -141,23 +138,16 @@ def quantify_single_channel(
     """
     mask = np.ascontiguousarray(mask.squeeze())
 
-    # Filter cells by area (same logic as extract_cell_properties)
-    labels, counts = np.unique(mask, return_counts=True)
-    valid_labels = labels[(labels != 0) & (counts >= min_area)]
+    labels = np.unique(mask)
+    valid_labels = labels[labels != 0]
 
     if len(valid_labels) == 0:
-        logger.warning("[WARN] No valid cells found after area filtering")
-        return pd.DataFrame()
-
-    mask_filtered = np.where(np.isin(mask, valid_labels), mask, 0)
-
-    if np.all(mask_filtered == 0):
-        logger.warning("[WARN] Filtered mask is empty")
+        logger.warning("[WARN] No cells found in mask")
         return pd.DataFrame()
 
     # Compute intensity for this channel (no morphology — that's done once upstream)
     intensity_series = compute_channel_intensity(
-        mask_filtered, channel_image, valid_labels, channel_name
+        mask, channel_image, valid_labels, channel_name
     )
 
     result_df = pd.DataFrame({
@@ -172,7 +162,6 @@ def run_quantification(
     mask_path: str,
     channel_path: str,
     output_path: str,
-    min_area: int = 0,
     channel_name: str = None
 ) -> pd.DataFrame:
     """Run quantification for a single channel.
@@ -185,9 +174,6 @@ def run_quantification(
         Path to channel image file (.tif).
     output_path : str
         Path to save output CSV file.
-    min_area : int, default=0
-        Minimum cell area filter in pixels. Cells smaller than this
-        are excluded from quantification.
     channel_name : str, optional
         Explicit channel/marker name. If not provided, will be parsed
         from the channel file basename.
@@ -254,7 +240,7 @@ def run_quantification(
 
     # Quantify
     result_df = quantify_single_channel(
-        mask, channel_image, channel_name, min_area=min_area
+        mask, channel_image, channel_name
     )
 
     # Save
@@ -276,7 +262,6 @@ def run_quantification_gpu(
     mask_path: str,
     channel_path: str,
     output_path: str,
-    min_area: int = 0,
     channel_name: str = None
 ) -> pd.DataFrame:
     """Run GPU-accelerated quantification for a single channel.
@@ -289,8 +274,6 @@ def run_quantification_gpu(
         Path to channel image file (.tif).
     output_path : str
         Path to save output CSV.
-    min_area : int, optional
-        Minimum cell area filter.
     channel_name : str, optional
         Explicit channel name. If not provided, will parse from filename.
 
@@ -334,22 +317,19 @@ def run_quantification_gpu(
     mask_gpu = cp.asarray(segmentation_mask)
     channel_gpu = cp.asarray(channel_image)
 
-    # Filter by area
-    labels, counts = cp.unique(mask_gpu, return_counts=True)
-    valid_labels = labels[(labels != 0) & (counts >= min_area)]
+    # Get all non-background labels
+    valid_labels = cp.unique(mask_gpu)
+    valid_labels = valid_labels[valid_labels != 0]
 
     if len(valid_labels) == 0:
-        logger.warning("No valid cells found")
+        logger.warning("No cells found in mask")
         empty_df = pd.DataFrame(columns=['label', channel_name])
         empty_df.to_csv(output_path, index=False)
         return empty_df
 
-    # Filter mask
-    mask_filtered = cp.where(cp.isin(mask_gpu, valid_labels), mask_gpu, 0)
-
     # Compute intensity only (morphology is done by EXTRACT_CELL_PROPERTIES)
     logger.info("Computing intensity (GPU)...")
-    flat_mask = mask_filtered.ravel()
+    flat_mask = mask_gpu.ravel()
     flat_channel = channel_gpu.ravel().astype(cp.float64)
 
     sum_per_label = cp.bincount(flat_mask, weights=flat_channel)
@@ -407,12 +387,6 @@ def parse_args():
         help='Output CSV filename (default: {channel}_quant.csv)'
     )
     parser.add_argument(
-        '--min_area',
-        type=int,
-        default=0,
-        help='Minimum cell area (pixels)'
-    )
-    parser.add_argument(
         '--channel-name',
         type=str,
         default=None,
@@ -447,7 +421,6 @@ def main():
         mask_path=args.mask_file,
         channel_path=args.channel_tiff,
         output_path=output_path,
-        min_area=args.min_area,
         channel_name=effective_channel_name
     )
 

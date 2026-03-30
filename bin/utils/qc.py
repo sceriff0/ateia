@@ -311,8 +311,10 @@ def create_registration_qc(
         )
         reg_dapi_idx = 0
 
-    logger.debug(f"Reference DAPI: channel {ref_dapi_idx} ({ref_channels[ref_dapi_idx]})")
-    logger.debug(f"Registered DAPI: channel {reg_dapi_idx} ({reg_channels[reg_dapi_idx]})")
+    if ref_channels:
+        logger.debug(f"Reference DAPI: channel {ref_dapi_idx} ({ref_channels[ref_dapi_idx]})")
+    if reg_channels:
+        logger.debug(f"Registered DAPI: channel {reg_dapi_idx} ({reg_channels[reg_dapi_idx]})")
 
     ref_dapi = ref_img[ref_dapi_idx]
     reg_dapi = reg_img[reg_dapi_idx]

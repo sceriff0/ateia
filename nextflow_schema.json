@@ -280,11 +280,6 @@
             "title": "Quantification options",
             "type": "object",
             "properties": {
-                "quant_min_area": {
-                    "type": "integer",
-                    "description": "Minimum cell area for quantification.",
-                    "default": 10
-                },
                 "skip_postprocessing_qc": {
                     "type": "boolean",
                     "description": "Skip postprocessing quality control (segmentation overlay, cell stats, intensity distributions).",

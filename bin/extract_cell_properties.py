@@ -38,16 +38,13 @@ logger = get_logger(__name__)
 
 def extract_morphology(
     mask: NDArray,
-    min_area: int = 0,
 ) -> Tuple[Optional[pd.DataFrame], Optional[NDArray], Optional[NDArray]]:
-    """Compute morphological properties for all cells above min_area.
+    """Compute morphological properties for all cells in the mask.
 
     Parameters
     ----------
     mask : ndarray, shape (Y, X)
         Segmentation mask with cell labels (background=0).
-    min_area : int
-        Minimum cell area in pixels.
 
     Returns
     -------
@@ -56,29 +53,23 @@ def extract_morphology(
         label, y, x, area, eccentricity, perimeter, convex_area,
         axis_major_length, axis_minor_length, plus bbox columns
         (bbox-0..bbox-3) used internally by extract_contours.
-    mask_filtered : ndarray or None
-        Mask with only valid cells (small cells zeroed out).
+    mask : ndarray or None
+        Input mask (unchanged, no filtering applied).
     valid_labels : ndarray or None
-        Array of valid label IDs.
+        Array of valid (non-background) label IDs.
     """
     mask = np.ascontiguousarray(mask.squeeze())
 
     labels, counts = np.unique(mask, return_counts=True)
-    valid_labels = labels[(labels != 0) & (counts >= min_area)]
+    valid_labels = labels[labels != 0]
 
     if len(valid_labels) == 0:
-        logger.warning("No valid cells found after area filtering")
-        return None, None, None
-
-    mask_filtered = np.where(np.isin(mask, valid_labels), mask, 0)
-
-    if np.all(mask_filtered == 0):
-        logger.warning("Filtered mask is empty")
+        logger.warning("No cells found in mask")
         return None, None, None
 
     logger.info(f"Computing morphology for {len(valid_labels)} cells...")
     props = regionprops_table(
-        mask_filtered,
+        mask,
         properties=[
             'label', 'centroid', 'area',
             'eccentricity', 'perimeter',
@@ -93,7 +84,7 @@ def extract_morphology(
     )
 
     logger.info(f"Morphology computed for {len(props_df)} cells")
-    return props_df, mask_filtered, valid_labels
+    return props_df, mask, valid_labels
 
 
 def extract_contours(
@@ -181,7 +172,6 @@ def extract_contours(
 def run_extraction(
     mask_path: str,
     outdir: str,
-    min_area: int = 0,
     simplify_tolerance: float = 0.5,
 ) -> Tuple[Optional[pd.DataFrame], Optional[Dict]]:
     """Run full extraction pipeline: morphology + contours.
@@ -192,8 +182,6 @@ def run_extraction(
         Path to segmentation mask (.tif or .npy).
     outdir : str
         Output directory.
-    min_area : int
-        Minimum cell area filter.
     simplify_tolerance : float
         Contour simplification tolerance.
 
@@ -216,10 +204,10 @@ def run_extraction(
     logger.info(f"Mask shape: {mask.shape}, dtype: {mask.dtype}")
 
     # Extract morphology
-    props_df, mask_filtered, valid_labels = extract_morphology(mask, min_area)
+    props_df, mask_filtered, valid_labels = extract_morphology(mask)
 
     if props_df is None:
-        logger.warning("No valid cells found after min_area filtering — writing empty outputs")
+        logger.warning("No cells found in mask — writing empty outputs")
         empty_df = pd.DataFrame(columns=[
             'label', 'y', 'x', 'area', 'eccentricity', 'perimeter',
             'convex_area', 'axis_major_length', 'axis_minor_length', 'solidity',
@@ -271,10 +259,6 @@ def parse_args():
         help='Output directory',
     )
     parser.add_argument(
-        '--min_area', type=int, default=0,
-        help='Minimum cell area in pixels',
-    )
-    parser.add_argument(
         '--simplify_tolerance', type=float, default=0.5,
         help='Douglas-Peucker contour simplification tolerance in pixels',
     )
@@ -291,7 +275,6 @@ def main():
     run_extraction(
         mask_path=args.mask_file,
         outdir=args.outdir,
-        min_area=args.min_area,
         simplify_tolerance=args.simplify_tolerance,
     )
 
