@@ -17,7 +17,7 @@ process GENERATE_PREPROCESS_QC {
 
     script:
     def args = task.ext.args ?: ''
-    def prefix = task.ext.prefix ?: "${meta.patient_id}"
+    def prefix = task.ext.prefix ?: "${preprocessed.simpleName}"
     def scale_factor = params.preprocess_qc_scale_factor ?: 0.25
     def channels = meta.channels.collect { "\"${it}\"" }.join(' ')
     """
@@ -45,7 +45,7 @@ process GENERATE_PREPROCESS_QC {
     """
 
     stub:
-    def prefix = task.ext.prefix ?: "${meta.patient_id}"
+    def prefix = task.ext.prefix ?: "${preprocessed.simpleName}"
     """
     mkdir -p qc
     touch qc/${prefix}_DAPI.png
