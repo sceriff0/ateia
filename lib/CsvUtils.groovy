@@ -105,10 +105,6 @@ class CsvUtils {
                 """.stripIndent())
         }
 
-        if (meta.channels[0].toUpperCase() != 'DAPI') {
-            throw new IllegalArgumentException("DAPI must be the first channel for sample ${meta.patient_id}, found: ${meta.channels[0]}")
-        }
-
         return meta
     }
 
