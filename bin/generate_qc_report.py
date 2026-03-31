@@ -59,46 +59,15 @@ def img_to_b64(path):
     return f"data:{mime};base64,{data}"
 
 
-def parse_versions_yml(path):
-    """
-    Parse a simple versions.yml produced by nf-core-style processes.
-    Returns a list of (process, tool, version) tuples.
-    No PyYAML required – we parse it manually.
-    """
-    if path is None or not Path(path).exists():
-        return []
-    rows = []
-    current_process = None
-    with open(path) as fh:
-        for line in fh:
-            stripped = line.rstrip()
-            if not stripped:
-                continue
-            # Top-level key: process name (quoted or unquoted, ends with ':')
-            if not stripped.startswith(" ") and stripped.endswith(":"):
-                current_process = stripped[:-1].strip('"\'')
-            elif stripped.startswith(" ") and ":" in stripped and current_process:
-                tool, _, version = stripped.partition(":")
-                rows.append((current_process, tool.strip(), version.strip()))
-    return rows
-
-
 def parse_valis_summary(csv_path):
     """
     Parse a preprocessed_summary.csv (or similar) produced by Valis.
     Returns (headers, rows) where each row is a list of strings.
-    Expected columns: image_name, original_rTRE, rigid_rTRE, non_rigid_rTRE, n_matches, improvement_pct
-    Falls back to whatever columns are present.
+    Shows all columns present in the CSV (including rTRE, D, n_matches, etc.).
     """
-    wanted = ["image_name", "original_rtre", "rigid_rtre", "non_rigid_rtre", "n_matches", "improvement_pct"]
     with open(csv_path, newline="") as fh:
         reader = csv.DictReader(fh)
-        raw_headers = reader.fieldnames or []
-        # Case-insensitive column mapping
-        col_map = {h.lower(): h for h in raw_headers}
-        display_headers = [col_map.get(w, w) for w in wanted if col_map.get(w)]
-        if not display_headers:
-            display_headers = raw_headers  # fallback: show everything
+        display_headers = reader.fieldnames or []
         rows = []
         for row in reader:
             rows.append([row.get(h, "") for h in display_headers])
@@ -132,17 +101,6 @@ def parse_feature_dist_json(json_path):
         "after_mean":  after_mean,
         "improvement_pct": improvement,
     }
-
-
-def count_csv_rows(csv_path):
-    """Return number of data rows (excluding header) in a CSV."""
-    with open(csv_path, newline="") as fh:
-        reader = csv.reader(fh)
-        try:
-            next(reader)  # skip header
-        except StopIteration:
-            return 0
-        return sum(1 for _ in reader)
 
 # ---------------------------------------------------------------------------
 # HTML building blocks
@@ -184,6 +142,12 @@ tr:hover td { background: #f8f9fa; }
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
     gap: 16px;
+    margin-top: 8px;
+}
+.img-grid-wide {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(500px, 1fr));
+    gap: 20px;
     margin-top: 8px;
 }
 .img-card {
@@ -239,9 +203,10 @@ def section(title, body_html):
     )
 
 
-def img_grid(png_files):
+def img_grid(png_files, wide=False):
     if not png_files:
         return '<p class="empty-notice">No images found.</p>'
+    grid_class = "img-grid-wide" if wide else "img-grid"
     cards = []
     for p in png_files:
         b64 = img_to_b64(p)
@@ -252,21 +217,7 @@ def img_grid(png_files):
             f'<div class="caption">{name}</div>'
             f'</div>'
         )
-    return '<div class="img-grid">' + "".join(cards) + "</div>"
-
-
-def versions_section(versions_path):
-    rows = parse_versions_yml(versions_path)
-    if not rows:
-        return section("Software Versions", '<p class="empty-notice">versions.yml not found or empty.</p>')
-    body = (
-        "<table>"
-        "<thead><tr><th>Process</th><th>Tool</th><th>Version</th></tr></thead><tbody>"
-    )
-    for process, tool, version in rows:
-        body += f"<tr><td>{process}</td><td>{tool}</td><td>{version}</td></tr>"
-    body += "</tbody></table>"
-    return section("Software Versions", body)
+    return f'<div class="{grid_class}">' + "".join(cards) + "</div>"
 
 
 def preprocess_qc_section(preprocess_dir):
@@ -329,8 +280,10 @@ def registration_qc_section(reg_dir, feat_dir, valis_dir):
 
 
 def postprocess_qc_section(postprocess_dir):
-    pngs = list_files(postprocess_dir, "*.png")
-    return section("Postprocessing QC", img_grid(pngs))
+    # Exclude seg_overlay images, keep only histograms/stats
+    all_pngs = list_files(postprocess_dir, "*.png")
+    pngs = [p for p in all_pngs if "_seg_overlay" not in p.name]
+    return section("Postprocessing QC", img_grid(pngs, wide=True))
 
 # ---------------------------------------------------------------------------
 # Data copy
@@ -349,11 +302,11 @@ def copy_data(args):
         for f in files:
             shutil.copy2(f, dest / Path(f).name)
 
-    copy_glob(args.preprocess_qc,     "*.png",  "preprocess_qc")
-    copy_glob(args.registration_qc,   "*.png",  "registration_qc")
-    copy_glob(args.feature_distances, "*.json", "feature_dist")
-    copy_glob(args.valis_summary,     "*.csv",  "valis_summary")
-    copy_glob(args.postprocess_qc,    "*.png",  "postprocess_qc")
+    copy_glob(args.preprocess_qc,        "*.png",  "preprocess_qc")
+    copy_glob(args.registration_qc,      "*.png",  "registration_qc")
+    copy_glob(args.feature_distances,    "*.json", "feature_dist")
+    copy_glob(args.valis_summary,        "*.csv",  "valis_summary")
+    copy_glob(args.postprocess_qc,       "*.png",  "postprocess_qc")
 
 # ---------------------------------------------------------------------------
 # Main
@@ -364,7 +317,6 @@ def main():
     timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
 
     html_parts = [html_header(timestamp)]
-    html_parts.append(versions_section(args.versions))
     html_parts.append(preprocess_qc_section(args.preprocess_qc))
     html_parts.append(registration_qc_section(
         args.registration_qc,

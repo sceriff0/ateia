@@ -155,6 +155,16 @@ process REGISTER {
         --input-dir registered_slides \\
         --output channels_manifest.json
 
+    # === RENAME SUMMARY CSVs WITH PATIENT ID ===
+    # Prefix CSV names with patient_id to avoid collisions when aggregated in QC report
+    for csv in preprocessed/data/*.csv; do
+        if [ -f "\$csv" ]; then
+            dir=\$(dirname "\$csv")
+            base=\$(basename "\$csv" .csv)
+            mv "\$csv" "\${dir}/${patient_id}_\${base}.csv"
+        fi
+    done
+
     # === CLEANUP INTERMEDIATES ===
     # Remove working copies to reclaim disk space. Do NOT delete staged inputs
     # (input_*, ref) — Nextflow needs them intact for retries.

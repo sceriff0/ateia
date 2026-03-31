@@ -41,7 +41,7 @@ nextflow_process {
                 { assert process.out.report },
                 { with(process.out.report) {
                     assert size() == 1
-                    assert get(0).toString().endsWith('mirage_qc_report.html')
+                    assert get(0).toString() ==~ /.*mirage_qc_report_\d{8}_\d{6}\.html/
                 }},
                 { assert process.out.versions }
             )

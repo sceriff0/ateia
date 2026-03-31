@@ -137,7 +137,7 @@ workflow MIRAGE {
     // Aggregate QC outputs from all steps into a single HTML report
     if (!params.skip_final_qc_report) {
         // Collect QC outputs from each step (empty channels for steps not run)
-        def ch_preprocess_qc_pngs  = Channel.empty()
+        def ch_preprocess_qc_pngs   = Channel.empty()
         def ch_registration_qc_pngs = Channel.empty()
         def ch_feature_dist_jsons   = Channel.empty()
         def ch_valis_summary_csvs   = Channel.empty()

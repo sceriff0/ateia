@@ -13,15 +13,16 @@ process GENERATE_QC_REPORT {
     path(versions_yml)
 
     output:
-    path "mirage_qc_report.html", emit: report
-    path "mirage_qc_data/"     , emit: data, optional: true
-    path "versions.yml"        , emit: versions
+    path "mirage_qc_report_*.html", emit: report
+    path "mirage_qc_data_*/"      , emit: data, optional: true
+    path "versions.yml"            , emit: versions
 
     when:
     task.ext.when == null || task.ext.when
 
     script:
     def args = task.ext.args ?: ''
+    def timestamp = new java.text.SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date())
     """
     generate_qc_report.py \\
         --preprocess-qc preprocess_qc/ \\
@@ -30,8 +31,8 @@ process GENERATE_QC_REPORT {
         --valis-summary valis_summary/ \\
         --postprocess-qc postprocess_qc/ \\
         --versions ${versions_yml} \\
-        --output mirage_qc_report.html \\
-        --data-dir mirage_qc_data/ \\
+        --output mirage_qc_report_${timestamp}.html \\
+        --data-dir mirage_qc_data_${timestamp}/ \\
         ${args}
 
     cat <<-END_VERSIONS > versions.yml
@@ -41,9 +42,10 @@ process GENERATE_QC_REPORT {
     """
 
     stub:
+    def timestamp = new java.text.SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date())
     """
-    mkdir -p mirage_qc_data
-    touch mirage_qc_report.html
+    mkdir -p mirage_qc_data_${timestamp}
+    touch mirage_qc_report_${timestamp}.html
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
