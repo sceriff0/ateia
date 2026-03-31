@@ -33,9 +33,8 @@ process SEGMENT {
     def pmax = params.seg_pmax ?: 99.8
     def dapi_check = (meta.channels && meta.channels.size() > 0) ? meta.channels[0].toUpperCase() : 'UNKNOWN'
 
-    // Increase n_tiles on retry to reduce per-tile memory usage
-    def n_tiles_y = Math.min((params.seg_n_tiles_y ?: 1) * Math.pow(4, task.attempt - 1) as Integer, 64)
-    def n_tiles_x = Math.min((params.seg_n_tiles_x ?: 1) * Math.pow(4, task.attempt - 1) as Integer, 64)
+    def n_tiles_y = params.seg_n_tiles_y ?: 1
+    def n_tiles_x = params.seg_n_tiles_x ?: 1
     """
     # Log input size for tracing (-L follows symlinks)
     input_bytes=\$(stat -L --printf="%s" ${merged_file} 2>/dev/null || echo 0)

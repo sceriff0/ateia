@@ -40,11 +40,7 @@ process REGISTER {
     def memory_mode = params.memory_mode ?: 'high'
     def micro_reg_fraction = params.reg_micro_reg_fraction ?: 0.125
     def max_image_dim = params.reg_max_image_dim ?: 4000
-    // Smart retry: skip micro-registration after multiple failures
-    // - Exit 1 (general failure): would benefit from skipping on attempt 2
-    // - Exit 137 (OOM): give it 2 attempts before skipping micro-reg
-    // Strategy: skip micro-registration on attempt 3+ (allows 2 attempts with micro-reg)
-    def skip_micro = (task.attempt > 2 || params.skip_micro_registration) ? '--skip-micro-registration' : ''
+    def skip_micro = params.skip_micro_registration ? '--skip-micro-registration' : ''
     // Performance options
     def parallel_warping = params.reg_parallel_warping ? '--parallel-warping' : ''
     def n_workers = params.reg_n_workers ?: 4
@@ -70,10 +66,6 @@ process REGISTER {
     echo "  - memory_mode: ${memory_mode}"
     echo "  - max_image_dim: ${max_image_dim}"
     echo "  - skip_micro_registration: ${skip_micro ? 'YES' : 'NO'}"
-    if [ ${task.attempt} -gt 5 ]; then
-        echo ""
-        echo "  WARNING: RETRY MODE (attempt 5+): Micro-registration disabled to reduce memory usage"
-    fi
     echo "========================================================================"
 
     # === STAGE INPUT FILES ===
