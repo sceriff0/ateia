@@ -1,6 +1,6 @@
 process GENERATE_QC_REPORT {
     tag "qc_report"
-    label 'process_single'
+    label 'process_low'
 
     container 'bolt3x/attend_image_analysis:preprocess'
 
