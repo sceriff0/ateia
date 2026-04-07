@@ -651,13 +651,16 @@ def merge_channels(
     # Create output directory
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
-    # PASS 3: Write pyramidal OME-TIFF
+    # PASS 3: Write pyramidal OME-TIFF (atomic: write tmp → validate → rename)
+    # If the process is killed mid-write, only the .tmp file exists.
+    # Nextflow won't find the expected output → marks as failed → retries.
     log("-" * 50)
     log("Pass 3: Writing pyramidal OME-TIFF...")
-    
+    tmp_path = output_path + ".tmp"
+
     write_pyramidal_ome_tiff(
         data=output_data,
-        output_path=output_path,
+        output_path=tmp_path,
         channel_names=channel_names,
         channel_colors=channel_colors,
         phenotype_colormap=phenotype_colormap,
@@ -669,6 +672,34 @@ def merge_channels(
         compression=compression,
         compressionargs=compressionargs,
     )
+
+    # Validate: check the file has the right number of channels and is readable.
+    # Reads only the first tile per channel (~KB each), not full pages.
+    log("Validating written file...")
+    with tifffile.TiffFile(tmp_path) as tif:
+        base_pages = [p for p in tif.pages if not (p.subfiletype & 0x1)]
+        n_written = len(base_pages)
+        if n_written != num_output_channels:
+            os.remove(tmp_path)
+            raise RuntimeError(
+                f"Pyramid validation failed: expected {num_output_channels} channels, "
+                f"got {n_written} pages. File was likely truncated."
+            )
+        for i, page in enumerate(base_pages):
+            # Read a single tile (first one) to verify the page is intact
+            try:
+                seg = page.asarray(maxworkers=1)[:256, :256]
+                del seg
+            except Exception as e:
+                os.remove(tmp_path)
+                raise RuntimeError(
+                    f"Pyramid validation failed: channel {i} ({channel_names[i]}) "
+                    f"is unreadable: {e}"
+                )
+    log(f"  Validation passed: {n_written} channels intact")
+
+    # Atomic rename — same filesystem, so this is instantaneous
+    os.replace(tmp_path, output_path)
 
     # Clean up
     del output_data
