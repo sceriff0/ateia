@@ -5,6 +5,15 @@ pixie-main/*
 # Python
 *.pyc
 **/__pycache__/
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Coverage
+.coverage
+coverage.xml
+htmlcov/
 
 # Nextflow runtime
 .nextflow/
@@ -51,3 +60,9 @@ legacy/
 # IDE
 .idea/
 .vscode/
+
+# Editor temp files
+*.swp
+*.swo
+*~
+.~lock.*
