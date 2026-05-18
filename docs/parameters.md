@@ -13,7 +13,7 @@ This page documents the active canonical parameter surface.
 | Parameter | Default | Notes |
 |---|---|---|
 | `input` | `''` | Required for `preprocessing`, `registration`, `postprocessing` |
-| `outdir` | `./results` | Main output root |
+| `outdir` | _(required)_ | Output root directory. No default — pass via `--outdir` or set in a profile. |
 | `savedir` | `null` | Optional archive destination |
 | `start` | `preprocessing` | Pipeline entry point: `preprocessing`, `registration`, `postprocessing` |
 | `stop` | `null` | Pipeline step to stop after. Default: null (runs to end). Values: `preprocessing`, `registration`, `postprocessing` |

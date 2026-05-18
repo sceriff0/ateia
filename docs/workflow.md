@@ -2,21 +2,21 @@
 
 ## Pipeline Stages
 
-## 1. Preprocessing
+### 1. Preprocessing
 
 - Convert/normalize source images
 - Correct illumination artifacts
 - Split channels
 - Emit checkpoint: `results/{patient_id}/csv/preprocessed.csv`
 
-## 2. Registration
+### 2. Registration
 
 - Group by patient
 - Select reference image
 - Register moving images to reference using selected method
 - Emit checkpoint: `results/{patient_id}/csv/registered.csv`
 
-## 3. Postprocessing
+### 3. Postprocessing
 
 - Segmentation
 - Quantification

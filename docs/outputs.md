@@ -1,6 +1,6 @@
 # Outputs
 
-All outputs are written under `--outdir` (default `./results`).
+All outputs are written under `--outdir`. This flag is required — there is no default; pass `--outdir results` or set it via a profile.
 
 ## Directory Structure
 

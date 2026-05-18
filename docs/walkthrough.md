@@ -1,6 +1,6 @@
 # End-to-End Walkthrough
 
-This page takes a brand-new user from a clean clone to a populated `results/` tree using the bundled synthetic test data. Total wall time on a modern laptop: **roughly 10–20 minutes**, almost entirely spent in segmentation and quantification on CPU. No GPU and no HPC are required.
+This page takes a brand-new user from a clean clone to a populated `results/` tree using the bundled synthetic test data. Total wall time on a modern laptop: **roughly 10–20 minutes**, almost entirely spent in segmentation and quantification on CPU. No GPU and no HPC are required. Timings cited later in this page are within this range.
 
 ## 0. Prerequisites
 
@@ -59,7 +59,7 @@ The `test` profile (defined in `conf/test.config`) sets:
 - `seg_gpu = false` so StarDist runs on CPU
 - Reduced `preproc_tile_size`, `feature_n_features`, and `memory_mode = 'low'` to keep the run small
 
-The full three-stage pipeline (preprocessing → registration → postprocessing) will execute. Watch the per-process progress in the Nextflow console. Expected timing on a 4-core laptop is on the order of 10–15 minutes; the bulk of the time is in `SEGMENT` and `QUANTIFY`.
+The full three-stage pipeline (preprocessing → registration → postprocessing) will execute. Watch the per-process progress in the Nextflow console. Expected timing on a 4-core laptop is 10–20 minutes; the bulk of the time is in `SEGMENT` and `QUANTIFY`.
 
 ## 4. Tour of `results/`
 

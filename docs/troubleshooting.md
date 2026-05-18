@@ -79,7 +79,7 @@ The `ieo` profile sets these automatically; for other sites, add them to your sh
 MIRAGE reads inputs through Bio-Formats (via the `CONVERT_IMAGE` module). Failures usually fall into:
 
 - **Unsupported vendor format.** Check the [Bio-Formats supported formats list](https://bio-formats.readthedocs.io/en/stable/supported-formats.html). If your format is listed but fails, the file may be corrupt or use a non-standard variant — open it in QuPath or Fiji first to confirm.
-- **Channel name mismatch.** The CSV column `channel_name` must match the channel names embedded in the image metadata exactly (case-sensitive). Use `bin/ome_tiff_inspect.py` (or `tifffile`/`bfconvert -info`) to dump the actual channel names from the OME metadata.
+- **Channel name mismatch.** The CSV uses a pipe-separated `channels` column (e.g. `DAPI|CD3|CD8`). Each value must match a channel name embedded in the image's OME metadata exactly (case-sensitive). Use `bin/ome_tiff_inspect.py` (or `tifffile`/`bfconvert -info`) to dump the actual channel names from the OME metadata.
 - **DAPI handling.** With `--preproc_skip_dapi true` (the default), DAPI channels bypass illumination correction. If you renamed DAPI to a custom label (e.g. `Hoechst`), set `--preproc_skip_dapi false` or rename the channel.
 
 ## GPU not detected for StarDist
@@ -98,7 +98,7 @@ For SLURM, ensure the job actually requests a GPU. The pipeline expects `--gpu_t
 
 VALIS uses learned feature detectors (default: SuperPoint). If a slide has very low contrast or sparse structure, the detector returns too few keypoints and registration fails or produces a wildly incorrect alignment. Mitigations, in order of likelihood:
 
-1. Lower `--feature_max_dim` (default 1024) so the detector sees a higher-resolution downscale.
+1. Raise `--feature_max_dim` (default 1024) so the detector sees a higher-resolution view of the slide and can find more keypoints. Lowering it makes the problem worse.
 2. Raise `--feature_n_features` to allow more candidate keypoints.
 3. Switch reference channels: `--reg_reference_markers '["DAPI"]'` is the most reliable on fluorescence data; add a structural marker (PANCK, SMA) if DAPI alone is weak.
 4. Set `--memory_mode high` if you have the RAM — it relaxes downsampling.

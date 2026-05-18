@@ -10,7 +10,7 @@ MIRAGE is checkpoint-driven. Each major stage writes a CSV that can be used as i
 
 ## Restart Patterns
 
-## Full pipeline from raw/preprocessing input
+### Full pipeline from raw/preprocessing input
 
 ```bash
 nextflow run main.nf \
@@ -19,7 +19,7 @@ nextflow run main.nf \
   --outdir results
 ```
 
-## Resume at registration
+### Resume at registration
 
 ```bash
 nextflow run main.nf \
@@ -28,7 +28,7 @@ nextflow run main.nf \
   --outdir results
 ```
 
-## Resume at postprocessing
+### Resume at postprocessing
 
 ```bash
 nextflow run main.nf \

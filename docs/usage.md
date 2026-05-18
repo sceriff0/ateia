@@ -73,7 +73,7 @@ P001,/results/P001/registered/P001_panel2_registered.ome.tiff,false,DAPI|PANCK|S
 
 - Exactly one `is_reference = true` row per `patient_id` at the `preprocessing` step.
 - All image paths must exist on the filesystem at pipeline launch.
-- The `channels` field must include `DAPI` and must match the image acquisition order.
+- The `channels` field should include `DAPI` for downstream segmentation (strong recommendation, not enforced by validation) and must match the image acquisition order.
 - For checkpoint steps (`registration`, `postprocessing`), only the columns required for that step need to be present.
 
 ---
