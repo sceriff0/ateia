@@ -21,7 +21,7 @@ Steps:
 Supports tiled inputs from pixie_pixel_cluster.py with automatic coordinate
 reconstruction to original image space.
 
-Author: ATEIA Pipeline (adapted from ark-analysis)
+Author: MIRAGE Pipeline (adapted from ark-analysis)
 """
 
 import argparse

@@ -4,7 +4,7 @@
  * ============================================================================
  *
  * Imports cells from GeoJSON with Pixie cluster classifications and colors.
- * Works with output from PIXIE_CELL_CLUSTER process in the ATEIA pipeline.
+ * Works with output from PIXIE_CELL_CLUSTER process in the MIRAGE pipeline.
  *
  * OUTPUT FILES EXPECTED (from pixie_cell_cluster.py):
  *   - pixie_clusters.geojson              <- Cell detections with cluster assignments

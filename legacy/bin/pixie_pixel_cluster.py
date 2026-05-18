@@ -18,7 +18,7 @@ Steps:
 Supports FOV tiling for large images and Pixie's internal multiprocessing
 for parallel processing of multiple FOV tiles.
 
-Author: ATEIA Pipeline (adapted from ark-analysis)
+Author: MIRAGE Pipeline (adapted from ark-analysis)
 """
 
 import argparse

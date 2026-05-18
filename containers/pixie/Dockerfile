@@ -1,4 +1,4 @@
-# Pixie Container for ATEIA Pipeline
+# Pixie Container for MIRAGE Pipeline
 # Based on ark-analysis 0.6.4 (the version Pixie is pinned to)
 #
 # Build: docker build -t bolt3x/attend_image_analysis:pixie .
@@ -6,7 +6,7 @@
 
 FROM python:3.9-slim
 
-LABEL maintainer="ATEIA Pipeline"
+LABEL maintainer="MIRAGE Pipeline"
 LABEL description="Pixie clustering container with ark-analysis 0.6.4"
 LABEL version="1.0.0"
 
