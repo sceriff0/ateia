@@ -97,7 +97,7 @@ Pass a template with `-params-file params/full_pipeline.json` and override indiv
 | Parameter | Default | Description |
 |---|---|---|
 | `input` | `''` | Path to samplesheet CSV (required for preprocessing, registration, postprocessing) |
-| `outdir` | `./results` | Output root directory |
+| `outdir` | _(required)_ | Output root directory. No default — must be passed via `--outdir` or set by a profile. |
 | `savedir` | `null` | Optional archive destination |
 | `start` | `preprocessing` | Pipeline entry point: `preprocessing`, `registration`, `postprocessing` |
 | `stop` | `null` | Pipeline step to stop after. When null, runs to end. Values: `preprocessing`, `registration`, `postprocessing` |
@@ -137,7 +137,7 @@ Pass a template with `-params-file params/full_pipeline.json` and override indiv
 | Parameter | Default | Description |
 |---|---|---|
 | `reg_reference_markers` | `["DAPI","FITC"]` | Channel names used as reference markers |
-| `memory_mode` | `high` | VALIS memory mode (`high` or `low`) |
+| `memory_mode` | `medium` | VALIS memory mode (`low`, `medium`, or `high`) |
 | `reg_micro_reg_fraction` | `0.125` | Fraction of image used for micro-registration |
 | `reg_max_image_dim` | `4000` | Max image dimension during VALIS registration |
 | `skip_micro_registration` | `true` | Skip VALIS micro-registration step |
@@ -165,18 +165,9 @@ Pass a template with `-params-file params/full_pipeline.json` and override indiv
 |---|---|---|
 | `quant_min_area` | `10` | Minimum cell area in pixels to retain for quantification |
 
-### Pixie Clustering (Optional)
+### Pixie Clustering (Planned)
 
-| Parameter | Default | Description |
-|---|---|---|
-| `pixie_enabled` | `false` | Enable Pixie pixel and cell clustering |
-| `pixie_channels` | *(panel list)* | Channels to include in clustering |
-| `pixie_blur_factor` | `2` | Gaussian blur factor applied before clustering |
-| `pixie_subset_proportion` | `0.05` | Fraction of pixels used for SOM training |
-| `pixie_num_passes` | `1` | Number of SOM training passes |
-| `pixie_max_k` | `20` | Maximum number of meta-clusters |
-| `pixie_cap` | `3` | Pixel intensity cap (z-score) |
-| `pixie_seed` | `4` | Random seed for reproducibility |
+Pixel- and cell-level clustering via Pixie is **not currently wired** into the pipeline. The `containers/pixie/` Dockerfile exists for future integration — see the upstream [angelolab/pixie](https://github.com/angelolab/pixie) project for the algorithm itself. No `pixie_*` parameters are accepted today; the table below will be filled in when the integration lands.
 
 ### Pyramid Export
 
@@ -238,17 +229,6 @@ nextflow run main.nf \
   --outdir results \
   -profile slurm \
   -resume
-```
-
-### With Pixie clustering enabled
-
-```bash
-nextflow run main.nf \
-  --input results/P001/csv/registered.csv \
-  --start postprocessing \
-  --pixie_enabled true \
-  --outdir results \
-  -profile slurm
 ```
 
 ### Dry-run validation

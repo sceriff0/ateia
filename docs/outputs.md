@@ -160,17 +160,6 @@ Resolution levels are controlled by `--pyramid_resolutions` and `--pyramid_scale
 
 ---
 
-## Pixie Outputs (Optional)
-
-Produced only when `--pixie_enabled true`.
-
-| Path | Format | Description |
-|---|---|---|
-| `<patient_id>/pixie/pixel_clusters/` | CSV + PNG | Pixel SOM and meta-cluster assignments |
-| `<patient_id>/pixie/cell_clusters/` | CSV + PNG | Cell-level cluster assignments derived from pixel clusters |
-
----
-
 ## Trace and Pipeline Info (`pipeline_info/`)
 
 Generated when `--enable_trace true` (default). Written to the directory specified by `--trace_dir` (default `.trace`).

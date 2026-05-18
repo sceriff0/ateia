@@ -56,12 +56,15 @@ P001,/results/P001/registered/P001_panel2_registered.ome.tiff,false,DAPI|PANCK|S
 Required runtime args:
 
 - `--outdir`
-- `--savedir`
+
+Optional runtime args:
+
+- `--savedir` — when set, finalized results are also copied to this archive location.
 
 ## Validation Rules
 
 - Exactly one reference image per patient at preprocessing input.
 - Input files must exist.
-- `channels` must include DAPI and match expected image content/ordering requirements.
+- `channels` should include DAPI for downstream segmentation. This is a strong recommendation rather than an enforced validation rule — see `lib/ParamUtils.groovy` for the columns that are actually checked.
 - For checkpoint steps, required columns must be present for that step.
 

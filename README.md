@@ -17,7 +17,7 @@ MIRAGE is a Nextflow DSL2 pipeline for whole slide image (WSI) processing. It su
 5. **Single-cell marker quantification** (`QUANTIFY`) — Extracts per-cell intensity statistics across all registered channels; outputs CSV tables
 6. **QuPath GeoJSON export** (`EXPORT_GEOJSON`) — Exports all cells with raw marker intensities and morphological measurements in QuPath-native GeoJSON format for interactive gating via FlowPath
 7. **Pyramidal OME-TIFF export** — Assembles all registered channels into a tiled, multi-resolution OME-TIFF for visualization (e.g., QuPath, napari)
-9. **Quality control reporting** — QC overlays and metrics are generated at the preprocessing and registration steps
+8. **Quality control reporting** — QC overlays and metrics are generated at the preprocessing and registration steps
 
 ## Quick Start
 
@@ -28,7 +28,7 @@ MIRAGE is a Nextflow DSL2 pipeline for whole slide image (WSI) processing. It su
 3. Clone the repository:
 
    ```bash
-   git clone <your-repo-url> mirage
+   git clone https://github.com/sceriff0/mirage.git
    cd mirage
    ```
 
@@ -82,7 +82,10 @@ nextflow run main.nf \
 ## Documentation
 
 - [Usage](docs/usage.md) — samplesheet format, parameters, profiles
-- [Output](docs/output.md) — output directory layout and file descriptions
+- [Outputs](docs/outputs.md) — output directory layout and file descriptions
+- [Walkthrough](docs/walkthrough.md) — end-to-end run on the bundled test data
+- [Troubleshooting](docs/troubleshooting.md) — common failures and remediation
+- [Citation](docs/citation.md) — how to cite MIRAGE and its dependencies
 
 Full documentation (MkDocs):
 

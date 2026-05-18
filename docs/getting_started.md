@@ -13,7 +13,7 @@ nextflow run main.nf \
   --input input.csv \
   --outdir results \
   --start preprocessing \
-  --registration_method gpu \
+  --registration_method valis \
   -profile slurm
 ```
 
@@ -23,7 +23,7 @@ nextflow run main.nf \
 nextflow run main.nf \
   --input results/P001/csv/preprocessed.csv \
   --start registration \
-  --registration_method cpu_tiled \
+  --registration_method valis \
   --outdir results \
   -profile slurm
 ```

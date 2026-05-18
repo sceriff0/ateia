@@ -1,6 +1,10 @@
 site_name: MIRAGE Pipeline
 site_description: Nextflow pipeline for microscopy preprocessing, registration, segmentation, quantification, and phenotyping.
 site_author: MIRAGE Team
+site_url: https://mirage.readthedocs.io/
+repo_url: https://github.com/sceriff0/mirage
+repo_name: sceriff0/mirage
+edit_uri: edit/main/docs/
 
 theme:
   name: material
@@ -11,22 +15,37 @@ theme:
     - navigation.tabs
     - navigation.sections
     - navigation.top
+    - navigation.indexes
     - search.highlight
+    - content.code.copy
+
+plugins:
+  - search
+  - include-markdown
 
 nav:
   - Home: index.md
-  - Getting Started: getting_started.md
-  - Installation: installation.md
-  - Input Format: input_spec.md
-  - Workflow: workflow.md
-  - Registration Methods: registration_methods.md
-  - Parameters: parameters.md
-  - Outputs: outputs.md
-  - Restartability: restartability_guide.md
-  - SLURM: slurm.md
-  - Testing: testing_guide.md
+  - Getting Started:
+      - Quick Start: getting_started.md
+      - Installation: installation.md
+      - Walkthrough: walkthrough.md
+  - Usage:
+      - Overview: usage.md
+      - Input Format: input_spec.md
+      - Workflow: workflow.md
+      - Parameters: parameters.md
+      - Outputs: outputs.md
+      - Restartability: restartability_guide.md
+  - Execution:
+      - SLURM: slurm.md
+      - Testing: testing_guide.md
+  - Reference:
+      - Registration Methods: registration_methods.md
+      - Registration Errors: registration_errors.md
+      - Feature Distance Estimation: estimate_feature_distances.md
   - Troubleshooting: troubleshooting.md
   - Developer Guide: developer_guide.md
+  - Citation: citation.md
   - Changelog: changelog.md
 
 markdown_extensions:

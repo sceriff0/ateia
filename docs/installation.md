@@ -11,7 +11,7 @@
 ## Clone and Enter Repository
 
 ```bash
-git clone <your-repo-url> mirage
+git clone https://github.com/sceriff0/mirage.git
 cd mirage
 ```
 
@@ -32,14 +32,16 @@ mkdocs serve
 
 ## Execution Profiles
 
-Defined in `nextflow.config`:
+Defined in `nextflow.config` under the `profiles { ... }` block. Combine profiles with a comma (e.g. `-profile test,docker`):
 
-- `standard` (SLURM default)
-- `slurm`
-- `test`
-- `local`
-- `docker`
-- `singularity`
+- `test` — minimal synthetic dataset for CI and smoke tests
+- `test_full` — larger synthetic dataset with realistic params
+- `docker` — run processes in Docker containers (local/dev)
+- `singularity` — run processes in Singularity/Apptainer containers (recommended on HPC)
+- `conda` — run with Conda-managed environments (no containers)
+- `slurm` — submit each process as a SLURM job
+- `local` — local executor with conservative caps (4 CPUs / 16 GB RAM)
+- `ieo` — site-specific config for the IEO HPC cluster (gitignored; copy from `site.config.template`)
 
 ## Container Images
 

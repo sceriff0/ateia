@@ -114,14 +114,10 @@
             "properties": {
                 "registration_method": {
                     "type": "string",
-                    "description": "Registration method to use.",
+                    "description": "Registration method to use. Only 'valis' is currently supported by the runtime validator (see lib/ParamUtils.groovy).",
                     "default": "valis",
                     "enum": [
-                        "valis",
-                        "valis_pairs",
-                        "gpu",
-                        "cpu",
-                        "cpu_tiled"
+                        "valis"
                     ]
                 },
                 "padding": {
