@@ -98,7 +98,11 @@ def _extract_2d_masks(labeled_output, target: str):
                 )
                 return single, single
         elif n >= 2:
-            # Conventional all_outputs ordering: [nuclei, cells]
+            # InstanSeg eval_small_image with target='all_outputs' returns a
+            # tensor of shape (2, Y, X): index 0 = nuclei labels, index 1 =
+            # cell labels.
+            # Ref: instanseg/inference_class.py upstream and the README usage
+            # examples at https://github.com/instanseg/instanseg.
             nuclei_2d = arr[0]
             cell_2d = arr[1]
             return nuclei_2d, cell_2d
@@ -192,10 +196,16 @@ def run_instanseg(
     # 3. Run segmentation
     logger.info(f"Running InstanSeg eval_small_image (target={target})...")
     seg_start = time.time()
+    # Pass the upstream defaults explicitly so behavior is pinned to the
+    # current InstanSeg contract and immune to future default drift.
+    # Ref: instanseg/inference_class.py eval_small_image signature.
     labeled_output, _image_tensor = model.eval_small_image(
         image_array,
         effective_pixel_size,
         target=target,
+        normalise=True,
+        return_image_tensor=True,
+        rescale_output=True,
     )
     logger.info(f"  Segmentation time: {time.time() - seg_start:.2f}s")
 
