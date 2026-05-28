@@ -33,6 +33,13 @@ class ParamUtils {
         }
     }
 
+    static void validateSegMethod(String method) {
+        def valid = ['stardist', 'instantseg']
+        if (!(method in valid)) {
+            throw new IllegalArgumentException("Invalid --seg_method '${method}'. Valid values: ${valid}")
+        }
+    }
+
     static List requiredColumnsForStep(String step) {
         def requirements = [
             preprocessing : ['patient_id','path_to_file','is_reference','channels'],

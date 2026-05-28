@@ -56,14 +56,17 @@ This page documents the active canonical parameter surface.
 ## Postprocessing
 
 - Segmentation:
+  - `seg_method` — backend to use: `'stardist'` (default, DAPI-channel only) or `'instantseg'` (channel-invariant, consumes the multichannel image directly). The container image is selected automatically based on this value.
   - `seg_gpu`
-  - `seg_pmin`
-  - `seg_pmax`
-  - `seg_n_tiles_y`
-  - `seg_n_tiles_x`
-  - `seg_expand_distance`
-  - `segmentation_model_dir`
-  - `segmentation_model`
+  - `seg_pmin` (StarDist only)
+  - `seg_pmax` (StarDist only)
+  - `seg_n_tiles_y` (StarDist only)
+  - `seg_n_tiles_x` (StarDist only)
+  - `seg_expand_distance` (StarDist only)
+  - `segmentation_model_dir` (StarDist only)
+  - `segmentation_model` (StarDist only)
+  - `seg_instantseg_model` — InstanSeg pretrained model name. Default `'fluorescence_nuclei_and_cells'`.
+  - `seg_instantseg_target` — `'all_outputs'` (default; nuclei + cells), `'cells'`, or `'nuclei'`. When a single target is produced, that mask is replicated to both `_nuclei_mask.tif` and `_cell_mask.tif` so downstream stays contract-preserving.
 - Quantification:
   - `quant_min_area`
 - Pyramid export:

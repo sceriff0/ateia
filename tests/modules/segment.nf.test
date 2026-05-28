@@ -139,6 +139,74 @@ nextflow_process {
         }
     }
 
+    test("Should segment cells with InstanSeg backend - stub") {
+
+        options "-stub"
+
+        when {
+            params {
+                seg_method = 'instantseg'
+            }
+            process {
+                """
+                input[0] = [
+                    [
+                        patient_id: 'P001',
+                        channels: ['DAPI', 'PANCK', 'SMA']
+                    ],
+                    file('tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            assert process.success
+            assert process.out.nuclei_mask
+            assert process.out.cell_mask
+            assert process.out.versions
+
+            with(process.out.nuclei_mask) {
+                assert size() == 1
+                assert get(0).get(0).patient_id == 'P001'
+                assert get(0).get(1).toString().endsWith('_nuclei_mask.tif')
+            }
+
+            with(process.out.cell_mask) {
+                assert size() == 1
+                assert get(0).get(0).patient_id == 'P001'
+                assert get(0).get(1).toString().endsWith('_cell_mask.tif')
+            }
+        }
+    }
+
+    test("Should NOT enforce DAPI-channel-0 check when seg_method='instantseg' - stub") {
+
+        options "-stub"
+
+        when {
+            params {
+                seg_method = 'instantseg'
+            }
+            process {
+                """
+                input[0] = [
+                    [
+                        patient_id: 'P001',
+                        channels: ['PANCK', 'DAPI', 'SMA']  // DAPI NOT FIRST - InstanSeg is channel-invariant
+                    ],
+                    file('tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            // InstanSeg path does not enforce DAPI-channel-0; should succeed.
+            assert process.success
+        }
+    }
+
     test("Should detect cells in synthetic image with DAPI signal - regression") {
 
         tag "real"

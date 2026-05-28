@@ -81,6 +81,10 @@ workflow MIRAGE {
         validateRegistrationMethod(params.registration_method)
     }
 
+    if (run('postprocessing')) {
+        validateSegMethod(params.seg_method)
+    }
+
     if (!params.input) {
         error "Please provide --input for start '${params.start}'"
     }
