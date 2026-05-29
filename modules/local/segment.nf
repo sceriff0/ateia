@@ -42,6 +42,11 @@ process SEGMENT {
     def n_tiles_y = params.seg_n_tiles_y ?: 1
     def n_tiles_x = params.seg_n_tiles_x ?: 1
     def dapi_check = (meta.channels && meta.channels.size() > 0) ? meta.channels[0].toUpperCase() : 'UNKNOWN'
+    // InstanSeg writes its BioImage.IO model under INSTANSEG_BIOIMAGEIO_PATH.
+    // The default (inside site-packages) is read-only under Singularity, so
+    // we redirect to a host-mounted path or, if unconfigured, to the task
+    // work dir (writable; re-downloads per task).
+    def instanseg_cache_dir = params.instanseg_model_dir ?: "\$PWD/.instanseg_cache"
 
     if (params.seg_method == 'instantseg') {
         """
@@ -49,8 +54,13 @@ process SEGMENT {
         input_bytes=\$(stat -L --printf="%s" ${merged_file} 2>/dev/null || echo 0)
         echo "${task.process},${meta.patient_id},${merged_file.name},\${input_bytes}" > ${meta.patient_id}.SEGMENT.size.csv
 
+        # Redirect InstanSeg model cache away from the read-only container image.
+        export INSTANSEG_BIOIMAGEIO_PATH="${instanseg_cache_dir}"
+        mkdir -p "\$INSTANSEG_BIOIMAGEIO_PATH"
+
         echo "Sample: ${meta.patient_id}"
         echo "Backend: InstanSeg (model=${params.seg_instantseg_model}, target=${params.seg_instantseg_target})"
+        echo "InstanSeg model cache: \$INSTANSEG_BIOIMAGEIO_PATH"
         echo "Note: InstanSeg is channel-invariant; skipping DAPI-channel-0 check."
 
         segment_instantseg.py \\
