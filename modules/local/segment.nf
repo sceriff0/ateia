@@ -70,6 +70,8 @@ process SEGMENT {
             --target ${params.seg_instantseg_target} \\
             --pixel-size ${params.pixel_size} \\
             --prefix ${prefix} \\
+            --tile-size ${params.seg_instantseg_tile_size} \\
+            --batch-size ${params.seg_instantseg_batch_size} \\
             ${use_gpu_flag} \\
             ${args}
 

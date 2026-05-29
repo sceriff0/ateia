@@ -121,8 +121,15 @@ def run_instanseg(
     pixel_size: float | None = None,
     use_gpu: bool = False,
     prefix: str | None = None,
+    tile_size: int = 512,
+    batch_size: int = 1,
 ):
     """Run the InstanSeg segmentation pipeline on a multichannel image.
+
+    Uses ``eval_medium_image`` (sliding-window tiled inference) so that peak
+    activation memory scales with ``tile_size`` and ``batch_size`` rather than
+    with the full image dimensions. ``eval_small_image`` was previously used
+    and is unsuitable for WSI-scale registered outputs (OOM).
 
     Parameters
     ----------
@@ -146,6 +153,11 @@ def run_instanseg(
         flag is informational and warned about if CUDA is unavailable.
     prefix
         Output filename prefix. Defaults to the input image's stem.
+    tile_size
+        Side length (px) of square sliding-window tiles for inference.
+    batch_size
+        Number of tiles pushed through the model per forward pass. Higher
+        values better utilise large GPUs; reduce on memory-constrained ones.
     """
     logger.info("=" * 80)
     logger.info("CELL SEGMENTATION PIPELINE (InstanSeg)")
@@ -193,15 +205,20 @@ def run_instanseg(
     effective_pixel_size = pixel_size if pixel_size is not None else detected_pixel_size
     logger.info(f"  Effective pixel size used: {effective_pixel_size}")
 
-    # 3. Run segmentation
-    logger.info(f"Running InstanSeg eval_small_image (target={target})...")
+    # 3. Run segmentation via tiled sliding-window inference.
+    # eval_medium_image keeps peak memory bounded by tile_size * batch_size
+    # rather than by full image dimensions; required for WSI-scale inputs.
+    # Ref: instanseg/inference_class.py eval_medium_image signature.
+    logger.info(
+        f"Running InstanSeg eval_medium_image "
+        f"(target={target}, tile_size={tile_size}, batch_size={batch_size})..."
+    )
     seg_start = time.time()
-    # Pass the upstream defaults explicitly so behavior is pinned to the
-    # current InstanSeg contract and immune to future default drift.
-    # Ref: instanseg/inference_class.py eval_small_image signature.
-    labeled_output, _image_tensor = model.eval_small_image(
+    labeled_output, _image_tensor = model.eval_medium_image(
         image_array,
         effective_pixel_size,
+        tile_size=tile_size,
+        batch_size=batch_size,
         target=target,
         normalise=True,
         return_image_tensor=True,
@@ -302,6 +319,20 @@ def parse_args():
         help='Output filename prefix (defaults to input image stem)',
     )
 
+    parser.add_argument(
+        '--tile-size',
+        type=int,
+        default=512,
+        help='Sliding-window tile size (px) for eval_medium_image',
+    )
+
+    parser.add_argument(
+        '--batch-size',
+        type=int,
+        default=1,
+        help='Tiles per forward pass; raise on large GPUs for throughput',
+    )
+
     return parser.parse_args()
 
 
@@ -318,6 +349,8 @@ def main():
         pixel_size=args.pixel_size,
         use_gpu=args.use_gpu,
         prefix=args.prefix,
+        tile_size=args.tile_size,
+        batch_size=args.batch_size,
     )
     return 0
 
