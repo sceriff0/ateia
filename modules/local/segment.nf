@@ -1,13 +1,18 @@
 /*
  * SEGMENT - cell segmentation
  *
- * Dispatches between two backends, controlled by ``params.seg_method``:
+ * Dispatches between three backends, controlled by ``params.seg_method``:
  *   - 'stardist'   (default): StarDist on the DAPI channel (channel 0 hard-check).
  *   - 'instantseg':           InstanSeg with the ``fluorescence_nuclei_and_cells``
  *                             model. Channel-invariant: consumes the multichannel
  *                             image directly; no DAPI-channel-0 check is enforced.
+ *   - 'cellsam':              CellSAM (SAM foundation model) on the DAPI channel.
+ *                             Segments nuclei; the whole-cell mask is derived by
+ *                             expanding nuclei labels (StarDist-style), so a
+ *                             nuclear channel is required but no channel-0 hard
+ *                             check is enforced (passed explicitly as --dapi-channel).
  *
- * Both backends produce the same outputs (``*_nuclei_mask.tif`` /
+ * All backends produce the same outputs (``*_nuclei_mask.tif`` /
  * ``*_cell_mask.tif`` / ``versions.yml`` / ``*.size.csv``) so all downstream
  * modules are contract-preserving.
  *
@@ -17,7 +22,9 @@ process SEGMENT {
     tag "${meta.patient_id}"
     label 'process_high'
 
-    container { params.seg_method == 'instantseg'
+    container { params.seg_method == 'cellsam'
+                ? 'bolt3x/attend_image_analysis:cellsam'
+                : params.seg_method == 'instantseg'
                 ? 'bolt3x/attend_image_analysis:instant_seg'
                 : 'bolt3x/attend_image_analysis:segmentation_gpu' }
 
@@ -47,8 +54,43 @@ process SEGMENT {
     // we redirect to a host-mounted path or, if unconfigured, to the task
     // work dir (writable; re-downloads per task).
     def instanseg_cache_dir = params.instanseg_model_dir ?: "\$PWD/.instanseg_cache"
+    // CellSAM flags. use_wsi toggles native tiling; model_path points at
+    // pre-downloaded weights (omit -> auto-download, needs DEEPCELL_ACCESS_TOKEN).
+    def cellsam_wsi_flag = params.seg_cellsam_use_wsi ? '--use-wsi' : ''
+    def cellsam_model_arg = params.cellsam_model_path ? "--model-path ${params.cellsam_model_path}" : ''
 
-    if (params.seg_method == 'instantseg') {
+    if (params.seg_method == 'cellsam') {
+        """
+        # Log input size for tracing (-L follows symlinks)
+        input_bytes=\$(stat -L --printf="%s" ${merged_file} 2>/dev/null || echo 0)
+        echo "${task.process},${meta.patient_id},${merged_file.name},\${input_bytes}" > ${meta.patient_id}.SEGMENT.size.csv
+
+        echo "Sample: ${meta.patient_id}"
+        echo "Backend: CellSAM (bbox_threshold=${params.seg_cellsam_bbox_threshold}, use_wsi=${params.seg_cellsam_use_wsi})"
+        echo "Note: CellSAM segments the nuclear (DAPI) channel; cell mask is expanded from nuclei. No DAPI-channel-0 check enforced."
+
+        segment_cellsam.py \\
+            --image ${merged_file} \\
+            --output-dir . \\
+            --dapi-channel 0 \\
+            --expand-distance ${params.seg_expand_distance} \\
+            --bbox-threshold ${params.seg_cellsam_bbox_threshold} \\
+            --block-size ${params.seg_cellsam_block_size} \\
+            --overlap ${params.seg_cellsam_overlap} \\
+            --prefix ${prefix} \\
+            ${cellsam_wsi_flag} \\
+            ${cellsam_model_arg} \\
+            ${use_gpu_flag} \\
+            ${args}
+
+        cat <<-END_VERSIONS > versions.yml
+        "${task.process}":
+            python: \$(python --version 2>&1 | sed 's/Python //')
+            cellSAM: \$(python -c "import cellSAM; print(getattr(cellSAM, '__version__', 'unknown'))" 2>/dev/null || echo "unknown")
+            torch: \$(python -c "import torch; print(torch.__version__)" 2>/dev/null || echo "unknown")
+        END_VERSIONS
+        """
+    } else if (params.seg_method == 'instantseg') {
         """
         # Log input size for tracing (-L follows symlinks)
         input_bytes=\$(stat -L --printf="%s" ${merged_file} 2>/dev/null || echo 0)

@@ -56,17 +56,22 @@ This page documents the active canonical parameter surface.
 ## Postprocessing
 
 - Segmentation:
-  - `seg_method` — backend to use: `'stardist'` (default, DAPI-channel only) or `'instantseg'` (channel-invariant, consumes the multichannel image directly). The container image is selected automatically based on this value.
+  - `seg_method` — backend to use: `'stardist'` (default, DAPI-channel only), `'instantseg'` (channel-invariant, consumes the multichannel image directly), or `'cellsam'` (CellSAM SAM foundation model on the DAPI channel). The container image is selected automatically based on this value.
   - `seg_gpu`
   - `seg_pmin` (StarDist only)
   - `seg_pmax` (StarDist only)
   - `seg_n_tiles_y` (StarDist only)
   - `seg_n_tiles_x` (StarDist only)
-  - `seg_expand_distance` (StarDist only)
+  - `seg_expand_distance` (StarDist and CellSAM — distance used to expand nuclei labels into the whole-cell mask)
   - `segmentation_model_dir` (StarDist only)
   - `segmentation_model` (StarDist only)
   - `seg_instantseg_model` — InstanSeg pretrained model name. Default `'fluorescence_nuclei_and_cells'`.
   - `seg_instantseg_target` — `'all_outputs'` (default; nuclei + cells), `'cells'`, or `'nuclei'`. When a single target is produced, that mask is replicated to both `_nuclei_mask.tif` and `_cell_mask.tif` so downstream stays contract-preserving.
+  - `seg_cellsam_bbox_threshold` (CellSAM only) — bounding-box confidence threshold; the main precision/recall knob. Default `0.4`.
+  - `seg_cellsam_use_wsi` (CellSAM only) — enable CellSAM's native whole-slide tiling for large images. Default `true`.
+  - `seg_cellsam_block_size` (CellSAM only) — tile side length (px) in WSI mode; recommended range `[256, 2048]`. Default `400`.
+  - `seg_cellsam_overlap` (CellSAM only) — tile overlap (px) in WSI mode. Default `56`.
+  - `cellsam_model_path` (CellSAM only) — path to pre-downloaded CellSAM weights for offline/container use. When `null`, weights are auto-downloaded at runtime (requires a valid `DEEPCELL_ACCESS_TOKEN` in the task environment). CellSAM segments the DAPI channel to produce nuclei; the whole-cell mask is derived by expanding nuclei labels via `seg_expand_distance` (StarDist-style).
 - Quantification:
   - `quant_min_area`
 - Pyramid export:

@@ -34,7 +34,7 @@ class ParamUtils {
     }
 
     static void validateSegMethod(String method) {
-        def valid = ['stardist', 'instantseg']
+        def valid = ['stardist', 'instantseg', 'cellsam']
         if (!(method in valid)) {
             throw new IllegalArgumentException("Invalid --seg_method '${method}'. Valid values: ${valid}")
         }
