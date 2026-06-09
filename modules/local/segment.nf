@@ -58,6 +58,10 @@ process SEGMENT {
     // pre-downloaded weights (omit -> auto-download, needs DEEPCELL_ACCESS_TOKEN).
     def cellsam_wsi_flag = params.seg_cellsam_use_wsi ? '--use-wsi' : ''
     def cellsam_model_arg = params.cellsam_model_path ? "--model-path ${params.cellsam_model_path}" : ''
+    // CellSAM extracts ONE nuclear channel (it is NOT channel-invariant like
+    // InstanSeg), so resolve the real DAPI index from meta.channels instead of
+    // assuming channel 0. -1 when absent; guarded in the script block below.
+    def cellsam_dapi_idx = (meta.channels ?: []).findIndexOf { it.toString().toUpperCase() == 'DAPI' }
 
     if (params.seg_method == 'cellsam') {
         """
@@ -67,12 +71,26 @@ process SEGMENT {
 
         echo "Sample: ${meta.patient_id}"
         echo "Backend: CellSAM (bbox_threshold=${params.seg_cellsam_bbox_threshold}, use_wsi=${params.seg_cellsam_use_wsi})"
-        echo "Note: CellSAM segments the nuclear (DAPI) channel; cell mask is expanded from nuclei. No DAPI-channel-0 check enforced."
+        echo "Note: CellSAM segments the nuclear (DAPI) channel resolved to index ${cellsam_dapi_idx}; cell mask is expanded from nuclei."
+
+        # CellSAM is NOT channel-invariant: it segments a single nuclear channel.
+        # Fail loudly when no DAPI channel exists rather than silently segmenting
+        # the wrong channel (a negative index would wrap around under NumPy).
+        if [ "${cellsam_dapi_idx}" -lt 0 ]; then
+            echo "ERROR: no 'DAPI' channel found in [${meta.channels ? meta.channels.join(', ') : 'Unknown'}] for ${meta.patient_id}"
+            echo "CellSAM requires a nuclear (DAPI) channel to be present."
+            exit 1
+        fi
+
+        # Warn early if auto-download will be attempted without credentials.
+        if [ -z "${cellsam_model_arg}" ] && [ -z "\${DEEPCELL_ACCESS_TOKEN:-}" ]; then
+            echo "WARNING: --model-path unset and DEEPCELL_ACCESS_TOKEN is empty; CellSAM weight auto-download will likely fail."
+        fi
 
         segment_cellsam.py \\
             --image ${merged_file} \\
             --output-dir . \\
-            --dapi-channel 0 \\
+            --dapi-channel ${cellsam_dapi_idx} \\
             --expand-distance ${params.seg_expand_distance} \\
             --bbox-threshold ${params.seg_cellsam_bbox_threshold} \\
             --block-size ${params.seg_cellsam_block_size} \\

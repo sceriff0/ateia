@@ -71,7 +71,7 @@ This page documents the active canonical parameter surface.
   - `seg_cellsam_use_wsi` (CellSAM only) — enable CellSAM's native whole-slide tiling for large images. Default `true`.
   - `seg_cellsam_block_size` (CellSAM only) — tile side length (px) in WSI mode; recommended range `[256, 2048]`. Default `400`.
   - `seg_cellsam_overlap` (CellSAM only) — tile overlap (px) in WSI mode. Default `56`.
-  - `cellsam_model_path` (CellSAM only) — path to pre-downloaded CellSAM weights for offline/container use. When `null`, weights are auto-downloaded at runtime (requires a valid `DEEPCELL_ACCESS_TOKEN` in the task environment). CellSAM segments the DAPI channel to produce nuclei; the whole-cell mask is derived by expanding nuclei labels via `seg_expand_distance` (StarDist-style).
+  - `cellsam_model_path` (CellSAM only) — path to pre-downloaded CellSAM weights for offline/container use. When `null`, weights are auto-downloaded at runtime — `export DEEPCELL_ACCESS_TOKEN=...` before launching and the pipeline forwards it into the container automatically (clusters without compute-node internet should pre-download weights and set `cellsam_model_path` instead). CellSAM segments the DAPI channel (located by name from the `channels` column, not assumed to be channel 0) to produce nuclei; the whole-cell mask is derived by expanding nuclei labels via `seg_expand_distance` (StarDist-style).
 - Quantification:
   - `quant_min_area`
 - Pyramid export:
