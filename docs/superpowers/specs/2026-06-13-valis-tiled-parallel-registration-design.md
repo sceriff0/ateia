@@ -481,9 +481,24 @@ REG_FINALIZE (JVM)  warp_tools.stitch_tiles(tiles) -> full bk/fwd; rebuild a MIN
   the registrar. Process fluorescence to its DAPI channel here.
 - **Task 7** (`reg_finalize.py`): stitch + rebuild minimal Slide + `warp_and_save_slide`; no
   registrar reload.
-- **Open de-risk before Task 5/7:** a small spike to confirm a hand-rebuilt `Slide` (plain attrs +
-  disk dxdy) warps **bit-identically** to a full classic run — the Option-A analogue of the Task-1
-  gate. This is the next make-or-break.
+- **Open de-risk before Task 5/7 (Task 4.5, the next make-or-break):** FINALIZE must reproduce the
+  post-tiler composition that `serial_non_rigid.calc_deformation` does on the stitched field
+  (serial_non_rigid.py:460-503), then warp — and prove it **pixel-identical** to a full classic run.
+  The composition is a fixed sequence of **VALIS functions** (not hand-rolled math), applied to the
+  stitched `moving_bk_dxdy`:
+  1. `warp_tools.remove_invasive_displacements(moving_bk_dxdy, M, src_shape_rc=unwarped_shape, out_shape_rc=og_reg_shape_rc)` when `from_rigid_reg`;
+  2. `mask_dxdy(·, reg_mask)` when a non-rigid mask exists;
+  3. `bk_dxdy_from_ref = bk_dxdy + moving_bk_dxdy` — **combine with the field of the image this slide
+     was aligned *to*** (the reference's field for slides adjacent to the reference; an *accumulated*
+     field for non-adjacent slides in `align_to_reference` serial order — this cross-slide
+     accumulation is the one real complication and must be dumped/threaded per slide);
+  4. `remove_invasive_displacements` again on the masked copy → `self.bk_dxdy`;
+  5. `self.fwd_dxdy = warp_tools.get_inverse_field(self.bk_dxdy)` (default `n_inter=10`).
+  PREP halts *before* non-rigid, so it does NOT have the reference/accumulated `bk_dxdy` from step 3;
+  the spike must determine how FINALIZE obtains it (e.g. process the reference slide's tiles first and
+  publish its composed field as an input to the moving slides' FINALIZE, honoring serial order). For
+  the common 1-ref+1-mov case the reference field is identity, so step 3 reduces to
+  `bk_dxdy_from_ref = moving_bk_dxdy` — start the spike there, then generalize.
 
 ---
 
