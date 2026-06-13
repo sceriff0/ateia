@@ -1,0 +1,316 @@
+# Design: Nextflow-Parallel VALIS Tiled Non-Rigid Registration
+
+- **Date:** 2026-06-13
+- **Branch / worktree:** `valis-tiled-parallel`
+- **Status:** Design spec (implementation deferred to a separate plan)
+- **Author:** brainstormed with Claude Code
+- **Reference VALIS version:** `valis-wsi == 1.2.0` (MathOnco/valis @ `325828c`)
+
+---
+
+## 1. Goal
+
+Add an **opt-in** registration path that takes VALIS's *internal, in-process* tiled
+non-rigid registration and lifts the per-tile loop up into **Nextflow processes**, so that:
+
+1. **Throughput** — independent tiles are distributed across cluster nodes instead of
+   threads on one node.
+2. **Peak RAM** — each task holds only one tile (+ buffer) of the non-rigid displacement
+   field, instead of the whole image's field on a single node.
+
+The classic single-process path (`REGISTER`) **remains the default and is unchanged**.
+The new path is selected by a Nextflow parameter (see §8). Output of the new path must be
+**bit-identical** to classic VALIS *in the regime where classic VALIS itself tiles* (see §5).
+
+### Non-goals (this session / this spec)
+
+- No implementation — this document is the design + parameter set only.
+- No change to the rigid / feature-matching / micro-registration stages' *algorithms*
+  (they are reused verbatim; only their orchestration changes).
+- No attempt to make the *whole-image* (sub-threshold) optical-flow path tiled-identical
+  (it is mathematically not reproducible by tiling — see §5).
+
+---
+
+## 2. Reference pinning — what "classic VALIS" means here
+
+The registration container (`containers/valis/Dockerfile`) installs VALIS via an
+**unpinned** `pip install valis-wsi`, which currently resolves to **1.2.0**. The pipeline's
+`bin/register.py` imports `from valis import registration`, i.e. the **pip site-packages
+copy**, *not* the repo's `valis_lib/` directory (Nextflow never stages `valis_lib/` into the
+task workdir).
+
+> **Therefore "classic VALIS" = `valis-wsi 1.2.0`'s `NonRigidTileRegistrar`.**
+> The repo's `valis_lib/` is a stale, locally-modified reading copy (it normalizes tiles
+> differently — `get_channel_stats` on masked tile pixels vs 1.2.0's
+> `collect_img_stats([fixed, moving])`). **Do not** use `valis_lib/` as the fidelity
+> reference.
+
+### Recommended hardening (separate, small change)
+
+Pin the container: `pip install valis-wsi==1.2.0`. An unpinned install means a future image
+rebuild can silently change the "classic" baseline and break bit-identical verification.
+
+---
+
+## 3. The classic tiled algorithm (`NonRigidTileRegistrar`, 1.2.0)
+
+After rigid alignment, for each moving slide downsampled to
+`max_non_rigid_registration_dim_px`, VALIS computes the non-rigid displacement field like so
+(`valis/non_rigid_registrars.py`, `valis/warp_tools.py`):
+
+1. **Grid** — `warp_tools.get_grid_bboxes(shape_rc, tile_wh, tile_wh, inclusive=True)`
+   → regular `n_rows × n_cols` grid of `tile_wh`-sized bboxes (default **512**).
+2. **Expand** — each bbox grown by `tile_buffer` overlap via
+   `warp_tools.expand_bbox(bbox, tile_buffer, shape_rc)` (default buffer **100**).
+3. **Per-tile registration** (the parallel kernel — currently `joblib`/`pqdm` over threads,
+   one call to `reg_tile(i)` per tile):
+   - `extract_area` the moving + fixed (+ mask) tile from the pyvips images.
+   - Grayscale / process the tile, then `norm_tiles(...)` (tile-local intensity stats via
+     `collect_img_stats([fixed, moving])`; fall back to global `target_stats` on `ValueError`).
+   - `OpticalFlowWarper().register(moving_normed, fixed_normed)` → per-tile **backward**
+     displacement `bk_dxdy`; `fwd_dxdy = warp_tools.get_inverse_field(bk_dxdy)`.
+   - Empty tiles (constant / fully masked) → zero displacement field, skipped.
+4. **Stitch** — `warp_tools.stitch_tiles(tiles, expanded_bboxes, n_rows, n_cols, tile_buffer)`
+   blends overlapping per-tile fields into one full-size `bk_dxdy` / `fwd_dxdy`.
+5. **Compose & warp** — `serial_non_rigid` composes the stitched field with the rigid
+   transform (and, in `align_to_reference` mode, the reference's field), then
+   `warp_and_save_slide` applies the full field to the full-resolution slide.
+
+**Why this parallelizes cleanly:** step 3 is side-effect-free per tile — each tile's field
+depends *only* on its own `(moving, fixed, mask)` crop and the (deterministic) DeepFlow
+optical flow. Thread order does not affect the result; stitching is deterministic by tile
+index. So replacing the thread pool with a Nextflow fan-out changes **nothing numerically**.
+
+---
+
+## 4. Architecture — Approach A (per-tile fan-out)
+
+Four Nextflow processes replace the monolithic `REGISTER`, selected only when the toggle is on:
+
+```
+                                   ┌──────────────────────────────────────────┐
+  per patient                      │  classic REGISTER (default, unchanged)     │
+  ──────────────►  toggle off ───► │  single process, VALIS internal threading  │
+                                   └──────────────────────────────────────────┘
+       │ toggle on
+       ▼
+┌────────────────┐   per slide   ┌────────────────┐  fan-out: 1 task / tile  ┌────────────────┐
+│  REG_PREP      │──────────────►│ (tile manifest)│─────────────────────────►│  REG_TILE      │
+│  rigid align + │  moving.v,    │  bbox_i, cfg   │                          │  extract tile, │
+│  downsample +  │  fixed.v,     └────────────────┘                          │  DeepFlow,     │
+│  grid bboxes   │  mask.v,                                                   │  emit dxdy_i   │
+└────────────────┘  bboxes.json                                              └───────┬────────┘
+                                                                                     │ fan-in (groupTuple by slide)
+                                                                                     ▼
+                                                              ┌────────────────┐  ┌────────────────┐
+                                                              │  REG_WARP      │◄─│  REG_STITCH    │
+                                                              │  apply full    │  │ stitch_tiles → │
+                                                              │  field to L0,  │  │ full bk/fwd    │
+                                                              │  save ome.tiff │  │ + compose      │
+                                                              └────────────────┘  └────────────────┘
+```
+
+| Process | Granularity | Reads | Emits | Label |
+|---|---|---|---|---|
+| `REG_PREP` | 1 / moving slide | preprocessed slides + reference | `moving.v`, `fixed.v`, `mask.v` (tiled pyramidal), `bboxes.json`, pickled registrar state | `process_high` (loads full image once to downsample) |
+| `REG_TILE` | **1 / tile** | `moving.v`+`fixed.v`+`mask.v` (lazy `extract_area` of one bbox), `bboxes.json[i]` | `dxdy_<slide>_<i>.v` (bk+fwd) | `process_low` (one tile in RAM) |
+| `REG_STITCH` | 1 / slide (fan-in) | all `dxdy_<slide>_*.v` + `bboxes.json` | full `bk_dxdy.v`, `fwd_dxdy.v` | `process_medium` |
+| `REG_WARP` | 1 / slide | full field + full-res source slide | `*_registered.ome.tiff` | `process_high` (full-res I/O) |
+
+`REG_TILE` is the fan-out unit. Nextflow's `groupTuple(by: slide_id, size: n_tiles)` re-collects
+tiles for `REG_STITCH`; `n_tiles` is known from `REG_PREP`'s manifest, enabling **streaming**
+group-by (consistent with the repo's existing streaming `groupTuple` pattern — see
+`CsvUtils.countImagesPerPatient`).
+
+> The reference slide produces an identity (zero) field and skips `REG_TILE` entirely.
+
+---
+
+## 5. Fidelity — the regime boundary (read this before claiming "bit-identical")
+
+VALIS tiles non-rigid registration **only** when estimated memory exceeds the threshold
+(`registration.py`): `use_tiler = (img_gb + displacement_gb + processed_img_gb) > TILER_THRESH_GB (10)`.
+
+- **Above threshold (big images):** classic VALIS tiles with `tile_wh=512`, `tile_buffer=100`.
+  Our distributed path reproduces *exactly this* tile grid + kernel + stitch → **bit-identical**.
+- **Below threshold (small images):** classic VALIS runs DeepFlow on the **whole image** (no
+  tiles). A tiled run **cannot** reproduce this — seams/blending differ. There is no set of
+  tile parameters that makes tiling equal whole-image optical flow.
+
+### Consequence for the toggle (must be explicit)
+
+The distributed mode is **for the tiling regime**. Two honest options for sub-threshold images
+(decision deferred to implementation, default = option (a)):
+
+- **(a) Auto-fallback (recommended default):** if `REG_PREP` computes `est_GB ≤ threshold`,
+  emit a single full-image "tile" and let one `REG_TILE` task run whole-image DeepFlow — which
+  *is* bit-identical to classic's whole-image path. Distribution kicks in only when classic
+  would tile. This makes the toggle a strict superset of classic behavior.
+- **(b) Force-tile both sides:** lower the effective threshold so classic *also* tiles, making
+  both paths share the tiled reference. Changes classic output for small images — only for users
+  who explicitly want uniform tiling. Off by default.
+
+### Other fidelity-critical details to replicate verbatim
+
+1. **Reuse VALIS functions, do not reimplement.** `REG_TILE` instantiates
+   `valis.non_rigid_registrars.NonRigidTileRegistrar`, sets its attributes
+   (`moving_img`, `fixed_img`, `mask`, `expanded_bboxes`, processing config, `target_stats`),
+   and calls its own `reg_tile(i, lock)` for a single index. `REG_STITCH` calls
+   `warp_tools.stitch_tiles(...)`. Fidelity is then guaranteed *by construction*.
+2. **Identical grid.** `REG_PREP` must call the same `get_grid_bboxes(..., inclusive=True)` and
+   `expand_bbox(..., tile_buffer, shape_rc)` so tile indices/bboxes match 1.2.0 exactly.
+3. **`target_stats` fallback.** The global `target_stats` used by `norm_tiles`'s `ValueError`
+   fallback must be computed in `REG_PREP` (the same way `serial_non_rigid` passes it) and
+   shipped to every `REG_TILE`.
+4. **Displacement composition.** The stitched `bk_dxdy` must be composed with the rigid
+   transform / reference field **exactly** as `serial_non_rigid` does
+   (`bk_dxdy_from_ref = bk_dxdy + moving_bk_dxdy`, `remove_invasive_displacements`,
+   `get_inverse_field`). **Strongly prefer keeping this composition inside a VALIS call**
+   (see §6, Strategy 2) rather than hand-porting it.
+5. **`get_inverse_field(n_inter=10)`** default must be preserved when inverting fields.
+6. **dtype/precision.** Tile fields are `float32` pyvips images (`numpy2vips(np.dstack(...).astype(np.float32))`).
+   Round-tripping through disk must stay `float32` (lossless container, e.g. uncompressed/LZW
+   `.v` or `.tif`), never quantize.
+
+---
+
+## 6. Two hooking strategies (decision for the plan; recommend Strategy 2)
+
+The per-tile *kernel* externalizes cleanly. The risk is the surrounding **composition** (§5.4).
+
+- **Strategy 1 — externalize `calc()` + reproduce composition.** `REG_STITCH`/`REG_WARP`
+  re-implement `serial_non_rigid`'s field composition in our own script. *Pro:* fewer VALIS
+  internals re-run. *Con:* we own a faithful port of intricate composition math — a real
+  bit-identical hazard.
+- **Strategy 2 — inject pre-computed tiles back into VALIS (recommended).** Monkeypatch
+  `NonRigidTileRegistrar.calc()` so that, instead of computing tiles, it **reads** the
+  per-tile `dxdy` fields produced by the distributed `REG_TILE` tasks and only runs
+  `stitch_tiles` + VALIS's own downstream composition. `REG_PREP` and the finalize step run
+  inside real VALIS calls (registrar state pickled by `REG_PREP`, reloaded by the finalizer),
+  so **all composition stays in VALIS** → bit-identical by construction. *Con:* registrar
+  state must be serialized/reloaded (VALIS already pickles its registrar to `results_dir`).
+
+Recommendation: **Strategy 2**, because the hard requirement is bit-identical and the
+composition is the part most likely to drift if re-implemented.
+
+> **Process-decomposition note:** under Strategy 2 the §4 `REG_STITCH` + `REG_WARP` boxes
+> collapse into a single `REG_FINALIZE` process — the reloaded VALIS registrar runs the
+> patched `calc()` (read tiles → `stitch_tiles`), then VALIS's own composition and
+> `warp_and_save_slide` in one call. The four-box diagram in §4 reflects the *logical* stages;
+> Strategy 2's *physical* layout is `REG_PREP → REG_TILE (fan-out) → REG_FINALIZE`. The plan
+> picks the final decomposition.
+
+---
+
+## 7. Data formats & I/O contract between processes
+
+| Artifact | Format | Notes |
+|---|---|---|
+| `moving.v` / `fixed.v` / `mask.v` | pyvips `.v` or tiled pyramidal OME-TIFF | Must support cheap `extract_area` (tiled, so `REG_TILE` reads only its bbox region, not the whole image — this is what bounds RAM). |
+| `bboxes.json` | JSON | `{ slide_id, shape_rc, tile_wh, tile_buffer, n_rows, n_cols, target_stats, tiles: [{idx, bbox_xywh, expanded_bbox_xywh, empty?}] }` |
+| `dxdy_<slide>_<i>.v` | float32 pyvips, 2 bands (bk) + 2 bands (fwd) | One per non-empty tile. Lossless. |
+| registrar state | VALIS pickle (Strategy 2) | Written by `REG_PREP`, reloaded by finalizer. |
+| `*_registered.ome.tiff` | OME-TIFF | Same output contract as classic `REGISTER` (so `channels_manifest.json`, downstream segmentation/quant are unaffected). |
+
+The new path must still emit the same `versions.yml`, `*.size.csv`, and `channels_manifest.json`
+as classic `REGISTER` so QC aggregation and the rest of the pipeline don't change.
+
+---
+
+## 8. Parameter design (Nextflow)
+
+### 8.1 The toggle
+
+| Param | Default | Meaning |
+|---|---|---|
+| `params.reg_distributed_tiling` | `false` | Master switch. `false` → classic `REGISTER` (unchanged). `true` → `REG_PREP → REG_TILE → REG_STITCH → REG_WARP`. |
+| `params.reg_dist_sub_threshold` | `'auto'` | `'auto'` = single whole-image tile below VALIS's tiler threshold (§5a). `'force'` = tile regardless (§5b). |
+| `params.reg_dist_tiles_per_task` | `1` | Tiles per `REG_TILE` task. `1` = Approach A (max granularity). Higher = batch (Approach B). Does **not** affect output, only scheduling. |
+
+Routing lives in `subworkflows/local/registration.nf`: branch on `params.reg_distributed_tiling`.
+Wired through `nextflow_schema.json` + `nextflow.config` like existing `reg_*` params, and
+documented in `docs/registration_methods.md`.
+
+### 8.2 The bit-identical VALIS parameter set
+
+Because "classic" = the current `REGISTER` process **as configured**, the distributed path
+must consume the **same** VALIS parameters the classic path already passes (memory-mode preset,
+reference, crop, feature detector/matcher, micro-registration, interpolation). The *only* added
+parameters are the tile-grid knobs, which must equal VALIS 1.2.0's internal tiling defaults so
+the grid matches what classic VALIS computes for itself:
+
+| VALIS parameter | Value for bit-identical | Source |
+|---|---|---|
+| non-rigid registrar | `OpticalFlowWarper` (DeepFlow) | `register.py` default; 1.2.0 default |
+| `optical_flow_obj` | `cv2.optflow.createOptFlow_DeepFlow()` | 1.2.0 default |
+| `n_grid_pts` | `50` | 1.2.0 default |
+| `sigma_ratio` | `0.005` | 1.2.0 default |
+| `paint_size` | `5000` | 1.2.0 default |
+| `fold_penalty` | `1e-6` | 1.2.0 default |
+| `smoothing_method` | `None` | 1.2.0 default |
+| `tile_wh` | **`512`** (`DEFAULT_NR_TILE_WH`) | must match classic's internal tiling |
+| `tile_buffer` | **`100`** (`NonRigidTileRegistrar` default) | must match classic's internal tiling |
+| `get_grid_bboxes(inclusive=...)` | **`True`** | 1.2.0 call site |
+| `get_inverse_field(n_inter=...)` | **`10`** | 1.2.0 default |
+| `max_non_rigid_registration_dim_px` | = current preset (`high` → `4096`) | inherit from `memory_mode`; must match classic |
+| `max_processed_image_dim_px` | = current preset (`high` → `2048`) | inherit from `memory_mode` |
+| `reference_img_f`, `align_to_reference`, `crop` | = current (`ref`, `True`, `"reference"`) | inherit from classic call |
+| feature detector / matcher | `SuperPointFD` / `SuperGlueMatcher` | inherit from `memory_mode` |
+| micro-registration | same as classic (`MicroRigidRegistrar`, `tile_wh=2048`) unless `--skip-micro-registration` | inherit |
+
+> The new tile knobs (`tile_wh=512`, `tile_buffer=100`) are **not** free tuning parameters if
+> bit-identical is required — they are pinned to VALIS's internals. They become free only if the
+> fidelity bar is relaxed to "equivalent quality."
+
+---
+
+## 9. Verification plan
+
+1. **Golden baseline:** run the classic `REGISTER` (toggle off) on a *big-enough* test slide
+   (one that crosses `TILER_THRESH_GB` so classic actually tiles — may require an upscaled or
+   synthetic large fixture, since `tests/testdata` is intentionally tiny).
+2. **Distributed run:** same inputs, toggle on, `tiles_per_task=1`.
+3. **Compare:**
+   - Per-slide stitched `bk_dxdy` / `fwd_dxdy`: exact array equality (or `max |Δ| == 0`).
+   - Final `*_registered.ome.tiff`: pixel-exact diff per channel.
+   - VALIS `error_df` registration metrics: identical.
+4. **Granularity invariance:** `tiles_per_task ∈ {1, 4, n_tiles}` must all produce identical
+   output (proves batching is purely a scheduling concern).
+5. **Sub-threshold parity (`'auto'`):** a small slide with toggle on must match classic exactly
+   (single whole-image tile path).
+6. **Stub tests:** add `nf-test` stubs for `REG_PREP/REG_TILE/REG_STITCH/REG_WARP` so the
+   distributed path runs in the existing fast stub CI loop.
+
+DeepFlow is deterministic, so equality (not just tolerance) is the right bar in the tiling regime.
+
+---
+
+## 10. Risks & open questions
+
+| # | Risk | Mitigation |
+|---|---|---|
+| R1 | Hand-ported composition diverges from VALIS (§5.4) | Use Strategy 2 (keep composition in VALIS). |
+| R2 | `extract_area` on a non-tiled `.v` reads the whole image → no RAM win | `REG_PREP` must write **tiled** images so tile reads are localized. Verify with `vips` header. |
+| R3 | Unpinned `valis-wsi` changes the baseline | Pin `==1.2.0` in Dockerfile (§2). |
+| R4 | `target_stats` fallback path not reproduced → off-by-epsilon tiles | Compute & ship `target_stats` from `REG_PREP` (§5.3); covered by verification step 3. |
+| R5 | Known VALIS bug: passing `NonRigidTileRegistrar` explicitly leaves `fwd_dxdy=None` (pyvips rejected by Slide setter) — already documented in `register.py:558-566` | Strategy 2 sidesteps it (we don't change the registrar class VALIS picks; we only feed `calc()` precomputed tiles). Keep the existing `fwd_dxdy`-repair safety net. |
+| R6 | Per-tile JVM/BioFormats startup cost if `REG_TILE` initializes VALIS heavily | `REG_TILE` should need only pyvips + the optical-flow kernel, **not** the JVM (no BioFormats I/O at tile stage). Confirm `import` cost during planning. |
+| R7 | Tiny test data never crosses the tiler threshold | Add a large synthetic fixture for the golden-baseline test (verification step 1). |
+| R8 | `tiles_per_task` batching accidentally changes normalization (e.g. shared stats across a batch) | Each tile must still normalize independently; batch only loops `reg_tile(i)` per index. Covered by verification step 4. |
+
+---
+
+## 11. Out of scope
+
+- Parallelizing rigid / feature-matching / micro-registration (kept as-is, per slide).
+- Changing default behavior for any existing user (toggle defaults off).
+- GPU optical flow, alternative non-rigid registrars, or registration-quality improvements.
+
+---
+
+## 12. Next step
+
+On approval, proceed to `writing-plans` to produce the implementation plan
+(process scaffolding, the Strategy-2 monkeypatch, schema/config wiring, large test fixture,
+and the verification harness above).
