@@ -177,7 +177,7 @@ RUN python3 -m pip install numpy
 # Install VALIS-WSI and its dependencies
 # Pinned to 1.0.0: the version in the deployed image and the bit-identical reference
 # for distributed tiled registration. Unpinned would drift to 1.2.0 (different tile kernel).
-RUN python3 -m pip install valis-wsi==1.0.0
+RUN python3 -m pip install --retries 10 --timeout 120 --resume-retries 10 valis-wsi==1.0.0
 
 # Create a working directory
 WORKDIR /workspace
