@@ -116,8 +116,16 @@ RUN apt-get update && apt-get install -y \
     libffi-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# Install meson and ninja-build BEFORE building libvips (the build uses them).
+# (Original ordering installed these after the first libvips attempt, which fails
+#  under BuildKit with exit 127 before the fallback rebuild can run.)
+RUN apt-get update && apt-get install -y \
+    meson \
+    ninja-build \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install libvips from source (version >= 8.11 required)
-# Using version 8.15.1 for stability
+# Using version 8.15.1 for stability. Non-fatal: the guarded rebuild below is the safety net.
 RUN wget https://github.com/libvips/libvips/releases/download/v8.15.1/vips-8.15.1.tar.xz && \
     tar -xf vips-8.15.1.tar.xz && \
     cd vips-8.15.1 && \
@@ -127,7 +135,7 @@ RUN wget https://github.com/libvips/libvips/releases/download/v8.15.1/vips-8.15.
     ninja install && \
     ldconfig && \
     cd ../.. && \
-    rm -rf vips-8.15.1*
+    rm -rf vips-8.15.1* || echo "first libvips build failed; fallback will retry"
 
 # Install meson and ninja-build (build tools for libvips)
 RUN apt-get update && apt-get install -y \
