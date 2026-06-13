@@ -440,6 +440,53 @@ Run via `bin/spikes/spike_externalize_tiles.py` on the P001 test slides. The spi
 
 ---
 
+## 6.2 Revised architecture (decision 2026-06-14, after §6.1 spike) — Option A: plain-data handoff
+
+Chosen with the user (goal: cheap RAM). The per-step decomposition (the RAM win) is preserved; the
+only change vs §4/§6 is that the PREP→FINALIZE handoff is **plain serializable data**, not a pickled
+`Valis` (Blocker 1). Verified feasible against the 1.0.0 `Slide.warp_slide` source (it already
+supports a disk-backed `dxdy`: `pyvips.Image.new_from_file(bk_dxdy_f)`, registration.py:626).
+
+**Why Option A for low RAM:** the RAM win comes from the decomposition itself (no-JVM `REG_TILE`
+swarm; PREP/FINALIZE separated so no single node holds JVM-heap *and* non-rigid *and* full-res warp).
+Option A additionally **reuses VALIS's own `warp_and_save_slide`, which streams the full-res warp via
+`pyvips.cache_set_max(0)`** (registration.py:35) — bounded RAM regardless of slide size. Re-rolling
+the warp ourselves (Strategy 1) would risk loading full-res into RAM; Option A avoids that.
+
+### Physical stages (Strategy 2 kernel, Option-A handoff)
+
+```
+REG_PREP  (JVM)  rigid only; per slide PROCESS images to the tiler's 2-D form (src_f available here,
+                 so ChannelGetter works), dump:
+                   tiler inputs: moving.v (processed, 2-D), fixed.v, mask.v, expanded_bboxes(.npy),
+                                 target_stats(.npy), manifest.json   [processing_cls = None downstream]
+                   warp state:   per-slide M, processed/reg/aligned shapes, bg_color, crop, src_f,
+                                 slide_dimensions_wh, reference shapes + crop mask   (.npy / .json)
+                 halt is signalled by SIDE EFFECT (dump dir populated); register() swallowing the
+                 hook's exception and returning None is expected (Blocker 2). NO registrar pickle.
+  ▼ fan-out 1 task/tile
+REG_TILE  (no JVM, ~1-2 GB)  VALIS reg_tile on the pre-processed 2-D tile with processing_cls=None
+                 (the deterministic path Part A/B proved bit-identical). Emits bk_<i>.v / fwd_<i>.v.
+  ▼ fan-in (groupTuple by slide)
+REG_FINALIZE (JVM)  warp_tools.stitch_tiles(tiles) -> full bk/fwd; rebuild a MINIMAL VALIS Slide from
+                 the dumped plain warp state + stitched dxdy; call slide.warp_and_save_slide(...)
+                 (+ register_micro in-process if micro on, §5A). All warp/compose math stays in VALIS.
+```
+
+### Consequences for the plan
+- **Task 4** (`EXTERNAL_TILE_HOOK` patch): keep, but only the **dump/halt** hook is used (by PREP).
+  FINALIZE does NOT re-enter `calc()`; it stitches directly. The hook signals halt via the
+  filesystem, not a raised exception that PREP catches.
+- **Task 5** (`reg_prep.py`): dump plain warp state + processed 2-D tiler inputs; do **not** pickle
+  the registrar. Process fluorescence to its DAPI channel here.
+- **Task 7** (`reg_finalize.py`): stitch + rebuild minimal Slide + `warp_and_save_slide`; no
+  registrar reload.
+- **Open de-risk before Task 5/7:** a small spike to confirm a hand-rebuilt `Slide` (plain attrs +
+  disk dxdy) warps **bit-identically** to a full classic run — the Option-A analogue of the Task-1
+  gate. This is the next make-or-break.
+
+---
+
 ## 7. Data formats & I/O contract between processes
 
 | Artifact | Format | Notes |

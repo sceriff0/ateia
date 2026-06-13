@@ -1,4 +1,21 @@
-# HANDOFF — Distributed VALIS tiled registration (paused 2026-06-13)
+# HANDOFF — Distributed VALIS tiled registration (updated 2026-06-14)
+
+## ⏩ Latest state (2026-06-14) — read spec §6.1 + §6.2 first
+
+- ✅ **Task 1 spike DONE** (commit `fb7aae6`): tile externalization is **bit-identical** (`max|Δ|=0`,
+  3×3 grid, bk+fwd). Spike kept at `bin/spikes/spike_externalize_tiles.py`.
+- ✅ **Phase 1 DONE** (commits `7efd649`, `2d52253`): `bin/utils/tile_grid.py` + `tile_io.py` with
+  passing unit tests (run in-image: `docker run ... python3 tests/unit/<f>.py`).
+- ⚠️ **3 blockers found → spec §6.1**: (1) pyvips images are unpicklable ⇒ no cross-process registrar
+  handoff; (2) `register()` swallows exceptions ⇒ halt via filesystem, not raise; (3) `ChannelGetter`
+  crashes in `process_tile` ⇒ classic tiling broken for fluorescence.
+- 🔀 **Architecture revised → Option A (plain-data handoff), spec §6.2** (decided with user, goal:
+  cheap RAM). RAM win = the per-step decomposition (no-JVM `REG_TILE` swarm), unchanged; FINALIZE
+  rebuilds a minimal `Slide` from plain dumped state + disk `dxdy` and reuses VALIS's streaming warp.
+- ▶️ **NEXT: Task 4.5 — Option-A FINALIZE spike** (the next make-or-break): prove a hand-rebuilt
+  `Slide` + disk-loaded stitched `dxdy` → `warp_and_save_slide` is **pixel-identical** to a full
+  classic run. Then finalize Tasks 4/5/7 per the revised plan. (Sections below are the original
+  2026-06-13 handoff, still valid for environment/build context.)
 
 ## How to restart with full context (do this first)
 

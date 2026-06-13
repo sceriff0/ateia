@@ -325,6 +325,32 @@ git commit -m ":sparkles: Add lossless float32 tile-field I/O"
 
 ---
 
+> ### ✅ Phase 1 DONE (2026-06-14) — Tasks 2 & 3 complete
+> - `bin/utils/tile_grid.py` + `tests/unit/test_tile_grid.py` — grid matches VALIS 1.0.0 exactly (3/3).
+> - `bin/utils/tile_io.py` + `tests/unit/test_tile_io.py` — lossless float32 `.v` round-trip (3/3).
+> - Unit tests carry a stdlib `__main__` runner (pytest not installed in `mirage-valis:1.0.0`); run
+>   them with `docker run --rm -v "$PWD":/work -w /work mirage-valis:1.0.0 python3 tests/unit/<f>.py`.
+
+> ### 🔀 Phase 2 revised — Option A (plain-data handoff), decided 2026-06-14 (spec §6.2)
+> The §6.1 spike killed the pickled-registrar handoff. Phase 2 now uses a **plain-data** PREP→FINALIZE
+> contract (see spec §6.2 for the stage diagram + dump contract). Net changes to the tasks below:
+> - **Before Task 5:** add **Task 4.5 — Option-A FINALIZE spike** (the next make-or-break): rebuild a
+>   minimal `Slide` from plain dumped warp-state (M, processed/reg/aligned shapes, bg_color, crop,
+>   src_f, slide_dimensions_wh, ref shapes/mask) + a disk-loaded stitched `dxdy`, call
+>   `warp_and_save_slide`, and assert the output is **pixel-identical** to a full classic run. Only
+>   after this passes, finalize Tasks 5/7.
+> - **Task 4:** only the dump/halt hook is needed (FINALIZE stitches directly, never re-enters
+>   `calc()`); halt is filesystem-signalled, not a caught exception.
+> - **Task 5 (`reg_prep.py`):** dump plain warp-state + **processed 2-D** tiler inputs (process
+>   fluorescence to its DAPI channel here, where `src_f` is live); `processing_cls=None` downstream;
+>   **no** registrar pickle.
+> - **Task 6 (`reg_tile.py`):** unchanged in spirit — runs on the pre-processed 2-D tile with
+>   `processing_cls=None`.
+> - **Task 7 (`reg_finalize.py`):** stitch + rebuild minimal Slide + `warp_and_save_slide`
+>   (+ `register_micro` if on); no registrar reload.
+> - **Task 10:** fluorescence parity must compare distributed vs **whole-image** classic (classic
+>   tiling crashes on fluorescence, Blocker 3); brightfield may compare vs classic tiling directly.
+
 ## Phase 2 — Stage scripts
 
 ### Task 4: explicit `EXTERNAL_TILE_HOOK` seam (spec §6 Option B) + `valis_tiling.py`
