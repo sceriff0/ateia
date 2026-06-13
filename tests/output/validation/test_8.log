@@ -1,0 +1,9 @@
+[33mNextflow 26.04.3 is available - Please consider updating your version to it(B[m
+
+[1m[38;5;232m[48;5;43m N E X T F L O W [0;2m  ~  [mversion 25.04.7[m
+[K
+Launching[35m `main.nf` [0;2m[[0;1;36mclever_boyd[0;2m] DSL2 - [36mrevision: [0;36m06a8e4b39d[m
+[K
+ERROR ~ Input CSV contains no data rows: /Users/valer/Desktop/Github/mirage/tests/testdata/empty_samplesheet.csv
+
+ -- Check script 'workflows/mirage.nf' at line: 103 or see '.nextflow.log' file for more details

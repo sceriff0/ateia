@@ -1,0 +1,9 @@
+dipy==1.9.0
+h5py==3.11.0
+nd2==0.10.1
+nd2reader==3.3.0
+opencv-python==4.10.0.82
+pandas==2.2.2
+tifffile==2023.4.12
+matplotlib==3.9.2
+BaSiCPy==1.2.0

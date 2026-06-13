@@ -40,6 +40,14 @@ class ParamUtils {
         }
     }
 
+    static void validateCompartmentQuant(boolean quantifyCompartments, boolean expanded) {
+        if (expanded && !quantifyCompartments) {
+            throw new IllegalArgumentException(
+                "--expanded_quantification requires --quantify_compartments to be true."
+            )
+        }
+    }
+
     static List requiredColumnsForStep(String step) {
         def requirements = [
             preprocessing : ['patient_id','path_to_file','is_reference','channels'],

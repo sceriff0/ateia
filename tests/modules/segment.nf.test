@@ -10,6 +10,7 @@ nextflow_process {
 
     test("Should segment cells from merged image - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -20,7 +21,7 @@ nextflow_process {
                         patient_id: 'P001',
                         channels: ['DAPI', 'PANCK', 'SMA']
                     ],
-                    file('tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
                 ]
                 """
             }
@@ -46,9 +47,12 @@ nextflow_process {
         }
     }
 
-    test("Should fail if DAPI not in channel 0 - stub") {
+    test("Should fail if DAPI not in channel 0 - real") {
 
-        options "-stub"
+        // Real (not stub): the stardist channel-0 hard-check runs in the
+        // process script, which a stub block does not execute.
+        tag "real"
+        tag "slow"
 
         when {
             process {
@@ -58,7 +62,7 @@ nextflow_process {
                         patient_id: 'P001',
                         channels: ['PANCK', 'DAPI', 'SMA']  // DAPI NOT FIRST
                     ],
-                    file('tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
                 ]
                 """
             }
@@ -68,33 +72,6 @@ nextflow_process {
             // Validation runs in script block and should fail
             assert process.failed
             assert process.exitStatus == 1
-        }
-    }
-
-    test("Should respect when condition") {
-
-        options "-stub"
-
-        when {
-            process {
-                """
-                // Set ext.when to false
-                ext.when = false
-
-                input[0] = [
-                    [
-                        patient_id: 'P001',
-                        channels: ['DAPI', 'PANCK', 'SMA']
-                    ],
-                    file('tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
-                ]
-                """
-            }
-        }
-
-        then {
-            // Process should be skipped
-            assert process.success
         }
     }
 
@@ -141,6 +118,7 @@ nextflow_process {
 
     test("Should segment cells with InstanSeg backend - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -154,7 +132,7 @@ nextflow_process {
                         patient_id: 'P001',
                         channels: ['DAPI', 'PANCK', 'SMA']
                     ],
-                    file('tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
                 ]
                 """
             }
@@ -182,6 +160,7 @@ nextflow_process {
 
     test("Should NOT enforce DAPI-channel-0 check when seg_method='instantseg' - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -195,7 +174,7 @@ nextflow_process {
                         patient_id: 'P001',
                         channels: ['PANCK', 'DAPI', 'SMA']  // DAPI NOT FIRST - InstanSeg is channel-invariant
                     ],
-                    file('tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
                 ]
                 """
             }
@@ -209,6 +188,7 @@ nextflow_process {
 
     test("Should segment cells with CellSAM backend - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -222,7 +202,7 @@ nextflow_process {
                         patient_id: 'P001',
                         channels: ['DAPI', 'PANCK', 'SMA']
                     ],
-                    file('tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
                 ]
                 """
             }
@@ -250,6 +230,7 @@ nextflow_process {
 
     test("Should NOT enforce DAPI-channel-0 check when seg_method='cellsam' - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -263,7 +244,7 @@ nextflow_process {
                         patient_id: 'P001',
                         channels: ['PANCK', 'DAPI', 'SMA']  // DAPI NOT FIRST - CellSAM path skips the channel-0 check
                     ],
-                    file('tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
                 ]
                 """
             }

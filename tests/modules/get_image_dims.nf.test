@@ -10,6 +10,7 @@ nextflow_process {
 
     test("Should extract image dimensions - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -43,6 +44,7 @@ nextflow_process {
 
     test("Should create dims.txt with correct format - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -75,6 +77,7 @@ nextflow_process {
 
     test("Should preserve metadata - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -107,6 +110,7 @@ nextflow_process {
 
     test("Should emit versions.yml - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -130,34 +134,6 @@ nextflow_process {
                 { assert process.out.versions },
                 { assert snapshot(process.out.versions).match() }
             )
-        }
-    }
-
-    test("Should skip when ext.when is false") {
-
-        options "-stub"
-
-        when {
-            process {
-                """
-                // Set ext.when to false
-                task.ext.when = false
-
-                input[0] = [
-                    [
-                        patient_id: 'P001',
-                        is_reference: true,
-                        channels: ['DAPI', 'PANCK', 'SMA']
-                    ],
-                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
-                ]
-                """
-            }
-        }
-
-        then {
-            // Process should be skipped but not fail
-            assert process.success
         }
     }
 

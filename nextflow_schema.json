@@ -276,6 +276,16 @@
             "title": "Quantification options",
             "type": "object",
             "properties": {
+                "quantify_compartments": {
+                    "type": "boolean",
+                    "description": "Quantify signal per compartment (Nucleus / Cytoplasm / Cell) by routing the nuclear mask into QUANTIFY alongside the whole-cell mask, and emit both segmentations into the GeoJSON. Cytoplasm = whole-cell minus nucleus.",
+                    "default": false
+                },
+                "expanded_quantification": {
+                    "type": "boolean",
+                    "description": "With quantify_compartments, also compute Median and Sum (integrated density) per compartment in addition to Mean. Requires quantify_compartments.",
+                    "default": false
+                },
                 "skip_postprocessing_qc": {
                     "type": "boolean",
                     "description": "Skip postprocessing quality control (segmentation overlay, cell stats, intensity distributions).",

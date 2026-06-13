@@ -23,10 +23,10 @@ process SEGMENT {
     label 'process_high'
 
     container { params.seg_method == 'cellsam'
-                ? 'bolt3x/attend_image_analysis:cellsam'
+                ? "${params.container_registry}/cellsam:${params.container_tag}"
                 : params.seg_method == 'instantseg'
-                ? 'bolt3x/attend_image_analysis:instant_seg'
-                : 'bolt3x/attend_image_analysis:segmentation_gpu' }
+                ? "${params.container_registry}/istantseg:${params.container_tag}"
+                : "${params.container_registry}/segmentation:${params.container_tag}" }
 
     input:
     tuple val(meta), path(merged_file)

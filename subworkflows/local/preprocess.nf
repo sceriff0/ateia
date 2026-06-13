@@ -71,7 +71,7 @@ workflow PREPROCESSING {
         .collectFile(
             name: 'preprocessed.csv',
             newLine: true,
-            storeDir: "${launchDir}/csv",
+            storeDir: "${params.outdir ?: launchDir}/csv",
             seed: 'patient_id,preprocessed_image,is_reference,channels'
         )
 

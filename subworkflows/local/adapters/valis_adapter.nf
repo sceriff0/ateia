@@ -86,7 +86,7 @@ workflow VALIS_ADAPTER {
             // Guard against duplicate channel signatures (would silently overwrite)
             if (channel_key_to_meta.size() != metas_list.size()) {
                 def signatures = metas_list.collect { it.channels.toSorted().join('_').toLowerCase() }
-                def duplicates = signatures.groupBy { it }.findAll { _, v -> v.size() > 1 }.keySet()
+                def duplicates = signatures.groupBy { it }.findAll { _sig, v -> v.size() > 1 }.keySet()
                 throw new Exception("""
                 ❌ VALIS adapter: Duplicate channel signatures for patient ${patient_id}
                 📍 ${metas_list.size()} slides but only ${channel_key_to_meta.size()} unique channel sets

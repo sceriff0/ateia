@@ -1,4 +1,3 @@
-import static ParamUtils.*
 
 /*
 ========================================================================================
@@ -8,6 +7,7 @@ import static ParamUtils.*
 
 include { SEGMENT                  } from '../../modules/local/segment'
 include { EXTRACT_CELL_PROPERTIES } from '../../modules/local/extract_cell_properties'
+include { EXTRACT_NUCLEI_PROPERTIES } from '../../modules/local/extract_nuclei_properties'
 include { SPLIT_CHANNELS           } from '../../modules/local/split_channels'
 include { QUANTIFY                 } from '../../modules/local/quantify'
 include { MERGE_QUANT_CSVS         } from '../../modules/local/quantify'
@@ -57,13 +57,30 @@ workflow POSTPROCESSING {
 
     SEGMENT(ch_references)
 
-    def ch_cell_mask = SEGMENT.out.cell_mask
+    def ch_cell_mask   = SEGMENT.out.cell_mask
+    def ch_nuclei_mask = SEGMENT.out.nuclei_mask
 
     // ========================================================================
     // CELL PROPERTIES - Extract morphology + contours from mask (runs in PARALLEL with SPLIT_CHANNELS)
     // Computes regionprops ONCE instead of N times in QUANTIFY
     // ========================================================================
     EXTRACT_CELL_PROPERTIES(ch_cell_mask)
+
+    // Nucleus contours (re-keyed to cell labels) for dual-segmentation GeoJSON export.
+    // Only computed when per-compartment quantification is enabled.
+    // Default to empty so the channel is always defined (the export join below
+    // only consumes it when quantify_compartments is set, but an unassigned
+    // `def` is a fragile null to leave in a channel expression).
+    def ch_nucleus_contours = Channel.empty()
+    if (params.quantify_compartments) {
+        ch_nuclei_props_in = ch_nuclei_mask
+            .map { meta, mask -> [meta.patient_id, meta, mask] }
+            .join(ch_cell_mask.map { meta, mask -> [meta.patient_id, mask] }, by: 0)
+            .map { _patient_id, meta, nuclei_mask, cell_mask -> [meta, nuclei_mask, cell_mask] }
+        EXTRACT_NUCLEI_PROPERTIES(ch_nuclei_props_in)
+        ch_nucleus_contours = EXTRACT_NUCLEI_PROPERTIES.out.contours
+            .map { meta, json_file -> [meta.patient_id, json_file] }
+    }
 
     // ========================================================================
     // CHANNEL SPLITTING - Split all multichannel images (runs in PARALLEL with EXTRACT_CELL_PROPERTIES)
@@ -105,19 +122,23 @@ workflow POSTPROCESSING {
         { patient_id, _meta, _tiff -> "Before combine: key=${patient_id}, channel=${_meta.channel_name}" }
     )
 
+    // Carry BOTH masks (cell + nuclei) keyed by patient_id. The nuclear mask is
+    // always available from SEGMENT; QUANTIFY only uses it when
+    // params.quantify_compartments is set (per-compartment signal).
     ch_mask = ch_cell_mask
         .map { meta, mask -> [meta.patient_id, mask] }
+        .join(ch_nuclei_mask.map { meta, mask -> [meta.patient_id, mask] }, by: 0)
     ch_mask = withDebugView(
         ch_mask,
-        { patient_id, _mask -> "Mask available: key=${patient_id}, mask=${_mask.name}" }
+        { patient_id, _cell, _nuc -> "Masks available: key=${patient_id}, cell=${_cell.name}, nuclei=${_nuc.name}" }
     )
 
     ch_for_quant = ch_for_combine
         .combine(ch_mask, by: 0)
-        .map { _patient_id, meta, tiff, mask -> [meta, tiff, mask] }
+        .map { _patient_id, meta, tiff, cell_mask, nuclei_mask -> [meta, tiff, cell_mask, nuclei_mask] }
     ch_for_quant = withDebugView(
         ch_for_quant,
-        { meta, _tiff, _mask -> "After combine: patient=${meta.patient_id}, channel=${meta.channel_name}" }
+        { meta, _tiff, _cell, _nuc -> "After combine: patient=${meta.patient_id}, channel=${meta.channel_name}" }
     )
 
     QUANTIFY(ch_for_quant)
@@ -166,10 +187,18 @@ workflow POSTPROCESSING {
     ch_contours = EXTRACT_CELL_PROPERTIES.out.contours
         .map { meta, json_file -> [meta.patient_id, json_file] }
 
+    // Nucleus contours channel: real nucleus contours when compartments are enabled,
+    // otherwise reuse the cell contours as a harmless placeholder (EXPORT_GEOJSON does
+    // not pass --nucleus_contours_json unless params.quantify_compartments).
+    ch_nuc_contours_for_export = params.quantify_compartments ? ch_nucleus_contours : ch_contours
+
     ch_for_export = MERGE_QUANT_CSVS.out.merged_csv
         .map { meta, csv -> [meta.patient_id, meta, csv] }
         .join(ch_contours, by: 0)
-        .map { _patient_id, meta, csv, contours_json -> [meta, csv, contours_json] }
+        .join(ch_nuc_contours_for_export, by: 0)
+        .map { _patient_id, meta, csv, contours_json, nucleus_contours_json ->
+            [meta, csv, contours_json, nucleus_contours_json]
+        }
 
     EXPORT_GEOJSON(ch_for_export)
 
@@ -280,7 +309,7 @@ workflow POSTPROCESSING {
         .collectFile(
             name: 'postprocessed.csv',
             newLine: true,
-            storeDir: "${launchDir}/csv",
+            storeDir: "${params.outdir ?: launchDir}/csv",
             seed: 'patient_id,cell_csv,cell_geojson,merged_csv,cell_mask,pyramid'
         )
 
@@ -300,6 +329,11 @@ workflow POSTPROCESSING {
             .mix(GENERATE_POSTPROCESSING_QC.out.size_log)
     }
 
+    // Fold in nucleus-properties traces/versions when compartment quantification ran.
+    if (params.quantify_compartments) {
+        ch_size_logs = ch_size_logs.mix(EXTRACT_NUCLEI_PROPERTIES.out.size_log)
+    }
+
     // Collect versions from all postprocessing processes
     ch_versions = Channel.empty()
         .mix(SEGMENT.out.versions.first())
@@ -313,6 +347,11 @@ workflow POSTPROCESSING {
     if (!params.skip_postprocessing_qc) {
         ch_versions = ch_versions
             .mix(GENERATE_POSTPROCESSING_QC.out.versions.first())
+    }
+
+    if (params.quantify_compartments) {
+        ch_versions = ch_versions
+            .mix(EXTRACT_NUCLEI_PROPERTIES.out.versions.first())
     }
 
     emit:

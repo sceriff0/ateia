@@ -11,7 +11,7 @@ process SPLIT_CHANNELS {
     tag "${meta.patient_id}"
     label 'process_medium'
 
-    container 'bolt3x/attend_image_analysis:preprocess'
+    container "${params.container_registry}/preprocess:${params.container_tag}"
 
     input:
     tuple val(meta), path(registered_image), val(is_reference)
@@ -55,11 +55,9 @@ process SPLIT_CHANNELS {
 
     stub:
     """
-    # Create stub channel files based on metadata
-    touch DAPI.tiff
-    ${meta.channels && meta.channels.size() > 1 ?
-        meta.channels.drop(1).collect { "touch ${it}.tiff" }.join('\n    ') :
-        'touch Marker1.tiff'}
+    # One stub file per output channel (DAPI is dropped for non-references,
+    # matching the real split which keeps DAPI only on the reference image).
+    ${meta.channels.findAll { is_reference || it.toString().toUpperCase() != 'DAPI' }.collect { "touch ${it}.tiff" }.join('\n    ')}
 
     echo "STUB,${meta.patient_id},stub,0" > ${meta.patient_id}_${registered_image.simpleName}.SPLIT_CHANNELS.size.csv
 

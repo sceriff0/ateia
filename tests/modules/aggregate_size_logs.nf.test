@@ -10,6 +10,7 @@ nextflow_process {
 
     test("Should aggregate size CSVs - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -34,6 +35,7 @@ nextflow_process {
 
     test("Should preserve aggregated output format - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -60,6 +62,7 @@ nextflow_process {
 
     test("Should emit versions.yml - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {

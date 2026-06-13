@@ -11,7 +11,7 @@ process PREPROCESS {
     tag "${meta.patient_id}"
     label 'process_medium'
 
-    container 'bolt3x/attend_image_analysis:preprocess'
+    container "${params.container_registry}/preprocess:${params.container_tag}"
 
     input:
     tuple val(meta), path(ome_tiff)
@@ -26,7 +26,6 @@ process PREPROCESS {
 
     script:
     def args = task.ext.args ?: ''
-    def prefix = task.ext.prefix ?: "${meta.patient_id}"
     def skip_dapi_flag = params.preproc_skip_dapi ? '--skip_dapi' : ''
     def autotune_flag = params.preproc_autotune ? '--autotune' : ''
     def no_darkfield_flag = params.preproc_no_darkfield ? '--no_darkfield' : ''
@@ -58,7 +57,6 @@ process PREPROCESS {
     """
 
     stub:
-    def prefix = task.ext.prefix ?: "${meta.patient_id}"
     """
     touch ${ome_tiff.simpleName}_corrected.ome.tif
     touch ${ome_tiff.simpleName}_dims.txt

@@ -2,7 +2,7 @@ process GET_IMAGE_DIMS {
     tag "${meta.patient_id}"
     label 'process_single'
 
-    container 'bolt3x/attend_image_analysis:preprocess'
+    container "${params.container_registry}/preprocess:${params.container_tag}"
 
     input:
     tuple val(meta), path(image)
