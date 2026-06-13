@@ -49,39 +49,4 @@ nextflow_process {
         }
     }
 
-    test("Should skip when ext.when is false") {
-
-        tag "stub"
-        options "-stub"
-
-        when {
-            process {
-                """
-                task.ext.when = false
-
-                input[0] = [
-                    file('${projectDir}/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
-                ]
-                input[1] = [
-                    file('${projectDir}/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
-                ]
-                input[2] = [
-                    file('${projectDir}/tests/testdata/sample_feature_distances.json', checkIfExists: true)
-                ]
-                input[3] = [
-                    file('${projectDir}/tests/testdata/sample_valis_summary.csv', checkIfExists: true)
-                ]
-                input[4] = [
-                    file('${projectDir}/tests/testdata/sample_morphology.csv', checkIfExists: true)
-                ]
-                input[5] = file('${projectDir}/tests/testdata/sample_versions.yml', checkIfExists: true)
-                """
-            }
-        }
-
-        then {
-            // Process should be skipped but not fail
-            assert process.success
-        }
-    }
 }

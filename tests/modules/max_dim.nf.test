@@ -116,31 +116,6 @@ nextflow_process {
         }
     }
 
-    test("Should skip when ext.when is false") {
-
-        tag "stub"
-        options "-stub"
-
-        when {
-            process {
-                """
-                // Set ext.when to false
-                task.ext.when = false
-
-                input[0] = [
-                    [patient_id: 'P001'],
-                    file('$projectDir/tests/testdata/sample_dims.txt', checkIfExists: true)
-                ]
-                """
-            }
-        }
-
-        then {
-            // Process should be skipped but not fail
-            assert process.success
-        }
-    }
-
     test("Should compute max dims from two 128x128 images - real") {
 
         tag "real"

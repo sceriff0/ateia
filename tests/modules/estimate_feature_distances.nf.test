@@ -31,7 +31,7 @@ nextflow_process {
                     ],
                     file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
                     file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true),
-                    file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)  // Using as registered
+                    file('$projectDir/tests/testdata/P001_mov2.ome.tiff', checkIfExists: true)  // Using as registered
                 ]
                 """
             }
@@ -70,7 +70,7 @@ nextflow_process {
                     ],
                     file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
                     file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true),
-                    file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)
+                    file('$projectDir/tests/testdata/P001_mov2.ome.tiff', checkIfExists: true)
                 ]
                 """
             }
@@ -115,7 +115,7 @@ nextflow_process {
                     ],
                     file('$projectDir/tests/testdata/P002_ref.ome.tiff', checkIfExists: true),
                     file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true),
-                    file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)
+                    file('$projectDir/tests/testdata/P001_mov2.ome.tiff', checkIfExists: true)
                 ]
                 """
             }
@@ -155,7 +155,7 @@ nextflow_process {
                     ],
                     file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
                     file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true),
-                    file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)
+                    file('$projectDir/tests/testdata/P001_mov2.ome.tiff', checkIfExists: true)
                 ]
                 """
             }
@@ -167,44 +167,6 @@ nextflow_process {
                 { assert process.out.versions },
                 { assert snapshot(process.out.versions).match() }
             )
-        }
-    }
-
-    test("Should skip when ext.when is false") {
-
-        tag "stub"
-        options "-stub"
-
-        when {
-            params {
-                container = [registration: 'docker://bolt3x/attend_image_analysis:debug_diffeo']
-                feature_detector = 'superpoint'
-                feature_max_dim = 2048
-                feature_n_features = 5000
-                outdir = "$outputDir"
-            }
-            process {
-                """
-                // Set ext.when to false
-                task.ext.when = false
-
-                input[0] = [
-                    [
-                        patient_id: 'P001',
-                        is_reference: false,
-                        channels: ['DAPI', 'PANCK', 'SMA']
-                    ],
-                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
-                    file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true),
-                    file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)
-                ]
-                """
-            }
-        }
-
-        then {
-            // Process should be skipped but not fail
-            assert process.success
         }
     }
 

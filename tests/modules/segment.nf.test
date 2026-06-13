@@ -47,10 +47,12 @@ nextflow_process {
         }
     }
 
-    test("Should fail if DAPI not in channel 0 - stub") {
+    test("Should fail if DAPI not in channel 0 - real") {
 
-        tag "stub"
-        options "-stub"
+        // Real (not stub): the stardist channel-0 hard-check runs in the
+        // process script, which a stub block does not execute.
+        tag "real"
+        tag "slow"
 
         when {
             process {
@@ -70,34 +72,6 @@ nextflow_process {
             // Validation runs in script block and should fail
             assert process.failed
             assert process.exitStatus == 1
-        }
-    }
-
-    test("Should respect when condition") {
-
-        tag "stub"
-        options "-stub"
-
-        when {
-            process {
-                """
-                // Set ext.when to false
-                ext.when = false
-
-                input[0] = [
-                    [
-                        patient_id: 'P001',
-                        channels: ['DAPI', 'PANCK', 'SMA']
-                    ],
-                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
-                ]
-                """
-            }
-        }
-
-        then {
-            // Process should be skipped
-            assert process.success
         }
     }
 

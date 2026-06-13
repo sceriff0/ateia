@@ -2,13 +2,13 @@
     "Should emit versions.yml - stub": {
         "content": [
             [
-                
+                "versions.yml:md5,bd997abc2e15db6699b3cc366c3176cf"
             ]
         ],
         "meta": {
             "nf-test": "0.9.0",
             "nextflow": "25.04.7"
         },
-        "timestamp": "2026-06-13T21:55:50.754511"
+        "timestamp": "2026-06-13T23:39:02.257262"
     }
 }

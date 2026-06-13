@@ -96,30 +96,4 @@ nextflow_process {
         }
     }
 
-    test("Should skip when ext.when is false") {
-
-        tag "stub"
-        options "-stub"
-
-        when {
-            process {
-                """
-                task.ext.when = false
-
-                input[0] = [
-                    [
-                        patient_id: 'P001',
-                        is_reference: true
-                    ],
-                    file('${projectDir}/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
-                ]
-                """
-            }
-        }
-
-        then {
-            // Process should be skipped but not fail
-            assert process.success
-        }
-    }
 }

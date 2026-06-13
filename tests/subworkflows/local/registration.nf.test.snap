@@ -2,13 +2,13 @@
     "Should run VALIS registration - stub": {
         "content": [
             [
-                
+                "registered.csv:md5,0840eaf4a5154d85447dc3522061ff0a"
             ]
         ],
         "meta": {
             "nf-test": "0.9.0",
             "nextflow": "25.04.7"
         },
-        "timestamp": "2026-06-13T22:01:17.081704"
+        "timestamp": "2026-06-13T23:43:35.558502"
     }
 }

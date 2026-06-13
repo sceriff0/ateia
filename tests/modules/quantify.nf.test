@@ -19,6 +19,7 @@ nextflow_process {
                 input[0] = [
                     [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA']],
                     file('$projectDir/tests/testdata/sample_DAPI.tif', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_cell_mask.npy', checkIfExists: true),
                     file('$projectDir/tests/testdata/P001_cell_mask.npy', checkIfExists: true)
                 ]
                 """
@@ -49,6 +50,7 @@ nextflow_process {
                 input[0] = [
                     [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA']],
                     file('$projectDir/tests/testdata/sample_DAPI.tif', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_cell_mask.npy', checkIfExists: true),
                     file('$projectDir/tests/testdata/P001_cell_mask.npy', checkIfExists: true)
                 ]
                 """
@@ -86,6 +88,7 @@ nextflow_process {
                 input[0] = [
                     [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA']],
                     file('$projectDir/tests/testdata/sample_DAPI.tif', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_cell_mask.npy', checkIfExists: true),
                     file('$projectDir/tests/testdata/P001_cell_mask.npy', checkIfExists: true)
                 ]
                 """

@@ -250,8 +250,8 @@ nextflow_workflow {
                 { with(workflow.out.checkpoint_csv) {
                     assert size() == 1
                     def csv = get(0)
-                    assert csv.exists()
-                    assert csv.name == 'postprocessed.csv'
+                    assert file(csv).exists()
+                    assert file(csv).name == 'postprocessed.csv'
                     def lines = csv.readLines()
                     // Header + at least 1 data row
                     assert lines.size() >= 2

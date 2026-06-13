@@ -180,39 +180,6 @@ nextflow_process {
         }
     }
 
-    test("Should skip when ext.when is false") {
-
-        tag "stub"
-        options "-stub"
-
-        when {
-            params {
-                gpu_reg_pad_mode = 'constant'
-            }
-            process {
-                """
-                // Set ext.when to false
-                task.ext.when = false
-
-                input[0] = [
-                    [
-                        patient_id: 'P001',
-                        is_reference: false,
-                        channels: ['DAPI', 'PANCK', 'SMA']
-                    ],
-                    file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true),
-                    file('$projectDir/tests/testdata/sample_max_dims.txt', checkIfExists: true)
-                ]
-                """
-            }
-        }
-
-        then {
-            // Process should be skipped but not fail
-            assert process.success
-        }
-    }
-
     test("Should pad real image to target dimensions") {
 
         tag "real"

@@ -417,8 +417,16 @@ def run_quantification(
         logger.info(f"[OK] Saved {len(result_df)} cells to {output_path}")
     else:
         logger.warning("[WARN] No results to save")
-        # Create empty CSV with expected columns (intensity-only)
-        empty_df = pd.DataFrame(columns=['label', channel_name])
+        # Empty CSV with the SAME columns a non-empty result would have, so the
+        # downstream per-channel merge stays consistent when a channel's mask
+        # contains no cells (compartment mode would otherwise emit only 2 cols).
+        cols = ['label', channel_name]
+        if nuclei_mask is not None:
+            cols += [f"{channel_name}: {c}: Mean" for c in COMPARTMENT_NAMES]
+            if expanded:
+                cols += [f"{channel_name}: {c}: Sum" for c in COMPARTMENT_NAMES]
+                cols += [f"{channel_name}: {c}: Median" for c in COMPARTMENT_NAMES]
+        empty_df = pd.DataFrame(columns=cols)
         empty_df.to_csv(output_path, index=False)
 
     logger.info("Quantification complete")

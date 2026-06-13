@@ -19,6 +19,7 @@ nextflow_process {
                 input[0] = [
                     [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA']],
                     file('$projectDir/tests/testdata/sample_merged_quant.csv', checkIfExists: true),
+                    file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true),
                     file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true)
                 ]
                 """
@@ -55,6 +56,7 @@ nextflow_process {
                 input[0] = [
                     [patient_id: 'P002', channels: ['DAPI', 'PANCK'], custom_field: 'preserved'],
                     file('$projectDir/tests/testdata/sample_merged_quant.csv', checkIfExists: true),
+                    file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true),
                     file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true)
                 ]
                 """
@@ -83,6 +85,7 @@ nextflow_process {
                 input[0] = [
                     [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA']],
                     file('$projectDir/tests/testdata/sample_merged_quant.csv', checkIfExists: true),
+                    file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true),
                     file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true)
                 ]
                 """
@@ -98,30 +101,6 @@ nextflow_process {
         }
     }
 
-    test("Should skip when ext.when is false") {
-
-        tag "stub"
-        options "-stub"
-
-        when {
-            process {
-                """
-                task.ext.when = false
-
-                input[0] = [
-                    [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA']],
-                    file('$projectDir/tests/testdata/sample_merged_quant.csv', checkIfExists: true),
-                    file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true)
-                ]
-                """
-            }
-        }
-
-        then {
-            assert process.success
-        }
-    }
-
     test("Should produce valid GeoJSON with cell features - real") {
 
         tag "real"
@@ -133,6 +112,7 @@ nextflow_process {
                 input[0] = [
                     [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA']],
                     file('$projectDir/tests/testdata/sample_merged_quant.csv', checkIfExists: true),
+                    file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true),
                     file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true)
                 ]
                 """
@@ -215,6 +195,7 @@ nextflow_process {
                 input[0] = [
                     [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA']],
                     file('$projectDir/tests/testdata/sample_merged_quant.csv', checkIfExists: true),
+                    file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true),
                     file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true)
                 ]
                 """

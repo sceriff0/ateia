@@ -1,3 +1,0 @@
-patient_id,preprocessed_image,is_reference,channels
-P001,/tmp/mso_def/P001/preprocessed/P001_mov1_corrected.ome.tif,false,DAPI|CD3|CD8
-P001,/tmp/mso_def/P001/preprocessed/P001_ref_corrected.ome.tif,true,DAPI|PANCK|SMA

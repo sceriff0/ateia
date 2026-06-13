@@ -63,10 +63,8 @@ nextflow_workflow {
         then {
             assertAll(
                 { assert workflow.success },
-                { with(workflow.out.preprocessed) {
-                    assert size() == 1
-                    assert collect { it[0].patient_id }.contains('P001')
-                }}
+                { assert workflow.out.preprocessed.size() == 1 },
+                { assert workflow.out.preprocessed.collect { it[0].patient_id }.contains('P001') }
             )
         }
     }
@@ -96,12 +94,10 @@ nextflow_workflow {
         then {
             assertAll(
                 { assert workflow.success },
-                { with(workflow.out.preprocessed) {
-                    assert size() == 3
-                    def patient_ids = collect { it[0].patient_id }
-                    assert patient_ids.count { it == 'P001' } == 2
-                    assert patient_ids.count { it == 'P002' } == 1
-                }}
+                { assert workflow.out.preprocessed.size() == 3 },
+                { def patient_ids = workflow.out.preprocessed.collect { it[0].patient_id }
+                  assert patient_ids.count { it == 'P001' } == 2
+                  assert patient_ids.count { it == 'P002' } == 1 }
             )
         }
     }
@@ -159,8 +155,8 @@ nextflow_workflow {
                 { assert workflow.success },
                 { assert workflow.out.checkpoint_csv },
                 { with(workflow.out.checkpoint_csv) {
-                    assert get(0).exists()
-                    assert get(0).name == 'preprocessed.csv'
+                    assert file(get(0)).exists()
+                    assert file(get(0)).name == 'preprocessed.csv'
                 }}
             )
         }
@@ -207,8 +203,8 @@ nextflow_workflow {
                 { with(workflow.out.checkpoint_csv) {
                     assert size() == 1
                     def csv = get(0)
-                    assert csv.exists()
-                    assert csv.name == 'preprocessed.csv'
+                    assert file(csv).exists()
+                    assert file(csv).name == 'preprocessed.csv'
                     def lines = csv.readLines()
                     // Header + at least 2 data rows
                     assert lines.size() >= 3

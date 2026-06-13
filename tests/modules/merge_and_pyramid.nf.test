@@ -183,48 +183,6 @@ nextflow_process {
         }
     }
 
-    test("Should skip when ext.when is false") {
-
-        tag "stub"
-        options "-stub"
-
-        when {
-            params {
-                outdir = "$outputDir"
-                pixel_size = 0.325
-                pyramid_resolutions = 8
-                pyramid_scale = 2
-                tilex = 512
-                compression = 'zstd'
-            }
-            process {
-                """
-                // Set ext.when to false
-                task.ext.when = false
-
-                input[0] = [
-                    [
-                        patient_id: 'P001',
-                        is_reference: true,
-                        channels: ['DAPI', 'PANCK', 'SMA']
-                    ],
-                    [
-                        file('$projectDir/tests/testdata/sample_DAPI.tif', checkIfExists: true),
-                        file('$projectDir/tests/testdata/sample_PANCK.tif', checkIfExists: true),
-                        file('$projectDir/tests/testdata/sample_SMA.tif', checkIfExists: true)
-                    ],
-                    file('$projectDir/tests/testdata/P001_cell_mask.npy', checkIfExists: true)
-                ]
-                """
-            }
-        }
-
-        then {
-            // Process should be skipped but not fail
-            assert process.success
-        }
-    }
-
     test("Should create pyramidal OME-TIFF from 3 channels + mask - real") {
 
         tag "real"

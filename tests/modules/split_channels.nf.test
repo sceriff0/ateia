@@ -43,11 +43,11 @@ nextflow_process {
                 assert meta.channels == ['DAPI', 'PANCK', 'SMA']
 
                 // In stub mode, should create 3 files (one per channel)
-                assert files instanceof List
-                assert files.size() == 3
+                def fileList = (files instanceof List) ? files : [files]
+                assert fileList.size() == 3
 
-                // Verify channel names in output files
-                def fileNames = files*.name.sort()
+                // Verify channel names in output files (paths come back as strings)
+                def fileNames = fileList.collect { file(it).name }.sort()
                 assert fileNames == ['DAPI.tiff', 'PANCK.tiff', 'SMA.tiff']
             }
         }
@@ -86,10 +86,10 @@ nextflow_process {
                 assert meta.patient_id == 'P002'
                 assert meta.channels == ['DAPI']
 
-                // Single channel should still produce a list with 1 file
-                assert files instanceof List
-                assert files.size() == 1
-                assert files[0].name == 'DAPI.tiff'
+                // Single channel produces one file (path may be a bare string)
+                def fileList = (files instanceof List) ? files : [files]
+                assert fileList.size() == 1
+                assert file(fileList[0]).name == 'DAPI.tiff'
             }
         }
     }

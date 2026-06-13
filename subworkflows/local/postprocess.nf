@@ -309,7 +309,7 @@ workflow POSTPROCESSING {
         .collectFile(
             name: 'postprocessed.csv',
             newLine: true,
-            storeDir: "${launchDir}/csv",
+            storeDir: "${params.outdir ?: launchDir}/csv",
             seed: 'patient_id,cell_csv,cell_geojson,merged_csv,cell_mask,pyramid'
         )
 
