@@ -108,9 +108,12 @@ jobs:
           bash tests/run_validation_tests.sh
 
       - name: Run pipeline with test profile (stub mode)
+        # Stub blocks only `touch` outputs — no container engine needed. Running
+        # container-free keeps stub CI green without pulling per-process images
+        # (real container behaviour is exercised by the nf-test real suite).
         run: |
           nextflow run . \
-            -profile test,docker \
+            -profile test \
             -stub \
             --outdir test_results_stub
 
@@ -167,8 +170,10 @@ jobs:
           version: ${{ env.NFTEST_VERSION }}
 
       - name: Run nf-test stub suite
+        # Container-free: stub blocks need no images (real images are covered by
+        # the nf-test real suite). Avoids pulling not-yet-published GHCR images.
         run: |
-          nf-test test --profile test,docker --verbose
+          nf-test test --profile test --verbose
 
       - name: Upload nf-test results
         if: always()

@@ -121,11 +121,12 @@ jobs:
         run: |
           bash tests/run_validation_tests.sh
 
-      # --- Same stub pipeline run CI runs ---
+      # --- Same stub pipeline run CI runs (container-free: stub needs no
+      #     images, and this gate runs BEFORE publish-images on a fresh tag). ---
       - name: Run pipeline stub
         run: |
           nextflow run . \
-            -profile test,docker \
+            -profile test \
             -stub \
             --outdir test_results_stub
 

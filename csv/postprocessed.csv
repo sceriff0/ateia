@@ -1,2 +1,2 @@
 patient_id,cell_csv,cell_geojson,merged_csv,cell_mask,pyramid
-P001,/tmp/mirage_stub_f2/P001/geojson/cells_data.csv,/tmp/mirage_stub_f2/P001/geojson/cells.geojson,/tmp/mirage_stub_f2/P001/quantification/merged_quant.csv,/tmp/mirage_stub_f2/P001/segmentation/P001_cell_mask.tif,/tmp/mirage_stub_f2/P001/pyramid/pyramid.ome.tiff
+P001,/tmp/mso/P001/geojson/cells_data.csv,/tmp/mso/P001/geojson/cells.geojson,/tmp/mso/P001/quantification/merged_quant.csv,/tmp/mso/P001/segmentation/P001_cell_mask.tif,/tmp/mso/P001/pyramid/pyramid.ome.tiff
