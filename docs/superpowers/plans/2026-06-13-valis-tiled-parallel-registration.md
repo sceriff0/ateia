@@ -6,13 +6,21 @@
 tile loop into Nextflow processes (one task per tile), producing **bit-identical** output to
 classic VALIS in the tiling regime, gated by `params.reg_distributed_tiling`.
 
-**Architecture:** Strategy 2 from the spec — `REG_PREP` runs VALIS through rigid registration
-and materializes the per-slide non-rigid inputs (rigid-warped moving image downsampled to
-`max_non_rigid_registration_dim_px`, fixed image, mask, `target_stats`, processing config) plus
-the `expanded_bboxes` tile grid; `REG_TILE` computes one tile's displacement field via VALIS's
-**own** `NonRigidTileRegistrar.reg_tile`; `REG_FINALIZE` reloads VALIS state, monkeypatches the
-tiler's `calc()` to **read** the precomputed tiles, then runs VALIS's own `stitch_tiles` +
-displacement composition + `warp_and_save_slide`. All VALIS math stays inside VALIS.
+**Architecture:** Strategy 2 from the spec, decomposed per-step for low-budget clusters (spec §5C).
+`REG_PREP` runs VALIS through **rigid registration only** (JVM-backed), materializes the per-slide
+non-rigid tiler inputs (rigid-warped moving image downsampled to `max_non_rigid_registration_dim_px`,
+fixed image, mask, `target_stats`, processing config) and the `expanded_bboxes` tile grid, then
+**halts before computing any tiles** (dump-mode `calc()` raises after dumping) and pickles the
+registrar. `REG_TILE` computes one tile's displacement field via VALIS's **own**
+`NonRigidTileRegistrar.reg_tile` — **no JVM, no BioFormats, ~1–2 GB** (the cheap-node fan-out unit,
+spec §5C). `REG_FINALIZE` reloads VALIS state, monkeypatches `calc()` to **read** the precomputed
+tiles, runs VALIS's own `stitch_tiles` + displacement composition, then (if micro is on, spec §5A)
+`register_micro()` in-process, then `warp_and_save_slide`. All VALIS math stays inside VALIS.
+
+**Why these stages and not more (spec §5B):** feature detection / matching / rigid run on the
+*downsampled* `processed_img` (~1–2k px) — fixed, tiny RAM regardless of slide size — so they are
+**not** tiled (tiling them buys ~0 memory and would seam the global alignment). Only non-rigid +
+micro scale with image size, so only they are externalized.
 
 **Tech Stack:** Nextflow DSL2 (`>=25.04.0`, nf-boost), Python 3.10, `valis-wsi==1.0.0`, pyvips,
 tifffile, numpy; nf-test (stub + real), pytest. Reference source: `valis_lib/` (== pip 1.0.0).
@@ -27,10 +35,10 @@ tifffile, numpy; nf-test (stub + real), pytest. Reference source: `valis_lib/` (
 |---|---|---|
 | `bin/utils/tile_grid.py` | Pure: compute `expanded_bboxes` grid + manifest JSON (wraps VALIS `get_grid_bboxes`/`expand_bbox`) | Create |
 | `bin/utils/tile_io.py` | Pure: lossless float32 per-tile displacement-field write/read (vips) | Create |
-| `bin/utils/valis_tiling.py` | The `NonRigidTileRegistrar.calc` monkeypatch (dump-mode + read-mode) shared by prep/finalize | Create |
-| `bin/reg_prep.py` | Stage 1: VALIS rigid + materialize non-rigid inputs + manifest + pickle registrar | Create |
-| `bin/reg_tile.py` | Stage 2: compute one tile via VALIS `reg_tile` | Create |
-| `bin/reg_finalize.py` | Stage 3: reload VALIS, inject tiles, stitch+compose+warp | Create |
+| `bin/utils/valis_tiling.py` | The `NonRigidTileRegistrar.calc` monkeypatch: **halt-mode** (dump inputs + raise, used by PREP) + **read-mode** (inject tiles, used by FINALIZE) | Create |
+| `bin/reg_prep.py` | Stage 1 (JVM): VALIS **rigid only** → dump tiler inputs + manifest + pickle registrar, halt before tile compute | Create |
+| `bin/reg_tile.py` | Stage 2 (**no JVM**, ~1–2 GB): compute one tile via VALIS `reg_tile` | Create |
+| `bin/reg_finalize.py` | Stage 3 (JVM): reload VALIS, inject tiles, stitch+compose, micro (if on), warp | Create |
 | `modules/local/reg_prep.nf` | `REG_PREP` process | Create |
 | `modules/local/reg_tile.nf` | `REG_TILE` process (fan-out) | Create |
 | `modules/local/reg_finalize.nf` | `REG_FINALIZE` process (fan-in) | Create |
@@ -128,10 +136,32 @@ Expected: prints `BIT-IDENTICAL: True` (the read-mode stitched field exactly equ
 the fallback (run rigid in PREP, full non-rigid+warp in FINALIZE from a re-derived registrar) —
 do not proceed to Phase 1 until the resume mechanism is proven.
 
+- [ ] **Step 5b: Validate the §5C halt → pickle → resume path (the default architecture)**
+
+This is the decisive test for the per-step decomposition. Confirm that PREP can stop at the
+non-rigid boundary, be pickled, and resumed in a *separate process* to produce the same result:
+
+```python
+# (a) PREP process: rigid only, dump inputs, RAISE before tile compute, pickle the registrar
+#     install_halt_calc(dump_dir); try: reg.register() except TilesPending: pass
+#     pickle.dump(reg, open("/tmp/spike_reg.pkl","wb"))
+# (b) TILE step(s): compute each tile from dump_dir (no JVM) -> /tmp/spike_tiles/*.v
+# (c) FINALIZE process (fresh python): reg = pickle.load(...); install_read_calc(tiles)
+#     resume non-rigid -> assert stitched bk_dxdy == baseline_bk  # exact
+print("PICKLE-RESUME OK:", resume_ok, " HALT-BIT-IDENTICAL:", np.array_equal(resumed_bk, baseline_bk))
+```
+
+Expected: `PICKLE-RESUME OK: True  HALT-BIT-IDENTICAL: True`.
+**If the registrar is not pickle-safe at the halt point** (e.g. holds an open JVM/BioFormats
+handle, or `register()` can't be resumed): record it, and the plan falls back to `install_dump_calc`
+(PREP computes tiles inline) per Task 4's note — the per-step low-budget benefit is reduced but
+correctness holds. Either way, do not proceed to Phase 1 until read-mode bit-identical (Step 5) is
+proven.
+
 - [ ] **Step 6: Write the decision record and remove the spike**
 
-Append findings to the spec (a short "§6.1 Spike result" note: confirmed mechanism, the exact
-attributes that must be serialized, whether full-registrar pickling or rigid-only resume was used).
+Append findings to the spec (a short "§6.1 Spike result" note: halt-vs-dump decision, whether the
+registrar pickles/resumes cleanly, and the exact attributes that must be serialized).
 
 ```bash
 git -C . rm -f bin/spikes/spike_externalize_tiles.py 2>/dev/null; rmdir bin/spikes 2>/dev/null || true
@@ -309,6 +339,29 @@ def install_dump_calc(out_dir):
         return bk, fwd
     nrr.NonRigidTileRegistrar.calc = dump_calc
 
+class TilesPending(Exception):
+    """Raised by halt-mode calc() after inputs are dumped, to stop before tile compute."""
+
+def install_halt_calc(out_dir):
+    """§5C default: dump tiler inputs, then RAISE so PREP does NO tile compute on the fat node.
+    reg_prep.py catches TilesPending and pickles the registrar; tiles are computed by REG_TILE."""
+    os.makedirs(out_dir, exist_ok=True)
+    def halt_calc(self, *a, **k):
+        self.moving_img.write_to_file(os.path.join(out_dir, "moving.v"))
+        self.fixed_img.write_to_file(os.path.join(out_dir, "fixed.v"))
+        if self.mask is not None:
+            self.mask.write_to_file(os.path.join(out_dir, "mask.v"))
+        if getattr(self, "target_stats", None) is not None:
+            np.save(os.path.join(out_dir, "target_stats.npy"), np.asarray(self.target_stats))
+        json.dump({
+            "expanded_bboxes": np.asarray(self.expanded_bboxes).tolist(),
+            "n_tiles": int(self.n_tiles), "n_rows": int(self.n_rows), "n_cols": int(self.n_cols),
+            "tile_wh": int(self.tile_wh), "tile_buffer": int(self.tile_buffer),
+            "has_mask": self.mask is not None,
+        }, open(os.path.join(out_dir, "manifest.json"), "w"))
+        raise TilesPending(out_dir)
+    nrr.NonRigidTileRegistrar.calc = halt_calc
+
 def install_read_calc(tiles_dir):
     """calc() that loads precomputed per-tile fields and stitches via VALIS's own stitch_tiles."""
     def read_calc(self, *a, **k):
@@ -331,24 +384,26 @@ git add bin/utils/valis_tiling.py
 git commit -m ":sparkles: Add NonRigidTileRegistrar.calc dump/read monkeypatches"
 ```
 
-> **Note on the chosen split:** PREP runs the real tile compute once (to keep a pickle-valid
-> registrar) AND dumps inputs; the distributed `REG_TILE` tasks recompute tiles in parallel; the
-> read-mode FINALIZE stitches those. The PREP recompute is the de-risking belt-and-suspenders;
-> Task 9's verification proves PREP-dump tiles == REG_TILE tiles == baseline. If Task 1 proved
-> PREP can halt before tile compute (cheaper), set `install_dump_calc` to raise after dumping and
-> catch in `reg_prep.py` — keep both behind the same module.
+> **Chosen split (spec §5C):** `install_halt_calc` is the **default** — PREP does rigid only and
+> dumps tiler inputs, raising `TilesPending` so **no tile compute runs on the fat JVM node**; the
+> no-JVM `REG_TILE` swarm does all tile compute. This requires that the registrar pickled at the
+> halt point can be reloaded and resumed in `REG_FINALIZE` — **that is exactly what the Task 1
+> spike proves.** `install_dump_calc` (PREP computes tiles inline) is the **fallback** if the
+> halt/resume turns out not to be pickle-safe; it sacrifices the low-budget benefit but is simpler.
+> Task 1 selects between them; the rest of the plan assumes halt-mode.
 
 ### Task 5: `reg_prep.py`
 
 **Files:**
 - Create: `bin/reg_prep.py`
 
-- [ ] **Step 1: Implement PREP (rigid + dump + pickle)**
+- [ ] **Step 1: Implement PREP (rigid only → dump inputs → halt → pickle)**
 
 ```python
 #!/usr/bin/env python3
-"""REG_PREP: VALIS rigid registration, materialize per-slide non-rigid tiler inputs + grid
-manifest, and pickle the registrar for REG_FINALIZE. Distributed-tiling stage 1."""
+"""REG_PREP (spec §5C): VALIS RIGID registration only. Materialize per-slide non-rigid tiler
+inputs + grid manifest, halt BEFORE any tile compute (so the heavy work goes to the no-JVM
+REG_TILE swarm), and pickle the registrar for REG_FINALIZE. Distributed-tiling stage 1."""
 import argparse, os, sys, pickle
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "utils"))
 import valis_tiling
@@ -367,7 +422,7 @@ def main():
 
     os.makedirs(args.out, exist_ok=True)
     dump_dir = os.path.join(args.out, "tiler_inputs")
-    valis_tiling.install_dump_calc(dump_dir)  # one dir per tiler; see note for multi-slide layout
+    valis_tiling.install_halt_calc(dump_dir)  # §5C: dump inputs then raise TilesPending
     registration.init_jvm(mem_gb=args.jvm_heap_gb)
     reg = registration.Valis(
         args.input_dir, args.out, reference_img_f=os.path.basename(args.reference),
@@ -379,7 +434,10 @@ def main():
         max_processed_image_dim_px=args.max_processed_dim,
         create_masks=True,
     )
-    reg.register()  # rigid + (dump-mode) tiled non-rigid
+    try:
+        reg.register()  # rigid runs; halt_calc raises once it reaches non-rigid tile compute
+    except valis_tiling.TilesPending:
+        pass  # expected: inputs dumped, registrar holds rigid state for FINALIZE to resume
     with open(os.path.join(args.out, "registrar.pkl"), "wb") as f:
         pickle.dump(reg, f)
     registration.kill_jvm()
@@ -388,11 +446,16 @@ if __name__ == "__main__":
     raise SystemExit(main())
 ```
 
+> **Spike dependency:** this relies on the registrar being pickle-safe at the halt point and
+> resumable in FINALIZE — Task 1 proves this. If the spike shows resume is not pickle-safe, switch
+> `install_halt_calc` → `install_dump_calc` and have FINALIZE re-derive instead of resume (the §6
+> Strategy-2 fallback); no other task changes.
+
 - [ ] **Step 2: Commit**
 
 ```bash
 git add bin/reg_prep.py
-git commit -m ":sparkles: Add REG_PREP stage script (rigid + dump tiler inputs)"
+git commit -m ":sparkles: Add REG_PREP stage script (rigid only, halt before tile compute)"
 ```
 
 > Multi-slide layout: dump under `tiler_inputs/<slide_name>/` keyed by `self` → slide name via the
