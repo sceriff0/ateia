@@ -373,6 +373,73 @@ owns setting/clearing the hook, so it's the only place that knows about the seam
 
 ---
 
+## 6.1 Spike result (Task 1, run 2026-06-14 in `mirage-valis:1.0.0`)
+
+Run via `bin/spikes/spike_externalize_tiles.py` on the P001 test slides. The spike drives
+`NonRigidTileRegistrar` directly with a forced **3×3 (9-tile)** grid (small `tile_wh`) so the
+`mblend` stitch seam is genuinely exercised, recomputes each tile in a **separate OS process**
+(subprocess), and compares to an unmodified-VALIS baseline.
+
+### ✅ Make-or-break PROVEN — externalized tiles + VALIS `stitch_tiles` == in-process `calc()`, exactly
+- Per-tile, fresh-process `reg_tile` vs the threaded loop's tile: `max|Δ| = 0` (9/9 tiles).
+- Read-mode `stitch_tiles(recomputed_tiles)` vs baseline **`bk_dxdy` and `fwd_dxdy`**: `max|Δ| = 0`.
+- ⇒ Strategy 2's tile externalization + `stitch_tiles` reuse is **bit-identical by construction**,
+  seam included. **Phase 1 is unblocked.** (Used `processing_cls=None`, the deterministic
+  grayscale path, to isolate the mechanism from Blocker 3 below.)
+
+### ❌ BLOCKER 1 — pyvips images are unpicklable ⇒ NO cross-process registrar handoff
+- A bare `pyvips.Image` cannot be pickled: `TypeError: cannot pickle '_cffi_backend._CDataBase'`
+  (the libvips handle is a cffi pointer). Confirmed by 2-line repro.
+- VALIS's **own** end-of-register registrar pickle fails to reload in a fresh process:
+  `TypeError: Class type incorrect`. `registration.load_registrar` is just `pickle.load(...)`
+  (registration.py:142), so it would fail identically — the registrar embeds pyvips images.
+- **Consequence (supersedes part of §6):** the §5C plan of "`REG_PREP` pickles the `Valis`
+  registrar → `REG_FINALIZE` reloads it" is **NOT viable** in this image. The
+  `REG_PREP → REG_TILE → REG_FINALIZE` boundary **must exchange plain serializable data**
+  (`.npy` displacement fields, JSON/`.npy` per-slide metadata, `.v` tile images on disk — exactly
+  what the spike's working dump/read path uses), never a pickled `Valis`. `REG_FINALIZE` must
+  reconstruct composition + warp from that plain state — per-slide rigid `M`, image shapes,
+  `bg_color`, crop bbox, reference `dxdy`, `target_stats`, processing config — either by rebuilding
+  a minimal `Slide` and calling `warp_and_save_slide`, or by re-implementing the
+  `serial_non_rigid` composition (the Strategy-1 option, R1). The **tile kernel + `stitch_tiles`
+  reuse still stand** (proven above); only the "keep the live registrar across processes" leg dies.
+  *Phase-2 follow-up:* identify the exact unpicklable slide attributes and whether they can be
+  dropped + re-derived from disk, or whether a newer pyvips fixes Image pickling.
+
+### ❌ BLOCKER 2 — `register()` swallows all exceptions ⇒ cannot raise-to-halt
+- `TilesPending` raised inside `calc()` is caught by `Valis.register()`'s broad `except Exception`
+  (registration.py ~4149), which logs it, `kill_jvm()`s, and **returns `None`** — it never
+  propagates to the caller. (Rigid state still persists on the slide objects.)
+- **Consequence:** `install_halt_hook` cannot rely on an exception reaching `REG_PREP`. Halt must
+  be signaled by **side effect**: the hook dumps tiler inputs to disk, and `REG_PREP` detects dump
+  completion (and tolerates `register()` returning `None`). The `EXTERNAL_TILE_HOOK` patch should
+  dump-then-signal via the filesystem, not via a raised exception.
+
+### ❌ BLOCKER 3 — `ChannelGetter` crashes in the tile path ⇒ classic tiling is broken for fluorescence
+- `ChannelGetter.process_image` (preprocessing.py:113-114) calls
+  `get_slide_reader(self.src_f)(self.src_f)` **unconditionally**, *before* the `if self.image is
+  None` check. `NonRigidTileRegistrar.process_tile` hardcodes `src_f=None`, so any `ChannelGetter`
+  (fluorescence/multichannel) tile raises `FileNotFoundError: 'None'`. Confirmed both in a real
+  `Valis.register()` run and via a standalone 2-line repro with a valid 2-D tile array.
+  Brightfield (`ColorfulStandardizer`) is unaffected (it uses only `self.image`).
+- **Consequence:** classic VALIS auto-tiling (`est_GB > 10`) **itself crashes on fluorescence** —
+  so there is *no working classic fluorescence-tiling baseline* to be "bit-identical" to. The
+  distributed path must feed the tiler **pre-reduced single-channel (2-D) images with
+  `processing_cls=None`** (the deterministic fallback Part A/B validated), or ship a guarded
+  `ChannelGetter`. §9's fluorescence verification must compare distributed output against the
+  **whole-image classic** result, not the broken tiled one. (Brightfield can still verify against
+  classic tiling directly.)
+
+### Net decision
+1. **Proceed to Phase 1** (Tasks 2–3: `tile_grid`, `tile_io`) — pure kernels, unaffected by the blockers.
+2. **Before Phase 2**, revise the PREP/FINALIZE contract: plain-data handoff (drop the
+   pickled-registrar assumption, Blocker 1), filesystem-signalled halt (Blocker 2), and
+   `processing_cls=None` + pre-reduced channels for the tiler (Blocker 3).
+3. The spike (`bin/spikes/spike_externalize_tiles.py`) is **kept** (not deleted as originally
+   planned) — it is the reproduction harness for Blockers 1–3 and the bit-identical regression check.
+
+---
+
 ## 7. Data formats & I/O contract between processes
 
 | Artifact | Format | Notes |

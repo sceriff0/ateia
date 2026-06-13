@@ -58,6 +58,21 @@ tifffile, numpy; nf-test (stub + real), pytest. Reference source: `valis_lib/` (
 
 ## Phase 0 — De-risk the integration crux
 
+> ### ✅ Task 1 RESULT (2026-06-14) — see spec §6.1 for the full decision record
+> - **Make-or-break PROVEN:** externalized `reg_tile` (separate OS processes) + VALIS
+>   `stitch_tiles` == in-process `calc()`, **bit-identical** (`max|Δ|=0` on a real 3×3 grid, bk+fwd).
+>   Strategy 2's tile externalization is sound → **Phase 1 unblocked.**
+> - **Three blockers found, forcing Phase-2 revisions (NOT Phase-1 blockers):**
+>   1. **pyvips images are unpicklable** ⇒ the pickled-registrar PREP→FINALIZE handoff (§5C) is
+>      dead. Exchange **plain data** (`.npy`/JSON/`.v`), never a pickled `Valis`. FINALIZE
+>      reconstructs composition+warp from dumped rigid state. **Revises Tasks 4, 5, 7.**
+>   2. **`register()` swallows all exceptions** ⇒ `install_halt_hook` cannot raise-to-halt; signal
+>      halt by filesystem side-effect. **Revises Task 4 (`valis_tiling.py`) + Task 5.**
+>   3. **`ChannelGetter` crashes in `process_tile` (`src_f=None`)** ⇒ classic tiling is broken for
+>      fluorescence; feed the tiler pre-reduced 2-D channels with `processing_cls=None`, and verify
+>      fluorescence against **whole-image** classic. **Revises Tasks 5, 6, 10.**
+> - Spike kept at `bin/spikes/spike_externalize_tiles.py` as the reproduction + regression harness.
+
 ### Task 1: Spike — externalize-and-resume proof of concept
 
 **Goal:** Before any Nextflow wiring, prove on real test data that we can (a) intercept
