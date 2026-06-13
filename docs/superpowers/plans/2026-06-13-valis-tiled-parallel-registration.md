@@ -339,6 +339,15 @@ git commit -m ":sparkles: Add lossless float32 tile-field I/O"
 >   src_f, slide_dimensions_wh, ref shapes/mask) + a disk-loaded stitched `dxdy`, call
 >   `warp_and_save_slide`, and assert the output is **pixel-identical** to a full classic run. Only
 >   after this passes, finalize Tasks 5/7.
+>
+> #### ✅ Task 4.5 DONE (2026-06-14) — see spec §6.3 for the full result + dump contract
+> `bin/spikes/spike_finalize_option_a.py all` — all four legs bit-identical (`max|Δ|=0`): P1 compose
+> (`calc_deformation` 460-503 reproduced from plain data), P2 warp (`slide_tools.warp_slide` is a PURE
+> plain-data fn — **no `Slide`/`Valis` rebuild needed for the pixels**, simpler than the plan assumed),
+> P3 lossless disk handoff, CHAIN end-to-end. **Key correction:** production always runs non-rigid on
+> scaled images ⇒ `from_rigid_reg=False` ⇒ the `remove_invasive_displacements` steps are NOT executed;
+> Task 7 must gate them on `from_rigid_reg`. Compose reduces to (opt mask) → add ref field → (opt mask)
+> → `get_inverse_field`. Tasks 5/7 unblocked. Spike kept as the FINALIZE regression harness.
 > - **Task 4:** only the dump/halt hook is needed (FINALIZE stitches directly, never re-enters
 >   `calc()`); halt is filesystem-signalled, not a caught exception.
 > - **Task 5 (`reg_prep.py`):** dump plain warp-state + **processed 2-D** tiler inputs (process

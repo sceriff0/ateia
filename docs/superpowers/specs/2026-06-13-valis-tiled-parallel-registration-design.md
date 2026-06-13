@@ -502,6 +502,67 @@ REG_FINALIZE (JVM)  warp_tools.stitch_tiles(tiles) -> full bk/fwd; rebuild a MIN
 
 ---
 
+## 6.3 Task 4.5 spike result (run 2026-06-14 in `mirage-valis:1.0.0`) — Option-A FINALIZE PROVEN
+
+Run via `bin/spikes/spike_finalize_option_a.py all`, 1-ref + 1-mov P001 fluorescence pair,
+production-matching config (`align_to_reference=True`, `crop="reference"`, `create_masks=True`,
+`OpticalFlowWarper`, no micro). Baseline is **whole-image classic** `Valis.register()` (the tiler is
+NOT forced — Blocker 3 crashes classic fluorescence tiling; the stitched-field identity is already
+proven by §6.1). The rebuild runs in a **fresh process from plain data only** (no pickled `Valis`).
+
+### ✅ All four legs bit-identical (`max|Δ| = 0`)
+- **P1 compose** — port of `calc_deformation` 460-503 on the captured `moving_bk_dxdy` reproduces the
+  classic `self.bk_dxdy` **exactly**.
+- **P2 warp** — `slide_tools.warp_slide(...)` is a **pure plain-data function** (`src_f`, `M`,
+  `transformation_src/dst_shape_rc`, `aligned_slide_shape_rc`, `dxdy`, `bbox_xywh`, `bg_color`,
+  `level`, `series`); fed the classic field it reproduces the classic warped slide **exactly**. ⇒
+  **FINALIZE needs no live/rebuilt `Slide` object for the pixels** — only this fn + the dumped scalars.
+- **P3 handoff** — `extract_area(bbox)` → lossless `tiffsave` (lzw, float) → `new_from_file` preserves
+  the field **exactly** (the disk-backed `dxdy` leg the tiler path uses, registration.py:3717-3720/626).
+- **CHAIN** — end-to-end `moving_bk_dxdy → compose → pad_displacement → warp_slide` == classic warped
+  slide, **exactly**.
+
+### 🔑 Key correction to §6.2 (observed, not assumed) — `from_rigid_reg` is FALSE in production
+`non_rigid_register` sets `nr_on_scaled_img = (max_processed_image_dim_px != max_non_rigid_registration_dim_px)
+or (mask crops the image)` (registration.py:3625-3626). This is **True in every preset** (test 256≠1024;
+mid 1024≠4096; high 2048≠4096) **and** whenever `create_masks=True` crops — so the non-rigid runs on a
+**dict** of pre-scaled images, and `SerialNonRigidRegistrar.__init__` sets `from_rigid_reg=False`
+(serial_non_rigid.py:642-647). Consequence: the `remove_invasive_displacements` calls (compose steps 1 & 4,
+lines 460-465 / 482-487) are **NOT executed** in production. The real FINALIZE compose is just:
+**(optional `mask_dxdy`) → add reference field → (optional `mask_dxdy`)**, then `get_inverse_field`.
+This is simpler than §6.2's worst case; Task 7 must gate the remove-invasive steps on `from_rigid_reg`.
+
+### Dump contract confirmed (what PREP must emit for FINALIZE), per slide
+- `moving_bk_dxdy` (from REG_TILE stitch) — native type matters: it's a **numpy `[dx,dy]`** here (the
+  `is_array` branch of `NonRigidTileRegistrar.register`), so FINALIZE must preserve native vips/numpy
+  type, not silently coerce (the compose add branches on type, 467 vs 473).
+- `from_rigid_reg` flag (+ `M`, `unwarped_shape`, `og_reg_shape_rc` only if True — unused in production).
+- reference/incoming field (identity when `align_to_reference=True`) + serial order (only needed for the
+  accumulation case, which `align_to_reference=True` avoids entirely).
+- internal pad `(out_shape_rc, bbox_xywh)` mapping the masked compose field → full reg-resolution field
+  (line 3671); `_full_displacement_shape_rc`, `_non_rigid_bbox` for the disk store/pad.
+- warp contract: `src_f`, `M`, `transformation_src_shape_rc` (= `processed_img_shape_rc`),
+  `transformation_dst_shape_rc` (= `reg_img_shape_rc`), `aligned_slide_shape_rc`, resolved crop
+  `bbox_xywh`, `bg_color`, `series`, `level`.
+
+### Scope / honest limitations (follow-ups, not blockers)
+1. **1-ref+1-mov only.** `align_to_reference=True` (production) makes every moving slide the same
+   identity-incoming case, so generalization to N moving slides is mechanical. The cross-slide
+   **accumulation** path (spec step 3) only arises under `align_to_reference=False`, which the pipeline
+   does not use — out of scope unless that changes.
+2. **Mask branches in compose not exercised:** the `mask` arg to `calc_deformation` was `None` in this
+   config (the mask crops the *image* pre-registration, but isn't threaded into the compose), so the
+   `mask_dxdy` branches are dead in this path. Re-verify if a future config passes a non-rigid mask.
+3. **No micro-registration** (§5A) — separate concern; FINALIZE-with-micro is still Option 1 (in-process).
+4. Baseline is whole-image (not tiled) by necessity (Blocker 3); the tile→stitch identity is §6.1's job.
+
+**Net:** Option-A plain-data FINALIZE is proven feasible and bit-identical for the production path.
+`bin/spikes/spike_finalize_option_a.py` is **kept** as the FINALIZE regression harness. Tasks 5 & 7
+can be finalized: PREP dumps the contract above; FINALIZE = compose (gated on `from_rigid_reg`) →
+`pad_displacement` → `slide_tools.warp_slide`, no `Slide`/`Valis` rebuild for the pixels.
+
+---
+
 ## 7. Data formats & I/O contract between processes
 
 | Artifact | Format | Notes |

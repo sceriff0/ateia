@@ -1,21 +1,29 @@
 # HANDOFF — Distributed VALIS tiled registration (updated 2026-06-14)
 
-## ⏩ Latest state (2026-06-14) — read spec §6.1 + §6.2 first
+## ⏩ Latest state (2026-06-14) — read spec §6.1 + §6.2 + §6.3 first
 
 - ✅ **Task 1 spike DONE** (commit `fb7aae6`): tile externalization is **bit-identical** (`max|Δ|=0`,
   3×3 grid, bk+fwd). Spike kept at `bin/spikes/spike_externalize_tiles.py`.
 - ✅ **Phase 1 DONE** (commits `7efd649`, `2d52253`): `bin/utils/tile_grid.py` + `tile_io.py` with
   passing unit tests (run in-image: `docker run ... python3 tests/unit/<f>.py`).
+- ✅ **Task 4.5 spike DONE (2026-06-14) → spec §6.3**: Option-A plain-data FINALIZE is **bit-identical**
+  (`max|Δ|=0`, all 4 legs: compose / warp / disk-handoff / end-to-end chain) vs whole-image classic, on
+  the production-matching config. Spike kept at `bin/spikes/spike_finalize_option_a.py`.
+  - 🔑 **Two findings that change Task 7:** (1) `slide_tools.warp_slide` is a **pure plain-data fn** —
+    FINALIZE needs **no `Slide`/`Valis` rebuild for the pixels**, just that fn + dumped scalars.
+    (2) Production always runs non-rigid on scaled images ⇒ `from_rigid_reg=False` ⇒ the
+    `remove_invasive_displacements` compose steps are **NOT executed**; compose = (opt mask) → add ref
+    field → (opt mask) → `get_inverse_field`. Gate remove-invasive on `from_rigid_reg` in Task 7.
 - ⚠️ **3 blockers found → spec §6.1**: (1) pyvips images are unpicklable ⇒ no cross-process registrar
   handoff; (2) `register()` swallows exceptions ⇒ halt via filesystem, not raise; (3) `ChannelGetter`
   crashes in `process_tile` ⇒ classic tiling broken for fluorescence.
-- 🔀 **Architecture revised → Option A (plain-data handoff), spec §6.2** (decided with user, goal:
-  cheap RAM). RAM win = the per-step decomposition (no-JVM `REG_TILE` swarm), unchanged; FINALIZE
-  rebuilds a minimal `Slide` from plain dumped state + disk `dxdy` and reuses VALIS's streaming warp.
-- ▶️ **NEXT: Task 4.5 — Option-A FINALIZE spike** (the next make-or-break): prove a hand-rebuilt
-  `Slide` + disk-loaded stitched `dxdy` → `warp_and_save_slide` is **pixel-identical** to a full
-  classic run. Then finalize Tasks 4/5/7 per the revised plan. (Sections below are the original
-  2026-06-13 handoff, still valid for environment/build context.)
+- 🔀 **Architecture = Option A (plain-data handoff), spec §6.2/§6.3.** RAM win = the per-step
+  decomposition (no-JVM `REG_TILE` swarm); FINALIZE = compose (gated on `from_rigid_reg`) →
+  `pad_displacement` → `slide_tools.warp_slide` (VALIS's streaming warp), all from plain dumped data.
+- ▶️ **NEXT: Task 4 — `EXTERNAL_TILE_HOOK` patch** (`containers/valis/calc_hook.patch` + Dockerfile
+  apply + `bin/utils/valis_tiling.py`), then **Tasks 5/7** (`reg_prep.py` / `reg_finalize.py`) per the
+  revised plan and the §6.3 dump contract. (Sections below are the original 2026-06-13 handoff, still
+  valid for environment/build context.)
 
 ## How to restart with full context (do this first)
 
