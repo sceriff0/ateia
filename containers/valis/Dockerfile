@@ -116,6 +116,11 @@ RUN apt-get update && apt-get install -y \
     libffi-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# Route `import distutils` to Python 3.10's stdlib copy (still ships msvccompiler).
+# Modern setuptools' vendored distutils dropped distutils.msvccompiler, which
+# gobject-introspection's g-ir-scanner imports while building the libvips typelib.
+ENV SETUPTOOLS_USE_DISTUTILS=stdlib
+
 # Install meson and ninja-build BEFORE building libvips (the build uses them).
 # (Original ordering installed these after the first libvips attempt, which fails
 #  under BuildKit with exit 127 before the fallback rebuild can run.)
