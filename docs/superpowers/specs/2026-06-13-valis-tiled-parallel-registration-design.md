@@ -82,15 +82,33 @@ After rigid alignment, for each moving slide downsampled to
      displacement `bk_dxdy`; `fwd_dxdy = warp_tools.get_inverse_field(bk_dxdy)`.
    - Empty tiles (constant / fully masked) → zero displacement field, skipped.
 4. **Stitch** — `warp_tools.stitch_tiles(tiles, expanded_bboxes, n_rows, n_cols, tile_buffer)`
-   blends overlapping per-tile fields into one full-size `bk_dxdy` / `fwd_dxdy`.
+   merges per-tile fields into one full-size `bk_dxdy` / `fwd_dxdy`. **This is not index
+   placement** — it uses pyvips `merge(..., mblend=overlap)`, i.e. **linear blending across the
+   `tile_buffer`-pixel seam**, so overlap regions are a weighted mix of *adjacent* tiles
+   (`warp_tools.py:550,564`). The merge order is fixed (rows left→right, then top→bottom),
+   independent of tile-completion order, so it stays deterministic — but bit-identical
+   externalization requires reusing **this exact function** (see §5).
 5. **Compose & warp** — `serial_non_rigid` composes the stitched field with the rigid
    transform (and, in `align_to_reference` mode, the reference's field), then
    `warp_and_save_slide` applies the full field to the full-resolution slide.
 
-**Why this parallelizes cleanly:** step 3 is side-effect-free per tile — each tile's field
-depends *only* on its own `(moving, fixed, mask)` crop and the (deterministic) DeepFlow
-optical flow. Thread order does not affect the result; stitching is deterministic by tile
-index. So replacing the thread pool with a Nextflow fan-out changes **nothing numerically**.
+**Why this parallelizes cleanly (verified 2026-06-13 by adversarial review of the 1.0.0 source):**
+step 3 is side-effect-free per tile — `reg_tile` writes only its own indexed slots
+`bk_dxdy_tiles[i]`/`fwd_dxdy_tiles[i]`, instantiates a fresh registrar per tile, and never
+mutates shared state (`non_rigid_registrars.py:1279-1353`). The `multiprocessing.Lock` in
+`calc()` is purely a **pyvips I/O guard** (libvips isn't thread-safe with cache disabled) — it
+has **no effect on numeric results**, so external processes produce the same per-tile arrays.
+DeepFlow and `get_inverse_field` (fixed 10 iterations) are deterministic with no RNG.
+
+**Three preconditions for bit-identical externalization (all confirmed necessary):**
+1. **DeepFlow/`OpticalFlowWarper` backend only.** The `SimpleElastixWarper` backend samples
+   with `RandomCoordinate`/`np.random` per tile (`non_rigid_registrars.py:685-691,801`); separate
+   processes reseed independently → **not reproducible**. Distributed mode must hard-require the
+   `OpticalFlowWarper` backend (the pipeline default — see `register.py:567`).
+2. **Lossless float32 round-trip.** Per-tile fields are in-memory `float32` pyvips images; the
+   on-disk format between `REG_TILE` and stitch must not quantize or compress lossily.
+3. **Reuse VALIS's own `stitch_tiles`** on the **identical** `expanded_bboxes`/`n_rows`/`n_cols`
+   grid — because the seam is `mblend`-blended (§3 step 4), a re-implemented stitch would diverge.
 
 ---
 
@@ -140,7 +158,11 @@ group-by (consistent with the repo's existing streaming `groupTuple` pattern —
 ## 5. Fidelity — the regime boundary (read this before claiming "bit-identical")
 
 VALIS tiles non-rigid registration **only** when estimated memory exceeds the threshold
-(`registration.py`): `use_tiler = (img_gb + displacement_gb + processed_img_gb) > TILER_THRESH_GB (10)`.
+(`registration.py:3455-3464`): `use_tiler = (img_gb + displacement_gb + processed_img_gb) > TILER_THRESH_GB (10)`
+— a **hard strict `>`** (exactly 10 GB → not tiled). Each term is multiplied by the slide
+count `self.size`, and `img_gb` uses the reference slide's full channel count and native dtype
+(it is a *stack* estimate, not a single-image cost). `REG_PREP` must compute this same estimate
+to decide auto-fallback (§5a).
 
 - **Above threshold (big images):** classic VALIS tiles with `tile_wh=512`, `tile_buffer=100`.
   Our distributed path reproduces *exactly this* tile grid + kernel + stitch → **bit-identical**.
@@ -170,9 +192,21 @@ The distributed mode is **for the tiling regime**. Two honest options for sub-th
    `warp_tools.stitch_tiles(...)`. Fidelity is then guaranteed *by construction*.
 2. **Identical grid.** `REG_PREP` must call the same `get_grid_bboxes(..., inclusive=True)` and
    `expand_bbox(..., tile_buffer, shape_rc)` so tile indices/bboxes match 1.0.0 exactly.
-3. **`target_stats` fallback.** The global `target_stats` used by `norm_tiles`'s `ValueError`
-   fallback must be computed in `REG_PREP` (the same way `serial_non_rigid` passes it) and
-   shipped to every `REG_TILE`.
+3. **Per-slide inputs `REG_PREP` must reproduce and ship to every `REG_TILE`** (all confirmed
+   consumed in 1.0.0):
+   - **`target_stats`** — non-None by **default** (`norm_method="img_stats"`,
+     `registration.py:54,1684`); shipped as `NR_STATS_KEY` whenever `norm_method` is set, and
+     consumed by `norm_tiles`'s `ValueError` fallback. Must be reproduced.
+   - **`processing_cls` / `processing_kwargs`** — **per-slide** (`registration.py:3319,3327-3328`),
+     applied per tile in `process_tile`. Must be reproduced exactly.
+   - **`mask`** — **per-slide**, derived deterministically from `slide_obj.rigid_reg_mask`
+     warped through the rigid `M` (`registration.py:3497-3511`) → reproducible from the rigid stage.
+   - **`tile_buffer=100`** — comes from the **`NonRigidTileRegistrar` constructor default**, *not*
+     from `get_nr_tiling_params` (which only sets `tile_wh=512`). Reproduce both explicitly.
+   - **The moving image** fed to the tiler is the source pyramid level resized to
+     `max_non_rigid_registration_dim_px` then **warped through the rigid `M`**
+     (`registration.py:3488-3553`); on the first non-rigid pass `dxdy=None` (rigid-only).
+     `REG_PREP` must materialize exactly this image.
 4. **Displacement composition.** The stitched `bk_dxdy` must be composed with the rigid
    transform / reference field **exactly** as `serial_non_rigid` does
    (`bk_dxdy_from_ref = bk_dxdy + moving_bk_dxdy`, `remove_invasive_displacements`,
@@ -237,6 +271,11 @@ as classic `REGISTER` so QC aggregation and the rest of the pipeline don't chang
 | `params.reg_distributed_tiling` | `false` | Master switch. `false` → classic `REGISTER` (unchanged). `true` → `REG_PREP → REG_TILE → REG_STITCH → REG_WARP`. |
 | `params.reg_dist_sub_threshold` | `'auto'` | `'auto'` = single whole-image tile below VALIS's tiler threshold (§5a). `'force'` = tile regardless (§5b). |
 | `params.reg_dist_tiles_per_task` | `1` | Tiles per `REG_TILE` task. `1` = Approach A (max granularity). Higher = batch (Approach B). Does **not** affect output, only scheduling. |
+
+> **Hard precondition (enforced at routing):** distributed mode requires the
+> `OpticalFlowWarper` (DeepFlow) non-rigid backend — the pipeline default. It must **refuse to
+> run** with a `SimpleElastix`-based backend, which is RNG-dependent per tile and therefore not
+> bit-identical under process-level fan-out (§3 precondition 1).
 
 Routing lives in `subworkflows/local/registration.nf`: branch on `params.reg_distributed_tiling`.
 Wired through `nextflow_schema.json` + `nextflow.config` like existing `reg_*` params, and
@@ -308,6 +347,14 @@ DeepFlow is deterministic, so equality (not just tolerance) is the right bar in 
 | R6 | Per-tile JVM/BioFormats startup cost if `REG_TILE` initializes VALIS heavily | `REG_TILE` should need only pyvips + the optical-flow kernel, **not** the JVM (no BioFormats I/O at tile stage). Confirm `import` cost during planning. |
 | R7 | Tiny test data never crosses the tiler threshold | Add a large synthetic fixture for the golden-baseline test (verification step 1). |
 | R8 | `tiles_per_task` batching accidentally changes normalization (e.g. shared stats across a batch) | Each tile must still normalize independently; batch only loops `reg_tile(i)` per index. Covered by verification step 4. |
+| R9 | A non-DeepFlow backend (`SimpleElastixWarper`) is selected → per-tile RNG sampling makes process fan-out non-reproducible (`non_rigid_registrars.py:685-691,801`) | Hard precondition (§8.1): distributed mode refuses any non-`OpticalFlowWarper` backend. |
+| R10 | Re-implemented stitch diverges from VALIS's `mblend` seam blend | Reuse `warp_tools.stitch_tiles` verbatim (Strategy 2); never hand-roll the blend (§3 step 4, §5 precondition 3). |
+
+> **Verification provenance:** §3, §5, and §8.2 were independently re-checked on 2026-06-13 by
+> three adversarial reviewers against the 1.0.0 source. Parameter defaults and the regime
+> boundary were confirmed exact; the `mblend` stitch behavior, the DeepFlow-only constraint, and
+> the per-slide provenance of `target_stats`/`processing_cls`/`mask`/`tile_buffer` were added as
+> a result.
 
 ---
 
