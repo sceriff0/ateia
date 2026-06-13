@@ -506,6 +506,14 @@ git commit -m ":sparkles: Add REG_FINALIZE stage script (inject tiles, stitch, w
 > per-slide `calc_deformation`) is locked by Task 1's spike; wire whichever the spike proved
 > produces a bit-identical stitched field.
 
+> **Micro-registration (spec §5A):** when `--skip-micro-registration` is NOT set, `reg_finalize.py`
+> must, after injecting the first-pass tiles, call `registrar.register_micro(..., tile_wh=2048,
+> max_non_rigid_registration_dim_px=floor(min_max_size*micro_reg_fraction))` in-process (Option 1)
+> BEFORE `warp_and_save_slide` — otherwise the distributed path silently drops the second non-rigid
+> pass and diverges from classic-with-micro. Add `--skip-micro-registration` / `--micro-reg-fraction`
+> args mirroring `bin/register.py`. (Option 2 — distributing micro as a second wave — is a later
+> enhancement.)
+
 ---
 
 ## Phase 3 — Nextflow wiring
@@ -760,6 +768,8 @@ Run: `pytest tests/integration/test_bit_identical.py -v`
 Expected: PASS — distributed output is pixel-identical to classic on the large fixture.
 
 - [ ] **Step 4: Granularity invariance** — re-run distributed with `--reg_dist_tiles_per_task 4` and assert identical to `=1`. Add as a second assertion/test.
+
+- [ ] **Step 4b: Micro-registration ON parity (spec §5A)** — re-run both classic and distributed with `--skip_micro_registration false` on the large fixture; assert pixel-identical. Confirms `reg_finalize.py` reproduces `register_micro()` rather than dropping it.
 
 - [ ] **Step 5: Pin the Dockerfile + document**
 

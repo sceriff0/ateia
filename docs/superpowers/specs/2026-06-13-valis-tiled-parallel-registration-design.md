@@ -219,6 +219,50 @@ The distributed mode is **for the tiling regime**. Two honest options for sub-th
 
 ---
 
+## 5A. Micro-registration (`skip_micro_registration=false`) — IMPORTANT
+
+The pipeline default is `skip_micro_registration=true`, so the base design (which runs only
+rigid + the **first** non-rigid pass) is bit-identical to classic by default. **When micro is
+ON, the distributed path must also reproduce `register_micro()` or it silently diverges.**
+Verified against `registration.py:4170-4279` and `bin/register.py`:
+
+- `register_micro()` is a **second non-rigid pass at higher resolution**. It calls
+  `prep_images_for_large_non_rigid_registration(max_img_dim=micro_reg_size,
+  updating_non_rigid=True, ...)` (`registration.py:4251-4255`).
+- **`updating_non_rigid=True`** ⇒ the moving image is warped through rigid `M` **plus the
+  first pass's stitched `dxdy`**; the micro pass computes the *residual* and composes it
+  additively onto the existing field. This is a **hard sequential dependency** on wave 1.
+- `using_tiler` is decided the same way (`est_GB > TILER_THRESH_GB`) at the micro resolution
+  (`registration.py:4260`); if tiling, it uses `NonRigidTileRegistrar` with **`tile_wh=2048`**
+  (`bin/register.py` passes `tile_wh=2048`; the main pass uses 512). It then runs through the
+  **same `serial_non_rigid.register_images` → `NonRigidTileRegistrar.calc()` path** — so the
+  same Strategy-2 monkeypatch externalizes it.
+- `micro_reg_size = floor(min_max_size × micro_reg_fraction)` (default fraction `0.125`,
+  `bin/register.py`). This may fall **below** the tiler threshold, in which case micro runs
+  whole-image (no tiles to distribute) → Option 1 below is the only sensible path.
+
+### Two ways to support micro (decision for the plan; default = Option 1)
+
+- **Option 1 — micro in-process inside `REG_FINALIZE` (recommended first cut).** Strategy 2
+  keeps a live VALIS registrar in `REG_FINALIZE`; after injecting the distributed first-pass
+  tiles it calls `registrar.register_micro(..., tile_wh=2048)` normally (VALIS's own threaded
+  tiling). **Bit-identical** (micro untouched), minimal plumbing. Downside: micro's big-image
+  cost stays on one node — and micro is often the *heavier* pass.
+- **Option 2 — distribute micro as a second wave.** `REG_PREP_MICRO` (updating mode) →
+  `REG_TILE_MICRO` (`tile_wh=2048`) → `REG_STITCH_MICRO`, then warp. Full RAM/throughput win on
+  both passes; costs a wave-1→wave-2 barrier and more plumbing.
+
+```
+rigid → [WAVE 1: PREP → TILE×N @512 → STITCH] → first-pass field
+                                                   │ updating: warp moving through it
+        Option 1: register_micro() in REG_FINALIZE (in-process)  ──▶ warp
+        Option 2: [WAVE 2: PREP_MICRO → TILE×M @2048 (updating) → STITCH_MICRO] ──▶ warp
+```
+
+**Routing rule:** when `reg_distributed_tiling=true` AND `skip_micro_registration=false`, the
+distributed subworkflow must take Option 1 (or 2) — it must **not** silently drop the micro pass.
+Add a verification case: distributed vs classic with micro ON must be pixel-identical.
+
 ## 6. Two hooking strategies (decision for the plan; recommend Strategy 2)
 
 The per-tile *kernel* externalizes cleanly. The risk is the surrounding **composition** (§5.4).
@@ -330,6 +374,8 @@ the grid matches what classic VALIS computes for itself:
    (single whole-image tile path).
 6. **Stub tests:** add `nf-test` stubs for `REG_PREP/REG_TILE/REG_STITCH/REG_WARP` so the
    distributed path runs in the existing fast stub CI loop.
+7. **Micro-registration ON (§5A):** with `skip_micro_registration=false`, distributed vs classic
+   must be pixel-identical — confirms `register_micro()` is reproduced (Option 1/2), not dropped.
 
 DeepFlow is deterministic, so equality (not just tolerance) is the right bar in the tiling regime.
 
@@ -349,6 +395,7 @@ DeepFlow is deterministic, so equality (not just tolerance) is the right bar in 
 | R8 | `tiles_per_task` batching accidentally changes normalization (e.g. shared stats across a batch) | Each tile must still normalize independently; batch only loops `reg_tile(i)` per index. Covered by verification step 4. |
 | R9 | A non-DeepFlow backend (`SimpleElastixWarper`) is selected → per-tile RNG sampling makes process fan-out non-reproducible (`non_rigid_registrars.py:685-691,801`) | Hard precondition (§8.1): distributed mode refuses any non-`OpticalFlowWarper` backend. |
 | R10 | Re-implemented stitch diverges from VALIS's `mblend` seam blend | Reuse `warp_tools.stitch_tiles` verbatim (Strategy 2); never hand-roll the blend (§3 step 4, §5 precondition 3). |
+| R11 | With `skip_micro_registration=false`, the distributed path skips `register_micro()` → not bit-identical to classic-with-micro | §5A: `REG_FINALIZE` runs `register_micro()` in-process (Option 1) or a second wave (Option 2); add a micro-ON verification case (§9.7). |
 
 > **Verification provenance:** §3, §5, and §8.2 were independently re-checked on 2026-06-13 by
 > three adversarial reviewers against the 1.0.0 source. Parameter defaults and the regime
