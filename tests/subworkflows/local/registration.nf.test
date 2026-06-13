@@ -9,6 +9,7 @@ nextflow_workflow {
 
     test("Should run VALIS registration - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -43,6 +44,7 @@ nextflow_workflow {
 
     test("Should handle multi-patient registration - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -80,6 +82,7 @@ nextflow_workflow {
 
     test("Should handle padding workflow - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -110,6 +113,7 @@ nextflow_workflow {
 
     test("Should skip QC when configured - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -140,6 +144,7 @@ nextflow_workflow {
 
     test("Should handle allow_auto_reference fallback - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {

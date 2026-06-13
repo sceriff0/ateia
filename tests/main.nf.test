@@ -11,6 +11,7 @@ nextflow_pipeline {
     //==========================================================================
 
     test("Should fail with missing required --input param") {
+        tag "stub"
 
         when {
             params {
@@ -26,6 +27,7 @@ nextflow_pipeline {
     }
 
     test("Should fail with empty samplesheet") {
+        tag "stub"
 
         when {
             params {
@@ -42,6 +44,7 @@ nextflow_pipeline {
 
     test("Should handle single-sample samplesheet - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -64,6 +67,7 @@ nextflow_pipeline {
     }
 
     test("Should complete dry_run with zero process executions") {
+        tag "stub"
 
         when {
             params {
@@ -84,6 +88,7 @@ nextflow_pipeline {
     //==========================================================================
 
     test("Should run with test profile") {
+        tag "real"
 
         when {
             params {
@@ -104,6 +109,7 @@ nextflow_pipeline {
 
     test("Should run with test profile - stub mode") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -129,6 +135,7 @@ nextflow_pipeline {
 
     test("Should run preprocessing step - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -156,6 +163,7 @@ nextflow_pipeline {
 
     test("Should run preprocessing with multi-patient data") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -184,6 +192,7 @@ nextflow_pipeline {
 
     test("Should run registration from checkpoint") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -208,6 +217,7 @@ nextflow_pipeline {
 
     test("Should run registration with VALIS method - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -230,6 +240,7 @@ nextflow_pipeline {
 
     test("Should run registration with padding - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -256,6 +267,7 @@ nextflow_pipeline {
 
     test("Should run postprocessing from checkpoint - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -280,6 +292,7 @@ nextflow_pipeline {
     //==========================================================================
 
     test("Should fail with invalid start") {
+        tag "stub"
 
         when {
             params {
@@ -296,6 +309,7 @@ nextflow_pipeline {
     }
 
     test("Should fail with invalid registration method") {
+        tag "stub"
 
         when {
             params {
@@ -312,6 +326,7 @@ nextflow_pipeline {
     }
 
     test("Should reject missing DAPI channel") {
+        tag "stub"
 
         when {
             params {
@@ -327,6 +342,7 @@ nextflow_pipeline {
     }
 
     test("Should reject no reference when allow_auto_reference=false") {
+        tag "stub"
 
         when {
             params {
@@ -344,6 +360,7 @@ nextflow_pipeline {
 
     test("Should accept no reference when allow_auto_reference=true") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -365,6 +382,7 @@ nextflow_pipeline {
     }
 
     test("Should reject missing checkpoint columns") {
+        tag "stub"
 
         when {
             params {
@@ -384,6 +402,7 @@ nextflow_pipeline {
     //==========================================================================
 
     test("Should fail with invalid --stop value") {
+        tag "stub"
 
         when {
             params {
@@ -400,6 +419,7 @@ nextflow_pipeline {
     }
 
     test("Should fail when --stop is before --start") {
+        tag "stub"
 
         when {
             params {
@@ -417,6 +437,7 @@ nextflow_pipeline {
 
     test("Should run only preprocessing when stop=preprocessing - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -445,6 +466,7 @@ nextflow_pipeline {
 
     test("Should run preprocessing+registration when stop=registration - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -473,6 +495,7 @@ nextflow_pipeline {
 
     test("Should run only registration when start=registration stop=registration - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -500,6 +523,7 @@ nextflow_pipeline {
     }
 
     test("Should complete dry_run with stop parameter") {
+        tag "stub"
 
         when {
             params {

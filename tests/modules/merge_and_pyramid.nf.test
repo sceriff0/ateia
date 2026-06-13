@@ -10,6 +10,7 @@ nextflow_process {
 
     test("Should create pyramidal OME-TIFF - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -56,6 +57,7 @@ nextflow_process {
 
     test("Should handle multi-channel input - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -96,6 +98,7 @@ nextflow_process {
 
     test("Should preserve metadata through process - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -140,6 +143,7 @@ nextflow_process {
 
     test("Should emit versions.yml with tifffile/numpy - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -181,6 +185,7 @@ nextflow_process {
 
     test("Should skip when ext.when is false") {
 
+        tag "stub"
         options "-stub"
 
         when {

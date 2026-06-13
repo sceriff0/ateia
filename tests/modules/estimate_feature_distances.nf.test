@@ -10,6 +10,7 @@ nextflow_process {
 
     test("Should estimate feature distances - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -48,6 +49,7 @@ nextflow_process {
 
     test("Should output metrics JSON and histogram PNG - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -91,6 +93,7 @@ nextflow_process {
 
     test("Should preserve metadata - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -131,6 +134,7 @@ nextflow_process {
 
     test("Should emit versions.yml - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -168,6 +172,7 @@ nextflow_process {
 
     test("Should skip when ext.when is false") {
 
+        tag "stub"
         options "-stub"
 
         when {

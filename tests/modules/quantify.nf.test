@@ -10,6 +10,7 @@ nextflow_process {
 
     test("Should quantify single channel - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -140,6 +141,7 @@ nextflow_process {
 
     test("Should merge multiple channel CSVs - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {

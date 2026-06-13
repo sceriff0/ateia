@@ -10,6 +10,7 @@ nextflow_process {
 
     test("Should segment cells from merged image - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -20,7 +21,7 @@ nextflow_process {
                         patient_id: 'P001',
                         channels: ['DAPI', 'PANCK', 'SMA']
                     ],
-                    file('tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
                 ]
                 """
             }
@@ -48,6 +49,7 @@ nextflow_process {
 
     test("Should fail if DAPI not in channel 0 - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -58,7 +60,7 @@ nextflow_process {
                         patient_id: 'P001',
                         channels: ['PANCK', 'DAPI', 'SMA']  // DAPI NOT FIRST
                     ],
-                    file('tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
                 ]
                 """
             }
@@ -73,6 +75,7 @@ nextflow_process {
 
     test("Should respect when condition") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -86,7 +89,7 @@ nextflow_process {
                         patient_id: 'P001',
                         channels: ['DAPI', 'PANCK', 'SMA']
                     ],
-                    file('tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
                 ]
                 """
             }
@@ -141,6 +144,7 @@ nextflow_process {
 
     test("Should segment cells with InstanSeg backend - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -154,7 +158,7 @@ nextflow_process {
                         patient_id: 'P001',
                         channels: ['DAPI', 'PANCK', 'SMA']
                     ],
-                    file('tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
                 ]
                 """
             }
@@ -182,6 +186,7 @@ nextflow_process {
 
     test("Should NOT enforce DAPI-channel-0 check when seg_method='instantseg' - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -195,7 +200,7 @@ nextflow_process {
                         patient_id: 'P001',
                         channels: ['PANCK', 'DAPI', 'SMA']  // DAPI NOT FIRST - InstanSeg is channel-invariant
                     ],
-                    file('tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
                 ]
                 """
             }
@@ -209,6 +214,7 @@ nextflow_process {
 
     test("Should segment cells with CellSAM backend - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -222,7 +228,7 @@ nextflow_process {
                         patient_id: 'P001',
                         channels: ['DAPI', 'PANCK', 'SMA']
                     ],
-                    file('tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
                 ]
                 """
             }
@@ -250,6 +256,7 @@ nextflow_process {
 
     test("Should NOT enforce DAPI-channel-0 check when seg_method='cellsam' - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -263,7 +270,7 @@ nextflow_process {
                         patient_id: 'P001',
                         channels: ['PANCK', 'DAPI', 'SMA']  // DAPI NOT FIRST - CellSAM path skips the channel-0 check
                     ],
-                    file('tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
                 ]
                 """
             }

@@ -9,6 +9,7 @@ nextflow_workflow {
 
     test("Should run full preprocessing workflow - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -43,6 +44,7 @@ nextflow_workflow {
 
     test("Should handle single patient - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -71,6 +73,7 @@ nextflow_workflow {
 
     test("Should handle multi-patient preprocessing - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -105,6 +108,7 @@ nextflow_workflow {
 
     test("Should preserve metadata through workflow") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -133,6 +137,7 @@ nextflow_workflow {
 
     test("Should create valid checkpoint CSV") {
 
+        tag "stub"
         options "-stub"
 
         when {

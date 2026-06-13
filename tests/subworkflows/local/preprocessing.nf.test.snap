@@ -1,0 +1,34 @@
+{
+    "Should run full preprocessing workflow - stub": {
+        "content": [
+            [
+                {
+                    "patient_id": "P001",
+                    "is_reference": false,
+                    "channels": [
+                        "DAPI",
+                        "PANCK",
+                        "SMA"
+                    ]
+                },
+                {
+                    "patient_id": "P001",
+                    "is_reference": true,
+                    "channels": [
+                        "DAPI",
+                        "PANCK",
+                        "SMA"
+                    ]
+                }
+            ],
+            [
+                "preprocessed.csv:md5,d51faae2097490b6f510c7a5c3a01f93"
+            ]
+        ],
+        "meta": {
+            "nf-test": "0.9.0",
+            "nextflow": "25.04.7"
+        },
+        "timestamp": "2026-06-13T22:00:51.676137"
+    }
+}

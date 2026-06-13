@@ -10,6 +10,7 @@ nextflow_process {
 
     test("Should split multichannel image - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -21,7 +22,7 @@ nextflow_process {
                         channels: ['DAPI', 'PANCK', 'SMA'],
                         is_reference: true
                     ],
-                    file('tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
                     true  // is_reference flag
                 ]
                 """
@@ -54,6 +55,7 @@ nextflow_process {
 
     test("Should handle single-channel image - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -65,7 +67,7 @@ nextflow_process {
                         channels: ['DAPI'],
                         is_reference: true
                     ],
-                    file('tests/testdata/sample_DAPI.tif', checkIfExists: true),
+                    file('$projectDir/tests/testdata/sample_DAPI.tif', checkIfExists: true),
                     true  // is_reference flag
                 ]
                 """

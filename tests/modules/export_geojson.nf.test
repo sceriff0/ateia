@@ -10,6 +10,7 @@ nextflow_process {
 
     test("Should export GeoJSON and CSV - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -45,6 +46,7 @@ nextflow_process {
 
     test("Should preserve metadata - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -72,6 +74,7 @@ nextflow_process {
 
     test("Should emit versions.yml - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -97,6 +100,7 @@ nextflow_process {
 
     test("Should skip when ext.when is false") {
 
+        tag "stub"
         options "-stub"
 
         when {

@@ -10,6 +10,7 @@ nextflow_process {
 
     test("Should convert to OME-TIFF - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -45,6 +46,7 @@ nextflow_process {
 
     test("Should create channels.txt file - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -78,6 +80,7 @@ nextflow_process {
 
     test("Should preserve channel names from metadata - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -110,6 +113,7 @@ nextflow_process {
 
     test("Should emit versions.yml with tifffile/aicsimageio - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -141,6 +145,7 @@ nextflow_process {
 
     test("Should skip when ext.when is false") {
 
+        tag "stub"
         options "-stub"
 
         when {

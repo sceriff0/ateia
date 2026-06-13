@@ -9,6 +9,7 @@ nextflow_workflow {
 
     test("Should run full postprocessing - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -43,6 +44,7 @@ nextflow_workflow {
 
     test("Should segment reference images only - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -79,6 +81,7 @@ nextflow_workflow {
 
     test("Should handle single patient - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -111,6 +114,7 @@ nextflow_workflow {
 
     test("Should handle multi-patient data - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -147,6 +151,7 @@ nextflow_workflow {
 
     test("Should create checkpoint CSV - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -181,6 +186,7 @@ nextflow_workflow {
 
     test("Should handle two-channel images - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {

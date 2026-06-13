@@ -10,6 +10,7 @@ nextflow_process {
 
     test("Should publish reference image unchanged - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -37,6 +38,7 @@ nextflow_process {
 
     test("Should preserve metadata - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -68,6 +70,7 @@ nextflow_process {
 
     test("Should emit versions.yml - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -95,6 +98,7 @@ nextflow_process {
 
     test("Should skip when ext.when is false") {
 
+        tag "stub"
         options "-stub"
 
         when {

@@ -170,10 +170,12 @@ jobs:
           version: ${{ env.NFTEST_VERSION }}
 
       - name: Run nf-test stub suite
-        # Container-free: stub blocks need no images (real images are covered by
-        # the nf-test real suite). Avoids pulling not-yet-published GHCR images.
+        # Container-free (-profile test) and stub-only (--tag stub): stub blocks
+        # need no images. Real cases are tagged "real" and run in the nf-test
+        # real job once GHCR images are published (avoids pulling images that do
+        # not exist yet on a PR).
         run: |
-          nf-test test --profile test --verbose
+          nf-test test --tag stub --profile test --verbose
 
       - name: Upload nf-test results
         if: always()

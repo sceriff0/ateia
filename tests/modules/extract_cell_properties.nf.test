@@ -10,6 +10,7 @@ nextflow_process {
 
     test("Should extract morphology and contours - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -200,6 +201,7 @@ nextflow_process {
 
     test("Should respect when condition") {
 
+        tag "stub"
         options "-stub"
 
         when {

@@ -10,6 +10,7 @@ nextflow_process {
 
     test("Should generate HTML report - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -50,6 +51,7 @@ nextflow_process {
 
     test("Should skip when ext.when is false") {
 
+        tag "stub"
         options "-stub"
 
         when {

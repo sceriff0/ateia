@@ -10,6 +10,7 @@ nextflow_process {
 
     test("Should generate preprocessing QC images - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -41,6 +42,7 @@ nextflow_process {
 
     test("Should create PNG for each channel - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -75,6 +77,7 @@ nextflow_process {
 
     test("Should preserve metadata - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -110,6 +113,7 @@ nextflow_process {
 
     test("Should emit versions.yml - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -141,6 +145,7 @@ nextflow_process {
 
     test("Should skip when ext.when is false") {
 
+        tag "stub"
         options "-stub"
 
         when {

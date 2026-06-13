@@ -1,0 +1,14 @@
+{
+    "Should emit versions.yml with tifffile/numpy - stub": {
+        "content": [
+            [
+                "versions.yml:md5,8d926bb68ea59083bb4be5ba1b4e4b19"
+            ]
+        ],
+        "meta": {
+            "nf-test": "0.9.0",
+            "nextflow": "25.04.7"
+        },
+        "timestamp": "2026-06-13T21:58:07.996364"
+    }
+}

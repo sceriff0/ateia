@@ -214,6 +214,7 @@ nextflow_pipeline {
 
     test("Should validate all patients have outputs - preprocessing stub") {
 
+        tag "stub"
         options "-stub"
 
         when {

@@ -10,6 +10,7 @@ nextflow_process {
 
     test("Should compute maximum dimensions - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -39,6 +40,7 @@ nextflow_process {
 
     test("Should handle multiple dim files - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -64,6 +66,7 @@ nextflow_process {
 
     test("Should preserve patient ID - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -90,6 +93,7 @@ nextflow_process {
 
     test("Should emit versions.yml - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -114,6 +118,7 @@ nextflow_process {
 
     test("Should skip when ext.when is false") {
 
+        tag "stub"
         options "-stub"
 
         when {

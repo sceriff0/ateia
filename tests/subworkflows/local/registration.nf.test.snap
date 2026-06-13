@@ -1,0 +1,14 @@
+{
+    "Should run VALIS registration - stub": {
+        "content": [
+            [
+                
+            ]
+        ],
+        "meta": {
+            "nf-test": "0.9.0",
+            "nextflow": "25.04.7"
+        },
+        "timestamp": "2026-06-13T22:01:17.081704"
+    }
+}
