@@ -13,8 +13,9 @@ fixed image, mask, `target_stats`, processing config) and the `expanded_bboxes` 
 **halts before computing any tiles** (dump-mode `calc()` raises after dumping) and pickles the
 registrar. `REG_TILE` computes one tile's displacement field via VALIS's **own**
 `NonRigidTileRegistrar.reg_tile` — **no JVM, no BioFormats, ~1–2 GB** (the cheap-node fan-out unit,
-spec §5C). `REG_FINALIZE` reloads VALIS state, monkeypatches `calc()` to **read** the precomputed
-tiles, runs VALIS's own `stitch_tiles` + displacement composition, then (if micro is on, spec §5A)
+spec §5C). `REG_FINALIZE` reloads VALIS state, sets the **explicit `EXTERNAL_TILE_HOOK`** (spec §6 Option B —
+a ~4-line patched seam, not runtime monkeypatch) so `calc()` **reads** the precomputed tiles, runs
+VALIS's own `stitch_tiles` + displacement composition, then (if micro is on, spec §5A)
 `register_micro()` in-process, then `warp_and_save_slide`. All VALIS math stays inside VALIS.
 
 **Why these stages and not more (spec §5B):** feature detection / matching / rigid run on the
@@ -35,7 +36,8 @@ tifffile, numpy; nf-test (stub + real), pytest. Reference source: `valis_lib/` (
 |---|---|---|
 | `bin/utils/tile_grid.py` | Pure: compute `expanded_bboxes` grid + manifest JSON (wraps VALIS `get_grid_bboxes`/`expand_bbox`) | Create |
 | `bin/utils/tile_io.py` | Pure: lossless float32 per-tile displacement-field write/read (vips) | Create |
-| `bin/utils/valis_tiling.py` | The `NonRigidTileRegistrar.calc` monkeypatch: **halt-mode** (dump inputs + raise, used by PREP) + **read-mode** (inject tiles, used by FINALIZE) | Create |
+| `containers/valis/calc_hook.patch` | ~4-line reviewable diff adding `NonRigidTileRegistrar.EXTERNAL_TILE_HOOK` (default `None`) to pip VALIS; applied in the Dockerfile after `pip install` (spec §6 Option B) | Create |
+| `bin/utils/valis_tiling.py` | Sets/clears `EXTERNAL_TILE_HOOK`: **halt hook** (dump inputs + raise, used by PREP) + **read hook** (inject tiles, used by FINALIZE). The only module that knows the seam. | Create |
 | `bin/reg_prep.py` | Stage 1 (JVM): VALIS **rigid only** → dump tiler inputs + manifest + pickle registrar, halt before tile compute | Create |
 | `bin/reg_tile.py` | Stage 2 (**no JVM**, ~1–2 GB): compute one tile via VALIS `reg_tile` | Create |
 | `bin/reg_finalize.py` | Stage 3 (JVM): reload VALIS, inject tiles, stitch+compose, micro (if on), warp | Create |
@@ -45,7 +47,7 @@ tifffile, numpy; nf-test (stub + real), pytest. Reference source: `valis_lib/` (
 | `subworkflows/local/registration.nf` | Branch classic vs distributed on `params.reg_distributed_tiling` | Modify |
 | `nextflow.config` | Param defaults | Modify |
 | `nextflow_schema.json` | Param schema | Modify |
-| `containers/valis/Dockerfile` | Pin `valis-wsi==1.0.0` | Modify |
+| `containers/valis/Dockerfile` | Pin `valis-wsi==1.0.0`; apply `calc_hook.patch` over the installed VALIS | Modify |
 | `docs/registration_methods.md` | Document the distributed path | Modify |
 | `tests/unit/test_tile_grid.py` | Grid math equality vs VALIS | Create |
 | `tests/unit/test_tile_io.py` | Float32 round-trip equality | Create |
@@ -68,6 +70,13 @@ documented rigid/non-rigid split).
 **Files:**
 - Create: `bin/spikes/spike_externalize_tiles.py` (throwaway; deleted at end of task)
 - Reference: `valis_lib/non_rigid_registrars.py`, `valis_lib/registration.py`
+
+> **Seam note:** the spike bootstraps with a **runtime** `calc` swap (simplest for a throwaway
+> proof) and runs in the already-built `mirage-valis:1.0.0`. It validates the *mechanism*
+> (externalize → read back; halt → pickle → resume), which is independent of how the seam is wired.
+> The real scripts use the explicit patched `EXTERNAL_TILE_HOOK` seam from Task 4 (spec §6 Option B).
+> Run the spike inside the image, e.g.:
+> `docker run --rm -v "$PWD":/work -w /work mirage-valis:1.0.0 python3 bin/spikes/spike_externalize_tiles.py`
 
 - [ ] **Step 1: Generate test data**
 
@@ -303,94 +312,120 @@ git commit -m ":sparkles: Add lossless float32 tile-field I/O"
 
 ## Phase 2 — Stage scripts
 
-### Task 4: `valis_tiling.py` — the `calc()` monkeypatch
+### Task 4: explicit `EXTERNAL_TILE_HOOK` seam (spec §6 Option B) + `valis_tiling.py`
+
+The seam is a reviewable patch over the pip-installed VALIS (not runtime swizzle). It refactors
+`NonRigidTileRegistrar.calc`'s body into `_calc_tiles` and dispatches through a default-`None`
+class hook, so the classic path is byte-identical and our scripts just set the hook.
 
 **Files:**
-- Create: `bin/utils/valis_tiling.py` (uses the mechanism confirmed in Task 1)
+- Create: `containers/valis/calc_hook.patch`
+- Modify: `containers/valis/Dockerfile` (apply the patch after `pip install`)
+- Create: `bin/utils/valis_tiling.py`
 
-- [ ] **Step 1: Implement dump-mode and read-mode patches**
+- [ ] **Step 1: Generate the patch from the byte-identical `valis_lib/` reference**
+
+```bash
+# valis_lib/ == pip 1.0.0; edit a copy, diff it, that diff IS the patch the image applies.
+cp valis_lib/non_rigid_registrars.py /tmp/nrr_orig.py
+cp valis_lib/non_rigid_registrars.py /tmp/nrr_hooked.py
+# In /tmp/nrr_hooked.py, inside `class NonRigidTileRegistrar(object):` add a class attr and split calc:
+#   EXTERNAL_TILE_HOOK = None      # explicit external seam (default None = pristine classic path)
+#   def calc(self, *args, **kwargs):
+#       if NonRigidTileRegistrar.EXTERNAL_TILE_HOOK is not None:
+#           return NonRigidTileRegistrar.EXTERNAL_TILE_HOOK(self)   # returns (bk_dxdy, fwd_dxdy)
+#       return self._calc_tiles()
+#   def _calc_tiles(self):        # <- original body of calc(), verbatim
+#       ...original lines...
+diff -u /tmp/nrr_orig.py /tmp/nrr_hooked.py > containers/valis/calc_hook.patch
+```
+
+Expected: `calc_hook.patch` is a small unified diff (≈ class attr + 4-line dispatch + indent of the
+original body into `_calc_tiles`). **With the hook unset the classic path is byte-identical.**
+
+- [ ] **Step 2: Apply the patch in the Dockerfile (after `pip install valis-wsi==1.0.0`)**
+
+```dockerfile
+# Add the explicit external tile-loop seam (default-off; classic path unchanged).
+COPY calc_hook.patch /tmp/calc_hook.patch
+RUN VALIS_DIR=$(python3 -c "import valis, os; print(os.path.dirname(valis.__file__))") && \
+    patch "$VALIS_DIR/non_rigid_registrars.py" < /tmp/calc_hook.patch && \
+    python3 -c "from valis.non_rigid_registrars import NonRigidTileRegistrar as T; assert hasattr(T,'EXTERNAL_TILE_HOOK') and T.EXTERNAL_TILE_HOOK is None; print('hook seam OK')"
+```
+
+- [ ] **Step 3: Rebuild and confirm the seam is present and default-off**
+
+Run: `docker build -t mirage-valis:1.0.0 containers/valis/`
+Expected: build prints `hook seam OK` (cached up to `pip install`; only the patch layer re-runs).
+
+- [ ] **Step 4: Implement `valis_tiling.py` (sets/clears the hook — no method swizzle)**
 
 ```python
 # bin/utils/valis_tiling.py
-"""Monkeypatches for NonRigidTileRegistrar.calc to externalize the tile loop (Strategy 2).
-Mechanism validated by Task 1 spike."""
+"""Set/clear NonRigidTileRegistrar.EXTERNAL_TILE_HOOK (the explicit seam patched into VALIS,
+spec §6 Option B) to externalize the tile loop. The only module that knows the seam."""
 import os, json, numpy as np
 from valis import non_rigid_registrars as nrr, warp_tools
-import tile_io
-
-_ORIG_CALC = nrr.NonRigidTileRegistrar.calc
-
-def install_dump_calc(out_dir):
-    """calc() that serializes inputs + per-tile fields, then stitches normally (so PREP also
-    produces a valid registrar to pickle). Writes one bk_/fwd_ field per tile."""
-    os.makedirs(out_dir, exist_ok=True)
-    def dump_calc(self, *a, **k):
-        self.moving_img.write_to_file(os.path.join(out_dir, "moving.v"))
-        self.fixed_img.write_to_file(os.path.join(out_dir, "fixed.v"))
-        if self.mask is not None:
-            self.mask.write_to_file(os.path.join(out_dir, "mask.v"))
-        json.dump({
-            "expanded_bboxes": np.asarray(self.expanded_bboxes).tolist(),
-            "n_tiles": int(self.n_tiles), "n_rows": int(self.n_rows), "n_cols": int(self.n_cols),
-            "tile_wh": int(self.tile_wh), "tile_buffer": int(self.tile_buffer),
-            "has_mask": self.mask is not None,
-        }, open(os.path.join(out_dir, "manifest.json"), "w"))
-        bk, fwd = _ORIG_CALC(self, *a, **k)  # real compute; PREP path keeps a valid registrar
-        return bk, fwd
-    nrr.NonRigidTileRegistrar.calc = dump_calc
 
 class TilesPending(Exception):
-    """Raised by halt-mode calc() after inputs are dumped, to stop before tile compute."""
+    """Raised by the halt hook after inputs are dumped, to stop PREP before tile compute."""
 
-def install_halt_calc(out_dir):
-    """§5C default: dump tiler inputs, then RAISE so PREP does NO tile compute on the fat node.
-    reg_prep.py catches TilesPending and pickles the registrar; tiles are computed by REG_TILE."""
+def _dump_inputs(self, out_dir):
     os.makedirs(out_dir, exist_ok=True)
-    def halt_calc(self, *a, **k):
-        self.moving_img.write_to_file(os.path.join(out_dir, "moving.v"))
-        self.fixed_img.write_to_file(os.path.join(out_dir, "fixed.v"))
-        if self.mask is not None:
-            self.mask.write_to_file(os.path.join(out_dir, "mask.v"))
-        if getattr(self, "target_stats", None) is not None:
-            np.save(os.path.join(out_dir, "target_stats.npy"), np.asarray(self.target_stats))
-        json.dump({
-            "expanded_bboxes": np.asarray(self.expanded_bboxes).tolist(),
-            "n_tiles": int(self.n_tiles), "n_rows": int(self.n_rows), "n_cols": int(self.n_cols),
-            "tile_wh": int(self.tile_wh), "tile_buffer": int(self.tile_buffer),
-            "has_mask": self.mask is not None,
-        }, open(os.path.join(out_dir, "manifest.json"), "w"))
+    self.moving_img.write_to_file(os.path.join(out_dir, "moving.v"))
+    self.fixed_img.write_to_file(os.path.join(out_dir, "fixed.v"))
+    if self.mask is not None:
+        self.mask.write_to_file(os.path.join(out_dir, "mask.v"))
+    if getattr(self, "target_stats", None) is not None:
+        np.save(os.path.join(out_dir, "target_stats.npy"), np.asarray(self.target_stats))
+    json.dump({
+        "expanded_bboxes": np.asarray(self.expanded_bboxes).tolist(),
+        "n_tiles": int(self.n_tiles), "n_rows": int(self.n_rows), "n_cols": int(self.n_cols),
+        "tile_wh": int(self.tile_wh), "tile_buffer": int(self.tile_buffer),
+        "has_mask": self.mask is not None,
+    }, open(os.path.join(out_dir, "manifest.json"), "w"))
+
+def install_halt_hook(out_dir):
+    """§5C default: dump inputs then RAISE — PREP does NO tile compute on the fat JVM node."""
+    def halt(self):
+        _dump_inputs(self, out_dir)
         raise TilesPending(out_dir)
-    nrr.NonRigidTileRegistrar.calc = halt_calc
+    nrr.NonRigidTileRegistrar.EXTERNAL_TILE_HOOK = halt
 
-def install_read_calc(tiles_dir):
-    """calc() that loads precomputed per-tile fields and stitches via VALIS's own stitch_tiles."""
-    def read_calc(self, *a, **k):
-        import pyvips
-        bk_tiles = [pyvips.Image.new_from_file(os.path.join(tiles_dir, f"bk_{i}.v")) for i in range(self.n_tiles)]
-        fwd_tiles = [pyvips.Image.new_from_file(os.path.join(tiles_dir, f"fwd_{i}.v")) for i in range(self.n_tiles)]
-        bk = warp_tools.stitch_tiles(bk_tiles, self.expanded_bboxes, self.n_rows, self.n_cols, self.tile_buffer)
-        fwd = warp_tools.stitch_tiles(fwd_tiles, self.expanded_bboxes, self.n_rows, self.n_cols, self.tile_buffer)
-        return bk, fwd
-    nrr.NonRigidTileRegistrar.calc = read_calc
+def install_dump_hook(out_dir):
+    """Fallback: dump inputs, then run the real loop inline (PREP keeps a pickle-valid registrar)."""
+    def dump(self):
+        _dump_inputs(self, out_dir)
+        return self._calc_tiles()   # the patched original loop
+    nrr.NonRigidTileRegistrar.EXTERNAL_TILE_HOOK = dump
 
-def restore_calc():
-    nrr.NonRigidTileRegistrar.calc = _ORIG_CALC
+def install_read_hook(tiles_dir):
+    """FINALIZE: load precomputed tiles and stitch via VALIS's own stitch_tiles."""
+    import pyvips
+    def read(self):
+        bk = [pyvips.Image.new_from_file(os.path.join(tiles_dir, f"bk_{i}.v")) for i in range(self.n_tiles)]
+        fwd = [pyvips.Image.new_from_file(os.path.join(tiles_dir, f"fwd_{i}.v")) for i in range(self.n_tiles)]
+        return (warp_tools.stitch_tiles(bk,  self.expanded_bboxes, self.n_rows, self.n_cols, self.tile_buffer),
+                warp_tools.stitch_tiles(fwd, self.expanded_bboxes, self.n_rows, self.n_cols, self.tile_buffer))
+    nrr.NonRigidTileRegistrar.EXTERNAL_TILE_HOOK = read
+
+def clear_hook():
+    nrr.NonRigidTileRegistrar.EXTERNAL_TILE_HOOK = None
 ```
 
-- [ ] **Step 2: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add bin/utils/valis_tiling.py
-git commit -m ":sparkles: Add NonRigidTileRegistrar.calc dump/read monkeypatches"
+git add containers/valis/calc_hook.patch containers/valis/Dockerfile bin/utils/valis_tiling.py
+git commit -m ":sparkles: Add explicit EXTERNAL_TILE_HOOK seam (patch) + hook-setting module"
 ```
 
-> **Chosen split (spec §5C):** `install_halt_calc` is the **default** — PREP does rigid only and
+> **Chosen split (spec §5C):** `install_halt_hook` is the **default** — PREP does rigid only and
 > dumps tiler inputs, raising `TilesPending` so **no tile compute runs on the fat JVM node**; the
-> no-JVM `REG_TILE` swarm does all tile compute. This requires that the registrar pickled at the
-> halt point can be reloaded and resumed in `REG_FINALIZE` — **that is exactly what the Task 1
-> spike proves.** `install_dump_calc` (PREP computes tiles inline) is the **fallback** if the
-> halt/resume turns out not to be pickle-safe; it sacrifices the low-budget benefit but is simpler.
-> Task 1 selects between them; the rest of the plan assumes halt-mode.
+> no-JVM `REG_TILE` swarm does all tile compute. This requires the registrar pickled at the halt
+> point be reloadable/resumable in `REG_FINALIZE` — **exactly what the Task 1 spike proves.**
+> `install_dump_hook` (PREP computes tiles inline via `_calc_tiles`) is the **fallback** if
+> halt/resume is not pickle-safe. Task 1 selects between them; the rest of the plan assumes halt.
 
 ### Task 5: `reg_prep.py`
 
@@ -422,7 +457,7 @@ def main():
 
     os.makedirs(args.out, exist_ok=True)
     dump_dir = os.path.join(args.out, "tiler_inputs")
-    valis_tiling.install_halt_calc(dump_dir)  # §5C: dump inputs then raise TilesPending
+    valis_tiling.install_halt_hook(dump_dir)  # §5C: sets EXTERNAL_TILE_HOOK → dump inputs then raise TilesPending
     registration.init_jvm(mem_gb=args.jvm_heap_gb)
     reg = registration.Valis(
         args.input_dir, args.out, reference_img_f=os.path.basename(args.reference),
@@ -448,7 +483,7 @@ if __name__ == "__main__":
 
 > **Spike dependency:** this relies on the registrar being pickle-safe at the halt point and
 > resumable in FINALIZE — Task 1 proves this. If the spike shows resume is not pickle-safe, switch
-> `install_halt_calc` → `install_dump_calc` and have FINALIZE re-derive instead of resume (the §6
+> `install_halt_hook` → `install_dump_hook` and have FINALIZE re-derive instead of resume (the §6
 > Strategy-2 fallback); no other task changes.
 
 - [ ] **Step 2: Commit**
@@ -542,7 +577,7 @@ def main():
     ap.add_argument("--jvm-heap-gb", type=int, default=32)
     args = ap.parse_args()
 
-    valis_tiling.install_read_calc(args.tiles_dir)
+    valis_tiling.install_read_hook(args.tiles_dir)  # sets EXTERNAL_TILE_HOOK → load tiles + stitch
     registration.init_jvm(mem_gb=args.jvm_heap_gb)
     reg = pickle.load(open(args.registrar, "rb"))
     # Re-run only the non-rigid stage so read-mode calc() feeds the precomputed tiles, then warp.
@@ -834,17 +869,17 @@ Expected: PASS — distributed output is pixel-identical to classic on the large
 
 - [ ] **Step 4b: Micro-registration ON parity (spec §5A)** — re-run both classic and distributed with `--skip_micro_registration false` on the large fixture; assert pixel-identical. Confirms `reg_finalize.py` reproduces `register_micro()` rather than dropping it.
 
-- [ ] **Step 5: Pin the Dockerfile + document**
+- [ ] **Step 5: Document** (Dockerfile pin `==1.0.0` + `calc_hook.patch` are already done — Task 4 / build).
 
-Modify `containers/valis/Dockerfile:165` → `RUN python3 -m pip install valis-wsi==1.0.0`.
 Add a "Distributed tiled registration" section to `docs/registration_methods.md` documenting the
-toggle, the regime boundary, the DeepFlow-only precondition, and `tiles_per_task`.
+toggle, the regime boundary (`est_GB>10`), the DeepFlow-only precondition, `tiles_per_task`,
+micro-registration handling (§5A), and the low-budget per-step resource sizing (§5C).
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add tests/integration/test_bit_identical.py tests/testdata/generate_large_fixture.py containers/valis/Dockerfile docs/registration_methods.md
-git commit -m ":white_check_mark: Bit-identical verification harness + pin valis-wsi==1.0.0 + docs"
+git add tests/integration/test_bit_identical.py tests/testdata/generate_large_fixture.py docs/registration_methods.md
+git commit -m ":white_check_mark: Bit-identical verification harness + docs"
 ```
 
 ---

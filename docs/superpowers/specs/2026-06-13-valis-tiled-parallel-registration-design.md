@@ -322,16 +322,47 @@ The per-tile *kernel* externalizes cleanly. The risk is the surrounding **compos
   re-implement `serial_non_rigid`'s field composition in our own script. *Pro:* fewer VALIS
   internals re-run. *Con:* we own a faithful port of intricate composition math — a real
   bit-identical hazard.
-- **Strategy 2 — inject pre-computed tiles back into VALIS (recommended).** Monkeypatch
-  `NonRigidTileRegistrar.calc()` so that, instead of computing tiles, it **reads** the
-  per-tile `dxdy` fields produced by the distributed `REG_TILE` tasks and only runs
-  `stitch_tiles` + VALIS's own downstream composition. `REG_PREP` and the finalize step run
-  inside real VALIS calls (registrar state pickled by `REG_PREP`, reloaded by the finalizer),
-  so **all composition stays in VALIS** → bit-identical by construction. *Con:* registrar
-  state must be serialized/reloaded (VALIS already pickles its registrar to `results_dir`).
+- **Strategy 2 — inject pre-computed tiles back into VALIS (recommended).** Replace the body of
+  `NonRigidTileRegistrar.calc()` so that, instead of computing tiles, it **reads** the per-tile
+  `dxdy` fields produced by the distributed `REG_TILE` tasks and only runs `stitch_tiles` +
+  VALIS's own downstream composition. `REG_PREP` and the finalize step run inside real VALIS
+  calls (registrar state pickled by `REG_PREP`, reloaded by the finalizer), so **all composition
+  stays in VALIS** → bit-identical by construction. *Con:* registrar state must be
+  serialized/reloaded (VALIS already pickles its registrar to `results_dir`).
 
 Recommendation: **Strategy 2**, because the hard requirement is bit-identical and the
 composition is the part most likely to drift if re-implemented.
+
+### How the seam is wired: explicit hook (Option B), not runtime monkeypatch
+
+VALIS exposes no public seam at the tile loop and hardcodes `NonRigidTileRegistrar` internally
+(`get_nr_tiling_params`), so `non_rigid_registrar_cls` cannot route to a subclass. Two ways to
+intercept `calc()`:
+
+- **A — runtime monkeypatch:** swap `NonRigidTileRegistrar.calc` at import time in our scripts.
+  Hidden seam; couples to the method name (safe under the `==1.0.0` pin).
+- **B — explicit source hook (CHOSEN).** Add a **~4-line, default-`None` class hook** to
+  `NonRigidTileRegistrar`, shipped as a **reviewable `.patch`** applied in the Dockerfile *after*
+  `pip install valis-wsi==1.0.0`:
+
+  ```python
+  class NonRigidTileRegistrar(object):
+      EXTERNAL_TILE_HOOK = None                          # default None ⇒ pristine classic path
+      def calc(self, *args, **kwargs):
+          if NonRigidTileRegistrar.EXTERNAL_TILE_HOOK is not None:
+              return NonRigidTileRegistrar.EXTERNAL_TILE_HOOK(self)   # returns (bk_dxdy, fwd_dxdy)
+          # ... original tile-loop body unchanged ...
+  ```
+
+  Our scripts set `EXTERNAL_TILE_HOOK` to a **halt hook** (PREP: dump inputs → raise
+  `TilesPending`) or a **read hook** (FINALIZE: load tiles → `stitch_tiles`). With the hook
+  unset, the classic path is **byte-identical** to upstream 1.0.0 (the guard short-circuits to
+  the original body).
+
+Why B: the seam is **visible in source and reviewable as a diff**, rather than swizzled at
+import. Cost: the container applies a small patch over the pip-installed VALIS, and we own that
+~4-line diff (`containers/valis/calc_hook.patch`). The single module `bin/utils/valis_tiling.py`
+owns setting/clearing the hook, so it's the only place that knows about the seam.
 
 > **Process-decomposition note:** under Strategy 2 the §4 `REG_STITCH` + `REG_WARP` boxes
 > collapse into a single `REG_FINALIZE` process — the reloaded VALIS registrar runs the
