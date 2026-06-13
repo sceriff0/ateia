@@ -1,2 +1,2 @@
 patient_id,cell_csv,cell_geojson,merged_csv,cell_mask,pyramid
-P001,/tmp/mso/P001/geojson/cells_data.csv,/tmp/mso/P001/geojson/cells.geojson,/tmp/mso/P001/quantification/merged_quant.csv,/tmp/mso/P001/segmentation/P001_cell_mask.tif,/tmp/mso/P001/pyramid/pyramid.ome.tiff
+P001,/tmp/mso_def/P001/geojson/cells_data.csv,/tmp/mso_def/P001/geojson/cells.geojson,/tmp/mso_def/P001/quantification/merged_quant.csv,/tmp/mso_def/P001/segmentation/P001_cell_mask.tif,/tmp/mso_def/P001/pyramid/pyramid.ome.tiff

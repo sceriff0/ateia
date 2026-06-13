@@ -21,18 +21,14 @@ include { MIRAGE } from './workflows/mirage'
 
 workflow {
     MIRAGE()
-}
 
-/*
-================================================================================
-    COMPLETION HANDLERS
-================================================================================
-*/
-
-workflow.onComplete {
-    if (workflow.success) {
-        log.info "Pipeline completed successfully!"
-    } else {
-        log.error "Pipeline failed - work directory preserved for debugging"
+    // Completion handler registered inside the entry workflow: the strict
+    // Nextflow parser (latest) rejects statements at the top level of the script.
+    workflow.onComplete {
+        if (workflow.success) {
+            log.info "Pipeline completed successfully!"
+        } else {
+            log.error "Pipeline failed - work directory preserved for debugging"
+        }
     }
 }

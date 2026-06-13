@@ -10,8 +10,6 @@ include { POSTPROCESSING      } from '../subworkflows/local/postprocess'
 include { AGGREGATE_SIZE_LOGS         } from '../modules/local/aggregate_size_logs'
 include { GENERATE_QC_REPORT          } from '../modules/local/generate_qc_report'
 
-import static CsvUtils.*
-import static ParamUtils.*
 
 /*
 ================================================================================
@@ -71,37 +69,38 @@ workflow MIRAGE {
 
     /* -------------------- PARAMETER VALIDATION -------------------- */
 
-    validateStart(params.start)
+    ParamUtils.validateStart(params.start)
 
     // Validate and resolve --stop: default to last step if not provided
     if (params.stop) {
-        validateStop(params.stop, params.start)
+        ParamUtils.validateStop(params.stop, params.start)
     }
     def effective_stop = params.stop ?: ParamUtils.STEP_ORDER.last()
 
-    // Helper closure: does this step fall within [start, stop]?
-    def run = { String s -> ParamUtils.shouldRun(s, params.start, effective_stop) }
+    // Per-step gate: ParamUtils.shouldRun(step, start, stop). Called inline at
+    // each site because the strict Nextflow parser does not support invoking a
+    // closure-typed local variable as a function.
 
-    if (run('registration')) {
-        validateRegistrationMethod(params.registration_method)
+    if (ParamUtils.shouldRun('registration', params.start, effective_stop)) {
+        ParamUtils.validateRegistrationMethod(params.registration_method)
     }
 
-    if (run('postprocessing')) {
-        validateSegMethod(params.seg_method)
-        validateCompartmentQuant(params.quantify_compartments, params.expanded_quantification)
+    if (ParamUtils.shouldRun('postprocessing', params.start, effective_stop)) {
+        ParamUtils.validateSegMethod(params.seg_method)
+        ParamUtils.validateCompartmentQuant(params.quantify_compartments, params.expanded_quantification)
     }
 
     if (!params.input) {
         error "Please provide --input for start '${params.start}'"
     }
-    validateInputCSV(
+    CsvUtils.validateInputCSV(
         params.input,
-        requiredColumnsForStep(params.start)
+        ParamUtils.requiredColumnsForStep(params.start)
     )
 
     // Fail-fast semantic validation (per-row format + per-patient reference
     // counts + file existence). Runs here so it is also exercised by --dry_run.
-    validateInputSemantics(
+    CsvUtils.validateInputSemantics(
         params.input,
         params.start,
         params.allow_auto_reference
@@ -119,14 +118,14 @@ workflow MIRAGE {
     def patient_counts = params.input ? CsvUtils.countImagesPerPatient(params.input) : [:]
     def channel_counts = params.input ? CsvUtils.countChannelsPerPatient(params.input) : [:]
 
-    if (run('preprocessing')) {
+    if (ParamUtils.shouldRun('preprocessing', params.start, effective_stop)) {
         def ch_input = loadInputChannel(params.input, 'path_to_file', patient_counts, channel_counts)
         PREPROCESSING(ch_input)
     }
 
     /* -------------------- REGISTRATION -------------------- */
 
-    if (run('registration')) {
+    if (ParamUtils.shouldRun('registration', params.start, effective_stop)) {
 
         // When starting from registration, params.input is a string path to CSV
         // When continuing from preprocessing, use direct channel (streaming, no wait)
@@ -139,7 +138,7 @@ workflow MIRAGE {
 
     /* -------------------- POSTPROCESSING -------------------- */
 
-    if (run('postprocessing')) {
+    if (ParamUtils.shouldRun('postprocessing', params.start, effective_stop)) {
 
         // When starting from postprocessing, params.input is a string path to CSV
         // When continuing from registration, use direct channel (streaming, no wait)
@@ -162,11 +161,11 @@ workflow MIRAGE {
         def ch_postprocess_qc_pngs  = Channel.empty()
         def ch_versions             = Channel.empty()
 
-        if (run('preprocessing')) {
+        if (ParamUtils.shouldRun('preprocessing', params.start, effective_stop)) {
             ch_preprocess_qc_pngs = ch_preprocess_qc_pngs.mix(PREPROCESSING.out.preprocess_qc)
             ch_versions = ch_versions.mix(PREPROCESSING.out.versions)
         }
-        if (run('registration')) {
+        if (ParamUtils.shouldRun('registration', params.start, effective_stop)) {
             ch_registration_qc_pngs = ch_registration_qc_pngs
                 .mix(REGISTRATION.out.qc.map { meta, files -> files })
             ch_feature_dist_jsons = ch_feature_dist_jsons
@@ -175,7 +174,7 @@ workflow MIRAGE {
                 .mix(REGISTRATION.out.valis_summary)
             ch_versions = ch_versions.mix(REGISTRATION.out.versions)
         }
-        if (run('postprocessing')) {
+        if (ParamUtils.shouldRun('postprocessing', params.start, effective_stop)) {
             ch_postprocess_qc_pngs = ch_postprocess_qc_pngs.mix(POSTPROCESSING.out.postprocess_qc)
             ch_versions = ch_versions.mix(POSTPROCESSING.out.versions)
         }
@@ -201,13 +200,13 @@ workflow MIRAGE {
     if (params.enable_trace) {
         def ch_all_sizes = Channel.empty()
 
-        if (run('preprocessing')) {
+        if (ParamUtils.shouldRun('preprocessing', params.start, effective_stop)) {
             ch_all_sizes = ch_all_sizes.mix(PREPROCESSING.out.size_logs)
         }
-        if (run('registration')) {
+        if (ParamUtils.shouldRun('registration', params.start, effective_stop)) {
             ch_all_sizes = ch_all_sizes.mix(REGISTRATION.out.size_logs)
         }
-        if (run('postprocessing')) {
+        if (ParamUtils.shouldRun('postprocessing', params.start, effective_stop)) {
             ch_all_sizes = ch_all_sizes.mix(POSTPROCESSING.out.size_logs)
         }
 
