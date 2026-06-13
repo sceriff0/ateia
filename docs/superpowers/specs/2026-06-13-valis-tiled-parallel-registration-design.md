@@ -263,6 +263,57 @@ rigid → [WAVE 1: PREP → TILE×N @512 → STITCH] → first-pass field
 distributed subworkflow must take Option 1 (or 2) — it must **not** silently drop the micro pass.
 Add a verification case: distributed vs classic with micro ON must be pixel-identical.
 
+## 5B. Per-stage memory profile & why only non-rigid/micro are tiled
+
+Verified against VALIS 1.0.0 source. This answers "if rigid/feature aren't tiled, is the memory
+gain meaningless?" — **no**, because those stages never touch the full-res image.
+
+| Stage | Runs at | Tiled? | Peak RAM driver |
+|---|---|---|---|
+| Feature detection (SuperPoint) + matching (SuperGlue) | downsampled `processed_img` @ `max_processed_image_dim_px` (~1024–2048px) | No | ~fixed, tiny — **independent of slide size** (`serial_rigid.py:511`) |
+| Initial **rigid** registration | same downsampled image | No (and can't be) | tiny — one global transform from globally-matched features |
+| **Non-rigid** | `max_non_rigid_registration_dim_px` (~3000–4096px) | **Yes** when `est_GB>10` | displacement fields × n_slides → the only size-scaling driver |
+| **Micro** (§5A) | `micro_reg_size`, `tile_wh=2048` | **Yes**, same rule | same |
+| **Warp** to full res | level 0 | streamed | bounded — `pyvips.cache_set_max(0)` streams tiles (`registration.py:35`) |
+
+**Conclusions:**
+1. Feature/matching/rigid are **already memory-bounded by downsampling** — tiling them buys ~zero
+   RAM and would hurt quality (per-tile rigid = independent local shifts = boundary seams; it
+   reinvents non-rigid, worse). So the design deliberately does **not** tile them. Bit-identical
+   is preserved precisely because those stages are untouched.
+2. The stages whose RAM scales with image size — non-rigid + micro — **are** tiled. That's the
+   meaningful lever, and it's the one this design pulls.
+3. The everything-per-tile idea is only worthwhile for a *different* goal (full-resolution
+   accuracy with no downsampling); for the **memory** goal it adds quality risk for no gain.
+
+## 5C. Low-budget clusters: separate process per step (the real win)
+
+The biggest low-budget killer in the current monolithic `REGISTER` is **not** the tile math — it's
+that it holds a **32–64 GB BioFormats JVM heap** *while* doing non-rigid *and* the full-res warp on
+one node. The decisive fact for cheap clusters:
+
+> **`REG_TILE` needs no JVM, no BioFormats, no full-res image — just pyvips + OpenCV DeepFlow on
+> one tile crop (~1–2 GB).** Hundreds of tile tasks can flood the smallest, cheapest nodes.
+
+So decompose into per-step processes, each sized to its own peak (a low-budget scheduler then
+places each where it fits):
+
+```
+RIGID_PREP   JVM + downsampled compute (rigid M + emit tiler inputs; NO tile compute)   few medium nodes
+  ▼
+REG_TILE×N   pyvips + DeepFlow, 1 tile   ~1–2 GB, NO JVM                                 MANY tiny cheap nodes ← win
+  ▼
+STITCH       assemble field @ non-rigid res   ~medium, no JVM                            few small nodes
+  ▼
+WARP         JVM + full-res streamed I/O   ~medium                                       few medium nodes
+```
+
+**Refinement to §4/§6:** `REG_PREP` should run **rigid only** and emit the tiler inputs, halting
+*before* computing any tiles (the "halt before tile compute" variant of the Task-1 spike), so the
+heavy compute is fully pushed to the no-JVM `REG_TILE` swarm rather than kept on the fat prep node.
+Each process declares a resource label matched to its real peak (`RIGID_PREP`/`WARP` → JVM-sized;
+`REG_TILE` → `process_low`, no JVM), so low-budget profiles can cap them independently.
+
 ## 6. Two hooking strategies (decision for the plan; recommend Strategy 2)
 
 The per-tile *kernel* externalizes cleanly. The risk is the surrounding **composition** (§5.4).
