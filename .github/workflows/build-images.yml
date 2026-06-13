@@ -1,0 +1,142 @@
+# =============================================================================
+# Build & Push Container Images
+# =============================================================================
+# Builds every Docker image vendored under containers/<name>/ and pushes it to
+# the GitHub Container Registry (GHCR) at ghcr.io/sceriff0/mirage/<name>:<tag>.
+#
+# Triggers:
+#   * release:published    -> build + push, tagged with the release version + latest
+#   * workflow_dispatch     -> build + push, tagged with the supplied version + latest
+#   * push to main (when    -> build ONLY (no push) so PRs/merges validate the
+#     containers/** change)     Dockerfiles without publishing
+#   * workflow_call         -> reusable; release.yml calls this with a version
+#
+# Auth: docker/login-action -> GHCR using the built-in GITHUB_TOKEN
+#       (requires `permissions: packages: write`).
+# Caching: GitHub Actions cache backend (type=gha) for fast layer reuse.
+# =============================================================================
+name: Build Images
+
+on:
+  # Published GitHub release -> build & push, version taken from the tag.
+  release:
+    types: [published]
+
+  # Manual trigger -> build & push, version supplied by the operator.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Image tag/version to publish (e.g. v1.0.0)'
+        required: true
+        type: string
+
+  # Changes to any vendored container -> build only (no push) as a sanity check.
+  push:
+    branches: [main]
+    paths:
+      - 'containers/**'
+      - '.github/workflows/build-images.yml'
+
+  # Reusable entry point so release.yml can invoke this workflow.
+  workflow_call:
+    inputs:
+      version:
+        description: 'Image tag/version to publish (e.g. v1.0.0)'
+        required: true
+        type: string
+
+# GHCR push needs package write access; contents:read for checkout.
+permissions:
+  contents: read
+  packages: write
+
+env:
+  # Base path for all published images.
+  REGISTRY: ghcr.io
+  IMAGE_BASE: ghcr.io/sceriff0/mirage
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Resolve the version/tag and whether we should push.
+  # ---------------------------------------------------------------------------
+  setup:
+    name: Resolve build parameters
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      push: ${{ steps.resolve.outputs.push }}
+    steps:
+      - name: Resolve version and push flag
+        id: resolve
+        run: |
+          # Determine the version string from whichever trigger fired.
+          if [ "${{ github.event_name }}" == "release" ]; then
+            VERSION="${{ github.event.release.tag_name }}"
+            PUSH="true"
+          elif [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+            PUSH="true"
+          elif [ "${{ github.event_name }}" == "workflow_call" ]; then
+            VERSION="${{ inputs.version }}"
+            PUSH="true"
+          else
+            # push to main on containers/** -> build only, no publish.
+            VERSION="ci-${GITHUB_SHA::7}"
+            PUSH="false"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "push=$PUSH" >> "$GITHUB_OUTPUT"
+          echo "Resolved version=$VERSION push=$PUSH (event=${{ github.event_name }})"
+
+  # ---------------------------------------------------------------------------
+  # Build (and conditionally push) each image in parallel via a matrix.
+  # ---------------------------------------------------------------------------
+  build:
+    name: Build ${{ matrix.image }}
+    needs: setup
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # One entry per vendored build context under containers/.
+        image:
+          - bioformats
+          - preprocess
+          - quantification
+          - segmentation
+          - cellsam
+          - istantseg
+          - merge
+          - debug_diffeo
+          - valis
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Only authenticate when we actually intend to push.
+      - name: Log in to GHCR
+        if: needs.setup.outputs.push == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push ${{ matrix.image }}
+        uses: docker/build-push-action@v6
+        with:
+          context: containers/${{ matrix.image }}
+          file: containers/${{ matrix.image }}/Dockerfile
+          push: ${{ needs.setup.outputs.push == 'true' }}
+          # Tag with the resolved version AND latest (both only matter on push;
+          # on build-only runs the tags are computed but nothing is published).
+          tags: |
+            ${{ env.IMAGE_BASE }}/${{ matrix.image }}:${{ needs.setup.outputs.version }}
+            ${{ env.IMAGE_BASE }}/${{ matrix.image }}:latest
+          # Per-image GitHub Actions layer cache.
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,scope=${{ matrix.image }},mode=max

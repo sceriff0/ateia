@@ -11,7 +11,7 @@ process SPLIT_CHANNELS {
     tag "${meta.patient_id}"
     label 'process_medium'
 
-    container 'bolt3x/attend_image_analysis:preprocess'
+    container "${params.container_registry}/preprocess:${params.container_tag}"
 
     input:
     tuple val(meta), path(registered_image), val(is_reference)

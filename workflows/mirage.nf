@@ -25,6 +25,11 @@ def loadInputChannel(csv_path, image_column, patient_counts = null, channel_coun
         .splitCsv(header: true)
         .map { row ->
             def meta = CsvUtils.parseMetadata(row, "CSV ${csv_path}")
+            // Per-image unique id (patient_id + source-image stem). Drives output
+            // file naming so a patient's multiple images do not produce identically
+            // named files that collide when collected downstream (QC, registration).
+            def stem = file(row[image_column]).simpleName
+            meta.id = stem.startsWith(meta.patient_id) ? stem : "${meta.patient_id}_${stem}"
             return tuple(meta, file(row[image_column]))
         }
 
@@ -83,6 +88,7 @@ workflow MIRAGE {
 
     if (run('postprocessing')) {
         validateSegMethod(params.seg_method)
+        validateCompartmentQuant(params.quantify_compartments, params.expanded_quantification)
     }
 
     if (!params.input) {
@@ -91,6 +97,14 @@ workflow MIRAGE {
     validateInputCSV(
         params.input,
         requiredColumnsForStep(params.start)
+    )
+
+    // Fail-fast semantic validation (per-row format + per-patient reference
+    // counts + file existence). Runs here so it is also exercised by --dry_run.
+    validateInputSemantics(
+        params.input,
+        params.start,
+        params.allow_auto_reference
     )
 
     if (params.dry_run) {
@@ -197,6 +211,10 @@ workflow MIRAGE {
             ch_all_sizes = ch_all_sizes.mix(POSTPROCESSING.out.size_logs)
         }
 
-        AGGREGATE_SIZE_LOGS(ch_all_sizes.collect())
+        // Merge by content (not by staging many same-named files) so AGGREGATE
+        // receives a single file and cannot hit a work-dir name collision —
+        // several processes emit identically-named *.size.csv logs.
+        def ch_merged_sizes = ch_all_sizes.collectFile(name: 'raw_input_sizes.csv', sort: true)
+        AGGREGATE_SIZE_LOGS(ch_merged_sizes)
     }
 }

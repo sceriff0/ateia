@@ -169,10 +169,65 @@ def extract_contours(
     return contours_dict
 
 
+def pair_labels_to_reference(
+    label_mask: NDArray,
+    reference_mask: NDArray,
+) -> Dict[int, int]:
+    """Map each label in ``label_mask`` to the dominant overlapping ``reference_mask`` label.
+
+    Used to attribute nucleus instances (``label_mask``) to whole-cell instances
+    (``reference_mask``). When the two masks share label IDs (StarDist / CellSAM,
+    where the cell mask is the expanded nucleus mask) this resolves to the identity
+    mapping; when they do not (InstanSeg or any independent dual-mask backend) it
+    pairs by maximal pixel overlap. Only nonzero reference labels are considered.
+
+    Returns
+    -------
+    dict
+        ``{label: reference_label}`` for every label that overlaps a cell.
+    """
+    flat = np.ascontiguousarray(label_mask).ravel()
+    ref = np.ascontiguousarray(reference_mask).ravel()
+    fg = (flat != 0) & (ref != 0)
+    if not np.any(fg):
+        return {}
+    pairs = pd.DataFrame({'lbl': flat[fg], 'ref': ref[fg]})
+    counts = pairs.groupby(['lbl', 'ref']).size().reset_index(name='n')
+    best_idx = counts.groupby('lbl')['n'].idxmax()
+    best = counts.loc[best_idx]
+    return {int(l): int(r) for l, r in zip(best['lbl'], best['ref'])}
+
+
+def rekey_contours_to_reference(
+    contours: Dict[str, List[List[float]]],
+    mapping: Dict[int, int],
+    areas: Dict[int, float],
+) -> Dict[str, List[List[float]]]:
+    """Re-key nucleus contours from nucleus labels to their paired cell labels.
+
+    If several nuclei map to the same cell, the largest nucleus (by area) wins, so
+    each cell carries a single nucleus polygon (QuPath cell objects hold one nucleus).
+    """
+    out: Dict[str, List[List[float]]] = {}
+    chosen_area: Dict[str, float] = {}
+    for label_str, ring in contours.items():
+        nuc = int(label_str)
+        cell = mapping.get(nuc)
+        if cell is None:
+            continue
+        cell_str = str(cell)
+        area = float(areas.get(nuc, 0.0))
+        if cell_str not in out or area > chosen_area[cell_str]:
+            out[cell_str] = ring
+            chosen_area[cell_str] = area
+    return out
+
+
 def run_extraction(
     mask_path: str,
     outdir: str,
     simplify_tolerance: float = 0.5,
+    reference_mask_path: Optional[str] = None,
 ) -> Tuple[Optional[pd.DataFrame], Optional[Dict]]:
     """Run full extraction pipeline: morphology + contours.
 
@@ -222,6 +277,22 @@ def run_extraction(
     # Extract contours (reuse bbox from morphology — no second regionprops call)
     contours = extract_contours(mask_filtered, props_df, simplify_tolerance)
 
+    # Optionally re-key contours from this mask's labels to a reference mask's labels.
+    # Used for the nucleus mask: emit nucleus contours keyed by CELL label so that
+    # EXPORT_GEOJSON attaches each nucleus polygon to the right cell via identity lookup.
+    if reference_mask_path:
+        logger.info(f"Re-keying contours to reference mask: {reference_mask_path}")
+        if reference_mask_path.endswith('.npy'):
+            reference_mask = np.load(reference_mask_path).squeeze()
+        else:
+            reference_mask, _ = load_image(reference_mask_path)
+            reference_mask = reference_mask.squeeze()
+        mapping = pair_labels_to_reference(mask_filtered, reference_mask)
+        areas = props_df['area'].to_dict() if 'area' in props_df.columns else {}
+        before = len(contours)
+        contours = rekey_contours_to_reference(contours, mapping, areas)
+        logger.info(f"Re-keyed {before} nucleus contours -> {len(contours)} cells")
+
     # Save morphology CSV
     morphology_path = str(Path(outdir) / 'morphology.csv')
     morphology_out = props_df.reset_index()
@@ -262,6 +333,12 @@ def parse_args():
         '--simplify_tolerance', type=float, default=0.5,
         help='Douglas-Peucker contour simplification tolerance in pixels',
     )
+    parser.add_argument(
+        '--reference_mask', type=str, default=None,
+        help='Optional reference mask (.tif/.npy). When given, contours are re-keyed '
+             'from this mask\'s labels to the dominant overlapping reference label '
+             '(used to key nucleus contours by cell label).',
+    )
     return parser.parse_args()
 
 
@@ -276,6 +353,7 @@ def main():
         mask_path=args.mask_file,
         outdir=args.outdir,
         simplify_tolerance=args.simplify_tolerance,
+        reference_mask_path=args.reference_mask,
     )
 
     return 0

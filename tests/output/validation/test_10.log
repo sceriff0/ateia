@@ -1,0 +1,9 @@
+[33mNextflow 26.04.3 is available - Please consider updating your version to it(B[m
+
+[1m[38;5;232m[48;5;43m N E X T F L O W [0;2m  ~  [mversion 25.04.7[m
+[K
+Launching[35m `main.nf` [0;2m[[0;1;36mromantic_fourier[0;2m] DSL2 - [36mrevision: [0;36ma18686d3a9[m
+[K
+ERROR ~ No such field: Missing required column 'channels' in CSV: /Users/valer/Desktop/Github/mirage/tests/testdata/invalid_checkpoint_missing_col.csv
+
+ -- Check script 'workflows/mirage.nf' at line: 99 or see '.nextflow.log' file for more details

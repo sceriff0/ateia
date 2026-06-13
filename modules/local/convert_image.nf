@@ -2,7 +2,7 @@ process CONVERT_IMAGE {
     tag "${meta.patient_id}"
     label 'process_medium'
 
-    container 'bolt3x/attend_image_analysis:convert_bioformats_2'
+    container "${params.container_registry}/bioformats:${params.container_tag}"
 
     input:
     tuple val(meta), path(image_file)
@@ -17,7 +17,7 @@ process CONVERT_IMAGE {
 
     script:
     def args = task.ext.args ?: ''
-    def prefix = task.ext.prefix ?: meta.patient_id
+    def prefix = task.ext.prefix ?: (meta.id ?: meta.patient_id)
     def pixel_size = params.pixel_size ?: '0.325'
     def channels = meta.channels.join(',')
     """
@@ -43,7 +43,7 @@ process CONVERT_IMAGE {
     """
 
     stub:
-    def prefix = task.ext.prefix ?: meta.patient_id
+    def prefix = task.ext.prefix ?: (meta.id ?: meta.patient_id)
     def channels = meta.channels.join(',')
     """
     touch ${prefix}.ome.tif

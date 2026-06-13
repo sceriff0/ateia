@@ -125,5 +125,92 @@ class TestCSVMerging:
         assert marker_cols == ['DAPI', 'FITC', 'PANCK']
 
 
+class TestCompartmentQuantification:
+    """Test per-compartment quantification (Nucleus / Cytoplasm / Cell)."""
+
+    @staticmethod
+    def _synthetic():
+        """Single cell (label 1) with an inner nucleus given a DIFFERENT label (7).
+
+        The differing label id proves the computation does not rely on the cell
+        and nucleus masks sharing label IDs (the InstanSeg / independent-mask case).
+        Channel = 100 inside the nucleus, 10 in the surrounding cytoplasm.
+        """
+        cell_mask = np.zeros((20, 20), dtype=np.int32)
+        cell_mask[5:15, 5:15] = 1                       # 100 px whole-cell
+        nuclei_mask = np.zeros((20, 20), dtype=np.int32)
+        nuclei_mask[8:12, 8:12] = 7                     # 16 px nucleus, id != cell id
+        channel = np.zeros((20, 20), dtype=np.float64)
+        channel[5:15, 5:15] = 10.0                      # cytoplasm value
+        channel[8:12, 8:12] = 100.0                     # nucleus value
+        return cell_mask, nuclei_mask, channel
+
+    def test_standard_means(self):
+        from quantify import compute_compartment_intensities
+
+        cell_mask, nuclei_mask, channel = self._synthetic()
+        df = compute_compartment_intensities(cell_mask, nuclei_mask, channel, "CD3")
+
+        assert len(df) == 1
+        row = df.iloc[0]
+        assert int(row["label"]) == 1
+        # Nuclear region = 16 px @100; cytoplasm = 84 px @10; whole-cell = mix.
+        assert row["CD3: Nucleus: Mean"] == pytest.approx(100.0)
+        assert row["CD3: Cytoplasm: Mean"] == pytest.approx(10.0)
+        assert row["CD3: Cell: Mean"] == pytest.approx((16 * 100 + 84 * 10) / 100.0)
+        # Backward-compatible bare marker column == whole-cell mean.
+        assert row["CD3"] == pytest.approx(row["CD3: Cell: Mean"])
+        # Standard mode emits no Median/Sum columns.
+        assert not any(": Median" in c or ": Sum" in c for c in df.columns)
+
+    def test_cytoplasm_is_cell_minus_nucleus(self):
+        """Integrated density: Cell Sum == Nucleus Sum + Cytoplasm Sum."""
+        from quantify import compute_compartment_intensities
+
+        cell_mask, nuclei_mask, channel = self._synthetic()
+        df = compute_compartment_intensities(
+            cell_mask, nuclei_mask, channel, "CD3", expanded=True
+        )
+        row = df.iloc[0]
+        assert row["CD3: Cell: Sum"] == pytest.approx(
+            row["CD3: Nucleus: Sum"] + row["CD3: Cytoplasm: Sum"]
+        )
+        assert row["CD3: Nucleus: Sum"] == pytest.approx(1600.0)
+        assert row["CD3: Cytoplasm: Sum"] == pytest.approx(840.0)
+
+    def test_expanded_medians(self):
+        from quantify import compute_compartment_intensities
+
+        cell_mask, nuclei_mask, channel = self._synthetic()
+        df = compute_compartment_intensities(
+            cell_mask, nuclei_mask, channel, "CD3", expanded=True
+        )
+        row = df.iloc[0]
+        assert row["CD3: Nucleus: Median"] == pytest.approx(100.0)
+        assert row["CD3: Cytoplasm: Median"] == pytest.approx(10.0)
+        # 84 px @10 outnumber 16 px @100, so the whole-cell median is 10.
+        assert row["CD3: Cell: Median"] == pytest.approx(10.0)
+
+    def test_quantify_single_channel_dispatches_to_compartments(self):
+        from quantify import quantify_single_channel
+
+        cell_mask, nuclei_mask, channel = self._synthetic()
+        # With a nuclei mask -> compartment columns.
+        comp = quantify_single_channel(cell_mask, channel, "CD3", nuclei_mask=nuclei_mask)
+        assert "CD3: Nucleus: Mean" in comp.columns
+        # Without -> legacy whole-cell mean only.
+        legacy = quantify_single_channel(cell_mask, channel, "CD3")
+        assert list(legacy.columns) == ["label", "CD3"]
+        assert legacy.iloc[0]["CD3"] == pytest.approx(comp.iloc[0]["CD3: Cell: Mean"])
+
+    def test_empty_mask_returns_empty(self):
+        from quantify import compute_compartment_intensities
+
+        empty = np.zeros((10, 10), dtype=np.int32)
+        channel = np.zeros((10, 10), dtype=np.float64)
+        df = compute_compartment_intensities(empty, empty, channel, "CD3")
+        assert df.empty
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
