@@ -650,6 +650,64 @@ below-threshold fallback policy).
 
 ---
 
+## 6.6 RESOLVED architecture (decided with user 2026-06-14) — fix-A, with the exact PREP recipe
+
+User priorities: **tiling + low RAM + as close to base VALIS 1.0.0 as possible**; below-threshold →
+**fall back to classic `REGISTER`**. Source analysis settles the rest:
+
+- **`processing_cls=None` on a multichannel tile does `rgb2gray` (a blend of all channels), NOT DAPI**
+  (non_rigid_registrars.py:1326-1338). So the tiler must be fed the **already-processed 2-D DAPI**
+  image; then reg_tile's `ndim==2` branch uses it as-is + `norm_tiles`.
+- A guarded `ChannelGetter` (fix-B) still can't map "dapi"→index per-tile without `src_f`
+  (preprocessing.py:122 needs a reader). Mapping requires either `src_f` (None per-tile) or a baked
+  index — i.e. extra plumbing. fix-A avoids it entirely.
+- **Decision = fix-A:** PREP produces base VALIS's own processed 2-D images and feeds the tiler
+  `processing_cls=None`. This reuses the proven pieces exactly: the 2-D images are VALIS's (captured
+  live), the tile kernel is VALIS's (§6.1, `max|Δ|=0`), compose+warp is VALIS's (§6.3, `max|Δ|=0`).
+  So the distributed result is **bit-identical, by construction, to running VALIS's tiler in-process
+  on VALIS's own processed 2-D image.** (Caveat recorded: for *brightfield* where base VALIS tiles
+  per-tile with `ColorfulStandardizer`, fix-A — process-whole-then-tile — would differ slightly from
+  base-VALIS-tiled; exact brightfield-tiled parity is a follow-up via per-tile `ColorfulStandardizer`,
+  which needs no guard. The fluorescence WSI case — where base VALIS tiling is *broken*, Blocker 3 —
+  is the primary use case and is served exactly.)
+
+### PREP recipe (fix-A) — how to get the processed 2-D images WITHOUT running DeepFlow (low RAM)
+1. JVM up; `registration.TILER_THRESH_GB = <high>` so `prep_images_for_large_non_rigid_registration`
+   takes its **processed branch** (3513 `if not use_tiler:` → 3525-3544: `ChannelGetter` w/ `src_f`
+   LIVE → `rescale_intensity` → `equalize_adapthist` → uint8 → mask → norm). These run at the
+   non-rigid resolution (downsampled) — cheap.
+2. **Hook `OpticalFlowWarper.register`** to capture its 2-D inputs (`moving_img`, `fixed_img`, `mask`)
+   per slide, then **raise `TilesPending`** — halting BEFORE the expensive whole-image DeepFlow. This
+   is the §6.4 halt, but on the whole-image warper (use_tiler=False) instead of the tiler.
+   `Valis.register()` swallows it (Blocker 2); rigid + prep-to-2-D state persists.
+3. Dump per moving slide: `moving.v`/`fixed.v`/`mask.v` (the captured 2-D), `target_stats.npy`,
+   the grid via `bin/utils/tile_grid.py` (matches VALIS's grid exactly, Task 2) → `expanded_bboxes.npy`
+   + `manifest.json` (the `valis_tiling._dump_inputs` contract; `non_rigid_registrar_cls` =
+   OpticalFlowWarper, `processing_cls=None`), and the **warp-state** for §6.3 FINALIZE:
+   `from_rigid_reg` (=False in prod), per-slide `M`, `processed_img_shape_rc`, `reg_img_shape_rc`,
+   `aligned_slide_shape_rc`, resolved crop `bbox_xywh` (compute via the slide's crop helpers post-rigid),
+   `bg_color`, `series`, `src_f`, the reference/incoming field (identity for align_to_reference=True),
+   `_non_rigid_bbox`, `_full_displacement_shape_rc`, and the internal pad `(out_shape, bbox)`.
+4. `kill_jvm()`. No registrar pickle (Blocker 1).
+
+### Make-or-break gate for the PREP spike (achievable, replaces §6.4/§6.5 gates)
+`REG_TILE(PREP's 2-D images) → stitch → §6.3 compose → warp` **==** in-process `NonRigidTileRegistrar`
+on the *same* captured 2-D images → compose → warp. (Each leg already `max|Δ|=0`; the spike confirms
+PREP wires them together correctly + that the warp-state dump is complete.) Below-threshold routing
+sends small inputs to classic `REGISTER` (no tiler), so no parity claim is needed there.
+
+### Remaining implementation (all design-resolved — no unknowns)
+- **Task 5** `bin/reg_prep.py` — the recipe above. **Task 7** `bin/reg_finalize.py` — load dumped
+  field tiles → `warp_tools.stitch_tiles` → §6.3 compose (gate on `from_rigid_reg`) →
+  `pad_displacement` → `slide_tools.warp_slide` → save OME-TIFF (+ `versions.yml`, `*.size.csv`,
+  `channels_manifest.json` per §7) (+ `register_micro` in-process if §5A on).
+- **Tasks 8-9** NF processes `REG_PREP`/`REG_TILE`/`REG_FINALIZE` + `subworkflows/local/registration.nf`
+  routing on `params.reg_distributed_tiling` (+ below-threshold → classic `REGISTER`), params, schema.
+- **Task 10** verify: distributed == in-process tiler on same 2-D (fluorescence) + == classic for
+  large brightfield; large fixture.
+
+---
+
 ## 7. Data formats & I/O contract between processes
 
 | Artifact | Format | Notes |

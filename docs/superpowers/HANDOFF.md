@@ -33,16 +33,25 @@
   "Bit-identical to classic" holds literally **only for large brightfield** (where classic itself tiles).
   For **fluorescence** there is NO working classic baseline (whole-image is a different algorithm;
   classic-tiled crashes, Blocker 3) — validate vs in-process tiler on the same 2-D images.
-- ⛔ **NEXT make-or-break: Task 5 PREP spike (spec §6.4 + §6.5).** Forcing the tiler dumps the
-  **UNPROCESSED 3-band image** (channel processing deferred to per-tile = Blocker 3 root). PREP must
-  feed the tiler the **2-D processed images classic's non-rigid pipeline produces** (registration.py
-  3525-3544: ChannelGetter w/ src_f live → norm → rescale → mask). **Revised gate:** PREP's 2-D images
-  through the in-process tiler == the field from classic's processed-2-D pipeline (i.e. PREP reproduces
-  classic's *processing*; *tiling* equivalence is already §6.1). Halt mechanics + surviving warp state
-  (`slide_dict`, `_non_rigid_bbox`, `_full_displacement_shape_rc`, rigid `M`/shapes/`bg_color`) confirmed.
-- ❓ **DECISION POINT for the user (spec §6.5):** (a) fix-A = process-to-2-D in PREP vs fix-B = ship a
-  guarded `ChannelGetter` so classic auto-tiling runs on fluorescence; (b) below-threshold policy —
-  fall back to classic whole-image `REGISTER` (a 1-tile tiler is NOT == whole-image).
+- ✅ **ARCHITECTURE RESOLVED with user (spec §6.6) — fix-A + below-threshold fallback to classic.**
+  Decisions: process-to-2-D in PREP (fix-A); below VALIS's tiling threshold → classic whole-image
+  `REGISTER`. Rationale: `processing_cls=None` on a multichannel tile does `rgb2gray` not DAPI
+  (1326-1338), and a guarded ChannelGetter can't map the channel per-tile without `src_f` — so the
+  tiler MUST be fed base VALIS's processed 2-D DAPI. fix-A reuses every proven piece, so the result is
+  **bit-identical by construction to VALIS's tiler run in-process on VALIS's own processed 2-D image**.
+- ▶️ **NEXT = pure implementation (no design unknowns left), per the §6.6 recipe:**
+  - **Task 5 `bin/reg_prep.py`** — JVM up; `TILER_THRESH_GB` high to force the processed-2-D branch;
+    hook `OpticalFlowWarper.register` to capture 2-D inputs + raise `TilesPending` (halt before
+    DeepFlow = low RAM); dump 2-D images + grid (via `tile_grid.py`) + warp-state (the §6.3 contract).
+    **Spike gate:** `REG_TILE(PREP 2-D) → stitch → compose → warp` == in-process tiler on the same 2-D
+    + compose + warp (each leg already `max|Δ|=0`).
+  - **Task 7 `bin/reg_finalize.py`** — `stitch_tiles` → §6.3 compose (gate on `from_rigid_reg`) →
+    `pad_displacement` → `slide_tools.warp_slide` → OME-TIFF + versions/size/manifest (§7); +micro if §5A.
+  - **Tasks 8-9** — NF processes + `registration.nf` routing on `params.reg_distributed_tiling`
+    (below-threshold → classic `REGISTER`), params, schema.
+  - **Task 10** — verify distributed == in-process tiler (fluorescence) + == classic (large brightfield).
+  - Follow-up noted in §6.6: exact base-VALIS-*tiled-brightfield* parity needs per-tile
+    `ColorfulStandardizer` (no guard) — secondary to the fluorescence WSI use case.
 - ▶️ **Then remaining:** Task 5 (`reg_prep.py`), Task 7 (`reg_finalize.py`, per §6.3 — compose gated
   on `from_rigid_reg` → `pad_displacement` → `slide_tools.warp_slide`, no Slide rebuild), Tasks 8-9
   (NF processes + routing), Task 10 (bit-identical verification). VALIS source is at `/tmp/valis_src/`
