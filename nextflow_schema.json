@@ -249,6 +249,11 @@
                     "description": "est_GB boundary for auto tiling routing (matches VALIS TILER_THRESH_GB).",
                     "default": 10
                 },
+                "reg_dist_force_tiling": {
+                    "type": "boolean",
+                    "description": "false = separated whole-image non-rigid (bit-identical, JVM-free); true = tiled fan-out (for a single field too big for one node).",
+                    "default": false
+                },
                 "reg_dist_sub_threshold": {
                     "type": "string",
                     "description": "Tiling-regime policy: 'auto' = tile only above VALIS's threshold; 'force' = always tile.",

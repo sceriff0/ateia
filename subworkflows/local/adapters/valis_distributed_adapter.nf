@@ -14,10 +14,12 @@
 ========================================================================================
 */
 
-include { REG_PREP }     from '../../../modules/local/reg_prep'
-include { REG_TILE }     from '../../../modules/local/reg_tile'
-include { REG_FINALIZE } from '../../../modules/local/reg_finalize'
-include { REG_WARP_REF } from '../../../modules/local/reg_warp_ref'
+include { REG_PREP }           from '../../../modules/local/reg_prep'
+include { REG_TILE }           from '../../../modules/local/reg_tile'
+include { REG_NONRIGID }       from '../../../modules/local/reg_nonrigid'
+include { REG_FINALIZE }       from '../../../modules/local/reg_finalize'
+include { REG_FINALIZE_FIELD } from '../../../modules/local/reg_finalize_field'
+include { REG_WARP_REF }       from '../../../modules/local/reg_warp_ref'
 
 def slideStem(f) {
     f.name.replaceAll(/\.ome\.tiff?$/, '').replaceAll(/\.tiff?$/, '')
@@ -66,24 +68,37 @@ workflow VALIS_DISTRIBUTED_ADAPTER {
         out
     }
 
-    // ---- fan-out: read each moving slide's manifest n_tiles -> one REG_TILE task per tile ----
-    ch_tile_tasks = ch_prep_moving.flatMap { key, ti, ws ->
-        def n = new groovy.json.JsonSlurper().parseText(ti.resolve('manifest.json').text).n_tiles as int
-        (0..<n).collect { i -> tuple(key[0], key[1], ti, i) }
+    // ---- NON-RIGID step: SEPARATED whole-image (default, bit-identical, JVM-free) or TILED fan-out
+    // (force via params.reg_dist_force_tiling, for a single field too big for one node). ----
+    if (params.reg_dist_force_tiling) {
+        // TILED: fan-out one REG_TILE task per tile, then stitch in REG_FINALIZE.
+        ch_tile_tasks = ch_prep_moving.flatMap { key, ti, ws ->
+            def n = new groovy.json.JsonSlurper().parseText(ti.resolve('manifest.json').text).n_tiles as int
+            (0..<n).collect { i -> tuple(key[0], key[1], ti, i) }
+        }
+        REG_TILE(ch_tile_tasks)
+        ch_tiles = REG_TILE.out.tiles
+            .groupTuple(by: [0, 1])
+            .map { patient_id, slide, tile_lists -> tuple([patient_id, slide], tile_lists.flatten()) }
+        ch_finalize_in = ch_prep_moving
+            .join(ch_tiles)
+            .join(ch_src.map { key, meta, f -> tuple(key, f) })
+            .map { key, ti, ws, tiles, src -> tuple(key[0], key[1], ti, tiles, ws, src) }
+        REG_FINALIZE(ch_finalize_in)
+        ch_moving_registered = REG_FINALIZE.out.registered
+        ch_moving_logs = REG_FINALIZE.out.size_log
+    } else {
+        // SEPARATED: whole-image non-rigid in a JVM-free process -> REG_FINALIZE_FIELD.
+        REG_NONRIGID(ch_prep_moving.map { key, ti, ws -> tuple(key[0], key[1], ti) })
+        ch_field = REG_NONRIGID.out.field.map { pid, slide, bk -> tuple([pid, slide], bk) }
+        ch_finalize_in = ch_prep_moving
+            .join(ch_field)
+            .join(ch_src.map { key, meta, f -> tuple(key, f) })
+            .map { key, ti, ws, field, src -> tuple(key[0], key[1], ti, field, ws, src) }
+        REG_FINALIZE_FIELD(ch_finalize_in)
+        ch_moving_registered = REG_FINALIZE_FIELD.out.registered
+        ch_moving_logs = REG_FINALIZE_FIELD.out.size_log
     }
-    REG_TILE(ch_tile_tasks)
-
-    // ---- fan-in: collect all tile .v files per (patient, slide) ----
-    ch_tiles = REG_TILE.out.tiles
-        .groupTuple(by: [0, 1])
-        .map { patient_id, slide, tile_lists -> tuple([patient_id, slide], tile_lists.flatten()) }
-
-    // ---- REG_FINALIZE (moving): join prep artifacts + tiles + src by [patient_id, slide] ----
-    ch_finalize_in = ch_prep_moving
-        .join(ch_tiles)                                              // key -> ti, ws, tiles
-        .join(ch_src.map { key, meta, f -> tuple(key, f) })          // key -> ..., src
-        .map { key, ti, ws, tiles, src -> tuple(key[0], key[1], ti, tiles, ws, src) }
-    REG_FINALIZE(ch_finalize_in)
 
     // ---- REG_WARP_REF (reference): join ref warp_state + src ----
     ch_ref_in = ch_prep_ref
@@ -92,7 +107,7 @@ workflow VALIS_DISTRIBUTED_ADAPTER {
     REG_WARP_REF(ch_ref_in)
 
     // ---- convert back to [meta, file] by joining registered outputs to their meta ----
-    ch_registered = REG_FINALIZE.out.registered
+    ch_registered = ch_moving_registered
         .mix(REG_WARP_REF.out.registered)
         .map { patient_id, slide, regfile -> tuple([patient_id, slide], regfile) }
         .join(ch_src.map { key, meta, f -> tuple(key, meta) })
@@ -101,5 +116,5 @@ workflow VALIS_DISTRIBUTED_ADAPTER {
     emit:
     registered = ch_registered
     versions   = REG_PREP.out.versions.first()
-    size_logs  = REG_PREP.out.size_log.mix(REG_FINALIZE.out.size_log)
+    size_logs  = REG_PREP.out.size_log.mix(ch_moving_logs)
 }
