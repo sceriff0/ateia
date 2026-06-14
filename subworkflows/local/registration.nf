@@ -10,6 +10,7 @@ include { PAD_IMAGES                        } from '../../modules/local/pad_imag
 include { GENERATE_REGISTRATION_QC          } from '../../modules/local/generate_registration_qc'
 
 include { VALIS_ADAPTER                     } from './adapters/valis_adapter'
+include { VALIS_DISTRIBUTED_ADAPTER         } from './adapters/valis_distributed_adapter'
 
 include { ESTIMATE_FEATURE_DISTANCES        } from '../../modules/local/estimate_feature_distances'
 
@@ -143,8 +144,18 @@ workflow REGISTRATION {
     //   - Runs registration
     //   - Converts output back to [meta, file] standard format
 
-    VALIS_ADAPTER(ch_grouped)
-    ch_registered = VALIS_ADAPTER.out.registered
+    // Opt-in distributed tiled registration (spec §6.6): lifts VALIS's non-rigid tile loop into
+    // REG_PREP -> REG_TILE (fan-out) -> REG_FINALIZE (fan-in) for low-RAM clusters. Bit-identical to
+    // VALIS's own tiler on its processed 2-D images. Default (false) keeps the classic VALIS_ADAPTER.
+    // (Below-threshold-fallback-to-classic — when classic would NOT tile — is a routing refinement to
+    //  add per spec §6.5; for now the toggle is all-or-nothing.)
+    if (params.reg_distributed_tiling) {
+        VALIS_DISTRIBUTED_ADAPTER(ch_grouped)
+        ch_registered = VALIS_DISTRIBUTED_ADAPTER.out.registered
+    } else {
+        VALIS_ADAPTER(ch_grouped)
+        ch_registered = VALIS_ADAPTER.out.registered
+    }
 
     // ========================================================================
     // STEP 3b: GENERATE QC (Method-independent)

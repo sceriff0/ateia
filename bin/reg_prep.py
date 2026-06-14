@@ -101,6 +101,36 @@ def main():
     # CROP_REF bbox at level 0 (warp_slide lines 882-889)
     scaled_aligned_rc = list(ref_slide.slide_dimensions_wh[0][::-1])
 
+    def _warp_state(slide_obj, name, internal_pad=None, from_rigid=False, rec=None):
+        slide_bbox_xywh, _ = slide_obj.get_crop_xywh(crop=CROP_REF, out_shape_rc=scaled_aligned_rc)
+        ws = {
+            "slide_name": name,
+            "src_f": slide_obj.src_f,
+            "from_rigid_reg": from_rigid,
+            "M": np.asarray(slide_obj.M).tolist(),
+            "processed_img_shape_rc": [int(x) for x in slide_obj.processed_img_shape_rc],
+            "reg_img_shape_rc": [int(x) for x in slide_obj.reg_img_shape_rc],
+            "aligned_slide_shape_rc": [int(x) for x in slide_obj.aligned_slide_shape_rc],
+            "bbox_xywh": [int(x) for x in slide_bbox_xywh],
+            "bg_color": [float(x) for x in slide_obj.bg_color] if slide_obj.bg_color is not None else None,
+            "series": slide_obj.series,
+            "is_rgb": bool(slide_obj.is_rgb),
+            "interp_method": "bicubic",
+        }
+        if internal_pad is not None:
+            ws["internal_pad"] = internal_pad
+        return ws
+
+    # Reference slide: warped-to-itself (rigid M + crop, identity non-rigid) so downstream QC has it in
+    # the same cropped coordinate space as the moving slides (classic VALIS warps all slides incl. ref).
+    ref_slide_obj = reg.slide_dict.get(ref_stem)
+    if ref_slide_obj is not None:
+        rdir = os.path.join(args.out, ref_stem)
+        os.makedirs(rdir, exist_ok=True)
+        with open(os.path.join(rdir, "warp_state.json"), "w") as fh:
+            json.dump(_warp_state(ref_slide_obj, ref_stem), fh, indent=2, default=_jd)
+        print(f"[reg_prep] dumped REFERENCE {ref_stem} warp_state (rigid-only)", flush=True)
+
     slides_written = []
     for name, slide_obj in reg.slide_dict.items():
         if name == ref_stem or name not in cap or "moving" not in cap[name]:
@@ -126,22 +156,8 @@ def main():
         if rec["reg_mask"] is not None:
             np.save(os.path.join(tiler_inputs, "reg_mask.npy"), rec["reg_mask"])
 
-        slide_bbox_xywh, _ = slide_obj.get_crop_xywh(crop=CROP_REF, out_shape_rc=scaled_aligned_rc)
-        ws = {
-            "slide_name": name,
-            "src_f": slide_obj.src_f,
-            "from_rigid_reg": rec["from_rigid"],
-            "M": np.asarray(slide_obj.M).tolist(),
-            "processed_img_shape_rc": [int(x) for x in slide_obj.processed_img_shape_rc],
-            "reg_img_shape_rc": [int(x) for x in slide_obj.reg_img_shape_rc],
-            "aligned_slide_shape_rc": [int(x) for x in slide_obj.aligned_slide_shape_rc],
-            "bbox_xywh": [int(x) for x in slide_bbox_xywh],
-            "bg_color": [float(x) for x in slide_obj.bg_color] if slide_obj.bg_color is not None else None,
-            "series": slide_obj.series,
-            "is_rgb": bool(slide_obj.is_rgb),
-            "interp_method": "bicubic",
-            "internal_pad": {"out_shape": full_disp, "bbox": non_rigid_bbox},
-        }
+        ws = _warp_state(slide_obj, name, internal_pad={"out_shape": full_disp, "bbox": non_rigid_bbox},
+                         from_rigid=rec["from_rigid"], rec=rec)
         with open(os.path.join(sdir, "warp_state.json"), "w") as fh:
             json.dump(ws, fh, indent=2, default=_jd)
         slides_written.append(name)

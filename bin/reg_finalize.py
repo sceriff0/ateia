@@ -74,43 +74,51 @@ def _to_vips_field(field):
 # --------------------------------------------------------------------------- main
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--inputs-dir", required=True, help="REG_PREP tiler_inputs (manifest.json + expanded_bboxes.npy)")
-    ap.add_argument("--tiles-dir", required=True, help="REG_TILE output (bk_*.v / fwd_*.v)")
     ap.add_argument("--warp-state", required=True, help="REG_PREP per-slide warp_state.json")
     ap.add_argument("--src-slide", required=True, help="full-res source ome.tiff to warp")
     ap.add_argument("--out", required=True, help="output ome.tiff path")
+    ap.add_argument("--inputs-dir", help="REG_PREP tiler_inputs (manifest.json + expanded_bboxes.npy)")
+    ap.add_argument("--tiles-dir", help="REG_TILE output (bk_*.v / fwd_*.v)")
+    ap.add_argument("--rigid-only", action="store_true",
+                    help="reference slide: warp with rigid M + crop only (dxdy=None), no tiles/compose")
     ap.add_argument("--compression", default="lzw")
     args = ap.parse_args()
-
-    m = json.load(open(os.path.join(args.inputs_dir, "manifest.json")))
-    expanded_bboxes = np.load(os.path.join(args.inputs_dir, "expanded_bboxes.npy"))
     ws = json.load(open(args.warp_state))
 
-    # 1) stitch the per-tile fields back into the full non-rigid field (== VALIS calc(), §6.1)
-    n = m["n_tiles"]
-    bk_tiles = [pyvips.Image.new_from_file(os.path.join(args.tiles_dir, f"bk_{i}.v")) for i in range(n)]
-    moving_bk = warp_tools.stitch_tiles(bk_tiles, expanded_bboxes, m["n_rows"], m["n_cols"], m["tile_buffer"])
-
-    # 2) compose (§6.3). align_to_reference=True => incoming/reference field is identity.
-    reg_mask_f = os.path.join(args.inputs_dir, "reg_mask.npy")
-    reg_mask = np.load(reg_mask_f) if os.path.exists(reg_mask_f) else None
-    incoming = pyvips.Image.black(moving_bk.width, moving_bk.height, bands=2).cast("float")
-    self_bk = compose(
-        moving_bk, incoming, reg_mask,
-        from_rigid_reg=ws.get("from_rigid_reg", False),
-        M=np.asarray(ws["M"]) if ws.get("M") is not None else None,
-        unwarped_shape=tuple(ws["unwarped_shape"]) if ws.get("unwarped_shape") else None,
-        og_reg_shape_rc=tuple(ws["og_reg_shape_rc"]) if ws.get("og_reg_shape_rc") else None,
-    )
-
-    # 3) pad the composed (masked/scaled) field up to the full registered resolution (line 3671)
-    ipad = ws.get("internal_pad")
-    if ipad is None:
-        slide_bk = self_bk
+    if args.rigid_only:
+        # Reference (or any rigid-only) slide: VALIS warps it with its M + crop and identity non-rigid.
+        slide_bk = None
     else:
-        os_rc, pb = ipad["out_shape"], ipad["bbox"]
-        slide_bk = pyvips.Image.black(os_rc[1], os_rc[0], bands=2).cast("float").insert(
-            _to_vips_field(self_bk), pb[0], pb[1])
+        if not args.inputs_dir or not args.tiles_dir:
+            raise SystemExit("--inputs-dir and --tiles-dir are required unless --rigid-only")
+        m = json.load(open(os.path.join(args.inputs_dir, "manifest.json")))
+        expanded_bboxes = np.load(os.path.join(args.inputs_dir, "expanded_bboxes.npy"))
+
+        # 1) stitch the per-tile fields back into the full non-rigid field (== VALIS calc(), §6.1)
+        n = m["n_tiles"]
+        bk_tiles = [pyvips.Image.new_from_file(os.path.join(args.tiles_dir, f"bk_{i}.v")) for i in range(n)]
+        moving_bk = warp_tools.stitch_tiles(bk_tiles, expanded_bboxes, m["n_rows"], m["n_cols"], m["tile_buffer"])
+
+        # 2) compose (§6.3). align_to_reference=True => incoming/reference field is identity.
+        reg_mask_f = os.path.join(args.inputs_dir, "reg_mask.npy")
+        reg_mask = np.load(reg_mask_f) if os.path.exists(reg_mask_f) else None
+        incoming = pyvips.Image.black(moving_bk.width, moving_bk.height, bands=2).cast("float")
+        self_bk = compose(
+            moving_bk, incoming, reg_mask,
+            from_rigid_reg=ws.get("from_rigid_reg", False),
+            M=np.asarray(ws["M"]) if ws.get("M") is not None else None,
+            unwarped_shape=tuple(ws["unwarped_shape"]) if ws.get("unwarped_shape") else None,
+            og_reg_shape_rc=tuple(ws["og_reg_shape_rc"]) if ws.get("og_reg_shape_rc") else None,
+        )
+
+        # 3) pad the composed (masked/scaled) field up to the full registered resolution (line 3671)
+        ipad = ws.get("internal_pad")
+        if ipad is None:
+            slide_bk = self_bk
+        else:
+            os_rc, pb = ipad["out_shape"], ipad["bbox"]
+            slide_bk = pyvips.Image.black(os_rc[1], os_rc[0], bands=2).cast("float").insert(
+                _to_vips_field(self_bk), pb[0], pb[1])
 
     # 4) warp the full-res slide via VALIS's own streaming warp (pure plain-data, §6.3)
     warped = slide_tools.warp_slide(

@@ -70,6 +70,9 @@ process REG_PREP {
     python3 -c "import numpy as np; np.save('prep/P001_mov1/tiler_inputs/expanded_bboxes.npy', np.array([[0,0,10,10]]))" 2>/dev/null || touch prep/P001_mov1/tiler_inputs/expanded_bboxes.npy
     touch prep/P001_mov1/tiler_inputs/moving.v prep/P001_mov1/tiler_inputs/fixed.v
     echo '{"slide_name":"P001_mov1","src_f":"P001_mov1.ome.tiff","from_rigid_reg":false,"M":[[1,0,0],[0,1,0],[0,0,1]],"processed_img_shape_rc":[10,10],"reg_img_shape_rc":[10,10],"aligned_slide_shape_rc":[10,10],"bbox_xywh":[0,0,10,10],"bg_color":[0,0,0],"series":0,"is_rgb":false,"interp_method":"bicubic","internal_pad":{"out_shape":[10,10],"bbox":[0,0,10,10]}}' > prep/P001_mov1/warp_state.json
+    # Reference dir: warp_state only, NO tiler_inputs (the adapter routes it to REG_WARP_REF)
+    mkdir -p prep/P001_ref
+    echo '{"slide_name":"P001_ref","src_f":"P001_ref.ome.tiff","from_rigid_reg":false,"M":[[1,0,0],[0,1,0],[0,0,1]],"processed_img_shape_rc":[10,10],"reg_img_shape_rc":[10,10],"aligned_slide_shape_rc":[10,10],"bbox_xywh":[0,0,10,10],"bg_color":[0,0,0],"series":0,"is_rgb":false,"interp_method":"bicubic"}' > prep/P001_ref/warp_state.json
     echo "STUB,${patient_id},stub,0" > ${patient_id}.REG_PREP.size.csv
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":

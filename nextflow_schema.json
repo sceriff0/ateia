@@ -223,6 +223,47 @@
                     "type": "integer",
                     "description": "Tile size for tiled registration.",
                     "default": 2048
+                },
+                "reg_distributed_tiling": {
+                    "type": "boolean",
+                    "description": "Opt-in: lift VALIS's non-rigid tile loop into Nextflow processes (REG_PREP/REG_TILE/REG_FINALIZE) for low-RAM clusters. Bit-identical to VALIS's own tiler. Default keeps the classic VALIS_ADAPTER.",
+                    "default": false
+                },
+                "reg_dist_container": {
+                    "type": "string",
+                    "description": "Container for distributed-tiling processes. MUST be the EXTERNAL_TILE_HOOK-patched VALIS image (the published cdgatenbee image lacks the seam).",
+                    "default": "mirage-valis:1.0.0"
+                },
+                "reg_dist_tile_wh": {
+                    "type": "integer",
+                    "description": "Non-rigid tile width/height for distributed tiling.",
+                    "default": 512
+                },
+                "reg_dist_tile_buffer": {
+                    "type": "integer",
+                    "description": "Tile overlap (buffer) for distributed tiling.",
+                    "default": 100
+                },
+                "reg_dist_sub_threshold": {
+                    "type": "string",
+                    "description": "Tiling-regime policy: 'auto' = tile only above VALIS's threshold; 'force' = always tile.",
+                    "default": "auto",
+                    "enum": ["auto", "force"]
+                },
+                "reg_dist_tiles_per_task": {
+                    "type": "integer",
+                    "description": "Tiles per REG_TILE task (1 = max granularity). Scheduling only; does not affect output.",
+                    "default": 1
+                },
+                "reg_max_non_rigid_dim": {
+                    "type": "integer",
+                    "description": "Max non-rigid registration dimension (px) for distributed REG_PREP.",
+                    "default": 4096
+                },
+                "reg_max_processed_dim": {
+                    "type": "integer",
+                    "description": "Max processed/rigid dimension (px) for distributed REG_PREP.",
+                    "default": 2048
                 }
             }
         },
