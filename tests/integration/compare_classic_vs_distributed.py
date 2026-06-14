@@ -39,9 +39,13 @@ INP = os.path.join(WORK, "in")
 PREP = os.path.join(WORK, "prep")
 REF, MOV = "P001_ref.ome.tiff", "P001_mov1.ome.tiff"
 MOV_STEM = "P001_mov1"
-TILE_WH, TILE_BUFFER = 48, 16
-MAX_NR, MAX_PROC = 1024, 256
-MICRO_FRACTION = 0.125
+# Defaults suit the 128px fixture; override via env for a larger fixture (see generate_large_fixture.py).
+DATADIR = os.environ.get("CMP_DATADIR", "tests/testdata")
+TILE_WH = int(os.environ.get("CMP_TILE_WH", "48"))
+TILE_BUFFER = int(os.environ.get("CMP_TILE_BUFFER", "16"))
+MAX_NR = int(os.environ.get("CMP_MAX_NR", "1024"))
+MAX_PROC = int(os.environ.get("CMP_MAX_PROC", "256"))
+MICRO_FRACTION = float(os.environ.get("CMP_MICRO_FRACTION", "0.125"))
 
 
 def npx(vips_img):
@@ -74,7 +78,7 @@ def main():
         shutil.rmtree(WORK)
     os.makedirs(INP)
     for s in (REF, MOV):
-        shutil.copy(os.path.join("tests/testdata", s), os.path.join(INP, s))
+        shutil.copy(os.path.join(DATADIR, s), os.path.join(INP, s))
 
     # ---------------- CLASSIC (whole-image VALIS) ----------------
     registration.TILER_THRESH_GB = 10  # do not tile -> classic whole-image (works on fluorescence)
