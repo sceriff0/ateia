@@ -708,6 +708,45 @@ sends small inputs to classic `REGISTER` (no tiler), so no parity claim is neede
 
 ---
 
+## 6.7 STRATEGIC finding (2026-06-14) — VALIS's auto-tiler rarely fires; non-rigid RAM is already bounded ‼️
+
+While implementing the `est_GB` router (the §6.5/§8.1 fallback), the exact VALIS formula revealed a
+project-level truth that reframes the value of tiling:
+
+- VALIS computes `est_GB` **at the non-rigid resolution** (`full_out_shape = get_aligned_slide_shape(s)`
+  with `s ≈ max_non_rigid_dim / processed_dim`, registration.py:3427-3430), NOT full-res. So the
+  non-rigid pass runs at ~`max_non_rigid_dim` (≈4096) **regardless of slide size**.
+- `est_GB = n_slides · (img + displacement + processed)` with VALIS's `calc_memory_size_gb`
+  (`= nch·H·W·8/bitdepth / 2³⁰`). At a 4096²-ish non-rigid shape with a few slides this is **~0.1 GB**.
+  A 40000×40000 WSI → still ~0.1 GB at the non-rigid stage.
+- Threshold math: `est_GB > 10` needs **`max_non_rigid_dim ≳ 34,000 px` OR `≳ 200 slides`**. Micro is
+  even smaller (`micro_reg_size = min_max·0.125`), so it tiles even more rarely.
+
+**Consequences:**
+1. **For typical configs (`max_non_rigid_dim` 1024–4096, few slides) VALIS NEVER tiles** → classic
+   non-rigid RAM is already bounded by downsampling. So in **`'auto'` mode the distributed path almost
+   never activates** — which is *correct* (it routes to classic = identical), but means tiling delivers
+   no RAM win in that regime.
+2. The distributed tiling win is real only when you **`'force'`** it (or set `max_non_rigid_dim` very
+   high / have hundreds of slides) — and `'force'` differs from classic-whole-image (§6.5).
+3. **The user's RAM spikes are likely NOT the non-rigid tile math.** The genuine size-scaling RAM
+   drivers in this pipeline are elsewhere:
+   - the **BioFormats JVM heap** (32–64 GB) held while reading full-res slides (the §5C lever — solved
+     by *process separation*, i.e. no-JVM REG_TILE nodes, NOT by tiling per se);
+   - full-res **slide reading / conversion / warp I/O** (warp is streamed via `cache_set_max(0)`, but
+     conversion/preprocessing may not be);
+   - `memory_mode='high'` pushing `max_processed/non_rigid_dim` up.
+   → **Before investing further (e.g. distributing micro), confirm where RAM actually spikes** (profile
+   a real run). If it's the JVM/full-res I/O, the §5C *decomposition* (separate JVM-sized PREP/WARP from
+   no-JVM TILE) is the lever — and that only helps once tiling engages, i.e. under `'force'` / high-res.
+
+**This does not invalidate the work** — the distributed path is correct and bit-identical to VALIS's
+tiler, and the `'auto'` router guarantees identity. It *does* mean the headline benefit is narrower than
+"low RAM for any large slide": it's "low RAM when the non-rigid/micro pass itself is large (high-res or
+many-slide), via no-JVM tile fan-out." Set expectations accordingly.
+
+---
+
 ## 7. Data formats & I/O contract between processes
 
 | Artifact | Format | Notes |
