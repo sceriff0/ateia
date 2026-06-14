@@ -17,8 +17,8 @@ process REG_ESTIMATE {
     tuple val(patient_id), path(reference, stageAs: 'ref/*'), path(all_files, stageAs: 'imgs/*')
 
     output:
-    tuple val(patient_id), env(USE_DISTRIBUTED), emit: decision
-    path "est_gb.json"                          , emit: report
+    tuple val(patient_id), env('USE_DISTRIBUTED'), emit: decision
+    path "est_gb.json"                           , emit: report
 
     when:
     task.ext.when == null || task.ext.when
