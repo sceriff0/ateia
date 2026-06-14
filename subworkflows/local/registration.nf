@@ -10,6 +10,8 @@ include { PAD_IMAGES                        } from '../../modules/local/pad_imag
 include { GENERATE_REGISTRATION_QC          } from '../../modules/local/generate_registration_qc'
 
 include { VALIS_ADAPTER                     } from './adapters/valis_adapter'
+include { VALIS_DISTRIBUTED_ADAPTER         } from './adapters/valis_distributed_adapter'
+include { REG_ESTIMATE                      } from '../../modules/local/reg_estimate'
 
 include { ESTIMATE_FEATURE_DISTANCES        } from '../../modules/local/estimate_feature_distances'
 
@@ -149,8 +151,47 @@ workflow REGISTRATION {
     //   - Runs registration
     //   - Converts output back to [meta, file] standard format
 
-    VALIS_ADAPTER(ch_grouped)
-    ch_registered = VALIS_ADAPTER.out.registered
+    // Opt-in distributed tiled registration (spec §6.5/§6.6): lifts VALIS's non-rigid tile loop into
+    // REG_PREP -> REG_TILE (fan-out) -> REG_FINALIZE (fan-in) for low-RAM clusters. Bit-identical to
+    // VALIS's own tiler on its processed 2-D images. Default (reg_distributed_tiling=false) = classic.
+    //
+    // IMPORTANT (spec §6.5): tiled non-rigid != whole-image non-rigid. VALIS only tiles when
+    // est_GB > threshold (rarely, since non-rigid runs downsampled). So:
+    //   - 'auto' (default): REG_ESTIMATE per patient -> route est>thr to distributed (== classic-tiled),
+    //     est<=thr to classic whole-image (IDENTICAL to classic). This keeps <10GB inputs bit-identical.
+    //   - 'force': always tile (RAM win at the cost of differing from classic-whole-image for small data).
+    if (!params.reg_distributed_tiling) {
+        VALIS_ADAPTER(ch_grouped)
+        ch_registered       = VALIS_ADAPTER.out.registered
+        ch_adapter_logs     = VALIS_ADAPTER.out.size_logs
+        ch_adapter_versions = VALIS_ADAPTER.out.versions
+        ch_adapter_summary  = VALIS_ADAPTER.out.summary
+    } else if ((params.reg_dist_sub_threshold ?: 'auto') == 'force') {
+        VALIS_DISTRIBUTED_ADAPTER(ch_grouped)
+        ch_registered       = VALIS_DISTRIBUTED_ADAPTER.out.registered
+        ch_adapter_logs     = VALIS_DISTRIBUTED_ADAPTER.out.size_logs
+        ch_adapter_versions = VALIS_DISTRIBUTED_ADAPTER.out.versions
+        ch_adapter_summary  = Channel.empty()
+    } else {
+        // 'auto': route per patient by INPUT SIZE (spec §6.7) — large inputs (JVM-RAM concern) ->
+        // distributed (JVM-free, bit-identical); small inputs -> classic VALIS (monolithic is fine).
+        REG_ESTIMATE(ch_grouped.map { pid, ref_item, all_items ->
+            tuple(pid, ref_item[1], all_items.collect { it[1] })
+        })
+        ch_routed = ch_grouped
+            .map { pid, ref_item, all_items -> tuple(pid, [ref_item, all_items]) }
+            .join(REG_ESTIMATE.out.decision)
+            .branch { pid, payload, use_distributed ->
+                distributed: use_distributed == 'true'
+                classic:     true
+            }
+        VALIS_DISTRIBUTED_ADAPTER(ch_routed.distributed.map { pid, payload, u -> tuple(pid, payload[0], payload[1]) })
+        VALIS_ADAPTER(            ch_routed.classic.map     { pid, payload, u -> tuple(pid, payload[0], payload[1]) })
+        ch_registered       = VALIS_DISTRIBUTED_ADAPTER.out.registered.mix(VALIS_ADAPTER.out.registered)
+        ch_adapter_logs     = VALIS_DISTRIBUTED_ADAPTER.out.size_logs.mix(VALIS_ADAPTER.out.size_logs)
+        ch_adapter_versions = VALIS_DISTRIBUTED_ADAPTER.out.versions.mix(VALIS_ADAPTER.out.versions)
+        ch_adapter_summary  = VALIS_ADAPTER.out.summary
+    }
 
     // ========================================================================
     // STEP 3b: GENERATE QC (Method-independent)
@@ -278,7 +319,7 @@ workflow REGISTRATION {
     }
 
     // Add size logs from the registration adapter
-    ch_size_logs = ch_size_logs.mix(VALIS_ADAPTER.out.size_logs)
+    ch_size_logs = ch_size_logs.mix(ch_adapter_logs)
 
     // Add size logs from QC processes (if enabled)
     if (!params.skip_registration_qc) {
@@ -299,7 +340,7 @@ workflow REGISTRATION {
             .mix(PAD_IMAGES.out.versions.first())
     }
 
-    ch_versions = ch_versions.mix(VALIS_ADAPTER.out.versions)
+    ch_versions = ch_versions.mix(ch_adapter_versions)
 
     if (!params.skip_registration_qc) {
         ch_versions = ch_versions.mix(GENERATE_REGISTRATION_QC.out.versions.first())
@@ -313,7 +354,7 @@ workflow REGISTRATION {
     checkpoint_csv   = ch_checkpoint_csv
     qc               = ch_qc
     error_metrics    = ch_error_metrics
-    valis_summary    = VALIS_ADAPTER.out.summary
+    valis_summary    = ch_adapter_summary
     size_logs        = ch_size_logs
     versions         = ch_versions
 }

@@ -1,0 +1,38 @@
+nextflow_process {
+
+    name "Test REG_FINALIZE process"
+    script "modules/local/reg_finalize.nf"
+    process "REG_FINALIZE"
+
+    tag "modules"
+    tag "modules_local"
+    tag "reg_finalize"
+
+    test("REG_FINALIZE - stub") {
+
+        options "-stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    'P001',
+                    'P001_mov1',
+                    file('$projectDir/tests/testdata', checkIfExists: true),
+                    [ file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true) ],
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.registered },
+                { assert process.out.versions }
+            )
+        }
+    }
+}

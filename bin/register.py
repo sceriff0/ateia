@@ -88,34 +88,9 @@ from valis.non_rigid_registrars import OpticalFlowWarper, NonRigidTileRegistrar
 # which is not available in this environment. Registration still works via
 # SuperPoint/SuperGlue feature matching without the affine optimizer refinement.
 
-# Memory mode presets - bundles feature detector, matcher, and dimension settings
-MEMORY_PRESETS = {
-    "high": {
-        "feature_detector_cls": feature_detectors.SuperPointFD,
-        "matcher": feature_matcher.SuperGlueMatcher(),
-        "max_processed_image_dim_px": 2048,  # Higher resolution for better feature detection (RAM impact)
-        "max_non_rigid_registration_dim_px": 4096,  # Higher resolution for more accurate non-rigid registration (RAM impact)
-        "num_features": 5000,
-    },
-    "medium": {
-        "feature_detector_cls": feature_detectors.SuperPointFD,
-        "matcher": feature_matcher.SuperGlueMatcher(),
-        "max_processed_image_dim_px": 1024,  # Higher resolution for better feature detection (RAM impact)
-        "max_non_rigid_registration_dim_px": 4096,  # Higher resolution for more accurate non-rigid registration (RAM impact)
-        "num_features": 5000,
-    },
-    "low": {
-        "feature_detector_cls": feature_detectors.SuperPointFD,
-        "matcher": feature_matcher.SuperGlueMatcher(),
-        "num_features": 5000,  
-        # Image dimensions (biggest memory impact)
-        "max_processed_image_dim_px": 256,
-        "max_non_rigid_registration_dim_px": 1024,  # Reduced from 1024 (4x RAM reduction)
-        # Tiled registration
-        "tile_wh": 512,  # Smaller tiles = lower peak RAM
-        "tile_buffer": 100,  # Reduced from 200
-    },
-}
+# Memory mode presets + registrar-kwargs builder live in the shared single-source-of-truth module
+# so the distributed path (bin/reg_prep.py) builds a bit-identical Valis. See bin/utils/valis_config.py.
+from valis_config import MEMORY_PRESETS, build_registrar_kwargs
 
 
 
@@ -574,34 +549,14 @@ def valis_registration(
     # Registration still works well via SuperPoint/SuperGlue feature matching.
     logger.info(f"  Affine optimizer: None (feature-based alignment only)")
 
-    # Build registrar kwargs
-    registrar_kwargs = {
-        # Reference image
-        "reference_img_f": ref_image,
-        "align_to_reference": True,
-        "crop": "reference",
-
-        # Image size parameters - tuned for memory efficiency
-        "max_processed_image_dim_px": max_processed_image_dim_px,
-        "max_non_rigid_registration_dim_px": max_non_rigid_dim_px,
-        "max_image_dim_px": preset_max_image_dim,
-
-        # Feature detection - determined by memory_mode preset
-        "feature_detector_cls": feature_detector_cls,
-        "matcher": matcher,
-
-        # Non-rigid registration - handles local deformations after rigid alignment
-        "non_rigid_registrar_cls": type(non_rigid_registrar),
-
-        # Affine optimizer - disabled (requires SimpleITK with Elastix)
-        "affine_optimizer_cls": None,
-
-        # Micro-rigid registration - high-resolution local alignment
-        "micro_rigid_registrar_cls": None if skip_micro_registration else MicroRigidRegistrar,
-
-        # Registration behavior
-        "create_masks": True,
-    }
+    # Build registrar kwargs via the shared single-source-of-truth builder (bin/utils/valis_config.py),
+    # so bin/reg_prep.py's distributed PREP constructs a bit-identical Valis.
+    registrar_kwargs = build_registrar_kwargs(
+        reference_img_f=ref_image,
+        memory_mode=memory_mode,
+        skip_micro_registration=skip_micro_registration,
+        max_image_dim_px=max_image_dim_px,
+    )
 
     registrar = registration.Valis(input_dir, results_dir, **registrar_kwargs)
 
