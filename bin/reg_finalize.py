@@ -79,6 +79,7 @@ def main():
     ap.add_argument("--out", required=True, help="output ome.tiff path")
     ap.add_argument("--inputs-dir", help="REG_PREP tiler_inputs (manifest.json + expanded_bboxes.npy)")
     ap.add_argument("--tiles-dir", help="REG_TILE output (bk_*.v / fwd_*.v)")
+    ap.add_argument("--field", help="whole-image non-rigid field bk.v from REG_NONRIGID (separated mode)")
     ap.add_argument("--rigid-only", action="store_true",
                     help="reference slide: warp with rigid M + crop only (dxdy=None), no tiles/compose")
     ap.add_argument("--compression", default="lzw")
@@ -89,19 +90,22 @@ def main():
         # Reference (or any rigid-only) slide: VALIS warps it with its M + crop and identity non-rigid.
         slide_bk = None
     else:
-        if not args.inputs_dir or not args.tiles_dir:
-            raise SystemExit("--inputs-dir and --tiles-dir are required unless --rigid-only")
-        m = json.load(open(os.path.join(args.inputs_dir, "manifest.json")))
-        expanded_bboxes = np.load(os.path.join(args.inputs_dir, "expanded_bboxes.npy"))
+        # Obtain moving_bk: either the whole-image field (separated mode, == classic) or by stitching
+        # the per-tile fields (tiled mode, == VALIS calc()). Both feed the SAME §6.3 compose+warp.
+        if args.field:
+            moving_bk = pyvips.Image.new_from_file(args.field)
+        else:
+            if not args.inputs_dir or not args.tiles_dir:
+                raise SystemExit("provide --field, or --inputs-dir + --tiles-dir, or --rigid-only")
+            m = json.load(open(os.path.join(args.inputs_dir, "manifest.json")))
+            expanded_bboxes = np.load(os.path.join(args.inputs_dir, "expanded_bboxes.npy"))
+            n = m["n_tiles"]
+            bk_tiles = [pyvips.Image.new_from_file(os.path.join(args.tiles_dir, f"bk_{i}.v")) for i in range(n)]
+            moving_bk = warp_tools.stitch_tiles(bk_tiles, expanded_bboxes, m["n_rows"], m["n_cols"], m["tile_buffer"])
 
-        # 1) stitch the per-tile fields back into the full non-rigid field (== VALIS calc(), §6.1)
-        n = m["n_tiles"]
-        bk_tiles = [pyvips.Image.new_from_file(os.path.join(args.tiles_dir, f"bk_{i}.v")) for i in range(n)]
-        moving_bk = warp_tools.stitch_tiles(bk_tiles, expanded_bboxes, m["n_rows"], m["n_cols"], m["tile_buffer"])
-
-        # 2) compose (§6.3). align_to_reference=True => incoming/reference field is identity.
-        reg_mask_f = os.path.join(args.inputs_dir, "reg_mask.npy")
-        reg_mask = np.load(reg_mask_f) if os.path.exists(reg_mask_f) else None
+        # compose (§6.3). align_to_reference=True => incoming/reference field is identity.
+        reg_mask_f = os.path.join(args.inputs_dir, "reg_mask.npy") if args.inputs_dir else None
+        reg_mask = np.load(reg_mask_f) if reg_mask_f and os.path.exists(reg_mask_f) else None
         incoming = pyvips.Image.black(moving_bk.width, moving_bk.height, bands=2).cast("float")
         self_bk = compose(
             moving_bk, incoming, reg_mask,

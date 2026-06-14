@@ -132,6 +132,14 @@ def main():
          "--out", os.path.join(md, "dist_B.ome.tiff")])
     dist_B = npx(pyvips.Image.new_from_file(os.path.join(md, "dist_B.ome.tiff")))
 
+    # B-sep) distributed rigid + non-rigid SEPARATED (whole-image, JVM-free) -- the user's primary path.
+    # Expected EXACTLY == classic whole-image (same OpticalFlowWarper on the same 2-D inputs).
+    run([sys.executable, "bin/reg_nonrigid.py", "--inputs-dir", ti, "--out-dir", os.path.join(md, "nr")])
+    run([sys.executable, "bin/reg_finalize.py", "--inputs-dir", ti, "--field", os.path.join(md, "nr", "bk.v"),
+         "--warp-state", os.path.join(md, "warp_state.json"), "--src-slide", src,
+         "--out", os.path.join(md, "dist_Bsep.ome.tiff")])
+    dist_Bsep = npx(pyvips.Image.new_from_file(os.path.join(md, "dist_Bsep.ome.tiff")))
+
     # in-process tiler reference (faithfulness baseline for B)
     moving = pyvips.Image.new_from_file(os.path.join(ti, "moving.v"))
     fixed = pyvips.Image.new_from_file(os.path.join(ti, "fixed.v"))
@@ -157,8 +165,9 @@ def main():
     print("CLASSIC (whole-image) vs DISTRIBUTED (tiled) — warped MOVING slide, fluorescence")
     print("=" * 78)
     report("A  rigid-only:  classic vs dist", classic_A, dist_A)
-    report("B  +non-rigid:  classic vs dist", classic_B, dist_B)
-    report("B  +non-rigid:  dist vs in-proc tiler", dist_B, inproc_B)
+    report("B  +non-rigid:  classic vs dist-SEPARATED", classic_B, dist_Bsep)
+    report("B  +non-rigid:  classic vs dist-tiled", classic_B, dist_B)
+    report("B  +non-rigid:  dist-tiled vs in-proc tiler", dist_B, inproc_B)
     report("C  +micro:      classic (shown)", classic_C, classic_C)
     print("   C  distributed micro: PENDING Option-2 (2nd wave) implementation")
     print("=" * 78, flush=True)
