@@ -11,6 +11,13 @@ import tempfile
 
 import numpy as np
 
+# Needs the valis image (pyvips); skip under a plain python env (CI Python job).
+try:
+    import pytest
+    pytest.importorskip("pyvips")
+except ImportError:  # stdlib __main__ runner in-image (not under pytest)
+    pass
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "bin", "utils"))
 
 from tile_io import read_field, write_field  # noqa: E402

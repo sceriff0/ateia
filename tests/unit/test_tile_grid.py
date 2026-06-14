@@ -12,6 +12,14 @@ import sys
 
 import numpy as np
 
+# Needs the valis image (pyvips + valis); skip under a plain python env (CI Python job).
+try:
+    import pytest
+    pytest.importorskip("pyvips")
+    pytest.importorskip("valis")
+except ImportError:  # stdlib __main__ runner in-image (not under pytest)
+    pass
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "bin", "utils"))
 
 from tile_grid import build_grid  # noqa: E402
