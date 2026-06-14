@@ -1,6 +1,25 @@
 # HANDOFF — Distributed VALIS tiled registration (updated 2026-06-14)
 
-## ⏩ Latest state (2026-06-14) — read spec §6.1 + §6.2 + §6.3 first
+## 🏁 ALL 10 TASKS CORE-COMPLETE (2026-06-14) — bit-identical end-to-end (`max|Δ|=0`)
+
+Full chain implemented + validated: **REG_PREP → REG_TILE (fan-out) → REG_FINALIZE (+REG_WARP_REF)**,
+wired into `registration.nf` behind `params.reg_distributed_tiling`. The end-to-end verification
+(`tests/integration/verify_distributed_bitidentical.py`) proves the distributed pipeline is
+**pixel-identical to VALIS's own in-process tiler** on the same processed 2-D images. Commits:
+4.5 `d4ac63c` · 4 `2ae2687` · 6 `f7a14ef` · 5+7 `040597e` · 8 `c39532d` · 9 `e7532a9` · 10 `045948f`.
+
+**Finishing items that need infra not available locally (not core blockers):**
+1. **Publish the patched image** (`containers/valis/` → GHCR) — `params.reg_dist_container` must point
+   to it; the published `cdgatenbee/valis-wsi:1.0.0` lacks the `EXTERNAL_TILE_HOOK` seam.
+2. **nf-test real suite + large fixture** — run once the image is published (stub tests already pass).
+3. **OME channel-metadata parity** — `reg_finalize.py` falls back to a pixel-faithful save because the
+   ome-types `OMEConverter.to_xml()` path is env-fragile; pixels are correct, channel metadata is the gap.
+4. **Below-threshold fallback routing** — route inputs below VALIS's tiling threshold to classic
+   `REGISTER` (the toggle is currently all-or-nothing); §6.5/§8.1.
+5. Optional: micro-registration in FINALIZE (§5A); exact brightfield-*tiled* parity via per-tile
+   `ColorfulStandardizer` (§6.6).
+
+## ⏩ Earlier state (2026-06-14) — read spec §6.1 + §6.2 + §6.3 first
 
 - ✅ **Task 1 spike DONE** (commit `fb7aae6`): tile externalization is **bit-identical** (`max|Δ|=0`,
   3×3 grid, bk+fwd). Spike kept at `bin/spikes/spike_externalize_tiles.py`.
