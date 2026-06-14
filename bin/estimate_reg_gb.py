@@ -54,11 +54,15 @@ def main():
     ap.add_argument("--images", nargs="+", required=True, help="all patient image paths (incl. reference)")
     ap.add_argument("--max-non-rigid-dim", type=int, default=4096)
     ap.add_argument("--threshold-gb", type=float, default=TILER_THRESH_GB)
+    ap.add_argument("--min-input-gb", type=float, default=1.0,
+                    help="route to distributed (JVM-free non-rigid) when total full-res input >= this; "
+                         "smaller inputs -> classic VALIS (the monolithic JVM run is fine, no overhead)")
     ap.add_argument("--out", default="est_gb.json")
     args = ap.parse_args()
 
     n_slides = len(args.images)
     rh, rw, rnch, rdtype = read_meta(args.reference)
+    total_input_gb = sum(os.path.getsize(f) for f in args.images) / (2 ** 30)
 
     # non-rigid shape: scale the reference to max_non_rigid_dim (downscale only; matches VALIS which
     # runs non-rigid at <= max_non_rigid_registration_dim_px).
@@ -69,9 +73,15 @@ def main():
     processed_img_gb = n_slides * calc_memory_size_gb(nr_shape, 1, "uint8")
     img_gb = n_slides * calc_memory_size_gb(nr_shape, rnch, rdtype)
     est_gb = img_gb + displacement_gb + processed_img_gb
-    use_tiler = est_gb > args.threshold_gb
+    # est_gb (non-rigid) is computed at the downsampled non-rigid resolution -> it's tiny and rarely
+    # exceeds the tiler threshold (spec §6.7). Tiling is therefore the rare 'force' case. The routing
+    # criterion the user actually wants ("small -> classic VALIS") is the FULL-RES INPUT size, which
+    # drives the BioFormats JVM heap (their RAM hotspot): large inputs -> distributed (JVM-free non-rigid).
+    use_distributed = total_input_gb >= args.min_input_gb
+    use_tiler = est_gb > args.threshold_gb  # informational: would VALIS's own auto-tiler engage
 
     result = {
+        "use_distributed": use_distributed, "total_input_gb": total_input_gb, "min_input_gb": args.min_input_gb,
         "est_gb": est_gb, "use_tiler": use_tiler, "threshold_gb": args.threshold_gb,
         "n_slides": n_slides, "nr_shape_hw": list(nr_shape), "ref_native_hw": [rh, rw],
         "ref_n_channels": rnch, "ref_dtype": rdtype, "max_non_rigid_dim": args.max_non_rigid_dim,
@@ -79,8 +89,8 @@ def main():
     }
     with open(args.out, "w") as fh:
         json.dump(result, fh, indent=2)
-    print(f"est_gb={est_gb:.4f} use_tiler={str(use_tiler).lower()} "
-          f"(threshold={args.threshold_gb}, n_slides={n_slides}, nr_shape={nr_shape})", flush=True)
+    print(f"use_distributed={str(use_distributed).lower()} total_input_gb={total_input_gb:.4f} "
+          f"(min_input_gb={args.min_input_gb}); est_gb={est_gb:.4f} use_tiler={str(use_tiler).lower()}", flush=True)
 
 
 if __name__ == "__main__":

@@ -167,19 +167,20 @@ workflow REGISTRATION {
         ch_adapter_versions = VALIS_DISTRIBUTED_ADAPTER.out.versions
         ch_adapter_summary  = Channel.empty()
     } else {
-        // 'auto': estimate VALIS's tiling decision per patient and route accordingly.
+        // 'auto': route per patient by INPUT SIZE (spec §6.7) — large inputs (JVM-RAM concern) ->
+        // distributed (JVM-free, bit-identical); small inputs -> classic VALIS (monolithic is fine).
         REG_ESTIMATE(ch_grouped.map { pid, ref_item, all_items ->
             tuple(pid, ref_item[1], all_items.collect { it[1] })
         })
         ch_routed = ch_grouped
             .map { pid, ref_item, all_items -> tuple(pid, [ref_item, all_items]) }
             .join(REG_ESTIMATE.out.decision)
-            .branch { pid, payload, use_tiler ->
-                tiled:   use_tiler == 'true'
-                classic: true
+            .branch { pid, payload, use_distributed ->
+                distributed: use_distributed == 'true'
+                classic:     true
             }
-        VALIS_DISTRIBUTED_ADAPTER(ch_routed.tiled.map   { pid, payload, u -> tuple(pid, payload[0], payload[1]) })
-        VALIS_ADAPTER(            ch_routed.classic.map { pid, payload, u -> tuple(pid, payload[0], payload[1]) })
+        VALIS_DISTRIBUTED_ADAPTER(ch_routed.distributed.map { pid, payload, u -> tuple(pid, payload[0], payload[1]) })
+        VALIS_ADAPTER(            ch_routed.classic.map     { pid, payload, u -> tuple(pid, payload[0], payload[1]) })
         ch_registered       = VALIS_DISTRIBUTED_ADAPTER.out.registered.mix(VALIS_ADAPTER.out.registered)
         ch_adapter_logs     = VALIS_DISTRIBUTED_ADAPTER.out.size_logs.mix(VALIS_ADAPTER.out.size_logs)
         ch_adapter_versions = VALIS_DISTRIBUTED_ADAPTER.out.versions.mix(VALIS_ADAPTER.out.versions)

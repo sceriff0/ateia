@@ -244,6 +244,11 @@
                     "description": "Tile overlap (buffer) for distributed tiling.",
                     "default": 100
                 },
+                "reg_dist_min_input_gb": {
+                    "type": "number",
+                    "description": "auto routing: total full-res input >= this (GB) -> distributed JVM-free non-rigid; smaller -> classic VALIS.",
+                    "default": 1.0
+                },
                 "reg_dist_threshold_gb": {
                     "type": "number",
                     "description": "est_GB boundary for auto tiling routing (matches VALIS TILER_THRESH_GB).",

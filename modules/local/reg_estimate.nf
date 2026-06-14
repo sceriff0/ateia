@@ -17,8 +17,8 @@ process REG_ESTIMATE {
     tuple val(patient_id), path(reference, stageAs: 'ref/*'), path(all_files, stageAs: 'imgs/*')
 
     output:
-    tuple val(patient_id), env(USE_TILER), emit: decision
-    path "est_gb.json"                   , emit: report
+    tuple val(patient_id), env(USE_DISTRIBUTED), emit: decision
+    path "est_gb.json"                          , emit: report
 
     when:
     task.ext.when == null || task.ext.when
@@ -26,19 +26,21 @@ process REG_ESTIMATE {
     script:
     def max_nr = params.reg_max_non_rigid_dim ?: 4096
     def thr = params.reg_dist_threshold_gb ?: 10
+    def min_input = params.reg_dist_min_input_gb ?: 1.0
     """
     estimate_reg_gb.py \\
         --reference ${reference} \\
         --images \$(find -L imgs -maxdepth 1 -type f \\( -name '*.ome.tif' -o -name '*.ome.tiff' \\) | sort | tr '\\n' ' ') \\
         --max-non-rigid-dim ${max_nr} \\
         --threshold-gb ${thr} \\
+        --min-input-gb ${min_input} \\
         --out est_gb.json
-    USE_TILER=\$(python3 -c "import json; print('true' if json.load(open('est_gb.json'))['use_tiler'] else 'false')")
+    USE_DISTRIBUTED=\$(python3 -c "import json; print('true' if json.load(open('est_gb.json'))['use_distributed'] else 'false')")
     """
 
     stub:
     """
-    echo '{"est_gb":0.0,"use_tiler":false,"threshold_gb":10}' > est_gb.json
-    USE_TILER=false
+    echo '{"use_distributed":true,"total_input_gb":99.0,"est_gb":0.0,"use_tiler":false}' > est_gb.json
+    USE_DISTRIBUTED=true
     """
 }
