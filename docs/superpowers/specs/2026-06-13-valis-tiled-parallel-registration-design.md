@@ -563,6 +563,42 @@ can be finalized: PREP dumps the contract above; FINALIZE = compose (gated on `f
 
 ---
 
+## 6.4 PREP halt finding (probe 2026-06-14) — the tiler dumps UNPROCESSED multichannel images ⚠️
+
+Probed by forcing the tiler (`registration.TILER_THRESH_GB = 0`) + `install_halt_hook` on the P001
+fluorescence pair, production config. **Confirmed working:**
+- The halt fires; `Valis.register()` **swallows** `TilesPending` (Blocker 2) and returns; PREP detects
+  the halt by the populated dump dir. ✅
+- After the halt, the rigid + non-rigid-prep state needed for FINALIZE's warp contract **survives** on
+  the `Valis`: `slide_dict` (per-slide rigid `M`, `reg_img_shape_rc`, `bg_color`), `_non_rigid_bbox`,
+  `_full_displacement_shape_rc`. ✅ (No registrar pickle needed — read these off `reg` in PREP.)
+
+**Blocker found (revises Task 5):** the dumped `moving.v` is **3-band (multichannel), NOT the 2-D DAPI
+channel** — e.g. `106×105 bands=3`. VALIS's tiler-prep takes the *unprocessed* warp branch
+(`prep_images_for_large_non_rigid_registration`, registration.py:3546-3555) and **defers channel
+processing to per-tile** (the processed-to-2-D branch at 3525-3544 runs only when `use_tiler` is
+False). This is the root of Blocker 3: the tiler is *designed* to `ChannelGetter`-process each tile
+(crashing on `src_f=None`). Consequence: feeding REG_TILE the dumped 3-band image with
+`processing_cls=None` would compute the field on raw multichannel data — **NOT bit-identical** to
+whole-image classic, which registers on the processed 2-D DAPI image.
+
+**⇒ Task 5 needs its own make-or-break spike** (the next one). PREP must hand the tiler the **same 2-D
+processed image whole-image non-rigid uses**. Two candidate approaches to spike:
+  - **(A) Intercept after processing:** drive prep so the processed-2-D branch runs (or call the
+    `ChannelGetter` pipeline 3525-3544 directly with `src_f` live), capture those 2-D images, then
+    drive `NonRigidTileRegistrar` on them with `processing_cls=None` + the halt hook (mirrors how the
+    §6.1 / §6.3 spikes drove the tiler directly on 2-D inputs). Most likely bit-identical.
+  - **(B) Guarded `ChannelGetter`:** ship a patch so `process_image` tolerates `src_f=None` and uses
+    `self.image`; lets the tiler process per-tile. Risk: per-tile DAPI extraction may differ from
+    whole-image at tile seams — must be proven bit-identical, not assumed.
+  The spike's gate: **distributed (2-D tiler) field == whole-image classic field, exactly**, for
+  fluorescence. Until then, REG_PREP/REG_FINALIZE production scripts are NOT safe to finalize.
+
+(Note: at the test image size with default `tile_wh`, the forced grid is 1×1 — functionally fine, but
+use a small `tile_wh` to exercise multi-tile stitch when validating, as §6.1 did.)
+
+---
+
 ## 7. Data formats & I/O contract between processes
 
 | Artifact | Format | Notes |

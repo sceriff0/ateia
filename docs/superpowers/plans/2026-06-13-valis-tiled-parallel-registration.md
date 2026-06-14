@@ -362,6 +362,16 @@ git commit -m ":sparkles: Add lossless float32 tile-field I/O"
 
 ## Phase 2 — Stage scripts
 
+> #### ✅ Task 4 DONE (2026-06-14, commit 2ae2687) · ✅ Task 6 DONE (commit f7a14ef)
+> Task 4: `calc_hook.patch` + Dockerfile apply + `bin/utils/valis_tiling.py`; image rebuilt, classic
+> path still 9/9 bit-identical. Task 6: `bin/reg_tile.py` validated bit-identical (9/9) vs the
+> in-process loop against the real dump contract.
+> #### ⛔ Task 5 BLOCKED pending a PREP spike — see spec §6.4
+> A probe found the forced tiler dumps the **unprocessed 3-band** image (channel processing is
+> deferred to per-tile = Blocker 3 root), so REG_TILE on it ≠ whole-image classic (2-D DAPI). PREP
+> must feed the tiler the processed 2-D image. **Spike that first** (gate: distributed field ==
+> whole-image classic field, exactly, for fluorescence). Halt + surviving warp-state already confirmed.
+
 ### Task 4: explicit `EXTERNAL_TILE_HOOK` seam (spec §6 Option B) + `valis_tiling.py`
 
 The seam is a reviewable patch over the pip-installed VALIS (not runtime swizzle). It refactors

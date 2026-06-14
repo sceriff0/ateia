@@ -17,13 +17,29 @@
 - ⚠️ **3 blockers found → spec §6.1**: (1) pyvips images are unpicklable ⇒ no cross-process registrar
   handoff; (2) `register()` swallows exceptions ⇒ halt via filesystem, not raise; (3) `ChannelGetter`
   crashes in `process_tile` ⇒ classic tiling broken for fluorescence.
+- ✅ **Task 4 DONE (commit `2ae2687`)**: `containers/valis/calc_hook.patch` splits `calc` → dispatch +
+  `_calc_tiles`, applied in the Dockerfile (image rebuilt; "hook seam OK"; §6.1 spike still 9/9
+  bit-identical). `bin/utils/valis_tiling.py` = the seam module (`install_halt_hook` /
+  `install_dump_hook` / `install_read_hook` / `clear_hook` + `_dump_inputs` contract). Smoke-tested.
+- ✅ **Task 6 DONE (commit `f7a14ef`)**: `bin/reg_tile.py` — single-tile VALIS `reg_tile`, JVM-free,
+  reads the dump contract, `processing_cls=None`. Validated end-to-end vs the in-process loop:
+  **bit-identical 9/9 tiles**.
 - 🔀 **Architecture = Option A (plain-data handoff), spec §6.2/§6.3.** RAM win = the per-step
   decomposition (no-JVM `REG_TILE` swarm); FINALIZE = compose (gated on `from_rigid_reg`) →
   `pad_displacement` → `slide_tools.warp_slide` (VALIS's streaming warp), all from plain dumped data.
-- ▶️ **NEXT: Task 4 — `EXTERNAL_TILE_HOOK` patch** (`containers/valis/calc_hook.patch` + Dockerfile
-  apply + `bin/utils/valis_tiling.py`), then **Tasks 5/7** (`reg_prep.py` / `reg_finalize.py`) per the
-  revised plan and the §6.3 dump contract. (Sections below are the original 2026-06-13 handoff, still
-  valid for environment/build context.)
+- ⛔ **NEXT make-or-break: Task 5 PREP spike (spec §6.4).** A probe showed forcing the tiler dumps the
+  **UNPROCESSED 3-band image** (the tiler defers channel processing to per-tile — root of Blocker 3),
+  so REG_TILE on it would NOT be bit-identical to whole-image classic (which uses 2-D DAPI). PREP must
+  feed the tiler the **same 2-D processed image** whole-image non-rigid uses. **Spike this first**
+  (approach A: drive the tiler directly on the processed-2-D images + halt hook; gate = distributed
+  field == whole-image classic field, exactly, for fluorescence) BEFORE writing `reg_prep.py`. The
+  halt mechanics + surviving warp state (`slide_dict`, `_non_rigid_bbox`, `_full_displacement_shape_rc`,
+  rigid `M`/shapes/`bg_color`) are already confirmed working.
+- ▶️ **Then remaining:** Task 5 (`reg_prep.py`), Task 7 (`reg_finalize.py`, per §6.3 — compose gated
+  on `from_rigid_reg` → `pad_displacement` → `slide_tools.warp_slide`, no Slide rebuild), Tasks 8-9
+  (NF processes + routing), Task 10 (bit-identical verification). VALIS source is at `/tmp/valis_src/`
+  (re-extract from `mirage-valis:1.0.0` if gone). (Sections below are the original 2026-06-13 handoff,
+  still valid for environment/build context.)
 
 ## How to restart with full context (do this first)
 
