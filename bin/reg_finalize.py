@@ -157,14 +157,60 @@ def main():
             pixel_physical_size_xyu=px_phys, channel_names=slide_meta.channel_names, colormap=None).to_xml()
         slide_io.save_ome_tiff(warped, dst_f=args.out, ome_xml=ome_xml, tile_wh=tile_wh, compression=args.compression)
     except Exception as e:
-        # OME-XML serialization is environment-fragile (ome-types/OMEConverter). The warped PIXELS are
-        # correct (proven §6.3) regardless; fall back to a pixel-faithful OME-TIFF and warn so the
-        # pipeline completes. Full channel-metadata parity is tracked as a finishing item (Task 10).
-        print(f"[reg_finalize] WARNING ome-xml path failed ({type(e).__name__}: {e}); "
-              f"writing pixel-faithful fallback", flush=True)
-        warped.tiffsave(args.out, compression=args.compression, tile=True, tile_width=tile_wh,
-                        tile_height=tile_wh, bigtiff=True, pyramid=True)
+        # VALIS's update_xml_for_new_img uses ome_types.from_xml(parser="xmlschema"), which is
+        # environment-fragile (needs the OME schema; classic warp_and_save_slide hits the same path).
+        # The warped PIXELS are correct (proven §6.3); fall back to a hand-built minimal OME-XML that
+        # still carries the channel NAMES, so downstream (segmentation/quant) keeps correct channels.
+        print(f"[reg_finalize] WARNING update_xml path failed ({type(e).__name__}: {e}); "
+              f"writing minimal OME-XML with channel names", flush=True)
+        chan_names = list(getattr(slide_meta, "channel_names", None) or [f"C{i}" for i in range(warped.bands)])
+        if len(chan_names) < warped.bands:
+            chan_names += [f"C{i}" for i in range(len(chan_names), warped.bands)]
+        # slide_io.save_ome_tiff ALSO routes through ome_types (same crash), so write the OME-TIFF
+        # directly with pyvips (channel names embedded), bypassing the fragile dependency.
+        _save_ome_pyvips(warped, args.out, chan_names[:warped.bands], slide_io.vips2bf_dtype(warped.format),
+                         tile_wh, args.compression)
     print(f"[reg_finalize] wrote {args.out} ({warped.width}x{warped.height} bands={warped.bands})", flush=True)
+
+
+def _save_ome_pyvips(warped, dst_f, channel_names, bf_dtype, tile_wh, compression):
+    """Write a multi-channel OME-TIFF via pyvips (libvips OME convention), embedding channel names.
+    Avoids slide_io.save_ome_tiff / ome_types (environment-fragile). The C bands are stacked
+    vertically into pages (page-height = H) and the OME-XML declares SizeC with DimensionOrder XYCZT."""
+    c = warped.bands
+    ome_xml = _minimal_ome_xml(warped.width, warped.height, c, bf_dtype, channel_names)
+    if c == 1:
+        page = warped
+    else:
+        bands = [warped[i] for i in range(c)]
+        page = bands[0]
+        for b in bands[1:]:
+            page = page.join(b, "vertical")
+    page = page.copy()
+    page.set_type(pyvips.GValue.gint_type, "page-height", warped.height)
+    page.set_type(pyvips.GValue.gstr_type, "image-description", ome_xml)
+    tw = max(16, min(tile_wh, warped.width, warped.height))
+    page.tiffsave(dst_f, compression=compression, tile=True, tile_width=tw, tile_height=tw, bigtiff=True)
+
+
+def _minimal_ome_xml(w, h, c, bf_dtype, channel_names):
+    """Build a minimal valid OME-XML (no ome_types) preserving channel names + dims, so registered
+    slides keep channel metadata even when VALIS's xmlschema-based xml builder fails in-environment."""
+    import html
+    chans = "".join(
+        f'<Channel ID="Channel:0:{i}" Name="{html.escape(str(n))}" SamplesPerPixel="1"/>'
+        for i, n in enumerate(channel_names))
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<OME xmlns="http://www.openmicroscopy.org/Schemas/OME/2016-06" '
+        'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" '
+        'xsi:schemaLocation="http://www.openmicroscopy.org/Schemas/OME/2016-06 '
+        'http://www.openmicroscopy.org/Schemas/OME/2016-06/ome.xsd">'
+        '<Image ID="Image:0" Name="registered">'
+        f'<Pixels ID="Pixels:0" DimensionOrder="XYCZT" Type="{bf_dtype}" '
+        f'Interleaved="false" SizeX="{w}" SizeY="{h}" SizeC="{c}" SizeZ="1" SizeT="1">'
+        f'{chans}'
+        '</Pixels></Image></OME>')
 
 
 if __name__ == "__main__":
