@@ -149,6 +149,46 @@ def build_measurements(
     return measurements
 
 
+def _polygon_geometry(
+    contours: Optional[Dict[str, List[List[float]]]],
+    label_str: str,
+) -> Optional[Dict]:
+    """Return a GeoJSON Polygon geometry for a label, or None if no contour exists."""
+    if contours and label_str in contours:
+        return {"type": "Polygon", "coordinates": [contours[label_str]]}
+    return None
+
+
+def build_feature(
+    measurements: List[Dict],
+    geometry: Dict,
+    color_int: int,
+    object_type: str = "detection",
+    nucleus_geometry: Optional[Dict] = None,
+    object_id: Optional[str] = "PathDetectionObject",
+) -> Dict:
+    """Assemble a single QuPath-native GeoJSON Feature.
+
+    ``nucleus_geometry``, when provided, is written as a **top-level** member of the
+    Feature (sibling of ``geometry``), exactly matching QuPath's own serialization
+    of cell objects (qupath.lib.io.QuPathTypeAdapters). It is only meaningful when
+    ``object_type == "cell"``.
+    """
+    feature: Dict = {"type": "Feature"}
+    if object_id is not None:
+        feature["id"] = object_id
+    feature["geometry"] = geometry
+    if nucleus_geometry is not None:
+        feature["nucleusGeometry"] = nucleus_geometry
+    feature["properties"] = {
+        "objectType": object_type,
+        "classification": {"name": "Cell", "colorRGB": color_int},
+        "isLocked": False,
+        "measurements": measurements,
+    }
+    return feature
+
+
 def export_geojson(
     df: pd.DataFrame,
     output_path: str,
@@ -204,35 +244,14 @@ def export_geojson(
         cell_label_str = str(int(cell_id)) if pd.notna(cell_id) else str(idx)
 
         # Geometry: Polygon if contour available, else Point
-        if contours and cell_label_str in contours:
-            geometry = {
-                "type": "Polygon",
-                "coordinates": [contours[cell_label_str]],
-            }
-        else:
-            geometry = {
-                "type": "Point",
-                "coordinates": [x_px_corner, y_px_corner],
-            }
+        geometry = _polygon_geometry(contours, cell_label_str) or {
+            "type": "Point",
+            "coordinates": [x_px_corner, y_px_corner],
+        }
 
         # Build measurements array (QuPath native format)
         measurements = build_measurements(row, marker_cols, pixel_size)
-
-        feature = {
-            "type": "Feature",
-            "id": "PathDetectionObject",
-            "geometry": geometry,
-            "properties": {
-                "objectType": "detection",
-                "classification": {
-                    "name": "Cell",
-                    "colorRGB": color_int,
-                },
-                "isLocked": False,
-                "measurements": measurements,
-            },
-        }
-        features.append(feature)
+        features.append(build_feature(measurements, geometry, color_int))
 
     logger.info(f"  Exported {len(features)} cells, skipped {skipped}")
 
@@ -248,6 +267,95 @@ def export_geojson(
     logger.info(f"  GeoJSON size: {file_size_mb:.1f} MB")
 
     return len(features)
+
+
+def _write_collection(features: List[Dict], output_path: str) -> None:
+    """Write a list of features as a GeoJSON FeatureCollection."""
+    with open(output_path, 'w') as f:
+        json.dump({"type": "FeatureCollection", "features": features}, f)
+
+
+def export_compartment_geojsons(
+    df: pd.DataFrame,
+    output_dir: str,
+    pixel_size: float,
+    marker_cols: List[str],
+    cell_contours: Optional[Dict[str, List[List[float]]]],
+    nucleus_contours: Optional[Dict[str, List[List[float]]]],
+    prefix: str = 'cells',
+) -> Dict[str, int]:
+    """Export the dual-segmentation GeoJSON set for per-compartment quantification.
+
+    Writes three files (the "Both" representation):
+
+    - ``<prefix>.geojson``           -- combined QuPath **cell** objects: whole-cell
+      polygon as ``geometry`` + nucleus polygon as top-level ``nucleusGeometry``.
+      This is the file FlowPath / qUMAP / annomask consume; QuPath toggles the
+      drawn outline (nucleus vs cell) natively.
+    - ``nuclei.geojson``             -- detection objects whose geometry is the
+      nucleus polygon (single-geometry object set), same per-compartment measurements.
+    - ``cells_wholecell.geojson``    -- detection objects whose geometry is the
+      whole-cell polygon, same measurements.
+
+    ``nucleus_contours`` must be keyed by **cell label** (re-keyed upstream by
+    EXTRACT_NUCLEI_PROPERTIES via ``--reference_mask``), so lookup is a plain
+    identity on the cell label.
+    """
+    color_int = rgb_to_qupath_color(*CELL_COLOR_RGB)
+
+    cells_combined: List[Dict] = []
+    nuclei_only: List[Dict] = []
+    cells_wholecell: List[Dict] = []
+    skipped = 0
+
+    for idx, row in df.iterrows():
+        x_px = row.get('x')
+        y_px = row.get('y')
+        if pd.isna(x_px) or pd.isna(y_px):
+            skipped += 1
+            continue
+        x_corner = float(x_px) + 0.5
+        y_corner = float(y_px) + 0.5
+
+        cell_id = row.get('label', idx)
+        label_str = str(int(cell_id)) if pd.notna(cell_id) else str(idx)
+
+        cell_geom = _polygon_geometry(cell_contours, label_str) or {
+            "type": "Point", "coordinates": [x_corner, y_corner],
+        }
+        nucleus_geom = _polygon_geometry(nucleus_contours, label_str)
+
+        measurements = build_measurements(row, marker_cols, pixel_size)
+
+        # Combined cell object (geometry = cell, nucleusGeometry = nucleus).
+        cells_combined.append(build_feature(
+            measurements, cell_geom, color_int,
+            object_type="cell", nucleus_geometry=nucleus_geom, object_id=None,
+        ))
+        # Whole-cell-only detection (single-geometry object set).
+        cells_wholecell.append(build_feature(measurements, cell_geom, color_int))
+        # Nucleus-only detection (skip cells without a nucleus polygon).
+        if nucleus_geom is not None:
+            nuclei_only.append(build_feature(measurements, nucleus_geom, color_int))
+
+    out = Path(output_dir)
+    combined_path = str(out / f'{prefix}.geojson')
+    nuclei_path = str(out / 'nuclei.geojson')
+    wholecell_path = str(out / 'cells_wholecell.geojson')
+    _write_collection(cells_combined, combined_path)
+    _write_collection(nuclei_only, nuclei_path)
+    _write_collection(cells_wholecell, wholecell_path)
+
+    counts = {
+        prefix: len(cells_combined),
+        'nuclei': len(nuclei_only),
+        'cells_wholecell': len(cells_wholecell),
+    }
+    logger.info(
+        f"  Dual-segmentation export: {counts[prefix]} cell objects "
+        f"({len(nuclei_only)} with nucleus), skipped {skipped}"
+    )
+    return counts
 
 
 def parse_args() -> argparse.Namespace:
@@ -266,7 +374,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         '--contours_json', type=str, default=None,
-        help='Path to pre-computed contours JSON (from extract_cell_properties.py)',
+        help='Path to pre-computed whole-cell contours JSON (from extract_cell_properties.py)',
+    )
+    parser.add_argument(
+        '--nucleus_contours_json', type=str, default=None,
+        help='Path to nucleus contours JSON re-keyed to cell labels (from '
+             'EXTRACT_NUCLEI_PROPERTIES). When given, enables the dual-segmentation export '
+             '(combined cell+nucleus objects + separate nuclei/cells files).',
     )
     parser.add_argument(
         '--pixel_size', type=float, default=0.325,
@@ -304,26 +418,47 @@ def main() -> int:
     marker_cols = identify_marker_columns(cell_df)
     logger.info(f"Detected {len(marker_cols)} marker channels: {marker_cols}")
 
-    # Load contours
+    # Load whole-cell contours
     contours = None
     if args.contours_json:
-        logger.info(f"Loading contours: {args.contours_json}")
+        logger.info(f"Loading cell contours: {args.contours_json}")
         with open(args.contours_json, 'r') as f:
             contours = json.load(f)
         logger.info(f"Loaded contours for {len(contours)} cells")
 
+    # Load nucleus contours (re-keyed to cell labels) for dual-segmentation export
+    nucleus_contours = None
+    if args.nucleus_contours_json:
+        logger.info(f"Loading nucleus contours: {args.nucleus_contours_json}")
+        with open(args.nucleus_contours_json, 'r') as f:
+            nucleus_contours = json.load(f)
+        logger.info(f"Loaded nucleus contours for {len(nucleus_contours)} cells")
+
     # Compute z-scores for CSV output
     cell_df_with_z = compute_zscores(cell_df, marker_cols)
 
-    # Export GeoJSON (raw values + morphology only)
     output_geojson = str(Path(args.output_dir) / f'{args.output_prefix}.geojson')
-    num_exported = export_geojson(
-        df=cell_df,
-        output_path=output_geojson,
-        pixel_size=args.pixel_size,
-        marker_cols=marker_cols,
-        contours=contours,
-    )
+    if nucleus_contours is not None:
+        # Dual-segmentation export: combined cell+nucleus objects + separate files.
+        counts = export_compartment_geojsons(
+            df=cell_df,
+            output_dir=args.output_dir,
+            pixel_size=args.pixel_size,
+            marker_cols=marker_cols,
+            cell_contours=contours,
+            nucleus_contours=nucleus_contours,
+            prefix=args.output_prefix,
+        )
+        num_exported = counts[args.output_prefix]
+    else:
+        # Whole-cell-only export (legacy behaviour).
+        num_exported = export_geojson(
+            df=cell_df,
+            output_path=output_geojson,
+            pixel_size=args.pixel_size,
+            marker_cols=marker_cols,
+            contours=contours,
+        )
 
     # Save CSV with both raw and z-score columns
     output_csv = str(Path(args.output_dir) / f'{args.output_prefix}_data.csv')

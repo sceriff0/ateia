@@ -16,14 +16,20 @@ process EXPORT_GEOJSON {
     tag "${meta.patient_id}"
     label 'process_medium'
 
-    container 'bolt3x/attend_image_analysis:quantification_gpu'
+    container "${params.container_registry}/quantification:${params.container_tag}"
 
     input:
-    tuple val(meta), path(quant_csv), path(contours_json)
+    // Stage the nucleus contours under a distinct name: both EXTRACT_CELL_PROPERTIES
+    // and EXTRACT_NUCLEI_PROPERTIES emit a file literally named contours.json, and
+    // (when compartments are disabled) the same cell-contours file is passed into
+    // both slots — either way an unstaged duplicate would collide in the work dir.
+    tuple val(meta), path(quant_csv), path(contours_json), path(nucleus_contours_json, stageAs: 'nucleus_contours.json')
 
     output:
     tuple val(meta), path("export/cells.geojson"), emit: geojson
     tuple val(meta), path("export/cells_data.csv"), emit: csv
+    tuple val(meta), path("export/nuclei.geojson")         , emit: nuclei_geojson    , optional: true
+    tuple val(meta), path("export/cells_wholecell.geojson"), emit: wholecell_geojson , optional: true
     path "versions.yml"                            , emit: versions
     path("*.size.csv")                             , emit: size_log
 
@@ -32,6 +38,10 @@ process EXPORT_GEOJSON {
 
     script:
     def args = task.ext.args ?: ''
+    // Dual-segmentation export when per-compartment quantification is enabled: pass the
+    // nucleus contours (re-keyed to cell labels) so cells get a nucleusGeometry and the
+    // separate nuclei/cells files are written.
+    def nucleus_arg = params.quantify_compartments ? "--nucleus_contours_json ${nucleus_contours_json}" : ''
     """
     # Log input size for tracing (-L follows symlinks)
     input_bytes=\$(stat -L --printf="%s" ${quant_csv} 2>/dev/null || echo 0)
@@ -44,6 +54,7 @@ process EXPORT_GEOJSON {
         --cell_data ${quant_csv} \\
         -o export \\
         --contours_json ${contours_json} \\
+        ${nucleus_arg} \\
         ${args}
 
     cat <<-END_VERSIONS > versions.yml

@@ -10,6 +10,7 @@ nextflow_process {
 
     test("Should run BaSiC correction on OME-TIFF - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -81,6 +82,7 @@ nextflow_process {
 
     test("Should preserve metadata through preprocessing") {
 
+        tag "stub"
         options "-stub"
 
         when {

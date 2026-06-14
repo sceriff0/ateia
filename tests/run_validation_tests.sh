@@ -32,12 +32,19 @@ echo ""
 rm -rf "$OUTPUT_DIR"
 mkdir -p "$OUTPUT_DIR"
 
-# Helper function to run a test
+# Helper function to run a test.
+#
+# Usage: run_test <name> <pass|fail> <input_csv> <expected_error> [extra nextflow args...]
+#   <expected_error> is the substring required in the log for a "fail" test;
+#   pass "" for "pass" tests. Keeping it as an explicit positional argument
+#   (rather than the last element of the args array) avoids leaking the string
+#   into the `nextflow run` command line.
 run_test() {
     local test_name="$1"
     local expected_result="$2"  # "pass" or "fail"
     local input_csv="$3"
-    shift 3
+    local expected_error="$4"
+    shift 4
     local extra_args=("$@")
 
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
@@ -46,17 +53,18 @@ run_test() {
     local output_file="$OUTPUT_DIR/test_${TESTS_TOTAL}.log"
     local exit_code=0
 
-    # Run pipeline with dry_run for fast validation
+    # Run pipeline with dry_run for fast validation.
+    # ${arr[@]+"${arr[@]}"} safely expands a possibly-empty array under `set -u`
+    # (bash 3.2 on macOS errors on a bare "${arr[@]}" when empty).
     cd "$PROJECT_ROOT"
     nextflow run main.nf \
         --input "$input_csv" \
         --outdir "$OUTPUT_DIR/test_${TESTS_TOTAL}" \
         --dry_run true \
-        "${extra_args[@]}" \
+        ${extra_args[@]+"${extra_args[@]}"} \
         > "$output_file" 2>&1 || exit_code=$?
 
     if [ "$expected_result" = "pass" ]; then
-        # Should succeed
         if [ $exit_code -eq 0 ]; then
             echo -e "${GREEN}✓ PASS${NC} - Validation succeeded as expected"
             TESTS_PASSED=$((TESTS_PASSED + 1))
@@ -69,10 +77,7 @@ run_test() {
             return 1
         fi
     else
-        # Should fail with expected error message
-        local expected_error="${extra_args[-1]}"  # Last arg is expected error
         if [ $exit_code -ne 0 ]; then
-            # Check for expected error message
             if grep -q "$expected_error" "$output_file"; then
                 echo -e "${GREEN}✓ PASS${NC} - Failed with expected error: '$expected_error'"
                 TESTS_PASSED=$((TESTS_PASSED + 1))
@@ -106,6 +111,7 @@ run_test \
     "Valid input - one reference per patient" \
     "pass" \
     "$TESTDATA_DIR/valid_preprocessing.csv" \
+    "" \
     --start preprocessing
 
 # Test 1.2: Invalid - multiple references per patient
@@ -113,33 +119,56 @@ run_test \
     "Invalid - multiple references per patient" \
     "fail" \
     "$TESTDATA_DIR/invalid_multi_ref.csv" \
-    --start preprocessing \
-    "Multiple reference images found"
+    "Multiple reference images found" \
+    --start preprocessing
 
 # Test 1.3: Invalid - no reference per patient
 run_test \
     "Invalid - no reference per patient" \
     "fail" \
     "$TESTDATA_DIR/invalid_no_ref.csv" \
-    --start preprocessing \
-    "No reference image found"
+    "No reference image found" \
+    --start preprocessing
 
-# Test 2.1: Valid - DAPI in any position
-echo -e "${YELLOW}[INFO]${NC} Test 2.1 skipped - requires ND2 conversion which needs ND2 files"
-
-# Test 2.2: Invalid - DAPI not in channel 0
+# Test 2.1: Valid - DAPI in a non-zero position (segmentation locates DAPI by
+# name, so any position is accepted as long as DAPI is present).
 run_test \
-    "Invalid - DAPI not in channel 0" \
-    "fail" \
+    "Valid - DAPI in non-zero position" \
+    "pass" \
     "$TESTDATA_DIR/invalid_dapi_position.csv" \
-    --start preprocessing \
-    "DAPI must be in channel 0"
+    "" \
+    --start preprocessing
 
-# Test 2.3: Valid - DAPI in channel 0
+# Test 2.2: Valid - DAPI in channel 0
 run_test \
     "Valid - DAPI in channel 0" \
     "pass" \
     "$TESTDATA_DIR/valid_preprocessing.csv" \
+    "" \
+    --start preprocessing
+
+# Test 2.3: Invalid - missing DAPI channel
+run_test \
+    "Invalid - missing DAPI channel" \
+    "fail" \
+    "$TESTDATA_DIR/invalid_no_dapi.csv" \
+    "DAPI channel not found" \
+    --start preprocessing
+
+# Test 2.4: Invalid - input file does not exist
+run_test \
+    "Invalid - input file not found" \
+    "fail" \
+    "$TESTDATA_DIR/invalid_file_not_found.csv" \
+    "does not exist" \
+    --start preprocessing
+
+# Test 2.5: Invalid - empty samplesheet (header only)
+run_test \
+    "Invalid - empty samplesheet" \
+    "fail" \
+    "$TESTDATA_DIR/empty_samplesheet.csv" \
+    "no data rows" \
     --start preprocessing
 
 echo ""
@@ -153,6 +182,7 @@ run_test \
     "Valid checkpoint CSV for registration step" \
     "pass" \
     "$TESTDATA_DIR/valid_checkpoint_registration.csv" \
+    "" \
     --start registration
 
 # Test 6.2: Invalid - missing required column
@@ -160,32 +190,16 @@ run_test \
     "Invalid checkpoint - missing required column" \
     "fail" \
     "$TESTDATA_DIR/invalid_checkpoint_missing_col.csv" \
-    --start registration \
-    "Missing required column"
+    "Missing required column" \
+    --start registration
 
 # Test 6.3: Invalid - malformed is_reference value
 run_test \
     "Invalid checkpoint - malformed is_reference" \
     "fail" \
     "$TESTDATA_DIR/invalid_checkpoint_bad_ref.csv" \
-    --start registration \
-    "Invalid is_reference value"
-
-# Test 6.4: Invalid - file does not exist
-run_test \
-    "Invalid - file not found" \
-    "fail" \
-    "$TESTDATA_DIR/invalid_file_not_found.csv" \
-    --start preprocessing \
-    "does not exist"
-
-# Test 6.5: Invalid - missing DAPI channel
-run_test \
-    "Invalid - missing DAPI channel" \
-    "fail" \
-    "$TESTDATA_DIR/invalid_no_dapi.csv" \
-    --start preprocessing \
-    "DAPI channel not found"
+    "Invalid is_reference value" \
+    --start registration
 
 echo ""
 echo "=========================================="

@@ -95,17 +95,26 @@ class CsvUtils {
 
         if (meta.channels.any { it == null || it.trim().isEmpty() })
             throw new IllegalArgumentException("Empty channel name found for patient ${meta.patient_id}")
-        
-        // Check if DAPI exists anywhere, not just at index 0
+
+        // DAPI may appear at ANY position (segmentation locates it by name, not index).
+        // Only its presence is required.
         if (!meta.channels.any { it.toUpperCase() == 'DAPI' }) {
-            throw new IllegalStateException("""
-                DAPI channel missing for patient ${meta.patient_id}
-                Context: ${context}
-                Found channels: ${meta.channels}
-                """.stripIndent())
+            throw new IllegalStateException("DAPI channel not found for patient ${meta.patient_id} (${context}). Found channels: ${meta.channels}")
         }
 
         return meta
+    }
+
+    /**
+     * Strictly parse an is_reference cell. Accepts only 'true'/'false'
+     * (case-insensitive); anything else is rejected so typos like "yes"
+     * cannot be silently coerced to false and corrupt reference selection.
+     */
+    static Boolean parseIsReference(def value, String context = 'unknown') {
+        def s = (value ?: '').toString().trim().toLowerCase()
+        if (s == 'true')  return true
+        if (s == 'false') return false
+        throw new IllegalArgumentException("Invalid is_reference value '${value}' in ${context}. Must be 'true' or 'false'.")
     }
 
     static Map parseMetadata(Map row, String context = 'parseMetadata') {
@@ -116,7 +125,7 @@ class CsvUtils {
 
         def meta = [
             patient_id  : row.patient_id,
-            is_reference: row.is_reference?.toBoolean(),
+            is_reference: parseIsReference(row.is_reference, "${context} (${row.patient_id})"),
             channels    : channels
         ]
 
@@ -137,7 +146,77 @@ class CsvUtils {
 
         required_cols.each {
             if (!(it in header))
-                throw new NoSuchFieldException("CSV missing required column '${it}'")
+                throw new NoSuchFieldException("Missing required column '${it}' in CSV: ${csv}")
+        }
+    }
+
+    /**
+     * Fail-fast semantic validation of the whole samplesheet, run at parse
+     * time (and therefore visible under --dry_run). Complements the per-row
+     * checks that otherwise only fire later during channel construction.
+     *
+     * Validates, for every data row: is_reference format, channel list /
+     * DAPI presence, and existence of the step's image file. Validates, per
+     * patient: exactly one reference image (zero allowed only when
+     * allow_auto_reference is set; more than one is always ambiguous).
+     *
+     * @param csv                  path to the input samplesheet
+     * @param step                 pipeline start step (selects the path column)
+     * @param allowAutoReference   whether a patient may omit an explicit reference
+     */
+    static void validateInputSemantics(def csv, String step, boolean allowAutoReference) {
+
+        def pathColumn = [
+            preprocessing : 'path_to_file',
+            registration  : 'preprocessed_image',
+            postprocessing: 'registered_image',
+        ][step]
+
+        def lines = new File(csv).readLines()
+        if (lines.size() < 2)
+            throw new IllegalStateException("Input CSV contains no data rows: ${csv}")
+
+        def header     = parseCsvLine(lines[0])
+        def piIdx      = header.findIndexOf { it == 'patient_id' }
+        def refIdx     = header.findIndexOf { it == 'is_reference' }
+        def chIdx      = header.findIndexOf { it == 'channels' }
+        def pathIdx    = pathColumn ? header.findIndexOf { it == pathColumn } : -1
+
+        def refCounts = [:].withDefault { 0 }
+        def rowCounts = [:].withDefault { 0 }
+
+        lines.drop(1).eachWithIndex { line, i ->
+            def cols = parseCsvLine(line)
+            if (cols.every { it == null || it.trim().isEmpty() }) return  // skip blank lines
+
+            def ctx = "row ${i + 2} of ${csv}"
+            def row = [
+                patient_id  : piIdx  >= 0 ? cols[piIdx]  : null,
+                is_reference: refIdx >= 0 ? cols[refIdx] : null,
+                channels    : chIdx  >= 0 && chIdx < cols.size() ? cols[chIdx] : null,
+            ]
+
+            // Per-row format + DAPI/channel validation (throws on problems).
+            parseMetadata(row, ctx)
+
+            // Image file must exist (resolved against the launch directory for
+            // relative paths). Skipped only if the path column is absent.
+            if (pathIdx >= 0 && pathIdx < cols.size()) {
+                def p = cols[pathIdx].trim()
+                if (p && !new File(p).exists())
+                    throw new FileNotFoundException("Input file does not exist: ${p} (patient ${row.patient_id}, ${ctx})")
+            }
+
+            rowCounts[row.patient_id]++
+            if (parseIsReference(row.is_reference, ctx)) refCounts[row.patient_id]++
+        }
+
+        rowCounts.each { patientId, _n ->
+            def refs = refCounts[patientId]
+            if (refs > 1)
+                throw new IllegalStateException("Multiple reference images found for patient ${patientId} (${refs} found). Exactly one image per patient may set is_reference=true.")
+            if (refs == 0 && !allowAutoReference)
+                throw new IllegalStateException("No reference image found for patient ${patientId}. Set is_reference=true for one image, or run with --allow_auto_reference true.")
         }
     }
 }

@@ -123,6 +123,12 @@ workflow REGISTRATION {
                     Using first image as reference (allow_auto_reference=true)
                     To make this an error, set allow_auto_reference=false
                     """.stripIndent()
+                    // Mark the auto-picked image as the reference so downstream
+                    // steps (registration QC branch, segmentation's is_reference
+                    // filter) see exactly one reference — otherwise the registered
+                    // output carries is_reference=false for every image and
+                    // postprocessing fails with "No reference images found".
+                    items[0] = [items[0][0] + [is_reference: true], items[0][1]]
                     ref = items[0]
                 } else {
                     throw new Exception("""
@@ -298,7 +304,7 @@ workflow REGISTRATION {
         .collectFile(
             name: 'registered.csv',
             newLine: true,
-            storeDir: "${launchDir}/csv",
+            storeDir: "${params.outdir ?: launchDir}/csv",
             seed: 'patient_id,registered_image,is_reference,channels'
         )
 

@@ -14,6 +14,8 @@ process REGISTER {
     tag "${patient_id}"
     label 'process_high'
 
+    // VALIS uses the maintained upstream image (linux/amd64); we do not rebuild
+    // it (its from-source libvips build is heavy and not vendored). See containers/README.md.
     container 'cdgatenbee/valis-wsi:1.0.0'
 
     input:

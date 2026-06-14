@@ -2,7 +2,7 @@ process GENERATE_PREPROCESS_QC {
     tag "${meta.patient_id}"
     label 'process_medium'
 
-    container 'bolt3x/attend_image_analysis:preprocess'
+    container "${params.container_registry}/preprocess:${params.container_tag}"
 
     input:
     tuple val(meta), path(preprocessed)

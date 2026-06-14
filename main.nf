@@ -22,17 +22,3 @@ include { MIRAGE } from './workflows/mirage'
 workflow {
     MIRAGE()
 }
-
-/*
-================================================================================
-    COMPLETION HANDLERS
-================================================================================
-*/
-
-workflow.onComplete {
-    if (workflow.success) {
-        log.info "Pipeline completed successfully!"
-    } else {
-        log.error "Pipeline failed - work directory preserved for debugging"
-    }
-}

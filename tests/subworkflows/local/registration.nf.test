@@ -9,6 +9,7 @@ nextflow_workflow {
 
     test("Should run VALIS registration - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -22,7 +23,7 @@ nextflow_workflow {
                 input[0] = Channel.fromList([
                     [[patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK']],
                      file('$projectDir/tests/testdata/P001_ref.ome.tiff')],
-                    [[patient_id: 'P001', is_reference: false, channels: ['DAPI', 'PANCK']],
+                    [[patient_id: 'P001', is_reference: false, channels: ['DAPI', 'CD3']],
                      file('$projectDir/tests/testdata/P001_mov1.ome.tiff')]
                 ])
                 // REGISTRATION now takes only ch_preprocessed (VALIS-only)
@@ -43,6 +44,7 @@ nextflow_workflow {
 
     test("Should handle multi-patient registration - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -55,7 +57,7 @@ nextflow_workflow {
                 input[0] = Channel.fromList([
                     [[patient_id: 'P001', is_reference: true, channels: ['DAPI']],
                      file('$projectDir/tests/testdata/P001_ref.ome.tiff')],
-                    [[patient_id: 'P001', is_reference: false, channels: ['DAPI']],
+                    [[patient_id: 'P001', is_reference: false, channels: ['DAPI', 'CD3']],
                      file('$projectDir/tests/testdata/P001_mov1.ome.tiff')],
                     [[patient_id: 'P002', is_reference: true, channels: ['DAPI']],
                      file('$projectDir/tests/testdata/P002_ref.ome.tiff')]
@@ -80,6 +82,7 @@ nextflow_workflow {
 
     test("Should handle padding workflow - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -92,7 +95,7 @@ nextflow_workflow {
                 input[0] = Channel.fromList([
                     [[patient_id: 'P001', is_reference: true, channels: ['DAPI']],
                      file('$projectDir/tests/testdata/P001_ref.ome.tiff')],
-                    [[patient_id: 'P001', is_reference: false, channels: ['DAPI']],
+                    [[patient_id: 'P001', is_reference: false, channels: ['DAPI', 'CD3']],
                      file('$projectDir/tests/testdata/P001_mov1.ome.tiff')]
                 ])
                 // REGISTRATION now takes only ch_preprocessed (VALIS-only)
@@ -110,6 +113,7 @@ nextflow_workflow {
 
     test("Should skip QC when configured - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -122,7 +126,7 @@ nextflow_workflow {
                 input[0] = Channel.fromList([
                     [[patient_id: 'P001', is_reference: true, channels: ['DAPI']],
                      file('$projectDir/tests/testdata/P001_ref.ome.tiff')],
-                    [[patient_id: 'P001', is_reference: false, channels: ['DAPI']],
+                    [[patient_id: 'P001', is_reference: false, channels: ['DAPI', 'CD3']],
                      file('$projectDir/tests/testdata/P001_mov1.ome.tiff')]
                 ])
                 // REGISTRATION now takes only ch_preprocessed (VALIS-only)
@@ -140,6 +144,7 @@ nextflow_workflow {
 
     test("Should handle allow_auto_reference fallback - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -154,7 +159,7 @@ nextflow_workflow {
                 input[0] = Channel.fromList([
                     [[patient_id: 'P001', is_reference: false, channels: ['DAPI']],
                      file('$projectDir/tests/testdata/P001_ref.ome.tiff')],
-                    [[patient_id: 'P001', is_reference: false, channels: ['DAPI']],
+                    [[patient_id: 'P001', is_reference: false, channels: ['DAPI', 'CD3']],
                      file('$projectDir/tests/testdata/P001_mov1.ome.tiff')]
                 ])
                 // REGISTRATION now takes only ch_preprocessed (VALIS-only)
@@ -207,7 +212,7 @@ nextflow_workflow {
                 input[0] = Channel.fromList([
                     [[patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK', 'SMA']],
                      file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)],
-                    [[patient_id: 'P001', is_reference: false, channels: ['DAPI', 'PANCK', 'SMA']],
+                    [[patient_id: 'P001', is_reference: false, channels: ['DAPI', 'CD3', 'CD8']],
                      file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)]
                 ])
                 // REGISTRATION now takes only ch_preprocessed (VALIS-only)
@@ -233,7 +238,7 @@ nextflow_workflow {
                 // Checkpoint CSV created
                 { with(workflow.out.checkpoint_csv) {
                     assert size() == 1
-                    assert get(0).exists()
+                    assert file(get(0)).exists()
                 }}
             )
         }
