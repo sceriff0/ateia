@@ -151,10 +151,16 @@ workflow REGISTRATION {
     //  add per spec §6.5; for now the toggle is all-or-nothing.)
     if (params.reg_distributed_tiling) {
         VALIS_DISTRIBUTED_ADAPTER(ch_grouped)
-        ch_registered = VALIS_DISTRIBUTED_ADAPTER.out.registered
+        ch_registered     = VALIS_DISTRIBUTED_ADAPTER.out.registered
+        ch_adapter_logs   = VALIS_DISTRIBUTED_ADAPTER.out.size_logs
+        ch_adapter_versions = VALIS_DISTRIBUTED_ADAPTER.out.versions
+        ch_adapter_summary  = Channel.empty()   // distributed path emits no preprocessed/data summary
     } else {
         VALIS_ADAPTER(ch_grouped)
-        ch_registered = VALIS_ADAPTER.out.registered
+        ch_registered     = VALIS_ADAPTER.out.registered
+        ch_adapter_logs   = VALIS_ADAPTER.out.size_logs
+        ch_adapter_versions = VALIS_ADAPTER.out.versions
+        ch_adapter_summary  = VALIS_ADAPTER.out.summary
     }
 
     // ========================================================================
@@ -283,7 +289,7 @@ workflow REGISTRATION {
     }
 
     // Add size logs from the registration adapter
-    ch_size_logs = ch_size_logs.mix(VALIS_ADAPTER.out.size_logs)
+    ch_size_logs = ch_size_logs.mix(ch_adapter_logs)
 
     // Add size logs from QC processes (if enabled)
     if (!params.skip_registration_qc) {
@@ -304,7 +310,7 @@ workflow REGISTRATION {
             .mix(PAD_IMAGES.out.versions.first())
     }
 
-    ch_versions = ch_versions.mix(VALIS_ADAPTER.out.versions)
+    ch_versions = ch_versions.mix(ch_adapter_versions)
 
     if (!params.skip_registration_qc) {
         ch_versions = ch_versions.mix(GENERATE_REGISTRATION_QC.out.versions.first())
@@ -318,7 +324,7 @@ workflow REGISTRATION {
     checkpoint_csv   = ch_checkpoint_csv
     qc               = ch_qc
     error_metrics    = ch_error_metrics
-    valis_summary    = VALIS_ADAPTER.out.summary
+    valis_summary    = ch_adapter_summary
     size_logs        = ch_size_logs
     versions         = ch_versions
 }
