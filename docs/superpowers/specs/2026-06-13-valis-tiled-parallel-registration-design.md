@@ -599,6 +599,57 @@ use a small `tile_wh` to exercise multi-tile stitch when validating, as §6.1 di
 
 ---
 
+## 6.5 Regime-boundary finding (probe 2026-06-14) — tiled DeepFlow ≠ whole-image DeepFlow ‼️
+
+Measured directly on the **same 2-D grayscale input** (P001 mov1→ref), `OpticalFlowWarper` (whole)
+vs `NonRigidTileRegistrar` (tiled), comparing the returned `bk_dxdy`:
+
+| Comparison | equal | max\|Δ\| (px) | mean\|Δ\| |
+|---|---|---|---|
+| whole-image vs multi-tile (3×3) | ❌ | **8.38** | 1.80 |
+| whole-image vs single-tile (1×1) | ❌ | **8.63** | 1.63 |
+| multi-tile vs single-tile | ❌ | 1.14 | 0.47 |
+
+**Tiled and whole-image non-rigid are different algorithms.** Even a single 1×1 tile diverges from
+whole-image (the tiler adds per-tile processing/normalization + `tile_buffer` bbox expansion). So:
+
+1. **The Task 5/§6.4 gate "distributed field == whole-image classic field" is UNACHIEVABLE.** Drop it.
+2. **The field baseline for the distributed path is the IN-PROCESS TILER on identical 2-D inputs**, not
+   whole-image. This is exactly what §6.1 (Task 1) and `reg_tile.py`'s check already use, and it's
+   `max|Δ|=0` there. "Bit-identical to *classic*" holds literally **only for large brightfield**, where
+   classic itself engages `NonRigidTileRegistrar` (`est_GB > 10`).
+3. **For fluorescence there is NO bit-identical classic baseline:** whole-image is a different algorithm
+   (~8px off) and classic-*tiled* crashes (Blocker 3). The distributed-tiled path is the *only* way to
+   tile fluorescence — it reproduces the tiled algorithm exactly, but cannot be "bit-identical to
+   classic" because working classic fluorescence tiling does not exist. Validate fluorescence against
+   **in-process tiler on the same 2-D images** (the achievable, meaningful baseline).
+4. **§8.1 `reg_dist_sub_threshold='auto'` (single whole-image tile below threshold) is NOT equal to
+   classic whole-image** either — a 1-tile tiler ≠ whole-image. Below the genuine tiling threshold the
+   distributed path should fall back to **classic whole-image `REGISTER`**, not a 1-tile tiler, if
+   matching classic matters. (Re-confirm: does Task 4.5's whole-image warp baseline still apply? Yes —
+   Task 4.5 proved *warp-given-a-field*; it is agnostic to how the field was produced.)
+
+**Corrected end-to-end story (supersedes the "compare vs whole-image" lines in §6.1 net-decision &
+§9/§10):**
+```
+PREP   : produce the 2-D processed images classic non-rigid would use (ChannelGetter w/ src_f live,
+         norm, rescale, mask — registration.py:3525-3544); dump them + grid + warp-state; halt.
+REG_TILE: tile those 2-D images -> field  (== in-process NonRigidTileRegistrar, proven §6.1)
+FINALIZE: compose (gated on from_rigid_reg) -> pad -> slide_tools.warp_slide  (proven §6.3)
+VALIDATE: distributed end-to-end == in-process tiler on the SAME 2-D images + same compose/warp.
+          Additionally, for LARGE BRIGHTFIELD, == classic Valis.register() directly (true regime).
+```
+
+**⇒ revised Task 5 spike gate:** PREP's dumped 2-D images, run through the in-process tiler, must equal
+the field from classic's own processed-2-D pipeline — i.e. PREP reproduces classic's *processing*
+exactly. The *tiling* equivalence is already §6.1. Open question worth a quick check: does a guarded
+`ChannelGetter` (Blocker 3 fix-B) let classic auto-tiling run on fluorescence and produce the SAME
+field as feeding pre-processed 2-D (fix-A)? If yes, fix-B is simpler for PREP. **This is a candidate
+decision point for the user** (fix-A processing-in-PREP vs fix-B guarded-ChannelGetter; and the
+below-threshold fallback policy).
+
+---
+
 ## 7. Data formats & I/O contract between processes
 
 | Artifact | Format | Notes |

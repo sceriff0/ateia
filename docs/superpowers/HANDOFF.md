@@ -27,14 +27,22 @@
 - 🔀 **Architecture = Option A (plain-data handoff), spec §6.2/§6.3.** RAM win = the per-step
   decomposition (no-JVM `REG_TILE` swarm); FINALIZE = compose (gated on `from_rigid_reg`) →
   `pad_displacement` → `slide_tools.warp_slide` (VALIS's streaming warp), all from plain dumped data.
-- ⛔ **NEXT make-or-break: Task 5 PREP spike (spec §6.4).** A probe showed forcing the tiler dumps the
-  **UNPROCESSED 3-band image** (the tiler defers channel processing to per-tile — root of Blocker 3),
-  so REG_TILE on it would NOT be bit-identical to whole-image classic (which uses 2-D DAPI). PREP must
-  feed the tiler the **same 2-D processed image** whole-image non-rigid uses. **Spike this first**
-  (approach A: drive the tiler directly on the processed-2-D images + halt hook; gate = distributed
-  field == whole-image classic field, exactly, for fluorescence) BEFORE writing `reg_prep.py`. The
-  halt mechanics + surviving warp state (`slide_dict`, `_non_rigid_bbox`, `_full_displacement_shape_rc`,
-  rigid `M`/shapes/`bg_color`) are already confirmed working.
+- ‼️ **PREMISE FINDING (spec §6.5):** tiled DeepFlow ≠ whole-image DeepFlow (measured: ~8px max\|Δ\|,
+  even for a single 1×1 tile). So "distributed field == whole-image classic" is **impossible** — the
+  correct field baseline is the **in-process tiler on identical 2-D images** (already `max|Δ|=0`, §6.1).
+  "Bit-identical to classic" holds literally **only for large brightfield** (where classic itself tiles).
+  For **fluorescence** there is NO working classic baseline (whole-image is a different algorithm;
+  classic-tiled crashes, Blocker 3) — validate vs in-process tiler on the same 2-D images.
+- ⛔ **NEXT make-or-break: Task 5 PREP spike (spec §6.4 + §6.5).** Forcing the tiler dumps the
+  **UNPROCESSED 3-band image** (channel processing deferred to per-tile = Blocker 3 root). PREP must
+  feed the tiler the **2-D processed images classic's non-rigid pipeline produces** (registration.py
+  3525-3544: ChannelGetter w/ src_f live → norm → rescale → mask). **Revised gate:** PREP's 2-D images
+  through the in-process tiler == the field from classic's processed-2-D pipeline (i.e. PREP reproduces
+  classic's *processing*; *tiling* equivalence is already §6.1). Halt mechanics + surviving warp state
+  (`slide_dict`, `_non_rigid_bbox`, `_full_displacement_shape_rc`, rigid `M`/shapes/`bg_color`) confirmed.
+- ❓ **DECISION POINT for the user (spec §6.5):** (a) fix-A = process-to-2-D in PREP vs fix-B = ship a
+  guarded `ChannelGetter` so classic auto-tiling runs on fluorescence; (b) below-threshold policy —
+  fall back to classic whole-image `REGISTER` (a 1-tile tiler is NOT == whole-image).
 - ▶️ **Then remaining:** Task 5 (`reg_prep.py`), Task 7 (`reg_finalize.py`, per §6.3 — compose gated
   on `from_rigid_reg` → `pad_displacement` → `slide_tools.warp_slide`, no Slide rebuild), Tasks 8-9
   (NF processes + routing), Task 10 (bit-identical verification). VALIS source is at `/tmp/valis_src/`
