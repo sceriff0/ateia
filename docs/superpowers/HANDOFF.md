@@ -39,19 +39,42 @@
   (1326-1338), and a guarded ChannelGetter can't map the channel per-tile without `src_f` — so the
   tiler MUST be fed base VALIS's processed 2-D DAPI. fix-A reuses every proven piece, so the result is
   **bit-identical by construction to VALIS's tiler run in-process on VALIS's own processed 2-D image**.
-- ▶️ **NEXT = pure implementation (no design unknowns left), per the §6.6 recipe:**
-  - **Task 5 `bin/reg_prep.py`** — JVM up; `TILER_THRESH_GB` high to force the processed-2-D branch;
-    hook `OpticalFlowWarper.register` to capture 2-D inputs + raise `TilesPending` (halt before
-    DeepFlow = low RAM); dump 2-D images + grid (via `tile_grid.py`) + warp-state (the §6.3 contract).
-    **Spike gate:** `REG_TILE(PREP 2-D) → stitch → compose → warp` == in-process tiler on the same 2-D
-    + compose + warp (each leg already `max|Δ|=0`).
-  - **Task 7 `bin/reg_finalize.py`** — `stitch_tiles` → §6.3 compose (gate on `from_rigid_reg`) →
-    `pad_displacement` → `slide_tools.warp_slide` → OME-TIFF + versions/size/manifest (§7); +micro if §5A.
-  - **Tasks 8-9** — NF processes + `registration.nf` routing on `params.reg_distributed_tiling`
-    (below-threshold → classic `REGISTER`), params, schema.
-  - **Task 10** — verify distributed == in-process tiler (fluorescence) + == classic (large brightfield).
-  - Follow-up noted in §6.6: exact base-VALIS-*tiled-brightfield* parity needs per-tile
-    `ColorfulStandardizer` (no guard) — secondary to the fluorescence WSI use case.
+- ✅ **Tasks 5, 7, 8 DONE (commits `040597e`, `c39532d`).**
+  - **Task 5 `bin/reg_prep.py`** (fix-A §6.6): force processed-2-D branch, no-op `OpticalFlowWarper`
+    to skip DeepFlow (low RAM) while capturing the 2-D images, dump per-slide `tiler_inputs/`
+    (via `valis_tiling` halt-on-2-D) + `warp_state.json`. No registrar pickle.
+  - **Task 7 `bin/reg_finalize.py`**: `stitch_tiles` → §6.3 compose (gated on `from_rigid_reg`) →
+    `pad_displacement` → `slide_tools.warp_slide` → OME-TIFF (pixel-faithful fallback save; the
+    ome-types `OMEConverter.to_xml()` path is env-fragile — channel-metadata parity is a Task-10 polish).
+  - **Validated END-TO-END:** `PREP → 9× REG_TILE → FINALIZE` on the P001 fluorescence pair produces
+    a registered 3-channel OME-TIFF; per-leg bit-identicality already proven (Tasks 6 + 4.5).
+  - **Task 8** `modules/local/reg_{prep,tile,finalize}.nf` + `tests/modules/reg_*.nf.test`: all 3
+    compile + stubs pass (`nextflow run -stub`, 0 errors with label memory capped). Container =
+    `params.reg_dist_container` (MUST be the patched image; published cdgatenbee lacks the seam).
+- ▶️ **REMAINING: Task 9 (routing) + Task 10 (verify).** Task 9 = a new `valis_distributed_adapter.nf`
+  + branch in `registration.nf` on `params.reg_distributed_tiling`. **Design worked out (do this):**
+  - PREP input = same shape as classic `VALIS_ADAPTER` (`[meta, pid, ref_file, all_files, all_metas]`).
+  - Fan-out: `REG_PREP.out.prepped` (`[pid, prep_dir, all_metas]`) → `flatMap` that, per slide subdir,
+    reads `tiler_inputs/manifest.json` (`new JsonSlurper().parse(...)`) for `n_tiles` and emits
+    `[pid, slide, file(tiler_inputs), i]` for `i in 0..<n_tiles` → `REG_TILE`.
+  - Fan-in: `REG_TILE.out.tiles.groupTuple(by:[0,1])` → flatten tile `.v` list; rejoin per slide with
+    `tiler_inputs` + `warp_state.json` (from prep) + `src_slide` (from `all_items`) → `REG_FINALIZE`.
+  - Output: convert `REG_FINALIZE.out.registered` → `[meta, file]` (match slide→meta by channel sig,
+    like the classic adapter). **⚠️ MUST also emit the REFERENCE** warped-to-itself (classic warps all
+    slides incl. ref; downstream QC compares moving-registered vs reference-registered in the same
+    cropped space) — either run FINALIZE on the ref with a zero non-rigid field, or warp it via
+    `slide_tools.warp_slide` with identity dxdy. Don't forget this or QC/coords break.
+  - **Below-threshold fallback (user decision):** route patients/inputs below VALIS's tiling threshold
+    to the classic `VALIS_ADAPTER`; only tile above it.
+  - **Params to add** (nextflow.config + schema): `reg_distributed_tiling` (false), `reg_dist_container`,
+    `reg_dist_tile_wh` (512), `reg_dist_tile_buffer` (100), `reg_max_non_rigid_dim`, `reg_max_processed_dim`,
+    `reg_dist_sub_threshold` ('auto'), `reg_dist_tiles_per_task` (1).
+  - **Cannot be fully validated locally** — needs the patched image PUBLISHED + a real pipeline run;
+    that's why it wasn't written blind. Stub-test the adapter, then real-test once the image is on GHCR.
+  - **Task 10** — verify distributed end-to-end == in-process tiler on the same 2-D images
+    (fluorescence) + == classic for large brightfield; large fixture. Also finish OME channel-metadata
+    parity in `reg_finalize.py` (the `to_xml()` fallback).
+  - Follow-up (§6.6): exact base-VALIS-*tiled-brightfield* parity needs per-tile `ColorfulStandardizer`.
 - ▶️ **Then remaining:** Task 5 (`reg_prep.py`), Task 7 (`reg_finalize.py`, per §6.3 — compose gated
   on `from_rigid_reg` → `pad_displacement` → `slide_tools.warp_slide`, no Slide rebuild), Tasks 8-9
   (NF processes + routing), Task 10 (bit-identical verification). VALIS source is at `/tmp/valis_src/`
