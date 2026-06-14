@@ -82,11 +82,16 @@ def main():
 
     # ---------------- CLASSIC (whole-image VALIS) ----------------
     registration.TILER_THRESH_GB = 10  # do not tile -> classic whole-image (works on fluorescence)
-    reg = registration.Valis(
-        INP, os.path.join(WORK, "classic_out"), reference_img_f=REF,
-        align_to_reference=True, crop="reference", non_rigid_registrar_cls=OpticalFlowWarper,
-        create_masks=True, micro_rigid_registrar_cls=None,
-        max_processed_image_dim_px=MAX_PROC, max_non_rigid_registration_dim_px=MAX_NR)
+    # Use the SAME shared config builder classic register.py + distributed reg_prep.py use, so this
+    # tests bit-identicality against the user's REAL config (memory_mode + micro). CMP_MEMORY_MODE
+    # selects the preset; CMP_SKIP_MICRO toggles MicroRigidRegistrar in the rigid stage.
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "bin", "utils"))
+    from valis_config import build_registrar_kwargs
+    MEMORY_MODE = os.environ.get("CMP_MEMORY_MODE", "high")
+    SKIP_MICRO = os.environ.get("CMP_SKIP_MICRO", "0") == "1"
+    kwargs = build_registrar_kwargs(reference_img_f=REF, memory_mode=MEMORY_MODE,
+                                    skip_micro_registration=SKIP_MICRO)
+    reg = registration.Valis(INP, os.path.join(WORK, "classic_out"), **kwargs)
     reg.register()
     mov_slide = reg.slide_dict[MOV_STEM]
     classic_A = npx(mov_slide.warp_slide(level=0, non_rigid=False, crop=True))
@@ -105,9 +110,11 @@ def main():
         print(f"[classic] micro failed (size={micro_size}): {type(e).__name__}: {e}", flush=True)
 
     # ---------------- DISTRIBUTED ----------------
-    run([sys.executable, "bin/reg_prep.py", "--input-dir", INP, "--out", PREP, "--reference", REF,
-         "--tile-wh", str(TILE_WH), "--tile-buffer", str(TILE_BUFFER),
-         "--max-non-rigid-dim", str(MAX_NR), "--max-processed-dim", str(MAX_PROC)])
+    prep_cmd = [sys.executable, "bin/reg_prep.py", "--input-dir", INP, "--out", PREP, "--reference", REF,
+                "--tile-wh", str(TILE_WH), "--tile-buffer", str(TILE_BUFFER), "--memory-mode", MEMORY_MODE]
+    if SKIP_MICRO:
+        prep_cmd.append("--skip-micro-registration")
+    run(prep_cmd)
     md = os.path.join(PREP, MOV_STEM)
     ti, tiles = os.path.join(md, "tiler_inputs"), os.path.join(md, "tiles")
     os.makedirs(tiles, exist_ok=True)

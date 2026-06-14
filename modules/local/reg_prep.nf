@@ -32,8 +32,10 @@ process REG_PREP {
     def ref_filename = reference ? reference.name : ''
     def tile_wh = params.reg_dist_tile_wh ?: 512
     def tile_buffer = params.reg_dist_tile_buffer ?: 100
-    def max_nr = params.reg_max_non_rigid_dim ?: 4096
-    def max_proc = params.reg_max_processed_dim ?: 2048
+    // Mirror classic register.nf so rigid is bit-identical (memory_mode preset + micro-rigid).
+    def memory_mode = params.memory_mode ?: 'high'
+    def max_image_dim = params.reg_max_image_dim ?: 4000
+    def skip_micro = params.skip_micro_registration ? '--skip-micro-registration' : ''
     """
     total_bytes=\$(find -L ref input_* -maxdepth 1 -type f \\( -name "*.ome.tif" -o -name "*.ome.tiff" \\) -exec stat -L --printf="%s\\n" {} + 2>/dev/null | awk '{sum+=\$1} END {print sum}')
     echo "${task.process},${patient_id},inputs/,\${total_bytes:-0}" > ${patient_id}.REG_PREP.size.csv
@@ -49,8 +51,9 @@ process REG_PREP {
         --reference ${ref_filename} \\
         --tile-wh ${tile_wh} \\
         --tile-buffer ${tile_buffer} \\
-        --max-non-rigid-dim ${max_nr} \\
-        --max-processed-dim ${max_proc} \\
+        --memory-mode ${memory_mode} \\
+        --max-image-dim ${max_image_dim} \\
+        ${skip_micro} \\
         ${args}
 
     # Drop the working copies; keep prep/ (the handoff).

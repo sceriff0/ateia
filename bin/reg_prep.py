@@ -24,6 +24,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "uti
 import numpy as np
 import pyvips
 import valis_tiling
+from valis_config import build_registrar_kwargs
 from valis import registration, slide_tools
 from valis import serial_non_rigid as snr
 from valis.non_rigid_registrars import OpticalFlowWarper, NonRigidTileRegistrar
@@ -47,8 +48,11 @@ def main():
     ap.add_argument("--reference", required=True, help="reference image basename")
     ap.add_argument("--tile-wh", type=int, default=512)
     ap.add_argument("--tile-buffer", type=int, default=100)
-    ap.add_argument("--max-non-rigid-dim", type=int, default=4096)
-    ap.add_argument("--max-processed-dim", type=int, default=2048)
+    # Registrar config — MUST mirror bin/register.py for bit-identical rigid (incl. MicroRigidRegistrar).
+    ap.add_argument("--memory-mode", default="high", choices=["high", "medium", "low"])
+    ap.add_argument("--skip-micro-registration", action="store_true",
+                    help="if NOT set, MicroRigidRegistrar runs in the rigid stage (matches classic)")
+    ap.add_argument("--max-image-dim", type=int, default=4000)
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
 
@@ -79,16 +83,15 @@ def main():
         z = [np.zeros((h, w)), np.zeros((h, w))]   # numpy [dx,dy] no-op field (skips DeepFlow)
         return moving_img, z, z
 
+    # Build the IDENTICAL Valis config as classic register.py (shared builder), so rigid (incl.
+    # MicroRigidRegistrar, SuperPoint/SuperGlue) is bit-identical. No-op only the non-rigid warper.
+    kwargs = build_registrar_kwargs(reference_img_f=args.reference, memory_mode=args.memory_mode,
+                                    skip_micro_registration=args.skip_micro_registration,
+                                    max_image_dim_px=args.max_image_dim)
     snr.NonRigidZImage.calc_deformation = cap_calc
     OpticalFlowWarper.register = noop_register
     try:
-        reg = registration.Valis(
-            args.input_dir, args.out, reference_img_f=args.reference,
-            align_to_reference=True, crop="reference",
-            non_rigid_registrar_cls=OpticalFlowWarper, create_masks=True,
-            micro_rigid_registrar_cls=None,
-            max_processed_image_dim_px=args.max_processed_dim,
-            max_non_rigid_registration_dim_px=args.max_non_rigid_dim)
+        reg = registration.Valis(args.input_dir, args.out, **kwargs)
         reg.register()
     finally:
         snr.NonRigidZImage.calc_deformation = orig_calc
