@@ -244,6 +244,11 @@
                     "description": "Tile overlap (buffer) for distributed tiling.",
                     "default": 100
                 },
+                "reg_dist_threshold_gb": {
+                    "type": "number",
+                    "description": "est_GB boundary for auto tiling routing (matches VALIS TILER_THRESH_GB).",
+                    "default": 10
+                },
                 "reg_dist_sub_threshold": {
                     "type": "string",
                     "description": "Tiling-regime policy: 'auto' = tile only above VALIS's threshold; 'force' = always tile.",
