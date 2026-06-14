@@ -1,7 +1,8 @@
 process ESTIMATE_FEATURE_DISTANCES {
     tag "${meta.patient_id}"
     label 'process_medium'
-    container "${params.container_registry}/valis:${params.container_tag}"
+    // VALIS upstream image (linux/amd64); not rebuilt by us — see containers/README.md.
+    container 'cdgatenbee/valis-wsi:1.0.0'
 
     // Measures feature distances BEFORE and AFTER registration for a single image
     // Detects and matches features in (ref vs moving), then (ref vs registered)
