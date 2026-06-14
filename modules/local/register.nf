@@ -14,7 +14,9 @@ process REGISTER {
     tag "${patient_id}"
     label 'process_high'
 
-    container "${params.container_registry}/valis:${params.container_tag}"
+    // VALIS uses the maintained upstream image (linux/amd64); we do not rebuild
+    // it (its from-source libvips build is heavy and not vendored). See containers/README.md.
+    container 'cdgatenbee/valis-wsi:1.0.0'
 
     input:
     // Use stageAs to avoid filename collision when reference is included in preproc_files

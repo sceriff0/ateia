@@ -29,26 +29,26 @@ Every image is tagged with both the release version (e.g. `v1.0.0`) and `latest`
 | `istantseg` | `ghcr.io/sceriff0/mirage/istantseg:<tag>` | `SEGMENT` (`params.seg_method` = `instantseg`) | `pytorch/pytorch:2.5.1-cuda11.8-cudnn9-runtime` + `instanseg-torch` |
 | `merge` | `ghcr.io/sceriff0/mirage/merge:<tag>` | `MERGE_AND_PYRAMID` | `pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime` + tifffile/imagecodecs pyramid stack |
 | `debug_diffeo` | `ghcr.io/sceriff0/mirage/debug_diffeo:<tag>` | `GENERATE_REGISTRATION_QC` | `nvidia/cuda:12.2.2-cudnn8-devel-ubuntu22.04` + Miniconda/bftools + StarDist/cudipy diffeo QC stack |
-| `valis` | `ghcr.io/sceriff0/mirage/valis:<tag>` | `REGISTER`, `ESTIMATE_FEATURE_DISTANCES` | `ubuntu:22.04` + OpenSlide/libvips/VALIS-WSI built from source (see note below) |
+| VALIS (not vendored) | `cdgatenbee/valis-wsi:1.0.0` (upstream) | `REGISTER`, `ESTIMATE_FEATURE_DISTANCES` | upstream maintained image — **not rebuilt or published by us** (see note below) |
 
 > The context directory name `istantseg` (a historical typo) is preserved
 > verbatim so it matches the upstream build context and the legacy DockerHub tag
 > `bolt3x/attend_image_analysis:instant_seg`. The published GHCR image is
 > therefore `.../istantseg`, even though `params.seg_method` is `instantseg`.
 
-### VALIS — upstream image + vendored Dockerfile
+### VALIS — uses the upstream image (not vendored)
 
-The VALIS image is **also published upstream** as
-[`cdgatenbee/valis-wsi:1.0.0`](https://hub.docker.com/r/cdgatenbee/valis-wsi),
-which the pipeline currently references directly. We **mirror its Dockerfile
-here for reproducibility** so the exact build (OpenSlide 3.4.1, pixman 0.40.0,
-libvips 8.15.1, `valis-wsi` on Python 3.10) can be reconstructed and republished
-under our own registry without depending on the upstream DockerHub tag.
+`REGISTER` and `ESTIMATE_FEATURE_DISTANCES` reference the maintained upstream
+image [`cdgatenbee/valis-wsi:1.0.0`](https://hub.docker.com/r/cdgatenbee/valis-wsi)
+directly. We do **not** vendor or republish it: its from-source libvips build is
+heavy (and the original vendored Dockerfile failed to build in CI — `meson` was
+missing). The upstream image is `linux/amd64` and already battle-tested, so there
+is little value in re-hosting it. It is therefore excluded from
+`build-images.yml`. If you ever want a self-hosted copy, add a `containers/valis/`
+Dockerfile that installs `meson`/`ninja` before the libvips build and re-add
+`valis` to the build matrix.
 
-The original vendored source contained two concatenated copies of the same
-Dockerfile (a copy/paste artifact, which is not a valid Docker build because it
-declared `FROM` twice). We vendored a **single canonical copy** so the context
-builds cleanly; the content is otherwise faithful to the original.
+All published images are built for **`linux/amd64`** (the pipeline's HPC target).
 
 ## Orphaned / legacy contexts NOT vendored
 

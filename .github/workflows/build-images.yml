@@ -99,6 +99,9 @@ jobs:
       fail-fast: false
       matrix:
         # One entry per vendored build context under containers/.
+        # VALIS is intentionally excluded: it uses the maintained upstream
+        # image cdgatenbee/valis-wsi:1.0.0 (its from-source libvips build is
+        # heavy and not worth re-hosting). The modules reference it directly.
         image:
           - bioformats
           - preprocess
@@ -108,7 +111,6 @@ jobs:
           - istantseg
           - merge
           - debug_diffeo
-          - valis
 
     steps:
       - name: Checkout repository
@@ -131,6 +133,8 @@ jobs:
         with:
           context: containers/${{ matrix.image }}
           file: containers/${{ matrix.image }}/Dockerfile
+          # Pin to linux/amd64 — the pipeline runs on amd64 HPC nodes.
+          platforms: linux/amd64
           push: ${{ needs.setup.outputs.push == 'true' }}
           # Tag with the resolved version AND latest (both only matter on push;
           # on build-only runs the tags are computed but nothing is published).
