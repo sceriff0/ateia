@@ -179,6 +179,14 @@ RUN python3 -m pip install numpy
 # for distributed tiled registration. Unpinned would drift to 1.2.0 (different tile kernel).
 RUN python3 -m pip install --retries 10 --timeout 120 --resume-retries 10 valis-wsi==1.0.0
 
+# Add the explicit external tile-loop seam (spec §6 Option B). Splits NonRigidTileRegistrar.calc
+# into a default-None dispatch + the original body (_calc_tiles), so the classic path is unchanged
+# (hook unset) and the distributed scripts just set NonRigidTileRegistrar.EXTERNAL_TILE_HOOK.
+COPY calc_hook.patch /tmp/calc_hook.patch
+RUN VALIS_DIR=$(python3 -c "import valis, os; print(os.path.dirname(valis.__file__))") && \
+    patch "$VALIS_DIR/non_rigid_registrars.py" < /tmp/calc_hook.patch && \
+    python3 -c "from valis.non_rigid_registrars import NonRigidTileRegistrar as T; assert hasattr(T, 'EXTERNAL_TILE_HOOK') and T.EXTERNAL_TILE_HOOK is None and hasattr(T, '_calc_tiles'); print('hook seam OK')"
+
 # Create a working directory
 WORKDIR /workspace
 
