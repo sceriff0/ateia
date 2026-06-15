@@ -147,7 +147,13 @@ def create_segmentation_mask(filename, size=(128, 128), n_cells=15):
             label += 1
 
     np.save(filename, mask)
-    print(f"  Created {filename} - {label-1} cells")
+    # Production segmentation masks come from SEGMENT as uint32 TIFFs (segment.py
+    # writes *_cell_mask.tif with compression='zlib'). Modules that read the mask
+    # as an image (e.g. MERGE_AND_PYRAMID) need a TIFF, not the .npy fixture, so
+    # write a matching .tif alongside it.
+    tif_path = Path(filename).with_suffix('.tif')
+    tifffile.imwrite(tif_path, mask.astype(np.uint32), compression='zlib')
+    print(f"  Created {filename} and {tif_path.name} - {label-1} cells")
     return mask
 
 create_segmentation_mask(OUT_DIR / 'P001_cell_mask.npy', n_cells=20)

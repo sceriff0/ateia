@@ -169,7 +169,7 @@ nextflow_process {
                         is_reference: false,
                         channels: ['DAPI', 'PANCK', 'SMA']
                     ],
-                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true),
                     file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
                 ]
                 """
