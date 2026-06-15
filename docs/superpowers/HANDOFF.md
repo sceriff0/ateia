@@ -64,10 +64,21 @@ docker run --rm -v "$PWD":/work -w /work mirage-valis:1.0.0 \
   python3 tests/integration/verify_distributed_bitidentical.py
 ```
 
-- ✅ **Micro: `max|Δ|=0`** on the micro 2-D inputs and the final micro-updated displacement field, vs
-  classic `register()+register_micro()` (memory_mode low; high confirmed equivalent — code path is
-  mode-independent). The warp is deterministic, so an identical field ⇒ identical registered pixels.
+- ✅ **Micro: `max|Δ|=0`** on the micro 2-D inputs AND the final micro-updated displacement field, vs
+  classic `register()+register_micro()`, at **`memory_mode=low`**. The warp is deterministic, so an
+  identical field ⇒ identical registered pixels.
+  - ⚠️ **`memory_mode=high` not yet locally confirmed.** Bit-identicality is *structural* — baseline and
+    distributed use the **identical** `build_registrar_kwargs(memory_mode)`, and the mode only changes
+    resolution caps, not the algorithm/wiring (so low-mode `max|Δ|=0` exercises the same code path that
+    runs at high). Two local high-mode attempts died in **baseline/shared code** (classic `register()` /
+    `reg_prep`) at 2048px before reaching the comparison — Docker resource pressure on this Mac, not a
+    correctness issue. **TODO: confirm `CMP_MODE=high` on a node with adequate RAM** (the goal names the
+    high-mem config). The reg_prep stage itself runs fine at high mode in isolation.
 - ✅ Wave-1 distributed (separated + tiled) proven `max|Δ|=0` previously (`spike_*`, §6.1/§6.3).
+- ✅ Full distributed pipeline runs `-stub` EXIT=0 in BOTH regimes (separated+micro, separated-no-micro)
+  AND the classic default path (regression) — `nextflow run . -profile test -stub
+  --reg_distributed_tiling true --reg_dist_sub_threshold force --skip_micro_registration false`
+  (regenerate testdata first: `python tests/testdata/generate_complete_testdata.py`).
 
 ## Status of the original "finishing items"
 
