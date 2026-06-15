@@ -191,15 +191,21 @@ jobs:
             tests/output/
 
   # ============================================================================
-  # nf-test real suite (runs on push to main/dev only)
+  # nf-test real suite (push to main/dev, and PRs targeting main/dev)
   # ============================================================================
   nf-test-real:
     name: nf-test (real)
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
-    # Advisory until the GHCR images (ghcr.io/sceriff0/mirage/*) are published
-    # by the release/build-images workflow: real tests pull per-process images,
-    # which do not exist on a fresh registry. Remove once images are published.
+    # Run on pushes to main/dev AND on PRs targeting them, so the real
+    # container suite gates merges (the on.pull_request filter already limits
+    # PR events to main/dev).
+    if: >-
+      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev'))
+      || github.event_name == 'pull_request'
+    # TEMPORARILY advisory for one verification run while the registration test
+    # data fix (moving images = translated copies of the reference DAPI) is
+    # confirmed green here. Flip to blocking (remove this line) once the real
+    # suite passes on the PR.
     continue-on-error: true
 
     steps:
