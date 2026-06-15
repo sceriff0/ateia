@@ -1,0 +1,42 @@
+nextflow_process {
+
+    name "Test REG_FINALIZE_MICRO process"
+    script "modules/local/reg_finalize_micro.nf"
+    process "REG_FINALIZE_MICRO"
+
+    tag "modules"
+    tag "modules_local"
+    tag "reg_finalize_micro"
+
+    test("REG_FINALIZE_MICRO - stub") {
+
+        options "-stub"
+
+        when {
+            process {
+                """
+                def f = file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)
+                input[0] = [
+                    'P001',
+                    'P001_mov1',
+                    file('$projectDir/tests/testdata', checkIfExists: true),  // tiler_inputs
+                    f,                                                        // wave-1 field bk.v
+                    f,                                                        // warp_state.json
+                    f,                                                        // src slide
+                    file('$projectDir/tests/testdata', checkIfExists: true),  // micro tiler_inputs
+                    f,                                                        // micro field bk.v
+                    f                                                         // micro_warp_state.json
+                ]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.registered },
+                { assert process.out.versions }
+            )
+        }
+    }
+}
