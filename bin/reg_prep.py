@@ -24,6 +24,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "uti
 import numpy as np
 import pyvips
 import valis_tiling
+from micro_rigid_guard import install_micro_rigid_guard
 from valis_config import build_registrar_kwargs
 from valis import registration, slide_tools
 from valis import serial_non_rigid as snr
@@ -56,6 +57,8 @@ def main():
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
 
+    # Make rigid-stage micro alignment robust to featureless input (no-op on real data); see module.
+    install_micro_rigid_guard()
     # Force the processed-2-D non-rigid prep branch (no tiler), then no-op the warper => no DeepFlow.
     registration.TILER_THRESH_GB = 10 ** 9
     cap = {}            # slide_name -> {moving, fixed, mask, from_rigid, incoming_is_none, reg_mask}

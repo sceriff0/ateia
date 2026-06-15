@@ -53,7 +53,7 @@ def main():
     # --- distributed path: PREP -> reg_tile (per tile, fresh proc) -> FINALIZE ---
     run([sys.executable, "bin/reg_prep.py", "--input-dir", INP, "--out", PREP,
          "--reference", "P001_ref.ome.tiff", "--tile-wh", str(TILE_WH), "--tile-buffer", str(TILE_BUFFER),
-         "--max-non-rigid-dim", "1024", "--max-processed-dim", "256"])
+         "--memory-mode", "low"])
     md = os.path.join(PREP, "P001_mov1")
     ti = os.path.join(md, "tiler_inputs")
     tiles = os.path.join(md, "tiles")

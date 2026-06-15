@@ -239,6 +239,11 @@
                     "description": "Non-rigid tile width/height for distributed tiling.",
                     "default": 512
                 },
+                "reg_dist_micro_tile_wh": {
+                    "type": "integer",
+                    "description": "Micro-registration tile width/height for the distributed micro second wave (spec §5A); VALIS default 2048.",
+                    "default": 2048
+                },
                 "reg_dist_tile_buffer": {
                     "type": "integer",
                     "description": "Tile overlap (buffer) for distributed tiling.",
