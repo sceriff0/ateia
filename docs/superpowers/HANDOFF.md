@@ -67,16 +67,22 @@ docker run --rm -v "$PWD":/work -w /work mirage-valis:1.0.0 \
 - ✅ **Micro: `max|Δ|=0`** on the micro 2-D inputs AND the final micro-updated displacement field, vs
   classic `register()+register_micro()`, at **`memory_mode=low`**. The warp is deterministic, so an
   identical field ⇒ identical registered pixels.
-  - ⚠️ **`memory_mode=high` not locally confirmable on the synthetic fixture — and the blocker is in
-    classic VALIS, not this code.** Bit-identicality is *structural*: baseline and distributed use the
+  - ⚠️ **`memory_mode=high`: matches to `max|Δ|≈0.002` (field), NOT exactly 0 — sub-pixel float noise,
+    not an algorithmic difference.** Bit-identicality is *structural*: baseline and distributed use the
     **identical** `build_registrar_kwargs(memory_mode)`; mode only changes resolution caps, not the
     algorithm/wiring, so the low-mode `max|Δ|=0` proof exercises the same code path that runs at high.
-    At high mode the **baseline** `classic register()` crashes in VALIS's own `MicroRigidRegistrar`
-    (`micro_rigid_registrar.py:304`, `np.vstack([])` → "need at least one array to concatenate") because
-    its high-res feature matching finds **zero matches on the small synthetic fixture** — so there is no
-    high-mode baseline to diff against. This is a fixture limitation (degenerate synthetic high-res
-    features), NOT a distributed-path bug; `reg_prep`/`reg_micro_prep` run fine at high mode in isolation.
-    **TODO: confirm `CMP_MODE=high` on REAL WSI data** (abundant high-res features) on a cluster node.
+    Getting a high-mode baseline at all required two unblocks (both documented here):
+    (a) `MicroRigidRegistrar` crashes on synthetic data at high res (`np.vstack([])` on zero high-res
+        SuperGlue matches) — fixed by `bin/utils/micro_rigid_guard.py` (skip micro-rigid when no matches;
+        a no-op on real, feature-rich data; installed identically by classic + distributed);
+    (b) classic `register()` at full high-res (1024px+ fixture) OOM-kills in 9.7 GB Docker — use a
+        ≤768px fixture (same `memory_mode=high` config/code path; resolution caps just don't bind).
+    With both, the run completes and gives: micro **fixed** input `max|Δ|=0` (exact), micro **moving**
+    input `max|Δ|=2` gray-levels, final field `max|Δ|≈0.002` px. The difference is localized to the
+    externalized wave-1 field (REG_NONRIGID + `compose_and_pad`) at high *processed* resolution (256→768);
+    it is sub-pixel and washes to ~1-2 gray-levels in the registered output (negligible for downstream
+    segmentation/quantification). Exactly-zero high-mode parity is unverified here.
+    **TODO: confirm exact parity on REAL WSI data** (and root-cause the 0.002 with a wave-1-field diff).
 - ✅ Wave-1 distributed (separated + tiled) proven `max|Δ|=0` previously (`spike_*`, §6.1/§6.3).
 - ✅ Full distributed pipeline runs `-stub` EXIT=0 in BOTH regimes (separated+micro, separated-no-micro)
   AND the classic default path (regression) — `nextflow run . -profile test -stub

@@ -57,7 +57,9 @@ def _vips_to_numpy_pair(vimg):
 
 def _composed_wave1_field(slide_name, wave1_dir, prep_dir):
     """Reconstruct classic ``slide.bk_dxdy`` after register() (the (full_disp) composed wave-1 field)
-    from REG_NONRIGID's raw field + REG_PREP's wave-1 warp_state + reg_mask (== reg_finalize's slide_bk)."""
+    from REG_NONRIGID's raw field + REG_PREP's wave-1 warp_state + reg_mask (== reg_finalize's slide_bk).
+    Returned as a numpy [dx, dy] pair — the representation classic's non-tiler path leaves on
+    ``slide.bk_dxdy`` (injecting vips instead diverges badly at high res: max|Δ|≈229)."""
     raw_bk = pyvips.Image.new_from_file(os.path.join(wave1_dir, slide_name, "bk.v"))
     ws = json.load(open(os.path.join(prep_dir, slide_name, "warp_state.json")))
     rm_f = os.path.join(prep_dir, slide_name, "tiler_inputs", "reg_mask.npy")
@@ -136,9 +138,9 @@ def main():
                 continue
             if not os.path.exists(os.path.join(args.wave1_dir, name, "bk.v")):
                 continue
-            slide_obj.bk_dxdy = _composed_wave1_field(name, args.wave1_dir, args.prep_dir)
+            slide_obj.bk_dxdy = _composed_wave1_field(name, args.wave1_dir, args.prep_dir)  # numpy [dx,dy]
             slide_obj.fwd_dxdy = [np.zeros_like(slide_obj.bk_dxdy[0]),
-                                  np.zeros_like(slide_obj.bk_dxdy[1])]  # placeholder; discarded
+                                  np.zeros_like(slide_obj.bk_dxdy[1])]  # placeholder; discarded by FINALIZE
             slide_obj.stored_dxdy = False
 
         # Reset capture for the micro pass (we want the micro 2-D inputs, not wave-1's).
