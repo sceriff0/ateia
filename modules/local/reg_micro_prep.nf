@@ -78,12 +78,22 @@ process REG_MICRO_PREP {
     """
 
     stub:
+    def ref_filename = reference ? reference.name : 'ref.ome.tiff'
     """
-    mkdir -p mprep/P001_mov1/tiler_inputs
-    echo '{"n_tiles":1,"n_rows":1,"n_cols":1,"tile_wh":2048,"tile_buffer":100,"has_mask":false,"has_target_stats":false,"processing_cls":null,"non_rigid_registrar_cls":"valis.non_rigid_registrars:OpticalFlowWarper"}' > mprep/P001_mov1/tiler_inputs/manifest.json
-    python3 -c "import numpy as np; np.save('mprep/P001_mov1/tiler_inputs/expanded_bboxes.npy', np.array([[0,0,10,10]]))" 2>/dev/null || touch mprep/P001_mov1/tiler_inputs/expanded_bboxes.npy
-    touch mprep/P001_mov1/tiler_inputs/moving.v mprep/P001_mov1/tiler_inputs/fixed.v
-    echo '{"slide_name":"P001_mov1","from_rigid_reg":false,"micro_full_out_shape_rc":[10,10],"micro_mask_bbox_xywh":[0,0,10,10]}' > mprep/P001_mov1/micro_warp_state.json
+    # Faithful stub: one micro dir per non-reference input slide stem (matches ch_micro_moving join keys).
+    mkdir -p mprep
+    ref_stem=\$(basename "${ref_filename}" | sed -E 's/\\.ome\\.tiff?\$//; s/\\.tiff?\$//')
+    manifest='{"n_tiles":1,"n_rows":1,"n_cols":1,"tile_wh":2048,"tile_buffer":100,"has_mask":false,"has_target_stats":false,"processing_cls":null,"non_rigid_registrar_cls":"valis.non_rigid_registrars:OpticalFlowWarper"}'
+    for f in \$(find -L ref input_* -maxdepth 1 -type f \\( -name "*.ome.tif" -o -name "*.ome.tiff" \\) 2>/dev/null); do
+        stem=\$(basename "\$f" | sed -E 's/\\.ome\\.tiff?\$//; s/\\.tiff?\$//')
+        [ "\$stem" = "\${ref_stem}" ] && continue
+        [ -d "mprep/\${stem}/tiler_inputs" ] && continue
+        mkdir -p "mprep/\${stem}/tiler_inputs"
+        echo "\$manifest" > "mprep/\${stem}/tiler_inputs/manifest.json"
+        python3 -c "import numpy as np; np.save('mprep/\${stem}/tiler_inputs/expanded_bboxes.npy', np.array([[0,0,10,10]]))" 2>/dev/null || touch "mprep/\${stem}/tiler_inputs/expanded_bboxes.npy"
+        touch "mprep/\${stem}/tiler_inputs/moving.v" "mprep/\${stem}/tiler_inputs/fixed.v"
+        echo '{"slide_name":"'\${stem}'","from_rigid_reg":false,"micro_full_out_shape_rc":[10,10],"micro_mask_bbox_xywh":[0,0,10,10]}' > "mprep/\${stem}/micro_warp_state.json"
+    done
     echo "STUB,${patient_id},stub,0" > ${patient_id}.REG_MICRO_PREP.size.csv
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":

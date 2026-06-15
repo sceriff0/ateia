@@ -36,7 +36,7 @@ from valis import serial_non_rigid as snr
 from valis.non_rigid_registrars import OpticalFlowWarper
 from valis.registration import CROP_REF
 
-MEMORY_MODE = "low"  # consistent across baseline + distributed; algorithm is mode-independent
+MEMORY_MODE = os.environ.get("CMP_MODE", "low")  # consistent across baseline + distributed; algorithm is mode-independent
 
 WORK = "/tmp/verify_micro"
 INP = os.path.join(WORK, "in")
@@ -128,7 +128,7 @@ def distributed():
     mfield = os.path.join(WORK, "mfield")
 
     run([PY, "bin/reg_prep.py", "--input-dir", INP, "--out", prep, "--reference", REF,
-         "--tile-wh", "512", "--tile-buffer", "100", "--memory-mode", "low"])
+         "--tile-wh", "512", "--tile-buffer", "100", "--memory-mode", MEMORY_MODE])
     md = os.path.join(prep, MOV_STEM)
     ti = os.path.join(md, "tiler_inputs")
     # wave-1 whole-image non-rigid (JVM-free)
@@ -136,7 +136,7 @@ def distributed():
 
     # micro prep (inject wave-1 composed field, capture micro 2-D inputs)
     run([PY, "bin/reg_micro_prep.py", "--input-dir", INP, "--out", mprep, "--reference", REF,
-         "--prep-dir", prep, "--wave1-dir", w1, "--memory-mode", "low",
+         "--prep-dir", prep, "--wave1-dir", w1, "--memory-mode", MEMORY_MODE,
          "--micro-fraction", str(MICRO_FRACTION), "--tile-wh", "2048"])
     mti = os.path.join(mprep, MOV_STEM, "tiler_inputs")
     micro_moving = to_np(pyvips.Image.new_from_file(os.path.join(mti, "moving.v")))

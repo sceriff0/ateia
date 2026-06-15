@@ -43,8 +43,12 @@ workflow VALIS_DISTRIBUTED_ADAPTER {
     REG_PREP(ch_prep_in)
 
     // ---- per-slide src file + meta, keyed by [patient_id, slide_stem] ----
+    // NB: keys use patient_id.toString(). patient_id arrives as a groupKey(pid, total_slides) from the
+    // main workflow's streaming groupTuple, but REG_PREP's process output round-trips it to a plain
+    // String. Mixing groupKey and String in the [pid, slide] join keys makes the joins below silently
+    // never match (REG_FINALIZE*/REG_WARP_REF stay pending). Normalize everything to String here.
     ch_src = ch_grouped_meta.flatMap { patient_id, ref_item, all_items ->
-        all_items.collect { item -> tuple([patient_id, slideStem(item[1])], item[0], item[1]) }
+        all_items.collect { item -> tuple([patient_id.toString(), slideStem(item[1])], item[0], item[1]) }
     }
 
     // ---- split PREP output into moving slides (have tiler_inputs) and the reference (no tiler_inputs) ----
@@ -54,7 +58,7 @@ workflow VALIS_DISTRIBUTED_ADAPTER {
             def ti = d.resolve('tiler_inputs')
             def ws = d.resolve('warp_state.json')
             if (ti.resolve('manifest.json').exists()) {
-                out << tuple([patient_id, d.name], ti, ws)
+                out << tuple([patient_id.toString(), d.name], ti, ws)
             }
         }
         out
@@ -65,7 +69,7 @@ workflow VALIS_DISTRIBUTED_ADAPTER {
             def ti = d.resolve('tiler_inputs')
             def ws = d.resolve('warp_state.json')
             if (!ti.resolve('manifest.json').exists() && ws.exists()) {
-                out << tuple([patient_id, d.name], ws)
+                out << tuple([patient_id.toString(), d.name], ws)
             }
         }
         out
@@ -113,12 +117,19 @@ workflow VALIS_DISTRIBUTED_ADAPTER {
             // (c) MICRO second wave (spec §5A Option-2). Gather wave-1 fields per patient -> REG_MICRO_PREP
             // (inject wave-1 field, capture micro 2-D inputs) -> REG_NONRIGID_MICRO (separated, per slide)
             // -> REG_FINALIZE_MICRO (additive compose of the micro residual onto the wave-1 field).
-            ch_wave1 = REG_NONRIGID.out.field.groupTuple(by: 0)   // (pid, [slides], [bks])
+            // NB: patient_id is a groupKey(pid, total_slides_incl_ref) from the streaming groupTuple in
+            // the main workflow. REG_NONRIGID only emits MOVING-slide fields (ref goes to REG_WARP_REF),
+            // so groupTuple by the groupKey would wait for the ref field that never arrives and STALL.
+            // Strip to a plain String key so groupTuple waits for channel close, and normalize all join
+            // keys to String so they match.
+            ch_wave1 = REG_NONRIGID.out.field
+                .map { pid, slide, bk -> tuple(pid.toString(), slide, bk) }
+                .groupTuple(by: 0)   // (pid, [slides], [bks]) — moving slides only
             ch_micro_prep_in = ch_grouped_meta
                 .map { patient_id, ref_item, all_items ->
-                    tuple(patient_id, [patient_id: patient_id], ref_item[1],
+                    tuple(patient_id.toString(), [patient_id: patient_id], ref_item[1],
                           all_items.collect { it[1] }, all_items.collect { it[0] }) }
-                .join(REG_PREP.out.prepped.map { pid, prep, metas -> tuple(pid, prep) })
+                .join(REG_PREP.out.prepped.map { pid, prep, metas -> tuple(pid.toString(), prep) })
                 .join(ch_wave1)
                 .map { pid, meta, ref, files, metas, prep, slides, bks ->
                     tuple(meta, pid, ref, files, metas, prep, slides, bks) }
@@ -139,11 +150,15 @@ workflow VALIS_DISTRIBUTED_ADAPTER {
             REG_NONRIGID_MICRO(ch_micro_moving.map { key, mti, mws -> tuple(key[0], key[1], mti) })
             ch_micro_field = REG_NONRIGID_MICRO.out.field.map { pid, slide, bk -> tuple([pid, slide], bk) }
 
-            ch_fin_micro_in = ch_prep_moving
-                .join(ch_field)
-                .join(ch_src.map { key, meta, f -> tuple(key, f) })
-                .join(ch_micro_moving.map { key, mti, mws -> tuple(key, mti, mws) })
-                .join(ch_micro_field)
+            // Normalize the [pid, slide] keys to plain Strings on every input: ch_prep_moving/ch_field/
+            // ch_src carry the groupKey pid, while ch_micro_moving/ch_micro_field carry the String pid
+            // (REG_MICRO_PREP was fed pid.toString()). List keys [groupKey,slide] != [String,slide] would
+            // never join, leaving REG_FINALIZE_MICRO pending.
+            ch_fin_micro_in = ch_prep_moving.map { key, ti, ws -> tuple([key[0].toString(), key[1]], ti, ws) }
+                .join(ch_field.map { key, f -> tuple([key[0].toString(), key[1]], f) })
+                .join(ch_src.map { key, meta, f -> tuple([key[0].toString(), key[1]], f) })
+                .join(ch_micro_moving.map { key, mti, mws -> tuple([key[0].toString(), key[1]], mti, mws) })
+                .join(ch_micro_field.map { key, bk -> tuple([key[0].toString(), key[1]], bk) })
                 .map { key, ti, ws, field, src, mti, mws, mfield ->
                     tuple(key[0], key[1], ti, field, ws, src, mti, mfield, mws) }
             REG_FINALIZE_MICRO(ch_fin_micro_in)

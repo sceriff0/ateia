@@ -67,15 +67,32 @@ process REG_PREP {
     """
 
     stub:
+    def ref_filename = reference ? reference.name : 'ref.ome.tiff'
     """
-    mkdir -p prep/P001_mov1/tiler_inputs
-    echo '{"n_tiles":1,"n_rows":1,"n_cols":1,"tile_wh":512,"tile_buffer":100,"has_mask":false,"has_target_stats":false,"processing_cls":null,"non_rigid_registrar_cls":"valis.non_rigid_registrars:OpticalFlowWarper"}' > prep/P001_mov1/tiler_inputs/manifest.json
-    python3 -c "import numpy as np; np.save('prep/P001_mov1/tiler_inputs/expanded_bboxes.npy', np.array([[0,0,10,10]]))" 2>/dev/null || touch prep/P001_mov1/tiler_inputs/expanded_bboxes.npy
-    touch prep/P001_mov1/tiler_inputs/moving.v prep/P001_mov1/tiler_inputs/fixed.v
-    echo '{"slide_name":"P001_mov1","src_f":"P001_mov1.ome.tiff","from_rigid_reg":false,"M":[[1,0,0],[0,1,0],[0,0,1]],"processed_img_shape_rc":[10,10],"reg_img_shape_rc":[10,10],"aligned_slide_shape_rc":[10,10],"bbox_xywh":[0,0,10,10],"bg_color":[0,0,0],"series":0,"is_rgb":false,"interp_method":"bicubic","internal_pad":{"out_shape":[10,10],"bbox":[0,0,10,10]}}' > prep/P001_mov1/warp_state.json
-    # Reference dir: warp_state only, NO tiler_inputs (the adapter routes it to REG_WARP_REF)
-    mkdir -p prep/P001_ref
-    echo '{"slide_name":"P001_ref","src_f":"P001_ref.ome.tiff","from_rigid_reg":false,"M":[[1,0,0],[0,1,0],[0,0,1]],"processed_img_shape_rc":[10,10],"reg_img_shape_rc":[10,10],"aligned_slide_shape_rc":[10,10],"bbox_xywh":[0,0,10,10],"bg_color":[0,0,0],"series":0,"is_rgb":false,"interp_method":"bicubic"}' > prep/P001_ref/warp_state.json
+    # Faithful stub: name dirs by the ACTUAL input slide stems (matching ch_src's slideStem), so the
+    # adapter's [pid, slide] joins resolve in -stub runs (hardcoded names would never match *_corrected).
+    mkdir -p prep
+    ref_stem=\$(basename "${ref_filename}" | sed -E 's/\\.ome\\.tiff?\$//; s/\\.tiff?\$//')
+    ws='{"from_rigid_reg":false,"M":[[1,0,0],[0,1,0],[0,0,1]],"processed_img_shape_rc":[10,10],"reg_img_shape_rc":[10,10],"aligned_slide_shape_rc":[10,10],"bbox_xywh":[0,0,10,10],"bg_color":[0,0,0],"series":0,"is_rgb":false,"interp_method":"bicubic"}'
+    wsm='{"from_rigid_reg":false,"M":[[1,0,0],[0,1,0],[0,0,1]],"processed_img_shape_rc":[10,10],"reg_img_shape_rc":[10,10],"aligned_slide_shape_rc":[10,10],"bbox_xywh":[0,0,10,10],"bg_color":[0,0,0],"series":0,"is_rgb":false,"interp_method":"bicubic","internal_pad":{"out_shape":[10,10],"bbox":[0,0,10,10]}}'
+    manifest='{"n_tiles":1,"n_rows":1,"n_cols":1,"tile_wh":512,"tile_buffer":100,"has_mask":false,"has_target_stats":false,"processing_cls":null,"non_rigid_registrar_cls":"valis.non_rigid_registrars:OpticalFlowWarper"}'
+
+    # Reference dir: warp_state only (no tiler_inputs -> adapter routes it to REG_WARP_REF)
+    mkdir -p "prep/\${ref_stem}"
+    echo "\$ws" > "prep/\${ref_stem}/warp_state.json"
+
+    # One moving dir per non-reference input slide (dedup by stem)
+    for f in \$(find -L ref input_* -maxdepth 1 -type f \\( -name "*.ome.tif" -o -name "*.ome.tiff" \\) 2>/dev/null); do
+        stem=\$(basename "\$f" | sed -E 's/\\.ome\\.tiff?\$//; s/\\.tiff?\$//')
+        [ "\$stem" = "\${ref_stem}" ] && continue
+        [ -d "prep/\${stem}/tiler_inputs" ] && continue
+        mkdir -p "prep/\${stem}/tiler_inputs"
+        echo "\$manifest" > "prep/\${stem}/tiler_inputs/manifest.json"
+        python3 -c "import numpy as np; np.save('prep/\${stem}/tiler_inputs/expanded_bboxes.npy', np.array([[0,0,10,10]]))" 2>/dev/null || touch "prep/\${stem}/tiler_inputs/expanded_bboxes.npy"
+        touch "prep/\${stem}/tiler_inputs/moving.v" "prep/\${stem}/tiler_inputs/fixed.v"
+        echo "\$wsm" > "prep/\${stem}/warp_state.json"
+    done
+
     echo "STUB,${patient_id},stub,0" > ${patient_id}.REG_PREP.size.csv
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
