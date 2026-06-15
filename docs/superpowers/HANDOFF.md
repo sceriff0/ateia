@@ -64,25 +64,21 @@ docker run --rm -v "$PWD":/work -w /work mirage-valis:1.0.0 \
   python3 tests/integration/verify_distributed_bitidentical.py
 ```
 
-- ✅ **Micro: `max|Δ|=0`** on the micro 2-D inputs AND the final micro-updated displacement field, vs
-  classic `register()+register_micro()`, at **`memory_mode=low`**. The warp is deterministic, so an
-  identical field ⇒ identical registered pixels.
-  - ⚠️ **`memory_mode=high`: matches to `max|Δ|≈0.002` (field), NOT exactly 0 — sub-pixel float noise,
-    not an algorithmic difference.** Bit-identicality is *structural*: baseline and distributed use the
-    **identical** `build_registrar_kwargs(memory_mode)`; mode only changes resolution caps, not the
-    algorithm/wiring, so the low-mode `max|Δ|=0` proof exercises the same code path that runs at high.
-    Getting a high-mode baseline at all required two unblocks (both documented here):
-    (a) `MicroRigidRegistrar` crashes on synthetic data at high res (`np.vstack([])` on zero high-res
-        SuperGlue matches) — fixed by `bin/utils/micro_rigid_guard.py` (skip micro-rigid when no matches;
-        a no-op on real, feature-rich data; installed identically by classic + distributed);
-    (b) classic `register()` at full high-res (1024px+ fixture) OOM-kills in 9.7 GB Docker — use a
-        ≤768px fixture (same `memory_mode=high` config/code path; resolution caps just don't bind).
-    With both, the run completes and gives: micro **fixed** input `max|Δ|=0` (exact), micro **moving**
-    input `max|Δ|=2` gray-levels, final field `max|Δ|≈0.002` px. The difference is localized to the
-    externalized wave-1 field (REG_NONRIGID + `compose_and_pad`) at high *processed* resolution (256→768);
-    it is sub-pixel and washes to ~1-2 gray-levels in the registered output (negligible for downstream
-    segmentation/quantification). Exactly-zero high-mode parity is unverified here.
-    **TODO: confirm exact parity on REAL WSI data** (and root-cause the 0.002 with a wave-1-field diff).
+- ✅ **Micro: `max|Δ|=0` at BOTH `memory_mode=low` AND `memory_mode=high`** — on the micro 2-D inputs,
+  the wave-1 field, the final micro-updated displacement field, **and the full-res registered OUTPUT
+  pixels** — vs classic `register()+register_micro()` with `skip_micro_registration=false`.
+  Confirmed: low (1024px) registered output `max|Δ|=0`; high (768px) registered output `max|Δ|=0`.
+  - Three things had to be right for the high-mode proof (all fixed/documented here):
+    1. **Field dtype.** Classic leaves `slide.bk_dxdy` as numpy **float64**; injecting the vips field's
+       native **float32** caused a sub-quantization warp difference — invisible at low res, ≤2 gray-levels
+       at high res (≈80 in the registered output at sharp edges). `reg_micro_prep._vips_to_numpy_pair`
+       now casts to float64 → bit-identical at both modes. (The externalized wave-1 field itself was
+       already `max|Δ|=0`; this was purely the injection dtype.)
+    2. **`MicroRigidRegistrar` crash** on featureless/synthetic data at high res (`np.vstack([])` on zero
+       high-res SuperGlue matches) — fixed by `bin/utils/micro_rigid_guard.py` (skip micro-rigid when no
+       matches = no-op on real data; installed identically by classic baseline + distributed scripts).
+    3. **OOM:** classic `register()` at full high-res (1024px+ fixture) OOM-kills in 9.7 GB Docker — use a
+       ≤768px fixture for the high-mode check (same `memory_mode=high` config; resolution caps don't bind).
 - ✅ Wave-1 distributed (separated + tiled) proven `max|Δ|=0` previously (`spike_*`, §6.1/§6.3).
 - ✅ Full distributed pipeline runs `-stub` EXIT=0 in BOTH regimes (separated+micro, separated-no-micro)
   AND the classic default path (regression) — `nextflow run . -profile test -stub

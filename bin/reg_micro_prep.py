@@ -49,10 +49,16 @@ def _jd(o):
 
 
 def _vips_to_numpy_pair(vimg):
-    """A 2-band vips field -> VALIS's numpy [dx, dy] representation (what slide.bk_dxdy expects)."""
+    """A 2-band vips field -> VALIS's numpy [dx, dy] representation (what slide.bk_dxdy expects).
+
+    Cast to **float64**: classic's non-tiler ``register()`` leaves ``slide.bk_dxdy`` as numpy float64,
+    and ``register_micro``'s updating-prep warp is dtype-sensitive. Injecting the vips field's native
+    float32 instead caused a sub-quantization warp difference — invisible at low resolution but ≤2
+    gray-levels at high resolution (amplifying to ~80 in the registered output at sharp edges). Matching
+    float64 makes the distributed micro chain bit-identical to classic at BOTH memory modes (max|Δ|=0)."""
     from valis import warp_tools
     arr = warp_tools.vips2numpy(vimg)  # (H, W, 2)
-    return np.array([arr[..., 0], arr[..., 1]])
+    return np.array([arr[..., 0], arr[..., 1]]).astype(np.float64)
 
 
 def _composed_wave1_field(slide_name, wave1_dir, prep_dir):

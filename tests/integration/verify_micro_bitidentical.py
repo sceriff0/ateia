@@ -95,6 +95,13 @@ def baseline():
                                     skip_micro_registration=False)  # scenario under test
     reg = registration.Valis(INP, os.path.join(WORK, "base_out"), **kwargs)
     reg.register()
+    # Wave-1 field classic leaves on the slide AFTER register() (before register_micro) — what
+    # REG_MICRO_PREP must inject. Compare to distributed compose_and_pad to localize the high-mode delta.
+    _bk = reg.slide_dict[MOV_STEM].bk_dxdy
+    _bkdt = (_bk.format if isinstance(_bk, pyvips.Image) else
+             (getattr(np.asarray(_bk[0]), "dtype", "?") if isinstance(_bk, (list, tuple)) else getattr(_bk, "dtype", "?")))
+    print(f"[verify_micro] classic slide.bk_dxdy type={type(_bk).__name__} dtype/format={_bkdt}", flush=True)
+    cap_wave1 = to_np(_bk)
 
     cap = {"grab": True}
     orig_reg = OpticalFlowWarper.register
@@ -119,7 +126,10 @@ def baseline():
     # This IS what the final warp consumes; comparing it directly is the rigorous bit-identical proof
     # (the warp is deterministic + already proven by verify_distributed_bitidentical.py).
     base_field = to_np(s.bk_dxdy)
-    return base_field, cap["micro_moving"], cap["micro_fixed"]
+    # The actual deliverable: the full-res REGISTERED OUTPUT pixels (warped via the micro-updated field).
+    # A sub-pixel field difference can round out here, so compare this too — it's the goal, not the field.
+    base_out = to_np(warp_with(os.path.join(INP, MOV), build_warp_state(s), s.bk_dxdy))
+    return base_field, base_out, cap_wave1, cap["micro_moving"], cap["micro_fixed"]
 
 
 def distributed():
@@ -158,7 +168,10 @@ def distributed():
     micro_raw = pyvips.Image.new_from_file(os.path.join(mfield, MOV_STEM, "bk.v"))
     mrm_f = os.path.join(mti, "reg_mask.npy")
     micro_reg_mask = np.load(mrm_f) if os.path.exists(mrm_f) else None
-    dist_field = to_np(reg_finalize.micro_additive(slide_bk, micro_raw, micro_ws, micro_reg_mask))
+    dist_updated = reg_finalize.micro_additive(slide_bk, micro_raw, micro_ws, micro_reg_mask)  # vips
+    dist_field = to_np(dist_updated)
+    # full-res REGISTERED OUTPUT (the actual deliverable) via the same warp baseline uses
+    dist_out = to_np(warp_with(os.path.join(INP, MOV), ws, dist_updated))
 
     # Smoke: the reg_finalize CLI must produce a registered image without crashing (OME save parity is
     # a separate concern — task #7). Warp the SAME field in-memory to confirm channel/shape sanity.
@@ -168,7 +181,7 @@ def distributed():
          "--micro-field", os.path.join(mfield, MOV_STEM, "bk.v"),
          "--micro-warp-state", os.path.join(mprep, MOV_STEM, "micro_warp_state.json"),
          "--micro-inputs-dir", mti, "--out", out])
-    return dist_field, micro_moving, micro_fixed
+    return dist_field, dist_out, to_np(slide_bk), micro_moving, micro_fixed
 
 
 def cmp(name, a, b):
@@ -189,14 +202,19 @@ def main():
         shutil.copy(os.path.join(DATADIR, s), os.path.join(INP, s))
 
     print("[verify_micro] === baseline (classic register + register_micro) ===", flush=True)
-    base_field, base_mm, base_mf = baseline()
+    base_field, base_out, base_w1, base_mm, base_mf = baseline()
     print("[verify_micro] === distributed micro chain ===", flush=True)
-    dist_field, dist_mm, dist_mf = distributed()
+    dist_field, dist_out, dist_w1, dist_mm, dist_mf = distributed()
 
     print("\n" + "=" * 72)
+    cmp("WAVE-1 field (pre-micro)", base_w1, dist_w1)
     ok_inputs = cmp("micro moving", base_mm, dist_mm) & cmp("micro fixed", base_mf, dist_mf)
     ok_field = cmp("final micro-updated field", base_field, dist_field)
-    ok = ok_inputs and ok_field
+    ok_out = cmp("REGISTERED OUTPUT pixels", base_out, dist_out)
+    # The deliverable is the registered OUTPUT. The intermediate field equality is a stricter bonus.
+    ok = ok_inputs and ok_field and ok_out
+    print(f"DISTRIBUTED MICRO BIT-IDENTICAL (field): {ok_field}")
+    print(f"DISTRIBUTED MICRO BIT-IDENTICAL (registered output): {ok_out}")
     print(f"DISTRIBUTED MICRO BIT-IDENTICAL: {ok}")
     print("=" * 72, flush=True)
     return 0 if ok else 1
