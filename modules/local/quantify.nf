@@ -11,7 +11,7 @@ process QUANTIFY {
     tag "${meta.patient_id} - ${meta.channel_name}"
     label 'process_low'
 
-    container "${params.container_registry}/quantification:${params.container_tag}"
+    container "bolt3x/attend_image_analysis:quantification_gpu"
 
     input:
     tuple val(meta), path(channel_tiff), path(cell_mask), path(nuclei_mask)
@@ -78,7 +78,7 @@ process MERGE_QUANT_CSVS {
     tag "${meta.patient_id}"
     label 'process_low'
 
-    container "${params.container_registry}/quantification:${params.container_tag}"
+    container "bolt3x/attend_image_analysis:quantification_gpu"
 
     input:
     tuple val(meta), path(individual_csvs), path(morphology_csv)

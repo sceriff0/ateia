@@ -16,7 +16,7 @@ process EXPORT_GEOJSON {
     tag "${meta.patient_id}"
     label 'process_medium'
 
-    container "${params.container_registry}/quantification:${params.container_tag}"
+    container "bolt3x/attend_image_analysis:quantification_gpu"
 
     input:
     // Stage the nucleus contours under a distinct name: both EXTRACT_CELL_PROPERTIES

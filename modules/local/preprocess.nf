@@ -11,7 +11,7 @@ process PREPROCESS {
     tag "${meta.patient_id}"
     label 'process_medium'
 
-    container "${params.container_registry}/preprocess:${params.container_tag}"
+    container "bolt3x/attend_image_analysis:preprocess"
 
     input:
     tuple val(meta), path(ome_tiff)

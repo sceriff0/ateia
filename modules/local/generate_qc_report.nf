@@ -2,7 +2,7 @@ process GENERATE_QC_REPORT {
     tag "qc_report"
     label 'process_low'
 
-    container "${params.container_registry}/preprocess:${params.container_tag}"
+    container "bolt3x/attend_image_analysis:preprocess"
 
     input:
     path(preprocess_qc_pngs, stageAs: 'preprocess_qc/*')
