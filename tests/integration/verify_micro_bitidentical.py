@@ -30,6 +30,7 @@ import pyvips
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "bin"))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "bin", "utils"))
 import reg_finalize
+from micro_rigid_guard import install_micro_rigid_guard
 from valis_config import build_registrar_kwargs
 from valis import registration, warp_tools, slide_tools
 from valis import serial_non_rigid as snr
@@ -87,6 +88,7 @@ def warp_with(src, ws, dxdy):
 
 def baseline():
     """Classic register()+register_micro() in-process; return (final_warped_px, micro_moving, micro_fixed)."""
+    install_micro_rigid_guard()  # same guard the distributed scripts install -> identical micro-rigid behavior
     registration.TILER_THRESH_GB = 10  # whole-image (matches the JVM-free REG_NONRIGID path)
     # IDENTICAL config to reg_prep/reg_micro_prep (build_registrar_kwargs) so rigid M matches exactly.
     kwargs = build_registrar_kwargs(reference_img_f=REF, memory_mode=MEMORY_MODE,

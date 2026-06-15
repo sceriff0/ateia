@@ -31,6 +31,7 @@ import numpy as np
 import pyvips
 import valis_tiling
 import reg_finalize  # reuse the EXACT wave-1 compose+pad that produces classic slide.bk_dxdy
+from micro_rigid_guard import install_micro_rigid_guard
 from valis_config import build_registrar_kwargs, micro_reg_size as compute_micro_reg_size
 from valis import registration
 from valis import serial_non_rigid as snr
@@ -86,6 +87,7 @@ def main():
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
 
+    install_micro_rigid_guard()  # robust micro-rigid (no-op on real data; see module)
     # Force the processed-2-D branch (no internal tiler), then no-op the warper => no DeepFlow.
     registration.TILER_THRESH_GB = 10 ** 9
     cap = {}     # slide_name -> {moving, fixed, mask, from_rigid, reg_mask, full_out, mask_bbox}
