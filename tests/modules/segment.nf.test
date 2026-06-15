@@ -82,8 +82,9 @@ nextflow_process {
 
         when {
             params {
-                seg_model = "2D_versatile_fluo"
-                seg_gpu = false
+                segmentation_model     = "2D_versatile_fluo"
+                segmentation_model_dir = null
+                seg_gpu                = false
             }
             process {
                 """
