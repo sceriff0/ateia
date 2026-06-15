@@ -241,27 +241,56 @@ Verified against `registration.py:4170-4279` and `bin/register.py`:
   `bin/register.py`). This may fall **below** the tiler threshold, in which case micro runs
   whole-image (no tiles to distribute) → Option 1 below is the only sensible path.
 
-### Two ways to support micro (decision for the plan; default = Option 1)
+### DECISION (2026-06-15, locked with user): Option 2 — distributed second wave, *separated whole-image*
 
-- **Option 1 — micro in-process inside `REG_FINALIZE` (recommended first cut).** Strategy 2
-  keeps a live VALIS registrar in `REG_FINALIZE`; after injecting the distributed first-pass
-  tiles it calls `registrar.register_micro(..., tile_wh=2048)` normally (VALIS's own threaded
-  tiling). **Bit-identical** (micro untouched), minimal plumbing. Downside: micro's big-image
-  cost stays on one node — and micro is often the *heavier* pass.
-- **Option 2 — distribute micro as a second wave.** `REG_PREP_MICRO` (updating mode) →
-  `REG_TILE_MICRO` (`tile_wh=2048`) → `REG_STITCH_MICRO`, then warp. Full RAM/throughput win on
-  both passes; costs a wave-1→wave-2 barrier and more plumbing.
+Two ways were considered:
+
+- **Option 1 — micro in-process inside `REG_FINALIZE`.** A live VALIS registrar in `REG_FINALIZE`
+  calls `registrar.register_micro(...)`. Bit-identical, minimal plumbing, **but** micro's big-image
+  cost (it is the *higher-resolution, heavier* pass — see below) stays on a single FINALIZE node,
+  re-introducing exactly the JVM-heap + serial bottleneck this whole design exists to remove. **Rejected.**
+- **Option 2 — distribute micro as a second wave. CHOSEN.** Micro mirrors wave 1's *process
+  separation* (§6.7), which is where the real RAM win comes from — not tiling. Micro runs in its own
+  **JVM-free, per-slide-parallel** process; it only fans out to tiles (`tile_wh=2048`) in the rare
+  case its `est_GB` crosses the 10 GB threshold (same fork as wave 1's `reg_dist_force_tiling`).
+
+**Why micro is the heavier pass (and why this matters):** `micro_reg_size = floor(min_max_full_res_dim
+× micro_reg_fraction)` with `micro_reg_fraction=0.125` (`bin/register.py:746-747`), while the main pass
+is fixed at `DEFAULT_MAX_NON_RIGID_REG_SIZE = 3000`px. For a ≥24k-px WSI, `micro_reg_size ≥ 3000` — i.e.
+micro runs at *equal or higher* resolution than the main pass (its own log: "may take 30-120 minutes").
+Running it in-process in FINALIZE is the bottleneck; running it as a separated per-slide process is not.
+
+**The chain (gated on `!skip_micro_registration`), reusing wave-1 machinery:**
 
 ```
-rigid → [WAVE 1: PREP → TILE×N @512 → STITCH] → first-pass field
-                                                   │ updating: warp moving through it
-        Option 1: register_micro() in REG_FINALIZE (in-process)  ──▶ warp
-        Option 2: [WAVE 2: PREP_MICRO → TILE×M @2048 (updating) → STITCH_MICRO] ──▶ warp
+REG_PREP → REG_NONRIGID (wave-1 bk.v + fwd.v)
+   │
+   ├─ skip_micro=true ─────────────────────────────────────→ REG_FINALIZE (compose+warp)
+   │
+   └─ skip_micro=false → REG_MICRO_PREP ─→ REG_NONRIGID ─────→ REG_FINALIZE
+        (JVM; inject wave-1 field via      (= reuse, JVM-free,   (additive compose:
+         stored_dxdy, prep updating         per-slide; tile@2048   updated = scale(wave1)
+         _non_rigid=True @micro_reg_size,    only if micro crosses  + pad(residual), for
+         no-op warper → capture micro        the 10 GB threshold)   BOTH bk and fwd; then
+         2-D inputs + full_out_shape_rc                             pad → warp_slide → save)
+         + mask_bbox; halt before DeepFlow)
 ```
 
-**Routing rule:** when `reg_distributed_tiling=true` AND `skip_micro_registration=false`, the
-distributed subworkflow must take Option 1 (or 2) — it must **not** silently drop the micro pass.
-Add a verification case: distributed vs classic with micro ON must be pixel-identical.
+- **`REG_MICRO_PREP`** (new): mirror `reg_prep.py` (no-op warper to capture 2-D inputs cheaply, JVM,
+  bounded — halts before DeepFlow), but first **inject the real wave-1 `bk`/`fwd` field** onto the
+  slide (`stored_dxdy`) so the `updating_non_rigid=True` prep warps the moving image through `M` +
+  wave-1 field before capturing the micro 2-D residual inputs. Dump micro `tiler_inputs/` + a micro
+  `warp_state` carrying `full_out_shape_rc` and `mask_bbox` (for the pad at `registration.py:4314`).
+- **micro non-rigid:** reuse `reg_nonrigid.py` unchanged (separated whole-image, default) — extended to
+  also emit `fwd.v` — or `reg_tile.py` at `tile_wh=2048` only if `est_GB > threshold`.
+- **`REG_FINALIZE`:** extend with `--micro-residual`/`--micro-warp-state`; apply the **spike-proven**
+  (`spike_micro_option2.py`, `max|Δ|=0`) additive compose for both `bk` and `fwd`, then the existing
+  pad → `slide_tools.warp_slide` → OME save. No new heavy node.
+
+**Routing rule:** when `reg_distributed_tiling=true` AND `skip_micro_registration=false`, the distributed
+subworkflow runs the micro wave above — it must **not** silently drop the micro pass. Verification (§9.7):
+distributed-with-micro vs classic-with-micro must be pixel-identical (`max|Δ|=0`), proven locally in
+`mirage-valis:1.0.0` on the large fixture.
 
 ## 5B. Per-stage memory profile & why only non-rigid/micro are tiled
 
