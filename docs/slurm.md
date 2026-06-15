@@ -225,16 +225,25 @@ nextflow run . -profile slurm,singularity -c conf/my_site.config \
 
 === "Named profile (`ieo`)"
 
-    The `ieo` profile is the IEO cluster's baked-in version of this pattern. It is **gitignored** — copy the template into place first:
+    The `ieo` profile is the IEO cluster's baked-in version of this pattern. The
+    profile ships in `nextflow.config` and carries only the **committable** cluster
+    execution settings (SLURM executor + the 128-core / 700 GB resource ceiling).
+    Site-specific paths and secrets (output dir, model directories, the Singularity
+    cache dir and bind mounts, Tower workspace) live in a **gitignored** overlay
+    that you layer on with `-c` — copy the template into place first:
 
     ```bash
     cp conf/site.config.template conf/ieo.config
-    # edit conf/ieo.config for your account/partition
-    nextflow run . -profile singularity,ieo \
+    # edit conf/ieo.config for your account/partition, paths, and cache/bind dirs
+    nextflow run . -profile singularity,ieo -c conf/ieo.config \
         --input samplesheet.csv --outdir results
     ```
 
-    The `ieo` profile also exports the Singularity cache variables and binds the shared model directory.
+    The `-c conf/ieo.config` overlay is what exports the Singularity cache variables
+    and binds the shared model directory. Keeping the include out of the committed
+    profile is deliberate: the strict Nextflow parser (latest-everything channel)
+    eagerly evaluates profile includes, so a baked-in `includeConfig` of the
+    gitignored file would break **every** profile in CI and fresh clones.
 
 ---
 
