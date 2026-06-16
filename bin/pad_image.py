@@ -103,8 +103,12 @@ def pad_single_image(
     """
     logger.info(f"Processing: {input_path.name}")
 
-    # Extract channel names from input file before loading
+    # Extract channel names AND physical pixel size from input OME before loading.
+    # Default to 0.325 um/px only as a fallback — never overwrite the real
+    # acquisition pixel size (doing so silently rescales every downstream micron
+    # measurement, e.g. GeoJSON coordinates in QuPath).
     channel_names = []
+    phys_x, phys_y, phys_unit = '0.325', '0.325', 'um'
     try:
         with tifffile.TiffFile(str(input_path)) as tif:
             if hasattr(tif, 'ome_metadata') and tif.ome_metadata:
@@ -116,8 +120,14 @@ def pad_single_image(
                 channel_names = [name for name in channel_names if name]
                 if channel_names:
                     logger.info(f"  Extracted {len(channel_names)} channel names from OME metadata")
+                pixels = root.find('.//ome:Pixels', ns)
+                if pixels is not None:
+                    phys_x = pixels.get('PhysicalSizeX') or phys_x
+                    phys_y = pixels.get('PhysicalSizeY') or phys_y
+                    phys_unit = pixels.get('PhysicalSizeXUnit') or phys_unit
+                    logger.info(f"  Pixel size: X={phys_x} Y={phys_y} {phys_unit}/px")
     except Exception as e:
-        logger.warning(f"  Could not extract channel names from metadata: {e}")
+        logger.warning(f"  Could not extract metadata: {e}")
 
     # Fallback: extract from filename
     if not channel_names:
@@ -175,28 +185,25 @@ def pad_single_image(
     if use_bigtiff:
         logger.info(f"  Using BigTIFF format (estimated size: {estimated_size / (1024**3):.2f} GB)")
 
-    # Generate OME-XML metadata with channel names
-    num_channels, height, width = padded_img.shape
-    ome_xml = f'''<?xml version="1.0" encoding="UTF-8"?>
-<OME xmlns="http://www.openmicroscopy.org/Schemas/OME/2016-06">
-    <Image ID="Image:0" Name="Padded">
-        <Pixels ID="Pixels:0" Type="{padded_img.dtype.name}"
-                SizeX="{width}" SizeY="{height}" SizeZ="1" SizeC="{num_channels}" SizeT="1"
-                DimensionOrder="XYCZT"
-                PhysicalSizeX="0.325" PhysicalSizeY="0.325" PhysicalSizeXUnit="um" PhysicalSizeYUnit="um">
-            {chr(10).join(f'            <Channel ID="Channel:0:{i}" Name="{name}" SamplesPerPixel="1" />' for i, name in enumerate(channel_names))}
-            <TiffData />
-        </Pixels>
-    </Image>
-</OME>'''
-
-    # Save padded image without compression (temporary file for GPU registration)
+    # Save padded image without compression (temporary file for GPU registration).
+    # Let tifffile build the OME-XML (ome=True) from a metadata dict carrying the
+    # channel names and the REAL pixel size extracted above. Building it this way
+    # (instead of a hand-written description= string alongside metadata=) keeps
+    # tif.ome_metadata reliably readable downstream (e.g. create_channels_manifest).
     logger.info(f"  Saving to: {output_path.name} with channel names: {channel_names}")
+    ome_metadata = {
+        'axes': 'CYX',
+        'Channel': {'Name': channel_names},
+        'PhysicalSizeX': float(phys_x),
+        'PhysicalSizeY': float(phys_y),
+        'PhysicalSizeXUnit': phys_unit,
+        'PhysicalSizeYUnit': phys_unit,
+    }
     tifffile.imwrite(
         str(output_path),
         padded_img,
-        metadata={'axes': 'CYX'},
-        description=ome_xml,
+        ome=True,
+        metadata=ome_metadata,
         compression=None,  # No compression for faster I/O and lower memory
         bigtiff=use_bigtiff
     )
