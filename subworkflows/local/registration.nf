@@ -142,6 +142,18 @@ workflow REGISTRATION {
             [patient_id, ref, items]
         }
 
+    // Single-slide patients (only the reference, nothing to register) must NOT
+    // be sent to the registration adapter: VALIS crashes on a lone image
+    // ("negative dimensions are not allowed" / "M is None — no transformation
+    // matrix"). For such a patient the reference IS the registered output, so we
+    // branch it out here and pass it straight through to ch_registered below.
+    ch_grouped_split = ch_grouped.branch { pid, ref, items ->
+        single: items.size() == 1
+        multi:  true
+    }
+    ch_grouped_multi = ch_grouped_split.multi
+    ch_passthrough   = ch_grouped_split.single.map { pid, ref, items -> ref }  // [meta, file]
+
     // ========================================================================
     // STEP 3: RUN REGISTRATION VIA METHOD-SPECIFIC ADAPTER
     // ========================================================================
@@ -161,13 +173,13 @@ workflow REGISTRATION {
     //     est<=thr to classic whole-image (IDENTICAL to classic). This keeps <10GB inputs bit-identical.
     //   - 'force': always tile (RAM win at the cost of differing from classic-whole-image for small data).
     if (!params.reg_distributed_tiling) {
-        VALIS_ADAPTER(ch_grouped)
+        VALIS_ADAPTER(ch_grouped_multi)
         ch_registered       = VALIS_ADAPTER.out.registered
         ch_adapter_logs     = VALIS_ADAPTER.out.size_logs
         ch_adapter_versions = VALIS_ADAPTER.out.versions
         ch_adapter_summary  = VALIS_ADAPTER.out.summary
     } else if ((params.reg_dist_sub_threshold ?: 'auto') == 'force') {
-        VALIS_DISTRIBUTED_ADAPTER(ch_grouped)
+        VALIS_DISTRIBUTED_ADAPTER(ch_grouped_multi)
         ch_registered       = VALIS_DISTRIBUTED_ADAPTER.out.registered
         ch_adapter_logs     = VALIS_DISTRIBUTED_ADAPTER.out.size_logs
         ch_adapter_versions = VALIS_DISTRIBUTED_ADAPTER.out.versions
@@ -175,10 +187,10 @@ workflow REGISTRATION {
     } else {
         // 'auto': route per patient by INPUT SIZE (spec §6.7) — large inputs (JVM-RAM concern) ->
         // distributed (JVM-free, bit-identical); small inputs -> classic VALIS (monolithic is fine).
-        REG_ESTIMATE(ch_grouped.map { pid, ref_item, all_items ->
+        REG_ESTIMATE(ch_grouped_multi.map { pid, ref_item, all_items ->
             tuple(pid, ref_item[1], all_items.collect { it[1] })
         })
-        ch_routed = ch_grouped
+        ch_routed = ch_grouped_multi
             .map { pid, ref_item, all_items -> tuple(pid, [ref_item, all_items]) }
             .join(REG_ESTIMATE.out.decision)
             .branch { pid, payload, use_distributed ->
@@ -192,6 +204,10 @@ workflow REGISTRATION {
         ch_adapter_versions = VALIS_DISTRIBUTED_ADAPTER.out.versions.mix(VALIS_ADAPTER.out.versions)
         ch_adapter_summary  = VALIS_ADAPTER.out.summary
     }
+
+    // Re-introduce single-slide patients (reference passed through unregistered)
+    // into the registered stream for QC, checkpointing and postprocessing.
+    ch_registered = ch_registered.mix(ch_passthrough)
 
     // ========================================================================
     // STEP 3b: GENERATE QC (Method-independent)

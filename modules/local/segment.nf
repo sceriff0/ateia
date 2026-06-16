@@ -49,6 +49,13 @@ process SEGMENT {
     def n_tiles_y = params.seg_n_tiles_y ?: 1
     def n_tiles_x = params.seg_n_tiles_x ?: 1
     def dapi_check = (meta.channels && meta.channels.size() > 0) ? meta.channels[0].toUpperCase() : 'UNKNOWN'
+    // Pass --model-dir only when a custom StarDist model directory is configured.
+    // When unset, segment.py loads --model-name as a built-in pretrained model
+    // (e.g. 2D_versatile_fluo), so the pipeline runs without a shipped model.
+    def stardist_model_dir_arg = params.segmentation_model_dir ? "--model-dir ${params.segmentation_model_dir}" : ''
+    // Optional StarDist detection probability threshold (lower = detect fainter
+    // nuclei). null -> use the model's built-in default.
+    def stardist_prob_arg = (params.seg_prob_thresh != null) ? "--prob-thresh ${params.seg_prob_thresh}" : ''
     // InstanSeg writes its BioImage.IO model under INSTANSEG_BIOIMAGEIO_PATH.
     // The default (inside site-packages) is read-only under Singularity, so
     // we redirect to a host-mounted path or, if unconfigured, to the task
@@ -163,13 +170,14 @@ process SEGMENT {
         segment.py \\
             --image ${merged_file} \\
             --output-dir . \\
-            --model-dir ${params.segmentation_model_dir} \\
+            ${stardist_model_dir_arg} \\
             --model-name ${params.segmentation_model} \\
             --dapi-channel 0 \\
             --n-tiles ${n_tiles_y} ${n_tiles_x} \\
             --expand-distance ${params.seg_expand_distance} \\
             --pmin ${pmin} \\
             --pmax ${pmax} \\
+            ${stardist_prob_arg} \\
             ${use_gpu_flag} \\
             ${args}
 

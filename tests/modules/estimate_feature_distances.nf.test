@@ -193,7 +193,7 @@ nextflow_process {
                     ],
                     file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
                     file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true),
-                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                    file('$projectDir/tests/testdata/P001_mov2.ome.tiff', checkIfExists: true)
                 ]
                 """
             }
@@ -238,7 +238,7 @@ nextflow_process {
                     ],
                     file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
                     file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true),
-                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                    file('$projectDir/tests/testdata/P001_mov2.ome.tiff', checkIfExists: true)
                 ]
                 """
             }

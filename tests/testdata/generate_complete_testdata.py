@@ -27,49 +27,71 @@ print("Generating comprehensive test data (seed=42)...")
 # 1. Generate realistic multi-channel OME-TIFF images
 # =============================================================================
 
-def create_multichannel_image(filename, size=(128, 128), channel_names=None,
-                              add_noise=True, shift=(0, 0)):
-    """Create a realistic multi-channel OME-TIFF with synthetic cell-like structures."""
+# Dedicated RNG for image anatomy so the shared structure is reproducible and
+# independent of the global np.random stream used elsewhere in this script.
+_img_rng = np.random.default_rng(42)
+
+
+def make_anatomy(size, n_cells, rng):
+    """Build a patient's shared tissue 'anatomy': a fixed set of cells
+    (position, radius, base intensity) that every image of that patient renders.
+
+    All of a patient's images (reference + moving) are drawn from this same
+    anatomy, translated by a per-image ``shift``. That makes the DAPI channel a
+    genuine geometric transform of the reference across slides, which is what
+    VALIS feature-based registration needs to recover a transform. Without a
+    shared structure, the "moving" images are independent random patterns and
+    VALIS legitimately fails ("M is None"), which is why the real REGISTER
+    nf-test was red. Cells live in [20, size-20] so a small shift never clips.
+    """
+    cells = []
+    for _ in range(n_cells):
+        cy = int(rng.integers(20, size[0] - 20))
+        cx = int(rng.integers(20, size[1] - 20))
+        # Nucleus-sized radius (diameter ~12-26 px): large enough for StarDist's
+        # built-in 2D_versatile_fluo to detect them as nuclei, while staying
+        # within bounds under the small per-image shift.
+        radius = int(rng.integers(6, 13))
+        intensity = int(rng.integers(8000, 15000))  # shared base, scaled per channel
+        cells.append((cy, cx, radius, intensity))
+    return cells
+
+
+def _render_channel(anatomy, size, shift, scale, rng, add_noise=True):
+    """Render one channel: draw the shared anatomy translated by ``shift`` with
+    per-channel intensity ``scale`` (DAPI=1.0; markers dimmer/variable)."""
+    img = np.zeros(size, dtype=np.uint16)
+    yy, xx = np.ogrid[:size[0], :size[1]]
+    for (cy, cx, radius, intensity) in anatomy:
+        cy_s, cx_s = cy + shift[0], cx + shift[1]
+        dist2 = (yy - cy_s) ** 2 + (xx - cx_s) ** 2
+        circle_mask = dist2 <= radius ** 2
+        gaussian = np.exp(-dist2 / (2 * (radius / 2) ** 2))
+        img = np.maximum(img, (circle_mask * gaussian * intensity * scale).astype(np.uint16))
+    if add_noise:
+        noise = rng.normal(100, 20, size).astype(np.int32)
+        img = np.clip(img.astype(np.int32) + noise, 0, 65535).astype(np.uint16)
+    return img
+
+
+def create_multichannel_image(filename, anatomy, size=(128, 128), channel_names=None,
+                              add_noise=True, shift=(0, 0), rng=None):
+    """Create a multi-channel OME-TIFF from a SHARED anatomy translated by ``shift``.
+
+    Channel 0 (DAPI) is the registration reference channel: rendered at full
+    intensity (scale 1.0) from the shared anatomy, it is near-identical across a
+    patient's images up to the known ``shift`` (+ light noise), so VALIS can
+    recover the transform. Marker channels reuse the same geometry at lower,
+    channel-specific intensities (co-registered marker panels).
+    """
     if channel_names is None:
         channel_names = ['DAPI', 'PANCK', 'SMA']
-    n_channels = len(channel_names)
+    if rng is None:
+        rng = _img_rng
     channels = []
-
-    for ch in range(n_channels):
-        img = np.zeros(size, dtype=np.uint16)
-
-        # Add some "cells" - bright spots with gaussian-like intensity
-        n_cells = np.random.randint(10, 20)
-        for _ in range(n_cells):
-            # Random cell center (with optional shift for moving images)
-            cy = np.random.randint(20, size[0]-20) + shift[0]
-            cx = np.random.randint(20, size[1]-20) + shift[1]
-
-            # Cell size
-            radius = np.random.randint(3, 8)
-
-            # Intensity varies by channel
-            if ch == 0:  # DAPI - brightest, nuclear
-                intensity = np.random.randint(8000, 15000)
-            else:  # Markers - variable
-                intensity = np.random.randint(2000, 10000)
-
-            # Draw circle with gaussian falloff
-            yy, xx = np.ogrid[:size[0], :size[1]]
-            circle_mask = (yy - cy)**2 + (xx - cx)**2 <= radius**2
-
-            # Add gaussian falloff
-            dist = np.sqrt((yy - cy)**2 + (xx - cx)**2)
-            gaussian = np.exp(-(dist**2) / (2 * (radius/2)**2))
-
-            img = np.maximum(img, (circle_mask * gaussian * intensity).astype(np.uint16))
-
-        # Add background noise
-        if add_noise:
-            noise = np.random.normal(100, 20, size).astype(np.int32)
-            img = np.clip(img.astype(np.int32) + noise, 0, 65535).astype(np.uint16)
-
-        channels.append(img)
+    for ch in range(len(channel_names)):
+        scale = 1.0 if ch == 0 else float(rng.uniform(0.25, 0.7))
+        channels.append(_render_channel(anatomy, size, shift, scale, rng, add_noise))
 
     # Stack channels (C, Y, X)
     multichannel = np.stack(channels, axis=0)
@@ -84,14 +106,19 @@ def create_multichannel_image(filename, size=(128, 128), channel_names=None,
     print(f"  Created {filename} - shape: {multichannel.shape}, channels: {channel_names}")
     return multichannel
 
-# Patient P001 - Reference and 2 moving images (each with unique marker panel, sharing DAPI)
+# Patient P001 - Reference + 2 moving images. All share ONE anatomy so the DAPI
+# channel of each moving image is the reference DAPI translated by `shift`
+# (true correspondence for VALIS registration). Each slide keeps its own marker
+# panel. n_cells is generous so SuperPoint/SuperGlue has plenty of keypoints.
 print("\n1. Creating multi-channel OME-TIFF images...")
-create_multichannel_image(OUT_DIR / 'P001_ref.ome.tiff',  channel_names=['DAPI', 'PANCK', 'SMA'],      shift=(0, 0))
-create_multichannel_image(OUT_DIR / 'P001_mov1.ome.tiff', channel_names=['DAPI', 'CD3', 'CD8'],        shift=(5, 5))
-create_multichannel_image(OUT_DIR / 'P001_mov2.ome.tiff', channel_names=['DAPI', 'VIMENTIN', 'CD45'],  shift=(-3, 4))
+p001_anatomy = make_anatomy((128, 128), n_cells=40, rng=_img_rng)
+create_multichannel_image(OUT_DIR / 'P001_ref.ome.tiff',  p001_anatomy, channel_names=['DAPI', 'PANCK', 'SMA'],      shift=(0, 0),  rng=_img_rng)
+create_multichannel_image(OUT_DIR / 'P001_mov1.ome.tiff', p001_anatomy, channel_names=['DAPI', 'CD3', 'CD8'],        shift=(5, 5),  rng=_img_rng)
+create_multichannel_image(OUT_DIR / 'P001_mov2.ome.tiff', p001_anatomy, channel_names=['DAPI', 'VIMENTIN', 'CD45'],  shift=(-3, 4), rng=_img_rng)
 
-# Patient P002 - Single slide (reference only)
-create_multichannel_image(OUT_DIR / 'P002_ref.ome.tiff',  channel_names=['DAPI', 'PANCK', 'SMA'],      shift=(0, 0))
+# Patient P002 - Single slide (reference only); its own shared anatomy.
+p002_anatomy = make_anatomy((128, 128), n_cells=40, rng=_img_rng)
+create_multichannel_image(OUT_DIR / 'P002_ref.ome.tiff',  p002_anatomy, channel_names=['DAPI', 'PANCK', 'SMA'],      shift=(0, 0),  rng=_img_rng)
 
 # =============================================================================
 # 2. Generate segmentation masks
@@ -123,7 +150,13 @@ def create_segmentation_mask(filename, size=(128, 128), n_cells=15):
             label += 1
 
     np.save(filename, mask)
-    print(f"  Created {filename} - {label-1} cells")
+    # Production segmentation masks come from SEGMENT as uint32 TIFFs (segment.py
+    # writes *_cell_mask.tif with compression='zlib'). Modules that read the mask
+    # as an image (e.g. MERGE_AND_PYRAMID) need a TIFF, not the .npy fixture, so
+    # write a matching .tif alongside it.
+    tif_path = Path(filename).with_suffix('.tif')
+    tifffile.imwrite(tif_path, mask.astype(np.uint32), compression='zlib')
+    print(f"  Created {filename} and {tif_path.name} - {label-1} cells")
     return mask
 
 create_segmentation_mask(OUT_DIR / 'P001_cell_mask.npy', n_cells=20)

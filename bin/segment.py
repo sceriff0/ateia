@@ -20,7 +20,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent / 'utils'))
 
 from logger import get_logger, configure_logging
-from typing import Tuple
+from typing import Optional, Tuple
 
 import dask.array as da
 import numpy as np
@@ -214,21 +214,33 @@ def load_stardist_model(
     logger.info(f"  Model directory: {model_dir}")
     logger.info(f"  GPU enabled: {use_gpu}")
 
-    # Verify the model path exists
-    model_path = Path(model_dir) / model_name
-    config_file = model_path / "config.json"
+    # StarDist ships built-in pretrained models that are downloaded/cached on
+    # first use. We fall back to these when no usable custom model directory is
+    # given, so the pipeline runs out of the box (and CI/real tests don't need a
+    # multi-MB trained model shipped in the repo).
+    BUILTIN_MODELS = {'2D_versatile_fluo', '2D_versatile_he', '2D_paper_dsb2018', '2D_demo'}
 
-    logger.info(f"  Expected model path: {model_path}")
-    logger.info(f"  Expected config file: {config_file}")
-    logger.info(f"  Model path exists: {model_path.exists()}")
-    logger.info(f"  Config file exists: {config_file.exists()}")
+    have_model_dir = model_dir not in (None, '', 'null', 'None')
+    model_path = (Path(model_dir) / model_name) if have_model_dir else None
 
-    if not model_path.exists():
-        raise FileNotFoundError(f"Model directory not found: {model_path}")
-    if not config_file.exists():
-        raise FileNotFoundError(f"Config file not found: {config_file}")
-
-    model = StarDist2D(None, name=model_name, basedir=model_dir)
+    if have_model_dir and model_path.exists():
+        # Custom model on disk (production path).
+        config_file = model_path / "config.json"
+        logger.info(f"  Loading custom model from: {model_path}")
+        if not config_file.exists():
+            raise FileNotFoundError(f"Config file not found: {config_file}")
+        model = StarDist2D(None, name=model_name, basedir=model_dir)
+    elif model_name in BUILTIN_MODELS:
+        # No usable custom dir — load a StarDist built-in pretrained model.
+        logger.info(f"  No custom model directory; loading built-in pretrained model: {model_name}")
+        model = StarDist2D.from_pretrained(model_name)
+    else:
+        raise FileNotFoundError(
+            f"StarDist model '{model_name}' could not be loaded: no custom model at "
+            f"{model_path} and '{model_name}' is not a built-in pretrained model "
+            f"(known built-ins: {sorted(BUILTIN_MODELS)}). Provide --model-dir or use "
+            f"a built-in model name."
+        )
 
     if hasattr(model, 'config'):
         model.config.use_gpu = use_gpu
@@ -294,7 +306,8 @@ def segment_nuclei(
     normalized_dapi: NDArray,
     model: StarDist2D,
     n_tiles: Tuple[int, int] = (24, 24),
-    expand_distance: int = 10
+    expand_distance: int = 10,
+    prob_thresh: Optional[float] = None
 ) -> Tuple[NDArray, NDArray]:
     """
     Segment nuclei and create whole-cell masks.
@@ -332,10 +345,15 @@ def segment_nuclei(
 
     start_time = time.time()
 
-    # Predict nuclei instances using StarDist
+    # Predict nuclei instances using StarDist. prob_thresh=None uses the model's
+    # built-in default; a lower value detects fainter/smaller nuclei (used by the
+    # test profile so the built-in model picks up small synthetic nuclei).
+    if prob_thresh is not None:
+        logger.info(f"  Probability threshold: {prob_thresh}")
     nuclei_labels, _ = model.predict_instances(
         normalized_dapi,
         n_tiles=n_tiles,
+        prob_thresh=prob_thresh,
         show_tile_progress=False,
         verbose=False
     )
@@ -379,7 +397,8 @@ def run_segmentation(
     n_tiles: Tuple[int, int] = (24, 24),
     expand_distance: int = 10,
     pmin: float = 1.0,
-    pmax: float = 99.8
+    pmax: float = 99.8,
+    prob_thresh: Optional[float] = None
 ) -> Tuple[str, str]:
     """
     Run complete segmentation pipeline on multichannel image.
@@ -439,7 +458,8 @@ def run_segmentation(
         normalized_dapi,
         model,
         n_tiles=n_tiles,
-        expand_distance=expand_distance
+        expand_distance=expand_distance,
+        prob_thresh=prob_thresh
     )
     del normalized_dapi, model  # Free float32 image + TF weights before save phase
 
@@ -484,8 +504,11 @@ def parse_args():
     parser.add_argument(
         '--model-dir',
         type=str,
-        required=True,
-        help='Directory containing StarDist model'
+        required=False,
+        default=None,
+        help='Directory containing a custom StarDist model. If omitted, '
+             '--model-name is loaded as a StarDist built-in pretrained model '
+             '(e.g. "2D_versatile_fluo").'
     )
 
     parser.add_argument(
@@ -547,6 +570,14 @@ def parse_args():
         help='Upper percentile for normalization'
     )
 
+    parser.add_argument(
+        '--prob-thresh',
+        type=float,
+        default=None,
+        help='StarDist detection probability threshold. Omit to use the model '
+             'default; lower it to detect fainter/smaller nuclei.'
+    )
+
     return parser.parse_args()
 
 
@@ -566,7 +597,8 @@ def main():
         n_tiles=tuple(args.n_tiles),
         expand_distance=args.expand_distance,
         pmin=args.pmin,
-        pmax=args.pmax
+        pmax=args.pmax,
+        prob_thresh=args.prob_thresh
     )
 
     return 0

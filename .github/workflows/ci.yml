@@ -197,9 +197,13 @@ jobs:
     name: nf-test (real)
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
-    # Advisory until the GHCR images (ghcr.io/sceriff0/mirage/*) are published
-    # by the release/build-images workflow: real tests pull per-process images,
-    # which do not exist on a fresh registry. Remove once images are published.
+    # ADVISORY. Registration, segmentation model-loading, and most test-staging
+    # bugs are fixed (suite went 26 -> ~20 failing); the remaining failures are
+    # the synthetic-data segmentation wall: StarDist's built-in 2D_versatile_fluo
+    # detects 0 nuclei in the smooth synthetic test blobs even at a low
+    # prob_thresh, so cell/quant/geojson assertions can't pass on this fixture
+    # data. Tracked for a follow-up (bundle a tiny real nuclei crop, or switch
+    # those assertions to "runs without error"). Flip to blocking once green.
     continue-on-error: true
 
     steps:
