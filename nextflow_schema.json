@@ -7,15 +7,25 @@
         "input_output_options": {
             "title": "Input/output options",
             "type": "object",
-            "required": ["start", "input", "outdir"],
+            "required": [
+                "start",
+                "input",
+                "outdir"
+            ],
             "properties": {
                 "input": {
-                    "type": ["string", "null"],
+                    "type": [
+                        "string",
+                        "null"
+                    ],
                     "description": "Path to input samplesheet or directory.",
                     "default": null
                 },
                 "outdir": {
-                    "type": ["string", "null"],
+                    "type": [
+                        "string",
+                        "null"
+                    ],
                     "description": "Output directory for pipeline results.",
                     "default": null
                 },
@@ -30,7 +40,10 @@
                     ]
                 },
                 "stop": {
-                    "type": ["string", "null"],
+                    "type": [
+                        "string",
+                        "null"
+                    ],
                     "description": "Pipeline step to stop after. If null, runs to the end.",
                     "default": null,
                     "enum": [
@@ -39,16 +52,6 @@
                         "postprocessing",
                         null
                     ]
-                },
-                "savedir": {
-                    "type": ["string", "null"],
-                    "description": "Save directory for archiving results.",
-                    "default": null
-                },
-                "publish_dir_mode": {
-                    "type": "string",
-                    "description": "Method for publishing output files.",
-                    "default": "copy"
                 }
             }
         },
@@ -176,7 +179,10 @@
                 "reg_reference_markers": {
                     "type": "array",
                     "description": "Reference markers for registration.",
-                    "default": ["DAPI", "FITC"]
+                    "default": [
+                        "DAPI",
+                        "FITC"
+                    ]
                 },
                 "reg_micro_reg_fraction": {
                     "type": "number",
@@ -192,7 +198,11 @@
                     "type": "string",
                     "description": "Memory mode for registration.",
                     "default": "medium",
-                    "enum": ["low", "medium", "high"]
+                    "enum": [
+                        "low",
+                        "medium",
+                        "high"
+                    ]
                 },
                 "skip_micro_registration": {
                     "type": "boolean",
@@ -232,7 +242,7 @@
                 "reg_dist_container": {
                     "type": "string",
                     "description": "Container for distributed-tiling processes. MUST be the EXTERNAL_TILE_HOOK-patched VALIS image (the published cdgatenbee image lacks the seam).",
-                    "default": "mirage-valis:1.0.0"
+                    "default": "ghcr.io/sceriff0/mirage/mirage-valis:1.0.0"
                 },
                 "reg_dist_tile_wh": {
                     "type": "integer",
@@ -241,7 +251,7 @@
                 },
                 "reg_dist_micro_tile_wh": {
                     "type": "integer",
-                    "description": "Micro-registration tile width/height for the distributed micro second wave (spec §5A); VALIS default 2048.",
+                    "description": "Micro-registration tile width/height for the distributed micro second wave (spec \u00a75A); VALIS default 2048.",
                     "default": 2048
                 },
                 "reg_dist_tile_buffer": {
@@ -268,7 +278,10 @@
                     "type": "string",
                     "description": "Tiling-regime policy: 'auto' = tile only above VALIS's threshold; 'force' = always tile.",
                     "default": "auto",
-                    "enum": ["auto", "force"]
+                    "enum": [
+                        "auto",
+                        "force"
+                    ]
                 },
                 "reg_dist_tiles_per_task": {
                     "type": "integer",
@@ -284,6 +297,14 @@
                     "type": "integer",
                     "description": "Max processed/rigid dimension (px) for distributed REG_PREP.",
                     "default": 2048
+                },
+                "reg_jvm_heap_gb": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "description": "JVM heap (GiB) for VALIS/Bio-Formats in REGISTER. null = derive from task.memory at runtime.",
+                    "default": null
                 }
             }
         },
@@ -327,8 +348,90 @@
                     "default": "stardist_full_e200_lr00001_aug1_seed10_es50p0.001_rlr0.5p50"
                 },
                 "segmentation_model_dir": {
-                    "type": ["string", "null"],
+                    "type": [
+                        "string",
+                        "null"
+                    ],
                     "description": "Directory containing segmentation models.",
+                    "default": null
+                },
+                "seg_method": {
+                    "type": "string",
+                    "description": "Segmentation backend to use.",
+                    "default": "stardist",
+                    "enum": [
+                        "stardist",
+                        "instantseg",
+                        "cellsam"
+                    ]
+                },
+                "seg_prob_thresh": {
+                    "type": [
+                        "number",
+                        "null"
+                    ],
+                    "description": "StarDist detection probability threshold. null = use the model's built-in default.",
+                    "default": null
+                },
+                "seg_instantseg_model": {
+                    "type": "string",
+                    "description": "InstanSeg model name (only used when seg_method='instantseg').",
+                    "default": "fluorescence_nuclei_and_cells"
+                },
+                "seg_instantseg_target": {
+                    "type": "string",
+                    "description": "InstanSeg output target.",
+                    "default": "all_outputs",
+                    "enum": [
+                        "all_outputs",
+                        "cells",
+                        "nuclei"
+                    ]
+                },
+                "seg_instantseg_tile_size": {
+                    "type": "integer",
+                    "description": "Tile size (px) for InstanSeg tiled inference.",
+                    "default": 512
+                },
+                "seg_instantseg_batch_size": {
+                    "type": "integer",
+                    "description": "Number of tiles per InstanSeg forward pass.",
+                    "default": 16
+                },
+                "instanseg_model_dir": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "description": "Writable host path for InstanSeg's BioImage.IO model cache. null = per-task work-dir cache.",
+                    "default": null
+                },
+                "seg_cellsam_bbox_threshold": {
+                    "type": "number",
+                    "description": "CellSAM bounding-box confidence threshold (precision/recall knob).",
+                    "default": 0.4
+                },
+                "seg_cellsam_use_wsi": {
+                    "type": "boolean",
+                    "description": "Enable CellSAM native tiling (block_size/overlap) for large images.",
+                    "default": true
+                },
+                "seg_cellsam_block_size": {
+                    "type": "integer",
+                    "description": "CellSAM tiling block size (px).",
+                    "default": 400
+                },
+                "seg_cellsam_overlap": {
+                    "type": "integer",
+                    "description": "CellSAM tiling overlap (px).",
+                    "default": 56
+                },
+                "cellsam_model_path": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "description": "Path to pre-downloaded CellSAM weights for offline/container use. null = auto-download at runtime.",
                     "default": null
                 }
             }
@@ -411,11 +514,6 @@
                     "description": "Enable debug output for channels.",
                     "default": false
                 },
-                "cleanup_work": {
-                    "type": "boolean",
-                    "description": "Automatically remove work directory after successful completion.",
-                    "default": true
-                },
                 "enable_trace": {
                     "type": "boolean",
                     "description": "Enable detailed execution tracing.",
@@ -433,17 +531,26 @@
             "type": "object",
             "properties": {
                 "slurm_partition": {
-                    "type": ["string", "null"],
+                    "type": [
+                        "string",
+                        "null"
+                    ],
                     "description": "SLURM partition to submit jobs to.",
                     "default": null
                 },
                 "slurm_account": {
-                    "type": ["string", "null"],
+                    "type": [
+                        "string",
+                        "null"
+                    ],
                     "description": "SLURM account for job submission.",
                     "default": null
                 },
                 "slurm_qos": {
-                    "type": ["string", "null"],
+                    "type": [
+                        "string",
+                        "null"
+                    ],
                     "description": "SLURM quality of service.",
                     "default": null
                 },
@@ -477,15 +584,33 @@
         }
     },
     "allOf": [
-        { "$ref": "#/definitions/input_output_options" },
-        { "$ref": "#/definitions/preprocessing_options" },
-        { "$ref": "#/definitions/registration_options" },
-        { "$ref": "#/definitions/segmentation_options" },
-        { "$ref": "#/definitions/quantification_options" },
-        { "$ref": "#/definitions/output_options" },
-        { "$ref": "#/definitions/pipeline_control" },
-        { "$ref": "#/definitions/cluster_options" },
-        { "$ref": "#/definitions/resource_limits" }
+        {
+            "$ref": "#/definitions/input_output_options"
+        },
+        {
+            "$ref": "#/definitions/preprocessing_options"
+        },
+        {
+            "$ref": "#/definitions/registration_options"
+        },
+        {
+            "$ref": "#/definitions/segmentation_options"
+        },
+        {
+            "$ref": "#/definitions/quantification_options"
+        },
+        {
+            "$ref": "#/definitions/output_options"
+        },
+        {
+            "$ref": "#/definitions/pipeline_control"
+        },
+        {
+            "$ref": "#/definitions/cluster_options"
+        },
+        {
+            "$ref": "#/definitions/resource_limits"
+        }
     ],
     "additionalProperties": true
 }

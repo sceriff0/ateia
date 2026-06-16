@@ -183,10 +183,10 @@ Short, practical answers to the questions users ask most. Click a question to ex
     Drop to `--memory_mode low`, lower `--reg_max_image_dim`, and enable tiled registration with `--reg_use_tiled_registration true --reg_tile_size 4096`. If the feature-detection pass is the culprit, also lower `--feature_n_features`. See [Registration Errors](registration_errors.md).
 
 ??? question "A job died with exit code 137. What does that mean?"
-    `137` (and `140`) almost always means the job was killed for exceeding its memory or time grant. MIRAGE auto-retries on `104,134,135,137,139,140,143`, and each retry doubles memory/time via `check_max()`. Raise the global caps with `--max_memory '700.GB'`, `--max_cpus 128`, `--max_time '240.h'` if needed. See [Troubleshooting → OOM](troubleshooting.md#out-of-memory-and-runtime-failures).
+    `137` (and `140`) almost always means the job was killed for exceeding its memory or time grant. MIRAGE auto-retries on `104,134,135,137,139,140,143`, and each retry scales memory/time with `task.attempt`. Raise the global caps with `--max_memory '700.GB'`, `--max_cpus 128`, `--max_time '240.h'` if needed (the `local`, `test`, `test_full`, `slurm`, and `ieo` profiles clamp every request to these via `process.resourceLimits`). See [Troubleshooting → OOM](troubleshooting.md#out-of-memory-and-runtime-failures).
 
 ??? question "What are the global resource caps?"
-    `--max_memory` defaults to `700.GB`, `--max_cpus` to `128`, `--max_time` to `240.h`. Every per-process request is clamped against these via `check_max()`.
+    `--max_memory` defaults to `700.GB`, `--max_cpus` to `128`, `--max_time` to `240.h`. The `local`, `test`, `test_full`, `slurm`, and `ieo` profiles set `process.resourceLimits` from these, clamping every per-process request to the ceiling.
 
 ??? question "How many patients can run at once?"
     There's no fixed limit — MIRAGE uses streaming `groupTuple` with patient/channel counts pre-computed from the CSV, so patients flow through concurrently as resources allow. Throughput is bounded by your executor's queue limits and the resource caps above. See [Workflow](workflow.md).

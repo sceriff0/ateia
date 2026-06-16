@@ -110,6 +110,12 @@ jobs:
         run: |
           bash tests/check_profiles_parse.sh
 
+      - name: Check param surface consistency (config <-> schema <-> code)
+        # Fails if a param is declared/used but undocumented in nextflow_schema.json
+        # (or vice-versa) — keeps the parameter surface from drifting.
+        run: |
+          python3 tests/check_param_consistency.py
+
       - name: Run pipeline validation tests
         run: |
           bash tests/run_validation_tests.sh
