@@ -581,6 +581,24 @@ def merge_channels(
     # a massive bulk cast later (which would triple peak RAM).
     out_dtype = np.uint16 if dtype in (np.float32, np.float64) else dtype
     need_float_cast = dtype in (np.float32, np.float64)
+
+    # A uint32 segmentation mask with > 65535 labels forces the WHOLE output to
+    # uint32 (all OME-TIFF channels share one dtype). Decide this BEFORE
+    # allocating output_data. Previously out_dtype was only bumped to uint32 while
+    # appending the mask — AFTER output_data had been allocated as uint16 — so the
+    # uint32 mask was silently truncated (labels mod 65536) for slides with
+    # > 65535 cells. Peek the mask's max here (single channel; re-read on append).
+    if out_dtype in (np.uint8, np.uint16):
+        for _mtype, _mpath in masks_info:
+            if _mtype == 'segmentation':
+                seg_max = int(_read_channel_file(_mpath).max())
+                gc.collect()
+                if seg_max > np.iinfo(out_dtype).max:
+                    log(f"  Segmentation mask has {seg_max} labels (> {np.iinfo(out_dtype).max}); "
+                        f"allocating output as uint32 to preserve all label IDs")
+                    out_dtype = np.uint32
+                break
+
     output_data = np.zeros((num_output_channels, height, width), dtype=out_dtype)
     output_idx = 0
 
@@ -631,16 +649,10 @@ def merge_channels(
 
             phenotype_colormap = create_phenotype_colormap(pheno_label_map, n_categories)
 
-        # Convert mask to output dtype if needed
-        # CRITICAL FIX: Don't downcast segmentation masks (uint32) to uint16
-        # This would cause label IDs > 65535 to overflow/wrap around
-        if mask_type == 'segmentation' and mask_data.dtype == np.uint32:
-            if out_dtype in [np.uint8, np.uint16] and mask_data.max() > np.iinfo(out_dtype).max:
-                log(f"    WARNING: Segmentation mask has {int(mask_data.max())} labels, "
-                    f"promoting output dtype from {out_dtype} to uint32 to preserve all label IDs")
-                out_dtype = np.uint32
-            mask_data = mask_data.astype(out_dtype)
-        elif mask_data.dtype != out_dtype:
+        # Cast mask to the output dtype. out_dtype was already promoted to uint32
+        # above if a segmentation mask needs it, so this never truncates labels
+        # (output_data is allocated at the final dtype).
+        if mask_data.dtype != out_dtype:
             mask_data = mask_data.astype(out_dtype)
 
         output_data[output_idx] = mask_data
