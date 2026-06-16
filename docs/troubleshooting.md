@@ -131,8 +131,8 @@ See the [Restartability Guide](restartability_guide.md) for the full resume stor
 
 ## Out-of-memory and runtime failures
 
-1. Raise the global caps: `--max_memory '700.GB'`, `--max_cpus 128`, `--max_time '240.h'`. These are hard ceilings that `check_max()` clamps every per-process request against.
-2. Resources scale with `task.attempt` via `check_max()`, so a single **automatic retry already doubles** memory and time. MIRAGE retries on exit codes `104,134,135,137,139,140,143`.
+1. Raise the global caps: `--max_memory '700.GB'`, `--max_cpus 128`, `--max_time '240.h'`. The `local`, `test`, `test_full`, `slurm`, and `ieo` profiles turn these into `process.resourceLimits`, a hard ceiling that clamps every per-process request.
+2. Per-process memory/time closures scale with `task.attempt`, so an **automatic retry raises** the request (clamped by the `resourceLimits` ceiling above). MIRAGE retries on exit codes `104,134,135,137,139,140,143`.
 3. Inspect per-process settings in `conf/modules.config` and `conf/base.config` if a specific process needs a different baseline.
 4. For registration specifically, drop to `--memory_mode low` and reduce `--feature_n_features` if VALIS runs out of RAM on the feature-detection pass (see [below](#out-of-memory-during-valis)).
 5. Resume from the last successful task with `-resume` after adjusting params — Nextflow's cache means only the failing tasks re-execute.

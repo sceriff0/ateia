@@ -76,7 +76,12 @@ def main() -> int:
     config_keys = extract_params_block_keys(config_text)
 
     schema = json.loads(SCHEMA_PATH.read_text())
+    # Params live under the nf-core grouped structure (definitions/$defs + allOf),
+    # and/or a flat top-level "properties". Flatten all of them so the check works
+    # regardless of which layout the schema uses.
     schema_keys = set(schema.get("properties", {}).keys())
+    for group in {**schema.get("definitions", {}), **schema.get("$defs", {})}.values():
+        schema_keys |= set(group.get("properties", {}).keys())
 
     ref_keys = extract_param_references()
 
