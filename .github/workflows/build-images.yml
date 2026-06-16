@@ -50,6 +50,12 @@ permissions:
   contents: read
   packages: write
 
+# Serialize per ref; do NOT cancel — an interrupted run can leave a half-pushed
+# image set in GHCR.
+concurrency:
+  group: build-images-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   # Base path for all published images.
   REGISTRY: ghcr.io

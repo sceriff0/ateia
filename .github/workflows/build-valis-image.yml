@@ -21,6 +21,16 @@ on:
 env:
   REGISTRY: ghcr.io
 
+# Read-only default token at workflow scope; the build job escalates to
+# packages: write for the GHCR push.
+permissions:
+  contents: read
+
+# Never cancel an in-flight ~10GB image push.
+concurrency:
+  group: build-valis-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
