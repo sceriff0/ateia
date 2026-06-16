@@ -26,6 +26,21 @@ class CsvUtils {
     }
 
     /**
+     * Read a CSV's lines, stripping a UTF-8 byte-order mark from the header if
+     * present. Excel/Windows commonly save CSVs with a leading BOM (U+FEFF),
+     * which otherwise gets glued onto the first header column name
+     * ("<BOM>patient_id"), making every column lookup return -1 — silently
+     * breaking image/channel counting (streaming groupTuple hangs) and input
+     * validation. Stripping it once here protects every reader below.
+     */
+    private static List<String> readCsvLines(String csvPath) {
+        def lines = new File(csvPath).readLines()
+        if (lines && lines[0] && ((int) lines[0].charAt(0)) == 0xFEFF)
+            lines[0] = lines[0].substring(1)
+        return lines
+    }
+
+    /**
      * Count images per patient from a CSV file.
      * Returns a Map of patient_id -> count
      */
@@ -34,7 +49,7 @@ class CsvUtils {
         if (!file.exists()) return [:]
 
         def counts = [:].withDefault { 0 }
-        def lines = file.readLines()
+        def lines = readCsvLines(file.path)
         if (lines.size() < 2) return [:]  // Header only or empty
 
         def header = parseCsvLine(lines[0])
@@ -45,7 +60,7 @@ class CsvUtils {
             def cols = parseCsvLine(line)
             if (cols.size() > patientIdx) {
                 def patientId = cols[patientIdx].trim()
-                counts[patientId]++
+                if (patientId) counts[patientId]++  // ignore blank patient_id cells
             }
         }
         return counts
@@ -61,7 +76,7 @@ class CsvUtils {
         if (!file.exists()) return [:]
 
         def channelSets = [:].withDefault { new HashSet<String>() }
-        def lines = file.readLines()
+        def lines = readCsvLines(file.path)
         if (lines.size() < 2) return [:]  // Header only or empty
 
         def header = parseCsvLine(lines[0])
@@ -73,6 +88,7 @@ class CsvUtils {
             def cols = parseCsvLine(line)
             if (cols.size() > Math.max(patientIdx, channelsIdx)) {
                 def patientId = cols[patientIdx].trim()
+                if (!patientId) return  // ignore blank patient_id cells
                 def channels = cols[channelsIdx].split('\\|')*.trim().findAll { it }
                 channelSets[patientId].addAll(channels*.toUpperCase())
             }
@@ -138,7 +154,7 @@ class CsvUtils {
         if (!file.exists())
             throw new FileNotFoundException("Input CSV not found: ${csv}")
 
-        def lines = file.readLines()
+        def lines = readCsvLines(file.path)
         if (lines.isEmpty())
             throw new RuntimeException("CSV is empty: ${csv}")
 
@@ -146,7 +162,7 @@ class CsvUtils {
 
         required_cols.each {
             if (!(it in header))
-                throw new NoSuchFieldException("Missing required column '${it}' in CSV: ${csv}")
+                throw new IllegalArgumentException("Missing required column '${it}' in CSV: ${csv}")
         }
     }
 
@@ -172,7 +188,7 @@ class CsvUtils {
             postprocessing: 'registered_image',
         ][step]
 
-        def lines = new File(csv).readLines()
+        def lines = readCsvLines(csv)
         if (lines.size() < 2)
             throw new IllegalStateException("Input CSV contains no data rows: ${csv}")
 
@@ -197,18 +213,20 @@ class CsvUtils {
             ]
 
             // Per-row format + DAPI/channel validation (throws on problems).
-            parseMetadata(row, ctx)
+            def parsed = parseMetadata(row, ctx)
 
             // Image file must exist (resolved against the launch directory for
             // relative paths). Skipped only if the path column is absent.
             if (pathIdx >= 0 && pathIdx < cols.size()) {
                 def p = cols[pathIdx].trim()
-                if (p && !new File(p).exists())
+                if (!p)
+                    throw new IllegalArgumentException("Empty path in column '${pathColumn}' for patient ${row.patient_id} (${ctx})")
+                if (!new File(p).exists())
                     throw new FileNotFoundException("Input file does not exist: ${p} (patient ${row.patient_id}, ${ctx})")
             }
 
             rowCounts[row.patient_id]++
-            if (parseIsReference(row.is_reference, ctx)) refCounts[row.patient_id]++
+            if (parsed.is_reference) refCounts[row.patient_id]++  // reuse parsed value (no re-parse)
         }
 
         rowCounts.each { patientId, _n ->
