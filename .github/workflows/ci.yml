@@ -103,6 +103,13 @@ jobs:
           pip install numpy tifffile
           python tests/testdata/generate_complete_testdata.py
 
+      - name: Check all profiles parse without the gitignored site config
+        # Guards against the strict-parser regression class: a committed profile
+        # must never includeConfig a gitignored/missing file (breaks every
+        # profile in CI). Runs with conf/ieo.config absent (it already is in CI).
+        run: |
+          bash tests/check_profiles_parse.sh
+
       - name: Run pipeline validation tests
         run: |
           bash tests/run_validation_tests.sh
