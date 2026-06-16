@@ -20,7 +20,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent / 'utils'))
 
 from logger import get_logger, configure_logging
-from typing import Tuple
+from typing import Optional, Tuple
 
 import dask.array as da
 import numpy as np
@@ -306,7 +306,8 @@ def segment_nuclei(
     normalized_dapi: NDArray,
     model: StarDist2D,
     n_tiles: Tuple[int, int] = (24, 24),
-    expand_distance: int = 10
+    expand_distance: int = 10,
+    prob_thresh: Optional[float] = None
 ) -> Tuple[NDArray, NDArray]:
     """
     Segment nuclei and create whole-cell masks.
@@ -344,10 +345,15 @@ def segment_nuclei(
 
     start_time = time.time()
 
-    # Predict nuclei instances using StarDist
+    # Predict nuclei instances using StarDist. prob_thresh=None uses the model's
+    # built-in default; a lower value detects fainter/smaller nuclei (used by the
+    # test profile so the built-in model picks up small synthetic nuclei).
+    if prob_thresh is not None:
+        logger.info(f"  Probability threshold: {prob_thresh}")
     nuclei_labels, _ = model.predict_instances(
         normalized_dapi,
         n_tiles=n_tiles,
+        prob_thresh=prob_thresh,
         show_tile_progress=False,
         verbose=False
     )
@@ -391,7 +397,8 @@ def run_segmentation(
     n_tiles: Tuple[int, int] = (24, 24),
     expand_distance: int = 10,
     pmin: float = 1.0,
-    pmax: float = 99.8
+    pmax: float = 99.8,
+    prob_thresh: Optional[float] = None
 ) -> Tuple[str, str]:
     """
     Run complete segmentation pipeline on multichannel image.
@@ -451,7 +458,8 @@ def run_segmentation(
         normalized_dapi,
         model,
         n_tiles=n_tiles,
-        expand_distance=expand_distance
+        expand_distance=expand_distance,
+        prob_thresh=prob_thresh
     )
     del normalized_dapi, model  # Free float32 image + TF weights before save phase
 
@@ -562,6 +570,14 @@ def parse_args():
         help='Upper percentile for normalization'
     )
 
+    parser.add_argument(
+        '--prob-thresh',
+        type=float,
+        default=None,
+        help='StarDist detection probability threshold. Omit to use the model '
+             'default; lower it to detect fainter/smaller nuclei.'
+    )
+
     return parser.parse_args()
 
 
@@ -581,7 +597,8 @@ def main():
         n_tiles=tuple(args.n_tiles),
         expand_distance=args.expand_distance,
         pmin=args.pmin,
-        pmax=args.pmax
+        pmax=args.pmax,
+        prob_thresh=args.prob_thresh
     )
 
     return 0

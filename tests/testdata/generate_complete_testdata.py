@@ -48,7 +48,10 @@ def make_anatomy(size, n_cells, rng):
     for _ in range(n_cells):
         cy = int(rng.integers(20, size[0] - 20))
         cx = int(rng.integers(20, size[1] - 20))
-        radius = int(rng.integers(3, 8))
+        # Nucleus-sized radius (diameter ~12-26 px): large enough for StarDist's
+        # built-in 2D_versatile_fluo to detect them as nuclei, while staying
+        # within bounds under the small per-image shift.
+        radius = int(rng.integers(6, 13))
         intensity = int(rng.integers(8000, 15000))  # shared base, scaled per channel
         cells.append((cy, cx, radius, intensity))
     return cells

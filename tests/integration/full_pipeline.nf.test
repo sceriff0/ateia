@@ -186,27 +186,19 @@ nextflow_pipeline {
                     def lines = checkpoint.readLines()
                     assert lines.size() >= 2, "P002 checkpoint should have header + data"
                 },
-                // Verify P001 CSV only contains P001 entries
+                // preprocessed.csv is a single GLOBAL multi-patient checkpoint, so
+                // it legitimately contains both patients. Verify no cross-contamination
+                // by asserting it holds EXACTLY the expected patient ids (both present,
+                // nothing leaked). The previous two assertions each demanded the global
+                // file contain only one patient — mutually contradictory and unpassable.
                 {
                     def checkpoint = path("$outputDir/csv/preprocessed.csv")
                     def lines = checkpoint.readLines()
                     def headerCols = lines[0].split(',')
                     def pidIdx = headerCols.findIndexOf { it.trim() == 'patient_id' }
-                    for (int i = 1; i < lines.size(); i++) {
-                        def pid = lines[i].split(',')[pidIdx].trim()
-                        assert pid == 'P001', "P001 CSV should only contain P001 entries, found: ${pid}"
-                    }
-                },
-                // Verify P002 CSV only contains P002 entries
-                {
-                    def checkpoint = path("$outputDir/csv/preprocessed.csv")
-                    def lines = checkpoint.readLines()
-                    def headerCols = lines[0].split(',')
-                    def pidIdx = headerCols.findIndexOf { it.trim() == 'patient_id' }
-                    for (int i = 1; i < lines.size(); i++) {
-                        def pid = lines[i].split(',')[pidIdx].trim()
-                        assert pid == 'P002', "P002 CSV should only contain P002 entries, found: ${pid}"
-                    }
+                    def pids = (1..<lines.size()).collect { lines[it].split(',')[pidIdx].trim() } as Set
+                    assert pids == (['P001', 'P002'] as Set),
+                        "preprocessed.csv should contain exactly P001 and P002, found: ${pids}"
                 }
             )
         }
