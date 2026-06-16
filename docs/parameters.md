@@ -20,8 +20,7 @@ shown here are the values in
 | Parameter | Default | Description |
 |---|---|---|
 | `input` | `null` | Path to the samplesheet CSV. **Required.** Columns depend on `--start` — see [Samplesheet & Input](input_spec.md). |
-| `outdir` | `null` | Output root directory. **Required** — no default. |
-| `savedir` | `null` | Optional archive destination for finalized results. |
+| `outdir` | `null` | Output root directory. **Required** — no default. Checkpoint CSVs are written to `<outdir>/csv/`. |
 | `publish_dir_mode` | `copy` | How outputs are published (`copy`, `symlink`, `move`). |
 
 ## Workflow control
@@ -32,11 +31,10 @@ shown here are the values in
 | `stop` | `null` | Stop after this stage. `null` = run to the end. |
 | `dry_run` | `false` | Validate inputs and exit without launching tasks. |
 | `debug_channels` | `false` | Emit `.view` channel-topology debug output. |
-| `cleanup_work` | `true` | Remove the `work/` directory after a successful run. |
 
 !!! tip "Run a single stage"
     `--start registration --stop registration` runs registration only, reading a
-    `csv/preprocessed.csv` checkpoint. See [Restartability](restartability_guide.md).
+    `<outdir>/csv/preprocessed.csv` checkpoint. See [Restartability](restartability_guide.md).
 
 ## Preprocessing
 
@@ -45,7 +43,7 @@ Bio-Formats conversion + BaSiC illumination correction. Deep dive:
 
 | Parameter | Default | Description |
 |---|---|---|
-| `pixel_size` | `0.325` | Physical pixel size in µm. Used in conversion and pyramid/GeoJSON metadata. |
+| `pixel_size` | `0.325` | Fallback physical pixel size in µm. The real value is read from the input OME metadata and **preserved** through the pipeline; `0.325` is used only when the input carries no pixel size. Governs µm conversion in GeoJSON and InstanSeg. |
 | `preproc_tile_size` | `1950` | FOV tile size (px) for BaSiC. |
 | `preproc_skip_dapi` | `true` | Skip BaSiC correction on the DAPI channel. |
 | `preproc_autotune` | `false` | Enable BaSiC autotune. |
@@ -81,6 +79,29 @@ VALIS whole-slide alignment. Deep dives: [Registration](registration_methods.md)
 | `reg_n_workers` | `8` | Worker threads for parallel warping. |
 | `reg_use_tiled_registration` | `true` | Use tiled non-rigid registration. |
 | `reg_tile_size` | `2048` | Tile size (px) for tiled registration. |
+| `reg_jvm_heap_gb` | `null` | Explicit JVM heap (GB) for VALIS. `null` auto-estimates from input size. |
+
+### Distributed registration (advanced)
+
+For very large slides, registration can be fanned out across tiles as separate
+tasks instead of running through the in-process VALIS adapter. This is **off by
+default** — the classic path is bit-identical and JVM-free for most inputs. Only
+reach for these if a single REGISTER task can't fit a slide in memory.
+
+| Parameter | Default | Description |
+|---|---|---|
+| `reg_distributed_tiling` | `false` | Master switch. `false` = classic in-process registration. |
+| `reg_dist_sub_threshold` | `auto` | `auto` tiles only when VALIS would (estimated size > threshold); `force` always tiles. |
+| `reg_dist_min_input_gb` | `1.0` | In `auto` mode, total full-res input ≥ this routes to distributed; smaller stays classic. |
+| `reg_dist_force_tiling` | `false` | `false` = separated whole-image non-rigid (JVM-free); `true` = tiled fan-out. |
+| `reg_dist_tile_wh` | `512` | Non-rigid tile size (px). |
+| `reg_dist_micro_tile_wh` | `2048` | Micro-registration tile size (px). |
+| `reg_dist_tile_buffer` | `100` | Tile overlap (px). |
+| `reg_dist_tiles_per_task` | `1` | Tiles per registration task (1 = max granularity). |
+| `reg_dist_threshold_gb` | `10` | Informational; matches VALIS's internal auto-tiler threshold. |
+| `reg_dist_container` | *(GHCR image)* | Patched VALIS image used for distributed tiles. |
+| `reg_max_non_rigid_dim` | `4096` | Non-rigid working resolution for the prep step. |
+| `reg_max_processed_dim` | `2048` | Rigid/processing working resolution for the prep step. |
 
 ## Segmentation
 
@@ -106,6 +127,7 @@ Consumes the **DAPI channel** (must be channel 0 — guaranteed upstream).
 | `seg_pmax` | `99.8` | Upper percentile for normalization. |
 | `seg_n_tiles_x` | `16` | Inference tiles along X. |
 | `seg_n_tiles_y` | `16` | Inference tiles along Y. |
+| `seg_prob_thresh` | `null` | Detection probability threshold. `null` uses the model's built-in default. |
 
 ### InstanSeg (`seg_method=instantseg`)
 

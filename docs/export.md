@@ -47,34 +47,70 @@ The GeoJSON and the pyramid are independent products built from the same upstrea
 
 ## The GeoJSON
 
-`EXPORT_GEOJSON` writes a GeoJSON **FeatureCollection**. Every cell is a single `Feature`:
+`EXPORT_GEOJSON` writes **one combined** GeoJSON **FeatureCollection** per patient — `geojson/cells.geojson` — with a single `Feature` per cell. There are no separate nuclei / whole-cell GeoJSON files; both outlines (when available) live inside the one feature.
 
-```json
-{
-  "type": "Feature",
-  "id": "PathDetectionObject",
-  "geometry": {
-    "type": "Polygon",
-    "coordinates": [[[1024.5, 768.5], [1025.5, 768.5], "..."]]
-  },
-  "properties": {
-    "objectType": "detection",
-    "classification": { "name": "Cell", "colorRGB": -16711681 },
-    "isLocked": false,
-    "measurements": [
-      { "name": "Centroid X µm", "value": 333.16 },
-      { "name": "Centroid Y µm", "value": 249.76 },
-      { "name": "CD8", "value": 412.5 },
-      { "name": "Area µm²", "value": 84.21 }
-    ]
-  }
-}
-```
+The exact shape of each feature depends on whether [compartment quantification](quantification.md#compartment-quantification) was enabled:
+
+=== "With `--quantify_compartments` (cell + nucleus)"
+
+    Each feature is a QuPath **`cell`** object: the **whole-cell** outline is the feature `geometry`, and the **nucleus** outline rides along as a sibling top-level `nucleusGeometry` member.
+
+    ```json
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[1024.5, 768.5], [1025.5, 768.5], "..."]]
+      },
+      "nucleusGeometry": {
+        "type": "Polygon",
+        "coordinates": [[[1026.5, 770.5], [1027.5, 770.5], "..."]]
+      },
+      "properties": {
+        "objectType": "cell",
+        "classification": { "name": "Cell" },
+        "isLocked": false,
+        "measurements": [
+          { "name": "Centroid X µm", "value": 333.16 },
+          { "name": "Centroid Y µm", "value": 249.76 },
+          { "name": "CD8: Nucleus: Mean", "value": 12.4 },
+          { "name": "CD8: Cytoplasm: Mean", "value": 121.0 },
+          { "name": "CD8: Cell: Mean", "value": 88.1 },
+          { "name": "Area µm²", "value": 84.21 }
+        ]
+      }
+    }
+    ```
+
+=== "Without compartments (legacy / default)"
+
+    Each feature is a QuPath **`detection`** object carrying the whole-cell polygon only, with bare per-marker measurements.
+
+    ```json
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[1024.5, 768.5], [1025.5, 768.5], "..."]]
+      },
+      "properties": {
+        "objectType": "detection",
+        "classification": { "name": "Cell" },
+        "isLocked": false,
+        "measurements": [
+          { "name": "Centroid X µm", "value": 333.16 },
+          { "name": "Centroid Y µm", "value": 249.76 },
+          { "name": "CD8", "value": 412.5 },
+          { "name": "Area µm²", "value": 84.21 }
+        ]
+      }
+    }
+    ```
 
 Key properties:
 
-- **`objectType: "detection"`** — QuPath treats each feature as a detection object.
-- **`classification: {name: "Cell"}`** — all cells share the single class `Cell` (in cyan). There is no phenotype label here (see the warning below).
+- **`objectType`** — `"cell"` when compartments are on (whole-cell `geometry` + `nucleusGeometry`), otherwise `"detection"` (whole-cell polygon only).
+- **`classification: {name: "Cell"}`** — all cells share the single class `Cell`. There is no phenotype label here (see the warning below).
 - **`geometry`** — a **Polygon** built from the simplified cell contours. If a cell has no contour, it falls back to a **Point** at the centroid.
 
 ### The measurements array
@@ -84,7 +120,7 @@ Measurements are stored as a **QuPath-native array** of `{name, value}` objects 
 | Measurement | Unit | Notes |
 | --- | --- | --- |
 | `Centroid X µm`, `Centroid Y µm` | µm | Cell centroid |
-| *each marker* | raw intensity | One entry per channel; plus compartment columns when per-compartment quantification is enabled |
+| *each marker* | raw intensity | One entry per channel. With `--quantify_compartments`, the per-compartment keys `"<MARKER>: Nucleus: Mean"`, `"<MARKER>: Cytoplasm: Mean"`, `"<MARKER>: Cell: Mean"` (and `Median` / `Sum` under `--expanded_quantification`) |
 | `Area µm²` | µm² | |
 | `Perimeter µm` | µm | |
 | `Convex Area µm²` | µm² | |
@@ -103,7 +139,7 @@ Lengths and areas are converted from pixels using **`--pixel_size`** (default `0
 `geojson/cells_data.csv` carries the same per-cell rows as a flat table and, on top of the raw intensities, adds a **per-marker z-score** column for each marker (e.g. `CD8_zscore`). This is the convenient form for scripted analysis outside QuPath.
 
 !!! danger "There is no phenotyping step in MIRAGE"
-    MIRAGE deliberately stops at **raw, un-gated measurements**. Every cell is class `Cell`; no thresholds are applied, no cell types are assigned. **Gating and phenotyping happen downstream in QuPath / FlowPath**, where you set thresholds interactively against the actual intensity distributions of your run. The GeoJSON is the hand-off point — it gives the downstream tools everything they need to gate, and nothing they'd have to undo.
+    MIRAGE deliberately stops at **raw, un-gated measurements**. Every cell is class `Cell`; no thresholds are applied, no cell types are assigned. **Gating and phenotyping happen downstream in QuPath via the [FlowPath ecosystem](flowpath.md)** (GatingTree / AnnoMask / qUMAP), where you set thresholds interactively against the actual intensity distributions of your run. The per-compartment keys `"<MARKER>: Compartment: Statistic"` are exactly what FlowPath's GatingTree and qUMAP read. The GeoJSON is the hand-off point — it gives the downstream tools everything they need to gate, and nothing they'd have to undo.
 
 ---
 
@@ -129,7 +165,7 @@ Lengths and areas are converted from pixels using **`--pixel_size`** (default `0
 
     ```bash
     nextflow run . \
-      --input csv/registered.csv \
+      --input results/csv/registered.csv \
       --start postprocessing \
       --compression zstd \
       --outdir results
@@ -162,7 +198,7 @@ Lengths and areas are converted from pixels using **`--pixel_size`** (default `0
     1. **Open the image.** In QuPath, drag in `pyramid/<patient>.ome.tiff` (or *File → Open*). It loads as a multi-channel pyramidal image; channel names and colors come from the OME metadata.
     2. **Import the objects.** *File → Import objects from file…* and select `geojson/cells.geojson`. The cell polygons appear overlaid on the image, all classified as `Cell`.
     3. **Inspect measurements.** Open the measurement table — each cell carries its centroid, raw marker intensities, and morphology in µm, ready to sort and visualize.
-    4. **Gate.** Use QuPath / **FlowPath** to threshold markers and assign phenotypes interactively. This is where cell typing happens — MIRAGE intentionally leaves it to you.
+    4. **Gate.** Use QuPath with the [**FlowPath ecosystem**](flowpath.md) (GatingTree / AnnoMask / qUMAP) to threshold markers and assign phenotypes interactively. This is where cell typing happens — MIRAGE intentionally leaves it to you.
 
 The same artifacts work in **napari** (open the OME-TIFF, load the GeoJSON as a shapes/points layer) and **OMERO** (import the pyramid; attach the GeoJSON). Because the pyramid is a standards-compliant OME-TIFF and the GeoJSON is QuPath-native, no conversion is needed.
 

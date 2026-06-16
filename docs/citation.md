@@ -16,4 +16,7 @@ A DOI for the pipeline will be published alongside a tagged release. Until then,
 
 The full list of underlying-tool citations is maintained at the repository root as [`CITATIONS.md`](https://github.com/sceriff0/mirage/blob/main/CITATIONS.md) and is included verbatim below.
 
+!!! tip "Cite the backend you ran"
+    MIRAGE ships three interchangeable segmentation backends — **StarDist**, **InstanSeg**, and **CellSAM** — selected at runtime via `--seg_method`. Cite the segmentation reference(s) that correspond to the backend(s) you actually used.
+
 {% include-markdown "../CITATIONS.md" heading-offset=2 %}

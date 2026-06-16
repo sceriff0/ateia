@@ -128,13 +128,13 @@ results/
 └── size_logs/              # input size logs (if trace is enabled)
 ```
 
-!!! note "Checkpoint CSVs live elsewhere"
-    The stage checkpoint CSVs are **not** under `results/`. They're written to a `csv/` folder **in your launch directory** (the place you ran `nextflow` from):
+!!! note "Where the checkpoint CSVs live"
+    The stage checkpoint CSVs are in one `csv/` folder directly under `--outdir` (here, `results/`) — aggregated across all patients, **not** in the per-patient `results/<patient_id>/csv/` subtree:
 
     ```text
-    csv/preprocessed.csv     # resume point for --start registration
-    csv/registered.csv       # resume point for --start postprocessing
-    csv/postprocessed.csv    # manifest of postprocessing outputs
+    results/csv/preprocessed.csv     # resume point for --start registration
+    results/csv/registered.csv       # resume point for --start postprocessing
+    results/csv/postprocessed.csv    # manifest of postprocessing outputs
     ```
 
     Each is a single file aggregating all patients — not per-patient.
@@ -153,11 +153,11 @@ See [Outputs](outputs.md) for the full column-level schema of every CSV and the 
 
 ## 5. Re-running a single stage
 
-Each stage emits a checkpoint CSV in `./csv/` that you can feed back into a later stage. Say you tuned a segmentation parameter and want to redo **only** postprocessing — without repeating preprocessing or registration:
+Each stage emits a checkpoint CSV in `<outdir>/csv/` that you can feed back into a later stage. Say you tuned a segmentation parameter and want to redo **only** postprocessing — without repeating preprocessing or registration:
 
 ```bash
 nextflow run . \
-  --input csv/registered.csv \
+  --input results/csv/registered.csv \
   --outdir results \
   --start postprocessing \
   -profile test,docker \
@@ -167,7 +167,7 @@ nextflow run . \
 `--start postprocessing` enters at the last stage, and `-resume` makes Nextflow reuse every cached upstream task — so only the work that actually changed is recomputed.
 
 !!! tip "The general pattern"
-    Resume registration with `--input csv/preprocessed.csv --start registration`, or postprocessing with `--input csv/registered.csv --start postprocessing`. See the [Restartability guide](restartability_guide.md) for all three entry points and the gotchas.
+    Resume registration with `--input results/csv/preprocessed.csv --start registration`, or postprocessing with `--input results/csv/registered.csv --start postprocessing`. See the [Restartability guide](restartability_guide.md) for all three entry points and the gotchas.
 
 ## 6. Next steps
 

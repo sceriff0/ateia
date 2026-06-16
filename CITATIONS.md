@@ -2,29 +2,27 @@
 
 ## Core tools
 
-### VALIS — Whole-slide image registration
+The MIRAGE pipeline builds on the following tools and methods. They are grouped
+by the stage of the pipeline in which they are used. Please cite the ones that
+apply to the steps you ran (in particular, the segmentation backend you selected
+via `--seg_method`).
 
-> Gatenbee, C. A., Baker, A.-M., Cunningham, J. J., Cresswell, G., Gatenbee, C., Robertson-Tessi, M., & Anderson, A. R. A. (2023).
-> VALIS: Virtual Alignment of pathoLogy Image Series.
-> *Nature Communications*, 14, 4426.
-> [https://doi.org/10.1038/s41467-023-40218-9](https://doi.org/10.1038/s41467-023-40218-9)
+### Image I/O
 
-GitHub: <https://github.com/MathOnco/valis>
+#### Bio-Formats — Image reading / metadata access
 
----
+> Linkert, M., Rueden, C. T., Allan, C., Burel, J.-M., Moore, W., Patterson, A., Loranger, B., Moore, J., Neves, C., MacDonald, D., Tarkowska, A., Sticco, C., Hill, E., Rossner, M., Eliceiri, K. W., & Swedlow, J. R. (2010).
+> Metadata matters: access to image data in the real world.
+> *Journal of Cell Biology*, 189(5), 777–782.
+> [https://doi.org/10.1083/jcb.201004104](https://doi.org/10.1083/jcb.201004104)
 
-### StarDist — Nuclei / cell segmentation
-
-> Schmidt, U., Weigert, M., Broaddus, C., & Myers, G. (2018).
-> Cell Detection with Star-Convex Polygons.
-> *Medical Image Computing and Computer Assisted Intervention (MICCAI)*, Lecture Notes in Computer Science, vol. 11071.
-> [https://doi.org/10.1007/978-3-030-00934-2_30](https://doi.org/10.1007/978-3-030-00934-2_30)
-
-GitHub: <https://github.com/stardist/stardist>
+GitHub: <https://github.com/ome/bioformats>
 
 ---
 
-### BaSiCPy — Illumination correction
+### Illumination correction
+
+#### BaSiCPy / BaSiC — Background and shading correction
 
 > Peng, T., Thorn, K., Schroeder, T., Wang, L., Theis, F. J., Marr, C., & Navab, N. (2017).
 > A BaSiC tool for background and shading correction of optical microscopy images.
@@ -35,25 +33,123 @@ GitHub: <https://github.com/peng-lab/BaSiCPy>
 
 ---
 
-### Pixie / ark-analysis — Pixel and cell clustering
+### Registration
 
-> Angelo Lab. ark-analysis: Pixie multiplexed imaging analysis pipeline.
-> GitHub: <https://github.com/angelolab/pixie>
+#### VALIS — Whole-slide image registration
+
+> Gatenbee, C. A., Baker, A.-M., Cunningham, J. J., Cresswell, G., Gatenbee, C., Robertson-Tessi, M., & Anderson, A. R. A. (2023).
+> VALIS: Virtual Alignment of pathoLogy Image Series.
+> *Nature Communications*, 14, 4426.
+> [https://doi.org/10.1038/s41467-023-40218-9](https://doi.org/10.1038/s41467-023-40218-9)
+
+GitHub: <https://github.com/MathOnco/valis>
 
 ---
 
-### Nextflow — Workflow management
+### Segmentation
+
+MIRAGE supports three interchangeable segmentation backends selected via
+`--seg_method`. Cite the backend(s) you actually ran.
+
+#### StarDist — Star-convex nuclei / cell segmentation
+
+> Schmidt, U., Weigert, M., Broaddus, C., & Myers, G. (2018).
+> Cell Detection with Star-Convex Polygons.
+> *Medical Image Computing and Computer Assisted Intervention (MICCAI)*, Lecture Notes in Computer Science, vol. 11071.
+> [https://doi.org/10.1007/978-3-030-00934-2_30](https://doi.org/10.1007/978-3-030-00934-2_30)
+
+GitHub: <https://github.com/stardist/stardist>
+
+---
+
+#### InstanSeg — Embedding-based instance segmentation
+
+> Goldsborough, T., O'Callaghan, A., Inglis, F., Leplat, L., Filby, A., Bilen, H., & Bankhead, P. (2024).
+> InstanSeg: an embedding-based instance segmentation algorithm optimized for accurate, efficient and portable cell segmentation.
+> *arXiv*:2408.15954.
+> [https://arxiv.org/abs/2408.15954](https://arxiv.org/abs/2408.15954)
+
+For the channel-invariant fluorescence model used on multiplexed images, also cite:
+
+> Goldsborough, T., O'Callaghan, A., Inglis, F., Visvanathan, A., Bilen, H., & Bankhead, P. (2024).
+> A novel channel invariant architecture for the segmentation of cells and nuclei in multiplexed images.
+> *bioRxiv*.
+> GitHub: <https://github.com/instanseg/instanseg>
+
+GitHub: <https://github.com/instanseg/instanseg>
+
+---
+
+#### CellSAM — Foundation-model cell segmentation
+
+> Israel, U., Marks, M., Dilip, R., Li, Q., Yu, C., Laubscher, E., Iqbal, A., Pradhan, E., Ates, A., Abt, M., Brown, C., Pao, E., Restrepo, S., Van Valen, D., et al. (2023).
+> A Foundation Model for Cell Segmentation.
+> *bioRxiv*.
+> [https://doi.org/10.1101/2023.11.17.567630](https://doi.org/10.1101/2023.11.17.567630)
+
+GitHub: <https://github.com/vanvalenlab/cellSAM>
+
+CellSAM builds on the Segment Anything Model (SAM):
+
+> Kirillov, A., Mintun, E., Ravi, N., Mao, H., Rolland, C., Gustafson, L., Xiao, T., Whitehead, S., Berg, A. C., Lo, W.-Y., Dollár, P., & Girshick, R. (2023).
+> Segment Anything.
+> *Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV)*; *arXiv*:2304.02643.
+> [https://arxiv.org/abs/2304.02643](https://arxiv.org/abs/2304.02643)
+
+---
+
+### Quantification & morphology
+
+#### scikit-image — Morphology, label expansion, contours
+
+> van der Walt, S., Schönberger, J. L., Nunez-Iglesias, J., Boulogne, F., Warner, J. D., Yager, N., Gouillart, E., Yu, T., & the scikit-image contributors (2014).
+> scikit-image: image processing in Python.
+> *PeerJ*, 2, e453.
+> [https://doi.org/10.7717/peerj.453](https://doi.org/10.7717/peerj.453)
+
+GitHub: <https://github.com/scikit-image/scikit-image>
+
+---
+
+### Downstream analysis
+
+#### QuPath — Digital pathology analysis (GeoJSON target)
+
+> Bankhead, P., Loughrey, M. B., Fernández, J. A., Dombrowski, Y., McArt, D. G., Dunne, P. D., McQuaid, S., Gray, R. T., Murray, L. J., Coleman, H. G., James, J. A., Salto-Tellez, M., & Hamilton, P. W. (2017).
+> QuPath: Open source software for digital pathology image analysis.
+> *Scientific Reports*, 7, 16878.
+> [https://doi.org/10.1038/s41598-017-17204-5](https://doi.org/10.1038/s41598-017-17204-5)
+
+Website: <https://qupath.github.io/>
+
+---
+
+### Workflow framework
+
+#### Nextflow — Workflow management
 
 > Di Tommaso, P., Chatzou, M., Floden, E. W., Barja, P. P., Palumbo, E., & Notredame, C. (2017).
 > Nextflow enables reproducible computational workflows.
 > *Nature Biotechnology*, 35, 316–319.
 > [https://doi.org/10.1038/nbt.3820](https://doi.org/10.1038/nbt.3820)
 
----
-
-### nf-core — Pipeline framework and community
+#### nf-core — Pipeline framework and community
 
 > Ewels, P. A., Peltzer, A., Fillinger, S., Patel, H., Alneberg, J., Wilm, A., Garcia, M. U., Di Tommaso, P., & Nahnsen, S. (2020).
 > The nf-core framework for community-curated bioinformatics pipelines.
 > *Nature Biotechnology*, 38, 276–278.
 > [https://doi.org/10.1038/s41587-020-0439-x](https://doi.org/10.1038/s41587-020-0439-x)
+
+---
+
+## Related / legacy
+
+### Pixie / ark-analysis — Pixel and cell clustering
+
+Pixie pixel/cell clustering is **not currently wired into the MIRAGE pipeline**.
+It is kept here for reference only (it lives in the legacy code paths) and is not
+a current runtime dependency.
+
+> Angelo Lab. ark-analysis: Pixie multiplexed imaging analysis pipeline.
+
+GitHub: <https://github.com/angelolab/pixie>

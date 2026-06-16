@@ -3,9 +3,9 @@
 MIRAGE is **checkpoint-driven**. Each stage writes an aggregated CSV describing its outputs, and that CSV is a valid `--input` for the next stage. This means you can stop after any stage, inspect the results, tune parameters, and resume — without re-running work you've already paid for.
 
 !!! danger "Where checkpoints live"
-    Checkpoint CSVs are written to **`csv/`** in your **launch directory** (the directory you ran `nextflow run` from). They are **not** under `--outdir` and **not** per-patient — each is a single file aggregating **all** patients.
+    Checkpoint CSVs are written to one `csv/` folder directly under `--outdir`. They are **not** in the per-patient `<outdir>/<patient_id>/csv/` subtree — each is a single file aggregating **all** patients.
 
-    Older docs incorrectly said `results/<patient>/csv/...`. The correct paths are `csv/preprocessed.csv`, `csv/registered.csv`, `csv/postprocessed.csv`.
+    Older docs incorrectly said `<outdir>/<patient>/csv/...` (or the launch directory). The correct paths are `<outdir>/csv/preprocessed.csv`, `<outdir>/csv/registered.csv`, `<outdir>/csv/postprocessed.csv`.
 
 ---
 
@@ -14,11 +14,11 @@ MIRAGE is **checkpoint-driven**. Each stage writes an aggregated CSV describing 
 ```mermaid
 flowchart TD
     raw["samplesheet.csv<br/>(raw images)"] --> pre[preprocessing]
-    pre -->|writes| cp1["csv/preprocessed.csv"]
+    pre -->|writes| cp1["&lt;outdir&gt;/csv/preprocessed.csv"]
     cp1 --> reg[registration]
-    reg -->|writes| cp2["csv/registered.csv"]
+    reg -->|writes| cp2["&lt;outdir&gt;/csv/registered.csv"]
     cp2 --> post[postprocessing]
-    post -->|writes| cp3["csv/postprocessed.csv<br/>(outputs manifest)"]
+    post -->|writes| cp3["&lt;outdir&gt;/csv/postprocessed.csv<br/>(outputs manifest)"]
 
     cp1 -.->|--start registration| reg
     cp2 -.->|--start postprocessing| post
@@ -35,12 +35,12 @@ Solid arrows are the normal end-to-end flow. Dotted arrows show how a checkpoint
 
 | Stage | Emits checkpoint | Columns | Resume the next stage with |
 |---|---|---|---|
-| preprocessing | `csv/preprocessed.csv` | `patient_id, preprocessed_image, is_reference, channels` | `--input csv/preprocessed.csv --start registration` |
-| registration | `csv/registered.csv` | `patient_id, registered_image, is_reference, channels` | `--input csv/registered.csv --start postprocessing` |
-| postprocessing | `csv/postprocessed.csv` | manifest: cell CSV, GeoJSON, merged CSV, cell mask, pyramid (per patient) | — (final stage) |
+| preprocessing | `<outdir>/csv/preprocessed.csv` | `patient_id, preprocessed_image, is_reference, channels` | `--input <outdir>/csv/preprocessed.csv --start registration` |
+| registration | `<outdir>/csv/registered.csv` | `patient_id, registered_image, is_reference, channels` | `--input <outdir>/csv/registered.csv --start postprocessing` |
+| postprocessing | `<outdir>/csv/postprocessed.csv` | manifest: cell CSV, GeoJSON, merged CSV, cell mask, pyramid (per patient) | — (final stage) |
 
-!!! info "`csv/postprocessed.csv` is a manifest, not a samplesheet"
-    The postprocessing checkpoint records *what was produced* — one set of output artifacts per patient (cell CSV, GeoJSON, merged CSV, cell mask, OME-TIFF pyramid). It's for downstream consumption, not for re-entering the pipeline.
+!!! info "`<outdir>/csv/postprocessed.csv` is a manifest, not a samplesheet"
+    The `<outdir>/csv/postprocessed.csv` checkpoint records *what was produced* — one set of output artifacts per patient (cell CSV, GeoJSON, merged CSV, cell mask, OME-TIFF pyramid). It's for downstream consumption, not for re-entering the pipeline.
 
 ---
 
@@ -52,7 +52,7 @@ Solid arrows are the normal end-to-end flow. Dotted arrows show how a checkpoint
 
     ```bash
     nextflow run main.nf \
-      --input csv/preprocessed.csv \
+      --input results/csv/preprocessed.csv \
       --outdir results \
       --start registration \
       -profile docker \
@@ -65,7 +65,7 @@ Solid arrows are the normal end-to-end flow. Dotted arrows show how a checkpoint
 
     ```bash
     nextflow run main.nf \
-      --input csv/registered.csv \
+      --input results/csv/registered.csv \
       --outdir results \
       --start postprocessing \
       -profile docker \
@@ -78,7 +78,7 @@ Solid arrows are the normal end-to-end flow. Dotted arrows show how a checkpoint
 
     ```bash
     nextflow run main.nf \
-      --input csv/preprocessed.csv \
+      --input results/csv/preprocessed.csv \
       --outdir results \
       --start registration --stop registration \
       -profile docker
@@ -115,7 +115,7 @@ They're easy to confuse, but they do different things and **combine well**.
 
     ```bash
     nextflow run main.nf \
-      --input csv/preprocessed.csv \
+      --input results/csv/preprocessed.csv \
       --outdir results \
       --start registration \
       -profile docker \
@@ -130,7 +130,7 @@ A common loop: registration is good, but you want to try different segmentation 
 
 ```bash
 nextflow run main.nf \
-  --input csv/registered.csv \
+  --input results/csv/registered.csv \
   --outdir results \
   --start postprocessing --stop postprocessing \
   --seg_method instantseg \
@@ -144,10 +144,10 @@ Change a parameter, re-run, compare outputs in `--outdir` — no preprocessing o
 ## Gotchas
 
 !!! warning "Read before you resume"
-    - **Run from the same launch directory.** Checkpoints live in `./csv/`, relative to where you launched. Resume from a different directory and `--input csv/registered.csv` won't be found.
-    - **Keep `--outdir` consistent.** Checkpoint CSVs reference prior outputs by **absolute path**. If you point a later stage at a different `--outdir` (or move the results), those paths break. Use the same `--outdir` across stages.
+    - **Point `--input` at the checkpoint under `--outdir`.** Checkpoints live in `<outdir>/csv/`, in one `csv/` folder under your output root — not in the per-patient `<outdir>/<patient_id>/csv/` subtree. Use the matching `<outdir>/csv/...` path for `--input` when you resume.
+    - **Keep `--outdir` consistent.** Checkpoint CSVs reference prior outputs by **absolute path**, and they live under `--outdir` themselves. If you point a later stage at a different `--outdir` (or move the results), those paths break. Use the same `--outdir` across stages.
     - **Don't move or rename the work directory** if you intend to `-resume` — the cache lives in `work/`.
-    - **Checkpoints aggregate all patients.** One `csv/preprocessed.csv` covers every patient from the run; you don't assemble per-patient files.
+    - **Checkpoints aggregate all patients.** One `<outdir>/csv/preprocessed.csv` covers every patient from the run; you don't assemble per-patient files.
     - **Editing a checkpoint is allowed.** It's a plain CSV with the columns the next stage needs — you can drop a patient or fix a path by hand. See [Input Format](input_spec.md).
 
 ---

@@ -15,7 +15,6 @@ This is the practical command reference for running MIRAGE. For the full paramet
 | `--outdir` | param | yes | Output root directory. Results, QC, and checkpoints reference paths here. |
 | `--start` | param | no | Entry stage: `preprocessing` (default), `registration`, or `postprocessing`. |
 | `--stop` | param | no | Last stage to run. Omitted = run to the end. Same three values. |
-| `--savedir` | param | no | Optional archive location; finalized results are also copied here. |
 | `--dry_run true` | param | no | Validate inputs and the samplesheet, then exit without running tasks. |
 | `-profile` | option | no | Execution/config profiles, comma-combined (e.g. `docker,test`). |
 | `-params-file` | option | no | JSON preset of parameters, e.g. `params/full_pipeline.json`. |
@@ -56,11 +55,11 @@ This is the practical command reference for running MIRAGE. For the full paramet
 
 === "Resume at registration"
 
-    Feed the checkpoint that preprocessing wrote to `csv/`.
+    Feed the checkpoint that preprocessing wrote to `<outdir>/csv/`.
 
     ```bash
     nextflow run main.nf \
-      --input csv/preprocessed.csv \
+      --input results/csv/preprocessed.csv \
       --outdir results \
       --start registration \
       -profile docker \
@@ -69,11 +68,11 @@ This is the practical command reference for running MIRAGE. For the full paramet
 
 === "Resume at postprocessing"
 
-    Feed the checkpoint that registration wrote to `csv/`.
+    Feed the checkpoint that registration wrote to `<outdir>/csv/`.
 
     ```bash
     nextflow run main.nf \
-      --input csv/registered.csv \
+      --input results/csv/registered.csv \
       --outdir results \
       --start postprocessing \
       -profile docker \
@@ -92,8 +91,8 @@ This is the practical command reference for running MIRAGE. For the full paramet
       --dry_run true
     ```
 
-!!! danger "Checkpoint paths are `csv/...`, not `results/<patient>/csv/...`"
-    Checkpoint CSVs are written to **`csv/`** in your **launch directory** — one aggregated file per stage, covering all patients. They are **not** under `--outdir` and **not** per-patient. Run resume commands from the same working directory you launched the first run from. Details in [Restartability & Checkpoints](restartability_guide.md).
+!!! danger "Checkpoint paths are `<outdir>/csv/...`, not `<outdir>/<patient>/csv/...`"
+    Checkpoint CSVs are written to one `csv/` folder directly under `--outdir` — one aggregated file per stage, covering all patients. They are **not** in the per-patient `<outdir>/<patient_id>/csv/` subtree. Keep `--outdir` consistent across stages so resume commands point `--input` at the right file. Details in [Restartability & Checkpoints](restartability_guide.md).
 
 ---
 
@@ -133,8 +132,8 @@ JSON presets in `params/` set sensible defaults for common scenarios. Load one w
 |---|---|
 | `params/full_pipeline.json` | All stages, starting from preprocessing. |
 | `params/preprocessing_only.json` | Preprocessing alone. |
-| `params/registration_only.json` | Registration from a `csv/preprocessed.csv` checkpoint. |
-| `params/postprocessing_only.json` | Postprocessing from a `csv/registered.csv` checkpoint. |
+| `params/registration_only.json` | Registration from a `<outdir>/csv/preprocessed.csv` checkpoint. |
+| `params/postprocessing_only.json` | Postprocessing from a `<outdir>/csv/registered.csv` checkpoint. |
 | `params/test.json` | Minimal test run. |
 
 ```bash

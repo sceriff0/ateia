@@ -169,11 +169,11 @@ Morphology is computed **once per patient** by `EXTRACT_CELL_PROPERTIES` (scikit
 
 ## From CSV to GeoJSON
 
-`EXPORT_GEOJSON` consumes `merged_quant.csv` (and the simplified `contours.json`) to produce two artifacts under `<outdir>/<patient>/geojson/`:
+`EXPORT_GEOJSON` consumes `merged_quant.csv` (and the simplified `contours.json`) to produce **one combined** GeoJSON plus a companion CSV under `<outdir>/<patient>/geojson/`:
 
 | File | Purpose |
 | --- | --- |
-| `cells.geojson` | Per-cell polygons with **QuPath-native measurement names**, ready to drop into QuPath. |
+| `cells.geojson` | A single per-patient FeatureCollection — one feature per cell, with **QuPath-native measurement names**, ready to drop into QuPath. |
 | `cells_data.csv` | Flat per-cell table including **per-marker z-scores**. |
 
 The GeoJSON measurement names follow QuPath conventions, for example:
@@ -182,6 +182,8 @@ The GeoJSON measurement names follow QuPath conventions, for example:
 - `"Area µm²"`
 - `"Eccentricity"`
 - one measurement per marker (plus its z-score in `cells_data.csv`)
+
+When `--quantify_compartments` is on, the per-compartment columns `"<MARKER>: Nucleus: Mean"`, `"<MARKER>: Cytoplasm: Mean"`, and `"<MARKER>: Cell: Mean"` (note the space after each colon) flow straight into the GeoJSON `measurements` array, and each feature becomes a QuPath `cell` carrying both the whole-cell `geometry` and a `nucleusGeometry`. These per-compartment keys are **exactly what the [FlowPath ecosystem](flowpath.md)'s GatingTree and qUMAP read** downstream.
 
 See [export](export.md) for the full GeoJSON schema and [outputs](outputs.md) for where everything lands on disk.
 

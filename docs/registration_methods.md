@@ -9,7 +9,7 @@ Get this right and a cell's CD8 reading and its PANCK reading come from the same
 
     ```bash
     nextflow run . \
-      --input csv/preprocessed.csv \
+      --input results/csv/preprocessed.csv \
       --start registration --stop registration \
       --outdir results
     ```
@@ -179,7 +179,7 @@ Panels of different sizes can be padded to a common canvas before alignment so t
 ```bash
 # Skip registration QC on a large cohort
 nextflow run . \
-  --input csv/preprocessed.csv \
+  --input results/csv/preprocessed.csv \
   --start registration \
   --skip_registration_qc true \
   --outdir results
@@ -191,7 +191,7 @@ For a **quantitative** measure of alignment quality — not just a visual overla
 
 ```bash
 nextflow run . \
-  --input csv/preprocessed.csv \
+  --input results/csv/preprocessed.csv \
   --start registration \
   --enable_feature_error true \
   --feature_detector superpoint \
@@ -239,13 +239,13 @@ Memory scales with the attempt number, so a first-attempt OOM is retried with mo
 | `<outdir>/<patient_id>/registered/summary/` | REGISTER | VALIS error summary CSV |
 | `<outdir>/<patient_id>/qc/registration/qc/` | GENERATE_REGISTRATION_QC | RGB overlays |
 | `<outdir>/<patient_id>/feature_distances/` | feature error (optional) | Feature-distance results |
-| `csv/registered.csv` (launch dir) | stage checkpoint | One row per registered image, all patients |
+| `<outdir>/csv/registered.csv` | stage checkpoint | One row per registered image, all patients |
 
 Resume the next stage with:
 
 ```bash
 nextflow run . \
-  --input csv/registered.csv \
+  --input results/csv/registered.csv \
   --start postprocessing \
   --outdir results
 ```

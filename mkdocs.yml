@@ -11,16 +11,21 @@ edit_uri: edit/main/docs/
 copyright: >-
   Copyright &copy; MIRAGE Team — released under the MIT License.
 
+# Author-facing helper files that should not become published pages
+exclude_docs: |
+  assets/images/README.md
+  superpowers/
+
 # ---------------------------------------------------------------------------
 # Theme
 # ---------------------------------------------------------------------------
 theme:
   name: material
   language: en
+  logo: assets/logo.png
+  favicon: assets/favicon.png
   icon:
     repo: fontawesome/brands/github
-    logo: material/microscope
-  favicon: assets/favicon.png
   palette:
     # Light mode
     - media: "(prefers-color-scheme: light)"
@@ -102,6 +107,8 @@ nav:
       - Segmentation: segmentation.md
       - Quantification: quantification.md
       - Visualization & Export: export.md
+  - Downstream:
+      - FlowPath Ecosystem: flowpath.md
   - Reference:
       - CLI & Usage: usage.md
       - Parameters: parameters.md

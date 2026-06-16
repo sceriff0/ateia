@@ -85,12 +85,12 @@ nextflow run . \
 
 ## Running a single stage, or resuming a later one
 
-Each stage writes a **checkpoint CSV** into `csv/` **in your launch directory** — not under `--outdir`, and not per-patient. Each file is a single CSV aggregating all patients. Feed one back in with a matching `--start` to resume.
+Each stage writes a **checkpoint CSV** into one `csv/` folder directly under `--outdir` — aggregated across all patients, not in the per-patient `<outdir>/<patient_id>/csv/` subtree. Each file is a single CSV aggregating all patients. Feed one back in with a matching `--start` to resume.
 
 ```text
-csv/preprocessed.csv     # written after preprocessing
-csv/registered.csv       # written after registration
-csv/postprocessed.csv    # written after postprocessing
+<outdir>/csv/preprocessed.csv     # written after preprocessing
+<outdir>/csv/registered.csv       # written after registration
+<outdir>/csv/postprocessed.csv    # written after postprocessing
 ```
 
 === "Single stage only"
@@ -108,7 +108,7 @@ csv/postprocessed.csv    # written after postprocessing
     Feed the preprocessing checkpoint back in:
 
     ```bash
-    nextflow run . --input csv/preprocessed.csv --outdir results \
+    nextflow run . --input results/csv/preprocessed.csv --outdir results \
       --start registration -profile docker -resume
     ```
 
@@ -117,7 +117,7 @@ csv/postprocessed.csv    # written after postprocessing
     Feed the registration checkpoint back in:
 
     ```bash
-    nextflow run . --input csv/registered.csv --outdir results \
+    nextflow run . --input results/csv/registered.csv --outdir results \
       --start postprocessing -profile docker -resume
     ```
 
@@ -138,7 +138,7 @@ Once a run starts, here's how to confirm each stage actually produced something:
 
 | After this stage | Look for | Where |
 |---|---|---|
-| Preprocessing | `csv/preprocessed.csv` | launch directory `csv/` |
+| Preprocessing | `<outdir>/csv/preprocessed.csv` | `<outdir>/csv/` |
 | Registration | `registered/` (per patient) | `<outdir>/<patient_id>/registered/` |
 | Postprocessing | `geojson/` and `pyramid/` (per patient) | `<outdir>/<patient_id>/` |
 

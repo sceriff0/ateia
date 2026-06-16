@@ -40,14 +40,14 @@ flowchart LR
     C --> F[GENERATE_PREPROCESS_QC]
     D --> F
     F -->|before/after PNGs| G[qc/preprocess/qc/]
-    E --> H[csv/preprocessed.csv]
+    E --> H[&lt;outdir&gt;/csv/preprocessed.csv]
 ```
 
-The checkpoint CSV `csv/preprocessed.csv` is written to the **launch directory** (not `--outdir`) and lists every patient's corrected images. You resume from it with:
+The checkpoint CSV `<outdir>/csv/preprocessed.csv` is written to a single top-level `csv/` folder under `--outdir` and lists every patient's corrected images. You resume from it with:
 
 ```bash
 nextflow run . \
-  --input csv/preprocessed.csv \
+  --input results/csv/preprocessed.csv \
   --start registration \
   --outdir results
 ```
@@ -183,7 +183,7 @@ These per-patient QC images are also rolled into the global HTML report at `<out
 | `<outdir>/<patient_id>/converted/` | CONVERT_IMAGE | Standardized OME-TIFF (CYX, DAPI at ch 0) |
 | `<outdir>/<patient_id>/preprocessed/` | PREPROCESS | `*_corrected.ome.tif` |
 | `<outdir>/<patient_id>/qc/preprocess/qc/` | GENERATE_PREPROCESS_QC | Before/after PNGs |
-| `csv/preprocessed.csv` (launch dir) | stage checkpoint | One row per corrected image, all patients |
+| `<outdir>/csv/preprocessed.csv` | stage checkpoint | One row per corrected image, all patients |
 
 ---
 
@@ -203,7 +203,7 @@ These per-patient QC images are also rolled into the global HTML report at `<out
 
     ---
 
-    Restart a later stage from `csv/preprocessed.csv`.
+    Restart a later stage from `<outdir>/csv/preprocessed.csv`.
 
     [→ restartability_guide.md](restartability_guide.md)
 

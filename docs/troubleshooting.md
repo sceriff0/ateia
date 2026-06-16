@@ -86,8 +86,8 @@ The pipeline validates a small set of enums at startup via `lib/ParamUtils.groov
 | `--start` | Key column expected | Typical source |
 |-----------|---------------------|----------------|
 | `preprocessing` | `path_to_file` | your raw samplesheet |
-| `registration` | `preprocessed_image` | `csv/preprocessed.csv` |
-| `postprocessing` | `registered_image` | `csv/registered.csv` |
+| `registration` | `preprocessed_image` | `<outdir>/csv/preprocessed.csv` |
+| `postprocessing` | `registered_image` | `<outdir>/csv/registered.csv` |
 
 All three also require `patient_id`, `is_reference`, and `channels`. See the [Input Format](input_spec.md) page for the exact column schemas.
 
@@ -96,16 +96,16 @@ All three also require `patient_id`, `is_reference`, and `channels`. See the [In
 
 ## Where are my checkpoint CSVs?
 
-After each stage finishes, MIRAGE writes a single resume-ready CSV (covering **all** patients) into a `csv/` folder in your **launch directory** — the directory you ran `nextflow run` from, *not* `--outdir`:
+After each stage finishes, MIRAGE writes a single resume-ready CSV (covering **all** patients) into one `csv/` folder directly under `--outdir`:
 
 ```text
-./csv/preprocessed.csv     # written after preprocessing  → feeds --start registration
-./csv/registered.csv       # written after registration   → feeds --start postprocessing
-./csv/postprocessed.csv    # written after postprocessing
+<outdir>/csv/preprocessed.csv     # written after preprocessing  → feeds --start registration
+<outdir>/csv/registered.csv       # written after registration   → feeds --start postprocessing
+<outdir>/csv/postprocessed.csv    # written after postprocessing
 ```
 
-!!! danger "They are NOT under `<outdir>/<patient>/csv/`"
-    A frequent source of confusion: people look for the checkpoint under the per-patient output tree and don't find it. The resume CSVs are aggregated, one file each, in `./csv/` relative to where you launched the run.
+!!! danger "They are NOT under `<outdir>/<patient_id>/csv/`"
+    A frequent source of confusion: people look for the checkpoint under the per-patient output tree and don't find it. The resume CSVs are aggregated, one file each, in `<outdir>/csv/` — not in the per-patient subtree.
 
 Resume a later stage by pointing `--input` at the right file:
 
@@ -113,7 +113,7 @@ Resume a later stage by pointing `--input` at the right file:
 
     ```bash
     nextflow run sceriff0/mirage -profile docker \
-      --input csv/preprocessed.csv \
+      --input results/csv/preprocessed.csv \
       --start registration \
       --outdir results
     ```
@@ -122,7 +122,7 @@ Resume a later stage by pointing `--input` at the right file:
 
     ```bash
     nextflow run sceriff0/mirage -profile docker \
-      --input csv/registered.csv \
+      --input results/csv/registered.csv \
       --start postprocessing \
       --outdir results
     ```

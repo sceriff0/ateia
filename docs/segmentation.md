@@ -1,6 +1,6 @@
 # Cell Segmentation
 
-Segmentation is where MIRAGE turns a registered, multichannel image into **objects** — one integer label per cell. Everything downstream (per-cell [quantification](quantification.md), morphology, and the [GeoJSON export](export.md)) is built on top of the masks produced here, so this is one of the most consequential choices in the pipeline.
+Segmentation is where MIRAGE turns a registered, multichannel image into **objects** — one integer label per cell. Everything downstream (per-cell [quantification](quantification.md), morphology, the [GeoJSON export](export.md), and ultimately gating in the [FlowPath ecosystem](flowpath.md)) is built on top of the masks produced here, so this is one of the most consequential choices in the pipeline.
 
 The decision you actually face is short: **which backend best matches your data and your hardware?** This page walks you through that choice and then documents each of the three backends in depth.
 
@@ -17,6 +17,8 @@ Regardless of backend, `SEGMENT` emits exactly **two integer-label masks** (plus
 | `*_cell_mask.tif` | One integer label per **whole-cell** instance | `uint32` |
 
 In both masks, background is `0` and each object carries a unique positive integer ID. Label `C` in the cell mask is the cell whose nucleus may carry a different ID in the nuclei mask — the masks are **independent label fields**, not a paired nucleus→cell mapping. (This matters for [compartment quantification](quantification.md#compartment-quantification), which intersects the two masks pixel-wise rather than matching labels.)
+
+Both masks are **published per patient** to `<outdir>/<patient_id>/segmentation/` as `*_cell_mask.tif` and `*_nuclei_mask.tif`. The whole-cell and nuclei masks both flow downstream: [compartment quantification](quantification.md#compartment-quantification) consumes the **nuclei mask** (intersected with the cell mask) to split signal into nucleus / cytoplasm / cell.
 
 ```mermaid
 flowchart LR

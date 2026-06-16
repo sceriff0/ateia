@@ -48,9 +48,9 @@ flowchart TB
       SEG --> MP
     end
     RAW[(Raw WSI panels)] --> PRE
-    PRE -->|csv/preprocessed.csv| REG
-    REG -->|csv/registered.csv| POST
-    POST -->|csv/postprocessed.csv| OUT[(GeoJSON · pyramid ·<br/>quant tables)]
+    PRE -->|&lt;outdir&gt;/csv/preprocessed.csv| REG
+    REG -->|&lt;outdir&gt;/csv/registered.csv| POST
+    POST -->|&lt;outdir&gt;/csv/postprocessed.csv| OUT[(GeoJSON · pyramid ·<br/>quant tables)]
 ```
 
 !!! info "Solid vs dashed"
@@ -77,8 +77,8 @@ static boolean shouldRun(String targetStep, String start, String stop) {
 |---|---|
 | Run everything from raw images | `--start preprocessing` (default `--stop` = end) |
 | Stop after registration | `--start preprocessing --stop registration` |
-| Resume from a registration checkpoint | `--start registration --input csv/preprocessed.csv` |
-| Run only postprocessing | `--start postprocessing --input csv/registered.csv` |
+| Resume from a registration checkpoint | `--start registration --input <outdir>/csv/preprocessed.csv` |
+| Run only postprocessing | `--start postprocessing --input <outdir>/csv/registered.csv` |
 | Run a single stage in isolation | `--start X --stop X` |
 
 If `--start` and `--stop` are inconsistent (e.g. stop *before* start), the
@@ -95,7 +95,7 @@ pipeline fails fast at launch with a clear message. See
     | `PREPROCESS` | BaSiC flatfield/darkfield illumination correction, FOV-tiled |
     | `GENERATE_PREPROCESS_QC` | Per-channel before/after thumbnails *(optional)* |
 
-    **Emits** `csv/preprocessed.csv`. Deep dive: [Preprocessing](preprocessing.md).
+    **Emits** `<outdir>/csv/preprocessed.csv`. Deep dive: [Preprocessing](preprocessing.md).
 
 === "② Registration"
 
@@ -106,7 +106,7 @@ pipeline fails fast at launch with a clear message. See
     | `GENERATE_REGISTRATION_QC` | RGB alignment overlays *(optional)* |
     | `ESTIMATE_FEATURE_DISTANCES` | Feature-based registration error *(only if `--enable_feature_error`)* |
 
-    **Emits** `csv/registered.csv`. Deep dives:
+    **Emits** `<outdir>/csv/registered.csv`. Deep dives:
     [Registration](registration_methods.md) ·
     [Error metrics](registration_errors.md) ·
     [Feature distances](estimate_feature_distances.md).
@@ -124,7 +124,7 @@ pipeline fails fast at launch with a clear message. See
     | `MERGE_AND_PYRAMID` | Pyramidal OME-TIFF for visualization |
     | `GENERATE_POSTPROCESSING_QC` | Segmentation/intensity QC plots *(optional)* |
 
-    **Emits** `csv/postprocessed.csv`. Deep dives:
+    **Emits** `<outdir>/csv/postprocessed.csv`. Deep dives:
     [Segmentation](segmentation.md) ·
     [Quantification](quantification.md) ·
     [Visualization & export](export.md).

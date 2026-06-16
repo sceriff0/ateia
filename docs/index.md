@@ -57,6 +57,11 @@ The three stages — **preprocessing → registration → postprocessing** — a
 independently restartable, so you can re-run just the part you're tuning. See
 [Pipeline Architecture](workflow.md) for the full data flow.
 
+<!-- Want a real screenshot montage here? Drop a file at assets/images/hero-overview.png
+     and uncomment the next line (see docs/assets/images/README.md for all slots):
+![MIRAGE results overview](assets/images/hero-overview.png) -->
+
+
 ## Choose your path
 
 <div class="grid cards" markdown>

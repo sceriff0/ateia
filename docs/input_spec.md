@@ -9,7 +9,7 @@ The required columns change depending on *where you enter the pipeline* (`--star
     - Exactly **one** `is_reference=true` row per patient.
     - `channels` is pipe-separated, in acquisition order, and **must include DAPI**.
     - The column that points to the image depends on `--start`: `path_to_file` → `preprocessed_image` → `registered_image`.
-    - You rarely write the registration/postprocessing samplesheets by hand — earlier stages emit them for you under `csv/`. See [Restartability & Checkpoints](restartability_guide.md).
+    - You rarely write the registration/postprocessing samplesheets by hand — earlier stages emit them for you under `<outdir>/csv/`. See [Restartability & Checkpoints](restartability_guide.md).
 
 ---
 
@@ -97,7 +97,7 @@ P002,/abs/path/preprocessed/P002_panel2_corrected.ome.tif,false,DAPI|FOXP3|KI67|
 ```
 
 !!! success "You don't have to build this by hand"
-    Preprocessing writes exactly this file to **`csv/preprocessed.csv`** in your launch directory, aggregating every patient. Point `--input` straight at it. See [Restartability & Checkpoints](restartability_guide.md).
+    Preprocessing writes exactly this file to **`<outdir>/csv/preprocessed.csv`** — one `csv/` folder under `--outdir`, aggregating every patient. Point `--input` straight at it. See [Restartability & Checkpoints](restartability_guide.md).
 
 ---
 
@@ -121,7 +121,7 @@ P002,/abs/path/registered/P002_panel2_registered.ome.tiff,false,DAPI|FOXP3|KI67|
 ```
 
 !!! success "Generated for you"
-    Registration writes **`csv/registered.csv`** in your launch directory — a ready-made postprocessing samplesheet for all patients. See [Restartability & Checkpoints](restartability_guide.md).
+    Registration writes **`<outdir>/csv/registered.csv`** — one `csv/` folder under `--outdir`, a ready-made postprocessing samplesheet for all patients. See [Restartability & Checkpoints](restartability_guide.md).
 
 ---
 
@@ -202,13 +202,13 @@ P002,/abs/path/registered/P002_panel2_registered.ome.tiff,false,DAPI|FOXP3|KI67|
     To stain a patient across multiple panels, add one row per panel sharing the same `patient_id`. Mark one as `is_reference=true`; the rest are moving panels that get registered onto the reference. They can carry **different channel sets** — only DAPI needs to be common (it anchors registration and segmentation).
 
 ??? tip "Checkpoint CSVs double as samplesheets"
-    Every stage emits an aggregated checkpoint CSV under `csv/` in your launch directory:
+    Every stage emits an aggregated checkpoint CSV under one `csv/` folder directly beneath `--outdir`:
 
     | After stage | File | Use as `--input` for |
     |---|---|---|
-    | preprocessing | `csv/preprocessed.csv` | `--start registration` |
-    | registration | `csv/registered.csv` | `--start postprocessing` |
-    | postprocessing | `csv/postprocessed.csv` | manifest of final outputs |
+    | preprocessing | `<outdir>/csv/preprocessed.csv` | `--start registration` |
+    | registration | `<outdir>/csv/registered.csv` | `--start postprocessing` |
+    | postprocessing | `<outdir>/csv/postprocessed.csv` | manifest of final outputs |
 
     These already carry the correct columns for the next stage — no manual editing. Full workflow in [Restartability & Checkpoints](restartability_guide.md).
 
@@ -217,6 +217,6 @@ P002,/abs/path/registered/P002_panel2_registered.ome.tiff,false,DAPI|FOXP3|KI67|
 ## Related pages
 
 - [CLI & Usage](usage.md) — how to invoke runs with `--input`, `--start`, `--stop`.
-- [Restartability & Checkpoints](restartability_guide.md) — resuming from `csv/*.csv`.
+- [Restartability & Checkpoints](restartability_guide.md) — resuming from `<outdir>/csv/*.csv`.
 - [Workflow](workflow.md) — what each stage does to your images.
 - [Outputs](outputs.md) — what lands in `--outdir`.

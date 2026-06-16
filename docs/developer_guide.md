@@ -290,6 +290,46 @@ Continuous integration (`.github/workflows/ci.yml`) mirrors the local tiers:
 
 ---
 
+## Documentation (this site)
+
+This site is built with **MkDocs + Material** (config: [`mkdocs.yml`](https://github.com/sceriff0/mirage/blob/main/mkdocs.yml)) and hosted on **Read the Docs**. Pages live in `docs/*.md`; pinned build deps are in `docs/requirements.txt`.
+
+Build and preview locally:
+
+```bash
+pip install -r docs/requirements.txt
+mkdocs serve            # live-reload preview at http://127.0.0.1:8000
+mkdocs build --strict   # fail on broken internal links (what to run before pushing)
+```
+
+### How Read the Docs stays in sync with GitHub
+
+Read the Docs **rebuilds automatically on every push** once the repository is
+connected — you don't trigger builds manually. The wiring:
+
+1. **Connect the repo once** (one-time, on the Read the Docs dashboard): *Import a
+   Project* → pick `sceriff0/mirage`. This installs a GitHub **webhook** (or uses
+   the Read the Docs GitHub App) that pings RTD on every push and merge.
+2. **Each push** to the tracked branch (e.g. `main`) fires the webhook → RTD
+   pulls the new commit, reads [`.readthedocs.yaml`](https://github.com/sceriff0/mirage/blob/main/.readthedocs.yaml), installs `docs/requirements.txt`, runs `mkdocs build`, and publishes — usually live within a couple of minutes.
+3. **Pull-request previews** (optional, enable in *Settings → Advanced*): RTD
+   builds the docs for each PR and posts a preview link, so doc changes are
+   reviewable before merge.
+
+!!! tip "Why `.readthedocs.yaml` unshallows the clone"
+    The page "last updated" dates come from the `git-revision-date-localized`
+    plugin, which needs full git history. Read the Docs clones shallow by default,
+    so the config runs `git fetch --unshallow` in a `post_checkout` job. Leave that
+    in place or the dates fall back to the build date.
+
+!!! note "Catching doc breakage in CI"
+    Read the Docs publishes but does not *gate* merges. To fail a PR on a broken
+    internal link, add a job that runs `mkdocs build --strict` (it passes in CI
+    because committed files have git history). This is optional and not currently
+    wired into `ci.yml`.
+
+---
+
 ## See also
 
 <div class="grid cards" markdown>

@@ -71,7 +71,7 @@ Short, practical answers to the questions users ask most. Click a question to ex
 
     ```bash
     nextflow run sceriff0/mirage -profile docker \
-      --input csv/preprocessed.csv --start registration --stop registration --outdir results
+      --input results/csv/preprocessed.csv --start registration --stop registration --outdir results
     ```
 
     Both `--start` and `--stop` accept `preprocessing`, `registration`, or `postprocessing`. See [Restartability Guide](restartability_guide.md).
@@ -80,22 +80,22 @@ Short, practical answers to the questions users ask most. Click a question to ex
     The pipeline runs from `--start` all the way to the end (postprocessing). `--stop` only matters when you want to halt early.
 
 ??? question "Where are the checkpoint CSVs?"
-    In a `csv/` folder in your **launch directory** (where you ran `nextflow run`), **not** under `--outdir`:
+    In one `csv/` folder directly under `--outdir`, aggregated across all patients:
 
     ```text
-    ./csv/preprocessed.csv
-    ./csv/registered.csv
-    ./csv/postprocessed.csv
+    <outdir>/csv/preprocessed.csv
+    <outdir>/csv/registered.csv
+    <outdir>/csv/postprocessed.csv
     ```
 
-    Each is a single file covering all patients. They are **not** under `<outdir>/<patient>/csv/`. See [Troubleshooting → Where are my checkpoint CSVs](troubleshooting.md#where-are-my-checkpoint-csvs).
+    Each is a single file covering all patients. They are **not** in the per-patient `<outdir>/<patient_id>/csv/` subtree. See [Troubleshooting → Where are my checkpoint CSVs](troubleshooting.md#where-are-my-checkpoint-csvs).
 
 ??? question "How do I resume just postprocessing?"
     Feed the registration checkpoint and start there:
 
     ```bash
     nextflow run sceriff0/mirage -profile docker \
-      --input csv/registered.csv --start postprocessing --outdir results
+      --input results/csv/registered.csv --start postprocessing --outdir results
     ```
 
     See [Restartability Guide](restartability_guide.md).

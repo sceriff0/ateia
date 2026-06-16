@@ -4,6 +4,11 @@ build:
   os: ubuntu-22.04
   tools:
     python: "3.11"
+  jobs:
+    # The git-revision-date plugin needs full history; Read the Docs clones
+    # shallow by default, so unshallow before the build (no-op if already full).
+    post_checkout:
+      - git fetch --unshallow || true
 
 mkdocs:
   configuration: mkdocs.yml
