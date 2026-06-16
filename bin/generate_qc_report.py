@@ -86,8 +86,10 @@ def parse_feature_dist_json(json_path):
     before_mean = None
     after_mean  = None
     if isinstance(data, dict):
-        before = data.get("before") or data.get("pre") or {}
-        after  = data.get("after")  or data.get("post") or {}
+        # Use `is not None` (not `or`): a perfectly-aligned panel can have a
+        # before/after mean of 0, which `or` would wrongly treat as missing.
+        before = data["before"] if data.get("before") is not None else data.get("pre") or {}
+        after  = data["after"]  if data.get("after")  is not None else data.get("post") or {}
         if isinstance(before, dict):
             before_mean = before.get("mean")
         if isinstance(after, dict):

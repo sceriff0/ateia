@@ -91,8 +91,12 @@ def split_multichannel_tiff(input_path, output_dir, is_reference=False, channel_
     skipped_count = 0
 
     for i, name in enumerate(channel_names):
-        # Check if this is DAPI channel (by name or by position 0 when using fallback names)
-        is_dapi = name.upper() == 'DAPI'
+        # Check if this is DAPI channel. Use substring match to stay consistent
+        # with convert_image.py's DAPI detection ('DAPI' in ch.upper()) — an
+        # exact match here would miss names like 'DAPI_nuclear' that convert_image
+        # already moved to channel 0, causing the DAPI-equivalent to be wrongly
+        # saved for non-reference images.
+        is_dapi = 'DAPI' in name.upper()
 
         # Skip DAPI if this is not the reference image
         if is_dapi and not is_reference:
