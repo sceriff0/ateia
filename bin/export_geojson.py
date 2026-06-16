@@ -279,7 +279,7 @@ def _write_collection(features: List[Dict], output_path: str) -> None:
         json.dump({"type": "FeatureCollection", "features": features}, f)
 
 
-def export_compartment_geojsons(
+def export_combined_geojson(
     df: pd.DataFrame,
     output_dir: str,
     pixel_size: float,
@@ -288,18 +288,13 @@ def export_compartment_geojsons(
     nucleus_contours: Optional[Dict[str, List[List[float]]]],
     prefix: str = 'cells',
 ) -> Dict[str, int]:
-    """Export the dual-segmentation GeoJSON set for per-compartment quantification.
+    """Export one combined GeoJSON for per-compartment quantification.
 
-    Writes three files (the "Both" representation):
-
-    - ``<prefix>.geojson``           -- combined QuPath **cell** objects: whole-cell
-      polygon as ``geometry`` + nucleus polygon as top-level ``nucleusGeometry``.
-      This is the file FlowPath / qUMAP / annomask consume; QuPath toggles the
-      drawn outline (nucleus vs cell) natively.
-    - ``nuclei.geojson``             -- detection objects whose geometry is the
-      nucleus polygon (single-geometry object set), same per-compartment measurements.
-    - ``cells_wholecell.geojson``    -- detection objects whose geometry is the
-      whole-cell polygon, same measurements.
+    Writes a single ``<prefix>.geojson`` of QuPath-native **cell** objects: the
+    whole-cell polygon as ``geometry`` and the nucleus polygon as top-level
+    ``nucleusGeometry``, carrying all per-compartment measurements. This is the
+    file FlowPath / qUMAP / annomask consume; QuPath toggles the drawn outline
+    (nucleus vs cell) natively, so no separate nuclei/whole-cell files are needed.
 
     ``nucleus_contours`` must be keyed by **cell label** (re-keyed upstream by
     EXTRACT_NUCLEI_PROPERTIES via ``--reference_mask``), so lookup is a plain
@@ -308,8 +303,7 @@ def export_compartment_geojsons(
     color_int = rgb_to_qupath_color(*CELL_COLOR_RGB)
 
     cells_combined: List[Dict] = []
-    nuclei_only: List[Dict] = []
-    cells_wholecell: List[Dict] = []
+    n_with_nucleus = 0
     skipped = 0
 
     for idx, row in df.iterrows():
@@ -328,36 +322,24 @@ def export_compartment_geojsons(
             "type": "Point", "coordinates": [x_corner, y_corner],
         }
         nucleus_geom = _polygon_geometry(nucleus_contours, label_str)
+        if nucleus_geom is not None:
+            n_with_nucleus += 1
 
         measurements = build_measurements(row, marker_cols, pixel_size)
 
-        # Combined cell object (geometry = cell, nucleusGeometry = nucleus).
         cells_combined.append(build_feature(
             measurements, cell_geom, color_int,
             object_type="cell", nucleus_geometry=nucleus_geom, object_id=None,
         ))
-        # Whole-cell-only detection (single-geometry object set).
-        cells_wholecell.append(build_feature(measurements, cell_geom, color_int))
-        # Nucleus-only detection (skip cells without a nucleus polygon).
-        if nucleus_geom is not None:
-            nuclei_only.append(build_feature(measurements, nucleus_geom, color_int))
 
     out = Path(output_dir)
     combined_path = str(out / f'{prefix}.geojson')
-    nuclei_path = str(out / 'nuclei.geojson')
-    wholecell_path = str(out / 'cells_wholecell.geojson')
     _write_collection(cells_combined, combined_path)
-    _write_collection(nuclei_only, nuclei_path)
-    _write_collection(cells_wholecell, wholecell_path)
 
-    counts = {
-        prefix: len(cells_combined),
-        'nuclei': len(nuclei_only),
-        'cells_wholecell': len(cells_wholecell),
-    }
+    counts = {prefix: len(cells_combined)}
     logger.info(
-        f"  Dual-segmentation export: {counts[prefix]} cell objects "
-        f"({len(nuclei_only)} with nucleus), skipped {skipped}"
+        f"  Combined export: {len(cells_combined)} cell objects "
+        f"({n_with_nucleus} with nucleus), skipped {skipped}"
     )
     return counts
 
@@ -383,8 +365,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--nucleus_contours_json', type=str, default=None,
         help='Path to nucleus contours JSON re-keyed to cell labels (from '
-             'EXTRACT_NUCLEI_PROPERTIES). When given, enables the dual-segmentation export '
-             '(combined cell+nucleus objects + separate nuclei/cells files).',
+             'EXTRACT_NUCLEI_PROPERTIES). When given, each cell in the single combined '
+             'cells.geojson gets a top-level nucleusGeometry field for per-compartment quantification.',
     )
     parser.add_argument(
         '--pixel_size', type=float, default=0.325,
@@ -430,7 +412,7 @@ def main() -> int:
             contours = json.load(f)
         logger.info(f"Loaded contours for {len(contours)} cells")
 
-    # Load nucleus contours (re-keyed to cell labels) for dual-segmentation export
+    # Load nucleus contours (re-keyed to cell labels) for the combined per-compartment export
     nucleus_contours = None
     if args.nucleus_contours_json:
         logger.info(f"Loading nucleus contours: {args.nucleus_contours_json}")
@@ -443,8 +425,8 @@ def main() -> int:
 
     output_geojson = str(Path(args.output_dir) / f'{args.output_prefix}.geojson')
     if nucleus_contours is not None:
-        # Dual-segmentation export: combined cell+nucleus objects + separate files.
-        counts = export_compartment_geojsons(
+        # Per-compartment quantification: one combined cell+nucleus GeoJSON.
+        counts = export_combined_geojson(
             df=cell_df,
             output_dir=args.output_dir,
             pixel_size=args.pixel_size,

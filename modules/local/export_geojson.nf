@@ -28,8 +28,6 @@ process EXPORT_GEOJSON {
     output:
     tuple val(meta), path("export/cells.geojson"), emit: geojson
     tuple val(meta), path("export/cells_data.csv"), emit: csv
-    tuple val(meta), path("export/nuclei.geojson")         , emit: nuclei_geojson    , optional: true
-    tuple val(meta), path("export/cells_wholecell.geojson"), emit: wholecell_geojson , optional: true
     path "versions.yml"                            , emit: versions
     path("*.size.csv")                             , emit: size_log
 
@@ -38,9 +36,8 @@ process EXPORT_GEOJSON {
 
     script:
     def args = task.ext.args ?: ''
-    // Dual-segmentation export when per-compartment quantification is enabled: pass the
-    // nucleus contours (re-keyed to cell labels) so cells get a nucleusGeometry and the
-    // separate nuclei/cells files are written.
+    // Per-compartment quantification: pass the nucleus contours (re-keyed to cell
+    // labels) so each cell gets a nucleusGeometry in the single combined cells.geojson.
     def nucleus_arg = params.quantify_compartments ? "--nucleus_contours_json ${nucleus_contours_json}" : ''
     """
     # Log input size for tracing (-L follows symlinks)
