@@ -251,7 +251,11 @@ def export_geojson(
 
         # Build measurements array (QuPath native format)
         measurements = build_measurements(row, marker_cols, pixel_size)
-        features.append(build_feature(measurements, geometry, color_int))
+        # object_id=None: do not stamp every cell with the same constant id
+        # ("PathDetectionObject"), which QuPath treats as a per-object UUID — a
+        # shared id across all detections breaks re-import. (Matches the
+        # compartment export path, which already passes object_id=None.)
+        features.append(build_feature(measurements, geometry, color_int, object_id=None))
 
     logger.info(f"  Exported {len(features)} cells, skipped {skipped}")
 
