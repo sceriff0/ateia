@@ -55,8 +55,10 @@ geometry). So `cells.geojson` is unchanged in content — we only stop writing t
   - Keep building/writing the combined `cells.geojson` (cell objects with
     `nucleusGeometry` + all compartment measurements).
   - Return value simplifies to `{prefix: <count>}`. Update the log line.
-  - Consider renaming the function (e.g. `export_combined_geojson`) for honesty, or keep
-    the name to minimise churn — decided in the plan.
+  - **Decision:** rename the function `export_compartment_geojsons` →
+    `export_combined_geojson` (it now writes a single combined file, not a compartment
+    set). The **output filename stays `cells.geojson`** — flowpath import and the module's
+    `path("export/cells.geojson")` depend on it, and the user chose to keep that rich file.
 - `modules/local/export_geojson.nf`
   - Remove the two `optional: true` emits (`nuclei_geojson`, `wholecell_geojson`).
   - Update the header/inline comments that describe "the separate nuclei/cells files".
@@ -93,14 +95,11 @@ In `src/main/java/qupath/ext/flowpath/ui/GateEditorPane.java`:
 `updateHistogram()`'s z-score transform (1188-1193) and clip range (1206-1213) come from
 `markerStats`, which is computed per *bare* channel (whole-cell). If we plot a non-default
 compartment's values against whole-cell-derived scaling, the data updates but the axis is
-wrong. Options, to be resolved in the plan:
-- (a) For non-default (compartment, statistic), derive the histogram clip range (and any
-  z-score) from the **resolved column's own** distribution; keep `markerStats` for the
-  default whole-cell-mean case (preserves cross-tree-consistent axes there).
-- (b) Make `markerStats` compartment-aware (larger change).
-Recommendation: (a) — smallest change that makes the displayed axis match the displayed
-data. Confirm whether z-score thresholding is even offered for non-default compartments;
-if not, only the clip range needs handling.
+wrong. **Decision: option (a).** For non-default (compartment, statistic), derive the histogram
+clip range from the **resolved column's own** distribution (percentiles of the resolved
+values); keep `markerStats` for the default whole-cell-mean case (preserves
+cross-tree-consistent axes there). Confirm whether z-score thresholding is offered for
+non-default compartments; if not, only the clip range needs handling.
 
 ## Verification
 
