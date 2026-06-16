@@ -157,10 +157,18 @@ def main() -> None:
 
     merged = merge_intensities(morphology, csv_files)
 
-    # Validate no cells were lost
-    cells_lost = len(morphology) - len(merged)
-    if cells_lost > 0:
-        logger.critical("Lost %d cells during merge", cells_lost)
+    # Validate the row count is exactly preserved. A left merge on 'label' can
+    # both LOSE cells (fewer rows) and FAN OUT (more rows) — the latter happens
+    # when an intensity CSV has duplicate labels, silently duplicating cells into
+    # the GeoJSON and z-score stats. Guard both directions.
+    cells_delta = len(merged) - len(morphology)
+    if cells_delta < 0:
+        logger.critical("Lost %d cells during merge", -cells_delta)
+        sys.exit(1)
+    elif cells_delta > 0:
+        logger.critical(
+            "Merge produced %d rows from %d morphology cells (+%d) — duplicate labels "
+            "in an intensity CSV fanned out the join", len(merged), len(morphology), cells_delta)
         sys.exit(1)
     else:
         logger.info("All %d cells preserved", len(merged))
