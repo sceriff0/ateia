@@ -19,6 +19,7 @@ Prints `est_gb=<float> use_tiler=<true|false>` and writes `<out>` JSON.
 """
 import argparse
 import json
+import os
 import re
 
 import numpy as np
