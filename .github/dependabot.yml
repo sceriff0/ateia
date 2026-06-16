@@ -1,0 +1,34 @@
+# Dependabot keeps the supply chain fresh: GitHub Actions and Python deps.
+# Grouped, weekly PRs keep noise low while closing the "deps silently rot" gap.
+version: 2
+updates:
+  # GitHub Actions used across .github/workflows/*.yml
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: ":arrow_up:"
+    labels:
+      - "dependencies"
+      - "github-actions"
+
+  # Python runtime deps (requirements.txt). The git+ pin (deepcell-types@master)
+  # is not version-managed by Dependabot — that is expected.
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      python:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: ":arrow_up:"
+    labels:
+      - "dependencies"
+      - "python"

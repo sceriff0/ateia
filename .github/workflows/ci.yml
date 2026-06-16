@@ -2,10 +2,22 @@ name: CI
 
 on:
   push:
-    branches: [ main, dev, valis ]
+    branches: [ main, dev ]
   pull_request:
     branches: [ main, dev ]
   workflow_dispatch:  # Allow manual trigger from GitHub UI
+
+# Least-privilege default token: read-only. Individual jobs escalate explicitly
+# (e.g. distributed-integration sets packages read via GHCR login with the
+# built-in token). Hardens against a compromised action writing to the repo.
+permissions:
+  contents: read
+
+# Cancel superseded runs on the same ref to save CI minutes; a new push to a PR
+# branch kills the previous in-flight run instead of stacking them.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   NFTEST_VERSION: '0.9.0'
@@ -335,6 +347,11 @@ jobs:
     name: distributed bit-identical (real image)
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch'
+    # Escalates above the workflow-level read-only default: needs to pull the
+    # patched VALIS image from GHCR.
+    permissions:
+      contents: read
+      packages: read
 
     steps:
       - name: Checkout repository
@@ -371,7 +388,11 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Nextflow
+        # Pin to the supported release for deterministic lint (matches the rest
+        # of the suite); avoids edge-Nextflow surprises in advisory linting.
         uses: nf-core/setup-nextflow@v2
+        with:
+          version: '25.04.0'
 
       - name: Install nf-core tools
         run: |

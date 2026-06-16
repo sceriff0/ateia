@@ -24,10 +24,16 @@ on:
         required: true
         type: string
 
-# bump-and-tag pushes a commit + tag; publish-images needs GHCR write.
+# Least-privilege default: read-only. The two jobs that write (bump-and-tag,
+# release-notes) and publish-images (GHCR) escalate explicitly per-job below.
 permissions:
-  contents: write
-  packages: write
+  contents: read
+
+# Serialize releases per ref but NEVER cancel one in flight — a half-published
+# release (tag pushed, images missing) is worse than a queued one.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   # ===========================================================================
@@ -148,6 +154,9 @@ jobs:
     needs: [validate, test]
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch'
+    # Pushes the version-bump commit + git tag to main.
+    permissions:
+      contents: write
     steps:
       - name: Checkout repository (main, full history)
         uses: actions/checkout@v4
@@ -276,6 +285,9 @@ jobs:
     needs: [validate, test, artifacts]
     runs-on: ubuntu-latest
     if: github.event_name == 'release'
+    # Uploads the archive + appends the release body to the GitHub release.
+    permissions:
+      contents: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
