@@ -100,7 +100,8 @@ def main():
         snr.NonRigidZImage.calc_deformation = orig_calc
         OpticalFlowWarper.register = orig_reg
 
-    ref_stem = args.reference.replace(".ome.tiff", "").replace(".tiff", "")
+    ref_stem = (args.reference.replace(".ome.tiff", "").replace(".ome.tif", "")
+                .replace(".tiff", "").replace(".tif", ""))
     ref_slide = reg.get_ref_slide()
     full_disp = [int(x) for x in reg._full_displacement_shape_rc]
     non_rigid_bbox = [int(x) for x in reg._non_rigid_bbox]

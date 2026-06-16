@@ -129,7 +129,8 @@ def main():
                                     skip_micro_registration=args.skip_micro_registration,
                                     max_image_dim_px=args.max_image_dim)
 
-    ref_stem = args.reference.replace(".ome.tiff", "").replace(".tiff", "")
+    ref_stem = (args.reference.replace(".ome.tiff", "").replace(".ome.tif", "")
+                .replace(".tiff", "").replace(".tif", ""))
 
     # Stage 1: rebuild rigid + wave-1 prep state with the no-op warper (cheap), like reg_prep.
     snr.NonRigidZImage.calc_deformation = cap_calc
