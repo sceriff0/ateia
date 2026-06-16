@@ -361,8 +361,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--nucleus_contours_json', type=str, default=None,
         help='Path to nucleus contours JSON re-keyed to cell labels (from '
-             'EXTRACT_NUCLEI_PROPERTIES). When given, enables the dual-segmentation export '
-             '(combined cell+nucleus objects + separate nuclei/cells files).',
+             'EXTRACT_NUCLEI_PROPERTIES). When given, each cell in the single combined '
+             'cells.geojson gets a top-level nucleusGeometry field for per-compartment quantification.',
     )
     parser.add_argument(
         '--pixel_size', type=float, default=0.325,
@@ -408,7 +408,7 @@ def main() -> int:
             contours = json.load(f)
         logger.info(f"Loaded contours for {len(contours)} cells")
 
-    # Load nucleus contours (re-keyed to cell labels) for dual-segmentation export
+    # Load nucleus contours (re-keyed to cell labels) for the combined per-compartment export
     nucleus_contours = None
     if args.nucleus_contours_json:
         logger.info(f"Loading nucleus contours: {args.nucleus_contours_json}")
