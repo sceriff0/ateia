@@ -85,10 +85,16 @@ def test_run_matrix_preserves_uint16_dtype(tmp_path):
         source=src, outdir=tmp_path / "m16",
         target_px=[50], n_channels=[1, 2], seed=0,
     )
-    rows = list(csv.DictReader(open(manifest)))
+    with open(manifest) as fh:
+        rows = list(csv.DictReader(fh))
     for r in rows:
         arr = tifffile.imread(r["path"])
         assert arr.dtype == np.uint16
+        n, h, w = int(r["n_channels"]), int(r["height"]), int(r["width"])
+        if n == 1:
+            assert arr.shape == (h, w)
+        else:
+            assert arr.shape == (n, h, w)
 
 
 def test_run_matrix_writes_cells_and_manifest(tmp_path):
@@ -103,7 +109,8 @@ def test_run_matrix_writes_cells_and_manifest(tmp_path):
         target_px=[100, 50], n_channels=[1, 2], seed=0,
     )
 
-    rows = list(csv.DictReader(open(manifest)))
+    with open(manifest) as fh:
+        rows = list(csv.DictReader(fh))
     # 2 sizes x 2 channel-counts = 4 cells
     assert len(rows) == 4
     assert set(rows[0].keys()) == {

@@ -55,21 +55,28 @@ _VIPS_FORMATS = {
 
 
 def _resize(src_2d: np.ndarray, target_hw: tuple[int, int]) -> np.ndarray:
-    """Resize a 2-D array to target (H, W), preserving dtype. Uses pyvips if available, else PIL."""
+    """Resize a 2-D array toward target (H, W), preserving dtype.
+
+    Uses pyvips when its native library loads, else PIL. The returned array's
+    shape may differ from target_hw by ~1px due to backend rounding; callers
+    should read the actual shape rather than assume target_hw.
+    """
     th, tw = target_hw
     try:
         import pyvips
-    except ModuleNotFoundError:
+    except (ImportError, OSError):
+        # ImportError: package missing. OSError: pyvips installed but libvips.so won't load.
         from PIL import Image
-        orig_dtype = src_2d.dtype
-        im = Image.fromarray(src_2d)
-        # PIL only supports BILINEAR on modes without a bit-depth suffix (e.g. "I;16").
-        # Convert to "I" (int32) for non-uint8 integer types so bilinear resampling works,
-        # then cast the result back to the original dtype.
-        if im.mode not in ("L", "RGB", "RGBA", "F"):
-            im = im.convert("I")
+        if src_2d.dtype == np.uint8:
+            im = Image.fromarray(src_2d)
+        elif src_2d.dtype in (np.uint16, np.int32):
+            im = Image.fromarray(src_2d.astype(np.int32), mode="I")
+        else:
+            raise ValueError(
+                f"PIL fallback cannot resize dtype {src_2d.dtype}; install pyvips for this dtype"
+            )
         im = im.resize((tw, th), Image.BILINEAR)
-        return np.asarray(im, dtype=orig_dtype)
+        return np.asarray(im, dtype=src_2d.dtype)
 
     fmt = _VIPS_FORMATS.get(src_2d.dtype.name)
     if fmt is None:
@@ -79,14 +86,20 @@ def _resize(src_2d: np.ndarray, target_hw: tuple[int, int]) -> np.ndarray:
     )
     vi = vi.resize(tw / src_2d.shape[1], vscale=th / src_2d.shape[0])
     buf = vi.write_to_memory()
-    return np.frombuffer(buf, dtype=src_2d.dtype).reshape(th, tw)
+    # Use the backend's ACTUAL output dims (pyvips may round +/-1px) to avoid reshape errors.
+    return np.frombuffer(buf, dtype=src_2d.dtype).reshape(vi.height, vi.width)
 
 
 def _read_source_2d(path: Path) -> np.ndarray:
+    """Read an image via tifffile and reduce it to a single 2-D channel."""
     import tifffile
-    arr = tifffile.imread(path)
-    if arr.ndim == 3:  # collapse to a single representative channel
-        arr = arr[0] if arr.shape[0] <= arr.shape[-1] else arr[..., 0]
+    arr = np.squeeze(tifffile.imread(path))
+    while arr.ndim > 2:
+        # Collapse the smallest leading axis (assumed channel/Z/T) by taking index 0.
+        axis = 0 if arr.shape[0] <= arr.shape[-1] else arr.ndim - 1
+        arr = arr.take(indices=0, axis=axis)
+    if arr.ndim != 2:
+        raise ValueError(f"Could not reduce source image to 2-D; got shape {arr.shape}")
     return arr
 
 
@@ -107,21 +120,18 @@ def run_matrix(source, outdir, target_px, n_channels, seed=0):
         for tpx in target_px:
             th, tw = compute_target_shape(src.shape, tpx)
             resized = _resize(src, (th, tw))
+            rh, rw = resized.shape  # actual dims (may differ from th,tw by backend rounding)
             for nch in n_channels:
                 cell_id = f"px{tpx}_ch{nch}"
                 out_path = outdir / f"{cell_id}.ome.tif"
                 stack = synthesize_channels(resized, nch, seed=seed)
                 data = stack[0] if nch == 1 else stack
-                channel_names = [f"ch{i}" for i in range(nch)]
-                tifffile.imwrite(
-                    out_path,
-                    data,
-                    photometric="minisblack",
-                    metadata={"axes": "YX" if nch == 1 else "CYX",
-                              "Channel": {"Name": channel_names}},
-                )
+                metadata = {"axes": "YX" if nch == 1 else "CYX"}
+                if nch > 1:
+                    metadata["Channel"] = {"Name": [f"ch{i}" for i in range(nch)]}
+                tifffile.imwrite(out_path, data, photometric="minisblack", metadata=metadata)
                 writer.writerow({
-                    "cell_id": cell_id, "target_px": tpx, "width": tw, "height": th,
+                    "cell_id": cell_id, "target_px": tpx, "width": rw, "height": rh,
                     "n_channels": nch, "bytes": out_path.stat().st_size, "path": str(out_path),
                 })
     return manifest_path
