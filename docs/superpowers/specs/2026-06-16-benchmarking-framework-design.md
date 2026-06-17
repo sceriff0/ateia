@@ -9,7 +9,7 @@
 Build a self-contained benchmarking layer for the Mirage WSI pipeline that:
 
 1. Generates a controlled **input matrix** (sizes × channels) from a single source image.
-2. Sweeps the pipeline over that matrix, capturing **resource usage** (RAM, runtime, CPU, I/O) vs input size per process.
+2. Sweeps the pipeline over that matrix **and over the pipeline parameters that influence cost**, capturing **resource usage** (RAM, runtime, CPU, I/O) vs input size *and* parameter settings, per process.
 3. Evaluates **registration accuracy** against landmark ground truth (ANHIR, ACROBAT), comparing **classic vs tiled** VALIS modes.
 4. Produces a **Jupyter notebook** with paper-ready plots and a resource-vs-size **linear regression**.
 5. Derives an **optimal `modules.config`** (separate, reviewable file) from the regression.
@@ -80,7 +80,39 @@ benchmarks/
 - **Manifest:** `matrix_manifest.csv` with `cell_id, target_px, width, height, n_channels, bytes, path` so the notebook joins runtime → true input dimensions (not just file bytes).
 - **Tooling:** pyvips (resize) + tifffile/ome-types (OME-TIFF + channel metadata).
 
-`run_sweep.sh` launches the existing pipeline once per cell with `-profile benchmark`, `--enable_trace true`, and a per-cell `trace_dir`, so each run isolates its `trace.txt` + `size_logs/input_sizes.csv`.
+### 4.1 Parameter sweep axis
+
+Beyond image size/channels, the sweep covers the **pipeline parameters that drive runtime / peak RSS**, declared in a config-driven `benchmarks/configs/sweep.yaml`:
+
+```yaml
+strategy: ofat        # ofat (one-factor-at-a-time, default) | grid (full cross product)
+image:
+  target_px:  [2048, 4096, 8192, 16384, 32768]
+  n_channels: [1, 2, 4, 8]
+params:                # name -> values; each maps to a --<param> override
+  # registration
+  memory_mode:                 [low, medium, high]
+  reg_max_image_dim:           [2000, 4000, 8000]
+  reg_use_tiled_registration:  [true, false]
+  reg_tile_size:               [1024, 2048, 4096]
+  reg_n_workers:               [2, 4, 8]
+  reg_parallel_warping:        [true, false]
+  skip_micro_registration:     [true, false]
+  reg_distributed_tiling:      [false, true]
+  reg_dist_tile_wh:            [256, 512, 1024]
+  reg_dist_force_tiling:       [false, true]
+  # preprocessing / segmentation / quantification / pyramid
+  preprocess_tile_size:        [...]
+  seg_method:                  [...]
+  expanded_quantification:     [true, false]
+  pyramid_tile_size:           [...]
+```
+
+- **`ofat` (default):** vary one parameter at a time off a baseline cell — keeps run count linear and gives clean per-parameter sensitivity (and clean single-predictor regression slices). Logged so the notebook knows which axis each run varied.
+- **`grid`:** full cross product for selected axes when interactions matter — the user opts in per axis (run-count guardrail: the driver prints the planned run count and requires confirmation above a threshold).
+- The exact value lists are tunable; the file ships with sensible defaults and inline comments. Axes the user doesn't care about are commented out.
+
+`run_sweep.sh` enumerates the sweep into a **run plan** (`run_plan.csv`: `run_id, cell_id, varied_axis, param overrides…`), then launches the existing pipeline once per run with `-profile benchmark`, `--enable_trace true`, `--enable_size_logs true`, the per-run `--<param>` overrides, and a per-run `trace_dir` + `outdir`, so each run isolates its `trace.txt` + `size_logs/input_sizes.csv`. The `run_id`/`varied_axis` columns let the notebook attribute cost to the right factor.
 
 ## 5. Component B — Registration-Accuracy Evaluation
 
@@ -90,6 +122,12 @@ benchmarks/
 - `adapters/anhir.py`: parse ANHIR landmark CSVs; reduce with **rTRE = Euclidean(warped, target) / image_diagonal**; report median, MMrTRE, AMrTRE.
 - `adapters/acrobat.py`: parse ACROBAT landmarks (multi-annotator); reduce in **µm** using pixel size; report mean **90th percentile**.
 - `prepare_pairs.py`: emit a Mirage samplesheet for each challenge image pair.
+
+#### Data access (verified 2026-06-17)
+
+- **ANHIR** — fully **account-gated**: requires a grand-challenge.org account → join the challenge → accept CC-BY-NC-SA → download from the platform. No direct/automatable URL; landmark CSVs are bundled with the (multi-scale) images, not separately downloadable. **User must download.**
+- **ACROBAT** — WSIs are **open access** on the Swedish National Data Service (direct ZIPs at `https://api.researchdata.se/dataset/2022-190-1/...`), but the **landmark annotations are NOT in the SND record** — they live behind the challenge site (account-gated), and the WSI archives are very large (4,212 WSIs). **User downloads the landmarks (and chosen WSIs).**
+- Consequence: the evaluator is **format-driven and download-independent**. The user points `prepare_pairs.py` at a local data dir; `benchmarks/registration_eval/README.md` documents the exact access steps for reproducibility. A tiny synthetic landmark fixture covers CI.
 
 ### 5.2 True TRE via VALIS warp
 
@@ -122,17 +160,15 @@ Publish the already-produced `{name}_summary.csv` and `{name}_registrar.pickle` 
 The `*.size.csv` subsystem exists **only** for profiling/benchmarking (it does not drive routing — that is `estimate_reg_gb.py`). It therefore belongs to the benchmark layer.
 
 - **Move** `modules/local/aggregate_size_logs.nf` → `benchmarks/modules/aggregate_size_logs.nf`; update the include in `workflows/mirage.nf`.
-- **Gate** per-module size emission behind a flag (default **off** in production; **on** under `-profile benchmark`). Candidate: reuse `enable_trace`, or add `params.enable_size_logs`. The inline emitters stay in their process bodies (they cannot physically relocate) but become benchmark-gated and conditionally wired in the subworkflows.
+- **Gate** per-module size emission behind a new dedicated `params.enable_size_logs` (default **off** in production; set **on** by `-profile benchmark`). The inline emitters stay in their process bodies (they cannot physically relocate) but become benchmark-gated and conditionally wired in the subworkflows.
 - All **consumption** (parsing/joining/analysis) lives in `benchmarks/analysis/lib/parse.py`.
-
-> Open question for review: gate on existing `enable_trace`, or a new dedicated `enable_size_logs`? Default assumption: new `enable_size_logs`, defaulting to `enable_trace`'s value.
 
 ## 7. Component C — Analysis Notebook
 
 `benchmark_analysis.ipynb`, thin cells calling `analysis/lib/`:
 
 1. **Ingest** — glob all per-run `trace.txt` + `input_sizes.csv` + `matrix_manifest.csv` → tidy dataframe.
-2. **Resource ~ size regression** — per process, fit `peak_rss` & `realtime` vs input bytes / pixels / channels (linear + log-log), with prediction intervals. Feeds §8.
+2. **Resource ~ size + parameter regression** — per process, fit `peak_rss` & `realtime` against input bytes / pixels / channels **and the swept parameters** (`run_plan.csv` columns as predictors: numeric params as continuous, booleans/enums as categoricals). Linear + log-log, with prediction intervals; per-parameter sensitivity from the `ofat` slices. Feeds §8.
 3. **Tiled vs classic** — true TRE + VALIS estimate + feature estimate, plus cost (`peak_rss`, `realtime`) across input sizes.
 4. **Sampling** — bootstrap distributions / CIs; paired tiled-vs-classic test.
 5. **Paper-ready styling** — shared theme; export every figure to `figures/*.pdf` + `*.svg`.
@@ -180,8 +216,9 @@ registration challenge data ─prepare_pairs.py─▶ samplesheet ─pipeline (c
                                                           └─▶ sampling.py ─▶ figures
 ```
 
-## 12. Open Questions
+## 12. Resolved Decisions
 
-1. Size-log gating flag: reuse `enable_trace` vs new `enable_size_logs` (default = `enable_trace`)? (§6)
-2. Which single source image should `generate_matrix.py` default to / does the user supply it?
-3. ACROBAT/ANHIR data: user downloads and points `prepare_pairs.py` at it (assumed yes).
+1. **Size-log gating:** new dedicated `params.enable_size_logs` (default off in production; on under `-profile benchmark`). (§6)
+2. **Source image:** the **user supplies** it; `generate_matrix.py` takes it as a required argument (no bundled default).
+3. **Challenge data:** I attempt to download ANHIR/ACROBAT; if gated/impractical, the user provides it and points `prepare_pairs.py` at the local path. Either way the loader is format-driven, not download-dependent.
+4. **Parameter sweep:** the benchmark covers pipeline parameters that influence runtime/peak RSS (registration memory_mode, tiling, dims, workers; preprocessing/segmentation/quantification/pyramid knobs), `ofat` by default with opt-in `grid`. (§4.1)
