@@ -1,7 +1,7 @@
 nextflow_process {
 
     name "Test AGGREGATE_SIZE_LOGS process"
-    script "modules/local/aggregate_size_logs.nf"
+    script "benchmarks/modules/aggregate_size_logs.nf"
     process "AGGREGATE_SIZE_LOGS"
 
     tag "modules"
