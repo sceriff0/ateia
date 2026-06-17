@@ -7,7 +7,7 @@
 include { PREPROCESSING       } from '../subworkflows/local/preprocess'
 include { REGISTRATION        } from '../subworkflows/local/registration'
 include { POSTPROCESSING      } from '../subworkflows/local/postprocess'
-include { AGGREGATE_SIZE_LOGS         } from '../modules/local/aggregate_size_logs'
+include { AGGREGATE_SIZE_LOGS         } from '../benchmarks/modules/aggregate_size_logs'
 include { GENERATE_QC_REPORT          } from '../modules/local/generate_qc_report'
 
 
