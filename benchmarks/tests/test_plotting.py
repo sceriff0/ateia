@@ -34,3 +34,22 @@ def test_before_after_box_returns_figure():
     fig = plotting.before_after_box(df, cols=["original", "registered"],
                                     ylabel="rTRE", title="tiled")
     assert fig is not None
+
+
+def test_save_fig_formats_arg_writes_only_requested(tmp_path):
+    import matplotlib.pyplot as plt
+    plotting.set_paper_theme()
+    fig, ax = plt.subplots()
+    ax.plot([0, 1], [1, 0])
+    paths = plotting.save_fig(fig, tmp_path / "png_only", formats=("png",))
+    assert (tmp_path / "png_only.png").exists()
+    assert not (tmp_path / "png_only.pdf").exists()
+    assert paths == [tmp_path / "png_only.png"]
+
+
+def test_save_fig_default_still_pdf_svg(tmp_path):
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots()
+    ax.plot([0, 1], [0, 1])
+    plotting.save_fig(fig, tmp_path / "d")
+    assert (tmp_path / "d.pdf").exists() and (tmp_path / "d.svg").exists()

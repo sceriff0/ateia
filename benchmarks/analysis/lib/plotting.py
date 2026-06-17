@@ -28,12 +28,15 @@ def set_paper_theme() -> None:
     plt.rcParams.update(_THEME)
 
 
-def save_fig(fig, path_stem) -> list[Path]:
-    """Save `fig` as both .pdf and .svg (vector, paper-ready). Returns the paths."""
+def save_fig(fig, path_stem, formats=("pdf", "svg")) -> list[Path]:
+    """Save `fig` in each requested vector/raster format. Returns the paths.
+
+    Default is paper-ready vectors (pdf+svg); pass formats=("png",) for web docs.
+    """
     stem = Path(path_stem)
     stem.parent.mkdir(parents=True, exist_ok=True)
     out = []
-    for ext in ("pdf", "svg"):
+    for ext in formats:
         p = stem.with_suffix(f".{ext}")
         fig.savefig(p)
         out.append(p)
