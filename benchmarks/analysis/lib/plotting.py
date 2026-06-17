@@ -55,7 +55,9 @@ def scatter_with_fit(x, y, slope, intercept, xlabel, ylabel, title):
 
 def before_after_box(df, cols, ylabel, title, log_scale=True):
     fig, ax = plt.subplots()
-    ax.boxplot([df[c].dropna().to_numpy() for c in cols], labels=cols)
+    ax.boxplot([df[c].dropna().to_numpy() for c in cols])
+    ax.set_xticks(range(1, len(cols) + 1))
+    ax.set_xticklabels(cols)
     if log_scale:
         ax.set_yscale("log")
     ax.set(ylabel=ylabel, title=title)
