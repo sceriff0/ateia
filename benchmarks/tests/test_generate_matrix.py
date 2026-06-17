@@ -1,3 +1,6 @@
+import csv
+from pathlib import Path
+
 import numpy as np
 import pytest
 from benchmarks.generate_matrix import compute_target_shape, synthesize_channels
@@ -69,3 +72,30 @@ def test_synthesize_channels_rejects_float_dtype():
 def test_compute_target_shape_rejects_zero_dimension():
     with pytest.raises(ValueError):
         compute_target_shape((0, 0), 512)
+
+
+def test_run_matrix_writes_cells_and_manifest(tmp_path):
+    import tifffile
+    from benchmarks.generate_matrix import run_matrix
+
+    src = tmp_path / "src.tif"
+    tifffile.imwrite(src, np.full((400, 200), 100, dtype=np.uint8))
+
+    manifest = run_matrix(
+        source=src, outdir=tmp_path / "matrix",
+        target_px=[100, 50], n_channels=[1, 2], seed=0,
+    )
+
+    rows = list(csv.DictReader(open(manifest)))
+    # 2 sizes x 2 channel-counts = 4 cells
+    assert len(rows) == 4
+    assert set(rows[0].keys()) == {
+        "cell_id", "target_px", "width", "height", "n_channels", "bytes", "path",
+    }
+    for r in rows:
+        p = Path(r["path"])
+        assert p.exists() and int(r["bytes"]) == p.stat().st_size
+        arr = tifffile.imread(p)
+        n = int(r["n_channels"])
+        # single-channel cells are 2-D; multi-channel are (C, H, W)
+        assert (arr.ndim == 2 and n == 1) or (arr.shape[0] == n)
