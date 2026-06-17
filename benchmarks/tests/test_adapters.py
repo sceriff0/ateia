@@ -32,3 +32,17 @@ def test_acrobat_load_pairs_averages_annotators():
     np.testing.assert_allclose(lp.moving_xy, [[101, 199], [301, 399]])
     np.testing.assert_allclose(lp.target_xy, [[106, 194], [296, 404]])
     assert lp.meta["mpp"] == 1.0
+
+
+def test_pairs_manifest_row_builds_expected_fields():
+    from benchmarks.registration_eval.prepare_pairs import build_manifest_row
+    row = build_manifest_row(
+        pair_id="P1", ref_image="/d/ref.tif", moving_image="/d/mov.tif",
+        source_landmarks="/d/mov.csv", target_landmarks="/d/ref.csv",
+        width=1000, height=800, pixel_size_um=0.5,
+    )
+    assert row == {
+        "pair_id": "P1", "ref_image": "/d/ref.tif", "moving_image": "/d/mov.tif",
+        "source_landmarks": "/d/mov.csv", "target_landmarks": "/d/ref.csv",
+        "width": 1000, "height": 800, "pixel_size_um": 0.5,
+    }
