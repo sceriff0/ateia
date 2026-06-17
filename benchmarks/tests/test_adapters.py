@@ -1,0 +1,34 @@
+from pathlib import Path
+
+import numpy as np
+
+from benchmarks.registration_eval.adapters import anhir, acrobat
+
+FIX = Path(__file__).parent / "fixtures"
+
+
+def test_anhir_load_pair_reads_xy_and_aligns():
+    lp = anhir.load_pair(FIX / "anhir_source.csv", FIX / "anhir_target.csv", pair_id="a")
+    assert lp.pair_id == "a"
+    np.testing.assert_allclose(lp.moving_xy, [[10, 20], [30, 40]])
+    np.testing.assert_allclose(lp.target_xy, [[11, 19], [29, 41]])
+
+
+def test_anhir_mismatched_lengths_raise():
+    import pytest
+    short = FIX / "anhir_source.csv"
+    # target with extra row simulated by reusing source twice is same length; instead
+    # assert the guard exists by calling with a deliberately bad pair via monkeypatch-free check:
+    with pytest.raises(ValueError):
+        anhir._validate_aligned(np.zeros((3, 2)), np.zeros((2, 2)))
+
+
+def test_acrobat_load_pairs_averages_annotators():
+    pairs = acrobat.load_pairs(FIX / "acrobat_landmarks.csv")
+    assert len(pairs) == 1
+    lp = pairs[0]
+    assert lp.pair_id == "pairA"
+    # annotator-averaged moving (IHC) point 0: (101, 199); point 1: (301, 399)
+    np.testing.assert_allclose(lp.moving_xy, [[101, 199], [301, 399]])
+    np.testing.assert_allclose(lp.target_xy, [[106, 194], [296, 404]])
+    assert lp.meta["mpp"] == 1.0
