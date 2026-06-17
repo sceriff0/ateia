@@ -24,6 +24,12 @@ Each run writes `bench_results/<run_id>/trace/trace.txt` and
 > `run_sweep.sh` requires bash 4+ (associative arrays). On macOS, install a modern bash
 > (`brew install bash`) and invoke it explicitly if `/bin/bash` is 3.x.
 
+> **Note — registration in the resource sweep.** `run_sweep.sh` emits one image per
+> patient (`is_reference=true`), so registration runs as a single-slide passthrough.
+> The resource sweep therefore characterises preprocessing, segmentation, quantification,
+> and export scaling. To benchmark registration cost against the registration parameter
+> axes, use paired inputs via the registration-accuracy harness (Plan 2).
+
 ## Registration accuracy (Plan 2)
 
 ANHIR is account-gated; ACROBAT landmarks are challenge-gated. Download with your own

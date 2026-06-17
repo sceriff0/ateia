@@ -128,7 +128,7 @@ def run_matrix(source, outdir, target_px, n_channels, seed=0):
                 data = stack[0] if nch == 1 else stack
                 metadata = {"axes": "YX" if nch == 1 else "CYX"}
                 if nch > 1:
-                    metadata["Channel"] = {"Name": [f"ch{i}" for i in range(nch)]}
+                    metadata["Channel"] = {"Name": ["DAPI"] + [f"ch{i}" for i in range(1, nch)]}
                 tifffile.imwrite(out_path, data, photometric="minisblack", metadata=metadata)
                 writer.writerow({
                     "cell_id": cell_id, "target_px": tpx, "width": rw, "height": rh,

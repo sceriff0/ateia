@@ -45,9 +45,12 @@ tail -n +2 "$RUN_PLAN" | while IFS=',' read -r -a vals; do
   img=$(awk -F',' -v c="$cell_id" 'NR>1 && $1==c {print $7}' "$MANIFEST")
   if [[ -z "$img" ]]; then echo "WARN: no matrix cell $cell_id; skipping $run_id" >&2; continue; fi
 
+  nch="${vals[$(col_index n_channels)]}"
+  chans="DAPI"
+  for ((i=1; i<nch; i++)); do chans+="|ch${i}"; done
   run_dir="$ROOT/$run_id"; mkdir -p "$run_dir"
   sheet="$run_dir/samplesheet.csv"
-  printf 'patient_id,image,channels,is_reference\n%s,%s,ch0,true\n' "$cell_id" "$img" > "$sheet"
+  printf 'patient_id,path_to_file,is_reference,channels\n%s,%s,true,%s\n' "$cell_id" "$img" "$chans" > "$sheet"
 
   # Map non-structural columns (skip run_id/varied_axis/target_px/n_channels) to --<param>.
   params=()
