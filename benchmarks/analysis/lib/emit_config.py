@@ -8,25 +8,35 @@ from __future__ import annotations
 
 from pathlib import Path
 
-# Per-process Groovy expression for input size in GiB. Processes absent here use
-# the generic `file_gb` placeholder, which the user maps to the real input var.
+# Per-process Groovy expression for input size in GiB, using the process's real
+# input variable(s). Processes NOT listed here are emitted as inert COMMENTED
+# blocks (the user supplies the expression and uncomments) so the generated
+# config is always valid Groovy as-is.
 PROCESS_INPUT_EXPR = {
-    "CONVERT_IMAGE": "(image_file.size() >> 30)",
-    "PREPROCESS": "(ome_tiff.size() >> 30)",
-    "SEGMENT": "(merged_file.size() >> 30)",
-    "MERGE_AND_PYRAMID": "(total_gb)",
+    "CONVERT_IMAGE": "((image_file.size() >> 30) ?: 1)",
+    "PREPROCESS": "((ome_tiff.size() >> 30) ?: 1)",
+    "SEGMENT": "((merged_file.size() >> 30) ?: 1)",
 }
 
 R2_LOW = 0.5
 
 
 def memory_closure(process: str, model: dict, input_expr: str | None = None) -> str:
-    expr = input_expr if input_expr is not None else PROCESS_INPUT_EXPR.get(process, "file_gb")
     slope = round(model["slope"], 3)
     intercept = round(model["intercept"], 3)
     sigma = round(model.get("sigma", 0.0), 3)
-    body = (f"check_max( ( {expr} * {slope} + {intercept} + {sigma} * task.attempt ).GB, "
-            f"'memory' )")
+    expr = input_expr if input_expr is not None else PROCESS_INPUT_EXPR.get(process)
+    if expr is None:
+        # No known input-size expression: emit an INERT commented block so the
+        # config stays valid Groovy. The operator fills in the real expression.
+        body = (f"check_max( ( <input_gb> * {slope} + {intercept} + "
+                f"{sigma} * task.attempt ).GB, 'memory' )")
+        return ("    // TODO set the input-size (GiB) expression for this process, then uncomment:\n"
+                f"    // withName: '{process}' {{\n"
+                f"    //     memory = {{ {body} }}\n"
+                "    // }")
+    body = (f"check_max( ( {expr} * {slope} + {intercept} + "
+            f"{sigma} * task.attempt ).GB, 'memory' )")
     return f"    withName: '{process}' {{\n        memory = {{ {body} }}\n    }}"
 
 

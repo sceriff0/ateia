@@ -32,3 +32,32 @@ def test_low_confidence_fit_is_flagged(tmp_path):
     out = tmp_path / "c.config"
     emit_config.write_optimized_config(models, out)
     assert "LOW CONFIDENCE" in out.read_text()
+
+
+def test_known_process_emits_live_block_with_zero_guard(tmp_path):
+    out = tmp_path / "k.config"
+    emit_config.write_optimized_config(
+        {"SEGMENT": {"slope": 7.0, "intercept": 8.0, "sigma": 4.0, "r2": 0.97, "n": 5}}, out)
+    text = out.read_text()
+    assert "    withName: 'SEGMENT'" in text          # live (uncommented) block
+    assert "?: 1" in text                             # zero-guard preserved
+
+
+def test_unknown_process_emitted_commented_not_invalid_var(tmp_path):
+    out = tmp_path / "u.config"
+    emit_config.write_optimized_config(
+        {"QUANTIFY": {"slope": 1.0, "intercept": 2.0, "sigma": 0.5, "r2": 0.9, "n": 5}}, out)
+    text = out.read_text()
+    assert "file_gb" not in text                      # no invalid placeholder variable
+    assert "total_gb" not in text
+    assert "// withName: 'QUANTIFY'" in text           # emitted but inert (commented)
+    assert "    withName: 'QUANTIFY'" not in text      # NOT an active block
+
+
+def test_merge_and_pyramid_is_not_emitted_with_invalid_total_gb(tmp_path):
+    out = tmp_path / "m.config"
+    emit_config.write_optimized_config(
+        {"MERGE_AND_PYRAMID": {"slope": 1.0, "intercept": 2.0, "sigma": 0.5, "r2": 0.9, "n": 5}}, out)
+    text = out.read_text()
+    assert "total_gb" not in text
+    assert "// withName: 'MERGE_AND_PYRAMID'" in text  # commented, awaiting a real expr
