@@ -99,6 +99,7 @@ nav:
       - Output Files: outputs.md
       - Restartability & Checkpoints: restartability_guide.md
       - Running on HPC / SLURM: slurm.md
+      - Benchmarks & Performance: benchmarks.md
   - Pipeline Stages:
       - Preprocessing: preprocessing.md
       - Registration: registration_methods.md

@@ -38,6 +38,8 @@ drop in a matching file, and delete the comment markers to make it live.
 | `segmentation-overlay.png` | `segmentation.md` | Cell/nuclei masks over DAPI |
 | `qupath-geojson.png` | `export.md`, `flowpath.md` | `cells.geojson` loaded over the pyramid in QuPath |
 | `flowpath-gating.png` | `flowpath.md` | FlowPath gating UI on MIRAGE cells |
+| `benchmarks/scaling_<PROCESS>.png` | `benchmarks.md` | Per-process peak RSS vs input size with fitted line (from `export_docs_figures.py`) |
+| `benchmarks/rtre_tiled_vs_untiled.png` | `benchmarks.md` | Landmark rTRE, in-process tiling on vs off |
 
 ## Conventions
 
