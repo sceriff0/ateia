@@ -197,7 +197,7 @@ workflow MIRAGE {
     /* -------------------- TRACE AGGREGATION -------------------- */
 
     // Aggregate input size logs from all processes (only if tracing enabled)
-    if (params.enable_trace) {
+    if (params.enable_size_logs) {
         def ch_all_sizes = Channel.empty()
 
         if (ParamUtils.shouldRun('preprocessing', params.start, effective_stop)) {
