@@ -39,7 +39,8 @@ flowchart LR
 
 ```bash
 # 1. build the input matrix from your own source image
-python benchmarks/generate_matrix.py --source /path/to/source.ome.tif --outdir bench_matrix
+# --paired emits a reference+moving panel per cell (n_channels>=2) so registration axes are exercised
+python benchmarks/generate_matrix.py --source /path/to/source.ome.tif --outdir bench_matrix --paired
 # 2. expand the parameter sweep into a run plan
 python benchmarks/build_run_plan.py --sweep benchmarks/configs/sweep.yaml --out bench_run_plan.csv
 # 3. run the sweep (per-run trace + size logs)
@@ -53,6 +54,14 @@ python -m benchmarks.analysis.export_docs_figures \
     --results-root bench_results --run-plan bench_run_plan.csv \
     --manifest bench_matrix/matrix_manifest.csv
 ```
+
+!!! note "Registration in the resource sweep"
+    When `--paired` is used with `generate_matrix.py`, `run_sweep.sh` emits a
+    reference+moving panel per patient (distinct channel names: reference uses
+    `DAPI|ch1|…`, moving uses `DAPI|m1|…`), so VALIS registration actually runs and
+    the registration parameter axes (`memory_mode`, `reg_*`) are exercised. Without
+    `--paired`, each run contains a single slide and registration is a passthrough
+    no-op, making those axes meaningless.
 
 The interactive notebook `benchmarks/analysis/benchmark_analysis.ipynb` walks the
 same five sections (load → regression → optimal config → tiled-vs-classic →

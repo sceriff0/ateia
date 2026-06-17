@@ -6,9 +6,11 @@ accuracy (classic vs tiled) against landmark ground truth. See the design spec:
 
 ## Resource sweep
 
-1. Generate the input matrix from your own source image:
+1. Generate the input matrix from your own source image (use `--paired` so each
+   cell with n_channels>=2 also gets a moving panel with distinct channel names,
+   making registration axes meaningful):
 
-       python benchmarks/generate_matrix.py --source /path/to/source.ome.tif --outdir bench_matrix
+       python benchmarks/generate_matrix.py --source /path/to/source.ome.tif --outdir bench_matrix --paired
 
 2. Expand the sweep into a run plan:
 
@@ -24,11 +26,11 @@ Each run writes `bench_results/<run_id>/trace/trace.txt` and
 > `run_sweep.sh` requires bash 4+ (associative arrays). On macOS, install a modern bash
 > (`brew install bash`) and invoke it explicitly if `/bin/bash` is 3.x.
 
-> **Note — registration in the resource sweep.** `run_sweep.sh` emits one image per
-> patient (`is_reference=true`), so registration runs as a single-slide passthrough.
-> The resource sweep therefore characterises preprocessing, segmentation, quantification,
-> and export scaling. To benchmark registration cost against the registration parameter
-> axes, use paired inputs via the registration-accuracy harness (Plan 2).
+> **Note — registration in the resource sweep.** When `--paired` is used with
+> `generate_matrix.py`, `run_sweep.sh` emits a reference+moving panel per patient
+> (distinct channel names: reference uses `DAPI|ch1|…`, moving uses `DAPI|m1|…`),
+> so VALIS registration actually runs and registration axes are exercised. Without
+> `--paired`, a single-slide passthrough is emitted and registration axes are no-ops.
 
 ## Registration accuracy (Plan 2)
 

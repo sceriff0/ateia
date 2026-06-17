@@ -1,4 +1,7 @@
 # Benchmark sweep definition. strategy: ofat (one-factor-at-a-time) | grid.
+# NOTE: registration axes (memory_mode, reg_*) only exercise real VALIS registration when
+# the matrix was generated with --paired (so each cell has a reference+moving panel with
+# distinct channel names). Without --paired, these runs are single-slide passthrough no-ops.
 strategy: ofat
 # Baseline used as the fixed point for ofat (one value per axis).
 baseline:

@@ -123,3 +123,29 @@ def test_run_matrix_writes_cells_and_manifest(tmp_path):
         n = int(r["n_channels"])
         # single-channel cells are 2-D; multi-channel are (C, H, W)
         assert (arr.ndim == 2 and n == 1) or (arr.shape[0] == n)
+
+
+def test_run_matrix_paired_writes_moving_with_distinct_channels(tmp_path):
+    import tifffile
+    from benchmarks.generate_matrix import run_matrix
+    src = tmp_path / "s.tif"
+    tifffile.imwrite(src, np.full((200, 100), 100, dtype=np.uint8))
+    manifest = run_matrix(source=src, outdir=tmp_path / "m",
+                          target_px=[50], n_channels=[1, 2], seed=0, paired=True)
+    rows = {r["cell_id"]: r for r in csv.DictReader(open(manifest))}
+    assert "moving_path" in next(iter(rows.values()))
+    # n>=2 gets a moving file; n==1 does not (would collide on {DAPI})
+    assert rows["px50_ch2"]["moving_path"] and Path(rows["px50_ch2"]["moving_path"]).exists()
+    assert rows["px50_ch1"]["moving_path"] == ""
+    mov = tifffile.imread(rows["px50_ch2"]["moving_path"])
+    assert mov.shape[0] == 2  # (C,H,W)
+
+
+def test_run_matrix_default_unpaired_manifest_columns_unchanged(tmp_path):
+    import tifffile
+    from benchmarks.generate_matrix import run_matrix
+    src = tmp_path / "s.tif"
+    tifffile.imwrite(src, np.full((80, 80), 100, dtype=np.uint8))
+    manifest = run_matrix(source=src, outdir=tmp_path / "m", target_px=[40], n_channels=[2], seed=0)
+    rows = list(csv.DictReader(open(manifest)))
+    assert set(rows[0].keys()) == {"cell_id", "target_px", "width", "height", "n_channels", "bytes", "path"}

@@ -103,7 +103,7 @@ def _read_source_2d(path: Path) -> np.ndarray:
     return arr
 
 
-def run_matrix(source, outdir, target_px, n_channels, seed=0):
+def run_matrix(source, outdir, target_px, n_channels, seed=0, paired: bool = False):
     import tifffile
 
     outdir = Path(outdir)
@@ -111,11 +111,11 @@ def run_matrix(source, outdir, target_px, n_channels, seed=0):
     src = _read_source_2d(Path(source))
     manifest_path = outdir / "matrix_manifest.csv"
 
+    base_fieldnames = ["cell_id", "target_px", "width", "height", "n_channels", "bytes", "path"]
+    fieldnames = base_fieldnames + ["moving_path"] if paired else base_fieldnames
+
     with open(manifest_path, "w", newline="") as fh:
-        writer = csv.DictWriter(
-            fh,
-            fieldnames=["cell_id", "target_px", "width", "height", "n_channels", "bytes", "path"],
-        )
+        writer = csv.DictWriter(fh, fieldnames=fieldnames)
         writer.writeheader()
         for tpx in target_px:
             th, tw = compute_target_shape(src.shape, tpx)
@@ -130,10 +130,22 @@ def run_matrix(source, outdir, target_px, n_channels, seed=0):
                 if nch > 1:
                     metadata["Channel"] = {"Name": ["DAPI"] + [f"ch{i}" for i in range(1, nch)]}
                 tifffile.imwrite(out_path, data, photometric="minisblack", metadata=metadata)
-                writer.writerow({
+                row = {
                     "cell_id": cell_id, "target_px": tpx, "width": rw, "height": rh,
                     "n_channels": nch, "bytes": out_path.stat().st_size, "path": str(out_path),
-                })
+                }
+                if paired:
+                    moving_path = ""
+                    if nch >= 2:
+                        mov_stack = synthesize_channels(resized, nch, seed=seed + 1)
+                        mov_out = outdir / f"{cell_id}_moving.ome.tif"
+                        tifffile.imwrite(
+                            mov_out, mov_stack, photometric="minisblack",
+                            metadata={"axes": "CYX",
+                                      "Channel": {"Name": ["DAPI"] + [f"m{i}" for i in range(1, nch)]}})
+                        moving_path = str(mov_out)
+                    row["moving_path"] = moving_path
+                writer.writerow(row)
     return manifest_path
 
 
@@ -144,8 +156,10 @@ def main():
     ap.add_argument("--target-px", type=int, nargs="+", default=[2048, 4096, 8192, 16384, 32768])
     ap.add_argument("--n-channels", type=int, nargs="+", default=[1, 2, 4, 8])
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--paired", action="store_true",
+                    help="Also emit a paired moving image per cell (n_channels>=2) with distinct channel names.")
     a = ap.parse_args()
-    path = run_matrix(a.source, a.outdir, a.target_px, a.n_channels, a.seed)
+    path = run_matrix(a.source, a.outdir, a.target_px, a.n_channels, a.seed, paired=a.paired)
     print(f"Wrote matrix manifest: {path}")
 
 
