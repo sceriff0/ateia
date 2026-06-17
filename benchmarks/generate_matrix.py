@@ -47,21 +47,39 @@ def synthesize_channels(src_2d: np.ndarray, n_channels: int, seed: int = 0) -> n
     return out
 
 
+# numpy dtype -> pyvips band format string
+_VIPS_FORMATS = {
+    "uint8": "uchar", "int8": "char", "uint16": "ushort", "int16": "short",
+    "uint32": "uint", "int32": "int", "float32": "float", "float64": "double",
+}
+
+
 def _resize(src_2d: np.ndarray, target_hw: tuple[int, int]) -> np.ndarray:
-    """Resize a 2-D array to target (H, W). Uses pyvips if available, else PIL."""
+    """Resize a 2-D array to target (H, W), preserving dtype. Uses pyvips if available, else PIL."""
     th, tw = target_hw
     try:
         import pyvips
-        vi = pyvips.Image.new_from_memory(
-            src_2d.tobytes(), src_2d.shape[1], src_2d.shape[0], 1, "uchar"
-        )
-        vi = vi.resize(tw / src_2d.shape[1], vscale=th / src_2d.shape[0])
-        buf = vi.write_to_memory()
-        return np.frombuffer(buf, dtype=np.uint8).reshape(th, tw)
     except ModuleNotFoundError:
         from PIL import Image
-        im = Image.fromarray(src_2d).resize((tw, th), Image.BILINEAR)
-        return np.asarray(im, dtype=src_2d.dtype)
+        orig_dtype = src_2d.dtype
+        im = Image.fromarray(src_2d)
+        # PIL only supports BILINEAR on modes without a bit-depth suffix (e.g. "I;16").
+        # Convert to "I" (int32) for non-uint8 integer types so bilinear resampling works,
+        # then cast the result back to the original dtype.
+        if im.mode not in ("L", "RGB", "RGBA", "F"):
+            im = im.convert("I")
+        im = im.resize((tw, th), Image.BILINEAR)
+        return np.asarray(im, dtype=orig_dtype)
+
+    fmt = _VIPS_FORMATS.get(src_2d.dtype.name)
+    if fmt is None:
+        raise ValueError(f"Unsupported dtype for pyvips resize: {src_2d.dtype}")
+    vi = pyvips.Image.new_from_memory(
+        src_2d.tobytes(), src_2d.shape[1], src_2d.shape[0], 1, fmt
+    )
+    vi = vi.resize(tw / src_2d.shape[1], vscale=th / src_2d.shape[0])
+    buf = vi.write_to_memory()
+    return np.frombuffer(buf, dtype=src_2d.dtype).reshape(th, tw)
 
 
 def _read_source_2d(path: Path) -> np.ndarray:

@@ -74,6 +74,23 @@ def test_compute_target_shape_rejects_zero_dimension():
         compute_target_shape((0, 0), 512)
 
 
+def test_run_matrix_preserves_uint16_dtype(tmp_path):
+    import tifffile
+    from benchmarks.generate_matrix import run_matrix
+
+    src = tmp_path / "src16.tif"
+    tifffile.imwrite(src, np.full((200, 100), 4000, dtype=np.uint16))
+
+    manifest = run_matrix(
+        source=src, outdir=tmp_path / "m16",
+        target_px=[50], n_channels=[1, 2], seed=0,
+    )
+    rows = list(csv.DictReader(open(manifest)))
+    for r in rows:
+        arr = tifffile.imread(r["path"])
+        assert arr.dtype == np.uint16
+
+
 def test_run_matrix_writes_cells_and_manifest(tmp_path):
     import tifffile
     from benchmarks.generate_matrix import run_matrix
