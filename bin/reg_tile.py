@@ -15,6 +15,12 @@ import json
 import os
 import threading
 
+# Read-only $HOME on HPC clusters breaks numba's on-disk cache during the valis
+# import (RuntimeError: '_repeat_1d': no locator available). Redirect + disable
+# before importing valis (mirrors register.py).
+os.environ.setdefault("NUMBA_CACHE_DIR", "/tmp/numba_cache")
+os.environ["NUMBA_DISABLE_CACHING"] = "1"
+
 import numpy as np
 import pyvips
 from valis.non_rigid_registrars import NonRigidTileRegistrar
