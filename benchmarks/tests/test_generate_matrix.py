@@ -36,3 +36,36 @@ def test_synthesize_channels_is_deterministic_for_seed():
     a = synthesize_channels(src, n_channels=3, seed=7)
     b = synthesize_channels(src, n_channels=3, seed=7)
     np.testing.assert_array_equal(a, b)
+
+
+def test_synthesize_channels_single_channel_returns_unchanged_source():
+    src = np.arange(64, dtype=np.uint8).reshape(8, 8)
+    out = synthesize_channels(src, n_channels=1, seed=0)
+    assert out.shape == (1, 8, 8)
+    np.testing.assert_array_equal(out[0], src)
+
+
+def test_synthesize_channels_output_stays_in_dtype_range():
+    src = np.full((8, 8), 250, dtype=np.uint8)
+    out = synthesize_channels(src, n_channels=4, seed=1)
+    assert out.max() <= 255 and out.min() >= 0
+
+
+def test_synthesize_channels_rejects_3d_input():
+    with pytest.raises(ValueError):
+        synthesize_channels(np.zeros((2, 4, 4), dtype=np.uint8), n_channels=2)
+
+
+def test_synthesize_channels_rejects_zero_channels():
+    with pytest.raises(ValueError):
+        synthesize_channels(np.zeros((4, 4), dtype=np.uint8), n_channels=0)
+
+
+def test_synthesize_channels_rejects_float_dtype():
+    with pytest.raises(ValueError):
+        synthesize_channels(np.zeros((4, 4), dtype=np.float32), n_channels=2)
+
+
+def test_compute_target_shape_rejects_zero_dimension():
+    with pytest.raises(ValueError):
+        compute_target_shape((0, 0), 512)

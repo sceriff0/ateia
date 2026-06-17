@@ -16,7 +16,9 @@ def compute_target_shape(src_hw: tuple[int, int], target_long_edge: int) -> tupl
     """Scale (height, width) so the longer edge equals target_long_edge, preserving aspect."""
     h, w = src_hw
     long_edge = max(h, w)
-    scale = target_long_edge / float(long_edge)
+    if long_edge == 0:
+        raise ValueError("src_hw must have positive dimensions")
+    scale = target_long_edge / long_edge
     return (round(h * scale), round(w * scale))
 
 
@@ -24,10 +26,14 @@ def synthesize_channels(src_2d: np.ndarray, n_channels: int, seed: int = 0) -> n
     """Replicate a single 2-D channel into n_channels with per-channel perturbation.
 
     Channel 0 is the unmodified source. Channels 1..N-1 add intensity jitter,
-    Gaussian noise, and a 1-px roll offset so each channel is non-identical.
+    Gaussian noise, and a c-px roll offset (by channel index) so each channel is non-identical.
     """
     if src_2d.ndim != 2:
         raise ValueError("src_2d must be 2-D (H, W)")
+    if n_channels < 1:
+        raise ValueError("n_channels must be >= 1")
+    if not np.issubdtype(src_2d.dtype, np.integer):
+        raise ValueError(f"src_2d must be an integer dtype, got {src_2d.dtype}")
     rng = np.random.default_rng(seed)
     info = np.iinfo(src_2d.dtype)
     out = np.empty((n_channels,) + src_2d.shape, dtype=src_2d.dtype)
