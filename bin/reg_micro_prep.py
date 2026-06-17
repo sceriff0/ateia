@@ -27,6 +27,13 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "utils"))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # for reg_finalize
+
+# Read-only $HOME on HPC clusters breaks numba's on-disk cache during the valis
+# import (RuntimeError: '_repeat_1d': no locator available). Redirect + disable
+# before importing valis (mirrors register.py).
+os.environ.setdefault("NUMBA_CACHE_DIR", "/tmp/numba_cache")
+os.environ["NUMBA_DISABLE_CACHING"] = "1"
+
 import numpy as np
 import pyvips
 import valis_tiling
