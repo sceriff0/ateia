@@ -1,0 +1,22 @@
+# Benchmark sweep definition. strategy: ofat (one-factor-at-a-time) | grid.
+strategy: ofat
+# Baseline used as the fixed point for ofat (one value per axis).
+baseline:
+  target_px: 4096
+  n_channels: 2
+  memory_mode: medium
+  reg_use_tiled_registration: true
+  reg_tile_size: 2048
+  reg_n_workers: 4
+  skip_micro_registration: true
+  reg_distributed_tiling: false
+# Axes to vary. Each maps to a --<name> CLI override (target_px/n_channels drive the image matrix).
+axes:
+  target_px:                  [2048, 4096, 8192, 16384, 32768]
+  n_channels:                 [1, 2, 4, 8]
+  memory_mode:                [low, medium, high]
+  reg_use_tiled_registration: [true, false]
+  reg_tile_size:              [1024, 2048, 4096]
+  reg_n_workers:              [2, 4, 8]
+  skip_micro_registration:    [true, false]
+  reg_distributed_tiling:     [false, true]
