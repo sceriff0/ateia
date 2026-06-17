@@ -16,7 +16,7 @@ matplotlib.use("Agg")
 from .lib import emit_config, load, plotting, regress
 
 
-def run(results_root, run_plan_csv, manifest_csv, reg_eval_csv, outdir) -> dict:
+def run(results_root, run_plan_csv, manifest_csv, reg_eval_csv, outdir, formats=("pdf", "svg")) -> dict:
     outdir = Path(outdir)
     figdir = outdir / "figures"
     figdir.mkdir(parents=True, exist_ok=True)
@@ -34,7 +34,7 @@ def run(results_root, run_plan_csv, manifest_csv, reg_eval_csv, outdir) -> dict:
         fig = plotting.scatter_with_fit(
             sub["input_gb"], sub["peak_rss_gb"], m["slope"], m["intercept"],
             xlabel="input (GiB)", ylabel="peak RSS (GiB)", title=proc)
-        plotting.save_fig(fig, figdir / f"scaling_{proc}")
+        plotting.save_fig(fig, figdir / f"scaling_{proc}", formats=formats)
 
     emit_config.write_optimized_config(models, outdir / "modules.optimized.config")
     return {"runs_df": runs_df, "models": models, "outdir": outdir}
