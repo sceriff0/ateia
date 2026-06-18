@@ -1,39 +1,188 @@
 # Mirage Benchmarking
 
-Quantifies resource usage vs input size + pipeline parameters, and registration
-accuracy (classic vs tiled) against landmark ground truth. See the design spec:
-`docs/superpowers/specs/2026-06-16-benchmarking-framework-design.md`.
+Quantifies **resource usage vs input size + pipeline parameters**, and **registration
+accuracy** (in-process tiling on vs off) against landmark ground truth — then derives
+an optimised `modules.config` from the measured scaling.
 
-## Resource sweep
+There are **two independent pipelines** (A: resource sweep, B: registration accuracy)
+plus an analysis layer (C: notebook, D: docs figures). The heavy steps (the sweeps)
+run on a **cluster** with the pipeline containers; everything else runs **locally**.
 
-1. Generate the input matrix from your own source image (use `--paired` so each
-   cell with n_channels>=2 also gets a moving panel with distinct channel names,
-   making registration axes meaningful):
+```
+A. RESOURCE / PARAMETER SWEEP          B. REGISTRATION ACCURACY
+   generate_matrix → build_run_plan       prepare_pairs
+        |                |                      |
+        +-- run_sweep.sh +                 run_registration.sh
+                |                               |
+          make_figures  <----- reg_eval.csv --- aggregate_eval
+                |
+   figures + modules.optimized.config           (both feed the notebook, C)
+```
 
-       python benchmarks/generate_matrix.py --source /path/to/source.ome.tif --outdir bench_matrix --paired
+Design rationale: `docs/superpowers/specs/2026-06-16-benchmarking-framework-design.md`.
+Rendered overview: `docs/benchmarks.md`.
 
-2. Expand the sweep into a run plan:
+## Prerequisites
 
-       python benchmarks/build_run_plan.py --sweep benchmarks/configs/sweep.yaml --out bench_run_plan.csv
+- **Local (analysis + tests):** numpy, pandas, scikit-learn, matplotlib, tifffile,
+  pyvips *or* Pillow, PyYAML, nbformat. No real data needed for the test suite.
+- **Cluster (the sweeps):** Nextflow >= 25.04, Docker/Singularity, the pipeline
+  containers (including the VALIS image), and `bash`. `run_sweep.sh` /
+  `run_registration.sh` use indexed-array lookups (no `declare -A`), so macOS
+  `/bin/bash` 3.2 works for the tested paths; if you hit an array error, `brew install bash`.
 
-3. Launch the sweep (one pipeline run per row; per-run trace + size logs isolated):
+Verify the whole harness with no data at all:
 
-       benchmarks/run_sweep.sh bench_run_plan.csv bench_matrix/matrix_manifest.csv bench_results
+    python -m pytest benchmarks/tests -q          # -> all green on synthetic fixtures
 
-Each run writes `bench_results/<run_id>/trace/trace.txt` and
-`bench_results/<run_id>/out/size_logs/input_sizes.csv`, joined by the analysis notebook (Plan 3).
+---
 
-> `run_sweep.sh` requires bash 4+ (associative arrays). On macOS, install a modern bash
-> (`brew install bash`) and invoke it explicitly if `/bin/bash` is 3.x.
+## A. Resource / parameter sweep
 
-> **Note — registration in the resource sweep.** When `--paired` is used with
-> `generate_matrix.py`, `run_sweep.sh` emits a reference+moving panel per patient
-> (distinct channel names: reference uses `DAPI|ch1|…`, moving uses `DAPI|m1|…`),
-> so VALIS registration actually runs and registration axes are exercised. Without
-> `--paired`, a single-slide passthrough is emitted and registration axes are no-ops.
+### A1 — Generate the input matrix
 
-## Registration accuracy (Plan 2)
+    python benchmarks/generate_matrix.py \
+        --source /path/to/your_source.ome.tif \
+        --outdir bench_matrix \
+        --paired
+        # optional: --target-px 2048 4096 8192 16384 32768  --n-channels 1 2 4 8  --seed 0
 
-ANHIR is account-gated; ACROBAT landmarks are challenge-gated. Download with your own
-account, then point `benchmarks/registration_eval/prepare_pairs.py` at the local data dir.
-Steps live in `benchmarks/registration_eval/README.md`.
+- **Input:** one image you supply (any Bio-Formats/tifffile-readable format; **uint8 or uint16**).
+- **Output:** `bench_matrix/px{px}_ch{n}.ome.tif` per (size x channel) cell; with `--paired`,
+  also `px{px}_ch{n}_moving.ome.tif` for n>=2 cells; plus `bench_matrix/matrix_manifest.csv`
+  (`cell_id,target_px,width,height,n_channels,bytes,path[,moving_path]`).
+- Use `--paired` so registration actually runs in the sweep (see the note below).
+
+### A2 — Expand the sweep into a run plan
+
+    python benchmarks/build_run_plan.py \
+        --sweep benchmarks/configs/sweep.yaml \
+        --out bench_run_plan.csv
+
+- **Input:** `benchmarks/configs/sweep.yaml` — edit it: `strategy: ofat|grid`, a `baseline:`
+  map, and the `axes:` you want. (Registration axes only do work when the matrix was `--paired`.)
+- **Output:** `bench_run_plan.csv` — one row per pipeline run
+  (`run_id,varied_axis,<param columns incl target_px,n_channels>`).
+
+### A3 — Launch the sweep (cluster)
+
+    benchmarks/run_sweep.sh  bench_run_plan.csv  bench_matrix/matrix_manifest.csv  bench_results \
+        [extra nextflow args, e.g. -profile singularity]
+
+- **What it does:** for each run-plan row, resolves the cell image, writes a per-run
+  samplesheet (reference + moving when paired), and launches the pipeline once with
+  `-profile docker -c benchmarks/configs/benchmark.config` (enables `enable_trace` +
+  `enable_size_logs`), isolating each run's outputs.
+- **Output per run:**
+  - `bench_results/<run_id>/trace/trace.txt` — peak_rss, realtime, cpus (+ `report.html`, `timeline.html`)
+  - `bench_results/<run_id>/out/size_logs/input_sizes.csv` — per-process input bytes
+  - `bench_results/<run_id>/out/...` — the normal pipeline outputs
+
+> `run_sweep.sh` parses CSV headers with indexed bash arrays. macOS `/bin/bash` (3.2)
+> works; if you see an array error use a newer bash (`brew install bash`).
+
+> **Registration in the resource sweep.** With `--paired`, `run_sweep.sh` emits a
+> reference+moving panel per patient with **distinct channel names** (reference
+> `DAPI|ch1|...`, moving `DAPI|m1|...` — distinct so the pipeline's duplicate-channel
+> guard accepts them), so VALIS registration runs and the registration axes
+> (`memory_mode`, `reg_tile_size`, `reg_n_workers`, `skip_micro_registration`,
+> `reg_distributed_tiling`) are exercised. Pairing applies to n_channels >= 2 cells;
+> n_channels == 1 cells are reference-only (both panels would be `{DAPI}` and collide).
+> Without `--paired`, registration is a single-slide passthrough and those axes are no-ops.
+
+### A4 — Analyse: figures + optimal config (local)
+
+    python -m benchmarks.analysis.make_figures \
+        --results-root bench_results \
+        --run-plan     bench_run_plan.csv \
+        --manifest     bench_matrix/matrix_manifest.csv \
+        --outdir       benchmarks/analysis
+        # optional: --reg-eval reg_eval.csv   (from pipeline B, for the accuracy section)
+
+- **Output:**
+  - `benchmarks/analysis/figures/scaling_<PROCESS>.pdf` + `.svg` — peak-RSS-vs-input fits per process.
+  - `benchmarks/analysis/modules.optimized.config` — regression-derived memory directives,
+    `memory = { check_max( ( <input_gb>*slope + intercept + sigma*task.attempt ).GB, 'memory' ) }`.
+    Processes with a known input expression are **live** blocks; others are emitted as
+    **commented** blocks for you to fill in (so the file is valid Groovy as-is). It never
+    overwrites the live config — review and diff:
+
+        diff conf/modules.config benchmarks/analysis/modules.optimized.config
+
+---
+
+## B. Registration accuracy (in-process tiling on vs off)
+
+Full detail (data access, limitations) in `benchmarks/registration_eval/README.md`.
+
+### B0 — Get data + describe pairs
+
+ANHIR is account-gated; ACROBAT landmarks are challenge-gated — download with your own
+account. Then write a `pairs.csv`:
+
+    pair_id,ref_image,moving_image,source_landmarks,target_landmarks,width,height,pixel_size_um
+    P001,/data/P001_HE.tif,/data/P001_IHC.tif,/data/P001_mov.csv,/data/P001_ref.csv,40000,30000,0.25
+
+### B1 — Prepare per-pair input dirs
+
+    python -m benchmarks.registration_eval.prepare_pairs --pairs-csv pairs.csv --out reg_prepared
+
+- **Output:** `reg_prepared/<pair_id>/input/` (symlinked images) + `reg_prepared/pairs_manifest.csv`.
+
+### B2 — Register (tiled & untiled) + score (cluster, VALIS env)
+
+    benchmarks/registration_eval/run_registration.sh \
+        reg_prepared/pairs_manifest.csv  reg_prepared  reg_results
+
+- **What it does:** per pair x mode (in-process tiling on/off), runs `bin/register.py`,
+  `bin/estimate_feature_distances.py`, then `eval_tre` (loads the VALIS registrar pickle,
+  warps the moving ground-truth landmarks).
+- **Output:** `reg_results/eval_<pair>_<mode>.json` — three error views per pair/mode:
+  true landmark **TRE/rTRE/um**, VALIS self-reported **rTRE**, feature-distance estimate.
+
+### B3 — Aggregate
+
+    python -m benchmarks.registration_eval.aggregate_eval \
+        --eval-dir reg_results --out reg_eval.csv --agg-out reg_eval_agg.csv
+
+- **Output:** `reg_eval.csv` (per pair/mode tidy rows) + `reg_eval_agg.csv` (per-mode
+  **MMrTRE / AMrTRE**). `reg_eval.csv` is what `make_figures --reg-eval` and the notebook consume.
+
+---
+
+## C. The notebook (interactive, paper-ready)
+
+    jupyter lab benchmarks/analysis/benchmark_analysis.ipynb
+
+Edit the paths in the **setup cell** (`RESULTS_ROOT`, `RUN_PLAN`, `MANIFEST`, `REG_EVAL`)
+to your outputs, then run top to bottom. Five sections: load -> regression -> optimal
+config -> tiled-vs-classic accuracy -> paired sampling. Produces inline plots, the same
+figures, and writes `conf/modules.optimized.config`.
+
+## D. Put figures in the docs (optional)
+
+    python -m benchmarks.analysis.export_docs_figures \
+        --results-root bench_results --run-plan bench_run_plan.csv \
+        --manifest bench_matrix/matrix_manifest.csv
+
+- **Output:** `docs/assets/images/benchmarks/scaling_*.png`. Then uncomment the matching
+  `<!-- ... -->` image slots in `docs/benchmarks.md` and run `mkdocs build`.
+
+---
+
+## Inputs -> outputs at a glance
+
+| Step | You provide | You get |
+|---|---|---|
+| `generate_matrix.py` | 1 source image | matrix of OME-TIFFs + `matrix_manifest.csv` |
+| `build_run_plan.py` | `sweep.yaml` | `run_plan.csv` |
+| `run_sweep.sh` | manifest + run plan | per-run `trace.txt` + `input_sizes.csv` |
+| `make_figures` | results + run plan + manifest | `scaling_*.pdf/svg` + `modules.optimized.config` |
+| `prepare_pairs.py` | `pairs.csv` (+ downloaded data) | per-pair input dirs + `pairs_manifest.csv` |
+| `run_registration.sh` | pairs manifest | `eval_*.json` (3-way error x tiled/untiled) |
+| `aggregate_eval` | eval JSONs | `reg_eval.csv` + `reg_eval_agg.csv` |
+| notebook | all the above paths | inline figures + optimal config |
+
+The fastest way to see every component work end-to-end **without any real data** is
+`python -m pytest benchmarks/tests -q` — the suite drives the whole harness on tiny
+synthetic fixtures.
