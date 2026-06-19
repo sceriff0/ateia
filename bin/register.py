@@ -72,6 +72,7 @@ os.environ['LD_LIBRARY_PATH'] = (
     '/usr/local/lib:/usr/lib/x86_64-linux-gnu:/lib/x86_64-linux-gnu:'
     + os.environ.get('LD_LIBRARY_PATH', '')
 )
+import hpc_scratch  # noqa: F401  redirect cjdk/matplotlib caches off read-only $HOME
 
 # VALIS library imports
 from valis import registration

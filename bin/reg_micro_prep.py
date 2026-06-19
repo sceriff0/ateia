@@ -33,6 +33,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # for reg_finali
 # before importing valis (mirrors register.py).
 os.environ.setdefault("NUMBA_CACHE_DIR", "/tmp/numba_cache")
 os.environ["NUMBA_DISABLE_CACHING"] = "1"
+import hpc_scratch  # noqa: F401  redirect cjdk/matplotlib caches off read-only $HOME
 
 import numpy as np
 import pyvips

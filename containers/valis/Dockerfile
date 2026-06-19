@@ -177,7 +177,20 @@ RUN python3 -m pip install numpy
 # Install VALIS-WSI and its dependencies
 # Pinned to 1.0.0: the version in the deployed image and the bit-identical reference
 # for distributed tiled registration. Unpinned would drift to 1.2.0 (different tile kernel).
-RUN python3 -m pip install --retries 10 --timeout 120 --resume-retries 10 valis-wsi==1.0.0
+#
+# scyjava is pinned to <1.11 to match the upstream cdgatenbee/valis-wsi:1.0.0 image's
+# JVM bootstrap. valis-wsi==1.0.0 only requires scyjava>=1.8.1,<2.0.0, so a fresh build
+# otherwise drifts to scyjava 1.12.x, whose fetch_java default is "always": it uses cjdk
+# to DOWNLOAD a managed JDK into ~/.cache/cjdk and ignores the system JDK — fatal on HPC
+# nodes with a read-only $HOME. scyjava<1.11 resolves to 1.10.2, the last release with no
+# cjdk dependency at all; it starts the JVM from the system openjdk-11 via JAVA_HOME above,
+# exactly like the reference image. The download decision lives in scyjava's fetch_java
+# default (not in cjdk), so the scyjava pin is the real lever — but scyjava 1.10.2 is
+# co-versioned with jgo 1.x (`from jgo import jgo`), so jgo MUST also be pinned <2 or the
+# image fails to build with `ImportError: cannot import name 'jgo' from 'jgo'` (jgo 2.x
+# dropped that module). Verified: scyjava 1.10.2 + jgo 1.1.0 import cleanly, no cjdk pulled.
+RUN python3 -m pip install --retries 10 --timeout 120 --resume-retries 10 \
+    valis-wsi==1.0.0 "scyjava>=1.8.1,<1.11" "jgo>=1.0.3,<2" "jpype1>=1.4.1,<2.0.0"
 
 # Add the explicit external tile-loop seam (spec §6 Option B). Splits NonRigidTileRegistrar.calc
 # into a default-None dispatch + the original body (_calc_tiles), so the classic path is unchanged
