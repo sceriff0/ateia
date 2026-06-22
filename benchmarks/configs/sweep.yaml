@@ -22,4 +22,7 @@ axes:
   reg_tile_size:              [1024, 2048, 4096]
   reg_n_workers:              [2, 4, 8]
   skip_micro_registration:    [true, false]
-  reg_distributed_tiling:     [false, true]
+  # reg_distributed_tiling axis disabled: the Nextflow-distributed tiling path
+  # (VALIS_DISTRIBUTED_ADAPTER) is currently broken. Baseline pins it to false,
+  # so every run below uses classic VALIS_ADAPTER (normal registration).
+  # Re-enable once the distributed path works: reg_distributed_tiling: [false, true]
