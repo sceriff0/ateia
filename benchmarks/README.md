@@ -100,6 +100,12 @@ Verify the whole harness with no data at all:
         # optional: --reg-eval reg_eval.csv   (from pipeline B, for the accuracy section)
 
 - **Output:**
+  - `benchmarks/analysis/measurements.csv` — **the primary data artifact**: one tidy row per
+    (run × process) with `peak_rss_gb`, `peak_vmem_gb`, `realtime_s`, `duration_s`, `cpus`,
+    `input_gb`, and every swept param column joined in (`run_id`, `varied_axis`, `target_px`,
+    `n_channels`, …). Read straight into R (`read.csv`) — no notebook required.
+  - `benchmarks/analysis/resource_models.csv` — one row per process with the fitted
+    `slope`, `intercept`, `r2`, `sigma`, `n` (empty `r2` ⇒ `n<3`, flat fallback).
   - `benchmarks/analysis/figures/scaling_<PROCESS>.pdf` + `.svg` — peak-RSS-vs-input fits per process.
   - `benchmarks/analysis/modules.optimized.config` — regression-derived memory directives,
     `memory = { check_max( ( <input_gb>*slope + intercept + sigma*task.attempt ).GB, 'memory' ) }`.
@@ -150,7 +156,11 @@ account. Then write a `pairs.csv`:
 
 ---
 
-## C. The notebook (interactive, paper-ready)
+## C. The notebook (optional — interactive view of the same numbers)
+
+> Not required. `make_figures` (A4) already writes `measurements.csv` +
+> `resource_models.csv`, which are the canonical outputs to analyse yourself
+> (e.g. in R). The notebook is just an interactive rendering of those same data.
 
     jupyter lab benchmarks/analysis/benchmark_analysis.ipynb
 
@@ -177,7 +187,7 @@ figures, and writes `conf/modules.optimized.config`.
 | `generate_matrix.py` | 1 source image | matrix of OME-TIFFs + `matrix_manifest.csv` |
 | `build_run_plan.py` | `sweep.yaml` | `run_plan.csv` |
 | `run_sweep.sh` | manifest + run plan | per-run `trace.txt` + `input_sizes.csv` |
-| `make_figures` | results + run plan + manifest | `scaling_*.pdf/svg` + `modules.optimized.config` |
+| `make_figures` | results + run plan + manifest | `measurements.csv` + `resource_models.csv` (tidy, for R) + `scaling_*.pdf/svg` + `modules.optimized.config` |
 | `prepare_pairs.py` | `pairs.csv` (+ downloaded data) | per-pair input dirs + `pairs_manifest.csv` |
 | `run_registration.sh` | pairs manifest | `eval_*.json` (3-way error x tiled/untiled) |
 | `aggregate_eval` | eval JSONs | `reg_eval.csv` + `reg_eval_agg.csv` |

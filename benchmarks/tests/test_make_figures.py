@@ -22,6 +22,28 @@ def test_run_produces_config_and_figures(tmp_path):
     assert "SEGMENT" in result["models"]
 
 
+def test_run_writes_tidy_csvs(tmp_path):
+    """The primary R-facing outputs: tidy measurements + regression fits as CSV."""
+    import pandas as pd
+
+    res = make_figures.run(
+        results_root=FIX / "runs", run_plan_csv=FIX / "runs_run_plan.csv",
+        manifest_csv=FIX / "runs_matrix_manifest.csv", reg_eval_csv=None, outdir=tmp_path,
+    )
+
+    meas = pd.read_csv(res["measurements_csv"])
+    assert len(meas) == 4  # 2 runs x 2 processes, one row each
+    # tidy long frame: measurement columns + swept params joined in
+    for col in ("run_id", "process", "input_gb", "peak_rss_gb", "realtime_s",
+                "cpus", "target_px", "n_channels"):
+        assert col in meas.columns
+
+    models = pd.read_csv(res["models_csv"])
+    assert set(models.columns) == {
+        "process", "predictor", "target", "slope", "intercept", "r2", "sigma", "n"}
+    assert set(models["process"]) == {"CONVERT_IMAGE", "SEGMENT"}
+
+
 def test_notebook_executes_on_fixture(tmp_path):
     """Smoke: the notebook's lib calls run headless against the fixture.
 

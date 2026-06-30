@@ -25,6 +25,13 @@ def run(results_root, run_plan_csv, manifest_csv, reg_eval_csv, outdir, formats=
     runs_df = load.load_runs(results_root, run_plan_csv, manifest_csv)
     models = regress.fit_per_process(runs_df, predictor="input_gb", target="peak_rss_gb")
 
+    # Tidy CSVs for downstream analysis (R, etc.) — these are the primary data
+    # artifacts; figures and the notebook are optional views of the same numbers.
+    measurements_csv = outdir / "measurements.csv"
+    models_csv = outdir / "resource_models.csv"
+    runs_df.to_csv(measurements_csv, index=False)
+    regress.models_to_frame(models).to_csv(models_csv, index=False)
+
     # per-process memory scaling figures
     for proc, g in runs_df.groupby("process"):
         sub = g[["input_gb", "peak_rss_gb"]].dropna()
@@ -37,7 +44,8 @@ def run(results_root, run_plan_csv, manifest_csv, reg_eval_csv, outdir, formats=
         plotting.save_fig(fig, figdir / f"scaling_{proc}", formats=formats)
 
     emit_config.write_optimized_config(models, outdir / "modules.optimized.config")
-    return {"runs_df": runs_df, "models": models, "outdir": outdir}
+    return {"runs_df": runs_df, "models": models, "outdir": outdir,
+            "measurements_csv": measurements_csv, "models_csv": models_csv}
 
 
 def main():
@@ -49,8 +57,9 @@ def main():
     ap.add_argument("--outdir", default="benchmarks/analysis")
     a = ap.parse_args()
     res = run(a.results_root, a.run_plan, a.manifest, a.reg_eval, a.outdir)
-    print(f"Wrote {res['outdir']}/modules.optimized.config and figures for "
-          f"{len(res['models'])} processes")
+    print(f"Wrote {res['measurements_csv']} ({len(res['runs_df'])} rows), "
+          f"{res['models_csv']} ({len(res['models'])} processes), "
+          f"{res['outdir']}/modules.optimized.config, and figures")
 
 
 if __name__ == "__main__":
