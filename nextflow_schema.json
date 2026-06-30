@@ -219,21 +219,6 @@
                     "description": "Enable parallel warping during registration.",
                     "default": false
                 },
-                "reg_n_workers": {
-                    "type": "integer",
-                    "description": "Number of workers for registration.",
-                    "default": 8
-                },
-                "reg_use_tiled_registration": {
-                    "type": "boolean",
-                    "description": "Use tiled registration approach.",
-                    "default": true
-                },
-                "reg_tile_size": {
-                    "type": "integer",
-                    "description": "Tile size for tiled registration.",
-                    "default": 2048
-                },
                 "reg_distributed_tiling": {
                     "type": "boolean",
                     "description": "Opt-in: lift VALIS's non-rigid tile loop into Nextflow processes (REG_PREP/REG_TILE/REG_FINALIZE) for low-RAM clusters. Bit-identical to VALIS's own tiler. Default keeps the classic VALIS_ADAPTER.",

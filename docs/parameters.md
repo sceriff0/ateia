@@ -76,9 +76,6 @@ VALIS whole-slide alignment. Deep dives: [Registration](registration_methods.md)
 | `reg_max_image_dim` | `4000` | Max cached image dimension during registration. |
 | `skip_micro_registration` | `true` | Skip the micro-registration refinement step. |
 | `reg_parallel_warping` | `false` | Warp slides in parallel. |
-| `reg_n_workers` | `8` | Worker threads for parallel warping. |
-| `reg_use_tiled_registration` | `true` | Use tiled non-rigid registration. |
-| `reg_tile_size` | `2048` | Tile size (px) for tiled registration. |
 | `reg_jvm_heap_gb` | `null` | Explicit JVM heap (GB) for VALIS. `null` auto-estimates from input size. |
 
 ### Distributed registration (advanced)

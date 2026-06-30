@@ -180,7 +180,7 @@ Short, practical answers to the questions users ask most. Click a question to ex
     The `ieo` profile sets these automatically. See [Troubleshooting → Container backends](troubleshooting.md#container-backend-issues).
 
 ??? question "How do I reduce memory use in registration?"
-    Drop to `--memory_mode low`, lower `--reg_max_image_dim`, and enable tiled registration with `--reg_use_tiled_registration true --reg_tile_size 4096`. If the feature-detection pass is the culprit, also lower `--feature_n_features`. See [Registration Errors](registration_errors.md).
+    Drop to `--memory_mode low` and lower `--reg_max_image_dim`. VALIS auto-tiles non-rigid registration internally once estimated memory is high, so there is nothing to toggle there. If the feature-detection pass is the culprit, also lower `--feature_n_features`. For low-RAM clusters you can opt into the Nextflow-distributed tiling path with `--reg_distributed_tiling true`. See [Registration Errors](registration_errors.md).
 
 ??? question "A job died with exit code 137. What does that mean?"
     `137` (and `140`) almost always means the job was killed for exceeding its memory or time grant. MIRAGE auto-retries on `104,134,135,137,139,140,143`, and each retry scales memory/time with `task.attempt`. Raise the global caps with `--max_memory '700.GB'`, `--max_cpus 128`, `--max_time '240.h'` if needed (the `local`, `test`, `test_full`, `slurm`, and `ieo` profiles clamp every request to these via `process.resourceLimits`). See [Troubleshooting → OOM](troubleshooting.md#out-of-memory-and-runtime-failures).

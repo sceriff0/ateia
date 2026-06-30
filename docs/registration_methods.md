@@ -123,9 +123,10 @@ The channels VALIS leans on to *pick and align* the reference are controlled by 
 | Parameter | Default | What it does |
 | --- | --- | --- |
 | `reg_parallel_warping` | `false` | Warp channels in parallel (faster, more RAM). |
-| `reg_n_workers` | `8` | Worker processes for registration. |
-| `reg_use_tiled_registration` | `true` | Register in tiles to bound memory on large slides. |
-| `reg_tile_size` | `2048` | Tile size (px) when tiled registration is on. |
+
+> Tiled non-rigid registration is handled automatically by VALIS — it switches to its
+> internal tile registrar when estimated memory exceeds ~10 GB, so there is no tile
+> size / worker count to set.
 
 ### Padding
 

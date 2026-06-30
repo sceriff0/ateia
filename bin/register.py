@@ -22,8 +22,7 @@ Example:
         --out ./registered \\
         --reference panel1.ome.tif \\
         --max-image-dim 6000 \\
-        --parallel-warping \\
-        --n-workers 4
+        --parallel-warping
 """
 from __future__ import annotations
 
@@ -389,9 +388,6 @@ def valis_registration(
     max_image_dim_px: int = 4000,
     skip_micro_registration: bool = False,
     parallel_warping: bool = False,
-    n_workers: int = 2,
-    use_tiled_registration: bool = False,
-    tile_size: int = 512,
     image_type: str = "auto",
     interp_method: str = "bilinear",
     jvm_heap_gb: Optional[int] = None,
@@ -419,13 +415,6 @@ def valis_registration(
         Skip the micro-rigid registration step. Default: False
     parallel_warping : bool, optional
         Enable parallel slide warping using ThreadPoolExecutor. Default: False
-    n_workers : int, optional
-        Number of parallel workers for warping. Default: 2
-    use_tiled_registration : bool, optional
-        Use NonRigidTileRegistrar for very large images. Processes tiles in parallel
-        which improves performance without sacrificing accuracy. Default: False
-    tile_size : int, optional
-        Tile size for tiled registration. Default: 512
     image_type : str, optional
         Image type for preprocessing: "brightfield", "fluorescence", or "auto".
         "auto" attempts to detect based on image characteristics. Default: "auto"
@@ -443,8 +432,6 @@ def valis_registration(
     feature_detector_cls = preset["feature_detector_cls"]
     matcher = preset["matcher"]
     # New preset keys with fallbacks to CLI args/defaults
-    preset_tile_wh = preset.get("tile_wh", tile_size)
-    preset_tile_buffer = preset.get("tile_buffer", 200)
     preset_max_image_dim = preset.get("max_image_dim_px", max_image_dim_px)
 
     # Initialize phase reporter for structured progress tracking
@@ -536,9 +523,6 @@ def valis_registration(
     # triggers a bug: its fwd_dxdy is always a pyvips.Image, but the Slide
     # setter silently rejects pyvips, leaving fwd_dxdy=None. This causes
     # measure_error() to report identical rigid/non-rigid errors.
-    if use_tiled_registration:
-        logger.warning("  --use-tiled-registration is deprecated: VALIS auto-tiles when needed.")
-        logger.warning("  Using OpticalFlowWarper instead (VALIS will auto-tile if memory requires it).")
     logger.info(f"  Non-rigid registrar: OpticalFlowWarper (VALIS auto-tiles if memory > 10GB)")
     non_rigid_registrar = OpticalFlowWarper()
 
@@ -840,9 +824,12 @@ def valis_registration(
         slide_name = basename.replace('.ome.tiff', '').replace('.ome.tif', '').replace('.tiff', '').replace('.tif', '')
         slide_name_to_path[slide_name] = f
 
+    # Warping concurrency. VALIS-internal tiling handles the heavy parallelism, so a
+    # small fixed pool suffices for slide warping (was the removed reg_n_workers param).
+    warp_workers = min(4, len(registrar.slide_dict)) or 1
     logger.info(f"\nWarping {len(registrar.slide_dict)} slides to: {out}")
     if parallel_warping:
-        logger.info(f"  Mode: Parallel (ThreadPoolExecutor, {n_workers} workers)")
+        logger.info(f"  Mode: Parallel (ThreadPoolExecutor, {warp_workers} workers)")
     else:
         logger.info(f"  Mode: Sequential")
     logger.info(f"  Transform: {'rigid + non-rigid' if use_non_rigid else 'rigid-only'}")
@@ -860,7 +847,7 @@ def valis_registration(
     if parallel_warping and len(registrar.slide_dict) > 1:
         # Parallel warping using ThreadPoolExecutor
         futures = {}
-        with ThreadPoolExecutor(max_workers=n_workers) as executor:
+        with ThreadPoolExecutor(max_workers=warp_workers) as executor:
             for slide_name, slide_obj in registrar.slide_dict.items():
                 if slide_name not in slide_name_to_path:
                     failed_slides.append((slide_name, "Path not found"))
@@ -1057,14 +1044,8 @@ def parse_args() -> argparse.Namespace:
     # Performance options
     parser.add_argument('--parallel-warping', action='store_true',
                         help='Enable parallel slide warping using ThreadPoolExecutor')
-    parser.add_argument('--n-workers', type=int, default=4,
-                        help='Number of parallel workers for warping')
 
     # Advanced registration options
-    parser.add_argument('--use-tiled-registration', action='store_true',
-                        help='Use NonRigidTileRegistrar for large images (parallel tile processing)')
-    parser.add_argument('--tile-size', type=int, default=2048,
-                        help='Tile size for tiled registration')
     parser.add_argument('--image-type', type=str, default='fluorescence',
                         choices=['auto', 'brightfield', 'fluorescence'],
                         help='Image type for preprocessing optimization')
@@ -1094,10 +1075,7 @@ def main() -> int:
             max_image_dim_px=args.max_image_dim,
             skip_micro_registration=args.skip_micro_registration,
             parallel_warping=args.parallel_warping,
-            n_workers=args.n_workers,
             # Advanced options
-            use_tiled_registration=args.use_tiled_registration,
-            tile_size=args.tile_size,
             image_type=args.image_type,
             interp_method=args.interp_method,
             jvm_heap_gb=args.jvm_heap_gb,
