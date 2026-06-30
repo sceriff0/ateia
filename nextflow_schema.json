@@ -80,9 +80,9 @@
                     "default": 100
                 },
                 "preproc_pool_workers": {
-                    "type": "integer",
-                    "description": "Number of pool workers for preprocessing.",
-                    "default": 3
+                    "type": ["integer", "null"],
+                    "description": "Worker threads for preprocessing parallelism. null = use task.cpus.",
+                    "default": null
                 },
                 "preproc_overlap": {
                     "type": "integer",
@@ -212,11 +212,6 @@
                 "allow_auto_reference": {
                     "type": "boolean",
                     "description": "Allow automatic reference selection.",
-                    "default": false
-                },
-                "reg_parallel_warping": {
-                    "type": "boolean",
-                    "description": "Enable parallel warping during registration.",
                     "default": false
                 },
                 "reg_distributed_tiling": {
