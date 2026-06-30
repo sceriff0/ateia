@@ -4,7 +4,7 @@ site_description: >-
   correction, registration, segmentation, single-cell quantification, and
   QuPath-compatible export.
 site_author: MIRAGE Team
-site_url: https://mirage.readthedocs.io/
+site_url: https://mirage-pipeline.readthedocs.io/
 repo_url: https://github.com/sceriff0/mirage
 repo_name: sceriff0/mirage
 edit_uri: edit/main/docs/
@@ -15,6 +15,7 @@ copyright: >-
 exclude_docs: |
   assets/images/README.md
   superpowers/
+  _archive/
 
 # ---------------------------------------------------------------------------
 # Theme
@@ -89,36 +90,10 @@ plugins:
 # ---------------------------------------------------------------------------
 nav:
   - Home: index.md
-  - Getting Started:
-      - Overview: getting_started.md
-      - Installation: installation.md
-      - Walkthrough: walkthrough.md
-  - User Guide:
-      - Pipeline Architecture: workflow.md
-      - Samplesheet & Input: input_spec.md
-      - Output Files: outputs.md
-      - Restartability & Checkpoints: restartability_guide.md
-      - Running on HPC / SLURM: slurm.md
-  - Pipeline Stages:
-      - Preprocessing: preprocessing.md
-      - Registration: registration_methods.md
-      - Registration Error Metrics: registration_errors.md
-      - Feature Distance Estimation: estimate_feature_distances.md
-      - Segmentation: segmentation.md
-      - Quantification: quantification.md
-      - Visualization & Export: export.md
-  - Downstream:
-      - FlowPath Ecosystem: flowpath.md
-  - Reference:
-      - CLI & Usage: usage.md
-      - Parameters: parameters.md
-  - Help:
-      - Troubleshooting: troubleshooting.md
-      - FAQ: faq.md
-      - Testing: testing_guide.md
-      - Developer Guide: developer_guide.md
-      - Changelog: changelog.md
-      - Citation: citation.md
+  - Installation: installation.md
+  - Usage: usage.md
+  - Parameters: parameters.md
+  - Citation: citation.md
 
 # ---------------------------------------------------------------------------
 # Appearance extras

@@ -19,7 +19,7 @@ shown here are the values in
 
 | Parameter | Default | Description |
 |---|---|---|
-| `input` | `null` | Path to the samplesheet CSV. **Required.** Columns depend on `--start` — see [Samplesheet & Input](input_spec.md). |
+| `input` | `null` | Path to the samplesheet CSV. **Required.** Columns depend on `--start` — see [Samplesheet & Input](usage.md#the-samplesheet). |
 | `outdir` | `null` | Output root directory. **Required** — no default. Checkpoint CSVs are written to `<outdir>/csv/`. |
 | `publish_dir_mode` | `copy` | How outputs are published (`copy`, `symlink`, `move`). |
 
@@ -34,12 +34,11 @@ shown here are the values in
 
 !!! tip "Run a single stage"
     `--start registration --stop registration` runs registration only, reading a
-    `<outdir>/csv/preprocessed.csv` checkpoint. See [Restartability](restartability_guide.md).
+    `<outdir>/csv/preprocessed.csv` checkpoint. See [Restartability](usage.md#checkpoints-resuming).
 
 ## Preprocessing
 
-Bio-Formats conversion + BaSiC illumination correction. Deep dive:
-[Preprocessing](preprocessing.md).
+Bio-Formats conversion + BaSiC illumination correction.
 
 | Parameter | Default | Description |
 |---|---|---|
@@ -54,8 +53,7 @@ Bio-Formats conversion + BaSiC illumination correction. Deep dive:
 
 ## Registration
 
-VALIS whole-slide alignment. Deep dives: [Registration](registration_methods.md) ·
-[Error metrics](registration_errors.md).
+VALIS whole-slide alignment.
 
 ### Common
 
@@ -101,7 +99,7 @@ reach for these if a single REGISTER task can't fit a slide in memory.
 
 ## Segmentation
 
-Backend selected by `--seg_method`. Deep dive: [Segmentation](segmentation.md).
+Backend selected by `--seg_method`.
 
 ### Backend selection & shared
 
@@ -156,7 +154,7 @@ SAM foundation model on the DAPI channel (located by name).
 
 ## Quantification
 
-Per-cell marker intensity. Deep dive: [Quantification](quantification.md).
+Per-cell marker intensity.
 
 | Parameter | Default | Description |
 |---|---|---|
@@ -169,8 +167,7 @@ Per-cell marker intensity. Deep dive: [Quantification](quantification.md).
 
 ## Visualization & export
 
-Pyramidal OME-TIFF assembly and GeoJSON. Deep dive:
-[Visualization & Export](export.md).
+Pyramidal OME-TIFF assembly and GeoJSON.
 
 | Parameter | Default | Description |
 |---|---|---|
@@ -197,7 +194,7 @@ Pyramidal OME-TIFF assembly and GeoJSON. Deep dive:
 
 ## Cluster & resources
 
-HPC details: [Running on HPC / SLURM](slurm.md).
+HPC details: [Running on HPC / SLURM](usage.md#running-on-hpc).
 
 | Parameter | Default | Description |
 |---|---|---|
@@ -212,7 +209,7 @@ HPC details: [Running on HPC / SLURM](slurm.md).
 !!! info "How resources scale"
     Per-process memory and time scale with `task.attempt`, so a retry roughly
     doubles them (bounded by the caps above). See the resource-label table in
-    [Running on HPC / SLURM](slurm.md#resource-labels-caps-and-retries).
+    [Running on HPC / SLURM](usage.md#running-on-hpc).
 
 ## Tracing
 
@@ -242,10 +239,6 @@ nextflow run . -profile slurm,singularity \
 
 ## See also
 
-<div class="grid cards" markdown>
-
-- :material-console:{ .lg .middle } **Command recipes** — [CLI & Usage](usage.md)
-- :material-sitemap:{ .lg .middle } **What the flags drive** — [Pipeline Architecture](workflow.md)
-- :material-help-circle:{ .lg .middle } **Common questions** — [FAQ](faq.md)
-
-</div>
+- :material-console: **Command recipes & the samplesheet** — [Usage](usage.md)
+- :material-help-circle: **Common questions** — [Usage → Troubleshooting & FAQ](usage.md#troubleshooting-faq)
+- :material-book-open-variant: **How to cite** — [Citation](citation.md)
