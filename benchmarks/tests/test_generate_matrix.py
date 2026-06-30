@@ -133,12 +133,27 @@ def test_run_matrix_paired_writes_moving_with_distinct_channels(tmp_path):
     manifest = run_matrix(source=src, outdir=tmp_path / "m",
                           target_px=[50], n_channels=[1, 2], seed=0, paired=True)
     rows = {r["cell_id"]: r for r in csv.DictReader(open(manifest))}
-    assert "moving_path" in next(iter(rows.values()))
-    # n>=2 gets a moving file; n==1 does not (would collide on {DAPI})
-    assert rows["px50_ch2"]["moving_path"] and Path(rows["px50_ch2"]["moving_path"]).exists()
-    assert rows["px50_ch1"]["moving_path"] == ""
-    mov = tifffile.imread(rows["px50_ch2"]["moving_path"])
+    assert "moving_paths" in next(iter(rows.values()))
+    # n>=2 gets one moving file (default n_moving=1); n==1 does not (would collide on {DAPI})
+    movs = rows["px50_ch2"]["moving_paths"].split(";")
+    assert len(movs) == 1 and Path(movs[0]).exists()
+    assert rows["px50_ch1"]["moving_paths"] == ""
+    mov = tifffile.imread(movs[0])
     assert mov.shape[0] == 2  # (C,H,W)
+
+
+def test_run_matrix_n_moving_writes_distinct_panels(tmp_path):
+    import tifffile
+    from benchmarks.generate_matrix import run_matrix
+    src = tmp_path / "s.tif"
+    tifffile.imwrite(src, np.full((200, 100), 100, dtype=np.uint8))
+    manifest = run_matrix(source=src, outdir=tmp_path / "m",
+                          target_px=[50], n_channels=[2], seed=0, paired=True, n_moving=3)
+    row = next(iter(csv.DictReader(open(manifest))))
+    movs = row["moving_paths"].split(";")
+    assert len(movs) == 3  # one distinct moving image per extra registration panel
+    assert all(Path(p).exists() for p in movs)
+    assert len(set(movs)) == 3  # distinct filenames
 
 
 def test_run_matrix_default_unpaired_manifest_columns_unchanged(tmp_path):

@@ -103,7 +103,8 @@ def _read_source_2d(path: Path) -> np.ndarray:
     return arr
 
 
-def run_matrix(source, outdir, target_px, n_channels, seed=0, paired: bool = False):
+def run_matrix(source, outdir, target_px, n_channels, seed=0, paired: bool = False,
+               n_moving: int = 1):
     import tifffile
 
     outdir = Path(outdir)
@@ -112,10 +113,14 @@ def run_matrix(source, outdir, target_px, n_channels, seed=0, paired: bool = Fal
     manifest_path = outdir / "matrix_manifest.csv"
 
     base_fieldnames = ["cell_id", "target_px", "width", "height", "n_channels", "bytes", "path"]
-    fieldnames = base_fieldnames + ["moving_path"] if paired else base_fieldnames
+    # `moving_paths` is a ';'-joined list of moving images (one per extra registration
+    # panel) so the sweep can register N images, not just a pair. Empty for n_channels==1.
+    fieldnames = base_fieldnames + ["moving_paths"] if paired else base_fieldnames
 
     with open(manifest_path, "w", newline="") as fh:
-        writer = csv.DictWriter(fh, fieldnames=fieldnames)
+        # lineterminator='\n' (not csv's default '\r\n') so downstream bash/awk column
+        # parsing in run_sweep.sh doesn't see a trailing '\r' on the last field.
+        writer = csv.DictWriter(fh, fieldnames=fieldnames, lineterminator="\n")
         writer.writeheader()
         for tpx in target_px:
             th, tw = compute_target_shape(src.shape, tpx)
@@ -135,16 +140,20 @@ def run_matrix(source, outdir, target_px, n_channels, seed=0, paired: bool = Fal
                     "n_channels": nch, "bytes": out_path.stat().st_size, "path": str(out_path),
                 }
                 if paired:
-                    moving_path = ""
+                    moving_paths = []
                     if nch >= 2:
-                        mov_stack = synthesize_channels(resized, nch, seed=seed + 1)
-                        mov_out = outdir / f"{cell_id}_moving.ome.tif"
-                        tifffile.imwrite(
-                            mov_out, mov_stack, photometric="minisblack",
-                            metadata={"axes": "CYX",
-                                      "Channel": {"Name": ["DAPI"] + [f"m{i}" for i in range(1, nch)]}})
-                        moving_path = str(mov_out)
-                    row["moving_path"] = moving_path
+                        # One distinct moving image per extra registration panel. Each gets a
+                        # different seed (distinct content) and a distinct channel-name set
+                        # (DAPI|m{panel}_1|...) so the pipeline's duplicate-channel guard accepts them.
+                        for j in range(1, n_moving + 1):
+                            mov_stack = synthesize_channels(resized, nch, seed=seed + j)
+                            mov_out = outdir / f"{cell_id}_moving{j}.ome.tif"
+                            tifffile.imwrite(
+                                mov_out, mov_stack, photometric="minisblack",
+                                metadata={"axes": "CYX",
+                                          "Channel": {"Name": ["DAPI"] + [f"m{j}_{i}" for i in range(1, nch)]}})
+                            moving_paths.append(str(mov_out))
+                    row["moving_paths"] = ";".join(moving_paths)
                 writer.writerow(row)
     return manifest_path
 
@@ -153,13 +162,18 @@ def main():
     ap = argparse.ArgumentParser(description="Generate a (size x channels) benchmark matrix.")
     ap.add_argument("--source", required=True, type=Path, help="Source image (user-supplied).")
     ap.add_argument("--outdir", required=True, type=Path)
-    ap.add_argument("--target-px", type=int, nargs="+", default=[2048, 4096, 8192, 16384, 32768])
+    ap.add_argument("--target-px", type=int, nargs="+",
+                    default=[2048, 4096, 8192, 16384, 32768, 65536, 131072])
     ap.add_argument("--n-channels", type=int, nargs="+", default=[1, 2, 4, 8])
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--paired", action="store_true",
-                    help="Also emit a paired moving image per cell (n_channels>=2) with distinct channel names.")
+                    help="Also emit moving image(s) per cell (n_channels>=2) with distinct channel names.")
+    ap.add_argument("--n-moving", type=int, default=1,
+                    help="Moving images per paired cell (=extra registration panels). "
+                         "Set >= max(n_register_images)-1 to benchmark N-image registration.")
     a = ap.parse_args()
-    path = run_matrix(a.source, a.outdir, a.target_px, a.n_channels, a.seed, paired=a.paired)
+    path = run_matrix(a.source, a.outdir, a.target_px, a.n_channels, a.seed,
+                      paired=a.paired, n_moving=a.n_moving)
     print(f"Wrote matrix manifest: {path}")
 
 

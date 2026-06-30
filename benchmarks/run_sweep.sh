@@ -12,7 +12,8 @@ shift 3
 EXTRA=("$@")
 
 mkdir -p "$ROOT"
-header=$(head -n1 "$RUN_PLAN")
+# tr -d '\r': tolerate CRLF-terminated CSVs (else the last column carries a trailing \r).
+header=$(head -n1 "$RUN_PLAN" | tr -d '\r')
 IFS=',' read -r -a cols <<< "$header"
 
 # col_index <name>: print the 0-based index of column <name> in $cols[].
@@ -35,7 +36,7 @@ col_val() {
 }
 
   # Pre-compute manifest column indices (done once, outside the loop).
-manifest_header=$(head -n1 "$MANIFEST")
+manifest_header=$(head -n1 "$MANIFEST" | tr -d '\r')
 IFS=',' read -r -a mcols <<< "$manifest_header"
 manifest_col_index() {
   local name="$1" i
@@ -47,10 +48,10 @@ manifest_col_index() {
 # 1-based awk field for the path column (always present).
 path_col_idx=$(manifest_col_index "path")
 path_awk_field=$((path_col_idx + 1))
-moving_col_idx=$(manifest_col_index "moving_path")
+moving_col_idx=$(manifest_col_index "moving_paths")
 moving_awk_field=$((moving_col_idx + 1))
 
-tail -n +2 "$RUN_PLAN" | while IFS=',' read -r -a vals; do
+tail -n +2 "$RUN_PLAN" | tr -d '\r' | while IFS=',' read -r -a vals; do
   run_id=$(col_val run_id "${vals[@]}")
   target_px=$(col_val target_px "${vals[@]}")
   n_channels=$(col_val n_channels "${vals[@]}")
@@ -58,36 +59,56 @@ tail -n +2 "$RUN_PLAN" | while IFS=',' read -r -a vals; do
   cell_id="px${target_px}_ch${n_channels}"
 
   # Resolve this cell's reference image from the matrix manifest.
-  img=$(awk -F',' -v c="$cell_id" -v f="$path_awk_field" 'NR>1 && $1==c {print $f}' "$MANIFEST")
+  # gsub(/\r/,""): tolerate CRLF manifests so the last field has no trailing \r.
+  img=$(awk -F',' -v c="$cell_id" -v f="$path_awk_field" 'NR>1 {gsub(/\r/,"")} $1==c {print $f}' "$MANIFEST")
   if [[ -z "$img" ]]; then echo "WARN: no matrix cell $cell_id; skipping $run_id" >&2; continue; fi
 
-  # Resolve moving image (empty when column absent or value empty).
-  mov_img=""
+  # Resolve moving images: a ';'-separated list (empty when column absent or value empty).
+  mov_list=""
   if [[ "$moving_col_idx" -ge 0 ]]; then
-    mov_img=$(awk -F',' -v c="$cell_id" -v f="$moving_awk_field" 'NR>1 && $1==c {print $f}' "$MANIFEST")
+    mov_list=$(awk -F',' -v c="$cell_id" -v f="$moving_awk_field" 'NR>1 {gsub(/\r/,"")} $1==c {print $f}' "$MANIFEST")
   fi
+
+  # Number of registration images for this run: 1 reference + (n_reg-1) moving panels.
+  # Defaults to 2 (ref + 1 moving) when the axis is absent — the classic pair.
+  n_reg=$(col_val n_register_images "${vals[@]}")
+  [[ -z "$n_reg" ]] && n_reg=2
 
   nch="${vals[$(col_index n_channels)]}"
   # Build reference channel string: DAPI|ch1|...|ch{nch-1}
   ref_chans="DAPI"
   for ((i=1; i<nch; i++)); do ref_chans+="|ch${i}"; done
-  # Build moving channel string: DAPI|m1|...|m{nch-1}
-  mov_chans="DAPI"
-  for ((i=1; i<nch; i++)); do mov_chans+="|m${i}"; done
 
   run_dir="$ROOT/$run_id"; mkdir -p "$run_dir"
   sheet="$run_dir/samplesheet.csv"
   printf 'patient_id,path_to_file,is_reference,channels\n' > "$sheet"
   printf '%s,%s,true,%s\n' "$cell_id" "$img" "$ref_chans" >> "$sheet"
-  if [[ -n "$mov_img" ]]; then
-    printf '%s,%s,false,%s\n' "$cell_id" "$mov_img" "$mov_chans" >> "$sheet"
+
+  # Emit up to (n_reg-1) moving panels, each with a distinct channel set
+  # (DAPI|m{panel}_1|...) so the pipeline's duplicate-channel guard accepts them.
+  if [[ -n "$mov_list" ]]; then
+    IFS=';' read -r -a movings <<< "$mov_list"
+    want=$(( n_reg - 1 )); emitted=0
+    for ((j=0; j<${#movings[@]} && emitted<want; j++)); do
+      panel=$(( j + 1 ))
+      mov_chans="DAPI"
+      for ((i=1; i<nch; i++)); do mov_chans+="|m${panel}_${i}"; done
+      printf '%s,%s,false,%s\n' "$cell_id" "${movings[$j]}" "$mov_chans" >> "$sheet"
+      emitted=$(( emitted + 1 ))
+    done
+    if [[ "$emitted" -lt "$want" ]]; then
+      echo "WARN: $run_id wanted $want moving panels but only $emitted available for $cell_id" \
+           "(regenerate the matrix with --n-moving >= $want)" >&2
+    fi
   fi
 
-  # Map non-structural columns (skip run_id/varied_axis/target_px/n_channels) to --<param>.
+  # Map non-structural columns to --<param>. Skip the matrix/registration-shape
+  # controls (run_id/varied_axis/target_px/n_channels/n_register_images) — they are
+  # consumed here to build the samplesheet, not passed to nextflow as pipeline params.
   params=()
   for i in "${!cols[@]}"; do
     k="${cols[$i]}"
-    case "$k" in run_id|varied_axis|target_px|n_channels) continue;; esac
+    case "$k" in run_id|varied_axis|target_px|n_channels|n_register_images) continue;; esac
     params+=("--${k}" "${vals[$i]}")
   done
 

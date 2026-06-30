@@ -48,7 +48,9 @@ def main():
     plan = build_run_plan(sweep)
     fields = ["run_id", "varied_axis"] + [k for k in plan[0] if k not in ("run_id", "varied_axis")]
     with open(a.out, "w", newline="") as fh:
-        w = csv.DictWriter(fh, fieldnames=fields)
+        # lineterminator='\n' (not csv's default '\r\n') so run_sweep.sh's bash column
+        # parsing doesn't see a trailing '\r' on the last field of each row.
+        w = csv.DictWriter(fh, fieldnames=fields, lineterminator="\n")
         w.writeheader()
         w.writerows(plan)
     print(f"Wrote {len(plan)} runs to {a.out}")

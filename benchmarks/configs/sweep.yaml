@@ -8,11 +8,14 @@
 # the matrix was generated with --paired (reference+moving panel per cell, distinct
 # channel names). Without --paired, registration is a single-slide passthrough no-op.
 #
-# REMOVED axes: reg_use_tiled_registration, reg_tile_size, reg_n_workers. VALIS auto-tiles
-# internally above its memory threshold, so the first two are no-ops (bin/register.py:
-# --use-tiled-registration is deprecated; the CLI tile size is unused), and reg_n_workers
-# only sized the slide-warping threadpool when reg_parallel_warping=true (off by default).
-# The matching pipeline params are removed on the main branch.
+# REMOVED axes: reg_use_tiled_registration, reg_tile_size, reg_n_workers (VALIS auto-tiles
+# internally, so they were no-ops) and reg_parallel_warping (parallel warping was removed;
+# warping is always sequential). The matching pipeline params are removed from the pipeline.
+#
+# N-IMAGE REGISTRATION: n_register_images sweeps the number of slides registered together
+# (1 reference + N-1 moving panels). It only does work with a --paired matrix and
+# n_channels>=2, and needs the matrix generated with `--n-moving >= max(n_register_images)-1`
+# so enough distinct moving images exist. run_sweep.sh builds the N-panel samplesheet.
 strategy: ofat
 
 # Baseline = the fixed point for ofat (one value per axis).
@@ -24,9 +27,11 @@ baseline:
   memory_mode: medium
   skip_micro_registration: true
   reg_distributed_tiling: false
+  n_register_images: 2                # 1 reference + 1 moving (the classic pair)
   # --- preprocessing (BaSiC illumination correction) ---
   preproc_n_iter: 100
   preproc_overlap: 0
+  preproc_pool_workers: 4             # worker threads for preprocessing parallelism
   # --- segmentation ---
   seg_method: stardist
   seg_gpu: true
@@ -43,16 +48,17 @@ baseline:
 # Axes to vary (OFAT: one run per non-baseline value of each axis).
 axes:
   # --- input scale: the primary driver of the per-process memory regression ---
-  target_px:                  [2048, 4096, 8192, 16384, 32768]
+  target_px:                  [2048, 4096, 8192, 16384, 32768, 65536, 131072]
   n_channels:                 [1, 2, 4, 8]
   # --- registration ---
   memory_mode:                [low, medium, high]
   skip_micro_registration:    [true, false]
+  n_register_images:          [2, 3, 4, 6, 8]     # panels registered together (needs matrix --n-moving >= 7)
   # --- preprocessing ---
   preproc_n_iter:             [50, 100, 200]      # BaSiC iterations (compute/time)
   preproc_overlap:            [0, 64, 128]        # tile overlap (px)
-  # (preproc_tile_size deliberately NOT swept: it is problem-dependent. preproc_pool_workers
-  #  is also omitted — preprocess.nf hard-wires --n_workers to task.cpus, so it is inert.)
+  preproc_pool_workers:       [1, 4, 8]           # preprocessing parallelism (null pipeline default = task.cpus)
+  # (preproc_tile_size deliberately NOT swept: it is problem-dependent.)
   # --- segmentation ---
   seg_method:                 [stardist, cellsam, instanseg]   # cellsam/instanseg need their weights + container on the cluster
   seg_gpu:                    [true, false]
