@@ -259,13 +259,16 @@ If a slide has very low contrast or sparse structure, the detector returns too f
 
 ### Out-of-memory during VALIS
 
-VALIS holds multiple registered images in memory. Drop to `--memory_mode low`, lower `--reg_max_image_dim`, and enable tiled registration:
+VALIS holds multiple registered images in memory. Drop to `--memory_mode low` and lower `--reg_max_image_dim`:
 
 ```bash
 --memory_mode low \
---reg_use_tiled_registration true \
---reg_tile_size 4096
+--reg_max_image_dim 3000
 ```
+
+VALIS auto-tiles non-rigid registration internally when estimated memory is high, so
+there is no tile size to set. For low-RAM clusters, opt into the Nextflow-distributed
+tiling path with `--reg_distributed_tiling true`.
 
 ### Micro-registration divergence
 

@@ -4,6 +4,12 @@ MIRAGE deliberately stops at **quantified cells**. It hands you a pyramidal OME-
 
 That last mile — *gating, phenotyping, and interactive exploration* — is exactly what the **FlowPath** suite is for. FlowPath is a family of [QuPath](https://qupath.github.io/) 0.7.0 extensions that pick up MIRAGE's output and turn it into living, clickable biology: hierarchical gates, named populations, and UMAP embeddings you can lasso.
 
+!!! tip "Full FlowPath documentation"
+    This page is MIRAGE's summary of the hand-off. The FlowPath suite has its
+    own complete documentation site — installation, per-extension guides, the
+    measurement-key contract, and troubleshooting:
+    **<https://flowpath.readthedocs.io/>**
+
 !!! info "Where MIRAGE ends and FlowPath begins"
     See [export.md](export.md) for how the `cells.geojson` is produced and [quantification.md](quantification.md) for the measurement keys it contains. Everything on this page happens *after* MIRAGE finishes, inside QuPath.
 

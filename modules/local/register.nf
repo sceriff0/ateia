@@ -43,14 +43,8 @@ process REGISTER {
     def micro_reg_fraction = params.reg_micro_reg_fraction ?: 0.125
     def max_image_dim = params.reg_max_image_dim ?: 4000
     def skip_micro = params.skip_micro_registration ? '--skip-micro-registration' : ''
-    // Performance options
-    def parallel_warping = params.reg_parallel_warping ? '--parallel-warping' : ''
-    def n_workers = params.reg_n_workers ?: 4
     // JVM heap scales with retry attempts: base 32GB + 16GB per attempt
     def jvm_heap_gb = Math.min(params.reg_jvm_heap_gb ?: (32 + 16 * task.attempt), task.memory.toGiga() - 4)
-    // Advanced registration options
-    def use_tiled = params.reg_use_tiled_registration ? '--use-tiled-registration' : ''
-    def tile_size = params.reg_tile_size ?: 2048
 
     """
     # === LOG INPUT SIZES ===
@@ -113,10 +107,6 @@ process REGISTER {
         --micro-reg-fraction ${micro_reg_fraction} \\
         --max-image-dim ${max_image_dim} \\
         ${skip_micro} \\
-        ${parallel_warping} \\
-        --n-workers ${n_workers} \\
-        ${use_tiled} \\
-        --tile-size ${tile_size} \\
         --jvm-heap-gb ${jvm_heap_gb} \\
         ${args}
 

@@ -238,19 +238,23 @@ def run_cellsam(
     # Defer heavy imports until after argparse/help works without GPU stacks.
     from cellSAM import cellsam_pipeline  # type: ignore
 
-    # Informational CUDA probe -- cellsam_pipeline manages devices internally.
+    # CUDA probe. cellsam_pipeline has NO device argument -- it auto-selects via
+    # `device = 'cuda' if torch.cuda.is_available() else 'cpu'`. So if GPU is
+    # requested but CUDA is not visible inside the container, the entire WSI
+    # would silently run on CPU (multi-day runs). Fail loudly instead: a hard
+    # error in seconds beats a 4-day CPU crawl that nobody notices.
     if use_gpu:
-        try:
-            import torch
-            if not torch.cuda.is_available():
-                logger.warning(
-                    "  --use-gpu requested but torch.cuda.is_available() is False; "
-                    "CellSAM will fall back to CPU."
-                )
-            else:
-                logger.info(f"  CUDA available: {torch.cuda.get_device_name(0)}")
-        except Exception as exc:
-            logger.warning(f"  Could not query torch CUDA state: {exc}")
+        import torch
+        if not torch.cuda.is_available():
+            raise RuntimeError(
+                "--use-gpu requested but torch.cuda.is_available() is False. "
+                "CellSAM would silently fall back to CPU (multi-day WSI runs). "
+                "Check that the GPU is bound into the container: Docker needs "
+                "'--gpus all', Singularity needs '--nv', and the host must have "
+                "the NVIDIA Container Toolkit / drivers installed. To deliberately "
+                "run on CPU, launch the pipeline with seg_gpu=false."
+            )
+        logger.info(f"  CUDA available: {torch.cuda.get_device_name(0)}")
 
     # 1. Extract DAPI channel and build CellSAM's (H, W, 3) input.
     dapi_image = extract_dapi_channel(image_path, dapi_channel_index)

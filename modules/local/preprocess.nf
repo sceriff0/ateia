@@ -41,7 +41,7 @@ process PREPROCESS {
         --output_dir . \\
         --channels ${channels} \\
         --fov_size ${params.preproc_tile_size} \\
-        --n_workers ${task.cpus} \\
+        --n_workers ${params.preproc_pool_workers ?: task.cpus} \\
         --n_iter ${params.preproc_n_iter} \\
         --overlap ${overlap} \\
         ${skip_dapi_flag} \\

@@ -37,10 +37,6 @@
     "reg_micro_reg_fraction": 0.125,
     "reg_max_image_dim": 4000,
     "skip_micro_registration": true,
-    "reg_parallel_warping": false,
-    "reg_n_workers": 8,
-    "reg_use_tiled_registration": true,
-    "reg_tile_size": 2048,
 
     "_comment_reg_gpu": "=== Registration (GPU Pairwise) ===",
     "gpu_reg_affine_crop_size": 10000,

@@ -9,7 +9,6 @@ Features:
 - SuperPoint feature detection with SuperGlue matching
 - Optional micro-rigid registration for high-resolution alignment
 - Structured error handling with retry logic for transient failures
-- Optional parallel slide warping for improved performance
 - Memory-optimized processing for large images
 - Progress tracking with ETA estimation
 
@@ -21,9 +20,7 @@ Example:
         --input-dir ./preprocessed \\
         --out ./registered \\
         --reference panel1.ome.tif \\
-        --max-image-dim 6000 \\
-        --parallel-warping \\
-        --n-workers 4
+        --max-image-dim 6000
 """
 from __future__ import annotations
 
@@ -33,7 +30,6 @@ import gc
 import glob
 import os
 import sys
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -201,119 +197,6 @@ def validate_input_slides(input_dir: str) -> Tuple[List[str], List[str]]:
     return valid_slides, invalid_slides
 
 
-@dataclass
-class WarpResult:
-    """Result of a single slide warping operation."""
-
-    slide_name: str
-    success: bool
-    output_path: Optional[str] = None
-    error: Optional[str] = None
-    has_value_issues: bool = False
-
-
-def validate_registered_image(output_path: str, slide_name: str) -> bool:
-    """Validate registered image for negative/wrapped values (Checkpoint 3).
-
-    Parameters
-    ----------
-    output_path : str
-        Path to the registered image file.
-    slide_name : str
-        Name of the slide for logging.
-
-    Returns
-    -------
-    bool
-        True if values look OK, False if issues detected.
-    """
-    try:
-        with tifffile.TiffFile(output_path) as tif:
-            # Read a sample of the image to check values
-            # Read first page to avoid loading entire large image
-            data = tif.pages[0].asarray()
-
-        log_image_stats(data, f"registered_{slide_name}", logger)
-
-        # Check for wrapped values (potential negatives stored as uint16)
-        if data.dtype == np.uint16:
-            has_wrapped, count, pct = detect_wrapped_values(data, logger=logger)
-            if has_wrapped:
-                logger.warning(
-                    f"[Checkpoint 3] {slide_name}: Detected {count} potentially wrapped "
-                    f"negative values ({pct:.4f}%). This may indicate interpolation artifacts."
-                )
-                return False
-
-        # Check for actual negatives (if signed type)
-        if data.min() < 0:
-            logger.warning(
-                f"[Checkpoint 3] {slide_name}: Detected negative values (min={data.min()}). "
-                f"This may indicate interpolation artifacts."
-            )
-            return False
-
-        return True
-
-    except Exception as e:
-        logger.warning(f"[Checkpoint 3] {slide_name}: Could not validate image: {e}")
-        return True  # Don't fail on validation errors
-
-
-def warp_single_slide(
-    slide_name: str,
-    slide_obj,
-    src_path: str,
-    out_path: str,
-    use_non_rigid: bool,
-    interp_method: str = "bicubic",
-) -> WarpResult:
-    """Warp a single slide (thread-safe).
-
-    Parameters
-    ----------
-    slide_name : str
-        Name of the slide
-    slide_obj : Slide
-        VALIS Slide object with registration parameters
-    src_path : str
-        Path to source slide file
-    out_path : str
-        Path for output registered slide
-    use_non_rigid : bool
-        Whether to apply non-rigid transforms
-    interp_method : str
-        Interpolation method: 'bilinear' (recommended for quantification),
-        'bicubic' (sharper but may cause negative overshoot), or 'nearest'
-
-    Returns
-    -------
-    WarpResult
-        Result with success status and any error message
-    """
-    try:
-        slide_obj.warp_and_save_slide(
-            src_f=src_path,
-            dst_f=out_path,
-            level=0,
-            non_rigid=use_non_rigid,
-            crop=True,
-            interp_method=interp_method,
-        )
-        # Checkpoint 3: Validate registered image for negative/wrapped values
-        values_ok = validate_registered_image(out_path, slide_name)
-        return WarpResult(
-            slide_name,
-            success=True,
-            output_path=out_path,
-            has_value_issues=not values_ok
-        )
-    except Exception as e:
-        return WarpResult(slide_name, success=False, error=str(e))
-    finally:
-        gc.collect()
-
-
 def find_reference_image(
     directory: str,
     required_markers: List[str],
@@ -387,10 +270,6 @@ def valis_registration(
     micro_reg_fraction: float = 0.125,
     max_image_dim_px: int = 4000,
     skip_micro_registration: bool = False,
-    parallel_warping: bool = False,
-    n_workers: int = 2,
-    use_tiled_registration: bool = False,
-    tile_size: int = 512,
     image_type: str = "auto",
     interp_method: str = "bilinear",
     jvm_heap_gb: Optional[int] = None,
@@ -416,15 +295,6 @@ def valis_registration(
         Maximum image dimension for caching (controls RAM usage). Default: 4000
     skip_micro_registration : bool, optional
         Skip the micro-rigid registration step. Default: False
-    parallel_warping : bool, optional
-        Enable parallel slide warping using ThreadPoolExecutor. Default: False
-    n_workers : int, optional
-        Number of parallel workers for warping. Default: 2
-    use_tiled_registration : bool, optional
-        Use NonRigidTileRegistrar for very large images. Processes tiles in parallel
-        which improves performance without sacrificing accuracy. Default: False
-    tile_size : int, optional
-        Tile size for tiled registration. Default: 512
     image_type : str, optional
         Image type for preprocessing: "brightfield", "fluorescence", or "auto".
         "auto" attempts to detect based on image characteristics. Default: "auto"
@@ -442,8 +312,6 @@ def valis_registration(
     feature_detector_cls = preset["feature_detector_cls"]
     matcher = preset["matcher"]
     # New preset keys with fallbacks to CLI args/defaults
-    preset_tile_wh = preset.get("tile_wh", tile_size)
-    preset_tile_buffer = preset.get("tile_buffer", 200)
     preset_max_image_dim = preset.get("max_image_dim_px", max_image_dim_px)
 
     # Initialize phase reporter for structured progress tracking
@@ -535,9 +403,6 @@ def valis_registration(
     # triggers a bug: its fwd_dxdy is always a pyvips.Image, but the Slide
     # setter silently rejects pyvips, leaving fwd_dxdy=None. This causes
     # measure_error() to report identical rigid/non-rigid errors.
-    if use_tiled_registration:
-        logger.warning("  --use-tiled-registration is deprecated: VALIS auto-tiles when needed.")
-        logger.warning("  Using OpticalFlowWarper instead (VALIS will auto-tile if memory requires it).")
     logger.info(f"  Non-rigid registrar: OpticalFlowWarper (VALIS auto-tiles if memory > 10GB)")
     non_rigid_registrar = OpticalFlowWarper()
 
@@ -840,10 +705,6 @@ def valis_registration(
         slide_name_to_path[slide_name] = f
 
     logger.info(f"\nWarping {len(registrar.slide_dict)} slides to: {out}")
-    if parallel_warping:
-        logger.info(f"  Mode: Parallel (ThreadPoolExecutor, {n_workers} workers)")
-    else:
-        logger.info(f"  Mode: Sequential")
     logger.info(f"  Transform: {'rigid + non-rigid' if use_non_rigid else 'rigid-only'}")
 
     # Initialize progress tracker
@@ -856,119 +717,80 @@ def valis_registration(
     warped_count = 0
     failed_slides: List[Tuple[str, str]] = []
 
-    if parallel_warping and len(registrar.slide_dict) > 1:
-        # Parallel warping using ThreadPoolExecutor
-        futures = {}
-        with ThreadPoolExecutor(max_workers=n_workers) as executor:
-            for slide_name, slide_obj in registrar.slide_dict.items():
-                if slide_name not in slide_name_to_path:
-                    failed_slides.append((slide_name, "Path not found"))
-                    continue
-                if slide_obj is None:
-                    failed_slides.append((slide_name, "Slide object is None"))
-                    continue
-                if slide_obj.M is None:
-                    failed_slides.append((slide_name, "No transformation matrix (M is None)"))
-                    continue
+    # Warp each slide sequentially (parallel warping removed).
+    for slide_name, slide_obj in registrar.slide_dict.items():
+        # Validate slide
+        if slide_name not in slide_name_to_path:
+            logger.error(f"  [FAIL] Cannot find path for '{slide_name}'")
+            failed_slides.append((slide_name, "Path not found"))
+            tracker.step_complete(slide_name, "FAILED: Path not found")
+            continue
 
-                src_path = slide_name_to_path[slide_name]
-                if slide_name.endswith('_corrected'):
-                    out_name = slide_name[:-len('_corrected')]
-                else:
-                    out_name = slide_name
-                out_path = os.path.join(out, f"{out_name}_registered.ome.tiff")
+        if slide_obj is None:
+            logger.error(f"  [FAIL] slide_obj is None for '{slide_name}'")
+            failed_slides.append((slide_name, "Slide object is None"))
+            tracker.step_complete(slide_name, "FAILED: Slide object is None")
+            continue
 
-                future = executor.submit(
-                    warp_single_slide,
-                    slide_name, slide_obj, src_path, out_path, use_non_rigid, interp_method
+        if slide_obj.M is None:
+            logger.error(f"  [FAIL] slide '{slide_name}' has no transformation matrix (M is None)")
+            failed_slides.append((slide_name, "No transformation matrix (M is None)"))
+            tracker.step_complete(slide_name, "FAILED: No M matrix")
+            continue
+
+        src_path = slide_name_to_path[slide_name]
+        if slide_name.endswith('_corrected'):
+            out_name = slide_name[:-len('_corrected')]
+        else:
+            out_name = slide_name
+        out_path = os.path.join(out, f"{out_name}_registered.ome.tiff")
+
+        # Retry context for transient failures (conservative: 2 attempts, 2s delay)
+        retry_ctx = RetryContext(
+            max_attempts=2,
+            delay_seconds=2.0,
+            cleanup_func=default_cleanup,
+        )
+
+        warp_succeeded = False
+        for attempt in retry_ctx:
+            try:
+                slide_obj.warp_and_save_slide(
+                    src_f=src_path,
+                    dst_f=out_path,
+                    level=0,
+                    non_rigid=use_non_rigid,
+                    crop=True,
+                    interp_method=interp_method,
                 )
-                futures[future] = slide_name
+                warp_succeeded = True
+                warped_count += 1
+                # Note: Negative values from VALIS warping will be clipped by split_multichannel.py
+                retry_ctx.succeeded()
+                break
+            except (MemoryError, OSError) as e:
+                logger.info(f"  Attempt {attempt} failed: {e}")
+                retry_ctx.failed(e)
+            except Exception as e:
+                # Non-retryable error
+                logger.info(f"  ERROR warping {slide_name}: {e}")
+                failed_slides.append((slide_name, str(e)))
+                tracker.step_complete(slide_name, f"FAILED (non-retryable): {e}")
+                break
 
-            for future in as_completed(futures):
-                slide_name = futures[future]
-                result = future.result()
+        if warp_succeeded:
+            tracker.step_complete(slide_name, f"Saved: {out_path}")
+        elif retry_ctx.all_attempts_failed:
+            failed_slides.append((slide_name, str(retry_ctx.last_exception)))
+            tracker.step_complete(slide_name, f"FAILED after retries: {retry_ctx.last_exception}")
 
-                if result.success:
-                    warped_count += 1
-                    tracker.step_complete(slide_name, f"Saved: {result.output_path}")
-                else:
-                    failed_slides.append((slide_name, result.error or "Unknown error"))
-                    tracker.step_complete(slide_name, f"FAILED: {result.error}")
-    else:
-        # Sequential warping with retry logic
-        for slide_name, slide_obj in registrar.slide_dict.items():
-            # Validate slide
-            if slide_name not in slide_name_to_path:
-                logger.error(f"  [FAIL] Cannot find path for '{slide_name}'")
-                failed_slides.append((slide_name, "Path not found"))
-                tracker.step_complete(slide_name, "FAILED: Path not found")
-                continue
-
-            if slide_obj is None:
-                logger.error(f"  [FAIL] slide_obj is None for '{slide_name}'")
-                failed_slides.append((slide_name, "Slide object is None"))
-                tracker.step_complete(slide_name, "FAILED: Slide object is None")
-                continue
-
-            if slide_obj.M is None:
-                logger.error(f"  [FAIL] slide '{slide_name}' has no transformation matrix (M is None)")
-                failed_slides.append((slide_name, "No transformation matrix (M is None)"))
-                tracker.step_complete(slide_name, "FAILED: No M matrix")
-                continue
-
-            src_path = slide_name_to_path[slide_name]
-            if slide_name.endswith('_corrected'):
-                out_name = slide_name[:-len('_corrected')]
-            else:
-                out_name = slide_name
-            out_path = os.path.join(out, f"{out_name}_registered.ome.tiff")
-
-            # Retry context for transient failures (conservative: 2 attempts, 2s delay)
-            retry_ctx = RetryContext(
-                max_attempts=2,
-                delay_seconds=2.0,
-                cleanup_func=default_cleanup,
-            )
-
-            warp_succeeded = False
-            for attempt in retry_ctx:
-                try:
-                    slide_obj.warp_and_save_slide(
-                        src_f=src_path,
-                        dst_f=out_path,
-                        level=0,
-                        non_rigid=use_non_rigid,
-                        crop=True,
-                        interp_method=interp_method,
-                    )
-                    warp_succeeded = True
-                    warped_count += 1
-                    # Note: Negative values from VALIS warping will be clipped by split_multichannel.py
-                    retry_ctx.succeeded()
-                    break
-                except (MemoryError, OSError) as e:
-                    logger.info(f"  Attempt {attempt} failed: {e}")
-                    retry_ctx.failed(e)
-                except Exception as e:
-                    # Non-retryable error
-                    logger.info(f"  ERROR warping {slide_name}: {e}")
-                    failed_slides.append((slide_name, str(e)))
-                    tracker.step_complete(slide_name, f"FAILED (non-retryable): {e}")
-                    break
-
-            if warp_succeeded:
-                tracker.step_complete(slide_name, f"Saved: {out_path}")
-            elif retry_ctx.all_attempts_failed:
-                failed_slides.append((slide_name, str(retry_ctx.last_exception)))
-                tracker.step_complete(slide_name, f"FAILED after retries: {retry_ctx.last_exception}")
-
-            # Memory cleanup after each slide
-            if hasattr(slide_obj, 'slide_reader') and hasattr(slide_obj.slide_reader, 'close'):
-                try:
-                    slide_obj.slide_reader.close()
-                except Exception:
-                    pass
-            gc.collect()
+        # Memory cleanup after each slide
+        if hasattr(slide_obj, 'slide_reader') and hasattr(slide_obj.slide_reader, 'close'):
+            try:
+                slide_obj.slide_reader.close()
+            except Exception:
+                pass
+        gc.collect()
 
     # Finish progress tracking
     tracker.finish(success=warped_count > 0)
@@ -1053,17 +875,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--skip-micro-registration', action='store_true',
                         help='Skip the micro-rigid registration step')
 
-    # Performance options
-    parser.add_argument('--parallel-warping', action='store_true',
-                        help='Enable parallel slide warping using ThreadPoolExecutor')
-    parser.add_argument('--n-workers', type=int, default=4,
-                        help='Number of parallel workers for warping')
-
     # Advanced registration options
-    parser.add_argument('--use-tiled-registration', action='store_true',
-                        help='Use NonRigidTileRegistrar for large images (parallel tile processing)')
-    parser.add_argument('--tile-size', type=int, default=2048,
-                        help='Tile size for tiled registration')
     parser.add_argument('--image-type', type=str, default='fluorescence',
                         choices=['auto', 'brightfield', 'fluorescence'],
                         help='Image type for preprocessing optimization')
@@ -1092,11 +904,7 @@ def main() -> int:
             micro_reg_fraction=args.micro_reg_fraction,
             max_image_dim_px=args.max_image_dim,
             skip_micro_registration=args.skip_micro_registration,
-            parallel_warping=args.parallel_warping,
-            n_workers=args.n_workers,
             # Advanced options
-            use_tiled_registration=args.use_tiled_registration,
-            tile_size=args.tile_size,
             image_type=args.image_type,
             interp_method=args.interp_method,
             jvm_heap_gb=args.jvm_heap_gb,
