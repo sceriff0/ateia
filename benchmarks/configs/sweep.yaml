@@ -13,9 +13,12 @@
 # warping is always sequential). The matching pipeline params are removed from the pipeline.
 #
 # N-IMAGE REGISTRATION: n_register_images sweeps the number of slides registered together
-# (1 reference + N-1 moving panels). It only does work with a --paired matrix and
-# n_channels>=2, and needs the matrix generated with `--n-moving >= max(n_register_images)-1`
-# so enough distinct moving images exist. run_sweep.sh builds the N-panel samplesheet.
+# (1 reference + N-1 moving panels). Generate the matrix straight from this file so it has
+# enough moving images — no manual sync:
+#     python benchmarks/generate_matrix.py --source img.ome.tif --outdir bench_matrix \
+#         --sweep benchmarks/configs/sweep.yaml
+# (--sweep derives target_px, n_channels, --n-moving = max(n_register_images)-1, and --paired.)
+# run_sweep.sh then builds the N-panel samplesheet per run.
 strategy: ofat
 
 # Baseline = the fixed point for ofat (one value per axis).
@@ -53,7 +56,7 @@ axes:
   # --- registration ---
   memory_mode:                [low, medium, high]
   skip_micro_registration:    [true, false]
-  n_register_images:          [2, 3, 4, 6, 8]     # panels registered together (needs matrix --n-moving >= 7)
+  n_register_images:          [2, 4, 8]           # panels registered together (1 ref + N-1 moving)
   # --- preprocessing ---
   preproc_n_iter:             [50, 100, 200]      # BaSiC iterations (compute/time)
   preproc_overlap:            [0, 64, 128]        # tile overlap (px)

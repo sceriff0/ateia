@@ -44,19 +44,20 @@ Verify the whole harness with no data at all:
     python benchmarks/generate_matrix.py \
         --source /path/to/your_source.ome.tif \
         --outdir bench_matrix \
-        --paired --n-moving 7
-        # optional: --target-px 2048 4096 8192 16384 32768 65536 131072  --n-channels 1 2 4 8  --seed 0
+        --sweep benchmarks/configs/sweep.yaml
 
+- **`--sweep` is the easy path:** it reads the sweep and generates exactly the cells +
+  moving panels the sweep needs — deriving `--target-px`, `--n-channels`, `--paired`, and
+  `--n-moving` (= `max(n_register_images) - 1`) automatically. No manual sync between the
+  matrix and the sweep. (Explicit `--target-px` / `--n-channels` / `--n-moving` / `--paired`
+  still override the derived values; `--seed 0` by default.)
 - **Input:** one image you supply (any Bio-Formats/tifffile-readable format; **uint8 or uint16**).
-- **Output:** `bench_matrix/px{px}_ch{n}.ome.tif` per (size x channel) cell; with `--paired`,
-  also `px{px}_ch{n}_moving{j}.ome.tif` (j = 1..`--n-moving`) for n>=2 cells, each a distinct
+- **Output:** `bench_matrix/px{px}_ch{n}.ome.tif` per (size x channel) cell; with pairing,
+  also `px{px}_ch{n}_moving{j}.ome.tif` (j = 1..n-moving) for n>=2 cells, each a distinct
   panel with distinct channel names; plus `bench_matrix/matrix_manifest.csv`
   (`cell_id,target_px,width,height,n_channels,bytes,path[,moving_paths]`, where `moving_paths`
-  is a `;`-joined list).
-- Use `--paired` so registration actually runs in the sweep (see the note below).
-- Set `--n-moving K` to benchmark **N-image registration**: K must be `>= max(n_register_images)-1`
-  in `sweep.yaml` (default sweep goes up to 8 panels, so `--n-moving 7`). More movings = more
-  disk; drop it to 1 if you only need the classic ref+moving pair.
+  is a `;`-joined list). The N-image registration sweep (`n_register_images: [2, 4, 8]`)
+  needs ≥7 moving panels — `--sweep` provides them.
 
 ### A2 — Expand the sweep into a run plan
 
@@ -91,9 +92,10 @@ Verify the whole harness with no data at all:
 > (reference `DAPI|ch1|...`, moving panel _p_ `DAPI|m{p}_1|...` — distinct so the
 > pipeline's duplicate-channel guard accepts them), so VALIS registration runs and the
 > registration axes (`memory_mode`, `skip_micro_registration`, `n_register_images`) are
-> exercised. **`n_register_images`** sets how many slides register together (1 reference +
-> N−1 moving panels) — this is how registration is benchmarked on N images, not just a
-> pair; it needs the matrix built with `--n-moving >= max(n_register_images)-1`.
+> exercised. **`n_register_images`** (default `[2, 4, 8]`) sets how many slides register
+> together (1 reference + N−1 moving panels) — this is how registration is benchmarked on
+> N images, not just a pair. Generating the matrix with `--sweep` provides the moving
+> panels automatically (no `--n-moving` to compute).
 > (`reg_use_tiled_registration`, `reg_tile_size`, `reg_n_workers`, `reg_parallel_warping`
 > were dropped — VALIS auto-tiles internally and warping is sequential, so they had no
 > effect.) Pairing applies to n_channels >= 2 cells; n_channels == 1 cells are

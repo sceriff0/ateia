@@ -158,22 +158,61 @@ def run_matrix(source, outdir, target_px, n_channels, seed=0, paired: bool = Fal
     return manifest_path
 
 
+def derive_from_sweep(sweep_path) -> dict:
+    """Read a sweep.yaml and derive the matrix it needs: target_px, n_channels, n_moving.
+
+    Each value covers the axis values UNION the baseline, so every run the sweep will
+    launch finds its cell. n_moving = max(n_register_images) - 1 so enough distinct moving
+    panels exist. Returns {target_px, n_channels, n_moving, paired}.
+    """
+    import yaml
+
+    sweep = yaml.safe_load(Path(sweep_path).read_text())
+    baseline = sweep.get("baseline", {})
+    axes = sweep.get("axes", {})
+
+    def values_for(key, default):
+        vals = set(axes.get(key, []))
+        if key in baseline:
+            vals.add(baseline[key])
+        return sorted(vals) if vals else default
+
+    target_px = values_for("target_px", [2048, 4096, 8192, 16384, 32768])
+    n_channels = values_for("n_channels", [1, 2, 4, 8])
+    n_reg = values_for("n_register_images", [2])
+    n_moving = max(max(n_reg) - 1, 1)
+    # A sweep with >1 panels (or any multi-channel registration) needs paired moving images.
+    paired = max(n_reg) > 1 or max(n_channels) >= 2
+    return {"target_px": target_px, "n_channels": n_channels, "n_moving": n_moving, "paired": paired}
+
+
 def main():
     ap = argparse.ArgumentParser(description="Generate a (size x channels) benchmark matrix.")
     ap.add_argument("--source", required=True, type=Path, help="Source image (user-supplied).")
     ap.add_argument("--outdir", required=True, type=Path)
-    ap.add_argument("--target-px", type=int, nargs="+",
-                    default=[2048, 4096, 8192, 16384, 32768, 65536, 131072])
-    ap.add_argument("--n-channels", type=int, nargs="+", default=[1, 2, 4, 8])
+    ap.add_argument("--sweep", type=Path, default=None,
+                    help="Derive --target-px, --n-channels, --n-moving, and --paired straight "
+                         "from a sweep.yaml so the matrix matches the sweep with no manual sync. "
+                         "Explicit flags below override the derived values.")
+    ap.add_argument("--target-px", type=int, nargs="+", default=None)
+    ap.add_argument("--n-channels", type=int, nargs="+", default=None)
     ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--paired", action="store_true",
+    ap.add_argument("--paired", action="store_true", default=None,
                     help="Also emit moving image(s) per cell (n_channels>=2) with distinct channel names.")
-    ap.add_argument("--n-moving", type=int, default=1,
+    ap.add_argument("--n-moving", type=int, default=None,
                     help="Moving images per paired cell (=extra registration panels). "
                          "Set >= max(n_register_images)-1 to benchmark N-image registration.")
     a = ap.parse_args()
-    path = run_matrix(a.source, a.outdir, a.target_px, a.n_channels, a.seed,
-                      paired=a.paired, n_moving=a.n_moving)
+
+    # Start from sweep-derived values (if given), then let explicit flags override.
+    d = derive_from_sweep(a.sweep) if a.sweep else {}
+    target_px = a.target_px if a.target_px is not None else d.get("target_px", [2048, 4096, 8192, 16384, 32768, 65536, 131072])
+    n_channels = a.n_channels if a.n_channels is not None else d.get("n_channels", [1, 2, 4, 8])
+    n_moving = a.n_moving if a.n_moving is not None else d.get("n_moving", 1)
+    paired = a.paired if a.paired is not None else d.get("paired", False)
+
+    path = run_matrix(a.source, a.outdir, target_px, n_channels, a.seed,
+                      paired=paired, n_moving=n_moving)
     print(f"Wrote matrix manifest: {path}")
 
 

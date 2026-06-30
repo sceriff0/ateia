@@ -156,6 +156,35 @@ def test_run_matrix_n_moving_writes_distinct_panels(tmp_path):
     assert len(set(movs)) == 3  # distinct filenames
 
 
+def test_derive_from_sweep_computes_matrix_shape(tmp_path):
+    from benchmarks.generate_matrix import derive_from_sweep
+    sweep = tmp_path / "sweep.yaml"
+    sweep.write_text(
+        "baseline:\n"
+        "  target_px: 4096\n"
+        "  n_channels: 2\n"
+        "  n_register_images: 2\n"
+        "axes:\n"
+        "  target_px: [2048, 4096, 8192]\n"
+        "  n_channels: [1, 2, 4]\n"
+        "  n_register_images: [2, 4, 8]\n"
+    )
+    d = derive_from_sweep(sweep)
+    assert d["target_px"] == [2048, 4096, 8192]      # axis ∪ baseline, sorted
+    assert d["n_channels"] == [1, 2, 4]
+    assert d["n_moving"] == 7                         # max(n_register_images) - 1 = 8 - 1
+    assert d["paired"] is True                        # >1 panel requested
+
+
+def test_derive_from_sweep_matches_repo_sweep():
+    """The shipped sweep.yaml derives a self-consistent matrix (no manual --n-moving sync)."""
+    from pathlib import Path
+    from benchmarks.generate_matrix import derive_from_sweep
+    d = derive_from_sweep(Path(__file__).parents[1] / "configs" / "sweep.yaml")
+    assert d["n_moving"] == 7 and d["paired"] is True
+    assert 131072 in d["target_px"]
+
+
 def test_run_matrix_default_unpaired_manifest_columns_unchanged(tmp_path):
     import tifffile
     from benchmarks.generate_matrix import run_matrix
