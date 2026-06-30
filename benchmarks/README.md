@@ -85,8 +85,9 @@ Verify the whole harness with no data at all:
 > reference+moving panel per patient with **distinct channel names** (reference
 > `DAPI|ch1|...`, moving `DAPI|m1|...` — distinct so the pipeline's duplicate-channel
 > guard accepts them), so VALIS registration runs and the registration axes
-> (`memory_mode`, `reg_tile_size`, `reg_n_workers`, `skip_micro_registration`,
-> `reg_distributed_tiling`) are exercised. Pairing applies to n_channels >= 2 cells;
+> (`memory_mode`, `skip_micro_registration`) are exercised. (`reg_use_tiled_registration`,
+> `reg_tile_size` and `reg_n_workers` were dropped — VALIS auto-tiles internally, so they
+> had no effect; see `sweep.yaml` header.) Pairing applies to n_channels >= 2 cells;
 > n_channels == 1 cells are reference-only (both panels would be `{DAPI}` and collide).
 > Without `--paired`, registration is a single-slide passthrough and those axes are no-ops.
 

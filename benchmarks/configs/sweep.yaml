@@ -1,28 +1,71 @@
 # Benchmark sweep definition. strategy: ofat (one-factor-at-a-time) | grid.
-# NOTE: registration axes (memory_mode, reg_*) only exercise real VALIS registration when
-# the matrix was generated with --paired (so each cell has a reference+moving panel with
-# distinct channel names). Without --paired, these runs are single-slide passthrough no-ops.
+#
+# Coverage: input scale (target_px, n_channels) + per-stage resource knobs across
+# preprocessing, registration, segmentation and quantification. Each axis maps to a
+# --<name> CLI override; target_px/n_channels drive the synthetic image matrix.
+#
+# NOTE (registration): the registration axes only exercise real VALIS registration when
+# the matrix was generated with --paired (reference+moving panel per cell, distinct
+# channel names). Without --paired, registration is a single-slide passthrough no-op.
+#
+# REMOVED axes: reg_use_tiled_registration, reg_tile_size, reg_n_workers. VALIS auto-tiles
+# internally above its memory threshold, so the first two are no-ops (bin/register.py:
+# --use-tiled-registration is deprecated; the CLI tile size is unused), and reg_n_workers
+# only sized the slide-warping threadpool when reg_parallel_warping=true (off by default).
+# The matching pipeline params are removed on the main branch.
 strategy: ofat
-# Baseline used as the fixed point for ofat (one value per axis).
+
+# Baseline = the fixed point for ofat (one value per axis).
 baseline:
+  # --- input scale ---
   target_px: 4096
   n_channels: 2
+  # --- registration ---
   memory_mode: medium
-  reg_use_tiled_registration: true
-  reg_tile_size: 2048
-  reg_n_workers: 4
   skip_micro_registration: true
   reg_distributed_tiling: false
-# Axes to vary. Each maps to a --<name> CLI override (target_px/n_channels drive the image matrix).
+  # --- preprocessing (BaSiC illumination correction) ---
+  preproc_n_iter: 100
+  preproc_overlap: 0
+  # --- segmentation ---
+  seg_method: stardist
+  seg_gpu: true
+  seg_n_tiles_x: 16
+  seg_n_tiles_y: 16
+  seg_cellsam_block_size: 400        # only used when seg_method=cellsam
+  seg_instantseg_tile_size: 512      # only used when seg_method=instantseg
+  # --- quantification ---
+  # compartments ON at baseline so the expanded_quantification axis is valid:
+  # expanded_quantification requires quantify_compartments (ParamUtils.validateCompartmentQuant).
+  quantify_compartments: true
+  expanded_quantification: false
+
+# Axes to vary (OFAT: one run per non-baseline value of each axis).
 axes:
+  # --- input scale: the primary driver of the per-process memory regression ---
   target_px:                  [2048, 4096, 8192, 16384, 32768]
   n_channels:                 [1, 2, 4, 8]
+  # --- registration ---
   memory_mode:                [low, medium, high]
-  reg_use_tiled_registration: [true, false]
-  reg_tile_size:              [1024, 2048, 4096]
-  reg_n_workers:              [2, 4, 8]
   skip_micro_registration:    [true, false]
-  # reg_distributed_tiling axis disabled: the Nextflow-distributed tiling path
-  # (VALIS_DISTRIBUTED_ADAPTER) is currently broken. Baseline pins it to false,
-  # so every run below uses classic VALIS_ADAPTER (normal registration).
+  # --- preprocessing ---
+  preproc_n_iter:             [50, 100, 200]      # BaSiC iterations (compute/time)
+  preproc_overlap:            [0, 64, 128]        # tile overlap (px)
+  # (preproc_tile_size deliberately NOT swept: it is problem-dependent. preproc_pool_workers
+  #  is also omitted — preprocess.nf hard-wires --n_workers to task.cpus, so it is inert.)
+  # --- segmentation ---
+  seg_method:                 [stardist, cellsam, instanseg]   # cellsam/instanseg need their weights + container on the cluster
+  seg_gpu:                    [true, false]
+  seg_n_tiles_x:              [8, 16, 32]         # StarDist tiling (active when seg_method=stardist)
+  seg_n_tiles_y:              [8, 16, 32]         # StarDist tiling (active when seg_method=stardist)
+  # Method-specific tile params take effect ONLY when seg_method matches their backend.
+  # Off the stardist baseline these OFAT runs reproduce the baseline (no variation); to
+  # benchmark them, set baseline seg_method to the matching backend or use a per-backend grid.
+  seg_cellsam_block_size:     [256, 400, 512]     # active when seg_method=cellsam
+  seg_instantseg_tile_size:   [256, 512, 1024]    # active when seg_method=instantseg
+  # --- quantification ---
+  quantify_compartments:      [false, true]
+  expanded_quantification:    [false, true]       # valid because baseline quantify_compartments=true
+  # reg_distributed_tiling axis stays disabled: the Nextflow-distributed tiling path
+  # (VALIS_DISTRIBUTED_ADAPTER) is currently broken. Baseline pins it to false.
   # Re-enable once the distributed path works: reg_distributed_tiling: [false, true]
