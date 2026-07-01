@@ -239,16 +239,11 @@ workflow POSTPROCESSING {
             [patient_meta, tiffs]
         }
 
-    // Join split channels with segmentation mask for MERGE
+    // Merge intensity channels only. The segmentation mask is intentionally NOT
+    // embedded: a >65,535-cell uint32 label mask would force the whole OME-TIFF
+    // to uint32, which Bio-Formats/QuPath cannot read. Cell objects are delivered
+    // separately via cells.geojson.
     ch_for_pyramid_merge = ch_split_grouped
-        .map { meta, tiffs -> [meta.patient_id, meta, tiffs] }
-        .join(
-            ch_cell_mask.map { meta, mask -> [meta.patient_id, mask] },
-            by: 0
-        )
-        .map { _patient_id, meta, split_tiffs, cell_mask ->
-            [meta, split_tiffs, cell_mask]
-        }
 
     // MERGE_AND_PYRAMID combines merge + pyramid generation in one step
     // This preserves OME-XML metadata (channel names, colors, pixel sizes)

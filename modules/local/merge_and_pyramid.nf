@@ -8,7 +8,7 @@
     Features:
     - Generates pyramidal OME-TIFF directly (no bfconvert needed)
     - Preserves channel names, colors, and pixel sizes in OME-XML
-    - Supports segmentation and phenotype mask overlays
+    - Intensity channels only; cell objects are delivered via cells.geojson
     - Memory-efficient processing for large images
     - Full QuPath compatibility
 ----------------------------------------------------------------------------------------
@@ -21,7 +21,7 @@ process MERGE_AND_PYRAMID {
     container "bolt3x/attend_image_analysis:merge"
 
     input:
-    tuple val(meta), path(split_channels, stageAs: 'channels/*'), path(seg_mask)
+    tuple val(meta), path(split_channels, stageAs: 'channels/*')
 
     output:
     tuple val(meta), path("pyramid.ome.tiff"), emit: pyramid
@@ -43,11 +43,9 @@ process MERGE_AND_PYRAMID {
     def compression = params.compression ?: 'zstd'
 
     """
-    # Log input size for tracing (sum of channels/ dir + seg_mask, -L follows symlinks)
+    # Log input size for tracing (channels/ dir only, -L follows symlinks)
     channels_bytes=\$(du -sLb channels/ | cut -f1)
-    mask_bytes=\$(stat -L --printf="%s" ${seg_mask})
-    total_bytes=\$((channels_bytes + mask_bytes))
-    echo "${task.process},${meta.patient_id},channels/+${seg_mask.name},\${total_bytes}" > ${meta.patient_id}.MERGE_AND_PYRAMID.size.csv
+    echo "${task.process},${meta.patient_id},channels/,\${channels_bytes}" > ${meta.patient_id}.MERGE_AND_PYRAMID.size.csv
 
     echo "Sample: ${meta.patient_id}"
     echo "Input directory: channels/"
@@ -62,7 +60,6 @@ process MERGE_AND_PYRAMID {
         --pyramid-scale ${pyramid_scale} \\
         --tile-size ${tile_size} \\
         --compression ${compression} \\
-        --segmentation-mask ${seg_mask} \\
         ${args}
 
     cat <<-END_VERSIONS > versions.yml

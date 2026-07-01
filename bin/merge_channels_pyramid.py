@@ -483,7 +483,6 @@ def _read_channel_file(path: str) -> np.ndarray:
 def merge_channels(
     input_dir: str,
     output_path: str,
-    segmentation_mask: str = None,
     phenotype_mask: str = None,
     phenotype_mapping: str = None,
     physical_size_x: float = 0.325,
@@ -558,12 +557,6 @@ def merge_channels(
 
     # Add mask channels
     masks_info = []
-    if segmentation_mask:
-        log(f"Will append segmentation mask: {segmentation_mask}")
-        channel_names.append("Segmentation")
-        channel_colors.append(MARKER_COLORS.get('Segmentation', (255, 255, 255)))
-        masks_info.append(('segmentation', segmentation_mask))
-
     if phenotype_mask:
         log(f"Will append phenotype mask: {phenotype_mask}")
         channel_names.append("Phenotype")
@@ -581,23 +574,6 @@ def merge_channels(
     # a massive bulk cast later (which would triple peak RAM).
     out_dtype = np.uint16 if dtype in (np.float32, np.float64) else dtype
     need_float_cast = dtype in (np.float32, np.float64)
-
-    # A uint32 segmentation mask with > 65535 labels forces the WHOLE output to
-    # uint32 (all OME-TIFF channels share one dtype). Decide this BEFORE
-    # allocating output_data. Previously out_dtype was only bumped to uint32 while
-    # appending the mask — AFTER output_data had been allocated as uint16 — so the
-    # uint32 mask was silently truncated (labels mod 65536) for slides with
-    # > 65535 cells. Peek the mask's max here (single channel; re-read on append).
-    if out_dtype in (np.uint8, np.uint16):
-        for _mtype, _mpath in masks_info:
-            if _mtype == 'segmentation':
-                seg_max = int(_read_channel_file(_mpath).max())
-                gc.collect()
-                if seg_max > np.iinfo(out_dtype).max:
-                    log(f"  Segmentation mask has {seg_max} labels (> {np.iinfo(out_dtype).max}); "
-                        f"allocating output as uint32 to preserve all label IDs")
-                    out_dtype = np.uint32
-                break
 
     output_data = np.zeros((num_output_channels, height, width), dtype=out_dtype)
     output_idx = 0
@@ -649,9 +625,8 @@ def merge_channels(
 
             phenotype_colormap = create_phenotype_colormap(pheno_label_map, n_categories)
 
-        # Cast mask to the output dtype. out_dtype was already promoted to uint32
-        # above if a segmentation mask needs it, so this never truncates labels
-        # (output_data is allocated at the final dtype).
+        # Cast the phenotype mask to the intensity output dtype. Phenotype
+        # category counts are small, so this fits without truncation.
         if mask_data.dtype != out_dtype:
             mask_data = mask_data.astype(out_dtype)
 
@@ -752,8 +727,6 @@ def parse_args() -> argparse.Namespace:
                         help='Directory with single-channel TIFF files')
     parser.add_argument('--output', required=True,
                         help='Output OME-TIFF path')
-    parser.add_argument('--segmentation-mask',
-                        help='Path to segmentation mask TIFF')
     parser.add_argument('--phenotype-mask',
                         help='Path to phenotype mask TIFF')
     parser.add_argument('--phenotype-mapping',
@@ -790,7 +763,6 @@ def main() -> int:
         merge_channels(
             args.input_dir,
             args.output,
-            segmentation_mask=args.segmentation_mask,
             phenotype_mask=args.phenotype_mask,
             phenotype_mapping=args.phenotype_mapping,
             physical_size_x=args.physical_size_x,
