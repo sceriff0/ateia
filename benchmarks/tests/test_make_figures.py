@@ -76,6 +76,24 @@ def test_run_accepts_formats_and_writes_png(tmp_path):
     assert not list((tmp_path / "figures").glob("scaling_*.pdf"))
 
 
+def test_size_varying_filters_confounding_axes():
+    """The memory regression must drop runs whose axis holds input size fixed
+    (memory_mode, seg_gpu, ...) — only baseline/target_px/n_channels vary input."""
+    import pandas as pd
+
+    df = pd.DataFrame({
+        "process": ["SEGMENT"] * 4,
+        "varied_axis": ["baseline", "target_px", "n_channels", "memory_mode"],
+        "input_gb": [1.0, 2.0, 3.0, 1.0],
+    })
+    kept = make_figures._size_varying(df)
+    assert set(kept["varied_axis"]) == {"baseline", "target_px", "n_channels"}
+    assert "memory_mode" not in set(kept["varied_axis"])
+    # graceful fallback when the column is absent (older run plans)
+    no_axis = df.drop(columns=["varied_axis"])
+    assert len(make_figures._size_varying(no_axis)) == len(no_axis)
+
+
 def test_export_docs_figures_writes_into_docs_dir(tmp_path):
     from benchmarks.analysis import export_docs_figures
     docs_img = tmp_path / "docs_imgs"

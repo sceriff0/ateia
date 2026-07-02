@@ -15,6 +15,21 @@ matplotlib.use("Agg")
 
 from .lib import emit_config, load, plotting, regress
 
+# Only these OFAT axes change the input image size (and therefore input_gb).
+# Every other axis (memory_mode, seg_gpu, preproc_n_iter, ...) holds input fixed
+# at the baseline cell, so pooling them into a peak_rss_gb ~ input_gb regression
+# piles many points at one x — inflating sigma, depressing r2, and perturbing the
+# intercept. The memory-scaling fit must use only the size-varying runs.
+SIZE_VARYING_AXES = {"baseline", "target_px", "n_channels"}
+
+
+def _size_varying(runs_df):
+    """Rows whose varied_axis changes input size; fall back to all rows if the
+    column is absent (older run plans)."""
+    if "varied_axis" not in runs_df.columns:
+        return runs_df
+    return runs_df[runs_df["varied_axis"].isin(SIZE_VARYING_AXES)]
+
 
 def run(results_root, run_plan_csv, manifest_csv, reg_eval_csv, outdir, formats=("pdf", "svg")) -> dict:
     outdir = Path(outdir)
@@ -23,7 +38,10 @@ def run(results_root, run_plan_csv, manifest_csv, reg_eval_csv, outdir, formats=
     plotting.set_paper_theme()
 
     runs_df = load.load_runs(results_root, run_plan_csv, manifest_csv)
-    models = regress.fit_per_process(runs_df, predictor="input_gb", target="peak_rss_gb")
+    # Fit the memory model on the size-varying runs only (avoids the confound);
+    # runs_df keeps every run so measurements.csv loses nothing.
+    scaling_df = _size_varying(runs_df)
+    models = regress.fit_per_process(scaling_df, predictor="input_gb", target="peak_rss_gb")
 
     # Tidy CSVs for downstream analysis (R, etc.) — these are the primary data
     # artifacts; figures and the notebook are optional views of the same numbers.
@@ -32,8 +50,8 @@ def run(results_root, run_plan_csv, manifest_csv, reg_eval_csv, outdir, formats=
     runs_df.to_csv(measurements_csv, index=False)
     regress.models_to_frame(models).to_csv(models_csv, index=False)
 
-    # per-process memory scaling figures
-    for proc, g in runs_df.groupby("process"):
+    # per-process memory scaling figures (size-varying runs only, matching the fit)
+    for proc, g in scaling_df.groupby("process"):
         sub = g[["input_gb", "peak_rss_gb"]].dropna()
         if sub.empty:
             continue

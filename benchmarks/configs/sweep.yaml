@@ -63,7 +63,7 @@ axes:
   preproc_pool_workers:       [1, 4, 8]           # preprocessing parallelism (null pipeline default = task.cpus)
   # (preproc_tile_size deliberately NOT swept: it is problem-dependent.)
   # --- segmentation ---
-  seg_method:                 [stardist, cellsam, instanseg]   # cellsam/instanseg need their weights + container on the cluster
+  seg_method:                 [stardist, cellsam, instantseg]  # cellsam/instantseg need their weights + container on the cluster (must match ParamUtils valid names)
   seg_gpu:                    [true, false]
   seg_n_tiles_x:              [8, 16, 32]         # StarDist tiling (active when seg_method=stardist)
   seg_n_tiles_y:              [8, 16, 32]         # StarDist tiling (active when seg_method=stardist)

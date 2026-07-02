@@ -12,10 +12,17 @@ from pathlib import Path
 # input variable(s). Processes NOT listed here are emitted as inert COMMENTED
 # blocks (the user supplies the expression and uncomments) so the generated
 # config is always valid Groovy as-is.
+#
+# The model is fit on CONTINUOUS GiB (bytes / 2**30 in load.parse_size_logs), so
+# the deployed expression must also be continuous: `size() / (1024 ** 3)` (Groovy
+# `/` on longs yields a fractional BigDecimal). The earlier `(size() >> 30) ?: 1`
+# floored to whole GiB and forced a 1 GiB minimum, so slope*x + intercept diverged
+# from the fitted line for sub-GiB / fractional inputs. No `?: 1` guard is needed:
+# a 0-byte input yields input term 0 and memory falls back to intercept + buffer.
 PROCESS_INPUT_EXPR = {
-    "CONVERT_IMAGE": "((image_file.size() >> 30) ?: 1)",
-    "PREPROCESS": "((ome_tiff.size() >> 30) ?: 1)",
-    "SEGMENT": "((merged_file.size() >> 30) ?: 1)",
+    "CONVERT_IMAGE": "(image_file.size() / (1024 ** 3))",
+    "PREPROCESS": "(ome_tiff.size() / (1024 ** 3))",
+    "SEGMENT": "(merged_file.size() / (1024 ** 3))",
 }
 
 R2_LOW = 0.5

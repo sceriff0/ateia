@@ -30,8 +30,19 @@ def parse_trace(trace_txt) -> pd.DataFrame:
 
 
 def parse_size_logs(input_sizes_csv) -> pd.DataFrame:
+    """Per-process input size in GiB, averaged over the process's tasks.
+
+    ``input_sizes.csv`` has one row per task (e.g. PREPROCESS emits one row per
+    channel image). The trace also has one row per task, but there is no shared
+    task-unique key to join on (both sides carry only ``process``/``sample_id``),
+    so ``input_gb`` is broadcast to every trace row of a process. Averaging — not
+    summing — makes that broadcast value the *per-task* input the memory model is
+    fit against; summing would inflate x by the task count for multi-task
+    processes and bias the regression. Single-task processes (one row) are
+    unaffected: mean == the single value.
+    """
     df = pd.read_csv(input_sizes_csv)
-    agg = df.groupby("process")["bytes"].sum().to_frame()
+    agg = df.groupby("process")["bytes"].mean().to_frame()
     agg["input_gb"] = agg["bytes"] / 2**30
     return agg
 

@@ -34,13 +34,16 @@ def test_low_confidence_fit_is_flagged(tmp_path):
     assert "LOW CONFIDENCE" in out.read_text()
 
 
-def test_known_process_emits_live_block_with_zero_guard(tmp_path):
+def test_known_process_emits_live_block_with_continuous_gib(tmp_path):
     out = tmp_path / "k.config"
     emit_config.write_optimized_config(
         {"SEGMENT": {"slope": 7.0, "intercept": 8.0, "sigma": 4.0, "r2": 0.97, "n": 5}}, out)
     text = out.read_text()
     assert "    withName: 'SEGMENT'" in text          # live (uncommented) block
-    assert "?: 1" in text                             # zero-guard preserved
+    # continuous GiB, matching the model fit on bytes / 2**30 (not floored >> 30)
+    assert "merged_file.size() / (1024 ** 3)" in text
+    assert ">> 30" not in text                        # no integer-floor GiB
+    assert "?: 1" not in text                         # no 1 GiB minimum floor
 
 
 def test_unknown_process_emitted_commented_not_invalid_var(tmp_path):
