@@ -22,11 +22,18 @@ def compute_target_shape(src_hw: tuple[int, int], target_long_edge: int) -> tupl
     return (round(h * scale), round(w * scale))
 
 
-def synthesize_channels(src_2d: np.ndarray, n_channels: int, seed: int = 0) -> np.ndarray:
+def synthesize_channels(src_2d: np.ndarray, n_channels: int, seed: int = 0,
+                        block_rows: int = 4096) -> np.ndarray:
     """Replicate a single 2-D channel into n_channels with per-channel perturbation.
 
     Channel 0 is the unmodified source. Channels 1..N-1 add intensity jitter,
     Gaussian noise, and a c-px roll offset (by channel index) so each channel is non-identical.
+
+    Memory: the per-channel float64 noise/scale intermediate is built in ROW BLOCKS
+    (``block_rows`` at a time), not for the whole image at once. Without this a large
+    scaling-grid cell (e.g. 65536x65536) allocated two full float64 arrays per channel
+    (~34 GB each) on top of the output stack and OOM-killed the process. Block-wise caps
+    the transient at ``block_rows x W`` (a few GB). Deterministic per seed (unchanged).
     """
     if src_2d.ndim != 2:
         raise ValueError("src_2d must be 2-D (H, W)")
@@ -36,14 +43,19 @@ def synthesize_channels(src_2d: np.ndarray, n_channels: int, seed: int = 0) -> n
         raise ValueError(f"src_2d must be an integer dtype, got {src_2d.dtype}")
     rng = np.random.default_rng(seed)
     info = np.iinfo(src_2d.dtype)
+    h = src_2d.shape[0]
     out = np.empty((n_channels,) + src_2d.shape, dtype=src_2d.dtype)
     out[0] = src_2d
     for c in range(1, n_channels):
         gain = 1.0 + rng.uniform(-0.1, 0.1)
-        noise = rng.normal(0.0, 3.0, size=src_2d.shape)
         shifted = np.roll(src_2d, shift=c, axis=1)
-        vals = np.clip(shifted.astype(np.float64) * gain + noise, info.min, info.max)
-        out[c] = vals.astype(src_2d.dtype)
+        for r0 in range(0, h, block_rows):
+            r1 = min(r0 + block_rows, h)
+            noise = rng.normal(0.0, 3.0, size=(r1 - r0, src_2d.shape[1]))
+            vals = np.clip(shifted[r0:r1].astype(np.float64) * gain + noise, info.min, info.max)
+            out[c, r0:r1] = vals.astype(src_2d.dtype)
+            del noise, vals
+        del shifted
     return out
 
 
