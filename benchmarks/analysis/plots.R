@@ -26,14 +26,28 @@ suppressPackageStartupMessages(lapply(.need, library, character.only = TRUE))
 
 adir  <- if (length(commandArgs(TRUE))) commandArgs(TRUE)[1] else "benchmarks/analysis"
 outdir <- file.path(adir, "figures_R"); dir.create(outdir, showWarnings = FALSE, recursive = TRUE)
-save_fig <- function(p, name, w = 8, h = 5)
+CAPTION <- "Mirage benchmark sweep · mean over replicate runs · SLURM-isolated per-process resources"
+# Save both a vector PDF (for the manuscript) and a 300-dpi PNG (for slides / quick view).
+save_fig <- function(p, name, w = 8, h = 5) {
+  p <- p + labs(caption = CAPTION)
   ggsave(file.path(outdir, paste0(name, ".pdf")), p, width = w, height = h, device = cairo_pdf)
+  ggsave(file.path(outdir, paste0(name, ".png")), p, width = w, height = h, dpi = 300)
+}
 
-theme_set(theme_minimal(base_size = 12) +
-          theme(panel.grid.minor = element_blank(),
-                strip.text = element_text(face = "bold"),
-                legend.position = "top"))
-# Okabe-Ito colourblind-safe palette
+# Publication theme: generous type, restrained gridlines, bold titles, grey subtitles.
+theme_paper <- theme_minimal(base_size = 13) +
+  theme(plot.title    = element_text(face = "bold", size = rel(1.05)),
+        plot.subtitle = element_text(colour = "grey35", margin = margin(b = 8)),
+        plot.caption  = element_text(colour = "grey55", size = rel(.7), hjust = 1),
+        plot.title.position = "plot", plot.caption.position = "plot",
+        axis.title    = element_text(colour = "grey20"),
+        panel.grid.minor = element_blank(),
+        panel.grid.major = element_line(linewidth = .3, colour = "grey90"),
+        strip.text    = element_text(face = "bold"),
+        legend.position = "top", legend.justification = "left",
+        plot.margin   = margin(12, 16, 8, 12))
+theme_set(theme_paper)
+# Okabe-Ito colourblind-safe palette (classic = black/grey, distributed = orange, etc.)
 oi <- c("#0072B2","#D55E00","#009E73","#CC79A7","#E69F00","#56B4E9","#F0E442","#000000")
 
 m <- read_csv(file.path(adir, "measurements.csv"), show_col_types = FALSE) %>%
@@ -51,7 +65,8 @@ p1 <- m %>% filter(varied_axis %in% size_axes, is.finite(input_gb), input_gb > 0
   facet_wrap(~ proc, scales = "free") +
   scale_x_log10(labels = label_number()) + scale_y_log10() +
   labs(title = "Peak memory scaling per process",
-       x = "input (GiB, log)", y = "peak RSS (GiB, log)")
+       subtitle = "Each point is a run; line = linear fit. Steeper = RAM grows faster with input size.",
+       x = "input (GiB, log10)", y = "peak RSS (GiB, log10)")
 save_fig(p1, "01_memory_scaling_per_process", 11, 8)
 
 # ── 2. TIME SCALING per process — realtime vs input ──
@@ -61,7 +76,9 @@ p2 <- m %>% filter(varied_axis %in% size_axes, is.finite(input_gb), input_gb > 0
   geom_smooth(method = "lm", se = FALSE, colour = oi[2], linewidth = .6) +
   facet_wrap(~ proc, scales = "free") +
   scale_x_log10() + scale_y_log10(labels = label_number()) +
-  labs(title = "Runtime scaling per process", x = "input (GiB, log)", y = "realtime (s, log)")
+  labs(title = "Runtime scaling per process",
+       subtitle = "Wall-clock per process vs input size (both log scales).",
+       x = "input (GiB, log10)", y = "realtime (s, log10)")
 save_fig(p2, "02_time_scaling_per_process", 11, 8)
 
 # ── 3. CLASSIC vs DISTRIBUTED registration — the RAM ceiling vs size ──
@@ -76,8 +93,9 @@ if (file.exists(cvd_path) && nrow(read_csv(cvd_path, show_col_types = FALSE)) > 
     geom_line(linewidth = .8) + geom_point(size = 2) +
     facet_wrap(~ n_channels, labeller = label_both) +
     scale_x_log10() + scale_colour_manual(values = oi[c(8,2)]) +
-    labs(title = "Registration peak RAM: classic vs distributed (the RAM win grows with size)",
-         x = "image size (px, log)", y = "registration-stage peak RSS (GiB)", colour = NULL)
+    labs(title = "Registration peak RAM: classic vs distributed",
+         subtitle = "Classic holds the BioFormats JVM heap (climbs with size); the JVM-free distributed path stays bounded.",
+         x = "image size (px, log10)", y = "registration-stage peak RSS (GiB)", colour = NULL)
   save_fig(p3, "03_classic_vs_distributed_ram", 9, 5)
 
   p3b <- ggplot(cvd, aes(target_px, rss_saving_gb, colour = factor(n_channels))) +
@@ -97,22 +115,22 @@ if (nrow(reg) > 0) {
     geom_line() + geom_point(size = 2) +
     facet_wrap(~ n_channels, labeller = label_both) +
     scale_colour_viridis_d(name = "size (px)", option = "C") +
-    labs(title = "N-image registration: REGISTER peak RAM vs slide count",
-         x = "n_register_images (1 ref + N−1 moving)", y = "peak RSS (GiB)")
+    labs(title = "N-image registration: peak RAM vs slide count",
+         subtitle = "Co-registering more slides to one reference; coloured by image size.",
+         x = "n_register_images (1 reference + N−1 moving)", y = "peak RSS (GiB)")
   save_fig(p4, "04_nimage_registration_ram", 9, 5)
 }
 
 # ── 5. OFAT KNOB EFFECTS — one panel per single-knob axis ──
 # For each OFAT axis, plot the most-affected process's realtime vs the knob value.
+# Only the true single-knob OFAT axes belong here; memory_mode / skip_micro_registration go to plot 10
+# (both paths) and the segmentation tile knobs to plots 9/9b (per method).
 knob_targets <- tribble(
   ~axis,                       ~proc,          ~metric,
-  "memory_mode",               "REGISTER",     "peak_rss_gb",
-  "skip_micro_registration",   "REGISTER",     "realtime_s",
   "preproc_n_iter",            "PREPROCESS",   "realtime_s",
   "preproc_overlap",           "PREPROCESS",   "realtime_s",
   "preproc_pool_workers",      "PREPROCESS",   "realtime_s",
-  "seg_n_tiles_x",             "SEGMENT",      "peak_rss_gb",
-  "seg_n_tiles_y",             "SEGMENT",      "peak_rss_gb",
+  "seg_gpu",                   "SEGMENT",      "realtime_s",
   "quantify_compartments",     "QUANTIFY",     "realtime_s",
   "expanded_quantification",   "QUANTIFY",     "realtime_s"
 )
@@ -155,7 +173,8 @@ p7 <- m %>% filter(varied_axis %in% size_axes, n_channels == 2, n_register_image
   ggplot(aes(factor(target_px), fct_reorder(proc, peak_rss_gb), fill = peak_rss_gb)) +
   geom_tile(colour = "white") +
   scale_fill_viridis_c(option = "B", trans = "log10", name = "peak RSS\n(GiB)") +
-  labs(title = "Where the memory goes: peak RSS by stage x image size",
+  labs(title = "Where the memory goes",
+       subtitle = "Peak RSS by stage \u00d7 image size (log colour). Darker = the memory bottleneck at that size.",
        x = "image size (px)", y = NULL)
 save_fig(p7, "07_stage_memory_heatmap", 9, 6)
 
@@ -169,5 +188,52 @@ p8 <- m %>% filter(varied_axis %in% size_axes, is.finite(input_gb), input_gb > 0
   scale_colour_manual(values = oi[c(1,2)], name = "channels") +
   labs(title = "Channel-count effect on memory scaling", x = "input (GiB, log)", y = "peak RSS (GiB, log)")
 save_fig(p8, "08_channel_effect", 10, 7)
+
+# ── 9. SEGMENTATION METHODS — each backend with its own parameter sweep ──
+seg <- m %>% filter(str_starts(varied_axis, "segmentation_grid"), proc == "SEGMENT")
+if (nrow(seg) > 0) {
+  p9 <- seg %>%
+    ggplot(aes(seg_method, realtime_s, colour = seg_method)) +
+    geom_boxplot(outlier.shape = NA, width = .5) +
+    geom_jitter(width = .12, alpha = .5, size = 1) +
+    scale_colour_manual(values = oi, guide = "none") +
+    labs(title = "Segmentation methods compared",
+         subtitle = "Box = IQR across each method's own parameter sweep; points = individual configs.",
+         x = NULL, y = "SEGMENT realtime (s)")
+  save_fig(p9, "09_segmentation_methods", 8, 5)
+
+  # StarDist tile grid effect (its own params)
+  sd <- seg %>% filter(seg_method == "stardist")
+  if (nrow(sd) > 0) {
+    p9b <- sd %>% group_by(seg_n_tiles_x, seg_n_tiles_y) %>%
+      summarise(peak_rss_gb = mean(peak_rss_gb), .groups = "drop") %>%
+      ggplot(aes(factor(seg_n_tiles_x), factor(seg_n_tiles_y), fill = peak_rss_gb)) +
+      geom_tile(colour = "white") + scale_fill_viridis_c(option = "D", name = "peak RSS\n(GiB)") +
+      labs(title = "StarDist tiling: peak RSS vs tile grid", x = "seg_n_tiles_x", y = "seg_n_tiles_y")
+    save_fig(p9b, "09b_stardist_tile_grid", 6, 5)
+  }
+}
+
+# ── 10. REGISTRATION PARAMETERS in BOTH paths — memory_mode / skip_micro, classic vs distributed ──
+reg_leaves <- c("REGISTER","REG_PREP","REG_TILE","REG_NONRIGID","REG_MICRO_PREP",
+                "REG_FINALIZE","REG_FINALIZE_FIELD","REG_FINALIZE_MICRO","REG_WARP_REF")
+truthy <- function(x) tolower(as.character(x)) %in% c("true","1","yes")
+rp <- m %>% filter(varied_axis == "registration_param_grid", proc %in% reg_leaves)
+if (nrow(rp) > 0) {
+  p10 <- rp %>%
+    group_by(run_id, memory_mode, skip_micro_registration, reg_distributed_tiling) %>%
+    summarise(reg_peak_gb = max(peak_rss_gb), .groups = "drop") %>%
+    mutate(path = ifelse(truthy(reg_distributed_tiling), "distributed", "classic")) %>%
+    group_by(memory_mode, skip_micro_registration, path) %>%
+    summarise(reg_peak_gb = mean(reg_peak_gb), .groups = "drop") %>%
+    ggplot(aes(fct_relevel(memory_mode, "low", "medium", "high"), reg_peak_gb, fill = path)) +
+    geom_col(position = "dodge", width = .7) +
+    facet_wrap(~ skip_micro_registration, labeller = label_both) +
+    scale_fill_manual(values = oi[c(8, 2)], name = NULL) +
+    labs(title = "Registration knobs, measured in both paths",
+         subtitle = "memory_mode \u00d7 skip_micro_registration \u2014 classic vs distributed registration.",
+         x = "memory_mode", y = "registration-stage peak RSS (GiB)")
+  save_fig(p10, "10_registration_params_both_paths", 9, 5)
+}
 
 message("Wrote figures to ", normalizePath(outdir))

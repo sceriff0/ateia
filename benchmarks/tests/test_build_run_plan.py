@@ -128,6 +128,58 @@ def test_registration_grid_crosses_channels_when_list():
         (4096, 2, 4), (4096, 2, 8), (4096, 4, 4), (4096, 4, 8)}
 
 
+def test_registration_param_grid_crosses_params_in_both_paths():
+    sweep = {
+        "strategy": "ofat",
+        "baseline": {"target_px": 4096, "n_channels": 2, "n_register_images": 2,
+                     "memory_mode": "medium", "skip_micro_registration": True,
+                     "reg_distributed_tiling": False},
+        "registration_param_grid": {
+            "memory_mode": ["low", "medium", "high"],
+            "skip_micro_registration": [True, False],
+        },
+        "axes": {},
+    }
+    plan = build_run_plan(sweep, repeats=1)
+    rp = [r for r in plan if r["varied_axis"] == "registration_param_grid"]
+    # 3 memory_mode x 2 skip_micro x 2 paths (classic + distributed)
+    assert len(rp) == 12
+    classic = [r for r in rp if r["reg_distributed_tiling"] is False]
+    dist = [r for r in rp if r["reg_distributed_tiling"] is True]
+    assert len(classic) == 6 and len(dist) == 6
+    # every distributed one is forced onto the SEPARATED path
+    assert all(r["reg_dist_sub_threshold"] == "force" and r["reg_dist_force_tiling"] is False for r in dist)
+    # both paths cover the same (memory_mode, skip_micro) combinations
+    combo = lambda rs: {(r["memory_mode"], r["skip_micro_registration"]) for r in rs}
+    assert combo(classic) == combo(dist)
+    assert len(combo(classic)) == 6
+
+
+def test_segmentation_grid_pins_method_and_crosses_own_params():
+    sweep = {
+        "strategy": "ofat",
+        "baseline": {"target_px": 4096, "n_channels": 2, "seg_method": "stardist",
+                     "seg_n_tiles_x": 16, "seg_n_tiles_y": 16},
+        "segmentation_grid": {
+            "stardist": {"seg_n_tiles_x": [8, 16, 32], "seg_n_tiles_y": [8, 16, 32]},
+            "cellsam": {"seg_cellsam_block_size": [256, 400, 512]},
+            "instantseg": {"seg_instantseg_tile_size": [256, 512, 1024]},
+        },
+        "axes": {},
+    }
+    plan = build_run_plan(sweep, repeats=1)
+    sd = [r for r in plan if r["varied_axis"] == "segmentation_grid:stardist"]
+    cs = [r for r in plan if r["varied_axis"] == "segmentation_grid:cellsam"]
+    ins = [r for r in plan if r["varied_axis"] == "segmentation_grid:instantseg"]
+    assert len(sd) == 9 and len(cs) == 3 and len(ins) == 3       # 3x3, 3, 3
+    assert all(r["seg_method"] == "stardist" for r in sd)
+    assert all(r["seg_method"] == "cellsam" for r in cs)
+    assert all(r["seg_method"] == "instantseg" for r in ins)
+    assert {(r["seg_n_tiles_x"], r["seg_n_tiles_y"]) for r in sd} == {
+        (x, y) for x in (8, 16, 32) for y in (8, 16, 32)}
+    assert {r["seg_cellsam_block_size"] for r in cs} == {256, 400, 512}
+
+
 def test_distributed_tiling_grid_pins_force_tiling_and_crosses_knobs():
     sweep = {
         "strategy": "ofat",
@@ -169,6 +221,17 @@ def test_project_sweep_distributed_grid_forces_distributed_across_sizes():
                      if r["varied_axis"] in ("scaling_grid", "baseline")}
     for r in dist:
         assert (r["target_px"], r["n_channels"]) in classic_cells
+
+
+def test_project_sweep_all_configs_share_columns():
+    # run_sweep.sh maps EVERY csv column to --param, so a config missing a key another config has would
+    # write a blank cell -> `--param ""` for those runs. Guard: all configs carry the same key set.
+    import yaml
+    sweep = yaml.safe_load(
+        (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text())
+    plan = build_run_plan(sweep, repeats=1)
+    keysets = {frozenset(r) for r in plan}
+    assert len(keysets) == 1, "configs have differing columns (baseline must declare every swept param)"
 
 
 def test_project_sweep_caps_and_grids():

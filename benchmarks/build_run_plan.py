@@ -88,6 +88,38 @@ def _configs(sweep: dict) -> list[tuple[dict, str]]:
                                      reg_dist_tile_wh=tw, reg_dist_tile_buffer=tb),
                                 "distributed_tiling_grid"))
 
+    # 3b. REGISTRATION PARAMETER GRID — the registration knobs (memory_mode, skip_micro_registration)
+    #     measured in BOTH the classic AND distributed path, so their effect is characterised for each.
+    #     Crosses memory_mode x skip_micro_registration x {classic, distributed(forced SEPARATED)} at the
+    #     baseline cell. Labelled registration_param_grid.
+    rpg = sweep.get("registration_param_grid")
+    if rpg:
+        mms = rpg.get("memory_mode", [baseline.get("memory_mode", "medium")])
+        mms = list(mms) if isinstance(mms, (list, tuple)) else [mms]
+        sms = rpg.get("skip_micro_registration", [baseline.get("skip_micro_registration", True)])
+        sms = list(sms) if isinstance(sms, (list, tuple)) else [sms]
+        for mm in mms:
+            for sm in sms:
+                for dist in (False, True):
+                    cfg = dict(baseline, memory_mode=mm, skip_micro_registration=sm,
+                               reg_distributed_tiling=dist)
+                    if dist:
+                        cfg.update(reg_dist_sub_threshold="force", reg_dist_force_tiling=False)
+                    configs.append((cfg, "registration_param_grid"))
+
+    # 3c. SEGMENTATION GRID — each method benchmarked with ITS OWN parameters. sweep.yaml maps a
+    #     seg_method to a dict of {param: [values]}; this pins seg_method and crosses that method's
+    #     params (so stardist tiles, cellsam block_size, instantseg tile_size each vary only where they
+    #     are live). Labelled segmentation_grid:<method>. cellsam/instantseg need their weights +
+    #     container on the cluster.
+    sgrid = sweep.get("segmentation_grid")
+    if sgrid:
+        for method, mparams in sgrid.items():
+            keys = list(mparams)
+            for combo in itertools.product(*(mparams[k] for k in keys)):
+                configs.append((dict(baseline, seg_method=method, **dict(zip(keys, combo))),
+                                f"segmentation_grid:{method}"))
+
     # 4. OFAT parameter knobs: one config per non-baseline value of each axis,
     #    holding input scale fixed at the baseline cell.
     for axis, values in axes.items():
@@ -132,11 +164,20 @@ def main():
     sweep = yaml.safe_load(a.sweep.read_text())
     plan = build_run_plan(sweep, repeats=a.repeats)
     lead = ["run_id", "varied_axis", "config_id", "rep"]
-    fields = lead + [k for k in plan[0] if k not in lead]
+    # Union of keys across ALL rows in first-seen order: some configs carry extra params (e.g. the
+    # distributed grids add reg_dist_sub_threshold / reg_dist_force_tiling), so keying off plan[0]
+    # alone would drop columns and crash DictWriter. A missing value is written blank (restval="") —
+    # keep the baseline complete so this stays a safety net, not the norm (blank cells become
+    # `--param ""` in run_sweep.sh).
+    fields = list(lead)
+    for r in plan:
+        for k in r:
+            if k not in fields:
+                fields.append(k)
     with open(a.out, "w", newline="") as fh:
         # lineterminator='\n' (not csv's default '\r\n') so run_sweep.sh's bash column
         # parsing doesn't see a trailing '\r' on the last field of each row.
-        w = csv.DictWriter(fh, fieldnames=fields, lineterminator="\n")
+        w = csv.DictWriter(fh, fieldnames=fields, lineterminator="\n", restval="")
         w.writeheader()
         w.writerows(plan)
     n_cfg = len({r["config_id"] for r in plan})
