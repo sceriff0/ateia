@@ -86,9 +86,9 @@ tail -n +2 "$RUN_PLAN" | tr -d '\r' | while IFS=',' read -r -a vals; do
 
   # Emit up to (n_reg-1) moving panels, each with a distinct channel set
   # (DAPI|m{panel}_1|...) so the pipeline's duplicate-channel guard accepts them.
+  want=$(( n_reg - 1 )); emitted=0
   if [[ -n "$mov_list" ]]; then
     IFS=';' read -r -a movings <<< "$mov_list"
-    want=$(( n_reg - 1 )); emitted=0
     for ((j=0; j<${#movings[@]} && emitted<want; j++)); do
       panel=$(( j + 1 ))
       mov_chans="DAPI"
@@ -96,10 +96,16 @@ tail -n +2 "$RUN_PLAN" | tr -d '\r' | while IFS=',' read -r -a vals; do
       printf '%s,%s,false,%s\n' "$cell_id" "${movings[$j]}" "$mov_chans" >> "$sheet"
       emitted=$(( emitted + 1 ))
     done
-    if [[ "$emitted" -lt "$want" ]]; then
-      echo "WARN: $run_id wanted $want moving panels but only $emitted available for $cell_id" \
-           "(regenerate the matrix with --n-moving >= $want)" >&2
-    fi
+  fi
+  # Hard guard (paired cells only): if the matrix can't supply the panels this run
+  # needs, registration would silently downgrade to fewer images and quietly corrupt
+  # the n_register_images scaling data. Skip the run loudly instead — regenerate the
+  # matrix from THIS sweep (generate_matrix --sweep is plan-aware and sizes each
+  # cell's moving panels to the runs that use it).
+  if [[ "$nch" -ge 2 && "$emitted" -lt "$want" ]]; then
+    echo "ERROR: $run_id needs $want moving panel(s) for $cell_id but the matrix has only $emitted;" \
+         "regenerate the matrix from this sweep — SKIPPING (no silent pair-registration downgrade)." >&2
+    continue
   fi
 
   # Map non-structural columns to --<param>. Skip the matrix/registration-shape

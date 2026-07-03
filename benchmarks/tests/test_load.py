@@ -39,6 +39,33 @@ def test_parse_size_logs_averages_multi_task_process(tmp_path):
     assert s.loc["SEGMENT", "input_gb"] == pytest.approx(4.0)
 
 
+def test_aggregate_repeats_reports_mean_std_cv_per_config():
+    import pandas as pd
+
+    df = pd.DataFrame({
+        "process": ["SEGMENT"] * 6,
+        "config_id": ["cfg000"] * 3 + ["cfg001"] * 3,
+        "varied_axis": ["baseline"] * 3 + ["scaling_grid"] * 3,
+        "target_px": [4096] * 3 + [8192] * 3,
+        "n_channels": [2] * 6,
+        "peak_rss_gb": [10.0, 12.0, 14.0, 20.0, 20.0, 20.0],
+        "realtime_s": [100.0, 100.0, 100.0, 200.0, 210.0, 220.0],
+    })
+    out = load.aggregate_repeats(df)
+    assert len(out) == 2
+
+    c0 = out[out["config_id"] == "cfg000"].iloc[0]
+    assert c0["n_reps"] == 3
+    assert c0["varied_axis"] == "baseline"
+    assert c0["peak_rss_gb_mean"] == pytest.approx(12.0)
+    assert c0["peak_rss_gb_std"] == pytest.approx(np.std([10.0, 12.0, 14.0]))  # ddof=0
+    assert c0["peak_rss_gb_cv"] == pytest.approx(np.std([10.0, 12.0, 14.0]) / 12.0)
+
+    c1 = out[out["config_id"] == "cfg001"].iloc[0]
+    assert c1["peak_rss_gb_cv"] == pytest.approx(0.0)  # zero variance across reps
+    assert c1["target_px"] == 8192
+
+
 def test_load_runs_joins_trace_sizes_and_params():
     df = load.load_runs(
         FIX / "runs",

@@ -48,9 +48,16 @@ Verify the whole harness with no data at all:
 
 - **`--sweep` is the easy path:** it reads the sweep and generates exactly the cells +
   moving panels the sweep needs — deriving `--target-px`, `--n-channels`, `--paired`, and
-  `--n-moving` (= `max(n_register_images) - 1`) automatically. No manual sync between the
-  matrix and the sweep. (Explicit `--target-px` / `--n-channels` / `--n-moving` / `--paired`
-  still override the derived values; `--seed 0` by default.)
+  `--n-moving` (= `max(n_register_images) - 1`) automatically. Input-scale cells come from
+  the sweep's `scaling_grid` (sizes × channels); the shipped sweep caps size at **65536**
+  and channels at **{2, 4}** (1-channel isn't benchmarked), so `--sweep` builds a **6 × 2 =
+  12-cell** matrix. Moving panels are generated **per cell, plan-aware**: each cell gets
+  exactly as many panels as the runs that touch it consume (derived from the real run
+  configs). Cells that only pair-register get 1; cells the `registration_grid` runs at 8
+  rounds get 7 — including the big ones, since those *are* measured at multiple rounds. No
+  panels are made that no run opens. No manual sync between the matrix and the sweep.
+  (Explicit `--target-px` / `--n-channels` / `--n-moving` (forces a uniform count) /
+  `--paired` still override; `--seed 0` by default.)
 - **Input:** one image you supply (any Bio-Formats/tifffile-readable format; **uint8 or uint16**).
 - **Output:** `bench_matrix/px{px}_ch{n}.ome.tif` per (size x channel) cell; with pairing,
   also `px{px}_ch{n}_moving{j}.ome.tif` (j = 1..n-moving) for n>=2 cells, each a distinct
@@ -63,12 +70,24 @@ Verify the whole harness with no data at all:
 
     python benchmarks/build_run_plan.py \
         --sweep benchmarks/configs/sweep.yaml \
-        --out bench_run_plan.csv
+        --out bench_run_plan.csv \
+        --repeats 3                       # replicate runs per config (default 3)
 
 - **Input:** `benchmarks/configs/sweep.yaml` — edit it: `strategy: ofat|grid`, a `baseline:`
-  map, and the `axes:` you want. (Registration axes only do work when the matrix was `--paired`.)
+  map, the OFAT `axes:` (one knob varied off baseline), and two input-scaling grids:
+  `scaling_grid:` (`target_px` × `n_channels`) and `registration_grid:` (`target_px` ×
+  `n_register_images`, at a fixed channel count). Both are full cross-products because the
+  three input-scaling dimensions — pixels, channels-per-round, and **number of registered
+  rounds** — each drive memory (REGISTER's input is the sum of all rounds; merged channels
+  grow with round count), so each must be measured across sizes, not at one baseline cell.
+  Do NOT also list `target_px` / `n_channels` / `n_register_images` under `axes:` — the
+  grids own input scale, and double-listing would confound the regression.
+- **`--repeats N`** emits N replicate launches per config so the analysis can report
+  per-config variance (timing at n=1 is noisy — cache state, node contention). `N=3` is the
+  default; `N=1` is a single-shot plan. Replicates share a `config_id`; `rep` is the index.
+  Repeats multiply *runs*, not *images* (the cell image is reused across a config's reps).
 - **Output:** `bench_run_plan.csv` — one row per pipeline run
-  (`run_id,varied_axis,<param columns incl target_px,n_channels>`).
+  (`run_id,varied_axis,config_id,rep,<param columns incl target_px,n_channels>`).
 
 ### A3 — Launch the sweep (cluster)
 
@@ -116,7 +135,12 @@ Verify the whole harness with no data at all:
     `input_gb`, and every swept param column joined in (`run_id`, `varied_axis`, `target_px`,
     `n_channels`, …). Read straight into R (`read.csv`) — no notebook required.
   - `benchmarks/analysis/resource_models.csv` — one row per process with the fitted
-    `slope`, `intercept`, `r2`, `sigma`, `n` (empty `r2` ⇒ `n<3`, flat fallback).
+    `slope`, `intercept`, `r2`, `sigma`, `n` (empty `r2` ⇒ `n<3`, flat fallback). Fit uses
+    only the size-varying runs (`scaling_grid` + `baseline`); OFAT-knob runs are excluded so
+    they don't pile points at one input size and confound the regression.
+  - `benchmarks/analysis/resource_stats.csv` — per-`(process, config_id)` replicate
+    variance: `n_reps` and `mean`/`std`/`cv` of `peak_rss_gb`, `realtime_s`, etc. This is the
+    error bar `--repeats` buys you (empty/degenerate when the plan has no replicates).
   - `benchmarks/analysis/figures/scaling_<PROCESS>.pdf` + `.svg` — peak-RSS-vs-input fits per process.
   - `benchmarks/analysis/modules.optimized.config` — regression-derived memory directives,
     `memory = { check_max( ( <input_gb>*slope + intercept + sigma*task.attempt ).GB, 'memory' ) }`.
@@ -198,7 +222,7 @@ figures, and writes `conf/modules.optimized.config`.
 | `generate_matrix.py` | 1 source image | matrix of OME-TIFFs + `matrix_manifest.csv` |
 | `build_run_plan.py` | `sweep.yaml` | `run_plan.csv` |
 | `run_sweep.sh` | manifest + run plan | per-run `trace.txt` + `input_sizes.csv` |
-| `make_figures` | results + run plan + manifest | `measurements.csv` + `resource_models.csv` (tidy, for R) + `scaling_*.pdf/svg` + `modules.optimized.config` |
+| `make_figures` | results + run plan + manifest | `measurements.csv` + `resource_models.csv` + `resource_stats.csv` (per-config variance) + `scaling_*.pdf/svg` + `modules.optimized.config` |
 | `prepare_pairs.py` | `pairs.csv` (+ downloaded data) | per-pair input dirs + `pairs_manifest.csv` |
 | `run_registration.sh` | pairs manifest | `eval_*.json` (3-way error x tiled/untiled) |
 | `aggregate_eval` | eval JSONs | `reg_eval.csv` + `reg_eval_agg.csv` |

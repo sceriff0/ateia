@@ -104,7 +104,7 @@ def _read_source_2d(path: Path) -> np.ndarray:
 
 
 def run_matrix(source, outdir, target_px, n_channels, seed=0, paired: bool = False,
-               n_moving: int = 1):
+               n_moving: int = 1, n_moving_map: dict | None = None):
     import tifffile
 
     outdir = Path(outdir)
@@ -140,12 +140,19 @@ def run_matrix(source, outdir, target_px, n_channels, seed=0, paired: bool = Fal
                     "n_channels": nch, "bytes": out_path.stat().st_size, "path": str(out_path),
                 }
                 if paired:
+                    # Per-cell panel count: the map (from derive_from_sweep) gives big
+                    # cells only what their runs consume; without it fall back to the
+                    # uniform n_moving for every paired (>=2ch) cell.
+                    if n_moving_map is not None:
+                        cell_moving = int(n_moving_map.get((tpx, nch), 0))
+                    else:
+                        cell_moving = n_moving if nch >= 2 else 0
                     moving_paths = []
-                    if nch >= 2:
+                    if cell_moving:
                         # One distinct moving image per extra registration panel. Each gets a
                         # different seed (distinct content) and a distinct channel-name set
                         # (DAPI|m{panel}_1|...) so the pipeline's duplicate-channel guard accepts them.
-                        for j in range(1, n_moving + 1):
+                        for j in range(1, cell_moving + 1):
                             mov_stack = synthesize_channels(resized, nch, seed=seed + j)
                             mov_out = outdir / f"{cell_id}_moving{j}.ome.tif"
                             tifffile.imwrite(
@@ -161,18 +168,31 @@ def run_matrix(source, outdir, target_px, n_channels, seed=0, paired: bool = Fal
 def derive_from_sweep(sweep_path) -> dict:
     """Read a sweep.yaml and derive the matrix it needs: target_px, n_channels, n_moving.
 
-    Each value covers the axis values UNION the baseline, so every run the sweep will
-    launch finds its cell. n_moving = max(n_register_images) - 1 so enough distinct moving
-    panels exist. Returns {target_px, n_channels, n_moving, paired}.
+    Input-scale cells come from the scaling_grid (size x channels) and the
+    registration_grid (size x n_register_images), unioned with the baseline, so every
+    run finds its cell. The per-cell moving-panel count (n_moving_map) is derived from
+    the ACTUAL run configs (build_run_plan._configs) — each cell gets max(N-1) over the
+    runs that touch it, so big cells aren't handed panels no run consumes, and cells
+    that DO run multi-round registration get exactly as many as they need. Returns
+    {target_px, n_channels, n_moving, paired, n_moving_map}.
     """
     import yaml
 
     sweep = yaml.safe_load(Path(sweep_path).read_text())
     baseline = sweep.get("baseline", {})
     axes = sweep.get("axes", {})
+    grids = [sweep.get("scaling_grid", {}), sweep.get("registration_grid", {})]
 
     def values_for(key, default):
+        # Input-scale cells come from either grid; any OFAT axis of the same name and
+        # the baseline value are unioned in so every run still finds its cell.
         vals = set(axes.get(key, []))
+        for g in grids:
+            v = g.get(key)
+            if isinstance(v, (list, tuple)):
+                vals |= set(v)
+            elif v is not None:
+                vals.add(v)                # registration_grid.n_channels is a scalar
         if key in baseline:
             vals.add(baseline[key])
         return sorted(vals) if vals else default
@@ -183,7 +203,28 @@ def derive_from_sweep(sweep_path) -> dict:
     n_moving = max(max(n_reg) - 1, 1)
     # A sweep with >1 panels (or any multi-channel registration) needs paired moving images.
     paired = max(n_reg) > 1 or max(n_channels) >= 2
-    return {"target_px": target_px, "n_channels": n_channels, "n_moving": n_moving, "paired": paired}
+
+    # Per-cell moving-panel count, derived from the real run configs so it stays exact
+    # for any sweep shape (scaling grid, registration grid, OFAT). Each cell gets the
+    # max panels any run at that cell consumes; paired cells get at least 1. A 'grid'
+    # strategy keeps the uniform max (map=None). Explicit --n-moving also bypasses it.
+    n_moving_map = None
+    if sweep.get("strategy", "ofat") == "ofat":
+        from benchmarks.build_run_plan import _configs
+        base_nreg = baseline.get("n_register_images", 2)
+        need: dict = {}
+        for params, _va in _configs(sweep):
+            t, c = params.get("target_px"), params.get("n_channels")
+            if t is None or c is None:
+                continue
+            panels = (params.get("n_register_images", base_nreg) - 1) if c >= 2 else 0
+            need[(t, c)] = max(need.get((t, c), 0), panels)
+        n_moving_map = {}
+        for t in target_px:
+            for c in n_channels:
+                n_moving_map[(t, c)] = 0 if c < 2 else max(need.get((t, c), 0), 1)
+    return {"target_px": target_px, "n_channels": n_channels, "n_moving": n_moving,
+            "paired": paired, "n_moving_map": n_moving_map}
 
 
 def main():
@@ -210,9 +251,12 @@ def main():
     n_channels = a.n_channels if a.n_channels is not None else d.get("n_channels", [1, 2, 4, 8])
     n_moving = a.n_moving if a.n_moving is not None else d.get("n_moving", 1)
     paired = a.paired if a.paired is not None else d.get("paired", False)
+    # Explicit --n-moving forces a uniform count (legacy behaviour); otherwise use the
+    # per-cell map so large cells aren't given panels no run consumes.
+    n_moving_map = None if a.n_moving is not None else d.get("n_moving_map")
 
     path = run_matrix(a.source, a.outdir, target_px, n_channels, a.seed,
-                      paired=paired, n_moving=n_moving)
+                      paired=paired, n_moving=n_moving, n_moving_map=n_moving_map)
     print(f"Wrote matrix manifest: {path}")
 
 

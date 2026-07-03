@@ -47,6 +47,44 @@ def parse_size_logs(input_sizes_csv) -> pd.DataFrame:
     return agg
 
 
+def aggregate_repeats(runs_df: pd.DataFrame,
+                      metrics=("peak_rss_gb", "peak_vmem_gb", "realtime_s",
+                               "duration_s", "input_gb")) -> pd.DataFrame:
+    """Collapse replicate runs into per-(process, config) mean / std / CV.
+
+    Replicates share a ``config_id`` (from build_run_plan --repeats); this reports
+    the spread across them — the variance estimate a single-shot (n=1) sweep can't
+    give. Falls back to grouping on ``process`` alone if ``config_id`` is absent.
+    For each metric: ``<m>_mean``, ``<m>_std`` (population, ddof=0), ``<m>_cv``
+    (std/mean, NaN when mean==0), plus ``n_reps``. Descriptive param columns
+    (varied_axis, target_px, n_channels) are carried through when present.
+    """
+    if runs_df.empty:
+        return pd.DataFrame()
+    keys = ["process"] + [k for k in ("config_id",) if k in runs_df.columns]
+    carry = [c for c in ("varied_axis", "target_px", "n_channels") if c in runs_df.columns]
+    metrics = [m for m in metrics if m in runs_df.columns]
+
+    out_rows = []
+    for key_vals, g in runs_df.groupby(keys):
+        key_vals = key_vals if isinstance(key_vals, tuple) else (key_vals,)
+        row = dict(zip(keys, key_vals))
+        row["n_reps"] = len(g)
+        for c in carry:
+            row[c] = g[c].iloc[0]
+        for m in metrics:
+            vals = g[m].dropna()
+            mean = float(vals.mean()) if len(vals) else float("nan")
+            std = float(vals.std(ddof=0)) if len(vals) else float("nan")
+            row[f"{m}_mean"] = mean
+            row[f"{m}_std"] = std
+            row[f"{m}_cv"] = (std / mean) if mean else float("nan")
+        out_rows.append(row)
+    cols = keys + ["n_reps"] + carry + [
+        f"{m}_{s}" for m in metrics for s in ("mean", "std", "cv")]
+    return pd.DataFrame(out_rows, columns=cols)
+
+
 def load_runs(results_root, run_plan_csv, manifest_csv) -> pd.DataFrame:
     root = Path(results_root)
     plan = pd.read_csv(run_plan_csv)

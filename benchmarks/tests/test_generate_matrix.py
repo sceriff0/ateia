@@ -182,7 +182,41 @@ def test_derive_from_sweep_matches_repo_sweep():
     from benchmarks.generate_matrix import derive_from_sweep
     d = derive_from_sweep(Path(__file__).parents[1] / "configs" / "sweep.yaml")
     assert d["n_moving"] == 7 and d["paired"] is True
-    assert 131072 in d["target_px"]
+    # input-scale cells come from the scaling_grid: sizes capped at 65536,
+    # channels {2, 4} (1 not benchmarked). 131072 was dropped (~69 GB/cell).
+    assert max(d["target_px"]) == 65536
+    assert 131072 not in d["target_px"]
+    assert d["n_channels"] == [2, 4]
+
+
+def test_derive_moving_map_matches_registration_grid():
+    from pathlib import Path
+    from benchmarks.generate_matrix import derive_from_sweep
+    d = derive_from_sweep(Path(__file__).parents[1] / "configs" / "sweep.yaml")
+    mm = d["n_moving_map"]
+    # The registration grid runs N=8 at EVERY size (at 2 channels), so every 2-channel
+    # cell must carry 7 moving panels — including the big ones now that they're
+    # registered with more than 2 rounds.
+    for t in (2048, 4096, 8192, 16384, 32768, 65536):
+        assert mm[(t, 2)] == 7, f"2-ch cell {t} should carry 7 panels"
+    # 4-channel cells are only in the scaling grid (N=2), so one panel suffices.
+    for t in (2048, 4096, 8192, 16384, 32768, 65536):
+        assert mm[(t, 4)] == 1, f"4-ch cell {t} should carry 1 panel"
+
+
+def test_run_matrix_moving_map_generates_per_cell_counts(tmp_path):
+    import tifffile
+    from benchmarks.generate_matrix import run_matrix
+    src = tmp_path / "s.tif"
+    tifffile.imwrite(src, np.full((64, 64), 100, dtype=np.uint8))
+    mm = {(32, 2): 3, (48, 2): 1}
+    manifest = run_matrix(source=src, outdir=tmp_path / "m", target_px=[32, 48],
+                          n_channels=[2], seed=0, paired=True, n_moving_map=mm)
+    rows = {r["cell_id"]: r for r in csv.DictReader(open(manifest))}
+    assert len(rows["px32_ch2"]["moving_paths"].split(";")) == 3   # 3 panels for this cell
+    assert len(rows["px48_ch2"]["moving_paths"].split(";")) == 1   # only 1 for this cell
+    assert (tmp_path / "m" / "px32_ch2_moving3.ome.tif").exists()
+    assert not (tmp_path / "m" / "px48_ch2_moving2.ome.tif").exists()  # not over-generated
 
 
 def test_run_matrix_default_unpaired_manifest_columns_unchanged(tmp_path):

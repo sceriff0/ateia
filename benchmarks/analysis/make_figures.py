@@ -15,12 +15,16 @@ matplotlib.use("Agg")
 
 from .lib import emit_config, load, plotting, regress
 
-# Only these OFAT axes change the input image size (and therefore input_gb).
-# Every other axis (memory_mode, seg_gpu, preproc_n_iter, ...) holds input fixed
-# at the baseline cell, so pooling them into a peak_rss_gb ~ input_gb regression
-# piles many points at one x — inflating sigma, depressing r2, and perturbing the
-# intercept. The memory-scaling fit must use only the size-varying runs.
-SIZE_VARYING_AXES = {"baseline", "target_px", "n_channels"}
+# Only these runs change input_gb: the scaling grid (size x channels), the
+# registration grid (size x n_register_images — REGISTER's input is the SUM of all
+# rounds, and merged channels grow with round count, so this genuinely varies input),
+# the baseline cell, and — for back-compat with older OFAT plans — the target_px /
+# n_channels axes. Every OTHER axis (memory_mode, seg_gpu, ...) holds input fixed at
+# the baseline cell, so pooling them into a peak_rss_gb ~ input_gb regression piles
+# many points at one x — inflating sigma, depressing r2, perturbing the intercept.
+# The memory-scaling fit must use only the size-varying runs.
+SIZE_VARYING_AXES = {"baseline", "scaling_grid", "registration_grid",
+                     "target_px", "n_channels"}
 
 
 def _size_varying(runs_df):
@@ -47,8 +51,13 @@ def run(results_root, run_plan_csv, manifest_csv, reg_eval_csv, outdir, formats=
     # artifacts; figures and the notebook are optional views of the same numbers.
     measurements_csv = outdir / "measurements.csv"
     models_csv = outdir / "resource_models.csv"
+    stats_csv = outdir / "resource_stats.csv"
     runs_df.to_csv(measurements_csv, index=False)
     regress.models_to_frame(models).to_csv(models_csv, index=False)
+    # per-config replicate variance (mean/std/CV across repeats) — empty CSV with
+    # no runs, but always written so the artifact set is stable.
+    stats_df = load.aggregate_repeats(runs_df)
+    stats_df.to_csv(stats_csv, index=False)
 
     # per-process memory scaling figures (size-varying runs only, matching the fit)
     for proc, g in scaling_df.groupby("process"):
@@ -63,7 +72,8 @@ def run(results_root, run_plan_csv, manifest_csv, reg_eval_csv, outdir, formats=
 
     emit_config.write_optimized_config(models, outdir / "modules.optimized.config")
     return {"runs_df": runs_df, "models": models, "outdir": outdir,
-            "measurements_csv": measurements_csv, "models_csv": models_csv}
+            "measurements_csv": measurements_csv, "models_csv": models_csv,
+            "stats_csv": stats_csv}
 
 
 def main():
@@ -77,6 +87,7 @@ def main():
     res = run(a.results_root, a.run_plan, a.manifest, a.reg_eval, a.outdir)
     print(f"Wrote {res['measurements_csv']} ({len(res['runs_df'])} rows), "
           f"{res['models_csv']} ({len(res['models'])} processes), "
+          f"{res['stats_csv']} (per-config variance), "
           f"{res['outdir']}/modules.optimized.config, and figures")
 
 

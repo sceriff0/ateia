@@ -21,9 +21,34 @@
 # run_sweep.sh then builds the N-panel samplesheet per run.
 strategy: ofat
 
-# Baseline = the fixed point for ofat (one value per axis).
+# Input-scale grid for the memory/time SCALING study. Unlike the OFAT axes below
+# (which move ONE knob off the baseline), this is a full cross-product so every
+# (size x channels) combination is measured — the memory regression needs the 2-D
+# grid, not a cross-shaped subset. Channels start at 2: single-channel does not
+# exercise the multi-channel merge/registration path, so it is not benchmarked.
+# generate_matrix.py --sweep builds exactly these cells; build_run_plan.py expands
+# them into runs (labelled varied_axis=scaling_grid, plus the baseline cell).
+scaling_grid:
+  target_px:  [2048, 4096, 8192, 16384, 32768, 65536]   # capped at 65536 (131072 dropped: ~69 GB/cell)
+  n_channels: [2, 4]                                     # 1 channel not benchmarked
+
+# Registration-scaling grid: size x number-of-registered-rounds, at a FIXED channel
+# count. n_register_images is a THIRD input-scaling dimension — REGISTER's input is
+# the SUM of all rounds' bytes, and the merged image's channels grow with the number
+# of rounds — so it must be measured ACROSS sizes, not only at the baseline cell.
+# N=2 is omitted here because the scaling_grid already covers every (size, 2ch) cell
+# at the baseline N=2 (the classic pair); this grid adds the 4- and 8-round points.
+# These runs are labelled varied_axis=registration_grid and DO feed the memory
+# regression (input genuinely varies with round count).
+registration_grid:
+  target_px:         [2048, 4096, 8192, 16384, 32768, 65536]
+  n_register_images: [4, 8]
+  n_channels:        2
+
+# Baseline = the fixed point for ofat (one value per axis). Also the (4096, 2)
+# cell of the scaling grid, so it is emitted once (labelled baseline).
 baseline:
-  # --- input scale ---
+  # --- input scale (fixed here; varied by scaling_grid above) ---
   target_px: 4096
   n_channels: 2
   # --- registration ---
@@ -48,15 +73,15 @@ baseline:
   quantify_compartments: true
   expanded_quantification: false
 
-# Axes to vary (OFAT: one run per non-baseline value of each axis).
+# Axes to vary (OFAT: one run per non-baseline value of each axis). These hold
+# input size FIXED at the baseline cell and vary a single pipeline knob.
+# NOTE: target_px / n_channels / n_register_images are NOT here — they are input-
+# scaling dimensions owned by scaling_grid and registration_grid above (full grids),
+# so listing them as OFAT axes would double-cover and confound the regression.
 axes:
-  # --- input scale: the primary driver of the per-process memory regression ---
-  target_px:                  [2048, 4096, 8192, 16384, 32768, 65536, 131072]
-  n_channels:                 [1, 2, 4, 8]
   # --- registration ---
   memory_mode:                [low, medium, high]
   skip_micro_registration:    [true, false]
-  n_register_images:          [2, 4, 8]           # panels registered together (1 ref + N-1 moving)
   # --- preprocessing ---
   preproc_n_iter:             [50, 100, 200]      # BaSiC iterations (compute/time)
   preproc_overlap:            [0, 64, 128]        # tile overlap (px)
