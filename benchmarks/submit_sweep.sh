@@ -47,9 +47,13 @@ CONCURRENCY="${SWEEP_CONCURRENCY:-6}"    # pipeline runs launched AT ONCE (each 
 cd "$SRC_DIR"
 mkdir -p logs
 
+# ~/.bashrc + /etc/bashrc + `conda activate` reference unset vars (e.g. BASHRCSOURCED) that trip
+# `set -u`. Relax nounset just for the environment init, then restore it.
+set +u
 # shellcheck disable=SC1090
 source ~/.bashrc
 conda activate "$CONDA_ENV"
+set -u
 command -v nextflow >/dev/null || { echo "nextflow not on PATH (check CONDA_ENV / module load)"; exit 1; }
 # Keep Singularity image cache off read-only $HOME (matches conf/ieo.config's cacheDir).
 export NXF_SINGULARITY_CACHEDIR="${NXF_SINGULARITY_CACHEDIR:-/hpcnfs/scratch/P_DIMA_ATTEND/users/vfassi/docker_images}"
