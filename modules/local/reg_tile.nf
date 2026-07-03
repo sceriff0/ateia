@@ -9,7 +9,7 @@ process REG_TILE {
     tag "${patient_id}:${slide}:${tile_idx}"
     label 'process_low'
 
-    container "${params.reg_dist_container ?: 'mirage-valis:1.0.0'}"
+    container "${params.reg_dist_container ?: 'bolt3x/attend_image_analysis:mirage_valis_1.0.0'}"
 
     input:
     tuple val(patient_id), val(slide), path(inputs_dir, stageAs: 'tiler_inputs'), val(tile_idx)

@@ -20,6 +20,10 @@ import os
 # before importing valis (mirrors register.py).
 os.environ.setdefault("NUMBA_CACHE_DIR", "/tmp/numba_cache")
 os.environ["NUMBA_DISABLE_CACHING"] = "1"
+# matplotlib (pulled in transitively by valis) builds a font cache under $HOME by default; on a
+# read-only cluster $HOME that warns/stalls. Redirect its config + generic XDG cache to /tmp too.
+os.environ.setdefault("MPLCONFIGDIR", "/tmp/mplconfig")
+os.environ.setdefault("XDG_CACHE_HOME", "/tmp/xdg_cache")
 
 import numpy as np
 import pyvips
@@ -28,6 +32,12 @@ from valis.non_rigid_registrars import OpticalFlowWarper
 
 
 def _save_field(field, path):
+    # CONTRACT: bk.v is persisted as float32 (pyvips "float"). This is intentional and verified:
+    #   - the field-mode FINALIZE (reg_finalize.py) composes+warps directly from this float32 field
+    #     (bit-identical to classic for the wave-1-only final warp);
+    #   - the micro path (reg_micro_prep._vips_to_numpy_pair) reloads and recasts to float64 before
+    #     injection (float32 injection diverges at high res) — that recast is the single source of
+    #     truth for micro. Any new consumer that is dtype-sensitive MUST recast, like the micro path.
     if isinstance(field, pyvips.Image):
         field.write_to_file(path)
     else:

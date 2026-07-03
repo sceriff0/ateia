@@ -46,6 +46,16 @@ test-real: testdata
 test-integration: testdata
 	nf-test test --profile test,docker --tag integration --verbose
 
+# Registration parity — proves classic == distributed (SEPARATED default path is bit-identical, and
+# the tiled path is bit-identical to VALIS's in-process tiler). Needs Docker + the patched VALIS image.
+# Exits non-zero if the paths diverge (compare_classic_vs_distributed.py's PARITY GATE).
+REG_DIST_IMAGE ?= bolt3x/attend_image_analysis:mirage_valis_1.0.0
+test-registration-parity: testdata
+	docker run --rm -v "$(PWD)":/work -w /work $(REG_DIST_IMAGE) \
+		python3 tests/integration/verify_distributed_bitidentical.py
+	docker run --rm -v "$(PWD)":/work -w /work $(REG_DIST_IMAGE) \
+		python3 tests/integration/compare_classic_vs_distributed.py
+
 # Python unit tests — runs in CI on every push
 test-python: testdata
 	pytest -v tests/ --ignore=tests/testdata --ignore=tests/modules --ignore=tests/subworkflows --ignore=tests/integration

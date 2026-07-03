@@ -9,7 +9,7 @@ process REG_FINALIZE_FIELD {
     tag "${patient_id}:${slide}"
     label 'process_high'
 
-    container "${params.reg_dist_container ?: 'mirage-valis:1.0.0'}"
+    container "${params.reg_dist_container ?: 'bolt3x/attend_image_analysis:mirage_valis_1.0.0'}"
 
     input:
     tuple val(patient_id), val(slide), path(inputs_dir, stageAs: 'tiler_inputs'), path(field, stageAs: 'nr/bk.v'), path(warp_state, stageAs: 'warp_state.json'), path(src_slide, stageAs: 'src/*')

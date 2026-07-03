@@ -33,13 +33,17 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # for reg_finali
 # before importing valis (mirrors register.py).
 os.environ.setdefault("NUMBA_CACHE_DIR", "/tmp/numba_cache")
 os.environ["NUMBA_DISABLE_CACHING"] = "1"
+# matplotlib (pulled in transitively by valis) builds a font cache under $HOME by default; on a
+# read-only cluster $HOME that warns/stalls. Redirect its config + generic XDG cache to /tmp too.
+os.environ.setdefault("MPLCONFIGDIR", "/tmp/mplconfig")
+os.environ.setdefault("XDG_CACHE_HOME", "/tmp/xdg_cache")
 
 import numpy as np
 import pyvips
 import valis_tiling
 import reg_finalize  # reuse the EXACT wave-1 compose+pad that produces classic slide.bk_dxdy
 from micro_rigid_guard import install_micro_rigid_guard
-from valis_config import build_registrar_kwargs, micro_reg_size as compute_micro_reg_size
+from valis_config import build_registrar_kwargs, init_jvm, micro_reg_size as compute_micro_reg_size
 from valis import registration
 from valis import serial_non_rigid as snr
 from valis.non_rigid_registrars import OpticalFlowWarper, NonRigidTileRegistrar
@@ -99,8 +103,14 @@ def main():
                          "config (incl. MicroRigidRegistrar) must be identical to REG_PREP for the same M.")
     ap.add_argument("--micro-fraction", type=float, default=0.125)
     ap.add_argument("--max-image-dim", type=int, default=4000)
+    ap.add_argument("--jvm-heap-gb", type=int, default=None,
+                    help="explicit BioFormats JVM heap (GB); default = auto-size from input size")
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
+
+    # Size + start the BioFormats JVM to the inputs BEFORE constructing Valis (mirrors register.py).
+    heap = init_jvm(args.input_dir, override_gb=args.jvm_heap_gb)
+    print(f"[reg_micro_prep] JVM heap = {heap} GB", flush=True)
 
     install_micro_rigid_guard()  # robust micro-rigid (no-op on real data; see module)
     # Force the processed-2-D branch (no internal tiler), then no-op the warper => no DeepFlow.
@@ -150,8 +160,13 @@ def main():
         for name, slide_obj in reg.slide_dict.items():
             if name == ref_stem:
                 continue
+            # A moving slide with no wave-1 field must NOT be silently skipped: skipping injection but
+            # still micro-registering it captures the micro residual off the rigid-only base (wrong),
+            # and dumps it as if valid. Fail loudly — the wave-1 field is a hard dependency here.
             if not os.path.exists(os.path.join(args.wave1_dir, name, "bk.v")):
-                continue
+                raise RuntimeError(
+                    f"[reg_micro_prep] moving slide {name!r} has no wave-1 field at "
+                    f"{os.path.join(args.wave1_dir, name, 'bk.v')} — cannot inject before micro pass.")
             slide_obj.bk_dxdy = _composed_wave1_field(name, args.wave1_dir, args.prep_dir)  # numpy [dx,dy]
             slide_obj.fwd_dxdy = [np.zeros_like(slide_obj.bk_dxdy[0]),
                                   np.zeros_like(slide_obj.bk_dxdy[1])]  # placeholder; discarded by FINALIZE
@@ -211,6 +226,15 @@ def main():
         slides_written.append(name)
         print(f"[reg_micro_prep] dumped {name}: micro tiler_inputs + micro_warp_state "
               f"(full_out={mws['micro_full_out_shape_rc']} bbox={mws['micro_mask_bbox_xywh']})", flush=True)
+
+    # Same silent-loss guard as reg_prep: every non-reference slide must have produced a micro dump.
+    expected_moving = [name for name in reg.slide_dict if name != ref_stem]
+    missing = [name for name in expected_moving if name not in slides_written]
+    if missing:
+        registration.kill_jvm()
+        raise RuntimeError(
+            f"[reg_micro_prep] {len(missing)} moving slide(s) produced no micro tiler_inputs and were "
+            f"silently dropped: {missing} (expected {len(expected_moving)}, wrote {len(slides_written)}).")
 
     registration.kill_jvm()
     print(f"[reg_micro_prep] DONE — {len(slides_written)} moving slide(s): {slides_written}", flush=True)

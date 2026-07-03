@@ -27,12 +27,16 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "uti
 # before importing valis (mirrors register.py).
 os.environ.setdefault("NUMBA_CACHE_DIR", "/tmp/numba_cache")
 os.environ["NUMBA_DISABLE_CACHING"] = "1"
+# matplotlib (pulled in transitively by valis) builds a font cache under $HOME by default; on a
+# read-only cluster $HOME that warns/stalls. Redirect its config + generic XDG cache to /tmp too.
+os.environ.setdefault("MPLCONFIGDIR", "/tmp/mplconfig")
+os.environ.setdefault("XDG_CACHE_HOME", "/tmp/xdg_cache")
 
 import numpy as np
 import pyvips
 import valis_tiling
 from micro_rigid_guard import install_micro_rigid_guard
-from valis_config import build_registrar_kwargs
+from valis_config import build_registrar_kwargs, init_jvm
 from valis import registration, slide_tools
 from valis import serial_non_rigid as snr
 from valis.non_rigid_registrars import OpticalFlowWarper, NonRigidTileRegistrar
@@ -61,8 +65,15 @@ def main():
     ap.add_argument("--skip-micro-registration", action="store_true",
                     help="if NOT set, MicroRigidRegistrar runs in the rigid stage (matches classic)")
     ap.add_argument("--max-image-dim", type=int, default=4000)
+    ap.add_argument("--jvm-heap-gb", type=int, default=None,
+                    help="explicit BioFormats JVM heap (GB); default = auto-size from input size")
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
+
+    # Size + start the BioFormats JVM to the inputs BEFORE constructing Valis (mirrors register.py).
+    # Skipping this lets the JVM start with VALIS's tiny default heap and OOM on a large slide.
+    heap = init_jvm(args.input_dir, override_gb=args.jvm_heap_gb)
+    print(f"[reg_prep] JVM heap = {heap} GB", flush=True)
 
     # Make rigid-stage micro alignment robust to featureless input (no-op on real data); see module.
     install_micro_rigid_guard()
@@ -85,6 +96,8 @@ def main():
 
     def noop_register(self, moving_img, fixed_img, mask=None, **kw):
         nm = cur.get("name")
+        assert nm is not None, "OpticalFlowWarper.register fired before calc_deformation set the slide name"
+        cap.setdefault(nm, {})
         cap[nm].update({"moving": moving_img, "fixed": fixed_img, "mask": mask})
         if isinstance(moving_img, pyvips.Image):
             h, w = moving_img.height, moving_img.width
@@ -137,13 +150,17 @@ def main():
 
     # Reference slide: warped-to-itself (rigid M + crop, identity non-rigid) so downstream QC has it in
     # the same cropped coordinate space as the moving slides (classic VALIS warps all slides incl. ref).
-    ref_slide_obj = reg.slide_dict.get(ref_stem)
-    if ref_slide_obj is not None:
+    # Use the ref Slide object VALIS already resolved (ref_slide), not a second slide_dict[ref_stem]
+    # lookup that silently yields None if the stem key ever diverges. The output DIR stays ref_stem
+    # because the adapter keys the reference by slideStem(ref_file) (== ref_stem).
+    if ref_slide is not None:
         rdir = os.path.join(args.out, ref_stem)
         os.makedirs(rdir, exist_ok=True)
         with open(os.path.join(rdir, "warp_state.json"), "w") as fh:
-            json.dump(_warp_state(ref_slide_obj, ref_stem), fh, indent=2, default=_jd)
+            json.dump(_warp_state(ref_slide, ref_stem), fh, indent=2, default=_jd)
         print(f"[reg_prep] dumped REFERENCE {ref_stem} warp_state (rigid-only)", flush=True)
+    else:
+        raise RuntimeError("[reg_prep] no reference slide resolved by VALIS (reg.get_ref_slide() is None)")
 
     slides_written = []
     for name, slide_obj in reg.slide_dict.items():
@@ -177,6 +194,19 @@ def main():
         slides_written.append(name)
         print(f"[reg_prep] dumped {name}: tiler_inputs + warp_state "
               f"(reg_shape={ws['reg_img_shape_rc']} bbox={ws['bbox_xywh']})", flush=True)
+
+    # Guard against silent slide loss: every non-reference slide VALIS registered MUST have produced a
+    # tiler_inputs+warp_state dump. If capture didn't fire for one (name mismatch, swallowed error), it
+    # would otherwise be omitted while the process still exits 0 — a missing registered output presented
+    # as a clean run. Fail loudly instead.
+    expected_moving = [name for name in reg.slide_dict if name != ref_stem]
+    missing = [name for name in expected_moving if name not in slides_written]
+    if missing:
+        registration.kill_jvm()
+        raise RuntimeError(
+            f"[reg_prep] {len(missing)} moving slide(s) produced no tiler_inputs/warp_state and were "
+            f"silently dropped: {missing} (expected {len(expected_moving)}, wrote {len(slides_written)}). "
+            "The non-rigid warper capture did not fire for those slides.")
 
     registration.kill_jvm()
     print(f"[reg_prep] DONE — {len(slides_written)} moving slide(s): {slides_written}", flush=True)

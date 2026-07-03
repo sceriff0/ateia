@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Classic VALIS vs distributed-tiled — final-result comparison across registration depths.
 
-Runs inside mirage-valis:1.0.0 on the P001 fluorescence pair. Produces the warped MOVING slide
+Runs inside bolt3x/attend_image_analysis:mirage_valis_1.0.0 on the P001 fluorescence pair. Produces the warped MOVING slide
 three ways for classic and (where implemented) distributed, and reports pixel deltas:
 
   A) rigid only                 (warp with M + crop, no non-rigid)
@@ -17,7 +17,7 @@ Key expectations (see spec §6.5/§6.6):
   * C: classic micro shown; distributed micro is pending Option-2 (2nd wave) implementation.
 
 Usage:
-  docker run --rm -v "$PWD":/work -w /work mirage-valis:1.0.0 \
+  docker run --rm -v "$PWD":/work -w /work bolt3x/attend_image_analysis:mirage_valis_1.0.0 \
       python3 tests/integration/compare_classic_vs_distributed.py
 """
 import json
@@ -169,9 +169,29 @@ def main():
     report("B  +non-rigid:  classic vs dist-tiled", classic_B, dist_B)
     report("B  +non-rigid:  dist-tiled vs in-proc tiler", dist_B, inproc_B)
     report("C  +micro:      classic (shown)", classic_C, classic_C)
-    print("   C  distributed micro: PENDING Option-2 (2nd wave) implementation")
+    print("   C  distributed micro: verified separately (verify_micro_bitidentical.py)")
     print("=" * 78, flush=True)
-    return 0
+
+    # ---------------- PARITY GATE (the "normal == distributed" guarantee) ----------------
+    # The DEFAULT distributed path (reg_dist_force_tiling=false) is SEPARATED whole-image non-rigid:
+    # the SAME OpticalFlowWarper on the SAME 2-D inputs classic uses, just in a JVM-free process. It
+    # must therefore be BIT-IDENTICAL to classic (spec §6.7). This is the guarantee users rely on when
+    # they flip reg_distributed_tiling on. Fail loudly if it ever drifts (e.g. a float-precision
+    # regression in the bk.v handoff — see reg_nonrigid._save_field contract).
+    atol = float(os.environ.get("CMP_SEPARATED_ATOL", "0"))  # 0 == exact (design claim: max|Δ|=0)
+    ok = True
+    if classic_A is None or dist_A is None or float(np.max(np.abs(classic_A - dist_A))) > atol:
+        print("PARITY FAIL: rigid-only classic != distributed (should be exact)", flush=True)
+        ok = False
+    if classic_B is None or dist_Bsep is None or classic_B.shape != dist_Bsep.shape:
+        print("PARITY FAIL: SEPARATED non-rigid missing / shape mismatch vs classic", flush=True)
+        ok = False
+    elif float(np.max(np.abs(classic_B - dist_Bsep))) > atol:
+        print(f"PARITY FAIL: SEPARATED non-rigid max|Δ|={float(np.max(np.abs(classic_B - dist_Bsep))):.4g} "
+              f"> atol={atol} — distributed default path is NOT bit-identical to classic.", flush=True)
+        ok = False
+    print(f"PARITY (classic == distributed SEPARATED default path): {'PASS' if ok else 'FAIL'}", flush=True)
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":
