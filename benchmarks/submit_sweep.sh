@@ -3,8 +3,8 @@
 #SBATCH --output=logs/bench_%j.out
 #SBATCH --error=logs/bench_%j.err
 #SBATCH --time=72:00:00
-#SBATCH --cpus-per-task=2
-#SBATCH --mem=16G
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=32G
 # #SBATCH --partition=<your_partition>     # uncomment + set if your site needs it
 # #SBATCH --mail-type=END,FAIL
 # #SBATCH --mail-user=you@ieo.it
@@ -39,6 +39,9 @@ RESULTS="bench_results"                   # per-run outputs land here
 PROFILES="singularity,ieo"               # OVERRIDES run_sweep.sh's default -profile docker
 SITE_CONFIG="conf/ieo.config"            # gitignored: executor=slurm + singularity cacheDir + paths
 CONDA_ENV="nf-env"                        # env that has nextflow + python
+CONCURRENCY="${SWEEP_CONCURRENCY:-6}"    # pipeline runs launched AT ONCE (each = 1 Nextflow head that
+                                          # submits its OWN SLURM process jobs). 6 heads fit in --mem=32G;
+                                          # raise for more sweep parallelism (and bump --mem: ~2-3 GB/head).
 # -------------------------------------------------------------------------------
 
 cd "$SRC_DIR"
@@ -57,7 +60,9 @@ echo "Start: $(date)   Profiles: $PROFILES   Results: $RESULTS"
 echo "=================================================="
 
 # run_sweep.sh: one `nextflow run` per run_plan row; each submits its process jobs to SLURM.
+# SWEEP_CONCURRENCY launches several of those runs at once (parallelising the sweep across the cluster).
 # The trailing args override the launcher's default -profile docker and add the site config.
+export SWEEP_CONCURRENCY="$CONCURRENCY"
 benchmarks/run_sweep.sh \
     "$RUN_PLAN" \
     "$MATRIX_DIR/matrix_manifest.csv" \

@@ -51,7 +51,14 @@ path_awk_field=$((path_col_idx + 1))
 moving_col_idx=$(manifest_col_index "moving_paths")
 moving_awk_field=$((moving_col_idx + 1))
 
-tail -n +2 "$RUN_PLAN" | tr -d '\r' | while IFS=',' read -r -a vals; do
+# SWEEP_CONCURRENCY: how many pipeline runs to launch AT ONCE (default 1 = serial). Each concurrent
+# run is its own `nextflow run` orchestrator (isolated -work-dir/-log/-name) that submits its OWN
+# process jobs to SLURM, so measurements stay clean (SLURM gives each process a dedicated allocation).
+# Set it >1 to parallelise the sweep across the cluster; the launching host just holds N Nextflow JVMs.
+CONCURRENCY="${SWEEP_CONCURRENCY:-1}"
+pids=()
+
+while IFS=',' read -r -a vals; do
   run_id=$(col_val run_id "${vals[@]}")
   target_px=$(col_val target_px "${vals[@]}")
   n_channels=$(col_val n_channels "${vals[@]}")
@@ -119,8 +126,26 @@ tail -n +2 "$RUN_PLAN" | tr -d '\r' | while IFS=',' read -r -a vals; do
   done
 
   echo ">>> $run_id (varied=${varied_axis}, cell=$cell_id)"
-  nextflow run . -profile docker \
-    -c benchmarks/configs/benchmark.config \
-    --input "$sheet" --outdir "$run_dir/out" --trace_dir "$run_dir/trace" \
-    "${params[@]}" ${EXTRA[@]+"${EXTRA[@]}"} || echo "RUN FAILED: $run_id" >&2
-done
+  # Launch in the background; isolate each concurrent run's work dir, log and session name so parallel
+  # Nextflow heads never collide. `wait -n` throttles to CONCURRENCY runs in flight.
+  (
+    nextflow -log "$run_dir/nextflow.log" run . -profile docker \
+      -c benchmarks/configs/benchmark.config \
+      -work-dir "$run_dir/work" -name "bench_${run_id}" \
+      --input "$sheet" --outdir "$run_dir/out" --trace_dir "$run_dir/trace" \
+      "${params[@]}" ${EXTRA[@]+"${EXTRA[@]}"} \
+      && echo "RUN OK: $run_id" || echo "RUN FAILED: $run_id" >&2
+  ) &
+  pids+=("$!")
+  # Throttle to CONCURRENCY in-flight runs. Wait on the OLDEST pid (FIFO) rather than `wait -n`
+  # (bash 4.3+ only) so this works on the older bash found on many clusters. This never exceeds
+  # CONCURRENCY runs at once (the property that matters); `|| true` so a failed run — already logged
+  # RUN FAILED — doesn't abort the whole sweep under `set -e`.
+  if (( ${#pids[@]} >= CONCURRENCY )); then
+    wait "${pids[0]}" || true
+    pids=("${pids[@]:1}")
+  fi
+done < <(tail -n +2 "$RUN_PLAN" | tr -d '\r')
+
+# Wait for the last in-flight runs to finish before returning (so the analysis step sees all outputs).
+wait

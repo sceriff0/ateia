@@ -253,9 +253,13 @@ ways:
     squeue -u $USER            # 1 head job + N child (process) jobs
     tail -f logs/bench_<jobid>.out
 
-Keep the head job small (2 cpus / 16 GB for the Nextflow JVM) but with a long walltime — `run_sweep.sh`
-runs the plan rows sequentially, so it lives for the whole sweep. The heavy per-process resources come
-from `conf/base.config` + `modules.config`, not the head job.
+**Parallelism.** By default `run_sweep.sh` runs the plan rows one at a time (each row's *processes* still
+parallelise across SLURM). To parallelise the **rows** too, set `SWEEP_CONCURRENCY=N` — it launches N
+runs at once, each its own Nextflow head submitting its own SLURM process jobs (measurements stay clean:
+SLURM gives every process a dedicated allocation). `submit_sweep.sh` sets `SWEEP_CONCURRENCY=6` and sizes
+the head job (4 cpus / 32 GB) to hold ~6 Nextflow JVMs; raise both together for more. The heavy
+per-process resources come from `conf/base.config` + `modules.config`, not the head job — so keep the head
+job small but give it a long walltime (it lives for the whole sweep).
 
 **(b) run the head on a login node** (in `tmux`/`screen` so it survives disconnects):
 
