@@ -12,6 +12,30 @@ shift 3
 EXTRA=("$@")
 
 mkdir -p "$ROOT"
+ROOT="$(cd "$ROOT" && pwd)"                                   # absolute: each run cd's into $ROOT/<run_id>
+START_DIR="$PWD"                                              # relative matrix/config paths resolve here
+PIPELINE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Pin Nextflow to the supported 25.04 line. NF 26.x dropped the automatic lib/*.groovy class loading
+# this pipeline relies on (ParamUtils/CsvUtils), so it fails with "Missing process or function ...".
+# Override by exporting NXF_VER yourself.
+export NXF_VER="${NXF_VER:-25.04.7}"
+
+# Each concurrent run is launched from its OWN dir (isolated .nextflow/ so parallel heads don't fight
+# over .nextflow/history — beegfs/NFS file locks choke otherwise). That `cd` breaks relative paths in
+# the pass-through args, so absolutize any -c/-config/-params-file file in EXTRA up front.
+EXTRA_ABS=(); _i=0
+while (( _i < ${#EXTRA[@]} )); do
+  _a="${EXTRA[$_i]}"; EXTRA_ABS+=("$_a")
+  case "$_a" in
+    -c|-C|-config|-params-file)
+      _i=$((_i + 1)); _v="${EXTRA[$_i]:-}"
+      [[ -n "$_v" && "$_v" != /* && -e "$_v" ]] && _v="$(cd "$(dirname "$_v")" && pwd)/$(basename "$_v")"
+      EXTRA_ABS+=("$_v") ;;
+  esac
+  _i=$((_i + 1))
+done
+
 # tr -d '\r': tolerate CRLF-terminated CSVs (else the last column carries a trailing \r).
 header=$(head -n1 "$RUN_PLAN" | tr -d '\r')
 IFS=',' read -r -a cols <<< "$header"
@@ -75,6 +99,8 @@ while IFS=',' read -r -a vals; do
   # gsub(/\r/,""): tolerate CRLF manifests so the last field has no trailing \r.
   img=$(awk -F',' -v c="$cell_id" -v f="$path_awk_field" 'NR>1 {gsub(/\r/,"")} $1==c {print $f}' "$MANIFEST")
   if [[ -z "$img" ]]; then echo "WARN: no matrix cell $cell_id; skipping $run_id" >&2; continue; fi
+  # Absolutize (the samplesheet is consumed from inside the per-run cwd).
+  [[ "$img" = /* ]] || img="$START_DIR/$img"
 
   # Resolve moving images: a ';'-separated list (empty when column absent or value empty).
   mov_list=""
@@ -106,7 +132,8 @@ while IFS=',' read -r -a vals; do
       panel=$(( j + 1 ))
       mov_chans="DAPI"
       for ((i=1; i<nch; i++)); do mov_chans+="|m${panel}_${i}"; done
-      printf '%s,%s,false,%s\n' "$cell_id" "${movings[$j]}" "$mov_chans" >> "$sheet"
+      mv="${movings[$j]}"; [[ "$mv" = /* ]] || mv="$START_DIR/$mv"
+      printf '%s,%s,false,%s\n' "$cell_id" "$mv" "$mov_chans" >> "$sheet"
       emitted=$(( emitted + 1 ))
     done
   fi
@@ -132,14 +159,15 @@ while IFS=',' read -r -a vals; do
   done
 
   echo ">>> $run_id (varied=${varied_axis}, cell=$cell_id)"
-  # Launch in the background; isolate each concurrent run's work dir, log and session name so parallel
-  # Nextflow heads never collide. `wait -n` throttles to CONCURRENCY runs in flight.
+  # Launch in the background FROM the per-run dir, so each run's .nextflow/ (history+cache), work dir,
+  # log and session name are isolated — parallel heads never collide (the beegfs history-lock killer).
+  # cwd = $run_dir, so pipeline + configs are absolute and outputs are run-dir-relative.
   (
-    nextflow -log "$run_dir/nextflow.log" run . -profile "$PROFILE" \
-      -c benchmarks/configs/benchmark.config \
-      -work-dir "$run_dir/work" -name "bench_${run_id}" \
-      --input "$sheet" --outdir "$run_dir/out" --trace_dir "$run_dir/trace" \
-      "${params[@]}" ${EXTRA[@]+"${EXTRA[@]}"} \
+    cd "$run_dir" && nextflow -log nextflow.log run "$PIPELINE_DIR" -profile "$PROFILE" \
+      -c "$PIPELINE_DIR/benchmarks/configs/benchmark.config" \
+      -work-dir work -name "bench_${run_id}" \
+      --input "$sheet" --outdir out --trace_dir trace \
+      "${params[@]}" ${EXTRA_ABS[@]+"${EXTRA_ABS[@]}"} \
       && echo "RUN OK: $run_id" || echo "RUN FAILED: $run_id" >&2
   ) &
   pids+=("$!")
