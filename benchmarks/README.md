@@ -242,10 +242,29 @@ per-node RAM ceiling. This section is how you run it on the cluster and confirm 
 
 ### E2 — Launch on the cluster
 
-Same launcher as A3, with your cluster profile (e.g. IEO SLURM + Singularity):
+The pipeline uses `executor = 'slurm'` (conf/ieo.config), so **Nextflow submits one SLURM job per
+process** — you run a single lightweight orchestrator ("head") that dispatches the compute jobs. Two
+ways:
+
+**(a) sbatch a head job (recommended).** `benchmarks/submit_sweep.sh` is a ready SLURM head-job script
+(edit the paths/`CONDA_ENV` at the top):
+
+    mkdir -p logs && sbatch benchmarks/submit_sweep.sh
+    squeue -u $USER            # 1 head job + N child (process) jobs
+    tail -f logs/bench_<jobid>.out
+
+Keep the head job small (2 cpus / 16 GB for the Nextflow JVM) but with a long walltime — `run_sweep.sh`
+runs the plan rows sequentially, so it lives for the whole sweep. The heavy per-process resources come
+from `conf/base.config` + `modules.config`, not the head job.
+
+**(b) run the head on a login node** (in `tmux`/`screen` so it survives disconnects):
 
     benchmarks/run_sweep.sh  bench_run_plan.csv  bench_matrix/matrix_manifest.csv  bench_results \
-        -profile ieo,singularity
+        -profile singularity,ieo -c conf/ieo.config
+
+Both pass `-profile singularity,ieo -c conf/ieo.config` — the trailing `-profile` **overrides**
+`run_sweep.sh`'s default `-profile docker` (Nextflow uses the last one), giving Singularity + the SLURM
+executor + your site paths. `conf/ieo.config` is gitignored; create it from `conf/site.config.template`.
 
 Each config's registered slides are published to
 `bench_results/<run_id>/out/<patient>/registered/registered_slides/*_registered.ome.tiff`
