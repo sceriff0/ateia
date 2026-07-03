@@ -68,7 +68,10 @@ os.environ['LD_LIBRARY_PATH'] = (
     '/usr/local/lib:/usr/lib/x86_64-linux-gnu:/lib/x86_64-linux-gnu:'
     + os.environ.get('LD_LIBRARY_PATH', '')
 )
-import hpc_scratch  # noqa: F401  redirect cjdk/matplotlib caches off read-only $HOME
+# matplotlib (pulled in transitively by valis) builds a font cache under $HOME by default; on a
+# read-only cluster $HOME that warns/stalls. Redirect its config + generic XDG cache to /tmp.
+os.environ.setdefault('MPLCONFIGDIR', '/tmp/mplconfig')
+os.environ.setdefault('XDG_CACHE_HOME', '/tmp/xdg_cache')
 
 # VALIS library imports
 from valis import registration

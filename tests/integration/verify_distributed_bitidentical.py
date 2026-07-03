@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Task 10 verification — distributed tiled registration is bit-identical to VALIS's in-process tiler.
 
-Runs inside mirage-valis:1.0.0. Proves the make-or-break end to end on the P001 fluorescence pair:
+Runs inside bolt3x/attend_image_analysis:mirage_valis_1.0.0. Proves the make-or-break end to end on the P001 fluorescence pair:
 
   distributed:  REG_PREP -> (per-tile, fresh process) reg_tile.py -> REG_FINALIZE   ==
   baseline:     the SAME PREP-dumped 2-D images run through VALIS's OWN in-process
@@ -13,7 +13,7 @@ together through the full pipeline.) The baseline is the in-process TILER on the
 — NOT whole-image classic, which is a different algorithm (§6.5).
 
 Usage:
-  docker run --rm -v "$PWD":/work -w /work mirage-valis:1.0.0 \
+  docker run --rm -v "$PWD":/work -w /work bolt3x/attend_image_analysis:mirage_valis_1.0.0 \
       python3 tests/integration/verify_distributed_bitidentical.py
 """
 import json

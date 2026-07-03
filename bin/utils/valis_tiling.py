@@ -120,6 +120,7 @@ def _set_hook(fn):
     from valis import non_rigid_registrars as nrr
     if not hasattr(nrr.NonRigidTileRegistrar, "EXTERNAL_TILE_HOOK"):
         raise RuntimeError(
-            "VALIS image is missing the EXTERNAL_TILE_HOOK seam (containers/valis/calc_hook.patch "
-            "not applied). Rebuild mirage-valis:1.0.0.")
+            "VALIS image is missing the EXTERNAL_TILE_HOOK seam (containers/valis/calc_hook.patch not "
+            "applied). Set params.reg_dist_container to the patched image "
+            "(default bolt3x/attend_image_analysis:mirage_valis_1.0.0), not stock cdgatenbee/valis-wsi:1.0.0.")
     nrr.NonRigidTileRegistrar.EXTERNAL_TILE_HOOK = fn

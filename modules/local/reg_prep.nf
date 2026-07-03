@@ -5,8 +5,10 @@
  * BEFORE whole-image DeepFlow (low RAM). Dumps, per moving slide, the tiler-input contract
  * (2-D images + tile grid) and a plain warp_state.json — the Option-A handoff (no registrar pickle).
  *
- * Container MUST be the patched VALIS image (containers/valis/calc_hook.patch applied); the published
- * cdgatenbee/valis-wsi:1.0.0 lacks the EXTERNAL_TILE_HOOK seam. Set via params.reg_dist_container.
+ * Container: the EXTERNAL_TILE_HOOK-patched VALIS 1.0.0 image on Docker Hub
+ * (bolt3x/attend_image_analysis:mirage_valis_1.0.0). It carries the calc_hook.patch seam that
+ * bin/utils/valis_tiling.py drives; stock cdgatenbee/valis-wsi:1.0.0 lacks it. Override via
+ * params.reg_dist_container.
  */
 process REG_PREP {
     // Fan-in over a patient's slides (like REGISTER): patient_id is the grouping key,
@@ -14,7 +16,7 @@ process REG_PREP {
     tag "${patient_id}"
     label 'process_high'
 
-    container "${params.reg_dist_container ?: 'mirage-valis:1.0.0'}"
+    container "${params.reg_dist_container ?: 'bolt3x/attend_image_analysis:mirage_valis_1.0.0'}"
 
     input:
     tuple val(meta), val(patient_id), path(reference, stageAs: 'ref/*'), path(preproc_files, stageAs: 'input_?/*'), val(all_metas)

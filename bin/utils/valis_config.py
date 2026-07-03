@@ -5,6 +5,8 @@ object from `build_registrar_kwargs(...)` here, so the distributed path's rigid 
 detector, matcher, MicroRigidRegistrar, image-dim caps, affine optimizer) is **bit-identical** to
 classic. Any drift here would change the rigid `M` and break bit-identicality.
 """
+import os
+
 from valis import feature_detectors, feature_matcher
 from valis.micro_rigid_registrar import MicroRigidRegistrar
 from valis.non_rigid_registrars import OpticalFlowWarper
@@ -61,6 +63,40 @@ def build_registrar_kwargs(reference_img_f, memory_mode="high", skip_micro_regis
         "micro_rigid_registrar_cls": None if skip_micro_registration else MicroRigidRegistrar,
         "create_masks": True,
     }
+
+
+def _system_memory_gb():
+    try:
+        pages = os.sysconf("SC_PHYS_PAGES")
+        page_size = os.sysconf("SC_PAGE_SIZE")
+        return (pages * page_size) // (1024 ** 3)
+    except Exception:
+        return None
+
+
+def init_jvm(input_dir, override_gb=None):
+    """Size and start the BioFormats JVM heap to the inputs, mirroring bin/register.py:333-335.
+
+    The distributed prep stages (reg_prep, reg_micro_prep) construct a real ``Valis`` and read slides
+    via BioFormats, exactly like classic register.py — so they MUST init the JVM with a heap sized to
+    the inputs. Without this the JVM either never starts, or starts with VALIS's small default heap and
+    OOMs reading a large slide on a cluster node — the RAM-on-one-node failure the distributed path
+    exists to remove. Heap formula is copied from register.py's estimate_jvm_memory (total*3+8, min 8,
+    capped at 75% of system RAM)."""
+    from valis import registration
+
+    if override_gb is not None and override_gb > 0:
+        mem_gb = int(override_gb)
+    else:
+        total_gb = 0.0
+        for f in os.listdir(input_dir):
+            if f.lower().endswith((".tif", ".tiff", ".ome.tif", ".ome.tiff")):
+                total_gb += os.path.getsize(os.path.join(input_dir, f)) / (1024 ** 3)
+        sys_mem = _system_memory_gb()
+        max_heap = int(sys_mem * 0.75) if sys_mem else 64
+        mem_gb = max(8, min(max_heap, int(total_gb * 3 + 8)))
+    registration.init_jvm(mem_gb=mem_gb)
+    return mem_gb
 
 
 def micro_reg_size(slide_dict, micro_reg_fraction=0.125):

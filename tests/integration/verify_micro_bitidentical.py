@@ -2,7 +2,7 @@
 """Verify the distributed MICRO-registration wave (spec §5A Option-2) is bit-identical to classic
 VALIS's register()+register_micro(), with skip_micro_registration=false.
 
-Runs inside mirage-valis:1.0.0 on the 1024px fixture (micro is degenerate at 128px). Proves:
+Runs inside bolt3x/attend_image_analysis:mirage_valis_1.0.0 on the 1024px fixture (micro is degenerate at 128px). Proves:
 
   distributed:  REG_PREP -> REG_NONRIGID(wave1) -> REG_MICRO_PREP -> REG_NONRIGID(micro)
                 -> REG_FINALIZE(--micro-field)            ==
@@ -14,7 +14,7 @@ Two checks (both must be max|Δ|=0):
   (2) final warped pixels distributed == baseline                            [end-to-end]
 
 Usage:
-  docker run --rm -v "$PWD":/work -w /work mirage-valis:1.0.0 bash -lc '
+  docker run --rm -v "$PWD":/work -w /work bolt3x/attend_image_analysis:mirage_valis_1.0.0 bash -lc '
     python3 tests/testdata/generate_large_fixture.py --size 1024 --out /tmp/bigdata &&
     python3 tests/integration/verify_micro_bitidentical.py'
 """

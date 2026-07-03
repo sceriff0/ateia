@@ -11,7 +11,7 @@ process REG_ESTIMATE {
     tag "${patient_id}"
     label 'process_single'
 
-    container "${params.reg_dist_container ?: 'mirage-valis:1.0.0'}"
+    container "${params.reg_dist_container ?: 'bolt3x/attend_image_analysis:mirage_valis_1.0.0'}"
 
     input:
     tuple val(patient_id), path(reference, stageAs: 'ref/*'), path(all_files, stageAs: 'imgs/*')

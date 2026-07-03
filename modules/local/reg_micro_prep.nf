@@ -7,13 +7,14 @@
  * moving slide, micro tiler_inputs (the 2-D images REG_NONRIGID/REG_TILE read at micro resolution) +
  * micro_warp_state.json (micro full_out_shape_rc + mask_bbox for the additive pad in REG_FINALIZE).
  *
- * Container MUST be the patched VALIS image (EXTERNAL_TILE_HOOK seam). Set via params.reg_dist_container.
+ * Container: the EXTERNAL_TILE_HOOK-patched VALIS 1.0.0 image on Docker Hub
+ * (bolt3x/attend_image_analysis:mirage_valis_1.0.0). Override via params.reg_dist_container.
  */
 process REG_MICRO_PREP {
     tag "${patient_id}"
     label 'process_high'
 
-    container "${params.reg_dist_container ?: 'mirage-valis:1.0.0'}"
+    container "${params.reg_dist_container ?: 'bolt3x/attend_image_analysis:mirage_valis_1.0.0'}"
 
     input:
     tuple val(meta), val(patient_id), path(reference, stageAs: 'ref/*'), path(preproc_files, stageAs: 'input_?/*'), val(all_metas), path(prep_dir, stageAs: 'prep'), val(wave1_slides), path(wave1_bks, stageAs: 'w1_?/*')
