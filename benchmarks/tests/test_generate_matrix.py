@@ -226,14 +226,12 @@ def test_derive_moving_map_matches_registration_grid():
     from benchmarks.generate_matrix import derive_from_sweep
     d = derive_from_sweep(Path(__file__).parents[1] / "configs" / "sweep.yaml")
     mm = d["n_moving_map"]
-    # The registration grid runs N=8 at EVERY size (at 2 channels), so every 2-channel
-    # cell must carry 7 moving panels — including the big ones now that they're
-    # registered with more than 2 rounds.
+    # The registration grid runs N=8 at EVERY size and at BOTH 2 and 4 channels, so every
+    # 2- and 4-channel cell must carry 7 moving panels (N=8 => 7 moving slides) — including
+    # the big ones now that they're registered with more than 2 rounds.
     for t in (2048, 4096, 8192, 16384, 32768, 65536):
-        assert mm[(t, 2)] == 7, f"2-ch cell {t} should carry 7 panels"
-    # 4-channel cells are only in the scaling grid (N=2), so one panel suffices.
-    for t in (2048, 4096, 8192, 16384, 32768, 65536):
-        assert mm[(t, 4)] == 1, f"4-ch cell {t} should carry 1 panel"
+        for c in (2, 4):
+            assert mm[(t, c)] == 7, f"{c}-ch cell {t} should carry 7 panels"
 
 
 def test_run_matrix_moving_map_generates_per_cell_counts(tmp_path):
