@@ -54,6 +54,38 @@ def test_synthesize_channels_output_stays_in_dtype_range():
     assert out.max() <= 255 and out.min() >= 0
 
 
+def test_synthesize_single_block_matches_reference_formula():
+    """When the image fits in one block (h <= block_rows), the block-wise path must compute
+    EXACTLY clip(roll(src, c)*gain + noise) with the documented rng draw order (gain, then one
+    whole-image noise draw per channel) — i.e. it is unchanged from the original whole-image code."""
+    src = (np.arange(6 * 5, dtype=np.uint16).reshape(6, 5) % 60).astype(np.uint16)
+    out = synthesize_channels(src, n_channels=2, seed=4, block_rows=4096)  # 6 rows -> 1 block
+    rng = np.random.default_rng(4)
+    info = np.iinfo(np.uint16)
+    gain = 1.0 + rng.uniform(-0.1, 0.1)                 # same first draw
+    shifted = np.roll(src, shift=1, axis=1)
+    noise = rng.normal(0.0, 3.0, size=src.shape)        # same second draw (whole image)
+    ref = np.clip(shifted.astype(np.float64) * gain + noise, info.min, info.max).astype(np.uint16)
+    np.testing.assert_array_equal(out[1], ref)
+
+
+def test_synthesize_blockwise_covers_all_rows_incl_partial_last_block():
+    """Non-divisible boundary (h=10, block_rows=4 -> rows 0:4, 4:8, 8:10). Every row of every
+    channel must be written into the np.empty output (no uninitialized gap at block seams), the
+    result is deterministic, and channel 0 is the exact source across all blocks."""
+    src = (np.arange(10 * 6, dtype=np.uint16).reshape(10, 6) * 7 % 500).astype(np.uint16)
+    a = synthesize_channels(src, n_channels=3, seed=3, block_rows=4)
+    b = synthesize_channels(src, n_channels=3, seed=3, block_rows=4)
+    np.testing.assert_array_equal(a, b)                 # deterministic for a fixed block_rows
+    np.testing.assert_array_equal(a[0], src)            # ch0 unchanged incl. the partial last block
+    assert a.shape == (3, 10, 6) and a.dtype == np.uint16
+    assert a.max() <= np.iinfo(np.uint16).max
+    for c in (1, 2):
+        assert not np.array_equal(a[c], src)            # every extra channel actually perturbed
+        # the partial last block (rows 8:9) was written, not left as np.empty garbage matching src
+        assert not np.array_equal(a[c, 8:], src[8:])
+
+
 def test_synthesize_channels_rejects_3d_input():
     with pytest.raises(ValueError):
         synthesize_channels(np.zeros((2, 4, 4), dtype=np.uint8), n_channels=2)
