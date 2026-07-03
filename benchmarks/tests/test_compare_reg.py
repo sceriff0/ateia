@@ -3,19 +3,19 @@ import pandas as pd
 from benchmarks.analysis.lib.compare_reg import compare_classic_vs_distributed
 
 
-def _run_rows(config_id, run_id, dist, procs):
-    """procs: list of (leaf, peak_rss_gb, realtime_s)."""
+def _run_rows(run_id, dist, procs, target_px=4096, n_channels=2, n_register_images=2):
+    """procs: list of (leaf, peak_rss_gb, realtime_s). Cell = (target_px, n_channels, n_register_images)."""
     return pd.DataFrame([
         {"process": f"MIRAGE:REGISTRATION:{leaf}", "peak_rss_gb": rss, "realtime_s": rt,
-         "config_id": config_id, "run_id": run_id, "rep": 0,
-         "reg_distributed_tiling": dist}
+         "config_id": run_id, "run_id": run_id, "rep": 0, "reg_distributed_tiling": dist,
+         "target_px": target_px, "n_channels": n_channels, "n_register_images": n_register_images}
         for leaf, rss, rt in procs
     ])
 
 
-def test_pairs_classic_and_distributed_and_reports_rss_saving():
-    classic = _run_rows("cfg000", "run0000", False, [("VALIS_ADAPTER:REGISTER", 60.0, 100.0)])
-    dist = _run_rows("cfg046", "run0046", True, [
+def test_pairs_same_cell_and_reports_rss_saving():
+    classic = _run_rows("run0000", False, [("VALIS_ADAPTER:REGISTER", 60.0, 100.0)])
+    dist = _run_rows("run0046", True, [
         ("REG_PREP", 20.0, 30.0),
         ("REG_NONRIGID", 8.0, 40.0),
         ("REG_FINALIZE_FIELD", 25.0, 20.0),
@@ -28,19 +28,42 @@ def test_pairs_classic_and_distributed_and_reports_rss_saving():
     assert row["reg_peak_rss_gb_classic"] == 60.0
     assert row["reg_peak_rss_gb_distributed"] == 25.0
     assert row["rss_saving_gb"] == 35.0
-    # distributed total compute = 30+40+20+10 = 100
-    assert row["reg_total_realtime_s_distributed"] == 100.0
+    assert row["reg_total_realtime_s_distributed"] == 100.0  # 30+40+20+10
     assert row["peak_rss_ratio"] == 25.0 / 60.0
 
 
+def test_pairs_per_cell_across_sizes():
+    # distributed_grid across two sizes; classic counterpart at each size
+    rows = pd.concat([
+        _run_rows("c2048", False, [("VALIS_ADAPTER:REGISTER", 10.0, 50.0)], target_px=2048),
+        _run_rows("d2048", True, [("REG_PREP", 4.0, 20.0), ("REG_FINALIZE_FIELD", 5.0, 30.0)], target_px=2048),
+        _run_rows("c8192", False, [("VALIS_ADAPTER:REGISTER", 90.0, 400.0)], target_px=8192),
+        _run_rows("d8192", True, [("REG_PREP", 20.0, 150.0), ("REG_FINALIZE_FIELD", 22.0, 200.0)], target_px=8192),
+    ], ignore_index=True)
+    out = compare_classic_vs_distributed(rows).set_index("target_px")
+    assert set(out.index) == {2048, 8192}
+    # the RAM saving grows with size (the whole point of the distributed_grid)
+    assert out.loc[2048, "rss_saving_gb"] == 10.0 - 5.0
+    assert out.loc[8192, "rss_saving_gb"] == 90.0 - 22.0
+    assert out.loc[8192, "rss_saving_gb"] > out.loc[2048, "rss_saving_gb"]
+
+
+def test_cell_measured_only_one_way_is_not_paired():
+    rows = pd.concat([
+        _run_rows("c4096", False, [("VALIS_ADAPTER:REGISTER", 60.0, 100.0)], target_px=4096),
+        _run_rows("d8192", True, [("REG_PREP", 20.0, 30.0)], target_px=8192),  # distributed only, no classic
+    ], ignore_index=True)
+    assert compare_classic_vs_distributed(rows).empty
+
+
 def test_empty_when_no_distributed_runs():
-    classic = _run_rows("cfg000", "run0000", False, [("VALIS_ADAPTER:REGISTER", 60.0, 100.0)])
+    classic = _run_rows("run0000", False, [("VALIS_ADAPTER:REGISTER", 60.0, 100.0)])
     assert compare_classic_vs_distributed(classic).empty
 
 
 def test_truthy_handles_nextflow_string_booleans():
-    classic = _run_rows("cfg000", "run0000", "false", [("VALIS_ADAPTER:REGISTER", 60.0, 100.0)])
-    dist = _run_rows("cfg046", "run0046", "true", [("REG_PREP", 20.0, 30.0)])
+    classic = _run_rows("run0000", "false", [("VALIS_ADAPTER:REGISTER", 60.0, 100.0)])
+    dist = _run_rows("run0046", "true", [("REG_PREP", 20.0, 30.0)])
     out = compare_classic_vs_distributed(pd.concat([classic, dist], ignore_index=True))
     assert len(out) == 1
     assert out.iloc[0]["reg_peak_rss_gb_distributed"] == 20.0

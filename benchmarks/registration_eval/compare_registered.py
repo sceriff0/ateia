@@ -78,10 +78,21 @@ def _auto_pair(results_root, run_plan_csv):
     dist = plan[plan.get("reg_distributed_tiling").map(_truthy)]
     classic = plan[~plan.get("reg_distributed_tiling").map(_truthy)]
     if dist.empty or classic.empty:
-        raise SystemExit("run plan has no classic/distributed pair (need the reg_distributed_tiling axis)")
+        raise SystemExit("run plan has no classic AND distributed runs to pair")
+    # Pair by cell (same input) — a size-crossed distributed_grid has one pair per (size, ch, N).
     root = Path(results_root)
-    return (root / classic.iloc[0]["run_id"] / "out",
-            root / dist.iloc[0]["run_id"] / "out")
+    cell_keys = [k for k in ("target_px", "n_channels", "n_register_images") if k in plan.columns]
+    classic_by_cell = {tuple(r[k] for k in cell_keys): r["run_id"] for _, r in classic.iterrows()}
+    pairs = []
+    for _, dr in dist.iterrows():
+        key = tuple(dr[k] for k in cell_keys)
+        if key in classic_by_cell:
+            pairs.append({"cell": key,
+                          "classic_out": root / classic_by_cell[key] / "out",
+                          "distributed_out": root / dr["run_id"] / "out"})
+    if not pairs:
+        raise SystemExit("no classic/distributed run pairs share a cell (size, channels, N)")
+    return pairs
 
 
 def main(argv=None) -> int:
@@ -94,26 +105,32 @@ def main(argv=None) -> int:
     a = ap.parse_args(argv)
 
     if a.results_root and a.run_plan:
-        classic_out, dist_out = _auto_pair(a.results_root, a.run_plan)
+        pairs = _auto_pair(a.results_root, a.run_plan)
     elif a.classic_out and a.distributed_out:
-        classic_out, dist_out = a.classic_out, a.distributed_out
+        pairs = [{"cell": None, "classic_out": a.classic_out, "distributed_out": a.distributed_out}]
     else:
         ap.error("give --classic-out + --distributed-out, or --results-root + --run-plan")
 
-    results = compare_registered_dirs(classic_out, dist_out, atol=a.atol)
-    if not results:
-        print(f"[parity] NO shared registered slides between {classic_out} and {dist_out}", flush=True)
-        return 2
     print("=" * 78)
     print("BENCHMARK-IMAGE REGISTRATION PARITY — classic vs distributed registered slides")
     print("=" * 78)
-    ok = True
-    for r in results:
-        status = "OK" if r["within_atol"] else "FAIL"
-        ok = ok and r["within_atol"]
-        print(f"  {r['patient']}/{r['slide']:24s} equal={r['equal']!s:5s} "
-              f"max|Δ|={r['max_abs_delta']:.4g}  [{status}]")
+    ok, any_slide = True, False
+    for p in pairs:
+        results = compare_registered_dirs(p["classic_out"], p["distributed_out"], atol=a.atol)
+        label = "" if p["cell"] is None else f"cell{p['cell']} "
+        if not results:
+            print(f"  {label}(no shared registered slides)")
+            continue
+        for r in results:
+            any_slide = True
+            status = "OK" if r["within_atol"] else "FAIL"
+            ok = ok and r["within_atol"]
+            print(f"  {label}{r['patient']}/{r['slide']:24s} equal={r['equal']!s:5s} "
+                  f"max|Δ|={r['max_abs_delta']:.4g}  [{status}]")
     print("=" * 78)
+    if not any_slide:
+        print("[parity] NO shared registered slides found", flush=True)
+        return 2
     print(f"PARITY (classic == distributed on benchmark images): {'PASS' if ok else 'FAIL'}", flush=True)
     return 0 if ok else 1
 

@@ -45,6 +45,17 @@ registration_grid:
   n_register_images: [4, 8]
   n_channels:        [2, 4]     # benchmark N-image registration at BOTH 2 and 4 channels
 
+# DISTRIBUTED GRID — classic vs distributed ACROSS sizes (same across-size treatment normal
+# registration gets above). Each cell runs the distributed SEPARATED path FORCED on (so 'auto' can't
+# route small cells back to classic); the classic counterpart at each cell is the scaling_grid run, so
+# the analysis pairs them by (size, channels, N). This is where the distributed RAM win becomes visible:
+# classic's per-node RAM (BioFormats JVM heap) climbs with size while the JVM-free distributed path stays
+# bounded. Runs labelled varied_axis=distributed_grid. Trim target_px to what your nodes can register.
+distributed_grid:
+  target_px:         [2048, 4096, 8192, 16384, 32768, 65536]
+  n_channels:        [2, 4]
+  n_register_images: [2]        # the pair; extend to [2, 4, 8] to also cross N (heavier)
+
 # Baseline = the fixed point for ofat (one value per axis). Also the (4096, 2)
 # cell of the scaling grid, so it is emitted once (labelled baseline).
 baseline:
@@ -54,13 +65,7 @@ baseline:
   # --- registration ---
   memory_mode: medium
   skip_micro_registration: true
-  reg_distributed_tiling: false
-  # Force the distributed adapter when reg_distributed_tiling=true. Without this, the default 'auto'
-  # routing (estimate_reg_gb: use_distributed = total_input_gb >= reg_dist_min_input_gb, 1 GB) sends the
-  # small baseline (~0.13 GB) BACK to classic — so the reg_distributed_tiling axis would compare
-  # classic-vs-classic. 'force' makes the true run actually run the distributed SEPARATED path
-  # (reg_dist_force_tiling=false => bit-identical, JVM-free). Inert for classic runs.
-  reg_dist_sub_threshold: force
+  reg_distributed_tiling: false       # classic; the distributed_grid above forces the distributed path
   n_register_images: 2                # 1 reference + 1 moving (the classic pair)
   # --- preprocessing (BaSiC illumination correction) ---
   preproc_n_iter: 100
@@ -98,25 +103,16 @@ axes:
   seg_gpu:                    [true, false]
   seg_n_tiles_x:              [8, 16, 32]         # StarDist tiling (active when seg_method=stardist)
   seg_n_tiles_y:              [8, 16, 32]         # StarDist tiling (active when seg_method=stardist)
-  # Method-specific tile params take effect ONLY when seg_method matches their backend.
-  # Off the stardist baseline these OFAT runs reproduce the baseline (no variation); to
-  # benchmark them, set baseline seg_method to the matching backend or use a per-backend grid.
-  seg_cellsam_block_size:     [256, 400, 512]     # active when seg_method=cellsam
-  seg_instantseg_tile_size:   [256, 512, 1024]    # active when seg_method=instantseg
   # --- quantification ---
   quantify_compartments:      [false, true]
   expanded_quantification:    [false, true]       # valid because baseline quantify_compartments=true
-  # --- distributed registration (classic vs distributed at the baseline pair) ---
-  # true = VALIS_DISTRIBUTED_ADAPTER, forced on by baseline reg_dist_sub_threshold=force (see baseline;
-  # otherwise 'auto' would send the small baseline back to classic). It runs the default SEPARATED
-  # (JVM-free, whole-image) non-rigid path, BIT-IDENTICAL to classic (verified by
-  # tests/integration/compare_classic_vs_distributed.py's PARITY GATE) but with a lower per-node RAM
-  # ceiling. This axis measures the classic-vs-distributed time/memory delta on the baseline pair
-  # (n_register_images=2). The analysis emits a comparison (benchmarks/analysis/lib/compare_reg.py).
-  # NB: at the small baseline this mostly measures the distributed decomposition's OVERHEAD; the RAM
-  # WIN shows at large inputs — to see it, cross reg_distributed_tiling with size (a distributed_grid).
-  # Runs in the patched container params.reg_dist_container (bolt3x/attend_image_analysis:mirage_valis_1.0.0).
-  reg_distributed_tiling:     [false, true]
+  # NOTE — distributed registration is NOT an OFAT axis: the distributed_grid above measures it across
+  # sizes (forced on, so 'auto' can't route small cells back to classic — the bug an OFAT axis hid).
+  # NOTE — seg_cellsam_block_size / seg_instantseg_tile_size are deliberately NOT swept: they are no-ops
+  # off the stardist baseline (an OFAT run there just reproduces the baseline — misleading zero-signal
+  # rows). To benchmark them, run a separate sweep with baseline seg_method set to that backend, so the
+  # knob is live and its OFAT values actually vary the run. seg_gpu=false is kept but note it may not
+  # yield a true CPU run (the seg container is GPU and TF isn't pinned to CPU — tracked in issue #20).
 
 # Tile size / overlap sub-study (OPTIONAL). reg_dist_tile_wh / reg_dist_tile_buffer are NO-OPS on the
 # default SEPARATED path (it does whole-image non-rigid — no tiles), so they must NOT be OFAT axes off

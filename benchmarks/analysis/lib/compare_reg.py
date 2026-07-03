@@ -61,7 +61,11 @@ def compare_classic_vs_distributed(runs_df: pd.DataFrame) -> pd.DataFrame:
     df["_leaf"] = df["process"].map(_leaf)
     df["_dist"] = df["reg_distributed_tiling"].map(_truthy)
 
-    # Reduce each run to its registration-stage metrics (averaged over repeats via config_id).
+    # Cell = the input point a classic and distributed run share (they differ only in the path taken).
+    # Pair per cell so a size-crossed distributed_grid compares against the SAME-size classic run.
+    cell_keys = [k for k in ("target_px", "n_channels", "n_register_images") if k in df.columns]
+
+    # Reduce each run to its registration-stage metrics.
     group_keys = [k for k in ("config_id", "run_id", "rep") if k in df.columns] or ["run_id"]
     per_run = []
     for keyvals, g in df.groupby(group_keys):
@@ -70,7 +74,7 @@ def compare_classic_vs_distributed(runs_df: pd.DataFrame) -> pd.DataFrame:
         stage = g[g["_leaf"].isin(leaves)]
         if stage.empty:
             continue
-        row = dict(zip(group_keys, keyvals if isinstance(keyvals, tuple) else (keyvals,)))
+        row = {k: g[k].iloc[0] for k in cell_keys}
         row["is_distributed"] = is_dist
         row.update(_stage_metrics(stage))
         per_run.append(row)
@@ -78,32 +82,23 @@ def compare_classic_vs_distributed(runs_df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
     runs = pd.DataFrame(per_run)
 
-    # Average replicates within a config.
-    cfg_key = "config_id" if "config_id" in runs.columns else "run_id"
-    agg = (runs.groupby([cfg_key, "is_distributed"])[["reg_peak_rss_gb", "reg_total_realtime_s"]]
-           .mean().reset_index())
+    # Average replicates within (cell, path).
+    metrics = ["reg_peak_rss_gb", "reg_total_realtime_s"]
+    agg = runs.groupby(cell_keys + ["is_distributed"])[metrics].mean().reset_index()
 
-    classic = agg[~agg["is_distributed"]].set_index(cfg_key)
-    dist = agg[agg["is_distributed"]].set_index(cfg_key)
+    classic = agg[~agg["is_distributed"]]
+    dist = agg[agg["is_distributed"]]
     if classic.empty or dist.empty:
         return pd.DataFrame()
 
-    # There is one classic baseline config and (per OFAT) one distributed config that differ ONLY in
-    # reg_distributed_tiling — pair every distributed config against the single classic baseline.
-    base = classic.iloc[0]
-    out = []
-    for cid, d in dist.iterrows():
-        out.append({
-            "classic_config": classic.index[0],
-            "distributed_config": cid,
-            "reg_peak_rss_gb_classic": base["reg_peak_rss_gb"],
-            "reg_peak_rss_gb_distributed": d["reg_peak_rss_gb"],
-            "reg_total_realtime_s_classic": base["reg_total_realtime_s"],
-            "reg_total_realtime_s_distributed": d["reg_total_realtime_s"],
-            "peak_rss_ratio": (d["reg_peak_rss_gb"] / base["reg_peak_rss_gb"]
-                               if base["reg_peak_rss_gb"] else float("nan")),
-            "realtime_ratio": (d["reg_total_realtime_s"] / base["reg_total_realtime_s"]
-                               if base["reg_total_realtime_s"] else float("nan")),
-            "rss_saving_gb": base["reg_peak_rss_gb"] - d["reg_peak_rss_gb"],
-        })
-    return pd.DataFrame(out)
+    # Inner-join classic vs distributed on the cell keys — only cells measured BOTH ways are compared.
+    merged = classic.merge(dist, on=cell_keys, suffixes=("_classic", "_distributed"))
+    if merged.empty:
+        return pd.DataFrame()
+    rss_c, rss_d = merged["reg_peak_rss_gb_classic"], merged["reg_peak_rss_gb_distributed"]
+    rt_c, rt_d = merged["reg_total_realtime_s_classic"], merged["reg_total_realtime_s_distributed"]
+    merged["peak_rss_ratio"] = rss_d / rss_c.where(rss_c != 0)
+    merged["realtime_ratio"] = rt_d / rt_c.where(rt_c != 0)
+    merged["rss_saving_gb"] = rss_c - rss_d
+    drop = [c for c in ("is_distributed_classic", "is_distributed_distributed") if c in merged]
+    return merged.drop(columns=drop).sort_values(cell_keys).reset_index(drop=True)

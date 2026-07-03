@@ -54,6 +54,26 @@ def _configs(sweep: dict) -> list[tuple[dict, str]]:
                     configs.append((dict(baseline, target_px=tpx, n_channels=nch,
                                          n_register_images=nreg), "registration_grid"))
 
+    # 2b. DISTRIBUTED GRID (classic-vs-distributed ACROSS sizes) — gives the distributed SEPARATED path
+    #     the same across-size treatment classic registration gets from scaling_grid/registration_grid.
+    #     Each cell emits a FORCED distributed run: reg_distributed_tiling=true, reg_dist_sub_threshold=
+    #     'force' (so 'auto' can't route the small cells back to classic), reg_dist_force_tiling=false
+    #     (the bit-identical SEPARATED path). The CLASSIC counterpart at each cell already exists in
+    #     scaling_grid/registration_grid, so the analysis pairs them by (target_px, n_channels,
+    #     n_register_images). n_channels / n_register_images may each be a scalar or a list.
+    dg = sweep.get("distributed_grid")
+    if dg:
+        dchs = dg.get("n_channels", baseline.get("n_channels"))
+        dchs = list(dchs) if isinstance(dchs, (list, tuple)) else [dchs]
+        dnregs = dg.get("n_register_images", baseline.get("n_register_images", 2))
+        dnregs = list(dnregs) if isinstance(dnregs, (list, tuple)) else [dnregs]
+        for tpx in dg["target_px"]:
+            for nch in dchs:
+                for nreg in dnregs:
+                    configs.append((dict(baseline, target_px=tpx, n_channels=nch, n_register_images=nreg,
+                                         reg_distributed_tiling=True, reg_dist_sub_threshold="force",
+                                         reg_dist_force_tiling=False), "distributed_grid"))
+
     # 3. DISTRIBUTED TILING GRID (tile_wh x tile_buffer), if present. Tile size/overlap are NO-OPS
     #    unless the distributed tiled fan-out is active, so this grid PINS reg_distributed_tiling=true
     #    AND reg_dist_force_tiling=true and crosses the two tile knobs. Kept separate from the OFAT

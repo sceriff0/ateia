@@ -147,13 +147,28 @@ def test_distributed_tiling_grid_pins_force_tiling_and_crosses_knobs():
         (256, 50), (256, 100), (512, 50), (512, 100)}
 
 
-def test_project_sweep_enables_distributed_axis():
+def test_project_sweep_distributed_grid_forces_distributed_across_sizes():
     import yaml
     sweep = yaml.safe_load(
         (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text())
-    # distributed registration is swept as classic(false) vs distributed(true)
-    assert sweep["axes"]["reg_distributed_tiling"] == [False, True]
+    # distributed is measured across sizes via distributed_grid (NOT a no-op OFAT axis)
+    assert "reg_distributed_tiling" not in sweep["axes"], "distributed must not be an OFAT axis (auto-routing hides it)"
     assert sweep["baseline"]["reg_distributed_tiling"] is False
+    dg = sweep["distributed_grid"]
+    assert dg["target_px"] == sweep["scaling_grid"]["target_px"]  # same sizes as classic scaling grid
+    plan = build_run_plan(sweep, repeats=1)
+    dist = [r for r in plan if r["varied_axis"] == "distributed_grid"]
+    assert dist, "distributed_grid must emit runs"
+    # every distributed run is FORCED (so 'auto' can't fall back to classic) on the SEPARATED path
+    for r in dist:
+        assert r["reg_distributed_tiling"] is True
+        assert r["reg_dist_sub_threshold"] == "force"
+        assert r["reg_dist_force_tiling"] is False
+    # each distributed cell has a matching classic scaling_grid cell to pair against
+    classic_cells = {(r["target_px"], r["n_channels"]) for r in plan
+                     if r["varied_axis"] in ("scaling_grid", "baseline")}
+    for r in dist:
+        assert (r["target_px"], r["n_channels"]) in classic_cells
 
 
 def test_project_sweep_caps_and_grids():
