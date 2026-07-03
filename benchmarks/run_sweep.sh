@@ -58,6 +58,12 @@ moving_awk_field=$((moving_col_idx + 1))
 CONCURRENCY="${SWEEP_CONCURRENCY:-1}"
 pids=()
 
+# SWEEP_PROFILE: Nextflow profile(s) applied to EVERY run (default docker). On a cluster set
+# SWEEP_PROFILE="singularity,ieo". It is passed as a SINGLE -profile — Nextflow rejects a second
+# -profile ("Can only specify option -profile once"), so do NOT also put -profile in the trailing
+# args. Extra `-c <config>` in the trailing args IS fine (Nextflow merges multiple -c).
+PROFILE="${SWEEP_PROFILE:-docker}"
+
 while IFS=',' read -r -a vals; do
   run_id=$(col_val run_id "${vals[@]}")
   target_px=$(col_val target_px "${vals[@]}")
@@ -129,7 +135,7 @@ while IFS=',' read -r -a vals; do
   # Launch in the background; isolate each concurrent run's work dir, log and session name so parallel
   # Nextflow heads never collide. `wait -n` throttles to CONCURRENCY runs in flight.
   (
-    nextflow -log "$run_dir/nextflow.log" run . -profile docker \
+    nextflow -log "$run_dir/nextflow.log" run . -profile "$PROFILE" \
       -c benchmarks/configs/benchmark.config \
       -work-dir "$run_dir/work" -name "bench_${run_id}" \
       --input "$sheet" --outdir "$run_dir/out" --trace_dir "$run_dir/trace" \

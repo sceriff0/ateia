@@ -65,13 +65,15 @@ echo "=================================================="
 
 # run_sweep.sh: one `nextflow run` per run_plan row; each submits its process jobs to SLURM.
 # SWEEP_CONCURRENCY launches several of those runs at once (parallelising the sweep across the cluster).
-# The trailing args override the launcher's default -profile docker and add the site config.
+# SWEEP_PROFILE sets the (single) Nextflow -profile; the site config is added as a trailing -c.
+# NB: pass the profile via SWEEP_PROFILE, NOT a trailing -profile — Nextflow allows -profile only once.
 export SWEEP_CONCURRENCY="$CONCURRENCY"
+export SWEEP_PROFILE="$PROFILES"
 benchmarks/run_sweep.sh \
     "$RUN_PLAN" \
     "$MATRIX_DIR/matrix_manifest.csv" \
     "$RESULTS" \
-    -profile "$PROFILES" -c "$SITE_CONFIG"
+    -c "$SITE_CONFIG"
 
 echo "=================================================="
 echo "Sweep finished: $(date)"

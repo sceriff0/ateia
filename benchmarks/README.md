@@ -263,12 +263,14 @@ job small but give it a long walltime (it lives for the whole sweep).
 
 **(b) run the head on a login node** (in `tmux`/`screen` so it survives disconnects):
 
-    benchmarks/run_sweep.sh  bench_run_plan.csv  bench_matrix/matrix_manifest.csv  bench_results \
-        -profile singularity,ieo -c conf/ieo.config
+    SWEEP_PROFILE=singularity,ieo SWEEP_CONCURRENCY=6 \
+      benchmarks/run_sweep.sh  bench_run_plan.csv  bench_matrix/matrix_manifest.csv  bench_results \
+        -c conf/ieo.config
 
-Both pass `-profile singularity,ieo -c conf/ieo.config` — the trailing `-profile` **overrides**
-`run_sweep.sh`'s default `-profile docker` (Nextflow uses the last one), giving Singularity + the SLURM
-executor + your site paths. `conf/ieo.config` is gitignored; create it from `conf/site.config.template`.
+Set the profile via **`SWEEP_PROFILE`** (a single `-profile` — Nextflow rejects a second one), and add
+the site config as a trailing **`-c conf/ieo.config`** (multiple `-c` is fine). This gives Singularity +
+the SLURM executor + your site paths. `conf/ieo.config` is gitignored; create it from
+`conf/site.config.template`. `submit_sweep.sh` sets both env vars for you.
 
 Each config's registered slides are published to
 `bench_results/<run_id>/out/<patient>/registered/registered_slides/*_registered.ome.tiff`
