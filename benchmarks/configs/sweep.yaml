@@ -55,6 +55,12 @@ baseline:
   memory_mode: medium
   skip_micro_registration: true
   reg_distributed_tiling: false
+  # Force the distributed adapter when reg_distributed_tiling=true. Without this, the default 'auto'
+  # routing (estimate_reg_gb: use_distributed = total_input_gb >= reg_dist_min_input_gb, 1 GB) sends the
+  # small baseline (~0.13 GB) BACK to classic — so the reg_distributed_tiling axis would compare
+  # classic-vs-classic. 'force' makes the true run actually run the distributed SEPARATED path
+  # (reg_dist_force_tiling=false => bit-identical, JVM-free). Inert for classic runs.
+  reg_dist_sub_threshold: force
   n_register_images: 2                # 1 reference + 1 moving (the classic pair)
   # --- preprocessing (BaSiC illumination correction) ---
   preproc_n_iter: 100
@@ -101,11 +107,14 @@ axes:
   quantify_compartments:      [false, true]
   expanded_quantification:    [false, true]       # valid because baseline quantify_compartments=true
   # --- distributed registration (classic vs distributed at the baseline pair) ---
-  # true = VALIS_DISTRIBUTED_ADAPTER: the default SEPARATED (JVM-free, whole-image) non-rigid path,
-  # which is BIT-IDENTICAL to classic (verified by tests/integration/compare_classic_vs_distributed.py's
-  # PARITY GATE) but with a lower per-node RAM ceiling. This axis measures the classic-vs-distributed
-  # time/memory delta on the same baseline pair (n_register_images=2, --paired). The analysis emits a
-  # classic-vs-distributed comparison section (see benchmarks/analysis/lib/compare_reg.py).
+  # true = VALIS_DISTRIBUTED_ADAPTER, forced on by baseline reg_dist_sub_threshold=force (see baseline;
+  # otherwise 'auto' would send the small baseline back to classic). It runs the default SEPARATED
+  # (JVM-free, whole-image) non-rigid path, BIT-IDENTICAL to classic (verified by
+  # tests/integration/compare_classic_vs_distributed.py's PARITY GATE) but with a lower per-node RAM
+  # ceiling. This axis measures the classic-vs-distributed time/memory delta on the baseline pair
+  # (n_register_images=2). The analysis emits a comparison (benchmarks/analysis/lib/compare_reg.py).
+  # NB: at the small baseline this mostly measures the distributed decomposition's OVERHEAD; the RAM
+  # WIN shows at large inputs — to see it, cross reg_distributed_tiling with size (a distributed_grid).
   # Runs in the patched container params.reg_dist_container (bolt3x/attend_image_analysis:mirage_valis_1.0.0).
   reg_distributed_tiling:     [false, true]
 
