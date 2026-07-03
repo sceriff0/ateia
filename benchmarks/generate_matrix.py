@@ -210,7 +210,13 @@ def derive_from_sweep(sweep_path) -> dict:
     # strategy keeps the uniform max (map=None). Explicit --n-moving also bypasses it.
     n_moving_map = None
     if sweep.get("strategy", "ofat") == "ofat":
-        from benchmarks.build_run_plan import _configs
+        try:
+            from benchmarks.build_run_plan import _configs
+        except ModuleNotFoundError:
+            # run as a plain script (python benchmarks/generate_matrix.py) => the repo root is
+            # not on sys.path, only benchmarks/ is, so the package-qualified import fails. The
+            # sibling module is importable directly in that case.
+            from build_run_plan import _configs
         base_nreg = baseline.get("n_register_images", 2)
         need: dict = {}
         for params, _va in _configs(sweep):
