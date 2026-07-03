@@ -100,6 +100,21 @@ axes:
   # --- quantification ---
   quantify_compartments:      [false, true]
   expanded_quantification:    [false, true]       # valid because baseline quantify_compartments=true
-  # reg_distributed_tiling axis stays disabled: the Nextflow-distributed tiling path
-  # (VALIS_DISTRIBUTED_ADAPTER) is currently broken. Baseline pins it to false.
-  # Re-enable once the distributed path works: reg_distributed_tiling: [false, true]
+  # --- distributed registration (classic vs distributed at the baseline pair) ---
+  # true = VALIS_DISTRIBUTED_ADAPTER: the default SEPARATED (JVM-free, whole-image) non-rigid path,
+  # which is BIT-IDENTICAL to classic (verified by tests/integration/compare_classic_vs_distributed.py's
+  # PARITY GATE) but with a lower per-node RAM ceiling. This axis measures the classic-vs-distributed
+  # time/memory delta on the same baseline pair (n_register_images=2, --paired). The analysis emits a
+  # classic-vs-distributed comparison section (see benchmarks/analysis/lib/compare_reg.py).
+  # Runs in the patched container params.reg_dist_container (bolt3x/attend_image_analysis:mirage_valis_1.0.0).
+  reg_distributed_tiling:     [false, true]
+
+# Tile size / overlap sub-study (OPTIONAL). reg_dist_tile_wh / reg_dist_tile_buffer are NO-OPS on the
+# default SEPARATED path (it does whole-image non-rigid — no tiles), so they must NOT be OFAT axes off
+# the baseline. This grid instead PINS the tiled fan-out on (reg_distributed_tiling=true +
+# reg_dist_force_tiling=true) and crosses the two tile knobs. Uncomment to benchmark the tiling regime.
+# build_run_plan.py expands it (labelled varied_axis=distributed_tiling_grid); generate_matrix.py must
+# have produced a --paired matrix for it to exercise real registration.
+# distributed_tiling_grid:
+#   reg_dist_tile_wh:     [256, 512, 1024]
+#   reg_dist_tile_buffer: [50, 100, 200]

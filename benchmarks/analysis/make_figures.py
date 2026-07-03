@@ -13,7 +13,7 @@ from pathlib import Path
 import matplotlib
 matplotlib.use("Agg")
 
-from .lib import emit_config, load, plotting, regress
+from .lib import compare_reg, emit_config, load, plotting, regress
 
 # Only these runs change input_gb: the scaling grid (size x channels), the
 # registration grid (size x n_register_images — REGISTER's input is the SUM of all
@@ -71,9 +71,17 @@ def run(results_root, run_plan_csv, manifest_csv, reg_eval_csv, outdir, formats=
         plotting.save_fig(fig, figdir / f"scaling_{proc}", formats=formats)
 
     emit_config.write_optimized_config(models, outdir / "modules.optimized.config")
+
+    # Classic vs distributed registration — the reg_distributed_tiling axis, if swept. Reports the
+    # registration-stage peak-RSS and compute-time delta (the equivalent-result cost comparison; the
+    # bit-identical guarantee itself is a code-level gate, tests/integration/compare_classic_vs_distributed.py).
+    compare_csv = outdir / "classic_vs_distributed_registration.csv"
+    compare_df = compare_reg.compare_classic_vs_distributed(runs_df)
+    compare_df.to_csv(compare_csv, index=False)  # always written (may be empty) for a stable artifact set
+
     return {"runs_df": runs_df, "models": models, "outdir": outdir,
             "measurements_csv": measurements_csv, "models_csv": models_csv,
-            "stats_csv": stats_csv}
+            "stats_csv": stats_csv, "compare_csv": compare_csv}
 
 
 def main():

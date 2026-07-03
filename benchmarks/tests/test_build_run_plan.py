@@ -109,6 +109,34 @@ def test_registration_grid_crosses_size_and_rounds():
                if r["varied_axis"] == "registration_grid")
 
 
+def test_distributed_tiling_grid_pins_force_tiling_and_crosses_knobs():
+    sweep = {
+        "strategy": "ofat",
+        "baseline": {"target_px": 4096, "reg_distributed_tiling": False},
+        "distributed_tiling_grid": {
+            "reg_dist_tile_wh": [256, 512],
+            "reg_dist_tile_buffer": [50, 100],
+        },
+    }
+    plan = build_run_plan(sweep, repeats=1)
+    grid = [r for r in plan if r["varied_axis"] == "distributed_tiling_grid"]
+    assert len(grid) == 4  # 2 tile_wh x 2 tile_buffer
+    # every grid run pins the tiled fan-out on (else the tile knobs are no-ops)
+    assert all(r["reg_distributed_tiling"] is True and r["reg_dist_force_tiling"] is True
+               for r in grid)
+    assert {(r["reg_dist_tile_wh"], r["reg_dist_tile_buffer"]) for r in grid} == {
+        (256, 50), (256, 100), (512, 50), (512, 100)}
+
+
+def test_project_sweep_enables_distributed_axis():
+    import yaml
+    sweep = yaml.safe_load(
+        (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text())
+    # distributed registration is swept as classic(false) vs distributed(true)
+    assert sweep["axes"]["reg_distributed_tiling"] == [False, True]
+    assert sweep["baseline"]["reg_distributed_tiling"] is False
+
+
 def test_project_sweep_caps_and_grids():
     import yaml
     sweep = yaml.safe_load(

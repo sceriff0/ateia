@@ -51,7 +51,21 @@ def _configs(sweep: dict) -> list[tuple[dict, str]]:
                 configs.append((dict(baseline, target_px=tpx, n_channels=rch,
                                      n_register_images=nreg), "registration_grid"))
 
-    # 3. OFAT parameter knobs: one config per non-baseline value of each axis,
+    # 3. DISTRIBUTED TILING GRID (tile_wh x tile_buffer), if present. Tile size/overlap are NO-OPS
+    #    unless the distributed tiled fan-out is active, so this grid PINS reg_distributed_tiling=true
+    #    AND reg_dist_force_tiling=true and crosses the two tile knobs. Kept separate from the OFAT
+    #    axes precisely so those knobs are never swept off the (separated, non-tiling) baseline where
+    #    they do nothing — mirroring the removed reg_tile_size no-op axis warned about in sweep.yaml.
+    dgrid = sweep.get("distributed_tiling_grid")
+    if dgrid:
+        for tw in dgrid.get("reg_dist_tile_wh", [baseline.get("reg_dist_tile_wh", 512)]):
+            for tb in dgrid.get("reg_dist_tile_buffer", [baseline.get("reg_dist_tile_buffer", 100)]):
+                configs.append((dict(baseline, reg_distributed_tiling=True,
+                                     reg_dist_force_tiling=True,
+                                     reg_dist_tile_wh=tw, reg_dist_tile_buffer=tb),
+                                "distributed_tiling_grid"))
+
+    # 4. OFAT parameter knobs: one config per non-baseline value of each axis,
     #    holding input scale fixed at the baseline cell.
     for axis, values in axes.items():
         for v in values:
