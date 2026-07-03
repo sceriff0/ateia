@@ -215,6 +215,80 @@ figures, and writes `conf/modules.optimized.config`.
 
 ---
 
+## E. Classic vs distributed registration (cluster)
+
+The sweep measures registration **two ways** on the same benchmark image — classic
+`REGISTER` vs the distributed `VALIS_DISTRIBUTED_ADAPTER` — via the
+`reg_distributed_tiling: [false, true]` axis in `sweep.yaml`. The default distributed path
+(SEPARATED, JVM-free, whole-image non-rigid) is **bit-identical to classic** but with a lower
+per-node RAM ceiling. This section is how you run it on the cluster and confirm parity.
+
+### E1 — Prerequisites (one-time)
+
+- **Container:** the distributed stages run in the EXTERNAL_TILE_HOOK-patched VALIS image
+  `bolt3x/attend_image_analysis:mirage_valis_1.0.0` (Docker Hub). It is the `reg_dist_container`
+  default; Singularity pulls it into the profile's `cacheDir`. Override with
+  `--reg_dist_container <image>` if you host your own.
+- **Paired matrix:** registration only runs when the matrix is `--paired` (reference + moving
+  panels). Generate it straight from the sweep so the panels line up:
+
+      python benchmarks/generate_matrix.py --source img.ome.tif --outdir bench_matrix \
+          --sweep benchmarks/configs/sweep.yaml
+      python benchmarks/build_run_plan.py --sweep benchmarks/configs/sweep.yaml \
+          --out bench_run_plan.csv --repeats 3
+
+  The run plan now contains one **classic** config (`reg_distributed_tiling=false`) and one
+  **distributed** config (`=true`) at the baseline pair.
+
+### E2 — Launch on the cluster
+
+Same launcher as A3, with your cluster profile (e.g. IEO SLURM + Singularity):
+
+    benchmarks/run_sweep.sh  bench_run_plan.csv  bench_matrix/matrix_manifest.csv  bench_results \
+        -profile ieo,singularity
+
+Each config's registered slides are published to
+`bench_results/<run_id>/out/<patient>/registered/registered_slides/*_registered.ome.tiff`
+(both the classic and distributed runs).
+
+### E3 — Confirm parity + read the cost delta
+
+Two independent checks:
+
+1. **Bit-identical output on the benchmark images** — pairs the classic and distributed runs
+   and compares the registered slides pixel-for-pixel:
+
+       python -m benchmarks.registration_eval.compare_registered \
+           --results-root bench_results --run-plan bench_run_plan.csv
+       # prints per-slide max|Δ| and "PARITY ... : PASS"; exits non-zero on any mismatch.
+       # --atol 0 (default) demands exact equality; the SEPARATED default path should pass at 0.
+
+2. **Code-level gate** (small fixture, on any node with Docker + the image) — asserts the
+   SEPARATED path == classic whole-image and the tiled path == VALIS's in-process tiler:
+
+       make test-registration-parity
+
+The **cost** delta (equal result, different resources) comes from `make_figures` (A4): it writes
+`benchmarks/analysis/classic_vs_distributed_registration.csv` with the registration-stage
+**peak RSS** and **total compute time** for each side, their ratio, and `rss_saving_gb` — this is
+where you see the distributed path's lower per-node RAM ceiling quantified.
+
+### Expected outputs
+
+| Artifact | Where | What it tells you |
+|---|---|---|
+| Registered slides (both paths) | `bench_results/<run_id>/out/<patient>/registered/registered_slides/` | the actual warped outputs to compare |
+| `PARITY ... : PASS` | stdout of `compare_registered` | classic == distributed on the real benchmark image (max\|Δ\|=0) |
+| `classic_vs_distributed_registration.csv` | `benchmarks/analysis/` | peak-RSS + compute-time delta, `peak_rss_ratio`, `rss_saving_gb` |
+| `PARITY ... : PASS` | stdout of `make test-registration-parity` | code-level bit-identical gate (SEPARATED == classic; tiled == in-process tiler) |
+
+> **Tile size / overlap.** `reg_dist_tile_wh` / `reg_dist_tile_buffer` are no-ops on the default
+> SEPARATED path (no tiles), so they are **not** swept as OFAT knobs. To benchmark the tiled
+> fan-out regime, uncomment the `distributed_tiling_grid` block in `sweep.yaml` — it pins
+> `reg_distributed_tiling=true` + `reg_dist_force_tiling=true` and crosses the two tile knobs.
+
+---
+
 ## Inputs -> outputs at a glance
 
 | Step | You provide | You get |
@@ -226,6 +300,7 @@ figures, and writes `conf/modules.optimized.config`.
 | `prepare_pairs.py` | `pairs.csv` (+ downloaded data) | per-pair input dirs + `pairs_manifest.csv` |
 | `run_registration.sh` | pairs manifest | `eval_*.json` (3-way error x tiled/untiled) |
 | `aggregate_eval` | eval JSONs | `reg_eval.csv` + `reg_eval_agg.csv` |
+| `compare_registered` | results + run plan (classic+distributed) | per-slide `max\|Δ\|` + `PARITY: PASS/FAIL` (bit-identical check on benchmark images) |
 | notebook | all the above paths | inline figures + optimal config |
 
 The fastest way to see every component work end-to-end **without any real data** is
