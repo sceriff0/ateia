@@ -109,6 +109,25 @@ def test_registration_grid_crosses_size_and_rounds():
                if r["varied_axis"] == "registration_grid")
 
 
+def test_registration_grid_crosses_channels_when_list():
+    sweep = {
+        "strategy": "ofat",
+        "scaling_grid": {"target_px": [2048, 4096], "n_channels": [2, 4]},
+        "registration_grid": {"target_px": [2048, 4096],
+                              "n_register_images": [4, 8], "n_channels": [2, 4]},
+        "baseline": {"target_px": 4096, "n_channels": 2, "n_register_images": 2,
+                     "memory_mode": "medium"},
+        "axes": {"memory_mode": ["medium", "high"]},
+    }
+    plan = build_run_plan(sweep, repeats=1)
+    reg = {(r["target_px"], r["n_channels"], r["n_register_images"]) for r in plan
+           if r["varied_axis"] == "registration_grid"}
+    # 2 sizes x {2,4} channels x {4,8} rounds = 8 configs (N=2 skipped, covered by scaling grid)
+    assert reg == {
+        (2048, 2, 4), (2048, 2, 8), (2048, 4, 4), (2048, 4, 8),
+        (4096, 2, 4), (4096, 2, 8), (4096, 4, 4), (4096, 4, 8)}
+
+
 def test_distributed_tiling_grid_pins_force_tiling_and_crosses_knobs():
     sweep = {
         "strategy": "ofat",

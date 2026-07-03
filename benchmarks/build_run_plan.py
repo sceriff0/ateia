@@ -36,20 +36,23 @@ def _configs(sweep: dict) -> list[tuple[dict, str]]:
     else:
         configs.append((dict(baseline), "baseline"))
 
-    # 2. REGISTRATION GRID (size x n_register_images at a fixed channel count).
+    # 2. REGISTRATION GRID (size x n_register_images x n_channels).
     #    n_register_images is an input-scaling dimension for REGISTER + downstream, so
     #    it's crossed with size. The baseline round count is skipped — the scaling grid
-    #    already covers every (size, fixed-ch) cell at baseline N.
+    #    already covers every (size, ch) cell at baseline N. n_channels may be a scalar
+    #    or a list ([2, 4]) to benchmark N-image registration at each channel count.
     rgrid = sweep.get("registration_grid")
     if rgrid:
         base_nreg = baseline.get("n_register_images", 2)
         rch = rgrid.get("n_channels", baseline.get("n_channels"))
+        rchs = list(rch) if isinstance(rch, (list, tuple)) else [rch]
         for tpx in rgrid["target_px"]:
-            for nreg in rgrid["n_register_images"]:
-                if nreg == base_nreg:
-                    continue  # already the scaling-grid cell at baseline N
-                configs.append((dict(baseline, target_px=tpx, n_channels=rch,
-                                     n_register_images=nreg), "registration_grid"))
+            for nch in rchs:
+                for nreg in rgrid["n_register_images"]:
+                    if nreg == base_nreg:
+                        continue  # already the scaling-grid cell at baseline N
+                    configs.append((dict(baseline, target_px=tpx, n_channels=nch,
+                                         n_register_images=nreg), "registration_grid"))
 
     # 3. DISTRIBUTED TILING GRID (tile_wh x tile_buffer), if present. Tile size/overlap are NO-OPS
     #    unless the distributed tiled fan-out is active, so this grid PINS reg_distributed_tiling=true

@@ -43,7 +43,7 @@ scaling_grid:
 registration_grid:
   target_px:         [2048, 4096, 8192, 16384, 32768, 65536]
   n_register_images: [4, 8]
-  n_channels:        2
+  n_channels:        [2, 4]     # benchmark N-image registration at BOTH 2 and 4 channels
 
 # Baseline = the fixed point for ofat (one value per axis). Also the (4096, 2)
 # cell of the scaling grid, so it is emitted once (labelled baseline).
