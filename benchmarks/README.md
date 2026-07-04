@@ -26,6 +26,8 @@ Rendered overview: `docs/benchmarks.md`.
 
 - **Local (analysis + tests):** numpy, pandas, scikit-learn, matplotlib, tifffile,
   pyvips *or* Pillow, PyYAML, nbformat. No real data needed for the test suite.
+  `zarr` is optional but recommended — it lets `compare_registered` stream whole-image parity
+  strip-by-strip (bounded memory) instead of loading a 34 GB slide; without it, pass `--max-dim` to cap.
 - **Cluster (the sweeps):** Nextflow >= 25.04, Docker/Singularity, the pipeline
   containers (including the VALIS image), and `bash`. `run_sweep.sh` /
   `run_registration.sh` use indexed-array lookups (no `declare -A`), so macOS
