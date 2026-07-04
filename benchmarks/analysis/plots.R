@@ -61,30 +61,42 @@ m <- read_csv(file.path(adir, "measurements.csv"), show_col_types = FALSE) %>%
 size_axes <- c("baseline", "scaling_grid", "registration_grid", "distributed_grid",
                "target_px", "n_channels")
 
-# ── 1. MEMORY SCALING per process (the headline) — peak RSS vs input, log-log ──
-# Only the size-varying runs (a fit over the OFAT-knob runs would pile points at one x).
-p1 <- m %>% filter(varied_axis %in% size_axes, is.finite(input_gb), input_gb > 0, peak_rss_gb > 0) %>%
-  ggplot(aes(input_gb, peak_rss_gb)) +
-  geom_point(alpha = .6, colour = oi[1]) +
-  geom_smooth(method = "lm", se = FALSE, colour = oi[2], linewidth = .6) +
-  facet_wrap(~ proc, scales = "free") +
-  scale_x_log10(labels = label_number()) + scale_y_log10() +
-  labs(title = "Peak memory scaling per process",
-       subtitle = "Each point is a run; line = linear fit. Steeper = RAM grows faster with input size.",
-       x = "input (GiB, log10)", y = "peak RSS (GiB, log10)")
-save_fig(p1, "01_memory_scaling_per_process", 11, 8)
+# POWER-LAW fit per process: lm(log10(y) ~ log10(x)). The slope β is the scaling exponent (β=1 linear,
+# >1 super-linear, <1 sub-linear) — the paper number. Returns the fitted line endpoints + β/R² per proc.
+# (The old geom_smooth(lm) fitted y~x in raw space and drew it curved on log axes — not a power law.)
+powerlaw <- function(df, xcol, ycol) {
+  parts <- lapply(split(df, df$proc), function(d) {
+    if (length(unique(d[[xcol]])) < 2) return(NULL)
+    f <- lm(log10(d[[ycol]]) ~ log10(d[[xcol]]))
+    b <- unname(coef(f)[2]); a <- unname(coef(f)[1]); r2 <- summary(f)$r.squared
+    xr <- range(d[[xcol]])
+    data.frame(proc = d$proc[1], x = xr, y = 10 ^ (a + b * log10(xr)), exponent = b, r2 = r2)
+  })
+  do.call(rbind, parts)
+}
+powerlaw_plot <- function(df, ycol, point_col, title, ylab) {
+  d <- df %>% filter(varied_axis %in% size_axes, is.finite(input_gb), input_gb > 0, .data[[ycol]] > 0)
+  pl <- powerlaw(d, "input_gb", ycol)
+  lab <- pl %>% group_by(proc) %>%
+    summarise(exponent = first(exponent), r2 = first(r2), x = min(x), y = max(y), .groups = "drop") %>%
+    mutate(l = sprintf("β=%.2f  R²=%.2f", exponent, r2))
+  ggplot(d, aes(input_gb, .data[[ycol]])) +
+    geom_point(alpha = .6, colour = point_col) +
+    geom_line(data = pl, aes(x, y), colour = oi[2], linewidth = .6) +
+    geom_text(data = lab, aes(x, y, label = l), hjust = 0, vjust = 1, size = 3, colour = "grey30") +
+    facet_wrap(~ proc, scales = "free") + scale_x_log10(labels = label_number()) + scale_y_log10() +
+    labs(title = title,
+         subtitle = "β = scaling exponent (log-log slope): 1 = linear, >1 super-linear, <1 sub-linear.",
+         x = "input (GiB, log10)", y = ylab)
+}
 
-# ── 2. TIME SCALING per process — realtime vs input ──
-p2 <- m %>% filter(varied_axis %in% size_axes, is.finite(input_gb), input_gb > 0, realtime_s > 0) %>%
-  ggplot(aes(input_gb, realtime_s)) +
-  geom_point(alpha = .6, colour = oi[3]) +
-  geom_smooth(method = "lm", se = FALSE, colour = oi[2], linewidth = .6) +
-  facet_wrap(~ proc, scales = "free") +
-  scale_x_log10() + scale_y_log10(labels = label_number()) +
-  labs(title = "Runtime scaling per process",
-       subtitle = "Wall-clock per process vs input size (both log scales).",
-       x = "input (GiB, log10)", y = "realtime (s, log10)")
-save_fig(p2, "02_time_scaling_per_process", 11, 8)
+# ── 1. MEMORY SCALING per process (the headline) — peak RSS vs input, power law ──
+save_fig(powerlaw_plot(m, "peak_rss_gb", oi[1], "Peak memory scaling per process (power law)",
+                       "peak RSS (GiB, log10)"), "01_memory_scaling_per_process", 11, 8)
+
+# ── 2. TIME SCALING per process — realtime vs input, power law ──
+save_fig(powerlaw_plot(m, "realtime_s", oi[3], "Runtime scaling per process (power law)",
+                       "realtime (s, log10)"), "02_time_scaling_per_process", 11, 8)
 
 # ── 3. CLASSIC vs DISTRIBUTED registration — the RAM ceiling vs size ──
 cvd_path <- file.path(adir, "classic_vs_distributed_registration.csv")
@@ -287,14 +299,15 @@ if (!is.null(qual) && "n_cells" %in% names(qual) && "seg_method" %in% names(qual
   }
 }
 agree <- read_opt("segmentation_agreement.csv")
-if (!is.null(agree) && "foreground_iou" %in% names(agree)) {
+if (!is.null(agree) && "instance_f1" %in% names(agree)) {
   p12b <- agree %>% mutate(pair = paste(method_a, "vs", method_b)) %>%
-    ggplot(aes(pair, foreground_iou, fill = pair)) +
-    geom_col(width = .6) + geom_text(aes(label = sprintf("ratio %.2f", cell_count_ratio)), vjust = -.4, size = 3) +
+    ggplot(aes(pair, instance_f1, fill = pair)) +
+    geom_col(width = .6) +
+    geom_text(aes(label = sprintf("count ratio %.2f", cell_count_ratio)), vjust = -.4, size = 3) +
     scale_fill_manual(values = oi, guide = "none") + ylim(0, 1) +
-    labs(title = "Segmentation cross-method agreement",
-         subtitle = "Foreground IoU between methods' masks (1 = identical); label = cell-count ratio.",
-         x = NULL, y = "foreground IoU")
+    labs(title = "Segmentation cross-method agreement (instance F1)",
+         subtitle = "IoU-matched per-cell F1 between methods (1 = agree on every cell); label = cell-count ratio.",
+         x = NULL, y = "instance F1 (IoU-matched)")
   save_fig(p12b, "12b_segmentation_agreement", 8, 5)
 }
 

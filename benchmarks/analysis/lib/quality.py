@@ -70,9 +70,12 @@ def _cell_masks(run_out_dir):
     return sorted(set(p.rglob("*_cell_mask.tif")) | set(p.rglob("*_cell_mask.tiff")))
 
 
-def _max_label(path, reader):
+def _n_cells(path, reader):
+    # Count DISTINCT non-zero labels (exact even if labels aren't a contiguous 1..N range — max-label
+    # would over-count with gaps).
     try:
-        return int(np.asarray(reader(path)).max())
+        u = np.unique(np.asarray(reader(path)))
+        return int((u != 0).sum())
     except Exception:
         return None
 
@@ -88,11 +91,43 @@ def harvest_segmentation_counts(results_root, run_plan_csv, reader=None) -> pd.D
     rows = []
     for run_id in plan["run_id"]:
         masks = _cell_masks(root / str(run_id) / "out")
-        counts = [c for c in (_max_label(m, reader) for m in masks) if c is not None]
+        counts = [c for c in (_n_cells(m, reader) for m in masks) if c is not None]
         if not counts:
             continue
         rows.append({"run_id": run_id, "n_cells": int(max(counts))})
     return pd.DataFrame(rows)
+
+
+def instance_f1(ma, mb, iou_thresh=0.5) -> dict:
+    """Instance-level agreement between two label masks by GREEDY IoU matching (the standard detection
+    metric — far more meaningful than foreground IoU). Returns {f1, precision, recall, matched, n_a, n_b}.
+    Efficient: intersections via a flat (a,b) label histogram, not an N×N matrix."""
+    a = np.asarray(ma).ravel().astype(np.int64)
+    b = np.asarray(mb).ravel().astype(np.int64)
+    na, nb = int(a.max()) if a.size else 0, int(b.max()) if b.size else 0
+    nan = float("nan")
+    if na == 0 or nb == 0:
+        return {"f1": nan, "precision": nan, "recall": nan, "matched": 0, "n_a": na, "n_b": nb}
+    fg = (a > 0) & (b > 0)
+    pair = a[fg] * (nb + 1) + b[fg]                       # unique key per (a_label, b_label)
+    counts = np.bincount(pair)
+    idx = np.nonzero(counts)[0]
+    inter = counts[idx].astype(np.float64)
+    al, bl = idx // (nb + 1), idx % (nb + 1)
+    area_a = np.bincount(a, minlength=na + 1).astype(np.float64)
+    area_b = np.bincount(b, minlength=nb + 1).astype(np.float64)
+    iou = inter / (area_a[al] + area_b[bl] - inter)
+    used_a, used_b, matched = set(), set(), 0
+    for k in np.argsort(-iou):                            # greedy, highest IoU first
+        if iou[k] < iou_thresh:
+            break
+        if al[k] in used_a or bl[k] in used_b:
+            continue
+        used_a.add(int(al[k])); used_b.add(int(bl[k])); matched += 1
+    precision = matched / nb
+    recall = matched / na
+    f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) else 0.0
+    return {"f1": f1, "precision": precision, "recall": recall, "matched": matched, "n_a": na, "n_b": nb}
 
 
 def segmentation_agreement(results_root, run_plan_csv, reader=None) -> pd.DataFrame:
@@ -128,9 +163,12 @@ def segmentation_agreement(results_root, run_plan_csv, reader=None) -> pd.DataFr
                 inter = int(np.logical_and(fa, fb).sum())
                 union = int(np.logical_or(fa, fb).sum())
                 na, nb = int(ma.max()), int(mb.max())
+                inst = instance_f1(ma, mb)               # IoU-matched per-cell agreement
                 row = dict(zip(keys, cell if isinstance(cell, tuple) else (cell,)))
                 row.update(method_a=a, method_b=b,
                            foreground_iou=(inter / union if union else float("nan")),
+                           instance_f1=inst["f1"], instance_precision=inst["precision"],
+                           instance_recall=inst["recall"], matched_cells=inst["matched"],
                            n_cells_a=na, n_cells_b=nb,
                            cell_count_ratio=(na / nb if nb else float("nan")))
                 rows.append(row)

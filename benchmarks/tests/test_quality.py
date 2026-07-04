@@ -68,10 +68,22 @@ def _mk_seg_run(tmp_path, run_id, patient="P001"):
 def test_harvest_segmentation_counts(tmp_path):
     plan = tmp_path / "plan.csv"; pd.DataFrame({"run_id": ["r0", "r1"]}).to_csv(plan, index=False)
     _mk_seg_run(tmp_path, "r0"); _mk_seg_run(tmp_path, "r1")
-    masks = {"r0": np.array([[0, 1], [2, 3]]), "r1": np.array([[0, 0], [0, 5]])}  # max label = cell count
+    # r1 has a NON-contiguous label (5) for a single cell — distinct-count = 1 (correct); max-label = 5.
+    masks = {"r0": np.array([[0, 1], [2, 3]]), "r1": np.array([[0, 0], [0, 5]])}
     reader = lambda p: masks["r0" if "r0" in str(p) else "r1"]
     out = quality.harvest_segmentation_counts(tmp_path, plan, reader=reader).set_index("run_id")
-    assert out.loc["r0", "n_cells"] == 3 and out.loc["r1", "n_cells"] == 5
+    assert out.loc["r0", "n_cells"] == 3 and out.loc["r1", "n_cells"] == 1
+
+
+def test_instance_f1_iou_matching():
+    ma = np.array([[1, 1, 1], [2, 2, 2]])
+    mb = np.array([[1, 1, 1], [0, 0, 2]])   # cell1 exact match (IoU=1); cell2 IoU=1/3 < 0.5 -> unmatched
+    r = quality.instance_f1(ma, mb, iou_thresh=0.5)
+    assert r["n_a"] == 2 and r["n_b"] == 2 and r["matched"] == 1
+    assert r["precision"] == 0.5 and r["recall"] == 0.5 and r["f1"] == 0.5
+    # identical masks -> perfect agreement
+    r2 = quality.instance_f1(ma, ma)
+    assert r2["f1"] == 1.0 and r2["matched"] == 2
 
 
 def test_harvest_segmentation_counts_finds_global_default_location(tmp_path):

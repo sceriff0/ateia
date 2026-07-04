@@ -115,6 +115,12 @@ def run(results_root, run_plan_csv, manifest_csv, reg_eval_csv, outdir, formats=
     except Exception:
         seg_agree = pd.DataFrame()
     seg_agree.to_csv(outdir / "segmentation_agreement.csv", index=False)
+    # compare_registered reads full-res slides (heavy), so it's a separate step — remind the user or
+    # figures 16/17's drift view stays empty.
+    if not (outdir / "registration_drift.csv").exists():
+        print("[analysis] for the tiled-drift figure (16), also run: python -m "
+              "benchmarks.registration_eval.compare_registered --results-root <ROOT> --run-plan <PLAN> "
+              f"--drift-csv {outdir / 'registration_drift.csv'}")
 
     return {"runs_df": runs_df, "models": models, "outdir": outdir,
             "measurements_csv": measurements_csv, "models_csv": models_csv,
