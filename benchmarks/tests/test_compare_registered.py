@@ -101,6 +101,17 @@ def test_max_pixels_skips_large_slides_without_reading(tmp_path):
     assert read_calls == []                         # never loaded the (huge) array
 
 
+def test_stream_falls_back_to_full_read_when_zarr_missing(tmp_path):
+    # stream=True uses zarr strip-reading on the cluster; if zarr isn't importable it must fall back to
+    # the full-array reader and still produce correct drift (never silently skip).
+    a = _make_run(tmp_path, "run0000", slides=("P001_mov1",))
+    b = _make_run(tmp_path, "run0046", slides=("P001_mov1",))
+    base = np.zeros((3, 4), np.uint16); drift = base.copy(); drift[0, 0] = 7
+    reader = lambda path: base if "run0000" in str(path) else drift
+    res = compare_registered_dirs(a, b, atol=0.0, reader=reader, stream=True)  # zarr absent locally
+    assert len(res) == 1 and res[0]["max_abs_delta"] == 7.0 and res[0]["within_atol"] is False
+
+
 def test_shape_mismatch_is_not_equal(tmp_path):
     a = _make_run(tmp_path, "run0000", slides=("P001_mov1",))
     b = _make_run(tmp_path, "run0046", slides=("P001_mov1",))

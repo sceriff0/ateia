@@ -49,53 +49,95 @@ def _shape(path):
         return tf.series[0].shape
 
 
-def compare_registered_dirs(classic_out, distributed_out, atol: float = 0.0,
-                            reader=_imread, max_pixels=None, shape_reader=_shape) -> list[dict]:
-    """Compare every slide present in BOTH run dirs. Returns one dict per shared slide with the DRIFT
-    of distributed from classic: {patient, slide, equal, max_abs_delta, mean_abs_delta, pct_pixels_diff,
-    shape_*, within_atol}. For the separated path these should be ~0 (bit-identical); for the tiled path
-    they QUANTIFY the drift (tiled != classic whole-image).
+def _delta_from_arrays(ca, cb):
+    """Drift stats from two in-memory arrays (or None for a shape mismatch)."""
+    if ca.shape != cb.shape:
+        return None
+    if ca.size:
+        d = np.abs(ca.astype(np.float64) - cb.astype(np.float64))
+        return {"max": float(d.max()), "mean": float(d.mean()),
+                "pct": float(100.0 * np.count_nonzero(d) / d.size), "equal": bool(np.array_equal(ca, cb)),
+                "shape": ca.shape}
+    return {"max": 0.0, "mean": 0.0, "pct": 0.0, "equal": True, "shape": ca.shape}
 
-    max_pixels: skip a slide (record skipped_too_large) if either image exceeds this many pixels — the
-    registered slides are single-resolution, so a 65536x65536 slide would need ~34 GB to load. The
-    bit-identity of the SEPARATED path holds by construction at large sizes (verified at feasible ones +
-    the code-level gate); drift is measured where it fits."""
+
+def _streamed_delta(pa, pb, block_rows=2048):
+    """WHOLE-IMAGE drift computed in horizontal strips off the tiled OME-TIFFs (zarr-backed) — bounded
+    memory, so a 65536x65536 slide compares without loading 34 GB. Returns None if zarr is unavailable
+    (caller falls back to a full read). {'shape_mismatch': ...} if the two shapes differ."""
+    import tifffile
+    try:
+        import zarr
+    except Exception:
+        return None
+    za = zarr.open(tifffile.imread(str(pa), aszarr=True), mode="r")
+    zb = zarr.open(tifffile.imread(str(pb), aszarr=True), mode="r")
+    if tuple(za.shape) != tuple(zb.shape):
+        return {"shape_mismatch": (tuple(za.shape), tuple(zb.shape))}
+    h = za.shape[-2] if za.ndim >= 2 else za.shape[0]        # strip along the Y axis (works for YX / CYX)
+    mx = msum = nz = tot = 0.0
+    for r0 in range(0, h, block_rows):
+        r1 = min(r0 + block_rows, h)
+        a = np.asarray(za[..., r0:r1, :] if za.ndim >= 2 else za[r0:r1]).astype(np.float64)
+        b = np.asarray(zb[..., r0:r1, :] if zb.ndim >= 2 else zb[r0:r1]).astype(np.float64)
+        d = np.abs(a - b)
+        if d.size:
+            mx = max(mx, float(d.max())); msum += float(d.sum()); nz += int(np.count_nonzero(d)); tot += d.size
+    return {"max": mx, "mean": (msum / tot if tot else 0.0), "pct": (100.0 * nz / tot if tot else 0.0),
+            "equal": mx == 0, "shape": tuple(za.shape)}
+
+
+def compare_registered_dirs(classic_out, distributed_out, atol: float = 0.0, reader=_imread,
+                            max_pixels=None, shape_reader=_shape, stream=False) -> list[dict]:
+    """Compare every slide present in BOTH run dirs, returning the DRIFT of distributed from classic per
+    slide: {patient, slide, equal, max_abs_delta, mean_abs_delta, pct_pixels_diff, shape_*, within_atol}.
+    Separated path ~0 (bit-identical); tiled path QUANTIFIES the drift.
+
+    stream=True compares the WHOLE image in memory-safe strips (zarr) — use on the cluster so even the
+    65536px slides get real whole-image parity; falls back to a full read if zarr is missing.
+    max_pixels (fallback only): if streaming is off/unavailable, skip a slide larger than this rather
+    than OOM (records skipped_too_large; not a parity failure — separated bit-identity holds above)."""
     a = find_registered(classic_out)
     b = find_registered(distributed_out)
     shared = sorted(set(a) & set(b))
     results = []
     for key in shared:
+        base = {"patient": key[0], "slide": key[1]}
+        s = _streamed_delta(a[key], b[key]) if stream else None
+        if s is not None and "shape_mismatch" not in s:
+            results.append({**base, "equal": s["equal"], "max_abs_delta": s["max"],
+                            "mean_abs_delta": s["mean"], "pct_pixels_diff": s["pct"],
+                            "shape_classic": s["shape"], "shape_distributed": s["shape"],
+                            "within_atol": s["max"] <= atol})
+            continue
+        if s is not None and "shape_mismatch" in s:
+            sa, sb = s["shape_mismatch"]
+            results.append({**base, "equal": False, "max_abs_delta": float("inf"),
+                            "mean_abs_delta": float("inf"), "pct_pixels_diff": float("nan"),
+                            "shape_classic": sa, "shape_distributed": sb, "within_atol": False})
+            continue
+        # full-read path (streaming off, or zarr unavailable) — guard against OOM on huge slides
         if max_pixels is not None:
             try:
-                sa, sb = shape_reader(a[key]), shape_reader(b[key])
-                npix = max(int(np.prod(sa)), int(np.prod(sb)))
+                npix = max(int(np.prod(shape_reader(a[key]))), int(np.prod(shape_reader(b[key]))))
             except Exception:
                 npix = 0
             if npix > max_pixels:
-                results.append({"patient": key[0], "slide": key[1], "equal": None,
-                                "max_abs_delta": float("nan"), "mean_abs_delta": float("nan"),
-                                "pct_pixels_diff": float("nan"), "shape_classic": None,
-                                "shape_distributed": None, "within_atol": True,  # not a parity failure
-                                "skipped_too_large": True})
+                results.append({**base, "equal": None, "max_abs_delta": float("nan"),
+                                "mean_abs_delta": float("nan"), "pct_pixels_diff": float("nan"),
+                                "shape_classic": None, "shape_distributed": None,
+                                "within_atol": True, "skipped_too_large": True})
                 continue
         ca, cb = reader(a[key]), reader(b[key])
-        if ca.shape != cb.shape:
-            results.append({"patient": key[0], "slide": key[1], "equal": False,
-                            "max_abs_delta": float("inf"), "mean_abs_delta": float("inf"),
-                            "pct_pixels_diff": float("nan"),
-                            "shape_classic": ca.shape, "shape_distributed": cb.shape,
-                            "within_atol": False})
+        d = _delta_from_arrays(ca, cb)
+        if d is None:
+            results.append({**base, "equal": False, "max_abs_delta": float("inf"),
+                            "mean_abs_delta": float("inf"), "pct_pixels_diff": float("nan"),
+                            "shape_classic": ca.shape, "shape_distributed": cb.shape, "within_atol": False})
             continue
-        if ca.size:
-            delta = np.abs(ca.astype(np.float64) - cb.astype(np.float64))
-            mx, mean = float(delta.max()), float(delta.mean())
-            pct = float(100.0 * np.count_nonzero(delta) / delta.size)
-        else:
-            mx = mean = pct = 0.0
-        results.append({"patient": key[0], "slide": key[1], "equal": bool(np.array_equal(ca, cb)),
-                        "max_abs_delta": mx, "mean_abs_delta": mean, "pct_pixels_diff": pct,
-                        "shape_classic": ca.shape, "shape_distributed": cb.shape,
-                        "within_atol": mx <= atol})
+        results.append({**base, "equal": d["equal"], "max_abs_delta": d["max"], "mean_abs_delta": d["mean"],
+                        "pct_pixels_diff": d["pct"], "shape_classic": d["shape"],
+                        "shape_distributed": d["shape"], "within_atol": d["max"] <= atol})
     return results
 
 
@@ -142,11 +184,14 @@ def main(argv=None) -> int:
     ap.add_argument("--run-plan")
     ap.add_argument("--atol", type=float, default=0.0, help="0 == exact (bit-identical, the SEPARATED claim)")
     ap.add_argument("--drift-csv", default=None, help="write per-slide drift rows here (for plotting)")
-    ap.add_argument("--max-dim", type=int, default=8192,
-                    help="skip slides whose larger dim exceeds this (single-res slides OOM at 65536); "
-                         "0 = no limit. Parity holds by construction above this.")
+    ap.add_argument("--no-stream", action="store_true",
+                    help="disable whole-image streaming (strip-by-strip via zarr); read full arrays")
+    ap.add_argument("--max-dim", type=int, default=0,
+                    help="FALLBACK only (when streaming is off/zarr missing): skip slides whose larger "
+                         "dim exceeds this to avoid OOM. 0 = no limit (whole-image, needs zarr).")
     a = ap.parse_args(argv)
     max_pixels = a.max_dim ** 2 if a.max_dim and a.max_dim > 0 else None
+    stream = not a.no_stream
 
     if a.results_root and a.run_plan:
         pairs = _auto_pair(a.results_root, a.run_plan)
@@ -162,7 +207,7 @@ def main(argv=None) -> int:
     parity_ok, any_sep, any_tiled, drift_rows = True, False, False, []
     for p in pairs:
         results = compare_registered_dirs(p["classic_out"], p["distributed_out"], atol=a.atol,
-                                          max_pixels=max_pixels)
+                                          max_pixels=max_pixels, stream=stream)
         cell = "" if p["cell"] is None else f"cell{p['cell']} "
         for r in results:
             if r.get("skipped_too_large"):

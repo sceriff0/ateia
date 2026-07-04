@@ -43,9 +43,16 @@ def run(results_root, run_plan_csv, manifest_csv, reg_eval_csv, outdir, formats=
     figdir.mkdir(parents=True, exist_ok=True)
     plotting.set_paper_theme()
 
-    runs_df = load.load_runs(results_root, run_plan_csv, manifest_csv)
-    # Fit the memory model on the size-varying runs only (avoids the confound);
-    # runs_df keeps every run so measurements.csv loses nothing.
+    runs_all = load.load_runs(results_root, run_plan_csv, manifest_csv)
+    # measurements.csv keeps EVERY row (incl. failed processes, with status/exit) — lossless. But the
+    # fits/aggregates/comparisons use only SUCCESSFUL processes: a failed CellSAM/timeout has bogus
+    # peak_rss + realtime that would corrupt the means and the scaling model.
+    runs_df = load.only_successful(runs_all)
+    n_dropped = len(runs_all) - len(runs_df)
+    if n_dropped:
+        print(f"[analysis] excluded {n_dropped} failed/incomplete process rows from the aggregates "
+              f"(measurements.csv keeps them)")
+    # Fit the memory model on the size-varying runs only (avoids the confound).
     scaling_df = _size_varying(runs_df)
     models = regress.fit_per_process(scaling_df, predictor="input_gb", target="peak_rss_gb")
 
@@ -54,7 +61,7 @@ def run(results_root, run_plan_csv, manifest_csv, reg_eval_csv, outdir, formats=
     measurements_csv = outdir / "measurements.csv"
     models_csv = outdir / "resource_models.csv"
     stats_csv = outdir / "resource_stats.csv"
-    runs_df.to_csv(measurements_csv, index=False)
+    runs_all.to_csv(measurements_csv, index=False)   # lossless (all rows, incl. failures)
     regress.models_to_frame(models).to_csv(models_csv, index=False)
     # per-config replicate variance (mean/std/CV across repeats) — empty CSV with
     # no runs, but always written so the artifact set is stable.

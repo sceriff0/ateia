@@ -52,6 +52,22 @@ def parse_size_logs(input_sizes_csv) -> pd.DataFrame:
     return agg
 
 
+def only_successful(runs_df: pd.DataFrame) -> pd.DataFrame:
+    """Keep only rows from processes that COMPLETED successfully — a failed/aborted process (a CellSAM
+    OOM, a timeout) has partial/bogus peak_rss + realtime that would pollute the fits and means. Uses
+    Nextflow ``status`` (COMPLETED/CACHED) when present, else ``exit == 0``; keeps rows with no signal
+    (so older traces without those columns are unaffected). measurements.csv still keeps EVERY row
+    (with status/exit) so failures remain visible — this filter only feeds the aggregates."""
+    if runs_df.empty:
+        return runs_df
+    ok = pd.Series(True, index=runs_df.index)
+    if "status" in runs_df.columns and runs_df["status"].notna().any():
+        ok &= runs_df["status"].isna() | runs_df["status"].isin(["COMPLETED", "CACHED"])
+    if "exit" in runs_df.columns and runs_df["exit"].notna().any():
+        ok &= runs_df["exit"].isna() | (runs_df["exit"] == 0)
+    return runs_df[ok]
+
+
 def aggregate_repeats(runs_df: pd.DataFrame,
                       metrics=("peak_rss_gb", "peak_vmem_gb", "realtime_s",
                                "duration_s", "input_gb")) -> pd.DataFrame:

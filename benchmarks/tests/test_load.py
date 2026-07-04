@@ -80,3 +80,19 @@ def test_load_runs_joins_trace_sizes_and_params():
     assert seg1["peak_rss_gb"] == pytest.approx(40.0)
     assert seg1["input_gb"] == pytest.approx(8.0)
     assert seg1["target_px"] == 8192
+
+
+def test_only_successful_drops_failed_and_aborted():
+    import pandas as pd
+    from benchmarks.analysis.lib.load import only_successful
+    df = pd.DataFrame({
+        "process": ["A", "B", "C", "D"],
+        "status": ["COMPLETED", "FAILED", "CACHED", "ABORTED"],
+        "exit": [0, 137, 0, 143],
+        "peak_rss_gb": [10, 999, 12, 500],
+    })
+    out = only_successful(df)
+    assert set(out["process"]) == {"A", "C"}          # FAILED/ABORTED dropped
+    # exit-only signal (no status column) also works
+    df2 = pd.DataFrame({"process": ["A", "B"], "exit": [0, 1], "peak_rss_gb": [10, 999]})
+    assert list(only_successful(df2)["process"]) == ["A"]
