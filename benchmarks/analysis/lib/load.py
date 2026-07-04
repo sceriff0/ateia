@@ -26,6 +26,11 @@ def parse_trace(trace_txt) -> pd.DataFrame:
         "duration_s": df["duration"].map(parse_duration),
         "cpus": pd.to_numeric(df.get("cpus"), errors="coerce"),
     })
+    # Timestamps (start/complete) enable an end-to-end wall-clock; present only if the trace config
+    # includes them. Parsed leniently so a missing/odd format degrades to NaT, never an error.
+    for src, dst in (("start", "start_ts"), ("complete", "complete_ts"), ("submit", "submit_ts")):
+        if src in df.columns:
+            out[dst] = pd.to_datetime(df[src], errors="coerce")
     return out
 
 

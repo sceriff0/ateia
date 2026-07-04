@@ -1,18 +1,24 @@
 #!/usr/bin/env python3
-"""Estimate feature-based distances BEFORE and AFTER registration.
+"""Estimate a feature-based registration-error PROXY, before and after registration.
 
-This script processes a single moving/registered image pair to compute feature-based
-alignment quality metrics both before and after registration. It provides a clear view
-of registration improvement for individual images.
+For a moving/registered pair against a reference, it detects features, matches them, and reports the
+pixel residual of matched keypoints. What this is — and is NOT — matters for interpretation:
 
-Metrics computed:
-- Feature match counts (before vs after)
-- Match ratios (before vs after)
-- Mean descriptor distances (before vs after)
-- Target Registration Error (TRE) statistics via feature distances
-- Improvement percentages
+  * It is a feature-RESIDUAL proxy, NOT an absolute landmark TRE. The "after" residual is obtained by
+    RE-MATCHING reference<->registered features independently of the "before" matching, so before/after
+    use DIFFERENT correspondence sets, and the matcher's inlier selection biases the residual LOW
+    (only geometrically-consistent matches survive). It is a good MONOTONIC proxy — better registration
+    -> smaller residual — so it discriminates configs (memory_mode, skip_micro, classic vs distributed),
+    which is exactly what the benchmark needs; it is not a substitute for ground-truth-landmark TRE.
+  * MEDIAN is the headline (robust to the outlier matches mean is sensitive to) — prefer it downstream.
+  * Reliability degrades with few matches (sparse/low-texture images); a `reliable` flag is emitted.
+  * A truer TRE would fix ref<->moving correspondences ONCE and warp them by the registration transform
+    (residual of the SAME points) — but this script only sees the warped IMAGE, not the transform, so
+    that is a pipeline-level change (VALIS's own rTRE already does this on the registrar).
 
-This provides complementary quality assessment to segmentation-based overlap metrics.
+Metrics: match counts, match ratios, descriptor distances, per-pair residual stats (mean/median/…),
+a robust `median_tre_px` + `reliable` summary, and improvement percentages. Complements the
+segmentation-based overlap metrics.
 """
 from __future__ import annotations
 
@@ -41,6 +47,9 @@ from registration_utils import (
 logger = get_logger(__name__)
 
 __all__ = ["main"]
+
+# Below this many matched features the residual estimate is not trustworthy (sparse/low-texture pair).
+MIN_RELIABLE_MATCHES = 10
 
 
 def log_progress(message: str) -> None:
@@ -324,7 +333,15 @@ def process_image_pair(
             "mean_descriptor_distance": float(mean_desc_distance_after),
             "feature_distances": after_stats
         },
-        "improvement": improvement
+        "improvement": improvement,
+        # Robust headline for downstream (benchmark / QC): MEDIAN residual (not mean) + a reliability
+        # flag — a residual from too few matches is not trustworthy. This is a proxy, not landmark TRE.
+        "tre_summary": {
+            "median_tre_px": float(after_stats.get("median", 0.0)),
+            "n_matches": int(n_matches_after),
+            "reliable": bool(n_matches_after >= MIN_RELIABLE_MATCHES),
+            "metric": "feature-residual proxy (re-matched ref<->registered; monotonic, not absolute TRE)",
+        },
     }
 
     # Save JSON results

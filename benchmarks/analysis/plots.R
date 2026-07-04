@@ -12,6 +12,11 @@
 #                      config_id, rep, memory_mode, seg_method, reg_distributed_tiling, ...)
 #   resource_stats.csv          per (process,config): n_reps + mean/std/cv
 #   classic_vs_distributed_registration.csv   per cell: classic vs distributed RAM/time
+#   run_cost.csv                per run: cpu_hours, gpu_hours, wall_clock_s, bottleneck_stage
+#   quality.csv                 per run: reg_tre_median_px (feature-error proxy) + n_cells + params
+#   segmentation_agreement.csv  pairwise method mask IoU + cell-count ratio
+# (the last three are optional — plots that need them are skipped if the file is absent/empty, so a
+#  sweep with failed runs still produces every figure it can.)
 #
 # Run:  Rscript benchmarks/analysis/plots.R  [analysis_dir]   (default: script's dir)
 # Deps: tidyverse (ggplot2, dplyr, readr, forcats, tidyr, stringr), scales
@@ -234,6 +239,99 @@ if (nrow(rp) > 0) {
          subtitle = "memory_mode \u00d7 skip_micro_registration \u2014 classic vs distributed registration.",
          x = "memory_mode", y = "registration-stage peak RSS (GiB)")
   save_fig(p10, "10_registration_params_both_paths", 9, 5)
+}
+
+# Helper: read an optional analysis CSV, returning NULL if absent/empty (keeps plots robust to
+# failed runs / signals the sweep didn't produce).
+read_opt <- function(name) {
+  p <- file.path(adir, name)
+  if (!file.exists(p)) return(NULL)
+  d <- suppressWarnings(read_csv(p, show_col_types = FALSE))
+  if (nrow(d) == 0) NULL else d
+}
+truthy <- function(x) tolower(as.character(x)) %in% c("true", "1", "yes")
+
+# ── 11. REGISTRATION ACCURACY vs COST (the Pareto view) ──
+qual <- read_opt("quality.csv"); cost <- read_opt("run_cost.csv")
+if (!is.null(qual) && !is.null(cost) && "reg_tre_median_px" %in% names(qual)) {
+  ac <- qual %>% select(any_of(c("run_id","varied_axis","memory_mode","skip_micro_registration",
+                                 "reg_tre_median_px"))) %>%
+    inner_join(cost %>% select(run_id, cpu_hours), by = "run_id") %>%
+    filter(is.finite(reg_tre_median_px))
+  if (nrow(ac) > 0) {
+    p11 <- ac %>%
+      ggplot(aes(cpu_hours, reg_tre_median_px)) +
+      geom_point(aes(colour = if ("memory_mode" %in% names(ac)) memory_mode else NULL,
+                     shape  = if ("skip_micro_registration" %in% names(ac))
+                                factor(skip_micro_registration) else NULL), size = 3, alpha = .8) +
+      scale_colour_manual(values = oi, name = "memory_mode", na.translate = FALSE) +
+      scale_shape_discrete(name = "skip_micro") +
+      labs(title = "Registration accuracy vs cost",
+           subtitle = "Lower-left is better: less error for fewer CPU-hours. Each point is a config.",
+           x = "registration CPU-hours", y = "feature TRE, median (px)")
+    save_fig(p11, "11_accuracy_vs_cost", 8, 5)
+  }
+}
+
+# ── 12. SEGMENTATION METHOD QUALITY — cell count by method + cross-method agreement ──
+if (!is.null(qual) && "n_cells" %in% names(qual) && "seg_method" %in% names(qual)) {
+  sc <- qual %>% filter(is.finite(n_cells))
+  if (nrow(sc) > 0) {
+    p12 <- ggplot(sc, aes(seg_method, n_cells, colour = seg_method)) +
+      geom_boxplot(outlier.shape = NA, width = .5) + geom_jitter(width = .12, alpha = .5) +
+      scale_colour_manual(values = oi, guide = "none") +
+      labs(title = "Segmentation: cells detected per method",
+           subtitle = "Spread = each method's own parameter sweep. Large gaps = methods disagree on cell count.",
+           x = NULL, y = "cells detected (max mask label)")
+    save_fig(p12, "12_segmentation_cell_counts", 8, 5)
+  }
+}
+agree <- read_opt("segmentation_agreement.csv")
+if (!is.null(agree) && "foreground_iou" %in% names(agree)) {
+  p12b <- agree %>% mutate(pair = paste(method_a, "vs", method_b)) %>%
+    ggplot(aes(pair, foreground_iou, fill = pair)) +
+    geom_col(width = .6) + geom_text(aes(label = sprintf("ratio %.2f", cell_count_ratio)), vjust = -.4, size = 3) +
+    scale_fill_manual(values = oi, guide = "none") + ylim(0, 1) +
+    labs(title = "Segmentation cross-method agreement",
+         subtitle = "Foreground IoU between methods' masks (1 = identical); label = cell-count ratio.",
+         x = NULL, y = "foreground IoU")
+  save_fig(p12b, "12b_segmentation_agreement", 8, 5)
+}
+
+# ── 13. END-TO-END COST — CPU-hours (and wall-clock) vs image size ──
+if (!is.null(cost) && "target_px" %in% names(cost)) {
+  size_cost <- cost %>% filter(varied_axis %in% size_axes) %>%
+    group_by(target_px) %>%
+    summarise(cpu_hours = mean(cpu_hours),
+              wall_clock_h = mean(wall_clock_s, na.rm = TRUE) / 3600, .groups = "drop")
+  if (nrow(size_cost) > 0) {
+    p13 <- size_cost %>% pivot_longer(c(cpu_hours, wall_clock_h), names_to = "metric", values_to = "hours") %>%
+      filter(is.finite(hours)) %>%
+      ggplot(aes(target_px, hours, colour = metric)) +
+      geom_line(linewidth = .8) + geom_point(size = 2) +
+      scale_x_log10() + scale_colour_manual(values = oi[c(1, 2)],
+        labels = c(cpu_hours = "CPU-hours", wall_clock_h = "wall-clock (h)"), name = NULL) +
+      labs(title = "End-to-end pipeline cost vs image size",
+           subtitle = "Total compute (CPU-hours) and wall-clock per slide.",
+           x = "image size (px, log10)", y = "hours")
+    save_fig(p13, "13_end_to_end_cost", 8, 5)
+  }
+}
+
+# ── 14. BOTTLENECK STAGE by image size — which stage dominates wall-clock where ──
+if (!is.null(cost) && all(c("bottleneck_stage", "target_px") %in% names(cost))) {
+  bn <- cost %>% filter(varied_axis %in% size_axes, !is.na(bottleneck_stage))
+  if (nrow(bn) > 0) {
+    p14 <- bn %>% count(target_px, bottleneck_stage) %>%
+      ggplot(aes(factor(target_px), n, fill = bottleneck_stage)) +
+      geom_col(position = "fill") +
+      scale_fill_manual(values = oi, name = "bottleneck") +
+      scale_y_continuous(labels = percent_format()) +
+      labs(title = "Pipeline bottleneck by image size",
+           subtitle = "Share of runs whose slowest single process is each stage — the bottleneck shifts with size.",
+           x = "image size (px)", y = "share of runs")
+    save_fig(p14, "14_bottleneck_by_size", 8, 5)
+  }
 }
 
 message("Wrote figures to ", normalizePath(outdir))

@@ -13,7 +13,9 @@ from pathlib import Path
 import matplotlib
 matplotlib.use("Agg")
 
-from .lib import compare_reg, emit_config, load, plotting, regress
+import pandas as pd
+
+from .lib import compare_reg, emit_config, load, plotting, quality, regress
 
 # Only these runs change input_gb: the scaling grid (size x channels), the
 # registration grid (size x n_register_images — REGISTER's input is the SUM of all
@@ -78,6 +80,33 @@ def run(results_root, run_plan_csv, manifest_csv, reg_eval_csv, outdir, formats=
     compare_csv = outdir / "classic_vs_distributed_registration.csv"
     compare_df = compare_reg.compare_classic_vs_distributed(runs_df)
     compare_df.to_csv(compare_csv, index=False)  # always written (may be empty) for a stable artifact set
+
+    # ── QUALITY + COST (the result-quality the trace ignores + derived cost). All best-effort and
+    #    robust to missing/failed runs, so a CellSAM run that OOMs simply contributes no rows. ──
+    # Per-run cost (cpu/gpu-hours, wall-clock, bottleneck) — from the trace, always available.
+    quality.run_cost_summary(runs_df).to_csv(outdir / "run_cost.csv", index=False)
+    # Per-run quality: registration accuracy (feature-error JSON) + segmentation cell count (mask max),
+    # joined to the swept params so the analysis/plots can relate accuracy to config + cost.
+    per_run = runs_df.drop_duplicates("run_id")[
+        [c for c in ("run_id", "varied_axis", "target_px", "n_channels", "n_register_images",
+                     "memory_mode", "skip_micro_registration", "seg_method", "reg_distributed_tiling")
+         if c in runs_df.columns]] if not runs_df.empty else pd.DataFrame(columns=["run_id"])
+    reg_err = quality.harvest_registration_error(results_root, run_plan_csv)
+    try:
+        seg_cnt = quality.harvest_segmentation_counts(results_root, run_plan_csv)  # reads masks (I/O)
+    except Exception:
+        seg_cnt = pd.DataFrame(columns=["run_id"])
+    quality_df = per_run
+    for extra in (reg_err, seg_cnt):
+        if not extra.empty:
+            quality_df = quality_df.merge(extra, on="run_id", how="left")
+    quality_df.to_csv(outdir / "quality.csv", index=False)
+    # Segmentation cross-method agreement (pairwise mask IoU + cell-count ratio) — best-effort.
+    try:
+        seg_agree = quality.segmentation_agreement(results_root, run_plan_csv)
+    except Exception:
+        seg_agree = pd.DataFrame()
+    seg_agree.to_csv(outdir / "segmentation_agreement.csv", index=False)
 
     return {"runs_df": runs_df, "models": models, "outdir": outdir,
             "measurements_csv": measurements_csv, "models_csv": models_csv,
