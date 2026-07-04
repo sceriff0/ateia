@@ -280,13 +280,16 @@ Each config's registered slides are published to
 
 Two independent checks:
 
-1. **Bit-identical output on the benchmark images** — pairs the classic and distributed runs
-   and compares the registered slides pixel-for-pixel:
+1. **Bit-identical output + tiled drift on the benchmark images** — pairs each distributed run with its
+   same-cell classic run and compares the registered slides pixel-for-pixel:
 
        python -m benchmarks.registration_eval.compare_registered \
-           --results-root bench_results --run-plan bench_run_plan.csv
-       # prints per-slide max|Δ| and "PARITY ... : PASS"; exits non-zero on any mismatch.
-       # --atol 0 (default) demands exact equality; the SEPARATED default path should pass at 0.
+           --results-root bench_results --run-plan bench_run_plan.csv \
+           --drift-csv benchmarks/analysis/registration_drift.csv
+       # SEPARATED path -> a bit-identical GATE ("SEPARATED PARITY: PASS", exit non-zero on any mismatch).
+       # TILED path     -> a DRIFT report (max|Δ|, mean|Δ|, %pixels vs classic, by tile_wh/buffer) — it is
+       #                   a different algorithm, so NOT expected to match; this quantifies how far it moves.
+       # The --drift-csv feeds plots 16 (tiled drift) and 17 (feature-TRE by path: classic/separated/tiled).
 
 2. **Code-level gate** (small fixture, on any node with Docker + the image) — asserts the
    SEPARATED path == classic whole-image and the tiled path == VALIS's in-process tiler:
@@ -303,7 +306,9 @@ where you see the distributed path's lower per-node RAM ceiling quantified.
 | Artifact | Where | What it tells you |
 |---|---|---|
 | Registered slides (both paths) | `bench_results/<run_id>/out/<patient>/registered/registered_slides/` | the actual warped outputs to compare |
-| `PARITY ... : PASS` | stdout of `compare_registered` | classic == distributed on the real benchmark image (max\|Δ\|=0) |
+| `SEPARATED PARITY: PASS` | stdout of `compare_registered` | separated distributed == classic on the real image (max\|Δ\|=0) |
+| `registration_drift.csv` | `benchmarks/analysis/` | tiled path's drift from classic (max\|Δ\|, mean\|Δ\|, %pixels) by tile size/overlap → fig 16 |
+| `quality.csv` (reg_tre_median_px by path) | `benchmarks/analysis/` | feature-TRE for classic / separated / tiled → fig 17 (accuracy cost of tiling) |
 | `classic_vs_distributed_registration.csv` | `benchmarks/analysis/` | peak-RSS + compute-time delta, `peak_rss_ratio`, `rss_saving_gb` |
 | `PARITY ... : PASS` | stdout of `make test-registration-parity` | code-level bit-identical gate (SEPARATED == classic; tiled == in-process tiler) |
 

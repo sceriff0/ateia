@@ -357,4 +357,38 @@ if ("varied_axis" %in% names(m) && any(m$varied_axis == "distributed_tiling_grid
   }
 }
 
+# ── 16. TILED PATH DRIFT from classic — how far the tiled fan-out moves from classic whole-image ──
+drift <- read_opt("registration_drift.csv")
+if (!is.null(drift) && "path" %in% names(drift)) {
+  td <- drift %>% filter(path == "tiled", is.finite(max_abs_delta))
+  if (nrow(td) > 0 && all(c("tile_wh", "tile_buffer") %in% names(td))) {
+    p16 <- td %>% group_by(tile_wh, tile_buffer) %>%
+      summarise(max_abs_delta = mean(max_abs_delta), pct_pixels_diff = mean(pct_pixels_diff), .groups = "drop") %>%
+      ggplot(aes(factor(tile_wh), max_abs_delta, fill = factor(tile_buffer))) +
+      geom_col(position = "dodge", width = .7) +
+      scale_fill_manual(values = oi, name = "tile_buffer (px)") +
+      labs(title = "Tiled path: pixel drift from classic",
+           subtitle = "max|Δ| vs the classic slide, by tile size/overlap (0 = identical). Drift, not a failure — tiled is a different algorithm.",
+           x = "reg_dist_tile_wh (px)", y = "max |Δ| vs classic (intensity levels)")
+    save_fig(p16, "16_tiled_drift_from_classic", 8, 5)
+  }
+}
+
+# ── 17. REGISTRATION ERROR by path — feature-TRE for classic vs separated vs tiled ──
+if (!is.null(qual) && "reg_tre_median_px" %in% names(qual) && "reg_distributed_tiling" %in% names(qual)) {
+  ep <- qual %>% filter(is.finite(reg_tre_median_px)) %>%
+    mutate(path = case_when(!truthy(reg_distributed_tiling) ~ "classic",
+                            "reg_dist_force_tiling" %in% names(.) & truthy(reg_dist_force_tiling) ~ "tiled",
+                            TRUE ~ "separated"))
+  if (nrow(ep) > 0 && dplyr::n_distinct(ep$path) > 1) {
+    p17 <- ggplot(ep, aes(path, reg_tre_median_px, colour = path)) +
+      geom_boxplot(outlier.shape = NA, width = .5) + geom_jitter(width = .12, alpha = .6) +
+      scale_colour_manual(values = oi[c(8, 1, 2)], guide = "none") +
+      labs(title = "Registration error by path (accuracy, not just pixel drift)",
+           subtitle = "Feature-based TRE proxy (median px). Separated should match classic; tiled shows any accuracy cost of tiling.",
+           x = NULL, y = "feature TRE, median (px)")
+    save_fig(p17, "17_registration_error_by_path", 8, 5)
+  }
+}
+
 message("Wrote figures to ", normalizePath(outdir))

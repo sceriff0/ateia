@@ -89,7 +89,8 @@ def run(results_root, run_plan_csv, manifest_csv, reg_eval_csv, outdir, formats=
     # joined to the swept params so the analysis/plots can relate accuracy to config + cost.
     per_run = runs_df.drop_duplicates("run_id")[
         [c for c in ("run_id", "varied_axis", "target_px", "n_channels", "n_register_images",
-                     "memory_mode", "skip_micro_registration", "seg_method", "reg_distributed_tiling")
+                     "memory_mode", "skip_micro_registration", "seg_method", "reg_distributed_tiling",
+                     "reg_dist_force_tiling")
          if c in runs_df.columns]] if not runs_df.empty else pd.DataFrame(columns=["run_id"])
     reg_err = quality.harvest_registration_error(results_root, run_plan_csv)
     try:
