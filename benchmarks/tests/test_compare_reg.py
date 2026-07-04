@@ -3,14 +3,26 @@ import pandas as pd
 from benchmarks.analysis.lib.compare_reg import compare_classic_vs_distributed
 
 
-def _run_rows(run_id, dist, procs, target_px=4096, n_channels=2, n_register_images=2):
+def _run_rows(run_id, dist, procs, target_px=4096, n_channels=2, n_register_images=2, force_tiling=False):
     """procs: list of (leaf, peak_rss_gb, realtime_s). Cell = (target_px, n_channels, n_register_images)."""
     return pd.DataFrame([
         {"process": f"MIRAGE:REGISTRATION:{leaf}", "peak_rss_gb": rss, "realtime_s": rt,
          "config_id": run_id, "run_id": run_id, "rep": 0, "reg_distributed_tiling": dist,
+         "reg_dist_force_tiling": force_tiling,
          "target_px": target_px, "n_channels": n_channels, "n_register_images": n_register_images}
         for leaf, rss, rt in procs
     ])
+
+
+def test_tiled_distributed_excluded_from_classic_comparison():
+    # tiled path (force_tiling=true) is a different algorithm from classic whole-image -> must NOT be
+    # paired with classic (would be a false mismatch). Only the SEPARATED distributed run pairs.
+    classic = _run_rows("c", False, [("VALIS_ADAPTER:REGISTER", 60.0, 100.0)])
+    sep = _run_rows("d", True, [("REG_PREP", 20.0, 30.0), ("REG_FINALIZE_FIELD", 25.0, 20.0)], force_tiling=False)
+    tiled = _run_rows("t", True, [("REG_PREP", 5.0, 30.0), ("REG_FINALIZE", 6.0, 20.0)], force_tiling=True)
+    out = compare_classic_vs_distributed(pd.concat([classic, sep, tiled], ignore_index=True))
+    assert len(out) == 1                                   # classic vs SEPARATED only
+    assert out.iloc[0]["reg_peak_rss_gb_distributed"] == 25.0   # the separated run, not the tiled one
 
 
 def test_pairs_same_cell_and_reports_rss_saving():

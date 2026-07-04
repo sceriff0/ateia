@@ -155,6 +155,9 @@ while IFS=',' read -r -a vals; do
   for i in "${!cols[@]}"; do
     k="${cols[$i]}"
     case "$k" in run_id|varied_axis|target_px|n_channels|n_register_images) continue;; esac
+    # Skip EMPTY values (a null/blank cell, e.g. reg_jvm_heap_gb: null) — passing `--param ""` would
+    # override the pipeline default with an empty string. Empty means "use the pipeline default".
+    [[ -z "${vals[$i]:-}" ]] && continue
     params+=("--${k}" "${vals[$i]}")
   done
 

@@ -75,10 +75,17 @@ def _auto_pair(results_root, run_plan_csv):
     def _truthy(v):
         return str(v).strip().lower() in ("true", "1", "yes")
 
-    dist = plan[plan.get("reg_distributed_tiling").map(_truthy)]
-    classic = plan[~plan.get("reg_distributed_tiling").map(_truthy)]
+    # Bit-identical parity holds ONLY for the SEPARATED distributed path — the TILED path
+    # (reg_dist_force_tiling=true) is a different algorithm from classic whole-image, so exclude it
+    # (comparing it to classic would be a false failure; it's verified against the in-process tiler by
+    # the code-level gate, not against classic pixels).
+    is_dist = plan.get("reg_distributed_tiling").map(_truthy)
+    is_tiled = plan["reg_dist_force_tiling"].map(_truthy) if "reg_dist_force_tiling" in plan.columns \
+        else pd.Series(False, index=plan.index)
+    dist = plan[is_dist & ~is_tiled]
+    classic = plan[~is_dist]
     if dist.empty or classic.empty:
-        raise SystemExit("run plan has no classic AND distributed runs to pair")
+        raise SystemExit("run plan has no classic AND separated-distributed runs to pair")
     # Pair by cell (same input) — a size-crossed distributed_grid has one pair per (size, ch, N).
     root = Path(results_root)
     cell_keys = [k for k in ("target_px", "n_channels", "n_register_images") if k in plan.columns]

@@ -84,6 +84,7 @@ def _configs(sweep: dict) -> list[tuple[dict, str]]:
         for tw in dgrid.get("reg_dist_tile_wh", [baseline.get("reg_dist_tile_wh", 512)]):
             for tb in dgrid.get("reg_dist_tile_buffer", [baseline.get("reg_dist_tile_buffer", 100)]):
                 configs.append((dict(baseline, reg_distributed_tiling=True,
+                                     reg_dist_sub_threshold="force",   # else 'auto' routes small cells to classic
                                      reg_dist_force_tiling=True,
                                      reg_dist_tile_wh=tw, reg_dist_tile_buffer=tb),
                                 "distributed_tiling_grid"))

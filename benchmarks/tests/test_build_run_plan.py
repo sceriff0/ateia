@@ -192,9 +192,10 @@ def test_distributed_tiling_grid_pins_force_tiling_and_crosses_knobs():
     plan = build_run_plan(sweep, repeats=1)
     grid = [r for r in plan if r["varied_axis"] == "distributed_tiling_grid"]
     assert len(grid) == 4  # 2 tile_wh x 2 tile_buffer
-    # every grid run pins the tiled fan-out on (else the tile knobs are no-ops)
+    # every grid run pins the tiled fan-out on (else the tile knobs are no-ops) AND forces the
+    # distributed adapter (else 'auto' routes small cells back to classic — no tiling measured)
     assert all(r["reg_distributed_tiling"] is True and r["reg_dist_force_tiling"] is True
-               for r in grid)
+               and r["reg_dist_sub_threshold"] == "force" for r in grid)
     assert {(r["reg_dist_tile_wh"], r["reg_dist_tile_buffer"]) for r in grid} == {
         (256, 50), (256, 100), (512, 50), (512, 100)}
 

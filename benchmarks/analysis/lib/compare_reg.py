@@ -58,6 +58,12 @@ def compare_classic_vs_distributed(runs_df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
 
     df = runs_df.copy()
+    # The TILED distributed path (reg_dist_force_tiling=true) is a DIFFERENT algorithm from classic
+    # whole-image (tiled != whole-image optical flow), so it must NOT be compared to classic here — it
+    # would read as a false parity/cost mismatch. Only classic vs the SEPARATED distributed path (which
+    # IS bit-identical) is a valid pairing. Drop tiled rows; the tiled path is benchmarked on its own.
+    if "reg_dist_force_tiling" in df.columns:
+        df = df[~df["reg_dist_force_tiling"].map(_truthy)]
     df["_leaf"] = df["process"].map(_leaf)
     df["_dist"] = df["reg_distributed_tiling"].map(_truthy)
 

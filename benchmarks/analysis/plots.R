@@ -334,4 +334,27 @@ if (!is.null(cost) && all(c("bottleneck_stage", "target_px") %in% names(cost))) 
   }
 }
 
+# ── 15. DISTRIBUTED TILED PATH — granularity study (tile size x overlap) ──
+# The tiled fan-out is a DIFFERENT algorithm from classic (excluded from the parity comparison), so it
+# gets its own figure: registration-stage peak RSS + compute vs tile_wh, coloured by tile_buffer.
+if ("varied_axis" %in% names(m) && any(m$varied_axis == "distributed_tiling_grid")) {
+  reg_leaves2 <- c("REG_PREP","REG_TILE","REG_NONRIGID","REG_FINALIZE","REG_FINALIZE_FIELD",
+                   "REG_FINALIZE_MICRO","REG_WARP_REF","REG_MICRO_PREP")
+  tg <- m %>% filter(varied_axis == "distributed_tiling_grid", proc %in% reg_leaves2)
+  if (nrow(tg) > 0 && all(c("reg_dist_tile_wh","reg_dist_tile_buffer") %in% names(tg))) {
+    p15 <- tg %>%
+      group_by(reg_dist_tile_wh, reg_dist_tile_buffer, run_id) %>%
+      summarise(reg_peak_gb = max(peak_rss_gb), reg_time_s = sum(realtime_s), .groups = "drop") %>%
+      group_by(reg_dist_tile_wh, reg_dist_tile_buffer) %>%
+      summarise(reg_peak_gb = mean(reg_peak_gb), reg_time_s = mean(reg_time_s), .groups = "drop") %>%
+      ggplot(aes(factor(reg_dist_tile_wh), reg_peak_gb, fill = factor(reg_dist_tile_buffer))) +
+      geom_col(position = "dodge", width = .7) +
+      scale_fill_manual(values = oi, name = "tile_buffer (px)") +
+      labs(title = "Distributed tiled path: RAM vs tile granularity",
+           subtitle = "Registration-stage peak RSS by tile size and overlap (the fan-out is a separate algorithm from classic).",
+           x = "reg_dist_tile_wh (px)", y = "registration-stage peak RSS (GiB)")
+    save_fig(p15, "15_tiled_path_granularity", 8, 5)
+  }
+}
+
 message("Wrote figures to ", normalizePath(outdir))
