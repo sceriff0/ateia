@@ -42,17 +42,42 @@ def _imread(path):
     return np.asarray(tifffile.imread(str(path)))
 
 
+def _shape(path):
+    """Cheap image shape from the TIFF header — no full-res load (so the size guard costs nothing)."""
+    import tifffile
+    with tifffile.TiffFile(str(path)) as tf:
+        return tf.series[0].shape
+
+
 def compare_registered_dirs(classic_out, distributed_out, atol: float = 0.0,
-                            reader=_imread) -> list[dict]:
+                            reader=_imread, max_pixels=None, shape_reader=_shape) -> list[dict]:
     """Compare every slide present in BOTH run dirs. Returns one dict per shared slide with the DRIFT
     of distributed from classic: {patient, slide, equal, max_abs_delta, mean_abs_delta, pct_pixels_diff,
     shape_*, within_atol}. For the separated path these should be ~0 (bit-identical); for the tiled path
-    they QUANTIFY the drift (tiled != classic whole-image)."""
+    they QUANTIFY the drift (tiled != classic whole-image).
+
+    max_pixels: skip a slide (record skipped_too_large) if either image exceeds this many pixels — the
+    registered slides are single-resolution, so a 65536x65536 slide would need ~34 GB to load. The
+    bit-identity of the SEPARATED path holds by construction at large sizes (verified at feasible ones +
+    the code-level gate); drift is measured where it fits."""
     a = find_registered(classic_out)
     b = find_registered(distributed_out)
     shared = sorted(set(a) & set(b))
     results = []
     for key in shared:
+        if max_pixels is not None:
+            try:
+                sa, sb = shape_reader(a[key]), shape_reader(b[key])
+                npix = max(int(np.prod(sa)), int(np.prod(sb)))
+            except Exception:
+                npix = 0
+            if npix > max_pixels:
+                results.append({"patient": key[0], "slide": key[1], "equal": None,
+                                "max_abs_delta": float("nan"), "mean_abs_delta": float("nan"),
+                                "pct_pixels_diff": float("nan"), "shape_classic": None,
+                                "shape_distributed": None, "within_atol": True,  # not a parity failure
+                                "skipped_too_large": True})
+                continue
         ca, cb = reader(a[key]), reader(b[key])
         if ca.shape != cb.shape:
             results.append({"patient": key[0], "slide": key[1], "equal": False,
@@ -117,7 +142,11 @@ def main(argv=None) -> int:
     ap.add_argument("--run-plan")
     ap.add_argument("--atol", type=float, default=0.0, help="0 == exact (bit-identical, the SEPARATED claim)")
     ap.add_argument("--drift-csv", default=None, help="write per-slide drift rows here (for plotting)")
+    ap.add_argument("--max-dim", type=int, default=8192,
+                    help="skip slides whose larger dim exceeds this (single-res slides OOM at 65536); "
+                         "0 = no limit. Parity holds by construction above this.")
     a = ap.parse_args(argv)
+    max_pixels = a.max_dim ** 2 if a.max_dim and a.max_dim > 0 else None
 
     if a.results_root and a.run_plan:
         pairs = _auto_pair(a.results_root, a.run_plan)
@@ -132,9 +161,13 @@ def main(argv=None) -> int:
     print("=" * 78)
     parity_ok, any_sep, any_tiled, drift_rows = True, False, False, []
     for p in pairs:
-        results = compare_registered_dirs(p["classic_out"], p["distributed_out"], atol=a.atol)
+        results = compare_registered_dirs(p["classic_out"], p["distributed_out"], atol=a.atol,
+                                          max_pixels=max_pixels)
         cell = "" if p["cell"] is None else f"cell{p['cell']} "
         for r in results:
+            if r.get("skipped_too_large"):
+                print(f"  [{p['path']:9s}] {cell}{r['slide']:22s} (skipped — larger than --max-dim)")
+                continue
             r2 = {"path": p["path"], "cell": str(p["cell"]), "tile_wh": p["tile_wh"],
                   "tile_buffer": p["tile_buffer"], **{k: r[k] for k in
                   ("patient", "slide", "max_abs_delta", "mean_abs_delta", "pct_pixels_diff", "equal")}}

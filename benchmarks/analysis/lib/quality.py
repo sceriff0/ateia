@@ -36,7 +36,7 @@ def harvest_registration_error(results_root, run_plan_csv) -> pd.DataFrame:
     plan = pd.read_csv(run_plan_csv)
     rows = []
     for run_id in plan["run_id"]:
-        jsons = list((root / str(run_id) / "out").glob("*/feature_distances/*_feature_distances.json"))
+        jsons = list((root / str(run_id) / "out").rglob("*_feature_distances.json"))
         med, mean, imp = [], [], []
         for j in jsons:
             try:
@@ -64,8 +64,10 @@ def harvest_registration_error(results_root, run_plan_csv) -> pd.DataFrame:
 
 # ─────────────────────────────────────────────────────────── segmentation counts ──
 def _cell_masks(run_out_dir):
-    return list(Path(run_out_dir).glob("*/segment*/*cell_mask*.tif")) + \
-           list(Path(run_out_dir).glob("*/segment*/*cell_mask*.tiff"))
+    # SEGMENT has no explicit publishDir, so masks land under the global-default dir (out/segment/),
+    # NOT out/<patient>/segment*/. Search recursively so we find them wherever they are published.
+    p = Path(run_out_dir)
+    return sorted(set(p.rglob("*_cell_mask.tif")) | set(p.rglob("*_cell_mask.tiff")))
 
 
 def _max_label(path, reader):

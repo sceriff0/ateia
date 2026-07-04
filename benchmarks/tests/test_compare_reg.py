@@ -68,6 +68,27 @@ def test_cell_measured_only_one_way_is_not_paired():
     assert compare_classic_vs_distributed(rows).empty
 
 
+def test_pairing_restricted_to_purpose_built_grids():
+    # registration_param_grid also has classic+distributed at the baseline cell (varied memory_mode) —
+    # they must NOT pollute the size-crossed classic-vs-distributed saving. Only baseline/scaling_grid
+    # (classic) vs distributed_grid (distributed) are paired.
+    def rows(run_id, va, dist, rss):
+        return pd.DataFrame([{"process": "MIRAGE:REGISTRATION:" + ("REG_PREP" if dist else "VALIS_ADAPTER:REGISTER"),
+                              "peak_rss_gb": rss, "realtime_s": 100.0, "config_id": run_id, "run_id": run_id,
+                              "rep": 0, "reg_distributed_tiling": dist, "reg_dist_force_tiling": False,
+                              "varied_axis": va, "target_px": 4096, "n_channels": 2, "n_register_images": 2}])
+    df = pd.concat([
+        rows("base", "baseline", False, 60.0),
+        rows("dg", "distributed_grid", True, 25.0),
+        rows("rp_c", "registration_param_grid", False, 200.0),   # noise that must be excluded
+        rows("rp_d", "registration_param_grid", True, 5.0),
+    ], ignore_index=True)
+    out = compare_classic_vs_distributed(df)
+    assert len(out) == 1
+    assert out.iloc[0]["reg_peak_rss_gb_classic"] == 60.0        # baseline, not the 200 param-grid run
+    assert out.iloc[0]["reg_peak_rss_gb_distributed"] == 25.0    # distributed_grid, not the 5 param-grid run
+
+
 def test_empty_when_no_distributed_runs():
     classic = _run_rows("run0000", False, [("VALIS_ADAPTER:REGISTER", 60.0, 100.0)])
     assert compare_classic_vs_distributed(classic).empty

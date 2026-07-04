@@ -85,6 +85,22 @@ def test_auto_pair_labels_separated_and_tiled(tmp_path):
     assert str(by_path["tiled"]["classic_out"]).endswith("c/out")
 
 
+def test_max_pixels_skips_large_slides_without_reading(tmp_path):
+    # Bug C: single-resolution slides OOM at 65536. With max_pixels set, a too-large slide is skipped
+    # via the cheap shape reader — the full-array reader is NEVER called for it.
+    a = _make_run(tmp_path, "run0000", slides=("P001_mov1",))
+    b = _make_run(tmp_path, "run0046", slides=("P001_mov1",))
+    read_calls = []
+    def reader(path):
+        read_calls.append(path); return np.zeros((3, 4), np.uint16)
+    shape_reader = lambda path: (65536, 65536)     # pretend it's huge
+    res = compare_registered_dirs(a, b, atol=0.0, reader=reader,
+                                  max_pixels=8192 * 8192, shape_reader=shape_reader)
+    assert len(res) == 1 and res[0].get("skipped_too_large") is True
+    assert res[0]["within_atol"] is True           # a skip is NOT a parity failure
+    assert read_calls == []                         # never loaded the (huge) array
+
+
 def test_shape_mismatch_is_not_equal(tmp_path):
     a = _make_run(tmp_path, "run0000", slides=("P001_mov1",))
     b = _make_run(tmp_path, "run0046", slides=("P001_mov1",))

@@ -74,6 +74,17 @@ def test_harvest_segmentation_counts(tmp_path):
     assert out.loc["r0", "n_cells"] == 3 and out.loc["r1", "n_cells"] == 5
 
 
+def test_harvest_segmentation_counts_finds_global_default_location(tmp_path):
+    # SEGMENT uses the global-default publishDir -> masks land at out/segment/ (NOT out/<patient>/...),
+    # so the harvest must search recursively. Regression for the wrong */segment*/ glob.
+    plan = tmp_path / "plan.csv"; pd.DataFrame({"run_id": ["r0"]}).to_csv(plan, index=False)
+    d = tmp_path / "r0" / "out" / "segment"; d.mkdir(parents=True)   # no patient dir
+    (d / "P001_cell_mask.tif").write_bytes(b"")
+    reader = lambda p: np.array([[0, 1], [2, 3]])
+    out = quality.harvest_segmentation_counts(tmp_path, plan, reader=reader)
+    assert len(out) == 1 and out.iloc[0]["n_cells"] == 3
+
+
 def test_segmentation_agreement_pairwise(tmp_path):
     plan = tmp_path / "plan.csv"
     pd.DataFrame({"run_id": ["s", "c"], "target_px": [4096, 4096], "n_channels": [2, 2],

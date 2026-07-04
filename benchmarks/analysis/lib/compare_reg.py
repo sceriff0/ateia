@@ -64,6 +64,16 @@ def compare_classic_vs_distributed(runs_df: pd.DataFrame) -> pd.DataFrame:
     # IS bit-identical) is a valid pairing. Drop tiled rows; the tiled path is benchmarked on its own.
     if "reg_dist_force_tiling" in df.columns:
         df = df[~df["reg_dist_force_tiling"].map(_truthy)]
+    # Restrict to the PURPOSE-BUILT size grids so the per-cell pairing is like-for-like. Many other
+    # axes (registration_param_grid, reg_jvm_heap_gb, segmentation_grid, …) also run at the baseline
+    # cell; pooling their classic runs into the "classic" side would average over memory_mode / JVM heap
+    # and muddle the saving. Classic side = baseline + scaling_grid; distributed side = distributed_grid.
+    # (registration_param_grid's own classic-vs-distributed comparison is shown per memory_mode by the
+    # plots, not here.)
+    if "varied_axis" in df.columns:
+        keep = {"baseline", "scaling_grid", "distributed_grid"}
+        if df["varied_axis"].isin(keep).any():
+            df = df[df["varied_axis"].isin(keep)]
     df["_leaf"] = df["process"].map(_leaf)
     df["_dist"] = df["reg_distributed_tiling"].map(_truthy)
 
