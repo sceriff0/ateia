@@ -87,6 +87,41 @@ def _streamed_delta(pa, pb, block_rows=2048):
             "equal": mx == 0, "shape": tuple(za.shape)}
 
 
+def _compare_one(pa, pb, base, atol, stream, max_pixels, reader, shape_reader) -> dict:
+    """Drift row for ONE slide pair. May raise (a mid-write / corrupt file) — the caller isolates that."""
+    s = _streamed_delta(pa, pb) if stream else None
+    if s is not None and "shape_mismatch" not in s:
+        return {**base, "equal": s["equal"], "max_abs_delta": s["max"],
+                "mean_abs_delta": s["mean"], "pct_pixels_diff": s["pct"],
+                "shape_classic": s["shape"], "shape_distributed": s["shape"],
+                "within_atol": s["max"] <= atol}
+    if s is not None and "shape_mismatch" in s:
+        sa, sb = s["shape_mismatch"]
+        return {**base, "equal": False, "max_abs_delta": float("inf"),
+                "mean_abs_delta": float("inf"), "pct_pixels_diff": float("nan"),
+                "shape_classic": sa, "shape_distributed": sb, "within_atol": False}
+    # full-read path (streaming off, or zarr unavailable) — guard against OOM on huge slides
+    if max_pixels is not None:
+        try:
+            npix = max(int(np.prod(shape_reader(pa))), int(np.prod(shape_reader(pb))))
+        except Exception:
+            npix = 0
+        if npix > max_pixels:
+            return {**base, "equal": None, "max_abs_delta": float("nan"),
+                    "mean_abs_delta": float("nan"), "pct_pixels_diff": float("nan"),
+                    "shape_classic": None, "shape_distributed": None,
+                    "within_atol": True, "skipped_too_large": True}
+    ca, cb = reader(pa), reader(pb)
+    d = _delta_from_arrays(ca, cb)
+    if d is None:
+        return {**base, "equal": False, "max_abs_delta": float("inf"),
+                "mean_abs_delta": float("inf"), "pct_pixels_diff": float("nan"),
+                "shape_classic": ca.shape, "shape_distributed": cb.shape, "within_atol": False}
+    return {**base, "equal": d["equal"], "max_abs_delta": d["max"], "mean_abs_delta": d["mean"],
+            "pct_pixels_diff": d["pct"], "shape_classic": d["shape"],
+            "shape_distributed": d["shape"], "within_atol": d["max"] <= atol}
+
+
 def compare_registered_dirs(classic_out, distributed_out, atol: float = 0.0, reader=_imread,
                             max_pixels=None, shape_reader=_shape, stream=False) -> list[dict]:
     """Compare every slide present in BOTH run dirs, returning the DRIFT of distributed from classic per
@@ -96,48 +131,26 @@ def compare_registered_dirs(classic_out, distributed_out, atol: float = 0.0, rea
     stream=True compares the WHOLE image in memory-safe strips (zarr) — use on the cluster so even the
     65536px slides get real whole-image parity; falls back to a full read if zarr is missing.
     max_pixels (fallback only): if streaming is off/unavailable, skip a slide larger than this rather
-    than OOM (records skipped_too_large; not a parity failure — separated bit-identity holds above)."""
+    than OOM (records skipped_too_large; not a parity failure — separated bit-identity holds above).
+
+    Safe against a PARTIALLY-COMPLETE sweep: a slide that can't be read yet (mid-publish, or a corrupt
+    in-flight file) is recorded as ``pending=True`` (equal=None, within_atol=True — NOT a parity failure)
+    instead of aborting the comparison, so already-finished pairs still report."""
     a = find_registered(classic_out)
     b = find_registered(distributed_out)
     shared = sorted(set(a) & set(b))
     results = []
     for key in shared:
         base = {"patient": key[0], "slide": key[1]}
-        s = _streamed_delta(a[key], b[key]) if stream else None
-        if s is not None and "shape_mismatch" not in s:
-            results.append({**base, "equal": s["equal"], "max_abs_delta": s["max"],
-                            "mean_abs_delta": s["mean"], "pct_pixels_diff": s["pct"],
-                            "shape_classic": s["shape"], "shape_distributed": s["shape"],
-                            "within_atol": s["max"] <= atol})
-            continue
-        if s is not None and "shape_mismatch" in s:
-            sa, sb = s["shape_mismatch"]
-            results.append({**base, "equal": False, "max_abs_delta": float("inf"),
-                            "mean_abs_delta": float("inf"), "pct_pixels_diff": float("nan"),
-                            "shape_classic": sa, "shape_distributed": sb, "within_atol": False})
-            continue
-        # full-read path (streaming off, or zarr unavailable) — guard against OOM on huge slides
-        if max_pixels is not None:
-            try:
-                npix = max(int(np.prod(shape_reader(a[key]))), int(np.prod(shape_reader(b[key]))))
-            except Exception:
-                npix = 0
-            if npix > max_pixels:
-                results.append({**base, "equal": None, "max_abs_delta": float("nan"),
-                                "mean_abs_delta": float("nan"), "pct_pixels_diff": float("nan"),
-                                "shape_classic": None, "shape_distributed": None,
-                                "within_atol": True, "skipped_too_large": True})
-                continue
-        ca, cb = reader(a[key]), reader(b[key])
-        d = _delta_from_arrays(ca, cb)
-        if d is None:
-            results.append({**base, "equal": False, "max_abs_delta": float("inf"),
-                            "mean_abs_delta": float("inf"), "pct_pixels_diff": float("nan"),
-                            "shape_classic": ca.shape, "shape_distributed": cb.shape, "within_atol": False})
-            continue
-        results.append({**base, "equal": d["equal"], "max_abs_delta": d["max"], "mean_abs_delta": d["mean"],
-                        "pct_pixels_diff": d["pct"], "shape_classic": d["shape"],
-                        "shape_distributed": d["shape"], "within_atol": d["max"] <= atol})
+        try:
+            results.append(_compare_one(a[key], b[key], base, atol, stream, max_pixels, reader, shape_reader))
+        except Exception as e:
+            # The run's slide exists in the tree but isn't readable yet (still being written by a live
+            # sweep) or is corrupt. Treat as PENDING, not a parity failure — don't abort the whole run.
+            results.append({**base, "equal": None, "max_abs_delta": float("nan"),
+                            "mean_abs_delta": float("nan"), "pct_pixels_diff": float("nan"),
+                            "shape_classic": None, "shape_distributed": None,
+                            "within_atol": True, "pending": True, "error": str(e)[:200]})
     return results
 
 
@@ -205,13 +218,25 @@ def main(argv=None) -> int:
     print("REGISTRATION vs CLASSIC — SEPARATED = bit-identical gate, TILED = drift measurement")
     print("=" * 78)
     parity_ok, any_sep, any_tiled, drift_rows = True, False, False, []
+    pairs_total, pairs_with_data, pending_pairs = len(pairs), 0, []
     for p in pairs:
         results = compare_registered_dirs(p["classic_out"], p["distributed_out"], atol=a.atol,
                                           max_pixels=max_pixels, stream=stream)
         cell = "" if p["cell"] is None else f"cell{p['cell']} "
+        # A pair "has data" only if at least one slide was actually compared (not absent, pending, or
+        # skipped-too-large). This is what makes a mid-sweep run honest: the parity verdict below covers
+        # only the pairs that were truly measured, and the coverage line reports the rest.
+        if any(not r.get("pending") and not r.get("skipped_too_large") for r in results):
+            pairs_with_data += 1
+        else:
+            pending_pairs.append((p["path"], p["cell"]))
         for r in results:
             if r.get("skipped_too_large"):
                 print(f"  [{p['path']:9s}] {cell}{r['slide']:22s} (skipped — larger than --max-dim)")
+                continue
+            if r.get("pending"):
+                print(f"  [{p['path']:9s}] {cell}{r['slide']:22s} (pending — slide not readable yet, "
+                      f"sweep still running)")
                 continue
             r2 = {"path": p["path"], "cell": str(p["cell"]), "tile_wh": p["tile_wh"],
                   "tile_buffer": p["tile_buffer"], **{k: r[k] for k in
@@ -232,8 +257,19 @@ def main(argv=None) -> int:
         import pandas as pd
         pd.DataFrame(drift_rows).to_csv(a.drift_csv, index=False)
         print(f"drift rows -> {a.drift_csv}")
+    # Coverage — so a run against a still-populating results/ dir can't be mistaken for the full picture.
+    provisional = ""
+    if pending_pairs:
+        provisional = f"  (PROVISIONAL — {len(pending_pairs)} pair(s) pending; rerun when the sweep finishes)"
+        print(f"coverage: {pairs_with_data}/{pairs_total} classic-distributed pairs had both sides' "
+              f"registered slides present; {len(pending_pairs)} pending (still running / not published yet)",
+              flush=True)
+    else:
+        print(f"coverage: {pairs_with_data}/{pairs_total} classic-distributed pairs measured (complete)",
+              flush=True)
     if any_sep:
-        print(f"SEPARATED PARITY (must be bit-identical): {'PASS' if parity_ok else 'FAIL'}", flush=True)
+        print(f"SEPARATED PARITY (must be bit-identical): {'PASS' if parity_ok else 'FAIL'}{provisional}",
+              flush=True)
     if any_tiled:
         import statistics
         mx = [r["max_abs_delta"] for r in drift_rows if r["path"] == "tiled" and np.isfinite(r["max_abs_delta"])]

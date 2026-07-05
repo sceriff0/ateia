@@ -131,6 +131,13 @@ Verify the whole harness with no data at all:
         --outdir       benchmarks/analysis
         # optional: --reg-eval reg_eval.csv   (from pipeline B, for the accuracy section)
 
+> **Run it any time — the sweep does not have to be finished.** `make_figures` reads whatever
+> runs have completed: it skips run dirs with no `trace.txt` yet, and (because Nextflow only writes
+> a trace row when a *process* finishes) an in-flight run contributes just its completed processes.
+> `only_successful` then drops any non-`COMPLETED` row, so the fits/means never see a partial process.
+> Early on, size-varying runs may be too few for a real fit (`r2` empty ⇒ `n<3` flat fallback) — that
+> is expected, not an error. Re-run it as more runs land to watch the fits firm up.
+
 - **Output:**
   - `benchmarks/analysis/measurements.csv` — **the primary data artifact**: one tidy row per
     (run × process) with `peak_rss_gb`, `peak_vmem_gb`, `realtime_s`, `duration_s`, `cpus`,
@@ -292,6 +299,13 @@ Two independent checks:
        # TILED path     -> a DRIFT report (max|Δ|, mean|Δ|, %pixels vs classic, by tile_wh/buffer) — it is
        #                   a different algorithm, so NOT expected to match; this quantifies how far it moves.
        # The --drift-csv feeds plots 16 (tiled drift) and 17 (feature-TRE by path: classic/separated/tiled).
+
+   **Safe to run mid-sweep.** Like `make_figures`, this tolerates a partially-populated `bench_results/`:
+   a pair whose runs haven't published slides yet is skipped, and a slide caught *mid-write* is recorded
+   as `pending` (not a parity failure) instead of aborting the run. The output ends with a **coverage**
+   line (`N/M pairs measured`) and tags the verdict **PROVISIONAL** while any pair is still pending — so a
+   `PASS` during the sweep can't be mistaken for the final gate. Re-run once the sweep finishes for the
+   definitive `PASS`/`FAIL` (coverage `M/M`, no PROVISIONAL tag).
 
 2. **Code-level gate** (small fixture, on any node with Docker + the image) — asserts the
    SEPARATED path == classic whole-image and the tiled path == VALIS's in-process tiler:

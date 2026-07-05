@@ -112,6 +112,62 @@ def test_stream_falls_back_to_full_read_when_zarr_missing(tmp_path):
     assert len(res) == 1 and res[0]["max_abs_delta"] == 7.0 and res[0]["within_atol"] is False
 
 
+def test_unreadable_slide_marked_pending_not_crash(tmp_path):
+    # A slide that exists in the tree but can't be read yet (mid-publish on a LIVE sweep, or corrupt) must
+    # NOT abort the comparison — it is recorded as pending (equal=None, within_atol=True: not a failure).
+    a = _make_run(tmp_path, "run0000", slides=("P001_mov1",))
+    b = _make_run(tmp_path, "run0046", slides=("P001_mov1",))
+    def reader(path):
+        raise OSError("truncated file — still being written")
+    res = compare_registered_dirs(a, b, atol=0.0, reader=reader)
+    assert len(res) == 1
+    assert res[0].get("pending") is True
+    assert res[0]["equal"] is None and res[0]["within_atol"] is True   # pending != parity failure
+
+
+def test_one_pending_slide_does_not_block_the_other(tmp_path):
+    # Two slides; one is mid-write (reader raises), the other is complete. The complete one must still be
+    # compared — a single in-flight file can't blind the whole pair.
+    a = _make_run(tmp_path, "run0000", slides=("P001_ref", "P001_mov1"))
+    b = _make_run(tmp_path, "run0046", slides=("P001_ref", "P001_mov1"))
+    good = np.arange(12, dtype=np.uint16).reshape(3, 4)
+    def reader(path):
+        if "P001_mov1" in str(path):
+            raise OSError("still writing")
+        return good
+    res = {r["slide"]: r for r in compare_registered_dirs(a, b, atol=0.0, reader=reader)}
+    assert res["P001_mov1"].get("pending") is True
+    assert res["P001_ref"].get("pending") is None and res["P001_ref"]["equal"] is True
+
+
+def test_main_reports_provisional_coverage_when_a_pair_is_pending(tmp_path, capsys):
+    # End-to-end main(): one separated pair fully published (→ measured PASS) and a second whose
+    # distributed run hasn't published slides yet (→ pending). The verdict must be flagged PROVISIONAL and
+    # the coverage line must show 1/2, so a mid-sweep run can't be mistaken for the complete gate.
+    import pandas as pd
+    import tifffile
+    from benchmarks.registration_eval.compare_registered import main
+    plan = tmp_path / "plan.csv"
+    pd.DataFrame({
+        "run_id": ["cA", "sepA", "cB", "sepB"],
+        "target_px": [4096, 4096, 8192, 8192], "n_channels": [2, 2, 2, 2],
+        "n_register_images": [2, 2, 2, 2],
+        "reg_distributed_tiling": [False, True, False, True],
+        "reg_dist_force_tiling": [False, False, False, False],
+        "reg_dist_tile_wh": [512] * 4, "reg_dist_tile_buffer": [100] * 4,
+    }).to_csv(plan, index=False)
+    img = np.arange(12, dtype=np.uint16).reshape(3, 4)
+    for rid in ("cA", "sepA", "cB"):                       # cB present but sepB has NO slides -> pending pair
+        out = _make_run(tmp_path, rid, slides=("P001_mov1",))
+        tifffile.imwrite(out / "P001" / "registered" / "registered_slides" / "P001_mov1_registered.ome.tiff", img)
+    _make_run(tmp_path, "sepB", slides=())                 # run dir exists, nothing published yet
+    rc = main(["--results-root", str(tmp_path), "--run-plan", str(plan)])
+    txt = capsys.readouterr().out
+    assert "1/2" in txt and "PROVISIONAL" in txt and "pending" in txt
+    assert "SEPARATED PARITY (must be bit-identical): PASS" in txt
+    assert rc == 0                                          # the measured pair passed
+
+
 def test_shape_mismatch_is_not_equal(tmp_path):
     a = _make_run(tmp_path, "run0000", slides=("P001_mov1",))
     b = _make_run(tmp_path, "run0046", slides=("P001_mov1",))
