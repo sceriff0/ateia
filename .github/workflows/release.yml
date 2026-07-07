@@ -47,7 +47,7 @@ jobs:
       version_no_v: ${{ steps.get_version.outputs.version_no_v }}  # e.g. 1.0.0
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Get version
         id: get_version
@@ -80,10 +80,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Cache Nextflow
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.nextflow
           key: ${{ runner.os }}-nextflow-release-${{ hashFiles('**/*.nf') }}
@@ -91,15 +91,15 @@ jobs:
             ${{ runner.os }}-nextflow-
 
       - name: Install Nextflow (>=25.04.0)
-        uses: nf-core/setup-nextflow@v2
+        uses: nf-core/setup-nextflow@v3
         with:
           version: 'latest-everything'
 
       - name: Set up Docker
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Install Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.10'
           cache: 'pip'
@@ -138,7 +138,7 @@ jobs:
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-test-results
           path: |
@@ -159,7 +159,7 @@ jobs:
       contents: write
     steps:
       - name: Checkout repository (main, full history)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: main
           fetch-depth: 0
@@ -210,7 +210,7 @@ jobs:
     if: github.event_name == 'release'
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Check manifest.version matches the released tag
         run: |
@@ -249,7 +249,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Create release archive
         run: |
@@ -271,7 +271,7 @@ jobs:
           ls -lh "$ARCHIVE_NAME"
 
       - name: Upload release artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-archive
           path: mirage-*.tar.gz
@@ -290,22 +290,22 @@ jobs:
       contents: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Download release archive
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: release-archive
 
       - name: Upload archive to release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v3
         with:
           files: mirage-*.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Update release body
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v3
         with:
           body: |
             ## MIRAGE Pipeline Release ${{ needs.validate.outputs.version }}

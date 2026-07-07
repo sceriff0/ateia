@@ -37,10 +37,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
           cache: 'pip'
@@ -64,7 +64,7 @@ jobs:
 
       - name: Upload coverage
         if: matrix.python-version == '3.10'
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v7
         with:
           files: ./coverage.xml
           fail_ci_if_error: false
@@ -83,10 +83,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Cache Nextflow
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.nextflow
@@ -97,15 +97,15 @@ jobs:
             ${{ runner.os }}-nextflow-
 
       - name: Install Nextflow
-        uses: nf-core/setup-nextflow@v2
+        uses: nf-core/setup-nextflow@v3
         with:
           version: ${{ matrix.nextflow-version }}
 
       - name: Set up Docker
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Install Python for test data generation
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.10'
           cache: 'pip'
@@ -144,7 +144,7 @@ jobs:
 
       - name: Upload stub test results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: stub-results-nf-${{ matrix.nextflow-version }}
           path: |
@@ -160,10 +160,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Cache Nextflow
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.nextflow
           key: ${{ runner.os }}-nextflow-${{ hashFiles('**/*.nf') }}
@@ -175,15 +175,15 @@ jobs:
         # wrappers do not compile under edge Nextflow's strict parser.
         # latest-everything full-pipeline compatibility is covered by the
         # nextflow-stub job's matrix.
-        uses: nf-core/setup-nextflow@v2
+        uses: nf-core/setup-nextflow@v3
         with:
           version: '25.04.0'
 
       - name: Set up Docker
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Install Python for test data generation
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.10'
           cache: 'pip'
@@ -194,7 +194,7 @@ jobs:
           python tests/testdata/generate_complete_testdata.py
 
       - name: Install nf-test
-        uses: nf-core/setup-nf-test@v1
+        uses: nf-core/setup-nf-test@v2
         with:
           version: ${{ env.NFTEST_VERSION }}
 
@@ -208,7 +208,7 @@ jobs:
 
       - name: Upload nf-test results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: nf-test-stub-results
           path: |
@@ -233,10 +233,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Cache Nextflow
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.nextflow
           key: ${{ runner.os }}-nextflow-real-${{ hashFiles('**/*.nf') }}
@@ -248,15 +248,15 @@ jobs:
         # wrappers do not compile under edge Nextflow's strict parser.
         # latest-everything full-pipeline compatibility is covered by the
         # nextflow-stub job's matrix.
-        uses: nf-core/setup-nextflow@v2
+        uses: nf-core/setup-nextflow@v3
         with:
           version: '25.04.0'
 
       - name: Set up Docker
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Install Python for test data generation
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.10'
           cache: 'pip'
@@ -267,7 +267,7 @@ jobs:
           python tests/testdata/generate_complete_testdata.py
 
       - name: Install nf-test
-        uses: nf-core/setup-nf-test@v1
+        uses: nf-core/setup-nf-test@v2
         with:
           version: ${{ env.NFTEST_VERSION }}
 
@@ -277,7 +277,7 @@ jobs:
 
       - name: Upload nf-test results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: nf-test-real-results
           path: |
@@ -294,22 +294,22 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install Nextflow
         # Pinned to the supported release: nf-test 0.9.0's generated test
         # wrappers do not compile under edge Nextflow's strict parser.
         # latest-everything full-pipeline compatibility is covered by the
         # nextflow-stub job's matrix.
-        uses: nf-core/setup-nextflow@v2
+        uses: nf-core/setup-nextflow@v3
         with:
           version: '25.04.0'
 
       - name: Set up Docker
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Install Python for test data generation
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.10'
           cache: 'pip'
@@ -320,7 +320,7 @@ jobs:
           python tests/testdata/generate_complete_testdata.py
 
       - name: Install nf-test
-        uses: nf-core/setup-nf-test@v1
+        uses: nf-core/setup-nf-test@v2
         with:
           version: ${{ env.NFTEST_VERSION }}
 
@@ -330,7 +330,7 @@ jobs:
 
       - name: Upload nf-test results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: nf-test-integration-results
           path: |
@@ -355,10 +355,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -385,12 +385,12 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install Nextflow
         # Pin to the supported release for deterministic lint (matches the rest
         # of the suite); avoids edge-Nextflow surprises in advisory linting.
-        uses: nf-core/setup-nextflow@v2
+        uses: nf-core/setup-nextflow@v3
         with:
           version: '25.04.0'
 
