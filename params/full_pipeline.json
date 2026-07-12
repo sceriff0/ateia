@@ -81,7 +81,6 @@
 
     "_comment_output": "=== Image Output / Pyramid ===",
     "tilex": 512,
-    "tiley": 512,
     "pyramid_resolutions": 8,
     "pyramid_scale": 2,
     "compression": "zstd",

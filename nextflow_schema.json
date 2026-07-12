@@ -269,20 +269,10 @@
                         "force"
                     ]
                 },
-                "reg_dist_tiles_per_task": {
-                    "type": "integer",
-                    "description": "Tiles per REG_TILE task (1 = max granularity). Scheduling only; does not affect output.",
-                    "default": 1
-                },
                 "reg_max_non_rigid_dim": {
                     "type": "integer",
                     "description": "Max non-rigid registration dimension (px) for distributed REG_PREP.",
                     "default": 4096
-                },
-                "reg_max_processed_dim": {
-                    "type": "integer",
-                    "description": "Max processed/rigid dimension (px) for distributed REG_PREP.",
-                    "default": 2048
                 },
                 "reg_jvm_heap_gb": {
                     "type": [
@@ -454,12 +444,7 @@
             "properties": {
                 "tilex": {
                     "type": "integer",
-                    "description": "Tile width for OME-TIFF output.",
-                    "default": 512
-                },
-                "tiley": {
-                    "type": "integer",
-                    "description": "Tile height for OME-TIFF output.",
+                    "description": "Tile size (px, square) for OME-TIFF output.",
                     "default": 512
                 },
                 "pyramid_resolutions": {

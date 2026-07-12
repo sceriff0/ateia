@@ -91,11 +91,9 @@ reach for these if a single REGISTER task can't fit a slide in memory.
 | `reg_dist_tile_wh` | `512` | Non-rigid tile size (px). |
 | `reg_dist_micro_tile_wh` | `2048` | Micro-registration tile size (px). |
 | `reg_dist_tile_buffer` | `100` | Tile overlap (px). |
-| `reg_dist_tiles_per_task` | `1` | Tiles per registration task (1 = max granularity). |
 | `reg_dist_threshold_gb` | `10` | Informational; matches VALIS's internal auto-tiler threshold. |
 | `reg_dist_container` | *(GHCR image)* | Patched VALIS image used for distributed tiles. |
 | `reg_max_non_rigid_dim` | `4096` | Non-rigid working resolution for the prep step. |
-| `reg_max_processed_dim` | `2048` | Rigid/processing working resolution for the prep step. |
 
 ## Segmentation
 
@@ -171,8 +169,7 @@ Pyramidal OME-TIFF assembly and GeoJSON.
 
 | Parameter | Default | Description |
 |---|---|---|
-| `tilex` | `512` | Tile width (px) for the pyramidal OME-TIFF. |
-| `tiley` | `512` | Tile height (px). |
+| `tilex` | `512` | Tile size (px, square) for the pyramidal OME-TIFF. |
 | `pyramid_resolutions` | `8` | Number of pyramid resolution levels. |
 | `pyramid_scale` | `2` | Downsampling factor between levels. |
 | `compression` | `zstd` | Codec: `zstd`, `lzw`, `zlib`, `jpeg`, `none`. |

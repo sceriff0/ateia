@@ -23,7 +23,17 @@ import sys
 from pathlib import Path
 from typing import Optional, Tuple, Dict
 
+# numba (pulled in transitively via valis/registration_utils) and matplotlib both cache under
+# $HOME by default; on a read-only-$HOME cluster node that crashes. Redirect the caches BEFORE
+# any third-party import triggers JIT compilation or font-cache init.
+os.environ.setdefault("NUMBA_CACHE_DIR", "/tmp/numba_cache")
+os.environ["NUMBA_DISABLE_CACHING"] = "1"
+os.environ.setdefault("MPLCONFIGDIR", "/tmp/mplconfig")
+os.environ.setdefault("XDG_CACHE_HOME", "/tmp/xdg_cache")
+
 import numpy as np
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 # Add utils directory to path
@@ -46,11 +56,6 @@ __all__ = ["main"]
 def log_progress(message: str) -> None:
     """Compatibility wrapper for existing progress output."""
     logger.info(message)
-
-# Disable numba caching
-os.environ['NUMBA_DISABLE_JIT'] = '0'
-os.environ['NUMBA_CACHE_DIR'] = '/tmp/numba_cache'
-os.environ['NUMBA_DISABLE_CACHING'] = '1'
 
 def compute_feature_distances(
     ref_kp: np.ndarray,
