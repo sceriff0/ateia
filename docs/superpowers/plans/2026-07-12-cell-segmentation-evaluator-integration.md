@@ -78,6 +78,17 @@ cp "$SRC/single_method_eval.py"  bin/utils/cse/single_method_eval.py
 cp "/Users/valer/Desktop/Github/CellSegmentationEvaluator-master/LICENSE" bin/utils/cse/LICENSE
 ```
 
+- [ ] **Step 1b: Rewrite intra-package imports to relative**
+
+The vendored `single_method_eval.py` imports its helpers with the upstream package name (upstream lines 24-25: `from CellSegmentationEvaluator.functions import ...`), which will not resolve once vendored as `bin.utils.cse`. Change both lines so the package name becomes a relative import:
+
+```python
+from .functions import get_matched_masks, flatten_dict
+from .functions import cell_size_uniformity, foreground_separation, fraction, foreground_uniformity, cell_type, cell_uniformity, getPCAmodel, get_quality_score, get_matched_masks, thresholding, get_matched_fraction
+```
+
+`functions.py` has no intra-package imports, so it needs no change here. Relative imports resolve both when the test imports `bin.utils.cse` and when the entry script imports the package as `cse` (via `sys.path` insert of `bin/utils`).
+
 - [ ] **Step 2: Write the package `__init__.py`** (upstream's does not re-export the functions)
 
 ```python
