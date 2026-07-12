@@ -1,0 +1,38 @@
+nextflow_process {
+
+    name "Test SEG_QC_GEOJSON process"
+    script "modules/local/seg_qc_geojson.nf"
+    process "SEG_QC_GEOJSON"
+
+    tag "modules"
+    tag "modules_local"
+    tag "seg_qc_geojson"
+
+    test("Should emit a cell GeoJSON for a native slide - stub") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [ patient_id: 'P001', channels: ['DAPI', 'CD3', 'CD8'], is_reference: false ],
+                    file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            assert process.success
+            assert process.out.geojson
+            assert process.out.versions
+            with(process.out.geojson) {
+                assert size() == 1
+                assert get(0).get(0).patient_id == 'P001'
+                assert get(0).get(1).toString().endsWith('.geojson')
+            }
+        }
+    }
+}

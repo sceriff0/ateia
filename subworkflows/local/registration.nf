@@ -8,7 +8,8 @@ include { GET_IMAGE_DIMS                    } from '../../modules/local/get_imag
 include { MAX_DIM                           } from '../../modules/local/max_dim'
 include { PAD_IMAGES                        } from '../../modules/local/pad_images'
 include { GENERATE_REGISTRATION_QC          } from '../../modules/local/generate_registration_qc'
-include { SEGMENTATION_QC                   } from '../../modules/local/segmentation_qc'
+include { SEG_QC_GEOJSON                    } from '../../modules/local/seg_qc_geojson'
+include { WARP_SEG_QC                       } from '../../modules/local/warp_seg_qc'
 
 include { VALIS_ADAPTER                     } from './adapters/valis_adapter'
 include { VALIS_DISTRIBUTED_ADAPTER         } from './adapters/valis_distributed_adapter'
@@ -173,9 +174,14 @@ workflow REGISTRATION {
     //   - 'auto' (default): REG_ESTIMATE per patient -> route est>thr to distributed (== classic-tiled),
     //     est<=thr to classic whole-image (IDENTICAL to classic). This keeps <10GB inputs bit-identical.
     //   - 'force': always tile (RAM win at the cost of differing from classic-whole-image for small data).
+    // Registrar pickle (per patient) for the GeoJSON seg-QC — classic VALIS only
+    // (the distributed path produces no single registrar pickle).
+    ch_registrar_pickle = Channel.empty()
+
     if (!params.reg_distributed_tiling) {
         VALIS_ADAPTER(ch_grouped_multi)
         ch_registered       = VALIS_ADAPTER.out.registered
+        ch_registrar_pickle = VALIS_ADAPTER.out.registrar
         ch_adapter_logs     = VALIS_ADAPTER.out.size_logs
         ch_adapter_versions = VALIS_ADAPTER.out.versions
         ch_adapter_summary  = VALIS_ADAPTER.out.summary
@@ -200,6 +206,7 @@ workflow REGISTRATION {
             }
         VALIS_DISTRIBUTED_ADAPTER(ch_routed.distributed.map { pid, payload, u -> tuple(pid, payload[0], payload[1]) })
         VALIS_ADAPTER(            ch_routed.classic.map     { pid, payload, u -> tuple(pid, payload[0], payload[1]) })
+        ch_registrar_pickle = VALIS_ADAPTER.out.registrar   // only classic slides have a pickle
         ch_registered       = VALIS_DISTRIBUTED_ADAPTER.out.registered.mix(VALIS_ADAPTER.out.registered)
         ch_adapter_logs     = VALIS_DISTRIBUTED_ADAPTER.out.size_logs.mix(VALIS_ADAPTER.out.size_logs)
         ch_adapter_versions = VALIS_DISTRIBUTED_ADAPTER.out.versions.mix(VALIS_ADAPTER.out.versions)
@@ -248,42 +255,33 @@ workflow REGISTRATION {
         ch_qc = Channel.empty()
     }
 
-    // Level >= 2: segmentation-overlap QC (Dice/IoU/instance-F1) BEFORE vs AFTER
-    // registration. Needs, per non-reference moving slide: the registered moving +
-    // registered reference (after, aligned grid) and the unregistered moving + reference
-    // (before, baseline). Built by joining ch_registered with ch_images_for_error
-    // (the pre-registration images), mirroring the feature-error channel below.
+    // Level >= 2: GeoJSON segmentation-overlap QC (Dice/IoU/instance-F1) BEFORE vs AFTER.
+    // Segment each slide's DAPI on its NATIVE (pre-registration) image -> cell GeoJSON,
+    // then warp the polygons through the registrar and score overlap. Classic VALIS only
+    // (needs the registrar pickle; distributed produces none).
     ch_seg_qc = Channel.empty()
     if (reg_qc_level >= 2) {
-        ch_for_seg_qc = ch_registered
-            .filter { meta, f -> !meta.is_reference }
-            .map { meta, reg -> [meta.patient_id, meta.channels.toSorted().join('|'), meta, reg] }
-            .join(
-                ch_images_for_error
-                    .filter { meta, f -> !meta.is_reference }
-                    .map { meta, mov -> [meta.patient_id, meta.channels.toSorted().join('|'), mov] },
-                by: [0, 1]
-            )
-            .map { pid, chsig, meta, mov_reg, mov_pre -> [pid, meta, mov_reg, mov_pre] }
-            .combine(
-                ch_images_for_error
-                    .filter { meta, f -> meta.is_reference }
-                    .map { meta, ref -> [meta.patient_id, ref] },
-                by: 0
-            )
-            .map { pid, meta, mov_reg, mov_pre, ref_pre -> [pid, meta, mov_reg, mov_pre, ref_pre] }
-            .combine(
-                ch_registered
-                    .filter { meta, f -> meta.is_reference }
-                    .map { meta, ref -> [meta.patient_id, ref] },
-                by: 0
-            )
-            .map { pid, meta, mov_reg, mov_pre, ref_pre, ref_reg ->
-                tuple(meta, ref_reg, mov_reg, ref_pre, mov_pre)
+        SEG_QC_GEOJSON(ch_images_for_error)
+
+        ch_gj = SEG_QC_GEOJSON.out.geojson.branch { meta, gj ->
+            reference: meta.is_reference
+            moving:    !meta.is_reference
+        }
+        // reference: [patient_id, ref_geojson, ref_slide_name(=stem)]
+        ch_ref_gj = ch_gj.reference.map { meta, gj -> [meta.patient_id, gj, gj.simpleName] }
+        // moving: [patient_id, meta, moving_geojson, moving_slide_name]
+        ch_mov_gj = ch_gj.moving.map { meta, gj -> [meta.patient_id, meta, gj, gj.simpleName] }
+
+        // Join each moving slide with its patient's reference GeoJSON + registrar pickle.
+        ch_for_warp = ch_mov_gj
+            .combine(ch_ref_gj, by: 0)
+            .combine(ch_registrar_pickle, by: 0)
+            .map { pid, meta, mov_gj, mov_name, ref_gj, ref_name, pickle ->
+                tuple(meta, pickle, ref_name, mov_name, ref_gj, mov_gj)
             }
 
-        SEGMENTATION_QC(ch_for_seg_qc)
-        ch_seg_qc = SEGMENTATION_QC.out.metrics
+        WARP_SEG_QC(ch_for_warp)
+        ch_seg_qc = WARP_SEG_QC.out.metrics
     }
 
     // ========================================================================
@@ -386,7 +384,9 @@ workflow REGISTRATION {
         ch_size_logs = ch_size_logs.mix(GENERATE_REGISTRATION_QC.out.size_log)
     }
     if (reg_qc_level >= 2) {
-        ch_size_logs = ch_size_logs.mix(SEGMENTATION_QC.out.size_log)
+        ch_size_logs = ch_size_logs
+            .mix(SEG_QC_GEOJSON.out.size_log)
+            .mix(WARP_SEG_QC.out.size_log)
     }
 
     // Add size logs from error estimation (if enabled)
@@ -409,7 +409,9 @@ workflow REGISTRATION {
         ch_versions = ch_versions.mix(GENERATE_REGISTRATION_QC.out.versions.first())
     }
     if (reg_qc_level >= 2) {
-        ch_versions = ch_versions.mix(SEGMENTATION_QC.out.versions.first())
+        ch_versions = ch_versions
+            .mix(SEG_QC_GEOJSON.out.versions.first())
+            .mix(WARP_SEG_QC.out.versions.first())
     }
     if (params.enable_feature_error) {
         ch_versions = ch_versions.mix(ESTIMATE_FEATURE_DISTANCES.out.versions.first())

@@ -1,0 +1,43 @@
+nextflow_process {
+
+    name "Test WARP_SEG_QC process"
+    script "modules/local/warp_seg_qc.nf"
+    process "WARP_SEG_QC"
+
+    tag "modules"
+    tag "modules_local"
+    tag "warp_seg_qc"
+
+    test("Should emit a before/after/delta seg-qc JSON - stub") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            process {
+                """
+                // [meta, pickle, ref_slide, moving_slide, ref_geojson, moving_geojson]
+                input[0] = [
+                    [ patient_id: 'P001' ],
+                    file('$projectDir/tests/testdata/single_sample.csv', checkIfExists: true),
+                    'P001_ref_corrected',
+                    'P001_mov1_corrected',
+                    file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true),
+                    file('$projectDir/tests/testdata/sample_merged_quant.csv', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            assert process.success
+            assert process.out.metrics
+            assert process.out.versions
+            with(process.out.metrics) {
+                assert size() == 1
+                assert get(0).get(0).patient_id == 'P001'
+                assert get(0).get(1).toString().endsWith('_seg_qc.json')
+            }
+        }
+    }
+}

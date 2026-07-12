@@ -28,6 +28,7 @@ process REGISTER {
     path "versions.yml"                                                                    , emit: versions
     path("*.size.csv")                                                                     , emit: size_log
     path("preprocessed/data/*.csv")                                                        , emit: summary, optional: true
+    tuple val(patient_id), path("preprocessed/data/*_registrar.pickle")                    , emit: registrar, optional: true
 
     when:
     task.ext.when == null || task.ext.when
@@ -177,8 +178,9 @@ process REGISTER {
     }
     def manifest_json = groovy.json.JsonOutput.toJson(manifest_map)
     """
-    mkdir -p registered_slides
+    mkdir -p registered_slides preprocessed/data
     ${touch_commands}
+    touch preprocessed/data/${patient_id}_registrar.pickle
     echo '${manifest_json}' > channels_manifest.json
     echo "STUB,${patient_id},stub,0" > ${patient_id}.REGISTER.size.csv
 

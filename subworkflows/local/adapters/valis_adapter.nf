@@ -134,6 +134,7 @@ workflow VALIS_ADAPTER {
 
     emit:
     registered = ch_registered
+    registrar  = REGISTER.out.registrar   // [patient_id, registrar.pickle] — for GeoJSON seg-QC
     size_logs  = ch_size_logs
     versions   = REGISTER.out.versions.first()
     summary    = REGISTER.out.summary
