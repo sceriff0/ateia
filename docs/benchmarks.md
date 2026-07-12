@@ -26,8 +26,8 @@ flowchart LR
 
 - **Resource sweep** — one image is rescaled across a size axis and a channel
   axis, and the pipeline is run once per cell (and per swept parameter), with
-  Nextflow tracing on. Each run yields `trace.txt` (peak RSS, runtime, CPU) and a
-  `size_logs/input_sizes.csv`.
+  Nextflow tracing on. Each run yields `trace.txt` (peak RSS, runtime, CPU, and
+  I/O volume via `rchar`/`wchar`) and a `size_logs/input_sizes.csv`.
 - **Parameter sweep** — registration/segmentation/quantification knobs that move
   cost are varied one-factor-at-a-time (`benchmarks/configs/sweep.yaml`).
 - **Registration accuracy** — VALIS registration with in-process tiling **on vs

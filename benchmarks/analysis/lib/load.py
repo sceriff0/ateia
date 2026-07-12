@@ -26,6 +26,11 @@ def parse_trace(trace_txt) -> pd.DataFrame:
         "duration_s": df["duration"].map(parse_duration),
         "cpus": pd.to_numeric(df.get("cpus"), errors="coerce"),
     })
+    # I/O volume: rchar/wchar are the cumulative bytes a process moved through read()/write()
+    # syscalls (Nextflow trace fields; nextflow.config enables both). This is transferred VOLUME,
+    # not throughput. Present-only, so a trace lacking the fields degrades to NaN, never an error.
+    for src, dst in (("rchar", "read_gb"), ("wchar", "write_gb")):
+        out[dst] = df[src].map(parse_to_gb) if src in df.columns else float("nan")
     # Timestamps (start/complete) enable an end-to-end wall-clock; present only if the trace config
     # includes them. Parsed leniently so a missing/odd format degrades to NaT, never an error.
     for src, dst in (("start", "start_ts"), ("complete", "complete_ts"), ("submit", "submit_ts")):
@@ -70,7 +75,7 @@ def only_successful(runs_df: pd.DataFrame) -> pd.DataFrame:
 
 def aggregate_repeats(runs_df: pd.DataFrame,
                       metrics=("peak_rss_gb", "peak_vmem_gb", "realtime_s",
-                               "duration_s", "input_gb")) -> pd.DataFrame:
+                               "duration_s", "input_gb", "read_gb", "write_gb")) -> pd.DataFrame:
     """Collapse replicate runs into per-(process, config) mean / std / CV.
 
     Replicates share a ``config_id`` (from build_run_plan --repeats); this reports

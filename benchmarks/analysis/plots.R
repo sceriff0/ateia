@@ -7,9 +7,12 @@
 # and writes PDFs to benchmarks/analysis/figures_R/.
 #
 #   measurements.csv  one row per (run x PROCESS): peak_rss_gb, peak_vmem_gb,
-#                     realtime_s, duration_s, cpus, input_gb + every swept param
+#                     realtime_s, duration_s, cpus, input_gb, read_gb, write_gb (I/O volume from
+#                     trace rchar/wchar) + every swept param
 #                     (varied_axis, target_px, n_channels, n_register_images,
 #                      config_id, rep, memory_mode, seg_method, reg_distributed_tiling, ...)
+# Scaling figures (01/02/02b/08) use LINEAR axes; the power-law fit is done in log space and drawn
+# as a curve (β = the log-log exponent, shown per facet strip). No log-log axes anywhere.
 #   resource_stats.csv          per (process,config): n_reps + mean/std/cv
 #   classic_vs_distributed_registration.csv   per cell: classic vs distributed RAM/time
 #   run_cost.csv                per run: cpu_hours, gpu_hours, wall_clock_s, bottleneck_stage
@@ -60,43 +63,59 @@ m <- read_csv(file.path(adir, "measurements.csv"), show_col_types = FALSE) %>%
          input_gb = as.numeric(input_gb))
 size_axes <- c("baseline", "scaling_grid", "registration_grid", "distributed_grid",
                "target_px", "n_channels")
+# I/O volume per process (read+write GiB) — present only if the trace carried rchar/wchar
+# (load.py parses them into read_gb/write_gb; older CSVs won't have the columns).
+has_io <- all(c("read_gb", "write_gb") %in% names(m))
+if (has_io) m <- m %>% mutate(total_io_gb = read_gb + write_gb)
 
 # POWER-LAW fit per process: lm(log10(y) ~ log10(x)). The slope β is the scaling exponent (β=1 linear,
-# >1 super-linear, <1 sub-linear) — the paper number. Returns the fitted line endpoints + β/R² per proc.
-# (The old geom_smooth(lm) fitted y~x in raw space and drew it curved on log axes — not a power law.)
+# >1 super-linear, <1 sub-linear) — the paper number. β/R² are surfaced in each facet strip and the
+# fit is drawn as a curve on LINEAR axes (no log-log), so `powerlaw` returns a fine x-grid, not just
+# the two endpoints (a power law is a straight line only in log-log space; on linear axes it curves).
 powerlaw <- function(df, xcol, ycol) {
   parts <- lapply(split(df, df$proc), function(d) {
     if (length(unique(d[[xcol]])) < 2) return(NULL)
     f <- lm(log10(d[[ycol]]) ~ log10(d[[xcol]]))
     b <- unname(coef(f)[2]); a <- unname(coef(f)[1]); r2 <- summary(f)$r.squared
     xr <- range(d[[xcol]])
-    data.frame(proc = d$proc[1], x = xr, y = 10 ^ (a + b * log10(xr)), exponent = b, r2 = r2)
+    xs <- 10 ^ seq(log10(xr[1]), log10(xr[2]), length.out = 80)   # smooth curve for linear axes
+    data.frame(proc = d$proc[1], x = xs, y = 10 ^ (a + b * log10(xs)), exponent = b, r2 = r2)
   })
   do.call(rbind, parts)
 }
 powerlaw_plot <- function(df, ycol, point_col, title, ylab) {
   d <- df %>% filter(varied_axis %in% size_axes, is.finite(input_gb), input_gb > 0, .data[[ycol]] > 0)
   pl <- powerlaw(d, "input_gb", ycol)
-  lab <- pl %>% group_by(proc) %>%
-    summarise(exponent = first(exponent), r2 = first(r2), x = min(x), y = max(y), .groups = "drop") %>%
-    mutate(l = sprintf("β=%.2f  R²=%.2f", exponent, r2))
+  if (is.null(pl) || !nrow(pl)) return(NULL)
+  # β/R² go into the facet strip label (declutters the panel: no overlapping in-panel text box).
+  strip <- pl %>% group_by(proc) %>%
+    summarise(l = sprintf("%s  (β=%.2f, R²=%.2f)", first(proc), first(exponent), first(r2)),
+              .groups = "drop")
+  lookup <- setNames(strip$l, strip$proc)
+  relabel <- function(v) ifelse(is.na(lookup[v]), v, lookup[v])   # procs with no fit keep bare name
   ggplot(d, aes(input_gb, .data[[ycol]])) +
     geom_point(alpha = .6, colour = point_col) +
     geom_line(data = pl, aes(x, y), colour = oi[2], linewidth = .6) +
-    geom_text(data = lab, aes(x, y, label = l), hjust = 0, vjust = 1, size = 3, colour = "grey30") +
-    facet_wrap(~ proc, scales = "free") + scale_x_log10(labels = label_number()) + scale_y_log10() +
+    facet_wrap(~ proc, scales = "free", labeller = labeller(proc = relabel)) +
     labs(title = title,
-         subtitle = "β = scaling exponent (log-log slope): 1 = linear, >1 super-linear, <1 sub-linear.",
-         x = "input (GiB, log10)", y = ylab)
+         subtitle = "Linear axes; curve = fitted power law. β = log-log slope (1 = linear, >1 super-linear, <1 sub-linear).",
+         x = "input (GiB)", y = ylab)
 }
 
-# ── 1. MEMORY SCALING per process (the headline) — peak RSS vs input, power law ──
+# ── 1. MEMORY SCALING per process (the headline) — peak RSS vs input, power law (linear axes) ──
 save_fig(powerlaw_plot(m, "peak_rss_gb", oi[1], "Peak memory scaling per process (power law)",
-                       "peak RSS (GiB, log10)"), "01_memory_scaling_per_process", 11, 8)
+                       "peak RSS (GiB)"), "01_memory_scaling_per_process", 11, 8)
 
-# ── 2. TIME SCALING per process — realtime vs input, power law ──
+# ── 2. TIME SCALING per process — realtime vs input, power law (linear axes) ──
 save_fig(powerlaw_plot(m, "realtime_s", oi[3], "Runtime scaling per process (power law)",
-                       "realtime (s, log10)"), "02_time_scaling_per_process", 11, 8)
+                       "realtime (s)"), "02_time_scaling_per_process", 11, 8)
+
+# ── 2b. I/O VOLUME SCALING per process — bytes moved (read+write) vs input, power law ──
+if (has_io && any(is.finite(m$total_io_gb) & m$total_io_gb > 0)) {
+  io_fig <- powerlaw_plot(m, "total_io_gb", oi[6],
+                          "I/O volume scaling per process (power law)", "read + write (GiB)")
+  if (!is.null(io_fig)) save_fig(io_fig, "02b_io_volume_scaling", 11, 8)
+}
 
 # ── 3. CLASSIC vs DISTRIBUTED registration — the RAM ceiling vs size ──
 cvd_path <- file.path(adir, "classic_vs_distributed_registration.csv")
@@ -109,16 +128,16 @@ if (file.exists(cvd_path) && nrow(read_csv(cvd_path, show_col_types = FALSE)) > 
   p3 <- ggplot(long, aes(target_px, peak_rss_gb, colour = path)) +
     geom_line(linewidth = .8) + geom_point(size = 2) +
     facet_wrap(~ n_channels, labeller = label_both) +
-    scale_x_log10() + scale_colour_manual(values = oi[c(8,2)]) +
+    scale_colour_manual(values = oi[c(8,2)]) +
     labs(title = "Registration peak RAM: classic vs distributed",
          subtitle = "Classic holds the BioFormats JVM heap (climbs with size); the JVM-free distributed path stays bounded.",
-         x = "image size (px, log10)", y = "registration-stage peak RSS (GiB)", colour = NULL)
+         x = "image size (px)", y = "registration-stage peak RSS (GiB)", colour = NULL)
   save_fig(p3, "03_classic_vs_distributed_ram", 9, 5)
 
   p3b <- ggplot(cvd, aes(target_px, rss_saving_gb, colour = factor(n_channels))) +
     geom_line(linewidth = .8) + geom_point(size = 2) +
-    scale_x_log10() + scale_colour_manual(values = oi, name = "channels") +
-    labs(title = "Distributed RAM saving vs classic", x = "image size (px, log)",
+    scale_colour_manual(values = oi, name = "channels") +
+    labs(title = "Distributed RAM saving vs classic", x = "image size (px)",
          y = "classic − distributed peak RSS (GiB)")
   save_fig(p3b, "03b_distributed_ram_saving", 8, 5)
 }
@@ -162,8 +181,11 @@ if (nrow(knob_df) > 0) {
     summarise(y = mean(y), .groups = "drop") %>%
     ggplot(aes(fct_inseq(value), y)) +
     geom_col(fill = oi[1], width = .6) +
-    facet_wrap(~ paste0(axis, "  (", proc, ": ", metric, ")"), scales = "free") +
-    labs(title = "OFAT knob effects (single param varied off baseline)", x = NULL, y = NULL)
+    facet_wrap(~ paste0(axis, "  (", proc, ")"), scales = "free", ncol = 3) +
+    labs(title = "OFAT knob effects (single param varied off baseline)",
+         subtitle = "Mean realtime (s) per knob value; each panel is one knob, free y-scale.",
+         x = NULL, y = "realtime (s)") +
+    theme(axis.text.x = element_text(angle = 30, hjust = 1))
   save_fig(p5, "05_ofat_knob_effects", 12, 8)
 }
 
@@ -195,15 +217,34 @@ p7 <- m %>% filter(varied_axis %in% size_axes, n_channels == 2, n_register_image
        x = "image size (px)", y = NULL)
 save_fig(p7, "07_stage_memory_heatmap", 9, 6)
 
+# ── 7b. I/O VOLUME by stage — mean bytes read vs written per process (which stage is I/O-heavy) ──
+if (has_io) {
+  io_stage <- m %>% filter(varied_axis %in% size_axes) %>%
+    group_by(proc) %>%
+    summarise(read = mean(read_gb, na.rm = TRUE), write = mean(write_gb, na.rm = TRUE),
+              .groups = "drop") %>%
+    pivot_longer(c(read, write), names_to = "direction", values_to = "gb") %>%
+    filter(is.finite(gb))
+  if (nrow(io_stage) > 0 && any(io_stage$gb > 0)) {
+    p7b <- io_stage %>%
+      ggplot(aes(fct_reorder(proc, gb, .fun = sum), gb, fill = direction)) +
+      geom_col(width = .6) + coord_flip() +
+      scale_fill_manual(values = oi[c(1, 2)], name = NULL) +
+      labs(title = "I/O volume by stage",
+           subtitle = "Mean bytes read/written per process (trace rchar/wchar) — the I/O bottleneck, stacked read + write.",
+           x = NULL, y = "I/O volume (GiB)")
+    save_fig(p7b, "07b_stage_io_split", 8, 6)
+  }
+}
+
 # ── 8. CHANNEL EFFECT — does 2 vs 4 channels shift the memory scaling? ──
 p8 <- m %>% filter(varied_axis %in% size_axes, is.finite(input_gb), input_gb > 0,
                    proc %in% c("REGISTER","PREPROCESS","SEGMENT","QUANTIFY")) %>%
   ggplot(aes(input_gb, peak_rss_gb, colour = factor(n_channels))) +
-  geom_point(alpha = .6) + geom_smooth(method = "lm", se = FALSE, linewidth = .6) +
+  geom_point(alpha = .6) + geom_smooth(method = "lm", se = FALSE, linewidth = .6, formula = y ~ x) +
   facet_wrap(~ proc, scales = "free") +
-  scale_x_log10() + scale_y_log10() +
   scale_colour_manual(values = oi[c(1,2)], name = "channels") +
-  labs(title = "Channel-count effect on memory scaling", x = "input (GiB, log)", y = "peak RSS (GiB, log)")
+  labs(title = "Channel-count effect on memory scaling", x = "input (GiB)", y = "peak RSS (GiB)")
 save_fig(p8, "08_channel_effect", 10, 7)
 
 # ── 9. SEGMENTATION METHODS — each backend with its own parameter sweep ──
@@ -301,10 +342,10 @@ if (!is.null(qual) && "n_cells" %in% names(qual) && "seg_method" %in% names(qual
 agree <- read_opt("segmentation_agreement.csv")
 if (!is.null(agree) && "instance_f1" %in% names(agree)) {
   p12b <- agree %>% mutate(pair = paste(method_a, "vs", method_b)) %>%
-    ggplot(aes(pair, instance_f1, fill = pair)) +
-    geom_col(width = .6) +
+    ggplot(aes(pair, instance_f1)) +
+    geom_col(width = .6, fill = oi[1]) +
     geom_text(aes(label = sprintf("count ratio %.2f", cell_count_ratio)), vjust = -.4, size = 3) +
-    scale_fill_manual(values = oi, guide = "none") + ylim(0, 1) +
+    ylim(0, 1) +
     labs(title = "Segmentation cross-method agreement (instance F1)",
          subtitle = "IoU-matched per-cell F1 between methods (1 = agree on every cell); label = cell-count ratio.",
          x = NULL, y = "instance F1 (IoU-matched)")
@@ -322,11 +363,11 @@ if (!is.null(cost) && "target_px" %in% names(cost)) {
       filter(is.finite(hours)) %>%
       ggplot(aes(target_px, hours, colour = metric)) +
       geom_line(linewidth = .8) + geom_point(size = 2) +
-      scale_x_log10() + scale_colour_manual(values = oi[c(1, 2)],
+      scale_colour_manual(values = oi[c(1, 2)],
         labels = c(cpu_hours = "CPU-hours", wall_clock_h = "wall-clock (h)"), name = NULL) +
       labs(title = "End-to-end pipeline cost vs image size",
            subtitle = "Total compute (CPU-hours) and wall-clock per slide.",
-           x = "image size (px, log10)", y = "hours")
+           x = "image size (px)", y = "hours")
     save_fig(p13, "13_end_to_end_cost", 8, 5)
   }
 }
