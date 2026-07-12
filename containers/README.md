@@ -29,6 +29,7 @@ Every image is tagged with both the release version (e.g. `v1.0.0`) and `latest`
 | `istantseg` | `ghcr.io/sceriff0/mirage/istantseg:<tag>` | `SEGMENT` (`params.seg_method` = `instantseg`) | `pytorch/pytorch:2.5.1-cuda11.8-cudnn9-runtime` + `instanseg-torch` |
 | `merge` | `ghcr.io/sceriff0/mirage/merge:<tag>` | `MERGE_AND_PYRAMID` | `pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime` + tifffile/imagecodecs pyramid stack |
 | `debug_diffeo` | `ghcr.io/sceriff0/mirage/debug_diffeo:<tag>` | `GENERATE_REGISTRATION_QC` | `nvidia/cuda:12.2.2-cudnn8-devel-ubuntu22.04` + Miniconda/bftools + StarDist/cudipy diffeo QC stack |
+| `segeval` | `ghcr.io/sceriff0/mirage/segeval:<tag>` | `SEG_QUALITY_EVAL`, `MERGE_SEG_EVAL` | `python:3.11-slim` + numpy/scipy/pandas/scikit-image/scikit-learn/aicsimageio/tifffile/xmltodict (vendored CSE metrics) |
 | VALIS (not vendored) | `cdgatenbee/valis-wsi:1.0.0` (upstream) | `REGISTER`, `ESTIMATE_FEATURE_DISTANCES` | upstream maintained image — **not rebuilt or published by us** (see note below) |
 
 > The context directory name `istantseg` (a historical typo) is preserved

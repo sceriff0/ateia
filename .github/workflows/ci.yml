@@ -51,7 +51,7 @@ jobs:
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt || true
           fi
-          pip install pytest pytest-cov tifffile numpy pandas scikit-image
+          pip install pytest pytest-cov tifffile numpy pandas scikit-image scipy scikit-learn xmltodict
 
       - name: Generate test data
         run: |

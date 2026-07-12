@@ -160,6 +160,7 @@ workflow MIRAGE {
         def ch_feature_dist_jsons   = Channel.empty()
         def ch_valis_summary_csvs   = Channel.empty()
         def ch_postprocess_qc_pngs  = Channel.empty()
+        def ch_seg_eval_csv         = Channel.empty()
         def ch_versions             = Channel.empty()
 
         if (ParamUtils.shouldRun('preprocessing', params.start, effective_stop)) {
@@ -177,6 +178,7 @@ workflow MIRAGE {
         }
         if (ParamUtils.shouldRun('postprocessing', params.start, effective_stop)) {
             ch_postprocess_qc_pngs = ch_postprocess_qc_pngs.mix(POSTPROCESSING.out.postprocess_qc)
+            ch_seg_eval_csv = ch_seg_eval_csv.mix(POSTPROCESSING.out.seg_eval_metrics)
             ch_versions = ch_versions.mix(POSTPROCESSING.out.versions)
         }
 
@@ -191,6 +193,7 @@ workflow MIRAGE {
             ch_feature_dist_jsons.collect().ifEmpty([]),
             ch_valis_summary_csvs.collect().ifEmpty([]),
             ch_postprocess_qc_pngs.collect().ifEmpty([]),
+            ch_seg_eval_csv.collect().ifEmpty([]),
             ch_collated_versions
         )
     }

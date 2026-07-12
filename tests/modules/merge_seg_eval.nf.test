@@ -1,0 +1,35 @@
+nextflow_process {
+
+    name "Test MERGE_SEG_EVAL process"
+    script "modules/local/merge_seg_eval.nf"
+    process "MERGE_SEG_EVAL"
+
+    tag "modules"
+    tag "modules_local"
+    tag "merge_seg_eval"
+
+    test("Should merge per-patient seg-eval JSONs into a CSV - stub") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    file('$projectDir/tests/testdata/seg_eval_P001.json', checkIfExists: true),
+                    file('$projectDir/tests/testdata/seg_eval_P002.json', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            assert process.success
+            assert process.out.csv
+            assert process.out.versions
+
+            assert snapshot(process.out.versions).match()
+        }
+    }
+}
