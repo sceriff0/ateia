@@ -15,7 +15,7 @@
 - Tool arguments live in `conf/modules.config` via `ext.args` — never hardcoded in process scripts.
 - `bin/*.py` invoked **by bare name** from a process MUST be git mode `100755` (`git update-index --chmod=+x`, verify `git ls-files -s` shows `100755`); import-only `bin/utils/*` stay `100644`.
 - Gitmoji prefix on every commit (`:sparkles:`, `:white_check_mark:`, `:memo:`, `:hammer:`, `:recycle:`, `:fire:` …); use `:shortcode:` form.
-- CSE `fast` (optimized) path must reproduce the `exact` (upstream) path within **1e-6** on every metric and `QualityScore`. No subsampling, no approximation.
+- CSE `fast` (optimized) path must reproduce the `exact` (upstream) path within **1e-6** on every individual metric. The composite `QualityScore` — a PCA+`exp` transform that amplifies the sub-epsilon float64-vs-float32 rounding introduced by `scipy.ndimage` labeled reductions — is instead bounded by a **1e-3 relative** tolerance (user decision, 2026-07-12: keep per-metric strictness, relax only the amplified composite). No subsampling, no approximation.
 - 2D only (`single_method_eval`), never the 3D path.
 - Purpose is informational QC: no gating, no branching, no method-selection.
 - All work happens in worktree `/Users/valer/Desktop/Github/mirage-cellseg-wt` on branch `cellseg-evaluator-integration`.
@@ -387,7 +387,28 @@ git commit -m ":zap: Vectorize CSE cell_type per-cell loop (ndimage, bit-exact)"
 **Interfaces:**
 - Produces: unchanged `cell_uniformity(mask, channels, label_list) -> (CV, fraction, silhouette)`.
 
-- [ ] **Step 1: Rewrite the 2D branch** (replace upstream lines 402-418). Both `feature_matrix` (raw channel) and `feature_matrix_z` (standardized) are per-cell means → two labeled reductions:
+> **Note (numerical):** `scipy.ndimage.mean` accumulates in float64 whereas upstream's `np.sum` on the float32 fixture accumulates in float32. Every *individual* metric stays within 1e-6, but `get_quality_score`'s `exp()` amplifies the sub-epsilon delta into a ~2.98e-6 gap on the composite `QualityScore`. Per the user decision (2026-07-12), the guard keeps per-metric strictness at 1e-6 and bounds only `QualityScore` by a 1e-3 relative tolerance. `cell_type` (Task 3) is unaffected because its means feed only KMeans cluster labels.
+
+- [ ] **Step 1: Relax only the composite `QualityScore` in the equivalence guard** — edit `assert_metrics_close` in `tests/test_cse_equivalence.py` so every metric stays strict at `tol=1e-6` but `QualityScore` uses a relative bound:
+
+```python
+def assert_metrics_close(result, golden, tol=1e-6, qs_rel_tol=1e-3):
+    r, g = flatten(result), dict(golden)
+    assert set(r) == set(g), f"metric keys differ: {set(r) ^ set(g)}"
+    for key in g:
+        gv, rv = g[key], r[key]
+        if np.isnan(gv):
+            assert np.isnan(rv), f"{key}: expected NaN"
+        elif key == "QualityScore":
+            # PCA+exp composite amplifies sub-epsilon float64-vs-float32 rounding
+            # from the vectorized reductions; individual metrics stay strict at tol.
+            denom = abs(gv) if abs(gv) > 1e-12 else 1.0
+            assert abs(rv - gv) / denom <= qs_rel_tol, f"{key}: {rv} vs {gv} (rel {qs_rel_tol})"
+        else:
+            assert abs(rv - gv) <= tol, f"{key}: {rv} vs {gv}"
+```
+
+- [ ] **Step 2: Rewrite the 2D branch** (replace upstream lines 402-418). Both `feature_matrix` (raw channel) and `feature_matrix_z` (standardized) are per-cell means → two labeled reductions:
 
 ```python
 	else:
@@ -402,16 +423,16 @@ git commit -m ":zap: Vectorize CSE cell_type per-cell loop (ndimage, bit-exact)"
 			feature_matrix_z_pieces.append(list(cell_intensity_z))
 ```
 
-- [ ] **Step 2: Run the equivalence test**
+- [ ] **Step 3: Run the equivalence test**
 
-Run: `pytest tests/test_cse_equivalence.py::test_fast_matches_golden -v`
-Expected: PASS within 1e-6.
+Run: `python3 -m pytest tests/test_cse_equivalence.py -v`
+Expected: PASS — every individual metric within 1e-6, `QualityScore` within 1e-3 relative.
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
-git add bin/utils/cse/functions.py
-git commit -m ":zap: Vectorize CSE cell_uniformity per-cell loops (ndimage, bit-exact)"
+git add bin/utils/cse/functions.py tests/test_cse_equivalence.py
+git commit -m ":zap: Vectorize CSE cell_uniformity per-cell loops (ndimage)"
 ```
 
 ### Task 5: Vectorize the per-pixel nucleus lookup in `get_matched_masks`
