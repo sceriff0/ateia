@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 #from PIL import Image
 #from pint import Quantity, UnitRegistry
+from scipy import ndimage
 from scipy.sparse import csr_matrix
 from scipy.stats import variation
 from skimage.filters import threshold_mean #, threshold_otsu
@@ -346,18 +347,15 @@ def cell_type(mask, channels):
 			feature_matrix_z_pieces.append(cell_intensity_z)
 
 	else:
+		ids = np.unique(mask)
+		ids = ids[ids != 0]
 		for i in range(n):
 			channel = channels[i]
 			channel_z = ss.fit_transform(channel)
-			cell_intensity_z = []
-			for j in cell_coord.index:
-				cell_size_current = len(cell_coord[j][0])
-				if cell_size_current != 0:
-					single_cell_intensity_z = (
-							np.sum(channel_z[tuple(cell_coord[j])]) / cell_size_current
-					)
-					cell_intensity_z.append(single_cell_intensity_z)
-			feature_matrix_z_pieces.append(cell_intensity_z)
+			# labeled mean == np.sum(channel_z[cell_pixels]) / cell_size, per cell,
+			# in ascending-label order (matches get_indices_pandas[1:]).
+			cell_intensity_z = ndimage.mean(channel_z, labels=mask, index=ids)
+			feature_matrix_z_pieces.append(list(cell_intensity_z))
 
 	feature_matrix_z = np.vstack(feature_matrix_z_pieces).T
 	#print('Feature_matrix_z.shape=',feature_matrix_z.shape)
