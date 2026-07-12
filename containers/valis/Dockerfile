@@ -205,6 +205,22 @@ RUN VALIS_DIR=$(python3 -c "import valis, os; print(os.path.dirname(valis.__file
     patch "$VALIS_DIR/non_rigid_registrars.py" < /tmp/calc_hook.patch && \
     python3 -c "from valis.non_rigid_registrars import NonRigidTileRegistrar as T; assert hasattr(T, 'EXTERNAL_TILE_HOOK') and T.EXTERNAL_TILE_HOOK is None and hasattr(T, '_calc_tiles'); print('hook seam OK')"
 
+# ── Self-contained BioFormats JVM cache (HPC read-only-$HOME fix) ──────────────────────────────────
+# scyjava<1.11 starts the JVM via jgo, which builds a Maven workspace under its cache dir the FIRST
+# time it runs. Unwarmed, that first run happens at pipeline time — and on an HPC compute node (Singularity
+# runs as a NON-root user, $HOME=/hpcnfs/... is read-only, and the node is usually offline) jgo's
+# `os.makedirs($HOME/.jgo)` dies with `OSError [Errno 30] Read-only file system`, killing REG_PREP.
+# The stock cdgatenbee/valis-wsi:1.0.0 image (classic REGISTER) never hits this because it ships a warm,
+# readable JVM cache; a fresh rebuild of THIS image did not — so reproduce that property here:
+#   1. warm the JVM at build (network available) so jgo resolves BioFormats INTO the image,
+#   2. chmod the cache world-readable + /root traversable (runtime user isn't root), and
+#   3. pin jgo/Maven at those baked paths via env (jgo honours JGO_CACHE_DIR / M2_REPO — jgo.py:438,255),
+#      which Singularity preserves, so resolution is $HOME-independent: no writes, no network at runtime.
+ENV JGO_CACHE_DIR=/root/.jgo \
+    M2_REPO=/root/.m2/repository
+RUN python3 -c "from valis import registration; registration.init_jvm(mem_gb=8); registration.kill_jvm()" && \
+    chmod a+rx /root && chmod -R a+rX /root/.jgo /root/.m2
+
 # Create a working directory
 WORKDIR /workspace
 
