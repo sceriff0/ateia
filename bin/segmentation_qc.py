@@ -34,7 +34,7 @@ def pick_dapi_index(channel_names) -> int:
 
 
 def find_dapi_index(image_path) -> int:
-    from utils.qc import extract_channel_names_from_ome  # light (tifffile + OME-XML)
+    from utils.metadata import extract_channel_names_from_ome  # light (tifffile + OME-XML)
     return pick_dapi_index(extract_channel_names_from_ome(image_path))
 
 

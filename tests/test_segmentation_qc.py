@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 
 import numpy as np
+import pytest
 
 import segmentation_qc
 
@@ -23,6 +24,18 @@ def test_pick_dapi_index_finds_dapi_else_falls_back_to_zero():
     assert segmentation_qc.pick_dapi_index(["CD3", "DAPI", "SMA"]) == 1
     assert segmentation_qc.pick_dapi_index(["dapi_nuclei", "CD8"]) == 0  # case-insensitive
     assert segmentation_qc.pick_dapi_index(["CD3", "CD8"]) == 0          # fallback
+
+
+def test_find_dapi_index_reads_real_ome_channel_names(tmp_path):
+    # Exercises the real extract_channel_names_from_ome import path (regression:
+    # the function lives in utils.metadata, not utils.qc).
+    pytest.importorskip("tifffile")
+    from pathlib import Path
+    ome = Path(__file__).resolve().parent / "testdata" / "P001_ref.ome.tiff"
+    if not ome.exists():
+        pytest.skip("P001_ref.ome.tiff fixture not generated")
+    idx = segmentation_qc.find_dapi_index(str(ome))
+    assert idx == 0  # DAPI is the first channel in the fixture
 
 
 def test_run_scores_two_masks_via_injected_segmenter():
