@@ -117,6 +117,7 @@ jobs:
           - istantseg
           - merge
           - debug_diffeo
+          - segeval
 
     steps:
       - name: Checkout repository
