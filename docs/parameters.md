@@ -183,11 +183,24 @@ Pyramidal OME-TIFF assembly and GeoJSON.
 | `skip_registration_qc` | `false` | Skip registration QC overlays. |
 | `qc_scale_factor` | `0.25` | Downsample factor for registration QC images. |
 | `skip_postprocessing_qc` | `false` | Skip segmentation/intensity QC plots. |
+| `skip_seg_quality_eval` | `false` | Skip reference-free cell-segmentation quality scoring (CellSegmentationEvaluator, 2D). |
+| `cse_fast` | `true` | Use the fast (approximate) CellSegmentationEvaluator scoring mode instead of exact metrics. |
+| `cse_pixel_size_um` | `null` | Pixel size (µm) passed to the CellSegmentationEvaluator; `null` infers it from image metadata. |
+| `segeval_tag` | `dev` | Container tag for the segmentation-quality-evaluator (`segeval`) image. |
 | `skip_final_qc_report` | `false` | Skip the aggregated HTML QC report. |
 | `enable_feature_error` | `false` | Compute feature-based registration error → `feature_distances/`. |
 | `feature_detector` | `superpoint` | Detector for error estimation: `superpoint`, `disk`, `dedode`, `brisk`, `vgg`. |
 | `feature_max_dim` | `1024` | Max image dimension for feature detection. |
 | `feature_n_features` | `5000` | Number of features to detect. |
+
+**Segmentation quality evaluation (CSE):** after `SEGMENT`, a vendored, patched
+[CellSegmentationEvaluator](https://github.com/murphygroup/CellSegmentationEvaluator)
+scores each patient's whole-cell/nuclear mask pair with reference-free metrics
+(no ground truth needed) and merges per-patient scores into one CSV at
+`${outdir}/qc/segmentation/segmentation_metrics.csv`. It runs automatically
+unless `skip_seg_quality_eval` is set; `cse_fast` trades exact metrics for
+speed (default on), and `cse_pixel_size_um` overrides pixel-size inference
+when image metadata is unreliable.
 
 ## Cluster & resources
 
