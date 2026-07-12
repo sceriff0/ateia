@@ -23,7 +23,8 @@ process SEG_QUALITY_EVAL {
     script:
     def args = task.ext.args ?: ''
     def prefix = "${meta.patient_id}"
-    def px_arg = params.cse_pixel_size_um ? "--pixel-size-um ${params.cse_pixel_size_um}" : ''
+    def px = params.cse_pixel_size_um ?: params.pixel_size
+    def px_arg = px ? "--pixel-size-um ${px}" : ''
     """
     bytes=\$(stat -L --printf="%s" ${image} 2>/dev/null || echo 0)
     echo "${task.process},${meta.patient_id},${image.name},\${bytes}" > ${prefix}.SEG_QUALITY_EVAL.size.csv

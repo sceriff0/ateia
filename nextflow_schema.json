@@ -436,11 +436,6 @@
                     "description": "Skip reference-free cell-segmentation quality scoring (CellSegmentationEvaluator, 2D).",
                     "default": false
                 },
-                "cse_fast": {
-                    "type": "boolean",
-                    "description": "Use the fast (approximate) CellSegmentationEvaluator scoring mode instead of exact metrics.",
-                    "default": true
-                },
                 "cse_pixel_size_um": {
                     "type": "number",
                     "description": "Pixel size in micrometers passed to the CellSegmentationEvaluator. null = infer from image metadata.",

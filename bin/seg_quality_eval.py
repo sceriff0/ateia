@@ -8,6 +8,20 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "utils"))
 from cse import single_method_eval  # noqa: E402
 
 
+def _relabel_contiguous(mask):
+    """Remap label image to contiguous 1..N (background 0 preserved).
+
+    CSE's get_matched_masks indexes per-label coord lists by label value and
+    assumes labels are contiguous; a gap would raise IndexError on a real mask.
+    Metric values are label-agnostic, so this remap is safe.
+    """
+    uniq = np.unique(mask)
+    lut = np.zeros(int(uniq.max()) + 1, dtype=np.int64)
+    pos = uniq[uniq != 0]
+    lut[pos] = np.arange(1, len(pos) + 1, dtype=np.int64)
+    return lut[mask]
+
+
 def _read_image_cyx(path):
     """Return (channels (C,Y,X), pixel_um_or_None). Prefer aicsimageio for
     robust OME axis handling (present in the container); fall back to tifffile."""
@@ -43,8 +57,8 @@ def main():
     # golden equivalence fixture exactly.
     img = {"name": a.id, "img": None, "data": img_data}
 
-    cell = tifffile.imread(a.cell_mask).astype(np.int32)
-    nuc = tifffile.imread(a.nuclei_mask).astype(np.int32)
+    cell = _relabel_contiguous(tifffile.imread(a.cell_mask).astype(np.int64))
+    nuc = _relabel_contiguous(tifffile.imread(a.nuclei_mask).astype(np.int64))
     # CSE mask["data"] is (T,C,Z,Y,X) with C-axis: ch0=cell, ch1=nucleus.
     mask_data = np.stack([cell, nuc], 0)[np.newaxis, :, np.newaxis, :, :]  # (1,2,1,Y,X)
     mask = {"name": a.id, "img": None, "data": mask_data}

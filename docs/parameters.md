@@ -184,8 +184,7 @@ Pyramidal OME-TIFF assembly and GeoJSON.
 | `qc_scale_factor` | `0.25` | Downsample factor for registration QC images. |
 | `skip_postprocessing_qc` | `false` | Skip segmentation/intensity QC plots. |
 | `skip_seg_quality_eval` | `false` | Skip reference-free cell-segmentation quality scoring (CellSegmentationEvaluator, 2D). |
-| `cse_fast` | `true` | Use the fast (approximate) CellSegmentationEvaluator scoring mode instead of exact metrics. |
-| `cse_pixel_size_um` | `null` | Pixel size (µm) passed to the CellSegmentationEvaluator; `null` infers it from image metadata. |
+| `cse_pixel_size_um` | `null` | Pixel size (µm) passed to the CellSegmentationEvaluator; `null` falls back to `pixel_size`. |
 | `segeval_tag` | `dev` | Container tag for the segmentation-quality-evaluator (`segeval`) image. |
 | `skip_final_qc_report` | `false` | Skip the aggregated HTML QC report. |
 | `enable_feature_error` | `false` | Compute feature-based registration error → `feature_distances/`. |
@@ -198,9 +197,8 @@ Pyramidal OME-TIFF assembly and GeoJSON.
 scores each patient's whole-cell/nuclear mask pair with reference-free metrics
 (no ground truth needed) and merges per-patient scores into one CSV at
 `${outdir}/qc/segmentation/segmentation_metrics.csv`. It runs automatically
-unless `skip_seg_quality_eval` is set; `cse_fast` trades exact metrics for
-speed (default on), and `cse_pixel_size_um` overrides pixel-size inference
-when image metadata is unreliable.
+unless `skip_seg_quality_eval` is set; `cse_pixel_size_um` overrides the
+pixel size passed to the evaluator, falling back to `pixel_size` when unset.
 
 ## Cluster & resources
 
