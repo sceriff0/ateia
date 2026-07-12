@@ -1,0 +1,41 @@
+nextflow_process {
+
+    name "Test SEGMENTATION_QC process"
+    script "modules/local/segmentation_qc.nf"
+    process "SEGMENTATION_QC"
+
+    tag "modules"
+    tag "modules_local"
+    tag "segmentation_qc"
+
+    test("Should emit a seg-qc JSON for a registered/reference pair - stub") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [ patient_id: 'P001', channels: ['DAPI', 'CD3', 'CD8'] ],
+                    file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            assert process.success
+            assert process.out.metrics
+            assert process.out.versions
+            assert process.out.size_log
+
+            with(process.out.metrics) {
+                assert size() == 1
+                assert get(0).get(0).patient_id == 'P001'
+                assert get(0).get(1).toString().endsWith('_seg_qc.json')
+            }
+        }
+    }
+}

@@ -141,8 +141,14 @@
                 },
                 "skip_registration_qc": {
                     "type": "boolean",
-                    "description": "Skip registration quality control.",
+                    "description": "Skip registration quality control (legacy; equivalent to reg_qc=0).",
                     "default": false
+                },
+                "reg_qc": {
+                    "type": "integer",
+                    "description": "Registration QC depth: 0=none, 1=DAPI overlay only, 2=DAPI overlay + segmentation-overlap metric (Dice/IoU/instance-F1).",
+                    "default": 1,
+                    "enum": [ 0, 1, 2 ]
                 },
                 "qc_scale_factor": {
                     "type": "number",

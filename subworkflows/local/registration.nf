@@ -8,6 +8,7 @@ include { GET_IMAGE_DIMS                    } from '../../modules/local/get_imag
 include { MAX_DIM                           } from '../../modules/local/max_dim'
 include { PAD_IMAGES                        } from '../../modules/local/pad_images'
 include { GENERATE_REGISTRATION_QC          } from '../../modules/local/generate_registration_qc'
+include { SEGMENTATION_QC                   } from '../../modules/local/segmentation_qc'
 
 include { VALIS_ADAPTER                     } from './adapters/valis_adapter'
 include { VALIS_DISTRIBUTED_ADAPTER         } from './adapters/valis_distributed_adapter'
@@ -234,12 +235,25 @@ workflow REGISTRATION {
             [meta, registered_file, reference_file]
         }
 
-    // Generate QC for all non-reference images
-    if (!params.skip_registration_qc) {
+    // reg_qc controls registration QC depth: 0 = none, 1 = DAPI overlay only,
+    // 2 = DAPI overlay + segmentation-overlap metric. Legacy skip_registration_qc=true
+    // forces 0 for backward compatibility.
+    def reg_qc_level = params.skip_registration_qc ? 0 : (params.reg_qc == null ? 1 : (params.reg_qc as int))
+
+    // Level >= 1: DAPI overlay image QC for all non-reference images
+    if (reg_qc_level >= 1) {
         GENERATE_REGISTRATION_QC(ch_for_qc)
         ch_qc = GENERATE_REGISTRATION_QC.out.qc
     } else {
         ch_qc = Channel.empty()
+    }
+
+    // Level >= 2: segmentation-overlap QC (Dice/IoU/instance-F1) on the same
+    // co-registered [meta, registered, reference] pairs.
+    ch_seg_qc = Channel.empty()
+    if (reg_qc_level >= 2) {
+        SEGMENTATION_QC(ch_for_qc)
+        ch_seg_qc = SEGMENTATION_QC.out.metrics
     }
 
     // ========================================================================
@@ -338,8 +352,11 @@ workflow REGISTRATION {
     ch_size_logs = ch_size_logs.mix(ch_adapter_logs)
 
     // Add size logs from QC processes (if enabled)
-    if (!params.skip_registration_qc) {
+    if (reg_qc_level >= 1) {
         ch_size_logs = ch_size_logs.mix(GENERATE_REGISTRATION_QC.out.size_log)
+    }
+    if (reg_qc_level >= 2) {
+        ch_size_logs = ch_size_logs.mix(SEGMENTATION_QC.out.size_log)
     }
 
     // Add size logs from error estimation (if enabled)
@@ -358,8 +375,11 @@ workflow REGISTRATION {
 
     ch_versions = ch_versions.mix(ch_adapter_versions)
 
-    if (!params.skip_registration_qc) {
+    if (reg_qc_level >= 1) {
         ch_versions = ch_versions.mix(GENERATE_REGISTRATION_QC.out.versions.first())
+    }
+    if (reg_qc_level >= 2) {
+        ch_versions = ch_versions.mix(SEGMENTATION_QC.out.versions.first())
     }
     if (params.enable_feature_error) {
         ch_versions = ch_versions.mix(ESTIMATE_FEATURE_DISTANCES.out.versions.first())
@@ -369,6 +389,7 @@ workflow REGISTRATION {
     registered       = ch_registered
     checkpoint_csv   = ch_checkpoint_csv
     qc               = ch_qc
+    seg_qc           = ch_seg_qc
     error_metrics    = ch_error_metrics
     valis_summary    = ch_adapter_summary
     size_logs        = ch_size_logs

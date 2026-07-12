@@ -83,6 +83,7 @@ workflow MIRAGE {
 
     if (ParamUtils.shouldRun('registration', params.start, effective_stop)) {
         ParamUtils.validateRegistrationMethod(params.registration_method)
+        ParamUtils.validateRegQc((params.reg_qc == null ? 1 : params.reg_qc) as int)
     }
 
     if (ParamUtils.shouldRun('postprocessing', params.start, effective_stop)) {

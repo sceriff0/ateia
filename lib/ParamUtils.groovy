@@ -33,6 +33,13 @@ class ParamUtils {
         }
     }
 
+    static void validateRegQc(int level) {
+        def valid = [0, 1, 2]
+        if (!(level in valid)) {
+            throw new IllegalArgumentException("Invalid --reg_qc '${level}'. Valid values: ${valid} (0=none, 1=DAPI overlay, 2=+segmentation QC)")
+        }
+    }
+
     static void validateSegMethod(String method) {
         def valid = ['stardist', 'instantseg', 'cellsam']
         if (!(method in valid)) {
