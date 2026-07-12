@@ -153,6 +153,18 @@ Upstream lines 126-134 call `sys.exit()` / `get_pixel_area` when pixel sizes are
 			pixel_size = pixelsizex * pixelsizey
 ```
 
+- [ ] **Step 5b: Make the `aicsimageio` import lazy in `functions.py`**
+
+`functions.py` imports `from aicsimageio import AICSImage` at module top (upstream line 7), but `AICSImage` is used **only** inside `get_pixel_area` and `get_voxel_volume` — helpers the 2D path never calls when explicit pixel sizes are supplied. Requiring aicsimageio at import time forces a heavy dependency (unavailable in the base test env) on every consumer. Delete the top-level import and move it into the two helpers:
+
+Delete upstream line 7 (`from aicsimageio import AICSImage`). Then inside `get_pixel_area` (upstream line 517) and `get_voxel_volume` (upstream line 514), add as the first line of each function body:
+
+```python
+	from aicsimageio import AICSImage  # lazy: only needed when reading pixel size from an image
+```
+
+This keeps the metric path pure-numpy/scipy/skimage/sklearn and importable without aicsimageio. (Verified: the vendored code runs end-to-end on synthetic input with aicsimageio absent.)
+
 - [ ] **Step 6: Confirm import mode stays 100644 and write the import smoke test**
 
 ```python
@@ -180,44 +192,75 @@ git commit -m ":sparkles: Vendor CSE v1.5.19 2D metric code (headless-safe)"
 ### Task 2: Golden-snapshot equivalence harness
 
 **Files:**
-- Create: `tests/data/cse/2D_CODEX.ome.tiff`, `tests/data/cse/2D_CODEX_mask.ome.tiff`, `tests/data/cse/golden_metrics.json`
+- Create: `tests/cse_fixture.py`, `tests/data/cse/golden_metrics.json`
 - Modify: `tests/test_cse_equivalence.py`
 
 **Interfaces:**
 - Consumes: `bin.utils.cse.single_method_eval` (Task 1).
-- Produces: pytest `assert_metrics_close(result, golden, tol=1e-6)` helper reused by all Phase B tasks; a `run_eval_on_fixture()` helper returning the flat metrics dict for the bundled fixture.
+- Produces: `tests/cse_fixture.py::make_fixture() -> (img_dict, mask_dict, pixel_um)` (numpy-only, deterministic); pytest `assert_metrics_close(result, golden, tol=1e-6)` and `run_eval_on_fixture()` helpers reused by all Phase B tasks.
 
-- [ ] **Step 1: Copy CSE's own example fixture into the repo**
+> **Why synthetic, not CSE's `example_data`:** those OME-TIFFs are Git-LFS pointer stubs (~130 bytes; the folder was unzipped without LFS and git-lfs is not installed), so no real image is available. A deterministic synthetic fixture is self-contained, commits no binaries, runs in the base env without `aicsimageio`, and exercises every code path (matching, KMeans, silhouette). This approach was validated end-to-end against the verbatim vendored code (`QualityScore` computed over 121 synthetic cells).
 
-```bash
-CSE="/Users/valer/Desktop/Github/CellSegmentationEvaluator-master/SimpleCSE/example_data"
-mkdir -p tests/data/cse
-cp "$CSE/imgs/2D_CODEX.ome.tiff"  tests/data/cse/2D_CODEX.ome.tiff
-cp "$CSE/masks/2D_CODEX.ome.tiff" tests/data/cse/2D_CODEX_mask.ome.tiff
+- [ ] **Step 1: Write the deterministic synthetic fixture generator**
+
+```python
+# tests/cse_fixture.py
+"""Deterministic synthetic multichannel image + cell/nucleus masks for CSE tests.
+
+CSE's own example_data are Git-LFS stubs, so we synthesize a small labeled scene:
+a grid of square cells (each with a centered nucleus of the same label) whose
+3 channels separate the cells into 3 intensity types — enough to exercise
+matching, KMeans k=2..10, and silhouette.
+"""
+import numpy as np
+
+PIXEL_UM = 0.5
+
+def make_arrays():
+    rng = np.random.default_rng(0)
+    Y = X = 160
+    C = 3
+    cell = np.zeros((Y, X), np.int32)
+    nuc = np.zeros((Y, X), np.int32)
+    img = np.zeros((C, Y, X), np.float32)
+    cid = 0
+    for gy in range(6, Y - 12, 14):
+        for gx in range(6, X - 12, 14):
+            cid += 1
+            cell[gy:gy + 10, gx:gx + 10] = cid
+            nuc[gy + 3:gy + 7, gx + 3:gx + 7] = cid
+            t = cid % C
+            for c in range(C):
+                img[c, gy:gy + 10, gx:gx + 10] = (
+                    50 + (80 if c == t else 5) + rng.normal(0, 3, (10, 10))
+                )
+    return img, cell, nuc
+
+def make_fixture():
+    img, cell, nuc = make_arrays()
+    img5 = img[np.newaxis, :, np.newaxis, :, :]                    # (1,C,1,Y,X)
+    mask5 = np.stack([cell, nuc], 0)[np.newaxis, :, np.newaxis, :, :]  # (1,2,1,Y,X)
+    img_d = {"name": "synth", "img": None, "data": img5}
+    mask_d = {"name": "synth", "img": None, "data": mask5}
+    return img_d, mask_d, PIXEL_UM
 ```
 
-- [ ] **Step 2: Write the fixture-runner + comparison helpers**
+- [ ] **Step 2: Write the fixture-runner + comparison helpers** (numpy only — no aicsimageio)
 
 ```python
 # tests/test_cse_equivalence.py  (append)
 import json
 from pathlib import Path
 import numpy as np
-from aicsimageio import AICSImage
+from tests.cse_fixture import make_fixture
 from bin.utils.cse import single_method_eval
 
 DATA = Path(__file__).parent / "data" / "cse"
-# CSE's example 2D CODEX is ~0.3775 um/px (from its OME metadata); pinned here
-# so the test never depends on metadata parsing.
-PIXEL_UM = 0.37744140625
 
 def run_eval_on_fixture():
-    aimg = AICSImage(DATA / "2D_CODEX.ome.tiff")
-    amsk = AICSImage(DATA / "2D_CODEX_mask.ome.tiff")
-    img = {"name": "2D_CODEX", "img": aimg, "data": aimg.get_image_data("TCZYX")}
-    mask = {"name": "2D_CODEX", "img": amsk, "data": amsk.get_image_data("TCZYX")}
-    return single_method_eval(img, mask, PCA_model=False, output_dir=DATA,
-                              pixelsizex=PIXEL_UM, pixelsizey=PIXEL_UM)
+    img, mask, px = make_fixture()
+    return single_method_eval(img, mask, PCA_model=False, output_dir=".",
+                              pixelsizex=px, pixelsizey=px)
 
 def flatten(metrics):
     flat = {}
@@ -241,9 +284,10 @@ def assert_metrics_close(result, golden, tol=1e-6):
 
 - [ ] **Step 3: Generate the golden snapshot from the verbatim vendored code**
 
-Because Task 1 vendored upstream *verbatim* (only removing dead control flow), its output IS the upstream reference. Generate and commit it now, before any Phase B optimization:
+Because Task 1 vendored upstream *verbatim* (only removing dead control flow + lazy import), its output IS the upstream reference. Generate and commit it now, before any Phase B optimization:
 
 ```bash
+mkdir -p tests/data/cse
 python - <<'PY'
 import json
 from tests.test_cse_equivalence import run_eval_on_fixture, flatten
@@ -272,7 +316,7 @@ Expected: PASS. (This is now the guard for every Phase B change.)
 - [ ] **Step 6: Commit**
 
 ```bash
-git add tests/data/cse tests/test_cse_equivalence.py
+git add tests/cse_fixture.py tests/data/cse tests/test_cse_equivalence.py
 git commit -m ":white_check_mark: Add CSE golden-snapshot equivalence test"
 ```
 
@@ -449,28 +493,24 @@ import json, subprocess, sys
 from pathlib import Path
 import numpy as np
 import tifffile
-from aicsimageio import AICSImage
-
-DATA = Path(__file__).parent / "data" / "cse"
-
-def _split_mask(tmp):
-    # CSE example mask: ch0=cell, ch1=nucleus. Split into two label TIFFs
-    # to mimic Mirage's SEGMENT output.
-    m = AICSImage(DATA / "2D_CODEX_mask.ome.tiff").get_image_data("TCZYX")
-    cell = m[0, 0, 0]; nuc = m[0, 1, 0]
-    cp, npth = tmp / "p_cell_mask.tif", tmp / "p_nuclei_mask.tif"
-    tifffile.imwrite(cp, cell.astype(np.int32))
-    tifffile.imwrite(npth, nuc.astype(np.int32))
-    return cp, npth
+from tests.cse_fixture import make_arrays
 
 def test_cli_writes_quality_score(tmp_path):
-    cp, npth = _split_mask(tmp_path)
+    # Synthetic fixture: img (C,Y,X), cell/nuc label masks (Y,X). Write as the
+    # separate label TIFFs + multichannel image that Mirage's SEGMENT emits.
+    img, cell, nuc = make_arrays()
+    cp = tmp_path / "p_cell_mask.tif"
+    npth = tmp_path / "p_nuclei_mask.tif"
+    imgp = tmp_path / "p_image.tif"
+    tifffile.imwrite(cp, cell.astype(np.int32))
+    tifffile.imwrite(npth, nuc.astype(np.int32))
+    tifffile.imwrite(imgp, img.astype(np.float32))   # (C,Y,X)
     out = tmp_path / "p_seg_eval.json"
     subprocess.run([sys.executable, "bin/seg_quality_eval.py",
                     "--cell-mask", str(cp), "--nuclei-mask", str(npth),
-                    "--image", str(DATA / "2D_CODEX.ome.tiff"),
+                    "--image", str(imgp),
                     "--id", "p", "--out", str(out),
-                    "--pixel-size-um", "0.37744140625"], check=True)
+                    "--pixel-size-um", "0.5"], check=True)
     doc = json.loads(out.read_text())
     assert doc["id"] == "p"
     assert isinstance(doc["QualityScore"], float)
@@ -489,26 +529,28 @@ Expected: FAIL (`bin/seg_quality_eval.py` does not exist).
 import argparse, json, os, sys
 import numpy as np
 import tifffile
-from aicsimageio import AICSImage
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "utils"))
 from cse import single_method_eval  # noqa: E402
 
 
-def _to_tczyx_labels(cell_path, nuc_path):
-    cell = tifffile.imread(cell_path)
-    nuc = tifffile.imread(nuc_path)
-    stack = np.stack([cell, nuc], axis=0).astype(np.int32)   # (C=2, Y, X)
-    return stack[:, np.newaxis, np.newaxis, :, :]            # (C,1,1,Y,X) -> as TCZYX with T=1
-
-
-def _resolve_pixel_um(image_path, override):
-    if override:
-        return float(override)
-    sizes = AICSImage(image_path).physical_pixel_sizes
-    if sizes.X and sizes.Y:
-        return None  # signal: use per-axis below
-    raise SystemExit("Pixel size missing from OME metadata; pass --pixel-size-um")
+def _read_image_cyx(path):
+    """Return (channels (C,Y,X), pixel_um_or_None). Prefer aicsimageio for
+    robust OME axis handling (present in the container); fall back to tifffile."""
+    try:
+        from aicsimageio import AICSImage
+        a = AICSImage(path)
+        data = np.asarray(a.get_image_data("CYX"))   # T,Z are 1 for 2D WSI
+        ps = a.physical_pixel_sizes
+        px = float(ps.X) if (ps.X and ps.Y) else None
+        return data, px
+    except Exception:
+        arr = np.asarray(tifffile.imread(path))
+        if arr.ndim == 2:
+            arr = arr[np.newaxis, :, :]
+        elif arr.ndim == 3 and arr.shape[-1] <= 5 and arr.shape[0] > 5:
+            arr = np.moveaxis(arr, -1, 0)            # YXC -> CYX heuristic
+        return arr, None
 
 
 def main():
@@ -521,20 +563,24 @@ def main():
     ap.add_argument("--pixel-size-um", default=None)
     a = ap.parse_args()
 
-    aimg = AICSImage(a.image)
-    img = {"name": a.id, "img": aimg, "data": aimg.get_image_data("TCZYX")}
+    channels, px_meta = _read_image_cyx(a.image)             # (C,Y,X)
+    img_data = channels[np.newaxis, :, np.newaxis, :, :]     # (1,C,1,Y,X)
+    # img["img"]=None forces CSE's metadata-free thresholding path, matching the
+    # golden equivalence fixture exactly.
+    img = {"name": a.id, "img": None, "data": img_data}
 
-    # Build CSE mask dict: data is (C,1,1,Y,X) with ch0=cell, ch1=nucleus.
-    mask_data = _to_tczyx_labels(a.cell_mask, a.nuclei_mask)
+    cell = tifffile.imread(a.cell_mask).astype(np.int32)
+    nuc = tifffile.imread(a.nuclei_mask).astype(np.int32)
+    # CSE mask["data"] is (T,C,Z,Y,X) with C-axis: ch0=cell, ch1=nucleus.
+    mask_data = np.stack([cell, nuc], 0)[np.newaxis, :, np.newaxis, :, :]  # (1,2,1,Y,X)
     mask = {"name": a.id, "img": None, "data": mask_data}
 
-    ps = AICSImage(a.image).physical_pixel_sizes
     if a.pixel_size_um:
         px = py = float(a.pixel_size_um)
-    elif ps.X and ps.Y:
-        px, py = float(ps.X), float(ps.Y)
+    elif px_meta:
+        px = py = px_meta
     else:
-        raise SystemExit("Pixel size missing from OME metadata; pass --pixel-size-um")
+        raise SystemExit("Pixel size missing from image metadata; pass --pixel-size-um")
 
     metrics = single_method_eval(img, mask, PCA_model=False, output_dir=".",
                                  pixelsizex=px, pixelsizey=py)
@@ -1095,7 +1141,7 @@ git commit -m ":sparkles: Surface CSE segmentation-quality metrics in QC report"
 **Files:**
 - Modify: `.github/workflows/ci.yml`, `CLAUDE.md` (or `docs/`)
 
-- [ ] **Step 1: Add the equivalence + CLI pytests to CI** — ensure the python-tests job runs `tests/test_cse_equivalence.py`, `tests/test_seg_quality_eval_cli.py`, `tests/test_merge_seg_eval.py`. These need `aicsimageio`, `scikit-learn`, `scipy`, `tifffile`, `xmltodict` in the CI python env; add them to the CI pip install / test requirements file.
+- [ ] **Step 1: Add the equivalence + CLI pytests to CI** — ensure the python-tests job runs `tests/test_cse_equivalence.py`, `tests/test_seg_quality_eval_cli.py`, `tests/test_merge_seg_eval.py`. These need `numpy`, `scipy`, `scikit-image`, `scikit-learn`, `pandas`, `tifffile`, `xmltodict` in the CI python env (NOT `aicsimageio` — the tests use the synthetic numpy fixture and tifffile only; aicsimageio is a lazy, container-only dependency); add them to the CI pip install / test requirements file.
 
 - [ ] **Step 2: Add the two nf-tests to the stub suite** — confirm `tests/modules/seg_quality_eval` and `tests/modules/merge_seg_eval` are picked up by the existing `nf-test test` invocation (they are, by directory convention; run once to confirm).
 
