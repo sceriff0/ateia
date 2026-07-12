@@ -1,3 +1,4 @@
+import os
 import re
 import xml.etree.ElementTree as ET
 import math
@@ -359,12 +360,15 @@ def cell_type(mask, channels):
 
 	feature_matrix_z = np.vstack(feature_matrix_z_pieces).T
 	#print('Feature_matrix_z.shape=',feature_matrix_z.shape)
-	label_list = []
-	label_list.append(np.zeros(cell_coord_num,dtype=int))
-	for c in range(2, 11):
-		model = KMeans(n_clusters=c, random_state=777).fit(feature_matrix_z)
-		label_list.append(model.labels_.astype(int))
-		#print(c,[sum(model.labels_.astype(int)==k) for k in range(c)])
+	from concurrent.futures import ThreadPoolExecutor
+	label_list = [np.zeros(cell_coord_num, dtype=int)]
+
+	def _fit(c):
+		return KMeans(n_clusters=c, random_state=777).fit(feature_matrix_z).labels_.astype(int)
+
+	with ThreadPoolExecutor(max_workers=min(9, (os.cpu_count() or 1))) as ex:
+		for labels in ex.map(_fit, range(2, 11)):
+			label_list.append(labels)
 	return label_list
 
 
