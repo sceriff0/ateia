@@ -21,6 +21,7 @@ htmlcov/
 work/
 results/
 test_results*/
+null/
 
 # Testing
 .nf-test/
@@ -43,6 +44,10 @@ mirage_app/*
 
 # Notebooks (analysis, not pipeline)
 notebooks/*
+
+# Benchmarking scratch (analysis venv + local eval outputs)
+.venv-bench/
+benchmarks/
 
 # macOS
 *.DS_Store
