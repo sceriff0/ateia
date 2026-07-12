@@ -577,7 +577,9 @@ def get_matched_masks(cell_mask, nuclear_mask):
 	for i in range(len(cell_coords)):
 		if len(cell_coords[i]) != 0:
 			current_cell_coords = cell_coords[i]
-			nuclear_search_num = np.unique(list(map(lambda x: nuclear_mask[tuple(x)], current_cell_coords)))
+			nuclear_search_num = np.unique(
+				nuclear_mask[current_cell_coords[:, 0], current_cell_coords[:, 1]]
+			)
 			best_mismatch_fraction = 1
 			whole_cell_best = []
 			for j in nuclear_search_num:
