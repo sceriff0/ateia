@@ -62,8 +62,16 @@ def _default_segmenter(model_dir, model_name, use_gpu, dapi_channel,
     )
 
 
-def run(registered, reference, segmenter=None, iou_thresh=0.5, **seg_kwargs) -> dict:
-    """Segment reference + registered slides and score mask overlap.
+_DELTA_KEYS = ("dice", "iou", "instance_f1")
+
+
+def run(reference_registered, moving_registered, reference_pre, moving_pre,
+        segmenter=None, iou_thresh=0.5, **seg_kwargs) -> dict:
+    """Score nuclei-mask overlap before vs after registration.
+
+    - after  = overlap(reference_registered, moving_registered)  — on the aligned grid
+    - before = overlap(reference_pre,        moving_pre)          — unregistered baseline
+    - delta  = after - before (the registration improvement) for dice/iou/instance_f1
 
     ``segmenter`` (path -> label mask) is injectable for tests; when omitted a StarDist
     segmenter is built from ``seg_kwargs`` (model_dir/model_name/use_gpu/...).
@@ -77,34 +85,39 @@ def run(registered, reference, segmenter=None, iou_thresh=0.5, **seg_kwargs) -> 
             seg_kwargs.get("n_tiles", (1, 1)), seg_kwargs.get("expand_distance", 10),
             seg_kwargs.get("prob_thresh"),
         )
-    ref_mask = segmenter(reference)
-    mov_mask = segmenter(registered)
-    return evaluate_masks(ref_mask, mov_mask, iou_thresh=iou_thresh)
+    after = evaluate_masks(segmenter(reference_registered),
+                           segmenter(moving_registered), iou_thresh=iou_thresh)
+    before = evaluate_masks(segmenter(reference_pre),
+                            segmenter(moving_pre), iou_thresh=iou_thresh)
+    delta = {k: after[k] - before[k] for k in _DELTA_KEYS}
+    return {"before": before, "after": after, "delta": delta}
 
 
-def build_record(metrics, patient_id, registered, reference) -> dict:
+def build_record(result, patient_id, registered, reference) -> dict:
     return {
         "patient_id": patient_id,
         "moving": os.path.basename(str(registered)),
         "reference": os.path.basename(str(reference)),
-        **metrics,
+        **result,
     }
 
 
-def write_report(registered, reference, output, patient_id=None,
-                 segmenter=None, iou_thresh=0.5, **seg_kwargs) -> dict:
-    metrics = run(registered, reference, segmenter=segmenter,
-                  iou_thresh=iou_thresh, **seg_kwargs)
-    record = build_record(metrics, patient_id, registered, reference)
+def write_report(reference_registered, moving_registered, reference_pre, moving_pre,
+                 output, patient_id=None, segmenter=None, iou_thresh=0.5, **seg_kwargs) -> dict:
+    result = run(reference_registered, moving_registered, reference_pre, moving_pre,
+                 segmenter=segmenter, iou_thresh=iou_thresh, **seg_kwargs)
+    record = build_record(result, patient_id, moving_registered, reference_registered)
     with open(output, "w") as f:
         json.dump(record, f, indent=2)
     return record
 
 
 def parse_args(argv=None):
-    ap = argparse.ArgumentParser(description="Segmentation-overlap registration QC.")
-    ap.add_argument("--registered", required=True, help="registered moving slide (OME-TIFF)")
-    ap.add_argument("--reference", required=True, help="registered reference slide (OME-TIFF)")
+    ap = argparse.ArgumentParser(description="Segmentation-overlap registration QC (before vs after).")
+    ap.add_argument("--reference-registered", required=True, help="registered reference slide (OME-TIFF)")
+    ap.add_argument("--moving-registered", required=True, help="registered moving slide (OME-TIFF)")
+    ap.add_argument("--reference-pre", required=True, help="unregistered reference slide (before)")
+    ap.add_argument("--moving-pre", required=True, help="unregistered moving slide (before)")
     ap.add_argument("--output", required=True, help="output JSON path")
     ap.add_argument("--patient-id", default=None)
     ap.add_argument("--dapi-channel", type=int, default=None,
@@ -124,14 +137,17 @@ def parse_args(argv=None):
 def main(argv=None):
     a = parse_args(argv)
     record = write_report(
-        a.registered, a.reference, a.output, patient_id=a.patient_id,
+        a.reference_registered, a.moving_registered, a.reference_pre, a.moving_pre,
+        a.output, patient_id=a.patient_id,
         iou_thresh=a.iou_thresh, model_dir=a.model_dir, model_name=a.model_name,
         use_gpu=a.use_gpu, dapi_channel=a.dapi_channel, pmin=a.pmin, pmax=a.pmax,
         n_tiles=tuple(a.n_tiles), expand_distance=a.expand_distance,
         prob_thresh=a.prob_thresh,
     )
-    print(f"Wrote {a.output}: dice={record['dice']:.4f} "
-          f"iou={record['iou']:.4f} instance_f1={record['instance_f1']:.4f}")
+    d = record["delta"]
+    print(f"Wrote {a.output}: after_dice={record['after']['dice']:.4f} "
+          f"before_dice={record['before']['dice']:.4f} "
+          f"delta_dice={d['dice']:+.4f} delta_f1={d['instance_f1']:+.4f}")
 
 
 if __name__ == "__main__":

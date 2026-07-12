@@ -248,11 +248,41 @@ workflow REGISTRATION {
         ch_qc = Channel.empty()
     }
 
-    // Level >= 2: segmentation-overlap QC (Dice/IoU/instance-F1) on the same
-    // co-registered [meta, registered, reference] pairs.
+    // Level >= 2: segmentation-overlap QC (Dice/IoU/instance-F1) BEFORE vs AFTER
+    // registration. Needs, per non-reference moving slide: the registered moving +
+    // registered reference (after, aligned grid) and the unregistered moving + reference
+    // (before, baseline). Built by joining ch_registered with ch_images_for_error
+    // (the pre-registration images), mirroring the feature-error channel below.
     ch_seg_qc = Channel.empty()
     if (reg_qc_level >= 2) {
-        SEGMENTATION_QC(ch_for_qc)
+        ch_for_seg_qc = ch_registered
+            .filter { meta, f -> !meta.is_reference }
+            .map { meta, reg -> [meta.patient_id, meta.channels.toSorted().join('|'), meta, reg] }
+            .join(
+                ch_images_for_error
+                    .filter { meta, f -> !meta.is_reference }
+                    .map { meta, mov -> [meta.patient_id, meta.channels.toSorted().join('|'), mov] },
+                by: [0, 1]
+            )
+            .map { pid, chsig, meta, mov_reg, mov_pre -> [pid, meta, mov_reg, mov_pre] }
+            .combine(
+                ch_images_for_error
+                    .filter { meta, f -> meta.is_reference }
+                    .map { meta, ref -> [meta.patient_id, ref] },
+                by: 0
+            )
+            .map { pid, meta, mov_reg, mov_pre, ref_pre -> [pid, meta, mov_reg, mov_pre, ref_pre] }
+            .combine(
+                ch_registered
+                    .filter { meta, f -> meta.is_reference }
+                    .map { meta, ref -> [meta.patient_id, ref] },
+                by: 0
+            )
+            .map { pid, meta, mov_reg, mov_pre, ref_pre, ref_reg ->
+                tuple(meta, ref_reg, mov_reg, ref_pre, mov_pre)
+            }
+
+        SEGMENTATION_QC(ch_for_seg_qc)
         ch_seg_qc = SEGMENTATION_QC.out.metrics
     }
 

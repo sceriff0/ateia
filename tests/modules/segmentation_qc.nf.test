@@ -8,7 +8,7 @@ nextflow_process {
     tag "modules_local"
     tag "segmentation_qc"
 
-    test("Should emit a seg-qc JSON for a registered/reference pair - stub") {
+    test("Should emit a before/after/delta seg-qc JSON - stub") {
 
         tag "stub"
         options "-stub"
@@ -16,10 +16,13 @@ nextflow_process {
         when {
             process {
                 """
+                // [meta, reference_registered, moving_registered, reference_pre, moving_pre]
                 input[0] = [
                     [ patient_id: 'P001', channels: ['DAPI', 'CD3', 'CD8'] ],
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff',  checkIfExists: true),
                     file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true),
-                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                    file('$projectDir/tests/testdata/P002_ref.ome.tiff',  checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_mov2.ome.tiff', checkIfExists: true)
                 ]
                 """
             }

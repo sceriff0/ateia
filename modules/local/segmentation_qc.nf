@@ -1,11 +1,13 @@
 /*
  * SEGMENTATION_QC - segmentation-based registration QC (reg_qc = 2)
  *
- * Segments the DAPI channel of a registered moving slide and its patient's
- * registered reference independently (StarDist), then scores nuclei-mask overlap
- * (Dice / IoU / instance-F1). Both inputs are already co-registered on the aligned
- * grid, so masks are compared directly — no coordinate warping. Complements the
- * DAPI-overlay image QC (GENERATE_REGISTRATION_QC) with a quantitative metric.
+ * Segments the DAPI channel of the reference and a moving slide independently
+ * (StarDist), before AND after registration, and scores nuclei-mask overlap
+ * (Dice / IoU / instance-F1):
+ *   - after  = overlap of the two REGISTERED slides (aligned grid, compared directly)
+ *   - before = overlap of the two UNREGISTERED slides (baseline misalignment)
+ *   - delta  = after - before (the registration improvement)
+ * Complements the DAPI-overlay image QC (GENERATE_REGISTRATION_QC) with a metric.
  *
  * Reuses the same StarDist container + model params as SEGMENT.
  */
@@ -16,7 +18,7 @@ process SEGMENTATION_QC {
     container "bolt3x/attend_image_analysis:segmentation_gpu"
 
     input:
-    tuple val(meta), path(registered), path(reference)
+    tuple val(meta), path(reference_registered), path(moving_registered), path(reference_pre), path(moving_pre)
 
     output:
     tuple val(meta), path("*_seg_qc.json"), emit: metrics
@@ -28,7 +30,7 @@ process SEGMENTATION_QC {
 
     script:
     def args = task.ext.args ?: ''
-    def prefix = "${meta.patient_id}_${registered.simpleName}"
+    def prefix = "${meta.patient_id}_${moving_registered.simpleName}"
     def use_gpu_flag = params.seg_gpu ? '--use-gpu' : ''
     def pmin = params.seg_pmin ?: 1.0
     def pmax = params.seg_pmax ?: 99.8
@@ -39,14 +41,17 @@ process SEGMENTATION_QC {
     def model_dir_arg = params.segmentation_model_dir ? "--model-dir ${params.segmentation_model_dir}" : ''
     def prob_arg = (params.seg_prob_thresh != null) ? "--prob-thresh ${params.seg_prob_thresh}" : ''
     """
-    reg_bytes=\$(stat -L --printf="%s" ${registered} 2>/dev/null || echo 0)
-    ref_bytes=\$(stat -L --printf="%s" ${reference} 2>/dev/null || echo 0)
-    total_bytes=\$((reg_bytes + ref_bytes))
-    echo "${task.process},${meta.patient_id},${registered.name}+${reference.name},\${total_bytes}" > ${prefix}.SEGMENTATION_QC.size.csv
+    total_bytes=0
+    for f in ${reference_registered} ${moving_registered} ${reference_pre} ${moving_pre}; do
+        b=\$(stat -L --printf="%s" "\$f" 2>/dev/null || echo 0); total_bytes=\$((total_bytes + b))
+    done
+    echo "${task.process},${meta.patient_id},${moving_registered.name},\${total_bytes}" > ${prefix}.SEGMENTATION_QC.size.csv
 
     segmentation_qc.py \\
-        --registered ${registered} \\
-        --reference ${reference} \\
+        --reference-registered ${reference_registered} \\
+        --moving-registered ${moving_registered} \\
+        --reference-pre ${reference_pre} \\
+        --moving-pre ${moving_pre} \\
         --output ${prefix}_seg_qc.json \\
         --patient-id ${meta.patient_id} \\
         --model-name ${params.segmentation_model} \\
@@ -66,9 +71,9 @@ process SEGMENTATION_QC {
     """
 
     stub:
-    def prefix = "${meta.patient_id}_${registered.simpleName}"
+    def prefix = "${meta.patient_id}_${moving_registered.simpleName}"
     """
-    echo '{"patient_id": "${meta.patient_id}", "moving": "${registered.name}", "reference": "${reference.name}", "dice": 0.0, "iou": 0.0, "instance_f1": 0.0, "n_ref": 0, "n_moving": 0}' > ${prefix}_seg_qc.json
+    echo '{"patient_id": "${meta.patient_id}", "moving": "${moving_registered.name}", "reference": "${reference_registered.name}", "before": {"dice": 0.0, "iou": 0.0, "instance_f1": 0.0}, "after": {"dice": 0.0, "iou": 0.0, "instance_f1": 0.0}, "delta": {"dice": 0.0, "iou": 0.0, "instance_f1": 0.0}}' > ${prefix}_seg_qc.json
     echo "STUB,${meta.patient_id},stub,0" > ${prefix}.SEGMENTATION_QC.size.csv
 
     cat <<-END_VERSIONS > versions.yml
