@@ -31,7 +31,8 @@ os.environ.setdefault("XDG_CACHE_HOME", "/tmp/xdg_cache")
 import numpy as np
 import pyvips
 
-from valis import warp_tools, slide_tools, slide_io
+from valis import warp_tools, slide_tools, slide_io, registration
+from valis_config import init_jvm
 
 
 # --------------------------------------------------------------------------- compose (proven §6.3)
@@ -157,8 +158,18 @@ def main():
                     "(micro_full_out_shape_rc, micro_mask_bbox_xywh, from_rigid_reg)")
     ap.add_argument("--micro-inputs-dir", help="REG_MICRO_PREP micro tiler_inputs (optional reg_mask.npy)")
     ap.add_argument("--compression", default="lzw")
+    ap.add_argument("--jvm-heap-gb", type=int, default=None,
+                    help="explicit BioFormats JVM heap (GB); default = auto-size from the source slide")
     args = ap.parse_args()
     ws = json.load(open(args.warp_state))
+
+    # Start the BioFormats JVM BEFORE any slide I/O. slide_tools.warp_slide() (and the OME reader/
+    # writer below) read/write the full-res slide via BioFormats — exactly like the prep stages, which
+    # is why they call init_jvm() too. Without this the JVM never starts (or starts with VALIS's tiny
+    # default heap and OOMs on a large slide), the cluster-node failure that broke REG_FINALIZE /
+    # REG_WARP_REF. Size the heap from the single staged source slide (staged under src/).
+    heap_gb = init_jvm(os.path.dirname(os.path.abspath(args.src_slide)) or ".", override_gb=args.jvm_heap_gb)
+    print(f"[reg_finalize] started BioFormats JVM (heap={heap_gb}GB)", flush=True)
 
     if args.rigid_only:
         # Reference (or any rigid-only) slide: VALIS warps it with its M + crop and identity non-rigid.
@@ -240,6 +251,7 @@ def main():
         _save_ome_pyvips(warped, args.out, chan_names[:warped.bands], slide_io.vips2bf_dtype(warped.format),
                          tile_wh, args.compression)
     print(f"[reg_finalize] wrote {args.out} ({warped.width}x{warped.height} bands={warped.bands})", flush=True)
+    registration.kill_jvm()
 
 
 def _save_ome_pyvips(warped, dst_f, channel_names, bf_dtype, tile_wh, compression):
