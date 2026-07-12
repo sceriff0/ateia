@@ -21,7 +21,6 @@ shown here are the values in
 |---|---|---|
 | `input` | `null` | Path to the samplesheet CSV. **Required.** Columns depend on `--start` — see [Samplesheet & Input](usage.md#the-samplesheet). |
 | `outdir` | `null` | Output root directory. **Required** — no default. Checkpoint CSVs are written to `<outdir>/csv/`. |
-| `publish_dir_mode` | `copy` | How outputs are published (`copy`, `symlink`, `move`). |
 
 ## Workflow control
 
@@ -47,7 +46,7 @@ Bio-Formats conversion + BaSiC illumination correction.
 | `preproc_skip_dapi` | `true` | Skip BaSiC correction on the DAPI channel. |
 | `preproc_autotune` | `false` | Enable BaSiC autotune. |
 | `preproc_n_iter` | `100` | BaSiC optimization iterations. |
-| `preproc_pool_workers` | `3` | Parallel channels processed at once (also the process CPU count). |
+| `preproc_pool_workers` | `null` | Worker threads for BaSiC preprocessing. `null` = use the process CPU count (`task.cpus`). |
 | `preproc_overlap` | `0` | FOV tile overlap (px). |
 | `preproc_no_darkfield` | `false` | Disable darkfield estimation. |
 
@@ -74,6 +73,7 @@ VALIS whole-slide alignment.
 | `reg_max_image_dim` | `4000` | Max cached image dimension during registration. |
 | `skip_micro_registration` | `true` | Skip the micro-registration refinement step. |
 | `reg_jvm_heap_gb` | `null` | Explicit JVM heap (GB) for VALIS. `null` auto-estimates from input size. |
+| `reg_qc` | `1` | Registration QC depth: `0` = none, `1` = DAPI overlay only, `2` = DAPI overlay + segmentation-overlap metrics (Dice/IoU/instance-F1). |
 
 ### Distributed registration (advanced)
 
@@ -143,7 +143,7 @@ SAM foundation model on the DAPI channel (located by name).
 |---|---|---|
 | `seg_cellsam_bbox_threshold` | `0.4` | Bounding-box confidence — the main precision/recall knob. |
 | `seg_cellsam_use_wsi` | `true` | Enable CellSAM native whole-slide tiling. |
-| `seg_cellsam_block_size` | `400` | Tile side (px) in WSI mode (recommend 256–2048). |
+| `seg_cellsam_block_size` | `1024` | Tile side (px) in WSI mode (recommend 256–2048). |
 | `seg_cellsam_overlap` | `56` | Tile overlap (px) in WSI mode. |
 | `cellsam_model_path` | `null` | Pre-downloaded weights. If `null`, weights auto-download and require `DEEPCELL_ACCESS_TOKEN`. |
 

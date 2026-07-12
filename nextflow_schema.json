@@ -405,7 +405,7 @@
                 "seg_cellsam_block_size": {
                     "type": "integer",
                     "description": "CellSAM tiling block size (px).",
-                    "default": 400
+                    "default": 1024
                 },
                 "seg_cellsam_overlap": {
                     "type": "integer",

@@ -13,7 +13,7 @@ MIRAGE is a Nextflow DSL2 pipeline for whole slide image (WSI) processing. It su
 1. **Image format conversion** — Input images are read from any Bio-Formats-compatible format and staged as OME-TIFF for downstream processing
 2. **Illumination correction** (`PREPROCESS`) — Per-channel flatfield/darkfield correction via the BaSiC algorithm ([BaSiCPy](https://github.com/peng-lab/BaSiCPy)); produces corrected OME-TIFF per image
 3. **Multi-modal image registration** (`REGISTER`) — Aligns all panels for a patient to a shared coordinate space using `valis` (graph-based whole-stack registration via [VALIS](https://github.com/MathOnco/valis))
-4. **Cell segmentation** (`SEGMENT`) — Nuclear and cell segmentation via [StarDist](https://github.com/stardist/stardist); outputs GeoJSON contours per patient
+4. **Cell segmentation** (`SEGMENT`) — Nuclear and cell segmentation via [StarDist](https://github.com/stardist/stardist); outputs nuclear and cell instance masks per patient
 5. **Single-cell marker quantification** (`QUANTIFY`) — Extracts per-cell intensity statistics across all registered channels; outputs CSV tables
 6. **QuPath GeoJSON export** (`EXPORT_GEOJSON`) — Exports all cells with raw marker intensities and morphological measurements in QuPath-native GeoJSON format for interactive gating via FlowPath
 7. **Pyramidal OME-TIFF export** — Assembles all registered channels into a tiled, multi-resolution OME-TIFF for visualization (e.g., QuPath, napari)
@@ -37,7 +37,7 @@ MIRAGE is a Nextflow DSL2 pipeline for whole slide image (WSI) processing. It su
 Use `--start` to choose the entry point and `--stop` to terminate early at a given step. Both accept `preprocessing`, `registration`, or `postprocessing`. If `--stop` is omitted, the pipeline runs through to the end.
 
 ```bash
-nextflow run main.nf \
+nextflow run . \
   --input samplesheet.csv \
   --outdir results \
   --start preprocessing \
@@ -50,8 +50,8 @@ nextflow run main.nf \
 ### Resume from registration checkpoint
 
 ```bash
-nextflow run main.nf \
-  --input results/P001/csv/preprocessed.csv \
+nextflow run . \
+  --input results/csv/preprocessed.csv \
   --start registration \
   --registration_method valis \
   --outdir results \
@@ -62,8 +62,8 @@ nextflow run main.nf \
 ### Resume from postprocessing checkpoint
 
 ```bash
-nextflow run main.nf \
-  --input results/P001/csv/registered.csv \
+nextflow run . \
+  --input results/csv/registered.csv \
   --start postprocessing \
   --outdir results \
   -profile slurm \
@@ -73,7 +73,7 @@ nextflow run main.nf \
 ### Dry-run (validation only)
 
 ```bash
-nextflow run main.nf \
+nextflow run . \
   --input samplesheet.csv \
   --start preprocessing \
   --dry_run true
@@ -82,9 +82,10 @@ nextflow run main.nf \
 ## Documentation
 
 - [Usage](docs/usage.md) — samplesheet format, parameters, profiles
-- [Outputs](docs/outputs.md) — output directory layout and file descriptions
-- [Walkthrough](docs/walkthrough.md) — end-to-end run on the bundled test data
-- [Troubleshooting](docs/troubleshooting.md) — common failures and remediation
+- [Outputs](docs/usage.md#outputs) — output directory layout and file descriptions
+- [Quick start walkthrough](docs/usage.md#quick-start-synthetic-data) — end-to-end run on the bundled test data
+- [Troubleshooting](docs/usage.md#troubleshooting--faq) — common failures and remediation
+- [Parameters](docs/parameters.md) — full parameter reference
 - [Citation](docs/citation.md) — how to cite MIRAGE and its dependencies
 
 Full documentation (MkDocs):
@@ -96,7 +97,7 @@ mkdocs serve
 
 ## Credits
 
-MIRAGE was developed by the mirage team.
+MIRAGE was developed by the MIRAGE team.
 
 ## Citations
 
