@@ -26,6 +26,7 @@ def parse_args():
     p.add_argument("--feature-distances",default="feature_dist/",     help="Directory of feature-distance JSONs")
     p.add_argument("--valis-summary",    default="valis_summary/",    help="Directory of Valis summary CSVs")
     p.add_argument("--postprocess-qc",   default="postprocess_qc/",   help="Directory of postprocessing QC PNGs")
+    p.add_argument("--seg-eval",         default=None,                help="Directory of segmentation_metrics.csv from CSE")
     p.add_argument("--versions",         default=None,                help="Path to collated versions.yml")
     p.add_argument("--output",           default="mirage_qc_report.html", help="Output HTML path")
     p.add_argument("--data-dir",         default="mirage_qc_data/",   help="Directory to copy input data into")
@@ -37,6 +38,8 @@ def parse_args():
 
 def list_files(directory, pattern="*"):
     """Return sorted list of existing files matching glob pattern inside directory."""
+    if not directory:
+        return []
     d = Path(directory)
     if not d.exists():
         return []
@@ -64,6 +67,22 @@ def parse_valis_summary(csv_path):
     Parse a preprocessed_summary.csv (or similar) produced by Valis.
     Returns (headers, rows) where each row is a list of strings.
     Shows all columns present in the CSV (including rTRE, D, n_matches, etc.).
+    """
+    with open(csv_path, newline="") as fh:
+        reader = csv.DictReader(fh)
+        display_headers = reader.fieldnames or []
+        rows = []
+        for row in reader:
+            rows.append([row.get(h, "") for h in display_headers])
+    return display_headers, rows
+
+
+def parse_seg_eval_csv(csv_path):
+    """
+    Parse a segmentation_metrics.csv produced by MERGE_SEG_EVAL (CSE).
+    Columns are dynamic: always `id`, `QualityScore`, plus zero or more
+    `metric::submetric` columns. Returns (headers, rows) like
+    parse_valis_summary.
     """
     with open(csv_path, newline="") as fh:
         reader = csv.DictReader(fh)
@@ -287,6 +306,33 @@ def postprocess_qc_section(postprocess_dir):
     pngs = [p for p in all_pngs if "_seg_overlay" not in p.name]
     return section("Postprocessing QC", img_grid(pngs, wide=True))
 
+
+def seg_eval_section(seg_eval_dir):
+    """
+    Render the Cell Segmentation Evaluator (CSE) metrics table.
+    Any number of segmentation_metrics.csv files may be present (one per
+    merge, though normally just one); each is rendered as its own table
+    since column sets can differ across runs.
+    """
+    parts = []
+    csv_files = list_files(seg_eval_dir, "*.csv")
+    if not csv_files:
+        parts.append('<p class="empty-notice">No segmentation-evaluation CSVs found.</p>')
+    else:
+        for csv_path in csv_files:
+            try:
+                headers, rows = parse_seg_eval_csv(csv_path)
+            except Exception as exc:
+                parts.append(f'<p class="empty-notice">Could not parse {Path(csv_path).name}: {exc}</p>')
+                continue
+            parts.append(f"<p style='font-size:0.85rem;color:#666;margin-bottom:6px;'>{Path(csv_path).name}</p>")
+            tbl = "<table><thead><tr>" + "".join(f"<th>{h}</th>" for h in headers) + "</tr></thead><tbody>"
+            for row in rows:
+                tbl += "<tr>" + "".join(f"<td>{v}</td>" for v in row) + "</tr>"
+            tbl += "</tbody></table>"
+            parts.append(tbl)
+    return section("Segmentation Quality (CSE)", "\n".join(parts))
+
 # ---------------------------------------------------------------------------
 # Data copy
 # ---------------------------------------------------------------------------
@@ -309,6 +355,7 @@ def copy_data(args):
     copy_glob(args.feature_distances,    "*.json", "feature_dist")
     copy_glob(args.valis_summary,        "*.csv",  "valis_summary")
     copy_glob(args.postprocess_qc,       "*.png",  "postprocess_qc")
+    copy_glob(args.seg_eval,             "*.csv",  "seg_eval")
 
 # ---------------------------------------------------------------------------
 # Main
@@ -326,6 +373,7 @@ def main():
         args.valis_summary,
     ))
     html_parts.append(postprocess_qc_section(args.postprocess_qc))
+    html_parts.append(seg_eval_section(args.seg_eval))
     html_parts.append(html_footer())
 
     out_path = Path(args.output)
