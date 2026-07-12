@@ -192,6 +192,11 @@ RUN python3 -m pip install numpy
 RUN python3 -m pip install --retries 10 --timeout 120 --resume-retries 10 \
     valis-wsi==1.0.0 "scyjava>=1.8.1,<1.11" "jgo>=1.0.3,<2" "jpype1>=1.4.1,<2.0.0"
 
+# scikit-image is a VALIS dependency (already pulled above), but pin it explicitly:
+# bin/warp_seg_qc.py rasterizes warped cell polygons with skimage.draw.polygon for the
+# segmentation-overlap registration QC (reg_qc=2, GeoJSON/warp path).
+RUN python3 -m pip install scikit-image
+
 # Add the explicit external tile-loop seam (spec §6 Option B). Splits NonRigidTileRegistrar.calc
 # into a default-None dispatch + the original body (_calc_tiles), so the classic path is unchanged
 # (hook unset) and the distributed scripts just set NonRigidTileRegistrar.EXTERNAL_TILE_HOOK.
