@@ -1,0 +1,14 @@
+This directory vendors code from CellSegmentationEvaluator (CSE) v1.5.19
+by Haoran Chen, Ted Zhang, and Robert F. Murphy, Carnegie Mellon University.
+
+Original source: https://github.com/murphygroup/CellSegmentationEvaluator
+License: see ./LICENSE
+
+Citation:
+Chen, Haoran, and Robert F. Murphy. "Evaluation of cell segmentation methods
+without reference segmentations." Molecular Biology of the Cell 34.6 (2023):
+ar50. https://doi.org/10.1091/mbc.E22-08-0364
+
+Modifications by the Mirage project: removed interactive input()/sys.exit
+control flow, fixed an unset `img_thresholded` reference, and replaced per-cell
+Python loops with scipy.ndimage labeled reductions (bit-exact within 1e-6).
