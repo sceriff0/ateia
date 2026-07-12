@@ -397,22 +397,15 @@ def cell_uniformity(mask, channels, label_list):
 			feature_matrix_z_pieces.append(cell_intensity_z)
 
 	else:
+		ids = np.unique(mask)
+		ids = ids[ids != 0]
 		for i in range(n):
 			channel = channels[i]
 			channel_z = ss.fit_transform(channel)
-			cell_intensity = []
-			cell_intensity_z = []
-			for j in cell_coord.index:
-				cell_size_current = len(cell_coord[j][0])
-				if cell_size_current != 0:
-					single_cell_intensity = np.sum(channel[tuple(cell_coord[j])]) / cell_size_current
-					single_cell_intensity_z = (
-							np.sum(channel_z[tuple(cell_coord[j])]) / cell_size_current
-					)
-					cell_intensity.append(single_cell_intensity)
-					cell_intensity_z.append(single_cell_intensity_z)
-			feature_matrix_pieces.append(cell_intensity)
-			feature_matrix_z_pieces.append(cell_intensity_z)
+			cell_intensity   = ndimage.mean(channel,   labels=mask, index=ids)
+			cell_intensity_z = ndimage.mean(channel_z, labels=mask, index=ids)
+			feature_matrix_pieces.append(list(cell_intensity))
+			feature_matrix_z_pieces.append(list(cell_intensity_z))
 
 	feature_matrix = np.vstack(feature_matrix_pieces).T
 	feature_matrix_z = np.vstack(feature_matrix_z_pieces).T
