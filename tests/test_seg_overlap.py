@@ -79,7 +79,10 @@ _FIX = Path(__file__).resolve().parent / "testdata"
 
 def _load(name):
     tifffile = pytest.importorskip("tifffile")
-    return tifffile.imread(str(_FIX / name)).astype(np.uint32)
+    p = _FIX / name
+    if not p.exists():
+        pytest.skip(f"{name} not generated (run tests/testdata/generate_complete_testdata.py)")
+    return tifffile.imread(str(p)).astype(np.uint32)
 
 
 def test_real_mask_identical_is_perfect():
