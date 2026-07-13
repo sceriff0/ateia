@@ -58,9 +58,12 @@ def instance_f1(ma, mb, iou_thresh: float = 0.5) -> dict:
         return {"f1": nan, "precision": nan, "recall": nan, "matched": 0, "n_a": na, "n_b": nb}
     fg = (a > 0) & (b > 0)
     pair = a[fg] * (nb + 1) + b[fg]
-    counts = np.bincount(pair)
-    idx = np.nonzero(counts)[0]
-    inter = counts[idx].astype(np.float64)
+    # np.unique (not np.bincount): a dense bincount over the encoded pair value would
+    # allocate ~na*nb int64 slots (TiB-scale on whole-slide masks with 100k+ labels).
+    # unique is sized by the number of foreground-overlap pixels — the sparse histogram
+    # the metric actually needs.
+    idx, counts = np.unique(pair, return_counts=True)
+    inter = counts.astype(np.float64)
     al, bl = idx // (nb + 1), idx % (nb + 1)
     area_a = np.bincount(a, minlength=na + 1).astype(np.float64)
     area_b = np.bincount(b, minlength=nb + 1).astype(np.float64)

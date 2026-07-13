@@ -50,6 +50,19 @@ def test_instance_f1_identical_and_disjoint():
     assert seg_overlap.instance_f1(a, b)["f1"] == 0.0
 
 
+def test_instance_f1_scales_to_many_labels_without_dense_histogram():
+    """Whole-slide masks carry tens/hundreds of thousands of cells. Encoding each
+    (a,b) co-occurrence as a*(nb+1)+b and histogramming it with np.bincount would
+    allocate ~na*nb int64 slots (GiB→TiB) and crash the QC process (the real 052
+    failure: 1016 GiB requested). The histogram must be sparse — sized by the
+    foreground-overlap pixels, not the label-product space."""
+    n = 40_000  # 200x200 distinct contiguous cells → bincount(pair) wants ~12 GiB
+    a = np.arange(1, n + 1, dtype=np.int64).reshape(200, 200)
+    out = seg_overlap.instance_f1(a, a.copy())  # must run in ms, not OOM
+    assert out["f1"] == 1.0
+    assert out["n_a"] == n and out["n_b"] == n and out["matched"] == n
+
+
 # ── shape alignment (registered vs reference may differ by a row/col) ──────────
 def test_align_shapes_crops_to_common_extent():
     a = np.ones((10, 12), dtype=np.uint32)
