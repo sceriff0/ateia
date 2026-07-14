@@ -85,6 +85,13 @@ def init_jvm(input_dir, override_gb=None):
     capped at 75% of system RAM)."""
     from valis import registration
 
+    # Point scyjava's jgo/Maven cache off a read-only $HOME (HPC nodes) BEFORE the JVM starts.
+    # scyjava<1.11 derives the cache path from Path.home() and ignores JGO_CACHE_DIR/M2_REPO, so
+    # the Dockerfile ENV knobs are inert; this uses scyjava.config.set_cache_dir instead. Without
+    # it, jgo's os.makedirs($HOME/.jgo) dies with EROFS on /hpcnfs. See jvm_cache.py.
+    from jvm_cache import point_jvm_cache_off_readonly_home
+    point_jvm_cache_off_readonly_home()
+
     if override_gb is not None and override_gb > 0:
         mem_gb = int(override_gb)
     else:
