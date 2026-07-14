@@ -347,22 +347,13 @@ jobs:
     name: distributed bit-identical (real image)
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch'
-    # Escalates above the workflow-level read-only default: needs to pull the
-    # patched VALIS image from GHCR.
+    # Pulls the patched VALIS image from Docker Hub (public — no auth needed).
     permissions:
       contents: read
-      packages: read
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Generate test data
         run: |
@@ -371,7 +362,7 @@ jobs:
 
       - name: Run distributed bit-identical verification in the patched image
         run: |
-          IMG="ghcr.io/${GITHUB_REPOSITORY,,}/mirage-valis:1.0.0"
+          IMG="bolt3x/attend_image_analysis:mirage_valis_1.0.0"
           docker pull "$IMG"
           docker run --rm -v "$PWD":/work -w /work "$IMG" \
             python3 tests/integration/verify_distributed_bitidentical.py

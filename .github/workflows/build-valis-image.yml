@@ -1,16 +1,19 @@
 name: Build patched VALIS image
 
-# Builds the EXTERNAL_TILE_HOOK-patched VALIS image (containers/valis/) and pushes it to GHCR.
-# Required for the distributed registration path (params.reg_distributed_tiling=true) — the published
-# cdgatenbee/valis-wsi:1.0.0 lacks the seam. Manual (workflow_dispatch) since the image is ~10GB and
-# the default pipeline (distributed OFF) does not need it. Point params.reg_dist_container at the
-# pushed tag, then run the real (non-stub) distributed nf-tests / integration comparison.
+# Builds the EXTERNAL_TILE_HOOK-patched VALIS image (containers/valis/) and pushes it to Docker Hub
+# as bolt3x/attend_image_analysis:mirage_valis_<tag>. Required for the distributed registration path
+# (params.reg_distributed_tiling=true) — the published cdgatenbee/valis-wsi:1.0.0 lacks the seam.
+# Manual (workflow_dispatch) since the image is ~10GB and the default pipeline (distributed OFF) does
+# not need it. Point params.reg_dist_container at the pushed tag, then run the real (non-stub)
+# distributed nf-tests / integration comparison.
+#
+# Auth: DOCKERHUB_USERNAME / DOCKERHUB_TOKEN repository secrets.
 
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Image tag (e.g. 1.0.0)"
+        description: "Version suffix for the mirage_valis_<tag> Docker Hub tag (e.g. 1.0.0)"
         required: true
         default: "1.0.0"
   push:
@@ -19,10 +22,8 @@ on:
       - "containers/valis/**"
 
 env:
-  REGISTRY: ghcr.io
+  IMAGE_REPO: docker.io/bolt3x/attend_image_analysis
 
-# Read-only default token at workflow scope; the build job escalates to
-# packages: write for the GHCR push.
 permissions:
   contents: read
 
@@ -36,27 +37,27 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
     steps:
       - uses: actions/checkout@v4
 
-      - name: Log in to GHCR
+      - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Set image ref
         id: ref
         run: |
           tag="${{ github.event.inputs.tag || '1.0.0' }}"
-          echo "image=${REGISTRY}/${GITHUB_REPOSITORY,,}/mirage-valis:${tag}" >> "$GITHUB_OUTPUT"
+          echo "image=${IMAGE_REPO}:mirage_valis_${tag}" >> "$GITHUB_OUTPUT"
 
       - name: Build + push
         uses: docker/build-push-action@v6
         with:
           context: containers/valis
+          # Pin to linux/amd64 — the pipeline runs on amd64 HPC nodes.
+          platforms: linux/amd64
           push: true
           tags: ${{ steps.ref.outputs.image }}
           # The build applies containers/valis/calc_hook.patch and asserts "hook seam OK".

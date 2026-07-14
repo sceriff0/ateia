@@ -7,7 +7,7 @@ process SEG_QUALITY_EVAL {
     tag "${meta.patient_id}"
     label 'process_high'
 
-    container "ghcr.io/sceriff0/mirage/segeval:${params.segeval_tag ?: 'dev'}"
+    container "bolt3x/attend_image_analysis:${params.segeval_tag ?: 'segeval'}"
 
     input:
     tuple val(meta), path(cell_mask), path(nuclei_mask), path(image)

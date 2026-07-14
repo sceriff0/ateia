@@ -66,6 +66,9 @@ legacy/
 .idea/
 .vscode/
 
+# Local SLURM run scripts (site-specific, not user-facing)
+run_stardist.sh
+
 # Editor temp files
 *.swp
 *.swo

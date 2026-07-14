@@ -4,32 +4,37 @@ This directory vendors the Docker build contexts for every image the Mirage
 pipeline runs. Each subdirectory is a self-contained build context
 (`containers/<name>/Dockerfile` plus any `requirements.txt` / helper files).
 
-Images are built and published to the **GitHub Container Registry (GHCR)** at:
+Images are built and published to **Docker Hub**, in a single public repository
+using one descriptive tag per image:
 
 ```
-ghcr.io/sceriff0/mirage/<name>:<tag>
+bolt3x/attend_image_analysis:<tag>
 ```
 
 Publishing is automated by [`.github/workflows/build-images.yml`](../.github/workflows/build-images.yml)
 and the release flow in [`.github/workflows/release.yml`](../.github/workflows/release.yml).
-Every image is tagged with both the release version (e.g. `v1.0.0`) and `latest`.
+CI authenticates with the `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` repository
+secrets. Docker Hub images are **public**, so no pull credentials are needed on
+the HPC/cluster side (unlike GHCR, whose default-private packages caused
+`403 Forbidden` on `singularity pull`).
 
-> `<tag>` below is the pipeline release version, e.g. `v1.0.0`. We avoid
-> `:latest` in the pipeline's `container` directives so runs are reproducible.
+> `<tag>` is a fixed, content-descriptive tag (e.g. `preprocess`,
+> `convert_bioformats_2`, `segeval`) — not a release version. The modules pin
+> these tags directly; we avoid `:latest` so runs are reproducible.
 
 ## Image mapping
 
-| Build context (`containers/<name>/`) | GHCR image:tag | Pipeline process(es) that use it | Source / base image |
+| Build context (`containers/<name>/`) | Docker Hub image:tag | Pipeline process(es) that use it | Source / base image |
 | --- | --- | --- | --- |
-| `bioformats` | `ghcr.io/sceriff0/mirage/bioformats:<tag>` | `CONVERT_IMAGE` | `eclipse-temurin:21-jre-jammy` + Glencoe `bioformats2raw` 0.12.0 / `raw2ometiff` 0.10.0 + `tifffile`/`numpy` |
-| `preprocess` | `ghcr.io/sceriff0/mirage/preprocess:<tag>` | `PREPROCESS`, `GENERATE_PREPROCESS_QC`, `GENERATE_QC_REPORT`, `GET_IMAGE_DIMS`, `MAX_DIM`, `PAD_IMAGES`, `SPLIT_CHANNELS` (7 modules) | `ubuntu:22.04` + Python 3.11 + BaSiCPy/JAX(cpu)/scikit-image illumination-correction stack |
-| `quantification` | `ghcr.io/sceriff0/mirage/quantification:<tag>` | `QUANTIFY`, `EXTRACT_CELL_PROPERTIES`, `EXTRACT_NUCLEI_PROPERTIES`, `EXPORT_GEOJSON`, `GENERATE_POSTPROCESSING_QC` (+ `quantify.nf` second container directive) (6 modules) | `nvidia/cuda:12.2.2-devel-ubuntu22.04` + cupy/cucim GPU quantification stack |
-| `segmentation` | `ghcr.io/sceriff0/mirage/segmentation:<tag>` | `SEGMENT` (default backend, `params.seg_method` = stardist) | `tensorflow/tensorflow:2.15.0-gpu-jupyter` + StarDist 0.9.1 / Cellpose 3.1.1.1 |
-| `cellsam` | `ghcr.io/sceriff0/mirage/cellsam:<tag>` | `SEGMENT` (`params.seg_method` = `cellsam`) | `pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime` + `cellSAM` (git) |
-| `istantseg` | `ghcr.io/sceriff0/mirage/istantseg:<tag>` | `SEGMENT` (`params.seg_method` = `instantseg`) | `pytorch/pytorch:2.5.1-cuda11.8-cudnn9-runtime` + `instanseg-torch` |
-| `merge` | `ghcr.io/sceriff0/mirage/merge:<tag>` | `MERGE_AND_PYRAMID` | `pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime` + tifffile/imagecodecs pyramid stack |
-| `debug_diffeo` | `ghcr.io/sceriff0/mirage/debug_diffeo:<tag>` | `GENERATE_REGISTRATION_QC` | `nvidia/cuda:12.2.2-cudnn8-devel-ubuntu22.04` + Miniconda/bftools + StarDist/cudipy diffeo QC stack |
-| `segeval` | `ghcr.io/sceriff0/mirage/segeval:<tag>` | `SEG_QUALITY_EVAL`, `MERGE_SEG_EVAL` | `python:3.11-slim` + numpy/scipy/pandas/scikit-image/scikit-learn/aicsimageio/tifffile/xmltodict (vendored CSE metrics) |
+| `bioformats` | `bolt3x/attend_image_analysis:convert_bioformats_2` | `CONVERT_IMAGE` | `eclipse-temurin:21-jre-jammy` + Glencoe `bioformats2raw` 0.12.0 / `raw2ometiff` 0.10.0 + `tifffile`/`numpy` |
+| `preprocess` | `bolt3x/attend_image_analysis:preprocess` | `PREPROCESS`, `GENERATE_PREPROCESS_QC`, `GENERATE_QC_REPORT`, `GET_IMAGE_DIMS`, `MAX_DIM`, `PAD_IMAGES`, `SPLIT_CHANNELS` (7 modules) | `ubuntu:22.04` + Python 3.11 + BaSiCPy/JAX(cpu)/scikit-image illumination-correction stack |
+| `quantification` | `bolt3x/attend_image_analysis:quantification_gpu` | `QUANTIFY`, `EXTRACT_CELL_PROPERTIES`, `EXTRACT_NUCLEI_PROPERTIES`, `EXPORT_GEOJSON`, `GENERATE_POSTPROCESSING_QC` (+ `quantify.nf` second container directive) (6 modules) | `nvidia/cuda:12.2.2-devel-ubuntu22.04` + cupy/cucim GPU quantification stack |
+| `segmentation` | `bolt3x/attend_image_analysis:segmentation_gpu` | `SEGMENT` (default backend, `params.seg_method` = stardist) | `tensorflow/tensorflow:2.15.0-gpu-jupyter` + StarDist 0.9.1 / Cellpose 3.1.1.1 |
+| `cellsam` | `bolt3x/attend_image_analysis:cellsam` | `SEGMENT` (`params.seg_method` = `cellsam`) | `pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime` + `cellSAM` (git) |
+| `istantseg` | `bolt3x/attend_image_analysis:instant_seg` | `SEGMENT` (`params.seg_method` = `instantseg`) | `pytorch/pytorch:2.5.1-cuda11.8-cudnn9-runtime` + `instanseg-torch` |
+| `merge` | `bolt3x/attend_image_analysis:merge` | `MERGE_AND_PYRAMID` | `pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime` + tifffile/imagecodecs pyramid stack |
+| `debug_diffeo` | `bolt3x/attend_image_analysis:debug_diffeo` | `GENERATE_REGISTRATION_QC` | `nvidia/cuda:12.2.2-cudnn8-devel-ubuntu22.04` + Miniconda/bftools + StarDist/cudipy diffeo QC stack |
+| `segeval` | `bolt3x/attend_image_analysis:segeval` | `SEG_QUALITY_EVAL`, `MERGE_SEG_EVAL` | `python:3.11-slim` + numpy/scipy/pandas/scikit-image/scikit-learn/aicsimageio/tifffile/xmltodict (vendored CSE metrics) |
 | VALIS (not vendored) | `cdgatenbee/valis-wsi:1.0.0` (upstream) | `REGISTER`, `ESTIMATE_FEATURE_DISTANCES` | upstream maintained image — **not rebuilt or published by us** (see note below) |
 
 > The context directory name `istantseg` (a historical typo) is preserved
@@ -72,59 +77,18 @@ They remain available in the author's working tree if ever needed again.
 | `jupyter` | Interactive notebook image for local exploration; not a pipeline runtime. |
 | `pixie` | Pixie clustering experiment; not part of the current pipeline (a stray `containers/pixie/Dockerfile` may exist locally but is not built or published by the release workflow). |
 
-## Recommended `container` directive replacements
+## `container` directives
 
-The pipeline modules (`.nf` files) currently reference the legacy DockerHub
-tags. To switch to the GHCR-published images, replace the `container` directives
-as follows. `${version}` is the release tag (e.g. `v1.0.0`); pin it explicitly
-rather than using `:latest`.
+The pipeline modules (`.nf` files) reference the Docker Hub tags in the mapping
+table above directly (e.g. `container 'bolt3x/attend_image_analysis:preprocess'`).
+Tags are fixed and content-descriptive — pin them explicitly, never `:latest`,
+so runs stay reproducible.
 
-> These edits are owned by the modules/config agent — this list is a
-> recommendation, not applied here.
+`modules/local/segment.nf` is the one dynamic case: `SEGMENT` picks its container
+at runtime from `params.seg_method` (`cellsam` → `:cellsam`, `instantseg` →
+`:instant_seg`, otherwise the StarDist default `:segmentation_gpu`).
 
-| File | Line | Old directive | Recommended new directive |
-| --- | --- | --- | --- |
-| `modules/local/convert_image.nf` | 5 | `container 'bolt3x/attend_image_analysis:convert_bioformats_2'` | `container 'ghcr.io/sceriff0/mirage/bioformats:${version}'` |
-| `modules/local/preprocess.nf` | 14 | `container 'bolt3x/attend_image_analysis:preprocess'` | `container 'ghcr.io/sceriff0/mirage/preprocess:${version}'` |
-| `modules/local/generate_preprocess_qc.nf` | 5 | `container 'bolt3x/attend_image_analysis:preprocess'` | `container 'ghcr.io/sceriff0/mirage/preprocess:${version}'` |
-| `modules/local/generate_qc_report.nf` | 5 | `container 'bolt3x/attend_image_analysis:preprocess'` | `container 'ghcr.io/sceriff0/mirage/preprocess:${version}'` |
-| `modules/local/get_image_dims.nf` | 5 | `container 'bolt3x/attend_image_analysis:preprocess'` | `container 'ghcr.io/sceriff0/mirage/preprocess:${version}'` |
-| `modules/local/max_dim.nf` | 5 | `container 'bolt3x/attend_image_analysis:preprocess'` | `container 'ghcr.io/sceriff0/mirage/preprocess:${version}'` |
-| `modules/local/pad_images.nf` | 5 | `container 'bolt3x/attend_image_analysis:preprocess'` | `container 'ghcr.io/sceriff0/mirage/preprocess:${version}'` |
-| `modules/local/split_channels.nf` | 14 | `container 'bolt3x/attend_image_analysis:preprocess'` | `container 'ghcr.io/sceriff0/mirage/preprocess:${version}'` |
-| `modules/local/quantify.nf` | 14 | `container 'bolt3x/attend_image_analysis:quantification_gpu'` | `container 'ghcr.io/sceriff0/mirage/quantification:${version}'` |
-| `modules/local/quantify.nf` | 81 | `container 'bolt3x/attend_image_analysis:quantification_gpu'` | `container 'ghcr.io/sceriff0/mirage/quantification:${version}'` |
-| `modules/local/extract_cell_properties.nf` | 18 | `container 'bolt3x/attend_image_analysis:quantification_gpu'` | `container 'ghcr.io/sceriff0/mirage/quantification:${version}'` |
-| `modules/local/extract_nuclei_properties.nf` | 16 | `container 'bolt3x/attend_image_analysis:quantification_gpu'` | `container 'ghcr.io/sceriff0/mirage/quantification:${version}'` |
-| `modules/local/export_geojson.nf` | 19 | `container 'bolt3x/attend_image_analysis:quantification_gpu'` | `container 'ghcr.io/sceriff0/mirage/quantification:${version}'` |
-| `modules/local/generate_postprocessing_qc.nf` | 5 | `container 'bolt3x/attend_image_analysis:quantification_gpu'` | `container 'ghcr.io/sceriff0/mirage/quantification:${version}'` |
-| `modules/local/merge_and_pyramid.nf` | 21 | `container 'bolt3x/attend_image_analysis:merge'` | `container 'ghcr.io/sceriff0/mirage/merge:${version}'` |
-| `modules/local/generate_registration_qc.nf` | 5 | `container 'bolt3x/attend_image_analysis:debug_diffeo'` | `container 'ghcr.io/sceriff0/mirage/debug_diffeo:${version}'` |
-| `modules/local/register.nf` | 17 | `container 'cdgatenbee/valis-wsi:1.0.0'` | `container 'ghcr.io/sceriff0/mirage/valis:${version}'` |
-| `modules/local/estimate_feature_distances.nf` | 4 | `container 'cdgatenbee/valis-wsi:1.0.0'` | `container 'ghcr.io/sceriff0/mirage/valis:${version}'` |
-
-### `modules/local/segment.nf` (dynamic selector, lines 25-29)
-
-`SEGMENT` chooses its container at runtime from `params.seg_method`. Replace the
-three tags inside the `container { ... }` closure:
-
-| Old tag (in selector) | Recommended new tag |
-| --- | --- |
-| `bolt3x/attend_image_analysis:cellsam` | `ghcr.io/sceriff0/mirage/cellsam:${version}` |
-| `bolt3x/attend_image_analysis:instant_seg` | `ghcr.io/sceriff0/mirage/istantseg:${version}` |
-| `bolt3x/attend_image_analysis:segmentation_gpu` (default) | `ghcr.io/sceriff0/mirage/segmentation:${version}` |
-
-Recommended closure shape:
-
-```groovy
-container { params.seg_method == 'cellsam'
-            ? 'ghcr.io/sceriff0/mirage/cellsam:${version}'
-            : params.seg_method == 'instantseg'
-            ? 'ghcr.io/sceriff0/mirage/istantseg:${version}'
-            : 'ghcr.io/sceriff0/mirage/segmentation:${version}' }
-```
-
-> Because `${version}` interpolates the pipeline release, consider centralizing
-> it (e.g. a `params.container_registry` / `params.container_tag`) so all
-> directives update from a single source. That decision belongs to the
-> modules/config agent.
+The distributed non-rigid tiling modules pull the patched VALIS image via
+`params.reg_dist_container` (default `bolt3x/attend_image_analysis:mirage_valis_1.0.0`),
+published by [`build-valis-image.yml`](../.github/workflows/build-valis-image.yml).
+`REGISTER` / `ESTIMATE_FEATURE_DISTANCES` use the upstream `cdgatenbee/valis-wsi:1.0.0`.

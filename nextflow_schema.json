@@ -228,7 +228,7 @@
                 "reg_dist_container": {
                     "type": "string",
                     "description": "Container for distributed-tiling processes. MUST be the EXTERNAL_TILE_HOOK-patched VALIS image (the published cdgatenbee image lacks the seam).",
-                    "default": "ghcr.io/sceriff0/mirage/mirage-valis:1.0.0"
+                    "default": "bolt3x/attend_image_analysis:mirage_valis_1.0.0"
                 },
                 "reg_dist_tile_wh": {
                     "type": "integer",
@@ -443,8 +443,8 @@
                 },
                 "segeval_tag": {
                     "type": "string",
-                    "description": "Container tag for the segmentation quality evaluator (segeval) image.",
-                    "default": "dev"
+                    "description": "Container tag for the segmentation quality evaluator (segeval) image on bolt3x/attend_image_analysis (Docker Hub).",
+                    "default": "segeval"
                 },
                 "skip_final_qc_report": {
                     "type": "boolean",

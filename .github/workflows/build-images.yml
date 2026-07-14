@@ -2,17 +2,22 @@
 # Build & Push Container Images
 # =============================================================================
 # Builds every Docker image vendored under containers/<name>/ and pushes it to
-# the GitHub Container Registry (GHCR) at ghcr.io/sceriff0/mirage/<name>:<tag>.
+# Docker Hub as bolt3x/attend_image_analysis:<tag>.
+#
+# NOTE: This repo uses a SINGLE Docker Hub repository (bolt3x/attend_image_analysis)
+# with one descriptive tag per image, matching how the modules pull them
+# (e.g. bolt3x/attend_image_analysis:preprocess). Docker Hub has no sub-path
+# namespace like GHCR, so the matrix maps each build context dir -> its tag.
 #
 # Triggers:
-#   * release:published    -> build + push, tagged with the release version + latest
-#   * workflow_dispatch     -> build + push, tagged with the supplied version + latest
+#   * release:published    -> build + push, using each image's descriptive tag
+#   * workflow_dispatch     -> build + push
 #   * push to main (when    -> build ONLY (no push) so PRs/merges validate the
 #     containers/** change)     Dockerfiles without publishing
 #   * workflow_call         -> reusable; release.yml calls this with a version
 #
-# Auth: docker/login-action -> GHCR using the built-in GITHUB_TOKEN
-#       (requires `permissions: packages: write`).
+# Auth: docker/login-action -> Docker Hub using DOCKERHUB_USERNAME / DOCKERHUB_TOKEN
+#       repository secrets (Settings -> Secrets and variables -> Actions).
 # Caching: GitHub Actions cache backend (type=gha) for fast layer reuse.
 # =============================================================================
 name: Build Images
@@ -45,21 +50,19 @@ on:
         required: true
         type: string
 
-# GHCR push needs package write access; contents:read for checkout.
+# Docker Hub push needs no special GITHUB_TOKEN scope; contents:read for checkout.
 permissions:
   contents: read
-  packages: write
 
 # Serialize per ref; do NOT cancel — an interrupted run can leave a half-pushed
-# image set in GHCR.
+# image set on Docker Hub.
 concurrency:
   group: build-images-${{ github.ref }}
   cancel-in-progress: false
 
 env:
-  # Base path for all published images.
-  REGISTRY: ghcr.io
-  IMAGE_BASE: ghcr.io/sceriff0/mirage
+  # Single Docker Hub repository that holds every image (as descriptive tags).
+  IMAGE_REPO: docker.io/bolt3x/attend_image_analysis
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -98,26 +101,28 @@ jobs:
   # Build (and conditionally push) each image in parallel via a matrix.
   # ---------------------------------------------------------------------------
   build:
-    name: Build ${{ matrix.image }}
+    name: Build ${{ matrix.dir }}
     needs: setup
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        # One entry per vendored build context under containers/.
-        # VALIS is intentionally excluded: it uses the maintained upstream
-        # image cdgatenbee/valis-wsi:1.0.0 (its from-source libvips build is
-        # heavy and not worth re-hosting). The modules reference it directly.
-        image:
-          - bioformats
-          - preprocess
-          - quantification
-          - segmentation
-          - cellsam
-          - istantseg
-          - merge
-          - debug_diffeo
-          - segeval
+        # One entry per vendored build context under containers/, mapped to the
+        # Docker Hub tag the modules pull it as.
+        # VALIS is intentionally excluded: it uses the maintained upstream image
+        # cdgatenbee/valis-wsi:1.0.0 (its from-source libvips build is heavy and
+        # not worth re-hosting). The distributed-tiling modules pull the patched
+        # bolt3x/attend_image_analysis:mirage_valis_1.0.0, published out-of-band.
+        include:
+          - { dir: bioformats,     tag: convert_bioformats_2 }
+          - { dir: preprocess,     tag: preprocess }
+          - { dir: quantification, tag: quantification_gpu }
+          - { dir: segmentation,   tag: segmentation_gpu }
+          - { dir: cellsam,        tag: cellsam }
+          - { dir: istantseg,      tag: instant_seg }
+          - { dir: merge,          tag: merge }
+          - { dir: debug_diffeo,   tag: debug_diffeo }
+          - { dir: segeval,        tag: segeval }
 
     steps:
       - name: Checkout repository
@@ -127,27 +132,23 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       # Only authenticate when we actually intend to push.
-      - name: Log in to GHCR
+      - name: Log in to Docker Hub
         if: needs.setup.outputs.push == 'true'
         uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push ${{ matrix.image }}
+      - name: Build and push ${{ matrix.dir }}
         uses: docker/build-push-action@v6
         with:
-          context: containers/${{ matrix.image }}
-          file: containers/${{ matrix.image }}/Dockerfile
+          context: containers/${{ matrix.dir }}
+          file: containers/${{ matrix.dir }}/Dockerfile
           # Pin to linux/amd64 — the pipeline runs on amd64 HPC nodes.
           platforms: linux/amd64
           push: ${{ needs.setup.outputs.push == 'true' }}
-          # Tag with the resolved version AND latest (both only matter on push;
-          # on build-only runs the tags are computed but nothing is published).
-          tags: |
-            ${{ env.IMAGE_BASE }}/${{ matrix.image }}:${{ needs.setup.outputs.version }}
-            ${{ env.IMAGE_BASE }}/${{ matrix.image }}:latest
+          # Descriptive tag the modules pull (matches the single-repo convention).
+          tags: ${{ env.IMAGE_REPO }}:${{ matrix.tag }}
           # Per-image GitHub Actions layer cache.
-          cache-from: type=gha,scope=${{ matrix.image }}
-          cache-to: type=gha,scope=${{ matrix.image }},mode=max
+          cache-from: type=gha,scope=${{ matrix.dir }}
+          cache-to: type=gha,scope=${{ matrix.dir }},mode=max
