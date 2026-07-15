@@ -21,6 +21,17 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "utils"))
+
+# Read-only $HOME on HPC clusters breaks numba's on-disk cache during the valis
+# import (RuntimeError: '_repeat_1d': no locator available). Redirect + disable
+# before importing valis (mirrors register.py / reg_finalize.py).
+os.environ.setdefault("NUMBA_CACHE_DIR", "/tmp/numba_cache")
+os.environ["NUMBA_DISABLE_CACHING"] = "1"
+# matplotlib (pulled in transitively by valis) builds a font cache under $HOME by default; on a
+# read-only cluster $HOME that warns/stalls. Redirect its config + generic XDG cache to /tmp too.
+os.environ.setdefault("MPLCONFIGDIR", "/tmp/mplconfig")
+os.environ.setdefault("XDG_CACHE_HOME", "/tmp/xdg_cache")
 
 import numpy as np
 
@@ -154,15 +165,32 @@ def parse_args(argv=None):
     ap.add_argument("--pt-level", type=int, default=0)
     ap.add_argument("--crop", default="overlap")
     ap.add_argument("--iou-thresh", type=float, default=0.5)
+    ap.add_argument("--jvm-heap-gb", type=int, default=None,
+                    help="explicit BioFormats JVM heap (GB); default = auto-size from the pickle dir")
     return ap.parse_args(argv)
 
 
 def main(argv=None):
     a = parse_args(argv)
-    rec = write_report(a.pickle, a.ref_slide, a.moving_slide, a.ref_geojson, a.moving_geojson,
-                       a.output, patient_id=a.patient_id, moving_name=a.moving_name,
-                       reference_name=a.reference_name, pt_level=a.pt_level, crop=a.crop,
-                       iou_thresh=a.iou_thresh)
+
+    # Start the BioFormats JVM BEFORE any slide I/O. registration.load_registrar() unpickles VALIS
+    # Slide objects whose BioFormats-backed readers reconstruct against a live JVM, and warp_geojson()
+    # reads slide geometry — exactly like the register stages, which is why they all call init_jvm()
+    # first. Without this, load_registrar() dies with jpype JVMNotRunning. Size the heap from the
+    # staged pickle dir (mirrors reg_finalize.py's src-slide sizing).
+    from valis import registration
+    from valis_config import init_jvm
+    heap_gb = init_jvm(os.path.dirname(os.path.abspath(a.pickle)) or ".", override_gb=a.jvm_heap_gb)
+    print(f"[warp_seg_qc] started BioFormats JVM (heap={heap_gb}GB)", flush=True)
+
+    try:
+        rec = write_report(a.pickle, a.ref_slide, a.moving_slide, a.ref_geojson, a.moving_geojson,
+                           a.output, patient_id=a.patient_id, moving_name=a.moving_name,
+                           reference_name=a.reference_name, pt_level=a.pt_level, crop=a.crop,
+                           iou_thresh=a.iou_thresh)
+    finally:
+        registration.kill_jvm()
+
     d = rec["delta"]
     print(f"Wrote {a.output}: after_dice={rec['after']['dice']:.4f} "
           f"before_dice={rec['before']['dice']:.4f} "
