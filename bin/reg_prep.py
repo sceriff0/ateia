@@ -120,7 +120,13 @@ def main():
         snr.NonRigidZImage.calc_deformation = orig_calc
         OpticalFlowWarper.register = orig_reg
 
-    ref_stem = (args.reference.replace(".ome.tiff", "").replace(".ome.tif", "")
+    # Stem used to MATCH reg.slide_dict keys (bare basename, no dir, no extension). VALIS keys slides
+    # by basename stem, but --reference is a path ("ref/<name>.ome.tif") so it must be basename'd first;
+    # otherwise "ref/<name>" never equals slide_dict's "<name>" and the reference is miscounted as a
+    # dropped moving slide (and its warp_state lands in an <out>/ref/ subdir). Keep args.reference (the
+    # full path) untouched — VALIS needs it to locate the file.
+    ref_basename = os.path.basename(args.reference)
+    ref_stem = (ref_basename.replace(".ome.tiff", "").replace(".ome.tif", "")
                 .replace(".tiff", "").replace(".tif", ""))
     ref_slide = reg.get_ref_slide()
     full_disp = [int(x) for x in reg._full_displacement_shape_rc]

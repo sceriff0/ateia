@@ -146,7 +146,11 @@ def main():
                                     skip_micro_registration=args.skip_micro_registration,
                                     max_image_dim_px=args.max_image_dim)
 
-    ref_stem = (args.reference.replace(".ome.tiff", "").replace(".ome.tif", "")
+    # Bare basename stem to MATCH reg.slide_dict keys (VALIS keys by basename). --reference is a path
+    # ("ref/<name>.ome.tif"), so it must be basename'd first or "ref/<name>" never equals slide_dict's
+    # "<name>" and the reference is miscounted as a dropped moving slide. See bin/reg_prep.py.
+    ref_basename = os.path.basename(args.reference)
+    ref_stem = (ref_basename.replace(".ome.tiff", "").replace(".ome.tif", "")
                 .replace(".tiff", "").replace(".tif", ""))
 
     # Stage 1: rebuild rigid + wave-1 prep state with the no-op warper (cheap), like reg_prep.
