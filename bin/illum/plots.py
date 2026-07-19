@@ -4,7 +4,6 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from illum.grid import period_from_profile
 from illum.metrics import _detrend
 
 

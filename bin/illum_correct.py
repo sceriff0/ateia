@@ -35,6 +35,9 @@ def main():
     p.add_argument("--background", default="none")
     p.add_argument("--smooth-frac", type=float, default=0.12)
     args = p.parse_args()
+    if args.flatfield == "basic" and args.dark != "none":
+        raise SystemExit("error: --flatfield basic performs its own darkfield estimation; "
+                         "use --dark none with --flatfield basic")
 
     os.makedirs(args.output_dir, exist_ok=True)
     stack = np.squeeze(tifffile.imread(args.image))

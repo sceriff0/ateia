@@ -5,7 +5,7 @@ methods degrade gracefully when skimage is absent.
 """
 from __future__ import annotations
 import numpy as np
-from scipy.ndimage import gaussian_filter, grey_opening, median_filter, zoom
+from scipy.ndimage import gaussian_filter, grey_opening, median_filter, white_tophat, zoom
 
 try:
     from skimage.restoration import rolling_ball as _rolling_ball
@@ -47,9 +47,13 @@ def _median(channel, out_dtype=np.uint16, downsample=8, size=15, **kw):
     return _finish(channel, f - bg[:f.shape[0], :f.shape[1]], out_dtype)
 
 
-def _tophat(channel, out_dtype=np.uint16, downsample=8, radius=None, **kw):
-    # white top-hat == img - opening(img); reuse the opening background
-    return _opening(channel, out_dtype=out_dtype, downsample=downsample, radius=radius)
+def _tophat(channel, out_dtype=np.uint16, size=25, **kw):
+    # Full-resolution white top-hat with a modest flat footprint: keeps small
+    # bright features and removes larger-scale background, without the
+    # downsample+smooth large-scale background estimate that _opening uses.
+    f = channel.astype(np.float32)
+    th = white_tophat(f, size=(size, size))
+    return _finish(channel, th, out_dtype)
 
 
 def _rball(channel, out_dtype=np.uint16, radius=50, **kw):

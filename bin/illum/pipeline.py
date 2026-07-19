@@ -1,6 +1,6 @@
 """Variant definition + per-variant run (correct all channels, capture metrics)."""
 from __future__ import annotations
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 import time
 import numpy as np
@@ -34,6 +34,9 @@ def _grid_for(grid, float_pitch):
 
 
 def _correct_channel(ch, grid, variant, out_dtype):
+    if variant.flatfield == "basic" and variant.dark != "none":
+        raise ValueError("flatfield='basic' does its own darkfield estimation; "
+                         "use dark='none' with basic")
     grid = _grid_for(grid, variant.float_pitch)
     f = ch.astype(np.float32)
     # darkfield (additive) subtracted BEFORE the divide
@@ -63,7 +66,7 @@ def _correct_channel(ch, grid, variant, out_dtype):
 
 
 def _basic_correct(ch, out_dtype):
-    import importlib.util, pathlib, sys
+    import pathlib, sys
     bin_dir = pathlib.Path(__file__).resolve().parents[1]
     sys.path.insert(0, str(bin_dir))
     from preprocess import apply_basic_correction   # requires basicpy
