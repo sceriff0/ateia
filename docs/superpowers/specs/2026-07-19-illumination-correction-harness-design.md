@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-19
 **Branch:** `feature/illum-correction-compare`
-**Status:** Approved (design), pending implementation plan
+**Status:** Implemented on branch `feature/illum-correction-compare` (Phase A complete; Phase B deferred)
 
 ## 1. Problem & Goal
 
