@@ -113,10 +113,23 @@ DEFAULT_MATRIX = [
 
 
 def full_matrix(available_bg):
-    variants = []
-    for ff in ("periodic",):
-        for dk in ("none", "const", "field"):
-            for bg in ["none"] + [b for b in available_bg if b != "none"]:
-                name = f"{ff}_{dk}_{bg}"
-                variants.append(Variant(name, flatfield=ff, dark=dk, background=bg))
+    """Full variant grid for --full-grid runs.
+
+    Leads with two visual anchors so the QuPath eyeball comparison has
+    references, then sweeps the periodic candidates over darkfield x
+    background:
+      - "baseline-uncorrected": the raw image passthrough (the 'before').
+      - "baseline-basic": the incumbent BaSiCpy correction (auto-skipped by
+        the driver if basicpy is not installed on the node).
+    Named "baseline-*" so both sort ahead of the "periodic_*" candidates in
+    QuPath's file browser.
+    """
+    variants = [
+        Variant("baseline-uncorrected", flatfield="none", dark="none", background="none"),
+        Variant("baseline-basic", flatfield="basic", dark="none", background="none"),
+    ]
+    for dk in ("none", "const", "field"):
+        for bg in ["none"] + [b for b in available_bg if b != "none"]:
+            variants.append(Variant(f"periodic_{dk}_{bg}", flatfield="periodic",
+                                    dark=dk, background=bg))
     return variants
