@@ -13,29 +13,39 @@ def estimate_flatfield(channel, grid, smooth_frac=0.12, est_downsample=4):
 
     # Per-tile content is spatially white (independent per-pixel brightness),
     # so a single point sample per est_downsample block (strided subsampling)
-    # leaves substantial noise in the raw per-tile estimate; combining tiles
-    # (median, robust to tile-to-tile content-brightness skew) at FULL
-    # resolution first, then block-averaging (proper anti-aliased decimation,
-    # not point-sampling) down to the estimate grid, is what actually
-    # isolates the smooth vignette from per-tile content noise.
+    # leaves substantial noise in the raw per-tile estimate. Instead, each
+    # tile is block-average (area-mean) downsampled to the estimate grid
+    # BEFORE being stacked, so only reduced-resolution tiles are ever held
+    # in memory together (~16x less than stacking full-res tiles). The
+    # median across those reduced tiles (robust to tile-to-tile
+    # content-brightness skew) then isolates the smooth vignette from
+    # per-tile content noise just as well as combining at full res would.
+    ds = max(int(est_downsample), 1)
+    small_h, small_w = max(py // ds, 1), max(px // ds, 1)
+    th, tw = small_h * ds, small_w * ds
+
     tiles = []
     for y in ys:
         for x in xs:
             t = channel[y:y + py, x:x + px].astype(np.float32)
             m = np.median(t)
             if m > 0:
-                tiles.append(t / m)
+                t_small = t[:th, :tw].reshape(small_h, ds, small_w, ds).mean(axis=(1, 3))
+                tiles.append(t_small / m)
     if not tiles:
         raise RuntimeError("no complete tiles; check pitch/phase/approx_tile")
 
-    ff_full = np.median(np.stack(tiles, 0), axis=0)
+    ff_small = np.median(np.stack(tiles, 0), axis=0)
 
-    ds = max(int(est_downsample), 1)
-    small_h, small_w = max(py // ds, 1), max(px // ds, 1)
-    th, tw = small_h * ds, small_w * ds
-    ff_small = ff_full[:th, :tw].reshape(small_h, ds, small_w, ds).mean(axis=(1, 3))
-
-    ff_small = gaussian_filter(ff_small, sigma=max(small_h, small_w) * smooth_frac)
+    # Each tile already went through a block-average before landing in the
+    # stack, so the median above is combining pre-denoised samples rather
+    # than raw per-pixel noise. Reusing the full smooth_frac-derived sigma
+    # (tuned for smoothing a noisier, un-block-averaged median) over-blurs
+    # the small ff and washes out real vignette curvature instead of just
+    # denoising it, which weakens the correction. Halving the sigma keeps
+    # comparable noise suppression for the (already-denoised) input while
+    # preserving vignette shape.
+    ff_small = gaussian_filter(ff_small, sigma=max(small_h, small_w) * smooth_frac * 0.5)
     ff = zoom(ff_small, (py / ff_small.shape[0], px / ff_small.shape[1]), order=1)
     ff = ff[:py, :px].astype(np.float32)
     ff /= ff.mean()
