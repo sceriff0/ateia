@@ -20,3 +20,24 @@ def test_subtract_constant_dark_lowers_floor():
     ch = d["mosaic"][0]
     out = subtract_dark(ch, 250.0)
     assert out.min() >= 0.0 or float(np.percentile(out, 1)) < float(np.percentile(ch, 1))
+
+
+def test_field_dark_estimate_and_subtract_smoke():
+    # Not asserting the recovered darkfield value equals the injected dark
+    # (300): the synthetic content never reaches zero, so a low-percentile
+    # estimator is legitimately biased high on this fixture — a known
+    # fixture limitation, not a bug. This is a shape/dtype/effect smoke test
+    # for the tile-array path exercised by Task 7's `field` darkfield variant.
+    d = make_synthetic_mosaic(dark=300.0, vignette_strength=0.2, n_channels=1)
+    ch = d["mosaic"][0]
+    g = recover_grid(d["mosaic"], approx_tile=d["pitch"])
+
+    dark_field = estimate_dark_field(ch, g)
+    assert dark_field.dtype == np.float32
+    assert dark_field.shape == (round(g["pitch_y"]), round(g["pitch_x"]))
+
+    out = subtract_dark(ch, dark_field, grid=g)
+    assert out.dtype == np.float32
+    assert out.shape == ch.shape
+    assert np.all(np.isfinite(out))
+    assert float(np.percentile(out, 1)) < float(np.percentile(ch, 1))

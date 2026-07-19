@@ -30,10 +30,11 @@ def estimate_dark_field(channel, grid, pct=5.0, smooth_frac=0.2, est_downsample=
 
 
 def subtract_dark(channel, dark, grid=None, chunk_rows=2048):
-    f = channel.astype(np.float32)
     if np.isscalar(dark):
-        return f - float(dark)
-    # tile-sized darkfield: tile it back on the float grid
+        return channel.astype(np.float32) - float(dark)
+    # tile-sized darkfield: tile it back on the float grid. Cast and subtract
+    # per row-chunk (never the full channel) so peak memory stays bounded to
+    # a chunk_rows-tall slice instead of a full-size float32 copy.
     Y, X = channel.shape
     py, px = dark.shape
     ci = _field_index(np.arange(X), grid["phase_x"], grid["pitch_x"], px)
@@ -41,5 +42,5 @@ def subtract_dark(channel, dark, grid=None, chunk_rows=2048):
     for y0 in range(0, Y, chunk_rows):
         y1 = min(y0 + chunk_rows, Y)
         ri = _field_index(np.arange(y0, y1), grid["phase_y"], grid["pitch_y"], py)
-        out[y0:y1] = f[y0:y1] - dark[np.ix_(ri, ci)]
+        out[y0:y1] = channel[y0:y1].astype(np.float32) - dark[np.ix_(ri, ci)]
     return out
