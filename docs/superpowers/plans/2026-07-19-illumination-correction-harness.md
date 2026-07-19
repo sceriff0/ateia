@@ -326,9 +326,9 @@ Expected: PASS (2 passed)
 - [ ] **Step 5: Commit**
 
 ```bash
-git update-index --add --chmod=+r bin/illum/__init__.py bin/illum/grid.py
 git add bin/illum/__init__.py bin/illum/grid.py tests/test_illum_grid.py
 git commit -m ":sparkles: Add periodic grid recovery with float-pitch tile origins"
+# library files stay 100644 (import-only, not name-invoked) — no chmod needed
 ```
 
 ---
