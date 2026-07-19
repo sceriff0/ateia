@@ -75,3 +75,6 @@ run_stardist.sh
 *~
 .~lock.*
 csv/
+
+# Superpowers SDD scratch
+.superpowers/
