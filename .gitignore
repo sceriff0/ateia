@@ -2,6 +2,9 @@
 valis_lib/*
 pixie-main/*
 
+# Paper
+MANUSCRIPT.md
+
 # Python
 *.pyc
 **/__pycache__/
