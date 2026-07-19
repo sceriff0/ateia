@@ -5,7 +5,7 @@ Produces per variant: corrected OME-TIFF, QuPath pyramid, diagnostic plots,
 plus a cross-variant metrics.json and an HTML report with a recommendation.
 """
 from __future__ import annotations
-import argparse, json, os, sys, pathlib
+import argparse, json, sys, pathlib
 import numpy as np
 import tifffile
 
@@ -60,22 +60,27 @@ def main():
             continue
         results.append({"name": res["name"], "metrics": res["metrics"]})
 
-        pngs = [grid_png]
-        if res["flats"][0] is not None:
-            pngs.append(plot_flatfield(res["flats"][0], outdir / "plots" / f"{v.name}_ff.png",
-                                       args.channels[0]))
-        pngs.append(plot_before_after(stack[0], res["corrected"][0], grid,
-                                      outdir / "plots" / f"{v.name}_ba.png", args.channels[0]))
-        plot_index[v.name] = pngs
+        try:
+            pngs = [grid_png]
+            if res["flats"][0] is not None:
+                pngs.append(plot_flatfield(res["flats"][0], outdir / "plots" / f"{v.name}_ff.png",
+                                           args.channels[0]))
+            pngs.append(plot_before_after(stack[0], res["corrected"][0], grid,
+                                          outdir / "plots" / f"{v.name}_ba.png", args.channels[0]))
+            plot_index[v.name] = pngs
+        except Exception as e:
+            print(f"    WARN plot {v.name}: {e}")
 
         if not args.no_pyramids:
-            from merge_channels_pyramid import write_pyramidal_ome_tiff, generate_channel_color
-            colors = [generate_channel_color(n, i) for i, n in enumerate(args.channels[:stack.shape[0]])]
-            write_pyramidal_ome_tiff(res["corrected"], str(outdir / "pyramids" / f"{v.name}.ome.tiff"),
-                                     args.channels[:stack.shape[0]], colors)
+            try:
+                from merge_channels_pyramid import write_pyramidal_ome_tiff, generate_channel_color
+                colors = [generate_channel_color(n, i) for i, n in enumerate(args.channels[:stack.shape[0]])]
+                write_pyramidal_ome_tiff(res["corrected"], str(outdir / "pyramids" / f"{v.name}.ome.tiff"),
+                                         args.channels[:stack.shape[0]], colors)
+            except Exception as e:
+                print(f"    WARN pyramid {v.name}: {e}")
 
-    (outdir / "metrics.json").write_text(json.dumps(
-        [{"name": r["name"], "metrics": r["metrics"]} for r in results], indent=2))
+    (outdir / "metrics.json").write_text(json.dumps(results, indent=2))
     write_report(results, plot_index, outdir / "report.html")
     print(f"wrote {outdir/'report.html'} and {outdir/'metrics.json'}")
     return 0
