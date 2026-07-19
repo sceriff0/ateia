@@ -24,7 +24,7 @@ def recommendation_text(ranked):
     if not ranked:
         return "No variants produced."
     win = ranked[0]
-    lines = [f"Recommended: **{win['name']}** — highest composite score "
+    lines = [f"Recommended: **{html.escape(win['name'])}** — highest composite score "
              f"({win['composite']:.3f}): seam suppression {win['seam_gain']*100:.1f}%, "
              f"background-flatness gain {win['cv_gain']*100:.1f}%, "
              f"{win['seconds']:.1f}s, {win['peak_rss_mb']:.0f} MB peak."]
@@ -32,14 +32,14 @@ def recommendation_text(ranked):
         r = ranked[1]
         faster = r["seconds"] < win["seconds"]
         lines.append(
-            f"Runner-up **{r['name']}** ({r['composite']:.3f})"
+            f"Runner-up **{html.escape(r['name'])}** ({r['composite']:.3f})"
             + (f" is faster ({r['seconds']:.1f}s vs {win['seconds']:.1f}s); "
                "prefer it if the composite gap is within visual noise and runtime matters."
                if faster else
                "; the winner leads on both quality and is not slower, so prefer the winner."))
-    lines.append("When scores are within ~0.02 of each other, treat them as a tie and "
-                 "decide from the before/after crops and QuPath pyramids — the metrics "
-                 "cannot see local artifacts the eye catches.")
+        lines.append("When scores are within ~0.02 of each other, treat them as a tie and "
+                     "decide from the before/after crops and QuPath pyramids — the metrics "
+                     "cannot see local artifacts the eye catches.")
     return "\n\n".join(lines)
 
 
@@ -70,5 +70,6 @@ table{{border-collapse:collapse}}td,th{{border:1px solid #ccc;padding:4px 8px}}
 <th>CV gain</th><th>Seconds</th><th>Peak MB</th></tr>{rows}</table>
 <h2>Diagnostics</h2>{plots_html}
 </body></html>"""
-    open(out_html, "w").write(doc)
+    with open(out_html, "w") as f:
+        f.write(doc)
     return str(out_html)
