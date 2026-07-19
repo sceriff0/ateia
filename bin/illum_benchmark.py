@@ -19,8 +19,6 @@ sequential run.
 """
 from __future__ import annotations
 import argparse, json, os, sys, pathlib
-import numpy as np
-import tifffile
 
 BIN = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(BIN))
@@ -29,6 +27,7 @@ from illum.pipeline import DEFAULT_MATRIX, full_matrix, run_variant
 from illum.background import available_methods
 from illum.plots import plot_grid_recovery, plot_flatfield, plot_before_after
 from illum.report import write_report
+from illum.io import load_mosaic
 
 
 def _select_matrix(full):
@@ -36,12 +35,16 @@ def _select_matrix(full):
 
 
 def _load_stack(args):
-    stack = np.squeeze(tifffile.imread(args.image))
-    if stack.ndim == 2:
-        stack = stack[None]
+    """Load the mosaic (.nd2 or .tif) as (stack, channel_names, pixel_um).
+
+    Channel names and pixel size come from the file's metadata (ND2) or OME
+    tags, overridable by --channels. --max-channels truncates both.
+    """
+    stack, names, pixel_um = load_mosaic(args.image, args.channels)
     if args.max_channels:
         stack = stack[:args.max_channels]
-    return stack
+        names = names[:args.max_channels]
+    return stack, names, pixel_um
 
 
 def _grid_png(stack, grid, outdir, approx_tile):
@@ -55,7 +58,7 @@ def _grid_png(stack, grid, outdir, approx_tile):
     return str(path)
 
 
-def _run_one(v, stack, grid, outdir, channels, no_pyramids, grid_png):
+def _run_one(v, stack, grid, outdir, names, pixel_um, no_pyramids, grid_png):
     """Compute one variant and write its plots + pyramid.
 
     Returns (entry, plot_paths). `entry` (name + metrics) is built BEFORE the
@@ -68,19 +71,20 @@ def _run_one(v, stack, grid, outdir, channels, no_pyramids, grid_png):
     try:
         if res["flats"][0] is not None:
             pngs.append(plot_flatfield(res["flats"][0],
-                                       outdir / "plots" / f"{v.name}_ff.png", channels[0]))
+                                       outdir / "plots" / f"{v.name}_ff.png", names[0]))
         pngs.append(plot_before_after(stack[0], res["corrected"][0], grid,
-                                      outdir / "plots" / f"{v.name}_ba.png", channels[0]))
+                                      outdir / "plots" / f"{v.name}_ba.png", names[0]))
     except Exception as e:
         print(f"    WARN plot {v.name}: {e}")
     if not no_pyramids:
         try:
             from merge_channels_pyramid import write_pyramidal_ome_tiff, generate_channel_color
-            colors = [generate_channel_color(n, i)
-                      for i, n in enumerate(channels[:stack.shape[0]])]
+            ch_names = names[:stack.shape[0]]
+            colors = [generate_channel_color(n, i) for i, n in enumerate(ch_names)]
             write_pyramidal_ome_tiff(res["corrected"],
                                      str(outdir / "pyramids" / f"{v.name}.ome.tiff"),
-                                     channels[:stack.shape[0]], colors)
+                                     ch_names, colors,
+                                     physical_size_x=pixel_um, physical_size_y=pixel_um)
         except Exception as e:
             print(f"    WARN pyramid {v.name}: {e}")
     return entry, pngs
@@ -105,9 +109,11 @@ def _aggregate(outdir):
 def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--image")
+    p.add_argument("--image", help="stitched mosaic (.nd2 or .tif/.tiff)")
     p.add_argument("--outdir", required=True)
-    p.add_argument("--channels", nargs="+")
+    p.add_argument("--channels", nargs="+",
+                   help="channel names in order; optional for .nd2 (read from "
+                        "metadata) — required only for TIFF without OME channel names")
     p.add_argument("--approx-tile", type=float, default=1950)
     p.add_argument("--full-grid", action="store_true")
     p.add_argument("--no-pyramids", action="store_true")
@@ -132,15 +138,16 @@ def main():
     if args.aggregate:
         return _aggregate(outdir)
 
-    # --- compute modes need image + channels ---
-    if not args.image or not args.channels:
-        p.error("--image and --channels are required unless --list-variants or --aggregate")
+    # --- compute modes need an image (channels auto-derived for ND2/OME) ---
+    if not args.image:
+        p.error("--image is required unless --list-variants or --aggregate")
 
     (outdir / "plots").mkdir(parents=True, exist_ok=True)
     if not args.no_pyramids:
         (outdir / "pyramids").mkdir(parents=True, exist_ok=True)
 
-    stack = _load_stack(args)
+    stack, names, pixel_um = _load_stack(args)
+    print(f"loaded {args.image}: shape {stack.shape}, channels {names}, pixel {pixel_um} um")
     grid = recover_grid(stack, approx_tile=args.approx_tile)
     print(f"grid: {grid}")
     grid_png = _grid_png(stack, grid, outdir, args.approx_tile)
@@ -155,7 +162,7 @@ def main():
                     f"run with --list-variants --full-grid to see names")
         print(f"--- variant: {match.name}")
         try:
-            entry, pngs = _run_one(match, stack, grid, outdir, args.channels,
+            entry, pngs = _run_one(match, stack, grid, outdir, names, pixel_um,
                                    args.no_pyramids, grid_png)
         except Exception as e:
             # run_variant itself failed -> no part written; aggregate simply
@@ -172,7 +179,7 @@ def main():
     for v in _select_matrix(args.full_grid):
         print(f"--- variant: {v.name}")
         try:
-            entry, pngs = _run_one(v, stack, grid, outdir, args.channels,
+            entry, pngs = _run_one(v, stack, grid, outdir, names, pixel_um,
                                    args.no_pyramids, grid_png)
         except Exception as e:
             print(f"    SKIP {v.name}: {e}")

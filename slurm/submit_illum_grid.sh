@@ -16,13 +16,15 @@ set -euo pipefail
 
 # ----------------------------- CONFIG (edit) -----------------------------
 REPO="$(git -C "$(dirname "$0")/.." rev-parse --show-toplevel)"
-IMAGE="/scratch/$USER/stitched_mosaic.ome.tiff"     # your stitched mosaic
+IMAGE="/scratch/$USER/stitched_mosaic.nd2"          # your stitched mosaic (.nd2 or .tif)
 OUTDIR="/scratch/$USER/illum_bench"                 # scratch dir, 100 GB+ free
-CHANNELS="DAPI CD3 CD8 CD4"                          # real names, in channel order
+CHANNELS=""                                         # leave "" for .nd2 (names from metadata);
+                                                    # for plain TIFF set e.g. "DAPI CD3 CD8 CD4"
 APPROX_TILE=1950                                     # true FOV pitch in px
 
 # How to activate a python env with: numpy scipy tifffile matplotlib
-# (optional: scikit-image for rolling_ball, basicpy for the baseline-basic anchor)
+# (optional: nd2 for .nd2 input, scikit-image for rolling_ball,
+#  basicpy for the baseline-basic anchor)
 ENV_ACTIVATE="source /scratch/$USER/illumenv/bin/activate"
 
 # Per-variant array-task resources — tune MEM to your mosaic (pyramid writing
@@ -36,6 +38,10 @@ PARTITION=""               # e.g. PARTITION="--partition=cpu"; leave "" for defa
 
 BENCH="$REPO/bin/illum_benchmark.py"
 mkdir -p "$OUTDIR"/{parts,plots,pyramids,logs}
+
+# --channels is optional for .nd2 (names come from metadata); only pass it if set.
+CHAN_ARG=""
+[ -n "$CHANNELS" ] && CHAN_ARG="--channels $CHANNELS"
 
 # 1) Enumerate the full grid (no image needed) -> one variant name per line.
 eval "$ENV_ACTIVATE"
@@ -55,7 +61,7 @@ ARRAY_ID=$(sbatch --parsable \
     NAME=\$(sed -n \"\${SLURM_ARRAY_TASK_ID}p\" '$OUTDIR/variants.txt'); \
     echo \"=== variant: \$NAME ===\"; \
     python '$BENCH' --variant \"\$NAME\" --full-grid \
-      --image '$IMAGE' --outdir '$OUTDIR' --channels $CHANNELS --approx-tile $APPROX_TILE")
+      --image '$IMAGE' --outdir '$OUTDIR' $CHAN_ARG --approx-tile $APPROX_TILE")
 echo "Submitted array job $ARRAY_ID  (1-$N%$MAX_CONCURRENT)"
 
 # 3) Aggregation job: runs AFTER the whole array finishes, regardless of any
