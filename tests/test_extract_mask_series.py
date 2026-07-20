@@ -36,3 +36,16 @@ def test_missing_series_fails_fast(tmp_path):
                        capture_output=True, text=True)
     assert r.returncode != 0
     assert "no mask series" in (r.stderr + r.stdout).lower()
+
+
+def test_float_mask_series_fails_fast(tmp_path):
+    intens = np.random.randint(0, 4000, size=(2, 64, 64), dtype=np.uint16)
+    fmask = np.random.rand(2, 64, 64).astype(np.float32)
+    out = tmp_path / "float.ome.tiff"
+    with tifffile.TiffWriter(out, bigtiff=True, ome=True) as tif:
+        tif.write(intens, metadata={'axes': 'CYX', 'Channel': {'Name': ['DAPI', 'CD8']}}, photometric='minisblack')
+        tif.write(fmask, metadata={'axes': 'CYX', 'Channel': {'Name': ['cell_mask', 'nuclei_mask']}}, photometric='minisblack')
+    r = subprocess.run([sys.executable, str(BIN / "extract_mask_series.py"),
+                        "--pyramid", str(out), "--outdir", str(tmp_path)], capture_output=True, text=True)
+    assert r.returncode != 0
+    assert "dtype" in (r.stderr + r.stdout).lower()

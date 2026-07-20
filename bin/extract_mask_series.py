@@ -26,8 +26,15 @@ def main() -> None:
         masks = tif.series[1].asarray()
     if masks.ndim != 3 or masks.shape[0] != 2:
         sys.exit(f"ERROR: mask series has shape {masks.shape}; expected (2, H, W) [cell, nuclei].")
+    # Fast-fail on dtypes that cannot losslessly represent uint32 label IDs.
+    # Accept unsigned-integer masks (uint8/uint16/uint32 -> lossless upcast) and
+    # reject anything else (float probability maps, signed/int64 arrays) loudly
+    # rather than silently corrupting downstream quantification.
+    if masks.dtype not in (np.uint8, np.uint16, np.uint32):
+        sys.exit(f"ERROR: mask series in {args.pyramid} has dtype {masks.dtype}; expected an unsigned "
+                 f"integer label mask (uint8/uint16/uint32). Refusing to coerce (silent-corruption risk).")
     if masks.dtype != np.uint32:
-        masks = masks.astype(np.uint32)
+        masks = masks.astype(np.uint32)  # lossless upcast from uint8/uint16
 
     args.outdir.mkdir(parents=True, exist_ok=True)
     tifffile.imwrite(args.outdir / "cell_mask.tif", masks[0])
