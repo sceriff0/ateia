@@ -52,8 +52,16 @@ def load_intensity_csvs(csvs_dir: Path | None = None, csv_files_list: list[str] 
 def merge_intensities(
     morphology: pd.DataFrame,
     csv_files: list[Path],
+    protected_cols: tuple[str, ...] = ('DAPI',),
 ) -> pd.DataFrame:
-    """Merge each intensity CSV into the morphology table by label."""
+    """Merge each intensity CSV into the base table by label.
+
+    `morphology` is the base table: a morphology-only table for a normal run,
+    or a full prior merged table for an incremental (add_cycle) run. When an
+    incoming marker column already exists in the base, the incoming value wins
+    (overwrites), UNLESS the column is in `protected_cols` (e.g. DAPI), in which
+    case the base is kept and the incoming column is dropped.
+    """
     merged = morphology.copy()
     morphology_cells = set(merged['label'])
 
@@ -65,22 +73,32 @@ def merge_intensities(
             logger.warning("%s: No marker columns found, skipping", csv_file.name)
             continue
 
+        # Collision handling: for any marker already present in the base table.
+        for col in list(marker_cols):
+            if col in merged.columns:
+                if col in protected_cols:
+                    df = df.drop(columns=[col])
+                    logger.info("%s: protected column '%s' kept from base (incoming dropped)",
+                                csv_file.name, col)
+                else:
+                    merged = merged.drop(columns=[col])
+                    logger.info("%s: column '%s' overwritten by new cycle (new wins)",
+                                csv_file.name, col)
+        marker_cols = [col for col in df.columns if col != 'label']
+        if not marker_cols:
+            continue
+
         # Validate cell labels
         intensity_cells = set(df['label'])
         missing = morphology_cells - intensity_cells
         extra = intensity_cells - morphology_cells
-
         if missing:
-            logger.warning("%s: Missing %d cells from morphology", csv_file.name, len(missing))
+            logger.warning("%s: Missing %d cells from base", csv_file.name, len(missing))
         if extra:
             logger.warning("%s: Has %d extra cells (will be ignored)", csv_file.name, len(extra))
 
         merge_df = df[['label'] + marker_cols]
         merged = merged.merge(merge_df, on='label', how='left')
-
-        # Leave missing intensities as NaN (not 0.0) so downstream tools can
-        # distinguish genuinely zero intensity from cells absent in this channel
-
         logger.info("  + %s from %s", ', '.join(marker_cols), csv_file.name)
 
     return merged
@@ -155,7 +173,7 @@ def main() -> None:
     csv_files = load_intensity_csvs(csvs_dir=args.csvs_dir, csv_files_list=args.csv_files)
     logger.info("Merging %d intensity CSVs with morphology...", len(csv_files))
 
-    merged = merge_intensities(morphology, csv_files)
+    merged = merge_intensities(morphology, csv_files, protected_cols=('DAPI',))
 
     # Validate the row count is exactly preserved. A left merge on 'label' can
     # both LOSE cells (fewer rows) and FAN OUT (more rows) — the latter happens
