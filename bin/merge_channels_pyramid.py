@@ -668,34 +668,41 @@ def merge_channels(
     mask_stack = None
     mask_names = None
     if masks_dir:
-        cell_mask_path = Path(masks_dir) / 'cell_mask.tif'
-        nuclei_mask_path = Path(masks_dir) / 'nuclei_mask.tif'
-        if cell_mask_path.exists() and nuclei_mask_path.exists():
-            log(f"Loading masks for second OME series from: {masks_dir}")
-            cell_mask = _read_channel_file(str(cell_mask_path))
-            nuclei_mask = _read_channel_file(str(nuclei_mask_path))
-            if cell_mask.ndim > 2:
-                cell_mask = cell_mask.squeeze()
-            if nuclei_mask.ndim > 2:
-                nuclei_mask = nuclei_mask.squeeze()
+        cell_matches = sorted(Path(masks_dir).glob('*cell_mask.tif'))
+        nuclei_matches = sorted(Path(masks_dir).glob('*nuclei_mask.tif'))
+        if not cell_matches or not nuclei_matches:
+            # --masks-dir is only passed when the mask series is REQUIRED
+            # (embed_masks + expanded compartment quant). Missing masks here is a
+            # hard error, not a silent skip — surface it with the dir contents.
+            found = [p.name for p in Path(masks_dir).glob('*')]
+            raise ValueError(
+                f"--masks-dir '{masks_dir}' given but no *cell_mask.tif / *nuclei_mask.tif found. "
+                f"Directory contains: {found}. Expected SEGMENT outputs like <patient>_cell_mask.tif.")
+        cell_mask_path, nuclei_mask_path = cell_matches[0], nuclei_matches[0]
 
-            if cell_mask.shape != (height, width) or nuclei_mask.shape != (height, width):
-                raise ValueError(
-                    "Mask/intensity dimension mismatch: intensity is "
-                    f"{(height, width)}, cell_mask is {cell_mask.shape}, "
-                    f"nuclei_mask is {nuclei_mask.shape}"
-                )
+        log(f"Loading masks for second OME series from: {masks_dir}")
+        cell_mask = _read_channel_file(str(cell_mask_path))
+        nuclei_mask = _read_channel_file(str(nuclei_mask_path))
+        if cell_mask.ndim > 2:
+            cell_mask = cell_mask.squeeze()
+        if nuclei_mask.ndim > 2:
+            nuclei_mask = nuclei_mask.squeeze()
 
-            mask_stack = np.stack([
-                cell_mask.astype(np.uint32),
-                nuclei_mask.astype(np.uint32),
-            ])
-            mask_names = ['cell_mask', 'nuclei_mask']
-            log(f"  Mask stack shape: {mask_stack.shape}, dtype: {mask_stack.dtype}")
-            del cell_mask, nuclei_mask
-            gc.collect()
-        else:
-            log(f"  masks-dir given but missing cell_mask.tif/nuclei_mask.tif in {masks_dir}; skipping mask series")
+        if cell_mask.shape != (height, width) or nuclei_mask.shape != (height, width):
+            raise ValueError(
+                "Mask/intensity dimension mismatch: intensity is "
+                f"{(height, width)}, cell_mask is {cell_mask.shape}, "
+                f"nuclei_mask is {nuclei_mask.shape}"
+            )
+
+        mask_stack = np.stack([
+            cell_mask.astype(np.uint32),
+            nuclei_mask.astype(np.uint32),
+        ])
+        mask_names = ['cell_mask', 'nuclei_mask']
+        log(f"  Mask stack shape: {mask_stack.shape}, dtype: {mask_stack.dtype}")
+        del cell_mask, nuclei_mask
+        gc.collect()
 
     # Create output directory
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)

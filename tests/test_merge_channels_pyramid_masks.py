@@ -46,3 +46,75 @@ def test_no_mask_stack_writes_single_series(tmp_path):
     )
     with tifffile.TiffFile(out) as tif:
         assert len(tif.series) == 1                    # unchanged behavior
+
+
+def test_merge_channels_embeds_masks_with_real_segment_filenames(tmp_path):
+    """Regression test for the SEGMENT filename mismatch bug.
+
+    SEGMENT emits `${patient_id}_cell_mask.tif` / `${patient_id}_nuclei_mask.tif`
+    (see modules/local/segment.nf), and Nextflow's `stageAs: 'masks/*'` preserves
+    that real basename inside masks/ -- it does NOT rename files down to the bare
+    `cell_mask.tif` / `nuclei_mask.tif`. merge_channels() must find masks named
+    with a patient prefix, not just the bare names.
+    """
+    h, w = 96, 96
+
+    channels_dir = tmp_path / "channels"
+    channels_dir.mkdir()
+    tifffile.imwrite(str(channels_dir / "DAPI.tif"),
+                      np.random.randint(0, 4000, size=(h, w), dtype=np.uint16))
+    tifffile.imwrite(str(channels_dir / "CD8.tif"),
+                      np.random.randint(0, 4000, size=(h, w), dtype=np.uint16))
+
+    masks_dir = tmp_path / "masks"
+    masks_dir.mkdir()
+    cell_mask = np.random.randint(0, 100000, size=(h, w), dtype=np.uint32)
+    nuclei_mask = np.random.randint(0, 100000, size=(h, w), dtype=np.uint32)
+    # Real SEGMENT/Nextflow-staged naming convention: patient-id prefixed.
+    tifffile.imwrite(str(masks_dir / "P001_cell_mask.tif"), cell_mask)
+    tifffile.imwrite(str(masks_dir / "P001_nuclei_mask.tif"), nuclei_mask)
+
+    out = tmp_path / "pyramid.ome.tiff"
+    mcp.merge_channels(
+        input_dir=str(channels_dir),
+        output_path=str(out),
+        masks_dir=str(masks_dir),
+        pyramid_resolutions=3,
+    )
+
+    with tifffile.TiffFile(str(out)) as tif:
+        assert len(tif.series) == 2
+        mask_series = tif.series[1]
+        assert mask_series.dtype == np.uint32
+        assert tuple(mask_series.shape) == (2, h, w)
+        s1 = mask_series.asarray()
+        np.testing.assert_array_equal(s1[0], cell_mask)
+        np.testing.assert_array_equal(s1[1], nuclei_mask)
+
+
+def test_merge_channels_masks_dir_with_no_masks_raises(tmp_path):
+    """--masks-dir is only ever passed when the mask series is REQUIRED.
+
+    A masks/ directory that exists but contains no matching *cell_mask.tif /
+    *nuclei_mask.tif files must be a hard error, never a silent skip.
+    """
+    h, w = 32, 32
+
+    channels_dir = tmp_path / "channels"
+    channels_dir.mkdir()
+    tifffile.imwrite(str(channels_dir / "DAPI.tif"),
+                      np.random.randint(0, 4000, size=(h, w), dtype=np.uint16))
+
+    masks_dir = tmp_path / "masks"
+    masks_dir.mkdir()
+    # Deliberately empty -- no cell/nuclei mask files present.
+
+    out = tmp_path / "pyramid.ome.tiff"
+    import pytest
+    with pytest.raises(ValueError, match="no \\*cell_mask.tif"):
+        mcp.merge_channels(
+            input_dir=str(channels_dir),
+            output_path=str(out),
+            masks_dir=str(masks_dir),
+            pyramid_resolutions=3,
+        )

@@ -43,10 +43,12 @@ process MERGE_AND_PYRAMID {
     def compression = params.compression ?: 'zstd'
 
     // Embed cell + nuclei segmentation masks as a second, single-resolution
-    // uint32 OME series only when explicitly enabled AND masks were staged
-    // (an empty mask_files list means Nextflow staged no masks/ dir).
-    def emit_masks = params.embed_masks && params.quantify_compartments && params.expanded_quantification
-    def masks_arg  = emit_masks ? "--masks-dir masks" : ""
+    // uint32 OME series only when masks were actually staged. postprocess.nf
+    // is the single source of truth for the embed_masks decision (it only
+    // wires mask_files into this process's input when
+    // embed_masks && quantify_compartments && expanded_quantification); an
+    // empty mask_files list means Nextflow staged no masks/ dir.
+    def masks_arg = mask_files ? "--masks-dir masks" : ""
 
     """
     # Log input size for tracing (channels/ dir only, -L follows symlinks)
