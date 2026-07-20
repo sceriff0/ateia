@@ -17,6 +17,21 @@ class ParamUtils {
         }
     }
 
+    static void validateAddCycle(String priorOutdir) {
+        if (!priorOutdir?.trim()) {
+            throw new IllegalArgumentException(
+                "mode='add_cycle' requires --prior_outdir pointing at the previous run's --outdir")
+        }
+        ['csv/registered.csv', 'csv/postprocessed.csv'].each { rel ->
+            def f = new File("${priorOutdir}/${rel}")
+            if (!f.exists()) {
+                throw new FileNotFoundException(
+                    "mode='add_cycle': required checkpoint '${rel}' not found under --prior_outdir '${priorOutdir}'. " +
+                    "Was the prior run completed through postprocessing?")
+            }
+        }
+    }
+
     /**
      * Check whether a given pipeline step should run, based on --start and --stop.
      */
