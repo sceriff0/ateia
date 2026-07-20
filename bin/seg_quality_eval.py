@@ -16,9 +16,11 @@ def _relabel_contiguous(mask):
     Metric values are label-agnostic, so this remap is safe.
     """
     uniq = np.unique(mask)
-    lut = np.zeros(int(uniq.max()) + 1, dtype=np.int64)
+    # int32 (labels are small positive ints, far below 2^31) halves the transient
+    # RAM of these full-WSI-sized label arrays vs int64; values are identical.
+    lut = np.zeros(int(uniq.max()) + 1, dtype=np.int32)
     pos = uniq[uniq != 0]
-    lut[pos] = np.arange(1, len(pos) + 1, dtype=np.int64)
+    lut[pos] = np.arange(1, len(pos) + 1, dtype=np.int32)
     return lut[mask]
 
 
@@ -57,8 +59,8 @@ def main():
     # golden equivalence fixture exactly.
     img = {"name": a.id, "img": None, "data": img_data}
 
-    cell = _relabel_contiguous(tifffile.imread(a.cell_mask).astype(np.int64))
-    nuc = _relabel_contiguous(tifffile.imread(a.nuclei_mask).astype(np.int64))
+    cell = _relabel_contiguous(tifffile.imread(a.cell_mask).astype(np.int32))
+    nuc = _relabel_contiguous(tifffile.imread(a.nuclei_mask).astype(np.int32))
     # CSE mask["data"] is (T,C,Z,Y,X) with C-axis: ch0=cell, ch1=nucleus.
     mask_data = np.stack([cell, nuc], 0)[np.newaxis, :, np.newaxis, :, :]  # (1,2,1,Y,X)
     mask = {"name": a.id, "img": None, "data": mask_data}
