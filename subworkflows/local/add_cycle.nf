@@ -237,6 +237,7 @@ workflow ADD_CYCLE {
         .mix(VALIS_ADAPTER.out.versions)
         .mix(EXTRACT_CELL_PROPERTIES.out.versions.first())
         .mix(SPLIT_CHANNELS.out.versions.first())
+        .mix(SPLIT_PRIOR_PYRAMID.out.versions.first())
         .mix(QUANTIFY.out.versions.first())
         .mix(MERGE_QUANT_CSVS.out.versions.first())
         .mix(EXPORT_GEOJSON.out.versions.first())
