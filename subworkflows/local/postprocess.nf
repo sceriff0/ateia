@@ -257,16 +257,26 @@ workflow POSTPROCESSING {
             [patient_meta, tiffs]
         }
 
-    // Merge intensity channels only. The segmentation mask is intentionally NOT
-    // embedded: a >65,535-cell uint32 label mask would force the whole OME-TIFF
-    // to uint32, which Bio-Formats/QuPath cannot read. Cell objects are delivered
-    // separately via cells.geojson.
-    ch_for_pyramid_merge = ch_split_grouped
+    // Merge intensity channels, and optionally embed cell + nuclei segmentation
+    // masks as a SECOND, single-resolution uint32 OME series (Image:1). The
+    // masks are never mixed into the intensity series itself: a >65,535-cell
+    // uint32 label mask would force the whole intensity OME-TIFF to uint32,
+    // which Bio-Formats/QuPath cannot read as a normal multi-channel image.
+    // Cell objects are always delivered separately via cells.geojson; this
+    // second series is an optional, additional way to carry the raw masks.
+    def emit_masks = params.embed_masks && params.quantify_compartments && params.expanded_quantification
+    ch_pyramid_in = emit_masks
+        ? ch_split_grouped
+            .map { meta, tiffs -> [meta.patient_id, meta, tiffs] }
+            .join(ch_cell_mask.map { m, f -> [m.patient_id, f] }, by: 0)
+            .join(ch_nuclei_mask.map { m, f -> [m.patient_id, f] }, by: 0)
+            .map { _pid, meta, tiffs, cm, nm -> [meta, tiffs, [cm, nm]] }
+        : ch_split_grouped.map { meta, tiffs -> [meta, tiffs, []] }
 
     // MERGE_AND_PYRAMID combines merge + pyramid generation in one step
     // This preserves OME-XML metadata (channel names, colors, pixel sizes)
     // and generates QuPath-compatible pyramidal OME-TIFF directly
-    MERGE_AND_PYRAMID(ch_for_pyramid_merge)
+    MERGE_AND_PYRAMID(ch_pyramid_in)
 
     // ========================================================================
     // POSTPROCESSING QC (optional, runs in PARALLEL with MERGE_AND_PYRAMID)

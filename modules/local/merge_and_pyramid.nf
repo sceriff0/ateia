@@ -21,7 +21,7 @@ process MERGE_AND_PYRAMID {
     container "bolt3x/attend_image_analysis:merge"
 
     input:
-    tuple val(meta), path(split_channels, stageAs: 'channels/*')
+    tuple val(meta), path(split_channels, stageAs: 'channels/*'), path(mask_files, stageAs: 'masks/*')
 
     output:
     tuple val(meta), path("pyramid.ome.tiff"), emit: pyramid
@@ -42,6 +42,12 @@ process MERGE_AND_PYRAMID {
     def tile_size = params.tilex ?: 256
     def compression = params.compression ?: 'zstd'
 
+    // Embed cell + nuclei segmentation masks as a second, single-resolution
+    // uint32 OME series only when explicitly enabled AND masks were staged
+    // (an empty mask_files list means Nextflow staged no masks/ dir).
+    def emit_masks = params.embed_masks && params.quantify_compartments && params.expanded_quantification
+    def masks_arg  = emit_masks ? "--masks-dir masks" : ""
+
     """
     # Log input size for tracing (channels/ dir only, -L follows symlinks)
     channels_bytes=\$(du -sLb channels/ | cut -f1)
@@ -60,6 +66,7 @@ process MERGE_AND_PYRAMID {
         --pyramid-scale ${pyramid_scale} \\
         --tile-size ${tile_size} \\
         --compression ${compression} \\
+        ${masks_arg} \\
         ${args}
 
     cat <<-END_VERSIONS > versions.yml

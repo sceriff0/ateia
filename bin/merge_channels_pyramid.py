@@ -321,15 +321,17 @@ def write_pyramidal_ome_tiff(
     tile_size: int = 512,
     compression: str = 'zstd',
     compressionargs: Optional[Dict] = None,
+    mask_stack: Optional[np.ndarray] = None,
+    mask_names: Optional[List[str]] = None,
 ):
     """
     Write a pyramidal OME-TIFF with proper QuPath-compatible structure.
-    
+
     KEY FIX: Write the entire CYX array at once, then write pyramid levels.
     This creates the correct IFD structure that Bio-Formats/QuPath expects:
     - Base resolution: all channels as separate pages
     - SubIFDs: downsampled versions for each channel
-    
+
     Args:
         data: 3D numpy array in CYX order (channels, height, width)
         output_path: Output file path
@@ -342,6 +344,12 @@ def write_pyramidal_ome_tiff(
         pyramid_scale: Downscaling factor between levels
         tile_size: Tile size for efficient access
         compression: Compression algorithm
+        mask_stack: Optional (2, H, W) uint32 array of segmentation masks
+            (cell + nuclei labels). Written as a SECOND, single-resolution
+            OME series (Image:1) so categorical label IDs are never
+            mean-downsampled. Does not affect the intensity series (Image:0).
+        mask_names: Channel names for the mask series (default
+            ['cell_mask', 'nuclei_mask']).
     """
     # Defensive cast: float→uint16 for QuPath compatibility (per-channel to limit RAM)
     if data.dtype in (np.float32, np.float64):
@@ -420,6 +428,24 @@ def write_pyramidal_ome_tiff(
             current_data = downsampled
             gc.collect()
 
+        # Optional second series: segmentation masks (cell + nuclei), uint32,
+        # single full-resolution. This is a fresh top-level tif.write (no
+        # subifds/subfiletype) which tifffile records as a NEW OME image
+        # (Image:1) rather than a pyramid level of Image:0. Mean-downsampling
+        # would corrupt categorical label IDs, so no pyramid is built here.
+        if mask_stack is not None:
+            if mask_stack.dtype != np.uint32:
+                mask_stack = mask_stack.astype(np.uint32)
+            log(f"  Writing mask series (Image:1): {mask_stack.shape} uint32")
+            tif.write(
+                mask_stack,
+                metadata={'axes': 'CYX', 'Channel': {'Name': mask_names or ['cell_mask', 'nuclei_mask']}},
+                tile=(tile_size, tile_size),
+                compression=compression,
+                photometric='minisblack',
+                resolutionunit='CENTIMETER',
+            )
+
     log(f"Pyramidal OME-TIFF complete: {output_path}")
     
     # Verify the output
@@ -492,6 +518,7 @@ def merge_channels(
     tile_size: int = 512,
     compression: str = 'zstd',
     compressionargs: Optional[Dict] = None,
+    masks_dir: Optional[str] = None,
 ):
     """
     Merge all single-channel TIFF files into a single pyramidal OME-TIFF.
@@ -635,6 +662,41 @@ def merge_channels(
         del mask_data
         gc.collect()
 
+    # Load segmentation masks (cell + nuclei) for the optional second series.
+    # Read only when masks_dir contains both expected files; single
+    # full-resolution uint32 stack, never pyramided/downsampled.
+    mask_stack = None
+    mask_names = None
+    if masks_dir:
+        cell_mask_path = Path(masks_dir) / 'cell_mask.tif'
+        nuclei_mask_path = Path(masks_dir) / 'nuclei_mask.tif'
+        if cell_mask_path.exists() and nuclei_mask_path.exists():
+            log(f"Loading masks for second OME series from: {masks_dir}")
+            cell_mask = _read_channel_file(str(cell_mask_path))
+            nuclei_mask = _read_channel_file(str(nuclei_mask_path))
+            if cell_mask.ndim > 2:
+                cell_mask = cell_mask.squeeze()
+            if nuclei_mask.ndim > 2:
+                nuclei_mask = nuclei_mask.squeeze()
+
+            if cell_mask.shape != (height, width) or nuclei_mask.shape != (height, width):
+                raise ValueError(
+                    "Mask/intensity dimension mismatch: intensity is "
+                    f"{(height, width)}, cell_mask is {cell_mask.shape}, "
+                    f"nuclei_mask is {nuclei_mask.shape}"
+                )
+
+            mask_stack = np.stack([
+                cell_mask.astype(np.uint32),
+                nuclei_mask.astype(np.uint32),
+            ])
+            mask_names = ['cell_mask', 'nuclei_mask']
+            log(f"  Mask stack shape: {mask_stack.shape}, dtype: {mask_stack.dtype}")
+            del cell_mask, nuclei_mask
+            gc.collect()
+        else:
+            log(f"  masks-dir given but missing cell_mask.tif/nuclei_mask.tif in {masks_dir}; skipping mask series")
+
     # Create output directory
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
@@ -658,13 +720,18 @@ def merge_channels(
         tile_size=tile_size,
         compression=compression,
         compressionargs=compressionargs,
+        mask_stack=mask_stack,
+        mask_names=mask_names,
     )
 
     # Validate: check the file has the right number of channels and is readable.
     # Reads only the first tile per channel (~KB each), not full pages.
+    # NOTE: use tif.series[0] (the intensity series) rather than raw tif.pages,
+    # since an optional mask series (Image:1) adds its own top-level pages that
+    # must not be counted against the intensity channel total.
     log("Validating written file...")
     with tifffile.TiffFile(tmp_path) as tif:
-        base_pages = [p for p in tif.pages if not (p.subfiletype & 0x1)]
+        base_pages = list(tif.series[0].pages)
         n_written = len(base_pages)
         if n_written != num_output_channels:
             os.remove(tmp_path)
@@ -683,7 +750,29 @@ def merge_channels(
                     f"Pyramid validation failed: channel {i} ({channel_names[i]}) "
                     f"is unreadable: {e}"
                 )
-    log(f"  Validation passed: {n_written} channels intact")
+
+        if mask_stack is not None:
+            if len(tif.series) < 2:
+                os.remove(tmp_path)
+                raise RuntimeError(
+                    "Pyramid validation failed: mask series was requested but "
+                    "no second OME series was found in the written file."
+                )
+            mask_series = tif.series[1]
+            if mask_series.dtype != np.uint32 or tuple(mask_series.shape) != tuple(mask_stack.shape):
+                os.remove(tmp_path)
+                raise RuntimeError(
+                    "Pyramid validation failed: mask series shape/dtype mismatch "
+                    f"(expected {mask_stack.shape} uint32, got {mask_series.shape} {mask_series.dtype})"
+                )
+            try:
+                seg = mask_series.pages[0].asarray(maxworkers=1)[:256, :256]
+                del seg
+            except Exception as e:
+                os.remove(tmp_path)
+                raise RuntimeError(f"Pyramid validation failed: mask series is unreadable: {e}")
+    log(f"  Validation passed: {n_written} channels intact"
+        + (f", mask series {mask_stack.shape} intact" if mask_stack is not None else ""))
 
     # Atomic rename — same filesystem, so this is instantaneous
     os.replace(tmp_path, output_path)
@@ -731,6 +820,9 @@ def parse_args() -> argparse.Namespace:
                         help='Path to phenotype mask TIFF')
     parser.add_argument('--phenotype-mapping',
                         help='Path to phenotype mapping JSON')
+    parser.add_argument('--masks-dir',
+                        help='Directory containing cell_mask.tif and nuclei_mask.tif '
+                             'to embed as a second (uint32, single-resolution) OME series')
     parser.add_argument('--physical-size-x', type=float, default=0.325,
                         help='Pixel size in X (micrometers, default: 0.325)')
     parser.add_argument('--physical-size-y', type=float, default=0.325,
@@ -772,6 +864,7 @@ def main() -> int:
             tile_size=args.tile_size,
             compression=compression,
             compressionargs=compressionargs,
+            masks_dir=args.masks_dir,
         )
         log("Complete!")
         return 0
