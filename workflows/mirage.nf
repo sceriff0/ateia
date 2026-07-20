@@ -7,8 +7,10 @@
 include { PREPROCESSING       } from '../subworkflows/local/preprocess'
 include { REGISTRATION        } from '../subworkflows/local/registration'
 include { POSTPROCESSING      } from '../subworkflows/local/postprocess'
+include { ADD_CYCLE           } from '../subworkflows/local/add_cycle'
 include { AGGREGATE_SIZE_LOGS         } from '../modules/local/aggregate_size_logs'
 include { GENERATE_QC_REPORT          } from '../modules/local/generate_qc_report'
+include { EXTRACT_MASK_SERIES         } from '../modules/local/extract_mask_series'
 
 
 /*
@@ -70,6 +72,66 @@ workflow MIRAGE {
     /* -------------------- PARAMETER VALIDATION -------------------- */
 
     ParamUtils.validateStart(params.start)
+
+    /* -------------------- MODE: ADD_CYCLE -------------------- */
+    if (params.mode == 'add_cycle') {
+        ParamUtils.validateAddCycle(params.prior_outdir)
+        ParamUtils.validateSegMethod(params.seg_method)  // reuse mask; still validate quant options
+        ParamUtils.validateCompartmentQuant(params.quantify_compartments, params.expanded_quantification)
+
+        if (!params.input) error "mode='add_cycle' requires --input (the new cycle samplesheet)"
+        CsvUtils.validateInputCSV(params.input, ParamUtils.requiredColumnsForStep('preprocessing'))
+        CsvUtils.validateInputSemantics(params.input, 'preprocessing', params.allow_auto_reference)
+
+        if (params.dry_run) {
+            log.info "DRY RUN (add_cycle): validations passed for --input=${params.input}, --prior_outdir=${params.prior_outdir}; mask extraction will run against ${params.prior_outdir}/csv/postprocessed.csv's pyramid column."
+            return
+        }
+
+        // New-cycle raw images -> [meta, file] (reuse existing loader + counts).
+        def new_counts    = CsvUtils.countImagesPerPatient(params.input)
+        def new_ch_counts = CsvUtils.countChannelsPerPatient(params.input)
+        def ch_new_input  = loadInputChannel(params.input, 'path_to_file', new_counts, new_ch_counts)
+
+        // Prior reusable assets from the previous run's checkpoint CSVs.
+        // registered.csv: patient_id,registered_image,is_reference,channels
+        def ch_prior_ref = Channel
+            .fromPath("${params.prior_outdir}/csv/registered.csv", checkIfExists: true)
+            .splitCsv(header: true)
+            .filter { row -> row.is_reference?.toString().toLowerCase() == 'true' }
+            .map { row ->
+                def chans = (row.channels ?: '').split('\\|').collect { it.trim() }.findAll { it }
+                [row.patient_id, chans, file(row.registered_image)]
+            }
+
+        // postprocessed.csv: patient_id,cell_csv,cell_geojson,merged_csv,cell_mask,pyramid
+        def ch_prior_rows = Channel
+            .fromPath("${params.prior_outdir}/csv/postprocessed.csv", checkIfExists: true)
+            .splitCsv(header: true)
+            .map { row -> [row.patient_id, file(row.merged_csv), file(row.cell_mask), file(row.pyramid)] }
+
+        // Extract masks from the prior pyramid's Image:1 series (fast-fails in the
+        // process if the prior run was not embed_masks+expanded+compartment).
+        EXTRACT_MASK_SERIES(ch_prior_rows.map { pid, _mc, _cm, pyramid -> [[patient_id: pid, id: pid], pyramid] })
+        def ch_masks = EXTRACT_MASK_SERIES.out.cell_mask.map { m, f -> [m.patient_id, f] }
+            .join(EXTRACT_MASK_SERIES.out.nuclei_mask.map { m, f -> [m.patient_id, f] }, by: 0)
+
+        def ch_prior_post = ch_prior_rows
+            .map { pid, merged_csv, _cm, pyramid -> [pid, merged_csv, pyramid] }
+            .join(ch_masks, by: 0)
+            .map { pid, merged_csv, pyramid, cell_mask, nuclei_mask ->
+                [pid, merged_csv, cell_mask, nuclei_mask, pyramid] }
+
+        // Join into a single per-patient asset tuple.
+        def ch_prior_assets = ch_prior_ref
+            .join(ch_prior_post, by: 0)
+            .map { pid, ref_channels, ref_image, merged_csv, cell_mask, nuclei_mask, pyramid ->
+                [pid, ref_channels, ref_image, merged_csv, cell_mask, nuclei_mask, pyramid]
+            }
+
+        ADD_CYCLE(ch_new_input, ch_prior_assets)
+        return   // do NOT fall through to the standard start/stop flow
+    }
 
     // Validate and resolve --stop: default to last step if not provided
     if (params.stop) {
