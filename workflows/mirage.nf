@@ -81,7 +81,24 @@ workflow MIRAGE {
 
         if (!params.input) error "mode='add_cycle' requires --input (the new cycle samplesheet)"
         CsvUtils.validateInputCSV(params.input, ParamUtils.requiredColumnsForStep('preprocessing'))
-        CsvUtils.validateInputSemantics(params.input, 'preprocessing', params.allow_auto_reference)
+
+        // The new-cycle samplesheet intentionally has NO reference row: the
+        // registration reference is the frozen prior-run reference (external to
+        // this CSV). Pass allow-no-reference=true so validation does not reject
+        // the by-design zero-reference sheet. (Registration still uses the prior
+        // reference — ADD_CYCLE forces the new cycle to is_reference=false.)
+        CsvUtils.validateInputSemantics(params.input, 'preprocessing', true)
+
+        // Fast-fail: every new-cycle patient must exist in the prior run's
+        // postprocessed checkpoint, else its masks/base-table can't be sourced.
+        def newPatients   = CsvUtils.countImagesPerPatient(params.input).keySet()
+        def priorPostCsv  = "${params.prior_outdir}/csv/postprocessed.csv"
+        def priorPatients = CsvUtils.countImagesPerPatient(priorPostCsv).keySet()
+        def orphans = newPatients - priorPatients
+        if (orphans) {
+            error "mode='add_cycle': new-cycle patient(s) ${orphans} have no entry in ${priorPostCsv}. " +
+                  "Each new-cycle patient_id must match a patient from the prior completed run."
+        }
 
         if (params.dry_run) {
             log.info "DRY RUN (add_cycle): validations passed for --input=${params.input}, --prior_outdir=${params.prior_outdir}; mask extraction will run against ${params.prior_outdir}/csv/postprocessed.csv's pyramid column."
@@ -98,7 +115,7 @@ workflow MIRAGE {
         def ch_prior_ref = Channel
             .fromPath("${params.prior_outdir}/csv/registered.csv", checkIfExists: true)
             .splitCsv(header: true)
-            .filter { row -> row.is_reference?.toString().toLowerCase() == 'true' }
+            .filter { row -> row.is_reference?.toLowerCase() == 'true' }
             .map { row ->
                 def chans = (row.channels ?: '').split('\\|').collect { it.trim() }.findAll { it }
                 [row.patient_id, chans, file(row.registered_image)]
@@ -112,12 +129,12 @@ workflow MIRAGE {
 
         // Extract masks from the prior pyramid's Image:1 series (fast-fails in the
         // process if the prior run was not embed_masks+expanded+compartment).
-        EXTRACT_MASK_SERIES(ch_prior_rows.map { pid, _mc, _cm, pyramid -> [[patient_id: pid, id: pid], pyramid] })
+        EXTRACT_MASK_SERIES(ch_prior_rows.map { pid, _merged_csv, _cell_mask, pyramid -> [[patient_id: pid, id: pid], pyramid] })
         def ch_masks = EXTRACT_MASK_SERIES.out.cell_mask.map { m, f -> [m.patient_id, f] }
             .join(EXTRACT_MASK_SERIES.out.nuclei_mask.map { m, f -> [m.patient_id, f] }, by: 0)
 
         def ch_prior_post = ch_prior_rows
-            .map { pid, merged_csv, _cm, pyramid -> [pid, merged_csv, pyramid] }
+            .map { pid, merged_csv, _cell_mask, pyramid -> [pid, merged_csv, pyramid] }
             .join(ch_masks, by: 0)
             .map { pid, merged_csv, pyramid, cell_mask, nuclei_mask ->
                 [pid, merged_csv, cell_mask, nuclei_mask, pyramid] }
