@@ -202,13 +202,26 @@ workflow ADD_CYCLE {
     }
     SPLIT_PRIOR_PYRAMID(ch_prior_pyramid)
 
-    ch_all_channels = SPLIT_CHANNELS.out.channels
-        .mix(SPLIT_PRIOR_PYRAMID.out.channels)
-        .flatMap { meta, tiffs ->
-            (tiffs instanceof List ? tiffs : [tiffs]).collect { tiff -> [meta.patient_id, tiff.baseName, tiff] }
+    // Deterministic new-wins dedup on a marker-name collision (matches the
+    // quantification merge's new-wins rule). Tag new-cycle channels priority 0
+    // and prior-pyramid channels priority 1; group by [pid, marker] and keep the
+    // lowest priority. An async .mix + first-occurrence .unique would be
+    // scheduling-nondeterministic, and could make the pyramid show the OLD image
+    // of a re-imaged marker while the quant CSV correctly shows the new one.
+    // (New cycle excludes DAPI via SPLIT_CHANNELS, so DAPI only ever comes from
+    // the prior pyramid at priority 1 — the reference DAPI is preserved.)
+    ch_new_tagged = SPLIT_CHANNELS.out.channels.flatMap { meta, tiffs ->
+        (tiffs instanceof List ? tiffs : [tiffs]).collect { tiff -> [[meta.patient_id, tiff.baseName], 0, tiff] }
+    }
+    ch_prior_tagged = SPLIT_PRIOR_PYRAMID.out.channels.flatMap { meta, tiffs ->
+        (tiffs instanceof List ? tiffs : [tiffs]).collect { tiff -> [[meta.patient_id, tiff.baseName], 1, tiff] }
+    }
+    ch_all_channels = ch_new_tagged.mix(ch_prior_tagged)
+        .groupTuple(by: 0)   // [[pid, marker], [priorities...], [tiffs...]]
+        .map { key, prios, tiffs ->
+            def winner = [prios, tiffs].transpose().sort { a, b -> a[0] <=> b[0] }.first()
+            [key[0], winner[1]]   // [pid, winning_tiff] — lowest priority (new) wins
         }
-        .unique { pid, marker, _t -> [pid, marker] }   // new cycle already excludes DAPI; keep one per marker
-        .map { pid, _marker, tiff -> [pid, tiff] }
         .groupTuple()
         .map { pid, tiffs -> [[patient_id: pid, id: pid, is_reference: false], tiffs] }
 
