@@ -79,6 +79,76 @@ def test_can_read_rejects_untiled():
     assert MirageVipsSlideReader.can_read(p) is False
 
 
+def _minimal_ome_xml(w, h, c, channel_names):
+    """Mirrors bin/reg_finalize.py::_minimal_ome_xml (channel names + SizeC only)."""
+    chans = "".join(
+        f'<Channel ID="Channel:0:{i}" Name="{n}" SamplesPerPixel="1"/>'
+        for i, n in enumerate(channel_names))
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<OME xmlns="http://www.openmicroscopy.org/Schemas/OME/2016-06">'
+        '<Image ID="Image:0" Name="registered">'
+        f'<Pixels ID="Pixels:0" DimensionOrder="XYCZT" Type="uint16" '
+        f'Interleaved="false" SizeX="{w}" SizeY="{h}" SizeC="{c}" SizeZ="1" SizeT="1">'
+        f'{chans}'
+        '</Pixels></Image></OME>')
+
+
+def _make_pyvips_slide(dirpath, c):
+    """Write a fixture with bin/reg_finalize.py::_save_ome_pyvips's EXACT convention:
+    bands joined vertically into one page, page-height set explicitly, tiled BigTIFF.
+    Returns (path, arr) with arr shaped (H, W, c) (or (H, W) when c == 1) to match what
+    slide2vips/slide2image hand back."""
+    import pyvips
+
+    rng = np.random.default_rng(11)
+    arr = rng.integers(0, 65535, size=(H, W, c), dtype=np.uint16)
+    channel_names = [f"chan{i}" for i in range(c)]
+    ome_xml = _minimal_ome_xml(W, H, c, channel_names)
+
+    if c == 1:
+        page = pyvips.Image.new_from_array(arr[..., 0])
+    else:
+        bands = [pyvips.Image.new_from_array(arr[..., i]) for i in range(c)]
+        page = bands[0]
+        for b in bands[1:]:
+            page = page.join(b, "vertical")
+    page = page.copy()
+    page.set_type(pyvips.GValue.gint_type, "page-height", H)
+    page.set_type(pyvips.GValue.gstr_type, "image-description", ome_xml)
+
+    p = os.path.join(dirpath, "warped.ome.tiff")
+    page.tiffsave(p, tile=True, tile_width=64, tile_height=64, bigtiff=True)
+    return p, (arr[..., 0] if c == 1 else arr)
+
+
+def test_pyvips_writer_multichannel_can_read_and_roundtrips():
+    """Exercises the reg_finalize._save_ome_pyvips convention (vertical band-join,
+    explicit page-height), untested until now even though add_cycle feeds slides written
+    by exactly this writer back into registration."""
+    from mirage_slide_reader import MirageVipsSlideReader
+    path, arr = _make_pyvips_slide(tempfile.mkdtemp(), c=4)
+    assert MirageVipsSlideReader.can_read(path) is True
+    reader = MirageVipsSlideReader(path)
+    img = reader.slide2vips(level=0)
+    assert (img.width, img.height, img.bands) == (W, H, 4)
+    got = np.frombuffer(img.write_to_memory(), dtype=np.uint16).reshape(H, W, 4)
+    assert np.array_equal(got, arr)
+
+
+def test_pyvips_writer_single_channel_can_read_and_roundtrips():
+    """The C == 1 case of the reg_finalize._save_ome_pyvips convention: no band-join at
+    all, just a single tiled page with page-height == full height."""
+    from mirage_slide_reader import MirageVipsSlideReader
+    path, arr = _make_pyvips_slide(tempfile.mkdtemp(), c=1)
+    assert MirageVipsSlideReader.can_read(path) is True
+    reader = MirageVipsSlideReader(path)
+    img = reader.slide2vips(level=0)
+    assert (img.width, img.height, img.bands) == (W, H, 1)
+    got = np.frombuffer(img.write_to_memory(), dtype=np.uint16).reshape(H, W)
+    assert np.array_equal(got, arr)
+
+
 if __name__ == "__main__":
     # stdlib runner so this works in the VALIS image without pytest installed
     import traceback

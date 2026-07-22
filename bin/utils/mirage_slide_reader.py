@@ -17,11 +17,12 @@ Anything this reader does not recognise falls back to VALIS's own dispatch via
 ``get_reader_for``, so non-mirage inputs keep working exactly as before.
 """
 import os
+import re
 
 import numpy as np
 import pyvips
 
-from valis import slide_io
+from valis import slide_io, slide_tools
 
 # Bands are packed vertically into pages by both tifffile (ome=True, axes="CYX") and
 # reg_finalize._save_ome_pyvips (page-height set explicitly). Reading with n=-1 yields a
@@ -84,81 +85,93 @@ class MirageVipsSlideReader(slide_io.SlideReader):
     # -- construction helpers --------------------------------------------------
 
     def _build_metadata(self):
+        ome_xml, tile_wh = _read_tiff_header(self.src_f)
         md = slide_io.MetaData(os.path.basename(self.src_f), "mirage-pyvips", series=self.series)
         md.slide_dimensions = [(self._img.width, self._img.height)]
         md.n_channels = self._img.bands
         md.is_rgb = False
-        md.channel_names = _channel_names(self.src_f, self._img.bands)
-        md.pixel_physical_size_xyu = _physical_size(self.src_f)
-        md.original_xml = _ome_xml(self.src_f)
-        md.bf_datatype = _bf_dtype(self._img.format)
-        md.optimal_tile_wh = _tile_wh(self.src_f)
+        md.channel_names = _channel_names(ome_xml, self._img.bands)
+        md.pixel_physical_size_xyu = _physical_size(ome_xml)
+        md.original_xml = ome_xml
+        md.bf_datatype = slide_io.vips2bf_dtype(self._img.format)
+        md.optimal_tile_wh = tile_wh
         return md
 
     @staticmethod
     def can_read(src_f):
-        """True only for tiled TIFFs this reader is known to handle correctly."""
+        """True only for tiled BigTIFF, single-sample, non-pyramidal OME-TIFFs that mirage's
+        own writers produce (bin/preprocess.py, bin/reg_finalize.py::_save_ome_pyvips).
+
+        This is a safety gate, not a performance heuristic: a false negative merely falls
+        back to the slower BioFormats/JVM path (get_reader_for), while a false positive would
+        silently misdecode a third-party slide (e.g. an RGB scan or a pyramidal OME-TIFF) and
+        corrupt registration. The broad ``except Exception: return False`` below is
+        deliberate -- on ANY ambiguity or read error, fail toward the slower-but-correct path.
+        """
         try:
             import tifffile
             with tifffile.TiffFile(str(src_f)) as tf:
                 page = tf.pages[0]
                 if not page.is_tiled:
                     return False
-            img = _bandjoin_pages(_open_roll(src_f))
-            return img.width > 0 and img.height > 0 and img.bands >= 1
+                if not tf.is_bigtiff:
+                    return False
+                if getattr(page, "subifds", None):
+                    return False
+                if page.samplesperpixel != 1:
+                    return False
+                ome_xml = tf.ome_metadata
+
+            img = _open_roll(src_f)
+            has_page_height = True
+            try:
+                img.get("page-height")
+            except pyvips.Error:
+                has_page_height = False
+            if not ome_xml and not has_page_height:
+                return False
+
+            joined = _bandjoin_pages(img)
+            if ome_xml:
+                m = re.search(r'SizeC="(\d+)"', ome_xml)
+                if m and joined.bands != int(m.group(1)):
+                    return False
+            return joined.width > 0 and joined.height > 0 and joined.bands >= 1
         except Exception:
             return False
 
 
 def _vips_dtype(vips_format):
-    return {
-        "uchar": np.uint8, "char": np.int8, "ushort": np.uint16, "short": np.int16,
-        "uint": np.uint32, "int": np.int32, "float": np.float32, "double": np.float64,
-    }[vips_format]
+    return slide_tools.VIPS_FORMAT_NUMPY_DTYPE[vips_format]
 
 
-def _bf_dtype(vips_format):
-    return {
-        "uchar": "uint8", "char": "int8", "ushort": "uint16", "short": "int16",
-        "uint": "uint32", "int": "int32", "float": "float", "double": "double",
-    }[vips_format]
-
-
-def _ome_xml(src_f):
+def _read_tiff_header(src_f):
+    """Single tifffile open: returns (ome_xml_or_None, tile_width)."""
     import tifffile
     with tifffile.TiffFile(str(src_f)) as tf:
-        return tf.ome_metadata
+        ome_xml = tf.ome_metadata
+        tw = tf.pages[0].tilewidth
+    return ome_xml, (int(tw) if tw else 1024)
 
 
-def _channel_names(src_f, n_bands):
-    xml = _ome_xml(src_f)
-    if not xml:
+def _channel_names(ome_xml, n_bands):
+    if not ome_xml:
         return [f"C{i}" for i in range(n_bands)]
-    import re
-    names = re.findall(r'<Channel[^>]*\bName="([^"]*)"', xml)
+    names = re.findall(r'<Channel[^>]*\bName="([^"]*)"', ome_xml)
     if len(names) < n_bands:
         names = list(names) + [f"C{i}" for i in range(len(names), n_bands)]
     return names[:n_bands]
 
 
-def _physical_size(src_f):
-    xml = _ome_xml(src_f)
-    if not xml:
+def _physical_size(ome_xml):
+    if not ome_xml:
         return [1.0, 1.0, slide_io.PIXEL_UNIT]
-    import re
-    x = re.search(r'PhysicalSizeX="([^"]+)"', xml)
-    y = re.search(r'PhysicalSizeY="([^"]+)"', xml)
-    u = re.search(r'PhysicalSizeXUnit="([^"]+)"', xml)
+    x = re.search(r'PhysicalSizeX="([^"]+)"', ome_xml)
+    y = re.search(r'PhysicalSizeY="([^"]+)"', ome_xml)
+    u = re.search(r'PhysicalSizeXUnit="([^"]+)"', ome_xml)
     if not (x and y):
         return [1.0, 1.0, slide_io.PIXEL_UNIT]
     return [float(x.group(1)), float(y.group(1)), u.group(1) if u else "µm"]
-
-
-def _tile_wh(src_f):
-    import tifffile
-    with tifffile.TiffFile(str(src_f)) as tf:
-        tw = tf.pages[0].tilewidth
-    return int(tw) if tw else 1024
 
 
 def get_reader_for(src_f, series=None):
