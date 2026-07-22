@@ -857,7 +857,7 @@ Immediately after `slide_bk` is fully composed and before the `# 4) warp` block,
         return 0
 ```
 
-If `slide_bk` is already a `pyvips.Image` at that point, `_to_vips_field` must be a no-op passthrough — confirm its existing behaviour and adjust if needed.
+No change to `_to_vips_field` is needed: `bin/reg_finalize.py:81-84` already returns a `pyvips.Image` unchanged and only converts the numpy `[dx, dy]` form. Verified during planning.
 
 - [ ] **Step 2: Write the grid helper**
 
@@ -910,18 +910,27 @@ import reg_finalize
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--warp-state", required=True)
-    ap.add_argument("--field", required=True, help="composed padded field from --emit-field-only")
+    ap.add_argument("--field", help="composed padded field from --emit-field-only; "
+                                    "omit together with --rigid-only for the reference")
+    ap.add_argument("--rigid-only", action="store_true",
+                    help="no non-rigid field (dxdy=None), matching reg_finalize.py --rigid-only")
     ap.add_argument("--src-slide", required=True)
     ap.add_argument("--grid", required=True, help="grid.json from reg_assemble --write-grid")
     ap.add_argument("--tile-idx", type=int, required=True)
     ap.add_argument("--out-dir", required=True)
     args = ap.parse_args()
 
+    if args.rigid_only == bool(args.field):
+        raise SystemExit("pass exactly one of --field or --rigid-only")
+
     ws = json.load(open(args.warp_state))
     grid = json.load(open(args.grid))
     tile = next(t for t in grid["tiles"] if t["idx"] == args.tile_idx)
 
-    dxdy = pyvips.Image.new_from_file(args.field)
+    # dxdy=None is the rigid-only path, byte-for-byte what reg_finalize.py --rigid-only does.
+    # Do NOT substitute a zero field: warp_img takes different branches for None vs a supplied
+    # field, and equivalence is not established.
+    dxdy = None if args.rigid_only else pyvips.Image.new_from_file(args.field)
     warped, _ = reg_finalize.warp_source(args.src_slide, ws, dxdy)
     region = warped.crop(tile["x"], tile["y"], tile["w"], tile["h"])
 
@@ -969,7 +978,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--warp-state", required=True)
     ap.add_argument("--src-slide", required=True)
-    ap.add_argument("--field", help="composed field (required with --write-grid)")
+    ap.add_argument("--field", help="composed field; omit together with --rigid-only")
+    ap.add_argument("--rigid-only", action="store_true",
+                    help="no non-rigid field (dxdy=None); must match reg_warp_tile.py's flag")
     ap.add_argument("--write-grid", help="path to write grid.json, then exit")
     ap.add_argument("--tile-wh", type=int, default=4096)
     ap.add_argument("--tiles-dir")
@@ -981,7 +992,9 @@ def main():
     ws = json.load(open(args.warp_state))
 
     if args.write_grid:
-        dxdy = pyvips.Image.new_from_file(args.field)
+        if args.rigid_only == bool(args.field):
+            raise SystemExit("pass exactly one of --field or --rigid-only")
+        dxdy = None if args.rigid_only else pyvips.Image.new_from_file(args.field)
         warped, _ = reg_finalize.warp_source(args.src_slide, ws, dxdy)
         grid = output_grid(warped.width, warped.height, args.tile_wh)
         os.makedirs(os.path.dirname(os.path.abspath(args.write_grid)) or ".", exist_ok=True)
@@ -1291,26 +1304,50 @@ include { REG_ASSEMBLE }   from '../../../modules/local/reg_assemble'
 Then define a reusable warp sub-flow at the bottom of the file:
 
 ```groovy
-// Shared warp: field -> tiles -> assembled slide. Used by every finalize regime and by the
-// reference warp, so there is exactly one full-res warp implementation in the pipeline.
+// Shared full-res warp: grid -> per-tile warp -> assemble. Every regime (tiled non-rigid,
+// separated, separated+micro) AND the reference route through this, so the pipeline contains
+// exactly ONE full-res warp implementation.
+//
+// KEY HAZARD (this file has been bitten three times already, see the comments above): patient_id
+// arrives from the main workflow as a groupKey, but round-trips through process outputs as a plain
+// String. A join key of [groupKey, slide] never matches [String, slide], and the symptom is not an
+// error -- the downstream process simply stays pending forever. Every key below is .toString()'d.
 workflow WARP_FANOUT {
     take:
-    ch_in   // [pid, slide, warp_state, field, src_slide, grid]
+    ch_in   // [pid, slide, warp_state, src_slide, field]  (field == [] means rigid-only)
 
     main:
-    ch_tasks = ch_in.flatMap { pid, slide, ws, field, src, grid ->
+    ch_norm = ch_in.map { pid, slide, ws, src, field ->
+        tuple(pid.toString(), slide, ws, src, field)
+    }
+
+    REG_GRID(ch_norm)
+
+    // Re-join the grid to its inputs, then emit one task per tile. The tile COUNT is read from
+    // grid.json, which REG_GRID derived from the real warped canvas -- not from warp_state
+    // arithmetic, which could disagree with what REG_WARP_TILE actually produces.
+    ch_with_grid = ch_norm
+        .map { pid, slide, ws, src, field -> tuple([pid, slide], ws, src, field) }
+        .join(REG_GRID.out.grid.map { pid, slide, g -> tuple([pid.toString(), slide], g) })
+
+    ch_tasks = ch_with_grid.flatMap { key, ws, src, field, grid ->
         def n = new groovy.json.JsonSlurper().parseText(grid.text).tiles.size()
-        (0..<n).collect { i -> tuple(pid, slide, ws, field, src, grid, i) }
+        (0..<n).collect { i -> tuple(key[0], key[1], ws, src, field, grid, i) }
     }
     REG_WARP_TILE(ch_tasks)
 
-    ch_assembled = ch_in.map { pid, slide, ws, field, src, grid -> tuple([pid, slide], ws, src, grid) }
-        .join(REG_WARP_TILE.out.tile
-                .map { pid, slide, t -> tuple([pid, slide], t) }
-                .groupTuple()
-                .map { key, tl -> tuple(key, tl.flatten()) })
+    // Fan-in. groupTuple with no size waits for channel close, which is correct here: the tile
+    // count per slide is only known after REG_GRID, so there is no size to supply up front.
+    ch_tiles = REG_WARP_TILE.out.tile
+        .map { pid, slide, t -> tuple([pid.toString(), slide], t) }
+        .groupTuple()
+        .map { key, tl -> tuple(key, tl.flatten()) }
+
+    ch_assemble_in = ch_with_grid
+        .map { key, ws, src, field, grid -> tuple(key, ws, src, grid) }
+        .join(ch_tiles)
         .map { key, ws, src, grid, tiles -> tuple(key[0], key[1], ws, src, grid, tiles) }
-    REG_ASSEMBLE(ch_assembled)
+    REG_ASSEMBLE(ch_assemble_in)
 
     emit:
     registered = REG_ASSEMBLE.out.registered
@@ -1319,9 +1356,185 @@ workflow WARP_FANOUT {
 }
 ```
 
-Change `REG_FINALIZE_FIELD`, `REG_FINALIZE_MICRO`, and `REG_WARP_REF` to run with `--emit-field-only` (via `ext.args` in `conf/modules.config`) and route their emitted field into `WARP_FANOUT`. The grid is produced by `reg_assemble.py --write-grid`; add it as an extra output of the field-emitting processes so it flows with the field.
+The three existing finalize processes stop warping and become **field emitters**. Rename them so the name matches what they now do, and delete `REG_WARP_REF` entirely — the reference now flows through the same grid/tile/assemble chain with `--rigid-only`, which also removes the 40 GB-heap process that has been OOMing on merged references.
 
-- [ ] **Step 6: Write the stub nf-tests**
+| Before | After | Change |
+|---|---|---|
+| `modules/local/reg_finalize.nf` (`REG_FINALIZE`) | `modules/local/reg_compose_tiled.nf` (`REG_COMPOSE_TILED`) | stitches tiles → emits `slide_dxdy.v` |
+| `modules/local/reg_finalize_field.nf` (`REG_FINALIZE_FIELD`) | `modules/local/reg_compose_field.nf` (`REG_COMPOSE_FIELD`) | emits `slide_dxdy.v` |
+| `modules/local/reg_finalize_micro.nf` (`REG_FINALIZE_MICRO`) | `modules/local/reg_compose_micro.nf` (`REG_COMPOSE_MICRO`) | emits `slide_dxdy.v` |
+| `modules/local/reg_warp_ref.nf` (`REG_WARP_REF`) | **deleted** | reference uses `REG_GRID`/`REG_WARP_TILE --rigid-only` |
+
+For each renamed module apply exactly these three edits, shown here for `REG_COMPOSE_FIELD` (the other two are identical in shape — only the existing `reg_finalize.py` flags differ, and those stay unchanged):
+
+```groovy
+    output:
+    tuple val(patient_id), val(slide), path("slide_dxdy.v"), emit: field
+    path "versions.yml"                                    , emit: versions
+    path "*.size.csv"                                      , emit: size_log
+```
+
+```groovy
+    reg_finalize.py \\
+        --inputs-dir tiler_inputs \\
+        --field nr/bk.v \\
+        --warp-state warp_state.json \\
+        --src-slide ${src_slide} \\
+        --emit-field-only \\
+        --out slide_dxdy.v \\
+        ${args}
+```
+
+and in the `stub:` block replace the `mkdir -p registered_slides; touch ...` lines with `touch slide_dxdy.v`.
+
+`REG_COMPOSE_TILED` keeps its `--inputs-dir`/`--tiles-dir` arguments; `REG_COMPOSE_MICRO` keeps its `--micro-field`/`--micro-warp-state`/`--micro-inputs-dir` arguments. Only the output and the two added lines change.
+
+Create `modules/local/reg_grid.nf`. Note `path(field)` with no `arity` accepts `[]` from the adapter and renders as an empty string — verified experimentally on Nextflow 25.04.7 — which is how the reference passes "no field":
+
+```groovy
+/*
+ * REG_GRID - compute the output-tile grid for one slide's full-res warp.
+ *
+ * The canvas size is read from the ACTUAL lazily-warped pyvips image rather than derived from
+ * warp_state arithmetic, so the grid can never disagree with what REG_WARP_TILE produces.
+ * Cheap: nothing is evaluated, only the header geometry.
+ */
+process REG_GRID {
+    tag "${patient_id}:${slide}"
+    label 'process_low'
+
+    container "${params.reg_dist_container ?: 'bolt3x/attend_image_analysis:mirage_valis_1.0.0'}"
+
+    input:
+    tuple val(patient_id), val(slide), path(warp_state, stageAs: 'warp_state.json'), path(src_slide, stageAs: 'src/*'), path(field)
+
+    output:
+    tuple val(patient_id), val(slide), path("grid.json"), emit: grid
+    path "versions.yml",                                  emit: versions
+
+    script:
+    def field_arg = field ? "--field ${field}" : "--rigid-only"
+    """
+    reg_assemble.py \\
+        --warp-state warp_state.json \\
+        --src-slide ${src_slide} \\
+        ${field_arg} \\
+        --tile-wh ${params.reg_warp_tile_wh} \\
+        --write-grid grid.json
+
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        python: \$(python3 --version | sed 's/Python //')
+        pyvips: \$(python3 -c "import pyvips; print(pyvips.__version__)")
+    END_VERSIONS
+    """
+
+    stub:
+    """
+    echo '{"n_cols":1,"n_rows":1,"tile_wh":4096,"width":8,"height":8,"tiles":[{"idx":0,"x":0,"y":0,"w":8,"h":8}]}' > grid.json
+
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        python: stub
+        pyvips: stub
+    END_VERSIONS
+    """
+}
+```
+
+Update `modules/local/reg_warp_tile.nf` (written in step 2) so its input carries the optional field and its script branches the same way:
+
+```groovy
+    input:
+    tuple val(patient_id), val(slide), path(warp_state, stageAs: 'warp_state.json'), path(src_slide, stageAs: 'src/*'), path(field), path(grid, stageAs: 'grid.json'), val(tile_idx)
+
+    script:
+    def field_arg = field ? "--field ${field}" : "--rigid-only"
+    """
+    reg_warp_tile.py \\
+        --warp-state warp_state.json \\
+        --src-slide ${src_slide} \\
+        ${field_arg} \\
+        --grid grid.json \\
+        --tile-idx ${tile_idx} \\
+        --out-dir tiles
+```
+
+Update `modules/local/reg_assemble.nf`'s input to match the assemble CLI:
+
+```groovy
+    input:
+    tuple val(patient_id), val(slide), path(warp_state, stageAs: 'warp_state.json'), path(src_slide, stageAs: 'src/*'), path(grid, stageAs: 'grid.json'), path(tiles, stageAs: "tiles/*")
+```
+
+- [ ] **Step 6: Rewire the adapter's call sites**
+
+`WARP_FANOUT` must be invoked exactly **once** — a DSL2 workflow cannot be called twice without aliasing — so mix the moving slides and the reference into a single channel first.
+
+In `subworkflows/local/adapters/valis_distributed_adapter.nf`, replace each regime's `REG_FINALIZE*` invocation with the matching `REG_COMPOSE_*`, assigning `ch_moving_field` instead of `ch_moving_registered`:
+
+```groovy
+    // regime (a)
+    REG_COMPOSE_TILED(ch_finalize_in)
+    ch_moving_field = REG_COMPOSE_TILED.out.field
+    ch_moving_logs  = REG_COMPOSE_TILED.out.size_log
+
+    // regime (b)
+    REG_COMPOSE_FIELD(ch_finalize_in)
+    ch_moving_field = REG_COMPOSE_FIELD.out.field
+    ch_moving_logs  = REG_COMPOSE_FIELD.out.size_log
+
+    // regime (c)
+    REG_COMPOSE_MICRO(ch_fin_micro_in)
+    ch_moving_field = REG_COMPOSE_MICRO.out.field
+    ch_moving_logs  = REG_COMPOSE_MICRO.out.size_log
+```
+
+Then replace the whole `REG_WARP_REF` block and the `ch_registered` assembly at the end of the workflow with:
+
+```groovy
+    // ---- FULL-RES WARP (moving slides + the reference, one shared fan-out) ----
+    // Keys normalised to String throughout: ch_prep_moving/ch_prep_ref/ch_src carry the groupKey
+    // patient_id from the main workflow's streaming groupTuple, while process outputs carry a
+    // plain String. Mixing the two in a join key silently never matches.
+    ch_key_src = ch_src.map { key, meta, f -> tuple([key[0].toString(), key[1]], f) }
+    ch_key_ws  = ch_prep_moving.map { key, ti, ws -> tuple([key[0].toString(), key[1]], ws) }
+
+    ch_moving_warp = ch_moving_field
+        .map { pid, slide, field -> tuple([pid.toString(), slide], field) }
+        .join(ch_key_ws)
+        .join(ch_key_src)
+        .map { key, field, ws, src -> tuple(key[0], key[1], ws, src, field) }
+
+    // The reference warps with its rigid M + crop only: field == [] selects --rigid-only, the
+    // exact semantics the deleted REG_WARP_REF had. Classic VALIS warps every slide including the
+    // reference, so downstream QC needs it in the same cropped coordinate space.
+    ch_ref_warp = ch_prep_ref
+        .map { key, ws -> tuple([key[0].toString(), key[1]], ws) }
+        .join(ch_key_src)
+        .map { key, ws, src -> tuple(key[0], key[1], ws, src, []) }
+
+    WARP_FANOUT(ch_moving_warp.mix(ch_ref_warp))
+
+    // ---- convert back to [meta, file] ----
+    ch_registered = WARP_FANOUT.out.registered
+        .map { pid, slide, regfile -> tuple([pid.toString(), slide], regfile) }
+        .join(ch_src.map { key, meta, f -> tuple([key[0].toString(), key[1]], meta) })
+        .map { key, regfile, meta -> tuple(meta, regfile) }
+
+    emit:
+    registered = ch_registered
+    versions   = REG_PREP.out.versions.first()
+    size_logs  = REG_PREP.out.size_log.mix(ch_moving_logs).mix(WARP_FANOUT.out.size_log)
+```
+
+Update the include block at the top of the file: drop `REG_FINALIZE`, `REG_FINALIZE_FIELD`, `REG_FINALIZE_MICRO`, `REG_WARP_REF`; add `REG_COMPOSE_TILED`, `REG_COMPOSE_FIELD`, `REG_COMPOSE_MICRO`, `REG_GRID`, `REG_WARP_TILE`, `REG_ASSEMBLE`.
+
+Delete `modules/local/reg_warp_ref.nf` and `tests/modules/reg_finalize.nf.test`'s stale process references; rename the three existing `tests/modules/reg_finalize*.nf.test` files to match the new process names and update their `process` / `script` / `tag` lines and their output assertions (`process.out.field` instead of `process.out.registered`).
+
+Also remove the now-dead `REG_WARP_REF` block from `conf/modules.config:264-289`, including its `ext.args = { "--jvm-heap-gb ..." }` — with the lazy reader there is no JVM heap to size.
+
+- [ ] **Step 7: Write the stub nf-tests**
 
 Create `tests/modules/reg_warp_tile.nf.test`:
 
@@ -1354,7 +1567,7 @@ nextflow_process {
 
 Create the analogous `tests/modules/reg_assemble.nf.test` for `REG_ASSEMBLE`, asserting `process.out.registered.size() == 1`.
 
-- [ ] **Step 7: Run the stub tests**
+- [ ] **Step 8: Run the stub tests**
 
 ```bash
 nf-test test tests/modules/reg_warp_tile.nf.test tests/modules/reg_assemble.nf.test \
@@ -1362,22 +1575,26 @@ nf-test test tests/modules/reg_warp_tile.nf.test tests/modules/reg_assemble.nf.t
 ```
 Expected: 2 passed.
 
-- [ ] **Step 8: Verify the default path is untouched**
+- [ ] **Step 9: Verify the default path is untouched**
 
 ```bash
 nextflow run . -profile test,docker -stub --outdir /tmp/stubout
 ```
 Expected: `EXIT: 0`, and no `REG_WARP_TILE` / `REG_ASSEMBLE` tasks in the output (the default is `reg_distributed_tiling=false`).
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
 git rev-parse --abbrev-ref HEAD
-git add modules/local/reg_warp_tile.nf modules/local/reg_assemble.nf \
+git add -u modules/local/ tests/modules/
+git add modules/local/reg_warp_tile.nf modules/local/reg_assemble.nf modules/local/reg_grid.nf \
+        modules/local/reg_compose_tiled.nf modules/local/reg_compose_field.nf \
+        modules/local/reg_compose_micro.nf \
         tests/modules/reg_warp_tile.nf.test tests/modules/reg_assemble.nf.test \
         subworkflows/local/adapters/valis_distributed_adapter.nf \
         conf/modules.config nextflow.config
-git commit -m ":sparkles: Wire the warp fan-out into the distributed adapter"
+git status --short   # confirm reg_warp_ref.nf shows as deleted and nothing unrelated is staged
+git commit -m ":recycle: Split finalize into compose + grid + tile-warp + assemble"
 ```
 
 ---
@@ -1432,13 +1649,42 @@ def useDistributedAdapter() {
 
 - [ ] **Step 3: Use it in `add_cycle.nf`**
 
-Replace `subworkflows/local/add_cycle.nf:68` (`VALIS_ADAPTER(ch_grouped)`) with a branch on `useDistributedAdapter()`, mirroring `registration.nf:181-214`. Keep the `reg_qc >= 2` block calling `VALIS_ADAPTER.out.registrar` only on the classic branch — the Step 1 validator guarantees that combination never reaches here.
-
-Add the include:
+Add the include next to the existing `VALIS_ADAPTER` one at `subworkflows/local/add_cycle.nf:26`:
 
 ```groovy
 include { VALIS_DISTRIBUTED_ADAPTER } from './adapters/valis_distributed_adapter'
 ```
+
+Replace line 68 (`VALIS_ADAPTER(ch_grouped)`) and line 71 (`ch_new_registered = ...`) with:
+
+```groovy
+    // Same adapter choice as a full run (registration.nf), so add_cycle inherits the
+    // low-memory path instead of being pinned to classic VALIS.
+    if (useDistributedAdapter()) {
+        VALIS_DISTRIBUTED_ADAPTER(ch_grouped)
+        ch_adapter_registered = VALIS_DISTRIBUTED_ADAPTER.out.registered
+        ch_adapter_versions   = VALIS_DISTRIBUTED_ADAPTER.out.versions
+    } else {
+        VALIS_ADAPTER(ch_grouped)
+        ch_adapter_registered = VALIS_ADAPTER.out.registered
+        ch_adapter_versions   = VALIS_ADAPTER.out.versions
+    }
+
+    // Keep only the newly registered cycle (drop the reference passthrough).
+    ch_new_registered = ch_adapter_registered.filter { meta, _f -> !meta.is_reference }
+```
+
+`useDistributedAdapter()` is defined in `registration.nf` (Step 2); import it by moving the helper into `lib/ParamUtils.groovy` as a static method `ParamUtils.useDistributedAdapter(params)` and calling that from both files, so there is one definition rather than two.
+
+The `reg_qc >= 2` block at lines 92-116 references `VALIS_ADAPTER.out.registrar`, which only exists on the classic branch. Guard it so it is unreachable on the distributed branch:
+
+```groovy
+    if (reg_qc_level >= 2 && !useDistributedAdapter()) {
+```
+
+Step 1's validator already rejects that combination at launch, so this guard is defence in depth rather than the primary gate — but without it the workflow would fail to compile on the distributed branch, because `VALIS_ADAPTER.out` is not defined there.
+
+At line 250, replace `.mix(VALIS_ADAPTER.out.versions)` with `.mix(ch_adapter_versions)`.
 
 - [ ] **Step 4: Verify with stubs**
 
@@ -1615,7 +1861,60 @@ Expected: `100755`.
 
 - [ ] **Step 3: Write the module**
 
-Create `modules/local/compare_registration.nf` following the `REG_ASSEMBLE` template: `tag "${meta.id}"`, `label 'process_low'`, same container, input `tuple val(meta), path(classic), path(newpath)`, outputs `metrics` (`*_regcompare.json`), `diff_png` (`*_regdiff.png`), `versions`, plus a `stub:` block that `touch`es both outputs.
+Create `modules/local/compare_registration.nf`:
+
+```groovy
+/*
+ * COMPARE_REGISTRATION - diff the classic and low-memory registered slides for one image.
+ *
+ * Driven by --reg_compare. Streams both slides tile-by-tile so it runs in bounded RAM on the same
+ * low-resource machine the new path targets.
+ */
+process COMPARE_REGISTRATION {
+    tag "${meta.id}"
+    label 'process_low'
+
+    container "${params.reg_dist_container ?: 'bolt3x/attend_image_analysis:mirage_valis_1.0.0'}"
+
+    input:
+    tuple val(meta), path(classic, stageAs: 'classic/*'), path(candidate, stageAs: 'candidate/*')
+
+    output:
+    tuple val(meta), path("*_regcompare.json"), emit: metrics
+    tuple val(meta), path("*_regdiff.png"),     emit: diff_png
+    path "versions.yml",                        emit: versions
+
+    script:
+    def args = task.ext.args ?: ''
+    """
+    compare_registration.py \\
+        --a ${classic} \\
+        --b ${candidate} \\
+        --slide ${meta.id} \\
+        --out-json ${meta.id}_regcompare.json \\
+        --out-png ${meta.id}_regdiff.png \\
+        ${args}
+
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        python: \$(python3 --version | sed 's/Python //')
+        pyvips: \$(python3 -c "import pyvips; print(pyvips.__version__)")
+    END_VERSIONS
+    """
+
+    stub:
+    """
+    echo '{"slide":"${meta.id}","overall":{"max_abs":0.0,"mean_abs":0.0,"rmse":0.0,"pct_differing":0.0}}' > ${meta.id}_regcompare.json
+    touch ${meta.id}_regdiff.png
+
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        python: stub
+        pyvips: stub
+    END_VERSIONS
+    """
+}
+```
 
 - [ ] **Step 4: Write the subworkflow**
 
