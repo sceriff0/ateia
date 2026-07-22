@@ -128,6 +128,26 @@ def test_choose_raster_scale_is_a_noop_when_the_grid_already_fits():
     info = warp_seg_qc.choose_raster_scale((1000, 1000), cell_area_px=300.0,
                                            max_raster_px=400_000_000)
     assert info["scale"] == 1.0 and info["cells_resolvable"] is True
+    assert info["downsampled"] is False
+
+
+@pytest.mark.parametrize("cap", [0, None])
+def test_no_cap_means_native_resolution(cap):
+    """The default. Block-wise metrics make full-res affordable (8 B per slide px), so a
+    QC number is quoted at native resolution unless a guard is explicitly set."""
+    info = warp_seg_qc.choose_raster_scale((150_000, 150_000), cell_area_px=300.0,
+                                           max_raster_px=cap)
+    assert info["scale"] == 1.0 and info["downsampled"] is False
+
+
+def test_default_is_native_resolution_end_to_end(tmp_path):
+    ref = _grid_fc(4, 4, 60, 40)          # small extent: the default rasterizes it as-is
+    ref_gj = _write(tmp_path / "ref.geojson", ref)
+    mov_gj = _write(tmp_path / "mov.geojson", ref)
+    reg = _FakeRegistrar({"ref": _FakeSlide(ref), "mov": _FakeSlide(ref)})
+    out = warp_seg_qc.run("pickle", "ref", "mov", ref_gj, mov_gj, loader=lambda _p: reg)
+    assert warp_seg_qc.DEFAULT_MAX_RASTER_PX == 0
+    assert out["raster"]["scale"] == 1.0 and out["raster"]["downsampled"] is False
 
 
 def test_choose_raster_scale_flags_unresolvable_cells_instead_of_relaxing():

@@ -13,14 +13,19 @@ Warping the exact polygons (not resampling a warped image) isolates registration
 from segmentation-on-interpolated-pixels bias. Runs in the VALIS container (valis + numpy
 + scikit-image). The warp is lazy + injectable so the rasterize/score logic is unit-testable.
 
-**Rasterization scale.** The polygons live in level-0 slide coordinates, so their bounding
-grid is the whole slide — 10^9-10^10 px, which no label raster can hold. The warp itself is
-done at full float precision (``pt_level=0``); only the *area integration* is quantized, by
-scaling polygon coordinates by a single factor chosen to fit ``--max-raster-px``. That factor
-is applied identically to ``before`` and ``after``, so the two stay directly comparable, and
-it is recorded in the output next to the resulting median cell area so a reviewer can check
-that cells stayed resolvable. Do **not** use VALIS's ``pt_level`` for this: it downsamples only
-the warped side, silently making ``before`` and ``after`` incommensurable.
+**Rasterization scale.** Scoring runs at native level-0 resolution by default — the metrics
+are accumulated block-wise (see ``utils/seg_overlap``), so the only term that scales with
+slide area is the two uint32 label images at 8 bytes per slide pixel. A 60k x 40k slide is
+19 GB of rasters, which a normal HPC allocation holds comfortably, so there is no reason to
+quantize a number you intend to defend.
+
+``--max-raster-px`` is an out-of-range guard, not the normal path. When it does bite, the warp
+is still done at full float precision (``pt_level=0``) and only the *area integration* is
+quantized, by scaling polygon coordinates by a single factor applied identically to ``before``
+and ``after`` so the two stay directly comparable. The factor, both grids and the resulting
+median cell area are recorded in the output, and ``raster.downsampled`` says plainly whether it
+happened. Do **not** use VALIS's ``pt_level`` for this: it downsamples only the warped side,
+silently making ``before`` and ``after`` incommensurable.
 """
 from __future__ import annotations
 
@@ -46,11 +51,13 @@ os.environ.setdefault("XDG_CACHE_HOME", "/tmp/xdg_cache")
 
 import numpy as np
 
-# Rasterizing more than this many pixels is what got WARP_SEG_QC killed (exit 140) on
-# whole-slide inputs. At ~10 bytes/px across the two uint32 label images and the metric's
-# block transients, 400 Mpx is ~4 GB — comfortable inside the task's memory with the
-# BioFormats JVM heap also resident.
-DEFAULT_MAX_RASTER_PX = 400_000_000
+# 0 = no cap: rasterize at native level-0 resolution, the scientifically neutral default.
+# Full-res is affordable because the metrics are accumulated block-wise: the two uint32
+# label images cost 8 bytes per slide pixel and nothing else scales with area. A 60k x 40k
+# slide is 2.4e9 px = 19 GB of rasters, so a 128 GB task covers up to ~1.4e10 px (a
+# 118k x 118k slide). Set --max-raster-px only as an out-of-range guard; when it bites it
+# downsamples the *area integration*, never the warp.
+DEFAULT_MAX_RASTER_PX = 0
 # A nucleus below this many raster pixels can no longer support a stable IoU, so the
 # resolvability flag trips and the run is marked as such rather than silently degraded.
 DEFAULT_MIN_CELL_AREA_PX = 20.0
@@ -174,18 +181,21 @@ def choose_raster_scale(shape_rc, cell_area_px, max_raster_px=DEFAULT_MAX_RASTER
                         min_cell_area_px=DEFAULT_MIN_CELL_AREA_PX) -> dict:
     """Pick the single rasterization scale (<=1) and report why.
 
-    Memory is the binding constraint — the grid MUST fit — so the scale is set by
-    ``max_raster_px`` alone. ``min_cell_area_px`` never relaxes it; it only decides the
-    ``cells_resolvable`` flag, which is what makes a downsampled score defensible rather
-    than silently degraded.
+    ``max_raster_px <= 0`` means no cap: score at native resolution, which is the default
+    and what any defensible number should be quoted at. When a cap IS set, memory is the
+    binding constraint — the grid MUST fit — so the scale is set by ``max_raster_px`` alone.
+    ``min_cell_area_px`` never relaxes it; it only decides the ``cells_resolvable`` flag,
+    which is what makes a downsampled score auditable rather than silently degraded.
     """
     h, w = int(shape_rc[0]), int(shape_rc[1])
     n_px = max(1, h * w)
-    scale = 1.0 if n_px <= max_raster_px else math.sqrt(max_raster_px / n_px)
+    capped = max_raster_px and max_raster_px > 0
+    scale = 1.0 if (not capped or n_px <= max_raster_px) else math.sqrt(max_raster_px / n_px)
     at_scale = float(cell_area_px) * scale * scale
     return {
         "scale": float(scale),
-        "max_raster_px": int(max_raster_px),
+        "downsampled": bool(scale < 1.0),
+        "max_raster_px": int(max_raster_px or 0),
         "native_grid_rc": [h, w],
         "native_grid_px": int(n_px),
         "scaled_grid_px": int(n_px * scale * scale),
@@ -263,7 +273,7 @@ def run(pickle_path, ref_slide, moving_slide, ref_geojson, moving_geojson,
     # scale no longer fits the budget. Retighten and re-score `before` from disk rather
     # than let the raster blow past the memory the task was given.
     warped_grid, _ = common_grid(ref_w, mov_w, scale=scale)
-    if warped_grid[0] * warped_grid[1] > max_raster_px:
+    if max_raster_px and max_raster_px > 0 and warped_grid[0] * warped_grid[1] > max_raster_px:
         raster = choose_raster_scale(
             common_grid(ref_w, mov_w)[0], median_cell_area(ref_w, mov_w),
             max_raster_px=max_raster_px, min_cell_area_px=min_cell_area_px)
@@ -342,7 +352,9 @@ def parse_args(argv=None):
     ap.add_argument("--crop", default="overlap")
     ap.add_argument("--iou-thresh", type=float, default=0.5)
     ap.add_argument("--max-raster-px", type=int, default=DEFAULT_MAX_RASTER_PX,
-                    help="rasterization budget in pixels; sets the shared before/after scale")
+                    help="out-of-range guard: rasterization budget in pixels. 0 (default) "
+                         "scores at native resolution. A positive value sets the shared "
+                         "before/after downsample scale when the grid exceeds it.")
     ap.add_argument("--min-cell-area-px", type=float, default=DEFAULT_MIN_CELL_AREA_PX,
                     help="median cell area below which the run is flagged not resolvable")
     ap.add_argument("--jvm-heap-gb", type=int, default=None,
