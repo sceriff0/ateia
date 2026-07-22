@@ -36,7 +36,8 @@ import numpy as np
 import pyvips
 import valis_tiling
 from micro_rigid_guard import install_micro_rigid_guard
-from valis_config import build_registrar_kwargs, init_jvm
+from valis_config import build_registrar_kwargs, maybe_init_jvm, slide_paths
+from mirage_slide_reader import get_reader_for, MirageVipsSlideReader, all_readable
 from valis import registration, slide_tools
 from valis import serial_non_rigid as snr
 from valis.non_rigid_registrars import OpticalFlowWarper, NonRigidTileRegistrar
@@ -70,10 +71,10 @@ def main():
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
 
-    # Size + start the BioFormats JVM to the inputs BEFORE constructing Valis (mirrors register.py).
-    # Skipping this lets the JVM start with VALIS's tiny default heap and OOM on a large slide.
-    heap = init_jvm(args.input_dir, override_gb=args.jvm_heap_gb)
-    print(f"[reg_prep] JVM heap = {heap} GB", flush=True)
+    # Size + start the BioFormats JVM only if some input is NOT mirage-readable.
+    heap = maybe_init_jvm(args.input_dir, override_gb=args.jvm_heap_gb)
+    print(f"[reg_prep] JVM heap = {heap} GB" if heap else
+          "[reg_prep] all inputs readable by MirageVipsSlideReader; no JVM started", flush=True)
 
     # Make rigid-stage micro alignment robust to featureless input (no-op on real data); see module.
     install_micro_rigid_guard()
@@ -115,7 +116,9 @@ def main():
     OpticalFlowWarper.register = noop_register
     try:
         reg = registration.Valis(args.input_dir, args.out, **kwargs)
-        reg.register()
+        reader_cls = (MirageVipsSlideReader
+                      if all_readable(slide_paths(args.input_dir)) else None)
+        reg.register(reader_cls=reader_cls)
     finally:
         snr.NonRigidZImage.calc_deformation = orig_calc
         OpticalFlowWarper.register = orig_reg
@@ -208,13 +211,15 @@ def main():
     expected_moving = [name for name in reg.slide_dict if name != ref_stem]
     missing = [name for name in expected_moving if name not in slides_written]
     if missing:
-        registration.kill_jvm()
+        if heap:
+            registration.kill_jvm()
         raise RuntimeError(
             f"[reg_prep] {len(missing)} moving slide(s) produced no tiler_inputs/warp_state and were "
             f"silently dropped: {missing} (expected {len(expected_moving)}, wrote {len(slides_written)}). "
             "The non-rigid warper capture did not fire for those slides.")
 
-    registration.kill_jvm()
+    if heap:
+        registration.kill_jvm()
     print(f"[reg_prep] DONE — {len(slides_written)} moving slide(s): {slides_written}", flush=True)
 
 

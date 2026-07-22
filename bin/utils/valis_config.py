@@ -106,6 +106,26 @@ def init_jvm(input_dir, override_gb=None):
     return mem_gb
 
 
+def slide_paths(input_dir):
+    """Every slide file in `input_dir`, matching init_jvm's extension filter."""
+    return [os.path.join(input_dir, f) for f in sorted(os.listdir(input_dir))
+            if f.lower().endswith((".tif", ".tiff", ".ome.tif", ".ome.tiff"))]
+
+
+def maybe_init_jvm(input_dir, override_gb=None):
+    """Start the BioFormats JVM only when some input needs it.
+
+    Returns the heap size in GB, or 0 when no JVM was started. mirage's own preprocessed
+    OME-TIFFs are read JVM-free by MirageVipsSlideReader, so on a normal run this starts
+    nothing -- which is the entire point of the low-memory path.
+    """
+    from mirage_slide_reader import all_readable
+    paths = slide_paths(input_dir)
+    if paths and all_readable(paths):
+        return 0
+    return init_jvm(input_dir, override_gb=override_gb)
+
+
 def micro_reg_size(slide_dict, micro_reg_fraction=0.125):
     """Replicate register.py's micro_reg_size = floor(min over slides of max(dim) * fraction)."""
     import numpy as np

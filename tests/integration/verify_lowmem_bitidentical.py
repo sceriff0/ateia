@@ -52,6 +52,27 @@ def setup():
     return os.path.join(PREP, MOV_STEM)
 
 
+def assert_nontrivial_warp(ws_path, field_path, eps=1e-9):
+    """Guard against a vacuous leg-1 pass: if the rigid M is ~identity AND the non-rigid field
+    is ~zero, the fixture exercises no real warp, and equal=True would prove nothing about
+    reader-swap faithfulness. Fail loudly instead of silently passing a meaningless comparison."""
+    ws = json.load(open(ws_path))
+    M = np.asarray(ws["M"], dtype=np.float64)
+    max_m_delta = float(np.max(np.abs(M - np.eye(3))))
+
+    from valis import warp_tools
+    field = pyvips.Image.new_from_file(field_path)
+    field_arr = warp_tools.vips2numpy(field).astype(np.float64)
+    max_dxdy = float(np.max(np.abs(field_arr)))
+
+    print(f"[verify] warp is non-trivial: max|M - I|={max_m_delta} max|dxdy|={max_dxdy}", flush=True)
+    if max_m_delta <= eps and max_dxdy <= eps:
+        raise SystemExit(
+            f"FAILED: fixture does not exercise a real warp (max|M - I|={max_m_delta}, "
+            f"max|dxdy|={max_dxdy}, both <= eps={eps}); a bit-identical leg-1 result would be "
+            "meaningless because both readers would be comparing trivial passthroughs.")
+
+
 def leg1(md):
     """Lazy reader vs BioFormats, same field, same warp state."""
     ti = os.path.join(md, "tiler_inputs")
@@ -60,6 +81,8 @@ def leg1(md):
     os.makedirs(os.path.join(md, "nr"), exist_ok=True)
     run([sys.executable, "bin/reg_nonrigid.py", "--inputs-dir", ti,
          "--out-dir", os.path.join(md, "nr")])
+
+    assert_nontrivial_warp(ws, field)
 
     lazy_out = os.path.join(md, "lazy.ome.tiff")
     bf_out = os.path.join(md, "bf.ome.tiff")
