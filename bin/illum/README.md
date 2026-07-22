@@ -10,8 +10,10 @@ optional; for a plain TIFF without OME channel names, pass `--channels`.
 
 Dependencies: `numpy scipy tifffile matplotlib` (required); optional
 `scikit-image` (adds the `rolling_ball` background method), `basicpy` (adds the
-`baseline-basic` BaSiC anchor under `--full-grid`), and **`nd2`** (required only
-for `.nd2` input — `pip install nd2`).
+`baseline-basic*` BaSiC anchors under `--full-grid`), `SimpleITK` (adds the
+`baseline-n4*` N4 bias-field anchors — `pip install SimpleITK`), and **`nd2`**
+(required only for `.nd2` input — `pip install nd2`). Variants whose optional
+dependency is missing are auto-skipped by the driver, not failed.
 
 ## Usage
 

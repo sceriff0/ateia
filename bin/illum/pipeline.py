@@ -56,6 +56,11 @@ def _correct_channel(ch, grid, variant, out_dtype):
         corr = apply_field(f.astype(np.float32), ff, grid, out_dtype=out_dtype)
     elif variant.flatfield == "basic":
         corr = _basic_correct(ch, out_dtype)   # may raise if basicpy absent
+    elif variant.flatfield == "n4":
+        from illum.n4 import n4_correct        # may raise if SimpleITK absent
+        # N4 removes a smooth multiplicative bias; run it on the (optionally
+        # dark-subtracted) signal so it can still stack with the darkfield axis.
+        corr = n4_correct(np.clip(f, 0, None), out_dtype)
     else:  # none
         info = np.iinfo(out_dtype)
         corr = np.clip(f, info.min, info.max).astype(out_dtype)
@@ -126,19 +131,33 @@ DEFAULT_MATRIX = [
 def full_matrix(available_bg):
     """Full variant grid for --full-grid runs.
 
-    Leads with two visual anchors so the QuPath eyeball comparison has
-    references, then sweeps the periodic candidates over darkfield x
-    background:
+    Leads with visual/scientific anchors so the QuPath eyeball comparison has
+    references, then sweeps the periodic candidates over darkfield x background:
       - "baseline-uncorrected": the raw image passthrough (the 'before').
-      - "baseline-basic": the incumbent BaSiCpy correction (auto-skipped by
-        the driver if basicpy is not installed on the node).
-    Named "baseline-*" so both sort ahead of the "periodic_*" candidates in
+      - "baseline-basic": the incumbent BaSiCpy flat-field only (auto-skipped by
+        the driver if basicpy is absent).
+      - "baseline-basic-{gaussian,median}": CONTROLS that give BaSiC the SAME
+        background-removal step the periodic candidates get, so the sweep can
+        separate "periodic flat-field vs BaSiC" from "the background step" (the
+        prior winner was periodic+median; BaSiC was never given a background pass).
+      - "baseline-n4[-median]": N4 bias-field flat-field, a distinct SOTA shading
+        model (auto-skipped if SimpleITK is absent). See illum/n4.py.
+    Named "baseline-*" so all anchors sort ahead of the "periodic_*" candidates in
     QuPath's file browser.
     """
+    has = lambda b: b in available_bg
     variants = [
         Variant("baseline-uncorrected", flatfield="none", dark="none", background="none"),
         Variant("baseline-basic", flatfield="basic", dark="none", background="none"),
     ]
+    # BaSiC + background controls (basic already does its own darkfield, so dark=none).
+    for bg in ("gaussian", "median"):
+        if has(bg):
+            variants.append(Variant(f"baseline-basic-{bg}", flatfield="basic", background=bg))
+    # N4 bias-field anchors (single-image parametric shading model).
+    variants.append(Variant("baseline-n4", flatfield="n4", dark="none", background="none"))
+    if has("median"):
+        variants.append(Variant("baseline-n4-median", flatfield="n4", background="median"))
     for dk in ("none", "const", "field"):
         for bg in ["none"] + [b for b in available_bg if b != "none"]:
             variants.append(Variant(f"periodic_{dk}_{bg}", flatfield="periodic",
