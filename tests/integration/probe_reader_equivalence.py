@@ -10,7 +10,6 @@ Usage (inside the VALIS image):
       python3 tests/integration/probe_reader_equivalence.py
 """
 import os
-import sys
 
 import numpy as np
 import pyvips
@@ -33,7 +32,7 @@ def make_fixture():
         bigtiff=True,
         ome=True,
         compression="zlib",
-        tile=(256, 256),
+        tile=(256, 256),  # Intentional: fixture is 512x640, so production's (2048, 2048) would yield single tile, not exercising multi-tile decoding
     )
     return arr
 
@@ -70,15 +69,19 @@ def main():
     registration.init_jvm(mem_gb=8)
     bf, reader_name = read_bioformats()
     print(f"[A1] BioFormats reader class chosen: {reader_name}", flush=True)
+    a1_reader = reader_name == "BioFormatsSlideReader"
+    if not a1_reader:
+        print(f"[A1] UNEXPECTED reader {reader_name!r}: the probe is no longer exercising "
+              f"BioFormats, so a pixel match proves nothing", flush=True)
     a1_bf = bf.shape == pv.shape and np.array_equal(bf, pv)
     d = None if bf.shape != pv.shape else float(np.max(np.abs(bf.astype(np.int64) - pv.astype(np.int64))))
     print(f"[A1] pyvips == BioFormats: {a1_bf}  max|delta|={d}", flush=True)
     registration.kill_jvm()
 
     print("=" * 72)
-    print(f"A1 VERDICT: {'PASS' if (a1_vs_truth and a1_bf) else 'FAIL'}")
+    print(f"A1 VERDICT: {'PASS' if (a1_vs_truth and a1_bf and a1_reader) else 'FAIL'}")
     print("=" * 72, flush=True)
-    return 0 if (a1_vs_truth and a1_bf) else 1
+    return 0 if (a1_vs_truth and a1_bf and a1_reader) else 1
 
 
 if __name__ == "__main__":
