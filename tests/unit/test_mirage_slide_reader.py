@@ -149,6 +149,96 @@ def test_pyvips_writer_single_channel_can_read_and_roundtrips():
     assert np.array_equal(got, arr)
 
 
+def test_can_read_rejects_non_bigtiff():
+    """Isolates the ``tf.is_bigtiff`` predicate: tiled, single-sample, OME, but written as
+    plain (non-Big) TIFF. Every other predicate (tiled, non-pyramidal, samplesperpixel==1,
+    OME-XML present, SizeC matching) holds -- only is_bigtiff is False."""
+    from mirage_slide_reader import MirageVipsSlideReader
+    dirpath = tempfile.mkdtemp()
+    p = os.path.join(dirpath, "notbig.ome.tiff")
+    rng = np.random.default_rng(7)
+    arr = rng.integers(0, 65535, size=(C, H, W), dtype=np.uint16)
+    tifffile.imwrite(
+        p, arr,
+        photometric="minisblack",
+        metadata={"axes": "CYX", "Channel": {"Name": ["DAPI", "SMA", "PANCK", "CD3"]}},
+        bigtiff=False, ome=True, compression="zlib", tile=(256, 256),
+    )
+    assert MirageVipsSlideReader.can_read(p) is False
+
+
+def test_can_read_rejects_rgb_interleaved():
+    """Isolates the ``samplesperpixel == 1`` predicate: tiled BigTIFF OME-TIFF, but written
+    as an interleaved RGB image (samplesperpixel == 3). Tiled/BigTIFF/non-pyramidal/OME-XML
+    predicates all hold -- only samplesperpixel disqualifies it."""
+    from mirage_slide_reader import MirageVipsSlideReader
+    dirpath = tempfile.mkdtemp()
+    p = os.path.join(dirpath, "rgb.ome.tiff")
+    rng = np.random.default_rng(7)
+    rgb_arr = rng.integers(0, 255, size=(H, W, 3), dtype=np.uint8)
+    tifffile.imwrite(
+        p, rgb_arr,
+        photometric="rgb",
+        bigtiff=True, ome=True, compression="zlib", tile=(256, 256),
+    )
+    assert MirageVipsSlideReader.can_read(p) is False
+
+
+def test_can_read_rejects_pyramidal():
+    """Isolates the "no sub-IFDs" predicate: tiled BigTIFF OME-TIFF, single-sample, but with
+    a reduced-resolution sub-image written via ``subifds=``/``subfiletype=1`` so page 0 has a
+    non-empty ``subifds``. Tiled/BigTIFF/samplesperpixel/OME-XML predicates all hold -- only
+    the subifds check disqualifies it."""
+    from mirage_slide_reader import MirageVipsSlideReader
+    dirpath = tempfile.mkdtemp()
+    p = os.path.join(dirpath, "pyramidal.ome.tiff")
+    rng = np.random.default_rng(7)
+    arr = rng.integers(0, 65535, size=(C, H, W), dtype=np.uint16)
+    with tifffile.TiffWriter(p, bigtiff=True, ome=True) as tif:
+        options = dict(photometric="minisblack", tile=(256, 256), compression="zlib")
+        tif.write(
+            arr, subifds=1,
+            metadata={"axes": "CYX", "Channel": {"Name": ["DAPI", "SMA", "PANCK", "CD3"]}},
+            **options,
+        )
+        # Reduced-resolution level, appended as the declared subifd.
+        tif.write(arr[:, ::2, ::2], subfiletype=1, **options)
+
+    with tifffile.TiffFile(p) as tf:
+        assert tf.pages[0].subifds, "fixture did not actually produce a pyramidal page 0"
+
+    assert MirageVipsSlideReader.can_read(p) is False
+
+
+def test_can_read_rejects_sizec_mismatch():
+    """Isolates the OME ``SizeC`` reconciliation predicate: a tiled BigTIFF OME-TIFF written
+    with reg_finalize's own pyvips convention (vertical band-join, explicit page-height), but
+    whose embedded OME-XML declares ``SizeC`` that disagrees with the actual number of
+    reconstructed bands. Tiled/BigTIFF/non-pyramidal/samplesperpixel/OME-XML-present
+    predicates all hold -- only the SizeC reconciliation disqualifies it."""
+    from mirage_slide_reader import MirageVipsSlideReader
+    import pyvips
+
+    dirpath = tempfile.mkdtemp()
+    p = os.path.join(dirpath, "sizec_mismatch.ome.tiff")
+    c = C
+    claimed_sizec = C - 1  # deliberately wrong
+    rng = np.random.default_rng(11)
+    arr = rng.integers(0, 65535, size=(H, W, c), dtype=np.uint16)
+    ome_xml = _minimal_ome_xml(W, H, claimed_sizec, [f"chan{i}" for i in range(c)])
+
+    bands = [pyvips.Image.new_from_array(arr[..., i]) for i in range(c)]
+    page = bands[0]
+    for b in bands[1:]:
+        page = page.join(b, "vertical")
+    page = page.copy()
+    page.set_type(pyvips.GValue.gint_type, "page-height", H)
+    page.set_type(pyvips.GValue.gstr_type, "image-description", ome_xml)
+    page.tiffsave(p, tile=True, tile_width=64, tile_height=64, bigtiff=True)
+
+    assert MirageVipsSlideReader.can_read(p) is False
+
+
 if __name__ == "__main__":
     # stdlib runner so this works in the VALIS image without pytest installed
     import traceback

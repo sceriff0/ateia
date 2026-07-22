@@ -75,7 +75,7 @@ class MirageVipsSlideReader(slide_io.SlideReader):
 
     def slide2image(self, level=0, series=None, xywh=None, *args, **kwargs):
         img = self.slide2vips(level=level, series=series, xywh=xywh)
-        arr = np.frombuffer(img.write_to_memory(), dtype=_vips_dtype(img.format))
+        arr = np.frombuffer(img.write_to_memory(), dtype=slide_tools.VIPS_FORMAT_NUMPY_DTYPE[img.format])
         arr = arr.reshape(img.height, img.width, img.bands)
         return arr[..., 0] if img.bands == 1 else arr
 
@@ -139,10 +139,6 @@ class MirageVipsSlideReader(slide_io.SlideReader):
             return joined.width > 0 and joined.height > 0 and joined.bands >= 1
         except Exception:
             return False
-
-
-def _vips_dtype(vips_format):
-    return slide_tools.VIPS_FORMAT_NUMPY_DTYPE[vips_format]
 
 
 def _read_tiff_header(src_f):
