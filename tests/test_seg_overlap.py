@@ -86,6 +86,81 @@ def test_evaluate_masks_aligns_mismatched_shapes():
     assert out["dice"] == 1.0
 
 
+# ── block-wise accumulation (the whole-slide memory contract) ─────────────────
+def _labelled_grid(n=12, pitch=8, size=5, shift=0):
+    """Regular grid of square cells — a small stand-in for a whole-slide mask."""
+    m = np.zeros((n * pitch, n * pitch), dtype=np.uint32)
+    for j in range(n):
+        for i in range(n):
+            r, c = j * pitch, i * pitch + shift
+            if c + size <= m.shape[1]:
+                m[r:r + size, c:c + size] = j * n + i + 1
+    return m
+
+
+@pytest.mark.parametrize("shift", [0, 1, 3])
+def test_block_size_does_not_change_any_metric(monkeypatch, shift):
+    """Every statistic is accumulated over row blocks so peak RAM is O(block), not
+    O(slide area). That is only safe if the block size is invisible in the result —
+    pin it, or a future block-size tweak silently changes published QC numbers."""
+    a = _labelled_grid()
+    b = _labelled_grid(shift=shift)
+    whole = seg_overlap.evaluate_masks(a, b)
+    monkeypatch.setattr(seg_overlap, "_BLOCK_BYTES", 512)  # forces many tiny blocks
+    chunked = seg_overlap.evaluate_masks(a, b)
+    assert chunked == whole
+
+
+def test_peak_memory_stays_below_one_mask(monkeypatch):
+    """The old implementation raveled both masks to int64 up front — 4x the raster —
+    which was the dominant term in the WARP_SEG_QC exit-140 kills. With block-wise
+    accumulation the transient working set is O(block), so scoring two masks must cost
+    less than a single extra copy of one of them."""
+    tracemalloc = pytest.importorskip("tracemalloc")
+    a = _labelled_grid(n=200, pitch=10, size=6)          # 2000x2000 uint32 = 16 MB
+    b = _labelled_grid(n=200, pitch=10, size=6, shift=2)
+    monkeypatch.setattr(seg_overlap, "_BLOCK_BYTES", 1 << 20)
+
+    tracemalloc.start()
+    try:
+        tracemalloc.reset_peak()
+        seg_overlap.evaluate_masks(a, b)
+        _cur, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    # A single int64 promotion of one mask alone would be 2x this bound.
+    assert peak < a.nbytes, f"peak {peak / 2**20:.1f} MB vs mask {a.nbytes / 2**20:.1f} MB"
+
+
+# ── cell counting (denominator correctness) ────────────────────────────────────
+def test_label_counts_use_present_labels_not_max():
+    """n_a/n_b are the cells actually in the raster. Using max(label) counted cells
+    that the rasterizer overwrote or never drew, inflating the recall/precision
+    denominators and silently depressing instance-F1 on dense tissue."""
+    a = np.zeros((6, 6), dtype=np.uint32)
+    a[0:2, 0:2] = 1
+    a[4:6, 4:6] = 9          # label 9 present, labels 2..8 are not
+    out = seg_overlap.instance_f1(a, a.copy())
+    assert out["n_a"] == 2 and out["n_b"] == 2   # not 9
+    assert out["f1"] == 1.0
+
+
+def test_sparse_labels_do_not_break_dice_or_iou():
+    a = np.zeros((4, 4), dtype=np.uint32); a[0:2, 0:2] = 77
+    b = np.zeros((4, 4), dtype=np.uint32); b[0:2, 0:2] = 3
+    assert seg_overlap.dice(a, b) == 1.0
+    assert seg_overlap.iou(a, b) == 1.0
+
+
+def test_evaluate_masks_reports_foreground_pixel_counts():
+    a = np.zeros((4, 4), dtype=np.uint32); a[0:2, 0:2] = 1
+    b = np.zeros((4, 4), dtype=np.uint32); b[1:3, 1:3] = 1
+    out = seg_overlap.evaluate_masks(a, b)
+    assert out["fg_px_ref"] == 4 and out["fg_px_moving"] == 4
+    assert out["fg_px_intersection"] == 1
+
+
 # ── real-data fixtures ─────────────────────────────────────────────────────────
 _FIX = Path(__file__).resolve().parent / "testdata"
 
@@ -93,7 +168,9 @@ _FIX = Path(__file__).resolve().parent / "testdata"
 def _load(name):
     tifffile = pytest.importorskip("tifffile")
     p = _FIX / name
-    if not p.exists():
+    # Size check as well as existence: the repo tracks a zero-byte placeholder for these,
+    # so `exists()` alone let the guard through and tifffile died on an empty file.
+    if not p.exists() or p.stat().st_size == 0:
         pytest.skip(f"{name} not generated (run tests/testdata/generate_complete_testdata.py)")
     return tifffile.imread(str(p)).astype(np.uint32)
 
