@@ -175,12 +175,25 @@ def get_reader_for(src_f, series=None):
 
     MirageVipsSlideReader when we recognise the file (no JVM, lazy); otherwise VALIS's own
     dispatch, which starts the JVM and picks BioFormats.
+
+    ``MIRAGE_FORCE_BIOFORMATS=1`` forces VALIS's own dispatch regardless of ``can_read`` -- the
+    only way an integration test can produce a genuine BioFormats reference to diff the lazy
+    reader against (see tests/integration/verify_lowmem_bitidentical.py).
     """
+    if os.environ.get("MIRAGE_FORCE_BIOFORMATS") == "1":
+        return slide_io.get_slide_reader(str(src_f), series=series)
     if MirageVipsSlideReader.can_read(src_f):
         return MirageVipsSlideReader
     return slide_io.get_slide_reader(str(src_f), series=series)
 
 
 def all_readable(paths):
-    """True when every path can be read JVM-free (so the caller can skip init_jvm entirely)."""
+    """True when every path can be read JVM-free (so the caller can skip init_jvm entirely).
+
+    Also honours ``MIRAGE_FORCE_BIOFORMATS`` so callers that gate JVM startup on this (e.g.
+    reg_finalize.main) actually start the JVM when the escape hatch is set, instead of skipping
+    it and leaving get_reader_for to force BioFormats through a JVM that was never initialised.
+    """
+    if os.environ.get("MIRAGE_FORCE_BIOFORMATS") == "1":
+        return False
     return all(MirageVipsSlideReader.can_read(p) for p in paths)

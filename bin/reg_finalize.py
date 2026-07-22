@@ -33,6 +33,7 @@ import pyvips
 
 from valis import warp_tools, slide_tools, slide_io, registration
 from valis_config import init_jvm
+from mirage_slide_reader import get_reader_for, all_readable   # noqa: E402
 
 
 # --------------------------------------------------------------------------- compose (proven §6.3)
@@ -140,6 +141,30 @@ def micro_additive(slide_bk_full, micro_raw_bk, micro_ws, micro_reg_mask):
     return cur + vips_new_bk
 
 
+def warp_source(src_slide, ws, dxdy):
+    """Lazily warp `src_slide` per the dumped warp state. Returns an UNEVALUATED pyvips.Image.
+
+    Identical to valis.slide_tools.warp_slide, except the slide is read through get_reader_for
+    (lazy pyvips when possible) instead of always BioFormats. The warp itself is VALIS's own
+    warp_tools.warp_img -- unchanged. Because the result is lazy, callers may .crop() a region
+    and only that region's source pixels are ever decoded.
+    """
+    reader_cls = get_reader_for(src_slide, series=ws.get("series"))
+    reader = reader_cls(src_slide, series=ws.get("series"))
+    vips_slide = reader.slide2vips(level=0, series=ws.get("series"))
+    return warp_tools.warp_img(
+        img=vips_slide,
+        M=np.asarray(ws["M"]),
+        bk_dxdy=dxdy,
+        transformation_dst_shape_rc=tuple(ws["reg_img_shape_rc"]),
+        out_shape_rc=tuple(ws["aligned_slide_shape_rc"]),
+        transformation_src_shape_rc=tuple(ws["processed_img_shape_rc"]),
+        bbox_xywh=tuple(ws["bbox_xywh"]) if ws.get("bbox_xywh") else None,
+        bg_color=ws.get("bg_color"),
+        interp_method=ws.get("interp_method", "bicubic"),
+    ), reader
+
+
 # --------------------------------------------------------------------------- main
 def main():
     ap = argparse.ArgumentParser()
@@ -163,13 +188,19 @@ def main():
     args = ap.parse_args()
     ws = json.load(open(args.warp_state))
 
-    # Start the BioFormats JVM BEFORE any slide I/O. slide_tools.warp_slide() (and the OME reader/
-    # writer below) read/write the full-res slide via BioFormats — exactly like the prep stages, which
-    # is why they call init_jvm() too. Without this the JVM never starts (or starts with VALIS's tiny
-    # default heap and OOMs on a large slide), the cluster-node failure that broke REG_FINALIZE /
-    # REG_WARP_REF. Size the heap from the single staged source slide (staged under src/).
-    heap_gb = init_jvm(os.path.dirname(os.path.abspath(args.src_slide)) or ".", override_gb=args.jvm_heap_gb)
-    print(f"[reg_finalize] started BioFormats JVM (heap={heap_gb}GB)", flush=True)
+    # Start the BioFormats JVM BEFORE any slide I/O, UNLESS the source slide is one of mirage's own
+    # tiled OME-TIFFs that MirageVipsSlideReader can read lazily with no JVM at all — the RAM win
+    # this module exists for. When the JVM IS needed (non-mirage inputs, or MIRAGE_FORCE_BIOFORMATS
+    # for the equivalence test), size the heap from the single staged source slide (staged under
+    # src/) exactly like the prep stages, which is why REG_FINALIZE / REG_WARP_REF used to always
+    # start one.
+    if all_readable([args.src_slide]):
+        heap_gb = 0
+        print("[reg_finalize] all inputs readable by MirageVipsSlideReader; skipping JVM", flush=True)
+    else:
+        heap_gb = init_jvm(os.path.dirname(os.path.abspath(args.src_slide)) or ".",
+                            override_gb=args.jvm_heap_gb)
+        print(f"[reg_finalize] started BioFormats JVM (heap={heap_gb}GB)", flush=True)
 
     if args.rigid_only:
         # Reference (or any rigid-only) slide: VALIS warps it with its M + crop and identity non-rigid.
@@ -204,25 +235,11 @@ def main():
             micro_reg_mask = np.load(micro_mask_f) if micro_mask_f and os.path.exists(micro_mask_f) else None
             slide_bk = micro_additive(slide_bk, micro_raw_bk, micro_ws, micro_reg_mask)
 
-    # 4) warp the full-res slide via VALIS's own streaming warp (pure plain-data, §6.3)
-    warped = slide_tools.warp_slide(
-        args.src_slide,
-        transformation_src_shape_rc=tuple(ws["processed_img_shape_rc"]),
-        transformation_dst_shape_rc=tuple(ws["reg_img_shape_rc"]),
-        aligned_slide_shape_rc=tuple(ws["aligned_slide_shape_rc"]),
-        M=np.asarray(ws["M"]),
-        dxdy=slide_bk,
-        level=0,
-        series=ws.get("series"),
-        interp_method=ws.get("interp_method", "bicubic"),
-        bbox_xywh=tuple(ws["bbox_xywh"]) if ws.get("bbox_xywh") else None,
-        bg_color=ws.get("bg_color"),
-    )
+    # 4) warp the full-res slide lazily (VALIS's own warp_img; only the READER differs, §6.3)
+    warped, reader = warp_source(args.src_slide, ws, slide_bk)
 
     # 5) save as OME-TIFF, mirroring Slide.warp_and_save_slide's metadata handling (registration.py:982-1024)
     os.makedirs(os.path.dirname(os.path.abspath(args.out)) or ".", exist_ok=True)
-    reader_cls = slide_io.get_slide_reader(args.src_slide, series=ws.get("series"))
-    reader = reader_cls(args.src_slide, series=ws.get("series"))
     slide_meta = reader.metadata
     out_xyczt = slide_io.get_shape_xyzct((warped.width, warped.height), warped.bands)
     tile_wh = slide_meta.optimal_tile_wh
@@ -251,7 +268,8 @@ def main():
         _save_ome_pyvips(warped, args.out, chan_names[:warped.bands], slide_io.vips2bf_dtype(warped.format),
                          tile_wh, args.compression)
     print(f"[reg_finalize] wrote {args.out} ({warped.width}x{warped.height} bands={warped.bands})", flush=True)
-    registration.kill_jvm()
+    if heap_gb:
+        registration.kill_jvm()
 
 
 def _save_ome_pyvips(warped, dst_f, channel_names, bf_dtype, tile_wh, compression):
