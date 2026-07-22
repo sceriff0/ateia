@@ -29,6 +29,10 @@ process REGISTER {
     path("*.size.csv")                                                                     , emit: size_log
     path("preprocessed/data/*.csv")                                                        , emit: summary, optional: true
     tuple val(patient_id), path("preprocessed/data/*_registrar.pickle")                    , emit: registrar, optional: true
+    // Pre-micro displacement fields for staged registration QC (reg_qc >= 2). Optional
+    // because it is only requested at that level, and because a failure to write it must
+    // never fail a registration — see bin/utils/stage_checkpoint.py.
+    tuple val(patient_id), path("reg_stage_checkpoint")                                    , emit: stage_checkpoint, optional: true
 
     when:
     task.ext.when == null || task.ext.when
@@ -44,6 +48,11 @@ process REGISTER {
     def micro_reg_fraction = params.reg_micro_reg_fraction ?: 0.125
     def max_image_dim = params.reg_max_image_dim ?: 4000
     def skip_micro = params.skip_micro_registration ? '--skip-micro-registration' : ''
+    // reg_qc >= 2 scores each registration stage separately, which needs the post-non-rigid,
+    // pre-micro displacement fields. VALIS composes micro into the same attribute, so nothing
+    // downstream can recover them — REGISTER is the only place they can be captured.
+    def reg_qc_level = params.skip_registration_qc ? 0 : (params.reg_qc == null ? 1 : (params.reg_qc as int))
+    def stage_ckpt = reg_qc_level >= 2 ? '--stage-checkpoint-dir reg_stage_checkpoint' : ''
     // JVM heap scales with retry attempts: base 32GB + 16GB per attempt
     def jvm_heap_gb = Math.min(params.reg_jvm_heap_gb ?: (32 + 16 * task.attempt), task.memory.toGiga() - 4)
 
@@ -109,6 +118,7 @@ process REGISTER {
         --max-image-dim ${max_image_dim} \\
         ${skip_micro} \\
         --jvm-heap-gb ${jvm_heap_gb} \\
+        ${stage_ckpt} \\
         ${args}
 
     # === VALIDATE OUTPUTS ===
@@ -177,12 +187,20 @@ process REGISTER {
         [(fname): m.channels]
     }
     def manifest_json = groovy.json.JsonOutput.toJson(manifest_map)
+    // Mirror the real path: the stage checkpoint exists only at reg_qc >= 2, so stub runs
+    // exercise the same channel wiring the real run does (including its absence at reg_qc<2).
+    def stub_qc_level = params.skip_registration_qc ? 0 : (params.reg_qc == null ? 1 : (params.reg_qc as int))
+    def stub_ckpt = stub_qc_level < 2 ? '' : """
+    mkdir -p reg_stage_checkpoint
+    echo '{"version": 1, "stage": "post_non_rigid_pre_micro", "micro_registration": true, "slides": {}, "errors": []}' > reg_stage_checkpoint/stage_checkpoint.json
+    """
     """
     mkdir -p registered_slides preprocessed/data
     ${touch_commands}
     touch preprocessed/data/${patient_id}_registrar.pickle
     echo '${manifest_json}' > channels_manifest.json
     echo "STUB,${patient_id},stub,0" > ${patient_id}.REGISTER.size.csv
+    ${stub_ckpt}
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":

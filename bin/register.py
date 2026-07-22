@@ -277,6 +277,7 @@ def valis_registration(
     image_type: str = "auto",
     interp_method: str = "bilinear",
     jvm_heap_gb: Optional[int] = None,
+    stage_checkpoint_dir: Optional[str] = None,
 ) -> int:
     """Perform VALIS registration on preprocessed images.
 
@@ -302,6 +303,11 @@ def valis_registration(
     image_type : str, optional
         Image type for preprocessing: "brightfield", "fluorescence", or "auto".
         "auto" attempts to detect based on image characteristics. Default: "auto"
+    stage_checkpoint_dir : str, optional
+        Where to snapshot each slide's forward displacement field after the non-rigid stage
+        and before micro-registration. Consumed by WARP_SEG_QC (reg_qc=2) to report the
+        'non_rigid' stage separately from 'micro'; VALIS composes the two destructively, so
+        the snapshot is the only way to tell them apart. None (default) writes nothing.
 
     Returns
     -------
@@ -601,8 +607,35 @@ def valis_registration(
     logger.info(f"  All {len(registrar.slide_dict)} slides have valid transformation matrices")
 
     # ========================================================================
+    # Staged-QC checkpoint (reg_qc >= 2) - MUST be taken here
+    # ========================================================================
+    # This is the only instant at which the post-non-rigid, pre-micro state exists.
+    # register_micro() updates each slide with fwd_dxdy = fwd_dxdy + micro_residual and
+    # writes the result back onto the same attribute, so afterwards the registrar holds one
+    # composed field and the intermediate is gone. WARP_SEG_QC needs it to separate the
+    # 'non_rigid' stage from the 'micro' stage. slide.M is already final here — the
+    # MicroRigidRegistrar runs inside register(), before the non-rigid stage — so only the
+    # displacement field has to be saved.
+    #
+    # Never allowed to fail a registration: this is QC input, and QC here is non-gating.
+    if stage_checkpoint_dir:
+        try:
+            from stage_checkpoint import write_checkpoint
+            manifest = write_checkpoint(registrar, stage_checkpoint_dir,
+                                        micro_registration=not skip_micro_registration)
+            n_fields = sum(1 for e in manifest["slides"].values() if e.get("field"))
+            logger.info(f"\nWrote staged-QC checkpoint to {stage_checkpoint_dir} "
+                        f"({n_fields}/{len(manifest['slides'])} slides carry a displacement field)")
+            for err in manifest.get("errors", []):
+                logger.warning(f"  [WARN] stage checkpoint: {err}")
+        except Exception as e:
+            logger.warning(f"\n[WARN] Could not write the staged-QC checkpoint: {e}")
+            logger.info("Continuing; reg_qc=2 will fall back to reporting rigid vs final only.")
+
+    # ========================================================================
     # Micro-registration - Try with error handling
     # ========================================================================
+    micro_registration_ran = False
     if skip_micro_registration:
         logger.info("\nSkipping micro-registration (--skip-micro-registration flag set)")
     else:
@@ -625,6 +658,7 @@ def valis_registration(
                 tile_wh=2048,
             )
 
+            micro_registration_ran = True
             logger.info("Micro-registration completed")
             logger.info(f"\nMicro-registration errors:\n{micro_error}")
 
@@ -632,7 +666,17 @@ def valis_registration(
             logger.warning(f"\n[WARN] Micro-registration failed: {e}")
             logger.info("Continuing without micro-registration...")
             logger.info("(This is usually caused by SimpleElastix not being available)")
-    
+
+    # Micro-registration is caught-and-continued above, so whether it actually ran is only
+    # knowable here. Correct the checkpoint: if it did not run, the field saved before this
+    # block is also the final field, and the QC must not report a 'micro' stage that would be
+    # a byte-for-byte duplicate of 'non_rigid'.
+    if stage_checkpoint_dir:
+        from stage_checkpoint import set_micro_registration
+        if set_micro_registration(stage_checkpoint_dir, micro_registration_ran) and \
+                not micro_registration_ran:
+            logger.info("  Staged-QC checkpoint marked: no distinct micro stage to report")
+
     # ========================================================================
     # Warp and Save Phase
     # ========================================================================
@@ -890,6 +934,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--jvm-heap-gb', type=int, default=None,
                         help='Explicit JVM heap size in GB (overrides auto-estimation). '
                              'Useful for scaling on retries.')
+    parser.add_argument('--stage-checkpoint-dir', type=str, default=None,
+                        help='Snapshot each slide\'s displacement field after the non-rigid '
+                             'stage and before micro-registration. Needed by WARP_SEG_QC '
+                             '(reg_qc=2) to score the non_rigid and micro stages separately; '
+                             'VALIS composes them destructively, so nothing downstream can '
+                             'recover the intermediate. Omit to write nothing.')
 
     return parser.parse_args()
 
@@ -912,6 +962,7 @@ def main() -> int:
             image_type=args.image_type,
             interp_method=args.interp_method,
             jvm_heap_gb=args.jvm_heap_gb,
+            stage_checkpoint_dir=args.stage_checkpoint_dir,
         )
     except Exception as e:
         logger.error(f"[FAIL] Registration failed: {e}")

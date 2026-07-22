@@ -1,37 +1,49 @@
 #!/usr/bin/env python
-"""GeoJSON/warp segmentation-overlap registration QC (reg_qc=2).
+"""Staged, fixed-correspondence segmentation-overlap registration QC (reg_qc=2).
 
-Each slide's nuclei are segmented on its NATIVE (pre-registration) image and exported
-as a cell GeoJSON (see mask_to_geojson.py). This step warps those polygons through the
-VALIS registrar and scores nuclei-mask overlap, before vs after registration:
+Each slide's nuclei are segmented on its NATIVE (pre-registration) image and exported as a cell
+GeoJSON (see ``segment_to_geojson.py``). This step warps those polygons through the VALIS
+registrar **once per registration stage** and reports how the same cells behave at each:
 
-  before = overlap of the raw native polygons (no registration)  — baseline misalignment
-  after  = overlap of the polygons warped into the aligned frame — registered
-  delta  = after - before                                        — registration improvement
+  native      no transform                          — the raw stage misalignment
+  rigid       rigid only (post micro-rigid M)       — **the anchor**
+  non_rigid   rigid + wave-1 non-rigid field        — needs the REGISTER pre-micro checkpoint
+  micro       rigid + non-rigid + micro residual    — what the pipeline actually ships
 
-Warping the exact polygons (not resampling a warped image) isolates registration quality
-from segmentation-on-interpolated-pixels bias. Runs in the VALIS container (valis + numpy
-+ scikit-image). The warp is lazy + injectable so the rasterize/score logic is unit-testable.
+**Correspondence is established once, at the rigid stage, and then held fixed.** Two things
+make that the right anchor. Cells are close enough after rigid for nearest-neighbour pairing to
+be meaningful — before any registration they are a whole tissue-offset apart, and any matcher
+run there is pairing noise. And because ``MicroRigidRegistrar`` runs inside ``register()``
+*before* the non-rigid stage, the rigid transform the anchor uses is the very transform every
+later stage builds on; the pairing is therefore valid for all of them by construction.
 
-**Rasterization scale.** Scoring runs at native level-0 resolution by default — the metrics
-are accumulated block-wise (see ``utils/seg_overlap``), so the only term that scales with
-slide area is the two uint32 label images at 8 bytes per slide pixel. A 60k x 40k slide is
-19 GB of rasters, which a normal HPC allocation holds comfortably, so there is no reason to
-quantize a number you intend to defend.
+Holding the pairing is what makes the per-stage numbers mean something. Re-deriving the match
+at each stage — what this script used to do — lets a score move because *different cells got
+paired*, or because a cell the rasterizer occluded at one stage reappeared at another. Neither
+is a registration effect. With the pairing fixed, every change between stages is geometry.
 
-``--max-raster-px`` is an out-of-range guard, not the normal path. When it does bite, the warp
-is still done at full float precision (``pt_level=0``) and only the *area integration* is
-quantized, by scaling polygon coordinates by a single factor applied identically to ``before``
-and ``after`` so the two stay directly comparable. The factor, both grids and the resulting
-median cell area are recorded in the output, and ``raster.downsampled`` says plainly whether it
-happened. Do **not** use VALIS's ``pt_level`` for this: it downsamples only the warped side,
-silently making ``before`` and ``after`` incommensurable.
+Two metrics per stage, both over the fixed pairs:
+
+  * **per-pair IoU** — mean/percentiles and the fraction at IoU >= threshold. Each pair is
+    rasterized in its own bounding-box window, so peak RAM is one nucleus rather than one
+    slide. This replaces the whole-slide uint32 label images the previous implementation
+    needed (19 GB on a 60k x 40k slide) and with them the raster-budget machinery.
+  * **centroid residual displacement** — median/p90/max distance between paired centroids, in
+    px and, where the slide metadata carries a pixel size, in µm. It has no resolution floor
+    the way a thresholded IoU does, and "residual error is 1.4 µm after non-rigid" is a
+    number that can be quoted.
+
+Deltas are reported against the anchor, so ``delta_vs_anchor.micro.displacement_px_p50`` reads
+directly as "what the non-rigid and micro stages bought over rigid alone" — and, when it has
+the wrong sign, as a warning that a stage made things worse.
+
+Runs in the VALIS container (valis + numpy + scipy + scikit-image). The warp is injectable so
+the staging, matching and scoring logic is unit-testable without VALIS.
 """
 from __future__ import annotations
 
 import argparse
 import json
-import math
 import os
 import sys
 import time
@@ -39,9 +51,9 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "utils"))
 
-# Read-only $HOME on HPC clusters breaks numba's on-disk cache during the valis
-# import (RuntimeError: '_repeat_1d': no locator available). Redirect + disable
-# before importing valis (mirrors register.py / reg_finalize.py).
+# Read-only $HOME on HPC clusters breaks numba's on-disk cache during the valis import
+# (RuntimeError: '_repeat_1d': no locator available). Redirect + disable before importing valis
+# (mirrors register.py / reg_finalize.py).
 os.environ.setdefault("NUMBA_CACHE_DIR", "/tmp/numba_cache")
 os.environ["NUMBA_DISABLE_CACHING"] = "1"
 # matplotlib (pulled in transitively by valis) builds a font cache under $HOME by default; on a
@@ -51,17 +63,26 @@ os.environ.setdefault("XDG_CACHE_HOME", "/tmp/xdg_cache")
 
 import numpy as np
 
-# 0 = no cap: rasterize at native level-0 resolution, the scientifically neutral default.
-# Full-res is affordable because the metrics are accumulated block-wise: the two uint32
-# label images cost 8 bytes per slide pixel and nothing else scales with area. A 60k x 40k
-# slide is 2.4e9 px = 19 GB of rasters, so a 128 GB task covers up to ~1.4e10 px (a
-# 118k x 118k slide). Set --max-raster-px only as an out-of-range guard; when it bites it
-# downsamples the *area integration*, never the warp.
-DEFAULT_MAX_RASTER_PX = 0
-# A nucleus below this many raster pixels can no longer support a stable IoU, so the
-# resolvability flag trips and the run is marked as such rather than silently degraded.
-DEFAULT_MIN_CELL_AREA_PX = 20.0
-_AREA_SAMPLE = 5000  # features sampled when estimating median cell area
+from utils import cell_pairs as cp
+from utils.valis_stage_warp import (
+    STAGE_MICRO,
+    STAGE_NATIVE,
+    STAGE_NON_RIGID,
+    STAGE_RIGID,
+)
+
+ANCHOR_STAGE = STAGE_RIGID
+# Pair two cells only if each is the other's nearest centroid AND they are within this many
+# median nuclear radii. 1.0 is deliberately tight: after a rigid alignment a correctly matched
+# nucleus sits well inside one radius, and anything further is more likely a neighbour than a
+# partner. Loosening it trades precision for recall in the pairing, not in the registration.
+DEFAULT_MATCH_RADIUS_FACTOR = 1.0
+DEFAULT_SUPERSAMPLE = 2
+DEFAULT_IOU_THRESH = 0.5
+# Deltas are reported only for these — the headline numbers. Counts and percentile widths are
+# all in the per-stage records; the delta of a count is not a meaningful quantity.
+_DELTA_KEYS = ("iou_mean", "iou_p50", "displacement_px_p50", "displacement_px_p90",
+               "displacement_um_p50", "displacement_um_p90", "dice_matched")
 
 
 def _log(msg, t0=None):
@@ -69,294 +90,242 @@ def _log(msg, t0=None):
     print(f"[warp_seg_qc] {msg}{suffix}", flush=True)
 
 
-# ── VALIS warp (lazy + injectable) ─────────────────────────────────────────────
+# ── VALIS access (lazy + injectable) ───────────────────────────────────────────
 def default_loader(pickle_path):
     from valis import registration  # lazy: real VALIS package, as in bin/register.py
     return registration.load_registrar(str(pickle_path))
 
 
-def warp_cells(registrar, slide_name, geojson_f, pt_level=0, non_rigid=True, crop="overlap"):
-    """Warp a slide's cell GeoJSON into the registered/aligned frame (FeatureCollection dict)."""
-    slide = registrar.slide_dict[slide_name]
-    return slide.warp_geojson(str(geojson_f), pt_level=pt_level,
-                              non_rigid=non_rigid, crop=crop)
+# ── stage planning ─────────────────────────────────────────────────────────────
+def plan_stages(checkpoint=None) -> tuple:
+    """Decide which transform states this run can actually distinguish.
 
+    Returns ``(stages, separable, note)``. There are three cases, and conflating them is how a
+    QC report ends up quietly reporting the same warp twice under two names:
 
-# ── polygon rasterization (skimage.draw.polygon — the standard rasterizer) ──────
-def _iter_rings(geometry):
-    """Yield ``(outer_ring, [hole_rings])`` per polygon in a GeoJSON geometry."""
-    if not geometry:
-        return
-    gtype, coords = geometry.get("type"), geometry.get("coordinates")
-    if gtype == "Polygon" and coords:
-        yield coords[0], list(coords[1:])
-    elif gtype == "MultiPolygon" and coords:
-        for poly in coords:
-            if poly:
-                yield poly[0], list(poly[1:])
-
-
-def _ring_pixels(ring, shape_rc, offset_xy=(0.0, 0.0), scale=1.0):
-    from skimage.draw import polygon as sk_polygon
-    pts = np.asarray(ring, dtype=float)
-    if pts.shape[0] < 3:
-        return (np.empty(0, dtype=np.intp), np.empty(0, dtype=np.intp))
-    ox, oy = float(offset_xy[0]), float(offset_xy[1])
-    h, w = int(shape_rc[0]), int(shape_rc[1])
-    # Scale in polygon space, then shift into the grid. Identical treatment of the native
-    # and warped collections is what keeps before/after comparable.
-    return sk_polygon(pts[:, 1] * scale - oy, pts[:, 0] * scale - ox, shape=(h, w))
-
-
-def rasterize_features(feature_collection, shape_rc, offset_xy=(0.0, 0.0), scale=1.0):
-    """Rasterize a FeatureCollection to a uint32 label image (label = feature index).
-
-    Interior rings (holes) are punched back out, but only where they fall on their own
-    feature — a hole must never erase a neighbouring cell that overlaps it. Overlapping
-    outer rings resolve last-wins; ``seg_overlap`` derives cell counts from the labels
-    actually present, so a fully occluded cell is not counted as a missed match.
+    * checkpoint present, micro-registration ran — all four stages are distinct.
+    * checkpoint present, micro-registration was skipped — the pickle's field *is* the wave-1
+      field, so ``micro`` would duplicate ``non_rigid``; it is not emitted.
+    * no checkpoint — the pickle's field already has the micro residual composed in and the
+      intermediate is unrecoverable, so ``non_rigid`` is not emitted.
     """
-    labels = np.zeros((int(shape_rc[0]), int(shape_rc[1])), dtype=np.uint32)
-    for i, ft in enumerate(feature_collection.get("features", []), start=1):
-        for outer, holes in _iter_rings(ft.get("geometry")):
-            rr, cc = _ring_pixels(outer, shape_rc, offset_xy, scale)
-            if rr.size:
-                labels[rr, cc] = i
-            for hole in holes:
-                hr, hc = _ring_pixels(hole, shape_rc, offset_xy, scale)
-                if hr.size:
-                    own = labels[hr, hc] == i
-                    labels[hr[own], hc[own]] = 0
-    return labels
+    if checkpoint is None:
+        return ([STAGE_NATIVE, STAGE_RIGID, STAGE_MICRO], False,
+                "no REGISTER stage checkpoint: the registrar's field already has the micro "
+                "residual composed in, so the 'non_rigid' stage cannot be separated from it")
+    if not checkpoint.micro_registration:
+        return ([STAGE_NATIVE, STAGE_RIGID, STAGE_NON_RIGID], True,
+                "micro-registration did not run: the final field is the wave-1 non-rigid "
+                "field, so there is no distinct 'micro' stage")
+    return ([STAGE_NATIVE, STAGE_RIGID, STAGE_NON_RIGID, STAGE_MICRO], True, "")
 
 
-def common_grid(*feature_collections, pad=1, scale=1.0):
-    """Bounding grid ``(shape_rc, offset_xy)`` covering all features at ``scale``.
+# ── one stage's geometry ───────────────────────────────────────────────────────
+def stage_geometry(warp, slide_name, native_ps, stage):
+    """Warp a native :class:`PolySet` into ``stage``'s frame and measure it.
 
-    Running min/max rather than concatenating every ring: on a whole-slide collection the
-    coordinate arrays alone are hundreds of MB and are needed only for their extent.
+    The returned set shares its ring bookkeeping with ``native_ps``, so feature index ``i`` is
+    the same cell at every stage — the invariant the fixed pairing depends on.
     """
-    minx = miny = math.inf
-    maxx = maxy = -math.inf
-    for fc in feature_collections:
-        for ft in fc.get("features", []):
-            for outer, _holes in _iter_rings(ft.get("geometry")):
-                arr = np.asarray(outer, dtype=float)
-                if arr.size == 0:
-                    continue
-                minx = min(minx, float(arr[:, 0].min())); maxx = max(maxx, float(arr[:, 0].max()))
-                miny = min(miny, float(arr[:, 1].min())); maxy = max(maxy, float(arr[:, 1].max()))
-    if not math.isfinite(minx):
-        return (1, 1), (0.0, 0.0)
-    sminx = math.floor(minx * scale) - pad
-    sminy = math.floor(miny * scale) - pad
-    smaxx = math.ceil(maxx * scale) + pad
-    smaxy = math.ceil(maxy * scale) + pad
-    return (int(smaxy - sminy), int(smaxx - sminx)), (float(sminx), float(sminy))
+    warped = native_ps.with_xy(warp(slide_name, native_ps.xy, stage))
+    area, cent = cp.feature_area_centroid(warped)
+    return warped, area, cent
 
 
-def median_cell_area(*feature_collections, sample=_AREA_SAMPLE):
-    """Median cell area in native px², estimated from outer-ring bounding boxes.
-
-    Feeds only the resolvability guard, so an estimate suffices: nuclei are convex blobs
-    and a blob fills ~pi/4 of its bounding box. Sampled, not exhaustive — a median over a
-    few thousand cells is stable, and this must not become another O(cells) walk.
-    """
-    areas = []
-    for fc in feature_collections:
-        feats = fc.get("features", [])
-        step = max(1, len(feats) // sample) if sample else 1
-        for ft in feats[::step]:
-            for outer, _holes in _iter_rings(ft.get("geometry")):
-                arr = np.asarray(outer, dtype=float)
-                if arr.shape[0] < 3:
-                    continue
-                bw = float(arr[:, 0].max() - arr[:, 0].min())
-                bh = float(arr[:, 1].max() - arr[:, 1].min())
-                areas.append(bw * bh * (math.pi / 4.0))
-    return float(np.median(areas)) if areas else 0.0
+def score_stage(ps_ref, ps_mov, cent_ref, cent_mov, area_ref, area_mov, idx_ref, idx_mov,
+                iou_thresh=DEFAULT_IOU_THRESH, supersample=DEFAULT_SUPERSAMPLE,
+                max_pair_window_px=cp.DEFAULT_MAX_PAIR_WINDOW_PX, pixel_size_um=None) -> dict:
+    """Per-pair IoU + centroid residual for one stage, over an already-fixed pairing."""
+    iou, scored = cp.pair_iou(ps_ref, ps_mov, idx_ref, idx_mov,
+                              supersample=supersample, max_window_px=max_pair_window_px)
+    dist = cp.centroid_distance(cent_ref, cent_mov, idx_ref, idx_mov)
+    return cp.summarize_stage(iou, scored, dist,
+                              np.asarray(area_ref)[idx_ref], np.asarray(area_mov)[idx_mov],
+                              iou_thresh=iou_thresh, pixel_size_um=pixel_size_um)
 
 
-def choose_raster_scale(shape_rc, cell_area_px, max_raster_px=DEFAULT_MAX_RASTER_PX,
-                        min_cell_area_px=DEFAULT_MIN_CELL_AREA_PX) -> dict:
-    """Pick the single rasterization scale (<=1) and report why.
-
-    ``max_raster_px <= 0`` means no cap: score at native resolution, which is the default
-    and what any defensible number should be quoted at. When a cap IS set, memory is the
-    binding constraint — the grid MUST fit — so the scale is set by ``max_raster_px`` alone.
-    ``min_cell_area_px`` never relaxes it; it only decides the ``cells_resolvable`` flag,
-    which is what makes a downsampled score auditable rather than silently degraded.
-    """
-    h, w = int(shape_rc[0]), int(shape_rc[1])
-    n_px = max(1, h * w)
-    capped = max_raster_px and max_raster_px > 0
-    scale = 1.0 if (not capped or n_px <= max_raster_px) else math.sqrt(max_raster_px / n_px)
-    at_scale = float(cell_area_px) * scale * scale
-    return {
-        "scale": float(scale),
-        "downsampled": bool(scale < 1.0),
-        "max_raster_px": int(max_raster_px or 0),
-        "native_grid_rc": [h, w],
-        "native_grid_px": int(n_px),
-        "scaled_grid_px": int(n_px * scale * scale),
-        "median_cell_area_px": float(cell_area_px),
-        "median_cell_area_px_at_scale": at_scale,
-        "min_cell_area_px": float(min_cell_area_px),
-        "cells_resolvable": bool(at_scale >= min_cell_area_px),
-    }
-
-
-def _score(fc_a, fc_b, iou_thresh=0.5, scale=1.0) -> dict:
-    """Rasterize two FeatureCollections onto a common grid and score overlap."""
-    from utils.seg_overlap import evaluate_masks
-    shape_rc, offset = common_grid(fc_a, fc_b, scale=scale)
-    a = rasterize_features(fc_a, shape_rc, offset, scale)
-    b = rasterize_features(fc_b, shape_rc, offset, scale)
-    out = evaluate_masks(a, b, iou_thresh=iou_thresh)
-    out["grid_rc"] = [int(shape_rc[0]), int(shape_rc[1])]
-    out["n_features_ref"] = len(fc_a.get("features", []))
-    out["n_features_moving"] = len(fc_b.get("features", []))
-    return out
-
-
-def _load_fc(geojson_f) -> dict:
-    with open(geojson_f) as f:
-        return json.load(f)
+def _stage_line(rec) -> str:
+    def g(k, fmt=".4f"):
+        v = rec.get(k)
+        return format(v, fmt) if isinstance(v, float) else "n/a"
+    return (f"pairs={rec.get('n_pairs_scored', 0)}/{rec.get('n_pairs', 0)} "
+            f"iou_mean={g('iou_mean')} iou_p50={g('iou_p50')} "
+            f"disp_p50={g('displacement_px_p50', '.2f')}px "
+            f"disp_p90={g('displacement_px_p90', '.2f')}px")
 
 
 # ── orchestration ──────────────────────────────────────────────────────────────
-_DELTA_KEYS = ("dice", "iou", "instance_f1", "instance_precision", "instance_recall")
+def run(ref_geojson, moving_geojson, warp, stages, pixel_size_um=None,
+        ref_slide=None, moving_slide=None,
+        match_radius_factor=DEFAULT_MATCH_RADIUS_FACTOR, match_radius_px=None,
+        iou_thresh=DEFAULT_IOU_THRESH, supersample=DEFAULT_SUPERSAMPLE,
+        max_pair_window_px=cp.DEFAULT_MAX_PAIR_WINDOW_PX) -> dict:
+    """Score every stage in ``stages`` against a correspondence fixed at the anchor.
 
-
-def run(pickle_path, ref_slide, moving_slide, ref_geojson, moving_geojson,
-        loader=default_loader, pt_level=0, crop="overlap", iou_thresh=0.5,
-        max_raster_px=DEFAULT_MAX_RASTER_PX,
-        min_cell_area_px=DEFAULT_MIN_CELL_AREA_PX) -> dict:
-    """Score nuclei-polygon overlap before (raw) vs after (warped) registration.
-
-    Ordered so at most two FeatureCollections are resident at once: the natives are scored
-    and dropped before the registrar is loaded and the warped pair is built.
+    The anchor is computed first regardless of where it sits in the reporting order, and each
+    remaining stage is warped, scored and dropped before the next is built — so peak memory is
+    the two native vertex arrays plus one stage's, not one array per stage.
     """
     t0 = time.perf_counter()
-    ref_fc, mov_fc = _load_fc(ref_geojson), _load_fc(moving_geojson)
-    n_ref_native, n_mov_native = len(ref_fc.get("features", [])), len(mov_fc.get("features", []))
-    _log(f"loaded native geojsons: ref={n_ref_native} mov={n_mov_native} cells", t0)
+    with open(ref_geojson) as f:
+        ref_native = cp.from_feature_collection(json.load(f))
+    with open(moving_geojson) as f:
+        mov_native = cp.from_feature_collection(json.load(f))
+    _log(f"loaded native geojsons: ref={ref_native.n_features} "
+         f"mov={mov_native.n_features} cells", t0)
 
-    # One scale, chosen from the native geometry, applied to both scores. The warped frame
-    # is the registration overlap crop, so it is normally smaller; the guard further down
-    # catches the case where a non-rigid warp expands it anyway.
-    native_grid, _ = common_grid(ref_fc, mov_fc)
-    raster = choose_raster_scale(native_grid, median_cell_area(ref_fc, mov_fc),
-                                 max_raster_px=max_raster_px, min_cell_area_px=min_cell_area_px)
-    scale = raster["scale"]
-    _log(f"native grid {native_grid[0]}x{native_grid[1]} px -> scale={scale:.4f} "
-         f"(median cell {raster['median_cell_area_px']:.0f} -> "
-         f"{raster['median_cell_area_px_at_scale']:.0f} px^2, "
-         f"resolvable={raster['cells_resolvable']})", t0)
-    if not raster["cells_resolvable"]:
-        _log("WARNING: cells fall below the resolvable-area floor at this scale; metrics "
-             "are still reported but flagged cells_resolvable=false")
+    if ANCHOR_STAGE not in stages:
+        raise ValueError(f"anchor stage {ANCHOR_STAGE!r} is not in the stage plan {stages}")
 
-    before = _score(ref_fc, mov_fc, iou_thresh=iou_thresh, scale=scale)
-    _log(f"before: dice={before['dice']:.4f} f1={before['instance_f1']:.4f} "
-         f"grid={before['grid_rc']}", t0)
-    del ref_fc, mov_fc
+    # ── anchor: warp, size the match radius from the cells themselves, pair once ──
+    a_ref, a_area_ref, a_cent_ref = stage_geometry(warp, ref_slide, ref_native, ANCHOR_STAGE)
+    a_mov, a_area_mov, a_cent_mov = stage_geometry(warp, moving_slide, mov_native, ANCHOR_STAGE)
+    cell_radius = cp.median_equivalent_radius(np.concatenate([a_area_ref, a_area_mov]))
+    radius = float(match_radius_px) if match_radius_px else float(match_radius_factor) * cell_radius
+    idx_ref, idx_mov, _ = cp.match_mutual_nn(a_cent_ref, a_cent_mov, radius)
+    _log(f"anchor '{ANCHOR_STAGE}': median cell radius {cell_radius:.2f} px -> match radius "
+         f"{radius:.2f} px -> {idx_ref.size} pairs", t0)
+    if idx_ref.size == 0:
+        _log("WARNING: no cells paired at the anchor. Every stage record will be empty; this "
+             "usually means the rigid stage failed or the two slides share no tissue.")
 
-    registrar = loader(pickle_path)
-    _log("registrar loaded", t0)
-    ref_w = warp_cells(registrar, ref_slide, ref_geojson, pt_level=pt_level, crop=crop)
-    mov_w = warp_cells(registrar, moving_slide, moving_geojson, pt_level=pt_level, crop=crop)
-    n_ref_warped, n_mov_warped = len(ref_w.get("features", [])), len(mov_w.get("features", []))
-    _log(f"warped: ref={n_ref_warped} mov={n_mov_warped} cells", t0)
+    denom = min(ref_native.n_features, mov_native.n_features) or 1
+    matching = {
+        "method": "mutual_nn_centroid",
+        "anchor_stage": ANCHOR_STAGE,
+        "radius_px": radius,
+        "radius_factor": None if match_radius_px else float(match_radius_factor),
+        "median_cell_radius_px": cell_radius,
+        "n_pairs": int(idx_ref.size),
+        "pair_fraction": float(idx_ref.size) / denom,
+        "pair_fraction_ref": float(idx_ref.size) / (ref_native.n_features or 1),
+        "pair_fraction_moving": float(idx_ref.size) / (mov_native.n_features or 1),
+    }
 
-    # Guard: if the warped frame is unexpectedly larger than the native one, the shared
-    # scale no longer fits the budget. Retighten and re-score `before` from disk rather
-    # than let the raster blow past the memory the task was given.
-    warped_grid, _ = common_grid(ref_w, mov_w, scale=scale)
-    if max_raster_px and max_raster_px > 0 and warped_grid[0] * warped_grid[1] > max_raster_px:
-        raster = choose_raster_scale(
-            common_grid(ref_w, mov_w)[0], median_cell_area(ref_w, mov_w),
-            max_raster_px=max_raster_px, min_cell_area_px=min_cell_area_px)
-        scale = raster["scale"]
-        raster["retightened_from_warped_frame"] = True
-        _log(f"warped frame exceeded the budget at the native scale; retightened to "
-             f"scale={scale:.4f} and re-scoring before", t0)
-        before = _score(_load_fc(ref_geojson), _load_fc(moving_geojson),
-                        iou_thresh=iou_thresh, scale=scale)
+    score_kwargs = dict(iou_thresh=iou_thresh, supersample=supersample,
+                        max_pair_window_px=max_pair_window_px, pixel_size_um=pixel_size_um)
+    records = {ANCHOR_STAGE: score_stage(a_ref, a_mov, a_cent_ref, a_cent_mov,
+                                         a_area_ref, a_area_mov, idx_ref, idx_mov,
+                                         **score_kwargs)}
+    _log(f"stage '{ANCHOR_STAGE}': {_stage_line(records[ANCHOR_STAGE])}", t0)
+    del a_ref, a_mov, a_cent_ref, a_cent_mov, a_area_ref, a_area_mov
 
-    after = _score(ref_w, mov_w, iou_thresh=iou_thresh, scale=scale)
-    _log(f"after: dice={after['dice']:.4f} f1={after['instance_f1']:.4f} "
-         f"grid={after['grid_rc']}", t0)
+    for stage in stages:
+        if stage == ANCHOR_STAGE:
+            continue
+        s_ref, ar_ref, c_ref = stage_geometry(warp, ref_slide, ref_native, stage)
+        s_mov, ar_mov, c_mov = stage_geometry(warp, moving_slide, mov_native, stage)
+        records[stage] = score_stage(s_ref, s_mov, c_ref, c_mov, ar_ref, ar_mov,
+                                     idx_ref, idx_mov, **score_kwargs)
+        _log(f"stage '{stage}': {_stage_line(records[stage])}", t0)
+        del s_ref, s_mov, c_ref, c_mov, ar_ref, ar_mov
 
-    delta = {k: after[k] - before[k] for k in _DELTA_KEYS}
+    anchor_rec = records[ANCHOR_STAGE]
+    deltas = {
+        stage: {k: records[stage][k] - anchor_rec[k]
+                for k in _DELTA_KEYS if k in records[stage] and k in anchor_rec}
+        for stage in stages if stage != ANCHOR_STAGE
+    }
+
     return {
-        "before": before,
-        "after": after,
-        "delta": delta,
-        "raster": raster,
+        "stage_order": list(stages),
+        "stages": records,
+        "delta_vs_anchor": deltas,
+        "matching": matching,
         "counts": {
-            "features_ref_native": n_ref_native,
-            "features_moving_native": n_mov_native,
-            "features_ref_warped": n_ref_warped,
-            "features_moving_warped": n_mov_warped,
-            # The warp is 1:1 per feature. If it is not, before and after describe
-            # different cell populations and `delta` is no longer a pure registration
-            # effect — surface that rather than quietly reporting the difference.
-            "paired": bool(n_ref_warped == n_ref_native and n_mov_warped == n_mov_native),
+            "features_ref": int(ref_native.n_features),
+            "features_moving": int(mov_native.n_features),
         },
         "params": {
-            "pt_level": pt_level, "crop": crop, "non_rigid": True,
             "iou_thresh": float(iou_thresh),
+            "supersample": int(supersample),
+            "max_pair_window_px": int(max_pair_window_px),
+            "pixel_size_um": pixel_size_um,
         },
     }
 
 
-def build_record(result, patient_id, moving_name, reference_name) -> dict:
-    return {
+def build_record(result, patient_id, moving_name, reference_name, separable, note) -> dict:
+    rec = {
         "patient_id": patient_id,
         "moving": os.path.basename(str(moving_name)),
         "reference": os.path.basename(str(reference_name)),
+        "stages_separable": bool(separable),
         **result,
     }
+    if note:
+        rec["note"] = note
+    return rec
 
 
 def write_report(pickle_path, ref_slide, moving_slide, ref_geojson, moving_geojson, output,
                  patient_id=None, moving_name=None, reference_name=None,
-                 loader=default_loader, pt_level=0, crop="overlap", iou_thresh=0.5,
-                 max_raster_px=DEFAULT_MAX_RASTER_PX,
-                 min_cell_area_px=DEFAULT_MIN_CELL_AREA_PX) -> dict:
-    result = run(pickle_path, ref_slide, moving_slide, ref_geojson, moving_geojson,
-                 loader=loader, pt_level=pt_level, crop=crop, iou_thresh=iou_thresh,
-                 max_raster_px=max_raster_px, min_cell_area_px=min_cell_area_px)
-    record = build_record(result, patient_id,
-                          moving_name or moving_slide, reference_name or ref_slide)
+                 checkpoint_dir=None, loader=default_loader, crop="overlap", clip=False,
+                 pixel_size_um=None, warp=None, stages=None, separable=True, note="",
+                 **run_kwargs) -> dict:
+    """Load the registrar (unless a warp is injected), score every stage, write the JSON."""
+    if warp is None:
+        from utils.stage_checkpoint import StageCheckpoint
+        from utils.valis_stage_warp import make_warper, slide_pixel_size_um
+
+        checkpoint = StageCheckpoint.load(checkpoint_dir) if checkpoint_dir else None
+        if checkpoint is not None and not checkpoint.has_slide(moving_slide):
+            raise KeyError(
+                f"the stage checkpoint has no entry for moving slide {moving_slide!r}; it has "
+                f"{checkpoint.slide_names}. The checkpoint and the registrar must come from "
+                "the same REGISTER task.")
+        stages, separable, note = plan_stages(checkpoint)
+        registrar = loader(pickle_path)
+        _log("registrar loaded")
+        warp = make_warper(registrar, crop=crop, clip=clip, checkpoint=checkpoint)
+        if pixel_size_um is None:
+            pixel_size_um = slide_pixel_size_um(registrar, moving_slide)
+    elif stages is None:
+        stages, separable, note = plan_stages(None)
+    _log(f"stage plan: {stages} (separable={separable})" + (f" — {note}" if note else ""))
+
+    result = run(ref_geojson, moving_geojson, warp, stages, pixel_size_um=pixel_size_um,
+                 ref_slide=ref_slide, moving_slide=moving_slide, **run_kwargs)
+    record = build_record(result, patient_id, moving_name or moving_slide,
+                          reference_name or ref_slide, separable, note)
     with open(output, "w") as f:
         json.dump(record, f, indent=2)
     return record
 
 
 def parse_args(argv=None):
-    ap = argparse.ArgumentParser(description="GeoJSON/warp segmentation-overlap registration QC.")
+    ap = argparse.ArgumentParser(
+        description="Staged, fixed-correspondence segmentation-overlap registration QC.")
     ap.add_argument("--pickle", required=True, help="VALIS registrar pickle")
     ap.add_argument("--ref-slide", required=True, help="reference slide name in registrar.slide_dict")
     ap.add_argument("--moving-slide", required=True, help="moving slide name in registrar.slide_dict")
     ap.add_argument("--ref-geojson", required=True, help="reference native-cell GeoJSON")
     ap.add_argument("--moving-geojson", required=True, help="moving native-cell GeoJSON")
     ap.add_argument("--output", required=True)
+    ap.add_argument("--checkpoint-dir", default=None,
+                    help="REGISTER pre-micro stage checkpoint. Without it the 'non_rigid' stage "
+                         "cannot be separated from 'micro' and is not reported.")
     ap.add_argument("--patient-id", default=None)
     ap.add_argument("--moving-name", default=None, help="display filename for the moving slide")
     ap.add_argument("--reference-name", default=None, help="display filename for the reference slide")
-    ap.add_argument("--pt-level", type=int, default=0,
-                    help="VALIS warp level. Leave at 0: it downsamples only the warped side, "
-                         "which breaks before/after comparability. Use --max-raster-px instead.")
     ap.add_argument("--crop", default="overlap")
-    ap.add_argument("--iou-thresh", type=float, default=0.5)
-    ap.add_argument("--max-raster-px", type=int, default=DEFAULT_MAX_RASTER_PX,
-                    help="out-of-range guard: rasterization budget in pixels. 0 (default) "
-                         "scores at native resolution. A positive value sets the shared "
-                         "before/after downsample scale when the grid exceeds it.")
-    ap.add_argument("--min-cell-area-px", type=float, default=DEFAULT_MIN_CELL_AREA_PX,
-                    help="median cell area below which the run is flagged not resolvable")
+    ap.add_argument("--clip-to-frame", action="store_true",
+                    help="reproduce warp_geojson's clip of warped vertices to the aligned frame. "
+                         "Off by default: it flattens boundary-straddling cells onto the crop "
+                         "edge in both slides, inflating their IoU for non-registration reasons.")
+    ap.add_argument("--match-radius-factor", type=float, default=DEFAULT_MATCH_RADIUS_FACTOR,
+                    help="match radius in median nuclear radii (default 1.0)")
+    ap.add_argument("--match-radius-px", type=float, default=None,
+                    help="absolute match radius in px; overrides --match-radius-factor")
+    ap.add_argument("--iou-thresh", type=float, default=DEFAULT_IOU_THRESH,
+                    help="IoU at which a pair counts as 'well aligned' for frac_iou_ge_*")
+    ap.add_argument("--supersample", type=int, default=DEFAULT_SUPERSAMPLE,
+                    help="per-pair rasterization factor. 2 puts the IoU quantum near 1%% for a "
+                         "typical nucleus; the window is per-pair, so the cost is negligible.")
+    ap.add_argument("--max-pair-window-px", type=int, default=cp.DEFAULT_MAX_PAIR_WINDOW_PX,
+                    help="a pair spanning a larger window is counted but not scored")
+    ap.add_argument("--pixel-size-um", type=float, default=None,
+                    help="physical pixel size; default = read from the slide metadata")
     ap.add_argument("--jvm-heap-gb", type=int, default=None,
                     help="explicit BioFormats JVM heap (GB); default = auto-size from the pickle dir")
     return ap.parse_args(argv)
@@ -366,30 +335,40 @@ def main(argv=None):
     a = parse_args(argv)
 
     # Start the BioFormats JVM BEFORE any slide I/O. registration.load_registrar() unpickles VALIS
-    # Slide objects whose BioFormats-backed readers reconstruct against a live JVM, and warp_geojson()
-    # reads slide geometry — exactly like the register stages, which is why they all call init_jvm()
-    # first. Without this, load_registrar() dies with jpype JVMNotRunning. WARP_SEG_QC stages no
-    # TIFFs, so the auto-sizer always lands on its 8 GB floor; pass --jvm-heap-gb to make the
-    # reservation explicit rather than incidental.
+    # Slide objects whose BioFormats-backed readers reconstruct against a live JVM, and the warp
+    # parameters read slide geometry — exactly like the register stages, which is why they all call
+    # init_jvm() first. Without this, load_registrar() dies with jpype JVMNotRunning. WARP_SEG_QC
+    # stages no TIFFs, so the auto-sizer always lands on its 8 GB floor; pass --jvm-heap-gb to make
+    # the reservation explicit rather than incidental.
     from valis import registration
     from valis_config import init_jvm
     heap_gb = init_jvm(os.path.dirname(os.path.abspath(a.pickle)) or ".", override_gb=a.jvm_heap_gb)
     _log(f"started BioFormats JVM (heap={heap_gb}GB)")
 
     try:
-        rec = write_report(a.pickle, a.ref_slide, a.moving_slide, a.ref_geojson, a.moving_geojson,
-                           a.output, patient_id=a.patient_id, moving_name=a.moving_name,
-                           reference_name=a.reference_name, pt_level=a.pt_level, crop=a.crop,
-                           iou_thresh=a.iou_thresh, max_raster_px=a.max_raster_px,
-                           min_cell_area_px=a.min_cell_area_px)
+        rec = write_report(
+            a.pickle, a.ref_slide, a.moving_slide, a.ref_geojson, a.moving_geojson, a.output,
+            patient_id=a.patient_id, moving_name=a.moving_name, reference_name=a.reference_name,
+            checkpoint_dir=a.checkpoint_dir, crop=a.crop, clip=a.clip_to_frame,
+            pixel_size_um=a.pixel_size_um,
+            match_radius_factor=a.match_radius_factor, match_radius_px=a.match_radius_px,
+            iou_thresh=a.iou_thresh, supersample=a.supersample,
+            max_pair_window_px=a.max_pair_window_px)
     finally:
         registration.kill_jvm()
 
-    d = rec["delta"]
-    print(f"Wrote {a.output}: after_dice={rec['after']['dice']:.4f} "
-          f"before_dice={rec['before']['dice']:.4f} "
-          f"delta_dice={d['dice']:+.4f} delta_f1={d['instance_f1']:+.4f} "
-          f"scale={rec['raster']['scale']:.4f} paired={rec['counts']['paired']}")
+    nan = float("nan")
+    last = rec["stage_order"][-1]
+    anchor, final = rec["stages"][ANCHOR_STAGE], rec["stages"][last]
+    delta = rec["delta_vs_anchor"].get(last, {})
+    print(f"Wrote {a.output}: pairs={rec['matching']['n_pairs']} "
+          f"({rec['matching']['pair_fraction']:.1%} of cells) | "
+          f"{ANCHOR_STAGE}: iou={anchor.get('iou_mean', nan):.4f} "
+          f"disp_p50={anchor.get('displacement_px_p50', nan):.2f}px | "
+          f"{last}: iou={final.get('iou_mean', nan):.4f} "
+          f"disp_p50={final.get('displacement_px_p50', nan):.2f}px | "
+          f"delta_iou={delta.get('iou_mean', nan):+.4f} "
+          f"delta_disp_p50={delta.get('displacement_px_p50', nan):+.2f}px")
 
 
 if __name__ == "__main__":

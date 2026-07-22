@@ -11,7 +11,7 @@ pytest.importorskip("skimage")
 pytest.importorskip("scipy")
 
 import mask_to_geojson
-import warp_seg_qc
+from utils import cell_pairs as cp
 
 
 def _two_square_mask():
@@ -36,18 +36,53 @@ def test_ignores_background_only_mask():
     assert fc["features"] == []
 
 
-def test_roundtrip_mask_to_geojson_to_raster_recovers_foreground():
+def _square_fc(*boxes):
+    """FeatureCollection of axis-aligned squares given as pixel-edge ``(x0, y0, x1, y1)``."""
+    feats = []
+    for x0, y0, x1, y1 in boxes:
+        ring = [[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]
+        feats.append({"type": "Feature", "properties": {},
+                      "geometry": {"type": "Polygon", "coordinates": [ring]}})
+    return {"type": "FeatureCollection", "features": feats}
+
+
+def test_polygons_land_on_the_pixels_they_came_from():
+    """Centroid and bounding box must be exact; area is allowed the marching-squares bias.
+
+    The contour runs through pixel centres at the corners, so a 6x6 block encloses 30.5 px^2
+    rather than 36 — a fixed geometric consequence of tracing an iso-line, not a placement
+    error. What must not drift is *where* the polygon is, which is what the QC's centroid
+    residual and per-pair IoU are read off.
+    """
     m = _two_square_mask()
-    fc = mask_to_geojson.mask_to_feature_collection(m)
-    shape_rc, offset = warp_seg_qc.common_grid(fc, pad=0)
-    lab = warp_seg_qc.rasterize_features(fc, shape_rc, offset)
-    orig = m > 0
-    recov = np.zeros_like(orig)
-    ys, xs = np.nonzero(lab > 0)
-    recov[ys + int(offset[1]), xs + int(offset[0])] = True
-    inter = np.logical_and(orig, recov).sum()
-    union = np.logical_or(orig, recov).sum()
-    assert inter / union > 0.7
+    ps = cp.from_feature_collection(mask_to_geojson.mask_to_feature_collection(m))
+    area, cent = cp.feature_area_centroid(ps)
+    bbox = cp.feature_bboxes(ps)
+
+    order = np.argsort(cent[:, 0])
+    # Coordinates are pixel-CENTRE based: the block m[2:8, 2:8] covers centres 2..7, so its
+    # traced outline runs 1.5..7.5. Everything downstream (warp, centroid residual) inherits
+    # this convention from here.
+    assert cent[order].ravel() == pytest.approx([4.5, 4.5, 14.5, 14.5])
+    assert bbox[order].ravel() == pytest.approx([1.5, 1.5, 7.5, 7.5, 11.5, 11.5, 17.5, 17.5])
+    assert area == pytest.approx([30.5, 30.5])
+
+
+def test_polygons_overlap_the_source_squares(tmp_path):
+    """IoU against the exact squares the mask was drawn from, scored the way the QC scores."""
+    m = _two_square_mask()
+    got = cp.from_feature_collection(mask_to_geojson.mask_to_feature_collection(m))
+    # Pixel-centre convention: m[2:8, 2:8] is the square spanning 1.5..7.5, not 2..8.
+    truth = cp.from_feature_collection(_square_fc((1.5, 1.5, 7.5, 7.5), (11.5, 11.5, 17.5, 17.5)))
+
+    _, c_got = cp.feature_area_centroid(got)
+    _, c_truth = cp.feature_area_centroid(truth)
+    i_truth, i_got, _ = cp.match_mutual_nn(c_truth, c_got, radius=2.0)
+    assert i_truth.size == 2
+
+    iou, scored = cp.pair_iou(truth, got, i_truth, i_got, supersample=8)
+    assert scored.all()
+    assert iou.min() > 0.8
 
 
 def test_write_geojson_roundtrips_through_disk(tmp_path):

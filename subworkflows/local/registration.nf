@@ -177,11 +177,15 @@ workflow REGISTRATION {
     // Registrar pickle (per patient) for the GeoJSON seg-QC — classic VALIS only
     // (the distributed path produces no single registrar pickle).
     ch_registrar_pickle = Channel.empty()
+    // Pre-micro displacement fields, same provenance as the pickle: classic VALIS only, and
+    // only when reg_qc >= 2 asked REGISTER for them.
+    ch_stage_checkpoint = Channel.empty()
 
     if (!params.reg_distributed_tiling) {
         VALIS_ADAPTER(ch_grouped_multi)
         ch_registered       = VALIS_ADAPTER.out.registered
         ch_registrar_pickle = VALIS_ADAPTER.out.registrar
+        ch_stage_checkpoint = VALIS_ADAPTER.out.stage_checkpoint
         ch_adapter_logs     = VALIS_ADAPTER.out.size_logs
         ch_adapter_versions = VALIS_ADAPTER.out.versions
         ch_adapter_summary  = VALIS_ADAPTER.out.summary
@@ -207,6 +211,7 @@ workflow REGISTRATION {
         VALIS_DISTRIBUTED_ADAPTER(ch_routed.distributed.map { pid, payload, u -> tuple(pid, payload[0], payload[1]) })
         VALIS_ADAPTER(            ch_routed.classic.map     { pid, payload, u -> tuple(pid, payload[0], payload[1]) })
         ch_registrar_pickle = VALIS_ADAPTER.out.registrar   // only classic slides have a pickle
+        ch_stage_checkpoint = VALIS_ADAPTER.out.stage_checkpoint
         ch_registered       = VALIS_DISTRIBUTED_ADAPTER.out.registered.mix(VALIS_ADAPTER.out.registered)
         ch_adapter_logs     = VALIS_DISTRIBUTED_ADAPTER.out.size_logs.mix(VALIS_ADAPTER.out.size_logs)
         ch_adapter_versions = VALIS_DISTRIBUTED_ADAPTER.out.versions.mix(VALIS_ADAPTER.out.versions)
@@ -272,12 +277,23 @@ workflow REGISTRATION {
         // moving: [patient_id, meta, moving_geojson, moving_slide_name]
         ch_mov_gj = ch_gj.moving.map { meta, gj -> [meta.patient_id, meta, gj, gj.simpleName] }
 
-        // Join each moving slide with its patient's reference GeoJSON + registrar pickle.
+        // Exactly one stage-checkpoint entry per patient that has a pickle — the real directory
+        // where REGISTER wrote one, `[]` where it did not. Making it total matters: a plain
+        // combine on an optional channel silently DROPS the patients that lack it, so a failed
+        // snapshot would remove the patient from the QC entirely instead of costing it one stage.
+        ch_ckpt_by_patient = ch_registrar_pickle
+            .map { pid, _pickle -> tuple(pid, []) }
+            .join(ch_stage_checkpoint, by: 0, remainder: true)
+            .map { pid, _placeholder, ckpt -> tuple(pid, ckpt ?: []) }
+
+        // Join each moving slide with its patient's reference GeoJSON, registrar pickle and
+        // stage checkpoint.
         ch_for_warp = ch_mov_gj
             .combine(ch_ref_gj, by: 0)
             .combine(ch_registrar_pickle, by: 0)
-            .map { pid, meta, mov_gj, mov_name, ref_gj, ref_name, pickle ->
-                tuple(meta, pickle, ref_name, mov_name, ref_gj, mov_gj)
+            .combine(ch_ckpt_by_patient, by: 0)
+            .map { pid, meta, mov_gj, mov_name, ref_gj, ref_name, pickle, ckpt ->
+                tuple(meta, pickle, ref_name, mov_name, ref_gj, mov_gj, ckpt)
             }
 
         WARP_SEG_QC(ch_for_warp)

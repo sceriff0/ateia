@@ -135,6 +135,10 @@ workflow VALIS_ADAPTER {
     emit:
     registered = ch_registered
     registrar  = REGISTER.out.registrar   // [patient_id, registrar.pickle] — for GeoJSON seg-QC
+    // [patient_id, reg_stage_checkpoint/] — pre-micro displacement fields, emitted only at
+    // reg_qc >= 2. Lets WARP_SEG_QC score the non_rigid stage apart from micro; VALIS composes
+    // the two into one field, so REGISTER is the only place they can be told apart.
+    stage_checkpoint = REGISTER.out.stage_checkpoint
     size_logs  = ch_size_logs
     versions   = REGISTER.out.versions.first()
     summary    = REGISTER.out.summary

@@ -73,7 +73,13 @@ VALIS whole-slide alignment.
 | `reg_max_image_dim` | `4000` | Max cached image dimension during registration. |
 | `skip_micro_registration` | `true` | Skip the micro-registration refinement step. |
 | `reg_jvm_heap_gb` | `null` | Explicit JVM heap (GB) for VALIS. `null` auto-estimates from input size. |
-| `reg_qc` | `1` | Registration QC depth: `0` = none, `1` = DAPI overlay only, `2` = DAPI overlay + segmentation-overlap metrics (Dice/IoU/instance-F1). |
+| `reg_qc` | `1` | Registration QC depth: `0` = none, `1` = DAPI overlay only, `2` = DAPI overlay + [staged segmentation-overlap metrics](registration_qc.md). |
+
+At `reg_qc = 2` the pipeline segments each slide's DAPI on its **native** image, pairs the
+nuclei once after rigid registration, and then re-scores those same pairs after every later
+stage — so per-pair IoU and centroid residual can be attributed to `rigid`, `non_rigid` and
+`micro` individually. See [Staged registration QC](registration_qc.md) for the output schema
+and how to read it. Classic VALIS only; the distributed path produces no registrar pickle.
 
 ### Distributed registration (advanced)
 
