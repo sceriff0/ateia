@@ -173,6 +173,33 @@ Once a winner is chosen:
 - Preserve default DAPI-skip behavior (or make it a param).
 - Match `*_corrected.ome.tif` naming if replacing in place.
 
+## 8b. Metric hardening (2026-07-22) — un-gameable composite
+
+A full-grid run on the real cluster mosaic exposed a metric flaw: the old composite
+`seam_gain + cv_gain` ranked variants that drove the image toward **black** at the
+top, because a zeroed image trivially has no seams and (with `background_cv`
+recomputed on the corrected image) zero background variance. Grounded in a SOTA
+review (`research/illumination-correction-sota-2026-07-22.md`; BaSiC/MCMICRO, SSIM,
+QUAREP-LiMi, perception-distortion tradeoff), the metrics were reworked:
+
+- **Fidelity gate.** `composite = artifact_score × fidelity`. Fidelity ∈ [0,1] is a
+  no-reference signal-retention score (retained foreground dynamic range × foreground
+  structure correlation) that collapses for a destroyed image — so over-subtraction
+  can no longer win. Bounded (soft-squash) artifact terms replace the unbounded gains.
+- **Offset-invariant flatness.** `background_flatness` (absolute std of a background
+  ROI **fixed on the uncorrected image**) replaces CV in the ranking; CV is
+  offset-sensitive (penalizes legitimate pedestal removal) and circular (thresholding
+  the corrected image), so it is now diagnostic-only.
+- **Full-reference validation.** `illum/metrics_reference.py` (SSIM/PSNR/RMSE +
+  recovered-flatfield error) scores variants against the injected clean phantom;
+  `tests/test_illum_antigaming.py` proves the new composite ranks a faithful
+  correction above a zeroing one while the old composite did the opposite.
+- **Instrumentation + plots.** peak-RSS now reports the absolute high-water mark (the
+  old delta-vs-baseline was ~0 for every variant); before/after plots use the densest
+  channel (DAPI) with a shared intensity scale; the redundant per-variant flat-field
+  plot is deduped to one shared per-channel file. `cross_tile_uniformity` added as a
+  downstream-relevant diagnostic (KASK 2016).
+
 ## 9. Non-goals
 
 - Not replacing `PREPROCESS` on `main` in this branch.

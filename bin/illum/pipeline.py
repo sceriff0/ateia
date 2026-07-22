@@ -8,7 +8,8 @@ import numpy as np
 from illum.flatfield import estimate_flatfield, apply_field
 from illum.darkfield import estimate_dark_constant, estimate_dark_field, subtract_dark
 from illum.background import remove_background
-from illum.metrics import seam_peak, background_cv, _rss_mb
+from illum.metrics import (seam_peak, background_cv, background_flatness, background_mask,
+                           foreground_mask, fidelity_score, cross_tile_uniformity, _rss_mb)
 
 
 @dataclass
@@ -77,27 +78,37 @@ def _basic_correct(ch, out_dtype):
 
 def run_variant(stack, grid, variant, out_dtype=np.uint16):
     t0 = time.perf_counter()
-    r0 = _rss_mb()
     C = stack.shape[0]
     out = np.empty_like(stack, dtype=out_dtype)
     flats = []
-    seam_x_b = seam_y_b = cv_b = 0.0
-    seam_x_a = seam_y_a = cv_a = 0.0
+    seam_x_b = seam_y_b = cv_b = flat_b = 0.0
+    seam_x_a = seam_y_a = cv_a = flat_a = 0.0
+    fidelity = xtile_b = xtile_a = 0.0
     for c in range(C):
         ch = stack[c]
+        # Background/foreground ROIs are fixed on the UNCORRECTED channel so the
+        # flatness metric is not circular and fidelity is measured on true signal.
+        bg = background_mask(ch)
+        fg = foreground_mask(ch)
         seam_x_b += seam_peak(ch, grid, 1); seam_y_b += seam_peak(ch, grid, 0)
-        cv_b += background_cv(ch)
+        cv_b += background_cv(ch, mask=bg); flat_b += background_flatness(ch, bg)
+        xtile_b += cross_tile_uniformity(ch, grid)
         corr, ff = _correct_channel(ch, grid, variant, out_dtype)
         out[c] = corr
         flats.append(ff)
         seam_x_a += seam_peak(corr, grid, 1); seam_y_a += seam_peak(corr, grid, 0)
-        cv_a += background_cv(corr)
+        cv_a += background_cv(corr, mask=bg); flat_a += background_flatness(corr, bg)
+        xtile_a += cross_tile_uniformity(corr, grid)
+        fidelity += fidelity_score(ch, corr, fg)
     metrics = {
         "seam_x_before": seam_x_b / C, "seam_x_after": seam_x_a / C,
         "seam_y_before": seam_y_b / C, "seam_y_after": seam_y_a / C,
         "cv_before": cv_b / C, "cv_after": cv_a / C,
+        "flat_before": flat_b / C, "flat_after": flat_a / C,
+        "xtile_before": xtile_b / C, "xtile_after": xtile_a / C,
+        "fidelity": fidelity / C,
         "seconds": time.perf_counter() - t0,
-        "peak_rss_mb": max(_rss_mb() - r0, 0.0),
+        "peak_rss_mb": _rss_mb(),
     }
     return {"name": variant.name, "corrected": out, "flats": flats, "metrics": metrics}
 

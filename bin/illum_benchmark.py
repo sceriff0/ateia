@@ -19,6 +19,7 @@ sequential run.
 """
 from __future__ import annotations
 import argparse, json, os, sys, pathlib
+import numpy as np
 
 BIN = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(BIN))
@@ -58,22 +59,54 @@ def _grid_png(stack, grid, outdir, approx_tile):
     return str(path)
 
 
-def _run_one(v, stack, grid, outdir, names, pixel_um, no_pyramids, grid_png):
+def _qc_channel(stack):
+    """Index of the DENSEST channel — the one whose eyeball QC shows seams best.
+
+    Channel 0 is often a sparse/dim marker; on a near-empty channel the mean
+    profiles can't distinguish 'kept signal' from 'zeroed everything'. The
+    densest channel (highest median on a thumbnail — typically DAPI) fills every
+    tile, so seams and signal loss are actually visible. Cheap: strided thumbnail.
+    """
+    if stack.ndim != 3 or stack.shape[0] == 1:
+        return 0
+    ds = max(max(stack.shape[1:]) // 512, 1)
+    med = [float(np.median(stack[c, ::ds, ::ds])) for c in range(stack.shape[0])]
+    return int(np.argmax(med))
+
+
+def _flatfield_png(ff, outdir, channel_name):
+    """Write the flat-field plot to a shared per-channel path, once.
+
+    The periodic flat-field depends only on the channel (not on the swept
+    darkfield/background axes), so every periodic variant produces the SAME field
+    for a given channel — writing one copy per variant is pure redundancy. Shared,
+    atomic, idempotent (mirrors _grid_png) so racing array tasks are safe."""
+    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in str(channel_name))
+    path = outdir / "plots" / f"flatfield_{safe}.png"
+    if not path.exists():
+        tmp = outdir / "plots" / f"flatfield_{safe}.{os.getpid()}.tmp.png"
+        plot_flatfield(ff, tmp, channel_name)
+        os.replace(tmp, path)
+    return str(path)
+
+
+def _run_one(v, stack, grid, outdir, names, pixel_um, no_pyramids, grid_png, qc_idx=0):
     """Compute one variant and write its plots + pyramid.
 
     Returns (entry, plot_paths). `entry` (name + metrics) is built BEFORE the
     plot/pyramid steps, and those steps are individually guarded, so a plot or
-    pyramid failure never loses the variant's recorded metrics.
+    pyramid failure never loses the variant's recorded metrics. Diagnostic plots
+    use the densest channel (`qc_idx`) so the eyeball QC can actually see seams
+    and signal loss.
     """
     res = run_variant(stack, grid, v, out_dtype=stack.dtype)
     entry = {"name": res["name"], "metrics": res["metrics"]}
     pngs = [grid_png]
     try:
-        if res["flats"][0] is not None:
-            pngs.append(plot_flatfield(res["flats"][0],
-                                       outdir / "plots" / f"{v.name}_ff.png", names[0]))
-        pngs.append(plot_before_after(stack[0], res["corrected"][0], grid,
-                                      outdir / "plots" / f"{v.name}_ba.png", names[0]))
+        if res["flats"][qc_idx] is not None:
+            pngs.append(_flatfield_png(res["flats"][qc_idx], outdir, names[qc_idx]))
+        pngs.append(plot_before_after(stack[qc_idx], res["corrected"][qc_idx], grid,
+                                      outdir / "plots" / f"{v.name}_ba.png", names[qc_idx]))
     except Exception as e:
         print(f"    WARN plot {v.name}: {e}")
     if not no_pyramids:
@@ -151,6 +184,8 @@ def main():
     grid = recover_grid(stack, approx_tile=args.approx_tile)
     print(f"grid: {grid}")
     grid_png = _grid_png(stack, grid, outdir, args.approx_tile)
+    qc_idx = _qc_channel(stack)
+    print(f"qc channel for plots: {qc_idx} ({names[qc_idx]})")
 
     # --- single-variant mode (one SLURM array task) ---
     if args.variant:
@@ -163,7 +198,7 @@ def main():
         print(f"--- variant: {match.name}")
         try:
             entry, pngs = _run_one(match, stack, grid, outdir, names, pixel_um,
-                                   args.no_pyramids, grid_png)
+                                   args.no_pyramids, grid_png, qc_idx)
         except Exception as e:
             # run_variant itself failed -> no part written; aggregate simply
             # omits this variant (one bad variant doesn't sink the grid).
@@ -180,7 +215,7 @@ def main():
         print(f"--- variant: {v.name}")
         try:
             entry, pngs = _run_one(v, stack, grid, outdir, names, pixel_um,
-                                   args.no_pyramids, grid_png)
+                                   args.no_pyramids, grid_png, qc_idx)
         except Exception as e:
             print(f"    SKIP {v.name}: {e}")
             continue

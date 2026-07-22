@@ -32,5 +32,26 @@ One variant per array task, then a dependent aggregate job:
 - `illum_benchmark.py --aggregate --outdir DIR`  → `DIR/metrics.json` + `DIR/report.html`
 
 Run on the real cluster mosaic, open `report.html`, and compare pyramids in QuPath.
-Ranking is a seam-suppression + background-flatness composite; when variants are
-within ~0.02 composite, decide from the crops and QuPath.
+
+## Ranking — the composite score
+
+`composite = artifact_score × fidelity`, both bounded, so it **cannot be gamed by
+over-subtraction** (a black image has no seams and zero background variance, so
+artifact metrics alone would rank "zero the image" first — see
+`research/illumination-correction-sota-2026-07-22.md`):
+
+- **artifact_score** ∈ (−1, 1): mean of soft-bounded seam-suppression and
+  background-flatness gains. Flatness uses `background_flatness` (absolute std of a
+  background ROI **fixed on the uncorrected image**) — offset-invariant, so
+  removing a dark pedestal is not penalized the way CV would. CV is still reported
+  as a diagnostic but is not ranked on.
+- **fidelity** ∈ [0, 1]: no-reference signal retention (geometric mean of retained
+  foreground dynamic range × foreground structure correlation). It **multiplies**
+  the artifact score, so a variant that suppresses seams by eating real signal —
+  low fidelity — scores ~0 instead of winning.
+
+Full-reference SSIM/RMSE (`illum/metrics_reference.py`) validate the no-reference
+ranking on the synthetic phantom (`tests/test_illum_antigaming.py`). Diagnostic
+plots use the **densest channel** (DAPI) with a shared Before/After intensity scale
+so signal loss is visible. When composites are within ~0.01, decide from the crops
+and QuPath.

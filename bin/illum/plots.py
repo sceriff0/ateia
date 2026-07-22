@@ -46,8 +46,17 @@ def plot_flatfield(ff, out_path, channel_name):
 
 def plot_before_after(before, after, grid, out_path, channel_name):
     fig, ax = plt.subplots(2, 2, figsize=(11, 8))
-    ax[0, 0].imshow(_thumb(before), cmap="gray"); ax[0, 0].set_title("Before")
-    ax[0, 1].imshow(_thumb(after), cmap="gray"); ax[0, 1].set_title("After")
+    # Shared display scale (percentiles of BEFORE) on both panels: with per-panel
+    # autoscaling, a variant that crushes the image toward black still looks
+    # "normal" because After is rescaled to its own tiny range. Locking both to
+    # Before's scale makes signal loss visible — the whole point of the eyeball QC.
+    tb, ta = _thumb(before), _thumb(after)
+    vmin, vmax = (float(np.percentile(tb, 1)), float(np.percentile(tb, 99)))
+    if vmax <= vmin:
+        vmax = vmin + 1.0
+    ax[0, 0].imshow(tb, cmap="gray", vmin=vmin, vmax=vmax); ax[0, 0].set_title("Before")
+    ax[0, 1].imshow(ta, cmap="gray", vmin=vmin, vmax=vmax)
+    ax[0, 1].set_title("After (same scale as Before)")
     ax[1, 0].plot(np.median(before, axis=0), label="before")
     ax[1, 0].plot(np.median(after, axis=0), label="after")
     ax[1, 0].legend(); ax[1, 0].set_title("Column profile")
