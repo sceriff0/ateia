@@ -179,7 +179,21 @@ workflow REGISTRATION {
     // (the distributed path produces no single registrar pickle).
     ch_registrar_pickle = Channel.empty()
 
-    if (!params.reg_distributed_tiling) {
+    // Hoisted above the adapter branch because the seg-QC gate below depends on BOTH: on the
+    // distributed branch VALIS_ADAPTER is never invoked, so `VALIS_ADAPTER.out` does not exist
+    // and any block referencing it must be unreachable at DAG-build time, not merely at runtime.
+    // reg_qc: 0 = none, 1 = DAPI overlay, 2 = + segmentation overlap (legacy
+    // skip_registration_qc=true forces 0). ParamUtils.regQcLevel is the single definition, so
+    // ParamUtils.validateRegistrationPath's launch-time gate cannot drift from it.
+    def use_distributed = ParamUtils.useDistributedAdapter(params)
+    def reg_qc_level    = ParamUtils.regQcLevel(params)
+
+    // Level 2 warps polygons through the classic registrar pickle, which the distributed path
+    // does not produce. ParamUtils.validateRegistrationPath already rejects that combination at
+    // launch; this is defence in depth (and what keeps the workflow buildable on 'force').
+    def do_seg_qc = reg_qc_level >= 2 && !use_distributed
+
+    if (!use_distributed) {
         VALIS_ADAPTER(ch_grouped_multi)
         ch_registered       = VALIS_ADAPTER.out.registered
         ch_registrar_pickle = VALIS_ADAPTER.out.registrar
@@ -201,8 +215,8 @@ workflow REGISTRATION {
         ch_routed = ch_grouped_multi
             .map { pid, ref_item, all_items -> tuple(pid, [ref_item, all_items]) }
             .join(REG_ESTIMATE.out.decision)
-            .branch { pid, payload, use_distributed ->
-                distributed: use_distributed == 'true'
+            .branch { pid, payload, est_decision ->
+                distributed: est_decision == 'true'
                 classic:     true
             }
         VALIS_DISTRIBUTED_ADAPTER(ch_routed.distributed.map { pid, payload, u -> tuple(pid, payload[0], payload[1]) })
@@ -243,11 +257,6 @@ workflow REGISTRATION {
             [meta, registered_file, reference_file]
         }
 
-    // reg_qc controls registration QC depth: 0 = none, 1 = DAPI overlay only,
-    // 2 = DAPI overlay + segmentation-overlap metric. Legacy skip_registration_qc=true
-    // forces 0 for backward compatibility.
-    def reg_qc_level = params.skip_registration_qc ? 0 : (params.reg_qc == null ? 1 : (params.reg_qc as int))
-
     // Level >= 1: DAPI overlay image QC for all non-reference images
     if (reg_qc_level >= 1) {
         GENERATE_REGISTRATION_QC(ch_for_qc)
@@ -261,7 +270,7 @@ workflow REGISTRATION {
     // then warp the polygons through the registrar and score overlap. Classic VALIS only
     // (needs the registrar pickle; distributed produces none).
     ch_seg_qc = Channel.empty()
-    if (reg_qc_level >= 2) {
+    if (do_seg_qc) {
         SEG_QC_GEOJSON(ch_images_for_error)
 
         ch_gj = SEG_QC_GEOJSON.out.geojson.branch { meta, gj ->
@@ -384,7 +393,7 @@ workflow REGISTRATION {
     if (reg_qc_level >= 1) {
         ch_size_logs = ch_size_logs.mix(GENERATE_REGISTRATION_QC.out.size_log)
     }
-    if (reg_qc_level >= 2) {
+    if (do_seg_qc) {
         ch_size_logs = ch_size_logs
             .mix(SEG_QC_GEOJSON.out.size_log)
             .mix(WARP_SEG_QC.out.size_log)
@@ -409,7 +418,7 @@ workflow REGISTRATION {
     if (reg_qc_level >= 1) {
         ch_versions = ch_versions.mix(GENERATE_REGISTRATION_QC.out.versions.first())
     }
-    if (reg_qc_level >= 2) {
+    if (do_seg_qc) {
         ch_versions = ch_versions
             .mix(SEG_QC_GEOJSON.out.versions.first())
             .mix(WARP_SEG_QC.out.versions.first())
