@@ -29,9 +29,13 @@ faithfulness argument depends on that.
 
 ---
 
-## 2. State: Tasks 0-7 COMPLETE, Task 8 NOT STARTED
+## 2. State: ALL TASKS 0-8 COMPLETE — the branch is now in review/merge territory
+
+The plan is finished. What remains is not implementation but the open items in §7 — chiefly that
+**nothing has ever run on a real slide** (§7.2), which is the branch's entire purpose.
 
 ```
+3be3da9 :wrench:           REG_PREP stage timings + bit-identity checks in CI       <- task 8
 d03ff54 :sparkles:         --reg_compare: run both paths, diff them                 <- task 7
 70a3d41 :sparkles:         add_cycle on the distributed path + reg_qc=2 fast-fail   <- task 6
 0c1656d :white_check_mark: Tag the new reg tests stub so CI actually runs them
@@ -74,6 +78,7 @@ also removed the 40 GB-heap process that had been OOMing on merged multi-cycle r
 | `--reg_compare` runs BOTH paths and diffs them | paired nf-tests assert WHICH processes ran (`REGISTER` + `REG_PREP` + `REG_ASSEMBLE` + `COMPARE_REGISTRATION` present with the flag, `COMPARE_REGISTRATION`/`REG_PREP` absent without it); full stub run `EXIT 0`, no config-selector WARNs, outputs in 3 distinct dirs |
 | the diff tool measures what it claims | `test_compare_registration.py` 6/6 in-image: every "they agree" paired with a perturbation of known exact magnitude; a LAST-channel-only perturbation (catches a regression to pyvips' default `n=1`); ragged tiled sweep == single-shot; comparing a file with itself fails loudly |
 | moving the band-join into `vips_pages` changed no reader behaviour | `test_mirage_slide_reader.py` **11/11** in-image after the move (same 11 as before it) |
+| restructuring `reg_prep` for stage timings changed no pixels | `verify_lowmem_bitidentical.py` re-run FROM SCRATCH at `3be3da9` (that harness runs `bin/reg_prep.py`): both legs `equal=True max\|delta\|=0.0` |
 
 ```bash
 # unit (in-image)
@@ -94,11 +99,11 @@ nf-test test --tag stub --profile test                        # the actual CI ga
 nextflow run . -profile test,docker -stub --outdir /tmp/stubout
 ```
 
-**Provenance caveat:** `59ce171`'s leg 2 ran on REUSED prep (`VERIFY_LOWMEM_REUSE_PREP=1`), not a
-from-scratch run. Sound for that change — `reg_prep.py`, the reader and the fixtures are untouched
-by it, and the reused prep came from a clean run of the same code — but `6850f82` is the commit
-with full clean-run provenance. Two attempts at a clean confirmation run for `59ce171` were killed
-mid-run; redoing it is cheap and unblocks nothing.
+**Provenance caveat — RESOLVED.** `59ce171`'s leg 2 had only ever run on REUSED prep
+(`VERIFY_LOWMEM_REUSE_PREP=1`). Task 8 re-ran `verify_lowmem_bitidentical.py` from scratch (no
+reuse) at `3be3da9` to prove the restructured `reg_prep.py` unchanged, and it came back
+`LEG 1 equal=True max|delta|=0.0` / `LEG 2 equal=True max|delta|=0.0` with both reader markers and
+full 3-channel coverage asserted. Leg 2 now has clean-run provenance.
 
 ---
 
@@ -201,9 +206,9 @@ preconditions.**
 
 ---
 
-## 6. Remaining work — Task 8
+## 6. What the last three tasks landed
 
-Concrete code is in the plan file.
+All plan tasks are done. Kept here because each carries a decision the code alone does not explain.
 
 - **Task 6 — DONE** (`70a3d41`). `ParamUtils.useDistributedAdapter` / `regQcLevel` /
   `validateRegistrationPath`; add_cycle now takes the same adapter as a full run; `reg_qc=2` +
@@ -233,19 +238,29 @@ Concrete code is in the plan file.
   patient collapses onto `[pid, null]`, and `join` drops unmatched keys without a word. The
   shipped key is `[patient_id, sorted channel signature]` with
   `failOnMismatch`/`failOnDuplicate`. Sixth instance of the §4.4 shape.
-- **Task 8 — stage timings + CI wiring.** This is where the real gap is: **NONE of the
-  bit-identity integration tests run in CI** (`verify_lowmem_bitidentical`,
-  `verify_distributed_bitidentical`, `test_tile_grid`, `test_mirage_slide_reader`,
-  `test_compare_registration` (new in task 7), and the still-unreferenced
-  `verify_micro_bitidentical.py`). Every guarantee on this branch currently depends on someone
-  remembering to run Docker by hand — on a host where Docker wedges (§5.1).
+- **Task 8 — DONE** (`3be3da9`). The gap it closed: **no bit-identity guarantee on this branch ran
+  automatically.** Two CI jobs now, split by cost:
 
-  Task 8 also inherits a **named, pre-existing cause of the red CI**: the full gate
-  (`nf-test test --tag stub --profile test`) is **113/114** after task 7, and the single failure is
-  `tests/modules/generate_qc_report.nf.test` — *"declares 7 input channels but 6 were
-  specified"*. Neither that module nor its test is touched by this branch; `db37397` **on main**
-  added a 7th input (`seg_eval_csvs`) without updating the test. Not ours, but it is what a
-  green gate needs.
+  | Job | Trigger | Blocking? | Runs |
+  |---|---|---|---|
+  | `valis-unit` | every push/PR | **yes** — in the `all-tests` gate | `test_tile_grid`, `test_mirage_slide_reader`, `test_compare_registration` (image needed for pyvips/valis, but no registration run) |
+  | `distributed-integration` | push to main/dev **+** dispatch (was dispatch-only) | no | `verify_distributed_bitidentical`, `probe_reader_equivalence`, `verify_lowmem_bitidentical`, `verify_micro_bitidentical` (a real `reg_prep`, too slow per-PR) |
+
+  `verify_micro_bitidentical.py` had existed in the repo referenced by **no workflow at all**.
+
+  `REG_PREP` also writes per-phase wall-clock (`load` / `rigid_and_prep` / `dump`) to
+  `<outdir>/<patient>/registered/timings/<patient>_reg_prep_timings.json`. It is the one process
+  on this path still doing whole-slide work, so its cost is the one thing the DAG does not show.
+
+  **Trap found doing it:** declaring the timings output nested as `prep/stage_timings.json` looked
+  right, ran green, and published an **empty** `timings/` directory. `publishDir`'s `pattern`
+  cannot reach inside a directory output — `prep/` publishes as a unit or not at all. The file is
+  lifted to the task root like `*.size.csv`. **Check the published tree, not the exit status.**
+
+  Still true and NOT ours: the full gate (`nf-test test --tag stub --profile test`) is
+  **113/114**; the single failure is `tests/modules/generate_qc_report.nf.test` — *"declares 7
+  input channels but 6 were specified"*. `db37397` **on main** added a 7th input (`seg_eval_csvs`)
+  without updating the test. A green gate needs it fixed.
 
 ---
 
@@ -253,12 +268,24 @@ Concrete code is in the plan file.
 
 **Blocking merge**
 1. **Spec §3/§5.2 wording** still says JVM-free (see §4.1).
-2. **Nothing has ever run on a real slide.** All evidence is on 128px synthetic fixtures.
-   Bit-identity is structural so it should hold, but the branch's actual PURPOSE — peak RSS, disk
-   footprint, tile counts, wall-clock, compression ratio on a real WSI — is entirely UNMEASURED.
-   The 1.43x compression measured on fixtures is NOT a capacity-planning number.
+2. **Nothing has ever run on a real slide. This is now the ONLY implementation-shaped thing left,
+   and it is the branch's entire purpose.** All evidence is on 128px synthetic fixtures.
+   Bit-identity is structural so it should hold, but peak RSS, disk footprint, tile counts,
+   wall-clock and compression ratio on a real WSI are entirely UNMEASURED. The 1.43x compression
+   measured on fixtures is NOT a capacity-planning number.
 
-**Should decide during Task 8**
+   Tasks 7 and 8 built the two instruments for exactly this and neither has been pointed at real
+   data yet. The intended first run:
+   ```bash
+   nextflow run . -profile <cluster> --reg_distributed_tiling true --reg_compare true \
+       --reg_mem_budget_gb <machine RAM> --input <real cohort>.csv --outdir <out>
+   ```
+   then read `<out>/<patient>/registered/compare/*_regcompare.json` (how far the paths diverge,
+   per channel) against `<out>/<patient>/registered/timings/*_reg_prep_timings.json` and the
+   Nextflow trace (where the time and memory actually went). Budget ~2x registration for the
+   comparison; drop `--reg_compare` once the numbers exist.
+
+**Should decide before merge**
 3. **`can_read()` accepts a non-OME grayscale multi-page tiled BigTIFF** (pyvips auto-populates
    `page-height`), degrading channel names to `C0/C1`. `workflows/mirage.nf:213` shows
    `--start registration` takes USER-SUPPLIED paths, so this is reachable. Channel names feed the
@@ -298,20 +325,30 @@ Concrete code is in the plan file.
 
 ## 8. Immediate next action
 
+The plan is finished; there is no next task to start. In priority order:
+
 ```bash
-git checkout feature/reg-lowmem-parallel     # HEAD should be d03ff54
+git checkout feature/reg-lowmem-parallel     # HEAD should be 3be3da9
 cat .superpowers/sdd/progress.md             # per-task history + review findings
 python tests/testdata/generate_complete_testdata.py   # BEFORE any nf-test
 docker ps -a                                 # 'Created' forever = wedged, see §5.1
 ```
 
-Then start **Task 8** from the plan — its CI wiring is what finally makes every bit-identity
-check automatic instead of dependent on someone running Docker by hand.
+1. **Run it on a real slide** (§7.2) — the command and what to read are written out there. Nothing
+   else on this list changes what we know about whether the branch achieves its purpose.
+2. **Push the branch and watch CI.** The new `valis-unit` job is blocking and has never executed on
+   a runner; it is written against the same image the local runs used, but "works locally" is not
+   "works on ubuntu-latest".
+3. **Fix `generate_qc_report.nf.test`** (§6) — not ours, but it is the last thing between this
+   branch and a green gate.
+4. **Fix the spec's JVM-free wording** (§7.1) — the only item explicitly marked blocking-merge that
+   is purely editorial.
 
 Tasks 0-5 have all been reviewed: the review over `d0434c9..HEAD` was completed 2026-07-23
-(verdict PASS, 0 critical) and its findings are fixed in `6d7ad64`. Tasks 6 (`70a3d41`) and 7
-(`d03ff54`) carry a controller self-review only — an independent pass over `6850f82..HEAD` with
-the §4.4 lens is still worth having if subagents are available.
+(verdict PASS, 0 critical) and its findings are fixed in `6d7ad64`. Tasks 6 (`70a3d41`), 7
+(`d03ff54`) and 8 (`3be3da9`) carry a controller self-review only — **an independent pass over
+`6850f82..HEAD` with the §4.4 lens is the single highest-value review left**, given that the
+vacuity pattern has now recurred six times, most recently in task 7's join key.
 
 **Tooling note:** `nf-test` 0.9.5 is installed (jar in `~/.nf-test/`, wrapper on PATH).
 `brew install nf-test` DOES NOT EXIST — install from the pinned `askimed/nf-test` GitHub release,

@@ -2015,7 +2015,21 @@ git commit -m ":sparkles: Add --reg_compare: run both registration paths and dif
 
 ---
 
-### Task 8: Stage timings and CI
+### Task 8: Stage timings and CI  — DONE
+
+**Divergences from the code below:**
+1. **The timings file is lifted to the TASK ROOT** (`<patient>_reg_prep_timings.json`), not left at
+   `prep/stage_timings.json`. `publishDir`'s `pattern` cannot reach a file nested inside a
+   directory output — `prep/` publishes as a unit or not at all — so the nested form ran green and
+   published an EMPTY `timings/` directory. Caught by inspecting the published tree.
+2. **A second CI job, `valis-unit`, runs the three in-image UNIT suites on every push/PR and is
+   BLOCKING** (added to `all-tests`). Step 2 below only extends `distributed-integration`, which
+   was `workflow_dispatch`-only — so following it literally would have left every guarantee still
+   manual, which is the exact gap Task 8 exists to close.
+3. `distributed-integration` now also triggers on push to main/dev (matching `nf-test-real`),
+   not dispatch only.
+4. Stage names are `load` / `rigid_and_prep` / `dump`; the timings write happens BEFORE the
+   slide-loss guard, so a run that fails that guard still reports where its time went.
 
 **Files:**
 - Modify: `bin/reg_prep.py`
