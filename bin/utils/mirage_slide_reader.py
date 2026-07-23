@@ -87,7 +87,12 @@ class MirageVipsSlideReader(slide_io.SlideReader):
     def _build_metadata(self):
         ome_xml, tile_wh = _read_tiff_header(self.src_f)
         md = slide_io.MetaData(os.path.basename(self.src_f), "mirage-pyvips", series=self.series)
-        md.slide_dimensions = [(self._img.width, self._img.height)]
+        # VALIS contracts slide_dimensions as an ndarray of shape (n_levels, 2), (width, height)
+        # per level -- see valis_lib/slide_io.py's real readers (e.g. VipsSlideReader's
+        # _get_slide_dimensions_vips: ``np.array(slide_dims)``) and registration.py, which does
+        # array ops on it directly (``.max(axis=1)``, ``slide_dimensions[level]/slide_dimensions[0]``).
+        # mirage's OME-TIFFs are single-level, so this is a single (w, h) row.
+        md.slide_dimensions = np.array([[self._img.width, self._img.height]])
         md.n_channels = self._img.bands
         md.is_rgb = False
         md.channel_names = _channel_names(ome_xml, self._img.bands)
@@ -95,6 +100,17 @@ class MirageVipsSlideReader(slide_io.SlideReader):
         md.original_xml = ome_xml
         md.bf_datatype = slide_io.vips2bf_dtype(self._img.format)
         md.optimal_tile_wh = tile_wh
+        # Not part of MetaData.__init__'s defaults, but set by every real reader
+        # (BioFormatsSlideReader, CziJpgxrReader) using this exact is_rgb/n_channels convention,
+        # and consumed generically wherever a numpy array is converted back to pyvips with the
+        # correct band interpretation (slide_tools.numpy2vips). mirage's own can_read() already
+        # rejects RGB and n_channels==0 is impossible for a real slide, so this is unconditional.
+        if md.is_rgb:
+            md.pyvips_interpretation = 'srgb'
+        elif md.n_channels == 1:
+            md.pyvips_interpretation = 'b-w'
+        else:
+            md.pyvips_interpretation = 'multiband'
         return md
 
     @staticmethod

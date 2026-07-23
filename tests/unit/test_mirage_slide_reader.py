@@ -65,10 +65,15 @@ def test_metadata_reports_dims_and_channels():
     from mirage_slide_reader import MirageVipsSlideReader
     path, _ = _make_slide(tempfile.mkdtemp())
     md = MirageVipsSlideReader(path).metadata
-    assert md.slide_dimensions[0] == (W, H)
+    # VALIS contracts slide_dimensions as an ndarray of shape (n_levels, 2); mirage's OME-TIFFs
+    # are single-level, so shape must be (1, 2).
+    assert isinstance(md.slide_dimensions, np.ndarray)
+    assert md.slide_dimensions.shape == (1, 2)
+    assert tuple(md.slide_dimensions[0]) == (W, H)
     assert md.n_channels == C
     assert md.channel_names == ["DAPI", "SMA", "PANCK", "CD3"]
     assert md.is_rgb is False
+    assert md.pyvips_interpretation == "multiband"
 
 
 def test_can_read_rejects_untiled():
@@ -147,6 +152,7 @@ def test_pyvips_writer_single_channel_can_read_and_roundtrips():
     assert (img.width, img.height, img.bands) == (W, H, 1)
     got = np.frombuffer(img.write_to_memory(), dtype=np.uint16).reshape(H, W)
     assert np.array_equal(got, arr)
+    assert reader.metadata.pyvips_interpretation == "b-w"
 
 
 def test_can_read_rejects_non_bigtiff():
