@@ -1,10 +1,22 @@
 /*
- * WARP_SEG_QC - warp native cell polygons through the registrar + score overlap (reg_qc = 2)
+ * WARP_SEG_QC - staged, fixed-correspondence segmentation-overlap QC (reg_qc = 2)
  *
  * Loads the VALIS registrar pickle and warps the reference and moving native-cell GeoJSONs
- * into the aligned frame, scoring nuclei-mask overlap before (raw overlay) vs after (warped)
- * registration -> {before, after, delta} Dice/IoU/instance-F1. Runs in the VALIS container
- * (same image as REGISTER's classic path, so the pickle loads and scikit-image is present).
+ * through each registration stage in turn — native, rigid, non-rigid, micro. Cell-to-cell
+ * correspondence is established ONCE at the rigid stage (mutual-nearest centroid within a
+ * nuclear radius) and then held fixed, so each stage's per-pair IoU and centroid residual
+ * describe the same cells and the deltas are pure registration effects.
+ *
+ * The pre-micro stage checkpoint from REGISTER is optional but load-bearing: VALIS composes
+ * the micro residual into the same displacement field, so without the checkpoint the
+ * 'non_rigid' stage cannot be separated from 'micro' and is not reported (the output records
+ * `stages_separable: false` and says why).
+ *
+ * Scoring is per-pair on a local window, so peak memory is one nucleus rather than one slide —
+ * this process no longer allocates whole-slide label images.
+ *
+ * Runs in the VALIS container (same image as REGISTER's classic path, so the pickle loads and
+ * scikit-image/scipy are present).
  *
  * Classic path only: the distributed registration path produces no registrar pickle.
  */
@@ -15,7 +27,7 @@ process WARP_SEG_QC {
     container "cdgatenbee/valis-wsi:1.0.0"
 
     input:
-    tuple val(meta), path(pickle), val(ref_slide), val(moving_slide), path(ref_geojson), path(moving_geojson)
+    tuple val(meta), path(pickle), val(ref_slide), val(moving_slide), path(ref_geojson), path(moving_geojson), path(stage_checkpoint)
 
     output:
     tuple val(meta), path("*_seg_qc.json"), emit: metrics
@@ -28,6 +40,9 @@ process WARP_SEG_QC {
     script:
     def args = task.ext.args ?: ''
     def prefix = "${meta.patient_id}_${moving_geojson.simpleName}"
+    // stage_checkpoint is staged as a directory; absent when REGISTER did not emit one
+    // (reg_qc < 2 on the registering run, or the snapshot failed and was logged as a warning).
+    def ckpt_arg = stage_checkpoint ? "--checkpoint-dir ${stage_checkpoint}" : ''
     """
     echo "${task.process},${meta.patient_id},${moving_geojson.name},0" > ${prefix}.WARP_SEG_QC.size.csv
 
@@ -41,6 +56,7 @@ process WARP_SEG_QC {
         --patient-id ${meta.patient_id} \\
         --moving-name '${moving_slide}' \\
         --reference-name '${ref_slide}' \\
+        ${ckpt_arg} \\
         ${args}
 
     cat <<-END_VERSIONS > versions.yml
@@ -48,19 +64,36 @@ process WARP_SEG_QC {
         python: \$(python --version 2>&1 | sed 's/Python //')
         valis: \$(python -c "import valis; print(valis.__version__)" 2>/dev/null || echo "unknown")
         scikit-image: \$(python -c "import skimage; print(skimage.__version__)" 2>/dev/null || echo "unknown")
+        scipy: \$(python -c "import scipy; print(scipy.__version__)" 2>/dev/null || echo "unknown")
     END_VERSIONS
     """
 
     stub:
     def prefix = "${meta.patient_id}_${moving_geojson.simpleName}"
+    // Built in Groovy rather than inline in the shell string: the record is nested enough that
+    // a hand-written JSON literal in a heredoc is a quoting accident waiting to happen.
+    def stage_stub = [n_pairs: 0, n_pairs_scored: 0, iou_n: 0, displacement_px_n: 0]
+    def stages = ['native', 'rigid', 'non_rigid', 'micro']
+    def stub_json = groovy.json.JsonOutput.toJson([
+        patient_id      : meta.patient_id,
+        moving          : moving_slide,
+        reference       : ref_slide,
+        stages_separable: true,
+        stage_order     : stages,
+        stages          : stages.collectEntries { [(it): stage_stub] },
+        delta_vs_anchor : (stages - 'rigid').collectEntries { [(it): [:]] },
+        matching        : [method: 'mutual_nn_centroid', anchor_stage: 'rigid', n_pairs: 0],
+        counts          : [features_ref: 0, features_moving: 0],
+    ])
     """
-    echo '{"patient_id": "${meta.patient_id}", "moving": "${moving_slide}", "reference": "${ref_slide}", "before": {"dice": 0.0, "iou": 0.0, "instance_f1": 0.0}, "after": {"dice": 0.0, "iou": 0.0, "instance_f1": 0.0}, "delta": {"dice": 0.0, "iou": 0.0, "instance_f1": 0.0}}' > ${prefix}_seg_qc.json
+    echo '${stub_json}' > ${prefix}_seg_qc.json
     echo "STUB,${meta.patient_id},stub,0" > ${prefix}.WARP_SEG_QC.size.csv
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         python: stub
         valis: stub
         scikit-image: stub
+        scipy: stub
     END_VERSIONS
     """
 }

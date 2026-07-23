@@ -13,8 +13,10 @@
     masks' cell labels align with the newly registered cycle. Registration-drift
     QC surfaces misalignment; it is non-gating:
       - reg_qc >= 1: DAPI-overlay image QC (GENERATE_REGISTRATION_QC)
-      - reg_qc >= 2: + seg-overlap Dice/IoU (SEG_QC_GEOJSON -> WARP_SEG_QC),
-        using the classic VALIS registrar pickle from the 2-node graph.
+      - reg_qc >= 2: + staged seg-overlap QC (SEG_QC_GEOJSON -> WARP_SEG_QC) — per-pair
+        IoU and centroid residual at each registration stage, on a correspondence fixed
+        after rigid. Uses the classic VALIS registrar pickle from the 2-node graph, plus
+        REGISTER's pre-micro stage checkpoint. See docs/registration_qc.md.
 
     Per-compartment (expanded) quantification is supported: when
     params.quantify_compartments, the reused nuclei mask feeds QUANTIFY and
@@ -106,11 +108,20 @@ workflow ADD_CYCLE {
         ch_ref_gj = ch_gj.reference.map { meta, gj -> [meta.patient_id, gj, gj.simpleName] }
         ch_mov_gj = ch_gj.moving.map    { meta, gj -> [meta.patient_id, meta, gj, gj.simpleName] }
 
+        // One stage-checkpoint entry per patient, `[]` where REGISTER wrote none — see the
+        // same construction in registration.nf. Total on purpose: combining on an optional
+        // channel would drop the patients that lack it rather than costing them a stage.
+        ch_ckpt_by_patient = VALIS_ADAPTER.out.registrar
+            .map { pid, _pickle -> tuple(pid, []) }
+            .join(VALIS_ADAPTER.out.stage_checkpoint, by: 0, remainder: true)
+            .map { pid, _placeholder, ckpt -> tuple(pid, ckpt ?: []) }
+
         ch_for_warp = ch_mov_gj
             .combine(ch_ref_gj, by: 0)
             .combine(VALIS_ADAPTER.out.registrar, by: 0)
-            .map { pid, meta, mov_gj, mov_name, ref_gj, ref_name, pickle ->
-                tuple(meta, pickle, ref_name, mov_name, ref_gj, mov_gj)
+            .combine(ch_ckpt_by_patient, by: 0)
+            .map { pid, meta, mov_gj, mov_name, ref_gj, ref_name, pickle, ckpt ->
+                tuple(meta, pickle, ref_name, mov_name, ref_gj, mov_gj, ckpt)
             }
         WARP_SEG_QC(ch_for_warp)
         ch_seg_qc = WARP_SEG_QC.out.metrics
