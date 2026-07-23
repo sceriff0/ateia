@@ -338,15 +338,61 @@ jobs:
             tests/output/
 
   # ============================================================================
+  # In-image unit tests (spec §8). These need the VALIS image for pyvips/valis but
+  # NOT a registration run, so they are cheap enough to gate EVERY push — unlike
+  # the bit-identity harnesses below, which run a real reg_prep.
+  #
+  # They exist because the low-memory path's correctness argument is "the reader
+  # and the tile grid reproduce VALIS exactly". Before this job, nothing checked
+  # that automatically: every guarantee depended on someone remembering to run
+  # Docker by hand. This is the job that makes them non-optional.
+  # ============================================================================
+  valis-unit:
+    name: In-image unit tests (reader, grid, compare)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # The committed fixtures are rewritten by the generator (see tests/testdata):
+      # without this the tests read stale/absent inputs.
+      - name: Generate test data
+        run: |
+          pip install numpy tifffile
+          python tests/testdata/generate_complete_testdata.py
+
+      - name: Run the in-image unit suites
+        run: |
+          IMG="bolt3x/attend_image_analysis:mirage_valis_1.0.0"
+          docker pull "$IMG"
+          # Each file is its own step-within-a-step so the log names the failing suite.
+          # pytest is NOT installed in this image — every one of these carries a stdlib
+          # __main__ runner and exits non-zero on failure. Do not switch to `pytest`.
+          for t in tests/unit/test_tile_grid.py \
+                   tests/unit/test_mirage_slide_reader.py \
+                   tests/unit/test_compare_registration.py; do
+            echo "::group::$t"
+            docker run --rm -v "$PWD":/work -w /work "$IMG" python3 "$t"
+            echo "::endgroup::"
+          done
+
+  # ============================================================================
   # Distributed registration bit-identical check (needs the published patched
-  # image; manual trigger). Runs the real integration harness in the patched
-  # VALIS image: distributed (PREP -> REG_TILE -> FINALIZE) == in-process tiler,
-  # max|Δ|=0. See .github/workflows/build-valis-image.yml to publish the image.
+  # image). Runs the real integration harnesses in the patched VALIS image:
+  # distributed (PREP -> REG_TILE -> FINALIZE) == in-process tiler, max|Δ|=0.
+  # See .github/workflows/build-valis-image.yml to publish the image.
+  #
+  # Trigger matches nf-test-real: push to main/dev, plus manual dispatch. These
+  # run a real reg_prep, so they are too slow to gate every PR — but leaving them
+  # dispatch-only meant nothing on this branch was ever verified automatically.
   # ============================================================================
   distributed-integration:
     name: distributed bit-identical (real image)
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev'))
     # Pulls the patched VALIS image from Docker Hub (public — no auth needed).
     permissions:
       contents: read
@@ -360,12 +406,40 @@ jobs:
           pip install numpy tifffile
           python tests/testdata/generate_complete_testdata.py
 
+      - name: Pull the patched VALIS image
+        run: docker pull bolt3x/attend_image_analysis:mirage_valis_1.0.0
+
       - name: Run distributed bit-identical verification in the patched image
         run: |
           IMG="bolt3x/attend_image_analysis:mirage_valis_1.0.0"
-          docker pull "$IMG"
           docker run --rm -v "$PWD":/work -w /work "$IMG" \
             python3 tests/integration/verify_distributed_bitidentical.py
+
+      # Spec assumption A1: pyvips and BioFormats decode mirage's OME-TIFF to the
+      # same pixels. The whole reader swap rests on this; it asserts the reader
+      # class too, so it cannot pass vacuously.
+      - name: Probe reader equivalence (spec A1)
+        run: |
+          IMG="bolt3x/attend_image_analysis:mirage_valis_1.0.0"
+          docker run --rm -v "$PWD":/work -w /work "$IMG" \
+            python3 tests/integration/probe_reader_equivalence.py
+
+      # Legs 1 and 2: full-res warp through the lazy reader == BioFormats, and the
+      # output-tile fan-out == the single-process warp.
+      - name: Verify low-memory path is bit-identical
+        run: |
+          IMG="bolt3x/attend_image_analysis:mirage_valis_1.0.0"
+          docker run --rm -v "$PWD":/work -w /work "$IMG" \
+            python3 tests/integration/verify_lowmem_bitidentical.py
+
+      # Micro-registration is degenerate at 128px, hence the 1024px fixture. This
+      # harness existed in the repo but was referenced by no workflow.
+      - name: Verify micro-registration is bit-identical
+        run: |
+          IMG="bolt3x/attend_image_analysis:mirage_valis_1.0.0"
+          docker run --rm -v "$PWD":/work -w /work "$IMG" bash -lc '
+            python3 tests/testdata/generate_large_fixture.py --size 1024 --out /tmp/bigdata &&
+            python3 tests/integration/verify_micro_bitidentical.py'
 
   # ============================================================================
   # Linting
@@ -398,7 +472,7 @@ jobs:
   # ============================================================================
   all-tests:
     name: All Tests
-    needs: [python-tests, nextflow-stub, nf-test-stub, lint]
+    needs: [python-tests, nextflow-stub, nf-test-stub, valis-unit, lint]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -414,6 +488,10 @@ jobs:
           fi
           if [ "${{ needs.nf-test-stub.result }}" != "success" ] && [ "${{ needs.nf-test-stub.result }}" != "skipped" ]; then
             echo "nf-test stub failed"
+            exit 1
+          fi
+          if [ "${{ needs.valis-unit.result }}" != "success" ] && [ "${{ needs.valis-unit.result }}" != "skipped" ]; then
+            echo "In-image unit tests failed (reader / tile grid / compare)"
             exit 1
           fi
           if [ "${{ needs.lint.result }}" != "success" ] && [ "${{ needs.lint.result }}" != "skipped" ]; then

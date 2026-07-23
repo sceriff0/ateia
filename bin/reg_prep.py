@@ -19,6 +19,7 @@ import argparse
 import json
 import os
 import sys
+import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "utils"))
 
@@ -42,6 +43,41 @@ from valis import registration, slide_tools
 from valis import serial_non_rigid as snr
 from valis.non_rigid_registrars import OpticalFlowWarper, NonRigidTileRegistrar
 from valis.registration import CROP_REF
+
+
+_TIMINGS = {}
+
+
+class _stage:
+    """Record wall-clock per prep phase (spec §5.6).
+
+    REG_PREP is the one process on the distributed path that still does whole-slide work, so it is
+    the one whose cost is not obvious from the DAG. Recording it per phase means the FIRST real run
+    says which loop to attack — is it the reader, the rigid stage, or the tiler-input dump — instead
+    of the next optimisation being a guess. The exit is unconditional, so a phase that raises still
+    reports the time it burned before failing.
+    """
+
+    def __init__(self, name):
+        self.name = name
+
+    def __enter__(self):
+        self.t0 = time.perf_counter()
+        return self
+
+    def __exit__(self, *exc):
+        _TIMINGS[self.name] = round(time.perf_counter() - self.t0, 3)
+        print(f"[reg_prep] stage {self.name}: {_TIMINGS[self.name]}s", flush=True)
+        return False
+
+
+def _write_timings(out_dir):
+    """Dump _TIMINGS next to the prep output. Never raises: a failed write must not lose a run."""
+    try:
+        with open(os.path.join(out_dir, "stage_timings.json"), "w") as fh:
+            json.dump(_TIMINGS, fh, indent=2)
+    except OSError as exc:
+        print(f"[reg_prep] WARNING: could not write stage_timings.json: {exc}", flush=True)
 
 
 def _jd(o):
@@ -123,10 +159,12 @@ def main():
     snr.NonRigidZImage.calc_deformation = cap_calc
     OpticalFlowWarper.register = noop_register
     try:
-        reg = registration.Valis(args.input_dir, args.out, **kwargs)
-        reader_cls = (MirageVipsSlideReader
-                      if all_readable(slide_paths(args.input_dir)) else None)
-        reg.register(reader_cls=reader_cls)
+        with _stage("load"):
+            reg = registration.Valis(args.input_dir, args.out, **kwargs)
+            reader_cls = (MirageVipsSlideReader
+                          if all_readable(slide_paths(args.input_dir)) else None)
+        with _stage("rigid_and_prep"):
+            reg.register(reader_cls=reader_cls)
     finally:
         snr.NonRigidZImage.calc_deformation = orig_calc
         OpticalFlowWarper.register = orig_reg
@@ -180,37 +218,41 @@ def main():
         raise RuntimeError("[reg_prep] no reference slide resolved by VALIS (reg.get_ref_slide() is None)")
 
     slides_written = []
-    for name, slide_obj in reg.slide_dict.items():
-        if name == ref_stem or name not in cap or "moving" not in cap[name]:
-            continue  # only moving slides that actually registered
-        rec = cap[name]
-        sdir = os.path.join(args.out, name)
-        tiler_inputs = os.path.join(sdir, "tiler_inputs")
-        os.makedirs(tiler_inputs, exist_ok=True)
+    with _stage("dump"):
+        for name, slide_obj in reg.slide_dict.items():
+            if name == ref_stem or name not in cap or "moving" not in cap[name]:
+                continue  # only moving slides that actually registered
+            rec = cap[name]
+            sdir = os.path.join(args.out, name)
+            tiler_inputs = os.path.join(sdir, "tiler_inputs")
+            os.makedirs(tiler_inputs, exist_ok=True)
 
-        # Dump the tiler-input contract (2-D images + grid) by driving the tiler on the captured 2-D
-        # images with the halt hook (grid is set up in register() before calc() -> _dump_inputs -> raise).
-        valis_tiling.install_halt_hook(tiler_inputs)
-        try:
-            t = NonRigidTileRegistrar(tile_wh=args.tile_wh, tile_buffer=args.tile_buffer)
-            t.register(rec["moving"], rec["fixed"], mask=rec["mask"],
-                       non_rigid_registrar_cls=OpticalFlowWarper,
-                       processing_cls=None, processing_kwargs=None, target_stats=None)
-        except valis_tiling.TilesPending:
-            pass
-        finally:
-            valis_tiling.clear_hook()
+            # Dump the tiler-input contract (2-D images + grid) by driving the tiler on the captured 2-D
+            # images with the halt hook (grid is set up in register() before calc() -> _dump_inputs -> raise).
+            valis_tiling.install_halt_hook(tiler_inputs)
+            try:
+                t = NonRigidTileRegistrar(tile_wh=args.tile_wh, tile_buffer=args.tile_buffer)
+                t.register(rec["moving"], rec["fixed"], mask=rec["mask"],
+                           non_rigid_registrar_cls=OpticalFlowWarper,
+                           processing_cls=None, processing_kwargs=None, target_stats=None)
+            except valis_tiling.TilesPending:
+                pass
+            finally:
+                valis_tiling.clear_hook()
 
-        if rec["reg_mask"] is not None:
-            np.save(os.path.join(tiler_inputs, "reg_mask.npy"), rec["reg_mask"])
+            if rec["reg_mask"] is not None:
+                np.save(os.path.join(tiler_inputs, "reg_mask.npy"), rec["reg_mask"])
 
-        ws = _warp_state(slide_obj, name, internal_pad={"out_shape": full_disp, "bbox": non_rigid_bbox},
-                         from_rigid=rec["from_rigid"], rec=rec)
-        with open(os.path.join(sdir, "warp_state.json"), "w") as fh:
-            json.dump(ws, fh, indent=2, default=_jd)
-        slides_written.append(name)
-        print(f"[reg_prep] dumped {name}: tiler_inputs + warp_state "
-              f"(reg_shape={ws['reg_img_shape_rc']} bbox={ws['bbox_xywh']})", flush=True)
+            ws = _warp_state(slide_obj, name, internal_pad={"out_shape": full_disp, "bbox": non_rigid_bbox},
+                             from_rigid=rec["from_rigid"], rec=rec)
+            with open(os.path.join(sdir, "warp_state.json"), "w") as fh:
+                json.dump(ws, fh, indent=2, default=_jd)
+            slides_written.append(name)
+            print(f"[reg_prep] dumped {name}: tiler_inputs + warp_state "
+                  f"(reg_shape={ws['reg_img_shape_rc']} bbox={ws['bbox_xywh']})", flush=True)
+
+    # Written BEFORE the loss guard below, so a run that fails it still says where the time went.
+    _write_timings(args.out)
 
     # Guard against silent slide loss: every non-reference slide VALIS registered MUST have produced a
     # tiler_inputs+warp_state dump. If capture didn't fire for one (name mismatch, swallowed error), it
@@ -228,7 +270,8 @@ def main():
 
     if heap:
         registration.kill_jvm()
-    print(f"[reg_prep] DONE — {len(slides_written)} moving slide(s): {slides_written}", flush=True)
+    print(f"[reg_prep] DONE — {len(slides_written)} moving slide(s): {slides_written} "
+          f"timings={_TIMINGS}", flush=True)
 
 
 if __name__ == "__main__":

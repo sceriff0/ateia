@@ -23,6 +23,10 @@ process REG_PREP {
 
     output:
     tuple val(patient_id), path("prep"), val(all_metas), emit: prepped
+    // Lifted to the task root, like *.size.csv. publishDir's `pattern` cannot reach a file NESTED
+    // inside a directory output — prep/ publishes as a unit or not at all — so a nested declaration
+    // silently creates an empty timings/ dir. Verified by a stub run, not assumed (spec §5.6).
+    tuple val(patient_id), path("*_reg_prep_timings.json"), emit: timings
     path "versions.yml"                                , emit: versions
     path "*.size.csv"                                  , emit: size_log
 
@@ -58,6 +62,12 @@ process REG_PREP {
         ${skip_micro} \\
         ${args}
 
+    # Lift the stage timings to the task root so publishDir can reach them (see the output block).
+    # reg_prep.py's write is best-effort by design — a failed timings write must not lose a run —
+    # so fall back to an empty object rather than failing the task on a missing report.
+    cp prep/stage_timings.json ${patient_id}_reg_prep_timings.json 2>/dev/null \\
+        || echo '{}' > ${patient_id}_reg_prep_timings.json
+
     # Drop the working copies; keep prep/ (the handoff).
     find staged -maxdepth 1 -type f -delete
 
@@ -78,6 +88,9 @@ process REG_PREP {
     ws='{"from_rigid_reg":false,"M":[[1,0,0],[0,1,0],[0,0,1]],"processed_img_shape_rc":[10,10],"reg_img_shape_rc":[10,10],"aligned_slide_shape_rc":[10,10],"bbox_xywh":[0,0,10,10],"bg_color":[0,0,0],"series":0,"is_rgb":false,"interp_method":"bicubic"}'
     wsm='{"from_rigid_reg":false,"M":[[1,0,0],[0,1,0],[0,0,1]],"processed_img_shape_rc":[10,10],"reg_img_shape_rc":[10,10],"aligned_slide_shape_rc":[10,10],"bbox_xywh":[0,0,10,10],"bg_color":[0,0,0],"series":0,"is_rgb":false,"interp_method":"bicubic","internal_pad":{"out_shape":[10,10],"bbox":[0,0,10,10]}}'
     manifest='{"n_tiles":1,"n_rows":1,"n_cols":1,"tile_wh":512,"tile_buffer":100,"has_mask":false,"has_target_stats":false,"processing_cls":null,"non_rigid_registrar_cls":"valis.non_rigid_registrars:OpticalFlowWarper"}'
+
+    echo '{"load":0.0,"rigid_and_prep":0.0,"dump":0.0}' > prep/stage_timings.json
+    cp prep/stage_timings.json ${patient_id}_reg_prep_timings.json
 
     # Reference dir: warp_state only (no tiler_inputs -> adapter warps it with --rigid-only)
     mkdir -p "prep/\${ref_stem}"
