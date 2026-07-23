@@ -166,7 +166,8 @@ workflow REGISTRATION {
     //   - Converts output back to [meta, file] standard format
 
     // Opt-in distributed tiled registration (spec §6.5/§6.6): lifts VALIS's non-rigid tile loop into
-    // REG_PREP -> REG_TILE (fan-out) -> REG_FINALIZE (fan-in) for low-RAM clusters. Bit-identical to
+    // REG_PREP -> REG_TILE (fan-out) -> REG_COMPOSE_* (fan-in) -> REG_WARP_TILE (fan-out) ->
+    // REG_ASSEMBLE for low-RAM clusters. Bit-identical to
     // VALIS's own tiler on its processed 2-D images. Default (reg_distributed_tiling=false) = classic.
     //
     // IMPORTANT (spec §6.5): tiled non-rigid != whole-image non-rigid. VALIS only tiles when

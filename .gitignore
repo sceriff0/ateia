@@ -26,6 +26,10 @@ null/
 # Testing
 .nf-test/
 .nf-test.log
+# nf-test writes a scratch <hash>.nf per test into the repo ROOT (77 after one
+# suite run) -- untracked noise that makes `git status` unreadable in a worktree
+# where `git add -A` is already unsafe.
+.nf-test-*.nf
 .pytest_cache/
 
 # Traces

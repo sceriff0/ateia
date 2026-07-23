@@ -79,7 +79,7 @@ process REG_PREP {
     wsm='{"from_rigid_reg":false,"M":[[1,0,0],[0,1,0],[0,0,1]],"processed_img_shape_rc":[10,10],"reg_img_shape_rc":[10,10],"aligned_slide_shape_rc":[10,10],"bbox_xywh":[0,0,10,10],"bg_color":[0,0,0],"series":0,"is_rgb":false,"interp_method":"bicubic","internal_pad":{"out_shape":[10,10],"bbox":[0,0,10,10]}}'
     manifest='{"n_tiles":1,"n_rows":1,"n_cols":1,"tile_wh":512,"tile_buffer":100,"has_mask":false,"has_target_stats":false,"processing_cls":null,"non_rigid_registrar_cls":"valis.non_rigid_registrars:OpticalFlowWarper"}'
 
-    # Reference dir: warp_state only (no tiler_inputs -> adapter routes it to REG_WARP_REF)
+    # Reference dir: warp_state only (no tiler_inputs -> adapter warps it with --rigid-only)
     mkdir -p "prep/\${ref_stem}"
     echo "\$ws" > "prep/\${ref_stem}/warp_state.json"
 

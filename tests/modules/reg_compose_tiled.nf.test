@@ -1,14 +1,14 @@
 nextflow_process {
 
-    name "Test REG_FINALIZE process"
-    script "modules/local/reg_finalize.nf"
-    process "REG_FINALIZE"
+    name "Test REG_COMPOSE_TILED process"
+    script "modules/local/reg_compose_tiled.nf"
+    process "REG_COMPOSE_TILED"
 
     tag "modules"
     tag "modules_local"
-    tag "reg_finalize"
+    tag "reg_compose_tiled"
 
-    test("REG_FINALIZE - stub") {
+    test("REG_COMPOSE_TILED - stub") {
 
         options "-stub"
 
@@ -30,7 +30,7 @@ nextflow_process {
         then {
             assertAll(
                 { assert process.success },
-                { assert process.out.registered },
+                { assert process.out.field },
                 { assert process.out.versions }
             )
         }
