@@ -131,10 +131,23 @@ All have complete, concrete code in the plan file. Start at Task 4.
 
 ## 7. Known open items (none blocking)
 
-1. **UNRESOLVED:** `reg_prep` exits 0 but prints a `Traceback`. Probably the intentional
-   `TilesPending` halt (`bin/reg_prep.py:191`) being logged, since `Valis.register()` swallows all
-   exceptions by design — but **this was never confirmed**. Verify the traceback text and that
-   `warp_state.json` + `tiler_inputs/` are actually produced, before trusting the rigid stage.
+1. **RESOLVED 2026-07-23 — benign, no action needed.** `reg_prep` exits 0 but prints a
+   `Traceback`. It is NOT the `TilesPending` halt (that was the wrong guess). It is VALIS's own
+   registrar-pickle step failing:
+   `registration.py:4144 pickle.dump(self, ...)` ->
+   `ffi.error: struct _VipsObject: wrong size for field 'constructed' (cdef says 1, but C
+   compiler says 4)` — a pyvips cffi/libvips ABI mismatch, caught by `register()`'s broad
+   `except` and logged.
+   Harmless HERE **by design**: pyvips images are unpicklable, which is why the distributed path
+   was built on a plain-data handoff (`.v`/`.npy`/JSON) and never consumes that pickle.
+   Confirmed `reg_prep` still does its real work — dumps both warp states plus `tiler_inputs/`,
+   and `warp_state.json` carries all 12 expected keys (`M`, `aligned_slide_shape_rc`,
+   `bbox_xywh`, `bg_color`, `from_rigid_reg`, `internal_pad`, `interp_method`, `is_rgb`,
+   `processed_img_shape_rc`, `reg_img_shape_rc`, `series`, `slide_name`).
+   ⚠️ SEPARATE CONCERN, unrelated to this branch: the CLASSIC path DOES need that pickle
+   (`reg_qc=2` warps GeoJSON polygons through it via `WARP_SEG_QC`). If this ABI mismatch also
+   occurs on the cluster, classic `reg_qc=2` is broken there too. Most likely local to this
+   image/QEMU emulation — worth a one-off check on real infrastructure.
 2. `conf/modules.config:260` sets only `publishDir` for `REG_NONRIGID|REG_MICRO_PREP`, so
    `REG_NONRIGID` inherits `process_medium` = **200 GB** for single-digit-GB work; `REG_MICRO_PREP`
    inherits `process_high` = 300 GB. Task 5 fixes this.
