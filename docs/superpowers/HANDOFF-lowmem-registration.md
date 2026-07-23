@@ -73,6 +73,7 @@ also removed the 40 GB-heap process that had been OOMing on merged multi-cycle r
 | NF wiring works and the default path is untouched | 6/6 nf-tests on the CI gate; full stub run completes, still routes to `VALIS_ADAPTER:REGISTER`, no fan-out tasks |
 | `--reg_compare` runs BOTH paths and diffs them | paired nf-tests assert WHICH processes ran (`REGISTER` + `REG_PREP` + `REG_ASSEMBLE` + `COMPARE_REGISTRATION` present with the flag, `COMPARE_REGISTRATION`/`REG_PREP` absent without it); full stub run `EXIT 0`, no config-selector WARNs, outputs in 3 distinct dirs |
 | the diff tool measures what it claims | `test_compare_registration.py` 6/6 in-image: every "they agree" paired with a perturbation of known exact magnitude; a LAST-channel-only perturbation (catches a regression to pyvips' default `n=1`); ragged tiled sweep == single-shot; comparing a file with itself fails loudly |
+| moving the band-join into `vips_pages` changed no reader behaviour | `test_mirage_slide_reader.py` **11/11** in-image after the move (same 11 as before it) |
 
 ```bash
 # unit (in-image)
@@ -258,13 +259,6 @@ Concrete code is in the plan file.
    The 1.43x compression measured on fixtures is NOT a capacity-planning number.
 
 **Should decide during Task 8**
-2b. **One in-image test was NOT re-run after task 7.** `d03ff54` moved the page-stack band-join
-   out of `mirage_slide_reader` into `bin/utils/vips_pages.py` (re-exported, so callers are
-   unchanged). `tests/unit/test_mirage_slide_reader.py` — 11/11 before the move — could not be
-   re-run: Docker wedged mid-task (§5.1). Name-completeness and absence of dangling references
-   were checked statically, and `test_compare_registration.py` exercises the extracted module
-   directly (6/6), but **run `test_mirage_slide_reader.py` in-image before merging.**
-
 3. **`can_read()` accepts a non-OME grayscale multi-page tiled BigTIFF** (pyvips auto-populates
    `page-height`), degrading channel names to `C0/C1`. `workflows/mirage.nf:213` shows
    `--start registration` takes USER-SUPPLIED paths, so this is reachable. Channel names feed the
@@ -309,12 +303,10 @@ git checkout feature/reg-lowmem-parallel     # HEAD should be d03ff54
 cat .superpowers/sdd/progress.md             # per-task history + review findings
 python tests/testdata/generate_complete_testdata.py   # BEFORE any nf-test
 docker ps -a                                 # 'Created' forever = wedged, see §5.1
-docker run --rm -v "$PWD":/work -w /work bolt3x/attend_image_analysis:mirage_valis_1.0.0 \
-  python3 tests/unit/test_mirage_slide_reader.py      # §7.2b: owed from task 7, expect 11/11
 ```
 
-Then start **Task 8** from the plan — and note that Task 8's CI wiring is what finally makes the
-owed re-run above (and every other bit-identity check) automatic instead of manual.
+Then start **Task 8** from the plan — its CI wiring is what finally makes every bit-identity
+check automatic instead of dependent on someone running Docker by hand.
 
 Tasks 0-5 have all been reviewed: the review over `d0434c9..HEAD` was completed 2026-07-23
 (verdict PASS, 0 critical) and its findings are fixed in `6d7ad64`. Tasks 6 (`70a3d41`) and 7
