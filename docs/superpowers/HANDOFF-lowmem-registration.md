@@ -41,7 +41,7 @@ b6d2a63 / 3fb20c4 / 9ad0ff7  :memo: plan + spec
 Working tree clean except pre-existing untracked `illum_bench/` — **keep it untracked, never
 `git add -A`** (another agent may share this worktree).
 
-Plan tasks 0-3 COMPLETE. **Tasks 4-8 NOT STARTED.**
+Plan tasks 0-4 COMPLETE (Task 4 added `6850f82` + `59ce171`; see §9). **Tasks 5-8 NOT STARTED.**
 
 ## 3. What is actually PROVEN (with the command to reproduce)
 
@@ -102,7 +102,7 @@ All have complete, concrete code in the plan file. Start at Task 4.
 - **Task 5 — NF modules + adapter rewiring.** The riskiest task. Splits finalize into
   compose → grid → tile-warp → assemble; DELETES `REG_WARP_REF` (reference goes through the same
   chain with `--rigid-only`, which also removes the 40 GB-heap process that had been OOMing on
-  merged references). Needs `nf-test` (NOT INSTALLED — `brew install nf-test`).
+  merged references). `nf-test` 0.9.5 IS NOW INSTALLED (see §9).
 - **Task 6 — `mode=add_cycle` + `reg_qc=2` fast-fail.**
 - **Task 7 — `--reg_compare`** (runs both adapters over the same slides, streams a per-channel diff).
 - **Task 8 — REG_PREP stage timings + CI wiring**, including the currently-unreferenced
@@ -165,9 +165,64 @@ All have complete, concrete code in the plan file. Start at Task 4.
 ```bash
 git checkout feature/reg-lowmem-parallel
 cat .superpowers/sdd/progress.md          # per-task history + review findings
-brew install nf-test                      # needed by Task 5
 ```
 
-Then either resolve open item §7.1 (cheap, ~10 min of container time) or start Task 4 from the
-plan. Execution has been running via `superpowers:subagent-driven-development`, one subagent per
-task plus a task review; `.superpowers/sdd/` holds every brief, report and review diff.
+**Tasks 0-4 are COMPLETE.** Start Task 5 from the plan — but first run the review pass that is
+still owed over `65c90f1..HEAD` (Task 3 was never formally reviewed and four commits now sit on
+it, and Task 5 rewires exactly that code).
+
+Execution originally ran via `superpowers:subagent-driven-development`, one subagent per task plus
+a task review; `.superpowers/sdd/` holds every brief, report and review diff. Task 4 was executed
+directly by the controller instead (no subagents), which is why it has a self-review rather than
+an independent one.
+
+## 9. Task 4 — done, and what it changed about the picture
+
+Commits: `6850f82` (tile fan-out), `59ce171` (compress the tiles).
+
+| Claim | Evidence |
+|---|---|
+| Tile fan-out == single-process warp | `LEG 2 ... equal=True max\|delta\|=0.0`, 9 tiles in a 3x3 grid, 5 of them ragged-edged |
+| Compressed tiles are lossless end-to-end | same leg 2, with `.tif` deflate+predictor tiles; round-trip also checked directly for every tile shape leg 2 emits x uchar/ushort/float |
+| `output_grid` partitions exactly | unit tests paint a coverage counter — catches gaps AND overlaps; `9/9 passed` |
+
+**`nf-test` install: `brew install nf-test` DOES NOT EXIST** (no such formula — this handoff said
+otherwise and it cost a cycle). Installed instead from the pinned GitHub release: download
+`nf-test-0.9.5.tar.gz` from `askimed/nf-test` releases, put `nf-test.jar` in `~/.nf-test/` and the
+`nf-test` wrapper on PATH. `nf-test version` -> 0.9.5, Nextflow 25.04.7. Avoid `nf-test update`,
+which curl-pipes to bash. Bioconda (`conda install -c bioconda nf-test`) also works.
+
+**A vacuity gap was found and closed in the EXISTING leg 1.** `px()` read with pyvips' default
+`n=1`, and BOTH writers in play stack channels vertically into pages (valis
+`slide_io.save_ome_tiff` does `arrayjoin(bandsplit(), across=1)`; so does `_save_ome_pyvips`) — so
+every `max|delta|=0.0` on this branch before `6850f82` covered **channel 0 of 3**. Now reads
+`n=-1` and asserts the loaded array is the full C x H x W stack. Same family as §4.3; assume more
+of them exist.
+
+**New traps, both real:**
+- The output canvas is NOT `aligned_slide_shape_rc` — `warp_img` crops to `bbox_xywh`
+  (`warp_tools.py:938-943`). Ask the lazy warp for `.width`/`.height` instead of predicting it;
+  that costs nothing because pyvips knows dimensions without decoding.
+- TIFF tile dimensions must be multiples of 16 and cannot exceed the image. A fixed 512px internal
+  tile size made small tiles unreadable (`tile size out of range`) — invisible at production tile
+  sizes (4096px), caught only because leg 2 uses a deliberately awkward 48px ragged grid. **Keep
+  new tests biased toward awkward geometry, not round numbers.**
+
+**Test ergonomics:** `VERIFY_LOWMEM_WORK=<dir>` + `VERIFY_LOWMEM_REUSE_PREP=1` skips the 5-15 min
+`reg_prep` and reuses an existing prep (opt-in, loudly announced, off in CI). Point `WORK` at a
+bind mount so it survives `docker run --rm`. Cuts the iteration cycle from ~12 min to ~3.
+
+## 10. Open items carried into Task 5
+
+1. **Review pass owed over `65c90f1..HEAD`** — see §8. Highest priority.
+2. **No provenance binds a tile to the field/warp state that produced it.** `_open_tile` checks
+   dimensions only, so a stale same-sized tile assembles silently. Not reachable today; Task 5's
+   `-resume` and cached task dirs are exactly what make it reachable. Design it in, don't retrofit:
+   stamp `grid.json` with a hash of field + warp state and check it at assembly.
+3. **Tile scratch is still large even compressed.** Measured 1.43x on 128px synthetic fixtures,
+   which is NOT a capacity-planning number (real slides have far more spatial correlation). Budget
+   disk in the Task 5 process directives.
+4. `reg_assemble` opens every tile before consuming any — fine at the 4096px default (~600 tiles
+   for a whole slide), but ~38k open images at `--tile-wh 512`. Document a floor.
+5. Items 2-5 of §7 (modules.config memory labels, the reg_finalize JVM-leak line, can_read
+   accepting non-OME grayscale, the warp_source docstring) are all still open.
