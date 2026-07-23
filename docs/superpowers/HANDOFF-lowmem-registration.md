@@ -29,9 +29,10 @@ faithfulness argument depends on that.
 
 ---
 
-## 2. State: Tasks 0-6 COMPLETE, Tasks 7-8 NOT STARTED
+## 2. State: Tasks 0-7 COMPLETE, Task 8 NOT STARTED
 
 ```
+d03ff54 :sparkles:         --reg_compare: run both paths, diff them                 <- task 7
 70a3d41 :sparkles:         add_cycle on the distributed path + reg_qc=2 fast-fail   <- task 6
 0c1656d :white_check_mark: Tag the new reg tests stub so CI actually runs them
 ff25787 :recycle:          Split finalize into compose + grid + tile-warp + assemble   <- task 5
@@ -70,6 +71,8 @@ also removed the 40 GB-heap process that had been OOMing on merged multi-cycle r
 | Distributed tiled registration == in-process VALIS tiler | `DISTRIBUTED TILED REGISTRATION BIT-IDENTICAL: True` |
 | `output_grid` partitions exactly (no gaps/overlaps) | unit tests paint a coverage counter; `9/9 passed` |
 | NF wiring works and the default path is untouched | 6/6 nf-tests on the CI gate; full stub run completes, still routes to `VALIS_ADAPTER:REGISTER`, no fan-out tasks |
+| `--reg_compare` runs BOTH paths and diffs them | paired nf-tests assert WHICH processes ran (`REGISTER` + `REG_PREP` + `REG_ASSEMBLE` + `COMPARE_REGISTRATION` present with the flag, `COMPARE_REGISTRATION`/`REG_PREP` absent without it); full stub run `EXIT 0`, no config-selector WARNs, outputs in 3 distinct dirs |
+| the diff tool measures what it claims | `test_compare_registration.py` 6/6 in-image: every "they agree" paired with a perturbation of known exact magnitude; a LAST-channel-only perturbation (catches a regression to pyvips' default `n=1`); ragged tiled sweep == single-shot; comparing a file with itself fails loudly |
 
 ```bash
 # unit (in-image)
@@ -144,6 +147,13 @@ preconditions.**
 - **The VALIS image is linux/amd64 under QEMU on an arm64 host.** `reg_prep.py` takes 5-15 min even
   on 97 KB fixtures. Run docker ONCE, and either foreground it or use a harness-tracked background
   job — do NOT poll and conclude "finished". Kill strays (`docker ps`); one ran 17 h unnoticed.
+- **Docker on this host WEDGES, and the symptom looks like a slow test.** Containers are created
+  and never start: `docker ps` shows nothing, `docker ps -a` shows `Created` forever, the client
+  process hangs, and `docker info` still answers normally — so the daemon looks healthy. Seen in
+  task 7 on both a `docker run` and a `-profile test,docker -stub` pipeline run (which stalled
+  mid-DAG at `SPLIT_CHANNELS`). **Check `docker ps -a` for `Created` before believing a container
+  is merely slow**, then `pkill -f "docker run"; docker ps -aq | xargs docker rm -f` and restart
+  Docker Desktop. Do not read a stalled run as a failure of whatever you just changed.
 - **The repo is bind-mounted into the container.** Editing files while a run is in flight changes
   what is being verified. Wait, or edit only files the run does not read.
 - **`pytest` is NOT in the VALIS image; `pyvips`/`valis` are NOT on the host.** Unit tests need the
@@ -190,27 +200,47 @@ preconditions.**
 
 ---
 
-## 6. Remaining work — Tasks 6, 7, 8
+## 6. Remaining work — Task 8
 
-Concrete code for all three is in the plan file.
+Concrete code is in the plan file.
 
 - **Task 6 — DONE** (`70a3d41`). `ParamUtils.useDistributedAdapter` / `regQcLevel` /
   `validateRegistrationPath`; add_cycle now takes the same adapter as a full run; `reg_qc=2` +
   distributed fails at launch from both call sites; 4 new nf-tests on the CI `stub` tag.
   One deliberate divergence: add_cycle does NOT replicate `reg_dist_sub_threshold='auto'`'s
   per-patient REG_ESTIMATE routing — with the switch on it always goes distributed. Harmless
-  under the default `reg_dist_force_tiling=false`; **fold the shared selector into Task 7**,
-  which has to invoke both paths over the same slides anyway.
-- **Task 7 — `--reg_compare`**: run classic AND the new path over the same slides, stream a
-  per-channel diff. Params `reg_compare` / `reg_mem_budget_gb` already exist in `nextflow.config`.
+  under the default `reg_dist_force_tiling=false`. The Task-7 note said to fold a shared adapter
+  selector in — **not done, and on reflection it is orthogonal**: `REG_COMPARE` invokes both
+  adapters *unconditionally*, so it never exercises the selector. Still worth doing; now a
+  standalone item (§7.12).
+- **Task 7 — DONE** (`d03ff54`). `--reg_compare` runs classic AND the new path over the same
+  slides and streams a per-channel diff; classic stays the run's real output. New:
+  `bin/compare_registration.py` (100755), `bin/utils/vips_pages.py`,
+  `modules/local/compare_registration.nf`, `subworkflows/local/reg_compare.nf`,
+  `tests/unit/test_compare_registration.py` (6/6 in-image), 2 paired nf-tests on the CI `stub`
+  tag. `ParamUtils.boolParam` / `regCompareEnabled`; `validateRegistrationPath` returns early
+  under compare (classic runs, so `reg_qc=2` keeps its pickle).
+
+  Outputs land in three distinct directories, on purpose:
+  `registered/registered_slides/` (classic = the run's output, and what the checkpoint CSV
+  lists), `registered/candidate/registered_slides/` (the low-memory path),
+  `registered/compare/<patient>_<channels>_regcompare.json` + `_regdiff.png`.
+
+  The plan file's §Task 7 lists all six divergences from its own code and why each was forced.
+  The one to carry forward: **the plan's `[patient_id, meta.id]` join key would have produced
+  ZERO comparisons, silently** — `meta.id` is absent on registration metas, so every slide of a
+  patient collapses onto `[pid, null]`, and `join` drops unmatched keys without a word. The
+  shipped key is `[patient_id, sorted channel signature]` with
+  `failOnMismatch`/`failOnDuplicate`. Sixth instance of the §4.4 shape.
 - **Task 8 — stage timings + CI wiring.** This is where the real gap is: **NONE of the
   bit-identity integration tests run in CI** (`verify_lowmem_bitidentical`,
-  `verify_distributed_bitidentical`, `test_tile_grid`, `test_mirage_slide_reader`, and the
-  still-unreferenced `verify_micro_bitidentical.py`). Every guarantee on this branch currently
-  depends on someone remembering to run Docker by hand.
+  `verify_distributed_bitidentical`, `test_tile_grid`, `test_mirage_slide_reader`,
+  `test_compare_registration` (new in task 7), and the still-unreferenced
+  `verify_micro_bitidentical.py`). Every guarantee on this branch currently depends on someone
+  remembering to run Docker by hand — on a host where Docker wedges (§5.1).
 
   Task 8 also inherits a **named, pre-existing cause of the red CI**: the full gate
-  (`nf-test test --tag stub --profile test`) is **111/112**, and the single failure is
+  (`nf-test test --tag stub --profile test`) is **113/114** after task 7, and the single failure is
   `tests/modules/generate_qc_report.nf.test` — *"declares 7 input channels but 6 were
   specified"*. Neither that module nor its test is touched by this branch; `db37397` **on main**
   added a 7th input (`seg_eval_csvs`) without updating the test. Not ours, but it is what a
@@ -227,7 +257,14 @@ Concrete code for all three is in the plan file.
    footprint, tile counts, wall-clock, compression ratio on a real WSI — is entirely UNMEASURED.
    The 1.43x compression measured on fixtures is NOT a capacity-planning number.
 
-**Should decide during Task 6-8**
+**Should decide during Task 8**
+2b. **One in-image test was NOT re-run after task 7.** `d03ff54` moved the page-stack band-join
+   out of `mirage_slide_reader` into `bin/utils/vips_pages.py` (re-exported, so callers are
+   unchanged). `tests/unit/test_mirage_slide_reader.py` — 11/11 before the move — could not be
+   re-run: Docker wedged mid-task (§5.1). Name-completeness and absence of dangling references
+   were checked statically, and `test_compare_registration.py` exercises the extracted module
+   directly (6/6), but **run `test_mirage_slide_reader.py` in-image before merging.**
+
 3. **`can_read()` accepts a non-OME grayscale multi-page tiled BigTIFF** (pyvips auto-populates
    `page-height`), degrading channel names to `C0/C1`. `workflows/mirage.nf:213` shows
    `--start registration` takes USER-SUPPLIED paths, so this is reachable. Channel names feed the
@@ -253,21 +290,36 @@ Concrete code for all three is in the plan file.
     design, **but classic `reg_qc=2` NEEDS that pickle** (`WARP_SEG_QC` warps GeoJSON through it).
     If it reproduces on the cluster, classic `reg_qc=2` is already broken there. Unverified on real
     infrastructure — worth a one-off check.
+12. **The adapter selector is still duplicated** between `registration.nf` (3-way: classic /
+    force-distributed / `auto` + REG_ESTIMATE per-patient routing) and `add_cycle.nf` (2-way, no
+    `auto`). Task 6's note assigned the fold to Task 7; Task 7 turned out not to need it
+    (`REG_COMPARE` invokes both adapters unconditionally). Doing it means one subworkflow both
+    call — check first that `REGISTRATION` and `ADD_CYCLE` can never both be invoked in one run,
+    since a DSL2 workflow cannot be invoked twice without aliasing.
+13. `--reg_compare` reports differences but never fails on them: there is no tolerance gate. That
+    is deliberate for a measurement tool, but once a real-slide number exists, a
+    `--reg_compare_max_abs` that turns the comparison into a CI assertion is the obvious follow-up.
 
 ---
 
 ## 8. Immediate next action
 
 ```bash
-git checkout feature/reg-lowmem-parallel     # HEAD should be 0c1656d
+git checkout feature/reg-lowmem-parallel     # HEAD should be d03ff54
 cat .superpowers/sdd/progress.md             # per-task history + review findings
 python tests/testdata/generate_complete_testdata.py   # BEFORE any nf-test
+docker ps -a                                 # 'Created' forever = wedged, see §5.1
+docker run --rm -v "$PWD":/work -w /work bolt3x/attend_image_analysis:mirage_valis_1.0.0 \
+  python3 tests/unit/test_mirage_slide_reader.py      # §7.2b: owed from task 7, expect 11/11
 ```
 
-Then start **Task 7** from the plan. Tasks 0-5 have all been reviewed: the review over
-`d0434c9..HEAD` was completed 2026-07-23 (verdict PASS, 0 critical) and its findings are fixed in
-`6d7ad64`. Task 6 (`70a3d41`) carries a controller self-review only — an independent pass over
-`6850f82..HEAD` with the §4.4 lens is still worth having if subagents are available.
+Then start **Task 8** from the plan — and note that Task 8's CI wiring is what finally makes the
+owed re-run above (and every other bit-identity check) automatic instead of manual.
+
+Tasks 0-5 have all been reviewed: the review over `d0434c9..HEAD` was completed 2026-07-23
+(verdict PASS, 0 critical) and its findings are fixed in `6d7ad64`. Tasks 6 (`70a3d41`) and 7
+(`d03ff54`) carry a controller self-review only — an independent pass over `6850f82..HEAD` with
+the §4.4 lens is still worth having if subagents are available.
 
 **Tooling note:** `nf-test` 0.9.5 is installed (jar in `~/.nf-test/`, wrapper on PATH).
 `brew install nf-test` DOES NOT EXIST — install from the pinned `askimed/nf-test` GitHub release,
