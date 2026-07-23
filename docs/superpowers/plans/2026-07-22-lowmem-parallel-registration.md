@@ -1715,13 +1715,39 @@ git commit -m ":sparkles: Support the distributed path in add_cycle; fast-fail r
 
 ---
 
-### Task 7: `--reg_compare`
+### Task 7: `--reg_compare`  — DONE
+
+**Divergences from the code below, all forced by what landed after this plan was written:**
+1. **Join key is `[patient_id, sorted channel signature]`, not `[patient_id, meta.id]`.** `meta.id` is
+   optional on registration metas (the fixtures and the `--start registration` entry point omit
+   it), so keying on it collapses every slide of a patient onto `[pid, null]`. `join` drops
+   unmatched keys SILENTLY, so `COMPARE_REGISTRATION` would have run zero times and the run would
+   still have been green — §4.4 vacuity, exactly. Added `failOnMismatch`/`failOnDuplicate` so a
+   future key regression is an error rather than a no-op.
+2. **Branches on `ParamUtils.regCompareEnabled(params)`**, not raw `params.reg_compare`
+   (Task 6 introduced the coercion: a `-params-file` can deliver the string `"false"`, truthy in
+   Groovy — here that silently doubles the cost of every run).
+3. **`REG_COMPARE` also emits `registrar`**, and `validateRegistrationPath` returns early under
+   `--reg_compare`: classic always runs on this branch, so `reg_qc=2` keeps working instead of
+   emitting a silently empty seg-QC channel.
+4. **The band-join moved to `bin/utils/vips_pages.py`** (pyvips only, no `valis`) and
+   `mirage_slide_reader` re-exports it, rather than `compare_registration.py` carrying its own
+   copy. §4.4(d)/(e) were both caused by page-reading logic getting duplicated and one copy
+   getting it wrong.
+5. **`REG_ASSEMBLE` publishes under `registered/candidate/` when `--reg_compare` is on.** Both
+   paths otherwise publish into one `registered_slides/`; the names do not collide today, so the
+   result would be a silently mixed directory while only classic's files are in the checkpoint CSV.
+6. Added `tests/unit/test_compare_registration.py` (6 tests, in-image) and two paired nf-tests
+   beyond the plan's stub run.
 
 **Files:**
 - Create: `bin/compare_registration.py` (mode 100755)
+- Create: `bin/utils/vips_pages.py`
 - Create: `modules/local/compare_registration.nf`
 - Create: `subworkflows/local/reg_compare.nf`
-- Modify: `subworkflows/local/registration.nf`
+- Create: `tests/unit/test_compare_registration.py`
+- Modify: `subworkflows/local/registration.nf`, `lib/ParamUtils.groovy`, `conf/modules.config`,
+  `bin/utils/mirage_slide_reader.py`, `tests/subworkflows/local/registration.nf.test`
 
 **Interfaces:**
 - Consumes: both adapters' `registered` channels.

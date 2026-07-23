@@ -13,6 +13,7 @@ include { WARP_SEG_QC                       } from '../../modules/local/warp_seg
 
 include { VALIS_ADAPTER                     } from './adapters/valis_adapter'
 include { VALIS_DISTRIBUTED_ADAPTER         } from './adapters/valis_distributed_adapter'
+include { REG_COMPARE                       } from './reg_compare'
 include { REG_ESTIMATE                      } from '../../modules/local/reg_estimate'
 
 include { ESTIMATE_FEATURE_DISTANCES        } from '../../modules/local/estimate_feature_distances'
@@ -186,14 +187,32 @@ workflow REGISTRATION {
     // skip_registration_qc=true forces 0). ParamUtils.regQcLevel is the single definition, so
     // ParamUtils.validateRegistrationPath's launch-time gate cannot drift from it.
     def use_distributed = ParamUtils.useDistributedAdapter(params)
+    def do_compare      = ParamUtils.regCompareEnabled(params)
     def reg_qc_level    = ParamUtils.regQcLevel(params)
 
     // Level 2 warps polygons through the classic registrar pickle, which the distributed path
     // does not produce. ParamUtils.validateRegistrationPath already rejects that combination at
     // launch; this is defence in depth (and what keeps the workflow buildable on 'force').
-    def do_seg_qc = reg_qc_level >= 2 && !use_distributed
+    // --reg_compare always runs classic too, so the pickle is available there regardless.
+    def do_seg_qc = reg_qc_level >= 2 && (do_compare || !use_distributed)
 
-    if (!use_distributed) {
+    // Per-slide classic-vs-low-memory diff metrics; empty unless --reg_compare is on.
+    ch_reg_compare = Channel.empty()
+
+    if (do_compare) {
+        // --reg_compare (spec §7): run BOTH paths over the same slides and diff them. Takes
+        // precedence over the adapter switch — the whole point is to run both, and the
+        // comparison's value depends on classic staying the run's real output.
+        log.warn "--reg_compare is ON: every multi-slide patient is registered TWICE " +
+                 "(classic VALIS + the low-memory path). Expect ~2x registration cost."
+        REG_COMPARE(ch_grouped_multi)
+        ch_registered       = REG_COMPARE.out.registered
+        ch_registrar_pickle = REG_COMPARE.out.registrar
+        ch_adapter_logs     = REG_COMPARE.out.size_logs
+        ch_adapter_versions = REG_COMPARE.out.versions
+        ch_adapter_summary  = REG_COMPARE.out.summary
+        ch_reg_compare      = REG_COMPARE.out.metrics
+    } else if (!use_distributed) {
         VALIS_ADAPTER(ch_grouped_multi)
         ch_registered       = VALIS_ADAPTER.out.registered
         ch_registrar_pickle = VALIS_ADAPTER.out.registrar
@@ -432,6 +451,7 @@ workflow REGISTRATION {
     checkpoint_csv   = ch_checkpoint_csv
     qc               = ch_qc
     seg_qc           = ch_seg_qc
+    reg_compare      = ch_reg_compare
     error_metrics    = ch_error_metrics
     valis_summary    = ch_adapter_summary
     size_logs        = ch_size_logs

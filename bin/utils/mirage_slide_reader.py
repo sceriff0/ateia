@@ -26,29 +26,17 @@ from valis import slide_io, slide_tools
 
 # Bands are packed vertically into pages by both tifffile (ome=True, axes="CYX") and
 # reg_finalize._save_ome_pyvips (page-height set explicitly). Reading with n=-1 yields a
-# "toilet roll" of height C*page_height which we crop back into bands.
-_TOILET_ROLL = -1
-
-
-def _open_roll(src_f):
-    return pyvips.Image.new_from_file(str(src_f), access="random", n=_TOILET_ROLL)
-
-
-def _page_height(img):
-    try:
-        return int(img.get("page-height"))
-    except pyvips.Error:
-        return int(img.height)
-
-
-def _bandjoin_pages(img):
-    """Turn a vertically-packed multi-page image into a multi-band image (lazy)."""
-    ph = _page_height(img)
-    n_pages = img.height // ph
-    if n_pages <= 1:
-        return img
-    bands = [img.crop(0, i * ph, img.width, ph) for i in range(n_pages)]
-    return bands[0].bandjoin(bands[1:])
+# "toilet roll" of height C*page_height which we crop back into bands. Defined in vips_pages
+# (pyvips only, no valis) so tools that need ONLY the band-join -- bin/compare_registration.py --
+# can have it without importing the registration stack. Re-exported here because that is where
+# every existing caller imports it from.
+from vips_pages import (  # noqa: E402
+    TOILET_ROLL as _TOILET_ROLL,
+    bandjoin_pages as _bandjoin_pages,
+    open_multiband,
+    open_roll as _open_roll,
+    page_height as _page_height,
+)
 
 
 class MirageVipsSlideReader(slide_io.SlideReader):
@@ -184,22 +172,6 @@ def _physical_size(ome_xml):
     if not (x and y):
         return [1.0, 1.0, slide_io.PIXEL_UNIT]
     return [float(x.group(1)), float(y.group(1)), u.group(1) if u else "µm"]
-
-
-def open_multiband(src_f):
-    """Open a possibly page-stacked TIFF as ONE lazy multi-band image, shape (H, W, C).
-
-    Both writers in this pipeline store the C channels as C vertically-stacked PAGES with
-    ``page-height=H`` -- valis ``slide_io.save_ome_tiff`` (arrayjoin(bandsplit(), across=1)) and
-    ``reg_finalize._save_ome_pyvips`` alike. pyvips' default ``n=1`` therefore reads CHANNEL 0
-    ALONE, so any test that diffs a written slide against an in-memory multi-band array must come
-    through here: reading it directly either silently compares one channel, or shape-mismatches
-    against the (H, W, C) baseline.
-
-    Note ``n=-1`` on its own is NOT enough -- it yields the (C*H, W) page stack, which still does
-    not match an interleaved (H, W, C) array. The band-join is the part that matters.
-    """
-    return _bandjoin_pages(_open_roll(src_f))
 
 
 def get_reader_for(src_f, series=None):

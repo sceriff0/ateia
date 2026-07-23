@@ -56,19 +56,33 @@ class ParamUtils {
     }
 
     /**
-     * Which registration adapter does this run use? Single source of truth, shared by
-     * REGISTRATION and ADD_CYCLE so an incremental cyclic-IF run takes the same path as a
-     * full run instead of being pinned to classic VALIS.
-     *
-     * Coerces explicitly instead of relying on Groovy truthiness: a -params-file can deliver
-     * the STRING "false", and every non-empty String is truthy in Groovy, which would turn
-     * the switch silently ON.
+     * Read a boolean switch without trusting Groovy truthiness: a -params-file (or --flag false
+     * on the command line) can deliver the STRING "false", and every non-empty String is truthy
+     * in Groovy — which would turn the switch silently ON.
      */
-    static boolean useDistributedAdapter(Map params) {
-        def v = params.reg_distributed_tiling
+    static boolean boolParam(Map params, String name) {
+        def v = params[name]
         if (v == null) return false
         if (v instanceof Boolean) return v
         return Boolean.parseBoolean(v.toString().trim())
+    }
+
+    /**
+     * Which registration adapter does this run use? Single source of truth, shared by
+     * REGISTRATION and ADD_CYCLE so an incremental cyclic-IF run takes the same path as a
+     * full run instead of being pinned to classic VALIS.
+     */
+    static boolean useDistributedAdapter(Map params) {
+        return boolParam(params, 'reg_distributed_tiling')
+    }
+
+    /**
+     * --reg_compare: run classic VALIS AND the low-memory path over the same slides and diff
+     * them. Costs 2x registration, so it must never switch on by accident — hence the same
+     * explicit coercion as the adapter switch.
+     */
+    static boolean regCompareEnabled(Map params) {
+        return boolParam(params, 'reg_compare')
     }
 
     /**
@@ -92,6 +106,9 @@ class ParamUtils {
      * cannot promise a pickle for any of them.
      */
     static void validateRegistrationPath(Map params) {
+        // --reg_compare runs classic VALIS alongside the candidate and keeps classic as the run's
+        // output, so the registrar pickle exists no matter how the distributed switch is set.
+        if (regCompareEnabled(params)) return
         if (!useDistributedAdapter(params)) return
         def level = regQcLevel(params)
         if (level >= 2) {
