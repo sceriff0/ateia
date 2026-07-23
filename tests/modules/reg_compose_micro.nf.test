@@ -10,6 +10,7 @@ nextflow_process {
 
     test("REG_COMPOSE_MICRO - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {

@@ -122,8 +122,16 @@ All have complete, concrete code in the plan file. Start at Task 4.
   the `try: import pytest / except ImportError:` guard AND a stdlib `__main__` runner — copy
   `tests/unit/test_tile_grid.py`'s structure. A bare `pytest.importorskip` SKIPS on the host and
   cannot run in-image, so it verifies nothing anywhere.
-- **Nextflow facts established experimentally (25.04.7):** `withName` selectors match as a
-  SUBSTRING FIND, not a full match (`REG_NONRIGID` also matches `REG_NONRIGID_MICRO`).
+- **⚠️ CORRECTED 2026-07-23 — `withName` is a FULL regex match, NOT a substring find.** This entry
+  previously claimed the opposite and Task 5 was built on it. Measured on 25.04.7: a bare
+  `withName: 'REG_COMPOSE'` matched NONE of `REG_COMPOSE_TILED`/`_FIELD`/`_MICRO`. Nextflow reports
+  this ONLY as `WARN: There's no process matching config selector` — never an error — after which
+  the processes silently inherit their module label AND the global default publishDir, so every
+  patient's output collides in one directory. **Read the stub run's WARNings, not just its exit
+  status.** Alternate names explicitly: `'A|B|C'`. (`REG_NONRIGID` matching `REG_NONRIGID_MICRO` is
+  explained by the alias `include { REG_NONRIGID as REG_NONRIGID_MICRO }`, not by substring
+  matching.)
+- **Nextflow facts established experimentally (25.04.7):**
   `path(x)` with no `arity` accepts `[]` and renders empty (this is how the optional field works);
   `arity: '0..1'` combined with `stageAs` is REJECTED.
 - **`valis_lib/` is a pristine read-only copy of PyPI valis-wsi 1.0.0.** Never modify it; the
@@ -207,6 +215,19 @@ of them exist.
   tile size made small tiles unreadable (`tile size out of range`) — invisible at production tile
   sizes (4096px), caught only because leg 2 uses a deliberately awkward 48px ragged grid. **Keep
   new tests biased toward awkward geometry, not round numbers.**
+
+**Running nf-test locally — two traps that make an untouched tree look broken:**
+1. **Run `python tests/testdata/generate_complete_testdata.py` FIRST.** The committed CSVs
+   (11 of them, incl. `test_input.csv`) hardcode absolute paths to `/Users/valer/Downloads/mirage`
+   — a different checkout. The generator rewrites them from `Path(__file__).parent`; CI runs it, so
+   CI is fine. Without it, 16 pipeline/subworkflow tests fail with "Input file does not exist" and
+   look like a regression in whatever you just changed. Note the generator also REWRITES
+   `tests/testdata/*.ome.tiff`, which the bit-identity tests consume — check `git status` after.
+2. **Use the CI gate's own command: `nf-test test --tag stub --profile test`** (no docker).
+   Running `--profile test,docker` makes even stub blocks execute inside their container, so every
+   process whose image is not pulled locally fails with exit 125 — 15 spurious failures here.
+   Also: `tag "stub"` goes INSIDE each test block next to `options "-stub"`, not at file level;
+   a test without it is silently SKIPPED by the CI gate.
 
 **Test ergonomics:** `VERIFY_LOWMEM_WORK=<dir>` + `VERIFY_LOWMEM_REUSE_PREP=1` skips the 5-15 min
 `reg_prep` and reuses an existing prep (opt-in, loudly announced, off in CI). Point `WORK` at a

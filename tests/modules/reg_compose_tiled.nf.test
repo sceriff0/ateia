@@ -10,6 +10,7 @@ nextflow_process {
 
     test("REG_COMPOSE_TILED - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {

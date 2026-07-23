@@ -5,6 +5,7 @@ nextflow_process {
     tag "modules"; tag "modules_local"; tag "reg_warp_tile"
 
     test("REG_WARP_TILE - stub, moving slide (with field)") {
+        tag "stub"
         options "-stub"
         when { process { """
             input[0] = [ 'P001', 'P001_mov1',
@@ -24,6 +25,7 @@ nextflow_process {
         // The reference passes field == [], which `path(field)` with no arity renders as an empty
         // string -- that is how --rigid-only is selected now that REG_WARP_REF is gone. If this
         // ever regresses, the reference would be warped WITH a non-rigid field it must not have.
+        tag "stub"
         options "-stub"
         when { process { """
             input[0] = [ 'P001', 'P001_ref',

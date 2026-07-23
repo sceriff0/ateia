@@ -4,6 +4,7 @@ nextflow_process {
     process "REG_COMPOSE_FIELD"
     tag "modules"; tag "modules_local"; tag "reg_compose_field"
     test("REG_COMPOSE_FIELD - stub") {
+        tag "stub"
         options "-stub"
         when { process { """
             input[0] = [ 'P001', 'P001_mov1',
