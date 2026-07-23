@@ -25,7 +25,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 
 from mirage_slide_reader import MirageVipsSlideReader  # noqa: E402
 
-WORK = "/tmp/verify_lowmem"
+# Overridable so the work dir can be put on a bind mount and survive `docker run --rm`, which is
+# what makes VERIFY_LOWMEM_REUSE_PREP below useful. Default is unchanged, so CI is unaffected.
+WORK = os.environ.get("VERIFY_LOWMEM_WORK", "/tmp/verify_lowmem")
 INP = os.path.join(WORK, "in")
 PREP = os.path.join(WORK, "prep")
 REF, MOV = "P001_ref.ome.tiff", "P001_mov1.ome.tiff"
@@ -52,8 +54,54 @@ def run(cmd):
 
 
 def px(path):
+    """Load EVERY page of an OME-TIFF as one array.
+
+    ``n=-1`` is load-bearing. Both writers this test compares stack the C channels VERTICALLY into
+    pages with ``page-height=H`` -- valis's slide_io.save_ome_tiff (arrayjoin(bandsplit(), across=1),
+    slide_io.py:2905-2910) and reg_finalize._save_ome_pyvips both -- and pyvips' default ``n=1``
+    reads page 0 only. Comparing with the default would therefore diff CHANNEL 0 ALONE and still
+    print max|delta|=0.0 while ignoring the other channels entirely (the fixtures have 3).
+    """
     from valis import warp_tools
-    return warp_tools.vips2numpy(pyvips.Image.new_from_file(path)).astype(np.float64)
+    return warp_tools.vips2numpy(pyvips.Image.new_from_file(path, n=-1)).astype(np.float64)
+
+
+def warped_canvas(ws_path, field_path):
+    """(height, width) of the full-res warp's output canvas, WITHOUT decoding a pixel.
+
+    Asks the lazy warp rather than recomputing VALIS's geometry: the canvas is NOT
+    ``aligned_slide_shape_rc``, because ``warp_tools.warp_img`` crops the result to ``bbox_xywh``
+    (warp_tools.py:938-943). Re-deriving that rule here would just be a second, driftable copy of
+    it. pyvips knows an unevaluated image's dimensions, so this costs nothing.
+
+    The canvas does not depend on WHICH field is passed: warp_img renders the affine into
+    ``oarea=out_shape_rc`` (warp_tools.py:1040-1049), the non-rigid step is a size-preserving
+    mapim, and only then does it crop to the bbox. So passing the raw per-tile field here gives
+    the same dimensions as the composed one.
+    """
+    import reg_finalize
+    ws = json.load(open(ws_path))
+    dxdy = pyvips.Image.new_from_file(field_path)
+    warped, _ = reg_finalize.warp_source(os.path.join(INP, MOV), ws, dxdy)
+    return warped.height, warped.width
+
+
+def assert_full_channel_stack(arr, path, expected_hw, label):
+    """Fail unless `arr` really holds every channel of the whole warped canvas.
+
+    Pins the precondition that makes an equality result meaningful. Both writers stack the C
+    channels vertically into pages, so a `px()` regression (or a pyvips default change) would
+    quietly reduce the comparison to channel 0 and keep printing max|delta|=0.0 -- the same
+    assert-the-outcome-but-not-the-precondition failure that already bit the A1 probe and leg 1.
+    """
+    h, w = expected_hw
+    c = MirageVipsSlideReader(os.path.join(INP, MOV)).metadata.n_channels
+    if arr.shape[0] != c * h or arr.shape[1] != w or arr.size != c * h * w:
+        raise SystemExit(
+            f"FAILED: {label} ({path}) loaded {arr.shape} ({arr.size} values) but the warped "
+            f"canvas and source band count imply a {c}-channel {h}x{w} stack ({c * h * w} values) "
+            "-- the comparison would cover only part of the slide and could pass vacuously.")
+    print(f"[verify] {label} covers the full {c}x{h}x{w} channel stack", flush=True)
 
 
 def _rewrite_as_mirage_tiff(src_path, dst_path, tile_px=_REWRITE_TILE_PX):
@@ -96,9 +144,35 @@ def _rewrite_as_mirage_tiff(src_path, dst_path, tile_px=_REWRITE_TILE_PX):
     )
 
 
+def _empty_dir(path):
+    """Remove everything INSIDE `path`, leaving `path` itself in place.
+
+    Not ``rmtree(path)``: WORK may be a bind mount (VERIFY_LOWMEM_WORK), and removing a mount
+    point fails with EBUSY.
+    """
+    if not os.path.isdir(path):
+        return
+    for name in os.listdir(path):
+        p = os.path.join(path, name)
+        if os.path.isdir(p) and not os.path.islink(p):
+            shutil.rmtree(p)
+        else:
+            os.remove(p)
+
+
 def setup():
-    if os.path.isdir(WORK):
-        shutil.rmtree(WORK)
+    md = os.path.join(PREP, MOV_STEM)
+    if os.environ.get("VERIFY_LOWMEM_REUSE_PREP") == "1" and os.path.isdir(md):
+        # DEVELOPMENT SHORTCUT, never the default. reg_prep takes 5-15 min in this image (it is
+        # linux/amd64 under emulation on arm64 hosts), which makes iterating on the legs painful.
+        # It is only sound while reg_prep.py, the reader and the fixtures are all unchanged --
+        # hence opt-in, loudly announced, and off in CI.
+        print(f"[verify] REUSING existing prep at {md} (VERIFY_LOWMEM_REUSE_PREP=1) -- reg_prep "
+              "was NOT re-run, so this result is stale if reg_prep/the reader/the fixtures "
+              "changed. Unset it for an authoritative run.", flush=True)
+        return md
+
+    _empty_dir(WORK)
     os.makedirs(INP)
     for s in (REF, MOV):
         dst = os.path.join(INP, s)
@@ -194,6 +268,9 @@ def leg1(md):
     assert_used_reader(r.stdout, expect_lazy=False, label="BioFormats reference run")
 
     a, b = px(lazy_out), px(bf_out)
+    canvas = warped_canvas(ws, field)
+    assert_full_channel_stack(a, lazy_out, canvas, "leg 1 lazy output")
+    assert_full_channel_stack(b, bf_out, canvas, "leg 1 BioFormats output")
     equal = a.shape == b.shape and np.array_equal(a, b)
     d = None if a.shape != b.shape else float(np.max(np.abs(a - b)))
     print("=" * 72)
@@ -202,9 +279,85 @@ def leg1(md):
     return 0 if equal else 1
 
 
+def leg2(md):
+    """Tile fan-out + assemble == the single-process warp.
+
+    Reuses leg 1's composed inputs and diffs against leg 1's own ``lazy.ome.tiff``, so this leg
+    isolates exactly one variable: whether splitting the warp into independent output tiles changes
+    any pixel. Expected to be bit-identical BY CONSTRUCTION -- each tile is a .crop() of the same
+    demand-driven pyvips warp -- so anything other than max|delta|=0.0 is a real defect, not
+    tolerance drift.
+    """
+    ti = os.path.join(md, "tiler_inputs")
+    ws = os.path.join(md, "warp_state.json")
+    field_v = os.path.join(md, "slide_dxdy.v")
+    src = os.path.join(INP, MOV)
+
+    run([sys.executable, "bin/reg_finalize.py", "--inputs-dir", ti,
+         "--field", os.path.join(md, "nr", "bk.v"), "--warp-state", ws,
+         "--src-slide", src, "--out", field_v, "--emit-field-only"])
+    if not os.path.exists(field_v):
+        raise SystemExit(f"FAILED: --emit-field-only did not write {field_v}")
+
+    grid_f = os.path.join(md, "grid.json")
+    # 48px tiles over the ~128px canvas: 3x3 with a short right column AND a short bottom row.
+    # Deliberately NOT a divisor of the canvas -- an exact division (e.g. 64) makes every tile
+    # full-size and never exercises a ragged edge, which is precisely where an off-by-one in the
+    # partition would show up as a seam or a shifted strip.
+    run([sys.executable, "bin/reg_assemble.py", "--warp-state", ws, "--src-slide", src,
+         "--field", field_v, "--write-grid", grid_f, "--tile-wh", "48"])
+    grid = json.load(open(grid_f))
+    if len(grid["tiles"]) < 2:
+        raise SystemExit(
+            f"FAILED: grid has {len(grid['tiles'])} tile(s) for a {grid['width']}x{grid['height']} "
+            "canvas -- a single-tile fan-out is just the whole-image warp under another name and "
+            "would prove nothing about tiling.")
+    ragged = [t for t in grid["tiles"] if t["w"] < grid["tile_wh"] or t["h"] < grid["tile_wh"]]
+    if not ragged:
+        raise SystemExit(
+            f"FAILED: every tile in the {grid['n_cols']}x{grid['n_rows']} grid is a full "
+            f"{grid['tile_wh']}px tile, so this leg never exercises a short edge tile. Choose a "
+            f"--tile-wh that does not divide {grid['width']}x{grid['height']} exactly.")
+    print(f"[verify] grid is {grid['n_cols']}x{grid['n_rows']} over {grid['width']}x{grid['height']} "
+          f"with {len(ragged)}/{len(grid['tiles'])} ragged-edge tiles", flush=True)
+
+    # Never fan out into a directory that already holds tiles: a leftover tile_<i>.v from an
+    # earlier grid is the right size to pass reg_assemble's per-tile check while holding pixels
+    # from a different run.
+    tiles_dir = os.path.join(md, "tiles_out")
+    if os.path.isdir(tiles_dir):
+        shutil.rmtree(tiles_dir)
+    for t in grid["tiles"]:
+        run([sys.executable, "bin/reg_warp_tile.py", "--warp-state", ws, "--field", field_v,
+             "--src-slide", src, "--grid", grid_f, "--tile-idx", str(t["idx"]),
+             "--out-dir", tiles_dir])
+    tiled_out = os.path.join(md, "tiled.ome.tiff")
+    run([sys.executable, "bin/reg_assemble.py", "--warp-state", ws, "--src-slide", src,
+         "--grid", grid_f, "--tiles-dir", tiles_dir, "--out", tiled_out])
+
+    a, b = px(os.path.join(md, "lazy.ome.tiff")), px(tiled_out)
+    canvas = (grid["height"], grid["width"])
+    assert_full_channel_stack(a, "lazy.ome.tiff", canvas, "leg 2 single-process output")
+    assert_full_channel_stack(b, tiled_out, canvas, "leg 2 tiled output")
+    if float(np.max(b)) == float(np.min(b)):
+        raise SystemExit(
+            f"FAILED: the assembled slide is constant (all {float(np.min(b))}); two blank images "
+            "compare equal no matter how badly the tiling is broken.")
+
+    equal = a.shape == b.shape and np.array_equal(a, b)
+    d = None if a.shape != b.shape else float(np.max(np.abs(a - b)))
+    print("=" * 72)
+    print(f"LEG 2 tile fan-out vs single warp: equal={equal} max|delta|={d} "
+          f"({len(grid['tiles'])} tiles, {grid['n_cols']}x{grid['n_rows']})")
+    print("=" * 72, flush=True)
+    return 0 if equal else 1
+
+
 def main():
     md = setup()
-    return leg1(md)
+    rc1 = leg1(md)
+    rc2 = leg2(md)
+    return rc1 or rc2
 
 
 if __name__ == "__main__":

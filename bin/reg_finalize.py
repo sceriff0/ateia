@@ -141,6 +141,26 @@ def micro_additive(slide_bk_full, micro_raw_bk, micro_ws, micro_reg_mask):
     return cur + vips_new_bk
 
 
+def start_jvm_if_needed(src_slide, jvm_heap_gb=None, tag="reg_finalize"):
+    """Start the BioFormats JVM only if `src_slide` cannot be read lazily. Returns the heap GB
+    (0 == no JVM started), which the caller passes to ``registration.kill_jvm()`` at the end.
+
+    Every script that calls ``warp_source`` needs this: ``get_reader_for`` falls back to VALIS's
+    own dispatch (BioFormats) for anything ``MirageVipsSlideReader`` does not recognise, and
+    instantiating that reader with no JVM running fails. When the JVM IS needed, the heap is sized
+    from the staged source directory exactly like the prep stages.
+
+    The two print lines are load-bearing: they are the only externally-observable evidence of which
+    reader path a run took, and tests/integration/verify_lowmem_bitidentical.py asserts on them.
+    """
+    if all_readable([src_slide]):
+        print(f"[{tag}] all inputs readable by MirageVipsSlideReader; skipping JVM", flush=True)
+        return 0
+    heap_gb = init_jvm(os.path.dirname(os.path.abspath(src_slide)) or ".", override_gb=jvm_heap_gb)
+    print(f"[{tag}] started BioFormats JVM (heap={heap_gb}GB)", flush=True)
+    return heap_gb
+
+
 def warp_source(src_slide, ws, dxdy):
     """Lazily warp `src_slide` per the dumped warp state. Returns an UNEVALUATED pyvips.Image.
 
@@ -176,6 +196,9 @@ def main():
     ap.add_argument("--field", help="whole-image non-rigid field bk.v from REG_NONRIGID (separated mode)")
     ap.add_argument("--rigid-only", action="store_true",
                     help="reference slide: warp with rigid M + crop only (dxdy=None), no tiles/compose")
+    ap.add_argument("--emit-field-only", action="store_true",
+                    help="compose the padded displacement field, write it to --out, and exit "
+                         "without warping (the warp is done by reg_warp_tile.py)")
     # Micro-registration second wave (spec §5A Option-2): additively compose the micro residual.
     ap.add_argument("--micro-field", help="whole-image MICRO residual bk.v from REG_NONRIGID on the "
                     "micro 2-D inputs (REG_MICRO_PREP); triggers the additive micro compose")
@@ -188,19 +211,18 @@ def main():
     args = ap.parse_args()
     ws = json.load(open(args.warp_state))
 
+    if args.emit_field_only and args.rigid_only:
+        # --rigid-only means dxdy=None end-to-end; there is no field to emit, and letting this
+        # through would compose nothing and then hand None to _to_vips_field.
+        raise SystemExit("--emit-field-only is incompatible with --rigid-only (no field exists)")
+
     # Start the BioFormats JVM BEFORE any slide I/O, UNLESS the source slide is one of mirage's own
     # tiled OME-TIFFs that MirageVipsSlideReader can read lazily with no JVM at all — the RAM win
     # this module exists for. When the JVM IS needed (non-mirage inputs, or MIRAGE_FORCE_BIOFORMATS
     # for the equivalence test), size the heap from the single staged source slide (staged under
     # src/) exactly like the prep stages, which is why REG_FINALIZE / REG_WARP_REF used to always
     # start one.
-    if all_readable([args.src_slide]):
-        heap_gb = 0
-        print("[reg_finalize] all inputs readable by MirageVipsSlideReader; skipping JVM", flush=True)
-    else:
-        heap_gb = init_jvm(os.path.dirname(os.path.abspath(args.src_slide)) or ".",
-                            override_gb=args.jvm_heap_gb)
-        print(f"[reg_finalize] started BioFormats JVM (heap={heap_gb}GB)", flush=True)
+    heap_gb = start_jvm_if_needed(args.src_slide, jvm_heap_gb=args.jvm_heap_gb)
 
     if args.rigid_only:
         # Reference (or any rigid-only) slide: VALIS warps it with its M + crop and identity non-rigid.
@@ -234,6 +256,18 @@ def main():
             micro_mask_f = os.path.join(args.micro_inputs_dir, "reg_mask.npy") if args.micro_inputs_dir else None
             micro_reg_mask = np.load(micro_mask_f) if micro_mask_f and os.path.exists(micro_mask_f) else None
             slide_bk = micro_additive(slide_bk, micro_raw_bk, micro_ws, micro_reg_mask)
+
+    # 3b) distributed warp (spec §5.3): the field is now fully composed, which is the ONLY part of
+    # this script the per-output-tile workers cannot each recompute cheaply. Write it out and stop;
+    # reg_warp_tile.py then warps each output region from this exact field, so every tile consumes
+    # byte-for-byte the same field the single-process warp below would have used.
+    if args.emit_field_only:
+        os.makedirs(os.path.dirname(os.path.abspath(args.out)) or ".", exist_ok=True)
+        _to_vips_field(slide_bk).write_to_file(args.out)
+        print(f"[reg_finalize] wrote composed field -> {args.out}", flush=True)
+        if heap_gb:
+            registration.kill_jvm()
+        return 0
 
     # 4) warp the full-res slide lazily (VALIS's own warp_img; only the READER differs, §6.3)
     warped, reader = warp_source(args.src_slide, ws, slide_bk)
