@@ -29,9 +29,10 @@ faithfulness argument depends on that.
 
 ---
 
-## 2. State: Tasks 0-5 COMPLETE, Tasks 6-8 NOT STARTED
+## 2. State: Tasks 0-6 COMPLETE, Tasks 7-8 NOT STARTED
 
 ```
+70a3d41 :sparkles:         add_cycle on the distributed path + reg_qc=2 fast-fail   <- task 6
 0c1656d :white_check_mark: Tag the new reg tests stub so CI actually runs them
 ff25787 :recycle:          Split finalize into compose + grid + tile-warp + assemble   <- task 5
 6d7ad64 :bug:              Fix review findings: false JVM log line + 2 unrunnable tests
@@ -164,7 +165,16 @@ preconditions.**
    `--profile test,docker` makes even stub blocks execute inside their container, so every process
    whose image is not pulled locally fails with exit 125 — 15 spurious failures. Also `tag "stub"`
    goes INSIDE each test block next to `options "-stub"`; a test without it is silently SKIPPED by
-   the CI gate.
+   the CI gate. **The two are independent and you need BOTH**: `tag "stub"` is only a CI label, so
+   a test carrying the tag but missing `options "-stub"` EXECUTES FOR REAL and dies on
+   `ModuleNotFoundError: No module named 'valis'`. (Validation tests that fail at launch get away
+   without it — nothing executes — which is why the existing ones look like counter-examples.)
+3. **`workflow.trace.tasks()` returns `WorkflowTask`, which has exactly two properties: `name` and
+   `success`.** There is NO `.process`. Derive the process name from `name`: strip the trailing
+   ` (tag)`, take the last `:`-separated segment, then compare EXACTLY — substring matching walks
+   straight into the §4.2 trap (`REG_COMPOSE` "matches" all three `REG_COMPOSE_*`).
+4. **Assert failure REASONS, not `workflow.failed`.** A launch-time error message lands in
+   `workflow.stdout` (a list of lines), not `workflow.errorReport`, which is `''`.
 
 ### 5.3 Geometry and formats
 - **The output canvas is NOT `aligned_slide_shape_rc`** — `warp_img` crops to `bbox_xywh`
@@ -184,7 +194,13 @@ preconditions.**
 
 Concrete code for all three is in the plan file.
 
-- **Task 6 — `mode=add_cycle` + `reg_qc=2` fast-fail.** (plan line ~1602)
+- **Task 6 — DONE** (`70a3d41`). `ParamUtils.useDistributedAdapter` / `regQcLevel` /
+  `validateRegistrationPath`; add_cycle now takes the same adapter as a full run; `reg_qc=2` +
+  distributed fails at launch from both call sites; 4 new nf-tests on the CI `stub` tag.
+  One deliberate divergence: add_cycle does NOT replicate `reg_dist_sub_threshold='auto'`'s
+  per-patient REG_ESTIMATE routing — with the switch on it always goes distributed. Harmless
+  under the default `reg_dist_force_tiling=false`; **fold the shared selector into Task 7**,
+  which has to invoke both paths over the same slides anyway.
 - **Task 7 — `--reg_compare`**: run classic AND the new path over the same slides, stream a
   per-channel diff. Params `reg_compare` / `reg_mem_budget_gb` already exist in `nextflow.config`.
 - **Task 8 — stage timings + CI wiring.** This is where the real gap is: **NONE of the
@@ -192,6 +208,13 @@ Concrete code for all three is in the plan file.
   `verify_distributed_bitidentical`, `test_tile_grid`, `test_mirage_slide_reader`, and the
   still-unreferenced `verify_micro_bitidentical.py`). Every guarantee on this branch currently
   depends on someone remembering to run Docker by hand.
+
+  Task 8 also inherits a **named, pre-existing cause of the red CI**: the full gate
+  (`nf-test test --tag stub --profile test`) is **111/112**, and the single failure is
+  `tests/modules/generate_qc_report.nf.test` — *"declares 7 input channels but 6 were
+  specified"*. Neither that module nor its test is touched by this branch; `db37397` **on main**
+  added a 7th input (`seg_eval_csvs`) without updating the test. Not ours, but it is what a
+  green gate needs.
 
 ---
 
@@ -241,9 +264,10 @@ cat .superpowers/sdd/progress.md             # per-task history + review finding
 python tests/testdata/generate_complete_testdata.py   # BEFORE any nf-test
 ```
 
-Then start **Task 6** from the plan. Tasks 0-5 have all been reviewed: the review over
+Then start **Task 7** from the plan. Tasks 0-5 have all been reviewed: the review over
 `d0434c9..HEAD` was completed 2026-07-23 (verdict PASS, 0 critical) and its findings are fixed in
-`6d7ad64`. No review debt is outstanding.
+`6d7ad64`. Task 6 (`70a3d41`) carries a controller self-review only — an independent pass over
+`6850f82..HEAD` with the §4.4 lens is still worth having if subagents are available.
 
 **Tooling note:** `nf-test` 0.9.5 is installed (jar in `~/.nf-test/`, wrapper on PATH).
 `brew install nf-test` DOES NOT EXIST — install from the pinned `askimed/nf-test` GitHub release,
