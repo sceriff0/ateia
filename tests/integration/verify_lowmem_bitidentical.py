@@ -9,6 +9,7 @@ Usage (inside the VALIS image):
       bolt3x/attend_image_analysis:mirage_valis_1.0.0 \
       python3 tests/integration/verify_lowmem_bitidentical.py
 """
+import glob
 import json
 import os
 import re
@@ -279,6 +280,27 @@ def leg1(md):
     return 0 if equal else 1
 
 
+_SAMPLE_BYTES = {"uchar": 1, "char": 1, "ushort": 2, "short": 2,
+                 "uint": 4, "int": 4, "float": 4, "double": 8}
+
+
+def report_tile_footprint(tiles_dir, grid):
+    """Report what the fan-out actually cost on disk, against the uncompressed equivalent.
+
+    The intermediate tiles are the largest artifact this path produces -- uncompressed they are
+    the whole DECOMPRESSED slide, on the low-resource machine the branch exists to serve -- so the
+    saving is worth measuring rather than assuming. Reported, not asserted: the ratio is entirely
+    image-dependent, and these fixtures are 128px synthetic data, so a threshold here would be
+    meaningless. Bit-identity is what leg 2 asserts; this is just the price tag.
+    """
+    paths = sorted(glob.glob(os.path.join(tiles_dir, "tile_*")))
+    on_disk = sum(os.path.getsize(p) for p in paths)
+    probe = pyvips.Image.new_from_file(paths[0])
+    raw = grid["width"] * grid["height"] * probe.bands * _SAMPLE_BYTES[probe.format]
+    print(f"[verify] {len(paths)} tiles ({os.path.splitext(paths[0])[1]}) = {on_disk / 1024:.1f} KiB "
+          f"on disk vs {raw / 1024:.1f} KiB uncompressed ({raw / on_disk:.2f}x)", flush=True)
+
+
 def leg2(md):
     """Tile fan-out + assemble == the single-process warp.
 
@@ -321,9 +343,9 @@ def leg2(md):
     print(f"[verify] grid is {grid['n_cols']}x{grid['n_rows']} over {grid['width']}x{grid['height']} "
           f"with {len(ragged)}/{len(grid['tiles'])} ragged-edge tiles", flush=True)
 
-    # Never fan out into a directory that already holds tiles: a leftover tile_<i>.v from an
-    # earlier grid is the right size to pass reg_assemble's per-tile check while holding pixels
-    # from a different run.
+    # Never fan out into a directory that already holds tiles: a leftover tile_<i> from an earlier
+    # grid is the right size to pass reg_assemble's per-tile check while holding pixels from a
+    # different run.
     tiles_dir = os.path.join(md, "tiles_out")
     if os.path.isdir(tiles_dir):
         shutil.rmtree(tiles_dir)
@@ -331,6 +353,8 @@ def leg2(md):
         run([sys.executable, "bin/reg_warp_tile.py", "--warp-state", ws, "--field", field_v,
              "--src-slide", src, "--grid", grid_f, "--tile-idx", str(t["idx"]),
              "--out-dir", tiles_dir])
+    report_tile_footprint(tiles_dir, grid)
+
     tiled_out = os.path.join(md, "tiled.ome.tiff")
     run([sys.executable, "bin/reg_assemble.py", "--warp-state", ws, "--src-slide", src,
          "--grid", grid_f, "--tiles-dir", tiles_dir, "--out", tiled_out])

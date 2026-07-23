@@ -37,6 +37,12 @@ def main():
     ap.add_argument("--grid", required=True, help="grid.json from reg_assemble.py --write-grid")
     ap.add_argument("--tile-idx", type=int, required=True)
     ap.add_argument("--out-dir", required=True)
+    ap.add_argument("--tile-format", choices=("tiff", "v"), default="tiff",
+                    help="tiff (default): tiled, losslessly-compressed TIFF. v: uncompressed "
+                         "libvips native -- faster to write, but the tiles then cost the full "
+                         "DECOMPRESSED slide on disk. Kept as an escape hatch for debugging.")
+    ap.add_argument("--tile-compression", default="deflate",
+                    help="lossless codec for --tile-format tiff (deflate, lzw, zstd, none)")
     ap.add_argument("--jvm-heap-gb", type=int, default=None,
                     help="explicit BioFormats JVM heap (GB); only used if the source slide is not "
                          "readable by MirageVipsSlideReader")
@@ -72,13 +78,60 @@ def main():
     region = warped.crop(tile["x"], tile["y"], tile["w"], tile["h"])
 
     os.makedirs(args.out_dir, exist_ok=True)
-    out = os.path.join(args.out_dir, f"tile_{args.tile_idx}.v")
-    region.write_to_file(out)
+    if args.tile_format == "v":
+        out = os.path.join(args.out_dir, f"tile_{args.tile_idx}.v")
+        region.write_to_file(out)
+    else:
+        out = os.path.join(args.out_dir, f"tile_{args.tile_idx}.tif")
+        _save_tile_tiff(region, out, args.tile_compression)
     print(f"[reg_warp_tile] {out} ({tile['w']}x{tile['h']} @ {tile['x']},{tile['y']} "
-          f"of {grid['width']}x{grid['height']}, bands={region.bands})", flush=True)
+          f"of {grid['width']}x{grid['height']}, bands={region.bands}, "
+          f"{os.path.getsize(out) / 1e6:.1f}MB)", flush=True)
     if heap_gb:
         registration.kill_jvm()
     return 0
+
+
+LOSSLESS_CODECS = ("deflate", "lzw", "zstd", "none")
+
+
+def _save_tile_tiff(img, path, compression):
+    """Write one warped output tile as a tiled, losslessly-compressed TIFF.
+
+    Lossless is a HARD requirement, not a preference: leg 2 of the integration test asserts the
+    reassembled slide is bit-identical to the single-process warp, so a lossy codec here is a
+    correctness bug, not a quality trade. jpeg/jp2k are therefore rejected rather than warned about.
+
+    The predictor is where most of the win is on 16-bit microscopy: horizontal differencing turns
+    highly-correlated neighbouring pixels into small residuals before deflate sees them. Float
+    images use TIFF's floating-point predictor instead, since horizontal differencing of raw IEEE
+    bytes does not help.
+
+    Tiled rather than stripped because reg_assemble reads these back region-by-region while
+    streaming the final image out, and a tiled layout keeps that access local. That internal tile
+    size is a locality choice only -- it has no bearing on the pixels.
+    """
+    if compression not in LOSSLESS_CODECS:
+        raise SystemExit(f"--tile-compression must be one of {', '.join(LOSSLESS_CODECS)} "
+                         f"(got {compression!r}); the tile fan-out must be lossless")
+    predictor = "float" if img.format in ("float", "double") else "horizontal"
+    img.tiffsave(path, compression=compression, predictor=predictor, bigtiff=True,
+                 **_internal_tiling(img))
+
+
+def _internal_tiling(img, target=512):
+    """TIFF tiling kwargs that are valid for an image of this size.
+
+    The TIFF spec requires tile dimensions to be multiples of 16, and libvips refuses to READ back
+    a file whose declared tile size is out of range for its dimensions ("tile size out of range").
+    A fixed 512 is fine for production output tiles (4096px) but not for the small ragged tiles the
+    integration test deliberately uses, so clamp to the image and round down to a multiple of 16 --
+    and fall back to strips when the image is too small to tile at all.
+    """
+    if min(img.width, img.height) < 16:
+        return {"tile": False}
+    wh = max(16, (min(target, img.width, img.height) // 16) * 16)
+    return {"tile": True, "tile_width": wh, "tile_height": wh}
 
 
 if __name__ == "__main__":

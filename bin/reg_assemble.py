@@ -4,7 +4,7 @@
 Two modes:
   --write-grid : build the same lazy warp reg_warp_tile.py will build, read the output canvas size
                  off it, and emit grid.json. Nothing is decoded -- the warp is never evaluated.
-  (default)    : lazily open every tile_<i>.v, join them row-major, and write the OME-TIFF.
+  (default)    : lazily open every tile_<i>.*, join them row-major, and write the OME-TIFF.
 
 Assembly is streaming: the joined image stays unevaluated until ``tiffsave`` pulls it, and libvips
 evaluates the join region-by-region as it writes, so peak RAM is O(one row of tiles), not O(slide).
@@ -14,6 +14,7 @@ same demand-driven warp (see bin/utils/tile_grid.output_grid). The join is a cha
 ragged canvas, and ``arrayjoin`` sizes every cell to the maximum and pads the difference.
 """
 import argparse
+import glob
 import json
 import os
 import sys
@@ -122,11 +123,22 @@ def _assemble(args, ws):
 
 def _open_tile(tiles_dir, t):
     """Open one tile lazily and check it is the region the grid says it is. A silently-missing or
-    wrong-sized tile (a failed fan-out task) would otherwise be padded by ``join`` and shift every
-    tile after it, producing a plausible-looking but misregistered slide."""
-    path = os.path.join(tiles_dir, f"tile_{t['idx']}.v")
-    if not os.path.exists(path):
-        raise SystemExit(f"missing tile {path} -- the fan-out did not produce every tile")
+    wrong-sized tile (a failed fan-out task) would otherwise be cropped or shifted by ``join``
+    (which defaults to expand=False), producing a plausible-looking but misregistered slide.
+
+    The extension is discovered rather than assumed, so assembly does not care whether the fan-out
+    ran with --tile-format tiff or v.
+    """
+    matches = sorted(glob.glob(os.path.join(tiles_dir, f"tile_{t['idx']}.*")))
+    if not matches:
+        raise SystemExit(f"missing tile_{t['idx']}.* in {tiles_dir} -- the fan-out did not "
+                         "produce every tile")
+    if len(matches) > 1:
+        # Two files for one index means an earlier fan-out left tiles behind, most likely in a
+        # different format. Picking either one silently mixes runs.
+        raise SystemExit(f"ambiguous tile {t['idx']}: {', '.join(os.path.basename(m) for m in matches)} "
+                         "-- leftovers from an earlier fan-out; clear the tiles dir")
+    path = matches[0]
     img = pyvips.Image.new_from_file(path)
     if (img.width, img.height) != (t["w"], t["h"]):
         raise SystemExit(f"{path} is {img.width}x{img.height} but the grid declares "
