@@ -37,7 +37,7 @@ import pyvips
 import valis_tiling
 from micro_rigid_guard import install_micro_rigid_guard
 from valis_config import build_registrar_kwargs, maybe_init_jvm, slide_paths
-from mirage_slide_reader import get_reader_for, MirageVipsSlideReader, all_readable
+from mirage_slide_reader import MirageVipsSlideReader, all_readable
 from valis import registration, slide_tools
 from valis import serial_non_rigid as snr
 from valis.non_rigid_registrars import OpticalFlowWarper, NonRigidTileRegistrar
@@ -71,10 +71,18 @@ def main():
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
 
-    # Size + start the BioFormats JVM only if some input is NOT mirage-readable.
+    # Size the BioFormats JVM heap to the inputs only if some input is NOT mirage-readable.
+    #
+    # This does NOT mean no JVM runs. Valis.__init__ starts one unconditionally --
+    # registration.py:2083 -> slide_tools.get_img_type() -> slide_io.init_jvm() -- to probe file
+    # types, before reader_cls is ever consulted. That JVM uses VALIS's small default heap and only
+    # sniffs extensions, so it is not the RAM wall. The wall was BioFormats decoding a whole slide
+    # into a heap sized 3*filesize+8, and THAT is what the lazy reader removes. Say "no
+    # slide-scaled heap", never "JVM-free" (spec assumption A2 is false).
     heap = maybe_init_jvm(args.input_dir, override_gb=args.jvm_heap_gb)
     print(f"[reg_prep] JVM heap = {heap} GB" if heap else
-          "[reg_prep] all inputs readable by MirageVipsSlideReader; no JVM started", flush=True)
+          "[reg_prep] all inputs readable by MirageVipsSlideReader; no slide-scaled JVM heap "
+          "(Valis still starts a default-heap JVM to probe file types)", flush=True)
 
     # Make rigid-stage micro alignment robust to featureless input (no-op on real data); see module.
     install_micro_rigid_guard()

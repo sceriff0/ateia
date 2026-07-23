@@ -186,6 +186,22 @@ def _physical_size(ome_xml):
     return [float(x.group(1)), float(y.group(1)), u.group(1) if u else "µm"]
 
 
+def open_multiband(src_f):
+    """Open a possibly page-stacked TIFF as ONE lazy multi-band image, shape (H, W, C).
+
+    Both writers in this pipeline store the C channels as C vertically-stacked PAGES with
+    ``page-height=H`` -- valis ``slide_io.save_ome_tiff`` (arrayjoin(bandsplit(), across=1)) and
+    ``reg_finalize._save_ome_pyvips`` alike. pyvips' default ``n=1`` therefore reads CHANNEL 0
+    ALONE, so any test that diffs a written slide against an in-memory multi-band array must come
+    through here: reading it directly either silently compares one channel, or shape-mismatches
+    against the (H, W, C) baseline.
+
+    Note ``n=-1`` on its own is NOT enough -- it yields the (C*H, W) page stack, which still does
+    not match an interleaved (H, W, C) array. The band-join is the part that matters.
+    """
+    return _bandjoin_pages(_open_roll(src_f))
+
+
 def get_reader_for(src_f, series=None):
     """Return the cheapest correct reader class for `src_f`.
 

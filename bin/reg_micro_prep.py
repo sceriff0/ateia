@@ -45,7 +45,7 @@ import reg_finalize  # reuse the EXACT wave-1 compose+pad that produces classic 
 from micro_rigid_guard import install_micro_rigid_guard
 from valis_config import (build_registrar_kwargs, maybe_init_jvm, slide_paths,
                           micro_reg_size as compute_micro_reg_size)
-from mirage_slide_reader import get_reader_for, MirageVipsSlideReader, all_readable
+from mirage_slide_reader import MirageVipsSlideReader, all_readable
 from valis import registration
 from valis import serial_non_rigid as snr
 from valis.non_rigid_registrars import OpticalFlowWarper, NonRigidTileRegistrar
@@ -110,10 +110,12 @@ def main():
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
 
-    # Size + start the BioFormats JVM only if some input is NOT mirage-readable.
+    # Size the BioFormats JVM heap to the inputs only if some input is NOT mirage-readable.
+    # A default-heap JVM still starts inside Valis.__init__ for file-type probing; see reg_prep.py.
     heap = maybe_init_jvm(args.input_dir, override_gb=args.jvm_heap_gb)
     print(f"[reg_micro_prep] JVM heap = {heap} GB" if heap else
-          "[reg_micro_prep] all inputs readable by MirageVipsSlideReader; no JVM started", flush=True)
+          "[reg_micro_prep] all inputs readable by MirageVipsSlideReader; no slide-scaled JVM heap "
+          "(Valis still starts a default-heap JVM to probe file types)", flush=True)
 
     install_micro_rigid_guard()  # robust micro-rigid (no-op on real data; see module)
     # Force the processed-2-D branch (no internal tiler), then no-op the warper => no DeepFlow.
