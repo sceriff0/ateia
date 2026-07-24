@@ -54,11 +54,13 @@ Ordered strongest first. Nothing in this design modifies a VALIS algorithm.
   True for uncompressed / LZW / deflate-zlib (mirage uses `compression='zlib'`), can differ
   for some JPEG variants. Probe first.
 - **A2 — `reader_cls=` keeps the JVM out of `Valis.register()` for our inputs.**
-  `slide_io.get_slide_reader()` calls `init_jvm()` unconditionally at
-  `valis_lib/slide_io.py:2338`, so any residual call site re-summons the JVM. The two known
-  remaining call sites (`valis_lib/registration.py:983, 995`) are inside
-  `Slide.warp_and_save_slide`, which the decomposed path does **not** use — but this must be
-  confirmed empirically, not by inspection alone.
+  **FALSE as stated (confirmed empirically).** `Valis.__init__` starts a JVM *unconditionally* —
+  `registration.py:2083` → `slide_tools.get_img_type()` → `slide_io.init_jvm()` — *before*
+  `reader_cls` is ever consulted, purely to sniff file extensions. So the design does **not** run
+  "JVM-free"; what it eliminates is the *slide-scaled* BioFormats heap (`3*filesize+8` GB) that
+  decoded an entire slide into memory. The residual JVM sniffs extensions at a default heap and is
+  not the RAM wall. This cannot be removed without editing `valis_lib/` (forbidden), and it does
+  not defeat the goal. **Wherever this document says "JVM-free", read "no slide-scaled JVM heap".**
 
 If A1 fails, the claim degrades from "bit-identical by construction" to "empirically close",
 and `--reg_compare` (§7) becomes the instrument that quantifies it. The project still lands;
@@ -122,7 +124,7 @@ it stays bit-identical. No Nextflow restructuring. This is deferred, not designe
 |---|---|
 | `bin/reg_prep.py`, `bin/reg_micro_prep.py` | pass `reader_cls=` into `registrar.register()`; skip `init_jvm()` when all inputs are mirage-readable |
 | `bin/reg_finalize.py:224` | use the factory instead of `slide_io.get_slide_reader` |
-| `bin/reg_finalize.py` writer | `_save_ome_pyvips` becomes the primary path when JVM-free |
+| `bin/reg_finalize.py` writer | `_save_ome_pyvips` becomes the primary path when the source is mirage-readable (no slide-scaled JVM heap; see §3 A2) |
 | `bin/utils/valis_config.py` | reader selection + a `no_jvm` mode |
 
 ### 5.3 Warp split (the "B" fan-out)
@@ -194,7 +196,7 @@ REG_PREP ──► REG_NONRIGID ──► REG_MICRO_PREP ──► REG_NONRIGID_
                                                           REG_ASSEMBLE ──► registered OME-TIFF
 ```
 
-All stages JVM-free when every input is mirage-readable.
+All stages avoid the slide-scaled JVM heap when every input is mirage-readable (a default-heap JVM still starts to sniff types; see §3 A2).
 
 ## 7. `--reg_compare`
 
