@@ -8,10 +8,10 @@ include { GET_IMAGE_DIMS                    } from '../../modules/local/get_imag
 include { MAX_DIM                           } from '../../modules/local/max_dim'
 include { PAD_IMAGES                        } from '../../modules/local/pad_images'
 include { GENERATE_REGISTRATION_QC          } from '../../modules/local/generate_registration_qc'
+include { SEG_QC_GEOJSON                    } from '../../modules/local/seg_qc_geojson'
+include { WARP_SEG_QC                       } from '../../modules/local/warp_seg_qc'
 
 include { VALIS_ADAPTER                     } from './adapters/valis_adapter'
-include { VALIS_DISTRIBUTED_ADAPTER         } from './adapters/valis_distributed_adapter'
-include { REG_ESTIMATE                      } from '../../modules/local/reg_estimate'
 
 include { ESTIMATE_FEATURE_DISTANCES        } from '../../modules/local/estimate_feature_distances'
 
@@ -163,47 +163,29 @@ workflow REGISTRATION {
     //   - Runs registration
     //   - Converts output back to [meta, file] standard format
 
-    // Opt-in distributed tiled registration (spec §6.5/§6.6): lifts VALIS's non-rigid tile loop into
-    // REG_PREP -> REG_TILE (fan-out) -> REG_FINALIZE (fan-in) for low-RAM clusters. Bit-identical to
-    // VALIS's own tiler on its processed 2-D images. Default (reg_distributed_tiling=false) = classic.
+    // Registration runs via the classic monolithic VALIS adapter (single-process REGISTER).
+    // The distributed/tiled low-memory path was archived on 2026-07-24 (git tag
+    // archive/tiled-valis-2026-07-24) and is no longer wired in.
     //
-    // IMPORTANT (spec §6.5): tiled non-rigid != whole-image non-rigid. VALIS only tiles when
-    // est_GB > threshold (rarely, since non-rigid runs downsampled). So:
-    //   - 'auto' (default): REG_ESTIMATE per patient -> route est>thr to distributed (== classic-tiled),
-    //     est<=thr to classic whole-image (IDENTICAL to classic). This keeps <10GB inputs bit-identical.
-    //   - 'force': always tile (RAM win at the cost of differing from classic-whole-image for small data).
-    if (!params.reg_distributed_tiling) {
-        VALIS_ADAPTER(ch_grouped_multi)
-        ch_registered       = VALIS_ADAPTER.out.registered
-        ch_adapter_logs     = VALIS_ADAPTER.out.size_logs
-        ch_adapter_versions = VALIS_ADAPTER.out.versions
-        ch_adapter_summary  = VALIS_ADAPTER.out.summary
-    } else if ((params.reg_dist_sub_threshold ?: 'auto') == 'force') {
-        VALIS_DISTRIBUTED_ADAPTER(ch_grouped_multi)
-        ch_registered       = VALIS_DISTRIBUTED_ADAPTER.out.registered
-        ch_adapter_logs     = VALIS_DISTRIBUTED_ADAPTER.out.size_logs
-        ch_adapter_versions = VALIS_DISTRIBUTED_ADAPTER.out.versions
-        ch_adapter_summary  = Channel.empty()
-    } else {
-        // 'auto': route per patient by INPUT SIZE (spec §6.7) — large inputs (JVM-RAM concern) ->
-        // distributed (JVM-free, bit-identical); small inputs -> classic VALIS (monolithic is fine).
-        REG_ESTIMATE(ch_grouped_multi.map { pid, ref_item, all_items ->
-            tuple(pid, ref_item[1], all_items.collect { it[1] })
-        })
-        ch_routed = ch_grouped_multi
-            .map { pid, ref_item, all_items -> tuple(pid, [ref_item, all_items]) }
-            .join(REG_ESTIMATE.out.decision)
-            .branch { pid, payload, use_distributed ->
-                distributed: use_distributed == 'true'
-                classic:     true
-            }
-        VALIS_DISTRIBUTED_ADAPTER(ch_routed.distributed.map { pid, payload, u -> tuple(pid, payload[0], payload[1]) })
-        VALIS_ADAPTER(            ch_routed.classic.map     { pid, payload, u -> tuple(pid, payload[0], payload[1]) })
-        ch_registered       = VALIS_DISTRIBUTED_ADAPTER.out.registered.mix(VALIS_ADAPTER.out.registered)
-        ch_adapter_logs     = VALIS_DISTRIBUTED_ADAPTER.out.size_logs.mix(VALIS_ADAPTER.out.size_logs)
-        ch_adapter_versions = VALIS_DISTRIBUTED_ADAPTER.out.versions.mix(VALIS_ADAPTER.out.versions)
-        ch_adapter_summary  = VALIS_ADAPTER.out.summary
-    }
+    // Registrar pickle (per patient) for the GeoJSON seg-QC, and the pre-micro displacement
+    // fields (only when reg_qc >= 2 asked REGISTER for them), both come from classic VALIS.
+    ch_registrar_pickle = Channel.empty()
+    ch_stage_checkpoint = Channel.empty()
+
+    // reg_qc: 0 = none, 1 = DAPI overlay, 2 = + segmentation overlap (legacy
+    // skip_registration_qc=true forces 0). ParamUtils.regQcLevel is the single definition.
+    def reg_qc_level = ParamUtils.regQcLevel(params)
+
+    // Level 2 warps polygons through the classic registrar pickle produced by REGISTER.
+    def do_seg_qc = reg_qc_level >= 2
+
+    VALIS_ADAPTER(ch_grouped_multi)
+    ch_registered       = VALIS_ADAPTER.out.registered
+    ch_registrar_pickle = VALIS_ADAPTER.out.registrar
+    ch_stage_checkpoint = VALIS_ADAPTER.out.stage_checkpoint
+    ch_adapter_logs     = VALIS_ADAPTER.out.size_logs
+    ch_adapter_versions = VALIS_ADAPTER.out.versions
+    ch_adapter_summary  = VALIS_ADAPTER.out.summary
 
     // Re-introduce single-slide patients (reference passed through unregistered)
     // into the registered stream for QC, checkpointing and postprocessing.
@@ -234,12 +216,52 @@ workflow REGISTRATION {
             [meta, registered_file, reference_file]
         }
 
-    // Generate QC for all non-reference images
-    if (!params.skip_registration_qc) {
+    // Level >= 1: DAPI overlay image QC for all non-reference images
+    if (reg_qc_level >= 1) {
         GENERATE_REGISTRATION_QC(ch_for_qc)
         ch_qc = GENERATE_REGISTRATION_QC.out.qc
     } else {
         ch_qc = Channel.empty()
+    }
+
+    // Level >= 2: GeoJSON segmentation-overlap QC (Dice/IoU/instance-F1) BEFORE vs AFTER.
+    // Segment each slide's DAPI on its NATIVE (pre-registration) image -> cell GeoJSON,
+    // then warp the polygons through the registrar and score overlap. Classic VALIS only
+    // (needs the registrar pickle; distributed produces none).
+    ch_seg_qc = Channel.empty()
+    if (do_seg_qc) {
+        SEG_QC_GEOJSON(ch_images_for_error)
+
+        ch_gj = SEG_QC_GEOJSON.out.geojson.branch { meta, gj ->
+            reference: meta.is_reference
+            moving:    !meta.is_reference
+        }
+        // reference: [patient_id, ref_geojson, ref_slide_name(=stem)]
+        ch_ref_gj = ch_gj.reference.map { meta, gj -> [meta.patient_id, gj, gj.simpleName] }
+        // moving: [patient_id, meta, moving_geojson, moving_slide_name]
+        ch_mov_gj = ch_gj.moving.map { meta, gj -> [meta.patient_id, meta, gj, gj.simpleName] }
+
+        // Exactly one stage-checkpoint entry per patient that has a pickle — the real directory
+        // where REGISTER wrote one, `[]` where it did not. Making it total matters: a plain
+        // combine on an optional channel silently DROPS the patients that lack it, so a failed
+        // snapshot would remove the patient from the QC entirely instead of costing it one stage.
+        ch_ckpt_by_patient = ch_registrar_pickle
+            .map { pid, _pickle -> tuple(pid, []) }
+            .join(ch_stage_checkpoint, by: 0, remainder: true)
+            .map { pid, _placeholder, ckpt -> tuple(pid, ckpt ?: []) }
+
+        // Join each moving slide with its patient's reference GeoJSON, registrar pickle and
+        // stage checkpoint.
+        ch_for_warp = ch_mov_gj
+            .combine(ch_ref_gj, by: 0)
+            .combine(ch_registrar_pickle, by: 0)
+            .combine(ch_ckpt_by_patient, by: 0)
+            .map { pid, meta, mov_gj, mov_name, ref_gj, ref_name, pickle, ckpt ->
+                tuple(meta, pickle, ref_name, mov_name, ref_gj, mov_gj, ckpt)
+            }
+
+        WARP_SEG_QC(ch_for_warp)
+        ch_seg_qc = WARP_SEG_QC.out.metrics
     }
 
     // ========================================================================
@@ -250,6 +272,7 @@ workflow REGISTRATION {
     //   - reference vs registered (post-registration)
 
     ch_error_metrics = Channel.empty()
+    ch_distance_plots = Channel.empty()
 
     if (params.enable_feature_error) {
         // For each non-reference image: [meta, reference, moving, registered]
@@ -286,6 +309,7 @@ workflow REGISTRATION {
 
         ESTIMATE_FEATURE_DISTANCES(ch_for_error)
         ch_error_metrics = ch_error_metrics.mix(ESTIMATE_FEATURE_DISTANCES.out.distance_metrics)
+        ch_distance_plots = ch_distance_plots.mix(ESTIMATE_FEATURE_DISTANCES.out.distance_plots)
     }
 
     // ========================================================================
@@ -338,8 +362,13 @@ workflow REGISTRATION {
     ch_size_logs = ch_size_logs.mix(ch_adapter_logs)
 
     // Add size logs from QC processes (if enabled)
-    if (!params.skip_registration_qc) {
+    if (reg_qc_level >= 1) {
         ch_size_logs = ch_size_logs.mix(GENERATE_REGISTRATION_QC.out.size_log)
+    }
+    if (do_seg_qc) {
+        ch_size_logs = ch_size_logs
+            .mix(SEG_QC_GEOJSON.out.size_log)
+            .mix(WARP_SEG_QC.out.size_log)
     }
 
     // Add size logs from error estimation (if enabled)
@@ -358,8 +387,13 @@ workflow REGISTRATION {
 
     ch_versions = ch_versions.mix(ch_adapter_versions)
 
-    if (!params.skip_registration_qc) {
+    if (reg_qc_level >= 1) {
         ch_versions = ch_versions.mix(GENERATE_REGISTRATION_QC.out.versions.first())
+    }
+    if (do_seg_qc) {
+        ch_versions = ch_versions
+            .mix(SEG_QC_GEOJSON.out.versions.first())
+            .mix(WARP_SEG_QC.out.versions.first())
     }
     if (params.enable_feature_error) {
         ch_versions = ch_versions.mix(ESTIMATE_FEATURE_DISTANCES.out.versions.first())
@@ -369,7 +403,9 @@ workflow REGISTRATION {
     registered       = ch_registered
     checkpoint_csv   = ch_checkpoint_csv
     qc               = ch_qc
+    seg_qc           = ch_seg_qc
     error_metrics    = ch_error_metrics
+    distance_plots   = ch_distance_plots
     valis_summary    = ch_adapter_summary
     size_logs        = ch_size_logs
     versions         = ch_versions

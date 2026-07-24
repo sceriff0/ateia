@@ -4,11 +4,15 @@
 ================================================================================
 */
 
+import groovy.json.JsonOutput
+
 include { PREPROCESSING       } from '../subworkflows/local/preprocess'
 include { REGISTRATION        } from '../subworkflows/local/registration'
 include { POSTPROCESSING      } from '../subworkflows/local/postprocess'
-include { AGGREGATE_SIZE_LOGS         } from '../benchmarks/modules/aggregate_size_logs'
+include { ADD_CYCLE           } from '../subworkflows/local/add_cycle'
+include { AGGREGATE_SIZE_LOGS         } from '../modules/local/aggregate_size_logs'
 include { GENERATE_QC_REPORT          } from '../modules/local/generate_qc_report'
+include { EXTRACT_MASK_SERIES         } from '../modules/local/extract_mask_series'
 
 
 /*
@@ -71,6 +75,84 @@ workflow MIRAGE {
 
     ParamUtils.validateStart(params.start)
 
+    /* -------------------- MODE: ADD_CYCLE -------------------- */
+    if (params.mode == 'add_cycle') {
+        ParamUtils.validateAddCycle(params.prior_outdir)
+        ParamUtils.validateSegMethod(params.seg_method)  // reuse mask; still validate quant options
+        ParamUtils.validateCompartmentQuant(params.quantify_compartments, params.expanded_quantification)
+        ParamUtils.validateRegQc((params.reg_qc == null ? 1 : params.reg_qc) as int)
+
+        if (!params.input) error "mode='add_cycle' requires --input (the new cycle samplesheet)"
+        CsvUtils.validateInputCSV(params.input, ParamUtils.requiredColumnsForStep('preprocessing'))
+
+        // The new-cycle samplesheet intentionally has NO reference row: the
+        // registration reference is the frozen prior-run reference (external to
+        // this CSV). Pass allow-no-reference=true so validation does not reject
+        // the by-design zero-reference sheet. (Registration still uses the prior
+        // reference — ADD_CYCLE forces the new cycle to is_reference=false.)
+        CsvUtils.validateInputSemantics(params.input, 'preprocessing', true)
+
+        // Fast-fail: every new-cycle patient must exist in the prior run's
+        // postprocessed checkpoint, else its masks/base-table can't be sourced.
+        def newPatients   = CsvUtils.countImagesPerPatient(params.input).keySet()
+        def priorPostCsv  = "${params.prior_outdir}/csv/postprocessed.csv"
+        def priorPatients = CsvUtils.countImagesPerPatient(priorPostCsv).keySet()
+        def orphans = newPatients - priorPatients
+        if (orphans) {
+            error "mode='add_cycle': new-cycle patient(s) ${orphans} have no entry in ${priorPostCsv}. " +
+                  "Each new-cycle patient_id must match a patient from the prior completed run."
+        }
+
+        if (params.dry_run) {
+            log.info "DRY RUN (add_cycle): validations passed for --input=${params.input}, --prior_outdir=${params.prior_outdir}; mask extraction will run against ${params.prior_outdir}/csv/postprocessed.csv's pyramid column."
+            return
+        }
+
+        // New-cycle raw images -> [meta, file] (reuse existing loader + counts).
+        def new_counts    = CsvUtils.countImagesPerPatient(params.input)
+        def new_ch_counts = CsvUtils.countChannelsPerPatient(params.input)
+        def ch_new_input  = loadInputChannel(params.input, 'path_to_file', new_counts, new_ch_counts)
+
+        // Prior reusable assets from the previous run's checkpoint CSVs.
+        // registered.csv: patient_id,registered_image,is_reference,channels
+        def ch_prior_ref = Channel
+            .fromPath("${params.prior_outdir}/csv/registered.csv", checkIfExists: true)
+            .splitCsv(header: true)
+            .filter { row -> row.is_reference?.toLowerCase() == 'true' }
+            .map { row ->
+                def chans = (row.channels ?: '').split('\\|').collect { it.trim() }.findAll { it }
+                [row.patient_id, chans, file(row.registered_image)]
+            }
+
+        // postprocessed.csv: patient_id,cell_csv,cell_geojson,merged_csv,cell_mask,pyramid
+        def ch_prior_rows = Channel
+            .fromPath("${params.prior_outdir}/csv/postprocessed.csv", checkIfExists: true)
+            .splitCsv(header: true)
+            .map { row -> [row.patient_id, file(row.merged_csv), file(row.cell_mask), file(row.pyramid)] }
+
+        // Extract masks from the prior pyramid's Image:1 series (fast-fails in the
+        // process if the prior run was not embed_masks+expanded+compartment).
+        EXTRACT_MASK_SERIES(ch_prior_rows.map { pid, _merged_csv, _cell_mask, pyramid -> [[patient_id: pid, id: pid], pyramid] })
+        def ch_masks = EXTRACT_MASK_SERIES.out.cell_mask.map { m, f -> [m.patient_id, f] }
+            .join(EXTRACT_MASK_SERIES.out.nuclei_mask.map { m, f -> [m.patient_id, f] }, by: 0)
+
+        def ch_prior_post = ch_prior_rows
+            .map { pid, merged_csv, _cell_mask, pyramid -> [pid, merged_csv, pyramid] }
+            .join(ch_masks, by: 0)
+            .map { pid, merged_csv, pyramid, cell_mask, nuclei_mask ->
+                [pid, merged_csv, cell_mask, nuclei_mask, pyramid] }
+
+        // Join into a single per-patient asset tuple.
+        def ch_prior_assets = ch_prior_ref
+            .join(ch_prior_post, by: 0)
+            .map { pid, ref_channels, ref_image, merged_csv, cell_mask, nuclei_mask, pyramid ->
+                [pid, ref_channels, ref_image, merged_csv, cell_mask, nuclei_mask, pyramid]
+            }
+
+        ADD_CYCLE(ch_new_input, ch_prior_assets)
+        return   // do NOT fall through to the standard start/stop flow
+    }
+
     // Validate and resolve --stop: default to last step if not provided
     if (params.stop) {
         ParamUtils.validateStop(params.stop, params.start)
@@ -83,6 +165,7 @@ workflow MIRAGE {
 
     if (ParamUtils.shouldRun('registration', params.start, effective_stop)) {
         ParamUtils.validateRegistrationMethod(params.registration_method)
+        ParamUtils.validateRegQc((params.reg_qc == null ? 1 : params.reg_qc) as int)
     }
 
     if (ParamUtils.shouldRun('postprocessing', params.start, effective_stop)) {
@@ -159,7 +242,10 @@ workflow MIRAGE {
         def ch_feature_dist_jsons   = Channel.empty()
         def ch_valis_summary_csvs   = Channel.empty()
         def ch_postprocess_qc_pngs  = Channel.empty()
+        def ch_seg_eval_csv         = Channel.empty()
         def ch_versions             = Channel.empty()
+        def ch_distance_plots = Channel.empty()
+        def ch_seg_qc_jsons   = Channel.empty()
 
         if (ParamUtils.shouldRun('preprocessing', params.start, effective_stop)) {
             ch_preprocess_qc_pngs = ch_preprocess_qc_pngs.mix(PREPROCESSING.out.preprocess_qc)
@@ -173,9 +259,14 @@ workflow MIRAGE {
             ch_valis_summary_csvs = ch_valis_summary_csvs
                 .mix(REGISTRATION.out.valis_summary)
             ch_versions = ch_versions.mix(REGISTRATION.out.versions)
+            ch_distance_plots = ch_distance_plots
+                .mix(REGISTRATION.out.distance_plots.map { meta, files -> files })
+            ch_seg_qc_jsons = ch_seg_qc_jsons
+                .mix(REGISTRATION.out.seg_qc.map { meta, files -> files })
         }
         if (ParamUtils.shouldRun('postprocessing', params.start, effective_stop)) {
             ch_postprocess_qc_pngs = ch_postprocess_qc_pngs.mix(POSTPROCESSING.out.postprocess_qc)
+            ch_seg_eval_csv = ch_seg_eval_csv.mix(POSTPROCESSING.out.seg_eval_metrics)
             ch_versions = ch_versions.mix(POSTPROCESSING.out.versions)
         }
 
@@ -184,20 +275,60 @@ workflow MIRAGE {
             .unique()
             .collectFile(name: 'collated_versions.yml')
 
+        // Run-context summary for the report's overview card (pipeline, run,
+        // params, sample manifest). Built from data already computed above
+        // (patient_counts/channel_counts) rather than re-parsing the CSV.
+        def manifest_patients = patient_counts.collectEntries { pid, imgs ->
+            [(pid): [images: imgs, channels: (channel_counts[pid] ?: 0)]]
+        }
+        def run_summary_map = [
+            pipeline: [name: workflow.manifest.name, version: workflow.manifest.version],
+            run: [
+                timestamp: new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss 'UTC'")
+                    .format(new Date()),
+                mode: (params.mode ?: 'standard'),
+                start: params.start,
+                stop: effective_stop,
+            ],
+            params: [
+                registration_method: params.registration_method,
+                seg_method: params.seg_method,
+                quantify_compartments: params.quantify_compartments,
+                expanded_quantification: params.expanded_quantification,
+                pixel_size: params.pixel_size,
+                cse_pixel_size_um: params.cse_pixel_size_um,
+            ],
+            manifest: [
+                totals: [
+                    patients: patient_counts.size(),
+                    images: (patient_counts.values().sum() ?: 0),
+                    channels: (channel_counts.values().sum() ?: 0),
+                ],
+                patients: manifest_patients,
+            ],
+        ]
+        def ch_run_summary = Channel
+            .of(JsonOutput.prettyPrint(JsonOutput.toJson(run_summary_map)))
+            .collectFile(name: 'run_summary.json')
+
         GENERATE_QC_REPORT(
             ch_preprocess_qc_pngs.collect().ifEmpty([]),
             ch_registration_qc_pngs.collect().ifEmpty([]),
             ch_feature_dist_jsons.collect().ifEmpty([]),
             ch_valis_summary_csvs.collect().ifEmpty([]),
             ch_postprocess_qc_pngs.collect().ifEmpty([]),
-            ch_collated_versions
+            ch_seg_eval_csv.collect().ifEmpty([]),
+            ch_collated_versions,
+            ch_run_summary,
+            ch_distance_plots.collect().ifEmpty([]),
+            ch_seg_qc_jsons.collect().ifEmpty([]),
         )
     }
 
     /* -------------------- TRACE AGGREGATION -------------------- */
 
     // Aggregate input size logs from all processes (only if tracing enabled)
-    if (params.enable_size_logs) {
+    if (params.enable_trace) {
         def ch_all_sizes = Channel.empty()
 
         if (ParamUtils.shouldRun('preprocessing', params.start, effective_stop)) {

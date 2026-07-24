@@ -38,6 +38,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed parameter formatting in `preprocess.py` line 249 (`skip_dapi : bool` -> `skip_dapi: bool`)
 - Removed redundant `import tifffile` in `preprocess.py`
 
+### Removed
+- **Phenotyping stage** — cell phenotype classification, z-score thresholding, and
+  marker-cutoff configuration are no longer part of the pipeline. GeoJSON export now
+  emits raw marker intensities for downstream gating (e.g. in FlowPath) instead.
+- **Alternative registration backends** — VALIS pairwise, GPU-accelerated diffeomorphic,
+  and CPU multi-threaded diffeomorphic registration were removed. `registration_method`
+  now accepts only `valis` (graph-based whole-slide registration).
+- **GPU quantification path** — the GPU-accelerated quantification option was removed;
+  quantification runs on CPU.
+
+<!-- TODO(release): before publication, cut a tagged release from [Unreleased] and reconcile the
+     entry below — its date is a placeholder and it lists features later removed in [Unreleased]
+     (phenotyping, VALIS pairwise, diffeomorphic backends, GPU quantification). -->
 ## [0.1.0] - 2024-01-01
 
 ### Added

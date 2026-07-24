@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """Unit tests for quantify.py module."""
 
-import pytest
+import sys
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
-from pathlib import Path
-import sys
+import pytest
 
 # Add bin/ to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / 'bin'))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "bin"))
 
 
 class TestQuantificationBasics:
@@ -30,41 +31,48 @@ class TestQuantificationBasics:
         props = regionprops_table(
             mask,
             intensity_image=intensity,
-            properties=['label', 'area', 'centroid', 'eccentricity', 'mean_intensity']
+            properties=["label", "area", "centroid", "eccentricity", "mean_intensity"],
         )
 
         df = pd.DataFrame(props)
 
         assert len(df) == 2, "Should have 2 cells"
-        assert 'label' in df.columns
-        assert 'area' in df.columns
-        assert 'mean_intensity' in df.columns
+        assert "label" in df.columns
+        assert "area" in df.columns
+        assert "mean_intensity" in df.columns
 
         # Cell 1 should be roughly 20x20 = 400 pixels
-        cell1 = df[df['label'] == 1].iloc[0]
-        assert cell1['area'] == pytest.approx(400, abs=10)
+        cell1 = df[df["label"] == 1].iloc[0]
+        assert cell1["area"] == pytest.approx(400, abs=10)
 
     def test_csv_column_structure(self):
         """Test expected CSV column structure."""
         # Expected columns from quantification
         expected_morphology = [
-            'label', 'y', 'x', 'area', 'eccentricity',
-            'perimeter', 'convex_area', 'axis_major_length', 'axis_minor_length'
+            "label",
+            "y",
+            "x",
+            "area",
+            "eccentricity",
+            "perimeter",
+            "convex_area",
+            "axis_major_length",
+            "axis_minor_length",
         ]
 
         # Mock quantification result
         data = {
-            'label': [1, 2, 3],
-            'y': [10, 20, 30],
-            'x': [15, 25, 35],
-            'area': [100, 150, 200],
-            'eccentricity': [0.5, 0.6, 0.7],
-            'perimeter': [40, 50, 60],
-            'convex_area': [105, 155, 205],
-            'axis_major_length': [12, 15, 18],
-            'axis_minor_length': [8, 10, 12],
-            'DAPI': [100, 120, 140],
-            'FITC': [200, 220, 240]
+            "label": [1, 2, 3],
+            "y": [10, 20, 30],
+            "x": [15, 25, 35],
+            "area": [100, 150, 200],
+            "eccentricity": [0.5, 0.6, 0.7],
+            "perimeter": [40, 50, 60],
+            "convex_area": [105, 155, 205],
+            "axis_major_length": [12, 15, 18],
+            "axis_minor_length": [8, 10, 12],
+            "DAPI": [100, 120, 140],
+            "FITC": [200, 220, 240],
         }
 
         df = pd.DataFrame(data)
@@ -74,8 +82,8 @@ class TestQuantificationBasics:
             assert col in df.columns, f"Missing column: {col}"
 
         # Check marker columns present
-        assert 'DAPI' in df.columns
-        assert 'FITC' in df.columns
+        assert "DAPI" in df.columns
+        assert "FITC" in df.columns
 
 
 class TestCSVMerging:
@@ -84,45 +92,46 @@ class TestCSVMerging:
     def test_inner_join_consistency(self):
         """Test that inner join maintains cell label consistency."""
         # Reference CSV (DAPI)
-        ref_df = pd.DataFrame({
-            'label': [1, 2, 3, 4],
-            'area': [100, 150, 200, 250],
-            'DAPI': [100, 120, 140, 160]
-        })
+        ref_df = pd.DataFrame(
+            {
+                "label": [1, 2, 3, 4],
+                "area": [100, 150, 200, 250],
+                "DAPI": [100, 120, 140, 160],
+            }
+        )
 
         # Other marker CSV (FITC) - missing cell 4
-        fitc_df = pd.DataFrame({
-            'label': [1, 2, 3],
-            'FITC': [200, 220, 240]
-        })
+        fitc_df = pd.DataFrame({"label": [1, 2, 3], "FITC": [200, 220, 240]})
 
         # Merge with inner join
-        merged = ref_df.merge(fitc_df, on='label', how='inner')
+        merged = ref_df.merge(fitc_df, on="label", how="inner")
 
         # Should only have cells 1, 2, 3
         assert len(merged) == 3
-        assert list(merged['label']) == [1, 2, 3]
-        assert 'DAPI' in merged.columns
-        assert 'FITC' in merged.columns
+        assert list(merged["label"]) == [1, 2, 3]
+        assert "DAPI" in merged.columns
+        assert "FITC" in merged.columns
 
     def test_marker_column_extraction(self):
         """Test extraction of marker columns excluding morphology."""
-        df = pd.DataFrame({
-            'label': [1, 2, 3],
-            'area': [100, 150, 200],
-            'perimeter': [40, 50, 60],
-            'DAPI': [100, 120, 140],
-            'FITC': [200, 220, 240],
-            'PANCK': [150, 170, 190]
-        })
+        df = pd.DataFrame(
+            {
+                "label": [1, 2, 3],
+                "area": [100, 150, 200],
+                "perimeter": [40, 50, 60],
+                "DAPI": [100, 120, 140],
+                "FITC": [200, 220, 240],
+                "PANCK": [150, 170, 190],
+            }
+        )
 
         # Morphology columns to exclude
-        morphology_cols = ['label', 'area', 'perimeter']
+        morphology_cols = ["label", "area", "perimeter"]
 
         # Extract marker columns
         marker_cols = [col for col in df.columns if col not in morphology_cols]
 
-        assert marker_cols == ['DAPI', 'FITC', 'PANCK']
+        assert marker_cols == ["DAPI", "FITC", "PANCK"]
 
 
 class TestCompartmentQuantification:
@@ -137,12 +146,12 @@ class TestCompartmentQuantification:
         Channel = 100 inside the nucleus, 10 in the surrounding cytoplasm.
         """
         cell_mask = np.zeros((20, 20), dtype=np.int32)
-        cell_mask[5:15, 5:15] = 1                       # 100 px whole-cell
+        cell_mask[5:15, 5:15] = 1  # 100 px whole-cell
         nuclei_mask = np.zeros((20, 20), dtype=np.int32)
-        nuclei_mask[8:12, 8:12] = 7                     # 16 px nucleus, id != cell id
+        nuclei_mask[8:12, 8:12] = 7  # 16 px nucleus, id != cell id
         channel = np.zeros((20, 20), dtype=np.float64)
-        channel[5:15, 5:15] = 10.0                      # cytoplasm value
-        channel[8:12, 8:12] = 100.0                     # nucleus value
+        channel[5:15, 5:15] = 10.0  # cytoplasm value
+        channel[8:12, 8:12] = 100.0  # nucleus value
         return cell_mask, nuclei_mask, channel
 
     def test_standard_means(self):
@@ -196,7 +205,9 @@ class TestCompartmentQuantification:
 
         cell_mask, nuclei_mask, channel = self._synthetic()
         # With a nuclei mask -> compartment columns.
-        comp = quantify_single_channel(cell_mask, channel, "CD3", nuclei_mask=nuclei_mask)
+        comp = quantify_single_channel(
+            cell_mask, channel, "CD3", nuclei_mask=nuclei_mask
+        )
         assert "CD3: Nucleus: Mean" in comp.columns
         # Without -> legacy whole-cell mean only.
         legacy = quantify_single_channel(cell_mask, channel, "CD3")
@@ -212,5 +223,5 @@ class TestCompartmentQuantification:
         assert df.empty
 
 
-if __name__ == '__main__':
-    pytest.main([__file__, '-v'])
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

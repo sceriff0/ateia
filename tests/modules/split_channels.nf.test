@@ -94,6 +94,45 @@ nextflow_process {
         }
     }
 
+    test("Should emit placeholder tiff when meta.channels is empty - stub") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [
+                        patient_id: 'P003',
+                        channels: [],
+                        is_reference: false
+                    ],
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    false  // is_reference flag
+                ]
+                """
+            }
+        }
+
+        then {
+            assert process.success
+            assert process.out.channels
+            assert process.out.versions
+
+            with(process.out.channels) {
+                assert size() == 1
+                def files = get(0).get(1)
+                def fileList = (files instanceof List) ? files : [files]
+
+                // At least one placeholder .tiff must be emitted so the
+                // mandatory `*.tiff` output binds even with no channels.
+                assert fileList.size() >= 1
+                assert fileList.every { file(it).name.endsWith('.tiff') }
+            }
+        }
+    }
+
     test("Should split 3-channel image into DAPI, PANCK, SMA - real") {
 
         tag "real"

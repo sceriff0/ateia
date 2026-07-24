@@ -1,0 +1,8 @@
+numpy==1.26.4
+scipy==1.11.4
+pandas==2.2.3
+scikit-image==0.25.2
+scikit-learn==1.5.2
+aicsimageio==4.14.0
+tifffile==2023.2.28
+xmltodict==0.13.0

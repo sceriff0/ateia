@@ -9,17 +9,18 @@ Supports:
 - NDPI/NDPIS (Hamamatsu) via tifffile
 - HDF5 (.h5, .hdf5) via h5py
 """
+
 from __future__ import annotations
 
 import argparse
 import sys
 from pathlib import Path
-from typing import List, Tuple, Optional
+from typing import List, Optional, Tuple
 
 import numpy as np
 import tifffile
 
-sys.path.insert(0, str(Path(__file__).parent / 'utils'))
+sys.path.insert(0, str(Path(__file__).parent / "utils"))
 from logger import configure_logging, get_logger
 
 logger = get_logger(__name__)
@@ -29,9 +30,9 @@ __all__ = ["main"]
 PIXEL_SIZE_UM = 0.325
 
 # Format detection
-BIOIO_NATIVE_FORMATS = {'.nd2', '.czi', '.lif', '.tif', '.tiff'}
-TIFFFILE_FORMATS = {'.ndpi', '.ndpis'}  # Hamamatsu formats readable by tifffile
-HDF5_FORMATS = {'.h5', '.hdf5'}
+BIOIO_NATIVE_FORMATS = {".nd2", ".czi", ".lif", ".tif", ".tiff"}
+TIFFFILE_FORMATS = {".ndpi", ".ndpis"}  # Hamamatsu formats readable by tifffile
+HDF5_FORMATS = {".h5", ".hdf5"}
 
 
 def get_file_format(file_path: Path) -> str:
@@ -39,19 +40,19 @@ def get_file_format(file_path: Path) -> str:
     name_lower = file_path.name.lower()
     suffix = file_path.suffix.lower()
 
-    if name_lower.endswith('.ome.tif') or name_lower.endswith('.ome.tiff'):
-        return 'bioio'
+    if name_lower.endswith(".ome.tif") or name_lower.endswith(".ome.tiff"):
+        return "bioio"
 
     if suffix in TIFFFILE_FORMATS:
-        return 'tifffile'
+        return "tifffile"
 
     if suffix in HDF5_FORMATS:
-        return 'hdf5'
+        return "hdf5"
 
     if suffix in BIOIO_NATIVE_FORMATS:
-        return 'bioio'
+        return "bioio"
 
-    return 'bioio'
+    return "bioio"
 
 
 def read_image_bioio(file_path: Path) -> Tuple[np.ndarray, dict]:
@@ -73,24 +74,26 @@ def read_image_bioio(file_path: Path) -> Tuple[np.ndarray, dict]:
     # Check if 'S' dimension should be treated as channels
     # This happens when image has 'S' but 'C' is 1 or not meaningful
     image_data = None  # Will be set below
-    if 'S' in dim_order and (num_channels == 1 or 'C' not in dim_order):
+    if "S" in dim_order and (num_channels == 1 or "C" not in dim_order):
         s_count = img.dims.S
         if s_count > 1:
-            logger.info(f"Detected 'S' dimension ({s_count}) used as channels instead of 'C' ({num_channels})")
+            logger.info(
+                f"Detected 'S' dimension ({s_count}) used as channels instead of 'C' ({num_channels})"
+            )
             num_channels = s_count
 
             # If there's a singleton C dimension, squeeze it out to avoid
             # having two 'C' characters in the dimension order
-            if 'C' in dim_order and img.dims.C == 1:
-                c_pos = dim_order.index('C')
+            if "C" in dim_order and img.dims.C == 1:
+                c_pos = dim_order.index("C")
                 image_data = np.squeeze(img.data, axis=c_pos)
-                dim_order = dim_order[:c_pos] + dim_order[c_pos+1:]
+                dim_order = dim_order[:c_pos] + dim_order[c_pos + 1 :]
                 logger.info(f"Squeezed singleton C dimension at position {c_pos}")
             else:
                 image_data = img.data
 
             # Remap dimension order for downstream processing (treat S as C)
-            dim_order = dim_order.replace('S', 'C')
+            dim_order = dim_order.replace("S", "C")
             logger.info(f"Remapped dimension order: {dim_order}")
 
     # Load data if not already loaded during S dimension handling
@@ -102,16 +105,18 @@ def read_image_bioio(file_path: Path) -> Tuple[np.ndarray, dict]:
     pixel_size_y = ps.Y if ps.Y is not None else PIXEL_SIZE_UM
     pixel_size_z = ps.Z
 
-    logger.info(f"Pixel sizes - X: {pixel_size_x}, Y: {pixel_size_y}, Z: {pixel_size_z}")
+    logger.info(
+        f"Pixel sizes - X: {pixel_size_x}, Y: {pixel_size_y}, Z: {pixel_size_z}"
+    )
     logger.info(f"Channel names from file: {img.channel_names}")
 
     metadata = {
-        'num_channels': num_channels,
-        'physical_pixel_size_x': pixel_size_x,
-        'physical_pixel_size_y': pixel_size_y,
-        'physical_pixel_size_z': pixel_size_z,
-        'channel_names_from_file': img.channel_names,
-        'original_dims': dim_order,
+        "num_channels": num_channels,
+        "physical_pixel_size_x": pixel_size_x,
+        "physical_pixel_size_y": pixel_size_y,
+        "physical_pixel_size_z": pixel_size_z,
+        "channel_names_from_file": img.channel_names,
+        "original_dims": dim_order,
     }
 
     return image_data, metadata
@@ -133,13 +138,13 @@ def parse_ndpis(ndpis_path: Path) -> List[Path]:
     real_ndpis_path = ndpis_path.resolve()
     ndpi_parent = real_ndpis_path.parent
 
-    with open(ndpis_path, 'r') as f:
+    with open(ndpis_path, "r") as f:
         lines = f.readlines()
 
     for line in lines:
         line = line.strip()
-        if line.startswith('Image') and '=' in line:
-            filename = line.split('=', 1)[1].strip()
+        if line.startswith("Image") and "=" in line:
+            filename = line.split("=", 1)[1].strip()
             ndpi_path = ndpi_parent / filename
             ndpi_files.append(ndpi_path)
 
@@ -160,10 +165,10 @@ def read_single_ndpi(file_path: Path) -> Tuple[np.ndarray, float, float]:
         pixel_size_y = PIXEL_SIZE_UM
 
         page = tif.pages[0]
-        if page.tags.get('XResolution') and page.tags.get('YResolution'):
-            x_res = page.tags['XResolution'].value
-            y_res = page.tags['YResolution'].value
-            res_unit = page.tags.get('ResolutionUnit')
+        if page.tags.get("XResolution") and page.tags.get("YResolution"):
+            x_res = page.tags["XResolution"].value
+            y_res = page.tags["YResolution"].value
+            res_unit = page.tags.get("ResolutionUnit")
 
             if x_res and y_res:
                 x_res_val = x_res[0] / x_res[1] if isinstance(x_res, tuple) else x_res
@@ -179,19 +184,21 @@ def read_single_ndpi(file_path: Path) -> Tuple[np.ndarray, float, float]:
         # Convert to grayscale if RGB (NDPI fluorescence channels are often stored as RGB)
         if image_data.ndim == 3 and image_data.shape[-1] == 3:
             # Check if R, G, B channels are identical
-            if np.array_equal(image_data[..., 0], image_data[..., 1]) and \
-               np.array_equal(image_data[..., 1], image_data[..., 2]):
-                logger.info(f"    RGB channels identical, taking first channel")
+            if np.array_equal(
+                image_data[..., 0], image_data[..., 1]
+            ) and np.array_equal(image_data[..., 1], image_data[..., 2]):
+                logger.info("    RGB channels identical, taking first channel")
             else:
-                logger.warning(f"    RGB channels differ! Taking first channel anyway")
+                logger.warning("    RGB channels differ! Taking first channel anyway")
             image_data = image_data[..., 0]
         elif image_data.ndim == 3 and image_data.shape[-1] == 4:
             # RGBA - check RGB channels
-            if np.array_equal(image_data[..., 0], image_data[..., 1]) and \
-               np.array_equal(image_data[..., 1], image_data[..., 2]):
-                logger.info(f"    RGBA channels identical, taking first channel")
+            if np.array_equal(
+                image_data[..., 0], image_data[..., 1]
+            ) and np.array_equal(image_data[..., 1], image_data[..., 2]):
+                logger.info("    RGBA channels identical, taking first channel")
             else:
-                logger.warning(f"    RGBA channels differ! Taking first channel anyway")
+                logger.warning("    RGBA channels differ! Taking first channel anyway")
             image_data = image_data[..., 0]
 
         return image_data, pixel_size_x, pixel_size_y
@@ -203,7 +210,7 @@ def read_image_tifffile(file_path: Path) -> Tuple[np.ndarray, dict]:
 
     suffix = file_path.suffix.lower()
 
-    if suffix == '.ndpis':
+    if suffix == ".ndpis":
         # NDPIS is a manifest file pointing to multiple NDPI files
         ndpi_files = parse_ndpis(file_path)
 
@@ -235,18 +242,18 @@ def read_image_tifffile(file_path: Path) -> Tuple[np.ndarray, dict]:
             image_data = image_data[np.newaxis, ...]
 
     num_channels = image_data.shape[0]
-    axes = 'CYX'
+    axes = "CYX"
 
     logger.info(f"Final shape: {image_data.shape}, axes: {axes}")
     logger.info(f"Pixel sizes - X: {pixel_size_x}, Y: {pixel_size_y}")
 
     metadata = {
-        'num_channels': num_channels,
-        'physical_pixel_size_x': pixel_size_x,
-        'physical_pixel_size_y': pixel_size_y,
-        'physical_pixel_size_z': None,
-        'channel_names_from_file': None,  # Channel names must come from args
-        'original_dims': axes,
+        "num_channels": num_channels,
+        "physical_pixel_size_x": pixel_size_x,
+        "physical_pixel_size_y": pixel_size_y,
+        "physical_pixel_size_z": None,
+        "channel_names_from_file": None,  # Channel names must come from args
+        "original_dims": axes,
     }
 
     return image_data, metadata
@@ -274,10 +281,10 @@ def _extract_h5_pixel_sizes(h5obj) -> Tuple[float, float, Optional[float]]:
     px_y = PIXEL_SIZE_UM
     px_z = None
 
-    for attr_name in ('element_size_um', 'pixel_size', 'resolution', 'pixelSize'):
+    for attr_name in ("element_size_um", "pixel_size", "resolution", "pixelSize"):
         if attr_name in h5obj.attrs:
             val = h5obj.attrs[attr_name]
-            if hasattr(val, '__len__'):
+            if hasattr(val, "__len__"):
                 if len(val) >= 2:
                     px_y, px_x = float(val[-2]), float(val[-1])
                 if len(val) >= 3:
@@ -295,7 +302,7 @@ def read_image_h5(file_path: Path) -> Tuple[np.ndarray, dict]:
 
     logger.info(f"Reading with h5py: {file_path.name}")
 
-    with h5py.File(file_path, 'r') as f:
+    with h5py.File(file_path, "r") as f:
         ds = _find_first_image_dataset(f)
         if ds is None:
             raise ValueError(f"No image dataset found in HDF5 file: {file_path}")
@@ -311,27 +318,30 @@ def read_image_h5(file_path: Path) -> Tuple[np.ndarray, dict]:
         # Extract channel names from attributes if available
         channel_names = None
         for obj in (ds, f):
-            if 'channel_names' in obj.attrs:
-                cn = obj.attrs['channel_names']
-                if hasattr(cn, '__len__') and len(cn) > 0:
+            if "channel_names" in obj.attrs:
+                cn = obj.attrs["channel_names"]
+                if hasattr(cn, "__len__") and len(cn) > 0:
                     channel_names = [str(n) for n in cn]
                     break
 
         # Determine axes from dimensionality
         if image_data.ndim == 2:
             image_data = image_data[np.newaxis, ...]
-            axes = 'CYX'
+            axes = "CYX"
         elif image_data.ndim == 3:
             # Heuristic: if last dim is small relative to first, it's YXC
-            if image_data.shape[-1] <= 10 and image_data.shape[0] > image_data.shape[-1]:
+            if (
+                image_data.shape[-1] <= 10
+                and image_data.shape[0] > image_data.shape[-1]
+            ):
                 image_data = np.moveaxis(image_data, -1, 0)
-            axes = 'CYX'
+            axes = "CYX"
         elif image_data.ndim == 4:
-            axes = 'ZCYX'
+            axes = "ZCYX"
         else:
-            axes = 'TCZYX'
+            axes = "TCZYX"
 
-        num_channels = image_data.shape[axes.index('C')]
+        num_channels = image_data.shape[axes.index("C")]
 
     logger.info(f"Final shape: {image_data.shape}, axes: {axes}")
     logger.info(f"Pixel sizes - X: {px_x}, Y: {px_y}, Z: {px_z}")
@@ -339,12 +349,12 @@ def read_image_h5(file_path: Path) -> Tuple[np.ndarray, dict]:
         logger.info(f"Channel names from file: {channel_names}")
 
     metadata = {
-        'num_channels': num_channels,
-        'physical_pixel_size_x': px_x,
-        'physical_pixel_size_y': px_y,
-        'physical_pixel_size_z': px_z,
-        'channel_names_from_file': channel_names,
-        'original_dims': axes,
+        "num_channels": num_channels,
+        "physical_pixel_size_x": px_x,
+        "physical_pixel_size_y": px_y,
+        "physical_pixel_size_z": px_z,
+        "channel_names_from_file": channel_names,
+        "original_dims": axes,
     }
 
     return image_data, metadata
@@ -355,9 +365,9 @@ def read_image(file_path: Path) -> Tuple[np.ndarray, dict]:
     format_type = get_file_format(file_path)
     logger.info(f"Detected format type: {format_type}")
 
-    if format_type == 'tifffile':
+    if format_type == "tifffile":
         return read_image_tifffile(file_path)
-    elif format_type == 'hdf5':
+    elif format_type == "hdf5":
         return read_image_h5(file_path)
     else:
         return read_image_bioio(file_path)
@@ -368,39 +378,41 @@ def convert_to_ome_tiff(
     output_dir: Path,
     patient_id: str,
     channel_names: Optional[List[str]] = None,
-    pixel_size_um: float = PIXEL_SIZE_UM
+    pixel_size_um: float = PIXEL_SIZE_UM,
 ) -> Tuple[Path, List[str]]:
     """Convert image to OME-TIFF with DAPI in channel 0."""
-    
+
     # Read image first to get metadata
     image_data, metadata = read_image(input_path)
-    original_dims = metadata.get('original_dims', 'TCZYX')
-    
+    original_dims = metadata.get("original_dims", "TCZYX")
+
     # Use channel names from file if not specified
     if channel_names is None:
-        channel_names = metadata.get('channel_names_from_file')
+        channel_names = metadata.get("channel_names_from_file")
         if channel_names is None:
-            raise ValueError("No channel names provided and none found in file metadata")
+            raise ValueError(
+                "No channel names provided and none found in file metadata"
+            )
         logger.info(f"Using channel names from file: {channel_names}")
-    
+
     # Validate channel count
-    num_channels_in_image = metadata['num_channels']
+    num_channels_in_image = metadata["num_channels"]
     if num_channels_in_image != len(channel_names):
         raise ValueError(
             f"Channel count mismatch: image has {num_channels_in_image}, "
             f"specified {len(channel_names)}: {channel_names}"
         )
-    
+
     # Find DAPI
     dapi_index = None
     for i, ch in enumerate(channel_names):
-        if 'DAPI' in ch.upper():
+        if "DAPI" in ch.upper():
             dapi_index = i
             break
-    
+
     if dapi_index is None:
         raise ValueError(f"DAPI channel not found in: {channel_names}")
-    
+
     # Reorder: DAPI first
     output_channels = channel_names.copy()
     if dapi_index != 0:
@@ -409,68 +421,70 @@ def convert_to_ome_tiff(
         output_channels.insert(0, dapi_ch)
     else:
         logger.info("DAPI already in position 0")
-    
-    channels_str = '_'.join(output_channels)
+
+    channels_str = "_".join(output_channels)
     output_filename = output_dir / f"{patient_id}_{channels_str}.ome.tif"
-    
+
     logger.info(f"Converting: {input_path.name}")
     logger.info(f"Input channels: {channel_names}")
     logger.info(f"Output channels: {output_channels}")
-    
-    px_x = metadata.get('physical_pixel_size_x', pixel_size_um)
-    px_y = metadata.get('physical_pixel_size_y', pixel_size_um)
-    px_z = metadata.get('physical_pixel_size_z')
-    
+
+    px_x = metadata.get("physical_pixel_size_x", pixel_size_um)
+    px_y = metadata.get("physical_pixel_size_y", pixel_size_um)
+    px_z = metadata.get("physical_pixel_size_z")
+
     # Normalize dimensions to standard OME-TIFF order (C before spatial dims)
     # Handle case where C is at the end (e.g., TZYXC from S dimension remapping)
-    if 'C' in original_dims and original_dims.endswith('C'):
+    if "C" in original_dims and original_dims.endswith("C"):
         # Move C from end to before spatial dimensions
-        c_pos = original_dims.index('C')
+        c_pos = original_dims.index("C")
         # Find where Y starts (spatial dimensions)
-        y_pos = original_dims.index('Y')
+        y_pos = original_dims.index("Y")
 
         # Transpose: move C axis to position just before Y
         axes_list = list(range(image_data.ndim))
         dims_list = list(original_dims)
         axes_list.remove(c_pos)
-        dims_list.remove('C')
-        new_y_pos = dims_list.index('Y')
+        dims_list.remove("C")
+        new_y_pos = dims_list.index("Y")
         axes_list.insert(new_y_pos, c_pos)
-        dims_list.insert(new_y_pos, 'C')
+        dims_list.insert(new_y_pos, "C")
         image_data = np.transpose(image_data, axes_list)
-        original_dims = ''.join(dims_list)
-        logger.info(f"Transposed C to standard position: {original_dims}, shape: {image_data.shape}")
+        original_dims = "".join(dims_list)
+        logger.info(
+            f"Transposed C to standard position: {original_dims}, shape: {image_data.shape}"
+        )
 
-    if original_dims == 'TCZYX':
+    if original_dims == "TCZYX":
         c_axis = 1
         if image_data.shape[0] == 1:
             image_data = image_data[0]
-            original_dims = 'CZYX'
+            original_dims = "CZYX"
             c_axis = 0
-    elif original_dims == 'TZCYX':
+    elif original_dims == "TZCYX":
         c_axis = 2
         # Squeeze T if singleton
         if image_data.shape[0] == 1:
             image_data = image_data[0]
-            original_dims = 'ZCYX'
+            original_dims = "ZCYX"
             c_axis = 1
-    elif original_dims == 'ZCYX':
+    elif original_dims == "ZCYX":
         c_axis = 1
-    elif original_dims in ('CZYX', 'CYX'):
+    elif original_dims in ("CZYX", "CYX"):
         c_axis = 0
     else:
         # Try to find C axis position
-        c_axis = original_dims.index('C') if 'C' in original_dims else 0
+        c_axis = original_dims.index("C") if "C" in original_dims else 0
 
     # Squeeze Z if singleton
-    if original_dims == 'CZYX' and image_data.shape[1] == 1:
+    if original_dims == "CZYX" and image_data.shape[1] == 1:
         image_data = image_data[:, 0, :, :]
-        original_dims = 'CYX'
-    elif original_dims == 'ZCYX' and image_data.shape[0] == 1:
+        original_dims = "CYX"
+    elif original_dims == "ZCYX" and image_data.shape[0] == 1:
         image_data = image_data[0]
-        original_dims = 'CYX'
+        original_dims = "CYX"
         c_axis = 0
-    
+
     # Rearrange channels
     if channel_names != output_channels:
         # Check for duplicate channel names (index() would silently return first match)
@@ -490,66 +504,66 @@ def convert_to_ome_tiff(
             indices = [channel_names.index(ch) for ch in output_channels]
         image_data = np.take(image_data, indices, axis=c_axis)
         logger.info(f"Rearranged channels: {channel_names} -> {output_channels}")
-    
+
     logger.info(f"Final shape: {image_data.shape}, axes: {original_dims}")
     logger.info(f"Pixel size: X={px_x}, Y={px_y}, Z={px_z}")
-    
+
     # Create output directory
     output_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # Build OME metadata for tifffile
     ome_metadata = {
-        'axes': original_dims,
-        'Channel': {'Name': output_channels},
-        'PhysicalSizeX': px_x,
-        'PhysicalSizeXUnit': 'µm',
-        'PhysicalSizeY': px_y,
-        'PhysicalSizeYUnit': 'µm',
+        "axes": original_dims,
+        "Channel": {"Name": output_channels},
+        "PhysicalSizeX": px_x,
+        "PhysicalSizeXUnit": "µm",
+        "PhysicalSizeY": px_y,
+        "PhysicalSizeYUnit": "µm",
     }
-    
+
     if px_z is not None:
-        ome_metadata['PhysicalSizeZ'] = px_z
-        ome_metadata['PhysicalSizeZUnit'] = 'µm'
-    
+        ome_metadata["PhysicalSizeZ"] = px_z
+        ome_metadata["PhysicalSizeZUnit"] = "µm"
+
     # Write OME-TIFF using tifffile
     logger.info(f"Writing: {output_filename.name}")
-    
+
     tifffile.imwrite(
         output_filename,
         image_data,
         metadata=ome_metadata,
-        photometric='minisblack',
+        photometric="minisblack",
         ome=True,
         bigtiff=True,
     )
-    
+
     logger.info(f"Saved: {output_filename.name}")
-    
+
     # Verify
     with tifffile.TiffFile(output_filename) as tif:
         if tif.ome_metadata:
             logger.info("OME-XML metadata present")
         else:
             logger.warning("No OME metadata found in saved file")
-    
+
     return output_filename, output_channels
 
 
 def parse_args() -> argparse.Namespace:
     """Parse CLI arguments."""
     parser = argparse.ArgumentParser(
-        description='Convert microscopy images to OME-TIFF'
+        description="Convert microscopy images to OME-TIFF"
     )
-    parser.add_argument('--input_file', type=str, required=True)
-    parser.add_argument('--output_dir', type=str, required=True)
-    parser.add_argument('--patient_id', type=str, required=True)
+    parser.add_argument("--input_file", type=str, required=True)
+    parser.add_argument("--output_dir", type=str, required=True)
+    parser.add_argument("--patient_id", type=str, required=True)
     parser.add_argument(
-        '--channels',
+        "--channels",
         type=str,
         default=None,
-        help='Comma-separated channel names (optional, reads metadata when omitted)'
+        help="Comma-separated channel names (optional, reads metadata when omitted)",
     )
-    parser.add_argument('--pixel_size', type=float, default=PIXEL_SIZE_UM)
+    parser.add_argument("--pixel_size", type=float, default=PIXEL_SIZE_UM)
     return parser.parse_args()
 
 
@@ -562,7 +576,7 @@ def main() -> int:
     output_dir = Path(args.output_dir)
     channel_names = None
     if args.channels:
-        channel_names = [ch.strip() for ch in args.channels.split(',')]
+        channel_names = [ch.strip() for ch in args.channels.split(",")]
 
     if not input_path.exists():
         logger.error(f"Input file not found: {input_path}")
@@ -593,10 +607,10 @@ def main() -> int:
 
     # Write channels file for Nextflow metadata propagation
     channels_file = output_dir / f"{args.patient_id}_channels.txt"
-    channels_file.write_text(','.join(output_channels))
+    channels_file.write_text(",".join(output_channels))
 
     return 0
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     raise SystemExit(main())

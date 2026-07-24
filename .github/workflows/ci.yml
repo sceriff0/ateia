@@ -7,9 +7,8 @@ on:
     branches: [ main, dev ]
   workflow_dispatch:  # Allow manual trigger from GitHub UI
 
-# Least-privilege default token: read-only. Individual jobs escalate explicitly
-# (e.g. distributed-integration sets packages read via GHCR login with the
-# built-in token). Hardens against a compromised action writing to the repo.
+# Least-privilege default token: read-only. Hardens against a compromised
+# action writing to the repo.
 permissions:
   contents: read
 
@@ -51,7 +50,7 @@ jobs:
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt || true
           fi
-          pip install pytest pytest-cov tifffile numpy pandas scikit-image
+          pip install pytest pytest-cov tifffile numpy pandas scikit-image scipy scikit-learn xmltodict
 
       - name: Generate test data
         run: |
@@ -336,45 +335,6 @@ jobs:
           path: |
             .nf-test/
             tests/output/
-
-  # ============================================================================
-  # Distributed registration bit-identical check (needs the published patched
-  # image; manual trigger). Runs the real integration harness in the patched
-  # VALIS image: distributed (PREP -> REG_TILE -> FINALIZE) == in-process tiler,
-  # max|Δ|=0. See .github/workflows/build-valis-image.yml to publish the image.
-  # ============================================================================
-  distributed-integration:
-    name: distributed bit-identical (real image)
-    runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch'
-    # Escalates above the workflow-level read-only default: needs to pull the
-    # patched VALIS image from GHCR.
-    permissions:
-      contents: read
-      packages: read
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Generate test data
-        run: |
-          pip install numpy tifffile
-          python tests/testdata/generate_complete_testdata.py
-
-      - name: Run distributed bit-identical verification in the patched image
-        run: |
-          IMG="ghcr.io/${GITHUB_REPOSITORY,,}/mirage-valis:1.0.0"
-          docker pull "$IMG"
-          docker run --rm -v "$PWD":/work -w /work "$IMG" \
-            python3 tests/integration/verify_distributed_bitidentical.py
 
   # ============================================================================
   # Linting

@@ -1,3 +1,6 @@
+/*
+ * GENERATE_REGISTRATION_QC - render registered-vs-reference RGB overlay QC images.
+ */
 process GENERATE_REGISTRATION_QC {
     tag "${meta.patient_id}"
     label 'process_high'

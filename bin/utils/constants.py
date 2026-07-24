@@ -60,6 +60,7 @@ DEFAULT_MAX_NON_RIGID_DIM: int = 2048  # Max dimension for non-rigid registratio
 # Exit Codes
 # =============================================================================
 
+
 class ExitCode:
     """Standard exit codes for CLI scripts.
 

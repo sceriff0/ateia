@@ -1,3 +1,6 @@
+/*
+ * MAX_DIM - reduce a patient's per-image dimensions to the common maximum canvas size.
+ */
 process MAX_DIM {
     tag "${meta.patient_id}"
     label 'process_single'

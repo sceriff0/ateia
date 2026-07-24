@@ -1,25 +1,20 @@
 #!/usr/bin/env python3
-"""Estimate a feature-based registration-error PROXY, before and after registration.
+"""Estimate feature-based distances BEFORE and AFTER registration.
 
-For a moving/registered pair against a reference, it detects features, matches them, and reports the
-pixel residual of matched keypoints. What this is — and is NOT — matters for interpretation:
+This script processes a single moving/registered image pair to compute feature-based
+alignment quality metrics both before and after registration. It provides a clear view
+of registration improvement for individual images.
 
-  * It is a feature-RESIDUAL proxy, NOT an absolute landmark TRE. The "after" residual is obtained by
-    RE-MATCHING reference<->registered features independently of the "before" matching, so before/after
-    use DIFFERENT correspondence sets, and the matcher's inlier selection biases the residual LOW
-    (only geometrically-consistent matches survive). It is a good MONOTONIC proxy — better registration
-    -> smaller residual — so it discriminates configs (memory_mode, skip_micro, classic vs distributed),
-    which is exactly what the benchmark needs; it is not a substitute for ground-truth-landmark TRE.
-  * MEDIAN is the headline (robust to the outlier matches mean is sensitive to) — prefer it downstream.
-  * Reliability degrades with few matches (sparse/low-texture images); a `reliable` flag is emitted.
-  * A truer TRE would fix ref<->moving correspondences ONCE and warp them by the registration transform
-    (residual of the SAME points) — but this script only sees the warped IMAGE, not the transform, so
-    that is a pipeline-level change (VALIS's own rTRE already does this on the registrar).
+Metrics computed:
+- Feature match counts (before vs after)
+- Match ratios (before vs after)
+- Mean descriptor distances (before vs after)
+- Target Registration Error (TRE) statistics via feature distances
+- Improvement percentages
 
-Metrics: match counts, match ratios, descriptor distances, per-pair residual stats (mean/median/…),
-a robust `median_tre_px` + `reliable` summary, and improvement percentages. Complements the
-segmentation-based overlap metrics.
+This provides complementary quality assessment to segmentation-based overlap metrics.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -27,17 +22,28 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Optional, Tuple, Dict
+from typing import Optional, Tuple
 
+# numba (pulled in transitively via valis/registration_utils) and matplotlib both cache under
+# $HOME by default; on a read-only-$HOME cluster node that crashes. Redirect the caches BEFORE
+# any third-party import triggers JIT compilation or font-cache init.
+os.environ.setdefault("NUMBA_CACHE_DIR", "/tmp/numba_cache")
+os.environ["NUMBA_DISABLE_CACHING"] = "1"
+os.environ.setdefault("MPLCONFIGDIR", "/tmp/mplconfig")
+os.environ.setdefault("XDG_CACHE_HOME", "/tmp/xdg_cache")
+
+import matplotlib
 import numpy as np
+
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 # Add utils directory to path
-sys.path.insert(0, str(Path(__file__).parent / 'utils'))
+sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
 # Import from shared library modules
-from logger import get_logger
 from image_utils import load_image_grayscale
+from logger import get_logger
 from registration_utils import (
     build_feature_detector,
     build_feature_matcher,
@@ -48,22 +54,14 @@ logger = get_logger(__name__)
 
 __all__ = ["main"]
 
-# Below this many matched features the residual estimate is not trustworthy (sparse/low-texture pair).
-MIN_RELIABLE_MATCHES = 10
-
 
 def log_progress(message: str) -> None:
     """Compatibility wrapper for existing progress output."""
     logger.info(message)
 
-# Disable numba caching
-os.environ['NUMBA_DISABLE_JIT'] = '0'
-os.environ['NUMBA_CACHE_DIR'] = '/tmp/numba_cache'
-os.environ['NUMBA_DISABLE_CACHING'] = '1'
 
 def compute_feature_distances(
-    ref_kp: np.ndarray,
-    mov_kp: np.ndarray
+    ref_kp: np.ndarray, mov_kp: np.ndarray
 ) -> Tuple[np.ndarray, dict]:
     """Compute distance statistics between matched keypoints.
 
@@ -101,7 +99,7 @@ def compute_feature_distances(
         "q90": float(np.percentile(distances, 90)),
         "q95": float(np.percentile(distances, 95)),
         "q99": float(np.percentile(distances, 99)),
-        "n_points": int(len(distances))
+        "n_points": int(len(distances)),
     }
 
     return distances, stats
@@ -111,7 +109,7 @@ def save_distance_histogram(
     before_distances: np.ndarray,
     after_distances: np.ndarray,
     output_path: str,
-    output_prefix: str
+    output_prefix: str,
 ) -> None:
     """Save comparison histogram of feature distances before and after registration.
 
@@ -129,38 +127,54 @@ def save_distance_histogram(
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
 
     # Before registration
-    ax1.hist(before_distances, bins=50, edgecolor='black', alpha=0.7, color='red')
-    ax1.set_xlabel('Feature Distance (pixels)', fontsize=12)
-    ax1.set_ylabel('Frequency', fontsize=12)
-    ax1.set_title('Before Registration', fontsize=14)
+    ax1.hist(before_distances, bins=50, edgecolor="black", alpha=0.7, color="red")
+    ax1.set_xlabel("Feature Distance (pixels)", fontsize=12)
+    ax1.set_ylabel("Frequency", fontsize=12)
+    ax1.set_title("Before Registration", fontsize=14)
     ax1.grid(True, alpha=0.3)
 
     mean_before = np.mean(before_distances)
     median_before = np.median(before_distances)
-    stats_text = f'Mean: {mean_before:.2f}px\nMedian: {median_before:.2f}px'
-    ax1.text(0.95, 0.95, stats_text, transform=ax1.transAxes,
-            verticalalignment='top', horizontalalignment='right',
-            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5), fontsize=10)
+    stats_text = f"Mean: {mean_before:.2f}px\nMedian: {median_before:.2f}px"
+    ax1.text(
+        0.95,
+        0.95,
+        stats_text,
+        transform=ax1.transAxes,
+        verticalalignment="top",
+        horizontalalignment="right",
+        bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5),
+        fontsize=10,
+    )
 
     # After registration
-    ax2.hist(after_distances, bins=50, edgecolor='black', alpha=0.7, color='green')
-    ax2.set_xlabel('Feature Distance (pixels)', fontsize=12)
-    ax2.set_ylabel('Frequency', fontsize=12)
-    ax2.set_title('After Registration', fontsize=14)
+    ax2.hist(after_distances, bins=50, edgecolor="black", alpha=0.7, color="green")
+    ax2.set_xlabel("Feature Distance (pixels)", fontsize=12)
+    ax2.set_ylabel("Frequency", fontsize=12)
+    ax2.set_title("After Registration", fontsize=14)
     ax2.grid(True, alpha=0.3)
 
     mean_after = np.mean(after_distances)
     median_after = np.median(after_distances)
-    improvement = ((mean_before - mean_after) / mean_before * 100) if mean_before > 0 else 0
-    stats_text = f'Mean: {mean_after:.2f}px\nMedian: {median_after:.2f}px\nImprovement: {improvement:.1f}%'
-    ax2.text(0.95, 0.95, stats_text, transform=ax2.transAxes,
-            verticalalignment='top', horizontalalignment='right',
-            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5), fontsize=10)
+    improvement = (
+        ((mean_before - mean_after) / mean_before * 100) if mean_before > 0 else 0
+    )
+    stats_text = f"Mean: {mean_after:.2f}px\nMedian: {median_after:.2f}px\nImprovement: {improvement:.1f}%"
+    ax2.text(
+        0.95,
+        0.95,
+        stats_text,
+        transform=ax2.transAxes,
+        verticalalignment="top",
+        horizontalalignment="right",
+        bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5),
+        fontsize=10,
+    )
 
-    fig.suptitle(f'Feature Distance Distribution - {output_prefix}', fontsize=16)
+    fig.suptitle(f"Feature Distance Distribution - {output_prefix}", fontsize=16)
 
     plt.tight_layout()
-    plt.savefig(output_path, dpi=150, bbox_inches='tight')
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
     plt.close()
 
     log_progress(f"  Saved histogram: {output_path}")
@@ -173,7 +187,7 @@ def process_image_pair(
     output_prefix: str,
     detector_type: str = "superpoint",
     max_dim: Optional[int] = 2048,
-    n_features: int = 5000
+    n_features: int = 5000,
 ) -> None:
     """Process a single moving/registered image pair against a reference.
 
@@ -204,9 +218,9 @@ def process_image_pair(
     matcher = build_feature_matcher(detector_type, logger=logger)
 
     # Load and process reference image
-    log_progress(f"\n[2/5] Processing reference image...")
+    log_progress("\n[2/5] Processing reference image...")
     log_progress(f"  Reference: {Path(reference_path).name}")
-    log_progress(f"  Extracting DAPI channel (channel 0) for feature detection...")
+    log_progress("  Extracting DAPI channel (channel 0) for feature detection...")
     reference_img = load_image_grayscale(reference_path, max_dim=max_dim)
 
     log_progress("  Detecting reference features...")
@@ -214,9 +228,9 @@ def process_image_pair(
     log_progress(f"    Detected {len(ref_kp)} keypoints")
 
     # Load moving image (BEFORE registration)
-    log_progress(f"\n[3/5] Processing moving image (BEFORE registration)...")
+    log_progress("\n[3/5] Processing moving image (BEFORE registration)...")
     log_progress(f"  Moving: {Path(moving_path).name}")
-    log_progress(f"  Extracting DAPI channel (channel 0) for feature detection...")
+    log_progress("  Extracting DAPI channel (channel 0) for feature detection...")
     moving_img = load_image_grayscale(moving_path, max_dim=max_dim)
 
     # Detect features in moving image
@@ -236,26 +250,36 @@ def process_image_pair(
         mov_kp,
     )
 
-    n_matches_before = filtered_match_info_before.n_matches if hasattr(filtered_match_info_before, 'n_matches') else len(filtered_match_info_before.matched_kp1_xy)
-    mean_desc_distance_before = filtered_match_info_before.distance if hasattr(filtered_match_info_before, 'distance') else 0.0
+    n_matches_before = (
+        filtered_match_info_before.n_matches
+        if hasattr(filtered_match_info_before, "n_matches")
+        else len(filtered_match_info_before.matched_kp1_xy)
+    )
+    mean_desc_distance_before = (
+        filtered_match_info_before.distance
+        if hasattr(filtered_match_info_before, "distance")
+        else 0.0
+    )
 
     log_progress(f"    Matches: {n_matches_before}")
 
     # Compute pixel distances BEFORE
     before_distances, before_stats = compute_feature_distances(
         filtered_match_info_before.matched_kp1_xy,
-        filtered_match_info_before.matched_kp2_xy
+        filtered_match_info_before.matched_kp2_xy,
     )
     if before_stats is None:
-        log_progress("    No feature matches before registration — cannot compute distances")
+        log_progress(
+            "    No feature matches before registration — cannot compute distances"
+        )
         before_stats = {"mean": 0.0, "median": 0.0, "std": 0.0, "min": 0.0, "max": 0.0}
     else:
         log_progress(f"    Mean distance: {before_stats['mean']:.2f} pixels")
 
     # Load registered image (AFTER registration)
-    log_progress(f"\n[4/5] Processing registered image (AFTER registration)...")
+    log_progress("\n[4/5] Processing registered image (AFTER registration)...")
     log_progress(f"  Registered: {Path(registered_path).name}")
-    log_progress(f"  Extracting DAPI channel (channel 0) for feature detection...")
+    log_progress("  Extracting DAPI channel (channel 0) for feature detection...")
     registered_img = load_image_grayscale(registered_path, max_dim=max_dim)
 
     # Detect features in registered image
@@ -275,15 +299,23 @@ def process_image_pair(
         reg_kp,
     )
 
-    n_matches_after = filtered_match_info_after.n_matches if hasattr(filtered_match_info_after, 'n_matches') else len(filtered_match_info_after.matched_kp1_xy)
-    mean_desc_distance_after = filtered_match_info_after.distance if hasattr(filtered_match_info_after, 'distance') else 0.0
+    n_matches_after = (
+        filtered_match_info_after.n_matches
+        if hasattr(filtered_match_info_after, "n_matches")
+        else len(filtered_match_info_after.matched_kp1_xy)
+    )
+    mean_desc_distance_after = (
+        filtered_match_info_after.distance
+        if hasattr(filtered_match_info_after, "distance")
+        else 0.0
+    )
 
     log_progress(f"    Matches: {n_matches_after}")
 
     # Compute pixel distances AFTER (TRE)
     after_distances, after_stats = compute_feature_distances(
         filtered_match_info_after.matched_kp1_xy,
-        filtered_match_info_after.matched_kp2_xy
+        filtered_match_info_after.matched_kp2_xy,
     )
     if after_stats is None:
         log_progress("    No feature matches after registration — cannot compute TRE")
@@ -292,14 +324,22 @@ def process_image_pair(
         log_progress(f"    Mean TRE: {after_stats['mean']:.2f} pixels")
 
     # Compute improvement metrics
-    log_progress(f"\n[5/5] Computing improvement metrics...")
+    log_progress("\n[5/5] Computing improvement metrics...")
     improvement = {
-        "distance_reduction_pixels": float(before_stats['mean'] - after_stats['mean']),
-        "distance_reduction_percent": float(((before_stats['mean'] - after_stats['mean']) / before_stats['mean'] * 100) if before_stats['mean'] > 0 else 0),
+        "distance_reduction_pixels": float(before_stats["mean"] - after_stats["mean"]),
+        "distance_reduction_percent": float(
+            ((before_stats["mean"] - after_stats["mean"]) / before_stats["mean"] * 100)
+            if before_stats["mean"] > 0
+            else 0
+        ),
         "match_count_increase": int(n_matches_after - n_matches_before),
-        "descriptor_distance_decrease": float(mean_desc_distance_before - mean_desc_distance_after)
+        "descriptor_distance_decrease": float(
+            mean_desc_distance_before - mean_desc_distance_after
+        ),
     }
-    log_progress(f"  Distance reduction: {improvement['distance_reduction_pixels']:.2f} pixels ({improvement['distance_reduction_percent']:.1f}%)")
+    log_progress(
+        f"  Distance reduction: {improvement['distance_reduction_pixels']:.2f} pixels ({improvement['distance_reduction_percent']:.1f}%)"
+    )
     log_progress(f"  Match count change: {improvement['match_count_increase']:+d}")
 
     # Save histogram (guard against None when zero matches)
@@ -308,7 +348,7 @@ def process_image_pair(
         before_distances if before_distances is not None else np.array([]),
         after_distances if after_distances is not None else np.array([]),
         histogram_path,
-        output_prefix
+        output_prefix,
     )
 
     # Compile results
@@ -322,31 +362,28 @@ def process_image_pair(
         "before_registration": {
             "n_keypoints": len(mov_kp),
             "n_matches": int(n_matches_before),
-            "match_ratio": float(n_matches_before) / float(min(len(ref_kp), len(mov_kp))) if min(len(ref_kp), len(mov_kp)) > 0 else 0.0,
+            "match_ratio": float(n_matches_before)
+            / float(min(len(ref_kp), len(mov_kp)))
+            if min(len(ref_kp), len(mov_kp)) > 0
+            else 0.0,
             "mean_descriptor_distance": float(mean_desc_distance_before),
-            "feature_distances": before_stats
+            "feature_distances": before_stats,
         },
         "after_registration": {
             "n_keypoints": len(reg_kp),
             "n_matches": int(n_matches_after),
-            "match_ratio": float(n_matches_after) / float(min(len(ref_kp), len(reg_kp))) if min(len(ref_kp), len(reg_kp)) > 0 else 0.0,
+            "match_ratio": float(n_matches_after) / float(min(len(ref_kp), len(reg_kp)))
+            if min(len(ref_kp), len(reg_kp)) > 0
+            else 0.0,
             "mean_descriptor_distance": float(mean_desc_distance_after),
-            "feature_distances": after_stats
+            "feature_distances": after_stats,
         },
         "improvement": improvement,
-        # Robust headline for downstream (benchmark / QC): MEDIAN residual (not mean) + a reliability
-        # flag — a residual from too few matches is not trustworthy. This is a proxy, not landmark TRE.
-        "tre_summary": {
-            "median_tre_px": float(after_stats.get("median", 0.0)),
-            "n_matches": int(n_matches_after),
-            "reliable": bool(n_matches_after >= MIN_RELIABLE_MATCHES),
-            "metric": "feature-residual proxy (re-matched ref<->registered; monotonic, not absolute TRE)",
-        },
     }
 
     # Save JSON results
     output_path = f"{output_prefix}_feature_distances.json"
-    with open(output_path, 'w') as f:
+    with open(output_path, "w") as f:
         json.dump(results, f, indent=2)
 
     log_progress(f"\n  Saved results: {output_path}")
@@ -358,30 +395,42 @@ def process_image_pair(
     log_progress("=" * 70)
 
 
-
-
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description='Estimate feature distances before and after registration',
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+        description="Estimate feature distances before and after registration",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
-    parser.add_argument('--reference', required=True,
-                       help='Path to reference image')
-    parser.add_argument('--moving', required=True,
-                       help='Path to moving image (before registration)')
-    parser.add_argument('--registered', required=True,
-                       help='Path to registered image (after registration)')
-    parser.add_argument('--output-prefix', required=True,
-                       help='Prefix for output files (e.g., sample1_DAPI)')
-    parser.add_argument('--detector', default='superpoint',
-                       choices=['superpoint', 'disk', 'dedode', 'brisk'],
-                       help='Feature detector type')
-    parser.add_argument('--max-dim', type=int, default=2048,
-                       help='Maximum image dimension for processing')
-    parser.add_argument('--n-features', type=int, default=5000,
-                       help='Number of features to keep')
+    parser.add_argument("--reference", required=True, help="Path to reference image")
+    parser.add_argument(
+        "--moving", required=True, help="Path to moving image (before registration)"
+    )
+    parser.add_argument(
+        "--registered",
+        required=True,
+        help="Path to registered image (after registration)",
+    )
+    parser.add_argument(
+        "--output-prefix",
+        required=True,
+        help="Prefix for output files (e.g., sample1_DAPI)",
+    )
+    parser.add_argument(
+        "--detector",
+        default="superpoint",
+        choices=["superpoint", "disk", "dedode", "brisk"],
+        help="Feature detector type",
+    )
+    parser.add_argument(
+        "--max-dim",
+        type=int,
+        default=2048,
+        help="Maximum image dimension for processing",
+    )
+    parser.add_argument(
+        "--n-features", type=int, default=5000, help="Number of features to keep"
+    )
 
     return parser.parse_args()
 
@@ -398,16 +447,17 @@ def main() -> int:
             output_prefix=args.output_prefix,
             detector_type=args.detector,
             max_dim=args.max_dim,
-            n_features=args.n_features
+            n_features=args.n_features,
         )
         return 0
 
     except Exception as e:
         log_progress(f"ERROR: Feature distance estimation failed: {e}")
         import traceback
+
         traceback.print_exc()
         return 1
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     raise SystemExit(main())

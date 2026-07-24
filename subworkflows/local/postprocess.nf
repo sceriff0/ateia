@@ -14,6 +14,8 @@ include { MERGE_QUANT_CSVS         } from '../../modules/local/quantify'
 include { EXPORT_GEOJSON            } from '../../modules/local/export_geojson'
 include { MERGE_AND_PYRAMID        } from '../../modules/local/merge_and_pyramid'
 include { GENERATE_POSTPROCESSING_QC    } from '../../modules/local/generate_postprocessing_qc'
+include { SEG_QUALITY_EVAL } from '../../modules/local/seg_quality_eval.nf'
+include { MERGE_SEG_EVAL   } from '../../modules/local/merge_seg_eval.nf'
 
 def withDebugView(channel, Closure formatter) {
     return params.debug_channels ? channel.view(formatter) : channel
@@ -65,6 +67,22 @@ workflow POSTPROCESSING {
     // Computes regionprops ONCE instead of N times in QUANTIFY
     // ========================================================================
     EXTRACT_CELL_PROPERTIES(ch_cell_mask)
+
+    // ========================================================================
+    // SEGMENTATION QUALITY EVAL (CSE) - informational per-patient QC
+    // ========================================================================
+    ch_seg_eval_in = ch_cell_mask
+        .map { meta, cmask -> [meta.patient_id, meta, cmask] }
+        .join(ch_nuclei_mask.map { meta, nmask -> [meta.patient_id, nmask] }, by: 0)
+        .join(ch_references.map { meta, img -> [meta.patient_id, img] }, by: 0)
+        .map { _pid, meta, cmask, nmask, img -> [meta, cmask, nmask, img] }
+
+    SEG_QUALITY_EVAL(ch_seg_eval_in)
+
+    MERGE_SEG_EVAL(
+        SEG_QUALITY_EVAL.out.metrics.map { _meta, json -> json }.collect().ifEmpty([])
+    )
+    def ch_seg_eval_metrics = MERGE_SEG_EVAL.out.csv
 
     // Nucleus contours (re-keyed to cell labels) for dual-segmentation GeoJSON export.
     // Only computed when per-compartment quantification is enabled.
@@ -239,21 +257,26 @@ workflow POSTPROCESSING {
             [patient_meta, tiffs]
         }
 
-    // Join split channels with segmentation mask for MERGE
-    ch_for_pyramid_merge = ch_split_grouped
-        .map { meta, tiffs -> [meta.patient_id, meta, tiffs] }
-        .join(
-            ch_cell_mask.map { meta, mask -> [meta.patient_id, mask] },
-            by: 0
-        )
-        .map { _patient_id, meta, split_tiffs, cell_mask ->
-            [meta, split_tiffs, cell_mask]
-        }
+    // Merge intensity channels, and optionally embed cell + nuclei segmentation
+    // masks as a SECOND, single-resolution uint32 OME series (Image:1). The
+    // masks are never mixed into the intensity series itself: a >65,535-cell
+    // uint32 label mask would force the whole intensity OME-TIFF to uint32,
+    // which Bio-Formats/QuPath cannot read as a normal multi-channel image.
+    // Cell objects are always delivered separately via cells.geojson; this
+    // second series is an optional, additional way to carry the raw masks.
+    def emit_masks = params.embed_masks && params.quantify_compartments && params.expanded_quantification
+    ch_pyramid_in = emit_masks
+        ? ch_split_grouped
+            .map { meta, tiffs -> [meta.patient_id, meta, tiffs] }
+            .join(ch_cell_mask.map { m, f -> [m.patient_id, f] }, by: 0)
+            .join(ch_nuclei_mask.map { m, f -> [m.patient_id, f] }, by: 0)
+            .map { _pid, meta, tiffs, cm, nm -> [meta, tiffs, [cm, nm]] }
+        : ch_split_grouped.map { meta, tiffs -> [meta, tiffs, []] }
 
     // MERGE_AND_PYRAMID combines merge + pyramid generation in one step
     // This preserves OME-XML metadata (channel names, colors, pixel sizes)
     // and generates QuPath-compatible pyramidal OME-TIFF directly
-    MERGE_AND_PYRAMID(ch_for_pyramid_merge)
+    MERGE_AND_PYRAMID(ch_pyramid_in)
 
     // ========================================================================
     // POSTPROCESSING QC (optional, runs in PARALLEL with MERGE_AND_PYRAMID)
@@ -322,6 +345,7 @@ workflow POSTPROCESSING {
         .mix(MERGE_QUANT_CSVS.out.size_log)
         .mix(EXPORT_GEOJSON.out.size_log)
         .mix(MERGE_AND_PYRAMID.out.size_log)
+        .mix(SEG_QUALITY_EVAL.out.size_log)
 
     // Add postprocessing QC size logs if enabled
     if (!params.skip_postprocessing_qc) {
@@ -343,6 +367,8 @@ workflow POSTPROCESSING {
         .mix(MERGE_QUANT_CSVS.out.versions.first())
         .mix(EXPORT_GEOJSON.out.versions.first())
         .mix(MERGE_AND_PYRAMID.out.versions.first())
+        .mix(SEG_QUALITY_EVAL.out.versions.first())
+        .mix(MERGE_SEG_EVAL.out.versions.first())
 
     if (!params.skip_postprocessing_qc) {
         ch_versions = ch_versions
@@ -357,6 +383,7 @@ workflow POSTPROCESSING {
     emit:
     checkpoint_csv    = ch_checkpoint_csv
     postprocess_qc    = ch_postprocess_qc
+    seg_eval_metrics  = ch_seg_eval_metrics
     size_logs         = ch_size_logs
     versions          = ch_versions
 }

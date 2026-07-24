@@ -17,13 +17,12 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
-import numpy as np
 import pandas as pd
 from scipy.stats import zscore
 
-sys.path.insert(0, str(Path(__file__).parent / 'utils'))
+sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
 from image_utils import ensure_dir
 from logger import configure_logging, get_logger
@@ -32,9 +31,18 @@ logger = get_logger(__name__)
 
 # Columns that are morphological / metadata, not marker intensities
 MORPHOLOGY_COLS = {
-    'label', 'y', 'x', 'area', 'eccentricity', 'perimeter',
-    'convex_area', 'axis_major_length', 'axis_minor_length', 'solidity',
-    'fov', 'cell_size',
+    "label",
+    "y",
+    "x",
+    "area",
+    "eccentricity",
+    "perimeter",
+    "convex_area",
+    "axis_major_length",
+    "axis_minor_length",
+    "solidity",
+    "fov",
+    "cell_size",
 }
 
 # Default classification color for "Cell" (cyan)
@@ -84,7 +92,7 @@ def compute_zscores(df: pd.DataFrame, marker_cols: List[str]) -> pd.DataFrame:
 
     # Compute z-scores (handle constant columns gracefully)
     z_values = pd.DataFrame(
-        zscore(marker_data, axis=0, nan_policy='omit'),
+        zscore(marker_data, axis=0, nan_policy="omit"),
         index=marker_data.index,
         columns=marker_data.columns,
     )
@@ -98,7 +106,7 @@ def compute_zscores(df: pd.DataFrame, marker_cols: List[str]) -> pd.DataFrame:
             z_values.loc[~is_missing_raw, col] = 0.0
 
     for col in marker_cols:
-        df[f'{col}_zscore'] = z_values[col]
+        df[f"{col}_zscore"] = z_values[col]
 
     return df
 
@@ -116,8 +124,8 @@ def build_measurements(
     measurements = []
 
     # Centroid in micrometers (apply +0.5 for corner-of-pixel convention consistency)
-    x_px = float(row.get('x', 0)) + 0.5
-    y_px = float(row.get('y', 0)) + 0.5
+    x_px = float(row.get("x", 0)) + 0.5
+    y_px = float(row.get("y", 0)) + 0.5
     measurements.append({"name": "Centroid X µm", "value": round(x_px * pixel_size, 3)})
     measurements.append({"name": "Centroid Y µm", "value": round(y_px * pixel_size, 3)})
 
@@ -128,23 +136,30 @@ def build_measurements(
             measurements.append({"name": col, "value": round(float(val), 4)})
 
     # Morphological features (converted to µm where appropriate)
-    area = row.get('area')
+    area = row.get("area")
     if pd.notna(area):
-        measurements.append({"name": "Area µm²", "value": round(float(area) * pixel_size * pixel_size, 3)})
+        measurements.append(
+            {
+                "name": "Area µm²",
+                "value": round(float(area) * pixel_size * pixel_size, 3),
+            }
+        )
 
     # Length measurements converted to µm, area measurements to µm²
     # Dimensionless ratios (eccentricity, solidity) kept as-is
     for morph_col, display_name, unit_factor in [
-        ('eccentricity', 'Eccentricity', 1.0),
-        ('perimeter', 'Perimeter µm', pixel_size),
-        ('solidity', 'Solidity', 1.0),
-        ('convex_area', 'Convex Area µm²', pixel_size * pixel_size),
-        ('axis_major_length', 'Major Axis Length µm', pixel_size),
-        ('axis_minor_length', 'Minor Axis Length µm', pixel_size),
+        ("eccentricity", "Eccentricity", 1.0),
+        ("perimeter", "Perimeter µm", pixel_size),
+        ("solidity", "Solidity", 1.0),
+        ("convex_area", "Convex Area µm²", pixel_size * pixel_size),
+        ("axis_major_length", "Major Axis Length µm", pixel_size),
+        ("axis_minor_length", "Minor Axis Length µm", pixel_size),
     ]:
         val = row.get(morph_col)
         if pd.notna(val):
-            measurements.append({"name": display_name, "value": round(float(val) * unit_factor, 4)})
+            measurements.append(
+                {"name": display_name, "value": round(float(val) * unit_factor, 4)}
+            )
 
     return measurements
 
@@ -228,8 +243,8 @@ def export_geojson(
     skipped = 0
 
     for idx, row in df.iterrows():
-        x_px = row.get('x')
-        y_px = row.get('y')
+        x_px = row.get("x")
+        y_px = row.get("y")
         if pd.isna(x_px) or pd.isna(y_px):
             skipped += 1
             continue
@@ -240,7 +255,7 @@ def export_geojson(
         x_px_corner = float(x_px) + 0.5
         y_px_corner = float(y_px) + 0.5
 
-        cell_id = row.get('label', idx)
+        cell_id = row.get("label", idx)
         cell_label_str = str(int(cell_id)) if pd.notna(cell_id) else str(idx)
 
         # Geometry: Polygon if contour available, else Point
@@ -255,7 +270,9 @@ def export_geojson(
         # ("PathDetectionObject"), which QuPath treats as a per-object UUID — a
         # shared id across all detections breaks re-import. (Matches the
         # compartment export path, which already passes object_id=None.)
-        features.append(build_feature(measurements, geometry, color_int, object_id=None))
+        features.append(
+            build_feature(measurements, geometry, color_int, object_id=None)
+        )
 
     logger.info(f"  Exported {len(features)} cells, skipped {skipped}")
 
@@ -264,7 +281,7 @@ def export_geojson(
         "features": features,
     }
 
-    with open(output_path, 'w') as f:
+    with open(output_path, "w") as f:
         json.dump(geojson, f)
 
     file_size_mb = Path(output_path).stat().st_size / (1024 * 1024)
@@ -275,7 +292,7 @@ def export_geojson(
 
 def _write_collection(features: List[Dict], output_path: str) -> None:
     """Write a list of features as a GeoJSON FeatureCollection."""
-    with open(output_path, 'w') as f:
+    with open(output_path, "w") as f:
         json.dump({"type": "FeatureCollection", "features": features}, f)
 
 
@@ -286,7 +303,7 @@ def export_combined_geojson(
     marker_cols: List[str],
     cell_contours: Optional[Dict[str, List[List[float]]]],
     nucleus_contours: Optional[Dict[str, List[List[float]]]],
-    prefix: str = 'cells',
+    prefix: str = "cells",
 ) -> Dict[str, int]:
     """Export one combined GeoJSON for per-compartment quantification.
 
@@ -307,19 +324,20 @@ def export_combined_geojson(
     skipped = 0
 
     for idx, row in df.iterrows():
-        x_px = row.get('x')
-        y_px = row.get('y')
+        x_px = row.get("x")
+        y_px = row.get("y")
         if pd.isna(x_px) or pd.isna(y_px):
             skipped += 1
             continue
         x_corner = float(x_px) + 0.5
         y_corner = float(y_px) + 0.5
 
-        cell_id = row.get('label', idx)
+        cell_id = row.get("label", idx)
         label_str = str(int(cell_id)) if pd.notna(cell_id) else str(idx)
 
         cell_geom = _polygon_geometry(cell_contours, label_str) or {
-            "type": "Point", "coordinates": [x_corner, y_corner],
+            "type": "Point",
+            "coordinates": [x_corner, y_corner],
         }
         nucleus_geom = _polygon_geometry(nucleus_contours, label_str)
         if nucleus_geom is not None:
@@ -327,13 +345,19 @@ def export_combined_geojson(
 
         measurements = build_measurements(row, marker_cols, pixel_size)
 
-        cells_combined.append(build_feature(
-            measurements, cell_geom, color_int,
-            object_type="cell", nucleus_geometry=nucleus_geom, object_id=None,
-        ))
+        cells_combined.append(
+            build_feature(
+                measurements,
+                cell_geom,
+                color_int,
+                object_type="cell",
+                nucleus_geometry=nucleus_geom,
+                object_id=None,
+            )
+        )
 
     out = Path(output_dir)
-    combined_path = str(out / f'{prefix}.geojson')
+    combined_path = str(out / f"{prefix}.geojson")
     _write_collection(cells_combined, combined_path)
 
     counts = {prefix: len(cells_combined)}
@@ -347,34 +371,44 @@ def export_combined_geojson(
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description='Export cell data to QuPath-compatible GeoJSON',
+        description="Export cell data to QuPath-compatible GeoJSON",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
-        '--cell_data', required=True,
-        help='Path to merged quantification CSV (from MERGE_QUANT_CSVS)',
+        "--cell_data",
+        required=True,
+        help="Path to merged quantification CSV (from MERGE_QUANT_CSVS)",
     )
     parser.add_argument(
-        '-o', '--output_dir', required=True,
-        help='Output directory',
+        "-o",
+        "--output_dir",
+        required=True,
+        help="Output directory",
     )
     parser.add_argument(
-        '--contours_json', type=str, default=None,
-        help='Path to pre-computed whole-cell contours JSON (from extract_cell_properties.py)',
+        "--contours_json",
+        type=str,
+        default=None,
+        help="Path to pre-computed whole-cell contours JSON (from extract_cell_properties.py)",
     )
     parser.add_argument(
-        '--nucleus_contours_json', type=str, default=None,
-        help='Path to nucleus contours JSON re-keyed to cell labels (from '
-             'EXTRACT_NUCLEI_PROPERTIES). When given, each cell in the single combined '
-             'cells.geojson gets a top-level nucleusGeometry field for per-compartment quantification.',
+        "--nucleus_contours_json",
+        type=str,
+        default=None,
+        help="Path to nucleus contours JSON re-keyed to cell labels (from "
+        "EXTRACT_NUCLEI_PROPERTIES). When given, each cell in the single combined "
+        "cells.geojson gets a top-level nucleusGeometry field for per-compartment quantification.",
     )
     parser.add_argument(
-        '--pixel_size', type=float, default=0.325,
-        help='Pixel size in micrometers',
+        "--pixel_size",
+        type=float,
+        default=0.325,
+        help="Pixel size in micrometers",
     )
     parser.add_argument(
-        '--output_prefix', default='cells',
-        help='Prefix for output files',
+        "--output_prefix",
+        default="cells",
+        help="Prefix for output files",
     )
     return parser.parse_args()
 
@@ -395,8 +429,8 @@ def main() -> int:
     cell_df = pd.read_csv(args.cell_data)
 
     # Remove duplicates by label if present
-    if 'label' in cell_df.columns:
-        cell_df = cell_df.drop_duplicates(subset='label', keep='first')
+    if "label" in cell_df.columns:
+        cell_df = cell_df.drop_duplicates(subset="label", keep="first")
 
     logger.info(f"Loaded {len(cell_df)} cells")
 
@@ -408,7 +442,7 @@ def main() -> int:
     contours = None
     if args.contours_json:
         logger.info(f"Loading cell contours: {args.contours_json}")
-        with open(args.contours_json, 'r') as f:
+        with open(args.contours_json, "r") as f:
             contours = json.load(f)
         logger.info(f"Loaded contours for {len(contours)} cells")
 
@@ -416,14 +450,14 @@ def main() -> int:
     nucleus_contours = None
     if args.nucleus_contours_json:
         logger.info(f"Loading nucleus contours: {args.nucleus_contours_json}")
-        with open(args.nucleus_contours_json, 'r') as f:
+        with open(args.nucleus_contours_json, "r") as f:
             nucleus_contours = json.load(f)
         logger.info(f"Loaded nucleus contours for {len(nucleus_contours)} cells")
 
     # Compute z-scores for CSV output
     cell_df_with_z = compute_zscores(cell_df, marker_cols)
 
-    output_geojson = str(Path(args.output_dir) / f'{args.output_prefix}.geojson')
+    output_geojson = str(Path(args.output_dir) / f"{args.output_prefix}.geojson")
     if nucleus_contours is not None:
         # Per-compartment quantification: one combined cell+nucleus GeoJSON.
         counts = export_combined_geojson(
@@ -447,7 +481,7 @@ def main() -> int:
         )
 
     # Save CSV with both raw and z-score columns
-    output_csv = str(Path(args.output_dir) / f'{args.output_prefix}_data.csv')
+    output_csv = str(Path(args.output_dir) / f"{args.output_prefix}_data.csv")
     logger.info(f"Saving CSV: {output_csv}")
     csv_df = cell_df_with_z.copy()
     csv_df.to_csv(output_csv, index=False)
@@ -456,9 +490,11 @@ def main() -> int:
     logger.info("=" * 80)
     logger.info("EXPORT COMPLETED SUCCESSFULLY")
     logger.info("=" * 80)
-    logger.info(f"Output files:")
+    logger.info("Output files:")
     logger.info(f"  GeoJSON: {output_geojson} ({num_exported} cells)")
-    logger.info(f"  CSV:     {output_csv} ({len(csv_df)} cells, {len(csv_df.columns)} columns)")
+    logger.info(
+        f"  CSV:     {output_csv} ({len(csv_df)} cells, {len(csv_df.columns)} columns)"
+    )
     logger.info("")
     logger.info("To view in QuPath:")
     logger.info("  1. Open your pyramidal OME-TIFF image")

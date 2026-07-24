@@ -1,3 +1,6 @@
+/*
+ * CONVERT_IMAGE - convert an input slide to standardized OME-TIFF via Bio-Formats.
+ */
 process CONVERT_IMAGE {
     tag "${meta.patient_id}"
     label 'process_medium'

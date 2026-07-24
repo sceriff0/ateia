@@ -5,6 +5,7 @@ PAD_IMAGES must preserve the input's physical pixel size in the output OME-XML.
 Previously it hardcoded PhysicalSize 0.325 um, silently rescaling every downstream
 micron measurement for any acquisition not at 0.325 um/px.
 """
+
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path

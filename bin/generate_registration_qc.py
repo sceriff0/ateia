@@ -61,10 +61,10 @@ from pathlib import Path
 from typing import List, Tuple
 
 # Add utils directory to path
-sys.path.insert(0, str(Path(__file__).parent / 'utils'))
+sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
 # Import from shared library modules (eliminates code duplication)
-from logger import get_logger, configure_logging
+from logger import configure_logging, get_logger
 from qc import create_registration_qc
 
 __all__ = ["main"]
@@ -108,60 +108,49 @@ Output:
     - {basename}_QC_RGB_fullres.tif  (full resolution, compressed)
     - {basename}_QC_RGB.tif          (downsampled for ImageJ)
     - {basename}_QC_RGB.png          (downsampled for quick view)
-        """
+        """,
     )
 
     parser.add_argument(
-        '--reference',
+        "--reference",
         type=Path,
         required=True,
-        help='Path to reference image (OME-TIFF)'
+        help="Path to reference image (OME-TIFF)",
     )
 
     parser.add_argument(
-        '--registered',
+        "--registered",
         type=Path,
-        nargs='+',
+        nargs="+",
         required=True,
-        help='Path(s) to registered image(s) (OME-TIFF). Can specify multiple files.'
+        help="Path(s) to registered image(s) (OME-TIFF). Can specify multiple files.",
     )
 
     parser.add_argument(
-        '--output',
-        type=Path,
-        required=True,
-        help='Output directory for QC files'
+        "--output", type=Path, required=True, help="Output directory for QC files"
     )
 
     parser.add_argument(
-        '--scale-factor',
+        "--scale-factor",
         type=float,
         default=0.25,
-        help='Downsampling factor for PNG/TIFF output (default: 0.25 = 4x smaller)'
+        help="Downsampling factor for PNG/TIFF output (default: 0.25 = 4x smaller)",
     )
 
     parser.add_argument(
-        '--no-fullres',
-        action='store_true',
-        help='Skip full-resolution TIFF output (saves disk space)'
+        "--no-fullres",
+        action="store_true",
+        help="Skip full-resolution TIFF output (saves disk space)",
+    )
+
+    parser.add_argument("--no-png", action="store_true", help="Skip PNG output")
+
+    parser.add_argument(
+        "--no-tiff", action="store_true", help="Skip downsampled TIFF output"
     )
 
     parser.add_argument(
-        '--no-png',
-        action='store_true',
-        help='Skip PNG output'
-    )
-
-    parser.add_argument(
-        '--no-tiff',
-        action='store_true',
-        help='Skip downsampled TIFF output'
-    )
-
-    parser.add_argument(
-        '--verbose',
-        action='store_true',
-        help='Enable verbose (DEBUG) logging'
+        "--verbose", action="store_true", help="Enable verbose (DEBUG) logging"
     )
 
     return parser.parse_args()
@@ -175,7 +164,7 @@ def process_single_image(
     save_fullres: bool,
     save_png: bool,
     save_tiff: bool,
-    logger
+    logger,
 ) -> Tuple[bool, str]:
     """Process a single registered image to generate QC outputs.
 
@@ -207,7 +196,7 @@ def process_single_image(
     """
     try:
         # Generate base output path from registered image name
-        base_name = registered_path.stem.removesuffix('.ome')
+        base_name = registered_path.stem.removesuffix(".ome")
         output_path = output_dir / f"{base_name}_QC_RGB.tif"
 
         # Call library function (eliminates code duplication)
@@ -218,7 +207,7 @@ def process_single_image(
             scale_factor=scale_factor,
             save_fullres=save_fullres,
             save_png=save_png,
-            save_tiff=save_tiff
+            save_tiff=save_tiff,
         )
 
         return True, "Success"
@@ -256,8 +245,7 @@ def main() -> int:
     # Configure logging using singleton pattern
     log_level = logging.DEBUG if args.verbose else logging.INFO
     configure_logging(
-        level=log_level,
-        format_string='[%(asctime)s] %(levelname)s - %(message)s'
+        level=log_level, format_string="[%(asctime)s] %(levelname)s - %(message)s"
     )
 
     # Get logger for this module
@@ -298,7 +286,7 @@ def main() -> int:
 
         # Skip if it's the reference image itself
         if reg_path.resolve() == args.reference.resolve():
-            logger.info(f"  ⊘ Skipping (is reference image)")
+            logger.info("  ⊘ Skipping (is reference image)")
             continue
 
         # Process image
@@ -310,12 +298,12 @@ def main() -> int:
             save_fullres=not args.no_fullres,
             save_png=not args.no_png,
             save_tiff=not args.no_tiff,
-            logger=logger
+            logger=logger,
         )
 
         if success:
             success_count += 1
-            logger.info(f"  ✓ Success")
+            logger.info("  ✓ Success")
         else:
             failed_images.append((reg_path, message))
             logger.warning(f"  ✗ Failed: {message}")
@@ -340,5 +328,5 @@ def main() -> int:
         return 0
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main())

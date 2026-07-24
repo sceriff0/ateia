@@ -25,11 +25,10 @@ from __future__ import annotations
 import json
 import math
 import os
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
-import numpy as np
 import tifffile
 from numpy.typing import NDArray
 
@@ -48,6 +47,7 @@ __all__ = [
 @dataclass
 class TileInfo:
     """Information about a single tile's position and dimensions."""
+
     row: int
     col: int
     y_start: int
@@ -66,10 +66,7 @@ class TileInfo:
 
 
 def calculate_tile_size_for_target(
-    height: int,
-    width: int,
-    target_fovs: int = 100,
-    min_tile_size: int = 512
+    height: int, width: int, target_fovs: int = 100, min_tile_size: int = 512
 ) -> int:
     """Calculate tile size to produce approximately target_fovs tiles.
 
@@ -105,9 +102,7 @@ def calculate_tile_size_for_target(
 
 
 def calculate_tile_grid(
-    height: int,
-    width: int,
-    tile_size: int = 2048
+    height: int, width: int, tile_size: int = 2048
 ) -> Tuple[int, int]:
     """Calculate the number of tiles needed to cover an image.
 
@@ -151,9 +146,7 @@ def needs_tiling(height: int, width: int, tile_size: int = 2048) -> bool:
 
 
 def split_image_to_fov_tiles(
-    image: NDArray,
-    tile_size: int = 2048,
-    patient_id: str = "sample"
+    image: NDArray, tile_size: int = 2048, patient_id: str = "sample"
 ) -> Dict[str, Tuple[NDArray, TileInfo]]:
     """Split a 2D image into tiles with unique FOV names.
 
@@ -205,7 +198,7 @@ def split_image_to_fov_tiles(
                 y_start=y_start,
                 x_start=x_start,
                 height=y_end - y_start,
-                width=x_end - x_start
+                width=x_end - x_start,
             )
 
             result[fov_name] = (tile, tile_info)
@@ -218,7 +211,7 @@ def create_fov_directory_structure(
     cell_mask: Path,
     output_dir: Path,
     tile_size: int = 2048,
-    patient_id: str = "sample"
+    patient_id: str = "sample",
 ) -> Tuple[Path, Path, List[str], Dict[str, TileInfo]]:
     """Create Pixie-compatible FOV directory structure from full images.
 
@@ -304,9 +297,7 @@ def create_fov_directory_structure(
         os.symlink(os.path.abspath(cell_mask), mask_dest)
 
         tile_info = TileInfo(
-            row=0, col=0,
-            y_start=0, x_start=0,
-            height=height, width=width
+            row=0, col=0, y_start=0, x_start=0, height=height, width=width
         )
 
         return tiff_dir, seg_dir, [fov_name], {fov_name: tile_info}
@@ -369,7 +360,7 @@ def save_tile_positions(
     patient_id: str,
     tile_size: int,
     original_height: int,
-    original_width: int
+    original_width: int,
 ) -> None:
     """Save tile position information to JSON file.
 
@@ -394,10 +385,10 @@ def save_tile_positions(
         "original_height": original_height,
         "original_width": original_width,
         "n_tiles": len(tile_positions),
-        "tiles": {name: info.to_dict() for name, info in tile_positions.items()}
+        "tiles": {name: info.to_dict() for name, info in tile_positions.items()},
     }
 
-    with open(output_path, 'w') as f:
+    with open(output_path, "w") as f:
         json.dump(data, f, indent=2)
 
 
@@ -420,8 +411,7 @@ def load_tile_positions(input_path: Path) -> Tuple[Dict[str, TileInfo], dict]:
         data = json.load(f)
 
     tile_positions = {
-        name: TileInfo.from_dict(info)
-        for name, info in data["tiles"].items()
+        name: TileInfo.from_dict(info) for name, info in data["tiles"].items()
     }
 
     metadata = {
@@ -429,7 +419,7 @@ def load_tile_positions(input_path: Path) -> Tuple[Dict[str, TileInfo], dict]:
         "tile_size": data["tile_size"],
         "original_height": data["original_height"],
         "original_width": data["original_width"],
-        "n_tiles": data["n_tiles"]
+        "n_tiles": data["n_tiles"],
     }
 
     return tile_positions, metadata

@@ -1,18 +1,10 @@
 /*
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    MERGE AND PYRAMID MODULE
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    Merges single-channel TIFFs into a pyramidal OME-TIFF with proper metadata
-    for QuPath visualization.
-
-    Features:
-    - Generates pyramidal OME-TIFF directly (no bfconvert needed)
-    - Preserves channel names, colors, and pixel sizes in OME-XML
-    - Supports segmentation and phenotype mask overlays
-    - Memory-efficient processing for large images
-    - Full QuPath compatibility
-----------------------------------------------------------------------------------------
-*/
+ * MERGE_AND_PYRAMID - merge single-channel TIFFs into a pyramidal OME-TIFF for QuPath.
+ *
+ * Writes a pyramidal OME-TIFF directly (no bfconvert), preserving channel names, colors, and
+ * pixel sizes in the OME-XML. Intensity channels only; cell objects are delivered separately via
+ * cells.geojson. Processes large images memory-efficiently.
+ */
 
 process MERGE_AND_PYRAMID {
     tag "${meta.patient_id}"
@@ -21,7 +13,7 @@ process MERGE_AND_PYRAMID {
     container "bolt3x/attend_image_analysis:merge"
 
     input:
-    tuple val(meta), path(split_channels, stageAs: 'channels/*'), path(seg_mask)
+    tuple val(meta), path(split_channels, stageAs: 'channels/*'), path(mask_files, stageAs: 'masks/*')
 
     output:
     tuple val(meta), path("pyramid.ome.tiff"), emit: pyramid
@@ -42,12 +34,18 @@ process MERGE_AND_PYRAMID {
     def tile_size = params.tilex ?: 256
     def compression = params.compression ?: 'zstd'
 
+    // Embed cell + nuclei segmentation masks as a second, single-resolution
+    // uint32 OME series only when masks were actually staged. postprocess.nf
+    // is the single source of truth for the embed_masks decision (it only
+    // wires mask_files into this process's input when
+    // embed_masks && quantify_compartments && expanded_quantification); an
+    // empty mask_files list means Nextflow staged no masks/ dir.
+    def masks_arg = mask_files ? "--masks-dir masks" : ""
+
     """
-    # Log input size for tracing (sum of channels/ dir + seg_mask, -L follows symlinks)
+    # Log input size for tracing (channels/ dir only, -L follows symlinks)
     channels_bytes=\$(du -sLb channels/ | cut -f1)
-    mask_bytes=\$(stat -L --printf="%s" ${seg_mask})
-    total_bytes=\$((channels_bytes + mask_bytes))
-    echo "${task.process},${meta.patient_id},channels/+${seg_mask.name},\${total_bytes}" > ${meta.patient_id}.MERGE_AND_PYRAMID.size.csv
+    echo "${task.process},${meta.patient_id},channels/,\${channels_bytes}" > ${meta.patient_id}.MERGE_AND_PYRAMID.size.csv
 
     echo "Sample: ${meta.patient_id}"
     echo "Input directory: channels/"
@@ -62,7 +60,7 @@ process MERGE_AND_PYRAMID {
         --pyramid-scale ${pyramid_scale} \\
         --tile-size ${tile_size} \\
         --compression ${compression} \\
-        --segmentation-mask ${seg_mask} \\
+        ${masks_arg} \\
         ${args}
 
     cat <<-END_VERSIONS > versions.yml

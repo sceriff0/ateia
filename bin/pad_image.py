@@ -4,6 +4,7 @@
 This script pads a single OME-TIFF image to target height and width,
 ensuring uniform spatial dimensions for downstream registration.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -12,14 +13,12 @@ import sys
 from pathlib import Path
 
 # Add parent directory to path to import lib modules
-sys.path.insert(0, str(Path(__file__).parent / 'utils'))
-
-from logger import get_logger, configure_logging
-from image_utils import ensure_dir
-from constants import BIGTIFF_THRESHOLD
+sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
 import numpy as np
 import tifffile
+from constants import BIGTIFF_THRESHOLD
+from logger import configure_logging, get_logger
 
 logger = get_logger(__name__)
 
@@ -27,23 +26,27 @@ __all__ = ["main"]
 
 
 def pad_image_to_shape(
-    img: np.ndarray,
-    target_h: int,
-    target_w: int,
-    mode: str = 'constant'
+    img: np.ndarray, target_h: int, target_w: int, mode: str = "constant"
 ) -> np.ndarray:
     """Pad image to target spatial dimensions using symmetric padding.
 
-    Note: Only pads height and width - channel count is preserved.
+    Only height and width are padded; channel count is preserved.
 
-    Parameters:
-        img (ndarray): Input image in (C, H, W) format
-        target_h (int): Target height
-        target_w (int): Target width
-        mode (str): Padding mode ('constant', 'edge', 'reflect', 'symmetric')
+    Parameters
+    ----------
+    img : ndarray
+        Input image in (C, H, W) format.
+    target_h : int
+        Target height.
+    target_w : int
+        Target width.
+    mode : str
+        Padding mode ('constant', 'edge', 'reflect', 'symmetric').
 
-    Returns:
-        ndarray: Padded image
+    Returns
+    -------
+    ndarray
+        Padded image.
     """
     c_img, h_img, w_img = img.shape
 
@@ -67,18 +70,20 @@ def pad_image_to_shape(
     pad_w_before = pad_w // 2
     pad_w_after = pad_w - pad_w_before
 
-    logger.info(f"    Padding: H={pad_h_before}+{pad_h_after}, W={pad_w_before}+{pad_w_after}")
+    logger.info(
+        f"    Padding: H={pad_h_before}+{pad_h_after}, W={pad_w_before}+{pad_w_after}"
+    )
 
     # Pad specification: ((C_before, C_after), (H_before, H_after), (W_before, W_after))
     pad_width = (
-        (0, 0),                       # No channel padding
+        (0, 0),  # No channel padding
         (pad_h_before, pad_h_after),  # Height padding
         (pad_w_before, pad_w_after),  # Width padding
     )
 
     # Apply padding
-    if mode == 'constant':
-        padded = np.pad(img, pad_width, mode='constant', constant_values=0)
+    if mode == "constant":
+        padded = np.pad(img, pad_width, mode="constant", constant_values=0)
     else:
         padded = np.pad(img, pad_width, mode=mode)
 
@@ -90,7 +95,7 @@ def pad_single_image(
     output_path: Path,
     target_h: int,
     target_w: int,
-    pad_mode: str = 'constant'
+    pad_mode: str = "constant",
 ) -> None:
     """Pad single image to target spatial dimensions.
 
@@ -108,23 +113,26 @@ def pad_single_image(
     # acquisition pixel size (doing so silently rescales every downstream micron
     # measurement, e.g. GeoJSON coordinates in QuPath).
     channel_names = []
-    phys_x, phys_y, phys_unit = '0.325', '0.325', 'um'
+    phys_x, phys_y, phys_unit = "0.325", "0.325", "um"
     try:
         with tifffile.TiffFile(str(input_path)) as tif:
-            if hasattr(tif, 'ome_metadata') and tif.ome_metadata:
+            if hasattr(tif, "ome_metadata") and tif.ome_metadata:
                 import xml.etree.ElementTree as ET
+
                 root = ET.fromstring(tif.ome_metadata)
-                ns = {'ome': 'http://www.openmicroscopy.org/Schemas/OME/2016-06'}
-                channels = root.findall('.//ome:Channel', ns)
-                channel_names = [ch.get('Name', '') for ch in channels]
+                ns = {"ome": "http://www.openmicroscopy.org/Schemas/OME/2016-06"}
+                channels = root.findall(".//ome:Channel", ns)
+                channel_names = [ch.get("Name", "") for ch in channels]
                 channel_names = [name for name in channel_names if name]
                 if channel_names:
-                    logger.info(f"  Extracted {len(channel_names)} channel names from OME metadata")
-                pixels = root.find('.//ome:Pixels', ns)
+                    logger.info(
+                        f"  Extracted {len(channel_names)} channel names from OME metadata"
+                    )
+                pixels = root.find(".//ome:Pixels", ns)
                 if pixels is not None:
-                    phys_x = pixels.get('PhysicalSizeX') or phys_x
-                    phys_y = pixels.get('PhysicalSizeY') or phys_y
-                    phys_unit = pixels.get('PhysicalSizeXUnit') or phys_unit
+                    phys_x = pixels.get("PhysicalSizeX") or phys_x
+                    phys_y = pixels.get("PhysicalSizeY") or phys_y
+                    phys_unit = pixels.get("PhysicalSizeXUnit") or phys_unit
                     logger.info(f"  Pixel size: X={phys_x} Y={phys_y} {phys_unit}/px")
     except Exception as e:
         logger.warning(f"  Could not extract metadata: {e}")
@@ -132,10 +140,15 @@ def pad_single_image(
     # Fallback: extract from filename
     if not channel_names:
         filename = input_path.stem
-        name_part = filename.replace('_corrected', '').replace('_preprocessed', '').replace('_registered', '').replace('_padded', '')
-        parts = name_part.split('_')
+        name_part = (
+            filename.replace("_corrected", "")
+            .replace("_preprocessed", "")
+            .replace("_registered", "")
+            .replace("_padded", "")
+        )
+        parts = name_part.split("_")
         # Skip first part if it looks like a patient/sample ID
-        if len(parts) > 1 and '-' in parts[0] and any(c.isdigit() for c in parts[0]):
+        if len(parts) > 1 and "-" in parts[0] and any(c.isdigit() for c in parts[0]):
             channel_names = parts[1:]
         else:
             channel_names = parts
@@ -165,9 +178,13 @@ def pad_single_image(
     # Ensure channel_names matches number of channels
     num_channels = img.shape[0]
     if len(channel_names) != num_channels:
-        logger.warning(f"  Channel name count mismatch: {len(channel_names)} names vs {num_channels} channels")
+        logger.warning(
+            f"  Channel name count mismatch: {len(channel_names)} names vs {num_channels} channels"
+        )
         if len(channel_names) < num_channels:
-            channel_names.extend([f"channel_{i}" for i in range(len(channel_names), num_channels)])
+            channel_names.extend(
+                [f"channel_{i}" for i in range(len(channel_names), num_channels)]
+            )
         else:
             channel_names = channel_names[:num_channels]
 
@@ -183,7 +200,9 @@ def pad_single_image(
     use_bigtiff = estimated_size > BIGTIFF_THRESHOLD
 
     if use_bigtiff:
-        logger.info(f"  Using BigTIFF format (estimated size: {estimated_size / (1024**3):.2f} GB)")
+        logger.info(
+            f"  Using BigTIFF format (estimated size: {estimated_size / (1024**3):.2f} GB)"
+        )
 
     # Save padded image without compression (temporary file for GPU registration).
     # Let tifffile build the OME-XML (ome=True) from a metadata dict carrying the
@@ -192,12 +211,12 @@ def pad_single_image(
     # tif.ome_metadata reliably readable downstream (e.g. create_channels_manifest).
     logger.info(f"  Saving to: {output_path.name} with channel names: {channel_names}")
     ome_metadata = {
-        'axes': 'CYX',
-        'Channel': {'Name': channel_names},
-        'PhysicalSizeX': float(phys_x),
-        'PhysicalSizeY': float(phys_y),
-        'PhysicalSizeXUnit': phys_unit,
-        'PhysicalSizeYUnit': phys_unit,
+        "axes": "CYX",
+        "Channel": {"Name": channel_names},
+        "PhysicalSizeX": float(phys_x),
+        "PhysicalSizeY": float(phys_y),
+        "PhysicalSizeXUnit": phys_unit,
+        "PhysicalSizeYUnit": phys_unit,
     }
     tifffile.imwrite(
         str(output_path),
@@ -205,52 +224,30 @@ def pad_single_image(
         ome=True,
         metadata=ome_metadata,
         compression=None,  # No compression for faster I/O and lower memory
-        bigtiff=use_bigtiff
+        bigtiff=use_bigtiff,
     )
     logger.info("  ✓ Saved")
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Pad image to target dimensions"
+    """CLI entry point: pad each input image to the target dimensions and write the result."""
+    parser = argparse.ArgumentParser(description="Pad image to target dimensions")
+    parser.add_argument("--input", type=str, required=True, help="Input image path")
+    parser.add_argument("--output", type=str, required=True, help="Output image path")
+    parser.add_argument(
+        "--target-height", type=int, required=True, help="Target height in pixels"
     )
     parser.add_argument(
-        '--input',
+        "--target-width", type=int, required=True, help="Target width in pixels"
+    )
+    parser.add_argument(
+        "--pad-mode",
         type=str,
-        required=True,
-        help='Input image path'
+        default="constant",
+        choices=["constant", "edge", "reflect", "symmetric"],
+        help="Padding mode (default: constant/zeros)",
     )
-    parser.add_argument(
-        '--output',
-        type=str,
-        required=True,
-        help='Output image path'
-    )
-    parser.add_argument(
-        '--target-height',
-        type=int,
-        required=True,
-        help='Target height in pixels'
-    )
-    parser.add_argument(
-        '--target-width',
-        type=int,
-        required=True,
-        help='Target width in pixels'
-    )
-    parser.add_argument(
-        '--pad-mode',
-        type=str,
-        default='constant',
-        choices=['constant', 'edge', 'reflect', 'symmetric'],
-        help='Padding mode (default: constant/zeros)'
-    )
-    parser.add_argument(
-        '--log-level',
-        type=str,
-        default='INFO',
-        help='Logging level'
-    )
+    parser.add_argument("--log-level", type=str, default="INFO", help="Logging level")
 
     args = parser.parse_args()
 
@@ -269,13 +266,14 @@ def main():
             output_path,
             args.target_height,
             args.target_width,
-            args.pad_mode
+            args.pad_mode,
         )
         return 0
 
     except Exception as e:
         logger.error(f"Padding failed: {e}")
         import traceback
+
         traceback.print_exc()
         return 1
 

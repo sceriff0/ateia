@@ -35,7 +35,7 @@ nextflow_process {
                         file('$projectDir/tests/testdata/sample_PANCK.tif', checkIfExists: true),
                         file('$projectDir/tests/testdata/sample_SMA.tif', checkIfExists: true)
                     ],
-                    file('$projectDir/tests/testdata/P001_cell_mask.tif', checkIfExists: true)
+                    []
                 ]
                 """
             }
@@ -82,7 +82,7 @@ nextflow_process {
                         file('$projectDir/tests/testdata/sample_PANCK.tif', checkIfExists: true),
                         file('$projectDir/tests/testdata/sample_SMA.tif', checkIfExists: true)
                     ],
-                    file('$projectDir/tests/testdata/P001_cell_mask.tif', checkIfExists: true)
+                    []
                 ]
                 """
             }
@@ -123,7 +123,7 @@ nextflow_process {
                         file('$projectDir/tests/testdata/sample_DAPI.tif', checkIfExists: true),
                         file('$projectDir/tests/testdata/sample_PANCK.tif', checkIfExists: true)
                     ],
-                    file('$projectDir/tests/testdata/P002_cell_mask.tif', checkIfExists: true)
+                    []
                 ]
                 """
             }
@@ -168,7 +168,7 @@ nextflow_process {
                         file('$projectDir/tests/testdata/sample_PANCK.tif', checkIfExists: true),
                         file('$projectDir/tests/testdata/sample_SMA.tif', checkIfExists: true)
                     ],
-                    file('$projectDir/tests/testdata/P001_cell_mask.tif', checkIfExists: true)
+                    []
                 ]
                 """
             }
@@ -183,7 +183,7 @@ nextflow_process {
         }
     }
 
-    test("Should create pyramidal OME-TIFF from 3 channels + mask - real") {
+    test("Should create pyramidal OME-TIFF from 3 channels - real") {
 
         tag "real"
         tag "slow"
@@ -210,7 +210,7 @@ nextflow_process {
                         file('$projectDir/tests/testdata/sample_PANCK.tif', checkIfExists: true),
                         file('$projectDir/tests/testdata/sample_SMA.tif', checkIfExists: true)
                     ],
-                    file('$projectDir/tests/testdata/P001_cell_mask.tif', checkIfExists: true)
+                    []
                 ]
                 """
             }
@@ -260,7 +260,7 @@ nextflow_process {
                         file('$projectDir/tests/testdata/sample_PANCK.tif', checkIfExists: true),
                         file('$projectDir/tests/testdata/sample_SMA.tif', checkIfExists: true)
                     ],
-                    file('$projectDir/tests/testdata/P001_cell_mask.tif', checkIfExists: true)
+                    []
                 ]
                 """
             }
@@ -270,7 +270,7 @@ nextflow_process {
             assertAll(
                 { assert process.success },
                 // Pyramid should contain multiple resolution levels (multi-resolution OME-TIFF)
-                // File should be substantial — at least 10KB for 128x128 with 3 channels + mask + 3 pyramid levels
+                // File should be substantial — at least 10KB for 128x128 with 3 channels + 3 pyramid levels
                 {
                     def pyramidSize = process.out.pyramid.get(0).get(1).size()
                     assert pyramidSize > 10_000, "Pyramid OME-TIFF should be > 10KB, got ${pyramidSize} bytes"

@@ -19,9 +19,8 @@ shown here are the values in
 
 | Parameter | Default | Description |
 |---|---|---|
-| `input` | `null` | Path to the samplesheet CSV. **Required.** Columns depend on `--start` — see [Samplesheet & Input](input_spec.md). |
+| `input` | `null` | Path to the samplesheet CSV. **Required.** Columns depend on `--start` — see [Samplesheet & Input](usage.md#the-samplesheet). |
 | `outdir` | `null` | Output root directory. **Required** — no default. Checkpoint CSVs are written to `<outdir>/csv/`. |
-| `publish_dir_mode` | `copy` | How outputs are published (`copy`, `symlink`, `move`). |
 
 ## Workflow control
 
@@ -34,12 +33,11 @@ shown here are the values in
 
 !!! tip "Run a single stage"
     `--start registration --stop registration` runs registration only, reading a
-    `<outdir>/csv/preprocessed.csv` checkpoint. See [Restartability](restartability_guide.md).
+    `<outdir>/csv/preprocessed.csv` checkpoint. See [Restartability](usage.md#checkpoints-resuming).
 
 ## Preprocessing
 
-Bio-Formats conversion + BaSiC illumination correction. Deep dive:
-[Preprocessing](preprocessing.md).
+Bio-Formats conversion + BaSiC illumination correction.
 
 | Parameter | Default | Description |
 |---|---|---|
@@ -48,14 +46,13 @@ Bio-Formats conversion + BaSiC illumination correction. Deep dive:
 | `preproc_skip_dapi` | `true` | Skip BaSiC correction on the DAPI channel. |
 | `preproc_autotune` | `false` | Enable BaSiC autotune. |
 | `preproc_n_iter` | `100` | BaSiC optimization iterations. |
-| `preproc_pool_workers` | `3` | Parallel channels processed at once (also the process CPU count). |
+| `preproc_pool_workers` | `null` | Worker threads for BaSiC preprocessing. `null` = use the process CPU count (`task.cpus`). |
 | `preproc_overlap` | `0` | FOV tile overlap (px). |
 | `preproc_no_darkfield` | `false` | Disable darkfield estimation. |
 
 ## Registration
 
-VALIS whole-slide alignment. Deep dives: [Registration](registration_methods.md) ·
-[Error metrics](registration_errors.md).
+VALIS whole-slide alignment.
 
 ### Common
 
@@ -76,32 +73,17 @@ VALIS whole-slide alignment. Deep dives: [Registration](registration_methods.md)
 | `reg_max_image_dim` | `4000` | Max cached image dimension during registration. |
 | `skip_micro_registration` | `true` | Skip the micro-registration refinement step. |
 | `reg_jvm_heap_gb` | `null` | Explicit JVM heap (GB) for VALIS. `null` auto-estimates from input size. |
+| `reg_qc` | `1` | Registration QC depth: `0` = none, `1` = DAPI overlay only, `2` = DAPI overlay + [staged segmentation-overlap metrics](registration_qc.md). |
 
-### Distributed registration (advanced)
-
-For very large slides, registration can be fanned out across tiles as separate
-tasks instead of running through the in-process VALIS adapter. This is **off by
-default** — the classic path is bit-identical and JVM-free for most inputs. Only
-reach for these if a single REGISTER task can't fit a slide in memory.
-
-| Parameter | Default | Description |
-|---|---|---|
-| `reg_distributed_tiling` | `false` | Master switch. `false` = classic in-process registration. |
-| `reg_dist_sub_threshold` | `auto` | `auto` tiles only when VALIS would (estimated size > threshold); `force` always tiles. |
-| `reg_dist_min_input_gb` | `1.0` | In `auto` mode, total full-res input ≥ this routes to distributed; smaller stays classic. |
-| `reg_dist_force_tiling` | `false` | `false` = separated whole-image non-rigid (JVM-free); `true` = tiled fan-out. |
-| `reg_dist_tile_wh` | `512` | Non-rigid tile size (px). |
-| `reg_dist_micro_tile_wh` | `2048` | Micro-registration tile size (px). |
-| `reg_dist_tile_buffer` | `100` | Tile overlap (px). |
-| `reg_dist_tiles_per_task` | `1` | Tiles per registration task (1 = max granularity). |
-| `reg_dist_threshold_gb` | `10` | Informational; matches VALIS's internal auto-tiler threshold. |
-| `reg_dist_container` | *(GHCR image)* | Patched VALIS image used for distributed tiles. |
-| `reg_max_non_rigid_dim` | `4096` | Non-rigid working resolution for the prep step. |
-| `reg_max_processed_dim` | `2048` | Rigid/processing working resolution for the prep step. |
+At `reg_qc = 2` the pipeline segments each slide's DAPI on its **native** image, pairs the
+nuclei once after rigid registration, and then re-scores those same pairs after every later
+stage — so per-pair IoU and centroid residual can be attributed to `rigid`, `non_rigid` and
+`micro` individually. See [Staged registration QC](registration_qc.md) for the output schema
+and how to read it.
 
 ## Segmentation
 
-Backend selected by `--seg_method`. Deep dive: [Segmentation](segmentation.md).
+Backend selected by `--seg_method`.
 
 ### Backend selection & shared
 
@@ -145,7 +127,7 @@ SAM foundation model on the DAPI channel (located by name).
 |---|---|---|
 | `seg_cellsam_bbox_threshold` | `0.4` | Bounding-box confidence — the main precision/recall knob. |
 | `seg_cellsam_use_wsi` | `true` | Enable CellSAM native whole-slide tiling. |
-| `seg_cellsam_block_size` | `400` | Tile side (px) in WSI mode (recommend 256–2048). |
+| `seg_cellsam_block_size` | `1024` | Tile side (px) in WSI mode (recommend 256–2048). |
 | `seg_cellsam_overlap` | `56` | Tile overlap (px) in WSI mode. |
 | `cellsam_model_path` | `null` | Pre-downloaded weights. If `null`, weights auto-download and require `DEEPCELL_ACCESS_TOKEN`. |
 
@@ -156,7 +138,7 @@ SAM foundation model on the DAPI channel (located by name).
 
 ## Quantification
 
-Per-cell marker intensity. Deep dive: [Quantification](quantification.md).
+Per-cell marker intensity.
 
 | Parameter | Default | Description |
 |---|---|---|
@@ -169,13 +151,11 @@ Per-cell marker intensity. Deep dive: [Quantification](quantification.md).
 
 ## Visualization & export
 
-Pyramidal OME-TIFF assembly and GeoJSON. Deep dive:
-[Visualization & Export](export.md).
+Pyramidal OME-TIFF assembly and GeoJSON.
 
 | Parameter | Default | Description |
 |---|---|---|
-| `tilex` | `512` | Tile width (px) for the pyramidal OME-TIFF. |
-| `tiley` | `512` | Tile height (px). |
+| `tilex` | `512` | Tile size (px, square) for the pyramidal OME-TIFF. |
 | `pyramid_resolutions` | `8` | Number of pyramid resolution levels. |
 | `pyramid_scale` | `2` | Downsampling factor between levels. |
 | `compression` | `zstd` | Codec: `zstd`, `lzw`, `zlib`, `jpeg`, `none`. |
@@ -189,15 +169,40 @@ Pyramidal OME-TIFF assembly and GeoJSON. Deep dive:
 | `skip_registration_qc` | `false` | Skip registration QC overlays. |
 | `qc_scale_factor` | `0.25` | Downsample factor for registration QC images. |
 | `skip_postprocessing_qc` | `false` | Skip segmentation/intensity QC plots. |
+| `skip_seg_quality_eval` | `false` | Skip reference-free cell-segmentation quality scoring (CellSegmentationEvaluator, 2D). |
+| `cse_pixel_size_um` | `null` | Pixel size (µm) passed to the CellSegmentationEvaluator; `null` falls back to `pixel_size`. |
+| `segeval_tag` | `segeval` | Tag on `bolt3x/attend_image_analysis` (Docker Hub) for the segmentation-quality-evaluator image. |
 | `skip_final_qc_report` | `false` | Skip the aggregated HTML QC report. |
 | `enable_feature_error` | `false` | Compute feature-based registration error → `feature_distances/`. |
 | `feature_detector` | `superpoint` | Detector for error estimation: `superpoint`, `disk`, `dedode`, `brisk`, `vgg`. |
 | `feature_max_dim` | `1024` | Max image dimension for feature detection. |
 | `feature_n_features` | `5000` | Number of features to detect. |
 
+**Segmentation quality evaluation (CSE):** after `SEGMENT`, a vendored, patched
+[CellSegmentationEvaluator](https://github.com/murphygroup/CellSegmentationEvaluator)
+scores each patient's whole-cell/nuclear mask pair with reference-free metrics
+(no ground truth needed) and merges per-patient scores into one CSV at
+`${outdir}/qc/segmentation/segmentation_metrics.csv`. It runs automatically
+unless `skip_seg_quality_eval` is set; `cse_pixel_size_um` overrides the
+pixel size passed to the evaluator, falling back to `pixel_size` when unset.
+
+### Reports
+
+- **`qc/mirage_qc_report_<timestamp>.html`** — aggregated QC report: run summary,
+  pipeline-stage status, sample manifest, preprocessing / registration (overlays,
+  rTRE, feature distances + histograms, warp-seg QC) / segmentation overlays /
+  postprocessing QC, CellSegmentationEvaluator metrics, and software versions.
+  Controlled by `skip_final_qc_report`.
+- **`qc/mirage_resource_report.html`** — computational-resource report built from
+  the per-task size logs and Nextflow `trace.txt`: run totals, per-process
+  rollup, resource-vs-input-size, top-N heaviest/slowest tasks, and
+  retries/failures. Generated at run completion when `enable_trace` is set;
+  re-runnable by hand via `bin/generate_resource_report.py`. Complements
+  Nextflow's native `report.html` / `timeline.html`.
+
 ## Cluster & resources
 
-HPC details: [Running on HPC / SLURM](slurm.md).
+HPC details: [Running on HPC / SLURM](usage.md#running-on-hpc).
 
 | Parameter | Default | Description |
 |---|---|---|
@@ -212,7 +217,7 @@ HPC details: [Running on HPC / SLURM](slurm.md).
 !!! info "How resources scale"
     Per-process memory and time scale with `task.attempt`, so a retry roughly
     doubles them (bounded by the caps above). See the resource-label table in
-    [Running on HPC / SLURM](slurm.md#resource-labels-caps-and-retries).
+    [Running on HPC / SLURM](usage.md#running-on-hpc).
 
 ## Tracing
 
@@ -220,6 +225,24 @@ HPC details: [Running on HPC / SLURM](slurm.md).
 |---|---|---|
 | `enable_trace` | `true` | Write Nextflow `trace.txt`, `report.html`, `timeline.html`, and per-task size logs. |
 | `trace_dir` | `.trace` | Directory for trace outputs (independent of `--outdir`). |
+
+## Incremental cyclic-IF mode (`add_cycle`)
+
+Fold a **new imaging cycle** into an already-completed patient run, reusing the prior
+reference, segmentation mask, and old-marker quantification instead of recomputing them.
+Full walkthrough: [Incremental cycles](add_cycle.md).
+
+| Parameter | Default | Description |
+|---|---|---|
+| `mode` | `standard` | `standard` = normal `--start`/`--stop` pipeline; `add_cycle` = incremental cyclic-IF. |
+| `prior_outdir` | `null` | **Required for `add_cycle`.** The `--outdir` of the previously completed run (supplies the reusable reference, mask, and quantification via its checkpoint CSVs). |
+| `embed_masks` | `true` | Embed the segmentation masks as a second uint32 series in the pyramid OME-TIFF. Written only when `embed_masks && quantify_compartments && expanded_quantification`; `add_cycle` consumes this series, so a prior run must have it to be extendable. |
+
+!!! warning "`add_cycle` prerequisites"
+    A prior run is only extendable if it was produced with
+    `--embed_masks true --quantify_compartments --expanded_quantification`. Without the
+    embedded mask series, `mode=add_cycle` **fast-fails** before doing any work. See
+    [Incremental cycles → Fast-fail behavior](add_cycle.md#fast-fail-behavior).
 
 ## Parameter presets
 
@@ -242,10 +265,6 @@ nextflow run . -profile slurm,singularity \
 
 ## See also
 
-<div class="grid cards" markdown>
-
-- :material-console:{ .lg .middle } **Command recipes** — [CLI & Usage](usage.md)
-- :material-sitemap:{ .lg .middle } **What the flags drive** — [Pipeline Architecture](workflow.md)
-- :material-help-circle:{ .lg .middle } **Common questions** — [FAQ](faq.md)
-
-</div>
+- :material-console: **Command recipes & the samplesheet** — [Usage](usage.md)
+- :material-help-circle: **Common questions** — [Usage → Troubleshooting & FAQ](usage.md#troubleshooting-faq)
+- :material-book-open-variant: **How to cite** — [Citation](citation.md)

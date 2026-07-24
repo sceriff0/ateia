@@ -28,7 +28,7 @@ from skimage.measure import (
 )
 
 # Add parent directory to path to import lib modules
-sys.path.insert(0, str(Path(__file__).parent / 'utils'))
+sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
 from image_utils import ensure_dir, load_image
 from logger import configure_logging, get_logger
@@ -71,15 +71,21 @@ def extract_morphology(
     props = regionprops_table(
         mask,
         properties=[
-            'label', 'centroid', 'area',
-            'eccentricity', 'perimeter',
-            'convex_area', 'axis_major_length', 'axis_minor_length',
-            'solidity', 'bbox',
+            "label",
+            "centroid",
+            "area",
+            "eccentricity",
+            "perimeter",
+            "convex_area",
+            "axis_major_length",
+            "axis_minor_length",
+            "solidity",
+            "bbox",
         ],
     )
-    props_df = pd.DataFrame(props).set_index('label')
+    props_df = pd.DataFrame(props).set_index("label")
     props_df.rename(
-        columns={'centroid-0': 'y', 'centroid-1': 'x'},
+        columns={"centroid-0": "y", "centroid-1": "x"},
         inplace=True,
     )
 
@@ -113,21 +119,30 @@ def extract_contours(
         Mapping of str(label) -> [[x, y], ...] closed polygon ring
         in pixel coordinates.
     """
-    logger.info(f"Extracting contours for {len(props_df)} cells (tolerance={simplify_tolerance})...")
+    logger.info(
+        f"Extracting contours for {len(props_df)} cells (tolerance={simplify_tolerance})..."
+    )
 
     contours_dict: Dict[str, List[List[float]]] = {}
     skipped_no_contour = 0
     skipped_too_simple = 0
 
     for label, row in props_df.iterrows():
-        minr, minc, maxr, maxc = int(row['bbox-0']), int(row['bbox-1']), int(row['bbox-2']), int(row['bbox-3'])
+        minr, minc, maxr, maxc = (
+            int(row["bbox-0"]),
+            int(row["bbox-1"]),
+            int(row["bbox-2"]),
+            int(row["bbox-3"]),
+        )
 
         # Crop binary mask for this cell, padded by 1px to ensure closed contours
         # for cells touching the image border (find_contours returns open contours
         # at array edges, which would produce incorrect polygon geometry)
         binary_crop = np.pad(
             (mask_filtered[minr:maxr, minc:maxc] == label).astype(np.uint8),
-            pad_width=1, mode='constant', constant_values=0
+            pad_width=1,
+            mode="constant",
+            constant_values=0,
         )
         contour_list = find_contours(binary_crop, level=0.5)
 
@@ -159,13 +174,14 @@ def extract_contours(
 
         # Convert from (y, x) to (x, y) for GeoJSON and round for compact JSON
         contours_dict[str(label)] = [
-            [round(float(pt[1]), 4), round(float(pt[0]), 4)]
-            for pt in simplified
+            [round(float(pt[1]), 4), round(float(pt[0]), 4)] for pt in simplified
         ]
 
     skipped = skipped_no_contour + skipped_too_simple
-    logger.info(f"Extracted {len(contours_dict)} contours, skipped {skipped} "
-                f"({skipped_no_contour} no contour, {skipped_too_simple} too few vertices)")
+    logger.info(
+        f"Extracted {len(contours_dict)} contours, skipped {skipped} "
+        f"({skipped_no_contour} no contour, {skipped_too_simple} too few vertices)"
+    )
     return contours_dict
 
 
@@ -191,11 +207,11 @@ def pair_labels_to_reference(
     fg = (flat != 0) & (ref != 0)
     if not np.any(fg):
         return {}
-    pairs = pd.DataFrame({'lbl': flat[fg], 'ref': ref[fg]})
-    counts = pairs.groupby(['lbl', 'ref']).size().reset_index(name='n')
-    best_idx = counts.groupby('lbl')['n'].idxmax()
+    pairs = pd.DataFrame({"lbl": flat[fg], "ref": ref[fg]})
+    counts = pairs.groupby(["lbl", "ref"]).size().reset_index(name="n")
+    best_idx = counts.groupby("lbl")["n"].idxmax()
     best = counts.loc[best_idx]
-    return {int(l): int(r) for l, r in zip(best['lbl'], best['ref'])}
+    return {int(l): int(r) for l, r in zip(best["lbl"], best["ref"])}
 
 
 def rekey_contours_to_reference(
@@ -251,7 +267,7 @@ def run_extraction(
 
     # Load mask
     logger.info(f"Loading mask: {mask_path}")
-    if mask_path.endswith('.npy'):
+    if mask_path.endswith(".npy"):
         mask = np.load(mask_path).squeeze()
     else:
         mask, _ = load_image(mask_path)
@@ -263,14 +279,24 @@ def run_extraction(
 
     if props_df is None:
         logger.warning("No cells found in mask — writing empty outputs")
-        empty_df = pd.DataFrame(columns=[
-            'label', 'y', 'x', 'area', 'eccentricity', 'perimeter',
-            'convex_area', 'axis_major_length', 'axis_minor_length', 'solidity',
-        ])
-        morphology_path = str(Path(outdir) / 'morphology.csv')
-        contours_path = str(Path(outdir) / 'contours.json')
+        empty_df = pd.DataFrame(
+            columns=[
+                "label",
+                "y",
+                "x",
+                "area",
+                "eccentricity",
+                "perimeter",
+                "convex_area",
+                "axis_major_length",
+                "axis_minor_length",
+                "solidity",
+            ]
+        )
+        morphology_path = str(Path(outdir) / "morphology.csv")
+        contours_path = str(Path(outdir) / "contours.json")
         empty_df.to_csv(morphology_path, index=False)
-        with open(contours_path, 'w') as f:
+        with open(contours_path, "w") as f:
             json.dump({}, f)
         return None, None
 
@@ -282,34 +308,44 @@ def run_extraction(
     # EXPORT_GEOJSON attaches each nucleus polygon to the right cell via identity lookup.
     if reference_mask_path:
         logger.info(f"Re-keying contours to reference mask: {reference_mask_path}")
-        if reference_mask_path.endswith('.npy'):
+        if reference_mask_path.endswith(".npy"):
             reference_mask = np.load(reference_mask_path).squeeze()
         else:
             reference_mask, _ = load_image(reference_mask_path)
             reference_mask = reference_mask.squeeze()
         mapping = pair_labels_to_reference(mask_filtered, reference_mask)
-        areas = props_df['area'].to_dict() if 'area' in props_df.columns else {}
+        areas = props_df["area"].to_dict() if "area" in props_df.columns else {}
         before = len(contours)
         contours = rekey_contours_to_reference(contours, mapping, areas)
         logger.info(f"Re-keyed {before} nucleus contours -> {len(contours)} cells")
 
     # Save morphology CSV
-    morphology_path = str(Path(outdir) / 'morphology.csv')
+    morphology_path = str(Path(outdir) / "morphology.csv")
     morphology_out = props_df.reset_index()
     morpho_cols = [
-        'label', 'y', 'x', 'area', 'eccentricity', 'perimeter',
-        'convex_area', 'axis_major_length', 'axis_minor_length', 'solidity',
+        "label",
+        "y",
+        "x",
+        "area",
+        "eccentricity",
+        "perimeter",
+        "convex_area",
+        "axis_major_length",
+        "axis_minor_length",
+        "solidity",
     ]
     morphology_out = morphology_out[morpho_cols]
     morphology_out.to_csv(morphology_path, index=False)
     logger.info(f"Saved morphology: {morphology_path} ({len(morphology_out)} cells)")
 
     # Save contours JSON
-    contours_path = str(Path(outdir) / 'contours.json')
-    with open(contours_path, 'w') as f:
+    contours_path = str(Path(outdir) / "contours.json")
+    with open(contours_path, "w") as f:
         json.dump(contours, f)
     contours_size_mb = Path(contours_path).stat().st_size / (1024 * 1024)
-    logger.info(f"Saved contours: {contours_path} ({len(contours)} cells, {contours_size_mb:.1f} MB)")
+    logger.info(
+        f"Saved contours: {contours_path} ({len(contours)} cells, {contours_size_mb:.1f} MB)"
+    )
 
     logger.info("Extraction complete")
     return morphology_out, contours
@@ -318,26 +354,34 @@ def run_extraction(
 def parse_args():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description='Extract cell morphology and contours from segmentation mask',
+        description="Extract cell morphology and contours from segmentation mask",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
-        '--mask_file', type=str, required=True,
-        help='Path to segmentation mask (.tif or .npy)',
+        "--mask_file",
+        type=str,
+        required=True,
+        help="Path to segmentation mask (.tif or .npy)",
     )
     parser.add_argument(
-        '--outdir', type=str, default='.',
-        help='Output directory',
+        "--outdir",
+        type=str,
+        default=".",
+        help="Output directory",
     )
     parser.add_argument(
-        '--simplify_tolerance', type=float, default=0.5,
-        help='Douglas-Peucker contour simplification tolerance in pixels',
+        "--simplify_tolerance",
+        type=float,
+        default=0.5,
+        help="Douglas-Peucker contour simplification tolerance in pixels",
     )
     parser.add_argument(
-        '--reference_mask', type=str, default=None,
-        help='Optional reference mask (.tif/.npy). When given, contours are re-keyed '
-             'from this mask\'s labels to the dominant overlapping reference label '
-             '(used to key nucleus contours by cell label).',
+        "--reference_mask",
+        type=str,
+        default=None,
+        help="Optional reference mask (.tif/.npy). When given, contours are re-keyed "
+        "from this mask's labels to the dominant overlapping reference label "
+        "(used to key nucleus contours by cell label).",
     )
     return parser.parse_args()
 
@@ -359,5 +403,5 @@ def main():
     return 0
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     raise SystemExit(main())

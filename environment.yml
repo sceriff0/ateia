@@ -1,3 +1,6 @@
+# Development/local conda environment for the pipeline's bin/ scripts. The authoritative,
+# reproducible environment is the per-process container images; this file is a convenience
+# for running the scripts outside Nextflow. See docs/installation.md.
 name: mirage
 channels:
   - conda-forge

@@ -54,10 +54,15 @@ process SPLIT_CHANNELS {
     """
 
     stub:
+    def out_channels = meta.channels.findAll { is_reference || it.toString().toUpperCase() != 'DAPI' }
+    // When meta.channels is empty (e.g. ADD_CYCLE's SPLIT_PRIOR_PYRAMID, which
+    // reads channel names from OME-XML in REAL mode only), still emit a single
+    // placeholder so the mandatory `*.tiff` output binds under -stub.
+    def touch_cmds = out_channels ? out_channels.collect { "touch ${it}.tiff" }.join('\n    ') : "touch prior_pyramid_channel.tiff"
     """
     # One stub file per output channel (DAPI is dropped for non-references,
     # matching the real split which keeps DAPI only on the reference image).
-    ${meta.channels.findAll { is_reference || it.toString().toUpperCase() != 'DAPI' }.collect { "touch ${it}.tiff" }.join('\n    ')}
+    ${touch_cmds}
 
     echo "STUB,${meta.patient_id},stub,0" > ${meta.patient_id}_${registered_image.simpleName}.SPLIT_CHANNELS.size.csv
 

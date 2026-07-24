@@ -8,17 +8,20 @@ directory and writes a JSON manifest mapping filename to channel names.
 
 import argparse
 import json
+import logging
 import os
 import sys
 from pathlib import Path
 
-import tifffile
-
-sys.path.insert(0, str(Path(__file__).parent / 'utils'))
+sys.path.insert(0, str(Path(__file__).parent / "utils"))
+from logger import configure_logging, get_logger
 from metadata import extract_channel_names_from_ome
+
+logger = get_logger(__name__)
 
 
 def parse_args():
+    """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
         description="Extract channel names from registered OME-TIFF files into a JSON manifest."
     )
@@ -36,6 +39,8 @@ def parse_args():
 
 
 def main():
+    """CLI entry point: extract channel names from registered OME-TIFFs into a JSON manifest."""
+    configure_logging(level=logging.INFO)
     args = parse_args()
 
     manifest = {}
@@ -51,9 +56,9 @@ def main():
     with open(args.output, "w") as fp:
         json.dump(manifest, fp)
 
-    print(f"Channels manifest: {len(manifest)} files")
+    logger.info(f"Channels manifest: {len(manifest)} files")
     for fname, chs in manifest.items():
-        print(f"  {fname}: {chs}")
+        logger.info(f"  {fname}: {chs}")
 
 
 if __name__ == "__main__":

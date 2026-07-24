@@ -25,7 +25,8 @@ on:
         type: string
 
 # Least-privilege default: read-only. The two jobs that write (bump-and-tag,
-# release-notes) and publish-images (GHCR) escalate explicitly per-job below.
+# release-notes) escalate explicitly per-job below. publish-images pushes to
+# Docker Hub via DOCKERHUB_* secrets (no extra GITHUB_TOKEN scope needed).
 permissions:
   contents: read
 
@@ -225,8 +226,8 @@ jobs:
           echo "Config matches tag."
 
   # ===========================================================================
-  # Job 4 - build & push all container images to GHCR, tagged with the version.
-  # Reuses build-images.yml via workflow_call. Gated on the test job.
+  # Job 4 - build & push all container images to Docker Hub (one descriptive tag
+  # per image). Reuses build-images.yml via workflow_call. Gated on the test job.
   # ===========================================================================
   publish-images:
     name: Publish Images
@@ -323,7 +324,7 @@ jobs:
 
             ### Container images
 
-            Published to GHCR under `ghcr.io/sceriff0/mirage/<name>:${{ needs.validate.outputs.version }}`.
+            Published to Docker Hub under `bolt3x/attend_image_analysis:<tag>` (one descriptive tag per image).
 
             ### Quick Start
 

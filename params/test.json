@@ -1,6 +1,6 @@
 {
     "_comment_io": "=== Input/Output ===",
-    "input": "tests/data/samplesheet.csv",
+    "input": "tests/testdata/test_input.csv",
     "outdir": "./test_results",
     "start": "preprocessing",
 

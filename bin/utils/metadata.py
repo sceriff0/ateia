@@ -23,7 +23,7 @@ import logging
 import os
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import List, Optional, Dict, Any
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import tifffile
@@ -86,14 +86,16 @@ def get_channel_names(filename: str | Path) -> List[str]:
     base = os.path.basename(str(filename))
 
     # Remove known suffixes that don't contain channel information
-    name_part = (base.replace('_corrected', '')
-                    .replace('_padded', '')
-                    .replace('_preprocessed', '')
-                    .replace('_registered', '')
-                    .split('.')[0])  # Remove file extension
+    name_part = (
+        base.replace("_corrected", "")
+        .replace("_padded", "")
+        .replace("_preprocessed", "")
+        .replace("_registered", "")
+        .split(".")[0]
+    )  # Remove file extension
 
     # Split by underscore
-    parts = name_part.split('_')
+    parts = name_part.split("_")
 
     # First part is sample ID (typically has format like "B19-10215" or "Sample01")
     # Remaining parts are channel names
@@ -107,8 +109,7 @@ def get_channel_names(filename: str | Path) -> List[str]:
 
 
 def extract_channel_names_from_filename(
-    filename: str | Path,
-    expected_channels: Optional[int] = None
+    filename: str | Path, expected_channels: Optional[int] = None
 ) -> List[str]:
     """Extract channel names from filename with validation.
 
@@ -152,7 +153,9 @@ def extract_channel_names_from_filename(
         return markers
     elif len(markers) < expected_channels:
         # Pad with generic names
-        return markers + [f"Channel_{i}" for i in range(len(markers), expected_channels)]
+        return markers + [
+            f"Channel_{i}" for i in range(len(markers), expected_channels)
+        ]
     else:
         # Too many names - truncate
         return markers[:expected_channels]
@@ -198,27 +201,27 @@ def extract_channel_names_from_ome(filepath: str | Path) -> List[str]:
     """
     try:
         with tifffile.TiffFile(str(filepath)) as tif:
-            if not hasattr(tif, 'ome_metadata') or not tif.ome_metadata:
+            if not hasattr(tif, "ome_metadata") or not tif.ome_metadata:
                 return []
 
             # Parse XML
             root = ET.fromstring(tif.ome_metadata)
 
             # Define OME namespace
-            ns = {'ome': 'http://www.openmicroscopy.org/Schemas/OME/2016-06'}
+            ns = {"ome": "http://www.openmicroscopy.org/Schemas/OME/2016-06"}
 
             # Try with namespace first
-            channels = root.findall('.//ome:Channel', ns)
+            channels = root.findall(".//ome:Channel", ns)
 
             if not channels:
                 # Fallback: try without namespace (some files may not use it properly)
-                channels = root.findall('.//{*}Channel')
+                channels = root.findall(".//{*}Channel")
 
             # Extract channel names
             names = []
             for ch in channels:
                 # Try 'Name' attribute first, fallback to 'ID'
-                name = ch.get('Name') or ch.get('ID', f'Channel_{len(names)}')
+                name = ch.get("Name") or ch.get("ID", f"Channel_{len(names)}")
                 names.append(name)
 
             return names
@@ -235,7 +238,7 @@ def create_ome_xml(
     height: int,
     pixel_size_um: float = 0.325,
     size_z: int = 1,
-    size_t: int = 1
+    size_t: int = 1,
 ) -> str:
     """Create OME-XML metadata string for TIFF files.
 
@@ -294,7 +297,7 @@ def create_ome_xml(
     dtype_name = dtype.name
 
     # Create channel XML elements
-    channel_xml = '\n'.join(
+    channel_xml = "\n".join(
         f'            <Channel ID="Channel:0:{i}" Name="{name}" SamplesPerPixel="1" />'
         for i, name in enumerate(channel_names)
     )
@@ -360,15 +363,19 @@ def extract_markers_from_filename(filename: str | Path) -> List[str]:
     base = os.path.basename(str(filename))
 
     # Remove suffixes
-    name = base.replace('_registered.ome.tif', '').replace('_registered.ome.tiff', '')
-    name = name.replace('_corrected', '').replace('_padded', '').replace('_preprocessed', '')
+    name = base.replace("_registered.ome.tif", "").replace("_registered.ome.tiff", "")
+    name = (
+        name.replace("_corrected", "")
+        .replace("_padded", "")
+        .replace("_preprocessed", "")
+    )
 
     # Remove file extension
-    if '.' in name:
-        name = name.split('.')[0]
+    if "." in name:
+        name = name.split(".")[0]
 
     # Split by underscore
-    parts = name.split('_')
+    parts = name.split("_")
 
     # Try to detect and filter out sample ID
     # Pattern: contains letters, numbers, and hyphen (e.g., "B19-10215")
@@ -377,10 +384,10 @@ def extract_markers_from_filename(filename: str | Path) -> List[str]:
         if not p:
             continue
         # Skip if it looks like a sample ID (has hyphen and alphanumeric)
-        if '-' in p and any(c.isalpha() for c in p) and any(c.isdigit() for c in p):
+        if "-" in p and any(c.isalpha() for c in p) and any(c.isdigit() for c in p):
             continue
         # Skip if it's just "Sample" or similar generic prefix
-        if p.lower() in ['sample', 'slide', 'image']:
+        if p.lower() in ["sample", "slide", "image"]:
             continue
         markers.append(p)
 
@@ -435,33 +442,33 @@ def get_ome_metadata(filepath: str | Path) -> Dict[str, Any]:
             # Get basic shape information
             if tif.pages:
                 page = tif.pages[0]
-                metadata['width'] = page.imagewidth
-                metadata['height'] = page.imagelength
-                metadata['dtype'] = str(page.dtype)
+                metadata["width"] = page.imagewidth
+                metadata["height"] = page.imagelength
+                metadata["dtype"] = str(page.dtype)
 
             # Get channel information
             channel_names = extract_channel_names_from_ome(filepath)
-            metadata['channel_names'] = channel_names
-            metadata['num_channels'] = len(channel_names)
+            metadata["channel_names"] = channel_names
+            metadata["num_channels"] = len(channel_names)
 
             # Get OME-XML if available
-            if hasattr(tif, 'ome_metadata'):
-                metadata['ome_xml'] = tif.ome_metadata
+            if hasattr(tif, "ome_metadata"):
+                metadata["ome_xml"] = tif.ome_metadata
 
                 # Try to extract physical pixel size
                 try:
                     root = ET.fromstring(tif.ome_metadata)
-                    ns = {'ome': 'http://www.openmicroscopy.org/Schemas/OME/2016-06'}
-                    pixels = root.find('.//ome:Pixels', ns)
+                    ns = {"ome": "http://www.openmicroscopy.org/Schemas/OME/2016-06"}
+                    pixels = root.find(".//ome:Pixels", ns)
                     if pixels is not None:
-                        px_size = pixels.get('PhysicalSizeX')
+                        px_size = pixels.get("PhysicalSizeX")
                         if px_size:
-                            metadata['pixel_size_um'] = float(px_size)
-                except (ET.ParseError, ValueError, TypeError) as e:
-                    metadata['pixel_size_um'] = None
+                            metadata["pixel_size_um"] = float(px_size)
+                except (ET.ParseError, ValueError, TypeError):
+                    metadata["pixel_size_um"] = None
             else:
-                metadata['ome_xml'] = None
-                metadata['pixel_size_um'] = None
+                metadata["ome_xml"] = None
+                metadata["pixel_size_um"] = None
 
     except Exception:
         return {}

@@ -52,6 +52,23 @@
                         "postprocessing",
                         null
                     ]
+                },
+                "mode": {
+                    "type": "string",
+                    "description": "Execution mode. 'standard' runs the linear start/stop step flow; 'add_cycle' bypasses it to fold a new imaging cycle into a completed patient run (requires --prior_outdir).",
+                    "default": "standard",
+                    "enum": [
+                        "standard",
+                        "add_cycle"
+                    ]
+                },
+                "prior_outdir": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "description": "For mode='add_cycle': the --outdir of the previously completed run, containing csv/registered.csv and csv/postprocessed.csv checkpoints to reuse.",
+                    "default": null
                 }
             }
         },
@@ -141,8 +158,14 @@
                 },
                 "skip_registration_qc": {
                     "type": "boolean",
-                    "description": "Skip registration quality control.",
+                    "description": "Skip registration quality control (legacy; equivalent to reg_qc=0).",
                     "default": false
+                },
+                "reg_qc": {
+                    "type": "integer",
+                    "description": "Registration QC depth: 0=none, 1=DAPI overlay only, 2=DAPI overlay + segmentation-overlap metric (Dice/IoU/instance-F1).",
+                    "default": 1,
+                    "enum": [ 0, 1, 2 ]
                 },
                 "qc_scale_factor": {
                     "type": "number",
@@ -213,70 +236,6 @@
                     "type": "boolean",
                     "description": "Allow automatic reference selection.",
                     "default": false
-                },
-                "reg_distributed_tiling": {
-                    "type": "boolean",
-                    "description": "Opt-in: lift VALIS's non-rigid tile loop into Nextflow processes (REG_PREP/REG_TILE/REG_FINALIZE) for low-RAM clusters. Bit-identical to VALIS's own tiler. Default keeps the classic VALIS_ADAPTER.",
-                    "default": false
-                },
-                "reg_dist_container": {
-                    "type": "string",
-                    "description": "Container for distributed-tiling processes. MUST be the EXTERNAL_TILE_HOOK-patched VALIS image (the published cdgatenbee image lacks the seam).",
-                    "default": "ghcr.io/sceriff0/mirage/mirage-valis:1.0.0"
-                },
-                "reg_dist_tile_wh": {
-                    "type": "integer",
-                    "description": "Non-rigid tile width/height for distributed tiling.",
-                    "default": 512
-                },
-                "reg_dist_micro_tile_wh": {
-                    "type": "integer",
-                    "description": "Micro-registration tile width/height for the distributed micro second wave (spec \u00a75A); VALIS default 2048.",
-                    "default": 2048
-                },
-                "reg_dist_tile_buffer": {
-                    "type": "integer",
-                    "description": "Tile overlap (buffer) for distributed tiling.",
-                    "default": 100
-                },
-                "reg_dist_min_input_gb": {
-                    "type": "number",
-                    "description": "auto routing: total full-res input >= this (GB) -> distributed JVM-free non-rigid; smaller -> classic VALIS.",
-                    "default": 1.0
-                },
-                "reg_dist_threshold_gb": {
-                    "type": "number",
-                    "description": "est_GB boundary for auto tiling routing (matches VALIS TILER_THRESH_GB).",
-                    "default": 10
-                },
-                "reg_dist_force_tiling": {
-                    "type": "boolean",
-                    "description": "false = separated whole-image non-rigid (bit-identical, JVM-free); true = tiled fan-out (for a single field too big for one node).",
-                    "default": false
-                },
-                "reg_dist_sub_threshold": {
-                    "type": "string",
-                    "description": "Tiling-regime policy: 'auto' = tile only above VALIS's threshold; 'force' = always tile.",
-                    "default": "auto",
-                    "enum": [
-                        "auto",
-                        "force"
-                    ]
-                },
-                "reg_dist_tiles_per_task": {
-                    "type": "integer",
-                    "description": "Tiles per REG_TILE task (1 = max granularity). Scheduling only; does not affect output.",
-                    "default": 1
-                },
-                "reg_max_non_rigid_dim": {
-                    "type": "integer",
-                    "description": "Max non-rigid registration dimension (px) for distributed REG_PREP.",
-                    "default": 4096
-                },
-                "reg_max_processed_dim": {
-                    "type": "integer",
-                    "description": "Max processed/rigid dimension (px) for distributed REG_PREP.",
-                    "default": 2048
                 },
                 "reg_jvm_heap_gb": {
                     "type": [
@@ -399,7 +358,7 @@
                 "seg_cellsam_block_size": {
                     "type": "integer",
                     "description": "CellSAM tiling block size (px).",
-                    "default": 400
+                    "default": 1024
                 },
                 "seg_cellsam_overlap": {
                     "type": "integer",
@@ -435,6 +394,21 @@
                     "description": "Skip postprocessing quality control (segmentation overlay, cell stats, intensity distributions).",
                     "default": false
                 },
+                "skip_seg_quality_eval": {
+                    "type": "boolean",
+                    "description": "Skip reference-free cell-segmentation quality scoring (CellSegmentationEvaluator, 2D).",
+                    "default": false
+                },
+                "cse_pixel_size_um": {
+                    "type": "number",
+                    "description": "Pixel size in micrometers passed to the CellSegmentationEvaluator. null = infer from image metadata.",
+                    "default": null
+                },
+                "segeval_tag": {
+                    "type": "string",
+                    "description": "Container tag for the segmentation quality evaluator (segeval) image on bolt3x/attend_image_analysis (Docker Hub).",
+                    "default": "segeval"
+                },
                 "skip_final_qc_report": {
                     "type": "boolean",
                     "description": "Skip generation of the final aggregated HTML QC report.",
@@ -448,12 +422,7 @@
             "properties": {
                 "tilex": {
                     "type": "integer",
-                    "description": "Tile width for OME-TIFF output.",
-                    "default": 512
-                },
-                "tiley": {
-                    "type": "integer",
-                    "description": "Tile height for OME-TIFF output.",
+                    "description": "Tile size (px, square) for OME-TIFF output.",
                     "default": 512
                 },
                 "pyramid_resolutions": {
@@ -477,6 +446,11 @@
                         "zstd",
                         "none"
                     ]
+                },
+                "embed_masks": {
+                    "type": "boolean",
+                    "description": "When true and quantify_compartments + expanded_quantification are also enabled, embed the cell + nuclei segmentation masks as a second, single-resolution uint32 OME series (Image:1) inside the pyramid OME-TIFF. Required on a prior run for that run's outputs to be extendable via mode='add_cycle'.",
+                    "default": true
                 }
             }
         },

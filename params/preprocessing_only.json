@@ -18,11 +18,9 @@
 
     "_comment_output": "=== Image Output / Pyramid ===",
     "tilex": 512,
-    "tiley": 512,
     "pyramid_resolutions": 8,
     "pyramid_scale": 2,
     "compression": "zstd",
-    "publish_dir_mode": "copy",
 
     "_comment_resources": "=== Resource Limits ===",
     "max_memory": "700.GB",

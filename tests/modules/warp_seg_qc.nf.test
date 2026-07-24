@@ -1,0 +1,78 @@
+nextflow_process {
+
+    name "Test WARP_SEG_QC process"
+    script "modules/local/warp_seg_qc.nf"
+    process "WARP_SEG_QC"
+
+    tag "modules"
+    tag "modules_local"
+    tag "warp_seg_qc"
+
+    test("Should emit a staged seg-qc JSON with a stage checkpoint - stub") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            process {
+                """
+                // [meta, pickle, ref_slide, moving_slide, ref_geojson, moving_geojson, stage_checkpoint]
+                input[0] = [
+                    [ patient_id: 'P001' ],
+                    file('$projectDir/tests/testdata/single_sample.csv', checkIfExists: true),
+                    'P001_ref_corrected',
+                    'P001_mov1_corrected',
+                    file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true),
+                    file('$projectDir/tests/testdata/sample_merged_quant.csv', checkIfExists: true),
+                    file('$projectDir/tests/testdata', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            assert process.success
+            assert process.out.metrics
+            assert process.out.versions
+            with(process.out.metrics) {
+                assert size() == 1
+                assert get(0).get(0).patient_id == 'P001'
+                assert get(0).get(1).toString().endsWith('_seg_qc.json')
+            }
+        }
+    }
+
+    test("Should run without a stage checkpoint - stub") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            process {
+                """
+                // An empty list is how an absent checkpoint reaches the process: REGISTER only
+                // emits one at reg_qc >= 2, and a failed snapshot must cost the run one stage,
+                // not remove the patient from the QC. See ch_ckpt_by_patient in registration.nf.
+                input[0] = [
+                    [ patient_id: 'P001' ],
+                    file('$projectDir/tests/testdata/single_sample.csv', checkIfExists: true),
+                    'P001_ref_corrected',
+                    'P001_mov1_corrected',
+                    file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true),
+                    file('$projectDir/tests/testdata/sample_merged_quant.csv', checkIfExists: true),
+                    []
+                ]
+                """
+            }
+        }
+
+        then {
+            assert process.success
+            assert process.out.metrics
+            with(process.out.metrics) {
+                assert size() == 1
+                assert get(0).get(1).toString().endsWith('_seg_qc.json')
+            }
+        }
+    }
+}

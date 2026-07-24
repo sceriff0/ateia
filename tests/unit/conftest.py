@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """pytest configuration and fixtures for unit tests."""
 
-import pytest
 import numpy as np
+import pytest
 
 
 @pytest.fixture
@@ -28,16 +28,12 @@ def synthetic_mask():
         y = np.random.randint(50, 450)
         x = np.random.randint(50, 450)
         size = np.random.randint(20, 40)
-        mask[y:y+size, x:x+size] = i
+        mask[y : y + size, x : x + size] = i
 
     return mask
 
 
 def pytest_configure(config):
     """Configure pytest with custom markers."""
-    config.addinivalue_line(
-        "markers", "slow: mark test as slow running"
-    )
-    config.addinivalue_line(
-        "markers", "gpu: mark test as requiring GPU"
-    )
+    config.addinivalue_line("markers", "slow: mark test as slow running")
+    config.addinivalue_line("markers", "gpu: mark test as requiring GPU")

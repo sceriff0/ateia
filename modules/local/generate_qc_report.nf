@@ -1,3 +1,6 @@
+/*
+ * GENERATE_QC_REPORT - assemble the per-step QC artifacts into a single HTML report.
+ */
 process GENERATE_QC_REPORT {
     tag "qc_report"
     label 'process_low'
@@ -10,7 +13,11 @@ process GENERATE_QC_REPORT {
     path(feature_distance_jsons, stageAs: 'feature_dist/*')
     path(valis_summary_csvs, stageAs: 'valis_summary/*')
     path(postprocess_qc_pngs, stageAs: 'postprocess_qc/*')
+    path(seg_eval_csvs, stageAs: 'seg_eval/*')
     path(versions_yml)
+    path(run_summary_json)
+    path(distance_plot_pngs, stageAs: 'distance_plots/*')
+    path(seg_qc_jsons, stageAs: 'seg_qc/*')
 
     output:
     path "mirage_qc_report_*.html", emit: report
@@ -30,7 +37,11 @@ process GENERATE_QC_REPORT {
         --feature-distances feature_dist/ \\
         --valis-summary valis_summary/ \\
         --postprocess-qc postprocess_qc/ \\
+        --seg-eval seg_eval/ \\
         --versions ${versions_yml} \\
+        --run-summary ${run_summary_json} \\
+        --distance-plots distance_plots/ \\
+        --seg-qc seg_qc/ \\
         --output mirage_qc_report_${timestamp}.html \\
         --data-dir mirage_qc_data_${timestamp}/ \\
         ${args}

@@ -1,6 +1,6 @@
 FROM ubuntu:22.04
 
-LABEL maintainer="ateia team"
+LABEL maintainer="mirage team"
 LABEL description="Docker image for BaSiC illumination correction preprocessing"
 LABEL version="1.0.0"
 

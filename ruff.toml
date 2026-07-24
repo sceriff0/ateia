@@ -1,0 +1,25 @@
+# Ruff configuration for the mirage pipeline.
+#
+# Scope: mirage's own Python (bin/ pipeline scripts, tests/). Vendored and
+# generated code is excluded and held to its upstream style, not ours.
+
+target-version = "py39"
+line-length = 88
+
+extend-exclude = [
+    "bin/utils/cse", # vendored: CellSegmentationEvaluator subset
+    "valis_lib",     # vendored VALIS library
+    "pixie-main",    # vendored third-party
+    "legacy",        # deprecated, gitignored
+    "notebooks",     # analysis notebooks, not pipeline
+    "work",          # Nextflow runtime dir
+    "site",          # generated docs
+    "benchmarks",    # benchmarking scratch
+]
+
+[lint]
+# E/W: pycodestyle, F: pyflakes (unused imports/vars), I: import sorting.
+select = ["E", "W", "F", "I"]
+# Line length is owned by the formatter; ignore E501 so long URLs/strings in
+# comments and docstrings do not produce unfixable lint noise.
+ignore = ["E501"]

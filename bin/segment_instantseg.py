@@ -21,13 +21,12 @@ import time
 from pathlib import Path
 
 # Add parent directory to path to import lib modules
-sys.path.insert(0, str(Path(__file__).parent / 'utils'))
+sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
 import numpy as np
 import tifffile
-
-from logger import get_logger, configure_logging
 from image_utils import ensure_dir
+from logger import configure_logging, get_logger
 
 logger = get_logger(__name__)
 
@@ -38,13 +37,13 @@ def _to_numpy(arr):
     InstanSeg may return either a numpy array or a torch tensor depending on
     version/device. This shim handles both without importing torch directly.
     """
-    if hasattr(arr, 'detach'):
+    if hasattr(arr, "detach"):
         # torch tensor — move to CPU first
         try:
             arr = arr.detach().cpu().numpy()
         except Exception:
-            arr = arr.cpu().numpy() if hasattr(arr, 'cpu') else arr.numpy()
-    elif hasattr(arr, 'numpy'):
+            arr = arr.cpu().numpy() if hasattr(arr, "cpu") else arr.numpy()
+    elif hasattr(arr, "numpy"):
         arr = arr.numpy()
     return np.asarray(arr)
 
@@ -71,9 +70,9 @@ def _extract_2d_masks(labeled_output, target: str):
     if arr.ndim == 2:
         # Single (Y, X) — only one target was requested
         single = arr
-        if target == 'nuclei':
+        if target == "nuclei":
             return single, single  # replicate to satisfy downstream cell-mask consumer
-        elif target == 'cells':
+        elif target == "cells":
             return single, single
         else:
             # Unexpected: all_outputs returned 2D. Treat as nuclei + replicate.
@@ -87,9 +86,9 @@ def _extract_2d_masks(labeled_output, target: str):
         n = arr.shape[0]
         if n == 1:
             single = arr[0]
-            if target == 'nuclei':
+            if target == "nuclei":
                 return single, single
-            elif target == 'cells':
+            elif target == "cells":
                 return single, single
             else:
                 logger.warning(
@@ -116,8 +115,8 @@ def _extract_2d_masks(labeled_output, target: str):
 def run_instanseg(
     image_path: str,
     output_dir: str,
-    model_name: str = 'fluorescence_nuclei_and_cells',
-    target: str = 'all_outputs',
+    model_name: str = "fluorescence_nuclei_and_cells",
+    target: str = "all_outputs",
     pixel_size: float | None = None,
     use_gpu: bool = False,
     prefix: str | None = None,
@@ -180,6 +179,7 @@ def run_instanseg(
     if use_gpu:
         try:
             import torch
+
             if not torch.cuda.is_available():
                 logger.warning(
                     "  --use-gpu requested but torch.cuda.is_available() is False; "
@@ -199,7 +199,9 @@ def run_instanseg(
     # 2. Read multichannel image (InstanSeg handles channel-invariance)
     logger.info("Reading image via InstanSeg...")
     image_array, detected_pixel_size = model.read_image(image_path)
-    logger.info(f"  Image array dtype: {getattr(image_array, 'dtype', type(image_array))}")
+    logger.info(
+        f"  Image array dtype: {getattr(image_array, 'dtype', type(image_array))}"
+    )
     logger.info(f"  Detected pixel size: {detected_pixel_size}")
 
     effective_pixel_size = pixel_size if pixel_size is not None else detected_pixel_size
@@ -247,11 +249,11 @@ def run_instanseg(
     logger.info("")
     logger.info("Saving segmentation masks...")
     logger.info(f"  Nuclei mask: {nuclei_mask_path.name}")
-    tifffile.imwrite(nuclei_mask_path, nuclei_mask, compression='zlib')
+    tifffile.imwrite(nuclei_mask_path, nuclei_mask, compression="zlib")
     del nuclei_mask
 
     logger.info(f"  Cell mask: {cell_mask_path.name}")
-    tifffile.imwrite(cell_mask_path, cell_mask, compression='zlib')
+    tifffile.imwrite(cell_mask_path, cell_mask, compression="zlib")
     del cell_mask
 
     logger.info("")
@@ -265,72 +267,72 @@ def run_instanseg(
 def parse_args():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description='Cell segmentation using InstanSeg on multichannel images',
+        description="Cell segmentation using InstanSeg on multichannel images",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
     parser.add_argument(
-        '--image',
+        "--image",
         type=str,
         required=True,
-        help='Path to multichannel OME-TIFF image (e.g., registered image from VALIS)',
+        help="Path to multichannel OME-TIFF image (e.g., registered image from VALIS)",
     )
 
     parser.add_argument(
-        '--output-dir',
+        "--output-dir",
         type=str,
-        default='.',
-        help='Output directory for segmentation masks',
+        default=".",
+        help="Output directory for segmentation masks",
     )
 
     parser.add_argument(
-        '--model-name',
+        "--model-name",
         type=str,
-        default='fluorescence_nuclei_and_cells',
-        help='InstanSeg pretrained model name',
+        default="fluorescence_nuclei_and_cells",
+        help="InstanSeg pretrained model name",
     )
 
     parser.add_argument(
-        '--target',
+        "--target",
         type=str,
-        default='all_outputs',
-        choices=['all_outputs', 'cells', 'nuclei'],
-        help='InstanSeg eval target (which masks to produce)',
+        default="all_outputs",
+        choices=["all_outputs", "cells", "nuclei"],
+        help="InstanSeg eval target (which masks to produce)",
     )
 
     parser.add_argument(
-        '--pixel-size',
+        "--pixel-size",
         type=float,
         default=None,
-        help='Override pixel size (µm/px). If omitted, InstanSeg auto-detects from OME metadata.',
+        help="Override pixel size (µm/px). If omitted, InstanSeg auto-detects from OME metadata.",
     )
 
     parser.add_argument(
-        '--use-gpu',
-        action='store_true',
+        "--use-gpu",
+        action="store_true",
         default=False,
-        help='Request GPU (InstanSeg picks the device automatically; informational only)',
+        help="Request GPU (InstanSeg picks the device automatically; informational only)",
     )
 
     parser.add_argument(
-        '--prefix',
+        "--prefix",
         type=str,
         default=None,
-        help='Output filename prefix (defaults to input image stem)',
+        help="Output filename prefix (defaults to input image stem)",
     )
 
     parser.add_argument(
-        '--tile-size',
+        "--tile-size",
         type=int,
         default=512,
-        help='Sliding-window tile size (px) for eval_medium_image',
+        help="Sliding-window tile size (px) for eval_medium_image",
     )
 
     parser.add_argument(
-        '--batch-size',
+        "--batch-size",
         type=int,
         default=1,
-        help='Tiles per forward pass; raise on large GPUs for throughput',
+        help="Tiles per forward pass; raise on large GPUs for throughput",
     )
 
     return parser.parse_args()
@@ -355,5 +357,5 @@ def main():
     return 0
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main())

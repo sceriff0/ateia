@@ -3,7 +3,7 @@
 This page gets MIRAGE running on your machine — laptop, workstation, or HPC login node. The whole setup is: install **Nextflow**, pick **one container backend**, clone the repo, and verify. Budget about 10–15 minutes, most of it spent pulling container images on the first run.
 
 !!! tip "In a hurry?"
-    Already have Nextflow and Docker? Skip to [Clone the repository](#clone-the-repository), then head straight to the [Walkthrough](walkthrough.md).
+    Already have Nextflow and Docker? Skip to [Clone the repository](#clone-the-repository), then head straight to the [Walkthrough](usage.md).
 
 ## Requirements
 
@@ -102,7 +102,7 @@ You should see version **25.04.0 or later**. A quick stub run validates the whol
 nextflow run . -profile test,docker -stub --outdir results_stub
 ```
 
-If that completes without `FAILED` processes, your installation is sound. (You'll need the test data generated first for a *real* run — see the [Walkthrough](walkthrough.md).)
+If that completes without `FAILED` processes, your installation is sound. (You'll need the test data generated first for a *real* run — see the [Walkthrough](usage.md).)
 
 ## Pre-pulling container images (optional)
 
@@ -135,7 +135,7 @@ The first real run downloads each tool's image, which can take several minutes. 
 
 Segmentation can run on a GPU for a substantial speedup, or fall back to CPU.
 
-- **Enable GPU**: `--seg_gpu true`. Your container runtime must expose the GPU — Singularity needs `--nv`, and on SLURM you must request a GPU (e.g. `--gres=gpu:1`). See the [SLURM guide](slurm.md) for cluster specifics.
+- **Enable GPU**: `--seg_gpu true`. Your container runtime must expose the GPU — Singularity needs `--nv`, and on SLURM you must request a GPU (e.g. `--gres=gpu:1`). See the [SLURM guide](usage.md#running-on-hpc) for cluster specifics.
 - **CPU fallback**: `--seg_gpu false`. Slower but works everywhere — this is what the `test` profile uses so the demo runs on any laptop.
 
 !!! warning
@@ -176,22 +176,6 @@ Profiles are defined in `nextflow.config` and combined with commas. Pick one **e
 
 ## Next steps
 
-<div class="grid cards" markdown>
-
-- :material-play-circle:{ .lg .middle } **Walkthrough**
-
-    ---
-
-    Generate the test data and run end-to-end on synthetic images.
-
-    [Start the tutorial](walkthrough.md)
-
-- :material-rocket-launch:{ .lg .middle } **Getting Started**
-
-    ---
-
-    The common command shapes and the three-stage mental model.
-
-    [Quick reference](getting_started.md)
-
-</div>
+Head to **[Usage](usage.md)** — the three-stage model, the samplesheet, the
+end-to-end run on synthetic data, resuming from checkpoints, and what lands in
+`--outdir`. To tune the run, see **[Parameters](parameters.md)**.
