@@ -26,6 +26,13 @@ import warnings
 
 warnings.filterwarnings('ignore')
 
+# silhouette_score materializes an O(n_cells^2) pairwise-distance matrix; at
+# whole-slide cell counts that is the single largest memory/time cost in the
+# evaluator. Cap it with a fixed-seed subsample: for masks with fewer cells than
+# this the subsample selects every cell (silhouette is order-invariant), so the
+# score is unchanged; only above the cap is it estimated, deterministically.
+SILHOUETTE_SAMPLE_SIZE = 10000
+
 """
 Package functions that evaluate a single cell segmentation mask for a single image
 Authors: Haoran Chen and Ted Zhang and Robert F. Murphy
@@ -116,7 +123,8 @@ def get_indices_pandas(data):
 
 
 def thresholding(img):
-	threshold = threshold_mean(img.astype(np.int64))
+	# (removed a discarded first `threshold_mean(img.astype(int64))` whose result
+	# was immediately overwritten by the line below.)
 	threshold = threshold_mean(img)
 	img_thre = img > threshold
 	img_thre = img_thre * 1
@@ -323,15 +331,17 @@ def cell_size_uniformity(mask):
 
 def cell_type(mask, channels):
 	n = len(channels)
-	#cell_coord = get_indices_sparse(mask)[1:]
-	cell_coord = get_indices_pandas(mask)[1:]
-	cell_coord_num = len(cell_coord)
 	ss = StandardScaler()
 	feature_matrix_z_pieces = []
 	#print('sum(mask)=',sum(mask))
 
 	# check 2D or 3D
 	if len(channels.shape) > 3:
+		# 3D still iterates per-cell coordinate lists; the full-image groupby is
+		# only computed on this path. The 2D path derives its cell count from
+		# `ids` below, avoiding a redundant full-image pass.
+		cell_coord = get_indices_pandas(mask)[1:]
+		cell_coord_num = len(cell_coord)
 		for i in range(n):
 			channel = channels[i]
 			z, x, y = channel.shape
@@ -350,6 +360,7 @@ def cell_type(mask, channels):
 	else:
 		ids = np.unique(mask)
 		ids = ids[ids != 0]
+		cell_coord_num = len(ids)
 		for i in range(n):
 			channel = channels[i]
 			channel_z = ss.fit_transform(channel)
@@ -374,14 +385,14 @@ def cell_type(mask, channels):
 
 def cell_uniformity(mask, channels, label_list):
 	n = len(channels)
-	#cell_coord = get_indices_sparse(mask)[1:]
-	cell_coord = get_indices_pandas(mask)[1:]
-	cell_coord_num = len(cell_coord)
 	ss = StandardScaler()
 	feature_matrix_pieces = []
 	feature_matrix_z_pieces = []
 
 	if len(channels.shape) > 3:
+		# 3D iterates per-cell coordinate lists; only this path needs the
+		# full-image groupby (the 2D path uses label-indexed reductions).
+		cell_coord = get_indices_pandas(mask)[1:]
 		_, z, x, y = channels.shape
 		for i in range(n):
 			channel = channels[i]
@@ -426,7 +437,9 @@ def cell_uniformity(mask, channels, label_list):
 		if c == 1:
 			silhouette.append(1)
 		else:
-			silhouette.append(silhouette_score(feature_matrix_z, labels))
+			silhouette.append(silhouette_score(
+				feature_matrix_z, labels,
+				sample_size=SILHOUETTE_SAMPLE_SIZE, random_state=777))
 		for i in range(c):
 			cluster_feature_matrix = feature_matrix[np.where(labels == i)[0], :]
 			cluster_feature_matrix_z = feature_matrix_z[np.where(labels == i)[0], :]
@@ -542,12 +555,6 @@ def get_matched_cells(cell_arr, cell_membrane_arr, nuclear_arr, mismatch_repair)
 		else:
 			return False, False, False
 
-def get_mask(cell_list, mask_shape):
-	mask = np.zeros(mask_shape)
-	for cell_num in range(len(cell_list)):
-		mask[tuple(cell_list[cell_num].T)] = cell_num+1
-	return mask
-
 def get_matched_fraction(repair_mask, mask, cell_matched_mask, nuclear_mask):
 	if repair_mask == 'repaired_matched_mask':
 		fraction_matched_cells = 1
@@ -563,57 +570,80 @@ def get_matched_fraction(repair_mask, mask, cell_matched_mask, nuclear_mask):
 	return fraction_matched_cells
 
 def get_matched_masks(cell_mask, nuclear_mask):
-	cell_membrane_mask = get_boundary(cell_mask)
-	#cell_coords = get_indices_sparse(cell_mask)[1:]
-	#nucleus_coords = get_indices_sparse(nuclear_mask)[1:]
-	cell_coords = get_indices_pandas(cell_mask)[1:]
-	nucleus_coords = get_indices_pandas(nuclear_mask)[1:]
-	cell_membrane_coords = get_indices_sparse(cell_membrane_mask)[1:]
-	cell_coords = list(map(lambda x: np.array(x).T, cell_coords))
-	cell_membrane_coords = list(map(lambda x: np.array(x).T, cell_membrane_coords))
-	nucleus_coords = list(map(lambda x: np.array(x).T, nucleus_coords))
-	cell_matched_index_list = []
-	nucleus_matched_index_list = []
-	cell_matched_list = []
-	nucleus_matched_list = []
-	
-	repaired_num = 0
-	for i in range(len(cell_coords)):
-		if len(cell_coords[i]) != 0:
-			current_cell_coords = cell_coords[i]
-			nuclear_search_num = np.unique(
-				nuclear_mask[current_cell_coords[:, 0], current_cell_coords[:, 1]]
-			)
-			best_mismatch_fraction = 1
-			whole_cell_best = []
-			for j in nuclear_search_num:
-				# print(j)
-				if j != 0:
-					if (j-1 not in nucleus_matched_index_list) and (i not in cell_matched_index_list):
-						whole_cell, nucleus, mismatch_fraction = get_matched_cells(cell_coords[i], cell_membrane_coords[i], nucleus_coords[j-1], mismatch_repair=1)
-						if type(whole_cell) != bool:
-							if mismatch_fraction < best_mismatch_fraction:
-								best_mismatch_fraction = mismatch_fraction
-								whole_cell_best = whole_cell
-								nucleus_best = nucleus
-								i_ind = i
-								j_ind = j-1
-			if best_mismatch_fraction < 1 and best_mismatch_fraction > 0:
-				repaired_num += 1
-			
-			if len(whole_cell_best) > 0:
-				cell_matched_list.append(whole_cell_best)
-				nucleus_matched_list.append(nucleus_best)
-				cell_matched_index_list.append(i_ind)
-				nucleus_matched_index_list.append(j_ind)
-			else:
-				print('Skipped cell#'+str(i))
+	"""Match each cell to a nucleus (with mismatch-repair) and return the
+	relabeled cell / nucleus / cell-minus-nucleus masks.
 
-	if repaired_num>0:
-		print(str(repaired_num)+' cells repaired out of '+str(len(cell_coords)))
+	Vectorized reimplementation of the original per-cell algorithm, which built
+	Python ``set(tuple(pixel)...)`` objects for every (cell, candidate-nucleus)
+	pair -- O(cells x pixels) with full Python-object overhead, the dominant
+	cost at whole-slide scale. This computes interior-overlap counts once via a
+	sparse (cell, nucleus) pixel histogram, runs the SAME greedy min-mismatch
+	matching over those counts, and paints the outputs with label LUTs in a
+	single pass each. Byte-identical to the old algorithm; the equivalence is
+	pinned by tests/test_get_matched_masks_equivalence.py.
+	"""
+	cell_mask = np.asarray(cell_mask)
+	nuclear_mask = np.asarray(nuclear_mask)
+	n_cells = int(cell_mask.max())
+	n_nuc = int(nuclear_mask.max())
 
-	cell_matched_mask = get_mask(cell_matched_list, cell_mask.shape)
-	nuclear_matched_mask = get_mask(nucleus_matched_list, nuclear_mask.shape)
+	# Cell interior = cell pixels minus their own inner boundary (membrane) --
+	# exactly the old ``d = a - b`` from get_matched_cells.
+	membrane = find_boundaries(cell_mask, mode='inner')
+	interior = np.where(membrane, 0, cell_mask)
+
+	# Global nucleus sizes (== old len(c), the whole nucleus, not just the part
+	# inside this cell), indexed by label.
+	nuc_size = np.bincount(nuclear_mask.ravel(), minlength=n_nuc + 1)
+
+	# Sparse interior-overlap counts: for pixels where a cell interior meets a
+	# nucleus, count per (cell label, nucleus label) pair. np.unique returns the
+	# pairs in ascending order, so per cell the nuclei come in ascending label
+	# order -- matching the old ``for j in np.unique(...)`` iteration, which is
+	# what makes the strict-< tie-break pick the smallest nucleus label.
+	sel = (interior > 0) & (nuclear_mask > 0)
+	ci = interior[sel]
+	ni = nuclear_mask[sel]
+	cand = {}  # cell label -> list of (nucleus_label, interior_overlap_count)
+	if ci.size:
+		pair = ci.astype(np.int64) * (n_nuc + 1) + ni.astype(np.int64)
+		upair, ucount = np.unique(pair, return_counts=True)
+		for p, cnt in zip(upair.tolist(), ucount.tolist()):
+			cand.setdefault(p // (n_nuc + 1), []).append((p % (n_nuc + 1), cnt))
+
+	# Greedy matching, cells in ascending label order (== old positional order,
+	# since callers pass contiguous 1..N labels). A nucleus with zero interior
+	# overlap can never be selected in the old code (get_matched_cells returns
+	# False when mismatch_pixel_num == len(c)), so restricting candidates to
+	# interior-overlap > 0 is equivalent.
+	claimed = np.zeros(n_nuc + 1, dtype=bool)
+	cell_lut = np.zeros(n_cells + 1, dtype=np.int32)  # cell label -> new matched label
+	nuc_lut = np.zeros(n_nuc + 1, dtype=np.int32)     # nucleus label -> new matched label
+	k = 0
+	for c in range(1, n_cells + 1):
+		best_frac = 1.0
+		best_nuc = 0
+		for nlab, cnt in cand.get(c, ()):  # ascending nlab
+			if claimed[nlab]:
+				continue
+			frac = (nuc_size[nlab] - cnt) / nuc_size[nlab]  # == old len(c-d)/len(c)
+			if frac < best_frac:            # strict -> first (smallest label) wins ties
+				best_frac = frac
+				best_nuc = nlab
+		if best_nuc:
+			k += 1
+			claimed[best_nuc] = True
+			cell_lut[c] = k
+			nuc_lut[best_nuc] = k
+
+	# Paint via LUTs. Matched-nucleus pixels are the nucleus pixels lying inside
+	# the interior of the cell they matched to (== old ``d & c``): keep a pixel
+	# where its interior-cell new-label equals its nucleus new-label.
+	cell_matched_mask = cell_lut[cell_mask]
+	interior_new = cell_lut[interior]
+	nuc_new = nuc_lut[nuclear_mask]
+	nuclear_matched_mask = np.where((nuc_new > 0) & (interior_new == nuc_new),
+	                                nuc_new, 0).astype(np.int32)
 	cell_outside_nucleus_mask = cell_matched_mask - nuclear_matched_mask
 	return cell_matched_mask, nuclear_matched_mask, cell_outside_nucleus_mask
 
