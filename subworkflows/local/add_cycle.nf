@@ -16,13 +16,11 @@
       - reg_qc >= 2: + staged seg-overlap QC (SEG_QC_GEOJSON -> WARP_SEG_QC) — per-pair
         IoU and centroid residual at each registration stage, on a correspondence fixed
         after rigid. Uses the classic VALIS registrar pickle from the 2-node graph, plus
-        REGISTER's pre-micro stage checkpoint. See docs/registration_qc.md. Classic
-        adapter only; ParamUtils.validateRegistrationPath rejects reg_qc>=2 with
-        --reg_distributed_tiling at launch (that path produces no pickle).
+        REGISTER's pre-micro stage checkpoint. See docs/registration_qc.md.
 
-    Registration adapter: the same choice as a full run
-    (ParamUtils.useDistributedAdapter), so --reg_distributed_tiling reaches
-    add_cycle too rather than leaving it pinned to classic VALIS.
+    Registration adapter: the classic monolithic VALIS adapter, matching a full run.
+    (The distributed/tiled low-memory path was archived 2026-07-24; see git tag
+    archive/tiled-valis-2026-07-24.)
 
     Per-compartment (expanded) quantification is supported: when
     params.quantify_compartments, the reused nuclei mask feeds QUANTIFY and
@@ -32,7 +30,6 @@
 
 include { PREPROCESSING            } from './preprocess'
 include { VALIS_ADAPTER            } from './adapters/valis_adapter'
-include { VALIS_DISTRIBUTED_ADAPTER } from './adapters/valis_distributed_adapter'
 include { EXTRACT_CELL_PROPERTIES  } from '../../modules/local/extract_cell_properties'
 include { EXTRACT_NUCLEI_PROPERTIES } from '../../modules/local/extract_nuclei_properties'
 include { SPLIT_CHANNELS           } from '../../modules/local/split_channels'
@@ -74,32 +71,15 @@ workflow ADD_CYCLE {
             [pid, ref_item, [ref_item, new_item]]   // all_items = reference + new cycle
         }
 
-    // Same adapter choice as a full run (ParamUtils.useDistributedAdapter is the single
-    // definition, shared with registration.nf), so add_cycle inherits the low-memory path
-    // instead of being pinned to classic VALIS.
-    //
-    // DIVERGENCE, deliberate: registration.nf's reg_dist_sub_threshold='auto' mode runs
-    // REG_ESTIMATE and routes PER PATIENT. add_cycle does not — with the switch on it always
-    // takes the distributed adapter. That is bit-identical to classic under the default
-    // reg_dist_force_tiling=false (the distributed path is separated whole-image non-rigid,
-    // not tiled); it only differs if force-tiling is ALSO on, where a full run's auto mode
-    // might have kept a small patient on classic whole-image.
-    def use_distributed = ParamUtils.useDistributedAdapter(params)
-
-    // Registrar pickle: classic VALIS only. The distributed path decomposes VALIS into
-    // separate processes and produces no single pickle, so this stays empty there.
+    // Registration runs via the classic monolithic VALIS adapter, matching a full run.
+    // The distributed/tiled low-memory path was archived on 2026-07-24 (git tag
+    // archive/tiled-valis-2026-07-24).
     ch_registrar = Channel.empty()
 
-    if (use_distributed) {
-        VALIS_DISTRIBUTED_ADAPTER(ch_grouped)
-        ch_adapter_registered = VALIS_DISTRIBUTED_ADAPTER.out.registered
-        ch_adapter_versions   = VALIS_DISTRIBUTED_ADAPTER.out.versions
-    } else {
-        VALIS_ADAPTER(ch_grouped)
-        ch_adapter_registered = VALIS_ADAPTER.out.registered
-        ch_adapter_versions   = VALIS_ADAPTER.out.versions
-        ch_registrar          = VALIS_ADAPTER.out.registrar
-    }
+    VALIS_ADAPTER(ch_grouped)
+    ch_adapter_registered = VALIS_ADAPTER.out.registered
+    ch_adapter_versions   = VALIS_ADAPTER.out.versions
+    ch_registrar          = VALIS_ADAPTER.out.registrar
 
     // Keep only the newly registered cycle (drop the reference passthrough).
     ch_new_registered = ch_adapter_registered.filter { meta, _f -> !meta.is_reference }
@@ -111,11 +91,8 @@ workflow ADD_CYCLE {
     ch_seg_qc = Channel.empty()
     def reg_qc_level = ParamUtils.regQcLevel(params)
 
-    // Level 2 needs the classic registrar pickle. ParamUtils.validateRegistrationPath already
-    // rejects reg_qc>=2 with the distributed path at launch; this guard is defence in depth and
-    // is what keeps the workflow BUILDABLE on the distributed branch, where VALIS_ADAPTER is
-    // never invoked and `VALIS_ADAPTER.out` therefore does not exist.
-    def do_seg_qc = reg_qc_level >= 2 && !use_distributed
+    // Level 2 needs the classic registrar pickle, which the classic VALIS adapter produces.
+    def do_seg_qc = reg_qc_level >= 2
 
     // Level >= 1: DAPI-overlay image QC — new registered vs prior reference.
     if (reg_qc_level >= 1) {

@@ -74,56 +74,12 @@ class ParamUtils {
     }
 
     /**
-     * Which registration adapter does this run use? Single source of truth, shared by
-     * REGISTRATION and ADD_CYCLE so an incremental cyclic-IF run takes the same path as a
-     * full run instead of being pinned to classic VALIS.
-     */
-    static boolean useDistributedAdapter(Map params) {
-        return boolParam(params, 'reg_distributed_tiling')
-    }
-
-    /**
-     * --reg_compare: run classic VALIS AND the low-memory path over the same slides and diff
-     * them. Costs 2x registration, so it must never switch on by accident — hence the same
-     * explicit coercion as the adapter switch.
-     */
-    static boolean regCompareEnabled(Map params) {
-        return boolParam(params, 'reg_compare')
-    }
-
-    /**
      * Effective registration-QC depth: 0 = none, 1 = DAPI overlay, 2 = + segmentation overlap.
-     * Legacy skip_registration_qc=true forces 0. Defined once so the launch-time gate in
-     * validateRegistrationPath() cannot drift from the runtime expression it guards
-     * (registration.nf / add_cycle.nf both call this).
+     * Legacy skip_registration_qc=true forces 0. Defined once and shared by
+     * registration.nf / add_cycle.nf so the QC gate has a single source of truth.
      */
     static int regQcLevel(Map params) {
         return params.skip_registration_qc ? 0 : (params.reg_qc == null ? 1 : (params.reg_qc as int))
-    }
-
-    /**
-     * The distributed/low-memory registration path decomposes VALIS into separate processes and
-     * therefore produces no single registrar pickle. reg_qc=2 (GeoJSON segmentation-overlap QC)
-     * warps polygons THROUGH that pickle, so the two are mutually exclusive. Fail loudly at
-     * launch rather than emitting an empty QC channel three hours in.
-     *
-     * This rejects reg_dist_sub_threshold='auto' too, even though auto routes SOME patients to
-     * classic: which patients is decided at runtime by REG_ESTIMATE, so a launch-time gate
-     * cannot promise a pickle for any of them.
-     */
-    static void validateRegistrationPath(Map params) {
-        // --reg_compare runs classic VALIS alongside the candidate and keeps classic as the run's
-        // output, so the registrar pickle exists no matter how the distributed switch is set.
-        if (regCompareEnabled(params)) return
-        if (!useDistributedAdapter(params)) return
-        def level = regQcLevel(params)
-        if (level >= 2) {
-            throw new IllegalArgumentException(
-                "reg_qc=${level} requires the classic VALIS registrar pickle, which the " +
-                "distributed path does not produce. Use --reg_qc 1, or set " +
-                "--reg_distributed_tiling false."
-            )
-        }
     }
 
     static void validateSegMethod(String method) {

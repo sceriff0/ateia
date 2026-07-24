@@ -111,8 +111,7 @@ jobs:
         # Docker Hub tag the modules pull it as.
         # VALIS is intentionally excluded: it uses the maintained upstream image
         # cdgatenbee/valis-wsi:1.0.0 (its from-source libvips build is heavy and
-        # not worth re-hosting). The distributed-tiling modules pull the patched
-        # bolt3x/attend_image_analysis:mirage_valis_1.0.0, published out-of-band.
+        # not worth re-hosting).
         include:
           - { dir: bioformats,     tag: convert_bioformats_2 }
           - { dir: preprocess,     tag: preprocess }

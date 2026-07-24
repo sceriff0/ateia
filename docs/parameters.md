@@ -79,42 +79,7 @@ At `reg_qc = 2` the pipeline segments each slide's DAPI on its **native** image,
 nuclei once after rigid registration, and then re-scores those same pairs after every later
 stage — so per-pair IoU and centroid residual can be attributed to `rigid`, `non_rigid` and
 `micro` individually. See [Staged registration QC](registration_qc.md) for the output schema
-and how to read it. Classic VALIS only; the distributed path produces no registrar pickle.
-
-### Distributed registration (advanced)
-
-For very large slides, registration can be fanned out across tiles as separate
-tasks instead of running through the in-process VALIS adapter. This is **off by
-default** — the classic path is bit-identical and JVM-free for most inputs. Only
-reach for these if a single REGISTER task can't fit a slide in memory.
-
-| Parameter | Default | Description |
-|---|---|---|
-| `reg_distributed_tiling` | `false` | Master switch. `false` = classic in-process registration. |
-| `reg_dist_sub_threshold` | `auto` | `auto` tiles only when VALIS would (estimated size > threshold); `force` always tiles. |
-| `reg_dist_min_input_gb` | `1.0` | In `auto` mode, total full-res input ≥ this routes to distributed; smaller stays classic. |
-| `reg_dist_force_tiling` | `false` | `false` = separated whole-image non-rigid (JVM-free); `true` = tiled fan-out. |
-| `reg_dist_tile_wh` | `512` | Non-rigid tile size (px). |
-| `reg_dist_micro_tile_wh` | `2048` | Micro-registration tile size (px). |
-| `reg_dist_tile_buffer` | `100` | Tile overlap (px). |
-| `reg_dist_threshold_gb` | `10` | Informational; matches VALIS's internal auto-tiler threshold. |
-| `reg_dist_container` | `bolt3x/attend_image_analysis:mirage_valis_1.0.0` | Patched VALIS image (Docker Hub) used for the distributed/low-memory registration processes. |
-| `reg_max_non_rigid_dim` | `4096` | Non-rigid working resolution for the prep step. |
-
-#### Full-resolution warp fan-out
-
-Once transforms are estimated, the final full-resolution warp is split into
-independent **output tiles**, each a `.crop()` of the same lazy pyvips warp — so the
-assembled result is bit-identical to a single-process warp, but peak RAM per task is
-one tile, not one slide. These knobs trade RAM-per-task against task count.
-
-| Parameter | Default | Description |
-|---|---|---|
-| `reg_warp_tile_wh` | `4096` | Output-tile edge (px). Smaller = less RAM per task, more tasks. |
-| `reg_warp_tile_format` | `tiff` | Intermediate tile format: `tiff` (tiled, lossless, ~2–4× smaller) or `v` (uncompressed, fastest). |
-| `reg_warp_tile_compression` | `deflate` | Lossless codec for tiles: `deflate`, `lzw`, `zstd`, or `none`. |
-| `reg_mem_budget_gb` | `null` | Cap per-task memory. `null` = use cluster defaults; set on a small machine to force smaller tiles. |
-| `reg_compare` | `false` | Run the classic **and** the distributed path over the same slides, then diff — a correctness check, not for production. |
+and how to read it.
 
 ## Segmentation
 

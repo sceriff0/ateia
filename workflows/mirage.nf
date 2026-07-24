@@ -79,7 +79,6 @@ workflow MIRAGE {
         ParamUtils.validateSegMethod(params.seg_method)  // reuse mask; still validate quant options
         ParamUtils.validateCompartmentQuant(params.quantify_compartments, params.expanded_quantification)
         ParamUtils.validateRegQc((params.reg_qc == null ? 1 : params.reg_qc) as int)
-        ParamUtils.validateRegistrationPath(params)      // reg_qc=2 needs the classic registrar pickle
 
         if (!params.input) error "mode='add_cycle' requires --input (the new cycle samplesheet)"
         CsvUtils.validateInputCSV(params.input, ParamUtils.requiredColumnsForStep('preprocessing'))
@@ -165,7 +164,6 @@ workflow MIRAGE {
     if (ParamUtils.shouldRun('registration', params.start, effective_stop)) {
         ParamUtils.validateRegistrationMethod(params.registration_method)
         ParamUtils.validateRegQc((params.reg_qc == null ? 1 : params.reg_qc) as int)
-        ParamUtils.validateRegistrationPath(params)      // reg_qc=2 needs the classic registrar pickle
     }
 
     if (ParamUtils.shouldRun('postprocessing', params.start, effective_stop)) {
