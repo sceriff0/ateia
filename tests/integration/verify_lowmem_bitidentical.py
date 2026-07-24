@@ -34,7 +34,7 @@ PREP = os.path.join(WORK, "prep")
 REF, MOV = "P001_ref.ome.tiff", "P001_mov1.ome.tiff"
 MOV_STEM = "P001_mov1"
 
-# reg_finalize.py's exact startup print lines (bin/reg_finalize.py:199 / 203) -- the only
+# reg_finalize.py's exact startup print lines (start_jvm_if_needed) -- the only
 # externally-observable evidence of which reader path a run actually took.
 LAZY_MARKER = "all inputs readable by MirageVipsSlideReader; skipping JVM"
 BF_MARKER = "started BioFormats JVM (heap="

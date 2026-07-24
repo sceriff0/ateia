@@ -1,9 +1,10 @@
 /*
  * REG_COMPOSE_TILED - distributed VALIS tiled registration, stage 3 (fan-in per slide)
  *
- * Stitches the precomputed tile fields, reproduces VALIS's post-tiler composition, and warps+saves
- * the full-res slide via VALIS's own streaming slide_tools.warp_slide — all from plain dumped data,
- * no registrar pickle (spec §6.3/§6.6, compose+warp proven bit-identical by Task 4.5).
+ * Stitches the precomputed tile fields and reproduces VALIS's post-tiler composition, emitting the
+ * composed full-res displacement field (slide_dxdy.v) — all from plain dumped data, no registrar
+ * pickle (spec §6.3/§6.6, compose proven bit-identical by Task 4.5). The warp itself is deferred to
+ * the REG_GRID -> REG_WARP_TILE -> REG_ASSEMBLE fan-out, which consumes this field.
  */
 process REG_COMPOSE_TILED {
     tag "${patient_id}:${slide}"

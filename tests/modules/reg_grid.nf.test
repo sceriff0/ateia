@@ -1,0 +1,40 @@
+nextflow_process {
+    name "Test REG_GRID process"
+    script "modules/local/reg_grid.nf"
+    process "REG_GRID"
+    tag "modules"; tag "modules_local"; tag "reg_grid"
+
+    test("REG_GRID - stub, moving slide (with field)") {
+        tag "stub"
+        options "-stub"
+        when { process { """
+            input[0] = [ 'P001', 'P001_mov1',
+                file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true),
+                file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true),
+                file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true) ]
+        """ } }
+        then { assertAll(
+            { assert process.success },
+            { assert process.out.grid },
+            { assert process.out.versions } ) }
+    }
+
+    test("REG_GRID - stub, reference slide (empty field => --rigid-only)") {
+        // The reference passes field == [], which `path(field)` with no arity renders as an empty
+        // string -- that is how --rigid-only is selected now that REG_WARP_REF is gone. If this
+        // ever regresses, the reference grid would be computed WITH a non-rigid field it must not
+        // have, and the grid would disagree with REG_WARP_TILE's --rigid-only warp.
+        tag "stub"
+        options "-stub"
+        when { process { """
+            input[0] = [ 'P001', 'P001_ref',
+                file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                [] ]
+        """ } }
+        then { assertAll(
+            { assert process.success },
+            { assert process.out.grid },
+            { assert process.out.versions } ) }
+    }
+}

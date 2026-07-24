@@ -2,9 +2,14 @@
 """REG_FINALIZE (Option A, spec §6.3/§6.6): distributed-tiling stage 3.
 
 Stitch the precomputed per-tile displacement fields (from REG_TILE) into the full non-rigid field,
-reproduce VALIS's post-tiler composition (serial_non_rigid.calc_deformation 460-503), pad to the
-full registered resolution, and warp+save the full-res slide via VALIS's own streaming
-``slide_tools.warp_slide`` — all from PLAIN dumped data, no pickled ``Valis`` registrar (Blocker 1).
+reproduce VALIS's post-tiler composition (serial_non_rigid.calc_deformation 460-503), and pad to the
+full registered resolution — all from PLAIN dumped data, no pickled ``Valis`` registrar (Blocker 1).
+
+Every production caller (REG_COMPOSE_{TILED,FIELD,MICRO}) runs this with ``--emit-field-only``: it
+writes the composed field to ``--out`` and returns WITHOUT warping. The warp is deferred to the
+REG_GRID -> REG_WARP_TILE -> REG_ASSEMBLE fan-out. The in-process full-warp branch is retained for
+the equivalence harnesses and goes through ``warp_source`` (a lazy ``get_reader_for`` +
+``warp_tools.warp_img``), not ``slide_tools.warp_slide`` directly.
 
 The compose + warp legs are proven pixel-identical to classic by ``bin/spikes/spike_finalize_option_a.py``
 (``max|Δ|=0``). Reads REG_PREP's dump: ``<inputs-dir>/manifest.json`` + ``expanded_bboxes.npy`` (tile
