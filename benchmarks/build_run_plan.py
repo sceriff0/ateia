@@ -54,45 +54,13 @@ def _configs(sweep: dict) -> list[tuple[dict, str]]:
                     configs.append((dict(baseline, target_px=tpx, n_channels=nch,
                                          n_register_images=nreg), "registration_grid"))
 
-    # 2b. DISTRIBUTED GRID (classic-vs-distributed ACROSS sizes) — gives the distributed SEPARATED path
-    #     the same across-size treatment classic registration gets from scaling_grid/registration_grid.
-    #     Each cell emits a FORCED distributed run: reg_distributed_tiling=true, reg_dist_sub_threshold=
-    #     'force' (so 'auto' can't route the small cells back to classic), reg_dist_force_tiling=false
-    #     (the bit-identical SEPARATED path). The CLASSIC counterpart at each cell already exists in
-    #     scaling_grid/registration_grid, so the analysis pairs them by (target_px, n_channels,
-    #     n_register_images). n_channels / n_register_images may each be a scalar or a list.
-    dg = sweep.get("distributed_grid")
-    if dg:
-        dchs = dg.get("n_channels", baseline.get("n_channels"))
-        dchs = list(dchs) if isinstance(dchs, (list, tuple)) else [dchs]
-        dnregs = dg.get("n_register_images", baseline.get("n_register_images", 2))
-        dnregs = list(dnregs) if isinstance(dnregs, (list, tuple)) else [dnregs]
-        for tpx in dg["target_px"]:
-            for nch in dchs:
-                for nreg in dnregs:
-                    configs.append((dict(baseline, target_px=tpx, n_channels=nch, n_register_images=nreg,
-                                         reg_distributed_tiling=True, reg_dist_sub_threshold="force",
-                                         reg_dist_force_tiling=False), "distributed_grid"))
+    # 2b. (removed) DISTRIBUTED GRID — the distributed/tiled registration path was archived out of the
+    #     pipeline (git tag archive/tiled-valis-2026-07-24); registration is classic REGISTER only, so
+    #     there is no distributed counterpart to benchmark. See docs/superpowers/specs/
+    #     2026-07-24-benchmark-paper-data-design.md.
 
-    # 3. DISTRIBUTED TILING GRID (tile_wh x tile_buffer), if present. Tile size/overlap are NO-OPS
-    #    unless the distributed tiled fan-out is active, so this grid PINS reg_distributed_tiling=true
-    #    AND reg_dist_force_tiling=true and crosses the two tile knobs. Kept separate from the OFAT
-    #    axes precisely so those knobs are never swept off the (separated, non-tiling) baseline where
-    #    they do nothing — mirroring the removed reg_tile_size no-op axis warned about in sweep.yaml.
-    dgrid = sweep.get("distributed_tiling_grid")
-    if dgrid:
-        for tw in dgrid.get("reg_dist_tile_wh", [baseline.get("reg_dist_tile_wh", 512)]):
-            for tb in dgrid.get("reg_dist_tile_buffer", [baseline.get("reg_dist_tile_buffer", 100)]):
-                configs.append((dict(baseline, reg_distributed_tiling=True,
-                                     reg_dist_sub_threshold="force",   # else 'auto' routes small cells to classic
-                                     reg_dist_force_tiling=True,
-                                     reg_dist_tile_wh=tw, reg_dist_tile_buffer=tb),
-                                "distributed_tiling_grid"))
-
-    # 3b. REGISTRATION PARAMETER GRID — the registration knobs (memory_mode, skip_micro_registration)
-    #     measured in BOTH the classic AND distributed path, so their effect is characterised for each.
-    #     Crosses memory_mode x skip_micro_registration x {classic, distributed(forced SEPARATED)} at the
-    #     baseline cell. Labelled registration_param_grid.
+    # 3. REGISTRATION PARAMETER GRID — the registration knobs (memory_mode, skip_micro_registration)
+    #    crossed at the baseline cell, classic path only. Labelled registration_param_grid.
     rpg = sweep.get("registration_param_grid")
     if rpg:
         mms = rpg.get("memory_mode", [baseline.get("memory_mode", "medium")])
@@ -101,12 +69,8 @@ def _configs(sweep: dict) -> list[tuple[dict, str]]:
         sms = list(sms) if isinstance(sms, (list, tuple)) else [sms]
         for mm in mms:
             for sm in sms:
-                for dist in (False, True):
-                    cfg = dict(baseline, memory_mode=mm, skip_micro_registration=sm,
-                               reg_distributed_tiling=dist)
-                    if dist:
-                        cfg.update(reg_dist_sub_threshold="force", reg_dist_force_tiling=False)
-                    configs.append((cfg, "registration_param_grid"))
+                configs.append((dict(baseline, memory_mode=mm, skip_micro_registration=sm),
+                                "registration_param_grid"))
 
     # 3c. SEGMENTATION GRID — each method benchmarked with ITS OWN parameters. sweep.yaml maps a
     #     seg_method to a dict of {param: [values]}; this pins seg_method and crosses that method's
@@ -165,8 +129,8 @@ def main():
     sweep = yaml.safe_load(a.sweep.read_text())
     plan = build_run_plan(sweep, repeats=a.repeats)
     lead = ["run_id", "varied_axis", "config_id", "rep"]
-    # Union of keys across ALL rows in first-seen order: some configs carry extra params (e.g. the
-    # distributed grids add reg_dist_sub_threshold / reg_dist_force_tiling), so keying off plan[0]
+    # Union of keys across ALL rows in first-seen order: some configs carry extra params (e.g. a
+    # segmentation_grid method adds its own backend knobs), so keying off plan[0]
     # alone would drop columns and crash DictWriter. A missing value is written blank (restval="") —
     # keep the baseline complete so this stays a safety net, not the norm (blank cells become
     # `--param ""` in run_sweep.sh).

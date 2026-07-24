@@ -128,12 +128,11 @@ def test_registration_grid_crosses_channels_when_list():
         (4096, 2, 4), (4096, 2, 8), (4096, 4, 4), (4096, 4, 8)}
 
 
-def test_registration_param_grid_crosses_params_in_both_paths():
+def test_registration_param_grid_crosses_params_classic():
     sweep = {
         "strategy": "ofat",
         "baseline": {"target_px": 4096, "n_channels": 2, "n_register_images": 2,
-                     "memory_mode": "medium", "skip_micro_registration": True,
-                     "reg_distributed_tiling": False},
+                     "memory_mode": "medium", "skip_micro_registration": True},
         "registration_param_grid": {
             "memory_mode": ["low", "medium", "high"],
             "skip_micro_registration": [True, False],
@@ -142,17 +141,12 @@ def test_registration_param_grid_crosses_params_in_both_paths():
     }
     plan = build_run_plan(sweep, repeats=1)
     rp = [r for r in plan if r["varied_axis"] == "registration_param_grid"]
-    # 3 memory_mode x 2 skip_micro x 2 paths (classic + distributed)
-    assert len(rp) == 12
-    classic = [r for r in rp if r["reg_distributed_tiling"] is False]
-    dist = [r for r in rp if r["reg_distributed_tiling"] is True]
-    assert len(classic) == 6 and len(dist) == 6
-    # every distributed one is forced onto the SEPARATED path
-    assert all(r["reg_dist_sub_threshold"] == "force" and r["reg_dist_force_tiling"] is False for r in dist)
-    # both paths cover the same (memory_mode, skip_micro) combinations
-    combo = lambda rs: {(r["memory_mode"], r["skip_micro_registration"]) for r in rs}
-    assert combo(classic) == combo(dist)
-    assert len(combo(classic)) == 6
+    # 3 memory_mode x 2 skip_micro, classic path only (distributed path was removed from the pipeline)
+    assert len(rp) == 6
+    combo = {(r["memory_mode"], r["skip_micro_registration"]) for r in rp}
+    assert combo == {(mm, sm) for mm in ("low", "medium", "high") for sm in (True, False)}
+    # the distributed knobs must not appear anywhere
+    assert all("reg_distributed_tiling" not in r and "reg_dist_force_tiling" not in r for r in rp)
 
 
 def test_segmentation_grid_pins_method_and_crosses_own_params():
@@ -180,48 +174,30 @@ def test_segmentation_grid_pins_method_and_crosses_own_params():
     assert {r["seg_cellsam_block_size"] for r in cs} == {256, 400, 512}
 
 
-def test_distributed_tiling_grid_pins_force_tiling_and_crosses_knobs():
-    sweep = {
-        "strategy": "ofat",
-        "baseline": {"target_px": 4096, "reg_distributed_tiling": False},
-        "distributed_tiling_grid": {
-            "reg_dist_tile_wh": [256, 512],
-            "reg_dist_tile_buffer": [50, 100],
-        },
-    }
-    plan = build_run_plan(sweep, repeats=1)
-    grid = [r for r in plan if r["varied_axis"] == "distributed_tiling_grid"]
-    assert len(grid) == 4  # 2 tile_wh x 2 tile_buffer
-    # every grid run pins the tiled fan-out on (else the tile knobs are no-ops) AND forces the
-    # distributed adapter (else 'auto' routes small cells back to classic — no tiling measured)
-    assert all(r["reg_distributed_tiling"] is True and r["reg_dist_force_tiling"] is True
-               and r["reg_dist_sub_threshold"] == "force" for r in grid)
-    assert {(r["reg_dist_tile_wh"], r["reg_dist_tile_buffer"]) for r in grid} == {
-        (256, 50), (256, 100), (512, 50), (512, 100)}
-
-
-def test_project_sweep_distributed_grid_forces_distributed_across_sizes():
+def test_project_sweep_has_no_distributed_surface():
+    # the distributed/tiled registration path was archived out of the pipeline; the sweep must not
+    # reference any of its params or grids (they would pass dead --param flags to the pipeline).
     import yaml
     sweep = yaml.safe_load(
         (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text())
-    # distributed is measured across sizes via distributed_grid (NOT a no-op OFAT axis)
-    assert "reg_distributed_tiling" not in sweep["axes"], "distributed must not be an OFAT axis (auto-routing hides it)"
-    assert sweep["baseline"]["reg_distributed_tiling"] is False
-    dg = sweep["distributed_grid"]
-    assert dg["target_px"] == sweep["scaling_grid"]["target_px"]  # same sizes as classic scaling grid
+    assert "distributed_grid" not in sweep
+    assert "distributed_tiling_grid" not in sweep
     plan = build_run_plan(sweep, repeats=1)
-    dist = [r for r in plan if r["varied_axis"] == "distributed_grid"]
-    assert dist, "distributed_grid must emit runs"
-    # every distributed run is FORCED (so 'auto' can't fall back to classic) on the SEPARATED path
-    for r in dist:
-        assert r["reg_distributed_tiling"] is True
-        assert r["reg_dist_sub_threshold"] == "force"
-        assert r["reg_dist_force_tiling"] is False
-    # each distributed cell has a matching classic scaling_grid cell to pair against
-    classic_cells = {(r["target_px"], r["n_channels"]) for r in plan
-                     if r["varied_axis"] in ("scaling_grid", "baseline")}
-    for r in dist:
-        assert (r["target_px"], r["n_channels"]) in classic_cells
+    for r in plan:
+        for k in r:
+            assert not k.startswith("reg_dist"), f"distributed param {k} leaked into the run plan"
+        assert "reg_distributed_tiling" not in r
+
+
+def test_project_sweep_enables_qc_signals():
+    # the paper's accuracy + segmentation-quality tables are harvested from pipeline QC, so the
+    # baseline must turn those QC steps on.
+    import yaml
+    sweep = yaml.safe_load(
+        (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text())
+    assert sweep["baseline"]["reg_qc"] == 2                       # staged registration QC (dice + displacement)
+    assert sweep["baseline"]["skip_seg_quality_eval"] is False     # CellSegmentationEvaluator on
+    assert "enable_feature_error" not in sweep["baseline"]         # replaced by reg_qc=2
 
 
 def test_project_sweep_all_configs_share_columns():

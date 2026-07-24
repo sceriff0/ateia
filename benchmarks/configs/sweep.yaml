@@ -10,7 +10,10 @@
 #
 # REMOVED axes: reg_use_tiled_registration, reg_tile_size, reg_n_workers (VALIS auto-tiles
 # internally, so they were no-ops) and reg_parallel_warping (parallel warping was removed;
-# warping is always sequential). The matching pipeline params are removed from the pipeline.
+# warping is always sequential). The distributed/tiled registration path was archived out of
+# the pipeline (git tag archive/tiled-valis-2026-07-24); registration is classic REGISTER only,
+# so reg_distributed_tiling / reg_dist_* and the distributed_grid / distributed_tiling_grid
+# sweeps were removed. The matching pipeline params no longer exist.
 #
 # N-IMAGE REGISTRATION: n_register_images sweeps the number of slides registered together
 # (1 reference + N-1 moving panels). Generate the matrix straight from this file so it has
@@ -45,17 +48,6 @@ registration_grid:
   n_register_images: [4, 8]
   n_channels:        [2, 4]     # benchmark N-image registration at BOTH 2 and 4 channels
 
-# DISTRIBUTED GRID — classic vs distributed ACROSS sizes (same across-size treatment normal
-# registration gets above). Each cell runs the distributed SEPARATED path FORCED on (so 'auto' can't
-# route small cells back to classic); the classic counterpart at each cell is the scaling_grid run, so
-# the analysis pairs them by (size, channels, N). This is where the distributed RAM win becomes visible:
-# classic's per-node RAM (BioFormats JVM heap) climbs with size while the JVM-free distributed path stays
-# bounded. Runs labelled varied_axis=distributed_grid. Trim target_px to what your nodes can register.
-distributed_grid:
-  target_px:         [2048, 4096, 8192, 16384, 32768, 65536]
-  n_channels:        [2, 4]
-  n_register_images: [2]        # the pair; extend to [2, 4, 8] to also cross N (heavier)
-
 # Baseline = the fixed point for ofat (one value per axis). Also the (4096, 2)
 # cell of the scaling grid, so it is emitted once (labelled baseline).
 baseline:
@@ -65,15 +57,12 @@ baseline:
   # --- registration ---
   memory_mode: medium
   skip_micro_registration: true
-  reg_distributed_tiling: false       # classic; the distributed_grid above forces the distributed path
-  reg_dist_sub_threshold: auto        # pipeline default; distributed grids override to 'force'. Declared
-  reg_dist_force_tiling: false        # here so every run carries these columns (no empty CSV cells that
-                                      # run_sweep.sh would pass as --param "" — the SEPARATED path stays).
-  reg_dist_tile_wh: 512               # tiled-path knobs (declared for column consistency; only bite when
-  reg_dist_tile_buffer: 100           # reg_dist_force_tiling=true — swept by distributed_tiling_grid).
   n_register_images: 2                # 1 reference + 1 moving (the classic pair)
-  enable_feature_error: true          # emit feature-based registration error per run (the accuracy
-                                      # signal joined into the accuracy-vs-cost analysis)
+  reg_qc: 2                           # staged registration QC ON: segments DAPI nuclei, fixes cell
+                                      # correspondence at the rigid stage, then re-measures dice_matched +
+                                      # centroid displacement (um) after each transform stage. This is the
+                                      # landmark-free registration-accuracy signal harvested into
+                                      # registration_accuracy.csv (bin/warp_seg_qc.py; docs/registration_qc.md).
   reg_jvm_heap_gb: null               # auto-size; the reg_jvm_heap_gb axis varies it (RAM elasticity)
   # --- preprocessing (BaSiC illumination correction) ---
   preproc_n_iter: 100
@@ -86,6 +75,9 @@ baseline:
   seg_n_tiles_y: 16
   seg_cellsam_block_size: 400        # only used when seg_method=cellsam
   seg_instantseg_tile_size: 512      # only used when seg_method=instantseg
+  skip_seg_quality_eval: false       # CellSegmentationEvaluator (CSE) ON: reference-free per-patient
+                                      # segmentation QualityScore + component metrics, harvested into
+                                      # segmentation_eval.csv (modules/local/seg_quality_eval.nf).
   # --- quantification ---
   # compartments ON at baseline so the expanded_quantification axis is valid:
   # expanded_quantification requires quantify_compartments (ParamUtils.validateCompartmentQuant).
@@ -112,16 +104,13 @@ axes:
   quantify_compartments:      [false, true]
   expanded_quantification:    [false, true]       # valid because baseline quantify_compartments=true
   # NOTE — the REGISTRATION knobs (memory_mode, skip_micro_registration) are NOT OFAT axes: they are
-  # measured in BOTH classic and distributed by registration_param_grid below.
+  # crossed at the baseline cell by registration_param_grid below.
   # NOTE — seg_method and its per-method params (seg_n_tiles_*, seg_cellsam_block_size,
   # seg_instantseg_tile_size) are NOT OFAT axes: segmentation_grid below runs each method with its OWN
   # live params (an OFAT run of a backend-specific param off the stardist baseline is a no-op).
-  # NOTE — distributed registration is NOT an OFAT axis: the distributed_grid above measures it across
-  # sizes (forced on, so 'auto' can't route small cells back to classic — the bug an OFAT axis hid).
 
-# REGISTRATION PARAMETER GRID — memory_mode x skip_micro_registration measured in BOTH the classic and
-# distributed path (each combination run once classic, once distributed-forced), at the baseline cell.
-# So the effect of the registration knobs is characterised for each registration path, not just classic.
+# REGISTRATION PARAMETER GRID — memory_mode x skip_micro_registration crossed at the baseline cell
+# (classic path only). Characterises the effect of the registration knobs on cost + accuracy.
 registration_param_grid:
   memory_mode:              [low, medium, high]
   skip_micro_registration:  [true, false]
@@ -138,16 +127,3 @@ segmentation_grid:
     seg_cellsam_block_size:  [256, 400, 512]
   instantseg:
     seg_instantseg_tile_size: [256, 512, 1024]
-
-# DISTRIBUTED TILED path — the second distributed mode: the non-rigid field is cut into tiles, each
-# computed by its own tiny JVM-free REG_TILE job (fan-out across many cheap nodes), then stitched. For
-# when even a single whole-image field won't fit one node. reg_dist_tile_wh / reg_dist_tile_buffer are
-# NO-OPS on the SEPARATED path, so they get a pinned grid (reg_distributed_tiling=true +
-# reg_dist_force_tiling=true, forced so 'auto' can't route small cells to classic) that crosses the two
-# tile knobs — the granularity study. NB: the tiled path is NOT bit-identical to classic whole-image
-# (tiled != whole-image optical flow), so the analysis EXCLUDES these runs from the classic-vs-distributed
-# parity/cost comparison (they're verified against the in-process tiler by the code-level gate). They
-# are labelled varied_axis=distributed_tiling_grid and get their own granularity plot.
-distributed_tiling_grid:
-  reg_dist_tile_wh:     [256, 512, 1024]
-  reg_dist_tile_buffer: [50, 100, 200]

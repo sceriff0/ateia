@@ -15,7 +15,7 @@ matplotlib.use("Agg")
 
 import pandas as pd
 
-from .lib import compare_reg, emit_config, load, plotting, quality, regress
+from .lib import emit_config, load, plotting, quality, regress
 
 # Only these runs change input_gb: the scaling grid (size x channels), the
 # registration grid (size x n_register_images — REGISTER's input is the SUM of all
@@ -81,13 +81,6 @@ def run(results_root, run_plan_csv, manifest_csv, reg_eval_csv, outdir, formats=
 
     emit_config.write_optimized_config(models, outdir / "modules.optimized.config")
 
-    # Classic vs distributed registration — the reg_distributed_tiling axis, if swept. Reports the
-    # registration-stage peak-RSS and compute-time delta (the equivalent-result cost comparison; the
-    # bit-identical guarantee itself is a code-level gate, tests/integration/compare_classic_vs_distributed.py).
-    compare_csv = outdir / "classic_vs_distributed_registration.csv"
-    compare_df = compare_reg.compare_classic_vs_distributed(runs_df)
-    compare_df.to_csv(compare_csv, index=False)  # always written (may be empty) for a stable artifact set
-
     # ── QUALITY + COST (the result-quality the trace ignores + derived cost). All best-effort and
     #    robust to missing/failed runs, so a CellSAM run that OOMs simply contributes no rows. ──
     # Per-run cost (cpu/gpu-hours, wall-clock, bottleneck) — from the trace, always available.
@@ -96,8 +89,7 @@ def run(results_root, run_plan_csv, manifest_csv, reg_eval_csv, outdir, formats=
     # joined to the swept params so the analysis/plots can relate accuracy to config + cost.
     per_run = runs_df.drop_duplicates("run_id")[
         [c for c in ("run_id", "varied_axis", "target_px", "n_channels", "n_register_images",
-                     "memory_mode", "skip_micro_registration", "seg_method", "reg_distributed_tiling",
-                     "reg_dist_force_tiling")
+                     "memory_mode", "skip_micro_registration", "seg_method")
          if c in runs_df.columns]] if not runs_df.empty else pd.DataFrame(columns=["run_id"])
     reg_err = quality.harvest_registration_error(results_root, run_plan_csv)
     try:
@@ -115,16 +107,10 @@ def run(results_root, run_plan_csv, manifest_csv, reg_eval_csv, outdir, formats=
     except Exception:
         seg_agree = pd.DataFrame()
     seg_agree.to_csv(outdir / "segmentation_agreement.csv", index=False)
-    # compare_registered reads full-res slides (heavy), so it's a separate step — remind the user or
-    # figures 16/17's drift view stays empty.
-    if not (outdir / "registration_drift.csv").exists():
-        print("[analysis] for the tiled-drift figure (16), also run: python -m "
-              "benchmarks.registration_eval.compare_registered --results-root <ROOT> --run-plan <PLAN> "
-              f"--drift-csv {outdir / 'registration_drift.csv'}")
 
     return {"runs_df": runs_df, "models": models, "outdir": outdir,
             "measurements_csv": measurements_csv, "models_csv": models_csv,
-            "stats_csv": stats_csv, "compare_csv": compare_csv}
+            "stats_csv": stats_csv}
 
 
 def main():
