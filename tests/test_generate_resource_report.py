@@ -1,0 +1,54 @@
+import importlib.util
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[1]
+SCRIPT = REPO / "bin" / "generate_resource_report.py"
+
+
+def _load():
+    spec = importlib.util.spec_from_file_location("grr", SCRIPT)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_parse_bytes():
+    grr = _load()
+    assert grr.parse_bytes("3.2 GB") == round(3.2 * 1024**3, 1)
+    assert grr.parse_bytes("512 MB") == 512 * 1024**2
+    assert grr.parse_bytes("-") is None
+    assert grr.parse_bytes("") is None
+
+
+def test_parse_duration():
+    grr = _load()
+    assert grr.parse_duration("1.5s") == 1.5
+    assert grr.parse_duration("12m 4s") == 724.0
+    assert grr.parse_duration("2h 1m") == 7260.0
+    assert grr.parse_duration("-") is None
+
+
+def test_parse_percent():
+    grr = _load()
+    assert grr.parse_percent("142.3%") == 142.3
+    assert grr.parse_percent("-") is None
+
+
+def test_parse_trace(tmp_path):
+    grr = _load()
+    t = tmp_path / "trace.txt"
+    t.write_text(
+        "task_id\tprocess\ttag\tname\tstatus\texit\tsubmit\tstart\tcomplete\t"
+        "duration\trealtime\t%cpu\tcpus\tmemory\tpeak_rss\tpeak_vmem\trchar\twchar\n"
+        "1\tMIRAGE:PRE:CONVERT_IMAGE\tP001\tname\tCOMPLETED\t0\t-\t-\t-\t"
+        "12m 4s\t10m\t142.3%\t8\t8 GB\t3.2 GB\t4 GB\t1 GB\t500 MB\n"
+    )
+    rows = grr.parse_trace(t)
+    assert len(rows) == 1
+    r = rows[0]
+    assert r["process"] == "MIRAGE:PRE:CONVERT_IMAGE"
+    assert r["tag"] == "P001"
+    assert r["realtime_s"] == 600.0
+    assert r["peak_rss_b"] == round(3.2 * 1024**3, 1)
+    assert r["cpu_pct"] == 142.3
+    assert r["exit"] == "0"
