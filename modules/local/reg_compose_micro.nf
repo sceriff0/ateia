@@ -3,7 +3,7 @@
  *
  * Same as REG_COMPOSE_FIELD but additively composes the micro residual (REG_NONRIGID on the micro
  * 2-D inputs from REG_MICRO_PREP) onto the wave-1 field before warping — reproducing classic
- * register_micro (registration.py:4299-4330; additive compose proven max|Δ|=0 by spike_micro_option2).
+ * register_micro; the additive compose is bit-identical to classic.
  */
 process REG_COMPOSE_MICRO {
     tag "${patient_id}:${slide}"

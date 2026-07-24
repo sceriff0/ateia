@@ -1,5 +1,5 @@
 /*
- * REG_GRID - compute the output-tile grid for one slide's full-res warp (spec §5.3).
+ * REG_GRID - compute the output-tile grid for one slide's full-res warp.
  *
  * The canvas size is read from the ACTUAL lazily-warped pyvips image rather than derived from
  * warp_state arithmetic, so the grid can never disagree with what REG_WARP_TILE produces (that
@@ -8,7 +8,7 @@
  *
  * `path(field)` carries no `arity`, so the adapter can pass `[]` for the reference slide and it
  * renders as an empty string -- that is how --rigid-only is selected. (`arity: '0..1'` combined
- * with `stageAs` is rejected by Nextflow 25.04.7.)
+ * with `stageAs` is rejected by Nextflow.)
  */
 process REG_GRID {
     tag "${patient_id}:${slide}"

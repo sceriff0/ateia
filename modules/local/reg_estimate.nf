@@ -1,5 +1,5 @@
 /*
- * REG_ESTIMATE - distributed tiling router (spec §6.5/§8.1)
+ * REG_ESTIMATE - distributed tiling router
  *
  * Computes VALIS's own non-rigid tiling decision (est_GB > TILER_THRESH_GB) per patient from slide
  * metadata (no JVM, no registration), so the subworkflow can route:

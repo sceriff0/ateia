@@ -22,6 +22,9 @@ process COMPARE_REGISTRATION {
     tuple val(meta), path("*_regdiff.png"),     emit: diff_png
     path "versions.yml",                        emit: versions
 
+    when:
+    task.ext.when == null || task.ext.when
+
     script:
     def args = task.ext.args ?: ''
     def name = "${meta.patient_id}_${(meta.channels ?: []).join('-') ?: (meta.id ?: 'slide')}"

@@ -1,3 +1,6 @@
+/*
+ * GENERATE_QC_REPORT - assemble the per-step QC artifacts into a single HTML report.
+ */
 process GENERATE_QC_REPORT {
     tag "qc_report"
     label 'process_low'

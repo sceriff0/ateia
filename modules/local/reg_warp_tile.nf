@@ -1,12 +1,12 @@
 /*
- * REG_WARP_TILE - warp ONE output tile of one slide's full-res warp (spec §5.3).
+ * REG_WARP_TILE - warp ONE output tile of one slide's full-res warp.
  *
  * This is the fan-out that removes the RAM wall: N of these run independently instead of one
  * process holding a full-resolution slide. Each tile is a .crop() of the SAME lazy pyvips warp,
  * and pyvips is demand-driven, so cropping the OUTPUT pulls exactly the source pixels that region
  * needs -- including the interpolator's halo across the tile edge -- through VALIS's own
  * warp_tools.warp_img. The reassembled slide is therefore bit-identical to a single-process warp
- * BY CONSTRUCTION, not by tolerance (leg 2 of tests/integration/verify_lowmem_bitidentical.py).
+ * BY CONSTRUCTION, not by tolerance (verified by the integration tests).
  *
  * Peak RAM is O(one output tile + its source footprint), so `process_low` is deliberate.
  */

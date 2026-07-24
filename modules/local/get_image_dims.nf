@@ -1,3 +1,6 @@
+/*
+ * GET_IMAGE_DIMS - read one image's pixel dimensions (without decoding) into a dims file.
+ */
 process GET_IMAGE_DIMS {
     tag "${meta.patient_id}"
     label 'process_single'

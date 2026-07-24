@@ -1,6 +1,6 @@
 /*
 ========================================================================================
-    REG_COMPARE  (spec §7)
+    REG_COMPARE
 ========================================================================================
     Run BOTH registration paths over the SAME slides and report how far apart their outputs
     are. Opt-in via --reg_compare; it costs 2x registration, which is why it is off by default.

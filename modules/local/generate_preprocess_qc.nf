@@ -1,3 +1,6 @@
+/*
+ * GENERATE_PREPROCESS_QC - render per-channel preprocessing QC thumbnails.
+ */
 process GENERATE_PREPROCESS_QC {
     tag "${meta.patient_id}"
     label 'process_medium'

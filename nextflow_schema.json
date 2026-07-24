@@ -291,6 +291,44 @@
                     "description": "Max non-rigid registration dimension (px) for distributed REG_PREP.",
                     "default": 4096
                 },
+                "reg_warp_tile_wh": {
+                    "type": "integer",
+                    "description": "Output-tile edge (px) for the full-res warp fan-out; smaller = less RAM per task, more tasks.",
+                    "default": 4096
+                },
+                "reg_warp_tile_format": {
+                    "type": "string",
+                    "description": "On-disk format for warped output tiles: 'tiff' = tiled deflate (lossless, smaller); 'v' = uncompressed libvips.",
+                    "default": "tiff",
+                    "enum": [
+                        "tiff",
+                        "v"
+                    ]
+                },
+                "reg_warp_tile_compression": {
+                    "type": "string",
+                    "description": "Lossless compression codec for warped output tiles.",
+                    "default": "deflate",
+                    "enum": [
+                        "deflate",
+                        "lzw",
+                        "zstd",
+                        "none"
+                    ]
+                },
+                "reg_mem_budget_gb": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "description": "Cap (GiB) on distributed-registration task memory. null = use cluster defaults.",
+                    "default": null
+                },
+                "reg_compare": {
+                    "type": "boolean",
+                    "description": "Run both the classic and low-memory registration paths over the same slides and diff their outputs (~2x cost).",
+                    "default": false
+                },
                 "reg_jvm_heap_gb": {
                     "type": [
                         "integer",

@@ -1,3 +1,6 @@
+/*
+ * PAD_IMAGES - pad each preprocessed image to the patient's common canvas size.
+ */
 process PAD_IMAGES {
     tag "${meta.patient_id}"
     label 'process_medium'

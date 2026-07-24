@@ -1,5 +1,5 @@
 /*
- * REG_MICRO_PREP - distributed MICRO-registration wave, stage 1 (spec §5A Option-2)
+ * REG_MICRO_PREP - distributed MICRO-registration wave, stage 1
  *
  * Second non-rigid pass at micro resolution. Rebuilds rigid (IDENTICAL config to REG_PREP => same M),
  * INJECTS the wave-1 composed field onto each moving slide, then runs register_micro with the warper

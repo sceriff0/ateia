@@ -2,8 +2,8 @@
  * REG_COMPOSE_FIELD - distributed registration, SEPARATED-mode finalize (fan-in per slide)
  *
  * Consumes the whole-image non-rigid field from REG_NONRIGID (--field) instead of stitched tiles,
- * then runs the SAME §6.3 compose as the tiled REG_COMPOSE_TILED. Used by the separated (JVM-free
- * whole-image) path; bit-identical to classic.
+ * then runs the SAME displacement-field compose as the tiled REG_COMPOSE_TILED. Used by the
+ * separated (JVM-free whole-image) path; bit-identical to classic.
  */
 process REG_COMPOSE_FIELD {
     tag "${patient_id}:${slide}"

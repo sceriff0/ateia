@@ -1,3 +1,6 @@
+/*
+ * GENERATE_POSTPROCESSING_QC - render segmentation and quantification QC figures.
+ */
 process GENERATE_POSTPROCESSING_QC {
     tag "${meta.patient_id}"
     label 'process_medium'

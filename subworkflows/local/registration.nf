@@ -166,12 +166,12 @@ workflow REGISTRATION {
     //   - Runs registration
     //   - Converts output back to [meta, file] standard format
 
-    // Opt-in distributed tiled registration (spec §6.5/§6.6): lifts VALIS's non-rigid tile loop into
+    // Opt-in distributed tiled registration: lifts VALIS's non-rigid tile loop into
     // REG_PREP -> REG_TILE (fan-out) -> REG_COMPOSE_* (fan-in) -> REG_WARP_TILE (fan-out) ->
     // REG_ASSEMBLE for low-RAM clusters. Bit-identical to
     // VALIS's own tiler on its processed 2-D images. Default (reg_distributed_tiling=false) = classic.
     //
-    // IMPORTANT (spec §6.5): tiled non-rigid != whole-image non-rigid. VALIS only tiles when
+    // IMPORTANT: tiled non-rigid != whole-image non-rigid. VALIS only tiles when
     // est_GB > threshold (rarely, since non-rigid runs downsampled). So:
     //   - 'auto' (default): REG_ESTIMATE per patient -> route est>thr to distributed (== classic-tiled),
     //     est<=thr to classic whole-image (IDENTICAL to classic). This keeps <10GB inputs bit-identical.
@@ -203,7 +203,7 @@ workflow REGISTRATION {
     ch_reg_compare = Channel.empty()
 
     if (do_compare) {
-        // --reg_compare (spec §7): run BOTH paths over the same slides and diff them. Takes
+        // --reg_compare: run BOTH paths over the same slides and diff them. Takes
         // precedence over the adapter switch — the whole point is to run both, and the
         // comparison's value depends on classic staying the run's real output.
         log.warn "--reg_compare is ON: every multi-slide patient is registered TWICE " +
@@ -230,7 +230,7 @@ workflow REGISTRATION {
         ch_adapter_versions = VALIS_DISTRIBUTED_ADAPTER.out.versions
         ch_adapter_summary  = Channel.empty()
     } else {
-        // 'auto': route per patient by INPUT SIZE (spec §6.7) — large inputs (JVM-RAM concern) ->
+        // 'auto': route per patient by INPUT SIZE — large inputs (JVM-RAM concern) ->
         // distributed (JVM-free, bit-identical); small inputs -> classic VALIS (monolithic is fine).
         REG_ESTIMATE(ch_grouped_multi.map { pid, ref_item, all_items ->
             tuple(pid, ref_item[1], all_items.collect { it[1] })

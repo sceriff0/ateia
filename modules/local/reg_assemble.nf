@@ -1,5 +1,5 @@
 /*
- * REG_ASSEMBLE - join the warped output tiles into the final registered OME-TIFF (spec §5.3).
+ * REG_ASSEMBLE - join the warped output tiles into the final registered OME-TIFF.
  *
  * Streaming: the joined image stays unevaluated until tiffsave pulls it, and libvips evaluates the
  * join region-by-region as it writes, so peak RAM is O(one row of tiles) rather than O(slide).

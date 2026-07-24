@@ -2,8 +2,8 @@
  * REG_TILE - distributed VALIS tiled registration, stage 2 (fan-out, one task per tile)
  *
  * Computes ONE tile's bk/fwd displacement field with VALIS's own reg_tile kernel, JVM-free (~1-2 GB).
- * Proven bit-identical to the in-process loop (spec §6.1, Task 6). Reads REG_PREP's per-slide
- * tiler_inputs dir; emits bk_<idx>.v / fwd_<idx>.v.
+ * Bit-identical to the in-process loop. Reads REG_PREP's per-slide tiler_inputs dir;
+ * emits bk_<idx>.v / fwd_<idx>.v.
  */
 process REG_TILE {
     tag "${patient_id}:${slide}:${tile_idx}"

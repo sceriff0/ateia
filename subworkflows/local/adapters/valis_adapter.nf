@@ -65,10 +65,10 @@ workflow VALIS_ADAPTER {
             // Sanity check: file count must match metadata count
             if (files_list.size() != metas_list.size()) {
                 def error_msg = """
-                ❌ VALIS adapter: File count mismatch for patient ${patient_id}
-                📍 Expected ${metas_list.size()} files but got ${files_list.size()}
-                📋 Metadata entries: ${metas_list.collect { it.channels.join('_') }.join(', ')}
-                📋 Files: ${files_list.collect { it.name }.join(', ')}
+                VALIS adapter: file count mismatch for patient ${patient_id}
+                Expected ${metas_list.size()} files but got ${files_list.size()}
+                Metadata entries: ${metas_list.collect { it.channels.join('_') }.join(', ')}
+                Files: ${files_list.collect { it.name }.join(', ')}
                 """.stripIndent()
                 throw new Exception(error_msg)
             }
@@ -88,10 +88,10 @@ workflow VALIS_ADAPTER {
                 def signatures = metas_list.collect { it.channels.toSorted().join('_').toLowerCase() }
                 def duplicates = signatures.groupBy { it }.findAll { _sig, v -> v.size() > 1 }.keySet()
                 throw new Exception("""
-                ❌ VALIS adapter: Duplicate channel signatures for patient ${patient_id}
-                📍 ${metas_list.size()} slides but only ${channel_key_to_meta.size()} unique channel sets
-                📋 Duplicated: ${duplicates.join(', ')}
-                💡 Each slide must have a unique combination of channels
+                VALIS adapter: duplicate channel signatures for patient ${patient_id}
+                ${metas_list.size()} slides but only ${channel_key_to_meta.size()} unique channel sets
+                Duplicated: ${duplicates.join(', ')}
+                Each slide must have a unique combination of channels
                 """.stripIndent())
             }
 
@@ -100,10 +100,10 @@ workflow VALIS_ADAPTER {
                 def ome_channels = manifest[reg_file.name]
                 if (!ome_channels) {
                     def error_msg = """
-                    ❌ VALIS adapter: No OME channel metadata for ${reg_file.name}
-                    📍 Patient: ${patient_id}
-                    📋 Manifest keys: ${manifest.keySet().join(', ')}
-                    💡 Check that registered files have OME-XML metadata with channel names
+                    VALIS adapter: no OME channel metadata for ${reg_file.name}
+                    Patient: ${patient_id}
+                    Manifest keys: ${manifest.keySet().join(', ')}
+                    Check that registered files have OME-XML metadata with channel names
                     """.stripIndent()
                     throw new Exception(error_msg)
                 }
@@ -114,13 +114,13 @@ workflow VALIS_ADAPTER {
 
                 if (!matched_meta) {
                     def error_msg = """
-                    ❌ VALIS adapter: Could not match OME channels to CSV metadata
-                    📍 Patient: ${patient_id}
-                    📍 File: ${reg_file.name}
-                    📍 OME channels: ${ome_channels}
-                    📍 OME key: ${ome_key}
-                    📍 Available CSV keys: ${channel_key_to_meta.keySet().join(', ')}
-                    💡 Ensure CSV 'channels' column matches OME-XML channel names
+                    VALIS adapter: could not match OME channels to CSV metadata
+                    Patient: ${patient_id}
+                    File: ${reg_file.name}
+                    OME channels: ${ome_channels}
+                    OME key: ${ome_key}
+                    Available CSV keys: ${channel_key_to_meta.keySet().join(', ')}
+                    Ensure CSV 'channels' column matches OME-XML channel names
                     """.stripIndent()
                     throw new Exception(error_msg)
                 }

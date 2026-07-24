@@ -1,18 +1,10 @@
 /*
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    MERGE AND PYRAMID MODULE
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    Merges single-channel TIFFs into a pyramidal OME-TIFF with proper metadata
-    for QuPath visualization.
-
-    Features:
-    - Generates pyramidal OME-TIFF directly (no bfconvert needed)
-    - Preserves channel names, colors, and pixel sizes in OME-XML
-    - Intensity channels only; cell objects are delivered via cells.geojson
-    - Memory-efficient processing for large images
-    - Full QuPath compatibility
-----------------------------------------------------------------------------------------
-*/
+ * MERGE_AND_PYRAMID - merge single-channel TIFFs into a pyramidal OME-TIFF for QuPath.
+ *
+ * Writes a pyramidal OME-TIFF directly (no bfconvert), preserving channel names, colors, and
+ * pixel sizes in the OME-XML. Intensity channels only; cell objects are delivered separately via
+ * cells.geojson. Processes large images memory-efficiently.
+ */
 
 process MERGE_AND_PYRAMID {
     tag "${meta.patient_id}"

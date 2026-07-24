@@ -1,6 +1,6 @@
 /*
 ========================================================================================
-    VALIS DISTRIBUTED (TILED) REGISTRATION ADAPTER  (spec §6.6)
+    VALIS DISTRIBUTED (TILED) REGISTRATION ADAPTER
 ========================================================================================
     Opt-in low-RAM path that lifts VALIS's in-process non-rigid tile loop into Nextflow
     processes: REG_PREP (rigid + processed-2-D inputs + halt) -> REG_TILE (fan-out, one
@@ -78,7 +78,7 @@ workflow VALIS_DISTRIBUTED_ADAPTER {
         out
     }
 
-    // ---- NON-RIGID step. Three regimes (spec §6.7 + §5A):
+    // ---- NON-RIGID step. Three regimes:
     //   (a) TILED, no micro      : force_tiling=true & skip_micro=true  -> REG_TILE fan-out -> REG_COMPOSE_TILED
     //   (b) SEPARATED, no micro   : default                              -> REG_NONRIGID -> REG_COMPOSE_FIELD
     //   (c) SEPARATED + MICRO     : skip_micro=false                     -> + REG_MICRO_PREP -> REG_NONRIGID_MICRO
@@ -117,7 +117,7 @@ workflow VALIS_DISTRIBUTED_ADAPTER {
             ch_moving_field = REG_COMPOSE_FIELD.out.field
             ch_moving_logs = REG_COMPOSE_FIELD.out.size_log
         } else {
-            // (c) MICRO second wave (spec §5A Option-2). Gather wave-1 fields per patient -> REG_MICRO_PREP
+            // (c) MICRO second wave. Gather wave-1 fields per patient -> REG_MICRO_PREP
             // (inject wave-1 field, capture micro 2-D inputs) -> REG_NONRIGID_MICRO (separated, per slide)
             // -> REG_COMPOSE_MICRO (additive compose of the micro residual onto the wave-1 field).
             // NB: patient_id is a groupKey(pid, total_slides_incl_ref) from the streaming groupTuple in
@@ -184,9 +184,9 @@ workflow VALIS_DISTRIBUTED_ADAPTER {
         .join(ch_key_src)
         .map { key, field, ws, src -> tuple(key[0], key[1], ws, src, field) }
 
-    // The reference warps with its rigid M + crop only: field == [] selects --rigid-only, the exact
-    // semantics the deleted REG_WARP_REF had. Classic VALIS warps every slide including the
-    // reference, so downstream QC needs it in the same cropped coordinate space.
+    // The reference warps with its rigid M + crop only: field == [] selects --rigid-only. Classic
+    // VALIS warps every slide including the reference, so downstream QC needs it in the same
+    // cropped coordinate space.
     ch_ref_warp = ch_prep_ref
         .map { key, ws -> tuple([key[0].toString(), key[1]], ws) }
         .join(ch_key_src)
@@ -209,8 +209,8 @@ workflow VALIS_DISTRIBUTED_ADAPTER {
 
 // Shared full-res warp: grid -> per-tile warp -> assemble. Every regime (tiled non-rigid,
 // separated, separated+micro) AND the reference route through this, so the pipeline contains
-// exactly ONE full-res warp implementation -- the one proven bit-identical to the single-process
-// warp by leg 2 of tests/integration/verify_lowmem_bitidentical.py.
+// exactly ONE full-res warp implementation -- the one that is bit-identical to the single-process
+// warp (verified by the integration tests).
 //
 // Called exactly ONCE: a DSL2 workflow cannot be invoked twice without aliasing, which is why the
 // moving slides and the reference are mixed into a single channel above.

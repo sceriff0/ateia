@@ -1,5 +1,5 @@
 /*
- * REG_PREP - distributed VALIS tiled registration, stage 1 (spec §6.6)
+ * REG_PREP - distributed VALIS tiled registration, stage 1
  *
  * Runs VALIS rigid registration + produces base VALIS's processed 2-D non-rigid inputs, halting
  * BEFORE whole-image DeepFlow (low RAM). Dumps, per moving slide, the tiler-input contract
@@ -25,7 +25,7 @@ process REG_PREP {
     tuple val(patient_id), path("prep"), val(all_metas), emit: prepped
     // Lifted to the task root, like *.size.csv. publishDir's `pattern` cannot reach a file NESTED
     // inside a directory output — prep/ publishes as a unit or not at all — so a nested declaration
-    // silently creates an empty timings/ dir. Verified by a stub run, not assumed (spec §5.6).
+    // silently creates an empty timings/ dir, so the timings file is lifted to the task root.
     tuple val(patient_id), path("*_reg_prep_timings.json"), emit: timings
     path "versions.yml"                                , emit: versions
     path "*.size.csv"                                  , emit: size_log
