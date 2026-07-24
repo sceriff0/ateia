@@ -7,7 +7,10 @@ It reads the pipeline's own trace + QC outputs and writes ``<outdir>/`` (default
   scaling_fits.csv           resource scaling laws: peak_rss_gb ~ input_gb and realtime_s ~ input_gb,
                              per stage (slope = marginal cost per input GiB, intercept = fixed overhead)
   registration_accuracy.csv  per (run, moving slide, stage): dice_matched + centroid displacement (um),
-                             deltas vs the rigid anchor — the landmark-free registration-accuracy signal
+                             deltas vs the rigid anchor — the segmentation-based registration-accuracy signal
+  registration_valis_rtre.csv per (run, slide): VALIS's own feature-based registration error (rTRE / D)
+                             from the summary CSVs it writes during register() — the independent, second
+                             accuracy signal (also rendered in the pipeline's final QC report)
   segmentation_eval.csv      per (run, patient): CellSegmentationEvaluator QualityScore + component metrics
   segmentation_agreement.csv per method-pair on a shared cell: instance-F1 + foreground IoU (stability)
   param_matrix.csv           runs_master joined with the registration + segmentation-quality headlines —
@@ -101,21 +104,24 @@ def build_paper_data(results_root, run_plan_csv, manifest_csv, outdir) -> dict:
     master = build_runs_master(runs_ok)
     scaling = build_scaling_fits(runs_ok)
     reg_acc = quality.harvest_registration_qc(results_root, run_plan_csv)
+    valis_rtre = quality.harvest_valis_rtre(results_root, run_plan_csv)
     seg_eval = quality.harvest_seg_quality(results_root, run_plan_csv)
     try:
         seg_agree = quality.segmentation_agreement(results_root, run_plan_csv)
     except Exception:
         seg_agree = pd.DataFrame()
 
-    # param_matrix: master + registration headline + segmentation-quality headline + cell count.
+    # param_matrix: master + BOTH registration-accuracy headlines (seg-based + VALIS rTRE) +
+    # segmentation-quality headline + cell count.
     reg_run = quality.registration_accuracy_per_run(reg_acc)
+    valis_run = quality.valis_rtre_per_run(valis_rtre)
     seg_run = _seg_quality_per_run(seg_eval)
     try:
         seg_cnt = quality.harvest_segmentation_counts(results_root, run_plan_csv)
     except Exception:
         seg_cnt = pd.DataFrame(columns=["run_id"])
     param_matrix = master if not master.empty else pd.DataFrame(columns=["run_id"])
-    for extra in (reg_run, seg_run, seg_cnt):
+    for extra in (reg_run, valis_run, seg_run, seg_cnt):
         if not extra.empty:
             param_matrix = param_matrix.merge(extra, on="run_id", how="left")
 
@@ -123,6 +129,7 @@ def build_paper_data(results_root, run_plan_csv, manifest_csv, outdir) -> dict:
         "runs_master": master,
         "scaling_fits": scaling,
         "registration_accuracy": reg_acc,
+        "registration_valis_rtre": valis_rtre,
         "segmentation_eval": seg_eval,
         "segmentation_agreement": seg_agree,
         "param_matrix": param_matrix,
@@ -189,6 +196,18 @@ _DICTS = {
          ("delta_dice_vs_rigid", "-", "dice_matched at this stage minus the rigid anchor."),
          ("delta_disp_um_p50_vs_rigid", "um", "displacement_um_p50 minus rigid (negative = improvement)."),
          ("delta_disp_px_p50_vs_rigid", "px", "displacement_px_p50 minus rigid (negative = improvement).")]),
+    "registration_valis_rtre": (
+        "VALIS's own registration error, from the summary CSVs it writes during register() (published "
+        "to <patient>/registered/summary/ and also shown in the final QC report). Feature-based — an "
+        "independent second accuracy signal alongside registration_accuracy.csv. One row per slide; "
+        "columns are exactly what VALIS wrote.",
+        [("run_id", "-", "Run identifier."),
+         ("summary_csv", "-", "Source VALIS summary CSV filename."),
+         ("original_D", "px", "Median matched-feature distance BEFORE registration (if VALIS emits it)."),
+         ("rigid_D", "px", "Median matched-feature distance after the rigid stage."),
+         ("non_rigid_D", "px", "Median matched-feature distance after the non-rigid stage (post-registration)."),
+         ("<...>rTRE", "-", "Relative target registration error variants, if present."),
+         ("n_matches", "-", "Number of matched features, if present.")]),
     "segmentation_eval": (
         "Reference-free segmentation quality from CellSegmentationEvaluator (CSE). One row per "
         "(run, patient). QualityScore is the headline composite; component metrics follow as "
@@ -223,6 +242,8 @@ _DICTS = {
          ("reg_delta_disp_um_p50_vs_rigid", "um", "Final-stage displacement improvement vs rigid."),
          ("reg_delta_dice_vs_rigid", "-", "Final-stage Dice improvement vs rigid."),
          ("reg_pair_fraction", "-", "Final-stage nucleus-pair fraction."),
+         ("valis_non_rigid_D", "px", "VALIS post-registration median feature distance (per-run median)."),
+         ("valis_<col>", "varies", "Per-run median of each numeric VALIS summary column."),
          ("seg_quality_score", "-", "Median CSE QualityScore across patients."),
          ("n_cells", "-", "Segmented cell count (max over the run's masks).")]),
 }
@@ -236,9 +257,9 @@ def _write_dict(path: Path, name: str, df: pd.DataFrame) -> None:
              "| Column | Unit | Definition |", "|---|---|---|"]
     lines += [f"| `{c}` | {u} | {d} |" for c, u, d in cols]
     # Flag any actual column not covered by a curated definition or a documented `<...>` pattern.
+    # Any `<placeholder>` in a documented column name is treated as a wildcard.
     import re
-    patterns = [re.compile("^" + re.escape(c).replace("<STAGE>", ".+")
-                           .replace("<metric>", ".+").replace("<channel_code>", ".+") + "$")
+    patterns = [re.compile("^" + re.sub(r"<[^>]+>", ".+", re.escape(c).replace(r"\<", "<").replace(r"\>", ">")) + "$")
                 for c in documented if "<" in c]
     undoc = [c for c in df.columns
              if c not in documented and not any(p.match(c) for p in patterns)]

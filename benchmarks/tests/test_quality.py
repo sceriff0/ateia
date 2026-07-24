@@ -74,6 +74,38 @@ def test_harvest_registration_qc_tolerates_bad_json(tmp_path):
     assert quality.harvest_registration_qc(tmp_path, plan).empty   # no crash, just empty
 
 
+# ── registration accuracy (VALIS-reported rTRE / D) ──
+def _write_valis_summary(root, run_id, patient, rows):
+    d = root / run_id / "out" / patient / "registered" / "summary"
+    d.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(rows).to_csv(d / f"{patient}_summary.csv", index=False)
+
+
+def test_harvest_valis_rtre_and_per_run(tmp_path):
+    plan = tmp_path / "plan.csv"
+    pd.DataFrame({"run_id": ["r0", "r1"]}).to_csv(plan, index=False)
+    _write_valis_summary(tmp_path, "r0", "P001", [
+        {"name": "cycle1", "original_D": 40.0, "rigid_D": 8.0, "non_rigid_D": 3.0, "n_matches": 200},
+        {"name": "cycle2", "original_D": 44.0, "rigid_D": 9.0, "non_rigid_D": 5.0, "n_matches": 180},
+    ])
+    # r1 has no summary -> contributes nothing
+    long = quality.harvest_valis_rtre(tmp_path, plan)
+    assert set(long["run_id"]) == {"r0"}
+    assert len(long) == 2                                   # two slides
+    assert "non_rigid_D" in long.columns and "summary_csv" in long.columns
+
+    per_run = quality.valis_rtre_per_run(long).set_index("run_id")
+    # median across the two slides, prefixed valis_
+    assert per_run.loc["r0", "valis_non_rigid_D"] == 4.0    # median(3, 5)
+    assert per_run.loc["r0", "valis_original_D"] == 42.0     # median(40, 44)
+
+
+def test_harvest_valis_rtre_tolerates_missing(tmp_path):
+    plan = tmp_path / "plan.csv"; pd.DataFrame({"run_id": ["r0"]}).to_csv(plan, index=False)
+    assert quality.harvest_valis_rtre(tmp_path, plan).empty
+    assert quality.valis_rtre_per_run(pd.DataFrame(columns=["run_id"])).empty
+
+
 # ── segmentation quality (CellSegmentationEvaluator, reference-free) ──
 def _write_seg_eval(root, run_id, patient, quality_score, cell_metrics):
     d = root / run_id / "out" / patient / "qc" / "segmentation"

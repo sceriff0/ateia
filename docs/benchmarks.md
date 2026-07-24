@@ -27,8 +27,15 @@ The benchmark **invents no metrics** — it harvests QC the pipeline already emi
 | Table | Signal | Source (pipeline) |
 |---|---|---|
 | Resource scaling | peak RAM, wall-time vs input | Nextflow `trace.txt` + per-stage `size_logs` |
-| Registration accuracy | `dice_matched` + centroid **displacement (µm)** per stage | `reg_qc=2` staged QC (`bin/warp_seg_qc.py`; see [Registration QC](registration_qc.md)) |
+| Registration accuracy (segmentation-based) | `dice_matched` + centroid **displacement (µm)** per stage | `reg_qc=2` staged QC (`bin/warp_seg_qc.py`; see [Registration QC](registration_qc.md)) |
+| Registration accuracy (VALIS-reported) | feature-based **rTRE / median distance (D)** per slide | the summary CSVs VALIS writes during `register()` (also shown in the final QC report) |
 | Segmentation quality | `QualityScore` + component metrics (reference-free) | `SEG_QUALITY_EVAL` = CellSegmentationEvaluator |
+
+The benchmark harvests **two independent registration-accuracy signals**: the
+segmentation-based Dice/displacement above, and VALIS's *own* feature-based rTRE (the
+error `registrar.register()` reports). Having both — one geometric on nuclei, one on
+VALIS's feature matches — is a stronger claim than either alone. The VALIS rTRE also
+appears in the pipeline's final HTML QC report ("Registration Accuracy (Valis rTRE)").
 
 Registration accuracy is landmark-free: the staged QC segments DAPI nuclei, fixes
 cell-to-cell correspondence **once** at the rigid stage, then re-measures the same
@@ -54,6 +61,7 @@ flowchart LR
 | `runs_master.csv` | run | `<stage>_peak_ram_gb`, `<stage>_wall_s`, `cpu_hours`, `gpu_hours` |
 | `scaling_fits.csv` | (stage, metric) | `slope`, `intercept`, `r2` for `peak_rss_gb ~ input_gb` and `realtime_s ~ input_gb` |
 | `registration_accuracy.csv` | (run, moving, stage) | `dice_matched`, `displacement_um_p50`, `delta_disp_um_p50_vs_rigid` |
+| `registration_valis_rtre.csv` | (run, slide) | VALIS-reported `non_rigid_D` / rTRE (feature-based) |
 | `segmentation_eval.csv` | (run, patient) | `QualityScore` + CSE component metrics |
 | `segmentation_agreement.csv` | method pair | `instance_f1` (reference-free cross-method stability) |
 | `param_matrix.csv` | run | `runs_master` joined with the accuracy + quality headlines — tune from here |

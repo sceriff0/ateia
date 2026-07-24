@@ -90,6 +90,9 @@ def run(results_root, run_plan_csv, manifest_csv, reg_eval_csv, outdir, formats=
     reg_qc_long = quality.harvest_registration_qc(results_root, run_plan_csv)
     reg_qc_long.to_csv(outdir / "registration_accuracy.csv", index=False)
     reg_run = quality.registration_accuracy_per_run(reg_qc_long)
+    # VALIS's own feature-based registration error (the independent second accuracy signal).
+    quality.harvest_valis_rtre(results_root, run_plan_csv).to_csv(
+        outdir / "registration_valis_rtre.csv", index=False)
     # Reference-free segmentation quality (CellSegmentationEvaluator).
     seg_eval = quality.harvest_seg_quality(results_root, run_plan_csv)
     seg_eval.to_csv(outdir / "segmentation_eval.csv", index=False)

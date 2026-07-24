@@ -7,7 +7,7 @@ import pandas as pd
 from benchmarks.analysis import make_tables
 
 FIX = Path(__file__).parent / "fixtures"
-TABLES = ("runs_master", "scaling_fits", "registration_accuracy",
+TABLES = ("runs_master", "scaling_fits", "registration_accuracy", "registration_valis_rtre",
           "segmentation_eval", "segmentation_agreement", "param_matrix")
 
 
@@ -72,6 +72,11 @@ def test_param_matrix_joins_registration_and_segmentation_quality(tmp_path):
     run0 = plan["run_id"].iloc[0]
     _seg_qc(runs, run0, "P001", "cycle2")
     _seg_eval(runs, run0, "P001", 0.88)
+    # VALIS's own registration error summary (published under registered/summary/)
+    vd = runs / run0 / "out" / "P001" / "registered" / "summary"
+    vd.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame([{"name": "cycle2", "non_rigid_D": 3.0, "n_matches": 200}]).to_csv(
+        vd / "P001_summary.csv", index=False)
 
     out = tmp_path / "paper_data"
     make_tables.build_paper_data(runs, FIX / "runs_run_plan.csv",
@@ -81,12 +86,16 @@ def test_param_matrix_joins_registration_and_segmentation_quality(tmp_path):
     assert set(reg["stage"]) == {"rigid", "non_rigid"}
     assert reg[reg["stage"] == "non_rigid"]["dice_matched"].iloc[0] == 0.82
 
+    valis = pd.read_csv(out / "registration_valis_rtre.csv")
+    assert valis["non_rigid_D"].iloc[0] == 3.0
+
     seg = pd.read_csv(out / "segmentation_eval.csv")
     assert seg["QualityScore"].iloc[0] == 0.88
 
     pm = pd.read_csv(out / "param_matrix.csv").set_index("run_id")
-    # the run with QC gets its headline accuracy + quality joined in
-    assert pm.loc[run0, "reg_dice_matched"] == 0.82           # final (non_rigid) stage
+    # the run with QC gets BOTH registration-accuracy headlines + quality joined in
+    assert pm.loc[run0, "reg_dice_matched"] == 0.82           # seg-based, final (non_rigid) stage
+    assert pm.loc[run0, "valis_non_rigid_D"] == 3.0           # VALIS-reported rTRE/D
     assert pm.loc[run0, "seg_quality_score"] == 0.88
 
 

@@ -149,6 +149,49 @@ def harvest_seg_quality(results_root, run_plan_csv) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+# ─────────────────────────────────────────────────── registration accuracy (VALIS rTRE) ──
+def harvest_valis_rtre(results_root, run_plan_csv) -> pd.DataFrame:
+    """Per-(run, slide) VALIS-reported registration error from the summary CSVs VALIS writes
+    during register() (published to <patient>/registered/summary/*.csv). This is the pipeline's
+    OTHER accuracy signal — feature-based rTRE / median distance (D), independent of the
+    segmentation-based dice/displacement. Columns are whatever VALIS wrote (e.g. original_D,
+    rigid_D, non_rigid_D, rTRE variants, n_matches), plus run_id and source. Best-effort."""
+    root = Path(results_root)
+    plan = pd.read_csv(run_plan_csv)
+    frames = []
+    for run_id in plan["run_id"]:
+        out = root / str(run_id) / "out"
+        # VALIS summaries are published under .../registered/summary/ (conf/modules.config REGISTER).
+        csvs = [c for c in out.rglob("*.csv")
+                if "registered/summary" in c.as_posix() or c.parent.name == "summary"]
+        for c in csvs:
+            try:
+                df = pd.read_csv(c)
+            except Exception:
+                continue
+            if df.empty:
+                continue
+            df.insert(0, "run_id", run_id)
+            df.insert(1, "summary_csv", c.name)
+            frames.append(df)
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=["run_id"])
+
+
+def valis_rtre_per_run(valis_long: pd.DataFrame) -> pd.DataFrame:
+    """Reduce the per-slide VALIS summary to one row per run: median of every numeric column,
+    prefixed ``valis_`` (so e.g. valis_non_rigid_D is the post-registration median distance).
+    Column-agnostic — works whatever VALIS's exact schema is. Empty in -> empty out."""
+    if valis_long.empty or "run_id" not in valis_long.columns:
+        return pd.DataFrame(columns=["run_id"])
+    num = valis_long.select_dtypes("number")
+    if num.empty:
+        return pd.DataFrame({"run_id": valis_long["run_id"].unique()})
+    num = num.assign(run_id=valis_long["run_id"].values)
+    agg = num.groupby("run_id", as_index=False).median()
+    agg.columns = ["run_id"] + [f"valis_{c}" for c in agg.columns if c != "run_id"]
+    return agg
+
+
 # ─────────────────────────────────────────────────────────── segmentation counts ──
 def _cell_masks(run_out_dir):
     # SEGMENT has no explicit publishDir, so masks land under the global-default dir (out/segment/),

@@ -137,13 +137,15 @@ Verify the whole harness with no data at all:
         --outdir       benchmarks/paper_data
 
 - **Output:** `benchmarks/paper_data/{runs_master,scaling_fits,registration_accuracy,
-  segmentation_eval,segmentation_agreement,param_matrix}.csv`, each with a sibling
-  `.dict.md` data dictionary. **This is the method-paper deliverable.** Column-by-column
-  meaning is in each `.dict.md` and summarised in `docs/benchmarks.md`.
-- Registration accuracy (`registration_accuracy.csv`) is populated only when the sweep
-  ran with `reg_qc: 2` (the shipped baseline) and registration actually ran (paired
-  matrix); segmentation quality (`segmentation_eval.csv`) needs `skip_seg_quality_eval:
-  false` (also the baseline).
+  registration_valis_rtre,segmentation_eval,segmentation_agreement,param_matrix}.csv`,
+  each with a sibling `.dict.md` data dictionary. **This is the method-paper deliverable.**
+  Column-by-column meaning is in each `.dict.md` and summarised in `docs/benchmarks.md`.
+- **Two registration-accuracy signals:** `registration_accuracy.csv` (segmentation-based
+  Dice/displacement from `reg_qc: 2`) and `registration_valis_rtre.csv` (VALIS's *own*
+  feature-based rTRE, harvested from the summary CSVs it writes — the same numbers the
+  final QC report shows). Both need registration to have actually run (paired matrix).
+  Segmentation quality (`segmentation_eval.csv`) needs `skip_seg_quality_eval: false`
+  (the shipped baseline).
 
 ### A5 — Optional: figures + derived config (local)
 
@@ -260,7 +262,7 @@ figures, and writes `conf/modules.optimized.config`.
 | `generate_matrix.py` | 1 source image | matrix of OME-TIFFs + `matrix_manifest.csv` |
 | `build_run_plan.py` | `sweep.yaml` | `run_plan.csv` |
 | `run_sweep.sh` | manifest + run plan | per-run `trace.txt` + `input_sizes.csv` + QC JSONs (`*_seg_qc.json`, `*_seg_eval.json`) |
-| **`make_tables`** | results + run plan + manifest | **`paper_data/{runs_master,scaling_fits,registration_accuracy,segmentation_eval,segmentation_agreement,param_matrix}.csv` (+ `.dict.md`)** — the paper DATA |
+| **`make_tables`** | results + run plan + manifest | **`paper_data/{runs_master,scaling_fits,registration_accuracy,registration_valis_rtre,segmentation_eval,segmentation_agreement,param_matrix}.csv` (+ `.dict.md`)** — the paper DATA |
 | `make_figures` (optional) | results + run plan + manifest | `measurements.csv` + `resource_models.csv` + `resource_stats.csv` + `scaling_*.pdf/svg` + `modules.optimized.config` |
 | `prepare_pairs.py` (optional) | `pairs.csv` (+ downloaded data) | per-pair input dirs + `pairs_manifest.csv` |
 | `run_registration.sh` (optional) | pairs manifest | `eval_*.json` (landmark TRE) |

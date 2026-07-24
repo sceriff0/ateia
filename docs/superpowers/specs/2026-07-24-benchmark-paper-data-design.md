@@ -102,6 +102,15 @@ displacement_um_p90, delta_disp_um_vs_rigid, delta_dice_vs_rigid, pair_fraction,
 n_pairs`. New `harvest_registration_qc()` in `lib/quality.py` replaces
 `harvest_registration_error()` (feature-distance JSON).
 
+### Table B2 — `registration_valis_rtre.csv` (added 2026-07-24)
+VALIS's *own* feature-based registration error — a **second, independent** accuracy signal.
+`registrar.register()` reports an `error_df`; the REGISTER module publishes it to
+`<patient>/registered/summary/*.csv` and it already renders in the final QC report
+("Registration Accuracy (Valis rTRE)"). `harvest_valis_rtre()` reads those CSVs verbatim
+(VALIS columns: `original_D, rigid_D, non_rigid_D`, rTRE variants, `n_matches`);
+`valis_rtre_per_run()` medians the numeric columns (prefixed `valis_`) into `param_matrix`.
+The paper reports both this and the segmentation-based Dice/displacement.
+
 ### Table C — `segmentation_eval.csv` (harvested; new harvester)
 One row per `(run_id, patient)`, from `*_seg_eval.json`: `seg_method,
 QualityScore` + the flattened CSE component metrics. New `harvest_seg_quality()`
