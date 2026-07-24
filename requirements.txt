@@ -1,4 +1,7 @@
-nextflow
+# Python dependencies for the pipeline's bin/ scripts (development/local convenience).
+# The authoritative, reproducible environment is the per-process container images; this
+# list is a superset for running the scripts outside Nextflow. Nextflow itself is the
+# workflow engine and is installed separately (see docs/installation.md), not via pip.
 numpy
 scipy
 pandas

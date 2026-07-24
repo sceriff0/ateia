@@ -6,7 +6,7 @@ nextflow.enable.dsl = 2
 ================================================================================
     MIRAGE WSI Processing Pipeline
 ================================================================================
-    Preprocessing, Registration, Segmentation, Quantification, Phenotyping
+    Preprocessing, Registration, Segmentation, Quantification, GeoJSON export
     https://github.com/sceriff0/mirage
 ================================================================================
 */

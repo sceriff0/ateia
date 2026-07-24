@@ -81,14 +81,19 @@ nextflow run . \
 
 ## Documentation
 
+Full documentation is hosted at **<https://mirage-pipeline.readthedocs.io/>**.
+
+- [Installation](docs/installation.md) — dependencies, containers, and setup
 - [Usage](docs/usage.md) — samplesheet format, parameters, profiles
 - [Outputs](docs/usage.md#outputs) — output directory layout and file descriptions
 - [Quick start walkthrough](docs/usage.md#quick-start-synthetic-data) — end-to-end run on the bundled test data
 - [Troubleshooting](docs/usage.md#troubleshooting--faq) — common failures and remediation
 - [Parameters](docs/parameters.md) — full parameter reference
+- [Incremental cyclic-IF](docs/add_cycle.md) — folding a new imaging cycle into a completed run
+- [Registration QC](docs/registration_qc.md) — interpreting registration quality metrics
 - [Citation](docs/citation.md) — how to cite MIRAGE and its dependencies
 
-Full documentation (MkDocs):
+To build the documentation locally:
 
 ```bash
 pip install -r docs/requirements.txt
@@ -97,7 +102,8 @@ mkdocs serve
 
 ## Credits
 
-MIRAGE was developed by the MIRAGE team.
+<!-- TODO(author): replace with the real author/maintainer name(s) and contact before publication. -->
+MIRAGE was developed by TODO(author).
 
 ## Citations
 
@@ -109,3 +115,7 @@ Core dependencies include:
 - **StarDist** — Schmidt et al. (2018), *MICCAI* — [https://doi.org/10.1007/978-3-030-00934-2_30](https://doi.org/10.1007/978-3-030-00934-2_30)
 - **BaSiCPy** — Peng et al. (2017), *Nature Communications* — [https://doi.org/10.1038/ncomms14836](https://doi.org/10.1038/ncomms14836)
 - **Nextflow** — Di Tommaso et al. (2017), *Nature Biotechnology* — [https://doi.org/10.1038/nbt.3820](https://doi.org/10.1038/nbt.3820)
+
+## License
+
+MIRAGE is released under the MIT License. See [LICENSE](LICENSE) for details.
