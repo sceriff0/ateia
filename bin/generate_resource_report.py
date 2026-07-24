@@ -87,3 +87,79 @@ def parse_trace(path):
                 "wchar_b": parse_bytes(r.get("wchar")),
             })
     return rows
+
+
+def parse_size_log(path):
+    """Sum input bytes per (process, sample_id) from input_sizes.csv."""
+    out = {}
+    if not path or not Path(path).exists():
+        return out
+    with open(path, newline="", encoding="utf-8") as fh:
+        for row in csv.DictReader(fh):
+            proc = (row.get("process") or "").strip()
+            sample = (row.get("sample_id") or "").strip()
+            if not proc or proc == "STUB":
+                continue
+            try:
+                b = int(float(row.get("bytes") or 0))
+            except ValueError:
+                b = 0
+            out[(proc, sample)] = out.get((proc, sample), 0) + b
+    return out
+
+
+def _maxf(values):
+    """Max of the non-None floats, or None."""
+    vals = [v for v in values if v is not None]
+    return max(vals) if vals else None
+
+
+def _sumf(values):
+    """Sum of the non-None floats (0.0 if all None)."""
+    return sum(v for v in values if v is not None)
+
+
+def rollup_by_process(trace_rows):
+    """Aggregate trace rows into per-process resource summaries."""
+    groups = {}
+    for r in trace_rows:
+        groups.setdefault(r["process"], []).append(r)
+    out = []
+    for proc, rows in sorted(groups.items()):
+        rts = [r.get("realtime_s") for r in rows]
+        realtime_total = _sumf(rts)
+        n = len(rows)
+        out.append({
+            "process": proc,
+            "n_tasks": n,
+            "realtime_total_s": realtime_total,
+            "realtime_mean_s": round(realtime_total / n, 1) if n else 0.0,
+            "cpu_max_pct": _maxf([r.get("cpu_pct") for r in rows]),
+            "peak_rss_max_b": _maxf([r.get("peak_rss_b") for r in rows]),
+            "peak_vmem_max_b": _maxf([r.get("peak_vmem_b") for r in rows]),
+            "rchar_total_b": _sumf([r.get("rchar_b") for r in rows]),
+            "wchar_total_b": _sumf([r.get("wchar_b") for r in rows]),
+            "n_failed": sum(1 for r in rows if r.get("exit") not in ("0", "", None)),
+        })
+    return out
+
+
+def join_size(trace_rows, size_map):
+    """Attach input_bytes to each trace row via (process, tag), with prefix fallback."""
+    # Pre-index sample ids by process for fallback matching.
+    by_proc = {}
+    for (proc, sample), b in size_map.items():
+        by_proc.setdefault(proc, []).append((sample, b))
+    joined = []
+    for r in trace_rows:
+        proc, tag = r["process"], r.get("tag", "")
+        input_bytes = size_map.get((proc, tag))
+        if input_bytes is None:
+            # Fallback: a size sample whose id is a prefix of the trace tag
+            # (trace tag is meta.id = "<patient>_<stem>"; size sample is patient).
+            for sample, b in by_proc.get(proc, []):
+                if sample and (tag == sample or tag.startswith(sample)):
+                    input_bytes = b
+                    break
+        joined.append({**r, "input_bytes": input_bytes})
+    return joined

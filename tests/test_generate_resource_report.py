@@ -52,3 +52,45 @@ def test_parse_trace(tmp_path):
     assert r["peak_rss_b"] == round(3.2 * 1024**3, 1)
     assert r["cpu_pct"] == 142.3
     assert r["exit"] == "0"
+
+
+def test_parse_size_log(tmp_path):
+    grr = _load()
+    p = tmp_path / "input_sizes.csv"
+    p.write_text(
+        "process,sample_id,filename,bytes\n"
+        "MIRAGE:PRE:CONVERT_IMAGE,P001,a.tiff,100\n"
+        "MIRAGE:PRE:CONVERT_IMAGE,P001,b.tiff,50\n"
+        "STUB,P001,stub,0\n"
+    )
+    m = grr.parse_size_log(p)
+    assert m[("MIRAGE:PRE:CONVERT_IMAGE", "P001")] == 150
+
+
+def test_rollup_by_process():
+    grr = _load()
+    rows = [
+        {"process": "A", "tag": "P1", "exit": "0", "realtime_s": 10.0, "cpu_pct": 100.0,
+         "peak_rss_b": 200.0, "peak_vmem_b": 300.0, "rchar_b": 5.0, "wchar_b": 2.0},
+        {"process": "A", "tag": "P2", "exit": "0", "realtime_s": 30.0, "cpu_pct": 150.0,
+         "peak_rss_b": 400.0, "peak_vmem_b": 500.0, "rchar_b": 7.0, "wchar_b": 1.0},
+    ]
+    roll = {r["process"]: r for r in grr.rollup_by_process(rows)}
+    a = roll["A"]
+    assert a["n_tasks"] == 2
+    assert a["realtime_total_s"] == 40.0
+    assert a["realtime_mean_s"] == 20.0
+    assert a["peak_rss_max_b"] == 400.0
+    assert a["cpu_max_pct"] == 150.0
+
+
+def test_join_size_exact_and_fallback():
+    grr = _load()
+    trace = [
+        {"process": "A", "tag": "P001", "realtime_s": 1.0, "peak_rss_b": 10.0},
+        {"process": "A", "tag": "P001_slideX", "realtime_s": 2.0, "peak_rss_b": 20.0},
+    ]
+    size = {("A", "P001"): 999}
+    joined = grr.join_size(trace, size)
+    assert joined[0]["input_bytes"] == 999          # exact (process, tag)
+    assert joined[1]["input_bytes"] == 999          # fallback: same process, sample prefix
