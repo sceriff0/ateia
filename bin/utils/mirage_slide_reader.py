@@ -16,12 +16,12 @@ the whole warp stream in O(tile) RAM with no algorithm change.
 Anything this reader does not recognise falls back to VALIS's own dispatch via
 ``get_reader_for``, so non-mirage inputs keep working exactly as before.
 """
+
 import os
 import re
 
 import numpy as np
 import pyvips
-
 from valis import slide_io, slide_tools
 
 # Bands are packed vertically into pages by both tifffile (ome=True, axes="CYX") and
@@ -30,12 +30,11 @@ from valis import slide_io, slide_tools
 # (pyvips only, no valis) so tools that need ONLY the band-join -- bin/compare_registration.py --
 # can have it without importing the registration stack. Re-exported here because that is where
 # every existing caller imports it from.
-from vips_pages import (  # noqa: E402
-    TOILET_ROLL as _TOILET_ROLL,
+from vips_pages import (
     bandjoin_pages as _bandjoin_pages,
-    open_multiband,
+)
+from vips_pages import (
     open_roll as _open_roll,
-    page_height as _page_height,
 )
 
 
@@ -63,7 +62,9 @@ class MirageVipsSlideReader(slide_io.SlideReader):
 
     def slide2image(self, level=0, series=None, xywh=None, *args, **kwargs):
         img = self.slide2vips(level=level, series=series, xywh=xywh)
-        arr = np.frombuffer(img.write_to_memory(), dtype=slide_tools.VIPS_FORMAT_NUMPY_DTYPE[img.format])
+        arr = np.frombuffer(
+            img.write_to_memory(), dtype=slide_tools.VIPS_FORMAT_NUMPY_DTYPE[img.format]
+        )
         arr = arr.reshape(img.height, img.width, img.bands)
         return arr[..., 0] if img.bands == 1 else arr
 
@@ -74,7 +75,9 @@ class MirageVipsSlideReader(slide_io.SlideReader):
 
     def _build_metadata(self):
         ome_xml, tile_wh = _read_tiff_header(self.src_f)
-        md = slide_io.MetaData(os.path.basename(self.src_f), "mirage-pyvips", series=self.series)
+        md = slide_io.MetaData(
+            os.path.basename(self.src_f), "mirage-pyvips", series=self.series
+        )
         # VALIS contracts slide_dimensions as an ndarray of shape (n_levels, 2), (width, height)
         # per level -- see valis_lib/slide_io.py's real readers (e.g. VipsSlideReader's
         # _get_slide_dimensions_vips: ``np.array(slide_dims)``) and registration.py, which does
@@ -94,11 +97,11 @@ class MirageVipsSlideReader(slide_io.SlideReader):
         # correct band interpretation (slide_tools.numpy2vips). mirage's own can_read() already
         # rejects RGB and n_channels==0 is impossible for a real slide, so this is unconditional.
         if md.is_rgb:
-            md.pyvips_interpretation = 'srgb'
+            md.pyvips_interpretation = "srgb"
         elif md.n_channels == 1:
-            md.pyvips_interpretation = 'b-w'
+            md.pyvips_interpretation = "b-w"
         else:
-            md.pyvips_interpretation = 'multiband'
+            md.pyvips_interpretation = "multiband"
         return md
 
     @staticmethod
@@ -125,6 +128,7 @@ class MirageVipsSlideReader(slide_io.SlideReader):
         """
         try:
             import tifffile
+
             with tifffile.TiffFile(str(src_f)) as tf:
                 page = tf.pages[0]
                 if not page.is_tiled:
@@ -160,6 +164,7 @@ class MirageVipsSlideReader(slide_io.SlideReader):
 def _read_tiff_header(src_f):
     """Single tifffile open: returns (ome_xml_or_None, tile_width)."""
     import tifffile
+
     with tifffile.TiffFile(str(src_f)) as tf:
         ome_xml = tf.ome_metadata
         tw = tf.pages[0].tilewidth

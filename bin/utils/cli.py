@@ -28,8 +28,7 @@ __all__ = [
 
 
 def create_base_parser(
-    description: str,
-    epilog: Optional[str] = None
+    description: str, epilog: Optional[str] = None
 ) -> argparse.ArgumentParser:
     """Create an argument parser with common options.
 
@@ -65,13 +64,15 @@ def create_base_parser(
     log_group = parser.add_argument_group("logging options")
 
     log_group.add_argument(
-        "-v", "--verbose",
+        "-v",
+        "--verbose",
         action="store_true",
         help="Enable verbose (DEBUG level) logging",
     )
 
     log_group.add_argument(
-        "-q", "--quiet",
+        "-q",
+        "--quiet",
         action="store_true",
         help="Suppress non-error output (ERROR level only)",
     )
@@ -87,8 +88,7 @@ def create_base_parser(
 
 
 def setup_logging_from_args(
-    args: argparse.Namespace,
-    default_level: int = logging.INFO
+    args: argparse.Namespace, default_level: int = logging.INFO
 ) -> None:
     """Configure logging based on parsed command-line arguments.
 
@@ -167,7 +167,8 @@ def add_input_output_args(
     io_group = parser.add_argument_group("input/output options")
 
     io_group.add_argument(
-        "--input", "-i",
+        "--input",
+        "-i",
         type=Path,
         required=input_required,
         metavar="PATH",
@@ -175,7 +176,8 @@ def add_input_output_args(
     )
 
     io_group.add_argument(
-        "--output-dir", "-o",
+        "--output-dir",
+        "-o",
         type=Path,
         required=output_required,
         metavar="DIR",

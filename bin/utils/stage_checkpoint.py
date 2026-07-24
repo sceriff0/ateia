@@ -19,6 +19,7 @@ of GB. Reference slides have no field and are recorded as such.
 Writing this must never be able to fail a registration: it is QC input, and QC in this pipeline
 is non-gating. :func:`write_checkpoint` returns a status dict instead of raising.
 """
+
 from __future__ import annotations
 
 import json
@@ -127,7 +128,8 @@ class StageCheckpoint:
         if version != CHECKPOINT_VERSION:
             raise ValueError(
                 f"stage checkpoint version {version!r} != {CHECKPOINT_VERSION}; it was written "
-                "by a different REGISTER than the one this QC expects")
+                "by a different REGISTER than the one this QC expects"
+            )
         return cls(manifest, root)
 
     @property
@@ -150,7 +152,8 @@ class StageCheckpoint:
         entry = self.manifest.get("slides", {}).get(name)
         if entry is None:
             raise KeyError(
-                f"slide {name!r} is not in the stage checkpoint (it has: {self.slide_names})")
+                f"slide {name!r} is not in the stage checkpoint (it has: {self.slide_names})"
+            )
         field = None
         if entry.get("field"):
             with np.load(os.path.join(self.root, entry["field"])) as npz:

@@ -21,8 +21,8 @@ between them stays apples-to-apples.
 def install_micro_rigid_guard():
     """Idempotently wrap MicroRigidRegistrar.align_slides to skip (M unchanged) when no high-rez
     matches are found, instead of crashing on np.vstack([])."""
-    from valis.micro_rigid_registrar import MicroRigidRegistrar
     from valis import valtils
+    from valis.micro_rigid_registrar import MicroRigidRegistrar
 
     if getattr(MicroRigidRegistrar, "_empty_match_guard", False):
         return
@@ -36,7 +36,8 @@ def install_micro_rigid_guard():
                 valtils.print_warning(
                     f"MicroRigidRegistrar: no high-rez matches for {moving_slide.name}->"
                     f"{fixed_slide.name}; skipping micro-rigid adjustment (rigid M unchanged). "
-                    f"This is a no-op on feature-rich (real) data.")
+                    f"This is a no-op on feature-rich (real) data."
+                )
                 return None
             raise
 

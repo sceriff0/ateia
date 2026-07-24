@@ -1,10 +1,11 @@
 import importlib
 import json
 from pathlib import Path
-import numpy as np
-from tests.cse_fixture import make_fixture
-from bin.utils.cse import single_method_eval
 
+import numpy as np
+
+from bin.utils.cse import single_method_eval
+from tests.cse_fixture import make_fixture
 
 DATA = Path(__file__).parent / "data" / "cse"
 
@@ -17,8 +18,9 @@ def test_cse_imports():
 
 def run_eval_on_fixture():
     img, mask, px = make_fixture()
-    return single_method_eval(img, mask, PCA_model=False, output_dir=".",
-                              pixelsizex=px, pixelsizey=px)
+    return single_method_eval(
+        img, mask, PCA_model=False, output_dir=".", pixelsizex=px, pixelsizey=px
+    )
 
 
 def flatten(metrics):
@@ -43,7 +45,9 @@ def assert_metrics_close(result, golden, tol=1e-6, qs_rel_tol=1e-3):
             # PCA+exp composite amplifies sub-epsilon float64-vs-float32 rounding
             # from the vectorized reductions; individual metrics stay strict at tol.
             denom = abs(gv) if abs(gv) > 1e-12 else 1.0
-            assert abs(rv - gv) / denom <= qs_rel_tol, f"{key}: {rv} vs {gv} (rel {qs_rel_tol})"
+            assert abs(rv - gv) / denom <= qs_rel_tol, (
+                f"{key}: {rv} vs {gv} (rel {qs_rel_tol})"
+            )
         else:
             assert abs(rv - gv) <= tol, f"{key}: {rv} vs {gv}"
 

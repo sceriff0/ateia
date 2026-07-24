@@ -18,31 +18,31 @@ Examples
 
 from __future__ import annotations
 
-# Logger utilities
-from .logger import (
-    get_logger,
-    configure_logging,
-    log_progress,
-    log_timing,
-    timed,
+# CLI utilities
+from .cli import (
+    add_input_output_args,
+    create_base_parser,
+    setup_logging_from_args,
 )
 
 # Constants
 from .constants import (
-    ExitCode,
     DEFAULT_FOV_SIZE,
     DEFAULT_PIXEL_SIZE,
     DEFAULT_TILE_SIZE,
     LOG_SEPARATOR,
-    TIFF_EXTENSIONS,
     OME_TIFF_EXTENSIONS,
+    TIFF_EXTENSIONS,
+    ExitCode,
 )
 
-# CLI utilities
-from .cli import (
-    create_base_parser,
-    setup_logging_from_args,
-    add_input_output_args,
+# Logger utilities
+from .logger import (
+    configure_logging,
+    get_logger,
+    log_progress,
+    log_timing,
+    timed,
 )
 
 __all__ = [

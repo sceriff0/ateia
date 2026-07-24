@@ -7,6 +7,7 @@ traced with the same crop -> find_contours -> simplify approach as
 ``bin/extract_cell_properties.py``. Runs in the StarDist/segmentation container
 (scipy + scikit-image present).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -18,7 +19,7 @@ import numpy as np
 def mask_to_feature_collection(mask, simplify_tolerance: float = 0.5) -> dict:
     """Trace each label's outer contour into a GeoJSON FeatureCollection (pixel x,y)."""
     from scipy import ndimage as ndi
-    from skimage.measure import find_contours, approximate_polygon
+    from skimage.measure import approximate_polygon, find_contours
 
     mask = np.asarray(mask)
     features = []
@@ -37,19 +38,23 @@ def mask_to_feature_collection(mask, simplify_tolerance: float = 0.5) -> dict:
             continue
         if ring[0] != ring[-1]:
             ring.append(ring[0])
-        features.append({
-            "type": "Feature",
-            "properties": {"label": int(i)},
-            "geometry": {"type": "Polygon", "coordinates": [ring]},
-        })
+        features.append(
+            {
+                "type": "Feature",
+                "properties": {"label": int(i)},
+                "geometry": {"type": "Polygon", "coordinates": [ring]},
+            }
+        )
     return {"type": "FeatureCollection", "features": features}
 
 
 def write_geojson(mask_path, out_path, simplify_tolerance: float = 0.5) -> int:
     """Read a label-mask TIFF, convert, write GeoJSON. Returns the cell count."""
     import tifffile
-    fc = mask_to_feature_collection(tifffile.imread(str(mask_path)),
-                                    simplify_tolerance=simplify_tolerance)
+
+    fc = mask_to_feature_collection(
+        tifffile.imread(str(mask_path)), simplify_tolerance=simplify_tolerance
+    )
     with open(out_path, "w") as f:
         json.dump(fc, f)
     return len(fc["features"])

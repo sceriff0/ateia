@@ -17,6 +17,7 @@ Dump contract (consumed by reg_tile.py; warp-state for reg_finalize.py is dumped
 from the Valis/Slide objects, NOT here — the registrar ``self`` only has the tiler inputs):
   moving.v, fixed.v, mask.v (if any), target_stats.npy (if any), expanded_bboxes.npy, manifest.json
 """
+
 import json
 import os
 
@@ -49,8 +50,12 @@ def _dump_inputs(self, out_dir):
         self.mask.write_to_file(os.path.join(out_dir, "mask.v"))
     has_target_stats = getattr(self, "target_stats", None) is not None
     if has_target_stats:
-        np.save(os.path.join(out_dir, "target_stats.npy"), np.asarray(self.target_stats))
-    np.save(os.path.join(out_dir, "expanded_bboxes.npy"), np.asarray(self.expanded_bboxes))
+        np.save(
+            os.path.join(out_dir, "target_stats.npy"), np.asarray(self.target_stats)
+        )
+    np.save(
+        os.path.join(out_dir, "expanded_bboxes.npy"), np.asarray(self.expanded_bboxes)
+    )
 
     manifest = {
         "n_tiles": int(self.n_tiles),
@@ -75,6 +80,7 @@ def install_halt_hook(out_dir):
     ``Valis.register()`` catches the raise and returns ``None`` (Blocker 2); PREP treats a populated
     ``out_dir`` (manifest.json present) as the halt signal.
     """
+
     def halt(self):
         _dump_inputs(self, out_dir)
         raise TilesPending(out_dir)
@@ -84,6 +90,7 @@ def install_halt_hook(out_dir):
 
 def install_dump_hook(out_dir):
     """Fallback / single-node tiled mode: dump inputs, then run the real loop inline."""
+
     def dump(self):
         _dump_inputs(self, out_dir)
         return self._calc_tiles()  # the patched-out original tile loop
@@ -100,13 +107,21 @@ def install_read_hook(tiles_dir):
     from valis import warp_tools
 
     def read(self):
-        bk = [pyvips.Image.new_from_file(os.path.join(tiles_dir, f"bk_{i}.v"))
-              for i in range(self.n_tiles)]
-        fwd = [pyvips.Image.new_from_file(os.path.join(tiles_dir, f"fwd_{i}.v"))
-               for i in range(self.n_tiles)]
+        bk = [
+            pyvips.Image.new_from_file(os.path.join(tiles_dir, f"bk_{i}.v"))
+            for i in range(self.n_tiles)
+        ]
+        fwd = [
+            pyvips.Image.new_from_file(os.path.join(tiles_dir, f"fwd_{i}.v"))
+            for i in range(self.n_tiles)
+        ]
         return (
-            warp_tools.stitch_tiles(bk, self.expanded_bboxes, self.n_rows, self.n_cols, self.tile_buffer),
-            warp_tools.stitch_tiles(fwd, self.expanded_bboxes, self.n_rows, self.n_cols, self.tile_buffer),
+            warp_tools.stitch_tiles(
+                bk, self.expanded_bboxes, self.n_rows, self.n_cols, self.tile_buffer
+            ),
+            warp_tools.stitch_tiles(
+                fwd, self.expanded_bboxes, self.n_rows, self.n_cols, self.tile_buffer
+            ),
         )
 
     _set_hook(read)
@@ -118,9 +133,11 @@ def clear_hook():
 
 def _set_hook(fn):
     from valis import non_rigid_registrars as nrr
+
     if not hasattr(nrr.NonRigidTileRegistrar, "EXTERNAL_TILE_HOOK"):
         raise RuntimeError(
             "VALIS image is missing the EXTERNAL_TILE_HOOK seam (containers/valis/calc_hook.patch not "
             "applied). Set params.reg_dist_container to the patched image "
-            "(default bolt3x/attend_image_analysis:mirage_valis_1.0.0), not stock cdgatenbee/valis-wsi:1.0.0.")
+            "(default bolt3x/attend_image_analysis:mirage_valis_1.0.0), not stock cdgatenbee/valis-wsi:1.0.0."
+        )
     nrr.NonRigidTileRegistrar.EXTERNAL_TILE_HOOK = fn

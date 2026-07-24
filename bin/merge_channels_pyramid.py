@@ -1,41 +1,50 @@
 #!/usr/bin/env python3
 """Merge single-channel TIFF files into a pyramidal multi-channel OME-TIFF."""
+
 from __future__ import annotations
 
 import argparse
-import sys
-from pathlib import Path
-import numpy as np
-import tifffile
-import os
-import gc
-import tempfile
-import json
 import colorsys
-from typing import Dict, List, Tuple, Optional
+import gc
+import json
+import os
+import sys
+import tempfile
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 from xml.sax.saxutils import escape as xml_escape
 
+import numpy as np
+import tifffile
+
 # Add path for utils
-sys.path.insert(0, str(Path(__file__).parent / 'utils'))
-from logger import get_logger, configure_logging
+sys.path.insert(0, str(Path(__file__).parent / "utils"))
+from logger import configure_logging, get_logger
 
 try:
-    from validation import log_image_stats, detect_wrapped_values, validate_image_range
+    from validation import detect_wrapped_values, log_image_stats, validate_image_range
 except ImportError:
     # Fallback if validation module not available
-    def log_image_stats(data, stage, logger=None): pass
-    def detect_wrapped_values(data, **kwargs): return False, 0, 0.0
-    def validate_image_range(data, stage, **kwargs): return True, data
+    def log_image_stats(data, stage, logger=None):
+        pass
+
+    def detect_wrapped_values(data, **kwargs):
+        return False, 0, 0.0
+
+    def validate_image_range(data, stage, **kwargs):
+        return True, data
+
 
 try:
     import zarr
+
     HAS_ZARR = True
 except ImportError:
     HAS_ZARR = False
 
-os.environ['NUMBA_DISABLE_JIT'] = '0'
-os.environ['NUMBA_CACHE_DIR'] = tempfile.gettempdir() + '/numba_cache'
-os.environ['NUMBA_DISABLE_CACHING'] = '1'
+os.environ["NUMBA_DISABLE_JIT"] = "0"
+os.environ["NUMBA_CACHE_DIR"] = tempfile.gettempdir() + "/numba_cache"
+os.environ["NUMBA_DISABLE_CACHING"] = "1"
 
 logger = get_logger(__name__)
 
@@ -67,24 +76,24 @@ PHENOTYPE_COLORS = {
 }
 
 MARKER_COLORS = {
-    'DAPI': (0, 0, 255),
-    'CD45': (0, 255, 0),
-    'CD3': (255, 255, 0),
-    'CD8': (255, 0, 255),
-    'CD4': (0, 255, 255),
-    'CD14': (255, 128, 0),
-    'CD163': (255, 0, 128),
-    'FOXP3': (128, 255, 0),
-    'PANCK': (255, 0, 0),
-    'VIMENTIN': (128, 0, 255),
-    'SMA': (0, 128, 255),
-    'GZMB': (255, 128, 128),
-    'PD1': (128, 255, 128),
-    'PDL1': (255, 200, 100),
-    'L1CAM': (100, 200, 255),
-    'PAX2': (200, 100, 255),
-    'CD74': (255, 255, 128),
-    'Segmentation': (255, 255, 255),
+    "DAPI": (0, 0, 255),
+    "CD45": (0, 255, 0),
+    "CD3": (255, 255, 0),
+    "CD8": (255, 0, 255),
+    "CD4": (0, 255, 255),
+    "CD14": (255, 128, 0),
+    "CD163": (255, 0, 128),
+    "FOXP3": (128, 255, 0),
+    "PANCK": (255, 0, 0),
+    "VIMENTIN": (128, 0, 255),
+    "SMA": (0, 128, 255),
+    "GZMB": (255, 128, 128),
+    "PD1": (128, 255, 128),
+    "PDL1": (255, 200, 100),
+    "L1CAM": (100, 200, 255),
+    "PAX2": (200, 100, 255),
+    "CD74": (255, 255, 128),
+    "Segmentation": (255, 255, 255),
 }
 
 
@@ -103,7 +112,7 @@ def generate_channel_color(name: str, index: int) -> Tuple[int, int, int]:
     for key in MARKER_COLORS:
         if key.upper() in name_upper or name_upper in key.upper():
             return MARKER_COLORS[key]
-    
+
     if name in MARKER_COLORS:
         return MARKER_COLORS[name]
 
@@ -115,7 +124,9 @@ def generate_channel_color(name: str, index: int) -> Tuple[int, int, int]:
     return (int(r * 255), int(g * 255), int(b * 255))
 
 
-def create_phenotype_colormap(label_map: Dict[int, str], n_categories: int) -> Dict[int, Tuple[str, Tuple[int, int, int]]]:
+def create_phenotype_colormap(
+    label_map: Dict[int, str], n_categories: int
+) -> Dict[int, Tuple[str, Tuple[int, int, int]]]:
     """Create a colormap for phenotype categories."""
     colormap = {}
     name_to_color = {v["name"]: v["rgb"] for v in PHENOTYPE_COLORS.values()}
@@ -138,13 +149,25 @@ def downsample_image(image: np.ndarray, factor: int) -> np.ndarray:
     """Downsample a 2D or 3D (CYX) image by a given factor."""
     try:
         import cv2
+
         if image.ndim == 2:
             h, w = image.shape
             new_h, new_w = h // factor, w // factor
             # cv2.INTER_AREA is good for downsampling but may introduce small rounding errors
             # For integer types, use float intermediate then round
-            if image.dtype in [np.uint8, np.uint16, np.uint32, np.int8, np.int16, np.int32]:
-                downsampled = cv2.resize(image.astype(np.float32), (new_w, new_h), interpolation=cv2.INTER_AREA)
+            if image.dtype in [
+                np.uint8,
+                np.uint16,
+                np.uint32,
+                np.int8,
+                np.int16,
+                np.int32,
+            ]:
+                downsampled = cv2.resize(
+                    image.astype(np.float32),
+                    (new_w, new_h),
+                    interpolation=cv2.INTER_AREA,
+                )
                 return np.round(downsampled).astype(image.dtype)
             else:
                 return cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
@@ -154,11 +177,24 @@ def downsample_image(image: np.ndarray, factor: int) -> np.ndarray:
             new_h, new_w = h // factor, w // factor
             result = np.zeros((c, new_h, new_w), dtype=image.dtype)
             for i in range(c):
-                if image.dtype in [np.uint8, np.uint16, np.uint32, np.int8, np.int16, np.int32]:
-                    downsampled = cv2.resize(image[i].astype(np.float32), (new_w, new_h), interpolation=cv2.INTER_AREA)
+                if image.dtype in [
+                    np.uint8,
+                    np.uint16,
+                    np.uint32,
+                    np.int8,
+                    np.int16,
+                    np.int32,
+                ]:
+                    downsampled = cv2.resize(
+                        image[i].astype(np.float32),
+                        (new_w, new_h),
+                        interpolation=cv2.INTER_AREA,
+                    )
                     result[i] = np.round(downsampled).astype(image.dtype)
                 else:
-                    result[i] = cv2.resize(image[i], (new_w, new_h), interpolation=cv2.INTER_AREA)
+                    result[i] = cv2.resize(
+                        image[i], (new_w, new_h), interpolation=cv2.INTER_AREA
+                    )
             return result
     except ImportError:
         pass
@@ -167,7 +203,7 @@ def downsample_image(image: np.ndarray, factor: int) -> np.ndarray:
     if image.ndim == 2:
         h, w = image.shape
         new_h, new_w = h // factor, w // factor
-        trimmed = image[:new_h * factor, :new_w * factor]
+        trimmed = image[: new_h * factor, : new_w * factor]
         reshaped = trimmed.reshape(new_h, factor, new_w, factor)
         if image.dtype in [np.float32, np.float64]:
             return reshaped.mean(axis=(1, 3)).astype(image.dtype)
@@ -179,7 +215,7 @@ def downsample_image(image: np.ndarray, factor: int) -> np.ndarray:
         new_h, new_w = h // factor, w // factor
         result = np.zeros((c, new_h, new_w), dtype=image.dtype)
         for i in range(c):
-            trimmed = image[i, :new_h * factor, :new_w * factor]
+            trimmed = image[i, : new_h * factor, : new_w * factor]
             reshaped = trimmed.reshape(new_h, factor, new_w, factor)
             # Fix: Round before converting to integer dtype to avoid truncation artifacts
             if image.dtype in [np.float32, np.float64]:
@@ -194,7 +230,7 @@ def calculate_pyramid_levels(
     width: int,
     min_size: int = 64,
     max_levels: int = 10,
-    scale_factor: int = 2
+    scale_factor: int = 2,
 ) -> List[Tuple[int, int]]:
     """Calculate pyramid level dimensions."""
     levels = [(height, width)]
@@ -220,26 +256,26 @@ def build_ome_xml(
     phenotype_colormap: Optional[Dict[int, Tuple[str, Tuple[int, int, int]]]] = None,
     physical_size_x: float = 0.325,
     physical_size_y: float = 0.325,
-    physical_size_unit: str = "µm"
+    physical_size_unit: str = "µm",
 ) -> str:
     """
     Build OME-XML metadata for multi-channel pyramidal image.
-    
-    IMPORTANT: For tifffile's automatic OME-TIFF handling, we use the 
+
+    IMPORTANT: For tifffile's automatic OME-TIFF handling, we use the
     metadata dict approach rather than raw XML for the base image,
     but we can still embed additional annotations.
     """
     dtype_map = {
-        'uint8': 'uint8',
-        'uint16': 'uint16',
-        'uint32': 'uint32',
-        'int8': 'int8',
-        'int16': 'int16',
-        'int32': 'int32',
-        'float32': 'float',
-        'float64': 'double',
+        "uint8": "uint8",
+        "uint16": "uint16",
+        "uint32": "uint32",
+        "int8": "int8",
+        "int16": "int16",
+        "int32": "int32",
+        "float32": "float",
+        "float64": "double",
     }
-    ome_dtype = dtype_map.get(str(dtype), 'uint16')
+    ome_dtype = dtype_map.get(str(dtype), "uint16")
 
     # Build channel elements
     channel_elements = []
@@ -261,14 +297,18 @@ def build_ome_xml(
             safe_name = xml_escape(name)
             r, g, b = rgb
             map_entries.append(f'        <M K="phenotype_{idx}_name">{safe_name}</M>')
-            map_entries.append(f'        <M K="phenotype_{idx}_color">#{r:02x}{g:02x}{b:02x}</M>')
+            map_entries.append(
+                f'        <M K="phenotype_{idx}_color">#{r:02x}{g:02x}{b:02x}</M>'
+            )
 
-        colormap_json = json.dumps({
-            str(k): {"name": v[0], "rgb": list(v[1])}
-            for k, v in phenotype_colormap.items()
-        })
+        colormap_json = json.dumps(
+            {
+                str(k): {"name": v[0], "rgb": list(v[1])}
+                for k, v in phenotype_colormap.items()
+            }
+        )
 
-        annotations_xml = f'''
+        annotations_xml = f"""
   <StructuredAnnotations>
     <MapAnnotation ID="Annotation:Phenotypes" Namespace="phenotype.colormap">
       <Value>
@@ -276,7 +316,7 @@ def build_ome_xml(
         <M K="colormap_json">{xml_escape(colormap_json)}</M>
       </Value>
     </MapAnnotation>
-  </StructuredAnnotations>'''
+  </StructuredAnnotations>"""
 
     # Build complete OME-XML
     # NOTE: TiffData is left simple - tifffile will handle IFD mapping
@@ -319,7 +359,7 @@ def write_pyramidal_ome_tiff(
     pyramid_resolutions: int = 5,
     pyramid_scale: int = 2,
     tile_size: int = 512,
-    compression: str = 'zstd',
+    compression: str = "zstd",
     compressionargs: Optional[Dict] = None,
     mask_stack: Optional[np.ndarray] = None,
     mask_names: Optional[List[str]] = None,
@@ -365,36 +405,37 @@ def write_pyramidal_ome_tiff(
 
     # Calculate pyramid levels
     levels = calculate_pyramid_levels(
-        height, width,
+        height,
+        width,
         min_size=64,
         max_levels=pyramid_resolutions,
-        scale_factor=pyramid_scale
+        scale_factor=pyramid_scale,
     )
     num_subresolutions = len(levels) - 1
-    
+
     log(f"Writing pyramidal OME-TIFF with {len(levels)} resolution levels:")
     for i, (h, w) in enumerate(levels):
         log(f"  Level {i}: {w} x {h}")
 
     # Build metadata dict for tifffile (it will generate proper OME-XML)
     metadata = {
-        'axes': 'CYX',
-        'Channel': {'Name': channel_names},
-        'PhysicalSizeX': physical_size_x,
-        'PhysicalSizeXUnit': 'µm',
-        'PhysicalSizeY': physical_size_y,
-        'PhysicalSizeYUnit': 'µm',
+        "axes": "CYX",
+        "Channel": {"Name": channel_names},
+        "PhysicalSizeX": physical_size_x,
+        "PhysicalSizeXUnit": "µm",
+        "PhysicalSizeY": physical_size_y,
+        "PhysicalSizeYUnit": "µm",
     }
 
     # Common write options
     options = dict(
         tile=(tile_size, tile_size),
         compression=compression,
-        photometric='minisblack',
-        resolutionunit='CENTIMETER',
+        photometric="minisblack",
+        resolutionunit="CENTIMETER",
     )
     if compressionargs:
-        options['compressionargs'] = compressionargs
+        options["compressionargs"] = compressionargs
 
     with tifffile.TiffWriter(output_path, bigtiff=True, ome=True) as tif:
         # Write base resolution with all channels
@@ -405,7 +446,7 @@ def write_pyramidal_ome_tiff(
             subifds=num_subresolutions,
             resolution=(1e4 / physical_size_x, 1e4 / physical_size_y),
             metadata=metadata,
-            **options
+            **options,
         )
 
         # Generate and write pyramid levels
@@ -413,18 +454,20 @@ def write_pyramidal_ome_tiff(
         for level_idx in range(1, len(levels)):
             level_h, level_w = levels[level_idx]
             log(f"  Writing pyramid level {level_idx} ({level_w} x {level_h})...")
-            
+
             # Downsample from previous level
             downsampled = downsample_image(current_data, pyramid_scale)
-            
+
             tif.write(
                 downsampled,
                 subfiletype=1,  # REDUCEDIMAGE flag for pyramid level
-                resolution=(1e4 / (physical_size_x * (pyramid_scale ** level_idx)),
-                           1e4 / (physical_size_y * (pyramid_scale ** level_idx))),
-                **options
+                resolution=(
+                    1e4 / (physical_size_x * (pyramid_scale**level_idx)),
+                    1e4 / (physical_size_y * (pyramid_scale**level_idx)),
+                ),
+                **options,
             )
-            
+
             current_data = downsampled
             gc.collect()
 
@@ -439,15 +482,18 @@ def write_pyramidal_ome_tiff(
             log(f"  Writing mask series (Image:1): {mask_stack.shape} uint32")
             tif.write(
                 mask_stack,
-                metadata={'axes': 'CYX', 'Channel': {'Name': mask_names or ['cell_mask', 'nuclei_mask']}},
+                metadata={
+                    "axes": "CYX",
+                    "Channel": {"Name": mask_names or ["cell_mask", "nuclei_mask"]},
+                },
                 tile=(tile_size, tile_size),
                 compression=compression,
-                photometric='minisblack',
-                resolutionunit='CENTIMETER',
+                photometric="minisblack",
+                resolutionunit="CENTIMETER",
             )
 
     log(f"Pyramidal OME-TIFF complete: {output_path}")
-    
+
     # Verify the output
     verify_ome_tiff(output_path)
 
@@ -458,26 +504,27 @@ def verify_ome_tiff(path: str):
     with tifffile.TiffFile(path) as tif:
         log(f"  Number of pages: {len(tif.pages)}")
         log(f"  Number of series: {len(tif.series)}")
-        
+
         if tif.series:
             series = tif.series[0]
             log(f"  Series 0 shape: {series.shape}")
             log(f"  Series 0 axes: {series.axes}")
             log(f"  Series 0 is_pyramidal: {series.is_pyramidal}")
-            
-            if hasattr(series, 'levels') and series.levels:
+
+            if hasattr(series, "levels") and series.levels:
                 log(f"  Pyramid levels: {len(series.levels)}")
                 for i, level in enumerate(series.levels):
                     log(f"    Level {i}: shape={level.shape}")
-        
+
         if tif.ome_metadata:
             log("  OME-XML metadata: present")
             # Parse and show channel names
             import xml.etree.ElementTree as ET
+
             try:
                 root = ET.fromstring(tif.ome_metadata)
-                ns = {'ome': 'http://www.openmicroscopy.org/Schemas/OME/2016-06'}
-                channels = root.findall('.//ome:Channel', ns)
+                ns = {"ome": "http://www.openmicroscopy.org/Schemas/OME/2016-06"}
+                channels = root.findall(".//ome:Channel", ns)
                 if channels:
                     log(f"  Channels in OME-XML: {len(channels)}")
                     for ch in channels[:5]:  # Show first 5
@@ -495,10 +542,10 @@ def _read_channel_file(path: str) -> np.ndarray:
     if HAS_ZARR:
         try:
             store = tifffile.imread(str(path), aszarr=True)
-            z = zarr.open(store, mode='r')
+            z = zarr.open(store, mode="r")
             arr = z[0] if isinstance(z, zarr.hierarchy.Group) else z
             data = np.asarray(arr)
-            if hasattr(store, 'close'):
+            if hasattr(store, "close"):
                 store.close()
             return data
         except Exception as e:
@@ -516,24 +563,23 @@ def merge_channels(
     pyramid_resolutions: int = 5,
     pyramid_scale: int = 2,
     tile_size: int = 512,
-    compression: str = 'zstd',
+    compression: str = "zstd",
     compressionargs: Optional[Dict] = None,
     masks_dir: Optional[str] = None,
 ):
     """
     Merge all single-channel TIFF files into a single pyramidal OME-TIFF.
     """
-    log(f"=" * 70)
-    log(f"MERGE CHANNELS - Pyramidal OME-TIFF (QuPath Compatible)")
-    log(f"=" * 70)
+    log("=" * 70)
+    log("MERGE CHANNELS - Pyramidal OME-TIFF (QuPath Compatible)")
+    log("=" * 70)
     log(f"Input directory: {input_dir}")
     log(f"Output: {output_path}")
     log(f"Pyramid: {pyramid_resolutions} levels, scale factor {pyramid_scale}")
 
     # Find all single-channel TIFF files
     channel_files = sorted(
-        list(Path(input_dir).glob("*.tif")) +
-        list(Path(input_dir).glob("*.tiff"))
+        list(Path(input_dir).glob("*.tif")) + list(Path(input_dir).glob("*.tiff"))
     )
 
     if not channel_files:
@@ -578,7 +624,7 @@ def merge_channels(
 
     if phenotype_mapping:
         log(f"Loading phenotype mapping: {phenotype_mapping}")
-        with open(phenotype_mapping, 'r') as f:
+        with open(phenotype_mapping, "r") as f:
             pheno_label_map = json.load(f)
         pheno_label_map = {int(k): v for k, v in pheno_label_map.items()}
 
@@ -588,7 +634,7 @@ def merge_channels(
         log(f"Will append phenotype mask: {phenotype_mask}")
         channel_names.append("Phenotype")
         channel_colors.append((200, 200, 200))
-        masks_info.append(('phenotype', phenotype_mask))
+        masks_info.append(("phenotype", phenotype_mask))
 
     num_output_channels = len(channel_names)
     log(f"Total output channels: {num_output_channels}")
@@ -596,7 +642,7 @@ def merge_channels(
     # PASS 2: Load all channels into memory
     log("-" * 50)
     log("Pass 2: Loading channels into memory...")
-    
+
     # Create output array – use uint16 when input is float to avoid
     # a massive bulk cast later (which would triple peak RAM).
     out_dtype = np.uint16 if dtype in (np.float32, np.float64) else dtype
@@ -615,14 +661,18 @@ def merge_channels(
         # Checkpoint 4: Validate channel data for negative/wrapped values
         ch_min, ch_max = channel_data.min(), channel_data.max()
         if ch_min < 0:
-            log(f"    WARNING: Negative values detected in {channel_file.stem}: min={ch_min}")
+            log(
+                f"    WARNING: Negative values detected in {channel_file.stem}: min={ch_min}"
+            )
             channel_data = np.clip(channel_data, 0, None)
             log(f"    Clipped to 0. New min={channel_data.min()}")
         elif dtype == np.uint16:
             # Check for wrapped values (negatives that became high positives)
             has_wrapped, wrap_count, wrap_pct = detect_wrapped_values(channel_data)
             if has_wrapped:
-                log(f"    WARNING: {wrap_count} potential wrapped negative pixels ({wrap_pct:.4f}%) in {channel_file.stem}")
+                log(
+                    f"    WARNING: {wrap_count} potential wrapped negative pixels ({wrap_pct:.4f}%) in {channel_file.stem}"
+                )
 
         # Cast per-channel to avoid bulk float→uint16 copy on the full CYX array
         if need_float_cast:
@@ -639,7 +689,7 @@ def merge_channels(
         if mask_data.ndim > 2:
             mask_data = mask_data.squeeze()
 
-        if mask_type == 'phenotype':
+        if mask_type == "phenotype":
             pheno_min = int(mask_data.min())
             pheno_max = int(mask_data.max())
             n_categories = pheno_max + 1
@@ -650,7 +700,9 @@ def merge_channels(
                 pheno_max = pheno_max - pheno_min
                 n_categories = pheno_max + 1
 
-            phenotype_colormap = create_phenotype_colormap(pheno_label_map, n_categories)
+            phenotype_colormap = create_phenotype_colormap(
+                pheno_label_map, n_categories
+            )
 
         # Cast the phenotype mask to the intensity output dtype. Phenotype
         # category counts are small, so this fits without truncation.
@@ -668,16 +720,17 @@ def merge_channels(
     mask_stack = None
     mask_names = None
     if masks_dir:
-        cell_matches = sorted(Path(masks_dir).glob('*cell_mask.tif'))
-        nuclei_matches = sorted(Path(masks_dir).glob('*nuclei_mask.tif'))
+        cell_matches = sorted(Path(masks_dir).glob("*cell_mask.tif"))
+        nuclei_matches = sorted(Path(masks_dir).glob("*nuclei_mask.tif"))
         if not cell_matches or not nuclei_matches:
             # --masks-dir is only passed when the mask series is REQUIRED
             # (embed_masks + expanded compartment quant). Missing masks here is a
             # hard error, not a silent skip — surface it with the dir contents.
-            found = [p.name for p in Path(masks_dir).glob('*')]
+            found = [p.name for p in Path(masks_dir).glob("*")]
             raise ValueError(
                 f"--masks-dir '{masks_dir}' given but no *cell_mask.tif / *nuclei_mask.tif found. "
-                f"Directory contains: {found}. Expected SEGMENT outputs like <patient>_cell_mask.tif.")
+                f"Directory contains: {found}. Expected SEGMENT outputs like <patient>_cell_mask.tif."
+            )
         cell_mask_path, nuclei_mask_path = cell_matches[0], nuclei_matches[0]
 
         log(f"Loading masks for second OME series from: {masks_dir}")
@@ -695,11 +748,13 @@ def merge_channels(
                 f"nuclei_mask is {nuclei_mask.shape}"
             )
 
-        mask_stack = np.stack([
-            cell_mask.astype(np.uint32),
-            nuclei_mask.astype(np.uint32),
-        ])
-        mask_names = ['cell_mask', 'nuclei_mask']
+        mask_stack = np.stack(
+            [
+                cell_mask.astype(np.uint32),
+                nuclei_mask.astype(np.uint32),
+            ]
+        )
+        mask_names = ["cell_mask", "nuclei_mask"]
         log(f"  Mask stack shape: {mask_stack.shape}, dtype: {mask_stack.dtype}")
         del cell_mask, nuclei_mask
         gc.collect()
@@ -766,7 +821,9 @@ def merge_channels(
                     "no second OME series was found in the written file."
                 )
             mask_series = tif.series[1]
-            if mask_series.dtype != np.uint32 or tuple(mask_series.shape) != tuple(mask_stack.shape):
+            if mask_series.dtype != np.uint32 or tuple(mask_series.shape) != tuple(
+                mask_stack.shape
+            ):
                 os.remove(tmp_path)
                 raise RuntimeError(
                     "Pyramid validation failed: mask series shape/dtype mismatch "
@@ -777,9 +834,13 @@ def merge_channels(
                 del seg
             except Exception as e:
                 os.remove(tmp_path)
-                raise RuntimeError(f"Pyramid validation failed: mask series is unreadable: {e}")
-    log(f"  Validation passed: {n_written} channels intact"
-        + (f", mask series {mask_stack.shape} intact" if mask_stack is not None else ""))
+                raise RuntimeError(
+                    f"Pyramid validation failed: mask series is unreadable: {e}"
+                )
+    log(
+        f"  Validation passed: {n_written} channels intact"
+        + (f", mask series {mask_stack.shape} intact" if mask_stack is not None else "")
+    )
 
     # Atomic rename — same filesystem, so this is instantaneous
     os.replace(tmp_path, output_path)
@@ -799,14 +860,14 @@ def merge_channels(
 
     # Save colormap JSON
     if phenotype_colormap:
-        colormap_output = str(Path(output_path).with_suffix('.phenotype_colors.json'))
+        colormap_output = str(Path(output_path).with_suffix(".phenotype_colors.json"))
         colormap_data = {
             "categories": {
                 str(k): {"name": v[0], "rgb": list(v[1])}
                 for k, v in phenotype_colormap.items()
             }
         }
-        with open(colormap_output, 'w') as f:
+        with open(colormap_output, "w") as f:
             json.dump(colormap_data, f, indent=2)
         log(f"Saved colormap: {colormap_output}")
 
@@ -816,33 +877,54 @@ def merge_channels(
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description='Merge single-channel TIFFs into pyramidal OME-TIFF (QuPath compatible)',
-        formatter_class=argparse.RawDescriptionHelpFormatter
+        description="Merge single-channel TIFFs into pyramidal OME-TIFF (QuPath compatible)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument('--input-dir', required=True,
-                        help='Directory with single-channel TIFF files')
-    parser.add_argument('--output', required=True,
-                        help='Output OME-TIFF path')
-    parser.add_argument('--phenotype-mask',
-                        help='Path to phenotype mask TIFF')
-    parser.add_argument('--phenotype-mapping',
-                        help='Path to phenotype mapping JSON')
-    parser.add_argument('--masks-dir',
-                        help='Directory containing cell_mask.tif and nuclei_mask.tif '
-                             'to embed as a second (uint32, single-resolution) OME series')
-    parser.add_argument('--physical-size-x', type=float, default=0.325,
-                        help='Pixel size in X (micrometers, default: 0.325)')
-    parser.add_argument('--physical-size-y', type=float, default=0.325,
-                        help='Pixel size in Y (micrometers, default: 0.325)')
-    parser.add_argument('--pyramid-resolutions', type=int, default=5,
-                        help='Number of pyramid levels (default: 5)')
-    parser.add_argument('--pyramid-scale', type=int, default=2,
-                        help='Downscaling factor between levels (default: 2)')
-    parser.add_argument('--tile-size', type=int, default=512,
-                        help='Tile size (default: 512)')
-    parser.add_argument('--compression', type=str, default='zstd',
-                        choices=['lzw', 'zlib', 'zstd', 'jpeg', 'none'],
-                        help='Compression algorithm (default: zstd)')
+    parser.add_argument(
+        "--input-dir", required=True, help="Directory with single-channel TIFF files"
+    )
+    parser.add_argument("--output", required=True, help="Output OME-TIFF path")
+    parser.add_argument("--phenotype-mask", help="Path to phenotype mask TIFF")
+    parser.add_argument("--phenotype-mapping", help="Path to phenotype mapping JSON")
+    parser.add_argument(
+        "--masks-dir",
+        help="Directory containing cell_mask.tif and nuclei_mask.tif "
+        "to embed as a second (uint32, single-resolution) OME series",
+    )
+    parser.add_argument(
+        "--physical-size-x",
+        type=float,
+        default=0.325,
+        help="Pixel size in X (micrometers, default: 0.325)",
+    )
+    parser.add_argument(
+        "--physical-size-y",
+        type=float,
+        default=0.325,
+        help="Pixel size in Y (micrometers, default: 0.325)",
+    )
+    parser.add_argument(
+        "--pyramid-resolutions",
+        type=int,
+        default=5,
+        help="Number of pyramid levels (default: 5)",
+    )
+    parser.add_argument(
+        "--pyramid-scale",
+        type=int,
+        default=2,
+        help="Downscaling factor between levels (default: 2)",
+    )
+    parser.add_argument(
+        "--tile-size", type=int, default=512, help="Tile size (default: 512)"
+    )
+    parser.add_argument(
+        "--compression",
+        type=str,
+        default="zstd",
+        choices=["lzw", "zlib", "zstd", "jpeg", "none"],
+        help="Compression algorithm (default: zstd)",
+    )
     return parser.parse_args()
 
 
@@ -851,12 +933,12 @@ def main() -> int:
     configure_logging()
     log(f"zarr available: {HAS_ZARR}")
     args = parse_args()
-    compression = None if args.compression == 'none' else args.compression
+    compression = None if args.compression == "none" else args.compression
 
     # Set compression-specific arguments
     compressionargs = None
-    if compression == 'zstd':
-        compressionargs = {'level': 2}  # Fast decompression for QuPath
+    if compression == "zstd":
+        compressionargs = {"level": 2}  # Fast decompression for QuPath
 
     try:
         merge_channels(
@@ -878,9 +960,10 @@ def main() -> int:
     except Exception as e:
         log(f"Error: {e}")
         import traceback
+
         traceback.print_exc()
         return 1
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     raise SystemExit(main())

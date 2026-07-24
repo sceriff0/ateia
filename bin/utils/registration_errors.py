@@ -22,8 +22,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional
-
+from typing import Any, Dict, List
 
 __all__ = [
     "ErrorSeverity",
@@ -36,8 +35,8 @@ class ErrorSeverity(Enum):
     """Severity levels for registration errors."""
 
     WARNING = "warning"  # Non-blocking issue, processing continues
-    ERROR = "error"      # Blocking for this slide, other slides may continue
-    FATAL = "fatal"      # Blocks entire registration process
+    ERROR = "error"  # Blocking for this slide, other slides may continue
+    FATAL = "fatal"  # Blocks entire registration process
 
 
 @dataclass

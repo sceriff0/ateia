@@ -11,6 +11,7 @@ the REG_TILE fan-out is only the fallback for a single field too big for one nod
 Reads REG_PREP's dump (moving.v, fixed.v, mask.v?, manifest.json), runs OpticalFlowWarper whole-image,
 emits the backward field bk.v (== classic's `moving_bk_dxdy`, the input to REG_FINALIZE's compose).
 """
+
 import argparse
 import json
 import os
@@ -41,12 +42,18 @@ def _save_field(field, path):
     if isinstance(field, pyvips.Image):
         field.write_to_file(path)
     else:
-        warp_tools.numpy2vips(np.dstack([np.asarray(field[0]), np.asarray(field[1])])).cast("float").write_to_file(path)
+        warp_tools.numpy2vips(
+            np.dstack([np.asarray(field[0]), np.asarray(field[1])])
+        ).cast("float").write_to_file(path)
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--inputs-dir", required=True, help="REG_PREP tiler_inputs (moving.v, fixed.v, mask.v?, manifest.json)")
+    ap.add_argument(
+        "--inputs-dir",
+        required=True,
+        help="REG_PREP tiler_inputs (moving.v, fixed.v, mask.v?, manifest.json)",
+    )
     ap.add_argument("--out-dir", required=True)
     args = ap.parse_args()
 
@@ -55,7 +62,9 @@ def main():
     def load2d(name):
         # OpticalFlowWarper.register does numpy ops/slicing -> feed the SAME 2-D numpy classic feeds it
         # (the processed image). REG_PREP's .v are single-band; squeeze to (H, W).
-        arr = warp_tools.vips2numpy(pyvips.Image.new_from_file(os.path.join(args.inputs_dir, name)))
+        arr = warp_tools.vips2numpy(
+            pyvips.Image.new_from_file(os.path.join(args.inputs_dir, name))
+        )
         return np.squeeze(arr)
 
     moving = load2d("moving.v")
@@ -63,11 +72,16 @@ def main():
     mask = load2d("mask.v") if m["has_mask"] else None
 
     reg = OpticalFlowWarper()
-    _, _, bk_dxdy = reg.register(moving_img=moving, fixed_img=fixed, mask=mask)  # whole-image DeepFlow
+    _, _, bk_dxdy = reg.register(
+        moving_img=moving, fixed_img=fixed, mask=mask
+    )  # whole-image DeepFlow
 
     os.makedirs(args.out_dir, exist_ok=True)
     _save_field(bk_dxdy, os.path.join(args.out_dir, "bk.v"))
-    print(f"[reg_nonrigid] whole-image field -> {args.out_dir}/bk.v (pid={os.getpid()}, no JVM)", flush=True)
+    print(
+        f"[reg_nonrigid] whole-image field -> {args.out_dir}/bk.v (pid={os.getpid()}, no JVM)",
+        flush=True,
+    )
 
 
 if __name__ == "__main__":

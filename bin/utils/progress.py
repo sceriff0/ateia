@@ -61,10 +61,10 @@ class ProgressTracker:
         self.start_time = datetime.now()
         self._last_step_time = time.time()
 
-        log_progress(f"\n{'='*70}")
+        log_progress(f"\n{'=' * 70}")
         log_progress(f"Starting: {self.operation_name}")
         log_progress(f"Total steps: {self.total_steps}")
-        log_progress(f"{'='*70}")
+        log_progress(f"{'=' * 70}")
 
     def step_complete(self, step_name: str, details: str = "") -> None:
         """Mark a step as complete and log progress.
@@ -114,9 +114,9 @@ class ProgressTracker:
         if remaining_secs < 60:
             return f"{remaining_secs:.0f}s"
         elif remaining_secs < 3600:
-            return f"{remaining_secs/60:.1f}m"
+            return f"{remaining_secs / 60:.1f}m"
         else:
-            return f"{remaining_secs/3600:.1f}h"
+            return f"{remaining_secs / 3600:.1f}h"
 
     def finish(self, success: bool = True) -> None:
         """Mark operation as complete.
@@ -133,14 +133,14 @@ class ProgressTracker:
 
         status = "completed successfully" if success else "FAILED"
 
-        log_progress(f"\n{'='*70}")
+        log_progress(f"\n{'=' * 70}")
         log_progress(f"{self.operation_name} {status}")
         log_progress(f"Total time: {duration}")
         log_progress(f"Steps completed: {self.current_step}/{self.total_steps}")
         if self.step_times:
             avg_time = sum(self.step_times) / len(self.step_times)
             log_progress(f"Average step time: {avg_time:.1f}s")
-        log_progress(f"{'='*70}")
+        log_progress(f"{'=' * 70}")
 
 
 class PhaseReporter:

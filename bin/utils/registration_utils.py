@@ -38,9 +38,7 @@ __all__ = [
 
 
 def autoscale(
-    img: NDArray,
-    low_p: float = 1.0,
-    high_p: float = 99.0
+    img: NDArray, low_p: float = 1.0, high_p: float = 99.0
 ) -> NDArray[np.uint8]:
     """Normalize image to 0-255 using percentile-based scaling.
 
@@ -107,9 +105,7 @@ def autoscale(
 
 
 def extract_crop_coords(
-    image_shape: Tuple[int, ...],
-    crop_size: int,
-    overlap: int
+    image_shape: Tuple[int, ...], crop_size: int, overlap: int
 ) -> List[Dict[str, int]]:
     """Generate crop coordinates for tiling a large image.
 
@@ -191,21 +187,13 @@ def extract_crop_coords(
             h = y_end - y_start
             w = x_end - x_start
 
-            coords.append({
-                "y": y_start,
-                "x": x_start,
-                "h": h,
-                "w": w
-            })
+            coords.append({"y": y_start, "x": x_start, "h": h, "w": w})
 
     return coords
 
 
 def calculate_bounds(
-    start: int,
-    crop_dim: int,
-    total_dim: int,
-    overlap: int
+    start: int, crop_dim: int, total_dim: int, overlap: int
 ) -> Tuple[int, int, slice]:
     """Calculate bounds for hard-cutoff crop placement.
 
@@ -289,7 +277,7 @@ def place_crop_hardcutoff(
     w: int,
     img_height: int,
     img_width: int,
-    overlap: int
+    overlap: int,
 ) -> None:
     """Place a crop into the target image using hard-cutoff strategy.
 
@@ -366,7 +354,7 @@ def place_crop_hardcutoff(
 def create_memmaps_for_merge(
     output_shape: Tuple[int, ...],
     dtype: np.dtype = np.float32,
-    prefix: str = "reg_merge_"
+    prefix: str = "reg_merge_",
 ) -> Tuple[np.memmap, np.memmap, Path]:
     """Create memory-mapped arrays for accumulating merged results.
 
@@ -467,6 +455,7 @@ def cleanup_memmaps(tmp_dir: Path) -> None:
     create_memmaps_for_merge : Create temporary memmaps
     """
     import shutil
+
     from logger import get_logger
 
     logger = get_logger(__name__)
@@ -478,7 +467,9 @@ def cleanup_memmaps(tmp_dir: Path) -> None:
         logger.warning(f"Could not clean up temp directory {tmp_dir}: {e}")
 
 
-def build_feature_detector(detector_type: str = "superpoint", logger: Optional[Any] = None):
+def build_feature_detector(
+    detector_type: str = "superpoint", logger: Optional[Any] = None
+):
     """Create a VALIS feature detector instance for the selected detector."""
     from valis import feature_detectors
 
@@ -496,7 +487,9 @@ def build_feature_detector(detector_type: str = "superpoint", logger: Optional[A
     return detector_map[detector]()
 
 
-def build_feature_matcher(detector_type: str = "superpoint", logger: Optional[Any] = None):
+def build_feature_matcher(
+    detector_type: str = "superpoint", logger: Optional[Any] = None
+):
     """Create a matcher compatible with the selected detector."""
     from valis import feature_matcher
 

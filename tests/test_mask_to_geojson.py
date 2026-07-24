@@ -1,5 +1,6 @@
 """Tests for bin/mask_to_geojson.py — label mask -> cell GeoJSON (the glue between
 segment.py's cell_mask.tif and warp_seg_qc's warp input)."""
+
 from __future__ import annotations
 
 import json
@@ -41,8 +42,13 @@ def _square_fc(*boxes):
     feats = []
     for x0, y0, x1, y1 in boxes:
         ring = [[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]
-        feats.append({"type": "Feature", "properties": {},
-                      "geometry": {"type": "Polygon", "coordinates": [ring]}})
+        feats.append(
+            {
+                "type": "Feature",
+                "properties": {},
+                "geometry": {"type": "Polygon", "coordinates": [ring]},
+            }
+        )
     return {"type": "FeatureCollection", "features": feats}
 
 
@@ -64,7 +70,9 @@ def test_polygons_land_on_the_pixels_they_came_from():
     # traced outline runs 1.5..7.5. Everything downstream (warp, centroid residual) inherits
     # this convention from here.
     assert cent[order].ravel() == pytest.approx([4.5, 4.5, 14.5, 14.5])
-    assert bbox[order].ravel() == pytest.approx([1.5, 1.5, 7.5, 7.5, 11.5, 11.5, 17.5, 17.5])
+    assert bbox[order].ravel() == pytest.approx(
+        [1.5, 1.5, 7.5, 7.5, 11.5, 11.5, 17.5, 17.5]
+    )
     assert area == pytest.approx([30.5, 30.5])
 
 
@@ -73,7 +81,9 @@ def test_polygons_overlap_the_source_squares(tmp_path):
     m = _two_square_mask()
     got = cp.from_feature_collection(mask_to_geojson.mask_to_feature_collection(m))
     # Pixel-centre convention: m[2:8, 2:8] is the square spanning 1.5..7.5, not 2..8.
-    truth = cp.from_feature_collection(_square_fc((1.5, 1.5, 7.5, 7.5), (11.5, 11.5, 17.5, 17.5)))
+    truth = cp.from_feature_collection(
+        _square_fc((1.5, 1.5, 7.5, 7.5), (11.5, 11.5, 17.5, 17.5))
+    )
 
     _, c_got = cp.feature_area_centroid(got)
     _, c_truth = cp.feature_area_centroid(truth)

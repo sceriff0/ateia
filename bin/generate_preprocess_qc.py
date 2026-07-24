@@ -38,25 +38,23 @@ import argparse
 import logging
 import sys
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 import numpy as np
 import tifffile
-from skimage.transform import resize
 from skimage.io import imsave
+from skimage.transform import resize
 
 # Add utils directory to path
-sys.path.insert(0, str(Path(__file__).parent / 'utils'))
+sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
-from logger import get_logger, configure_logging
+from logger import configure_logging, get_logger
 
 __all__ = ["main", "generate_preprocess_qc"]
 
 
 def normalize_image(
-    image: np.ndarray,
-    percentile_low: float = 1.0,
-    percentile_high: float = 99.0
+    image: np.ndarray, percentile_low: float = 1.0, percentile_high: float = 99.0
 ) -> np.ndarray:
     """Normalize image to 0-255 range using percentile-based contrast.
 
@@ -92,10 +90,7 @@ def normalize_image(
     return (img * 255).astype(np.uint8)
 
 
-def downsample_image(
-    image: np.ndarray,
-    scale_factor: float
-) -> np.ndarray:
+def downsample_image(image: np.ndarray, scale_factor: float) -> np.ndarray:
     """Downsample image by a given scale factor.
 
     Parameters
@@ -113,17 +108,14 @@ def downsample_image(
     if scale_factor >= 1.0:
         return image
 
-    new_shape = (
-        int(image.shape[0] * scale_factor),
-        int(image.shape[1] * scale_factor)
-    )
+    new_shape = (int(image.shape[0] * scale_factor), int(image.shape[1] * scale_factor))
     # Use anti_aliasing for better downsampling quality
     downsampled = resize(
         image,
         new_shape,
         order=1,  # Bilinear interpolation
         anti_aliasing=True,
-        preserve_range=True
+        preserve_range=True,
     )
     return downsampled.astype(image.dtype)
 
@@ -136,7 +128,7 @@ def generate_preprocess_qc(
     prefix: Optional[str] = None,
     percentile_low: float = 1.0,
     percentile_high: float = 99.0,
-    logger: Optional[logging.Logger] = None
+    logger: Optional[logging.Logger] = None,
 ) -> List[Path]:
     """Generate QC PNG images for each channel in a preprocessed image.
 
@@ -177,7 +169,11 @@ def generate_preprocess_qc(
         img_stack = np.expand_dims(img_stack, axis=0)
 
     # Handle (Y, X, C) format — only transpose if last dim matches channels AND first dim does not
-    if img_stack.ndim == 3 and img_stack.shape[2] == len(channel_names) and img_stack.shape[0] != len(channel_names):
+    if (
+        img_stack.ndim == 3
+        and img_stack.shape[2] == len(channel_names)
+        and img_stack.shape[0] != len(channel_names)
+    ):
         logger.info("Transposing from (Y, X, C) to (C, Y, X)")
         img_stack = np.transpose(img_stack, (2, 0, 1))
 
@@ -195,9 +191,9 @@ def generate_preprocess_qc(
     if prefix is None:
         # Extract basename, removing common suffixes
         prefix = image_path.stem
-        for suffix in ['.ome', '_corrected', '_preprocessed']:
+        for suffix in [".ome", "_corrected", "_preprocessed"]:
             if prefix.endswith(suffix):
-                prefix = prefix[:-len(suffix)]
+                prefix = prefix[: -len(suffix)]
 
     # Create output directory
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -205,16 +201,14 @@ def generate_preprocess_qc(
     # Generate PNGs for each channel
     output_files = []
     for i, channel_name in enumerate(channel_names):
-        logger.info(f"Processing channel {i+1}/{n_channels}: {channel_name}")
+        logger.info(f"Processing channel {i + 1}/{n_channels}: {channel_name}")
 
         # Extract channel
         channel_img = img_stack[i]
 
         # Normalize for visualization
         normalized = normalize_image(
-            channel_img,
-            percentile_low=percentile_low,
-            percentile_high=percentile_high
+            channel_img, percentile_low=percentile_low, percentile_high=percentile_high
         )
 
         # Downsample
@@ -224,7 +218,9 @@ def generate_preprocess_qc(
         output_path = output_dir / f"{prefix}_{channel_name}.png"
         imsave(str(output_path), downsampled, check_contrast=False)
 
-        logger.info(f"  ✓ Saved: {output_path.name} ({downsampled.shape[1]}x{downsampled.shape[0]})")
+        logger.info(
+            f"  ✓ Saved: {output_path.name} ({downsampled.shape[1]}x{downsampled.shape[0]})"
+        )
         output_files.append(output_path)
 
     return output_files
@@ -253,63 +249,51 @@ Examples:
 Output:
   For each channel, creates:
     - {prefix}_{channel_name}.png  (downsampled, contrast-adjusted)
-        """
+        """,
     )
 
     parser.add_argument(
-        '--image',
-        type=Path,
-        required=True,
-        help='Path to preprocessed OME-TIFF image'
+        "--image", type=Path, required=True, help="Path to preprocessed OME-TIFF image"
     )
 
     parser.add_argument(
-        '--output',
-        type=Path,
-        required=True,
-        help='Output directory for PNG files'
+        "--output", type=Path, required=True, help="Output directory for PNG files"
     )
 
     parser.add_argument(
-        '--channels',
-        type=str,
-        nargs='+',
-        required=True,
-        help='Channel names'
+        "--channels", type=str, nargs="+", required=True, help="Channel names"
     )
 
     parser.add_argument(
-        '--scale-factor',
+        "--scale-factor",
         type=float,
         default=0.25,
-        help='Downsampling factor (default: 0.25 = 4x smaller)'
+        help="Downsampling factor (default: 0.25 = 4x smaller)",
     )
 
     parser.add_argument(
-        '--prefix',
+        "--prefix",
         type=str,
         default=None,
-        help='Prefix for output filenames (default: image basename)'
+        help="Prefix for output filenames (default: image basename)",
     )
 
     parser.add_argument(
-        '--percentile-low',
+        "--percentile-low",
         type=float,
         default=1.0,
-        help='Lower percentile for contrast adjustment (default: 1.0)'
+        help="Lower percentile for contrast adjustment (default: 1.0)",
     )
 
     parser.add_argument(
-        '--percentile-high',
+        "--percentile-high",
         type=float,
         default=99.0,
-        help='Upper percentile for contrast adjustment (default: 99.0)'
+        help="Upper percentile for contrast adjustment (default: 99.0)",
     )
 
     parser.add_argument(
-        '--verbose',
-        action='store_true',
-        help='Enable verbose (DEBUG) logging'
+        "--verbose", action="store_true", help="Enable verbose (DEBUG) logging"
     )
 
     return parser.parse_args()
@@ -328,8 +312,7 @@ def main() -> int:
     # Configure logging
     log_level = logging.DEBUG if args.verbose else logging.INFO
     configure_logging(
-        level=log_level,
-        format_string='[%(asctime)s] %(levelname)s - %(message)s'
+        level=log_level, format_string="[%(asctime)s] %(levelname)s - %(message)s"
     )
 
     logger = get_logger(__name__)
@@ -358,7 +341,7 @@ def main() -> int:
             prefix=args.prefix,
             percentile_low=args.percentile_low,
             percentile_high=args.percentile_high,
-            logger=logger
+            logger=logger,
         )
 
         logger.info("")
@@ -377,5 +360,5 @@ def main() -> int:
         return 1
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main())

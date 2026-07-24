@@ -32,14 +32,15 @@ from pathlib import Path
 from typing import List, Optional
 
 import matplotlib
-matplotlib.use('Agg')
+
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from skimage.segmentation import find_boundaries
 
 # Add utils directory to path
-sys.path.insert(0, str(Path(__file__).parent / 'utils'))
+sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
 from logger import configure_logging, get_logger
 
@@ -47,9 +48,18 @@ __all__ = ["main", "generate_postprocessing_qc"]
 
 # Morphology columns that should not appear in intensity distribution plots
 MORPHOLOGY_COLUMNS = {
-    'label', 'y', 'x', 'area', 'eccentricity', 'perimeter',
-    'convex_area', 'axis_major_length', 'axis_minor_length', 'solidity',
-    'fov', 'cell_size',
+    "label",
+    "y",
+    "x",
+    "area",
+    "eccentricity",
+    "perimeter",
+    "convex_area",
+    "axis_major_length",
+    "axis_minor_length",
+    "solidity",
+    "fov",
+    "cell_size",
 }
 
 
@@ -66,10 +76,11 @@ def load_mask(mask_path: Path) -> np.ndarray:
     np.ndarray
         2D segmentation mask array.
     """
-    if mask_path.suffix == '.npy':
+    if mask_path.suffix == ".npy":
         mask = np.load(str(mask_path)).squeeze()
     else:
         import tifffile
+
         mask = tifffile.imread(str(mask_path)).squeeze()
     return mask
 
@@ -101,7 +112,7 @@ def generate_seg_overlay(
 
     logger.info(f"Generating segmentation overlay ({mask.shape[1]}x{mask.shape[0]})")
 
-    boundaries = find_boundaries(mask, mode='thick')
+    boundaries = find_boundaries(mask, mode="thick")
 
     # Scale down for large images to keep output file size reasonable
     max_dim = 4096
@@ -112,21 +123,32 @@ def generate_seg_overlay(
         new_w = int(mask.shape[1] * scale)
         # Use proper resampling to avoid jagged boundary artifacts
         from skimage.transform import resize as skimage_resize
-        boundaries = skimage_resize(
-            boundaries.astype(np.float32), (new_h, new_w),
-            order=1, anti_aliasing=True, preserve_range=True
-        ) > 0.5  # Threshold back to binary after interpolation
-        logger.info(f"  Downsampled to {boundaries.shape[1]}x{boundaries.shape[0]} (scale={scale:.3f})")
+
+        boundaries = (
+            skimage_resize(
+                boundaries.astype(np.float32),
+                (new_h, new_w),
+                order=1,
+                anti_aliasing=True,
+                preserve_range=True,
+            )
+            > 0.5
+        )  # Threshold back to binary after interpolation
+        logger.info(
+            f"  Downsampled to {boundaries.shape[1]}x{boundaries.shape[0]} (scale={scale:.3f})"
+        )
 
     # Count cells from the CSV (post-filtering count), not from raw mask labels
-    n_cells = n_cells_from_csv if n_cells_from_csv is not None else len(np.unique(mask)) - 1
+    n_cells = (
+        n_cells_from_csv if n_cells_from_csv is not None else len(np.unique(mask)) - 1
+    )
 
     fig, ax = plt.subplots(1, 1, figsize=(10, 10))
-    ax.imshow(boundaries, cmap='gray', interpolation='nearest')
+    ax.imshow(boundaries, cmap="gray", interpolation="nearest")
     ax.set_title(f"Cell Boundaries ({n_cells} cells)")
-    ax.axis('off')
+    ax.axis("off")
     fig.tight_layout()
-    fig.savefig(str(output_path), dpi=150, bbox_inches='tight')
+    fig.savefig(str(output_path), dpi=150, bbox_inches="tight")
     plt.close(fig)
 
     logger.info(f"  Saved: {output_path.name}")
@@ -165,44 +187,86 @@ def generate_cell_stats(
     fig, axes = plt.subplots(1, 3, figsize=(15, 4))
 
     # Panel 1: Cell area histogram
-    if 'area' in df.columns:
-        areas = df['area'].dropna()
-        axes[0].hist(areas, bins=50, color='steelblue', edgecolor='black', linewidth=0.5)
-        axes[0].set_xlabel('Cell Area (pixels)')
-        axes[0].set_ylabel('Count')
-        axes[0].set_title(f'Cell Area Distribution (n={len(areas)})')
+    if "area" in df.columns:
+        areas = df["area"].dropna()
+        axes[0].hist(
+            areas, bins=50, color="steelblue", edgecolor="black", linewidth=0.5
+        )
+        axes[0].set_xlabel("Cell Area (pixels)")
+        axes[0].set_ylabel("Count")
+        axes[0].set_title(f"Cell Area Distribution (n={len(areas)})")
         median_area = areas.median()
-        axes[0].axvline(median_area, color='red', linestyle='--', linewidth=1, label=f'Median={median_area:.0f}')
+        axes[0].axvline(
+            median_area,
+            color="red",
+            linestyle="--",
+            linewidth=1,
+            label=f"Median={median_area:.0f}",
+        )
         axes[0].legend()
     else:
-        axes[0].text(0.5, 0.5, 'No area column', ha='center', va='center', transform=axes[0].transAxes)
-        axes[0].set_title('Cell Area Distribution')
+        axes[0].text(
+            0.5,
+            0.5,
+            "No area column",
+            ha="center",
+            va="center",
+            transform=axes[0].transAxes,
+        )
+        axes[0].set_title("Cell Area Distribution")
 
     # Panel 2: Eccentricity histogram
-    if 'eccentricity' in df.columns:
-        ecc = df['eccentricity'].dropna()
-        axes[1].hist(ecc, bins=50, color='coral', edgecolor='black', linewidth=0.5)
-        axes[1].set_xlabel('Eccentricity')
-        axes[1].set_ylabel('Count')
-        axes[1].set_title(f'Eccentricity Distribution (n={len(ecc)})')
+    if "eccentricity" in df.columns:
+        ecc = df["eccentricity"].dropna()
+        axes[1].hist(ecc, bins=50, color="coral", edgecolor="black", linewidth=0.5)
+        axes[1].set_xlabel("Eccentricity")
+        axes[1].set_ylabel("Count")
+        axes[1].set_title(f"Eccentricity Distribution (n={len(ecc)})")
         axes[1].set_xlim(0, 1)
         median_ecc = ecc.median()
-        axes[1].axvline(median_ecc, color='red', linestyle='--', linewidth=1, label=f'Median={median_ecc:.2f}')
+        axes[1].axvline(
+            median_ecc,
+            color="red",
+            linestyle="--",
+            linewidth=1,
+            label=f"Median={median_ecc:.2f}",
+        )
         axes[1].legend()
     else:
-        axes[1].text(0.5, 0.5, 'No eccentricity column', ha='center', va='center', transform=axes[1].transAxes)
-        axes[1].set_title('Eccentricity Distribution')
+        axes[1].text(
+            0.5,
+            0.5,
+            "No eccentricity column",
+            ha="center",
+            va="center",
+            transform=axes[1].transAxes,
+        )
+        axes[1].set_title("Eccentricity Distribution")
 
     # Panel 3: Cell count bar chart
     cell_count = len(df)
-    axes[2].bar(['Total Cells'], [cell_count], color='seagreen', edgecolor='black', linewidth=0.5)
-    axes[2].set_ylabel('Count')
-    axes[2].set_title('Cell Count')
-    axes[2].text(0, cell_count, str(cell_count), ha='center', va='bottom', fontweight='bold', fontsize=14)
+    axes[2].bar(
+        ["Total Cells"],
+        [cell_count],
+        color="seagreen",
+        edgecolor="black",
+        linewidth=0.5,
+    )
+    axes[2].set_ylabel("Count")
+    axes[2].set_title("Cell Count")
+    axes[2].text(
+        0,
+        cell_count,
+        str(cell_count),
+        ha="center",
+        va="bottom",
+        fontweight="bold",
+        fontsize=14,
+    )
 
-    fig.suptitle('Cell Morphology Statistics', fontsize=14, fontweight='bold')
+    fig.suptitle("Cell Morphology Statistics", fontsize=14, fontweight="bold")
     fig.tight_layout()
-    fig.savefig(str(output_path), dpi=150, bbox_inches='tight')
+    fig.savefig(str(output_path), dpi=150, bbox_inches="tight")
     plt.close(fig)
 
     logger.info(f"  Saved: {output_path.name}")
@@ -235,8 +299,10 @@ def generate_intensity_distributions(
 
     # Identify marker columns (everything that is not morphology/metadata)
     marker_cols = [
-        col for col in df.columns
-        if col not in MORPHOLOGY_COLUMNS and df[col].dtype in [np.float64, np.float32, np.int64, np.int32]
+        col
+        for col in df.columns
+        if col not in MORPHOLOGY_COLUMNS
+        and df[col].dtype in [np.float64, np.float32, np.int64, np.int32]
     ]
 
     if not marker_cols:
@@ -261,22 +327,29 @@ def generate_intensity_distributions(
     for i, marker in enumerate(marker_cols):
         ax = axes[i]
         values = df[marker].dropna()
-        ax.hist(values, bins=50, color='steelblue', edgecolor='black', linewidth=0.3, alpha=0.8)
+        ax.hist(
+            values,
+            bins=50,
+            color="steelblue",
+            edgecolor="black",
+            linewidth=0.3,
+            alpha=0.8,
+        )
         ax.set_title(marker, fontsize=10)
-        ax.set_xlabel('Intensity')
-        ax.set_ylabel('Count')
+        ax.set_xlabel("Intensity")
+        ax.set_ylabel("Count")
 
         # Add median line
         median_val = values.median()
-        ax.axvline(median_val, color='red', linestyle='--', linewidth=0.8, alpha=0.7)
+        ax.axvline(median_val, color="red", linestyle="--", linewidth=0.8, alpha=0.7)
 
     # Hide unused subplot axes
     for j in range(n_markers, len(axes)):
         axes[j].set_visible(False)
 
-    fig.suptitle('Marker Intensity Distributions', fontsize=14, fontweight='bold')
+    fig.suptitle("Marker Intensity Distributions", fontsize=14, fontweight="bold")
     fig.tight_layout()
-    fig.savefig(str(output_path), dpi=150, bbox_inches='tight')
+    fig.savefig(str(output_path), dpi=150, bbox_inches="tight")
     plt.close(fig)
 
     logger.info(f"  Saved: {output_path.name}")
@@ -319,7 +392,9 @@ def generate_postprocessing_qc(
     # Load segmentation mask
     logger.info(f"Loading mask: {mask_path}")
     mask = load_mask(mask_path)
-    logger.info(f"Mask shape: {mask.shape}, dtype: {mask.dtype}, unique labels: {len(np.unique(mask)) - 1}")
+    logger.info(
+        f"Mask shape: {mask.shape}, dtype: {mask.dtype}, unique labels: {len(np.unique(mask)) - 1}"
+    )
 
     # Load merged CSV
     logger.info(f"Loading CSV: {csv_path}")
@@ -364,41 +439,30 @@ Output:
     - {prefix}_seg_overlay.png           (cell boundary visualization)
     - {prefix}_cell_stats.png            (area, eccentricity, cell count)
     - {prefix}_intensity_distributions.png (per-marker histograms)
-        """
+        """,
     )
 
     parser.add_argument(
-        '--mask',
+        "--mask",
         type=Path,
         required=True,
-        help='Path to segmentation mask (.npy or .tif)'
+        help="Path to segmentation mask (.npy or .tif)",
     )
 
     parser.add_argument(
-        '--csv',
-        type=Path,
-        required=True,
-        help='Path to merged quantification CSV'
+        "--csv", type=Path, required=True, help="Path to merged quantification CSV"
     )
 
     parser.add_argument(
-        '--output',
-        type=Path,
-        required=True,
-        help='Output directory for PNG files'
+        "--output", type=Path, required=True, help="Output directory for PNG files"
     )
 
     parser.add_argument(
-        '--prefix',
-        type=str,
-        required=True,
-        help='Prefix for output filenames'
+        "--prefix", type=str, required=True, help="Prefix for output filenames"
     )
 
     parser.add_argument(
-        '--verbose',
-        action='store_true',
-        help='Enable verbose (DEBUG) logging'
+        "--verbose", action="store_true", help="Enable verbose (DEBUG) logging"
     )
 
     return parser.parse_args()
@@ -417,8 +481,7 @@ def main() -> int:
     # Configure logging
     log_level = logging.DEBUG if args.verbose else logging.INFO
     configure_logging(
-        level=log_level,
-        format_string='[%(asctime)s] %(levelname)s - %(message)s'
+        level=log_level, format_string="[%(asctime)s] %(levelname)s - %(message)s"
     )
 
     logger = get_logger(__name__)
@@ -467,5 +530,5 @@ def main() -> int:
         return 1
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main())

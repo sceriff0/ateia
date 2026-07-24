@@ -50,7 +50,7 @@ _LOG_FILE: Optional[Path] = None
 def configure_logging(
     level: int = logging.INFO,
     log_file: Optional[str | Path] = None,
-    format_string: Optional[str] = None
+    format_string: Optional[str] = None,
 ) -> None:
     """Configure global logging settings (call once at application startup).
 
@@ -112,7 +112,7 @@ def configure_logging(
 
     # Default format string follows best practices
     if format_string is None:
-        format_string = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        format_string = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
     # Configure root logger (affects all loggers)
     root_logger = logging.getLogger()
@@ -125,10 +125,7 @@ def configure_logging(
     # Console handler (always present for visibility)
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(level)
-    console_formatter = logging.Formatter(
-        format_string,
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
+    console_formatter = logging.Formatter(format_string, datefmt="%Y-%m-%d %H:%M:%S")
     console_handler.setFormatter(console_formatter)
     root_logger.addHandler(console_handler)
 
@@ -139,10 +136,7 @@ def configure_logging(
 
         file_handler = logging.FileHandler(_LOG_FILE)
         file_handler.setLevel(level)
-        file_formatter = logging.Formatter(
-            format_string,
-            datefmt='%Y-%m-%d %H:%M:%S'
-        )
+        file_formatter = logging.Formatter(format_string, datefmt="%Y-%m-%d %H:%M:%S")
         file_handler.setFormatter(file_formatter)
         root_logger.addHandler(file_handler)
 
@@ -249,8 +243,7 @@ def log_progress(message: str) -> None:
 
 @contextmanager
 def log_timing(
-    operation: str,
-    logger: Optional[logging.Logger] = None
+    operation: str, logger: Optional[logging.Logger] = None
 ) -> Generator[None, None, None]:
     """Context manager for timing operations with logging.
 
@@ -323,6 +316,7 @@ def timed(func: F) -> F:
     >>> result = process_image("image.tif")
     # At DEBUG level: "process_image completed in 2.34s"
     """
+
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         start = time.perf_counter()
@@ -332,4 +326,5 @@ def timed(func: F) -> F:
             f"{func.__name__} completed in {elapsed:.2f}s"
         )
         return result
+
     return wrapper  # type: ignore[return-value]

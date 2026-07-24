@@ -19,6 +19,7 @@ frozen module globals that ``get_cache_dir()`` returns, regardless of when scyja
 Call :func:`point_jvm_cache_off_readonly_home` after valis/scyjava are importable and *before*
 ``registration.init_jvm``.
 """
+
 import os
 
 
@@ -48,7 +49,9 @@ def point_jvm_cache_off_readonly_home():
 
     home = os.path.expanduser("~")
     if os.access(home, os.W_OK):
-        return None  # writable $HOME — leave scyjava's Path.home()-derived defaults alone
+        return (
+            None  # writable $HOME — leave scyjava's Path.home()-derived defaults alone
+        )
 
     # 1) prefer a warm baked cache (exists -> jgo reuses it: no writes, no network)
     for root in (os.environ.get("MIRAGE_JVM_HOME", "").strip(), "/root"):

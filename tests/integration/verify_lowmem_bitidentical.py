@@ -9,6 +9,7 @@ Usage (inside the VALIS image):
       bolt3x/attend_image_analysis:mirage_valis_1.0.0 \
       python3 tests/integration/verify_lowmem_bitidentical.py
 """
+
 import glob
 import json
 import os
@@ -21,8 +22,15 @@ import numpy as np
 import pyvips
 import tifffile
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "bin"))
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "bin", "utils"))
+sys.path.insert(
+    0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "bin")
+)
+sys.path.insert(
+    0,
+    os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "..", "bin", "utils"
+    ),
+)
 
 from mirage_slide_reader import MirageVipsSlideReader  # noqa: E402
 
@@ -64,7 +72,10 @@ def px(path):
     print max|delta|=0.0 while ignoring the other channels entirely (the fixtures have 3).
     """
     from valis import warp_tools
-    return warp_tools.vips2numpy(pyvips.Image.new_from_file(path, n=-1)).astype(np.float64)
+
+    return warp_tools.vips2numpy(pyvips.Image.new_from_file(path, n=-1)).astype(
+        np.float64
+    )
 
 
 def warped_canvas(ws_path, field_path):
@@ -81,6 +92,7 @@ def warped_canvas(ws_path, field_path):
     the same dimensions as the composed one.
     """
     import reg_finalize
+
     ws = json.load(open(ws_path))
     dxdy = pyvips.Image.new_from_file(field_path)
     warped, _ = reg_finalize.warp_source(os.path.join(INP, MOV), ws, dxdy)
@@ -101,7 +113,8 @@ def assert_full_channel_stack(arr, path, expected_hw, label):
         raise SystemExit(
             f"FAILED: {label} ({path}) loaded {arr.shape} ({arr.size} values) but the warped "
             f"canvas and source band count imply a {c}-channel {h}x{w} stack ({c * h * w} values) "
-            "-- the comparison would cover only part of the slide and could pass vacuously.")
+            "-- the comparison would cover only part of the slide and could pass vacuously."
+        )
     print(f"[verify] {label} covers the full {c}x{h}x{w} channel stack", flush=True)
 
 
@@ -123,7 +136,9 @@ def _rewrite_as_mirage_tiff(src_path, dst_path, tile_px=_REWRITE_TILE_PX):
     n_channels = arr.shape[0] if arr.ndim == 3 else 1
     channel_names = re.findall(r'<Channel[^>]*\bName="([^"]*)"', ome_xml)
     if len(channel_names) < n_channels:
-        channel_names = list(channel_names) + [f"C{i}" for i in range(len(channel_names), n_channels)]
+        channel_names = list(channel_names) + [
+            f"C{i}" for i in range(len(channel_names), n_channels)
+        ]
     channel_names = channel_names[:n_channels]
 
     tifffile.imwrite(
@@ -168,9 +183,12 @@ def setup():
         # linux/amd64 under emulation on arm64 hosts), which makes iterating on the legs painful.
         # It is only sound while reg_prep.py, the reader and the fixtures are all unchanged --
         # hence opt-in, loudly announced, and off in CI.
-        print(f"[verify] REUSING existing prep at {md} (VERIFY_LOWMEM_REUSE_PREP=1) -- reg_prep "
-              "was NOT re-run, so this result is stale if reg_prep/the reader/the fixtures "
-              "changed. Unset it for an authoritative run.", flush=True)
+        print(
+            f"[verify] REUSING existing prep at {md} (VERIFY_LOWMEM_REUSE_PREP=1) -- reg_prep "
+            "was NOT re-run, so this result is stale if reg_prep/the reader/the fixtures "
+            "changed. Unset it for an authoritative run.",
+            flush=True,
+        )
         return md
 
     _empty_dir(WORK)
@@ -183,10 +201,27 @@ def setup():
                 f"FAILED: rewritten fixture {s} is not readable by MirageVipsSlideReader "
                 "(can_read() returned False) -- the tiled-BigTIFF rewrite did not produce a "
                 "file the lazy reader recognises, so leg 1 would silently exercise BioFormats "
-                "on both sides again. Aborting rather than let that happen quietly.")
-        print(f"[verify] rewritten {s} is readable by MirageVipsSlideReader (can_read=True)", flush=True)
-    run([sys.executable, "bin/reg_prep.py", "--input-dir", INP, "--out", PREP,
-         "--reference", REF, "--memory-mode", "low", "--skip-micro-registration"])
+                "on both sides again. Aborting rather than let that happen quietly."
+            )
+        print(
+            f"[verify] rewritten {s} is readable by MirageVipsSlideReader (can_read=True)",
+            flush=True,
+        )
+    run(
+        [
+            sys.executable,
+            "bin/reg_prep.py",
+            "--input-dir",
+            INP,
+            "--out",
+            PREP,
+            "--reference",
+            REF,
+            "--memory-mode",
+            "low",
+            "--skip-micro-registration",
+        ]
+    )
     return os.path.join(PREP, MOV_STEM)
 
 
@@ -204,21 +239,31 @@ def assert_used_reader(stdout, expect_lazy, label):
             f"FAILED: {label} produced an ambiguous reader marker "
             f"(lazy-marker-present={has_lazy}, bf-marker-present={has_bf}); expected exactly one "
             f"of reg_finalize.py's two startup print lines. stdout tail:\n"
-            + "\n".join(stdout.splitlines()[-20:]))
+            + "\n".join(stdout.splitlines()[-20:])
+        )
     if expect_lazy and not has_lazy:
         raise SystemExit(
             f"FAILED: {label} was expected to use MirageVipsSlideReader (no JVM) but instead used "
             "BioFormats -- the reader swap this test exists to verify never engaged, so a "
             "bit-identical result would prove nothing. stdout tail:\n"
-            + "\n".join(stdout.splitlines()[-20:]))
+            + "\n".join(stdout.splitlines()[-20:])
+        )
     if not expect_lazy and not has_bf:
         raise SystemExit(
             f"FAILED: {label} was expected to use BioFormats (MIRAGE_FORCE_BIOFORMATS=1) but "
             "instead used MirageVipsSlideReader -- MIRAGE_FORCE_BIOFORMATS did not force the JVM "
             "path, so this leg would compare the lazy reader against itself. stdout tail:\n"
-            + "\n".join(stdout.splitlines()[-20:]))
-    marker_line = next(l for l in stdout.splitlines() if (LAZY_MARKER if expect_lazy else BF_MARKER) in l)
-    print(f"[verify] {label} used the expected reader -- {marker_line.strip()!r}", flush=True)
+            + "\n".join(stdout.splitlines()[-20:])
+        )
+    marker_line = next(
+        l
+        for l in stdout.splitlines()
+        if (LAZY_MARKER if expect_lazy else BF_MARKER) in l
+    )
+    print(
+        f"[verify] {label} used the expected reader -- {marker_line.strip()!r}",
+        flush=True,
+    )
 
 
 def assert_nontrivial_warp(ws_path, field_path, eps=1e-9):
@@ -230,16 +275,21 @@ def assert_nontrivial_warp(ws_path, field_path, eps=1e-9):
     max_m_delta = float(np.max(np.abs(M - np.eye(3))))
 
     from valis import warp_tools
+
     field = pyvips.Image.new_from_file(field_path)
     field_arr = warp_tools.vips2numpy(field).astype(np.float64)
     max_dxdy = float(np.max(np.abs(field_arr)))
 
-    print(f"[verify] warp is non-trivial: max|M - I|={max_m_delta} max|dxdy|={max_dxdy}", flush=True)
+    print(
+        f"[verify] warp is non-trivial: max|M - I|={max_m_delta} max|dxdy|={max_dxdy}",
+        flush=True,
+    )
     if max_m_delta <= eps and max_dxdy <= eps:
         raise SystemExit(
             f"FAILED: fixture does not exercise a real warp (max|M - I|={max_m_delta}, "
             f"max|dxdy|={max_dxdy}, both <= eps={eps}); a bit-identical leg-1 result would be "
-            "meaningless because both readers would be comparing trivial passthroughs.")
+            "meaningless because both readers would be comparing trivial passthroughs."
+        )
 
 
 def leg1(md):
@@ -248,21 +298,59 @@ def leg1(md):
     ws = os.path.join(md, "warp_state.json")
     field = os.path.join(md, "nr", "bk.v")
     os.makedirs(os.path.join(md, "nr"), exist_ok=True)
-    run([sys.executable, "bin/reg_nonrigid.py", "--inputs-dir", ti,
-         "--out-dir", os.path.join(md, "nr")])
+    run(
+        [
+            sys.executable,
+            "bin/reg_nonrigid.py",
+            "--inputs-dir",
+            ti,
+            "--out-dir",
+            os.path.join(md, "nr"),
+        ]
+    )
 
     assert_nontrivial_warp(ws, field)
 
     lazy_out = os.path.join(md, "lazy.ome.tiff")
     bf_out = os.path.join(md, "bf.ome.tiff")
-    lazy_r = run([sys.executable, "bin/reg_finalize.py", "--inputs-dir", ti, "--field", field,
-                  "--warp-state", ws, "--src-slide", os.path.join(INP, MOV), "--out", lazy_out])
+    lazy_r = run(
+        [
+            sys.executable,
+            "bin/reg_finalize.py",
+            "--inputs-dir",
+            ti,
+            "--field",
+            field,
+            "--warp-state",
+            ws,
+            "--src-slide",
+            os.path.join(INP, MOV),
+            "--out",
+            lazy_out,
+        ]
+    )
     assert_used_reader(lazy_r.stdout, expect_lazy=True, label="lazy-reader run")
 
     env = dict(os.environ, MIRAGE_FORCE_BIOFORMATS="1")
-    r = subprocess.run([sys.executable, "bin/reg_finalize.py", "--inputs-dir", ti, "--field", field,
-                        "--warp-state", ws, "--src-slide", os.path.join(INP, MOV), "--out", bf_out],
-                       capture_output=True, text=True, env=env)
+    r = subprocess.run(
+        [
+            sys.executable,
+            "bin/reg_finalize.py",
+            "--inputs-dir",
+            ti,
+            "--field",
+            field,
+            "--warp-state",
+            ws,
+            "--src-slide",
+            os.path.join(INP, MOV),
+            "--out",
+            bf_out,
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
     if r.returncode != 0:
         sys.stderr.write("\n".join((r.stdout + r.stderr).splitlines()[-15:]))
         raise SystemExit("FAILED: BioFormats reference run")
@@ -280,8 +368,16 @@ def leg1(md):
     return 0 if equal else 1
 
 
-_SAMPLE_BYTES = {"uchar": 1, "char": 1, "ushort": 2, "short": 2,
-                 "uint": 4, "int": 4, "float": 4, "double": 8}
+_SAMPLE_BYTES = {
+    "uchar": 1,
+    "char": 1,
+    "ushort": 2,
+    "short": 2,
+    "uint": 4,
+    "int": 4,
+    "float": 4,
+    "double": 8,
+}
 
 
 def report_tile_footprint(tiles_dir, grid):
@@ -297,8 +393,11 @@ def report_tile_footprint(tiles_dir, grid):
     on_disk = sum(os.path.getsize(p) for p in paths)
     probe = pyvips.Image.new_from_file(paths[0])
     raw = grid["width"] * grid["height"] * probe.bands * _SAMPLE_BYTES[probe.format]
-    print(f"[verify] {len(paths)} tiles ({os.path.splitext(paths[0])[1]}) = {on_disk / 1024:.1f} KiB "
-          f"on disk vs {raw / 1024:.1f} KiB uncompressed ({raw / on_disk:.2f}x)", flush=True)
+    print(
+        f"[verify] {len(paths)} tiles ({os.path.splitext(paths[0])[1]}) = {on_disk / 1024:.1f} KiB "
+        f"on disk vs {raw / 1024:.1f} KiB uncompressed ({raw / on_disk:.2f}x)",
+        flush=True,
+    )
 
 
 def leg2(md):
@@ -315,9 +414,23 @@ def leg2(md):
     field_v = os.path.join(md, "slide_dxdy.v")
     src = os.path.join(INP, MOV)
 
-    run([sys.executable, "bin/reg_finalize.py", "--inputs-dir", ti,
-         "--field", os.path.join(md, "nr", "bk.v"), "--warp-state", ws,
-         "--src-slide", src, "--out", field_v, "--emit-field-only"])
+    run(
+        [
+            sys.executable,
+            "bin/reg_finalize.py",
+            "--inputs-dir",
+            ti,
+            "--field",
+            os.path.join(md, "nr", "bk.v"),
+            "--warp-state",
+            ws,
+            "--src-slide",
+            src,
+            "--out",
+            field_v,
+            "--emit-field-only",
+        ]
+    )
     if not os.path.exists(field_v):
         raise SystemExit(f"FAILED: --emit-field-only did not write {field_v}")
 
@@ -326,22 +439,43 @@ def leg2(md):
     # Deliberately NOT a divisor of the canvas -- an exact division (e.g. 64) makes every tile
     # full-size and never exercises a ragged edge, which is precisely where an off-by-one in the
     # partition would show up as a seam or a shifted strip.
-    run([sys.executable, "bin/reg_assemble.py", "--warp-state", ws, "--src-slide", src,
-         "--field", field_v, "--write-grid", grid_f, "--tile-wh", "48"])
+    run(
+        [
+            sys.executable,
+            "bin/reg_assemble.py",
+            "--warp-state",
+            ws,
+            "--src-slide",
+            src,
+            "--field",
+            field_v,
+            "--write-grid",
+            grid_f,
+            "--tile-wh",
+            "48",
+        ]
+    )
     grid = json.load(open(grid_f))
     if len(grid["tiles"]) < 2:
         raise SystemExit(
             f"FAILED: grid has {len(grid['tiles'])} tile(s) for a {grid['width']}x{grid['height']} "
             "canvas -- a single-tile fan-out is just the whole-image warp under another name and "
-            "would prove nothing about tiling.")
-    ragged = [t for t in grid["tiles"] if t["w"] < grid["tile_wh"] or t["h"] < grid["tile_wh"]]
+            "would prove nothing about tiling."
+        )
+    ragged = [
+        t for t in grid["tiles"] if t["w"] < grid["tile_wh"] or t["h"] < grid["tile_wh"]
+    ]
     if not ragged:
         raise SystemExit(
             f"FAILED: every tile in the {grid['n_cols']}x{grid['n_rows']} grid is a full "
             f"{grid['tile_wh']}px tile, so this leg never exercises a short edge tile. Choose a "
-            f"--tile-wh that does not divide {grid['width']}x{grid['height']} exactly.")
-    print(f"[verify] grid is {grid['n_cols']}x{grid['n_rows']} over {grid['width']}x{grid['height']} "
-          f"with {len(ragged)}/{len(grid['tiles'])} ragged-edge tiles", flush=True)
+            f"--tile-wh that does not divide {grid['width']}x{grid['height']} exactly."
+        )
+    print(
+        f"[verify] grid is {grid['n_cols']}x{grid['n_rows']} over {grid['width']}x{grid['height']} "
+        f"with {len(ragged)}/{len(grid['tiles'])} ragged-edge tiles",
+        flush=True,
+    )
 
     # Never fan out into a directory that already holds tiles: a leftover tile_<i> from an earlier
     # grid is the right size to pass reg_assemble's per-tile check while holding pixels from a
@@ -350,14 +484,43 @@ def leg2(md):
     if os.path.isdir(tiles_dir):
         shutil.rmtree(tiles_dir)
     for t in grid["tiles"]:
-        run([sys.executable, "bin/reg_warp_tile.py", "--warp-state", ws, "--field", field_v,
-             "--src-slide", src, "--grid", grid_f, "--tile-idx", str(t["idx"]),
-             "--out-dir", tiles_dir])
+        run(
+            [
+                sys.executable,
+                "bin/reg_warp_tile.py",
+                "--warp-state",
+                ws,
+                "--field",
+                field_v,
+                "--src-slide",
+                src,
+                "--grid",
+                grid_f,
+                "--tile-idx",
+                str(t["idx"]),
+                "--out-dir",
+                tiles_dir,
+            ]
+        )
     report_tile_footprint(tiles_dir, grid)
 
     tiled_out = os.path.join(md, "tiled.ome.tiff")
-    run([sys.executable, "bin/reg_assemble.py", "--warp-state", ws, "--src-slide", src,
-         "--grid", grid_f, "--tiles-dir", tiles_dir, "--out", tiled_out])
+    run(
+        [
+            sys.executable,
+            "bin/reg_assemble.py",
+            "--warp-state",
+            ws,
+            "--src-slide",
+            src,
+            "--grid",
+            grid_f,
+            "--tiles-dir",
+            tiles_dir,
+            "--out",
+            tiled_out,
+        ]
+    )
 
     a, b = px(os.path.join(md, "lazy.ome.tiff")), px(tiled_out)
     canvas = (grid["height"], grid["width"])
@@ -366,13 +529,16 @@ def leg2(md):
     if float(np.max(b)) == float(np.min(b)):
         raise SystemExit(
             f"FAILED: the assembled slide is constant (all {float(np.min(b))}); two blank images "
-            "compare equal no matter how badly the tiling is broken.")
+            "compare equal no matter how badly the tiling is broken."
+        )
 
     equal = a.shape == b.shape and np.array_equal(a, b)
     d = None if a.shape != b.shape else float(np.max(np.abs(a - b)))
     print("=" * 72)
-    print(f"LEG 2 tile fan-out vs single warp: equal={equal} max|delta|={d} "
-          f"({len(grid['tiles'])} tiles, {grid['n_cols']}x{grid['n_rows']})")
+    print(
+        f"LEG 2 tile fan-out vs single warp: equal={equal} max|delta|={d} "
+        f"({len(grid['tiles'])} tiles, {grid['n_cols']}x{grid['n_rows']})"
+    )
     print("=" * 72, flush=True)
     return 0 if equal else 1
 

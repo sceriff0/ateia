@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Merge per-patient CSE JSONs into one CSV (one row per patient)."""
-import argparse, csv, json
+
+import argparse
+import csv
+import json
 
 
 def flatten(doc):

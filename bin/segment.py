@@ -12,25 +12,25 @@ from __future__ import annotations
 
 import argparse
 import logging
-import time
-from pathlib import Path
 
 # Add parent directory to path to import lib modules
 import sys
-sys.path.insert(0, str(Path(__file__).parent / 'utils'))
+import time
+from pathlib import Path
 
-from logger import get_logger, configure_logging
+sys.path.insert(0, str(Path(__file__).parent / "utils"))
+
 from typing import Optional, Tuple
 
 import dask.array as da
 import numpy as np
 import tifffile
 from csbdeep.utils import normalize
+from image_utils import ensure_dir
+from logger import configure_logging, get_logger
+from numpy.typing import NDArray
 from skimage import segmentation
 from stardist.models import StarDist2D
-from numpy.typing import NDArray
-
-from image_utils import ensure_dir
 from validation import clip_negative_values
 
 logger = get_logger(__name__)
@@ -45,8 +45,7 @@ __all__ = [
 
 
 def extract_dapi_channel(
-    multichannel_image_path: str,
-    dapi_channel_index: int = 0
+    multichannel_image_path: str, dapi_channel_index: int = 0
 ) -> Tuple[NDArray, dict]:
     """
     Extract DAPI channel from multichannel OME-TIFF image using memory-mapped I/O.
@@ -82,7 +81,9 @@ def extract_dapi_channel(
             # Non-OME TIFF or corrupted OME metadata - fall back to pages
             logger.warning("No OME series found, falling back to raw pages")
             if not tif.pages:
-                raise ValueError(f"TIFF file appears corrupted: {multichannel_image_path}")
+                raise ValueError(
+                    f"TIFF file appears corrupted: {multichannel_image_path}"
+                )
             source = tif.pages[0]
 
         image_shape = source.shape
@@ -99,15 +100,15 @@ def extract_dapi_channel(
 
         # Extract OME metadata if available
         metadata = {}
-        if hasattr(tif, 'ome_metadata') and tif.ome_metadata:
-            metadata['ome'] = tif.ome_metadata
-            logger.info(f"  ✓ OME metadata found")
+        if hasattr(tif, "ome_metadata") and tif.ome_metadata:
+            metadata["ome"] = tif.ome_metadata
+            logger.info("  ✓ OME metadata found")
 
         logger.info(f"  Image shape: {image_shape}")
         logger.info(f"  Image dtype: {image_dtype}")
 
         # Memory-map the file (doesn't load into RAM)
-        image_memmap = tif.asarray(out='memmap')
+        image_memmap = tif.asarray(out="memmap")
 
         # Handle different image formats
         if image_memmap.ndim == 2:
@@ -116,7 +117,9 @@ def extract_dapi_channel(
             # Load single channel into RAM
             dapi_image = np.array(image_memmap, copy=True)
             # Clip negative values from interpolation artifacts (e.g., bicubic overshoot)
-            dapi_image = clip_negative_values(dapi_image, logger, stage_name="extract_dapi")
+            dapi_image = clip_negative_values(
+                dapi_image, logger, stage_name="extract_dapi"
+            )
         elif image_memmap.ndim == 3:
             # Multichannel image (C, Y, X) format
             n_channels = image_memmap.shape[0]
@@ -129,10 +132,14 @@ def extract_dapi_channel(
                 )
 
             # Extract ONLY the DAPI channel into RAM (not all channels)
-            logger.info(f"  - Extracting DAPI channel (index {dapi_channel_index}) - memory efficient")
+            logger.info(
+                f"  - Extracting DAPI channel (index {dapi_channel_index}) - memory efficient"
+            )
             dapi_image = np.array(image_memmap[dapi_channel_index, :, :], copy=True)
             # Clip negative values from interpolation artifacts (e.g., bicubic overshoot)
-            dapi_image = clip_negative_values(dapi_image, logger, stage_name="extract_dapi")
+            dapi_image = clip_negative_values(
+                dapi_image, logger, stage_name="extract_dapi"
+            )
             logger.info(f"  - Extracted DAPI channel (index {dapi_channel_index})")
         else:
             raise ValueError(
@@ -148,9 +155,7 @@ def extract_dapi_channel(
 
 
 def normalize_dapi(
-    dapi_image: NDArray,
-    pmin: float = 1.0,
-    pmax: float = 99.8
+    dapi_image: NDArray, pmin: float = 1.0, pmax: float = 99.8
 ) -> NDArray:
     """
     Normalize DAPI image using CSBDeep percentile normalization.
@@ -188,9 +193,7 @@ def normalize_dapi(
 
 
 def load_stardist_model(
-    model_dir: str,
-    model_name: str,
-    use_gpu: bool = True
+    model_dir: str, model_name: str, use_gpu: bool = True
 ) -> StarDist2D:
     """
     Load pre-trained StarDist model.
@@ -209,7 +212,7 @@ def load_stardist_model(
     model : StarDist2D
         Loaded StarDist model.
     """
-    logger.info(f"Loading StarDist model...")
+    logger.info("Loading StarDist model...")
     logger.info(f"  Model name: {model_name}")
     logger.info(f"  Model directory: {model_dir}")
     logger.info(f"  GPU enabled: {use_gpu}")
@@ -218,9 +221,14 @@ def load_stardist_model(
     # first use. We fall back to these when no usable custom model directory is
     # given, so the pipeline runs out of the box (and CI/real tests don't need a
     # multi-MB trained model shipped in the repo).
-    BUILTIN_MODELS = {'2D_versatile_fluo', '2D_versatile_he', '2D_paper_dsb2018', '2D_demo'}
+    BUILTIN_MODELS = {
+        "2D_versatile_fluo",
+        "2D_versatile_he",
+        "2D_paper_dsb2018",
+        "2D_demo",
+    }
 
-    have_model_dir = model_dir not in (None, '', 'null', 'None')
+    have_model_dir = model_dir not in (None, "", "null", "None")
     model_path = (Path(model_dir) / model_name) if have_model_dir else None
 
     if have_model_dir and model_path.exists():
@@ -232,7 +240,9 @@ def load_stardist_model(
         model = StarDist2D(None, name=model_name, basedir=model_dir)
     elif model_name in BUILTIN_MODELS:
         # No usable custom dir — load a StarDist built-in pretrained model.
-        logger.info(f"  No custom model directory; loading built-in pretrained model: {model_name}")
+        logger.info(
+            f"  No custom model directory; loading built-in pretrained model: {model_name}"
+        )
         model = StarDist2D.from_pretrained(model_name)
     else:
         raise FileNotFoundError(
@@ -242,7 +252,7 @@ def load_stardist_model(
             f"a built-in model name."
         )
 
-    if hasattr(model, 'config'):
+    if hasattr(model, "config"):
         model.config.use_gpu = use_gpu
 
     logger.info("  ✓ Model loaded successfully")
@@ -251,9 +261,7 @@ def load_stardist_model(
 
 
 def expand_labels_tiled(
-    label_image: NDArray,
-    distance: int = 1,
-    tile_size: int = 1024
+    label_image: NDArray, distance: int = 1, tile_size: int = 1024
 ) -> NDArray:
     """
     Parallel tiled expansion using Dask.
@@ -292,11 +300,7 @@ def expand_labels_tiled(
 
     # Process tiles in parallel with overlap handling
     expanded = da.map_overlap(
-        _expand_tile,
-        dask_labels,
-        depth=overlap,
-        boundary='none',
-        dtype=np.uint32
+        _expand_tile, dask_labels, depth=overlap, boundary="none", dtype=np.uint32
     )
 
     return expanded.compute()
@@ -307,7 +311,7 @@ def segment_nuclei(
     model: StarDist2D,
     n_tiles: Tuple[int, int] = (24, 24),
     expand_distance: int = 10,
-    prob_thresh: Optional[float] = None
+    prob_thresh: Optional[float] = None,
 ) -> Tuple[NDArray, NDArray]:
     """
     Segment nuclei and create whole-cell masks.
@@ -338,7 +342,7 @@ def segment_nuclei(
     - Expands nuclei labels using skimage.segmentation.expand_labels
     - Label 0 is background, labels ≥1 are cells
     """
-    logger.info(f"Segmenting nuclei on whole image...")
+    logger.info("Segmenting nuclei on whole image...")
     logger.info(f"  Image shape: {normalized_dapi.shape}")
     logger.info(f"  Tiling: {n_tiles}")
     logger.info(f"  Cell expansion distance: {expand_distance}px")
@@ -355,23 +359,21 @@ def segment_nuclei(
         n_tiles=n_tiles,
         prob_thresh=prob_thresh,
         show_tile_progress=False,
-        verbose=False
+        verbose=False,
     )
 
-    logger.info(f"  ✓ Nuclei detection complete")
+    logger.info("  ✓ Nuclei detection complete")
 
     # Free normalized DAPI to reduce memory pressure before expansion
-    logger.info(f"  Freeing normalized DAPI from memory...")
+    logger.info("  Freeing normalized DAPI from memory...")
     del normalized_dapi
     import gc
+
     gc.collect()
 
     # Expand nuclei labels to create whole-cell masks (tiled for memory efficiency)
-    logger.info(f"  Expanding nuclei labels to create cell masks...")
-    cell_labels = expand_labels_tiled(
-        nuclei_labels,
-        distance=expand_distance
-    )
+    logger.info("  Expanding nuclei labels to create cell masks...")
+    cell_labels = expand_labels_tiled(nuclei_labels, distance=expand_distance)
 
     elapsed = time.time() - start_time
 
@@ -398,7 +400,7 @@ def run_segmentation(
     expand_distance: int = 10,
     pmin: float = 1.0,
     pmax: float = 99.8,
-    prob_thresh: Optional[float] = None
+    prob_thresh: Optional[float] = None,
 ) -> Tuple[str, str]:
     """
     Run complete segmentation pipeline on multichannel image.
@@ -459,7 +461,7 @@ def run_segmentation(
         model,
         n_tiles=n_tiles,
         expand_distance=expand_distance,
-        prob_thresh=prob_thresh
+        prob_thresh=prob_thresh,
     )
     del normalized_dapi, model  # Free float32 image + TF weights before save phase
 
@@ -471,11 +473,11 @@ def run_segmentation(
     logger.info("")
     logger.info("Saving segmentation masks...")
     logger.info(f"  Nuclei mask: {nuclei_mask_path.name}")
-    tifffile.imwrite(nuclei_mask_path, nuclei_mask, compression='zlib')
+    tifffile.imwrite(nuclei_mask_path, nuclei_mask, compression="zlib")
     del nuclei_mask  # Free before writing cell mask
 
     logger.info(f"  Cell mask: {cell_mask_path.name}")
-    tifffile.imwrite(cell_mask_path, cell_mask, compression='zlib')
+    tifffile.imwrite(cell_mask_path, cell_mask, compression="zlib")
     del cell_mask
 
     logger.info("")
@@ -489,93 +491,87 @@ def run_segmentation(
 def parse_args():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description='Cell segmentation using StarDist on multichannel images',
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+        description="Cell segmentation using StarDist on multichannel images",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
     # Required arguments
     parser.add_argument(
-        '--image',
+        "--image",
         type=str,
         required=True,
-        help='Path to multichannel OME-TIFF image (e.g., registered image from VALIS)'
+        help="Path to multichannel OME-TIFF image (e.g., registered image from VALIS)",
     )
 
     parser.add_argument(
-        '--model-dir',
+        "--model-dir",
         type=str,
         required=False,
         default=None,
-        help='Directory containing a custom StarDist model. If omitted, '
-             '--model-name is loaded as a StarDist built-in pretrained model '
-             '(e.g. "2D_versatile_fluo").'
+        help="Directory containing a custom StarDist model. If omitted, "
+        "--model-name is loaded as a StarDist built-in pretrained model "
+        '(e.g. "2D_versatile_fluo").',
     )
 
     parser.add_argument(
-        '--model-name',
+        "--model-name",
         type=str,
         required=True,
-        help='StarDist model name (e.g., "2D_versatile_fluo")'
+        help='StarDist model name (e.g., "2D_versatile_fluo")',
     )
 
     # Optional arguments
     parser.add_argument(
-        '--output-dir',
+        "--output-dir",
         type=str,
-        default='./segmentation_output',
-        help='Output directory for segmentation masks'
+        default="./segmentation_output",
+        help="Output directory for segmentation masks",
     )
 
     parser.add_argument(
-        '--dapi-channel',
+        "--dapi-channel",
         type=int,
         default=0,
-        help='Index of DAPI channel in multichannel image'
+        help="Index of DAPI channel in multichannel image",
     )
 
     parser.add_argument(
-        '--use-gpu',
-        action='store_true',
+        "--use-gpu",
+        action="store_true",
         default=False,
-        help='Use GPU acceleration (if available)'
+        help="Use GPU acceleration (if available)",
     )
 
     parser.add_argument(
-        '--n-tiles',
+        "--n-tiles",
         type=int,
         nargs=2,
         default=[16, 16],
-        metavar=('Y', 'X'),
-        help='Number of tiles for processing (Y X)'
+        metavar=("Y", "X"),
+        help="Number of tiles for processing (Y X)",
     )
 
     parser.add_argument(
-        '--expand-distance',
+        "--expand-distance",
         type=int,
         default=10,
-        help='Distance (pixels) to expand nuclei labels for whole-cell masks'
+        help="Distance (pixels) to expand nuclei labels for whole-cell masks",
     )
 
     parser.add_argument(
-        '--pmin',
-        type=float,
-        default=1.0,
-        help='Lower percentile for normalization'
+        "--pmin", type=float, default=1.0, help="Lower percentile for normalization"
     )
 
     parser.add_argument(
-        '--pmax',
-        type=float,
-        default=99.8,
-        help='Upper percentile for normalization'
+        "--pmax", type=float, default=99.8, help="Upper percentile for normalization"
     )
 
     parser.add_argument(
-        '--prob-thresh',
+        "--prob-thresh",
         type=float,
         default=None,
-        help='StarDist detection probability threshold. Omit to use the model '
-             'default; lower it to detect fainter/smaller nuclei.'
+        help="StarDist detection probability threshold. Omit to use the model "
+        "default; lower it to detect fainter/smaller nuclei.",
     )
 
     return parser.parse_args()
@@ -598,11 +594,11 @@ def main():
         expand_distance=args.expand_distance,
         pmin=args.pmin,
         pmax=args.pmax,
-        prob_thresh=args.prob_thresh
+        prob_thresh=args.prob_thresh,
     )
 
     return 0
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     exit(main())

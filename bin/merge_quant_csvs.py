@@ -18,7 +18,7 @@ from pathlib import Path
 import pandas as pd
 
 # Add parent directory to path to import lib modules
-sys.path.insert(0, str(Path(__file__).parent / 'utils'))
+sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
 from logger import configure_logging, get_logger
 
@@ -26,12 +26,22 @@ logger = get_logger(__name__)
 
 # Canonical morphology column order
 MORPHOLOGY_COLS = [
-    'label', 'y', 'x', 'area', 'eccentricity', 'perimeter',
-    'convex_area', 'axis_major_length', 'axis_minor_length', 'solidity',
+    "label",
+    "y",
+    "x",
+    "area",
+    "eccentricity",
+    "perimeter",
+    "convex_area",
+    "axis_major_length",
+    "axis_minor_length",
+    "solidity",
 ]
 
 
-def load_intensity_csvs(csvs_dir: Path | None = None, csv_files_list: list[str] | None = None) -> list[Path]:
+def load_intensity_csvs(
+    csvs_dir: Path | None = None, csv_files_list: list[str] | None = None
+) -> list[Path]:
     """Find and return sorted list of per-channel quantification CSVs.
 
     Either provide explicit file paths via csv_files_list, or a directory
@@ -40,7 +50,7 @@ def load_intensity_csvs(csvs_dir: Path | None = None, csv_files_list: list[str] 
     if csv_files_list:
         csv_files = [Path(f) for f in csv_files_list]
     elif csvs_dir is not None:
-        csv_files = sorted(csvs_dir.glob('*_quant.csv'))
+        csv_files = sorted(csvs_dir.glob("*_quant.csv"))
     else:
         csv_files = []
     if not csv_files:
@@ -52,7 +62,7 @@ def load_intensity_csvs(csvs_dir: Path | None = None, csv_files_list: list[str] 
 def merge_intensities(
     morphology: pd.DataFrame,
     csv_files: list[Path],
-    protected_cols: tuple[str, ...] = ('DAPI',),
+    protected_cols: tuple[str, ...] = ("DAPI",),
 ) -> pd.DataFrame:
     """Merge each intensity CSV into the base table by label.
 
@@ -63,11 +73,11 @@ def merge_intensities(
     case the base is kept and the incoming column is dropped.
     """
     merged = morphology.copy()
-    morphology_cells = set(merged['label'])
+    morphology_cells = set(merged["label"])
 
     for csv_file in csv_files:
         df = pd.read_csv(csv_file)
-        marker_cols = [col for col in df.columns if col != 'label']
+        marker_cols = [col for col in df.columns if col != "label"]
 
         if not marker_cols:
             logger.warning("%s: No marker columns found, skipping", csv_file.name)
@@ -78,28 +88,38 @@ def merge_intensities(
             if col in merged.columns:
                 if col in protected_cols:
                     df = df.drop(columns=[col])
-                    logger.info("%s: protected column '%s' kept from base (incoming dropped)",
-                                csv_file.name, col)
+                    logger.info(
+                        "%s: protected column '%s' kept from base (incoming dropped)",
+                        csv_file.name,
+                        col,
+                    )
                 else:
                     merged = merged.drop(columns=[col])
-                    logger.info("%s: column '%s' overwritten by new cycle (new wins)",
-                                csv_file.name, col)
-        marker_cols = [col for col in df.columns if col != 'label']
+                    logger.info(
+                        "%s: column '%s' overwritten by new cycle (new wins)",
+                        csv_file.name,
+                        col,
+                    )
+        marker_cols = [col for col in df.columns if col != "label"]
         if not marker_cols:
             continue
 
         # Validate cell labels
-        intensity_cells = set(df['label'])
+        intensity_cells = set(df["label"])
         missing = morphology_cells - intensity_cells
         extra = intensity_cells - morphology_cells
         if missing:
-            logger.warning("%s: Missing %d cells from base", csv_file.name, len(missing))
+            logger.warning(
+                "%s: Missing %d cells from base", csv_file.name, len(missing)
+            )
         if extra:
-            logger.warning("%s: Has %d extra cells (will be ignored)", csv_file.name, len(extra))
+            logger.warning(
+                "%s: Has %d extra cells (will be ignored)", csv_file.name, len(extra)
+            )
 
-        merge_df = df[['label'] + marker_cols]
-        merged = merged.merge(merge_df, on='label', how='left')
-        logger.info("  + %s from %s", ', '.join(marker_cols), csv_file.name)
+        merge_df = df[["label"] + marker_cols]
+        merged = merged.merge(merge_df, on="label", how="left")
+        logger.info("  + %s from %s", ", ".join(marker_cols), csv_file.name)
 
     return merged
 
@@ -108,24 +128,28 @@ def reorder_columns(merged: pd.DataFrame, patient_id: str) -> pd.DataFrame:
     """Reorder columns and add fov/cell_size for downstream analysis."""
     # Separate morphology and marker columns
     morpho_present = [col for col in MORPHOLOGY_COLS if col in merged.columns]
-    marker_cols_all = [col for col in merged.columns if col not in MORPHOLOGY_COLS and col not in ('fov', 'cell_size')]
+    marker_cols_all = [
+        col
+        for col in merged.columns
+        if col not in MORPHOLOGY_COLS and col not in ("fov", "cell_size")
+    ]
 
     # Put DAPI first among markers if present
-    if 'DAPI' in marker_cols_all:
-        marker_cols_all.remove('DAPI')
-        final_column_order = morpho_present + ['DAPI'] + sorted(marker_cols_all)
+    if "DAPI" in marker_cols_all:
+        marker_cols_all.remove("DAPI")
+        final_column_order = morpho_present + ["DAPI"] + sorted(marker_cols_all)
     else:
         final_column_order = morpho_present + sorted(marker_cols_all)
     merged = merged[final_column_order]
 
     # Add required columns for Pixie cell clustering
-    merged['fov'] = patient_id
-    if 'area' in merged.columns:
-        merged['cell_size'] = merged['area']
+    merged["fov"] = patient_id
+    if "area" in merged.columns:
+        merged["cell_size"] = merged["area"]
 
     # Move fov and cell_size to the front
     cols = merged.columns.tolist()
-    for col_to_move in ['cell_size', 'fov']:
+    for col_to_move in ["cell_size", "fov"]:
         if col_to_move in cols:
             cols.remove(col_to_move)
             cols = [col_to_move] + cols
@@ -137,27 +161,38 @@ def reorder_columns(merged: pd.DataFrame, patient_id: str) -> pd.DataFrame:
 def main() -> None:
     """Parse arguments and run the merge pipeline."""
     parser = argparse.ArgumentParser(
-        description='Merge per-channel quantification CSVs with morphology.',
+        description="Merge per-channel quantification CSVs with morphology.",
     )
     parser.add_argument(
-        '--csvs-dir', type=Path, required=False, default=None,
-        help='Directory to glob for *_quant.csv files',
+        "--csvs-dir",
+        type=Path,
+        required=False,
+        default=None,
+        help="Directory to glob for *_quant.csv files",
     )
     parser.add_argument(
-        '--csv-files', nargs='*', default=None,
-        help='Explicit list of CSV files to merge (alternative to --csvs-dir)',
+        "--csv-files",
+        nargs="*",
+        default=None,
+        help="Explicit list of CSV files to merge (alternative to --csvs-dir)",
     )
     parser.add_argument(
-        '--morphology', type=Path, required=True,
-        help='Path to morphology CSV from EXTRACT_CELL_PROPERTIES',
+        "--morphology",
+        type=Path,
+        required=True,
+        help="Path to morphology CSV from EXTRACT_CELL_PROPERTIES",
     )
     parser.add_argument(
-        '--patient-id', type=str, required=True,
-        help='Patient/sample ID for fov column and logging',
+        "--patient-id",
+        type=str,
+        required=True,
+        help="Patient/sample ID for fov column and logging",
     )
     parser.add_argument(
-        '--output', type=Path, required=True,
-        help='Output path for merged CSV',
+        "--output",
+        type=Path,
+        required=True,
+        help="Output path for merged CSV",
     )
     args = parser.parse_args()
 
@@ -167,13 +202,17 @@ def main() -> None:
 
     # Load morphology (computed once by EXTRACT_CELL_PROPERTIES)
     morphology = pd.read_csv(args.morphology)
-    logger.info("Morphology: %d cells, %d columns", len(morphology), len(morphology.columns))
+    logger.info(
+        "Morphology: %d cells, %d columns", len(morphology), len(morphology.columns)
+    )
 
     # Find and merge intensity CSVs
-    csv_files = load_intensity_csvs(csvs_dir=args.csvs_dir, csv_files_list=args.csv_files)
+    csv_files = load_intensity_csvs(
+        csvs_dir=args.csvs_dir, csv_files_list=args.csv_files
+    )
     logger.info("Merging %d intensity CSVs with morphology...", len(csv_files))
 
-    merged = merge_intensities(morphology, csv_files, protected_cols=('DAPI',))
+    merged = merge_intensities(morphology, csv_files, protected_cols=("DAPI",))
 
     # Validate the row count is exactly preserved. A left merge on 'label' can
     # both LOSE cells (fewer rows) and FAN OUT (more rows) — the latter happens
@@ -186,7 +225,11 @@ def main() -> None:
     elif cells_delta > 0:
         logger.critical(
             "Merge produced %d rows from %d morphology cells (+%d) — duplicate labels "
-            "in an intensity CSV fanned out the join", len(merged), len(morphology), cells_delta)
+            "in an intensity CSV fanned out the join",
+            len(merged),
+            len(morphology),
+            cells_delta,
+        )
         sys.exit(1)
     else:
         logger.info("All %d cells preserved", len(merged))
@@ -196,9 +239,11 @@ def main() -> None:
 
     # Save merged CSV
     merged.to_csv(args.output, index=False)
-    logger.info("Merged CSV saved: %d cells, %d columns", len(merged), len(merged.columns))
-    logger.info("  Final columns: %s", ', '.join(merged.columns))
+    logger.info(
+        "Merged CSV saved: %d cells, %d columns", len(merged), len(merged.columns)
+    )
+    logger.info("  Final columns: %s", ", ".join(merged.columns))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

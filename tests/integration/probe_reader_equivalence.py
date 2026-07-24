@@ -9,6 +9,7 @@ Usage (inside the VALIS image):
       bolt3x/attend_image_analysis:mirage_valis_1.0.0 \
       python3 tests/integration/probe_reader_equivalence.py
 """
+
 import os
 
 import numpy as np
@@ -26,13 +27,17 @@ def make_fixture():
     rng = np.random.default_rng(0)
     arr = rng.integers(0, 65535, size=(C, H, W), dtype=np.uint16)
     tifffile.imwrite(
-        SRC, arr,
+        SRC,
+        arr,
         photometric="minisblack",
         metadata={"axes": "CYX"},
         bigtiff=True,
         ome=True,
         compression="zlib",
-        tile=(256, 256),  # Intentional: fixture is 512x640, so production's (2048, 2048) would yield single tile, not exercising multi-tile decoding
+        tile=(
+            256,
+            256,
+        ),  # Intentional: fixture is 512x640, so production's (2048, 2048) would yield single tile, not exercising multi-tile decoding
     )
     return arr
 
@@ -49,11 +54,14 @@ def read_pyvips():
 
 def read_bioformats():
     from valis import slide_io
+
     reader_cls = slide_io.get_slide_reader(SRC, series=0)
     reader = reader_cls(SRC, series=0)
     vips_img = reader.slide2vips(level=0)
     mem = np.frombuffer(vips_img.write_to_memory(), dtype=np.uint16)
-    return mem.reshape(vips_img.height, vips_img.width, vips_img.bands), reader_cls.__name__
+    return mem.reshape(
+        vips_img.height, vips_img.width, vips_img.bands
+    ), reader_cls.__name__
 
 
 def main():
@@ -66,15 +74,23 @@ def main():
     print(f"[A1] pyvips == tifffile source array: {a1_vs_truth}", flush=True)
 
     from valis import registration
+
     registration.init_jvm(mem_gb=8)
     bf, reader_name = read_bioformats()
     print(f"[A1] BioFormats reader class chosen: {reader_name}", flush=True)
     a1_reader = reader_name == "BioFormatsSlideReader"
     if not a1_reader:
-        print(f"[A1] UNEXPECTED reader {reader_name!r}: the probe is no longer exercising "
-              f"BioFormats, so a pixel match proves nothing", flush=True)
+        print(
+            f"[A1] UNEXPECTED reader {reader_name!r}: the probe is no longer exercising "
+            f"BioFormats, so a pixel match proves nothing",
+            flush=True,
+        )
     a1_bf = bf.shape == pv.shape and np.array_equal(bf, pv)
-    d = None if bf.shape != pv.shape else float(np.max(np.abs(bf.astype(np.int64) - pv.astype(np.int64))))
+    d = (
+        None
+        if bf.shape != pv.shape
+        else float(np.max(np.abs(bf.astype(np.int64) - pv.astype(np.int64))))
+    )
     print(f"[A1] pyvips == BioFormats: {a1_bf}  max|delta|={d}", flush=True)
     registration.kill_jvm()
 

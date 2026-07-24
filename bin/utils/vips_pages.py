@@ -15,6 +15,7 @@ in the JVM sniff, numba and matplotlib cache setup that ``bin/reg_finalize.py`` 
 environment for. Lightweight consumers -- ``bin/compare_registration.py`` -- need the band-join and
 nothing else, and should not be able to fail for a reason that belongs to the registration stack.
 """
+
 import pyvips
 
 # n=-1 asks libvips for every page joined vertically: a "toilet roll" of height C*page_height.

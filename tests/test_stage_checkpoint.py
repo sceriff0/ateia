@@ -5,6 +5,7 @@ The contract this file defends: the snapshot round-trips, it survives a slide th
 snapshotted (registration must never fail because a QC artifact could not be written), and it
 refuses to be read by a QC that expects a different layout.
 """
+
 from __future__ import annotations
 
 import json
@@ -14,7 +15,12 @@ import sys
 import numpy as np
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bin", "utils"))
+sys.path.insert(
+    0,
+    os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bin", "utils"
+    ),
+)
 
 import stage_checkpoint as sc
 
@@ -38,7 +44,9 @@ def _field(h=4, w=5, seed=0):
 # ── write / read round trip ────────────────────────────────────────────────────
 def test_round_trip_returns_the_same_field(tmp_path):
     f = _field()
-    reg = _Registrar({"ref": _Slide(M=np.eye(3)), "mov": _Slide(M=np.eye(3), fwd_dxdy=f)})
+    reg = _Registrar(
+        {"ref": _Slide(M=np.eye(3)), "mov": _Slide(M=np.eye(3), fwd_dxdy=f)}
+    )
     sc.write_checkpoint(reg, str(tmp_path))
 
     ck = sc.StageCheckpoint.load(str(tmp_path))
@@ -50,7 +58,9 @@ def test_round_trip_returns_the_same_field(tmp_path):
 def test_a_slide_without_a_field_reads_back_as_none(tmp_path):
     """The reference has no displacement field — register_micro skips it — and 'no field'
     is the correct answer for it, not an error."""
-    reg = _Registrar({"ref": _Slide(M=np.eye(3)), "mov": _Slide(M=np.eye(3), fwd_dxdy=_field())})
+    reg = _Registrar(
+        {"ref": _Slide(M=np.eye(3)), "mov": _Slide(M=np.eye(3), fwd_dxdy=_field())}
+    )
     sc.write_checkpoint(reg, str(tmp_path))
     ck = sc.StageCheckpoint.load(str(tmp_path))
     assert ck.fwd_dxdy("ref") is None
@@ -80,8 +90,8 @@ def test_slide_names_with_awkward_characters_get_safe_filenames(tmp_path):
     reg = _Registrar({name: _Slide(M=np.eye(3), fwd_dxdy=_field())})
     sc.write_checkpoint(reg, str(tmp_path))
     ck = sc.StageCheckpoint.load(str(tmp_path))
-    assert ck.has_slide(name)              # the key keeps the original name...
-    assert np.isfinite(ck.fwd_dxdy(name)).all()   # ...and the file is still readable
+    assert ck.has_slide(name)  # the key keeps the original name...
+    assert np.isfinite(ck.fwd_dxdy(name)).all()  # ...and the file is still readable
 
 
 # ── the micro_registration flag ────────────────────────────────────────────────
@@ -99,22 +109,26 @@ def test_set_micro_registration_corrects_the_flag_after_the_fact(tmp_path):
     assert sc.StageCheckpoint.load(str(tmp_path)).micro_registration is False
 
 
-def test_set_micro_registration_on_a_missing_checkpoint_reports_failure_not_raises(tmp_path):
+def test_set_micro_registration_on_a_missing_checkpoint_reports_failure_not_raises(
+    tmp_path,
+):
     assert sc.set_micro_registration(str(tmp_path / "nope"), True) is False
 
 
 # ── failure containment ────────────────────────────────────────────────────────
 def test_a_slide_that_cannot_be_snapshotted_is_recorded_not_raised(tmp_path):
     """Registration must never fail because a QC artifact could not be written."""
-    bad = _Slide(M=np.eye(3), fwd_dxdy=np.zeros((3, 4, 5)))   # not a (2, H, W) field
+    bad = _Slide(M=np.eye(3), fwd_dxdy=np.zeros((3, 4, 5)))  # not a (2, H, W) field
     good = _Slide(M=np.eye(3), fwd_dxdy=_field())
-    manifest = sc.write_checkpoint(_Registrar({"bad": bad, "good": good}), str(tmp_path))
+    manifest = sc.write_checkpoint(
+        _Registrar({"bad": bad, "good": good}), str(tmp_path)
+    )
 
     assert len(manifest["errors"]) == 1
     assert "bad" in manifest["errors"][0]
     ck = sc.StageCheckpoint.load(str(tmp_path))
-    assert ck.fwd_dxdy("bad") is None            # recorded as fieldless, not corrupt
-    assert np.allclose(ck.fwd_dxdy("good"), good.fwd_dxdy)   # the good slide survived
+    assert ck.fwd_dxdy("bad") is None  # recorded as fieldless, not corrupt
+    assert np.allclose(ck.fwd_dxdy("good"), good.fwd_dxdy)  # the good slide survived
 
 
 def test_asking_for_an_unknown_slide_names_the_ones_it_has(tmp_path):

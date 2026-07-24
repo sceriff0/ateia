@@ -17,6 +17,7 @@ The timing-immune lever is ``scyjava.config.set_cache_dir`` / ``set_m2_repo`` â€
 overwrite the frozen module globals that ``get_cache_dir()`` returns. This is a static
 behavioural test (scyjava.config is faked) so it runs in CI without a valis install.
 """
+
 import os
 import sys
 import types
@@ -57,6 +58,7 @@ def fake_scyjava(monkeypatch):
 
 def _fn():
     import jvm_cache  # noqa: WPS433  (imported lazily so the fake scyjava is in place)
+
     return jvm_cache.point_jvm_cache_off_readonly_home
 
 

@@ -19,11 +19,11 @@ import pandas as pd
 from numpy.typing import NDArray
 
 # Add parent directory to path to import lib modules
-sys.path.insert(0, str(Path(__file__).parent / 'utils'))
+sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
 # Import from lib for DRY principle
-from logger import get_logger, configure_logging
 from image_utils import ensure_dir, load_image
+from logger import configure_logging, get_logger
 
 logger = get_logger(__name__)
 
@@ -41,10 +41,7 @@ COMPARTMENT_NAMES = ("Nucleus", "Cytoplasm", "Cell")
 
 
 def compute_channel_intensity(
-    mask_filtered: NDArray,
-    channel: NDArray,
-    valid_labels: NDArray,
-    channel_name: str
+    mask_filtered: NDArray, channel: NDArray, valid_labels: NDArray, channel_name: str
 ) -> pd.Series:
     """Compute mean intensity per cell for a single channel.
 
@@ -91,7 +88,7 @@ def compute_channel_intensity(
     quantify_single_channel : Complete quantification pipeline
     """
     channel = channel.squeeze()
-    
+
     # Efficient bincount-based mean computation
     flat_mask = mask_filtered.ravel()
     flat_channel = channel.ravel().astype(np.float64)
@@ -100,7 +97,7 @@ def compute_channel_intensity(
     count_per_label = np.bincount(flat_mask)
 
     # Compute means with safe division
-    with np.errstate(divide='ignore', invalid='ignore'):
+    with np.errstate(divide="ignore", invalid="ignore"):
         mean_intensities = np.divide(sum_per_label, count_per_label)
         mean_intensities = np.nan_to_num(mean_intensities, nan=0.0)
 
@@ -108,7 +105,7 @@ def compute_channel_intensity(
     max_label = len(mean_intensities) - 1
     safe_labels = np.clip(valid_labels, 0, max_label)
     intensities = mean_intensities[safe_labels]
-    
+
     # Handle any labels that were out of bounds
     out_of_bounds = valid_labels > max_label
     if np.any(out_of_bounds):
@@ -119,7 +116,7 @@ def compute_channel_intensity(
 
 def _safe_mean(sums: NDArray, counts: NDArray) -> NDArray:
     """Element-wise sums / counts with 0.0 where counts is 0."""
-    with np.errstate(divide='ignore', invalid='ignore'):
+    with np.errstate(divide="ignore", invalid="ignore"):
         means = np.divide(sums, counts)
     return np.nan_to_num(means, nan=0.0)
 
@@ -209,7 +206,9 @@ def compute_compartment_intensities(
     # Backward-compatible bare marker column (== whole-cell mean).
     out[channel_name] = _safe_mean(cell_sum, cell_count)[valid_labels]
     for comp in COMPARTMENT_NAMES:
-        out[f"{channel_name}: {comp}: Mean"] = _safe_mean(sums[comp], counts[comp])[valid_labels]
+        out[f"{channel_name}: {comp}: Mean"] = _safe_mean(sums[comp], counts[comp])[
+            valid_labels
+        ]
 
     if expanded:
         # Sum (integrated density) is already computed above.
@@ -217,11 +216,13 @@ def compute_compartment_intensities(
             out[f"{channel_name}: {comp}: Sum"] = sums[comp][valid_labels]
         # Median needs a per-pixel gather; restrict to foreground cell pixels only.
         fg = flat_cell != 0
-        df_px = pd.DataFrame({
-            "label": flat_cell[fg],
-            "val": flat_val[fg],
-            "nuc": nuc_fg[fg],
-        })
+        df_px = pd.DataFrame(
+            {
+                "label": flat_cell[fg],
+                "val": flat_val[fg],
+                "nuc": nuc_fg[fg],
+            }
+        )
         medians = {
             "Cell": df_px.groupby("label")["val"].median(),
             "Nucleus": df_px[df_px["nuc"]].groupby("label")["val"].median(),
@@ -287,17 +288,19 @@ def quantify_single_channel(
         mask, channel_image, valid_labels, channel_name
     )
 
-    result_df = pd.DataFrame({
-        'label': valid_labels,
-        channel_name: intensity_series.values,
-    })
+    result_df = pd.DataFrame(
+        {
+            "label": valid_labels,
+            channel_name: intensity_series.values,
+        }
+    )
 
     return result_df
 
 
 def _load_mask(mask_path: str) -> NDArray:
     """Load a segmentation mask from .npy or .tif, squeezed to 2D."""
-    if mask_path.endswith('.npy'):
+    if mask_path.endswith(".npy"):
         return np.load(mask_path).squeeze()
     loaded, _ = load_image(mask_path)
     return loaded.squeeze()
@@ -345,9 +348,9 @@ def run_quantification(
     """
     # Use provided channel name, or extract from filename as fallback
     if channel_name is None:
-        channel_name = Path(channel_path).stem.split('_')[-1]
+        channel_name = Path(channel_path).stem.split("_")[-1]
         logger.info(f"Channel name parsed from filename: {channel_name}")
-    
+
     logger.info("=" * 60)
     logger.info(f"Quantifying channel: {channel_name}")
     logger.info("=" * 60)
@@ -355,7 +358,7 @@ def run_quantification(
     # Load segmentation mask
     logger.info(f"Loading mask: {mask_path}")
     try:
-        if mask_path.endswith('.npy'):
+        if mask_path.endswith(".npy"):
             mask = np.load(mask_path).squeeze()
         else:
             mask, _ = load_image(mask_path)
@@ -400,15 +403,24 @@ def run_quantification(
             logger.error(f"[FAIL] Nuclei mask not found: {nuclei_mask_path}")
             raise FileNotFoundError(f"Nuclei mask not found: {nuclei_mask_path}")
         except Exception as e:
-            logger.error(f"[FAIL] Failed to load nuclei mask from {nuclei_mask_path}: {e}")
-            raise ValueError(f"Failed to load nuclei mask from {nuclei_mask_path}: {e}") from e
+            logger.error(
+                f"[FAIL] Failed to load nuclei mask from {nuclei_mask_path}: {e}"
+            )
+            raise ValueError(
+                f"Failed to load nuclei mask from {nuclei_mask_path}: {e}"
+            ) from e
         mode = "expanded (Mean/Median/Sum)" if expanded else "standard (Mean)"
-        logger.info(f"Per-compartment quantification enabled: Nucleus/Cytoplasm/Cell, {mode}")
+        logger.info(
+            f"Per-compartment quantification enabled: Nucleus/Cytoplasm/Cell, {mode}"
+        )
 
     # Quantify
     result_df = quantify_single_channel(
-        mask, channel_image, channel_name,
-        nuclei_mask=nuclei_mask, expanded=expanded,
+        mask,
+        channel_image,
+        channel_name,
+        nuclei_mask=nuclei_mask,
+        expanded=expanded,
     )
 
     # Save
@@ -420,7 +432,7 @@ def run_quantification(
         # Empty CSV with the SAME columns a non-empty result would have, so the
         # downstream per-channel merge stays consistent when a channel's mask
         # contains no cells (compartment mode would otherwise emit only 2 cols).
-        cols = ['label', channel_name]
+        cols = ["label", channel_name]
         if nuclei_mask is not None:
             cols += [f"{channel_name}: {c}: Mean" for c in COMPARTMENT_NAMES]
             if expanded:
@@ -435,10 +447,7 @@ def run_quantification(
 
 
 def run_quantification_gpu(
-    mask_path: str,
-    channel_path: str,
-    output_path: str,
-    channel_name: str = None
+    mask_path: str, channel_path: str, output_path: str, channel_name: str = None
 ) -> pd.DataFrame:
     """Run GPU-accelerated quantification for a single channel.
 
@@ -459,25 +468,24 @@ def run_quantification_gpu(
         Quantification results.
     """
     import cupy as cp
-    from cucim.skimage.measure import regionprops_table as gpu_regionprops_table
 
     # Use provided channel name, or extract from filename as fallback
     if channel_name is None:
-        channel_name = Path(channel_path).stem.split('_')[-1]
+        channel_name = Path(channel_path).stem.split("_")[-1]
         logger.info(f"Channel name parsed from filename: {channel_name}")
-    
+
     logger.info("=" * 60)
     logger.info(f"Quantifying channel (GPU): {channel_name}")
     logger.info("=" * 60)
 
     # Load data
     logger.info(f"Loading mask: {mask_path}")
-    if mask_path.endswith('.npy'):
+    if mask_path.endswith(".npy"):
         segmentation_mask = np.load(mask_path).squeeze()
     else:
         segmentation_mask, _ = load_image(mask_path)
         segmentation_mask = segmentation_mask.squeeze()
-    
+
     logger.info(f"Loading channel: {channel_path}")
     channel_image, _ = load_image(channel_path)
     channel_image = channel_image.squeeze()
@@ -499,7 +507,7 @@ def run_quantification_gpu(
 
     if len(valid_labels) == 0:
         logger.warning("No cells found in mask")
-        empty_df = pd.DataFrame(columns=['label', channel_name])
+        empty_df = pd.DataFrame(columns=["label", channel_name])
         empty_df.to_csv(output_path, index=False)
         return empty_df
 
@@ -515,10 +523,12 @@ def run_quantification_gpu(
     intensities = means[valid_labels]
 
     # Create result dataframe (intensity-only)
-    result_df = pd.DataFrame({
-        'label': valid_labels.get(),
-        channel_name: intensities.get(),
-    })
+    result_df = pd.DataFrame(
+        {
+            "label": valid_labels.get(),
+            channel_name: intensities.get(),
+        }
+    )
 
     # Save
     logger.info(f"Saving: {output_path}")
@@ -535,51 +545,46 @@ def run_quantification_gpu(
 def parse_args():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description='Single-channel cell quantification (Nextflow compatible)',
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+        description="Single-channel cell quantification (Nextflow compatible)",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
     parser.add_argument(
-        '--channel_tiff',
+        "--channel_tiff",
         type=str,
         required=True,
-        help='Path to single channel TIFF image'
+        help="Path to single channel TIFF image",
     )
     parser.add_argument(
-        '--mask_file',
+        "--mask_file",
         type=str,
         required=True,
-        help='Path to whole-cell segmentation mask (.npy or .tif)'
+        help="Path to whole-cell segmentation mask (.npy or .tif)",
     )
     parser.add_argument(
-        '--nuclei_mask_file',
+        "--nuclei_mask_file",
         type=str,
         default=None,
-        help='Path to nuclear mask (.npy or .tif). If given, enables per-compartment '
-             'quantification (Nucleus/Cytoplasm/Cell).'
+        help="Path to nuclear mask (.npy or .tif). If given, enables per-compartment "
+        "quantification (Nucleus/Cytoplasm/Cell).",
     )
     parser.add_argument(
-        '--expanded',
-        action='store_true',
-        help='With --nuclei_mask_file, also emit Median and Sum per compartment '
-             '(default: Mean only).'
+        "--expanded",
+        action="store_true",
+        help="With --nuclei_mask_file, also emit Median and Sum per compartment "
+        "(default: Mean only).",
     )
+    parser.add_argument("--outdir", type=str, default=".", help="Output directory")
     parser.add_argument(
-        '--outdir',
+        "--output_file",
         type=str,
-        default='.',
-        help='Output directory'
+        help="Output CSV filename (default: {channel}_quant.csv)",
     )
     parser.add_argument(
-        '--output_file',
-        type=str,
-        help='Output CSV filename (default: {channel}_quant.csv)'
-    )
-    parser.add_argument(
-        '--channel-name',
+        "--channel-name",
         type=str,
         default=None,
-        help='Explicit channel name (if not provided, will parse from filename)'
+        help="Explicit channel name (if not provided, will parse from filename)",
     )
 
     return parser.parse_args()
@@ -595,7 +600,9 @@ def main():
     ensure_dir(args.outdir)
 
     # Derive effective channel name once for consistency
-    effective_channel_name = args.channel_name or Path(args.channel_tiff).stem.split('_')[-1]
+    effective_channel_name = (
+        args.channel_name or Path(args.channel_tiff).stem.split("_")[-1]
+    )
 
     # Determine output path
     if args.output_file:
@@ -605,7 +612,7 @@ def main():
 
     # Run quantification (CPU mode)
     # Note: GPU mode removed - use GPU container if GPU acceleration needed
-    logger.info('Running CPU quantification')
+    logger.info("Running CPU quantification")
     run_quantification(
         mask_path=args.mask_file,
         channel_path=args.channel_tiff,
@@ -618,5 +625,5 @@ def main():
     return 0
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     exit(main())

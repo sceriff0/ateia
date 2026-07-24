@@ -18,6 +18,7 @@ Usage:
     python3 tests/testdata/generate_large_fixture.py --size 1024 --out /tmp/bigdata &&
     python3 tests/integration/verify_micro_bitidentical.py'
 """
+
 import json
 import os
 import shutil
@@ -27,17 +28,25 @@ import sys
 import numpy as np
 import pyvips
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "bin"))
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "bin", "utils"))
+sys.path.insert(
+    0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "bin")
+)
+sys.path.insert(
+    0,
+    os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "..", "bin", "utils"
+    ),
+)
 import reg_finalize
 from micro_rigid_guard import install_micro_rigid_guard
-from valis_config import build_registrar_kwargs
-from valis import registration, warp_tools, slide_tools
-from valis import serial_non_rigid as snr
+from valis import registration, slide_tools, warp_tools
 from valis.non_rigid_registrars import OpticalFlowWarper
 from valis.registration import CROP_REF
+from valis_config import build_registrar_kwargs
 
-MEMORY_MODE = os.environ.get("CMP_MODE", "low")  # consistent across baseline + distributed; algorithm is mode-independent
+MEMORY_MODE = os.environ.get(
+    "CMP_MODE", "low"
+)  # consistent across baseline + distributed; algorithm is mode-independent
 
 WORK = "/tmp/verify_micro"
 INP = os.path.join(WORK, "in")
@@ -65,42 +74,68 @@ def to_np(f):
 
 
 def build_warp_state(slide_obj):
-    bbox, _ = slide_obj.get_crop_xywh(crop=CROP_REF, out_shape_rc=list(slide_obj.slide_dimensions_wh[0][::-1]))
+    bbox, _ = slide_obj.get_crop_xywh(
+        crop=CROP_REF, out_shape_rc=list(slide_obj.slide_dimensions_wh[0][::-1])
+    )
     return dict(
         processed_img_shape_rc=[int(x) for x in slide_obj.processed_img_shape_rc],
         reg_img_shape_rc=[int(x) for x in slide_obj.reg_img_shape_rc],
         aligned_slide_shape_rc=[int(x) for x in slide_obj.aligned_slide_shape_rc],
         M=np.asarray(slide_obj.M).tolist(),
         bbox_xywh=[int(x) for x in bbox],
-        bg_color=[float(x) for x in slide_obj.bg_color] if slide_obj.bg_color is not None else None,
-        series=slide_obj.series, is_rgb=bool(slide_obj.is_rgb), interp_method="bicubic")
+        bg_color=[float(x) for x in slide_obj.bg_color]
+        if slide_obj.bg_color is not None
+        else None,
+        series=slide_obj.series,
+        is_rgb=bool(slide_obj.is_rgb),
+        interp_method="bicubic",
+    )
 
 
 def warp_with(src, ws, dxdy):
     return slide_tools.warp_slide(
-        src, transformation_src_shape_rc=tuple(ws["processed_img_shape_rc"]),
+        src,
+        transformation_src_shape_rc=tuple(ws["processed_img_shape_rc"]),
         transformation_dst_shape_rc=tuple(ws["reg_img_shape_rc"]),
         aligned_slide_shape_rc=tuple(ws["aligned_slide_shape_rc"]),
-        M=np.asarray(ws["M"]), dxdy=dxdy, level=0, series=ws.get("series"),
+        M=np.asarray(ws["M"]),
+        dxdy=dxdy,
+        level=0,
+        series=ws.get("series"),
         interp_method=ws.get("interp_method", "bicubic"),
-        bbox_xywh=tuple(ws["bbox_xywh"]) if ws.get("bbox_xywh") else None, bg_color=ws.get("bg_color"))
+        bbox_xywh=tuple(ws["bbox_xywh"]) if ws.get("bbox_xywh") else None,
+        bg_color=ws.get("bg_color"),
+    )
 
 
 def baseline():
     """Classic register()+register_micro() in-process; return (final_warped_px, micro_moving, micro_fixed)."""
     install_micro_rigid_guard()  # same guard the distributed scripts install -> identical micro-rigid behavior
-    registration.TILER_THRESH_GB = 10  # whole-image (matches the JVM-free REG_NONRIGID path)
+    registration.TILER_THRESH_GB = (
+        10  # whole-image (matches the JVM-free REG_NONRIGID path)
+    )
     # IDENTICAL config to reg_prep/reg_micro_prep (build_registrar_kwargs) so rigid M matches exactly.
-    kwargs = build_registrar_kwargs(reference_img_f=REF, memory_mode=MEMORY_MODE,
-                                    skip_micro_registration=False)  # scenario under test
+    kwargs = build_registrar_kwargs(
+        reference_img_f=REF, memory_mode=MEMORY_MODE, skip_micro_registration=False
+    )  # scenario under test
     reg = registration.Valis(INP, os.path.join(WORK, "base_out"), **kwargs)
     reg.register()
     # Wave-1 field classic leaves on the slide AFTER register() (before register_micro) — what
     # REG_MICRO_PREP must inject. Compare to distributed compose_and_pad to localize the high-mode delta.
     _bk = reg.slide_dict[MOV_STEM].bk_dxdy
-    _bkdt = (_bk.format if isinstance(_bk, pyvips.Image) else
-             (getattr(np.asarray(_bk[0]), "dtype", "?") if isinstance(_bk, (list, tuple)) else getattr(_bk, "dtype", "?")))
-    print(f"[verify_micro] classic slide.bk_dxdy type={type(_bk).__name__} dtype/format={_bkdt}", flush=True)
+    _bkdt = (
+        _bk.format
+        if isinstance(_bk, pyvips.Image)
+        else (
+            getattr(np.asarray(_bk[0]), "dtype", "?")
+            if isinstance(_bk, (list, tuple))
+            else getattr(_bk, "dtype", "?")
+        )
+    )
+    print(
+        f"[verify_micro] classic slide.bk_dxdy type={type(_bk).__name__} dtype/format={_bkdt}",
+        flush=True,
+    )
     cap_wave1 = to_np(_bk)
 
     cap = {"grab": True}
@@ -108,16 +143,25 @@ def baseline():
 
     def cap_reg(self, moving_img, fixed_img, mask=None, **kw):
         if cap.get("grab"):
-            cap["micro_moving"], cap["micro_fixed"] = to_np(moving_img), to_np(fixed_img)
+            cap["micro_moving"], cap["micro_fixed"] = (
+                to_np(moving_img),
+                to_np(fixed_img),
+            )
             cap["grab"] = False
         return orig_reg(self, moving_img, fixed_img, mask=mask, **kw)
 
     OpticalFlowWarper.register = cap_reg
     try:
         img_dims = np.array([s.slide_dimensions_wh[0] for s in reg.slide_dict.values()])
-        micro_size = int(np.floor(np.min([np.max(d) for d in img_dims]) * MICRO_FRACTION))
-        reg.register_micro(max_non_rigid_registration_dim_px=micro_size, reference_img_f=REF,
-                           align_to_reference=True, tile_wh=2048)
+        micro_size = int(
+            np.floor(np.min([np.max(d) for d in img_dims]) * MICRO_FRACTION)
+        )
+        reg.register_micro(
+            max_non_rigid_registration_dim_px=micro_size,
+            reference_img_f=REF,
+            align_to_reference=True,
+            tile_wh=2048,
+        )
     finally:
         OpticalFlowWarper.register = orig_reg
 
@@ -139,23 +183,76 @@ def distributed():
     mprep = os.path.join(WORK, "mprep")
     mfield = os.path.join(WORK, "mfield")
 
-    run([PY, "bin/reg_prep.py", "--input-dir", INP, "--out", prep, "--reference", REF,
-         "--tile-wh", "512", "--tile-buffer", "100", "--memory-mode", MEMORY_MODE])
+    run(
+        [
+            PY,
+            "bin/reg_prep.py",
+            "--input-dir",
+            INP,
+            "--out",
+            prep,
+            "--reference",
+            REF,
+            "--tile-wh",
+            "512",
+            "--tile-buffer",
+            "100",
+            "--memory-mode",
+            MEMORY_MODE,
+        ]
+    )
     md = os.path.join(prep, MOV_STEM)
     ti = os.path.join(md, "tiler_inputs")
     # wave-1 whole-image non-rigid (JVM-free)
-    run([PY, "bin/reg_nonrigid.py", "--inputs-dir", ti, "--out-dir", os.path.join(w1, MOV_STEM)])
+    run(
+        [
+            PY,
+            "bin/reg_nonrigid.py",
+            "--inputs-dir",
+            ti,
+            "--out-dir",
+            os.path.join(w1, MOV_STEM),
+        ]
+    )
 
     # micro prep (inject wave-1 composed field, capture micro 2-D inputs)
-    run([PY, "bin/reg_micro_prep.py", "--input-dir", INP, "--out", mprep, "--reference", REF,
-         "--prep-dir", prep, "--wave1-dir", w1, "--memory-mode", MEMORY_MODE,
-         "--micro-fraction", str(MICRO_FRACTION), "--tile-wh", "2048"])
+    run(
+        [
+            PY,
+            "bin/reg_micro_prep.py",
+            "--input-dir",
+            INP,
+            "--out",
+            mprep,
+            "--reference",
+            REF,
+            "--prep-dir",
+            prep,
+            "--wave1-dir",
+            w1,
+            "--memory-mode",
+            MEMORY_MODE,
+            "--micro-fraction",
+            str(MICRO_FRACTION),
+            "--tile-wh",
+            "2048",
+        ]
+    )
     mti = os.path.join(mprep, MOV_STEM, "tiler_inputs")
     micro_moving = to_np(pyvips.Image.new_from_file(os.path.join(mti, "moving.v")))
     micro_fixed = to_np(pyvips.Image.new_from_file(os.path.join(mti, "fixed.v")))
 
     # micro whole-image non-rigid (reuse REG_NONRIGID)
-    run([PY, "bin/reg_nonrigid.py", "--inputs-dir", mti, "--out-dir", os.path.join(mfield, MOV_STEM)])
+    run(
+        [
+            PY,
+            "bin/reg_nonrigid.py",
+            "--inputs-dir",
+            mti,
+            "--out-dir",
+            os.path.join(mfield, MOV_STEM),
+        ]
+    )
 
     # Distributed final field, computed via reg_finalize's OWN functions (compose_and_pad + micro_additive)
     # on the subprocess-produced raw fields. This is exactly what reg_finalize.py --micro-field does.
@@ -168,7 +265,9 @@ def distributed():
     micro_raw = pyvips.Image.new_from_file(os.path.join(mfield, MOV_STEM, "bk.v"))
     mrm_f = os.path.join(mti, "reg_mask.npy")
     micro_reg_mask = np.load(mrm_f) if os.path.exists(mrm_f) else None
-    dist_updated = reg_finalize.micro_additive(slide_bk, micro_raw, micro_ws, micro_reg_mask)  # vips
+    dist_updated = reg_finalize.micro_additive(
+        slide_bk, micro_raw, micro_ws, micro_reg_mask
+    )  # vips
     dist_field = to_np(dist_updated)
     # full-res REGISTERED OUTPUT (the actual deliverable) via the same warp baseline uses
     dist_out = to_np(warp_with(os.path.join(INP, MOV), ws, dist_updated))
@@ -176,11 +275,28 @@ def distributed():
     # Smoke: the reg_finalize CLI must produce a registered image without crashing (OME save parity is
     # a separate concern — task #7). Warp the SAME field in-memory to confirm channel/shape sanity.
     out = os.path.join(WORK, "dist_registered.ome.tiff")
-    run([PY, "bin/reg_finalize.py", "--inputs-dir", ti, "--field", os.path.join(w1, MOV_STEM, "bk.v"),
-         "--warp-state", os.path.join(md, "warp_state.json"), "--src-slide", os.path.join(INP, MOV),
-         "--micro-field", os.path.join(mfield, MOV_STEM, "bk.v"),
-         "--micro-warp-state", os.path.join(mprep, MOV_STEM, "micro_warp_state.json"),
-         "--micro-inputs-dir", mti, "--out", out])
+    run(
+        [
+            PY,
+            "bin/reg_finalize.py",
+            "--inputs-dir",
+            ti,
+            "--field",
+            os.path.join(w1, MOV_STEM, "bk.v"),
+            "--warp-state",
+            os.path.join(md, "warp_state.json"),
+            "--src-slide",
+            os.path.join(INP, MOV),
+            "--micro-field",
+            os.path.join(mfield, MOV_STEM, "bk.v"),
+            "--micro-warp-state",
+            os.path.join(mprep, MOV_STEM, "micro_warp_state.json"),
+            "--micro-inputs-dir",
+            mti,
+            "--out",
+            out,
+        ]
+    )
     return dist_field, dist_out, to_np(slide_bk), micro_moving, micro_fixed
 
 
@@ -201,14 +317,19 @@ def main():
     for s in (REF, MOV):
         shutil.copy(os.path.join(DATADIR, s), os.path.join(INP, s))
 
-    print("[verify_micro] === baseline (classic register + register_micro) ===", flush=True)
+    print(
+        "[verify_micro] === baseline (classic register + register_micro) ===",
+        flush=True,
+    )
     base_field, base_out, base_w1, base_mm, base_mf = baseline()
     print("[verify_micro] === distributed micro chain ===", flush=True)
     dist_field, dist_out, dist_w1, dist_mm, dist_mf = distributed()
 
     print("\n" + "=" * 72)
     cmp("WAVE-1 field (pre-micro)", base_w1, dist_w1)
-    ok_inputs = cmp("micro moving", base_mm, dist_mm) & cmp("micro fixed", base_mf, dist_mf)
+    ok_inputs = cmp("micro moving", base_mm, dist_mm) & cmp(
+        "micro fixed", base_mf, dist_mf
+    )
     ok_field = cmp("final micro-updated field", base_field, dist_field)
     ok_out = cmp("REGISTERED OUTPUT pixels", base_out, dist_out)
     # The deliverable is the registered OUTPUT. The intermediate field equality is a stricter bonus.

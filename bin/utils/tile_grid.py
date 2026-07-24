@@ -10,6 +10,7 @@ truth for the grid.
 the full-res warp can be fanned out over processes (spec §5.3). It is deliberately buffer-free --
 see its docstring.
 """
+
 import numpy as np
 from valis import warp_tools
 
@@ -62,9 +63,21 @@ def output_grid(width, height, tile_wh):
     idx = 0
     for y in range(0, height, tile_wh):
         for x in range(0, width, tile_wh):
-            tiles.append({"idx": idx, "x": x, "y": y,
-                          "w": min(tile_wh, width - x), "h": min(tile_wh, height - y)})
+            tiles.append(
+                {
+                    "idx": idx,
+                    "x": x,
+                    "y": y,
+                    "w": min(tile_wh, width - x),
+                    "h": min(tile_wh, height - y),
+                }
+            )
             idx += 1
-    return {"n_cols": (width + tile_wh - 1) // tile_wh,
-            "n_rows": (height + tile_wh - 1) // tile_wh,
-            "tile_wh": tile_wh, "width": width, "height": height, "tiles": tiles}
+    return {
+        "n_cols": (width + tile_wh - 1) // tile_wh,
+        "n_rows": (height + tile_wh - 1) // tile_wh,
+        "tile_wh": tile_wh,
+        "width": width,
+        "height": height,
+        "tiles": tiles,
+    }

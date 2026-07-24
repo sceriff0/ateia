@@ -12,6 +12,7 @@ Peak RAM is therefore O(one output tile + its source footprint), not O(slide), w
 point: N of these run independently (one Nextflow task each) instead of one process holding a
 full-resolution slide in memory.
 """
+
 import argparse
 import json
 import os
@@ -28,24 +29,47 @@ from valis import registration  # noqa: E402
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--warp-state", required=True, help="REG_PREP per-slide warp_state.json")
-    ap.add_argument("--field", help="composed padded field from reg_finalize.py --emit-field-only; "
-                                    "omit together with --rigid-only for the reference slide")
-    ap.add_argument("--rigid-only", action="store_true",
-                    help="no non-rigid field (dxdy=None), matching reg_finalize.py --rigid-only")
-    ap.add_argument("--src-slide", required=True, help="full-res source ome.tiff to warp")
-    ap.add_argument("--grid", required=True, help="grid.json from reg_assemble.py --write-grid")
+    ap.add_argument(
+        "--warp-state", required=True, help="REG_PREP per-slide warp_state.json"
+    )
+    ap.add_argument(
+        "--field",
+        help="composed padded field from reg_finalize.py --emit-field-only; "
+        "omit together with --rigid-only for the reference slide",
+    )
+    ap.add_argument(
+        "--rigid-only",
+        action="store_true",
+        help="no non-rigid field (dxdy=None), matching reg_finalize.py --rigid-only",
+    )
+    ap.add_argument(
+        "--src-slide", required=True, help="full-res source ome.tiff to warp"
+    )
+    ap.add_argument(
+        "--grid", required=True, help="grid.json from reg_assemble.py --write-grid"
+    )
     ap.add_argument("--tile-idx", type=int, required=True)
     ap.add_argument("--out-dir", required=True)
-    ap.add_argument("--tile-format", choices=("tiff", "v"), default="tiff",
-                    help="tiff (default): tiled, losslessly-compressed TIFF. v: uncompressed "
-                         "libvips native -- faster to write, but the tiles then cost the full "
-                         "DECOMPRESSED slide on disk. Kept as an escape hatch for debugging.")
-    ap.add_argument("--tile-compression", default="deflate",
-                    help="lossless codec for --tile-format tiff (deflate, lzw, zstd, none)")
-    ap.add_argument("--jvm-heap-gb", type=int, default=None,
-                    help="explicit BioFormats JVM heap (GB); only used if the source slide is not "
-                         "readable by MirageVipsSlideReader")
+    ap.add_argument(
+        "--tile-format",
+        choices=("tiff", "v"),
+        default="tiff",
+        help="tiff (default): tiled, losslessly-compressed TIFF. v: uncompressed "
+        "libvips native -- faster to write, but the tiles then cost the full "
+        "DECOMPRESSED slide on disk. Kept as an escape hatch for debugging.",
+    )
+    ap.add_argument(
+        "--tile-compression",
+        default="deflate",
+        help="lossless codec for --tile-format tiff (deflate, lzw, zstd, none)",
+    )
+    ap.add_argument(
+        "--jvm-heap-gb",
+        type=int,
+        default=None,
+        help="explicit BioFormats JVM heap (GB); only used if the source slide is not "
+        "readable by MirageVipsSlideReader",
+    )
     args = ap.parse_args()
 
     if args.rigid_only == bool(args.field):
@@ -55,11 +79,14 @@ def main():
     grid = json.load(open(args.grid))
     tile = next((t for t in grid["tiles"] if t["idx"] == args.tile_idx), None)
     if tile is None:
-        raise SystemExit(f"--tile-idx {args.tile_idx} is not in {args.grid} "
-                         f"(it has {len(grid['tiles'])} tiles, 0..{len(grid['tiles']) - 1})")
+        raise SystemExit(
+            f"--tile-idx {args.tile_idx} is not in {args.grid} "
+            f"(it has {len(grid['tiles'])} tiles, 0..{len(grid['tiles']) - 1})"
+        )
 
-    heap_gb = reg_finalize.start_jvm_if_needed(args.src_slide, jvm_heap_gb=args.jvm_heap_gb,
-                                               tag="reg_warp_tile")
+    heap_gb = reg_finalize.start_jvm_if_needed(
+        args.src_slide, jvm_heap_gb=args.jvm_heap_gb, tag="reg_warp_tile"
+    )
 
     # dxdy=None is the rigid-only path, byte-for-byte what reg_finalize.py --rigid-only does.
     # Do NOT substitute a zero field: warp_img branches differently on None vs a supplied field,
@@ -73,7 +100,8 @@ def main():
         # produce a cropped or misaligned slide.
         raise SystemExit(
             f"grid canvas {grid['width']}x{grid['height']} != warped canvas "
-            f"{warped.width}x{warped.height} for {args.src_slide} -- wrong grid.json/warp state")
+            f"{warped.width}x{warped.height} for {args.src_slide} -- wrong grid.json/warp state"
+        )
 
     region = warped.crop(tile["x"], tile["y"], tile["w"], tile["h"])
 
@@ -84,9 +112,12 @@ def main():
     else:
         out = os.path.join(args.out_dir, f"tile_{args.tile_idx}.tif")
         _save_tile_tiff(region, out, args.tile_compression)
-    print(f"[reg_warp_tile] {out} ({tile['w']}x{tile['h']} @ {tile['x']},{tile['y']} "
-          f"of {grid['width']}x{grid['height']}, bands={region.bands}, "
-          f"{os.path.getsize(out) / 1e6:.1f}MB)", flush=True)
+    print(
+        f"[reg_warp_tile] {out} ({tile['w']}x{tile['h']} @ {tile['x']},{tile['y']} "
+        f"of {grid['width']}x{grid['height']}, bands={region.bands}, "
+        f"{os.path.getsize(out) / 1e6:.1f}MB)",
+        flush=True,
+    )
     if heap_gb:
         registration.kill_jvm()
     return 0
@@ -112,11 +143,18 @@ def _save_tile_tiff(img, path, compression):
     size is a locality choice only -- it has no bearing on the pixels.
     """
     if compression not in LOSSLESS_CODECS:
-        raise SystemExit(f"--tile-compression must be one of {', '.join(LOSSLESS_CODECS)} "
-                         f"(got {compression!r}); the tile fan-out must be lossless")
+        raise SystemExit(
+            f"--tile-compression must be one of {', '.join(LOSSLESS_CODECS)} "
+            f"(got {compression!r}); the tile fan-out must be lossless"
+        )
     predictor = "float" if img.format in ("float", "double") else "horizontal"
-    img.tiffsave(path, compression=compression, predictor=predictor, bigtiff=True,
-                 **_internal_tiling(img))
+    img.tiffsave(
+        path,
+        compression=compression,
+        predictor=predictor,
+        bigtiff=True,
+        **_internal_tiling(img),
+    )
 
 
 def _internal_tiling(img, target=512):

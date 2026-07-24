@@ -9,22 +9,23 @@ and saves the result back to a single TIFF file.
 
 from __future__ import annotations
 
-import os
 import argparse
 import logging
 import math
-from pathlib import Path
+import os
 
 # Add utils directory to path to import shared modules
 import sys
-sys.path.insert(0, str(Path(__file__).parent / 'utils'))
+from pathlib import Path
 
-from logger import get_logger, configure_logging
-from typing import Tuple, List, Optional
+sys.path.insert(0, str(Path(__file__).parent / "utils"))
+
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import List, Tuple
 
 import numpy as np
 import tifffile
+from logger import configure_logging, get_logger
 from numpy.typing import NDArray
 
 os.environ["JAX_PLATFORM_NAME"] = "cpu"  # Force CPU for JAX
@@ -34,12 +35,12 @@ import basicpy
 import pydantic
 from packaging import version
 
-BASICPY_VERSION = getattr(basicpy, '__version__', 'unknown')
-PYDANTIC_VERSION = getattr(pydantic, '__version__', 'unknown')
+BASICPY_VERSION = getattr(basicpy, "__version__", "unknown")
+PYDANTIC_VERSION = getattr(pydantic, "__version__", "unknown")
 AUTOTUNE_AVAILABLE = False
 
 # autotune requires BaSiCPy >= 1.1.0 and Pydantic v2
-if BASICPY_VERSION != 'unknown' and PYDANTIC_VERSION != 'unknown':
+if BASICPY_VERSION != "unknown" and PYDANTIC_VERSION != "unknown":
     try:
         basicpy_ok = version.parse(BASICPY_VERSION) >= version.parse("1.1.0")
         pydantic_ok = version.parse(PYDANTIC_VERSION) >= version.parse("2.0.0")
@@ -48,9 +49,8 @@ if BASICPY_VERSION != 'unknown' and PYDANTIC_VERSION != 'unknown':
         pass
 
 from basicpy import BaSiC  # type: ignore
-
 from image_utils import ensure_dir
-from validation import log_image_stats, clip_negative_values, detect_negative_values
+from validation import detect_negative_values, log_image_stats
 
 logger = get_logger(__name__)
 
@@ -68,9 +68,7 @@ __all__ = [
 
 
 def count_fovs(
-    image_shape: Tuple[int, int],
-    fov_size: Tuple[int, int],
-    overlap: int = 0
+    image_shape: Tuple[int, int], fov_size: Tuple[int, int], overlap: int = 0
 ) -> Tuple[int, int]:
     """Calculate how many FOVs are needed to cover an image with given FOV size and overlap."""
     height, width = image_shape[:2]
@@ -89,9 +87,7 @@ def count_fovs(
 
 
 def split_image_into_fovs(
-    image: NDArray,
-    n_fovs_x: int,
-    n_fovs_y: int
+    image: NDArray, n_fovs_x: int, n_fovs_y: int
 ) -> Tuple[NDArray, List[Tuple[int, int, int, int]], Tuple[int, int]]:
     """
     Split image (H, W) into FOV tiles with adaptive sizing to handle remainders.
@@ -136,7 +132,7 @@ def split_image_into_fovs(
             h = fov_heights[i]
             w = fov_widths[j]
 
-            fov_stack[idx, :h, :w] = image[y_start:y_start + h, x_start:x_start + w]
+            fov_stack[idx, :h, :w] = image[y_start : y_start + h, x_start : x_start + w]
 
             positions.append((y_start, x_start, h, w))
             x_start += w
@@ -149,7 +145,7 @@ def split_image_into_fovs(
 def reconstruct_image_from_fovs(
     fov_stack: NDArray,
     positions: List[Tuple[int, int, int, int]],
-    original_shape: Tuple[int, ...]
+    original_shape: Tuple[int, ...],
 ) -> NDArray:
     """
     Reconstruct 2D image from 3D FOV tiles stack.
@@ -158,8 +154,9 @@ def reconstruct_image_from_fovs(
 
     for idx, (row_start, col_start, h, w) in enumerate(positions):
         # fov_stack is 3D (N, fov_h, fov_w), reconstructed is 2D (H, W)
-        reconstructed[row_start:row_start + h, col_start:col_start + w] = \
-            fov_stack[idx, :h, :w]
+        reconstructed[row_start : row_start + h, col_start : col_start + w] = fov_stack[
+            idx, :h, :w
+        ]
 
     return reconstructed
 
@@ -170,13 +167,15 @@ def apply_basic_correction(
     get_darkfield: bool = True,
     autotune: bool = False,
     n_iter: int = 100,
-    **basic_kwargs
+    **basic_kwargs,
 ) -> Tuple[NDArray, object]:
     """
     Apply BaSiC illumination correction to a single channel image (H, W).
     """
     if image.ndim != 2:
-        raise ValueError(f"apply_basic_correction requires a 2D image, got shape {image.shape}")
+        raise ValueError(
+            f"apply_basic_correction requires a 2D image, got shape {image.shape}"
+        )
 
     n_fovs_y, n_fovs_x = count_fovs(image.shape, fov_size)
     fov_stack, positions, _ = split_image_into_fovs(image, n_fovs_x, n_fovs_y)
@@ -185,10 +184,7 @@ def apply_basic_correction(
 
     if autotune:
         logger.info(f"  [OK] Autotuning BaSiC parameters for {n_iter} iterations")
-        basic.autotune(
-            fov_stack,
-            n_iter=n_iter
-        )
+        basic.autotune(fov_stack, n_iter=n_iter)
 
     corrected_fovs = basic.fit_transform(fov_stack)
 
@@ -203,11 +199,7 @@ def apply_basic_correction(
         corrected_fovs = np.clip(corrected_fovs, 0, None)
         logger.info(f"Clipped negative values to 0. New min: {corrected_fovs.min()}")
 
-    reconstructed = reconstruct_image_from_fovs(
-        corrected_fovs,
-        positions,
-        image.shape
-    )
+    reconstructed = reconstruct_image_from_fovs(corrected_fovs, positions, image.shape)
 
     return reconstructed, basic
 
@@ -221,7 +213,7 @@ def _process_single_channel_from_stack(
     autotune: bool,
     n_iter: int,
     basic_kwargs: dict,
-    auto_detect: bool = True
+    auto_detect: bool = True,
 ) -> Tuple[int, NDArray, bool]:
     """Worker function to process a single channel slice from a stack.
 
@@ -237,17 +229,17 @@ def _process_single_channel_from_stack(
     logger.debug(f"Processing channel #{channel_index} ({channel_name})")
 
     # Automatic detection of whether to apply BaSiC
-    if skip_dapi and 'DAPI' in channel_name.upper():
-        logger.debug(f"  [SKIP] BaSiC correction for DAPI (user setting)")
+    if skip_dapi and "DAPI" in channel_name.upper():
+        logger.debug("  [SKIP] BaSiC correction for DAPI (user setting)")
         return channel_index, channel_image, False
 
-    logger.debug(f"  [OK] Applying BaSiC correction")
+    logger.debug("  [OK] Applying BaSiC correction")
     corrected, _ = apply_basic_correction(
         channel_image,
         fov_size=fov_size,
         autotune=autotune,
         n_iter=n_iter,
-        **basic_kwargs
+        **basic_kwargs,
     )
     return channel_index, corrected, True
 
@@ -261,7 +253,7 @@ def preprocess_multichannel_image(
     autotune: bool = False,
     n_iter: int = 3,
     n_workers: int = 4,
-    **basic_kwargs
+    **basic_kwargs,
 ) -> NDArray:
     """
     Apply BaSiC preprocessing to a single multichannel image in parallel and save as TIFF.
@@ -273,37 +265,48 @@ def preprocess_multichannel_image(
     pixel_size_x = 0.325
     pixel_size_y = 0.325
     with tifffile.TiffFile(image_path) as tif:
-        has_ome = hasattr(tif, 'ome_metadata') and tif.ome_metadata
-        has_physical_size = has_ome and 'PhysicalSizeX' in tif.ome_metadata
+        has_ome = hasattr(tif, "ome_metadata") and tif.ome_metadata
+        has_physical_size = has_ome and "PhysicalSizeX" in tif.ome_metadata
         if has_ome:
-            logger.debug(f"  Input metadata: OME=True, PhysicalSize={has_physical_size}")
+            logger.debug(
+                f"  Input metadata: OME=True, PhysicalSize={has_physical_size}"
+            )
             if has_physical_size:
                 try:
                     import xml.etree.ElementTree as ET
+
                     ome_xml = tif.ome_metadata
                     root = ET.fromstring(ome_xml) if isinstance(ome_xml, str) else None
                     if root is not None:
-                        ns = {'ome': 'http://www.openmicroscopy.org/Schemas/OME/2016-06'}
-                        pixels = root.find('.//ome:Pixels', ns)
+                        ns = {
+                            "ome": "http://www.openmicroscopy.org/Schemas/OME/2016-06"
+                        }
+                        pixels = root.find(".//ome:Pixels", ns)
                         if pixels is None:
                             # Try without namespace
-                            pixels = root.find('.//{*}Pixels')
+                            pixels = root.find(".//{*}Pixels")
                         if pixels is not None:
-                            px = pixels.get('PhysicalSizeX')
-                            py = pixels.get('PhysicalSizeY')
+                            px = pixels.get("PhysicalSizeX")
+                            py = pixels.get("PhysicalSizeY")
                             if px:
                                 pixel_size_x = float(px)
                             if py:
                                 pixel_size_y = float(py)
-                            logger.info(f"  Extracted pixel size from OME: X={pixel_size_x}, Y={pixel_size_y} µm")
+                            logger.info(
+                                f"  Extracted pixel size from OME: X={pixel_size_x}, Y={pixel_size_y} µm"
+                            )
                 except Exception as e:
-                    logger.warning(f"  Failed to parse pixel size from OME metadata: {e}, using default 0.325 µm")
+                    logger.warning(
+                        f"  Failed to parse pixel size from OME metadata: {e}, using default 0.325 µm"
+                    )
         else:
             logger.warning("  [WARN] Input file has no OME metadata")
 
         if tif.pages and len(tif.pages) > 0:
             first_page = tif.pages[0]
-            logger.debug(f"  First page: shape={first_page.shape}, dtype={first_page.dtype}")
+            logger.debug(
+                f"  First page: shape={first_page.shape}, dtype={first_page.dtype}"
+            )
 
     multichannel_stack = tifffile.imread(image_path)
     logger.info(f"Loaded image shape: {multichannel_stack.shape}")
@@ -314,7 +317,11 @@ def preprocess_multichannel_image(
     if multichannel_stack.ndim == 2:
         logger.debug("  Converting 2D to 3D (adding channel dimension)")
         multichannel_stack = np.expand_dims(multichannel_stack, axis=0)
-    elif multichannel_stack.ndim == 3 and multichannel_stack.shape[2] == len(channel_names) and multichannel_stack.shape[0] != len(channel_names):
+    elif (
+        multichannel_stack.ndim == 3
+        and multichannel_stack.shape[2] == len(channel_names)
+        and multichannel_stack.shape[0] != len(channel_names)
+    ):
         logger.debug("  Transposing from (Y, X, C) to (C, Y, X)")
         multichannel_stack = np.transpose(multichannel_stack, (2, 0, 1))
 
@@ -323,8 +330,12 @@ def preprocess_multichannel_image(
 
     if n_channels != len(channel_names):
         if n_channels < len(channel_names):
-            logger.warning(f"Image has {n_channels} channels but {len(channel_names)} channel names provided. Truncating channel names.")
-        channel_names = channel_names[:n_channels] + [f"Channel_{i}" for i in range(len(channel_names), n_channels)]
+            logger.warning(
+                f"Image has {n_channels} channels but {len(channel_names)} channel names provided. Truncating channel names."
+            )
+        channel_names = channel_names[:n_channels] + [
+            f"Channel_{i}" for i in range(len(channel_names), n_channels)
+        ]
 
     results = {}
     correction_applied = {}
@@ -341,7 +352,7 @@ def preprocess_multichannel_image(
                 skip_dapi,
                 autotune,
                 n_iter,
-                basic_kwargs
+                basic_kwargs,
             )
             futures.append(future)
 
@@ -350,60 +361,73 @@ def preprocess_multichannel_image(
             results[channel_index] = result_array
             correction_applied[channel_index] = was_corrected
 
-    preprocessed_channels = [
-        results[i] for i in range(n_channels)
-    ]
+    preprocessed_channels = [results[i] for i in range(n_channels)]
 
     # Log summary
     n_corrected = sum(correction_applied.values())
     n_skipped = n_channels - n_corrected
-    logger.info(f"BaSiC Correction Summary: corrected={n_corrected}/{n_channels}, skipped={n_skipped}/{n_channels}")
+    logger.info(
+        f"BaSiC Correction Summary: corrected={n_corrected}/{n_channels}, skipped={n_skipped}/{n_channels}"
+    )
 
     preprocessed = np.stack(preprocessed_channels, axis=0)
 
     # Cast back to original dtype (BaSiC outputs float32, but downstream expects uint16)
     if preprocessed.dtype != multichannel_stack.dtype:
-        logger.info(f"Casting from {preprocessed.dtype} back to {multichannel_stack.dtype}")
-        preprocessed = np.clip(preprocessed, np.iinfo(multichannel_stack.dtype).min,
-                               np.iinfo(multichannel_stack.dtype).max) if np.issubdtype(multichannel_stack.dtype, np.integer) else preprocessed
+        logger.info(
+            f"Casting from {preprocessed.dtype} back to {multichannel_stack.dtype}"
+        )
+        preprocessed = (
+            np.clip(
+                preprocessed,
+                np.iinfo(multichannel_stack.dtype).min,
+                np.iinfo(multichannel_stack.dtype).max,
+            )
+            if np.issubdtype(multichannel_stack.dtype, np.integer)
+            else preprocessed
+        )
         preprocessed = preprocessed.astype(multichannel_stack.dtype)
 
     # Log output statistics after all processing
     log_image_stats(preprocessed, "after_basic_correction", logger)
 
     logger.info(f"Saving corrected image to {output_path}")
-    logger.debug(f"  Final stack shape: {preprocessed.shape}, channels: {channel_names[:preprocessed.shape[0]]}")
+    logger.debug(
+        f"  Final stack shape: {preprocessed.shape}, channels: {channel_names[: preprocessed.shape[0]]}"
+    )
 
     # Save as OME-TIFF with proper metadata
     # VALIS expects OME-TIFF with proper channel dimension and physical size metadata
     # Default pixel size is 0.325 µm (matching convert_nd2.py)
     metadata = {
-        'axes': 'CYX',
-        'Channel': {'Name': channel_names[:preprocessed.shape[0]]},
-        'PhysicalSizeX': pixel_size_x,
-        'PhysicalSizeXUnit': 'µm',
-        'PhysicalSizeY': pixel_size_y,
-        'PhysicalSizeYUnit': 'µm'
+        "axes": "CYX",
+        "Channel": {"Name": channel_names[: preprocessed.shape[0]]},
+        "PhysicalSizeX": pixel_size_x,
+        "PhysicalSizeXUnit": "µm",
+        "PhysicalSizeY": pixel_size_y,
+        "PhysicalSizeYUnit": "µm",
     }
 
-    logger.debug(f"  OME metadata: axes={metadata['axes']}, pixel_size={pixel_size_x}x{pixel_size_y}µm")
+    logger.debug(
+        f"  OME metadata: axes={metadata['axes']}, pixel_size={pixel_size_x}x{pixel_size_y}µm"
+    )
 
     tifffile.imwrite(
         output_path,
         preprocessed,
-        photometric='minisblack',
+        photometric="minisblack",
         metadata=metadata,
         bigtiff=True,
         ome=True,
-        compression='zlib',
-        tile=(2048, 2048)
+        compression="zlib",
+        tile=(2048, 2048),
     )
 
     logger.info(f"[OK] Saved OME-TIFF with {preprocessed.shape[0]} channels")
 
     # Verify the saved file
     with tifffile.TiffFile(output_path) as tif:
-        has_ome = hasattr(tif, 'ome_metadata') and tif.ome_metadata
+        has_ome = hasattr(tif, "ome_metadata") and tif.ome_metadata
         if not has_ome:
             logger.warning("[WARN] No OME metadata in saved file")
 
@@ -414,9 +438,13 @@ def preprocess_multichannel_image(
     if verify_min < 0:
         neg_count = int(np.sum(preprocessed < 0))
         neg_pct = 100 * neg_count / preprocessed.size
-        logger.error(f"[CHECKPOINT 1 FAIL] Preprocessed data has {neg_count} negatives ({neg_pct:.4f}%), min={verify_min}")
+        logger.error(
+            f"[CHECKPOINT 1 FAIL] Preprocessed data has {neg_count} negatives ({neg_pct:.4f}%), min={verify_min}"
+        )
     else:
-        logger.info(f"[CHECKPOINT 1 OK] No negatives. min={verify_min:.2f}, max={verify_max:.2f}")
+        logger.info(
+            f"[CHECKPOINT 1 OK] No negatives. min={verify_min:.2f}, max={verify_max:.2f}"
+        )
 
     return preprocessed
 
@@ -424,79 +452,66 @@ def preprocess_multichannel_image(
 def parse_args():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description='Apply BaSiC illumination correction to multichannel images',
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+        description="Apply BaSiC illumination correction to multichannel images",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
     parser.add_argument(
-        '--image',
+        "--image", type=str, required=True, help="Path to the multichannel image file"
+    )
+
+    parser.add_argument(
+        "--output_dir", type=str, required=True, help="Output directory"
+    )
+
+    parser.add_argument(
+        "--channels",
         type=str,
+        nargs="+",
         required=True,
-        help='Path to the multichannel image file'
+        help="Channel names from metadata",
     )
 
     parser.add_argument(
-        '--output_dir',
-        type=str,
-        required=True,
-        help='Output directory'
+        "--fov_size", type=int, default=1950, help="FOV size for BaSiC tiling"
     )
 
     parser.add_argument(
-        '--channels',
-        type=str,
-        nargs='+',
-        required=True,
-        help='Channel names from metadata'
-    )
-
-    parser.add_argument(
-        '--fov_size',
-        type=int,
-        default=1950,
-        help='FOV size for BaSiC tiling'
-    )
-    
-    parser.add_argument(
-        '--n_workers',
+        "--n_workers",
         type=int,
         default=4,
-        help='Maximum number of channels to process in parallel.'
+        help="Maximum number of channels to process in parallel.",
     )
 
     parser.add_argument(
-        '--skip_dapi',
-        action='store_true',
-        help='Skip BaSiC correction for DAPI channel'
+        "--skip_dapi",
+        action="store_true",
+        help="Skip BaSiC correction for DAPI channel",
     )
 
     parser.add_argument(
-        '--autotune',
-        action='store_true',
-        help='Autotune BaSiC parameters'
+        "--autotune", action="store_true", help="Autotune BaSiC parameters"
     )
 
     parser.add_argument(
-        '--n_iter',
-        type=int,
-        default=3,
-        help='Number of autotuning iterations'
+        "--n_iter", type=int, default=3, help="Number of autotuning iterations"
     )
 
     parser.add_argument(
-        '--overlap',
+        "--overlap",
         type=int,
         default=0,
-        help='Overlap between FOV tiles for BaSiC correction'
+        help="Overlap between FOV tiles for BaSiC correction",
     )
 
     parser.add_argument(
-        '--no_darkfield',
-        action='store_true',
-        help='Disable darkfield estimation in BaSiC'
+        "--no_darkfield",
+        action="store_true",
+        help="Disable darkfield estimation in BaSiC",
     )
 
     return parser.parse_args()
+
 
 def main():
     """Main entry point."""
@@ -512,32 +527,26 @@ def main():
     channel_names = args.channels
 
     # Always save as .ome.tiff since we're writing OME-TIFF format
-    if image_basename.endswith('.ome.tif'):
+    if image_basename.endswith(".ome.tif"):
         base = image_basename[:-8]  # Remove .ome.tif
-    elif image_basename.endswith('.ome.tiff'):
+    elif image_basename.endswith(".ome.tiff"):
         base = image_basename[:-9]  # Remove .ome.tiff
-    elif image_basename.endswith('.tif'):
+    elif image_basename.endswith(".tif"):
         base = image_basename[:-4]  # Remove .tif
-    elif image_basename.endswith('.tiff'):
+    elif image_basename.endswith(".tiff"):
         base = image_basename[:-5]  # Remove .tiff
     else:
         base = os.path.splitext(image_basename)[0]
 
-    ext = '.ome.tif'  # Always use OME-TIFF extension
+    ext = ".ome.tif"  # Always use OME-TIFF extension
     output_filename = f"{base}_corrected{ext}"
-    output_path = os.path.join(
-        args.output_dir,
-        output_filename
-    )
+    output_path = os.path.join(args.output_dir, output_filename)
 
     logger.info(f"Starting preprocessing: {image_path}")
     logger.info(f"Expected channel order: {channel_names}")
 
     # Build BaSiC kwargs
-    basic_kwargs = {
-        'overlap': args.overlap,
-        'get_darkfield': not args.no_darkfield
-    }
+    basic_kwargs = {"overlap": args.overlap, "get_darkfield": not args.no_darkfield}
 
     preprocessed = preprocess_multichannel_image(
         image_path=image_path,
@@ -548,21 +557,27 @@ def main():
         autotune=args.autotune,
         n_iter=args.n_iter,
         n_workers=args.n_workers,
-        **basic_kwargs
+        **basic_kwargs,
     )
 
     logger.info(f"Preprocessing completed successfully. Output: {output_path}")
 
     # Write dimensions to file for downstream processes (use in-memory shape, no re-read)
-    shape = preprocessed.shape if preprocessed.ndim == 3 else (1, preprocessed.shape[0], preprocessed.shape[1])
+    shape = (
+        preprocessed.shape
+        if preprocessed.ndim == 3
+        else (1, preprocessed.shape[0], preprocessed.shape[1])
+    )
     dims_filename = f"{base}_dims.txt"
     dims_path = os.path.join(args.output_dir, dims_filename)
-    with open(dims_path, 'w') as f:
+    with open(dims_path, "w") as f:
         f.write(f"{shape[0]} {shape[1]} {shape[2]}")
-    logger.info(f"Image dimensions saved to: {dims_path} (C={shape[0]}, H={shape[1]}, W={shape[2]})")
+    logger.info(
+        f"Image dimensions saved to: {dims_path} (C={shape[0]}, H={shape[1]}, W={shape[2]})"
+    )
 
     return 0
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     exit(main())

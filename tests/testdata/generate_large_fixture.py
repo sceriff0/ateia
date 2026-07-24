@@ -10,6 +10,7 @@ multichannel OME-TIFF pair (reference + moving with a smooth local deformation) 
 Usage:
   python3 tests/testdata/generate_large_fixture.py --size 1024 --out /tmp/bigdata
 """
+
 import argparse
 import os
 
@@ -28,9 +29,13 @@ def draw(size, channel_names, seed, warp=None):
             cy = rng.randint(15, size - 15)
             cx = rng.randint(15, size - 15)
             radius = rng.randint(4, 14)
-            intensity = rng.randint(8000, 15000) if ch == 0 else rng.randint(2000, 10000)
+            intensity = (
+                rng.randint(8000, 15000) if ch == 0 else rng.randint(2000, 10000)
+            )
             dist2 = (yy - cy) ** 2 + (xx - cx) ** 2
-            img = np.maximum(img, np.exp(-dist2 / (2 * (radius / 2.0) ** 2)) * intensity)
+            img = np.maximum(
+                img, np.exp(-dist2 / (2 * (radius / 2.0) ** 2)) * intensity
+            )
         img += rng.normal(100, 20, (size, size))
         img = np.clip(img, 0, 65535)
         if warp is not None:
@@ -58,12 +63,21 @@ def main():
 
     specs = [
         ("P001_ref.ome.tiff", ["DAPI", "PANCK", "SMA"], 1, None),
-        ("P001_mov1.ome.tiff", ["DAPI", "CD3", "CD8"], 1, (6.0, 2.0)),  # same seed=1 sharing DAPI struct, + warp
+        (
+            "P001_mov1.ome.tiff",
+            ["DAPI", "CD3", "CD8"],
+            1,
+            (6.0, 2.0),
+        ),  # same seed=1 sharing DAPI struct, + warp
     ]
     for fname, chans, seed, warp in specs:
         arr = draw(args.size, chans, seed, warp)
-        tifffile.imwrite(os.path.join(args.out, fname), arr, photometric="minisblack",
-                         metadata={"axes": "CYX", "Channel": {"Name": chans}})
+        tifffile.imwrite(
+            os.path.join(args.out, fname),
+            arr,
+            photometric="minisblack",
+            metadata={"axes": "CYX", "Channel": {"Name": chans}},
+        )
         print(f"  wrote {fname} shape={arr.shape} dtype={arr.dtype}", flush=True)
 
 

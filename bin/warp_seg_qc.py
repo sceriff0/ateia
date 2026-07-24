@@ -40,6 +40,7 @@ the wrong sign, as a warning that a stage made things worse.
 Runs in the VALIS container (valis + numpy + scipy + scikit-image). The warp is injectable so
 the staging, matching and scoring logic is unit-testable without VALIS.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -62,7 +63,6 @@ os.environ.setdefault("MPLCONFIGDIR", "/tmp/mplconfig")
 os.environ.setdefault("XDG_CACHE_HOME", "/tmp/xdg_cache")
 
 import numpy as np
-
 from utils import cell_pairs as cp
 from utils.valis_stage_warp import (
     STAGE_MICRO,
@@ -81,8 +81,15 @@ DEFAULT_SUPERSAMPLE = 2
 DEFAULT_IOU_THRESH = 0.5
 # Deltas are reported only for these — the headline numbers. Counts and percentile widths are
 # all in the per-stage records; the delta of a count is not a meaningful quantity.
-_DELTA_KEYS = ("iou_mean", "iou_p50", "displacement_px_p50", "displacement_px_p90",
-               "displacement_um_p50", "displacement_um_p90", "dice_matched")
+_DELTA_KEYS = (
+    "iou_mean",
+    "iou_p50",
+    "displacement_px_p50",
+    "displacement_px_p90",
+    "displacement_um_p50",
+    "displacement_um_p90",
+    "dice_matched",
+)
 
 
 def _log(msg, t0=None):
@@ -93,6 +100,7 @@ def _log(msg, t0=None):
 # ── VALIS access (lazy + injectable) ───────────────────────────────────────────
 def default_loader(pickle_path):
     from valis import registration  # lazy: real VALIS package, as in bin/register.py
+
     return registration.load_registrar(str(pickle_path))
 
 
@@ -110,13 +118,19 @@ def plan_stages(checkpoint=None) -> tuple:
       intermediate is unrecoverable, so ``non_rigid`` is not emitted.
     """
     if checkpoint is None:
-        return ([STAGE_NATIVE, STAGE_RIGID, STAGE_MICRO], False,
-                "no REGISTER stage checkpoint: the registrar's field already has the micro "
-                "residual composed in, so the 'non_rigid' stage cannot be separated from it")
+        return (
+            [STAGE_NATIVE, STAGE_RIGID, STAGE_MICRO],
+            False,
+            "no REGISTER stage checkpoint: the registrar's field already has the micro "
+            "residual composed in, so the 'non_rigid' stage cannot be separated from it",
+        )
     if not checkpoint.micro_registration:
-        return ([STAGE_NATIVE, STAGE_RIGID, STAGE_NON_RIGID], True,
-                "micro-registration did not run: the final field is the wave-1 non-rigid "
-                "field, so there is no distinct 'micro' stage")
+        return (
+            [STAGE_NATIVE, STAGE_RIGID, STAGE_NON_RIGID],
+            True,
+            "micro-registration did not run: the final field is the wave-1 non-rigid "
+            "field, so there is no distinct 'micro' stage",
+        )
     return ([STAGE_NATIVE, STAGE_RIGID, STAGE_NON_RIGID, STAGE_MICRO], True, "")
 
 
@@ -132,34 +146,69 @@ def stage_geometry(warp, slide_name, native_ps, stage):
     return warped, area, cent
 
 
-def score_stage(ps_ref, ps_mov, cent_ref, cent_mov, area_ref, area_mov, idx_ref, idx_mov,
-                iou_thresh=DEFAULT_IOU_THRESH, supersample=DEFAULT_SUPERSAMPLE,
-                max_pair_window_px=cp.DEFAULT_MAX_PAIR_WINDOW_PX, pixel_size_um=None) -> dict:
+def score_stage(
+    ps_ref,
+    ps_mov,
+    cent_ref,
+    cent_mov,
+    area_ref,
+    area_mov,
+    idx_ref,
+    idx_mov,
+    iou_thresh=DEFAULT_IOU_THRESH,
+    supersample=DEFAULT_SUPERSAMPLE,
+    max_pair_window_px=cp.DEFAULT_MAX_PAIR_WINDOW_PX,
+    pixel_size_um=None,
+) -> dict:
     """Per-pair IoU + centroid residual for one stage, over an already-fixed pairing."""
-    iou, scored = cp.pair_iou(ps_ref, ps_mov, idx_ref, idx_mov,
-                              supersample=supersample, max_window_px=max_pair_window_px)
+    iou, scored = cp.pair_iou(
+        ps_ref,
+        ps_mov,
+        idx_ref,
+        idx_mov,
+        supersample=supersample,
+        max_window_px=max_pair_window_px,
+    )
     dist = cp.centroid_distance(cent_ref, cent_mov, idx_ref, idx_mov)
-    return cp.summarize_stage(iou, scored, dist,
-                              np.asarray(area_ref)[idx_ref], np.asarray(area_mov)[idx_mov],
-                              iou_thresh=iou_thresh, pixel_size_um=pixel_size_um)
+    return cp.summarize_stage(
+        iou,
+        scored,
+        dist,
+        np.asarray(area_ref)[idx_ref],
+        np.asarray(area_mov)[idx_mov],
+        iou_thresh=iou_thresh,
+        pixel_size_um=pixel_size_um,
+    )
 
 
 def _stage_line(rec) -> str:
     def g(k, fmt=".4f"):
         v = rec.get(k)
         return format(v, fmt) if isinstance(v, float) else "n/a"
-    return (f"pairs={rec.get('n_pairs_scored', 0)}/{rec.get('n_pairs', 0)} "
-            f"iou_mean={g('iou_mean')} iou_p50={g('iou_p50')} "
-            f"disp_p50={g('displacement_px_p50', '.2f')}px "
-            f"disp_p90={g('displacement_px_p90', '.2f')}px")
+
+    return (
+        f"pairs={rec.get('n_pairs_scored', 0)}/{rec.get('n_pairs', 0)} "
+        f"iou_mean={g('iou_mean')} iou_p50={g('iou_p50')} "
+        f"disp_p50={g('displacement_px_p50', '.2f')}px "
+        f"disp_p90={g('displacement_px_p90', '.2f')}px"
+    )
 
 
 # ── orchestration ──────────────────────────────────────────────────────────────
-def run(ref_geojson, moving_geojson, warp, stages, pixel_size_um=None,
-        ref_slide=None, moving_slide=None,
-        match_radius_factor=DEFAULT_MATCH_RADIUS_FACTOR, match_radius_px=None,
-        iou_thresh=DEFAULT_IOU_THRESH, supersample=DEFAULT_SUPERSAMPLE,
-        max_pair_window_px=cp.DEFAULT_MAX_PAIR_WINDOW_PX) -> dict:
+def run(
+    ref_geojson,
+    moving_geojson,
+    warp,
+    stages,
+    pixel_size_um=None,
+    ref_slide=None,
+    moving_slide=None,
+    match_radius_factor=DEFAULT_MATCH_RADIUS_FACTOR,
+    match_radius_px=None,
+    iou_thresh=DEFAULT_IOU_THRESH,
+    supersample=DEFAULT_SUPERSAMPLE,
+    max_pair_window_px=cp.DEFAULT_MAX_PAIR_WINDOW_PX,
+) -> dict:
     """Score every stage in ``stages`` against a correspondence fixed at the anchor.
 
     The anchor is computed first regardless of where it sits in the reporting order, and each
@@ -171,23 +220,41 @@ def run(ref_geojson, moving_geojson, warp, stages, pixel_size_um=None,
         ref_native = cp.from_feature_collection(json.load(f))
     with open(moving_geojson) as f:
         mov_native = cp.from_feature_collection(json.load(f))
-    _log(f"loaded native geojsons: ref={ref_native.n_features} "
-         f"mov={mov_native.n_features} cells", t0)
+    _log(
+        f"loaded native geojsons: ref={ref_native.n_features} "
+        f"mov={mov_native.n_features} cells",
+        t0,
+    )
 
     if ANCHOR_STAGE not in stages:
-        raise ValueError(f"anchor stage {ANCHOR_STAGE!r} is not in the stage plan {stages}")
+        raise ValueError(
+            f"anchor stage {ANCHOR_STAGE!r} is not in the stage plan {stages}"
+        )
 
     # ── anchor: warp, size the match radius from the cells themselves, pair once ──
-    a_ref, a_area_ref, a_cent_ref = stage_geometry(warp, ref_slide, ref_native, ANCHOR_STAGE)
-    a_mov, a_area_mov, a_cent_mov = stage_geometry(warp, moving_slide, mov_native, ANCHOR_STAGE)
+    a_ref, a_area_ref, a_cent_ref = stage_geometry(
+        warp, ref_slide, ref_native, ANCHOR_STAGE
+    )
+    a_mov, a_area_mov, a_cent_mov = stage_geometry(
+        warp, moving_slide, mov_native, ANCHOR_STAGE
+    )
     cell_radius = cp.median_equivalent_radius(np.concatenate([a_area_ref, a_area_mov]))
-    radius = float(match_radius_px) if match_radius_px else float(match_radius_factor) * cell_radius
+    radius = (
+        float(match_radius_px)
+        if match_radius_px
+        else float(match_radius_factor) * cell_radius
+    )
     idx_ref, idx_mov, _ = cp.match_mutual_nn(a_cent_ref, a_cent_mov, radius)
-    _log(f"anchor '{ANCHOR_STAGE}': median cell radius {cell_radius:.2f} px -> match radius "
-         f"{radius:.2f} px -> {idx_ref.size} pairs", t0)
+    _log(
+        f"anchor '{ANCHOR_STAGE}': median cell radius {cell_radius:.2f} px -> match radius "
+        f"{radius:.2f} px -> {idx_ref.size} pairs",
+        t0,
+    )
     if idx_ref.size == 0:
-        _log("WARNING: no cells paired at the anchor. Every stage record will be empty; this "
-             "usually means the rigid stage failed or the two slides share no tissue.")
+        _log(
+            "WARNING: no cells paired at the anchor. Every stage record will be empty; this "
+            "usually means the rigid stage failed or the two slides share no tissue."
+        )
 
     denom = min(ref_native.n_features, mov_native.n_features) or 1
     matching = {
@@ -202,11 +269,25 @@ def run(ref_geojson, moving_geojson, warp, stages, pixel_size_um=None,
         "pair_fraction_moving": float(idx_ref.size) / (mov_native.n_features or 1),
     }
 
-    score_kwargs = dict(iou_thresh=iou_thresh, supersample=supersample,
-                        max_pair_window_px=max_pair_window_px, pixel_size_um=pixel_size_um)
-    records = {ANCHOR_STAGE: score_stage(a_ref, a_mov, a_cent_ref, a_cent_mov,
-                                         a_area_ref, a_area_mov, idx_ref, idx_mov,
-                                         **score_kwargs)}
+    score_kwargs = dict(
+        iou_thresh=iou_thresh,
+        supersample=supersample,
+        max_pair_window_px=max_pair_window_px,
+        pixel_size_um=pixel_size_um,
+    )
+    records = {
+        ANCHOR_STAGE: score_stage(
+            a_ref,
+            a_mov,
+            a_cent_ref,
+            a_cent_mov,
+            a_area_ref,
+            a_area_mov,
+            idx_ref,
+            idx_mov,
+            **score_kwargs,
+        )
+    }
     _log(f"stage '{ANCHOR_STAGE}': {_stage_line(records[ANCHOR_STAGE])}", t0)
     del a_ref, a_mov, a_cent_ref, a_cent_mov, a_area_ref, a_area_mov
 
@@ -215,16 +296,21 @@ def run(ref_geojson, moving_geojson, warp, stages, pixel_size_um=None,
             continue
         s_ref, ar_ref, c_ref = stage_geometry(warp, ref_slide, ref_native, stage)
         s_mov, ar_mov, c_mov = stage_geometry(warp, moving_slide, mov_native, stage)
-        records[stage] = score_stage(s_ref, s_mov, c_ref, c_mov, ar_ref, ar_mov,
-                                     idx_ref, idx_mov, **score_kwargs)
+        records[stage] = score_stage(
+            s_ref, s_mov, c_ref, c_mov, ar_ref, ar_mov, idx_ref, idx_mov, **score_kwargs
+        )
         _log(f"stage '{stage}': {_stage_line(records[stage])}", t0)
         del s_ref, s_mov, c_ref, c_mov, ar_ref, ar_mov
 
     anchor_rec = records[ANCHOR_STAGE]
     deltas = {
-        stage: {k: records[stage][k] - anchor_rec[k]
-                for k in _DELTA_KEYS if k in records[stage] and k in anchor_rec}
-        for stage in stages if stage != ANCHOR_STAGE
+        stage: {
+            k: records[stage][k] - anchor_rec[k]
+            for k in _DELTA_KEYS
+            if k in records[stage] and k in anchor_rec
+        }
+        for stage in stages
+        if stage != ANCHOR_STAGE
     }
 
     return {
@@ -245,7 +331,9 @@ def run(ref_geojson, moving_geojson, warp, stages, pixel_size_um=None,
     }
 
 
-def build_record(result, patient_id, moving_name, reference_name, separable, note) -> dict:
+def build_record(
+    result, patient_id, moving_name, reference_name, separable, note
+) -> dict:
     rec = {
         "patient_id": patient_id,
         "moving": os.path.basename(str(moving_name)),
@@ -258,11 +346,27 @@ def build_record(result, patient_id, moving_name, reference_name, separable, not
     return rec
 
 
-def write_report(pickle_path, ref_slide, moving_slide, ref_geojson, moving_geojson, output,
-                 patient_id=None, moving_name=None, reference_name=None,
-                 checkpoint_dir=None, loader=default_loader, crop="overlap", clip=False,
-                 pixel_size_um=None, warp=None, stages=None, separable=True, note="",
-                 **run_kwargs) -> dict:
+def write_report(
+    pickle_path,
+    ref_slide,
+    moving_slide,
+    ref_geojson,
+    moving_geojson,
+    output,
+    patient_id=None,
+    moving_name=None,
+    reference_name=None,
+    checkpoint_dir=None,
+    loader=default_loader,
+    crop="overlap",
+    clip=False,
+    pixel_size_um=None,
+    warp=None,
+    stages=None,
+    separable=True,
+    note="",
+    **run_kwargs,
+) -> dict:
     """Load the registrar (unless a warp is injected), score every stage, write the JSON."""
     if warp is None:
         from utils.stage_checkpoint import StageCheckpoint
@@ -273,7 +377,8 @@ def write_report(pickle_path, ref_slide, moving_slide, ref_geojson, moving_geojs
             raise KeyError(
                 f"the stage checkpoint has no entry for moving slide {moving_slide!r}; it has "
                 f"{checkpoint.slide_names}. The checkpoint and the registrar must come from "
-                "the same REGISTER task.")
+                "the same REGISTER task."
+            )
         stages, separable, note = plan_stages(checkpoint)
         registrar = loader(pickle_path)
         _log("registrar loaded")
@@ -282,12 +387,28 @@ def write_report(pickle_path, ref_slide, moving_slide, ref_geojson, moving_geojs
             pixel_size_um = slide_pixel_size_um(registrar, moving_slide)
     elif stages is None:
         stages, separable, note = plan_stages(None)
-    _log(f"stage plan: {stages} (separable={separable})" + (f" — {note}" if note else ""))
+    _log(
+        f"stage plan: {stages} (separable={separable})" + (f" — {note}" if note else "")
+    )
 
-    result = run(ref_geojson, moving_geojson, warp, stages, pixel_size_um=pixel_size_um,
-                 ref_slide=ref_slide, moving_slide=moving_slide, **run_kwargs)
-    record = build_record(result, patient_id, moving_name or moving_slide,
-                          reference_name or ref_slide, separable, note)
+    result = run(
+        ref_geojson,
+        moving_geojson,
+        warp,
+        stages,
+        pixel_size_um=pixel_size_um,
+        ref_slide=ref_slide,
+        moving_slide=moving_slide,
+        **run_kwargs,
+    )
+    record = build_record(
+        result,
+        patient_id,
+        moving_name or moving_slide,
+        reference_name or ref_slide,
+        separable,
+        note,
+    )
     with open(output, "w") as f:
         json.dump(record, f, indent=2)
     return record
@@ -295,39 +416,92 @@ def write_report(pickle_path, ref_slide, moving_slide, ref_geojson, moving_geojs
 
 def parse_args(argv=None):
     ap = argparse.ArgumentParser(
-        description="Staged, fixed-correspondence segmentation-overlap registration QC.")
+        description="Staged, fixed-correspondence segmentation-overlap registration QC."
+    )
     ap.add_argument("--pickle", required=True, help="VALIS registrar pickle")
-    ap.add_argument("--ref-slide", required=True, help="reference slide name in registrar.slide_dict")
-    ap.add_argument("--moving-slide", required=True, help="moving slide name in registrar.slide_dict")
-    ap.add_argument("--ref-geojson", required=True, help="reference native-cell GeoJSON")
-    ap.add_argument("--moving-geojson", required=True, help="moving native-cell GeoJSON")
+    ap.add_argument(
+        "--ref-slide",
+        required=True,
+        help="reference slide name in registrar.slide_dict",
+    )
+    ap.add_argument(
+        "--moving-slide",
+        required=True,
+        help="moving slide name in registrar.slide_dict",
+    )
+    ap.add_argument(
+        "--ref-geojson", required=True, help="reference native-cell GeoJSON"
+    )
+    ap.add_argument(
+        "--moving-geojson", required=True, help="moving native-cell GeoJSON"
+    )
     ap.add_argument("--output", required=True)
-    ap.add_argument("--checkpoint-dir", default=None,
-                    help="REGISTER pre-micro stage checkpoint. Without it the 'non_rigid' stage "
-                         "cannot be separated from 'micro' and is not reported.")
+    ap.add_argument(
+        "--checkpoint-dir",
+        default=None,
+        help="REGISTER pre-micro stage checkpoint. Without it the 'non_rigid' stage "
+        "cannot be separated from 'micro' and is not reported.",
+    )
     ap.add_argument("--patient-id", default=None)
-    ap.add_argument("--moving-name", default=None, help="display filename for the moving slide")
-    ap.add_argument("--reference-name", default=None, help="display filename for the reference slide")
+    ap.add_argument(
+        "--moving-name", default=None, help="display filename for the moving slide"
+    )
+    ap.add_argument(
+        "--reference-name",
+        default=None,
+        help="display filename for the reference slide",
+    )
     ap.add_argument("--crop", default="overlap")
-    ap.add_argument("--clip-to-frame", action="store_true",
-                    help="reproduce warp_geojson's clip of warped vertices to the aligned frame. "
-                         "Off by default: it flattens boundary-straddling cells onto the crop "
-                         "edge in both slides, inflating their IoU for non-registration reasons.")
-    ap.add_argument("--match-radius-factor", type=float, default=DEFAULT_MATCH_RADIUS_FACTOR,
-                    help="match radius in median nuclear radii (default 1.0)")
-    ap.add_argument("--match-radius-px", type=float, default=None,
-                    help="absolute match radius in px; overrides --match-radius-factor")
-    ap.add_argument("--iou-thresh", type=float, default=DEFAULT_IOU_THRESH,
-                    help="IoU at which a pair counts as 'well aligned' for frac_iou_ge_*")
-    ap.add_argument("--supersample", type=int, default=DEFAULT_SUPERSAMPLE,
-                    help="per-pair rasterization factor. 2 puts the IoU quantum near 1%% for a "
-                         "typical nucleus; the window is per-pair, so the cost is negligible.")
-    ap.add_argument("--max-pair-window-px", type=int, default=cp.DEFAULT_MAX_PAIR_WINDOW_PX,
-                    help="a pair spanning a larger window is counted but not scored")
-    ap.add_argument("--pixel-size-um", type=float, default=None,
-                    help="physical pixel size; default = read from the slide metadata")
-    ap.add_argument("--jvm-heap-gb", type=int, default=None,
-                    help="explicit BioFormats JVM heap (GB); default = auto-size from the pickle dir")
+    ap.add_argument(
+        "--clip-to-frame",
+        action="store_true",
+        help="reproduce warp_geojson's clip of warped vertices to the aligned frame. "
+        "Off by default: it flattens boundary-straddling cells onto the crop "
+        "edge in both slides, inflating their IoU for non-registration reasons.",
+    )
+    ap.add_argument(
+        "--match-radius-factor",
+        type=float,
+        default=DEFAULT_MATCH_RADIUS_FACTOR,
+        help="match radius in median nuclear radii (default 1.0)",
+    )
+    ap.add_argument(
+        "--match-radius-px",
+        type=float,
+        default=None,
+        help="absolute match radius in px; overrides --match-radius-factor",
+    )
+    ap.add_argument(
+        "--iou-thresh",
+        type=float,
+        default=DEFAULT_IOU_THRESH,
+        help="IoU at which a pair counts as 'well aligned' for frac_iou_ge_*",
+    )
+    ap.add_argument(
+        "--supersample",
+        type=int,
+        default=DEFAULT_SUPERSAMPLE,
+        help="per-pair rasterization factor. 2 puts the IoU quantum near 1%% for a "
+        "typical nucleus; the window is per-pair, so the cost is negligible.",
+    )
+    ap.add_argument(
+        "--max-pair-window-px",
+        type=int,
+        default=cp.DEFAULT_MAX_PAIR_WINDOW_PX,
+        help="a pair spanning a larger window is counted but not scored",
+    )
+    ap.add_argument(
+        "--pixel-size-um",
+        type=float,
+        default=None,
+        help="physical pixel size; default = read from the slide metadata",
+    )
+    ap.add_argument(
+        "--jvm-heap-gb",
+        type=int,
+        default=None,
+        help="explicit BioFormats JVM heap (GB); default = auto-size from the pickle dir",
+    )
     return ap.parse_args(argv)
 
 
@@ -342,18 +516,33 @@ def main(argv=None):
     # the reservation explicit rather than incidental.
     from valis import registration
     from valis_config import init_jvm
-    heap_gb = init_jvm(os.path.dirname(os.path.abspath(a.pickle)) or ".", override_gb=a.jvm_heap_gb)
+
+    heap_gb = init_jvm(
+        os.path.dirname(os.path.abspath(a.pickle)) or ".", override_gb=a.jvm_heap_gb
+    )
     _log(f"started BioFormats JVM (heap={heap_gb}GB)")
 
     try:
         rec = write_report(
-            a.pickle, a.ref_slide, a.moving_slide, a.ref_geojson, a.moving_geojson, a.output,
-            patient_id=a.patient_id, moving_name=a.moving_name, reference_name=a.reference_name,
-            checkpoint_dir=a.checkpoint_dir, crop=a.crop, clip=a.clip_to_frame,
+            a.pickle,
+            a.ref_slide,
+            a.moving_slide,
+            a.ref_geojson,
+            a.moving_geojson,
+            a.output,
+            patient_id=a.patient_id,
+            moving_name=a.moving_name,
+            reference_name=a.reference_name,
+            checkpoint_dir=a.checkpoint_dir,
+            crop=a.crop,
+            clip=a.clip_to_frame,
             pixel_size_um=a.pixel_size_um,
-            match_radius_factor=a.match_radius_factor, match_radius_px=a.match_radius_px,
-            iou_thresh=a.iou_thresh, supersample=a.supersample,
-            max_pair_window_px=a.max_pair_window_px)
+            match_radius_factor=a.match_radius_factor,
+            match_radius_px=a.match_radius_px,
+            iou_thresh=a.iou_thresh,
+            supersample=a.supersample,
+            max_pair_window_px=a.max_pair_window_px,
+        )
     finally:
         registration.kill_jvm()
 
@@ -361,14 +550,16 @@ def main(argv=None):
     last = rec["stage_order"][-1]
     anchor, final = rec["stages"][ANCHOR_STAGE], rec["stages"][last]
     delta = rec["delta_vs_anchor"].get(last, {})
-    print(f"Wrote {a.output}: pairs={rec['matching']['n_pairs']} "
-          f"({rec['matching']['pair_fraction']:.1%} of cells) | "
-          f"{ANCHOR_STAGE}: iou={anchor.get('iou_mean', nan):.4f} "
-          f"disp_p50={anchor.get('displacement_px_p50', nan):.2f}px | "
-          f"{last}: iou={final.get('iou_mean', nan):.4f} "
-          f"disp_p50={final.get('displacement_px_p50', nan):.2f}px | "
-          f"delta_iou={delta.get('iou_mean', nan):+.4f} "
-          f"delta_disp_p50={delta.get('displacement_px_p50', nan):+.2f}px")
+    print(
+        f"Wrote {a.output}: pairs={rec['matching']['n_pairs']} "
+        f"({rec['matching']['pair_fraction']:.1%} of cells) | "
+        f"{ANCHOR_STAGE}: iou={anchor.get('iou_mean', nan):.4f} "
+        f"disp_p50={anchor.get('displacement_px_p50', nan):.2f}px | "
+        f"{last}: iou={final.get('iou_mean', nan):.4f} "
+        f"disp_p50={final.get('displacement_px_p50', nan):.2f}px | "
+        f"delta_iou={delta.get('iou_mean', nan):+.4f} "
+        f"delta_disp_p50={delta.get('displacement_px_p50', nan):+.2f}px"
+    )
 
 
 if __name__ == "__main__":

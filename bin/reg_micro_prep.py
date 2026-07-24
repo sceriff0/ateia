@@ -20,6 +20,7 @@ with two micro-specific additions (registration.py:4170-4339):
 
 The additive compose (scale(wave1) + pad(residual)) is proven max|Δ|=0 by spike_micro_option2.py.
 """
+
 import argparse
 import json
 import os
@@ -40,15 +41,15 @@ os.environ.setdefault("XDG_CACHE_HOME", "/tmp/xdg_cache")
 
 import numpy as np
 import pyvips
-import valis_tiling
 import reg_finalize  # reuse the EXACT wave-1 compose+pad that produces classic slide.bk_dxdy
+import valis_tiling
 from micro_rigid_guard import install_micro_rigid_guard
-from valis_config import (build_registrar_kwargs, maybe_init_jvm, slide_paths,
-                          micro_reg_size as compute_micro_reg_size)
 from mirage_slide_reader import MirageVipsSlideReader, all_readable
 from valis import registration
 from valis import serial_non_rigid as snr
-from valis.non_rigid_registrars import OpticalFlowWarper, NonRigidTileRegistrar
+from valis.non_rigid_registrars import NonRigidTileRegistrar, OpticalFlowWarper
+from valis_config import build_registrar_kwargs, maybe_init_jvm, slide_paths
+from valis_config import micro_reg_size as compute_micro_reg_size
 
 
 def _jd(o):
@@ -70,6 +71,7 @@ def _vips_to_numpy_pair(vimg):
     gray-levels at high resolution (amplifying to ~80 in the registered output at sharp edges). Matching
     float64 makes the distributed micro chain bit-identical to classic at BOTH memory modes (max|Δ|=0)."""
     from valis import warp_tools
+
     arr = warp_tools.vips2numpy(vimg)  # (H, W, 2)
     return np.array([arr[..., 0], arr[..., 1]]).astype(np.float64)
 
@@ -83,7 +85,7 @@ def _composed_wave1_field(slide_name, wave1_dir, prep_dir):
     ws = json.load(open(os.path.join(prep_dir, slide_name, "warp_state.json")))
     rm_f = os.path.join(prep_dir, slide_name, "tiler_inputs", "reg_mask.npy")
     reg_mask = np.load(rm_f) if os.path.exists(rm_f) else None
-    slide_bk = reg_finalize.compose_and_pad(raw_bk, ws, reg_mask)   # vips, (full_disp)
+    slide_bk = reg_finalize.compose_and_pad(raw_bk, ws, reg_mask)  # vips, (full_disp)
     return _vips_to_numpy_pair(slide_bk)
 
 
@@ -92,46 +94,82 @@ def main():
     ap.add_argument("--input-dir", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--reference", required=True, help="reference image basename")
-    ap.add_argument("--prep-dir", required=True,
-                    help="REG_PREP output (per-patient): <slide>/warp_state.json + tiler_inputs/reg_mask.npy")
-    ap.add_argument("--wave1-dir", required=True,
-                    help="per-slide RAW wave-1 fields from REG_NONRIGID: <slide>/bk.v "
-                         "(composed+padded here to reproduce classic slide.bk_dxdy before injection)")
-    ap.add_argument("--tile-wh", type=int, default=2048, help="micro tile size (classic uses 2048)")
+    ap.add_argument(
+        "--prep-dir",
+        required=True,
+        help="REG_PREP output (per-patient): <slide>/warp_state.json + tiler_inputs/reg_mask.npy",
+    )
+    ap.add_argument(
+        "--wave1-dir",
+        required=True,
+        help="per-slide RAW wave-1 fields from REG_NONRIGID: <slide>/bk.v "
+        "(composed+padded here to reproduce classic slide.bk_dxdy before injection)",
+    )
+    ap.add_argument(
+        "--tile-wh", type=int, default=2048, help="micro tile size (classic uses 2048)"
+    )
     ap.add_argument("--tile-buffer", type=int, default=100)
     ap.add_argument("--memory-mode", default="high", choices=["high", "medium", "low"])
-    ap.add_argument("--skip-micro-registration", action="store_true",
-                    help="MUST match REG_PREP: reg_micro_prep re-runs rigid from scratch, so the rigid "
-                         "config (incl. MicroRigidRegistrar) must be identical to REG_PREP for the same M.")
+    ap.add_argument(
+        "--skip-micro-registration",
+        action="store_true",
+        help="MUST match REG_PREP: reg_micro_prep re-runs rigid from scratch, so the rigid "
+        "config (incl. MicroRigidRegistrar) must be identical to REG_PREP for the same M.",
+    )
     ap.add_argument("--micro-fraction", type=float, default=0.125)
     ap.add_argument("--max-image-dim", type=int, default=4000)
-    ap.add_argument("--jvm-heap-gb", type=int, default=None,
-                    help="explicit BioFormats JVM heap (GB); default = auto-size from input size")
+    ap.add_argument(
+        "--jvm-heap-gb",
+        type=int,
+        default=None,
+        help="explicit BioFormats JVM heap (GB); default = auto-size from input size",
+    )
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
 
     # Size the BioFormats JVM heap to the inputs only if some input is NOT mirage-readable.
     # A default-heap JVM still starts inside Valis.__init__ for file-type probing; see reg_prep.py.
     heap = maybe_init_jvm(args.input_dir, override_gb=args.jvm_heap_gb)
-    print(f"[reg_micro_prep] JVM heap = {heap} GB" if heap else
-          "[reg_micro_prep] all inputs readable by MirageVipsSlideReader; no slide-scaled JVM heap "
-          "(Valis still starts a default-heap JVM to probe file types)", flush=True)
+    print(
+        f"[reg_micro_prep] JVM heap = {heap} GB"
+        if heap
+        else "[reg_micro_prep] all inputs readable by MirageVipsSlideReader; no slide-scaled JVM heap "
+        "(Valis still starts a default-heap JVM to probe file types)",
+        flush=True,
+    )
 
     install_micro_rigid_guard()  # robust micro-rigid (no-op on real data; see module)
     # Force the processed-2-D branch (no internal tiler), then no-op the warper => no DeepFlow.
-    registration.TILER_THRESH_GB = 10 ** 9
-    cap = {}     # slide_name -> {moving, fixed, mask, from_rigid, reg_mask, full_out, mask_bbox}
+    registration.TILER_THRESH_GB = 10**9
+    cap = {}  # slide_name -> {moving, fixed, mask, from_rigid, reg_mask, full_out, mask_bbox}
     cur = {}
 
     orig_calc = snr.NonRigidZImage.calc_deformation
 
-    def cap_calc(self, registered_fixed_image, non_rigid_reg_class, bk_dxdy=None, params=None, mask=None):
+    def cap_calc(
+        self,
+        registered_fixed_image,
+        non_rigid_reg_class,
+        bk_dxdy=None,
+        params=None,
+        mask=None,
+    ):
         cur["name"] = self.name
         cap.setdefault(self.name, {})
-        cap[self.name].update({"from_rigid": bool(self.reg_obj.from_rigid_reg),
-                               "reg_mask": None if mask is None else np.asarray(mask)})
-        return orig_calc(self, registered_fixed_image, non_rigid_reg_class,
-                         bk_dxdy=bk_dxdy, params=params, mask=mask)
+        cap[self.name].update(
+            {
+                "from_rigid": bool(self.reg_obj.from_rigid_reg),
+                "reg_mask": None if mask is None else np.asarray(mask),
+            }
+        )
+        return orig_calc(
+            self,
+            registered_fixed_image,
+            non_rigid_reg_class,
+            bk_dxdy=bk_dxdy,
+            params=params,
+            mask=mask,
+        )
 
     orig_reg = OpticalFlowWarper.register
 
@@ -147,24 +185,32 @@ def main():
         return moving_img, z, z
 
     # IDENTICAL rigid config to REG_PREP (re-running rigid from scratch must yield the SAME M).
-    kwargs = build_registrar_kwargs(reference_img_f=args.reference, memory_mode=args.memory_mode,
-                                    skip_micro_registration=args.skip_micro_registration,
-                                    max_image_dim_px=args.max_image_dim)
+    kwargs = build_registrar_kwargs(
+        reference_img_f=args.reference,
+        memory_mode=args.memory_mode,
+        skip_micro_registration=args.skip_micro_registration,
+        max_image_dim_px=args.max_image_dim,
+    )
 
     # Bare basename stem to MATCH reg.slide_dict keys (VALIS keys by basename). --reference is a path
     # ("ref/<name>.ome.tif"), so it must be basename'd first or "ref/<name>" never equals slide_dict's
     # "<name>" and the reference is miscounted as a dropped moving slide. See bin/reg_prep.py.
     ref_basename = os.path.basename(args.reference)
-    ref_stem = (ref_basename.replace(".ome.tiff", "").replace(".ome.tif", "")
-                .replace(".tiff", "").replace(".tif", ""))
+    ref_stem = (
+        ref_basename.replace(".ome.tiff", "")
+        .replace(".ome.tif", "")
+        .replace(".tiff", "")
+        .replace(".tif", "")
+    )
 
     # Stage 1: rebuild rigid + wave-1 prep state with the no-op warper (cheap), like reg_prep.
     snr.NonRigidZImage.calc_deformation = cap_calc
     OpticalFlowWarper.register = noop_register
     try:
         reg = registration.Valis(args.input_dir, args.out, **kwargs)
-        reader_cls = (MirageVipsSlideReader
-                      if all_readable(slide_paths(args.input_dir)) else None)
+        reader_cls = (
+            MirageVipsSlideReader if all_readable(slide_paths(args.input_dir)) else None
+        )
         reg.register(reader_cls=reader_cls)
 
         # INJECT wave-1 composed field onto each moving slide (so updating prep warps through it).
@@ -177,10 +223,15 @@ def main():
             if not os.path.exists(os.path.join(args.wave1_dir, name, "bk.v")):
                 raise RuntimeError(
                     f"[reg_micro_prep] moving slide {name!r} has no wave-1 field at "
-                    f"{os.path.join(args.wave1_dir, name, 'bk.v')} — cannot inject before micro pass.")
-            slide_obj.bk_dxdy = _composed_wave1_field(name, args.wave1_dir, args.prep_dir)  # numpy [dx,dy]
-            slide_obj.fwd_dxdy = [np.zeros_like(slide_obj.bk_dxdy[0]),
-                                  np.zeros_like(slide_obj.bk_dxdy[1])]  # placeholder; discarded by FINALIZE
+                    f"{os.path.join(args.wave1_dir, name, 'bk.v')} — cannot inject before micro pass."
+                )
+            slide_obj.bk_dxdy = _composed_wave1_field(
+                name, args.wave1_dir, args.prep_dir
+            )  # numpy [dx,dy]
+            slide_obj.fwd_dxdy = [
+                np.zeros_like(slide_obj.bk_dxdy[0]),
+                np.zeros_like(slide_obj.bk_dxdy[1]),
+            ]  # placeholder; discarded by FINALIZE
             slide_obj.stored_dxdy = False
 
         # Reset capture for the micro pass (we want the micro 2-D inputs, not wave-1's).
@@ -188,11 +239,19 @@ def main():
             for sub in ("moving", "fixed", "mask"):
                 cap[k].pop(sub, None)
 
-        micro_size = compute_micro_reg_size(reg.slide_dict, micro_reg_fraction=args.micro_fraction)
-        print(f"[reg_micro_prep] micro_reg_size={micro_size}px (fraction={args.micro_fraction})", flush=True)
-        reg.register_micro(max_non_rigid_registration_dim_px=micro_size,
-                           reference_img_f=args.reference, align_to_reference=True,
-                           tile_wh=args.tile_wh)
+        micro_size = compute_micro_reg_size(
+            reg.slide_dict, micro_reg_fraction=args.micro_fraction
+        )
+        print(
+            f"[reg_micro_prep] micro_reg_size={micro_size}px (fraction={args.micro_fraction})",
+            flush=True,
+        )
+        reg.register_micro(
+            max_non_rigid_registration_dim_px=micro_size,
+            reference_img_f=args.reference,
+            align_to_reference=True,
+            tile_wh=args.tile_wh,
+        )
     finally:
         snr.NonRigidZImage.calc_deformation = orig_calc
         OpticalFlowWarper.register = orig_reg
@@ -214,10 +273,18 @@ def main():
 
         valis_tiling.install_halt_hook(tiler_inputs)
         try:
-            t = NonRigidTileRegistrar(tile_wh=args.tile_wh, tile_buffer=args.tile_buffer)
-            t.register(rec["moving"], rec["fixed"], mask=rec["mask"],
-                       non_rigid_registrar_cls=OpticalFlowWarper,
-                       processing_cls=None, processing_kwargs=None, target_stats=None)
+            t = NonRigidTileRegistrar(
+                tile_wh=args.tile_wh, tile_buffer=args.tile_buffer
+            )
+            t.register(
+                rec["moving"],
+                rec["fixed"],
+                mask=rec["mask"],
+                non_rigid_registrar_cls=OpticalFlowWarper,
+                processing_cls=None,
+                processing_kwargs=None,
+                target_stats=None,
+            )
         except valis_tiling.TilesPending:
             pass
         finally:
@@ -235,8 +302,11 @@ def main():
         with open(os.path.join(sdir, "micro_warp_state.json"), "w") as fh:
             json.dump(mws, fh, indent=2, default=_jd)
         slides_written.append(name)
-        print(f"[reg_micro_prep] dumped {name}: micro tiler_inputs + micro_warp_state "
-              f"(full_out={mws['micro_full_out_shape_rc']} bbox={mws['micro_mask_bbox_xywh']})", flush=True)
+        print(
+            f"[reg_micro_prep] dumped {name}: micro tiler_inputs + micro_warp_state "
+            f"(full_out={mws['micro_full_out_shape_rc']} bbox={mws['micro_mask_bbox_xywh']})",
+            flush=True,
+        )
 
     # Same silent-loss guard as reg_prep: every non-reference slide must have produced a micro dump.
     expected_moving = [name for name in reg.slide_dict if name != ref_stem]
@@ -246,11 +316,15 @@ def main():
             registration.kill_jvm()
         raise RuntimeError(
             f"[reg_micro_prep] {len(missing)} moving slide(s) produced no micro tiler_inputs and were "
-            f"silently dropped: {missing} (expected {len(expected_moving)}, wrote {len(slides_written)}).")
+            f"silently dropped: {missing} (expected {len(expected_moving)}, wrote {len(slides_written)})."
+        )
 
     if heap:
         registration.kill_jvm()
-    print(f"[reg_micro_prep] DONE — {len(slides_written)} moving slide(s): {slides_written}", flush=True)
+    print(
+        f"[reg_micro_prep] DONE — {len(slides_written)} moving slide(s): {slides_written}",
+        flush=True,
+    )
 
 
 if __name__ == "__main__":

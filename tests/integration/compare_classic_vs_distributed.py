@@ -20,6 +20,7 @@ Usage:
   docker run --rm -v "$PWD":/work -w /work bolt3x/attend_image_analysis:mirage_valis_1.0.0 \
       python3 tests/integration/compare_classic_vs_distributed.py
 """
+
 import json
 import os
 import shutil
@@ -29,7 +30,9 @@ import sys
 import numpy as np
 import pyvips
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "bin"))
+sys.path.insert(
+    0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "bin")
+)
 import reg_finalize  # also puts bin/utils on sys.path
 from mirage_slide_reader import open_multiband  # noqa: E402
 from valis import registration, slide_tools, warp_tools
@@ -63,8 +66,10 @@ def report(name, a, b):
     d = np.abs(a - b)
     eq = bool(np.array_equal(a, b))
     npix = int((d > 0).sum())
-    print(f"  {name:34s} : equal={eq!s:5s} max|Δ|={d.max():.4g} mean|Δ|={d.mean():.4g} "
-          f"pixels_diff={npix}/{d.size} ({100.0*npix/d.size:.2f}%)")
+    print(
+        f"  {name:34s} : equal={eq!s:5s} max|Δ|={d.max():.4g} mean|Δ|={d.mean():.4g} "
+        f"pixels_diff={npix}/{d.size} ({100.0 * npix / d.size:.2f}%)"
+    )
 
 
 def run(cmd):
@@ -82,16 +87,25 @@ def main():
         shutil.copy(os.path.join(DATADIR, s), os.path.join(INP, s))
 
     # ---------------- CLASSIC (whole-image VALIS) ----------------
-    registration.TILER_THRESH_GB = 10  # do not tile -> classic whole-image (works on fluorescence)
+    registration.TILER_THRESH_GB = (
+        10  # do not tile -> classic whole-image (works on fluorescence)
+    )
     # Use the SAME shared config builder classic register.py + distributed reg_prep.py use, so this
     # tests bit-identicality against the user's REAL config (memory_mode + micro). CMP_MEMORY_MODE
     # selects the preset; CMP_SKIP_MICRO toggles MicroRigidRegistrar in the rigid stage.
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "bin", "utils"))
+    sys.path.insert(
+        0,
+        os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", "..", "bin", "utils"
+        ),
+    )
     from valis_config import build_registrar_kwargs
+
     MEMORY_MODE = os.environ.get("CMP_MEMORY_MODE", "high")
     SKIP_MICRO = os.environ.get("CMP_SKIP_MICRO", "0") == "1"
-    kwargs = build_registrar_kwargs(reference_img_f=REF, memory_mode=MEMORY_MODE,
-                                    skip_micro_registration=SKIP_MICRO)
+    kwargs = build_registrar_kwargs(
+        reference_img_f=REF, memory_mode=MEMORY_MODE, skip_micro_registration=SKIP_MICRO
+    )
     reg = registration.Valis(INP, os.path.join(WORK, "classic_out"), **kwargs)
     reg.register()
     mov_slide = reg.slide_dict[MOV_STEM]
@@ -104,15 +118,38 @@ def main():
     micro_size = int(np.floor(min_max_size * MICRO_FRACTION))
     classic_C = None
     try:
-        reg.register_micro(max_non_rigid_registration_dim_px=micro_size, reference_img_f=REF,
-                           align_to_reference=True, tile_wh=2048)
-        classic_C = npx(reg.slide_dict[MOV_STEM].warp_slide(level=0, non_rigid=True, crop=True))
+        reg.register_micro(
+            max_non_rigid_registration_dim_px=micro_size,
+            reference_img_f=REF,
+            align_to_reference=True,
+            tile_wh=2048,
+        )
+        classic_C = npx(
+            reg.slide_dict[MOV_STEM].warp_slide(level=0, non_rigid=True, crop=True)
+        )
     except Exception as e:
-        print(f"[classic] micro failed (size={micro_size}): {type(e).__name__}: {e}", flush=True)
+        print(
+            f"[classic] micro failed (size={micro_size}): {type(e).__name__}: {e}",
+            flush=True,
+        )
 
     # ---------------- DISTRIBUTED ----------------
-    prep_cmd = [sys.executable, "bin/reg_prep.py", "--input-dir", INP, "--out", PREP, "--reference", REF,
-                "--tile-wh", str(TILE_WH), "--tile-buffer", str(TILE_BUFFER), "--memory-mode", MEMORY_MODE]
+    prep_cmd = [
+        sys.executable,
+        "bin/reg_prep.py",
+        "--input-dir",
+        INP,
+        "--out",
+        PREP,
+        "--reference",
+        REF,
+        "--tile-wh",
+        str(TILE_WH),
+        "--tile-buffer",
+        str(TILE_BUFFER),
+        "--memory-mode",
+        MEMORY_MODE,
+    ]
     if SKIP_MICRO:
         prep_cmd.append("--skip-micro-registration")
     run(prep_cmd)
@@ -121,49 +158,140 @@ def main():
     os.makedirs(tiles, exist_ok=True)
     man = json.load(open(os.path.join(ti, "manifest.json")))
     for i in range(man["n_tiles"]):
-        run([sys.executable, "bin/reg_tile.py", "--inputs-dir", ti, "--tile-idx", str(i), "--out-dir", tiles])
+        run(
+            [
+                sys.executable,
+                "bin/reg_tile.py",
+                "--inputs-dir",
+                ti,
+                "--tile-idx",
+                str(i),
+                "--out-dir",
+                tiles,
+            ]
+        )
     src = os.path.join(INP, MOV)
     # A) distributed rigid-only
-    run([sys.executable, "bin/reg_finalize.py", "--rigid-only", "--warp-state", os.path.join(md, "warp_state.json"),
-         "--src-slide", src, "--out", os.path.join(md, "dist_A.ome.tiff")])
+    run(
+        [
+            sys.executable,
+            "bin/reg_finalize.py",
+            "--rigid-only",
+            "--warp-state",
+            os.path.join(md, "warp_state.json"),
+            "--src-slide",
+            src,
+            "--out",
+            os.path.join(md, "dist_A.ome.tiff"),
+        ]
+    )
     dist_A = npx(open_multiband(os.path.join(md, "dist_A.ome.tiff")))
     # B) distributed rigid + non-rigid (tiled)
-    run([sys.executable, "bin/reg_finalize.py", "--inputs-dir", ti, "--tiles-dir", tiles,
-         "--warp-state", os.path.join(md, "warp_state.json"), "--src-slide", src,
-         "--out", os.path.join(md, "dist_B.ome.tiff")])
+    run(
+        [
+            sys.executable,
+            "bin/reg_finalize.py",
+            "--inputs-dir",
+            ti,
+            "--tiles-dir",
+            tiles,
+            "--warp-state",
+            os.path.join(md, "warp_state.json"),
+            "--src-slide",
+            src,
+            "--out",
+            os.path.join(md, "dist_B.ome.tiff"),
+        ]
+    )
     dist_B = npx(open_multiband(os.path.join(md, "dist_B.ome.tiff")))
 
     # B-sep) distributed rigid + non-rigid SEPARATED (whole-image, JVM-free) -- the user's primary path.
     # Expected EXACTLY == classic whole-image (same OpticalFlowWarper on the same 2-D inputs).
-    run([sys.executable, "bin/reg_nonrigid.py", "--inputs-dir", ti, "--out-dir", os.path.join(md, "nr")])
-    run([sys.executable, "bin/reg_finalize.py", "--inputs-dir", ti, "--field", os.path.join(md, "nr", "bk.v"),
-         "--warp-state", os.path.join(md, "warp_state.json"), "--src-slide", src,
-         "--out", os.path.join(md, "dist_Bsep.ome.tiff")])
+    run(
+        [
+            sys.executable,
+            "bin/reg_nonrigid.py",
+            "--inputs-dir",
+            ti,
+            "--out-dir",
+            os.path.join(md, "nr"),
+        ]
+    )
+    run(
+        [
+            sys.executable,
+            "bin/reg_finalize.py",
+            "--inputs-dir",
+            ti,
+            "--field",
+            os.path.join(md, "nr", "bk.v"),
+            "--warp-state",
+            os.path.join(md, "warp_state.json"),
+            "--src-slide",
+            src,
+            "--out",
+            os.path.join(md, "dist_Bsep.ome.tiff"),
+        ]
+    )
     dist_Bsep = npx(open_multiband(os.path.join(md, "dist_Bsep.ome.tiff")))
 
     # in-process tiler reference (faithfulness baseline for B)
     moving = pyvips.Image.new_from_file(os.path.join(ti, "moving.v"))
     fixed = pyvips.Image.new_from_file(os.path.join(ti, "fixed.v"))
-    mask = pyvips.Image.new_from_file(os.path.join(ti, "mask.v")) if man["has_mask"] else None
+    mask = (
+        pyvips.Image.new_from_file(os.path.join(ti, "mask.v"))
+        if man["has_mask"]
+        else None
+    )
     t = NonRigidTileRegistrar(tile_wh=TILE_WH, tile_buffer=TILE_BUFFER)
-    _, _, ip_bk = t.register(moving, fixed, mask=mask, non_rigid_registrar_cls=OpticalFlowWarper,
-                             processing_cls=None, processing_kwargs=None, target_stats=None)
+    _, _, ip_bk = t.register(
+        moving,
+        fixed,
+        mask=mask,
+        non_rigid_registrar_cls=OpticalFlowWarper,
+        processing_cls=None,
+        processing_kwargs=None,
+        target_stats=None,
+    )
     ws = json.load(open(os.path.join(md, "warp_state.json")))
     ipad = ws["internal_pad"]
-    self_bk = reg_finalize.compose(ip_bk, pyvips.Image.black(
-        ip_bk.width if isinstance(ip_bk, pyvips.Image) else ip_bk[0].shape[1],
-        ip_bk.height if isinstance(ip_bk, pyvips.Image) else ip_bk[0].shape[0], bands=2).cast("float"),
-        np.load(os.path.join(ti, "reg_mask.npy")) if os.path.exists(os.path.join(ti, "reg_mask.npy")) else None,
-        from_rigid_reg=ws.get("from_rigid_reg", False))
-    slide_bk = pyvips.Image.black(ipad["out_shape"][1], ipad["out_shape"][0], bands=2).cast("float").insert(
-        reg_finalize._to_vips_field(self_bk), ipad["bbox"][0], ipad["bbox"][1])
-    inproc_B = npx(slide_tools.warp_slide(src, tuple(ws["processed_img_shape_rc"]), tuple(ws["reg_img_shape_rc"]),
-                  tuple(ws["aligned_slide_shape_rc"]), M=np.asarray(ws["M"]), dxdy=slide_bk, level=0,
-                  series=ws.get("series"), bbox_xywh=tuple(ws["bbox_xywh"]), bg_color=ws.get("bg_color")))
+    self_bk = reg_finalize.compose(
+        ip_bk,
+        pyvips.Image.black(
+            ip_bk.width if isinstance(ip_bk, pyvips.Image) else ip_bk[0].shape[1],
+            ip_bk.height if isinstance(ip_bk, pyvips.Image) else ip_bk[0].shape[0],
+            bands=2,
+        ).cast("float"),
+        np.load(os.path.join(ti, "reg_mask.npy"))
+        if os.path.exists(os.path.join(ti, "reg_mask.npy"))
+        else None,
+        from_rigid_reg=ws.get("from_rigid_reg", False),
+    )
+    slide_bk = (
+        pyvips.Image.black(ipad["out_shape"][1], ipad["out_shape"][0], bands=2)
+        .cast("float")
+        .insert(reg_finalize._to_vips_field(self_bk), ipad["bbox"][0], ipad["bbox"][1])
+    )
+    inproc_B = npx(
+        slide_tools.warp_slide(
+            src,
+            tuple(ws["processed_img_shape_rc"]),
+            tuple(ws["reg_img_shape_rc"]),
+            tuple(ws["aligned_slide_shape_rc"]),
+            M=np.asarray(ws["M"]),
+            dxdy=slide_bk,
+            level=0,
+            series=ws.get("series"),
+            bbox_xywh=tuple(ws["bbox_xywh"]),
+            bg_color=ws.get("bg_color"),
+        )
+    )
 
     # ---------------- REPORT ----------------
     print("\n" + "=" * 78)
-    print("CLASSIC (whole-image) vs DISTRIBUTED (tiled) — warped MOVING slide, fluorescence")
+    print(
+        "CLASSIC (whole-image) vs DISTRIBUTED (tiled) — warped MOVING slide, fluorescence"
+    )
     print("=" * 78)
     report("A  rigid-only:  classic vs dist", classic_A, dist_A)
     report("B  +non-rigid:  classic vs dist-SEPARATED", classic_B, dist_Bsep)
@@ -179,19 +307,37 @@ def main():
     # must therefore be BIT-IDENTICAL to classic (spec §6.7). This is the guarantee users rely on when
     # they flip reg_distributed_tiling on. Fail loudly if it ever drifts (e.g. a float-precision
     # regression in the bk.v handoff — see reg_nonrigid._save_field contract).
-    atol = float(os.environ.get("CMP_SEPARATED_ATOL", "0"))  # 0 == exact (design claim: max|Δ|=0)
+    atol = float(
+        os.environ.get("CMP_SEPARATED_ATOL", "0")
+    )  # 0 == exact (design claim: max|Δ|=0)
     ok = True
-    if classic_A is None or dist_A is None or float(np.max(np.abs(classic_A - dist_A))) > atol:
-        print("PARITY FAIL: rigid-only classic != distributed (should be exact)", flush=True)
+    if (
+        classic_A is None
+        or dist_A is None
+        or float(np.max(np.abs(classic_A - dist_A))) > atol
+    ):
+        print(
+            "PARITY FAIL: rigid-only classic != distributed (should be exact)",
+            flush=True,
+        )
         ok = False
     if classic_B is None or dist_Bsep is None or classic_B.shape != dist_Bsep.shape:
-        print("PARITY FAIL: SEPARATED non-rigid missing / shape mismatch vs classic", flush=True)
+        print(
+            "PARITY FAIL: SEPARATED non-rigid missing / shape mismatch vs classic",
+            flush=True,
+        )
         ok = False
     elif float(np.max(np.abs(classic_B - dist_Bsep))) > atol:
-        print(f"PARITY FAIL: SEPARATED non-rigid max|Δ|={float(np.max(np.abs(classic_B - dist_Bsep))):.4g} "
-              f"> atol={atol} — distributed default path is NOT bit-identical to classic.", flush=True)
+        print(
+            f"PARITY FAIL: SEPARATED non-rigid max|Δ|={float(np.max(np.abs(classic_B - dist_Bsep))):.4g} "
+            f"> atol={atol} — distributed default path is NOT bit-identical to classic.",
+            flush=True,
+        )
         ok = False
-    print(f"PARITY (classic == distributed SEPARATED default path): {'PASS' if ok else 'FAIL'}", flush=True)
+    print(
+        f"PARITY (classic == distributed SEPARATED default path): {'PASS' if ok else 'FAIL'}",
+        flush=True,
+    )
     return 0 if ok else 1
 
 

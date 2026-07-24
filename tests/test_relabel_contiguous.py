@@ -4,6 +4,7 @@ Covers the gap/background-preservation behaviour that CSE's get_matched_masks
 relies on (it indexes per-label coord lists by label value, so labels must be
 contiguous 1..N). bin/ is on sys.path via tests/conftest.py.
 """
+
 import numpy as np
 from seg_quality_eval import _relabel_contiguous
 

@@ -16,6 +16,7 @@ The compose + warp legs are proven pixel-identical to classic by ``bin/spikes/sp
 grid), ``<tiles-dir>/bk_*.v`` & ``fwd_*.v`` (REG_TILE output), ``<warp-state>`` JSON (per-slide plain
 warp state), and an optional ``reg_mask.npy``.
 """
+
 import argparse
 import json
 import os
@@ -35,16 +36,19 @@ os.environ.setdefault("XDG_CACHE_HOME", "/tmp/xdg_cache")
 
 import numpy as np
 import pyvips
-
-from valis import warp_tools, slide_tools, slide_io, registration
+from mirage_slide_reader import all_readable, get_reader_for  # noqa: E402
+from valis import registration, slide_io, warp_tools
 from valis_config import init_jvm
-from mirage_slide_reader import get_reader_for, all_readable   # noqa: E402
 
 
 # --------------------------------------------------------------------------- compose (proven §6.3)
 def _mask_img(img, mask):
     if isinstance(img, pyvips.Image):
-        vmask = mask if isinstance(mask, pyvips.Image) else warp_tools.numpy2vips(np.asarray(mask))
+        vmask = (
+            mask
+            if isinstance(mask, pyvips.Image)
+            else warp_tools.numpy2vips(np.asarray(mask))
+        )
         return (vmask == 0).ifthenelse(0, img)
     out = img.copy()
     out[np.asarray(mask) == 0] = 0
@@ -57,57 +61,90 @@ def _mask_dxdy(dxdy, mask):
     return [_mask_img(dxdy[0], mask), _mask_img(dxdy[1], mask)]
 
 
-def compose(moving_bk_dxdy, incoming_bk_dxdy, reg_mask, from_rigid_reg=False,
-            M=None, unwarped_shape=None, og_reg_shape_rc=None):
+def compose(
+    moving_bk_dxdy,
+    incoming_bk_dxdy,
+    reg_mask,
+    from_rigid_reg=False,
+    M=None,
+    unwarped_shape=None,
+    og_reg_shape_rc=None,
+):
     """Port of serial_non_rigid.NonRigidZImage.calc_deformation 460-503 (spec §6.3). In production
     ``from_rigid_reg`` is False (scaled-image non-rigid), so remove_invasive_displacements is skipped."""
     if from_rigid_reg:  # 460-465
         moving_bk_dxdy = warp_tools.remove_invasive_displacements(
-            moving_bk_dxdy, M=M, src_shape_rc=unwarped_shape, out_shape_rc=og_reg_shape_rc)
+            moving_bk_dxdy,
+            M=M,
+            src_shape_rc=unwarped_shape,
+            out_shape_rc=og_reg_shape_rc,
+        )
 
     if not isinstance(moving_bk_dxdy, pyvips.Image):  # 467-472 numpy branch
         if reg_mask is not None:
             moving_bk_dxdy = _mask_dxdy(moving_bk_dxdy, reg_mask)
-        bk_dxdy_from_ref = np.array([incoming_bk_dxdy[0] + moving_bk_dxdy[0],
-                                     incoming_bk_dxdy[1] + moving_bk_dxdy[1]])
+        bk_dxdy_from_ref = np.array(
+            [
+                incoming_bk_dxdy[0] + moving_bk_dxdy[0],
+                incoming_bk_dxdy[1] + moving_bk_dxdy[1],
+            ]
+        )
     else:  # 473-476 pyvips branch
         if reg_mask is not None:
             moving_bk_dxdy = _mask_dxdy(moving_bk_dxdy, reg_mask)
         bk_dxdy_from_ref = incoming_bk_dxdy + moving_bk_dxdy
 
-    img_bk_dxdy = bk_dxdy_from_ref.copy() if hasattr(bk_dxdy_from_ref, "copy") else bk_dxdy_from_ref
+    img_bk_dxdy = (
+        bk_dxdy_from_ref.copy()
+        if hasattr(bk_dxdy_from_ref, "copy")
+        else bk_dxdy_from_ref
+    )
     if reg_mask is not None:  # 479-480
         img_bk_dxdy = _mask_dxdy(img_bk_dxdy, reg_mask)
     if from_rigid_reg:  # 482-487
         img_bk_dxdy = warp_tools.remove_invasive_displacements(
-            img_bk_dxdy, M=M, src_shape_rc=unwarped_shape, out_shape_rc=og_reg_shape_rc)
+            img_bk_dxdy, M=M, src_shape_rc=unwarped_shape, out_shape_rc=og_reg_shape_rc
+        )
     return img_bk_dxdy
 
 
 def _to_vips_field(field):
     if isinstance(field, pyvips.Image):
         return field
-    return warp_tools.numpy2vips(np.dstack([np.asarray(field[0]), np.asarray(field[1])])).cast("float")
+    return warp_tools.numpy2vips(
+        np.dstack([np.asarray(field[0]), np.asarray(field[1])])
+    ).cast("float")
 
 
 def compose_and_pad(moving_bk, ws, reg_mask):
     """Reproduce classic ``slide.bk_dxdy`` after ``register()`` (registration.py:3707): the §6.3
     compose of the raw non-rigid field, then internal_pad up to ``_full_displacement_shape_rc``.
     Proven == classic by spike_finalize_option_a + the micro oracle (Q1: shape == full_disp)."""
-    incoming = pyvips.Image.black(moving_bk.width, moving_bk.height, bands=2).cast("float")
+    incoming = pyvips.Image.black(moving_bk.width, moving_bk.height, bands=2).cast(
+        "float"
+    )
     self_bk = compose(
-        moving_bk, incoming, reg_mask,
+        moving_bk,
+        incoming,
+        reg_mask,
         from_rigid_reg=ws.get("from_rigid_reg", False),
         M=np.asarray(ws["M"]) if ws.get("M") is not None else None,
-        unwarped_shape=tuple(ws["unwarped_shape"]) if ws.get("unwarped_shape") else None,
-        og_reg_shape_rc=tuple(ws["og_reg_shape_rc"]) if ws.get("og_reg_shape_rc") else None,
+        unwarped_shape=tuple(ws["unwarped_shape"])
+        if ws.get("unwarped_shape")
+        else None,
+        og_reg_shape_rc=tuple(ws["og_reg_shape_rc"])
+        if ws.get("og_reg_shape_rc")
+        else None,
     )
     ipad = ws.get("internal_pad")
     if ipad is None:
         return _to_vips_field(self_bk)
     os_rc, pb = ipad["out_shape"], ipad["bbox"]
-    return pyvips.Image.black(os_rc[1], os_rc[0], bands=2).cast("float").insert(
-        _to_vips_field(self_bk), pb[0], pb[1])
+    return (
+        pyvips.Image.black(os_rc[1], os_rc[0], bands=2)
+        .cast("float")
+        .insert(_to_vips_field(self_bk), pb[0], pb[1])
+    )
 
 
 def micro_additive(slide_bk_full, micro_raw_bk, micro_ws, micro_reg_mask):
@@ -117,21 +154,31 @@ def micro_additive(slide_bk_full, micro_raw_bk, micro_ws, micro_reg_mask):
 
       updated = scale(slide_bk_full -> micro_out_shape) + pad(compose(micro_raw) -> micro_full_out @ bbox)
     """
-    full_out = tuple(micro_ws["micro_full_out_shape_rc"])          # e.g. (129, 129)
-    mask_bbox = micro_ws.get("micro_mask_bbox_xywh")               # [x, y, w, h]
+    full_out = tuple(micro_ws["micro_full_out_shape_rc"])  # e.g. (129, 129)
+    mask_bbox = micro_ws.get("micro_mask_bbox_xywh")  # [x, y, w, h]
 
     # 1) compose the micro residual (== nr_obj.bk_dxdy post calc_deformation). For micro,
     #    align_to_reference=True => incoming is identity; mask/from_rigid per the micro warp_state.
-    incoming = pyvips.Image.black(micro_raw_bk.width, micro_raw_bk.height, bands=2).cast("float")
-    composed_residual = _to_vips_field(compose(
-        micro_raw_bk, incoming, micro_reg_mask,
-        from_rigid_reg=micro_ws.get("from_rigid_reg", False)))
+    incoming = pyvips.Image.black(
+        micro_raw_bk.width, micro_raw_bk.height, bands=2
+    ).cast("float")
+    composed_residual = _to_vips_field(
+        compose(
+            micro_raw_bk,
+            incoming,
+            micro_reg_mask,
+            from_rigid_reg=micro_ws.get("from_rigid_reg", False),
+        )
+    )
 
     # 2) pad the residual into the micro full_out field at mask_bbox (registration.py:4312-4314)
     if (composed_residual.height, composed_residual.width) != full_out:
         bx, by = (mask_bbox[0], mask_bbox[1]) if mask_bbox else (0, 0)
-        vips_new_bk = pyvips.Image.black(full_out[1], full_out[0], bands=2).cast("float").insert(
-            composed_residual, bx, by)
+        vips_new_bk = (
+            pyvips.Image.black(full_out[1], full_out[0], bands=2)
+            .cast("float")
+            .insert(composed_residual, bx, by)
+        )
     else:
         vips_new_bk = composed_residual
 
@@ -159,9 +206,14 @@ def start_jvm_if_needed(src_slide, jvm_heap_gb=None, tag="reg_finalize"):
     reader path a run took, and tests/integration/verify_lowmem_bitidentical.py asserts on them.
     """
     if all_readable([src_slide]):
-        print(f"[{tag}] all inputs readable by MirageVipsSlideReader; skipping JVM", flush=True)
+        print(
+            f"[{tag}] all inputs readable by MirageVipsSlideReader; skipping JVM",
+            flush=True,
+        )
         return 0
-    heap_gb = init_jvm(os.path.dirname(os.path.abspath(src_slide)) or ".", override_gb=jvm_heap_gb)
+    heap_gb = init_jvm(
+        os.path.dirname(os.path.abspath(src_slide)) or ".", override_gb=jvm_heap_gb
+    )
     print(f"[{tag}] started BioFormats JVM (heap={heap_gb}GB)", flush=True)
     return heap_gb
 
@@ -193,33 +245,64 @@ def warp_source(src_slide, ws, dxdy):
 # --------------------------------------------------------------------------- main
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--warp-state", required=True, help="REG_PREP per-slide warp_state.json")
-    ap.add_argument("--src-slide", required=True, help="full-res source ome.tiff to warp")
+    ap.add_argument(
+        "--warp-state", required=True, help="REG_PREP per-slide warp_state.json"
+    )
+    ap.add_argument(
+        "--src-slide", required=True, help="full-res source ome.tiff to warp"
+    )
     ap.add_argument("--out", required=True, help="output ome.tiff path")
-    ap.add_argument("--inputs-dir", help="REG_PREP tiler_inputs (manifest.json + expanded_bboxes.npy)")
+    ap.add_argument(
+        "--inputs-dir",
+        help="REG_PREP tiler_inputs (manifest.json + expanded_bboxes.npy)",
+    )
     ap.add_argument("--tiles-dir", help="REG_TILE output (bk_*.v / fwd_*.v)")
-    ap.add_argument("--field", help="whole-image non-rigid field bk.v from REG_NONRIGID (separated mode)")
-    ap.add_argument("--rigid-only", action="store_true",
-                    help="reference slide: warp with rigid M + crop only (dxdy=None), no tiles/compose")
-    ap.add_argument("--emit-field-only", action="store_true",
-                    help="compose the padded displacement field, write it to --out, and exit "
-                         "without warping (the warp is done by reg_warp_tile.py)")
+    ap.add_argument(
+        "--field",
+        help="whole-image non-rigid field bk.v from REG_NONRIGID (separated mode)",
+    )
+    ap.add_argument(
+        "--rigid-only",
+        action="store_true",
+        help="reference slide: warp with rigid M + crop only (dxdy=None), no tiles/compose",
+    )
+    ap.add_argument(
+        "--emit-field-only",
+        action="store_true",
+        help="compose the padded displacement field, write it to --out, and exit "
+        "without warping (the warp is done by reg_warp_tile.py)",
+    )
     # Micro-registration second wave (spec §5A Option-2): additively compose the micro residual.
-    ap.add_argument("--micro-field", help="whole-image MICRO residual bk.v from REG_NONRIGID on the "
-                    "micro 2-D inputs (REG_MICRO_PREP); triggers the additive micro compose")
-    ap.add_argument("--micro-warp-state", help="REG_MICRO_PREP micro_warp_state.json "
-                    "(micro_full_out_shape_rc, micro_mask_bbox_xywh, from_rigid_reg)")
-    ap.add_argument("--micro-inputs-dir", help="REG_MICRO_PREP micro tiler_inputs (optional reg_mask.npy)")
+    ap.add_argument(
+        "--micro-field",
+        help="whole-image MICRO residual bk.v from REG_NONRIGID on the "
+        "micro 2-D inputs (REG_MICRO_PREP); triggers the additive micro compose",
+    )
+    ap.add_argument(
+        "--micro-warp-state",
+        help="REG_MICRO_PREP micro_warp_state.json "
+        "(micro_full_out_shape_rc, micro_mask_bbox_xywh, from_rigid_reg)",
+    )
+    ap.add_argument(
+        "--micro-inputs-dir",
+        help="REG_MICRO_PREP micro tiler_inputs (optional reg_mask.npy)",
+    )
     ap.add_argument("--compression", default="lzw")
-    ap.add_argument("--jvm-heap-gb", type=int, default=None,
-                    help="explicit BioFormats JVM heap (GB); default = auto-size from the source slide")
+    ap.add_argument(
+        "--jvm-heap-gb",
+        type=int,
+        default=None,
+        help="explicit BioFormats JVM heap (GB); default = auto-size from the source slide",
+    )
     args = ap.parse_args()
     ws = json.load(open(args.warp_state))
 
     if args.emit_field_only and args.rigid_only:
         # --rigid-only means dxdy=None end-to-end; there is no field to emit, and letting this
         # through would compose nothing and then hand None to _to_vips_field.
-        raise SystemExit("--emit-field-only is incompatible with --rigid-only (no field exists)")
+        raise SystemExit(
+            "--emit-field-only is incompatible with --rigid-only (no field exists)"
+        )
 
     # Start the BioFormats JVM BEFORE any slide I/O, UNLESS the source slide is one of mirage's own
     # tiled OME-TIFFs that MirageVipsSlideReader can read lazily with no JVM at all — the RAM win
@@ -239,17 +322,30 @@ def main():
             moving_bk = pyvips.Image.new_from_file(args.field)
         else:
             if not args.inputs_dir or not args.tiles_dir:
-                raise SystemExit("provide --field, or --inputs-dir + --tiles-dir, or --rigid-only")
+                raise SystemExit(
+                    "provide --field, or --inputs-dir + --tiles-dir, or --rigid-only"
+                )
             m = json.load(open(os.path.join(args.inputs_dir, "manifest.json")))
-            expanded_bboxes = np.load(os.path.join(args.inputs_dir, "expanded_bboxes.npy"))
+            expanded_bboxes = np.load(
+                os.path.join(args.inputs_dir, "expanded_bboxes.npy")
+            )
             n = m["n_tiles"]
-            bk_tiles = [pyvips.Image.new_from_file(os.path.join(args.tiles_dir, f"bk_{i}.v")) for i in range(n)]
-            moving_bk = warp_tools.stitch_tiles(bk_tiles, expanded_bboxes, m["n_rows"], m["n_cols"], m["tile_buffer"])
+            bk_tiles = [
+                pyvips.Image.new_from_file(os.path.join(args.tiles_dir, f"bk_{i}.v"))
+                for i in range(n)
+            ]
+            moving_bk = warp_tools.stitch_tiles(
+                bk_tiles, expanded_bboxes, m["n_rows"], m["n_cols"], m["tile_buffer"]
+            )
 
         # compose (§6.3) + internal_pad => classic slide.bk_dxdy after register() (the wave-1 field).
         # align_to_reference=True => incoming/reference field is identity.
-        reg_mask_f = os.path.join(args.inputs_dir, "reg_mask.npy") if args.inputs_dir else None
-        reg_mask = np.load(reg_mask_f) if reg_mask_f and os.path.exists(reg_mask_f) else None
+        reg_mask_f = (
+            os.path.join(args.inputs_dir, "reg_mask.npy") if args.inputs_dir else None
+        )
+        reg_mask = (
+            np.load(reg_mask_f) if reg_mask_f and os.path.exists(reg_mask_f) else None
+        )
         slide_bk = compose_and_pad(moving_bk, ws, reg_mask)
 
         # Micro second wave (spec §5A Option-2): additively compose the micro residual onto the
@@ -258,8 +354,16 @@ def main():
         if args.micro_field:
             micro_ws = json.load(open(args.micro_warp_state))
             micro_raw_bk = pyvips.Image.new_from_file(args.micro_field)
-            micro_mask_f = os.path.join(args.micro_inputs_dir, "reg_mask.npy") if args.micro_inputs_dir else None
-            micro_reg_mask = np.load(micro_mask_f) if micro_mask_f and os.path.exists(micro_mask_f) else None
+            micro_mask_f = (
+                os.path.join(args.micro_inputs_dir, "reg_mask.npy")
+                if args.micro_inputs_dir
+                else None
+            )
+            micro_reg_mask = (
+                np.load(micro_mask_f)
+                if micro_mask_f and os.path.exists(micro_mask_f)
+                else None
+            )
             slide_bk = micro_additive(slide_bk, micro_raw_bk, micro_ws, micro_reg_mask)
 
     # 3b) distributed warp (spec §5.3): the field is now fully composed, which is the ONLY part of
@@ -285,28 +389,59 @@ def main():
     if min(out_xyczt[0:2]) < tile_wh:
         tile_wh = min(out_xyczt[0:2])
     try:
-        px_phys = None if slide_meta.pixel_physical_size_xyu[2] == slide_io.PIXEL_UNIT else reader.scale_physical_size(0)
+        px_phys = (
+            None
+            if slide_meta.pixel_physical_size_xyu[2] == slide_io.PIXEL_UNIT
+            else reader.scale_physical_size(0)
+        )
         bf_dtype = slide_io.vips2bf_dtype(warped.format)
         ome_xml = slide_io.update_xml_for_new_img(
-            current_ome_xml_str=slide_meta.original_xml, new_xyzct=out_xyczt, bf_dtype=bf_dtype,
-            is_rgb=ws.get("is_rgb", False), series=ws.get("series"),
-            pixel_physical_size_xyu=px_phys, channel_names=slide_meta.channel_names, colormap=None).to_xml()
-        slide_io.save_ome_tiff(warped, dst_f=args.out, ome_xml=ome_xml, tile_wh=tile_wh, compression=args.compression)
+            current_ome_xml_str=slide_meta.original_xml,
+            new_xyzct=out_xyczt,
+            bf_dtype=bf_dtype,
+            is_rgb=ws.get("is_rgb", False),
+            series=ws.get("series"),
+            pixel_physical_size_xyu=px_phys,
+            channel_names=slide_meta.channel_names,
+            colormap=None,
+        ).to_xml()
+        slide_io.save_ome_tiff(
+            warped,
+            dst_f=args.out,
+            ome_xml=ome_xml,
+            tile_wh=tile_wh,
+            compression=args.compression,
+        )
     except Exception as e:
         # VALIS's update_xml_for_new_img uses ome_types.from_xml(parser="xmlschema"), which is
         # environment-fragile (needs the OME schema; classic warp_and_save_slide hits the same path).
         # The warped PIXELS are correct (proven §6.3); fall back to a hand-built minimal OME-XML that
         # still carries the channel NAMES, so downstream (segmentation/quant) keeps correct channels.
-        print(f"[reg_finalize] WARNING update_xml path failed ({type(e).__name__}: {e}); "
-              f"writing minimal OME-XML with channel names", flush=True)
-        chan_names = list(getattr(slide_meta, "channel_names", None) or [f"C{i}" for i in range(warped.bands)])
+        print(
+            f"[reg_finalize] WARNING update_xml path failed ({type(e).__name__}: {e}); "
+            f"writing minimal OME-XML with channel names",
+            flush=True,
+        )
+        chan_names = list(
+            getattr(slide_meta, "channel_names", None)
+            or [f"C{i}" for i in range(warped.bands)]
+        )
         if len(chan_names) < warped.bands:
             chan_names += [f"C{i}" for i in range(len(chan_names), warped.bands)]
         # slide_io.save_ome_tiff ALSO routes through ome_types (same crash), so write the OME-TIFF
         # directly with pyvips (channel names embedded), bypassing the fragile dependency.
-        _save_ome_pyvips(warped, args.out, chan_names[:warped.bands], slide_io.vips2bf_dtype(warped.format),
-                         tile_wh, args.compression)
-    print(f"[reg_finalize] wrote {args.out} ({warped.width}x{warped.height} bands={warped.bands})", flush=True)
+        _save_ome_pyvips(
+            warped,
+            args.out,
+            chan_names[: warped.bands],
+            slide_io.vips2bf_dtype(warped.format),
+            tile_wh,
+            args.compression,
+        )
+    print(
+        f"[reg_finalize] wrote {args.out} ({warped.width}x{warped.height} bands={warped.bands})",
+        flush=True,
+    )
     if heap_gb:
         registration.kill_jvm()
 
@@ -328,16 +463,25 @@ def _save_ome_pyvips(warped, dst_f, channel_names, bf_dtype, tile_wh, compressio
     page.set_type(pyvips.GValue.gint_type, "page-height", warped.height)
     page.set_type(pyvips.GValue.gstr_type, "image-description", ome_xml)
     tw = max(16, min(tile_wh, warped.width, warped.height))
-    page.tiffsave(dst_f, compression=compression, tile=True, tile_width=tw, tile_height=tw, bigtiff=True)
+    page.tiffsave(
+        dst_f,
+        compression=compression,
+        tile=True,
+        tile_width=tw,
+        tile_height=tw,
+        bigtiff=True,
+    )
 
 
 def _minimal_ome_xml(w, h, c, bf_dtype, channel_names):
     """Build a minimal valid OME-XML (no ome_types) preserving channel names + dims, so registered
     slides keep channel metadata even when VALIS's xmlschema-based xml builder fails in-environment."""
     import html
+
     chans = "".join(
         f'<Channel ID="Channel:0:{i}" Name="{html.escape(str(n))}" SamplesPerPixel="1"/>'
-        for i, n in enumerate(channel_names))
+        for i, n in enumerate(channel_names)
+    )
     return (
         '<?xml version="1.0" encoding="UTF-8"?>'
         '<OME xmlns="http://www.openmicroscopy.org/Schemas/OME/2016-06" '
@@ -347,8 +491,9 @@ def _minimal_ome_xml(w, h, c, bf_dtype, channel_names):
         '<Image ID="Image:0" Name="registered">'
         f'<Pixels ID="Pixels:0" DimensionOrder="XYCZT" Type="{bf_dtype}" '
         f'Interleaved="false" SizeX="{w}" SizeY="{h}" SizeC="{c}" SizeZ="1" SizeT="1">'
-        f'{chans}'
-        '</Pixels></Image></OME>')
+        f"{chans}"
+        "</Pixels></Image></OME>"
+    )
 
 
 if __name__ == "__main__":

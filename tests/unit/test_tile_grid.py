@@ -15,6 +15,7 @@ because reg_assemble.py joins the tiles back edge-to-edge with no blending. Any 
 or gap here is a visible seam or a shifted slide, so the tests below assert coverage by
 reconstruction, not just by counting tiles.
 """
+
 import os
 import sys
 
@@ -23,6 +24,7 @@ import numpy as np
 # Needs the valis image (pyvips + valis); skip under a plain python env (CI Python job).
 try:
     import pytest
+
     pytest.importorskip("pyvips")
     pytest.importorskip("valis")
 except ImportError:  # stdlib __main__ runner in-image (not under pytest)
@@ -66,6 +68,7 @@ def test_grid_multi_tile_small_shape():
 
 def test_grid_json_serializable():
     import json
+
     grid = build_grid((600, 400), 256, 32)
     # every value must survive json round-trip (manifest is shipped as JSON)
     assert json.loads(json.dumps(grid)) == grid
@@ -80,10 +83,11 @@ def _assert_exact_cover(grid, width, height):
     cover = np.zeros((height, width), dtype=np.int32)
     for t in grid["tiles"]:
         assert t["w"] > 0 and t["h"] > 0, f"degenerate tile {t}"
-        cover[t["y"]:t["y"] + t["h"], t["x"]:t["x"] + t["w"]] += 1
+        cover[t["y"] : t["y"] + t["h"], t["x"] : t["x"] + t["w"]] += 1
     assert cover.min() == 1 and cover.max() == 1, (
         f"tiles do not exactly cover {width}x{height}: "
-        f"min cover={cover.min()} max cover={cover.max()}")
+        f"min cover={cover.min()} max cover={cover.max()}"
+    )
 
 
 def test_output_grid_exactly_covers_ragged_canvas():
@@ -138,6 +142,7 @@ def test_output_grid_rejects_degenerate_arguments():
 
 def test_output_grid_json_serializable():
     import json
+
     grid = output_grid(300, 220, 128)
     assert json.loads(json.dumps(grid)) == grid
 
@@ -145,8 +150,10 @@ def test_output_grid_json_serializable():
 if __name__ == "__main__":
     # stdlib runner so this works in the VALIS image without pytest installed
     import traceback
-    fns = [v for k, v in sorted(globals().items())
-           if k.startswith("test_") and callable(v)]
+
+    fns = [
+        v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)
+    ]
     failed = 0
     for fn in fns:
         try:

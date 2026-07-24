@@ -12,9 +12,7 @@ import os
 import sys
 from pathlib import Path
 
-import tifffile
-
-sys.path.insert(0, str(Path(__file__).parent / 'utils'))
+sys.path.insert(0, str(Path(__file__).parent / "utils"))
 from metadata import extract_channel_names_from_ome
 
 

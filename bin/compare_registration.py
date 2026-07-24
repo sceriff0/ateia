@@ -18,6 +18,7 @@ branch came from checking an outcome without pinning what makes it meaningful):
 Dependencies are pyvips + numpy only, deliberately: ``valis`` is not imported, so this cannot fail
 for a reason belonging to the registration stack it is measuring.
 """
+
 import argparse
 import json
 import os
@@ -34,10 +35,14 @@ TILE = 2048
 # pyvips band format -> numpy dtype. Kept local (valis' VIPS_FORMAT_NUMPY_DTYPE is the same map)
 # so this script stays valis-free.
 _VIPS_TO_NUMPY = {
-    "uchar": np.uint8, "char": np.int8,
-    "ushort": np.uint16, "short": np.int16,
-    "uint": np.uint32, "int": np.int32,
-    "float": np.float32, "double": np.float64,
+    "uchar": np.uint8,
+    "char": np.int8,
+    "ushort": np.uint16,
+    "short": np.int16,
+    "uint": np.uint32,
+    "int": np.int32,
+    "float": np.float32,
+    "double": np.float64,
 }
 
 
@@ -45,7 +50,9 @@ def _to_f64(region, h, w, c):
     """Decode one crop into an (h, w, c) float64 array. This is the only place pixels are read."""
     dtype = _VIPS_TO_NUMPY.get(region.format)
     if dtype is None:
-        raise SystemExit(f"[compare_registration] unsupported band format: {region.format}")
+        raise SystemExit(
+            f"[compare_registration] unsupported band format: {region.format}"
+        )
     arr = np.frombuffer(region.write_to_memory(), dtype=dtype)
     return arr.reshape(h, w, c).astype(np.float64)
 
@@ -56,6 +63,7 @@ def _channel_names(path, n):
         import re
 
         import tifffile
+
         with tifffile.TiffFile(path) as tf:
             xml = tf.ome_metadata or ""
         names = re.findall(r'<Channel[^>]*\bName="([^"]*)"', xml)
@@ -74,8 +82,12 @@ def _write(path, payload):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--a", required=True, help="classic VALIS registered slide (the reference)")
-    ap.add_argument("--b", required=True, help="new-path registered slide (the candidate)")
+    ap.add_argument(
+        "--a", required=True, help="classic VALIS registered slide (the reference)"
+    )
+    ap.add_argument(
+        "--b", required=True, help="new-path registered slide (the candidate)"
+    )
     ap.add_argument("--slide", required=True, help="slide id, echoed into the report")
     ap.add_argument("--out-json", required=True)
     ap.add_argument("--out-png", required=True)
@@ -94,10 +106,15 @@ def main():
     a, b = open_multiband(args.a), open_multiband(args.b)
 
     if (a.width, a.height, a.bands) != (b.width, b.height, b.bands):
-        _write(args.out_json, {
-            "slide": args.slide, "error": "shape mismatch",
-            "a": [a.height, a.width, a.bands], "b": [b.height, b.width, b.bands],
-        })
+        _write(
+            args.out_json,
+            {
+                "slide": args.slide,
+                "error": "shape mismatch",
+                "a": [a.height, a.width, a.bands],
+                "b": [b.height, b.width, b.bands],
+            },
+        )
         raise SystemExit(
             f"[compare_registration] shape mismatch: {a.width}x{a.height}x{a.bands} vs "
             f"{b.width}x{b.height}x{b.bands}"
@@ -120,7 +137,7 @@ def main():
             d = np.abs(ta - tb).reshape(-1, c)
             max_abs = np.maximum(max_abs, d.max(axis=0))
             sum_abs += d.sum(axis=0)
-            sum_sq += (d ** 2).sum(axis=0)
+            sum_sq += (d**2).sum(axis=0)
             n_diff += (d > 0).sum(axis=0)
             n_px += h * w
 

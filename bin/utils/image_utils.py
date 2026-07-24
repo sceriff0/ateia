@@ -20,16 +20,15 @@ duplicated across multiple bin/ scripts.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
-from numpy.typing import NDArray
-
 import tifffile
-from typing import Any, Dict
+from numpy.typing import NDArray
 
 try:
     import pyvips
+
     HAS_PYVIPS = True
 except ImportError:
     HAS_PYVIPS = False
@@ -127,8 +126,7 @@ def normalize_image_dimensions(img: NDArray) -> NDArray:
 
 
 def load_image_grayscale(
-    image_path: str | Path,
-    max_dim: Optional[int] = None
+    image_path: str | Path, max_dim: Optional[int] = None
 ) -> NDArray[np.uint8]:
     """Load image and convert to grayscale uint8 for feature detection.
 
@@ -220,7 +218,9 @@ def load_image_grayscale(
 
         if img_max > img_min:
             # Scale to 0-255
-            img_array = ((img_array - img_min) / (img_max - img_min) * 255).astype(np.uint8)
+            img_array = ((img_array - img_min) / (img_max - img_min) * 255).astype(
+                np.uint8
+            )
         else:
             # All same value - return zeros
             img_array = np.zeros_like(img_array, dtype=np.uint8)
@@ -262,8 +262,7 @@ def ensure_dir(directory: str | Path) -> Path:
 
 
 def load_image(
-    image_path: str | Path,
-    memmap: bool = False
+    image_path: str | Path, memmap: bool = False
 ) -> Tuple[NDArray, Dict[str, Any]]:
     """Load image from TIFF file with metadata extraction.
 
@@ -319,19 +318,19 @@ def load_image(
     try:
         with tifffile.TiffFile(str(image_path)) as tif:
             if memmap:
-                image = tif.asarray(out='memmap')
+                image = tif.asarray(out="memmap")
             else:
                 image = tif.asarray()
 
             metadata = {
-                'shape': image.shape,
-                'dtype': image.dtype,
-                'ome': None,
-                'axes': None
+                "shape": image.shape,
+                "dtype": image.dtype,
+                "ome": None,
+                "axes": None,
             }
 
-            if hasattr(tif, 'ome_metadata') and tif.ome_metadata:
-                metadata['ome'] = tif.ome_metadata
+            if hasattr(tif, "ome_metadata") and tif.ome_metadata:
+                metadata["ome"] = tif.ome_metadata
 
             return image, metadata
 
@@ -342,9 +341,9 @@ def load_image(
 def save_tiff(
     image: NDArray,
     output_path: str | Path,
-    compression: str = 'zlib',
+    compression: str = "zlib",
     bigtiff: bool = True,
-    **kwargs
+    **kwargs,
 ) -> Path:
     """Save image array to TIFF file with compression.
 
@@ -390,11 +389,7 @@ def save_tiff(
     ensure_dir(output_path.parent)
 
     tifffile.imwrite(
-        str(output_path),
-        image,
-        compression=compression,
-        bigtiff=bigtiff,
-        **kwargs
+        str(output_path), image, compression=compression, bigtiff=bigtiff, **kwargs
     )
 
     return output_path

@@ -14,6 +14,7 @@ What these pin, and why (handoff section 4.4 — vacuity is endemic on this bran
     a ragged canvas where the right column and bottom row are short. Test geometry is deliberately
     awkward, not round.
 """
+
 import json
 import os
 import subprocess
@@ -25,6 +26,7 @@ import numpy as np
 # Needs the valis image (pyvips); skip under a plain python env (CI Python job).
 try:
     import pytest
+
     pytest.importorskip("pyvips")
 except ImportError:  # stdlib __main__ runner in-image (not under pytest)
     pass
@@ -45,9 +47,15 @@ def _write_pages(path, arr_hwc):
     h, w, c = arr_hwc.shape
     arr = np.ascontiguousarray(arr_hwc)
     img = pyvips.Image.new_from_memory(
-        arr.tobytes(), w, h, c,
-        {np.dtype("uint8"): "uchar", np.dtype("uint16"): "ushort",
-         np.dtype("float32"): "float"}[arr.dtype],
+        arr.tobytes(),
+        w,
+        h,
+        c,
+        {
+            np.dtype("uint8"): "uchar",
+            np.dtype("uint16"): "ushort",
+            np.dtype("float32"): "float",
+        }[arr.dtype],
     )
     stacked = pyvips.Image.arrayjoin(img.bandsplit(), across=1)
     stacked = stacked.copy()
@@ -59,9 +67,23 @@ def _run(a, b, workdir, slide="S", extra=()):
     out_json = os.path.join(workdir, "out.json")
     out_png = os.path.join(workdir, "out.png")
     proc = subprocess.run(
-        [sys.executable, SCRIPT, "--a", a, "--b", b, "--slide", slide,
-         "--out-json", out_json, "--out-png", out_png, *extra],
-        capture_output=True, text=True,
+        [
+            sys.executable,
+            SCRIPT,
+            "--a",
+            a,
+            "--b",
+            b,
+            "--slide",
+            slide,
+            "--out-json",
+            out_json,
+            "--out-png",
+            out_png,
+            *extra,
+        ],
+        capture_output=True,
+        text=True,
     )
     report = None
     if os.path.exists(out_json):
@@ -103,7 +125,7 @@ def test_known_perturbation_gives_exact_metrics():
         n_px = 37 * 53
         assert rep["overall"]["max_abs"] == 300.0
         assert abs(rep["overall"]["mean_abs"] - 300.0 / n_px) < 1e-12
-        assert abs(rep["overall"]["rmse"] - np.sqrt(300.0 ** 2 / n_px)) < 1e-9
+        assert abs(rep["overall"]["rmse"] - np.sqrt(300.0**2 / n_px)) < 1e-9
         assert abs(rep["overall"]["pct_differing"] - 100.0 / n_px) < 1e-12
 
 
@@ -114,7 +136,7 @@ def test_perturbing_the_last_channel_is_seen():
         a, b = os.path.join(d, "a.tif"), os.path.join(d, "b.tif")
         _write_pages(a, arr)
         arr2 = arr.copy()
-        arr2[5, 7, 2] = 111          # LAST channel only
+        arr2[5, 7, 2] = 111  # LAST channel only
         _write_pages(b, arr2)
 
         # Guard the guard: confirm the fixture really is page-stacked with 3 bands.
@@ -134,7 +156,7 @@ def test_tiling_does_not_change_the_answer():
         rng = np.random.default_rng(7)
         arr = rng.integers(0, 500, size=(37, 53, 2), dtype=np.uint16)
         arr2 = arr.copy()
-        arr2[36, 52, 1] = 65535      # the last pixel of the last (short) tile
+        arr2[36, 52, 1] = 65535  # the last pixel of the last (short) tile
         arr2[0, 0, 0] = 9
         a, b = os.path.join(d, "a.tif"), os.path.join(d, "b.tif")
         _write_pages(a, arr)
@@ -142,7 +164,10 @@ def test_tiling_does_not_change_the_answer():
 
         _, whole, _ = _run(a, b, d, extra=["--tile", "4096"])
         _, tiled, _ = _run(a, b, d, extra=["--tile", "16"])
-        assert whole["overall"] == tiled["overall"], (whole["overall"], tiled["overall"])
+        assert whole["overall"] == tiled["overall"], (
+            whole["overall"],
+            tiled["overall"],
+        )
         assert whole["channels"] == tiled["channels"]
         expected = float(abs(int(arr2[36, 52, 1]) - int(arr[36, 52, 1])))
         assert whole["overall"]["max_abs"] == expected
@@ -177,7 +202,9 @@ def test_shape_mismatch_fails_and_records_both_shapes():
 if __name__ == "__main__":
     # stdlib runner: pytest is not installed in the VALIS image.
     failures = 0
-    tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
+    tests = [
+        v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)
+    ]
     for fn in tests:
         try:
             fn()

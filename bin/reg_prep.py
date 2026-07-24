@@ -15,6 +15,7 @@ To get the processed-2-D images without paying for DeepFlow: force the processed
 replace ``OpticalFlowWarper.register`` with a no-op that captures its 2-D inputs and returns a zero
 field. ``Valis.register()`` then completes cheaply; rigid + non-rigid-prep state persists on the Valis.
 """
+
 import argparse
 import json
 import os
@@ -37,13 +38,12 @@ import numpy as np
 import pyvips
 import valis_tiling
 from micro_rigid_guard import install_micro_rigid_guard
-from valis_config import build_registrar_kwargs, maybe_init_jvm, slide_paths
 from mirage_slide_reader import MirageVipsSlideReader, all_readable
-from valis import registration, slide_tools
+from valis import registration
 from valis import serial_non_rigid as snr
-from valis.non_rigid_registrars import OpticalFlowWarper, NonRigidTileRegistrar
+from valis.non_rigid_registrars import NonRigidTileRegistrar, OpticalFlowWarper
 from valis.registration import CROP_REF
-
+from valis_config import build_registrar_kwargs, maybe_init_jvm, slide_paths
 
 _TIMINGS = {}
 
@@ -77,7 +77,9 @@ def _write_timings(out_dir):
         with open(os.path.join(out_dir, "stage_timings.json"), "w") as fh:
             json.dump(_TIMINGS, fh, indent=2)
     except OSError as exc:
-        print(f"[reg_prep] WARNING: could not write stage_timings.json: {exc}", flush=True)
+        print(
+            f"[reg_prep] WARNING: could not write stage_timings.json: {exc}", flush=True
+        )
 
 
 def _jd(o):
@@ -99,11 +101,18 @@ def main():
     ap.add_argument("--tile-buffer", type=int, default=100)
     # Registrar config — MUST mirror bin/register.py for bit-identical rigid (incl. MicroRigidRegistrar).
     ap.add_argument("--memory-mode", default="high", choices=["high", "medium", "low"])
-    ap.add_argument("--skip-micro-registration", action="store_true",
-                    help="if NOT set, MicroRigidRegistrar runs in the rigid stage (matches classic)")
+    ap.add_argument(
+        "--skip-micro-registration",
+        action="store_true",
+        help="if NOT set, MicroRigidRegistrar runs in the rigid stage (matches classic)",
+    )
     ap.add_argument("--max-image-dim", type=int, default=4000)
-    ap.add_argument("--jvm-heap-gb", type=int, default=None,
-                    help="explicit BioFormats JVM heap (GB); default = auto-size from input size")
+    ap.add_argument(
+        "--jvm-heap-gb",
+        type=int,
+        default=None,
+        help="explicit BioFormats JVM heap (GB); default = auto-size from input size",
+    )
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
 
@@ -116,53 +125,83 @@ def main():
     # into a heap sized 3*filesize+8, and THAT is what the lazy reader removes. Say "no
     # slide-scaled heap", never "JVM-free" (spec assumption A2 is false).
     heap = maybe_init_jvm(args.input_dir, override_gb=args.jvm_heap_gb)
-    print(f"[reg_prep] JVM heap = {heap} GB" if heap else
-          "[reg_prep] all inputs readable by MirageVipsSlideReader; no slide-scaled JVM heap "
-          "(Valis still starts a default-heap JVM to probe file types)", flush=True)
+    print(
+        f"[reg_prep] JVM heap = {heap} GB"
+        if heap
+        else "[reg_prep] all inputs readable by MirageVipsSlideReader; no slide-scaled JVM heap "
+        "(Valis still starts a default-heap JVM to probe file types)",
+        flush=True,
+    )
 
     # Make rigid-stage micro alignment robust to featureless input (no-op on real data); see module.
     install_micro_rigid_guard()
     # Force the processed-2-D non-rigid prep branch (no tiler), then no-op the warper => no DeepFlow.
-    registration.TILER_THRESH_GB = 10 ** 9
-    cap = {}            # slide_name -> {moving, fixed, mask, from_rigid, incoming_is_none, reg_mask}
+    registration.TILER_THRESH_GB = 10**9
+    cap = {}  # slide_name -> {moving, fixed, mask, from_rigid, incoming_is_none, reg_mask}
     cur = {}
 
     orig_calc = snr.NonRigidZImage.calc_deformation
 
-    def cap_calc(self, registered_fixed_image, non_rigid_reg_class, bk_dxdy=None, params=None, mask=None):
+    def cap_calc(
+        self,
+        registered_fixed_image,
+        non_rigid_reg_class,
+        bk_dxdy=None,
+        params=None,
+        mask=None,
+    ):
         cur["name"] = self.name
-        cap[self.name] = {"from_rigid": bool(self.reg_obj.from_rigid_reg),
-                          "incoming_is_none": bk_dxdy is None,
-                          "reg_mask": None if mask is None else np.asarray(mask)}
-        return orig_calc(self, registered_fixed_image, non_rigid_reg_class,
-                         bk_dxdy=bk_dxdy, params=params, mask=mask)
+        cap[self.name] = {
+            "from_rigid": bool(self.reg_obj.from_rigid_reg),
+            "incoming_is_none": bk_dxdy is None,
+            "reg_mask": None if mask is None else np.asarray(mask),
+        }
+        return orig_calc(
+            self,
+            registered_fixed_image,
+            non_rigid_reg_class,
+            bk_dxdy=bk_dxdy,
+            params=params,
+            mask=mask,
+        )
 
     orig_reg = OpticalFlowWarper.register
 
     def noop_register(self, moving_img, fixed_img, mask=None, **kw):
         nm = cur.get("name")
-        assert nm is not None, "OpticalFlowWarper.register fired before calc_deformation set the slide name"
+        assert nm is not None, (
+            "OpticalFlowWarper.register fired before calc_deformation set the slide name"
+        )
         cap.setdefault(nm, {})
         cap[nm].update({"moving": moving_img, "fixed": fixed_img, "mask": mask})
         if isinstance(moving_img, pyvips.Image):
             h, w = moving_img.height, moving_img.width
         else:
             h, w = moving_img.shape[0:2]
-        z = [np.zeros((h, w)), np.zeros((h, w))]   # numpy [dx,dy] no-op field (skips DeepFlow)
+        z = [
+            np.zeros((h, w)),
+            np.zeros((h, w)),
+        ]  # numpy [dx,dy] no-op field (skips DeepFlow)
         return moving_img, z, z
 
     # Build the IDENTICAL Valis config as classic register.py (shared builder), so rigid (incl.
     # MicroRigidRegistrar, SuperPoint/SuperGlue) is bit-identical. No-op only the non-rigid warper.
-    kwargs = build_registrar_kwargs(reference_img_f=args.reference, memory_mode=args.memory_mode,
-                                    skip_micro_registration=args.skip_micro_registration,
-                                    max_image_dim_px=args.max_image_dim)
+    kwargs = build_registrar_kwargs(
+        reference_img_f=args.reference,
+        memory_mode=args.memory_mode,
+        skip_micro_registration=args.skip_micro_registration,
+        max_image_dim_px=args.max_image_dim,
+    )
     snr.NonRigidZImage.calc_deformation = cap_calc
     OpticalFlowWarper.register = noop_register
     try:
         with _stage("load"):
             reg = registration.Valis(args.input_dir, args.out, **kwargs)
-            reader_cls = (MirageVipsSlideReader
-                          if all_readable(slide_paths(args.input_dir)) else None)
+            reader_cls = (
+                MirageVipsSlideReader
+                if all_readable(slide_paths(args.input_dir))
+                else None
+            )
         with _stage("rigid_and_prep"):
             reg.register(reader_cls=reader_cls)
     finally:
@@ -175,8 +214,12 @@ def main():
     # dropped moving slide (and its warp_state lands in an <out>/ref/ subdir). Keep args.reference (the
     # full path) untouched — VALIS needs it to locate the file.
     ref_basename = os.path.basename(args.reference)
-    ref_stem = (ref_basename.replace(".ome.tiff", "").replace(".ome.tif", "")
-                .replace(".tiff", "").replace(".tif", ""))
+    ref_stem = (
+        ref_basename.replace(".ome.tiff", "")
+        .replace(".ome.tif", "")
+        .replace(".tiff", "")
+        .replace(".tif", "")
+    )
     ref_slide = reg.get_ref_slide()
     full_disp = [int(x) for x in reg._full_displacement_shape_rc]
     non_rigid_bbox = [int(x) for x in reg._non_rigid_bbox]
@@ -184,17 +227,25 @@ def main():
     scaled_aligned_rc = list(ref_slide.slide_dimensions_wh[0][::-1])
 
     def _warp_state(slide_obj, name, internal_pad=None, from_rigid=False, rec=None):
-        slide_bbox_xywh, _ = slide_obj.get_crop_xywh(crop=CROP_REF, out_shape_rc=scaled_aligned_rc)
+        slide_bbox_xywh, _ = slide_obj.get_crop_xywh(
+            crop=CROP_REF, out_shape_rc=scaled_aligned_rc
+        )
         ws = {
             "slide_name": name,
             "src_f": slide_obj.src_f,
             "from_rigid_reg": from_rigid,
             "M": np.asarray(slide_obj.M).tolist(),
-            "processed_img_shape_rc": [int(x) for x in slide_obj.processed_img_shape_rc],
+            "processed_img_shape_rc": [
+                int(x) for x in slide_obj.processed_img_shape_rc
+            ],
             "reg_img_shape_rc": [int(x) for x in slide_obj.reg_img_shape_rc],
-            "aligned_slide_shape_rc": [int(x) for x in slide_obj.aligned_slide_shape_rc],
+            "aligned_slide_shape_rc": [
+                int(x) for x in slide_obj.aligned_slide_shape_rc
+            ],
             "bbox_xywh": [int(x) for x in slide_bbox_xywh],
-            "bg_color": [float(x) for x in slide_obj.bg_color] if slide_obj.bg_color is not None else None,
+            "bg_color": [float(x) for x in slide_obj.bg_color]
+            if slide_obj.bg_color is not None
+            else None,
             "series": slide_obj.series,
             "is_rgb": bool(slide_obj.is_rgb),
             "interp_method": "bicubic",
@@ -213,9 +264,14 @@ def main():
         os.makedirs(rdir, exist_ok=True)
         with open(os.path.join(rdir, "warp_state.json"), "w") as fh:
             json.dump(_warp_state(ref_slide, ref_stem), fh, indent=2, default=_jd)
-        print(f"[reg_prep] dumped REFERENCE {ref_stem} warp_state (rigid-only)", flush=True)
+        print(
+            f"[reg_prep] dumped REFERENCE {ref_stem} warp_state (rigid-only)",
+            flush=True,
+        )
     else:
-        raise RuntimeError("[reg_prep] no reference slide resolved by VALIS (reg.get_ref_slide() is None)")
+        raise RuntimeError(
+            "[reg_prep] no reference slide resolved by VALIS (reg.get_ref_slide() is None)"
+        )
 
     slides_written = []
     with _stage("dump"):
@@ -231,10 +287,18 @@ def main():
             # images with the halt hook (grid is set up in register() before calc() -> _dump_inputs -> raise).
             valis_tiling.install_halt_hook(tiler_inputs)
             try:
-                t = NonRigidTileRegistrar(tile_wh=args.tile_wh, tile_buffer=args.tile_buffer)
-                t.register(rec["moving"], rec["fixed"], mask=rec["mask"],
-                           non_rigid_registrar_cls=OpticalFlowWarper,
-                           processing_cls=None, processing_kwargs=None, target_stats=None)
+                t = NonRigidTileRegistrar(
+                    tile_wh=args.tile_wh, tile_buffer=args.tile_buffer
+                )
+                t.register(
+                    rec["moving"],
+                    rec["fixed"],
+                    mask=rec["mask"],
+                    non_rigid_registrar_cls=OpticalFlowWarper,
+                    processing_cls=None,
+                    processing_kwargs=None,
+                    target_stats=None,
+                )
             except valis_tiling.TilesPending:
                 pass
             finally:
@@ -243,13 +307,21 @@ def main():
             if rec["reg_mask"] is not None:
                 np.save(os.path.join(tiler_inputs, "reg_mask.npy"), rec["reg_mask"])
 
-            ws = _warp_state(slide_obj, name, internal_pad={"out_shape": full_disp, "bbox": non_rigid_bbox},
-                             from_rigid=rec["from_rigid"], rec=rec)
+            ws = _warp_state(
+                slide_obj,
+                name,
+                internal_pad={"out_shape": full_disp, "bbox": non_rigid_bbox},
+                from_rigid=rec["from_rigid"],
+                rec=rec,
+            )
             with open(os.path.join(sdir, "warp_state.json"), "w") as fh:
                 json.dump(ws, fh, indent=2, default=_jd)
             slides_written.append(name)
-            print(f"[reg_prep] dumped {name}: tiler_inputs + warp_state "
-                  f"(reg_shape={ws['reg_img_shape_rc']} bbox={ws['bbox_xywh']})", flush=True)
+            print(
+                f"[reg_prep] dumped {name}: tiler_inputs + warp_state "
+                f"(reg_shape={ws['reg_img_shape_rc']} bbox={ws['bbox_xywh']})",
+                flush=True,
+            )
 
     # Written BEFORE the loss guard below, so a run that fails it still says where the time went.
     _write_timings(args.out)
@@ -266,12 +338,16 @@ def main():
         raise RuntimeError(
             f"[reg_prep] {len(missing)} moving slide(s) produced no tiler_inputs/warp_state and were "
             f"silently dropped: {missing} (expected {len(expected_moving)}, wrote {len(slides_written)}). "
-            "The non-rigid warper capture did not fire for those slides.")
+            "The non-rigid warper capture did not fire for those slides."
+        )
 
     if heap:
         registration.kill_jvm()
-    print(f"[reg_prep] DONE — {len(slides_written)} moving slide(s): {slides_written} "
-          f"timings={_TIMINGS}", flush=True)
+    print(
+        f"[reg_prep] DONE — {len(slides_written)} moving slide(s): {slides_written} "
+        f"timings={_TIMINGS}",
+        flush=True,
+    )
 
 
 if __name__ == "__main__":

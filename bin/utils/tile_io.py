@@ -6,6 +6,7 @@ compression — or the stitched field diverges from classic VALIS. pyvips `.v` i
 format (no codec), and warp_tools.numpy2vips/vips2numpy are the exact helpers VALIS itself uses
 to move tile fields between numpy and pyvips (non_rigid_registrars.py:1347).
 """
+
 import numpy as np
 from valis import warp_tools
 
@@ -19,5 +20,6 @@ def write_field(field_hw2, path):
 def read_field(path):
     """Read a `.v` displacement field back as an (H, W, 2) float32 ndarray."""
     import pyvips
+
     vi = pyvips.Image.new_from_file(path)
     return np.ascontiguousarray(warp_tools.vips2numpy(vi).astype(np.float32))

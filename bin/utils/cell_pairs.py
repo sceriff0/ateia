@@ -28,6 +28,7 @@ every per-stage change a pure function of geometry.
 
 numpy + scipy + scikit-image only — no shapely, no VALIS. Unit-testable without a container.
 """
+
 from __future__ import annotations
 
 import math
@@ -76,8 +77,12 @@ class PolySet:
         """Same rings, new vertex coordinates — i.e. this set after a warp."""
         xy = np.asarray(xy, dtype=float)
         if xy.shape != self.xy.shape:
-            raise ValueError(f"warped xy has shape {xy.shape}, expected {self.xy.shape}")
-        return PolySet(xy, self.ring_off, self.ring_feat, self.ring_hole, self.n_features)
+            raise ValueError(
+                f"warped xy has shape {xy.shape}, expected {self.xy.shape}"
+            )
+        return PolySet(
+            xy, self.ring_off, self.ring_feat, self.ring_hole, self.n_features
+        )
 
 
 def _iter_rings(geometry):
@@ -144,7 +149,7 @@ def _ring_area_centroid(ps: PolySet):
     area = np.zeros(n, dtype=float)
     cent = np.zeros((n, 2), dtype=float)
     for r in range(n):
-        p = ps.xy[ps.ring_off[r]:ps.ring_off[r + 1]]
+        p = ps.xy[ps.ring_off[r] : ps.ring_off[r + 1]]
         # Close the ring if the source did not repeat the first vertex.
         if p.shape[0] >= 2 and not np.array_equal(p[0], p[-1]):
             p = np.vstack([p, p[:1]])
@@ -186,7 +191,7 @@ def feature_area_centroid(ps: PolySet):
         for f in np.flatnonzero(bad):
             lo, hi = int(slices[f]), int(slices[f + 1])
             if hi > lo:
-                cent[f] = ps.xy[ps.ring_off[lo]:ps.ring_off[hi]].mean(axis=0)
+                cent[f] = ps.xy[ps.ring_off[lo] : ps.ring_off[hi]].mean(axis=0)
     return np.abs(area), cent
 
 
@@ -198,7 +203,7 @@ def feature_bboxes(ps: PolySet) -> np.ndarray:
         lo, hi = int(slices[f]), int(slices[f + 1])
         if hi <= lo:
             continue
-        p = ps.xy[ps.ring_off[lo]:ps.ring_off[hi]]
+        p = ps.xy[ps.ring_off[lo] : ps.ring_off[hi]]
         out[f] = [p[:, 0].min(), p[:, 1].min(), p[:, 0].max(), p[:, 1].max()]
     return out
 
@@ -225,7 +230,11 @@ def match_mutual_nn(cent_a, cent_b, radius):
 
     cent_a = np.asarray(cent_a, dtype=float)
     cent_b = np.asarray(cent_b, dtype=float)
-    empty = (np.empty(0, dtype=np.int64), np.empty(0, dtype=np.int64), np.empty(0, dtype=float))
+    empty = (
+        np.empty(0, dtype=np.int64),
+        np.empty(0, dtype=np.int64),
+        np.empty(0, dtype=float),
+    )
     if cent_a.size == 0 or cent_b.size == 0 or not (radius > 0):
         return empty
     ok_a = np.flatnonzero(np.isfinite(cent_a).all(axis=1))
@@ -266,8 +275,10 @@ def _raster_feature(ps: PolySet, slices, f, origin_xy, shape_rc, scale):
     hole = np.zeros(shape_rc, dtype=bool)
     ox, oy = origin_xy
     for r in range(int(slices[f]), int(slices[f + 1])):
-        p = ps.xy[ps.ring_off[r]:ps.ring_off[r + 1]]
-        rr, cc = sk_polygon((p[:, 1] - oy) * scale, (p[:, 0] - ox) * scale, shape=shape_rc)
+        p = ps.xy[ps.ring_off[r] : ps.ring_off[r + 1]]
+        rr, cc = sk_polygon(
+            (p[:, 1] - oy) * scale, (p[:, 0] - ox) * scale, shape=shape_rc
+        )
         if rr.size == 0:
             continue
         (hole if ps.ring_hole[r] else mask)[rr, cc] = True
@@ -276,8 +287,14 @@ def _raster_feature(ps: PolySet, slices, f, origin_xy, shape_rc, scale):
     return mask
 
 
-def pair_iou(ps_a: PolySet, ps_b: PolySet, idx_a, idx_b, supersample: int = 2,
-             max_window_px: int = DEFAULT_MAX_PAIR_WINDOW_PX):
+def pair_iou(
+    ps_a: PolySet,
+    ps_b: PolySet,
+    idx_a,
+    idx_b,
+    supersample: int = 2,
+    max_window_px: int = DEFAULT_MAX_PAIR_WINDOW_PX,
+):
     """IoU of each matched pair, each scored in its own bounding-box window.
 
     Returns ``(iou, scored)``: ``iou`` is NaN wherever ``scored`` is False — a pair whose two
@@ -332,8 +349,9 @@ def _dist_stats(values, prefix, percentiles=(10, 50, 90)) -> dict:
     return out
 
 
-def summarize_stage(iou, scored, dist_px, areas_a, areas_b, iou_thresh=0.5,
-                    pixel_size_um=None) -> dict:
+def summarize_stage(
+    iou, scored, dist_px, areas_a, areas_b, iou_thresh=0.5, pixel_size_um=None
+) -> dict:
     """Collapse one stage's per-pair arrays into the reported record.
 
     ``dice_matched`` is the areal Dice restricted to the matched pairs: ``2*sum(inter) /
@@ -360,5 +378,7 @@ def summarize_stage(iou, scored, dist_px, areas_a, areas_b, iou_thresh=0.5,
         tot = aa[scored] + ab[scored]
         inter = i * tot / (1.0 + i)
         denom = float(tot.sum())
-        rec["dice_matched"] = float(2.0 * inter.sum() / denom) if denom else float("nan")
+        rec["dice_matched"] = (
+            float(2.0 * inter.sum() / denom) if denom else float("nan")
+        )
     return rec

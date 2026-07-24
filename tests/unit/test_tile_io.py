@@ -5,6 +5,7 @@ on-disk container between REG_TILE and REG_STITCH must not quantize or compress 
 stitched field diverges from classic VALIS. Equality here must be EXACT (np.array_equal), not
 approximate. Runs inside mirage-valis:1.0.0 (needs `valis`/pyvips).
 """
+
 import os
 import sys
 import tempfile
@@ -14,6 +15,7 @@ import numpy as np
 # Needs the valis image (pyvips); skip under a plain python env (CI Python job).
 try:
     import pytest
+
     pytest.importorskip("pyvips")
 except ImportError:  # stdlib __main__ runner in-image (not under pytest)
     pass
@@ -62,8 +64,10 @@ def test_roundtrip_matches_a_realistic_deepflow_field():
 
 if __name__ == "__main__":
     import traceback
-    fns = [v for k, v in sorted(globals().items())
-           if k.startswith("test_") and callable(v)]
+
+    fns = [
+        v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)
+    ]
     failed = 0
     for fn in fns:
         try:

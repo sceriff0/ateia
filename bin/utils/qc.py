@@ -22,17 +22,16 @@ in registration scripts (register_cpu.py, register_gpu.py).
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Tuple
 
 import cv2
 import numpy as np
 import tifffile
-from numpy.typing import NDArray
-from skimage.transform import rescale
-
 from logger import get_logger
 from metadata import extract_channel_names_from_ome
+from numpy.typing import NDArray
 from registration_utils import autoscale
+from skimage.transform import rescale
 
 __all__ = [
     "create_registration_qc",
@@ -43,10 +42,7 @@ __all__ = [
 logger = get_logger(__name__)
 
 
-def autoscale_for_display(
-    img: NDArray,
-    method: str = "minmax"
-) -> NDArray[np.uint8]:
+def autoscale_for_display(img: NDArray, method: str = "minmax") -> NDArray[np.uint8]:
     """Autoscale image for display purposes.
 
     Parameters
@@ -88,9 +84,7 @@ def autoscale_for_display(
 
 
 def create_dapi_overlay(
-    reference_dapi: NDArray,
-    registered_dapi: NDArray,
-    scale_factor: float = 0.25
+    reference_dapi: NDArray, registered_dapi: NDArray, scale_factor: float = 0.25
 ) -> Tuple[NDArray, NDArray]:
     """Create RGB overlay of reference and registered DAPI channels.
 
@@ -150,18 +144,16 @@ def create_dapi_overlay(
     # Downsample if requested
     if scale_factor != 1.0:
         # Fix: Round before converting to uint8 to avoid truncation artifacts
-        ref_down = np.round(rescale(
-            ref_scaled,
-            scale=scale_factor,
-            anti_aliasing=True,
-            preserve_range=True
-        )).astype(np.uint8)
-        reg_down = np.round(rescale(
-            reg_scaled,
-            scale=scale_factor,
-            anti_aliasing=True,
-            preserve_range=True
-        )).astype(np.uint8)
+        ref_down = np.round(
+            rescale(
+                ref_scaled, scale=scale_factor, anti_aliasing=True, preserve_range=True
+            )
+        ).astype(np.uint8)
+        reg_down = np.round(
+            rescale(
+                reg_scaled, scale=scale_factor, anti_aliasing=True, preserve_range=True
+            )
+        ).astype(np.uint8)
     else:
         ref_down = ref_scaled
         reg_down = reg_scaled
@@ -170,16 +162,19 @@ def create_dapi_overlay(
 
     # Create RGB composite in BGR order (for OpenCV)
     rgb_bgr = np.zeros((h, w, 3), dtype=np.uint8)
-    rgb_bgr[:, :, 2] = reg_down   # Red = registered (BGR so index 2 is Red)
-    rgb_bgr[:, :, 1] = ref_down   # Green = reference
-    rgb_bgr[:, :, 0] = 0          # Blue = 0
+    rgb_bgr[:, :, 2] = reg_down  # Red = registered (BGR so index 2 is Red)
+    rgb_bgr[:, :, 1] = ref_down  # Green = reference
+    rgb_bgr[:, :, 0] = 0  # Blue = 0
 
     # Create CYX version for TIFF
-    rgb_cyx = np.stack([
-        reg_down,                           # Red channel (registered)
-        ref_down,                           # Green channel (reference)
-        np.zeros_like(ref_down, dtype=np.uint8)  # Blue channel
-    ], axis=0)
+    rgb_cyx = np.stack(
+        [
+            reg_down,  # Red channel (registered)
+            ref_down,  # Green channel (reference)
+            np.zeros_like(ref_down, dtype=np.uint8),  # Blue channel
+        ],
+        axis=0,
+    )
 
     return rgb_bgr, rgb_cyx
 
@@ -191,7 +186,7 @@ def create_registration_qc(
     scale_factor: float = 0.25,
     save_fullres: bool = True,
     save_png: bool = True,
-    save_tiff: bool = True
+    save_tiff: bool = True,
 ) -> None:
     """Create QC visualizations for registration assessment.
 
@@ -290,8 +285,7 @@ def create_registration_qc(
 
     # Find DAPI index (default to first channel if not found)
     ref_dapi_idx = next(
-        (i for i, ch in enumerate(ref_channels) if "DAPI" in ch.upper()),
-        None
+        (i for i, ch in enumerate(ref_channels) if "DAPI" in ch.upper()), None
     )
     if ref_dapi_idx is None:
         logger.warning(
@@ -301,8 +295,7 @@ def create_registration_qc(
         ref_dapi_idx = 0
 
     reg_dapi_idx = next(
-        (i for i, ch in enumerate(reg_channels) if "DAPI" in ch.upper()),
-        None
+        (i for i, ch in enumerate(reg_channels) if "DAPI" in ch.upper()), None
     )
     if reg_dapi_idx is None:
         logger.warning(
@@ -312,9 +305,13 @@ def create_registration_qc(
         reg_dapi_idx = 0
 
     if ref_channels:
-        logger.debug(f"Reference DAPI: channel {ref_dapi_idx} ({ref_channels[ref_dapi_idx]})")
+        logger.debug(
+            f"Reference DAPI: channel {ref_dapi_idx} ({ref_channels[ref_dapi_idx]})"
+        )
     if reg_channels:
-        logger.debug(f"Registered DAPI: channel {reg_dapi_idx} ({reg_channels[reg_dapi_idx]})")
+        logger.debug(
+            f"Registered DAPI: channel {reg_dapi_idx} ({reg_channels[reg_dapi_idx]})"
+        )
 
     ref_dapi = ref_img[ref_dapi_idx]
     reg_dapi = reg_img[reg_dapi_idx]
@@ -324,42 +321,47 @@ def create_registration_qc(
         ref_dapi_scaled = autoscale_for_display(ref_dapi, method="minmax")
         reg_dapi_scaled = autoscale_for_display(reg_dapi, method="minmax")
 
-        rgb_stack_full = np.stack([
-            reg_dapi_scaled,   # Red channel (registered)
-            ref_dapi_scaled,   # Green channel (reference)
-            np.zeros_like(ref_dapi_scaled, dtype=np.uint8)  # Blue channel
-        ], axis=0)
+        rgb_stack_full = np.stack(
+            [
+                reg_dapi_scaled,  # Red channel (registered)
+                ref_dapi_scaled,  # Green channel (reference)
+                np.zeros_like(ref_dapi_scaled, dtype=np.uint8),  # Blue channel
+            ],
+            axis=0,
+        )
 
-        fullres_output_path = output_path.with_name(output_path.stem + '_fullres.tif')
+        fullres_output_path = output_path.with_name(output_path.stem + "_fullres.tif")
         tifffile.imwrite(
             str(fullres_output_path),
             rgb_stack_full,
             imagej=True,
-            metadata={'axes': 'CYX', 'mode': 'composite'},
-            compression='zlib'
+            metadata={"axes": "CYX", "mode": "composite"},
+            compression="zlib",
         )
         logger.info(f"  Saved full-res QC TIFF: {fullres_output_path}")
         del rgb_stack_full
 
     # Create downsampled overlay
-    rgb_bgr, rgb_cyx = create_dapi_overlay(ref_dapi, reg_dapi, scale_factor=scale_factor)
+    rgb_bgr, rgb_cyx = create_dapi_overlay(
+        ref_dapi, reg_dapi, scale_factor=scale_factor
+    )
 
     # Save PNG (OpenCV uses BGR order)
     if save_png:
-        png_output_path = output_path.with_suffix('.png')
+        png_output_path = output_path.with_suffix(".png")
         cv2.imwrite(str(png_output_path), rgb_bgr)
         logger.info(f"  Saved QC PNG: {png_output_path}")
 
     # Save TIFF (ImageJ-compatible, CYX order)
     if save_tiff:
-        tiff_output_path = output_path.with_suffix('.tif')
+        tiff_output_path = output_path.with_suffix(".tif")
         tifffile.imwrite(
             str(tiff_output_path),
             rgb_cyx,
             ome=True,
             bigtiff=True,
-            metadata={'axes': 'CYX', 'mode': 'composite'}
+            metadata={"axes": "CYX", "mode": "composite"},
         )
         logger.info(f"  Saved QC TIFF: {tiff_output_path}")
 
-    logger.info(f"QC generation complete")
+    logger.info("QC generation complete")

@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """Evaluate one patient's cell segmentation with vendored CSE (2D)."""
-import argparse, json, os, sys
+
+import argparse
+import json
+import os
+import sys
+
 import numpy as np
 import tifffile
 
@@ -29,8 +34,9 @@ def _read_image_cyx(path):
     robust OME axis handling (present in the container); fall back to tifffile."""
     try:
         from aicsimageio import AICSImage
+
         a = AICSImage(path)
-        data = np.asarray(a.get_image_data("CYX"))   # T,Z are 1 for 2D WSI
+        data = np.asarray(a.get_image_data("CYX"))  # T,Z are 1 for 2D WSI
         ps = a.physical_pixel_sizes
         px = float(ps.X) if (ps.X and ps.Y) else None
         return data, px
@@ -39,7 +45,7 @@ def _read_image_cyx(path):
         if arr.ndim == 2:
             arr = arr[np.newaxis, :, :]
         elif arr.ndim == 3 and arr.shape[-1] <= 5 and arr.shape[0] > 5:
-            arr = np.moveaxis(arr, -1, 0)            # YXC -> CYX heuristic
+            arr = np.moveaxis(arr, -1, 0)  # YXC -> CYX heuristic
         return arr, None
 
 
@@ -53,8 +59,8 @@ def main():
     ap.add_argument("--pixel-size-um", default=None)
     a = ap.parse_args()
 
-    channels, px_meta = _read_image_cyx(a.image)             # (C,Y,X)
-    img_data = channels[np.newaxis, :, np.newaxis, :, :]     # (1,C,1,Y,X)
+    channels, px_meta = _read_image_cyx(a.image)  # (C,Y,X)
+    img_data = channels[np.newaxis, :, np.newaxis, :, :]  # (1,C,1,Y,X)
     # img["img"]=None forces CSE's metadata-free thresholding path, matching the
     # golden equivalence fixture exactly.
     img = {"name": a.id, "img": None, "data": img_data}
@@ -72,11 +78,15 @@ def main():
     else:
         raise SystemExit("Pixel size missing from image metadata; pass --pixel-size-um")
 
-    metrics = single_method_eval(img, mask, PCA_model=False, output_dir=".",
-                                 pixelsizex=px, pixelsizey=py)
+    metrics = single_method_eval(
+        img, mask, PCA_model=False, output_dir=".", pixelsizex=px, pixelsizey=py
+    )
     qs = metrics.get("QualityScore")
-    doc = {"id": a.id, "metrics": metrics,
-           "QualityScore": float(qs) if qs is not None else float("nan")}
+    doc = {
+        "id": a.id,
+        "metrics": metrics,
+        "QualityScore": float(qs) if qs is not None else float("nan"),
+    }
     with open(a.out, "w") as fh:
         json.dump(doc, fh, indent=2, default=lambda o: float(o))
 

@@ -24,6 +24,7 @@ the crop boundary onto that boundary — in *both* slides, identically — which
 IoU toward 1 for reasons that have nothing to do with registration. Pass ``clip=True`` to
 reproduce VALIS's output exactly.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -117,11 +118,14 @@ def to_numpy_field(field):
         arr = field
     else:  # pyvips.Image -> (H, W, 2)
         from valis import warp_tools
+
         arr = warp_tools.vips2numpy(field)
         arr = np.transpose(arr, (2, 0, 1))
     arr = np.asarray(arr, dtype=np.float32)
     if arr.ndim != 3 or arr.shape[0] != 2:
-        raise ValueError(f"expected a (2, H, W) displacement field, got shape {arr.shape}")
+        raise ValueError(
+            f"expected a (2, H, W) displacement field, got shape {arr.shape}"
+        )
     return arr
 
 
@@ -137,7 +141,9 @@ def make_warper(registrar, crop="overlap", clip=False, checkpoint=None):
 
     def _params(name):
         if name not in params_cache:
-            params_cache[name] = slide_warp_params(registrar.slide_dict[name], crop=crop)
+            params_cache[name] = slide_warp_params(
+                registrar.slide_dict[name], crop=crop
+            )
         return params_cache[name]
 
     def _field(name, stage):
@@ -152,7 +158,8 @@ def make_warper(registrar, crop="overlap", clip=False, checkpoint=None):
             if checkpoint is None:
                 raise ValueError(
                     "the 'non_rigid' stage needs the REGISTER pre-micro checkpoint; without it "
-                    "the pickle's field already has the micro residual composed into it")
+                    "the pickle's field already has the micro residual composed into it"
+                )
             field = checkpoint.fwd_dxdy(name)
         else:
             raise ValueError(f"unknown stage {stage!r}")
@@ -162,7 +169,9 @@ def make_warper(registrar, crop="overlap", clip=False, checkpoint=None):
     def warp(slide_name, xy, stage):
         if stage == STAGE_NATIVE:
             return np.asarray(xy, dtype=float)
-        return warp_points(xy, _params(slide_name), fwd_dxdy=_field(slide_name, stage), clip=clip)
+        return warp_points(
+            xy, _params(slide_name), fwd_dxdy=_field(slide_name, stage), clip=clip
+        )
 
     return warp
 
@@ -174,6 +183,12 @@ def slide_pixel_size_um(registrar, slide_name):
     units = getattr(slide, "units", None)
     if res is None or not np.isfinite(res) or res <= 0:
         return None
-    if units and str(units).strip().lower() not in ("um", "µm", "µm", "micron", "microns"):
+    if units and str(units).strip().lower() not in (
+        "um",
+        "µm",
+        "µm",
+        "micron",
+        "microns",
+    ):
         return None
     return float(res)

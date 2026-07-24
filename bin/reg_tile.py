@@ -9,6 +9,7 @@ hook): ``moving.v``, ``fixed.v``, ``mask.v`` (if any), ``target_stats.npy`` (if 
 path PART A/B validated) because PREP already processed the images to their 2-D form (Blocker 3).
 Emits ``bk_<idx>.v`` / ``fwd_<idx>.v`` for the requested tile.
 """
+
 import argparse
 import importlib
 import json
@@ -48,8 +49,11 @@ class _NullPbar:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--inputs-dir", required=True,
-                    help="dir with moving.v, fixed.v, mask.v?, expanded_bboxes.npy, manifest.json")
+    ap.add_argument(
+        "--inputs-dir",
+        required=True,
+        help="dir with moving.v, fixed.v, mask.v?, expanded_bboxes.npy, manifest.json",
+    )
     ap.add_argument("--tile-idx", type=int, required=True)
     ap.add_argument("--out-dir", required=True)
     args = ap.parse_args()
@@ -59,10 +63,15 @@ def main():
         raise SystemExit(f"--tile-idx {args.tile_idx} out of range [0, {m['n_tiles']})")
 
     reg = NonRigidTileRegistrar(tile_wh=m["tile_wh"], tile_buffer=m["tile_buffer"])
-    reg.moving_img = pyvips.Image.new_from_file(os.path.join(args.inputs_dir, "moving.v"))
+    reg.moving_img = pyvips.Image.new_from_file(
+        os.path.join(args.inputs_dir, "moving.v")
+    )
     reg.fixed_img = pyvips.Image.new_from_file(os.path.join(args.inputs_dir, "fixed.v"))
-    reg.mask = (pyvips.Image.new_from_file(os.path.join(args.inputs_dir, "mask.v"))
-                if m["has_mask"] else None)
+    reg.mask = (
+        pyvips.Image.new_from_file(os.path.join(args.inputs_dir, "mask.v"))
+        if m["has_mask"]
+        else None
+    )
     reg.expanded_bboxes = np.load(os.path.join(args.inputs_dir, "expanded_bboxes.npy"))
     reg.n_tiles = m["n_tiles"]
     reg.n_rows = m["n_rows"]
@@ -73,16 +82,26 @@ def main():
     reg.non_rigid_registrar_cls = _load_cls(m["non_rigid_registrar_cls"])
     reg.processing_cls = None
     reg.processing_kwargs = None
-    reg.target_stats = (np.load(os.path.join(args.inputs_dir, "target_stats.npy"))
-                        if m["has_target_stats"] else None)
+    reg.target_stats = (
+        np.load(os.path.join(args.inputs_dir, "target_stats.npy"))
+        if m["has_target_stats"]
+        else None
+    )
     reg.pbar = _NullPbar()
 
     reg.reg_tile(args.tile_idx, threading.Lock())  # VALIS's exact per-tile kernel
 
     os.makedirs(args.out_dir, exist_ok=True)
-    reg.bk_dxdy_tiles[args.tile_idx].write_to_file(os.path.join(args.out_dir, f"bk_{args.tile_idx}.v"))
-    reg.fwd_dxdy_tiles[args.tile_idx].write_to_file(os.path.join(args.out_dir, f"fwd_{args.tile_idx}.v"))
-    print(f"[reg_tile] idx={args.tile_idx} OK (pid={os.getpid()}) -> {args.out_dir}", flush=True)
+    reg.bk_dxdy_tiles[args.tile_idx].write_to_file(
+        os.path.join(args.out_dir, f"bk_{args.tile_idx}.v")
+    )
+    reg.fwd_dxdy_tiles[args.tile_idx].write_to_file(
+        os.path.join(args.out_dir, f"fwd_{args.tile_idx}.v")
+    )
+    print(
+        f"[reg_tile] idx={args.tile_idx} OK (pid={os.getpid()}) -> {args.out_dir}",
+        flush=True,
+    )
 
 
 if __name__ == "__main__":

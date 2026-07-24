@@ -37,16 +37,15 @@ from pathlib import Path
 from typing import Tuple
 
 # Add parent directory to path to import lib modules
-sys.path.insert(0, str(Path(__file__).parent / 'utils'))
+sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
 import dask.array as da
 import numpy as np
 import tifffile
+from image_utils import ensure_dir
+from logger import configure_logging, get_logger
 from numpy.typing import NDArray
 from skimage import segmentation
-
-from logger import get_logger, configure_logging
-from image_utils import ensure_dir
 from validation import clip_negative_values
 
 logger = get_logger(__name__)
@@ -77,7 +76,7 @@ def extract_dapi_channel(
     logger.info(f"Loading multichannel image: {multichannel_image_path}")
 
     with tifffile.TiffFile(multichannel_image_path) as tif:
-        image_memmap = tif.asarray(out='memmap')
+        image_memmap = tif.asarray(out="memmap")
 
         if image_memmap.ndim == 2:
             logger.info("  - Single channel image (assuming DAPI/nuclear)")
@@ -149,7 +148,7 @@ def expand_labels_tiled(
         _expand_tile,
         dask_labels,
         depth=overlap,
-        boundary='none',
+        boundary="none",
         dtype=np.uint32,
     )
 
@@ -245,6 +244,7 @@ def run_cellsam(
     # error in seconds beats a 4-day CPU crawl that nobody notices.
     if use_gpu:
         import torch
+
         if not torch.cuda.is_available():
             raise RuntimeError(
                 "--use-gpu requested but torch.cuda.is_available() is False. "
@@ -281,8 +281,12 @@ def run_cellsam(
     nuclei_mask = np.asarray(nuclei_labels).astype(np.uint32, copy=False)
 
     # 3. Derive whole-cell mask by expanding nuclei labels (StarDist-style).
-    logger.info(f"Expanding nuclei labels to create cell mask (distance={expand_distance}px)...")
-    cell_mask = expand_labels_tiled(nuclei_mask, distance=expand_distance).astype(np.uint32)
+    logger.info(
+        f"Expanding nuclei labels to create cell mask (distance={expand_distance}px)..."
+    )
+    cell_mask = expand_labels_tiled(nuclei_mask, distance=expand_distance).astype(
+        np.uint32
+    )
 
     n_nuclei = int(nuclei_mask.max())
     n_cells = int(cell_mask.max())
@@ -297,11 +301,11 @@ def run_cellsam(
     logger.info("")
     logger.info("Saving segmentation masks...")
     logger.info(f"  Nuclei mask: {nuclei_mask_path.name}")
-    tifffile.imwrite(nuclei_mask_path, nuclei_mask, compression='zlib')
+    tifffile.imwrite(nuclei_mask_path, nuclei_mask, compression="zlib")
     del nuclei_mask
 
     logger.info(f"  Cell mask: {cell_mask_path.name}")
-    tifffile.imwrite(cell_mask_path, cell_mask, compression='zlib')
+    tifffile.imwrite(cell_mask_path, cell_mask, compression="zlib")
     del cell_mask
 
     logger.info("")
@@ -315,86 +319,86 @@ def run_cellsam(
 def parse_args():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description='Cell segmentation using CellSAM on the nuclear (DAPI) channel',
+        description="Cell segmentation using CellSAM on the nuclear (DAPI) channel",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
     parser.add_argument(
-        '--image',
+        "--image",
         type=str,
         required=True,
-        help='Path to multichannel OME-TIFF image (e.g., registered image from VALIS)',
+        help="Path to multichannel OME-TIFF image (e.g., registered image from VALIS)",
     )
 
     parser.add_argument(
-        '--output-dir',
+        "--output-dir",
         type=str,
-        default='.',
-        help='Output directory for segmentation masks',
+        default=".",
+        help="Output directory for segmentation masks",
     )
 
     parser.add_argument(
-        '--dapi-channel',
+        "--dapi-channel",
         type=int,
         default=0,
-        help='Index of the nuclear (DAPI) channel in the multichannel image',
+        help="Index of the nuclear (DAPI) channel in the multichannel image",
     )
 
     parser.add_argument(
-        '--expand-distance',
+        "--expand-distance",
         type=int,
         default=10,
-        help='Distance (pixels) to expand nuclei labels for the whole-cell mask',
+        help="Distance (pixels) to expand nuclei labels for the whole-cell mask",
     )
 
     parser.add_argument(
-        '--use-gpu',
-        action='store_true',
+        "--use-gpu",
+        action="store_true",
         default=False,
-        help='Request GPU (cellsam_pipeline picks the device automatically; informational)',
+        help="Request GPU (cellsam_pipeline picks the device automatically; informational)",
     )
 
     parser.add_argument(
-        '--use-wsi',
-        action='store_true',
+        "--use-wsi",
+        action="store_true",
         default=False,
-        help='Enable CellSAM native WSI tiling (recommended for large images)',
+        help="Enable CellSAM native WSI tiling (recommended for large images)",
     )
 
     parser.add_argument(
-        '--bbox-threshold',
+        "--bbox-threshold",
         type=float,
         default=0.4,
-        help='CellSAM bounding-box confidence threshold (precision/recall knob)',
+        help="CellSAM bounding-box confidence threshold (precision/recall knob)",
     )
 
     parser.add_argument(
-        '--block-size',
+        "--block-size",
         type=int,
         default=400,
-        help='Tile block size (px) for WSI mode',
+        help="Tile block size (px) for WSI mode",
     )
 
     parser.add_argument(
-        '--overlap',
+        "--overlap",
         type=int,
         default=56,
-        help='Tile overlap (px) for WSI mode',
+        help="Tile overlap (px) for WSI mode",
     )
 
     parser.add_argument(
-        '--model-path',
+        "--model-path",
         type=str,
         default=None,
-        help='Path to pre-downloaded CellSAM weights. If omitted, weights are '
-             'auto-downloaded (requires DEEPCELL_ACCESS_TOKEN).',
+        help="Path to pre-downloaded CellSAM weights. If omitted, weights are "
+        "auto-downloaded (requires DEEPCELL_ACCESS_TOKEN).",
     )
 
     parser.add_argument(
-        '--prefix',
+        "--prefix",
         type=str,
         default=None,
-        help='Output filename prefix (defaults to input image stem)',
+        help="Output filename prefix (defaults to input image stem)",
     )
 
     return parser.parse_args()
@@ -421,5 +425,5 @@ def main():
     return 0
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main())

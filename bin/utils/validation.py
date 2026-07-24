@@ -20,7 +20,6 @@ from typing import Optional, Tuple
 import numpy as np
 from numpy.typing import NDArray
 
-
 __all__ = [
     "log_image_stats",
     "detect_negative_values",
@@ -31,9 +30,7 @@ __all__ = [
 
 
 def log_image_stats(
-    data: NDArray,
-    stage_name: str,
-    logger: Optional[logging.Logger] = None
+    data: NDArray, stage_name: str, logger: Optional[logging.Logger] = None
 ) -> None:
     """Log image statistics for debugging and validation.
 
@@ -76,8 +73,7 @@ def log_image_stats(
 
 
 def detect_negative_values(
-    data: NDArray,
-    logger: Optional[logging.Logger] = None
+    data: NDArray, logger: Optional[logging.Logger] = None
 ) -> Tuple[bool, int, float]:
     """Detect negative values in image data.
 
@@ -103,8 +99,9 @@ def detect_negative_values(
     """
     _logger = logger or logging.getLogger(__name__)
 
-    if not np.issubdtype(data.dtype, np.signedinteger) and \
-       not np.issubdtype(data.dtype, np.floating):
+    if not np.issubdtype(data.dtype, np.signedinteger) and not np.issubdtype(
+        data.dtype, np.floating
+    ):
         # Unsigned type - cannot have actual negatives
         return False, 0, 0.0
 
@@ -128,7 +125,7 @@ def detect_wrapped_values(
     data: NDArray,
     threshold_percentile: float = 99.5,
     min_value_threshold: float = 0.9,
-    logger: Optional[logging.Logger] = None
+    logger: Optional[logging.Logger] = None,
 ) -> Tuple[bool, int, float]:
     """Detect potentially wrapped negative values in unsigned integer data.
 
@@ -187,9 +184,7 @@ def detect_wrapped_values(
 
 
 def clip_negative_values(
-    data: NDArray,
-    logger: Optional[logging.Logger] = None,
-    stage_name: str = "unknown"
+    data: NDArray, logger: Optional[logging.Logger] = None, stage_name: str = "unknown"
 ) -> NDArray:
     """Clip negative values to zero with logging.
 
@@ -238,7 +233,7 @@ def validate_image_range(
     stage_name: str,
     expected_dtype: Optional[np.dtype] = None,
     logger: Optional[logging.Logger] = None,
-    fix_issues: bool = False
+    fix_issues: bool = False,
 ) -> Tuple[bool, NDArray]:
     """Validate image values are within expected range.
 

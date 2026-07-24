@@ -7,21 +7,23 @@ Usage:
     python split_multichannel.py input.ome.tiff output_folder --is-reference
     python split_multichannel.py input.ome.tiff output_folder  # skips DAPI
 """
+
 from __future__ import annotations
 
 import argparse
-import os
-import tifffile
-import numpy as np
 import logging
+import os
 
 # Add parent directory to path to import lib modules
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent / 'utils'))
 
-from logger import get_logger, configure_logging
-from image_utils import normalize_image_dimensions, ensure_dir
+import tifffile
+
+sys.path.insert(0, str(Path(__file__).parent / "utils"))
+
+from image_utils import ensure_dir, normalize_image_dimensions
+from logger import configure_logging, get_logger
 from metadata import extract_channel_names_from_ome
 from validation import clip_negative_values
 
@@ -30,7 +32,9 @@ logger = get_logger(__name__)
 __all__ = ["main"]
 
 
-def split_multichannel_tiff(input_path, output_dir, is_reference=False, channel_names=None):
+def split_multichannel_tiff(
+    input_path, output_dir, is_reference=False, channel_names=None
+):
     """
     Split a multichannel TIFF into single-channel TIFFs.
     DAPI is only saved if is_reference=True.
@@ -71,15 +75,19 @@ def split_multichannel_tiff(input_path, output_dir, is_reference=False, channel_
 
     if channel_names is None:
         channel_names = [f"Channel_{i}" for i in range(n_channels)]
-        logger.info(f"  Using default channel names")
+        logger.info("  Using default channel names")
     else:
         logger.info(f"  Channel names from metadata: {len(channel_names)} channels")
 
     # Validate channel count
     if len(channel_names) != n_channels:
-        logger.warning(f"  Warning: {len(channel_names)} names vs {n_channels} channels")
+        logger.warning(
+            f"  Warning: {len(channel_names)} names vs {n_channels} channels"
+        )
         if len(channel_names) < n_channels:
-            channel_names.extend([f"Channel_{i}" for i in range(len(channel_names), n_channels)])
+            channel_names.extend(
+                [f"Channel_{i}" for i in range(len(channel_names), n_channels)]
+            )
         else:
             channel_names = channel_names[:n_channels]
 
@@ -96,7 +104,7 @@ def split_multichannel_tiff(input_path, output_dir, is_reference=False, channel_
         # exact match here would miss names like 'DAPI_nuclear' that convert_image
         # already moved to channel 0, causing the DAPI-equivalent to be wrongly
         # saved for non-reference images.
-        is_dapi = 'DAPI' in name.upper()
+        is_dapi = "DAPI" in name.upper()
 
         # Skip DAPI if this is not the reference image
         if is_dapi and not is_reference:
@@ -105,22 +113,26 @@ def split_multichannel_tiff(input_path, output_dir, is_reference=False, channel_
             continue
 
         # Clean the channel name for use as filename
-        clean_name = "".join(c if c.isalnum() or c in '-_' else '_' for c in name)
+        clean_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in name)
 
         # Detect filename collisions from sanitization (e.g. "CD3-105" and "CD3_105")
         candidate_path = os.path.join(output_dir, f"{clean_name}.tiff")
         if os.path.exists(candidate_path):
             suffix = 2
-            while os.path.exists(os.path.join(output_dir, f"{clean_name}_{suffix}.tiff")):
+            while os.path.exists(
+                os.path.join(output_dir, f"{clean_name}_{suffix}.tiff")
+            ):
                 suffix += 1
-            logger.warning(f"  Filename collision: '{name}' sanitized to '{clean_name}' which already exists, "
-                           f"using '{clean_name}_{suffix}' instead")
+            logger.warning(
+                f"  Filename collision: '{name}' sanitized to '{clean_name}' which already exists, "
+                f"using '{clean_name}_{suffix}' instead"
+            )
             clean_name = f"{clean_name}_{suffix}"
 
         output_path = os.path.join(output_dir, f"{clean_name}.tiff")
 
         channel_data = data[i]
-        tifffile.imwrite(output_path, channel_data, bigtiff=True, compression='zlib')
+        tifffile.imwrite(output_path, channel_data, bigtiff=True, compression="zlib")
 
         saved_paths.append(output_path)
         status = " (DAPI from reference)" if is_dapi else ""
@@ -132,33 +144,27 @@ def split_multichannel_tiff(input_path, output_dir, is_reference=False, channel_
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Split multichannel TIFF into single-channel TIFFs (DAPI only from reference)',
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+        description="Split multichannel TIFF into single-channel TIFFs (DAPI only from reference)",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+
+    parser.add_argument("input", type=str, help="Path to input multichannel TIFF file")
+
+    parser.add_argument(
+        "output_dir", type=str, help="Directory to save single-channel TIFFs"
     )
 
     parser.add_argument(
-        'input',
-        type=str,
-        help='Path to input multichannel TIFF file'
+        "--is-reference",
+        action="store_true",
+        help="This is the reference image (save DAPI)",
     )
 
     parser.add_argument(
-        'output_dir',
-        type=str,
-        help='Directory to save single-channel TIFFs'
-    )
-
-    parser.add_argument(
-        '--is-reference',
-        action='store_true',
-        help='This is the reference image (save DAPI)'
-    )
-
-    parser.add_argument(
-        '--channels',
-        nargs='+',
+        "--channels",
+        nargs="+",
         default=None,
-        help='Channel names (optional, will try to read from OME metadata)'
+        help="Channel names (optional, will try to read from OME metadata)",
     )
 
     args = parser.parse_args()
@@ -169,12 +175,14 @@ def main():
     logger.info("SPLIT MULTICHANNEL TIFF")
     logger.info("=" * 80)
 
-    split_multichannel_tiff(args.input, args.output_dir, args.is_reference, args.channels)
+    split_multichannel_tiff(
+        args.input, args.output_dir, args.is_reference, args.channels
+    )
 
     logger.info("=" * 80)
     logger.info("✓ COMPLETE")
     logger.info("=" * 80)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
