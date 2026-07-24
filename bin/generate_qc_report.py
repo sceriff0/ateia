@@ -165,6 +165,52 @@ def parse_feature_dist_json(json_path):
     }
 
 
+def parse_versions_yml(path):
+    """
+    Minimal two-level YAML parser for a collated versions.yml.
+
+    Structure (concatenated per-process blocks):
+        "PROCESS:NAME":
+            tool: version
+    Returns {process: {tool: version}}. Stdlib-only (no PyYAML) to keep the
+    report self-contained. Repeated process keys are merged.
+    """
+    result = {}
+    current = None
+    if not path or not Path(path).exists():
+        return result
+    with open(path, encoding="utf-8") as fh:
+        for raw in fh:
+            line = raw.rstrip("\n")
+            if not line.strip():
+                continue
+            if not line.startswith((" ", "\t")):
+                # top-level "PROCESS": key
+                key = line.strip().rstrip(":").strip().strip('"')
+                current = key
+                result.setdefault(current, {})
+            elif current is not None and ":" in line:
+                tool, _, ver = line.strip().partition(":")
+                result[current][tool.strip().strip('"')] = ver.strip().strip('"')
+    return result
+
+
+def versions_section(versions_path):
+    """Render the collated versions.yml as a per-process software table."""
+    versions = parse_versions_yml(versions_path) if versions_path else {}
+    if not versions:
+        body = '<p class="empty-notice">Version information not available.</p>'
+        return section("Software Versions", body)
+    tbl = "<table><thead><tr><th>Process</th><th>Tool</th><th>Version</th></tr></thead><tbody>"
+    for proc in sorted(versions):
+        tools = versions[proc]
+        for i, tool in enumerate(sorted(tools)):
+            proc_cell = f"<td rowspan='{len(tools)}'>{proc}</td>" if i == 0 else ""
+            tbl += f"<tr>{proc_cell}<td>{tool}</td><td>{tools[tool]}</td></tr>"
+    tbl += "</tbody></table>"
+    return section("Software Versions", tbl)
+
+
 # ---------------------------------------------------------------------------
 # HTML building blocks
 # ---------------------------------------------------------------------------
