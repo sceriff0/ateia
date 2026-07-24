@@ -93,6 +93,7 @@ nav:
   - Installation: installation.md
   - Usage: usage.md
   - Parameters: parameters.md
+  - Incremental cycles: add_cycle.md
   - Registration QC: registration_qc.md
   - Citation: citation.md
 

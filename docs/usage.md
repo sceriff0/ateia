@@ -33,6 +33,11 @@ flowchart LR
     intensities plus z-scores**, so you gate and phenotype downstream in QuPath or
     [FlowPath](https://flowpath.readthedocs.io/).
 
+!!! tip "Adding a new imaging cycle later?"
+    To fold a fresh cyclic-IF cycle into an already-completed run — reusing the prior
+    reference, segmentation mask, and old-marker quantification — use
+    `--mode add_cycle` instead of the linear stages. See [Incremental cycles](add_cycle.md).
+
 ## Quick start (synthetic data)
 
 No real images, no GPU, no HPC — runs on any laptop in ~15 minutes:

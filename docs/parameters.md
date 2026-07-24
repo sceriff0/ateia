@@ -98,8 +98,23 @@ reach for these if a single REGISTER task can't fit a slide in memory.
 | `reg_dist_micro_tile_wh` | `2048` | Micro-registration tile size (px). |
 | `reg_dist_tile_buffer` | `100` | Tile overlap (px). |
 | `reg_dist_threshold_gb` | `10` | Informational; matches VALIS's internal auto-tiler threshold. |
-| `reg_dist_container` | *(GHCR image)* | Patched VALIS image used for distributed tiles. |
+| `reg_dist_container` | `bolt3x/attend_image_analysis:mirage_valis_1.0.0` | Patched VALIS image (Docker Hub) used for the distributed/low-memory registration processes. |
 | `reg_max_non_rigid_dim` | `4096` | Non-rigid working resolution for the prep step. |
+
+#### Full-resolution warp fan-out
+
+Once transforms are estimated, the final full-resolution warp is split into
+independent **output tiles**, each a `.crop()` of the same lazy pyvips warp — so the
+assembled result is bit-identical to a single-process warp, but peak RAM per task is
+one tile, not one slide. These knobs trade RAM-per-task against task count.
+
+| Parameter | Default | Description |
+|---|---|---|
+| `reg_warp_tile_wh` | `4096` | Output-tile edge (px). Smaller = less RAM per task, more tasks. |
+| `reg_warp_tile_format` | `tiff` | Intermediate tile format: `tiff` (tiled, lossless, ~2–4× smaller) or `v` (uncompressed, fastest). |
+| `reg_warp_tile_compression` | `deflate` | Lossless codec for tiles: `deflate`, `lzw`, `zstd`, or `none`. |
+| `reg_mem_budget_gb` | `null` | Cap per-task memory. `null` = use cluster defaults; set on a small machine to force smaller tiles. |
+| `reg_compare` | `false` | Run the classic **and** the distributed path over the same slides, then diff — a correctness check, not for production. |
 
 ## Segmentation
 
@@ -191,7 +206,7 @@ Pyramidal OME-TIFF assembly and GeoJSON.
 | `skip_postprocessing_qc` | `false` | Skip segmentation/intensity QC plots. |
 | `skip_seg_quality_eval` | `false` | Skip reference-free cell-segmentation quality scoring (CellSegmentationEvaluator, 2D). |
 | `cse_pixel_size_um` | `null` | Pixel size (µm) passed to the CellSegmentationEvaluator; `null` falls back to `pixel_size`. |
-| `segeval_tag` | `dev` | Container tag for the segmentation-quality-evaluator (`segeval`) image. |
+| `segeval_tag` | `segeval` | Tag on `bolt3x/attend_image_analysis` (Docker Hub) for the segmentation-quality-evaluator image. |
 | `skip_final_qc_report` | `false` | Skip the aggregated HTML QC report. |
 | `enable_feature_error` | `false` | Compute feature-based registration error → `feature_distances/`. |
 | `feature_detector` | `superpoint` | Detector for error estimation: `superpoint`, `disk`, `dedode`, `brisk`, `vgg`. |
@@ -231,6 +246,24 @@ HPC details: [Running on HPC / SLURM](usage.md#running-on-hpc).
 |---|---|---|
 | `enable_trace` | `true` | Write Nextflow `trace.txt`, `report.html`, `timeline.html`, and per-task size logs. |
 | `trace_dir` | `.trace` | Directory for trace outputs (independent of `--outdir`). |
+
+## Incremental cyclic-IF mode (`add_cycle`)
+
+Fold a **new imaging cycle** into an already-completed patient run, reusing the prior
+reference, segmentation mask, and old-marker quantification instead of recomputing them.
+Full walkthrough: [Incremental cycles](add_cycle.md).
+
+| Parameter | Default | Description |
+|---|---|---|
+| `mode` | `standard` | `standard` = normal `--start`/`--stop` pipeline; `add_cycle` = incremental cyclic-IF. |
+| `prior_outdir` | `null` | **Required for `add_cycle`.** The `--outdir` of the previously completed run (supplies the reusable reference, mask, and quantification via its checkpoint CSVs). |
+| `embed_masks` | `true` | Embed the segmentation masks as a second uint32 series in the pyramid OME-TIFF. Written only when `embed_masks && quantify_compartments && expanded_quantification`; `add_cycle` consumes this series, so a prior run must have it to be extendable. |
+
+!!! warning "`add_cycle` prerequisites"
+    A prior run is only extendable if it was produced with
+    `--embed_masks true --quantify_compartments --expanded_quantification`. Without the
+    embedded mask series, `mode=add_cycle` **fast-fails** before doing any work. See
+    [Incremental cycles → Fast-fail behavior](add_cycle.md#fast-fail-behavior).
 
 ## Parameter presets
 
