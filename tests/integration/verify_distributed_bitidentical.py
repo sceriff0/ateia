@@ -26,7 +26,8 @@ import numpy as np
 import pyvips
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "bin"))
-import reg_finalize  # reuse the EXACT compose + pad + warp logic
+import reg_finalize  # reuse the EXACT compose + pad + warp logic (also puts bin/utils on sys.path)
+from mirage_slide_reader import open_multiband  # noqa: E402
 from valis import warp_tools, slide_tools
 from valis.non_rigid_registrars import NonRigidTileRegistrar, OpticalFlowWarper
 
@@ -67,7 +68,9 @@ def main():
     run([sys.executable, "bin/reg_finalize.py", "--inputs-dir", ti, "--tiles-dir", tiles,
          "--warp-state", os.path.join(md, "warp_state.json"),
          "--src-slide", os.path.join(INP, "P001_mov1.ome.tiff"), "--out", dist_out])
-    dist_px = warp_tools.vips2numpy(pyvips.Image.new_from_file(dist_out)).astype(np.float64)
+    # open_multiband, NOT new_from_file: the written slide stores its C channels as C stacked
+    # PAGES, so a default read returns channel 0 alone and shape-mismatches base_px below.
+    dist_px = warp_tools.vips2numpy(open_multiband(dist_out)).astype(np.float64)
 
     # --- baseline: VALIS's OWN in-process tiler on the SAME dumped 2-D images, same compose+warp ---
     moving = pyvips.Image.new_from_file(os.path.join(ti, "moving.v"))

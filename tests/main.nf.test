@@ -325,6 +325,49 @@ nextflow_pipeline {
         }
     }
 
+    test("Should fail at launch when reg_qc=2 meets the distributed registration path") {
+        tag "stub"
+
+        when {
+            params {
+                input = "$projectDir/tests/testdata/valid_checkpoint_registration.csv"
+                outdir = "$outputDir"
+                start = "registration"
+                reg_distributed_tiling = true
+                reg_qc = 2
+            }
+        }
+
+        then {
+            assert workflow.failed
+            // Assert the REASON, not just the failure: a bad fixture path or any unrelated
+            // breakage would also make workflow.failed true and the test would prove nothing.
+            assert workflow.stdout.any { it.contains("requires the classic VALIS registrar pickle") }
+        }
+    }
+
+    test("Should accept reg_qc=1 with the distributed registration path") {
+        tag "stub"
+        options "-stub"   // this one actually EXECUTES processes; tag "stub" is only a CI label
+
+        when {
+            params {
+                input = "$projectDir/tests/testdata/valid_checkpoint_registration.csv"
+                outdir = "$outputDir"
+                start = "registration"
+                stop = "registration"
+                reg_distributed_tiling = true
+                reg_qc = 1
+            }
+        }
+
+        then {
+            // Positive control for the gate above: it must reject the reg_qc=2 COMBINATION,
+            // not the distributed path as such.
+            assert workflow.success
+        }
+    }
+
     test("Should reject missing DAPI channel") {
         tag "stub"
 

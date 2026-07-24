@@ -1,11 +1,12 @@
 /*
- * REG_FINALIZE - distributed VALIS tiled registration, stage 3 (fan-in per slide)
+ * REG_COMPOSE_TILED - distributed VALIS tiled registration, stage 3 (fan-in per slide)
  *
- * Stitches the precomputed tile fields, reproduces VALIS's post-tiler composition, and warps+saves
- * the full-res slide via VALIS's own streaming slide_tools.warp_slide — all from plain dumped data,
- * no registrar pickle (spec §6.3/§6.6, compose+warp proven bit-identical by Task 4.5).
+ * Stitches the precomputed tile fields and reproduces VALIS's post-tiler composition, emitting the
+ * composed full-res displacement field (slide_dxdy.v) — all from plain dumped data, no registrar
+ * pickle (spec §6.3/§6.6, compose proven bit-identical by Task 4.5). The warp itself is deferred to
+ * the REG_GRID -> REG_WARP_TILE -> REG_ASSEMBLE fan-out, which consumes this field.
  */
-process REG_FINALIZE {
+process REG_COMPOSE_TILED {
     tag "${patient_id}:${slide}"
     label 'process_high'
 
@@ -15,8 +16,8 @@ process REG_FINALIZE {
     tuple val(patient_id), val(slide), path(inputs_dir, stageAs: 'tiler_inputs'), path(tiles, stageAs: 'tiles/*'), path(warp_state, stageAs: 'warp_state.json'), path(src_slide, stageAs: 'src/*')
 
     output:
-    tuple val(patient_id), val(slide), path("registered_slides/${slide}_registered.ome.tiff"), emit: registered
-    path "versions.yml"                                                                       , emit: versions
+    tuple val(patient_id), val(slide), path("slide_dxdy.v"), emit: field
+    path "versions.yml"                                    , emit: versions
     path "*.size.csv"                                                                         , emit: size_log
 
     when:
@@ -26,15 +27,15 @@ process REG_FINALIZE {
     def args = task.ext.args ?: ''
     """
     in_bytes=\$(stat -L --printf="%s" ${src_slide} 2>/dev/null || echo 0)
-    echo "${task.process},${patient_id},${slide},\${in_bytes:-0}" > ${patient_id}_${slide}.REG_FINALIZE.size.csv
+    echo "${task.process},${patient_id},${slide},\${in_bytes:-0}" > ${patient_id}_${slide}.REG_COMPOSE_TILED.size.csv
 
-    mkdir -p registered_slides
     reg_finalize.py \\
         --inputs-dir tiler_inputs \\
         --tiles-dir tiles \\
         --warp-state warp_state.json \\
         --src-slide ${src_slide} \\
-        --out registered_slides/${slide}_registered.ome.tiff \\
+        --emit-field-only \\
+        --out slide_dxdy.v \\
         ${args}
 
     cat <<-END_VERSIONS > versions.yml
@@ -46,9 +47,8 @@ process REG_FINALIZE {
 
     stub:
     """
-    mkdir -p registered_slides
-    touch registered_slides/${slide}_registered.ome.tiff
-    echo "STUB,${patient_id},${slide},0" > ${patient_id}_${slide}.REG_FINALIZE.size.csv
+    touch slide_dxdy.v
+    echo "STUB,${patient_id},${slide},0" > ${patient_id}_${slide}.REG_COMPOSE_TILED.size.csv
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         python: stub

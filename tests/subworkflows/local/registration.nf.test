@@ -142,6 +142,91 @@ nextflow_workflow {
         }
     }
 
+    test("reg_compare=true runs BOTH paths over the same slides and diffs them - stub") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                skip_registration_qc = true
+                padding = false
+                enable_feature_error = false
+                reg_compare = true
+            }
+            workflow {
+                """
+                input[0] = Channel.fromList([
+                    [[patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK']],
+                     file('$projectDir/tests/testdata/P001_ref.ome.tiff')],
+                    [[patient_id: 'P001', is_reference: false, channels: ['DAPI', 'CD3']],
+                     file('$projectDir/tests/testdata/P001_mov1.ome.tiff')]
+                ])
+                """
+            }
+        }
+
+        then {
+            // PRECONDITION FIRST. `workflow.success` alone would pass just as happily if the
+            // comparison never ran — and COMPARE_REGISTRATION not running is exactly the failure
+            // mode here, because the classic/candidate join drops unmatched slides SILENTLY.
+            // Exact process-name segments, never substrings (a `contains('REG_COMPOSE')` style
+            // check silently matches REG_COMPOSE_TILED/_FIELD/_MICRO).
+            def procs = workflow.trace.tasks()
+                .collect { it.name.replaceAll(/\s*\(.*\)\s*$/, '').tokenize(':').last() }
+                .unique()
+            assert procs.contains('REGISTER')             : "classic path did not run: ${procs}"
+            assert procs.contains('REG_PREP')             : "low-memory path did not run: ${procs}"
+            assert procs.contains('REG_ASSEMBLE')         : "low-memory path did not run: ${procs}"
+            assert procs.contains('COMPARE_REGISTRATION') : "nothing was compared: ${procs}"
+
+            assert workflow.success
+            // One report per registered slide (both slides, reference included — classic warps
+            // the reference too, and the distributed path routes it through --rigid-only).
+            assert workflow.out.reg_compare.size() == 2
+            // Classic stays the run's real output: a comparison run must not change what ships.
+            assert workflow.out.registered.size() == 2
+        }
+    }
+
+    test("default (reg_compare=false) runs classic only, nothing is compared - stub") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                skip_registration_qc = true
+                padding = false
+                enable_feature_error = false
+            }
+            workflow {
+                """
+                input[0] = Channel.fromList([
+                    [[patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK']],
+                     file('$projectDir/tests/testdata/P001_ref.ome.tiff')],
+                    [[patient_id: 'P001', is_reference: false, channels: ['DAPI', 'CD3']],
+                     file('$projectDir/tests/testdata/P001_mov1.ome.tiff')]
+                ])
+                """
+            }
+        }
+
+        then {
+            // The negative half of the pair above. Together these prove --reg_compare is what
+            // decides, rather than the comparison happening (or not) for some other reason.
+            def procs = workflow.trace.tasks()
+                .collect { it.name.replaceAll(/\s*\(.*\)\s*$/, '').tokenize(':').last() }
+                .unique()
+            assert procs.contains('REGISTER')              : "classic path did not run: ${procs}"
+            assert !procs.contains('COMPARE_REGISTRATION') : "compare leaked into the default: ${procs}"
+            assert !procs.contains('REG_PREP')             : "low-memory path leaked into the default: ${procs}"
+
+            assert workflow.success
+            assert workflow.out.reg_compare.size() == 0
+        }
+    }
+
     test("Should handle allow_auto_reference fallback - stub") {
 
         tag "stub"

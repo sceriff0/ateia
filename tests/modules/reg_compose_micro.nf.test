@@ -1,15 +1,16 @@
 nextflow_process {
 
-    name "Test REG_FINALIZE_MICRO process"
-    script "modules/local/reg_finalize_micro.nf"
-    process "REG_FINALIZE_MICRO"
+    name "Test REG_COMPOSE_MICRO process"
+    script "modules/local/reg_compose_micro.nf"
+    process "REG_COMPOSE_MICRO"
 
     tag "modules"
     tag "modules_local"
-    tag "reg_finalize_micro"
+    tag "reg_compose_micro"
 
-    test("REG_FINALIZE_MICRO - stub") {
+    test("REG_COMPOSE_MICRO - stub") {
 
+        tag "stub"
         options "-stub"
 
         when {
@@ -34,7 +35,7 @@ nextflow_process {
         then {
             assertAll(
                 { assert process.success },
-                { assert process.out.registered },
+                { assert process.out.field },
                 { assert process.out.versions }
             )
         }

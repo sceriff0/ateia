@@ -13,6 +13,7 @@ include { WARP_SEG_QC                       } from '../../modules/local/warp_seg
 
 include { VALIS_ADAPTER                     } from './adapters/valis_adapter'
 include { VALIS_DISTRIBUTED_ADAPTER         } from './adapters/valis_distributed_adapter'
+include { REG_COMPARE                       } from './reg_compare'
 include { REG_ESTIMATE                      } from '../../modules/local/reg_estimate'
 
 include { ESTIMATE_FEATURE_DISTANCES        } from '../../modules/local/estimate_feature_distances'
@@ -166,7 +167,8 @@ workflow REGISTRATION {
     //   - Converts output back to [meta, file] standard format
 
     // Opt-in distributed tiled registration (spec §6.5/§6.6): lifts VALIS's non-rigid tile loop into
-    // REG_PREP -> REG_TILE (fan-out) -> REG_FINALIZE (fan-in) for low-RAM clusters. Bit-identical to
+    // REG_PREP -> REG_TILE (fan-out) -> REG_COMPOSE_* (fan-in) -> REG_WARP_TILE (fan-out) ->
+    // REG_ASSEMBLE for low-RAM clusters. Bit-identical to
     // VALIS's own tiler on its processed 2-D images. Default (reg_distributed_tiling=false) = classic.
     //
     // IMPORTANT (spec §6.5): tiled non-rigid != whole-image non-rigid. VALIS only tiles when
@@ -181,7 +183,39 @@ workflow REGISTRATION {
     // only when reg_qc >= 2 asked REGISTER for them.
     ch_stage_checkpoint = Channel.empty()
 
-    if (!params.reg_distributed_tiling) {
+    // Hoisted above the adapter branch because the seg-QC gate below depends on BOTH: on the
+    // distributed branch VALIS_ADAPTER is never invoked, so `VALIS_ADAPTER.out` does not exist
+    // and any block referencing it must be unreachable at DAG-build time, not merely at runtime.
+    // reg_qc: 0 = none, 1 = DAPI overlay, 2 = + segmentation overlap (legacy
+    // skip_registration_qc=true forces 0). ParamUtils.regQcLevel is the single definition, so
+    // ParamUtils.validateRegistrationPath's launch-time gate cannot drift from it.
+    def use_distributed = ParamUtils.useDistributedAdapter(params)
+    def do_compare      = ParamUtils.regCompareEnabled(params)
+    def reg_qc_level    = ParamUtils.regQcLevel(params)
+
+    // Level 2 warps polygons through the classic registrar pickle, which the distributed path
+    // does not produce. ParamUtils.validateRegistrationPath already rejects that combination at
+    // launch; this is defence in depth (and what keeps the workflow buildable on 'force').
+    // --reg_compare always runs classic too, so the pickle is available there regardless.
+    def do_seg_qc = reg_qc_level >= 2 && (do_compare || !use_distributed)
+
+    // Per-slide classic-vs-low-memory diff metrics; empty unless --reg_compare is on.
+    ch_reg_compare = Channel.empty()
+
+    if (do_compare) {
+        // --reg_compare (spec §7): run BOTH paths over the same slides and diff them. Takes
+        // precedence over the adapter switch — the whole point is to run both, and the
+        // comparison's value depends on classic staying the run's real output.
+        log.warn "--reg_compare is ON: every multi-slide patient is registered TWICE " +
+                 "(classic VALIS + the low-memory path). Expect ~2x registration cost."
+        REG_COMPARE(ch_grouped_multi)
+        ch_registered       = REG_COMPARE.out.registered
+        ch_registrar_pickle = REG_COMPARE.out.registrar
+        ch_adapter_logs     = REG_COMPARE.out.size_logs
+        ch_adapter_versions = REG_COMPARE.out.versions
+        ch_adapter_summary  = REG_COMPARE.out.summary
+        ch_reg_compare      = REG_COMPARE.out.metrics
+    } else if (!use_distributed) {
         VALIS_ADAPTER(ch_grouped_multi)
         ch_registered       = VALIS_ADAPTER.out.registered
         ch_registrar_pickle = VALIS_ADAPTER.out.registrar
@@ -204,8 +238,8 @@ workflow REGISTRATION {
         ch_routed = ch_grouped_multi
             .map { pid, ref_item, all_items -> tuple(pid, [ref_item, all_items]) }
             .join(REG_ESTIMATE.out.decision)
-            .branch { pid, payload, use_distributed ->
-                distributed: use_distributed == 'true'
+            .branch { pid, payload, est_decision ->
+                distributed: est_decision == 'true'
                 classic:     true
             }
         VALIS_DISTRIBUTED_ADAPTER(ch_routed.distributed.map { pid, payload, u -> tuple(pid, payload[0], payload[1]) })
@@ -247,11 +281,6 @@ workflow REGISTRATION {
             [meta, registered_file, reference_file]
         }
 
-    // reg_qc controls registration QC depth: 0 = none, 1 = DAPI overlay only,
-    // 2 = DAPI overlay + segmentation-overlap metric. Legacy skip_registration_qc=true
-    // forces 0 for backward compatibility.
-    def reg_qc_level = params.skip_registration_qc ? 0 : (params.reg_qc == null ? 1 : (params.reg_qc as int))
-
     // Level >= 1: DAPI overlay image QC for all non-reference images
     if (reg_qc_level >= 1) {
         GENERATE_REGISTRATION_QC(ch_for_qc)
@@ -265,7 +294,7 @@ workflow REGISTRATION {
     // then warp the polygons through the registrar and score overlap. Classic VALIS only
     // (needs the registrar pickle; distributed produces none).
     ch_seg_qc = Channel.empty()
-    if (reg_qc_level >= 2) {
+    if (do_seg_qc) {
         SEG_QC_GEOJSON(ch_images_for_error)
 
         ch_gj = SEG_QC_GEOJSON.out.geojson.branch { meta, gj ->
@@ -399,7 +428,7 @@ workflow REGISTRATION {
     if (reg_qc_level >= 1) {
         ch_size_logs = ch_size_logs.mix(GENERATE_REGISTRATION_QC.out.size_log)
     }
-    if (reg_qc_level >= 2) {
+    if (do_seg_qc) {
         ch_size_logs = ch_size_logs
             .mix(SEG_QC_GEOJSON.out.size_log)
             .mix(WARP_SEG_QC.out.size_log)
@@ -424,7 +453,7 @@ workflow REGISTRATION {
     if (reg_qc_level >= 1) {
         ch_versions = ch_versions.mix(GENERATE_REGISTRATION_QC.out.versions.first())
     }
-    if (reg_qc_level >= 2) {
+    if (do_seg_qc) {
         ch_versions = ch_versions
             .mix(SEG_QC_GEOJSON.out.versions.first())
             .mix(WARP_SEG_QC.out.versions.first())
@@ -438,6 +467,7 @@ workflow REGISTRATION {
     checkpoint_csv   = ch_checkpoint_csv
     qc               = ch_qc
     seg_qc           = ch_seg_qc
+    reg_compare      = ch_reg_compare
     error_metrics    = ch_error_metrics
     valis_summary    = ch_adapter_summary
     size_logs        = ch_size_logs

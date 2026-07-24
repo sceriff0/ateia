@@ -30,7 +30,8 @@ import numpy as np
 import pyvips
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "bin"))
-import reg_finalize
+import reg_finalize  # also puts bin/utils on sys.path
+from mirage_slide_reader import open_multiband  # noqa: E402
 from valis import registration, slide_tools, warp_tools
 from valis.non_rigid_registrars import NonRigidTileRegistrar, OpticalFlowWarper
 
@@ -125,12 +126,12 @@ def main():
     # A) distributed rigid-only
     run([sys.executable, "bin/reg_finalize.py", "--rigid-only", "--warp-state", os.path.join(md, "warp_state.json"),
          "--src-slide", src, "--out", os.path.join(md, "dist_A.ome.tiff")])
-    dist_A = npx(pyvips.Image.new_from_file(os.path.join(md, "dist_A.ome.tiff")))
+    dist_A = npx(open_multiband(os.path.join(md, "dist_A.ome.tiff")))
     # B) distributed rigid + non-rigid (tiled)
     run([sys.executable, "bin/reg_finalize.py", "--inputs-dir", ti, "--tiles-dir", tiles,
          "--warp-state", os.path.join(md, "warp_state.json"), "--src-slide", src,
          "--out", os.path.join(md, "dist_B.ome.tiff")])
-    dist_B = npx(pyvips.Image.new_from_file(os.path.join(md, "dist_B.ome.tiff")))
+    dist_B = npx(open_multiband(os.path.join(md, "dist_B.ome.tiff")))
 
     # B-sep) distributed rigid + non-rigid SEPARATED (whole-image, JVM-free) -- the user's primary path.
     # Expected EXACTLY == classic whole-image (same OpticalFlowWarper on the same 2-D inputs).
@@ -138,7 +139,7 @@ def main():
     run([sys.executable, "bin/reg_finalize.py", "--inputs-dir", ti, "--field", os.path.join(md, "nr", "bk.v"),
          "--warp-state", os.path.join(md, "warp_state.json"), "--src-slide", src,
          "--out", os.path.join(md, "dist_Bsep.ome.tiff")])
-    dist_Bsep = npx(pyvips.Image.new_from_file(os.path.join(md, "dist_Bsep.ome.tiff")))
+    dist_Bsep = npx(open_multiband(os.path.join(md, "dist_Bsep.ome.tiff")))
 
     # in-process tiler reference (faithfulness baseline for B)
     moving = pyvips.Image.new_from_file(os.path.join(ti, "moving.v"))

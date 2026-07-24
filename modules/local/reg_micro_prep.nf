@@ -5,7 +5,7 @@
  * INJECTS the wave-1 composed field onto each moving slide, then runs register_micro with the warper
  * no-op'd to CAPTURE the micro 2-D inputs cheaply (halt before micro DeepFlow, low RAM). Dumps, per
  * moving slide, micro tiler_inputs (the 2-D images REG_NONRIGID/REG_TILE read at micro resolution) +
- * micro_warp_state.json (micro full_out_shape_rc + mask_bbox for the additive pad in REG_FINALIZE).
+ * micro_warp_state.json (micro full_out_shape_rc + mask_bbox for the additive pad in REG_COMPOSE_MICRO).
  *
  * Container: the EXTERNAL_TILE_HOOK-patched VALIS 1.0.0 image on Docker Hub
  * (bolt3x/attend_image_analysis:mirage_valis_1.0.0). Override via params.reg_dist_container.
