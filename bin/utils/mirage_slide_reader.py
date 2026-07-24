@@ -118,13 +118,11 @@ class MirageVipsSlideReader(slide_io.SlideReader):
 
         Sub-IFD pyramids are ACCEPTED: the C channels are the full-res MAIN IFDs and pyvips'
         ``n=-1`` read (``open_roll``) ignores the reduced-resolution sub-IFDs, so the
-        reconstructed image is the full-res slide -- proven by
-        ``test_valis_subifd_pyramid_reads_full_res_all_channels`` and
-        ``test_can_read_accepts_pyramidal_and_reads_full_res``. A prior CLASSIC registration run
+        reconstructed image is the full-res slide. A prior CLASSIC registration run
         writes exactly this, and add_cycle reuses it as the reference; rejecting it forced the
         BioFormats JVM into the heap-stripped tile fan-out (REG_GRID/REG_WARP_TILE), reviving
-        the OOM class f76da84 fixed. The SizeC reconciliation and band-join dims below still
-        guard against malformed layouts.
+        the OOM class this reader was written to eliminate. The SizeC reconciliation and band-join
+        dims below still guard against malformed layouts.
         """
         try:
             import tifffile
@@ -199,7 +197,7 @@ def get_reader_for(src_f, series=None):
 
     ``MIRAGE_FORCE_BIOFORMATS=1`` forces VALIS's own dispatch regardless of ``can_read`` -- the
     only way an integration test can produce a genuine BioFormats reference to diff the lazy
-    reader against (see tests/integration/verify_lowmem_bitidentical.py).
+    reader against (see the integration tests).
     """
     if os.environ.get("MIRAGE_FORCE_BIOFORMATS") == "1":
         return slide_io.get_slide_reader(str(src_f), series=series)

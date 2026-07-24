@@ -1,3 +1,10 @@
+/*
+ * CsvUtils - helpers for reading the pipeline's input sample sheet.
+ *
+ * Parses the input CSV (quote-aware), extracts per-sample metadata, and derives
+ * the per-patient / per-channel counts that the workflow injects into meta maps
+ * so channels can stream through groupTuple without buffering every sample.
+ */
 class CsvUtils {
 
     private static List<String> parseCsvLine(String line) {

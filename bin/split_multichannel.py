@@ -39,20 +39,21 @@ def split_multichannel_tiff(
     Split a multichannel TIFF into single-channel TIFFs.
     DAPI is only saved if is_reference=True.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     input_path : str
-        Path to the input multichannel TIFF file
+        Path to the input multichannel TIFF file.
     output_dir : str
-        Directory to save the single-channel TIFFs
+        Directory to save the single-channel TIFFs.
     is_reference : bool
         If True, saves DAPI channel. If False, skips DAPI.
     channel_names : list of str, optional
         Names for each channel. If None, tries to read from OME metadata.
 
-    Returns:
-    --------
-    list : Paths to the saved files
+    Returns
+    -------
+    list of str
+        Paths to the saved files.
     """
     # Read the image
     logger.info(f"Reading: {input_path}")
@@ -143,6 +144,7 @@ def split_multichannel_tiff(
 
 
 def main():
+    """CLI entry point: split a multichannel TIFF into single-channel TIFFs."""
     parser = argparse.ArgumentParser(
         description="Split multichannel TIFF into single-channel TIFFs (DAPI only from reference)",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,

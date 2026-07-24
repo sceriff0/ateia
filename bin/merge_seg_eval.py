@@ -16,6 +16,7 @@ def flatten(doc):
 
 
 def main():
+    """CLI entry point: merge per-patient CSE JSONs into one CSV (one row per patient)."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--inputs", nargs="+", required=True)
     ap.add_argument("--out", required=True)

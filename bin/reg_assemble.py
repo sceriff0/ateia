@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""REG_ASSEMBLE (spec §5.3): join warped output tiles into the final OME-TIFF.
+"""REG_ASSEMBLE: join warped output tiles into the final OME-TIFF.
 
 Two modes:
   --write-grid : build the same lazy warp reg_warp_tile.py will build, read the output canvas size
@@ -17,6 +17,7 @@ ragged canvas, and ``arrayjoin`` sizes every cell to the maximum and pads the di
 import argparse
 import glob
 import json
+import logging
 import os
 import sys
 
@@ -26,12 +27,17 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "utils"))
 
 import reg_finalize  # noqa: E402  (also sets the numba/matplotlib cache env before valis loads)
+from logger import configure_logging, get_logger  # noqa: E402
 from mirage_slide_reader import get_reader_for  # noqa: E402
 from tile_grid import output_grid  # noqa: E402
 from valis import registration, slide_io  # noqa: E402
 
+logger = get_logger(__name__)
+
 
 def main():
+    """CLI entry point: join warped output tiles into the final OME-TIFF, or emit the tile grid."""
+    configure_logging(level=logging.INFO)
     ap = argparse.ArgumentParser()
     ap.add_argument(
         "--warp-state", required=True, help="REG_PREP per-slide warp_state.json"
@@ -89,11 +95,10 @@ def _write_grid(args, ws):
     os.makedirs(os.path.dirname(os.path.abspath(args.write_grid)) or ".", exist_ok=True)
     with open(args.write_grid, "w") as fh:
         json.dump(grid, fh)
-    print(
-        f"[reg_assemble] grid {grid['n_cols']}x{grid['n_rows']} "
+    logger.info(
+        f"grid {grid['n_cols']}x{grid['n_rows']} "
         f"({len(grid['tiles'])} tiles of {args.tile_wh}px) for "
-        f"{warped.width}x{warped.height} -> {args.write_grid}",
-        flush=True,
+        f"{warped.width}x{warped.height} -> {args.write_grid}"
     )
     return 0
 
@@ -156,10 +161,9 @@ def _assemble(args, ws):
         tile_wh,
         args.compression,
     )
-    print(
-        f"[reg_assemble] wrote {args.out} ({full.width}x{full.height} bands={full.bands}, "
-        f"{len(grid['tiles'])} tiles)",
-        flush=True,
+    logger.info(
+        f"wrote {args.out} ({full.width}x{full.height} bands={full.bands}, "
+        f"{len(grid['tiles'])} tiles)"
     )
     return 0
 

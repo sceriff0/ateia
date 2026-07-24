@@ -372,24 +372,37 @@ def write_pyramidal_ome_tiff(
     - Base resolution: all channels as separate pages
     - SubIFDs: downsampled versions for each channel
 
-    Args:
-        data: 3D numpy array in CYX order (channels, height, width)
-        output_path: Output file path
-        channel_names: List of channel names
-        channel_colors: List of (R, G, B) tuples
-        phenotype_colormap: Optional colormap for phenotype labels
-        physical_size_x: Pixel size in X (micrometers)
-        physical_size_y: Pixel size in Y (micrometers)
-        pyramid_resolutions: Number of pyramid levels
-        pyramid_scale: Downscaling factor between levels
-        tile_size: Tile size for efficient access
-        compression: Compression algorithm
-        mask_stack: Optional (2, H, W) uint32 array of segmentation masks
-            (cell + nuclei labels). Written as a SECOND, single-resolution
-            OME series (Image:1) so categorical label IDs are never
-            mean-downsampled. Does not affect the intensity series (Image:0).
-        mask_names: Channel names for the mask series (default
-            ['cell_mask', 'nuclei_mask']).
+    Parameters
+    ----------
+    data : ndarray
+        3D numpy array in CYX order (channels, height, width).
+    output_path : str
+        Output file path.
+    channel_names : list of str
+        List of channel names.
+    channel_colors : list of tuple
+        List of (R, G, B) tuples.
+    phenotype_colormap : optional
+        Optional colormap for phenotype labels.
+    physical_size_x : float
+        Pixel size in X (micrometers).
+    physical_size_y : float
+        Pixel size in Y (micrometers).
+    pyramid_resolutions : int
+        Number of pyramid levels.
+    pyramid_scale : int
+        Downscaling factor between levels.
+    tile_size : int
+        Tile size for efficient access.
+    compression : str
+        Compression algorithm.
+    mask_stack : ndarray, optional
+        Optional (2, H, W) uint32 array of segmentation masks (cell + nuclei
+        labels). Written as a SECOND, single-resolution OME series (Image:1)
+        so categorical label IDs are never mean-downsampled. Does not affect
+        the intensity series (Image:0).
+    mask_names : list of str, optional
+        Channel names for the mask series (default ['cell_mask', 'nuclei_mask']).
     """
     # Defensive cast: float→uint16 for QuPath compatibility (per-channel to limit RAM)
     if data.dtype in (np.float32, np.float64):

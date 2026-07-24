@@ -1,3 +1,9 @@
+/*
+ * ParamUtils - validation helpers for the pipeline's step-routing parameters.
+ *
+ * Checks that --start / --stop name valid steps and are in the right order,
+ * against the canonical preprocessing -> registration -> postprocessing sequence.
+ */
 class ParamUtils {
 
     static final List STEP_ORDER = ['preprocessing', 'registration', 'postprocessing']

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""REG_WARP_TILE (spec §5.3): warp ONE output tile of one slide.
+"""REG_WARP_TILE: warp ONE output tile of one slide.
 
 Bit-identical to the whole-image warp BY CONSTRUCTION, not by approximation: this runs the same
 lazy ``reg_finalize.warp_source()`` and then ``.crop()``s the requested region. pyvips is
@@ -15,6 +15,7 @@ full-resolution slide in memory.
 
 import argparse
 import json
+import logging
 import os
 import sys
 
@@ -24,10 +25,15 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "utils"))
 
 import reg_finalize  # noqa: E402  (also sets the numba/matplotlib cache env before valis loads)
+from logger import configure_logging, get_logger  # noqa: E402
 from valis import registration  # noqa: E402
+
+logger = get_logger(__name__)
 
 
 def main():
+    """CLI entry point: warp one output tile of one slide and save it."""
+    configure_logging(level=logging.INFO)
     ap = argparse.ArgumentParser()
     ap.add_argument(
         "--warp-state", required=True, help="REG_PREP per-slide warp_state.json"
@@ -112,11 +118,10 @@ def main():
     else:
         out = os.path.join(args.out_dir, f"tile_{args.tile_idx}.tif")
         _save_tile_tiff(region, out, args.tile_compression)
-    print(
-        f"[reg_warp_tile] {out} ({tile['w']}x{tile['h']} @ {tile['x']},{tile['y']} "
+    logger.info(
+        f"{out} ({tile['w']}x{tile['h']} @ {tile['x']},{tile['y']} "
         f"of {grid['width']}x{grid['height']}, bands={region.bands}, "
-        f"{os.path.getsize(out) / 1e6:.1f}MB)",
-        flush=True,
+        f"{os.path.getsize(out) / 1e6:.1f}MB)"
     )
     if heap_gb:
         registration.kill_jvm()
@@ -129,7 +134,7 @@ LOSSLESS_CODECS = ("deflate", "lzw", "zstd", "none")
 def _save_tile_tiff(img, path, compression):
     """Write one warped output tile as a tiled, losslessly-compressed TIFF.
 
-    Lossless is a HARD requirement, not a preference: leg 2 of the integration test asserts the
+    Lossless is a HARD requirement, not a preference: the integration tests assert the
     reassembled slide is bit-identical to the single-process warp, so a lossy codec here is a
     correctness bug, not a quality trade. jpeg/jp2k are therefore rejected rather than warned about.
 

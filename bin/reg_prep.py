@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""REG_PREP (fix-A, spec §6.6): distributed-tiling stage 1.
+"""REG_PREP: distributed-tiling stage 1.
 
 Run VALIS rigid registration + produce base VALIS's *processed 2-D* non-rigid inputs, but halt
 BEFORE the whole-image DeepFlow (so no heavy non-rigid runs here — low RAM). Dump, per moving slide:
 the 2-D images + tile grid (the ``valis_tiling`` contract REG_TILE reads) and a plain ``warp_state.json``
-(the §6.3 contract REG_FINALIZE reads). No registrar pickle (Blocker 1).
+(the contract REG_FINALIZE reads). No registrar pickle.
 
-Why this is bit-identical by construction (spec §6.5/§6.6): the dumped 2-D images are VALIS's OWN
-processed images (captured live, ChannelGetter w/ src_f present), the tile kernel is VALIS's (§6.1),
-and compose+warp is VALIS's (§6.3). So distributed == VALIS's tiler run in-process on its own 2-D image.
+Why this is bit-identical by construction: the dumped 2-D images are VALIS's OWN
+processed images (captured live, ChannelGetter w/ src_f present), the tile kernel is VALIS's,
+and compose+warp is VALIS's. So distributed == VALIS's tiler run in-process on its own 2-D image.
 
 To get the processed-2-D images without paying for DeepFlow: force the processed branch
 (``TILER_THRESH_GB`` high so ``prep_images_for_large_non_rigid_registration`` processes to 2-D), then
@@ -18,6 +18,7 @@ field. ``Valis.register()`` then completes cheaply; rigid + non-rigid-prep state
 
 import argparse
 import json
+import logging
 import os
 import sys
 import time
@@ -37,6 +38,7 @@ os.environ.setdefault("XDG_CACHE_HOME", "/tmp/xdg_cache")
 import numpy as np
 import pyvips
 import valis_tiling
+from logger import configure_logging, get_logger
 from micro_rigid_guard import install_micro_rigid_guard
 from mirage_slide_reader import MirageVipsSlideReader, all_readable
 from valis import registration
@@ -45,11 +47,12 @@ from valis.non_rigid_registrars import NonRigidTileRegistrar, OpticalFlowWarper
 from valis.registration import CROP_REF
 from valis_config import build_registrar_kwargs, maybe_init_jvm, slide_paths
 
+logger = get_logger(__name__)
 _TIMINGS = {}
 
 
 class _stage:
-    """Record wall-clock per prep phase (spec §5.6).
+    """Record wall-clock per prep phase.
 
     REG_PREP is the one process on the distributed path that still does whole-slide work, so it is
     the one whose cost is not obvious from the DAG. Recording it per phase means the FIRST real run
@@ -67,7 +70,7 @@ class _stage:
 
     def __exit__(self, *exc):
         _TIMINGS[self.name] = round(time.perf_counter() - self.t0, 3)
-        print(f"[reg_prep] stage {self.name}: {_TIMINGS[self.name]}s", flush=True)
+        logger.info(f"stage {self.name}: {_TIMINGS[self.name]}s")
         return False
 
 
@@ -77,9 +80,7 @@ def _write_timings(out_dir):
         with open(os.path.join(out_dir, "stage_timings.json"), "w") as fh:
             json.dump(_TIMINGS, fh, indent=2)
     except OSError as exc:
-        print(
-            f"[reg_prep] WARNING: could not write stage_timings.json: {exc}", flush=True
-        )
+        logger.warning(f"could not write stage_timings.json: {exc}")
 
 
 def _jd(o):
@@ -93,6 +94,8 @@ def _jd(o):
 
 
 def main():
+    """CLI entry point: run the distributed-tiling prep stage (rigid + processed 2-D input capture)."""
+    configure_logging(level=logging.INFO)
     ap = argparse.ArgumentParser()
     ap.add_argument("--input-dir", required=True)
     ap.add_argument("--out", required=True)
@@ -119,18 +122,17 @@ def main():
     # Size the BioFormats JVM heap to the inputs only if some input is NOT mirage-readable.
     #
     # This does NOT mean no JVM runs. Valis.__init__ starts one unconditionally --
-    # registration.py:2083 -> slide_tools.get_img_type() -> slide_io.init_jvm() -- to probe file
-    # types, before reader_cls is ever consulted. That JVM uses VALIS's small default heap and only
-    # sniffs extensions, so it is not the RAM wall. The wall was BioFormats decoding a whole slide
-    # into a heap sized 3*filesize+8, and THAT is what the lazy reader removes. Say "no
-    # slide-scaled heap", never "JVM-free" (spec assumption A2 is false).
+    # slide_tools.get_img_type() -> slide_io.init_jvm() -- to probe file types, before reader_cls
+    # is ever consulted. That JVM uses VALIS's small default heap and only sniffs extensions, so it
+    # is not the RAM wall. The wall was BioFormats decoding a whole slide into a heap sized
+    # 3*filesize+8, and THAT is what the lazy reader removes. Say "no slide-scaled heap", never
+    # "JVM-free".
     heap = maybe_init_jvm(args.input_dir, override_gb=args.jvm_heap_gb)
-    print(
-        f"[reg_prep] JVM heap = {heap} GB"
+    logger.info(
+        f"JVM heap = {heap} GB"
         if heap
-        else "[reg_prep] all inputs readable by MirageVipsSlideReader; no slide-scaled JVM heap "
-        "(Valis still starts a default-heap JVM to probe file types)",
-        flush=True,
+        else "all inputs readable by MirageVipsSlideReader; no slide-scaled JVM heap "
+        "(Valis still starts a default-heap JVM to probe file types)"
     )
 
     # Make rigid-stage micro alignment robust to featureless input (no-op on real data); see module.
@@ -264,10 +266,7 @@ def main():
         os.makedirs(rdir, exist_ok=True)
         with open(os.path.join(rdir, "warp_state.json"), "w") as fh:
             json.dump(_warp_state(ref_slide, ref_stem), fh, indent=2, default=_jd)
-        print(
-            f"[reg_prep] dumped REFERENCE {ref_stem} warp_state (rigid-only)",
-            flush=True,
-        )
+        logger.info(f"dumped REFERENCE {ref_stem} warp_state (rigid-only)")
     else:
         raise RuntimeError(
             "[reg_prep] no reference slide resolved by VALIS (reg.get_ref_slide() is None)"
@@ -317,10 +316,9 @@ def main():
             with open(os.path.join(sdir, "warp_state.json"), "w") as fh:
                 json.dump(ws, fh, indent=2, default=_jd)
             slides_written.append(name)
-            print(
-                f"[reg_prep] dumped {name}: tiler_inputs + warp_state "
-                f"(reg_shape={ws['reg_img_shape_rc']} bbox={ws['bbox_xywh']})",
-                flush=True,
+            logger.info(
+                f"dumped {name}: tiler_inputs + warp_state "
+                f"(reg_shape={ws['reg_img_shape_rc']} bbox={ws['bbox_xywh']})"
             )
 
     # Written BEFORE the loss guard below, so a run that fails it still says where the time went.
@@ -343,10 +341,9 @@ def main():
 
     if heap:
         registration.kill_jvm()
-    print(
-        f"[reg_prep] DONE — {len(slides_written)} moving slide(s): {slides_written} "
-        f"timings={_TIMINGS}",
-        flush=True,
+    logger.info(
+        f"DONE — {len(slides_written)} moving slide(s): {slides_written} "
+        f"timings={_TIMINGS}"
     )
 
 

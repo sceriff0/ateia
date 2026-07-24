@@ -1,13 +1,13 @@
 """Pure tile-grid computation for the two grids the distributed path needs.
 
 `build_grid` is the INPUT grid: identical to VALIS 1.0.0 NonRigidTileRegistrar.register(), it
-reproduces registration's internal grid bookkeeping (non_rigid_registrars.py:1458-1465) so REG_PREP
+reproduces registration's internal grid bookkeeping (non_rigid_registrars.py) so REG_PREP
 can emit a tile manifest whose indices/bboxes match what classic VALIS would compute for itself.
 Keeping this in one wrapper means the manifest, REG_TILE, and REG_FINALIZE all share one source of
 truth for the grid.
 
 `output_grid` is the OUTPUT grid, which has no VALIS counterpart: it partitions the warped canvas so
-the full-res warp can be fanned out over processes (spec §5.3). It is deliberately buffer-free --
+the full-res warp can be fanned out over processes. It is deliberately buffer-free --
 see its docstring.
 """
 
@@ -47,7 +47,7 @@ def output_grid(width, height, tile_wh):
     needs -- including the bicubic interpolator's halo, across the tile edge -- computed by the
     same code as the whole-image warp. The tiles are therefore bit-identical to the corresponding
     regions of the single-process warp BY CONSTRUCTION, and can be joined edge-to-edge with no
-    blending (verified as leg 2 of tests/integration/verify_lowmem_bitidentical.py).
+    blending (verified by the integration tests).
 
     Tiles are numbered row-major and cover the canvas exactly: reg_assemble.py selects a row with
     ``t["y"] == r * tile_wh`` and joins in ascending ``x``, so both properties are load-bearing.

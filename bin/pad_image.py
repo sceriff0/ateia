@@ -30,16 +30,23 @@ def pad_image_to_shape(
 ) -> np.ndarray:
     """Pad image to target spatial dimensions using symmetric padding.
 
-    Note: Only pads height and width - channel count is preserved.
+    Only height and width are padded; channel count is preserved.
 
-    Parameters:
-        img (ndarray): Input image in (C, H, W) format
-        target_h (int): Target height
-        target_w (int): Target width
-        mode (str): Padding mode ('constant', 'edge', 'reflect', 'symmetric')
+    Parameters
+    ----------
+    img : ndarray
+        Input image in (C, H, W) format.
+    target_h : int
+        Target height.
+    target_w : int
+        Target width.
+    mode : str
+        Padding mode ('constant', 'edge', 'reflect', 'symmetric').
 
-    Returns:
-        ndarray: Padded image
+    Returns
+    -------
+    ndarray
+        Padded image.
     """
     c_img, h_img, w_img = img.shape
 
@@ -223,6 +230,7 @@ def pad_single_image(
 
 
 def main():
+    """CLI entry point: pad each input image to the target dimensions and write the result."""
     parser = argparse.ArgumentParser(description="Pad image to target dimensions")
     parser.add_argument("--input", type=str, required=True, help="Input image path")
     parser.add_argument("--output", type=str, required=True, help="Output image path")

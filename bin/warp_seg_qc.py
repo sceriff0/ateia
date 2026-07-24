@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """Staged, fixed-correspondence segmentation-overlap registration QC (reg_qc=2).
 
 Each slide's nuclei are segmented on its NATIVE (pre-registration) image and exported as a cell
@@ -18,8 +18,8 @@ run there is pairing noise. And because ``MicroRigidRegistrar`` runs inside ``re
 later stage builds on; the pairing is therefore valid for all of them by construction.
 
 Holding the pairing is what makes the per-stage numbers mean something. Re-deriving the match
-at each stage — what this script used to do — lets a score move because *different cells got
-paired*, or because a cell the rasterizer occluded at one stage reappeared at another. Neither
+at each stage lets a score move because *different cells got paired*, or because a cell the
+rasterizer occluded at one stage reappeared at another. Neither
 is a registration effect. With the pairing fixed, every change between stages is geometry.
 
 Two metrics per stage, both over the fixed pairs:
@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import sys
 import time
@@ -63,6 +64,7 @@ os.environ.setdefault("MPLCONFIGDIR", "/tmp/mplconfig")
 os.environ.setdefault("XDG_CACHE_HOME", "/tmp/xdg_cache")
 
 import numpy as np
+from logger import configure_logging, get_logger
 from utils import cell_pairs as cp
 from utils.valis_stage_warp import (
     STAGE_MICRO,
@@ -70,6 +72,8 @@ from utils.valis_stage_warp import (
     STAGE_NON_RIGID,
     STAGE_RIGID,
 )
+
+logger = get_logger(__name__)
 
 ANCHOR_STAGE = STAGE_RIGID
 # Pair two cells only if each is the other's nearest centroid AND they are within this many
@@ -94,11 +98,12 @@ _DELTA_KEYS = (
 
 def _log(msg, t0=None):
     suffix = f" ({time.perf_counter() - t0:.1f}s)" if t0 is not None else ""
-    print(f"[warp_seg_qc] {msg}{suffix}", flush=True)
+    logger.info(f"{msg}{suffix}")
 
 
 # ── VALIS access (lazy + injectable) ───────────────────────────────────────────
 def default_loader(pickle_path):
+    """Load a VALIS registrar from a pickle path (lazy VALIS import)."""
     from valis import registration  # lazy: real VALIS package, as in bin/register.py
 
     return registration.load_registrar(str(pickle_path))
@@ -334,6 +339,7 @@ def run(
 def build_record(
     result, patient_id, moving_name, reference_name, separable, note
 ) -> dict:
+    """Assemble the per-slide QC record (per-stage metrics + deltas vs. the anchor) as a dict."""
     rec = {
         "patient_id": patient_id,
         "moving": os.path.basename(str(moving_name)),
@@ -415,6 +421,7 @@ def write_report(
 
 
 def parse_args(argv=None):
+    """Parse command-line arguments."""
     ap = argparse.ArgumentParser(
         description="Staged, fixed-correspondence segmentation-overlap registration QC."
     )
@@ -506,6 +513,8 @@ def parse_args(argv=None):
 
 
 def main(argv=None):
+    """CLI entry point: run the staged segmentation-overlap registration QC and write the report."""
+    configure_logging(level=logging.INFO)
     a = parse_args(argv)
 
     # Start the BioFormats JVM BEFORE any slide I/O. registration.load_registrar() unpickles VALIS
@@ -550,7 +559,7 @@ def main(argv=None):
     last = rec["stage_order"][-1]
     anchor, final = rec["stages"][ANCHOR_STAGE], rec["stages"][last]
     delta = rec["delta_vs_anchor"].get(last, {})
-    print(
+    logger.info(
         f"Wrote {a.output}: pairs={rec['matching']['n_pairs']} "
         f"({rec['matching']['pair_fraction']:.1%} of cells) | "
         f"{ANCHOR_STAGE}: iou={anchor.get('iou_mean', nan):.4f} "

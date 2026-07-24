@@ -84,7 +84,7 @@ def _system_memory_gb():
 
 
 def init_jvm(input_dir, override_gb=None):
-    """Size and start the BioFormats JVM heap to the inputs, mirroring bin/register.py:333-335.
+    """Size and start the BioFormats JVM heap to the inputs, mirroring bin/register.py.
 
     The distributed prep stages (reg_prep, reg_micro_prep) construct a real ``Valis`` and read slides
     via BioFormats, exactly like classic register.py — so they MUST init the JVM with a heap sized to

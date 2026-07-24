@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Estimate VALIS's non-rigid RAM (`est_GB`) for a patient's slides, to decide tiling.
 
-Replicates VALIS 1.0.0's own tiling decision (registration.py:3455-3462): non-rigid registration
+Replicates VALIS 1.0.0's own tiling decision: non-rigid registration
 tiles iff `est_GB > TILER_THRESH_GB` (10). We reproduce the *exact* formula (including VALIS's
 `calc_memory_size_gb` bitdepth quirk) so the Nextflow router matches what classic VALIS would do:
 
@@ -51,6 +51,7 @@ def read_meta(path):
 
 
 def main():
+    """CLI entry point: estimate non-rigid registration RAM and print the tiling decision."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--reference", required=True, help="reference image path")
     ap.add_argument(
@@ -85,7 +86,7 @@ def main():
     img_gb = n_slides * calc_memory_size_gb(nr_shape, rnch, rdtype)
     est_gb = img_gb + displacement_gb + processed_img_gb
     # est_gb (non-rigid) is computed at the downsampled non-rigid resolution -> it's tiny and rarely
-    # exceeds the tiler threshold (spec §6.7). Tiling is therefore the rare 'force' case. The routing
+    # exceeds the tiler threshold. Tiling is therefore the rare 'force' case. The routing
     # criterion the user actually wants ("small -> classic VALIS") is the FULL-RES INPUT size, which
     # drives the BioFormats JVM heap (their RAM hotspot): large inputs -> distributed (JVM-free non-rigid).
     use_distributed = total_input_gb >= args.min_input_gb

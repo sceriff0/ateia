@@ -2,12 +2,12 @@
 ``skip_micro_registration=false``).
 
 VALIS's ``MicroRigidRegistrar.align_slides`` does ``np.vstack(high_rez_match_list)``
-(``micro_rigid_registrar.py:331``) with NO guard for the case where no high-resolution feature
+(in ``micro_rigid_registrar.py``) with NO guard for the case where no high-resolution feature
 matches are found in any tile — it raises ``ValueError: need at least one array to concatenate`` and
 takes down the whole ``register()`` run. This happens on low-texture / featureless regions (and on
 synthetic fixtures, which lack distinctive high-rez SuperPoint/SuperGlue features).
 
-The vstack is reached BEFORE the slide's ``M`` is updated (M is computed at line 356+), so "no
+The vstack is reached BEFORE the slide's ``M`` is updated (M is computed further down), so "no
 high-rez matches" should simply mean "no micro-rigid adjustment" (leave the rigid ``M`` as-is) — not a
 crash. This guard wraps ``align_slides`` to do exactly that.
 

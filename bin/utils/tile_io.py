@@ -1,10 +1,10 @@
 """Lossless float32 displacement-field I/O via pyvips `.v` (native, uncompressed).
 
-Per spec §5 precondition 2: the on-disk container for per-tile displacement fields exchanged
-between REG_TILE and REG_STITCH must round-trip float32 EXACTLY — no quantization, no lossy
-compression — or the stitched field diverges from classic VALIS. pyvips `.v` is the raw native
-format (no codec), and warp_tools.numpy2vips/vips2numpy are the exact helpers VALIS itself uses
-to move tile fields between numpy and pyvips (non_rigid_registrars.py:1347).
+The on-disk container for per-tile displacement fields exchanged between REG_TILE and REG_STITCH
+must round-trip float32 EXACTLY — no quantization, no lossy compression — or the stitched field
+diverges from classic VALIS. pyvips `.v` is the raw native format (no codec), and
+warp_tools.numpy2vips/vips2numpy are the exact helpers VALIS itself uses to move tile fields
+between numpy and pyvips.
 """
 
 import numpy as np

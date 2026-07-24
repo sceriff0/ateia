@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""REG_NONRIGID (spec §6.7): whole-image non-rigid registration in a JVM-FREE process.
+"""REG_NONRIGID: whole-image non-rigid registration in a JVM-FREE process.
 
 The user's RAM hotspot is the BioFormats JVM heap held *during* the non-rigid pass. The non-rigid
 pass itself (OpticalFlowWarper / DeepFlow) needs no JVM — just pyvips + OpenCV. So running it
@@ -14,7 +14,11 @@ emits the backward field bk.v (== classic's `moving_bk_dxdy`, the input to REG_F
 
 import argparse
 import json
+import logging
 import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "utils"))
 
 # Read-only $HOME on HPC clusters breaks numba's on-disk cache during the valis
 # import (RuntimeError: '_repeat_1d': no locator available). Redirect + disable
@@ -28,8 +32,11 @@ os.environ.setdefault("XDG_CACHE_HOME", "/tmp/xdg_cache")
 
 import numpy as np
 import pyvips
+from logger import configure_logging, get_logger
 from valis import warp_tools
 from valis.non_rigid_registrars import OpticalFlowWarper
+
+logger = get_logger(__name__)
 
 
 def _save_field(field, path):
@@ -48,6 +55,8 @@ def _save_field(field, path):
 
 
 def main():
+    """CLI entry point: run whole-image non-rigid registration and save the displacement field."""
+    configure_logging(level=logging.INFO)
     ap = argparse.ArgumentParser()
     ap.add_argument(
         "--inputs-dir",
@@ -78,9 +87,8 @@ def main():
 
     os.makedirs(args.out_dir, exist_ok=True)
     _save_field(bk_dxdy, os.path.join(args.out_dir, "bk.v"))
-    print(
-        f"[reg_nonrigid] whole-image field -> {args.out_dir}/bk.v (pid={os.getpid()}, no JVM)",
-        flush=True,
+    logger.info(
+        f"whole-image field -> {args.out_dir}/bk.v (pid={os.getpid()}, no JVM)"
     )
 
 

@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """Segment one slide's DAPI on its NATIVE image and write a cell GeoJSON (reg_qc=2).
 
 Thin orchestration for the GeoJSON/warp registration QC: extract + normalize DAPI
@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 
 def pick_dapi_index(channel_names) -> int:
+    """Return the index of the first channel whose name contains 'DAPI', or 0 if none match."""
     for i, ch in enumerate(channel_names or []):
         if "DAPI" in str(ch).upper():
             return i
@@ -24,6 +25,7 @@ def pick_dapi_index(channel_names) -> int:
 
 
 def find_dapi_index(image_path) -> int:
+    """Return the DAPI channel index for ``image_path``, read from its OME channel names."""
     from utils.metadata import extract_channel_names_from_ome
 
     return pick_dapi_index(extract_channel_names_from_ome(image_path))
@@ -43,6 +45,10 @@ def segment_to_geojson(
     prob_thresh=None,
     simplify_tolerance=0.5,
 ) -> int:
+    """Segment DAPI nuclei to whole-cell polygons and write them as a GeoJSON.
+
+    Returns the number of cell features written.
+    """
     import mask_to_geojson
     import segment
 
@@ -68,6 +74,7 @@ def segment_to_geojson(
 
 
 def parse_args(argv=None):
+    """Parse command-line arguments."""
     ap = argparse.ArgumentParser(description="Segment a slide's DAPI -> cell GeoJSON.")
     ap.add_argument("--image", required=True, help="native (pre-registration) OME-TIFF")
     ap.add_argument("--output", required=True, help="output cell GeoJSON")
@@ -90,6 +97,7 @@ def parse_args(argv=None):
 
 
 def main(argv=None):
+    """CLI entry point: segment a slide's DAPI channel and write a cell GeoJSON."""
     a = parse_args(argv)
     n = segment_to_geojson(
         a.image,

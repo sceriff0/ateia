@@ -17,6 +17,7 @@ import tifffile
 
 
 def main() -> None:
+    """CLI entry point: extract the mask series from a pyramid OME-TIFF into cell/nuclei mask TIFFs."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--pyramid", type=Path, required=True)
     ap.add_argument("--outdir", type=Path, required=True)

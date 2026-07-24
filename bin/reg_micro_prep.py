@@ -1,28 +1,29 @@
 #!/usr/bin/env python3
-"""REG_MICRO_PREP (spec §5A Option-2): distributed MICRO-registration wave, stage 1.
+"""REG_MICRO_PREP: distributed MICRO-registration wave, stage 1.
 
 Micro-registration is VALIS's SECOND non-rigid pass, at higher resolution (micro_reg_size =
 floor(min_max_full_res_dim * micro_reg_fraction)). It is the *heavier* pass, so — like wave 1 —
 we run its expensive DeepFlow in a separate JVM-free process (REG_NONRIGID), NOT in REG_FINALIZE.
 
 This stage mirrors reg_prep.py (rigid + processed-2-D capture, no-op warper => no DeepFlow, low RAM),
-with two micro-specific additions (registration.py:4170-4339):
+with two micro-specific additions:
   1. INJECT the wave-1 backward field onto each moving slide's ``bk_dxdy`` BEFORE the updating-mode
      prep, so ``prep_images_for_large_non_rigid_registration(updating_non_rigid=True)`` warps the
-     moving image through ``M`` + wave-1 field (registration.py:3491-3492) before capturing the micro
+     moving image through ``M`` + wave-1 field before capturing the micro
      2-D inputs. The wave-1 field handed in (``--wave1-field``) is the COMPOSED full field that classic
      ``register()`` leaves on ``slide.bk_dxdy`` (== reg_finalize's padded ``slide_bk``); we synthesize a
-     zero ``fwd_dxdy`` of the same shape so register_micro's additive compose (reads ``fwd_dxdy``
-     @registration.py:4300) doesn't crash — its output is discarded; FINALIZE recomputes the warp field.
+     zero ``fwd_dxdy`` of the same shape so register_micro's additive compose (reads ``fwd_dxdy``)
+     doesn't crash — its output is discarded; FINALIZE recomputes the warp field.
   2. Capture, per moving slide, the micro 2-D inputs (the ``valis_tiling`` contract REG_NONRIGID/REG_TILE
      read) + a ``micro_warp_state.json`` carrying ``full_out_shape_rc`` and ``mask_bbox`` (for the
-     additive pad at registration.py:4314) and ``from_rigid_reg`` (for the §6.3 micro compose).
+     additive pad) and ``from_rigid_reg`` (for the micro compose).
 
-The additive compose (scale(wave1) + pad(residual)) is proven max|Δ|=0 by spike_micro_option2.py.
+The additive compose (scale(wave1) + pad(residual)) is bit-identical to classic (max|Δ|=0).
 """
 
 import argparse
 import json
+import logging
 import os
 import sys
 
@@ -43,6 +44,7 @@ import numpy as np
 import pyvips
 import reg_finalize  # reuse the EXACT wave-1 compose+pad that produces classic slide.bk_dxdy
 import valis_tiling
+from logger import configure_logging, get_logger
 from micro_rigid_guard import install_micro_rigid_guard
 from mirage_slide_reader import MirageVipsSlideReader, all_readable
 from valis import registration
@@ -50,6 +52,8 @@ from valis import serial_non_rigid as snr
 from valis.non_rigid_registrars import NonRigidTileRegistrar, OpticalFlowWarper
 from valis_config import build_registrar_kwargs, maybe_init_jvm, slide_paths
 from valis_config import micro_reg_size as compute_micro_reg_size
+
+logger = get_logger(__name__)
 
 
 def _jd(o):
@@ -90,6 +94,8 @@ def _composed_wave1_field(slide_name, wave1_dir, prep_dir):
 
 
 def main():
+    """CLI entry point: run the micro-registration prep stage and dump per-slide micro inputs."""
+    configure_logging(level=logging.INFO)
     ap = argparse.ArgumentParser()
     ap.add_argument("--input-dir", required=True)
     ap.add_argument("--out", required=True)
@@ -130,12 +136,11 @@ def main():
     # Size the BioFormats JVM heap to the inputs only if some input is NOT mirage-readable.
     # A default-heap JVM still starts inside Valis.__init__ for file-type probing; see reg_prep.py.
     heap = maybe_init_jvm(args.input_dir, override_gb=args.jvm_heap_gb)
-    print(
-        f"[reg_micro_prep] JVM heap = {heap} GB"
+    logger.info(
+        f"JVM heap = {heap} GB"
         if heap
-        else "[reg_micro_prep] all inputs readable by MirageVipsSlideReader; no slide-scaled JVM heap "
-        "(Valis still starts a default-heap JVM to probe file types)",
-        flush=True,
+        else "all inputs readable by MirageVipsSlideReader; no slide-scaled JVM heap "
+        "(Valis still starts a default-heap JVM to probe file types)"
     )
 
     install_micro_rigid_guard()  # robust micro-rigid (no-op on real data; see module)
@@ -242,9 +247,8 @@ def main():
         micro_size = compute_micro_reg_size(
             reg.slide_dict, micro_reg_fraction=args.micro_fraction
         )
-        print(
-            f"[reg_micro_prep] micro_reg_size={micro_size}px (fraction={args.micro_fraction})",
-            flush=True,
+        logger.info(
+            f"micro_reg_size={micro_size}px (fraction={args.micro_fraction})"
         )
         reg.register_micro(
             max_non_rigid_registration_dim_px=micro_size,
@@ -257,8 +261,8 @@ def main():
         OpticalFlowWarper.register = orig_reg
 
     # Micro full_out_shape / mask_bbox are per-Valis, set unconditionally at register_micro's end
-    # (registration.py:4374-4375) — more reliable than hooking pad_displacement (which only fires when
-    # the residual is smaller than full_out). They are the SAME for every slide in the micro pass.
+    # — more reliable than hooking pad_displacement (which only fires when the residual is smaller
+    # than full_out). They are the SAME for every slide in the micro pass.
     micro_full_out = [int(x) for x in reg._full_displacement_shape_rc]
     micro_bbox = [int(x) for x in reg._non_rigid_bbox]
 
@@ -302,10 +306,9 @@ def main():
         with open(os.path.join(sdir, "micro_warp_state.json"), "w") as fh:
             json.dump(mws, fh, indent=2, default=_jd)
         slides_written.append(name)
-        print(
-            f"[reg_micro_prep] dumped {name}: micro tiler_inputs + micro_warp_state "
-            f"(full_out={mws['micro_full_out_shape_rc']} bbox={mws['micro_mask_bbox_xywh']})",
-            flush=True,
+        logger.info(
+            f"dumped {name}: micro tiler_inputs + micro_warp_state "
+            f"(full_out={mws['micro_full_out_shape_rc']} bbox={mws['micro_mask_bbox_xywh']})"
         )
 
     # Same silent-loss guard as reg_prep: every non-reference slide must have produced a micro dump.
@@ -321,9 +324,8 @@ def main():
 
     if heap:
         registration.kill_jvm()
-    print(
-        f"[reg_micro_prep] DONE — {len(slides_written)} moving slide(s): {slides_written}",
-        flush=True,
+    logger.info(
+        f"DONE — {len(slides_written)} moving slide(s): {slides_written}"
     )
 
 

@@ -73,9 +73,9 @@ from valis import warp_tools as valis_warp_tools
 # Non-rigid registrars - OpticalFlowWarper is default, NonRigidTileRegistrar for large images
 from valis.non_rigid_registrars import OpticalFlowWarper
 
-# Note: AffineOptimizerMattesMI removed - requires SimpleITK with Elastix bindings
-# which is not available in this environment. Registration still works via
-# SuperPoint/SuperGlue feature matching without the affine optimizer refinement.
+# AffineOptimizerMattesMI refinement is not used: it requires SimpleITK with Elastix bindings,
+# which is not available in this environment. Registration works via SuperPoint/SuperGlue feature
+# matching without the affine optimizer refinement.
 # Memory mode presets + registrar-kwargs builder live in the shared single-source-of-truth module
 # so the distributed path (bin/reg_prep.py) builds a bit-identical Valis. See bin/utils/valis_config.py.
 from valis_config import MEMORY_PRESETS, build_registrar_kwargs

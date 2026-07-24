@@ -1,10 +1,10 @@
 """Set/clear ``NonRigidTileRegistrar.EXTERNAL_TILE_HOOK`` — the explicit seam patched into VALIS
-1.0.0 (spec §6 Option B, ``containers/valis/calc_hook.patch``) — to externalize the non-rigid tile
+1.0.0 (``containers/valis/calc_hook.patch``) — to externalize the non-rigid tile
 loop into separate Nextflow processes. This is the ONLY module that knows the seam.
 
-Design (spec §6.1/§6.2/§6.3, all proven by the spikes):
+Design:
   * ``install_halt_hook`` — used by REG_PREP. Dumps the tiler's inputs to disk, then raises
-    ``TilesPending``. ``Valis.register()`` swallows the exception (Blocker 2) and returns ``None``;
+    ``TilesPending``. ``Valis.register()`` swallows the exception and returns ``None``;
     PREP detects the halt by the populated dump dir, NOT by catching the exception. PREP does NO
     tile compute on the fat JVM node.
   * ``install_dump_hook`` — fallback / non-decomposed mode: dump inputs, then run the real loop
@@ -65,7 +65,7 @@ def _dump_inputs(self, out_dir):
         "tile_buffer": int(self.tile_buffer),
         "has_mask": has_mask,
         "has_target_stats": has_target_stats,
-        # processing is done in PREP (src_f live, Blocker 3); REG_TILE runs processing_cls=None.
+        # processing is done in PREP (src_f live); REG_TILE runs processing_cls=None.
         "processing_cls": _cls_path(getattr(self, "processing_cls", None)),
         "processing_kwargs": getattr(self, "processing_kwargs", None),
         "non_rigid_registrar_cls": _cls_path(self.non_rigid_registrar_cls),
@@ -75,9 +75,9 @@ def _dump_inputs(self, out_dir):
 
 
 def install_halt_hook(out_dir):
-    """REG_PREP default (§5C): dump inputs then RAISE — no tile compute on the fat JVM node.
+    """REG_PREP default: dump inputs then RAISE — no tile compute on the fat JVM node.
 
-    ``Valis.register()`` catches the raise and returns ``None`` (Blocker 2); PREP treats a populated
+    ``Valis.register()`` catches the raise and returns ``None``; PREP treats a populated
     ``out_dir`` (manifest.json present) as the halt signal.
     """
 

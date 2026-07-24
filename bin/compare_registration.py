@@ -6,8 +6,8 @@ keep the VALIS guarantees?" on REAL data, instead of on the 128 px synthetic fix
 bit-identity suite uses. Streams both images in tiles so it runs in bounded RAM on the same
 low-resource machine the new path targets: peak footprint is O(TILE^2 * C), not O(slide).
 
-Preconditions are asserted, not assumed (spec/handoff section 4.4 -- every vacuous result on this
-branch came from checking an outcome without pinning what makes it meaningful):
+Preconditions are asserted, not assumed -- every vacuous result on this branch came from checking
+an outcome without pinning what makes it meaningful:
 
   * the two inputs must be DIFFERENT files -- comparing a slide with itself reports a perfect
     max|delta|=0.0 that says nothing about either registration path;
@@ -21,6 +21,7 @@ for a reason belonging to the registration stack it is measuring.
 
 import argparse
 import json
+import logging
 import os
 import sys
 
@@ -28,7 +29,10 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "utils"))
 
+from logger import configure_logging, get_logger  # noqa: E402
 from vips_pages import open_multiband  # noqa: E402
+
+logger = get_logger(__name__)
 
 TILE = 2048
 
@@ -81,6 +85,8 @@ def _write(path, payload):
 
 
 def main():
+    """CLI entry point: compare two registered slides tile-by-tile and report their divergence."""
+    configure_logging(level=logging.INFO)
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument(
         "--a", required=True, help="classic VALIS registered slide (the reference)"
@@ -176,12 +182,11 @@ def main():
     scale = min(1.0, args.png_max_dim / float(max(a.width, a.height)))
     diff.resize(scale).cast("uchar").write_to_file(args.out_png)
 
-    print(
-        f"[compare_registration] {args.slide}: {a.width}x{a.height}x{c} "
+    logger.info(
+        f"{args.slide}: {a.width}x{a.height}x{c} "
         f"max|delta|={report['overall']['max_abs']} "
         f"rmse={report['overall']['rmse']:.6g} "
-        f"pct_differing={report['overall']['pct_differing']:.6f}%",
-        flush=True,
+        f"pct_differing={report['overall']['pct_differing']:.6f}%"
     )
     return 0
 

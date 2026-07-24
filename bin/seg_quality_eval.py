@@ -50,6 +50,7 @@ def _read_image_cyx(path):
 
 
 def main():
+    """CLI entry point: evaluate one patient's cell segmentation with vendored CSE and write the result."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--cell-mask", required=True)
     ap.add_argument("--nuclei-mask", required=True)

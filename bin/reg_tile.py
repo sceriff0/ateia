@@ -1,20 +1,24 @@
 #!/usr/bin/env python3
 """REG_TILE (distributed tiling stage 2, fan-out): compute ONE tile's bk/fwd displacement field
 using VALIS 1.0.0's own ``NonRigidTileRegistrar.reg_tile`` kernel, in a fresh, JVM-free process
-(~1-2 GB). Proven bit-identical to the in-process threaded loop by the §6.1 spike (max|Δ|=0).
+(~1-2 GB). Bit-identical to the in-process threaded loop (max|Δ|=0).
 
 Reads the dump contract written by ``bin/utils/valis_tiling._dump_inputs`` (via REG_PREP's halt
 hook): ``moving.v``, ``fixed.v``, ``mask.v`` (if any), ``target_stats.npy`` (if any),
 ``expanded_bboxes.npy``, ``manifest.json``. Runs with ``processing_cls=None`` (the deterministic
-path PART A/B validated) because PREP already processed the images to their 2-D form (Blocker 3).
+path) because PREP already processed the images to their 2-D form.
 Emits ``bk_<idx>.v`` / ``fwd_<idx>.v`` for the requested tile.
 """
 
 import argparse
 import importlib
 import json
+import logging
 import os
+import sys
 import threading
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "utils"))
 
 # Read-only $HOME on HPC clusters breaks numba's on-disk cache during the valis
 # import (RuntimeError: '_repeat_1d': no locator available). Redirect + disable
@@ -28,7 +32,10 @@ os.environ.setdefault("XDG_CACHE_HOME", "/tmp/xdg_cache")
 
 import numpy as np
 import pyvips
+from logger import configure_logging, get_logger
 from valis.non_rigid_registrars import NonRigidTileRegistrar
+
+logger = get_logger(__name__)
 
 
 def _load_cls(path):
@@ -48,6 +55,8 @@ class _NullPbar:
 
 
 def main():
+    """CLI entry point: compute one tile's displacement field and write it to the output dir."""
+    configure_logging(level=logging.INFO)
     ap = argparse.ArgumentParser()
     ap.add_argument(
         "--inputs-dir",
@@ -78,7 +87,7 @@ def main():
     reg.n_cols = m["n_cols"]
     reg.bk_dxdy_tiles = [None] * reg.n_tiles
     reg.fwd_dxdy_tiles = [None] * reg.n_tiles
-    # PREP processed the images already (src_f live); REG_TILE must NOT re-process (Blocker 3).
+    # PREP processed the images already (src_f live); REG_TILE must NOT re-process.
     reg.non_rigid_registrar_cls = _load_cls(m["non_rigid_registrar_cls"])
     reg.processing_cls = None
     reg.processing_kwargs = None
@@ -98,10 +107,7 @@ def main():
     reg.fwd_dxdy_tiles[args.tile_idx].write_to_file(
         os.path.join(args.out_dir, f"fwd_{args.tile_idx}.v")
     )
-    print(
-        f"[reg_tile] idx={args.tile_idx} OK (pid={os.getpid()}) -> {args.out_dir}",
-        flush=True,
-    )
+    logger.info(f"idx={args.tile_idx} OK (pid={os.getpid()}) -> {args.out_dir}")
 
 
 if __name__ == "__main__":

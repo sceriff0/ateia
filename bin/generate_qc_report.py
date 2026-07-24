@@ -9,9 +9,16 @@ import argparse
 import base64
 import csv
 import json
+import logging
 import shutil
+import sys
 from datetime import datetime
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent / "utils"))
+from logger import configure_logging, get_logger  # noqa: E402
+
+logger = get_logger(__name__)
 
 # ---------------------------------------------------------------------------
 # CLI
@@ -19,6 +26,7 @@ from pathlib import Path
 
 
 def parse_args():
+    """Parse command-line arguments."""
     p = argparse.ArgumentParser(description="Generate MIRAGE QC HTML report")
     p.add_argument(
         "--preprocess-qc",
@@ -228,6 +236,7 @@ tr:hover td { background: #f8f9fa; }
 
 
 def html_header(timestamp):
+    """Return the HTML document header, including the title and generation timestamp."""
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -246,10 +255,12 @@ def html_header(timestamp):
 
 
 def html_footer():
+    """Return the closing HTML tags for the report."""
     return "</main>\n</body>\n</html>\n"
 
 
 def section(title, body_html):
+    """Wrap ``body_html`` in a titled report section."""
     return (
         f"<section>\n"
         f"  <h2>{title}</h2>\n"
@@ -259,6 +270,7 @@ def section(title, body_html):
 
 
 def img_grid(png_files, wide=False):
+    """Render a list of PNG files as a grid of base64-embedded image cards."""
     if not png_files:
         return '<p class="empty-notice">No images found.</p>'
     grid_class = "img-grid-wide" if wide else "img-grid"
@@ -276,11 +288,13 @@ def img_grid(png_files, wide=False):
 
 
 def preprocess_qc_section(preprocess_dir):
+    """Build the preprocessing-QC report section from the PNGs in ``preprocess_dir``."""
     pngs = list_files(preprocess_dir, "*.png")
     return section("Preprocessing QC", img_grid(pngs))
 
 
 def registration_qc_section(reg_dir, feat_dir, valis_dir):
+    """Build the registration-QC report section (overlay images plus accuracy tables)."""
     parts = []
 
     # Image grid
@@ -363,6 +377,7 @@ def registration_qc_section(reg_dir, feat_dir, valis_dir):
 
 
 def postprocess_qc_section(postprocess_dir):
+    """Build the postprocessing-QC report section (histograms/stats, excluding seg overlays)."""
     # Exclude seg_overlay images, keep only histograms/stats
     all_pngs = list_files(postprocess_dir, "*.png")
     pngs = [p for p in all_pngs if "_seg_overlay" not in p.name]
@@ -412,10 +427,12 @@ def seg_eval_section(seg_eval_dir):
 
 
 def copy_data(args):
+    """Copy the raw QC artifacts (PNGs, CSVs) into the report's data directory."""
     data_dir = Path(args.data_dir)
     data_dir.mkdir(parents=True, exist_ok=True)
 
     def copy_glob(src_dir, pattern, subdir):
+        """Copy every file matching ``pattern`` in ``src_dir`` into ``data_dir/subdir``."""
         files = list_files(src_dir, pattern)
         if not files:
             return
@@ -438,6 +455,8 @@ def copy_data(args):
 
 
 def main():
+    """CLI entry point: assemble the per-step QC outputs into a single HTML report."""
+    configure_logging(level=logging.INFO)
     args = parse_args()
     timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
 
@@ -459,10 +478,10 @@ def main():
     with open(out_path, "w", encoding="utf-8") as fh:
         fh.write("".join(html_parts))
 
-    print(f"[generate_qc_report] Report written to: {out_path}")
+    logger.info(f"Report written to: {out_path}")
 
     copy_data(args)
-    print(f"[generate_qc_report] Data copied to: {args.data_dir}")
+    logger.info(f"Data copied to: {args.data_dir}")
 
 
 if __name__ == "__main__":

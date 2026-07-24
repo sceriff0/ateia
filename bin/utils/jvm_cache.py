@@ -8,7 +8,7 @@ Why this exists
 The distributed registration image pins ``scyjava<1.11`` (see containers/valis/Dockerfile).
 That scyjava computes its jgo ``cache_dir`` and Maven ``m2_repo`` from ``pathlib.Path.home()``
 at *import time* and passes them **explicitly** into ``jgo.resolve_dependencies``
-(scyjava/config.py:15-16, scyjava/_jvm.py). It never consults the ``JGO_CACHE_DIR`` / ``M2_REPO``
+(in scyjava's config and _jvm modules). It never consults the ``JGO_CACHE_DIR`` / ``M2_REPO``
 environment variables — so setting those (e.g. the Dockerfile ENV) has no effect on where the
 JVM cache lands. On an HPC compute node ``$HOME`` (e.g. ``/hpcnfs/...``) is a read-only mount, so
 jgo's first-run ``os.makedirs($HOME/.jgo)`` dies with ``OSError [Errno 30] Read-only file system``

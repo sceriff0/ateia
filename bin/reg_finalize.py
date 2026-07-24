@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""REG_FINALIZE (Option A, spec §6.3/§6.6): distributed-tiling stage 3.
+"""REG_FINALIZE: distributed-tiling stage 3.
 
 Stitch the precomputed per-tile displacement fields (from REG_TILE) into the full non-rigid field,
-reproduce VALIS's post-tiler composition (serial_non_rigid.calc_deformation 460-503), and pad to the
-full registered resolution — all from PLAIN dumped data, no pickled ``Valis`` registrar (Blocker 1).
+reproduce VALIS's post-tiler composition (serial_non_rigid.calc_deformation), and pad to the
+full registered resolution — all from PLAIN dumped data, no pickled ``Valis`` registrar.
 
 Every production caller (REG_COMPOSE_{TILED,FIELD,MICRO}) runs this with ``--emit-field-only``: it
 writes the composed field to ``--out`` and returns WITHOUT warping. The warp is deferred to the
@@ -11,8 +11,8 @@ REG_GRID -> REG_WARP_TILE -> REG_ASSEMBLE fan-out. The in-process full-warp bran
 the equivalence harnesses and goes through ``warp_source`` (a lazy ``get_reader_for`` +
 ``warp_tools.warp_img``), not ``slide_tools.warp_slide`` directly.
 
-The compose + warp legs are proven pixel-identical to classic by ``bin/spikes/spike_finalize_option_a.py``
-(``max|Δ|=0``). Reads REG_PREP's dump: ``<inputs-dir>/manifest.json`` + ``expanded_bboxes.npy`` (tile
+The compose + warp legs are pixel-identical to classic (``max|Δ|=0``). Reads REG_PREP's dump:
+``<inputs-dir>/manifest.json`` + ``expanded_bboxes.npy`` (tile
 grid), ``<tiles-dir>/bk_*.v`` & ``fwd_*.v`` (REG_TILE output), ``<warp-state>`` JSON (per-slide plain
 warp state), and an optional ``reg_mask.npy``.
 """
@@ -41,7 +41,7 @@ from valis import registration, slide_io, warp_tools
 from valis_config import init_jvm
 
 
-# --------------------------------------------------------------------------- compose (proven §6.3)
+# --------------------------------------------------------------------------- compose
 def _mask_img(img, mask):
     if isinstance(img, pyvips.Image):
         vmask = (
@@ -70,9 +70,9 @@ def compose(
     unwarped_shape=None,
     og_reg_shape_rc=None,
 ):
-    """Port of serial_non_rigid.NonRigidZImage.calc_deformation 460-503 (spec §6.3). In production
+    """Port of serial_non_rigid.NonRigidZImage.calc_deformation. In production
     ``from_rigid_reg`` is False (scaled-image non-rigid), so remove_invasive_displacements is skipped."""
-    if from_rigid_reg:  # 460-465
+    if from_rigid_reg:
         moving_bk_dxdy = warp_tools.remove_invasive_displacements(
             moving_bk_dxdy,
             M=M,
@@ -80,7 +80,7 @@ def compose(
             out_shape_rc=og_reg_shape_rc,
         )
 
-    if not isinstance(moving_bk_dxdy, pyvips.Image):  # 467-472 numpy branch
+    if not isinstance(moving_bk_dxdy, pyvips.Image):  # numpy branch
         if reg_mask is not None:
             moving_bk_dxdy = _mask_dxdy(moving_bk_dxdy, reg_mask)
         bk_dxdy_from_ref = np.array(
@@ -89,7 +89,7 @@ def compose(
                 incoming_bk_dxdy[1] + moving_bk_dxdy[1],
             ]
         )
-    else:  # 473-476 pyvips branch
+    else:  # pyvips branch
         if reg_mask is not None:
             moving_bk_dxdy = _mask_dxdy(moving_bk_dxdy, reg_mask)
         bk_dxdy_from_ref = incoming_bk_dxdy + moving_bk_dxdy
@@ -99,9 +99,9 @@ def compose(
         if hasattr(bk_dxdy_from_ref, "copy")
         else bk_dxdy_from_ref
     )
-    if reg_mask is not None:  # 479-480
+    if reg_mask is not None:
         img_bk_dxdy = _mask_dxdy(img_bk_dxdy, reg_mask)
-    if from_rigid_reg:  # 482-487
+    if from_rigid_reg:
         img_bk_dxdy = warp_tools.remove_invasive_displacements(
             img_bk_dxdy, M=M, src_shape_rc=unwarped_shape, out_shape_rc=og_reg_shape_rc
         )
@@ -117,9 +117,9 @@ def _to_vips_field(field):
 
 
 def compose_and_pad(moving_bk, ws, reg_mask):
-    """Reproduce classic ``slide.bk_dxdy`` after ``register()`` (registration.py:3707): the §6.3
+    """Reproduce classic ``slide.bk_dxdy`` after ``register()``: the
     compose of the raw non-rigid field, then internal_pad up to ``_full_displacement_shape_rc``.
-    Proven == classic by spike_finalize_option_a + the micro oracle (Q1: shape == full_disp)."""
+    == classic (shape == full_disp)."""
     incoming = pyvips.Image.black(moving_bk.width, moving_bk.height, bands=2).cast(
         "float"
     )
@@ -148,9 +148,8 @@ def compose_and_pad(moving_bk, ws, reg_mask):
 
 
 def micro_additive(slide_bk_full, micro_raw_bk, micro_ws, micro_reg_mask):
-    """Reproduce register_micro's additive field update (registration.py:4299-4330), proven
-    max|Δ|=0 by spike_micro_option2.py. Returns the micro-updated backward field at micro
-    ``full_out_shape_rc`` — the field the final warp consumes.
+    """Reproduce register_micro's additive field update (max|Δ|=0). Returns the micro-updated
+    backward field at micro ``full_out_shape_rc`` — the field the final warp consumes.
 
       updated = scale(slide_bk_full -> micro_out_shape) + pad(compose(micro_raw) -> micro_full_out @ bbox)
     """
@@ -171,7 +170,7 @@ def micro_additive(slide_bk_full, micro_raw_bk, micro_ws, micro_reg_mask):
         )
     )
 
-    # 2) pad the residual into the micro full_out field at mask_bbox (registration.py:4312-4314)
+    # 2) pad the residual into the micro full_out field at mask_bbox
     if (composed_residual.height, composed_residual.width) != full_out:
         bx, by = (mask_bbox[0], mask_bbox[1]) if mask_bbox else (0, 0)
         vips_new_bk = (
@@ -182,14 +181,14 @@ def micro_additive(slide_bk_full, micro_raw_bk, micro_ws, micro_reg_mask):
     else:
         vips_new_bk = composed_residual
 
-    # 3) scale the wave-1 field to the micro out_shape (registration.py:4317-4323)
+    # 3) scale the wave-1 field to the micro out_shape
     cur = _to_vips_field(slide_bk_full)
     slide_sxy = (np.array(full_out) / np.array([cur.height, cur.width]))[::-1]
     if not np.all(slide_sxy == 1):
         sx, sy = float(slide_sxy[0]), float(slide_sxy[1])
         cur = warp_tools.resize_img((sx * cur[0]).bandjoin(sy * cur[1]), full_out)
 
-    # 4) additive (registration.py:4330)
+    # 4) additive
     return cur + vips_new_bk
 
 
@@ -203,7 +202,7 @@ def start_jvm_if_needed(src_slide, jvm_heap_gb=None, tag="reg_finalize"):
     from the staged source directory exactly like the prep stages.
 
     The two print lines are load-bearing: they are the only externally-observable evidence of which
-    reader path a run took, and tests/integration/verify_lowmem_bitidentical.py asserts on them.
+    reader path a run took, and the integration tests assert on them.
     """
     if all_readable([src_slide]):
         print(
@@ -244,6 +243,7 @@ def warp_source(src_slide, ws, dxdy):
 
 # --------------------------------------------------------------------------- main
 def main():
+    """CLI entry point: compose the full displacement field, then either emit it or warp and save the slide."""
     ap = argparse.ArgumentParser()
     ap.add_argument(
         "--warp-state", required=True, help="REG_PREP per-slide warp_state.json"
@@ -272,7 +272,7 @@ def main():
         help="compose the padded displacement field, write it to --out, and exit "
         "without warping (the warp is done by reg_warp_tile.py)",
     )
-    # Micro-registration second wave (spec §5A Option-2): additively compose the micro residual.
+    # Micro-registration second wave: additively compose the micro residual.
     ap.add_argument(
         "--micro-field",
         help="whole-image MICRO residual bk.v from REG_NONRIGID on the "
@@ -308,8 +308,7 @@ def main():
     # tiled OME-TIFFs that MirageVipsSlideReader can read lazily with no JVM at all — the RAM win
     # this module exists for. When the JVM IS needed (non-mirage inputs, or MIRAGE_FORCE_BIOFORMATS
     # for the equivalence test), size the heap from the single staged source slide (staged under
-    # src/) exactly like the prep stages, which is why REG_FINALIZE / REG_WARP_REF used to always
-    # start one.
+    # src/) exactly like the prep stages.
     heap_gb = start_jvm_if_needed(args.src_slide, jvm_heap_gb=args.jvm_heap_gb)
 
     if args.rigid_only:
@@ -317,7 +316,7 @@ def main():
         slide_bk = None
     else:
         # Obtain moving_bk: either the whole-image field (separated mode, == classic) or by stitching
-        # the per-tile fields (tiled mode, == VALIS calc()). Both feed the SAME §6.3 compose+warp.
+        # the per-tile fields (tiled mode, == VALIS calc()). Both feed the SAME compose+warp.
         if args.field:
             moving_bk = pyvips.Image.new_from_file(args.field)
         else:
@@ -338,7 +337,7 @@ def main():
                 bk_tiles, expanded_bboxes, m["n_rows"], m["n_cols"], m["tile_buffer"]
             )
 
-        # compose (§6.3) + internal_pad => classic slide.bk_dxdy after register() (the wave-1 field).
+        # compose + internal_pad => classic slide.bk_dxdy after register() (the wave-1 field).
         # align_to_reference=True => incoming/reference field is identity.
         reg_mask_f = (
             os.path.join(args.inputs_dir, "reg_mask.npy") if args.inputs_dir else None
@@ -348,8 +347,8 @@ def main():
         )
         slide_bk = compose_and_pad(moving_bk, ws, reg_mask)
 
-        # Micro second wave (spec §5A Option-2): additively compose the micro residual onto the
-        # wave-1 field, reproducing register_micro (registration.py:4299-4330). The result is the
+        # Micro second wave: additively compose the micro residual onto the
+        # wave-1 field, reproducing register_micro. The result is the
         # micro-resolution field the final warp consumes (warp_slide resizes it to reg_img_shape).
         if args.micro_field:
             micro_ws = json.load(open(args.micro_warp_state))
@@ -366,7 +365,7 @@ def main():
             )
             slide_bk = micro_additive(slide_bk, micro_raw_bk, micro_ws, micro_reg_mask)
 
-    # 3b) distributed warp (spec §5.3): the field is now fully composed, which is the ONLY part of
+    # 3b) distributed warp: the field is now fully composed, which is the ONLY part of
     # this script the per-output-tile workers cannot each recompute cheaply. Write it out and stop;
     # reg_warp_tile.py then warps each output region from this exact field, so every tile consumes
     # byte-for-byte the same field the single-process warp below would have used.
@@ -378,10 +377,10 @@ def main():
             registration.kill_jvm()
         return 0
 
-    # 4) warp the full-res slide lazily (VALIS's own warp_img; only the READER differs, §6.3)
+    # 4) warp the full-res slide lazily (VALIS's own warp_img; only the READER differs)
     warped, reader = warp_source(args.src_slide, ws, slide_bk)
 
-    # 5) save as OME-TIFF, mirroring Slide.warp_and_save_slide's metadata handling (registration.py:982-1024)
+    # 5) save as OME-TIFF, mirroring Slide.warp_and_save_slide's metadata handling
     os.makedirs(os.path.dirname(os.path.abspath(args.out)) or ".", exist_ok=True)
     slide_meta = reader.metadata
     out_xyczt = slide_io.get_shape_xyzct((warped.width, warped.height), warped.bands)
@@ -415,7 +414,7 @@ def main():
     except Exception as e:
         # VALIS's update_xml_for_new_img uses ome_types.from_xml(parser="xmlschema"), which is
         # environment-fragile (needs the OME schema; classic warp_and_save_slide hits the same path).
-        # The warped PIXELS are correct (proven §6.3); fall back to a hand-built minimal OME-XML that
+        # The warped PIXELS are correct; fall back to a hand-built minimal OME-XML that
         # still carries the channel NAMES, so downstream (segmentation/quant) keeps correct channels.
         print(
             f"[reg_finalize] WARNING update_xml path failed ({type(e).__name__}: {e}); "

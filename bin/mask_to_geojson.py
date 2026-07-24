@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """Convert a StarDist label mask (segment.py's ``*_cell_mask.tif``) into a cell
 GeoJSON that ``warp_seg_qc.py`` / VALIS ``Slide.warp_geojson`` can consume.
 
@@ -61,6 +61,7 @@ def write_geojson(mask_path, out_path, simplify_tolerance: float = 0.5) -> int:
 
 
 def main():
+    """CLI entry point: convert a StarDist cell-mask TIFF into a cell GeoJSON."""
     ap = argparse.ArgumentParser(description="StarDist cell-mask TIFF -> cell GeoJSON.")
     ap.add_argument("--mask", required=True)
     ap.add_argument("--out", required=True)
