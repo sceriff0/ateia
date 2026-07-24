@@ -31,32 +31,72 @@ def test_run_cost_summary_wall_clock_from_timestamps():
     assert out.loc["r0", "wall_clock_s"] == 7 * 60   # 10:00:00 start -> 10:07:00 complete
 
 
-# ── registration accuracy ──
-def _write_fd(root, run_id, patient, stem, after_median, after_mean, improv):
-    d = root / run_id / "out" / patient / "feature_distances"
+# ── registration accuracy (staged QC, reg_qc=2) ──
+def _write_seg_qc(root, run_id, patient, moving, stages, deltas, pair_fraction=0.9):
+    d = root / run_id / "out" / patient / "qc" / "registration"
     d.mkdir(parents=True, exist_ok=True)
-    (d / f"{stem}_feature_distances.json").write_text(json.dumps({
-        "after_registration": {"feature_distances": {"median": after_median, "mean": after_mean}},
-        "improvement": {"distance_reduction_percent": improv}}))
+    (d / f"{patient}_{moving}_seg_qc.json").write_text(json.dumps({
+        "patient_id": patient, "moving": moving, "reference": f"{patient}_ref",
+        "stages_separable": True, "stage_order": list(stages),
+        "stages": stages, "delta_vs_anchor": deltas,
+        "matching": {"pair_fraction": pair_fraction, "n_pairs": 1000}}))
 
 
-def test_harvest_registration_error(tmp_path):
+def test_harvest_registration_qc(tmp_path):
     plan = tmp_path / "plan.csv"
     pd.DataFrame({"run_id": ["r0", "r1"]}).to_csv(plan, index=False)
-    _write_fd(tmp_path, "r0", "P001", "P001_mov1_DAPI", 1.2, 1.5, 88.0)
-    _write_fd(tmp_path, "r0", "P001", "P001_mov2_DAPI", 1.4, 1.7, 90.0)   # 2 moving images -> aggregate
-    # r1 has no feature_distances -> skipped
-    out = quality.harvest_registration_error(tmp_path, plan).set_index("run_id")
-    assert list(out.index) == ["r0"]
-    assert out.loc["r0", "reg_tre_median_px"] == np.median([1.2, 1.4])
-    assert out.loc["r0", "reg_improvement_pct"] == np.mean([88.0, 90.0])
+    stages = {
+        "rigid":     {"n_pairs": 1000, "iou_mean": 0.42, "iou_p50": 0.40,
+                      "dice_matched": 0.55, "displacement_px_p50": 4.1, "displacement_um_p50": 1.33},
+        "non_rigid": {"n_pairs": 1000, "iou_mean": 0.71, "iou_p50": 0.70,
+                      "dice_matched": 0.80, "displacement_px_p50": 1.6, "displacement_um_p50": 0.52},
+    }
+    deltas = {"non_rigid": {"dice_matched": 0.25, "displacement_um_p50": -0.81,
+                            "displacement_px_p50": -2.5}}
+    _write_seg_qc(tmp_path, "r0", "P001", "cycle2", stages, deltas, pair_fraction=0.91)
+    # r1 has no seg_qc -> skipped
+    out = quality.harvest_registration_qc(tmp_path, plan)
+    assert set(out["run_id"]) == {"r0"}
+    assert set(out["stage"]) == {"rigid", "non_rigid"}
+    nr = out[out["stage"] == "non_rigid"].iloc[0]
+    assert nr["dice_matched"] == 0.80
+    assert nr["displacement_um_p50"] == 0.52
+    assert nr["delta_dice_vs_rigid"] == 0.25
+    assert nr["pair_fraction"] == 0.91
+    rigid = out[out["stage"] == "rigid"].iloc[0]
+    assert np.isnan(rigid["delta_dice_vs_rigid"])   # anchor has no delta
 
 
-def test_harvest_registration_error_tolerates_bad_json(tmp_path):
+def test_harvest_registration_qc_tolerates_bad_json(tmp_path):
     plan = tmp_path / "plan.csv"; pd.DataFrame({"run_id": ["r0"]}).to_csv(plan, index=False)
-    d = tmp_path / "r0" / "out" / "P001" / "feature_distances"; d.mkdir(parents=True)
-    (d / "x_feature_distances.json").write_text("{ not json")
-    assert quality.harvest_registration_error(tmp_path, plan).empty   # no crash, just empty
+    d = tmp_path / "r0" / "out" / "P001" / "qc" / "registration"; d.mkdir(parents=True)
+    (d / "x_seg_qc.json").write_text("{ not json")
+    assert quality.harvest_registration_qc(tmp_path, plan).empty   # no crash, just empty
+
+
+# ── segmentation quality (CellSegmentationEvaluator, reference-free) ──
+def _write_seg_eval(root, run_id, patient, quality_score, cell_metrics):
+    d = root / run_id / "out" / patient / "qc" / "segmentation"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / f"{patient}_seg_eval.json").write_text(json.dumps({
+        "id": patient,
+        "metrics": {"Matched Cell": cell_metrics, "QualityScore": quality_score},
+        "QualityScore": quality_score}))
+
+
+def test_harvest_seg_quality(tmp_path):
+    plan = tmp_path / "plan.csv"
+    pd.DataFrame({"run_id": ["r0", "r1"]}).to_csv(plan, index=False)
+    _write_seg_eval(tmp_path, "r0", "P001", 0.87,
+                    {"NumberOfCellsPer100SquareMicrons": 12.3,
+                     "FractionOfForegroundOccupiedByCells": 0.64})
+    # r1 has no seg_eval -> skipped
+    out = quality.harvest_seg_quality(tmp_path, plan).set_index("run_id")
+    assert list(out.index) == ["r0"]
+    assert out.loc["r0", "QualityScore"] == 0.87
+    assert out.loc["r0", "patient"] == "P001"
+    assert out.loc["r0", "cell:NumberOfCellsPer100SquareMicrons"] == 12.3
+    assert out.loc["r0", "cell:FractionOfForegroundOccupiedByCells"] == 0.64
 
 
 # ── segmentation counts + agreement (injected mask reader) ──

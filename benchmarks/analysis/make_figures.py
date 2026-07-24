@@ -85,19 +85,25 @@ def run(results_root, run_plan_csv, manifest_csv, reg_eval_csv, outdir, formats=
     #    robust to missing/failed runs, so a CellSAM run that OOMs simply contributes no rows. ──
     # Per-run cost (cpu/gpu-hours, wall-clock, bottleneck) — from the trace, always available.
     quality.run_cost_summary(runs_df).to_csv(outdir / "run_cost.csv", index=False)
-    # Per-run quality: registration accuracy (feature-error JSON) + segmentation cell count (mask max),
-    # joined to the swept params so the analysis/plots can relate accuracy to config + cost.
+    # Registration accuracy (staged QC, reg_qc=2) — the full per-(run, moving, stage) table, and a
+    # per-run headline reduction (final stage, median over moving slides).
+    reg_qc_long = quality.harvest_registration_qc(results_root, run_plan_csv)
+    reg_qc_long.to_csv(outdir / "registration_accuracy.csv", index=False)
+    reg_run = quality.registration_accuracy_per_run(reg_qc_long)
+    # Reference-free segmentation quality (CellSegmentationEvaluator).
+    seg_eval = quality.harvest_seg_quality(results_root, run_plan_csv)
+    seg_eval.to_csv(outdir / "segmentation_eval.csv", index=False)
+    # Per-run quality join: swept params + registration headline + segmentation cell count.
     per_run = runs_df.drop_duplicates("run_id")[
         [c for c in ("run_id", "varied_axis", "target_px", "n_channels", "n_register_images",
                      "memory_mode", "skip_micro_registration", "seg_method")
          if c in runs_df.columns]] if not runs_df.empty else pd.DataFrame(columns=["run_id"])
-    reg_err = quality.harvest_registration_error(results_root, run_plan_csv)
     try:
         seg_cnt = quality.harvest_segmentation_counts(results_root, run_plan_csv)  # reads masks (I/O)
     except Exception:
         seg_cnt = pd.DataFrame(columns=["run_id"])
     quality_df = per_run
-    for extra in (reg_err, seg_cnt):
+    for extra in (reg_run, seg_cnt):
         if not extra.empty:
             quality_df = quality_df.merge(extra, on="run_id", how="left")
     quality_df.to_csv(outdir / "quality.csv", index=False)

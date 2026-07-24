@@ -1,8 +1,13 @@
 """Harvest QUALITY + COST signals the pipeline already writes but the resource trace ignores.
 
 The sweep's trace.txt gives RAM/time; this module joins in the *result-quality* the pipeline emits:
-  - registration accuracy: feature-based error JSON
-      <root>/<run_id>/out/<patient>/feature_distances/*_feature_distances.json  (enable_feature_error)
+  - registration accuracy: staged QC JSON (reg_qc=2)
+      <root>/<run_id>/out/<patient>/qc/registration/*_seg_qc.json
+    Segments DAPI nuclei, fixes cell correspondence once at the rigid stage, then re-measures
+    dice_matched + centroid displacement (px/um) after each transform stage — the landmark-free
+    registration-accuracy signal (bin/warp_seg_qc.py; docs/registration_qc.md).
+  - segmentation quality: reference-free CellSegmentationEvaluator JSON (skip_seg_quality_eval=false)
+      <root>/<run_id>/out/<patient>/**/*_seg_eval.json   -> QualityScore + component metrics.
   - segmentation output size: cell count = max label of <...>/segment*/*cell_mask*.tif
   - segmentation cross-method agreement: pairwise mask IoU + cell-count ratio between methods on the
     SAME image (segmentation_grid runs share the baseline cell).
@@ -28,37 +33,119 @@ def _leaf(process: str) -> str:
 
 
 # ─────────────────────────────────────────────────────────── registration accuracy ──
-def harvest_registration_error(results_root, run_plan_csv) -> pd.DataFrame:
-    """Per-run registration accuracy from the feature-distance JSONs. Aggregates over the moving
-    images of a run (median of per-image AFTER-registration median TRE — robust to outlier images).
-    Columns: run_id, reg_tre_median_px, reg_tre_mean_px, reg_improvement_pct. Missing runs are skipped."""
+# The anchor stage the staged QC reports deltas against (see docs/registration_qc.md).
+REG_QC_ANCHOR = "rigid"
+
+
+def _f(x):
+    """Coerce a JSON value to float, or NaN if missing/non-numeric."""
+    try:
+        return float(x)
+    except (TypeError, ValueError):
+        return float("nan")
+
+
+def harvest_registration_qc(results_root, run_plan_csv) -> pd.DataFrame:
+    """Per-(run, moving-slide, stage) registration accuracy from the staged QC JSONs (reg_qc=2).
+
+    One row per registration stage (native/rigid/non_rigid/micro) of each moving slide of each run.
+    dice_matched and centroid displacement are the co-headline accuracy metrics; the *_vs_rigid
+    deltas isolate the registration effect from segmentation noise (docs/registration_qc.md).
+    Missing/unparseable JSONs are skipped (best-effort)."""
     root = Path(results_root)
     plan = pd.read_csv(run_plan_csv)
     rows = []
     for run_id in plan["run_id"]:
-        jsons = list((root / str(run_id) / "out").rglob("*_feature_distances.json"))
-        med, mean, imp = [], [], []
-        for j in jsons:
+        for j in (root / str(run_id) / "out").rglob("*_seg_qc.json"):
             try:
                 d = json.loads(j.read_text())
             except Exception:
                 continue
-            fd = (d.get("after_registration") or {}).get("feature_distances") or {}
-            if fd.get("median") is not None:
-                med.append(fd["median"])
-            if fd.get("mean") is not None:
-                mean.append(fd["mean"])
-            v = (d.get("improvement") or {}).get("distance_reduction_percent")
-            if v is not None:
-                imp.append(v)
-        if not (med or mean):
-            continue
-        rows.append({
-            "run_id": run_id,
-            "reg_tre_median_px": float(np.median(med)) if med else float("nan"),
-            "reg_tre_mean_px": float(np.mean(mean)) if mean else float("nan"),
-            "reg_improvement_pct": float(np.mean(imp)) if imp else float("nan"),
-        })
+            stages = d.get("stages") or {}
+            deltas = d.get("delta_vs_anchor") or {}
+            pair_fraction = _f((d.get("matching") or {}).get("pair_fraction"))
+            for stage in (d.get("stage_order") or list(stages)):
+                s = stages.get(stage) or {}
+                dv = deltas.get(stage) or {}
+                rows.append({
+                    "run_id": run_id,
+                    "patient_id": d.get("patient_id"),
+                    "moving": d.get("moving"),
+                    "stage": stage,
+                    "n_pairs": int(s.get("n_pairs") or 0),
+                    "pair_fraction": pair_fraction,
+                    "iou_mean": _f(s.get("iou_mean")),
+                    "iou_p50": _f(s.get("iou_p50")),
+                    "frac_iou_ge_0.5": _f(s.get("frac_iou_ge_0.5")),
+                    "dice_matched": _f(s.get("dice_matched")),
+                    "displacement_px_p50": _f(s.get("displacement_px_p50")),
+                    "displacement_px_p90": _f(s.get("displacement_px_p90")),
+                    "displacement_um_p50": _f(s.get("displacement_um_p50")),
+                    "displacement_um_p90": _f(s.get("displacement_um_p90")),
+                    "delta_dice_vs_rigid": _f(dv.get("dice_matched")),
+                    "delta_disp_um_p50_vs_rigid": _f(dv.get("displacement_um_p50")),
+                    "delta_disp_px_p50_vs_rigid": _f(dv.get("displacement_px_p50")),
+                })
+    return pd.DataFrame(rows)
+
+
+# Stage ordering so a per-run reduction can pick the final (most-registered) stage.
+_STAGE_RANK = {"native": 0, "rigid": 1, "non_rigid": 2, "micro": 3}
+
+
+def registration_accuracy_per_run(reg_qc_long: pd.DataFrame) -> pd.DataFrame:
+    """Reduce the per-(run, moving, stage) QC table to ONE headline row per run: the final
+    (most-registered) stage of each moving slide, then the median across moving slides. Columns:
+    run_id, reg_dice_matched, reg_displacement_um_p50, reg_delta_disp_um_p50_vs_rigid,
+    reg_delta_dice_vs_rigid, reg_pair_fraction. Empty in -> empty out."""
+    if reg_qc_long.empty:
+        return pd.DataFrame(columns=["run_id"])
+    df = reg_qc_long.copy()
+    df["_rank"] = df["stage"].map(_STAGE_RANK).fillna(-1)
+    # final stage per (run, moving)
+    final = df.sort_values("_rank").groupby(["run_id", "moving"], as_index=False).tail(1)
+    agg = final.groupby("run_id", as_index=False).agg(
+        reg_dice_matched=("dice_matched", "median"),
+        reg_displacement_um_p50=("displacement_um_p50", "median"),
+        reg_delta_disp_um_p50_vs_rigid=("delta_disp_um_p50_vs_rigid", "median"),
+        reg_delta_dice_vs_rigid=("delta_dice_vs_rigid", "median"),
+        reg_pair_fraction=("pair_fraction", "median"))
+    return agg
+
+
+# ─────────────────────────────────────────────────────── segmentation quality (CSE) ──
+# CSE metrics nest under three mask channels; short codes keep the flattened column names readable.
+_CSE_CHANNEL_CODE = {
+    "Matched Cell": "cell",
+    "Nucleus (including nuclear membrane)": "nucleus",
+    "Cell Not Including Nucleus (cell membrane plus cytoplasm)": "cyto",
+}
+
+
+def harvest_seg_quality(results_root, run_plan_csv) -> pd.DataFrame:
+    """Per-(run, patient) reference-free segmentation quality from CellSegmentationEvaluator JSONs.
+
+    Columns: run_id, patient (=id), QualityScore (the headline composite), plus the flattened CSE
+    component metrics as ``<channel_code>:<metric>``. Missing/unparseable JSONs are skipped."""
+    root = Path(results_root)
+    plan = pd.read_csv(run_plan_csv)
+    rows = []
+    for run_id in plan["run_id"]:
+        for j in (root / str(run_id) / "out").rglob("*_seg_eval.json"):
+            try:
+                d = json.loads(j.read_text())
+            except Exception:
+                continue
+            row = {"run_id": run_id, "patient": d.get("id"),
+                   "QualityScore": _f(d.get("QualityScore"))}
+            metrics = d.get("metrics") or {}
+            for chan, sub in metrics.items():
+                if not isinstance(sub, dict):
+                    continue  # skips the top-level "QualityScore" duplicate inside metrics
+                code = _CSE_CHANNEL_CODE.get(chan, chan.split()[0].lower())
+                for name, val in sub.items():
+                    row[f"{code}:{name}"] = _f(val)
+            rows.append(row)
     return pd.DataFrame(rows)
 
 
@@ -185,7 +272,8 @@ def run_cost_summary(runs_df: pd.DataFrame) -> pd.DataFrame:
     df["_leaf"] = df["process"].map(_leaf)
     key = "run_id" if "run_id" in df.columns else "config_id"
     carry = [c for c in ("varied_axis", "target_px", "n_channels", "n_register_images",
-                         "reg_distributed_tiling", "config_id", "rep") if c in df.columns]
+                         "memory_mode", "skip_micro_registration", "seg_method",
+                         "config_id", "rep") if c in df.columns]
     out = []
     for run, g in df.groupby(key):
         rt = g["realtime_s"].fillna(0)
