@@ -163,3 +163,185 @@ def join_size(trace_rows, size_map):
                     break
         joined.append({**r, "input_bytes": input_bytes})
     return joined
+
+
+def fmt_bytes(b):
+    if b is None:
+        return "N/A"
+    b = float(b)
+    for unit in ["B", "KB", "MB", "GB", "TB"]:
+        if b < 1024 or unit == "TB":
+            return f"{b:.1f} {unit}"
+        b /= 1024
+
+
+def fmt_secs(s):
+    if s is None:
+        return "N/A"
+    s = int(s)
+    h, rem = divmod(s, 3600)
+    m, sec = divmod(rem, 60)
+    if h:
+        return f"{h}h {m}m {sec}s"
+    if m:
+        return f"{m}m {sec}s"
+    return f"{sec}s"
+
+
+_CSS = """
+body{font-family:'Segoe UI',Arial,sans-serif;background:#f4f6f9;color:#333;margin:0}
+header{background:#1a2332;color:#fff;padding:24px 40px}
+main{max-width:1400px;margin:32px auto;padding:0 24px 60px}
+section{background:#fff;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.1);margin-bottom:32px;overflow:hidden}
+h2{background:#2c3e50;color:#fff;padding:14px 20px;font-size:1.15rem;margin:0}
+.body{padding:20px}
+table{border-collapse:collapse;width:100%;font-size:.88rem}
+th{background:#ecf0f1;text-align:left;padding:8px 12px;border-bottom:2px solid #bdc3c7}
+td{padding:7px 12px;border-bottom:1px solid #ecf0f1}
+tr:hover td{background:#f8f9fa}
+.empty{color:#888;font-style:italic}
+.fail{color:#c0392b;font-weight:600}
+"""
+
+
+def _section(title, body):
+    return f"<section><h2>{title}</h2><div class='body'>{body}</div></section>"
+
+
+def build_html(trace_rows, size_map, timestamp, native_report=None, native_timeline=None):
+    parts = [
+        "<!DOCTYPE html><html lang='en'><head><meta charset='UTF-8'>",
+        "<meta name='viewport' content='width=device-width, initial-scale=1.0'>",
+        f"<title>MIRAGE Resource Report</title><style>{_CSS}</style></head><body>",
+        f"<header><h1>MIRAGE Computational Resource Report</h1>"
+        f"<div style='opacity:.75;font-size:.9rem'>Generated: {timestamp}</div></header><main>",
+    ]
+
+    if not trace_rows:
+        parts.append(_section("Resource Usage",
+                     "<p class='empty'>Trace data not available "
+                     "(run with --enable_trace to collect it).</p>"))
+        parts.append("</main></body></html>")
+        return "".join(parts)
+
+    # Run totals
+    total_wall = _sumf([r.get("realtime_s") for r in trace_rows])
+    n_fail = sum(1 for r in trace_rows if r.get("exit") not in ("0", "", None))
+    peak = _maxf([r.get("peak_rss_b") for r in trace_rows])
+    totals = (f"<table><tbody>"
+              f"<tr><th>Total tasks</th><td>{len(trace_rows)}</td></tr>"
+              f"<tr><th>Total CPU wall-time</th><td>{fmt_secs(total_wall)}</td></tr>"
+              f"<tr><th>Failed/non-zero exit</th><td>{n_fail}</td></tr>"
+              f"<tr><th>Peak single-task RSS</th><td>{fmt_bytes(peak)}</td></tr>"
+              f"</tbody></table>")
+    parts.append(_section("Run Totals", totals))
+
+    # Per-process rollup
+    roll = rollup_by_process(trace_rows)
+    tbl = ("<table><thead><tr><th>Process</th><th>Tasks</th><th>Total time</th>"
+           "<th>Mean time</th><th>Max %CPU</th><th>Max peak RSS</th>"
+           "<th>Max peak VMEM</th><th>Read</th><th>Write</th><th>Failed</th>"
+           "</tr></thead><tbody>")
+    for r in roll:
+        tbl += (f"<tr><td>{r['process']}</td><td>{r['n_tasks']}</td>"
+                f"<td>{fmt_secs(r['realtime_total_s'])}</td>"
+                f"<td>{fmt_secs(r['realtime_mean_s'])}</td>"
+                f"<td>{'' if r['cpu_max_pct'] is None else r['cpu_max_pct']}</td>"
+                f"<td>{fmt_bytes(r['peak_rss_max_b'])}</td>"
+                f"<td>{fmt_bytes(r['peak_vmem_max_b'])}</td>"
+                f"<td>{fmt_bytes(r['rchar_total_b'])}</td>"
+                f"<td>{fmt_bytes(r['wchar_total_b'])}</td>"
+                f"<td class='{'fail' if r['n_failed'] else ''}'>{r['n_failed']}</td></tr>")
+    tbl += "</tbody></table>"
+    parts.append(_section("Per-Process Resource Rollup", tbl))
+
+    # Resource vs input size
+    joined = join_size(trace_rows, size_map)
+    with_size = [j for j in joined if j.get("input_bytes")]
+    if with_size:
+        tbl = ("<table><thead><tr><th>Process</th><th>Sample (tag)</th>"
+               "<th>Input size</th><th>Peak RSS</th><th>Realtime</th>"
+               "<th>RSS / input GB</th></tr></thead><tbody>")
+        for j in sorted(with_size, key=lambda x: -(x.get("peak_rss_b") or 0)):
+            gb = j["input_bytes"] / 1024**3
+            ratio = (j["peak_rss_b"] / j["input_bytes"]) if j.get("peak_rss_b") else None
+            tbl += (f"<tr><td>{j['process']}</td><td>{j.get('tag', '')}</td>"
+                    f"<td>{fmt_bytes(j['input_bytes'])}</td>"
+                    f"<td>{fmt_bytes(j.get('peak_rss_b'))}</td>"
+                    f"<td>{fmt_secs(j.get('realtime_s'))}</td>"
+                    f"<td>{'' if ratio is None else f'{ratio:.1f}x'}</td></tr>")
+        tbl += "</tbody></table>"
+        parts.append(_section("Resource vs Input Size", tbl))
+    else:
+        parts.append(_section("Resource vs Input Size",
+                     "<p class='empty'>No size logs matched trace tasks.</p>"))
+
+    # Top-N heaviest / slowest
+    heaviest = sorted([r for r in trace_rows if r.get("peak_rss_b")],
+                      key=lambda x: -x["peak_rss_b"])[:10]
+    slowest = sorted([r for r in trace_rows if r.get("realtime_s")],
+                     key=lambda x: -x["realtime_s"])[:10]
+
+    def _top(rows, valf, fmt):
+        t = "<table><thead><tr><th>Process</th><th>Sample</th><th>Value</th></tr></thead><tbody>"
+        for r in rows:
+            t += f"<tr><td>{r['process']}</td><td>{r.get('tag', '')}</td><td>{fmt(valf(r))}</td></tr>"
+        return t + "</tbody></table>"
+
+    parts.append(_section("Top 10 by Peak RSS",
+                 _top(heaviest, lambda r: r["peak_rss_b"], fmt_bytes)))
+    parts.append(_section("Top 10 by Runtime",
+                 _top(slowest, lambda r: r["realtime_s"], fmt_secs)))
+
+    # Retries & failures
+    fails = [r for r in trace_rows if r.get("exit") not in ("0", "", None)]
+    if fails:
+        t = "<table><thead><tr><th>Process</th><th>Sample</th><th>Status</th><th>Exit</th></tr></thead><tbody>"
+        for r in fails:
+            t += (f"<tr><td>{r['process']}</td><td>{r.get('tag', '')}</td>"
+                  f"<td>{r.get('status', '')}</td><td class='fail'>{r.get('exit', '')}</td></tr>")
+        t += "</tbody></table>"
+        parts.append(_section("Retries &amp; Failures", t))
+    else:
+        parts.append(_section("Retries &amp; Failures",
+                     "<p class='empty'>No failed or non-zero-exit tasks.</p>"))
+
+    # Pointers to native reports
+    links = []
+    if native_report:
+        links.append(f"<li>Interactive execution report: <code>{native_report}</code></li>")
+    if native_timeline:
+        links.append(f"<li>Timeline: <code>{native_timeline}</code></li>")
+    if links:
+        parts.append(_section("Nextflow Native Reports", "<ul>" + "".join(links) + "</ul>"))
+
+    parts.append("</main></body></html>")
+    return "".join(parts)
+
+
+def parse_args():
+    p = argparse.ArgumentParser(description="Generate MIRAGE computational-resource report")
+    p.add_argument("--trace", default=".trace/trace.txt")
+    p.add_argument("--size-log", default=None)
+    p.add_argument("--output", default="mirage_resource_report.html")
+    p.add_argument("--native-report", default=None)
+    p.add_argument("--native-timeline", default=None)
+    return p.parse_args()
+
+
+def main():
+    args = parse_args()
+    timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    trace_rows = parse_trace(args.trace)
+    size_map = parse_size_log(args.size_log)
+    html = build_html(trace_rows, size_map, timestamp,
+                      args.native_report, args.native_timeline)
+    out = Path(args.output)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(html, encoding="utf-8")
+    print(f"Resource report written to: {out}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

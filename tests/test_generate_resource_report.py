@@ -1,4 +1,6 @@
 import importlib.util
+import subprocess
+import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
@@ -94,3 +96,44 @@ def test_join_size_exact_and_fallback():
     joined = grr.join_size(trace, size)
     assert joined[0]["input_bytes"] == 999          # exact (process, tag)
     assert joined[1]["input_bytes"] == 999          # fallback: same process, sample prefix
+
+
+def test_cli_writes_report(tmp_path):
+    trace = tmp_path / "trace.txt"
+    trace.write_text(
+        "task_id\tprocess\ttag\tname\tstatus\texit\tsubmit\tstart\tcomplete\t"
+        "duration\trealtime\t%cpu\tcpus\tmemory\tpeak_rss\tpeak_vmem\trchar\twchar\n"
+        "1\tMIRAGE:PRE:CONVERT_IMAGE\tP001\tn\tCOMPLETED\t0\t-\t-\t-\t"
+        "12m\t10m\t142%\t8\t8 GB\t3.2 GB\t4 GB\t1 GB\t500 MB\n"
+        "2\tMIRAGE:REG:REGISTER\tP001\tn\tFAILED\t1\t-\t-\t-\t"
+        "1h\t1h\t90%\t8\t8 GB\t7 GB\t9 GB\t2 GB\t1 GB\n"
+    )
+    size = tmp_path / "input_sizes.csv"
+    size.write_text(
+        "process,sample_id,filename,bytes\n"
+        "MIRAGE:PRE:CONVERT_IMAGE,P001,a.tiff,1073741824\n"
+    )
+    out = tmp_path / "resource.html"
+    r = subprocess.run([
+        sys.executable, str(SCRIPT),
+        "--trace", str(trace), "--size-log", str(size), "--output", str(out),
+    ], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    html = out.read_text()
+    assert "Resource" in html
+    assert "MIRAGE:PRE:CONVERT_IMAGE" in html
+    assert "MIRAGE:REG:REGISTER" in html
+    assert "Retries" in html or "Failures" in html
+
+
+def test_cli_missing_inputs_is_graceful(tmp_path):
+    out = tmp_path / "resource.html"
+    r = subprocess.run([
+        sys.executable, str(SCRIPT),
+        "--trace", str(tmp_path / "nope.txt"),
+        "--size-log", str(tmp_path / "nope.csv"),
+        "--output", str(out),
+    ], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    assert out.exists()
+    assert "not available" in out.read_text().lower()
