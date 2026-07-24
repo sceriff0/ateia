@@ -211,6 +211,82 @@ def versions_section(versions_path):
     return section("Software Versions", tbl)
 
 
+def parse_run_summary_json(path):
+    """Load the workflow-written run_summary.json; return {} on any problem."""
+    if not path or not Path(path).exists():
+        return {}
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _kv_table(pairs):
+    """Render a list of (label, value) tuples as a two-column table."""
+    rows = "".join(
+        f"<tr><th style='width:240px'>{k}</th><td>{'' if v is None else v}</td></tr>"
+        for k, v in pairs
+    )
+    return f"<table><tbody>{rows}</tbody></table>"
+
+
+def run_summary_section(summary):
+    """Top overview card: pipeline, run context, and key parameters used."""
+    if not summary:
+        return section("Run Summary", '<p class="empty-notice">Run summary not available.</p>')
+    pipe = summary.get("pipeline", {})
+    run = summary.get("run", {})
+    params = summary.get("params", {})
+    pairs = [
+        ("Pipeline", f"{pipe.get('name', 'mirage')} v{pipe.get('version', '?')}"),
+        ("Run timestamp", run.get("timestamp")),
+        ("Mode", run.get("mode")),
+        ("Steps", f"{run.get('start', '?')} → {run.get('stop', '?')}"),
+    ]
+    for key in sorted(params):
+        pairs.append((f"param: {key}", params[key]))
+    return section("Run Summary", _kv_table(pairs))
+
+
+def status_strip_section(present):
+    """A row of stage badges: ran (green) vs no artifacts (grey)."""
+    badges = []
+    for stage, ran in present.items():
+        color = "#27ae60" if ran else "#95a5a6"
+        label = "ran" if ran else "no artifacts"
+        badges.append(
+            f"<span style='display:inline-block;margin:4px 8px 4px 0;padding:6px 12px;"
+            f"border-radius:14px;background:{color};color:#fff;font-size:0.85rem;'>"
+            f"{stage}: {label}</span>"
+        )
+    return section("Pipeline Stages", "<div>" + "".join(badges) + "</div>")
+
+
+def manifest_section(summary):
+    """Sample manifest: totals plus a per-patient image/channel table."""
+    manifest = (summary or {}).get("manifest", {})
+    if not manifest:
+        return section("Sample Manifest", '<p class="empty-notice">Manifest not available.</p>')
+    totals = manifest.get("totals", {})
+    patients = manifest.get("patients", {})
+    head = _kv_table([
+        ("Patients", totals.get("patients")),
+        ("Images", totals.get("images")),
+        ("Channels", totals.get("channels")),
+    ])
+    tbl = ("<table style='margin-top:14px'><thead><tr>"
+           "<th>Patient</th><th>Images</th><th>Channels</th>"
+           "</tr></thead><tbody>")
+    for pid in sorted(patients):
+        row = patients[pid]
+        tbl += (f"<tr><td>{pid}</td><td>{row.get('images', '')}</td>"
+                f"<td>{row.get('channels', '')}</td></tr>")
+    tbl += "</tbody></table>"
+    return section("Sample Manifest", head + tbl)
+
+
 # ---------------------------------------------------------------------------
 # HTML building blocks
 # ---------------------------------------------------------------------------

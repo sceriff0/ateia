@@ -43,3 +43,49 @@ def test_versions_section_missing_file_is_graceful(tmp_path):
     html = gqr.versions_section(tmp_path / "nope.yml")
     assert "Software Versions" in html
     assert "not available" in html.lower() or "no " in html.lower()
+
+
+import json
+
+
+def _summary(tmp_path):
+    p = tmp_path / "run_summary.json"
+    p.write_text(json.dumps({
+        "pipeline": {"name": "mirage", "version": "0.1.0"},
+        "run": {"timestamp": "2026-07-24 10:00:00 UTC", "mode": "standard",
+                "start": "preprocessing", "stop": "postprocessing"},
+        "params": {"registration_method": "valis", "seg_method": "cellsam", "pixel_size": 0.325},
+        "manifest": {"totals": {"patients": 1, "images": 3, "channels": 5},
+                     "patients": {"P001": {"images": 3, "channels": 5}}},
+    }))
+    return p
+
+
+def test_parse_run_summary_missing_returns_empty(tmp_path):
+    gqr = _load()
+    assert gqr.parse_run_summary_json(tmp_path / "nope.json") == {}
+
+
+def test_run_summary_section(tmp_path):
+    gqr = _load()
+    s = gqr.parse_run_summary_json(_summary(tmp_path))
+    html = gqr.run_summary_section(s)
+    assert "mirage" in html and "0.1.0" in html
+    assert "valis" in html and "cellsam" in html
+    assert "standard" in html
+
+
+def test_status_strip(tmp_path):
+    gqr = _load()
+    html = gqr.status_strip_section({"Preprocessing": True, "Registration": True,
+                                     "Segmentation & Quant": False})
+    assert "Preprocessing" in html and "Registration" in html
+    assert "Segmentation" in html
+
+
+def test_manifest_section(tmp_path):
+    gqr = _load()
+    s = gqr.parse_run_summary_json(_summary(tmp_path))
+    html = gqr.manifest_section(s)
+    assert "P001" in html
+    assert ">3<" in html or "3" in html   # image count present
