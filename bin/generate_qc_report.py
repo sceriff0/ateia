@@ -59,6 +59,17 @@ def parse_args():
         help="Directory of segmentation_metrics.csv from CSE",
     )
     p.add_argument("--versions", default=None, help="Path to collated versions.yml")
+    p.add_argument("--run-summary", default=None, help="Path to run_summary.json")
+    p.add_argument(
+        "--distance-plots",
+        default="distance_plots/",
+        help="Directory of registration distance-histogram PNGs",
+    )
+    p.add_argument(
+        "--seg-qc",
+        default="seg_qc/",
+        help="Directory of warp-segmentation QC JSONs",
+    )
     p.add_argument("--output", default="mirage_qc_report.html", help="Output HTML path")
     p.add_argument(
         "--data-dir",
@@ -646,6 +657,12 @@ def copy_data(args):
     copy_glob(args.valis_summary, "*.csv", "valis_summary")
     copy_glob(args.postprocess_qc, "*.png", "postprocess_qc")
     copy_glob(args.seg_eval, "*.csv", "seg_eval")
+    copy_glob(args.distance_plots, "*.png", "distance_plots")
+    copy_glob(args.seg_qc, "*.json", "seg_qc")
+    if args.run_summary and Path(args.run_summary).exists():
+        shutil.copy2(args.run_summary, data_dir / "run_summary.json")
+    if args.versions and Path(args.versions).exists():
+        shutil.copy2(args.versions, data_dir / "collated_versions.yml")
 
 
 # ---------------------------------------------------------------------------
@@ -659,17 +676,32 @@ def main():
     args = parse_args()
     timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
 
+    summary = parse_run_summary_json(args.run_summary)
+    present = {
+        "Preprocessing": bool(list_files(args.preprocess_qc, "*.png")),
+        "Registration": bool(list_files(args.registration_qc, "*")),
+        "Segmentation & Quant": bool(list_files(args.postprocess_qc, "*.png"))
+        or bool(list_files(args.seg_eval, "*.csv")),
+    }
+
     html_parts = [html_header(timestamp)]
+    html_parts.append(run_summary_section(summary))
+    html_parts.append(status_strip_section(present))
+    html_parts.append(manifest_section(summary))
     html_parts.append(preprocess_qc_section(args.preprocess_qc))
     html_parts.append(
         registration_qc_section(
             args.registration_qc,
             args.feature_distances,
             args.valis_summary,
+            args.distance_plots,
+            args.seg_qc,
         )
     )
+    html_parts.append(seg_overlay_section(args.postprocess_qc))
     html_parts.append(postprocess_qc_section(args.postprocess_qc))
     html_parts.append(seg_eval_section(args.seg_eval))
+    html_parts.append(versions_section(args.versions))
     html_parts.append(html_footer())
 
     out_path = Path(args.output)

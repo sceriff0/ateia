@@ -125,3 +125,40 @@ def test_seg_overlay_section_only_overlays(tmp_path):
     html = gqr.seg_overlay_section(d)
     assert "seg_overlay" in html
     assert "intensity_distributions" not in html
+
+
+def test_end_to_end_cli_smoke(tmp_path):
+    # Minimal inputs: run summary + versions only; everything else empty dirs.
+    (tmp_path / "preprocess_qc").mkdir()
+    (tmp_path / "registration_qc").mkdir()
+    (tmp_path / "feature_dist").mkdir()
+    (tmp_path / "valis_summary").mkdir()
+    (tmp_path / "postprocess_qc").mkdir()
+    (tmp_path / "seg_eval").mkdir()
+    (tmp_path / "distance_plots").mkdir()
+    (tmp_path / "seg_qc").mkdir()
+    rs = _summary(tmp_path)
+    v = tmp_path / "v.yml"
+    v.write_text('"A:B":\n    tool: 1.0\n')
+    out = tmp_path / "report.html"
+    r = subprocess.run([
+        sys.executable, str(SCRIPT),
+        "--preprocess-qc", str(tmp_path / "preprocess_qc"),
+        "--registration-qc", str(tmp_path / "registration_qc"),
+        "--feature-distances", str(tmp_path / "feature_dist"),
+        "--valis-summary", str(tmp_path / "valis_summary"),
+        "--postprocess-qc", str(tmp_path / "postprocess_qc"),
+        "--seg-eval", str(tmp_path / "seg_eval"),
+        "--distance-plots", str(tmp_path / "distance_plots"),
+        "--seg-qc", str(tmp_path / "seg_qc"),
+        "--run-summary", str(rs),
+        "--versions", str(v),
+        "--output", str(out),
+        "--data-dir", str(tmp_path / "data"),
+    ], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    html = out.read_text()
+    for header in ["Run Summary", "Pipeline Stages", "Sample Manifest",
+                   "Preprocessing QC", "Registration QC", "Segmentation Overlays",
+                   "Postprocessing QC", "Segmentation Quality (CSE)", "Software Versions"]:
+        assert header in html, f"missing section: {header}"
