@@ -1,8 +1,7 @@
 """Regression guard for the HPC read-only-filesystem BioFormats-JVM crash.
 
-On clusters where $HOME lives on a read-only mount (e.g. /hpcnfs), the distributed
-registration stages (reg_prep / reg_micro_prep / reg_finalize) crash starting the
-BioFormats JVM:
+On clusters where $HOME lives on a read-only mount (e.g. /hpcnfs), any stage that
+starts the BioFormats JVM (e.g. warp_seg_qc via valis_config.init_jvm) crashes:
 
     OSError: [Errno 30] Read-only file system: '/hpcnfs'
       ... jgo.resolve_dependencies -> os.makedirs(workspace)

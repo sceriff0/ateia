@@ -237,60 +237,6 @@
                     "description": "Allow automatic reference selection.",
                     "default": false
                 },
-                "reg_distributed_tiling": {
-                    "type": "boolean",
-                    "description": "Opt-in: lift VALIS's non-rigid tile loop into Nextflow processes (REG_PREP/REG_TILE/REG_FINALIZE) for low-RAM clusters. Bit-identical to VALIS's own tiler. Default keeps the classic VALIS_ADAPTER.",
-                    "default": false
-                },
-                "reg_dist_container": {
-                    "type": "string",
-                    "description": "Container for distributed-tiling processes. MUST be the EXTERNAL_TILE_HOOK-patched VALIS image (the published cdgatenbee image lacks the seam).",
-                    "default": "bolt3x/attend_image_analysis:mirage_valis_1.0.0"
-                },
-                "reg_dist_tile_wh": {
-                    "type": "integer",
-                    "description": "Non-rigid tile width/height for distributed tiling.",
-                    "default": 512
-                },
-                "reg_dist_micro_tile_wh": {
-                    "type": "integer",
-                    "description": "Micro-registration tile width/height for the distributed micro second wave (spec \u00a75A); VALIS default 2048.",
-                    "default": 2048
-                },
-                "reg_dist_tile_buffer": {
-                    "type": "integer",
-                    "description": "Tile overlap (buffer) for distributed tiling.",
-                    "default": 100
-                },
-                "reg_dist_min_input_gb": {
-                    "type": "number",
-                    "description": "auto routing: total full-res input >= this (GB) -> distributed JVM-free non-rigid; smaller -> classic VALIS.",
-                    "default": 1.0
-                },
-                "reg_dist_threshold_gb": {
-                    "type": "number",
-                    "description": "est_GB boundary for auto tiling routing (matches VALIS TILER_THRESH_GB).",
-                    "default": 10
-                },
-                "reg_dist_force_tiling": {
-                    "type": "boolean",
-                    "description": "false = separated whole-image non-rigid (bit-identical, JVM-free); true = tiled fan-out (for a single field too big for one node).",
-                    "default": false
-                },
-                "reg_dist_sub_threshold": {
-                    "type": "string",
-                    "description": "Tiling-regime policy: 'auto' = tile only above VALIS's threshold; 'force' = always tile.",
-                    "default": "auto",
-                    "enum": [
-                        "auto",
-                        "force"
-                    ]
-                },
-                "reg_max_non_rigid_dim": {
-                    "type": "integer",
-                    "description": "Max non-rigid registration dimension (px) for distributed REG_PREP.",
-                    "default": 4096
-                },
                 "reg_jvm_heap_gb": {
                     "type": [
                         "integer",

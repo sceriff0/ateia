@@ -1,9 +1,9 @@
 """Single source of truth for the VALIS registrar configuration.
 
-Both the classic `bin/register.py` and the distributed `bin/reg_prep.py` build their `Valis`
-object from `build_registrar_kwargs(...)` here, so the distributed path's rigid stage (feature
-detector, matcher, MicroRigidRegistrar, image-dim caps, affine optimizer) is **bit-identical** to
-classic. Any drift here would change the rigid `M` and break bit-identicality.
+`bin/register.py` builds its `Valis` object from `build_registrar_kwargs(...)` here, so the
+registrar's feature detector, matcher, MicroRigidRegistrar, image-dim caps and affine optimizer
+have a single definition. `init_jvm(...)` is the shared BioFormats JVM-heap sizer, also used by
+`bin/warp_seg_qc.py` for the reg_qc>=2 segmentation-overlap QC.
 """
 import os
 
@@ -77,12 +77,9 @@ def _system_memory_gb():
 def init_jvm(input_dir, override_gb=None):
     """Size and start the BioFormats JVM heap to the inputs, mirroring bin/register.py:333-335.
 
-    The distributed prep stages (reg_prep, reg_micro_prep) construct a real ``Valis`` and read slides
-    via BioFormats, exactly like classic register.py — so they MUST init the JVM with a heap sized to
-    the inputs. Without this the JVM either never starts, or starts with VALIS's small default heap and
-    OOMs reading a large slide on a cluster node — the RAM-on-one-node failure the distributed path
-    exists to remove. Heap formula is copied from register.py's estimate_jvm_memory (total*3+8, min 8,
-    capped at 75% of system RAM)."""
+    Used by bin/warp_seg_qc.py, which constructs a real ``Valis`` and reads slides via BioFormats.
+    Heap formula is copied from register.py's estimate_jvm_memory (total*3+8, min 8, capped at
+    75% of system RAM)."""
     from valis import registration
 
     # Point scyjava's jgo/Maven cache off a read-only $HOME (HPC nodes) BEFORE the JVM starts.
@@ -104,31 +101,3 @@ def init_jvm(input_dir, override_gb=None):
         mem_gb = max(8, min(max_heap, int(total_gb * 3 + 8)))
     registration.init_jvm(mem_gb=mem_gb)
     return mem_gb
-
-
-def slide_paths(input_dir):
-    """Every slide file in `input_dir`, matching init_jvm's extension filter."""
-    return [os.path.join(input_dir, f) for f in sorted(os.listdir(input_dir))
-            if f.lower().endswith((".tif", ".tiff", ".ome.tif", ".ome.tiff"))]
-
-
-def maybe_init_jvm(input_dir, override_gb=None):
-    """Start the BioFormats JVM only when some input needs it.
-
-    Returns the heap size in GB, or 0 when no JVM was started. mirage's own preprocessed
-    OME-TIFFs are read JVM-free by MirageVipsSlideReader, so on a normal run this starts
-    nothing -- which is the entire point of the low-memory path.
-    """
-    from mirage_slide_reader import all_readable
-    paths = slide_paths(input_dir)
-    if paths and all_readable(paths):
-        return 0
-    return init_jvm(input_dir, override_gb=override_gb)
-
-
-def micro_reg_size(slide_dict, micro_reg_fraction=0.125):
-    """Replicate register.py's micro_reg_size = floor(min over slides of max(dim) * fraction)."""
-    import numpy as np
-    img_dims = np.array([s.slide_dimensions_wh[0] for s in slide_dict.values()])
-    min_max_size = np.min([np.max(d) for d in img_dims])
-    return int(np.floor(min_max_size * micro_reg_fraction))

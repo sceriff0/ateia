@@ -267,8 +267,7 @@ VALIS holds multiple registered images in memory. Drop to `--memory_mode low` an
 ```
 
 VALIS auto-tiles non-rigid registration internally when estimated memory is high, so
-there is no tile size to set. For low-RAM clusters, opt into the Nextflow-distributed
-tiling path with `--reg_distributed_tiling true`.
+there is no tile size to set.
 
 ### Micro-registration divergence
 

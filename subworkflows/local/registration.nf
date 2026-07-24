@@ -12,9 +12,6 @@ include { SEG_QC_GEOJSON                    } from '../../modules/local/seg_qc_g
 include { WARP_SEG_QC                       } from '../../modules/local/warp_seg_qc'
 
 include { VALIS_ADAPTER                     } from './adapters/valis_adapter'
-include { VALIS_DISTRIBUTED_ADAPTER         } from './adapters/valis_distributed_adapter'
-include { REG_COMPARE                       } from './reg_compare'
-include { REG_ESTIMATE                      } from '../../modules/local/reg_estimate'
 
 include { ESTIMATE_FEATURE_DISTANCES        } from '../../modules/local/estimate_feature_distances'
 
@@ -166,91 +163,29 @@ workflow REGISTRATION {
     //   - Runs registration
     //   - Converts output back to [meta, file] standard format
 
-    // Opt-in distributed tiled registration (spec §6.5/§6.6): lifts VALIS's non-rigid tile loop into
-    // REG_PREP -> REG_TILE (fan-out) -> REG_COMPOSE_* (fan-in) -> REG_WARP_TILE (fan-out) ->
-    // REG_ASSEMBLE for low-RAM clusters. Bit-identical to
-    // VALIS's own tiler on its processed 2-D images. Default (reg_distributed_tiling=false) = classic.
+    // Registration runs via the classic monolithic VALIS adapter (single-process REGISTER).
+    // The distributed/tiled low-memory path was archived on 2026-07-24 (git tag
+    // archive/tiled-valis-2026-07-24) and is no longer wired in.
     //
-    // IMPORTANT (spec §6.5): tiled non-rigid != whole-image non-rigid. VALIS only tiles when
-    // est_GB > threshold (rarely, since non-rigid runs downsampled). So:
-    //   - 'auto' (default): REG_ESTIMATE per patient -> route est>thr to distributed (== classic-tiled),
-    //     est<=thr to classic whole-image (IDENTICAL to classic). This keeps <10GB inputs bit-identical.
-    //   - 'force': always tile (RAM win at the cost of differing from classic-whole-image for small data).
-    // Registrar pickle (per patient) for the GeoJSON seg-QC — classic VALIS only
-    // (the distributed path produces no single registrar pickle).
+    // Registrar pickle (per patient) for the GeoJSON seg-QC, and the pre-micro displacement
+    // fields (only when reg_qc >= 2 asked REGISTER for them), both come from classic VALIS.
     ch_registrar_pickle = Channel.empty()
-    // Pre-micro displacement fields, same provenance as the pickle: classic VALIS only, and
-    // only when reg_qc >= 2 asked REGISTER for them.
     ch_stage_checkpoint = Channel.empty()
 
-    // Hoisted above the adapter branch because the seg-QC gate below depends on BOTH: on the
-    // distributed branch VALIS_ADAPTER is never invoked, so `VALIS_ADAPTER.out` does not exist
-    // and any block referencing it must be unreachable at DAG-build time, not merely at runtime.
     // reg_qc: 0 = none, 1 = DAPI overlay, 2 = + segmentation overlap (legacy
-    // skip_registration_qc=true forces 0). ParamUtils.regQcLevel is the single definition, so
-    // ParamUtils.validateRegistrationPath's launch-time gate cannot drift from it.
-    def use_distributed = ParamUtils.useDistributedAdapter(params)
-    def do_compare      = ParamUtils.regCompareEnabled(params)
-    def reg_qc_level    = ParamUtils.regQcLevel(params)
+    // skip_registration_qc=true forces 0). ParamUtils.regQcLevel is the single definition.
+    def reg_qc_level = ParamUtils.regQcLevel(params)
 
-    // Level 2 warps polygons through the classic registrar pickle, which the distributed path
-    // does not produce. ParamUtils.validateRegistrationPath already rejects that combination at
-    // launch; this is defence in depth (and what keeps the workflow buildable on 'force').
-    // --reg_compare always runs classic too, so the pickle is available there regardless.
-    def do_seg_qc = reg_qc_level >= 2 && (do_compare || !use_distributed)
+    // Level 2 warps polygons through the classic registrar pickle produced by REGISTER.
+    def do_seg_qc = reg_qc_level >= 2
 
-    // Per-slide classic-vs-low-memory diff metrics; empty unless --reg_compare is on.
-    ch_reg_compare = Channel.empty()
-
-    if (do_compare) {
-        // --reg_compare (spec §7): run BOTH paths over the same slides and diff them. Takes
-        // precedence over the adapter switch — the whole point is to run both, and the
-        // comparison's value depends on classic staying the run's real output.
-        log.warn "--reg_compare is ON: every multi-slide patient is registered TWICE " +
-                 "(classic VALIS + the low-memory path). Expect ~2x registration cost."
-        REG_COMPARE(ch_grouped_multi)
-        ch_registered       = REG_COMPARE.out.registered
-        ch_registrar_pickle = REG_COMPARE.out.registrar
-        ch_adapter_logs     = REG_COMPARE.out.size_logs
-        ch_adapter_versions = REG_COMPARE.out.versions
-        ch_adapter_summary  = REG_COMPARE.out.summary
-        ch_reg_compare      = REG_COMPARE.out.metrics
-    } else if (!use_distributed) {
-        VALIS_ADAPTER(ch_grouped_multi)
-        ch_registered       = VALIS_ADAPTER.out.registered
-        ch_registrar_pickle = VALIS_ADAPTER.out.registrar
-        ch_stage_checkpoint = VALIS_ADAPTER.out.stage_checkpoint
-        ch_adapter_logs     = VALIS_ADAPTER.out.size_logs
-        ch_adapter_versions = VALIS_ADAPTER.out.versions
-        ch_adapter_summary  = VALIS_ADAPTER.out.summary
-    } else if ((params.reg_dist_sub_threshold ?: 'auto') == 'force') {
-        VALIS_DISTRIBUTED_ADAPTER(ch_grouped_multi)
-        ch_registered       = VALIS_DISTRIBUTED_ADAPTER.out.registered
-        ch_adapter_logs     = VALIS_DISTRIBUTED_ADAPTER.out.size_logs
-        ch_adapter_versions = VALIS_DISTRIBUTED_ADAPTER.out.versions
-        ch_adapter_summary  = Channel.empty()
-    } else {
-        // 'auto': route per patient by INPUT SIZE (spec §6.7) — large inputs (JVM-RAM concern) ->
-        // distributed (JVM-free, bit-identical); small inputs -> classic VALIS (monolithic is fine).
-        REG_ESTIMATE(ch_grouped_multi.map { pid, ref_item, all_items ->
-            tuple(pid, ref_item[1], all_items.collect { it[1] })
-        })
-        ch_routed = ch_grouped_multi
-            .map { pid, ref_item, all_items -> tuple(pid, [ref_item, all_items]) }
-            .join(REG_ESTIMATE.out.decision)
-            .branch { pid, payload, est_decision ->
-                distributed: est_decision == 'true'
-                classic:     true
-            }
-        VALIS_DISTRIBUTED_ADAPTER(ch_routed.distributed.map { pid, payload, u -> tuple(pid, payload[0], payload[1]) })
-        VALIS_ADAPTER(            ch_routed.classic.map     { pid, payload, u -> tuple(pid, payload[0], payload[1]) })
-        ch_registrar_pickle = VALIS_ADAPTER.out.registrar   // only classic slides have a pickle
-        ch_stage_checkpoint = VALIS_ADAPTER.out.stage_checkpoint
-        ch_registered       = VALIS_DISTRIBUTED_ADAPTER.out.registered.mix(VALIS_ADAPTER.out.registered)
-        ch_adapter_logs     = VALIS_DISTRIBUTED_ADAPTER.out.size_logs.mix(VALIS_ADAPTER.out.size_logs)
-        ch_adapter_versions = VALIS_DISTRIBUTED_ADAPTER.out.versions.mix(VALIS_ADAPTER.out.versions)
-        ch_adapter_summary  = VALIS_ADAPTER.out.summary
-    }
+    VALIS_ADAPTER(ch_grouped_multi)
+    ch_registered       = VALIS_ADAPTER.out.registered
+    ch_registrar_pickle = VALIS_ADAPTER.out.registrar
+    ch_stage_checkpoint = VALIS_ADAPTER.out.stage_checkpoint
+    ch_adapter_logs     = VALIS_ADAPTER.out.size_logs
+    ch_adapter_versions = VALIS_ADAPTER.out.versions
+    ch_adapter_summary  = VALIS_ADAPTER.out.summary
 
     // Re-introduce single-slide patients (reference passed through unregistered)
     // into the registered stream for QC, checkpointing and postprocessing.
@@ -467,7 +402,6 @@ workflow REGISTRATION {
     checkpoint_csv   = ch_checkpoint_csv
     qc               = ch_qc
     seg_qc           = ch_seg_qc
-    reg_compare      = ch_reg_compare
     error_metrics    = ch_error_metrics
     valis_summary    = ch_adapter_summary
     size_logs        = ch_size_logs
