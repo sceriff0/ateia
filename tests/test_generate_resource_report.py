@@ -137,3 +137,29 @@ def test_cli_missing_inputs_is_graceful(tmp_path):
     assert r.returncode == 0, r.stderr
     assert out.exists()
     assert "not available" in out.read_text().lower()
+
+
+def test_build_html_keeps_zero_byte_matched_input(tmp_path):
+    grr = _load()
+    trace_rows = [
+        {"process": "A", "tag": "P001", "exit": "0", "realtime_s": 1.0,
+         "peak_rss_b": 100.0, "peak_vmem_b": None, "rchar_b": None,
+         "wchar_b": None, "cpu_pct": None, "duration_s": None},
+    ]
+    size_map = {("A", "P001"): 0}
+
+    html = grr.build_html(trace_rows, size_map, "ts")
+
+    assert isinstance(html, str)
+
+    section_marker = "<h2>Resource vs Input Size</h2>"
+    assert section_marker in html
+    section = html[html.index(section_marker):]
+    section = section[:section.index("</section>")]
+
+    # The zero-byte but matched row must still appear in the section (not
+    # dropped as "unmatched"), and the ratio cell must be empty (N/A), not a
+    # ZeroDivisionError or crash.
+    assert "A" in section
+    assert "P001" in section
+    assert "<td></td></tr>" in section

@@ -257,14 +257,14 @@ def build_html(trace_rows, size_map, timestamp, native_report=None, native_timel
 
     # Resource vs input size
     joined = join_size(trace_rows, size_map)
-    with_size = [j for j in joined if j.get("input_bytes")]
+    with_size = [j for j in joined if j.get("input_bytes") is not None]
     if with_size:
         tbl = ("<table><thead><tr><th>Process</th><th>Sample (tag)</th>"
                "<th>Input size</th><th>Peak RSS</th><th>Realtime</th>"
                "<th>RSS / input GB</th></tr></thead><tbody>")
         for j in sorted(with_size, key=lambda x: -(x.get("peak_rss_b") or 0)):
             gb = j["input_bytes"] / 1024**3
-            ratio = (j["peak_rss_b"] / j["input_bytes"]) if j.get("peak_rss_b") else None
+            ratio = (j["peak_rss_b"] / j["input_bytes"]) if (j.get("peak_rss_b") is not None and j["input_bytes"]) else None
             tbl += (f"<tr><td>{j['process']}</td><td>{j.get('tag', '')}</td>"
                     f"<td>{fmt_bytes(j['input_bytes'])}</td>"
                     f"<td>{fmt_bytes(j.get('peak_rss_b'))}</td>"
