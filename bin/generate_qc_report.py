@@ -59,6 +59,17 @@ def parse_args():
         help="Directory of segmentation_metrics.csv from CSE",
     )
     p.add_argument("--versions", default=None, help="Path to collated versions.yml")
+    p.add_argument("--run-summary", default=None, help="Path to run_summary.json")
+    p.add_argument(
+        "--distance-plots",
+        default="distance_plots/",
+        help="Directory of registration distance-histogram PNGs",
+    )
+    p.add_argument(
+        "--seg-qc",
+        default="seg_qc/",
+        help="Directory of warp-segmentation QC JSONs",
+    )
     p.add_argument("--output", default="mirage_qc_report.html", help="Output HTML path")
     p.add_argument(
         "--data-dir",
@@ -163,6 +174,128 @@ def parse_feature_dist_json(json_path):
         "after_mean": after_mean,
         "improvement_pct": improvement,
     }
+
+
+def parse_versions_yml(path):
+    """
+    Minimal two-level YAML parser for a collated versions.yml.
+
+    Structure (concatenated per-process blocks):
+        "PROCESS:NAME":
+            tool: version
+    Returns {process: {tool: version}}. Stdlib-only (no PyYAML) to keep the
+    report self-contained. Repeated process keys are merged.
+    """
+    result = {}
+    current = None
+    if not path or not Path(path).exists():
+        return result
+    with open(path, encoding="utf-8") as fh:
+        for raw in fh:
+            line = raw.rstrip("\n")
+            if not line.strip():
+                continue
+            if not line.startswith((" ", "\t")):
+                # top-level "PROCESS": key
+                key = line.strip().rstrip(":").strip().strip('"')
+                current = key
+                result.setdefault(current, {})
+            elif current is not None and ":" in line:
+                tool, _, ver = line.strip().partition(":")
+                result[current][tool.strip().strip('"')] = ver.strip().strip('"')
+    return result
+
+
+def versions_section(versions_path):
+    """Render the collated versions.yml as a per-process software table."""
+    versions = parse_versions_yml(versions_path) if versions_path else {}
+    if not versions:
+        body = '<p class="empty-notice">Version information not available.</p>'
+        return section("Software Versions", body)
+    tbl = "<table><thead><tr><th>Process</th><th>Tool</th><th>Version</th></tr></thead><tbody>"
+    for proc in sorted(versions):
+        tools = versions[proc]
+        for i, tool in enumerate(sorted(tools)):
+            proc_cell = f"<td rowspan='{len(tools)}'>{proc}</td>" if i == 0 else ""
+            tbl += f"<tr>{proc_cell}<td>{tool}</td><td>{tools[tool]}</td></tr>"
+    tbl += "</tbody></table>"
+    return section("Software Versions", tbl)
+
+
+def parse_run_summary_json(path):
+    """Load the workflow-written run_summary.json; return {} on any problem."""
+    if not path or not Path(path).exists():
+        return {}
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _kv_table(pairs):
+    """Render a list of (label, value) tuples as a two-column table."""
+    rows = "".join(
+        f"<tr><th style='width:240px'>{k}</th><td>{'' if v is None else v}</td></tr>"
+        for k, v in pairs
+    )
+    return f"<table><tbody>{rows}</tbody></table>"
+
+
+def run_summary_section(summary):
+    """Top overview card: pipeline, run context, and key parameters used."""
+    if not summary:
+        return section("Run Summary", '<p class="empty-notice">Run summary not available.</p>')
+    pipe = summary.get("pipeline", {})
+    run = summary.get("run", {})
+    params = summary.get("params", {})
+    pairs = [
+        ("Pipeline", f"{pipe.get('name', 'mirage')} v{pipe.get('version', '?')}"),
+        ("Run timestamp", run.get("timestamp")),
+        ("Mode", run.get("mode")),
+        ("Steps", f"{run.get('start', '?')} → {run.get('stop', '?')}"),
+    ]
+    for key in sorted(params):
+        pairs.append((f"param: {key}", params[key]))
+    return section("Run Summary", _kv_table(pairs))
+
+
+def status_strip_section(present):
+    """A row of stage badges: ran (green) vs no artifacts (grey)."""
+    badges = []
+    for stage, ran in present.items():
+        color = "#27ae60" if ran else "#95a5a6"
+        label = "ran" if ran else "no artifacts"
+        badges.append(
+            f"<span style='display:inline-block;margin:4px 8px 4px 0;padding:6px 12px;"
+            f"border-radius:14px;background:{color};color:#fff;font-size:0.85rem;'>"
+            f"{stage}: {label}</span>"
+        )
+    return section("Pipeline Stages", "<div>" + "".join(badges) + "</div>")
+
+
+def manifest_section(summary):
+    """Sample manifest: totals plus a per-patient image/channel table."""
+    manifest = (summary or {}).get("manifest", {})
+    if not manifest:
+        return section("Sample Manifest", '<p class="empty-notice">Manifest not available.</p>')
+    totals = manifest.get("totals", {})
+    patients = manifest.get("patients", {})
+    head = _kv_table([
+        ("Patients", totals.get("patients")),
+        ("Images", totals.get("images")),
+        ("Channels", totals.get("channels")),
+    ])
+    tbl = ("<table style='margin-top:14px'><thead><tr>"
+           "<th>Patient</th><th>Images</th><th>Channels</th>"
+           "</tr></thead><tbody>")
+    for pid in sorted(patients):
+        row = patients[pid]
+        tbl += (f"<tr><td>{pid}</td><td>{row.get('images', '')}</td>"
+                f"<td>{row.get('channels', '')}</td></tr>")
+    tbl += "</tbody></table>"
+    return section("Sample Manifest", head + tbl)
 
 
 # ---------------------------------------------------------------------------
@@ -293,7 +426,7 @@ def preprocess_qc_section(preprocess_dir):
     return section("Preprocessing QC", img_grid(pngs))
 
 
-def registration_qc_section(reg_dir, feat_dir, valis_dir):
+def registration_qc_section(reg_dir, feat_dir, valis_dir, dist_plots_dir=None, seg_qc_dir=None):
     """Build the registration-QC report section (overlay images plus accuracy tables)."""
     parts = []
 
@@ -373,6 +506,22 @@ def registration_qc_section(reg_dir, feat_dir, valis_dir):
             '<p class="empty-notice" style="margin-top:12px;">No feature-distance JSONs found.</p>'
         )
 
+    # Distance-distribution histograms (previously dropped)
+    dist_pngs = list_files(dist_plots_dir, "*.png") if dist_plots_dir else []
+    if dist_pngs:
+        parts.append(
+            "<h3 style='margin:20px 0 8px;font-size:1rem;color:#444;'>Feature-Distance Histograms</h3>"
+        )
+        parts.append(img_grid(dist_pngs, wide=True))
+
+    # Warp-segmentation QC metrics (previously dropped)
+    seg_qc_jsons = list_files(seg_qc_dir, "*.json") if seg_qc_dir else []
+    if seg_qc_jsons:
+        parts.append(
+            "<h3 style='margin:20px 0 8px;font-size:1rem;color:#444;'>Warp-Segmentation QC</h3>"
+        )
+        parts.extend(_seg_qc_table(jp) for jp in seg_qc_jsons)
+
     return section("Registration QC", "\n".join(parts))
 
 
@@ -382,6 +531,67 @@ def postprocess_qc_section(postprocess_dir):
     all_pngs = list_files(postprocess_dir, "*.png")
     pngs = [p for p in all_pngs if "_seg_overlay" not in p.name]
     return section("Postprocessing QC", img_grid(pngs, wide=True))
+
+
+def _flatten(prefix, obj, out):
+    """Recursively flatten a nested dict into (dotted-key, str-value) rows."""
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            _flatten(f"{prefix}.{k}" if prefix else str(k), v, out)
+    elif isinstance(obj, list):
+        for i, v in enumerate(obj):
+            _flatten(f"{prefix}[{i}]", v, out)
+    else:
+        out.append((prefix, str(obj)))
+
+
+def parse_seg_qc_json(path):
+    """Flatten a warp-seg QC JSON into (key, value) rows; schema-agnostic."""
+    with open(path, encoding="utf-8") as fh:
+        data = json.load(fh)
+    out = []
+    _flatten("", data, out)
+    return out
+
+
+def _seg_qc_table(json_path):
+    """
+    Render a single warp-seg QC JSON as a filename caption + metric table.
+
+    Shared by ``seg_qc_section`` and ``registration_qc_section`` so the
+    warp-seg QC table is built in exactly one place.
+    """
+    parts = [
+        f"<p style='font-size:0.85rem;color:#666;margin:8px 0 4px;'>{Path(json_path).name}</p>"
+    ]
+    try:
+        rows = parse_seg_qc_json(json_path)
+    except Exception as exc:  # noqa: BLE001 - report, never crash
+        parts.append(f'<p class="empty-notice">Could not parse {Path(json_path).name}: {exc}</p>')
+        return "\n".join(parts)
+    tbl = "<table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>"
+    for k, v in rows:
+        tbl += f"<tr><td>{k}</td><td>{v}</td></tr>"
+    tbl += "</tbody></table>"
+    parts.append(tbl)
+    return "\n".join(parts)
+
+
+def seg_qc_section(seg_qc_dir):
+    """Render warp-seg QC JSONs (one table per file)."""
+    jsons = list_files(seg_qc_dir, "*.json")
+    if not jsons:
+        body = '<p class="empty-notice">No warp-segmentation QC metrics found.</p>'
+        return section("Segmentation Warp QC", body)
+    parts = [_seg_qc_table(jp) for jp in jsons]
+    return section("Segmentation Warp QC", "\n".join(parts))
+
+
+def seg_overlay_section(postprocess_dir):
+    """Dedicated section for the *_seg_overlay* PNGs (the most-inspected QC)."""
+    all_pngs = list_files(postprocess_dir, "*.png")
+    overlays = [p for p in all_pngs if "_seg_overlay" in p.name]
+    return section("Segmentation Overlays", img_grid(overlays, wide=True))
 
 
 def seg_eval_section(seg_eval_dir):
@@ -447,6 +657,12 @@ def copy_data(args):
     copy_glob(args.valis_summary, "*.csv", "valis_summary")
     copy_glob(args.postprocess_qc, "*.png", "postprocess_qc")
     copy_glob(args.seg_eval, "*.csv", "seg_eval")
+    copy_glob(args.distance_plots, "*.png", "distance_plots")
+    copy_glob(args.seg_qc, "*.json", "seg_qc")
+    if args.run_summary and Path(args.run_summary).exists():
+        shutil.copy2(args.run_summary, data_dir / "run_summary.json")
+    if args.versions and Path(args.versions).exists():
+        shutil.copy2(args.versions, data_dir / "collated_versions.yml")
 
 
 # ---------------------------------------------------------------------------
@@ -460,17 +676,32 @@ def main():
     args = parse_args()
     timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
 
+    summary = parse_run_summary_json(args.run_summary)
+    present = {
+        "Preprocessing": bool(list_files(args.preprocess_qc, "*.png")),
+        "Registration": bool(list_files(args.registration_qc, "*")),
+        "Segmentation & Quant": bool(list_files(args.postprocess_qc, "*.png"))
+        or bool(list_files(args.seg_eval, "*.csv")),
+    }
+
     html_parts = [html_header(timestamp)]
+    html_parts.append(run_summary_section(summary))
+    html_parts.append(status_strip_section(present))
+    html_parts.append(manifest_section(summary))
     html_parts.append(preprocess_qc_section(args.preprocess_qc))
     html_parts.append(
         registration_qc_section(
             args.registration_qc,
             args.feature_distances,
             args.valis_summary,
+            args.distance_plots,
+            args.seg_qc,
         )
     )
+    html_parts.append(seg_overlay_section(args.postprocess_qc))
     html_parts.append(postprocess_qc_section(args.postprocess_qc))
     html_parts.append(seg_eval_section(args.seg_eval))
+    html_parts.append(versions_section(args.versions))
     html_parts.append(html_footer())
 
     out_path = Path(args.output)

@@ -4,6 +4,8 @@
 ================================================================================
 */
 
+import groovy.json.JsonOutput
+
 include { PREPROCESSING       } from '../subworkflows/local/preprocess'
 include { REGISTRATION        } from '../subworkflows/local/registration'
 include { POSTPROCESSING      } from '../subworkflows/local/postprocess'
@@ -242,6 +244,8 @@ workflow MIRAGE {
         def ch_postprocess_qc_pngs  = Channel.empty()
         def ch_seg_eval_csv         = Channel.empty()
         def ch_versions             = Channel.empty()
+        def ch_distance_plots = Channel.empty()
+        def ch_seg_qc_jsons   = Channel.empty()
 
         if (ParamUtils.shouldRun('preprocessing', params.start, effective_stop)) {
             ch_preprocess_qc_pngs = ch_preprocess_qc_pngs.mix(PREPROCESSING.out.preprocess_qc)
@@ -255,6 +259,10 @@ workflow MIRAGE {
             ch_valis_summary_csvs = ch_valis_summary_csvs
                 .mix(REGISTRATION.out.valis_summary)
             ch_versions = ch_versions.mix(REGISTRATION.out.versions)
+            ch_distance_plots = ch_distance_plots
+                .mix(REGISTRATION.out.distance_plots.map { meta, files -> files })
+            ch_seg_qc_jsons = ch_seg_qc_jsons
+                .mix(REGISTRATION.out.seg_qc.map { meta, files -> files })
         }
         if (ParamUtils.shouldRun('postprocessing', params.start, effective_stop)) {
             ch_postprocess_qc_pngs = ch_postprocess_qc_pngs.mix(POSTPROCESSING.out.postprocess_qc)
@@ -267,6 +275,42 @@ workflow MIRAGE {
             .unique()
             .collectFile(name: 'collated_versions.yml')
 
+        // Run-context summary for the report's overview card (pipeline, run,
+        // params, sample manifest). Built from data already computed above
+        // (patient_counts/channel_counts) rather than re-parsing the CSV.
+        def manifest_patients = patient_counts.collectEntries { pid, imgs ->
+            [(pid): [images: imgs, channels: (channel_counts[pid] ?: 0)]]
+        }
+        def run_summary_map = [
+            pipeline: [name: workflow.manifest.name, version: workflow.manifest.version],
+            run: [
+                timestamp: new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss 'UTC'")
+                    .format(new Date()),
+                mode: (params.mode ?: 'standard'),
+                start: params.start,
+                stop: effective_stop,
+            ],
+            params: [
+                registration_method: params.registration_method,
+                seg_method: params.seg_method,
+                quantify_compartments: params.quantify_compartments,
+                expanded_quantification: params.expanded_quantification,
+                pixel_size: params.pixel_size,
+                cse_pixel_size_um: params.cse_pixel_size_um,
+            ],
+            manifest: [
+                totals: [
+                    patients: patient_counts.size(),
+                    images: (patient_counts.values().sum() ?: 0),
+                    channels: (channel_counts.values().sum() ?: 0),
+                ],
+                patients: manifest_patients,
+            ],
+        ]
+        def ch_run_summary = Channel
+            .of(JsonOutput.prettyPrint(JsonOutput.toJson(run_summary_map)))
+            .collectFile(name: 'run_summary.json')
+
         GENERATE_QC_REPORT(
             ch_preprocess_qc_pngs.collect().ifEmpty([]),
             ch_registration_qc_pngs.collect().ifEmpty([]),
@@ -274,7 +318,10 @@ workflow MIRAGE {
             ch_valis_summary_csvs.collect().ifEmpty([]),
             ch_postprocess_qc_pngs.collect().ifEmpty([]),
             ch_seg_eval_csv.collect().ifEmpty([]),
-            ch_collated_versions
+            ch_collated_versions,
+            ch_run_summary,
+            ch_distance_plots.collect().ifEmpty([]),
+            ch_seg_qc_jsons.collect().ifEmpty([]),
         )
     }
 

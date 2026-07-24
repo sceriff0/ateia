@@ -15,6 +15,9 @@ process GENERATE_QC_REPORT {
     path(postprocess_qc_pngs, stageAs: 'postprocess_qc/*')
     path(seg_eval_csvs, stageAs: 'seg_eval/*')
     path(versions_yml)
+    path(run_summary_json)
+    path(distance_plot_pngs, stageAs: 'distance_plots/*')
+    path(seg_qc_jsons, stageAs: 'seg_qc/*')
 
     output:
     path "mirage_qc_report_*.html", emit: report
@@ -36,6 +39,9 @@ process GENERATE_QC_REPORT {
         --postprocess-qc postprocess_qc/ \\
         --seg-eval seg_eval/ \\
         --versions ${versions_yml} \\
+        --run-summary ${run_summary_json} \\
+        --distance-plots distance_plots/ \\
+        --seg-qc seg_qc/ \\
         --output mirage_qc_report_${timestamp}.html \\
         --data-dir mirage_qc_data_${timestamp}/ \\
         ${args}

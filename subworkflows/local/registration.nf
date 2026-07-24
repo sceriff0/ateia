@@ -272,6 +272,7 @@ workflow REGISTRATION {
     //   - reference vs registered (post-registration)
 
     ch_error_metrics = Channel.empty()
+    ch_distance_plots = Channel.empty()
 
     if (params.enable_feature_error) {
         // For each non-reference image: [meta, reference, moving, registered]
@@ -308,6 +309,7 @@ workflow REGISTRATION {
 
         ESTIMATE_FEATURE_DISTANCES(ch_for_error)
         ch_error_metrics = ch_error_metrics.mix(ESTIMATE_FEATURE_DISTANCES.out.distance_metrics)
+        ch_distance_plots = ch_distance_plots.mix(ESTIMATE_FEATURE_DISTANCES.out.distance_plots)
     }
 
     // ========================================================================
@@ -403,6 +405,7 @@ workflow REGISTRATION {
     qc               = ch_qc
     seg_qc           = ch_seg_qc
     error_metrics    = ch_error_metrics
+    distance_plots   = ch_distance_plots
     valis_summary    = ch_adapter_summary
     size_logs        = ch_size_logs
     versions         = ch_versions

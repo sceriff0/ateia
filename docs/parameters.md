@@ -186,6 +186,20 @@ scores each patient's whole-cell/nuclear mask pair with reference-free metrics
 unless `skip_seg_quality_eval` is set; `cse_pixel_size_um` overrides the
 pixel size passed to the evaluator, falling back to `pixel_size` when unset.
 
+### Reports
+
+- **`qc/mirage_qc_report_<timestamp>.html`** — aggregated QC report: run summary,
+  pipeline-stage status, sample manifest, preprocessing / registration (overlays,
+  rTRE, feature distances + histograms, warp-seg QC) / segmentation overlays /
+  postprocessing QC, CellSegmentationEvaluator metrics, and software versions.
+  Controlled by `skip_final_qc_report`.
+- **`qc/mirage_resource_report.html`** — computational-resource report built from
+  the per-task size logs and Nextflow `trace.txt`: run totals, per-process
+  rollup, resource-vs-input-size, top-N heaviest/slowest tasks, and
+  retries/failures. Generated at run completion when `enable_trace` is set;
+  re-runnable by hand via `bin/generate_resource_report.py`. Complements
+  Nextflow's native `report.html` / `timeline.html`.
+
 ## Cluster & resources
 
 HPC details: [Running on HPC / SLURM](usage.md#running-on-hpc).
