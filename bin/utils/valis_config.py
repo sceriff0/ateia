@@ -5,6 +5,7 @@ registrar's feature detector, matcher, MicroRigidRegistrar, image-dim caps and a
 have a single definition. `init_jvm(...)` is the shared BioFormats JVM-heap sizer, also used by
 `bin/warp_seg_qc.py` for the reg_qc>=2 segmentation-overlap QC.
 """
+
 import os
 
 from valis import feature_detectors, feature_matcher
@@ -40,8 +41,12 @@ MEMORY_PRESETS = {
 }
 
 
-def build_registrar_kwargs(reference_img_f, memory_mode="high", skip_micro_registration=False,
-                           max_image_dim_px=4000):
+def build_registrar_kwargs(
+    reference_img_f,
+    memory_mode="high",
+    skip_micro_registration=False,
+    max_image_dim_px=4000,
+):
     """Return the exact kwargs dict passed to `registration.Valis(...)` by classic register.py.
 
     NOTE: a fresh `SuperGlueMatcher()` instance is created per call (mirrors register.py, which
@@ -54,13 +59,17 @@ def build_registrar_kwargs(reference_img_f, memory_mode="high", skip_micro_regis
         "align_to_reference": True,
         "crop": "reference",
         "max_processed_image_dim_px": preset["max_processed_image_dim_px"],
-        "max_non_rigid_registration_dim_px": preset["max_non_rigid_registration_dim_px"],
+        "max_non_rigid_registration_dim_px": preset[
+            "max_non_rigid_registration_dim_px"
+        ],
         "max_image_dim_px": preset.get("max_image_dim_px", max_image_dim_px),
         "feature_detector_cls": preset["feature_detector_cls"],
         "matcher": preset["matcher"],
         "non_rigid_registrar_cls": OpticalFlowWarper,
         "affine_optimizer_cls": None,
-        "micro_rigid_registrar_cls": None if skip_micro_registration else MicroRigidRegistrar,
+        "micro_rigid_registrar_cls": None
+        if skip_micro_registration
+        else MicroRigidRegistrar,
         "create_masks": True,
     }
 
@@ -69,7 +78,7 @@ def _system_memory_gb():
     try:
         pages = os.sysconf("SC_PHYS_PAGES")
         page_size = os.sysconf("SC_PAGE_SIZE")
-        return (pages * page_size) // (1024 ** 3)
+        return (pages * page_size) // (1024**3)
     except Exception:
         return None
 
@@ -80,13 +89,13 @@ def init_jvm(input_dir, override_gb=None):
     Used by bin/warp_seg_qc.py, which constructs a real ``Valis`` and reads slides via BioFormats.
     Heap formula is copied from register.py's estimate_jvm_memory (total*3+8, min 8, capped at
     75% of system RAM)."""
-    from valis import registration
-
     # Point scyjava's jgo/Maven cache off a read-only $HOME (HPC nodes) BEFORE the JVM starts.
     # scyjava<1.11 derives the cache path from Path.home() and ignores JGO_CACHE_DIR/M2_REPO, so
     # the Dockerfile ENV knobs are inert; this uses scyjava.config.set_cache_dir instead. Without
     # it, jgo's os.makedirs($HOME/.jgo) dies with EROFS on /hpcnfs. See jvm_cache.py.
     from jvm_cache import point_jvm_cache_off_readonly_home
+    from valis import registration
+
     point_jvm_cache_off_readonly_home()
 
     if override_gb is not None and override_gb > 0:
@@ -95,7 +104,7 @@ def init_jvm(input_dir, override_gb=None):
         total_gb = 0.0
         for f in os.listdir(input_dir):
             if f.lower().endswith((".tif", ".tiff", ".ome.tif", ".ome.tiff")):
-                total_gb += os.path.getsize(os.path.join(input_dir, f)) / (1024 ** 3)
+                total_gb += os.path.getsize(os.path.join(input_dir, f)) / (1024**3)
         sys_mem = _system_memory_gb()
         max_heap = int(sys_mem * 0.75) if sys_mem else 64
         mem_gb = max(8, min(max_heap, int(total_gb * 3 + 8)))

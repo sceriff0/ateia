@@ -9,6 +9,7 @@ a nucleus overlapping only a cell's membrane (interior overlap 0 -> unmatched),
 multi-candidate min-mismatch selection with greedy claiming, and skipped cells.
 Plus randomized fuzz scenes for breadth.
 """
+
 import numpy as np
 from scipy.sparse import csr_matrix
 from skimage.segmentation import find_boundaries
@@ -22,6 +23,7 @@ from bin.utils.cse.functions import get_matched_masks
 # ---------------------------------------------------------------------------
 def _old_get_indices_pandas(data):
     import pandas as pd
+
     d = data.ravel()
     f = lambda x: np.unravel_index(x.index, data.shape)
     return pd.Series(d).groupby(d).apply(f)
@@ -29,8 +31,9 @@ def _old_get_indices_pandas(data):
 
 def _old_compute_M(data):
     cols = np.arange(data.size)
-    return csr_matrix((cols, (data.ravel(), cols)),
-                      shape=(np.int64(data.max() + 1), data.size))
+    return csr_matrix(
+        (cols, (data.ravel(), cols)), shape=(np.int64(data.max() + 1), data.size)
+    )
 
 
 def _old_get_indices_sparse(data):
@@ -47,7 +50,7 @@ def _old_get_indexed_mask(mask, boundary):
 
 
 def _old_get_boundary(mask):
-    mask_boundary = find_boundaries(mask, mode='inner')
+    mask_boundary = find_boundaries(mask, mode="inner")
     return _old_get_indexed_mask(mask, mask_boundary)
 
 
@@ -96,10 +99,15 @@ def _old_get_matched_masks(cell_mask, nuclear_mask):
             whole_cell_best = []
             for j in nuclear_search_num:
                 if j != 0:
-                    if (j - 1 not in nucleus_matched_index_list) and (i not in cell_matched_index_list):
+                    if (j - 1 not in nucleus_matched_index_list) and (
+                        i not in cell_matched_index_list
+                    ):
                         whole_cell, nucleus, mismatch_fraction = _old_get_matched_cells(
-                            cell_coords[i], cell_membrane_coords[i], nucleus_coords[j - 1],
-                            mismatch_repair=1)
+                            cell_coords[i],
+                            cell_membrane_coords[i],
+                            nucleus_coords[j - 1],
+                            mismatch_repair=1,
+                        )
                         if type(whole_cell) != bool:
                             if mismatch_fraction < best_mismatch_fraction:
                                 best_mismatch_fraction = mismatch_fraction
@@ -141,21 +149,21 @@ def _handcrafted_scene():
     # B: two candidate nuclei -> must pick the fully-interior one (min mismatch),
     #    and one nucleus pokes outside the cell (repair path).
     cell[2:12, 20:30] = 2
-    nuc[4:8, 26:34] = 2          # pokes out to the right (cols 30-33 outside cell B)
-    nuc[6:9, 22:25] = 3          # fully interior -> lower mismatch, should win
+    nuc[4:8, 26:34] = 2  # pokes out to the right (cols 30-33 outside cell B)
+    nuc[6:9, 22:25] = 3  # fully interior -> lower mismatch, should win
 
     # C and D adjacent; one nucleus spans both interiors -> greedy claims for C,
     #    D has no other nucleus -> skipped.
     cell[20:30, 2:12] = 4
     cell[20:30, 12:22] = 5
-    nuc[23:27, 9:15] = 4         # straddles the C|D border
+    nuc[23:27, 9:15] = 4  # straddles the C|D border
 
     # E: no nucleus at all -> skipped.
     cell[40:50, 2:12] = 6
 
     # F: nucleus overlaps only the cell's top membrane row (interior overlap 0).
     cell[40:50, 20:30] = 7
-    nuc[40:41, 22:28] = 5        # row 40 is F's inner boundary -> unmatched
+    nuc[40:41, 22:28] = 5  # row 40 is F's inner boundary -> unmatched
 
     return _relabel_contiguous(cell), _relabel_contiguous(nuc)
 
@@ -174,7 +182,7 @@ def _random_scene(seed, size=80, n_cells=12):
             cid += 1
             h = rng.integers(6, step - 1)
             w = rng.integers(6, step - 1)
-            cell[gy:gy + h, gx:gx + w] = cid
+            cell[gy : gy + h, gx : gx + w] = cid
             if rng.random() < 0.85:
                 # nucleus offset by a random amount -> sometimes pokes outside
                 oy = rng.integers(-2, 4)
@@ -183,7 +191,7 @@ def _random_scene(seed, size=80, n_cells=12):
                 nw = rng.integers(2, max(3, w - 2))
                 y0 = max(0, gy + 2 + oy)
                 x0 = max(0, gx + 2 + ox)
-                nuc[y0:y0 + nh, x0:x0 + nw] = cid
+                nuc[y0 : y0 + nh, x0 : x0 + nw] = cid
     return _relabel_contiguous(cell), _relabel_contiguous(nuc)
 
 
@@ -192,8 +200,9 @@ def _assert_same(cell, nuc):
     n = get_matched_masks(cell, nuc)
     names = ("cell_matched", "nuclear_matched", "cell_outside_nucleus")
     for name, ov, nv in zip(names, o, n):
-        assert np.array_equal(ov.astype(np.int64), nv.astype(np.int64)), \
+        assert np.array_equal(ov.astype(np.int64), nv.astype(np.int64)), (
             f"{name} differs: old-uniq={np.unique(ov)} new-uniq={np.unique(nv)}"
+        )
 
 
 def test_handcrafted_scene_matches_oracle():

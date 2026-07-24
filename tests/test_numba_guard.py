@@ -13,6 +13,7 @@ entrypoint must do the same, BEFORE the first valis import in source order.
 
 This is a static source test (no valis install required) so it runs in CI.
 """
+
 import re
 from pathlib import Path
 
@@ -23,7 +24,7 @@ BIN = Path(__file__).resolve().parent.parent / "bin"
 # Module-level entrypoints that import valis (directly or via valis_config) at
 # load time and therefore need the numba-cache guard before the first valis import.
 ENTRYPOINTS = [
-    "register.py",      # positive control: already guarded
+    "register.py",  # positive control: already guarded
 ]
 
 # Matches a top-level import that triggers valis (and thus numba) at load time.
