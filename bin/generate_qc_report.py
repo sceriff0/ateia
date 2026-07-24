@@ -415,7 +415,7 @@ def preprocess_qc_section(preprocess_dir):
     return section("Preprocessing QC", img_grid(pngs))
 
 
-def registration_qc_section(reg_dir, feat_dir, valis_dir):
+def registration_qc_section(reg_dir, feat_dir, valis_dir, dist_plots_dir=None, seg_qc_dir=None):
     """Build the registration-QC report section (overlay images plus accuracy tables)."""
     parts = []
 
@@ -495,6 +495,22 @@ def registration_qc_section(reg_dir, feat_dir, valis_dir):
             '<p class="empty-notice" style="margin-top:12px;">No feature-distance JSONs found.</p>'
         )
 
+    # Distance-distribution histograms (previously dropped)
+    dist_pngs = list_files(dist_plots_dir, "*.png") if dist_plots_dir else []
+    if dist_pngs:
+        parts.append(
+            "<h3 style='margin:20px 0 8px;font-size:1rem;color:#444;'>Feature-Distance Histograms</h3>"
+        )
+        parts.append(img_grid(dist_pngs, wide=True))
+
+    # Warp-segmentation QC metrics (previously dropped)
+    seg_qc_jsons = list_files(seg_qc_dir, "*.json") if seg_qc_dir else []
+    if seg_qc_jsons:
+        parts.append(
+            "<h3 style='margin:20px 0 8px;font-size:1rem;color:#444;'>Warp-Segmentation QC</h3>"
+        )
+        parts.extend(_seg_qc_table(jp) for jp in seg_qc_jsons)
+
     return section("Registration QC", "\n".join(parts))
 
 
@@ -504,6 +520,67 @@ def postprocess_qc_section(postprocess_dir):
     all_pngs = list_files(postprocess_dir, "*.png")
     pngs = [p for p in all_pngs if "_seg_overlay" not in p.name]
     return section("Postprocessing QC", img_grid(pngs, wide=True))
+
+
+def _flatten(prefix, obj, out):
+    """Recursively flatten a nested dict into (dotted-key, str-value) rows."""
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            _flatten(f"{prefix}.{k}" if prefix else str(k), v, out)
+    elif isinstance(obj, list):
+        for i, v in enumerate(obj):
+            _flatten(f"{prefix}[{i}]", v, out)
+    else:
+        out.append((prefix, str(obj)))
+
+
+def parse_seg_qc_json(path):
+    """Flatten a warp-seg QC JSON into (key, value) rows; schema-agnostic."""
+    with open(path, encoding="utf-8") as fh:
+        data = json.load(fh)
+    out = []
+    _flatten("", data, out)
+    return out
+
+
+def _seg_qc_table(json_path):
+    """
+    Render a single warp-seg QC JSON as a filename caption + metric table.
+
+    Shared by ``seg_qc_section`` and ``registration_qc_section`` so the
+    warp-seg QC table is built in exactly one place.
+    """
+    parts = [
+        f"<p style='font-size:0.85rem;color:#666;margin:8px 0 4px;'>{Path(json_path).name}</p>"
+    ]
+    try:
+        rows = parse_seg_qc_json(json_path)
+    except Exception as exc:  # noqa: BLE001 - report, never crash
+        parts.append(f'<p class="empty-notice">Could not parse {Path(json_path).name}: {exc}</p>')
+        return "\n".join(parts)
+    tbl = "<table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>"
+    for k, v in rows:
+        tbl += f"<tr><td>{k}</td><td>{v}</td></tr>"
+    tbl += "</tbody></table>"
+    parts.append(tbl)
+    return "\n".join(parts)
+
+
+def seg_qc_section(seg_qc_dir):
+    """Render warp-seg QC JSONs (one table per file)."""
+    jsons = list_files(seg_qc_dir, "*.json")
+    if not jsons:
+        body = '<p class="empty-notice">No warp-segmentation QC metrics found.</p>'
+        return section("Segmentation Warp QC", body)
+    parts = [_seg_qc_table(jp) for jp in jsons]
+    return section("Segmentation Warp QC", "\n".join(parts))
+
+
+def seg_overlay_section(postprocess_dir):
+    """Dedicated section for the *_seg_overlay* PNGs (the most-inspected QC)."""
+    all_pngs = list_files(postprocess_dir, "*.png")
+    overlays = [p for p in all_pngs if "_seg_overlay" in p.name]
+    return section("Segmentation Overlays", img_grid(overlays, wide=True))
 
 
 def seg_eval_section(seg_eval_dir):

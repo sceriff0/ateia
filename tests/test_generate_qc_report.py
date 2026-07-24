@@ -89,3 +89,39 @@ def test_manifest_section(tmp_path):
     html = gqr.manifest_section(s)
     assert "P001" in html
     assert ">3<" in html or "3" in html   # image count present
+
+
+def test_parse_seg_qc_json_flattens(tmp_path):
+    gqr = _load()
+    p = tmp_path / "P001_seg_qc.json"
+    p.write_text(json.dumps({"id": "P001", "metrics": {"iou": 0.9, "n": 12}}))
+    rows = gqr.parse_seg_qc_json(p)
+    d = dict(rows)
+    assert d["id"] == "P001"
+    assert d["metrics.iou"] == "0.9"
+    assert d["metrics.n"] == "12"
+
+
+def test_seg_qc_section_missing(tmp_path):
+    gqr = _load()
+    d = tmp_path / "seg_qc"
+    d.mkdir()
+    html = gqr.seg_qc_section(d)
+    assert "Warp" in html or "Segmentation Warp" in html
+    assert "not" in html.lower() or "no " in html.lower()
+
+
+def test_seg_overlay_section_only_overlays(tmp_path):
+    gqr = _load()
+    d = tmp_path / "postprocess_qc"
+    d.mkdir()
+    # 1x1 transparent PNG
+    png = bytes.fromhex(
+        "89504e470d0a1a0a0000000d494844520000000100000001080600000"
+        "01f15c4890000000a49444154789c6360000002000154a24f9f0000000049454e44ae426082"
+    )
+    (d / "P001_seg_overlay.png").write_bytes(png)
+    (d / "P001_intensity_distributions.png").write_bytes(png)
+    html = gqr.seg_overlay_section(d)
+    assert "seg_overlay" in html
+    assert "intensity_distributions" not in html
