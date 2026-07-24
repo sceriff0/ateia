@@ -103,14 +103,25 @@ class MirageVipsSlideReader(slide_io.SlideReader):
 
     @staticmethod
     def can_read(src_f):
-        """True only for tiled BigTIFF, single-sample, non-pyramidal OME-TIFFs that mirage's
-        own writers produce (bin/preprocess.py, bin/reg_finalize.py::_save_ome_pyvips).
+        """True for tiled BigTIFF, single-sample OME-TIFFs that mirage's own writers produce
+        (bin/preprocess.py, bin/reg_finalize.py::_save_ome_pyvips) AND for valis's own
+        ``slide_io.save_ome_tiff`` output, which is a sub-IFD pyramid of the same channels.
 
         This is a safety gate, not a performance heuristic: a false negative merely falls
         back to the slower BioFormats/JVM path (get_reader_for), while a false positive would
-        silently misdecode a third-party slide (e.g. an RGB scan or a pyramidal OME-TIFF) and
-        corrupt registration. The broad ``except Exception: return False`` below is
-        deliberate -- on ANY ambiguity or read error, fail toward the slower-but-correct path.
+        silently misdecode a third-party slide (e.g. an RGB scan) and corrupt registration.
+        The broad ``except Exception: return False`` below is deliberate -- on ANY ambiguity or
+        read error, fail toward the slower-but-correct path.
+
+        Sub-IFD pyramids are ACCEPTED: the C channels are the full-res MAIN IFDs and pyvips'
+        ``n=-1`` read (``open_roll``) ignores the reduced-resolution sub-IFDs, so the
+        reconstructed image is the full-res slide -- proven by
+        ``test_valis_subifd_pyramid_reads_full_res_all_channels`` and
+        ``test_can_read_accepts_pyramidal_and_reads_full_res``. A prior CLASSIC registration run
+        writes exactly this, and add_cycle reuses it as the reference; rejecting it forced the
+        BioFormats JVM into the heap-stripped tile fan-out (REG_GRID/REG_WARP_TILE), reviving
+        the OOM class f76da84 fixed. The SizeC reconciliation and band-join dims below still
+        guard against malformed layouts.
         """
         try:
             import tifffile
@@ -120,8 +131,9 @@ class MirageVipsSlideReader(slide_io.SlideReader):
                     return False
                 if not tf.is_bigtiff:
                     return False
-                if getattr(page, "subifds", None):
-                    return False
+                # Sub-IFDs (a reduced-resolution pyramid) are fine: they hold downsampled levels
+                # while the C channels remain the full-res main IFDs that open_roll (n=-1) reads.
+                # valis save_ome_tiff writes exactly this. See the docstring + read tests.
                 if page.samplesperpixel != 1:
                     return False
                 ome_xml = tf.ome_metadata
