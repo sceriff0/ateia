@@ -1,33 +1,39 @@
 # Mirage Benchmarking
 
-Quantifies **resource usage vs input size + pipeline parameters**, and **registration
-accuracy** (in-process tiling on vs off) against landmark ground truth — then derives
-an optimised `modules.config` from the measured scaling.
+Produces the **DATA** a method paper needs — tidy CSV tables, not plots — for the
+*shipped* pipeline (classic VALIS registration). Three signals, all harvested from
+QC the pipeline already emits (the benchmark invents no metrics):
 
-There are **two independent pipelines** (A: resource sweep, B: registration accuracy)
-plus an analysis layer (C: notebook, D: docs figures). The heavy steps (the sweeps)
-run on a **cluster** with the pipeline containers; everything else runs **locally**.
+1. **Resource scaling** — peak RAM & wall-time vs input size / channels / rounds (Nextflow trace).
+2. **Registration accuracy** — `dice_matched` + centroid **displacement (µm)** from the staged
+   DAPI-nuclei QC (`reg_qc=2`; `bin/warp_seg_qc.py`). Landmark-free.
+3. **Segmentation quality** — reference-free `QualityScore` from CellSegmentationEvaluator
+   (`SEG_QUALITY_EVAL`).
+
+The heavy step (the sweep) runs on a **cluster** with the pipeline containers;
+matrix generation and the DATA emit run **locally**.
 
 ```
-A. RESOURCE / PARAMETER SWEEP          B. REGISTRATION ACCURACY
-   generate_matrix → build_run_plan       prepare_pairs
-        |                |                      |
-        +-- run_sweep.sh +                 run_registration.sh
-                |                               |
-          make_figures  <----- reg_eval.csv --- aggregate_eval
-                |
-   figures + modules.optimized.config           (both feed the notebook, C)
+   generate_matrix.py --sweep  ->  build_run_plan.py --sweep  ->  run_sweep.sh  (cluster)
+                                                                       |
+                                             per-run trace + size logs + QC JSONs
+                                                                       |
+                                        make_tables.py  ->  benchmarks/paper_data/*.csv (+ *.dict.md)
 ```
 
-Design rationale: `docs/superpowers/specs/2026-06-16-benchmarking-framework-design.md`.
+!!! note
+    The distributed/tiled registration path was archived out of the pipeline (git tag
+    `archive/tiled-valis-2026-07-24`); registration is classic `REGISTER` only, so the
+    old classic-vs-distributed benchmark was removed.
+
+Design record: `docs/superpowers/specs/2026-07-24-benchmark-paper-data-design.md`.
 Rendered overview: `docs/benchmarks.md`.
 
 ## Prerequisites
 
-- **Local (analysis + tests):** numpy, pandas, scikit-learn, matplotlib, tifffile,
-  pyvips *or* Pillow, PyYAML, nbformat. No real data needed for the test suite.
-  `zarr` is optional but recommended — it lets `compare_registered` stream whole-image parity
-  strip-by-strip (bounded memory) instead of loading a 34 GB slide; without it, pass `--max-dim` to cap.
+- **Local (DATA emit + tests):** numpy, pandas, scikit-learn, tifffile, PyYAML.
+  (`matplotlib` + `nbformat` only for the optional figures/notebook.) No real data
+  needed for the test suite.
 - **Cluster (the sweeps):** Nextflow >= 25.04, Docker/Singularity, the pipeline
   containers (including the VALIS image), and `bash`. `run_sweep.sh` /
   `run_registration.sh` use indexed-array lookups (no `declare -A`), so macOS
@@ -122,16 +128,33 @@ Verify the whole harness with no data at all:
 > effect.) Pairing applies to n_channels >= 2 cells; n_channels == 1 cells are
 > reference-only. Without `--paired`, registration is a single-slide passthrough.
 
-### A4 — Analyse: figures + optimal config (local)
+### A4 — Emit the paper DATA (local)
+
+    python -m benchmarks.analysis.make_tables \
+        --results-root bench_results \
+        --run-plan     bench_run_plan.csv \
+        --manifest     bench_matrix/matrix_manifest.csv \
+        --outdir       benchmarks/paper_data
+
+- **Output:** `benchmarks/paper_data/{runs_master,scaling_fits,registration_accuracy,
+  segmentation_eval,segmentation_agreement,param_matrix}.csv`, each with a sibling
+  `.dict.md` data dictionary. **This is the method-paper deliverable.** Column-by-column
+  meaning is in each `.dict.md` and summarised in `docs/benchmarks.md`.
+- Registration accuracy (`registration_accuracy.csv`) is populated only when the sweep
+  ran with `reg_qc: 2` (the shipped baseline) and registration actually ran (paired
+  matrix); segmentation quality (`segmentation_eval.csv`) needs `skip_seg_quality_eval:
+  false` (also the baseline).
+
+### A5 — Optional: figures + derived config (local)
 
     python -m benchmarks.analysis.make_figures \
         --results-root bench_results \
         --run-plan     bench_run_plan.csv \
         --manifest     bench_matrix/matrix_manifest.csv \
         --outdir       benchmarks/analysis
-        # optional: --reg-eval reg_eval.csv   (from pipeline B, for the accuracy section)
 
-> **Run it any time — the sweep does not have to be finished.** `make_figures` reads whatever
+> **Run it any time — the sweep does not have to be finished.** Both `make_tables` and
+> `make_figures` read whatever
 > runs have completed: it skips run dirs with no `trace.txt` yet, and (because Nextflow only writes
 > a trace row when a *process* finishes) an in-flight run contributes just its completed processes.
 > `only_successful` then drops any non-`COMPLETED` row, so the fits/means never see a partial process.
@@ -161,7 +184,13 @@ Verify the whole harness with no data at all:
 
 ---
 
-## B. Registration accuracy (in-process tiling on vs off)
+## B. Optional: external landmark validation (ANHIR / ACROBAT)
+
+> **Not the paper's accuracy signal.** Registration accuracy for the paper comes from the
+> pipeline's own `reg_qc=2` staged QC, harvested into `paper_data/registration_accuracy.csv`
+> (Section A) — no challenge data required. This section is a separate, optional cross-check
+> against public landmark ground truth. It predates the removal of the in-process tiling
+> modes, so ignore any "tiled vs untiled" framing below — modern runs register once per pair.
 
 Full detail (data access, limitations) in `benchmarks/registration_eval/README.md`.
 
@@ -224,130 +253,19 @@ figures, and writes `conf/modules.optimized.config`.
 
 ---
 
-## E. Classic vs distributed registration (cluster)
-
-The sweep measures registration **two ways** on the same benchmark image — classic
-`REGISTER` vs the distributed `VALIS_DISTRIBUTED_ADAPTER` — via the
-`reg_distributed_tiling: [false, true]` axis in `sweep.yaml`. The default distributed path
-(SEPARATED, JVM-free, whole-image non-rigid) is **bit-identical to classic** but with a lower
-per-node RAM ceiling. This section is how you run it on the cluster and confirm parity.
-
-### E1 — Prerequisites (one-time)
-
-- **Container:** the distributed stages run in the EXTERNAL_TILE_HOOK-patched VALIS image
-  `bolt3x/attend_image_analysis:mirage_valis_1.0.0` (Docker Hub). It is the `reg_dist_container`
-  default; Singularity pulls it into the profile's `cacheDir`. Override with
-  `--reg_dist_container <image>` if you host your own.
-- **Paired matrix:** registration only runs when the matrix is `--paired` (reference + moving
-  panels). Generate it straight from the sweep so the panels line up:
-
-      python benchmarks/generate_matrix.py --source img.ome.tif --outdir bench_matrix \
-          --sweep benchmarks/configs/sweep.yaml
-      python benchmarks/build_run_plan.py --sweep benchmarks/configs/sweep.yaml \
-          --out bench_run_plan.csv --repeats 3
-
-  The run plan now contains one **classic** config (`reg_distributed_tiling=false`) and one
-  **distributed** config (`=true`) at the baseline pair.
-
-### E2 — Launch on the cluster
-
-The pipeline uses `executor = 'slurm'` (conf/ieo.config), so **Nextflow submits one SLURM job per
-process** — you run a single lightweight orchestrator ("head") that dispatches the compute jobs. Two
-ways:
-
-**(a) sbatch a head job (recommended).** `benchmarks/submit_sweep.sh` is a ready SLURM head-job script
-(edit the paths/`CONDA_ENV` at the top):
-
-    mkdir -p logs && sbatch benchmarks/submit_sweep.sh
-    squeue -u $USER            # 1 head job + N child (process) jobs
-    tail -f logs/bench_<jobid>.out
-
-**Parallelism.** By default `run_sweep.sh` runs the plan rows one at a time (each row's *processes* still
-parallelise across SLURM). To parallelise the **rows** too, set `SWEEP_CONCURRENCY=N` — it launches N
-runs at once, each its own Nextflow head submitting its own SLURM process jobs (measurements stay clean:
-SLURM gives every process a dedicated allocation). `submit_sweep.sh` sets `SWEEP_CONCURRENCY=6` and sizes
-the head job (4 cpus / 32 GB) to hold ~6 Nextflow JVMs; raise both together for more. The heavy
-per-process resources come from `conf/base.config` + `modules.config`, not the head job — so keep the head
-job small but give it a long walltime (it lives for the whole sweep).
-
-**(b) run the head on a login node** (in `tmux`/`screen` so it survives disconnects):
-
-    SWEEP_PROFILE=singularity,ieo SWEEP_CONCURRENCY=6 \
-      benchmarks/run_sweep.sh  bench_run_plan.csv  bench_matrix/matrix_manifest.csv  bench_results \
-        -c conf/ieo.config
-
-Set the profile via **`SWEEP_PROFILE`** (a single `-profile` — Nextflow rejects a second one), and add
-the site config as a trailing **`-c conf/ieo.config`** (multiple `-c` is fine). This gives Singularity +
-the SLURM executor + your site paths. `conf/ieo.config` is gitignored; create it from
-`conf/site.config.template`. `submit_sweep.sh` sets both env vars for you.
-
-Each config's registered slides are published to
-`bench_results/<run_id>/out/<patient>/registered/registered_slides/*_registered.ome.tiff`
-(both the classic and distributed runs).
-
-### E3 — Confirm parity + read the cost delta
-
-Two independent checks:
-
-1. **Bit-identical output + tiled drift on the benchmark images** — pairs each distributed run with its
-   same-cell classic run and compares the registered slides pixel-for-pixel:
-
-       python -m benchmarks.registration_eval.compare_registered \
-           --results-root bench_results --run-plan bench_run_plan.csv \
-           --drift-csv benchmarks/analysis/registration_drift.csv
-       # SEPARATED path -> a bit-identical GATE ("SEPARATED PARITY: PASS", exit non-zero on any mismatch).
-       # TILED path     -> a DRIFT report (max|Δ|, mean|Δ|, %pixels vs classic, by tile_wh/buffer) — it is
-       #                   a different algorithm, so NOT expected to match; this quantifies how far it moves.
-       # The --drift-csv feeds plots 16 (tiled drift) and 17 (feature-TRE by path: classic/separated/tiled).
-
-   **Safe to run mid-sweep.** Like `make_figures`, this tolerates a partially-populated `bench_results/`:
-   a pair whose runs haven't published slides yet is skipped, and a slide caught *mid-write* is recorded
-   as `pending` (not a parity failure) instead of aborting the run. The output ends with a **coverage**
-   line (`N/M pairs measured`) and tags the verdict **PROVISIONAL** while any pair is still pending — so a
-   `PASS` during the sweep can't be mistaken for the final gate. Re-run once the sweep finishes for the
-   definitive `PASS`/`FAIL` (coverage `M/M`, no PROVISIONAL tag).
-
-2. **Code-level gate** (small fixture, on any node with Docker + the image) — asserts the
-   SEPARATED path == classic whole-image and the tiled path == VALIS's in-process tiler:
-
-       make test-registration-parity
-
-The **cost** delta (equal result, different resources) comes from `make_figures` (A4): it writes
-`benchmarks/analysis/classic_vs_distributed_registration.csv` with the registration-stage
-**peak RSS** and **total compute time** for each side, their ratio, and `rss_saving_gb` — this is
-where you see the distributed path's lower per-node RAM ceiling quantified.
-
-### Expected outputs
-
-| Artifact | Where | What it tells you |
-|---|---|---|
-| Registered slides (both paths) | `bench_results/<run_id>/out/<patient>/registered/registered_slides/` | the actual warped outputs to compare |
-| `SEPARATED PARITY: PASS` | stdout of `compare_registered` | separated distributed == classic on the real image (max\|Δ\|=0) |
-| `registration_drift.csv` | `benchmarks/analysis/` | tiled path's drift from classic (max\|Δ\|, mean\|Δ\|, %pixels) by tile size/overlap → fig 16 |
-| `quality.csv` (reg_tre_median_px by path) | `benchmarks/analysis/` | feature-TRE for classic / separated / tiled → fig 17 (accuracy cost of tiling) |
-| `classic_vs_distributed_registration.csv` | `benchmarks/analysis/` | peak-RSS + compute-time delta, `peak_rss_ratio`, `rss_saving_gb` |
-| `PARITY ... : PASS` | stdout of `make test-registration-parity` | code-level bit-identical gate (SEPARATED == classic; tiled == in-process tiler) |
-
-> **Tile size / overlap.** `reg_dist_tile_wh` / `reg_dist_tile_buffer` are no-ops on the default
-> SEPARATED path (no tiles), so they are **not** swept as OFAT knobs. To benchmark the tiled
-> fan-out regime, uncomment the `distributed_tiling_grid` block in `sweep.yaml` — it pins
-> `reg_distributed_tiling=true` + `reg_dist_force_tiling=true` and crosses the two tile knobs.
-
----
-
 ## Inputs -> outputs at a glance
 
 | Step | You provide | You get |
 |---|---|---|
 | `generate_matrix.py` | 1 source image | matrix of OME-TIFFs + `matrix_manifest.csv` |
 | `build_run_plan.py` | `sweep.yaml` | `run_plan.csv` |
-| `run_sweep.sh` | manifest + run plan | per-run `trace.txt` + `input_sizes.csv` |
-| `make_figures` | results + run plan + manifest | `measurements.csv` + `resource_models.csv` + `resource_stats.csv` (per-config variance) + `scaling_*.pdf/svg` + `modules.optimized.config` |
-| `prepare_pairs.py` | `pairs.csv` (+ downloaded data) | per-pair input dirs + `pairs_manifest.csv` |
-| `run_registration.sh` | pairs manifest | `eval_*.json` (3-way error x tiled/untiled) |
-| `aggregate_eval` | eval JSONs | `reg_eval.csv` + `reg_eval_agg.csv` |
-| `compare_registered` | results + run plan (classic+distributed) | per-slide `max\|Δ\|` + `PARITY: PASS/FAIL` (bit-identical check on benchmark images) |
-| notebook | all the above paths | inline figures + optimal config |
+| `run_sweep.sh` | manifest + run plan | per-run `trace.txt` + `input_sizes.csv` + QC JSONs (`*_seg_qc.json`, `*_seg_eval.json`) |
+| **`make_tables`** | results + run plan + manifest | **`paper_data/{runs_master,scaling_fits,registration_accuracy,segmentation_eval,segmentation_agreement,param_matrix}.csv` (+ `.dict.md`)** — the paper DATA |
+| `make_figures` (optional) | results + run plan + manifest | `measurements.csv` + `resource_models.csv` + `resource_stats.csv` + `scaling_*.pdf/svg` + `modules.optimized.config` |
+| `prepare_pairs.py` (optional) | `pairs.csv` (+ downloaded data) | per-pair input dirs + `pairs_manifest.csv` |
+| `run_registration.sh` (optional) | pairs manifest | `eval_*.json` (landmark TRE) |
+| `aggregate_eval` (optional) | eval JSONs | `reg_eval.csv` + `reg_eval_agg.csv` |
+| notebook (optional) | all the above paths | inline figures + optimal config |
 
 The fastest way to see every component work end-to-end **without any real data** is
 `python -m pytest benchmarks/tests -q` — the suite drives the whole harness on tiny

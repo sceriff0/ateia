@@ -148,11 +148,9 @@ python benchmarks/build_run_plan.py \
     --sweep benchmarks/configs/sweep.yaml \
     --out bench_run_plan.csv --repeats 3
 
-# 3. Run the sweep (cluster; each run executes the pipeline with reg_qc=2 + CSE on)
-bash benchmarks/run_sweep.sh \
-    --run-plan bench_run_plan.csv \
-    --matrix bench_matrix/matrix_manifest.csv \
-    --outroot bench_runs
+# 3. Run the sweep (cluster; each run executes the pipeline with reg_qc=2 + CSE on).
+#    Positional args: <run_plan> <matrix_manifest> <results_root>. Requires bash 4+.
+bash benchmarks/run_sweep.sh bench_run_plan.csv bench_matrix/matrix_manifest.csv bench_runs
 ```
 
 **Local — emit the paper DATA from the completed runs:**
