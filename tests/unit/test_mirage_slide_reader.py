@@ -190,11 +190,14 @@ def test_can_read_rejects_rgb_interleaved():
     assert MirageVipsSlideReader.can_read(p) is False
 
 
-def test_can_read_rejects_pyramidal():
-    """Isolates the "no sub-IFDs" predicate: tiled BigTIFF OME-TIFF, single-sample, but with
-    a reduced-resolution sub-image written via ``subifds=``/``subfiletype=1`` so page 0 has a
-    non-empty ``subifds``. Tiled/BigTIFF/samplesperpixel/OME-XML predicates all hold -- only
-    the subifds check disqualifies it."""
+def test_can_read_accepts_pyramidal_and_reads_full_res():
+    """A sub-IFD pyramid is ACCEPTED (reversing the old reject-pyramidal gate): the C channels
+    are the full-res main IFDs, and the reduced-resolution level lives in a sub-IFD that
+    open_roll's n=-1 read ignores. Uses tifffile's pyramid construction
+    (``subifds=``/``subfiletype=1``) -- a DIFFERENT write path from the pyvips valis fixture
+    above -- and asserts BOTH acceptance and full-res, all-channel read correctness. valis
+    save_ome_tiff produces this, and add_cycle reuses it as the reference; rejecting it forced
+    the BioFormats JVM into the heap-stripped tile fan-out (REG_GRID/REG_WARP_TILE)."""
     from mirage_slide_reader import MirageVipsSlideReader
     dirpath = tempfile.mkdtemp()
     p = os.path.join(dirpath, "pyramidal.ome.tiff")
@@ -210,10 +213,15 @@ def test_can_read_rejects_pyramidal():
         # Reduced-resolution level, appended as the declared subifd.
         tif.write(arr[:, ::2, ::2], subfiletype=1, **options)
 
+    # PRECONDITION: genuinely a sub-IFD pyramid, or the test is vacuous.
     with tifffile.TiffFile(p) as tf:
         assert tf.pages[0].subifds, "fixture did not actually produce a pyramidal page 0"
 
-    assert MirageVipsSlideReader.can_read(p) is False
+    assert MirageVipsSlideReader.can_read(p) is True
+    img = MirageVipsSlideReader(p).slide2vips(level=0)
+    assert (img.width, img.height, img.bands) == (W, H, C)
+    got = np.frombuffer(img.write_to_memory(), dtype=np.uint16).reshape(H, W, C)
+    assert np.array_equal(got, np.moveaxis(arr, 0, -1))
 
 
 def test_can_read_rejects_sizec_mismatch():
@@ -243,6 +251,62 @@ def test_can_read_rejects_sizec_mismatch():
     page.tiffsave(p, tile=True, tile_width=64, tile_height=64, bigtiff=True)
 
     assert MirageVipsSlideReader.can_read(p) is False
+
+
+def _make_valis_pyramid(dirpath, c):
+    """Write a fixture the way ``valis slide_io.save_ome_tiff`` does: bands joined vertically
+    (page-height set), then ``tiffsave(pyramid=True, subifd=True)``. The C channels live in the
+    MAIN IFDs (full res); pyramid levels go into per-page SubIFDs. A prior classic REGISTER run
+    produces exactly this, and ``add_cycle`` reuses it as the reference. Returns (path, arr) with
+    arr shaped (H, W, c)."""
+    import pyvips
+
+    rng = np.random.default_rng(13)
+    arr = rng.integers(0, 65535, size=(H, W, c), dtype=np.uint16)
+    ome_xml = _minimal_ome_xml(W, H, c, [f"chan{i}" for i in range(c)])
+
+    bands = [pyvips.Image.new_from_array(arr[..., i]) for i in range(c)]
+    page = bands[0]
+    for b in bands[1:]:
+        page = page.join(b, "vertical")
+    page = page.copy()
+    page.set_type(pyvips.GValue.gint_type, "page-height", H)
+    page.set_type(pyvips.GValue.gstr_type, "image-description", ome_xml)
+
+    p = os.path.join(dirpath, "valis_pyr.ome.tiff")
+    page.tiffsave(p, tile=True, tile_width=64, tile_height=64, bigtiff=True,
+                  pyramid=True, subifd=True)
+    return p, arr
+
+
+def test_valis_subifd_pyramid_reads_full_res_all_channels():
+    """The correctness precondition for accepting sub-IFD pyramids: prove the lazy reader
+    reconstructs FULL-RES, ALL channels from a valis-style pyramid (channels in main IFDs,
+    pyramid in sub-IFDs -> n=-1 must ignore the sub-IFDs). Runs independently of can_read (the
+    constructor does not gate on it), so it stands as evidence even while can_read still rejects
+    the file. Asserts the whole (H, W, C) array, not channel 0 alone -- a reader that pulled a
+    downsampled sub-IFD level in as an extra page would fail here rather than look perfect."""
+    from mirage_slide_reader import MirageVipsSlideReader
+    path, arr = _make_valis_pyramid(tempfile.mkdtemp(), c=C)
+
+    # PRECONDITION: the fixture is genuinely a sub-IFD pyramid, or the test is vacuous.
+    with tifffile.TiffFile(path) as tf:
+        assert tf.pages[0].subifds, "fixture is not a sub-IFD pyramid; test would be vacuous"
+
+    img = MirageVipsSlideReader(path).slide2vips(level=0)
+    assert (img.width, img.height, img.bands) == (W, H, C)
+    got = np.frombuffer(img.write_to_memory(), dtype=np.uint16).reshape(H, W, C)
+    assert np.array_equal(got, arr)
+
+
+def test_can_read_accepts_valis_subifd_pyramid():
+    """A valis-written pyramid (pyramid=True, subifd=True) is a legitimate mirage-readable
+    reference: its channels are full-res main IFDs. can_read must accept it so add_cycle does
+    NOT fall back to the BioFormats JVM in the heap-stripped tile fan-out. The other predicates
+    (bigtiff, tiled, samplesperpixel==1, SizeC reconciliation) still guard correctness."""
+    from mirage_slide_reader import MirageVipsSlideReader
+    path, _ = _make_valis_pyramid(tempfile.mkdtemp(), c=C)
+    assert MirageVipsSlideReader.can_read(path) is True
 
 
 if __name__ == "__main__":
