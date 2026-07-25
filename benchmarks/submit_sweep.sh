@@ -3,8 +3,8 @@
 #SBATCH --output=logs/bench_%j.out
 #SBATCH --error=logs/bench_%j.err
 #SBATCH --time=72:00:00
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=48G           # ~3 GB per concurrent Nextflow head (CONCURRENCY below) + JVM overhead
+#SBATCH --cpus-per-task=8   # headroom for CONCURRENCY Nextflow JVMs (they mostly poll SLURM, not compute)
+#SBATCH --mem=64G           # all CONCURRENCY heads share this; NXF_OPTS -Xmx caps each head's heap (below)
 # #SBATCH --partition=<your_partition>     # uncomment + set if your site needs it
 # #SBATCH --mail-type=END,FAIL
 # #SBATCH --mail-user=you@ieo.it
@@ -39,11 +39,13 @@ RESULTS="bench_results"                   # per-run outputs land here
 PROFILES="singularity,ieo"               # OVERRIDES run_sweep.sh's default -profile docker
 SITE_CONFIG="conf/ieo.config"            # gitignored: executor=slurm + singularity cacheDir + paths
 CONDA_ENV="nf-env"                        # env that has nextflow + python
-CONCURRENCY="${SWEEP_CONCURRENCY:-10}"   # pipeline runs launched AT ONCE (each = 1 Nextflow head that
-                                          # submits its OWN SLURM process jobs). 10 heads fit in --mem=48G;
-                                          # each head runs up to queueSize=100 process jobs (benchmark.config),
-                                          # so peak in-flight SLURM jobs ~ CONCURRENCY x 100. Raise both (and
-                                          # --mem: ~3 GB/head) for more, minding your per-user SLURM job cap.
+CONCURRENCY="${SWEEP_CONCURRENCY:-16}"   # pipeline runs launched AT ONCE (each = 1 Nextflow head that
+                                          # submits its OWN SLURM process jobs). 16 heads x ~3 GB heap
+                                          # (NXF_OPTS below) fit in --mem=64G; each head runs up to
+                                          # queueSize=100 process jobs (benchmark.config), so peak in-flight
+                                          # SLURM jobs ~ CONCURRENCY x 100 (~1600). Raise CONCURRENCY only
+                                          # alongside --mem (~4 GB/head incl. overhead) and mind your
+                                          # per-user SLURM job cap (sacctmgr ... format=maxsubmit).
 # -------------------------------------------------------------------------------
 
 cd "$SRC_DIR"
@@ -59,6 +61,9 @@ set -u
 command -v nextflow >/dev/null || { echo "nextflow not on PATH (check CONDA_ENV / module load)"; exit 1; }
 # Keep Singularity image cache off read-only $HOME (matches conf/ieo.config's cacheDir).
 export NXF_SINGULARITY_CACHEDIR="${NXF_SINGULARITY_CACHEDIR:-/hpcnfs/scratch/P_DIMA_ATTEND/users/vfassi/docker_images}"
+# Cap EACH concurrent Nextflow head's JVM heap so CONCURRENCY x heap stays under --mem
+# (16 x 3 GB = 48 GB < 64 GB, leaving room for JVM/OS overhead). Raise -Xmx only if a head OOMs.
+export NXF_OPTS="${NXF_OPTS:--Xms512m -Xmx3g}"
 
 echo "=================================================="
 echo "Head job ${SLURM_JOB_ID:-local} on ${SLURM_NODELIST:-$(hostname)}"
