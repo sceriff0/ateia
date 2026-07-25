@@ -4,7 +4,7 @@
 #SBATCH --error=logs/bench_%j.err
 #SBATCH --time=72:00:00
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=32G
+#SBATCH --mem=48G           # ~3 GB per concurrent Nextflow head (CONCURRENCY below) + JVM overhead
 # #SBATCH --partition=<your_partition>     # uncomment + set if your site needs it
 # #SBATCH --mail-type=END,FAIL
 # #SBATCH --mail-user=you@ieo.it
@@ -39,9 +39,11 @@ RESULTS="bench_results"                   # per-run outputs land here
 PROFILES="singularity,ieo"               # OVERRIDES run_sweep.sh's default -profile docker
 SITE_CONFIG="conf/ieo.config"            # gitignored: executor=slurm + singularity cacheDir + paths
 CONDA_ENV="nf-env"                        # env that has nextflow + python
-CONCURRENCY="${SWEEP_CONCURRENCY:-6}"    # pipeline runs launched AT ONCE (each = 1 Nextflow head that
-                                          # submits its OWN SLURM process jobs). 6 heads fit in --mem=32G;
-                                          # raise for more sweep parallelism (and bump --mem: ~2-3 GB/head).
+CONCURRENCY="${SWEEP_CONCURRENCY:-10}"   # pipeline runs launched AT ONCE (each = 1 Nextflow head that
+                                          # submits its OWN SLURM process jobs). 10 heads fit in --mem=48G;
+                                          # each head runs up to queueSize=100 process jobs (benchmark.config),
+                                          # so peak in-flight SLURM jobs ~ CONCURRENCY x 100. Raise both (and
+                                          # --mem: ~3 GB/head) for more, minding your per-user SLURM job cap.
 # -------------------------------------------------------------------------------
 
 cd "$SRC_DIR"
