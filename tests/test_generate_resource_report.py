@@ -22,14 +22,18 @@ def test_parse_bytes():
     assert grr.parse_bytes("") is None
 
 
-def test_parse_bytes_bare_zero_treated_as_missing():
+def test_parse_bytes_inert_set_condition_is_behavior_preserving():
     """Regression test for the inert-set-condition bug: `and` bound tighter
-    than `or` in `s in {"0", "-"} and s == "-"`, silently dropping the "0"
-    set member so it never took effect. The literal set shows the intent was
-    to treat a bare "0" byte-metric reading (peak_rss/peak_vmem/rchar/wchar)
-    as missing/not-measured, same as "-", not as a genuine zero."""
+    than `or` in the buggy `s in {"0", "-"} and s == "-"`, which reduces, for
+    every value of s, to exactly `s == "-"`. A bare "0" is a genuine
+    zero-byte reading (peak_rss/peak_vmem/rchar/wchar can legitimately be 0)
+    and must keep falling through to float("0") == 0.0 — only "-"
+    (not-run/cached) and empty are "missing", matching parse_duration's and
+    parse_percent's identical guard clause."""
     grr = _load()
-    assert grr.parse_bytes("0") is None
+    assert grr.parse_bytes("0") == 0.0
+    assert grr.parse_bytes("-") is None
+    assert grr.parse_bytes("") is None
 
 
 def test_parse_duration():

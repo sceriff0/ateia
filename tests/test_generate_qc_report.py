@@ -223,6 +223,38 @@ def test_html_table_escapes_headers_and_cells():
     assert "&lt;i&gt;x&lt;/i&gt;" in out
 
 
+def test_html_table_extra_body_html_appends_colspan_row():
+    """`extra_body_html` (used for the feature-distance parse-error row) is
+    appended raw, after the normal escaped rows, inside the same tbody."""
+    gqr = _load()
+    out = gqr._html_table(
+        ["A"], [["x"]], "<tr><td>err</td><td colspan='3'>boom</td></tr>"
+    )
+    assert "<td>x</td>" in out
+    assert "<td colspan='3'>boom</td>" in out
+    # both the normal row and the extra row live in the same tbody
+    assert out.index("<tbody>") < out.index("<td>x</td>") < out.index("colspan")
+    assert out.index("colspan") < out.index("</tbody>")
+
+
+def test_registration_qc_section_feature_distance_parse_error_uses_colspan(tmp_path):
+    """A feature-distance JSON that fails to parse must still render as a
+    single full-width (colspan) row — not silently dropped, and not
+    flattened into extra empty cells — with the filename and exception
+    message both HTML-escaped."""
+    gqr = _load()
+    feat_dir = tmp_path / "feature_dist"
+    feat_dir.mkdir()
+    (feat_dir / "<bad>.json").write_text("{not valid json")
+    valis_dir = tmp_path / "valis_summary"
+    valis_dir.mkdir()
+    html = gqr.registration_qc_section(tmp_path / "reg", feat_dir, valis_dir)
+    assert "colspan='3'" in html
+    assert "Parse error" in html
+    assert "<bad>.json" not in html
+    assert "&lt;bad&gt;.json" in html
+
+
 def test_manifest_section_escapes_html_special_patient_id(tmp_path):
     gqr = _load()
     summary = {

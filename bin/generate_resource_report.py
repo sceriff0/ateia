@@ -20,13 +20,15 @@ def parse_bytes(s):
     if s is None:
         return None
     s = s.strip()
-    # Operator precedence note: `and` binds tighter than `or`, so a previous
-    # version of this condition (`s in {"-", "0"} and s == "-"`) reduced to
-    # just `s == "-"` — the "0" set member was inert and never fired. The
-    # literal set `{"0", "-"}` shows byte-metric "0" (peak_rss/peak_vmem/
-    # rchar/wchar) was meant to be treated as missing/not-measured here too,
-    # same as "-", rather than a genuine zero-byte reading.
-    if not s or s in {"0", "-"}:
+    # Operator precedence note: `and` binds tighter than `or`, so the buggy
+    # source form of this condition (`s in {"-", "0"} and s == "-"`) reduces,
+    # for every value of s, to exactly `s == "-"` — the "0" set member was
+    # inert and never fired. A bare "0" is a real zero-byte reading (e.g.
+    # peak_rss/rchar/wchar can genuinely be 0 for a trivial task) and must
+    # keep falling through to float("0") == 0.0, matching parse_duration's
+    # and parse_percent's identical `not s or s == "-"` guard. Only "-"
+    # (Nextflow's not-run/cached sentinel) and empty are "missing".
+    if not s or s == "-":
         return None
     m = re.match(r"^([\d.]+)\s*([KMGT]?B)$", s, re.IGNORECASE)
     if m:

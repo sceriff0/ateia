@@ -397,7 +397,7 @@ def section(title, body_html):
     )
 
 
-def _html_table(headers, rows):
+def _html_table(headers, rows, extra_body_html=""):
     """
     Build a complete ``<table>`` (with ``<thead>``/``<tbody>``), escaping
     every header and every cell value via ``html.escape``.
@@ -406,12 +406,19 @@ def _html_table(headers, rows):
     registration-QC Valis rTRE table, the CSE seg-eval table, and the
     feature-distance table, and ensures none of them can inject raw
     CSV/JSON-derived HTML into the report.
+
+    `extra_body_html`: optional pre-rendered ``<tr>...</tr>`` HTML appended
+    after the normal rows — for full-width/``colspan`` rows (e.g. a
+    per-file parse-error notice) that don't fit the uniform one-cell-per-
+    header row shape every other row uses. The caller is responsible for
+    escaping any dynamic values it interpolates into this HTML itself.
     """
     thead = "".join(f"<th>{html.escape(str(h))}</th>" for h in headers)
     body = "".join(
         "<tr>" + "".join(f"<td>{html.escape(str(v))}</td>" for v in row) + "</tr>"
         for row in rows
     )
+    body += extra_body_html
     return f"<table><thead><tr>{thead}</tr></thead><tbody>{body}</tbody></table>"
 
 
@@ -483,11 +490,15 @@ def registration_qc_section(reg_dir, feat_dir, valis_dir, dist_plots_dir=None, s
         )
         feat_headers = ["File", "Before Mean", "After Mean", "Improvement (%)"]
         feat_rows = []
+        feat_error_rows_html = []
         for jp in feat_jsons:
             try:
                 info = parse_feature_dist_json(jp)
             except Exception as exc:
-                feat_rows.append([Path(jp).name, f"Parse error: {exc}", "", ""])
+                feat_error_rows_html.append(
+                    f"<tr><td>{html.escape(Path(jp).name)}</td>"
+                    f"<td colspan='3'>Parse error: {html.escape(str(exc))}</td></tr>"
+                )
                 continue
             bm = (
                 f"{info['before_mean']:.4f}"
@@ -503,7 +514,9 @@ def registration_qc_section(reg_dir, feat_dir, valis_dir, dist_plots_dir=None, s
                 else "N/A"
             )
             feat_rows.append([info["file"], bm, am, imp])
-        parts.append(_html_table(feat_headers, feat_rows))
+        parts.append(
+            _html_table(feat_headers, feat_rows, "".join(feat_error_rows_html))
+        )
     else:
         parts.append(
             '<p class="empty-notice" style="margin-top:12px;">No feature-distance JSONs found.</p>'
