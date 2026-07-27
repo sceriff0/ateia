@@ -17,6 +17,7 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
+from scipy import ndimage
 
 # Add parent directory to path to import lib modules
 sys.path.insert(0, str(Path(__file__).parent / "utils"))
@@ -152,21 +153,31 @@ def compute_compartment_intensities(
     # key below plus FlowPath defaulting its statistic selector to Median.
     out[channel_name] = _safe_mean(cell_sum, cell_count)[valid_labels]
 
-    # Default statistic: MEDIAN (always). Needs a per-pixel gather (bincount cannot
-    # compute medians); restrict to foreground cell pixels.
-    fg = flat_cell != 0
-    px = {"label": flat_cell[fg], "val": flat_val[fg]}
-    if has_nuclei:
-        px["nuc"] = nuc_fg[fg]
-    df_px = pd.DataFrame(px)
-    medians = {"Cell": df_px.groupby("label")["val"].median()}
-    if has_nuclei:
-        medians["Nucleus"] = df_px[df_px["nuc"]].groupby("label")["val"].median()
-        medians["Cytoplasm"] = df_px[~df_px["nuc"]].groupby("label")["val"].median()
-    for comp in compartments:
-        out[f"{channel_name}: {comp}: Median"] = (
-            medians[comp].reindex(valid_labels).fillna(0.0).values
+    # Default statistic: MEDIAN (always). Computed with scipy.ndimage.labeled_comprehension
+    # directly on the label/value arrays already built above for the bincount sums —
+    # NOT a per-pixel DataFrame. A per-pixel pandas DataFrame (one row per foreground
+    # pixel, rebuilt on every channel) is what caused the WSI-scale memory regression;
+    # labeled_comprehension computes the same per-label median in bounded memory. A
+    # label absent from the underlying label array (e.g. a cell with no nuclear
+    # overlap, so an empty Nucleus/Cytoplasm compartment) yields `default` below,
+    # which reproduces the old code's `.reindex(valid_labels).fillna(0.0)` behavior
+    # exactly (verified against the old groupby-median path in
+    # tests/test_quantify_median.py).
+    medians = {
+        "Cell": ndimage.labeled_comprehension(
+            flat_val, flat_cell, valid_labels, np.median, np.float64, 0.0
         )
+    }
+    if has_nuclei:
+        cyto_cell_labels = np.where(nuc_fg, 0, flat_cell)
+        medians["Nucleus"] = ndimage.labeled_comprehension(
+            flat_val, nuc_cell_labels, valid_labels, np.median, np.float64, 0.0
+        )
+        medians["Cytoplasm"] = ndimage.labeled_comprehension(
+            flat_val, cyto_cell_labels, valid_labels, np.median, np.float64, 0.0
+        )
+    for comp in compartments:
+        out[f"{channel_name}: {comp}: Median"] = medians[comp]
 
     if expanded:
         for comp in compartments:
