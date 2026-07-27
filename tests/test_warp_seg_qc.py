@@ -404,6 +404,62 @@ def test_write_report_emits_the_documented_record(tmp_path):
     assert "displacement_px_p90" in rec["stages"][STAGE_RIGID]
 
 
+def test_record_is_honest_that_rigid_includes_micro_rigid_at_level_1(tmp_path):
+    """At micro_reg>=1 the 'rigid' stage is really affine ∘ micro-rigid (VALIS composes them
+    into slide.M). The record must say so rather than let a reader assume pure affine."""
+    ref = _write(tmp_path, "ref.geojson", _grid_fc())
+    mov = _write(tmp_path, "mov.geojson", _grid_fc(dx=1.0))
+    rec = wsq.write_report(
+        None,
+        REF,
+        MOV,
+        ref,
+        mov,
+        str(tmp_path / "o.json"),
+        warp=_shift_warp({STAGE_RIGID: 0.0}),
+        stages=[STAGE_RIGID],
+        micro_reg=1,
+    )
+    assert rec["micro_reg"] == 1
+    assert rec["rigid_includes_micro_rigid"] is True
+
+
+def test_record_says_rigid_is_pure_affine_at_level_0(tmp_path):
+    ref = _write(tmp_path, "ref.geojson", _grid_fc())
+    mov = _write(tmp_path, "mov.geojson", _grid_fc(dx=1.0))
+    rec = wsq.write_report(
+        None,
+        REF,
+        MOV,
+        ref,
+        mov,
+        str(tmp_path / "o.json"),
+        warp=_shift_warp({STAGE_RIGID: 0.0}),
+        stages=[STAGE_RIGID],
+        micro_reg=0,
+    )
+    assert rec["micro_reg"] == 0
+    assert rec["rigid_includes_micro_rigid"] is False
+
+
+def test_record_omits_micro_reg_fields_when_it_is_unknown(tmp_path):
+    """When the level isn't supplied (e.g. an injected-warp unit run), don't fabricate it."""
+    ref = _write(tmp_path, "ref.geojson", _grid_fc())
+    mov = _write(tmp_path, "mov.geojson", _grid_fc(dx=1.0))
+    rec = wsq.write_report(
+        None,
+        REF,
+        MOV,
+        ref,
+        mov,
+        str(tmp_path / "o.json"),
+        warp=_shift_warp({STAGE_RIGID: 0.0}),
+        stages=[STAGE_RIGID],
+    )
+    assert "micro_reg" not in rec
+    assert "rigid_includes_micro_rigid" not in rec
+
+
 def test_write_report_defaults_display_names_to_the_slide_names(tmp_path):
     ref = _write(tmp_path, "ref.geojson", _grid_fc())
     mov = _write(tmp_path, "mov.geojson", _grid_fc(dx=1.0))
@@ -465,3 +521,17 @@ def test_parse_args_defaults_match_the_documented_behaviour():
     assert a.supersample == wsq.DEFAULT_SUPERSAMPLE
     assert a.iou_thresh == wsq.DEFAULT_IOU_THRESH
     assert a.crop == "overlap"
+    assert a.micro_reg is None  # unknown unless the caller passes it
+
+
+def test_parse_args_accepts_micro_reg_level():
+    a = wsq.parse_args(
+        [
+            "--pickle", "p.pickle",
+            "--ref-slide", "r", "--moving-slide", "m",
+            "--ref-geojson", "r.geojson", "--moving-geojson", "m.geojson",
+            "--output", "o.json",
+            "--micro-reg", "1",
+        ]
+    )
+    assert a.micro_reg == 1

@@ -162,3 +162,79 @@ def test_end_to_end_cli_smoke(tmp_path):
                    "Preprocessing QC", "Registration QC", "Segmentation Overlays",
                    "Postprocessing QC", "Segmentation Quality (CSE)", "Software Versions"]:
         assert header in html, f"missing section: {header}"
+
+
+# ── (C) feature-TRE vs cell-displacement reconciliation ─────────────────────────
+# VALIS scores registration on its own SuperPoint/SuperGlue keypoints (a self-referential,
+# optimistic feature-TRE); WARP_SEG_QC scores it on independently segmented cells (centroid
+# displacement in µm). The report lines the two up per stage so a divergence — features say
+# aligned, cells say not — is visible instead of buried. The stage→source mapping is exact:
+#   rigid       feature-TRE = rigid_D (either summary; micro-rigid doesn't touch it)
+#   non_rigid   feature-TRE = non_rigid_D from the PRE-micro summary
+#   micro       feature-TRE = non_rigid_D from the FINAL (post-micro) summary
+def _valis_csvs(tmp_path):
+    d = tmp_path / "valis_summary"
+    d.mkdir()
+    (d / "P001_preprocessed_summary.csv").write_text(
+        "from,rigid_D,non_rigid_D\nmov,2.0,0.5\n"           # final: non_rigid_D = micro TRE
+    )
+    (d / "P001_preprocessed_summary_premicro.csv").write_text(
+        "from,rigid_D,non_rigid_D\nmov,2.0,1.0\n"           # pre-micro: non_rigid_D = non_rigid TRE
+    )
+    return d
+
+
+def _seg_qc_json(tmp_path):
+    d = tmp_path / "seg_qc"
+    d.mkdir()
+    (d / "P001_mov_seg_qc.json").write_text(json.dumps({
+        "patient_id": "P001", "moving": "mov", "reference": "ref",
+        "stages": {
+            "rigid":     {"displacement_um_p50": 2.1},
+            "non_rigid": {"displacement_um_p50": 1.1},
+            "micro":     {"displacement_um_p50": 6.0},
+        },
+    }))
+    return d
+
+
+def test_reconcile_maps_each_stage_to_the_right_tre_source(tmp_path):
+    gqr = _load()
+    rows = {(r["slide"], r["stage"]): r
+            for r in gqr.reconcile_rows(str(_valis_csvs(tmp_path)), str(_seg_qc_json(tmp_path)))}
+
+    assert rows[("mov", "rigid")]["feature_tre_um"] == 2.0
+    assert rows[("mov", "non_rigid")]["feature_tre_um"] == 1.0   # from PRE-micro summary
+    assert rows[("mov", "micro")]["feature_tre_um"] == 0.5       # from FINAL summary
+    assert rows[("mov", "rigid")]["cell_disp_um"] == 2.1
+    assert rows[("mov", "micro")]["cell_disp_um"] == 6.0
+
+
+def test_reconcile_flags_divergence_when_features_and_cells_disagree(tmp_path):
+    gqr = _load()
+    rows = {(r["slide"], r["stage"]): r
+            for r in gqr.reconcile_rows(str(_valis_csvs(tmp_path)), str(_seg_qc_json(tmp_path)))}
+
+    # rigid/non_rigid agree closely -> not divergent; micro: features say 0.5µm, cells say 6µm.
+    assert rows[("mov", "rigid")]["divergent"] is False
+    assert rows[("mov", "non_rigid")]["divergent"] is False
+    assert rows[("mov", "micro")]["divergent"] is True
+
+
+def test_reconcile_non_rigid_tre_is_unknown_without_the_premicro_summary(tmp_path):
+    gqr = _load()
+    d = tmp_path / "valis_summary"
+    d.mkdir()
+    (d / "P001_preprocessed_summary.csv").write_text("from,rigid_D,non_rigid_D\nmov,2.0,0.5\n")
+    rows = {(r["slide"], r["stage"]): r
+            for r in gqr.reconcile_rows(str(d), str(_seg_qc_json(tmp_path)))}
+    # No pre-micro CSV -> the non_rigid feature-TRE cannot be isolated from micro.
+    assert rows[("mov", "non_rigid")]["feature_tre_um"] is None
+    assert rows[("mov", "non_rigid")]["divergent"] is None
+
+
+def test_reconciliation_section_renders_and_marks_divergence(tmp_path):
+    gqr = _load()
+    html = gqr.reconciliation_section(str(_valis_csvs(tmp_path)), str(_seg_qc_json(tmp_path)))
+    assert "Reconciliation" in html
+    assert "mov" in html

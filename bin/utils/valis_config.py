@@ -44,10 +44,16 @@ MEMORY_PRESETS = {
 def build_registrar_kwargs(
     reference_img_f,
     memory_mode="high",
-    skip_micro_registration=False,
+    micro_reg=0,
     max_image_dim_px=4000,
 ):
     """Return the exact kwargs dict passed to `registration.Valis(...)` by classic register.py.
+
+    ``micro_reg`` is the ordinal micro-registration depth (0/1/2). It controls only the *first*
+    micro pass here — ``MicroRigidRegistrar``, which runs inside ``Valis.register()`` and refines
+    ``slide.M`` — via the ``micro_rigid_registrar_cls`` constructor kwarg: enabled at level >= 1.
+    The *second* pass (``register_micro``, the non-rigid micro step) is a separate method call
+    gated at level >= 2 by ``register.py``; it is not configured here.
 
     NOTE: a fresh `SuperGlueMatcher()` instance is created per call (mirrors register.py, which
     instantiates the matcher from the preset). The matcher carries no cross-run RNG state that
@@ -67,9 +73,7 @@ def build_registrar_kwargs(
         "matcher": preset["matcher"],
         "non_rigid_registrar_cls": OpticalFlowWarper,
         "affine_optimizer_cls": None,
-        "micro_rigid_registrar_cls": None
-        if skip_micro_registration
-        else MicroRigidRegistrar,
+        "micro_rigid_registrar_cls": MicroRigidRegistrar if micro_reg >= 1 else None,
         "create_masks": True,
     }
 
