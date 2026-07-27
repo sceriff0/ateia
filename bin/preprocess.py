@@ -167,6 +167,7 @@ def apply_basic_correction(
     get_darkfield: bool = True,
     autotune: bool = False,
     n_iter: int = 100,
+    overlap: int = 0,
     **basic_kwargs,
 ) -> Tuple[NDArray, object]:
     """
@@ -177,7 +178,7 @@ def apply_basic_correction(
             f"apply_basic_correction requires a 2D image, got shape {image.shape}"
         )
 
-    n_fovs_y, n_fovs_x = count_fovs(image.shape, fov_size)
+    n_fovs_y, n_fovs_x = count_fovs(image.shape, fov_size, overlap=overlap)
     fov_stack, positions, _ = split_image_into_fovs(image, n_fovs_x, n_fovs_y)
 
     basic = BaSiC(get_darkfield=get_darkfield, smoothness_flatfield=1)
@@ -386,6 +387,10 @@ def preprocess_multichannel_image(
             if np.issubdtype(multichannel_stack.dtype, np.integer)
             else preprocessed
         )
+        if np.issubdtype(multichannel_stack.dtype, np.integer):
+            # Round to nearest (half-to-even) before casting so fractional BaSiC
+            # output doesn't get silently truncated toward zero (astype floors).
+            preprocessed = np.round(preprocessed)
         preprocessed = preprocessed.astype(multichannel_stack.dtype)
 
     # Log output statistics after all processing
