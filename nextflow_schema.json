@@ -386,7 +386,7 @@
                 },
                 "expanded_quantification": {
                     "type": "boolean",
-                    "description": "With quantify_compartments, also compute Median and Sum (integrated density) per compartment in addition to Mean. Requires quantify_compartments.",
+                    "description": "With quantify_compartments, also emit Mean and Sum (integrated density) per compartment; per-compartment Median is always emitted. Requires quantify_compartments.",
                     "default": false
                 },
                 "simplify_tolerance": {

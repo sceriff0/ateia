@@ -143,7 +143,7 @@ Per-cell marker intensity.
 | Parameter | Default | Description |
 |---|---|---|
 | `quantify_compartments` | `true` | Emit per-compartment signal (Nucleus / Cytoplasm / Cell) by routing the nuclear mask into quantification. |
-| `expanded_quantification` | `true` | Also emit Median and Sum per compartment. **Requires** `quantify_compartments=true`. |
+| `expanded_quantification` | `true` | Also emit Mean and Sum per compartment (per-compartment Median is always emitted). **Requires** `quantify_compartments=true`. |
 
 !!! danger "Validation rule"
     Setting `--expanded_quantification true` without `--quantify_compartments true`
