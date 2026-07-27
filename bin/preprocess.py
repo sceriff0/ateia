@@ -70,7 +70,11 @@ __all__ = [
 def count_fovs(
     image_shape: Tuple[int, int], fov_size: Tuple[int, int], overlap: int = 0
 ) -> Tuple[int, int]:
-    """Calculate how many FOVs are needed to cover an image with given FOV size and overlap."""
+    """Calculate how many FOVs are needed to cover an image with given FOV size and overlap.
+
+    Note: `overlap` changes only the FOV tile COUNT used for BaSiC fitting;
+    extraction (split_image_into_fovs) is non-overlapping by design.
+    """
     height, width = image_shape[:2]
     fov_h, fov_w = fov_size
 
