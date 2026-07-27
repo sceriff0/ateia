@@ -200,6 +200,21 @@ def test_project_sweep_enables_qc_signals():
     assert "enable_feature_error" not in sweep["baseline"]         # replaced by reg_qc=2
 
 
+def test_project_sweep_baseline_matches_pipeline_defaults():
+    # The 'baseline' run must be the SHIPPED default config. These mirror nextflow.config defaults
+    # (as of 2026-07-27); update BOTH sides together if a pipeline default changes.
+    import yaml
+    base = yaml.safe_load(
+        (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text())["baseline"]
+    assert base["memory_mode"] == "high"               # nextflow.config default
+    assert base["reg_qc"] == 2                          # nextflow.config default
+    assert base["quantify_compartments"] is True       # nextflow.config default
+    assert base["expanded_quantification"] is True      # nextflow.config default (Mean/Sum on top of Median)
+    assert base["seg_cellsam_block_size"] == 1024       # nextflow.config default
+    assert base["cse_max_pixels"] == 50000000           # nextflow.config default (CSE downsample cap)
+    assert base["preproc_pool_workers"] is None         # nextflow.config default (null = task.cpus)
+
+
 def test_project_sweep_all_configs_share_columns():
     # run_sweep.sh maps EVERY csv column to --param, so a config missing a key another config has would
     # write a blank cell -> `--param ""` for those runs. Guard: all configs carry the same key set.

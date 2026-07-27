@@ -55,34 +55,39 @@ baseline:
   target_px: 4096
   n_channels: 2
   # --- registration ---
-  memory_mode: medium
+  # NB: baseline mirrors the PIPELINE DEFAULTS (nextflow.config) so the 'baseline' run is the
+  # shipped config. memory_mode=high and reg_qc=2 are the pipeline defaults as of 2026-07-27.
+  memory_mode: high                   # pipeline default (registration memory profile)
   skip_micro_registration: true
   n_register_images: 2                # 1 reference + 1 moving (the classic pair)
-  reg_qc: 2                           # staged registration QC ON: segments DAPI nuclei, fixes cell
-                                      # correspondence at the rigid stage, then re-measures dice_matched +
-                                      # centroid displacement (um) after each transform stage. This is the
-                                      # landmark-free registration-accuracy signal harvested into
+  reg_qc: 2                           # pipeline default: staged registration QC ON — segments DAPI nuclei,
+                                      # fixes correspondence at the rigid stage, re-measures dice_matched +
+                                      # centroid displacement (um) per stage. Harvested into
                                       # registration_accuracy.csv (bin/warp_seg_qc.py; docs/registration_qc.md).
   reg_jvm_heap_gb: null               # auto-size; the reg_jvm_heap_gb axis varies it (RAM elasticity)
   # --- preprocessing (BaSiC illumination correction) ---
   preproc_n_iter: 100
   preproc_overlap: 0
-  preproc_pool_workers: 4             # worker threads for preprocessing parallelism
+  preproc_pool_workers: null          # pipeline default (null = task.cpus); the preproc_pool_workers axis
+                                      # varies it to explicit thread counts
   # --- segmentation ---
   seg_method: stardist
   seg_gpu: true
   seg_n_tiles_x: 16
   seg_n_tiles_y: 16
-  seg_cellsam_block_size: 400        # only used when seg_method=cellsam
-  seg_instantseg_tile_size: 512      # only used when seg_method=instantseg
-  skip_seg_quality_eval: false       # CellSegmentationEvaluator (CSE) ON: reference-free per-patient
+  seg_cellsam_block_size: 1024        # pipeline default (only used when seg_method=cellsam)
+  seg_instantseg_tile_size: 512       # only used when seg_method=instantseg
+  skip_seg_quality_eval: false        # CellSegmentationEvaluator (CSE) ON: reference-free per-patient
                                       # segmentation QualityScore + component metrics, harvested into
                                       # segmentation_eval.csv (modules/local/seg_quality_eval.nf).
+  cse_max_pixels: 50000000            # pipeline default: bin image+masks so CSE scores <= this many px
+                                      # (caps CSE memory/time on full-WSI masks; QualityScore shifts with
+                                      # the binning factor, so keep it FIXED across the cohort).
   # --- quantification ---
   # compartments ON at baseline so the expanded_quantification axis is valid:
   # expanded_quantification requires quantify_compartments (ParamUtils.validateCompartmentQuant).
-  quantify_compartments: true
-  expanded_quantification: false
+  quantify_compartments: true         # pipeline default
+  expanded_quantification: true       # pipeline default (Mean/Sum on top of the always-computed Median)
 
 # Axes to vary (OFAT: one run per non-baseline value of each axis). These hold
 # input size FIXED at the baseline cell and vary a single pipeline knob.
@@ -124,6 +129,6 @@ segmentation_grid:
     seg_n_tiles_x:            [8, 16, 32]
     seg_n_tiles_y:            [8, 16, 32]
   cellsam:
-    seg_cellsam_block_size:  [256, 400, 512]
+    seg_cellsam_block_size:  [512, 1024, 2048]   # centred on the pipeline default (1024)
   instantseg:
     seg_instantseg_tile_size: [256, 512, 1024]
