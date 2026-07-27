@@ -51,7 +51,9 @@ process REGISTER {
     // reg_qc >= 2 scores each registration stage separately, which needs the post-non-rigid,
     // pre-micro displacement fields. VALIS composes micro into the same attribute, so nothing
     // downstream can recover them — REGISTER is the only place they can be captured.
-    def reg_qc_level = params.skip_registration_qc ? 0 : (params.reg_qc == null ? 1 : (params.reg_qc as int))
+    // ParamUtils.regQcLevel is the single source of truth (null reg_qc -> 2), shared with
+    // registration.nf/add_cycle.nf so this process can't drift from the rest of the pipeline.
+    def reg_qc_level = ParamUtils.regQcLevel(params)
     def stage_ckpt = reg_qc_level >= 2 ? '--stage-checkpoint-dir reg_stage_checkpoint' : ''
     // JVM heap scales with retry attempts: base 32GB + 16GB per attempt
     def jvm_heap_gb = Math.min(params.reg_jvm_heap_gb ?: (32 + 16 * task.attempt), task.memory.toGiga() - 4)
@@ -189,7 +191,8 @@ process REGISTER {
     def manifest_json = groovy.json.JsonOutput.toJson(manifest_map)
     // Mirror the real path: the stage checkpoint exists only at reg_qc >= 2, so stub runs
     // exercise the same channel wiring the real run does (including its absence at reg_qc<2).
-    def stub_qc_level = params.skip_registration_qc ? 0 : (params.reg_qc == null ? 1 : (params.reg_qc as int))
+    // Uses the same ParamUtils.regQcLevel default (null -> 2) as the script block above.
+    def stub_qc_level = ParamUtils.regQcLevel(params)
     def stub_ckpt = stub_qc_level < 2 ? '' : """
     mkdir -p reg_stage_checkpoint
     echo '{"version": 1, "stage": "post_non_rigid_pre_micro", "micro_registration": true, "slides": {}, "errors": []}' > reg_stage_checkpoint/stage_checkpoint.json
