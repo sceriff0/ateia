@@ -79,7 +79,7 @@ class ParamUtils {
      * registration.nf / add_cycle.nf so the QC gate has a single source of truth.
      */
     static int regQcLevel(Map params) {
-        return params.skip_registration_qc ? 0 : (params.reg_qc == null ? 1 : (params.reg_qc as int))
+        return params.skip_registration_qc ? 0 : (params.reg_qc == null ? 2 : (params.reg_qc as int))
     }
 
     static void validateSegMethod(String method) {
