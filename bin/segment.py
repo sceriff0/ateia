@@ -323,7 +323,7 @@ def segment_nuclei(
     model : StarDist2D
         Loaded StarDist model.
     n_tiles : tuple of int, optional
-        Number of tiles for tiled processing. Default is (16, 16).
+        Number of tiles for tiled processing. Default is (24, 24).
         Larger images benefit from tiling.
     expand_distance : int, optional
         Distance (pixels) to expand nuclei labels to create whole-cell masks.
@@ -420,7 +420,7 @@ def run_segmentation(
     use_gpu : bool, optional
         Use GPU acceleration. Default is True.
     n_tiles : tuple of int, optional
-        Number of tiles for processing. Default is (16, 16).
+        Number of tiles for processing. Default is (24, 24).
     expand_distance : int, optional
         Distance to expand nuclei for whole-cell masks. Default is 10.
     pmin : float, optional

@@ -165,6 +165,10 @@ def extract_contours(
         contour[:, 1] += minc - 1  # x offset
 
         # Convert from skimage center-of-pixel to ImageJ/QuPath corner-of-pixel convention
+        # NOTE: this +0.5 offset is intentional and QuPath-specific — it diverges from
+        # mask_to_geojson.py's no-offset (skimage center-of-pixel) contours, which feed
+        # the VALIS reg-QC warp instead of QuPath import. Do not "fix" one to match the
+        # other; each serves a different consumer's pixel convention.
         contour += 0.5
 
         # Simplify with Douglas-Peucker
@@ -219,7 +223,7 @@ def pair_labels_to_reference(
     counts = pairs.groupby(["lbl", "ref"]).size().reset_index(name="n")
     best_idx = counts.groupby("lbl")["n"].idxmax()
     best = counts.loc[best_idx]
-    return {int(l): int(r) for l, r in zip(best["lbl"], best["ref"])}
+    return {int(lab): int(r) for lab, r in zip(best["lbl"], best["ref"])}
 
 
 def rekey_contours_to_reference(
