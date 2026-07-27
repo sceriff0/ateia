@@ -96,7 +96,8 @@ def extract_morphology(
 def extract_contours(
     mask_filtered: NDArray,
     props_df: pd.DataFrame,
-    simplify_tolerance: float = 0.5,
+    simplify_tolerance: float = 1.0,
+    coord_precision: int = 2,
 ) -> Dict[str, List[List[float]]]:
     """Extract simplified polygon contours for each cell.
 
@@ -111,7 +112,13 @@ def extract_contours(
         Morphology DataFrame indexed by label, must contain bbox columns
         (bbox-0, bbox-1, bbox-2, bbox-3) from regionprops_table.
     simplify_tolerance : float
-        Douglas-Peucker simplification tolerance in pixels.
+        Douglas-Peucker simplification tolerance in pixels. Higher = fewer
+        polygon vertices = smaller GeoJSON and faster QuPath import. The exported
+        polygon is display-only (all quantification is mask-derived), so this does
+        not affect downstream gating/analysis.
+    coord_precision : int
+        Decimal places to round vertex coordinates to. 2 (0.01 px) is far below
+        one pixel, so it shrinks the GeoJSON with no visible/analysis impact.
 
     Returns
     -------
@@ -174,7 +181,8 @@ def extract_contours(
 
         # Convert from (y, x) to (x, y) for GeoJSON and round for compact JSON
         contours_dict[str(label)] = [
-            [round(float(pt[1]), 4), round(float(pt[0]), 4)] for pt in simplified
+            [round(float(pt[1]), coord_precision), round(float(pt[0]), coord_precision)]
+            for pt in simplified
         ]
 
     skipped = skipped_no_contour + skipped_too_simple
@@ -242,8 +250,9 @@ def rekey_contours_to_reference(
 def run_extraction(
     mask_path: str,
     outdir: str,
-    simplify_tolerance: float = 0.5,
+    simplify_tolerance: float = 1.0,
     reference_mask_path: Optional[str] = None,
+    coord_precision: int = 2,
 ) -> Tuple[Optional[pd.DataFrame], Optional[Dict]]:
     """Run full extraction pipeline: morphology + contours.
 
@@ -301,7 +310,9 @@ def run_extraction(
         return None, None
 
     # Extract contours (reuse bbox from morphology — no second regionprops call)
-    contours = extract_contours(mask_filtered, props_df, simplify_tolerance)
+    contours = extract_contours(
+        mask_filtered, props_df, simplify_tolerance, coord_precision
+    )
 
     # Optionally re-key contours from this mask's labels to a reference mask's labels.
     # Used for the nucleus mask: emit nucleus contours keyed by CELL label so that
@@ -372,8 +383,17 @@ def parse_args():
     parser.add_argument(
         "--simplify_tolerance",
         type=float,
-        default=0.5,
-        help="Douglas-Peucker contour simplification tolerance in pixels",
+        default=1.0,
+        help="Douglas-Peucker contour simplification tolerance in pixels. Higher = "
+        "fewer polygon vertices = smaller GeoJSON and faster QuPath import. "
+        "Display-only geometry; does not affect quantification.",
+    )
+    parser.add_argument(
+        "--coord_precision",
+        type=int,
+        default=2,
+        help="Decimal places for polygon vertex coordinates (2 = 0.01 px, sub-pixel). "
+        "Lower = smaller GeoJSON; no analysis impact.",
     )
     parser.add_argument(
         "--reference_mask",
@@ -398,6 +418,7 @@ def main():
         outdir=args.outdir,
         simplify_tolerance=args.simplify_tolerance,
         reference_mask_path=args.reference_mask,
+        coord_precision=args.coord_precision,
     )
 
     return 0

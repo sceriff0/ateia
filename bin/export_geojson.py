@@ -360,10 +360,27 @@ def export_combined_geojson(
     combined_path = str(out / f"{prefix}.geojson")
     _write_collection(cells_combined, combined_path)
 
-    counts = {prefix: len(cells_combined)}
+    # Whole-cell-only companion: same cells and the SAME measurements, but WITHOUT
+    # the nucleusGeometry polygon. Dropping the second polygon roughly halves the
+    # geometry, so it imports much faster in QuPath; compartment gating still works
+    # in FlowPath (which reads the measurement keys, not the nucleus polygon). Import
+    # whichever you need — <prefix>.geojson for the nucleus outline / cell-vs-nucleus
+    # toggle, <prefix>_wholecell.geojson for a fast, lean import.
+    wholecell = [
+        {k: v for k, v in feat.items() if k != "nucleusGeometry"}
+        for feat in cells_combined
+    ]
+    wholecell_path = str(out / f"{prefix}_wholecell.geojson")
+    _write_collection(wholecell, wholecell_path)
+
+    counts = {prefix: len(cells_combined), f"{prefix}_wholecell": len(wholecell)}
     logger.info(
         f"  Combined export: {len(cells_combined)} cell objects "
         f"({n_with_nucleus} with nucleus), skipped {skipped}"
+    )
+    logger.info(
+        f"  Whole-cell companion: {len(wholecell)} cells without nucleusGeometry "
+        f"-> {Path(wholecell_path).name}"
     )
     return counts
 

@@ -154,7 +154,7 @@ class TestCompartmentQuantification:
         channel[8:12, 8:12] = 100.0  # nucleus value
         return cell_mask, nuclei_mask, channel
 
-    def test_standard_means(self):
+    def test_standard_default_is_median(self):
         from quantify import compute_compartment_intensities
 
         cell_mask, nuclei_mask, channel = self._synthetic()
@@ -163,14 +163,16 @@ class TestCompartmentQuantification:
         assert len(df) == 1
         row = df.iloc[0]
         assert int(row["label"]) == 1
+        # Median is the default statistic — always emitted, no expanded needed.
         # Nuclear region = 16 px @100; cytoplasm = 84 px @10; whole-cell = mix.
-        assert row["CD3: Nucleus: Mean"] == pytest.approx(100.0)
-        assert row["CD3: Cytoplasm: Mean"] == pytest.approx(10.0)
-        assert row["CD3: Cell: Mean"] == pytest.approx((16 * 100 + 84 * 10) / 100.0)
-        # Backward-compatible bare marker column == whole-cell mean.
-        assert row["CD3"] == pytest.approx(row["CD3: Cell: Mean"])
-        # Standard mode emits no Median/Sum columns.
-        assert not any(": Median" in c or ": Sum" in c for c in df.columns)
+        assert row["CD3: Nucleus: Median"] == pytest.approx(100.0)
+        assert row["CD3: Cytoplasm: Median"] == pytest.approx(10.0)
+        # 84 px @10 outnumber 16 px @100 -> whole-cell median is 10.
+        assert row["CD3: Cell: Median"] == pytest.approx(10.0)
+        # Bare marker column stays whole-cell MEAN (backward-compat / FlowPath fallback).
+        assert row["CD3"] == pytest.approx((16 * 100 + 84 * 10) / 100.0)
+        # Standard (non-expanded) mode emits NO Mean/Sum columns — those are expanded-only.
+        assert not any(": Mean" in c or ": Sum" in c for c in df.columns)
 
     def test_cytoplasm_is_cell_minus_nucleus(self):
         """Integrated density: Cell Sum == Nucleus Sum + Cytoplasm Sum."""
@@ -204,15 +206,20 @@ class TestCompartmentQuantification:
         from quantify import quantify_single_channel
 
         cell_mask, nuclei_mask, channel = self._synthetic()
-        # With a nuclei mask -> compartment columns.
+        # With a nuclei mask -> Nucleus/Cytoplasm compartments added (Median default).
         comp = quantify_single_channel(
             cell_mask, channel, "CD3", nuclei_mask=nuclei_mask
         )
-        assert "CD3: Nucleus: Mean" in comp.columns
-        # Without -> legacy whole-cell mean only.
-        legacy = quantify_single_channel(cell_mask, channel, "CD3")
-        assert list(legacy.columns) == ["label", "CD3"]
-        assert legacy.iloc[0]["CD3"] == pytest.approx(comp.iloc[0]["CD3: Cell: Mean"])
+        assert "CD3: Nucleus: Median" in comp.columns
+        assert "CD3: Cell: Median" in comp.columns
+        # Without a nuclei mask -> whole-cell Cell compartment only, still Median default.
+        wholecell = quantify_single_channel(cell_mask, channel, "CD3")
+        assert list(wholecell.columns) == ["label", "CD3", "CD3: Cell: Median"]
+        assert not any(
+            "Nucleus" in c or "Cytoplasm" in c for c in wholecell.columns
+        )
+        # Bare marker column is whole-cell mean in both paths.
+        assert wholecell.iloc[0]["CD3"] == pytest.approx(comp.iloc[0]["CD3"])
 
     def test_empty_mask_returns_empty(self):
         from quantify import compute_compartment_intensities

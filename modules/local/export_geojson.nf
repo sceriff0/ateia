@@ -27,6 +27,10 @@ process EXPORT_GEOJSON {
 
     output:
     tuple val(meta), path("export/cells.geojson"), emit: geojson
+    // Whole-cell-only companion (no nucleusGeometry), written only in the
+    // per-compartment path (params.quantify_compartments). Lighter/faster to import
+    // in QuPath; same measurements, so FlowPath compartment gating still works.
+    tuple val(meta), path("export/cells_wholecell.geojson"), optional: true, emit: geojson_wholecell
     tuple val(meta), path("export/cells_data.csv"), emit: csv
     path "versions.yml"                            , emit: versions
     path("*.size.csv")                             , emit: size_log
@@ -66,6 +70,7 @@ process EXPORT_GEOJSON {
     """
     mkdir -p export
     touch export/cells.geojson
+    ${params.quantify_compartments ? 'touch export/cells_wholecell.geojson' : ''}
     touch export/cells_data.csv
     echo "STUB,${meta.patient_id},stub,0" > ${meta.patient_id}.EXPORT_GEOJSON.size.csv
 
