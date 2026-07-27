@@ -70,82 +70,12 @@ os.environ.setdefault("XDG_CACHE_HOME", "/tmp/xdg_cache")
 from valis import registration
 from valis import warp_tools as valis_warp_tools
 
-# Non-rigid registrars - OpticalFlowWarper is default, NonRigidTileRegistrar for large images
-from valis.non_rigid_registrars import OpticalFlowWarper
-
 # AffineOptimizerMattesMI refinement is not used: it requires SimpleITK with Elastix bindings,
 # which is not available in this environment. Registration works via SuperPoint/SuperGlue feature
 # matching without the affine optimizer refinement.
-# Memory mode presets + registrar-kwargs builder live in the shared single-source-of-truth module
-# so the distributed path (bin/reg_prep.py) builds a bit-identical Valis. See bin/utils/valis_config.py.
-from valis_config import MEMORY_PRESETS, build_registrar_kwargs
-
-
-def _get_system_memory_gb() -> Optional[int]:
-    """Return total system memory in GB, or None if unavailable."""
-    try:
-        import shutil
-
-        total = shutil.disk_usage("/").total  # fallback, not what we want
-        # Try /proc/meminfo (Linux)
-        with open("/proc/meminfo") as f:
-            for line in f:
-                if line.startswith("MemTotal:"):
-                    return int(line.split()[1]) // (1024 * 1024)
-    except Exception:
-        pass
-    try:
-        pages = os.sysconf("SC_PHYS_PAGES")
-        page_size = os.sysconf("SC_PAGE_SIZE")
-        return (pages * page_size) // (1024**3)
-    except Exception:
-        return None
-
-
-def estimate_jvm_memory(
-    input_dir: str, default_gb: int = 16, override_gb: Optional[int] = None
-) -> int:
-    """Estimate JVM memory based on input file sizes and system memory.
-
-    Parameters
-    ----------
-    input_dir : str
-        Directory containing input files
-    default_gb : int
-        Default memory allocation in GB
-    override_gb : int, optional
-        Explicit JVM heap size in GB (overrides auto-estimation)
-
-    Returns
-    -------
-    int
-        Recommended JVM heap size in GB
-    """
-    if override_gb is not None and override_gb > 0:
-        logger.info(f"Using explicit JVM heap size: {override_gb} GB")
-        return override_gb
-
-    total_size_gb = 0.0
-    try:
-        for f in os.listdir(input_dir):
-            if f.lower().endswith((".tif", ".tiff", ".ome.tif", ".ome.tiff")):
-                fpath = os.path.join(input_dir, f)
-                total_size_gb += os.path.getsize(fpath) / (1024**3)
-
-        # Cap at 75% of system memory (leave room for Python/vips), minimum 8GB
-        sys_mem = _get_system_memory_gb()
-        max_heap = int(sys_mem * 0.75) if sys_mem else 64
-        recommended = max(8, min(max_heap, int(total_size_gb * 3 + 8)))
-        logger.info(
-            f"Input files total: {total_size_gb:.1f} GB, system RAM: {sys_mem or '?'} GB, "
-            f"recommending {recommended} GB JVM heap (cap: {max_heap} GB)"
-        )
-        return recommended
-    except Exception as e:
-        logger.info(
-            f"Could not estimate JVM memory: {e}, using default {default_gb} GB"
-        )
-        return default_gb
+# Memory mode presets + registrar-kwargs builder, and the JVM-heap sizer, live in the shared
+# single-source-of-truth module so there is one heap formula. See bin/utils/valis_config.py.
+from valis_config import MEMORY_PRESETS, build_registrar_kwargs, init_jvm
 
 
 def validate_input_slides(input_dir: str) -> Tuple[List[str], List[str]]:
@@ -268,7 +198,6 @@ def valis_registration(
     micro_reg_fraction: float = 0.125,
     max_image_dim_px: int = 4000,
     skip_micro_registration: bool = False,
-    image_type: str = "auto",
     interp_method: str = "bicubic",
     jvm_heap_gb: Optional[int] = None,
     stage_checkpoint_dir: Optional[str] = None,
@@ -294,9 +223,6 @@ def valis_registration(
         Maximum image dimension for caching (controls RAM usage). Default: 4000
     skip_micro_registration : bool, optional
         Skip the micro-rigid registration step. Default: False
-    image_type : str, optional
-        Image type for preprocessing: "brightfield", "fluorescence", or "auto".
-        "auto" attempts to detect based on image characteristics. Default: "auto"
     stage_checkpoint_dir : str, optional
         Where to snapshot each slide's forward displacement field after the non-rigid stage
         and before micro-registration. Consumed by WARP_SEG_QC (reg_qc=2) to report the
@@ -333,10 +259,10 @@ def valis_registration(
         raise FileNotFoundError(f"No valid slides found in {input_dir}")
     logger.info(f"  Valid: {len(valid_slides)}, Invalid: {len(invalid_slides)}")
 
-    # Initialize JVM with adaptive memory sizing
-    jvm_mem_gb = estimate_jvm_memory(input_dir, default_gb=16, override_gb=jvm_heap_gb)
-    logger.info(f"Initializing JVM with {jvm_mem_gb}GB heap...")
-    registration.init_jvm(mem_gb=jvm_mem_gb)
+    # Initialize JVM with adaptive memory sizing (shared formula: bin/utils/valis_config.py).
+    # jvm_heap_gb, when set, overrides the auto-estimate exactly as before.
+    logger.info("Initializing JVM...")
+    jvm_mem_gb = init_jvm(input_dir, override_gb=jvm_heap_gb)
     logger.info(f"JVM initialized with {jvm_mem_gb}GB heap")
 
     # Configuration
@@ -411,19 +337,13 @@ def valis_registration(
         f"  max_image_dim_px: {preset_max_image_dim} (limits cached image size for RAM control)"
     )
 
-    # ========================================================================
-    # Configure Non-Rigid Registration Strategy
-    # ========================================================================
-    # Always use OpticalFlowWarper. VALIS internally auto-switches to
+    # Non-rigid registrar: OpticalFlowWarper, set via non_rigid_registrar_cls in
+    # build_registrar_kwargs below. VALIS internally auto-switches to
     # NonRigidTileRegistrar when estimated memory > 10GB (see TILER_THRESH_GB
     # in valis_lib/registration.py). Explicitly passing NonRigidTileRegistrar
     # triggers a bug: its fwd_dxdy is always a pyvips.Image, but the Slide
     # setter silently rejects pyvips, leaving fwd_dxdy=None. This causes
     # measure_error() to report identical rigid/non-rigid errors.
-    logger.info(
-        "  Non-rigid registrar: OpticalFlowWarper (VALIS auto-tiles if memory > 10GB)"
-    )
-    non_rigid_registrar = OpticalFlowWarper()
 
     # ========================================================================
     # Affine Optimizer - Disabled (requires SimpleITK with Elastix bindings)
@@ -433,8 +353,7 @@ def valis_registration(
     # Registration still works well via SuperPoint/SuperGlue feature matching.
     logger.info("  Affine optimizer: None (feature-based alignment only)")
 
-    # Build registrar kwargs via the shared single-source-of-truth builder (bin/utils/valis_config.py),
-    # so bin/reg_prep.py's distributed PREP constructs a bit-identical Valis.
+    # Build registrar kwargs via the shared single-source-of-truth builder (bin/utils/valis_config.py).
     registrar_kwargs = build_registrar_kwargs(
         reference_img_f=ref_image,
         memory_mode=memory_mode,
@@ -518,14 +437,7 @@ def valis_registration(
                 )
                 try:
                     stats = dxdy.stats()
-                    # stats() returns a 2D array: columns = bands+1, rows = [min, max, sum, sum^2, mean, stdev]
-                    # Band 0 (first col) is all-band summary, band 1 = dx, band 2 = dy
-                    dx_min = stats(1, 0)[0]  # band 1 min
-                    dx_max = stats(2, 0)[0]  # band 1 max
-                    dx_mean = stats(5, 0)[0]  # band 1 mean (row 5, col 0 = all-band)
-                    dy_min = stats(1, 1)[0]  # band 2 min
-                    dy_max = stats(2, 1)[0]  # band 2 max
-                    # Actually, pyvips stats() returns (cols=bands+1, rows=7):
+                    # pyvips stats() returns (cols=bands+1, rows=7):
                     # Row 0=min, 1=max, 2=sum, 3=sum^2, 4=mean, 5=sd, 6=count
                     # Col 0=all, Col 1=band0(dx), Col 2=band1(dy)
                     stats_np = np.array(
@@ -576,13 +488,6 @@ def valis_registration(
                     f"  [{slide_name}] REFERENCE — bk_dxdy={'set' if bk is not None else 'None'}, fwd_dxdy={'set' if fwd is not None else 'None'}"
                 )
                 continue
-
-            # Check if displacement files exist on disk (tiled registration)
-            if stored:
-                bk_f, fwd_f = slide_obj.get_displacement_f()
-                logger.info(
-                    f"  [{slide_name}] stored_dxdy=True, bk_file={os.path.exists(bk_f)}, fwd_file={os.path.exists(fwd_f)}"
-                )
 
             _report_dxdy(slide_name, "bk_dxdy", bk, stored)
             _report_dxdy(slide_name, "fwd_dxdy", fwd, stored)
@@ -1039,19 +944,13 @@ def parse_args() -> argparse.Namespace:
 
     # Advanced registration options
     parser.add_argument(
-        "--image-type",
-        type=str,
-        default="fluorescence",
-        choices=["auto", "brightfield", "fluorescence"],
-        help="Image type for preprocessing optimization",
-    )
-    parser.add_argument(
         "--interp-method",
         type=str,
         default="bicubic",
         choices=["bilinear", "bicubic", "nearest"],
-        help="Interpolation method for warping. bilinear recommended for "
-        "quantification (no negative overshoot), bicubic for visual quality.",
+        help="Interpolation method for warping. Default is bicubic (VALIS's own "
+        "default); any negative overshoot near sharp edges is clipped downstream "
+        "by clip_negative_values() in split_multichannel.py.",
     )
     parser.add_argument(
         "--jvm-heap-gb",
@@ -1089,7 +988,6 @@ def main() -> int:
             max_image_dim_px=args.max_image_dim,
             skip_micro_registration=args.skip_micro_registration,
             # Advanced options
-            image_type=args.image_type,
             interp_method=args.interp_method,
             jvm_heap_gb=args.jvm_heap_gb,
             stage_checkpoint_dir=args.stage_checkpoint_dir,
