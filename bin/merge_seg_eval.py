@@ -7,7 +7,17 @@ import json
 
 
 def flatten(doc):
-    row = {"id": doc["id"], "QualityScore": doc.get("QualityScore")}
+    row = {
+        "id": doc["id"],
+        "QualityScore": doc.get("QualityScore"),
+        # Per-patient downsampling drifts QualityScore (coarser grid = different
+        # metric values); carry both through so the merged report can show it
+        # instead of silently discarding it. Older per-patient JSONs (written
+        # before seg_quality_eval.py started emitting these) lack the keys, so
+        # default to None rather than raising.
+        "downsample_factor": doc.get("downsample_factor"),
+        "effective_pixel_size_um": doc.get("effective_pixel_size_um"),
+    }
     for k, v in doc.get("metrics", {}).items():
         if isinstance(v, dict):
             for kk, vv in v.items():
@@ -21,7 +31,11 @@ def main():
     ap.add_argument("--inputs", nargs="+", required=True)
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
-    rows = [flatten(json.loads(open(p).read())) for p in a.inputs]
+    rows = []
+    for p in a.inputs:
+        with open(p) as fh:
+            data = json.load(fh)
+        rows.append(flatten(data))
     cols = []
     for r in rows:
         for k in r:

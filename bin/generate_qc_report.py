@@ -594,12 +594,24 @@ def seg_overlay_section(postprocess_dir):
     return section("Segmentation Overlays", img_grid(overlays, wide=True))
 
 
-def seg_eval_section(seg_eval_dir):
+def seg_eval_section(seg_eval_dir, expected_patients=None):
     """
     Render the Cell Segmentation Evaluator (CSE) metrics table.
     Any number of segmentation_metrics.csv files may be present (one per
     merge, though normally just one); each is rendered as its own table
-    since column sets can differ across runs.
+    since column sets can differ across runs. Columns are whatever
+    merge_seg_eval.py wrote, dynamically — this now includes
+    `downsample_factor` and `effective_pixel_size_um` so per-patient
+    QualityScore drift from CSE-budget downsampling is visible.
+
+    `expected_patients`: optional collection of patient IDs the run actually
+    processed (e.g. from run_summary.json's manifest, which is built from the
+    input CSV independent of seg-eval's own output). SEG_QUALITY_EVAL runs
+    under an `errorStrategy='ignore'` QC gate, so a patient can fail/OOM there
+    and simply be absent from segmentation_metrics.csv with no other trace.
+    When `expected_patients` is available we diff it against the `id` column
+    to name exactly which patients silently dropped; when it isn't, we still
+    report the present-count so a shrinking row count is at least visible.
     """
     parts = []
     csv_files = list_files(seg_eval_dir, "*.csv")
@@ -608,6 +620,7 @@ def seg_eval_section(seg_eval_dir):
             '<p class="empty-notice">No segmentation-evaluation CSVs found.</p>'
         )
     else:
+        expected_set = set(expected_patients) if expected_patients else None
         for csv_path in csv_files:
             try:
                 headers, rows = parse_seg_eval_csv(csv_path)
@@ -619,6 +632,7 @@ def seg_eval_section(seg_eval_dir):
             parts.append(
                 f"<p style='font-size:0.85rem;color:#666;margin-bottom:6px;'>{Path(csv_path).name}</p>"
             )
+            parts.append(_seg_eval_reconciliation_html(headers, rows, expected_set))
             tbl = (
                 "<table><thead><tr>"
                 + "".join(f"<th>{h}</th>" for h in headers)
@@ -629,6 +643,48 @@ def seg_eval_section(seg_eval_dir):
             tbl += "</tbody></table>"
             parts.append(tbl)
     return section("Segmentation Quality (CSE)", "\n".join(parts))
+
+
+def _seg_eval_reconciliation_html(headers, rows, expected_set):
+    """
+    Build the expected-vs-present reconciliation line for one seg-eval CSV.
+
+    `expected_set`: patient IDs known from the run manifest, or None if that
+    signal isn't available to the caller. `headers`/`rows` come from
+    parse_seg_eval_csv. Missing patients (present in expected_set but absent
+    from the `id` column) are named explicitly since they were most likely
+    dropped silently by the QC `errorStrategy='ignore'` gate around
+    SEG_QUALITY_EVAL, not because they were never run.
+    """
+    n_present = len(rows)
+    if "id" in headers:
+        id_idx = headers.index("id")
+        present_ids = {row[id_idx] for row in rows if id_idx < len(row)}
+    else:
+        present_ids = set()
+
+    if expected_set is None:
+        return (
+            f"<p style='font-size:0.85rem;color:#666;'>{n_present} patient(s) present. "
+            "Expected patient count is not available to this section, so a "
+            "patient silently dropped by the QC errorStrategy='ignore' gate "
+            "cannot be flagged here — cross-check against the Sample Manifest "
+            "section above.</p>"
+        )
+
+    n_expected = len(expected_set)
+    missing = sorted(expected_set - present_ids)
+    if missing:
+        return (
+            f"<p style='font-size:0.85rem;color:#c0392b;font-weight:600;'>"
+            f"{n_present}/{n_expected} expected patients present — "
+            f"MISSING (likely dropped by QC errorStrategy='ignore'): "
+            f"{', '.join(missing)}</p>"
+        )
+    return (
+        f"<p style='font-size:0.85rem;color:#666;'>"
+        f"{n_present}/{n_expected} expected patients present.</p>"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -700,7 +756,8 @@ def main():
     )
     html_parts.append(seg_overlay_section(args.postprocess_qc))
     html_parts.append(postprocess_qc_section(args.postprocess_qc))
-    html_parts.append(seg_eval_section(args.seg_eval))
+    expected_patients = set(summary.get("manifest", {}).get("patients", {}).keys()) or None
+    html_parts.append(seg_eval_section(args.seg_eval, expected_patients))
     html_parts.append(versions_section(args.versions))
     html_parts.append(html_footer())
 
