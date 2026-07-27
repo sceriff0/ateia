@@ -22,6 +22,16 @@ def test_parse_bytes():
     assert grr.parse_bytes("") is None
 
 
+def test_parse_bytes_bare_zero_treated_as_missing():
+    """Regression test for the inert-set-condition bug: `and` bound tighter
+    than `or` in `s in {"0", "-"} and s == "-"`, silently dropping the "0"
+    set member so it never took effect. The literal set shows the intent was
+    to treat a bare "0" byte-metric reading (peak_rss/peak_vmem/rchar/wchar)
+    as missing/not-measured, same as "-", not as a genuine zero."""
+    grr = _load()
+    assert grr.parse_bytes("0") is None
+
+
 def test_parse_duration():
     grr = _load()
     assert grr.parse_duration("1.5s") == 1.5
@@ -98,6 +108,50 @@ def test_join_size_exact_and_fallback():
     assert joined[1]["input_bytes"] == 999          # fallback: same process, sample prefix
 
 
+def test_join_size_prefix_boundary_no_false_match():
+    """A size sample "P1" must not prefix-match a trace tag "P10_slide" —
+    only an exact match or a "<sample>_"-bounded prefix should join."""
+    grr = _load()
+    trace = [
+        {"process": "A", "tag": "P10_slideX", "realtime_s": 1.0, "peak_rss_b": 10.0},
+        {"process": "A", "tag": "P1_slideY", "realtime_s": 2.0, "peak_rss_b": 20.0},
+        {"process": "A", "tag": "P1", "realtime_s": 3.0, "peak_rss_b": 30.0},
+    ]
+    size = {("A", "P1"): 111}
+    joined = grr.join_size(trace, size)
+    by_tag = {j["tag"]: j["input_bytes"] for j in joined}
+    assert by_tag["P10_slideX"] is None       # P1 must not falsely match P10_...
+    assert by_tag["P1_slideY"] == 111         # legitimate "<sample>_" boundary match
+    assert by_tag["P1"] == 111                # exact match
+
+
+def test_rollup_by_process_exit_dash_not_counted_as_failure():
+    """A trace row with exit="-" (cached/aborted/not-run) must not be
+    counted as a failure, either in the per-process rollup or the run-level
+    failure count / Retries & Failures section."""
+    grr = _load()
+    rows = [
+        {"process": "A", "tag": "P1", "exit": "-", "realtime_s": 1.0, "cpu_pct": None,
+         "peak_rss_b": None, "peak_vmem_b": None, "rchar_b": None, "wchar_b": None},
+        {"process": "A", "tag": "P2", "exit": "0", "realtime_s": 1.0, "cpu_pct": None,
+         "peak_rss_b": None, "peak_vmem_b": None, "rchar_b": None, "wchar_b": None},
+    ]
+    roll = {r["process"]: r for r in grr.rollup_by_process(rows)}
+    assert roll["A"]["n_failed"] == 0
+
+
+def test_build_html_exit_dash_excluded_from_failures():
+    grr = _load()
+    trace_rows = [
+        {"process": "A", "tag": "P1", "status": "ABORTED", "exit": "-",
+         "realtime_s": 1.0, "peak_rss_b": None, "peak_vmem_b": None,
+         "rchar_b": None, "wchar_b": None, "cpu_pct": None, "duration_s": None},
+    ]
+    html_out = grr.build_html(trace_rows, {}, "ts")
+    assert "<tr><th>Failed/non-zero exit</th><td>0</td></tr>" in html_out
+    assert "No failed or non-zero-exit tasks." in html_out
+
+
 def test_cli_writes_report(tmp_path):
     trace = tmp_path / "trace.txt"
     trace.write_text(
@@ -163,3 +217,47 @@ def test_build_html_keeps_zero_byte_matched_input(tmp_path):
     assert "A" in section
     assert "P001" in section
     assert "<td></td></tr>" in section
+
+
+def test_build_html_escapes_html_special_process_and_tag():
+    """An HTML-special process/tag value (e.g. from an attacker-influenced
+    CSV/trace field) must be escaped, never injected raw into the report."""
+    grr = _load()
+    trace_rows = [
+        {"process": "A & B", "tag": "<b>P001</b>", "status": "COMPLETED",
+         "exit": "0", "realtime_s": 1.0, "peak_rss_b": 10.0, "peak_vmem_b": None,
+         "rchar_b": None, "wchar_b": None, "cpu_pct": None, "duration_s": None},
+    ]
+    html_out = grr.build_html(trace_rows, {}, "ts")
+    assert "<b>P001</b>" not in html_out
+    assert "&lt;b&gt;P001&lt;/b&gt;" in html_out
+    assert "A & B" not in html_out
+    assert "A &amp; B" in html_out
+
+
+def test_build_html_escapes_failing_task_status_and_exit():
+    grr = _load()
+    trace_rows = [
+        {"process": "A", "tag": "P1", "status": "<i>FAILED</i>", "exit": "1 & 2",
+         "realtime_s": 1.0, "peak_rss_b": None, "peak_vmem_b": None,
+         "rchar_b": None, "wchar_b": None, "cpu_pct": None, "duration_s": None},
+    ]
+    html_out = grr.build_html(trace_rows, {}, "ts")
+    assert "<i>FAILED</i>" not in html_out
+    assert "&lt;i&gt;FAILED&lt;/i&gt;" in html_out
+    assert "1 & 2" not in html_out
+    assert "1 &amp; 2" in html_out
+
+
+def test_build_html_cpu_max_pct_has_percent_suffix():
+    grr = _load()
+    trace_rows = [
+        {"process": "A", "tag": "P1", "status": "COMPLETED", "exit": "0",
+         "realtime_s": 1.0, "peak_rss_b": None, "peak_vmem_b": None,
+         "rchar_b": None, "wchar_b": None, "cpu_pct": 87.5, "duration_s": None},
+    ]
+    html_out = grr.build_html(trace_rows, {}, "ts")
+    section_marker = "<h2>Per-Process Resource Rollup</h2>"
+    section = html_out[html_out.index(section_marker):]
+    section = section[:section.index("</section>")]
+    assert "87.5%" in section

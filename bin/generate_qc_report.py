@@ -8,11 +8,12 @@ All images are embedded as base64; no external dependencies required.
 import argparse
 import base64
 import csv
+import html
 import json
 import logging
 import shutil
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent / "utils"))
@@ -110,27 +111,13 @@ def img_to_b64(path):
     return f"data:{mime};base64,{data}"
 
 
-def parse_valis_summary(csv_path):
+def parse_csv_table(csv_path):
     """
-    Parse a preprocessed_summary.csv (or similar) produced by Valis.
-    Returns (headers, rows) where each row is a list of strings.
-    Shows all columns present in the CSV (including rTRE, D, n_matches, etc.).
-    """
-    with open(csv_path, newline="") as fh:
-        reader = csv.DictReader(fh)
-        display_headers = reader.fieldnames or []
-        rows = []
-        for row in reader:
-            rows.append([row.get(h, "") for h in display_headers])
-    return display_headers, rows
-
-
-def parse_seg_eval_csv(csv_path):
-    """
-    Parse a segmentation_metrics.csv produced by MERGE_SEG_EVAL (CSE).
-    Columns are dynamic: always `id`, `QualityScore`, plus zero or more
-    `metric::submetric` columns. Returns (headers, rows) like
-    parse_valis_summary.
+    Parse a generic CSV into (headers, rows) where each row is a list of
+    strings in header order. Used for both the Valis preprocessed_summary.csv
+    (rTRE, D, n_matches, etc.) and the CSE segmentation_metrics.csv (id,
+    QualityScore, plus zero or more dynamic `metric::submetric` columns) —
+    the two were byte-identical parsers, so they share this implementation.
     """
     with open(csv_path, newline="") as fh:
         reader = csv.DictReader(fh)
@@ -215,9 +202,13 @@ def versions_section(versions_path):
     tbl = "<table><thead><tr><th>Process</th><th>Tool</th><th>Version</th></tr></thead><tbody>"
     for proc in sorted(versions):
         tools = versions[proc]
+        proc_esc = html.escape(str(proc))
         for i, tool in enumerate(sorted(tools)):
-            proc_cell = f"<td rowspan='{len(tools)}'>{proc}</td>" if i == 0 else ""
-            tbl += f"<tr>{proc_cell}<td>{tool}</td><td>{tools[tool]}</td></tr>"
+            proc_cell = f"<td rowspan='{len(tools)}'>{proc_esc}</td>" if i == 0 else ""
+            tbl += (
+                f"<tr>{proc_cell}<td>{html.escape(str(tool))}</td>"
+                f"<td>{html.escape(str(tools[tool]))}</td></tr>"
+            )
     tbl += "</tbody></table>"
     return section("Software Versions", tbl)
 
@@ -237,7 +228,8 @@ def parse_run_summary_json(path):
 def _kv_table(pairs):
     """Render a list of (label, value) tuples as a two-column table."""
     rows = "".join(
-        f"<tr><th style='width:240px'>{k}</th><td>{'' if v is None else v}</td></tr>"
+        f"<tr><th style='width:240px'>{html.escape(str(k))}</th>"
+        f"<td>{'' if v is None else html.escape(str(v))}</td></tr>"
         for k, v in pairs
     )
     return f"<table><tbody>{rows}</tbody></table>"
@@ -270,7 +262,7 @@ def status_strip_section(present):
         badges.append(
             f"<span style='display:inline-block;margin:4px 8px 4px 0;padding:6px 12px;"
             f"border-radius:14px;background:{color};color:#fff;font-size:0.85rem;'>"
-            f"{stage}: {label}</span>"
+            f"{html.escape(str(stage))}: {label}</span>"
         )
     return section("Pipeline Stages", "<div>" + "".join(badges) + "</div>")
 
@@ -292,8 +284,11 @@ def manifest_section(summary):
            "</tr></thead><tbody>")
     for pid in sorted(patients):
         row = patients[pid]
-        tbl += (f"<tr><td>{pid}</td><td>{row.get('images', '')}</td>"
-                f"<td>{row.get('channels', '')}</td></tr>")
+        tbl += (
+            f"<tr><td>{html.escape(str(pid))}</td>"
+            f"<td>{html.escape(str(row.get('images', '')))}</td>"
+            f"<td>{html.escape(str(row.get('channels', '')))}</td></tr>"
+        )
     tbl += "</tbody></table>"
     return section("Sample Manifest", head + tbl)
 
@@ -402,6 +397,24 @@ def section(title, body_html):
     )
 
 
+def _html_table(headers, rows):
+    """
+    Build a complete ``<table>`` (with ``<thead>``/``<tbody>``), escaping
+    every header and every cell value via ``html.escape``.
+
+    Centralizes the table-render logic that used to be duplicated across the
+    registration-QC Valis rTRE table, the CSE seg-eval table, and the
+    feature-distance table, and ensures none of them can inject raw
+    CSV/JSON-derived HTML into the report.
+    """
+    thead = "".join(f"<th>{html.escape(str(h))}</th>" for h in headers)
+    body = "".join(
+        "<tr>" + "".join(f"<td>{html.escape(str(v))}</td>" for v in row) + "</tr>"
+        for row in rows
+    )
+    return f"<table><thead><tr>{thead}</tr></thead><tbody>{body}</tbody></table>"
+
+
 def img_grid(png_files, wide=False):
     """Render a list of PNG files as a grid of base64-embedded image cards."""
     if not png_files:
@@ -410,7 +423,7 @@ def img_grid(png_files, wide=False):
     cards = []
     for p in png_files:
         b64 = img_to_b64(p)
-        name = Path(p).name
+        name = html.escape(Path(p).name)
         cards.append(
             f'<div class="img-card">'
             f'<img src="{b64}" alt="{name}" loading="lazy">'
@@ -445,24 +458,18 @@ def registration_qc_section(reg_dir, feat_dir, valis_dir, dist_plots_dir=None, s
         )
         for csv_path in valis_csvs:
             try:
-                headers, rows = parse_valis_summary(csv_path)
+                headers, rows = parse_csv_table(csv_path)
             except Exception as exc:
                 parts.append(
-                    f'<p class="empty-notice">Could not parse {Path(csv_path).name}: {exc}</p>'
+                    '<p class="empty-notice">Could not parse '
+                    f"{html.escape(Path(csv_path).name)}: {html.escape(str(exc))}</p>"
                 )
                 continue
             parts.append(
-                f"<p style='font-size:0.85rem;color:#666;margin-bottom:6px;'>{Path(csv_path).name}</p>"
+                "<p style='font-size:0.85rem;color:#666;margin-bottom:6px;'>"
+                f"{html.escape(Path(csv_path).name)}</p>"
             )
-            tbl = (
-                "<table><thead><tr>"
-                + "".join(f"<th>{h}</th>" for h in headers)
-                + "</tr></thead><tbody>"
-            )
-            for row in rows:
-                tbl += "<tr>" + "".join(f"<td>{v}</td>" for v in row) + "</tr>"
-            tbl += "</tbody></table>"
-            parts.append(tbl)
+            parts.append(_html_table(headers, rows))
     else:
         parts.append(
             '<p class="empty-notice" style="margin-top:12px;">No Valis summary CSVs found.</p>'
@@ -474,16 +481,13 @@ def registration_qc_section(reg_dir, feat_dir, valis_dir, dist_plots_dir=None, s
         parts.append(
             "<h3 style='margin:20px 0 8px;font-size:1rem;color:#444;'>Feature Distances</h3>"
         )
-        tbl = (
-            "<table><thead><tr>"
-            "<th>File</th><th>Before Mean</th><th>After Mean</th><th>Improvement (%)</th>"
-            "</tr></thead><tbody>"
-        )
+        feat_headers = ["File", "Before Mean", "After Mean", "Improvement (%)"]
+        feat_rows = []
         for jp in feat_jsons:
             try:
                 info = parse_feature_dist_json(jp)
             except Exception as exc:
-                tbl += f"<tr><td>{Path(jp).name}</td><td colspan='3'>Parse error: {exc}</td></tr>"
+                feat_rows.append([Path(jp).name, f"Parse error: {exc}", "", ""])
                 continue
             bm = (
                 f"{info['before_mean']:.4f}"
@@ -498,9 +502,8 @@ def registration_qc_section(reg_dir, feat_dir, valis_dir, dist_plots_dir=None, s
                 if info["improvement_pct"] is not None
                 else "N/A"
             )
-            tbl += f"<tr><td>{info['file']}</td><td>{bm}</td><td>{am}</td><td>{imp}</td></tr>"
-        tbl += "</tbody></table>"
-        parts.append(tbl)
+            feat_rows.append([info["file"], bm, am, imp])
+        parts.append(_html_table(feat_headers, feat_rows))
     else:
         parts.append(
             '<p class="empty-notice" style="margin-top:12px;">No feature-distance JSONs found.</p>'
@@ -562,18 +565,18 @@ def _seg_qc_table(json_path):
     warp-seg QC table is built in exactly one place.
     """
     parts = [
-        f"<p style='font-size:0.85rem;color:#666;margin:8px 0 4px;'>{Path(json_path).name}</p>"
+        "<p style='font-size:0.85rem;color:#666;margin:8px 0 4px;'>"
+        f"{html.escape(Path(json_path).name)}</p>"
     ]
     try:
         rows = parse_seg_qc_json(json_path)
     except Exception as exc:  # noqa: BLE001 - report, never crash
-        parts.append(f'<p class="empty-notice">Could not parse {Path(json_path).name}: {exc}</p>')
+        parts.append(
+            '<p class="empty-notice">Could not parse '
+            f"{html.escape(Path(json_path).name)}: {html.escape(str(exc))}</p>"
+        )
         return "\n".join(parts)
-    tbl = "<table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>"
-    for k, v in rows:
-        tbl += f"<tr><td>{k}</td><td>{v}</td></tr>"
-    tbl += "</tbody></table>"
-    parts.append(tbl)
+    parts.append(_html_table(["Metric", "Value"], rows))
     return "\n".join(parts)
 
 
@@ -623,25 +626,19 @@ def seg_eval_section(seg_eval_dir, expected_patients=None):
         expected_set = set(expected_patients) if expected_patients else None
         for csv_path in csv_files:
             try:
-                headers, rows = parse_seg_eval_csv(csv_path)
+                headers, rows = parse_csv_table(csv_path)
             except Exception as exc:
                 parts.append(
-                    f'<p class="empty-notice">Could not parse {Path(csv_path).name}: {exc}</p>'
+                    '<p class="empty-notice">Could not parse '
+                    f"{html.escape(Path(csv_path).name)}: {html.escape(str(exc))}</p>"
                 )
                 continue
             parts.append(
-                f"<p style='font-size:0.85rem;color:#666;margin-bottom:6px;'>{Path(csv_path).name}</p>"
+                "<p style='font-size:0.85rem;color:#666;margin-bottom:6px;'>"
+                f"{html.escape(Path(csv_path).name)}</p>"
             )
             parts.append(_seg_eval_reconciliation_html(headers, rows, expected_set))
-            tbl = (
-                "<table><thead><tr>"
-                + "".join(f"<th>{h}</th>" for h in headers)
-                + "</tr></thead><tbody>"
-            )
-            for row in rows:
-                tbl += "<tr>" + "".join(f"<td>{v}</td>" for v in row) + "</tr>"
-            tbl += "</tbody></table>"
-            parts.append(tbl)
+            parts.append(_html_table(headers, rows))
     return section("Segmentation Quality (CSE)", "\n".join(parts))
 
 
@@ -651,7 +648,7 @@ def _seg_eval_reconciliation_html(headers, rows, expected_set):
 
     `expected_set`: patient IDs known from the run manifest, or None if that
     signal isn't available to the caller. `headers`/`rows` come from
-    parse_seg_eval_csv. Missing patients (present in expected_set but absent
+    parse_csv_table. Missing patients (present in expected_set but absent
     from the `id` column) are named explicitly since they were most likely
     dropped silently by the QC `errorStrategy='ignore'` gate around
     SEG_QUALITY_EVAL, not because they were never run.
@@ -675,11 +672,12 @@ def _seg_eval_reconciliation_html(headers, rows, expected_set):
     n_expected = len(expected_set)
     missing = sorted(expected_set - present_ids)
     if missing:
+        missing_escaped = ", ".join(html.escape(str(pid)) for pid in missing)
         return (
             f"<p style='font-size:0.85rem;color:#c0392b;font-weight:600;'>"
             f"{n_present}/{n_expected} expected patients present — "
             f"MISSING (likely dropped by QC errorStrategy='ignore'): "
-            f"{', '.join(missing)}</p>"
+            f"{missing_escaped}</p>"
         )
     return (
         f"<p style='font-size:0.85rem;color:#666;'>"
@@ -730,7 +728,7 @@ def main():
     """CLI entry point: assemble the per-step QC outputs into a single HTML report."""
     configure_logging(level=logging.INFO)
     args = parse_args()
-    timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
     summary = parse_run_summary_json(args.run_summary)
     present = {

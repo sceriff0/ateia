@@ -192,6 +192,50 @@ def test_seg_eval_section_reconciliation_all_present(tmp_path):
     assert "MISSING" not in html
 
 
+def test_seg_eval_section_escapes_html_special_patient_id(tmp_path):
+    """A patient/id value containing HTML-special characters (from the
+    CSV or run manifest) must be escaped, never injected raw — both in the
+    metrics table and in the reconciliation "MISSING" line."""
+    gqr = _load()
+    d = tmp_path / "seg_eval"
+    d.mkdir()
+    _write_seg_eval_csv(
+        d / "segmentation_metrics.csv",
+        [{"id": "<b>P001</b>", "QualityScore": "0.8", "downsample_factor": "1",
+          "effective_pixel_size_um": "0.65"}],
+    )
+    html = gqr.seg_eval_section(str(d), expected_patients={"<b>P001</b>", "A & B"})
+    assert "<b>P001</b>" not in html
+    assert "&lt;b&gt;P001&lt;/b&gt;" in html
+    assert "A & B" not in html
+    assert "A &amp; B" in html
+    assert "MISSING" in html
+
+
+def test_html_table_escapes_headers_and_cells():
+    gqr = _load()
+    out = gqr._html_table(["<script>h</script>"], [["A & B"], ["<i>x</i>"]])
+    assert "<script>h</script>" not in out
+    assert "&lt;script&gt;h&lt;/script&gt;" in out
+    assert "A & B" not in out
+    assert "A &amp; B" in out
+    assert "<i>x</i>" not in out
+    assert "&lt;i&gt;x&lt;/i&gt;" in out
+
+
+def test_manifest_section_escapes_html_special_patient_id(tmp_path):
+    gqr = _load()
+    summary = {
+        "manifest": {
+            "totals": {"patients": 1, "images": 1, "channels": 1},
+            "patients": {"<b>P001</b>": {"images": 1, "channels": 1}},
+        }
+    }
+    html = gqr.manifest_section(summary)
+    assert "<b>P001</b>" not in html
+    assert "&lt;b&gt;P001&lt;/b&gt;" in html
+
+
 def test_seg_eval_section_no_expected_source_still_shows_present_count(tmp_path):
     gqr = _load()
     d = tmp_path / "seg_eval"
