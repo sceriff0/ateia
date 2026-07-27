@@ -389,6 +389,16 @@
                     "description": "With quantify_compartments, also compute Median and Sum (integrated density) per compartment in addition to Mean. Requires quantify_compartments.",
                     "default": false
                 },
+                "simplify_tolerance": {
+                    "type": "number",
+                    "description": "Douglas-Peucker simplification tolerance (px) applied to exported GeoJSON cell/nucleus polygons. The exported polygon is display-only (quantification is mask-derived), so simplifying it does not affect analysis.",
+                    "default": 1.0
+                },
+                "geojson_coord_precision": {
+                    "type": "integer",
+                    "description": "Decimal places retained for GeoJSON polygon coordinates on export.",
+                    "default": 2
+                },
                 "skip_postprocessing_qc": {
                     "type": "boolean",
                     "description": "Skip postprocessing quality control (segmentation overlay, cell stats, intensity distributions).",
