@@ -83,3 +83,64 @@ run_stardist.sh
 *~
 .~lock.*
 csv/
+
+# Scratch/deliverable staging dirs (ad-hoc, not user-facing)
+.tmp_*/
+
+# Superpowers skill docs mirrored locally (not part of this repo's docs)
+docs/superpowers/
+
+# Generated test fixtures: tests/testdata/generate_complete_testdata.py
+# (re)writes these every run (CI regenerates before every test job — see
+# .github/workflows/ci.yml). Untracked so they don't show perpetual `M` churn
+# from embedded absolute paths / TIFF timestamps / RNG-seeded content that
+# differs by machine. Hand-authored fixtures the generator does NOT write
+# (P001_image.tiff, P001_merged_quant.csv, P001_nuclei_mask.tif,
+# P001_pyramid.ome.tiff, sample_feature_distances.json, sample_size_log*.csv,
+# sample_valis_summary.csv, sample_versions.yml, seg_eval_P00*.json) stay
+# tracked and are NOT listed here.
+tests/testdata/P001_ref.ome.tiff
+tests/testdata/P001_mov1.ome.tiff
+tests/testdata/P001_mov2.ome.tiff
+tests/testdata/P002_ref.ome.tiff
+tests/testdata/P001_cell_mask.npy
+tests/testdata/P001_cell_mask.tif
+tests/testdata/P002_cell_mask.npy
+tests/testdata/P002_cell_mask.tif
+tests/testdata/valid_preprocessing.csv
+tests/testdata/valid_checkpoint_registration.csv
+tests/testdata/valid_checkpoint_postprocessing.csv
+tests/testdata/invalid_multi_ref.csv
+tests/testdata/invalid_no_ref.csv
+tests/testdata/invalid_dapi_position.csv
+tests/testdata/invalid_no_dapi.csv
+tests/testdata/invalid_checkpoint_missing_col.csv
+tests/testdata/invalid_checkpoint_bad_ref.csv
+tests/testdata/invalid_file_not_found.csv
+tests/testdata/test_input.csv
+tests/testdata/sample_merged_quant.csv
+tests/testdata/empty_samplesheet.csv
+tests/testdata/single_sample.csv
+tests/testdata/sample_DAPI_intensity.csv
+tests/testdata/sample_PANCK_intensity.csv
+tests/testdata/sample_SMA_intensity.csv
+tests/testdata/sample_max_dims.txt
+tests/testdata/sample_dims.txt
+tests/testdata/sample_features.json
+tests/testdata/sample_phenotype_mapping.json
+tests/testdata/sample_phenotypes.geojson
+tests/testdata/sample_feature_metrics.json
+tests/testdata/sample_channels.txt
+tests/testdata/sample_contours.json
+tests/testdata/sample_morphology.csv
+tests/testdata/sample_DAPI.tif
+tests/testdata/sample_PANCK.tif
+tests/testdata/sample_SMA.tif
+tests/testdata/expected/channels_3ch.txt
+tests/testdata/expected/dims_128x128.txt
+tests/testdata/expected/max_dims_128.txt
+tests/testdata/expected/merged_quant_columns.txt
+tests/testdata/expected/morphology_columns.txt
+tests/testdata/expected/intensity_csv_columns.txt
+tests/testdata/expected/preproc_checkpoint_columns.txt
+tests/testdata/expected/reg_checkpoint_columns.txt
