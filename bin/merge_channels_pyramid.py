@@ -22,17 +22,11 @@ sys.path.insert(0, str(Path(__file__).parent / "utils"))
 from logger import configure_logging, get_logger
 
 try:
-    from validation import detect_wrapped_values, log_image_stats, validate_image_range
+    from validation import detect_wrapped_values
 except ImportError:
     # Fallback if validation module not available
-    def log_image_stats(data, stage, logger=None):
-        pass
-
     def detect_wrapped_values(data, **kwargs):
         return False, 0, 0.0
-
-    def validate_image_range(data, stage, **kwargs):
-        return True, data
 
 
 try:
@@ -107,14 +101,12 @@ def rgb_to_ome_color(r: int, g: int, b: int, a: int = 255) -> int:
 
 def generate_channel_color(name: str, index: int) -> Tuple[int, int, int]:
     """Generate a color for a channel based on name or index."""
-    # Check predefined colors first
+    # Check predefined colors first (exact match, case-insensitive) — avoids
+    # substring collisions like "CD4" matching "CD45", or "CD1" matching "CD14".
     name_upper = name.upper()
-    for key in MARKER_COLORS:
-        if key.upper() in name_upper or name_upper in key.upper():
-            return MARKER_COLORS[key]
-
-    if name in MARKER_COLORS:
-        return MARKER_COLORS[name]
+    for key, rgb in MARKER_COLORS.items():
+        if key.upper() == name_upper:
+            return rgb
 
     # Generate color using golden ratio
     h = (index * 0.618033988749895) % 1.0
@@ -223,6 +215,10 @@ def downsample_image(image: np.ndarray, factor: int) -> np.ndarray:
             else:
                 result[i] = np.round(reshaped.mean(axis=(1, 3))).astype(image.dtype)
         return result
+    else:
+        raise ValueError(
+            f"downsample_image only supports 2D or 3D (CYX) images, got ndim={image.ndim}"
+        )
 
 
 def calculate_pyramid_levels(
@@ -672,7 +668,7 @@ def merge_channels(
             channel_data = channel_data.squeeze()
 
         # Checkpoint 4: Validate channel data for negative/wrapped values
-        ch_min, ch_max = channel_data.min(), channel_data.max()
+        ch_min = channel_data.min()
         if ch_min < 0:
             log(
                 f"    WARNING: Negative values detected in {channel_file.stem}: min={ch_min}"
