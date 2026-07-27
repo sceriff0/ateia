@@ -39,7 +39,7 @@ class TestCombinedGeoJsonExport:
         nucleus = {"1": [[8, 8], [12, 8], [12, 12], [8, 12], [8, 8]]}
         return cell, nucleus
 
-    def test_single_file_and_count(self, tmp_path):
+    def test_dual_files_and_count(self, tmp_path):
         from export_geojson import export_combined_geojson
 
         df = self._df()
@@ -54,11 +54,24 @@ class TestCombinedGeoJsonExport:
             nuc_c,
             prefix="cells",
         )
-        assert counts == {"cells": 2}
+        # Compartment path writes BOTH the cell+nucleus file and a whole-cell-only
+        # companion (same cells/measurements, no nucleusGeometry).
+        assert counts == {"cells": 2, "cells_wholecell": 2}
         assert (tmp_path / "cells.geojson").exists()
-        # The redundant per-compartment files must NOT be written.
+        assert (tmp_path / "cells_wholecell.geojson").exists()
+        # The separate legacy per-compartment file must still NOT be written.
         assert not (tmp_path / "nuclei.geojson").exists()
-        assert not (tmp_path / "cells_wholecell.geojson").exists()
+
+        # The companion carries the same cells and measurements but drops every
+        # nucleusGeometry, while cells.geojson keeps it.
+        combined = json.loads((tmp_path / "cells.geojson").read_text())
+        wholecell = json.loads((tmp_path / "cells_wholecell.geojson").read_text())
+        assert len(wholecell["features"]) == len(combined["features"]) == 2
+        assert any("nucleusGeometry" in f for f in combined["features"])
+        assert all("nucleusGeometry" not in f for f in wholecell["features"])
+        # Measurements preserved in the companion (compartment gating still works).
+        wc_names = [m["name"] for m in wholecell["features"][0]["properties"]["measurements"]]
+        assert "CD3: Cell: Mean" in wc_names
 
     def test_combined_cell_object_has_toplevel_nucleusgeometry(self, tmp_path):
         from export_geojson import export_combined_geojson

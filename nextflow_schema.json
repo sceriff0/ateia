@@ -164,7 +164,7 @@
                 "reg_qc": {
                     "type": "integer",
                     "description": "Registration QC depth: 0=none, 1=DAPI overlay only, 2=DAPI overlay + segmentation-overlap metric (Dice/IoU/instance-F1).",
-                    "default": 1,
+                    "default": 2,
                     "enum": [ 0, 1, 2 ]
                 },
                 "qc_scale_factor": {
@@ -220,7 +220,7 @@
                 "memory_mode": {
                     "type": "string",
                     "description": "Memory mode for registration.",
-                    "default": "medium",
+                    "default": "high",
                     "enum": [
                         "low",
                         "medium",
@@ -403,6 +403,11 @@
                     "type": "number",
                     "description": "Pixel size in micrometers passed to the CellSegmentationEvaluator. null = infer from image metadata.",
                     "default": null
+                },
+                "cse_max_pixels": {
+                    "type": "integer",
+                    "description": "Bin image+masks so CSE scores at most this many pixels, capping its memory/time on full-WSI masks (the pixel size is scaled to match, preserving geometry/area metrics). null = score at full resolution. Keep fixed across a cohort: the composite QualityScore shifts with the binning factor.",
+                    "default": 50000000
                 },
                 "segeval_tag": {
                     "type": "string",

@@ -123,39 +123,51 @@ def _safe_mean(sums: NDArray, counts: NDArray) -> NDArray:
 
 def compute_compartment_intensities(
     cell_mask: NDArray,
-    nuclei_mask: NDArray,
+    nuclei_mask: Optional[NDArray],
     channel: NDArray,
     channel_name: str,
     expanded: bool = False,
 ) -> pd.DataFrame:
-    """Compute per-compartment signal (Nucleus / Cytoplasm / Cell) for one channel.
+    """Compute per-cell signal for one channel — Median-first.
 
-    The nuclear signal of cell ``C`` is measured over the pixels that belong to
-    cell ``C`` **and** to any nucleus, i.e. ``(cell_mask == C) & (nuclei_mask > 0)``.
-    This keys nuclear statistics by the *cell* label directly, so no nucleus->cell
-    label pairing is required and the two masks need not share label IDs. Cytoplasm
-    is derived as ``Cell - Nucleus`` by subtraction (guaranteed non-negative because
-    the measured nuclear region is a subset of the cell). Works for any backend that
-    exposes both masks (StarDist, CellSAM, InstanSeg, ...).
+    The default per-channel statistic is **Median** and is ALWAYS emitted. With
+    ``expanded=True`` it additionally emits **Mean** and **Sum** (integrated
+    density). This statistic policy is independent of compartments:
+
+    - ``nuclei_mask is None``  -> only the whole-cell ``Cell`` compartment.
+    - ``nuclei_mask`` supplied  -> additionally ``Nucleus`` and ``Cytoplasm``.
+
+    When a nuclear mask is supplied, the nuclear signal of cell ``C`` is measured
+    over the pixels that belong to cell ``C`` **and** to any nucleus, i.e.
+    ``(cell_mask == C) & (nuclei_mask > 0)`` — keyed by the *cell* label, so no
+    nucleus->cell pairing is required and the masks need not share label IDs.
+    Cytoplasm = ``Cell - Nucleus`` by subtraction (non-negative; the nuclear region
+    is a subset of the cell). Works for any backend exposing both masks.
 
     Output columns are the *final QuPath measurement keys*, so they flow unchanged
     through merge_quant_csvs -> export_geojson -> GeoJSON:
 
     - ``label``
-    - ``<channel>``  (== whole-cell mean, kept for backward compatibility)
-    - ``<channel>: Nucleus: Mean`` / ``: Cytoplasm: Mean`` / ``: Cell: Mean``
-    - with ``expanded=True``, additionally ``: <Compartment>: Median`` and ``: Sum``.
+    - ``<channel>``  (== whole-cell **mean**, kept for backward compatibility and as
+      FlowPath's bare-key fallback — that fast path is hard-wired to whole-cell mean)
+    - ``<channel>: <Compartment>: Median``  (default statistic, always)
+    - with ``expanded=True``, additionally ``: <Compartment>: Mean`` and ``: Sum``
+
+    where ``<Compartment>`` is ``Cell`` (always) plus ``Nucleus``/``Cytoplasm`` when
+    a nuclear mask is supplied.
 
     Parameters
     ----------
-    cell_mask, nuclei_mask : ndarray, shape (Y, X)
-        Whole-cell and nuclear instance masks (background = 0).
+    cell_mask : ndarray, shape (Y, X)
+        Whole-cell instance mask (background = 0).
+    nuclei_mask : ndarray or None, shape (Y, X)
+        Nuclear instance mask. When None, only the whole-cell compartment is emitted.
     channel : ndarray, shape (Y, X)
         Single-channel intensity image.
     channel_name : str
         Marker name used to build measurement keys.
     expanded : bool
-        If True, also emit Median and Sum (integrated density) per compartment.
+        If True, also emit Mean and Sum (integrated density) per compartment.
 
     Returns
     -------
@@ -163,13 +175,14 @@ def compute_compartment_intensities(
         One row per (whole-cell) label. Empty DataFrame if no cells.
     """
     cell_mask = np.ascontiguousarray(cell_mask.squeeze())
-    nuclei_mask = np.ascontiguousarray(nuclei_mask.squeeze())
     channel = channel.squeeze()
-
-    if cell_mask.shape != nuclei_mask.shape:
-        raise ValueError(
-            f"cell/nuclei mask shape mismatch: {cell_mask.shape} vs {nuclei_mask.shape}"
-        )
+    has_nuclei = nuclei_mask is not None
+    if has_nuclei:
+        nuclei_mask = np.ascontiguousarray(nuclei_mask.squeeze())
+        if cell_mask.shape != nuclei_mask.shape:
+            raise ValueError(
+                f"cell/nuclei mask shape mismatch: {cell_mask.shape} vs {nuclei_mask.shape}"
+            )
     if cell_mask.shape != channel.shape:
         raise ValueError(
             f"mask/channel shape mismatch: {cell_mask.shape} vs {channel.shape}"
@@ -184,53 +197,59 @@ def compute_compartment_intensities(
     n = int(cell_mask.max()) + 1
     flat_cell = cell_mask.ravel()
     flat_val = channel.ravel().astype(np.float64)
-    nuc_fg = nuclei_mask.ravel() > 0
 
     # Whole-cell sums/counts keyed by cell label.
     cell_sum = np.bincount(flat_cell, weights=flat_val, minlength=n)
     cell_count = np.bincount(flat_cell, minlength=n)
+    sums = {"Cell": cell_sum}
+    counts = {"Cell": cell_count}
 
-    # Nuclear region (cell ∩ nucleus) keyed by *cell* label — label-pairing free.
-    nuc_cell_labels = np.where(nuc_fg, flat_cell, 0)
-    nuc_sum = np.bincount(nuc_cell_labels, weights=flat_val, minlength=n)
-    nuc_count = np.bincount(nuc_cell_labels, minlength=n)
+    nuc_fg = None
+    if has_nuclei:
+        # Nuclear region (cell ∩ nucleus) keyed by *cell* label — label-pairing free.
+        nuc_fg = nuclei_mask.ravel() > 0
+        nuc_cell_labels = np.where(nuc_fg, flat_cell, 0)
+        nuc_sum = np.bincount(nuc_cell_labels, weights=flat_val, minlength=n)
+        nuc_count = np.bincount(nuc_cell_labels, minlength=n)
+        sums["Nucleus"] = nuc_sum
+        counts["Nucleus"] = nuc_count
+        # Cytoplasm = whole-cell minus nuclear region (per cell, by subtraction).
+        sums["Cytoplasm"] = cell_sum - nuc_sum
+        counts["Cytoplasm"] = cell_count - nuc_count
 
-    # Cytoplasm = whole-cell minus nuclear region (per cell, by subtraction).
-    cyto_sum = cell_sum - nuc_sum
-    cyto_count = cell_count - nuc_count
-
-    sums = {"Nucleus": nuc_sum, "Cytoplasm": cyto_sum, "Cell": cell_sum}
-    counts = {"Nucleus": nuc_count, "Cytoplasm": cyto_count, "Cell": cell_count}
+    # Canonical order, restricted to the compartments actually computed.
+    compartments = [c for c in COMPARTMENT_NAMES if c in sums]
 
     out: dict = {"label": valid_labels}
-    # Backward-compatible bare marker column (== whole-cell mean).
+    # Backward-compatible bare marker column (== whole-cell mean). FlowPath's
+    # bare-key fast path is hard-wired to (WHOLE_CELL, Mean), so this stays mean;
+    # the Median default reaches FlowPath via the structured "<marker>: Cell: Median"
+    # key below plus FlowPath defaulting its statistic selector to Median.
     out[channel_name] = _safe_mean(cell_sum, cell_count)[valid_labels]
-    for comp in COMPARTMENT_NAMES:
-        out[f"{channel_name}: {comp}: Mean"] = _safe_mean(sums[comp], counts[comp])[
-            valid_labels
-        ]
+
+    # Default statistic: MEDIAN (always). Needs a per-pixel gather (bincount cannot
+    # compute medians); restrict to foreground cell pixels.
+    fg = flat_cell != 0
+    px = {"label": flat_cell[fg], "val": flat_val[fg]}
+    if has_nuclei:
+        px["nuc"] = nuc_fg[fg]
+    df_px = pd.DataFrame(px)
+    medians = {"Cell": df_px.groupby("label")["val"].median()}
+    if has_nuclei:
+        medians["Nucleus"] = df_px[df_px["nuc"]].groupby("label")["val"].median()
+        medians["Cytoplasm"] = df_px[~df_px["nuc"]].groupby("label")["val"].median()
+    for comp in compartments:
+        out[f"{channel_name}: {comp}: Median"] = (
+            medians[comp].reindex(valid_labels).fillna(0.0).values
+        )
 
     if expanded:
-        # Sum (integrated density) is already computed above.
-        for comp in COMPARTMENT_NAMES:
+        for comp in compartments:
+            out[f"{channel_name}: {comp}: Mean"] = _safe_mean(
+                sums[comp], counts[comp]
+            )[valid_labels]
+        for comp in compartments:
             out[f"{channel_name}: {comp}: Sum"] = sums[comp][valid_labels]
-        # Median needs a per-pixel gather; restrict to foreground cell pixels only.
-        fg = flat_cell != 0
-        df_px = pd.DataFrame(
-            {
-                "label": flat_cell[fg],
-                "val": flat_val[fg],
-                "nuc": nuc_fg[fg],
-            }
-        )
-        medians = {
-            "Cell": df_px.groupby("label")["val"].median(),
-            "Nucleus": df_px[df_px["nuc"]].groupby("label")["val"].median(),
-            "Cytoplasm": df_px[~df_px["nuc"]].groupby("label")["val"].median(),
-        }
-        for comp in COMPARTMENT_NAMES:
-            series = medians[comp].reindex(valid_labels).fillna(0.0)
-            out[f"{channel_name}: {comp}: Median"] = series.values
 
     return pd.DataFrame(out)
 
@@ -246,9 +265,11 @@ def quantify_single_channel(
 
     Morphology is computed separately by EXTRACT_CELL_PROPERTIES.
 
-    When ``nuclei_mask`` is provided, per-compartment intensities (Nucleus /
-    Cytoplasm / Cell) are computed via :func:`compute_compartment_intensities`.
-    Otherwise the legacy whole-cell mean is computed.
+    Delegates to :func:`compute_compartment_intensities`, which is Median-first:
+    the default statistic (Median) is always computed, ``expanded`` adds Mean and
+    Sum, and ``nuclei_mask`` only controls whether the Nucleus/Cytoplasm compartments
+    are added alongside the whole-cell ``Cell`` compartment (so the statistic set is
+    the same with or without a nuclear mask).
 
     Parameters
     ----------
@@ -259,43 +280,20 @@ def quantify_single_channel(
     channel_name : str
         Name of the channel/marker.
     nuclei_mask : ndarray, optional
-        Nuclear segmentation mask. If given, enables per-compartment quantification.
+        Nuclear segmentation mask. If given, adds Nucleus/Cytoplasm compartments.
     expanded : bool
-        With ``nuclei_mask``, also emit Median and Sum per compartment.
+        Also emit Mean and Sum per compartment (Median is always emitted).
 
     Returns
     -------
     DataFrame
-        Intensity per cell. Columns: ``label`` plus either ``{channel_name}``
-        (legacy) or the per-compartment measurement keys.
+        Intensity per cell: ``label``, bare ``{channel_name}`` (whole-cell mean),
+        and the per-compartment measurement keys (Median always; Mean/Sum expanded).
     """
     mask = np.ascontiguousarray(mask.squeeze())
-
-    if nuclei_mask is not None:
-        return compute_compartment_intensities(
-            mask, nuclei_mask, channel_image, channel_name, expanded=expanded
-        )
-
-    labels = np.unique(mask)
-    valid_labels = labels[labels != 0]
-
-    if len(valid_labels) == 0:
-        logger.warning("[WARN] No cells found in mask")
-        return pd.DataFrame()
-
-    # Compute intensity for this channel (no morphology — that's done once upstream)
-    intensity_series = compute_channel_intensity(
-        mask, channel_image, valid_labels, channel_name
+    return compute_compartment_intensities(
+        mask, nuclei_mask, channel_image, channel_name, expanded=expanded
     )
-
-    result_df = pd.DataFrame(
-        {
-            "label": valid_labels,
-            channel_name: intensity_series.values,
-        }
-    )
-
-    return result_df
 
 
 def _load_mask(mask_path: str) -> NDArray:
@@ -409,7 +407,7 @@ def run_quantification(
             raise ValueError(
                 f"Failed to load nuclei mask from {nuclei_mask_path}: {e}"
             ) from e
-        mode = "expanded (Mean/Median/Sum)" if expanded else "standard (Mean)"
+        mode = "Median + Mean + Sum" if expanded else "Median only"
         logger.info(
             f"Per-compartment quantification enabled: Nucleus/Cytoplasm/Cell, {mode}"
         )
@@ -431,13 +429,15 @@ def run_quantification(
         logger.warning("[WARN] No results to save")
         # Empty CSV with the SAME columns a non-empty result would have, so the
         # downstream per-channel merge stays consistent when a channel's mask
-        # contains no cells (compartment mode would otherwise emit only 2 cols).
+        # contains no cells. Mirrors compute_compartment_intensities: bare column,
+        # Median per compartment (always), + Mean/Sum when expanded. Compartments =
+        # Cell only without a nuclear mask, else Nucleus/Cytoplasm/Cell.
+        comps = list(COMPARTMENT_NAMES) if nuclei_mask is not None else ["Cell"]
         cols = ["label", channel_name]
-        if nuclei_mask is not None:
-            cols += [f"{channel_name}: {c}: Mean" for c in COMPARTMENT_NAMES]
-            if expanded:
-                cols += [f"{channel_name}: {c}: Sum" for c in COMPARTMENT_NAMES]
-                cols += [f"{channel_name}: {c}: Median" for c in COMPARTMENT_NAMES]
+        cols += [f"{channel_name}: {c}: Median" for c in comps]
+        if expanded:
+            cols += [f"{channel_name}: {c}: Mean" for c in comps]
+            cols += [f"{channel_name}: {c}: Sum" for c in comps]
         empty_df = pd.DataFrame(columns=cols)
         empty_df.to_csv(output_path, index=False)
 
@@ -571,8 +571,8 @@ def parse_args():
     parser.add_argument(
         "--expanded",
         action="store_true",
-        help="With --nuclei_mask_file, also emit Median and Sum per compartment "
-        "(default: Mean only).",
+        help="Also emit Mean and Sum per compartment (Median is always emitted as "
+        "the default statistic).",
     )
     parser.add_argument("--outdir", type=str, default=".", help="Output directory")
     parser.add_argument(
