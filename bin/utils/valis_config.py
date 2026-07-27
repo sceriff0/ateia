@@ -87,8 +87,7 @@ def init_jvm(input_dir, override_gb=None):
     """Size and start the BioFormats JVM heap to the inputs, mirroring bin/register.py:333-335.
 
     Used by bin/warp_seg_qc.py, which constructs a real ``Valis`` and reads slides via BioFormats.
-    Heap formula is copied from register.py's estimate_jvm_memory (total*3+8, min 8, capped at
-    75% of system RAM)."""
+    Heap formula: total input size * 3 + 8, min 8, capped at 75% of system memory."""
     # Point scyjava's jgo/Maven cache off a read-only $HOME (HPC nodes) BEFORE the JVM starts.
     # scyjava<1.11 derives the cache path from Path.home() and ignores JGO_CACHE_DIR/M2_REPO, so
     # the Dockerfile ENV knobs are inert; this uses scyjava.config.set_cache_dir instead. Without

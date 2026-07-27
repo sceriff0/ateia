@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -43,9 +44,6 @@ def test_versions_section_missing_file_is_graceful(tmp_path):
     html = gqr.versions_section(tmp_path / "nope.yml")
     assert "Software Versions" in html
     assert "not available" in html.lower() or "no " in html.lower()
-
-
-import json
 
 
 def _summary(tmp_path):

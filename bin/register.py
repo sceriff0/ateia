@@ -50,8 +50,8 @@ logger = get_logger(__name__)
 
 __all__ = ["main"]
 
-from progress import PhaseReporter, ProgressTracker
-from retry import RetryContext, default_cleanup
+from progress import PhaseReporter, ProgressTracker  # noqa: E402
+from retry import RetryContext, default_cleanup  # noqa: E402
 
 # Environment configuration (must be before VALIS imports that use numba)
 os.environ["NUMBA_DISABLE_JIT"] = "0"
@@ -67,15 +67,15 @@ os.environ.setdefault("MPLCONFIGDIR", "/tmp/mplconfig")
 os.environ.setdefault("XDG_CACHE_HOME", "/tmp/xdg_cache")
 
 # VALIS library imports
-from valis import registration
-from valis import warp_tools as valis_warp_tools
+from valis import registration  # noqa: E402
+from valis import warp_tools as valis_warp_tools  # noqa: E402
 
 # AffineOptimizerMattesMI refinement is not used: it requires SimpleITK with Elastix bindings,
 # which is not available in this environment. Registration works via SuperPoint/SuperGlue feature
 # matching without the affine optimizer refinement.
 # Memory mode presets + registrar-kwargs builder, and the JVM-heap sizer, live in the shared
 # single-source-of-truth module so there is one heap formula. See bin/utils/valis_config.py.
-from valis_config import MEMORY_PRESETS, build_registrar_kwargs, init_jvm
+from valis_config import MEMORY_PRESETS, build_registrar_kwargs, init_jvm  # noqa: E402
 
 
 def validate_input_slides(input_dir: str) -> Tuple[List[str], List[str]]:

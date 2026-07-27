@@ -48,9 +48,9 @@ if BASICPY_VERSION != "unknown" and PYDANTIC_VERSION != "unknown":
     except Exception:
         pass
 
-from basicpy import BaSiC  # type: ignore
-from image_utils import ensure_dir
-from validation import detect_negative_values, log_image_stats
+from basicpy import BaSiC  # type: ignore  # noqa: E402
+from image_utils import ensure_dir  # noqa: E402
+from validation import detect_negative_values, log_image_stats  # noqa: E402
 
 logger = get_logger(__name__)
 
