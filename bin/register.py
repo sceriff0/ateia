@@ -269,7 +269,7 @@ def valis_registration(
     max_image_dim_px: int = 4000,
     skip_micro_registration: bool = False,
     image_type: str = "auto",
-    interp_method: str = "bilinear",
+    interp_method: str = "bicubic",
     jvm_heap_gb: Optional[int] = None,
     stage_checkpoint_dir: Optional[str] = None,
 ) -> int:
@@ -384,9 +384,12 @@ def valis_registration(
         except (FileNotFoundError, ValueError) as e:
             logger.error(f"[FAIL] {e}")
             logger.info("Falling back to first available image")
-            files = sorted(glob.glob(os.path.join(input_dir, "*.ome.tif")))
+            files = sorted(
+                set(glob.glob(os.path.join(input_dir, "*.ome.tif")))
+                | set(glob.glob(os.path.join(input_dir, "*.ome.tiff")))
+            )
             if not files:
-                raise FileNotFoundError(f"No .ome.tif files in {input_dir}")
+                raise FileNotFoundError(f"No .ome.tif or .ome.tiff files in {input_dir}")
             ref_image = os.path.basename(files[0])
 
     logger.info(f"Using reference image: {ref_image}")
@@ -890,7 +893,10 @@ def valis_registration(
                 )
                 warp_succeeded = True
                 warped_count += 1
-                # Note: Negative values from VALIS warping will be clipped by split_multichannel.py
+                # Note: interp_method defaults to "bicubic" (VALIS's own default for
+                # warp_and_save_slide/warp_slide/warp_img). Bicubic interpolation can
+                # produce small negative overshoot near sharp edges; these are clipped
+                # to 0 downstream by clip_negative_values() in split_multichannel.py.
                 retry_ctx.succeeded()
                 break
             except (MemoryError, OSError) as e:
