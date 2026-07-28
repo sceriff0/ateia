@@ -337,9 +337,16 @@ def run(
 
 
 def build_record(
-    result, patient_id, moving_name, reference_name, separable, note
+    result, patient_id, moving_name, reference_name, separable, note, micro_reg=None
 ) -> dict:
-    """Assemble the per-slide QC record (per-stage metrics + deltas vs. the anchor) as a dict."""
+    """Assemble the per-slide QC record (per-stage metrics + deltas vs. the anchor) as a dict.
+
+    ``micro_reg`` (0/1/2), when known, is recorded together with ``rigid_includes_micro_rigid``:
+    at level >= 1 the ``rigid`` stage is affine ∘ micro-rigid, because VALIS composes
+    MicroRigidRegistrar into ``slide.M`` and the two are not separable. Stating it keeps the
+    report honest instead of letting a reader assume ``rigid`` is a pure affine transform.
+    When it is None (e.g. an injected-warp unit run) the fields are omitted rather than guessed.
+    """
     rec = {
         "patient_id": patient_id,
         "moving": os.path.basename(str(moving_name)),
@@ -347,6 +354,9 @@ def build_record(
         "stages_separable": bool(separable),
         **result,
     }
+    if micro_reg is not None:
+        rec["micro_reg"] = int(micro_reg)
+        rec["rigid_includes_micro_rigid"] = int(micro_reg) >= 1
     if note:
         rec["note"] = note
     return rec
@@ -371,6 +381,7 @@ def write_report(
     stages=None,
     separable=True,
     note="",
+    micro_reg=None,
     **run_kwargs,
 ) -> dict:
     """Load the registrar (unless a warp is injected), score every stage, write the JSON."""
@@ -414,6 +425,7 @@ def write_report(
         reference_name or ref_slide,
         separable,
         note,
+        micro_reg=micro_reg,
     )
     with open(output, "w") as f:
         json.dump(record, f, indent=2)
@@ -509,6 +521,15 @@ def parse_args(argv=None):
         default=None,
         help="explicit BioFormats JVM heap (GB); default = auto-size from the pickle dir",
     )
+    ap.add_argument(
+        "--micro-reg",
+        type=int,
+        default=None,
+        choices=[0, 1, 2],
+        help="micro-registration depth of the run that produced this registrar (0/1/2). "
+        "Recorded in the report so it can state honestly that at >=1 the 'rigid' stage is "
+        "affine ∘ micro-rigid (VALIS composes them into slide.M and they are not separable).",
+    )
     return ap.parse_args(argv)
 
 
@@ -551,6 +572,7 @@ def main(argv=None):
             iou_thresh=a.iou_thresh,
             supersample=a.supersample,
             max_pair_window_px=a.max_pair_window_px,
+            micro_reg=a.micro_reg,
         )
     finally:
         registration.kill_jvm()

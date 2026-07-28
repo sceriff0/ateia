@@ -43,6 +43,9 @@ process WARP_SEG_QC {
     // stage_checkpoint is staged as a directory; absent when REGISTER did not emit one
     // (reg_qc < 2 on the registering run, or the snapshot failed and was logged as a warning).
     def ckpt_arg = stage_checkpoint ? "--checkpoint-dir ${stage_checkpoint}" : ''
+    // Tell the QC the run's micro depth so it can state honestly whether 'rigid' includes
+    // micro-rigid (level >= 1). Single-source via ParamUtils, same as REGISTER.
+    def micro_reg = ParamUtils.microRegLevel(params)
     """
     echo "${task.process},${meta.patient_id},${moving_geojson.name},0" > ${prefix}.WARP_SEG_QC.size.csv
 
@@ -56,6 +59,7 @@ process WARP_SEG_QC {
         --patient-id ${meta.patient_id} \\
         --moving-name '${moving_slide}' \\
         --reference-name '${ref_slide}' \\
+        --micro-reg ${micro_reg} \\
         ${ckpt_arg} \\
         ${args}
 
@@ -74,11 +78,14 @@ process WARP_SEG_QC {
     // a hand-written JSON literal in a heredoc is a quoting accident waiting to happen.
     def stage_stub = [n_pairs: 0, n_pairs_scored: 0, iou_n: 0, displacement_px_n: 0]
     def stages = ['native', 'rigid', 'non_rigid', 'micro']
+    def micro_reg = ParamUtils.microRegLevel(params)
     def stub_json = groovy.json.JsonOutput.toJson([
         patient_id      : meta.patient_id,
         moving          : moving_slide,
         reference       : ref_slide,
         stages_separable: true,
+        micro_reg       : micro_reg,
+        rigid_includes_micro_rigid: micro_reg >= 1,
         stage_order     : stages,
         stages          : stages.collectEntries { [(it): stage_stub] },
         delta_vs_anchor : (stages - 'rigid').collectEntries { [(it): [:]] },

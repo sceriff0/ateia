@@ -197,7 +197,7 @@ def valis_registration(
     memory_mode: str = "high",
     micro_reg_fraction: float = 0.125,
     max_image_dim_px: int = 4000,
-    skip_micro_registration: bool = False,
+    micro_reg: int = 0,
     interp_method: str = "bicubic",
     jvm_heap_gb: Optional[int] = None,
     stage_checkpoint_dir: Optional[str] = None,
@@ -221,8 +221,11 @@ def valis_registration(
         Fraction of image size for micro-registration. Default: 0.125
     max_image_dim_px : int, optional
         Maximum image dimension for caching (controls RAM usage). Default: 4000
-    skip_micro_registration : bool, optional
-        Skip the micro-rigid registration step. Default: False
+    micro_reg : int, optional
+        Micro-registration depth (nested ordinal). 0 = neither micro pass (default);
+        1 = micro-rigid only (``MicroRigidRegistrar`` refines ``slide.M`` inside
+        ``register()``); 2 = also the micro non-rigid pass (``register_micro()``). VALIS
+        controls the two independently, so this ordinal is the single knob that gates both.
     stage_checkpoint_dir : str, optional
         Where to snapshot each slide's forward displacement field after the non-rigid stage
         and before micro-registration. Consumed by WARP_SEG_QC (reg_qc=2) to report the
@@ -357,7 +360,7 @@ def valis_registration(
     registrar_kwargs = build_registrar_kwargs(
         reference_img_f=ref_image,
         memory_mode=memory_mode,
-        skip_micro_registration=skip_micro_registration,
+        micro_reg=micro_reg,
         max_image_dim_px=max_image_dim_px,
     )
 
@@ -572,7 +575,7 @@ def valis_registration(
             manifest = write_checkpoint(
                 registrar,
                 stage_checkpoint_dir,
-                micro_registration=not skip_micro_registration,
+                micro_registration=(micro_reg >= 2),
             )
             n_fields = sum(1 for e in manifest["slides"].values() if e.get("field"))
             logger.info(
@@ -588,12 +591,31 @@ def valis_registration(
             )
 
     # ========================================================================
-    # Micro-registration - Try with error handling
+    # (B) Persist the PRE-micro feature-TRE before register_micro() clobbers it
+    # ========================================================================
+    # register_micro() re-runs measure_error() and OVERWRITES {name}_summary.csv with post-micro
+    # numbers, and it composes the micro residual into bk_dxdy — so the rewritten non_rigid_D no
+    # longer isolates the non-rigid stage. Save the pre-micro error_df now, so the QC report can
+    # line VALIS's own non_rigid feature-TRE up against WARP_SEG_QC's non_rigid cell displacement.
+    # Only meaningful at level 2 (below it register_micro never runs, so the summary already IS
+    # the pre-micro one). Never fail a registration over a QC artifact.
+    if micro_reg >= 2 and error_df is not None:
+        try:
+            premicro_f = os.path.join(
+                registrar.data_dir, f"{registrar.name}_summary_premicro.csv"
+            )
+            error_df.to_csv(premicro_f, index=False)
+            logger.info(f"Wrote pre-micro registration summary to {premicro_f}")
+        except Exception as e:
+            logger.warning(f"[WARN] Could not write pre-micro summary: {e}")
+
+    # ========================================================================
+    # Micro-registration (non-rigid, register_micro) - level 2 only
     # ========================================================================
     micro_registration_ran = False
-    if skip_micro_registration:
+    if micro_reg < 2:
         logger.info(
-            "\nSkipping micro-registration (--skip-micro-registration flag set)"
+            f"\nSkipping micro non-rigid registration (micro_reg={micro_reg} < 2)"
         )
     else:
         reporter.enter_phase("micro")
@@ -707,7 +729,7 @@ def valis_registration(
             logger.error("we cannot warp the slides without JVM for BioFormats I/O.")
             logger.error("\nSuggested workarounds:")
             logger.error(
-                "  1. Try --skip-micro-registration flag (micro-reg may be killing JVM)"
+                "  1. Try --micro-reg 0 (micro passes may be killing JVM)"
             )
             logger.error("  2. Reduce --max-image-dim to lower memory usage")
             logger.error(
@@ -716,7 +738,7 @@ def valis_registration(
             logger.error("=" * 70)
             raise RuntimeError(
                 "JVM was killed during registration. Warping cannot proceed. "
-                "Try --skip-micro-registration or check for errors above."
+                "Try --micro-reg 0 or check for errors above."
             )
         logger.info("  JVM is running - proceeding with warping")
     except ImportError:
@@ -937,9 +959,12 @@ def parse_args() -> argparse.Namespace:
         help="Maximum image dimension for caching (controls RAM usage)",
     )
     parser.add_argument(
-        "--skip-micro-registration",
-        action="store_true",
-        help="Skip the micro-rigid registration step",
+        "--micro-reg",
+        type=int,
+        default=0,
+        choices=[0, 1, 2],
+        help="Micro-registration depth (nested): 0=none (default), 1=micro-rigid only "
+        "(refines slide.M), 2=+micro non-rigid (register_micro)",
     )
 
     # Advanced registration options
@@ -986,7 +1011,7 @@ def main() -> int:
             memory_mode=args.memory_mode,
             micro_reg_fraction=args.micro_reg_fraction,
             max_image_dim_px=args.max_image_dim,
-            skip_micro_registration=args.skip_micro_registration,
+            micro_reg=args.micro_reg,
             # Advanced options
             interp_method=args.interp_method,
             jvm_heap_gb=args.jvm_heap_gb,

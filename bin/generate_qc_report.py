@@ -593,6 +593,154 @@ def _seg_qc_table(json_path):
     return "\n".join(parts)
 
 
+# ── (C) feature-TRE vs cell-displacement reconciliation ─────────────────────────
+# VALIS scores registration on its own SuperPoint/SuperGlue keypoints — a self-referential,
+# optimistic feature-TRE — while WARP_SEG_QC scores it on independently segmented cells. Lining
+# the two up per stage exposes the failure mode neither catches alone: features declaring a slide
+# aligned while the cells say otherwise. A stage counts as divergent when the two disagree by more
+# than this factor; below it they are treated as corroborating.
+RECONCILE_DIVERGENCE_RATIO = 3.0
+
+# Each stage's feature-TRE comes from a specific VALIS summary column, because register_micro()
+# composes the micro residual into the same field and rewrites non_rigid_D in place: only the
+# pre-micro summary still isolates the non-rigid stage. (col, which_summary).
+_RECONCILE_TRE_SOURCE = {
+    "rigid": ("rigid_D", "final"),
+    "non_rigid": ("non_rigid_D", "premicro"),
+    "micro": ("non_rigid_D", "final"),
+}
+
+
+def _to_float(v):
+    try:
+        f = float(v)
+        return f if f == f else None  # drop NaN
+    except (TypeError, ValueError):
+        return None
+
+
+def _read_valis_tre(valis_dir):
+    """slide -> {'final': {col: val}, 'premicro': {col: val}} of feature distances from CSVs."""
+    out = {}
+    for csv_path in list_files(valis_dir, "*.csv"):
+        which = "premicro" if csv_path.name.endswith("_summary_premicro.csv") else "final"
+        try:
+            with open(csv_path, newline="") as fh:
+                for row in csv.DictReader(fh):
+                    slide = row.get("from") or row.get("filename")
+                    if not slide:
+                        continue
+                    slot = out.setdefault(str(slide), {"final": {}, "premicro": {}})[which]
+                    for col in ("rigid_D", "non_rigid_D"):
+                        if col in row:
+                            slot[col] = _to_float(row[col])
+        except (OSError, csv.Error):
+            continue
+    return out
+
+
+def _read_seg_cell_disp(seg_qc_dir):
+    """slide -> {stage: displacement_µm_p50} from the WARP_SEG_QC JSONs (px if no µm present)."""
+    out = {}
+    for jp in list_files(seg_qc_dir, "*.json"):
+        try:
+            with open(jp, encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        slide = data.get("moving")
+        stages = data.get("stages") or {}
+        if not slide or not isinstance(stages, dict):
+            continue
+        per_stage = {}
+        for stage, metrics in stages.items():
+            if not isinstance(metrics, dict):
+                continue
+            val = metrics.get("displacement_um_p50")
+            if val is None:
+                val = metrics.get("displacement_px_p50")  # fall back to px if no pixel size
+            per_stage[stage] = _to_float(val)
+        out[str(slide)] = per_stage
+    return out
+
+
+def reconcile_rows(valis_dir, seg_qc_dir):
+    """Pair VALIS feature-TRE with WARP_SEG_QC cell displacement, per slide per stage.
+
+    Returns a list of dicts: ``slide``, ``stage``, ``feature_tre_um``, ``cell_disp_um``,
+    ``divergent`` (True/False, or None when either number is missing so no verdict is possible).
+    Slides are keyed by VALIS slide name (``from`` == ``moving``); rows are only emitted for
+    slides that appear in the seg-QC output.
+    """
+    tre = _read_valis_tre(valis_dir)
+    cell = _read_seg_cell_disp(seg_qc_dir)
+    rows = []
+    for slide in sorted(cell):
+        slide_tre = tre.get(slide, {})
+        for stage in ("rigid", "non_rigid", "micro"):
+            col, which = _RECONCILE_TRE_SOURCE[stage]
+            feature = slide_tre.get(which, {}).get(col)
+            # non_rigid_D is overwritten in place by register_micro(), so only the pre-micro
+            # summary isolates the non-rigid TRE. But when no pre-micro summary exists
+            # (micro_reg < 2 -> register_micro never ran), the final summary still IS the
+            # pre-micro non-rigid value: fall back to it. Without this the non_rigid row is
+            # permanently n/a at the shipped default (micro_reg=0), defeating the whole
+            # reconciliation for the configuration that actually runs.
+            if feature is None and stage == "non_rigid" and which == "premicro":
+                feature = slide_tre.get("final", {}).get(col)
+            disp = cell.get(slide, {}).get(stage)
+            divergent = None
+            if feature is not None and disp is not None:
+                lo, hi = sorted((abs(feature), abs(disp)))
+                divergent = hi > RECONCILE_DIVERGENCE_RATIO * lo if lo > 0 else hi > 0
+            rows.append({
+                "slide": slide,
+                "stage": stage,
+                "feature_tre_um": feature,
+                "cell_disp_um": disp,
+                "divergent": divergent,
+            })
+    return rows
+
+
+def reconciliation_section(valis_dir, seg_qc_dir):
+    """Render the feature-TRE vs cell-displacement reconciliation table."""
+    title = "Feature-TRE vs Cell-Displacement Reconciliation"
+    rows = reconcile_rows(valis_dir, seg_qc_dir)
+    if not rows:
+        return section(
+            title,
+            '<p class="empty-notice">No overlapping VALIS summary + segmentation-warp QC '
+            "found to reconcile.</p>",
+        )
+
+    def fmt(v):
+        return f"{v:.3f}" if isinstance(v, float) else "—"
+
+    body = [
+        "<p style='font-size:0.85rem;color:#666;margin:0 0 8px;'>"
+        "VALIS feature-TRE is measured on its own SuperPoint/SuperGlue keypoints (optimistic); "
+        "cell displacement is measured on independently segmented nuclei. A flagged row means "
+        f"the two disagree by more than {RECONCILE_DIVERGENCE_RATIO:g}× — worth a look.</p>",
+        "<table><thead><tr><th>Slide</th><th>Stage</th><th>Feature-TRE (µm)</th>"
+        "<th>Cell disp. p50 (µm)</th><th>Agreement</th></tr></thead><tbody>",
+    ]
+    for r in rows:
+        if r["divergent"] is None:
+            flag = "<span style='color:#999;'>n/a</span>"
+        elif r["divergent"]:
+            flag = "<span style='color:#c0392b;font-weight:600;'>⚠ divergent</span>"
+        else:
+            flag = "<span style='color:#27ae60;'>✓ agree</span>"
+        body.append(
+            f"<tr><td>{r['slide']}</td><td>{r['stage']}</td>"
+            f"<td>{fmt(r['feature_tre_um'])}</td><td>{fmt(r['cell_disp_um'])}</td>"
+            f"<td>{flag}</td></tr>"
+        )
+    body.append("</tbody></table>")
+    return section(title, "\n".join(body))
+
+
 def seg_qc_section(seg_qc_dir):
     """Render warp-seg QC JSONs (one table per file)."""
     jsons = list_files(seg_qc_dir, "*.json")
@@ -765,6 +913,7 @@ def main():
             args.seg_qc,
         )
     )
+    html_parts.append(reconciliation_section(args.valis_summary, args.seg_qc))
     html_parts.append(seg_overlay_section(args.postprocess_qc))
     html_parts.append(postprocess_qc_section(args.postprocess_qc))
     expected_patients = set(summary.get("manifest", {}).get("patients", {}).keys()) or None

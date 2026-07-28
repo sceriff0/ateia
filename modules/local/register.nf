@@ -47,7 +47,8 @@ process REGISTER {
     def memory_mode = params.memory_mode ?: 'high'
     def micro_reg_fraction = params.reg_micro_reg_fraction ?: 0.125
     def max_image_dim = params.reg_max_image_dim ?: 4000
-    def skip_micro = params.skip_micro_registration ? '--skip-micro-registration' : ''
+    // Micro-registration depth (0/1/2), resolved via the single-source ParamUtils helper.
+    def micro_reg = ParamUtils.microRegLevel(params)
     // reg_qc >= 2 scores each registration stage separately, which needs the post-non-rigid,
     // pre-micro displacement fields. VALIS composes micro into the same attribute, so nothing
     // downstream can recover them — REGISTER is the only place they can be captured.
@@ -73,7 +74,7 @@ process REGISTER {
     echo "Settings:"
     echo "  - memory_mode: ${memory_mode}"
     echo "  - max_image_dim: ${max_image_dim}"
-    echo "  - skip_micro_registration: ${skip_micro ? 'YES' : 'NO'}"
+    echo "  - micro_reg: ${micro_reg} (0=none, 1=micro-rigid, 2=+micro non-rigid)"
     echo "========================================================================"
 
     # === STAGE INPUT FILES ===
@@ -118,7 +119,7 @@ process REGISTER {
         --memory-mode ${memory_mode} \\
         --micro-reg-fraction ${micro_reg_fraction} \\
         --max-image-dim ${max_image_dim} \\
-        ${skip_micro} \\
+        --micro-reg ${micro_reg} \\
         --jvm-heap-gb ${jvm_heap_gb} \\
         ${stage_ckpt} \\
         ${args}

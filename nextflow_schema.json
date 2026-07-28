@@ -227,10 +227,15 @@
                         "high"
                     ]
                 },
-                "skip_micro_registration": {
-                    "type": "boolean",
-                    "description": "Skip micro registration step.",
-                    "default": true
+                "micro_reg": {
+                    "type": "integer",
+                    "description": "Micro-registration depth (nested): 0=none, 1=micro-rigid only (refines slide.M), 2=+micro non-rigid (register_micro).",
+                    "default": 0,
+                    "enum": [
+                        0,
+                        1,
+                        2
+                    ]
                 },
                 "allow_auto_reference": {
                     "type": "boolean",
