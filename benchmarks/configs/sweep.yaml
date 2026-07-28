@@ -10,10 +10,16 @@
 #
 # REMOVED axes: reg_use_tiled_registration, reg_tile_size, reg_n_workers (VALIS auto-tiles
 # internally, so they were no-ops) and reg_parallel_warping (parallel warping was removed;
-# warping is always sequential). The distributed/tiled registration path was archived out of
-# the pipeline (git tag archive/tiled-valis-2026-07-24); registration is classic REGISTER only,
-# so reg_distributed_tiling / reg_dist_* and the distributed_grid / distributed_tiling_grid
-# sweeps were removed. The matching pipeline params no longer exist.
+# warping is always sequential). The OLD distributed/tiled VALIS path was archived out of the
+# pipeline (git tag archive/tiled-valis-2026-07-24), so reg_distributed_tiling / reg_dist_* and
+# the distributed_grid / distributed_tiling_grid sweeps were removed — those params no longer exist.
+#
+# REGISTRATION METHODS: registration_method='valis' (feature-based rigid+non-rigid, the baseline)
+# vs 'tiled' = STARE (JVM-free NumPy/skimage rigid + mesh registrar, merged from feat/tiled-registration
+# @ c6477b1). STARE is NOT the old archived distributed path above — it is a distinct method that ships
+# on main. Both methods are benchmarked head-to-head by registration_method_grid below (VALIS = baseline
+# anchor; tiled = its own reg_tiled_* knobs). A THIRD baseline, Ashlar, is benchmarked out-of-band by the
+# benchmarks/ashlar_eval/ harness (see the ASHLAR note at the bottom of this file).
 #
 # N-IMAGE REGISTRATION: n_register_images sweeps the number of slides registered together
 # (1 reference + N-1 moving panels). Generate the matrix straight from this file so it has
@@ -57,8 +63,12 @@ baseline:
   # --- registration ---
   # NB: baseline mirrors the PIPELINE DEFAULTS (nextflow.config) so the 'baseline' run is the
   # shipped config. memory_mode=high and reg_qc=2 are the pipeline defaults as of 2026-07-27.
+  registration_method: valis          # pipeline default: 'valis' | 'tiled' (STARE). This baseline is the
+                                      # VALIS anchor; registration_method_grid below adds tiled/STARE runs.
   memory_mode: high                   # pipeline default (registration memory profile)
-  skip_micro_registration: true
+  reg_micro_reg: 0                    # pipeline default: micro-registration DEPTH (0=none | 1=micro-rigid |
+                                      # 2=+micro non-rigid). Replaces the old boolean skip_micro_registration
+                                      # (removed on main); crossed with memory_mode by registration_param_grid.
   n_register_images: 2                # 1 reference + 1 moving (the classic pair)
   reg_qc: 2                           # pipeline default: staged registration QC ON — segments DAPI nuclei,
                                       # fixes correspondence at the rigid stage, re-measures dice_matched +
@@ -105,17 +115,20 @@ axes:
   # --- quantification ---
   quantify_compartments:      [false, true]
   expanded_quantification:    [false, true]       # valid because baseline quantify_compartments=true
-  # NOTE — the REGISTRATION knobs (memory_mode, skip_micro_registration) are NOT OFAT axes: they are
+  # NOTE — the VALIS registration knobs (memory_mode, reg_micro_reg) are NOT OFAT axes: they are
   # crossed at the baseline cell by registration_param_grid below.
+  # NOTE — registration_method is NOT an OFAT axis: it is a method grid (registration_method_grid), each
+  # method run with its OWN live knobs (a tiled-only knob off the VALIS baseline would be a no-op).
   # NOTE — seg_method and its per-method params (seg_n_tiles_*, seg_cellsam_block_size,
   # seg_instantseg_tile_size) are NOT OFAT axes: segmentation_grid below runs each method with its OWN
   # live params (an OFAT run of a backend-specific param off the stardist baseline is a no-op).
 
-# REGISTRATION PARAMETER GRID — memory_mode x skip_micro_registration crossed at the baseline cell
-# (classic path only). Characterises the effect of the registration knobs on cost + accuracy.
+# REGISTRATION PARAMETER GRID (VALIS) — memory_mode x reg_micro_reg crossed at the baseline cell, VALIS
+# path only. Characterises the effect of the VALIS registration knobs on cost + accuracy. reg_micro_reg is
+# the micro-registration DEPTH (0/1/2), replacing the old boolean skip_micro_registration (removed on main).
 registration_param_grid:
-  memory_mode:              [low, medium, high]
-  skip_micro_registration:  [true, false]
+  memory_mode:    [low, medium, high]
+  reg_micro_reg:  [0, 1, 2]              # 0=none | 1=micro-rigid only | 2=+micro non-rigid
 
 # SEGMENTATION GRID — each method benchmarked with ITS OWN parameters (pinned seg_method + that method's
 # live knobs crossed). stardist crosses its tile grid; cellsam its block size; instantseg its tile size.
@@ -127,3 +140,31 @@ segmentation_grid:
     seg_n_tiles_y:            [8, 16, 32]
   instantseg:
     seg_instantseg_tile_size: [256, 512, 1024]
+
+# REGISTRATION METHOD GRID — the head-to-head method comparison. Each registration_method is benchmarked
+# with ITS OWN live knobs, exactly like segmentation_grid does per seg backend. The baseline run above is
+# the VALIS anchor (registration_method=valis at defaults); this grid adds the STARE / tiled method and
+# sweeps its accuracy knobs. An OFAT run of a tiled-only knob off the VALIS baseline would be a no-op, so
+# per-method grids (not flat OFAT axes) are the correct structure. Like all real registration axes this
+# needs a --paired matrix (a moving panel to register).
+#
+# reg_tiled_tile is THE fairness / granularity knob: it sets both the tile core size AND the mesh grid
+# resolution (nextflow.config), so a finer grid gives STARE more local (piecewise) deformation freedom —
+# the direct analog of Ashlar's re-tile granularity. reg_tiled_gate_tre gates which tiles get non-rigid
+# refinement (accuracy vs cost). The remaining STARE knobs are held at their pipeline defaults:
+# reg_tiled_halo / reg_tiled_upsample (secondary accuracy) and reg_tiled_fanout / reg_tiled_out_tile
+# (resource + I/O, not accuracy) — add them here later if a resource/accuracy curve for them is needed.
+registration_method_grid:
+  tiled:
+    reg_tiled_tile:     [1024, 2048, 4096]   # grid granularity / mesh resolution (px) — the fairness knob
+    reg_tiled_gate_tre: [0.5, 1.0, 2.0]      # per-tile non-rigid refine gate (rigid-stage TRE, px)
+
+# ASHLAR (third baseline) — OUT OF BAND, NOT a sweep axis. Ashlar is not a pipeline registration_method:
+# it needs raw unstitched tiles with stage-position metadata, whereas Mirage inputs are pre-stitched WSIs.
+# Its knobs are therefore NOT pipeline params and cannot live here (a --<name> override would fail). Ashlar
+# is benchmarked by the standalone benchmarks/ashlar_eval/ harness (retile -> ashlar runner -> un-mosaic ->
+# ORB scorer), scored head-to-head against VALIS + STARE via bin/registration_benchmark.py. Its tuning
+# knobs, for reference, are:
+#   tile_size, overlap_fraction, grid_granularity (fairness analog of reg_tiled_tile),
+#   maximum_shift (µm; must exceed real cross-cycle drift), align_channel (DAPI index).
+# See docs/ashlar_registration_benchmark_design.md and the implementation plan under docs/superpowers/specs/.

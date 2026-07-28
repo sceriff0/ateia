@@ -59,17 +59,19 @@ def _configs(sweep: dict) -> list[tuple[dict, str]]:
     #     there is no distributed counterpart to benchmark. See docs/superpowers/specs/
     #     2026-07-24-benchmark-paper-data-design.md.
 
-    # 3. REGISTRATION PARAMETER GRID — the registration knobs (memory_mode, skip_micro_registration)
-    #    crossed at the baseline cell, classic path only. Labelled registration_param_grid.
+    # 3. REGISTRATION PARAMETER GRID (VALIS) — the VALIS registration knobs (memory_mode, reg_micro_reg)
+    #    crossed at the baseline cell, VALIS path only. reg_micro_reg is the micro-registration DEPTH
+    #    (0/1/2), replacing the old boolean skip_micro_registration (removed on main). Labelled
+    #    registration_param_grid.
     rpg = sweep.get("registration_param_grid")
     if rpg:
         mms = rpg.get("memory_mode", [baseline.get("memory_mode", "medium")])
         mms = list(mms) if isinstance(mms, (list, tuple)) else [mms]
-        sms = rpg.get("skip_micro_registration", [baseline.get("skip_micro_registration", True)])
-        sms = list(sms) if isinstance(sms, (list, tuple)) else [sms]
+        rmrs = rpg.get("reg_micro_reg", [baseline.get("reg_micro_reg", 0)])
+        rmrs = list(rmrs) if isinstance(rmrs, (list, tuple)) else [rmrs]
         for mm in mms:
-            for sm in sms:
-                configs.append((dict(baseline, memory_mode=mm, skip_micro_registration=sm),
+            for rmr in rmrs:
+                configs.append((dict(baseline, memory_mode=mm, reg_micro_reg=rmr),
                                 "registration_param_grid"))
 
     # 3c. SEGMENTATION GRID — each method benchmarked with ITS OWN parameters. sweep.yaml maps a
@@ -84,6 +86,21 @@ def _configs(sweep: dict) -> list[tuple[dict, str]]:
             for combo in itertools.product(*(mparams[k] for k in keys)):
                 configs.append((dict(baseline, seg_method=method, **dict(zip(keys, combo))),
                                 f"segmentation_grid:{method}"))
+
+    # 3d. REGISTRATION METHOD GRID — each registration_method benchmarked with ITS OWN parameters,
+    #     mirroring segmentation_grid. sweep.yaml maps a registration_method (valis|tiled) to a dict of
+    #     {param: [values]}; this pins registration_method and crosses that method's live knobs (VALIS:
+    #     memory_mode/reg_micro_reg; STARE/tiled: reg_tiled_*). An OFAT run of a tiled-only knob off the
+    #     VALIS baseline would be a no-op, so per-method grids are correct. Labelled
+    #     registration_method_grid:<method>. Needs a --paired matrix (a moving panel to register). The
+    #     baseline run is the VALIS anchor, so this grid typically only carries the 'tiled' method.
+    rmgrid = sweep.get("registration_method_grid")
+    if rmgrid:
+        for method, mparams in rmgrid.items():
+            keys = list(mparams)
+            for combo in itertools.product(*(mparams[k] for k in keys)):
+                configs.append((dict(baseline, registration_method=method, **dict(zip(keys, combo))),
+                                f"registration_method_grid:{method}"))
 
     # 4. OFAT parameter knobs: one config per non-baseline value of each axis,
     #    holding input scale fixed at the baseline cell.
