@@ -19,7 +19,7 @@ from phenotyping.model_config import (  # noqa: E402
     write_spec_report_html,
 )
 from phenotyping.palette import build_palette  # noqa: E402
-from phenotyping.panel_schema import parse_panel, typecheck  # noqa: E402
+from phenotyping.panel_schema import PanelError, parse_panel, typecheck  # noqa: E402
 from phenotyping.references import resolve_references  # noqa: E402
 
 
@@ -57,9 +57,24 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--max-enumerate", type=int, default=100000)
     args = ap.parse_args(argv)
 
-    cfg, errors, warnings = compile_panel(
-        args.panel, alpha_target=args.alpha_target, min_calibration=args.min_calibration,
-        max_enumerate=args.max_enumerate, spec_version=_spec_version(args.panel))
+    spec_version = _spec_version(args.panel)
+
+    try:
+        cfg, errors, warnings = compile_panel(
+            args.panel, alpha_target=args.alpha_target, min_calibration=args.min_calibration,
+            max_enumerate=args.max_enumerate, spec_version=spec_version)
+    except PanelError as e:
+        # A HARD error (typecheck/enumerate_feasible raised) means there is no
+        # valid model_config to write -- but the report must still render the
+        # error for the user instead of a raw traceback. §4.3 intent: the
+        # user sees what their panel means (or why it doesn't compile) before
+        # any data is touched.
+        errors = [str(e)]
+        error_cfg = {"markers": {}, "feasible_set": [], "spec_version": spec_version}
+        write_spec_report_html(error_cfg, errors, [], args.report)
+        print(f"[ERROR] {e}", file=sys.stderr)
+        return 1
+
     cfg["compiled_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
     with open(args.out, "w") as fh:

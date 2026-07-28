@@ -34,3 +34,21 @@ def test_cli_nonzero_on_validation_error(tmp_path):
     rc = cp.main(["--panel", str(bad), "--out", str(tmp_path / "c.json"),
                   "--report", str(tmp_path / "r.html"), "--validate-only", "--accept-all"])
     assert rc != 0
+
+
+def test_cli_hard_panel_error_writes_report_not_traceback(tmp_path):
+    # Phenotype references a marker that was never declared -> typecheck()
+    # raises PanelError, a HARD error (not the soft errors/warnings list).
+    bad = tmp_path / "bad_hard.yaml"
+    bad.write_text(
+        "markers:\n  A: {role: lineage, compartment: cell}\n"
+        "phenotypes:\n  P: {Z: '+'}\n"  # Z is undeclared
+        "constraints: {}\n"
+    )
+    report = tmp_path / "r.html"
+    rc = cp.main(["--panel", str(bad), "--out", str(tmp_path / "c.json"),
+                  "--report", str(report), "--validate-only", "--accept-all"])
+    assert isinstance(rc, int)
+    assert rc != 0
+    assert report.exists()
+    assert "unknown marker" in report.read_text()
