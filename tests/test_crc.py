@@ -1,5 +1,9 @@
 import numpy as np
-from utils.phenotyping.crc import hoeffding_ucb, risk_excess_copositivity, crc_select_alpha
+from utils.phenotyping.crc import (
+    crc_select_alpha,
+    hoeffding_ucb,
+    risk_excess_copositivity,
+)
 
 PAIRS = [{"markers": ["A", "B"], "id": 0}]
 
@@ -24,8 +28,10 @@ def test_crc_guarantee_holds_on_synthetic_violations():
     def make_committed(alpha):
         n = 200
         k = int(alpha * n)               # more double-positives as alpha grows
-        a = np.zeros(n, int); b = np.zeros(n, int)
-        a[:k] = 1; b[:k] = 1
+        a = np.zeros(n, int)
+        b = np.zeros(n, int)
+        a[:k] = 1
+        b[:k] = 1
         return {"A": a, "B": b}
     nominal = {0: 0.02}
 
