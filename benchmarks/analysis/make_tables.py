@@ -36,8 +36,12 @@ from .lib import load, quality, regress
 SIZE_VARYING_AXES = {"baseline", "scaling_grid", "registration_grid", "target_px", "n_channels"}
 
 # Config columns carried onto the master/param tables (present depending on the sweep).
+# registration_method (valis|tiled) + reg_micro_reg (micro-reg depth 0/1/2) replace the old boolean
+# skip_micro_registration, which was removed on main; reg_tiled_tile/reg_tiled_gate_tre are the STARE
+# knobs swept by registration_method_grid. Columns absent from a given sweep are simply not carried.
 CONFIG_COLS = ("varied_axis", "target_px", "n_channels", "n_register_images",
-               "memory_mode", "skip_micro_registration", "seg_method")
+               "registration_method", "memory_mode", "reg_micro_reg",
+               "reg_tiled_tile", "reg_tiled_gate_tre", "seg_method")
 
 
 def _size_varying(runs_df: pd.DataFrame) -> pd.DataFrame:
