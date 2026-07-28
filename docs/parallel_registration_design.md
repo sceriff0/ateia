@@ -309,7 +309,13 @@ dedicated lean `withName:'TILED_*'` overrides (2–8 GB) or pair with a memory-c
   a ground-truth-free residual-TRE + correlation metric that runs on any method's output, so
   VALIS vs tiled is a direct number-to-number comparison on the same slide. Validated on synthetic
   ground truth (STARE drops the residual TRE below 2 px; a pure 11.66 px shift is fully removed).
-- **~61 Python tests passing; ruff clean.**
+- **Per-tile Nextflow fan-out (done):** `reg_tiled_fanout=true` switches the adapter to
+  `TILED_COARSE → TILED_REG_TILE (one task per tile) → TILED_SOLVE → TILED_STITCH` — the
+  little-process-per-tile design, all JVM-free. `warp_image` gained an `out_origin` so each tile
+  task warps only its window (and the stitch warps in row strips). The fan-out chain is proven to
+  compose into a correct registration end-to-end (synthetic ground truth), and the DAG is **stub
+  green at reg_qc 1 and 2**; the default (`false`) monolithic path is unchanged.
+- **~64 Python tests passing; ruff clean.**
 
 **Convention settled during implementation:** the mesh lives in the **reference frame** (sampled
 at the rigid position `M0·xy`), which the tiled implementation produces naturally and which gives
@@ -318,10 +324,9 @@ a decoupled warp inverse. §5/§6 describe this.
 **Remaining**
 - **Run the accuracy harness on real WSIs vs VALIS** (operational — the metric and tooling are in
   place; this is executing them on real slides + a VALIS run, which needs the cluster).
-- **Per-tile Nextflow fan-out (optional):** the current `TILED_REGISTER` is one task per moving
-  slide that tiles *internally* (memory-bounded, ≤8 GB). Splitting the tiles into separate
-  Nextflow tasks (§5's `REG_TILE`/`WARP_TILE`/`STITCH`) is a further parallelism step; the
-  algorithmic cores (`tile_grid`/`tile_residual`/`tiled_warp`/`tiled_manifest`) are already
-  factored for it.
-- **nf-test** module + integration coverage.
+- **nf-test** module + integration coverage (the Python cores and the stub DAG are covered; native
+  nf-test cases for the new processes would round it out).
+- **Streaming gigapixel stitch:** `TILED_STITCH` warps in row strips (bounded memory) but still
+  materialises the full output array before writing; a truly gigapixel-safe path would write tiles
+  incrementally to a pyramidal OME-TIFF.
 ```

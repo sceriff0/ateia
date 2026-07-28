@@ -69,6 +69,22 @@ def test_warp_never_produces_negative_pixels():
     assert out.max() <= img.max() + 1e-9
 
 
+def test_out_origin_warps_a_subregion_identical_to_cropping_the_full_warp():
+    """The per-tile stitch guarantee: warping tile (out_origin, out_shape) equals the matching
+    crop of the whole-image warp — so tiles reassemble seamlessly and memory stays per-tile."""
+    rng = np.random.default_rng(5)
+    img = rng.uniform(0, 100, size=(40, 40))
+    mesh = MeshField(
+        np.array([0.0, 40.0]),
+        np.array([0.0, 40.0]),
+        np.array([[[1.5, -1.0], [2.0, 0.5]], [[-1.0, 2.0], [0.5, 1.5]]]),
+    )
+    full = warp_image(img, _translation(2.3, -1.7), mesh, (40, 40))
+    # rows 8..24, cols 20..32
+    tile = warp_image(img, _translation(2.3, -1.7), mesh, (16, 12), out_origin=(20, 8))
+    np.testing.assert_allclose(tile, full[8:24, 20:32], atol=1e-9)
+
+
 def test_multichannel_is_warped_per_channel():
     img = np.zeros((16, 16, 3))
     img[4, 4, 1] = 50.0  # (x=4, y=4) in channel 1

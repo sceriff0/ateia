@@ -25,7 +25,7 @@ def _apply_affine(m, xy):
     return (homog @ np.asarray(m, dtype=float).T)[:, :2]
 
 
-def warp_image(image, m0, mesh, out_shape, mesh_inverse_iters=3):
+def warp_image(image, m0, mesh, out_shape, mesh_inverse_iters=3, out_origin=(0, 0)):
     """Warp ``image`` (moving) into an ``out_shape`` = ``(H, W)`` reference-frame raster.
 
     Parameters
@@ -38,13 +38,20 @@ def warp_image(image, m0, mesh, out_shape, mesh_inverse_iters=3):
         Residual displacement field in the *reference frame*, or None for a rigid warp.
     out_shape : (int, int)
         Output raster size ``(height, width)`` in the reference frame.
+    out_origin : (int, int)
+        ``(x, y)`` top-left of the output window in the reference frame (default ``(0, 0)``).
+        Warping a window equals cropping the full-frame warp, so per-tile warps reassemble
+        seamlessly and each tile task holds only its own output in memory.
     """
     image = np.asarray(image, dtype=float)
     m0 = np.asarray(m0, dtype=float)
     out_h, out_w = out_shape
+    ox, oy = out_origin
 
     ys, xs = np.mgrid[0:out_h, 0:out_w]
-    u = np.column_stack([xs.ravel().astype(float), ys.ravel().astype(float)])
+    u = np.column_stack(
+        [(xs.ravel() + ox).astype(float), (ys.ravel() + oy).astype(float)]
+    )
 
     m_inv = np.linalg.inv(m0)
     # Forward map is u = v + F(v) with v = M0 x the rigid (ref-frame) position. Invert in two
