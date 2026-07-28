@@ -1,0 +1,8 @@
+# STARE tiled registration (registration_method='tiled') — CPU-only, JVM-free.
+# Pinned to the versions the method was developed and tested against.
+numpy==1.26.4
+scipy==1.13.1
+scikit-image==0.24.0
+tifffile==2024.7.2
+zarr==2.18.3          # lazy region reads for the streaming gigapixel stitch (tifffile aszarr)
+numcodecs==0.13.1     # pinned: newer numcodecs drops blosc.cbuffer_sizes that zarr 2.18 imports
