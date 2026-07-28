@@ -10,6 +10,7 @@ include { PAD_IMAGES                        } from '../../modules/local/pad_imag
 include { GENERATE_REGISTRATION_QC          } from '../../modules/local/generate_registration_qc'
 include { SEG_QC_GEOJSON                    } from '../../modules/local/seg_qc_geojson'
 include { WARP_SEG_QC                       } from '../../modules/local/warp_seg_qc'
+include { WARP_SEG_QC_TILED                 } from '../../modules/local/warp_seg_qc_tiled'
 
 include { VALIS_ADAPTER                     } from './adapters/valis_adapter'
 include { TILED_ADAPTER                     } from './adapters/tiled_adapter'
@@ -177,15 +178,13 @@ workflow REGISTRATION {
     // skip_registration_qc=true forces 0). ParamUtils.regQcLevel is the single definition.
     def reg_qc_level = ParamUtils.regQcLevel(params)
 
-    // Level 2 warps polygons through the registrar the method produced (VALIS pickle, or the
-    // STARE manifest). The tiled method's reg_qc=2 seg-QC dispatch (WARP_SEG_QC --method tiled)
-    // is not wired yet, so for now level-2 seg-QC is capped to the DAPI overlay under 'tiled'.
-    def do_seg_qc = reg_qc_level >= 2 && params.registration_method != 'tiled'
-    if (reg_qc_level >= 2 && params.registration_method == 'tiled') {
-        log.warn "registration_method='tiled': reg_qc=2 segmentation-overlap QC is not wired yet; " +
-                 "emitting the DAPI-overlay QC only. The reg_qc=2 scorer already supports the tiled " +
-                 "warper (see docs/parallel_registration_design.md §4)."
-    }
+    // Level 2 warps polygons through the registrar the method produced — the VALIS pickle (via the
+    // BioFormats JVM) or the STARE manifest (JVM-free). The scorer is identical; only the warper
+    // differs (WARP_SEG_QC vs WARP_SEG_QC_TILED). Segmentation of the native slides is shared.
+    def do_seg_qc = reg_qc_level >= 2
+
+    // Per-moving-slide STARE manifest (meta-keyed), used by the tiled reg_qc=2 seg-QC join.
+    ch_manifest_by_meta = Channel.empty()
 
     // Dispatch on the registration method. Both adapters emit the identical channel contract,
     // so everything downstream (QC, checkpoint, error estimation) is method-agnostic.
@@ -193,6 +192,7 @@ workflow REGISTRATION {
         TILED_ADAPTER(ch_grouped_multi)
         ch_registered       = TILED_ADAPTER.out.registered
         ch_registrar_pickle = TILED_ADAPTER.out.manifest
+        ch_manifest_by_meta = TILED_ADAPTER.out.manifest_by_meta
         ch_stage_checkpoint = TILED_ADAPTER.out.stage_checkpoint
         ch_adapter_logs     = TILED_ADAPTER.out.size_logs
         ch_adapter_versions = TILED_ADAPTER.out.versions
@@ -249,6 +249,10 @@ workflow REGISTRATION {
     // then warp the polygons through the registrar and score overlap. Classic VALIS only
     // (needs the registrar pickle; distributed produces none).
     ch_seg_qc = Channel.empty()
+    // Captured from whichever WARP process the method dispatches to, so the version/size-log
+    // aggregation below never references a process that was not invoked in this run.
+    ch_seg_qc_size_log = Channel.empty()
+    ch_seg_qc_versions = Channel.empty()
     if (do_seg_qc) {
         SEG_QC_GEOJSON(ch_images_for_error)
 
@@ -261,27 +265,50 @@ workflow REGISTRATION {
         // moving: [patient_id, meta, moving_geojson, moving_slide_name]
         ch_mov_gj = ch_gj.moving.map { meta, gj -> [meta.patient_id, meta, gj, gj.simpleName] }
 
-        // Exactly one stage-checkpoint entry per patient that has a pickle — the real directory
-        // where REGISTER wrote one, `[]` where it did not. Making it total matters: a plain
-        // combine on an optional channel silently DROPS the patients that lack it, so a failed
-        // snapshot would remove the patient from the QC entirely instead of costing it one stage.
-        ch_ckpt_by_patient = ch_registrar_pickle
-            .map { pid, _pickle -> tuple(pid, []) }
-            .join(ch_stage_checkpoint, by: 0, remainder: true)
-            .map { pid, _placeholder, ckpt -> tuple(pid, ckpt ?: []) }
+        if (params.registration_method == 'tiled') {
+            // Tiled: one manifest per moving slide (meta-keyed). Join it to the moving GeoJSON by
+            // (patient, sorted-channels) so each slide is scored against its own transform. No
+            // stage checkpoint (stages are separable by construction) and no JVM.
+            ch_manifest_keyed = ch_manifest_by_meta
+                .map { meta, m -> [meta.patient_id, meta.channels.toSorted().join('|'), m] }
 
-        // Join each moving slide with its patient's reference GeoJSON, registrar pickle and
-        // stage checkpoint.
-        ch_for_warp = ch_mov_gj
-            .combine(ch_ref_gj, by: 0)
-            .combine(ch_registrar_pickle, by: 0)
-            .combine(ch_ckpt_by_patient, by: 0)
-            .map { pid, meta, mov_gj, mov_name, ref_gj, ref_name, pickle, ckpt ->
-                tuple(meta, pickle, ref_name, mov_name, ref_gj, mov_gj, ckpt)
-            }
+            ch_for_warp_tiled = ch_mov_gj
+                .map { pid, meta, gj, name -> [pid, meta.channels.toSorted().join('|'), meta, gj, name] }
+                .combine(ch_ref_gj, by: 0)
+                .combine(ch_manifest_keyed, by: [0, 1])
+                .map { _pid, _sig, meta, mov_gj, mov_name, ref_gj, ref_name, m ->
+                    tuple(meta, m, ref_name, mov_name, ref_gj, mov_gj)
+                }
 
-        WARP_SEG_QC(ch_for_warp)
-        ch_seg_qc = WARP_SEG_QC.out.metrics
+            WARP_SEG_QC_TILED(ch_for_warp_tiled)
+            ch_seg_qc = WARP_SEG_QC_TILED.out.metrics
+            ch_seg_qc_size_log = WARP_SEG_QC_TILED.out.size_log
+            ch_seg_qc_versions = WARP_SEG_QC_TILED.out.versions
+        } else {
+            // VALIS: one registrar pickle per patient. Exactly one stage-checkpoint entry per
+            // patient that has a pickle — the real directory where REGISTER wrote one, `[]` where
+            // it did not. Making it total matters: a plain combine on an optional channel silently
+            // DROPS the patients that lack it, removing them from the QC instead of costing a stage.
+            ch_ckpt_by_patient = ch_registrar_pickle
+                .map { pid, _pickle -> tuple(pid, []) }
+                .join(ch_stage_checkpoint, by: 0, remainder: true)
+                .map { pid, _placeholder, ckpt -> tuple(pid, ckpt ?: []) }
+
+            // Join each moving slide with its patient's reference GeoJSON, registrar pickle and
+            // stage checkpoint.
+            ch_for_warp = ch_mov_gj
+                .combine(ch_ref_gj, by: 0)
+                .combine(ch_registrar_pickle, by: 0)
+                .combine(ch_ckpt_by_patient, by: 0)
+                .map { pid, meta, mov_gj, mov_name, ref_gj, ref_name, pickle, ckpt ->
+                    tuple(meta, pickle, ref_name, mov_name, ref_gj, mov_gj, ckpt)
+                }
+
+            WARP_SEG_QC(ch_for_warp)
+            ch_seg_qc = WARP_SEG_QC.out.metrics
+            ch_seg_qc_size_log = WARP_SEG_QC.out.size_log
+            ch_seg_qc_versions = WARP_SEG_QC.out.versions
+        }
     }
 
     // ========================================================================
@@ -388,7 +415,7 @@ workflow REGISTRATION {
     if (do_seg_qc) {
         ch_size_logs = ch_size_logs
             .mix(SEG_QC_GEOJSON.out.size_log)
-            .mix(WARP_SEG_QC.out.size_log)
+            .mix(ch_seg_qc_size_log)
     }
 
     // Add size logs from error estimation (if enabled)
@@ -413,7 +440,7 @@ workflow REGISTRATION {
     if (do_seg_qc) {
         ch_versions = ch_versions
             .mix(SEG_QC_GEOJSON.out.versions.first())
-            .mix(WARP_SEG_QC.out.versions.first())
+            .mix(ch_seg_qc_versions.first())
     }
     if (params.enable_feature_error) {
         ch_versions = ch_versions.mix(ESTIMATE_FEATURE_DISTANCES.out.versions.first())

@@ -530,13 +530,88 @@ def parse_args(argv=None):
         "Recorded in the report so it can state honestly that at >=1 the 'rigid' stage is "
         "affine ∘ micro-rigid (VALIS composes them into slide.M and they are not separable).",
     )
+    ap.add_argument(
+        "--method",
+        default="valis",
+        choices=["valis", "tiled"],
+        help="registration method that produced the transform. 'valis' (default) loads a registrar "
+        "pickle behind a BioFormats JVM; 'tiled' loads a STARE manifest (M0 + mesh) via "
+        "tiled_stage_warp and needs no JVM — the reg_qc=2 scorer is otherwise identical.",
+    )
     return ap.parse_args(argv)
+
+
+def _main_tiled(a):
+    """JVM-free reg_qc=2 for the tiled ('STARE') method.
+
+    The scorer is method-agnostic (it takes an injected ``warp``), so the only tiled-specific work
+    is building that warper from the STARE manifest instead of a VALIS registrar. The manifest is
+    self-contained: it names the reference and carries one moving slide, both reachable by the
+    warper; stages are ``native/rigid/refined`` (no destructive micro composition, so always
+    separable and no checkpoint needed).
+    """
+    from tiled_stage_warp import (
+        STAGE_NATIVE,
+        STAGE_REFINED,
+        STAGE_RIGID,
+        make_warper,
+    )
+
+    with open(a.pickle) as f:
+        manifest = json.load(f)
+    warp = make_warper(manifest)
+    ref_slide = manifest["ref_slide"]
+    movers = [k for k in manifest["slides"] if k != ref_slide]
+    if not movers:
+        raise ValueError(
+            f"tiled manifest {a.pickle!r} carries no moving slide besides the reference"
+        )
+    moving_slide = movers[0]
+    stages = [STAGE_NATIVE, STAGE_RIGID, STAGE_REFINED]
+    _log(f"tiled reg_qc: ref={ref_slide!r} moving={moving_slide!r} stages={stages}")
+
+    rec = write_report(
+        None,
+        ref_slide,
+        moving_slide,
+        a.ref_geojson,
+        a.moving_geojson,
+        a.output,
+        patient_id=a.patient_id,
+        moving_name=a.moving_name or moving_slide,
+        reference_name=a.reference_name or ref_slide,
+        crop=a.crop,
+        clip=a.clip_to_frame,
+        pixel_size_um=a.pixel_size_um,
+        warp=warp,
+        stages=stages,
+        separable=True,
+        match_radius_factor=a.match_radius_factor,
+        match_radius_px=a.match_radius_px,
+        iou_thresh=a.iou_thresh,
+        supersample=a.supersample,
+        max_pair_window_px=a.max_pair_window_px,
+    )
+    nan = float("nan")
+    last = rec["stage_order"][-1]
+    anchor, final = rec["stages"][ANCHOR_STAGE], rec["stages"][last]
+    logger.info(
+        f"Wrote {a.output} (tiled): pairs={rec['matching']['n_pairs']} "
+        f"({rec['matching']['pair_fraction']:.1%} of cells) | "
+        f"{ANCHOR_STAGE}: iou={anchor.get('iou_mean', nan):.4f} | "
+        f"{last}: iou={final.get('iou_mean', nan):.4f}"
+    )
+    return None
 
 
 def main(argv=None):
     """CLI entry point: run the staged segmentation-overlap registration QC and write the report."""
     configure_logging(level=logging.INFO)
     a = parse_args(argv)
+
+    # The tiled method carries no VALIS registrar and needs no JVM — score through the manifest.
+    if a.method == "tiled":
+        return _main_tiled(a)
 
     # Start the BioFormats JVM BEFORE any slide I/O. registration.load_registrar() unpickles VALIS
     # Slide objects whose BioFormats-backed readers reconstruct against a live JVM, and the warp

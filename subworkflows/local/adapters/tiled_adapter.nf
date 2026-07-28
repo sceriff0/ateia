@@ -36,9 +36,10 @@ workflow TILED_ADAPTER {
 
     emit:
     registered       = ch_registered
-    // Manifest keyed by patient, mirroring VALIS_ADAPTER.out.registrar so the reg_qc=2 seg-QC
-    // wiring can consume it (via --method tiled) the same way it consumes the VALIS pickle.
+    // Manifest keyed by patient, mirroring VALIS_ADAPTER.out.registrar.
     manifest         = TILED_REGISTER.out.manifest.map { meta, m -> tuple(meta.patient_id, m) }
+    // Same manifests keyed by meta — the reg_qc=2 seg-QC joins one manifest per moving slide.
+    manifest_by_meta = TILED_REGISTER.out.manifest
     // The tiled method composes no stages destructively, so it needs no pre-micro checkpoint.
     stage_checkpoint = Channel.empty()
     size_logs        = TILED_REGISTER.out.size_log

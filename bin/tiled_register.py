@@ -96,9 +96,17 @@ def run(args) -> int:
     tifffile.imwrite(str(args.out), registered, photometric="minisblack")
     logger.info(f"wrote registered slide {registered.shape} -> {args.out}")
 
+    # Include the reference as an identity entry so the manifest is self-contained for the
+    # reg_qc=2 warper, which warps both the reference and the moving cells through it.
     manifest = {
         "ref_slide": args.reference_name,
-        "slides": {args.moving_name: result["entry"]},
+        "slides": {
+            args.reference_name: {
+                "M0": [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+                "mesh": None,
+            },
+            args.moving_name: result["entry"],
+        },
     }
     Path(args.manifest).write_text(json.dumps(manifest, indent=2))
 
