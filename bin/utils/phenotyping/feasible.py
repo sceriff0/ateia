@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import itertools
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 from .panel_schema import Panel, PanelError
 
@@ -75,3 +75,46 @@ def enumerate_feasible(panel: Panel, max_enumerate: int = 100000) -> List[Dict]:
             continue
         out.append({"pattern": pattern, "phenotype": name_pattern(panel, pattern)})
     return out
+
+
+def validate(panel: Panel, feasible: List[Dict]) -> Tuple[List[str], List[str]]:
+    errors: List[str] = []
+    warnings: List[str] = []
+
+    if not feasible:
+        errors.append("Unsatisfiable feasible set (F = empty); check for a requires cycle.")
+
+    named = {e["phenotype"] for e in feasible}
+    for name in panel.phenotypes:
+        if name not in named:
+            errors.append(f"Unreachable phenotype {name!r}: a constraint deleted every cell of this type.")
+
+    sigs = {name: tuple(sorted(inherited_signature(panel, name).items())) for name in panel.phenotypes}
+    seen: Dict[tuple, str] = {}
+    for name, sig in sigs.items():
+        if sig in seen:
+            errors.append(f"Collision: phenotypes {seen[sig]!r} and {name!r} share an identical signature.")
+        else:
+            seen[sig] = name
+
+    raw = {name: inherited_signature(panel, name) for name in panel.phenotypes}
+    for a in raw:
+        for b in raw:
+            if a == b:
+                continue
+            ka, kb = set(raw[a]), set(raw[b])
+            if ka < kb and all(raw[a][m] == raw[b][m] for m in ka):
+                warnings.append(f"Subsumption: {a!r} signature is a subset of {b!r} (resolved by specificity).")
+
+    used = set()
+    for ph in panel.phenotypes.values():
+        used |= set(ph.markers)
+    for c in panel.exclusive:
+        used |= set(c.markers)
+    for a, b in panel.requires:
+        used |= {a, b}
+    for m, mk in panel.markers.items():
+        if mk.role == "lineage" and m not in used:
+            warnings.append(f"Marker {m!r} declared but used by nothing (dead channel).")
+
+    return errors, warnings
