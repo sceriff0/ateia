@@ -305,15 +305,19 @@ dedicated lean `withName:'TILED_*'` overrides (2–8 GB) or pair with a memory-c
 - **Slim container (done):** `containers/tiled/` (`python:3.11-slim` + numpy/scipy/scikit-image/
   tifffile, no JVM/libvips/GPU). **Built and verified locally** — the CLIs import and run
   in-container; **~438 MB** vs the multi-GB VALIS image. Added to the `build-images.yml` matrix.
-- **~58 Python tests passing; ruff clean.**
+- **Accuracy harness (done):** `bin/utils/reg_benchmark.py` + `bin/registration_benchmark.py` —
+  a ground-truth-free residual-TRE + correlation metric that runs on any method's output, so
+  VALIS vs tiled is a direct number-to-number comparison on the same slide. Validated on synthetic
+  ground truth (STARE drops the residual TRE below 2 px; a pure 11.66 px shift is fully removed).
+- **~61 Python tests passing; ruff clean.**
 
 **Convention settled during implementation:** the mesh lives in the **reference frame** (sampled
 at the rigid position `M0·xy`), which the tiled implementation produces naturally and which gives
 a decoupled warp inverse. §5/§6 describe this.
 
 **Remaining**
-- **Real-data accuracy validation** vs VALIS on real WSIs, quantified by the intrinsic TRE +
-  reg_qc=2 metrics.
+- **Run the accuracy harness on real WSIs vs VALIS** (operational — the metric and tooling are in
+  place; this is executing them on real slides + a VALIS run, which needs the cluster).
 - **Per-tile Nextflow fan-out (optional):** the current `TILED_REGISTER` is one task per moving
   slide that tiles *internally* (memory-bounded, ≤8 GB). Splitting the tiles into separate
   Nextflow tasks (§5's `REG_TILE`/`WARP_TILE`/`STITCH`) is a further parallelism step; the
