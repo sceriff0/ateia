@@ -1,6 +1,9 @@
 # STARE — a fully-parallel, tiled, laptop-friendly registration method for mirage
 
-**Status:** design proposal (not yet implemented). Converged via a design grilling session.
+**Status:** implemented on branch `feat/tiled-registration` (Phases 1–2 + Nextflow wiring, 56
+Python tests, JVM-free stub run green). Remaining: reg_qc=2 seg-QC Nextflow dispatch, the slim
+container, real-data accuracy validation, and the optional per-tile Nextflow fan-out (§5). See the
+status box after §10.
 **Working name:** **STARE** — *STar-Anchored Registration with Error (TRE)*.
 **Method id:** `registration_method = 'tiled'`.
 **Companion:** `docs/parallel_registration_research.md` — primary-source notes on ASHLAR & VALIS.
@@ -279,4 +282,41 @@ dedicated lean `withName:'TILED_*'` overrides (2–8 GB) or pair with a memory-c
 - **OME channel manifest.** STITCH must still emit `channels_manifest.json` (filename → OME
   channel names) so `TILED_ADAPTER` matches registered files back to meta by channel signature
   (`valis_adapter.nf:76-113`). Reuse `create_channels_manifest.py`.
+
+## Implementation status (branch `feat/tiled-registration`)
+
+**Done & verified**
+- **Phase 1 — reg_qc=2 seam:** `bin/utils/mesh_field.py` (smooth field + non-negative bilinear
+  resampler), `bin/utils/tiled_stage_warp.py` (`make_warper`). Unit-proven that the existing
+  `warp_seg_qc` scorer runs a `[native, rigid, refined]` plan through the tiled warper unchanged.
+- **Phase 2 — rigid core:** `tile_grid`, `coarse_align` (ORB+RANSAC M0 + residual TRE),
+  `tile_residual` (whitened/Hann phase-corr), `tiled_warp` (inverse-map bilinear, non-negative),
+  `tiled_manifest` (TRE-gated control grid), `tiled_pipeline.register_slide` (end-to-end). An
+  end-to-end test realigns a synthetically warped slide (corr > 0.9), a pure shift needs no mesh,
+  a non-rigid warp is captured by the mesh.
+- **CLI:** `bin/tiled_register.py` (100755) — real OME-TIFF I/O, smoke-tested.
+- **Nextflow wiring:** `modules/local/tiled_register.nf`, `subworkflows/local/adapters/tiled_adapter.nf`,
+  the `registration.nf` method branch, `validateRegistrationMethod += 'tiled'`, `reg_tiled_*`
+  params, and a lean 8 GB `TILED_REGISTER` resource block. **Stub run green** end-to-end
+  (`-profile test -stub --registration_method tiled --reg_qc 1`), JVM-free, no container needed.
+- **56 Python tests passing; ruff clean.**
+
+**Convention settled during implementation:** the mesh lives in the **reference frame** (sampled
+at the rigid position `M0·xy`), which the tiled implementation produces naturally and which gives
+a decoupled warp inverse. §5/§6 describe this.
+
+**Remaining**
+- **reg_qc=2 seg-QC Nextflow dispatch:** wire `WARP_SEG_QC --method tiled` to load the STARE
+  manifest via `tiled_stage_warp.make_warper` instead of the VALIS pickle (the *scorer* already
+  works — Phase 1; only the module dispatch is left). Until then, `reg_qc=2` under `tiled`
+  emits the DAPI-overlay QC only (with a warning).
+- **Slim container:** build/pin `python + numpy + scipy + scikit-image + tifffile` (no JVM).
+- **Real-data accuracy validation** vs VALIS on real WSIs, quantified by the intrinsic TRE +
+  reg_qc=2 metrics.
+- **Per-tile Nextflow fan-out (optional):** the current `TILED_REGISTER` is one task per moving
+  slide that tiles *internally* (memory-bounded, ≤8 GB). Splitting the tiles into separate
+  Nextflow tasks (§5's `REG_TILE`/`WARP_TILE`/`STITCH`) is a further parallelism step; the
+  algorithmic cores (`tile_grid`/`tile_residual`/`tiled_warp`/`tiled_manifest`) are already
+  factored for it.
+- **nf-test** module + integration coverage.
 ```

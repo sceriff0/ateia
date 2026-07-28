@@ -12,6 +12,7 @@ include { SEG_QC_GEOJSON                    } from '../../modules/local/seg_qc_g
 include { WARP_SEG_QC                       } from '../../modules/local/warp_seg_qc'
 
 include { VALIS_ADAPTER                     } from './adapters/valis_adapter'
+include { TILED_ADAPTER                     } from './adapters/tiled_adapter'
 
 include { ESTIMATE_FEATURE_DISTANCES        } from '../../modules/local/estimate_feature_distances'
 
@@ -176,16 +177,35 @@ workflow REGISTRATION {
     // skip_registration_qc=true forces 0). ParamUtils.regQcLevel is the single definition.
     def reg_qc_level = ParamUtils.regQcLevel(params)
 
-    // Level 2 warps polygons through the classic registrar pickle produced by REGISTER.
-    def do_seg_qc = reg_qc_level >= 2
+    // Level 2 warps polygons through the registrar the method produced (VALIS pickle, or the
+    // STARE manifest). The tiled method's reg_qc=2 seg-QC dispatch (WARP_SEG_QC --method tiled)
+    // is not wired yet, so for now level-2 seg-QC is capped to the DAPI overlay under 'tiled'.
+    def do_seg_qc = reg_qc_level >= 2 && params.registration_method != 'tiled'
+    if (reg_qc_level >= 2 && params.registration_method == 'tiled') {
+        log.warn "registration_method='tiled': reg_qc=2 segmentation-overlap QC is not wired yet; " +
+                 "emitting the DAPI-overlay QC only. The reg_qc=2 scorer already supports the tiled " +
+                 "warper (see docs/parallel_registration_design.md §4)."
+    }
 
-    VALIS_ADAPTER(ch_grouped_multi)
-    ch_registered       = VALIS_ADAPTER.out.registered
-    ch_registrar_pickle = VALIS_ADAPTER.out.registrar
-    ch_stage_checkpoint = VALIS_ADAPTER.out.stage_checkpoint
-    ch_adapter_logs     = VALIS_ADAPTER.out.size_logs
-    ch_adapter_versions = VALIS_ADAPTER.out.versions
-    ch_adapter_summary  = VALIS_ADAPTER.out.summary
+    // Dispatch on the registration method. Both adapters emit the identical channel contract,
+    // so everything downstream (QC, checkpoint, error estimation) is method-agnostic.
+    if (params.registration_method == 'tiled') {
+        TILED_ADAPTER(ch_grouped_multi)
+        ch_registered       = TILED_ADAPTER.out.registered
+        ch_registrar_pickle = TILED_ADAPTER.out.manifest
+        ch_stage_checkpoint = TILED_ADAPTER.out.stage_checkpoint
+        ch_adapter_logs     = TILED_ADAPTER.out.size_logs
+        ch_adapter_versions = TILED_ADAPTER.out.versions
+        ch_adapter_summary  = TILED_ADAPTER.out.summary
+    } else {
+        VALIS_ADAPTER(ch_grouped_multi)
+        ch_registered       = VALIS_ADAPTER.out.registered
+        ch_registrar_pickle = VALIS_ADAPTER.out.registrar
+        ch_stage_checkpoint = VALIS_ADAPTER.out.stage_checkpoint
+        ch_adapter_logs     = VALIS_ADAPTER.out.size_logs
+        ch_adapter_versions = VALIS_ADAPTER.out.versions
+        ch_adapter_summary  = VALIS_ADAPTER.out.summary
+    }
 
     // Re-introduce single-slide patients (reference passed through unregistered)
     // into the registered stream for QC, checkpointing and postprocessing.
