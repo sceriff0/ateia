@@ -2,12 +2,21 @@
 """Export cell data to QuPath-compatible GeoJSON.
 
 Generates a QuPath-native GeoJSON FeatureCollection with raw marker intensities
-and morphological measurements for all cells. No phenotype classification is
-applied — gating is handled downstream by FlowPath in QuPath.
+and morphological measurements for all cells.
+
+By default (no ``--panel_model``/``--phenotypes``) every cell gets a constant
+"Cell" classification and no ``id`` is stamped — gating is handled downstream
+by FlowPath in QuPath. When a compiled panel (``model_config.json``) and a
+``phenotypes.csv`` are supplied, each feature additionally gets a stamped
+``id`` ("<patient_id>:<label>"), a five-state classification (<Phenotype> /
+Ambiguous / Conflict / Artefact / Unclassified), numeric phenotype
+measurements (pheno_score, p_neg/p_pos, state, and QC fields), and a
+``panel_model.json`` sidecar is written alongside the GeoJSON outputs.
 
 Outputs:
     - cells.geojson: QuPath-compatible cell detections (native array measurement format)
     - cells_data.csv: Full cell data with raw intensities and z-scores per marker
+    - panel_model.json: FlowPath-facing panel projection (only when phenotyping is active)
 """
 
 from __future__ import annotations

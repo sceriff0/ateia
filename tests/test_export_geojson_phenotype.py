@@ -83,10 +83,18 @@ def test_end_to_end_export_stamps_and_classifies(tmp_path):
     f0 = gj["features"][0]
     assert f0["id"] == "P001:1"
     assert f0["properties"]["classification"]["name"] == "Tumour"
-    names = {m["name"] for m in f0["properties"]["measurements"]}
+    measurements = f0["properties"]["measurements"]
+    names = {m["name"] for m in measurements}
     assert "PanCK: Cytoplasm: Mean" in names        # legacy key unchanged
     assert "pheno_score: Tumour" in names           # new numeric evidence
     assert "PanCK: p_neg" in names
+    # label measurement: FlowPath reconstructs the stable id "<patient_id>:<label>"
+    # from this numeric measurement (QuPath drops non-UUID feature ids on import).
+    # A dropped emit must fail here, not just silently miss the key.
+    assert "label" in names
+    label_measurements = [m for m in measurements if m["name"] == "label"]
+    assert len(label_measurements) == 1
+    assert label_measurements[0]["value"] == 1
 
 
 def test_backward_compat_no_panel_supplied_is_unchanged(tmp_path):
