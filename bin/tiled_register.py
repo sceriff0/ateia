@@ -39,6 +39,7 @@ sys.path.insert(0, str(Path(__file__).parent / "utils"))
 import tifffile  # noqa: E402
 from logger import configure_logging, get_logger  # noqa: E402
 from tiled_pipeline import register_slide  # noqa: E402
+from tre_report import build_tre_report  # noqa: E402
 
 logger = get_logger(__name__)
 
@@ -110,23 +111,32 @@ def run(args) -> int:
     }
     Path(args.manifest).write_text(json.dumps(manifest, indent=2))
 
-    tre = np.asarray(result["tre_px"], dtype=float)
-    summary = {
-        "moving": args.moving_name,
-        "reference": args.reference_name,
-        "coarse_tre_px": float(result["coarse_tre"]),
-        "n_inliers": int(result["n_inliers"]),
-        "n_tiles": int(len(result["tiles"])),
-        "tre_px_mean": float(np.mean(tre)) if tre.size else None,
-        "tre_px_p50": float(np.median(tre)) if tre.size else None,
-        "tre_px_p90": float(np.percentile(tre, 90)) if tre.size else None,
-        "tre_px_max": float(np.max(tre)) if tre.size else None,
-        "mesh_refined": result["entry"]["mesh"] is not None,
-    }
+    records = [
+        {
+            "ix": t.ix,
+            "iy": t.iy,
+            "cx": t.cx,
+            "cy": t.cy,
+            "tre_rigid": float(pre),
+            "tre_after": float(post),
+        }
+        for t, pre, post in zip(
+            result["tiles"], result["tre_px"], result["tre_after_px"]
+        )
+    ]
+    summary = build_tre_report(
+        result["coarse_tre"],
+        result["n_inliers"],
+        records,
+        result["entry"]["mesh"] is not None,
+    )
+    summary["moving"] = args.moving_name
+    summary["reference"] = args.reference_name
     Path(args.tre_summary).write_text(json.dumps(summary, indent=2))
+    final = summary.get("residual_after_px", {}).get("p50")
     logger.info(
-        f"TRE: coarse={summary['coarse_tre_px']:.2f}px, "
-        f"tile p50={summary['tre_px_p50']}, refined={summary['mesh_refined']}"
+        f"TRE: coarse={summary['coarse_tre_px']:.2f}px, rigid p50={summary['rigid_tre_px']['p50']}, "
+        f"final p50={final}, refined={summary['mesh_refined']}"
     )
     return 0
 

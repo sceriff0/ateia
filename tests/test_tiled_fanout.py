@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import csv
 import glob
+import json
 import os
 import sys
 
@@ -127,6 +128,7 @@ def test_fanout_scripts_chain_into_a_registered_slide(tmp_path):
     assert len(glob.glob(str(tmp_path / "ctrl_*.json"))) == len(rows)
 
     man_f = tmp_path / "manifest.json"
+    tre_f = tmp_path / "tre.json"
     tiled_solve.main(
         [
             "--m0",
@@ -141,8 +143,15 @@ def test_fanout_scripts_chain_into_a_registered_slide(tmp_path):
             "mov",
             "--out-manifest",
             str(man_f),
+            "--out-tre",
+            str(tre_f),
         ]
     )
+    # fix: the fan-out now emits the intrinsic TRE (spatial rigid heatmap), not just the manifest
+    tre = json.loads(tre_f.read_text())
+    assert tre["n_tiles"] == len(rows)
+    assert len(tre["tiles"]) == len(rows)
+    assert "coarse_tre_px" in tre and tre["rigid_tre_px"]["p50"] is not None
 
     reg_f = tmp_path / "mov_registered.ome.tiff"
     tiled_stitch.main(
