@@ -36,7 +36,7 @@
     "memory_mode": "high",
     "reg_micro_reg_fraction": 0.125,
     "reg_max_image_dim": 4000,
-    "micro_reg": 0,
+    "reg_micro_reg": 0,
 
     "_comment_seg": "=== Segmentation ===",
     "seg_gpu": true,

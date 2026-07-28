@@ -92,13 +92,13 @@ class ParamUtils {
      * so the QC can honestly say what the 'rigid' stage means for a given run.
      */
     static int microRegLevel(Map params) {
-        return params.micro_reg == null ? 0 : (params.micro_reg as int)
+        return params.reg_micro_reg == null ? 0 : (params.reg_micro_reg as int)
     }
 
     static void validateMicroReg(int level) {
         def valid = [0, 1, 2]
         if (!(level in valid)) {
-            throw new IllegalArgumentException("Invalid --micro_reg '${level}'. Valid values: ${valid} (0=none, 1=micro-rigid only, 2=micro-rigid + micro non-rigid)")
+            throw new IllegalArgumentException("Invalid --reg_micro_reg '${level}'. Valid values: ${valid} (0=none, 1=micro-rigid only, 2=micro-rigid + micro non-rigid)")
         }
     }
 

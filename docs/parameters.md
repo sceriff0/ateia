@@ -71,7 +71,7 @@ VALIS whole-slide alignment.
 | `memory_mode` | `high` | `low` (BRISK/RANSAC, small dims), `medium`, or `high` (SuperPoint/SuperGlue, larger dims). |
 | `reg_micro_reg_fraction` | `0.125` | Image fraction used for micro-registration. |
 | `reg_max_image_dim` | `4000` | Max cached image dimension during registration. |
-| `micro_reg` | `0` | Micro-registration depth (nested): `0` = none, `1` = micro-rigid only (refines `slide.M`), `2` = + micro non-rigid (`register_micro`). At `>=1` the QC `rigid` stage means affine ∘ micro-rigid. |
+| `reg_micro_reg` | `0` | Micro-registration depth (nested): `0` = none, `1` = micro-rigid only (refines `slide.M`), `2` = + micro non-rigid (`register_micro`). At `>=1` the QC `rigid` stage means affine ∘ micro-rigid. |
 | `reg_jvm_heap_gb` | `null` | Explicit JVM heap (GB) for VALIS. `null` auto-estimates from input size. |
 | `reg_qc` | `2` | Registration QC depth: `0` = none, `1` = DAPI overlay only, `2` = DAPI overlay + [staged segmentation-overlap metrics](registration_qc.md). |
 
