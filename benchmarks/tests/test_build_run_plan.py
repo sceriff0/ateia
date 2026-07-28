@@ -132,19 +132,20 @@ def test_registration_param_grid_crosses_params_classic():
     sweep = {
         "strategy": "ofat",
         "baseline": {"target_px": 4096, "n_channels": 2, "n_register_images": 2,
-                     "memory_mode": "medium", "skip_micro_registration": True},
+                     "memory_mode": "medium", "reg_micro_reg": 0},
         "registration_param_grid": {
             "memory_mode": ["low", "medium", "high"],
-            "skip_micro_registration": [True, False],
+            "reg_micro_reg": [0, 1, 2],
         },
         "axes": {},
     }
     plan = build_run_plan(sweep, repeats=1)
     rp = [r for r in plan if r["varied_axis"] == "registration_param_grid"]
-    # 3 memory_mode x 2 skip_micro, classic path only (distributed path was removed from the pipeline)
-    assert len(rp) == 6
-    combo = {(r["memory_mode"], r["skip_micro_registration"]) for r in rp}
-    assert combo == {(mm, sm) for mm in ("low", "medium", "high") for sm in (True, False)}
+    # 3 memory_mode x 3 reg_micro_reg depths (0/1/2), VALIS path only (reg_micro_reg replaced the old
+    # boolean skip_micro_registration when the STARE merge landed on main).
+    assert len(rp) == 9
+    combo = {(r["memory_mode"], r["reg_micro_reg"]) for r in rp}
+    assert combo == {(mm, rmr) for mm in ("low", "medium", "high") for rmr in (0, 1, 2)}
     # the distributed knobs must not appear anywhere
     assert all("reg_distributed_tiling" not in r and "reg_dist_force_tiling" not in r for r in rp)
 
@@ -231,11 +232,11 @@ def test_project_sweep_caps_and_grids():
     sweep = yaml.safe_load(
         (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text())
     sg = sweep["scaling_grid"]
-    assert max(sg["target_px"]) == 65536        # capped: 131072 dropped
+    assert max(sg["target_px"]) == 90000        # largest benchmarked size (see sweep.yaml scaling_grid)
     assert sg["n_channels"] == [2, 4]           # 1 not benchmarked, max 4
     # registration is measured ACROSS sizes, not only at baseline
     rg = sweep["registration_grid"]
-    assert max(rg["target_px"]) == 65536
+    assert max(rg["target_px"]) == 90000
     assert rg["n_register_images"] == [4, 8]
     # input-scaling dimensions are owned by the grids, not double-covered as OFAT axes
     for k in ("target_px", "n_channels", "n_register_images"):

@@ -69,6 +69,11 @@ baseline:
   reg_micro_reg: 0                    # pipeline default: micro-registration DEPTH (0=none | 1=micro-rigid |
                                       # 2=+micro non-rigid). Replaces the old boolean skip_micro_registration
                                       # (removed on main); crossed with memory_mode by registration_param_grid.
+  reg_tiled_tile: 2048                # STARE tile core / mesh resolution (px), pipeline default. Only live when
+                                      # registration_method=tiled; declared here (like the seg_* backend params)
+                                      # so EVERY config shares columns — registration_method_grid crosses it.
+  reg_tiled_gate_tre: 1.0             # STARE per-tile non-rigid refine gate (px), pipeline default. Only live for
+                                      # tiled runs; declared for column uniformity (crossed by registration_method_grid).
   n_register_images: 2                # 1 reference + 1 moving (the classic pair)
   reg_qc: 2                           # pipeline default: staged registration QC ON — segments DAPI nuclei,
                                       # fixes correspondence at the rigid stage, re-measures dice_matched +

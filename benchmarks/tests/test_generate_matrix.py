@@ -214,9 +214,9 @@ def test_derive_from_sweep_matches_repo_sweep():
     from benchmarks.generate_matrix import derive_from_sweep
     d = derive_from_sweep(Path(__file__).parents[1] / "configs" / "sweep.yaml")
     assert d["n_moving"] == 7 and d["paired"] is True
-    # input-scale cells come from the scaling_grid: sizes capped at 65536,
-    # channels {2, 4} (1 not benchmarked). 131072 was dropped (~69 GB/cell).
-    assert max(d["target_px"]) == 65536
+    # input-scale cells come from the scaling_grid; 90000 is the largest benchmarked size.
+    # channels {2, 4} (1 not benchmarked). 131072 is not benchmarked (~69 GB/cell).
+    assert max(d["target_px"]) == 90000
     assert 131072 not in d["target_px"]
     assert d["n_channels"] == [2, 4]
 
