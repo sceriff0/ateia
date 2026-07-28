@@ -1,7 +1,7 @@
-label,PanCK: Cytoplasm: Mean,CD45: Cytoplasm: Mean,CD3: Cytoplasm: Mean,CD8: Cytoplasm: Mean,CD4: Cytoplasm: Mean,Ki67: Nucleus: Median
-1,10.1,0.1,0.0,0.0,0.0,10.0
-2,9.9,0.0,0.0,0.0,0.0,9.8
-3,10.2,0.2,0.0,0.0,0.0,10.1
-4,0.1,10.0,0.0,0.0,0.0,0.1
-5,0.0,9.8,0.0,0.0,0.0,0.0
-6,0.2,10.2,0.0,0.0,0.0,0.2
+label,x,y,PanCK: Cytoplasm: Mean,CD45: Cytoplasm: Mean,CD3: Cytoplasm: Mean,CD8: Cytoplasm: Mean,CD4: Cytoplasm: Mean,Ki67: Nucleus: Median
+1,10,10,10.1,0.1,0.0,0.0,0.0,10.0
+2,40,12,9.9,0.0,0.0,0.0,0.0,9.8
+3,15,50,10.2,0.2,0.0,0.0,0.0,10.1
+4,300,300,0.1,10.0,0.0,0.0,0.0,0.1
+5,330,305,0.0,9.8,0.0,0.0,0.0,0.0
+6,310,340,0.2,10.2,0.0,0.0,0.0,0.2
