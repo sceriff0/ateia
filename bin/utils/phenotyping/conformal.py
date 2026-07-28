@@ -61,3 +61,33 @@ def conformal_scores(sk: np.ndarray, cal: MarkerCalibration) -> Tuple[np.ndarray
             p_neg[i] = p_neg_scalar(sk[i], neg_cal)
             p_pos[i] = p_pos_scalar(sk[i], pos_cal)
     return p_neg, p_pos
+
+
+def resolve_sign(p_neg: float, p_pos: float, alpha: float) -> str:
+    """Two-sided sign resolution at level alpha (phenotyping section 5.4).
+
+    `neg` stays in the prediction set iff `p_neg > alpha`; `pos` stays in
+    the set iff `p_pos > alpha`. `{pos}` => "pos" (confidently positive,
+    sign 1), `{neg}` => "neg" (confidently negative, sign 0), `{pos,neg}`
+    => "free" (undetermined), `{}` => "contra" (contradiction, surfaced as
+    Artefact evidence downstream).
+    """
+    neg_in = p_neg > alpha
+    pos_in = p_pos > alpha
+    if pos_in and not neg_in:
+        return "pos"
+    if neg_in and not pos_in:
+        return "neg"
+    if neg_in and pos_in:
+        return "free"
+    return "contra"
+
+
+def resolve_signs(p_neg: np.ndarray, p_pos: np.ndarray, alpha: float) -> np.ndarray:
+    """Vectorized `resolve_sign`, returning a dtype=object array of the same strings."""
+    p_neg = np.asarray(p_neg, dtype=float)
+    p_pos = np.asarray(p_pos, dtype=float)
+    out = np.empty(p_neg.shape, dtype=object)
+    for i in range(p_neg.size):
+        out[i] = resolve_sign(float(p_neg[i]), float(p_pos[i]), alpha)
+    return out
