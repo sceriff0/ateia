@@ -91,7 +91,25 @@ def register_slide(
         else None
     )
 
-    # 4. warp the (possibly multi-channel) moving image with M0 + mesh
+    # 4. Post-refinement per-tile residual = STARE's final-accuracy TRE (the analogue of VALIS's
+    #    non-rigid error). Re-warp the DAPI with M0 + mesh and re-measure each tile against the
+    #    reference. With no mesh the rigid warp is final, so the rigid residual is already the
+    #    final residual — no second measurement needed.
+    if mesh is not None:
+        mov_refined = warp_image(mov_dapi, m0, mesh, ref_dapi.shape)
+        tre_after = []
+        for t in tiles:
+            rx0, ry0, rx1, ry1 = t.read
+            _dx, _dy, tre = residual_displacement(
+                ref_dapi[ry0:ry1, rx0:rx1],
+                mov_refined[ry0:ry1, rx0:rx1],
+                upsample=upsample,
+            )
+            tre_after.append(tre)
+    else:
+        tre_after = [r[2] for r in residuals]
+
+    # 5. warp the (possibly multi-channel) moving image with M0 + mesh
     data = warp_data if warp_data is not None else mov_dapi
     registered = warp_image(data, m0, mesh, out_shape)
 
@@ -102,7 +120,8 @@ def register_slide(
         "M0": m0,
         "tiles": tiles,
         "residuals": residuals,
-        "tre_px": [r[2] for r in residuals],
+        "tre_px": [r[2] for r in residuals],  # per-tile rigid-stage misalignment
+        "tre_after_px": tre_after,  # per-tile residual after refinement (final accuracy)
         "coarse_tre": coarse_tre,
         "n_inliers": n_inliers,
     }

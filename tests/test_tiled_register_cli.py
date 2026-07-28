@@ -98,3 +98,10 @@ def test_cli_registers_a_synthetic_pair(tmp_path):
     tre = json.loads(tre_f.read_text())
     assert tre["n_inliers"] >= 4
     assert tre["n_tiles"] >= 1
+    # intrinsic TRE: coarse (rigid feature-fit) + per-tile rigid spatial heatmap
+    assert "coarse_tre_px" in tre
+    assert tre["rigid_tre_px"]["p50"] is not None
+    assert len(tre["tiles"]) == tre["n_tiles"]  # one heatmap entry per tile
+    assert {"ix", "iy", "cx", "cy", "tre_rigid"} <= set(tre["tiles"][0])
+    # a shift is fully absorbed by M0 -> no mesh -> the rigid residual IS the final residual
+    assert tre["residual_after_px"]["p50"] is not None
