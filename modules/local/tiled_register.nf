@@ -15,7 +15,7 @@ process TILED_REGISTER {
     label 'process_medium'
 
     // Slim, JVM-free image (python + numpy + scipy + scikit-image + tifffile). No libvips/BioFormats.
-    // TODO(release): build & pin this image; see containers/README.md.
+    // Build context: containers/tiled/ (~438 MB); published by .github/workflows/build-images.yml.
     container 'bolt3x/attend_image_analysis:tiled'
 
     input:

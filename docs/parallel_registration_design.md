@@ -302,6 +302,9 @@ dedicated lean `withName:'TILED_*'` overrides (2–8 GB) or pair with a memory-c
   STARE manifest (no JVM), and `WARP_SEG_QC_TILED` + the `registration.nf` seg-QC branch feed it
   one manifest per moving slide. **Stub run green at reg_qc=2** — emits the `native/rigid/refined`
   `_seg_qc.json`. Unit-tested through the real CLI `main()`.
+- **Slim container (done):** `containers/tiled/` (`python:3.11-slim` + numpy/scipy/scikit-image/
+  tifffile, no JVM/libvips/GPU). **Built and verified locally** — the CLIs import and run
+  in-container; **~438 MB** vs the multi-GB VALIS image. Added to the `build-images.yml` matrix.
 - **~58 Python tests passing; ruff clean.**
 
 **Convention settled during implementation:** the mesh lives in the **reference frame** (sampled
@@ -309,7 +312,6 @@ at the rigid position `M0·xy`), which the tiled implementation produces natural
 a decoupled warp inverse. §5/§6 describe this.
 
 **Remaining**
-- **Slim container:** build/pin `python + numpy + scipy + scikit-image + tifffile` (no JVM).
 - **Real-data accuracy validation** vs VALIS on real WSIs, quantified by the intrinsic TRE +
   reg_qc=2 metrics.
 - **Per-tile Nextflow fan-out (optional):** the current `TILED_REGISTER` is one task per moving
