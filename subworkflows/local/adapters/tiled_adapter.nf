@@ -84,7 +84,7 @@ workflow TILED_ADAPTER {
             .mix(TILED_REG_TILE.out.versions.first())
             .mix(TILED_SOLVE.out.versions.first())
             .mix(TILED_STITCH.out.versions.first())
-        ch_summary           = Channel.empty()
+        ch_summary           = TILED_SOLVE.out.tre.map { _meta, f -> f }
     } else {
         TILED_REGISTER(ch_moving)
         ch_registered_moving = TILED_REGISTER.out.registered

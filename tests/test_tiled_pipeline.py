@@ -95,3 +95,9 @@ def test_local_deformation_is_captured_by_the_mesh():
     )  # local deformation -> refinement present
     assert len(result["tre_px"]) == len(result["tiles"])
     assert result["registered"].min() >= 0.0
+
+    # intrinsic TRE: the post-refinement residual (final accuracy) beats the rigid-stage residual.
+    assert len(result["tre_after_px"]) == len(result["tiles"])
+    rigid = float(np.median(result["tre_px"]))
+    final = float(np.median(result["tre_after_px"]))
+    assert final < rigid  # the mesh reduced the misalignment

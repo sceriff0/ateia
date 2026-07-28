@@ -23,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).parent / "utils"))
 import numpy as np  # noqa: E402
 from logger import configure_logging, get_logger  # noqa: E402
 from tiled_manifest import build_manifest, slide_entry  # noqa: E402
+from tre_report import build_tre_report  # noqa: E402
 
 logger = get_logger(__name__)
 
@@ -58,6 +59,11 @@ def main(argv=None) -> int:
     )
     ap.add_argument("--moving-name", required=True)
     ap.add_argument("--out-manifest", required=True)
+    ap.add_argument(
+        "--out-tre",
+        default=None,
+        help="output intrinsic-TRE summary JSON (rigid-stage spatial TRE from the control points)",
+    )
     a = ap.parse_args(argv)
 
     m0_doc = json.loads(Path(a.m0).read_text())
@@ -85,6 +91,35 @@ def main(argv=None) -> int:
         },
     )
     Path(a.out_manifest).write_text(json.dumps(manifest, indent=2))
+
+    # Intrinsic TRE (fix: the fan-out used to drop this). Built from the same per-tile phase
+    # correlations the registration used — coarse rigid TRE + a spatial per-tile heatmap. The
+    # post-refinement residual is not measured here (no re-warp in this reduction); the default
+    # monolithic path and the reg_benchmark harness provide the final-accuracy number.
+    if a.out_tre:
+        records = [
+            {
+                "ix": int(c["ix"]),
+                "iy": int(c["iy"]),
+                "cx": float(c["cx"]),
+                "cy": float(c["cy"]),
+                "tre_rigid": float(c["tre"]),
+            }
+            for c in controls
+        ]
+        report = build_tre_report(
+            m0_doc.get("coarse_tre", 0.0),
+            m0_doc.get("n_inliers", 0),
+            records,
+            entry["mesh"] is not None,
+        )
+        report["moving"] = a.moving_name
+        report["reference"] = reference_name
+        report["note"] = (
+            "fan-out: rigid-stage spatial TRE; post-refinement residual not measured here"
+        )
+        Path(a.out_tre).write_text(json.dumps(report, indent=2))
+
     n_refined = sum(1 for row in disp for d in row if d != [0.0, 0.0])
     logger.info(
         f"solve: {len(controls)} tiles -> manifest (mesh={'yes' if entry['mesh'] else 'no'}, "

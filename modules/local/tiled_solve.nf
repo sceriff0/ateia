@@ -15,6 +15,7 @@ process TILED_SOLVE {
 
     output:
     tuple val(meta), path("*_manifest.json"), emit: manifest
+    tuple val(meta), path("*_tre.json")     , emit: tre
     path "versions.yml"                     , emit: versions
 
     when:
@@ -30,7 +31,8 @@ process TILED_SOLVE {
         --controls 'ctrl_*/*_ctrl.json' \\
         --gate-tre ${gate} \\
         --moving-name '${slidename}' \\
-        --out-manifest ${prefix}_manifest.json
+        --out-manifest ${prefix}_manifest.json \\
+        --out-tre ${prefix}_tre.json
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
@@ -43,6 +45,7 @@ process TILED_SOLVE {
     def slidename = meta.channels.join('_')
     """
     echo '{"ref_slide":"ref","slides":{"ref":{"M0":[[1,0,0],[0,1,0],[0,0,1]],"mesh":null},"${slidename}":{"M0":[[1,0,0],[0,1,0],[0,0,1]],"mesh":null,"out_shape":[16,16]}}}' > ${prefix}_manifest.json
+    echo '{"coarse_tre_px":0,"n_inliers":0,"n_tiles":0,"mesh_refined":false,"rigid_tre_px":{"mean":null,"p50":null,"p90":null,"max":null},"tiles":[]}' > ${prefix}_tre.json
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         python: stub
