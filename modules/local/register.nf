@@ -194,9 +194,10 @@ process REGISTER {
     // exercise the same channel wiring the real run does (including its absence at reg_qc<2).
     // Uses the same ParamUtils.regQcLevel default (null -> 2) as the script block above.
     def stub_qc_level = ParamUtils.regQcLevel(params)
+    def stub_micro_reg = ParamUtils.microRegLevel(params)
     def stub_ckpt = stub_qc_level < 2 ? '' : """
     mkdir -p reg_stage_checkpoint
-    echo '{"version": 1, "stage": "post_non_rigid_pre_micro", "micro_registration": true, "slides": {}, "errors": []}' > reg_stage_checkpoint/stage_checkpoint.json
+    echo '{"version": 1, "stage": "post_non_rigid_pre_micro", "micro_registration": ${stub_micro_reg >= 2}, "slides": {}, "errors": []}' > reg_stage_checkpoint/stage_checkpoint.json
     """
     """
     mkdir -p registered_slides preprocessed/data
