@@ -36,8 +36,7 @@ measures exactly the transform that shipped.
 from __future__ import annotations
 
 import numpy as np
-
-from .mesh_field import MeshField
+from mesh_field import MeshField
 
 __all__ = [
     "STAGE_NATIVE",
