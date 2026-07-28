@@ -16,6 +16,8 @@ exclude_docs: |
   assets/images/README.md
   superpowers/
   _archive/
+  parallel_registration_design.md
+  parallel_registration_research.md
 
 # ---------------------------------------------------------------------------
 # Theme

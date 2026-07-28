@@ -48,9 +48,9 @@ if BASICPY_VERSION != "unknown" and PYDANTIC_VERSION != "unknown":
     except Exception:
         pass
 
-from basicpy import BaSiC  # type: ignore
-from image_utils import ensure_dir
-from validation import detect_negative_values, log_image_stats
+from basicpy import BaSiC  # type: ignore  # noqa: E402
+from image_utils import ensure_dir  # noqa: E402
+from validation import detect_negative_values, log_image_stats  # noqa: E402
 
 logger = get_logger(__name__)
 
@@ -70,7 +70,11 @@ __all__ = [
 def count_fovs(
     image_shape: Tuple[int, int], fov_size: Tuple[int, int], overlap: int = 0
 ) -> Tuple[int, int]:
-    """Calculate how many FOVs are needed to cover an image with given FOV size and overlap."""
+    """Calculate how many FOVs are needed to cover an image with given FOV size and overlap.
+
+    Note: `overlap` changes only the FOV tile COUNT used for BaSiC fitting;
+    extraction (split_image_into_fovs) is non-overlapping by design.
+    """
     height, width = image_shape[:2]
     fov_h, fov_w = fov_size
 
@@ -167,6 +171,7 @@ def apply_basic_correction(
     get_darkfield: bool = True,
     autotune: bool = False,
     n_iter: int = 100,
+    overlap: int = 0,
     **basic_kwargs,
 ) -> Tuple[NDArray, object]:
     """
@@ -177,7 +182,7 @@ def apply_basic_correction(
             f"apply_basic_correction requires a 2D image, got shape {image.shape}"
         )
 
-    n_fovs_y, n_fovs_x = count_fovs(image.shape, fov_size)
+    n_fovs_y, n_fovs_x = count_fovs(image.shape, fov_size, overlap=overlap)
     fov_stack, positions, _ = split_image_into_fovs(image, n_fovs_x, n_fovs_y)
 
     basic = BaSiC(get_darkfield=get_darkfield, smoothness_flatfield=1)
@@ -386,6 +391,10 @@ def preprocess_multichannel_image(
             if np.issubdtype(multichannel_stack.dtype, np.integer)
             else preprocessed
         )
+        if np.issubdtype(multichannel_stack.dtype, np.integer):
+            # Round to nearest (half-to-even) before casting so fractional BaSiC
+            # output doesn't get silently truncated toward zero (astype floors).
+            preprocessed = np.round(preprocessed)
         preprocessed = preprocessed.astype(multichannel_stack.dtype)
 
     # Log output statistics after all processing

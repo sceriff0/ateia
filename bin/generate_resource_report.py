@@ -7,8 +7,9 @@ Joins the aggregated input-size log with Nextflow's trace.txt. Stdlib only.
 
 import argparse
 import csv
+import html
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 _UNIT = {"B": 1, "KB": 1024, "MB": 1024**2, "GB": 1024**3, "TB": 1024**4}
@@ -19,7 +20,15 @@ def parse_bytes(s):
     if s is None:
         return None
     s = s.strip()
-    if not s or s in {"-", "0"} and s == "-":
+    # Operator precedence note: `and` binds tighter than `or`, so the buggy
+    # source form of this condition (`s in {"-", "0"} and s == "-"`) reduces,
+    # for every value of s, to exactly `s == "-"` — the "0" set member was
+    # inert and never fired. A bare "0" is a real zero-byte reading (e.g.
+    # peak_rss/rchar/wchar can genuinely be 0 for a trivial task) and must
+    # keep falling through to float("0") == 0.0, matching parse_duration's
+    # and parse_percent's identical `not s or s == "-"` guard. Only "-"
+    # (Nextflow's not-run/cached sentinel) and empty are "missing".
+    if not s or s == "-":
         return None
     m = re.match(r"^([\d.]+)\s*([KMGT]?B)$", s, re.IGNORECASE)
     if m:
@@ -139,7 +148,7 @@ def rollup_by_process(trace_rows):
             "peak_vmem_max_b": _maxf([r.get("peak_vmem_b") for r in rows]),
             "rchar_total_b": _sumf([r.get("rchar_b") for r in rows]),
             "wchar_total_b": _sumf([r.get("wchar_b") for r in rows]),
-            "n_failed": sum(1 for r in rows if r.get("exit") not in ("0", "", None)),
+            "n_failed": sum(1 for r in rows if r.get("exit") not in ("0", "", "-", None)),
         })
     return out
 
@@ -157,8 +166,10 @@ def join_size(trace_rows, size_map):
         if input_bytes is None:
             # Fallback: a size sample whose id is a prefix of the trace tag
             # (trace tag is meta.id = "<patient>_<stem>"; size sample is patient).
+            # Boundary-match on "_" so sample "P1" cannot prefix-match tag
+            # "P10_slide" (a plain startswith would false-positive there).
             for sample, b in by_proc.get(proc, []):
-                if sample and (tag == sample or tag.startswith(sample)):
+                if sample and (tag == sample or tag.startswith(sample + "_")):
                     input_bytes = b
                     break
         joined.append({**r, "input_bytes": input_bytes})
@@ -204,6 +215,23 @@ tr:hover td{background:#f8f9fa}
 """
 
 
+def _esc(v):
+    """Escape a dynamic value (process name, tag, status, exit code, path,
+    etc.) for safe inclusion in HTML. Kept as its own tiny helper (rather
+    than importing anything from generate_qc_report.py) so this script stays
+    stdlib-only and self-contained; `html` is stdlib so this is allowed."""
+    return html.escape(str(v))
+
+
+def _html_table(headers, rows):
+    """Build a complete ``<table>``, escaping every header and cell value."""
+    thead = "".join(f"<th>{_esc(h)}</th>" for h in headers)
+    body = "".join(
+        "<tr>" + "".join(f"<td>{_esc(v)}</td>" for v in row) + "</tr>" for row in rows
+    )
+    return f"<table><thead><tr>{thead}</tr></thead><tbody>{body}</tbody></table>"
+
+
 def _section(title, body):
     return f"<section><h2>{title}</h2><div class='body'>{body}</div></section>"
 
@@ -226,7 +254,7 @@ def build_html(trace_rows, size_map, timestamp, native_report=None, native_timel
 
     # Run totals
     total_wall = _sumf([r.get("realtime_s") for r in trace_rows])
-    n_fail = sum(1 for r in trace_rows if r.get("exit") not in ("0", "", None))
+    n_fail = sum(1 for r in trace_rows if r.get("exit") not in ("0", "", "-", None))
     peak = _maxf([r.get("peak_rss_b") for r in trace_rows])
     totals = (f"<table><tbody>"
               f"<tr><th>Total tasks</th><td>{len(trace_rows)}</td></tr>"
@@ -243,10 +271,11 @@ def build_html(trace_rows, size_map, timestamp, native_report=None, native_timel
            "<th>Max peak VMEM</th><th>Read</th><th>Write</th><th>Failed</th>"
            "</tr></thead><tbody>")
     for r in roll:
-        tbl += (f"<tr><td>{r['process']}</td><td>{r['n_tasks']}</td>"
+        cpu_max = "" if r["cpu_max_pct"] is None else f"{r['cpu_max_pct']}%"
+        tbl += (f"<tr><td>{_esc(r['process'])}</td><td>{r['n_tasks']}</td>"
                 f"<td>{fmt_secs(r['realtime_total_s'])}</td>"
                 f"<td>{fmt_secs(r['realtime_mean_s'])}</td>"
-                f"<td>{'' if r['cpu_max_pct'] is None else r['cpu_max_pct']}</td>"
+                f"<td>{cpu_max}</td>"
                 f"<td>{fmt_bytes(r['peak_rss_max_b'])}</td>"
                 f"<td>{fmt_bytes(r['peak_vmem_max_b'])}</td>"
                 f"<td>{fmt_bytes(r['rchar_total_b'])}</td>"
@@ -263,9 +292,8 @@ def build_html(trace_rows, size_map, timestamp, native_report=None, native_timel
                "<th>Input size</th><th>Peak RSS</th><th>Realtime</th>"
                "<th>RSS / input GB</th></tr></thead><tbody>")
         for j in sorted(with_size, key=lambda x: -(x.get("peak_rss_b") or 0)):
-            gb = j["input_bytes"] / 1024**3
             ratio = (j["peak_rss_b"] / j["input_bytes"]) if (j.get("peak_rss_b") is not None and j["input_bytes"]) else None
-            tbl += (f"<tr><td>{j['process']}</td><td>{j.get('tag', '')}</td>"
+            tbl += (f"<tr><td>{_esc(j['process'])}</td><td>{_esc(j.get('tag', ''))}</td>"
                     f"<td>{fmt_bytes(j['input_bytes'])}</td>"
                     f"<td>{fmt_bytes(j.get('peak_rss_b'))}</td>"
                     f"<td>{fmt_secs(j.get('realtime_s'))}</td>"
@@ -283,10 +311,10 @@ def build_html(trace_rows, size_map, timestamp, native_report=None, native_timel
                      key=lambda x: -x["realtime_s"])[:10]
 
     def _top(rows, valf, fmt):
-        t = "<table><thead><tr><th>Process</th><th>Sample</th><th>Value</th></tr></thead><tbody>"
-        for r in rows:
-            t += f"<tr><td>{r['process']}</td><td>{r.get('tag', '')}</td><td>{fmt(valf(r))}</td></tr>"
-        return t + "</tbody></table>"
+        return _html_table(
+            ["Process", "Sample", "Value"],
+            [[r["process"], r.get("tag", ""), fmt(valf(r))] for r in rows],
+        )
 
     parts.append(_section("Top 10 by Peak RSS",
                  _top(heaviest, lambda r: r["peak_rss_b"], fmt_bytes)))
@@ -294,12 +322,13 @@ def build_html(trace_rows, size_map, timestamp, native_report=None, native_timel
                  _top(slowest, lambda r: r["realtime_s"], fmt_secs)))
 
     # Retries & failures
-    fails = [r for r in trace_rows if r.get("exit") not in ("0", "", None)]
+    fails = [r for r in trace_rows if r.get("exit") not in ("0", "", "-", None)]
     if fails:
         t = "<table><thead><tr><th>Process</th><th>Sample</th><th>Status</th><th>Exit</th></tr></thead><tbody>"
         for r in fails:
-            t += (f"<tr><td>{r['process']}</td><td>{r.get('tag', '')}</td>"
-                  f"<td>{r.get('status', '')}</td><td class='fail'>{r.get('exit', '')}</td></tr>")
+            t += (f"<tr><td>{_esc(r['process'])}</td><td>{_esc(r.get('tag', ''))}</td>"
+                  f"<td>{_esc(r.get('status', ''))}</td>"
+                  f"<td class='fail'>{_esc(r.get('exit', ''))}</td></tr>")
         t += "</tbody></table>"
         parts.append(_section("Retries &amp; Failures", t))
     else:
@@ -309,9 +338,9 @@ def build_html(trace_rows, size_map, timestamp, native_report=None, native_timel
     # Pointers to native reports
     links = []
     if native_report:
-        links.append(f"<li>Interactive execution report: <code>{native_report}</code></li>")
+        links.append(f"<li>Interactive execution report: <code>{_esc(native_report)}</code></li>")
     if native_timeline:
-        links.append(f"<li>Timeline: <code>{native_timeline}</code></li>")
+        links.append(f"<li>Timeline: <code>{_esc(native_timeline)}</code></li>")
     if links:
         parts.append(_section("Nextflow Native Reports", "<ul>" + "".join(links) + "</ul>"))
 
@@ -331,14 +360,16 @@ def parse_args():
 
 def main():
     args = parse_args()
-    timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     trace_rows = parse_trace(args.trace)
     size_map = parse_size_log(args.size_log)
-    html = build_html(trace_rows, size_map, timestamp,
-                      args.native_report, args.native_timeline)
+    # Named report_html (not `html`) to avoid shadowing the stdlib `html`
+    # module used for escaping elsewhere in this file.
+    report_html = build_html(trace_rows, size_map, timestamp,
+                              args.native_report, args.native_timeline)
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(html, encoding="utf-8")
+    out.write_text(report_html, encoding="utf-8")
     print(f"Resource report written to: {out}")
     return 0
 

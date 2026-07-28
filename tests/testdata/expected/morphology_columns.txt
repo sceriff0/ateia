@@ -1,1 +1,0 @@
-label,y,x,area,eccentricity,perimeter,convex_area,axis_major_length,axis_minor_length

@@ -8,11 +8,12 @@ All images are embedded as base64; no external dependencies required.
 import argparse
 import base64
 import csv
+import html
 import json
 import logging
 import shutil
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent / "utils"))
@@ -110,27 +111,13 @@ def img_to_b64(path):
     return f"data:{mime};base64,{data}"
 
 
-def parse_valis_summary(csv_path):
+def parse_csv_table(csv_path):
     """
-    Parse a preprocessed_summary.csv (or similar) produced by Valis.
-    Returns (headers, rows) where each row is a list of strings.
-    Shows all columns present in the CSV (including rTRE, D, n_matches, etc.).
-    """
-    with open(csv_path, newline="") as fh:
-        reader = csv.DictReader(fh)
-        display_headers = reader.fieldnames or []
-        rows = []
-        for row in reader:
-            rows.append([row.get(h, "") for h in display_headers])
-    return display_headers, rows
-
-
-def parse_seg_eval_csv(csv_path):
-    """
-    Parse a segmentation_metrics.csv produced by MERGE_SEG_EVAL (CSE).
-    Columns are dynamic: always `id`, `QualityScore`, plus zero or more
-    `metric::submetric` columns. Returns (headers, rows) like
-    parse_valis_summary.
+    Parse a generic CSV into (headers, rows) where each row is a list of
+    strings in header order. Used for both the Valis preprocessed_summary.csv
+    (rTRE, D, n_matches, etc.) and the CSE segmentation_metrics.csv (id,
+    QualityScore, plus zero or more dynamic `metric::submetric` columns) —
+    the two were byte-identical parsers, so they share this implementation.
     """
     with open(csv_path, newline="") as fh:
         reader = csv.DictReader(fh)
@@ -215,9 +202,13 @@ def versions_section(versions_path):
     tbl = "<table><thead><tr><th>Process</th><th>Tool</th><th>Version</th></tr></thead><tbody>"
     for proc in sorted(versions):
         tools = versions[proc]
+        proc_esc = html.escape(str(proc))
         for i, tool in enumerate(sorted(tools)):
-            proc_cell = f"<td rowspan='{len(tools)}'>{proc}</td>" if i == 0 else ""
-            tbl += f"<tr>{proc_cell}<td>{tool}</td><td>{tools[tool]}</td></tr>"
+            proc_cell = f"<td rowspan='{len(tools)}'>{proc_esc}</td>" if i == 0 else ""
+            tbl += (
+                f"<tr>{proc_cell}<td>{html.escape(str(tool))}</td>"
+                f"<td>{html.escape(str(tools[tool]))}</td></tr>"
+            )
     tbl += "</tbody></table>"
     return section("Software Versions", tbl)
 
@@ -237,7 +228,8 @@ def parse_run_summary_json(path):
 def _kv_table(pairs):
     """Render a list of (label, value) tuples as a two-column table."""
     rows = "".join(
-        f"<tr><th style='width:240px'>{k}</th><td>{'' if v is None else v}</td></tr>"
+        f"<tr><th style='width:240px'>{html.escape(str(k))}</th>"
+        f"<td>{'' if v is None else html.escape(str(v))}</td></tr>"
         for k, v in pairs
     )
     return f"<table><tbody>{rows}</tbody></table>"
@@ -246,7 +238,9 @@ def _kv_table(pairs):
 def run_summary_section(summary):
     """Top overview card: pipeline, run context, and key parameters used."""
     if not summary:
-        return section("Run Summary", '<p class="empty-notice">Run summary not available.</p>')
+        return section(
+            "Run Summary", '<p class="empty-notice">Run summary not available.</p>'
+        )
     pipe = summary.get("pipeline", {})
     run = summary.get("run", {})
     params = summary.get("params", {})
@@ -270,7 +264,7 @@ def status_strip_section(present):
         badges.append(
             f"<span style='display:inline-block;margin:4px 8px 4px 0;padding:6px 12px;"
             f"border-radius:14px;background:{color};color:#fff;font-size:0.85rem;'>"
-            f"{stage}: {label}</span>"
+            f"{html.escape(str(stage))}: {label}</span>"
         )
     return section("Pipeline Stages", "<div>" + "".join(badges) + "</div>")
 
@@ -279,21 +273,30 @@ def manifest_section(summary):
     """Sample manifest: totals plus a per-patient image/channel table."""
     manifest = (summary or {}).get("manifest", {})
     if not manifest:
-        return section("Sample Manifest", '<p class="empty-notice">Manifest not available.</p>')
+        return section(
+            "Sample Manifest", '<p class="empty-notice">Manifest not available.</p>'
+        )
     totals = manifest.get("totals", {})
     patients = manifest.get("patients", {})
-    head = _kv_table([
-        ("Patients", totals.get("patients")),
-        ("Images", totals.get("images")),
-        ("Channels", totals.get("channels")),
-    ])
-    tbl = ("<table style='margin-top:14px'><thead><tr>"
-           "<th>Patient</th><th>Images</th><th>Channels</th>"
-           "</tr></thead><tbody>")
+    head = _kv_table(
+        [
+            ("Patients", totals.get("patients")),
+            ("Images", totals.get("images")),
+            ("Channels", totals.get("channels")),
+        ]
+    )
+    tbl = (
+        "<table style='margin-top:14px'><thead><tr>"
+        "<th>Patient</th><th>Images</th><th>Channels</th>"
+        "</tr></thead><tbody>"
+    )
     for pid in sorted(patients):
         row = patients[pid]
-        tbl += (f"<tr><td>{pid}</td><td>{row.get('images', '')}</td>"
-                f"<td>{row.get('channels', '')}</td></tr>")
+        tbl += (
+            f"<tr><td>{html.escape(str(pid))}</td>"
+            f"<td>{html.escape(str(row.get('images', '')))}</td>"
+            f"<td>{html.escape(str(row.get('channels', '')))}</td></tr>"
+        )
     tbl += "</tbody></table>"
     return section("Sample Manifest", head + tbl)
 
@@ -402,6 +405,31 @@ def section(title, body_html):
     )
 
 
+def _html_table(headers, rows, extra_body_html=""):
+    """
+    Build a complete ``<table>`` (with ``<thead>``/``<tbody>``), escaping
+    every header and every cell value via ``html.escape``.
+
+    Centralizes the table-render logic that used to be duplicated across the
+    registration-QC Valis rTRE table, the CSE seg-eval table, and the
+    feature-distance table, and ensures none of them can inject raw
+    CSV/JSON-derived HTML into the report.
+
+    `extra_body_html`: optional pre-rendered ``<tr>...</tr>`` HTML appended
+    after the normal rows — for full-width/``colspan`` rows (e.g. a
+    per-file parse-error notice) that don't fit the uniform one-cell-per-
+    header row shape every other row uses. The caller is responsible for
+    escaping any dynamic values it interpolates into this HTML itself.
+    """
+    thead = "".join(f"<th>{html.escape(str(h))}</th>" for h in headers)
+    body = "".join(
+        "<tr>" + "".join(f"<td>{html.escape(str(v))}</td>" for v in row) + "</tr>"
+        for row in rows
+    )
+    body += extra_body_html
+    return f"<table><thead><tr>{thead}</tr></thead><tbody>{body}</tbody></table>"
+
+
 def img_grid(png_files, wide=False):
     """Render a list of PNG files as a grid of base64-embedded image cards."""
     if not png_files:
@@ -410,7 +438,7 @@ def img_grid(png_files, wide=False):
     cards = []
     for p in png_files:
         b64 = img_to_b64(p)
-        name = Path(p).name
+        name = html.escape(Path(p).name)
         cards.append(
             f'<div class="img-card">'
             f'<img src="{b64}" alt="{name}" loading="lazy">'
@@ -426,7 +454,9 @@ def preprocess_qc_section(preprocess_dir):
     return section("Preprocessing QC", img_grid(pngs))
 
 
-def registration_qc_section(reg_dir, feat_dir, valis_dir, dist_plots_dir=None, seg_qc_dir=None):
+def registration_qc_section(
+    reg_dir, feat_dir, valis_dir, dist_plots_dir=None, seg_qc_dir=None
+):
     """Build the registration-QC report section (overlay images plus accuracy tables)."""
     parts = []
 
@@ -437,35 +467,37 @@ def registration_qc_section(reg_dir, feat_dir, valis_dir, dist_plots_dir=None, s
     )
     parts.append(img_grid(pngs))
 
-    # Valis rTRE table
+    # Registration-accuracy summaries. The method decides the format: VALIS emits rTRE CSVs, the
+    # tiled ('STARE') method emits its own intrinsic-TRE JSON (_tre.json) — both land here.
     valis_csvs = list_files(valis_dir, "*.csv")
+    tiled_tre_jsons = list_files(valis_dir, "*_tre.json")
     if valis_csvs:
         parts.append(
             "<h3 style='margin:20px 0 8px;font-size:1rem;color:#444;'>Registration Accuracy (Valis rTRE)</h3>"
         )
         for csv_path in valis_csvs:
             try:
-                headers, rows = parse_valis_summary(csv_path)
+                headers, rows = parse_csv_table(csv_path)
             except Exception as exc:
                 parts.append(
-                    f'<p class="empty-notice">Could not parse {Path(csv_path).name}: {exc}</p>'
+                    '<p class="empty-notice">Could not parse '
+                    f"{html.escape(Path(csv_path).name)}: {html.escape(str(exc))}</p>"
                 )
                 continue
             parts.append(
-                f"<p style='font-size:0.85rem;color:#666;margin-bottom:6px;'>{Path(csv_path).name}</p>"
+                "<p style='font-size:0.85rem;color:#666;margin-bottom:6px;'>"
+                f"{html.escape(Path(csv_path).name)}</p>"
             )
-            tbl = (
-                "<table><thead><tr>"
-                + "".join(f"<th>{h}</th>" for h in headers)
-                + "</tr></thead><tbody>"
-            )
-            for row in rows:
-                tbl += "<tr>" + "".join(f"<td>{v}</td>" for v in row) + "</tr>"
-            tbl += "</tbody></table>"
-            parts.append(tbl)
-    else:
+            parts.append(_html_table(headers, rows))
+    if tiled_tre_jsons:
         parts.append(
-            '<p class="empty-notice" style="margin-top:12px;">No Valis summary CSVs found.</p>'
+            "<h3 style='margin:20px 0 8px;font-size:1rem;color:#444;'>Registration Accuracy "
+            "(STARE Tiled TRE)</h3>"
+        )
+        parts.append(_tiled_tre_tables(tiled_tre_jsons))
+    if not valis_csvs and not tiled_tre_jsons:
+        parts.append(
+            '<p class="empty-notice" style="margin-top:12px;">No registration-accuracy summary found.</p>'
         )
 
     # Feature distance table
@@ -474,16 +506,17 @@ def registration_qc_section(reg_dir, feat_dir, valis_dir, dist_plots_dir=None, s
         parts.append(
             "<h3 style='margin:20px 0 8px;font-size:1rem;color:#444;'>Feature Distances</h3>"
         )
-        tbl = (
-            "<table><thead><tr>"
-            "<th>File</th><th>Before Mean</th><th>After Mean</th><th>Improvement (%)</th>"
-            "</tr></thead><tbody>"
-        )
+        feat_headers = ["File", "Before Mean", "After Mean", "Improvement (%)"]
+        feat_rows = []
+        feat_error_rows_html = []
         for jp in feat_jsons:
             try:
                 info = parse_feature_dist_json(jp)
             except Exception as exc:
-                tbl += f"<tr><td>{Path(jp).name}</td><td colspan='3'>Parse error: {exc}</td></tr>"
+                feat_error_rows_html.append(
+                    f"<tr><td>{html.escape(Path(jp).name)}</td>"
+                    f"<td colspan='3'>Parse error: {html.escape(str(exc))}</td></tr>"
+                )
                 continue
             bm = (
                 f"{info['before_mean']:.4f}"
@@ -498,9 +531,10 @@ def registration_qc_section(reg_dir, feat_dir, valis_dir, dist_plots_dir=None, s
                 if info["improvement_pct"] is not None
                 else "N/A"
             )
-            tbl += f"<tr><td>{info['file']}</td><td>{bm}</td><td>{am}</td><td>{imp}</td></tr>"
-        tbl += "</tbody></table>"
-        parts.append(tbl)
+            feat_rows.append([info["file"], bm, am, imp])
+        parts.append(
+            _html_table(feat_headers, feat_rows, "".join(feat_error_rows_html))
+        )
     else:
         parts.append(
             '<p class="empty-notice" style="margin-top:12px;">No feature-distance JSONs found.</p>'
@@ -562,19 +596,284 @@ def _seg_qc_table(json_path):
     warp-seg QC table is built in exactly one place.
     """
     parts = [
-        f"<p style='font-size:0.85rem;color:#666;margin:8px 0 4px;'>{Path(json_path).name}</p>"
+        "<p style='font-size:0.85rem;color:#666;margin:8px 0 4px;'>"
+        f"{html.escape(Path(json_path).name)}</p>"
     ]
     try:
         rows = parse_seg_qc_json(json_path)
     except Exception as exc:  # noqa: BLE001 - report, never crash
-        parts.append(f'<p class="empty-notice">Could not parse {Path(json_path).name}: {exc}</p>')
+        parts.append(
+            '<p class="empty-notice">Could not parse '
+            f"{html.escape(Path(json_path).name)}: {html.escape(str(exc))}</p>"
+        )
         return "\n".join(parts)
-    tbl = "<table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>"
-    for k, v in rows:
-        tbl += f"<tr><td>{k}</td><td>{v}</td></tr>"
-    tbl += "</tbody></table>"
-    parts.append(tbl)
+    parts.append(_html_table(["Metric", "Value"], rows))
     return "\n".join(parts)
+
+
+# ── STARE tiled-registration intrinsic TRE ──────────────────────────────────────
+# The tiled ('STARE') method emits its own intrinsic Target Registration Error per slide
+# (_tre.json), the way VALIS emits rTRE: coarse (rigid) feature-fit TRE, a per-tile spatial
+# heatmap VALIS does not have, and — in the default path — the post-refinement residual (its
+# analogue of VALIS's non-rigid error). Rendered here alongside the other registration-accuracy
+# tables so both methods surface a comparable number.
+def _fmt_px(v):
+    return f"{v:.2f}" if isinstance(v, (int, float)) else "n/a"
+
+
+def parse_tiled_tre_json(path):
+    """Flatten a STARE _tre.json into the headline registration-accuracy fields."""
+    with open(path, encoding="utf-8") as fh:
+        data = json.load(fh)
+
+    def pct(block, key):
+        b = data.get(block)
+        return b.get(key) if isinstance(b, dict) else None
+
+    return {
+        "file": Path(path).name,
+        "moving": data.get("moving") or Path(path).name,
+        "coarse_tre_px": data.get("coarse_tre_px"),
+        "n_tiles": data.get("n_tiles"),
+        "mesh_refined": bool(data.get("mesh_refined")),
+        "rigid_p50": pct("rigid_tre_px", "p50"),
+        "rigid_p90": pct("rigid_tre_px", "p90"),
+        "final_p50": pct("residual_after_px", "p50"),
+        "final_p90": pct("residual_after_px", "p90"),
+        "tiles": data.get("tiles", []) or [],
+    }
+
+
+def _tiled_tre_heatmap_svg(info, cell=14):
+    """A compact per-tile TRE heatmap (green=low, red=high) — STARE's spatial accuracy view."""
+    tiles = info["tiles"]
+    if not tiles:
+        return ""
+    have_final = all("tre_after" in t for t in tiles)
+
+    def val(t):
+        return t["tre_after"] if have_final else t.get("tre_rigid", 0.0)
+
+    vmax = max((val(t) for t in tiles), default=0.0) or 1.0
+    nx = max(t["ix"] for t in tiles) + 1
+    ny = max(t["iy"] for t in tiles) + 1
+    rects = []
+    for t in tiles:
+        frac = min(val(t) / vmax, 1.0)
+        r, g = int(60 + 195 * frac), int(180 * (1 - frac))
+        rects.append(
+            f'<rect x="{t["ix"] * cell}" y="{t["iy"] * cell}" width="{cell - 1}" '
+            f'height="{cell - 1}" fill="rgb({r},{g},70)">'
+            f"<title>tile ({t['ix']},{t['iy']}): {val(t):.2f}px</title></rect>"
+        )
+    label = "post-refinement residual" if have_final else "rigid-stage TRE"
+    return (
+        '<div style="margin:8px 0 4px;">'
+        f'<p style="font-size:0.8rem;color:#666;margin:0 0 2px;">'
+        f"{html.escape(info['moving'])} — per-tile {label} "
+        f"(green=low, red=high; max {vmax:.2f}px)</p>"
+        f'<svg width="{nx * cell}" height="{ny * cell}" '
+        f'style="border:1px solid #eee;">{"".join(rects)}</svg></div>'
+    )
+
+
+def _tiled_tre_tables(tre_jsons):
+    """Per-slide STARE-TRE summary table + spatial heatmaps."""
+    headers = [
+        "Slide",
+        "Coarse TRE (px)",
+        "Rigid p50 / p90 (px)",
+        "Final p50 / p90 (px)",
+        "Refined",
+        "Tiles",
+    ]
+    rows, heatmaps, err_html = [], [], []
+    for jp in sorted(tre_jsons):
+        try:
+            info = parse_tiled_tre_json(jp)
+        except Exception as exc:  # noqa: BLE001 - report, never crash
+            err_html.append(
+                f"<tr><td>{html.escape(Path(jp).name)}</td>"
+                f"<td colspan='5'>Parse error: {html.escape(str(exc))}</td></tr>"
+            )
+            continue
+        final = (
+            f"{_fmt_px(info['final_p50'])} / {_fmt_px(info['final_p90'])}"
+            if info["final_p50"] is not None
+            else "n/a (fan-out — see benchmark)"
+        )
+        rows.append(
+            [
+                info["moving"],
+                _fmt_px(info["coarse_tre_px"]),
+                f"{_fmt_px(info['rigid_p50'])} / {_fmt_px(info['rigid_p90'])}",
+                final,
+                "yes" if info["mesh_refined"] else "no",
+                str(info["n_tiles"]),
+            ]
+        )
+        hm = _tiled_tre_heatmap_svg(info)
+        if hm:
+            heatmaps.append(hm)
+    parts = [_html_table(headers, rows, "".join(err_html))]
+    parts.extend(heatmaps)
+    return "\n".join(parts)
+
+
+# ── (C) feature-TRE vs cell-displacement reconciliation ─────────────────────────
+# VALIS scores registration on its own SuperPoint/SuperGlue keypoints — a self-referential,
+# optimistic feature-TRE — while WARP_SEG_QC scores it on independently segmented cells. Lining
+# the two up per stage exposes the failure mode neither catches alone: features declaring a slide
+# aligned while the cells say otherwise. A stage counts as divergent when the two disagree by more
+# than this factor; below it they are treated as corroborating.
+RECONCILE_DIVERGENCE_RATIO = 3.0
+
+# Each stage's feature-TRE comes from a specific VALIS summary column, because register_micro()
+# composes the micro residual into the same field and rewrites non_rigid_D in place: only the
+# pre-micro summary still isolates the non-rigid stage. (col, which_summary).
+_RECONCILE_TRE_SOURCE = {
+    "rigid": ("rigid_D", "final"),
+    "non_rigid": ("non_rigid_D", "premicro"),
+    "micro": ("non_rigid_D", "final"),
+}
+
+
+def _to_float(v):
+    try:
+        f = float(v)
+        return f if f == f else None  # drop NaN
+    except (TypeError, ValueError):
+        return None
+
+
+def _read_valis_tre(valis_dir):
+    """slide -> {'final': {col: val}, 'premicro': {col: val}} of feature distances from CSVs."""
+    out = {}
+    for csv_path in list_files(valis_dir, "*.csv"):
+        which = (
+            "premicro" if csv_path.name.endswith("_summary_premicro.csv") else "final"
+        )
+        try:
+            with open(csv_path, newline="") as fh:
+                for row in csv.DictReader(fh):
+                    slide = row.get("from") or row.get("filename")
+                    if not slide:
+                        continue
+                    slot = out.setdefault(str(slide), {"final": {}, "premicro": {}})[
+                        which
+                    ]
+                    for col in ("rigid_D", "non_rigid_D"):
+                        if col in row:
+                            slot[col] = _to_float(row[col])
+        except (OSError, csv.Error):
+            continue
+    return out
+
+
+def _read_seg_cell_disp(seg_qc_dir):
+    """slide -> {stage: displacement_µm_p50} from the WARP_SEG_QC JSONs (px if no µm present)."""
+    out = {}
+    for jp in list_files(seg_qc_dir, "*.json"):
+        try:
+            with open(jp, encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        slide = data.get("moving")
+        stages = data.get("stages") or {}
+        if not slide or not isinstance(stages, dict):
+            continue
+        per_stage = {}
+        for stage, metrics in stages.items():
+            if not isinstance(metrics, dict):
+                continue
+            val = metrics.get("displacement_um_p50")
+            if val is None:
+                val = metrics.get(
+                    "displacement_px_p50"
+                )  # fall back to px if no pixel size
+            per_stage[stage] = _to_float(val)
+        out[str(slide)] = per_stage
+    return out
+
+
+def reconcile_rows(valis_dir, seg_qc_dir):
+    """Pair VALIS feature-TRE with WARP_SEG_QC cell displacement, per slide per stage.
+
+    Returns a list of dicts: ``slide``, ``stage``, ``feature_tre_um``, ``cell_disp_um``,
+    ``divergent`` (True/False, or None when either number is missing so no verdict is possible).
+    Slides are keyed by VALIS slide name (``from`` == ``moving``); rows are only emitted for
+    slides that appear in the seg-QC output.
+    """
+    tre = _read_valis_tre(valis_dir)
+    cell = _read_seg_cell_disp(seg_qc_dir)
+    rows = []
+    for slide in sorted(cell):
+        slide_tre = tre.get(slide, {})
+        for stage in ("rigid", "non_rigid", "micro"):
+            col, which = _RECONCILE_TRE_SOURCE[stage]
+            feature = slide_tre.get(which, {}).get(col)
+            # non_rigid_D is overwritten in place by register_micro(), so only the pre-micro
+            # summary isolates the non-rigid TRE. But when no pre-micro summary exists
+            # (micro_reg < 2 -> register_micro never ran), the final summary still IS the
+            # pre-micro non-rigid value: fall back to it. Without this the non_rigid row is
+            # permanently n/a at the shipped default (micro_reg=0), defeating the whole
+            # reconciliation for the configuration that actually runs.
+            if feature is None and stage == "non_rigid" and which == "premicro":
+                feature = slide_tre.get("final", {}).get(col)
+            disp = cell.get(slide, {}).get(stage)
+            divergent = None
+            if feature is not None and disp is not None:
+                lo, hi = sorted((abs(feature), abs(disp)))
+                divergent = hi > RECONCILE_DIVERGENCE_RATIO * lo if lo > 0 else hi > 0
+            rows.append(
+                {
+                    "slide": slide,
+                    "stage": stage,
+                    "feature_tre_um": feature,
+                    "cell_disp_um": disp,
+                    "divergent": divergent,
+                }
+            )
+    return rows
+
+
+def reconciliation_section(valis_dir, seg_qc_dir):
+    """Render the feature-TRE vs cell-displacement reconciliation table."""
+    title = "Feature-TRE vs Cell-Displacement Reconciliation"
+    rows = reconcile_rows(valis_dir, seg_qc_dir)
+    if not rows:
+        return section(
+            title,
+            '<p class="empty-notice">No overlapping VALIS summary + segmentation-warp QC '
+            "found to reconcile.</p>",
+        )
+
+    def fmt(v):
+        return f"{v:.3f}" if isinstance(v, float) else "—"
+
+    body = [
+        "<p style='font-size:0.85rem;color:#666;margin:0 0 8px;'>"
+        "VALIS feature-TRE is measured on its own SuperPoint/SuperGlue keypoints (optimistic); "
+        "cell displacement is measured on independently segmented nuclei. A flagged row means "
+        f"the two disagree by more than {RECONCILE_DIVERGENCE_RATIO:g}× — worth a look.</p>",
+        "<table><thead><tr><th>Slide</th><th>Stage</th><th>Feature-TRE (µm)</th>"
+        "<th>Cell disp. p50 (µm)</th><th>Agreement</th></tr></thead><tbody>",
+    ]
+    for r in rows:
+        if r["divergent"] is None:
+            flag = "<span style='color:#999;'>n/a</span>"
+        elif r["divergent"]:
+            flag = "<span style='color:#c0392b;font-weight:600;'>⚠ divergent</span>"
+        else:
+            flag = "<span style='color:#27ae60;'>✓ agree</span>"
+        body.append(
+            f"<tr><td>{r['slide']}</td><td>{r['stage']}</td>"
+            f"<td>{fmt(r['feature_tre_um'])}</td><td>{fmt(r['cell_disp_um'])}</td>"
+            f"<td>{flag}</td></tr>"
+        )
+    body.append("</tbody></table>")
+    return section(title, "\n".join(body))
 
 
 def seg_qc_section(seg_qc_dir):
@@ -594,12 +893,24 @@ def seg_overlay_section(postprocess_dir):
     return section("Segmentation Overlays", img_grid(overlays, wide=True))
 
 
-def seg_eval_section(seg_eval_dir):
+def seg_eval_section(seg_eval_dir, expected_patients=None):
     """
     Render the Cell Segmentation Evaluator (CSE) metrics table.
     Any number of segmentation_metrics.csv files may be present (one per
     merge, though normally just one); each is rendered as its own table
-    since column sets can differ across runs.
+    since column sets can differ across runs. Columns are whatever
+    merge_seg_eval.py wrote, dynamically — this now includes
+    `downsample_factor` and `effective_pixel_size_um` so per-patient
+    QualityScore drift from CSE-budget downsampling is visible.
+
+    `expected_patients`: optional collection of patient IDs the run actually
+    processed (e.g. from run_summary.json's manifest, which is built from the
+    input CSV independent of seg-eval's own output). SEG_QUALITY_EVAL runs
+    under an `errorStrategy='ignore'` QC gate, so a patient can fail/OOM there
+    and simply be absent from segmentation_metrics.csv with no other trace.
+    When `expected_patients` is available we diff it against the `id` column
+    to name exactly which patients silently dropped; when it isn't, we still
+    report the present-count so a shrinking row count is at least visible.
     """
     parts = []
     csv_files = list_files(seg_eval_dir, "*.csv")
@@ -608,27 +919,66 @@ def seg_eval_section(seg_eval_dir):
             '<p class="empty-notice">No segmentation-evaluation CSVs found.</p>'
         )
     else:
+        expected_set = set(expected_patients) if expected_patients else None
         for csv_path in csv_files:
             try:
-                headers, rows = parse_seg_eval_csv(csv_path)
+                headers, rows = parse_csv_table(csv_path)
             except Exception as exc:
                 parts.append(
-                    f'<p class="empty-notice">Could not parse {Path(csv_path).name}: {exc}</p>'
+                    '<p class="empty-notice">Could not parse '
+                    f"{html.escape(Path(csv_path).name)}: {html.escape(str(exc))}</p>"
                 )
                 continue
             parts.append(
-                f"<p style='font-size:0.85rem;color:#666;margin-bottom:6px;'>{Path(csv_path).name}</p>"
+                "<p style='font-size:0.85rem;color:#666;margin-bottom:6px;'>"
+                f"{html.escape(Path(csv_path).name)}</p>"
             )
-            tbl = (
-                "<table><thead><tr>"
-                + "".join(f"<th>{h}</th>" for h in headers)
-                + "</tr></thead><tbody>"
-            )
-            for row in rows:
-                tbl += "<tr>" + "".join(f"<td>{v}</td>" for v in row) + "</tr>"
-            tbl += "</tbody></table>"
-            parts.append(tbl)
+            parts.append(_seg_eval_reconciliation_html(headers, rows, expected_set))
+            parts.append(_html_table(headers, rows))
     return section("Segmentation Quality (CSE)", "\n".join(parts))
+
+
+def _seg_eval_reconciliation_html(headers, rows, expected_set):
+    """
+    Build the expected-vs-present reconciliation line for one seg-eval CSV.
+
+    `expected_set`: patient IDs known from the run manifest, or None if that
+    signal isn't available to the caller. `headers`/`rows` come from
+    parse_csv_table. Missing patients (present in expected_set but absent
+    from the `id` column) are named explicitly since they were most likely
+    dropped silently by the QC `errorStrategy='ignore'` gate around
+    SEG_QUALITY_EVAL, not because they were never run.
+    """
+    n_present = len(rows)
+    if "id" in headers:
+        id_idx = headers.index("id")
+        present_ids = {row[id_idx] for row in rows if id_idx < len(row)}
+    else:
+        present_ids = set()
+
+    if expected_set is None:
+        return (
+            f"<p style='font-size:0.85rem;color:#666;'>{n_present} patient(s) present. "
+            "Expected patient count is not available to this section, so a "
+            "patient silently dropped by the QC errorStrategy='ignore' gate "
+            "cannot be flagged here — cross-check against the Sample Manifest "
+            "section above.</p>"
+        )
+
+    n_expected = len(expected_set)
+    missing = sorted(expected_set - present_ids)
+    if missing:
+        missing_escaped = ", ".join(html.escape(str(pid)) for pid in missing)
+        return (
+            f"<p style='font-size:0.85rem;color:#c0392b;font-weight:600;'>"
+            f"{n_present}/{n_expected} expected patients present — "
+            f"MISSING (likely dropped by QC errorStrategy='ignore'): "
+            f"{missing_escaped}</p>"
+        )
+    return (
+        f"<p style='font-size:0.85rem;color:#666;'>"
+        f"{n_present}/{n_expected} expected patients present.</p>"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -674,7 +1024,7 @@ def main():
     """CLI entry point: assemble the per-step QC outputs into a single HTML report."""
     configure_logging(level=logging.INFO)
     args = parse_args()
-    timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
     summary = parse_run_summary_json(args.run_summary)
     present = {
@@ -698,9 +1048,13 @@ def main():
             args.seg_qc,
         )
     )
+    html_parts.append(reconciliation_section(args.valis_summary, args.seg_qc))
     html_parts.append(seg_overlay_section(args.postprocess_qc))
     html_parts.append(postprocess_qc_section(args.postprocess_qc))
-    html_parts.append(seg_eval_section(args.seg_eval))
+    expected_patients = (
+        set(summary.get("manifest", {}).get("patients", {}).keys()) or None
+    )
+    html_parts.append(seg_eval_section(args.seg_eval, expected_patients))
     html_parts.append(versions_section(args.versions))
     html_parts.append(html_footer())
 

@@ -307,7 +307,6 @@ def load_image(
 
     See Also
     --------
-    lib.metadata.get_ome_metadata : Extract detailed OME metadata
     save_tiff : Save image to TIFF format
     """
     image_path = Path(image_path)
@@ -383,7 +382,6 @@ def save_tiff(
     See Also
     --------
     load_image : Load TIFF image
-    lib.metadata.create_ome_xml : Create OME-XML metadata
     """
     output_path = Path(output_path)
     ensure_dir(output_path.parent)

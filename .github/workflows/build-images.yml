@@ -122,6 +122,7 @@ jobs:
           - { dir: merge,          tag: merge }
           - { dir: debug_diffeo,   tag: debug_diffeo }
           - { dir: segeval,        tag: segeval }
+          - { dir: tiled,          tag: tiled }
 
     steps:
       - name: Checkout repository

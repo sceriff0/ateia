@@ -81,6 +81,7 @@ workflow MIRAGE {
         ParamUtils.validateSegMethod(params.seg_method)  // reuse mask; still validate quant options
         ParamUtils.validateCompartmentQuant(params.quantify_compartments, params.expanded_quantification)
         ParamUtils.validateRegQc((params.reg_qc == null ? 2 : params.reg_qc) as int)
+        ParamUtils.validateMicroReg(ParamUtils.microRegLevel(params))
 
         if (!params.input) error "mode='add_cycle' requires --input (the new cycle samplesheet)"
         CsvUtils.validateInputCSV(params.input, ParamUtils.requiredColumnsForStep('preprocessing'))
@@ -150,6 +151,72 @@ workflow MIRAGE {
             }
 
         ADD_CYCLE(ch_new_input, ch_prior_assets)
+
+        /* -------------------- FINAL QC REPORT (add_cycle) -------------------- */
+        // Mirrors the standard-path aggregation below (version collation + QC report +
+        // optional size-log aggregation), scoped to what ADD_CYCLE actually emits.
+        // ADD_CYCLE has no separate PREPROCESSING-QC / feature-distance / VALIS-summary /
+        // POSTPROCESSING-QC / seg-eval emits of its own (it calls PREPROCESSING internally
+        // but does not re-expose its QC pngs, and it has no POSTPROCESSING/CSE step at
+        // all — masks are reused, not re-segmented) — those five report inputs are
+        // deliberately left empty here rather than silently dropping the whole report.
+        if (!params.skip_final_qc_report) {
+            def ch_collated_versions = ADD_CYCLE.out.versions
+                .unique()
+                .collectFile(name: 'collated_versions.yml')
+
+            def run_summary_map = [
+                pipeline: [name: workflow.manifest.name, version: workflow.manifest.version],
+                run: [
+                    timestamp: new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss 'UTC'")
+                        .format(new Date()),
+                    mode: 'add_cycle',
+                    start: params.start,
+                    stop: 'add_cycle',
+                ],
+                params: [
+                    registration_method: params.registration_method,
+                    seg_method: params.seg_method,
+                    quantify_compartments: params.quantify_compartments,
+                    expanded_quantification: params.expanded_quantification,
+                    pixel_size: params.pixel_size,
+                    cse_pixel_size_um: params.cse_pixel_size_um,
+                ],
+                manifest: [
+                    totals: [
+                        patients: new_counts.size(),
+                        images: (new_counts.values().sum() ?: 0),
+                        channels: (new_ch_counts.values().sum() ?: 0),
+                    ],
+                    patients: new_counts.collectEntries { pid, imgs ->
+                        [(pid): [images: imgs, channels: (new_ch_counts[pid] ?: 0)]]
+                    },
+                ],
+            ]
+            def ch_run_summary = Channel
+                .of(JsonOutput.prettyPrint(JsonOutput.toJson(run_summary_map)))
+                .collectFile(name: 'run_summary.json')
+
+            GENERATE_QC_REPORT(
+                Channel.empty().collect().ifEmpty([]),                             // preprocess_qc_pngs (not re-emitted by ADD_CYCLE)
+                ADD_CYCLE.out.qc.map { meta, files -> files }.collect().ifEmpty([]),
+                Channel.empty().collect().ifEmpty([]),                             // feature_distance_jsons (not re-emitted by ADD_CYCLE)
+                Channel.empty().collect().ifEmpty([]),                             // valis_summary_csvs (not re-emitted by ADD_CYCLE)
+                Channel.empty().collect().ifEmpty([]),                             // postprocess_qc_pngs (no POSTPROCESSING call in add_cycle)
+                Channel.empty().collect().ifEmpty([]),                             // seg_eval_csvs (no CSE step in add_cycle)
+                ch_collated_versions,
+                ch_run_summary,
+                Channel.empty().collect().ifEmpty([]),                             // distance_plots (not produced in add_cycle)
+                ADD_CYCLE.out.seg_qc.map { meta, files -> files }.collect().ifEmpty([]),
+            )
+        }
+
+        /* -------------------- TRACE AGGREGATION (add_cycle) -------------------- */
+        if (params.enable_trace) {
+            def ch_merged_sizes = ADD_CYCLE.out.size_logs.collectFile(name: 'raw_input_sizes.csv', sort: true)
+            AGGREGATE_SIZE_LOGS(ch_merged_sizes)
+        }
+
         return   // do NOT fall through to the standard start/stop flow
     }
 
@@ -166,6 +233,7 @@ workflow MIRAGE {
     if (ParamUtils.shouldRun('registration', params.start, effective_stop)) {
         ParamUtils.validateRegistrationMethod(params.registration_method)
         ParamUtils.validateRegQc((params.reg_qc == null ? 2 : params.reg_qc) as int)
+        ParamUtils.validateMicroReg(ParamUtils.microRegLevel(params))
     }
 
     if (ParamUtils.shouldRun('postprocessing', params.start, effective_stop)) {

@@ -48,7 +48,7 @@ class ParamUtils {
     }
 
     static void validateRegistrationMethod(String method) {
-        def valid = ['valis']
+        def valid = ['valis', 'tiled']
         if (!(method in valid)) {
             throw new IllegalArgumentException("Invalid --registration_method '${method}'. Valid values: ${valid}")
         }
@@ -80,6 +80,26 @@ class ParamUtils {
      */
     static int regQcLevel(Map params) {
         return params.skip_registration_qc ? 0 : (params.reg_qc == null ? 2 : (params.reg_qc as int))
+    }
+
+    /**
+     * Effective micro-registration depth: 0 = none, 1 = micro-rigid only (refines slide.M),
+     * 2 = micro-rigid + micro non-rigid (register_micro). VALIS controls the two passes
+     * independently — micro_rigid_registrar_cls for the rigid refinement, the register_micro()
+     * call for the non-rigid one — and this ordinal nests them (0 ⊂ 1 ⊂ 2), which forbids the
+     * odd "micro non-rigid without micro-rigid" combination. Default 0 preserves the pipeline's
+     * historical behaviour (micro off). Single source of truth for register.nf / warp_seg_qc.nf
+     * so the QC can honestly say what the 'rigid' stage means for a given run.
+     */
+    static int microRegLevel(Map params) {
+        return params.reg_micro_reg == null ? 0 : (params.reg_micro_reg as int)
+    }
+
+    static void validateMicroReg(int level) {
+        def valid = [0, 1, 2]
+        if (!(level in valid)) {
+            throw new IllegalArgumentException("Invalid --reg_micro_reg '${level}'. Valid values: ${valid} (0=none, 1=micro-rigid only, 2=micro-rigid + micro non-rigid)")
+        }
     }
 
     static void validateSegMethod(String method) {

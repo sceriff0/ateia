@@ -164,7 +164,6 @@ def detect_wrapped_values(
         return False, 0, 0.0
 
     # Calculate threshold: values above this are suspicious
-    percentile_val = np.percentile(data, threshold_percentile)
     absolute_threshold = dtype_max * min_value_threshold
     # Flag values above absolute threshold as suspicious
     suspicious_mask = data > absolute_threshold
