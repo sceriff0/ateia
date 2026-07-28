@@ -77,6 +77,16 @@ def enumerate_feasible(panel: Panel, max_enumerate: int = 100000) -> List[Dict]:
     return out
 
 
+def _ancestors(panel: Panel, name: str) -> set:
+    """Names reachable by walking `name`'s `parent` chain (excludes `name` itself)."""
+    anc: set = set()
+    cur = panel.phenotypes[name].parent
+    while cur is not None and cur not in anc:
+        anc.add(cur)
+        cur = panel.phenotypes[cur].parent
+    return anc
+
+
 def validate(panel: Panel, feasible: List[Dict]) -> Tuple[List[str], List[str]]:
     errors: List[str] = []
     warnings: List[str] = []
@@ -85,22 +95,34 @@ def validate(panel: Panel, feasible: List[Dict]) -> Tuple[List[str], List[str]]:
         errors.append("Unsatisfiable feasible set (F = empty); check for a requires cycle.")
 
     named = {e["phenotype"] for e in feasible}
-    for name in panel.phenotypes:
-        if name not in named:
-            errors.append(f"Unreachable phenotype {name!r}: a constraint deleted every cell of this type.")
 
     sigs = {name: tuple(sorted(inherited_signature(panel, name).items())) for name in panel.phenotypes}
     seen: Dict[tuple, str] = {}
+    collision_losers: set = set()
     for name, sig in sigs.items():
         if sig in seen:
             errors.append(f"Collision: phenotypes {seen[sig]!r} and {name!r} share an identical signature.")
+            collision_losers.add(name)
         else:
             seen[sig] = name
+
+    for name in panel.phenotypes:
+        if name not in named and name not in collision_losers:
+            # A Collision error already accounts for the tie-break loser above;
+            # only report "unreachable" here when a constraint (not a naming
+            # tie-break) is what actually deleted this phenotype's cells.
+            errors.append(f"Unreachable phenotype {name!r}: a constraint deleted every cell of this type.")
 
     raw = {name: inherited_signature(panel, name) for name in panel.phenotypes}
     for a in raw:
         for b in raw:
             if a == b:
+                continue
+            if b in _ancestors(panel, a) or a in _ancestors(panel, b):
+                # Ancestor/descendant pairs necessarily have subset signatures
+                # (a child's inherited_signature is a superset of its parent's
+                # by construction) -- that's correct inheritance, not
+                # accidental overlap, so it must not warn.
                 continue
             ka, kb = set(raw[a]), set(raw[b])
             if ka < kb and all(raw[a][m] == raw[b][m] for m in ka):
