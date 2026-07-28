@@ -35,7 +35,7 @@ def warp_image(image, m0, mesh, out_shape, mesh_inverse_iters=3):
     m0 : 3x3 array
         Global forward affine, moving -> reference.
     mesh : MeshField or None
-        Residual displacement field (sampled at moving coordinates), or None for a rigid warp.
+        Residual displacement field in the *reference frame*, or None for a rigid warp.
     out_shape : (int, int)
         Output raster size ``(height, width)`` in the reference frame.
     """
@@ -47,11 +47,13 @@ def warp_image(image, m0, mesh, out_shape, mesh_inverse_iters=3):
     u = np.column_stack([xs.ravel().astype(float), ys.ravel().astype(float)])
 
     m_inv = np.linalg.inv(m0)
-    x = _apply_affine(m_inv, u)
+    # Forward map is u = v + F(v) with v = M0 x the rigid (ref-frame) position. Invert in two
+    # decoupled steps: solve v = u - F(v) by fixed-point (F is small and smooth), then x = M0^-1 v.
+    v = u
     if mesh is not None:
-        # solve u = M0 x + F(x) for x by fixed-point; F is small so this converges in a few steps
         for _ in range(mesh_inverse_iters):
-            x = _apply_affine(m_inv, u - mesh.displacement(x))
+            v = u - mesh.displacement(v)
+    x = _apply_affine(m_inv, v)
 
     vals = resample_bilinear(image, x)
     if image.ndim == 3:

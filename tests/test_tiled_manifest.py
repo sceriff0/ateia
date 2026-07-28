@@ -71,16 +71,18 @@ def test_manifest_round_trips_through_json_into_a_working_warper():
         "ref",
         {
             "ref": slide_entry(np.eye(3)),
-            "mov": slide_entry([[1, 0, -2], [0, 1, 0], [0, 0, 1]], gx, gy, disp),
+            # identity M0 so the rigid position equals the native point, landing exactly on the
+            # (1,1) control node — makes the mesh contribution assertable to the node value.
+            "mov": slide_entry(np.eye(3), gx, gy, disp),
         },
     )
     # must survive serialization intact (all json-native types)
     manifest = json.loads(json.dumps(manifest))
 
     warp = make_warper(manifest)
-    # a point at the (1,1) tile centre: rigid shifts by -2 in x, mesh adds +4 -> net +2
+    # a point at the (1,1) tile centre (a control node): rigid is identity, mesh adds +4 in x
     centre = np.array([[gx[1], gy[1]]])
     rigid = warp("mov", centre, STAGE_RIGID)
     refined = warp("mov", centre, STAGE_REFINED)
-    np.testing.assert_allclose(rigid, centre + np.array([-2.0, 0.0]))
-    np.testing.assert_allclose(refined, centre + np.array([2.0, 0.0]))
+    np.testing.assert_allclose(rigid, centre)
+    np.testing.assert_allclose(refined, centre + np.array([4.0, 0.0]))

@@ -28,9 +28,9 @@ Stages
 
 There is no ``micro`` stage and nothing is composed destructively, so — unlike VALIS — every
 stage is a first-class transform the manifest can reproduce directly; no pre-micro checkpoint is
-needed. The mesh is sampled at the *native* coordinate (the grid lives on the moving slide's tile
-centres), and both this warper and the per-tile image warp sample that same field, so the QC
-measures exactly the transform that shipped.
+needed. The mesh lives in the *reference frame* (the grid is laid on the rigid-warped slide's tile
+centres) and is sampled at the rigid position ``M0·xy``; both this warper and the per-tile image
+warp sample that same field, so the QC measures exactly the transform that shipped.
 """
 
 from __future__ import annotations
@@ -80,11 +80,12 @@ def make_warper(manifest):
             return xy.copy()
         if stage not in (STAGE_RIGID, STAGE_REFINED):
             raise ValueError(f"unknown stage {stage!r}; expected one of {STAGES}")
-        warped = _apply_affine(affines[slide_name], xy)
+        warped = _apply_affine(affines[slide_name], xy)  # rigid position in the reference frame
         if stage == STAGE_REFINED:
             mesh = meshes.get(slide_name)
             if mesh is not None:
-                warped = warped + mesh.displacement(xy)
+                # the mesh lives in the reference frame, so it is sampled at the rigid position
+                warped = warped + mesh.displacement(warped)
         return warped
 
     return warp
