@@ -238,7 +238,9 @@ def _kv_table(pairs):
 def run_summary_section(summary):
     """Top overview card: pipeline, run context, and key parameters used."""
     if not summary:
-        return section("Run Summary", '<p class="empty-notice">Run summary not available.</p>')
+        return section(
+            "Run Summary", '<p class="empty-notice">Run summary not available.</p>'
+        )
     pipe = summary.get("pipeline", {})
     run = summary.get("run", {})
     params = summary.get("params", {})
@@ -271,17 +273,23 @@ def manifest_section(summary):
     """Sample manifest: totals plus a per-patient image/channel table."""
     manifest = (summary or {}).get("manifest", {})
     if not manifest:
-        return section("Sample Manifest", '<p class="empty-notice">Manifest not available.</p>')
+        return section(
+            "Sample Manifest", '<p class="empty-notice">Manifest not available.</p>'
+        )
     totals = manifest.get("totals", {})
     patients = manifest.get("patients", {})
-    head = _kv_table([
-        ("Patients", totals.get("patients")),
-        ("Images", totals.get("images")),
-        ("Channels", totals.get("channels")),
-    ])
-    tbl = ("<table style='margin-top:14px'><thead><tr>"
-           "<th>Patient</th><th>Images</th><th>Channels</th>"
-           "</tr></thead><tbody>")
+    head = _kv_table(
+        [
+            ("Patients", totals.get("patients")),
+            ("Images", totals.get("images")),
+            ("Channels", totals.get("channels")),
+        ]
+    )
+    tbl = (
+        "<table style='margin-top:14px'><thead><tr>"
+        "<th>Patient</th><th>Images</th><th>Channels</th>"
+        "</tr></thead><tbody>"
+    )
     for pid in sorted(patients):
         row = patients[pid]
         tbl += (
@@ -446,7 +454,9 @@ def preprocess_qc_section(preprocess_dir):
     return section("Preprocessing QC", img_grid(pngs))
 
 
-def registration_qc_section(reg_dir, feat_dir, valis_dir, dist_plots_dir=None, seg_qc_dir=None):
+def registration_qc_section(
+    reg_dir, feat_dir, valis_dir, dist_plots_dir=None, seg_qc_dir=None
+):
     """Build the registration-QC report section (overlay images plus accuracy tables)."""
     parts = []
 
@@ -457,8 +467,10 @@ def registration_qc_section(reg_dir, feat_dir, valis_dir, dist_plots_dir=None, s
     )
     parts.append(img_grid(pngs))
 
-    # Valis rTRE table
+    # Registration-accuracy summaries. The method decides the format: VALIS emits rTRE CSVs, the
+    # tiled ('STARE') method emits its own intrinsic-TRE JSON (_tre.json) — both land here.
     valis_csvs = list_files(valis_dir, "*.csv")
+    tiled_tre_jsons = list_files(valis_dir, "*_tre.json")
     if valis_csvs:
         parts.append(
             "<h3 style='margin:20px 0 8px;font-size:1rem;color:#444;'>Registration Accuracy (Valis rTRE)</h3>"
@@ -477,9 +489,15 @@ def registration_qc_section(reg_dir, feat_dir, valis_dir, dist_plots_dir=None, s
                 f"{html.escape(Path(csv_path).name)}</p>"
             )
             parts.append(_html_table(headers, rows))
-    else:
+    if tiled_tre_jsons:
         parts.append(
-            '<p class="empty-notice" style="margin-top:12px;">No Valis summary CSVs found.</p>'
+            "<h3 style='margin:20px 0 8px;font-size:1rem;color:#444;'>Registration Accuracy "
+            "(STARE Tiled TRE)</h3>"
+        )
+        parts.append(_tiled_tre_tables(tiled_tre_jsons))
+    if not valis_csvs and not tiled_tre_jsons:
+        parts.append(
+            '<p class="empty-notice" style="margin-top:12px;">No registration-accuracy summary found.</p>'
         )
 
     # Feature distance table
@@ -593,6 +611,115 @@ def _seg_qc_table(json_path):
     return "\n".join(parts)
 
 
+# ── STARE tiled-registration intrinsic TRE ──────────────────────────────────────
+# The tiled ('STARE') method emits its own intrinsic Target Registration Error per slide
+# (_tre.json), the way VALIS emits rTRE: coarse (rigid) feature-fit TRE, a per-tile spatial
+# heatmap VALIS does not have, and — in the default path — the post-refinement residual (its
+# analogue of VALIS's non-rigid error). Rendered here alongside the other registration-accuracy
+# tables so both methods surface a comparable number.
+def _fmt_px(v):
+    return f"{v:.2f}" if isinstance(v, (int, float)) else "n/a"
+
+
+def parse_tiled_tre_json(path):
+    """Flatten a STARE _tre.json into the headline registration-accuracy fields."""
+    with open(path, encoding="utf-8") as fh:
+        data = json.load(fh)
+
+    def pct(block, key):
+        b = data.get(block)
+        return b.get(key) if isinstance(b, dict) else None
+
+    return {
+        "file": Path(path).name,
+        "moving": data.get("moving") or Path(path).name,
+        "coarse_tre_px": data.get("coarse_tre_px"),
+        "n_tiles": data.get("n_tiles"),
+        "mesh_refined": bool(data.get("mesh_refined")),
+        "rigid_p50": pct("rigid_tre_px", "p50"),
+        "rigid_p90": pct("rigid_tre_px", "p90"),
+        "final_p50": pct("residual_after_px", "p50"),
+        "final_p90": pct("residual_after_px", "p90"),
+        "tiles": data.get("tiles", []) or [],
+    }
+
+
+def _tiled_tre_heatmap_svg(info, cell=14):
+    """A compact per-tile TRE heatmap (green=low, red=high) — STARE's spatial accuracy view."""
+    tiles = info["tiles"]
+    if not tiles:
+        return ""
+    have_final = all("tre_after" in t for t in tiles)
+
+    def val(t):
+        return t["tre_after"] if have_final else t.get("tre_rigid", 0.0)
+
+    vmax = max((val(t) for t in tiles), default=0.0) or 1.0
+    nx = max(t["ix"] for t in tiles) + 1
+    ny = max(t["iy"] for t in tiles) + 1
+    rects = []
+    for t in tiles:
+        frac = min(val(t) / vmax, 1.0)
+        r, g = int(60 + 195 * frac), int(180 * (1 - frac))
+        rects.append(
+            f'<rect x="{t["ix"] * cell}" y="{t["iy"] * cell}" width="{cell - 1}" '
+            f'height="{cell - 1}" fill="rgb({r},{g},70)">'
+            f"<title>tile ({t['ix']},{t['iy']}): {val(t):.2f}px</title></rect>"
+        )
+    label = "post-refinement residual" if have_final else "rigid-stage TRE"
+    return (
+        '<div style="margin:8px 0 4px;">'
+        f'<p style="font-size:0.8rem;color:#666;margin:0 0 2px;">'
+        f"{html.escape(info['moving'])} — per-tile {label} "
+        f"(green=low, red=high; max {vmax:.2f}px)</p>"
+        f'<svg width="{nx * cell}" height="{ny * cell}" '
+        f'style="border:1px solid #eee;">{"".join(rects)}</svg></div>'
+    )
+
+
+def _tiled_tre_tables(tre_jsons):
+    """Per-slide STARE-TRE summary table + spatial heatmaps."""
+    headers = [
+        "Slide",
+        "Coarse TRE (px)",
+        "Rigid p50 / p90 (px)",
+        "Final p50 / p90 (px)",
+        "Refined",
+        "Tiles",
+    ]
+    rows, heatmaps, err_html = [], [], []
+    for jp in sorted(tre_jsons):
+        try:
+            info = parse_tiled_tre_json(jp)
+        except Exception as exc:  # noqa: BLE001 - report, never crash
+            err_html.append(
+                f"<tr><td>{html.escape(Path(jp).name)}</td>"
+                f"<td colspan='5'>Parse error: {html.escape(str(exc))}</td></tr>"
+            )
+            continue
+        final = (
+            f"{_fmt_px(info['final_p50'])} / {_fmt_px(info['final_p90'])}"
+            if info["final_p50"] is not None
+            else "n/a (fan-out — see benchmark)"
+        )
+        rows.append(
+            [
+                info["moving"],
+                _fmt_px(info["coarse_tre_px"]),
+                f"{_fmt_px(info['rigid_p50'])} / {_fmt_px(info['rigid_p90'])}",
+                final,
+                "yes" if info["mesh_refined"] else "no",
+                str(info["n_tiles"]),
+            ]
+        )
+        hm = _tiled_tre_heatmap_svg(info)
+        if hm:
+            heatmaps.append(hm)
+    parts = [_html_table(headers, rows, "".join(err_html))]
+    parts.extend(heatmaps)
+    return "\n".join(parts)
+
+
 # ── (C) feature-TRE vs cell-displacement reconciliation ─────────────────────────
 # VALIS scores registration on its own SuperPoint/SuperGlue keypoints — a self-referential,
 # optimistic feature-TRE — while WARP_SEG_QC scores it on independently segmented cells. Lining
@@ -623,14 +750,18 @@ def _read_valis_tre(valis_dir):
     """slide -> {'final': {col: val}, 'premicro': {col: val}} of feature distances from CSVs."""
     out = {}
     for csv_path in list_files(valis_dir, "*.csv"):
-        which = "premicro" if csv_path.name.endswith("_summary_premicro.csv") else "final"
+        which = (
+            "premicro" if csv_path.name.endswith("_summary_premicro.csv") else "final"
+        )
         try:
             with open(csv_path, newline="") as fh:
                 for row in csv.DictReader(fh):
                     slide = row.get("from") or row.get("filename")
                     if not slide:
                         continue
-                    slot = out.setdefault(str(slide), {"final": {}, "premicro": {}})[which]
+                    slot = out.setdefault(str(slide), {"final": {}, "premicro": {}})[
+                        which
+                    ]
                     for col in ("rigid_D", "non_rigid_D"):
                         if col in row:
                             slot[col] = _to_float(row[col])
@@ -658,7 +789,9 @@ def _read_seg_cell_disp(seg_qc_dir):
                 continue
             val = metrics.get("displacement_um_p50")
             if val is None:
-                val = metrics.get("displacement_px_p50")  # fall back to px if no pixel size
+                val = metrics.get(
+                    "displacement_px_p50"
+                )  # fall back to px if no pixel size
             per_stage[stage] = _to_float(val)
         out[str(slide)] = per_stage
     return out
@@ -693,13 +826,15 @@ def reconcile_rows(valis_dir, seg_qc_dir):
             if feature is not None and disp is not None:
                 lo, hi = sorted((abs(feature), abs(disp)))
                 divergent = hi > RECONCILE_DIVERGENCE_RATIO * lo if lo > 0 else hi > 0
-            rows.append({
-                "slide": slide,
-                "stage": stage,
-                "feature_tre_um": feature,
-                "cell_disp_um": disp,
-                "divergent": divergent,
-            })
+            rows.append(
+                {
+                    "slide": slide,
+                    "stage": stage,
+                    "feature_tre_um": feature,
+                    "cell_disp_um": disp,
+                    "divergent": divergent,
+                }
+            )
     return rows
 
 
@@ -916,7 +1051,9 @@ def main():
     html_parts.append(reconciliation_section(args.valis_summary, args.seg_qc))
     html_parts.append(seg_overlay_section(args.postprocess_qc))
     html_parts.append(postprocess_qc_section(args.postprocess_qc))
-    expected_patients = set(summary.get("manifest", {}).get("patients", {}).keys()) or None
+    expected_patients = (
+        set(summary.get("manifest", {}).get("patients", {}).keys()) or None
+    )
     html_parts.append(seg_eval_section(args.seg_eval, expected_patients))
     html_parts.append(versions_section(args.versions))
     html_parts.append(html_footer())
