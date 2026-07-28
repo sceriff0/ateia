@@ -11,8 +11,8 @@ RUN pip install --no-cache-dir --upgrade pip
 
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt \
-    && python -c "import numpy, scipy, skimage, tifffile; \
-print('tiled image OK:', numpy.__version__, scipy.__version__, skimage.__version__, tifffile.__version__)"
+    && python -c "import numpy, scipy, skimage, tifffile, zarr; \
+print('tiled image OK:', numpy.__version__, scipy.__version__, skimage.__version__, tifffile.__version__, zarr.__version__)"
 
 # The bin/ scripts redirect numba/matplotlib caches to /tmp themselves (read-only-$HOME safe).
 CMD ["python", "--version"]

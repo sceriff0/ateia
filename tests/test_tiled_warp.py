@@ -20,7 +20,7 @@ sys.path.insert(
 )
 
 from mesh_field import MeshField
-from tiled_warp import warp_image
+from tiled_warp import source_region, warp_image
 
 
 def _translation(tx, ty):
@@ -83,6 +83,48 @@ def test_out_origin_warps_a_subregion_identical_to_cropping_the_full_warp():
     # rows 8..24, cols 20..32
     tile = warp_image(img, _translation(2.3, -1.7), mesh, (16, 12), out_origin=(20, 8))
     np.testing.assert_allclose(tile, full[8:24, 20:32], atol=1e-9)
+
+
+def test_src_origin_samples_from_a_crop_identical_to_the_full_image():
+    """Streaming stitch reads only a source crop per tile; warping from the crop (with src_origin)
+    must equal warping from the whole image, so the streamed output is bit-identical."""
+    rng = np.random.default_rng(7)
+    img = np.asarray(rng.uniform(0, 100, size=(40, 40)))
+    m0 = _translation(
+        2.0, -3.0
+    )  # forward moving->ref; source of the tile is offset by (-2,+3)
+    # output tile: cols 20..32, rows 8..24  ->  source cols ~18..30, rows ~11..27
+    full = warp_image(img, m0, None, (16, 12), out_origin=(20, 8))
+    sx0, sy0, sx1, sy1 = 14, 7, 34, 30  # a crop comfortably covering that source region
+    crop = img[sy0:sy1, sx0:sx1]
+    tiled = warp_image(
+        crop, m0, None, (16, 12), out_origin=(20, 8), src_origin=(sx0, sy0)
+    )
+    np.testing.assert_allclose(tiled, full, atol=1e-9)
+
+
+def test_source_region_bounds_the_moving_pixels_a_tile_needs():
+    # identity M0, no mesh: an output tile maps to the same source box, plus the margin, clamped.
+    x0, y0, x1, y1 = source_region(
+        np.eye(3),
+        None,
+        out_origin=(20, 8),
+        out_shape=(16, 12),
+        margin=4,
+        src_shape=(40, 40),
+    )
+    # cols 20..32 -/+ margin -> 16..36 ; rows 8..24 -/+ margin -> 4..28
+    assert (x0, y0, x1, y1) == (16, 4, 36, 28)
+    # clamps to the image at the border
+    cx0, cy0, cx1, cy1 = source_region(
+        np.eye(3),
+        None,
+        out_origin=(0, 0),
+        out_shape=(10, 10),
+        margin=5,
+        src_shape=(8, 8),
+    )
+    assert (cx0, cy0) == (0, 0) and cx1 <= 8 and cy1 <= 8
 
 
 def test_multichannel_is_warped_per_channel():

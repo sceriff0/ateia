@@ -17,7 +17,7 @@ from __future__ import annotations
 import numpy as np
 from mesh_field import resample_bilinear
 
-__all__ = ["warp_image"]
+__all__ = ["warp_image", "source_region"]
 
 
 def _apply_affine(m, xy):
@@ -25,7 +25,50 @@ def _apply_affine(m, xy):
     return (homog @ np.asarray(m, dtype=float).T)[:, :2]
 
 
-def warp_image(image, m0, mesh, out_shape, mesh_inverse_iters=3, out_origin=(0, 0)):
+def _invert(m0, mesh, u, mesh_inverse_iters):
+    """Source (moving) coordinates for reference-frame points ``u``: x = M0^-1 (u - F(v))."""
+    v = u
+    if mesh is not None:
+        for _ in range(mesh_inverse_iters):
+            v = u - mesh.displacement(v)
+    return _apply_affine(np.linalg.inv(np.asarray(m0, dtype=float)), v)
+
+
+def source_region(m0, mesh, out_origin, out_shape, margin=8, src_shape=None):
+    """Bounding box (in moving pixels) that an output tile draws from.
+
+    Inverse-maps the output tile's corners to moving coordinates and pads by ``margin`` (which must
+    cover the mesh's residual displacement plus a bilinear pixel). Returns integer
+    ``(x0, y0, x1, y1)``, clamped to ``src_shape`` = ``(H, W)`` when given. This lets the streaming
+    stitch read only the moving pixels a tile needs, never the whole slide.
+    """
+    ox, oy = out_origin
+    out_h, out_w = out_shape
+    corners = np.array(
+        [[ox, oy], [ox + out_w, oy], [ox, oy + out_h], [ox + out_w, oy + out_h]],
+        dtype=float,
+    )
+    x = _invert(m0, mesh, corners, mesh_inverse_iters=3)
+    x0 = int(np.floor(x[:, 0].min())) - margin
+    y0 = int(np.floor(x[:, 1].min())) - margin
+    x1 = int(np.ceil(x[:, 0].max())) + margin
+    y1 = int(np.ceil(x[:, 1].max())) + margin
+    if src_shape is not None:
+        h, w = src_shape
+        x0, y0 = max(0, x0), max(0, y0)
+        x1, y1 = min(int(w), x1), min(int(h), y1)
+    return x0, y0, x1, y1
+
+
+def warp_image(
+    image,
+    m0,
+    mesh,
+    out_shape,
+    mesh_inverse_iters=3,
+    out_origin=(0, 0),
+    src_origin=(0, 0),
+):
     """Warp ``image`` (moving) into an ``out_shape`` = ``(H, W)`` reference-frame raster.
 
     Parameters
@@ -42,25 +85,27 @@ def warp_image(image, m0, mesh, out_shape, mesh_inverse_iters=3, out_origin=(0, 
         ``(x, y)`` top-left of the output window in the reference frame (default ``(0, 0)``).
         Warping a window equals cropping the full-frame warp, so per-tile warps reassemble
         seamlessly and each tile task holds only its own output in memory.
+    src_origin : (int, int)
+        ``(x, y)`` of ``image``'s top-left in moving coordinates, when ``image`` is a crop of the
+        moving slide (streaming stitch). Sample points are shifted into the crop's local frame.
     """
     image = np.asarray(image, dtype=float)
-    m0 = np.asarray(m0, dtype=float)
     out_h, out_w = out_shape
     ox, oy = out_origin
+    sox, soy = src_origin
 
     ys, xs = np.mgrid[0:out_h, 0:out_w]
     u = np.column_stack(
         [(xs.ravel() + ox).astype(float), (ys.ravel() + oy).astype(float)]
     )
 
-    m_inv = np.linalg.inv(m0)
     # Forward map is u = v + F(v) with v = M0 x the rigid (ref-frame) position. Invert in two
     # decoupled steps: solve v = u - F(v) by fixed-point (F is small and smooth), then x = M0^-1 v.
-    v = u
-    if mesh is not None:
-        for _ in range(mesh_inverse_iters):
-            v = u - mesh.displacement(v)
-    x = _apply_affine(m_inv, v)
+    x = _invert(m0, mesh, u, mesh_inverse_iters)
+    # ``image`` may be a crop of the moving slide whose top-left sits at ``src_origin`` in moving
+    # coordinates — shift the sample points into the crop's local frame.
+    if sox or soy:
+        x = x - np.array([sox, soy], dtype=float)
 
     vals = resample_bilinear(image, x)
     if image.ndim == 3:

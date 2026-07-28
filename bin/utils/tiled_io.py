@@ -29,6 +29,44 @@ def dapi_channel(arr_chw, index):
     return arr_chw[index].astype(np.float32)
 
 
+def open_lazy(path):
+    """Open an OME-TIFF as a lazy ``(C, H, W)`` array + a close callable, without loading it.
+
+    Uses tifffile's zarr view so region reads (``arr[c, y0:y1, x0:x1]``) fetch only the tiles they
+    touch — the property the streaming gigapixel stitch relies on. A 2-D image is presented as
+    ``C=1``; a pyramidal OME-TIFF resolves to its base (full-resolution) level.
+
+    Returns ``(arr, dtype, close)`` where ``arr`` is a zarr array with a NumPy-like getitem.
+    """
+    import tifffile
+    import zarr
+
+    store = tifffile.imread(str(path), aszarr=True)
+    grp = zarr.open(store, mode="r")
+    arr = (
+        grp[0] if isinstance(grp, zarr.hierarchy.Group) else grp
+    )  # base level if pyramidal
+
+    class _CHW:
+        """Adapt a 2-D or (C,H,W) zarr array to a uniform (C,H,W) region-readable view."""
+
+        def __init__(self, z):
+            self._z = z
+            self._2d = z.ndim == 2
+            if z.ndim not in (2, 3):
+                raise ValueError(
+                    f"{path}: expected 2-D or 3-D (C,H,W), got shape {z.shape}"
+                )
+            self.shape = (1, *z.shape) if self._2d else tuple(z.shape)
+            self.dtype = z.dtype
+
+        def __getitem__(self, key):
+            c, ys, xs = key
+            return self._z[ys, xs] if self._2d else self._z[c, ys, xs]
+
+    return _CHW(arr), arr.dtype, store.close
+
+
 def write_ome_nonneg(path, arr_chw, src_dtype):
     """Write a ``(C, H, W)`` array as OME-TIFF, clamped non-negative and cast to ``src_dtype``.
 

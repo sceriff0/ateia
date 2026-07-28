@@ -24,7 +24,7 @@ process TILED_STITCH {
     script:
     def prefix    = "${meta.patient_id}_${meta.channels.join('_')}"
     def slidename = meta.channels.join('_')
-    def strip     = params.reg_tiled_tile ?: 2048
+    def out_tile  = params.reg_tiled_out_tile ?: 1024
     """
     total_bytes=\$(stat -L --printf="%s" ${moving} 2>/dev/null || echo 0)
     echo "${task.process},${meta.patient_id},${moving.name},\${total_bytes}" > ${prefix}.TILED_STITCH.size.csv
@@ -34,7 +34,7 @@ process TILED_STITCH {
         --moving ${moving} \\
         --manifest ${manifest} \\
         --moving-name '${slidename}' \\
-        --strip ${strip} \\
+        --out-tile ${out_tile} \\
         --out registered/${prefix}_registered.ome.tiff
 
     cat <<-END_VERSIONS > versions.yml

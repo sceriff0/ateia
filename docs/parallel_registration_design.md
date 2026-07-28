@@ -315,7 +315,13 @@ dedicated lean `withName:'TILED_*'` overrides (2–8 GB) or pair with a memory-c
   task warps only its window (and the stitch warps in row strips). The fan-out chain is proven to
   compose into a correct registration end-to-end (synthetic ground truth), and the DAG is **stub
   green at reg_qc 1 and 2**; the default (`false`) monolithic path is unchanged.
-- **~64 Python tests passing; ruff clean.**
+- **Streaming gigapixel stitch (done):** `TILED_STITCH` no longer materialises the moving slide or
+  the output. It reads only each output tile's source pixels (`source_region` inverse-map + a lazy
+  `zarr` region read via `tifffile` `aszarr`), warps that tile (`warp_image` `out_origin`+`src_origin`),
+  and writes it straight to a tiled OME-TIFF. Peak memory is one source crop + one output tile per
+  channel. Proven bit-identical to the whole-image warp (±1 rounding); container gains `zarr`
+  (amd64 image built & verified, 482 MB).
+- **~67 Python tests passing; ruff clean.**
 
 **Convention settled during implementation:** the mesh lives in the **reference frame** (sampled
 at the rigid position `M0·xy`), which the tiled implementation produces naturally and which gives
@@ -326,7 +332,4 @@ a decoupled warp inverse. §5/§6 describe this.
   place; this is executing them on real slides + a VALIS run, which needs the cluster).
 - **nf-test** module + integration coverage (the Python cores and the stub DAG are covered; native
   nf-test cases for the new processes would round it out).
-- **Streaming gigapixel stitch:** `TILED_STITCH` warps in row strips (bounded memory) but still
-  materialises the full output array before writing; a truly gigapixel-safe path would write tiles
-  incrementally to a pyramidal OME-TIFF.
 ```
