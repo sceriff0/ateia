@@ -25,9 +25,9 @@ Primary external sources:
 
 Entry point `subworkflows/local/registration.nf`. Steps, in order:
 
-1. **Optional padding** (`params.padding`) — `GET_IMAGE_DIMS` → `MAX_DIM` (per-patient) →
-   `PAD_IMAGES`, so every slide of a patient shares a canvas size
-   (`registration.nf:62-93`). Parallel per image except `MAX_DIM`, which is a per-patient fan-in.
+1. **Images enter as-is** — no padding step. Both backends align inputs of differing sizes natively
+   (VALIS resolves them into a shared space; the tiled/STARE backend warps each moving slide into the
+   reference's shape), so no common-canvas step is needed.
 2. **Group by patient + identify reference** (`registration.nf:106-143`). Slides are grouped with
    a streaming `groupTuple(size: images_count)` keyed on `patient_id`; the reference is the item
    whose `meta.is_reference == true`. Missing reference → hard error unless
@@ -75,7 +75,6 @@ Other registration-subworkflow processes and their labels:
 | `SEG_QC_GEOJSON` | `process_high` + `gpu` container | 8 CPU / 200+100·att GB | StarDist DAPI seg on native slide → cell GeoJSON (reg_qc=2) |
 | `WARP_SEG_QC` | `process_medium` | 4 CPU / 100+100·att GB / 4 h | warp polygons through stages, score overlap (reg_qc=2) |
 | `GENERATE_REGISTRATION_QC` | `process_high` | 8 CPU / 200+100·att GB | RGB DAPI overlay (reg_qc≥1) |
-| `PAD_IMAGES` / `GET_IMAGE_DIMS` / `MAX_DIM` | low/single | — | optional padding |
 | `ESTIMATE_FEATURE_DISTANCES` | (opt.) | — | feature-based TRE (opt-in) |
 
 `process_high_memory` (400·att GB, `conf/modules.config:58-60`) exists but is **not** used by the

@@ -61,18 +61,16 @@ whole-slide alignment) and **STARE tiled** (JVM-free, fully parallel, laptop-fri
 |---|---|---|
 | `registration_method` | `valis` | Registration backend: `valis` (VALIS whole-slide) or `tiled` (STARE — see [Tiled / STARE](#tiled--stare-registration_methodtiled)). |
 | `allow_auto_reference` | `false` | If no `is_reference=true` row, use the first panel as reference. |
-| `padding` | `false` | Pad all panels to the patient's max dimensions before registering. |
-| `pad_mode` | `constant` | Padding fill mode: `constant`, `edge`, `reflect`, `symmetric`. |
+| `nuclear_markers` | `['DAPI','CELLTOX']` | Ordered preference of nuclear/fiducial marker names. The first present (resolved from channel metadata, never the filename) is moved to channel 0 and drives both cell segmentation and the registration fiducial. Fails fast if none present (single-channel images excepted). |
 
 ### VALIS
 
 | Parameter | Default | Description |
 |---|---|---|
-| `reg_reference_markers` | `['DAPI','FITC']` | Channels used to identify/align the reference. |
 | `memory_mode` | `high` | `low` (BRISK/RANSAC, small dims), `medium`, or `high` (SuperPoint/SuperGlue, larger dims). |
 | `reg_micro_reg_fraction` | `0.125` | Image fraction used for micro-registration. |
 | `reg_max_image_dim` | `4000` | Max cached image dimension during registration. |
-| `reg_micro_reg` | `0` | Micro-registration depth (nested): `0` = none, `1` = micro-rigid only (refines `slide.M`), `2` = + micro non-rigid (`register_micro`). At `>=1` the QC `rigid` stage means affine ∘ micro-rigid. |
+| `reg_micro_reg` | `2` | Micro-registration depth (nested, default MAX): `0` = none, `1` = micro-rigid only (refines `slide.M`), `2` = + micro non-rigid (`register_micro`). At `>=1` the QC `rigid` stage means affine ∘ micro-rigid. |
 | `reg_jvm_heap_gb` | `null` | Explicit JVM heap (GB) for VALIS. `null` auto-estimates from input size. |
 | `reg_qc` | `2` | Registration QC depth: `0` = none, `1` = DAPI overlay only, `2` = DAPI overlay + [staged segmentation-overlap metrics](registration_qc.md). |
 

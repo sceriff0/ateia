@@ -23,6 +23,7 @@ process CONVERT_IMAGE {
     def prefix = task.ext.prefix ?: (meta.id ?: meta.patient_id)
     def pixel_size = params.pixel_size ?: '0.325'
     def channels = meta.channels.join(',')
+    def nuclear_markers = (params.nuclear_markers ?: ['DAPI', 'CELLTOX']).join(' ')
     """
     # Log input size for tracing (-L follows symlinks)
     input_bytes=\$(stat -L --printf="%s" ${image_file} 2>/dev/null || echo 0)
@@ -34,6 +35,7 @@ process CONVERT_IMAGE {
         --patient_id ${prefix} \\
         --channels ${channels} \\
         --pixel_size ${pixel_size} \\
+        --nuclear-markers ${nuclear_markers} \\
         ${args}
 
     cat <<-END_VERSIONS > versions.yml

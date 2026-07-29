@@ -87,12 +87,12 @@ class ParamUtils {
      * 2 = micro-rigid + micro non-rigid (register_micro). VALIS controls the two passes
      * independently — micro_rigid_registrar_cls for the rigid refinement, the register_micro()
      * call for the non-rigid one — and this ordinal nests them (0 ⊂ 1 ⊂ 2), which forbids the
-     * odd "micro non-rigid without micro-rigid" combination. Default 0 preserves the pipeline's
-     * historical behaviour (micro off). Single source of truth for register.nf / warp_seg_qc.nf
-     * so the QC can honestly say what the 'rigid' stage means for a given run.
+     * odd "micro non-rigid without micro-rigid" combination. Default 2 (max: micro-rigid +
+     * micro non-rigid), matching nextflow.config. Single source of truth for register.nf /
+     * warp_seg_qc.nf so the QC can honestly say what the 'rigid' stage means for a given run.
      */
     static int microRegLevel(Map params) {
-        return params.reg_micro_reg == null ? 0 : (params.reg_micro_reg as int)
+        return params.reg_micro_reg == null ? 2 : (params.reg_micro_reg as int)
     }
 
     static void validateMicroReg(int level) {

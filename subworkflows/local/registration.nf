@@ -4,9 +4,6 @@
 ========================================================================================
 */
 
-include { GET_IMAGE_DIMS                    } from '../../modules/local/get_image_dims'
-include { MAX_DIM                           } from '../../modules/local/max_dim'
-include { PAD_IMAGES                        } from '../../modules/local/pad_images'
 include { GENERATE_REGISTRATION_QC          } from '../../modules/local/generate_registration_qc'
 include { SEG_QC_GEOJSON                    } from '../../modules/local/seg_qc_geojson'
 include { WARP_SEG_QC                       } from '../../modules/local/warp_seg_qc'
@@ -23,7 +20,6 @@ include { ESTIMATE_FEATURE_DISTANCES        } from '../../modules/local/estimate
     SUBWORKFLOW: REGISTRATION
 ========================================================================================
     Configuration:
-        - params.padding: true | false (optional padding per patient)
         - params.skip_registration_qc: true | false (skip QC generation)
         - params.qc_scale_factor: float (QC downsampling factor, default 0.25)
         - params.enable_feature_error: true | false (enable feature-based TRE)
@@ -59,40 +55,13 @@ workflow REGISTRATION {
 
     main:
     // ========================================================================
-    // STEP 1: OPTIONAL PADDING (per patient)
+    // STEP 1: Images enter registration as-is. Both backends align inputs of
+    // differing sizes natively (VALIS resolves them into a shared space; the
+    // tiled/STARE backend warps each moving slide into the reference's shape),
+    // so no common-canvas padding step is needed.
     // ========================================================================
-    if (params.padding) {
-        // Get dimensions for all images
-        GET_IMAGE_DIMS(ch_preprocessed)
-
-        // Group by patient and find max dimensions per patient
-        // Use groupKey for streaming - emits as soon as images_count items collected
-        ch_grouped_dims = GET_IMAGE_DIMS.out.dims
-            .map { meta, dims ->
-                def key = meta.images_count ? groupKey(meta.patient_id, meta.images_count) : meta.patient_id
-                [key, dims]
-            }
-            .groupTuple()
-            .map { key, dims_list ->
-                [ [patient_id: key.toString()], dims_list ]
-            }
-
-        MAX_DIM(ch_grouped_dims)
-
-        // MAX_DIM outputs [meta, max_dims_file]
-        // Combine each individual image with its patient's max_dims_file
-        ch_to_pad = ch_preprocessed
-            .map { meta, file -> [meta.patient_id, meta, file] }
-            .combine(MAX_DIM.out.max_dims_file.map { meta, f -> [meta.patient_id, f] }, by: 0)
-            .map { patient_id, meta, file, max_dims -> [meta, file, max_dims] }
-
-        PAD_IMAGES(ch_to_pad)
-        ch_images = PAD_IMAGES.out.padded
-        ch_images_for_error = ch_images.map { it }
-    } else {
-        ch_images = ch_preprocessed
-        ch_images_for_error = ch_images.map { it }
-    }
+    ch_images = ch_preprocessed
+    ch_images_for_error = ch_images.map { it }
 
     // ========================================================================
     // STEP 2: GROUP BY PATIENT AND IDENTIFY REFERENCES
@@ -400,13 +369,6 @@ workflow REGISTRATION {
     // Collect size logs from all registration processes
     ch_size_logs = Channel.empty()
 
-    // Add size logs from padding processes (if padding is enabled)
-    if (params.padding) {
-        ch_size_logs = ch_size_logs
-            .mix(GET_IMAGE_DIMS.out.size_log)
-            .mix(PAD_IMAGES.out.size_log)
-    }
-
     // Add size logs from the registration adapter
     ch_size_logs = ch_size_logs.mix(ch_adapter_logs)
 
@@ -427,12 +389,6 @@ workflow REGISTRATION {
 
     // Collect versions from all registration processes
     ch_versions = Channel.empty()
-
-    if (params.padding) {
-        ch_versions = ch_versions
-            .mix(GET_IMAGE_DIMS.out.versions.first())
-            .mix(PAD_IMAGES.out.versions.first())
-    }
 
     ch_versions = ch_versions.mix(ch_adapter_versions)
 

@@ -345,18 +345,6 @@ with open(OUT_DIR / "sample_merged_quant.csv", "w") as f:
         )
 print("  Created sample_merged_quant.csv (20 cells)")
 
-# 6b. Max dimensions file for padding tests
-with open(OUT_DIR / "sample_max_dims.txt", "w") as f:
-    f.write("MAX_HEIGHT 256\n")
-    f.write("MAX_WIDTH 256\n")
-print("  Created sample_max_dims.txt")
-
-# 6c. Individual dimensions file
-with open(OUT_DIR / "sample_dims.txt", "w") as f:
-    f.write("P001_ref.ome.tiff 128 128\n")
-    f.write("P001_mov1.ome.tiff 128 128\n")
-print("  Created sample_dims.txt")
-
 # 6d. Sample features JSON
 features = {
     "keypoints": [
@@ -459,8 +447,6 @@ print("  - invalid_checkpoint_bad_ref.csv")
 print("  - invalid_file_not_found.csv")
 print("\nModule test fixtures:")
 print("  - sample_merged_quant.csv")
-print("  - sample_max_dims.txt")
-print("  - sample_dims.txt")
 print("  - sample_features.json")
 print("  - sample_phenotype_mapping.json")
 print("  - sample_phenotypes.geojson")
@@ -553,16 +539,6 @@ print("\n8. Creating golden reference files in expected/...")
 with open(EXPECTED_DIR / "channels_3ch.txt", "w") as f:
     f.write("DAPI\nPANCK\nSMA\n")
 print("  Created expected/channels_3ch.txt")
-
-# 8b. Expected dimensions output
-with open(EXPECTED_DIR / "dims_128x128.txt", "w") as f:
-    f.write("P001_ref.ome.tiff 128 128\n")
-print("  Created expected/dims_128x128.txt")
-
-# 8c. Expected max dimensions
-with open(EXPECTED_DIR / "max_dims_128.txt", "w") as f:
-    f.write("MAX_HEIGHT 128\nMAX_WIDTH 128\n")
-print("  Created expected/max_dims_128.txt")
 
 # 8d. Expected merged quant columns (fov + cell_size + morphology + markers)
 with open(EXPECTED_DIR / "merged_quant_columns.txt", "w") as f:

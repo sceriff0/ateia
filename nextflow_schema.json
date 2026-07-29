@@ -141,20 +141,12 @@
                         "tiled"
                     ]
                 },
-                "padding": {
-                    "type": "boolean",
-                    "description": "Enable padding during registration.",
-                    "default": false
-                },
-                "pad_mode": {
-                    "type": "string",
-                    "description": "Padding mode for registration.",
-                    "default": "constant",
-                    "enum": [
-                        "constant",
-                        "edge",
-                        "reflect",
-                        "symmetric"
+                "nuclear_markers": {
+                    "type": "array",
+                    "description": "Ordered preference of nuclear/fiducial marker names; the first present (resolved from channel metadata, never the filename) is moved to channel 0 and drives both cell segmentation and the registration fiducial.",
+                    "default": [
+                        "DAPI",
+                        "CELLTOX"
                     ]
                 },
                 "skip_registration_qc": {
@@ -200,14 +192,6 @@
                     "description": "Number of features to detect.",
                     "default": 5000
                 },
-                "reg_reference_markers": {
-                    "type": "array",
-                    "description": "Reference markers for registration.",
-                    "default": [
-                        "DAPI",
-                        "FITC"
-                    ]
-                },
                 "reg_micro_reg_fraction": {
                     "type": "number",
                     "description": "Fraction for micro registration.",
@@ -230,8 +214,8 @@
                 },
                 "reg_micro_reg": {
                     "type": "integer",
-                    "description": "Micro-registration depth (nested): 0=none, 1=micro-rigid only (refines slide.M), 2=+micro non-rigid (register_micro).",
-                    "default": 0,
+                    "description": "Micro-registration depth (nested, default MAX): 0=none, 1=micro-rigid only (refines slide.M), 2=+micro non-rigid (register_micro).",
+                    "default": 2,
                     "enum": [
                         0,
                         1,
