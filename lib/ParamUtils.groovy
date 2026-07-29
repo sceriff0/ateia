@@ -109,6 +109,22 @@ class ParamUtils {
         }
     }
 
+    /**
+     * add_cycle does NOT run phenotyping: the incremental subworkflow has no
+     * COMPILE_PANEL/PHENOTYPE, and EXPORT_GEOJSON reuses the cell-contours file as a
+     * placeholder in the phenotype/model_config slots. If a panel were configured,
+     * EXPORT_GEOJSON's arg guard (params.panel_spec || params.panel_model) would activate
+     * --phenotypes/--panel_model against that placeholder and mis-classify. Reject the
+     * combination at launch rather than silently emit a wrong cells.geojson.
+     */
+    static void validateAddCyclePhenotyping(Map params) {
+        if (params.panel_spec || params.panel_model) {
+            throw new IllegalArgumentException(
+                "mode='add_cycle' does not support phenotyping. Unset --panel_spec / --panel_model " +
+                "for the incremental run — the new cycle inherits the base run's classification.")
+        }
+    }
+
     static void validateCompartmentQuant(boolean quantifyCompartments, boolean expanded) {
         if (expanded && !quantifyCompartments) {
             throw new IllegalArgumentException(

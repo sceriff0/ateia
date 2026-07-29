@@ -82,6 +82,13 @@ workflow MIRAGE {
         ParamUtils.validateCompartmentQuant(params.quantify_compartments, params.expanded_quantification)
         ParamUtils.validateRegQc((params.reg_qc == null ? 2 : params.reg_qc) as int)
         ParamUtils.validateMicroReg(ParamUtils.microRegLevel(params))
+        ParamUtils.validateAddCyclePhenotyping(params)  // add_cycle has no PHENOTYPE stage
+        // add_cycle re-registers the new cycle via the classic VALIS_ADAPTER only; the
+        // STARE 'tiled' backend is not wired into the incremental path — reject it loudly
+        // rather than silently registering with VALIS.
+        if (params.registration_method == 'tiled') {
+            error "mode='add_cycle' does not support --registration_method tiled (STARE) yet; use valis."
+        }
 
         if (!params.input) error "mode='add_cycle' requires --input (the new cycle samplesheet)"
         CsvUtils.validateInputCSV(params.input, ParamUtils.requiredColumnsForStep('preprocessing'))

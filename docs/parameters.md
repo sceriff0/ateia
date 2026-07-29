@@ -52,13 +52,14 @@ Bio-Formats conversion + BaSiC illumination correction.
 
 ## Registration
 
-VALIS whole-slide alignment.
+Two backends, selected by `--registration_method`: **VALIS** (default, graph-based
+whole-slide alignment) and **STARE tiled** (JVM-free, fully parallel, laptop-friendly).
 
 ### Common
 
 | Parameter | Default | Description |
 |---|---|---|
-| `registration_method` | `valis` | Registration backend. Only `valis` is supported. |
+| `registration_method` | `valis` | Registration backend: `valis` (VALIS whole-slide) or `tiled` (STARE — see [Tiled / STARE](#tiled--stare-registration_methodtiled)). |
 | `allow_auto_reference` | `false` | If no `is_reference=true` row, use the first panel as reference. |
 | `padding` | `false` | Pad all panels to the patient's max dimensions before registering. |
 | `pad_mode` | `constant` | Padding fill mode: `constant`, `edge`, `reflect`, `symmetric`. |
@@ -80,6 +81,22 @@ nuclei once after rigid registration, and then re-scores those same pairs after 
 stage — so per-pair IoU and centroid residual can be attributed to `rigid`, `non_rigid` and
 `micro` individually. See [Staged registration QC](registration_qc.md) for the output schema
 and how to read it.
+
+### Tiled / STARE (`registration_method=tiled`)
+
+STARE is an alternative registration backend that is **JVM-free** (no Bio-Formats/Java
+heap), tiles the slide internally, and runs fully in parallel — usable on a laptop. These
+params apply only when `--registration_method tiled`.
+
+| Parameter | Default | Description |
+|---|---|---|
+| `reg_tiled_dapi_index` | `0` | DAPI channel index used to estimate the transform. |
+| `reg_tiled_tile` | `2048` | Tile core size (px); also the mesh-grid resolution. |
+| `reg_tiled_halo` | `256` | Per-tile read halo (px) for registration context. |
+| `reg_tiled_gate_tre` | `1.0` | Refine only tiles whose rigid-stage TRE (px) exceeds this. |
+| `reg_tiled_upsample` | `10` | Phase-correlation sub-pixel upsample factor (per tile). |
+| `reg_tiled_out_tile` | `1024` | Streaming stitch write-tile size (px) — gigapixel-safe. |
+| `reg_tiled_fanout` | `false` | `false`: one Nextflow task per slide, tiled internally (≤8 GB). `true`: per-tile Nextflow fan-out (COARSE→REG_TILE→SOLVE→STITCH). |
 
 ## Segmentation
 
@@ -149,6 +166,26 @@ Per-cell marker intensity.
     Setting `--expanded_quantification true` without `--quantify_compartments true`
     fails at launch with a clear error.
 
+## Phenotyping (panel-agnostic)
+
+Optional constrained cell-type classification. When **both** `panel_spec` and
+`panel_model` are `null` (the default), phenotyping is skipped and the GeoJSON carries
+the constant `"Cell"` classification (raw intensities only — gate downstream). Supplying a
+panel enables conformal-risk-controlled (CRC) phenotype assignment written into the
+exported `cells.geojson`.
+
+| Parameter | Default | Description |
+|---|---|---|
+| `panel_spec` | `null` | Path to the panel authoring spec (`panel.yaml`). |
+| `panel_model` | `null` | Path to a frozen, compiled `model_config.json` (produced by `COMPILE_PANEL`). |
+| `pheno_alpha` | `0.05` | CRC target risk α (per-marker miscoverage budget). |
+| `pheno_min_cal` | `50` | Minimum per-marker calibration-set size. |
+| `pheno_max_enumerate` | `100000` | Feasible-set brute-force enumeration ceiling. |
+
+!!! note "Incremental cycles"
+    Phenotyping is **not** run in `--mode add_cycle`; setting `panel_spec`/`panel_model`
+    in add_cycle mode is rejected at launch.
+
 ## Visualization & export
 
 Pyramidal OME-TIFF assembly and GeoJSON.
@@ -159,6 +196,8 @@ Pyramidal OME-TIFF assembly and GeoJSON.
 | `pyramid_resolutions` | `8` | Number of pyramid resolution levels. |
 | `pyramid_scale` | `2` | Downsampling factor between levels. |
 | `compression` | `zstd` | Codec: `zstd`, `lzw`, `zlib`, `jpeg`, `none`. |
+| `simplify_tolerance` | `1.0` | Douglas–Peucker tolerance (px) for GeoJSON contour simplification. Display-only — quantification is mask-derived, so this does not affect measurements. |
+| `geojson_coord_precision` | `2` | Decimal places for GeoJSON coordinates. Display-only. |
 
 ## Quality control & reports { #quality-control--reports }
 
@@ -171,6 +210,7 @@ Pyramidal OME-TIFF assembly and GeoJSON.
 | `skip_postprocessing_qc` | `false` | Skip segmentation/intensity QC plots. |
 | `skip_seg_quality_eval` | `false` | Skip reference-free cell-segmentation quality scoring (CellSegmentationEvaluator, 2D). |
 | `cse_pixel_size_um` | `null` | Pixel size (µm) passed to the CellSegmentationEvaluator; `null` falls back to `pixel_size`. |
+| `cse_max_pixels` | `50000000` | Bin image+masks so CSE scores at most this many pixels (caps memory/time on full-WSI masks). Geometry/area metrics are preserved by binning, but the composite `QualityScore` shifts with the factor — keep it **fixed** across a cohort for comparability. `null` disables (score at full resolution). |
 | `segeval_tag` | `segeval` | Tag on `bolt3x/attend_image_analysis` (Docker Hub) for the segmentation-quality-evaluator image. |
 | `skip_final_qc_report` | `false` | Skip the aggregated HTML QC report. |
 | `enable_feature_error` | `false` | Compute feature-based registration error → `feature_distances/`. |

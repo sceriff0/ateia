@@ -165,9 +165,11 @@ workflow REGISTRATION {
     //   - Runs registration
     //   - Converts output back to [meta, file] standard format
 
-    // Registration runs via the classic monolithic VALIS adapter (single-process REGISTER).
-    // The distributed/tiled low-memory path was archived on 2026-07-24 (git tag
-    // archive/tiled-valis-2026-07-24) and is no longer wired in.
+    // Default registration runs via the classic monolithic VALIS adapter (single-process
+    // REGISTER). NOTE: the *old distributed-VALIS* low-memory path was archived 2026-07-24
+    // (git tag archive/tiled-valis-2026-07-24). The current `registration_method='tiled'`
+    // is a SEPARATE, live STARE backend dispatched via TILED_ADAPTER below — not that
+    // archived path. Don't confuse the two.
     //
     // Registrar pickle (per patient) for the GeoJSON seg-QC, and the pre-micro displacement
     // fields (only when reg_qc >= 2 asked REGISTER for them), both come from classic VALIS.
