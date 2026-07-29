@@ -1,1 +1,0 @@
-patient_id,preprocessed_image,is_reference,channels

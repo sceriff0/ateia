@@ -3,11 +3,14 @@
 
 import argparse
 import json
+import logging
 import os
 import sys
 
 import numpy as np
 import tifffile
+
+logger = logging.getLogger(__name__)
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "utils"))
 from cse import single_method_eval  # noqa: E402
@@ -110,9 +113,14 @@ def main():
     )
     a = ap.parse_args()
 
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
     channels, px_meta = _read_image_cyx(a.image)  # (C,Y,X)
-    cell = tifffile.imread(a.cell_mask).astype(np.int32)
-    nuc = tifffile.imread(a.nuclei_mask).astype(np.int32)
+    # .squeeze() drops a leading singleton axis: some label TIFFs are written
+    # as (1,Y,X) rather than (Y,X), which would otherwise break the `y, x =
+    # shape` unpack in _downsample_factor. A legitimate (Y,X) mask is a no-op.
+    cell = tifffile.imread(a.cell_mask).astype(np.int32).squeeze()
+    nuc = tifffile.imread(a.nuclei_mask).astype(np.int32).squeeze()
 
     if a.pixel_size_um:
         px = py = float(a.pixel_size_um)
@@ -128,6 +136,9 @@ def main():
     channels, cell, nuc = _downsample(channels, cell, nuc, factor)
     px *= factor
     py *= factor
+    logger.info(
+        f"[{a.id}] downsample_factor={factor} effective_pixel_size_um=({px:.4f}, {py:.4f})"
+    )
 
     img_data = channels[np.newaxis, :, np.newaxis, :, :]  # (1,C,1,Y,X)
     # img["img"]=None forces CSE's metadata-free thresholding path, matching the

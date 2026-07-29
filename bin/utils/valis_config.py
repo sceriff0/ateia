@@ -44,10 +44,16 @@ MEMORY_PRESETS = {
 def build_registrar_kwargs(
     reference_img_f,
     memory_mode="high",
-    skip_micro_registration=False,
+    micro_reg=0,
     max_image_dim_px=4000,
 ):
     """Return the exact kwargs dict passed to `registration.Valis(...)` by classic register.py.
+
+    ``micro_reg`` is the ordinal micro-registration depth (0/1/2). It controls only the *first*
+    micro pass here — ``MicroRigidRegistrar``, which runs inside ``Valis.register()`` and refines
+    ``slide.M`` — via the ``micro_rigid_registrar_cls`` constructor kwarg: enabled at level >= 1.
+    The *second* pass (``register_micro``, the non-rigid micro step) is a separate method call
+    gated at level >= 2 by ``register.py``; it is not configured here.
 
     NOTE: a fresh `SuperGlueMatcher()` instance is created per call (mirrors register.py, which
     instantiates the matcher from the preset). The matcher carries no cross-run RNG state that
@@ -67,9 +73,7 @@ def build_registrar_kwargs(
         "matcher": preset["matcher"],
         "non_rigid_registrar_cls": OpticalFlowWarper,
         "affine_optimizer_cls": None,
-        "micro_rigid_registrar_cls": None
-        if skip_micro_registration
-        else MicroRigidRegistrar,
+        "micro_rigid_registrar_cls": MicroRigidRegistrar if micro_reg >= 1 else None,
         "create_masks": True,
     }
 
@@ -87,8 +91,7 @@ def init_jvm(input_dir, override_gb=None):
     """Size and start the BioFormats JVM heap to the inputs, mirroring bin/register.py:333-335.
 
     Used by bin/warp_seg_qc.py, which constructs a real ``Valis`` and reads slides via BioFormats.
-    Heap formula is copied from register.py's estimate_jvm_memory (total*3+8, min 8, capped at
-    75% of system RAM)."""
+    Heap formula: total input size * 3 + 8, min 8, capped at 75% of system memory."""
     # Point scyjava's jgo/Maven cache off a read-only $HOME (HPC nodes) BEFORE the JVM starts.
     # scyjava<1.11 derives the cache path from Path.home() and ignores JGO_CACHE_DIR/M2_REPO, so
     # the Dockerfile ENV knobs are inert; this uses scyjava.config.set_cache_dir instead. Without

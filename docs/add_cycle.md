@@ -48,7 +48,7 @@ poor registration means the new markers for that patient are unreliable.
 Cycle N's `--outdir` becomes cycle N+1's `--prior_outdir`.
 
 ## Mask pyramid (`embed_masks`)
-`params.embed_masks` (default `true`) controls whether `MERGE_AND_PYRAMID`
+`params.embed_masks` (default `false`) controls whether `MERGE_AND_PYRAMID`
 embeds the segmentation masks in the output pyramid OME-TIFF:
 
 - When `embed_masks && quantify_compartments && expanded_quantification`, the

@@ -68,12 +68,12 @@ VALIS whole-slide alignment.
 | Parameter | Default | Description |
 |---|---|---|
 | `reg_reference_markers` | `['DAPI','FITC']` | Channels used to identify/align the reference. |
-| `memory_mode` | `medium` | `low` (BRISK/RANSAC, small dims), `medium`, or `high` (SuperPoint/SuperGlue, larger dims). |
+| `memory_mode` | `high` | `low` (BRISK/RANSAC, small dims), `medium`, or `high` (SuperPoint/SuperGlue, larger dims). |
 | `reg_micro_reg_fraction` | `0.125` | Image fraction used for micro-registration. |
 | `reg_max_image_dim` | `4000` | Max cached image dimension during registration. |
-| `skip_micro_registration` | `true` | Skip the micro-registration refinement step. |
+| `reg_micro_reg` | `0` | Micro-registration depth (nested): `0` = none, `1` = micro-rigid only (refines `slide.M`), `2` = + micro non-rigid (`register_micro`). At `>=1` the QC `rigid` stage means affine ∘ micro-rigid. |
 | `reg_jvm_heap_gb` | `null` | Explicit JVM heap (GB) for VALIS. `null` auto-estimates from input size. |
-| `reg_qc` | `1` | Registration QC depth: `0` = none, `1` = DAPI overlay only, `2` = DAPI overlay + [staged segmentation-overlap metrics](registration_qc.md). |
+| `reg_qc` | `2` | Registration QC depth: `0` = none, `1` = DAPI overlay only, `2` = DAPI overlay + [staged segmentation-overlap metrics](registration_qc.md). |
 
 At `reg_qc = 2` the pipeline segments each slide's DAPI on its **native** image, pairs the
 nuclei once after rigid registration, and then re-scores those same pairs after every later
@@ -142,8 +142,8 @@ Per-cell marker intensity.
 
 | Parameter | Default | Description |
 |---|---|---|
-| `quantify_compartments` | `false` | Emit per-compartment signal (Nucleus / Cytoplasm / Cell) by routing the nuclear mask into quantification. |
-| `expanded_quantification` | `false` | Also emit Median and Sum per compartment. **Requires** `quantify_compartments=true`. |
+| `quantify_compartments` | `true` | Emit per-compartment signal (Nucleus / Cytoplasm / Cell) by routing the nuclear mask into quantification. |
+| `expanded_quantification` | `true` | Also emit Mean and Sum per compartment (per-compartment Median is always emitted). **Requires** `quantify_compartments=true`. |
 
 !!! danger "Validation rule"
     Setting `--expanded_quantification true` without `--quantify_compartments true`
@@ -236,11 +236,12 @@ Full walkthrough: [Incremental cycles](add_cycle.md).
 |---|---|---|
 | `mode` | `standard` | `standard` = normal `--start`/`--stop` pipeline; `add_cycle` = incremental cyclic-IF. |
 | `prior_outdir` | `null` | **Required for `add_cycle`.** The `--outdir` of the previously completed run (supplies the reusable reference, mask, and quantification via its checkpoint CSVs). |
-| `embed_masks` | `true` | Embed the segmentation masks as a second uint32 series in the pyramid OME-TIFF. Written only when `embed_masks && quantify_compartments && expanded_quantification`; `add_cycle` consumes this series, so a prior run must have it to be extendable. |
+| `embed_masks` | `false` | Embed the segmentation masks as a second uint32 series in the pyramid OME-TIFF. Written only when `embed_masks && quantify_compartments && expanded_quantification`; `add_cycle` consumes this series, so a prior run must have it to be extendable. |
 
 !!! warning "`add_cycle` prerequisites"
-    A prior run is only extendable if it was produced with
-    `--embed_masks true --quantify_compartments --expanded_quantification`. Without the
+    `embed_masks` defaults to `false`, so a default run is **not** add_cycle-extendable.
+    Set `--embed_masks true` (together with `--quantify_compartments` and
+    `--expanded_quantification`, both on by default) to make a run extendable. Without the
     embedded mask series, `mode=add_cycle` **fast-fails** before doing any work. See
     [Incremental cycles → Fast-fail behavior](add_cycle.md#fast-fail-behavior).
 

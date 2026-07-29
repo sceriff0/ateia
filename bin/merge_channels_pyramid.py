@@ -22,17 +22,11 @@ sys.path.insert(0, str(Path(__file__).parent / "utils"))
 from logger import configure_logging, get_logger
 
 try:
-    from validation import detect_wrapped_values, log_image_stats, validate_image_range
+    from validation import detect_wrapped_values
 except ImportError:
     # Fallback if validation module not available
-    def log_image_stats(data, stage, logger=None):
-        pass
-
     def detect_wrapped_values(data, **kwargs):
         return False, 0, 0.0
-
-    def validate_image_range(data, stage, **kwargs):
-        return True, data
 
 
 try:
@@ -107,14 +101,12 @@ def rgb_to_ome_color(r: int, g: int, b: int, a: int = 255) -> int:
 
 def generate_channel_color(name: str, index: int) -> Tuple[int, int, int]:
     """Generate a color for a channel based on name or index."""
-    # Check predefined colors first
+    # Check predefined colors first (exact match, case-insensitive) — avoids
+    # substring collisions like "CD4" matching "CD45", or "CD1" matching "CD14".
     name_upper = name.upper()
-    for key in MARKER_COLORS:
-        if key.upper() in name_upper or name_upper in key.upper():
-            return MARKER_COLORS[key]
-
-    if name in MARKER_COLORS:
-        return MARKER_COLORS[name]
+    for key, rgb in MARKER_COLORS.items():
+        if key.upper() == name_upper:
+            return rgb
 
     # Generate color using golden ratio
     h = (index * 0.618033988749895) % 1.0
@@ -223,6 +215,10 @@ def downsample_image(image: np.ndarray, factor: int) -> np.ndarray:
             else:
                 result[i] = np.round(reshaped.mean(axis=(1, 3))).astype(image.dtype)
         return result
+    else:
+        raise ValueError(
+            f"downsample_image only supports 2D or 3D (CYX) images, got ndim={image.ndim}"
+        )
 
 
 def calculate_pyramid_levels(
@@ -566,30 +562,14 @@ def _read_channel_file(path: str) -> np.ndarray:
     return tifffile.imread(str(path))
 
 
-def merge_channels(
+def _scan_channel_metadata(
     input_dir: str,
-    output_path: str,
-    phenotype_mask: str = None,
-    phenotype_mapping: str = None,
-    physical_size_x: float = 0.325,
-    physical_size_y: float = 0.325,
-    pyramid_resolutions: int = 5,
-    pyramid_scale: int = 2,
-    tile_size: int = 512,
-    compression: str = "zstd",
-    compressionargs: Optional[Dict] = None,
-    masks_dir: Optional[str] = None,
+    phenotype_mask: Optional[str],
+    phenotype_mapping: Optional[str],
 ):
+    """Pass 1: discover channel files and scan their metadata (order, dtype,
+    shape), then fold in the phenotype mapping and mask-channel bookkeeping.
     """
-    Merge all single-channel TIFF files into a single pyramidal OME-TIFF.
-    """
-    log("=" * 70)
-    log("MERGE CHANNELS - Pyramidal OME-TIFF (QuPath Compatible)")
-    log("=" * 70)
-    log(f"Input directory: {input_dir}")
-    log(f"Output: {output_path}")
-    log(f"Pyramid: {pyramid_resolutions} levels, scale factor {pyramid_scale}")
-
     # Find all single-channel TIFF files
     channel_files = sorted(
         list(Path(input_dir).glob("*.tif")) + list(Path(input_dir).glob("*.tiff"))
@@ -633,7 +613,6 @@ def merge_channels(
 
     # Load phenotype mapping
     pheno_label_map = {}
-    phenotype_colormap = None
 
     if phenotype_mapping:
         log(f"Loading phenotype mapping: {phenotype_mapping}")
@@ -652,7 +631,21 @@ def merge_channels(
     num_output_channels = len(channel_names)
     log(f"Total output channels: {num_output_channels}")
 
-    # PASS 2: Load all channels into memory
+    return (
+        channel_files,
+        channel_names,
+        channel_colors,
+        height,
+        width,
+        dtype,
+        pheno_label_map,
+        masks_info,
+        num_output_channels,
+    )
+
+
+def _load_channel_stack(channel_files, num_output_channels, height, width, dtype):
+    """Pass 2: allocate the output stack and load each channel file into it."""
     log("-" * 50)
     log("Pass 2: Loading channels into memory...")
 
@@ -672,7 +665,7 @@ def merge_channels(
             channel_data = channel_data.squeeze()
 
         # Checkpoint 4: Validate channel data for negative/wrapped values
-        ch_min, ch_max = channel_data.min(), channel_data.max()
+        ch_min = channel_data.min()
         if ch_min < 0:
             log(
                 f"    WARNING: Negative values detected in {channel_file.stem}: min={ch_min}"
@@ -694,6 +687,25 @@ def merge_channels(
         output_idx += 1
         del channel_data
         gc.collect()
+
+    return output_data, output_idx, out_dtype
+
+
+def _stack_masks(
+    output_data,
+    output_idx,
+    out_dtype,
+    masks_info,
+    pheno_label_map,
+    height,
+    width,
+    masks_dir,
+):
+    """Add mask planes: the phenotype mask channel (appended to the intensity
+    stack) and, optionally, the cell/nuclei segmentation mask stack that
+    becomes a second OME series.
+    """
+    phenotype_colormap = None
 
     # Load mask channels
     for mask_type, mask_path in masks_info:
@@ -772,6 +784,28 @@ def merge_channels(
         del cell_mask, nuclei_mask
         gc.collect()
 
+    return phenotype_colormap, mask_stack, mask_names
+
+
+def _write_pyramid(
+    output_path,
+    output_data,
+    channel_names,
+    channel_colors,
+    phenotype_colormap,
+    physical_size_x,
+    physical_size_y,
+    pyramid_resolutions,
+    pyramid_scale,
+    tile_size,
+    compression,
+    compressionargs,
+    mask_stack,
+    mask_names,
+):
+    """Pass 3: write the pyramidal OME-TIFF to a temp path (atomic write:
+    write tmp → validate → rename is completed by the caller).
+    """
     # Create output directory
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
@@ -799,6 +833,13 @@ def merge_channels(
         mask_names=mask_names,
     )
 
+    return tmp_path
+
+
+def _validate_written_pyramid(tmp_path, num_output_channels, channel_names, mask_stack):
+    """Post-write validation: check the file has the right number of channels
+    and is readable, including the optional mask series.
+    """
     # Validate: check the file has the right number of channels and is readable.
     # Reads only the first tile per channel (~KB each), not full pages.
     # NOTE: use tif.series[0] (the intensity series) rather than raw tif.pages,
@@ -854,6 +895,77 @@ def merge_channels(
         f"  Validation passed: {n_written} channels intact"
         + (f", mask series {mask_stack.shape} intact" if mask_stack is not None else "")
     )
+
+
+def merge_channels(
+    input_dir: str,
+    output_path: str,
+    phenotype_mask: str = None,
+    phenotype_mapping: str = None,
+    physical_size_x: float = 0.325,
+    physical_size_y: float = 0.325,
+    pyramid_resolutions: int = 5,
+    pyramid_scale: int = 2,
+    tile_size: int = 512,
+    compression: str = "zstd",
+    compressionargs: Optional[Dict] = None,
+    masks_dir: Optional[str] = None,
+):
+    """
+    Merge all single-channel TIFF files into a single pyramidal OME-TIFF.
+    """
+    log("=" * 70)
+    log("MERGE CHANNELS - Pyramidal OME-TIFF (QuPath Compatible)")
+    log("=" * 70)
+    log(f"Input directory: {input_dir}")
+    log(f"Output: {output_path}")
+    log(f"Pyramid: {pyramid_resolutions} levels, scale factor {pyramid_scale}")
+
+    (
+        channel_files,
+        channel_names,
+        channel_colors,
+        height,
+        width,
+        dtype,
+        pheno_label_map,
+        masks_info,
+        num_output_channels,
+    ) = _scan_channel_metadata(input_dir, phenotype_mask, phenotype_mapping)
+
+    output_data, output_idx, out_dtype = _load_channel_stack(
+        channel_files, num_output_channels, height, width, dtype
+    )
+
+    phenotype_colormap, mask_stack, mask_names = _stack_masks(
+        output_data,
+        output_idx,
+        out_dtype,
+        masks_info,
+        pheno_label_map,
+        height,
+        width,
+        masks_dir,
+    )
+
+    tmp_path = _write_pyramid(
+        output_path,
+        output_data,
+        channel_names,
+        channel_colors,
+        phenotype_colormap,
+        physical_size_x,
+        physical_size_y,
+        pyramid_resolutions,
+        pyramid_scale,
+        tile_size,
+        compression,
+        compressionargs,
+        mask_stack,
+        mask_names,
+    )
+
+    _validate_written_pyramid(tmp_path, num_output_channels, channel_names, mask_stack)
 
     # Atomic rename — same filesystem, so this is instantaneous
     os.replace(tmp_path, output_path)

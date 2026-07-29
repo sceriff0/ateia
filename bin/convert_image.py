@@ -438,8 +438,6 @@ def convert_to_ome_tiff(
     if "C" in original_dims and original_dims.endswith("C"):
         # Move C from end to before spatial dimensions
         c_pos = original_dims.index("C")
-        # Find where Y starts (spatial dimensions)
-        y_pos = original_dims.index("Y")
 
         # Transpose: move C axis to position just before Y
         axes_list = list(range(image_data.ndim))

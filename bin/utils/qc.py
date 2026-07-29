@@ -255,7 +255,6 @@ def create_registration_qc(
     See Also
     --------
     create_dapi_overlay : Lower-level overlay creation
-    lib.metadata.get_channel_names : Extract channel names
     """
     reference_path = Path(reference_path)
     registered_path = Path(registered_path)

@@ -25,7 +25,10 @@ def _old_get_indices_pandas(data):
     import pandas as pd
 
     d = data.ravel()
-    f = lambda x: np.unravel_index(x.index, data.shape)
+
+    def f(x):
+        return np.unravel_index(x.index, data.shape)
+
     return pd.Series(d).groupby(d).apply(f)
 
 
@@ -108,7 +111,7 @@ def _old_get_matched_masks(cell_mask, nuclear_mask):
                             nucleus_coords[j - 1],
                             mismatch_repair=1,
                         )
-                        if type(whole_cell) != bool:
+                        if type(whole_cell) is not bool:
                             if mismatch_fraction < best_mismatch_fraction:
                                 best_mismatch_fraction = mismatch_fraction
                                 whole_cell_best = whole_cell
