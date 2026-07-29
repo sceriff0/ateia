@@ -12,6 +12,8 @@ include { SPLIT_CHANNELS           } from '../../modules/local/split_channels'
 include { QUANTIFY                 } from '../../modules/local/quantify'
 include { MERGE_QUANT_CSVS         } from '../../modules/local/quantify'
 include { EXPORT_GEOJSON            } from '../../modules/local/export_geojson'
+include { COMPILE_PANEL            } from '../../modules/local/compile_panel'
+include { PHENOTYPE                } from '../../modules/local/phenotype'
 include { MERGE_AND_PYRAMID        } from '../../modules/local/merge_and_pyramid'
 include { GENERATE_POSTPROCESSING_QC    } from '../../modules/local/generate_postprocessing_qc'
 include { SEG_QUALITY_EVAL } from '../../modules/local/seg_quality_eval.nf'
@@ -199,24 +201,52 @@ workflow POSTPROCESSING {
     MERGE_QUANT_CSVS(ch_for_quant_merge)
 
     // ========================================================================
-    // GEOJSON EXPORT - Export cell data with raw measurements for FlowPath
+    // PHENOTYPING (optional) - compile panel + classify cells per patient
     // ========================================================================
-    // Join merged CSV with pre-computed contours from EXTRACT_CELL_PROPERTIES
     ch_contours = EXTRACT_CELL_PROPERTIES.out.contours
         .map { meta, json_file -> [meta.patient_id, json_file] }
-
-    // Nucleus contours channel: real nucleus contours when compartments are enabled,
-    // otherwise reuse the cell contours as a harmless placeholder (EXPORT_GEOJSON does
-    // not pass --nucleus_contours_json unless params.quantify_compartments).
     ch_nuc_contours_for_export = params.quantify_compartments ? ch_nucleus_contours : ch_contours
 
-    ch_for_export = MERGE_QUANT_CSVS.out.merged_csv
+    def do_pheno = (params.panel_spec != null) || (params.panel_model != null)
+    def ch_model_config = Channel.empty()
+    def ch_phenotypes = Channel.empty()
+    if (do_pheno) {
+        if (params.panel_spec) {
+            COMPILE_PANEL(Channel.value(file(params.panel_spec)))
+            ch_model_config = COMPILE_PANEL.out.model_config.first()
+        } else {
+            ch_model_config = Channel.value(file(params.panel_model))
+        }
+
+        ch_pheno_in = MERGE_QUANT_CSVS.out.merged_csv
+            .map { meta, csv -> [meta.patient_id, meta, csv] }
+            .join(ch_morphology, by: 0)
+            .map { _pid, meta, csv, morph -> [meta, csv, morph] }
+        PHENOTYPE(ch_pheno_in, ch_model_config)
+        ch_phenotypes = PHENOTYPE.out.phenotypes
+    }
+
+    def ch_export_base = MERGE_QUANT_CSVS.out.merged_csv
         .map { meta, csv -> [meta.patient_id, meta, csv] }
         .join(ch_contours, by: 0)
         .join(ch_nuc_contours_for_export, by: 0)
-        .map { _patient_id, meta, csv, contours_json, nucleus_contours_json ->
-            [meta, csv, contours_json, nucleus_contours_json]
-        }
+
+    def ch_for_export
+    if (do_pheno) {
+        ch_for_export = ch_export_base
+            .join(ch_phenotypes.map { meta, ph -> [meta.patient_id, ph] }, by: 0)
+            .combine(ch_model_config)
+            .map { _pid, meta, csv, contours_json, nuc_json, ph, mc ->
+                [meta, csv, contours_json, nuc_json, ph, mc]
+            }
+    } else {
+        ch_for_export = ch_export_base
+            .map { _pid, meta, csv, contours_json, nuc_json ->
+                // No panel: reuse the contours file as harmless placeholders; the module
+                // guard (params.panel_spec || params.panel_model) suppresses the args.
+                [meta, csv, contours_json, nuc_json, contours_json, contours_json]
+            }
+    }
 
     EXPORT_GEOJSON(ch_for_export)
 
@@ -347,6 +377,10 @@ workflow POSTPROCESSING {
         .mix(MERGE_AND_PYRAMID.out.size_log)
         .mix(SEG_QUALITY_EVAL.out.size_log)
 
+    if (do_pheno) {
+        ch_size_logs = ch_size_logs.mix(PHENOTYPE.out.size_log)
+    }
+
     // Add postprocessing QC size logs if enabled
     if (!params.skip_postprocessing_qc) {
         ch_size_logs = ch_size_logs
@@ -369,6 +403,13 @@ workflow POSTPROCESSING {
         .mix(MERGE_AND_PYRAMID.out.versions.first())
         .mix(SEG_QUALITY_EVAL.out.versions.first())
         .mix(MERGE_SEG_EVAL.out.versions.first())
+
+    if (do_pheno) {
+        ch_versions = ch_versions.mix(PHENOTYPE.out.versions.first())
+        if (params.panel_spec) {
+            ch_versions = ch_versions.mix(COMPILE_PANEL.out.versions.first())
+        }
+    }
 
     if (!params.skip_postprocessing_qc) {
         ch_versions = ch_versions

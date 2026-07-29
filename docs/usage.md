@@ -28,10 +28,12 @@ flowchart LR
 - **Registration** — VALIS whole-slide alignment of every panel onto the reference panel.
 - **Postprocessing** — segmentation + per-cell quantification + QuPath GeoJSON export + pyramidal OME-TIFF.
 
-!!! info "No phenotyping stage"
-    MIRAGE does not assign cell types. The exported GeoJSON carries **raw marker
-    intensities plus z-scores**, so you gate and phenotype downstream in QuPath or
-    [FlowPath](https://flowpath.readthedocs.io/).
+!!! info "Optional phenotyping"
+    By default MIRAGE does not assign cell types — the exported GeoJSON carries **raw
+    marker intensities**, so you can gate and phenotype downstream in QuPath or
+    [FlowPath](https://flowpath.readthedocs.io/). Optionally, supplying a panel
+    (`--panel_spec` / `--panel_model`) enables built-in conformal-risk-controlled
+    phenotype assignment — see [Phenotyping](parameters.md#phenotyping-panel-agnostic).
 
 !!! tip "Adding a new imaging cycle later?"
     To fold a fresh cyclic-IF cycle into an already-completed run — reusing the prior
@@ -290,7 +292,7 @@ These open directly in QuPath, napari, and OMERO, and feed
 
 ??? failure "Launch fails on an invalid value"
     `--start`/`--stop` must be `preprocessing|registration|postprocessing`;
-    `--registration_method` accepts only `valis`; `--seg_method` must be
+    `--registration_method` must be `valis|tiled`; `--seg_method` must be
     `stardist|instantseg|cellsam`. Typos exit before any process is submitted.
 
 ??? failure "`--input` validation error / wrong columns"

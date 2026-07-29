@@ -129,7 +129,7 @@ The first real run downloads each tool's image, which can take several minutes. 
     ```
 
 !!! note "Where tags live"
-    The exact `bolt3x/attend_image_analysis` tag is pinned in `nextflow.config` (`params.container`) and `conf/modules.config`. Never use `:latest` — MIRAGE pins immutable version tags for reproducibility.
+    The exact `bolt3x/attend_image_analysis` tag is pinned per-process in `modules/local/*.nf` (and resource overrides in `conf/modules.config`). MIRAGE never uses `:latest`. Note that the current tags are content-descriptive (e.g. `preprocess`, `segeval`), not immutable version tags — see [`containers/README.md`](https://github.com/sceriff0/mirage/blob/main/containers/README.md).
 
 ## GPU notes
 

@@ -134,10 +134,11 @@
             "properties": {
                 "registration_method": {
                     "type": "string",
-                    "description": "Registration method to use. Only 'valis' is currently supported by the runtime validator (see lib/ParamUtils.groovy).",
+                    "description": "Registration backend: 'valis' (VALIS graph-based whole-slide) or 'tiled' (STARE: JVM-free, internally tiled, fully parallel). See lib/ParamUtils.groovy.",
                     "default": "valis",
                     "enum": [
-                        "valis"
+                        "valis",
+                        "tiled"
                     ]
                 },
                 "padding": {
@@ -249,6 +250,41 @@
                     ],
                     "description": "JVM heap (GiB) for VALIS/Bio-Formats in REGISTER. null = derive from task.memory at runtime.",
                     "default": null
+                },
+                "reg_tiled_dapi_index": {
+                    "type": "integer",
+                    "description": "STARE (registration_method=tiled) only: DAPI channel index used to estimate the transform.",
+                    "default": 0
+                },
+                "reg_tiled_tile": {
+                    "type": "integer",
+                    "description": "STARE only: tile core size (px); also the mesh-grid resolution.",
+                    "default": 2048
+                },
+                "reg_tiled_halo": {
+                    "type": "integer",
+                    "description": "STARE only: per-tile read halo (px) for registration context.",
+                    "default": 256
+                },
+                "reg_tiled_gate_tre": {
+                    "type": "number",
+                    "description": "STARE only: refine only tiles whose rigid-stage TRE (px) exceeds this.",
+                    "default": 1.0
+                },
+                "reg_tiled_upsample": {
+                    "type": "integer",
+                    "description": "STARE only: phase-correlation sub-pixel upsample factor (per tile).",
+                    "default": 10
+                },
+                "reg_tiled_out_tile": {
+                    "type": "integer",
+                    "description": "STARE only: streaming stitch write-tile size (px), gigapixel-safe.",
+                    "default": 1024
+                },
+                "reg_tiled_fanout": {
+                    "type": "boolean",
+                    "description": "STARE only: false = one Nextflow task per slide, tiled internally (<=8 GB); true = per-tile Nextflow fan-out (COARSE->REG_TILE->SOLVE->STITCH).",
+                    "default": false
                 }
             }
         },
@@ -436,6 +472,44 @@
                 }
             }
         },
+        "phenotyping_options": {
+            "title": "Phenotyping options",
+            "type": "object",
+            "description": "Optional panel-agnostic phenotyping. When panel_spec and panel_model are both null, phenotyping is skipped (constant 'Cell' classification). Not run in mode='add_cycle'.",
+            "properties": {
+                "panel_spec": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "description": "Path to the panel authoring spec (panel.yaml). Enables phenotyping when set.",
+                    "default": null
+                },
+                "panel_model": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "description": "Path to a frozen, compiled model_config.json (produced by COMPILE_PANEL).",
+                    "default": null
+                },
+                "pheno_alpha": {
+                    "type": "number",
+                    "description": "Conformal-risk-control target risk alpha (per-marker miscoverage budget).",
+                    "default": 0.05
+                },
+                "pheno_min_cal": {
+                    "type": "integer",
+                    "description": "Minimum per-marker calibration-set size.",
+                    "default": 50
+                },
+                "pheno_max_enumerate": {
+                    "type": "integer",
+                    "description": "Feasible-set brute-force enumeration ceiling.",
+                    "default": 100000
+                }
+            }
+        },
         "output_options": {
             "title": "Output options",
             "type": "object",
@@ -577,6 +651,9 @@
         },
         {
             "$ref": "#/definitions/quantification_options"
+        },
+        {
+            "$ref": "#/definitions/phenotyping_options"
         },
         {
             "$ref": "#/definitions/output_options"

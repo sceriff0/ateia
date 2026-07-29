@@ -54,9 +54,11 @@ flowchart LR
 
 The three stages — **preprocessing → registration → postprocessing** — run in that
 order and are independently restartable, so you can re-run just the part you're
-tuning. MIRAGE deliberately **stops at quantified cells**: the exported GeoJSON
-carries raw marker intensities plus z-scores, and you gate/phenotype downstream in
-QuPath or the [FlowPath](https://flowpath.readthedocs.io/) ecosystem.
+tuning. By default MIRAGE **stops at quantified cells** — the exported GeoJSON carries
+raw marker intensities, and you gate/phenotype downstream in QuPath or the
+[FlowPath](https://flowpath.readthedocs.io/) ecosystem. Optional built-in
+[phenotyping](parameters.md#phenotyping-panel-agnostic) (panel-driven, conformal-risk
+controlled) can assign cell types directly into the GeoJSON when a panel is supplied.
 
 ## Highlights
 

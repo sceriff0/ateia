@@ -18,9 +18,15 @@ secrets. Docker Hub images are **public**, so no pull credentials are needed on
 the HPC/cluster side (unlike GHCR, whose default-private packages caused
 `403 Forbidden` on `singularity pull`).
 
-> `<tag>` is a fixed, content-descriptive tag (e.g. `preprocess`,
+> `<tag>` is a content-descriptive tag (e.g. `preprocess`,
 > `convert_bioformats_2`, `segeval`) — not a release version. The modules pin
-> these tags directly; we avoid `:latest` so runs are reproducible.
+> these tags directly and never use `:latest`.
+>
+> **Reproducibility caveat:** these descriptive tags are **mutable** — rebuilding and
+> re-pushing `bolt3x/attend_image_analysis:preprocess` changes what a checkout runs, so
+> a tagged pipeline release is **not** byte-for-byte reproducible from the tag alone. For
+> a hard reproducibility guarantee, pin by immutable digest (`@sha256:…`) or cut
+> release-versioned image tags (e.g. `:v1.0.0`) at release time.
 
 ## Image mapping
 
