@@ -315,7 +315,7 @@ def run_cost_summary(runs_df: pd.DataFrame) -> pd.DataFrame:
     df["_leaf"] = df["process"].map(_leaf)
     key = "run_id" if "run_id" in df.columns else "config_id"
     carry = [c for c in ("varied_axis", "target_px", "n_channels", "n_register_images",
-                         "memory_mode", "skip_micro_registration", "seg_method",
+                         "memory_mode", "reg_micro_reg", "registration_method", "seg_method",
                          "config_id", "rep") if c in df.columns]
     out = []
     for run, g in df.groupby(key):

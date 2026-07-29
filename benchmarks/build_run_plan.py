@@ -59,18 +59,30 @@ def _configs(sweep: dict) -> list[tuple[dict, str]]:
     #     there is no distributed counterpart to benchmark. See docs/superpowers/specs/
     #     2026-07-24-benchmark-paper-data-design.md.
 
-    # 3. REGISTRATION PARAMETER GRID — the registration knobs (memory_mode, skip_micro_registration)
-    #    crossed at the baseline cell, classic path only. Labelled registration_param_grid.
+    # 3. REGISTRATION PARAMETER GRID — the registration knobs (memory_mode, reg_micro_reg)
+    #    crossed at the baseline cell. Labelled registration_param_grid. NB: reg_micro_reg is the REAL
+    #    pipeline param (0/1/2); the old skip_micro_registration boolean was never read by the pipeline,
+    #    so it silently pinned micro-registration at 0 for the whole sweep.
     rpg = sweep.get("registration_param_grid")
     if rpg:
         mms = rpg.get("memory_mode", [baseline.get("memory_mode", "medium")])
         mms = list(mms) if isinstance(mms, (list, tuple)) else [mms]
-        sms = rpg.get("skip_micro_registration", [baseline.get("skip_micro_registration", True)])
-        sms = list(sms) if isinstance(sms, (list, tuple)) else [sms]
+        mrs = rpg.get("reg_micro_reg", [baseline.get("reg_micro_reg", 0)])
+        mrs = list(mrs) if isinstance(mrs, (list, tuple)) else [mrs]
         for mm in mms:
-            for sm in sms:
-                configs.append((dict(baseline, memory_mode=mm, skip_micro_registration=sm),
+            for mr in mrs:
+                configs.append((dict(baseline, memory_mode=mm, reg_micro_reg=mr),
                                 "registration_param_grid"))
+
+    # 3b. TILED (STARE) PARAMETER GRID — reg_tiled_* crossed with registration_method PINNED to 'tiled'
+    #     (these params are no-ops under valis, so an OFAT run off the valis baseline would not exercise
+    #     them). Labelled tiled_param_grid.
+    tpg = sweep.get("tiled_param_grid")
+    if tpg:
+        tkeys = list(tpg)
+        for combo in itertools.product(*(tpg[k] for k in tkeys)):
+            configs.append((dict(baseline, registration_method="tiled", **dict(zip(tkeys, combo))),
+                            "tiled_param_grid"))
 
     # 3c. SEGMENTATION GRID — each method benchmarked with ITS OWN parameters. sweep.yaml maps a
     #     seg_method to a dict of {param: [values]}; this pins seg_method and crosses that method's

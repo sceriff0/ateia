@@ -128,25 +128,48 @@ def test_registration_grid_crosses_channels_when_list():
         (4096, 2, 4), (4096, 2, 8), (4096, 4, 4), (4096, 4, 8)}
 
 
-def test_registration_param_grid_crosses_params_classic():
+def test_registration_param_grid_crosses_params():
     sweep = {
         "strategy": "ofat",
         "baseline": {"target_px": 4096, "n_channels": 2, "n_register_images": 2,
-                     "memory_mode": "medium", "skip_micro_registration": True},
+                     "memory_mode": "medium", "reg_micro_reg": 0},
         "registration_param_grid": {
             "memory_mode": ["low", "medium", "high"],
-            "skip_micro_registration": [True, False],
+            "reg_micro_reg": [0, 1, 2],
         },
         "axes": {},
     }
     plan = build_run_plan(sweep, repeats=1)
     rp = [r for r in plan if r["varied_axis"] == "registration_param_grid"]
-    # 3 memory_mode x 2 skip_micro, classic path only (distributed path was removed from the pipeline)
-    assert len(rp) == 6
-    combo = {(r["memory_mode"], r["skip_micro_registration"]) for r in rp}
-    assert combo == {(mm, sm) for mm in ("low", "medium", "high") for sm in (True, False)}
-    # the distributed knobs must not appear anywhere
+    # 3 memory_mode x 3 reg_micro_reg depths
+    assert len(rp) == 9
+    combo = {(r["memory_mode"], r["reg_micro_reg"]) for r in rp}
+    assert combo == {(mm, mr) for mm in ("low", "medium", "high") for mr in (0, 1, 2)}
+    # the DEAD skip_micro_registration boolean (never read by the pipeline) and the archived
+    # distributed knobs must not appear anywhere
+    assert all("skip_micro_registration" not in r for r in rp)
     assert all("reg_distributed_tiling" not in r and "reg_dist_force_tiling" not in r for r in rp)
+
+
+def test_tiled_param_grid_pins_method_and_crosses_reg_tiled_params():
+    sweep = {
+        "strategy": "ofat",
+        "baseline": {"target_px": 4096, "n_channels": 2, "registration_method": "valis",
+                     "reg_tiled_tile": 2048, "reg_tiled_gate_tre": 1.0},
+        "tiled_param_grid": {
+            "reg_tiled_tile": [1024, 2048, 4096],
+            "reg_tiled_gate_tre": [0.5, 1.0, 2.0],
+        },
+        "axes": {},
+    }
+    plan = build_run_plan(sweep, repeats=1)
+    tp = [r for r in plan if r["varied_axis"] == "tiled_param_grid"]
+    # 3 tile x 3 gate = 9 configs, all PINNED to registration_method=tiled (reg_tiled_* are no-ops
+    # under valis, so the grid forces the tiled backend)
+    assert len(tp) == 9
+    assert all(r["registration_method"] == "tiled" for r in tp)
+    combo = {(r["reg_tiled_tile"], r["reg_tiled_gate_tre"]) for r in tp}
+    assert combo == {(t, g) for t in (1024, 2048, 4096) for g in (0.5, 1.0, 2.0)}
 
 
 def test_segmentation_grid_pins_method_and_crosses_own_params():
@@ -213,6 +236,9 @@ def test_project_sweep_baseline_matches_pipeline_defaults():
     assert base["seg_cellsam_block_size"] == 1024       # nextflow.config default
     assert base["cse_max_pixels"] == 50000000           # nextflow.config default (CSE downsample cap)
     assert base["preproc_pool_workers"] is None         # nextflow.config default (null = task.cpus)
+    assert base["reg_micro_reg"] == 0                   # nextflow.config default (micro-registration off)
+    assert base["registration_method"] == "valis"       # nextflow.config default backend
+    assert "skip_micro_registration" not in base        # DEAD param: the pipeline never read it
 
 
 def test_project_sweep_all_configs_share_columns():

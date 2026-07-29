@@ -159,7 +159,7 @@ if (nrow(reg) > 0) {
 
 # ── 5. OFAT KNOB EFFECTS — one panel per single-knob axis ──
 # For each OFAT axis, plot the most-affected process's realtime vs the knob value.
-# Only the true single-knob OFAT axes belong here; memory_mode / skip_micro_registration go to plot 10
+# Only the true single-knob OFAT axes belong here; memory_mode / reg_micro_reg go to plot 10
 # (both paths) and the segmentation tile knobs to plots 9/9b (per method).
 knob_targets <- tribble(
   ~axis,                       ~proc,          ~metric,
@@ -279,17 +279,17 @@ truthy <- function(x) tolower(as.character(x)) %in% c("true","1","yes")
 rp <- m %>% filter(varied_axis == "registration_param_grid", proc %in% reg_leaves)
 if (nrow(rp) > 0) {
   p10 <- rp %>%
-    group_by(run_id, memory_mode, skip_micro_registration, reg_distributed_tiling) %>%
+    group_by(run_id, memory_mode, reg_micro_reg, reg_distributed_tiling) %>%
     summarise(reg_peak_gb = max(peak_rss_gb), .groups = "drop") %>%
     mutate(path = ifelse(truthy(reg_distributed_tiling), "distributed", "classic")) %>%
-    group_by(memory_mode, skip_micro_registration, path) %>%
+    group_by(memory_mode, reg_micro_reg, path) %>%
     summarise(reg_peak_gb = mean(reg_peak_gb), .groups = "drop") %>%
     ggplot(aes(fct_relevel(memory_mode, "low", "medium", "high"), reg_peak_gb, fill = path)) +
     geom_col(position = "dodge", width = .7) +
-    facet_wrap(~ skip_micro_registration, labeller = label_both) +
+    facet_wrap(~ reg_micro_reg, labeller = label_both) +
     scale_fill_manual(values = oi[c(8, 2)], name = NULL) +
     labs(title = "Registration knobs, measured in both paths",
-         subtitle = "memory_mode \u00d7 skip_micro_registration \u2014 classic vs distributed registration.",
+         subtitle = "memory_mode \u00d7 reg_micro_reg \u2014 classic vs distributed registration.",
          x = "memory_mode", y = "registration-stage peak RSS (GiB)")
   save_fig(p10, "10_registration_params_both_paths", 9, 5)
 }
@@ -307,7 +307,7 @@ truthy <- function(x) tolower(as.character(x)) %in% c("true", "1", "yes")
 # ── 11. REGISTRATION ACCURACY vs COST (the Pareto view) ──
 qual <- read_opt("quality.csv"); cost <- read_opt("run_cost.csv")
 if (!is.null(qual) && !is.null(cost) && "reg_tre_median_px" %in% names(qual)) {
-  ac <- qual %>% select(any_of(c("run_id","varied_axis","memory_mode","skip_micro_registration",
+  ac <- qual %>% select(any_of(c("run_id","varied_axis","memory_mode","reg_micro_reg",
                                  "reg_tre_median_px"))) %>%
     inner_join(cost %>% select(run_id, cpu_hours), by = "run_id") %>%
     filter(is.finite(reg_tre_median_px))
@@ -315,8 +315,8 @@ if (!is.null(qual) && !is.null(cost) && "reg_tre_median_px" %in% names(qual)) {
     p11 <- ac %>%
       ggplot(aes(cpu_hours, reg_tre_median_px)) +
       geom_point(aes(colour = if ("memory_mode" %in% names(ac)) memory_mode else NULL,
-                     shape  = if ("skip_micro_registration" %in% names(ac))
-                                factor(skip_micro_registration) else NULL), size = 3, alpha = .8) +
+                     shape  = if ("reg_micro_reg" %in% names(ac))
+                                factor(reg_micro_reg) else NULL), size = 3, alpha = .8) +
       scale_colour_manual(values = oi, name = "memory_mode", na.translate = FALSE) +
       scale_shape_discrete(name = "skip_micro") +
       labs(title = "Registration accuracy vs cost",

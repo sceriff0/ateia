@@ -118,7 +118,7 @@ Verify the whole harness with no data at all:
 > reference + one-or-more moving panels per patient with **distinct channel names**
 > (reference `DAPI|ch1|...`, moving panel _p_ `DAPI|m{p}_1|...` — distinct so the
 > pipeline's duplicate-channel guard accepts them), so VALIS registration runs and the
-> registration axes (`memory_mode`, `skip_micro_registration`, `n_register_images`) are
+> registration axes (`memory_mode`, `reg_micro_reg`, `n_register_images`) are
 > exercised. **`n_register_images`** (default `[2, 4, 8]`) sets how many slides register
 > together (1 reference + N−1 moving panels) — this is how registration is benchmarked on
 > N images, not just a pair. Generating the matrix with `--sweep` provides the moving

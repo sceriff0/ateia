@@ -37,7 +37,7 @@ SIZE_VARYING_AXES = {"baseline", "scaling_grid", "registration_grid", "target_px
 
 # Config columns carried onto the master/param tables (present depending on the sweep).
 CONFIG_COLS = ("varied_axis", "target_px", "n_channels", "n_register_images",
-               "memory_mode", "skip_micro_registration", "seg_method")
+               "memory_mode", "reg_micro_reg", "registration_method", "seg_method")
 
 
 def _size_varying(runs_df: pd.DataFrame) -> pd.DataFrame:
@@ -153,7 +153,8 @@ _DICTS = {
          ("n_channels", "-", "Channels per slide."),
          ("n_register_images", "-", "Slides registered together (1 reference + N-1 moving)."),
          ("memory_mode", "-", "Registration memory profile (low/medium/high)."),
-         ("skip_micro_registration", "bool", "Whether micro-registration was skipped."),
+         ("reg_micro_reg", "-", "Micro-registration depth (0=none, 1=micro-rigid, 2=+micro non-rigid)."),
+         ("registration_method", "-", "Registration backend (valis / tiled)."),
          ("seg_method", "-", "Segmentation backend (stardist/cellsam/instantseg)."),
          ("total_realtime_s", "s", "Sum of all process realtimes."),
          ("cpu_hours", "cpu-h", "Sum of realtime x allocated cpus over all processes."),

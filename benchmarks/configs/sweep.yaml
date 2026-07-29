@@ -32,7 +32,7 @@ strategy: ofat
 # generate_matrix.py --sweep builds exactly these cells; build_run_plan.py expands
 # them into runs (labelled varied_axis=scaling_grid, plus the baseline cell).
 scaling_grid:
-  target_px:  [2048, 4096, 8192, 16384, 32768, 65536, 90000]  
+  target_px:  [2048, 4096, 8192, 16384, 32768, 65536]    # capped at 65536 (131072 ~69 GB/cell dropped)
   n_channels: [2, 4]                                     # 1 channel not benchmarked
 
 # Registration-scaling grid: size x number-of-registered-rounds, at a FIXED channel
@@ -44,7 +44,7 @@ scaling_grid:
 # These runs are labelled varied_axis=registration_grid and DO feed the memory
 # regression (input genuinely varies with round count).
 registration_grid:
-  target_px:         [2048, 4096, 8192, 16384, 32768, 65536, 90000]
+  target_px:         [2048, 4096, 8192, 16384, 32768, 65536]   # capped at 65536 (matches scaling_grid)
   n_register_images: [4, 8]
   n_channels:        [2, 4]     # benchmark N-image registration at BOTH 2 and 4 channels
 
@@ -58,13 +58,19 @@ baseline:
   # NB: baseline mirrors the PIPELINE DEFAULTS (nextflow.config) so the 'baseline' run is the
   # shipped config. memory_mode=high and reg_qc=2 are the pipeline defaults as of 2026-07-27.
   memory_mode: high                   # pipeline default (registration memory profile)
-  skip_micro_registration: true
+  registration_method: valis          # pipeline default backend; the registration_method axis adds the
+                                      # STARE 'tiled' backend for the valis-vs-tiled comparison
+  reg_micro_reg: 0                    # pipeline default micro-registration depth (0=none, 1=micro-rigid,
+                                      # 2=+micro non-rigid); crossed by registration_param_grid below
   n_register_images: 2                # 1 reference + 1 moving (the classic pair)
   reg_qc: 2                           # pipeline default: staged registration QC ON — segments DAPI nuclei,
                                       # fixes correspondence at the rigid stage, re-measures dice_matched +
                                       # centroid displacement (um) per stage. Harvested into
                                       # registration_accuracy.csv (bin/warp_seg_qc.py; docs/registration_qc.md).
   reg_jvm_heap_gb: null               # auto-size; the reg_jvm_heap_gb axis varies it (RAM elasticity)
+  reg_tiled_tile: 2048                # STARE tile core size (px), pipeline default. Ignored under valis;
+                                      # varied by tiled_param_grid (which pins registration_method=tiled)
+  reg_tiled_gate_tre: 1.0             # STARE per-tile refine gate (px TRE), pipeline default
   # --- preprocessing (BaSiC illumination correction) ---
   preproc_n_iter: 100
   preproc_overlap: 0
@@ -88,6 +94,11 @@ baseline:
   # expanded_quantification requires quantify_compartments (ParamUtils.validateCompartmentQuant).
   quantify_compartments: true         # pipeline default
   expanded_quantification: true       # pipeline default (Mean/Sum on top of the always-computed Median)
+  # --- export / output (pipeline defaults; varied by the export OFAT axes below) ---
+  compression: zstd                   # pipeline default OME-TIFF codec
+  pyramid_resolutions: 8              # pipeline default pyramid level count
+  simplify_tolerance: 1.0             # pipeline default GeoJSON simplification tolerance (display-only)
+  geojson_coord_precision: 2          # pipeline default GeoJSON coord decimals (display-only)
 
 # Axes to vary (OFAT: one run per non-baseline value of each axis). These hold
 # input size FIXED at the baseline cell and vary a single pipeline knob.
@@ -105,17 +116,42 @@ axes:
   # --- quantification ---
   quantify_compartments:      [false, true]
   expanded_quantification:    [false, true]       # valid because baseline quantify_compartments=true
-  # NOTE — the REGISTRATION knobs (memory_mode, skip_micro_registration) are NOT OFAT axes: they are
+  # --- registration method comparison: VALIS (default) vs the shipped STARE tiled backend ---
+  registration_method:        [valis, tiled]      # accuracy (dice_matched/displacement) + cost per backend
+  # --- registration QC depth (MEASUREMENT SETTING, not a pipeline knob) ---
+  reg_qc:                     [0, 1, 2]            # CAVEAT: reg_qc<2 emits NO staged accuracy metric, so
+                                                  # those runs drop out of registration_accuracy.csv. Swept
+                                                  # to characterise QC COST only — NOT comparable across
+                                                  # values for the accuracy table.
+  # --- CSE segmentation-quality-eval cost (MEASUREMENT SETTING) ---
+  cse_max_pixels:             [10000000, 50000000, 100000000]  # CSE downsample cap. CAVEAT: composite
+                                                  # QualityScore shifts with the binning factor — cost
+                                                  # characterisation only, NOT comparable across values.
+  # --- export / output size + write-time (display-only or resource-only; no accuracy effect) ---
+  compression:                [zstd, lzw, none]   # OME-TIFF codec (output size / write time)
+  pyramid_resolutions:        [4, 8]              # pyramid level count (output size / write time)
+  simplify_tolerance:         [0.0, 1.0, 2.0]     # display-only (quantification is mask-derived)
+  geojson_coord_precision:    [1, 2, 3]           # display-only
+  # NOTE — the REGISTRATION knobs (memory_mode, reg_micro_reg) are NOT OFAT axes: they are
   # crossed at the baseline cell by registration_param_grid below.
   # NOTE — seg_method and its per-method params (seg_n_tiles_*, seg_cellsam_block_size,
   # seg_instantseg_tile_size) are NOT OFAT axes: segmentation_grid below runs each method with its OWN
   # live params (an OFAT run of a backend-specific param off the stardist baseline is a no-op).
 
-# REGISTRATION PARAMETER GRID — memory_mode x skip_micro_registration crossed at the baseline cell
-# (classic path only). Characterises the effect of the registration knobs on cost + accuracy.
+# REGISTRATION PARAMETER GRID — memory_mode x reg_micro_reg crossed at the baseline cell.
+# Characterises the effect of the registration knobs on cost + accuracy. NB: reg_micro_reg is the REAL
+# pipeline param (0/1/2); the old skip_micro_registration boolean was a no-op the pipeline never read, so
+# micro-registration was silently pinned at 0 for the whole sweep before this fix.
 registration_param_grid:
-  memory_mode:              [low, medium, high]
-  skip_micro_registration:  [true, false]
+  memory_mode:    [low, medium, high]
+  reg_micro_reg:  [0, 1, 2]
+
+# TILED (STARE) PARAMETER GRID — reg_tiled_* only take effect under registration_method=tiled, so they
+# are crossed with the method PINNED to 'tiled' (an OFAT run off the valis baseline would be a no-op —
+# the same trap the reg_micro_reg fix above removes). Characterises the STARE backend's own knobs.
+tiled_param_grid:
+  reg_tiled_tile:      [1024, 2048, 4096]   # tile core size (px) — accuracy vs cost
+  reg_tiled_gate_tre:  [0.5, 1.0, 2.0]      # per-tile refine gate (px TRE) — how aggressively to refine
 
 # SEGMENTATION GRID — each method benchmarked with ITS OWN parameters (pinned seg_method + that method's
 # live knobs crossed). stardist crosses its tile grid; cellsam its block size; instantseg its tile size.
