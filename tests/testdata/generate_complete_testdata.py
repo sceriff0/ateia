@@ -323,7 +323,7 @@ print("  - invalid_file_not_found.csv")
 # =============================================================================
 print("\n6. Creating additional test fixtures for module tests...")
 
-# 6a. Merged quantification CSV for phenotype tests
+# 6a. Merged quantification CSV for export/QC module tests
 with open(OUT_DIR / "sample_merged_quant.csv", "w") as f:
     f.write(
         "label,centroid_x,centroid_y,area,perimeter,eccentricity,major_axis,minor_axis,solidity,DAPI,PANCK,SMA\n"
@@ -360,37 +360,6 @@ features = {
 with open(OUT_DIR / "sample_features.json", "w") as f:
     json.dump(features, f, indent=2)
 print("  Created sample_features.json (5 keypoints)")
-
-# 6e. Phenotype mapping JSON
-phenotype_mapping = {
-    "phenotypes": {"0": "Unassigned", "1": "PANCK+", "2": "SMA+", "3": "PANCK+SMA+"},
-    "colors": {"0": "#808080", "1": "#00FF00", "2": "#FF0000", "3": "#FFFF00"},
-}
-with open(OUT_DIR / "sample_phenotype_mapping.json", "w") as f:
-    json.dump(phenotype_mapping, f, indent=2)
-print("  Created sample_phenotype_mapping.json")
-
-# 6f. Sample GeoJSON for phenotype output
-geojson = {
-    "type": "FeatureCollection",
-    "features": [
-        {
-            "type": "Feature",
-            "geometry": {
-                "type": "Polygon",
-                "coordinates": [[[50, 30], [55, 30], [55, 35], [50, 35], [50, 30]]],
-            },
-            "properties": {
-                "objectType": "cell",
-                "classification": {"name": "PANCK+", "colorRGB": 65280},
-                "measurements": [{"name": "DAPI", "value": 8500}],
-            },
-        }
-    ],
-}
-with open(OUT_DIR / "sample_phenotypes.geojson", "w") as f:
-    json.dump(geojson, f, indent=2)
-print("  Created sample_phenotypes.geojson")
 
 # 6g. Feature distance metrics JSON
 metrics = {
@@ -448,8 +417,6 @@ print("  - invalid_file_not_found.csv")
 print("\nModule test fixtures:")
 print("  - sample_merged_quant.csv")
 print("  - sample_features.json")
-print("  - sample_phenotype_mapping.json")
-print("  - sample_phenotypes.geojson")
 print("  - sample_feature_metrics.json")
 print("  - sample_DAPI.tif, sample_PANCK.tif, sample_SMA.tif")
 print("  - sample_channels.txt")
