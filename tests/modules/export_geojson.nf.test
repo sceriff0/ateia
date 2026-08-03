@@ -241,34 +241,4 @@ nextflow_process {
             )
         }
     }
-
-    test("Should stamp id and classification when panel supplied - real") {
-        tag "real"
-        tag "phenotype"
-        when {
-            params { panel_model = "$projectDir/tests/testdata/model_config_min.json" }
-            process {
-                """
-                input[0] = [
-                    [patient_id: 'P001', channels: ['DAPI', 'PANCK']],
-                    file('$projectDir/tests/testdata/pheno_merged_quant.csv', checkIfExists: true),
-                    file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true),
-                    file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true),
-                    file('$projectDir/tests/testdata/pheno_phenotypes.csv', checkIfExists: true),
-                    file('$projectDir/tests/testdata/model_config_min.json', checkIfExists: true)
-                ]
-                """
-            }
-        }
-        then {
-            assertAll(
-                { assert process.success },
-                { assert process.out.panel_model },
-                { def gj = new groovy.json.JsonSlurper().parseText(path(process.out.geojson.get(0).get(1)).text)
-                  assert gj.features[0].id.toString().startsWith('P001:')
-                  def cls = gj.features.collect { it.properties.classification.name } as Set
-                  assert cls.every { it in ['Tumour','Immune','Ambiguous','Conflict','Artefact','Unclassified'] } }
-            )
-        }
-    }
 }

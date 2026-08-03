@@ -32,7 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.0.0] - 2026-07-29
 
 First public release. End-to-end multiplex WSI processing: preprocessing, registration,
-segmentation, per-cell quantification, optional phenotyping, and QuPath-compatible
+segmentation, per-cell quantification, and QuPath-compatible
 GeoJSON + pyramidal OME-TIFF export.
 
 ### Added
@@ -49,8 +49,6 @@ GeoJSON + pyramidal OME-TIFF export.
   and CellSAM; GPU or CPU; configurable nuclei→whole-cell expansion.
 - **Quantification** — per-cell morphology and per-channel intensity; optional
   per-compartment (Nucleus / Cytoplasm / Cell) signal and expanded Mean/Sum statistics.
-- **Phenotyping (optional, panel-agnostic)** — conformal-risk-controlled cell-type
-  assignment when a panel is supplied (`panel_spec` / `panel_model`); skipped by default.
 - **Reference-free segmentation-quality evaluation** — CellSegmentationEvaluator
   `QualityScore` with a `cse_max_pixels` downsample cap.
 - **Export** — QuPath-compatible `cells.geojson` and pyramidal OME-TIFF; configurable

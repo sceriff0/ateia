@@ -2,21 +2,12 @@
 """Export cell data to QuPath-compatible GeoJSON.
 
 Generates a QuPath-native GeoJSON FeatureCollection with raw marker intensities
-and morphological measurements for all cells.
-
-By default (no ``--panel_model``/``--phenotypes``) every cell gets a constant
-"Cell" classification and no ``id`` is stamped — gating is handled downstream
-by FlowPath in QuPath. When a compiled panel (``model_config.json``) and a
-``phenotypes.csv`` are supplied, each feature additionally gets a stamped
-``id`` ("<patient_id>:<label>"), a five-state classification (<Phenotype> /
-Ambiguous / Conflict / Artefact / Unclassified), numeric phenotype
-measurements (pheno_score, p_neg/p_pos, state, and QC fields), and a
-``panel_model.json`` sidecar is written alongside the GeoJSON outputs.
+and morphological measurements for all cells. No phenotype classification is
+applied — gating is handled downstream by FlowPath in QuPath.
 
 Outputs:
     - cells.geojson: QuPath-compatible cell detections (native array measurement format)
     - cells_data.csv: Full cell data with raw intensities and z-scores per marker
-    - panel_model.json: FlowPath-facing panel projection (only when phenotyping is active)
 """
 
 from __future__ import annotations
@@ -64,126 +55,6 @@ def rgb_to_qupath_color(r: int, g: int, b: int, a: int = 255) -> int:
     if value >= 0x80000000:
         value -= 0x100000000
     return value
-
-
-RESERVED_CLASSES = {
-    "Ambiguous": [150, 150, 150], "Conflict": [230, 140, 0],
-    "Artefact": [220, 50, 50], "Unclassified": [120, 120, 120],
-}
-
-
-def load_model_config(path: str) -> Dict:
-    """Load a compiled panel's ``model_config.json`` (Task 6 shape)."""
-    with open(path) as fh:
-        return json.load(fh)
-
-
-def load_phenotypes(path: str) -> Dict[int, Dict]:
-    """Load ``phenotypes.csv`` (Task 18 columns) into a per-label row dict."""
-    df = pd.read_csv(path)
-    return {int(r["label"]): {k: r[k] for k in df.columns} for _, r in df.iterrows()}
-
-
-def stamped_id(patient_id: str, label) -> str:
-    """Stable feature id ``"<patient_id>:<label>"`` (label coerced to int)."""
-    return f"{patient_id}:{int(float(label))}"
-
-
-def resolve_classification(prow: Dict, palette: Dict[str, List[int]]):
-    """Resolve a phenotype row's ``outcome`` to ``(name, qupath_color_int)`` via the palette."""
-    name = str(prow.get("outcome", "Cell"))
-    rgb = palette.get(name) or RESERVED_CLASSES.get(name) or list(CELL_COLOR_RGB)
-    return name, rgb_to_qupath_color(int(rgb[0]), int(rgb[1]), int(rgb[2]))
-
-
-def pheno_extra_measurements(
-    prow: Dict, feasible_names: List[str], lineage: List[str], states: List[str]
-) -> List[Dict]:
-    """Numeric-only phenotype measurements with the section-6.1 key spelling.
-
-    Emits ``pheno_score: <Name>``, ``<marker>: p_neg``, ``<marker>: p_pos``,
-    ``state: <marker>``, and the plain-keyed ``n_candidates``, ``empty_type``,
-    ``violated_constraint_id``, ``provenance``, ``density_bin``.
-    """
-    out: List[Dict] = []
-
-    def _num(v):
-        try:
-            return float(v)
-        except (TypeError, ValueError):
-            return None
-
-    # Stable-id anchor. QuPath drops a non-UUID GeoJSON feature `id` on import,
-    # so FlowPath reconstructs "<patient_id>:<label>" from this numeric `label`
-    # measurement + the caller-supplied patient id (carry-forward key). MUST be
-    # present whenever phenotyping is active.
-    lab = _num(prow.get("label"))
-    if lab is not None:
-        out.append({"name": "label", "value": int(lab)})
-
-    for name in feasible_names:
-        v = _num(prow.get(f"pheno_score:{name}", 0.0))
-        out.append({"name": f"pheno_score: {name}", "value": round(v or 0.0, 6)})
-    for m in lineage + states:
-        for direction in ("p_neg", "p_pos"):
-            v = _num(prow.get(f"{direction}:{m}"))
-            if v is not None:
-                out.append({"name": f"{m}: {direction}", "value": round(v, 6)})
-    for m in states:
-        v = _num(prow.get(f"state:{m}"))
-        if v is not None:
-            out.append({"name": f"state: {m}", "value": int(v)})
-    for key in ("n_candidates", "empty_type", "violated_constraint_id", "provenance", "density_bin"):
-        v = _num(prow.get(key))
-        if v is not None:
-            out.append({"name": key, "value": int(v)})
-    return out
-
-
-def write_panel_model_sidecar(cfg: Dict, out_path: str) -> None:
-    """Write ``panel_model.json``: a FlowPath-facing projection of the compiled panel.
-
-    ``constraint_table`` is FLATTENED (a list of ``{id, markers, kind, rate}``) for
-    every never/enforce/audit/requires entry — NOT a nested constraints object,
-    since the flowpath reader consumes the flat table directly.
-    """
-    table = []
-    for kind in ("never", "enforce", "audit"):
-        for c in cfg.get("constraints", {}).get(kind, []):
-            table.append({"id": c["id"], "markers": c["markers"], "kind": kind, "rate": c.get("rate", kind)})
-    for c in cfg.get("constraints", {}).get("requires", []):
-        table.append({"id": c["id"], "markers": [c["if"], c["then"]], "kind": "requires", "rate": "requires"})
-    side = {
-        "phenotypes": cfg.get("phenotypes", []),
-        "feasible_set": cfg.get("feasible_set", []),
-        "markers": {m: {"role": v.get("role"), "compartment": v.get("compartment")}
-                    for m, v in cfg.get("markers", {}).items()},
-        "palette": cfg.get("palette", {}),
-        "reserved_classes": RESERVED_CLASSES,
-        "constraint_table": table,
-        "spec_version": cfg.get("spec_version"),
-    }
-    with open(out_path, "w") as fh:
-        json.dump(side, fh)
-
-
-def _feature_class_and_extra(row, pheno_lookup, palette, patient_id, feasible_names, lineage, states):
-    """Return (feature_id, class_name, color_int, extra_measurements) for one cell.
-
-    When ``pheno_lookup`` is None (no panel supplied), returns today's constant
-    "Cell" classification with no stamped id and no extra measurements — the
-    exact pre-phenotyping behaviour.
-    """
-    if pheno_lookup is None:
-        return None, "Cell", rgb_to_qupath_color(*CELL_COLOR_RGB), []
-    label = row.get("label")
-    prow = pheno_lookup.get(int(float(label))) if label is not None else None
-    if prow is None:
-        return None, "Cell", rgb_to_qupath_color(*CELL_COLOR_RGB), []
-    name, color = resolve_classification(prow, palette)
-    extra = pheno_extra_measurements(prow, feasible_names or [], lineage or [], states or [])
-    fid = stamped_id(patient_id, label) if patient_id is not None else None
-    return fid, name, color, extra
 
 
 def identify_marker_columns(df: pd.DataFrame) -> List[str]:
@@ -310,8 +181,6 @@ def build_feature(
     object_type: str = "detection",
     nucleus_geometry: Optional[Dict] = None,
     object_id: Optional[str] = "PathDetectionObject",
-    class_name: str = "Cell",
-    feature_id: Optional[str] = None,
 ) -> Dict:
     """Assemble a single QuPath-native GeoJSON Feature.
 
@@ -319,22 +188,16 @@ def build_feature(
     Feature (sibling of ``geometry``), exactly matching QuPath's own serialization
     of cell objects (qupath.lib.io.QuPathTypeAdapters). It is only meaningful when
     ``object_type == "cell"``.
-
-    ``feature_id``, when given, takes precedence over ``object_id`` (the stamped
-    "<patient_id>:<label>" id used when phenotyping is active). ``class_name``
-    defaults to the legacy constant "Cell" classification.
     """
     feature: Dict = {"type": "Feature"}
-    if feature_id is not None:
-        feature["id"] = feature_id
-    elif object_id is not None:
+    if object_id is not None:
         feature["id"] = object_id
     feature["geometry"] = geometry
     if nucleus_geometry is not None:
         feature["nucleusGeometry"] = nucleus_geometry
     feature["properties"] = {
         "objectType": object_type,
-        "classification": {"name": class_name, "colorRGB": color_int},
+        "classification": {"name": "Cell", "colorRGB": color_int},
         "isLocked": False,
         "measurements": measurements,
     }
@@ -347,12 +210,6 @@ def export_geojson(
     pixel_size: float = 0.325,
     marker_cols: Optional[List[str]] = None,
     contours: Optional[Dict[str, List[List[float]]]] = None,
-    pheno_lookup: Optional[Dict[int, Dict]] = None,
-    palette: Optional[Dict[str, List[int]]] = None,
-    patient_id: Optional[str] = None,
-    feasible_names: Optional[List[str]] = None,
-    lineage: Optional[List[str]] = None,
-    states: Optional[List[str]] = None,
 ) -> int:
     """Export cells to QuPath-native GeoJSON format.
 
@@ -368,10 +225,6 @@ def export_geojson(
         Marker columns to include. If None, auto-detected.
     contours : dict, optional
         Pre-computed contours mapping str(label) -> [[x,y], ...] polygon ring.
-    pheno_lookup, palette, patient_id, feasible_names, lineage, states : optional
-        Phenotype classification inputs (Task 18/6). All default to ``None``,
-        which reproduces today's behaviour exactly: constant "Cell"
-        classification, no stamped ``id``, no extra measurements.
 
     Returns
     -------
@@ -383,6 +236,8 @@ def export_geojson(
 
     logger.info(f"Exporting {len(df)} cells to GeoJSON: {output_path}")
     logger.info(f"  Markers: {marker_cols}")
+
+    color_int = rgb_to_qupath_color(*CELL_COLOR_RGB)
 
     features = []
     skipped = 0
@@ -411,19 +266,12 @@ def export_geojson(
 
         # Build measurements array (QuPath native format)
         measurements = build_measurements(row, marker_cols, pixel_size)
-        fid, class_name, color_int_row, extra = _feature_class_and_extra(
-            row, pheno_lookup, palette, patient_id, feasible_names, lineage, states
-        )
-        measurements.extend(extra)
         # object_id=None: do not stamp every cell with the same constant id
         # ("PathDetectionObject"), which QuPath treats as a per-object UUID — a
         # shared id across all detections breaks re-import. (Matches the
-        # compartment export path, which already passes object_id=None.) When
-        # phenotyping is active, feature_id=fid supplies the stamped
-        # "<patient_id>:<label>" id instead.
+        # compartment export path, which already passes object_id=None.)
         features.append(
-            build_feature(measurements, geometry, color_int_row, object_id=None,
-                          class_name=class_name, feature_id=fid)
+            build_feature(measurements, geometry, color_int, object_id=None)
         )
 
     logger.info(f"  Exported {len(features)} cells, skipped {skipped}")
@@ -456,12 +304,6 @@ def export_combined_geojson(
     cell_contours: Optional[Dict[str, List[List[float]]]],
     nucleus_contours: Optional[Dict[str, List[List[float]]]],
     prefix: str = "cells",
-    pheno_lookup: Optional[Dict[int, Dict]] = None,
-    palette: Optional[Dict[str, List[int]]] = None,
-    patient_id: Optional[str] = None,
-    feasible_names: Optional[List[str]] = None,
-    lineage: Optional[List[str]] = None,
-    states: Optional[List[str]] = None,
 ) -> Dict[str, int]:
     """Export one combined GeoJSON for per-compartment quantification.
 
@@ -475,6 +317,8 @@ def export_combined_geojson(
     EXTRACT_NUCLEI_PROPERTIES via ``--reference_mask``), so lookup is a plain
     identity on the cell label.
     """
+    color_int = rgb_to_qupath_color(*CELL_COLOR_RGB)
+
     cells_combined: List[Dict] = []
     n_with_nucleus = 0
     skipped = 0
@@ -500,21 +344,15 @@ def export_combined_geojson(
             n_with_nucleus += 1
 
         measurements = build_measurements(row, marker_cols, pixel_size)
-        fid, class_name, color_int_row, extra = _feature_class_and_extra(
-            row, pheno_lookup, palette, patient_id, feasible_names, lineage, states
-        )
-        measurements.extend(extra)
 
         cells_combined.append(
             build_feature(
                 measurements,
                 cell_geom,
-                color_int_row,
+                color_int,
                 object_type="cell",
                 nucleus_geometry=nucleus_geom,
                 object_id=None,
-                class_name=class_name,
-                feature_id=fid,
             )
         )
 
@@ -589,9 +427,6 @@ def parse_args() -> argparse.Namespace:
         default="cells",
         help="Prefix for output files",
     )
-    parser.add_argument("--phenotypes", default=None, help="phenotypes.csv from PHENOTYPE")
-    parser.add_argument("--panel_model", default=None, help="model_config.json (compiled panel)")
-    parser.add_argument("--patient_id", default=None, help="patient id for stamped feature ids")
     return parser.parse_args()
 
 
@@ -619,25 +454,6 @@ def main() -> int:
     # Identify marker columns
     marker_cols = identify_marker_columns(cell_df)
     logger.info(f"Detected {len(marker_cols)} marker channels: {marker_cols}")
-
-    # Optional phenotype support: only active when both a compiled panel and a
-    # phenotypes.csv are supplied. Otherwise every new kwarg stays None and the
-    # exporter behaves exactly as before.
-    pheno_lookup = palette = feasible_names = lineage = states = None
-    patient_id = args.patient_id
-    if args.phenotypes and args.panel_model:
-        logger.info(f"Loading panel model: {args.panel_model}")
-        cfg = load_model_config(args.panel_model)
-        logger.info(f"Loading phenotypes: {args.phenotypes}")
-        pheno_lookup = load_phenotypes(args.phenotypes)
-        palette = cfg.get("palette", {})
-        feasible_names = sorted({e["phenotype"] for e in cfg.get("feasible_set", [])})
-        lineage = cfg.get("lineage_markers", [])
-        states = cfg.get("state_markers", [])
-        if patient_id is None and "fov" in cell_df.columns and len(cell_df):
-            patient_id = str(cell_df["fov"].iloc[0])
-        write_panel_model_sidecar(cfg, str(Path(args.output_dir) / "panel_model.json"))
-        logger.info(f"Wrote panel_model.json sidecar ({len(pheno_lookup)} phenotyped cells)")
 
     # Load whole-cell contours
     contours = None
@@ -669,12 +485,6 @@ def main() -> int:
             cell_contours=contours,
             nucleus_contours=nucleus_contours,
             prefix=args.output_prefix,
-            pheno_lookup=pheno_lookup,
-            palette=palette,
-            patient_id=patient_id,
-            feasible_names=feasible_names,
-            lineage=lineage,
-            states=states,
         )
         num_exported = counts[args.output_prefix]
     else:
@@ -685,12 +495,6 @@ def main() -> int:
             pixel_size=args.pixel_size,
             marker_cols=marker_cols,
             contours=contours,
-            pheno_lookup=pheno_lookup,
-            palette=palette,
-            patient_id=patient_id,
-            feasible_names=feasible_names,
-            lineage=lineage,
-            states=states,
         )
 
     # Save CSV with both raw and z-score columns

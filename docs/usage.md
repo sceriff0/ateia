@@ -28,12 +28,10 @@ flowchart LR
 - **Registration** — VALIS whole-slide alignment of every panel onto the reference panel.
 - **Postprocessing** — segmentation + per-cell quantification + QuPath GeoJSON export + pyramidal OME-TIFF.
 
-!!! info "Optional phenotyping"
-    By default MIRAGE does not assign cell types — the exported GeoJSON carries **raw
+!!! info "Downstream phenotyping"
+    MIRAGE does not assign cell types — the exported GeoJSON carries **raw
     marker intensities**, so you can gate and phenotype downstream in QuPath or
-    [FlowPath](https://flowpath.readthedocs.io/). Optionally, supplying a panel
-    (`--panel_spec` / `--panel_model`) enables built-in conformal-risk-controlled
-    phenotype assignment — see [Phenotyping](parameters.md#phenotyping-panel-agnostic).
+    [FlowPath](https://flowpath.readthedocs.io/).
 
 !!! tip "Adding a new imaging cycle later?"
     To fold a fresh cyclic-IF cycle into an already-completed run — reusing the prior

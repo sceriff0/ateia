@@ -164,26 +164,6 @@ Per-cell marker intensity.
     Setting `--expanded_quantification true` without `--quantify_compartments true`
     fails at launch with a clear error.
 
-## Phenotyping (panel-agnostic)
-
-Optional constrained cell-type classification. When **both** `panel_spec` and
-`panel_model` are `null` (the default), phenotyping is skipped and the GeoJSON carries
-the constant `"Cell"` classification (raw intensities only — gate downstream). Supplying a
-panel enables conformal-risk-controlled (CRC) phenotype assignment written into the
-exported `cells.geojson`.
-
-| Parameter | Default | Description |
-|---|---|---|
-| `panel_spec` | `null` | Path to the panel authoring spec (`panel.yaml`). |
-| `panel_model` | `null` | Path to a frozen, compiled `model_config.json` (produced by `COMPILE_PANEL`). |
-| `pheno_alpha` | `0.05` | CRC target risk α (per-marker miscoverage budget). |
-| `pheno_min_cal` | `50` | Minimum per-marker calibration-set size. |
-| `pheno_max_enumerate` | `100000` | Feasible-set brute-force enumeration ceiling. |
-
-!!! note "Incremental cycles"
-    Phenotyping is **not** run in `--mode add_cycle`; setting `panel_spec`/`panel_model`
-    in add_cycle mode is rejected at launch.
-
 ## Visualization & export
 
 Pyramidal OME-TIFF assembly and GeoJSON.
