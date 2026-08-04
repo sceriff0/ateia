@@ -57,12 +57,23 @@ jobs:
           # blosc.cbuffer_sizes that zarr 2.18 imports — so the test module fails at
           # COLLECTION with `from zarr.meta import Metadata2, Metadata3`, taking the whole
           # job down rather than failing one test. Same pair as containers/tiled/requirements.txt.
-          pip install 'zarr==2.18.3' 'numcodecs==0.13.1'
           # anndata powers tests/test_join_flowpath.py. Tolerated as optional because
           # anndata has dropped Python 3.9, which this matrix still covers; the test
           # module pytest.importorskip's it, so an unavailable anndata skips those
           # tests instead of failing the job.
-          pip install anndata || echo "anndata unavailable on Python ${{ matrix.python-version }} — test_join_flowpath will skip"
+          #
+          # Capped below 0.12: anndata >= 0.12 requires zarr >= 3, and zarr 3 removes the
+          # store API tifffile's aszarr relies on (`Unsupported type for store_like:
+          # 'ZarrTiffStore'`), which breaks the tiled streaming/fanout tests. 0.11.x works
+          # with zarr 2 and is all these tests need — they only build in-memory AnnData.
+          pip install 'anndata<0.12' || echo "anndata unavailable on Python ${{ matrix.python-version }} — test_join_flowpath will skip"
+          # ORDERING IS LOAD-BEARING: this pin goes LAST so it wins over anything the
+          # installs above dragged in transitively. zarr/numcodecs must move together —
+          # newer numcodecs drops blosc.cbuffer_sizes that zarr 2.18 imports, and
+          # tests/test_tiled_stitch_streaming.py imports bin/utils/tiled_io.py -> zarr, so
+          # a bad pair fails at COLLECTION and takes the whole job down rather than one
+          # test. Same pair as containers/tiled/requirements.txt.
+          pip install 'zarr==2.18.3' 'numcodecs==0.13.1'
 
       - name: Generate test data
         run: |
