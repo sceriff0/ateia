@@ -97,7 +97,10 @@
                     "default": 100
                 },
                 "preproc_pool_workers": {
-                    "type": ["integer", "null"],
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
                     "description": "Worker threads for preprocessing parallelism. null = use task.cpus.",
                     "default": null
                 },
@@ -158,7 +161,11 @@
                     "type": "integer",
                     "description": "Registration QC depth: 0=none, 1=DAPI overlay only, 2=DAPI overlay + segmentation-overlap metric (Dice/IoU/instance-F1).",
                     "default": 2,
-                    "enum": [ 0, 1, 2 ]
+                    "enum": [
+                        0,
+                        1,
+                        2
+                    ]
                 },
                 "qc_scale_factor": {
                     "type": "number",
@@ -453,6 +460,25 @@
                     "type": "boolean",
                     "description": "Skip generation of the final aggregated HTML QC report.",
                     "default": false
+                },
+                "skip_spatialdata_export": {
+                    "type": "boolean",
+                    "description": "Skip the SpatialData (.zarr) export.",
+                    "help_text": "The scverse-native store is additive; the pyramidal OME-TIFF and QuPath GeoJSON remain the primary outputs.",
+                    "default": false
+                },
+                "spatialdata_include_image": {
+                    "type": "boolean",
+                    "description": "Write the merged pyramid into the SpatialData store.",
+                    "help_text": "spatialdata.write() materializes every element, so this duplicates the largest artifact the pipeline produces. Off by default; turn on for a self-contained, depositable object.",
+                    "default": false
+                },
+                "spatialdata_residual_join_max_px": {
+                    "type": "number",
+                    "description": "Max centroid distance (px) when joining registration QC residuals onto cell_mask.",
+                    "help_text": "The reg-QC segmentation is a separate native-image run and shares no label space with cell_mask, so the join is spatial.",
+                    "default": 15.0,
+                    "minimum": 0
                 }
             }
         },

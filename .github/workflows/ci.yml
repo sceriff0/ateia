@@ -58,6 +58,11 @@ jobs:
           # COLLECTION with `from zarr.meta import Metadata2, Metadata3`, taking the whole
           # job down rather than failing one test. Same pair as containers/tiled/requirements.txt.
           pip install 'zarr==2.18.3' 'numcodecs==0.13.1'
+          # anndata powers tests/test_join_flowpath.py. Tolerated as optional because
+          # anndata has dropped Python 3.9, which this matrix still covers; the test
+          # module pytest.importorskip's it, so an unavailable anndata skips those
+          # tests instead of failing the job.
+          pip install anndata || echo "anndata unavailable on Python ${{ matrix.python-version }} — test_join_flowpath will skip"
 
       - name: Generate test data
         run: |
