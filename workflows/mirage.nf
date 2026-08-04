@@ -82,6 +82,7 @@ workflow MIRAGE {
         ParamUtils.validateCompartmentQuant(params.quantify_compartments, params.expanded_quantification)
         ParamUtils.validateRegQc((params.reg_qc == null ? 2 : params.reg_qc) as int)
         ParamUtils.validateMicroReg(ParamUtils.microRegLevel(params))
+        ParamUtils.validateAddCyclePhenotyping(params)  // add_cycle has no PHENOTYPE stage
         // add_cycle re-registers the new cycle via the classic VALIS_ADAPTER only; the
         // STARE 'tiled' backend is not wired into the incremental path — reject it loudly
         // rather than silently registering with VALIS.
