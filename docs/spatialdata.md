@@ -136,6 +136,12 @@ over every marker would silently merge that with "negative".
 
 ## Reading it back
 
+!!! info "`layers` contains a `None` key"
+    On read-back, `adata.layers` lists `['zscore', None]`. This is an **anndata
+    0.13.2 zarr round-trip artifact, not a MIRAGE bug** — a plain AnnData with no
+    SpatialData involvement gains the same key, and `layers[None]` is simply `X`.
+    Ignore it; `adata.layers["zscore"]` works normally.
+
 ```python
 import spatialdata as sd
 import scanpy as sc
