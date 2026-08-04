@@ -16,10 +16,14 @@ sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
 from phenotyping.calibration import (  # noqa: E402
     finalize_calibration,
-    marker_calibration_indices,
+    marker_calibration_weights,
 )
 from phenotyping.classify import classify_cell  # noqa: E402
-from phenotyping.conformal import conformal_scores, resolve_signs  # noqa: E402
+from phenotyping.conformal import (  # noqa: E402
+    conformal_scores,
+    ks_uniform,
+    resolve_signs,
+)
 from phenotyping.crc import (  # noqa: E402
     crc_select_alpha,
     hoeffding_ucb,
@@ -96,6 +100,7 @@ def run_phenotyping(
     degraded = []
     p_neg: Dict[str, np.ndarray] = {}
     p_pos: Dict[str, np.ndarray] = {}
+    calibration_ks: Dict[str, dict] = {}
     for m in list(markers_cfg):
         vals, missing = _marker_values(df, m, markers_cfg[m])
         values[m] = vals
@@ -106,11 +111,26 @@ def run_phenotyping(
             p_neg[m] = np.ones(n)
             p_pos[m] = np.ones(n)
             continue
-        neg_idx, pos_idx = marker_calibration_indices(m, values, references)
-        cal = finalize_calibration(m, values[m], neg_idx, pos_idx, bins, min_calibration)
+        w_neg_m, w_pos_m = marker_calibration_weights(m, values, references)
+        cal = finalize_calibration(m, values[m], w_neg_m, w_pos_m, bins, min_calibration)
         if cal.degraded and m not in degraded:
             degraded.append(m)
         p_neg[m], p_pos[m] = conformal_scores(values[m], cal)
+        # Fix 4: label-free calibration diagnostic. On confidently-negative
+        # cells (high w_neg) p_neg should be ~Uniform(0,1); likewise p_pos on
+        # confident positives. KS-to-uniform near 0 = well calibrated; a large
+        # value flags the old truncation pathology. Only reported when enough
+        # confident reference cells exist to make the KS meaningful.
+        if m not in degraded:
+            ks_entry = {}
+            neg_ref = w_neg_m > 0.9
+            pos_ref = w_pos_m > 0.9
+            if int(neg_ref.sum()) >= 30:
+                ks_entry["neg"] = round(ks_uniform(p_neg[m][neg_ref]), 4)
+            if int(pos_ref.sum()) >= 30:
+                ks_entry["pos"] = round(ks_uniform(p_pos[m][pos_ref]), 4)
+            if ks_entry:
+                calibration_ks[m] = ks_entry
 
     def classify_all(alpha):
         sm = {m: resolve_signs(p_neg[m], p_pos[m], alpha) for m in lineage}
@@ -229,6 +249,7 @@ def run_phenotyping(
         "n_cells": n,
         "density_radius": radius,
         "n_bins": int(len(np.unique(bins))),
+        "calibration_ks": calibration_ks,
     }
     return pheno_df, audit_df, qc
 

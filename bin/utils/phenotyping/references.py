@@ -45,6 +45,12 @@ def _neg_source(panel: Panel, marker: str, never_pairs: List[dict]) -> Tuple[dic
             return {"type": "partner", "marker": b}, True
         if marker == b:
             return {"type": "partner", "marker": a}, True
+    # requires contrapositive (Fix 1): if `marker -> consequent`, then
+    # consequent-negative cells are necessarily marker-negative, a structural
+    # negative anchor that never thresholds `marker` on itself.
+    for antecedent, consequent in panel.requires:
+        if antecedent == marker:
+            return {"type": "requires_neg", "marker": consequent}, True
     return {"type": "gmm"}, False
 
 

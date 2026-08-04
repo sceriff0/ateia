@@ -17,8 +17,11 @@ def test_high_value_is_confidently_positive():
 
 def test_conformal_scores_uses_bin_and_degrade_returns_ones():
     sk = np.array([0.0, 5.0, 10.0, 0.0])
-    cal = MarkerCalibration("X", False, {0: np.array([0.0, 1.0, 2.0])},
-                            {0: np.array([8.0, 9.0, 10.0])}, np.zeros(4, dtype=int))
+    # weighted MarkerCalibration: neg_by_bin[b] = (scores, weights)
+    cal = MarkerCalibration("X", False,
+                            {0: (np.array([0.0, 1.0, 2.0]), np.ones(3))},
+                            {0: (np.array([8.0, 9.0, 10.0]), np.ones(3))},
+                            np.zeros(4, dtype=int))
     p_neg, p_pos = conformal_scores(sk, cal)
     assert p_neg.shape == (4,) and p_pos.shape == (4,)
     assert p_neg[2] < p_neg[0]   # high value -> smaller p_neg
