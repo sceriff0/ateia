@@ -31,6 +31,31 @@ class GMM1D:
         """Midpoint between the two component means."""
         return 0.5 * (float(self.means[0]) + float(self.means[1]))
 
+    def responsibility_high(self, x) -> np.ndarray:
+        """Posterior P(high component | x) for each value in ``x``.
+
+        This is the soft-membership weight used by responsibility-weighted
+        conformal calibration (replacing hard threshold masks). A degenerate
+        fit (no separable components) returns an uninformative ``0.5``
+        everywhere, so a marker with no usable bimodality contributes uniform
+        weight rather than a spurious hard split. In the extreme tails where
+        both component densities underflow to 0, membership falls back to the
+        side of the midpoint threshold (deterministic, no RNG).
+        """
+        x = np.asarray(x, dtype=float)
+        if self.degenerate:
+            return np.full(x.shape, 0.5)
+        lo = self.weights[0] * _norm_pdf(x, self.means[0], self.variances[0])
+        hi = self.weights[1] * _norm_pdf(x, self.means[1], self.variances[1])
+        denom = lo + hi
+        resp = np.divide(
+            hi, denom, out=np.full(x.shape, 0.5, dtype=float), where=denom > 0
+        )
+        tail = denom <= 0
+        if np.any(tail):
+            resp = np.where(tail, (x >= self.threshold()).astype(float), resp)
+        return resp
+
 
 def _norm_pdf(x: np.ndarray, m: float, v: float) -> np.ndarray:
     return np.exp(-0.5 * (x - m) ** 2 / v) / np.sqrt(2.0 * np.pi * v)
