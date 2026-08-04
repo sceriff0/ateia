@@ -209,6 +209,11 @@ workflow ADD_CYCLE {
     //    nucleus slot: real nucleus contours when compartments enabled,
     //    else the cell contours (harmless placeholder — EXPORT_GEOJSON only
     //    passes --nucleus_contours_json under params.quantify_compartments).
+    //    add_cycle does not run phenotyping (no COMPILE_PANEL/PHENOTYPE here):
+    //    the phenotypes/model_config slots reuse the cell contours file as a
+    //    harmless placeholder. panel_spec/panel_model are REJECTED at launch in
+    //    add_cycle mode (ParamUtils.validateAddCyclePhenotyping), so EXPORT_GEOJSON's
+    //    arg guard is always off here and the legacy constant-"Cell" export is kept.
     // ------------------------------------------------------------------ //
     ch_nuc_for_export = params.quantify_compartments ? ch_nucleus_contours : ch_contours
     ch_for_export = MERGE_QUANT_CSVS.out.merged_csv
@@ -216,7 +221,7 @@ workflow ADD_CYCLE {
         .join(ch_contours, by: 0)
         .join(ch_nuc_for_export, by: 0)
         .map { _pid, meta, csv, contours, nucleus_contours ->
-            [meta, csv, contours, nucleus_contours]
+            [meta, csv, contours, nucleus_contours, contours, contours]
         }
     EXPORT_GEOJSON(ch_for_export)
 

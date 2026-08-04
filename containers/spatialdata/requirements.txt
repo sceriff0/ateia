@@ -1,0 +1,26 @@
+# EXPORT_SPATIALDATA / JOIN_FLOWPATH — scverse serialization stack, CPU only.
+#
+# Lower bounds rather than hard pins on the scverse packages: the SpatialData on-disk
+# format is still moving (0.8.0 switched to zarr 3 and writes NGFF "0.5-dev-spatialdata"),
+# and pinning an exact patch here would strand the image on a format older than what
+# collaborators' napari-spatialdata / squidpy can read. The Dockerfile's import smoke
+# test is what catches a bad resolution.
+spatialdata>=0.8.0
+zarr>=3.0.0            # required by spatialdata >= 0.8.0 (NOT the 2.18 the tiled image pins)
+ome-zarr>=0.16.0
+anndata>=0.11.0
+
+# Shapes are GeoParquet-backed GeoDataFrames; GEOS comes from libgeos-c1v5 in the image.
+geopandas>=1.0.0
+shapely>=2.0.0
+pyarrow>=15.0.0        # GeoParquet writer for shapes/, and Parquet for any points/
+
+# Lazy, chunked reads of the merged pyramid — peak memory is one chunk, not one slide.
+dask[array]>=2024.8.0
+tifffile>=2024.7.2
+imagecodecs>=2024.6.1  # zstd/LZW codecs used by MERGE_AND_PYRAMID's OME-TIFF
+
+# cKDTree for the QC-residual -> cell_mask spatial join.
+scipy>=1.13.0
+pandas>=2.0.0
+numpy>=1.26,<3

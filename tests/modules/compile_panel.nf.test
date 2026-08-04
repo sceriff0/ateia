@@ -1,0 +1,47 @@
+nextflow_process {
+
+    name "Test COMPILE_PANEL process"
+    script "modules/local/compile_panel.nf"
+    process "COMPILE_PANEL"
+
+    tag "modules"
+    tag "modules_local"
+    tag "compile_panel"
+
+    test("Should compile panel - stub") {
+        tag "stub"
+        options "-stub"
+        when {
+            process {
+                """
+                input[0] = file('$projectDir/tests/testdata/panel_min.yaml', checkIfExists: true)
+                """
+            }
+        }
+        then {
+            assert process.success
+            assert process.out.model_config
+            assert process.out.versions
+        }
+    }
+
+    test("Should emit model_config.json - real") {
+        tag "real"
+        when {
+            process {
+                """
+                input[0] = file('$projectDir/tests/testdata/panel_min.yaml', checkIfExists: true)
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert process.success },
+                { def cfg = new groovy.json.JsonSlurper().parseText(
+                    path(process.out.model_config.get(0)).text)
+                  assert cfg.feasible_set.size() > 0
+                  assert cfg.constraints.never.size() == 1 }
+            )
+        }
+    }
+}

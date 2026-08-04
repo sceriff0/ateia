@@ -321,8 +321,8 @@
                 },
                 "seg_method": {
                     "type": "string",
-                    "description": "Segmentation backend to use.",
-                    "default": "stardist",
+                    "description": "Segmentation backend to use. 'instantseg' (default) runs without extra assets; 'stardist' requires a trained model via segmentation_model_dir unless segmentation_model names a StarDist built-in.",
+                    "default": "instantseg",
                     "enum": [
                         "stardist",
                         "instantseg",
@@ -453,6 +453,44 @@
                     "type": "boolean",
                     "description": "Skip generation of the final aggregated HTML QC report.",
                     "default": false
+                }
+            }
+        },
+        "phenotyping_options": {
+            "title": "Phenotyping options",
+            "type": "object",
+            "description": "Optional panel-agnostic phenotyping. When panel_spec and panel_model are both null, phenotyping is skipped (constant 'Cell' classification). Not run in mode='add_cycle'.",
+            "properties": {
+                "panel_spec": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "description": "Path to the panel authoring spec (panel.yaml). Enables phenotyping when set.",
+                    "default": null
+                },
+                "panel_model": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "description": "Path to a frozen, compiled model_config.json (produced by COMPILE_PANEL).",
+                    "default": null
+                },
+                "pheno_alpha": {
+                    "type": "number",
+                    "description": "Conformal-risk-control target risk alpha (per-marker miscoverage budget).",
+                    "default": 0.05
+                },
+                "pheno_min_cal": {
+                    "type": "integer",
+                    "description": "Minimum per-marker calibration-set size.",
+                    "default": 50
+                },
+                "pheno_max_enumerate": {
+                    "type": "integer",
+                    "description": "Feasible-set brute-force enumeration ceiling.",
+                    "default": 100000
                 }
             }
         },
@@ -592,6 +630,9 @@
         },
         {
             "$ref": "#/definitions/quantification_options"
+        },
+        {
+            "$ref": "#/definitions/phenotyping_options"
         },
         {
             "$ref": "#/definitions/output_options"

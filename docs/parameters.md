@@ -104,7 +104,7 @@ Backend selected by `--seg_method`.
 
 | Parameter | Default | Description |
 |---|---|---|
-| `seg_method` | `stardist` | Backend: `stardist`, `instantseg`, or `cellsam`. The container is chosen automatically. |
+| `seg_method` | `instantseg` | Backend: `stardist`, `instantseg`, or `cellsam`. The container is chosen automatically. `instantseg` is the default because it is the only backend that runs on a fresh clone — `stardist` needs a trained model supplied via `segmentation_model_dir`, and `cellsam` needs a DeepCell access token. InstanSeg is Apache-2.0 with unencumbered weights. |
 | `seg_gpu` | `true` | Use GPU (adds SLURM `--gres` + Singularity `--nv`). Set `false` to force CPU. |
 | `seg_expand_distance` | `10` | Pixels to expand nuclei into the whole-cell mask (StarDist & CellSAM). |
 
@@ -114,8 +114,8 @@ Consumes the **DAPI channel** (must be channel 0 — guaranteed upstream).
 
 | Parameter | Default | Description |
 |---|---|---|
-| `segmentation_model` | *(bundled)* | StarDist model name (`stardist_full_e200_…`). |
-| `segmentation_model_dir` | `null` | Custom model directory; uses the bundled model if `null`. |
+| `segmentation_model` | `stardist_full_e200_…` | StarDist model name. **Not a StarDist built-in** — it names a trained model that must exist under `segmentation_model_dir`. |
+| `segmentation_model_dir` | `null` | Directory holding the trained model. **Required for this backend**: with `null`, `segment.py` raises `FileNotFoundError` unless `segmentation_model` names a StarDist built-in (`2D_versatile_fluo`, `2D_versatile_he`, `2D_paper_dsb2018`, `2D_demo`). No model is bundled with the repo. |
 | `seg_pmin` | `1.0` | Lower percentile for normalization. |
 | `seg_pmax` | `99.8` | Upper percentile for normalization. |
 | `seg_n_tiles_x` | `16` | Inference tiles along X. |
@@ -163,6 +163,26 @@ Per-cell marker intensity.
 !!! danger "Validation rule"
     Setting `--expanded_quantification true` without `--quantify_compartments true`
     fails at launch with a clear error.
+
+## Phenotyping (panel-agnostic)
+
+Optional constrained cell-type classification. When **both** `panel_spec` and
+`panel_model` are `null` (the default), phenotyping is skipped and the GeoJSON carries
+the constant `"Cell"` classification (raw intensities only — gate downstream). Supplying a
+panel enables conformal-risk-controlled (CRC) phenotype assignment written into the
+exported `cells.geojson`.
+
+| Parameter | Default | Description |
+|---|---|---|
+| `panel_spec` | `null` | Path to the panel authoring spec (`panel.yaml`). |
+| `panel_model` | `null` | Path to a frozen, compiled `model_config.json` (produced by `COMPILE_PANEL`). |
+| `pheno_alpha` | `0.05` | CRC target risk α (per-marker miscoverage budget). |
+| `pheno_min_cal` | `50` | Minimum per-marker calibration-set size. |
+| `pheno_max_enumerate` | `100000` | Feasible-set brute-force enumeration ceiling. |
+
+!!! note "Incremental cycles"
+    Phenotyping is **not** run in `--mode add_cycle`; setting `panel_spec`/`panel_model`
+    in add_cycle mode is rejected at launch.
 
 ## Visualization & export
 
