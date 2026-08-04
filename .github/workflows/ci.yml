@@ -51,6 +51,13 @@ jobs:
             pip install -r requirements.txt || true
           fi
           pip install pytest pytest-cov tifffile numpy pandas scikit-image scipy scikit-learn xmltodict
+          # zarr/numcodecs must be pinned together, and pinned HERE rather than left to
+          # transitive resolution: tests/test_tiled_stitch_streaming.py imports
+          # bin/utils/tiled_io.py, which imports zarr, and a newer numcodecs drops
+          # blosc.cbuffer_sizes that zarr 2.18 imports — so the test module fails at
+          # COLLECTION with `from zarr.meta import Metadata2, Metadata3`, taking the whole
+          # job down rather than failing one test. Same pair as containers/tiled/requirements.txt.
+          pip install 'zarr==2.18.3' 'numcodecs==0.13.1'
 
       - name: Generate test data
         run: |
