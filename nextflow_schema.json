@@ -321,8 +321,8 @@
                 },
                 "seg_method": {
                     "type": "string",
-                    "description": "Segmentation backend to use.",
-                    "default": "stardist",
+                    "description": "Segmentation backend to use. 'instantseg' (default) runs without extra assets; 'stardist' requires a trained model via segmentation_model_dir unless segmentation_model names a StarDist built-in.",
+                    "default": "instantseg",
                     "enum": [
                         "stardist",
                         "instantseg",

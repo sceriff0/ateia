@@ -220,6 +220,8 @@ workflow REGISTRATION {
     // then warp the polygons through the registrar and score overlap. Classic VALIS only
     // (needs the registrar pickle; distributed produces none).
     ch_seg_qc = Channel.empty()
+    // Per-cell registration residuals (final stage), for the SpatialData export.
+    ch_seg_residuals = Channel.empty()
     // Captured from whichever WARP process the method dispatches to, so the version/size-log
     // aggregation below never references a process that was not invoked in this run.
     ch_seg_qc_size_log = Channel.empty()
@@ -253,6 +255,7 @@ workflow REGISTRATION {
 
             WARP_SEG_QC_TILED(ch_for_warp_tiled)
             ch_seg_qc = WARP_SEG_QC_TILED.out.metrics
+            ch_seg_residuals = WARP_SEG_QC_TILED.out.per_cell
             ch_seg_qc_size_log = WARP_SEG_QC_TILED.out.size_log
             ch_seg_qc_versions = WARP_SEG_QC_TILED.out.versions
         } else {
@@ -277,6 +280,7 @@ workflow REGISTRATION {
 
             WARP_SEG_QC(ch_for_warp)
             ch_seg_qc = WARP_SEG_QC.out.metrics
+            ch_seg_residuals = WARP_SEG_QC.out.per_cell
             ch_seg_qc_size_log = WARP_SEG_QC.out.size_log
             ch_seg_qc_versions = WARP_SEG_QC.out.versions
         }
@@ -409,6 +413,7 @@ workflow REGISTRATION {
     checkpoint_csv   = ch_checkpoint_csv
     qc               = ch_qc
     seg_qc           = ch_seg_qc
+    seg_residuals    = ch_seg_residuals
     error_metrics    = ch_error_metrics
     distance_plots   = ch_distance_plots
     valis_summary    = ch_adapter_summary

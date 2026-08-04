@@ -304,7 +304,18 @@ workflow MIRAGE {
             ? loadInputChannel(params.input, 'registered_image', patient_counts, channel_counts)
             : REGISTRATION.out.registered  // Direct channel - enables patient-level parallelism!
 
-        POSTPROCESSING(ch_for_postprocessing)
+        // Registration QC feeds the SpatialData export's `uns`/`obsm`. It only exists
+        // when REGISTRATION actually ran in this session — with --start postprocessing
+        // there is no REGISTRATION output to reference, so pass empty channels and let
+        // the export write a store without registration QC rather than fail.
+        def ch_reg_qc_for_post = params.start == 'postprocessing'
+            ? Channel.empty()
+            : REGISTRATION.out.seg_qc
+        def ch_reg_residuals_for_post = params.start == 'postprocessing'
+            ? Channel.empty()
+            : REGISTRATION.out.seg_residuals
+
+        POSTPROCESSING(ch_for_postprocessing, ch_reg_qc_for_post, ch_reg_residuals_for_post)
     }
 
     /* -------------------- FINAL QC REPORT -------------------- */
