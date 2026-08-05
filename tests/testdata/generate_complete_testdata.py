@@ -514,17 +514,89 @@ print("  Created whitespace_patient_id.csv")
 # so tests/subworkflows/local/postprocessing.nf.test can pass non-empty
 # ch_reg_qc / ch_reg_residuals into POSTPROCESSING and exercise the
 # EXPORT_SPATIALDATA fold-in path (postprocess.nf ~379-384), not just
-# Channel.empty(). Shape mirrors bin/warp_seg_qc.py's build_record()/
-# write_per_cell_csv() output.
+# Channel.empty(). Shape mirrors what bin/warp_seg_qc.py's build_record()
+# actually emits (run()'s return at bin/warp_seg_qc.py:349-367, splatted at
+# :407) — per-stage metrics nested under "stages", keyed by stage name, with
+# sibling "stage_order"/"delta_vs_anchor"/"matching"/"counts"/"params" — not
+# top-level stage keys. Field names inside each stage record come from
+# summarize_stage()/_dist_stats() in bin/utils/cell_pairs.py:340-384
+# (n_pairs, n_pairs_scored, iou_n/iou_mean/iou_p10/iou_p50/iou_p90/iou_max,
+# displacement_px_n/_mean/_p10/_p50/_p90/_max, frac_iou_ge_<thresh>,
+# dice_matched) — NOT the mean_iou/mean_residual_px names used in an earlier,
+# invented version of this fixture. Cross-checked against the module's own
+# -stub block (modules/local/warp_seg_qc.nf:85-97), which builds the same
+# top-level shape (stage_order/stages/delta_vs_anchor/matching/counts).
+ANCHOR_STAGE = "rigid"
+STAGE_ORDER = ["native", "rigid", "non_rigid", "micro"]
+_DELTA_KEYS = (
+    "iou_mean",
+    "iou_p50",
+    "displacement_px_p50",
+    "displacement_px_p90",
+    "displacement_um_p50",
+    "displacement_um_p90",
+    "dice_matched",
+)
+
+
+def _stage_record(n_pairs, n_scored, iou_mean, iou_p10, iou_p50, iou_p90, iou_max,
+                   disp_mean, disp_p10, disp_p50, disp_p90, disp_max, dice):
+    return {
+        "n_pairs": n_pairs,
+        "n_pairs_scored": n_scored,
+        "iou_n": n_scored,
+        "iou_mean": iou_mean,
+        "iou_p10": iou_p10,
+        "iou_p50": iou_p50,
+        "iou_p90": iou_p90,
+        "iou_max": iou_max,
+        "displacement_px_n": n_scored,
+        "displacement_px_mean": disp_mean,
+        "displacement_px_p10": disp_p10,
+        "displacement_px_p50": disp_p50,
+        "displacement_px_p90": disp_p90,
+        "displacement_px_max": disp_max,
+        "frac_iou_ge_0.5": round(min(1.0, iou_mean + 0.1), 3),
+        "dice_matched": dice,
+    }
+
+
+stage_records = {
+    "native": _stage_record(20, 18, 0.41, 0.20, 0.40, 0.62, 0.70, 18.2, 9.5, 17.8, 27.6, 34.0, 0.39),
+    "rigid": _stage_record(20, 19, 0.68, 0.50, 0.69, 0.85, 0.92, 6.4, 2.1, 6.0, 11.2, 14.5, 0.66),
+    "non_rigid": _stage_record(20, 19, 0.83, 0.68, 0.84, 0.94, 0.97, 2.1, 0.6, 1.9, 3.8, 5.0, 0.82),
+    "micro": _stage_record(20, 20, 0.91, 0.80, 0.92, 0.98, 0.99, 0.9, 0.2, 0.8, 1.7, 2.3, 0.90),
+}
+anchor_rec = stage_records[ANCHOR_STAGE]
+delta_vs_anchor = {
+    stage: {
+        k: round(stage_records[stage][k] - anchor_rec[k], 4)
+        for k in _DELTA_KEYS
+        if k in stage_records[stage] and k in anchor_rec
+    }
+    for stage in STAGE_ORDER
+    if stage != ANCHOR_STAGE
+}
 seg_qc_record = {
     "patient_id": "P001",
     "moving": "P001_mov1.ome.tiff",
     "reference": "P001_ref.ome.tiff",
     "stages_separable": True,
-    "native": {"mean_iou": 0.41, "mean_residual_px": 18.2, "n_pairs": 20},
-    "rigid": {"mean_iou": 0.68, "mean_residual_px": 6.4, "n_pairs": 20},
-    "non_rigid": {"mean_iou": 0.83, "mean_residual_px": 2.1, "n_pairs": 20},
-    "micro": {"mean_iou": 0.91, "mean_residual_px": 0.9, "n_pairs": 20},
+    "stage_order": STAGE_ORDER,
+    "stages": stage_records,
+    "delta_vs_anchor": delta_vs_anchor,
+    "matching": {
+        "method": "mutual_nn_centroid",
+        "anchor_stage": ANCHOR_STAGE,
+        "n_pairs": 20,
+    },
+    "counts": {"features_ref": 22, "features_moving": 21},
+    "params": {
+        "iou_thresh": 0.5,
+        "supersample": 2,
+        "max_pair_window_px": 4_000_000,
+        "pixel_size_um": 0.325,
+    },
     "micro_reg": 1,
     "rigid_includes_micro_rigid": True,
 }
