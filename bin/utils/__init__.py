@@ -4,7 +4,6 @@ This package provides common utilities for the MIRAGE image processing pipeline:
 
 - **logger**: Centralized logging configuration with timing utilities
 - **constants**: Pipeline-wide constants and exit codes
-- **cli**: Command-line interface utilities
 - **image_utils**: Image I/O and processing utilities
 - **metadata**: OME-TIFF metadata handling
 - **registration_utils**: Registration helper functions
@@ -17,13 +16,6 @@ Examples
 """
 
 from __future__ import annotations
-
-# CLI utilities
-from .cli import (
-    add_input_output_args,
-    create_base_parser,
-    setup_logging_from_args,
-)
 
 # Constants
 from .constants import (
@@ -60,8 +52,4 @@ __all__ = [
     "LOG_SEPARATOR",
     "TIFF_EXTENSIONS",
     "OME_TIFF_EXTENSIONS",
-    # CLI
-    "create_base_parser",
-    "setup_logging_from_args",
-    "add_input_output_args",
 ]
