@@ -19,7 +19,7 @@
  */
 process EXPORT_SPATIALDATA {
     tag "${meta.patient_id}"
-    label params.spatialdata_include_image ? 'process_high_memory' : 'process_medium'
+    label params.spatialdata_include_image ? 'process_high' : 'process_medium'
 
     container "bolt3x/attend_image_analysis:spatialdata"
 
