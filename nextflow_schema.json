@@ -414,12 +414,12 @@
                 "quantify_compartments": {
                     "type": "boolean",
                     "description": "Quantify signal per compartment (Nucleus / Cytoplasm / Cell) by routing the nuclear mask into QUANTIFY alongside the whole-cell mask, and emit both segmentations into the GeoJSON. Cytoplasm = whole-cell minus nucleus.",
-                    "default": false
+                    "default": true
                 },
                 "expanded_quantification": {
                     "type": "boolean",
                     "description": "With quantify_compartments, also emit Mean and Sum (integrated density) per compartment; per-compartment Median is always emitted. Requires quantify_compartments.",
-                    "default": false
+                    "default": true
                 },
                 "simplify_tolerance": {
                     "type": "number",
@@ -554,7 +554,7 @@
                 "embed_masks": {
                     "type": "boolean",
                     "description": "When true and quantify_compartments + expanded_quantification are also enabled, embed the cell + nuclei segmentation masks as a second, single-resolution uint32 OME series (Image:1) inside the pyramid OME-TIFF. Required on a prior run for that run's outputs to be extendable via mode='add_cycle'.",
-                    "default": true
+                    "default": false
                 }
             }
         },
