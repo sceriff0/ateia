@@ -134,7 +134,7 @@ nextflow_process {
 nextflow_process {
 
     name "Test MERGE_QUANT_CSVS process"
-    script "modules/local/quantify.nf"
+    script "modules/local/merge_quant_csvs.nf"
     process "MERGE_QUANT_CSVS"
 
     tag "modules"

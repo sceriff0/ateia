@@ -1,0 +1,61 @@
+/*
+ * QUANTIFY - Marker intensity quantification
+ *
+ * Measures per-cell marker intensities from single-channel TIFFs using
+ * segmentation masks. Computes morphological features and intensity statistics.
+ *
+ * Input: Single-channel TIFF and segmentation mask
+ * Output: Per-channel quantification CSV with cell measurements
+ */
+process MERGE_QUANT_CSVS {
+    tag "${meta.patient_id}"
+    label 'process_low'
+
+    container "bolt3x/attend_image_analysis:quantification_gpu"
+
+    input:
+    tuple val(meta), path(individual_csvs), path(morphology_csv)
+
+    output:
+    tuple val(meta), path("merged_quant.csv"), emit: merged_csv
+    path "versions.yml"                       , emit: versions
+    path("*.size.csv")                        , emit: size_log
+
+    when:
+    task.ext.when == null || task.ext.when
+
+    script:
+    def args = task.ext.args ?: ''
+    """
+    # Log input size for tracing
+    total_bytes=\$(find . -name '*_quant.csv' -exec stat -L --printf="%s\\n" {} + 2>/dev/null | awk '{sum+=\$1} END {print sum}')
+    morph_bytes=\$(stat -L --printf="%s" ${morphology_csv} 2>/dev/null || echo 0)
+    total_bytes=\$((total_bytes + morph_bytes))
+    echo "${task.process},${meta.patient_id},csvs/,\${total_bytes}" > ${meta.patient_id}.MERGE_QUANT_CSVS.size.csv
+
+    merge_quant_csvs.py \\
+        --csv-files ${individual_csvs} \\
+        --morphology ${morphology_csv} \\
+        --patient-id ${meta.patient_id} \\
+        --output merged_quant.csv \\
+        ${args}
+
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        python: \$(python --version 2>&1 | sed 's/Python //')
+        pandas: \$(python -c "import pandas; print(pandas.__version__)" 2>/dev/null || echo "unknown")
+    END_VERSIONS
+    """
+
+    stub:
+    """
+    touch merged_quant.csv
+    echo "STUB,${meta.patient_id},stub,0" > ${meta.patient_id}.MERGE_QUANT_CSVS.size.csv
+
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        python: stub
+        pandas: stub
+    END_VERSIONS
+    """
+}

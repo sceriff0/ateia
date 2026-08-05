@@ -35,7 +35,7 @@ include { EXTRACT_NUCLEI_PROPERTIES } from '../../modules/local/extract_nuclei_p
 include { SPLIT_CHANNELS           } from '../../modules/local/split_channels'
 include { SPLIT_CHANNELS as SPLIT_PRIOR_PYRAMID } from '../../modules/local/split_channels'
 include { QUANTIFY                 } from '../../modules/local/quantify'
-include { MERGE_QUANT_CSVS         } from '../../modules/local/quantify'
+include { MERGE_QUANT_CSVS         } from '../../modules/local/merge_quant_csvs'
 include { EXPORT_GEOJSON           } from '../../modules/local/export_geojson'
 include { MERGE_AND_PYRAMID        } from '../../modules/local/merge_and_pyramid'
 include { GENERATE_REGISTRATION_QC } from '../../modules/local/generate_registration_qc'

@@ -10,7 +10,7 @@ include { EXTRACT_CELL_PROPERTIES } from '../../modules/local/extract_cell_prope
 include { EXTRACT_NUCLEI_PROPERTIES } from '../../modules/local/extract_nuclei_properties'
 include { SPLIT_CHANNELS           } from '../../modules/local/split_channels'
 include { QUANTIFY                 } from '../../modules/local/quantify'
-include { MERGE_QUANT_CSVS         } from '../../modules/local/quantify'
+include { MERGE_QUANT_CSVS         } from '../../modules/local/merge_quant_csvs'
 include { EXPORT_GEOJSON            } from '../../modules/local/export_geojson'
 include { COMPILE_PANEL            } from '../../modules/local/compile_panel'
 include { PHENOTYPE                } from '../../modules/local/phenotype'
