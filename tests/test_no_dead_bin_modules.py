@@ -57,19 +57,6 @@ ALLOWLIST = {
         "genuinely unimported by anything under bin/ or tests/, and is kept "
         "on purpose."
     ),
-    "constants": (
-        "bin/utils/constants.py is only referenced by bin/utils/__init__.py's "
-        "own barrel re-export (`from .constants import (...)`), which is "
-        "excluded from this test's haystack -- same pattern as cli.py. "
-        "Exhaustive grep confirms every exported symbol (ExitCode, "
-        "DEFAULT_FOV_SIZE, DEFAULT_PIXEL_SIZE, DEFAULT_TILE_SIZE, "
-        "LOG_SEPARATOR, TIFF_EXTENSIONS, OME_TIFF_EXTENSIONS, ...) has zero "
-        "downstream consumers, i.e. it is genuinely dead by the same "
-        "standard as the three modules this task deletes. It is out of "
-        "scope for task-4 (not named in the brief) and is left in place "
-        "pending a follow-up task -- allowlisted here rather than silently "
-        "hidden by excluding __init__.py from the haystack."
-    ),
 }
 
 
