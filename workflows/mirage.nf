@@ -60,6 +60,27 @@ def loadInputChannel(csv_path, image_column, patient_counts = null, channel_coun
                 [updated_meta, f]
             }
     }
+
+    // Fail-fast guard: `.combine(by: 0)` above is an INNER join keyed on
+    // patient_id. If a row's patient_id does not exactly match a key in the
+    // pre-computed counts map (e.g. stray whitespace CsvUtils.parseMetadata
+    // failed to trim), the row is silently dropped with no warning or error —
+    // that is the exact mechanism of the samplesheet-row-drop bug this guard
+    // closes. Compare what actually reaches the channel against the
+    // independently-computed per-patient image total and error loudly (not
+    // log.warn) on any shortfall, naming patient_id so the cause is obvious.
+    if (patient_counts) {
+        def expected_count = patient_counts.values().sum() ?: 0
+        ch.count().subscribe { emitted ->
+            if (emitted < expected_count) {
+                error "loadInputChannel(${csv_path}): ${expected_count - emitted} row(s) were silently dropped " +
+                      "joining on patient_id (expected ${expected_count} row(s), got ${emitted}). This means a " +
+                      "row's patient_id does not exactly match the value used to pre-compute per-patient counts " +
+                      "(e.g. leading/trailing whitespace) so the inner-join combine(by: 0) discarded it."
+            }
+        }
+    }
+
     return ch
 }
 
