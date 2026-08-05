@@ -125,9 +125,14 @@ workflow POSTPROCESSING {
             // Ensure tiffs is always a list (handle both single file and multiple files)
             def tiff_list = tiffs instanceof List ? tiffs : [tiffs]
 
-            // Create unique meta map for each channel file. Map addition (+)
-            // returns a new map; clone() would only shallow-copy and alias
-            // meta.channels across every derived channel_meta.
+            // Create unique meta map for each channel file. `+` creates a new
+            // top-level map, but Groovy's Map.plus() is
+            // cloneSimilarMap(left).putAll(right) -- clone-then-putAll,
+            // operationally identical to clone(). meta.channels is still the
+            // same List reference as in the original meta. See
+            // subworkflows/local/adapters/valis_adapter.nf:82-88 for why
+            // that matters and why toSorted() (not sort()) is mandatory
+            // wherever meta.channels is read.
             tiff_list.collect { tiff ->
                 def channel_meta = meta + [
                     id: "${meta.patient_id}_${tiff.baseName}",
@@ -189,8 +194,13 @@ workflow POSTPROCESSING {
         }
         .groupTuple(by: 0)
         .map { patient_id, metas, csvs ->
-            // Map addition (+) returns a new map; clone() would only
-            // shallow-copy and alias metas[0].channels.
+            // `+` creates a new top-level map, but Groovy's Map.plus() is
+            // cloneSimilarMap(left).putAll(right) -- clone-then-putAll,
+            // operationally identical to clone(). metas[0].channels is still
+            // the same List reference as in the original meta. See
+            // subworkflows/local/adapters/valis_adapter.nf:82-88 for why
+            // that matters and why toSorted() (not sort()) is mandatory
+            // wherever meta.channels is read.
             // Extract actual patient_id from groupKey wrapper if needed
             def meta = metas[0] + [id: patient_id.toString()]
             [meta, csvs]

@@ -44,8 +44,13 @@ def loadInputChannel(csv_path, image_column, patient_counts = null, channel_coun
             .map { meta, f -> [meta.patient_id, meta, f] }
             .combine(counts_ch, by: 0)
             .map { patient_id, meta, f, count ->
-                // Map addition (+) returns a new map; clone() would only
-                // shallow-copy and alias meta.channels across derived metas.
+                // `+` creates a new top-level map, but Groovy's Map.plus() is
+                // cloneSimilarMap(left).putAll(right) -- clone-then-putAll,
+                // operationally identical to clone(). meta.channels is still
+                // the same List reference as in the original meta. See
+                // subworkflows/local/adapters/valis_adapter.nf:82-88 for why
+                // that matters and why toSorted() (not sort()) is mandatory
+                // wherever meta.channels is read.
                 def updated_meta = meta + [images_count: count]
                 [updated_meta, f]
             }
@@ -58,8 +63,13 @@ def loadInputChannel(csv_path, image_column, patient_counts = null, channel_coun
             .map { meta, f -> [meta.patient_id, meta, f] }
             .combine(ch_counts, by: 0)
             .map { patient_id, meta, f, count ->
-                // Map addition (+) returns a new map; clone() would only
-                // shallow-copy and alias meta.channels across derived metas.
+                // `+` creates a new top-level map, but Groovy's Map.plus() is
+                // cloneSimilarMap(left).putAll(right) -- clone-then-putAll,
+                // operationally identical to clone(). meta.channels is still
+                // the same List reference as in the original meta. See
+                // subworkflows/local/adapters/valis_adapter.nf:82-88 for why
+                // that matters and why toSorted() (not sort()) is mandatory
+                // wherever meta.channels is read.
                 def updated_meta = meta + [channels_count: count]
                 [updated_meta, f]
             }

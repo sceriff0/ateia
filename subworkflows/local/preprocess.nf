@@ -42,9 +42,14 @@ workflow PREPROCESSING {
             // Read output channels from file (DAPI will be first)
             def output_channels = channels_file.text.trim().split(',').toList()
 
-            // Update meta with output channel order. Map addition (+) returns a
-            // genuinely new map, unlike clone() which shallow-copies and would
-            // leave `channels` aliased across every derived meta.
+            // Update meta with output channel order. This is safe from the
+            // aliasing hazard described in valis_adapter.nf:82-88 not because
+            // `+` avoids aliasing -- it doesn't; Map.plus() is
+            // cloneSimilarMap(left).putAll(right), operationally identical to
+            // clone() -- but because `channels` is rebound here to a
+            // brand-new List (output_channels, freshly built by
+            // .split(',').toList()) rather than to the original
+            // meta.channels reference.
             def updated_meta = meta + [channels: output_channels]
             [updated_meta, ome_file]
         }

@@ -152,8 +152,13 @@ workflow ADD_CYCLE {
 
     ch_new_channels = SPLIT_CHANNELS.out.channels
         .flatMap { meta, tiffs ->
-            // Map addition (+) returns a new map; clone() would only
-            // shallow-copy and alias meta.channels across every derived m.
+            // `+` creates a new top-level map, but Groovy's Map.plus() is
+            // cloneSimilarMap(left).putAll(right) -- clone-then-putAll,
+            // operationally identical to clone(). meta.channels is still the
+            // same List reference as in the original meta. See
+            // subworkflows/local/adapters/valis_adapter.nf:82-88 for why
+            // that matters and why toSorted() (not sort()) is mandatory
+            // wherever meta.channels is read.
             (tiffs instanceof List ? tiffs : [tiffs]).collect { tiff ->
                 def m = meta + [
                     id: "${meta.patient_id}_${tiff.baseName}",
