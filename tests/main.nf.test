@@ -46,8 +46,13 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.failed },
-                { assert workflow.stdout.any { it.contains("outdir") } ||
-                         workflow.errorReport.contains("outdir") }
+                // nf-schema reports "Missing required parameter(s): outdir" on
+                // stderr, while the Groovy fallback (ParamUtils.validateOutdir)
+                // surfaces via stdout/errorReport — search all three so this
+                // asserts the operator is told *which* parameter is missing,
+                // whichever layer catches it.
+                { assert (workflow.stdout + workflow.stderr).any { it.contains("outdir") } ||
+                         (workflow.errorReport ?: '').contains("outdir") }
             )
         }
     }

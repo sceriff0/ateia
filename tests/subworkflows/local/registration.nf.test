@@ -77,8 +77,10 @@ nextflow_workflow {
         }
     }
 
-    // Invalid method test removed — REGISTRATION no longer takes method param
-    // Method validation happens at mirage.nf level via ParamUtils.validateRegistrationMethod
+    // Invalid method test removed — REGISTRATION no longer takes method param.
+    // registration_method's allowed values are declared in nextflow_schema.json
+    // and enforced at launch by validateParameters(); see
+    // tests/param_validation.nf.test.
 
     test("Should handle padding workflow - stub") {
 

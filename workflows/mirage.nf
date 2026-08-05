@@ -6,6 +6,8 @@
 
 import groovy.json.JsonOutput
 
+include { validateParameters  } from 'plugin/nf-schema'
+
 include { PREPROCESSING       } from '../subworkflows/local/preprocess'
 include { REGISTRATION        } from '../subworkflows/local/registration'
 include { POSTPROCESSING      } from '../subworkflows/local/postprocess'
@@ -96,16 +98,21 @@ workflow MIRAGE {
 
     /* -------------------- PARAMETER VALIDATION -------------------- */
 
-    ParamUtils.validateStart(params.start)
+    // Types, enums and ranges come from nextflow_schema.json (nf-schema). This
+    // covers every parameter in one place, including the ones the hand-rolled
+    // Groovy never checked, and it rejects a -params-file that delivers a
+    // boolean as the STRING "false" instead of silently treating it as true.
+    // Cross-parameter and filesystem rules that no JSON Schema can express
+    // (--stop ordering, samplesheet semantics, add_cycle prerequisites) stay
+    // below in Groovy.
+    validateParameters()
+
     ParamUtils.validateOutdir(params.outdir)
 
     /* -------------------- MODE: ADD_CYCLE -------------------- */
     if (params.mode == 'add_cycle') {
         ParamUtils.validateAddCycle(params.prior_outdir)
-        ParamUtils.validateSegMethod(params.seg_method)  // reuse mask; still validate quant options
         ParamUtils.validateCompartmentQuant(params.quantify_compartments, params.expanded_quantification)
-        ParamUtils.validateRegQc((params.reg_qc == null ? 2 : params.reg_qc) as int)
-        ParamUtils.validateMicroReg(ParamUtils.microRegLevel(params))
         ParamUtils.validateAddCyclePhenotyping(params)  // add_cycle has no PHENOTYPE stage
         // add_cycle re-registers the new cycle via the classic VALIS_ADAPTER only; the
         // STARE 'tiled' backend is not wired into the incremental path — reject it loudly
@@ -261,14 +268,7 @@ workflow MIRAGE {
     // each site because the strict Nextflow parser does not support invoking a
     // closure-typed local variable as a function.
 
-    if (ParamUtils.shouldRun('registration', params.start, effective_stop)) {
-        ParamUtils.validateRegistrationMethod(params.registration_method)
-        ParamUtils.validateRegQc((params.reg_qc == null ? 2 : params.reg_qc) as int)
-        ParamUtils.validateMicroReg(ParamUtils.microRegLevel(params))
-    }
-
     if (ParamUtils.shouldRun('postprocessing', params.start, effective_stop)) {
-        ParamUtils.validateSegMethod(params.seg_method)
         ParamUtils.validateCompartmentQuant(params.quantify_compartments, params.expanded_quantification)
     }
 

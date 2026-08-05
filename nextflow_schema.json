@@ -1,9 +1,9 @@
 {
-    "$schema": "http://json-schema.org/draft-07/schema",
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
     "title": "MIRAGE WSI Processing Pipeline Parameters",
     "description": "Schema synchronized with nextflow.config canonical params surface.",
     "type": "object",
-    "definitions": {
+    "$defs": {
         "input_output_options": {
             "title": "Input/output options",
             "type": "object",
@@ -643,34 +643,34 @@
     },
     "allOf": [
         {
-            "$ref": "#/definitions/input_output_options"
+            "$ref": "#/$defs/input_output_options"
         },
         {
-            "$ref": "#/definitions/preprocessing_options"
+            "$ref": "#/$defs/preprocessing_options"
         },
         {
-            "$ref": "#/definitions/registration_options"
+            "$ref": "#/$defs/registration_options"
         },
         {
-            "$ref": "#/definitions/segmentation_options"
+            "$ref": "#/$defs/segmentation_options"
         },
         {
-            "$ref": "#/definitions/quantification_options"
+            "$ref": "#/$defs/quantification_options"
         },
         {
-            "$ref": "#/definitions/phenotyping_options"
+            "$ref": "#/$defs/phenotyping_options"
         },
         {
-            "$ref": "#/definitions/output_options"
+            "$ref": "#/$defs/output_options"
         },
         {
-            "$ref": "#/definitions/pipeline_control"
+            "$ref": "#/$defs/pipeline_control"
         },
         {
-            "$ref": "#/definitions/cluster_options"
+            "$ref": "#/$defs/cluster_options"
         },
         {
-            "$ref": "#/definitions/resource_limits"
+            "$ref": "#/$defs/resource_limits"
         }
     ],
     "additionalProperties": true

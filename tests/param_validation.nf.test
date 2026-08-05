@@ -1,0 +1,217 @@
+/*
+ * Characterisation tests for the pipeline's parameter-enum validation.
+ *
+ * One test per enum check that used to live in lib/ParamUtils.groovy
+ * (validateStart, the enum half of validateStop, validateRegistrationMethod,
+ * validateRegQc, validateMicroReg, validateSegMethod). Those checks now come
+ * from nextflow_schema.json via nf-schema's validateParameters().
+ *
+ * These tests passed BEFORE that migration (hand-rolled Groovy) and must keep
+ * passing AFTER it (JSON Schema). That is the point: a schema that silently
+ * stops validating is indistinguishable from a working one unless something
+ * asserts that bad input is still rejected BY NAME.
+ *
+ * Each test asserts two things:
+ *   1. the run fails, and
+ *   2. the operator-facing error names the offending parameter, so the message
+ *      is actionable rather than a bare stack trace.
+ */
+
+nextflow_pipeline {
+
+    name "Parameter enum validation"
+    script "main.nf"
+
+    tag "pipeline"
+    tag "param_validation"
+
+    test("Should reject an invalid --start and name the parameter") {
+        tag "stub"
+
+        when {
+            params {
+                input  = "$projectDir/tests/testdata/test_input.csv"
+                outdir = "$outputDir"
+                start  = "notastart"
+            }
+        }
+
+        then {
+            def report = (workflow.stdout + workflow.stderr).join('\n') + (workflow.errorReport ?: '') + (workflow.errorMessage ?: '')
+            assertAll(
+                { assert workflow.failed },
+                { assert report.contains("--start") },
+                { assert report.contains("notastart") }
+            )
+        }
+    }
+
+    test("Should reject an invalid --stop and name the parameter") {
+        tag "stub"
+
+        when {
+            params {
+                input  = "$projectDir/tests/testdata/test_input.csv"
+                outdir = "$outputDir"
+                start  = "preprocessing"
+                stop   = "notastop"
+            }
+        }
+
+        then {
+            def report = (workflow.stdout + workflow.stderr).join('\n') + (workflow.errorReport ?: '') + (workflow.errorMessage ?: '')
+            assertAll(
+                { assert workflow.failed },
+                { assert report.contains("--stop") },
+                { assert report.contains("notastop") }
+            )
+        }
+    }
+
+    test("Should reject an invalid --registration_method and name the parameter") {
+        tag "stub"
+
+        when {
+            params {
+                input               = "$projectDir/tests/testdata/test_input.csv"
+                outdir              = "$outputDir"
+                start               = "preprocessing"
+                registration_method = "notaregmethod"
+            }
+        }
+
+        then {
+            def report = (workflow.stdout + workflow.stderr).join('\n') + (workflow.errorReport ?: '') + (workflow.errorMessage ?: '')
+            assertAll(
+                { assert workflow.failed },
+                { assert report.contains("--registration_method") },
+                { assert report.contains("notaregmethod") }
+            )
+        }
+    }
+
+    test("Should reject an invalid --seg_method and name the parameter") {
+        tag "stub"
+
+        when {
+            params {
+                input      = "$projectDir/tests/testdata/test_input.csv"
+                outdir     = "$outputDir"
+                start      = "preprocessing"
+                seg_method = "notasegmethod"
+            }
+        }
+
+        then {
+            def report = (workflow.stdout + workflow.stderr).join('\n') + (workflow.errorReport ?: '') + (workflow.errorMessage ?: '')
+            assertAll(
+                { assert workflow.failed },
+                { assert report.contains("--seg_method") },
+                { assert report.contains("notasegmethod") }
+            )
+        }
+    }
+
+    test("Should reject an out-of-range --reg_qc and name the parameter") {
+        tag "stub"
+
+        when {
+            params {
+                input  = "$projectDir/tests/testdata/test_input.csv"
+                outdir = "$outputDir"
+                start  = "preprocessing"
+                reg_qc = 7
+            }
+        }
+
+        then {
+            def report = (workflow.stdout + workflow.stderr).join('\n') + (workflow.errorReport ?: '') + (workflow.errorMessage ?: '')
+            assertAll(
+                { assert workflow.failed },
+                { assert report.contains("--reg_qc") }
+            )
+        }
+    }
+
+    test("Should reject an out-of-range --reg_micro_reg and name the parameter") {
+        tag "stub"
+
+        when {
+            params {
+                input         = "$projectDir/tests/testdata/test_input.csv"
+                outdir        = "$outputDir"
+                start         = "preprocessing"
+                reg_micro_reg = 9
+            }
+        }
+
+        then {
+            def report = (workflow.stdout + workflow.stderr).join('\n') + (workflow.errorReport ?: '') + (workflow.errorMessage ?: '')
+            assertAll(
+                { assert workflow.failed },
+                { assert report.contains("--reg_micro_reg") }
+            )
+        }
+    }
+
+    /*
+     * Valid values must still be accepted — without this, a validator that
+     * rejects EVERYTHING would satisfy all six tests above.
+     */
+    test("Should accept the valid ends of every enum - stub") {
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                input               = "$projectDir/tests/testdata/test_input.csv"
+                outdir              = "$outputDir"
+                start               = "preprocessing"
+                stop                = "preprocessing"
+                registration_method = "valis"
+                seg_method          = "cellsam"
+                reg_qc              = 0
+                reg_micro_reg       = 1
+                seg_gpu             = false
+            }
+        }
+
+        then {
+            assert workflow.success
+        }
+    }
+
+    /*
+     * A -params-file delivers JSON, and JSON can carry the STRING "false" where
+     * a boolean switch is expected. Every non-empty String is truthy in Groovy,
+     * so `if (!params.skip_preprocess_qc)` used to evaluate FALSE and silently
+     * turn the switch ON — the preprocessing QC was skipped by a params file
+     * that literally said "false". The parameter schema types this as a boolean,
+     * so the mistyped value is now rejected at launch by name instead of
+     * quietly changing what the pipeline does.
+     */
+    test("Should reject a -params-file boolean delivered as the string 'false'") {
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                input              = "$projectDir/tests/testdata/test_input.csv"
+                outdir             = "$outputDir"
+                start              = "preprocessing"
+                stop               = "preprocessing"
+                seg_gpu            = false
+                skip_preprocess_qc = "false"
+            }
+        }
+
+        then {
+            def report = (workflow.stdout + workflow.stderr).join('\n') + (workflow.errorReport ?: '') + (workflow.errorMessage ?: '')
+            assertAll(
+                { assert workflow.failed },
+                { assert report.contains("--skip_preprocess_qc") }
+            )
+        }
+    }
+
+}
