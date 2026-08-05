@@ -95,6 +95,7 @@ workflow MIRAGE {
     /* -------------------- PARAMETER VALIDATION -------------------- */
 
     ParamUtils.validateStart(params.start)
+    ParamUtils.validateOutdir(params.outdir)
 
     /* -------------------- MODE: ADD_CYCLE -------------------- */
     if (params.mode == 'add_cycle') {

@@ -14,6 +14,14 @@ class ParamUtils {
         }
     }
 
+    static void validateOutdir(String outdir) {
+        if (!outdir?.trim()) {
+            throw new IllegalArgumentException(
+                "Please provide --outdir (the pipeline's output directory). " +
+                "Without it every published file lands under a literal 'null/' path.")
+        }
+    }
+
     static void validateStop(String stop, String start) {
         if (!(stop in STEP_ORDER)) {
             throw new IllegalArgumentException("Invalid --stop '${stop}'. Valid values: ${STEP_ORDER}")

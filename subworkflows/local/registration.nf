@@ -366,7 +366,7 @@ workflow REGISTRATION {
         .collectFile(
             name: 'registered.csv',
             newLine: true,
-            storeDir: "${params.outdir ?: launchDir}/csv",
+            storeDir: "${params.outdir}/csv",
             seed: 'patient_id,registered_image,is_reference,channels'
         )
 
