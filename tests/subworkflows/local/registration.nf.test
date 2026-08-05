@@ -195,6 +195,75 @@ nextflow_workflow {
         }
     }
 
+    test("Should not run seg-QC segmentation for a single-slide patient - stub") {
+
+        // Single-slide patients have nothing to register and are branched straight
+        // through to ch_registered (see the "single" branch in registration.nf).
+        // Their reference must NOT be fed into SEG_QC: there is no moving slide to
+        // score it against, so a full GPU StarDist segmentation would be computed
+        // and thrown away. Guarded alongside a two-slide patient (below) so a fix
+        // that disables seg-QC entirely would also fail this test.
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                reg_qc = 2
+                padding = false
+            }
+            workflow {
+                """
+                input[0] = Channel.fromList([
+                    [[patient_id: 'P001', is_reference: true, channels: ['DAPI']],
+                     file('$projectDir/tests/testdata/P001_ref.ome.tiff')]
+                ])
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.contains('SEG_QC_GEOJSON')
+                }.size() == 0 }
+            )
+        }
+    }
+
+    test("Should still run seg-QC segmentation for both slides of a two-slide patient - stub") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                reg_qc = 2
+                padding = false
+            }
+            workflow {
+                """
+                input[0] = Channel.fromList([
+                    [[patient_id: 'P002', is_reference: true, channels: ['DAPI']],
+                     file('$projectDir/tests/testdata/P002_ref.ome.tiff')],
+                    [[patient_id: 'P002', is_reference: false, channels: ['DAPI', 'CD3']],
+                     file('$projectDir/tests/testdata/P001_mov1.ome.tiff')]
+                ])
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.contains('SEG_QC_GEOJSON')
+                }.size() == 2 }
+            )
+        }
+    }
+
     test("Should register images using VALIS - real") {
 
         tag "real"

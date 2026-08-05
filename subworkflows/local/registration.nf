@@ -60,7 +60,6 @@ workflow REGISTRATION {
     // so no common-canvas padding step is needed.
     // ========================================================================
     ch_images = ch_preprocessed
-    ch_images_for_error = ch_images.map { it }
 
     // ========================================================================
     // STEP 2: GROUP BY PATIENT AND IDENTIFY REFERENCES
@@ -123,6 +122,12 @@ workflow REGISTRATION {
     }
     ch_grouped_multi = ch_grouped_split.multi
     ch_passthrough   = ch_grouped_split.single.map { pid, ref, items -> ref }  // [meta, file]
+
+    // Flattened back to [meta, file] for consumers (seg-QC) that segment individual slides
+    // rather than patient groups. Single-slide patients are excluded here on purpose: they
+    // have no moving slide to score against, so segmenting their reference would compute a
+    // full GPU StarDist WSI segmentation and discard it.
+    ch_images_multi = ch_grouped_multi.flatMap { pid, ref, items -> items }
 
     // ========================================================================
     // STEP 3: RUN REGISTRATION VIA METHOD-SPECIFIC ADAPTER
@@ -231,7 +236,7 @@ workflow REGISTRATION {
     // the tiled-only and valis-only channels are handed over together and SEG_QC reads the
     // ones its branch needs (the other side is Channel.empty() and is never consumed).
     if (do_seg_qc) {
-        SEG_QC(ch_images_for_error, ch_registrar_pickle, ch_stage_checkpoint, ch_manifest_by_meta)
+        SEG_QC(ch_images_multi, ch_registrar_pickle, ch_stage_checkpoint, ch_manifest_by_meta)
         ch_seg_qc          = SEG_QC.out.metrics
         ch_seg_residuals   = SEG_QC.out.per_cell
         ch_seg_qc_size_log = SEG_QC.out.size_log
@@ -254,14 +259,14 @@ workflow REGISTRATION {
             .filter { meta, file -> !meta.is_reference }
             .map { meta, reg_file -> [meta.patient_id, meta.channels.toSorted().join('|'), meta, reg_file] }
             .join(
-                ch_images_for_error
+                ch_images
                     .filter { meta, file -> !meta.is_reference }
                     .map { meta, mov_file -> [meta.patient_id, meta.channels.toSorted().join('|'), mov_file] },
                 by: [0, 1]
             )
             .map { patient_id, channels, meta, reg_file, mov_file -> [patient_id, meta, reg_file, mov_file] }
             .combine(
-                ch_images_for_error
+                ch_images
                     .filter { meta, file -> meta.is_reference }
                     .map { meta, ref_file -> [meta.patient_id, ref_file] },
                 by: 0
