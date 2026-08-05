@@ -127,6 +127,14 @@ workflow REGISTRATION {
     // rather than patient groups. Single-slide patients are excluded here on purpose: they
     // have no moving slide to score against, so segmenting their reference would compute a
     // full GPU StarDist WSI segmentation and discard it.
+    //
+    // NOTE: unlike the raw ch_preprocessed stream, `items` here comes out of the grouping
+    // closure above, so under allow_auto_reference=true it carries that closure's
+    // is_reference: true fill-in (registration.nf:100) for patients whose CSV marked no
+    // reference. seg_qc.nf's reference/moving branch reads meta.is_reference, so this
+    // channel is what lets an auto-reference multi-slide patient be scored at all — sourced
+    // from the raw stream, that patient's reference branch was empty and it silently
+    // produced zero seg-QC output.
     ch_images_multi = ch_grouped_multi.flatMap { pid, ref, items -> items }
 
     // ========================================================================
