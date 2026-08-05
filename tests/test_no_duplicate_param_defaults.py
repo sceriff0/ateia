@@ -34,6 +34,8 @@ FALLBACK_RE = re.compile(r"params\.([A-Za-z_][A-Za-z0-9_]*)\s*\?:")
 SCANNED_GLOBS = [
     "modules/local/*.nf",
     "conf/modules.config",
+    "workflows/*.nf",
+    "subworkflows/**/*.nf",
 ]
 
 

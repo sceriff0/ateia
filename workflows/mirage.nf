@@ -396,7 +396,7 @@ workflow MIRAGE {
             run: [
                 timestamp: new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss 'UTC'")
                     .format(new Date()),
-                mode: (params.mode ?: 'standard'),
+                mode: params.mode,
                 start: params.start,
                 stop: effective_stop,
             ],
