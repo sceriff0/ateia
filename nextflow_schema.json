@@ -442,7 +442,7 @@
                     "default": false
                 },
                 "cse_pixel_size_um": {
-                    "type": "number",
+                    "type": ["number", "null"],
                     "description": "Pixel size in micrometers passed to the CellSegmentationEvaluator. null = infer from image metadata.",
                     "default": null
                 },
