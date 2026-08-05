@@ -234,6 +234,10 @@ nextflow run . -profile slurm,singularity \
   `--max_time` (`240.h`) clamp every per-process request; memory/time scale with
   `task.attempt`, so retries automatically ask for more (up to the cap). See the
   [cluster parameters](parameters.md#cluster-resources).
+- **`DEEPCELL_ACCESS_TOKEN` on Singularity** — `singularity.envWhitelist`
+  forwards it to the container by *reference*, so it must be present in the
+  environment on the compute node itself, and a SLURM site launching with
+  `--export=NONE` will silently stop delivering it.
 
 A minimal `site.config` layered with `-c`:
 
