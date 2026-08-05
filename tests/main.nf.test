@@ -26,6 +26,32 @@ nextflow_pipeline {
         }
     }
 
+    test("Should fail with missing required --outdir param") {
+        tag "stub"
+
+        when {
+            params {
+                input = "$projectDir/tests/testdata/test_input.csv"
+                start = "preprocessing"
+                // outdir is explicitly nulled out here: the "test,docker" profile
+                // (nf-test.config) includes conf/test.config, which sets a default
+                // outdir = "test_results". Simply omitting `outdir` from this block
+                // would inherit that default and never exercise a null outdir, so
+                // this test-params override (highest precedence) sets it to null
+                // directly to reproduce the missing-flag case.
+                outdir = null
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.failed },
+                { assert workflow.stdout.any { it.contains("outdir") } ||
+                         workflow.errorReport.contains("outdir") }
+            )
+        }
+    }
+
     test("Should fail with empty samplesheet") {
         tag "stub"
 
