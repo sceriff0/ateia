@@ -30,6 +30,17 @@ nextflow_workflow {
                     [[patient_id: 'P001', is_reference: false, channels: ['DAPI', 'PANCK', 'SMA']],
                      file('$projectDir/tests/testdata/P001_mov1.ome.tiff')]
                 ])
+                // Non-empty ch_reg_qc / ch_reg_residuals, shaped like
+                // REGISTRATION.out.seg_qc / .out.seg_residuals ([meta, file] tuples
+                // from WARP_SEG_QC), to exercise the EXPORT_SPATIALDATA fold-in path
+                // in postprocess.nf (the normal full-pipeline path, not the
+                // --start postprocessing shortcut covered by the other tests below).
+                input[1] = Channel.fromList([
+                    [[patient_id: 'P001'], file('$projectDir/tests/testdata/sample_reg_qc.json')]
+                ])
+                input[2] = Channel.fromList([
+                    [[patient_id: 'P001'], file('$projectDir/tests/testdata/sample_reg_residuals.csv')]
+                ])
                 """
             }
         }
@@ -67,6 +78,9 @@ nextflow_workflow {
                     [[patient_id: 'P001', is_reference: false, channels: ['DAPI', 'PANCK', 'SMA']],
                      file('$projectDir/tests/testdata/P001_mov2.ome.tiff')]
                 ])
+                // No REGISTRATION output in this session (--start postprocessing path).
+                input[1] = Channel.empty()
+                input[2] = Channel.empty()
                 """
             }
         }
@@ -100,6 +114,8 @@ nextflow_workflow {
                     [[patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK', 'SMA']],
                      file('$projectDir/tests/testdata/P001_ref.ome.tiff')]
                 ])
+                input[1] = Channel.empty()
+                input[2] = Channel.empty()
                 """
             }
         }
@@ -137,6 +153,8 @@ nextflow_workflow {
                     [[patient_id: 'P002', is_reference: true, channels: ['DAPI', 'PANCK', 'SMA']],
                      file('$projectDir/tests/testdata/P002_ref.ome.tiff')]
                 ])
+                input[1] = Channel.empty()
+                input[2] = Channel.empty()
                 """
             }
         }
@@ -170,6 +188,8 @@ nextflow_workflow {
                     [[patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK', 'SMA']],
                      file('$projectDir/tests/testdata/P001_ref.ome.tiff')]
                 ])
+                input[1] = Channel.empty()
+                input[2] = Channel.empty()
                 """
             }
         }
@@ -205,6 +225,8 @@ nextflow_workflow {
                     [[patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK']],
                      file('$projectDir/tests/testdata/P001_ref.ome.tiff')]
                 ])
+                input[1] = Channel.empty()
+                input[2] = Channel.empty()
                 """
             }
         }
@@ -239,6 +261,8 @@ nextflow_workflow {
                     [[patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK', 'SMA']],
                      file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)]
                 ])
+                input[1] = Channel.empty()
+                input[2] = Channel.empty()
                 """
             }
         }

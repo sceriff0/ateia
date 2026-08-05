@@ -510,6 +510,38 @@ with open(OUT_DIR / "whitespace_patient_id.csv", "w") as f:
     f.write(f"P001 ,{TESTDATA_ABS}/P001_mov1.ome.tiff,false,DAPI|CD3|CD8\n")
 print("  Created whitespace_patient_id.csv")
 
+# 7g. Registration QC fixtures matching WARP_SEG_QC.out.metrics / .out.per_cell,
+# so tests/subworkflows/local/postprocessing.nf.test can pass non-empty
+# ch_reg_qc / ch_reg_residuals into POSTPROCESSING and exercise the
+# EXPORT_SPATIALDATA fold-in path (postprocess.nf ~379-384), not just
+# Channel.empty(). Shape mirrors bin/warp_seg_qc.py's build_record()/
+# write_per_cell_csv() output.
+seg_qc_record = {
+    "patient_id": "P001",
+    "moving": "P001_mov1.ome.tiff",
+    "reference": "P001_ref.ome.tiff",
+    "stages_separable": True,
+    "native": {"mean_iou": 0.41, "mean_residual_px": 18.2, "n_pairs": 20},
+    "rigid": {"mean_iou": 0.68, "mean_residual_px": 6.4, "n_pairs": 20},
+    "non_rigid": {"mean_iou": 0.83, "mean_residual_px": 2.1, "n_pairs": 20},
+    "micro": {"mean_iou": 0.91, "mean_residual_px": 0.9, "n_pairs": 20},
+    "micro_reg": 1,
+    "rigid_includes_micro_rigid": True,
+}
+with open(OUT_DIR / "sample_reg_qc.json", "w") as f:
+    json.dump(seg_qc_record, f, indent=2)
+print("  Created sample_reg_qc.json")
+
+with open(OUT_DIR / "sample_reg_residuals.csv", "w") as f:
+    f.write("moving,ref_x,ref_y,residual_px,stage\n")
+    rng_res = np.random.default_rng(7)
+    for i in range(10):
+        x = round(float(rng_res.uniform(10, 118)), 4)
+        y = round(float(rng_res.uniform(10, 118)), 4)
+        d = round(float(rng_res.uniform(0.2, 2.5)), 6)
+        f.write(f"P001_mov1.ome.tiff,{x},{y},{d},micro\n")
+print("  Created sample_reg_residuals.csv")
+
 # =============================================================================
 # 8. Golden reference files in tests/testdata/expected/
 # =============================================================================

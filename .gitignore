@@ -131,6 +131,8 @@ tests/testdata/sample_feature_metrics.json
 tests/testdata/sample_channels.txt
 tests/testdata/sample_contours.json
 tests/testdata/sample_morphology.csv
+tests/testdata/sample_reg_qc.json
+tests/testdata/sample_reg_residuals.csv
 tests/testdata/sample_DAPI.tif
 tests/testdata/sample_PANCK.tif
 tests/testdata/sample_SMA.tif
