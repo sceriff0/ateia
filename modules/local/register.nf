@@ -46,9 +46,9 @@ process REGISTER {
     def ref_filename = reference ? reference.name : ''
     def ref_arg = ref_filename ? "--reference ${ref_filename}" : ''
     // Memory mode controls feature detector, matcher, and dimension settings
-    def memory_mode = params.memory_mode ?: 'high'
-    def micro_reg_fraction = params.reg_micro_reg_fraction ?: 0.125
-    def max_image_dim = params.reg_max_image_dim ?: 4000
+    def memory_mode = params.memory_mode
+    def micro_reg_fraction = params.reg_micro_reg_fraction
+    def max_image_dim = params.reg_max_image_dim
     // Micro-registration depth (0/1/2), resolved via the single-source ParamUtils helper.
     def micro_reg = ParamUtils.microRegLevel(params)
     // reg_qc >= 2 scores each registration stage separately, which needs the post-non-rigid,

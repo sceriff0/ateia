@@ -44,10 +44,10 @@ process SEGMENT {
     def args = task.ext.args ?: ''
     def prefix = task.ext.prefix ?: "${meta.patient_id}"
     def use_gpu_flag = params.seg_gpu ? '--use-gpu' : ''
-    def pmin = params.seg_pmin ?: 1.0
-    def pmax = params.seg_pmax ?: 99.8
-    def n_tiles_y = params.seg_n_tiles_y ?: 1
-    def n_tiles_x = params.seg_n_tiles_x ?: 1
+    def pmin = params.seg_pmin
+    def pmax = params.seg_pmax
+    def n_tiles_y = params.seg_n_tiles_y
+    def n_tiles_x = params.seg_n_tiles_x
     def dapi_check = (meta.channels && meta.channels.size() > 0) ? meta.channels[0].toUpperCase() : 'UNKNOWN'
     // Pass --model-dir only when a custom StarDist model directory is configured.
     // When unset, segment.py loads --model-name as a built-in pretrained model

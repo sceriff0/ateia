@@ -20,9 +20,9 @@ process TILED_COARSE {
 
     script:
     def prefix     = "${meta.patient_id}_${meta.channels.join('_')}"
-    def dapi_index = params.reg_tiled_dapi_index ?: 0
-    def tile       = params.reg_tiled_tile ?: 2048
-    def halo       = params.reg_tiled_halo ?: 256
+    def dapi_index = params.reg_tiled_dapi_index
+    def tile       = params.reg_tiled_tile
+    def halo       = params.reg_tiled_halo
     """
     tiled_coarse.py \\
         --reference ${reference} \\

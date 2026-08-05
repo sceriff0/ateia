@@ -24,7 +24,7 @@ process TILED_SOLVE {
     script:
     def prefix    = "${meta.patient_id}_${meta.channels.join('_')}"
     def slidename = meta.channels.join('_')
-    def gate      = params.reg_tiled_gate_tre ?: 1.0
+    def gate      = params.reg_tiled_gate_tre
     """
     tiled_solve.py \\
         --m0 ${m0} \\

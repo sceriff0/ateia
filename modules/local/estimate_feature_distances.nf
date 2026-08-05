@@ -23,9 +23,9 @@ process ESTIMATE_FEATURE_DISTANCES {
 
     script:
     def args = task.ext.args ?: ''
-    def detector = params.feature_detector ?: 'superpoint'
-    def max_dim = params.feature_max_dim ?: 1024
-    def n_features = params.feature_n_features ?: 5000
+    def detector = params.feature_detector
+    def max_dim = params.feature_max_dim
+    def n_features = params.feature_n_features
     def prefix = meta.channels.join('_')
     """
     # Log input sizes for tracing (sum of reference + moving + registered, -L follows symlinks)

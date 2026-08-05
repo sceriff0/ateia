@@ -29,7 +29,7 @@ process PREPROCESS {
     def skip_dapi_flag = params.preproc_skip_dapi ? '--skip_dapi' : ''
     def autotune_flag = params.preproc_autotune ? '--autotune' : ''
     def no_darkfield_flag = params.preproc_no_darkfield ? '--no_darkfield' : ''
-    def overlap = params.preproc_overlap ?: 0
+    def overlap = params.preproc_overlap
     def channels = meta.channels.join(' ')
     """
     # Log input size for tracing (-L follows symlinks)

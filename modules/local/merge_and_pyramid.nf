@@ -26,13 +26,13 @@ process MERGE_AND_PYRAMID {
     script:
     def args = task.ext.args ?: ''
 
-    // Parameters are centralized in nextflow.config; keep conservative fallbacks.
-    def pixel_size_x = params.pixel_size ?: 0.325
-    def pixel_size_y = params.pixel_size ?: 0.325
-    def pyramid_resolutions = params.pyramid_resolutions ?: 8
-    def pyramid_scale = params.pyramid_scale ?: 2
-    def tile_size = params.tilex ?: 256
-    def compression = params.compression ?: 'zstd'
+    // Parameters are centralized in nextflow.config; no fallback needed here.
+    def pixel_size_x = params.pixel_size
+    def pixel_size_y = params.pixel_size
+    def pyramid_resolutions = params.pyramid_resolutions
+    def pyramid_scale = params.pyramid_scale
+    def tile_size = params.tilex
+    def compression = params.compression
 
     // Embed cell + nuclei segmentation masks as a second, single-resolution
     // uint32 OME series only when masks were actually staged. postprocess.nf
