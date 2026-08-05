@@ -79,12 +79,14 @@ workflow VALIS_ADAPTER {
             // Build lookup: sorted channel signature (from CSV meta) -> meta
             def channel_key_to_meta = metas_list.collectEntries { meta ->
                 // IMPORTANT: Use toSorted() instead of sort() to avoid mutating meta.channels.
-                // (The historical aliasing hazard from meta.clone() shallow-copying
-                // meta.channels across derived metas is now structurally gone — every
-                // meta.clone() call site was replaced with `meta + [...]` map addition,
-                // which returns a genuinely new map. sort()'s in-place mutation would
-                // still be wrong here regardless, since it corrupts channel order for
-                // any code holding the same meta reference — hence toSorted().)
+                // (Elsewhere in the pipeline, meta.clone() was replaced with `meta + [...]`
+                // map addition — but Groovy's Map.plus() is implemented as
+                // cloneSimilarMap(left).putAll(right), i.e. clone-then-putAll, so the two
+                // are operationally identical. That was an idiom change, not a safety
+                // change: meta.channels is still a shared List reference across any
+                // derived metas that do not explicitly rebind it. sort()'s in-place
+                // mutation would corrupt that shared list for every other meta holding the
+                // same reference — hence toSorted(), here and at every future call site.)
                 def key = meta.channels.toSorted().join('_').toLowerCase()
                 [(key): meta]
             }
