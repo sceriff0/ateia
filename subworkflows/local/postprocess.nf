@@ -125,11 +125,14 @@ workflow POSTPROCESSING {
             // Ensure tiffs is always a list (handle both single file and multiple files)
             def tiff_list = tiffs instanceof List ? tiffs : [tiffs]
 
-            // Create unique meta map for each channel file
+            // Create unique meta map for each channel file. Map addition (+)
+            // returns a new map; clone() would only shallow-copy and alias
+            // meta.channels across every derived channel_meta.
             tiff_list.collect { tiff ->
-                def channel_meta = meta.clone()
-                channel_meta.id = "${meta.patient_id}_${tiff.baseName}"
-                channel_meta.channel_name = tiff.baseName
+                def channel_meta = meta + [
+                    id: "${meta.patient_id}_${tiff.baseName}",
+                    channel_name: tiff.baseName
+                ]
                 [channel_meta, tiff]
             }
         }
@@ -186,9 +189,10 @@ workflow POSTPROCESSING {
         }
         .groupTuple(by: 0)
         .map { patient_id, metas, csvs ->
-            def meta = metas[0].clone()
+            // Map addition (+) returns a new map; clone() would only
+            // shallow-copy and alias metas[0].channels.
             // Extract actual patient_id from groupKey wrapper if needed
-            meta.id = patient_id.toString()
+            def meta = metas[0] + [id: patient_id.toString()]
             [meta, csvs]
         }
 

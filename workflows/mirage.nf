@@ -42,8 +42,9 @@ def loadInputChannel(csv_path, image_column, patient_counts = null, channel_coun
             .map { meta, f -> [meta.patient_id, meta, f] }
             .combine(counts_ch, by: 0)
             .map { patient_id, meta, f, count ->
-                def updated_meta = meta.clone()
-                updated_meta.images_count = count
+                // Map addition (+) returns a new map; clone() would only
+                // shallow-copy and alias meta.channels across derived metas.
+                def updated_meta = meta + [images_count: count]
                 [updated_meta, f]
             }
     }
@@ -55,8 +56,9 @@ def loadInputChannel(csv_path, image_column, patient_counts = null, channel_coun
             .map { meta, f -> [meta.patient_id, meta, f] }
             .combine(ch_counts, by: 0)
             .map { patient_id, meta, f, count ->
-                def updated_meta = meta.clone()
-                updated_meta.channels_count = count
+                // Map addition (+) returns a new map; clone() would only
+                // shallow-copy and alias meta.channels across derived metas.
+                def updated_meta = meta + [channels_count: count]
                 [updated_meta, f]
             }
     }

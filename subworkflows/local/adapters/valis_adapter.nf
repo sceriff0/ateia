@@ -78,7 +78,13 @@ workflow VALIS_ADAPTER {
 
             // Build lookup: sorted channel signature (from CSV meta) -> meta
             def channel_key_to_meta = metas_list.collectEntries { meta ->
-                // IMPORTANT: Use toSorted() instead of sort() to avoid mutating meta.channels
+                // IMPORTANT: Use toSorted() instead of sort() to avoid mutating meta.channels.
+                // (The historical aliasing hazard from meta.clone() shallow-copying
+                // meta.channels across derived metas is now structurally gone — every
+                // meta.clone() call site was replaced with `meta + [...]` map addition,
+                // which returns a genuinely new map. sort()'s in-place mutation would
+                // still be wrong here regardless, since it corrupts channel order for
+                // any code holding the same meta reference — hence toSorted().)
                 def key = meta.channels.toSorted().join('_').toLowerCase()
                 [(key): meta]
             }

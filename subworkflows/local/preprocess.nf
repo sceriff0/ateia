@@ -42,9 +42,10 @@ workflow PREPROCESSING {
             // Read output channels from file (DAPI will be first)
             def output_channels = channels_file.text.trim().split(',').toList()
 
-            // Update meta with output channel order
-            def updated_meta = meta.clone()
-            updated_meta.channels = output_channels
+            // Update meta with output channel order. Map addition (+) returns a
+            // genuinely new map, unlike clone() which shallow-copies and would
+            // leave `channels` aliased across every derived meta.
+            def updated_meta = meta + [channels: output_channels]
             [updated_meta, ome_file]
         }
 

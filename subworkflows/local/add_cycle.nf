@@ -170,10 +170,13 @@ workflow ADD_CYCLE {
 
     ch_new_channels = SPLIT_CHANNELS.out.channels
         .flatMap { meta, tiffs ->
+            // Map addition (+) returns a new map; clone() would only
+            // shallow-copy and alias meta.channels across every derived m.
             (tiffs instanceof List ? tiffs : [tiffs]).collect { tiff ->
-                def m = meta.clone()
-                m.id = "${meta.patient_id}_${tiff.baseName}"
-                m.channel_name = tiff.baseName
+                def m = meta + [
+                    id: "${meta.patient_id}_${tiff.baseName}",
+                    channel_name: tiff.baseName
+                ]
                 [m, tiff]
             }
         }
