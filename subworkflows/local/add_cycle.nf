@@ -39,8 +39,7 @@ include { MERGE_QUANT_CSVS         } from '../../modules/local/quantify'
 include { EXPORT_GEOJSON           } from '../../modules/local/export_geojson'
 include { MERGE_AND_PYRAMID        } from '../../modules/local/merge_and_pyramid'
 include { GENERATE_REGISTRATION_QC } from '../../modules/local/generate_registration_qc'
-include { SEG_QC_GEOJSON           } from '../../modules/local/seg_qc_geojson'
-include { WARP_SEG_QC              } from '../../modules/local/warp_seg_qc'
+include { SEG_QC                   } from './seg_qc'
 
 workflow ADD_CYCLE {
     take:
@@ -107,39 +106,22 @@ workflow ADD_CYCLE {
     // Level >= 2: seg-overlap Dice/IoU. Segment DAPI on the NATIVE (pre-reg)
     // reference + new-cycle images -> cell GeoJSON, then warp through the
     // classic registrar pickle (classic adapter only — see do_seg_qc above).
-    // Mirrors registration.nf's seg-QC block.
+    // Shares subworkflows/local/seg_qc.nf with registration.nf. add_cycle is VALIS-only
+    // (mirage.nf rejects --registration_method tiled in this mode), so the two tiled-only
+    // inputs are empty and SEG_QC always takes its valis branch.
+    ch_seg_qc_size_log = Channel.empty()
+    ch_seg_qc_versions = Channel.empty()
     if (do_seg_qc) {
         ch_native = ch_new_pre
             .map { meta, f -> [meta + [is_reference: false], f] }
             .mix(ch_prior_assets.map { pid, rc, ref_image, _m, _cm, _nm, _py ->
                 [[patient_id: pid, id: "${pid}_reference", is_reference: true, channels: rc], ref_image]
             })
-        SEG_QC_GEOJSON(ch_native)
 
-        ch_gj = SEG_QC_GEOJSON.out.geojson.branch { meta, gj ->
-            reference: meta.is_reference
-            moving:    !meta.is_reference
-        }
-        ch_ref_gj = ch_gj.reference.map { meta, gj -> [meta.patient_id, gj, gj.simpleName] }
-        ch_mov_gj = ch_gj.moving.map    { meta, gj -> [meta.patient_id, meta, gj, gj.simpleName] }
-
-        // One stage-checkpoint entry per patient, `[]` where REGISTER wrote none — see the
-        // same construction in registration.nf. Total on purpose: combining on an optional
-        // channel would drop the patients that lack it rather than costing them a stage.
-        ch_ckpt_by_patient = VALIS_ADAPTER.out.registrar
-            .map { pid, _pickle -> tuple(pid, []) }
-            .join(VALIS_ADAPTER.out.stage_checkpoint, by: 0, remainder: true)
-            .map { pid, _placeholder, ckpt -> tuple(pid, ckpt ?: []) }
-
-        ch_for_warp = ch_mov_gj
-            .combine(ch_ref_gj, by: 0)
-            .combine(ch_registrar, by: 0)
-            .combine(ch_ckpt_by_patient, by: 0)
-            .map { pid, meta, mov_gj, mov_name, ref_gj, ref_name, pickle, ckpt ->
-                tuple(meta, pickle, ref_name, mov_name, ref_gj, mov_gj, ckpt)
-            }
-        WARP_SEG_QC(ch_for_warp)
-        ch_seg_qc = WARP_SEG_QC.out.metrics
+        SEG_QC(ch_native, ch_registrar, VALIS_ADAPTER.out.stage_checkpoint, Channel.empty())
+        ch_seg_qc          = SEG_QC.out.metrics
+        ch_seg_qc_size_log = SEG_QC.out.size_log
+        ch_seg_qc_versions = SEG_QC.out.versions
     }
 
     // ------------------------------------------------------------------ //
@@ -305,9 +287,10 @@ workflow ADD_CYCLE {
         ch_versions  = ch_versions.mix(GENERATE_REGISTRATION_QC.out.versions.first())
         ch_size_logs = ch_size_logs.mix(GENERATE_REGISTRATION_QC.out.size_log)
     }
+    // SEG_QC's emissions already cover SEG_QC_GEOJSON + WARP_SEG_QC (versions pre-.first()).
     if (do_seg_qc) {
-        ch_versions  = ch_versions.mix(SEG_QC_GEOJSON.out.versions.first()).mix(WARP_SEG_QC.out.versions.first())
-        ch_size_logs = ch_size_logs.mix(SEG_QC_GEOJSON.out.size_log).mix(WARP_SEG_QC.out.size_log)
+        ch_versions  = ch_versions.mix(ch_seg_qc_versions)
+        ch_size_logs = ch_size_logs.mix(ch_seg_qc_size_log)
     }
     if (params.quantify_compartments) {
         ch_versions  = ch_versions.mix(EXTRACT_NUCLEI_PROPERTIES.out.versions.first())
