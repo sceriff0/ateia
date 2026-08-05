@@ -1,11 +1,12 @@
 /*
- * QUANTIFY - Marker intensity quantification
+ * MERGE_QUANT_CSVS - Merge per-channel quantification into one table
  *
- * Measures per-cell marker intensities from single-channel TIFFs using
- * segmentation masks. Computes morphological features and intensity statistics.
+ * Joins the per-channel marker intensity CSVs (from QUANTIFY) onto the
+ * morphology CSV (from EXTRACT_CELL_PROPERTIES) by cell label, validating
+ * that no cells are lost or duplicated during the merge.
  *
- * Input: Single-channel TIFF and segmentation mask
- * Output: Per-channel quantification CSV with cell measurements
+ * Input: Per-channel intensity CSVs and a morphology CSV
+ * Output: Single merged CSV with morphology + per-marker intensities
  */
 process MERGE_QUANT_CSVS {
     tag "${meta.patient_id}"
