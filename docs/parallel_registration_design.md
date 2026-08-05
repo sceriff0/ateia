@@ -188,7 +188,7 @@ Unlike the VALIS path, which relies on `split_multichannel.py` to clip negatives
 ## 8. Nextflow wiring (drop-in adapter)
 
 The hook exists: `params.registration_method` is defined (`nextflow.config:61`) and validated
-(`ParamUtils.validateRegistrationMethod`, `mirage.nf:167`), but `registration.nf:182` hardcodes
+via its `nextflow_schema.json` enum (nf-schema, not `ParamUtils`), but `registration.nf:182` hardcodes
 `VALIS_ADAPTER`. Add the value `'tiled'` to the validator and branch:
 
 ```groovy

@@ -77,8 +77,9 @@ Other registration-subworkflow processes and their labels:
 | `GENERATE_REGISTRATION_QC` | `process_high` | 8 CPU / 200+100·att GB | RGB DAPI overlay (reg_qc≥1) |
 | `ESTIMATE_FEATURE_DISTANCES` | (opt.) | — | feature-based TRE (opt-in) |
 
-`process_high_memory` (400·att GB, `conf/modules.config:58-60`) exists but is **not** used by the
-current registration processes.
+There is no `process_high_memory` label — `conf/modules.config` defines only `process_single`,
+`process_low`, `process_medium`, and `process_high` (8 CPU / 200+100·att GB / 12 h, the ceiling
+used by the registration processes above).
 
 ### 1.3 What VALIS features mirage actually uses
 

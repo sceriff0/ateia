@@ -278,7 +278,9 @@ It is now rejected:
 * --skip_preprocess_qc (false): Value is [string] but should be [boolean]
 ```
 
-Write booleans unquoted in a params file: `"skip_preprocess_qc": false`.
+Write booleans unquoted in a params file: `"skip_preprocess_qc": false`. The
+same applies to numbers — a quoted `"reg_qc": "2"` is a string too and is now
+rejected rather than silently coerced.
 
 Rules a JSON Schema cannot express — `--stop` must not precede `--start`,
 `--expanded_quantification` requires `--quantify_compartments`, samplesheet
