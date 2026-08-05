@@ -27,6 +27,7 @@ nextflow_pipeline {
 
     test("Should reject an invalid --start and name the parameter") {
         tag "stub"
+        options "-stub"
 
         when {
             params {
@@ -48,6 +49,7 @@ nextflow_pipeline {
 
     test("Should reject an invalid --stop and name the parameter") {
         tag "stub"
+        options "-stub"
 
         when {
             params {
@@ -70,6 +72,7 @@ nextflow_pipeline {
 
     test("Should reject an invalid --registration_method and name the parameter") {
         tag "stub"
+        options "-stub"
 
         when {
             params {
@@ -92,6 +95,7 @@ nextflow_pipeline {
 
     test("Should reject an invalid --seg_method and name the parameter") {
         tag "stub"
+        options "-stub"
 
         when {
             params {
@@ -114,6 +118,7 @@ nextflow_pipeline {
 
     test("Should reject an out-of-range --reg_qc and name the parameter") {
         tag "stub"
+        options "-stub"
 
         when {
             params {
@@ -135,6 +140,7 @@ nextflow_pipeline {
 
     test("Should reject an out-of-range --reg_micro_reg and name the parameter") {
         tag "stub"
+        options "-stub"
 
         when {
             params {
