@@ -497,6 +497,19 @@ with open(OUT_DIR / "single_sample.csv", "w") as f:
     f.write(f"P001,{TESTDATA_ABS}/P001_ref.ome.tiff,true,DAPI|PANCK|SMA\n")
 print("  Created single_sample.csv")
 
+# 7f. Two-image, one-patient samplesheet where every row's patient_id cell
+# carries a trailing space. Regression fixture for the silent-row-drop bug:
+# Nextflow's splitCsv() does not trim fields, so an untrimmed
+# CsvUtils.parseMetadata() would produce meta.patient_id == "P001 " while the
+# pre-computed per-patient counts map (built via CsvUtils.parseCsvLine, which
+# does trim) keys on "P001" — the inner-join combine(by: 0) in
+# workflows/mirage.nf's loadInputChannel() then silently drops the row.
+with open(OUT_DIR / "whitespace_patient_id.csv", "w") as f:
+    f.write("patient_id,path_to_file,is_reference,channels\n")
+    f.write(f"P001 ,{TESTDATA_ABS}/P001_ref.ome.tiff,true,DAPI|PANCK|SMA\n")
+    f.write(f"P001 ,{TESTDATA_ABS}/P001_mov1.ome.tiff,false,DAPI|CD3|CD8\n")
+print("  Created whitespace_patient_id.csv")
+
 # =============================================================================
 # 8. Golden reference files in tests/testdata/expected/
 # =============================================================================

@@ -66,6 +66,29 @@ nextflow_pipeline {
         }
     }
 
+    test("Should not drop rows whose patient_id has surrounding whitespace") {
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                input  = "$projectDir/tests/testdata/whitespace_patient_id.csv"
+                outdir = "$outputDir"
+                start  = "preprocessing"
+                stop   = "preprocessing"
+                seg_gpu = false
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                // both rows must reach preprocessing, not zero and not one
+                { assert path("$outputDir/csv/preprocessed.csv").readLines().size() == 3 }  // header + 2
+            )
+        }
+    }
+
     test("Should complete dry_run with zero process executions") {
         tag "stub"
 
