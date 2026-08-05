@@ -16,22 +16,42 @@ counts genuine `import`/`from ... import ...` statements, resolved against
 each module's basename and its dotted path under `utils.`.
 
 bin/utils/__init__.py is deliberately excluded from the set of files this
-test treats as "importers". It re-exports `create_base_parser`,
-`setup_logging_from_args`, `add_input_output_args` (from cli.py) and
-`ExitCode`, `DEFAULT_FOV_SIZE`, etc. (from constants.py) via `from .cli
-import (...)` / `from .constants import (...)`, but nothing downstream ever
-consumes those re-exported names (verified by exhaustive grep across bin/
-and tests/ for every symbol in both modules). Counting that barrel import as
-"usage" would hide cli.py's deadness behind its own package's re-export
-statement -- the exact false-negative this test exists to prevent. Modules
-that are used elsewhere via `from logger import ...`, `from metadata import
-...`, etc. are unaffected, since those imports come directly from consumer
-scripts, not through the barrel.
+test treats as "importers". Historically it barrel re-exported `cli.py`
+(`create_base_parser`, `setup_logging_from_args`, `add_input_output_args`)
+and `constants.py` (`ExitCode`, `DEFAULT_FOV_SIZE`, etc.) even though
+nothing downstream ever consumed those re-exported names (verified by
+exhaustive grep across bin/, tests/, modules/, conf/, docs/, and
+containers/ for every symbol in both modules). Counting that barrel import
+as "usage" would have hidden both modules' deadness behind their own
+package's re-export statement -- the exact false-negative this exclusion
+exists to prevent. Both modules have since been deleted (see git history);
+__init__.py now only re-exports `logger.py`, which is independently alive
+via direct imports elsewhere (see `test_known_alive_modules_are_not_false_
+flagged`). Modules used elsewhere via `from logger import ...`, `from
+metadata import ...`, etc. are unaffected, since those imports come
+directly from consumer scripts, not through the barrel.
+
+Known latent limitation: because __init__.py is excluded from the haystack,
+a *future* module consumed *exclusively* via `from utils import
+<exported_name>` -- i.e. only through a barrel-exported symbol, never by
+its own module path or basename -- would be misclassified as dead. The
+matcher recognizes `from utils import <module_name>` as proof of life
+(e.g. `from utils import cell_pairs`), but has no way to trace `from utils
+import <a_symbol_defined_inside_that_module>` back to the module that
+defines it, since the symbol's name need not match the module's basename
+(e.g. `get_logger` vs. `logger.py`). Not currently triggered -- verified:
+`logger.py` is alive via direct imports (`from utils.logger import ...` /
+`from logger import ...`) independent of the barrel, and no other
+bin/utils module is consumed exclusively through a barrel-exported symbol.
+A future module that *is* exposed and consumed only that way would need
+either a direct import somewhere or an ALLOWLIST entry to avoid a false
+"dead" flag.
 """
 
 from __future__ import annotations
 
 import ast
+import warnings
 from pathlib import Path
 
 import pytest
@@ -46,17 +66,34 @@ TESTS_DIR = REPO_ROOT / "tests"
 HAYSTACK_EXCLUDE = {UTILS_DIR / "__init__.py"}
 
 # Modules with zero real importers that are intentionally kept anyway.
-# Map of basename -> reason.
+#
+# Map of basename -> {"status": ..., "reason": ...}. `status` is structural,
+# not prose, so a machine (and a future reader skimming, not reading) can
+# tell the two fundamentally different kinds of entry apart:
+#
+#   "permanent"        -- deliberate, standing policy. Keep indefinitely.
+#   "pending_removal"  -- temporary debt: the module is dead by this test's
+#                         own standard, deletion is just deferred. Without a
+#                         structural marker, "temporary" silently becomes
+#                         "permanent" because nobody re-reads the prose.
+#                         See test_pending_removal_entries_are_flagged_loudly:
+#                         any entry with this status is surfaced as a pytest
+#                         warning on every run, not just skipped quietly.
+_ALLOWED_STATUSES = {"permanent", "pending_removal"}
+
 ALLOWLIST = {
-    "reg_benchmark": (
-        "bin/utils/reg_benchmark.py is the dependency of "
-        "bin/registration_benchmark.py, an unreferenced manual harness "
-        "documented in docs/parallel_registration_design.md. A sibling "
-        "`benchmarking` branch may depend on it (task-4 brief, explicit "
-        "do-not-delete list). Not a false negative in this test -- it is "
-        "genuinely unimported by anything under bin/ or tests/, and is kept "
-        "on purpose."
-    ),
+    "reg_benchmark": {
+        "status": "permanent",
+        "reason": (
+            "bin/utils/reg_benchmark.py is the dependency of "
+            "bin/registration_benchmark.py, an unreferenced manual harness "
+            "documented in docs/parallel_registration_design.md. A sibling "
+            "`benchmarking` branch may depend on it (task-4 brief, explicit "
+            "do-not-delete list). Not a false negative in this test -- it is "
+            "genuinely unimported by anything under bin/ or tests/, and is kept "
+            "on purpose."
+        ),
+    },
 }
 
 
@@ -139,7 +176,8 @@ CANDIDATES = _candidate_modules()
 def test_bin_utils_module_has_a_real_importer(module_path: Path) -> None:
     basename = module_path.stem
     if basename in ALLOWLIST:
-        pytest.skip(f"allowlisted: {ALLOWLIST[basename]}")
+        entry = ALLOWLIST[basename]
+        pytest.skip(f"allowlisted ({entry['status']}): {entry['reason']}")
 
     haystack = _haystack_files()
     assert _is_imported_anywhere(module_path, haystack), (
@@ -153,9 +191,62 @@ def test_bin_utils_module_has_a_real_importer(module_path: Path) -> None:
 def test_known_alive_modules_are_not_false_flagged() -> None:
     """Sanity check the matcher itself against modules known to be genuinely used."""
     haystack = _haystack_files()
-    for name in ("image_utils", "validation", "metadata", "cell_pairs"):
+    # logger.py is the one remaining barrel-exported-but-genuinely-alive
+    # module: bin/utils/__init__.py re-exports get_logger/configure_logging/
+    # etc., but this test must confirm the matcher finds it alive through
+    # *direct* imports (`from utils.logger import ...` / `from logger import
+    # ...`), independent of that barrel -- exactly the case the module
+    # docstring's design rationale (and its documented latent limitation)
+    # argues about.
+    for name in ("image_utils", "validation", "metadata", "cell_pairs", "logger"):
         candidates = [p for p in CANDIDATES if p.stem == name]
         assert candidates, f"expected to find bin/utils/{name}.py among candidates"
         assert _is_imported_anywhere(candidates[0], haystack), (
             f"matcher false-negatived a module known to be alive: {name}"
+        )
+
+
+def test_allowlist_entries_declare_a_valid_status() -> None:
+    """Every ALLOWLIST entry must be a structured {status, reason} dict.
+
+    This is what makes "permanent" and "pending_removal" a real distinction
+    instead of a convention someone can forget: a bare string reason (the
+    old format) or an unrecognized status value fails collection outright,
+    forcing whoever defers a module next to explicitly pick a kind.
+    """
+    for name, entry in ALLOWLIST.items():
+        assert isinstance(entry, dict) and set(entry) == {"status", "reason"}, (
+            f"ALLOWLIST[{name!r}] must be a dict with exactly 'status' and "
+            "'reason' keys, not a bare string -- see the ALLOWLIST comment."
+        )
+        assert entry["status"] in _ALLOWED_STATUSES, (
+            f"ALLOWLIST[{name!r}] has status={entry['status']!r}; must be "
+            f"one of {sorted(_ALLOWED_STATUSES)}."
+        )
+
+
+def test_pending_removal_entries_are_flagged_loudly() -> None:
+    """`pending_removal` entries must not sit in ALLOWLIST silently.
+
+    A `pending_removal` entry marks temporary debt -- a module this test
+    would otherwise flag as dead, with deletion deferred to a later task --
+    as opposed to a `permanent` entry like reg_benchmark, which is
+    deliberate standing policy. Deferring is a legitimate outcome, so this
+    test doesn't fail merely because one exists. But it must not be
+    possible to defer something and have it quietly age into permanence:
+    every `pending_removal` entry is re-emitted as a pytest warning on
+    *every* run, so it shows up in the warnings summary (which CI logs and
+    reviewers actually scan) instead of disappearing into ALLOWLIST prose
+    nobody re-reads once it's merged.
+    """
+    pending = {
+        name: entry
+        for name, entry in ALLOWLIST.items()
+        if entry["status"] == "pending_removal"
+    }
+    for name, entry in pending.items():
+        warnings.warn(
+            f"ALLOWLIST['{name}'] is status=pending_removal (temporary debt, "
+            f"not permanent policy) -- deletion is still owed: {entry['reason']}",
+            stacklevel=1,
         )
