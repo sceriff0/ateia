@@ -1,0 +1,198 @@
+/*
+ * SEG_QC (reg_qc = 2 segmentation-overlap QC), shared by REGISTRATION and ADD_CYCLE.
+ *
+ * These tests exist because two of SEG_QC's behaviours were previously untestable and
+ * defended only by a comment:
+ *
+ *  1. The `remainder: true` stage-checkpoint totalisation. REGISTER emits
+ *     reg_stage_checkpoint as an `optional:` output, so a patient can hold a registrar
+ *     pickle and no checkpoint. That patient must still reach the warp with `ckpt = []`
+ *     rather than being silently dropped by the downstream combine — silent patient loss
+ *     from QC, not a loud failure. REGISTER's stub writes a checkpoint whenever
+ *     reg_qc >= 2, and reg_qc >= 2 is also what turns SEG_QC on, so no whole-pipeline
+ *     stub run can ever reach the missing-checkpoint state. Calling SEG_QC directly can.
+ *
+ *  2. The tiled (STARE) branch at reg_qc = 2, which has no other nf-test coverage:
+ *     registration.nf.test sets skip_registration_qc = true in every params block (so it
+ *     never reaches reg_qc >= 1 at all) and add_cycle.nf.test is VALIS-only.
+ *
+ * The registrar pickle / stage checkpoint / transform manifest are opaque `path` inputs to
+ * the warp processes and are never read in stub mode, so small tracked fixtures stand in
+ * for them. (In a real run the checkpoint is a directory; the distinction does not reach
+ * the channel logic under test.)
+ */
+nextflow_workflow {
+
+    name "Test SEG_QC subworkflow"
+    script "subworkflows/local/seg_qc.nf"
+    workflow "SEG_QC"
+
+    tag "subworkflow"
+    tag "seg_qc"
+    tag "registration"
+
+    test("valis: patients with a registrar pickle but NO stage checkpoint still reach the warp") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                outdir = "$outputDir"
+                registration_method = 'valis'
+            }
+            workflow {
+                """
+                // Three patients, one reference + one moving slide each.
+                input[0] = Channel.fromList([
+                    [[patient_id: 'P001', id: 'P001_ref',  is_reference: true,  channels: ['DAPI', 'PANCK']],
+                     file('$projectDir/tests/testdata/P001_ref.ome.tiff',  checkIfExists: true)],
+                    [[patient_id: 'P001', id: 'P001_mov1', is_reference: false, channels: ['DAPI', 'CD3']],
+                     file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)],
+                    [[patient_id: 'P002', id: 'P002_ref',  is_reference: true,  channels: ['DAPI', 'PANCK']],
+                     file('$projectDir/tests/testdata/P002_ref.ome.tiff',  checkIfExists: true)],
+                    [[patient_id: 'P002', id: 'P002_mov1', is_reference: false, channels: ['DAPI', 'VIMENTIN']],
+                     file('$projectDir/tests/testdata/P001_mov2.ome.tiff', checkIfExists: true)],
+                    [[patient_id: 'P003', id: 'P003_ref',  is_reference: true,  channels: ['DAPI', 'PANCK']],
+                     file('$projectDir/tests/testdata/P001_ref.ome.tiff',  checkIfExists: true)],
+                    [[patient_id: 'P003', id: 'P003_mov1', is_reference: false, channels: ['DAPI', 'CD3']],
+                     file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)]
+                ])
+
+                // Every patient has a registrar pickle.
+                input[1] = Channel.fromList([
+                    ['P001', file('$projectDir/tests/testdata/sample_versions.yml')],
+                    ['P002', file('$projectDir/tests/testdata/sample_versions.yml')],
+                    ['P003', file('$projectDir/tests/testdata/sample_versions.yml')]
+                ])
+
+                // ...but only P001 has a stage checkpoint. P002 and P003 are the case the
+                // `remainder: true` join exists for.
+                input[2] = Channel.of(
+                    ['P001', file('$projectDir/tests/testdata/sample_size_log1.csv')]
+                )
+
+                // tiled-only channel, unused on this branch
+                input[3] = Channel.empty()
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                // All three patients scored — the two without a checkpoint were NOT dropped.
+                { assert workflow.out.metrics.size() == 3 },
+                { assert workflow.out.metrics.collect { it[0].patient_id }.toSorted() ==
+                         ['P001', 'P002', 'P003'] },
+                { assert workflow.out.per_cell.size() == 3 },
+                { assert workflow.out.versions },
+                { assert workflow.out.size_log }
+            )
+        }
+    }
+
+    test("valis: an entirely empty stage-checkpoint channel does not disable the QC") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                outdir = "$outputDir"
+                registration_method = 'valis'
+            }
+            workflow {
+                """
+                input[0] = Channel.fromList([
+                    [[patient_id: 'P001', id: 'P001_ref',  is_reference: true,  channels: ['DAPI', 'PANCK']],
+                     file('$projectDir/tests/testdata/P001_ref.ome.tiff',  checkIfExists: true)],
+                    [[patient_id: 'P001', id: 'P001_mov1', is_reference: false, channels: ['DAPI', 'CD3']],
+                     file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)],
+                    [[patient_id: 'P002', id: 'P002_ref',  is_reference: true,  channels: ['DAPI', 'PANCK']],
+                     file('$projectDir/tests/testdata/P002_ref.ome.tiff',  checkIfExists: true)],
+                    [[patient_id: 'P002', id: 'P002_mov1', is_reference: false, channels: ['DAPI', 'VIMENTIN']],
+                     file('$projectDir/tests/testdata/P001_mov2.ome.tiff', checkIfExists: true)]
+                ])
+
+                input[1] = Channel.fromList([
+                    ['P001', file('$projectDir/tests/testdata/sample_versions.yml')],
+                    ['P002', file('$projectDir/tests/testdata/sample_versions.yml')]
+                ])
+
+                // No patient has a checkpoint at all. An inner join here would empty the
+                // whole QC path; `remainder: true` keeps it total.
+                input[2] = Channel.empty()
+                input[3] = Channel.empty()
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.out.metrics.size() == 2 },
+                { assert workflow.out.metrics.collect { it[0].patient_id }.toSorted() ==
+                         ['P001', 'P002'] }
+            )
+        }
+    }
+
+    test("tiled: dispatches to WARP_SEG_QC_TILED and joins one manifest per moving slide") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                outdir = "$outputDir"
+                registration_method = 'tiled'
+            }
+            workflow {
+                """
+                // Two patients; P001 has TWO moving slides, so the per-slide manifest join
+                // (patient_id + sorted channel signature) has to discriminate between them.
+                input[0] = Channel.fromList([
+                    [[patient_id: 'P001', id: 'P001_ref',  is_reference: true,  channels: ['DAPI', 'PANCK']],
+                     file('$projectDir/tests/testdata/P001_ref.ome.tiff',  checkIfExists: true)],
+                    [[patient_id: 'P001', id: 'P001_mov1', is_reference: false, channels: ['DAPI', 'CD3']],
+                     file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)],
+                    [[patient_id: 'P001', id: 'P001_mov2', is_reference: false, channels: ['DAPI', 'VIMENTIN']],
+                     file('$projectDir/tests/testdata/P001_mov2.ome.tiff', checkIfExists: true)],
+                    [[patient_id: 'P002', id: 'P002_ref',  is_reference: true,  channels: ['DAPI', 'PANCK']],
+                     file('$projectDir/tests/testdata/P002_ref.ome.tiff',  checkIfExists: true)],
+                    [[patient_id: 'P002', id: 'P002_mov1', is_reference: false, channels: ['DAPI', 'CD3']],
+                     file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)]
+                ])
+
+                // The valis-only channels are empty on this branch and must not be read.
+                input[1] = Channel.empty()
+                input[2] = Channel.empty()
+
+                // One STARE transform manifest per MOVING slide, keyed by meta.
+                input[3] = Channel.fromList([
+                    [[patient_id: 'P001', id: 'P001_mov1', is_reference: false, channels: ['DAPI', 'CD3']],
+                     file('$projectDir/tests/testdata/model_config_min.json')],
+                    [[patient_id: 'P001', id: 'P001_mov2', is_reference: false, channels: ['DAPI', 'VIMENTIN']],
+                     file('$projectDir/tests/testdata/model_config_min.json')],
+                    [[patient_id: 'P002', id: 'P002_mov1', is_reference: false, channels: ['DAPI', 'CD3']],
+                     file('$projectDir/tests/testdata/model_config_min.json')]
+                ])
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                // One score per moving slide, not per patient.
+                { assert workflow.out.metrics.size() == 3 },
+                { assert workflow.out.metrics.collect { it[0].id }.toSorted() ==
+                         ['P001_mov1', 'P001_mov2', 'P002_mov1'] },
+                // The tiled scorer reports its own stage set, proving WARP_SEG_QC_TILED ran
+                // rather than the VALIS process.
+                { assert path(workflow.out.metrics[0][1]).json.stage_order == ['native', 'rigid', 'refined'] }
+            )
+        }
+    }
+}
