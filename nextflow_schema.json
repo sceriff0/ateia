@@ -572,11 +572,6 @@
                     "description": "Enable debug output for channels.",
                     "default": false
                 },
-                "enable_size_logs": {
-                    "type": "boolean",
-                    "description": "Aggregate per-process input-size logs for benchmarking. Off in production; enabled by -profile benchmark.",
-                    "default": false
-                },
                 "enable_trace": {
                     "type": "boolean",
                     "description": "Enable detailed execution tracing.",
