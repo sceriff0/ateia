@@ -251,6 +251,90 @@ params {
 }
 ```
 
+## Parameter validation
+
+Every parameter's type, allowed values and range is declared once in
+`nextflow_schema.json` and enforced at launch by the
+[nf-schema](https://nextflow-io.github.io/nf-schema/) plugin, pinned to
+`nf-schema@2.5.1` in `nextflow.config`. A bad value stops the run before any
+process is submitted, and every violation is reported at once, by flag name:
+
+```text
+ERROR ~ Validation of pipeline parameters failed!
+
+The following invalid input values have been detected:
+
+* --reg_qc (7): Expected any of [[0, 1, 2]]
+* --seg_method (notamethod): Expected any of [[stardist, instantseg, cellsam]]
+```
+
+Validation is strict about **types**, which matters most with `-params-file`.
+JSON lets you write `"skip_preprocess_qc": "false"` — a *string*, not a boolean —
+and because every non-empty string is truthy in Groovy, that used to silently
+turn the switch **on** and skip the QC a file that said "false" was asking for.
+It is now rejected:
+
+```text
+* --skip_preprocess_qc (false): Value is [string] but should be [boolean]
+```
+
+Write booleans unquoted in a params file: `"skip_preprocess_qc": false`.
+
+Rules a JSON Schema cannot express — `--stop` must not precede `--start`,
+`--expanded_quantification` requires `--quantify_compartments`, samplesheet
+semantics, `add_cycle` prerequisites — are still checked in `lib/` and fire
+right after schema validation.
+
+### Offline / air-gapped execution
+
+Nextflow downloads `nf-schema` from the plugin registry the first time the
+pipeline runs. On a compute node with no outbound network that fails at launch:
+
+```text
+ERROR ~ Plugin with id nf-schema not found in any repository
+```
+
+Pre-provision the plugin. Either route below works — pick one.
+
+**1. A shared plugins directory** (recommended for a cluster)
+
+On a host that *does* have network access, and with the same Nextflow version
+the cluster runs:
+
+```bash
+export NXF_PLUGINS_DIR=/shared/nextflow/plugins   # readable from the compute nodes
+nextflow plugin install nf-schema@2.5.1
+ls "$NXF_PLUGINS_DIR"      # -> nf-schema-2.5.1/
+```
+
+`rsync` that directory across if it is not already on shared storage, then
+export the same variable wherever the pipeline is launched (`~/.bashrc`, the
+SLURM job script, or a site profile). Nextflow resolves plugins from
+`NXF_PLUGINS_DIR` and never contacts the registry when the pinned version is
+already present.
+
+**2. The default cache, primed from the login node**
+
+With no `NXF_PLUGINS_DIR` set, plugins live in `$NXF_HOME/plugins` (default
+`~/.nextflow/plugins`). If the login node has network access and `$HOME` is
+shared with the compute nodes, priming it once is enough:
+
+```bash
+nextflow plugin install nf-schema@2.5.1     # on the login node
+```
+
+Then set `NXF_OFFLINE=true` on the cluster so Nextflow skips every remote check
+(plugin registry, version check) instead of waiting for it to time out:
+
+```bash
+export NXF_OFFLINE=true
+nextflow run . -profile slurm,singularity --input samplesheet.csv --outdir results
+```
+
+The plugin version is pinned exactly, never as a range, so the copy you
+provision is the copy that runs. Re-provisioning is only needed when the pin in
+`nextflow.config` changes.
+
 ## Outputs
 
 Two output locations: per-patient **results** under `--outdir`, and aggregated

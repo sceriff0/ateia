@@ -20,7 +20,12 @@ concurrency:
 
 env:
   NFTEST_VERSION: '0.9.0'
-  NF_VALIDATION_VERSION: '1.1.3'
+  # Nextflow plugins (nf-schema, which enforces nextflow_schema.json) are
+  # downloaded from the plugin registry on first use. Point every job at one
+  # cacheable directory instead of ~/.nextflow/plugins so the download happens
+  # once, not once per job per push. This is the same NXF_PLUGINS_DIR mechanism
+  # docs/usage.md documents for air-gapped clusters, so CI exercises it.
+  NXF_PLUGINS_DIR: ${{ github.workspace }}/.nextflow-plugins
 
 jobs:
   # ============================================================================
@@ -123,6 +128,23 @@ jobs:
         with:
           version: ${{ matrix.nextflow-version }}
 
+      - name: Cache Nextflow plugins
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.nextflow-plugins
+          key: ${{ runner.os }}-nf-plugins-${{ hashFiles('nextflow.config') }}
+          restore-keys: |
+            ${{ runner.os }}-nf-plugins-
+
+      - name: Provision Nextflow plugins
+        # Install the pinned nf-schema explicitly so a registry outage fails in
+        # a step that names it, instead of halfway into a pipeline run. The
+        # version is read out of nextflow.config rather than duplicated here, so
+        # CI and the pipeline cannot pin different versions. No-op when the
+        # cache above already restored it.
+        run: |
+          nextflow plugin install "$(sed -n "s/.*id '\(nf-schema@[0-9.]*\)'.*/\1/p" nextflow.config)"
+
       - name: Set up Docker
         uses: docker/setup-buildx-action@v3
 
@@ -201,6 +223,23 @@ jobs:
         with:
           version: '25.04.0'
 
+      - name: Cache Nextflow plugins
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.nextflow-plugins
+          key: ${{ runner.os }}-nf-plugins-${{ hashFiles('nextflow.config') }}
+          restore-keys: |
+            ${{ runner.os }}-nf-plugins-
+
+      - name: Provision Nextflow plugins
+        # Install the pinned nf-schema explicitly so a registry outage fails in
+        # a step that names it, instead of halfway into a pipeline run. The
+        # version is read out of nextflow.config rather than duplicated here, so
+        # CI and the pipeline cannot pin different versions. No-op when the
+        # cache above already restored it.
+        run: |
+          nextflow plugin install "$(sed -n "s/.*id '\(nf-schema@[0-9.]*\)'.*/\1/p" nextflow.config)"
+
       - name: Set up Docker
         uses: docker/setup-buildx-action@v3
 
@@ -274,6 +313,23 @@ jobs:
         with:
           version: '25.04.0'
 
+      - name: Cache Nextflow plugins
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.nextflow-plugins
+          key: ${{ runner.os }}-nf-plugins-${{ hashFiles('nextflow.config') }}
+          restore-keys: |
+            ${{ runner.os }}-nf-plugins-
+
+      - name: Provision Nextflow plugins
+        # Install the pinned nf-schema explicitly so a registry outage fails in
+        # a step that names it, instead of halfway into a pipeline run. The
+        # version is read out of nextflow.config rather than duplicated here, so
+        # CI and the pipeline cannot pin different versions. No-op when the
+        # cache above already restored it.
+        run: |
+          nextflow plugin install "$(sed -n "s/.*id '\(nf-schema@[0-9.]*\)'.*/\1/p" nextflow.config)"
+
       - name: Set up Docker
         uses: docker/setup-buildx-action@v3
 
@@ -326,6 +382,23 @@ jobs:
         uses: nf-core/setup-nextflow@v2
         with:
           version: '25.04.0'
+
+      - name: Cache Nextflow plugins
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.nextflow-plugins
+          key: ${{ runner.os }}-nf-plugins-${{ hashFiles('nextflow.config') }}
+          restore-keys: |
+            ${{ runner.os }}-nf-plugins-
+
+      - name: Provision Nextflow plugins
+        # Install the pinned nf-schema explicitly so a registry outage fails in
+        # a step that names it, instead of halfway into a pipeline run. The
+        # version is read out of nextflow.config rather than duplicated here, so
+        # CI and the pipeline cannot pin different versions. No-op when the
+        # cache above already restored it.
+        run: |
+          nextflow plugin install "$(sed -n "s/.*id '\(nf-schema@[0-9.]*\)'.*/\1/p" nextflow.config)"
 
       - name: Set up Docker
         uses: docker/setup-buildx-action@v3
