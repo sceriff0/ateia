@@ -147,7 +147,7 @@ class CsvUtils {
             ?.collect { it.trim() } ?: []
 
         def meta = [
-            patient_id  : row.patient_id,
+            patient_id  : row.patient_id?.toString()?.trim(),
             is_reference: parseIsReference(row.is_reference, "${context} (${row.patient_id})"),
             channels    : channels
         ]
@@ -214,7 +214,7 @@ class CsvUtils {
 
             def ctx = "row ${i + 2} of ${csv}"
             def row = [
-                patient_id  : piIdx  >= 0 ? cols[piIdx]  : null,
+                patient_id  : piIdx  >= 0 ? cols[piIdx]?.trim() : null,
                 is_reference: refIdx >= 0 ? cols[refIdx] : null,
                 channels    : chIdx  >= 0 && chIdx < cols.size() ? cols[chIdx] : null,
             ]

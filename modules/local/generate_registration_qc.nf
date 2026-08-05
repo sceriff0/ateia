@@ -21,7 +21,7 @@ process GENERATE_REGISTRATION_QC {
 
     script:
     def args = task.ext.args ?: ''
-    def scale_factor = params.qc_scale_factor ?: 0.25
+    def scale_factor = params.qc_scale_factor
     """
     # Log input sizes for tracing (sum of registered + reference, -L follows symlinks)
     reg_bytes=\$(stat -L --printf="%s" ${registered} 2>/dev/null || echo 0)

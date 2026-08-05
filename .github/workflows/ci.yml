@@ -20,7 +20,12 @@ concurrency:
 
 env:
   NFTEST_VERSION: '0.9.0'
-  NF_VALIDATION_VERSION: '1.1.3'
+  # Nextflow plugins (nf-schema, which enforces nextflow_schema.json) are
+  # downloaded from the plugin registry on first use. Point every job at one
+  # cacheable directory instead of ~/.nextflow/plugins so the download happens
+  # once, not once per job per push. This is the same NXF_PLUGINS_DIR mechanism
+  # docs/usage.md documents for air-gapped clusters, so CI exercises it.
+  NXF_PLUGINS_DIR: ${{ github.workspace }}/.nextflow-plugins
 
 jobs:
   # ============================================================================
@@ -51,6 +56,29 @@ jobs:
             pip install -r requirements.txt || true
           fi
           pip install pytest pytest-cov tifffile numpy pandas scikit-image scipy scikit-learn xmltodict
+          # zarr/numcodecs must be pinned together, and pinned HERE rather than left to
+          # transitive resolution: tests/test_tiled_stitch_streaming.py imports
+          # bin/utils/tiled_io.py, which imports zarr, and a newer numcodecs drops
+          # blosc.cbuffer_sizes that zarr 2.18 imports — so the test module fails at
+          # COLLECTION with `from zarr.meta import Metadata2, Metadata3`, taking the whole
+          # job down rather than failing one test. Same pair as containers/tiled/requirements.txt.
+          # anndata powers tests/test_join_flowpath.py. Tolerated as optional because
+          # anndata has dropped Python 3.9, which this matrix still covers; the test
+          # module pytest.importorskip's it, so an unavailable anndata skips those
+          # tests instead of failing the job.
+          #
+          # Capped below 0.12: anndata >= 0.12 requires zarr >= 3, and zarr 3 removes the
+          # store API tifffile's aszarr relies on (`Unsupported type for store_like:
+          # 'ZarrTiffStore'`), which breaks the tiled streaming/fanout tests. 0.11.x works
+          # with zarr 2 and is all these tests need — they only build in-memory AnnData.
+          pip install 'anndata<0.12' || echo "anndata unavailable on Python ${{ matrix.python-version }} — test_join_flowpath will skip"
+          # ORDERING IS LOAD-BEARING: this pin goes LAST so it wins over anything the
+          # installs above dragged in transitively. zarr/numcodecs must move together —
+          # newer numcodecs drops blosc.cbuffer_sizes that zarr 2.18 imports, and
+          # tests/test_tiled_stitch_streaming.py imports bin/utils/tiled_io.py -> zarr, so
+          # a bad pair fails at COLLECTION and takes the whole job down rather than one
+          # test. Same pair as containers/tiled/requirements.txt.
+          pip install 'zarr==2.18.3' 'numcodecs==0.13.1'
 
       - name: Generate test data
         run: |
@@ -99,6 +127,23 @@ jobs:
         uses: nf-core/setup-nextflow@v2
         with:
           version: ${{ matrix.nextflow-version }}
+
+      - name: Cache Nextflow plugins
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.nextflow-plugins
+          key: ${{ runner.os }}-nf-plugins-${{ hashFiles('nextflow.config') }}
+          restore-keys: |
+            ${{ runner.os }}-nf-plugins-
+
+      - name: Provision Nextflow plugins
+        # Install the pinned nf-schema explicitly so a registry outage fails in
+        # a step that names it, instead of halfway into a pipeline run. The
+        # version is read out of nextflow.config rather than duplicated here, so
+        # CI and the pipeline cannot pin different versions. No-op when the
+        # cache above already restored it.
+        run: |
+          nextflow plugin install "$(sed -n "s/.*id '\(nf-schema@[0-9.]*\)'.*/\1/p" nextflow.config)"
 
       - name: Set up Docker
         uses: docker/setup-buildx-action@v3
@@ -178,6 +223,23 @@ jobs:
         with:
           version: '25.04.0'
 
+      - name: Cache Nextflow plugins
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.nextflow-plugins
+          key: ${{ runner.os }}-nf-plugins-${{ hashFiles('nextflow.config') }}
+          restore-keys: |
+            ${{ runner.os }}-nf-plugins-
+
+      - name: Provision Nextflow plugins
+        # Install the pinned nf-schema explicitly so a registry outage fails in
+        # a step that names it, instead of halfway into a pipeline run. The
+        # version is read out of nextflow.config rather than duplicated here, so
+        # CI and the pipeline cannot pin different versions. No-op when the
+        # cache above already restored it.
+        run: |
+          nextflow plugin install "$(sed -n "s/.*id '\(nf-schema@[0-9.]*\)'.*/\1/p" nextflow.config)"
+
       - name: Set up Docker
         uses: docker/setup-buildx-action@v3
 
@@ -251,6 +313,23 @@ jobs:
         with:
           version: '25.04.0'
 
+      - name: Cache Nextflow plugins
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.nextflow-plugins
+          key: ${{ runner.os }}-nf-plugins-${{ hashFiles('nextflow.config') }}
+          restore-keys: |
+            ${{ runner.os }}-nf-plugins-
+
+      - name: Provision Nextflow plugins
+        # Install the pinned nf-schema explicitly so a registry outage fails in
+        # a step that names it, instead of halfway into a pipeline run. The
+        # version is read out of nextflow.config rather than duplicated here, so
+        # CI and the pipeline cannot pin different versions. No-op when the
+        # cache above already restored it.
+        run: |
+          nextflow plugin install "$(sed -n "s/.*id '\(nf-schema@[0-9.]*\)'.*/\1/p" nextflow.config)"
+
       - name: Set up Docker
         uses: docker/setup-buildx-action@v3
 
@@ -303,6 +382,23 @@ jobs:
         uses: nf-core/setup-nextflow@v2
         with:
           version: '25.04.0'
+
+      - name: Cache Nextflow plugins
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.nextflow-plugins
+          key: ${{ runner.os }}-nf-plugins-${{ hashFiles('nextflow.config') }}
+          restore-keys: |
+            ${{ runner.os }}-nf-plugins-
+
+      - name: Provision Nextflow plugins
+        # Install the pinned nf-schema explicitly so a registry outage fails in
+        # a step that names it, instead of halfway into a pipeline run. The
+        # version is read out of nextflow.config rather than duplicated here, so
+        # CI and the pipeline cannot pin different versions. No-op when the
+        # cache above already restored it.
+        run: |
+          nextflow plugin install "$(sed -n "s/.*id '\(nf-schema@[0-9.]*\)'.*/\1/p" nextflow.config)"
 
       - name: Set up Docker
         uses: docker/setup-buildx-action@v3

@@ -22,6 +22,7 @@ import tifffile
 
 sys.path.insert(0, str(Path(__file__).parent / "utils"))
 from logger import configure_logging, get_logger
+from metadata import DEFAULT_NUCLEAR_MARKERS, pick_nuclear_index
 
 logger = get_logger(__name__)
 
@@ -379,8 +380,14 @@ def convert_to_ome_tiff(
     patient_id: str,
     channel_names: Optional[List[str]] = None,
     pixel_size_um: float = PIXEL_SIZE_UM,
+    nuclear_markers: Optional[List[str]] = None,
 ) -> Tuple[Path, List[str]]:
-    """Convert image to OME-TIFF with DAPI in channel 0."""
+    """Convert image to OME-TIFF with the nuclear/fiducial channel in channel 0.
+
+    The nuclear channel is resolved by marker name from the declared/metadata
+    channel names (never the filename), using ``nuclear_markers`` as an ordered
+    preference list (default ``('DAPI', 'CELLTOX')``).
+    """
 
     # Read image first to get metadata
     image_data, metadata = read_image(input_path)
@@ -403,24 +410,37 @@ def convert_to_ome_tiff(
             f"specified {len(channel_names)}: {channel_names}"
         )
 
-    # Find DAPI
-    dapi_index = None
-    for i, ch in enumerate(channel_names):
-        if "DAPI" in ch.upper():
-            dapi_index = i
-            break
+    # Resolve the nuclear/fiducial channel by marker name (ordered preference).
+    # Identity comes from the declared/metadata channel names, never the filename.
+    markers = list(nuclear_markers) if nuclear_markers else list(DEFAULT_NUCLEAR_MARKERS)
+    nuclear_index = pick_nuclear_index(channel_names, markers)
 
-    if dapi_index is None:
-        raise ValueError(f"DAPI channel not found in: {channel_names}")
+    if nuclear_index is None:
+        if len(channel_names) == 1:
+            # Genuinely single-channel image: treat the sole channel as nuclear.
+            logger.warning(
+                f"No nuclear marker {markers} in single-channel image; "
+                f"assuming '{channel_names[0]}' is the nuclear channel"
+            )
+            nuclear_index = 0
+        else:
+            raise ValueError(
+                f"None of nuclear_markers {markers} found in channels {channel_names}"
+            )
 
-    # Reorder: DAPI first
+    nuclear_name = channel_names[nuclear_index]
+
+    # Reorder: nuclear channel first. Downstream (segmentation, tiled registration
+    # fiducial) trusts the invariant "channel 0 = nuclear marker".
     output_channels = channel_names.copy()
-    if dapi_index != 0:
-        logger.info(f"Moving DAPI from position {dapi_index} to position 0")
-        dapi_ch = output_channels.pop(dapi_index)
-        output_channels.insert(0, dapi_ch)
+    if nuclear_index != 0:
+        logger.info(
+            f"Moving nuclear channel '{nuclear_name}' from position {nuclear_index} to 0"
+        )
+        nuclear_ch = output_channels.pop(nuclear_index)
+        output_channels.insert(0, nuclear_ch)
     else:
-        logger.info("DAPI already in position 0")
+        logger.info(f"Nuclear channel '{nuclear_name}' already in position 0")
 
     channels_str = "_".join(output_channels)
     output_filename = output_dir / f"{patient_id}_{channels_str}.ome.tif"
@@ -562,6 +582,13 @@ def parse_args() -> argparse.Namespace:
         help="Comma-separated channel names (optional, reads metadata when omitted)",
     )
     parser.add_argument("--pixel_size", type=float, default=PIXEL_SIZE_UM)
+    parser.add_argument(
+        "--nuclear-markers",
+        nargs="+",
+        default=list(DEFAULT_NUCLEAR_MARKERS),
+        help="Ordered preference of nuclear/fiducial marker names; the first present "
+        "(resolved from channel metadata) is moved to channel 0.",
+    )
     return parser.parse_args()
 
 
@@ -592,7 +619,12 @@ def main() -> int:
 
     try:
         output_path, output_channels = convert_to_ome_tiff(
-            input_path, output_dir, args.patient_id, channel_names, args.pixel_size
+            input_path,
+            output_dir,
+            args.patient_id,
+            channel_names,
+            args.pixel_size,
+            args.nuclear_markers,
         )
     except Exception as exc:
         logger.error(f"Conversion failed: {exc}")

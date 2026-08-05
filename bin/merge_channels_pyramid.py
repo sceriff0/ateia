@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import colorsys
 import gc
-import json
 import os
 import sys
 import tempfile
@@ -48,26 +47,6 @@ __all__ = ["main"]
 def log(msg):
     logger.info(msg)
 
-
-# =============================================================================
-# PHENOTYPE COLOR PALETTE
-# =============================================================================
-PHENOTYPE_COLORS = {
-    0: {"name": "Background", "rgb": (0, 0, 0)},
-    1: {"name": "Immune", "rgb": (0, 255, 0)},
-    2: {"name": "T helper", "rgb": (255, 255, 0)},
-    3: {"name": "T cytotoxic", "rgb": (0, 255, 255)},
-    4: {"name": "activated T cytotoxic", "rgb": (0, 200, 255)},
-    5: {"name": "CD4 T regulatory", "rgb": (255, 200, 0)},
-    6: {"name": "CD8 T regulatory", "rgb": (200, 255, 0)},
-    7: {"name": "Macrophages", "rgb": (255, 128, 0)},
-    8: {"name": "M1", "rgb": (255, 80, 80)},
-    9: {"name": "M2", "rgb": (255, 160, 80)},
-    10: {"name": "PANCK+ Tumor", "rgb": (255, 0, 0)},
-    11: {"name": "VIM+ Tumor", "rgb": (255, 0, 255)},
-    12: {"name": "Stroma", "rgb": (128, 128, 128)},
-    13: {"name": "Unknown", "rgb": (64, 64, 64)},
-}
 
 MARKER_COLORS = {
     "DAPI": (0, 0, 255),
@@ -114,27 +93,6 @@ def generate_channel_color(name: str, index: int) -> Tuple[int, int, int]:
     v = 0.85 + (index % 2) * 0.1
     r, g, b = colorsys.hsv_to_rgb(h, s, v)
     return (int(r * 255), int(g * 255), int(b * 255))
-
-
-def create_phenotype_colormap(
-    label_map: Dict[int, str], n_categories: int
-) -> Dict[int, Tuple[str, Tuple[int, int, int]]]:
-    """Create a colormap for phenotype categories."""
-    colormap = {}
-    name_to_color = {v["name"]: v["rgb"] for v in PHENOTYPE_COLORS.values()}
-
-    for idx in range(n_categories):
-        name = label_map.get(idx, f"Phenotype_{idx}")
-        if name in name_to_color:
-            rgb = name_to_color[name]
-        elif idx < len(PHENOTYPE_COLORS):
-            rgb = list(PHENOTYPE_COLORS.values())[idx]["rgb"]
-        else:
-            np.random.seed(idx + 42)
-            rgb = tuple(np.random.randint(50, 255, 3).tolist())
-        colormap[idx] = (name, rgb)
-
-    return colormap
 
 
 def downsample_image(image: np.ndarray, factor: int) -> np.ndarray:
@@ -249,7 +207,6 @@ def build_ome_xml(
     dtype: np.dtype,
     channel_names: List[str],
     channel_colors: List[Tuple[int, int, int]],
-    phenotype_colormap: Optional[Dict[int, Tuple[str, Tuple[int, int, int]]]] = None,
     physical_size_x: float = 0.325,
     physical_size_y: float = 0.325,
     physical_size_unit: str = "µm",
@@ -285,35 +242,6 @@ def build_ome_xml(
 
     channels_xml = "\n".join(channel_elements)
 
-    # Build StructuredAnnotations for phenotype colormap
-    annotations_xml = ""
-    if phenotype_colormap:
-        map_entries = []
-        for idx, (name, rgb) in sorted(phenotype_colormap.items()):
-            safe_name = xml_escape(name)
-            r, g, b = rgb
-            map_entries.append(f'        <M K="phenotype_{idx}_name">{safe_name}</M>')
-            map_entries.append(
-                f'        <M K="phenotype_{idx}_color">#{r:02x}{g:02x}{b:02x}</M>'
-            )
-
-        colormap_json = json.dumps(
-            {
-                str(k): {"name": v[0], "rgb": list(v[1])}
-                for k, v in phenotype_colormap.items()
-            }
-        )
-
-        annotations_xml = f"""
-  <StructuredAnnotations>
-    <MapAnnotation ID="Annotation:Phenotypes" Namespace="phenotype.colormap">
-      <Value>
-{chr(10).join(map_entries)}
-        <M K="colormap_json">{xml_escape(colormap_json)}</M>
-      </Value>
-    </MapAnnotation>
-  </StructuredAnnotations>"""
-
     # Build complete OME-XML
     # NOTE: TiffData is left simple - tifffile will handle IFD mapping
     ome_xml = f'''<?xml version="1.0" encoding="UTF-8"?>
@@ -338,7 +266,7 @@ def build_ome_xml(
 {channels_xml}
       <TiffData/>
     </Pixels>
-  </Image>{annotations_xml}
+  </Image>
 </OME>'''
 
     return ome_xml
@@ -349,7 +277,6 @@ def write_pyramidal_ome_tiff(
     output_path: str,
     channel_names: List[str],
     channel_colors: List[Tuple[int, int, int]],
-    phenotype_colormap: Optional[Dict] = None,
     physical_size_x: float = 0.325,
     physical_size_y: float = 0.325,
     pyramid_resolutions: int = 5,
@@ -378,8 +305,6 @@ def write_pyramidal_ome_tiff(
         List of channel names.
     channel_colors : list of tuple
         List of (R, G, B) tuples.
-    phenotype_colormap : optional
-        Optional colormap for phenotype labels.
     physical_size_x : float
         Pixel size in X (micrometers).
     physical_size_y : float
@@ -562,13 +487,9 @@ def _read_channel_file(path: str) -> np.ndarray:
     return tifffile.imread(str(path))
 
 
-def _scan_channel_metadata(
-    input_dir: str,
-    phenotype_mask: Optional[str],
-    phenotype_mapping: Optional[str],
-):
+def _scan_channel_metadata(input_dir: str):
     """Pass 1: discover channel files and scan their metadata (order, dtype,
-    shape), then fold in the phenotype mapping and mask-channel bookkeeping.
+    shape).
     """
     # Find all single-channel TIFF files
     channel_files = sorted(
@@ -611,23 +532,6 @@ def _scan_channel_metadata(
                 if (h, w) != (height, width):
                     raise ValueError(f"Dimension mismatch: {channel_name}")
 
-    # Load phenotype mapping
-    pheno_label_map = {}
-
-    if phenotype_mapping:
-        log(f"Loading phenotype mapping: {phenotype_mapping}")
-        with open(phenotype_mapping, "r") as f:
-            pheno_label_map = json.load(f)
-        pheno_label_map = {int(k): v for k, v in pheno_label_map.items()}
-
-    # Add mask channels
-    masks_info = []
-    if phenotype_mask:
-        log(f"Will append phenotype mask: {phenotype_mask}")
-        channel_names.append("Phenotype")
-        channel_colors.append((200, 200, 200))
-        masks_info.append(("phenotype", phenotype_mask))
-
     num_output_channels = len(channel_names)
     log(f"Total output channels: {num_output_channels}")
 
@@ -638,8 +542,6 @@ def _scan_channel_metadata(
         height,
         width,
         dtype,
-        pheno_label_map,
-        masks_info,
         num_output_channels,
     )
 
@@ -691,54 +593,10 @@ def _load_channel_stack(channel_files, num_output_channels, height, width, dtype
     return output_data, output_idx, out_dtype
 
 
-def _stack_masks(
-    output_data,
-    output_idx,
-    out_dtype,
-    masks_info,
-    pheno_label_map,
-    height,
-    width,
-    masks_dir,
-):
-    """Add mask planes: the phenotype mask channel (appended to the intensity
-    stack) and, optionally, the cell/nuclei segmentation mask stack that
-    becomes a second OME series.
+def _stack_masks(height, width, masks_dir):
+    """Load the optional cell/nuclei segmentation mask stack that becomes a
+    second OME series.
     """
-    phenotype_colormap = None
-
-    # Load mask channels
-    for mask_type, mask_path in masks_info:
-        log(f"  Loading {mask_type} mask...")
-        mask_data = _read_channel_file(mask_path)
-        if mask_data.ndim > 2:
-            mask_data = mask_data.squeeze()
-
-        if mask_type == "phenotype":
-            pheno_min = int(mask_data.min())
-            pheno_max = int(mask_data.max())
-            n_categories = pheno_max + 1
-            log(f"    Label range: {pheno_min} to {pheno_max}")
-
-            if pheno_min < 0:
-                mask_data = mask_data - pheno_min
-                pheno_max = pheno_max - pheno_min
-                n_categories = pheno_max + 1
-
-            phenotype_colormap = create_phenotype_colormap(
-                pheno_label_map, n_categories
-            )
-
-        # Cast the phenotype mask to the intensity output dtype. Phenotype
-        # category counts are small, so this fits without truncation.
-        if mask_data.dtype != out_dtype:
-            mask_data = mask_data.astype(out_dtype)
-
-        output_data[output_idx] = mask_data
-        output_idx += 1
-        del mask_data
-        gc.collect()
-
     # Load segmentation masks (cell + nuclei) for the optional second series.
     # Read only when masks_dir contains both expected files; single
     # full-resolution uint32 stack, never pyramided/downsampled.
@@ -784,7 +642,7 @@ def _stack_masks(
         del cell_mask, nuclei_mask
         gc.collect()
 
-    return phenotype_colormap, mask_stack, mask_names
+    return mask_stack, mask_names
 
 
 def _write_pyramid(
@@ -792,7 +650,6 @@ def _write_pyramid(
     output_data,
     channel_names,
     channel_colors,
-    phenotype_colormap,
     physical_size_x,
     physical_size_y,
     pyramid_resolutions,
@@ -821,7 +678,6 @@ def _write_pyramid(
         output_path=tmp_path,
         channel_names=channel_names,
         channel_colors=channel_colors,
-        phenotype_colormap=phenotype_colormap,
         physical_size_x=physical_size_x,
         physical_size_y=physical_size_y,
         pyramid_resolutions=pyramid_resolutions,
@@ -900,8 +756,6 @@ def _validate_written_pyramid(tmp_path, num_output_channels, channel_names, mask
 def merge_channels(
     input_dir: str,
     output_path: str,
-    phenotype_mask: str = None,
-    phenotype_mapping: str = None,
     physical_size_x: float = 0.325,
     physical_size_y: float = 0.325,
     pyramid_resolutions: int = 5,
@@ -928,32 +782,20 @@ def merge_channels(
         height,
         width,
         dtype,
-        pheno_label_map,
-        masks_info,
         num_output_channels,
-    ) = _scan_channel_metadata(input_dir, phenotype_mask, phenotype_mapping)
+    ) = _scan_channel_metadata(input_dir)
 
-    output_data, output_idx, out_dtype = _load_channel_stack(
+    output_data, _, _ = _load_channel_stack(
         channel_files, num_output_channels, height, width, dtype
     )
 
-    phenotype_colormap, mask_stack, mask_names = _stack_masks(
-        output_data,
-        output_idx,
-        out_dtype,
-        masks_info,
-        pheno_label_map,
-        height,
-        width,
-        masks_dir,
-    )
+    mask_stack, mask_names = _stack_masks(height, width, masks_dir)
 
     tmp_path = _write_pyramid(
         output_path,
         output_data,
         channel_names,
         channel_colors,
-        phenotype_colormap,
         physical_size_x,
         physical_size_y,
         pyramid_resolutions,
@@ -983,20 +825,7 @@ def merge_channels(
     log(f"  Channel list: {', '.join(channel_names)}")
     log("=" * 70)
 
-    # Save colormap JSON
-    if phenotype_colormap:
-        colormap_output = str(Path(output_path).with_suffix(".phenotype_colors.json"))
-        colormap_data = {
-            "categories": {
-                str(k): {"name": v[0], "rgb": list(v[1])}
-                for k, v in phenotype_colormap.items()
-            }
-        }
-        with open(colormap_output, "w") as f:
-            json.dump(colormap_data, f, indent=2)
-        log(f"Saved colormap: {colormap_output}")
-
-    return channel_names, phenotype_colormap
+    return channel_names
 
 
 def parse_args() -> argparse.Namespace:
@@ -1009,8 +838,6 @@ def parse_args() -> argparse.Namespace:
         "--input-dir", required=True, help="Directory with single-channel TIFF files"
     )
     parser.add_argument("--output", required=True, help="Output OME-TIFF path")
-    parser.add_argument("--phenotype-mask", help="Path to phenotype mask TIFF")
-    parser.add_argument("--phenotype-mapping", help="Path to phenotype mapping JSON")
     parser.add_argument(
         "--masks-dir",
         help="Directory containing cell_mask.tif and nuclei_mask.tif "
@@ -1069,8 +896,6 @@ def main() -> int:
         merge_channels(
             args.input_dir,
             args.output,
-            phenotype_mask=args.phenotype_mask,
-            phenotype_mapping=args.phenotype_mapping,
             physical_size_x=args.physical_size_x,
             physical_size_y=args.physical_size_y,
             pyramid_resolutions=args.pyramid_resolutions,

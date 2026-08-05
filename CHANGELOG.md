@@ -5,6 +5,30 @@ All notable changes to the MIRAGE pipeline will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **`nuclear_markers`** parameter (default `['DAPI', 'CELLTOX']`) — an ordered preference list
+  naming the nuclear/fiducial channel. The first marker present (resolved from channel metadata,
+  never the filename) is moved to channel 0 by `CONVERT_IMAGE` and drives **both** cell
+  segmentation and the registration fiducial. Fails fast if none is present (single-channel images
+  excepted).
+
+### Changed
+- **`reg_micro_reg` now defaults to `2`** (maximum: micro-rigid + micro non-rigid), previously `0`.
+  Registrations run the full micro-registration by default — a quality-over-speed change
+  (micro-registration can add ~30–120 min per registration).
+
+### Removed
+- **`reg_reference_markers`** — removed. It only fed a filename-based fallback for reference-image
+  selection that the pipeline never reached (the reference slide is chosen by `is_reference`, and
+  `--reference` is always passed to VALIS). Nuclear-channel selection is now `nuclear_markers`
+  (metadata-based). `register.py`'s standalone `--reference-markers` CLI flag is unaffected.
+- **`padding` / `pad_mode`** and the `PAD_IMAGES`, `GET_IMAGE_DIMS`, and `MAX_DIM` processes —
+  removed. Padding was default-off and unused: both registration backends align inputs of differing
+  sizes natively (VALIS into a shared space; the tiled/STARE backend into the reference's shape).
+  This also removed the pipeline's only filename-based channel-name inference.
+
 ## [1.0.0] - 2026-07-29
 
 First public release. End-to-end multiplex WSI processing: preprocessing, registration,

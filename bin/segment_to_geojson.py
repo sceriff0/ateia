@@ -16,19 +16,23 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 
-def pick_dapi_index(channel_names) -> int:
-    """Return the index of the first channel whose name contains 'DAPI', or 0 if none match."""
-    for i, ch in enumerate(channel_names or []):
-        if "DAPI" in str(ch).upper():
-            return i
-    return 0
+def find_nuclear_index(image_path, nuclear_markers=None) -> int:
+    """Return the nuclear-channel index for ``image_path``, resolved by marker name
+    from its OME channel names (never the filename).
 
+    Falls back to index 0 when no listed marker matches: images reaching this QC
+    path are CONVERT_IMAGE output, where the nuclear channel is already normalized
+    to channel 0.
+    """
+    from utils.metadata import (
+        DEFAULT_NUCLEAR_MARKERS,
+        extract_channel_names_from_ome,
+        pick_nuclear_index,
+    )
 
-def find_dapi_index(image_path) -> int:
-    """Return the DAPI channel index for ``image_path``, read from its OME channel names."""
-    from utils.metadata import extract_channel_names_from_ome
-
-    return pick_dapi_index(extract_channel_names_from_ome(image_path))
+    names = extract_channel_names_from_ome(image_path)
+    idx = pick_nuclear_index(names, nuclear_markers or DEFAULT_NUCLEAR_MARKERS)
+    return idx if idx is not None else 0
 
 
 def segment_to_geojson(
@@ -52,7 +56,7 @@ def segment_to_geojson(
     import mask_to_geojson
     import segment
 
-    idx = dapi_channel if dapi_channel is not None else find_dapi_index(image_path)
+    idx = dapi_channel if dapi_channel is not None else find_nuclear_index(image_path)
     dapi, _ = segment.extract_dapi_channel(str(image_path), idx)
     normalized = segment.normalize_dapi(dapi, pmin=pmin, pmax=pmax)
     model = segment.load_stardist_model(model_dir, model_name, use_gpu=use_gpu)

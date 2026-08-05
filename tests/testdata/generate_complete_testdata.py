@@ -323,7 +323,7 @@ print("  - invalid_file_not_found.csv")
 # =============================================================================
 print("\n6. Creating additional test fixtures for module tests...")
 
-# 6a. Merged quantification CSV for phenotype tests
+# 6a. Merged quantification CSV for export/QC module tests
 with open(OUT_DIR / "sample_merged_quant.csv", "w") as f:
     f.write(
         "label,centroid_x,centroid_y,area,perimeter,eccentricity,major_axis,minor_axis,solidity,DAPI,PANCK,SMA\n"
@@ -345,18 +345,6 @@ with open(OUT_DIR / "sample_merged_quant.csv", "w") as f:
         )
 print("  Created sample_merged_quant.csv (20 cells)")
 
-# 6b. Max dimensions file for padding tests
-with open(OUT_DIR / "sample_max_dims.txt", "w") as f:
-    f.write("MAX_HEIGHT 256\n")
-    f.write("MAX_WIDTH 256\n")
-print("  Created sample_max_dims.txt")
-
-# 6c. Individual dimensions file
-with open(OUT_DIR / "sample_dims.txt", "w") as f:
-    f.write("P001_ref.ome.tiff 128 128\n")
-    f.write("P001_mov1.ome.tiff 128 128\n")
-print("  Created sample_dims.txt")
-
 # 6d. Sample features JSON
 features = {
     "keypoints": [
@@ -372,37 +360,6 @@ features = {
 with open(OUT_DIR / "sample_features.json", "w") as f:
     json.dump(features, f, indent=2)
 print("  Created sample_features.json (5 keypoints)")
-
-# 6e. Phenotype mapping JSON
-phenotype_mapping = {
-    "phenotypes": {"0": "Unassigned", "1": "PANCK+", "2": "SMA+", "3": "PANCK+SMA+"},
-    "colors": {"0": "#808080", "1": "#00FF00", "2": "#FF0000", "3": "#FFFF00"},
-}
-with open(OUT_DIR / "sample_phenotype_mapping.json", "w") as f:
-    json.dump(phenotype_mapping, f, indent=2)
-print("  Created sample_phenotype_mapping.json")
-
-# 6f. Sample GeoJSON for phenotype output
-geojson = {
-    "type": "FeatureCollection",
-    "features": [
-        {
-            "type": "Feature",
-            "geometry": {
-                "type": "Polygon",
-                "coordinates": [[[50, 30], [55, 30], [55, 35], [50, 35], [50, 30]]],
-            },
-            "properties": {
-                "objectType": "cell",
-                "classification": {"name": "PANCK+", "colorRGB": 65280},
-                "measurements": [{"name": "DAPI", "value": 8500}],
-            },
-        }
-    ],
-}
-with open(OUT_DIR / "sample_phenotypes.geojson", "w") as f:
-    json.dump(geojson, f, indent=2)
-print("  Created sample_phenotypes.geojson")
 
 # 6g. Feature distance metrics JSON
 metrics = {
@@ -459,11 +416,7 @@ print("  - invalid_checkpoint_bad_ref.csv")
 print("  - invalid_file_not_found.csv")
 print("\nModule test fixtures:")
 print("  - sample_merged_quant.csv")
-print("  - sample_max_dims.txt")
-print("  - sample_dims.txt")
 print("  - sample_features.json")
-print("  - sample_phenotype_mapping.json")
-print("  - sample_phenotypes.geojson")
 print("  - sample_feature_metrics.json")
 print("  - sample_DAPI.tif, sample_PANCK.tif, sample_SMA.tif")
 print("  - sample_channels.txt")
@@ -544,6 +497,123 @@ with open(OUT_DIR / "single_sample.csv", "w") as f:
     f.write(f"P001,{TESTDATA_ABS}/P001_ref.ome.tiff,true,DAPI|PANCK|SMA\n")
 print("  Created single_sample.csv")
 
+# 7f. Two-image, one-patient samplesheet where every row's patient_id cell
+# carries a trailing space. Regression fixture for the silent-row-drop bug:
+# Nextflow's splitCsv() does not trim fields, so an untrimmed
+# CsvUtils.parseMetadata() would produce meta.patient_id == "P001 " while the
+# pre-computed per-patient counts map (built via CsvUtils.parseCsvLine, which
+# does trim) keys on "P001" — the inner-join combine(by: 0) in
+# workflows/mirage.nf's loadInputChannel() then silently drops the row.
+with open(OUT_DIR / "whitespace_patient_id.csv", "w") as f:
+    f.write("patient_id,path_to_file,is_reference,channels\n")
+    f.write(f"P001 ,{TESTDATA_ABS}/P001_ref.ome.tiff,true,DAPI|PANCK|SMA\n")
+    f.write(f"P001 ,{TESTDATA_ABS}/P001_mov1.ome.tiff,false,DAPI|CD3|CD8\n")
+print("  Created whitespace_patient_id.csv")
+
+# 7g. Registration QC fixtures matching WARP_SEG_QC.out.metrics / .out.per_cell,
+# so tests/subworkflows/local/postprocessing.nf.test can pass non-empty
+# ch_reg_qc / ch_reg_residuals into POSTPROCESSING and exercise the
+# EXPORT_SPATIALDATA fold-in path (postprocess.nf ~379-384), not just
+# Channel.empty(). Shape mirrors what bin/warp_seg_qc.py's build_record()
+# actually emits (run()'s return at bin/warp_seg_qc.py:349-367, splatted at
+# :407) — per-stage metrics nested under "stages", keyed by stage name, with
+# sibling "stage_order"/"delta_vs_anchor"/"matching"/"counts"/"params" — not
+# top-level stage keys. Field names inside each stage record come from
+# summarize_stage()/_dist_stats() in bin/utils/cell_pairs.py:340-384
+# (n_pairs, n_pairs_scored, iou_n/iou_mean/iou_p10/iou_p50/iou_p90/iou_max,
+# displacement_px_n/_mean/_p10/_p50/_p90/_max, frac_iou_ge_<thresh>,
+# dice_matched) — NOT the mean_iou/mean_residual_px names used in an earlier,
+# invented version of this fixture. Cross-checked against the module's own
+# -stub block (modules/local/warp_seg_qc.nf:85-97), which builds the same
+# top-level shape (stage_order/stages/delta_vs_anchor/matching/counts).
+ANCHOR_STAGE = "rigid"
+STAGE_ORDER = ["native", "rigid", "non_rigid", "micro"]
+_DELTA_KEYS = (
+    "iou_mean",
+    "iou_p50",
+    "displacement_px_p50",
+    "displacement_px_p90",
+    "displacement_um_p50",
+    "displacement_um_p90",
+    "dice_matched",
+)
+
+
+def _stage_record(n_pairs, n_scored, iou_mean, iou_p10, iou_p50, iou_p90, iou_max,
+                   disp_mean, disp_p10, disp_p50, disp_p90, disp_max, dice):
+    return {
+        "n_pairs": n_pairs,
+        "n_pairs_scored": n_scored,
+        "iou_n": n_scored,
+        "iou_mean": iou_mean,
+        "iou_p10": iou_p10,
+        "iou_p50": iou_p50,
+        "iou_p90": iou_p90,
+        "iou_max": iou_max,
+        "displacement_px_n": n_scored,
+        "displacement_px_mean": disp_mean,
+        "displacement_px_p10": disp_p10,
+        "displacement_px_p50": disp_p50,
+        "displacement_px_p90": disp_p90,
+        "displacement_px_max": disp_max,
+        "frac_iou_ge_0.5": round(min(1.0, iou_mean + 0.1), 3),
+        "dice_matched": dice,
+    }
+
+
+stage_records = {
+    "native": _stage_record(20, 18, 0.41, 0.20, 0.40, 0.62, 0.70, 18.2, 9.5, 17.8, 27.6, 34.0, 0.39),
+    "rigid": _stage_record(20, 19, 0.68, 0.50, 0.69, 0.85, 0.92, 6.4, 2.1, 6.0, 11.2, 14.5, 0.66),
+    "non_rigid": _stage_record(20, 19, 0.83, 0.68, 0.84, 0.94, 0.97, 2.1, 0.6, 1.9, 3.8, 5.0, 0.82),
+    "micro": _stage_record(20, 20, 0.91, 0.80, 0.92, 0.98, 0.99, 0.9, 0.2, 0.8, 1.7, 2.3, 0.90),
+}
+anchor_rec = stage_records[ANCHOR_STAGE]
+delta_vs_anchor = {
+    stage: {
+        k: round(stage_records[stage][k] - anchor_rec[k], 4)
+        for k in _DELTA_KEYS
+        if k in stage_records[stage] and k in anchor_rec
+    }
+    for stage in STAGE_ORDER
+    if stage != ANCHOR_STAGE
+}
+seg_qc_record = {
+    "patient_id": "P001",
+    "moving": "P001_mov1.ome.tiff",
+    "reference": "P001_ref.ome.tiff",
+    "stages_separable": True,
+    "stage_order": STAGE_ORDER,
+    "stages": stage_records,
+    "delta_vs_anchor": delta_vs_anchor,
+    "matching": {
+        "method": "mutual_nn_centroid",
+        "anchor_stage": ANCHOR_STAGE,
+        "n_pairs": 20,
+    },
+    "counts": {"features_ref": 22, "features_moving": 21},
+    "params": {
+        "iou_thresh": 0.5,
+        "supersample": 2,
+        "max_pair_window_px": 4_000_000,
+        "pixel_size_um": 0.325,
+    },
+    "micro_reg": 1,
+    "rigid_includes_micro_rigid": True,
+}
+with open(OUT_DIR / "sample_reg_qc.json", "w") as f:
+    json.dump(seg_qc_record, f, indent=2)
+print("  Created sample_reg_qc.json")
+
+with open(OUT_DIR / "sample_reg_residuals.csv", "w") as f:
+    f.write("moving,ref_x,ref_y,residual_px,stage\n")
+    rng_res = np.random.default_rng(7)
+    for i in range(10):
+        x = round(float(rng_res.uniform(10, 118)), 4)
+        y = round(float(rng_res.uniform(10, 118)), 4)
+        d = round(float(rng_res.uniform(0.2, 2.5)), 6)
+        f.write(f"P001_mov1.ome.tiff,{x},{y},{d},micro\n")
+print("  Created sample_reg_residuals.csv")
+
 # =============================================================================
 # 8. Golden reference files in tests/testdata/expected/
 # =============================================================================
@@ -553,16 +623,6 @@ print("\n8. Creating golden reference files in expected/...")
 with open(EXPECTED_DIR / "channels_3ch.txt", "w") as f:
     f.write("DAPI\nPANCK\nSMA\n")
 print("  Created expected/channels_3ch.txt")
-
-# 8b. Expected dimensions output
-with open(EXPECTED_DIR / "dims_128x128.txt", "w") as f:
-    f.write("P001_ref.ome.tiff 128 128\n")
-print("  Created expected/dims_128x128.txt")
-
-# 8c. Expected max dimensions
-with open(EXPECTED_DIR / "max_dims_128.txt", "w") as f:
-    f.write("MAX_HEIGHT 128\nMAX_WIDTH 128\n")
-print("  Created expected/max_dims_128.txt")
 
 # 8d. Expected merged quant columns (fov + cell_size + morphology + markers)
 with open(EXPECTED_DIR / "merged_quant_columns.txt", "w") as f:

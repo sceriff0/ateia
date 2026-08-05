@@ -29,10 +29,10 @@ process SEG_QC_GEOJSON {
     // .ome.tif/.ome.tiff), so the stem == the registrar slide_dict key WARP_SEG_QC looks up.
     def prefix = image.name.replaceAll(/\.ome\.tiff?$/, '').replaceAll(/\.tiff?$/, '')
     def use_gpu_flag = params.seg_gpu ? '--use-gpu' : ''
-    def pmin = params.seg_pmin ?: 1.0
-    def pmax = params.seg_pmax ?: 99.8
-    def n_tiles_y = params.seg_n_tiles_y ?: 1
-    def n_tiles_x = params.seg_n_tiles_x ?: 1
+    def pmin = params.seg_pmin
+    def pmax = params.seg_pmax
+    def n_tiles_y = params.seg_n_tiles_y
+    def n_tiles_x = params.seg_n_tiles_x
     def model_dir_arg = params.segmentation_model_dir ? "--model-dir ${params.segmentation_model_dir}" : ''
     def prob_arg = (params.seg_prob_thresh != null) ? "--prob-thresh ${params.seg_prob_thresh}" : ''
     """

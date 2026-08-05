@@ -39,6 +39,66 @@ def p_pos_scalar(s_i: float, pos_cal: np.ndarray) -> float:
     return (1 + int(np.sum(pos_cal <= s_i))) / (pos_cal.size + 1)
 
 
+def weighted_tail_pvalues(
+    query: np.ndarray, ref_scores: np.ndarray, ref_weights: np.ndarray, side: str
+) -> np.ndarray:
+    """Responsibility-weighted one-sided tail probability, vectorized.
+
+    Replaces the hard-membership rank p-value (`p_neg_scalar`/`p_pos_scalar`
+    against a truncated calibration subset) with a weighted empirical tail over
+    ALL reference cells:
+
+        side="neg":  p_neg(q) = (Σ_j w_j · 1[s_j >= q]) / (Σ_j w_j)
+        side="pos":  p_pos(q) = (Σ_j w_j · 1[s_j <= q]) / (Σ_j w_j)
+
+    Every cell contributes, weighted by how negative (resp. positive) it is, so
+    a confidently-positive cell (w_neg≈0) neither pollutes nor truncates the
+    negative reference. Exchangeability is restored in expectation: the
+    reference is no longer the marker distribution hard-cut at the GMM
+    crossover. Returns all-1.0 if the total weight is ~0 (no usable reference
+    -> marker stays undetermined, matching the degrade convention).
+    """
+    query = np.asarray(query, dtype=float)
+    ref_scores = np.asarray(ref_scores, dtype=float)
+    ref_weights = np.asarray(ref_weights, dtype=float)
+    total = float(ref_weights.sum())
+    if total <= 1e-12 or ref_scores.size == 0:
+        return np.ones(query.shape)
+
+    order = np.argsort(ref_scores, kind="mergesort")   # deterministic ties
+    s_sorted = ref_scores[order]
+    w_sorted = ref_weights[order]
+    if side == "neg":
+        # mass at-or-above q = total - mass strictly below q
+        suffix = np.concatenate([np.cumsum(w_sorted[::-1])[::-1], [0.0]])
+        idx = np.searchsorted(s_sorted, query, side="left")
+        mass = suffix[idx]
+    elif side == "pos":
+        prefix = np.concatenate([[0.0], np.cumsum(w_sorted)])
+        idx = np.searchsorted(s_sorted, query, side="right")
+        mass = prefix[idx]
+    else:
+        raise ValueError(f"side must be 'neg' or 'pos', got {side!r}")
+    return mass / total
+
+
+def ks_uniform(pvals: np.ndarray) -> float:
+    """One-sample Kolmogorov–Smirnov distance of ``pvals`` to Uniform(0,1).
+
+    Calibration diagnostic (§ Fix 4): under correct calibration the p-values of
+    a genuinely-reference population are ~Uniform(0,1). A large value flags the
+    old truncation pathology (p-values spiked near 0/1). Pure-numpy, no scipy
+    dependency, so it runs anywhere the phenotyper runs.
+    """
+    p = np.sort(np.asarray(pvals, dtype=float))
+    n = p.size
+    if n == 0:
+        return float("nan")
+    ecdf_hi = np.arange(1, n + 1) / n
+    ecdf_lo = np.arange(0, n) / n
+    return float(np.maximum(np.abs(ecdf_hi - p), np.abs(p - ecdf_lo)).max())
+
+
 def conformal_scores(sk: np.ndarray, cal: MarkerCalibration) -> Tuple[np.ndarray, np.ndarray]:
     """Per-cell two-sided conformal p-values, ranked within each cell's own bin.
 
@@ -52,14 +112,14 @@ def conformal_scores(sk: np.ndarray, cal: MarkerCalibration) -> Tuple[np.ndarray
 
     p_neg = np.ones(n)
     p_pos = np.ones(n)
+    empty = (np.array([]), np.array([]))
     for b in np.unique(cal.bins):
         b = int(b)
-        mask = cal.bins == b
-        neg_cal = cal.neg_by_bin.get(b, np.array([]))
-        pos_cal = cal.pos_by_bin.get(b, np.array([]))
-        for i in np.where(mask)[0]:
-            p_neg[i] = p_neg_scalar(sk[i], neg_cal)
-            p_pos[i] = p_pos_scalar(sk[i], pos_cal)
+        idx = np.where(cal.bins == b)[0]
+        neg_s, neg_w = cal.neg_by_bin.get(b, empty)
+        pos_s, pos_w = cal.pos_by_bin.get(b, empty)
+        p_neg[idx] = weighted_tail_pvalues(sk[idx], neg_s, neg_w, "neg")
+        p_pos[idx] = weighted_tail_pvalues(sk[idx], pos_s, pos_w, "pos")
     return p_neg, p_pos
 
 

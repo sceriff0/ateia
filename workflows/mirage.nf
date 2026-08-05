@@ -6,6 +6,8 @@
 
 import groovy.json.JsonOutput
 
+include { validateParameters  } from 'plugin/nf-schema'
+
 include { PREPROCESSING       } from '../subworkflows/local/preprocess'
 include { REGISTRATION        } from '../subworkflows/local/registration'
 include { POSTPROCESSING      } from '../subworkflows/local/postprocess'
@@ -42,8 +44,14 @@ def loadInputChannel(csv_path, image_column, patient_counts = null, channel_coun
             .map { meta, f -> [meta.patient_id, meta, f] }
             .combine(counts_ch, by: 0)
             .map { patient_id, meta, f, count ->
-                def updated_meta = meta.clone()
-                updated_meta.images_count = count
+                // `+` creates a new top-level map, but Groovy's Map.plus() is
+                // cloneSimilarMap(left).putAll(right) -- clone-then-putAll,
+                // operationally identical to clone(). meta.channels is still
+                // the same List reference as in the original meta. See
+                // subworkflows/local/adapters/valis_adapter.nf:82-88 for why
+                // that matters and why toSorted() (not sort()) is mandatory
+                // wherever meta.channels is read.
+                def updated_meta = meta + [images_count: count]
                 [updated_meta, f]
             }
     }
@@ -55,11 +63,38 @@ def loadInputChannel(csv_path, image_column, patient_counts = null, channel_coun
             .map { meta, f -> [meta.patient_id, meta, f] }
             .combine(ch_counts, by: 0)
             .map { patient_id, meta, f, count ->
-                def updated_meta = meta.clone()
-                updated_meta.channels_count = count
+                // `+` creates a new top-level map, but Groovy's Map.plus() is
+                // cloneSimilarMap(left).putAll(right) -- clone-then-putAll,
+                // operationally identical to clone(). meta.channels is still
+                // the same List reference as in the original meta. See
+                // subworkflows/local/adapters/valis_adapter.nf:82-88 for why
+                // that matters and why toSorted() (not sort()) is mandatory
+                // wherever meta.channels is read.
+                def updated_meta = meta + [channels_count: count]
                 [updated_meta, f]
             }
     }
+
+    // Fail-fast guard: `.combine(by: 0)` above is an INNER join keyed on
+    // patient_id. If a row's patient_id does not exactly match a key in the
+    // pre-computed counts map (e.g. stray whitespace CsvUtils.parseMetadata
+    // failed to trim), the row is silently dropped with no warning or error —
+    // that is the exact mechanism of the samplesheet-row-drop bug this guard
+    // closes. Compare what actually reaches the channel against the
+    // independently-computed per-patient image total and error loudly (not
+    // log.warn) on any shortfall, naming patient_id so the cause is obvious.
+    if (patient_counts) {
+        def expected_count = patient_counts.values().sum() ?: 0
+        ch.count().subscribe { emitted ->
+            if (emitted < expected_count) {
+                error "loadInputChannel(${csv_path}): ${expected_count - emitted} row(s) were silently dropped " +
+                      "joining on patient_id (expected ${expected_count} row(s), got ${emitted}). This means a " +
+                      "row's patient_id does not exactly match the value used to pre-compute per-patient counts " +
+                      "(e.g. leading/trailing whitespace) so the inner-join combine(by: 0) discarded it."
+            }
+        }
+    }
+
     return ch
 }
 
@@ -73,15 +108,21 @@ workflow MIRAGE {
 
     /* -------------------- PARAMETER VALIDATION -------------------- */
 
-    ParamUtils.validateStart(params.start)
+    // Types, enums and ranges come from nextflow_schema.json (nf-schema). This
+    // covers every parameter in one place, including the ones the hand-rolled
+    // Groovy never checked, and it rejects a -params-file that delivers a
+    // boolean as the STRING "false" instead of silently treating it as true.
+    // Cross-parameter and filesystem rules that no JSON Schema can express
+    // (--stop ordering, samplesheet semantics, add_cycle prerequisites) stay
+    // below in Groovy.
+    validateParameters()
+
+    ParamUtils.validateOutdir(params.outdir)
 
     /* -------------------- MODE: ADD_CYCLE -------------------- */
     if (params.mode == 'add_cycle') {
         ParamUtils.validateAddCycle(params.prior_outdir)
-        ParamUtils.validateSegMethod(params.seg_method)  // reuse mask; still validate quant options
         ParamUtils.validateCompartmentQuant(params.quantify_compartments, params.expanded_quantification)
-        ParamUtils.validateRegQc((params.reg_qc == null ? 2 : params.reg_qc) as int)
-        ParamUtils.validateMicroReg(ParamUtils.microRegLevel(params))
         ParamUtils.validateAddCyclePhenotyping(params)  // add_cycle has no PHENOTYPE stage
         // add_cycle re-registers the new cycle via the classic VALIS_ADAPTER only; the
         // STARE 'tiled' backend is not wired into the incremental path — reject it loudly
@@ -237,14 +278,7 @@ workflow MIRAGE {
     // each site because the strict Nextflow parser does not support invoking a
     // closure-typed local variable as a function.
 
-    if (ParamUtils.shouldRun('registration', params.start, effective_stop)) {
-        ParamUtils.validateRegistrationMethod(params.registration_method)
-        ParamUtils.validateRegQc((params.reg_qc == null ? 2 : params.reg_qc) as int)
-        ParamUtils.validateMicroReg(ParamUtils.microRegLevel(params))
-    }
-
     if (ParamUtils.shouldRun('postprocessing', params.start, effective_stop)) {
-        ParamUtils.validateSegMethod(params.seg_method)
         ParamUtils.validateCompartmentQuant(params.quantify_compartments, params.expanded_quantification)
     }
 
@@ -304,7 +338,18 @@ workflow MIRAGE {
             ? loadInputChannel(params.input, 'registered_image', patient_counts, channel_counts)
             : REGISTRATION.out.registered  // Direct channel - enables patient-level parallelism!
 
-        POSTPROCESSING(ch_for_postprocessing)
+        // Registration QC feeds the SpatialData export's `uns`/`obsm`. It only exists
+        // when REGISTRATION actually ran in this session — with --start postprocessing
+        // there is no REGISTRATION output to reference, so pass empty channels and let
+        // the export write a store without registration QC rather than fail.
+        def ch_reg_qc_for_post = params.start == 'postprocessing'
+            ? Channel.empty()
+            : REGISTRATION.out.seg_qc
+        def ch_reg_residuals_for_post = params.start == 'postprocessing'
+            ? Channel.empty()
+            : REGISTRATION.out.seg_residuals
+
+        POSTPROCESSING(ch_for_postprocessing, ch_reg_qc_for_post, ch_reg_residuals_for_post)
     }
 
     /* -------------------- FINAL QC REPORT -------------------- */
@@ -361,7 +406,7 @@ workflow MIRAGE {
             run: [
                 timestamp: new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss 'UTC'")
                     .format(new Date()),
-                mode: (params.mode ?: 'standard'),
+                mode: params.mode,
                 start: params.start,
                 stop: effective_stop,
             ],

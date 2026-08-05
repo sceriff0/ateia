@@ -77,8 +77,10 @@ nextflow_workflow {
         }
     }
 
-    // Invalid method test removed — REGISTRATION no longer takes method param
-    // Method validation happens at mirage.nf level via ParamUtils.validateRegistrationMethod
+    // Invalid method test removed — REGISTRATION no longer takes method param.
+    // registration_method's allowed values are declared in nextflow_schema.json
+    // and enforced at launch by validateParameters(); see
+    // tests/param_validation.nf.test.
 
     test("Should handle padding workflow - stub") {
 
@@ -192,6 +194,129 @@ nextflow_workflow {
 
         then {
             assert workflow.failed
+        }
+    }
+
+    test("Should not run seg-QC segmentation for a single-slide patient - stub") {
+
+        // Single-slide patients have nothing to register and are branched straight
+        // through to ch_registered (see the "single" branch in registration.nf).
+        // Their reference must NOT be fed into SEG_QC: there is no moving slide to
+        // score it against, so a full GPU StarDist segmentation would be computed
+        // and thrown away. Guarded alongside a two-slide patient (below) so a fix
+        // that disables seg-QC entirely would also fail this test.
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                reg_qc = 2
+                padding = false
+            }
+            workflow {
+                """
+                input[0] = Channel.fromList([
+                    [[patient_id: 'P001', is_reference: true, channels: ['DAPI']],
+                     file('$projectDir/tests/testdata/P001_ref.ome.tiff')]
+                ])
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.contains('SEG_QC_GEOJSON')
+                }.size() == 0 }
+            )
+        }
+    }
+
+    test("Should still run seg-QC segmentation for both slides of a two-slide patient - stub") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                reg_qc = 2
+                padding = false
+            }
+            workflow {
+                """
+                input[0] = Channel.fromList([
+                    [[patient_id: 'P002', is_reference: true, channels: ['DAPI']],
+                     file('$projectDir/tests/testdata/P002_ref.ome.tiff')],
+                    [[patient_id: 'P002', is_reference: false, channels: ['DAPI', 'CD3']],
+                     file('$projectDir/tests/testdata/P001_mov1.ome.tiff')]
+                ])
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.contains('SEG_QC_GEOJSON')
+                }.size() == 2 }
+            )
+        }
+    }
+
+    test("Should seg-QC score a multi-slide patient auto-picked as reference - stub") {
+
+        // Regression guard for a metadata-shape difference introduced when SEG_QC's
+        // source switched from the raw ch_preprocessed stream to the grouped closure's
+        // `items` (see ch_images_multi above): when no image is CSV-marked
+        // is_reference and allow_auto_reference=true, the grouping closure mutates the
+        // auto-picked item's meta to carry is_reference: true *inside the grouped
+        // list* (registration.nf:100) — the raw stream never saw that mutation.
+        // seg_qc.nf's reference/moving branch (seg_qc.nf:52-55) reads meta.is_reference,
+        // so a multi-slide auto-reference patient previously produced ZERO seg-QC
+        // output (the reference branch was empty, so the combine-by-patient join
+        // matched nothing). Feeding SEG_QC from the grouped/flattened channel carries
+        // the mutated meta through, so this patient is now scored correctly. Assert
+        // that positively here, since it was uncovered before and after this task.
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                allow_auto_reference = true
+                reg_qc = 2
+                padding = false
+            }
+            workflow {
+                """
+                // Two slides, neither CSV-marked is_reference -> auto-reference picks
+                // the first one and mutates its meta inside the grouped closure.
+                input[0] = Channel.fromList([
+                    [[patient_id: 'P003', is_reference: false, channels: ['DAPI']],
+                     file('$projectDir/tests/testdata/P002_ref.ome.tiff')],
+                    [[patient_id: 'P003', is_reference: false, channels: ['DAPI', 'CD3']],
+                     file('$projectDir/tests/testdata/P001_mov1.ome.tiff')]
+                ])
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                // Both slides were segmented (the waste-avoidance guard above does not
+                // apply here — this patient has two slides, not one).
+                { assert workflow.trace.tasks().findAll {
+                    it.name.contains('SEG_QC_GEOJSON')
+                }.size() == 2 },
+                // The reference/moving split in seg_qc.nf actually resolved: one
+                // moving slide was scored against the auto-picked reference. Before
+                // this task's channel swap this was empty (the bug this test guards).
+                { assert workflow.out.seg_qc.size() == 1 }
+            )
         }
     }
 

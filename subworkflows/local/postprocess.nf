@@ -10,7 +10,7 @@ include { EXTRACT_CELL_PROPERTIES } from '../../modules/local/extract_cell_prope
 include { EXTRACT_NUCLEI_PROPERTIES } from '../../modules/local/extract_nuclei_properties'
 include { SPLIT_CHANNELS           } from '../../modules/local/split_channels'
 include { QUANTIFY                 } from '../../modules/local/quantify'
-include { MERGE_QUANT_CSVS         } from '../../modules/local/quantify'
+include { MERGE_QUANT_CSVS         } from '../../modules/local/merge_quant_csvs'
 include { EXPORT_GEOJSON            } from '../../modules/local/export_geojson'
 include { COMPILE_PANEL            } from '../../modules/local/compile_panel'
 include { PHENOTYPE                } from '../../modules/local/phenotype'
@@ -18,6 +18,7 @@ include { MERGE_AND_PYRAMID        } from '../../modules/local/merge_and_pyramid
 include { GENERATE_POSTPROCESSING_QC    } from '../../modules/local/generate_postprocessing_qc'
 include { SEG_QUALITY_EVAL } from '../../modules/local/seg_quality_eval.nf'
 include { MERGE_SEG_EVAL   } from '../../modules/local/merge_seg_eval.nf'
+include { EXPORT_SPATIALDATA } from '../../modules/local/export_spatialdata'
 
 def withDebugView(channel, Closure formatter) {
     return params.debug_channels ? channel.view(formatter) : channel
@@ -46,6 +47,8 @@ def withDebugView(channel, Closure formatter) {
 workflow POSTPROCESSING {
     take:
     ch_registered       // Channel of [meta, file] tuples
+    ch_reg_qc           // Registration QC JSONs (may be empty)
+    ch_reg_residuals    // Per-cell registration residual CSVs (may be empty)
 
     main:
 
@@ -122,11 +125,19 @@ workflow POSTPROCESSING {
             // Ensure tiffs is always a list (handle both single file and multiple files)
             def tiff_list = tiffs instanceof List ? tiffs : [tiffs]
 
-            // Create unique meta map for each channel file
+            // Create unique meta map for each channel file. `+` creates a new
+            // top-level map, but Groovy's Map.plus() is
+            // cloneSimilarMap(left).putAll(right) -- clone-then-putAll,
+            // operationally identical to clone(). meta.channels is still the
+            // same List reference as in the original meta. See
+            // subworkflows/local/adapters/valis_adapter.nf:82-88 for why
+            // that matters and why toSorted() (not sort()) is mandatory
+            // wherever meta.channels is read.
             tiff_list.collect { tiff ->
-                def channel_meta = meta.clone()
-                channel_meta.id = "${meta.patient_id}_${tiff.baseName}"
-                channel_meta.channel_name = tiff.baseName
+                def channel_meta = meta + [
+                    id: "${meta.patient_id}_${tiff.baseName}",
+                    channel_name: tiff.baseName
+                ]
                 [channel_meta, tiff]
             }
         }
@@ -183,9 +194,15 @@ workflow POSTPROCESSING {
         }
         .groupTuple(by: 0)
         .map { patient_id, metas, csvs ->
-            def meta = metas[0].clone()
+            // `+` creates a new top-level map, but Groovy's Map.plus() is
+            // cloneSimilarMap(left).putAll(right) -- clone-then-putAll,
+            // operationally identical to clone(). metas[0].channels is still
+            // the same List reference as in the original meta. See
+            // subworkflows/local/adapters/valis_adapter.nf:82-88 for why
+            // that matters and why toSorted() (not sort()) is mandatory
+            // wherever meta.channels is read.
             // Extract actual patient_id from groupKey wrapper if needed
-            meta.id = patient_id.toString()
+            def meta = metas[0] + [id: patient_id.toString()]
             [meta, csvs]
         }
 
@@ -355,6 +372,32 @@ workflow POSTPROCESSING {
             [meta.patient_id, published_path]
         })
 
+    // ========================================================================
+    // SPATIALDATA EXPORT - scverse-native .zarr (additive; OME-TIFF + GeoJSON stay primary)
+    // ========================================================================
+    if (!params.skip_spatialdata_export) {
+        def ch_sd_in = MERGE_QUANT_CSVS.out.merged_csv
+            .map { meta, csv -> [meta.patient_id, meta, csv] }
+            .join(ch_contours, by: 0)
+            .join(ch_nuc_contours_for_export, by: 0)
+            .join(ch_cell_mask.map { meta, m -> [meta.patient_id, m] }, by: 0)
+            .join(ch_nuclei_mask.map { meta, m -> [meta.patient_id, m] }, by: 0)
+            .join(MERGE_AND_PYRAMID.out.pyramid.map { meta, p -> [meta.patient_id, p] }, by: 0)
+            .map { _pid, meta, csv, contours, nuc_contours, cmask, nmask, pyramid ->
+                [meta, csv, contours, nuc_contours, cmask, nmask, pyramid]
+            }
+
+        // QC is collected run-wide rather than per patient: these channels are already
+        // flat file streams by the time they arrive, and `.ifEmpty([])` keeps the export
+        // running when reg_qc=0 or the run started at postprocessing.
+        EXPORT_SPATIALDATA(
+            ch_sd_in,
+            ch_reg_qc.map { it instanceof List ? it[-1] : it }.flatten().collect().ifEmpty([]),
+            ch_seg_eval_metrics.flatten().collect().ifEmpty([]),
+            ch_reg_residuals.map { it instanceof List ? it[-1] : it }.flatten().collect().ifEmpty([])
+        )
+    }
+
     ch_checkpoint_csv = ch_base_checkpoint
         .map { patient_id, cell_csv, cell_geojson, merged_csv, cell_mask, pyramid ->
             "${patient_id},${cell_csv},${cell_geojson},${merged_csv},${cell_mask},${pyramid}"
@@ -362,7 +405,7 @@ workflow POSTPROCESSING {
         .collectFile(
             name: 'postprocessed.csv',
             newLine: true,
-            storeDir: "${params.outdir ?: launchDir}/csv",
+            storeDir: "${params.outdir}/csv",
             seed: 'patient_id,cell_csv,cell_geojson,merged_csv,cell_mask,pyramid'
         )
 

@@ -1,9 +1,9 @@
 {
-    "$schema": "http://json-schema.org/draft-07/schema",
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
     "title": "MIRAGE WSI Processing Pipeline Parameters",
     "description": "Schema synchronized with nextflow.config canonical params surface.",
     "type": "object",
-    "definitions": {
+    "$defs": {
         "input_output_options": {
             "title": "Input/output options",
             "type": "object",
@@ -97,7 +97,10 @@
                     "default": 100
                 },
                 "preproc_pool_workers": {
-                    "type": ["integer", "null"],
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
                     "description": "Worker threads for preprocessing parallelism. null = use task.cpus.",
                     "default": null
                 },
@@ -141,20 +144,12 @@
                         "tiled"
                     ]
                 },
-                "padding": {
-                    "type": "boolean",
-                    "description": "Enable padding during registration.",
-                    "default": false
-                },
-                "pad_mode": {
-                    "type": "string",
-                    "description": "Padding mode for registration.",
-                    "default": "constant",
-                    "enum": [
-                        "constant",
-                        "edge",
-                        "reflect",
-                        "symmetric"
+                "nuclear_markers": {
+                    "type": "array",
+                    "description": "Ordered preference of nuclear/fiducial marker names; the first present (resolved from channel metadata, never the filename) is moved to channel 0 and drives both cell segmentation and the registration fiducial.",
+                    "default": [
+                        "DAPI",
+                        "CELLTOX"
                     ]
                 },
                 "skip_registration_qc": {
@@ -166,7 +161,11 @@
                     "type": "integer",
                     "description": "Registration QC depth: 0=none, 1=DAPI overlay only, 2=DAPI overlay + segmentation-overlap metric (Dice/IoU/instance-F1).",
                     "default": 2,
-                    "enum": [ 0, 1, 2 ]
+                    "enum": [
+                        0,
+                        1,
+                        2
+                    ]
                 },
                 "qc_scale_factor": {
                     "type": "number",
@@ -200,14 +199,6 @@
                     "description": "Number of features to detect.",
                     "default": 5000
                 },
-                "reg_reference_markers": {
-                    "type": "array",
-                    "description": "Reference markers for registration.",
-                    "default": [
-                        "DAPI",
-                        "FITC"
-                    ]
-                },
                 "reg_micro_reg_fraction": {
                     "type": "number",
                     "description": "Fraction for micro registration.",
@@ -230,8 +221,8 @@
                 },
                 "reg_micro_reg": {
                     "type": "integer",
-                    "description": "Micro-registration depth (nested): 0=none, 1=micro-rigid only (refines slide.M), 2=+micro non-rigid (register_micro).",
-                    "default": 0,
+                    "description": "Micro-registration depth (nested, default MAX): 0=none, 1=micro-rigid only (refines slide.M), 2=+micro non-rigid (register_micro).",
+                    "default": 2,
                     "enum": [
                         0,
                         1,
@@ -337,8 +328,8 @@
                 },
                 "seg_method": {
                     "type": "string",
-                    "description": "Segmentation backend to use.",
-                    "default": "stardist",
+                    "description": "Segmentation backend to use. 'instantseg' (default) runs without extra assets; 'stardist' requires a trained model via segmentation_model_dir unless segmentation_model names a StarDist built-in.",
+                    "default": "instantseg",
                     "enum": [
                         "stardist",
                         "instantseg",
@@ -451,7 +442,7 @@
                     "default": false
                 },
                 "cse_pixel_size_um": {
-                    "type": "number",
+                    "type": ["number", "null"],
                     "description": "Pixel size in micrometers passed to the CellSegmentationEvaluator. null = infer from image metadata.",
                     "default": null
                 },
@@ -469,6 +460,25 @@
                     "type": "boolean",
                     "description": "Skip generation of the final aggregated HTML QC report.",
                     "default": false
+                },
+                "skip_spatialdata_export": {
+                    "type": "boolean",
+                    "description": "Skip the SpatialData (.zarr) export.",
+                    "help_text": "The scverse-native store is additive; the pyramidal OME-TIFF and QuPath GeoJSON remain the primary outputs.",
+                    "default": false
+                },
+                "spatialdata_include_image": {
+                    "type": "boolean",
+                    "description": "Write the merged pyramid into the SpatialData store.",
+                    "help_text": "spatialdata.write() materializes every element, so this duplicates the largest artifact the pipeline produces. Off by default; turn on for a self-contained, depositable object.",
+                    "default": false
+                },
+                "spatialdata_residual_join_max_px": {
+                    "type": "number",
+                    "description": "Max centroid distance (px) when joining registration QC residuals onto cell_mask.",
+                    "help_text": "The reg-QC segmentation is a separate native-image run and shares no label space with cell_mask, so the join is spatial.",
+                    "default": 15.0,
+                    "minimum": 0
                 }
             }
         },
@@ -638,34 +648,34 @@
     },
     "allOf": [
         {
-            "$ref": "#/definitions/input_output_options"
+            "$ref": "#/$defs/input_output_options"
         },
         {
-            "$ref": "#/definitions/preprocessing_options"
+            "$ref": "#/$defs/preprocessing_options"
         },
         {
-            "$ref": "#/definitions/registration_options"
+            "$ref": "#/$defs/registration_options"
         },
         {
-            "$ref": "#/definitions/segmentation_options"
+            "$ref": "#/$defs/segmentation_options"
         },
         {
-            "$ref": "#/definitions/quantification_options"
+            "$ref": "#/$defs/quantification_options"
         },
         {
-            "$ref": "#/definitions/phenotyping_options"
+            "$ref": "#/$defs/phenotyping_options"
         },
         {
-            "$ref": "#/definitions/output_options"
+            "$ref": "#/$defs/output_options"
         },
         {
-            "$ref": "#/definitions/pipeline_control"
+            "$ref": "#/$defs/pipeline_control"
         },
         {
-            "$ref": "#/definitions/cluster_options"
+            "$ref": "#/$defs/cluster_options"
         },
         {
-            "$ref": "#/definitions/resource_limits"
+            "$ref": "#/$defs/resource_limits"
         }
     ],
     "additionalProperties": true

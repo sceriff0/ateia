@@ -294,7 +294,29 @@ def run(
         )
     }
     _log(f"stage '{ANCHOR_STAGE}': {_stage_line(records[ANCHOR_STAGE])}", t0)
+
+    # See the note on `per_cell` below. Captured here, before the anchor arrays are
+    # released, for the degenerate single-stage plan where the anchor IS the final stage.
+    per_cell = None
+    if stages[-1] == ANCHOR_STAGE and idx_ref.size:
+        per_cell = {
+            "stage": ANCHOR_STAGE,
+            "ref_xy": np.asarray(a_cent_ref, dtype=float)[idx_ref],
+            "residual_px": cp.centroid_distance(
+                a_cent_ref, a_cent_mov, idx_ref, idx_mov
+            ),
+        }
+
     del a_ref, a_mov, a_cent_ref, a_cent_mov, a_area_ref, a_area_mov
+
+    # Per-cell residuals for the FINAL stage — the fully-registered state. Retained
+    # (rather than aggregated away like every other stage) because this is the only
+    # per-cell registration-confidence signal the pipeline produces, and downstream
+    # consumers join it onto the quantification table. Reference centroids are taken
+    # in the final stage's frame, which is the frame SEGMENT ran on, so the join is a
+    # spatial one against cell_mask centroids — the QC segmentation here is a separate
+    # native-image StarDist run and shares no label space with cell_mask.
+    final_stage = stages[-1]
 
     for stage in stages:
         if stage == ANCHOR_STAGE:
@@ -304,6 +326,12 @@ def run(
         records[stage] = score_stage(
             s_ref, s_mov, c_ref, c_mov, ar_ref, ar_mov, idx_ref, idx_mov, **score_kwargs
         )
+        if stage == final_stage and idx_ref.size:
+            per_cell = {
+                "stage": stage,
+                "ref_xy": np.asarray(c_ref, dtype=float)[idx_ref],
+                "residual_px": cp.centroid_distance(c_ref, c_mov, idx_ref, idx_mov),
+            }
         _log(f"stage '{stage}': {_stage_line(records[stage])}", t0)
         del s_ref, s_mov, c_ref, c_mov, ar_ref, ar_mov
 
@@ -322,6 +350,9 @@ def run(
         "stage_order": list(stages),
         "stages": records,
         "delta_vs_anchor": deltas,
+        # Not serialized into the QC JSON (it is per-cell, not per-slide); the caller
+        # writes it to a separate CSV when --per-cell-csv is given.
+        "_per_cell": per_cell,
         "matching": matching,
         "counts": {
             "features_ref": int(ref_native.n_features),
@@ -334,6 +365,35 @@ def run(
             "pixel_size_um": pixel_size_um,
         },
     }
+
+
+def write_per_cell_csv(path, per_cell, moving_name) -> int:
+    """Write the final-stage per-pair registration residuals as CSV.
+
+    Columns are ``moving,ref_x,ref_y,residual_px,stage``. ``ref_x``/``ref_y`` are
+    reference-cell centroids **in the final stage's frame** — i.e. the frame the
+    registered reference image (and therefore ``cell_mask``) lives in, which is what
+    makes a downstream spatial join onto cell labels well-posed.
+
+    Always writes a header, so a slide that paired no cells yields an empty table
+    rather than a missing file (the consumer can then distinguish "ran, found
+    nothing" from "never ran").
+
+    Returns the number of data rows written.
+    """
+    import csv as _csv
+
+    with open(path, "w", newline="") as fh:
+        w = _csv.writer(fh)
+        w.writerow(["moving", "ref_x", "ref_y", "residual_px", "stage"])
+        if not per_cell:
+            return 0
+        xy = np.asarray(per_cell["ref_xy"], dtype=float)
+        dist = np.asarray(per_cell["residual_px"], dtype=float)
+        stage = per_cell["stage"]
+        for (x, y), d in zip(xy, dist):
+            w.writerow([moving_name, f"{x:.4f}", f"{y:.4f}", f"{d:.6f}", stage])
+        return int(dist.size)
 
 
 def build_record(
@@ -382,6 +442,7 @@ def write_report(
     separable=True,
     note="",
     micro_reg=None,
+    per_cell_csv=None,
     **run_kwargs,
 ) -> dict:
     """Load the registrar (unless a warp is injected), score every stage, write the JSON."""
@@ -418,6 +479,12 @@ def write_report(
         moving_slide=moving_slide,
         **run_kwargs,
     )
+    # Pop before build_record: it splats `result` into the JSON record, and these are
+    # numpy arrays (not serializable) and per-cell rather than per-slide.
+    per_cell = result.pop("_per_cell", None)
+    if per_cell_csv:
+        write_per_cell_csv(per_cell_csv, per_cell, moving_name or moving_slide)
+
     record = build_record(
         result,
         patient_id,
@@ -436,6 +503,15 @@ def parse_args(argv=None):
     """Parse command-line arguments."""
     ap = argparse.ArgumentParser(
         description="Staged, fixed-correspondence segmentation-overlap registration QC."
+    )
+    ap.add_argument(
+        "--per-cell-csv",
+        default=None,
+        help=(
+            "Optional path for final-stage per-pair registration residuals "
+            "(moving,ref_x,ref_y,residual_px,stage). ref_x/ref_y are in the registered "
+            "reference frame, for spatial joining onto cell_mask downstream."
+        ),
     )
     ap.add_argument("--pickle", required=True, help="VALIS registrar pickle")
     ap.add_argument(
@@ -591,6 +667,7 @@ def _main_tiled(a):
         iou_thresh=a.iou_thresh,
         supersample=a.supersample,
         max_pair_window_px=a.max_pair_window_px,
+        per_cell_csv=a.per_cell_csv,
     )
     nan = float("nan")
     last = rec["stage_order"][-1]
@@ -648,6 +725,7 @@ def main(argv=None):
             supersample=a.supersample,
             max_pair_window_px=a.max_pair_window_px,
             micro_reg=a.micro_reg,
+            per_cell_csv=a.per_cell_csv,
         )
     finally:
         registration.kill_jvm()

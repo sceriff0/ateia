@@ -61,18 +61,16 @@ whole-slide alignment) and **STARE tiled** (JVM-free, fully parallel, laptop-fri
 |---|---|---|
 | `registration_method` | `valis` | Registration backend: `valis` (VALIS whole-slide) or `tiled` (STARE — see [Tiled / STARE](#tiled--stare-registration_methodtiled)). |
 | `allow_auto_reference` | `false` | If no `is_reference=true` row, use the first panel as reference. |
-| `padding` | `false` | Pad all panels to the patient's max dimensions before registering. |
-| `pad_mode` | `constant` | Padding fill mode: `constant`, `edge`, `reflect`, `symmetric`. |
+| `nuclear_markers` | `['DAPI','CELLTOX']` | Ordered preference of nuclear/fiducial marker names. The first present (resolved from channel metadata, never the filename) is moved to channel 0 and drives both cell segmentation and the registration fiducial. Fails fast if none present (single-channel images excepted). |
 
 ### VALIS
 
 | Parameter | Default | Description |
 |---|---|---|
-| `reg_reference_markers` | `['DAPI','FITC']` | Channels used to identify/align the reference. |
 | `memory_mode` | `high` | `low` (BRISK/RANSAC, small dims), `medium`, or `high` (SuperPoint/SuperGlue, larger dims). |
 | `reg_micro_reg_fraction` | `0.125` | Image fraction used for micro-registration. |
 | `reg_max_image_dim` | `4000` | Max cached image dimension during registration. |
-| `reg_micro_reg` | `0` | Micro-registration depth (nested): `0` = none, `1` = micro-rigid only (refines `slide.M`), `2` = + micro non-rigid (`register_micro`). At `>=1` the QC `rigid` stage means affine ∘ micro-rigid. |
+| `reg_micro_reg` | `2` | Micro-registration depth (nested, default MAX): `0` = none, `1` = micro-rigid only (refines `slide.M`), `2` = + micro non-rigid (`register_micro`). At `>=1` the QC `rigid` stage means affine ∘ micro-rigid. |
 | `reg_jvm_heap_gb` | `null` | Explicit JVM heap (GB) for VALIS. `null` auto-estimates from input size. |
 | `reg_qc` | `2` | Registration QC depth: `0` = none, `1` = DAPI overlay only, `2` = DAPI overlay + [staged segmentation-overlap metrics](registration_qc.md). |
 
@@ -106,7 +104,7 @@ Backend selected by `--seg_method`.
 
 | Parameter | Default | Description |
 |---|---|---|
-| `seg_method` | `stardist` | Backend: `stardist`, `instantseg`, or `cellsam`. The container is chosen automatically. |
+| `seg_method` | `instantseg` | Backend: `stardist`, `instantseg`, or `cellsam`. The container is chosen automatically. `instantseg` is the default because it is the only backend that runs on a fresh clone — `stardist` needs a trained model supplied via `segmentation_model_dir`, and `cellsam` needs a DeepCell access token. InstanSeg is Apache-2.0 with unencumbered weights. |
 | `seg_gpu` | `true` | Use GPU (adds SLURM `--gres` + Singularity `--nv`). Set `false` to force CPU. |
 | `seg_expand_distance` | `10` | Pixels to expand nuclei into the whole-cell mask (StarDist & CellSAM). |
 
@@ -116,8 +114,8 @@ Consumes the **DAPI channel** (must be channel 0 — guaranteed upstream).
 
 | Parameter | Default | Description |
 |---|---|---|
-| `segmentation_model` | *(bundled)* | StarDist model name (`stardist_full_e200_…`). |
-| `segmentation_model_dir` | `null` | Custom model directory; uses the bundled model if `null`. |
+| `segmentation_model` | `stardist_full_e200_…` | StarDist model name. **Not a StarDist built-in** — it names a trained model that must exist under `segmentation_model_dir`. |
+| `segmentation_model_dir` | `null` | Directory holding the trained model. **Required for this backend**: with `null`, `segment.py` raises `FileNotFoundError` unless `segmentation_model` names a StarDist built-in (`2D_versatile_fluo`, `2D_versatile_he`, `2D_paper_dsb2018`, `2D_demo`). No model is bundled with the repo. |
 | `seg_pmin` | `1.0` | Lower percentile for normalization. |
 | `seg_pmax` | `99.8` | Upper percentile for normalization. |
 | `seg_n_tiles_x` | `16` | Inference tiles along X. |

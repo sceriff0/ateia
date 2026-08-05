@@ -22,8 +22,8 @@ process TILED_REG_TILE {
 
     script:
     def prefix     = "${meta.patient_id}_${meta.channels.join('_')}_${row.ix}_${row.iy}"
-    def dapi_index = params.reg_tiled_dapi_index ?: 0
-    def upsample   = params.reg_tiled_upsample ?: 10
+    def dapi_index = params.reg_tiled_dapi_index
+    def upsample   = params.reg_tiled_upsample
     """
     tiled_reg_tile.py \\
         --reference ${reference} \\

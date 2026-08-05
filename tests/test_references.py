@@ -32,6 +32,9 @@ def test_explicit_control_channel_and_gmm_fallback_warns():
     p = parse_panel(PANEL)
     refs, warns = resolve_references(p, split_constraints(p))
     assert refs["PD1"]["neg_source"] == {"type": "control", "ref": "isotype_ch7"}
-    # CD8 has no never-partner and no requires-then -> both sides fall to gmm, with warnings.
-    assert refs["CD8"]["neg_source"] == {"type": "gmm"}
-    assert any("CD8" in w for w in warns)
+    # CD8 is the antecedent of `CD8 -> CD3`, so by contrapositive (Fix 1) its
+    # negative anchor is CD3-negative cells; only its POSITIVE side (CD8 is no
+    # requires-consequent, no explicit ref) falls to gmm, with a warning.
+    assert refs["CD8"]["neg_source"] == {"type": "requires_neg", "marker": "CD3"}
+    assert refs["CD8"]["pos_source"] == {"type": "gmm"}
+    assert any("CD8" in w and "positive_reference" in w for w in warns)

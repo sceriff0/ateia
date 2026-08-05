@@ -26,6 +26,37 @@ nextflow_pipeline {
         }
     }
 
+    test("Should fail with missing required --outdir param") {
+        tag "stub"
+
+        when {
+            params {
+                input = "$projectDir/tests/testdata/test_input.csv"
+                start = "preprocessing"
+                // outdir is explicitly nulled out here: the "test,docker" profile
+                // (nf-test.config) includes conf/test.config, which sets a default
+                // outdir = "test_results". Simply omitting `outdir` from this block
+                // would inherit that default and never exercise a null outdir, so
+                // this test-params override (highest precedence) sets it to null
+                // directly to reproduce the missing-flag case.
+                outdir = null
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.failed },
+                // nf-schema reports "Missing required parameter(s): outdir" on
+                // stderr, while the Groovy fallback (ParamUtils.validateOutdir)
+                // surfaces via stdout/errorReport — search all three so this
+                // asserts the operator is told *which* parameter is missing,
+                // whichever layer catches it.
+                { assert (workflow.stdout + workflow.stderr).any { it.contains("outdir") } ||
+                         (workflow.errorReport ?: '').contains("outdir") }
+            )
+        }
+    }
+
     test("Should fail with empty samplesheet") {
         tag "stub"
 
@@ -62,6 +93,29 @@ nextflow_pipeline {
             assertAll(
                 { assert workflow.success },
                 { assert path("$outputDir").exists() }
+            )
+        }
+    }
+
+    test("Should not drop rows whose patient_id has surrounding whitespace") {
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                input  = "$projectDir/tests/testdata/whitespace_patient_id.csv"
+                outdir = "$outputDir"
+                start  = "preprocessing"
+                stop   = "preprocessing"
+                seg_gpu = false
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                // both rows must reach preprocessing, not zero and not one
+                { assert path("$outputDir/csv/preprocessed.csv").readLines().size() == 3 }  // header + 2
             )
         }
     }

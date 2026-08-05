@@ -21,7 +21,7 @@ process GENERATE_PREPROCESS_QC {
     script:
     def args = task.ext.args ?: ''
     def prefix = task.ext.prefix ?: "${preprocessed.simpleName}"
-    def scale_factor = params.preprocess_qc_scale_factor ?: 0.25
+    def scale_factor = params.preprocess_qc_scale_factor
     def channels = meta.channels.collect { "\"${it}\"" }.join(' ')
     """
     # Log input size for tracing (-L follows symlinks)

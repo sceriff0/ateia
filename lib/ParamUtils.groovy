@@ -1,23 +1,31 @@
 /*
  * ParamUtils - validation helpers for the pipeline's step-routing parameters.
  *
- * Checks that --start / --stop name valid steps and are in the right order,
- * against the canonical preprocessing -> registration -> postprocessing sequence.
+ * Scope note: single-parameter checks (is this a valid step name? a valid
+ * segmentation backend? a reg_qc level in range?) are NOT here. They are stated
+ * once in nextflow_schema.json and enforced by nf-schema's validateParameters()
+ * at the top of workflows/mirage.nf. What remains below is what no JSON Schema
+ * can express: cross-parameter rules (--stop must not precede --start,
+ * --expanded_quantification implies --quantify_compartments), mode-conditional
+ * rules (add_cycle), filesystem prerequisites, and plain control-flow helpers.
  */
 class ParamUtils {
 
     static final List STEP_ORDER = ['preprocessing', 'registration', 'postprocessing']
 
-    static void validateStart(String start) {
-        if (!(start in STEP_ORDER)) {
-            throw new IllegalArgumentException("Invalid --start '${start}'. Valid values: ${STEP_ORDER}")
+    static void validateOutdir(String outdir) {
+        if (!outdir?.trim()) {
+            throw new IllegalArgumentException(
+                "Please provide --outdir (the pipeline's output directory). " +
+                "Without it every published file lands under a literal 'null/' path.")
         }
     }
 
+    /**
+     * Ordering-only check: --stop must not name an earlier step than --start.
+     * That both are valid step names is asserted by the schema before this runs.
+     */
     static void validateStop(String stop, String start) {
-        if (!(stop in STEP_ORDER)) {
-            throw new IllegalArgumentException("Invalid --stop '${stop}'. Valid values: ${STEP_ORDER}")
-        }
         if (STEP_ORDER.indexOf(stop) < STEP_ORDER.indexOf(start)) {
             throw new IllegalArgumentException("--stop '${stop}' cannot come before --start '${start}'. Pipeline order: ${STEP_ORDER.join(' → ')}")
         }
@@ -47,32 +55,6 @@ class ParamUtils {
         return idx >= STEP_ORDER.indexOf(start) && idx <= STEP_ORDER.indexOf(stop)
     }
 
-    static void validateRegistrationMethod(String method) {
-        def valid = ['valis', 'tiled']
-        if (!(method in valid)) {
-            throw new IllegalArgumentException("Invalid --registration_method '${method}'. Valid values: ${valid}")
-        }
-    }
-
-    static void validateRegQc(int level) {
-        def valid = [0, 1, 2]
-        if (!(level in valid)) {
-            throw new IllegalArgumentException("Invalid --reg_qc '${level}'. Valid values: ${valid} (0=none, 1=DAPI overlay, 2=+segmentation QC)")
-        }
-    }
-
-    /**
-     * Read a boolean switch without trusting Groovy truthiness: a -params-file (or --flag false
-     * on the command line) can deliver the STRING "false", and every non-empty String is truthy
-     * in Groovy — which would turn the switch silently ON.
-     */
-    static boolean boolParam(Map params, String name) {
-        def v = params[name]
-        if (v == null) return false
-        if (v instanceof Boolean) return v
-        return Boolean.parseBoolean(v.toString().trim())
-    }
-
     /**
      * Effective registration-QC depth: 0 = none, 1 = DAPI overlay, 2 = + segmentation overlap.
      * Legacy skip_registration_qc=true forces 0. Defined once and shared by
@@ -87,26 +69,12 @@ class ParamUtils {
      * 2 = micro-rigid + micro non-rigid (register_micro). VALIS controls the two passes
      * independently — micro_rigid_registrar_cls for the rigid refinement, the register_micro()
      * call for the non-rigid one — and this ordinal nests them (0 ⊂ 1 ⊂ 2), which forbids the
-     * odd "micro non-rigid without micro-rigid" combination. Default 0 preserves the pipeline's
-     * historical behaviour (micro off). Single source of truth for register.nf / warp_seg_qc.nf
-     * so the QC can honestly say what the 'rigid' stage means for a given run.
+     * odd "micro non-rigid without micro-rigid" combination. Default 2 (max: micro-rigid +
+     * micro non-rigid), matching nextflow.config. Single source of truth for register.nf /
+     * warp_seg_qc.nf so the QC can honestly say what the 'rigid' stage means for a given run.
      */
     static int microRegLevel(Map params) {
-        return params.reg_micro_reg == null ? 0 : (params.reg_micro_reg as int)
-    }
-
-    static void validateMicroReg(int level) {
-        def valid = [0, 1, 2]
-        if (!(level in valid)) {
-            throw new IllegalArgumentException("Invalid --reg_micro_reg '${level}'. Valid values: ${valid} (0=none, 1=micro-rigid only, 2=micro-rigid + micro non-rigid)")
-        }
-    }
-
-    static void validateSegMethod(String method) {
-        def valid = ['stardist', 'instantseg', 'cellsam']
-        if (!(method in valid)) {
-            throw new IllegalArgumentException("Invalid --seg_method '${method}'. Valid values: ${valid}")
-        }
+        return params.reg_micro_reg == null ? 2 : (params.reg_micro_reg as int)
     }
 
     /**

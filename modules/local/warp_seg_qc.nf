@@ -31,6 +31,8 @@ process WARP_SEG_QC {
 
     output:
     tuple val(meta), path("*_seg_qc.json"), emit: metrics
+    // Final-stage per-cell registration residuals, spatially joinable onto cell_mask.
+    tuple val(meta), path("*_reg_residuals.csv"), optional: true, emit: per_cell
     path "versions.yml"                   , emit: versions
     path("*.size.csv")                    , emit: size_log
 
@@ -56,6 +58,7 @@ process WARP_SEG_QC {
         --ref-geojson ${ref_geojson} \\
         --moving-geojson ${moving_geojson} \\
         --output ${prefix}_seg_qc.json \\
+        --per-cell-csv ${prefix}_reg_residuals.csv \\
         --patient-id ${meta.patient_id} \\
         --moving-name '${moving_slide}' \\
         --reference-name '${ref_slide}' \\
@@ -94,6 +97,7 @@ process WARP_SEG_QC {
     ])
     """
     echo '${stub_json}' > ${prefix}_seg_qc.json
+    printf 'moving,ref_x,ref_y,residual_px,stage\\n' > ${prefix}_reg_residuals.csv
     echo "STUB,${meta.patient_id},stub,0" > ${prefix}.WARP_SEG_QC.size.csv
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":

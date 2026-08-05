@@ -96,6 +96,7 @@ nav:
   - Parameters: parameters.md
   - Incremental cycles: add_cycle.md
   - Registration QC: registration_qc.md
+  - SpatialData & FlowPath: spatialdata.md
   - Benchmarks: benchmarks.md
   - Citation: citation.md
 

@@ -188,7 +188,7 @@ Unlike the VALIS path, which relies on `split_multichannel.py` to clip negatives
 ## 8. Nextflow wiring (drop-in adapter)
 
 The hook exists: `params.registration_method` is defined (`nextflow.config:61`) and validated
-(`ParamUtils.validateRegistrationMethod`, `mirage.nf:167`), but `registration.nf:182` hardcodes
+via its `nextflow_schema.json` enum (nf-schema, not `ParamUtils`), but `registration.nf:182` hardcodes
 `VALIS_ADAPTER`. Add the value `'tiled'` to the validator and branch:
 
 ```groovy
@@ -299,8 +299,9 @@ dedicated lean `withName:'TILED_*'` overrides (2–8 GB) or pair with a memory-c
   the `registration.nf` method branch, `validateRegistrationMethod += 'tiled'`, `reg_tiled_*`
   params, and a lean 8 GB `TILED_REGISTER` resource block. **Stub run green** end-to-end, JVM-free.
 - **reg_qc=2 seg-QC dispatch (done):** `warp_seg_qc.py --method tiled` builds the warper from the
-  STARE manifest (no JVM), and `WARP_SEG_QC_TILED` + the `registration.nf` seg-QC branch feed it
-  one manifest per moving slide. **Stub run green at reg_qc=2** — emits the `native/rigid/refined`
+  STARE manifest (no JVM), and `WARP_SEG_QC_TILED` + the valis/tiled dispatch branch in
+  `subworkflows/local/seg_qc.nf` (called from `registration.nf`) feed it one manifest per moving
+  slide. **Stub run green at reg_qc=2** — emits the `native/rigid/refined`
   `_seg_qc.json`. Unit-tested through the real CLI `main()`.
 - **Slim container (done):** `containers/tiled/` (`python:3.11-slim` + numpy/scipy/scikit-image/
   tifffile, no JVM/libvips/GPU). **Built and verified locally** — the CLIs import and run

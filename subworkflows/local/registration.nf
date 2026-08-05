@@ -4,13 +4,9 @@
 ========================================================================================
 */
 
-include { GET_IMAGE_DIMS                    } from '../../modules/local/get_image_dims'
-include { MAX_DIM                           } from '../../modules/local/max_dim'
-include { PAD_IMAGES                        } from '../../modules/local/pad_images'
 include { GENERATE_REGISTRATION_QC          } from '../../modules/local/generate_registration_qc'
-include { SEG_QC_GEOJSON                    } from '../../modules/local/seg_qc_geojson'
-include { WARP_SEG_QC                       } from '../../modules/local/warp_seg_qc'
-include { WARP_SEG_QC_TILED                 } from '../../modules/local/warp_seg_qc_tiled'
+
+include { SEG_QC                            } from './seg_qc'
 
 include { VALIS_ADAPTER                     } from './adapters/valis_adapter'
 include { TILED_ADAPTER                     } from './adapters/tiled_adapter'
@@ -23,7 +19,6 @@ include { ESTIMATE_FEATURE_DISTANCES        } from '../../modules/local/estimate
     SUBWORKFLOW: REGISTRATION
 ========================================================================================
     Configuration:
-        - params.padding: true | false (optional padding per patient)
         - params.skip_registration_qc: true | false (skip QC generation)
         - params.qc_scale_factor: float (QC downsampling factor, default 0.25)
         - params.enable_feature_error: true | false (enable feature-based TRE)
@@ -59,40 +54,12 @@ workflow REGISTRATION {
 
     main:
     // ========================================================================
-    // STEP 1: OPTIONAL PADDING (per patient)
+    // STEP 1: Images enter registration as-is. Both backends align inputs of
+    // differing sizes natively (VALIS resolves them into a shared space; the
+    // tiled/STARE backend warps each moving slide into the reference's shape),
+    // so no common-canvas padding step is needed.
     // ========================================================================
-    if (params.padding) {
-        // Get dimensions for all images
-        GET_IMAGE_DIMS(ch_preprocessed)
-
-        // Group by patient and find max dimensions per patient
-        // Use groupKey for streaming - emits as soon as images_count items collected
-        ch_grouped_dims = GET_IMAGE_DIMS.out.dims
-            .map { meta, dims ->
-                def key = meta.images_count ? groupKey(meta.patient_id, meta.images_count) : meta.patient_id
-                [key, dims]
-            }
-            .groupTuple()
-            .map { key, dims_list ->
-                [ [patient_id: key.toString()], dims_list ]
-            }
-
-        MAX_DIM(ch_grouped_dims)
-
-        // MAX_DIM outputs [meta, max_dims_file]
-        // Combine each individual image with its patient's max_dims_file
-        ch_to_pad = ch_preprocessed
-            .map { meta, file -> [meta.patient_id, meta, file] }
-            .combine(MAX_DIM.out.max_dims_file.map { meta, f -> [meta.patient_id, f] }, by: 0)
-            .map { patient_id, meta, file, max_dims -> [meta, file, max_dims] }
-
-        PAD_IMAGES(ch_to_pad)
-        ch_images = PAD_IMAGES.out.padded
-        ch_images_for_error = ch_images.map { it }
-    } else {
-        ch_images = ch_preprocessed
-        ch_images_for_error = ch_images.map { it }
-    }
+    ch_images = ch_preprocessed
 
     // ========================================================================
     // STEP 2: GROUP BY PATIENT AND IDENTIFY REFERENCES
@@ -155,6 +122,20 @@ workflow REGISTRATION {
     }
     ch_grouped_multi = ch_grouped_split.multi
     ch_passthrough   = ch_grouped_split.single.map { pid, ref, items -> ref }  // [meta, file]
+
+    // Flattened back to [meta, file] for consumers (seg-QC) that segment individual slides
+    // rather than patient groups. Single-slide patients are excluded here on purpose: they
+    // have no moving slide to score against, so segmenting their reference would compute a
+    // full GPU StarDist WSI segmentation and discard it.
+    //
+    // NOTE: unlike the raw ch_preprocessed stream, `items` here comes out of the grouping
+    // closure above, so under allow_auto_reference=true it carries that closure's
+    // is_reference: true fill-in (registration.nf:100) for patients whose CSV marked no
+    // reference. seg_qc.nf's reference/moving branch reads meta.is_reference, so this
+    // channel is what lets an auto-reference multi-slide patient be scored at all — sourced
+    // from the raw stream, that patient's reference branch was empty and it silently
+    // produced zero seg-QC output.
+    ch_images_multi = ch_grouped_multi.flatMap { pid, ref, items -> items }
 
     // ========================================================================
     // STEP 3: RUN REGISTRATION VIA METHOD-SPECIFIC ADAPTER
@@ -251,66 +232,23 @@ workflow REGISTRATION {
     // then warp the polygons through the registrar and score overlap. Classic VALIS only
     // (needs the registrar pickle; distributed produces none).
     ch_seg_qc = Channel.empty()
+    // Per-cell registration residuals (final stage), for the SpatialData export.
+    ch_seg_residuals = Channel.empty()
     // Captured from whichever WARP process the method dispatches to, so the version/size-log
     // aggregation below never references a process that was not invoked in this run.
     ch_seg_qc_size_log = Channel.empty()
     ch_seg_qc_versions = Channel.empty()
+    // The whole block (segment natives -> branch -> checkpoint totalisation -> method-specific
+    // warp) lives in subworkflows/local/seg_qc.nf, shared with add_cycle.nf. The valis/tiled
+    // dispatch is SEG_QC's business, so nothing here reaches back through the adapter seam:
+    // the tiled-only and valis-only channels are handed over together and SEG_QC reads the
+    // ones its branch needs (the other side is Channel.empty() and is never consumed).
     if (do_seg_qc) {
-        SEG_QC_GEOJSON(ch_images_for_error)
-
-        ch_gj = SEG_QC_GEOJSON.out.geojson.branch { meta, gj ->
-            reference: meta.is_reference
-            moving:    !meta.is_reference
-        }
-        // reference: [patient_id, ref_geojson, ref_slide_name(=stem)]
-        ch_ref_gj = ch_gj.reference.map { meta, gj -> [meta.patient_id, gj, gj.simpleName] }
-        // moving: [patient_id, meta, moving_geojson, moving_slide_name]
-        ch_mov_gj = ch_gj.moving.map { meta, gj -> [meta.patient_id, meta, gj, gj.simpleName] }
-
-        if (params.registration_method == 'tiled') {
-            // Tiled: one manifest per moving slide (meta-keyed). Join it to the moving GeoJSON by
-            // (patient, sorted-channels) so each slide is scored against its own transform. No
-            // stage checkpoint (stages are separable by construction) and no JVM.
-            ch_manifest_keyed = ch_manifest_by_meta
-                .map { meta, m -> [meta.patient_id, meta.channels.toSorted().join('|'), m] }
-
-            ch_for_warp_tiled = ch_mov_gj
-                .map { pid, meta, gj, name -> [pid, meta.channels.toSorted().join('|'), meta, gj, name] }
-                .combine(ch_ref_gj, by: 0)
-                .combine(ch_manifest_keyed, by: [0, 1])
-                .map { _pid, _sig, meta, mov_gj, mov_name, ref_gj, ref_name, m ->
-                    tuple(meta, m, ref_name, mov_name, ref_gj, mov_gj)
-                }
-
-            WARP_SEG_QC_TILED(ch_for_warp_tiled)
-            ch_seg_qc = WARP_SEG_QC_TILED.out.metrics
-            ch_seg_qc_size_log = WARP_SEG_QC_TILED.out.size_log
-            ch_seg_qc_versions = WARP_SEG_QC_TILED.out.versions
-        } else {
-            // VALIS: one registrar pickle per patient. Exactly one stage-checkpoint entry per
-            // patient that has a pickle — the real directory where REGISTER wrote one, `[]` where
-            // it did not. Making it total matters: a plain combine on an optional channel silently
-            // DROPS the patients that lack it, removing them from the QC instead of costing a stage.
-            ch_ckpt_by_patient = ch_registrar_pickle
-                .map { pid, _pickle -> tuple(pid, []) }
-                .join(ch_stage_checkpoint, by: 0, remainder: true)
-                .map { pid, _placeholder, ckpt -> tuple(pid, ckpt ?: []) }
-
-            // Join each moving slide with its patient's reference GeoJSON, registrar pickle and
-            // stage checkpoint.
-            ch_for_warp = ch_mov_gj
-                .combine(ch_ref_gj, by: 0)
-                .combine(ch_registrar_pickle, by: 0)
-                .combine(ch_ckpt_by_patient, by: 0)
-                .map { pid, meta, mov_gj, mov_name, ref_gj, ref_name, pickle, ckpt ->
-                    tuple(meta, pickle, ref_name, mov_name, ref_gj, mov_gj, ckpt)
-                }
-
-            WARP_SEG_QC(ch_for_warp)
-            ch_seg_qc = WARP_SEG_QC.out.metrics
-            ch_seg_qc_size_log = WARP_SEG_QC.out.size_log
-            ch_seg_qc_versions = WARP_SEG_QC.out.versions
-        }
+        SEG_QC(ch_images_multi, ch_registrar_pickle, ch_stage_checkpoint, ch_manifest_by_meta)
+        ch_seg_qc          = SEG_QC.out.metrics
+        ch_seg_residuals   = SEG_QC.out.per_cell
+        ch_seg_qc_size_log = SEG_QC.out.size_log
+        ch_seg_qc_versions = SEG_QC.out.versions
     }
 
     // ========================================================================
@@ -329,14 +267,14 @@ workflow REGISTRATION {
             .filter { meta, file -> !meta.is_reference }
             .map { meta, reg_file -> [meta.patient_id, meta.channels.toSorted().join('|'), meta, reg_file] }
             .join(
-                ch_images_for_error
+                ch_images
                     .filter { meta, file -> !meta.is_reference }
                     .map { meta, mov_file -> [meta.patient_id, meta.channels.toSorted().join('|'), mov_file] },
                 by: [0, 1]
             )
             .map { patient_id, channels, meta, reg_file, mov_file -> [patient_id, meta, reg_file, mov_file] }
             .combine(
-                ch_images_for_error
+                ch_images
                     .filter { meta, file -> meta.is_reference }
                     .map { meta, ref_file -> [meta.patient_id, ref_file] },
                 by: 0
@@ -393,19 +331,12 @@ workflow REGISTRATION {
         .collectFile(
             name: 'registered.csv',
             newLine: true,
-            storeDir: "${params.outdir ?: launchDir}/csv",
+            storeDir: "${params.outdir}/csv",
             seed: 'patient_id,registered_image,is_reference,channels'
         )
 
     // Collect size logs from all registration processes
     ch_size_logs = Channel.empty()
-
-    // Add size logs from padding processes (if padding is enabled)
-    if (params.padding) {
-        ch_size_logs = ch_size_logs
-            .mix(GET_IMAGE_DIMS.out.size_log)
-            .mix(PAD_IMAGES.out.size_log)
-    }
 
     // Add size logs from the registration adapter
     ch_size_logs = ch_size_logs.mix(ch_adapter_logs)
@@ -414,10 +345,9 @@ workflow REGISTRATION {
     if (reg_qc_level >= 1) {
         ch_size_logs = ch_size_logs.mix(GENERATE_REGISTRATION_QC.out.size_log)
     }
+    // SEG_QC.out.size_log already carries SEG_QC_GEOJSON's log plus the warp process's.
     if (do_seg_qc) {
-        ch_size_logs = ch_size_logs
-            .mix(SEG_QC_GEOJSON.out.size_log)
-            .mix(ch_seg_qc_size_log)
+        ch_size_logs = ch_size_logs.mix(ch_seg_qc_size_log)
     }
 
     // Add size logs from error estimation (if enabled)
@@ -428,21 +358,14 @@ workflow REGISTRATION {
     // Collect versions from all registration processes
     ch_versions = Channel.empty()
 
-    if (params.padding) {
-        ch_versions = ch_versions
-            .mix(GET_IMAGE_DIMS.out.versions.first())
-            .mix(PAD_IMAGES.out.versions.first())
-    }
-
     ch_versions = ch_versions.mix(ch_adapter_versions)
 
     if (reg_qc_level >= 1) {
         ch_versions = ch_versions.mix(GENERATE_REGISTRATION_QC.out.versions.first())
     }
+    // SEG_QC.out.versions is already de-duplicated per process (.first() applied inside).
     if (do_seg_qc) {
-        ch_versions = ch_versions
-            .mix(SEG_QC_GEOJSON.out.versions.first())
-            .mix(ch_seg_qc_versions.first())
+        ch_versions = ch_versions.mix(ch_seg_qc_versions)
     }
     if (params.enable_feature_error) {
         ch_versions = ch_versions.mix(ESTIMATE_FEATURE_DISTANCES.out.versions.first())
@@ -453,6 +376,7 @@ workflow REGISTRATION {
     checkpoint_csv   = ch_checkpoint_csv
     qc               = ch_qc
     seg_qc           = ch_seg_qc
+    seg_residuals    = ch_seg_residuals
     error_metrics    = ch_error_metrics
     distance_plots   = ch_distance_plots
     valis_summary    = ch_adapter_summary

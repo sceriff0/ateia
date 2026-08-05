@@ -18,6 +18,7 @@ htmlcov/
 # Nextflow runtime
 .nextflow/
 .nextflow.log*
+.nextflow-plugins/
 work/
 results/
 test_results*/
@@ -126,18 +127,19 @@ tests/testdata/test_input.csv
 tests/testdata/sample_merged_quant.csv
 tests/testdata/empty_samplesheet.csv
 tests/testdata/single_sample.csv
+tests/testdata/whitespace_patient_id.csv
 tests/testdata/sample_DAPI_intensity.csv
 tests/testdata/sample_PANCK_intensity.csv
 tests/testdata/sample_SMA_intensity.csv
 tests/testdata/sample_max_dims.txt
 tests/testdata/sample_dims.txt
 tests/testdata/sample_features.json
-tests/testdata/sample_phenotype_mapping.json
-tests/testdata/sample_phenotypes.geojson
 tests/testdata/sample_feature_metrics.json
 tests/testdata/sample_channels.txt
 tests/testdata/sample_contours.json
 tests/testdata/sample_morphology.csv
+tests/testdata/sample_reg_qc.json
+tests/testdata/sample_reg_residuals.csv
 tests/testdata/sample_DAPI.tif
 tests/testdata/sample_PANCK.tif
 tests/testdata/sample_SMA.tif

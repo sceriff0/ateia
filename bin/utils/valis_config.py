@@ -44,7 +44,7 @@ MEMORY_PRESETS = {
 def build_registrar_kwargs(
     reference_img_f,
     memory_mode="high",
-    micro_reg=0,
+    micro_reg=2,
     max_image_dim_px=4000,
 ):
     """Return the exact kwargs dict passed to `registration.Valis(...)` by classic register.py.

@@ -33,7 +33,7 @@ the HPC/cluster side (unlike GHCR, whose default-private packages caused
 | Build context (`containers/<name>/`) | Docker Hub image:tag | Pipeline process(es) that use it | Source / base image |
 | --- | --- | --- | --- |
 | `bioformats` | `bolt3x/attend_image_analysis:convert_bioformats_2` | `CONVERT_IMAGE` | `eclipse-temurin:21-jre-jammy` + Glencoe `bioformats2raw` 0.12.0 / `raw2ometiff` 0.10.0 + `tifffile`/`numpy` |
-| `preprocess` | `bolt3x/attend_image_analysis:preprocess` | `PREPROCESS`, `GENERATE_PREPROCESS_QC`, `GENERATE_QC_REPORT`, `GET_IMAGE_DIMS`, `MAX_DIM`, `PAD_IMAGES`, `SPLIT_CHANNELS` (7 modules) | `ubuntu:22.04` + Python 3.11 + BaSiCPy/JAX(cpu)/scikit-image illumination-correction stack |
+| `preprocess` | `bolt3x/attend_image_analysis:preprocess` | `PREPROCESS`, `GENERATE_PREPROCESS_QC`, `GENERATE_QC_REPORT`, `SPLIT_CHANNELS` (4 modules) | `ubuntu:22.04` + Python 3.11 + BaSiCPy/JAX(cpu)/scikit-image illumination-correction stack |
 | `quantification` | `bolt3x/attend_image_analysis:quantification_gpu` | `QUANTIFY`, `EXTRACT_CELL_PROPERTIES`, `EXTRACT_NUCLEI_PROPERTIES`, `EXPORT_GEOJSON`, `GENERATE_POSTPROCESSING_QC` (+ `quantify.nf` second container directive) (6 modules) | `nvidia/cuda:12.2.2-devel-ubuntu22.04` + cupy/cucim GPU quantification stack |
 | `segmentation` | `bolt3x/attend_image_analysis:segmentation_gpu` | `SEGMENT` (default backend, `params.seg_method` = stardist) | `tensorflow/tensorflow:2.15.0-gpu-jupyter` + StarDist 0.9.1 / Cellpose 3.1.1.1 |
 | `cellsam` | `bolt3x/attend_image_analysis:cellsam` | `SEGMENT` (`params.seg_method` = `cellsam`) | `pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime` + `cellSAM` (git) |
@@ -42,7 +42,14 @@ the HPC/cluster side (unlike GHCR, whose default-private packages caused
 | `debug_diffeo` | `bolt3x/attend_image_analysis:debug_diffeo` | `GENERATE_REGISTRATION_QC` | `nvidia/cuda:12.2.2-cudnn8-devel-ubuntu22.04` + Miniconda/bftools + StarDist/cudipy diffeo QC stack |
 | `segeval` | `bolt3x/attend_image_analysis:segeval` | `SEG_QUALITY_EVAL`, `MERGE_SEG_EVAL` | `python:3.11-slim` + numpy/scipy/pandas/scikit-image/scikit-learn/aicsimageio/tifffile/xmltodict (vendored CSE metrics) |
 | `tiled` | `bolt3x/attend_image_analysis:tiled` | `TILED_REGISTER`, `WARP_SEG_QC_TILED` (STARE `registration_method='tiled'`) | `python:3.11-slim` + numpy/scipy/scikit-image/tifffile — **no JVM/BioFormats/libvips/GPU** (~438 MB, vs the multi-GB VALIS image) |
+| `spatialdata` | `bolt3x/attend_image_analysis:spatialdata` | `EXPORT_SPATIALDATA` (+ the out-of-band `bin/join_flowpath.py` cohort join) | `python:3.11-slim` + spatialdata/anndata/geopandas/zarr 3 — CPU only, no JVM/GPU |
 | VALIS (not vendored) | `cdgatenbee/valis-wsi:1.0.0` (upstream) | `REGISTER`, `ESTIMATE_FEATURE_DISTANCES` | upstream maintained image — **not rebuilt or published by us** (see note below) |
+
+> **zarr major versions differ on purpose.** `spatialdata` pins `zarr>=3.0.0`
+> (required by `spatialdata>=0.8.0`, which writes NGFF `"0.5-dev-spatialdata"`),
+> while `tiled` pins `zarr==2.18.3` for `tifffile`'s `aszarr` region reads. Keeping
+> them in separate images is what lets both constraints hold without either being
+> downgraded.
 
 > The context directory name `istantseg` (a historical typo) is preserved
 > verbatim so it matches the upstream build context and the legacy DockerHub tag

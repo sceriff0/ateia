@@ -9,10 +9,11 @@ This page gets MIRAGE running on your machine — laptop, workstation, or HPC lo
 
 | Requirement | Version / detail | Notes |
 |---|---|---|
-| **Nextflow** | `>=25.04.0` | Uses the `nf-boost` plugin; older versions will not run. |
+| **Nextflow** | `>=25.04.0` | Uses the `nf-schema@2.5.1` plugin; older versions will not run. |
 | **Java** | 11 or newer | Required by Nextflow. Check with `java -version`. |
 | **Container backend** | one of Singularity/Apptainer, Docker, or Conda | Singularity recommended on HPC; Docker for local/dev. |
 | **Free disk** | ~10 GB | For container images plus intermediate outputs. |
+| **Network access on first run** | outbound access to the Nextflow plugin registry | Nextflow fetches `nf-schema` from the registry the first time the pipeline runs. On a network-isolated compute node, pre-provision the plugin first — see [Offline / air-gapped execution](usage.md#offline-air-gapped-execution). |
 
 !!! warning "Nextflow version matters"
     MIRAGE requires Nextflow **25.04.0 or later**. If `nextflow -version` reports something older, update it (next section) before doing anything else.

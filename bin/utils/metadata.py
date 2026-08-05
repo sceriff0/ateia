@@ -12,7 +12,7 @@ Examples
 Notes
 -----
 This module consolidates metadata extraction logic used by register.py,
-split_multichannel.py, and pad_image.py.
+split_multichannel.py, convert_image.py, and segment_to_geojson.py.
 """
 
 from __future__ import annotations
@@ -26,7 +26,45 @@ import tifffile
 
 __all__ = [
     "extract_channel_names_from_ome",
+    "pick_nuclear_index",
+    "DEFAULT_NUCLEAR_MARKERS",
 ]
+
+# Ordered preference for the nuclear/fiducial channel (the marker used to drive
+# both cell segmentation and the registration fiducial). The first marker that
+# matches any channel name wins. Mirrors params.nuclear_markers in nextflow.config.
+DEFAULT_NUCLEAR_MARKERS = ("DAPI", "CELLTOX")
+
+
+def pick_nuclear_index(channel_names, nuclear_markers=None):
+    """Index of the nuclear/fiducial channel, resolved by marker name.
+
+    Channel identity comes from metadata (OME ``Channel:Name`` or the declared
+    channel names), never from the filename. Markers are tried in order; the first
+    marker that matches any channel (case-insensitive substring) wins, and that
+    channel's index is returned.
+
+    Parameters
+    ----------
+    channel_names : list of str
+        Channel names in image/channel order.
+    nuclear_markers : sequence of str, optional
+        Ordered preference list of nuclear marker names. Defaults to
+        ``DEFAULT_NUCLEAR_MARKERS`` (``('DAPI', 'CELLTOX')``).
+
+    Returns
+    -------
+    int or None
+        Index of the first matching channel, or ``None`` if no marker matches.
+    """
+    markers = list(nuclear_markers) if nuclear_markers else list(DEFAULT_NUCLEAR_MARKERS)
+    names = [str(n).upper() for n in (channel_names or [])]
+    for marker in markers:
+        needle = str(marker).upper()
+        for i, name in enumerate(names):
+            if needle in name:
+                return i
+    return None
 
 
 def extract_channel_names_from_ome(filepath: str | Path) -> List[str]:
