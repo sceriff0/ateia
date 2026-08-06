@@ -23,7 +23,13 @@ process CONVERT_IMAGE {
     def prefix = task.ext.prefix ?: (meta.id ?: meta.patient_id)
     def pixel_size = params.pixel_size
     def channels = meta.channels.join(',')
-    def nuclear_markers = params.nuclear_markers.join(' ')
+    // Through MarkerUtils, like every other consumer. params.nuclear_markers is a List
+    // in nextflow.config but a bare String for `--nuclear_markers CELLTOX` on the command
+    // line, and "CELLTOX".join(' ') does NOT throw -- it dispatches to Java's static
+    // String.join(CharSequence, CharSequence...) with zero varargs and returns the EMPTY
+    // string, so the rendered command carries a bare `--nuclear-markers` and fails
+    // convert_image.py's nargs="+" with exit 2 halfway through the run.
+    def nuclear_markers = MarkerUtils.markerList(params.nuclear_markers).join(' ')
     """
     # Log input size for tracing (-L follows symlinks)
     input_bytes=\$(stat -L --printf="%s" ${image_file} 2>/dev/null || echo 0)

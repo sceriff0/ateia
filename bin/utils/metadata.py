@@ -18,6 +18,7 @@ split_multichannel.py, convert_image.py, and segment_to_geojson.py.
 from __future__ import annotations
 
 import logging
+import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import List
@@ -44,9 +45,19 @@ DEFAULT_NUCLEAR_MARKERS = ("DAPI", "CELLTOX")
 
 
 def _resolve_markers(nuclear_markers):
-    """The configured markers, trimmed and upper-cased, or the default mirror."""
+    """The configured markers, trimmed and upper-cased, or the default mirror.
+
+    Each element is also split on commas and whitespace, mirroring
+    ``lib/MarkerUtils.groovy``'s ``markerList``. A single ``"DAPI,CELLTOX"`` element is
+    a marker that matches NO channel, and the failure is silent in both languages --
+    every channel is classified non-nuclear, the nuclear channel is never dropped from
+    moving slides, and the pre-computed group sizes are wrong with no error anywhere.
+    """
     markers = [
-        str(m).strip().upper() for m in (nuclear_markers or ()) if str(m).strip()
+        part.upper()
+        for m in (nuclear_markers or ())
+        for part in re.split(r"[,\s]+", str(m).strip())
+        if part
     ]
     return markers or [str(m).upper() for m in DEFAULT_NUCLEAR_MARKERS]
 

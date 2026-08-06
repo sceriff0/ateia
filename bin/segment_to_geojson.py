@@ -24,14 +24,13 @@ def find_nuclear_index(image_path, nuclear_markers=None) -> int:
     path are CONVERT_IMAGE output, where the nuclear channel is already normalized
     to channel 0.
     """
-    from utils.metadata import (
-        DEFAULT_NUCLEAR_MARKERS,
-        extract_channel_names_from_ome,
-        pick_nuclear_index,
-    )
+    from utils.metadata import extract_channel_names_from_ome, pick_nuclear_index
 
     names = extract_channel_names_from_ome(image_path)
-    idx = pick_nuclear_index(names, nuclear_markers or DEFAULT_NUCLEAR_MARKERS)
+    # pick_nuclear_index already falls back to DEFAULT_NUCLEAR_MARKERS when the list is
+    # empty; naming the constant a second time here only created another place for the
+    # fallback to drift. SEG_QC_GEOJSON now passes params.nuclear_markers explicitly.
+    idx = pick_nuclear_index(names, nuclear_markers)
     return idx if idx is not None else 0
 
 
@@ -42,6 +41,7 @@ def segment_to_geojson(
     model_name,
     use_gpu=False,
     dapi_channel=None,
+    nuclear_markers=None,
     pmin=1.0,
     pmax=99.8,
     n_tiles=(1, 1),
@@ -56,7 +56,11 @@ def segment_to_geojson(
     import mask_to_geojson
     import segment
 
-    idx = dapi_channel if dapi_channel is not None else find_nuclear_index(image_path)
+    idx = (
+        dapi_channel
+        if dapi_channel is not None
+        else find_nuclear_index(image_path, nuclear_markers)
+    )
     dapi, _ = segment.extract_dapi_channel(str(image_path), idx)
     normalized = segment.normalize_dapi(dapi, pmin=pmin, pmax=pmax)
     model = segment.load_stardist_model(model_dir, model_name, use_gpu=use_gpu)
@@ -88,6 +92,14 @@ def parse_args(argv=None):
         default=None,
         help="DAPI channel index; auto-detected from OME channel names if omitted",
     )
+    ap.add_argument(
+        "--nuclear-markers",
+        nargs="+",
+        default=None,
+        help="Marker names identifying the nuclear channel, used when --dapi-channel is "
+        "omitted. SEG_QC_GEOJSON always passes params.nuclear_markers; the default is "
+        "only for standalone use.",
+    )
     ap.add_argument("--model-dir", default=None)
     ap.add_argument("--model-name", required=True)
     ap.add_argument("--use-gpu", action="store_true")
@@ -110,6 +122,7 @@ def main(argv=None):
         a.model_name,
         use_gpu=a.use_gpu,
         dapi_channel=a.dapi_channel,
+        nuclear_markers=a.nuclear_markers,
         pmin=a.pmin,
         pmax=a.pmax,
         n_tiles=tuple(a.n_tiles),

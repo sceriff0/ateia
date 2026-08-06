@@ -27,26 +27,37 @@ class MarkerUtils {
     /**
      * The configured markers, trimmed and upper-cased.
      *
-     * Accepts BOTH shapes `params.nuclear_markers` can arrive in: the List declared in
-     * nextflow.config, and the bare String Nextflow produces for a command-line
-     * `--nuclear_markers CELLTOX` (or `--nuclear_markers DAPI,CELLTOX`). Without that
-     * coercion a String would be iterated CHARACTER by character and every channel
-     * containing one of its letters would be classified nuclear — 'PANCK' would match
-     * the 'C' of 'CELLTOX'.
+     * THIS IS THE ONLY WAY TO READ params.nuclear_markers. Every consumer goes through
+     * it (tests/test_nuclear_marker_routing.py enforces that mechanically), because the
+     * parameter arrives in three different shapes and two of them break silently:
+     *
+     *   ['DAPI','CELLTOX']  nextflow.config / a params file      - the intended shape
+     *   'CELLTOX'           `--nuclear_markers CELLTOX` on the CLI (nextflow_schema.json
+     *                       permits a string; an array cannot be given on a command line)
+     *   ['DAPI,CELLTOX']    a params file with the list written as one comma string
+     *
+     * The bare String, iterated as a List, yields the CHARACTERS C,E,L,L,T,O,X, so
+     * 'PANCK' matches on 'C' and is classified nuclear. The one-element comma string is
+     * worse: it is a valid Collection, so nothing coerces it, and the single marker
+     * 'DAPI,CELLTOX' matches NO channel -- every channel is silently non-nuclear, the
+     * nuclear channel is never dropped from moving slides, and the pre-computed group
+     * sizes are wrong with no error anywhere. Splitting EVERY element on commas and
+     * whitespace closes both.
      *
      * Throws rather than assuming a default, so a missing/empty params.nuclear_markers
      * is loud instead of silently classifying every channel as non-nuclear.
      */
     static List<String> markerList(def nuclearMarkers) {
         def raw
-        if (nuclearMarkers == null)                     raw = []
-        else if (nuclearMarkers instanceof CharSequence) raw = nuclearMarkers.toString().split(/[,\s]+/) as List
+        if (nuclearMarkers == null)                      raw = []
+        else if (nuclearMarkers instanceof CharSequence) raw = [nuclearMarkers]
         else if (nuclearMarkers instanceof Object[])     raw = nuclearMarkers as List
         else if (nuclearMarkers instanceof Collection)   raw = nuclearMarkers as List
         else                                             raw = [nuclearMarkers]
 
         def markers = raw
-            .collect { it?.toString()?.trim()?.toUpperCase() }
+            .collectMany { it == null ? [] : it.toString().split(/[,\s]+/) as List }
+            .collect { it?.trim()?.toUpperCase() }
             .findAll { it }
         if (!markers)
             throw new IllegalArgumentException(
