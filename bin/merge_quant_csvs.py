@@ -21,22 +21,14 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
 from logger import configure_logging, get_logger
+from measurements import MORPHOLOGY_COLS
 
 logger = get_logger(__name__)
 
-# Canonical morphology column order
-MORPHOLOGY_COLS = [
-    "label",
-    "y",
-    "x",
-    "area",
-    "eccentricity",
-    "perimeter",
-    "convex_area",
-    "axis_major_length",
-    "axis_minor_length",
-    "solidity",
-]
+# Canonical morphology column order (single source of truth:
+# bin/utils/measurements.py). Kept as a list here since reorder_columns
+# below iterates it to build an ordered column selection.
+MORPHOLOGY_COLS = list(MORPHOLOGY_COLS)
 
 
 def load_intensity_csvs(
@@ -128,11 +120,7 @@ def reorder_columns(merged: pd.DataFrame, patient_id: str) -> pd.DataFrame:
     """Reorder columns and add fov/cell_size for downstream analysis."""
     # Separate morphology and marker columns
     morpho_present = [col for col in MORPHOLOGY_COLS if col in merged.columns]
-    marker_cols_all = [
-        col
-        for col in merged.columns
-        if col not in MORPHOLOGY_COLS and col not in ("fov", "cell_size")
-    ]
+    marker_cols_all = [col for col in merged.columns if col not in MORPHOLOGY_COLS]
 
     # Put DAPI first among markers if present
     if "DAPI" in marker_cols_all:

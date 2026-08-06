@@ -43,24 +43,14 @@ from skimage.segmentation import find_boundaries
 sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
 from logger import configure_logging, get_logger
+from measurements import MORPHOLOGY_COLS
 
 __all__ = ["main", "generate_postprocessing_qc"]
 
 # Morphology columns that should not appear in intensity distribution plots
-MORPHOLOGY_COLUMNS = {
-    "label",
-    "y",
-    "x",
-    "area",
-    "eccentricity",
-    "perimeter",
-    "convex_area",
-    "axis_major_length",
-    "axis_minor_length",
-    "solidity",
-    "fov",
-    "cell_size",
-}
+# (single source of truth: bin/utils/measurements.py). Wrapped in a set here
+# since this module does membership tests in a loop.
+MORPHOLOGY_COLUMNS = set(MORPHOLOGY_COLS)
 
 
 def load_mask(mask_path: Path) -> np.ndarray:
