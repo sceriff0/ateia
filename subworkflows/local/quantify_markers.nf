@@ -21,8 +21,9 @@
 
 include { QUANTIFY } from '../../modules/local/quantify'
 
-// Local copy of postprocess.nf's debug helper: the `.view()` calls below moved in
-// with the chain they annotate. Off unless --debug_channels, and log-only either way.
+// The pipeline's only --debug_channels view helper. It used to be duplicated in
+// postprocess.nf; that copy went with the chain its `.view()` calls annotate, so there
+// is one implementation and one caller file. Off unless --debug_channels, log-only.
 def viewIfDebug(channel, Closure formatter) {
     return params.debug_channels ? channel.view(formatter) : channel
 }
@@ -34,7 +35,12 @@ workflow QUANTIFY_MARKERS {
 
     main:
 
-    ch_flatmapped = ch_split_channels
+    ch_split_viewed = viewIfDebug(
+        ch_split_channels,
+        { meta, tiffs -> "SPLIT_CHANNELS output: patient=${meta.patient_id}, tiffs=${tiffs*.name}" }
+    )
+
+    ch_flatmapped = ch_split_viewed
         .flatMap { meta, tiffs ->
             // Ensure tiffs is always a list (handle both single file and multiple files)
             def tiff_list = tiffs instanceof List ? tiffs : [tiffs]
@@ -90,16 +96,22 @@ workflow QUANTIFY_MARKERS {
     // Deduplicate by patient_id + marker (take first occurrence if same marker appears multiple times)
     // Use groupKey for streaming - emits as soon as channels_count items collected
     //
-    // `remainder: true` is what makes the sized key a HINT rather than an assertion.
-    // channels_count is the patient's DISTINCT channel count from the samplesheet
-    // (CsvUtils.countChannelsPerPatient). On the linear path that equals the number of
-    // QUANTIFY tasks exactly, so every group fills and streams early. In add_cycle it
-    // does NOT: SPLIT_CHANNELS drops DAPI from a non-reference slide, so a new cycle
-    // declared `DAPI|KI67|CD20` quantifies 2 markers against a channels_count of 3.
-    // groupTuple discards under-sized groups by default, which silently deletes the
-    // patient from the merge/export. With remainder the group is emitted when the
-    // upstream channel completes — exactly what add_cycle's former bare .groupTuple()
-    // did — while a group that does reach its size still emits early.
+    // channels_count is EXACT for both callers: CsvUtils.countChannelsPerPatient applies
+    // MarkerUtils.splitOutputChannels, the same rule SPLIT_CHANNELS applies, so it counts
+    // the markers that actually reach QUANTIFY rather than the channels the samplesheet
+    // declares. (It used to union declared channels with no reference awareness, which
+    // over-counted a reference-less add_cycle sheet by exactly its dropped nuclear
+    // channel — the group could then never fill.)
+    //
+    // `remainder: true` is kept anyway, as a safety net against a future miscount rather
+    // than as load-bearing logic: with it a wrong count degrades to "late but complete"
+    // instead of "silently dropped", which is the better failure mode. The identical
+    // grouping in postprocess.nf (ch_split_grouped, built from the same channels_count)
+    // carries it for the same reason — the two must not diverge again.
+    // NOTE the residual asymmetry: remainder makes an OVER-count harmless, but an
+    // UNDER-count now emits at size and then emits the surplus as a SECOND group, so a
+    // per-patient consumer would run twice. Over-counting is the safe direction, which
+    // is why countChannelsPerPatient errs high whenever it cannot be certain.
     // ========================================================================
     ch_grouped_csvs = QUANTIFY.out.individual_csv
         .map { meta, csv ->

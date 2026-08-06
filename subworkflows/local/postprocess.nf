@@ -19,10 +19,6 @@ include { EXPORT_SPATIALDATA } from '../../modules/local/export_spatialdata'
 include { QUANTIFY_MARKERS         } from './quantify_markers'
 include { ASSEMBLE_EXPORT          } from './assemble_export'
 
-def withDebugView(channel, Closure formatter) {
-    return params.debug_channels ? channel.view(formatter) : channel
-}
-
 /*
 ========================================================================================
     SUBWORKFLOW:POSTPROCESSING
@@ -98,11 +94,6 @@ workflow POSTPROCESSING {
     // ========================================================================
     // QUANTIFICATION - Join channels with their patient's mask
     // ========================================================================
-    ch_split_output = withDebugView(
-        SPLIT_CHANNELS.out.channels,
-        { meta, tiffs -> "SPLIT_CHANNELS output: patient=${meta.patient_id}, tiffs=${tiffs*.name}" }
-    )
-
     // Carry BOTH masks (cell + nuclei) keyed by patient_id. The nuclear mask is
     // always available from SEGMENT; QUANTIFY only uses it when
     // params.quantify_compartments is set (per-compartment signal). The same pair
@@ -113,7 +104,9 @@ workflow POSTPROCESSING {
 
     // Per-marker fan-out + QUANTIFY + per-patient grouping (with the groupKey
     // streaming hint) all live in QUANTIFY_MARKERS, shared with add_cycle.nf.
-    QUANTIFY_MARKERS(ch_split_output, ch_mask)
+    // The --debug_channels views for this whole chain moved there with it, so this
+    // file no longer carries a debug-view helper of its own.
+    QUANTIFY_MARKERS(SPLIT_CHANNELS.out.channels, ch_mask)
     ch_grouped_csvs = QUANTIFY_MARKERS.out.grouped_csv
 
     // Join grouped intensity CSVs with morphology.csv from EXTRACT_CELL_PROPERTIES
@@ -168,6 +161,14 @@ workflow POSTPROCESSING {
     // SPLIT_CHANNELS already handles DAPI filtering correctly
     // Deduplicate by patient_id + marker to avoid duplicate channel names
     // Use groupKey for streaming - emits as soon as channels_count items collected
+    //
+    // `remainder: true` for the same reason as QUANTIFY_MARKERS' grouping, which is built
+    // from the same channels_count: a wrong count must degrade to "late but complete"
+    // rather than "silently dropped". Keeping only one of the two groupings total would
+    // be worse than keeping neither — the patient would reach geojson/ and
+    // quantification/ but not the pyramid, and so be missing from csv/postprocessed.csv,
+    // half-published and invisible to any later --start postprocessing or add_cycle run.
+    // These two must keep identical semantics.
     ch_split_grouped = SPLIT_CHANNELS.out.channels
         .flatMap { meta, tiffs ->
             // Normalize to List and create entries keyed by [patient_id, marker]
@@ -185,7 +186,7 @@ workflow POSTPROCESSING {
                 : patient_id
             [gkey, tiff]
         }
-        .groupTuple(by: 0)
+        .groupTuple(by: 0, remainder: true)
         .map { patient_id, tiffs ->
             // Create patient-level metadata
             // Extract actual patient_id from groupKey wrapper

@@ -27,6 +27,13 @@
                              the arguments, so the placeholder is never read.
       - `ch_pyramid_masks` — [patient_id, cell_mask, nuclei_mask]: freshly segmented in
                              POSTPROCESSING, reused from the prior run in add_cycle.
+
+    One deliberate normalisation: the embed_masks gate below joins ch_pyramid_masks with
+    `join(by: 0)`, which is what POSTPROCESSING's copy did; add_cycle's copy used
+    `combine(by: 0)`. Both channels carry exactly one entry per patient, so at the
+    reachable cardinality the two operators are equivalent — but join is the stricter of
+    the pair (a duplicate mask entry would fan out under combine and error under join),
+    so the shared version keeps join.
 ========================================================================================
 */
 
