@@ -1,0 +1,163 @@
+/*
+ * FINAL_QC — the end-of-run aggregation, shared by the linear path and by
+ * add_cycle. Both used to carry their own copy of it ("Mirrors the standard-path
+ * aggregation below").
+ *
+ * The contract under test is that ONE module serves both callers even though they
+ * contribute different sets of artifact kinds: add_cycle has no preprocess_qc, no
+ * valis_summary and no postprocess_qc. If the missing kinds were not defaulted to
+ * an empty list inside the module, `.collect()` on an empty channel would simply
+ * never emit and GENERATE_QC_REPORT would silently never run — a green pipeline
+ * with no report. Hence the explicit task-count assertions rather than
+ * `assert workflow.success` alone.
+ */
+nextflow_workflow {
+
+    name "Test FINAL_QC subworkflow (stub)"
+    script "subworkflows/local/final_qc.nf"
+    workflow "FINAL_QC"
+
+    test("standard path: every artifact kind present -> one report, one size rollup") {
+        tag "stub"
+        options "-stub"
+
+        when {
+            workflow {
+                """
+                input[0] = Channel.of(
+                    ['preprocess_qc',   file('$projectDir/tests/testdata/sample_DAPI.tif')],
+                    ['registration_qc', file('$projectDir/tests/testdata/sample_PANCK.tif')],
+                    ['valis_summary',   file('$projectDir/tests/testdata/sample_valis_summary.csv')],
+                    ['postprocess_qc',  file('$projectDir/tests/testdata/sample_SMA.tif')],
+                    ['seg_qc',          file('$projectDir/tests/testdata/sample_seg_qc.json')],
+                    ['versions',        file('$projectDir/tests/testdata/sample_versions.yml')],
+                    ['size_log',        file('$projectDir/tests/testdata/sample_size_log1.csv')],
+                    ['size_log',        file('$projectDir/tests/testdata/sample_size_log2.csv')]
+                )
+                input[1] = Channel.value([stop: 'postprocessing', patients: [P001: 2], channels: [P001: 5]])
+                """
+            }
+            params {
+                outdir = "$outputDir"
+                skip_final_qc_report = false
+                enable_trace = true
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.contains('GENERATE_QC_REPORT') }.size() == 1 },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.contains('AGGREGATE_SIZE_LOGS') }.size() == 1 },
+                { assert path("$outputDir/qc").list().any { it.toString().contains('mirage_qc_report_') } }
+            )
+        }
+    }
+
+    test("add_cycle path: only the kinds add_cycle emits -> the same single report") {
+        tag "stub"
+        options "-stub"
+
+        when {
+            workflow {
+                """
+                // No preprocess_qc / valis_summary / postprocess_qc: ADD_CYCLE re-uses
+                // the prior segmentation and does not re-expose PREPROCESSING's QC.
+                input[0] = Channel.of(
+                    ['registration_qc', file('$projectDir/tests/testdata/sample_PANCK.tif')],
+                    ['seg_qc',          file('$projectDir/tests/testdata/sample_seg_qc.json')],
+                    ['versions',        file('$projectDir/tests/testdata/sample_versions.yml')],
+                    ['size_log',        file('$projectDir/tests/testdata/sample_size_log1.csv')]
+                )
+                input[1] = Channel.value([stop: 'add_cycle', patients: [P001: 1], channels: [P001: 2]])
+                """
+            }
+            params {
+                outdir = "$outputDir"
+                mode = 'add_cycle'
+                skip_final_qc_report = false
+                enable_trace = true
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                // Same module, same arity, one invocation — the three absent kinds are
+                // defaulted inside FINAL_QC, not padded at the call site.
+                { assert workflow.trace.tasks().findAll {
+                    it.name.contains('GENERATE_QC_REPORT') }.size() == 1 },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.contains('AGGREGATE_SIZE_LOGS') }.size() == 1 },
+                { assert path("$outputDir/qc").list().any { it.toString().contains('mirage_qc_report_') } }
+            )
+        }
+    }
+
+    test("--skip_final_qc_report suppresses the report but not the size rollup") {
+        tag "stub"
+        options "-stub"
+
+        when {
+            workflow {
+                """
+                input[0] = Channel.of(
+                    ['versions', file('$projectDir/tests/testdata/sample_versions.yml')],
+                    ['size_log', file('$projectDir/tests/testdata/sample_size_log1.csv')]
+                )
+                input[1] = Channel.value([stop: 'postprocessing', patients: [P001: 2], channels: [P001: 5]])
+                """
+            }
+            params {
+                outdir = "$outputDir"
+                skip_final_qc_report = true
+                enable_trace = true
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.contains('GENERATE_QC_REPORT') }.size() == 0 },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.contains('AGGREGATE_SIZE_LOGS') }.size() == 1 }
+            )
+        }
+    }
+
+    test("--enable_trace false suppresses the size rollup but not the report") {
+        tag "stub"
+        options "-stub"
+
+        when {
+            workflow {
+                """
+                input[0] = Channel.of(
+                    ['versions', file('$projectDir/tests/testdata/sample_versions.yml')],
+                    ['size_log', file('$projectDir/tests/testdata/sample_size_log1.csv')]
+                )
+                input[1] = Channel.value([stop: 'postprocessing', patients: [P001: 2], channels: [P001: 5]])
+                """
+            }
+            params {
+                outdir = "$outputDir"
+                skip_final_qc_report = false
+                enable_trace = false
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.contains('GENERATE_QC_REPORT') }.size() == 1 },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.contains('AGGREGATE_SIZE_LOGS') }.size() == 0 }
+            )
+        }
+    }
+
+}

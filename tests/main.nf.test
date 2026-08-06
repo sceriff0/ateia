@@ -612,4 +612,126 @@ nextflow_pipeline {
         }
     }
 
+    //==========================================================================
+    // ROUTER SHAPE — one input read, one QC aggregation
+    //==========================================================================
+
+    /*
+     * The router used to carry TWO copies of the end-of-run aggregation (the
+     * add_cycle copy was introduced as "Mirrors the standard-path aggregation
+     * below"). Both paths now go through subworkflows/local/final_qc.nf, so the
+     * QC report must come from exactly one call site — and the fully-qualified
+     * task name is the evidence of which one. Asserting only that a report exists
+     * would still pass if a second, differently-fed aggregation reappeared and
+     * overwrote it.
+     */
+    test("Should aggregate QC exactly once, through FINAL_QC - stub") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                input = "$projectDir/tests/testdata/test_input.csv"
+                outdir = "$outputDir"
+                start = "preprocessing"
+
+                max_cpus = 2
+                max_memory = '6.GB'
+                seg_gpu = false
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.startsWith('MIRAGE:FINAL_QC:GENERATE_QC_REPORT') }.size() == 1 },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.contains('GENERATE_QC_REPORT') }.size() == 1 },
+                // --enable_trace defaults true, so the size rollup is the other half
+                // of FINAL_QC and must also run exactly once.
+                { assert workflow.trace.tasks().findAll {
+                    it.name.startsWith('MIRAGE:FINAL_QC:AGGREGATE_SIZE_LOGS') }.size() == 1 },
+                { assert path("$outputDir/qc").list().any {
+                    it.toString().contains('mirage_qc_report_') } },
+                { assert path("$outputDir/size_logs/input_sizes.csv").exists() }
+            )
+        }
+    }
+
+    /*
+     * FINAL_QC is now invoked unconditionally; the two gates live inside it. A run
+     * that wants neither half must still complete cleanly rather than hang on an
+     * unconsumed artifact channel.
+     */
+    test("Should complete with no report and no size rollup when both are off - stub") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                input = "$projectDir/tests/testdata/test_input.csv"
+                outdir = "$outputDir"
+                start = "preprocessing"
+                skip_final_qc_report = true
+                enable_trace = false
+
+                max_cpus = 2
+                max_memory = '6.GB'
+                seg_gpu = false
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.contains('GENERATE_QC_REPORT') }.size() == 0 },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.contains('AGGREGATE_SIZE_LOGS') }.size() == 0 },
+                // The rest of the pipeline is unaffected.
+                { assert path("$outputDir/csv/postprocessed.csv").exists() }
+            )
+        }
+    }
+
+    /*
+     * The samplesheet is read exactly once, by INPUT_CHECK, with the column fixed
+     * by --start. Starting mid-pipeline must read the checkpoint's own column
+     * (registered_image here) — reading path_to_file instead would fail at launch
+     * rather than silently, but only if the mapping stays in step with --start.
+     */
+    test("Should read the entry step's image column, once - stub") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                input = "$projectDir/tests/testdata/valid_checkpoint_postprocessing.csv"
+                outdir = "$outputDir"
+                start = "postprocessing"
+
+                max_cpus = 2
+                max_memory = '6.GB'
+                seg_gpu = false
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                // One patient, one image -> exactly one SEGMENT and one merge. A second
+                // read of the sheet (or a lost images_count) would change these.
+                { assert workflow.trace.tasks().findAll {
+                    it.name.startsWith('MIRAGE:POSTPROCESSING:SEGMENT') }.size() == 1 },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.startsWith('MIRAGE:POSTPROCESSING:MERGE_QUANT_CSVS') }.size() == 1 },
+                { assert path("$outputDir/csv/postprocessed.csv").exists() }
+            )
+        }
+    }
+
 }

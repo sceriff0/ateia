@@ -220,4 +220,41 @@ nextflow_pipeline {
         }
     }
 
+    /*
+     * --start/--stop resolve to three booleans that gate both the step calls and
+     * what each step contributes to the QC artifact stream. A partial run must
+     * still produce a report, containing only the steps that actually ran: if the
+     * gate and the contribution ever disagreed, the report would either go missing
+     * or reference a step that never executed.
+     */
+    test("Should still report when only part of the pipeline runs - stub") {
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                input   = "$projectDir/tests/testdata/test_input.csv"
+                outdir  = "$outputDir"
+                start   = "preprocessing"
+                stop    = "preprocessing"
+                seg_gpu = false
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.startsWith('MIRAGE:FINAL_QC:GENERATE_QC_REPORT') }.size() == 1 },
+                { assert path("$outputDir/qc").list().any {
+                    it.toString().contains('mirage_qc_report_') } },
+                // Preprocessing ran, the later steps did not.
+                { assert path("$outputDir/csv/preprocessed.csv").exists() },
+                { assert !path("$outputDir/csv/registered.csv").exists() },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.contains('REGISTRATION:') }.size() == 0 }
+            )
+        }
+    }
+
 }
