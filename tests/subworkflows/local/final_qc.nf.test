@@ -128,6 +128,81 @@ nextflow_workflow {
         }
     }
 
+    /*
+     * The tag vocabulary is hand-written at both call sites. A typo ('registration_QC')
+     * matches no artifactsOf() filter, so that whole QC category would vanish from the
+     * report — the run stays green, GENERATE_QC_REPORT still runs exactly once, and every
+     * OTHER test in this file still passes, because they assert task counts and not report
+     * contents. Under the old positional signature the same typo was a parse-time
+     * resolution error. This test is the replacement for that safety.
+     */
+    test("an unknown artifact kind fails loudly instead of dropping the category") {
+        tag "stub"
+        options "-stub"
+
+        when {
+            workflow {
+                """
+                input[0] = Channel.of(
+                    ['registration_QC', file('$projectDir/tests/testdata/sample_PANCK.tif')],
+                    ['versions',        file('$projectDir/tests/testdata/sample_versions.yml')]
+                )
+                input[1] = Channel.value([stop: 'postprocessing', patients: [P001: 2], channels: [P001: 5]])
+                """
+            }
+            params {
+                outdir = "$outputDir"
+                skip_final_qc_report = false
+                enable_trace = true
+            }
+        }
+
+        then {
+            def report = (workflow.stdout + workflow.stderr).join('\n') + (workflow.errorReport ?: '') + (workflow.errorMessage ?: '')
+            assertAll(
+                { assert workflow.failed },
+                // The message must name the offending tag, not just "invalid input".
+                { assert report.contains('registration_QC') },
+                { assert report.contains('unknown artifact kind') }
+            )
+        }
+    }
+
+    /*
+     * The guard is registered outside both param gates, so it fires even on a run that
+     * asks for neither output — otherwise a typo would sit undetected until someone
+     * turned the report back on.
+     */
+    test("the vocabulary guard fires even with both outputs switched off") {
+        tag "stub"
+        options "-stub"
+
+        when {
+            workflow {
+                """
+                input[0] = Channel.of(
+                    ['size_logs', file('$projectDir/tests/testdata/sample_size_log1.csv')]
+                )
+                input[1] = Channel.value([stop: 'postprocessing', patients: [P001: 2], channels: [P001: 5]])
+                """
+            }
+            params {
+                outdir = "$outputDir"
+                skip_final_qc_report = true
+                enable_trace = false
+            }
+        }
+
+        then {
+            def report = (workflow.stdout + workflow.stderr).join('\n') + (workflow.errorReport ?: '') + (workflow.errorMessage ?: '')
+            assertAll(
+                { assert workflow.failed },
+                // 'size_logs' is the plural near-miss of the real kind, 'size_log'.
+                { assert report.contains('size_logs') }
+            )
+        }
+    }
+
     test("--enable_trace false suppresses the size rollup but not the report") {
         tag "stub"
         options "-stub"

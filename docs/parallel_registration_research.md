@@ -134,8 +134,10 @@ CSV → meta parsing in `CsvUtils.parseMetadata` (`lib/CsvUtils.groovy:143-156`)
   (`CsvUtils.groovy:136-141`). **Exactly one** reference per patient is enforced
   (`validateInputSemantics`, `CsvUtils.groovy:239-245`); zero allowed only with
   `allow_auto_reference`.
-- `channels` — non-empty `|`-split list; **DAPI must be present** (at any position), located by
-  name not index (`CsvUtils.groovy:116-126`).
+- `channels` — non-empty `|`-split list; **a nuclear marker must be present** (at any position),
+  located by name not index. Which names qualify comes from `params.nuclear_markers`
+  (`nextflow.config`, default `['DAPI', 'CELLTOX']`) via `MarkerUtils.hasNuclear`, not a
+  hardcoded `DAPI` (`lib/CsvUtils.groovy:160-166`).
 - `id` — per-image unique id `patient_id + source-stem` (`subworkflows/local/input_check.nf:46-51`).
 - `images_count` / `channels_count` — pre-computed from the CSV
   (`CsvUtils.countImagesPerPatient` / `countChannelsPerPatient`, `CsvUtils.groovy:54-106`) and

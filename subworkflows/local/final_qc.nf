@@ -29,8 +29,11 @@
       versions   -> deduplicated and collated into collated_versions.yml
       size_log   -> merged into raw_input_sizes.csv for AGGREGATE_SIZE_LOGS
 
-    An unrecognised kind is silently ignored: every consumer here is an explicit
-    `artifactsOf(...)` filter.
+    An unrecognised kind is a hard ERROR (see KNOWN_ARTIFACT_KINDS below). Every
+    consumer here is an `artifactsOf(...)` filter, so an unknown tag would match no
+    filter and that whole QC category would vanish from the report while the run
+    stayed green — under the previous positional signature the same typo was a
+    parse-time resolution failure, and this guard is what keeps it loud.
 
     `ch_run_facts` carries the only run-summary inputs that genuinely differ
     between the two callers — the `stop` label and the sample manifest totals.
@@ -46,6 +49,19 @@ import groovy.json.JsonOutput
 include { AGGREGATE_SIZE_LOGS } from '../../modules/local/aggregate_size_logs'
 include { GENERATE_QC_REPORT  } from '../../modules/local/generate_qc_report'
 
+// The complete artifact vocabulary. Both call sites hand-write these tags (13
+// literals across workflows/mirage.nf's two FINAL_QC calls) and nothing else
+// checks that the two vocabularies agree — so this list is the check.
+KNOWN_ARTIFACT_KINDS = [
+    'preprocess_qc',
+    'registration_qc',
+    'valis_summary',
+    'postprocess_qc',
+    'seg_qc',
+    'versions',
+    'size_log',
+]
+
 // Pull one kind out of the tagged artifact stream. Nextflow channels are
 // broadcast, so applying this repeatedly to the same source is fine.
 def artifactsOf(ch_artifacts, String kind) {
@@ -59,6 +75,18 @@ workflow FINAL_QC {
                    //   patients/channels are INPUT_CHECK.out.counts
 
     main:
+
+    // Fail-fast vocabulary guard. Registered unconditionally (not inside either
+    // param gate) so a typo is caught even on a run that asks for neither output.
+    ch_artifacts.subscribe { item ->
+        if (!(item[0] in KNOWN_ARTIFACT_KINDS)) {
+            error "FINAL_QC: unknown artifact kind '${item[0]}' for ${item[1]}. " +
+                  "Known kinds: ${KNOWN_ARTIFACT_KINDS.join(', ')}. An unknown tag matches no " +
+                  "artifactsOf() filter, so that whole QC category would be dropped from the " +
+                  "report without failing the run — fix the tag at the FINAL_QC call site in " +
+                  "workflows/mirage.nf, or add the kind here and wire it to a report slot."
+        }
+    }
 
     if (!params.skip_final_qc_report) {
         // Run-context summary for the report's overview card (pipeline, run,
@@ -120,4 +148,16 @@ workflow FINAL_QC {
             artifactsOf(ch_artifacts, 'size_log').collectFile(name: 'raw_input_sizes.csv', sort: true)
         )
     }
+
+    // Neither GENERATE_QC_REPORT.out.versions nor AGGREGATE_SIZE_LOGS.out.versions is
+    // consumed here, and neither was consumed by the router before this subworkflow
+    // existed: both processes run AFTER the version collation they would belong to.
+    // Left as-is to keep this extraction behaviour-preserving.
+    //
+    // The two are NOT equally invisible, though. GENERATE_QC_REPORT's publishDir
+    // (conf/modules.config:139-145) drops versions.yml via saveAs; AGGREGATE_SIZE_LOGS'
+    // (conf/modules.config:479-497) does NOT, so <outdir>/size_logs/versions.yml is a
+    // published artifact whose single key is the fully-qualified process name — moving
+    // this call in here changed it to "MIRAGE:FINAL_QC:AGGREGATE_SIZE_LOGS". See the
+    // comment on that publishDir block.
 }
