@@ -58,9 +58,15 @@ import groovy.json.JsonOutput
 include { AGGREGATE_SIZE_LOGS } from '../../modules/local/aggregate_size_logs'
 include { GENERATE_QC_REPORT  } from '../../modules/local/generate_qc_report'
 
-// The complete artifact vocabulary. Both call sites hand-write these tags (13
-// literals across workflows/mirage.nf's two FINAL_QC calls) and nothing else
-// checks that the two vocabularies agree — so this list is the check.
+// The complete artifact vocabulary. Both call sites hand-write these tags (15
+// literals across workflows/mirage.nf's two FINAL_QC calls -- 4 in add_cycle,
+// 11 in the standard path) and nothing else checks that the two vocabularies
+// agree — so this list is the check.
+//
+// Deliberately a bare top-level assignment, not `def`: a script-level `def` in
+// Groovy is scoped to this file's implicit `run()` method and would be
+// invisible to artifactsOf()/buildManifest() below even though they live in
+// the same file. This looks like a missing `def` but is not one.
 KNOWN_ARTIFACT_KINDS = [
     'preprocess_qc',
     'registration_qc',
@@ -73,7 +79,16 @@ KNOWN_ARTIFACT_KINDS = [
 
 // Pull one kind out of the tagged artifact stream. Nextflow channels are
 // broadcast, so applying this repeatedly to the same source is fine.
+//
+// Validates `kind` itself, not just the tags flowing through `ch_artifacts`
+// (that's the subscribe guard below): the seven artifactsOf() call sites in
+// this file's `main:` are a second, textually separate copy of the vocabulary,
+// and a typo there (e.g. 'seg_qcc') would match nothing and silently empty
+// that report slot while every test stayed green -- the same failure class
+// the subscribe guard exists to catch, from the other side.
 def artifactsOf(ch_artifacts, String kind) {
+    if (!(kind in KNOWN_ARTIFACT_KINDS))
+        throw new IllegalArgumentException("FINAL_QC: artifactsOf('${kind}') is not a known artifact kind: ${KNOWN_ARTIFACT_KINDS.join(', ')}")
     return ch_artifacts.filter { it[0] == kind }.map { it[1] }
 }
 
@@ -135,8 +150,9 @@ workflow FINAL_QC {
     ch_run_facts   // value channel of [stop: String, patients: Map, channels: Map,
                    //   declared_channels: Map] — patients/channels/declared_channels
                    //   are INPUT_CHECK.out.counts. `channels` is NOT read by the
-                   //   manifest below (see header comment) — it is carried through
-                   //   unchanged for whichever other consumer needs the exact count.
+                   //   manifest below (see header comment) — it is deliberately unread
+                   //   here. It is only present because this Map is INPUT_CHECK.out.counts
+                   //   passed wholesale, not because some other consumer needs it.
 
     main:
 
@@ -199,7 +215,7 @@ workflow FINAL_QC {
     //
     // The two are NOT equally invisible, though. GENERATE_QC_REPORT's publishDir
     // (conf/modules.config:139-145) drops versions.yml via saveAs; AGGREGATE_SIZE_LOGS'
-    // (conf/modules.config:479-497) does NOT, so <outdir>/size_logs/versions.yml is a
+    // (conf/modules.config:540-545) does NOT, so <outdir>/size_logs/versions.yml is a
     // published artifact whose single key is the fully-qualified process name — moving
     // this call in here changed it to "MIRAGE:FINAL_QC:AGGREGATE_SIZE_LOGS". See the
     // comment on that publishDir block.
