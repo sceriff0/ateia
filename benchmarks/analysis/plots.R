@@ -10,11 +10,11 @@
 #                     realtime_s, duration_s, cpus, input_gb, read_gb, write_gb (I/O volume from
 #                     trace rchar/wchar) + every swept param
 #                     (varied_axis, target_px, n_channels, n_register_images,
-#                      config_id, rep, memory_mode, seg_method, reg_distributed_tiling, ...)
+#                      config_id, rep, memory_mode, reg_micro_reg, registration_method, seg_method, ...)
 # Scaling figures (01/02/02b/08) use LINEAR axes; the power-law fit is done in log space and drawn
 # as a curve (β = the log-log exponent, shown per facet strip). No log-log axes anywhere.
 #   resource_stats.csv          per (process,config): n_reps + mean/std/cv
-#   classic_vs_distributed_registration.csv   per cell: classic vs distributed RAM/time
+#   (classic_vs_distributed_registration.csv was dropped with the archived distributed path)
 #   run_cost.csv                per run: cpu_hours, gpu_hours, wall_clock_s, bottleneck_stage
 #   quality.csv                 per run: reg_tre_median_px (feature-error proxy) + n_cells + params
 #   segmentation_agreement.csv  pairwise method mask IoU + cell-count ratio
@@ -117,30 +117,12 @@ if (has_io && any(is.finite(m$total_io_gb) & m$total_io_gb > 0)) {
   if (!is.null(io_fig)) save_fig(io_fig, "02b_io_volume_scaling", 11, 8)
 }
 
-# ── 3. CLASSIC vs DISTRIBUTED registration — the RAM ceiling vs size ──
-cvd_path <- file.path(adir, "classic_vs_distributed_registration.csv")
-if (file.exists(cvd_path) && nrow(read_csv(cvd_path, show_col_types = FALSE)) > 0) {
-  cvd <- read_csv(cvd_path, show_col_types = FALSE)
-  long <- cvd %>%
-    select(target_px, n_channels,
-           classic = reg_peak_rss_gb_classic, distributed = reg_peak_rss_gb_distributed) %>%
-    pivot_longer(c(classic, distributed), names_to = "path", values_to = "peak_rss_gb")
-  p3 <- ggplot(long, aes(target_px, peak_rss_gb, colour = path)) +
-    geom_line(linewidth = .8) + geom_point(size = 2) +
-    facet_wrap(~ n_channels, labeller = label_both) +
-    scale_colour_manual(values = oi[c(8,2)]) +
-    labs(title = "Registration peak RAM: classic vs distributed",
-         subtitle = "Classic holds the BioFormats JVM heap (climbs with size); the JVM-free distributed path stays bounded.",
-         x = "image size (px)", y = "registration-stage peak RSS (GiB)", colour = NULL)
-  save_fig(p3, "03_classic_vs_distributed_ram", 9, 5)
-
-  p3b <- ggplot(cvd, aes(target_px, rss_saving_gb, colour = factor(n_channels))) +
-    geom_line(linewidth = .8) + geom_point(size = 2) +
-    scale_colour_manual(values = oi, name = "channels") +
-    labs(title = "Distributed RAM saving vs classic", x = "image size (px)",
-         y = "classic − distributed peak RSS (GiB)")
-  save_fig(p3b, "03b_distributed_ram_saving", 8, 5)
-}
+# ── 3. (removed) CLASSIC vs DISTRIBUTED registration ──
+# Plotted classic_vs_distributed_registration.csv, which no longer exists: the distributed/tiled VALIS
+# path was archived out of the pipeline (git tag archive/tiled-valis-2026-07-24) and its emitter went
+# with it, so the block was permanently inert behind its file.exists() guard.
+# The live head-to-head is now VALIS vs STARE (registration_method = valis | tiled), swept by
+# sweep.yaml's registration_method_grid and reported by `python -m benchmarks.analysis.make_tables`.
 
 # ── 4. N-IMAGE REGISTRATION — REGISTER cost vs number of slides ──
 reg <- m %>% filter(proc == "REGISTER", varied_axis %in% c("registration_grid", "baseline", "scaling_grid"))
@@ -159,7 +141,7 @@ if (nrow(reg) > 0) {
 
 # ── 5. OFAT KNOB EFFECTS — one panel per single-knob axis ──
 # For each OFAT axis, plot the most-affected process's realtime vs the knob value.
-# Only the true single-knob OFAT axes belong here; memory_mode / skip_micro_registration go to plot 10
+# Only the true single-knob OFAT axes belong here; memory_mode / reg_micro_reg go to plot 10
 # (both paths) and the segmentation tile knobs to plots 9/9b (per method).
 knob_targets <- tribble(
   ~axis,                       ~proc,          ~metric,
@@ -278,20 +260,21 @@ reg_leaves <- c("REGISTER","REG_PREP","REG_TILE","REG_NONRIGID","REG_MICRO_PREP"
 truthy <- function(x) tolower(as.character(x)) %in% c("true","1","yes")
 rp <- m %>% filter(varied_axis == "registration_param_grid", proc %in% reg_leaves)
 if (nrow(rp) > 0) {
+  # reg_micro_reg is the micro-registration DEPTH (0=none | 1=micro-rigid | 2=+micro non-rigid). It
+  # replaced the boolean skip_micro_registration, which the pipeline never actually read.
   p10 <- rp %>%
-    group_by(run_id, memory_mode, skip_micro_registration, reg_distributed_tiling) %>%
+    group_by(run_id, memory_mode, reg_micro_reg) %>%
     summarise(reg_peak_gb = max(peak_rss_gb), .groups = "drop") %>%
-    mutate(path = ifelse(truthy(reg_distributed_tiling), "distributed", "classic")) %>%
-    group_by(memory_mode, skip_micro_registration, path) %>%
+    group_by(memory_mode, reg_micro_reg) %>%
     summarise(reg_peak_gb = mean(reg_peak_gb), .groups = "drop") %>%
-    ggplot(aes(fct_relevel(memory_mode, "low", "medium", "high"), reg_peak_gb, fill = path)) +
+    ggplot(aes(fct_relevel(memory_mode, "low", "medium", "high"), reg_peak_gb,
+               fill = factor(reg_micro_reg))) +
     geom_col(position = "dodge", width = .7) +
-    facet_wrap(~ skip_micro_registration, labeller = label_both) +
-    scale_fill_manual(values = oi[c(8, 2)], name = NULL) +
-    labs(title = "Registration knobs, measured in both paths",
-         subtitle = "memory_mode \u00d7 skip_micro_registration \u2014 classic vs distributed registration.",
+    scale_fill_manual(values = oi, name = "reg_micro_reg") +
+    labs(title = "VALIS registration knobs",
+         subtitle = "memory_mode \u00d7 reg_micro_reg (micro-registration depth) at the baseline cell.",
          x = "memory_mode", y = "registration-stage peak RSS (GiB)")
-  save_fig(p10, "10_registration_params_both_paths", 9, 5)
+  save_fig(p10, "10_registration_params", 9, 5)
 }
 
 # Helper: read an optional analysis CSV, returning NULL if absent/empty (keeps plots robust to
@@ -307,7 +290,7 @@ truthy <- function(x) tolower(as.character(x)) %in% c("true", "1", "yes")
 # ── 11. REGISTRATION ACCURACY vs COST (the Pareto view) ──
 qual <- read_opt("quality.csv"); cost <- read_opt("run_cost.csv")
 if (!is.null(qual) && !is.null(cost) && "reg_tre_median_px" %in% names(qual)) {
-  ac <- qual %>% select(any_of(c("run_id","varied_axis","memory_mode","skip_micro_registration",
+  ac <- qual %>% select(any_of(c("run_id","varied_axis","memory_mode","reg_micro_reg",
                                  "reg_tre_median_px"))) %>%
     inner_join(cost %>% select(run_id, cpu_hours), by = "run_id") %>%
     filter(is.finite(reg_tre_median_px))
@@ -315,10 +298,10 @@ if (!is.null(qual) && !is.null(cost) && "reg_tre_median_px" %in% names(qual)) {
     p11 <- ac %>%
       ggplot(aes(cpu_hours, reg_tre_median_px)) +
       geom_point(aes(colour = if ("memory_mode" %in% names(ac)) memory_mode else NULL,
-                     shape  = if ("skip_micro_registration" %in% names(ac))
-                                factor(skip_micro_registration) else NULL), size = 3, alpha = .8) +
+                     shape  = if ("reg_micro_reg" %in% names(ac))
+                                factor(reg_micro_reg) else NULL), size = 3, alpha = .8) +
       scale_colour_manual(values = oi, name = "memory_mode", na.translate = FALSE) +
-      scale_shape_discrete(name = "skip_micro") +
+      scale_shape_discrete(name = "reg_micro_reg") +
       labs(title = "Registration accuracy vs cost",
            subtitle = "Lower-left is better: less error for fewer CPU-hours. Each point is a config.",
            x = "registration CPU-hours", y = "feature TRE, median (px)")
@@ -388,60 +371,26 @@ if (!is.null(cost) && all(c("bottleneck_stage", "target_px") %in% names(cost))) 
   }
 }
 
-# ── 15. DISTRIBUTED TILED PATH — granularity study (tile size x overlap) ──
-# The tiled fan-out is a DIFFERENT algorithm from classic (excluded from the parity comparison), so it
-# gets its own figure: registration-stage peak RSS + compute vs tile_wh, coloured by tile_buffer.
-if ("varied_axis" %in% names(m) && any(m$varied_axis == "distributed_tiling_grid")) {
-  reg_leaves2 <- c("REG_PREP","REG_TILE","REG_NONRIGID","REG_FINALIZE","REG_FINALIZE_FIELD",
-                   "REG_FINALIZE_MICRO","REG_WARP_REF","REG_MICRO_PREP")
-  tg <- m %>% filter(varied_axis == "distributed_tiling_grid", proc %in% reg_leaves2)
-  if (nrow(tg) > 0 && all(c("reg_dist_tile_wh","reg_dist_tile_buffer") %in% names(tg))) {
-    p15 <- tg %>%
-      group_by(reg_dist_tile_wh, reg_dist_tile_buffer, run_id) %>%
-      summarise(reg_peak_gb = max(peak_rss_gb), reg_time_s = sum(realtime_s), .groups = "drop") %>%
-      group_by(reg_dist_tile_wh, reg_dist_tile_buffer) %>%
-      summarise(reg_peak_gb = mean(reg_peak_gb), reg_time_s = mean(reg_time_s), .groups = "drop") %>%
-      ggplot(aes(factor(reg_dist_tile_wh), reg_peak_gb, fill = factor(reg_dist_tile_buffer))) +
-      geom_col(position = "dodge", width = .7) +
-      scale_fill_manual(values = oi, name = "tile_buffer (px)") +
-      labs(title = "Distributed tiled path: RAM vs tile granularity",
-           subtitle = "Registration-stage peak RSS by tile size and overlap (the fan-out is a separate algorithm from classic).",
-           x = "reg_dist_tile_wh (px)", y = "registration-stage peak RSS (GiB)")
-    save_fig(p15, "15_tiled_path_granularity", 8, 5)
-  }
-}
+# ── 15/16. (removed) DISTRIBUTED TILED PATH granularity + drift-from-classic ──
+# Both keyed off the archived distributed VALIS path: the distributed_tiling_grid sweep, the
+# reg_dist_tile_wh / reg_dist_tile_buffer params, and registration_drift.csv. All three were removed
+# with the path itself (git tag archive/tiled-valis-2026-07-24), so these blocks could never fire.
+# The live granularity knob is reg_tiled_tile on the STARE backend — see plot 17 and, for the numbers,
+# `python -m benchmarks.analysis.make_tables`.
 
-# ── 16. TILED PATH DRIFT from classic — how far the tiled fan-out moves from classic whole-image ──
-drift <- read_opt("registration_drift.csv")
-if (!is.null(drift) && "path" %in% names(drift)) {
-  td <- drift %>% filter(path == "tiled", is.finite(max_abs_delta))
-  if (nrow(td) > 0 && all(c("tile_wh", "tile_buffer") %in% names(td))) {
-    p16 <- td %>% group_by(tile_wh, tile_buffer) %>%
-      summarise(max_abs_delta = mean(max_abs_delta), pct_pixels_diff = mean(pct_pixels_diff), .groups = "drop") %>%
-      ggplot(aes(factor(tile_wh), max_abs_delta, fill = factor(tile_buffer))) +
-      geom_col(position = "dodge", width = .7) +
-      scale_fill_manual(values = oi, name = "tile_buffer (px)") +
-      labs(title = "Tiled path: pixel drift from classic",
-           subtitle = "max|Δ| vs the classic slide, by tile size/overlap (0 = identical). Drift, not a failure — tiled is a different algorithm.",
-           x = "reg_dist_tile_wh (px)", y = "max |Δ| vs classic (intensity levels)")
-    save_fig(p16, "16_tiled_drift_from_classic", 8, 5)
-  }
-}
-
-# ── 17. REGISTRATION ERROR by path — feature-TRE for classic vs separated vs tiled ──
-if (!is.null(qual) && "reg_tre_median_px" %in% names(qual) && "reg_distributed_tiling" %in% names(qual)) {
-  ep <- qual %>% filter(is.finite(reg_tre_median_px)) %>%
-    mutate(path = case_when(!truthy(reg_distributed_tiling) ~ "classic",
-                            "reg_dist_force_tiling" %in% names(.) & truthy(reg_dist_force_tiling) ~ "tiled",
-                            TRUE ~ "separated"))
-  if (nrow(ep) > 0 && dplyr::n_distinct(ep$path) > 1) {
-    p17 <- ggplot(ep, aes(path, reg_tre_median_px, colour = path)) +
+# ── 17. REGISTRATION ERROR by METHOD — feature-TRE for VALIS vs STARE/tiled ──
+# Was keyed on reg_distributed_tiling (archived). The live comparison is registration_method, swept
+# head-to-head by sweep.yaml's registration_method_grid.
+if (!is.null(qual) && "reg_tre_median_px" %in% names(qual) && "registration_method" %in% names(qual)) {
+  ep <- qual %>% filter(is.finite(reg_tre_median_px))
+  if (nrow(ep) > 0 && dplyr::n_distinct(ep$registration_method) > 1) {
+    p17 <- ggplot(ep, aes(registration_method, reg_tre_median_px, colour = registration_method)) +
       geom_boxplot(outlier.shape = NA, width = .5) + geom_jitter(width = .12, alpha = .6) +
-      scale_colour_manual(values = oi[c(8, 1, 2)], guide = "none") +
-      labs(title = "Registration error by path (accuracy, not just pixel drift)",
-           subtitle = "Feature-based TRE proxy (median px). Separated should match classic; tiled shows any accuracy cost of tiling.",
+      scale_colour_manual(values = oi, guide = "none") +
+      labs(title = "Registration error by method",
+           subtitle = "Feature-based TRE proxy (median px). VALIS is the baseline anchor; STARE/tiled is the JVM-free backend.",
            x = NULL, y = "feature TRE, median (px)")
-    save_fig(p17, "17_registration_error_by_path", 8, 5)
+    save_fig(p17, "17_registration_error_by_method", 8, 5)
   }
 }
 

@@ -35,13 +35,35 @@ from .lib import load, quality, regress
 # swept at fixed input piles many points at one x and corrupts the regression). Mirrors make_figures.
 SIZE_VARYING_AXES = {"baseline", "scaling_grid", "registration_grid", "target_px", "n_channels"}
 
-# Config columns carried onto the master/param tables (present depending on the sweep).
+# Config columns carried onto the master/param tables (present depending on the sweep). This is the
+# run's IDENTITY: every knob sweep.yaml varies belongs here, or two runs that differ only by that knob
+# become indistinguishable rows in the paper tables. Columns absent from a given sweep are simply not
+# carried, so listing a param the current sweep does not vary is harmless.
+#
 # registration_method (valis|tiled) + reg_micro_reg (micro-reg depth 0/1/2) replace the old boolean
-# skip_micro_registration, which was removed on main; reg_tiled_tile/reg_tiled_gate_tre are the STARE
-# knobs swept by registration_method_grid. Columns absent from a given sweep are simply not carried.
-CONFIG_COLS = ("varied_axis", "target_px", "n_channels", "n_register_images",
-               "registration_method", "memory_mode", "reg_micro_reg",
-               "reg_tiled_tile", "reg_tiled_gate_tre", "seg_method")
+# skip_micro_registration, which was removed on main; reg_tiled_* are the STARE knobs swept by
+# registration_method_grid, reg_tiled_fanout being the execution shape (per-slide vs per-tile fan-out).
+CONFIG_COLS = (
+    "varied_axis", "target_px", "n_channels", "n_register_images",
+    # registration
+    "registration_method", "memory_mode", "reg_micro_reg", "reg_jvm_heap_gb",
+    "reg_tiled_tile", "reg_tiled_gate_tre", "reg_tiled_fanout",
+    # registration feature-error diagnostic (pinned_grids.feature_error)
+    "enable_feature_error", "feature_detector", "feature_max_dim",
+    # preprocessing
+    "preproc_pool_workers", "preproc_tile_size", "preproc_no_darkfield", "preproc_autotune",
+    # segmentation (per-backend knobs, crossed by segmentation_grid)
+    "seg_method", "seg_gpu", "seg_n_tiles_x", "seg_n_tiles_y",
+    "seg_instantseg_tile_size", "seg_instantseg_batch_size",
+    "seg_cellsam_block_size", "seg_cellsam_bbox_threshold",
+    # quantification + export
+    "quantify_compartments", "expanded_quantification",
+    "skip_spatialdata_export", "spatialdata_include_image",
+    "compression", "pyramid_resolutions", "tilex",
+    "simplify_tolerance", "geojson_coord_precision",
+    # measurement settings — comparable on COST only (see sweep.yaml caveats)
+    "reg_qc", "cse_max_pixels",
+)
 
 
 def _size_varying(runs_df: pd.DataFrame) -> pd.DataFrame:

@@ -1,8 +1,34 @@
+import importlib.util
 from pathlib import Path
 
 import pytest
 
 from benchmarks.build_run_plan import build_run_plan
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _param_checker():
+    """Load tests/check_param_consistency.py (not an importable package) by path.
+
+    That module already parses nextflow.config's `params {}` block into Python values and is the
+    pipeline's own source of truth for "what is the shipped default". Reusing it keeps one Groovy
+    literal parser in the repo instead of a second, drifting copy here.
+    """
+    path = REPO_ROOT / "tests" / "check_param_consistency.py"
+    spec = importlib.util.spec_from_file_location("_check_param_consistency", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_CHECKER = _param_checker()
+Unparsed = _CHECKER.Unparsed
+
+
+def pipeline_param_defaults() -> dict:
+    """param name -> shipped default, straight from nextflow.config."""
+    return _CHECKER.extract_config_defaults((REPO_ROOT / "nextflow.config").read_text())
 
 SWEEP = {
     "strategy": "ofat",
@@ -150,6 +176,72 @@ def test_registration_param_grid_crosses_params_classic():
     assert all("reg_distributed_tiling" not in r and "reg_dist_force_tiling" not in r for r in rp)
 
 
+def test_pinned_grid_pins_the_gate_and_crosses_live_knobs():
+    # Params behind a feature gate must be swept with the gate ON, or the run varies a value the
+    # pipeline never reads: full cost, zero signal.
+    sweep = {
+        "strategy": "ofat",
+        "baseline": {"target_px": 4096, "n_channels": 2,
+                     "enable_feature_error": False, "feature_detector": "superpoint",
+                     "feature_max_dim": 1024},
+        "pinned_grids": {
+            "feature_error": {
+                "pin": {"enable_feature_error": True},
+                "cross": {"feature_detector": ["superpoint", "disk"],
+                          "feature_max_dim": [512, 1024]},
+            },
+        },
+        "axes": {},
+    }
+    plan = build_run_plan(sweep, repeats=1)
+    pinned = [r for r in plan if r["varied_axis"] == "pinned_grid:feature_error"]
+    assert len(pinned) == 4                                    # 2 detectors x 2 dims
+    assert all(r["enable_feature_error"] is True for r in pinned)
+    assert {(r["feature_detector"], r["feature_max_dim"]) for r in pinned} == {
+        ("superpoint", 512), ("superpoint", 1024), ("disk", 512), ("disk", 1024)}
+    # the baseline run keeps the gate OFF
+    assert [r for r in plan if r["varied_axis"] == "baseline"][0]["enable_feature_error"] is False
+
+
+def test_project_sweep_exercises_the_tiled_fanout_path():
+    # At reg_tiled_fanout=false, TILED_COARSE/TILED_REG_TILE/TILED_SOLVE/TILED_STITCH never execute.
+    # The sweep must produce runs on BOTH sides or those four processes are never measured at all.
+    import yaml
+    sweep = yaml.safe_load(
+        (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text())
+    plan = build_run_plan(sweep, repeats=1)
+    tiled = [r for r in plan if r.get("registration_method") == "tiled"]
+    assert tiled, "no tiled/STARE runs in the plan"
+    assert {r["reg_tiled_fanout"] for r in tiled} == {False, True}
+
+
+def test_project_sweep_covers_every_shipped_segmentation_backend():
+    import yaml
+    sweep = yaml.safe_load(
+        (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text())
+    # nextflow.config's seg_method enum -- all three must be benchmarked somewhere in the plan.
+    plan = build_run_plan(sweep, repeats=1)
+    assert {r["seg_method"] for r in plan} == {"stardist", "instantseg", "cellsam"}
+
+
+def test_project_sweep_has_no_dead_axes():
+    # An OFAT axis on a param that is gated behind another param is a no-op run. These belong in
+    # pinned_grids (gate pinned on) or a per-method grid, never in flat `axes`.
+    import yaml
+    sweep = yaml.safe_load(
+        (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text())
+    gated = {
+        "feature_detector", "feature_max_dim", "feature_n_features",  # enable_feature_error
+        "reg_tiled_tile", "reg_tiled_gate_tre", "reg_tiled_fanout",   # registration_method=tiled
+        "reg_tiled_halo", "reg_tiled_upsample", "reg_tiled_out_tile",
+        "seg_n_tiles_x", "seg_n_tiles_y",                              # seg_method=stardist
+        "seg_instantseg_tile_size", "seg_instantseg_batch_size",       # seg_method=instantseg
+        "seg_cellsam_block_size", "seg_cellsam_bbox_threshold",        # seg_method=cellsam
+    }
+    dead = gated & set(sweep["axes"])
+    assert not dead, f"gated params used as flat OFAT axes (they would measure nothing): {sorted(dead)}"
+
+
 def test_segmentation_grid_pins_method_and_crosses_own_params():
     sweep = {
         "strategy": "ofat",
@@ -198,22 +290,50 @@ def test_project_sweep_enables_qc_signals():
         (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text())
     assert sweep["baseline"]["reg_qc"] == 2                       # staged registration QC (dice + displacement)
     assert sweep["baseline"]["skip_seg_quality_eval"] is False     # CellSegmentationEvaluator on
-    assert "enable_feature_error" not in sweep["baseline"]         # replaced by reg_qc=2
+    # enable_feature_error stays OFF at the baseline (it is the pipeline default, and reg_qc=2 is the
+    # primary accuracy signal), but it must be DECLARED so every config shares columns and so
+    # pinned_grids.feature_error can pin it on. Declared-and-false, never absent.
+    assert sweep["baseline"]["enable_feature_error"] is False
 
 
 def test_project_sweep_baseline_matches_pipeline_defaults():
-    # The 'baseline' run must be the SHIPPED default config. These mirror nextflow.config defaults
-    # (as of 2026-07-27); update BOTH sides together if a pipeline default changes.
+    """Every baseline value must equal the shipped nextflow.config default.
+
+    Read straight from nextflow.config rather than mirrored as literals here. The previous
+    hand-maintained assertion list said "update BOTH sides together if a pipeline default changes",
+    and that is exactly what failed: main flipped seg_method from 'stardist' to 'instantseg' and the
+    sweep kept claiming stardist was the pipeline default, because seg_method was never asserted.
+    Deriving the expected values means a new pipeline default cannot silently desync the baseline --
+    the same approach tests/check_param_consistency.py takes for the schema.
+    """
     import yaml
     base = yaml.safe_load(
         (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text())["baseline"]
-    assert base["memory_mode"] == "high"               # nextflow.config default
-    assert base["reg_qc"] == 2                          # nextflow.config default
-    assert base["quantify_compartments"] is True       # nextflow.config default
-    assert base["expanded_quantification"] is True      # nextflow.config default (Mean/Sum on top of Median)
-    assert base["seg_cellsam_block_size"] == 1024       # nextflow.config default
-    assert base["cse_max_pixels"] == 50000000           # nextflow.config default (CSE downsample cap)
-    assert base["preproc_pool_workers"] is None         # nextflow.config default (null = task.cpus)
+    config_defaults = pipeline_param_defaults()
+
+    # Synthetic matrix dimensions: owned by generate_matrix.py, not pipeline params.
+    synthetic = {"target_px", "n_channels", "n_register_images"}
+
+    checked = 0
+    for name, baseline_value in base.items():
+        if name in synthetic:
+            continue
+        assert name in config_defaults, (
+            f"sweep baseline sets '{name}', which is not a pipeline param in nextflow.config"
+        )
+        expected = config_defaults[name]
+        if isinstance(expected, Unparsed):
+            continue  # Groovy literal the parser cannot evaluate; nothing to compare
+        assert baseline_value == expected and (
+            isinstance(baseline_value, bool) == isinstance(expected, bool)
+        ), (
+            f"sweep baseline '{name}' = {baseline_value!r} but nextflow.config default is "
+            f"{expected!r}. The baseline run must BE the shipped config -- update sweep.yaml "
+            f"(or, if the pipeline default moved deliberately, update both together)."
+        )
+        checked += 1
+
+    assert checked > 20, f"only {checked} baseline params checked -- parser likely broke"
 
 
 def test_project_sweep_all_configs_share_columns():

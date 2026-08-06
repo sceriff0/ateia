@@ -148,13 +148,18 @@ while IFS=',' read -r -a vals; do
     continue
   fi
 
-  # Map non-structural columns to --<param>. Skip the matrix/registration-shape
-  # controls (run_id/varied_axis/target_px/n_channels/n_register_images) — they are
-  # consumed here to build the samplesheet, not passed to nextflow as pipeline params.
+  # Map non-structural columns to --<param>. Skipped columns fall in two groups:
+  #   * matrix/registration shape (target_px/n_channels/n_register_images) — consumed here to build the
+  #     samplesheet, not passed to nextflow as pipeline params;
+  #   * run-plan bookkeeping (run_id/varied_axis/config_id/rep) — build_run_plan.py's own labels, which
+  #     are not pipeline params at all. config_id/rep were previously passed through as
+  #     `--config_id cfg000 --rep 0`; nextflow_schema.json sets additionalProperties:true so nf-schema
+  #     tolerated them, but they are still undeclared params and would become hard validation errors the
+  #     moment the schema is tightened.
   params=()
   for i in "${!cols[@]}"; do
     k="${cols[$i]}"
-    case "$k" in run_id|varied_axis|target_px|n_channels|n_register_images) continue;; esac
+    case "$k" in run_id|varied_axis|config_id|rep|target_px|n_channels|n_register_images) continue;; esac
     # Skip EMPTY values (a null/blank cell, e.g. reg_jvm_heap_gb: null) — passing `--param ""` would
     # override the pipeline default with an empty string. Empty means "use the pipeline default".
     [[ -z "${vals[$i]:-}" ]] && continue

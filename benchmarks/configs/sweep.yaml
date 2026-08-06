@@ -65,9 +65,12 @@ baseline:
   registration_method: valis          # pipeline default: 'valis' | 'tiled' (STARE). This baseline is the
                                       # VALIS anchor; registration_method_grid below adds tiled/STARE runs.
   memory_mode: high                   # pipeline default (registration memory profile)
-  reg_micro_reg: 0                    # pipeline default: micro-registration DEPTH (0=none | 1=micro-rigid |
-                                      # 2=+micro non-rigid). Replaces the old boolean skip_micro_registration
-                                      # (removed on main); crossed with memory_mode by registration_param_grid.
+  reg_micro_reg: 2                    # pipeline default: micro-registration DEPTH (0=none | 1=micro-rigid |
+                                      # 2=+micro non-rigid). nextflow.config ships 2 ("default MAX"); this
+                                      # baseline previously claimed 0 was the default, which made the
+                                      # 'baseline' run cheaper AND less accurate than the shipped config.
+                                      # Replaces the old boolean skip_micro_registration (removed on main);
+                                      # crossed with memory_mode by registration_param_grid.
   reg_tiled_tile: 2048                # STARE tile core / mesh resolution (px), pipeline default. Only live when
                                       # registration_method=tiled; declared here (like the seg_* backend params)
                                       # so EVERY config shares columns — registration_method_grid crosses it.
@@ -79,18 +82,40 @@ baseline:
                                       # centroid displacement (um) per stage. Harvested into
                                       # registration_accuracy.csv (bin/warp_seg_qc.py; docs/registration_qc.md).
   reg_jvm_heap_gb: null               # auto-size; the reg_jvm_heap_gb axis varies it (RAM elasticity)
+  reg_tiled_fanout: false             # STARE execution SHAPE, pipeline default: false = one Nextflow task
+                                      # per slide (tiled internally); true = per-TILE fan-out
+                                      # (TILED_COARSE -> TILED_REG_TILE -> TILED_SOLVE -> TILED_STITCH).
+                                      # Crossed by registration_method_grid: at false those four processes
+                                      # NEVER execute, so the fan-out path was previously unmeasured.
+  # --- registration feature-error diagnostic (ESTIMATE_FEATURE_DISTANCES) ---
+  # OFF at baseline (pipeline default). The feature_* knobs below are read ONLY by that process, so
+  # they are swept by pinned_grids.feature_error (which pins the gate on), never as OFAT axes.
+  enable_feature_error: false
+  feature_detector: superpoint        # pipeline default
+  feature_max_dim: 1024               # pipeline default
+  feature_n_features: 5000            # pipeline default
   # --- preprocessing (BaSiC illumination correction) ---
   preproc_n_iter: 100
   preproc_overlap: 0
+  preproc_tile_size: 1950             # pipeline default (BaSiC tile size)
+  preproc_no_darkfield: false         # pipeline default (darkfield correction ON)
+  preproc_autotune: false             # pipeline default
   preproc_pool_workers: null          # pipeline default (null = task.cpus); the preproc_pool_workers axis
                                       # varies it to explicit thread counts
   # --- segmentation ---
-  seg_method: stardist
+  # seg_method mirrors the PIPELINE DEFAULT, which is 'instantseg' (nextflow.config): it is the only
+  # backend that runs on a fresh clone (StarDist needs a trained model via segmentation_model_dir, and
+  # CellSAM's weights are gated). StarDist is still benchmarked head-to-head by segmentation_grid below.
+  seg_method: instantseg
   seg_gpu: true
-  seg_n_tiles_x: 16
-  seg_n_tiles_y: 16
+  seg_n_tiles_x: 16                   # StarDist only; declared for column uniformity
+  seg_n_tiles_y: 16                   # StarDist only; declared for column uniformity
   seg_cellsam_block_size: 1024        # pipeline default (only used when seg_method=cellsam)
-  seg_instantseg_tile_size: 512       # only used when seg_method=instantseg
+  seg_cellsam_bbox_threshold: 0.4     # pipeline default (CellSAM precision/recall knob)
+  seg_instantseg_tile_size: 512       # pipeline default (live at this baseline)
+  seg_instantseg_batch_size: 16       # pipeline default: tiles per InstanSeg forward pass. Live at the
+                                      # baseline now that instantseg is the default backend — it is the
+                                      # GPU-throughput knob, crossed by segmentation_grid.
   skip_seg_quality_eval: false        # CellSegmentationEvaluator (CSE) ON: reference-free per-patient
                                       # segmentation QualityScore + component metrics, harvested into
                                       # segmentation_eval.csv (modules/local/seg_quality_eval.nf).
@@ -102,6 +127,19 @@ baseline:
   # expanded_quantification requires quantify_compartments (ParamUtils.validateCompartmentQuant).
   quantify_compartments: true         # pipeline default
   expanded_quantification: true       # pipeline default (Mean/Sum on top of the always-computed Median)
+  # --- SpatialData (.zarr) export ---
+  # EXPORT_SPATIALDATA is ON by default on main, so it already costs wall-clock in every run; it is
+  # declared here so that cost is attributable instead of anonymous.
+  skip_spatialdata_export: false      # pipeline default (export ON)
+  spatialdata_include_image: false    # pipeline default. TRUE materialises the whole pyramid into the
+                                      # zarr store — the single largest output-size/write-time knob in
+                                      # the pipeline, which is why it gets its own OFAT axis below.
+  # --- OME-TIFF / GeoJSON export (output size + write time; no effect on quantification) ---
+  compression: zstd                   # pipeline default OME-TIFF codec
+  pyramid_resolutions: 8              # pipeline default pyramid level count
+  tilex: 512                          # pipeline default OME-TIFF tile size (px)
+  simplify_tolerance: 1.0             # pipeline default; display-only (quantification is mask-derived)
+  geojson_coord_precision: 2          # pipeline default; display-only
 
 # Axes to vary (OFAT: one run per non-baseline value of each axis). These hold
 # input size FIXED at the baseline cell and vary a single pipeline knob.
@@ -114,18 +152,53 @@ axes:
                                                   # just reserve idle RAM? (classic path; RAM response curve)
   # --- preprocessing ---
   preproc_pool_workers:       [1, 4, 8]           # preprocessing parallelism (null pipeline default = task.cpus)
+  preproc_tile_size:          [1024, 1950, 3000]  # BaSiC tile size — illumination-fit cost vs field size
+  preproc_no_darkfield:       [false, true]       # skipping the darkfield term cuts BaSiC cost; it also
+                                                  # changes the corrected image, so this is a cost AND
+                                                  # correction-quality axis, not a free saving
+  preproc_autotune:           [false, true]       # BaSiC autotune: extra fitting passes for a better fit
   # --- segmentation ---
   seg_gpu:                    [true, false]       # NB: false may not be a true CPU run (issue #20)
   # --- quantification ---
   quantify_compartments:      [false, true]
   expanded_quantification:    [false, true]       # valid because baseline quantify_compartments=true
+  # --- SpatialData export ---
+  skip_spatialdata_export:    [false, true]       # cost of the whole EXPORT_SPATIALDATA stage
+  spatialdata_include_image:  [false, true]       # writes the full pyramid into the zarr store: the
+                                                  # dominant output-size axis (duplicates the largest
+                                                  # artifact the pipeline produces)
+  # --- OME-TIFF / GeoJSON export (output size + write time; quantification is mask-derived, so the
+  #     GeoJSON geometry knobs cannot change any measurement) ---
+  compression:                [zstd, lzw, none]   # OME-TIFF codec. NB: 'none' inflates every downstream
+                                                  # stage's INPUT bytes, so it shifts the memory
+                                                  # regression's x-axis — read it as an I/O axis, not as
+                                                  # a free comparison against the zstd runs.
+  pyramid_resolutions:        [4, 8]              # pyramid level count
+  tilex:                      [256, 512, 1024]    # OME-TIFF tile size (write pattern / random-access cost)
+  simplify_tolerance:         [0.0, 1.0, 2.0]     # display-only
+  geojson_coord_precision:    [1, 2, 3]           # display-only
+  # --- MEASUREMENT SETTINGS (these change what is measured, so runs are NOT comparable across values;
+  #     swept to price the QC itself, never to compare quality between values) ---
+  reg_qc:                     [0, 1, 2]           # CAVEAT: reg_qc<2 emits NO staged accuracy metric, so
+                                                  # those runs are absent from registration_accuracy.csv.
+                                                  # Cost characterisation of the QC stage only.
+  cse_max_pixels:             [10000000, 50000000, 100000000]
+                                                  # CAVEAT: the CSE composite QualityScore shifts with the
+                                                  # binning factor, so these runs are comparable on COST
+                                                  # but NOT on QualityScore. Keep the cohort fixed at the
+                                                  # baseline value for the quality table.
   # NOTE — the VALIS registration knobs (memory_mode, reg_micro_reg) are NOT OFAT axes: they are
   # crossed at the baseline cell by registration_param_grid below.
   # NOTE — registration_method is NOT an OFAT axis: it is a method grid (registration_method_grid), each
   # method run with its OWN live knobs (a tiled-only knob off the VALIS baseline would be a no-op).
-  # NOTE — seg_method and its per-method params (seg_n_tiles_*, seg_cellsam_block_size,
-  # seg_instantseg_tile_size) are NOT OFAT axes: segmentation_grid below runs each method with its OWN
-  # live params (an OFAT run of a backend-specific param off the stardist baseline is a no-op).
+  # NOTE — seg_method and its per-method params (seg_n_tiles_*, seg_cellsam_*, seg_instantseg_*) are NOT
+  # OFAT axes: segmentation_grid below runs each method with its OWN live params (an OFAT run of a
+  # backend-specific param off the instantseg baseline would be a no-op).
+  # NOTE — reg_tiled_fanout is NOT an OFAT axis: it only means anything under registration_method=tiled,
+  # so registration_method_grid crosses it (see there).
+  # NOTE — the feature_* knobs are NOT OFAT axes: ESTIMATE_FEATURE_DISTANCES is gated behind
+  # enable_feature_error (default false), so varying them off the baseline would change values the
+  # pipeline never reads. pinned_grids.feature_error turns the gate on and crosses them there.
 
 # REGISTRATION PARAMETER GRID (VALIS) — memory_mode x reg_micro_reg crossed at the baseline cell, VALIS
 # path only. Characterises the effect of the VALIS registration knobs on cost + accuracy. reg_micro_reg is
@@ -135,15 +208,21 @@ registration_param_grid:
   reg_micro_reg:  [0, 1, 2]              # 0=none | 1=micro-rigid only | 2=+micro non-rigid
 
 # SEGMENTATION GRID — each method benchmarked with ITS OWN parameters (pinned seg_method + that method's
-# live knobs crossed). stardist crosses its tile grid; cellsam its block size; instantseg its tile size.
-# cellsam/instantseg need their model weights + container available on the cluster (see conf/ieo.config
-# instanseg_model_dir / cellsam_model_path); drop a method here if it can't run at your site.
+# live knobs crossed). All THREE shipped backends are covered: stardist crosses its tile grid, instantseg
+# its tile size x GPU batch size, cellsam its block size x bbox threshold.
+# stardist needs a trained model (segmentation_model_dir) and cellsam needs its weights + a valid
+# DEEPCELL_ACCESS_TOKEN (or cellsam_model_path) on the cluster — see conf/ieo.config. Drop a method from
+# this grid if it cannot run at your site; the instantseg entry is the one that runs on a fresh clone.
 segmentation_grid:
   stardist:
     seg_n_tiles_x:            [8, 16, 32]
     seg_n_tiles_y:            [8, 16, 32]
   instantseg:
-    seg_instantseg_tile_size: [256, 512, 1024]
+    seg_instantseg_tile_size:  [256, 512, 1024]
+    seg_instantseg_batch_size: [8, 16, 32]       # tiles per forward pass — the GPU-throughput/VRAM knob
+  cellsam:
+    seg_cellsam_block_size:     [512, 1024, 2048]  # native tiling block (px); stay in CellSAM's [256,2048]
+    seg_cellsam_bbox_threshold: [0.3, 0.4, 0.5]    # precision/recall knob — cell count vs false positives
 
 # REGISTRATION METHOD GRID — the head-to-head method comparison. Each registration_method is benchmarked
 # with ITS OWN live knobs, exactly like segmentation_grid does per seg backend. The baseline run above is
@@ -154,11 +233,31 @@ segmentation_grid:
 #
 # reg_tiled_tile is THE fairness / granularity knob: it sets both the tile core size AND the mesh grid
 # resolution (nextflow.config), so a finer grid gives STARE more local (piecewise) deformation freedom.
-# reg_tiled_gate_tre gates which tiles get non-rigid
-# refinement (accuracy vs cost). The remaining STARE knobs are held at their pipeline defaults:
-# reg_tiled_halo / reg_tiled_upsample (secondary accuracy) and reg_tiled_fanout / reg_tiled_out_tile
-# (resource + I/O, not accuracy) — add them here later if a resource/accuracy curve for them is needed.
+# reg_tiled_gate_tre gates which tiles get non-rigid refinement (accuracy vs cost).
+#
+# reg_tiled_fanout is the EXECUTION SHAPE, not an accuracy knob, and it is crossed here because at its
+# default (false) four pipeline processes — TILED_COARSE, TILED_REG_TILE, TILED_SOLVE, TILED_STITCH —
+# never execute at all, in any run of the sweep. Crossing it is the only way the benchmark measures the
+# per-tile Nextflow fan-out: same registration result, completely different scheduling and per-task
+# resource profile (many small tasks vs one big one), which is exactly what the cost tables exist to
+# compare. Held at pipeline defaults: reg_tiled_halo / reg_tiled_upsample (secondary accuracy) and
+# reg_tiled_out_tile (write-side I/O) — add them here if a curve for them is ever needed.
 registration_method_grid:
   tiled:
     reg_tiled_tile:     [1024, 2048, 4096]   # grid granularity / mesh resolution (px) — the fairness knob
     reg_tiled_gate_tre: [0.5, 1.0, 2.0]      # per-tile non-rigid refine gate (rigid-stage TRE, px)
+    reg_tiled_fanout:   [false, true]        # execution shape: one task/slide vs per-TILE Nextflow fan-out
+
+# PINNED GRIDS — params that are DEAD unless another param enables them. Sweeping them as flat OFAT axes
+# would change values the pipeline never reads (measuring nothing while paying for the run), so each
+# entry pins the enabling param and crosses the now-live knobs. Labelled pinned_grid:<name>.
+pinned_grids:
+  # ESTIMATE_FEATURE_DISTANCES is gated behind enable_feature_error (pipeline default false). It yields a
+  # feature-correspondence registration-error signal that is INDEPENDENT of reg_qc's segmentation-overlap
+  # dice/displacement — a second accuracy axis for the paper rather than a duplicate of the first.
+  feature_error:
+    pin:
+      enable_feature_error: true
+    cross:
+      feature_detector: [superpoint, disk, brisk]  # schema enum also allows dedode, vgg
+      feature_max_dim:  [512, 1024, 2048]          # detection working size — accuracy vs cost

@@ -90,6 +90,27 @@ Verify the whole harness with no data at all:
   grow with round count), so each must be measured across sizes, not at one baseline cell.
   Do NOT also list `target_px` / `n_channels` / `n_register_images` under `axes:` — the
   grids own input scale, and double-listing would confound the regression.
+- **A knob that is only live under another setting must NOT be a flat OFAT axis.** Varying
+  it off the baseline changes a value the pipeline never reads: the run costs full price and
+  measures nothing. `sweep.yaml` has three structures for these, and
+  `test_project_sweep_has_no_dead_axes` enforces the rule:
+  - `segmentation_grid:` — pins `seg_method` per backend and crosses that backend's own knobs
+    (StarDist tile grid; InstanSeg tile size × batch size; CellSAM block size × bbox threshold).
+    All three shipped backends are covered.
+  - `registration_method_grid:` — pins `registration_method` and crosses that method's knobs.
+    The `tiled`/STARE entry crosses `reg_tiled_fanout`, which is the only way the per-tile
+    fan-out processes (`TILED_COARSE`/`TILED_REG_TILE`/`TILED_SOLVE`/`TILED_STITCH`) execute
+    at all — at the default `false` they never run in any sweep run.
+  - `pinned_grids:` — the general form: `pin:` the enabling param(s), `cross:` the now-live
+    knobs. Used for the `feature_*` knobs, which only exist behind
+    `enable_feature_error` (`ESTIMATE_FEATURE_DISTANCES`).
+- **The `baseline:` map must equal the shipped `nextflow.config` defaults**, and must declare
+  every param any grid or axis varies (so all configs share CSV columns).
+  `test_project_sweep_baseline_matches_pipeline_defaults` reads `nextflow.config` directly and
+  fails on any divergence — it is not a hand-maintained mirror.
+- Some axes are **measurement settings**, not pipeline knobs: `reg_qc` and `cse_max_pixels`
+  change *what is measured*, so their runs are comparable on cost but **not** on quality. Keep
+  the cohort at the baseline value for any quality table. Each carries this caveat inline.
 - **`--repeats N`** emits N replicate launches per config so the analysis can report
   per-config variance (timing at n=1 is noisy — cache state, node contention). `N=3` is the
   default; `N=1` is a single-shot plan. Replicates share a `config_id`; `rep` is the index.
@@ -118,7 +139,7 @@ Verify the whole harness with no data at all:
 > reference + one-or-more moving panels per patient with **distinct channel names**
 > (reference `DAPI|ch1|...`, moving panel _p_ `DAPI|m{p}_1|...` — distinct so the
 > pipeline's duplicate-channel guard accepts them), so VALIS registration runs and the
-> registration axes (`memory_mode`, `skip_micro_registration`, `n_register_images`) are
+> registration axes (`memory_mode`, `reg_micro_reg`, `n_register_images`) are
 > exercised. **`n_register_images`** (default `[2, 4, 8]`) sets how many slides register
 > together (1 reference + N−1 moving panels) — this is how registration is benchmarked on
 > N images, not just a pair. Generating the matrix with `--sweep` provides the moving
