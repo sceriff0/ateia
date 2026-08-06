@@ -270,35 +270,14 @@ ARGPARSE_DEFAULT_ALLOWLIST = {
             "the script's own help text."
         ),
     },
-    # The next two entries were invisible before the per-script map existed:
-    # --model-name is genuinely ambiguous at the bare-flag level (stardist's
-    # `segmentation_model` vs. instantseg's `seg_instantseg_model`, both in
-    # conf/modules.config's SEGMENT ext.args), so it fell through the old
-    # flag-only map's ambiguity exclusion and was never compared at all.
-    "segment.py:--model-name": {
-        "reason": (
-            "Not a real default-vs-config divergence: `--model-name` is "
-            "`required=True` with no `default=` kwarg at all "
-            "(bin/segment.py:516-521), so argparse's implicit default=None is "
-            "never reachable -- the flag must always be supplied, standalone "
-            "or via the pipeline (conf/modules.config's stardist ext.args: "
-            "`\"--model-name ${params.segmentation_model}\"`). The mismatch "
-            "this check reports (None vs. the configured model name) is an "
-            "artifact of comparing a moot, unreachable default, not evidence "
-            "the script's behavior can silently diverge from nextflow.config."
-        ),
-    },
-    "segment_to_geojson.py:--model-name": {
-        "reason": (
-            "Same required=True/no-default shape as segment.py's --model-name "
-            "(bin/segment_to_geojson.py:104), for the same reason: the "
-            "argument must always be supplied "
-            "(modules/local/seg_qc_geojson.nf:52 always passes "
-            "`--model-name ${params.segmentation_model}`), so its absent "
-            "default is never reachable and the comparison is moot."
-        ),
-    },
 }
+# NOTE: `segment.py:--model-name` and `segment_to_geojson.py:--model-name`
+# are deliberately NOT here. Both are `required=True` with no `default=` at
+# all, so their comparison against `segmentation_model` was a moot,
+# unreachable-default artifact, not a real divergence -- `find_argparse_
+# default_sites` now excludes every `required=True` add_argument() call from
+# comparison entirely (see the `required` bucket below), so these two simply
+# never reach a point where they'd need an exemption.
 
 
 def _config_value_to_python(text: str):
@@ -531,33 +510,64 @@ def _iter_add_argument_calls(tree: ast.AST):
             yield node
 
 
+def _is_required_true(call: ast.Call) -> bool:
+    """True iff this `add_argument()` call has a literal `required=True`.
+
+    A `required=True` argument can never fall back to its `default=` --
+    argparse raises if the flag is omitted, so nothing can silently drift to
+    an unreachable default. This is true whether or not the call even has a
+    `default=` kwarg: an argument that is BOTH `required=True` AND carries a
+    `default=` is unusual but legal, and that default is dead code -- it can
+    never execute -- for exactly the same reason, so it is excluded from
+    comparison identically to the more common required-with-no-default case.
+    A non-literal `required=` (a variable, an expression) is treated as NOT
+    required, matching this file's general policy of only acting on what can
+    be statically confirmed.
+    """
+    for kw in call.keywords:
+        if kw.arg == "required":
+            try:
+                return ast.literal_eval(kw.value) is True
+            except (ValueError, TypeError):
+                return False
+    return False
+
+
 def find_argparse_default_sites():
     """Scan `bin/**/*.py` for `add_argument()` calls whose flag resolves to a
     `nextflow.config` params{} key, via the per-script map, the flag-only
     map, or (as a last resort) exact name-equality.
 
-    Returns `(matched, skipped, no_correspondence, declared)`:
+    Returns `(matched, skipped, required, no_correspondence, declared)`:
       - `matched`: `(path, flag, param_name, python_default, via)` for calls
         with a literal `default=` (or no `default=` kwarg at all, which
-        argparse itself treats as `default=None`). `via` is `"per-script"`,
-        `"flag-only"`, or `"name-eq"`, per the resolution precedence.
+        argparse itself treats as `default=None`), where the argument is
+        NOT `required=True`. `via` is `"per-script"`, `"flag-only"`, or
+        `"name-eq"`, per the resolution precedence.
       - `skipped`: `(path, flag, param_name, via)` for calls whose
         `default=` is a non-literal expression (a variable, a call, an
         f-string, ...) that `ast.literal_eval` cannot statically evaluate.
+      - `required`: `(path, flag, param_name, via)` for calls with a literal
+        `required=True` -- excluded from comparison regardless of whether a
+        `default=` is present, because a required argument's default (if
+        any) is dead code that can never be reached (see
+        `_is_required_true`).
       - `no_correspondence`: `(path, flag)` for flags that resolved via
         none of the three paths -- genuinely out of scope (e.g.
-        `--tolerance`), not a silently dropped result. Every argparse flag
-        this function examines lands in exactly one of `matched`,
-        `skipped`, or `no_correspondence`, so `len(matched) + len(skipped)
-        + len(no_correspondence)` accounts for all of them.
+        `--tolerance`), not a silently dropped result.
       - `declared`: the `nextflow.config` params{} block, as parsed by
         `parse_declared_params`.
+
+    Every argparse flag this function examines lands in exactly one of
+    `matched`, `skipped`, `required`, or `no_correspondence`, so their
+    combined length accounts for all of them.
     """
     declared = parse_declared_params(CONFIG_PATH.read_text())
     per_script_map, flag_only_map = build_flag_param_maps()
 
     matched: list[tuple[Path, str, str, object, str]] = []
     skipped: list[tuple[Path, str, str, str]] = []
+    required: list[tuple[Path, str, str, str]] = []
     no_correspondence: list[tuple[Path, str]] = []
     for path in sorted(BIN_DIR.rglob("*.py")):
         try:
@@ -575,6 +585,7 @@ def find_argparse_default_sites():
             default_kw = next(
                 (kw.value for kw in call.keywords if kw.arg == "default"), None
             )
+            is_required = _is_required_true(call)
             for flag in flags:
                 name = _normalize_flag(flag)
                 if (path.name, name) in per_script_map:
@@ -586,6 +597,9 @@ def find_argparse_default_sites():
                 else:
                     no_correspondence.append((path, flag))
                     continue
+                if is_required:
+                    required.append((path, flag, key, via))
+                    continue
                 if default_kw is None:
                     matched.append((path, flag, key, None, via))
                     continue
@@ -595,24 +609,34 @@ def find_argparse_default_sites():
                     skipped.append((path, flag, key, via))
                     continue
                 matched.append((path, flag, key, python_default, via))
-    return matched, skipped, no_correspondence, declared
+    return matched, skipped, required, no_correspondence, declared
 
 
 def test_no_duplicate_bin_argparse_defaults():
     """Every `bin/**/*.py` argparse default that resolves to a
     `nextflow.config` param (via the per-script map, the flag-only map, or
-    exact name-equality as a last resort) must equal that param's default.
+    exact name-equality as a last resort) must equal that param's default --
+    unless the argument is `required=True`, in which case its default (if
+    it even has one) is dead code that can never execute, so it is excluded
+    from comparison rather than compared against a value it can never
+    actually take.
 
     Non-literal defaults (a variable, a call, an f-string) can't be
     statically compared and are skipped. Flags with no correspondence at all
-    are genuinely out of scope. Both are counted, not silently dropped --
-    the warning this test always emits reports FOUR numbers (checked, via
-    either derived map; checked via name-equality; skipped as non-literal;
-    no correspondence found) whose sum is every argparse flag this function
-    examined, so no flag can fall out of the accounting unobserved.
+    are genuinely out of scope. All three of these, plus the required-and-
+    excluded case, are counted, not silently dropped -- the warning this
+    test always emits reports FIVE numbers (checked via either derived map;
+    checked via name-equality; skipped as non-literal; excluded as
+    required=True; no correspondence found) whose sum is every argparse flag
+    this function examined, so no flag can fall out of the accounting
+    unobserved.
     """
-    matched, skipped, no_correspondence, declared = find_argparse_default_sites()
-    total_examined = len(matched) + len(skipped) + len(no_correspondence)
+    matched, skipped, required, no_correspondence, declared = (
+        find_argparse_default_sites()
+    )
+    total_examined = (
+        len(matched) + len(skipped) + len(required) + len(no_correspondence)
+    )
 
     assert total_examined, (
         "No bin/**/*.py argparse add_argument() call was found at all -- "
@@ -644,9 +668,10 @@ def test_no_duplicate_bin_argparse_defaults():
         f"({via_per_script} per-script, {via_flag_only} flag-only), "
         f"{via_name_eq} via the name-equality fallback, {len(skipped)} "
         "skipped (non-literal default=, cannot be statically compared), "
-        f"{len(no_correspondence)} with no correspondence found at all "
-        f"(out of scope). {via_map} + {via_name_eq} + {len(skipped)} + "
-        f"{len(no_correspondence)} = {total_examined}."
+        f"{len(required)} excluded as required=True (default, if any, is "
+        f"dead code), {len(no_correspondence)} with no correspondence found "
+        f"at all (out of scope). {via_map} + {via_name_eq} + {len(skipped)} "
+        f"+ {len(required)} + {len(no_correspondence)} = {total_examined}."
         + (
             " Skipped: "
             + ", ".join(f"{p.relative_to(ROOT)}:{f}" for p, f, _, _ in skipped)
