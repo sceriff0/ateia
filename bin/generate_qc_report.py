@@ -40,11 +40,6 @@ def parse_args():
         help="Directory of registration QC PNGs",
     )
     p.add_argument(
-        "--feature-distances",
-        default="feature_dist/",
-        help="Directory of feature-distance JSONs",
-    )
-    p.add_argument(
         "--valis-summary",
         default="valis_summary/",
         help="Directory of Valis summary CSVs",
@@ -61,11 +56,6 @@ def parse_args():
     )
     p.add_argument("--versions", default=None, help="Path to collated versions.yml")
     p.add_argument("--run-summary", default=None, help="Path to run_summary.json")
-    p.add_argument(
-        "--distance-plots",
-        default="distance_plots/",
-        help="Directory of registration distance-histogram PNGs",
-    )
     p.add_argument(
         "--seg-qc",
         default="seg_qc/",
@@ -126,41 +116,6 @@ def parse_csv_table(csv_path):
         for row in reader:
             rows.append([row.get(h, "") for h in display_headers])
     return display_headers, rows
-
-
-def parse_feature_dist_json(json_path):
-    """
-    Parse a feature-distance JSON.
-    Expected structure:
-      { "before": {"mean": float, ...}, "after": {"mean": float, ...}, ... }
-    Returns a dict summary.
-    """
-    with open(json_path) as fh:
-        data = json.load(fh)
-    before_mean = None
-    after_mean = None
-    if isinstance(data, dict):
-        # Use `is not None` (not `or`): a perfectly-aligned panel can have a
-        # before/after mean of 0, which `or` would wrongly treat as missing.
-        before = (
-            data["before"] if data.get("before") is not None else data.get("pre") or {}
-        )
-        after = (
-            data["after"] if data.get("after") is not None else data.get("post") or {}
-        )
-        if isinstance(before, dict):
-            before_mean = before.get("mean")
-        if isinstance(after, dict):
-            after_mean = after.get("mean")
-    improvement = None
-    if before_mean is not None and after_mean is not None and before_mean != 0:
-        improvement = round((1 - after_mean / before_mean) * 100, 2)
-    return {
-        "file": Path(json_path).name,
-        "before_mean": before_mean,
-        "after_mean": after_mean,
-        "improvement_pct": improvement,
-    }
 
 
 def parse_versions_yml(path):
@@ -411,9 +366,8 @@ def _html_table(headers, rows, extra_body_html=""):
     every header and every cell value via ``html.escape``.
 
     Centralizes the table-render logic that used to be duplicated across the
-    registration-QC Valis rTRE table, the CSE seg-eval table, and the
-    feature-distance table, and ensures none of them can inject raw
-    CSV/JSON-derived HTML into the report.
+    registration-QC Valis rTRE table and the CSE seg-eval table, and
+    ensures neither can inject raw CSV/JSON-derived HTML into the report.
 
     `extra_body_html`: optional pre-rendered ``<tr>...</tr>`` HTML appended
     after the normal rows — for full-width/``colspan`` rows (e.g. a
@@ -454,9 +408,7 @@ def preprocess_qc_section(preprocess_dir):
     return section("Preprocessing QC", img_grid(pngs))
 
 
-def registration_qc_section(
-    reg_dir, feat_dir, valis_dir, dist_plots_dir=None, seg_qc_dir=None
-):
+def registration_qc_section(reg_dir, valis_dir, seg_qc_dir=None):
     """Build the registration-QC report section (overlay images plus accuracy tables)."""
     parts = []
 
@@ -499,54 +451,6 @@ def registration_qc_section(
         parts.append(
             '<p class="empty-notice" style="margin-top:12px;">No registration-accuracy summary found.</p>'
         )
-
-    # Feature distance table
-    feat_jsons = list_files(feat_dir, "*.json")
-    if feat_jsons:
-        parts.append(
-            "<h3 style='margin:20px 0 8px;font-size:1rem;color:#444;'>Feature Distances</h3>"
-        )
-        feat_headers = ["File", "Before Mean", "After Mean", "Improvement (%)"]
-        feat_rows = []
-        feat_error_rows_html = []
-        for jp in feat_jsons:
-            try:
-                info = parse_feature_dist_json(jp)
-            except Exception as exc:
-                feat_error_rows_html.append(
-                    f"<tr><td>{html.escape(Path(jp).name)}</td>"
-                    f"<td colspan='3'>Parse error: {html.escape(str(exc))}</td></tr>"
-                )
-                continue
-            bm = (
-                f"{info['before_mean']:.4f}"
-                if info["before_mean"] is not None
-                else "N/A"
-            )
-            am = (
-                f"{info['after_mean']:.4f}" if info["after_mean"] is not None else "N/A"
-            )
-            imp = (
-                f"{info['improvement_pct']:.2f}"
-                if info["improvement_pct"] is not None
-                else "N/A"
-            )
-            feat_rows.append([info["file"], bm, am, imp])
-        parts.append(
-            _html_table(feat_headers, feat_rows, "".join(feat_error_rows_html))
-        )
-    else:
-        parts.append(
-            '<p class="empty-notice" style="margin-top:12px;">No feature-distance JSONs found.</p>'
-        )
-
-    # Distance-distribution histograms (previously dropped)
-    dist_pngs = list_files(dist_plots_dir, "*.png") if dist_plots_dir else []
-    if dist_pngs:
-        parts.append(
-            "<h3 style='margin:20px 0 8px;font-size:1rem;color:#444;'>Feature-Distance Histograms</h3>"
-        )
-        parts.append(img_grid(dist_pngs, wide=True))
 
     # Warp-segmentation QC metrics (previously dropped)
     seg_qc_jsons = list_files(seg_qc_dir, "*.json") if seg_qc_dir else []
@@ -1003,11 +907,9 @@ def copy_data(args):
 
     copy_glob(args.preprocess_qc, "*.png", "preprocess_qc")
     copy_glob(args.registration_qc, "*.png", "registration_qc")
-    copy_glob(args.feature_distances, "*.json", "feature_dist")
     copy_glob(args.valis_summary, "*.csv", "valis_summary")
     copy_glob(args.postprocess_qc, "*.png", "postprocess_qc")
     copy_glob(args.seg_eval, "*.csv", "seg_eval")
-    copy_glob(args.distance_plots, "*.png", "distance_plots")
     copy_glob(args.seg_qc, "*.json", "seg_qc")
     if args.run_summary and Path(args.run_summary).exists():
         shutil.copy2(args.run_summary, data_dir / "run_summary.json")
@@ -1042,9 +944,7 @@ def main():
     html_parts.append(
         registration_qc_section(
             args.registration_qc,
-            args.feature_distances,
             args.valis_summary,
-            args.distance_plots,
             args.seg_qc,
         )
     )

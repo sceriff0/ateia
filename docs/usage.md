@@ -395,8 +395,7 @@ These open directly in QuPath, napari, and OMERO, and feed
     Almost always the job exceeded its memory/time grant. Raise `--max_memory`,
     `--max_cpus`, `--max_time`; MIRAGE auto-retries on `104,134,135,137,139,140,143`
     with scaled resources. For registration specifically, drop to
-    `--memory_mode low` and lower `--reg_max_image_dim` (and `--feature_n_features`
-    if feature detection is the culprit).
+    `--memory_mode low` and lower `--reg_max_image_dim`.
 
 ??? failure "The run seems to hang at startup"
     Usually Nextflow pulling large container images on first run. Pre-pull once:

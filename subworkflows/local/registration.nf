@@ -11,8 +11,6 @@ include { SEG_QC                            } from './seg_qc'
 include { VALIS_ADAPTER                     } from './adapters/valis_adapter'
 include { TILED_ADAPTER                     } from './adapters/tiled_adapter'
 
-include { ESTIMATE_FEATURE_DISTANCES        } from '../../modules/local/estimate_feature_distances'
-
 
 /*
 ========================================================================================
@@ -21,7 +19,6 @@ include { ESTIMATE_FEATURE_DISTANCES        } from '../../modules/local/estimate
     Configuration:
         - params.skip_registration_qc: true | false (skip QC generation)
         - params.qc_scale_factor: float (QC downsampling factor, default 0.25)
-        - params.enable_feature_error: true | false (enable feature-based TRE)
         - method: 'valis'
 
     Input:
@@ -32,7 +29,6 @@ include { ESTIMATE_FEATURE_DISTANCES        } from '../../modules/local/estimate
         registered: Channel of [meta, file] tuples (standard format)
         qc: Channel of QC outputs (PNG and TIFF)
         checkpoint_csv: Checkpoint CSV file
-        error_metrics: Channel of error estimation outputs (optional)
 
     QC Generation:
         - Decoupled from registration methods
@@ -252,54 +248,6 @@ workflow REGISTRATION {
     }
 
     // ========================================================================
-    // STEP 3C: ERROR ESTIMATION (Optional)
-    // ========================================================================
-    // For each non-reference image, measure quality by comparing:
-    //   - reference vs moving (pre-registration)
-    //   - reference vs registered (post-registration)
-
-    ch_error_metrics = Channel.empty()
-    ch_distance_plots = Channel.empty()
-
-    if (params.enable_feature_error) {
-        // For each non-reference image: [meta, reference, moving, registered]
-        ch_for_error = ch_registered
-            .filter { meta, file -> !meta.is_reference }
-            .map { meta, reg_file -> [meta.patient_id, meta.channels.toSorted().join('|'), meta, reg_file] }
-            .join(
-                ch_images
-                    .filter { meta, file -> !meta.is_reference }
-                    .map { meta, mov_file -> [meta.patient_id, meta.channels.toSorted().join('|'), mov_file] },
-                by: [0, 1]
-            )
-            .map { patient_id, channels, meta, reg_file, mov_file -> [patient_id, meta, reg_file, mov_file] }
-            .combine(
-                ch_images
-                    .filter { meta, file -> meta.is_reference }
-                    .map { meta, ref_file -> [meta.patient_id, ref_file] },
-                by: 0
-            )
-            .map { patient_id, meta, reg_file, mov_file, ref_file ->
-                tuple(meta, ref_file, mov_file, reg_file)
-            }
-
-        // Validate that we have images to process
-        ch_for_error
-            .count()
-            .subscribe { n ->
-                if (n == 0) {
-                    log.warn "No images available for feature error estimation - check channel metadata consistency"
-                } else {
-                    log.info "Feature error estimation: processing ${n} image(s)"
-                }
-            }
-
-        ESTIMATE_FEATURE_DISTANCES(ch_for_error)
-        ch_error_metrics = ch_error_metrics.mix(ESTIMATE_FEATURE_DISTANCES.out.distance_metrics)
-        ch_distance_plots = ch_distance_plots.mix(ESTIMATE_FEATURE_DISTANCES.out.distance_plots)
-    }
-
-    // ========================================================================
     // STEP 4: CHECKPOINT
     // ========================================================================
     // Use collectFile() for non-blocking aggregation (enables patient-level parallelism)
@@ -350,11 +298,6 @@ workflow REGISTRATION {
         ch_size_logs = ch_size_logs.mix(ch_seg_qc_size_log)
     }
 
-    // Add size logs from error estimation (if enabled)
-    if (params.enable_feature_error) {
-        ch_size_logs = ch_size_logs.mix(ESTIMATE_FEATURE_DISTANCES.out.size_log)
-    }
-
     // Collect versions from all registration processes
     ch_versions = Channel.empty()
 
@@ -367,9 +310,6 @@ workflow REGISTRATION {
     if (do_seg_qc) {
         ch_versions = ch_versions.mix(ch_seg_qc_versions)
     }
-    if (params.enable_feature_error) {
-        ch_versions = ch_versions.mix(ESTIMATE_FEATURE_DISTANCES.out.versions.first())
-    }
 
     emit:
     registered       = ch_registered
@@ -377,8 +317,6 @@ workflow REGISTRATION {
     qc               = ch_qc
     seg_qc           = ch_seg_qc
     seg_residuals    = ch_seg_residuals
-    error_metrics    = ch_error_metrics
-    distance_plots   = ch_distance_plots
     valis_summary    = ch_adapter_summary
     size_logs        = ch_size_logs
     versions         = ch_versions

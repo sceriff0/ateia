@@ -261,7 +261,7 @@ def test_html_table_escapes_headers_and_cells():
 
 
 def test_html_table_extra_body_html_appends_colspan_row():
-    """`extra_body_html` (used for the feature-distance parse-error row) is
+    """`extra_body_html` (used for the per-file parse-error row) is
     appended raw, after the normal escaped rows, inside the same tbody."""
     gqr = _load()
     out = gqr._html_table(
@@ -272,24 +272,6 @@ def test_html_table_extra_body_html_appends_colspan_row():
     # both the normal row and the extra row live in the same tbody
     assert out.index("<tbody>") < out.index("<td>x</td>") < out.index("colspan")
     assert out.index("colspan") < out.index("</tbody>")
-
-
-def test_registration_qc_section_feature_distance_parse_error_uses_colspan(tmp_path):
-    """A feature-distance JSON that fails to parse must still render as a
-    single full-width (colspan) row — not silently dropped, and not
-    flattened into extra empty cells — with the filename and exception
-    message both HTML-escaped."""
-    gqr = _load()
-    feat_dir = tmp_path / "feature_dist"
-    feat_dir.mkdir()
-    (feat_dir / "<bad>.json").write_text("{not valid json")
-    valis_dir = tmp_path / "valis_summary"
-    valis_dir.mkdir()
-    html = gqr.registration_qc_section(tmp_path / "reg", feat_dir, valis_dir)
-    assert "colspan='3'" in html
-    assert "Parse error" in html
-    assert "<bad>.json" not in html
-    assert "&lt;bad&gt;.json" in html
 
 
 def test_manifest_section_escapes_html_special_patient_id(tmp_path):
@@ -329,11 +311,9 @@ def test_end_to_end_cli_smoke(tmp_path):
     # Minimal inputs: run summary + versions only; everything else empty dirs.
     (tmp_path / "preprocess_qc").mkdir()
     (tmp_path / "registration_qc").mkdir()
-    (tmp_path / "feature_dist").mkdir()
     (tmp_path / "valis_summary").mkdir()
     (tmp_path / "postprocess_qc").mkdir()
     (tmp_path / "seg_eval").mkdir()
-    (tmp_path / "distance_plots").mkdir()
     (tmp_path / "seg_qc").mkdir()
     # _summary()'s manifest has exactly patient P001; a matching seg-eval row
     # exercises the main()->seg_eval_section expected_patients wiring end to end.
@@ -360,16 +340,12 @@ def test_end_to_end_cli_smoke(tmp_path):
             str(tmp_path / "preprocess_qc"),
             "--registration-qc",
             str(tmp_path / "registration_qc"),
-            "--feature-distances",
-            str(tmp_path / "feature_dist"),
             "--valis-summary",
             str(tmp_path / "valis_summary"),
             "--postprocess-qc",
             str(tmp_path / "postprocess_qc"),
             "--seg-eval",
             str(tmp_path / "seg_eval"),
-            "--distance-plots",
-            str(tmp_path / "distance_plots"),
             "--seg-qc",
             str(tmp_path / "seg_qc"),
             "--run-summary",
@@ -576,6 +552,6 @@ def test_registration_section_renders_stare_tre_from_valis_dir(tmp_path):
             {"ix": 0, "iy": 0, "cx": 8, "cy": 8, "tre_rigid": 3.0, "tre_after": 0.5}
         ],
     )
-    html = gqr.registration_qc_section(tmp_path / "reg", tmp_path / "feat", str(valis))
+    html = gqr.registration_qc_section(tmp_path / "reg", str(valis))
     assert "STARE Tiled TRE" in html
     assert "No registration-accuracy summary found" not in html
