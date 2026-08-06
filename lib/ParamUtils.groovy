@@ -36,8 +36,11 @@ class ParamUtils {
             throw new IllegalArgumentException(
                 "mode='add_cycle' requires --prior_outdir pointing at the previous run's --outdir")
         }
-        ['csv/registered.csv', 'csv/postprocessed.csv'].each { rel ->
-            def f = new File("${priorOutdir}/${rel}")
+        // Which checkpoints a prior run must have left behind, and where they live,
+        // is Layout's to state — add_cycle.nf reads the very same two files.
+        Layout.ADD_CYCLE_CHECKPOINTS.each { step ->
+            def rel = Layout.checkpointCsvRelative(step)
+            def f = new File(Layout.checkpointCsv(priorOutdir, step))
             if (!f.exists()) {
                 throw new FileNotFoundException(
                     "mode='add_cycle': required checkpoint '${rel}' not found under --prior_outdir '${priorOutdir}'. " +

@@ -62,7 +62,7 @@ workflow MIRAGE {
         // Fast-fail: every new-cycle patient must exist in the prior run's
         // postprocessed checkpoint, else its masks/base-table can't be sourced.
         def newPatients   = CsvUtils.countImagesPerPatient(params.input).keySet()
-        def priorPostCsv  = "${params.prior_outdir}/csv/postprocessed.csv"
+        def priorPostCsv  = Layout.checkpointCsv(params.prior_outdir, Layout.POSTPROCESSED)
         def priorPatients = CsvUtils.countImagesPerPatient(priorPostCsv).keySet()
         def orphans = newPatients - priorPatients
         if (orphans) {
@@ -71,7 +71,7 @@ workflow MIRAGE {
         }
 
         if (params.dry_run) {
-            log.info "DRY RUN (add_cycle): validations passed for --input=${params.input}, --prior_outdir=${params.prior_outdir}; mask extraction will run against ${params.prior_outdir}/csv/postprocessed.csv's pyramid column."
+            log.info "DRY RUN (add_cycle): validations passed for --input=${params.input}, --prior_outdir=${params.prior_outdir}; mask extraction will run against ${priorPostCsv}'s pyramid column."
             return
         }
 

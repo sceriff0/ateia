@@ -73,7 +73,7 @@ workflow ADD_CYCLE {
 
     // registered.csv: patient_id,registered_image,is_reference,channels
     ch_prior_ref = Channel
-        .fromPath("${params.prior_outdir}/csv/registered.csv", checkIfExists: true)
+        .fromPath(Layout.checkpointCsv(params.prior_outdir, Layout.REGISTERED), checkIfExists: true)
         .splitCsv(header: true)
         .filter { row -> row.is_reference?.toLowerCase() == 'true' }
         .map { row ->
@@ -87,7 +87,7 @@ workflow ADD_CYCLE {
     // pyramid's embedded mask series, which is the copy that is registered to the
     // pyramid's own frame.
     ch_prior_rows = Channel
-        .fromPath("${params.prior_outdir}/csv/postprocessed.csv", checkIfExists: true)
+        .fromPath(Layout.checkpointCsv(params.prior_outdir, Layout.POSTPROCESSED), checkIfExists: true)
         .splitCsv(header: true)
         .map { row -> [row.patient_id, file(row.merged_csv), file(row.cell_mask), file(row.pyramid)] }
 
