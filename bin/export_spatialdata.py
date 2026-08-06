@@ -130,16 +130,14 @@ def sanitize_for_uns(obj):
     return obj
 
 
-def load_qc(
-    reg_qc_paths: List[str], seg_eval_paths: List[str], versions_paths: List[str]
-) -> Tuple[Dict, Dict]:
+def load_qc(reg_qc_paths: List[str], versions_paths: List[str]) -> Tuple[Dict, Dict]:
     """Collect QC into a flattened dict (``uns['qc']``) and verbatim JSON strings.
 
     Storing both is deliberate: the flattened form is what people actually index
     into, and the verbatim string guarantees nothing is lost to flattening.
     """
-    qc: Dict = {"registration": {}, "segmentation": {}}
-    raw: Dict = {"registration": {}, "segmentation": {}}
+    qc: Dict = {"registration": {}}
+    raw: Dict = {"registration": {}}
 
     for p in reg_qc_paths:
         try:
@@ -150,24 +148,6 @@ def load_qc(
         key = str(doc.get("moving") or Path(p).stem)
         qc["registration"][key] = sanitize_for_uns(doc)
         raw["registration"][key] = json.dumps(doc)
-
-    for p in seg_eval_paths:
-        try:
-            doc = json.loads(Path(p).read_text())
-        except (OSError, json.JSONDecodeError) as exc:
-            logger.warning("skipping unreadable segmentation eval %s: %s", p, exc)
-            continue
-        key = str(doc.get("id") or Path(p).stem)
-        # downsample_factor travels WITH QualityScore, always: the score drifts with
-        # the factor, so a bare score cannot be compared against another run's.
-        if "downsample_factor" not in doc:
-            logger.warning(
-                "segmentation eval %s has no downsample_factor; QualityScore is not "
-                "comparable across runs without it",
-                p,
-            )
-        qc["segmentation"][key] = sanitize_for_uns(doc)
-        raw["segmentation"][key] = json.dumps(doc)
 
     versions: Dict[str, str] = {}
     for p in versions_paths:
@@ -486,9 +466,7 @@ def build_spatialdata(args) -> "object":
         args.reg_residuals or [], centroids, labels_arr, args.residual_join_max_px
     )
 
-    qc, extras = load_qc(
-        args.qc_json or [], args.seg_eval_json or [], args.versions or []
-    )
+    qc, extras = load_qc(args.qc_json or [], args.versions or [])
     table = build_table(
         args.quant_csv, args.patient_id, residuals, qc, extras, residual_stats
     )
@@ -586,7 +564,6 @@ def parse_args(argv=None):
     ap.add_argument("--nuclei-mask", help="nuclei label mask TIFF")
     ap.add_argument("--pyramid", help="merged pyramidal OME-TIFF")
     ap.add_argument("--qc-json", nargs="*", help="registration QC JSONs")
-    ap.add_argument("--seg-eval-json", nargs="*", help="segmentation eval JSONs")
     ap.add_argument("--reg-residuals", nargs="*", help="per-cell residual CSVs")
     ap.add_argument("--versions", nargs="*", help="versions.yml files")
     ap.add_argument("--patient-id", default="unknown")

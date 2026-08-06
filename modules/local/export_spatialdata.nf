@@ -26,7 +26,6 @@ process EXPORT_SPATIALDATA {
     input:
     tuple val(meta), path(quant_csv), path(contours_json), path(nucleus_contours_json, stageAs: 'nucleus_contours.json'), path(cell_mask), path(nuclei_mask), path(pyramid)
     path qc_json
-    path seg_eval_json
     path reg_residuals
 
     output:
@@ -43,7 +42,6 @@ process EXPORT_SPATIALDATA {
     def nuc_cont_arg  = params.quantify_compartments ? "--nucleus-contours-json ${nucleus_contours_json}" : ''
     def image_arg     = (params.spatialdata_include_image && pyramid) ? "--include-image --pyramid ${pyramid}" : ''
     def qc_arg        = qc_json       ? "--qc-json ${qc_json}"             : ''
-    def seg_arg       = seg_eval_json ? "--seg-eval-json ${seg_eval_json}" : ''
     def resid_arg     = reg_residuals ? "--reg-residuals ${reg_residuals}" : ''
     """
     input_bytes=\$(stat -L --printf="%s" ${quant_csv} 2>/dev/null || echo 0)
@@ -58,7 +56,6 @@ process EXPORT_SPATIALDATA {
         ${nuc_cont_arg} \\
         ${image_arg} \\
         ${qc_arg} \\
-        ${seg_arg} \\
         ${resid_arg} \\
         --patient-id ${meta.patient_id} \\
         --pixel-size ${params.pixel_size} \\

@@ -1,0 +1,8 @@
+{
+  "moving": "P001_mov1",
+  "reference": "P001_ref",
+  "stages": {
+    "rigid": { "dice_matched": 0.83, "median_displacement_um": 2.1, "n_matched": 19 },
+    "non_rigid": { "dice_matched": 0.91, "median_displacement_um": 0.9, "n_matched": 20 }
+  }
+}

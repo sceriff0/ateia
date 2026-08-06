@@ -206,26 +206,14 @@ Pyramidal OME-TIFF assembly and GeoJSON.
 | `skip_registration_qc` | `false` | Skip registration QC overlays. |
 | `qc_scale_factor` | `0.25` | Downsample factor for registration QC images. |
 | `skip_postprocessing_qc` | `false` | Skip segmentation/intensity QC plots. |
-| `skip_seg_quality_eval` | `false` | Skip reference-free cell-segmentation quality scoring (CellSegmentationEvaluator, 2D). |
-| `cse_pixel_size_um` | `null` | Pixel size (µm) passed to the CellSegmentationEvaluator; `null` falls back to `pixel_size`. |
-| `cse_max_pixels` | `50000000` | Bin image+masks so CSE scores at most this many pixels (caps memory/time on full-WSI masks). Geometry/area metrics are preserved by binning, but the composite `QualityScore` shifts with the factor — keep it **fixed** across a cohort for comparability. `null` disables (score at full resolution). |
-| `segeval_tag` | `segeval` | Tag on `bolt3x/attend_image_analysis` (Docker Hub) for the segmentation-quality-evaluator image. |
 | `skip_final_qc_report` | `false` | Skip the aggregated HTML QC report. |
-
-**Segmentation quality evaluation (CSE):** after `SEGMENT`, a vendored, patched
-[CellSegmentationEvaluator](https://github.com/murphygroup/CellSegmentationEvaluator)
-scores each patient's whole-cell/nuclear mask pair with reference-free metrics
-(no ground truth needed) and merges per-patient scores into one CSV at
-`${outdir}/qc/segmentation/segmentation_metrics.csv`. It runs automatically
-unless `skip_seg_quality_eval` is set; `cse_pixel_size_um` overrides the
-pixel size passed to the evaluator, falling back to `pixel_size` when unset.
 
 ### Reports
 
 - **`qc/mirage_qc_report_<timestamp>.html`** — aggregated QC report: run summary,
   pipeline-stage status, sample manifest, preprocessing / registration (overlays,
-  rTRE, feature distances + histograms, warp-seg QC) / segmentation overlays /
-  postprocessing QC, CellSegmentationEvaluator metrics, and software versions.
+  VALIS rTRE, STARE tiled TRE, warp-seg QC) / segmentation overlays /
+  postprocessing QC, and software versions.
   Controlled by `skip_final_qc_report`.
 - **`qc/mirage_resource_report.html`** — computational-resource report built from
   the per-task size logs and Nextflow `trace.txt`: run totals, per-process

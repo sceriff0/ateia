@@ -356,7 +356,6 @@ results/                          # = --outdir
 │   └── qc/                       # preprocess / registration / postprocessing QC
 ├── csv/                          # checkpoint CSVs (all patients)
 └── qc/                           # aggregated HTML QC report
-    └── segmentation/             # segmentation_metrics.csv (CSE quality scores, all patients)
 ```
 
 The tables you'll analyze:
@@ -367,7 +366,6 @@ The tables you'll analyze:
 | `geojson/cells.geojson` | One QuPath feature per cell: whole-cell polygon + measurement array (centroid µm, marker intensities, morphology). Carries `nucleusGeometry` in compartment mode. |
 | `geojson/cells_data.csv` | The cell table with per-marker **z-scores** added. |
 | `segmentation/*_cell_mask.tif` | Whole-cell instance labels (uint32); each non-zero value is one cell. |
-| `qc/segmentation/segmentation_metrics.csv` | Reference-free segmentation-quality score (CellSegmentationEvaluator) per patient. Skip with `--skip_seg_quality_eval`. |
 
 These open directly in QuPath, napari, and OMERO, and feed
 [FlowPath](https://flowpath.readthedocs.io/) for interactive gating.

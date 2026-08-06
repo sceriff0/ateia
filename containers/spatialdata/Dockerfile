@@ -11,7 +11,7 @@
 # `tiled` image pins zarr 2.18 for tifffile's aszarr region reads. They are separate
 # images precisely so those two constraints never have to be reconciled.
 #
-# Python 3.12, NOT the 3.11 the other CPU images (`tiled`, `segeval`) use:
+# Python 3.12, NOT the 3.11 the other CPU images (`tiled`) use:
 # spatialdata 0.8.0 declares Requires-Python >= 3.12. On 3.11 pip silently skips it
 # and reports "no matching distribution found for spatialdata>=0.8.0", which reads
 # like a typo'd package name rather than a Python-version floor.

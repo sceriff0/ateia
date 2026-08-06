@@ -1,0 +1,11 @@
+{
+  "run": {
+    "start": "preprocessing",
+    "stop": "postprocessing",
+    "registration_method": "valis"
+  },
+  "manifest": {
+    "totals": { "patients": 1, "images": 2, "channels": 3 },
+    "patients": { "P001": { "images": 2, "channels": 3 } }
+  }
+}

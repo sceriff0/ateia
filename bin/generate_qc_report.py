@@ -49,11 +49,6 @@ def parse_args():
         default="postprocess_qc/",
         help="Directory of postprocessing QC PNGs",
     )
-    p.add_argument(
-        "--seg-eval",
-        default=None,
-        help="Directory of segmentation_metrics.csv from CSE",
-    )
     p.add_argument("--versions", default=None, help="Path to collated versions.yml")
     p.add_argument("--run-summary", default=None, help="Path to run_summary.json")
     p.add_argument(
@@ -104,10 +99,9 @@ def img_to_b64(path):
 def parse_csv_table(csv_path):
     """
     Parse a generic CSV into (headers, rows) where each row is a list of
-    strings in header order. Used for both the Valis preprocessed_summary.csv
-    (rTRE, D, n_matches, etc.) and the CSE segmentation_metrics.csv (id,
-    QualityScore, plus zero or more dynamic `metric::submetric` columns) —
-    the two were byte-identical parsers, so they share this implementation.
+    strings in header order. Used for the Valis preprocessed_summary.csv
+    (rTRE, D, n_matches, etc.); kept generic (columns are whatever the CSV
+    declares) so any future summary CSV can reuse it unchanged.
     """
     with open(csv_path, newline="") as fh:
         reader = csv.DictReader(fh)
@@ -366,7 +360,7 @@ def _html_table(headers, rows, extra_body_html=""):
     every header and every cell value via ``html.escape``.
 
     Centralizes the table-render logic that used to be duplicated across the
-    registration-QC Valis rTRE table and the CSE seg-eval table, and
+    registration-QC Valis rTRE table and the STARE tiled-TRE table, and
     ensures neither can inject raw CSV/JSON-derived HTML into the report.
 
     `extra_body_html`: optional pre-rendered ``<tr>...</tr>`` HTML appended
@@ -797,99 +791,6 @@ def seg_overlay_section(postprocess_dir):
     return section("Segmentation Overlays", img_grid(overlays, wide=True))
 
 
-def seg_eval_section(seg_eval_dir, expected_patients=None):
-    """
-    Render the Cell Segmentation Evaluator (CSE) metrics table.
-    Any number of segmentation_metrics.csv files may be present (one per
-    merge, though normally just one); each is rendered as its own table
-    since column sets can differ across runs. Columns are whatever
-    merge_seg_eval.py wrote, dynamically — this now includes
-    `downsample_factor` and `effective_pixel_size_um` so per-patient
-    QualityScore drift from CSE-budget downsampling is visible.
-
-    `expected_patients`: optional collection of patient IDs the run actually
-    processed (e.g. from run_summary.json's manifest, which is built from the
-    input CSV independent of seg-eval's own output). SEG_QUALITY_EVAL runs
-    under an `errorStrategy='ignore'` QC gate, so a patient can fail/OOM there
-    and simply be absent from segmentation_metrics.csv with no other trace.
-    When `expected_patients` is available we diff it against the `id` column
-    to name exactly which patients silently dropped; when it isn't, we still
-    report the present-count so a shrinking row count is at least visible.
-    """
-    parts = []
-    csv_files = list_files(seg_eval_dir, "*.csv")
-    if not csv_files:
-        parts.append(
-            '<p class="empty-notice">No segmentation-evaluation CSVs found.</p>'
-        )
-    else:
-        expected_set = set(expected_patients) if expected_patients else None
-        for csv_path in csv_files:
-            try:
-                headers, rows = parse_csv_table(csv_path)
-            except Exception as exc:
-                parts.append(
-                    '<p class="empty-notice">Could not parse '
-                    f"{html.escape(Path(csv_path).name)}: {html.escape(str(exc))}</p>"
-                )
-                continue
-            parts.append(
-                "<p style='font-size:0.85rem;color:#666;margin-bottom:6px;'>"
-                f"{html.escape(Path(csv_path).name)}</p>"
-            )
-            parts.append(_seg_eval_reconciliation_html(headers, rows, expected_set))
-            parts.append(_html_table(headers, rows))
-    return section("Segmentation Quality (CSE)", "\n".join(parts))
-
-
-def _seg_eval_reconciliation_html(headers, rows, expected_set):
-    """
-    Build the expected-vs-present reconciliation line for one seg-eval CSV.
-
-    `expected_set`: patient IDs known from the run manifest, or None if that
-    signal isn't available to the caller. `headers`/`rows` come from
-    parse_csv_table. Missing patients (present in expected_set but absent
-    from the `id` column) are named explicitly since they were most likely
-    dropped silently by the QC `errorStrategy='ignore'` gate around
-    SEG_QUALITY_EVAL, not because they were never run.
-    """
-    n_present = len(rows)
-    if "id" in headers:
-        id_idx = headers.index("id")
-        present_ids = {row[id_idx] for row in rows if id_idx < len(row)}
-    else:
-        present_ids = set()
-
-    if expected_set is None:
-        return (
-            f"<p style='font-size:0.85rem;color:#666;'>{n_present} patient(s) present. "
-            "Expected patient count is not available to this section, so a "
-            "patient silently dropped by the QC errorStrategy='ignore' gate "
-            "cannot be flagged here — cross-check against the Sample Manifest "
-            "section above.</p>"
-        )
-
-    n_expected = len(expected_set)
-    missing = sorted(expected_set - present_ids)
-    if missing:
-        missing_escaped = ", ".join(html.escape(str(pid)) for pid in missing)
-        return (
-            f"<p style='font-size:0.85rem;color:#c0392b;font-weight:600;'>"
-            f"{n_present}/{n_expected} expected patients present — "
-            f"MISSING (likely dropped by QC errorStrategy='ignore'): "
-            f"{missing_escaped}</p>"
-        )
-    return (
-        f"<p style='font-size:0.85rem;color:#666;'>"
-        f"{n_present}/{n_expected} expected patients present.</p>"
-    )
-
-
-# ---------------------------------------------------------------------------
-# Data copy
-# ---------------------------------------------------------------------------
-
-
 def copy_data(args):
     """Copy the raw QC artifacts (PNGs, CSVs) into the report's data directory."""
     data_dir = Path(args.data_dir)
@@ -909,7 +810,6 @@ def copy_data(args):
     copy_glob(args.registration_qc, "*.png", "registration_qc")
     copy_glob(args.valis_summary, "*.csv", "valis_summary")
     copy_glob(args.postprocess_qc, "*.png", "postprocess_qc")
-    copy_glob(args.seg_eval, "*.csv", "seg_eval")
     copy_glob(args.seg_qc, "*.json", "seg_qc")
     if args.run_summary and Path(args.run_summary).exists():
         shutil.copy2(args.run_summary, data_dir / "run_summary.json")
@@ -932,8 +832,7 @@ def main():
     present = {
         "Preprocessing": bool(list_files(args.preprocess_qc, "*.png")),
         "Registration": bool(list_files(args.registration_qc, "*")),
-        "Segmentation & Quant": bool(list_files(args.postprocess_qc, "*.png"))
-        or bool(list_files(args.seg_eval, "*.csv")),
+        "Segmentation & Quant": bool(list_files(args.postprocess_qc, "*.png")),
     }
 
     html_parts = [html_header(timestamp)]
@@ -951,10 +850,6 @@ def main():
     html_parts.append(reconciliation_section(args.valis_summary, args.seg_qc))
     html_parts.append(seg_overlay_section(args.postprocess_qc))
     html_parts.append(postprocess_qc_section(args.postprocess_qc))
-    expected_patients = (
-        set(summary.get("manifest", {}).get("patients", {}).keys()) or None
-    )
-    html_parts.append(seg_eval_section(args.seg_eval, expected_patients))
     html_parts.append(versions_section(args.versions))
     html_parts.append(html_footer())
 
