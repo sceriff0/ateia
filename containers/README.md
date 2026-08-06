@@ -19,7 +19,7 @@ the HPC/cluster side (unlike GHCR, whose default-private packages caused
 `403 Forbidden` on `singularity pull`).
 
 > `<tag>` is a content-descriptive tag (e.g. `preprocess`,
-> `convert_bioformats_2`, `segeval`) — not a release version. The modules pin
+> `convert_bioformats_2`, `tiled`) — not a release version. The modules pin
 > these tags directly and never use `:latest`.
 >
 > **Reproducibility caveat:** these descriptive tags are **mutable** — rebuilding and
@@ -40,7 +40,6 @@ the HPC/cluster side (unlike GHCR, whose default-private packages caused
 | `istantseg` | `bolt3x/attend_image_analysis:instant_seg` | `SEGMENT` (`params.seg_method` = `instantseg`) | `pytorch/pytorch:2.5.1-cuda11.8-cudnn9-runtime` + `instanseg-torch` |
 | `merge` | `bolt3x/attend_image_analysis:merge` | `MERGE_AND_PYRAMID` | `pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime` + tifffile/imagecodecs pyramid stack |
 | `debug_diffeo` | `bolt3x/attend_image_analysis:debug_diffeo` | `GENERATE_REGISTRATION_QC` | `nvidia/cuda:12.2.2-cudnn8-devel-ubuntu22.04` + Miniconda/bftools + StarDist/cudipy diffeo QC stack |
-| `segeval` | `bolt3x/attend_image_analysis:segeval` | `SEG_QUALITY_EVAL`, `MERGE_SEG_EVAL` | `python:3.11-slim` + numpy/scipy/pandas/scikit-image/scikit-learn/aicsimageio/tifffile/xmltodict (vendored CSE metrics) |
 | `tiled` | `bolt3x/attend_image_analysis:tiled` | `TILED_REGISTER`, `WARP_SEG_QC_TILED` (STARE `registration_method='tiled'`) | `python:3.11-slim` + numpy/scipy/scikit-image/tifffile — **no JVM/BioFormats/libvips/GPU** (~438 MB, vs the multi-GB VALIS image) |
 | `spatialdata` | `bolt3x/attend_image_analysis:spatialdata` | `EXPORT_SPATIALDATA` (+ the out-of-band `bin/join_flowpath.py` cohort join) | `python:3.11-slim` + spatialdata/anndata/geopandas/zarr 3 — CPU only, no JVM/GPU |
 | VALIS (not vendored) | `cdgatenbee/valis-wsi:1.0.0` (upstream) | `REGISTER` | upstream maintained image — **not rebuilt or published by us** (see note below) |

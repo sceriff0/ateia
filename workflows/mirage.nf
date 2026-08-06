@@ -203,11 +203,11 @@ workflow MIRAGE {
         /* -------------------- FINAL QC REPORT (add_cycle) -------------------- */
         // Mirrors the standard-path aggregation below (version collation + QC report +
         // optional size-log aggregation), scoped to what ADD_CYCLE actually emits.
-        // ADD_CYCLE has no separate PREPROCESSING-QC / VALIS-summary / POSTPROCESSING-QC /
-        // seg-eval emits of its own (it calls PREPROCESSING internally but does not
-        // re-expose its QC pngs, and it has no POSTPROCESSING/CSE step at all — masks are
-        // reused, not re-segmented) — those four report inputs are deliberately left empty
-        // here rather than silently dropping the whole report.
+        // ADD_CYCLE has no separate PREPROCESSING-QC / VALIS-summary / POSTPROCESSING-QC
+        // emits of its own (it calls PREPROCESSING internally but does not re-expose its
+        // QC pngs, and it has no POSTPROCESSING step at all — masks are reused, not
+        // re-segmented) — those three report inputs are deliberately left empty here
+        // rather than silently dropping the whole report.
         if (!params.skip_final_qc_report) {
             def ch_collated_versions = ADD_CYCLE.out.versions
                 .unique()
@@ -228,7 +228,6 @@ workflow MIRAGE {
                     quantify_compartments: params.quantify_compartments,
                     expanded_quantification: params.expanded_quantification,
                     pixel_size: params.pixel_size,
-                    cse_pixel_size_um: params.cse_pixel_size_um,
                 ],
                 manifest: [
                     totals: [
@@ -250,7 +249,6 @@ workflow MIRAGE {
                 ADD_CYCLE.out.qc.map { meta, files -> files }.collect().ifEmpty([]),
                 Channel.empty().collect().ifEmpty([]),                             // valis_summary_csvs (not re-emitted by ADD_CYCLE)
                 Channel.empty().collect().ifEmpty([]),                             // postprocess_qc_pngs (no POSTPROCESSING call in add_cycle)
-                Channel.empty().collect().ifEmpty([]),                             // seg_eval_csvs (no CSE step in add_cycle)
                 ch_collated_versions,
                 ch_run_summary,
                 ADD_CYCLE.out.seg_qc.map { meta, files -> files }.collect().ifEmpty([]),
@@ -359,7 +357,6 @@ workflow MIRAGE {
         def ch_registration_qc_pngs = Channel.empty()
         def ch_valis_summary_csvs   = Channel.empty()
         def ch_postprocess_qc_pngs  = Channel.empty()
-        def ch_seg_eval_csv         = Channel.empty()
         def ch_versions             = Channel.empty()
         def ch_seg_qc_jsons   = Channel.empty()
 
@@ -378,7 +375,6 @@ workflow MIRAGE {
         }
         if (ParamUtils.shouldRun('postprocessing', params.start, effective_stop)) {
             ch_postprocess_qc_pngs = ch_postprocess_qc_pngs.mix(POSTPROCESSING.out.postprocess_qc)
-            ch_seg_eval_csv = ch_seg_eval_csv.mix(POSTPROCESSING.out.seg_eval_metrics)
             ch_versions = ch_versions.mix(POSTPROCESSING.out.versions)
         }
 
@@ -408,7 +404,6 @@ workflow MIRAGE {
                 quantify_compartments: params.quantify_compartments,
                 expanded_quantification: params.expanded_quantification,
                 pixel_size: params.pixel_size,
-                cse_pixel_size_um: params.cse_pixel_size_um,
             ],
             manifest: [
                 totals: [
@@ -428,7 +423,6 @@ workflow MIRAGE {
             ch_registration_qc_pngs.collect().ifEmpty([]),
             ch_valis_summary_csvs.collect().ifEmpty([]),
             ch_postprocess_qc_pngs.collect().ifEmpty([]),
-            ch_seg_eval_csv.collect().ifEmpty([]),
             ch_collated_versions,
             ch_run_summary,
             ch_seg_qc_jsons.collect().ifEmpty([]),

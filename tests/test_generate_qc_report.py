@@ -140,115 +140,6 @@ def test_seg_overlay_section_only_overlays(tmp_path):
     assert "intensity_distributions" not in html
 
 
-def _write_seg_eval_csv(path, rows, extra_headers=()):
-    import csv as csv_mod
-
-    headers = ["id", "QualityScore", "downsample_factor", "effective_pixel_size_um"]
-    headers += list(extra_headers)
-    with open(path, "w", newline="") as fh:
-        w = csv_mod.DictWriter(fh, fieldnames=headers)
-        w.writeheader()
-        w.writerows(rows)
-
-
-def test_seg_eval_section_no_csvs(tmp_path):
-    gqr = _load()
-    d = tmp_path / "seg_eval"
-    d.mkdir()
-    html = gqr.seg_eval_section(str(d))
-    assert "No segmentation-evaluation" in html
-
-
-def test_seg_eval_section_surfaces_downsample_factor_column(tmp_path):
-    gqr = _load()
-    d = tmp_path / "seg_eval"
-    d.mkdir()
-    _write_seg_eval_csv(
-        d / "segmentation_metrics.csv",
-        [
-            {
-                "id": "P001",
-                "QualityScore": "0.8",
-                "downsample_factor": "4",
-                "effective_pixel_size_um": "1.3",
-            }
-        ],
-    )
-    html = gqr.seg_eval_section(str(d))
-    assert "downsample_factor" in html
-    assert "effective_pixel_size_um" in html
-    assert ">4<" in html
-
-
-def test_seg_eval_section_reconciliation_flags_missing_patient(tmp_path):
-    gqr = _load()
-    d = tmp_path / "seg_eval"
-    d.mkdir()
-    # P002 is expected (from the run manifest) but silently absent here, as if
-    # dropped by the QC errorStrategy='ignore' gate around SEG_QUALITY_EVAL.
-    _write_seg_eval_csv(
-        d / "segmentation_metrics.csv",
-        [
-            {
-                "id": "P001",
-                "QualityScore": "0.8",
-                "downsample_factor": "1",
-                "effective_pixel_size_um": "0.65",
-            }
-        ],
-    )
-    html = gqr.seg_eval_section(str(d), expected_patients={"P001", "P002"})
-    assert "1/2 expected patients present" in html
-    assert "P002" in html
-    assert "MISSING" in html
-
-
-def test_seg_eval_section_reconciliation_all_present(tmp_path):
-    gqr = _load()
-    d = tmp_path / "seg_eval"
-    d.mkdir()
-    _write_seg_eval_csv(
-        d / "segmentation_metrics.csv",
-        [
-            {
-                "id": "P001",
-                "QualityScore": "0.8",
-                "downsample_factor": "1",
-                "effective_pixel_size_um": "0.65",
-            }
-        ],
-    )
-    html = gqr.seg_eval_section(str(d), expected_patients={"P001"})
-    assert "1/1 expected patients present" in html
-    assert "MISSING" not in html
-
-
-def test_seg_eval_section_escapes_html_special_patient_id(tmp_path):
-    """A patient/id value containing HTML-special characters (from the
-    CSV or run manifest) must be escaped, never injected raw — both in the
-    metrics table and in the reconciliation "MISSING" line."""
-    gqr = _load()
-    d = tmp_path / "seg_eval"
-    d.mkdir()
-    _write_seg_eval_csv(
-        d / "segmentation_metrics.csv",
-        [
-            {
-                "id": "<b>P001</b>",
-                "QualityScore": "0.8",
-                "downsample_factor": "1",
-                "effective_pixel_size_um": "0.65",
-            }
-        ],
-    )
-    html = gqr.seg_eval_section(str(d), expected_patients={"<b>P001</b>", "A & B"})
-    assert "<b>P001</b>" not in html
-    assert "&lt;b&gt;P001&lt;/b&gt;" in html
-    assert "A & B" not in html
-    assert "A &amp; B" in html
-    assert "MISSING" in html
-
-
 def test_html_table_escapes_headers_and_cells():
     gqr = _load()
     out = gqr._html_table(["<script>h</script>"], [["A & B"], ["<i>x</i>"]])
@@ -287,47 +178,13 @@ def test_manifest_section_escapes_html_special_patient_id(tmp_path):
     assert "&lt;b&gt;P001&lt;/b&gt;" in html
 
 
-def test_seg_eval_section_no_expected_source_still_shows_present_count(tmp_path):
-    gqr = _load()
-    d = tmp_path / "seg_eval"
-    d.mkdir()
-    _write_seg_eval_csv(
-        d / "segmentation_metrics.csv",
-        [
-            {
-                "id": "P001",
-                "QualityScore": "0.8",
-                "downsample_factor": "1",
-                "effective_pixel_size_um": "0.65",
-            }
-        ],
-    )
-    html = gqr.seg_eval_section(str(d), expected_patients=None)
-    assert "1 patient(s) present" in html
-    assert "not available" in html.lower()
-
-
 def test_end_to_end_cli_smoke(tmp_path):
     # Minimal inputs: run summary + versions only; everything else empty dirs.
     (tmp_path / "preprocess_qc").mkdir()
     (tmp_path / "registration_qc").mkdir()
     (tmp_path / "valis_summary").mkdir()
     (tmp_path / "postprocess_qc").mkdir()
-    (tmp_path / "seg_eval").mkdir()
     (tmp_path / "seg_qc").mkdir()
-    # _summary()'s manifest has exactly patient P001; a matching seg-eval row
-    # exercises the main()->seg_eval_section expected_patients wiring end to end.
-    _write_seg_eval_csv(
-        tmp_path / "seg_eval" / "segmentation_metrics.csv",
-        [
-            {
-                "id": "P001",
-                "QualityScore": "0.8",
-                "downsample_factor": "1",
-                "effective_pixel_size_um": "0.325",
-            }
-        ],
-    )
     rs = _summary(tmp_path)
     v = tmp_path / "v.yml"
     v.write_text('"A:B":\n    tool: 1.0\n')
@@ -344,8 +201,6 @@ def test_end_to_end_cli_smoke(tmp_path):
             str(tmp_path / "valis_summary"),
             "--postprocess-qc",
             str(tmp_path / "postprocess_qc"),
-            "--seg-eval",
-            str(tmp_path / "seg_eval"),
             "--seg-qc",
             str(tmp_path / "seg_qc"),
             "--run-summary",
@@ -370,14 +225,9 @@ def test_end_to_end_cli_smoke(tmp_path):
         "Registration QC",
         "Segmentation Overlays",
         "Postprocessing QC",
-        "Segmentation Quality (CSE)",
         "Software Versions",
     ]:
         assert header in html, f"missing section: {header}"
-    # Reconciliation wiring: main() passes the manifest's patient set through
-    # to seg_eval_section, and P001 (the only expected patient) is present.
-    assert "1/1 expected patients present" in html
-    assert "downsample_factor" in html
 
 
 # ── (C) feature-TRE vs cell-displacement reconciliation ─────────────────────────

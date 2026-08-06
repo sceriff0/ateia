@@ -104,12 +104,7 @@ def test_load_qc_keeps_verbatim_json_and_survives_bad_files(tmp_path):
     bad = tmp_path / "broken.json"
     bad.write_text("{not json")
 
-    seg = tmp_path / "s_seg_eval.json"
-    seg.write_text(
-        json.dumps({"id": "P1", "QualityScore": 0.87, "downsample_factor": 2})
-    )
-
-    qc, extras = esd.load_qc([str(good), str(bad)], [str(seg)], [])
+    qc, extras = esd.load_qc([str(good), str(bad)], [])
     assert "cycle2" in qc["registration"]
     assert np.isnan(qc["registration"]["cycle2"]["matching"]["radius_factor"])
     # verbatim copy is preserved alongside the flattened form
@@ -119,7 +114,6 @@ def test_load_qc_keeps_verbatim_json_and_survives_bad_files(tmp_path):
         ]
         is None
     )
-    assert qc["segmentation"]["P1"]["QualityScore"] == 0.87
 
 
 # ── spatial join of registration residuals ─────────────────────────────────────

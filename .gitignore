@@ -98,7 +98,7 @@ docs/superpowers/
 # differs by machine. Hand-authored fixtures the generator does NOT write
 # (P001_image.tiff, P001_merged_quant.csv, P001_nuclei_mask.tif,
 # P001_pyramid.ome.tiff, sample_size_log*.csv, sample_valis_summary.csv,
-# sample_versions.yml, seg_eval_P00*.json) stay
+# sample_versions.yml, sample_run_summary.json, sample_seg_qc.json) stay
 # tracked and are NOT listed here.
 tests/testdata/P001_ref.ome.tiff
 tests/testdata/P001_mov1.ome.tiff

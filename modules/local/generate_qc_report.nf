@@ -12,7 +12,6 @@ process GENERATE_QC_REPORT {
     path(registration_qc_pngs, stageAs: 'registration_qc/*')
     path(valis_summary_csvs, stageAs: 'valis_summary/*')
     path(postprocess_qc_pngs, stageAs: 'postprocess_qc/*')
-    path(seg_eval_csvs, stageAs: 'seg_eval/*')
     path(versions_yml)
     path(run_summary_json)
     path(seg_qc_jsons, stageAs: 'seg_qc/*')
@@ -34,7 +33,6 @@ process GENERATE_QC_REPORT {
         --registration-qc registration_qc/ \\
         --valis-summary valis_summary/ \\
         --postprocess-qc postprocess_qc/ \\
-        --seg-eval seg_eval/ \\
         --versions ${versions_yml} \\
         --run-summary ${run_summary_json} \\
         --seg-qc seg_qc/ \\
