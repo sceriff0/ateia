@@ -13,6 +13,22 @@
                          per tile) -> TILED_SOLVE -> TILED_STITCH. Maximises parallelism.
 
     Input:  ch_grouped_meta - Channel of [patient_id, reference_item, all_items]
+
+    THE ADAPTER CONTRACT (identical in adapters/valis_adapter.nf, and binding on any third
+    adapter). Every registration adapter takes [patient_id, reference_item, all_items]
+    and emits EXACTLY these names:
+
+        registered          [meta, file]                registered slides (+ passthroughs)
+        transform           [patient_id, transform]     ONE transform object per patient
+        transform_by_slide  [meta, transform]           one transform per MOVING slide
+        stage_checkpoint    [patient_id, dir]           intermediate-stage fields
+        size_logs / versions / summary
+
+    A method that produces no artifact for one of these emits `Channel.empty()` for it --
+    a NULL OBJECT, never a missing emit and never an error. That is what lets
+    REGISTER_PATIENT wire both backends with one short branch, and it is why nothing
+    downstream of that branch has to know which method ran. A future adapter inherits the
+    rule: declare every name; empty the ones your method cannot produce.
 ========================================================================================
 */
 
@@ -151,11 +167,14 @@ workflow TILED_ADAPTER {
 
     emit:
     registered       = ch_registered
-    // Manifest keyed by patient, mirroring VALIS_ADAPTER.out.registrar.
-    manifest         = ch_manifest_by_meta.map { meta, m -> tuple(meta.patient_id, m) }
-    // Same manifests keyed by meta — the reg_qc=2 seg-QC joins one manifest per moving slide.
-    manifest_by_meta = ch_manifest_by_meta
-    // The tiled method composes no stages destructively, so it needs no pre-micro checkpoint.
+    // The STARE transform manifest keyed by patient — the same slot VALIS fills with its
+    // registrar pickle. A patient with several moving slides contributes several items here.
+    transform        = ch_manifest_by_meta.map { meta, m -> tuple(meta.patient_id, m) }
+    // The same manifests keyed by meta. Unlike VALIS, the tiled method DOES have one transform
+    // per moving slide, and the reg_qc=2 seg-QC joins them per slide.
+    transform_by_slide = ch_manifest_by_meta
+    // The tiled method composes no stages destructively, so it needs no pre-micro checkpoint:
+    // the null object the contract above requires.
     stage_checkpoint = Channel.empty()
     size_logs        = ch_size_logs
     versions         = ch_versions

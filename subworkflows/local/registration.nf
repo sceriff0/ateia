@@ -20,9 +20,11 @@ include { REGISTER_PATIENT                  } from './register_patient'
     Configuration:
         - params.skip_registration_qc: true | false (skip QC generation)
         - params.qc_scale_factor: float (QC downsampling factor, default 0.25)
-        - params.registration_method: 'valis' | 'tiled' -- read HERE and passed to
-          REGISTER_PATIENT as an argument; the adapter dispatch itself is that
-          subworkflow's, shared with add_cycle.nf.
+        - params.registration_method: 'valis' | 'tiled' -- read ONCE here, the single
+          decision site on this path, and handed as an ARGUMENT to both REGISTER_PATIENT
+          (which owns the adapter dispatch) and SEG_QC (which owns the warp dispatch).
+          Neither reads the global, so neither can be what lifts add_cycle's VALIS-only
+          guarantee.
 
     Input:
         ch_preprocessed: Channel of [meta, file] tuples
@@ -119,17 +121,23 @@ workflow REGISTRATION {
     // The GROUPING above stays here: the linear path's sized groupKey and its
     // allow_auto_reference resolution have no counterpart on the add_cycle path,
     // whose reference is the frozen prior one.
-    REGISTER_PATIENT(ch_grouped, params.registration_method)
+    // The ONE read of params.registration_method on this path. Bound once and passed as an
+    // argument to both consumers, so there is a single decision site instead of two reads
+    // that could drift apart.
+    def registration_method = params.registration_method
 
-    ch_registered       = REGISTER_PATIENT.out.registered
-    ch_images_multi     = REGISTER_PATIENT.out.images_multi
-    ch_registrar_pickle = REGISTER_PATIENT.out.registrar
-    ch_stage_checkpoint = REGISTER_PATIENT.out.stage_checkpoint
-    // Per-moving-slide STARE manifest (meta-keyed), used by the tiled reg_qc=2 seg-QC join.
-    ch_manifest_by_meta = REGISTER_PATIENT.out.manifest_by_meta
-    ch_adapter_logs     = REGISTER_PATIENT.out.size_logs
-    ch_adapter_versions = REGISTER_PATIENT.out.versions
-    ch_adapter_summary  = REGISTER_PATIENT.out.summary
+    REGISTER_PATIENT(ch_grouped, registration_method)
+
+    ch_registered         = REGISTER_PATIENT.out.registered
+    ch_images_multi       = REGISTER_PATIENT.out.images_multi
+    // The method's transform, per patient (VALIS registrar pickle / STARE manifest) and --
+    // where the method has one -- per moving slide. The unfilled one is Channel.empty().
+    ch_transform          = REGISTER_PATIENT.out.transform
+    ch_transform_by_slide = REGISTER_PATIENT.out.transform_by_slide
+    ch_stage_checkpoint   = REGISTER_PATIENT.out.stage_checkpoint
+    ch_adapter_logs       = REGISTER_PATIENT.out.size_logs
+    ch_adapter_versions   = REGISTER_PATIENT.out.versions
+    ch_adapter_summary    = REGISTER_PATIENT.out.summary
 
     // reg_qc: 0 = none, 1 = DAPI overlay, 2 = + segmentation overlap (legacy
     // skip_registration_qc=true forces 0). ParamUtils.regQcLevel is the single definition.
@@ -185,12 +193,13 @@ workflow REGISTRATION {
     ch_seg_qc_size_log = Channel.empty()
     ch_seg_qc_versions = Channel.empty()
     // The whole block (segment natives -> branch -> checkpoint totalisation -> method-specific
-    // warp) lives in subworkflows/local/seg_qc.nf, shared with add_cycle.nf. The valis/tiled
-    // dispatch is SEG_QC's business, so nothing here reaches back through the adapter seam:
-    // the tiled-only and valis-only channels are handed over together and SEG_QC reads the
-    // ones its branch needs (the other side is Channel.empty() and is never consumed).
+    // warp) lives in subworkflows/local/seg_qc.nf, shared with add_cycle.nf. Both transform
+    // channels are handed over under the adapters' shared names; whichever one the method does
+    // not produce is Channel.empty() (the adapters' null-object contract) and is never read.
+    // The method reaches SEG_QC as an ARGUMENT — the same value REGISTER_PATIENT got above.
     if (do_seg_qc) {
-        SEG_QC(ch_images_multi, ch_registrar_pickle, ch_stage_checkpoint, ch_manifest_by_meta)
+        SEG_QC(ch_images_multi, ch_transform, ch_stage_checkpoint, ch_transform_by_slide,
+               registration_method)
         ch_seg_qc          = SEG_QC.out.metrics
         ch_seg_residuals   = SEG_QC.out.per_cell
         ch_seg_qc_size_log = SEG_QC.out.size_log

@@ -44,10 +44,15 @@
                                         multi-slide patients only; seg-QC input
         checkpoint_csv   the registration checkpoint manifest (see
                          REGISTERED_CHECKPOINT / Layout)
-        registrar        [patient_id, registrar.pickle | manifest] — seg-QC warper
-        stage_checkpoint [patient_id, reg_stage_checkpoint/] (VALIS, reg_qc>=2 only)
-        manifest_by_meta [meta, manifest] (tiled only)
+        transform          [patient_id, registrar.pickle | manifest] — seg-QC warper
+        transform_by_slide [meta, manifest] — one per moving slide (empty under VALIS)
+        stage_checkpoint   [patient_id, reg_stage_checkpoint/] (VALIS, reg_qc>=2 only)
         size_logs / versions / summary — the adapter's, unaggregated
+
+    Those last six are passed through from the adapter UNRENAMED. Both adapters emit the
+    same vocabulary and fill any slot their method lacks with `Channel.empty()` (the
+    contract is written out in either adapter's header), so this file holds no
+    translation table and nothing below it has to know which backend ran.
 ========================================================================================
 */
 
@@ -98,41 +103,27 @@ workflow REGISTER_PATIENT {
     // ========================================================================
     // RUN REGISTRATION VIA METHOD-SPECIFIC ADAPTER
     // ========================================================================
-    // Registrar pickle (per patient) for the GeoJSON seg-QC, and the pre-micro
-    // displacement fields (only when reg_qc >= 2 asked REGISTER for them), both come
-    // from classic VALIS. Per-moving-slide STARE manifests come from tiled.
-    ch_registrar_pickle = Channel.empty()
-    ch_stage_checkpoint = Channel.empty()
-    ch_manifest_by_meta = Channel.empty()
-
-    // Both adapters emit the identical channel contract, so everything downstream
-    // (QC, checkpoint, error estimation) is method-agnostic.
+    // The ENTIRE method dispatch. Both adapters emit the identical vocabulary
+    // (registered / transform / transform_by_slide / stage_checkpoint / size_logs /
+    // versions / summary), with Channel.empty() in any slot a method cannot fill — see
+    // either adapter's header for the contract. So this binds ONE name, `ch_adapter`,
+    // instead of a per-emit translation table plus the pre-declared empty channels that
+    // used to exist only so the union of the two vocabularies could be assembled here.
     //
     // NOTE: the *old distributed-VALIS* low-memory path was archived 2026-07-24
     // (git tag archive/tiled-valis-2026-07-24). `method == 'tiled'` is a SEPARATE,
     // live STARE backend — don't confuse the two.
     if (method == 'tiled') {
         TILED_ADAPTER(ch_grouped_multi)
-        ch_registered       = TILED_ADAPTER.out.registered
-        ch_registrar_pickle = TILED_ADAPTER.out.manifest
-        ch_manifest_by_meta = TILED_ADAPTER.out.manifest_by_meta
-        ch_stage_checkpoint = TILED_ADAPTER.out.stage_checkpoint
-        ch_adapter_logs     = TILED_ADAPTER.out.size_logs
-        ch_adapter_versions = TILED_ADAPTER.out.versions
-        ch_adapter_summary  = TILED_ADAPTER.out.summary
+        ch_adapter = TILED_ADAPTER.out
     } else {
         VALIS_ADAPTER(ch_grouped_multi)
-        ch_registered       = VALIS_ADAPTER.out.registered
-        ch_registrar_pickle = VALIS_ADAPTER.out.registrar
-        ch_stage_checkpoint = VALIS_ADAPTER.out.stage_checkpoint
-        ch_adapter_logs     = VALIS_ADAPTER.out.size_logs
-        ch_adapter_versions = VALIS_ADAPTER.out.versions
-        ch_adapter_summary  = VALIS_ADAPTER.out.summary
+        ch_adapter = VALIS_ADAPTER.out
     }
 
     // Re-introduce single-slide patients (reference passed through unregistered)
     // into the registered stream for QC, checkpointing and postprocessing.
-    ch_registered = ch_registered.mix(ch_passthrough)
+    ch_registered = ch_adapter.registered.mix(ch_passthrough)
 
     // ========================================================================
     // CHECKPOINT
@@ -140,13 +131,14 @@ workflow REGISTER_PATIENT {
     REGISTERED_CHECKPOINT(ch_registered)
 
     emit:
-    registered       = ch_registered
-    images_multi     = ch_images_multi
-    checkpoint_csv   = REGISTERED_CHECKPOINT.out.csv
-    registrar        = ch_registrar_pickle
-    stage_checkpoint = ch_stage_checkpoint
-    manifest_by_meta = ch_manifest_by_meta
-    size_logs        = ch_adapter_logs
-    versions         = ch_adapter_versions
-    summary          = ch_adapter_summary
+    registered         = ch_registered
+    images_multi       = ch_images_multi
+    checkpoint_csv     = REGISTERED_CHECKPOINT.out.csv
+    // Straight through from the adapter, under the adapter's own names — see the header.
+    transform          = ch_adapter.transform
+    transform_by_slide = ch_adapter.transform_by_slide
+    stage_checkpoint   = ch_adapter.stage_checkpoint
+    size_logs          = ch_adapter.size_logs
+    versions           = ch_adapter.versions
+    summary            = ch_adapter.summary
 }

@@ -11,6 +11,22 @@
             where reference_item = [meta, file] for the reference image
             and all_items = [[meta1, file1], [meta2, file2], ...] for all images
     Output: Channel of [meta, file] tuples (standard format)
+
+    THE ADAPTER CONTRACT (identical in adapters/tiled_adapter.nf, and binding on any third
+    adapter). Every registration adapter takes [patient_id, reference_item, all_items]
+    and emits EXACTLY these names:
+
+        registered          [meta, file]                registered slides (+ passthroughs)
+        transform           [patient_id, transform]     ONE transform object per patient
+        transform_by_slide  [meta, transform]           one transform per MOVING slide
+        stage_checkpoint    [patient_id, dir]           intermediate-stage fields
+        size_logs / versions / summary
+
+    A method that produces no artifact for one of these emits `Channel.empty()` for it --
+    a NULL OBJECT, never a missing emit and never an error. That is what lets
+    REGISTER_PATIENT wire both backends with one short branch, and it is why nothing
+    downstream of that branch has to know which method ran. A future adapter inherits the
+    rule: declare every name; empty the ones your method cannot produce.
 ========================================================================================
 */
 
@@ -142,7 +158,13 @@ workflow VALIS_ADAPTER {
 
     emit:
     registered = ch_registered
-    registrar  = REGISTER.out.registrar   // [patient_id, registrar.pickle] — for GeoJSON seg-QC
+    // [patient_id, registrar.pickle] — VALIS's transform is ONE object per patient: the graph
+    // it optimised over the whole group. Consumed by the GeoJSON seg-QC warper.
+    transform  = REGISTER.out.registrar
+    // VALIS has no per-slide transform: the registrar is a single group-wide object and is not
+    // decomposable into one transform per moving slide. This is the null object the contract
+    // above requires — not an omission, and not an error for any consumer.
+    transform_by_slide = Channel.empty()
     // [patient_id, reg_stage_checkpoint/] — pre-micro displacement fields, emitted only at
     // reg_qc >= 2. Lets WARP_SEG_QC score the non_rigid stage apart from micro; VALIS composes
     // the two into one field, so REGISTER is the only place they can be told apart.

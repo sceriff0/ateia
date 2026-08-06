@@ -154,7 +154,7 @@ workflow ADD_CYCLE {
     REGISTER_PATIENT(ch_grouped, 'valis')
     ch_adapter_registered = REGISTER_PATIENT.out.registered
     ch_adapter_versions   = REGISTER_PATIENT.out.versions
-    ch_registrar          = REGISTER_PATIENT.out.registrar
+    ch_transform          = REGISTER_PATIENT.out.transform
 
     // Keep only the newly registered cycle (drop the reference passthrough).
     ch_new_registered = ch_adapter_registered.filter { meta, _f -> !meta.is_reference }
@@ -182,9 +182,12 @@ workflow ADD_CYCLE {
     // Level >= 2: seg-overlap Dice/IoU. Segment DAPI on the NATIVE (pre-reg)
     // reference + new-cycle images -> cell GeoJSON, then warp through the
     // classic registrar pickle (classic adapter only — see do_seg_qc above).
-    // Shares subworkflows/local/seg_qc.nf with registration.nf. add_cycle is VALIS-only
-    // (mirage.nf rejects --registration_method tiled in this mode), so the two tiled-only
-    // inputs are empty and SEG_QC always takes its valis branch.
+    // Shares subworkflows/local/seg_qc.nf with registration.nf. 'valis' is passed as a
+    // LITERAL for the same reason as the REGISTER_PATIENT call above: SEG_QC takes the method
+    // as an ARGUMENT and never reads params.registration_method, so sharing it cannot quietly
+    // lift mirage.nf's rejection of --registration_method tiled in this mode.
+    // REGISTER_PATIENT.out.transform_by_slide is Channel.empty() under VALIS by the adapters'
+    // null-object contract, which is exactly what the valis branch expects.
     ch_seg_qc_size_log = Channel.empty()
     ch_seg_qc_versions = Channel.empty()
     if (do_seg_qc) {
@@ -194,7 +197,8 @@ workflow ADD_CYCLE {
                 [[patient_id: pid, id: "${pid}_reference", is_reference: true, channels: prior.ref_channels], prior.ref_image]
             })
 
-        SEG_QC(ch_native, ch_registrar, REGISTER_PATIENT.out.stage_checkpoint, Channel.empty())
+        SEG_QC(ch_native, ch_transform, REGISTER_PATIENT.out.stage_checkpoint,
+               REGISTER_PATIENT.out.transform_by_slide, 'valis')
         ch_seg_qc          = SEG_QC.out.metrics
         ch_seg_qc_size_log = SEG_QC.out.size_log
         ch_seg_qc_versions = SEG_QC.out.versions
