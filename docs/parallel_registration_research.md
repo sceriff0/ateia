@@ -39,9 +39,8 @@ Entry point `subworkflows/local/registration.nf`. Steps, in order:
    reshapes patient-grouped data into one `REGISTER` invocation per patient (all slides at once)
    and matches registered outputs back to metas by **OME channel signature** read from a
    `channels_manifest.json` (`valis_adapter.nf:58-130`) — no filename parsing.
-5. **QC generation** (see §2), **optional feature-error estimation**
-   (`ESTIMATE_FEATURE_DISTANCES`, `registration.nf:277-313`), **checkpoint CSV**
-   (`registered.csv`, `registration.nf:319-349`).
+5. **QC generation** (see §2), **checkpoint CSV** (`registered.csv`, in
+   `registration.nf`).
 
 **Key structural fact for the redesign:** registration today is a **single monolithic
 per-patient process** (`REGISTER`). All slides of a patient go into one container, one JVM, one
@@ -75,7 +74,6 @@ Other registration-subworkflow processes and their labels:
 | `SEG_QC_GEOJSON` | `process_high` + `gpu` container | 8 CPU / 200+100·att GB | StarDist DAPI seg on native slide → cell GeoJSON (reg_qc=2) |
 | `WARP_SEG_QC` | `process_medium` | 4 CPU / 100+100·att GB / 4 h | warp polygons through stages, score overlap (reg_qc=2) |
 | `GENERATE_REGISTRATION_QC` | `process_high` | 8 CPU / 200+100·att GB | RGB DAPI overlay (reg_qc≥1) |
-| `ESTIMATE_FEATURE_DISTANCES` | (opt.) | — | feature-based TRE (opt-in) |
 
 There is no `process_high_memory` label — `conf/modules.config` defines only `process_single`,
 `process_low`, `process_medium`, and `process_high` (8 CPU / 200+100·att GB / 12 h, the ceiling
