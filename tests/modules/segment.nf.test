@@ -282,6 +282,10 @@ nextflow_process {
 
     test("Should reject an unknown seg_method rather than silently run StarDist - stub") {
 
+        // Stub is sufficient here, unusually: the throw comes from SegBackends.of() in
+        // the `container` DIRECTIVE, which Nextflow evaluates for every task whichever
+        // block runs. The stub block itself never touches SegBackends, so what this case
+        // pins is the directive, not the script.
         tag "stub"
         options "-stub"
 

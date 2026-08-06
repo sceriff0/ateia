@@ -563,6 +563,42 @@ nextflow_pipeline {
         }
     }
 
+    test("a comma-joined nuclear_markers element is split, not taken as one marker") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                // The shape a params file produces when the list is written as a single
+                // string. It is a valid Collection, so nothing coerces it -- unsplit, the
+                // one marker 'CELLTOX,DAPI' matches NO channel, every channel is
+                // classified non-reference-safe, and SPLIT_CHANNELS keeps the nuclear
+                // channel on the moving slide. That emits SIX files against a groupTuple
+                // sized 5 (the union dedupes CELLTOX, so the count is unchanged), which
+                // is the surplus-second-group case: 6 QUANTIFY and TWO MERGE_QUANT_CSVS
+                // writing the same merged_quant.csv. Silent -- no error anywhere.
+                input           = "$projectDir/tests/testdata/celltox_only.csv"
+                nuclear_markers = ['CELLTOX,DAPI']
+                outdir          = "$outputDir"
+                start           = "preprocessing"
+                max_cpus = 2
+                max_memory = '6.GB'
+                seg_gpu = false
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.startsWith('MIRAGE:POSTPROCESSING:QUANTIFY_MARKERS:QUANTIFY') }.size() == 5 },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.startsWith('MIRAGE:POSTPROCESSING:MERGE_QUANT_CSVS') }.size() == 1 }
+            )
+        }
+    }
+
     test("Should reject missing checkpoint columns") {
         tag "stub"
 

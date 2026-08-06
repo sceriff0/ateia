@@ -72,6 +72,19 @@ class TestIsNuclear:
         assert not is_nuclear("", ["DAPI"])
         assert not is_nuclear(None, ["DAPI"])
 
+    def test_a_comma_joined_element_is_split_not_treated_as_one_marker(self):
+        # The shape a params file produces when the list is written as one string:
+        # ["DAPI,CELLTOX"]. Unsplit it is a single marker that matches NO channel, so
+        # every channel is silently classified non-nuclear and the nuclear channel is
+        # never dropped from moving slides. lib/MarkerUtils.groovy's markerList splits
+        # the same way; the two must agree.
+        assert is_nuclear("DAPI", ["DAPI,CELLTOX"])
+        assert is_nuclear("CELLTOX", ["DAPI,CELLTOX"])
+        assert not is_nuclear("PANCK", ["DAPI,CELLTOX"])
+
+    def test_a_space_joined_element_is_split_too(self):
+        assert is_nuclear("CELLTOX", ["DAPI CELLTOX"])
+
     def test_falls_back_to_the_one_permitted_mirror(self):
         # bin/utils/metadata.py holds the ONLY Python mirror of nextflow.config's
         # default; MarkerUtils deliberately has none and throws instead.
