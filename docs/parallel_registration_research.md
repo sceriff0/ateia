@@ -136,11 +136,11 @@ CSV → meta parsing in `CsvUtils.parseMetadata` (`lib/CsvUtils.groovy:143-156`)
   `allow_auto_reference`.
 - `channels` — non-empty `|`-split list; **DAPI must be present** (at any position), located by
   name not index (`CsvUtils.groovy:116-126`).
-- `id` — per-image unique id `patient_id + source-stem` (`workflows/mirage.nf:30-34`).
+- `id` — per-image unique id `patient_id + source-stem` (`subworkflows/local/input_check.nf:46-51`).
 - `images_count` / `channels_count` — pre-computed from the CSV
   (`CsvUtils.countImagesPerPatient` / `countChannelsPerPatient`, `CsvUtils.groovy:54-106`) and
   injected into meta so `groupTuple(by:, size:)` can **stream** (emit as soon as a patient's slides
-  arrive, without buffering the whole run) — `workflows/mirage.nf:38-59`.
+  arrive, without buffering the whole run) — `subworkflows/local/input_check.nf:54-82`.
 
 **All channels carry `[meta, file]` tuples.** Reference vs moving is distinguished **only** by
 `meta.is_reference`; there is no separate `ref`/`mov`/`is_ref` field. The registration subworkflow

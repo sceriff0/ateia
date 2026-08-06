@@ -148,3 +148,5 @@ tests/testdata/expected/morphology_columns.txt
 tests/testdata/expected/intensity_csv_columns.txt
 tests/testdata/expected/preproc_checkpoint_columns.txt
 tests/testdata/expected/reg_checkpoint_columns.txt
+# Minimal "prior completed run" checkpoint CSVs for the add_cycle subworkflow test.
+tests/testdata/prior_run/

@@ -232,6 +232,25 @@ with open(OUT_DIR / "valid_checkpoint_postprocessing.csv", "w") as f:
     f.write(f"P001,{TESTDATA_ABS}/P001_ref.ome.tiff,true,DAPI|PANCK|SMA\n")
 print("  Created valid_checkpoint_postprocessing.csv")
 
+# 3d. A minimal "prior completed run" for the add_cycle path. ADD_CYCLE rebuilds
+#     the assets it reuses from these two checkpoint CSVs under
+#     <prior_outdir>/csv/, so tests/subworkflows/add_cycle.nf.test only has to
+#     point --prior_outdir at this directory. Every referenced file must really
+#     exist: Nextflow stages merged_csv and pyramid into the processes.
+PRIOR_DIR = OUT_DIR / "prior_run" / "csv"
+PRIOR_DIR.mkdir(parents=True, exist_ok=True)
+with open(PRIOR_DIR / "registered.csv", "w") as f:
+    f.write("patient_id,registered_image,is_reference,channels\n")
+    f.write(f"P001,{TESTDATA_ABS}/P001_image.tiff,true,DAPI|PANCK\n")
+with open(PRIOR_DIR / "postprocessed.csv", "w") as f:
+    f.write("patient_id,cell_csv,cell_geojson,merged_csv,cell_mask,pyramid\n")
+    f.write(
+        f"P001,{TESTDATA_ABS}/P001_merged_quant.csv,{TESTDATA_ABS}/sample_contours.json,"
+        f"{TESTDATA_ABS}/P001_merged_quant.csv,{TESTDATA_ABS}/P001_cell_mask.tif,"
+        f"{TESTDATA_ABS}/P001_pyramid.ome.tiff\n"
+    )
+print("  Created prior_run/csv/{registered,postprocessed}.csv")
+
 # =============================================================================
 # 4. Generate INVALID input CSVs for validation testing
 # =============================================================================
