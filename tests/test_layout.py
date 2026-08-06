@@ -216,11 +216,14 @@ def test_the_unregistered_slide_path_has_its_own_owner():
     )
     assert "is_passthrough" in writer
 
-    # Both producers of an unregistered slide must set the flag the writer keys on.
-    reg = (ROOT / "subworkflows" / "local" / "registration.nf").read_text()
+    # Both producers of an unregistered slide must set the flag the writer keys on:
+    # REGISTER_PATIENT's single-slide branch, and TILED_ADAPTER's every-patient
+    # reference. (The single-slide branch moved out of registration.nf with the rest
+    # of the shared registration core — add_cycle.nf had lost it entirely.)
+    reg = (ROOT / "subworkflows" / "local" / "register_patient.nf").read_text()
     assert "is_passthrough" in reg, (
-        "registration.nf's single-slide passthrough branch no longer marks the "
-        "slide — its registered.csv row would name a file nothing publishes"
+        "REGISTER_PATIENT's single-slide passthrough branch no longer marks the "
+        "slide — its checkpoint row would name a file nothing publishes"
     )
     tiled = (ROOT / "subworkflows" / "local" / "adapters" / "tiled_adapter.nf").read_text()
     assert "is_passthrough" in tiled, (

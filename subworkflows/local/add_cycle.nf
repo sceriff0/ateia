@@ -29,7 +29,10 @@
 */
 
 include { PREPROCESSING            } from './preprocess'
-include { VALIS_ADAPTER            } from './adapters/valis_adapter'
+// The registration adapter dispatch, the single-slide passthrough branch and the
+// checkpoint manifest are REGISTER_PATIENT's, shared with registration.nf. This file
+// used to call VALIS_ADAPTER directly and rebuild the surrounding wiring by hand.
+include { REGISTER_PATIENT         } from './register_patient'
 include { EXTRACT_MASK_SERIES      } from '../../modules/local/extract_mask_series'
 include { EXTRACT_CELL_PROPERTIES  } from '../../modules/local/extract_cell_properties'
 include { EXTRACT_NUCLEI_PROPERTIES } from '../../modules/local/extract_nuclei_properties'
@@ -38,10 +41,6 @@ include { SPLIT_CHANNELS as SPLIT_PRIOR_PYRAMID } from '../../modules/local/spli
 include { MERGE_QUANT_CSVS         } from '../../modules/local/merge_quant_csvs'
 include { GENERATE_REGISTRATION_QC } from '../../modules/local/generate_registration_qc'
 include { SEG_QC                   } from './seg_qc'
-// Same writer registration.nf uses. Before it was shared, an add_cycle run wrote no
-// csv/registered.csv at all, so its --outdir could never be a second add_cycle's
-// --prior_outdir (the reader below is exactly what would have had nothing to open).
-include { REGISTERED_CHECKPOINT    } from './registered_checkpoint'
 // Shared with subworkflows/local/postprocess.nf. These used to be copied inline here;
 // the copy had already drifted (bare .groupTuple() instead of the sized groupKey).
 include { QUANTIFY_MARKERS         } from './quantify_markers'
@@ -139,24 +138,26 @@ workflow ADD_CYCLE {
         }
 
     // Registration runs via the classic monolithic VALIS adapter, matching a full run.
-    // The distributed/tiled low-memory path was archived on 2026-07-24 (git tag
-    // archive/tiled-valis-2026-07-24).
-    ch_registrar = Channel.empty()
-
-    VALIS_ADAPTER(ch_grouped)
-    ch_adapter_registered = VALIS_ADAPTER.out.registered
-    ch_adapter_versions   = VALIS_ADAPTER.out.versions
-    ch_registrar          = VALIS_ADAPTER.out.registrar
+    // 'valis' is passed as a LITERAL, not params.registration_method: workflows/mirage.nf
+    // rejects --registration_method tiled in add_cycle mode, and going through the shared
+    // REGISTER_PATIENT must not be what quietly lifts that rejection. Lifting it is a
+    // one-word change here plus deleting the guard — a behaviour change of its own.
+    // (The distributed/tiled low-memory VALIS path was archived on 2026-07-24, git tag
+    // archive/tiled-valis-2026-07-24; that is a different thing from the STARE backend.)
+    //
+    // REGISTER_PATIENT also writes csv/registered.csv, from the FULL registered stream —
+    // reference row included — exactly as the linear path does. That row is the one a
+    // follow-on `--mode add_cycle` reads back (`ch_prior_ref` above filters
+    // is_reference=true), so a manifest without it would be one this very file cannot
+    // consume. Its single-slide passthrough branch never fires here: every group this
+    // file builds is [prior reference, new slide], size 2.
+    REGISTER_PATIENT(ch_grouped, 'valis')
+    ch_adapter_registered = REGISTER_PATIENT.out.registered
+    ch_adapter_versions   = REGISTER_PATIENT.out.versions
+    ch_registrar          = REGISTER_PATIENT.out.registrar
 
     // Keep only the newly registered cycle (drop the reference passthrough).
     ch_new_registered = ch_adapter_registered.filter { meta, _f -> !meta.is_reference }
-
-    // Registration checkpoint. Written from the FULL adapter stream — reference row
-    // included — exactly as the linear path writes it, because the reference row is
-    // the one a follow-on `--mode add_cycle` reads back (`ch_prior_ref` above filters
-    // is_reference=true). Recording only the new cycle would produce a manifest that
-    // this very file cannot consume.
-    REGISTERED_CHECKPOINT(ch_adapter_registered)
 
     // ------------------------------------------------------------------ //
     // 3. REGISTRATION-DRIFT QC (non-gating)
@@ -193,7 +194,7 @@ workflow ADD_CYCLE {
                 [[patient_id: pid, id: "${pid}_reference", is_reference: true, channels: prior.ref_channels], prior.ref_image]
             })
 
-        SEG_QC(ch_native, ch_registrar, VALIS_ADAPTER.out.stage_checkpoint, Channel.empty())
+        SEG_QC(ch_native, ch_registrar, REGISTER_PATIENT.out.stage_checkpoint, Channel.empty())
         ch_seg_qc          = SEG_QC.out.metrics
         ch_seg_qc_size_log = SEG_QC.out.size_log
         ch_seg_qc_versions = SEG_QC.out.versions
@@ -367,7 +368,7 @@ workflow ADD_CYCLE {
     // csv/registered.csv. Nothing in workflows/mirage.nf consumes it (collectFile's
     // storeDir writes the file regardless), but it is emitted so a test can assert on
     // it and so the add_cycle path advertises the same artifact REGISTRATION does.
-    checkpoint_csv = REGISTERED_CHECKPOINT.out.csv
+    checkpoint_csv = REGISTER_PATIENT.out.checkpoint_csv
     pyramid     = ASSEMBLE_EXPORT.out.pyramid
     qc          = ch_qc
     seg_qc      = ch_seg_qc

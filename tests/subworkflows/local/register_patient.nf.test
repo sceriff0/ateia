@@ -1,0 +1,155 @@
+/*
+ * REGISTER_PATIENT is the shared registration core: it is called by REGISTRATION
+ * (linear) and by ADD_CYCLE (incremental cyclic-IF), which used to reimplement it.
+ *
+ * Most of its behaviour is already asserted THROUGH those two callers —
+ * tests/subworkflows/local/registration.nf.test for the linear path,
+ * tests/subworkflows/add_cycle.nf.test and tests/checkpoint_manifest.nf.test for
+ * add_cycle. What is asserted HERE is the pair of properties that only became
+ * expressible when the core was shared, and that nothing else can see:
+ *
+ *   1. the backend is chosen by the `method` ARGUMENT, not by reading
+ *      params.registration_method. ADD_CYCLE passes the literal 'valis' because
+ *      workflows/mirage.nf rejects --registration_method tiled in add_cycle mode;
+ *      if this subworkflow read the param instead, sharing the core would have
+ *      silently lifted that rejection.
+ *   2. a single-slide group still bypasses the adapter entirely. add_cycle had lost
+ *      this branch by copying; it is inert there (its groups are always size 2) but
+ *      load-bearing on the linear path, where VALIS crashes on a lone image.
+ *
+ * Tagged "stub" because CI's blocking gate is `nf-test test --tag stub`.
+ */
+
+nextflow_workflow {
+
+    name "Test REGISTER_PATIENT subworkflow (stub)"
+    script "subworkflows/local/register_patient.nf"
+    workflow "REGISTER_PATIENT"
+
+    tag "subworkflow"
+    tag "registration"
+
+    test("the method ARGUMENT wins over params.registration_method") {
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                // The param says tiled; the caller says valis. The caller must win —
+                // this is exactly the configuration add_cycle is protected against.
+                registration_method = 'tiled'
+                reg_qc = 0
+            }
+            workflow {
+                """
+                input[0] = Channel.of([
+                    'P001',
+                    [[patient_id: 'P001', id: 'P001_ref', is_reference: true, channels: ['DAPI','PANCK']],
+                     file('$projectDir/tests/testdata/P001_ref.ome.tiff')],
+                    [
+                      [[patient_id: 'P001', id: 'P001_ref', is_reference: true, channels: ['DAPI','PANCK']],
+                       file('$projectDir/tests/testdata/P001_ref.ome.tiff')],
+                      [[patient_id: 'P001', id: 'P001_mov1', is_reference: false, channels: ['DAPI','CD3']],
+                       file('$projectDir/tests/testdata/P001_mov1.ome.tiff')]
+                    ]
+                ])
+                input[1] = 'valis'
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.contains('REGISTER')
+                }.size() == 1 },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.contains('TILED_')
+                }.size() == 0 },
+                { assert workflow.out.checkpoint_csv },
+            )
+        }
+    }
+
+    test("'tiled' selects the STARE backend") {
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                // The mirror image: the param says valis, the caller says tiled.
+                registration_method = 'valis'
+                reg_qc = 0
+            }
+            workflow {
+                """
+                input[0] = Channel.of([
+                    'P001',
+                    [[patient_id: 'P001', id: 'P001_ref', is_reference: true, channels: ['DAPI','PANCK']],
+                     file('$projectDir/tests/testdata/P001_ref.ome.tiff')],
+                    [
+                      [[patient_id: 'P001', id: 'P001_ref', is_reference: true, channels: ['DAPI','PANCK']],
+                       file('$projectDir/tests/testdata/P001_ref.ome.tiff')],
+                      [[patient_id: 'P001', id: 'P001_mov1', is_reference: false, channels: ['DAPI','CD3']],
+                       file('$projectDir/tests/testdata/P001_mov1.ome.tiff')]
+                    ]
+                ])
+                input[1] = 'tiled'
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.contains('TILED_')
+                }.size() > 0 },
+                { assert workflow.trace.tasks().findAll {
+                    it.name =~ /(^|:)REGISTER\b/
+                }.size() == 0 },
+            )
+        }
+    }
+
+    test("a single-slide group never reaches the adapter") {
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                reg_qc = 0
+            }
+            workflow {
+                """
+                input[0] = Channel.of([
+                    'P001',
+                    [[patient_id: 'P001', id: 'P001_ref', is_reference: true, channels: ['DAPI','PANCK']],
+                     file('$projectDir/tests/testdata/P001_ref.ome.tiff')],
+                    [
+                      [[patient_id: 'P001', id: 'P001_ref', is_reference: true, channels: ['DAPI','PANCK']],
+                       file('$projectDir/tests/testdata/P001_ref.ome.tiff')]
+                    ]
+                ])
+                input[1] = 'valis'
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                // Nothing registered — VALIS crashes on a lone image.
+                { assert workflow.trace.tasks().findAll {
+                    it.name.contains('REGISTER')
+                }.size() == 0 },
+                // ...but the slide still reaches the registered stream, and the
+                // checkpoint still records it (at its PREPROCESSED/native location,
+                // via meta.is_passthrough — see tests/checkpoint_manifest.nf.test).
+                { assert workflow.out.registered.size() == 1 },
+                { assert workflow.out.checkpoint_csv },
+            )
+        }
+    }
+}
