@@ -174,18 +174,27 @@ def test_no_duplicate_param_defaults():
 # The `?:` check above only sees Groovy. A `bin/foo.py` argparse `default=`
 # is just as capable of drifting from `nextflow.config` -- the pipeline
 # always passes the flag explicitly (ext.args / a process script), so a
-# stale Python default only bites hand-invocation of the script. This check
-# is deliberately NAME-based, not value-based: a flag `--foo-bar` or
-# `--foo_bar` normalizes to `foo_bar` and is only in scope if that exact
-# string is a `nextflow.config` params{} key. A flag like
+# stale Python default only bites hand-invocation of the script.
+#
+# The authority for "which param does this flag mean" is the pipeline's own
+# invocation text, not a guess from the flag's spelling: `build_flag_param_map`
+# scans `modules/local/*.nf` + `conf/modules.config` for the two shapes the
+# pipeline actually uses (`--flag ${params.key}` directly, or one level of
+# `def var = params.key` aliasing) and derives a flag -> param map from that.
+# A flag whose name happens to equal a params key (e.g. `--pyramid-resolutions`
+# / `pyramid_resolutions`) is *also* covered by that direct form, so the
+# straight name-equality check that shipped before this exists purely as a
+# fallback for flags the derived map doesn't find -- it's still correct when
+# it fires, just no longer the primary authority. A flag like
 # `segment_to_geojson.py`'s `--tolerance` matches no param named `tolerance`
-# (the real param is `simplify_tolerance`) and is out of scope by design --
-# fuzzy/prefix matching is not this check's job.
+# via either path and stays out of scope by design.
 
 # Deliberate divergences between a bin/*.py argparse default and the
-# nextflow.config default its flag name-matches. Keyed by "<file>:<flag>".
-# Every entry here is a documented, intentional standalone-use fallback
-# (verified against the script's own help text/docstring), not drift.
+# nextflow.config default its flag resolves to (via the derived map or the
+# name-equality fallback). Keyed by "<file>:<flag>". Every entry here is
+# either a documented, intentional standalone-use fallback (verified against
+# the script's own help text/docstring) or a real divergence in a file this
+# task is not authorized to edit (noted as such).
 ARGPARSE_DEFAULT_ALLOWLIST = {
     "extract_cell_properties.py:--outdir": {
         "reason": (
@@ -227,6 +236,18 @@ ARGPARSE_DEFAULT_ALLOWLIST = {
             "standalone use.'"
         ),
     },
+    "segment_cellsam.py:--block-size": {
+        "reason": (
+            "Real divergence surfaced by the derived flag->param map "
+            "(conf/modules.config:383 `--block-size ${params.seg_cellsam_"
+            "block_size}` resolves --block-size unambiguously): argparse "
+            "default=400 vs. nextflow.config's seg_cellsam_block_size=1024. "
+            "bin/segment_cellsam.py is not one of the files this task (Task "
+            "1 of the arch-candidates-1-8 refactor) is authorized to edit, "
+            "so it is allowlisted here rather than fixed. Flagged in the "
+            "task report for a follow-up task to actually fix the default."
+        ),
+    },
 }
 
 
@@ -249,6 +270,90 @@ def _normalize_flag(flag: str) -> str:
     return flag.lstrip("-").replace("-", "_")
 
 
+# A CLI flag immediately followed by one-or-more consecutive `${...}`
+# interpolations, e.g. `--n_iter ${params.preproc_n_iter}` or
+# `--n-tiles ${params.seg_n_tiles_y} ${params.seg_n_tiles_x}` (two
+# interpolations -- a composite flag this check deliberately does not
+# resolve; see `build_flag_param_map`).
+_FLAG_INTERP_RE = re.compile(r"--([A-Za-z0-9][A-Za-z0-9_-]*)((?:\s+\$\{[^}]*\})+)")
+# A single `${...}` interpolation's content, only when it is one bare token
+# (a dotted `params.key` reference or a plain variable name) with no
+# surrounding whitespace -- i.e. not `${params.x ?: task.cpus}` or
+# `${row.ix}`-via-method-call style expressions, which are one level deeper
+# than this check resolves.
+_INTERP_ATOM_RE = re.compile(r"\$\{\s*([^}\s]+)\s*\}")
+# `def <var> = params.<key>` -- the one level of aliasing this check resolves.
+_DEF_ALIAS_RE = re.compile(
+    r"^\s*def\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*params\.([A-Za-z_][A-Za-z0-9_]*)\s*$",
+    re.MULTILINE,
+)
+
+
+def build_flag_param_map() -> dict[str, str]:
+    """Derive an authoritative flag -> nextflow.config param-key map from how
+    the pipeline itself invokes bin/*.py scripts, instead of guessing a
+    correspondence from the flag's spelling.
+
+    Scans `modules/local/*.nf` and `conf/modules.config` for exactly two
+    shapes (this is deliberately NOT a general expression evaluator -- it
+    resolves at most one level):
+
+      - direct:      `--flag ${params.key}`
+      - def-aliased: `def var = params.key`  ...  `--flag ${var}`
+
+    A flag is excluded from the returned map (left for the name-equality
+    fallback, or left out of scope entirely) when:
+
+      - it resolves to more than one *distinct* param key across the
+        scanned files -- e.g. `--scale-factor` means `qc_scale_factor` in
+        `generate_registration_qc.nf` but `preprocess_qc_scale_factor` in
+        `generate_preprocess_qc.nf`: two different scripts, two different
+        params, coincidentally the same flag name;
+      - any occurrence of the flag is followed by more than one
+        interpolation -- a composite/nargs-style flag consuming multiple
+        params at once, e.g. `--n-tiles ${params.seg_n_tiles_y}
+        ${params.seg_n_tiles_x}` (comparing a 2-element argparse default
+        against one scalar param would be a category error, not a real
+        drift check); or
+      - the interpolated expression isn't a bare `params.key` or a bare
+        aliased variable -- e.g. `${params.preproc_pool_workers ?:
+        task.cpus}` is a fallback expression one level deeper than this
+        resolves, so `--n_workers` is intentionally left unmapped rather
+        than compared against `preproc_pool_workers`'s null default (which
+        would be a false positive: null there means "derive at runtime",
+        the exact contract `test_no_duplicate_param_defaults` already
+        recognizes for the Groovy `?:` check above).
+    """
+    nf_files = sorted(ROOT.glob("modules/local/*.nf")) + [ROOT / "conf/modules.config"]
+
+    raw: dict[str, set[str]] = {}
+    multivalue: set[str] = set()
+
+    for path in nf_files:
+        text = path.read_text()
+        aliases = dict(_DEF_ALIAS_RE.findall(text))
+        for m in _FLAG_INTERP_RE.finditer(text):
+            flag = _normalize_flag(m.group(1))
+            atoms = _INTERP_ATOM_RE.findall(m.group(2))
+            if len(atoms) != 1:
+                multivalue.add(flag)
+                continue
+            atom = atoms[0]
+            key = None
+            if atom.startswith("params."):
+                key = atom[len("params.") :].split(".")[0]
+            elif atom in aliases:
+                key = aliases[atom]
+            if key is not None:
+                raw.setdefault(flag, set()).add(key)
+
+    return {
+        flag: next(iter(keys))
+        for flag, keys in raw.items()
+        if len(keys) == 1 and flag not in multivalue
+    }
+
+
 def _iter_add_argument_calls(tree: ast.AST):
     for node in ast.walk(tree):
         if (
@@ -260,23 +365,27 @@ def _iter_add_argument_calls(tree: ast.AST):
 
 
 def find_argparse_default_sites():
-    """Scan `bin/**/*.py` for `add_argument()` calls whose flag name-matches
-    a `nextflow.config` params{} key.
+    """Scan `bin/**/*.py` for `add_argument()` calls whose flag resolves to a
+    `nextflow.config` params{} key, via the derived flag->param map or (as a
+    fallback) exact name-equality.
 
     Returns `(matched, skipped, declared)`:
-      - `matched`: `(path, flag, param_name, python_default)` for calls with
-        a literal `default=` (or no `default=` kwarg at all, which argparse
-        itself treats as `default=None`).
-      - `skipped`: `(path, flag, param_name)` for calls whose `default=` is
-        a non-literal expression (a variable, a call, an f-string, ...)
-        that `ast.literal_eval` cannot statically evaluate.
+      - `matched`: `(path, flag, param_name, python_default, via)` for calls
+        with a literal `default=` (or no `default=` kwarg at all, which
+        argparse itself treats as `default=None`). `via` is `"map"` when the
+        derived flag->param map resolved the flag, `"name-eq"` when only the
+        name-equality fallback did.
+      - `skipped`: `(path, flag, param_name, via)` for calls whose
+        `default=` is a non-literal expression (a variable, a call, an
+        f-string, ...) that `ast.literal_eval` cannot statically evaluate.
       - `declared`: the `nextflow.config` params{} block, as parsed by
         `parse_declared_params`.
     """
     declared = parse_declared_params(CONFIG_PATH.read_text())
+    flag_param_map = build_flag_param_map()
 
-    matched: list[tuple[Path, str, str, object]] = []
-    skipped: list[tuple[Path, str, str]] = []
+    matched: list[tuple[Path, str, str, object, str]] = []
+    skipped: list[tuple[Path, str, str, str]] = []
     for path in sorted(BIN_DIR.rglob("*.py")):
         try:
             tree = ast.parse(path.read_text(), filename=str(path))
@@ -295,56 +404,66 @@ def find_argparse_default_sites():
             )
             for flag in flags:
                 name = _normalize_flag(flag)
-                if name not in declared:
-                    continue  # out of scope: no name match, e.g. --tolerance
+                if name in flag_param_map:
+                    key, via = flag_param_map[name], "map"
+                elif name in declared:
+                    key, via = name, "name-eq"
+                else:
+                    continue  # out of scope: no correspondence found at all
                 if default_kw is None:
-                    matched.append((path, flag, name, None))
+                    matched.append((path, flag, key, None, via))
                     continue
                 try:
                     python_default = ast.literal_eval(default_kw)
                 except (ValueError, TypeError):
-                    skipped.append((path, flag, name))
+                    skipped.append((path, flag, key, via))
                     continue
-                matched.append((path, flag, name, python_default))
+                matched.append((path, flag, key, python_default, via))
     return matched, skipped, declared
 
 
 def test_no_duplicate_bin_argparse_defaults():
-    """Every `bin/**/*.py` argparse default that name-matches a
-    `nextflow.config` param must equal that param's default.
+    """Every `bin/**/*.py` argparse default that resolves to a
+    `nextflow.config` param (via the derived flag->param map, or by exact
+    name-equality as a fallback) must equal that param's default.
 
     Non-literal defaults (a variable, a call, an f-string) can't be
     statically compared and are skipped -- see the warning this test always
-    emits for exactly how many were skipped, so that count stays visible
-    instead of silently dropping sites.
+    emits reporting how many flags were checked via the derived map, how
+    many via the name-equality fallback, and how many were skipped, so none
+    of those counts silently disappear.
     """
     matched, skipped, declared = find_argparse_default_sites()
 
     assert matched or skipped, (
-        "No bin/**/*.py argparse flag name-matched a nextflow.config params "
+        "No bin/**/*.py argparse flag resolved to a nextflow.config params "
         "key at all -- the scan may be broken."
     )
 
     offending = []
-    for path, flag, name, python_default in matched:
-        key = f"{path.name}:{flag}"
-        if key in ARGPARSE_DEFAULT_ALLOWLIST:
+    for path, flag, key, python_default, via in matched:
+        allowlist_key = f"{path.name}:{flag}"
+        if allowlist_key in ARGPARSE_DEFAULT_ALLOWLIST:
             continue
-        config_default = _config_value_to_python(declared[name])
+        config_default = _config_value_to_python(declared[key])
         if python_default != config_default:
             offending.append(
                 f"{path.relative_to(ROOT)}: {flag} default={python_default!r} "
-                f"but nextflow.config's {name} = {config_default!r}. Either "
-                "fix the Python default to match, or add an "
-                f"ARGPARSE_DEFAULT_ALLOWLIST entry keyed {key!r} with a reason."
+                f"but nextflow.config's {key} = {config_default!r} (resolved "
+                f"via {via}). Either fix the Python default to match, or add "
+                f"an ARGPARSE_DEFAULT_ALLOWLIST entry keyed {allowlist_key!r} "
+                "with a reason."
             )
 
+    via_map = sum(1 for *_, via in matched if via == "map")
+    via_name_eq = sum(1 for *_, via in matched if via == "name-eq")
     warnings.warn(
-        f"bin argparse-default check: {len(matched)} flag(s) name-matched a "
-        f"nextflow.config params key and were compared; {len(skipped)} "
-        "skipped (non-literal default=, cannot be statically compared)"
+        f"bin argparse-default check: {via_map} flag(s) checked via the "
+        f"derived flag->param map, {via_name_eq} via the name-equality "
+        f"fallback, {len(skipped)} skipped (non-literal default=, cannot be "
+        "statically compared)"
         + (
-            ": " + ", ".join(f"{p.relative_to(ROOT)}:{f}" for p, f, _ in skipped)
+            ": " + ", ".join(f"{p.relative_to(ROOT)}:{f}" for p, f, _, _ in skipped)
             if skipped
             else ""
         ),
