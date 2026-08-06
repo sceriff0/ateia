@@ -431,7 +431,25 @@ nextflow_pipeline {
         }
 
         then {
-            assert workflow.success
+            assertAll(
+                { assert workflow.success },
+                // The per-patient groupKey sizes come from
+                // CsvUtils.countChannelsPerPatient, which drops the nuclear channel for
+                // NON-reference rows. Under allow_auto_reference no row is marked
+                // reference in the CSV, but registration.nf promotes the patient's first
+                // image, so that slide's nuclear channel IS kept and the count must
+                // include it (5 markers here, not 4). Counting 4 makes groupTuple emit at
+                // size and then emit the surplus as a SECOND group, so the per-patient
+                // MERGE_QUANT_CSVS / MERGE_AND_PYRAMID run twice and both writes land on
+                // the same published path. `assert workflow.success` alone does not see
+                // that, hence the explicit task counts.
+                { assert workflow.trace.tasks().findAll {
+                    it.name.startsWith('MIRAGE:POSTPROCESSING:QUANTIFY_MARKERS:QUANTIFY') }.size() == 5 },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.startsWith('MIRAGE:POSTPROCESSING:MERGE_QUANT_CSVS') }.size() == 1 },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.startsWith('MIRAGE:POSTPROCESSING:ASSEMBLE_EXPORT:MERGE_AND_PYRAMID') }.size() == 1 }
+            )
         }
     }
 
