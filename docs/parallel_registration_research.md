@@ -128,21 +128,21 @@ VALIS's pyramidal OME-TIFF reader and must solve large-image I/O itself.
 
 ### 1.5 The meta-map channel contract
 
-CSV → meta parsing in `CsvUtils.parseMetadata` (`lib/CsvUtils.groovy:143-156`). A meta map carries:
+CSV → meta parsing in `CsvUtils.parseMetadata` (`lib/CsvUtils.groovy:237-250`). A meta map carries:
 - `patient_id` (grouping key)
 - `is_reference` — strict boolean, parsed by `parseIsReference`, only `true`/`false` accepted
-  (`CsvUtils.groovy:136-141`). **Exactly one** reference per patient is enforced
-  (`validateInputSemantics`, `CsvUtils.groovy:239-245`); zero allowed only with
+  (`CsvUtils.groovy:230-235`). **Exactly one** reference per patient is enforced
+  (`validateInputSemantics`, `CsvUtils.groovy:334-340`); zero allowed only with
   `allow_auto_reference`.
 - `channels` — non-empty `|`-split list; **a nuclear marker must be present** (at any position),
   located by name not index. Which names qualify comes from `params.nuclear_markers`
   (`nextflow.config`, default `['DAPI', 'CELLTOX']`) via `MarkerUtils.hasNuclear`, not a
-  hardcoded `DAPI` (`lib/CsvUtils.groovy:160-166`).
-- `id` — per-image unique id `patient_id + source-stem` (`subworkflows/local/input_check.nf:46-51`).
+  hardcoded `DAPI` (`lib/CsvUtils.groovy:218`).
+- `id` — per-image unique id `patient_id + source-stem` (`subworkflows/local/input_check.nf:50-54`).
 - `images_count` / `channels_count` — pre-computed from the CSV
-  (`CsvUtils.countImagesPerPatient` / `countChannelsPerPatient`, `CsvUtils.groovy:54-106`) and
+  (`CsvUtils.countImagesPerPatient` / `countChannelsPerPatient`, `CsvUtils.groovy:54-152`) and
   injected into meta so `groupTuple(by:, size:)` can **stream** (emit as soon as a patient's slides
-  arrive, without buffering the whole run) — `subworkflows/local/input_check.nf:54-82`.
+  arrive, without buffering the whole run) — `subworkflows/local/input_check.nf:58-86`.
 
 **All channels carry `[meta, file]` tuples.** Reference vs moving is distinguished **only** by
 `meta.is_reference`; there is no separate `ref`/`mov`/`is_ref` field. The registration subworkflow

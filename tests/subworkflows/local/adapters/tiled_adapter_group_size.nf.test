@@ -6,8 +6,8 @@
  * fix keys the gather with groupKey(slideKey(meta), requireTilesCount(meta)) so a slide's
  * group can close as soon as its own tiles arrive. requireTilesCount is the piece that makes
  * a missing count impossible to paper over: unlike the three existing groupKey call sites in
- * this repo (registration.nf:73, postprocess.nf:173, postprocess.nf:272), which all fall back
- * to a bare, unsized key via a ternary when the count is absent, this one errors loudly.
+ * this repo (registration.nf:73, quantify_markers.nf:137, postprocess.nf:192), which all fall
+ * back to a bare, unsized key via a ternary when the count is absent, this one errors loudly.
  *
  * A true streaming-emission-order test (a slide's TILED_SOLVE starting before another slide's
  * TILED_REG_TILE tasks have all finished) is not reliably expressible via nf-test here: the

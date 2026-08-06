@@ -104,8 +104,11 @@ workflow QUANTIFY_MARKERS {
     // channel — the group could then never fill.)
     //
     // `remainder: true` is kept anyway, as a safety net against a future miscount. An
-    // OVER-count is harmless either way: the surplus slot never fills, so nothing extra
-    // is ever emitted. An UNDER-count is NOT uniformly safe, and it is NOT "a per-patient
+    // OVER-count is safe either way, and strictly better than before this branch: the
+    // surplus slot never fills at its (too-large) target size, but `remainder: true`
+    // still emits it -- complete, just late, at channel close -- instead of the
+    // pre-branch silent drop where an over-counted group never emitted at all. An
+    // UNDER-count is NOT uniformly safe, and it is NOT "a per-patient
     // consumer runs twice" in general — an undercount makes groupTuple emit the patient
     // TWICE (once at the too-small target size, once as the `remainder: true` leftover),
     // and what happens to those two emissions depends entirely on how the CALLER
