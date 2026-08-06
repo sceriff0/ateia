@@ -289,6 +289,50 @@ with open(OUT_DIR / "invalid_file_not_found.csv", "w") as f:
 print("  Created invalid_file_not_found.csv (file not found)")
 
 # =============================================================================
+# 4h. TILED_COARSE tile-plan CSV fixtures, for tiled_adapter_group_size.nf.test's
+#     countTileRows()/requirePositiveTileCount() coverage (subworkflows/local/adapters/
+#     tiled_adapter.nf). Same header TILED_COARSE actually writes
+#     (modules/local/tiled_coarse.nf), covering: a normal 12-row plan, one with a
+#     trailing blank line, one with a blank line interspersed among data rows, and a
+#     header-only plan (must hit the n < 1 guard).
+# =============================================================================
+print("\n4h. Creating tile-plan CSV fixtures for the tiled fan-in gather...")
+_TILE_HEADER = "ix,iy,cx,cy,x0,y0,x1,y1,rx0,ry0,rx1,ry1"
+
+
+def _tile_row(ix, iy):
+    x0, y0 = ix * 16, iy * 16
+    return f"{ix},{iy},{x0 + 8},{y0 + 8},{x0},{y0},{x0 + 16},{y0 + 16},{x0},{y0},{x0 + 16},{y0 + 16}"
+
+
+_tile_rows = [_tile_row(i % 4, i // 4) for i in range(12)]
+
+with open(OUT_DIR / "tiles_12_rows.csv", "w") as f:
+    f.write(_TILE_HEADER + "\n")
+    for r in _tile_rows:
+        f.write(r + "\n")
+print("  Created tiles_12_rows.csv (12 data rows)")
+
+with open(OUT_DIR / "tiles_12_rows_trailing_blank.csv", "w") as f:
+    f.write(_TILE_HEADER + "\n")
+    for r in _tile_rows:
+        f.write(r + "\n")
+    f.write("\n")
+print("  Created tiles_12_rows_trailing_blank.csv (12 data rows + trailing blank line)")
+
+with open(OUT_DIR / "tiles_12_rows_blank_interspersed.csv", "w") as f:
+    f.write(_TILE_HEADER + "\n")
+    for i, r in enumerate(_tile_rows):
+        f.write(r + "\n")
+        if i == 5:
+            f.write("\n")
+print("  Created tiles_12_rows_blank_interspersed.csv (blank line mid-file)")
+
+with open(OUT_DIR / "tiles_header_only.csv", "w") as f:
+    f.write(_TILE_HEADER + "\n")
+print("  Created tiles_header_only.csv (no data rows)")
+
+# =============================================================================
 # 5. Update test.config input to use valid data
 # =============================================================================
 print("\n5. Creating test.config input CSV...")
@@ -318,6 +362,9 @@ print("  - invalid_no_dapi.csv")
 print("  - invalid_checkpoint_missing_col.csv")
 print("  - invalid_checkpoint_bad_ref.csv")
 print("  - invalid_file_not_found.csv")
+print("\nTile-plan CSV fixtures:")
+print("  - tiles_12_rows.csv, tiles_12_rows_trailing_blank.csv")
+print("  - tiles_12_rows_blank_interspersed.csv, tiles_header_only.csv")
 # =============================================================================
 # 6. Generate additional test fixtures for module tests
 # =============================================================================

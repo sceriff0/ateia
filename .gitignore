@@ -118,6 +118,10 @@ tests/testdata/invalid_no_dapi.csv
 tests/testdata/invalid_checkpoint_missing_col.csv
 tests/testdata/invalid_checkpoint_bad_ref.csv
 tests/testdata/invalid_file_not_found.csv
+tests/testdata/tiles_12_rows.csv
+tests/testdata/tiles_12_rows_trailing_blank.csv
+tests/testdata/tiles_12_rows_blank_interspersed.csv
+tests/testdata/tiles_header_only.csv
 tests/testdata/test_input.csv
 tests/testdata/sample_merged_quant.csv
 tests/testdata/empty_samplesheet.csv

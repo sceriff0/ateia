@@ -38,6 +38,25 @@ def requireTilesCount(meta) {
     meta.tiles_count
 }
 
+// Counts a tile-plan CSV's data rows: total non-blank lines minus the header. Extracted (not
+// left inline in the ch_tile_counts closure below) so the counting logic itself is unit-testable
+// in isolation -- this is the number that ends up sizing the groupKey at the gather, so an
+// off-by-one here either hangs the pipeline (count too high, the group never closes) or
+// truncates the control points TILED_SOLVE fits its mesh from (count too low, the group closes
+// early on a silently mis-registered slide). Neither failure mode looks like a crash, which is
+// exactly why the count itself -- not just the null-check in requireTilesCount -- needs direct
+// coverage.
+def countTileRows(csv) {
+    csv.readLines().findAll { it.trim() }.size() - 1
+}
+
+// Fails loudly (naming the slide) on an empty tile plan, mirroring requireTilesCount's
+// never-silently-degrade contract for the other half of the count derivation.
+def requirePositiveTileCount(n, meta) {
+    if (n < 1) error "TILED_COARSE emitted no tiles for ${slideKey(meta)} (n=${n})"
+    n
+}
+
 workflow TILED_ADAPTER {
     take:
     ch_grouped_meta   // [patient_id, reference_item, all_items]
@@ -61,11 +80,7 @@ workflow TILED_ADAPTER {
         // row cannot know how many rows the file has in total. The CSV is tiny (one row per
         // tile, plus a header), so counting lines is cheap.
         ch_tile_counts = TILED_COARSE.out.tiles
-            .map { meta, csv ->
-                def n = csv.readLines().findAll { it.trim() }.size() - 1 // minus header
-                if (n < 1) error "TILED_COARSE emitted no tiles for ${slideKey(meta)} (${csv})"
-                tuple(slideKey(meta), n)
-            }
+            .map { meta, csv -> tuple(slideKey(meta), requirePositiveTileCount(countTileRows(csv), meta)) }
 
         // Context per slide: meta (+tiles_count) + reference + moving + M0, keyed for the
         // per-tile join. Map addition (never meta.clone()) -- see the aliasing note at
