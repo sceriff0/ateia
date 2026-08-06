@@ -1,11 +1,20 @@
 #!/usr/bin/env python3
 """
 Split multichannel TIFF images into individual single-channel TIFF files.
-DAPI channel is only saved from the reference image.
+The nuclear/fiducial channel is only saved from the reference image.
+
+Which channel counts as nuclear comes from ``--nuclear-markers`` (SPLIT_CHANNELS passes
+``params.nuclear_markers``), resolved by the shared ``utils.metadata.is_nuclear`` rule --
+not by a hardcoded ``"DAPI"``. That matters beyond configurability: Nextflow pre-computes
+each patient's ``groupTuple`` size from the SAME rule in ``lib/MarkerUtils.groovy``
+(via ``CsvUtils.countChannelsPerPatient``), so if this script kept a channel Groovy
+expected to be dropped the group would over-fill and a per-patient consumer would run
+twice against one published path.
 
 Usage:
     python split_multichannel.py input.ome.tiff output_folder --is-reference
-    python split_multichannel.py input.ome.tiff output_folder  # skips DAPI
+    python split_multichannel.py input.ome.tiff output_folder  # skips the nuclear channel
+    python split_multichannel.py in.tiff out --nuclear-markers CELLTOX
 """
 
 from __future__ import annotations
@@ -24,7 +33,7 @@ sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
 from image_utils import ensure_dir, normalize_image_dimensions
 from logger import configure_logging, get_logger
-from metadata import extract_channel_names_from_ome
+from metadata import extract_channel_names_from_ome, is_nuclear
 from validation import clip_negative_values
 
 logger = get_logger(__name__)
@@ -33,11 +42,11 @@ __all__ = ["main"]
 
 
 def split_multichannel_tiff(
-    input_path, output_dir, is_reference=False, channel_names=None
+    input_path, output_dir, is_reference=False, channel_names=None, nuclear_markers=None
 ):
     """
     Split a multichannel TIFF into single-channel TIFFs.
-    DAPI is only saved if is_reference=True.
+    The nuclear channel is only saved if is_reference=True.
 
     Parameters
     ----------
@@ -46,9 +55,12 @@ def split_multichannel_tiff(
     output_dir : str
         Directory to save the single-channel TIFFs.
     is_reference : bool
-        If True, saves DAPI channel. If False, skips DAPI.
+        If True, saves the nuclear channel. If False, skips it.
     channel_names : list of str, optional
         Names for each channel. If None, tries to read from OME metadata.
+    nuclear_markers : sequence of str, optional
+        Marker names that identify the nuclear/fiducial channel
+        (``params.nuclear_markers``). Defaults to ``DEFAULT_NUCLEAR_MARKERS``.
 
     Returns
     -------
@@ -95,21 +107,21 @@ def split_multichannel_tiff(
     # Create output directory
     ensure_dir(output_dir)
 
-    # Save each channel (skip DAPI if not reference)
+    # Save each channel (skip the nuclear channel if not reference)
     saved_paths = []
     skipped_count = 0
 
     for i, name in enumerate(channel_names):
-        # Check if this is DAPI channel. Use substring match to stay consistent
-        # with convert_image.py's DAPI detection ('DAPI' in ch.upper()) — an
-        # exact match here would miss names like 'DAPI_nuclear' that convert_image
-        # already moved to channel 0, causing the DAPI-equivalent to be wrongly
-        # saved for non-reference images.
-        is_dapi = "DAPI" in name.upper()
+        # The one nuclear-marker rule: case-insensitive SUBSTRING match against the
+        # configured markers, shared with convert_image.py (which already moved this
+        # channel to index 0) and mirrored by lib/MarkerUtils.groovy. An exact match
+        # would miss names like 'DAPI_nuclear'; a hardcoded 'DAPI' would miss a
+        # CELLTOX-configured run and keep a channel Groovy already counted as dropped.
+        is_nuclear_channel = is_nuclear(name, nuclear_markers)
 
-        # Skip DAPI if this is not the reference image
-        if is_dapi and not is_reference:
-            logger.info(f"  Skipping: {name} (DAPI from non-reference)")
+        # Skip the nuclear channel if this is not the reference image
+        if is_nuclear_channel and not is_reference:
+            logger.info(f"  Skipping: {name} (nuclear channel from non-reference)")
             skipped_count += 1
             continue
 
@@ -136,7 +148,7 @@ def split_multichannel_tiff(
         tifffile.imwrite(output_path, channel_data, bigtiff=True, compression="zlib")
 
         saved_paths.append(output_path)
-        status = " (DAPI from reference)" if is_dapi else ""
+        status = " (nuclear channel from reference)" if is_nuclear_channel else ""
         logger.info(f"  Saved: {clean_name}.tiff{status}")
 
     logger.info(f"✓ Saved {len(saved_paths)} channels, skipped {skipped_count}")
@@ -146,7 +158,8 @@ def split_multichannel_tiff(
 def main():
     """CLI entry point: split a multichannel TIFF into single-channel TIFFs."""
     parser = argparse.ArgumentParser(
-        description="Split multichannel TIFF into single-channel TIFFs (DAPI only from reference)",
+        description="Split multichannel TIFF into single-channel TIFFs "
+        "(the nuclear channel is kept only for the reference image)",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
@@ -159,7 +172,7 @@ def main():
     parser.add_argument(
         "--is-reference",
         action="store_true",
-        help="This is the reference image (save DAPI)",
+        help="This is the reference image (save the nuclear channel)",
     )
 
     parser.add_argument(
@@ -167,6 +180,15 @@ def main():
         nargs="+",
         default=None,
         help="Channel names (optional, will try to read from OME metadata)",
+    )
+
+    parser.add_argument(
+        "--nuclear-markers",
+        nargs="+",
+        default=None,
+        help="Marker names identifying the nuclear/fiducial channel, which is kept "
+        "only on the reference image. SPLIT_CHANNELS always passes "
+        "params.nuclear_markers; the default is only for standalone use.",
     )
 
     args = parser.parse_args()
@@ -178,7 +200,11 @@ def main():
     logger.info("=" * 80)
 
     split_multichannel_tiff(
-        args.input, args.output_dir, args.is_reference, args.channels
+        args.input,
+        args.output_dir,
+        args.is_reference,
+        args.channels,
+        args.nuclear_markers,
     )
 
     logger.info("=" * 80)

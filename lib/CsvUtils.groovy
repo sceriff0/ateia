@@ -96,7 +96,7 @@ class CsvUtils {
      *
      * Returns a Map of patient_id -> channel count.
      */
-    static Map<String, Integer> countChannelsPerPatient(String csvPath, List nuclearMarkers, boolean autoReference) {
+    static Map<String, Integer> countChannelsPerPatient(String csvPath, def nuclearMarkers, boolean autoReference) {
         def file = new File(csvPath)
         if (!file.exists()) return [:]
 
@@ -143,7 +143,7 @@ class CsvUtils {
         }
     }
 
-    static Map validateMetadata(Map meta, List nuclearMarkers, String context = 'unknown') {
+    static Map validateMetadata(Map meta, def nuclearMarkers, String context = 'unknown') {
 
         if (!meta.patient_id)
             throw new IllegalArgumentException("Missing patient_id in ${context}")
@@ -163,7 +163,7 @@ class CsvUtils {
         // MarkerUtils — not a hardcoded 'DAPI', which rejected an otherwise valid
         // CELLTOX-only samplesheet before the run could start.
         if (!MarkerUtils.hasNuclear(meta.channels, nuclearMarkers)) {
-            throw new IllegalStateException("No nuclear channel (${nuclearMarkers.join(', ')}) found for patient ${meta.patient_id} (${context}). Found channels: ${meta.channels}")
+            throw new IllegalStateException("No nuclear channel (${MarkerUtils.markerList(nuclearMarkers).join(', ')}) found for patient ${meta.patient_id} (${context}). Found channels: ${meta.channels}")
         }
 
         return meta
@@ -181,7 +181,7 @@ class CsvUtils {
         throw new IllegalArgumentException("Invalid is_reference value '${value}' in ${context}. Must be 'true' or 'false'.")
     }
 
-    static Map parseMetadata(Map row, List nuclearMarkers, String context = 'parseMetadata') {
+    static Map parseMetadata(Map row, def nuclearMarkers, String context = 'parseMetadata') {
 
         def channels = row.channels
             ?.split('\\|')
@@ -229,7 +229,7 @@ class CsvUtils {
      * @param allowAutoReference   whether a patient may omit an explicit reference
      * @param nuclearMarkers       params.nuclear_markers — required, never defaulted here
      */
-    static void validateInputSemantics(def csv, String step, boolean allowAutoReference, List nuclearMarkers) {
+    static void validateInputSemantics(def csv, String step, boolean allowAutoReference, def nuclearMarkers) {
 
         def pathColumn = [
             preprocessing : 'path_to_file',
