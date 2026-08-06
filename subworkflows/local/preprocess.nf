@@ -77,6 +77,14 @@ workflow PREPROCESSING {
         .collectFile(
             name: Layout.checkpointCsvName(Layout.PREPROCESSED),
             newLine: true,
+            sort: true,
+            // sort: true makes the manifest REPRODUCIBLE. Without it collectFile
+            // writes rows in completion order, so two runs of the same commit
+            // produced different files (found while capturing this branch's golden
+            // baseline; a rerun of the UNMODIFIED branch differed from itself). The
+            // rows begin with patient_id followed by the published path, so natural
+            // string order IS "patient id, then file" — and the `seed:` header is
+            // written first regardless of sorting.
             storeDir: Layout.checkpointDir(params.outdir),
             seed: 'patient_id,preprocessed_image,is_reference,channels'
         )
