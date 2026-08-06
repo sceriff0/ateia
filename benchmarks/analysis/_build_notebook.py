@@ -42,18 +42,18 @@ CELLS = [
              "    reg = pd.read_csv(REG_EVAL)\n"
              "    piv = reg.pivot_table(index='pair_id', columns='mode', values='true_median_rtre')\n"
              "    fig = plotting.before_after_box(piv, cols=list(piv.columns),\n"
-             "        ylabel='median rTRE', title='tiled vs untiled')\n"
-             "    plotting.save_fig(fig, Path('figures')/'rtre_tiled_vs_untiled')\n"
+             "        ylabel='median rTRE', title='valis vs STARE')\n"
+             "    plotting.save_fig(fig, Path('figures')/'rtre_valis_vs_stare')\n"
              "    display(reg.groupby('mode')[['true_median_rtre','valis_rtre']].median())\n"
              "else:\n"
              "    print('reg_eval.csv not found - run Plan 2 first')"),
-    ("md", "## 5. Sampling — paired tiled-vs-untiled significance"),
+    ("md", "## 5. Sampling — paired valis-vs-STARE significance"),
     ("code", "from benchmarks.registration_eval import sampling\n"
              "if REG_EVAL.exists():\n"
              "    reg = pd.read_csv(REG_EVAL)\n"
              "    piv = reg.pivot_table(index='pair_id', columns='mode', values='true_median_px').dropna()\n"
-             "    if {'tiled','untiled'} <= set(piv.columns):\n"
-             "        print(sampling.paired_diff_test(piv['tiled'].values, piv['untiled'].values))"),
+             "    if {'valis','tiled'} <= set(piv.columns):\n"
+             "        print(sampling.paired_diff_test(piv['valis'].values, piv['tiled'].values))"),
 ]
 
 

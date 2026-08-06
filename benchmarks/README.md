@@ -205,8 +205,9 @@ Verify the whole harness with no data at all:
 > **Not the paper's accuracy signal.** Registration accuracy for the paper comes from the
 > pipeline's own `reg_qc=2` staged QC, harvested into `paper_data/registration_accuracy.csv`
 > (Section A) — no challenge data required. This section is a separate, optional cross-check
-> against public landmark ground truth. It predates the removal of the in-process tiling
-> modes, so ignore any "tiled vs untiled" framing below — modern runs register once per pair.
+> against public landmark ground truth, and the only place a *ground-truth* number exists at
+> all. It now registers each pair with BOTH shipped methods (`valis`, `tiled`/STARE), so the
+> landmark TRE can be read against each method's own self-reported accuracy.
 
 Full detail (data access, limitations) in `benchmarks/registration_eval/README.md`.
 
@@ -224,16 +225,24 @@ account. Then write a `pairs.csv`:
 
 - **Output:** `reg_prepared/<pair_id>/input/` (symlinked images) + `reg_prepared/pairs_manifest.csv`.
 
-### B2 — Register (tiled & untiled) + score (cluster, VALIS env)
+### B2 — Register (valis & STARE) + score (cluster, VALIS env)
 
+    # 4th arg is optional: a StarDist model dir enables the reg_qc=2 seg-overlap leg
     benchmarks/registration_eval/run_registration.sh \
-        reg_prepared/pairs_manifest.csv  reg_prepared  reg_results
+        reg_prepared/pairs_manifest.csv  reg_prepared  reg_results  [stardist_model_dir]
 
-- **What it does:** per pair x mode (in-process tiling on/off), runs `bin/register.py`,
-  then `eval_tre` (loads the VALIS registrar pickle, warps the moving ground-truth
-  landmarks).
-- **Output:** `reg_results/eval_<pair>_<mode>.json` — two error views per pair/mode:
-  true landmark **TRE/rTRE/um** and VALIS self-reported **rTRE**.
+- **What it does:** per pair x method, registers with `bin/register.py` (`valis`) and
+  `bin/tiled_register.py` (`tiled`/STARE), then `eval_tre` warps the moving ground-truth
+  landmarks through that method's transform. With a model dir it also segments both native
+  slides and runs `bin/warp_seg_qc.py` — the pipeline's own reg_qc=2 scorer — per method.
+- **Output:** `reg_results/eval_<pair>_<method>.json` — ground truth plus every
+  method-native signal available for that run:
+  | field | source | available for |
+  |---|---|---|
+  | `true_tre` | landmark TRE/rTRE/um | both (the only ground truth) |
+  | `valis_rtre` | VALIS `error_df` | `valis` |
+  | `stare_tre` | STARE intrinsic `_tre.json` (coarse / rigid / post-mesh residual) | `tiled` |
+  | `seg_qc` | reg_qc=2 dice + centroid displacement (`bin/warp_seg_qc.py`) | both, if a model dir was given |
 
 ### B3 — Aggregate
 

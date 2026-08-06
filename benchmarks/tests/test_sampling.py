@@ -15,7 +15,7 @@ def test_bootstrap_ci_is_deterministic_and_brackets_point():
 def test_paired_diff_test_detects_positive_shift():
     rng = np.random.default_rng(0)
     a = rng.normal(10.0, 1.0, size=50)   # tiled (worse, higher TRE)
-    b = a - 2.0                          # untiled consistently 2 lower
+    b = a - 2.0                          # method B consistently 2 lower
     res = sampling.paired_diff_test(a, b, n_boot=500, seed=0)
     assert res["median_diff"] > 0
     assert res["ci_low"] > 0             # CI excludes zero -> significant

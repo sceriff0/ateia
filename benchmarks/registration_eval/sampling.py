@@ -1,4 +1,4 @@
-"""Bootstrap confidence intervals and paired tiled-vs-untiled comparison."""
+"""Bootstrap confidence intervals and paired method-vs-method comparison."""
 from __future__ import annotations
 
 import numpy as np
