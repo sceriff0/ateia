@@ -54,7 +54,12 @@ process SPLIT_CHANNELS {
     """
 
     stub:
-    def out_channels = meta.channels.findAll { is_reference || it.toString().toUpperCase() != 'DAPI' }
+    // Same rule as the real split, via the one shared implementation: the nuclear
+    // channel survives only on the reference slide. MarkerUtils reads
+    // params.nuclear_markers so this no longer hardcodes 'DAPI' — and, critically,
+    // CsvUtils.countChannelsPerPatient derives the postprocessing groupKey sizes from
+    // the SAME method, so the stub's output count matches the size the group expects.
+    def out_channels = MarkerUtils.splitOutputChannels(meta.channels, is_reference, params.nuclear_markers)
     // When meta.channels is empty (e.g. ADD_CYCLE's SPLIT_PRIOR_PYRAMID, which
     // reads channel names from OME-XML in REAL mode only), still emit a single
     // placeholder so the mandatory `*.tiff` output binds under -stub.

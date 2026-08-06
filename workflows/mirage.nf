@@ -28,7 +28,7 @@ def loadInputChannel(csv_path, image_column, patient_counts = null, channel_coun
         .fromPath(csv_path, checkIfExists: true)
         .splitCsv(header: true)
         .map { row ->
-            def meta = CsvUtils.parseMetadata(row, "CSV ${csv_path}")
+            def meta = CsvUtils.parseMetadata(row, params.nuclear_markers, "CSV ${csv_path}")
             // Per-image unique id (patient_id + source-image stem). Drives output
             // file naming so a patient's multiple images do not produce identically
             // named files that collide when collected downstream (QC, registration).
@@ -139,7 +139,7 @@ workflow MIRAGE {
         // this CSV). Pass allow-no-reference=true so validation does not reject
         // the by-design zero-reference sheet. (Registration still uses the prior
         // reference — ADD_CYCLE forces the new cycle to is_reference=false.)
-        CsvUtils.validateInputSemantics(params.input, 'preprocessing', true)
+        CsvUtils.validateInputSemantics(params.input, 'preprocessing', true, params.nuclear_markers)
 
         // Fast-fail: every new-cycle patient must exist in the prior run's
         // postprocessed checkpoint, else its masks/base-table can't be sourced.
@@ -159,7 +159,10 @@ workflow MIRAGE {
 
         // New-cycle raw images -> [meta, file] (reuse existing loader + counts).
         def new_counts    = CsvUtils.countImagesPerPatient(params.input)
-        def new_ch_counts = CsvUtils.countChannelsPerPatient(params.input)
+        // autoReference = false: add_cycle registers against the PRIOR run's reference,
+        // which is never a row in this sheet, so no row here keeps its nuclear channel
+        // and the new cycle's markers are the declared channels minus the nuclear one.
+        def new_ch_counts = CsvUtils.countChannelsPerPatient(params.input, params.nuclear_markers, false)
         def ch_new_input  = loadInputChannel(params.input, 'path_to_file', new_counts, new_ch_counts)
 
         // Prior reusable assets from the previous run's checkpoint CSVs.
@@ -291,7 +294,8 @@ workflow MIRAGE {
     CsvUtils.validateInputSemantics(
         params.input,
         params.start,
-        params.allow_auto_reference
+        params.allow_auto_reference,
+        params.nuclear_markers
     )
 
     if (params.dry_run) {
@@ -304,7 +308,12 @@ workflow MIRAGE {
     // Pre-count images and channels per patient for streaming groupTuple operations
     // (called after null-guard above ensures params.input is valid)
     def patient_counts = params.input ? CsvUtils.countImagesPerPatient(params.input) : [:]
-    def channel_counts = params.input ? CsvUtils.countChannelsPerPatient(params.input) : [:]
+    // autoReference = params.allow_auto_reference: when a patient marks no reference,
+    // registration.nf promotes its first image, which keeps that slide's nuclear
+    // channel in the split output and therefore in the count.
+    def channel_counts = params.input
+        ? CsvUtils.countChannelsPerPatient(params.input, params.nuclear_markers, params.allow_auto_reference)
+        : [:]
 
     if (ParamUtils.shouldRun('preprocessing', params.start, effective_stop)) {
         def ch_input = loadInputChannel(params.input, 'path_to_file', patient_counts, channel_counts)
