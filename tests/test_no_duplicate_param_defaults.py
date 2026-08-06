@@ -191,61 +191,67 @@ def test_no_duplicate_param_defaults():
 
 # Deliberate divergences between a bin/*.py argparse default and the
 # nextflow.config default its flag resolves to (via the derived map or the
-# name-equality fallback). Keyed by "<file>:<flag>". Every entry here is
-# either a documented, intentional standalone-use fallback (verified against
-# the script's own help text/docstring) or a real divergence in a file this
-# task is not authorized to edit (noted as such).
+# name-equality fallback). Keyed by "<file>:<flag>". Every entry here is a
+# documented, intentional standalone-use fallback (verified against the
+# script's own help text/docstring) -- not a placeholder for a fix deferred
+# out of scope. A divergence that is simply a bug gets fixed, not allowlisted
+# (see bin/segment_cellsam.py's --block-size, which the derived map caught
+# and was fixed rather than exempted).
 ARGPARSE_DEFAULT_ALLOWLIST = {
     "extract_cell_properties.py:--outdir": {
         "reason": (
-            "Standalone-CLI convenience: defaults to the cwd so the script "
-            "is hand-runnable without an explicit --outdir. nextflow.config's "
-            "`outdir` is null (required; resolved to the run's real output "
-            "directory by the pipeline) -- a different contract than 'default "
-            "location for a manual invocation'."
+            "Not actually the same 'outdir' as nextflow.config's: "
+            "modules/local/extract_cell_properties.nf:43 and "
+            "modules/local/extract_nuclei_properties.nf:42 (which reuses this "
+            "same script) both hardcode `--outdir .` -- a literal, not "
+            "`${params.outdir}` -- because Nextflow already isolates each "
+            "task in its own work dir; `publishDir` (driven by the real, "
+            "pipeline-wide params.outdir) copies the results out afterward. "
+            "This flag's name-equality match to the top-level `outdir` param "
+            "is a coincidence, not a real correspondence -- the script's own "
+            "default='.' (for standalone hand-invocation, writing to the "
+            "cwd) is correct to keep as-is."
         ),
     },
     "quantify.py:--outdir": {
         "reason": (
-            "Same standalone-CLI convenience as extract_cell_properties.py's "
-            "--outdir: defaults to the cwd for hand-invocation; the pipeline "
-            "always passes an explicit --outdir."
+            "Same non-correspondence as extract_cell_properties.py's --outdir: "
+            "modules/local/quantify.nf:51 hardcodes `--outdir .` (a literal, "
+            "not `${params.outdir}`) for the same task-local-vs-publishDir "
+            "reason. The name-equality match to the top-level `outdir` param "
+            "is coincidental."
         ),
     },
     "segment_instantseg.py:--pixel-size": {
         "reason": (
             "default=None is a real fallback, not a stale literal: the "
             "script's own help text says 'Override pixel size (um/px). If "
-            "omitted, InstanSeg auto-detects from OME metadata.' Hardcoding "
-            "nextflow.config's 0.325 here would remove that auto-detect path "
-            "for standalone use."
+            "omitted, InstanSeg auto-detects from OME metadata.' The pipeline "
+            "always passes an explicit value regardless (conf/modules.config's "
+            "instantseg ext.args has `--pixel-size ${params.pixel_size}`), so "
+            "this default only matters for standalone use, where auto-detect "
+            "is the more useful behavior than silently assuming 0.325."
         ),
     },
     "segment_to_geojson.py:--nuclear-markers": {
         "reason": (
             "default=None is intentional per the script's own help text: "
             "'SEG_QC_GEOJSON always passes params.nuclear_markers; the "
-            "default is only for standalone use.' The pipeline never relies "
-            "on this default."
+            "default is only for standalone use.' Confirmed true: "
+            "modules/local/seg_qc_geojson.nf:44 always builds and passes "
+            "`--nuclear-markers ${MarkerUtils.markerList(params.nuclear_"
+            "markers).join(' ')}`, so the pipeline never relies on this "
+            "default."
         ),
     },
     "split_multichannel.py:--nuclear-markers": {
         "reason": (
-            "Same pattern as segment_to_geojson.py: 'SPLIT_CHANNELS always "
-            "passes params.nuclear_markers; the default is only for "
-            "standalone use.'"
-        ),
-    },
-    "segment_cellsam.py:--block-size": {
-        "reason": (
-            "Real divergence surfaced by the derived flag->param map "
-            "(conf/modules.config:383 `--block-size ${params.seg_cellsam_"
-            "block_size}` resolves --block-size unambiguously): argparse "
-            "default=400 vs. nextflow.config's seg_cellsam_block_size=1024. "
-            "bin/segment_cellsam.py is not one of the files this task (Task "
-            "1 of the arch-candidates-1-8 refactor) is authorized to edit, "
-            "so it is allowlisted here rather than fixed. Flagged in the "
-            "task report for a follow-up task to actually fix the default."
+            "Same pattern as segment_to_geojson.py, confirmed the same way: "
+            "modules/local/split_channels.nf:40 always builds and passes "
+            "`--nuclear-markers ${MarkerUtils.markerList(params.nuclear_"
+            "markers).join(' ')}` -- 'SPLIT_CHANNELS always passes params."
+            "nuclear_markers; the default is only for standalone use' per "
+            "the script's own help text."
         ),
     },
 }
