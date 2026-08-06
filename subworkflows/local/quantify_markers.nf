@@ -103,15 +103,27 @@ workflow QUANTIFY_MARKERS {
     // over-counted a reference-less add_cycle sheet by exactly its dropped nuclear
     // channel — the group could then never fill.)
     //
-    // `remainder: true` is kept anyway, as a safety net against a future miscount rather
-    // than as load-bearing logic: with it a wrong count degrades to "late but complete"
-    // instead of "silently dropped", which is the better failure mode. The identical
-    // grouping in postprocess.nf (ch_split_grouped, built from the same channels_count)
-    // carries it for the same reason — the two must not diverge again.
-    // NOTE the residual asymmetry: remainder makes an OVER-count harmless, but an
-    // UNDER-count now emits at size and then emits the surplus as a SECOND group, so a
-    // per-patient consumer would run twice. Over-counting is the safe direction, which
-    // is why countChannelsPerPatient errs high whenever it cannot be certain.
+    // `remainder: true` is kept anyway, as a safety net against a future miscount. An
+    // OVER-count is harmless either way: the surplus slot never fills, so nothing extra
+    // is ever emitted. An UNDER-count is NOT uniformly safe, and it is NOT "a per-patient
+    // consumer runs twice" in general — an undercount makes groupTuple emit the patient
+    // TWICE (once at the too-small target size, once as the `remainder: true` leftover),
+    // and what happens to those two emissions depends entirely on how the CALLER
+    // consumes this grouped_csv, which differs per caller:
+    //   - add_cycle.nf's `.combine(by: 0)` against the prior base table (the "MERGE new
+    //     marker CSVs onto the prior merged table" section) is a true cross-product:
+    //     MERGE_QUANT_CSVS actually runs TWICE, both invocations writing the SAME
+    //     <pid>/quantification/merged_quant.csv.
+    //   - postprocess.nf's `.join(ch_morphology, by: 0)` feeding MERGE_QUANT_CSVS on the
+    //     linear path is a keyed inner join: the surplus group is silently DISCARDED, so
+    //     merged_quant.csv loses markers with no error at all.
+    //   - postprocess.nf's OWN, separately-built grouping for the pyramid path
+    //     (ch_split_grouped, same channels_count, same remainder:true — see its comment)
+    //     is worse still: a one-file surplus group trips the MERGE_AND_PYRAMID memory
+    //     closure (conf/modules.config:330-337 — pre-existing, NOT fixed here) and the
+    //     run ABORTS with "No such file or directory: channels".
+    // Over-counting is still the safe direction, which is why countChannelsPerPatient
+    // errs high whenever it cannot be certain.
     // ========================================================================
     ch_grouped_csvs = QUANTIFY.out.individual_csv
         .map { meta, csv ->

@@ -102,6 +102,42 @@ nextflow_workflow {
         }
     }
 
+    test("declared_channels (manifest) and channels_count (groupKey) provably differ") {
+        tag "stub"
+
+        when {
+            workflow {
+                """
+                // invalid_no_ref.csv: two non-reference rows, each declaring DAPI
+                // (P001,...,false,DAPI|CD3|CD8 / P001,...,false,DAPI|VIMENTIN|CD45).
+                // auto_reference=false mirrors mode=add_cycle: INPUT_CHECK is always
+                // called with autoReference=false there, since the reference is the
+                // prior run's and never a row in this sheet.
+                input[0] = "$projectDir/tests/testdata/invalid_no_ref.csv"
+                input[1] = 'path_to_file'
+                input[2] = false
+                """
+            }
+            params {
+                outdir = "$outputDir"
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                // Declared union for the manifest: DAPI+CD3+CD8+VIMENTIN+CD45 = 5,
+                // with no reference/nuclear awareness at all.
+                { assert workflow.out.counts[0].declared_channels.P001 == 5 },
+                // Exact count for channels_count/the groupKey: DAPI is dropped from
+                // BOTH rows (neither is a reference) = CD3+CD8+VIMENTIN+CD45 = 4.
+                // This is the one place the two must provably differ.
+                { assert workflow.out.counts[0].channels.P001 == 4 },
+                { assert workflow.out.samples.every { it[0].channels_count == 4 } }
+            )
+        }
+    }
+
     test("auto_reference widens the channel count when no row is the reference") {
         tag "stub"
 

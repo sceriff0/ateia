@@ -34,7 +34,7 @@ nextflow_workflow {
                     ['size_log',        file('$projectDir/tests/testdata/sample_size_log1.csv')],
                     ['size_log',        file('$projectDir/tests/testdata/sample_size_log2.csv')]
                 )
-                input[1] = Channel.value([stop: 'postprocessing', patients: [P001: 2], channels: [P001: 5]])
+                input[1] = Channel.value([stop: 'postprocessing', patients: [P001: 2], channels: [P001: 5], declared_channels: [P001: 6]])
                 """
             }
             params {
@@ -71,7 +71,7 @@ nextflow_workflow {
                     ['versions',        file('$projectDir/tests/testdata/sample_versions.yml')],
                     ['size_log',        file('$projectDir/tests/testdata/sample_size_log1.csv')]
                 )
-                input[1] = Channel.value([stop: 'add_cycle', patients: [P001: 1], channels: [P001: 2]])
+                input[1] = Channel.value([stop: 'add_cycle', patients: [P001: 1], channels: [P001: 2], declared_channels: [P001: 3]])
                 """
             }
             params {
@@ -107,7 +107,7 @@ nextflow_workflow {
                     ['versions', file('$projectDir/tests/testdata/sample_versions.yml')],
                     ['size_log', file('$projectDir/tests/testdata/sample_size_log1.csv')]
                 )
-                input[1] = Channel.value([stop: 'postprocessing', patients: [P001: 2], channels: [P001: 5]])
+                input[1] = Channel.value([stop: 'postprocessing', patients: [P001: 2], channels: [P001: 5], declared_channels: [P001: 6]])
                 """
             }
             params {
@@ -147,7 +147,7 @@ nextflow_workflow {
                     ['registration_QC', file('$projectDir/tests/testdata/sample_PANCK.tif')],
                     ['versions',        file('$projectDir/tests/testdata/sample_versions.yml')]
                 )
-                input[1] = Channel.value([stop: 'postprocessing', patients: [P001: 2], channels: [P001: 5]])
+                input[1] = Channel.value([stop: 'postprocessing', patients: [P001: 2], channels: [P001: 5], declared_channels: [P001: 6]])
                 """
             }
             params {
@@ -183,7 +183,7 @@ nextflow_workflow {
                 input[0] = Channel.of(
                     ['size_logs', file('$projectDir/tests/testdata/sample_size_log1.csv')]
                 )
-                input[1] = Channel.value([stop: 'postprocessing', patients: [P001: 2], channels: [P001: 5]])
+                input[1] = Channel.value([stop: 'postprocessing', patients: [P001: 2], channels: [P001: 5], declared_channels: [P001: 6]])
                 """
             }
             params {
@@ -214,7 +214,7 @@ nextflow_workflow {
                     ['versions', file('$projectDir/tests/testdata/sample_versions.yml')],
                     ['size_log', file('$projectDir/tests/testdata/sample_size_log1.csv')]
                 )
-                input[1] = Channel.value([stop: 'postprocessing', patients: [P001: 2], channels: [P001: 5]])
+                input[1] = Channel.value([stop: 'postprocessing', patients: [P001: 2], channels: [P001: 5], declared_channels: [P001: 6]])
                 """
             }
             params {

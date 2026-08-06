@@ -37,6 +37,10 @@ workflow INPUT_CHECK {
     // here, so the sheet is known parseable at this point.
     def patient_counts = CsvUtils.countImagesPerPatient(samplesheet)
     def channel_counts = CsvUtils.countChannelsPerPatient(samplesheet, params.nuclear_markers, auto_reference)
+    // Declared union -- FINAL_QC's run_summary.json manifest only, NEVER meta.channels_count.
+    // See CsvUtils.countDeclaredChannelsPerPatient's doc for why the manifest cannot share
+    // channel_counts' source.
+    def declared_channel_counts = CsvUtils.countDeclaredChannelsPerPatient(samplesheet)
 
     ch_samples = Channel
         .fromPath(samplesheet, checkIfExists: true)
@@ -107,6 +111,18 @@ workflow INPUT_CHECK {
     // The same totals, for the QC report's sample manifest. A value channel
     // because `emit:` must be a channel; FINAL_QC unwraps it. Emitting them
     // here (rather than re-counting at the report site) keeps ONE count per run,
-    // so the manifest can never disagree with the counts the groupings used.
-    counts  = Channel.value([patients: patient_counts, channels: channel_counts])
+    // so the per-patient groupings and the manifest can never independently drift.
+    //
+    // `channels` and `declared_channels` are BOTH carried through on purpose, and
+    // FINAL_QC must not blur them back into one number: `channels` is the exact,
+    // post-nuclear-drop count that sized meta.channels_count/the groupKey above;
+    // `declared_channels` is the samplesheet's raw union, for the manifest, which
+    // should report what was declared rather than what survived quantification's
+    // nuclear-channel drop. See CsvUtils.countChannelsPerPatient /
+    // countDeclaredChannelsPerPatient for the full story of why they differ.
+    counts  = Channel.value([
+        patients: patient_counts,
+        channels: channel_counts,
+        declared_channels: declared_channel_counts,
+    ])
 }

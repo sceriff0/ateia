@@ -162,13 +162,20 @@ workflow POSTPROCESSING {
     // Deduplicate by patient_id + marker to avoid duplicate channel names
     // Use groupKey for streaming - emits as soon as channels_count items collected
     //
-    // `remainder: true` for the same reason as QUANTIFY_MARKERS' grouping, which is built
-    // from the same channels_count: a wrong count must degrade to "late but complete"
-    // rather than "silently dropped". Keeping only one of the two groupings total would
-    // be worse than keeping neither — the patient would reach geojson/ and
-    // quantification/ but not the pyramid, and so be missing from csv/postprocessed.csv,
-    // half-published and invisible to any later --start postprocessing or add_cycle run.
-    // These two must keep identical semantics.
+    // `remainder: true` for the same reason as QUANTIFY_MARKERS' grouping (same
+    // channels_count): an under-count must not be allowed to silently drop the patient
+    // from the pyramid outright. But — see the fuller account in QUANTIFY_MARKERS'
+    // GROUP comment, which this grouping mirrors — an under-count here does NOT degrade
+    // to "late but complete" the way it can for the CSV-merge paths. This grouping feeds
+    // MERGE_AND_PYRAMID with a one-file surplus group, which trips that process's memory
+    // closure (conf/modules.config:330-337 — pre-existing, NOT fixed here) and the run
+    // ABORTS with "No such file or directory: channels". `remainder: true` is kept anyway
+    // because keeping only one of the two channels_count-sized groupings (this one, or
+    // QUANTIFY_MARKERS') would be worse than keeping neither — the patient would reach
+    // geojson/ and quantification/ but not the pyramid, and so be missing from
+    // csv/postprocessed.csv, half-published and invisible to any later --start
+    // postprocessing or add_cycle run. These two groupings must keep identical
+    // channels_count semantics even though their downstream failure modes differ.
     ch_split_grouped = SPLIT_CHANNELS.out.channels
         .flatMap { meta, tiffs ->
             // Normalize to List and create entries keyed by [patient_id, marker]

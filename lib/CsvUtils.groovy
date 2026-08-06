@@ -76,14 +76,22 @@ class CsvUtils {
     /**
      * Count the channels per patient that actually reach quantification.
      *
-     * This is the size the postprocessing groupKeys are built from, so it must equal
-     * the number of single-channel TIFFs SPLIT_CHANNELS produces for the patient --
-     * not the number of channels the samplesheet declares. The two differ because the
+     * This is the size the postprocessing groupKeys are built from (feeds
+     * meta.channels_count via input_check.nf), so it must equal the number of
+     * single-channel TIFFs SPLIT_CHANNELS produces for the patient -- not the number
+     * of channels the samplesheet declares. The two differ because the
      * nuclear/fiducial channel is kept only on the reference slide (see
      * MarkerUtils.splitOutputChannels): a reference-less sheet declaring
      * `DAPI|KI67|CD20` yields TWO markers, not three. Unioning declared channels with
      * no reference awareness (what this did before) over-counted exactly that case,
      * and an over-counted groupKey never fills.
+     *
+     * Do NOT point run_summary.json's input manifest at this. The manifest should
+     * report what the samplesheet declared, not what survives the nuclear-channel
+     * drop -- that consumer is countDeclaredChannelsPerPatient below. Feeding the
+     * manifest from THIS function is the exact regression closed in the branch that
+     * added it: for add_cycle it silently reported 2 channels for a declared 3-channel
+     * cycle. One number, one purpose; see that function's doc for the other half.
      *
      * @param csvPath        path to the samplesheet
      * @param nuclearMarkers params.nuclear_markers -- required, never defaulted here
@@ -141,6 +149,51 @@ class CsvUtils {
             }
             [patientId, kept.size()]
         }
+    }
+
+    /**
+     * Count the DECLARED channels per patient: the union of the samplesheet's
+     * `channels` column values, patient-wide -- no reference awareness, no
+     * nuclear-marker awareness, no extra arguments. This is deliberately
+     * countChannelsPerPatient's exact pre-Task-3 behaviour, kept alive for a
+     * different consumer: run_summary.json's input manifest
+     * (`manifest.totals.channels` / `manifest.patients[pid].channels`), which should
+     * report what the samplesheet SAID, not what reaches QUANTIFY.
+     *
+     * Do NOT feed this into channels_count / the groupKey size. That reintroduces
+     * the exact bug countChannelsPerPatient's exactness fixed: unioning declared
+     * channels with no reference awareness over-counts a reference-less sheet by its
+     * dropped nuclear channel, and an over-counted groupKey never fills (the run
+     * hangs). See countChannelsPerPatient's doc for that consumer's requirements.
+     *
+     * @param csvPath path to the samplesheet
+     *
+     * Returns a Map of patient_id -> declared channel count.
+     */
+    static Map<String, Integer> countDeclaredChannelsPerPatient(String csvPath) {
+        def file = new File(csvPath)
+        if (!file.exists()) return [:]
+
+        def channelSets = [:].withDefault { new HashSet<String>() }
+        def lines = readCsvLines(file.path)
+        if (lines.size() < 2) return [:]  // Header only or empty
+
+        def header = parseCsvLine(lines[0])
+        def patientIdx = header.findIndexOf { it == 'patient_id' }
+        def channelsIdx = header.findIndexOf { it == 'channels' }
+        if (patientIdx == -1 || channelsIdx == -1) return [:]
+
+        lines.drop(1).each { line ->
+            def cols = parseCsvLine(line)
+            if (cols.size() > Math.max(patientIdx, channelsIdx)) {
+                def patientId = cols[patientIdx].trim()
+                if (!patientId) return  // ignore blank patient_id cells
+                def channels = cols[channelsIdx].split('\\|')*.trim().findAll { it }
+                channelSets[patientId].addAll(channels*.toUpperCase())
+            }
+        }
+
+        return channelSets.collectEntries { k, v -> [k, v.size()] }
     }
 
     static Map validateMetadata(Map meta, def nuclearMarkers, String context = 'unknown') {

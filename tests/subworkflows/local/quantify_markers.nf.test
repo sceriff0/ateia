@@ -143,13 +143,23 @@ nextflow_workflow {
             workflow {
                 """
                 // The dangerous direction. `remainder: true` makes an OVER-count harmless
-                // (late but complete), but an UNDER-count makes groupTuple emit at size
-                // and then emit the surplus as a SECOND group for the same patient, so a
-                // per-patient consumer runs twice and both writes land on the same
-                // published path. Before `remainder` the surplus was silently discarded
-                // instead. This test pins the behaviour so the trade-off is visible:
-                // countChannelsPerPatient must never under-count, and errs high when it
-                // cannot be certain (see lib/CsvUtils.groovy).
+                // (the surplus slot never fills, so nothing extra is emitted), but an
+                // UNDER-count makes groupTuple emit at size and then emit the surplus as a
+                // SECOND group for the same patient — AT THIS SUBWORKFLOW BOUNDARY, which
+                // is exactly what this test pins below. Before `remainder` the surplus was
+                // silently discarded instead.
+                //
+                // What the CALLER does with those two same-patient-id emissions is NOT
+                // uniform, and is deliberately out of scope for this subworkflow-level
+                // test — see QUANTIFY_MARKERS' own GROUP comment
+                // (subworkflows/local/quantify_markers.nf) for the full per-caller account:
+                // add_cycle.nf's `.combine(by: 0)` runs MERGE_QUANT_CSVS twice onto the same
+                // published path; postprocess.nf's `.join(ch_morphology, by: 0)` silently
+                // discards the surplus instead; postprocess.nf's separate pyramid grouping
+                // aborts the run entirely via the MERGE_AND_PYRAMID memory closure
+                // (conf/modules.config:330-337). This test pins the behaviour so the
+                // trade-off is visible: countChannelsPerPatient must never under-count, and
+                // errs high when it cannot be certain (see lib/CsvUtils.groovy).
                 input[0] = Channel.of(
                     [[patient_id: 'P001', id: 'P001_a', channels_count: 1],
                      [file('$projectDir/tests/testdata/sample_DAPI.tif',  checkIfExists: true),

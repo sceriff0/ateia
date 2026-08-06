@@ -41,6 +41,15 @@
     params.mode/start, the params block) is derived here, so the two paths cannot
     drift apart in a field neither of them meant to change. Nothing in this file
     branches on params.mode.
+
+    `facts.channels` and `facts.declared_channels` are NOT interchangeable, and the
+    manifest built below reads ONLY `declared_channels`: `channels` is
+    channels_count's exact, post-nuclear-drop count (correct for sizing groupKey,
+    wrong for an input manifest); `declared_channels` is the samplesheet's raw
+    union (right for the manifest, wrong for groupKey — see
+    CsvUtils.countDeclaredChannelsPerPatient / countChannelsPerPatient). Reading
+    `channels` here instead is the exact regression this file's manifest carried
+    for a while: add_cycle reported 2 channels for a declared 3-channel cycle.
 ================================================================================
 */
 
@@ -68,11 +77,66 @@ def artifactsOf(ch_artifacts, String kind) {
     return ch_artifacts.filter { it[0] == kind }.map { it[1] }
 }
 
+// Build the `manifest` block of run_summary.json: total and per-patient
+// image/channel counts for the sample manifest. Pulled into its own function so it
+// is unit-testable via nf-test's `nextflow_function`
+// (final_qc_run_summary.nf.test) — GENERATE_QC_REPORT's stub never copies
+// run_summary.json anywhere a workflow test could inspect its content, so before
+// this the whole run_summary.json build was unverifiable by anything but a manual
+// diff in a report.
+//
+// `facts.declared_channels` (NOT `facts.channels`) feeds this. See the header
+// comment above and CsvUtils.countDeclaredChannelsPerPatient's doc for why the
+// manifest and channels_count must not share a source.
+def buildManifest(Map facts) {
+    def patient_counts    = facts.patients
+    def declared_channels = facts.declared_channels
+    return [
+        totals: [
+            patients: patient_counts.size(),
+            images: (patient_counts.values().sum() ?: 0),
+            channels: (declared_channels.values().sum() ?: 0),
+        ],
+        patients: patient_counts.collectEntries { pid, imgs ->
+            [(pid): [images: imgs, channels: (declared_channels[pid] ?: 0)]]
+        },
+    ]
+}
+
+// Build the complete run_summary.json content, as a Map (pre-JSON-encoding).
+// params/pipeline-info/timestamp are explicit arguments — rather than this function
+// reading params./workflow.manifest directly — purely so it is callable from an
+// isolated nf-test `nextflow_function` test with no live params{}/workflow binding
+// required. The live call site below (FINAL_QC's main:) passes the real
+// params/workflow.manifest/timestamp; production behaviour is unchanged by this.
+def buildRunSummary(Map facts, Map runParams, Map pipelineInfo, String timestamp) {
+    return [
+        pipeline: pipelineInfo,
+        run: [
+            timestamp: timestamp,
+            mode: runParams.mode,
+            start: runParams.start,
+            stop: facts.stop,
+        ],
+        params: [
+            registration_method: runParams.registration_method,
+            seg_method: runParams.seg_method,
+            quantify_compartments: runParams.quantify_compartments,
+            expanded_quantification: runParams.expanded_quantification,
+            pixel_size: runParams.pixel_size,
+        ],
+        manifest: buildManifest(facts),
+    ]
+}
+
 workflow FINAL_QC {
     take:
     ch_artifacts   // [kind, file]  — see the kind list above
-    ch_run_facts   // value channel of [stop: String, patients: Map, channels: Map]
-                   //   patients/channels are INPUT_CHECK.out.counts
+    ch_run_facts   // value channel of [stop: String, patients: Map, channels: Map,
+                   //   declared_channels: Map] — patients/channels/declared_channels
+                   //   are INPUT_CHECK.out.counts. `channels` is NOT read by the
+                   //   manifest below (see header comment) — it is carried through
+                   //   unchanged for whichever other consumer needs the exact count.
 
     main:
 
@@ -94,35 +158,14 @@ workflow FINAL_QC {
         // computed rather than by re-parsing the samplesheet.
         ch_run_summary = ch_run_facts
             .map { facts ->
-                def patient_counts = facts.patients
-                def channel_counts = facts.channels
-                def summary = [
-                    pipeline: [name: workflow.manifest.name, version: workflow.manifest.version],
-                    run: [
-                        timestamp: new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss 'UTC'")
-                            .format(new Date()),
-                        mode: params.mode,
-                        start: params.start,
-                        stop: facts.stop,
-                    ],
-                    params: [
-                        registration_method: params.registration_method,
-                        seg_method: params.seg_method,
-                        quantify_compartments: params.quantify_compartments,
-                        expanded_quantification: params.expanded_quantification,
-                        pixel_size: params.pixel_size,
-                    ],
-                    manifest: [
-                        totals: [
-                            patients: patient_counts.size(),
-                            images: (patient_counts.values().sum() ?: 0),
-                            channels: (channel_counts.values().sum() ?: 0),
-                        ],
-                        patients: patient_counts.collectEntries { pid, imgs ->
-                            [(pid): [images: imgs, channels: (channel_counts[pid] ?: 0)]]
-                        },
-                    ],
-                ]
+                def timestamp = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss 'UTC'")
+                    .format(new Date())
+                def summary = buildRunSummary(
+                    facts,
+                    params,
+                    [name: workflow.manifest.name, version: workflow.manifest.version],
+                    timestamp
+                )
                 return JsonOutput.prettyPrint(JsonOutput.toJson(summary))
             }
             .collectFile(name: 'run_summary.json')
