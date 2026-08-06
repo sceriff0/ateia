@@ -405,3 +405,86 @@ def test_registration_section_renders_stare_tre_from_valis_dir(tmp_path):
     html = gqr.registration_qc_section(tmp_path / "reg", str(valis))
     assert "STARE Tiled TRE" in html
     assert "No registration-accuracy summary found" not in html
+
+
+# ── pin: VALIS CSV shape, preserved across the _read_valis_tre -> _read_intrinsic_tre rename ────
+# This assertion was first written and run green against the unmodified `_read_valis_tre` (see
+# task-5b-report.md for the pre-refactor pytest output). Only the callee name below was updated
+# afterward, so a green result here proves the VALIS path is unchanged by the refactor rather than
+# merely "whatever the new code happens to do".
+def test_read_intrinsic_tre_valis_csv_shape_preserved(tmp_path):
+    gqr = _load()
+    out = gqr._read_intrinsic_tre(str(_valis_csvs(tmp_path)))
+    assert out["mov"]["final"] == {"rigid_D": 2.0, "non_rigid_D": 0.5}
+    assert out["mov"]["premicro"] == {"rigid_D": 2.0, "non_rigid_D": 1.0}
+
+
+def test_read_intrinsic_tre_reads_stare_json(tmp_path):
+    gqr = _load()
+    d = tmp_path / "registration_tre"
+    d.mkdir()
+    _write_tre(d, "P1_DAPI", coarse=2.5, rigid_p50=4.0, final_p50=0.4)
+    out = gqr._read_intrinsic_tre(str(d))
+    assert out["P1_DAPI"]["final"] == {"rigid_D": 2.5, "non_rigid_D": 0.4}
+    assert out["P1_DAPI"]["premicro"] == {}
+
+
+def test_reconcile_rows_from_stare_tre_json_are_nonempty(tmp_path):
+    gqr = _load()
+    d = tmp_path / "registration_tre"
+    d.mkdir()
+    _write_tre(d, "mov", coarse=2.0, rigid_p50=3.0, final_p50=0.5)
+    seg_qc = _seg_qc_json(tmp_path)  # slide "mov", matches _write_tre's moving field
+    rows = {(r["slide"], r["stage"]): r for r in gqr.reconcile_rows(str(d), str(seg_qc))}
+    assert rows  # non-empty: the JSON-only input still reconciles
+    assert rows[("mov", "rigid")]["feature_tre_um"] == 2.0  # coarse_tre_px
+    # No premicro summary for STARE -> non_rigid falls back to final's non_rigid_D (0.5),
+    # same fallback path VALIS uses when micro_reg < 2.
+    assert rows[("mov", "non_rigid")]["feature_tre_um"] == 0.5
+    assert rows[("mov", "micro")]["feature_tre_um"] == 0.5
+
+
+def test_reconciliation_section_neither_format_is_method_neutral_and_does_not_raise(tmp_path):
+    gqr = _load()
+    empty_tre = tmp_path / "registration_tre"
+    empty_tre.mkdir()
+    empty_seg_qc = tmp_path / "seg_qc"
+    empty_seg_qc.mkdir()
+    html = gqr.reconciliation_section(str(empty_tre), str(empty_seg_qc))
+    assert "Reconciliation" in html
+    assert "VALIS" not in html  # a tiled-only run must not see a VALIS-flavoured message
+    assert "found to reconcile" in html
+
+
+def test_reconcile_rows_merges_valis_csv_and_stare_json_rather_than_shadowing(tmp_path):
+    gqr = _load()
+    d = tmp_path / "registration_tre"
+    d.mkdir()
+    (d / "P001_preprocessed_summary.csv").write_text(
+        "from,rigid_D,non_rigid_D\nmov_valis,2.0,0.5\n"
+    )
+    _write_tre(d, "mov_stare", coarse=1.5, rigid_p50=2.0, final_p50=0.3)
+
+    seg_qc = tmp_path / "seg_qc"
+    seg_qc.mkdir()
+    (seg_qc / "mov_valis_seg_qc.json").write_text(
+        json.dumps(
+            {
+                "moving": "mov_valis",
+                "stages": {"rigid": {"displacement_um_p50": 2.1}},
+            }
+        )
+    )
+    (seg_qc / "mov_stare_seg_qc.json").write_text(
+        json.dumps(
+            {
+                "moving": "mov_stare",
+                "stages": {"rigid": {"displacement_um_p50": 1.6}},
+            }
+        )
+    )
+
+    rows = {(r["slide"], r["stage"]): r for r in gqr.reconcile_rows(str(d), str(seg_qc))}
+    # Both slides are present: the CSV reader did not shadow the JSON reader, or vice versa.
+    assert rows[("mov_valis", "rigid")]["feature_tre_um"] == 2.0
+    assert rows[("mov_stare", "rigid")]["feature_tre_um"] == 1.5

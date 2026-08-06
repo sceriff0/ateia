@@ -309,7 +309,7 @@ dedicated lean `withName:'TILED_*'` overrides (2–8 GB) or pair with a memory-c
   `bin/utils/tre_report.py`; the fan-out (`TILED_SOLVE`) now emits the rigid spatial heatmap too
   (previously dropped). The fan-out's final-accuracy residual comes from the reg_benchmark harness.
 - **Final QC-report integration (done):** the `_tre.json` already flowed into the report's
-  `valis_summary/` input; `generate_qc_report.py` now renders it as a "Registration Accuracy
+  `registration_tre/` input; `generate_qc_report.py` now renders it as a "Registration Accuracy
   (STARE Tiled TRE)" subsection — a per-slide table (coarse / rigid p50-p90 / post-refinement final
   p50-p90 / refined / tiles) plus a **per-tile SVG heatmap** of the spatial TRE, sitting alongside
   the VALIS rTRE, feature-distance, and seg-QC tables. Unit-tested.
