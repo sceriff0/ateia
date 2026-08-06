@@ -9,18 +9,15 @@ include { SEGMENT                  } from '../../modules/local/segment'
 include { EXTRACT_CELL_PROPERTIES } from '../../modules/local/extract_cell_properties'
 include { EXTRACT_NUCLEI_PROPERTIES } from '../../modules/local/extract_nuclei_properties'
 include { SPLIT_CHANNELS           } from '../../modules/local/split_channels'
-include { QUANTIFY                 } from '../../modules/local/quantify'
 include { MERGE_QUANT_CSVS         } from '../../modules/local/merge_quant_csvs'
-include { EXPORT_GEOJSON            } from '../../modules/local/export_geojson'
 include { COMPILE_PANEL            } from '../../modules/local/compile_panel'
 include { PHENOTYPE                } from '../../modules/local/phenotype'
-include { MERGE_AND_PYRAMID        } from '../../modules/local/merge_and_pyramid'
 include { GENERATE_POSTPROCESSING_QC    } from '../../modules/local/generate_postprocessing_qc'
 include { EXPORT_SPATIALDATA } from '../../modules/local/export_spatialdata'
-
-def withDebugView(channel, Closure formatter) {
-    return params.debug_channels ? channel.view(formatter) : channel
-}
+// Shared with subworkflows/local/add_cycle.nf — see those files for why the shaping
+// lives there rather than being copied into each caller.
+include { QUANTIFY_MARKERS         } from './quantify_markers'
+include { ASSEMBLE_EXPORT          } from './assemble_export'
 
 /*
 ========================================================================================
@@ -97,96 +94,20 @@ workflow POSTPROCESSING {
     // ========================================================================
     // QUANTIFICATION - Join channels with their patient's mask
     // ========================================================================
-    ch_split_output = withDebugView(
-        SPLIT_CHANNELS.out.channels,
-        { meta, tiffs -> "SPLIT_CHANNELS output: patient=${meta.patient_id}, tiffs=${tiffs*.name}" }
-    )
-
-    ch_flatmapped = ch_split_output
-        .flatMap { meta, tiffs ->
-            // Ensure tiffs is always a list (handle both single file and multiple files)
-            def tiff_list = tiffs instanceof List ? tiffs : [tiffs]
-
-            // Create unique meta map for each channel file. `+` creates a new
-            // top-level map, but Groovy's Map.plus() is
-            // cloneSimilarMap(left).putAll(right) -- clone-then-putAll,
-            // operationally identical to clone(). meta.channels is still the
-            // same List reference as in the original meta. See
-            // subworkflows/local/adapters/valis_adapter.nf:82-88 for why
-            // that matters and why toSorted() (not sort()) is mandatory
-            // wherever meta.channels is read.
-            tiff_list.collect { tiff ->
-                def channel_meta = meta + [
-                    id: "${meta.patient_id}_${tiff.baseName}",
-                    channel_name: tiff.baseName
-                ]
-                [channel_meta, tiff]
-            }
-        }
-    ch_flatmapped = withDebugView(
-        ch_flatmapped,
-        { meta, tiff -> "After flatMap: id=${meta.id}, channel=${meta.channel_name}, tiff=${tiff.name}" }
-    )
-
-    ch_for_combine = ch_flatmapped
-        .map { meta, tiff -> [meta.patient_id, meta, tiff] }
-    ch_for_combine = withDebugView(
-        ch_for_combine,
-        { patient_id, _meta, _tiff -> "Before combine: key=${patient_id}, channel=${_meta.channel_name}" }
-    )
-
     // Carry BOTH masks (cell + nuclei) keyed by patient_id. The nuclear mask is
     // always available from SEGMENT; QUANTIFY only uses it when
-    // params.quantify_compartments is set (per-compartment signal).
+    // params.quantify_compartments is set (per-compartment signal). The same pair
+    // feeds ASSEMBLE_EXPORT's embed_masks gate further down.
     ch_mask = ch_cell_mask
         .map { meta, mask -> [meta.patient_id, mask] }
         .join(ch_nuclei_mask.map { meta, mask -> [meta.patient_id, mask] }, by: 0)
-    ch_mask = withDebugView(
-        ch_mask,
-        { patient_id, _cell, _nuc -> "Masks available: key=${patient_id}, cell=${_cell.name}, nuclei=${_nuc.name}" }
-    )
 
-    ch_for_quant = ch_for_combine
-        .combine(ch_mask, by: 0)
-        .map { _patient_id, meta, tiff, cell_mask, nuclei_mask -> [meta, tiff, cell_mask, nuclei_mask] }
-    ch_for_quant = withDebugView(
-        ch_for_quant,
-        { meta, _tiff, _cell, _nuc -> "After combine: patient=${meta.patient_id}, channel=${meta.channel_name}" }
-    )
-
-    QUANTIFY(ch_for_quant)
-
-    // ========================================================================
-    // MERGE - Group CSVs by patient_id
-    // Deduplicate by patient_id + marker (take first occurrence if same marker appears multiple times)
-    // Use groupKey for streaming - emits as soon as channels_count items collected
-    // ========================================================================
-    ch_grouped_csvs = QUANTIFY.out.individual_csv
-        .map { meta, csv ->
-            def marker = meta.channel_name  // Extract marker name
-            [[meta.patient_id, marker], meta, csv]  // Key by [patient_id, marker]
-        }
-        .unique { entry -> entry[0] }  // Keep only first occurrence of each [patient_id, marker] pair
-        .map { key, meta, csv ->
-            // Use groupKey for streaming if channels_count is available
-            def gkey = meta.channels_count
-                ? groupKey(key[0], meta.channels_count)
-                : key[0]
-            [gkey, meta, csv]
-        }
-        .groupTuple(by: 0)
-        .map { patient_id, metas, csvs ->
-            // `+` creates a new top-level map, but Groovy's Map.plus() is
-            // cloneSimilarMap(left).putAll(right) -- clone-then-putAll,
-            // operationally identical to clone(). metas[0].channels is still
-            // the same List reference as in the original meta. See
-            // subworkflows/local/adapters/valis_adapter.nf:82-88 for why
-            // that matters and why toSorted() (not sort()) is mandatory
-            // wherever meta.channels is read.
-            // Extract actual patient_id from groupKey wrapper if needed
-            def meta = metas[0] + [id: patient_id.toString()]
-            [meta, csvs]
-        }
+    // Per-marker fan-out + QUANTIFY + per-patient grouping (with the groupKey
+    // streaming hint) all live in QUANTIFY_MARKERS, shared with add_cycle.nf.
+    // The --debug_channels views for this whole chain moved there with it, so this
+    // file no longer carries a debug-view helper of its own.
+    QUANTIFY_MARKERS(SPLIT_CHANNELS.out.channels, ch_mask)
+    ch_grouped_csvs = QUANTIFY_MARKERS.out.grouped_csv
 
     // Join grouped intensity CSVs with morphology.csv from EXTRACT_CELL_PROPERTIES
     ch_morphology = EXTRACT_CELL_PROPERTIES.out.morphology
@@ -225,29 +146,13 @@ workflow POSTPROCESSING {
         ch_phenotypes = PHENOTYPE.out.phenotypes
     }
 
-    def ch_export_base = MERGE_QUANT_CSVS.out.merged_csv
-        .map { meta, csv -> [meta.patient_id, meta, csv] }
-        .join(ch_contours, by: 0)
-        .join(ch_nuc_contours_for_export, by: 0)
-
-    def ch_for_export
-    if (do_pheno) {
-        ch_for_export = ch_export_base
-            .join(ch_phenotypes.map { meta, ph -> [meta.patient_id, ph] }, by: 0)
-            .combine(ch_model_config)
-            .map { _pid, meta, csv, contours_json, nuc_json, ph, mc ->
-                [meta, csv, contours_json, nuc_json, ph, mc]
-            }
-    } else {
-        ch_for_export = ch_export_base
-            .map { _pid, meta, csv, contours_json, nuc_json ->
-                // No panel: reuse the contours file as harmless placeholders; the module
-                // guard (params.panel_spec || params.panel_model) suppresses the args.
-                [meta, csv, contours_json, nuc_json, contours_json, contours_json]
-            }
-    }
-
-    EXPORT_GEOJSON(ch_for_export)
+    // Phenotype/model-config slots for EXPORT_GEOJSON, keyed by patient_id.
+    // With a panel: the real PHENOTYPE output plus the compiled model config.
+    // Without: reuse the contours file as harmless placeholders; the module guard
+    // (params.panel_spec || params.panel_model) suppresses the args.
+    def ch_pheno_extras = do_pheno
+        ? ch_phenotypes.map { meta, ph -> [meta.patient_id, ph] }.combine(ch_model_config)
+        : ch_contours.map { pid, contours_json -> [pid, contours_json, contours_json] }
 
     // ========================================================================
     // MERGE - Combine split channel TIFFs with segmentation mask (per patient)
@@ -256,6 +161,21 @@ workflow POSTPROCESSING {
     // SPLIT_CHANNELS already handles DAPI filtering correctly
     // Deduplicate by patient_id + marker to avoid duplicate channel names
     // Use groupKey for streaming - emits as soon as channels_count items collected
+    //
+    // `remainder: true` for the same reason as QUANTIFY_MARKERS' grouping (same
+    // channels_count): an under-count must not be allowed to silently drop the patient
+    // from the pyramid outright. But — see the fuller account in QUANTIFY_MARKERS'
+    // GROUP comment, which this grouping mirrors — an under-count here does NOT degrade
+    // to "late but complete" the way it can for the CSV-merge paths. This grouping feeds
+    // MERGE_AND_PYRAMID with a one-file surplus group, which trips that process's memory
+    // closure (conf/modules.config:330-337 — pre-existing, NOT fixed here) and the run
+    // ABORTS with "No such file or directory: channels". `remainder: true` is kept anyway
+    // because keeping only one of the two channels_count-sized groupings (this one, or
+    // QUANTIFY_MARKERS') would be worse than keeping neither — the patient would reach
+    // geojson/ and quantification/ but not the pyramid, and so be missing from
+    // csv/postprocessed.csv, half-published and invisible to any later --start
+    // postprocessing or add_cycle run. These two groupings must keep identical
+    // channels_count semantics even though their downstream failure modes differ.
     ch_split_grouped = SPLIT_CHANNELS.out.channels
         .flatMap { meta, tiffs ->
             // Normalize to List and create entries keyed by [patient_id, marker]
@@ -273,7 +193,7 @@ workflow POSTPROCESSING {
                 : patient_id
             [gkey, tiff]
         }
-        .groupTuple(by: 0)
+        .groupTuple(by: 0, remainder: true)
         .map { patient_id, tiffs ->
             // Create patient-level metadata
             // Extract actual patient_id from groupKey wrapper
@@ -286,26 +206,16 @@ workflow POSTPROCESSING {
             [patient_meta, tiffs]
         }
 
-    // Merge intensity channels, and optionally embed cell + nuclei segmentation
-    // masks as a SECOND, single-resolution uint32 OME series (Image:1). The
-    // masks are never mixed into the intensity series itself: a >65,535-cell
-    // uint32 label mask would force the whole intensity OME-TIFF to uint32,
-    // which Bio-Formats/QuPath cannot read as a normal multi-channel image.
-    // Cell objects are always delivered separately via cells.geojson; this
-    // second series is an optional, additional way to carry the raw masks.
-    def emit_masks = params.embed_masks && params.quantify_compartments && params.expanded_quantification
-    ch_pyramid_in = emit_masks
-        ? ch_split_grouped
-            .map { meta, tiffs -> [meta.patient_id, meta, tiffs] }
-            .join(ch_cell_mask.map { m, f -> [m.patient_id, f] }, by: 0)
-            .join(ch_nuclei_mask.map { m, f -> [m.patient_id, f] }, by: 0)
-            .map { _pid, meta, tiffs, cm, nm -> [meta, tiffs, [cm, nm]] }
-        : ch_split_grouped.map { meta, tiffs -> [meta, tiffs, []] }
-
-    // MERGE_AND_PYRAMID combines merge + pyramid generation in one step
-    // This preserves OME-XML metadata (channel names, colors, pixel sizes)
-    // and generates QuPath-compatible pyramidal OME-TIFF directly
-    MERGE_AND_PYRAMID(ch_pyramid_in)
+    // EXPORT_GEOJSON tuple assembly + the embed_masks pyramid gate live in
+    // ASSEMBLE_EXPORT, shared with add_cycle.nf.
+    ASSEMBLE_EXPORT(
+        MERGE_QUANT_CSVS.out.merged_csv,
+        ch_contours,
+        ch_nuc_contours_for_export,
+        ch_pheno_extras,
+        ch_split_grouped,
+        ch_mask
+    )
 
     // ========================================================================
     // POSTPROCESSING QC (optional, runs in PARALLEL with MERGE_AND_PYRAMID)
@@ -332,12 +242,12 @@ workflow POSTPROCESSING {
     // The join chain is kept (it's per-patient and doesn't block other patients)
 
     // Base checkpoint data (always present)
-    ch_base_checkpoint = EXPORT_GEOJSON.out.csv
+    ch_base_checkpoint = ASSEMBLE_EXPORT.out.csv
         .map { meta, csv ->
             def published_path = "${params.outdir}/${meta.patient_id}/geojson/${csv.name}"
             [meta.patient_id, published_path]
         }
-        .join(EXPORT_GEOJSON.out.geojson.map { meta, geojson ->
+        .join(ASSEMBLE_EXPORT.out.geojson.map { meta, geojson ->
             def published_path = "${params.outdir}/${meta.patient_id}/geojson/${geojson.name}"
             [meta.patient_id, published_path]
         })
@@ -349,7 +259,7 @@ workflow POSTPROCESSING {
             def published_path = "${params.outdir}/${meta.patient_id}/segmentation/${mask.name}"
             [meta.patient_id, published_path]
         })
-        .join(MERGE_AND_PYRAMID.out.pyramid.map { meta, pyramid ->
+        .join(ASSEMBLE_EXPORT.out.pyramid.map { meta, pyramid ->
             def published_path = "${params.outdir}/${meta.patient_id}/pyramid/${pyramid.name}"
             [meta.patient_id, published_path]
         })
@@ -364,7 +274,7 @@ workflow POSTPROCESSING {
             .join(ch_nuc_contours_for_export, by: 0)
             .join(ch_cell_mask.map { meta, m -> [meta.patient_id, m] }, by: 0)
             .join(ch_nuclei_mask.map { meta, m -> [meta.patient_id, m] }, by: 0)
-            .join(MERGE_AND_PYRAMID.out.pyramid.map { meta, p -> [meta.patient_id, p] }, by: 0)
+            .join(ASSEMBLE_EXPORT.out.pyramid.map { meta, p -> [meta.patient_id, p] }, by: 0)
             .map { _pid, meta, csv, contours, nuc_contours, cmask, nmask, pyramid ->
                 [meta, csv, contours, nuc_contours, cmask, nmask, pyramid]
             }
@@ -395,10 +305,9 @@ workflow POSTPROCESSING {
         .mix(SEGMENT.out.size_log)
         .mix(EXTRACT_CELL_PROPERTIES.out.size_log)
         .mix(SPLIT_CHANNELS.out.size_log)
-        .mix(QUANTIFY.out.size_log)
+        .mix(QUANTIFY_MARKERS.out.size_logs)
         .mix(MERGE_QUANT_CSVS.out.size_log)
-        .mix(EXPORT_GEOJSON.out.size_log)
-        .mix(MERGE_AND_PYRAMID.out.size_log)
+        .mix(ASSEMBLE_EXPORT.out.size_logs)
 
     if (do_pheno) {
         ch_size_logs = ch_size_logs.mix(PHENOTYPE.out.size_log)
@@ -415,15 +324,16 @@ workflow POSTPROCESSING {
         ch_size_logs = ch_size_logs.mix(EXTRACT_NUCLEI_PROPERTIES.out.size_log)
     }
 
-    // Collect versions from all postprocessing processes
+    // Collect versions from all postprocessing processes.
+    // QUANTIFY_MARKERS / ASSEMBLE_EXPORT already applied `.first()` internally
+    // (see the comments on their `versions` emits) — do not re-apply it here.
     ch_versions = Channel.empty()
         .mix(SEGMENT.out.versions.first())
         .mix(EXTRACT_CELL_PROPERTIES.out.versions.first())
         .mix(SPLIT_CHANNELS.out.versions.first())
-        .mix(QUANTIFY.out.versions.first())
+        .mix(QUANTIFY_MARKERS.out.versions)
         .mix(MERGE_QUANT_CSVS.out.versions.first())
-        .mix(EXPORT_GEOJSON.out.versions.first())
-        .mix(MERGE_AND_PYRAMID.out.versions.first())
+        .mix(ASSEMBLE_EXPORT.out.versions)
 
     if (do_pheno) {
         ch_versions = ch_versions.mix(PHENOTYPE.out.versions.first())

@@ -145,8 +145,8 @@
                     ]
                 },
                 "nuclear_markers": {
-                    "type": "array",
-                    "description": "Ordered preference of nuclear/fiducial marker names; the first present (resolved from channel metadata, never the filename) is moved to channel 0 and drives both cell segmentation and the registration fiducial.",
+                    "type": ["array", "string"],
+                    "description": "Ordered preference of nuclear/fiducial marker names; the first present (resolved from channel metadata, never the filename) is moved to channel 0 and drives both cell segmentation and the registration fiducial. Accepts a list (config/params file) or a comma- or space-separated string, which is the only shape Nextflow can produce for `--nuclear_markers CELLTOX` on the command line; MarkerUtils.markerList normalises both.",
                     "default": [
                         "DAPI",
                         "CELLTOX"

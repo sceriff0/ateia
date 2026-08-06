@@ -31,11 +31,17 @@ CONFIG_PATH = ROOT / "nextflow.config"
 FALLBACK_RE = re.compile(r"params\.([A-Za-z_][A-Za-z0-9_]*)\s*\?:")
 
 # Files scanned for `params.x ?: <literal>` fallbacks.
+#
+# `lib/*.groovy` is in the list because parameter reads move there: SegBackends holds
+# the per-backend defaults SEGMENT's script block used to inline, including
+# `params.instanseg_model_dir ?: "$PWD/.instanseg_cache"`. A fallback that escaped the
+# scan by being one directory over would be exactly the drift this test exists to catch.
 SCANNED_GLOBS = [
     "modules/local/*.nf",
     "conf/modules.config",
     "workflows/*.nf",
     "subworkflows/**/*.nf",
+    "lib/*.groovy",
 ]
 
 

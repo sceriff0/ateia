@@ -143,6 +143,68 @@ nextflow_process {
         }
     }
 
+    test("Should render a valid --nuclear-markers for a scalar params value - real") {
+
+        // REAL, not stub, and deliberately so. This asserts the RENDERED COMMAND, which
+        // only a `script:` block produces -- `-stub` runs the stub block and never
+        // evaluates line 32 at all. That is exactly how the defect this pins reached
+        // main: every test for the scalar `--nuclear_markers CELLTOX` spelling was a
+        // stub run, so nothing ever rendered the flag.
+        //
+        // The defect: `params.nuclear_markers.join(' ')` on a bare String does not throw.
+        // Groovy dispatches it to Java's static String.join(CharSequence, CharSequence...)
+        // with zero varargs, which returns the EMPTY string -- the rendered command
+        // carried a bare `--nuclear-markers` and convert_image.py's nargs="+" exited 2
+        // mid-run, naming the wrong problem. Against that code this test fails.
+        //
+        // Asserted on the rendered .command.sh rather than on process outcome, so it
+        // holds whether the conversion itself succeeds or fails for unrelated
+        // environmental reasons (arm64 host, missing container).
+        tag "real"
+        tag "slow"
+
+        when {
+            params {
+                // The shape Nextflow produces for `--nuclear_markers CELLTOX` on the
+                // command line. nextflow_schema.json permits it because an array cannot
+                // be given on a command line at all.
+                nuclear_markers = 'CELLTOX'
+                pixel_size = 0.325
+            }
+            process {
+                """
+                input[0] = [
+                    [
+                        patient_id: 'P001',
+                        is_reference: true,
+                        channels: ['CELLTOX', 'PANCK', 'SMA']
+                    ],
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            // Nextflow lays tasks out as <workDir>/<2 hex>/<30 hex>/.command.sh.
+            def rendered = []
+            new File("$workDir").eachFileRecurse { f ->
+                if (f.name == '.command.sh' && f.text.contains('convert_image.py'))
+                    rendered << f.text
+            }
+
+            assertAll(
+                { assert rendered.size() >= 1,
+                    "no rendered CONVERT_IMAGE .command.sh found under the task work dir" },
+                // The whole assertion. With the defect the rendered line is a bare
+                // `--nuclear-markers` followed by the shell line-continuation, so the
+                // value is simply absent and this fails.
+                { assert rendered.every { it.contains('--nuclear-markers CELLTOX') },
+                    "rendered command lost the marker value: " + rendered.join(' --- ') }
+            )
+        }
+    }
+
     test("Should convert OME-TIFF with correct channels - real") {
 
         tag "real"

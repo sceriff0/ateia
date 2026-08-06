@@ -30,23 +30,87 @@
 
 include { PREPROCESSING            } from './preprocess'
 include { VALIS_ADAPTER            } from './adapters/valis_adapter'
+include { EXTRACT_MASK_SERIES      } from '../../modules/local/extract_mask_series'
 include { EXTRACT_CELL_PROPERTIES  } from '../../modules/local/extract_cell_properties'
 include { EXTRACT_NUCLEI_PROPERTIES } from '../../modules/local/extract_nuclei_properties'
 include { SPLIT_CHANNELS           } from '../../modules/local/split_channels'
 include { SPLIT_CHANNELS as SPLIT_PRIOR_PYRAMID } from '../../modules/local/split_channels'
-include { QUANTIFY                 } from '../../modules/local/quantify'
 include { MERGE_QUANT_CSVS         } from '../../modules/local/merge_quant_csvs'
-include { EXPORT_GEOJSON           } from '../../modules/local/export_geojson'
-include { MERGE_AND_PYRAMID        } from '../../modules/local/merge_and_pyramid'
 include { GENERATE_REGISTRATION_QC } from '../../modules/local/generate_registration_qc'
 include { SEG_QC                   } from './seg_qc'
+// Shared with subworkflows/local/postprocess.nf. These used to be copied inline here;
+// the copy had already drifted (bare .groupTuple() instead of the sized groupKey).
+include { QUANTIFY_MARKERS         } from './quantify_markers'
+include { ASSEMBLE_EXPORT          } from './assemble_export'
 
 workflow ADD_CYCLE {
     take:
     ch_new_input     // [meta, raw_file]  (new cycle slides, is_reference=false)
-    ch_prior_assets  // [patient_id, ref_channels(List), ref_image, base_merged_csv, cell_mask, nuclei_mask, pyramid]
 
     main:
+    // ------------------------------------------------------------------ //
+    // 0. PRIOR ASSETS — everything this subworkflow reuses from the prior
+    //    completed run, rebuilt from that run's checkpoint CSVs.
+    // ------------------------------------------------------------------ //
+    // This used to be assembled by the caller (workflows/mirage.nf) and handed
+    // over as a bare 7-tuple, which this file then destructured positionally
+    // eleven times with `_`-prefixed throwaways. It lives here now, and the
+    // per-patient payload is a NAMED map:
+    //
+    //   [patient_id, [ ref_channels : List<String>  channels of the frozen reference
+    //                , ref_image    : path          the frozen registration target
+    //                , base_csv     : path          prior merged quantification table
+    //                , cell_mask    : path          prior segmentation cell mask
+    //                , nuclei_mask  : path          prior segmentation nuclei mask
+    //                , pyramid      : path          prior combined pyramid ]]
+    //
+    // patient_id stays a bare first element so the joins/combines below can key
+    // on it with `by: 0`.
+    //
+    // The prerequisites (--prior_outdir exists, every new-cycle patient appears
+    // in the prior postprocessed.csv, --mode add_cycle) are validated in
+    // workflows/mirage.nf before this subworkflow is ever invoked.
+
+    // registered.csv: patient_id,registered_image,is_reference,channels
+    ch_prior_ref = Channel
+        .fromPath("${params.prior_outdir}/csv/registered.csv", checkIfExists: true)
+        .splitCsv(header: true)
+        .filter { row -> row.is_reference?.toLowerCase() == 'true' }
+        .map { row ->
+            def chans = (row.channels ?: '').split('\\|').collect { it.trim() }.findAll { it }
+            [row.patient_id, chans, file(row.registered_image)]
+        }
+
+    // postprocessed.csv: patient_id,cell_csv,cell_geojson,merged_csv,cell_mask,pyramid
+    // The cell_mask column is parsed (so a checkpoint missing it still fails loudly,
+    // as before) but deliberately NOT used: the reusable masks come from the prior
+    // pyramid's embedded mask series, which is the copy that is registered to the
+    // pyramid's own frame.
+    ch_prior_rows = Channel
+        .fromPath("${params.prior_outdir}/csv/postprocessed.csv", checkIfExists: true)
+        .splitCsv(header: true)
+        .map { row -> [row.patient_id, file(row.merged_csv), file(row.cell_mask), file(row.pyramid)] }
+
+    // Extract masks from the prior pyramid's Image:1 series (fast-fails in the
+    // process if the prior run was not embed_masks+expanded+compartment).
+    EXTRACT_MASK_SERIES(ch_prior_rows.map { pid, _merged_csv, _cell_mask, pyramid -> [[patient_id: pid, id: pid], pyramid] })
+    ch_extracted_masks = EXTRACT_MASK_SERIES.out.cell_mask.map { m, f -> [m.patient_id, f] }
+        .join(EXTRACT_MASK_SERIES.out.nuclei_mask.map { m, f -> [m.patient_id, f] }, by: 0)
+
+    ch_prior_assets = ch_prior_ref
+        .join(ch_prior_rows.map { pid, merged_csv, _cell_mask, pyramid -> [pid, merged_csv, pyramid] }, by: 0)
+        .join(ch_extracted_masks, by: 0)
+        .map { pid, ref_channels, ref_image, base_csv, pyramid, cell_mask, nuclei_mask ->
+            [pid, [
+                ref_channels: ref_channels,
+                ref_image   : ref_image,
+                base_csv    : base_csv,
+                cell_mask   : cell_mask,
+                nuclei_mask : nuclei_mask,
+                pyramid     : pyramid,
+            ]]
+        }
+
     // ------------------------------------------------------------------ //
     // 1. PREPROCESS the new cycle (mirrors cycle-1 illumination/prep)
     // ------------------------------------------------------------------ //
@@ -59,9 +123,9 @@ workflow ADD_CYCLE {
     // Build [patient_id, ref_item, all_items] with the prior reference marked
     // is_reference=true. The reference is a fixed frame (passed through
     // unregistered by VALIS); we discard its output and keep only the new cycle.
-    ch_ref_item = ch_prior_assets.map { pid, ref_channels, ref_image, _m, _cm, _nm, _py ->
-        def ref_meta = [patient_id: pid, id: "${pid}_reference", is_reference: true, channels: ref_channels]
-        [pid, [ref_meta, ref_image]]
+    ch_ref_item = ch_prior_assets.map { pid, prior ->
+        def ref_meta = [patient_id: pid, id: "${pid}_reference", is_reference: true, channels: prior.ref_channels]
+        [pid, [ref_meta, prior.ref_image]]
     }
     ch_grouped = ch_new_pre
         .map { meta, file -> [meta.patient_id, [meta + [is_reference: false], file]] }
@@ -97,7 +161,7 @@ workflow ADD_CYCLE {
     if (reg_qc_level >= 1) {
         ch_for_qc = ch_new_registered
             .map { meta, f -> [meta.patient_id, meta, f] }
-            .combine(ch_prior_assets.map { pid, _rc, ref_image, _m, _cm, _nm, _py -> [pid, ref_image] }, by: 0)
+            .combine(ch_prior_assets.map { pid, prior -> [pid, prior.ref_image] }, by: 0)
             .map { _pid, meta, reg_f, ref_f -> [meta, reg_f, ref_f] }
         GENERATE_REGISTRATION_QC(ch_for_qc)
         ch_qc = GENERATE_REGISTRATION_QC.out.qc
@@ -114,8 +178,8 @@ workflow ADD_CYCLE {
     if (do_seg_qc) {
         ch_native = ch_new_pre
             .map { meta, f -> [meta + [is_reference: false], f] }
-            .mix(ch_prior_assets.map { pid, rc, ref_image, _m, _cm, _nm, _py ->
-                [[patient_id: pid, id: "${pid}_reference", is_reference: true, channels: rc], ref_image]
+            .mix(ch_prior_assets.map { pid, prior ->
+                [[patient_id: pid, id: "${pid}_reference", is_reference: true, channels: prior.ref_channels], prior.ref_image]
             })
 
         SEG_QC(ch_native, ch_registrar, VALIS_ADAPTER.out.stage_checkpoint, Channel.empty())
@@ -128,8 +192,8 @@ workflow ADD_CYCLE {
     // 4. REUSE prior masks -> cell contours (+ nucleus contours if compartments)
     //    Masks are unchanged, so cell labels are identical.
     // ------------------------------------------------------------------ //
-    ch_prior_cell_mask = ch_prior_assets.map { pid, _rc, _ri, _m, cell_mask, _nm, _py ->
-        [[patient_id: pid, id: pid, is_reference: true], cell_mask]
+    ch_prior_cell_mask = ch_prior_assets.map { pid, prior ->
+        [[patient_id: pid, id: pid, is_reference: true], prior.cell_mask]
     }
     EXTRACT_CELL_PROPERTIES(ch_prior_cell_mask)
     ch_contours = EXTRACT_CELL_PROPERTIES.out.contours.map { meta, j -> [meta.patient_id, j] }
@@ -137,8 +201,8 @@ workflow ADD_CYCLE {
     // Nucleus contours (re-keyed to cell labels) — only when compartments enabled.
     ch_nucleus_contours = Channel.empty()
     if (params.quantify_compartments) {
-        ch_nuclei_props_in = ch_prior_assets.map { pid, _rc, _ri, _m, cell_mask, nuclei_mask, _py ->
-            [[patient_id: pid, id: pid], nuclei_mask, cell_mask]
+        ch_nuclei_props_in = ch_prior_assets.map { pid, prior ->
+            [[patient_id: pid, id: pid], prior.nuclei_mask, prior.cell_mask]
         }
         EXTRACT_NUCLEI_PROPERTIES(ch_nuclei_props_in)
         ch_nucleus_contours = EXTRACT_NUCLEI_PROPERTIES.out.contours.map { meta, j -> [meta.patient_id, j] }
@@ -150,45 +214,30 @@ workflow ADD_CYCLE {
     // ------------------------------------------------------------------ //
     SPLIT_CHANNELS(ch_new_registered.map { meta, f -> [meta, f, false] })
 
-    ch_new_channels = SPLIT_CHANNELS.out.channels
-        .flatMap { meta, tiffs ->
-            // `+` creates a new top-level map, but Groovy's Map.plus() is
-            // cloneSimilarMap(left).putAll(right) -- clone-then-putAll,
-            // operationally identical to clone(). meta.channels is still the
-            // same List reference as in the original meta. See
-            // subworkflows/local/adapters/valis_adapter.nf:82-88 for why
-            // that matters and why toSorted() (not sort()) is mandatory
-            // wherever meta.channels is read.
-            (tiffs instanceof List ? tiffs : [tiffs]).collect { tiff ->
-                def m = meta + [
-                    id: "${meta.patient_id}_${tiff.baseName}",
-                    channel_name: tiff.baseName
-                ]
-                [m, tiff]
-            }
-        }
-
     // ------------------------------------------------------------------ //
     // 6. QUANTIFY new markers against the REUSED masks. QUANTIFY reads
     //    params.quantify_compartments to route the nuclei mask; --expanded
     //    arrives via ext.args (conf/modules.config), so no change here.
+    //
+    //    The per-marker fan-out, the mask combine and the per-patient grouping
+    //    are QUANTIFY_MARKERS, shared with postprocess.nf — including the
+    //    groupKey(patient_id, channels_count) streaming hint that this file's
+    //    former inline copy had lost.
     // ------------------------------------------------------------------ //
-    ch_masks = ch_prior_assets.map { pid, _rc, _ri, _m, cell_mask, nuclei_mask, _py ->
-        [pid, cell_mask, nuclei_mask]
+    ch_masks = ch_prior_assets.map { pid, prior ->
+        [pid, prior.cell_mask, prior.nuclei_mask]
     }
-    ch_for_quant = ch_new_channels
-        .map { meta, tiff -> [meta.patient_id, meta, tiff] }
-        .combine(ch_masks, by: 0)
-        .map { _pid, meta, tiff, cell_mask, nuclei_mask -> [meta, tiff, cell_mask, nuclei_mask] }
-    QUANTIFY(ch_for_quant)
+    QUANTIFY_MARKERS(SPLIT_CHANNELS.out.channels, ch_masks)
 
     // ------------------------------------------------------------------ //
     // 7. MERGE new marker CSVs onto the prior merged table (base) by label
     // ------------------------------------------------------------------ //
-    ch_new_quant_grouped = QUANTIFY.out.individual_csv
-        .map { meta, csv -> [meta.patient_id, csv] }
-        .groupTuple()   // all new-marker CSVs for the patient
-    ch_base = ch_prior_assets.map { pid, _rc, _ri, base_csv, _cm, _nm, _py -> [pid, base_csv] }
+    // QUANTIFY_MARKERS emits [meta, csvs]; add_cycle keys the merge by patient
+    // and builds its own patient-level meta (no morphology join here — the third
+    // MERGE_QUANT_CSVS slot carries the prior base table instead).
+    ch_new_quant_grouped = QUANTIFY_MARKERS.out.grouped_csv
+        .map { meta, csvs -> [meta.patient_id, csvs] }
+    ch_base = ch_prior_assets.map { pid, prior -> [pid, prior.base_csv] }
     ch_for_merge = ch_new_quant_grouped
         .combine(ch_base, by: 0)
         .map { pid, csvs, base_csv -> [[patient_id: pid, id: pid], csvs, base_csv] }
@@ -206,22 +255,16 @@ workflow ADD_CYCLE {
     //    arg guard is always off here and the legacy constant-"Cell" export is kept.
     // ------------------------------------------------------------------ //
     ch_nuc_for_export = params.quantify_compartments ? ch_nucleus_contours : ch_contours
-    ch_for_export = MERGE_QUANT_CSVS.out.merged_csv
-        .map { meta, csv -> [meta.patient_id, meta, csv] }
-        .join(ch_contours, by: 0)
-        .join(ch_nuc_for_export, by: 0)
-        .map { _pid, meta, csv, contours, nucleus_contours ->
-            [meta, csv, contours, nucleus_contours, contours, contours]
-        }
-    EXPORT_GEOJSON(ch_for_export)
+    // No PHENOTYPE stage here: both phenotype slots reuse the cell contours file.
+    ch_pheno_extras = ch_contours.map { pid, contours -> [pid, contours, contours] }
 
     // ------------------------------------------------------------------ //
     // 9. REBUILD complete pyramid: recover prior channels from the prior
     //    pyramid (is_reference=true keeps ref DAPI + all old markers), then
     //    merge with the new cycle's channels.
     // ------------------------------------------------------------------ //
-    ch_prior_pyramid = ch_prior_assets.map { pid, _rc, _ri, _m, _cm, _nm, pyramid ->
-        [[patient_id: pid, id: pid, is_reference: true, channels: []], pyramid, true]
+    ch_prior_pyramid = ch_prior_assets.map { pid, prior ->
+        [[patient_id: pid, id: pid, is_reference: true, channels: []], prior.pyramid, true]
     }
     SPLIT_PRIOR_PYRAMID(ch_prior_pyramid)
 
@@ -248,44 +291,49 @@ workflow ADD_CYCLE {
         .groupTuple()
         .map { pid, tiffs -> [[patient_id: pid, id: pid, is_reference: false], tiffs] }
 
-    // MERGE_AND_PYRAMID now takes a 3-tuple [meta, split_channels, mask_files]
-    // (mask embedding as a second OME series — see merge_and_pyramid.nf and
-    // postprocess.nf's ch_pyramid_in). ADD_CYCLE mirrors postprocess.nf's
-    // embed_masks gate: reuse the SAME cell + nuclei masks from ch_prior_assets
-    // (they are unchanged in ADD_CYCLE — no re-derivation), embedding them into
-    // the rebuilt combined pyramid only when embed_masks is on. Otherwise pass
-    // an empty mask list so Nextflow stages no masks/ dir.
-    def emit_masks = params.embed_masks && params.quantify_compartments && params.expanded_quantification
-    ch_masks_for_pyramid = ch_prior_assets.map { pid, _rc, _ri, _m, cell_mask, nuclei_mask, _py -> [pid, cell_mask, nuclei_mask] }
-    ch_pyramid_in = emit_masks
-        ? ch_all_channels
-            .map { meta, tiffs -> [meta.patient_id, meta, tiffs] }
-            .combine(ch_masks_for_pyramid, by: 0)
-            .map { _pid, meta, tiffs, cm, nm -> [meta, tiffs, [cm, nm]] }
-        : ch_all_channels.map { meta, tiffs -> [meta, tiffs, []] }
-    MERGE_AND_PYRAMID(ch_pyramid_in)
+    // ------------------------------------------------------------------ //
+    // 10. EXPORT + PYRAMID (ASSEMBLE_EXPORT, shared with postprocess.nf)
+    // ------------------------------------------------------------------ //
+    // ASSEMBLE_EXPORT owns the EXPORT_GEOJSON tuple and the embed_masks gate.
+    // ADD_CYCLE feeds it the SAME cell + nuclei masks it reused from
+    // ch_prior_assets (they are unchanged here — no re-derivation), so the
+    // rebuilt combined pyramid carries the mask series whenever embed_masks is on.
+    ASSEMBLE_EXPORT(
+        MERGE_QUANT_CSVS.out.merged_csv,
+        ch_contours,
+        ch_nuc_for_export,
+        ch_pheno_extras,
+        ch_all_channels,
+        ch_masks
+    )
 
     // ------------------------------------------------------------------ //
     // Versions + size logs
     // ------------------------------------------------------------------ //
+    // QUANTIFY_MARKERS / ASSEMBLE_EXPORT already applied `.first()` internally
+    // (see the comments on their `versions` emits) — do not re-apply it here.
+    //
+    // EXTRACT_MASK_SERIES.out.versions is deliberately NOT mixed in: it was not
+    // collected when the process was invoked from workflows/mirage.nf either, and
+    // adding it here would change collated_versions.yml (and therefore the QC
+    // report's version table) as a side effect of moving the call. Wiring it up is
+    // a real gap, but a behaviour change that belongs in its own commit.
     ch_versions = Channel.empty()
         .mix(PREPROCESSING.out.versions)
         .mix(ch_adapter_versions)
         .mix(EXTRACT_CELL_PROPERTIES.out.versions.first())
         .mix(SPLIT_CHANNELS.out.versions.first())
         .mix(SPLIT_PRIOR_PYRAMID.out.versions.first())
-        .mix(QUANTIFY.out.versions.first())
+        .mix(QUANTIFY_MARKERS.out.versions)
         .mix(MERGE_QUANT_CSVS.out.versions.first())
-        .mix(EXPORT_GEOJSON.out.versions.first())
-        .mix(MERGE_AND_PYRAMID.out.versions.first())
+        .mix(ASSEMBLE_EXPORT.out.versions)
 
     ch_size_logs = Channel.empty()
         .mix(SPLIT_CHANNELS.out.size_log)
         .mix(SPLIT_PRIOR_PYRAMID.out.size_log)
-        .mix(QUANTIFY.out.size_log)
+        .mix(QUANTIFY_MARKERS.out.size_logs)
         .mix(MERGE_QUANT_CSVS.out.size_log)
-        .mix(EXPORT_GEOJSON.out.size_log)
-        .mix(MERGE_AND_PYRAMID.out.size_log)
+        .mix(ASSEMBLE_EXPORT.out.size_logs)
         .mix(EXTRACT_CELL_PROPERTIES.out.size_log)
 
     if (reg_qc_level >= 1) {
@@ -303,9 +351,9 @@ workflow ADD_CYCLE {
     }
 
     emit:
-    geojson     = EXPORT_GEOJSON.out.geojson
+    geojson     = ASSEMBLE_EXPORT.out.geojson
     merged_csv  = MERGE_QUANT_CSVS.out.merged_csv
-    pyramid     = MERGE_AND_PYRAMID.out.pyramid
+    pyramid     = ASSEMBLE_EXPORT.out.pyramid
     qc          = ch_qc
     seg_qc      = ch_seg_qc
     versions    = ch_versions

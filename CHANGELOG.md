@@ -10,14 +10,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **`nuclear_markers`** parameter (default `['DAPI', 'CELLTOX']`) — an ordered preference list
   naming the nuclear/fiducial channel. The first marker present (resolved from channel metadata,
-  never the filename) is moved to channel 0 by `CONVERT_IMAGE` and drives **both** cell
-  segmentation and the registration fiducial. Fails fast if none is present (single-channel images
-  excepted).
+  never the filename) is moved to channel 0 by `CONVERT_IMAGE`. Fails fast if none is present
+  (single-channel images excepted).
 
 ### Changed
+- **`nuclear_markers` is now honoured by every consumer**, not only `CONVERT_IMAGE`:
+  `SPLIT_CHANNELS`/`split_multichannel.py`, `SEGMENT`, `SEG_QC_GEOJSON`, and `CsvUtils`'
+  samplesheet validation and channel counting all resolve the nuclear/fiducial channel from the
+  same rule now, so it genuinely drives both cell segmentation and the registration fiducial.
+  **Behaviour change under the shipped default `['DAPI', 'CELLTOX']`:** a samplesheet with a
+  channel whose name *contains* `CELLTOX` (case-insensitive) now has that channel dropped from
+  non-reference slides, exactly as `DAPI` always was. On an affected run, `add_cycle`'s
+  double-written `merged_quant.csv` becomes a single correct file, and the redundant per-cycle
+  fiducial disappears from `*_quant.csv`. Users who want the old behaviour should set
+  `--nuclear_markers DAPI`.
+- **`--nuclear_markers` now accepts a comma/space-separated string as well as a list**, so
+  `--nuclear_markers CELLTOX` works on the command line (`nextflow_schema.json` type widened to
+  `["array", "string"]`).
 - **`reg_micro_reg` now defaults to `2`** (maximum: micro-rigid + micro non-rigid), previously `0`.
   Registrations run the full micro-registration by default — a quality-over-speed change
   (micro-registration can add ~30–120 min per registration).
+- **`--seg_method` with an unrecognised value now fails fast** instead of silently running
+  StarDist.
+- **`<outdir>/size_logs/versions.yml`'s single key changed** to
+  `MIRAGE:FINAL_QC:AGGREGATE_SIZE_LOGS` (diagnostic string only; no functional effect).
 
 ### Removed
 - **`reg_reference_markers`** — removed. It only fed a filename-based fallback for reference-image

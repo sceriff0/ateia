@@ -35,6 +35,13 @@ process SEG_QC_GEOJSON {
     def n_tiles_x = params.seg_n_tiles_x
     def model_dir_arg = params.segmentation_model_dir ? "--model-dir ${params.segmentation_model_dir}" : ''
     def prob_arg = (params.seg_prob_thresh != null) ? "--prob-thresh ${params.seg_prob_thresh}" : ''
+    // The nuclear channel is resolved inside the script too (no --dapi-channel is
+    // passed), so the configured marker list has to travel with it. Without this the
+    // script fell back to bin/utils/metadata.py's DEFAULT_NUCLEAR_MARKERS, and a run
+    // configured for a marker outside that default scored registration QC on the wrong
+    // channel -- silently, because find_nuclear_index() falls back to index 0 rather
+    // than failing.
+    def nuclear_args = "--nuclear-markers ${MarkerUtils.markerList(params.nuclear_markers).join(' ')}"
     """
     bytes=\$(stat -L --printf="%s" ${image} 2>/dev/null || echo 0)
     echo "${task.process},${meta.patient_id},${image.name},\${bytes}" > ${prefix}.SEG_QC_GEOJSON.size.csv
@@ -48,6 +55,7 @@ process SEG_QC_GEOJSON {
         --pmin ${pmin} --pmax ${pmax} \\
         --n-tiles ${n_tiles_y} ${n_tiles_x} \\
         ${prob_arg} \\
+        ${nuclear_args} \\
         ${args}
 
     cat <<-END_VERSIONS > versions.yml

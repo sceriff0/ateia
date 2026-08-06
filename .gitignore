@@ -118,11 +118,17 @@ tests/testdata/invalid_no_dapi.csv
 tests/testdata/invalid_checkpoint_missing_col.csv
 tests/testdata/invalid_checkpoint_bad_ref.csv
 tests/testdata/invalid_file_not_found.csv
+tests/testdata/tiles_12_rows.csv
+tests/testdata/tiles_12_rows_trailing_blank.csv
+tests/testdata/tiles_12_rows_blank_interspersed.csv
+tests/testdata/tiles_header_only.csv
 tests/testdata/test_input.csv
 tests/testdata/sample_merged_quant.csv
 tests/testdata/empty_samplesheet.csv
 tests/testdata/single_sample.csv
 tests/testdata/whitespace_patient_id.csv
+tests/testdata/celltox_nonreference.csv
+tests/testdata/celltox_only.csv
 tests/testdata/sample_DAPI_intensity.csv
 tests/testdata/sample_PANCK_intensity.csv
 tests/testdata/sample_SMA_intensity.csv
@@ -144,3 +150,5 @@ tests/testdata/expected/morphology_columns.txt
 tests/testdata/expected/intensity_csv_columns.txt
 tests/testdata/expected/preproc_checkpoint_columns.txt
 tests/testdata/expected/reg_checkpoint_columns.txt
+# Minimal "prior completed run" checkpoint CSVs for the add_cycle subworkflow test.
+tests/testdata/prior_run/

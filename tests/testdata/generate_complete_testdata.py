@@ -232,6 +232,25 @@ with open(OUT_DIR / "valid_checkpoint_postprocessing.csv", "w") as f:
     f.write(f"P001,{TESTDATA_ABS}/P001_ref.ome.tiff,true,DAPI|PANCK|SMA\n")
 print("  Created valid_checkpoint_postprocessing.csv")
 
+# 3d. A minimal "prior completed run" for the add_cycle path. ADD_CYCLE rebuilds
+#     the assets it reuses from these two checkpoint CSVs under
+#     <prior_outdir>/csv/, so tests/subworkflows/add_cycle.nf.test only has to
+#     point --prior_outdir at this directory. Every referenced file must really
+#     exist: Nextflow stages merged_csv and pyramid into the processes.
+PRIOR_DIR = OUT_DIR / "prior_run" / "csv"
+PRIOR_DIR.mkdir(parents=True, exist_ok=True)
+with open(PRIOR_DIR / "registered.csv", "w") as f:
+    f.write("patient_id,registered_image,is_reference,channels\n")
+    f.write(f"P001,{TESTDATA_ABS}/P001_image.tiff,true,DAPI|PANCK\n")
+with open(PRIOR_DIR / "postprocessed.csv", "w") as f:
+    f.write("patient_id,cell_csv,cell_geojson,merged_csv,cell_mask,pyramid\n")
+    f.write(
+        f"P001,{TESTDATA_ABS}/P001_merged_quant.csv,{TESTDATA_ABS}/sample_contours.json,"
+        f"{TESTDATA_ABS}/P001_merged_quant.csv,{TESTDATA_ABS}/P001_cell_mask.tif,"
+        f"{TESTDATA_ABS}/P001_pyramid.ome.tiff\n"
+    )
+print("  Created prior_run/csv/{registered,postprocessed}.csv")
+
 # =============================================================================
 # 4. Generate INVALID input CSVs for validation testing
 # =============================================================================
@@ -289,6 +308,50 @@ with open(OUT_DIR / "invalid_file_not_found.csv", "w") as f:
 print("  Created invalid_file_not_found.csv (file not found)")
 
 # =============================================================================
+# 4h. TILED_COARSE tile-plan CSV fixtures, for tiled_adapter_group_size.nf.test's
+#     countTileRows()/requirePositiveTileCount() coverage (subworkflows/local/adapters/
+#     tiled_adapter.nf). Same header TILED_COARSE actually writes
+#     (modules/local/tiled_coarse.nf), covering: a normal 12-row plan, one with a
+#     trailing blank line, one with a blank line interspersed among data rows, and a
+#     header-only plan (must hit the n < 1 guard).
+# =============================================================================
+print("\n4h. Creating tile-plan CSV fixtures for the tiled fan-in gather...")
+_TILE_HEADER = "ix,iy,cx,cy,x0,y0,x1,y1,rx0,ry0,rx1,ry1"
+
+
+def _tile_row(ix, iy):
+    x0, y0 = ix * 16, iy * 16
+    return f"{ix},{iy},{x0 + 8},{y0 + 8},{x0},{y0},{x0 + 16},{y0 + 16},{x0},{y0},{x0 + 16},{y0 + 16}"
+
+
+_tile_rows = [_tile_row(i % 4, i // 4) for i in range(12)]
+
+with open(OUT_DIR / "tiles_12_rows.csv", "w") as f:
+    f.write(_TILE_HEADER + "\n")
+    for r in _tile_rows:
+        f.write(r + "\n")
+print("  Created tiles_12_rows.csv (12 data rows)")
+
+with open(OUT_DIR / "tiles_12_rows_trailing_blank.csv", "w") as f:
+    f.write(_TILE_HEADER + "\n")
+    for r in _tile_rows:
+        f.write(r + "\n")
+    f.write("\n")
+print("  Created tiles_12_rows_trailing_blank.csv (12 data rows + trailing blank line)")
+
+with open(OUT_DIR / "tiles_12_rows_blank_interspersed.csv", "w") as f:
+    f.write(_TILE_HEADER + "\n")
+    for i, r in enumerate(_tile_rows):
+        f.write(r + "\n")
+        if i == 5:
+            f.write("\n")
+print("  Created tiles_12_rows_blank_interspersed.csv (blank line mid-file)")
+
+with open(OUT_DIR / "tiles_header_only.csv", "w") as f:
+    f.write(_TILE_HEADER + "\n")
+print("  Created tiles_header_only.csv (no data rows)")
+
+# =============================================================================
 # 5. Update test.config input to use valid data
 # =============================================================================
 print("\n5. Creating test.config input CSV...")
@@ -318,6 +381,9 @@ print("  - invalid_no_dapi.csv")
 print("  - invalid_checkpoint_missing_col.csv")
 print("  - invalid_checkpoint_bad_ref.csv")
 print("  - invalid_file_not_found.csv")
+print("\nTile-plan CSV fixtures:")
+print("  - tiles_12_rows.csv, tiles_12_rows_trailing_blank.csv")
+print("  - tiles_12_rows_blank_interspersed.csv, tiles_header_only.csv")
 # =============================================================================
 # 6. Generate additional test fixtures for module tests
 # =============================================================================
@@ -472,6 +538,35 @@ with open(OUT_DIR / "whitespace_patient_id.csv", "w") as f:
     f.write(f"P001 ,{TESTDATA_ABS}/P001_ref.ome.tiff,true,DAPI|PANCK|SMA\n")
     f.write(f"P001 ,{TESTDATA_ABS}/P001_mov1.ome.tiff,false,DAPI|CD3|CD8\n")
 print("  Created whitespace_patient_id.csv")
+
+# 7g-bis. Nuclear-marker fixtures. `params.nuclear_markers` is the declared source of
+# truth for "which channel is nuclear", and its shipped default is ['DAPI', 'CELLTOX'] --
+# but every consumer used to hardcode the literal 'DAPI', so the CELLTOX half of the
+# default was unreachable. These two sheets exercise it.
+#
+# celltox_nonreference.csv is the dangerous shape: the ONLY CELLTOX-bearing slide is a
+# NON-reference one, on the SHIPPED DEFAULT marker list. SPLIT_CHANNELS drops the nuclear
+# channel from non-reference slides, so the patient's channel count is
+# {DAPI,PANCK,SMA} + {CD3,CD8} = 5, and bin/split_multichannel.py must emit exactly those
+# five. While that script tested `"DAPI" in name.upper()` it kept CELLTOX on the
+# non-reference slide and emitted SIX, over-filling a groupTuple sized for five --
+# on the linear path postprocess.nf's join() then silently DROPS the surplus markers,
+# and on the add_cycle path its combine(by:0) runs MERGE_QUANT_CSVS twice against one
+# published merged_quant.csv.
+with open(OUT_DIR / "celltox_nonreference.csv", "w") as f:
+    f.write("patient_id,path_to_file,is_reference,channels\n")
+    f.write(f"P001,{TESTDATA_ABS}/P001_ref.ome.tiff,true,DAPI|PANCK|SMA\n")
+    f.write(f"P001,{TESTDATA_ABS}/P001_mov1.ome.tiff,false,CELLTOX|CD3|CD8\n")
+print("  Created celltox_nonreference.csv")
+
+# celltox_only.csv has no DAPI anywhere: run it with --nuclear_markers CELLTOX. Before
+# the nuclear-marker rule was shared, CsvUtils rejected this sheet at launch ("DAPI
+# channel not found") and SEGMENT rejected it again at runtime.
+with open(OUT_DIR / "celltox_only.csv", "w") as f:
+    f.write("patient_id,path_to_file,is_reference,channels\n")
+    f.write(f"P001,{TESTDATA_ABS}/P001_ref.ome.tiff,true,CELLTOX|PANCK|SMA\n")
+    f.write(f"P001,{TESTDATA_ABS}/P001_mov1.ome.tiff,false,CELLTOX|CD3|CD8\n")
+print("  Created celltox_only.csv")
 
 # 7g. Registration QC fixtures matching WARP_SEG_QC.out.metrics / .out.per_cell,
 # so tests/subworkflows/local/postprocessing.nf.test can pass non-empty

@@ -4,6 +4,14 @@ nextflow_workflow {
     script "subworkflows/local/add_cycle.nf"
     workflow "ADD_CYCLE"
 
+    /*
+     * ADD_CYCLE now takes ONLY the new-cycle sample channel: it rebuilds the prior
+     * run's reusable assets itself, from --prior_outdir's checkpoint CSVs (that
+     * reconstruction, including EXTRACT_MASK_SERIES, used to live in the router).
+     * tests/testdata/prior_run/ is a minimal stand-in for a completed run, written
+     * by tests/testdata/generate_complete_testdata.py.
+     */
+
     test("folds a new cycle: emits combined geojson, merged csv, and pyramid") {
         tag "stub"
         options "-stub"
@@ -17,20 +25,12 @@ nextflow_workflow {
                       channels: ['DAPI','CD8'], images_count: 1, channels_count: 2 ],
                     file('tests/testdata/P001_image.tiff')
                 ])
-                // Prior assets: [patient_id, ref_channels, ref_image, base_merged_csv, cell_mask, nuclei_mask, pyramid]
-                input[1] = Channel.of([
-                    'P001', ['DAPI','PANCK'],
-                    file('tests/testdata/P001_image.tiff'),
-                    file('tests/testdata/P001_merged_quant.csv'),
-                    file('tests/testdata/P001_cell_mask.tif'),
-                    file('tests/testdata/P001_nuclei_mask.tif'),
-                    file('tests/testdata/P001_pyramid.ome.tiff')
-                ])
                 """
             }
             params {
                 outdir = "$outputDir"
                 mode = 'add_cycle'
+                prior_outdir = "$projectDir/tests/testdata/prior_run"
                 reg_qc = 1
                 quantify_compartments = false
             }
@@ -56,19 +56,12 @@ nextflow_workflow {
                       channels: ['DAPI','CD8'], images_count: 1, channels_count: 2 ],
                     file('tests/testdata/P001_image.tiff')
                 ])
-                input[1] = Channel.of([
-                    'P001', ['DAPI','PANCK'],
-                    file('tests/testdata/P001_image.tiff'),
-                    file('tests/testdata/P001_merged_quant.csv'),
-                    file('tests/testdata/P001_cell_mask.tif'),
-                    file('tests/testdata/P001_nuclei_mask.tif'),
-                    file('tests/testdata/P001_pyramid.ome.tiff')
-                ])
                 """
             }
             params {
                 outdir = "$outputDir"
                 mode = 'add_cycle'
+                prior_outdir = "$projectDir/tests/testdata/prior_run"
                 reg_qc = 2
                 quantify_compartments = true
                 expanded_quantification = true
@@ -80,6 +73,44 @@ nextflow_workflow {
             assert workflow.out.geojson
             assert workflow.out.pyramid
             assert workflow.out.seg_qc   // reg_qc=2 -> WARP_SEG_QC metrics present
+        }
+    }
+
+    test("reuses the PRIOR reference: the prior run's checkpoint drives registration") {
+        tag "stub"
+        options "-stub"
+
+        when {
+            workflow {
+                """
+                input[0] = Channel.of([
+                    [ id: 'P001_cycle2', patient_id: 'P001', is_reference: false,
+                      channels: ['DAPI','CD8'], images_count: 1, channels_count: 2 ],
+                    file('tests/testdata/P001_image.tiff')
+                ])
+                """
+            }
+            params {
+                outdir = "$outputDir"
+                mode = 'add_cycle'
+                prior_outdir = "$projectDir/tests/testdata/prior_run"
+                reg_qc = 1
+                quantify_compartments = false
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                // The reusable masks come from the prior PYRAMID's embedded mask
+                // series, not from postprocessed.csv's cell_mask column: this pins
+                // that EXTRACT_MASK_SERIES really runs inside ADD_CYCLE.
+                // Exactly one patient in the prior run -> one extraction, one merge.
+                { assert workflow.trace.tasks().findAll {
+                    it.name.contains('EXTRACT_MASK_SERIES') }.size() == 1 },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.contains('MERGE_QUANT_CSVS') }.size() == 1 }
+            )
         }
     }
 
