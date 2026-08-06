@@ -1,9 +1,8 @@
 """Evaluate registration accuracy for one image pair / mode.
 
 Loads a VALIS registrar pickle, warps the moving ground-truth landmarks into the
-target frame, and merges three estimates: true landmark TRE, VALIS self-rTRE,
-and the feature-distance estimate. VALIS import is lazy + injectable so the pure
-logic is testable without VALIS.
+target frame, and merges two estimates: true landmark TRE and VALIS self-rTRE.
+VALIS import is lazy + injectable so the pure logic is testable without VALIS.
 """
 from __future__ import annotations
 
@@ -46,18 +45,12 @@ def read_valis_rtre(summary_csv):
     return None
 
 
-def read_feature_estimate(feature_json):
-    data = json.loads(Path(feature_json).read_text())
-    return data.get("after_registration", {}).get("feature_distances")
-
-
-def build_eval_record(pair_id, mode, tre_summary, valis_rtre=None, feature_estimate=None) -> dict:
+def build_eval_record(pair_id, mode, tre_summary, valis_rtre=None) -> dict:
     return {
         "pair_id": pair_id,
         "mode": mode,
         "true_tre": tre_summary,
         "valis_rtre": valis_rtre,
-        "feature_estimate": feature_estimate,
     }
 
 
@@ -73,7 +66,6 @@ def main():
     ap.add_argument("--height", type=int, required=True)
     ap.add_argument("--pixel-size-um", type=float, default=None)
     ap.add_argument("--valis-summary", default=None)
-    ap.add_argument("--feature-json", default=None)
     ap.add_argument("--mode", required=True, choices=["tiled", "untiled"])
     ap.add_argument("--pair-id", required=True)
     ap.add_argument("--out", required=True)
@@ -85,7 +77,6 @@ def main():
     record = build_eval_record(
         a.pair_id, a.mode, tre_summary,
         valis_rtre=read_valis_rtre(a.valis_summary) if a.valis_summary else None,
-        feature_estimate=read_feature_estimate(a.feature_json) if a.feature_json else None,
     )
     Path(a.out).write_text(json.dumps(record, indent=2))
     print(f"Wrote {a.out}")

@@ -10,7 +10,6 @@ import pandas as pd
 
 def _flatten(rec: dict) -> dict:
     tre = rec.get("true_tre") or {}
-    feat = rec.get("feature_estimate") or {}
     return {
         "pair_id": rec.get("pair_id"),
         "mode": rec.get("mode"),
@@ -21,7 +20,6 @@ def _flatten(rec: dict) -> dict:
         "true_median_um": tre.get("median_um"),
         "true_p90_um": tre.get("p90_um"),
         "valis_rtre": rec.get("valis_rtre"),
-        "feature_median": feat.get("median"),
     }
 
 

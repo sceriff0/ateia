@@ -87,13 +87,6 @@ baseline:
                                       # (TILED_COARSE -> TILED_REG_TILE -> TILED_SOLVE -> TILED_STITCH).
                                       # Crossed by registration_method_grid: at false those four processes
                                       # NEVER execute, so the fan-out path was previously unmeasured.
-  # --- registration feature-error diagnostic (ESTIMATE_FEATURE_DISTANCES) ---
-  # OFF at baseline (pipeline default). The feature_* knobs below are read ONLY by that process, so
-  # they are swept by pinned_grids.feature_error (which pins the gate on), never as OFAT axes.
-  enable_feature_error: false
-  feature_detector: superpoint        # pipeline default
-  feature_max_dim: 1024               # pipeline default
-  feature_n_features: 5000            # pipeline default
   # --- preprocessing (BaSiC illumination correction) ---
   preproc_n_iter: 100
   preproc_overlap: 0
@@ -196,9 +189,6 @@ axes:
   # backend-specific param off the instantseg baseline would be a no-op).
   # NOTE — reg_tiled_fanout is NOT an OFAT axis: it only means anything under registration_method=tiled,
   # so registration_method_grid crosses it (see there).
-  # NOTE — the feature_* knobs are NOT OFAT axes: ESTIMATE_FEATURE_DISTANCES is gated behind
-  # enable_feature_error (default false), so varying them off the baseline would change values the
-  # pipeline never reads. pinned_grids.feature_error turns the gate on and crosses them there.
 
 # REGISTRATION PARAMETER GRID (VALIS) — memory_mode x reg_micro_reg crossed at the baseline cell, VALIS
 # path only. Characterises the effect of the VALIS registration knobs on cost + accuracy. reg_micro_reg is
@@ -251,13 +241,11 @@ registration_method_grid:
 # PINNED GRIDS — params that are DEAD unless another param enables them. Sweeping them as flat OFAT axes
 # would change values the pipeline never reads (measuring nothing while paying for the run), so each
 # entry pins the enabling param and crosses the now-live knobs. Labelled pinned_grid:<name>.
-pinned_grids:
-  # ESTIMATE_FEATURE_DISTANCES is gated behind enable_feature_error (pipeline default false). It yields a
-  # feature-correspondence registration-error signal that is INDEPENDENT of reg_qc's segmentation-overlap
-  # dice/displacement — a second accuracy axis for the paper rather than a duplicate of the first.
-  feature_error:
-    pin:
-      enable_feature_error: true
-    cross:
-      feature_detector: [superpoint, disk, brisk]  # schema enum also allows dedode, vgg
-      feature_max_dim:  [512, 1024, 2048]          # detection working size — accuracy vs cost
+#
+#   pinned_grids:
+#     <name>:
+#       pin:   {<gate_param>: true}
+#       cross: {<live_knob>: [...], <other_live_knob>: [...]}
+#
+# Every pinned/crossed param must also appear in `baseline` so all configs share CSV columns.
+# Currently empty: the pipeline has no gated-param knobs left to sweep.

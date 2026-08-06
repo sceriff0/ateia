@@ -102,8 +102,7 @@ Verify the whole harness with no data at all:
     fan-out processes (`TILED_COARSE`/`TILED_REG_TILE`/`TILED_SOLVE`/`TILED_STITCH`) execute
     at all — at the default `false` they never run in any sweep run.
   - `pinned_grids:` — the general form: `pin:` the enabling param(s), `cross:` the now-live
-    knobs. Used for the `feature_*` knobs, which only exist behind
-    `enable_feature_error` (`ESTIMATE_FEATURE_DISTANCES`).
+    knobs. Currently empty — no gated-param knobs remain to sweep.
 - **The `baseline:` map must equal the shipped `nextflow.config` defaults**, and must declare
   every param any grid or axis varies (so all configs share CSV columns).
   `test_project_sweep_baseline_matches_pipeline_defaults` reads `nextflow.config` directly and
@@ -237,10 +236,10 @@ account. Then write a `pairs.csv`:
         reg_prepared/pairs_manifest.csv  reg_prepared  reg_results
 
 - **What it does:** per pair x mode (in-process tiling on/off), runs `bin/register.py`,
-  `bin/estimate_feature_distances.py`, then `eval_tre` (loads the VALIS registrar pickle,
-  warps the moving ground-truth landmarks).
-- **Output:** `reg_results/eval_<pair>_<mode>.json` — three error views per pair/mode:
-  true landmark **TRE/rTRE/um**, VALIS self-reported **rTRE**, feature-distance estimate.
+  then `eval_tre` (loads the VALIS registrar pickle, warps the moving ground-truth
+  landmarks).
+- **Output:** `reg_results/eval_<pair>_<mode>.json` — two error views per pair/mode:
+  true landmark **TRE/rTRE/um** and VALIS self-reported **rTRE**.
 
 ### B3 — Aggregate
 

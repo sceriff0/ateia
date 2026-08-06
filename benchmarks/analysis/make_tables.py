@@ -48,8 +48,6 @@ CONFIG_COLS = (
     # registration
     "registration_method", "memory_mode", "reg_micro_reg", "reg_jvm_heap_gb",
     "reg_tiled_tile", "reg_tiled_gate_tre", "reg_tiled_fanout",
-    # registration feature-error diagnostic (pinned_grids.feature_error)
-    "enable_feature_error", "feature_detector", "feature_max_dim",
     # preprocessing
     "preproc_pool_workers", "preproc_tile_size", "preproc_no_darkfield", "preproc_autotune",
     # segmentation (per-backend knobs, crossed by segmentation_grid)

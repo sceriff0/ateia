@@ -31,13 +31,6 @@ tail -n +2 "$MANIFEST" | while IFS=',' read -r -a v; do
 
     pickle=$(find "$out_dir" -name "*_registrar.pickle" | head -1)
     summary=$(find "$out_dir" -name "*_summary.csv" | head -1)
-    reg_img=$(find "$out_dir/registered_slides" -name "*_registered.ome.tiff" | head -1)
-
-    # optional feature-distance estimate on the registered output
-    fjson="$out_dir/feature_distances.json"
-    python "$REPO_ROOT/bin/estimate_feature_distances.py" \
-      --reference "$input_dir/$ref_name" --moving "$input_dir/$mov_name" \
-      --registered "$reg_img" --output-prefix "$out_dir/fd" 2>/dev/null || fjson=""
 
     python -m benchmarks.registration_eval.eval_tre \
       --pickle "$pickle" --slide-name "$mov_stem" \
@@ -45,7 +38,6 @@ tail -n +2 "$MANIFEST" | while IFS=',' read -r -a v; do
       --width "${v[$ci_w]}" --height "${v[$ci_h]}" \
       ${v[$ci_ps]:+--pixel-size-um "${v[$ci_ps]}"} \
       ${summary:+--valis-summary "$summary"} \
-      ${fjson:+--feature-json "$out_dir/fd_feature_distances.json"} \
       --mode "$mode" --pair-id "$pair" --out "$RESULTS/eval_${pair}_${mode}.json"
   done
 done

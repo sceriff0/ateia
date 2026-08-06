@@ -109,9 +109,9 @@ def _configs(sweep: dict) -> list[tuple[dict, str]]:
     #     and crosses the now-live knobs:
     #
     #       pinned_grids:
-    #         feature_error:
-    #           pin:   {enable_feature_error: true}
-    #           cross: {feature_detector: [...], feature_max_dim: [...]}
+    #         <name>:
+    #           pin:   {<gate_param>: true}
+    #           cross: {<live_knob>: [...], <other_live_knob>: [...]}
     #
     #     Labelled pinned_grid:<name>. Every pinned/crossed param must also appear in `baseline`
     #     so all configs share columns (see test_project_sweep_all_configs_share_columns).

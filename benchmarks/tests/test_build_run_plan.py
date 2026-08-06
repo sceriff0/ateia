@@ -178,29 +178,28 @@ def test_registration_param_grid_crosses_params_classic():
 
 def test_pinned_grid_pins_the_gate_and_crosses_live_knobs():
     # Params behind a feature gate must be swept with the gate ON, or the run varies a value the
-    # pipeline never reads: full cost, zero signal.
+    # pipeline never reads: full cost, zero signal. Synthetic params: this covers the expander
+    # mechanism, which must keep working for whatever gated knob the sweep grows next.
     sweep = {
         "strategy": "ofat",
         "baseline": {"target_px": 4096, "n_channels": 2,
-                     "enable_feature_error": False, "feature_detector": "superpoint",
-                     "feature_max_dim": 1024},
+                     "enable_gate": False, "knob_a": "x", "knob_b": 1024},
         "pinned_grids": {
-            "feature_error": {
-                "pin": {"enable_feature_error": True},
-                "cross": {"feature_detector": ["superpoint", "disk"],
-                          "feature_max_dim": [512, 1024]},
+            "gated_knobs": {
+                "pin": {"enable_gate": True},
+                "cross": {"knob_a": ["x", "y"], "knob_b": [512, 1024]},
             },
         },
         "axes": {},
     }
     plan = build_run_plan(sweep, repeats=1)
-    pinned = [r for r in plan if r["varied_axis"] == "pinned_grid:feature_error"]
-    assert len(pinned) == 4                                    # 2 detectors x 2 dims
-    assert all(r["enable_feature_error"] is True for r in pinned)
-    assert {(r["feature_detector"], r["feature_max_dim"]) for r in pinned} == {
-        ("superpoint", 512), ("superpoint", 1024), ("disk", 512), ("disk", 1024)}
+    pinned = [r for r in plan if r["varied_axis"] == "pinned_grid:gated_knobs"]
+    assert len(pinned) == 4                                    # 2 knob_a x 2 knob_b
+    assert all(r["enable_gate"] is True for r in pinned)
+    assert {(r["knob_a"], r["knob_b"]) for r in pinned} == {
+        ("x", 512), ("x", 1024), ("y", 512), ("y", 1024)}
     # the baseline run keeps the gate OFF
-    assert [r for r in plan if r["varied_axis"] == "baseline"][0]["enable_feature_error"] is False
+    assert [r for r in plan if r["varied_axis"] == "baseline"][0]["enable_gate"] is False
 
 
 def test_project_sweep_exercises_the_tiled_fanout_path():
@@ -231,7 +230,6 @@ def test_project_sweep_has_no_dead_axes():
     sweep = yaml.safe_load(
         (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text())
     gated = {
-        "feature_detector", "feature_max_dim", "feature_n_features",  # enable_feature_error
         "reg_tiled_tile", "reg_tiled_gate_tre", "reg_tiled_fanout",   # registration_method=tiled
         "reg_tiled_halo", "reg_tiled_upsample", "reg_tiled_out_tile",
         "seg_n_tiles_x", "seg_n_tiles_y",                              # seg_method=stardist
@@ -290,10 +288,6 @@ def test_project_sweep_enables_qc_signals():
         (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text())
     assert sweep["baseline"]["reg_qc"] == 2                       # staged registration QC (dice + displacement)
     assert sweep["baseline"]["skip_seg_quality_eval"] is False     # CellSegmentationEvaluator on
-    # enable_feature_error stays OFF at the baseline (it is the pipeline default, and reg_qc=2 is the
-    # primary accuracy signal), but it must be DECLARED so every config shares columns and so
-    # pinned_grids.feature_error can pin it on. Declared-and-false, never absent.
-    assert sweep["baseline"]["enable_feature_error"] is False
 
 
 def test_project_sweep_baseline_matches_pipeline_defaults():
