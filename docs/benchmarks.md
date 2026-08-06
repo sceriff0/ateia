@@ -6,7 +6,7 @@ questions about the *shipped* pipeline (classic VALIS registration):
 
 1. **How do resources scale with input size and parameters?** (peak RAM & wall-time laws)
 2. **How accurate is registration?** (landmark-free, from the pipeline's own DAPI-nuclei QC)
-3. **How good is segmentation?** (reference-free CellSegmentationEvaluator quality score)
+3. **How stable is segmentation across backends?** (reference-free cross-method agreement)
 
 !!! info "Where this lives"
     Everything is under `benchmarks/`, isolated from the production pipeline (it
@@ -29,7 +29,7 @@ The benchmark **invents no metrics** — it harvests QC the pipeline already emi
 | Resource scaling | peak RAM, wall-time vs input | Nextflow `trace.txt` + per-stage `size_logs` |
 | Registration accuracy (segmentation-based) | `dice_matched` + centroid **displacement (µm)** per stage | `reg_qc=2` staged QC (`bin/warp_seg_qc.py`; see [Registration QC](registration_qc.md)) |
 | Registration accuracy (VALIS-reported) | feature-based **rTRE / median distance (D)** per slide | the summary CSVs VALIS writes during `register()` (also shown in the final QC report) |
-| Segmentation quality | `QualityScore` + component metrics (reference-free) | `SEG_QUALITY_EVAL` = CellSegmentationEvaluator |
+| Segmentation stability | cross-method `instance_f1` on the same image (reference-free) | pairwise mask IoU between `segmentation_grid` runs |
 
 The benchmark harvests **two independent registration-accuracy signals**: the
 segmentation-based Dice/displacement above, and VALIS's *own* feature-based rTRE (the
@@ -62,9 +62,8 @@ flowchart LR
 | `scaling_fits.csv` | (stage, metric) | `slope`, `intercept`, `r2` for `peak_rss_gb ~ input_gb` and `realtime_s ~ input_gb` |
 | `registration_accuracy.csv` | (run, moving, stage) | `dice_matched`, `displacement_um_p50`, `delta_disp_um_p50_vs_rigid` |
 | `registration_valis_rtre.csv` | (run, slide) | VALIS-reported `non_rigid_D` / rTRE (feature-based) |
-| `segmentation_eval.csv` | (run, patient) | `QualityScore` + CSE component metrics |
 | `segmentation_agreement.csv` | method pair | `instance_f1` (reference-free cross-method stability) |
-| `param_matrix.csv` | run | `runs_master` joined with the accuracy + quality headlines — tune from here |
+| `param_matrix.csv` | run | `runs_master` joined with both registration-accuracy headlines — tune from here |
 
 The scaling fit is **linear**: `slope` is the marginal cost per input GiB and
 `intercept` the fixed overhead (physically interpretable for capacity planning),
@@ -88,7 +87,7 @@ python benchmarks/build_run_plan.py \
     --sweep benchmarks/configs/sweep.yaml \
     --out bench_run_plan.csv --repeats 3
 
-# 3. run the sweep on the cluster — one pipeline launch per row, reg_qc=2 + CSE on.
+# 3. run the sweep on the cluster — one pipeline launch per row, reg_qc=2 on.
 #    Positional args: <run_plan> <matrix_manifest> <results_root>. Requires bash 4+.
 #    Parallelism: export SWEEP_CONCURRENCY=N to keep N runs in flight.
 benchmarks/run_sweep.sh bench_run_plan.csv bench_matrix/matrix_manifest.csv bench_runs
