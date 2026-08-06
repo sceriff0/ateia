@@ -97,8 +97,8 @@ docs/superpowers/
 # from embedded absolute paths / TIFF timestamps / RNG-seeded content that
 # differs by machine. Hand-authored fixtures the generator does NOT write
 # (P001_image.tiff, P001_merged_quant.csv, P001_nuclei_mask.tif,
-# P001_pyramid.ome.tiff, sample_feature_distances.json, sample_size_log*.csv,
-# sample_valis_summary.csv, sample_versions.yml, seg_eval_P00*.json) stay
+# P001_pyramid.ome.tiff, sample_size_log*.csv, sample_valis_summary.csv,
+# sample_versions.yml, seg_eval_P00*.json) stay
 # tracked and are NOT listed here.
 tests/testdata/P001_ref.ome.tiff
 tests/testdata/P001_mov1.ome.tiff
@@ -128,8 +128,6 @@ tests/testdata/sample_PANCK_intensity.csv
 tests/testdata/sample_SMA_intensity.csv
 tests/testdata/sample_max_dims.txt
 tests/testdata/sample_dims.txt
-tests/testdata/sample_features.json
-tests/testdata/sample_feature_metrics.json
 tests/testdata/sample_channels.txt
 tests/testdata/sample_contours.json
 tests/testdata/sample_morphology.csv

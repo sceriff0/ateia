@@ -43,7 +43,7 @@ the HPC/cluster side (unlike GHCR, whose default-private packages caused
 | `segeval` | `bolt3x/attend_image_analysis:segeval` | `SEG_QUALITY_EVAL`, `MERGE_SEG_EVAL` | `python:3.11-slim` + numpy/scipy/pandas/scikit-image/scikit-learn/aicsimageio/tifffile/xmltodict (vendored CSE metrics) |
 | `tiled` | `bolt3x/attend_image_analysis:tiled` | `TILED_REGISTER`, `WARP_SEG_QC_TILED` (STARE `registration_method='tiled'`) | `python:3.11-slim` + numpy/scipy/scikit-image/tifffile — **no JVM/BioFormats/libvips/GPU** (~438 MB, vs the multi-GB VALIS image) |
 | `spatialdata` | `bolt3x/attend_image_analysis:spatialdata` | `EXPORT_SPATIALDATA` (+ the out-of-band `bin/join_flowpath.py` cohort join) | `python:3.11-slim` + spatialdata/anndata/geopandas/zarr 3 — CPU only, no JVM/GPU |
-| VALIS (not vendored) | `cdgatenbee/valis-wsi:1.0.0` (upstream) | `REGISTER`, `ESTIMATE_FEATURE_DISTANCES` | upstream maintained image — **not rebuilt or published by us** (see note below) |
+| VALIS (not vendored) | `cdgatenbee/valis-wsi:1.0.0` (upstream) | `REGISTER` | upstream maintained image — **not rebuilt or published by us** (see note below) |
 
 > **zarr major versions differ on purpose.** `spatialdata` pins `zarr>=3.0.0`
 > (required by `spatialdata>=0.8.0`, which writes NGFF `"0.5-dev-spatialdata"`),
@@ -58,8 +58,7 @@ the HPC/cluster side (unlike GHCR, whose default-private packages caused
 
 ### VALIS — uses the upstream image (not vendored)
 
-`REGISTER` and `ESTIMATE_FEATURE_DISTANCES` reference the maintained upstream
-image [`cdgatenbee/valis-wsi:1.0.0`](https://hub.docker.com/r/cdgatenbee/valis-wsi)
+`REGISTER` references the maintained upstream image [`cdgatenbee/valis-wsi:1.0.0`](https://hub.docker.com/r/cdgatenbee/valis-wsi)
 directly. We do **not** vendor or republish it: its from-source libvips build is
 heavy (and the original vendored Dockerfile failed to build in CI — `meson` was
 missing). The upstream image is `linux/amd64` and already battle-tested, so there
@@ -105,4 +104,4 @@ at runtime from `params.seg_method` (`cellsam` → `:cellsam`, `instantseg` →
 The distributed non-rigid tiling modules pull the patched VALIS image via
 `params.reg_dist_container` (default `bolt3x/attend_image_analysis:mirage_valis_1.0.0`),
 published by [`build-valis-image.yml`](../.github/workflows/build-valis-image.yml).
-`REGISTER` / `ESTIMATE_FEATURE_DISTANCES` use the upstream `cdgatenbee/valis-wsi:1.0.0`.
+`REGISTER` uses the upstream `cdgatenbee/valis-wsi:1.0.0`.

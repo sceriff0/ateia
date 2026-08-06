@@ -10,10 +10,6 @@
     "nuclear_markers": ["DAPI", "CELLTOX"],
     "skip_registration_qc": false,
     "qc_scale_factor": 0.25,
-    "enable_feature_error": false,
-    "feature_detector": "superpoint",
-    "feature_max_dim": 1024,
-    "feature_n_features": 5000,
 
     "_comment_reg_valis": "=== Registration (VALIS — default method) ===",
     "memory_mode": "high",

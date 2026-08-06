@@ -148,11 +148,7 @@ smaller tiles → finer non-rigid but more tasks.
 **TRE — intrinsic, VALIS `error_df` semantics.** Each REG_TILE scores the residual of the
 phase-correlation match *after* applying its transform — a Target Registration Error per tile,
 aggregated to a per-slide table (mean/percentiles, in px and µm) and a **spatial heatmap** (one
-value per tile — strictly richer than VALIS's single `error_df` number). Mirage's existing
-`ESTIMATE_FEATURE_DISTANCES` (`bin/estimate_feature_distances.py`, opt-in `enable_feature_error`,
-already method-agnostic) is retained as an **independent, unbiased post-hoc cross-check** — it
-re-detects features on the registered output, so it is not self-scoring the way an intrinsic TRE
-could be.
+value per tile — strictly richer than VALIS's single `error_df` number).
 
 **Seam continuity — smooth mesh/grid warp.** Independent per-tile fields would tear cells at tile
 boundaries (the problem ASHLAR's MST solves). Instead each tile contributes **one displacement
@@ -260,8 +256,7 @@ dedicated lean `withName:'TILED_*'` overrides (2–8 GB) or pair with a memory-c
    (`nextflow run . -profile test,docker -stub`) against known VALIS output. Assert non-negativity.
 3. **Mesh non-rigid + reg_qc=2 end-to-end.** Add TRE-gated control-point refinement, the smooth
    field, and the `refined` stage; dispatch `warp_seg_qc.py --method tiled`.
-4. **TRE outputs.** Per-slide table + spatial heatmap; keep `ESTIMATE_FEATURE_DISTANCES` as the
-   post-hoc cross-check.
+4. **TRE outputs.** Per-slide table + spatial heatmap.
 5. **nf-test** modules, exec-bit the bin scripts, CI stub coverage, `low`/`high` presets.
 
 ## Risks / open questions

@@ -211,10 +211,6 @@ Pyramidal OME-TIFF assembly and GeoJSON.
 | `cse_max_pixels` | `50000000` | Bin image+masks so CSE scores at most this many pixels (caps memory/time on full-WSI masks). Geometry/area metrics are preserved by binning, but the composite `QualityScore` shifts with the factor — keep it **fixed** across a cohort for comparability. `null` disables (score at full resolution). |
 | `segeval_tag` | `segeval` | Tag on `bolt3x/attend_image_analysis` (Docker Hub) for the segmentation-quality-evaluator image. |
 | `skip_final_qc_report` | `false` | Skip the aggregated HTML QC report. |
-| `enable_feature_error` | `false` | Compute feature-based registration error → `feature_distances/`. |
-| `feature_detector` | `superpoint` | Detector for error estimation: `superpoint`, `disk`, `dedode`, `brisk`, `vgg`. |
-| `feature_max_dim` | `1024` | Max image dimension for feature detection. |
-| `feature_n_features` | `5000` | Number of features to detect. |
 
 **Segmentation quality evaluation (CSE):** after `SEGMENT`, a vendored, patched
 [CellSegmentationEvaluator](https://github.com/murphygroup/CellSegmentationEvaluator)

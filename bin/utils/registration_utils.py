@@ -1,7 +1,7 @@
 """Shared utilities for image registration.
 
-This module consolidates common functions used across registration scripts
-(register.py) to eliminate code duplication.
+This module holds registration helpers shared by other ``bin/`` scripts
+(currently ``utils/qc.py``) to eliminate code duplication.
 
 Examples
 --------
@@ -16,17 +16,10 @@ of functions that were previously duplicated across multiple scripts.
 
 from __future__ import annotations
 
-from typing import Any, Optional, Tuple
-
 import numpy as np
 from numpy.typing import NDArray
 
-__all__ = [
-    "autoscale",
-    "build_feature_detector",
-    "build_feature_matcher",
-    "match_feature_points",
-]
+__all__ = ["autoscale"]
 
 
 def autoscale(
@@ -94,76 +87,3 @@ def autoscale(
     # Scale to [0, 255] and convert to uint8
     # Fix: Round before converting to uint8 to avoid truncation artifacts
     return np.round(img_normalized * 255).astype(np.uint8)
-
-
-def build_feature_detector(
-    detector_type: str = "superpoint", logger: Optional[Any] = None
-):
-    """Create a VALIS feature detector instance for the selected detector."""
-    from valis import feature_detectors
-
-    detector = detector_type.lower()
-    detector_map = {
-        "superpoint": feature_detectors.SuperPointFD,
-        "brisk": feature_detectors.BriskFD,
-        "vgg": feature_detectors.VggFD,
-    }
-    if detector not in detector_map:
-        raise ValueError(f"Unknown detector type: {detector_type}")
-
-    if logger:
-        logger.info(f"Initializing feature detector: {detector}")
-    return detector_map[detector]()
-
-
-def build_feature_matcher(
-    detector_type: str = "superpoint", logger: Optional[Any] = None
-):
-    """Create a matcher compatible with the selected detector."""
-    from valis import feature_matcher
-
-    detector = detector_type.lower()
-    if detector == "superpoint":
-        if logger:
-            logger.info("Initializing SuperGlue matcher")
-        return feature_matcher.SuperGlueMatcher()
-    if detector in {"disk", "dedode"}:
-        if logger:
-            logger.info("Initializing LightGlue matcher")
-        return feature_matcher.LightGlueMatcher()
-    if logger:
-        logger.info("Initializing Matcher with USAC_MAGSAC filter")
-    return feature_matcher.Matcher(match_filter_method="USAC_MAGSAC", ransac_thresh=7)
-
-
-def match_feature_points(
-    matcher: Any,
-    ref_img: NDArray,
-    ref_desc: NDArray,
-    ref_kp: NDArray,
-    mov_img: NDArray,
-    mov_desc: NDArray,
-    mov_kp: NDArray,
-) -> Tuple[Any, Any, Any, Any]:
-    """Run feature matching with the correct matcher-specific signature."""
-    from valis import feature_matcher
-
-    if isinstance(matcher, feature_matcher.SuperGlueMatcher) or (
-        hasattr(feature_matcher, "LightGlueMatcher")
-        and isinstance(matcher, feature_matcher.LightGlueMatcher)
-    ):
-        return matcher.match_images(
-            img1=ref_img,
-            desc1=ref_desc,
-            kp1_xy=ref_kp,
-            img2=mov_img,
-            desc2=mov_desc,
-            kp2_xy=mov_kp,
-        )
-
-    return matcher.match_images(
-        desc1=ref_desc,
-        kp1_xy=ref_kp,
-        desc2=mov_desc,
-        kp2_xy=mov_kp,
-    )

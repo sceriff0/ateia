@@ -23,24 +23,20 @@ nextflow_process {
                     file('${projectDir}/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
                 ]
                 input[2] = [
-                    file('${projectDir}/tests/testdata/sample_feature_distances.json', checkIfExists: true)
-                ]
-                input[3] = [
                     file('${projectDir}/tests/testdata/sample_valis_summary.csv', checkIfExists: true)
                 ]
-                input[4] = [
+                input[3] = [
                     file('${projectDir}/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
                 ]
-                input[5] = [
+                input[4] = [
                     file('${projectDir}/tests/testdata/sample_morphology.csv', checkIfExists: true)
                 ]
-                input[6] = file('${projectDir}/tests/testdata/sample_versions.yml', checkIfExists: true)
-                input[7] = file('${projectDir}/tests/testdata/sample_feature_distances.json', checkIfExists: true)
-                input[8] = [
-                    file('${projectDir}/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
-                ]
-                input[9] = [
-                    file('${projectDir}/tests/testdata/sample_feature_distances.json', checkIfExists: true)
+                input[5] = file('${projectDir}/tests/testdata/sample_versions.yml', checkIfExists: true)
+                // Stub run: only file staging is exercised, so any tracked JSON serves
+                // as the run-summary / seg-QC placeholder.
+                input[6] = file('${projectDir}/tests/testdata/seg_eval_P001.json', checkIfExists: true)
+                input[7] = [
+                    file('${projectDir}/tests/testdata/seg_eval_P002.json', checkIfExists: true)
                 ]
                 """
             }

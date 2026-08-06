@@ -10,13 +10,11 @@ process GENERATE_QC_REPORT {
     input:
     path(preprocess_qc_pngs, stageAs: 'preprocess_qc/*')
     path(registration_qc_pngs, stageAs: 'registration_qc/*')
-    path(feature_distance_jsons, stageAs: 'feature_dist/*')
     path(valis_summary_csvs, stageAs: 'valis_summary/*')
     path(postprocess_qc_pngs, stageAs: 'postprocess_qc/*')
     path(seg_eval_csvs, stageAs: 'seg_eval/*')
     path(versions_yml)
     path(run_summary_json)
-    path(distance_plot_pngs, stageAs: 'distance_plots/*')
     path(seg_qc_jsons, stageAs: 'seg_qc/*')
 
     output:
@@ -34,13 +32,11 @@ process GENERATE_QC_REPORT {
     generate_qc_report.py \\
         --preprocess-qc preprocess_qc/ \\
         --registration-qc registration_qc/ \\
-        --feature-distances feature_dist/ \\
         --valis-summary valis_summary/ \\
         --postprocess-qc postprocess_qc/ \\
         --seg-eval seg_eval/ \\
         --versions ${versions_yml} \\
         --run-summary ${run_summary_json} \\
-        --distance-plots distance_plots/ \\
         --seg-qc seg_qc/ \\
         --output mirage_qc_report_${timestamp}.html \\
         --data-dir mirage_qc_data_${timestamp}/ \\

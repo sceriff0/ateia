@@ -16,7 +16,6 @@ nextflow_workflow {
             params {
                 skip_registration_qc = true
                 padding = false
-                enable_feature_error = false
             }
             workflow {
                 """
@@ -330,7 +329,6 @@ nextflow_workflow {
                 outdir = "$outputDir"
                 skip_registration_qc = true
                 padding = false
-                enable_feature_error = false
             }
             workflow {
                 """

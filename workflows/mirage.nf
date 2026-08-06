@@ -203,11 +203,11 @@ workflow MIRAGE {
         /* -------------------- FINAL QC REPORT (add_cycle) -------------------- */
         // Mirrors the standard-path aggregation below (version collation + QC report +
         // optional size-log aggregation), scoped to what ADD_CYCLE actually emits.
-        // ADD_CYCLE has no separate PREPROCESSING-QC / feature-distance / VALIS-summary /
-        // POSTPROCESSING-QC / seg-eval emits of its own (it calls PREPROCESSING internally
-        // but does not re-expose its QC pngs, and it has no POSTPROCESSING/CSE step at
-        // all — masks are reused, not re-segmented) — those five report inputs are
-        // deliberately left empty here rather than silently dropping the whole report.
+        // ADD_CYCLE has no separate PREPROCESSING-QC / VALIS-summary / POSTPROCESSING-QC /
+        // seg-eval emits of its own (it calls PREPROCESSING internally but does not
+        // re-expose its QC pngs, and it has no POSTPROCESSING/CSE step at all — masks are
+        // reused, not re-segmented) — those four report inputs are deliberately left empty
+        // here rather than silently dropping the whole report.
         if (!params.skip_final_qc_report) {
             def ch_collated_versions = ADD_CYCLE.out.versions
                 .unique()
@@ -248,13 +248,11 @@ workflow MIRAGE {
             GENERATE_QC_REPORT(
                 Channel.empty().collect().ifEmpty([]),                             // preprocess_qc_pngs (not re-emitted by ADD_CYCLE)
                 ADD_CYCLE.out.qc.map { meta, files -> files }.collect().ifEmpty([]),
-                Channel.empty().collect().ifEmpty([]),                             // feature_distance_jsons (not re-emitted by ADD_CYCLE)
                 Channel.empty().collect().ifEmpty([]),                             // valis_summary_csvs (not re-emitted by ADD_CYCLE)
                 Channel.empty().collect().ifEmpty([]),                             // postprocess_qc_pngs (no POSTPROCESSING call in add_cycle)
                 Channel.empty().collect().ifEmpty([]),                             // seg_eval_csvs (no CSE step in add_cycle)
                 ch_collated_versions,
                 ch_run_summary,
-                Channel.empty().collect().ifEmpty([]),                             // distance_plots (not produced in add_cycle)
                 ADD_CYCLE.out.seg_qc.map { meta, files -> files }.collect().ifEmpty([]),
             )
         }
@@ -359,12 +357,10 @@ workflow MIRAGE {
         // Collect QC outputs from each step (empty channels for steps not run)
         def ch_preprocess_qc_pngs   = Channel.empty()
         def ch_registration_qc_pngs = Channel.empty()
-        def ch_feature_dist_jsons   = Channel.empty()
         def ch_valis_summary_csvs   = Channel.empty()
         def ch_postprocess_qc_pngs  = Channel.empty()
         def ch_seg_eval_csv         = Channel.empty()
         def ch_versions             = Channel.empty()
-        def ch_distance_plots = Channel.empty()
         def ch_seg_qc_jsons   = Channel.empty()
 
         if (ParamUtils.shouldRun('preprocessing', params.start, effective_stop)) {
@@ -374,13 +370,9 @@ workflow MIRAGE {
         if (ParamUtils.shouldRun('registration', params.start, effective_stop)) {
             ch_registration_qc_pngs = ch_registration_qc_pngs
                 .mix(REGISTRATION.out.qc.map { meta, files -> files })
-            ch_feature_dist_jsons = ch_feature_dist_jsons
-                .mix(REGISTRATION.out.error_metrics.map { meta, files -> files })
             ch_valis_summary_csvs = ch_valis_summary_csvs
                 .mix(REGISTRATION.out.valis_summary)
             ch_versions = ch_versions.mix(REGISTRATION.out.versions)
-            ch_distance_plots = ch_distance_plots
-                .mix(REGISTRATION.out.distance_plots.map { meta, files -> files })
             ch_seg_qc_jsons = ch_seg_qc_jsons
                 .mix(REGISTRATION.out.seg_qc.map { meta, files -> files })
         }
@@ -434,13 +426,11 @@ workflow MIRAGE {
         GENERATE_QC_REPORT(
             ch_preprocess_qc_pngs.collect().ifEmpty([]),
             ch_registration_qc_pngs.collect().ifEmpty([]),
-            ch_feature_dist_jsons.collect().ifEmpty([]),
             ch_valis_summary_csvs.collect().ifEmpty([]),
             ch_postprocess_qc_pngs.collect().ifEmpty([]),
             ch_seg_eval_csv.collect().ifEmpty([]),
             ch_collated_versions,
             ch_run_summary,
-            ch_distance_plots.collect().ifEmpty([]),
             ch_seg_qc_jsons.collect().ifEmpty([]),
         )
     }

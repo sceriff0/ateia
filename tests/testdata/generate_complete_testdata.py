@@ -346,41 +346,6 @@ with open(OUT_DIR / "sample_merged_quant.csv", "w") as f:
 print("  Created sample_merged_quant.csv (20 cells)")
 
 # 6d. Sample features JSON
-features = {
-    "keypoints": [
-        {"x": 25.5, "y": 30.2, "descriptor": [0.1] * 256},
-        {"x": 50.1, "y": 45.8, "descriptor": [0.2] * 256},
-        {"x": 80.3, "y": 70.5, "descriptor": [0.3] * 256},
-        {"x": 100.0, "y": 95.2, "descriptor": [0.15] * 256},
-        {"x": 60.5, "y": 110.8, "descriptor": [0.25] * 256},
-    ],
-    "detector": "superpoint",
-    "n_features": 5,
-}
-with open(OUT_DIR / "sample_features.json", "w") as f:
-    json.dump(features, f, indent=2)
-print("  Created sample_features.json (5 keypoints)")
-
-# 6g. Feature distance metrics JSON
-metrics = {
-    "pre_registration": {
-        "mean_distance": 15.3,
-        "median_distance": 12.8,
-        "std_distance": 5.2,
-        "n_matches": 45,
-    },
-    "post_registration": {
-        "mean_distance": 2.1,
-        "median_distance": 1.8,
-        "std_distance": 0.9,
-        "n_matches": 45,
-    },
-    "improvement": 86.3,
-}
-with open(OUT_DIR / "sample_feature_metrics.json", "w") as f:
-    json.dump(metrics, f, indent=2)
-print("  Created sample_feature_metrics.json")
-
 # 6h. Single channel TIF images (already exist but ensure proper format)
 for ch_name in ["DAPI", "PANCK", "SMA"]:
     img = np.random.randint(100, 10000, size=(128, 128), dtype=np.uint16)
@@ -416,8 +381,6 @@ print("  - invalid_checkpoint_bad_ref.csv")
 print("  - invalid_file_not_found.csv")
 print("\nModule test fixtures:")
 print("  - sample_merged_quant.csv")
-print("  - sample_features.json")
-print("  - sample_feature_metrics.json")
 print("  - sample_DAPI.tif, sample_PANCK.tif, sample_SMA.tif")
 print("  - sample_channels.txt")
 # =============================================================================

@@ -172,33 +172,6 @@
                     "description": "Scale factor for registration QC images.",
                     "default": 0.25
                 },
-                "enable_feature_error": {
-                    "type": "boolean",
-                    "description": "Enable feature error detection during registration.",
-                    "default": false
-                },
-                "feature_detector": {
-                    "type": "string",
-                    "description": "Feature detector algorithm for registration.",
-                    "default": "superpoint",
-                    "enum": [
-                        "superpoint",
-                        "disk",
-                        "dedode",
-                        "brisk",
-                        "vgg"
-                    ]
-                },
-                "feature_max_dim": {
-                    "type": "integer",
-                    "description": "Maximum image dimension for feature detection.",
-                    "default": 1024
-                },
-                "feature_n_features": {
-                    "type": "integer",
-                    "description": "Number of features to detect.",
-                    "default": 5000
-                },
                 "reg_micro_reg_fraction": {
                     "type": "number",
                     "description": "Fraction for micro registration.",
