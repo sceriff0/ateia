@@ -176,32 +176,6 @@ def test_registration_param_grid_crosses_params_classic():
     assert all("reg_distributed_tiling" not in r and "reg_dist_force_tiling" not in r for r in rp)
 
 
-def test_pinned_grid_pins_the_gate_and_crosses_live_knobs():
-    # Params behind a feature gate must be swept with the gate ON, or the run varies a value the
-    # pipeline never reads: full cost, zero signal. Synthetic params: this covers the expander
-    # mechanism, which must keep working for whatever gated knob the sweep grows next.
-    sweep = {
-        "strategy": "ofat",
-        "baseline": {"target_px": 4096, "n_channels": 2,
-                     "enable_gate": False, "knob_a": "x", "knob_b": 1024},
-        "pinned_grids": {
-            "gated_knobs": {
-                "pin": {"enable_gate": True},
-                "cross": {"knob_a": ["x", "y"], "knob_b": [512, 1024]},
-            },
-        },
-        "axes": {},
-    }
-    plan = build_run_plan(sweep, repeats=1)
-    pinned = [r for r in plan if r["varied_axis"] == "pinned_grid:gated_knobs"]
-    assert len(pinned) == 4                                    # 2 knob_a x 2 knob_b
-    assert all(r["enable_gate"] is True for r in pinned)
-    assert {(r["knob_a"], r["knob_b"]) for r in pinned} == {
-        ("x", 512), ("x", 1024), ("y", 512), ("y", 1024)}
-    # the baseline run keeps the gate OFF
-    assert [r for r in plan if r["varied_axis"] == "baseline"][0]["enable_gate"] is False
-
-
 def test_project_sweep_exercises_the_tiled_fanout_path():
     # At reg_tiled_fanout=false, TILED_COARSE/TILED_REG_TILE/TILED_SOLVE/TILED_STITCH never execute.
     # The sweep must produce runs on BOTH sides or those four processes are never measured at all.
@@ -225,7 +199,7 @@ def test_project_sweep_covers_every_shipped_segmentation_backend():
 
 def test_project_sweep_has_no_dead_axes():
     # An OFAT axis on a param that is gated behind another param is a no-op run. These belong in
-    # pinned_grids (gate pinned on) or a per-method grid, never in flat `axes`.
+    # a per-method grid (gate pinned on), never in flat `axes`.
     import yaml
     sweep = yaml.safe_load(
         (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text())
@@ -287,7 +261,6 @@ def test_project_sweep_enables_qc_signals():
     sweep = yaml.safe_load(
         (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text())
     assert sweep["baseline"]["reg_qc"] == 2                       # staged registration QC (dice + displacement)
-    assert sweep["baseline"]["skip_seg_quality_eval"] is False     # CellSegmentationEvaluator on
 
 
 def test_project_sweep_baseline_matches_pipeline_defaults():

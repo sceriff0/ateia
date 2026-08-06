@@ -102,27 +102,10 @@ def _configs(sweep: dict) -> list[tuple[dict, str]]:
                 configs.append((dict(baseline, registration_method=method, **dict(zip(keys, combo))),
                                 f"registration_method_grid:{method}"))
 
-    # 3e. PINNED GRIDS — the general form of the per-method grids above, for params that are DEAD
-    #     unless some other param enables them. A flat OFAT run of such a param off the baseline
-    #     changes a value the pipeline never reads, so it silently measures nothing (the same trap
-    #     the reg_micro_reg and reg_tiled_* structures avoid). Each entry pins the enabling params
-    #     and crosses the now-live knobs:
-    #
-    #       pinned_grids:
-    #         <name>:
-    #           pin:   {<gate_param>: true}
-    #           cross: {<live_knob>: [...], <other_live_knob>: [...]}
-    #
-    #     Labelled pinned_grid:<name>. Every pinned/crossed param must also appear in `baseline`
-    #     so all configs share columns (see test_project_sweep_all_configs_share_columns).
-    for name, spec in (sweep.get("pinned_grids") or {}).items():
-        pin = spec.get("pin", {})
-        cross = spec.get("cross", {})
-        keys = list(cross)
-        combos = itertools.product(*(cross[k] for k in keys)) if keys else [()]
-        for combo in combos:
-            configs.append((dict(baseline, **pin, **dict(zip(keys, combo))),
-                            f"pinned_grid:{name}"))
+    # NOTE: a param that is DEAD unless another param enables it must never reach the OFAT loop
+    #       below — a flat run off the baseline changes a value the pipeline never reads, so it
+    #       silently measures nothing at full run cost. Pin the gate in a per-method grid above
+    #       instead. Guarded by test_project_sweep_has_no_dead_axes.
 
     # 4. OFAT parameter knobs: one config per non-baseline value of each axis,
     #    holding input scale fixed at the baseline cell.

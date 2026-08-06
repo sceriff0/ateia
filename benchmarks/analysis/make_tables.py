@@ -11,7 +11,6 @@ It reads the pipeline's own trace + QC outputs and writes ``<outdir>/`` (default
   registration_valis_rtre.csv per (run, slide): VALIS's own feature-based registration error (rTRE / D)
                              from the summary CSVs it writes during register() — the independent, second
                              accuracy signal (also rendered in the pipeline's final QC report)
-  segmentation_eval.csv      per (run, patient): CellSegmentationEvaluator QualityScore + component metrics
   segmentation_agreement.csv per method-pair on a shared cell: instance-F1 + foreground IoU (stability)
   param_matrix.csv           runs_master joined with the registration + segmentation-quality headlines —
                              every knob's cost AND quality in one wide table (for parameter tuning)
@@ -60,7 +59,7 @@ CONFIG_COLS = (
     "compression", "pyramid_resolutions", "tilex",
     "simplify_tolerance", "geojson_coord_precision",
     # measurement settings — comparable on COST only (see sweep.yaml caveats)
-    "reg_qc", "cse_max_pixels",
+    "reg_qc",
 )
 
 
@@ -110,14 +109,6 @@ def build_scaling_fits(runs_ok: pd.DataFrame) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)
 
 
-def _seg_quality_per_run(seg_eval: pd.DataFrame) -> pd.DataFrame:
-    """Reduce per-(run, patient) CSE to one row per run: median QualityScore across patients."""
-    if seg_eval.empty or "QualityScore" not in seg_eval.columns:
-        return pd.DataFrame(columns=["run_id"])
-    return (seg_eval.groupby("run_id", as_index=False)
-            .agg(seg_quality_score=("QualityScore", "median")))
-
-
 def build_paper_data(results_root, run_plan_csv, manifest_csv, outdir) -> dict:
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
@@ -129,23 +120,21 @@ def build_paper_data(results_root, run_plan_csv, manifest_csv, outdir) -> dict:
     scaling = build_scaling_fits(runs_ok)
     reg_acc = quality.harvest_registration_qc(results_root, run_plan_csv)
     valis_rtre = quality.harvest_valis_rtre(results_root, run_plan_csv)
-    seg_eval = quality.harvest_seg_quality(results_root, run_plan_csv)
     try:
         seg_agree = quality.segmentation_agreement(results_root, run_plan_csv)
     except Exception:
         seg_agree = pd.DataFrame()
 
     # param_matrix: master + BOTH registration-accuracy headlines (seg-based + VALIS rTRE) +
-    # segmentation-quality headline + cell count.
+    # cell count.
     reg_run = quality.registration_accuracy_per_run(reg_acc)
     valis_run = quality.valis_rtre_per_run(valis_rtre)
-    seg_run = _seg_quality_per_run(seg_eval)
     try:
         seg_cnt = quality.harvest_segmentation_counts(results_root, run_plan_csv)
     except Exception:
         seg_cnt = pd.DataFrame(columns=["run_id"])
     param_matrix = master if not master.empty else pd.DataFrame(columns=["run_id"])
-    for extra in (reg_run, valis_run, seg_run, seg_cnt):
+    for extra in (reg_run, valis_run, seg_cnt):
         if not extra.empty:
             param_matrix = param_matrix.merge(extra, on="run_id", how="left")
 
@@ -154,7 +143,6 @@ def build_paper_data(results_root, run_plan_csv, manifest_csv, outdir) -> dict:
         "scaling_fits": scaling,
         "registration_accuracy": reg_acc,
         "registration_valis_rtre": valis_rtre,
-        "segmentation_eval": seg_eval,
         "segmentation_agreement": seg_agree,
         "param_matrix": param_matrix,
     }
@@ -166,7 +154,7 @@ def build_paper_data(results_root, run_plan_csv, manifest_csv, outdir) -> dict:
 
 # ─────────────────────────────────────────────────────────────── data dictionaries ──
 # Curated definitions for the STABLE columns of each table. Dynamic columns (per-stage RAM/time
-# pivots, CSE component metrics) are described by their pattern in the prose, since their exact set
+# pivots) are described by their pattern in the prose, since their exact set
 # depends on which stages/methods a given sweep exercised.
 _DICTS = {
     "runs_master": (
@@ -235,16 +223,6 @@ _DICTS = {
          ("non_rigid_D", "px", "Median matched-feature distance after the non-rigid stage (post-registration)."),
          ("<...>rTRE", "-", "Relative target registration error variants, if present."),
          ("n_matches", "-", "Number of matched features, if present.")]),
-    "segmentation_eval": (
-        "Reference-free segmentation quality from CellSegmentationEvaluator (CSE). One row per "
-        "(run, patient). QualityScore is the headline composite; component metrics follow as "
-        "<channel_code>:<metric> where channel_code is cell / nucleus / cyto.",
-        [("run_id", "-", "Run identifier."),
-         ("patient", "-", "Patient (CSE 'id')."),
-         ("QualityScore", "-", "Composite reference-free segmentation quality (higher is better)."),
-         ("cell:<metric>", "varies", "Matched-cell CSE metrics (coverage, cell-count density, uniformity, ...)."),
-         ("nucleus:<metric>", "varies", "Nucleus-channel CSE metrics."),
-         ("cyto:<metric>", "varies", "Cell-minus-nucleus (cytoplasm) CSE metrics.")]),
     "segmentation_agreement": (
         "Cross-method segmentation stability on a shared input cell (no ground truth): each method pair "
         "compared by IoU-matched instance-F1 and foreground IoU. Consensus = mean instance_f1.",
@@ -271,7 +249,6 @@ _DICTS = {
          ("reg_pair_fraction", "-", "Final-stage nucleus-pair fraction."),
          ("valis_non_rigid_D", "px", "VALIS post-registration median feature distance (per-run median)."),
          ("valis_<col>", "varies", "Per-run median of each numeric VALIS summary column."),
-         ("seg_quality_score", "-", "Median CSE QualityScore across patients."),
          ("n_cells", "-", "Segmented cell count (max over the run's masks).")]),
 }
 

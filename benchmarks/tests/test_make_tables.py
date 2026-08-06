@@ -8,7 +8,7 @@ from benchmarks.analysis import make_tables
 
 FIX = Path(__file__).parent / "fixtures"
 TABLES = ("runs_master", "scaling_fits", "registration_accuracy", "registration_valis_rtre",
-          "segmentation_eval", "segmentation_agreement", "param_matrix")
+          "segmentation_agreement", "param_matrix")
 
 
 def test_build_paper_data_emits_all_tables_and_dicts(tmp_path):
@@ -55,23 +55,13 @@ def _seg_qc(root, run_id, patient, moving):
         "matching": {"pair_fraction": 0.9}}))
 
 
-def _seg_eval(root, run_id, patient, score):
-    d = root / run_id / "out" / patient / "qc" / "segmentation"
-    d.mkdir(parents=True, exist_ok=True)
-    (d / f"{patient}_seg_eval.json").write_text(json.dumps({
-        "id": patient, "QualityScore": score,
-        "metrics": {"Matched Cell": {"FractionOfForegroundOccupiedByCells": 0.6},
-                    "QualityScore": score}}))
-
-
-def test_param_matrix_joins_registration_and_segmentation_quality(tmp_path):
+def test_param_matrix_joins_both_registration_accuracy_headlines(tmp_path):
     # copy the fixture runs tree so we can inject QC JSONs the base fixture doesn't ship
     runs = tmp_path / "runs"
     shutil.copytree(FIX / "runs", runs)
     plan = pd.read_csv(FIX / "runs_run_plan.csv")
     run0 = plan["run_id"].iloc[0]
     _seg_qc(runs, run0, "P001", "cycle2")
-    _seg_eval(runs, run0, "P001", 0.88)
     # VALIS's own registration error summary (published under registered/summary/)
     vd = runs / run0 / "out" / "P001" / "registered" / "summary"
     vd.mkdir(parents=True, exist_ok=True)
@@ -89,14 +79,10 @@ def test_param_matrix_joins_registration_and_segmentation_quality(tmp_path):
     valis = pd.read_csv(out / "registration_valis_rtre.csv")
     assert valis["non_rigid_D"].iloc[0] == 3.0
 
-    seg = pd.read_csv(out / "segmentation_eval.csv")
-    assert seg["QualityScore"].iloc[0] == 0.88
-
     pm = pd.read_csv(out / "param_matrix.csv").set_index("run_id")
-    # the run with QC gets BOTH registration-accuracy headlines + quality joined in
+    # the run with QC gets BOTH registration-accuracy headlines joined in
     assert pm.loc[run0, "reg_dice_matched"] == 0.82           # seg-based, final (non_rigid) stage
     assert pm.loc[run0, "valis_non_rigid_D"] == 3.0           # VALIS-reported rTRE/D
-    assert pm.loc[run0, "seg_quality_score"] == 0.88
 
 
 def test_dict_flags_undocumented_columns(tmp_path):

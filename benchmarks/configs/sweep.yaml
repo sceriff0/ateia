@@ -109,12 +109,6 @@ baseline:
   seg_instantseg_batch_size: 16       # pipeline default: tiles per InstanSeg forward pass. Live at the
                                       # baseline now that instantseg is the default backend — it is the
                                       # GPU-throughput knob, crossed by segmentation_grid.
-  skip_seg_quality_eval: false        # CellSegmentationEvaluator (CSE) ON: reference-free per-patient
-                                      # segmentation QualityScore + component metrics, harvested into
-                                      # segmentation_eval.csv (modules/local/seg_quality_eval.nf).
-  cse_max_pixels: 50000000            # pipeline default: bin image+masks so CSE scores <= this many px
-                                      # (caps CSE memory/time on full-WSI masks; QualityScore shifts with
-                                      # the binning factor, so keep it FIXED across the cohort).
   # --- quantification ---
   # compartments ON at baseline so the expanded_quantification axis is valid:
   # expanded_quantification requires quantify_compartments (ParamUtils.validateCompartmentQuant).
@@ -175,11 +169,6 @@ axes:
   reg_qc:                     [0, 1, 2]           # CAVEAT: reg_qc<2 emits NO staged accuracy metric, so
                                                   # those runs are absent from registration_accuracy.csv.
                                                   # Cost characterisation of the QC stage only.
-  cse_max_pixels:             [10000000, 50000000, 100000000]
-                                                  # CAVEAT: the CSE composite QualityScore shifts with the
-                                                  # binning factor, so these runs are comparable on COST
-                                                  # but NOT on QualityScore. Keep the cohort fixed at the
-                                                  # baseline value for the quality table.
   # NOTE — the VALIS registration knobs (memory_mode, reg_micro_reg) are NOT OFAT axes: they are
   # crossed at the baseline cell by registration_param_grid below.
   # NOTE — registration_method is NOT an OFAT axis: it is a method grid (registration_method_grid), each
@@ -238,14 +227,7 @@ registration_method_grid:
     reg_tiled_gate_tre: [0.5, 1.0, 2.0]      # per-tile non-rigid refine gate (rigid-stage TRE, px)
     reg_tiled_fanout:   [false, true]        # execution shape: one task/slide vs per-TILE Nextflow fan-out
 
-# PINNED GRIDS — params that are DEAD unless another param enables them. Sweeping them as flat OFAT axes
-# would change values the pipeline never reads (measuring nothing while paying for the run), so each
-# entry pins the enabling param and crosses the now-live knobs. Labelled pinned_grid:<name>.
-#
-#   pinned_grids:
-#     <name>:
-#       pin:   {<gate_param>: true}
-#       cross: {<live_knob>: [...], <other_live_knob>: [...]}
-#
-# Every pinned/crossed param must also appear in `baseline` so all configs share CSV columns.
-# Currently empty: the pipeline has no gated-param knobs left to sweep.
+# NOTE — a param that is DEAD unless another param enables it must never be a flat OFAT axis:
+# varying it would change a value the pipeline never reads (full run cost, zero signal). Pin the
+# gate and cross the now-live knobs instead, the way segmentation_grid and registration_method_grid
+# do. Guarded by test_project_sweep_has_no_dead_axes.

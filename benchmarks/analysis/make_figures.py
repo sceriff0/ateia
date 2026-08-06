@@ -93,9 +93,6 @@ def run(results_root, run_plan_csv, manifest_csv, reg_eval_csv, outdir, formats=
     # VALIS's own feature-based registration error (the independent second accuracy signal).
     quality.harvest_valis_rtre(results_root, run_plan_csv).to_csv(
         outdir / "registration_valis_rtre.csv", index=False)
-    # Reference-free segmentation quality (CellSegmentationEvaluator).
-    seg_eval = quality.harvest_seg_quality(results_root, run_plan_csv)
-    seg_eval.to_csv(outdir / "segmentation_eval.csv", index=False)
     # Per-run quality join: swept params + registration headline + segmentation cell count.
     per_run = runs_df.drop_duplicates("run_id")[
         [c for c in ("run_id", "varied_axis", "target_px", "n_channels", "n_register_images",

@@ -6,8 +6,6 @@ The sweep's trace.txt gives RAM/time; this module joins in the *result-quality* 
     Segments DAPI nuclei, fixes cell correspondence once at the rigid stage, then re-measures
     dice_matched + centroid displacement (px/um) after each transform stage — the landmark-free
     registration-accuracy signal (bin/warp_seg_qc.py; docs/registration_qc.md).
-  - segmentation quality: reference-free CellSegmentationEvaluator JSON (skip_seg_quality_eval=false)
-      <root>/<run_id>/out/<patient>/**/*_seg_eval.json   -> QualityScore + component metrics.
   - segmentation output size: cell count = max label of <...>/segment*/*cell_mask*.tif
   - segmentation cross-method agreement: pairwise mask IoU + cell-count ratio between methods on the
     SAME image (segmentation_grid runs share the baseline cell).
@@ -111,42 +109,6 @@ def registration_accuracy_per_run(reg_qc_long: pd.DataFrame) -> pd.DataFrame:
         reg_delta_dice_vs_rigid=("delta_dice_vs_rigid", "median"),
         reg_pair_fraction=("pair_fraction", "median"))
     return agg
-
-
-# ─────────────────────────────────────────────────────── segmentation quality (CSE) ──
-# CSE metrics nest under three mask channels; short codes keep the flattened column names readable.
-_CSE_CHANNEL_CODE = {
-    "Matched Cell": "cell",
-    "Nucleus (including nuclear membrane)": "nucleus",
-    "Cell Not Including Nucleus (cell membrane plus cytoplasm)": "cyto",
-}
-
-
-def harvest_seg_quality(results_root, run_plan_csv) -> pd.DataFrame:
-    """Per-(run, patient) reference-free segmentation quality from CellSegmentationEvaluator JSONs.
-
-    Columns: run_id, patient (=id), QualityScore (the headline composite), plus the flattened CSE
-    component metrics as ``<channel_code>:<metric>``. Missing/unparseable JSONs are skipped."""
-    root = Path(results_root)
-    plan = pd.read_csv(run_plan_csv)
-    rows = []
-    for run_id in plan["run_id"]:
-        for j in (root / str(run_id) / "out").rglob("*_seg_eval.json"):
-            try:
-                d = json.loads(j.read_text())
-            except Exception:
-                continue
-            row = {"run_id": run_id, "patient": d.get("id"),
-                   "QualityScore": _f(d.get("QualityScore"))}
-            metrics = d.get("metrics") or {}
-            for chan, sub in metrics.items():
-                if not isinstance(sub, dict):
-                    continue  # skips the top-level "QualityScore" duplicate inside metrics
-                code = _CSE_CHANNEL_CODE.get(chan, chan.split()[0].lower())
-                for name, val in sub.items():
-                    row[f"{code}:{name}"] = _f(val)
-            rows.append(row)
-    return pd.DataFrame(rows)
 
 
 # ─────────────────────────────────────────────────── registration accuracy (VALIS rTRE) ──

@@ -106,31 +106,6 @@ def test_harvest_valis_rtre_tolerates_missing(tmp_path):
     assert quality.valis_rtre_per_run(pd.DataFrame(columns=["run_id"])).empty
 
 
-# ── segmentation quality (CellSegmentationEvaluator, reference-free) ──
-def _write_seg_eval(root, run_id, patient, quality_score, cell_metrics):
-    d = root / run_id / "out" / patient / "qc" / "segmentation"
-    d.mkdir(parents=True, exist_ok=True)
-    (d / f"{patient}_seg_eval.json").write_text(json.dumps({
-        "id": patient,
-        "metrics": {"Matched Cell": cell_metrics, "QualityScore": quality_score},
-        "QualityScore": quality_score}))
-
-
-def test_harvest_seg_quality(tmp_path):
-    plan = tmp_path / "plan.csv"
-    pd.DataFrame({"run_id": ["r0", "r1"]}).to_csv(plan, index=False)
-    _write_seg_eval(tmp_path, "r0", "P001", 0.87,
-                    {"NumberOfCellsPer100SquareMicrons": 12.3,
-                     "FractionOfForegroundOccupiedByCells": 0.64})
-    # r1 has no seg_eval -> skipped
-    out = quality.harvest_seg_quality(tmp_path, plan).set_index("run_id")
-    assert list(out.index) == ["r0"]
-    assert out.loc["r0", "QualityScore"] == 0.87
-    assert out.loc["r0", "patient"] == "P001"
-    assert out.loc["r0", "cell:NumberOfCellsPer100SquareMicrons"] == 12.3
-    assert out.loc["r0", "cell:FractionOfForegroundOccupiedByCells"] == 0.64
-
-
 # ── segmentation counts + agreement (injected mask reader) ──
 def _mk_seg_run(tmp_path, run_id, patient="P001"):
     d = tmp_path / run_id / "out" / patient / "segment"; d.mkdir(parents=True, exist_ok=True)

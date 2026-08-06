@@ -7,8 +7,6 @@ QC the pipeline already emits (the benchmark invents no metrics):
 1. **Resource scaling** — peak RAM & wall-time vs input size / channels / rounds (Nextflow trace).
 2. **Registration accuracy** — `dice_matched` + centroid **displacement (µm)** from the staged
    DAPI-nuclei QC (`reg_qc=2`; `bin/warp_seg_qc.py`). Landmark-free.
-3. **Segmentation quality** — reference-free `QualityScore` from CellSegmentationEvaluator
-   (`SEG_QUALITY_EVAL`).
 
 The heavy step (the sweep) runs on a **cluster** with the pipeline containers;
 matrix generation and the DATA emit run **locally**.
@@ -101,15 +99,13 @@ Verify the whole harness with no data at all:
     The `tiled`/STARE entry crosses `reg_tiled_fanout`, which is the only way the per-tile
     fan-out processes (`TILED_COARSE`/`TILED_REG_TILE`/`TILED_SOLVE`/`TILED_STITCH`) execute
     at all — at the default `false` they never run in any sweep run.
-  - `pinned_grids:` — the general form: `pin:` the enabling param(s), `cross:` the now-live
-    knobs. Currently empty — no gated-param knobs remain to sweep.
 - **The `baseline:` map must equal the shipped `nextflow.config` defaults**, and must declare
   every param any grid or axis varies (so all configs share CSV columns).
   `test_project_sweep_baseline_matches_pipeline_defaults` reads `nextflow.config` directly and
   fails on any divergence — it is not a hand-maintained mirror.
-- Some axes are **measurement settings**, not pipeline knobs: `reg_qc` and `cse_max_pixels`
-  change *what is measured*, so their runs are comparable on cost but **not** on quality. Keep
-  the cohort at the baseline value for any quality table. Each carries this caveat inline.
+- Some axes are **measurement settings**, not pipeline knobs: `reg_qc` changes *what is
+  measured*, so its runs are comparable on cost but **not** on quality. Keep the cohort at the
+  baseline value for any quality table. It carries this caveat inline.
 - **`--repeats N`** emits N replicate launches per config so the analysis can report
   per-config variance (timing at n=1 is noisy — cache state, node contention). `N=3` is the
   default; `N=1` is a single-shot plan. Replicates share a `config_id`; `rep` is the index.
@@ -157,15 +153,13 @@ Verify the whole harness with no data at all:
         --outdir       benchmarks/paper_data
 
 - **Output:** `benchmarks/paper_data/{runs_master,scaling_fits,registration_accuracy,
-  registration_valis_rtre,segmentation_eval,segmentation_agreement,param_matrix}.csv`,
+  registration_valis_rtre,segmentation_agreement,param_matrix}.csv`,
   each with a sibling `.dict.md` data dictionary. **This is the method-paper deliverable.**
   Column-by-column meaning is in each `.dict.md` and summarised in `docs/benchmarks.md`.
 - **Two registration-accuracy signals:** `registration_accuracy.csv` (segmentation-based
   Dice/displacement from `reg_qc: 2`) and `registration_valis_rtre.csv` (VALIS's *own*
   feature-based rTRE, harvested from the summary CSVs it writes — the same numbers the
   final QC report shows). Both need registration to have actually run (paired matrix).
-  Segmentation quality (`segmentation_eval.csv`) needs `skip_seg_quality_eval: false`
-  (the shipped baseline).
 
 ### A5 — Optional: figures + derived config (local)
 
@@ -281,8 +275,8 @@ figures, and writes `conf/modules.optimized.config`.
 |---|---|---|
 | `generate_matrix.py` | 1 source image | matrix of OME-TIFFs + `matrix_manifest.csv` |
 | `build_run_plan.py` | `sweep.yaml` | `run_plan.csv` |
-| `run_sweep.sh` | manifest + run plan | per-run `trace.txt` + `input_sizes.csv` + QC JSONs (`*_seg_qc.json`, `*_seg_eval.json`) |
-| **`make_tables`** | results + run plan + manifest | **`paper_data/{runs_master,scaling_fits,registration_accuracy,registration_valis_rtre,segmentation_eval,segmentation_agreement,param_matrix}.csv` (+ `.dict.md`)** — the paper DATA |
+| `run_sweep.sh` | manifest + run plan | per-run `trace.txt` + `input_sizes.csv` + QC JSONs (`*_seg_qc.json`) |
+| **`make_tables`** | results + run plan + manifest | **`paper_data/{runs_master,scaling_fits,registration_accuracy,registration_valis_rtre,segmentation_agreement,param_matrix}.csv` (+ `.dict.md`)** — the paper DATA |
 | `make_figures` (optional) | results + run plan + manifest | `measurements.csv` + `resource_models.csv` + `resource_stats.csv` + `scaling_*.pdf/svg` + `modules.optimized.config` |
 | `prepare_pairs.py` (optional) | `pairs.csv` (+ downloaded data) | per-pair input dirs + `pairs_manifest.csv` |
 | `run_registration.sh` (optional) | pairs manifest | `eval_*.json` (landmark TRE) |
