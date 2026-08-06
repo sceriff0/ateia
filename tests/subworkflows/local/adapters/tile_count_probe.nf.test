@@ -21,6 +21,7 @@ nextflow_workflow {
 
     tag "subworkflow"
     tag "tiled_adapter"
+    tag "stub"
 
     test("12-row tile plan: countTileRows equals splitCsv's row count") {
 

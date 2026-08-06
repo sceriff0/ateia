@@ -28,6 +28,8 @@ nextflow_function {
     name "Test buildManifest / buildRunSummary (run_summary.json content)"
     script "subworkflows/local/final_qc.nf"
 
+    tag "stub"
+
     test("buildManifest reads declared_channels, not channels -- linear path") {
 
         function "buildManifest"

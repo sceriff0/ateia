@@ -50,6 +50,8 @@ nextflow_function {
     name "Test requireTilesCount (tiled fan-in group size)"
     script "subworkflows/local/adapters/tiled_adapter.nf"
 
+    tag "stub"
+
     test("requireTilesCount returns the count when meta carries tiles_count") {
 
         function "requireTilesCount"
