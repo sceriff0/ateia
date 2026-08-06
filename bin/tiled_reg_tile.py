@@ -62,38 +62,43 @@ def main(argv=None) -> int:
     m0 = np.asarray(json.loads(Path(a.m0).read_text())["M0"], dtype=float)
 
     # Lazy zarr-region reads (the tiled_stitch.py pattern): decode only the reference tile and
-    # the small moving crop the tile's inverse map draws from, never either whole slide.
+    # the small moving crop the tile's inverse map draws from, never either whole slide. The
+    # acquisitions are nested (not two opens followed by one try/finally) so that if opening the
+    # moving slide raises, the already-open reference handle is still closed.
     ref_src, _ref_dtype, ref_close = open_lazy(a.reference)
-    mov_src, _mov_dtype, mov_close = open_lazy(a.moving)
     try:
-        _check_dapi_index(a.dapi_index, ref_src.shape[0])
-        _check_dapi_index(a.dapi_index, mov_src.shape[0])
-        out_h, out_w = a.ry1 - a.ry0, a.rx1 - a.rx0
-        ref_tile = np.asarray(
-            ref_src[a.dapi_index, slice(a.ry0, a.ry1), slice(a.rx0, a.rx1)],
-            dtype=np.float32,
-        )
-        _c, mh, mw = mov_src.shape
-        sx0, sy0, sx1, sy1 = source_region(
-            m0, None, (a.rx0, a.ry0), (out_h, out_w), src_shape=(mh, mw)
-        )
-        if sx1 > sx0 and sy1 > sy0:
-            crop = np.asarray(
-                mov_src[a.dapi_index, slice(sy0, sy1), slice(sx0, sx1)], dtype=float
+        mov_src, _mov_dtype, mov_close = open_lazy(a.moving)
+        try:
+            _check_dapi_index(a.dapi_index, ref_src.shape[0])
+            _check_dapi_index(a.dapi_index, mov_src.shape[0])
+            out_h, out_w = a.ry1 - a.ry0, a.rx1 - a.rx0
+            ref_tile = np.asarray(
+                ref_src[a.dapi_index, slice(a.ry0, a.ry1), slice(a.rx0, a.rx1)],
+                dtype=np.float32,
             )
-            mov_tile = warp_image(
-                crop,
-                m0,
-                None,
-                (out_h, out_w),
-                out_origin=(a.rx0, a.ry0),
-                src_origin=(sx0, sy0),
+            _c, mh, mw = mov_src.shape
+            sx0, sy0, sx1, sy1 = source_region(
+                m0, None, (a.rx0, a.ry0), (out_h, out_w), src_shape=(mh, mw)
             )
-        else:
-            mov_tile = np.zeros((out_h, out_w), dtype=float)
+            if sx1 > sx0 and sy1 > sy0:
+                crop = np.asarray(
+                    mov_src[a.dapi_index, slice(sy0, sy1), slice(sx0, sx1)],
+                    dtype=float,
+                )
+                mov_tile = warp_image(
+                    crop,
+                    m0,
+                    None,
+                    (out_h, out_w),
+                    out_origin=(a.rx0, a.ry0),
+                    src_origin=(sx0, sy0),
+                )
+            else:
+                mov_tile = np.zeros((out_h, out_w), dtype=float)
+        finally:
+            mov_close()
     finally:
         ref_close()
-        mov_close()
 
     dx, dy, tre = residual_displacement(ref_tile, mov_tile, upsample=a.upsample)
 

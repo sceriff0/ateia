@@ -332,3 +332,112 @@ def test_dapi_index_out_of_range_raises_same_message(tmp_path):
                 str(out_f),
             ]
         )
+
+
+def _reg_tile_args(
+    ref_f, mov_f, m0_f, out_f, dapi_index=0, rx0=0, ry0=0, rx1=32, ry1=32
+):
+    """Small argv builder used only by the two close-callable tests below — the four tests above
+    are left as-is (a full `_run(...)` refactor of the whole file is a deferred minor, out of
+    scope for this fix)."""
+    return [
+        "--reference",
+        str(ref_f),
+        "--moving",
+        str(mov_f),
+        "--m0",
+        str(m0_f),
+        "--dapi-index",
+        str(dapi_index),
+        "--ix",
+        "0",
+        "--iy",
+        "0",
+        "--cx",
+        "16.0",
+        "--cy",
+        "16.0",
+        "--rx0",
+        str(rx0),
+        "--ry0",
+        str(ry0),
+        "--rx1",
+        str(rx1),
+        "--ry1",
+        str(ry1),
+        "--out",
+        str(out_f),
+    ]
+
+
+def _spy_close(orig_open_lazy, closed, key_for_path):
+    """Wrap tiled_io.open_lazy so the returned close callable is observed while still calling
+    through to the real primitive — spying on the real close, not a mock that never opened
+    anything."""
+
+    def spying_open_lazy(path):
+        arr, dtype, close = orig_open_lazy(path)
+        key = key_for_path(path)
+
+        def spy():
+            closed[key] = True
+            close()
+
+        return arr, dtype, spy
+
+    return spying_open_lazy
+
+
+def test_reference_handle_closed_when_moving_open_raises(tmp_path, monkeypatch):
+    """If open_lazy(a.moving) itself raises, the already-open reference handle must still close.
+
+    Regression test for a review finding: the two open_lazy calls originally ran before a single
+    try/finally, so a failure opening the moving slide (bad path, corrupt/unreadable TIFF,
+    zarr-open failure) leaked the reference handle. Uses a real nonexistent path so the exception
+    comes from the real primitive, not a simulated one.
+    """
+    ref_f, _mov_f, m0_f, _m0, _ref, _mov = _write_pair(tmp_path, n=64)
+    bad_moving = tmp_path / "does_not_exist.ome.tiff"
+
+    import tiled_io
+
+    orig_open_lazy = tiled_io.open_lazy
+    closed = {"ref": False}
+    monkeypatch.setattr(
+        tiled_reg_tile,
+        "open_lazy",
+        _spy_close(orig_open_lazy, closed, lambda path: "ref"),
+    )
+
+    out_f = tmp_path / "ctrl.json"
+    with pytest.raises(FileNotFoundError):
+        tiled_reg_tile.main(_reg_tile_args(ref_f, bad_moving, m0_f, out_f))
+
+    assert closed["ref"] is True
+
+
+def test_both_handles_closed_when_exception_raised_inside_try(tmp_path, monkeypatch):
+    """Both opens succeed, then an exception inside the try block (out-of-range --dapi-index)
+    must still close both handles."""
+    ref_f, mov_f, m0_f, _m0, _ref, _mov = _write_pair(tmp_path, n=64)
+
+    import tiled_io
+
+    orig_open_lazy = tiled_io.open_lazy
+    closed = {"ref": False, "mov": False}
+
+    def key_for_path(path):
+        return "ref" if str(path) == str(ref_f) else "mov"
+
+    monkeypatch.setattr(
+        tiled_reg_tile,
+        "open_lazy",
+        _spy_close(orig_open_lazy, closed, key_for_path),
+    )
+
+    out_f = tmp_path / "ctrl.json"
+    with pytest.raises(ValueError, match="out of range"):
+        tiled_reg_tile.main(_reg_tile_args(ref_f, mov_f, m0_f, out_f, dapi_index=99))
+
+    assert closed["ref"] is True
+    assert closed["mov"] is True
