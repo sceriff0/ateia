@@ -58,28 +58,66 @@ nextflow_pipeline {
             assert workflow.success
 
             // --- the invariant ------------------------------------------------
-            // Every absolute field of every data row of every checkpoint CSV must
-            // name a file that exists. Absolute-only: the other columns are ids,
-            // booleans and pipe-joined channel names.
-            def missing = []
-            def checked = 0
-            ['preprocessed', 'registered', 'postprocessed'].each { step ->
-                def csv = new File("${outputDir}/csv/${step}.csv".toString())
-                assert csv.exists() : "${step}.csv was not published"
+            // TWO properties, not one.
+            //
+            //   1. every recorded path EXISTS, and
+            //   2. no recorded path lies under the run's work directory.
+            //
+            // (2) is not redundant. Existence alone is blind to the failure mode this
+            // manifest actually has: under the pre-fix `{32}` work-hash width the
+            // single-slide reference was recorded as
+            // <workDir>/49/bc25521f0d35abf9510e09738cbcad/P001_ref_corrected.ome.tif —
+            // a path that EXISTS, so an existence-only check waves it through. The
+            // work directory is scratch: -w is cleanable, it is not published, and a
+            // manifest that points into it is a restart that breaks the first time
+            // someone runs `nextflow clean`.
+            //
+            // Deliberately NOT "every path must start with outputDir". That would be
+            // wrong: with --start registration a run legitimately records the
+            // passthrough reference at the PRIOR run's outdir (verified — a run with
+            // --outdir /tmp/A correctly wrote /tmp/B/P001/preprocessed/... into its
+            // own registered.csv). Excluding workDir is the correct shape; requiring
+            // an outputDir prefix is not.
+            def csvDir = new File("${outputDir}/csv".toString())
+            assert csvDir.isDirectory() : "no csv/ directory was published"
+
+            // Globbed, not a hardcoded step list: a fourth checkpoint manifest is
+            // covered the day it is added instead of silently going unchecked.
+            def manifests = (csvDir.listFiles() ?: [])
+                .findAll { it.name.endsWith('.csv') }
+                .sort { it.name }
+            assert manifests.size() == 3 :
+                "expected 3 checkpoint manifests, found ${manifests.size()}: " +
+                manifests*.name
+
+            def work = new File("${workDir}".toString()).absolutePath
+            def problems = []
+            def checked  = 0
+            manifests.each { csv ->
                 csv.readLines().drop(1).findAll { it.trim() }.each { line ->
                     line.split(',').each { field ->
+                        // Absolute fields only: the rest are ids, booleans and
+                        // pipe-joined channel names.
                         if (field.startsWith('/')) {
                             checked++
-                            if (!new File(field).exists()) missing << "${step}.csv -> ${field}"
+                            if (new File(field).absolutePath.startsWith(work + File.separator))
+                                problems << "${csv.name}: inside the work directory (scratch, unpublished) -> ${field}"
+                            else if (!new File(field).exists())
+                                problems << "${csv.name}: does not exist -> ${field}"
                         }
                     }
                 }
             }
-            // Guard against the assertion passing because nothing was examined.
-            assert checked >= 7 : "only ${checked} paths examined — did the CSV columns change?"
-            assert missing.isEmpty() :
-                "checkpoint manifest names ${missing.size()} file(s) that do not exist:\n  " +
-                missing.join("\n  ")
+            // Exact, not a lower bound: a lower bound lets a path column disappear
+            // from a manifest without anyone noticing.
+            assert checked == 9 :
+                "expected 9 recorded paths, examined ${checked} — did the CSV columns change?"
+            // ONE assertion covering both properties, deliberately: Groovy aborts at
+            // the first failed assert, so splitting them would hide the work-directory
+            // findings behind the existence findings whenever a change breaks both.
+            assert problems.isEmpty() :
+                "checkpoint manifest has ${problems.size()} bad path(s):\n  " +
+                problems.join("\n  ")
         }
     }
 
@@ -102,28 +140,66 @@ nextflow_pipeline {
             assert workflow.success
 
             // --- the invariant ------------------------------------------------
-            // Every absolute field of every data row of every checkpoint CSV must
-            // name a file that exists. Absolute-only: the other columns are ids,
-            // booleans and pipe-joined channel names.
-            def missing = []
-            def checked = 0
-            ['preprocessed', 'registered', 'postprocessed'].each { step ->
-                def csv = new File("${outputDir}/csv/${step}.csv".toString())
-                assert csv.exists() : "${step}.csv was not published"
+            // TWO properties, not one.
+            //
+            //   1. every recorded path EXISTS, and
+            //   2. no recorded path lies under the run's work directory.
+            //
+            // (2) is not redundant. Existence alone is blind to the failure mode this
+            // manifest actually has: under the pre-fix `{32}` work-hash width the
+            // single-slide reference was recorded as
+            // <workDir>/49/bc25521f0d35abf9510e09738cbcad/P001_ref_corrected.ome.tif —
+            // a path that EXISTS, so an existence-only check waves it through. The
+            // work directory is scratch: -w is cleanable, it is not published, and a
+            // manifest that points into it is a restart that breaks the first time
+            // someone runs `nextflow clean`.
+            //
+            // Deliberately NOT "every path must start with outputDir". That would be
+            // wrong: with --start registration a run legitimately records the
+            // passthrough reference at the PRIOR run's outdir (verified — a run with
+            // --outdir /tmp/A correctly wrote /tmp/B/P001/preprocessed/... into its
+            // own registered.csv). Excluding workDir is the correct shape; requiring
+            // an outputDir prefix is not.
+            def csvDir = new File("${outputDir}/csv".toString())
+            assert csvDir.isDirectory() : "no csv/ directory was published"
+
+            // Globbed, not a hardcoded step list: a fourth checkpoint manifest is
+            // covered the day it is added instead of silently going unchecked.
+            def manifests = (csvDir.listFiles() ?: [])
+                .findAll { it.name.endsWith('.csv') }
+                .sort { it.name }
+            assert manifests.size() == 3 :
+                "expected 3 checkpoint manifests, found ${manifests.size()}: " +
+                manifests*.name
+
+            def work = new File("${workDir}".toString()).absolutePath
+            def problems = []
+            def checked  = 0
+            manifests.each { csv ->
                 csv.readLines().drop(1).findAll { it.trim() }.each { line ->
                     line.split(',').each { field ->
+                        // Absolute fields only: the rest are ids, booleans and
+                        // pipe-joined channel names.
                         if (field.startsWith('/')) {
                             checked++
-                            if (!new File(field).exists()) missing << "${step}.csv -> ${field}"
+                            if (new File(field).absolutePath.startsWith(work + File.separator))
+                                problems << "${csv.name}: inside the work directory (scratch, unpublished) -> ${field}"
+                            else if (!new File(field).exists())
+                                problems << "${csv.name}: does not exist -> ${field}"
                         }
                     }
                 }
             }
-            // Guard against the assertion passing because nothing was examined.
-            assert checked >= 6 : "only ${checked} paths examined — did the CSV columns change?"
-            assert missing.isEmpty() :
-                "checkpoint manifest names ${missing.size()} file(s) that do not exist:\n  " +
-                missing.join("\n  ")
+            // Exact, not a lower bound: a lower bound lets a path column disappear
+            // from a manifest without anyone noticing.
+            assert checked == 7 :
+                "expected 7 recorded paths, examined ${checked} — did the CSV columns change?"
+            // ONE assertion covering both properties, deliberately: Groovy aborts at
+            // the first failed assert, so splitting them would hide the work-directory
+            // findings behind the existence findings whenever a change breaks both.
+            assert problems.isEmpty() :
+                "checkpoint manifest has ${problems.size()} bad path(s):\n  " +
+                problems.join("\n  ")
         }
     }
 
@@ -148,28 +224,66 @@ nextflow_pipeline {
             assert workflow.success
 
             // --- the invariant ------------------------------------------------
-            // Every absolute field of every data row of every checkpoint CSV must
-            // name a file that exists. Absolute-only: the other columns are ids,
-            // booleans and pipe-joined channel names.
-            def missing = []
-            def checked = 0
-            ['preprocessed', 'registered', 'postprocessed'].each { step ->
-                def csv = new File("${outputDir}/csv/${step}.csv".toString())
-                assert csv.exists() : "${step}.csv was not published"
+            // TWO properties, not one.
+            //
+            //   1. every recorded path EXISTS, and
+            //   2. no recorded path lies under the run's work directory.
+            //
+            // (2) is not redundant. Existence alone is blind to the failure mode this
+            // manifest actually has: under the pre-fix `{32}` work-hash width the
+            // single-slide reference was recorded as
+            // <workDir>/49/bc25521f0d35abf9510e09738cbcad/P001_ref_corrected.ome.tif —
+            // a path that EXISTS, so an existence-only check waves it through. The
+            // work directory is scratch: -w is cleanable, it is not published, and a
+            // manifest that points into it is a restart that breaks the first time
+            // someone runs `nextflow clean`.
+            //
+            // Deliberately NOT "every path must start with outputDir". That would be
+            // wrong: with --start registration a run legitimately records the
+            // passthrough reference at the PRIOR run's outdir (verified — a run with
+            // --outdir /tmp/A correctly wrote /tmp/B/P001/preprocessed/... into its
+            // own registered.csv). Excluding workDir is the correct shape; requiring
+            // an outputDir prefix is not.
+            def csvDir = new File("${outputDir}/csv".toString())
+            assert csvDir.isDirectory() : "no csv/ directory was published"
+
+            // Globbed, not a hardcoded step list: a fourth checkpoint manifest is
+            // covered the day it is added instead of silently going unchecked.
+            def manifests = (csvDir.listFiles() ?: [])
+                .findAll { it.name.endsWith('.csv') }
+                .sort { it.name }
+            assert manifests.size() == 3 :
+                "expected 3 checkpoint manifests, found ${manifests.size()}: " +
+                manifests*.name
+
+            def work = new File("${workDir}".toString()).absolutePath
+            def problems = []
+            def checked  = 0
+            manifests.each { csv ->
                 csv.readLines().drop(1).findAll { it.trim() }.each { line ->
                     line.split(',').each { field ->
+                        // Absolute fields only: the rest are ids, booleans and
+                        // pipe-joined channel names.
                         if (field.startsWith('/')) {
                             checked++
-                            if (!new File(field).exists()) missing << "${step}.csv -> ${field}"
+                            if (new File(field).absolutePath.startsWith(work + File.separator))
+                                problems << "${csv.name}: inside the work directory (scratch, unpublished) -> ${field}"
+                            else if (!new File(field).exists())
+                                problems << "${csv.name}: does not exist -> ${field}"
                         }
                     }
                 }
             }
-            // Guard against the assertion passing because nothing was examined.
-            assert checked >= 7 : "only ${checked} paths examined — did the CSV columns change?"
-            assert missing.isEmpty() :
-                "checkpoint manifest names ${missing.size()} file(s) that do not exist:\n  " +
-                missing.join("\n  ")
+            // Exact, not a lower bound: a lower bound lets a path column disappear
+            // from a manifest without anyone noticing.
+            assert checked == 9 :
+                "expected 9 recorded paths, examined ${checked} — did the CSV columns change?"
+            // ONE assertion covering both properties, deliberately: Groovy aborts at
+            // the first failed assert, so splitting them would hide the work-directory
+            // findings behind the existence findings whenever a change breaks both.
+            assert problems.isEmpty() :
+                "checkpoint manifest has ${problems.size()} bad path(s):\n  " +
+                problems.join("\n  ")
         }
     }
 
@@ -194,28 +308,66 @@ nextflow_pipeline {
             assert workflow.success
 
             // --- the invariant ------------------------------------------------
-            // Every absolute field of every data row of every checkpoint CSV must
-            // name a file that exists. Absolute-only: the other columns are ids,
-            // booleans and pipe-joined channel names.
-            def missing = []
-            def checked = 0
-            ['preprocessed', 'registered', 'postprocessed'].each { step ->
-                def csv = new File("${outputDir}/csv/${step}.csv".toString())
-                assert csv.exists() : "${step}.csv was not published"
+            // TWO properties, not one.
+            //
+            //   1. every recorded path EXISTS, and
+            //   2. no recorded path lies under the run's work directory.
+            //
+            // (2) is not redundant. Existence alone is blind to the failure mode this
+            // manifest actually has: under the pre-fix `{32}` work-hash width the
+            // single-slide reference was recorded as
+            // <workDir>/49/bc25521f0d35abf9510e09738cbcad/P001_ref_corrected.ome.tif —
+            // a path that EXISTS, so an existence-only check waves it through. The
+            // work directory is scratch: -w is cleanable, it is not published, and a
+            // manifest that points into it is a restart that breaks the first time
+            // someone runs `nextflow clean`.
+            //
+            // Deliberately NOT "every path must start with outputDir". That would be
+            // wrong: with --start registration a run legitimately records the
+            // passthrough reference at the PRIOR run's outdir (verified — a run with
+            // --outdir /tmp/A correctly wrote /tmp/B/P001/preprocessed/... into its
+            // own registered.csv). Excluding workDir is the correct shape; requiring
+            // an outputDir prefix is not.
+            def csvDir = new File("${outputDir}/csv".toString())
+            assert csvDir.isDirectory() : "no csv/ directory was published"
+
+            // Globbed, not a hardcoded step list: a fourth checkpoint manifest is
+            // covered the day it is added instead of silently going unchecked.
+            def manifests = (csvDir.listFiles() ?: [])
+                .findAll { it.name.endsWith('.csv') }
+                .sort { it.name }
+            assert manifests.size() == 3 :
+                "expected 3 checkpoint manifests, found ${manifests.size()}: " +
+                manifests*.name
+
+            def work = new File("${workDir}".toString()).absolutePath
+            def problems = []
+            def checked  = 0
+            manifests.each { csv ->
                 csv.readLines().drop(1).findAll { it.trim() }.each { line ->
                     line.split(',').each { field ->
+                        // Absolute fields only: the rest are ids, booleans and
+                        // pipe-joined channel names.
                         if (field.startsWith('/')) {
                             checked++
-                            if (!new File(field).exists()) missing << "${step}.csv -> ${field}"
+                            if (new File(field).absolutePath.startsWith(work + File.separator))
+                                problems << "${csv.name}: inside the work directory (scratch, unpublished) -> ${field}"
+                            else if (!new File(field).exists())
+                                problems << "${csv.name}: does not exist -> ${field}"
                         }
                     }
                 }
             }
-            // Guard against the assertion passing because nothing was examined.
-            assert checked >= 7 : "only ${checked} paths examined — did the CSV columns change?"
-            assert missing.isEmpty() :
-                "checkpoint manifest names ${missing.size()} file(s) that do not exist:\n  " +
-                missing.join("\n  ")
+            // Exact, not a lower bound: a lower bound lets a path column disappear
+            // from a manifest without anyone noticing.
+            assert checked == 9 :
+                "expected 9 recorded paths, examined ${checked} — did the CSV columns change?"
+            // ONE assertion covering both properties, deliberately: Groovy aborts at
+            // the first failed assert, so splitting them would hide the work-directory
+            // findings behind the existence findings whenever a change breaks both.
+            assert problems.isEmpty() :
+                "checkpoint manifest has ${problems.size()} bad path(s):\n  " +
+                problems.join("\n  ")
         }
     }
 }

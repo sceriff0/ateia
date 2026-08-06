@@ -118,7 +118,14 @@ def test_no_caller_restates_a_checkpoint_csv_path():
 
 
 def test_no_caller_reimplements_the_work_hash_heuristic():
-    """The 32-hex-char test lives once, in Layout.producerSubdir/isWorkHash."""
+    """Recognising a Nextflow task directory happens once, in Layout.isTaskDir.
+
+    The docstring this replaces said "the 32-hex-char test" — which was the bug, not
+    the rule: a task directory is <work>/<2 hex>/<30 hex>, so a 32-wide test never
+    fires. A comment asserting 32 is how the defect survived its first review; the
+    guard below therefore matches BOTH widths, so a copy of either the broken or the
+    fixed spelling is caught.
+    """
     # Broadened after review: the first version matched only the exact spelling
     # this repo happened to use. It now catches any hex character class of a
     # work-hash width, in either order, and any 30/32 length comparison, across
