@@ -1,0 +1,95 @@
+/*
+ * Characterisation tests for lib/Layout.groovy — the pipeline's one statement of
+ * WHERE A PUBLISHED FILE LANDS.
+ *
+ * Layout is a plain Groovy class on Nextflow's `lib/` classpath, which nf-test's
+ * assertion context cannot see (`No such property: Layout`), and the repo has no
+ * JVM unit-test runner. So its path construction is asserted through its only
+ * caller that writes the result down: the three checkpoint CSVs. Those CSVs are a
+ * user-visible restart contract — `--start registration` reads registered.csv and
+ * opens exactly the paths it names — so asserting the EXACT strings is the right
+ * granularity anyway.
+ *
+ * What each assertion pins:
+ *
+ *   checkpointDir / checkpointCsvName  the CSVs are at <outdir>/csv/<step>.csv
+ *   publishedPath                      <outdir>/<pid>/<kind>/<basename>, basename only
+ *   publishedPathWithProducerSubdir    'registered_slides/' SURVIVES into the
+ *                                      registered.csv path, because REGISTER's
+ *                                      publishDir pattern carries it there. This is
+ *                                      the case the work-hash heuristic exists for:
+ *                                      drop the subdirectory and every restart from
+ *                                      registration opens a file that is not there.
+ *
+ * NOTE: every expected line ends in .toString(). List.contains() compares a GString
+ * to a String by identity of class, so a bare "...$outputDir..." literal silently
+ * never matches and the assertion passes for the wrong reason once negated.
+ *
+ * Tagged "stub" because CI's blocking gate is `nf-test test --tag stub`; an
+ * untagged file never runs there.
+ */
+
+nextflow_pipeline {
+
+    name "Layout — published paths recorded in the checkpoint CSVs"
+    script "main.nf"
+
+    tag "pipeline"
+    tag "layout"
+
+    test("checkpoint CSVs record exactly the paths Layout constructs") {
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                input  = "$projectDir/tests/testdata/test_input.csv"
+                outdir = "$outputDir"
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+
+                // --- Layout.checkpointDir + Layout.checkpointCsvName -------------
+                { assert path("$outputDir/csv/preprocessed.csv").exists() },
+                { assert path("$outputDir/csv/registered.csv").exists() },
+                { assert path("$outputDir/csv/postprocessed.csv").exists() },
+
+                // --- Layout.publishedPath: <outdir>/<pid>/<kind>/<basename> ------
+                { assert path("$outputDir/csv/preprocessed.csv").readLines().contains(
+                    "P001,$outputDir/P001/preprocessed/P001_ref_corrected.ome.tif,true,DAPI|PANCK|SMA".toString()) },
+                { assert path("$outputDir/csv/preprocessed.csv").readLines().contains(
+                    "P001,$outputDir/P001/preprocessed/P001_mov1_corrected.ome.tif,false,DAPI|CD3|CD8".toString()) },
+
+                // --- Layout.publishedPathWithProducerSubdir ----------------------
+                // 'registered_slides/' is REGISTER's own output subdirectory and
+                // publishDir's `pattern:` carries it into the published path. If
+                // this ever collapses to <pid>/registered/<name>, every
+                // `--start registration` run breaks on a missing file.
+                { assert path("$outputDir/csv/registered.csv").readLines().contains(
+                    "P001,$outputDir/P001/registered/registered_slides/P001_DAPI_PANCK_SMA_registered.ome.tiff,true,DAPI|PANCK|SMA".toString()) },
+                { assert path("$outputDir/csv/registered.csv").readLines().contains(
+                    "P001,$outputDir/P001/registered/registered_slides/P001_DAPI_CD3_CD8_registered.ome.tiff,false,DAPI|CD3|CD8".toString()) },
+
+                // --- Layout.publishedPath across five different `kind`s ----------
+                { assert path("$outputDir/csv/postprocessed.csv").readLines().contains(
+                    "P001," +
+                    "$outputDir/P001/geojson/cells_data.csv," +
+                    "$outputDir/P001/geojson/cells.geojson," +
+                    "$outputDir/P001/quantification/merged_quant.csv," +
+                    "$outputDir/P001/segmentation/P001_cell_mask.tif," +
+                    "$outputDir/P001/pyramid/pyramid.ome.tiff".toString()) },
+
+                // --- column order is part of the contract ------------------------
+                { assert path("$outputDir/csv/preprocessed.csv").readLines()[0] ==
+                    "patient_id,preprocessed_image,is_reference,channels" },
+                { assert path("$outputDir/csv/registered.csv").readLines()[0] ==
+                    "patient_id,registered_image,is_reference,channels" },
+                { assert path("$outputDir/csv/postprocessed.csv").readLines()[0] ==
+                    "patient_id,cell_csv,cell_geojson,merged_csv,cell_mask,pyramid" }
+            )
+        }
+    }
+}

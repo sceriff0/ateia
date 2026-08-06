@@ -70,14 +70,14 @@ workflow PREPROCESSING {
     // Use collectFile() for non-blocking aggregation (enables patient-level parallelism)
     ch_checkpoint_csv = ch_preprocessed_with_meta
         .map { meta, image_file ->
-            def image_path = "${params.outdir}/${meta.patient_id}/preprocessed/${image_file.name}"
+            def image_path = Layout.publishedPath(params.outdir, meta.patient_id, Layout.PREPROCESSED, image_file)
             def channels = meta.channels.join('|')
             "${meta.patient_id},${image_path},${meta.is_reference},${channels}"
         }
         .collectFile(
-            name: 'preprocessed.csv',
+            name: Layout.checkpointCsvName(Layout.PREPROCESSED),
             newLine: true,
-            storeDir: "${params.outdir}/csv",
+            storeDir: Layout.checkpointDir(params.outdir),
             seed: 'patient_id,preprocessed_image,is_reference,channels'
         )
 

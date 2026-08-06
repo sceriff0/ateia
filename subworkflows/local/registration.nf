@@ -253,33 +253,22 @@ workflow REGISTRATION {
     // Use collectFile() for non-blocking aggregation (enables patient-level parallelism)
     ch_checkpoint_csv = ch_registered
         .map { meta, file ->
-            // Construct the path where the file will be published
-            // Must match the publishDir configuration in modules.config
-            //
-            // METHOD-AGNOSTIC APPROACH:
-            // Detect if file is in a subdirectory by checking parent directory name length.
-            // Nextflow work dirs are 32-char hex hashes (e.g., e6194a65f430c8860ff1f93c4a556c).
-            // Real subdirectories (e.g., "registered_slides") have different lengths.
-            //
-            // - VALIS: work/.../registered_slides/file.tiff → parent="registered_slides" (17 chars)
-            // - CPU/GPU: work/.../e6194a65f430c8860ff1f93c4a556c/file.tiff → parent=hash (32 chars)
-            // - References: work/.../de93746794b82349b3fde77bf41502/file.tif → parent=hash (32 chars)
-
-            def file_path = file instanceof List ? file[0] : file
-            def filename = file_path.name
-            def parent_name = file_path.parent?.name ?: ''
-
-            // If parent name is NOT a Nextflow work hash (32 hex chars), it's a real subdirectory
-            def is_work_hash = parent_name.length() == 32 && parent_name.matches(/^[0-9a-f]{32}$/)
-            def relative_path = is_work_hash ? filename : "${parent_name}/${filename}"
-
-            def published_path = "${params.outdir}/${meta.patient_id}/registered/${relative_path}"
+            // Where the file WILL be published. This must agree with REGISTER's /
+            // TILED_*'s publishDir in conf/modules.config, including the producer
+            // subdirectory those blocks' `pattern:` carries along
+            // ('registered_slides/' for VALIS, 'registered/' for tiled, none for a
+            // reference that passes through unregistered). That rule -- and the
+            // work-hash test that recovers the subdirectory -- now lives in
+            // Layout.publishedPathWithProducerSubdir, which documents why it is a
+            // heuristic and what it costs to replace.
+            def published_path = Layout.publishedPathWithProducerSubdir(
+                params.outdir, meta.patient_id, Layout.REGISTERED, file)
             "${meta.patient_id},${published_path},${meta.is_reference},${meta.channels.join('|')}"
         }
         .collectFile(
-            name: 'registered.csv',
+            name: Layout.checkpointCsvName(Layout.REGISTERED),
             newLine: true,
-            storeDir: "${params.outdir}/csv",
+            storeDir: Layout.checkpointDir(params.outdir),
             seed: 'patient_id,registered_image,is_reference,channels'
         )
 

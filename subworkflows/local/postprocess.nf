@@ -244,23 +244,23 @@ workflow POSTPROCESSING {
     // Base checkpoint data (always present)
     ch_base_checkpoint = ASSEMBLE_EXPORT.out.csv
         .map { meta, csv ->
-            def published_path = "${params.outdir}/${meta.patient_id}/geojson/${csv.name}"
+            def published_path = Layout.publishedPath(params.outdir, meta.patient_id, 'geojson', csv)
             [meta.patient_id, published_path]
         }
         .join(ASSEMBLE_EXPORT.out.geojson.map { meta, geojson ->
-            def published_path = "${params.outdir}/${meta.patient_id}/geojson/${geojson.name}"
+            def published_path = Layout.publishedPath(params.outdir, meta.patient_id, 'geojson', geojson)
             [meta.patient_id, published_path]
         })
         .join(MERGE_QUANT_CSVS.out.merged_csv.map { meta, csv ->
-            def published_path = "${params.outdir}/${meta.patient_id}/quantification/${csv.name}"
+            def published_path = Layout.publishedPath(params.outdir, meta.patient_id, 'quantification', csv)
             [meta.patient_id, published_path]
         })
         .join(ch_cell_mask.map { meta, mask ->
-            def published_path = "${params.outdir}/${meta.patient_id}/segmentation/${mask.name}"
+            def published_path = Layout.publishedPath(params.outdir, meta.patient_id, 'segmentation', mask)
             [meta.patient_id, published_path]
         })
         .join(ASSEMBLE_EXPORT.out.pyramid.map { meta, pyramid ->
-            def published_path = "${params.outdir}/${meta.patient_id}/pyramid/${pyramid.name}"
+            def published_path = Layout.publishedPath(params.outdir, meta.patient_id, 'pyramid', pyramid)
             [meta.patient_id, published_path]
         })
 
@@ -294,9 +294,9 @@ workflow POSTPROCESSING {
             "${patient_id},${cell_csv},${cell_geojson},${merged_csv},${cell_mask},${pyramid}"
         }
         .collectFile(
-            name: 'postprocessed.csv',
+            name: Layout.checkpointCsvName(Layout.POSTPROCESSED),
             newLine: true,
-            storeDir: "${params.outdir}/csv",
+            storeDir: Layout.checkpointDir(params.outdir),
             seed: 'patient_id,cell_csv,cell_geojson,merged_csv,cell_mask,pyramid'
         )
 
