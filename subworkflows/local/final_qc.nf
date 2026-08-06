@@ -18,13 +18,13 @@
     positional channels. A caller mixes in what it has; a kind nobody contributes
     simply yields an empty branch here, which is what removes the
     `Channel.empty().collect().ifEmpty([])` placeholders both callers used to
-    repeat. (add_cycle contributes no preprocess_qc / valis_summary /
+    repeat. (add_cycle contributes no preprocess_qc / registration_tre /
     postprocess_qc: it calls PREPROCESSING internally without re-exposing its QC
     pngs, and it has no POSTPROCESSING step at all — masks are reused, not
     re-segmented.)
 
     Recognised kinds:
-      preprocess_qc | registration_qc | valis_summary | postprocess_qc | seg_qc
+      preprocess_qc | registration_qc | registration_tre | postprocess_qc | seg_qc
         -> staged into the matching GENERATE_QC_REPORT input directory
       versions   -> deduplicated and collated into collated_versions.yml
       size_log   -> merged into raw_input_sizes.csv for AGGREGATE_SIZE_LOGS
@@ -70,7 +70,11 @@ include { GENERATE_QC_REPORT  } from '../../modules/local/generate_qc_report'
 KNOWN_ARTIFACT_KINDS = [
     'preprocess_qc',
     'registration_qc',
-    'valis_summary',
+    // The registration method's OWN target-registration-error estimate. NOT named after a
+    // method: both backends produce one (VALIS a feature-distance CSV, STARE a *_tre.json)
+    // and a backend that produced none would contribute nothing, which the
+    // .collect().ifEmpty([]) below already tolerates.
+    'registration_tre',
     'postprocess_qc',
     'seg_qc',
     'versions',
@@ -191,7 +195,7 @@ workflow FINAL_QC {
         GENERATE_QC_REPORT(
             artifactsOf(ch_artifacts, 'preprocess_qc').collect().ifEmpty([]),
             artifactsOf(ch_artifacts, 'registration_qc').collect().ifEmpty([]),
-            artifactsOf(ch_artifacts, 'valis_summary').collect().ifEmpty([]),
+            artifactsOf(ch_artifacts, 'registration_tre').collect().ifEmpty([]),
             artifactsOf(ch_artifacts, 'postprocess_qc').collect().ifEmpty([]),
             artifactsOf(ch_artifacts, 'versions').unique().collectFile(name: 'collated_versions.yml'),
             ch_run_summary,

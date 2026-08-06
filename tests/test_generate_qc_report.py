@@ -197,7 +197,7 @@ def test_end_to_end_cli_smoke(tmp_path):
             str(tmp_path / "preprocess_qc"),
             "--registration-qc",
             str(tmp_path / "registration_qc"),
-            "--valis-summary",
+            "--registration-tre",
             str(tmp_path / "valis_summary"),
             "--postprocess-qc",
             str(tmp_path / "postprocess_qc"),

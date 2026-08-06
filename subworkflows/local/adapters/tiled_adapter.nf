@@ -22,7 +22,15 @@
         transform           [patient_id, transform]     ONE transform object per patient
         transform_by_slide  [meta, transform]           one transform per MOVING slide
         stage_checkpoint    [patient_id, dir]           intermediate-stage fields
-        size_logs / versions / summary
+        intrinsic_tre       file                        the method's OWN target-registration
+                                                        -error estimate, whatever its format
+        size_logs / versions
+
+    `intrinsic_tre` is deliberately NOT named after any one method. Both shipped backends
+    estimate a TRE from their own registration -- VALIS a feature-distance CSV, STARE a
+    *_tre.json -- and the seam used to call the slot `summary` and then re-emit it as
+    `valis_summary`, which pinned one method's name into the artifact vocabulary all the way
+    out to the QC report. Formats are NOT normalised here; that is the reader's job.
 
     A method that produces no artifact for one of these emits `Channel.empty()` for it --
     a NULL OBJECT, never a missing emit and never an error. That is what lets
@@ -153,14 +161,14 @@ workflow TILED_ADAPTER {
             .mix(TILED_REG_TILE.out.versions.first())
             .mix(TILED_SOLVE.out.versions.first())
             .mix(TILED_STITCH.out.versions.first())
-        ch_summary           = TILED_SOLVE.out.tre.map { _meta, f -> f }
+        ch_intrinsic_tre     = TILED_SOLVE.out.tre.map { _meta, f -> f }
     } else {
         TILED_REGISTER(ch_moving)
         ch_registered_moving = TILED_REGISTER.out.registered
         ch_manifest_by_meta  = TILED_REGISTER.out.manifest
         ch_size_logs         = TILED_REGISTER.out.size_log
         ch_versions          = TILED_REGISTER.out.versions.first()
-        ch_summary           = TILED_REGISTER.out.tre.map { _meta, f -> f }
+        ch_intrinsic_tre     = TILED_REGISTER.out.tre.map { _meta, f -> f }
     }
 
     ch_registered = ch_registered_moving.mix(ch_reference)
@@ -178,5 +186,8 @@ workflow TILED_ADAPTER {
     stage_checkpoint = Channel.empty()
     size_logs        = ch_size_logs
     versions         = ch_versions
-    summary          = ch_summary
+    // STARE's intrinsic TRE: *_tre.json from bin/utils/tre_report.py. A DIFFERENT format
+    // from VALIS's CSV, on purpose — the channel vocabulary is unified, the file formats
+    // are not, and teaching the report reader both shapes is a separate change.
+    intrinsic_tre    = ch_intrinsic_tre
 }

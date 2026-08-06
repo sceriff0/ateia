@@ -47,7 +47,8 @@
         transform          [patient_id, registrar.pickle | manifest] — seg-QC warper
         transform_by_slide [meta, manifest] — one per moving slide (empty under VALIS)
         stage_checkpoint   [patient_id, reg_stage_checkpoint/] (VALIS, reg_qc>=2 only)
-        size_logs / versions / summary — the adapter's, unaggregated
+        intrinsic_tre      the method's own TRE estimate (VALIS CSV / STARE JSON)
+        size_logs / versions — the adapter's, unaggregated
 
     Those last six are passed through from the adapter UNRENAMED. Both adapters emit the
     same vocabulary and fill any slot their method lacks with `Channel.empty()` (the
@@ -104,8 +105,8 @@ workflow REGISTER_PATIENT {
     // RUN REGISTRATION VIA METHOD-SPECIFIC ADAPTER
     // ========================================================================
     // The ENTIRE method dispatch. Both adapters emit the identical vocabulary
-    // (registered / transform / transform_by_slide / stage_checkpoint / size_logs /
-    // versions / summary), with Channel.empty() in any slot a method cannot fill — see
+    // (registered / transform / transform_by_slide / stage_checkpoint / intrinsic_tre /
+    // size_logs / versions), with Channel.empty() in any slot a method cannot fill — see
     // either adapter's header for the contract. So this binds ONE name, `ch_adapter`,
     // instead of a per-emit translation table plus the pre-declared empty channels that
     // used to exist only so the union of the two vocabularies could be assembled here.
@@ -138,7 +139,7 @@ workflow REGISTER_PATIENT {
     transform          = ch_adapter.transform
     transform_by_slide = ch_adapter.transform_by_slide
     stage_checkpoint   = ch_adapter.stage_checkpoint
+    intrinsic_tre      = ch_adapter.intrinsic_tre
     size_logs          = ch_adapter.size_logs
     versions           = ch_adapter.versions
-    summary            = ch_adapter.summary
 }

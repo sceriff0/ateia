@@ -40,9 +40,12 @@ def parse_args():
         help="Directory of registration QC PNGs",
     )
     p.add_argument(
-        "--valis-summary",
-        default="valis_summary/",
-        help="Directory of Valis summary CSVs",
+        "--registration-tre",
+        default="registration_tre/",
+        help=(
+            "Directory of the registration method's own target-registration-error "
+            "artifacts (VALIS *_summary.csv / STARE *_tre.json)"
+        ),
     )
     p.add_argument(
         "--postprocess-qc",
@@ -808,7 +811,7 @@ def copy_data(args):
 
     copy_glob(args.preprocess_qc, "*.png", "preprocess_qc")
     copy_glob(args.registration_qc, "*.png", "registration_qc")
-    copy_glob(args.valis_summary, "*.csv", "valis_summary")
+    copy_glob(args.registration_tre, "*.csv", "registration_tre")
     copy_glob(args.postprocess_qc, "*.png", "postprocess_qc")
     copy_glob(args.seg_qc, "*.json", "seg_qc")
     if args.run_summary and Path(args.run_summary).exists():
@@ -843,11 +846,11 @@ def main():
     html_parts.append(
         registration_qc_section(
             args.registration_qc,
-            args.valis_summary,
+            args.registration_tre,
             args.seg_qc,
         )
     )
-    html_parts.append(reconciliation_section(args.valis_summary, args.seg_qc))
+    html_parts.append(reconciliation_section(args.registration_tre, args.seg_qc))
     html_parts.append(seg_overlay_section(args.postprocess_qc))
     html_parts.append(postprocess_qc_section(args.postprocess_qc))
     html_parts.append(versions_section(args.versions))

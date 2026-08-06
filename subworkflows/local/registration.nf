@@ -137,7 +137,10 @@ workflow REGISTRATION {
     ch_stage_checkpoint   = REGISTER_PATIENT.out.stage_checkpoint
     ch_adapter_logs       = REGISTER_PATIENT.out.size_logs
     ch_adapter_versions   = REGISTER_PATIENT.out.versions
-    ch_adapter_summary    = REGISTER_PATIENT.out.summary
+    // The method's OWN target-registration-error estimate. Both backends produce one
+    // (VALIS a feature-distance CSV, STARE a *_tre.json); a backend that produced none
+    // would emit Channel.empty() here and every consumer must tolerate that.
+    ch_registration_tre   = REGISTER_PATIENT.out.intrinsic_tre
 
     // reg_qc: 0 = none, 1 = DAPI overlay, 2 = + segmentation overlap (legacy
     // skip_registration_qc=true forces 0). ParamUtils.regQcLevel is the single definition.
@@ -247,7 +250,7 @@ workflow REGISTRATION {
     qc               = ch_qc
     seg_qc           = ch_seg_qc
     seg_residuals    = ch_seg_residuals
-    valis_summary    = ch_adapter_summary
+    registration_tre = ch_registration_tre
     size_logs        = ch_size_logs
     versions         = ch_versions
 }

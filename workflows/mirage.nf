@@ -84,7 +84,7 @@ workflow MIRAGE {
         // --prior_outdir's checkpoint CSVs.
         ADD_CYCLE(INPUT_CHECK.out.samples)
 
-        // ADD_CYCLE has no preprocess_qc / valis_summary / postprocess_qc of its own
+        // ADD_CYCLE has no preprocess_qc / registration_tre / postprocess_qc of its own
         // (it calls PREPROCESSING internally without re-exposing its QC pngs, and has
         // no POSTPROCESSING step at all — masks are reused, not re-segmented). Those
         // kinds are simply not contributed; FINAL_QC defaults them to empty.
@@ -214,11 +214,11 @@ workflow MIRAGE {
     }
     if (run_registration) {
         ch_qc_artifacts = ch_qc_artifacts
-            .mix(REGISTRATION.out.qc.map            { _meta, files -> ['registration_qc', files] })
-            .mix(REGISTRATION.out.seg_qc.map        { _meta, files -> ['seg_qc', files] })
-            .mix(REGISTRATION.out.valis_summary.map { f -> ['valis_summary', f] })
-            .mix(REGISTRATION.out.versions.map      { f -> ['versions', f] })
-            .mix(REGISTRATION.out.size_logs.map     { f -> ['size_log', f] })
+            .mix(REGISTRATION.out.qc.map               { _meta, files -> ['registration_qc', files] })
+            .mix(REGISTRATION.out.seg_qc.map           { _meta, files -> ['seg_qc', files] })
+            .mix(REGISTRATION.out.registration_tre.map { f -> ['registration_tre', f] })
+            .mix(REGISTRATION.out.versions.map         { f -> ['versions', f] })
+            .mix(REGISTRATION.out.size_logs.map        { f -> ['size_log', f] })
     }
     if (run_postprocessing) {
         ch_qc_artifacts = ch_qc_artifacts

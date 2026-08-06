@@ -14,6 +14,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (single-channel images excepted).
 
 ### Changed
+- **The registration method's intrinsic TRE is no longer named after VALIS.** Both backends
+  estimate a target registration error from their own registration — VALIS a feature-distance
+  `*_summary.csv`, STARE a `*_tre.json` — but the QC pipeline called the slot `valis_summary`
+  end to end. It is now `registration_tre`: the adapters emit `intrinsic_tre`, `REGISTRATION`
+  emits `registration_tre`, and that is the artifact kind `FINAL_QC` recognises.
+  **Published-output change:** the folder inside the `qc/mirage_qc_data_*/` report bundle that
+  holds these raw artifacts is renamed `valis_summary/` -> `registration_tre/`. Nothing else
+  about the published tree changes — no path, filename or checkpoint-CSV column moves.
+  `GENERATE_QC_REPORT`'s `--valis-summary` flag is likewise now `--registration-tre` (an
+  internal process-to-script interface; the parameter surface is unchanged).
 - **`nuclear_markers` is now honoured by every consumer**, not only `CONVERT_IMAGE`:
   `SPLIT_CHANNELS`/`split_multichannel.py`, `SEGMENT`, `SEG_QC_GEOJSON`, and `CsvUtils`'
   samplesheet validation and channel counting all resolve the nuclear/fiducial channel from the

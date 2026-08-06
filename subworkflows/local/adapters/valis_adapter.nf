@@ -20,7 +20,15 @@
         transform           [patient_id, transform]     ONE transform object per patient
         transform_by_slide  [meta, transform]           one transform per MOVING slide
         stage_checkpoint    [patient_id, dir]           intermediate-stage fields
-        size_logs / versions / summary
+        intrinsic_tre       file                        the method's OWN target-registration
+                                                        -error estimate, whatever its format
+        size_logs / versions
+
+    `intrinsic_tre` is deliberately NOT named after any one method. Both shipped backends
+    estimate a TRE from their own registration -- VALIS a feature-distance CSV, STARE a
+    *_tre.json -- and the seam used to call the slot `summary` and then re-emit it as
+    `valis_summary`, which pinned one method's name into the artifact vocabulary all the way
+    out to the QC report. Formats are NOT normalised here; that is the reader's job.
 
     A method that produces no artifact for one of these emits `Channel.empty()` for it --
     a NULL OBJECT, never a missing emit and never an error. That is what lets
@@ -171,5 +179,7 @@ workflow VALIS_ADAPTER {
     stage_checkpoint = REGISTER.out.stage_checkpoint
     size_logs  = ch_size_logs
     versions   = REGISTER.out.versions.first()
-    summary    = REGISTER.out.summary
+    // VALIS's intrinsic TRE: `error_df` written as preprocessed/data/*_summary.csv, the
+    // feature distances it measures on its OWN SuperPoint/SuperGlue keypoints.
+    intrinsic_tre = REGISTER.out.summary
 }
