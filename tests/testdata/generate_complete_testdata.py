@@ -539,6 +539,35 @@ with open(OUT_DIR / "whitespace_patient_id.csv", "w") as f:
     f.write(f"P001 ,{TESTDATA_ABS}/P001_mov1.ome.tiff,false,DAPI|CD3|CD8\n")
 print("  Created whitespace_patient_id.csv")
 
+# 7g-bis. Nuclear-marker fixtures. `params.nuclear_markers` is the declared source of
+# truth for "which channel is nuclear", and its shipped default is ['DAPI', 'CELLTOX'] --
+# but every consumer used to hardcode the literal 'DAPI', so the CELLTOX half of the
+# default was unreachable. These two sheets exercise it.
+#
+# celltox_nonreference.csv is the dangerous shape: the ONLY CELLTOX-bearing slide is a
+# NON-reference one, on the SHIPPED DEFAULT marker list. SPLIT_CHANNELS drops the nuclear
+# channel from non-reference slides, so the patient's channel count is
+# {DAPI,PANCK,SMA} + {CD3,CD8} = 5, and bin/split_multichannel.py must emit exactly those
+# five. While that script tested `"DAPI" in name.upper()` it kept CELLTOX on the
+# non-reference slide and emitted SIX, over-filling a groupTuple sized for five --
+# on the linear path postprocess.nf's join() then silently DROPS the surplus markers,
+# and on the add_cycle path its combine(by:0) runs MERGE_QUANT_CSVS twice against one
+# published merged_quant.csv.
+with open(OUT_DIR / "celltox_nonreference.csv", "w") as f:
+    f.write("patient_id,path_to_file,is_reference,channels\n")
+    f.write(f"P001,{TESTDATA_ABS}/P001_ref.ome.tiff,true,DAPI|PANCK|SMA\n")
+    f.write(f"P001,{TESTDATA_ABS}/P001_mov1.ome.tiff,false,CELLTOX|CD3|CD8\n")
+print("  Created celltox_nonreference.csv")
+
+# celltox_only.csv has no DAPI anywhere: run it with --nuclear_markers CELLTOX. Before
+# the nuclear-marker rule was shared, CsvUtils rejected this sheet at launch ("DAPI
+# channel not found") and SEGMENT rejected it again at runtime.
+with open(OUT_DIR / "celltox_only.csv", "w") as f:
+    f.write("patient_id,path_to_file,is_reference,channels\n")
+    f.write(f"P001,{TESTDATA_ABS}/P001_ref.ome.tiff,true,CELLTOX|PANCK|SMA\n")
+    f.write(f"P001,{TESTDATA_ABS}/P001_mov1.ome.tiff,false,CELLTOX|CD3|CD8\n")
+print("  Created celltox_only.csv")
+
 # 7g. Registration QC fixtures matching WARP_SEG_QC.out.metrics / .out.per_cell,
 # so tests/subworkflows/local/postprocessing.nf.test can pass non-empty
 # ch_reg_qc / ch_reg_residuals into POSTPROCESSING and exercise the

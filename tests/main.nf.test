@@ -453,6 +453,116 @@ nextflow_pipeline {
         }
     }
 
+    test("a non-reference CELLTOX slide is counted as one dropped nuclear channel") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                // NOTE: nuclear_markers is deliberately NOT overridden. This runs on the
+                // SHIPPED DEFAULT ['DAPI','CELLTOX'], whose CELLTOX half was unreachable
+                // while every consumer hardcoded the literal 'DAPI'.
+                input  = "$projectDir/tests/testdata/celltox_nonreference.csv"
+                outdir = "$outputDir"
+                start  = "preprocessing"
+                max_cpus = 2
+                max_memory = '6.GB'
+                seg_gpu = false
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                // Reference keeps {DAPI,PANCK,SMA}; the non-reference slide's nuclear
+                // channel (CELLTOX) is dropped, leaving {CD3,CD8}. Five markers, so five
+                // QUANTIFY tasks and ONE per-patient consumer of the group.
+                //
+                // This is the count HALF of the invariant. The other half --
+                // bin/split_multichannel.py emitting exactly these five in a real run --
+                // is pinned by tests/unit/test_nuclear_markers.py against the same
+                // channel table, because the stub block resolves the drop in Groovy
+                // (MarkerUtils) and so cannot see a Python-side disagreement. Keep the
+                // two expectations in step.
+                { assert workflow.trace.tasks().findAll {
+                    it.name.startsWith('MIRAGE:POSTPROCESSING:QUANTIFY_MARKERS:QUANTIFY') }.size() == 5 },
+                // Two here would mean an under-count: groupTuple emits at size and then
+                // emits the surplus as a SECOND group, and both writes land on
+                // <outdir>/P001/quantification/merged_quant.csv.
+                { assert workflow.trace.tasks().findAll {
+                    it.name.startsWith('MIRAGE:POSTPROCESSING:MERGE_QUANT_CSVS') }.size() == 1 },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.startsWith('MIRAGE:POSTPROCESSING:ASSEMBLE_EXPORT:MERGE_AND_PYRAMID') }.size() == 1 }
+            )
+        }
+    }
+
+    test("a CELLTOX-only samplesheet runs end to end under --nuclear_markers CELLTOX") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                // No DAPI channel anywhere. CsvUtils used to reject this sheet before the
+                // run started ("DAPI channel not found") and SEGMENT rejected it again at
+                // runtime, so the marker list was configurable in name only.
+                input           = "$projectDir/tests/testdata/celltox_only.csv"
+                nuclear_markers = ['CELLTOX']
+                outdir          = "$outputDir"
+                start           = "preprocessing"
+                max_cpus = 2
+                max_memory = '6.GB'
+                seg_gpu = false
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                // {CELLTOX,PANCK,SMA} from the reference + {CD3,CD8} from the moving
+                // slide = 5, exactly as for the DAPI-configured sheet.
+                { assert workflow.trace.tasks().findAll {
+                    it.name.startsWith('MIRAGE:POSTPROCESSING:QUANTIFY_MARKERS:QUANTIFY') }.size() == 5 },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.startsWith('MIRAGE:POSTPROCESSING:MERGE_QUANT_CSVS') }.size() == 1 }
+            )
+        }
+    }
+
+    test("a scalar --nuclear_markers is not iterated character by character") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                // Nextflow hands `--nuclear_markers CELLTOX` through as a bare String.
+                // Iterating it as a List yields the CHARACTERS C,E,L,L,T,O,X, and then
+                // 'PANCK' matches on 'C' and is classified nuclear -- dropping a real
+                // marker from every non-reference slide. MarkerUtils.markerList coerces
+                // the scalar instead, so this must count the same 5 markers as the List
+                // spelling above.
+                input           = "$projectDir/tests/testdata/celltox_only.csv"
+                nuclear_markers = 'CELLTOX'
+                outdir          = "$outputDir"
+                start           = "preprocessing"
+                max_cpus = 2
+                max_memory = '6.GB'
+                seg_gpu = false
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.startsWith('MIRAGE:POSTPROCESSING:QUANTIFY_MARKERS:QUANTIFY') }.size() == 5 }
+            )
+        }
+    }
+
     test("Should reject missing checkpoint columns") {
         tag "stub"
 

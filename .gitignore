@@ -127,6 +127,8 @@ tests/testdata/sample_merged_quant.csv
 tests/testdata/empty_samplesheet.csv
 tests/testdata/single_sample.csv
 tests/testdata/whitespace_patient_id.csv
+tests/testdata/celltox_nonreference.csv
+tests/testdata/celltox_only.csv
 tests/testdata/sample_DAPI_intensity.csv
 tests/testdata/sample_PANCK_intensity.csv
 tests/testdata/sample_SMA_intensity.csv

@@ -8,6 +8,11 @@ nextflow_process {
     tag "modules_local"
     tag "segment"
 
+    // The three backend tests below assert the SAME four-channel output contract
+    // (nuclei_mask / cell_mask / versions / size_log). That identity is what lets
+    // postprocess.nf consume SEGMENT without knowing which segmenter ran, and it is the
+    // property the shared backend table (lib/SegBackends.groovy) has to preserve --
+    // everything the backends do differently happens behind it.
     test("Should segment cells from merged image - stub") {
 
         tag "stub"
@@ -32,6 +37,7 @@ nextflow_process {
             assert process.out.nuclei_mask
             assert process.out.cell_mask
             assert process.out.versions
+            assert process.out.size_log
 
             with(process.out.nuclei_mask) {
                 assert size() == 1
@@ -44,6 +50,13 @@ nextflow_process {
                 assert get(0).get(0).patient_id == 'P001'
                 assert get(0).get(1).toString().endsWith('_cell_mask.tif')
             }
+
+            // The `test` profile pins seg_method='stardist' (conf/test.config), so this
+            // case covers the StarDist branch of the dispatch without saying so in its
+            // own params block. Named explicitly so a profile change is a test diff.
+            assert process.out.versions.get(0).toString().endsWith('versions.yml')
+            assert path(process.out.versions.get(0)).text.contains('seg_method: stardist')
+            assert process.out.size_log.get(0).toString().endsWith('.SEGMENT.size.csv')
         }
     }
 
@@ -144,6 +157,7 @@ nextflow_process {
             assert process.out.nuclei_mask
             assert process.out.cell_mask
             assert process.out.versions
+            assert process.out.size_log
 
             with(process.out.nuclei_mask) {
                 assert size() == 1
@@ -156,6 +170,10 @@ nextflow_process {
                 assert get(0).get(0).patient_id == 'P001'
                 assert get(0).get(1).toString().endsWith('_cell_mask.tif')
             }
+
+            // Same four outputs, same names, different backend.
+            assert path(process.out.versions.get(0)).text.contains('seg_method: instantseg')
+            assert process.out.size_log.get(0).toString().endsWith('.SEGMENT.size.csv')
         }
     }
 
@@ -214,6 +232,7 @@ nextflow_process {
             assert process.out.nuclei_mask
             assert process.out.cell_mask
             assert process.out.versions
+            assert process.out.size_log
 
             with(process.out.nuclei_mask) {
                 assert size() == 1
@@ -226,6 +245,10 @@ nextflow_process {
                 assert get(0).get(0).patient_id == 'P001'
                 assert get(0).get(1).toString().endsWith('_cell_mask.tif')
             }
+
+            // Same four outputs, same names, third backend.
+            assert path(process.out.versions.get(0)).text.contains('seg_method: cellsam')
+            assert process.out.size_log.get(0).toString().endsWith('.SEGMENT.size.csv')
         }
     }
 
@@ -254,6 +277,80 @@ nextflow_process {
         then {
             // CellSAM path does not enforce DAPI-channel-0; should succeed.
             assert process.success
+        }
+    }
+
+    test("Should reject an unknown seg_method rather than silently run StarDist - stub") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                // A plausible typo. The old nested `container` ternary treated anything
+                // that was not 'cellsam' or 'instantseg' as StarDist, so this ran a
+                // different segmenter than asked for -- either dying later on StarDist's
+                // channel-0 check with an error naming the wrong problem, or succeeding
+                // with the wrong algorithm. seg_method has no schema enum, so
+                // SegBackends.of() is the only place the typo can be caught.
+                seg_method = 'instaseg'
+            }
+            process {
+                """
+                input[0] = [
+                    [
+                        patient_id: 'P001',
+                        channels: ['DAPI', 'PANCK', 'SMA']
+                    ],
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            assert process.failed
+        }
+    }
+
+    test("Should enforce the CONFIGURED nuclear marker, not the literal DAPI - real") {
+
+        // Real (not stub): like its sibling above, the channel-0 hard check lives in the
+        // script block, which a stub does not execute. It exits before Python runs, so
+        // this costs a container start and nothing else.
+        tag "real"
+        tag "slow"
+
+        when {
+            params {
+                // The inversion that proves the literal 'DAPI' is gone. Channel 0 IS
+                // DAPI, which the old hardcoded check accepted unconditionally -- but
+                // DAPI is not one of the CONFIGURED markers here, so StarDist would be
+                // pointed at the wrong channel and must refuse.
+                //
+                // This is the site that turned Task 3's relaxed launch validation into a
+                // later, less legible failure in the other direction too: a
+                // CELLTOX-configured sheet passed validation, CONVERT_IMAGE correctly
+                // moved CELLTOX to channel 0, and then SEGMENT rejected it for not
+                // being DAPI.
+                nuclear_markers = ['CELLTOX']
+            }
+            process {
+                """
+                input[0] = [
+                    [
+                        patient_id: 'P001',
+                        channels: ['DAPI', 'PANCK', 'SMA']
+                    ],
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            assert process.failed
+            assert process.exitStatus == 1
         }
     }
 

@@ -3,15 +3,19 @@
 
 The nuclear channel is resolved by marker NAME from metadata (never the filename),
 using an ordered preference list. These tests pin the ordering, case-insensitivity,
-the no-match contract of the shared helper, and CONVERT_IMAGE's use of it (reorder
-to channel 0, fail-fast when absent, single-channel exception).
+the no-match contract of the shared helper, CONVERT_IMAGE's use of it (reorder
+to channel 0, fail-fast when absent, single-channel exception), and -- in
+``TestSplitCountMatchesPrecomputedCount`` -- the cross-language agreement the
+postprocessing group sizes depend on.
 """
 
 from pathlib import Path
 
 import numpy as np
 import pytest
-from utils.metadata import DEFAULT_NUCLEAR_MARKERS, pick_nuclear_index
+import tifffile
+from split_multichannel import split_multichannel_tiff
+from utils.metadata import DEFAULT_NUCLEAR_MARKERS, is_nuclear, pick_nuclear_index
 
 
 class TestPickNuclearIndex:
@@ -37,6 +41,143 @@ class TestPickNuclearIndex:
     def test_empty_or_none_channel_list_returns_none(self):
         assert pick_nuclear_index([]) is None
         assert pick_nuclear_index(None) is None
+
+
+class TestIsNuclear:
+    """The per-channel predicate, shared with lib/MarkerUtils.groovy's isNuclear.
+
+    Same rule, two languages: case-insensitive SUBSTRING. Anything asserted here has
+    a counterpart in MarkerUtils, and the two must be changed together.
+    """
+
+    def test_exact_marker_matches(self):
+        assert is_nuclear("DAPI", ["DAPI"])
+
+    def test_substring_match_so_convert_image_stays_in_agreement(self):
+        # CONVERT_IMAGE already moved 'DAPI_nuclear' to channel 0 via
+        # pick_nuclear_index's substring rule; an exact match here would then keep it
+        # on non-reference slides and over-fill the patient's group.
+        assert is_nuclear("DAPI_nuclear", ["DAPI"])
+
+    def test_case_insensitive(self):
+        assert is_nuclear("celltox-fiducial", ["CELLTOX"])
+
+    def test_non_marker_channel_is_not_nuclear(self):
+        assert not is_nuclear("PANCK", ["DAPI", "CELLTOX"])
+
+    def test_celltox_is_not_nuclear_when_only_dapi_is_configured(self):
+        assert not is_nuclear("CELLTOX", ["DAPI"])
+
+    def test_blank_channel_name_is_not_nuclear(self):
+        assert not is_nuclear("", ["DAPI"])
+        assert not is_nuclear(None, ["DAPI"])
+
+    def test_falls_back_to_the_one_permitted_mirror(self):
+        # bin/utils/metadata.py holds the ONLY Python mirror of nextflow.config's
+        # default; MarkerUtils deliberately has none and throws instead.
+        assert is_nuclear("CELLTOX")
+        assert is_nuclear("DAPI")
+
+
+def _write_multichannel_tiff(path, n_channels):
+    """A tiny (C, Y, X) uint16 stack -- content is irrelevant, channel count is not."""
+    data = np.zeros((n_channels, 4, 4), dtype=np.uint16)
+    for c in range(n_channels):
+        data[c] = c + 1
+    tifffile.imwrite(str(path), data)
+    return path
+
+
+class TestSplitCountMatchesPrecomputedCount:
+    """The invariant the whole nuclear-marker rule rests on.
+
+    Nextflow sizes each patient's postprocessing ``groupTuple`` AHEAD of the run, from
+    ``CsvUtils.countChannelsPerPatient`` -> ``MarkerUtils.splitOutputChannels``. The
+    files that actually arrive come from ``bin/split_multichannel.py``. If the two
+    disagree the failure is silent, not loud:
+
+      * Python emits MORE than Groovy counted -> the group over-fills, ``remainder:
+        true`` emits the surplus as a SECOND group for the same patient, and
+        ``MERGE_QUANT_CSVS`` runs twice against one
+        ``<outdir>/<pid>/quantification/merged_quant.csv``. On the linear path
+        ``postprocess.nf``'s ``join(ch_morphology, by: 0)`` instead discards the
+        surplus, so ``merged_quant.csv`` quietly loses markers.
+      * Python emits FEWER -> the group never fills.
+
+    Each case below states the channel table and the count Groovy computes for it. The
+    Groovy half of the same expectation is asserted in ``tests/main.nf.test``
+    ("a non-reference CELLTOX slide is counted as one dropped nuclear channel" and
+    "a CELLTOX-only samplesheet runs end to end"), which runs the stub pipeline over
+    ``tests/testdata/celltox_nonreference.csv`` / ``celltox_only.csv`` -- the SAME
+    channel tables -- and asserts 5 QUANTIFY tasks and ONE ``MERGE_QUANT_CSVS``.
+    pytest cannot execute Groovy, so the two halves are pinned against a shared
+    literal rather than against each other; change one and you must change the other.
+    """
+
+    @pytest.mark.parametrize(
+        "channels,is_reference,markers,expected",
+        [
+            # tests/testdata/celltox_nonreference.csv, on the SHIPPED DEFAULT marker
+            # list. Groovy counts {DAPI,PANCK,SMA} + {CD3,CD8} = 5 for the patient.
+            (["DAPI", "PANCK", "SMA"], True, ["DAPI", "CELLTOX"], 3),
+            (["CELLTOX", "CD3", "CD8"], False, ["DAPI", "CELLTOX"], 2),
+            # tests/testdata/celltox_only.csv, under --nuclear_markers CELLTOX.
+            # Groovy counts {CELLTOX,PANCK,SMA} + {CD3,CD8} = 5.
+            (["CELLTOX", "PANCK", "SMA"], True, ["CELLTOX"], 3),
+            (["CELLTOX", "CD3", "CD8"], False, ["CELLTOX"], 2),
+            # The regression the hardcoded `"DAPI" in name.upper()` caused: with only
+            # CELLTOX configured, DAPI is an ordinary marker and is NOT dropped.
+            (["DAPI", "CD3", "CD8"], False, ["CELLTOX"], 3),
+        ],
+    )
+    def test_emitted_channel_count(
+        self, tmp_path, channels, is_reference, markers, expected
+    ):
+        src = _write_multichannel_tiff(tmp_path / "in.tiff", len(channels))
+        out = tmp_path / f"out_{'ref' if is_reference else 'mov'}_{len(markers)}"
+        saved = split_multichannel_tiff(
+            str(src), str(out), is_reference, list(channels), markers
+        )
+        assert len(saved) == expected
+
+    def test_the_dropped_channel_is_the_nuclear_one(self, tmp_path):
+        src = _write_multichannel_tiff(tmp_path / "in.tiff", 3)
+        saved = split_multichannel_tiff(
+            str(src),
+            str(tmp_path / "out"),
+            False,
+            ["CELLTOX", "CD3", "CD8"],
+            ["DAPI", "CELLTOX"],
+        )
+        assert sorted(Path(p).name for p in saved) == ["CD3.tiff", "CD8.tiff"]
+
+    def test_substring_named_nuclear_channel_is_dropped_too(self, tmp_path):
+        # CONVERT_IMAGE resolves 'CELLTOX_fiducial' as nuclear (substring rule) and
+        # MarkerUtils counts it as dropped, so the split must drop it as well.
+        src = _write_multichannel_tiff(tmp_path / "in.tiff", 2)
+        saved = split_multichannel_tiff(
+            str(src),
+            str(tmp_path / "out"),
+            False,
+            ["CELLTOX_fiducial", "CD3"],
+            ["DAPI", "CELLTOX"],
+        )
+        assert [Path(p).name for p in saved] == ["CD3.tiff"]
+
+    def test_reference_keeps_every_channel(self, tmp_path):
+        src = _write_multichannel_tiff(tmp_path / "in.tiff", 3)
+        saved = split_multichannel_tiff(
+            str(src),
+            str(tmp_path / "out"),
+            True,
+            ["CELLTOX", "CD3", "CD8"],
+            ["CELLTOX"],
+        )
+        assert sorted(Path(p).name for p in saved) == [
+            "CD3.tiff",
+            "CD8.tiff",
+            "CELLTOX.tiff",
+        ]
 
 
 def _fake_read_image(channel_count):
