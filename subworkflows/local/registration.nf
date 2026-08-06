@@ -20,11 +20,12 @@ include { REGISTER_PATIENT                  } from './register_patient'
     Configuration:
         - params.skip_registration_qc: true | false (skip QC generation)
         - params.qc_scale_factor: float (QC downsampling factor, default 0.25)
-        - method: 'valis'
+        - params.registration_method: 'valis' | 'tiled' -- read HERE and passed to
+          REGISTER_PATIENT as an argument; the adapter dispatch itself is that
+          subworkflow's, shared with add_cycle.nf.
 
     Input:
         ch_preprocessed: Channel of [meta, file] tuples
-        method: Registration method name
 
     Output:
         registered: Channel of [meta, file] tuples (standard format)

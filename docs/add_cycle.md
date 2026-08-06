@@ -45,7 +45,12 @@ cycle registers accurately. Check `--reg_qc 1` (DAPI overlay) QC per patient;
 poor registration means the new markers for that patient are unreliable.
 
 ## Chaining cycles
-Cycle N's `--outdir` becomes cycle N+1's `--prior_outdir`.
+**Not yet supported.** `--prior_outdir` must contain BOTH `csv/registered.csv` and
+`csv/postprocessed.csv` (`ParamUtils.validateAddCycle`). An add_cycle run now writes
+the first, but it has no postprocessing step -- masks and the base quantification
+table are reused rather than re-derived -- so it writes no `csv/postprocessed.csv`
+and cycle N+1 fails its launch validation. Each add_cycle run must currently take
+its `--prior_outdir` from a full linear run.
 
 ## Mask pyramid (`embed_masks`)
 `params.embed_masks` (default `false`) controls whether `MERGE_AND_PYRAMID`
