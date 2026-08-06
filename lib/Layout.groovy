@@ -131,73 +131,99 @@ class Layout {
     }
 
     /**
-     * `<outdir>/<patient_id>/<kind>/<basename>` - where `file` will be published.
+     * `<outdir>/<patient_id>/<kind>/[<producer subdir>/]<basename>` - where `file`
+     * will be published.
      *
-     * Only the BASENAME is used. Callers whose producer emits into a subdirectory of
-     * its task directory (currently only registration) want
-     * publishedPathWithProducerSubdir instead.
-     */
-    static String publishedPath(def outdir, def patientId, String kind, def file) {
-        return "${patientDir(outdir, patientId, kind)}/${basename(file)}"
-    }
-
-    /**
-     * `<outdir>/<patient_id>/<kind>/[<producer subdir>/]<basename>`.
-     *
-     * Some producers write into a named subdirectory of their task work directory and
-     * publish with a `pattern:` that carries that subdirectory along, so the published
-     * path keeps it:
+     * A process that writes into a named subdirectory of its task directory and
+     * publishes with a `pattern:` that names that subdirectory gets the subdirectory
+     * carried into the published path. conf/modules.config does this in three places:
      *
      *   REGISTER (VALIS)  pattern 'registered_slides/*_registered.ome.tiff'
      *                     -> <outdir>/<pid>/registered/registered_slides/<name>
      *   TILED_REGISTER /  pattern 'registered/*_registered.ome.tiff'
      *   TILED_STITCH      -> <outdir>/<pid>/registered/registered/<name>
-     *   passthrough       reference slides emitted straight into the task dir
-     *                     -> <outdir>/<pid>/registered/<name>
+     *   EXPORT_GEOJSON    output path("export/cells.geojson"), published bare
+     *                     -> <outdir>/<pid>/geojson/export/cells.geojson
      *
-     * See producerSubdir for how the subdirectory is recovered, and why.
+     * So this is NOT an option a caller opts into - a caller that forgets records a
+     * path that does not exist, which is exactly how csv/postprocessed.csv came to
+     * name <pid>/geojson/cells.geojson for two releases. Preserving the producer
+     * subdirectory is the DEFAULT and the only behaviour; there is deliberately no
+     * basename-only variant to pick by mistake. tests/checkpoint_manifest.nf.test
+     * asserts the consequence: no checkpoint row ever names a missing file.
      */
-    static String publishedPathWithProducerSubdir(def outdir, def patientId, String kind, def file) {
+    static String publishedPath(def outdir, def patientId, String kind, def file) {
         def sub = producerSubdir(file)
         def rel = sub ? "${sub}/${basename(file)}" : basename(file)
         return "${patientDir(outdir, patientId, kind)}/${rel}"
     }
 
     /**
+     * Where a slide that was NOT registered will be published.
+     *
+     * A single-slide patient has nothing to register, so registration.nf branches its
+     * reference straight through (`ch_passthrough`); the tiled backend does the same
+     * for every patient's reference, which defines the frame and is never warped.
+     * NOTHING publishes those into `<pid>/registered/` - no process emitted them -
+     * so recording them there names a file that does not exist. Verified against a
+     * stub run: a single-slide patient's output tree contains no `P001/registered/`
+     * directory at all.
+     *
+     * The slide is still published, just by whoever produced it:
+     *
+     *   produced by PREPROCESS this run  -> <outdir>/<pid>/preprocessed/<name>
+     *   supplied by a `--start registration` samplesheet -> already an absolute
+     *                                       path to an existing file; record it as is
+     *
+     * `isTaskDir` tells the two apart exactly: a file at the top of a Nextflow task
+     * directory came from a task in this run, anything else came from outside it.
+     */
+    static String passthroughPath(def outdir, def patientId, def file) {
+        def path = resolve(file)
+        if (path == null)
+            throw new IllegalArgumentException("Layout.passthroughPath: no file given")
+        return isTaskDir(path.parent)
+            ? publishedPath(outdir, patientId, PREPROCESSED, path)
+            : path.toString()
+    }
+
+    /**
      * The subdirectory a producer emitted `file` into, or '' when it emitted straight
-     * into its task work directory.
+     * into its task directory.
      *
-     * THIS IS A HEURISTIC, AND IT IS DELIBERATELY HERE RATHER THAN IN A WORKFLOW FILE.
-     * A Nextflow task directory is a 32-hex-character hash, so a staged output whose
-     * PARENT is such a hash sits at the top of its task directory and publishes under
-     * its bare name; a parent that is not a hash ('registered_slides', 'registered') is
-     * a real subdirectory that publishDir's `pattern:` carries into the published path.
+     * This used to be a LENGTH heuristic ("a Nextflow work dir is a 32-hex-char hash")
+     * living in subworkflows/local/registration.nf, and it was WRONG: Nextflow splits
+     * the hash as `<work>/<2 hex>/<30 hex>`, so a task directory name is 30 characters,
+     * never 32, and the test never once fired. Nobody noticed because on the VALIS path
+     * every registered file really does have a `registered_slides/` parent. The one
+     * case the test existed to catch - a file emitted bare into its task dir - was
+     * silently mis-recorded as `<pid>/registered/<30-hex-hash>/<name>`.
+     * tests/checkpoint_manifest.nf.test found it on its first run.
      *
-     * It lives here because the alternative was worse, not because it is elegant:
-     *
-     *   - Passing the subdirectory in from the caller means threading producer identity
-     *     through both registration adapters AND the single-slide passthrough branch;
-     *     within one adapter (tiled) the answer differs per item, since the reference
-     *     passes through unregistered while moving slides come out of 'registered/'.
-     *   - Deriving it from the file's position under workflow.workDir (strip the workDir
-     *     prefix and the two hash components) is cleaner, but silently yields the wrong
-     *     answer for a file that did NOT come from the work directory - which is exactly
-     *     what a `--start registration` run reads out of a published checkpoint CSV.
-     *
-     * Either replacement would change an emitted path in a case no stub run exercises.
-     * The published-path contract is frozen (the checkpoint CSVs are a user-visible
-     * restart contract), so the heuristic stays - but as ONE copy, with the five
-     * hand-written path templates that used to accompany it now gone.
+     * It is now a STRUCTURAL test (see isTaskDir), not a length guess.
      */
     static String producerSubdir(def file) {
         def path = resolve(file)
-        def parent = path?.parent?.name?.toString() ?: ''
-        return isWorkHash(parent) ? '' : parent
+        def parent = path?.parent
+        if (parent == null) return ''
+        return isTaskDir(parent) ? '' : (parent.name?.toString() ?: '')
     }
 
-    /** True for a Nextflow task-directory name (32 lowercase hex characters). */
-    static boolean isWorkHash(String name) {
-        return name != null && name.length() == 32 && name.matches(/^[0-9a-f]{32}$/)
+    /**
+     * True when `dir` is a Nextflow task directory: `<workDir>/<2 hex>/<30 hex>`.
+     *
+     * Both halves are checked. The name alone would misclassify a genuine output
+     * subdirectory that happened to be hex-shaped; requiring the two-character hex
+     * parent as well makes a false positive essentially impossible. The width is
+     * accepted as 30..32 rather than pinned at 30 so a future Nextflow that widens
+     * the hash keeps working - the two-char parent is the load-bearing half.
+     */
+    static boolean isTaskDir(def dir) {
+        if (dir == null) return false
+        def name = dir.name?.toString()
+        if (!name || !name.matches(/^[0-9a-f]{30,32}$/)) return false
+        def prefix = dir.parent?.name?.toString()
+        return prefix != null && prefix.matches(/^[0-9a-f]{2}$/)
     }
 
     /* ------------------------------------------------------------------ *

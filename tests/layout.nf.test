@@ -74,10 +74,14 @@ nextflow_pipeline {
                     "P001,$outputDir/P001/registered/registered_slides/P001_DAPI_CD3_CD8_registered.ome.tiff,false,DAPI|CD3|CD8".toString()) },
 
                 // --- Layout.publishedPath across five different `kind`s ----------
+                // The two geojson columns carry EXPORT_GEOJSON's own `export/`
+                // output subdirectory, exactly as REGISTER's `registered_slides/`
+                // is carried above. Recording the bare basename here named files
+                // that did not exist; see tests/checkpoint_manifest.nf.test.
                 { assert path("$outputDir/csv/postprocessed.csv").readLines().contains(
                     "P001," +
-                    "$outputDir/P001/geojson/cells_data.csv," +
-                    "$outputDir/P001/geojson/cells.geojson," +
+                    "$outputDir/P001/geojson/export/cells_data.csv," +
+                    "$outputDir/P001/geojson/export/cells.geojson," +
                     "$outputDir/P001/quantification/merged_quant.csv," +
                     "$outputDir/P001/segmentation/P001_cell_mask.tif," +
                     "$outputDir/P001/pyramid/pyramid.ome.tiff".toString()) },

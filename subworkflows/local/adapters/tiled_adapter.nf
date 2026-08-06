@@ -62,8 +62,13 @@ workflow TILED_ADAPTER {
     ch_grouped_meta   // [patient_id, reference_item, all_items]
 
     main:
-    // The reference is the frame — it passes through unregistered.
-    ch_reference = ch_grouped_meta.map { _pid, ref_item, _items -> ref_item }  // [meta, file]
+    // The reference is the frame — it passes through unregistered. is_passthrough says
+    // so to registration.nf's checkpoint writer: an unwarped reference is published by
+    // whoever produced it, not into <pid>/registered/ where no tiled process writes it.
+    // Map addition, never meta.clone() — see the aliasing note at valis_adapter.nf:82-88.
+    ch_reference = ch_grouped_meta.map { _pid, ref_item, _items ->
+        [ref_item[0] + [is_passthrough: true], ref_item[1]]
+    }  // [meta, file]
 
     // One stream item per moving (non-reference) slide: [meta, reference_file, moving_file].
     ch_moving = ch_grouped_meta.flatMap { _pid, ref_item, items ->

@@ -40,6 +40,13 @@ def _callers() -> list[Path]:
     return [f for f in files if f.exists()]
 
 
+def _sweep_files() -> list[Path]:
+    """_callers() plus modules/ — a re-scattered path template is just as wrong in a
+    process definition, and modules/ was outside the original sweep."""
+    files = _callers() + sorted((ROOT / "modules").rglob("*.nf"))
+    return [f for f in files if f.exists()]
+
+
 def test_layout_exists_and_is_all_static():
     """G4: lib/*.groovy classes hold only static methods — no instance state."""
     text = LAYOUT.read_text()
@@ -78,10 +85,12 @@ def test_layout_never_reads_params():
 def test_no_caller_restates_a_per_patient_published_path():
     """`<outdir>/<patient_id>/<kind>` belongs to Layout.patientDir alone."""
     # e.g. "${params.outdir}/${meta.patient_id}/registered"
-    template = re.compile(r"\$\{params\.(?:prior_)?outdir\}/\$\{meta\.patient_id\}")
+    # Broadened after review: `${meta.patient_id}` was only one of the spellings a
+    # copy could use. Any `${...outdir}/${<anything>}` is a per-patient template.
+    template = re.compile(r"\$\{params\.(?:prior_)?outdir\}/\$\{[^}]+\}")
     offenders = [
         f"{f.relative_to(ROOT)}:{i}"
-        for f in _callers()
+        for f in _sweep_files()
         for i, line in enumerate(f.read_text().splitlines(), 1)
         if template.search(line)
     ]
@@ -97,7 +106,7 @@ def test_no_caller_restates_a_checkpoint_csv_path():
     literal = re.compile(r"""csv/(preprocessed|registered|postprocessed)\.csv""")
     offenders = [
         f"{f.relative_to(ROOT)}:{i}"
-        for f in _callers()
+        for f in _sweep_files()
         for i, line in enumerate(f.read_text().splitlines(), 1)
         if literal.search(line) and not line.lstrip().startswith(("*", "//"))
     ]
@@ -110,10 +119,18 @@ def test_no_caller_restates_a_checkpoint_csv_path():
 
 def test_no_caller_reimplements_the_work_hash_heuristic():
     """The 32-hex-char test lives once, in Layout.producerSubdir/isWorkHash."""
-    hash_test = re.compile(r"\[0-9a-f\]\{32\}|length\(\)\s*==\s*32")
+    # Broadened after review: the first version matched only the exact spelling
+    # this repo happened to use. It now catches any hex character class of a
+    # work-hash width, in either order, and any 30/32 length comparison, across
+    # modules/ as well (see _sweep_files).
+    hash_test = re.compile(
+        r"\[(?:0-9a-f|a-f0-9|0-9A-Fa-f)\]\s*\{\s*3[02]"     # [0-9a-f]{32} and friends
+        r"|\.\s*(?:length\(\)|size\(\))\s*==\s*3[02]"      # .length() == 32
+        r"|==\s*3[02]\s*&&.*(?:hex|hash)"                     # == 32 && ...hash
+    )
     offenders = [
         f"{f.relative_to(ROOT)}:{i}"
-        for f in _callers()
+        for f in _sweep_files()
         for i, line in enumerate(f.read_text().splitlines(), 1)
         if hash_test.search(line)
     ]
@@ -151,7 +168,7 @@ def test_every_kind_asked_of_layout_is_published_by_modules_config():
     assert published, "no per-patient publishDir paths found in conf/modules.config"
 
     call = re.compile(
-        r"Layout\.(?:publishedPath|publishedPathWithProducerSubdir|patientDir)\("
+        r"Layout\.(?:publishedPath|patientDir)\("
         r"\s*params\.\w+\s*,\s*[^,]+,\s*(?:'([^']+)'|Layout\.(\w+))"
     )
     asked = []
@@ -173,3 +190,34 @@ def test_every_kind_asked_of_layout_is_published_by_modules_config():
         "Layout is asked for a `kind` conf/modules.config never publishes into: "
         + ", ".join(f"{where} -> {kind!r}" for where, kind in unpublished)
     )
+
+
+def test_the_unregistered_slide_path_has_its_own_owner():
+    """A slide that was never registered is published by whoever produced it, not
+    into <pid>/registered/. registration.nf must ask Layout which case it is in
+    rather than assuming — that assumption is defect (c)."""
+    reg = (ROOT / "subworkflows" / "local" / "registration.nf").read_text()
+    assert "Layout.passthroughPath(" in reg, (
+        "registration.nf no longer routes unregistered slides through "
+        "Layout.passthroughPath — see tests/checkpoint_manifest.nf.test"
+    )
+    assert "is_passthrough" in reg
+
+    # Both producers of an unregistered slide must set the flag the writer keys on.
+    tiled = (ROOT / "subworkflows" / "local" / "adapters" / "tiled_adapter.nf").read_text()
+    assert "is_passthrough" in tiled, (
+        "TILED_ADAPTER's reference passes through unregistered but is not marked "
+        "is_passthrough — its registered.csv row would name a file nothing publishes"
+    )
+
+
+def test_task_dir_test_is_structural_not_a_length_guess():
+    """The predecessor of Layout.isTaskDir tested `length() == 32`. A Nextflow task
+    directory is `<work>/<2 hex>/<30 hex>` — 30, not 32 — so it never fired. Pin the
+    two properties that make the replacement correct: a 30-wide-or-more hex name AND
+    a two-hex-character parent."""
+    text = LAYOUT.read_text()
+    body = text[text.index("static boolean isTaskDir(") :]
+    body = body[: body.index("\n    }")]
+    assert "{30,32}" in body, "isTaskDir must accept a 30-character task-dir name"
+    assert "{2}" in body, "isTaskDir must also require the two-hex-character parent"

@@ -117,7 +117,15 @@ workflow REGISTRATION {
         multi:  true
     }
     ch_grouped_multi = ch_grouped_split.multi
-    ch_passthrough   = ch_grouped_split.single.map { pid, ref, items -> ref }  // [meta, file]
+    // is_passthrough marks a slide that reaches the registered stream WITHOUT having
+    // been registered. It is what the checkpoint writer below keys on: nothing
+    // publishes an unregistered slide into <pid>/registered/, so recording it there
+    // names a file that does not exist (tests/checkpoint_manifest.nf.test).
+    // TILED_ADAPTER sets the same flag on every patient's reference, which likewise
+    // passes through unwarped.
+    ch_passthrough   = ch_grouped_split.single.map { _pid, ref, _items ->
+        [ref[0] + [is_passthrough: true], ref[1]]
+    }  // [meta, file]
 
     // Flattened back to [meta, file] for consumers (seg-QC) that segment individual slides
     // rather than patient groups. Single-slide patients are excluded here on purpose: they
@@ -255,14 +263,15 @@ workflow REGISTRATION {
         .map { meta, file ->
             // Where the file WILL be published. This must agree with REGISTER's /
             // TILED_*'s publishDir in conf/modules.config, including the producer
-            // subdirectory those blocks' `pattern:` carries along
-            // ('registered_slides/' for VALIS, 'registered/' for tiled, none for a
-            // reference that passes through unregistered). That rule -- and the
-            // work-hash test that recovers the subdirectory -- now lives in
-            // Layout.publishedPathWithProducerSubdir, which documents why it is a
-            // heuristic and what it costs to replace.
-            def published_path = Layout.publishedPathWithProducerSubdir(
-                params.outdir, meta.patient_id, Layout.REGISTERED, file)
+            // subdirectory those blocks' `pattern:` carries along ('registered_slides/'
+            // for VALIS, 'registered/' for tiled). Both rules live in Layout.
+            //
+            // A passthrough slide was never registered, so no registration process
+            // published it and <pid>/registered/ may not even exist; Layout.passthroughPath
+            // records where it actually is instead.
+            def published_path = meta.is_passthrough
+                ? Layout.passthroughPath(params.outdir, meta.patient_id, file)
+                : Layout.publishedPath(params.outdir, meta.patient_id, Layout.REGISTERED, file)
             "${meta.patient_id},${published_path},${meta.is_reference},${meta.channels.join('|')}"
         }
         .collectFile(
