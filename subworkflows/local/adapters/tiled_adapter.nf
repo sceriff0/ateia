@@ -25,6 +25,19 @@ include { TILED_STITCH   } from '../../../modules/local/tiled_stitch'
 // Stable per-moving-slide join key (patient + its channel set).
 def slideKey(meta) { "${meta.patient_id}#${meta.channels.toSorted().join('_')}" }
 
+// The control-point gather (below) must size its groupKey with the real tile count so each
+// slide's group can close as soon as ITS OWN tiles have arrived, instead of waiting for the
+// whole upstream channel to close (every tile of every slide of every patient). Unlike the
+// three existing groupKey call sites in this repo, this one must NOT degrade to a bare,
+// unsized key when the count is missing -- that silently reverts to the full-barrier behaviour
+// this fix removes, with no warning. Fail loudly instead.
+def requireTilesCount(meta) {
+    if (meta.tiles_count == null) {
+        error "TILED_ADAPTER: tiles_count missing from meta for ${slideKey(meta)} -- cannot size the control-point gather"
+    }
+    meta.tiles_count
+}
+
 workflow TILED_ADAPTER {
     take:
     ch_grouped_meta   // [patient_id, reference_item, all_items]
@@ -43,10 +56,25 @@ workflow TILED_ADAPTER {
     if (params.reg_tiled_fanout) {
         TILED_COARSE(ch_moving)
 
-        // Context per slide: meta + reference + moving + M0, keyed for the per-tile join.
+        // Tile count per slide, derived from the tile-plan CSV file itself -- NOT from the
+        // splitCsv rows below: splitCsv streams one item per row, so the closure that sees a
+        // row cannot know how many rows the file has in total. The CSV is tiny (one row per
+        // tile, plus a header), so counting lines is cheap.
+        ch_tile_counts = TILED_COARSE.out.tiles
+            .map { meta, csv ->
+                def n = csv.readLines().findAll { it.trim() }.size() - 1 // minus header
+                if (n < 1) error "TILED_COARSE emitted no tiles for ${slideKey(meta)} (${csv})"
+                tuple(slideKey(meta), n)
+            }
+
+        // Context per slide: meta (+tiles_count) + reference + moving + M0, keyed for the
+        // per-tile join. Map addition (never meta.clone()) -- see the aliasing note at
+        // valis_adapter.nf:82-88.
         ch_ctx = ch_moving
             .map { meta, ref, mov -> tuple(slideKey(meta), meta, ref, mov) }
             .join(TILED_COARSE.out.m0.map { meta, m0 -> tuple(slideKey(meta), m0) }, by: 0)
+            .join(ch_tile_counts, by: 0)
+            .map { k, meta, ref, mov, m0, n -> tuple(k, meta + [tiles_count: n], ref, mov, m0) }
 
         // Fan out: one item per tile (splitCsv), attach the slide context.
         ch_tile_items = TILED_COARSE.out.tiles
@@ -57,9 +85,14 @@ workflow TILED_ADAPTER {
 
         TILED_REG_TILE(ch_tile_items)
 
-        // Gather every tile's control point back per slide.
+        // Gather every tile's control point back per slide. groupKey(slideKey, tiles_count)
+        // lets a slide's group close -- and TILED_SOLVE start -- as soon as that slide's own
+        // tiles have all arrived, instead of the bare groupTuple(by: 0) this replaces, which
+        // buffered every key until the WHOLE upstream channel closed (i.e. until every tile of
+        // every slide of every patient had finished). requireTilesCount errors rather than
+        // silently falling back to an unsized key if the count is ever missing.
         ch_controls = TILED_REG_TILE.out.control
-            .map { meta, c -> tuple(slideKey(meta), meta, c) }
+            .map { meta, c -> tuple(groupKey(slideKey(meta), requireTilesCount(meta)), meta, c) }
             .groupTuple(by: 0)
             .map { _k, metas, controls -> tuple(metas[0], controls) }
 

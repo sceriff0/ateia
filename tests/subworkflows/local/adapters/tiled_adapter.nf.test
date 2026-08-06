@@ -1,0 +1,81 @@
+/*
+ * TILED_ADAPTER fan-in group size (reg_tiled_fanout=true path) -- end-to-end functional check.
+ *
+ * subworkflows/local/adapters/tiled_adapter.nf:94-97 used to gather every tile's control
+ * point with a bare `.groupTuple(by: 0)` -- no size hint -- so no slide's TILED_SOLVE could
+ * start until every tile of every slide of every patient had finished. The gather now keys
+ * with groupKey(slideKey(meta), meta.tiles_count) so a slide's group can close as soon as its
+ * own tiles have arrived. See tiled_adapter_group_size.nf.test for the requireTilesCount()
+ * function tests (the guard behind that groupKey call).
+ *
+ * This test is a regression/functional-equivalence check for the "Done when" requirement that
+ * the set of control points reaching TILED_SOLVE per slide is unchanged: two patients run the
+ * per-tile fan-out concurrently and both still produce a manifest end to end. It is NOT a
+ * streaming-emission-order test -- see the note in tiled_adapter_group_size.nf.test for why
+ * that property is not reliably expressible in this harness (stub-mode tasks complete
+ * effectively instantaneously, so there is no controllable gap to assert an ordering against).
+ */
+nextflow_workflow {
+
+    name "Test TILED_ADAPTER fan-out gather (reg_tiled_fanout=true)"
+    script "subworkflows/local/adapters/tiled_adapter.nf"
+    workflow "TILED_ADAPTER"
+
+    tag "subworkflow"
+    tag "tiled_adapter"
+    tag "stub"
+
+    test("Should register both moving slides of a two-patient run through the per-tile fan-out - stub") {
+
+        options "-stub"
+
+        when {
+            params {
+                registration_method = 'tiled'
+                reg_tiled_fanout    = true
+            }
+            workflow {
+                """
+                input[0] = Channel.fromList([
+                    [
+                        'P001',
+                        [[patient_id: 'P001', is_reference: true, channels: ['DAPI']],
+                         file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)],
+                        [
+                            [[patient_id: 'P001', is_reference: true, channels: ['DAPI']],
+                             file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)],
+                            [[patient_id: 'P001', is_reference: false, channels: ['DAPI', 'CD3']],
+                             file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)]
+                        ]
+                    ],
+                    [
+                        'P002',
+                        [[patient_id: 'P002', is_reference: true, channels: ['DAPI']],
+                         file('$projectDir/tests/testdata/P002_ref.ome.tiff', checkIfExists: true)],
+                        [
+                            [[patient_id: 'P002', is_reference: true, channels: ['DAPI']],
+                             file('$projectDir/tests/testdata/P002_ref.ome.tiff', checkIfExists: true)],
+                            [[patient_id: 'P002', is_reference: false, channels: ['DAPI', 'CD3']],
+                             file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)]
+                        ]
+                    ]
+                ])
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                // One manifest per moving slide (the reference passes through unregistered) --
+                // the fan-in gather still reaches every slide's TILED_SOLVE with its control
+                // points, exactly as before this task's change.
+                { assert workflow.out.manifest_by_meta.size() == 2 },
+                { def patient_ids = workflow.out.manifest_by_meta.collect { it[0].patient_id }.toSorted()
+                  assert patient_ids == ['P001', 'P002'] },
+                // Both moving slides + both references registered/passed through.
+                { assert workflow.out.registered.size() == 4 }
+            )
+        }
+    }
+}
