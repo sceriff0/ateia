@@ -35,4 +35,78 @@ nextflow_process {
             }
         }
     }
+
+    test("Should render the shared StarDist flags, including --tolerance - rendered command") {
+
+        // Tagged `stub` so CI's blocking `nf-test test --tag stub` gate runs it, but
+        // deliberately WITHOUT `options "-stub"` -- same shape as
+        // tests/modules/generate_qc_report.nf.test's "rendered command" case (Task 5).
+        // `-stub` never evaluates a `script:` block, so no stub run can observe a
+        // rendered command at all. That is exactly what this task changed: the eight
+        // StarDist flags moved out of being rebuilt by hand in seg_qc_geojson.nf's
+        // script: block and into conf/modules.config's ext.args (shared with SEGMENT's
+        // stardist backend via conf/modules.config's starDistCommonFlags()), and `--tolerance` is now passed
+        // for the first time ever -- ruling R1's one intentional behaviour change in this
+        // task (registration-QC scores are not comparable across this commit).
+        //
+        // No container engine is active under `--profile test` (docker.enabled is only
+        // true in the `docker` profile, which this suite is told never to combine with
+        // `test` on this arm64 machine), so this runs bin/segment_to_geojson.py directly
+        // and it will fail importing StarDist/TensorFlow on a host without them
+        // installed. That is fine: like GENERATE_QC_REPORT's rendered-command case, the
+        // assertions read the rendered .command.sh rather than the process outcome, so
+        // the case holds whether the script itself succeeds or fails for unrelated
+        // environmental reasons.
+        tag "stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [ patient_id: 'P001', channels: ['DAPI', 'CD3', 'CD8'], is_reference: false ],
+                    file('${projectDir}/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            // Nextflow lays tasks out as <workDir>/<2 hex>/<30 hex>/.command.sh.
+            def rendered = []
+            new File("$workDir").eachFileRecurse { f ->
+                if (f.name == '.command.sh' && f.text.contains('segment_to_geojson.py')) {
+                    rendered << f.text
+                }
+            }
+
+            assertAll(
+                { assert rendered.size() >= 1,
+                    "no rendered SEG_QC_GEOJSON .command.sh found under the task work dir" },
+                // The assertion with teeth: against the pre-refactor module, ext.args was
+                // permanently empty (SEG_QC_GEOJSON had no ext.args entry at all), so
+                // none of these flags -- least of all --tolerance, which was never passed
+                // at any tolerance -- appear in the rendered command.
+                { assert rendered.every { it.contains('--tolerance 1.0') },
+                    "rendered command missing --tolerance: " + rendered.join(' --- ') },
+                { assert rendered.every { it.contains('--nuclear-markers DAPI CELLTOX') },
+                    "rendered command missing --nuclear-markers: " + rendered.join(' --- ') },
+                { assert rendered.every { it.contains('--model-name 2D_versatile_fluo') },
+                    "rendered command missing --model-name: " + rendered.join(' --- ') },
+                { assert rendered.every { it.contains('--n-tiles 2 2') },
+                    "rendered command missing --n-tiles: " + rendered.join(' --- ') },
+                { assert rendered.every { it.contains('--pmin 1.0') && it.contains('--pmax 99.8') },
+                    "rendered command missing --pmin/--pmax: " + rendered.join(' --- ') },
+                { assert rendered.every { it.contains('--prob-thresh 0.3') },
+                    "rendered command missing --prob-thresh: " + rendered.join(' --- ') },
+                // Two things this shared list must NOT leak in either direction:
+                // --model-dir is conditional on segmentation_model_dir (null under the
+                // test profile), and --expand-distance is SEGMENT-only (starDistCommonFlags()'s
+                // class comment explains why SEG_QC_GEOJSON has no equivalent knob).
+                { assert rendered.every { !it.contains('--model-dir') },
+                    "rendered command carries --model-dir despite segmentation_model_dir=null: " + rendered.join(' --- ') },
+                { assert rendered.every { !it.contains('--expand-distance') },
+                    "rendered command carries SEGMENT-only --expand-distance: " + rendered.join(' --- ') }
+            )
+        }
+    }
 }

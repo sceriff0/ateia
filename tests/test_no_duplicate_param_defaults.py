@@ -270,6 +270,21 @@ ARGPARSE_DEFAULT_ALLOWLIST = {
             "the script's own help text."
         ),
     },
+    "mask_to_geojson.py:--tolerance": {
+        "reason": (
+            "Flag-name coincidence, not a real correspondence, resolved via the "
+            "flag-only fallback because conf/modules.config's SEG_QC_GEOJSON "
+            "ext.args now passes `--tolerance ${params.simplify_tolerance}` to "
+            "segment_to_geojson.py (Task 6, ruling R1). mask_to_geojson.py is a "
+            "library segment_to_geojson.py imports (`mask_to_feature_collection`), "
+            "not a script any process invokes by name -- its own `main()`/CLI is "
+            "for standalone use only, and its docstring records that its contour "
+            "convention deliberately diverges from extract_cell_properties.py's "
+            "(no +0.5 corner-of-pixel offset, because these contours feed VALIS's "
+            "warp_geojson reg-QC path). Keeping its default independent of "
+            "nextflow.config's simplify_tolerance is intentional."
+        ),
+    },
 }
 # NOTE: `segment.py:--model-name` and `segment_to_geojson.py:--model-name`
 # are deliberately NOT here. Both are `required=True` with no `default=` at

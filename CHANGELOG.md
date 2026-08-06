@@ -37,6 +37,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`--nuclear_markers` now accepts a comma/space-separated string as well as a list**, so
   `--nuclear_markers CELLTOX` works on the command line (`nextflow_schema.json` type widened to
   `["array", "string"]`).
+- **`SEG_QC_GEOJSON` (the `reg_qc=2` GeoJSON registration-QC path) now passes
+  `--tolerance ${simplify_tolerance}` to `segment_to_geojson.py`.** Previously it passed no
+  tolerance at all, so its contours were simplified at the script's own default (`0.5`) while
+  `EXTRACT_CELL_PROPERTIES` — the GeoJSON `WARP_SEG_QC` compares this one against — used the
+  configured `simplify_tolerance` (`1.0`). The two GeoJSONs `WARP_SEG_QC` diffs were therefore
+  simplified at different tolerances. **Behaviour change:** `reg_qc=2` registration-QC scores
+  (dice/displacement) from before this change are **not comparable** to scores computed after
+  it, on any run using the GeoJSON path. Also factored the StarDist flags SEGMENT and
+  SEG_QC_GEOJSON both need (model, tiling, pmin/pmax, prob-threshold) into one shared definition
+  (`conf/modules.config`'s `starDistCommonFlags()`), which had drifted apart into two hand-built
+  copies; `--nuclear-markers` stays built in `seg_qc_geojson.nf`'s script block (unchanged
+  behaviour — see that file's comment for why it could not move alongside the rest).
 - **`reg_micro_reg` now defaults to `2`** (maximum: micro-rigid + micro non-rigid), previously `0`.
   Registrations run the full micro-registration by default — a quality-over-speed change
   (micro-registration can add ~30–120 min per registration).
