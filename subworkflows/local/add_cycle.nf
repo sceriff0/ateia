@@ -38,6 +38,10 @@ include { SPLIT_CHANNELS as SPLIT_PRIOR_PYRAMID } from '../../modules/local/spli
 include { MERGE_QUANT_CSVS         } from '../../modules/local/merge_quant_csvs'
 include { GENERATE_REGISTRATION_QC } from '../../modules/local/generate_registration_qc'
 include { SEG_QC                   } from './seg_qc'
+// Same writer registration.nf uses. Before it was shared, an add_cycle run wrote no
+// csv/registered.csv at all, so its --outdir could never be a second add_cycle's
+// --prior_outdir (the reader below is exactly what would have had nothing to open).
+include { REGISTERED_CHECKPOINT    } from './registered_checkpoint'
 // Shared with subworkflows/local/postprocess.nf. These used to be copied inline here;
 // the copy had already drifted (bare .groupTuple() instead of the sized groupKey).
 include { QUANTIFY_MARKERS         } from './quantify_markers'
@@ -146,6 +150,13 @@ workflow ADD_CYCLE {
 
     // Keep only the newly registered cycle (drop the reference passthrough).
     ch_new_registered = ch_adapter_registered.filter { meta, _f -> !meta.is_reference }
+
+    // Registration checkpoint. Written from the FULL adapter stream — reference row
+    // included — exactly as the linear path writes it, because the reference row is
+    // the one a follow-on `--mode add_cycle` reads back (`ch_prior_ref` above filters
+    // is_reference=true). Recording only the new cycle would produce a manifest that
+    // this very file cannot consume.
+    REGISTERED_CHECKPOINT(ch_adapter_registered)
 
     // ------------------------------------------------------------------ //
     // 3. REGISTRATION-DRIFT QC (non-gating)
@@ -353,6 +364,10 @@ workflow ADD_CYCLE {
     emit:
     geojson     = ASSEMBLE_EXPORT.out.geojson
     merged_csv  = MERGE_QUANT_CSVS.out.merged_csv
+    // csv/registered.csv. Nothing in workflows/mirage.nf consumes it (collectFile's
+    // storeDir writes the file regardless), but it is emitted so a test can assert on
+    // it and so the add_cycle path advertises the same artifact REGISTRATION does.
+    checkpoint_csv = REGISTERED_CHECKPOINT.out.csv
     pyramid     = ASSEMBLE_EXPORT.out.pyramid
     qc          = ch_qc
     seg_qc      = ch_seg_qc

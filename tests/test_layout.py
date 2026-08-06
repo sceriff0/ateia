@@ -201,16 +201,27 @@ def test_every_kind_asked_of_layout_is_published_by_modules_config():
 
 def test_the_unregistered_slide_path_has_its_own_owner():
     """A slide that was never registered is published by whoever produced it, not
-    into <pid>/registered/. registration.nf must ask Layout which case it is in
-    rather than assuming — that assumption is defect (c)."""
-    reg = (ROOT / "subworkflows" / "local" / "registration.nf").read_text()
-    assert "Layout.passthroughPath(" in reg, (
-        "registration.nf no longer routes unregistered slides through "
-        "Layout.passthroughPath — see tests/checkpoint_manifest.nf.test"
+    into <pid>/registered/. The checkpoint writer must ask Layout which case it is
+    in rather than assuming — that assumption is defect (c).
+
+    The writer moved out of registration.nf into its own subworkflow so the
+    add_cycle path could share it (an add_cycle run used to write no
+    csv/registered.csv at all). The property is unchanged; only its owner moved."""
+    writer = (
+        ROOT / "subworkflows" / "local" / "registered_checkpoint.nf"
+    ).read_text()
+    assert "Layout.passthroughPath(" in writer, (
+        "the registered-checkpoint writer no longer routes unregistered slides "
+        "through Layout.passthroughPath — see tests/checkpoint_manifest.nf.test"
     )
-    assert "is_passthrough" in reg
+    assert "is_passthrough" in writer
 
     # Both producers of an unregistered slide must set the flag the writer keys on.
+    reg = (ROOT / "subworkflows" / "local" / "registration.nf").read_text()
+    assert "is_passthrough" in reg, (
+        "registration.nf's single-slide passthrough branch no longer marks the "
+        "slide — its registered.csv row would name a file nothing publishes"
+    )
     tiled = (ROOT / "subworkflows" / "local" / "adapters" / "tiled_adapter.nf").read_text()
     assert "is_passthrough" in tiled, (
         "TILED_ADAPTER's reference passes through unregistered but is not marked "

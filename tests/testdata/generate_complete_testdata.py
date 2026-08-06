@@ -251,6 +251,22 @@ with open(PRIOR_DIR / "postprocessed.csv", "w") as f:
     )
 print("  Created prior_run/csv/{registered,postprocessed}.csv")
 
+# 3e. The NEW-CYCLE samplesheet that goes with prior_run/ — i.e. what a real
+#     `--mode add_cycle --prior_outdir <prior_run> --input <this>` run consumes.
+#     By design it has NO reference row: the registration reference is the frozen
+#     prior-run reference, which is never a row in this sheet (mirage.nf passes
+#     allow-no-reference=true for exactly this shape).
+#
+#     ONE slide, deliberately. add_cycle builds one registration group per new
+#     slide, each carrying the prior reference, so N new slides for a patient
+#     re-emit that reference N times — which would put N identical reference rows
+#     in csv/registered.csv. Keeping the fixture at one slide keeps the manifest
+#     test asserting the writer rather than that pre-existing fan-out.
+with open(OUT_DIR / "new_cycle.csv", "w") as f:
+    f.write("patient_id,path_to_file,is_reference,channels\n")
+    f.write(f"P001,{TESTDATA_ABS}/P001_mov1.ome.tiff,false,DAPI|CD3|CD8\n")
+print("  Created new_cycle.csv (add_cycle new-cycle samplesheet for prior_run/)")
+
 # =============================================================================
 # 4. Generate INVALID input CSVs for validation testing
 # =============================================================================

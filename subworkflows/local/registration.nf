@@ -7,6 +7,9 @@
 include { GENERATE_REGISTRATION_QC          } from '../../modules/local/generate_registration_qc'
 
 include { SEG_QC                            } from './seg_qc'
+// The registered-checkpoint writer is mode-independent and shared with add_cycle.nf,
+// which used to write no manifest at all.
+include { REGISTERED_CHECKPOINT             } from './registered_checkpoint'
 
 include { VALIS_ADAPTER                     } from './adapters/valis_adapter'
 include { TILED_ADAPTER                     } from './adapters/tiled_adapter'
@@ -258,36 +261,11 @@ workflow REGISTRATION {
     // ========================================================================
     // STEP 4: CHECKPOINT
     // ========================================================================
-    // Use collectFile() for non-blocking aggregation (enables patient-level parallelism)
-    ch_checkpoint_csv = ch_registered
-        .map { meta, file ->
-            // Where the file WILL be published. This must agree with REGISTER's /
-            // TILED_*'s publishDir in conf/modules.config, including the producer
-            // subdirectory those blocks' `pattern:` carries along ('registered_slides/'
-            // for VALIS, 'registered/' for tiled). Both rules live in Layout.
-            //
-            // A passthrough slide was never registered, so no registration process
-            // published it and <pid>/registered/ may not even exist; Layout.passthroughPath
-            // records where it actually is instead.
-            def published_path = meta.is_passthrough
-                ? Layout.passthroughPath(params.outdir, meta.patient_id, file)
-                : Layout.publishedPath(params.outdir, meta.patient_id, Layout.REGISTERED, file)
-            "${meta.patient_id},${published_path},${meta.is_reference},${meta.channels.join('|')}"
-        }
-        .collectFile(
-            name: Layout.checkpointCsvName(Layout.REGISTERED),
-            newLine: true,
-            sort: true,
-            // sort: true makes the manifest REPRODUCIBLE. Without it collectFile
-            // writes rows in completion order, so two runs of the same commit
-            // produced different files (found while capturing this branch's golden
-            // baseline; a rerun of the UNMODIFIED branch differed from itself). The
-            // rows begin with patient_id followed by the published path, so natural
-            // string order IS "patient id, then file" — and the `seed:` header is
-            // written first regardless of sorting.
-            storeDir: Layout.checkpointDir(params.outdir),
-            seed: 'patient_id,registered_image,is_reference,channels'
-        )
+    // The writer itself lives in subworkflows/local/registered_checkpoint.nf: an
+    // add_cycle run also has to produce this manifest, and it does not come through
+    // here. Same rows, same order, same `sort:`/`seed:` — one definition.
+    REGISTERED_CHECKPOINT(ch_registered)
+    ch_checkpoint_csv = REGISTERED_CHECKPOINT.out.csv
 
     // Collect size logs from all registration processes
     ch_size_logs = Channel.empty()
