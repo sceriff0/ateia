@@ -68,6 +68,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   StarDist.
 - **`<outdir>/size_logs/versions.yml`'s single key changed** to
   `MIRAGE:FINAL_QC:AGGREGATE_SIZE_LOGS` (diagnostic string only; no functional effect).
+- **`SPLIT_CHANNELS` and `QUANTIFY` now publish per patient.**
+  **Published-output change:** `<outdir>/split_channels/<marker>.tiff` moves to
+  `<outdir>/<patient_id>/split_channels/<marker>.tiff`, and
+  `<outdir>/quantify/<patient>_<marker>_quant.csv` moves to
+  `<outdir>/<patient_id>/quantify/`. Both processes previously had no `publishDir` of
+  their own and inherited a run-level, patient-unaware default. Because
+  `split_multichannel.py` names its outputs by sanitised channel name alone, **two
+  patients sharing a marker published to the same path and the second silently
+  overwrote the first** on every multi-patient run. Nothing in the pipeline reads the
+  published copies, so the run stayed green and the loss was invisible. No checkpoint
+  CSV column, no other published path, and no GeoJSON measurement key changes.
+- **The fall-through `publishDir` default is now a guard.** A process with no explicit
+  `publishDir` publishes to `<outdir>/_UNROUTED_PUBLISH/<process>` instead of to a
+  plausible-looking run-level directory, and `tests/test_layout.py` fails the build if
+  any process reaches it. Two other already-unrouted processes surfaced by this guard
+  (`EXTRACT_MASK_SERIES`, and the shared `TILED_COARSE|TILED_REG_TILE` block) publish
+  only internal, re-derivable intermediates (a prior run's re-extracted mask series;
+  per-tile registration control points consumed by `TILED_SOLVE`), so they were given
+  an explicit `publishDir = [ enabled: false ]` rather than a new output path.
 
 ### Fixed
 - **The checkpoint manifests no longer name files that do not exist.** `csv/postprocessed.csv`'s

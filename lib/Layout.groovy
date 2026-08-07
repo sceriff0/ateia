@@ -110,12 +110,57 @@ class Layout {
      * ------------------------------------------------------------------ */
 
     /**
+     * The closed vocabulary of per-patient publish leaves — every `kind` any caller may
+     * pass to patientDir()/publishedPath(), and every leaf conf/modules.config publishes
+     * a per-patient artifact into.
+     *
+     * WHY A CLOSED LIST. `kind` was a free-form String. Three of the ~14 kinds in use had
+     * constants (PREPROCESSED, REGISTERED, POSTPROCESSED); the rest were bare literals at
+     * the call site ('geojson', 'quantification', 'segmentation', 'pyramid'), so a typo
+     * produced a checkpoint row naming a directory that does not exist — green run,
+     * unresolvable path. tests/test_layout.py checks this list against
+     * conf/modules.config in BOTH directions: a kind here that the config never publishes
+     * into is dead, and a per-patient publish leaf in the config that is absent here is a
+     * path with no owner.
+     *
+     * 'spatialdata' is deliberately NOT here: EXPORT_SPATIALDATA publishes to the bare
+     * patient root (`${params.outdir}/${meta.patient_id}`, no trailing leaf) because its
+     * .zarr output already carries `spatialdata/` from the process's own `pattern:` —
+     * publishing it under a `.../spatialdata` kind directory would double-nest it. There
+     * is no `<outdir>/<pid>/spatialdata` leaf for a caller to ask Layout for.
+     *
+     * Ordered as the pipeline produces them, not alphabetically.
+     */
+    static final List<String> PUBLISHED_KINDS = [
+        'converted',
+        PREPROCESSED,
+        REGISTERED,
+        'segmentation',
+        'cell_properties',
+        'split_channels',
+        'quantify',
+        'quantification',
+        'phenotyping',
+        'geojson',
+        'pyramid',
+    ].asImmutable()
+
+    /** Reject an unknown publish kind at the call site rather than at path-resolution time. */
+    static String requireKind(String kind) {
+        if (!PUBLISHED_KINDS.contains(kind))
+            throw new IllegalArgumentException(
+                "Unknown published kind: '${kind}'. Valid: ${PUBLISHED_KINDS}")
+        return kind
+    }
+
+    /**
      * `<outdir>/<patient_id>/<kind>` - the per-patient publish root.
      *
      * `kind` is the leaf conf/modules.config publishes into: 'preprocessed',
      * 'registered', 'segmentation', 'quantification', 'geojson', 'pyramid', ...
      */
     static String patientDir(def outdir, def patientId, String kind) {
+        requireKind(kind)
         if (!patientId?.toString()?.trim())
             throw new IllegalArgumentException("Layout.patientDir: patient_id is required")
         if (!kind?.trim())

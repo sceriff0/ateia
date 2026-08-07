@@ -232,6 +232,98 @@ def test_the_unregistered_slide_path_has_its_own_owner():
     )
 
 
+def _per_patient_publish_leaves() -> set[str]:
+    """Every per-patient publish leaf conf/modules.config declares.
+
+    Matches `path: { "${params.outdir}/${meta.patient_id}/<leaf>" }`. Multi-level leaves
+    (qc/registration, cell_properties/nuclei, registered/summary, ...) are QC and producer
+    sub-paths beneath a kind, not kinds themselves — only the first segment counts, and the
+    QC subtree is excluded entirely because no checkpoint CSV names it.
+    """
+    text = MODULES_CONFIG.read_text()
+    leaves = set()
+    for m in re.finditer(
+        r'\$\{params\.outdir\}/\$\{meta\.patient_id\}/([A-Za-z0-9_/]+)', text
+    ):
+        first = m.group(1).split("/")[0]
+        if first == "qc":
+            continue
+        leaves.add(first)
+    return leaves
+
+
+def _declared_kinds() -> set[str]:
+    """Layout.PUBLISHED_KINDS, parsed from the Groovy source."""
+    text = LAYOUT.read_text()
+    block = re.search(
+        r"PUBLISHED_KINDS\s*=\s*\[(.*?)\]\.asImmutable\(\)", text, re.S
+    )
+    assert block, "Layout.PUBLISHED_KINDS not found — did the constant move?"
+    body = block.group(1)
+    kinds = set(re.findall(r"'([^']+)'", body))
+    # Bare constant references (PREPROCESSED, REGISTERED) resolve to their own literals.
+    for const in re.findall(r"^\s*([A-Z_]+),\s*$", body, re.M):
+        lit = re.search(rf"static final String {const}\s*=\s*'([^']+)'", text)
+        assert lit, f"Layout.PUBLISHED_KINDS names {const}, which has no String constant"
+        kinds.add(lit.group(1))
+    return kinds
+
+
+def test_every_per_patient_publish_leaf_is_a_declared_kind():
+    """The reverse direction: a leaf the config publishes into that Layout never names is
+    a published path with no owner — exactly what Layout exists to prevent."""
+    undeclared = _per_patient_publish_leaves() - _declared_kinds()
+    assert not undeclared, (
+        f"conf/modules.config publishes per-patient into {sorted(undeclared)}, which "
+        "Layout.PUBLISHED_KINDS does not declare. Add them there, or stop publishing there."
+    )
+
+
+def test_no_declared_kind_is_dead():
+    """A kind Layout declares that nothing publishes into is a path that cannot exist."""
+    dead = _declared_kinds() - _per_patient_publish_leaves()
+    assert not dead, (
+        f"Layout.PUBLISHED_KINDS declares {sorted(dead)}, which conf/modules.config never "
+        "publishes a per-patient artifact into."
+    )
+
+
+def test_no_process_relies_on_the_fall_through_publish_default():
+    """Every process in modules/local/ must have a withName: block that sets publishDir.
+
+    The fall-through default publishes to _UNROUTED_PUBLISH/. It used to publish to a real
+    run-level path, which is how SPLIT_CHANNELS came to overwrite one patient's channels
+    with another's on every multi-patient run without failing.
+    """
+    config = MODULES_CONFIG.read_text()
+    processes = set()
+    for nf in sorted((ROOT / "modules" / "local").glob("*.nf")):
+        m = re.search(r"^process\s+([A-Z][A-Z0-9_]*)\s*\{", nf.read_text(), re.M)
+        if m:
+            processes.add(m.group(1))
+
+    # Which process names appear in a withName: selector whose block sets publishDir.
+    routed = set()
+    for m in re.finditer(r"withName:\s*'([^']+)'\s*\{", config):
+        names = m.group(1).split("|")
+        start = m.end()
+        depth, i = 1, start
+        while i < len(config) and depth:
+            if config[i] == "{":
+                depth += 1
+            elif config[i] == "}":
+                depth -= 1
+            i += 1
+        if "publishDir" in config[start:i]:
+            routed.update(n.strip() for n in names)
+
+    unrouted = processes - routed
+    assert not unrouted, (
+        f"{sorted(unrouted)} have no withName: block setting publishDir, so they fall "
+        "through to the _UNROUTED_PUBLISH default. Give each an explicit publishDir."
+    )
+
+
 def test_task_dir_test_is_structural_not_a_length_guess():
     """The predecessor of Layout.isTaskDir tested `length() == 32`. A Nextflow task
     directory is `<work>/<2 hex>/<30 hex>` — 30, not 32 — so it never fired. Pin the

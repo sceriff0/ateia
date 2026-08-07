@@ -103,6 +103,24 @@ workflow {
             "step '${step.name}': entryColumn '${step.entryColumn}' not in requiredColumns"
     }
 
+    // ------------------------------------------------------------------ //
+    // Layout — the published-kind vocabulary
+    // ------------------------------------------------------------------ //
+    assert Layout.requireKind('segmentation') == 'segmentation'
+    assert Layout.PUBLISHED_KINDS.contains(Layout.REGISTERED)
+    assert Layout.PUBLISHED_KINDS.contains('split_channels')
+
+    def badKind = false
+    try { Layout.requireKind('segmentaton') }   // typo, deliberately
+    catch (IllegalArgumentException ignored) { badKind = true }
+    assert badKind, 'Layout.requireKind must reject an unknown kind'
+
+    // patientDir must reject it too — that is the call site the typo reaches from.
+    def badPatientKind = false
+    try { Layout.patientDir('/out', 'P001', 'segmentaton') }
+    catch (IllegalArgumentException ignored) { badPatientKind = true }
+    assert badPatientKind, 'Layout.patientDir must reject an unknown kind'
+
     // println, NOT log.info: nf-test's underlying `nextflow ... -quiet` run
     // suppresses log.info from stdout entirely (observed directly: a log.info
     // line here never appears in workflow.stdout under nf-test, even though the
