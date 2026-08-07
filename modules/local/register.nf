@@ -12,7 +12,6 @@ process REGISTER {
     // multiple per-slide metas are grouped into a single patient-level invocation.
     // patient_id is the grouping key; all_metas carries the per-slide metadata list.
     tag "${patient_id}"
-    label 'process_high'
 
     // VALIS uses the maintained upstream image (linux/amd64); we do not rebuild
     // it (its from-source libvips build is heavy and not vendored). See containers/README.md.

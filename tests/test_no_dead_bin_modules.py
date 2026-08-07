@@ -81,29 +81,14 @@ HAYSTACK_EXCLUDE = {UTILS_DIR / "__init__.py"}
 #                         warning on every run, not just skipped quietly.
 _ALLOWED_STATUSES = {"permanent", "pending_removal"}
 
-ALLOWLIST = {
-    "reg_benchmark": {
-        "status": "permanent",
-        "reason": (
-            "bin/utils/reg_benchmark.py is the dependency of "
-            "bin/registration_benchmark.py, an unreferenced manual harness "
-            "documented in docs/parallel_registration_design.md. A sibling "
-            "`benchmarking` branch may depend on it (task-4 brief, explicit "
-            "do-not-delete list). Not a false negative in this test -- it is "
-            "genuinely unimported by anything under bin/ or tests/, and is kept "
-            "on purpose."
-        ),
-    },
-}
+ALLOWLIST: dict[str, dict[str, str]] = {}
 
 
 def _candidate_modules() -> list[Path]:
-    """bin/utils/**/*.py, excluding __init__.py and the vendored cse/ tree."""
+    """bin/utils/**/*.py, excluding __init__.py."""
     mods = []
     for path in sorted(UTILS_DIR.rglob("*.py")):
         if path.name == "__init__.py":
-            continue
-        if "cse" in path.relative_to(UTILS_DIR).parts:
             continue
         mods.append(path)
     return mods
@@ -230,9 +215,10 @@ def test_pending_removal_entries_are_flagged_loudly() -> None:
 
     A `pending_removal` entry marks temporary debt -- a module this test
     would otherwise flag as dead, with deletion deferred to a later task --
-    as opposed to a `permanent` entry like reg_benchmark, which is
-    deliberate standing policy. Deferring is a legitimate outcome, so this
-    test doesn't fail merely because one exists. But it must not be
+    as opposed to a `permanent` entry, which is deliberate standing policy
+    (e.g. a module deliberately kept for a documented external consumer).
+    Deferring is a legitimate outcome, so this test doesn't fail merely
+    because one exists. But it must not be
     possible to defer something and have it quietly age into permanence:
     every `pending_removal` entry is re-emitted as a pytest warning on
     *every* run, so it shows up in the warnings summary (which CI logs and

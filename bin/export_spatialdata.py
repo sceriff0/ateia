@@ -41,29 +41,14 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
 from logger import configure_logging, get_logger  # noqa: E402
-
-logger = get_logger(__name__)
-
-# Columns in the merged quantification CSV that describe geometry/identity rather
-# than marker signal. Kept in sync with bin/export_geojson.py::MORPHOLOGY_COLS.
-MORPHOLOGY_COLS = (
-    "label",
-    "y",
-    "x",
-    "area",
-    "eccentricity",
-    "perimeter",
-    "convex_area",
-    "axis_major_length",
-    "axis_minor_length",
-    "solidity",
-    "fov",
-    "cell_size",
+from measurements import (  # noqa: E402
+    COMPARTMENTS,
+    MORPHOLOGY_COLS,
+    STATISTICS,
+    identify_marker_columns,
 )
 
-# The measurement-key grammar shared with QuPath/FlowPath: "<marker>: <Compartment>: <Stat>".
-COMPARTMENTS = ("Nucleus", "Cytoplasm", "Cell")
-STATISTICS = ("Median", "Mean", "Sum")
+logger = get_logger(__name__)
 
 REGION_LABELS = "cell_mask"
 INSTANCE_KEY = "label"
@@ -89,15 +74,6 @@ def parse_measurement_key(key: str) -> Tuple[str, Optional[str], Optional[str]]:
                 if marker:
                     return marker, comp, stat
     return key, None, None
-
-
-def identify_marker_columns(df: pd.DataFrame) -> List[str]:
-    """Numeric columns that are marker measurements rather than morphology."""
-    return [
-        c
-        for c in df.columns
-        if c not in MORPHOLOGY_COLS and pd.api.types.is_numeric_dtype(df[c])
-    ]
 
 
 # ── QC sanitizing ──────────────────────────────────────────────────────────────

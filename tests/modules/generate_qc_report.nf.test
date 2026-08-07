@@ -50,4 +50,86 @@ nextflow_process {
         }
     }
 
+    test("Should render --registration-tre, not --valis-summary - rendered command") {
+
+        // Tagged `stub` so CI's blocking `nf-test test --tag stub` gate runs it, but
+        // deliberately WITHOUT `options "-stub"`. That is the whole point of the case:
+        // `-stub` never evaluates a `script:` block, so no stub run can observe a rendered
+        // command at all. The TRE rename this pins lives in exactly the two places `-stub`
+        // cannot see — the `--valis-summary` -> `--registration-tre` flag in `script:`, and
+        // the `stageAs: 'valis_summary/*'` -> `'registration_tre/*'` input directive — and
+        // a stub diff would have reported "identical" through the entire change. (Task 4
+        // hit the same blind spot with `${task.process}` in register.nf's script block,
+        // where the stub writes the literal STUB.)
+        //
+        // GENERATE_QC_REPORT is safe to run for real without a container on any host:
+        // bin/generate_qc_report.py is stdlib-only Python and Nextflow stages bin/ onto
+        // $PATH. Even so, the assertions read the rendered .command.sh / .command.run
+        // rather than process outcome, so the case holds whether the script itself
+        // succeeds or fails for unrelated environmental reasons. Same shape as
+        // tests/modules/convert_image.nf.test's rendered-command case (99bca24).
+        tag "stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    file('${projectDir}/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                ]
+                input[1] = [
+                    file('${projectDir}/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                ]
+                input[2] = [
+                    file('${projectDir}/tests/testdata/sample_valis_summary.csv', checkIfExists: true)
+                ]
+                input[3] = [
+                    file('${projectDir}/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                ]
+                input[4] = file('${projectDir}/tests/testdata/sample_versions.yml', checkIfExists: true)
+                input[5] = file('${projectDir}/tests/testdata/sample_run_summary.json', checkIfExists: true)
+                input[6] = [
+                    file('${projectDir}/tests/testdata/sample_seg_qc.json', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            // Nextflow lays tasks out as <workDir>/<2 hex>/<30 hex>/.command.{sh,run}.
+            def rendered = []
+            def staged   = []
+            new File("$workDir").eachFileRecurse { f ->
+                if (f.name == '.command.sh' && f.text.contains('generate_qc_report.py')) {
+                    rendered << f.text
+                    // .command.run is the STAGING script and never mentions the tool, so it
+                    // is found as the sibling of the .command.sh that does.
+                    def run = new File(f.parentFile, '.command.run')
+                    if (run.exists()) staged << run.text
+                }
+            }
+
+            assertAll(
+                { assert rendered.size() >= 1,
+                    "no rendered GENERATE_QC_REPORT .command.sh found under the task work dir" },
+                // The assertion with teeth: the exact flag+value substring of the rendered
+                // command. Against the pre-rename module this reads
+                // `--valis-summary valis_summary/` and both of these fail.
+                { assert rendered.every { it.contains('--registration-tre registration_tre/') },
+                    "rendered command: " + rendered.join(' --- ') },
+                { assert rendered.every { !it.contains('--valis-summary') },
+                    "rendered command still carries the VALIS-specific flag: " + rendered.join(' --- ') },
+                // The other half `-stub` cannot see: the `stageAs:` directive, which decides
+                // both what the script finds on disk and the folder name inside the published
+                // mirage_qc_data_*/ bundle. It appears in the staging script, not in
+                // .command.sh, so it needs its own assertion.
+                { assert staged.size() >= 1,
+                    "no GENERATE_QC_REPORT .command.run found under the task work dir" },
+                { assert staged.every { it.contains('registration_tre/') },
+                    "stageAs directory not renamed in the staging script" },
+                { assert staged.every { !it.contains('valis_summary/') },
+                    "staging script still stages into valis_summary/" }
+            )
+        }
+    }
+
 }

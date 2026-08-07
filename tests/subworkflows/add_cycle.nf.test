@@ -96,12 +96,27 @@ nextflow_workflow {
                 prior_outdir = "$projectDir/tests/testdata/prior_run"
                 reg_qc = 1
                 quantify_compartments = false
+                // ADD_CYCLE registers with VALIS unconditionally: it passes the
+                // LITERAL 'valis' to the shared REGISTER_PATIENT, never
+                // params.registration_method. workflows/mirage.nf rejects
+                // --registration_method tiled in add_cycle mode, but a caller that
+                // invokes ADD_CYCLE directly -- this test, for one -- bypasses that
+                // guard entirely, so the guarantee has to be pinned HERE too.
+                // tests/subworkflows/local/register_patient.nf.test proves
+                // REGISTER_PATIENT honours its argument; this proves add_cycle.nf
+                // passes the right one. Neither test alone is sufficient.
+                registration_method = 'tiled'
             }
         }
 
         then {
             assertAll(
                 { assert workflow.success },
+                // Set to 'tiled' above and still not tiled: the literal wins.
+                { assert workflow.trace.tasks().findAll {
+                    it.name.contains('TILED_') }.size() == 0 },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.contains('REGISTER') }.size() == 1 },
                 // The reusable masks come from the prior PYRAMID's embedded mask
                 // series, not from postprocessed.csv's cell_mask column: this pins
                 // that EXTRACT_MASK_SERIES really runs inside ADD_CYCLE.

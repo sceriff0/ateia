@@ -83,8 +83,8 @@ nextflow_workflow {
                 // One manifest per moving slide (the reference passes through unregistered) --
                 // the fan-in gather still reaches every slide's TILED_SOLVE with its control
                 // points, exactly as before this task's change.
-                { assert workflow.out.manifest_by_meta.size() == 2 },
-                { def patient_ids = workflow.out.manifest_by_meta.collect { it[0].patient_id }.toSorted()
+                { assert workflow.out.transform_by_slide.size() == 2 },
+                { def patient_ids = workflow.out.transform_by_slide.collect { it[0].patient_id }.toSorted()
                   assert patient_ids == ['P001', 'P002'] },
                 // Both moving slides + both references registered/passed through.
                 { assert workflow.out.registered.size() == 4 }

@@ -5,7 +5,7 @@
  *
  * The contract under test is that ONE module serves both callers even though they
  * contribute different sets of artifact kinds: add_cycle has no preprocess_qc, no
- * valis_summary and no postprocess_qc. If the missing kinds were not defaulted to
+ * registration_tre and no postprocess_qc. If the missing kinds were not defaulted to
  * an empty list inside the module, `.collect()` on an empty channel would simply
  * never emit and GENERATE_QC_REPORT would silently never run — a green pipeline
  * with no report. Hence the explicit task-count assertions rather than
@@ -27,7 +27,7 @@ nextflow_workflow {
                 input[0] = Channel.of(
                     ['preprocess_qc',   file('$projectDir/tests/testdata/sample_DAPI.tif')],
                     ['registration_qc', file('$projectDir/tests/testdata/sample_PANCK.tif')],
-                    ['valis_summary',   file('$projectDir/tests/testdata/sample_valis_summary.csv')],
+                    ['registration_tre', file('$projectDir/tests/testdata/sample_valis_summary.csv')],
                     ['postprocess_qc',  file('$projectDir/tests/testdata/sample_SMA.tif')],
                     ['seg_qc',          file('$projectDir/tests/testdata/sample_seg_qc.json')],
                     ['versions',        file('$projectDir/tests/testdata/sample_versions.yml')],
@@ -63,7 +63,7 @@ nextflow_workflow {
         when {
             workflow {
                 """
-                // No preprocess_qc / valis_summary / postprocess_qc: ADD_CYCLE re-uses
+                // No preprocess_qc / registration_tre / postprocess_qc: ADD_CYCLE re-uses
                 // the prior segmentation and does not re-expose PREPROCESSING's QC.
                 input[0] = Channel.of(
                     ['registration_qc', file('$projectDir/tests/testdata/sample_PANCK.tif')],

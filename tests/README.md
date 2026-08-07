@@ -251,8 +251,11 @@ nf-test test --profile test,docker
 # Specific process
 nf-test test tests/modules/segment.nf.test
 
-# In stub mode (faster)
-nf-test test --profile test,docker -stub
+# In stub mode (faster) -- matches CI's blocking gate: container-free, tag-filtered.
+# --profile test,docker with stub still resolves/pulls container images (and on
+# arm64, qemu-emulates amd64 ones) even though stub skips script: execution -- that
+# combination hangs. Use --profile test (no docker) instead.
+nf-test test --tag stub --profile test
 ```
 
 #### Run Validation Tests
@@ -442,7 +445,7 @@ nextflow run . -profile test -stub
 
 **Solution**: Check if running in stub mode
 ```bash
-nf-test test --profile test,docker -stub
+nf-test test --tag stub --profile test
 ```
 
 #### 5. "Import errors in Python tests"
@@ -511,7 +514,7 @@ pytest -v -s tests/  # -s shows print statements
 Before submitting a PR:
 
 - [ ] Python unit tests pass: `pytest -v tests/`
-- [ ] nf-tests pass: `nf-test test --profile test,docker -stub`
+- [ ] nf-tests pass: `nf-test test --tag stub --profile test`
 - [ ] Validation tests pass: `bash tests/run_validation_tests.sh`
 - [ ] Pipeline runs in stub mode: `nextflow run . -profile test,docker -stub`
 - [ ] New code has tests

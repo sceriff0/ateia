@@ -4,7 +4,6 @@
  */
 process COMPILE_PANEL {
     tag "panel"
-    label 'process_single'
 
     container "bolt3x/attend_image_analysis:quantification_gpu"
 

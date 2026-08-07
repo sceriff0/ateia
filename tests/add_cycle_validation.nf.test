@@ -1,0 +1,70 @@
+/*
+ * Characterisation test for ParamUtils.validateAddCycle's --outdir/--prior_outdir
+ * guard.
+ *
+ * add_cycle writes csv/registered.csv via collectFile(storeDir:), which OVERWRITES.
+ * If a user pointed --outdir at the very directory named by --prior_outdir, that
+ * write would clobber the prior run's complete registered.csv with add_cycle's
+ * partial one, while csv/postprocessed.csv (untouched by add_cycle) survives
+ * untouched -- leaving --prior_outdir internally inconsistent and the prior run
+ * unrecoverable. docs/add_cycle.md has always said to use a fresh --outdir; nothing
+ * enforced it until now.
+ *
+ * The check compares CANONICAL paths, not raw strings, so it must still fire when
+ * the two flags spell the same directory differently (trailing slash, a `.`
+ * segment) -- a bare string compare would miss exactly that case.
+ *
+ * Tagged "stub" because CI's blocking gate is `nf-test test --tag stub`.
+ */
+
+nextflow_pipeline {
+
+    name "add_cycle: --outdir must not equal --prior_outdir"
+    script "main.nf"
+
+    tag "pipeline"
+    tag "add_cycle_validation"
+
+    test("Should reject --outdir == --prior_outdir (same path, different spelling)") {
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                input        = "$projectDir/tests/testdata/new_cycle.csv"
+                // Same directory as prior_outdir, spelled with a trailing '/.' --
+                // proves the comparison is canonical, not a raw string compare.
+                outdir       = "$projectDir/tests/testdata/prior_run/."
+                mode         = 'add_cycle'
+                prior_outdir = "$projectDir/tests/testdata/prior_run"
+            }
+        }
+
+        then {
+            def report = (workflow.stdout + workflow.stderr).join('\n') + (workflow.errorReport ?: '') + (workflow.errorMessage ?: '')
+            assertAll(
+                { assert workflow.failed },
+                { assert report.contains("--outdir") },
+                { assert report.contains("--prior_outdir") }
+            )
+        }
+    }
+
+    test("Should accept --outdir != --prior_outdir") {
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                input        = "$projectDir/tests/testdata/new_cycle.csv"
+                outdir       = "$outputDir"
+                mode         = 'add_cycle'
+                prior_outdir = "$projectDir/tests/testdata/prior_run"
+            }
+        }
+
+        then {
+            assert workflow.success
+        }
+    }
+}

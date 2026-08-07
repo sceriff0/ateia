@@ -1,0 +1,247 @@
+/*
+ * Layout - the pipeline's one description of WHERE A FILE LANDS under --outdir.
+ *
+ * `conf/modules.config` decides where each process actually publishes. Everything
+ * else that needs to KNOW that answer - the checkpoint CSVs that record published
+ * paths for a later `--start`, the add_cycle reader that opens a prior run's
+ * checkpoints, the validator that asserts they exist, the onComplete resource
+ * report - used to restate the rule by hand. Six independent copies, kept in
+ * agreement only by eye:
+ *
+ *   1. subworkflows/local/preprocess.nf   "<outdir>/<pid>/preprocessed/<name>"
+ *                                          + collectFile storeDir "<outdir>/csv"
+ *   2. subworkflows/local/registration.nf "<outdir>/<pid>/registered/<rel>" and the
+ *                                          work-hash heuristic that derived <rel>
+ *   3. subworkflows/local/postprocess.nf   five "<outdir>/<pid>/<kind>/<name>"
+ *                                          templates (geojson x2, quantification,
+ *                                          segmentation, pyramid)
+ *   4. subworkflows/local/add_cycle.nf     "<prior_outdir>/csv/registered.csv" and
+ *                                          "<prior_outdir>/csv/postprocessed.csv"
+ *   5. lib/ParamUtils.groovy               the same two relative paths again, as
+ *                                          literals in the add_cycle precondition
+ *   6. workflows/mirage.nf / main.nf       "<prior_outdir>/csv/postprocessed.csv",
+ *                                          "<outdir>/size_logs/...", "<outdir>/qc"
+ *
+ * All six now come through here. When the published layout changes, change it in
+ * conf/modules.config and in this class - and nowhere else. DO NOT re-scatter a
+ * path template into a workflow file: the whole point of this class is that the
+ * next contributor has something to ask instead of something to re-derive.
+ *
+ * SCOPE. This class describes the layout; it does not enforce it. The publishDir
+ * blocks in conf/modules.config are deliberately NOT routed through here (they run
+ * in a different evaluation context and rewriting them would change publish
+ * behaviour). So this class must be kept in agreement with them by hand - but that
+ * is one agreement to maintain instead of six.
+ *
+ * All methods are static and take `outdir` as an ARGUMENT; nothing here reads
+ * `params`. lib/*.groovy is called from many contexts (workflow closures,
+ * onComplete, unit tests) and a static class reaching into `params` is neither
+ * testable nor safe. Follows lib/ParamUtils.groovy, which receives params the
+ * same way.
+ */
+class Layout {
+
+    /* ------------------------------------------------------------------ *
+     * Checkpoint CSVs
+     * ------------------------------------------------------------------ */
+
+    /** Run-level directory (relative to --outdir) holding the checkpoint CSVs. */
+    static final String CSV_DIR = 'csv'
+
+    /**
+     * The checkpoint step names. These are the CSV basenames AND the `--start` /
+     * `--stop` vocabulary minus the "-ing" (`preprocessing` writes `preprocessed.csv`),
+     * which is exactly the sort of near-miss that produced the hardcoded literals this
+     * class replaces. Use the constants, never the strings.
+     */
+    static final String PREPROCESSED  = 'preprocessed'
+    static final String REGISTERED    = 'registered'
+    static final String POSTPROCESSED = 'postprocessed'
+
+    static final List<String> CHECKPOINT_STEPS =
+        [PREPROCESSED, REGISTERED, POSTPROCESSED].asImmutable()
+
+    /** The two checkpoints a `mode='add_cycle'` run reads out of --prior_outdir. */
+    static final List<String> ADD_CYCLE_CHECKPOINTS =
+        [REGISTERED, POSTPROCESSED].asImmutable()
+
+    private static String requireStep(String step) {
+        if (!CHECKPOINT_STEPS.contains(step))
+            throw new IllegalArgumentException(
+                "Unknown checkpoint step: '${step}'. Valid: ${CHECKPOINT_STEPS}")
+        return step
+    }
+
+    private static String requireOutdir(def outdir) {
+        def s = outdir?.toString()
+        if (!s?.trim())
+            throw new IllegalArgumentException(
+                "Layout needs an output directory; got ${outdir == null ? 'null' : "'${outdir}'"}. " +
+                "Pass params.outdir (or params.prior_outdir) explicitly.")
+        return stripTrailingSlash(s)
+    }
+
+    private static String stripTrailingSlash(String s) {
+        return s.length() > 1 && s.endsWith('/') ? s[0..-2] : s
+    }
+
+    /** `<outdir>/csv` - the collectFile storeDir every checkpoint CSV is written to. */
+    static String checkpointDir(def outdir) {
+        return "${requireOutdir(outdir)}/${CSV_DIR}"
+    }
+
+    /** `<step>.csv` - the collectFile `name:` for a checkpoint. */
+    static String checkpointCsvName(String step) {
+        return "${requireStep(step)}.csv"
+    }
+
+    /** `csv/<step>.csv` - outdir-relative, for messages and existence checks. */
+    static String checkpointCsvRelative(String step) {
+        return "${CSV_DIR}/${checkpointCsvName(step)}"
+    }
+
+    /** `<outdir>/csv/<step>.csv` - the absolute checkpoint path. */
+    static String checkpointCsv(def outdir, String step) {
+        return "${requireOutdir(outdir)}/${checkpointCsvRelative(step)}"
+    }
+
+    /* ------------------------------------------------------------------ *
+     * Published directories
+     * ------------------------------------------------------------------ */
+
+    /**
+     * `<outdir>/<patient_id>/<kind>` - the per-patient publish root.
+     *
+     * `kind` is the leaf conf/modules.config publishes into: 'preprocessed',
+     * 'registered', 'segmentation', 'quantification', 'geojson', 'pyramid', ...
+     */
+    static String patientDir(def outdir, def patientId, String kind) {
+        if (!patientId?.toString()?.trim())
+            throw new IllegalArgumentException("Layout.patientDir: patient_id is required")
+        if (!kind?.trim())
+            throw new IllegalArgumentException("Layout.patientDir: kind is required")
+        return "${requireOutdir(outdir)}/${patientId}/${kind}"
+    }
+
+    /** `<outdir>/<kind>` - a run-level (not per-patient) publish directory. */
+    static String runDir(def outdir, String kind) {
+        if (!kind?.trim())
+            throw new IllegalArgumentException("Layout.runDir: kind is required")
+        return "${requireOutdir(outdir)}/${kind}"
+    }
+
+    /**
+     * `<outdir>/<patient_id>/<kind>/[<producer subdir>/]<basename>` - where `file`
+     * will be published.
+     *
+     * A process that writes into a named subdirectory of its task directory and
+     * publishes with a `pattern:` that names that subdirectory gets the subdirectory
+     * carried into the published path. conf/modules.config does this in three places:
+     *
+     *   REGISTER (VALIS)  pattern 'registered_slides/*_registered.ome.tiff'
+     *                     -> <outdir>/<pid>/registered/registered_slides/<name>
+     *   TILED_REGISTER /  pattern 'registered/*_registered.ome.tiff'
+     *   TILED_STITCH      -> <outdir>/<pid>/registered/registered/<name>
+     *   EXPORT_GEOJSON    output path("export/cells.geojson"), published bare
+     *                     -> <outdir>/<pid>/geojson/export/cells.geojson
+     *
+     * So this is NOT an option a caller opts into - a caller that forgets records a
+     * path that does not exist, which is exactly how csv/postprocessed.csv came to
+     * name <pid>/geojson/cells.geojson for two releases. Preserving the producer
+     * subdirectory is the DEFAULT and the only behaviour; there is deliberately no
+     * basename-only variant to pick by mistake. tests/checkpoint_manifest.nf.test
+     * asserts the consequence: no checkpoint row ever names a missing file.
+     */
+    static String publishedPath(def outdir, def patientId, String kind, def file) {
+        def sub = producerSubdir(file)
+        def rel = sub ? "${sub}/${basename(file)}" : basename(file)
+        return "${patientDir(outdir, patientId, kind)}/${rel}"
+    }
+
+    /**
+     * Where a slide that was NOT registered will be published.
+     *
+     * A single-slide patient has nothing to register, so registration.nf branches its
+     * reference straight through (`ch_passthrough`); the tiled backend does the same
+     * for every patient's reference, which defines the frame and is never warped.
+     * NOTHING publishes those into `<pid>/registered/` - no process emitted them -
+     * so recording them there names a file that does not exist. Verified against a
+     * stub run: a single-slide patient's output tree contains no `P001/registered/`
+     * directory at all.
+     *
+     * The slide is still published, just by whoever produced it:
+     *
+     *   produced by PREPROCESS this run  -> <outdir>/<pid>/preprocessed/<name>
+     *   supplied by a `--start registration` samplesheet -> already an absolute
+     *                                       path to an existing file; record it as is
+     *
+     * `isTaskDir` tells the two apart exactly: a file at the top of a Nextflow task
+     * directory came from a task in this run, anything else came from outside it.
+     */
+    static String passthroughPath(def outdir, def patientId, def file) {
+        def path = resolve(file)
+        if (path == null)
+            throw new IllegalArgumentException("Layout.passthroughPath: no file given")
+        return isTaskDir(path.parent)
+            ? publishedPath(outdir, patientId, PREPROCESSED, path)
+            : path.toString()
+    }
+
+    /**
+     * The subdirectory a producer emitted `file` into, or '' when it emitted straight
+     * into its task directory.
+     *
+     * This used to be a LENGTH heuristic ("a Nextflow work dir is a 32-hex-char hash")
+     * living in subworkflows/local/registration.nf, and it was WRONG: Nextflow splits
+     * the hash as `<work>/<2 hex>/<30 hex>`, so a task directory name is 30 characters,
+     * never 32, and the test never once fired. Nobody noticed because on the VALIS path
+     * every registered file really does have a `registered_slides/` parent. The one
+     * case the test existed to catch - a file emitted bare into its task dir - was
+     * silently mis-recorded as `<pid>/registered/<30-hex-hash>/<name>`.
+     * tests/checkpoint_manifest.nf.test found it on its first run.
+     *
+     * It is now a STRUCTURAL test (see isTaskDir), not a length guess.
+     */
+    static String producerSubdir(def file) {
+        def path = resolve(file)
+        def parent = path?.parent
+        if (parent == null) return ''
+        return isTaskDir(parent) ? '' : (parent.name?.toString() ?: '')
+    }
+
+    /**
+     * True when `dir` is a Nextflow task directory: `<workDir>/<2 hex>/<30 hex>`.
+     *
+     * Both halves are checked. The name alone would misclassify a genuine output
+     * subdirectory that happened to be hex-shaped; requiring the two-character hex
+     * parent as well makes a false positive essentially impossible. The width is
+     * accepted as 30..32 rather than pinned at 30 so a future Nextflow that widens
+     * the hash keeps working - the two-char parent is the load-bearing half.
+     */
+    static boolean isTaskDir(def dir) {
+        if (dir == null) return false
+        def name = dir.name?.toString()
+        if (!name || !name.matches(/^[0-9a-f]{30,32}$/)) return false
+        def prefix = dir.parent?.name?.toString()
+        return prefix != null && prefix.matches(/^[0-9a-f]{2}$/)
+    }
+
+    /* ------------------------------------------------------------------ *
+     * Internals
+     * ------------------------------------------------------------------ */
+
+    /**
+     * Nextflow unwraps a single-element output glob to a bare Path but leaves a
+     * multi-element one a List; callers hand us whichever they got.
+     */
+    private static def resolve(def file) {
+        return file instanceof List ? (file ? file[0] : null) : file
+    }
+
+    private static String basename(def file) {
+        def path = resolve(file)
+        if (path == null)
+            throw new IllegalArgumentException("Layout: no file given")
+        return path.name.toString()
+    }
+}

@@ -16,7 +16,13 @@
  *     registration.nf.test sets skip_registration_qc = true in every params block (so it
  *     never reaches reg_qc >= 1 at all) and add_cycle.nf.test is VALIS-only.
  *
- * The registrar pickle / stage checkpoint / transform manifest are opaque `path` inputs to
+ * The method arrives as an ARGUMENT (input[4]), never from params.registration_method. The
+ * params blocks below still set the param, and deliberately so: in the two valis cases the
+ * param says 'valis' and in the tiled case it says 'tiled', so if the argument were ever
+ * ignored the cases would still pass. What pins the argument is
+ * tests/subworkflows/local/register_patient.nf.test's pair of arg-vs-param mismatch cases.
+ *
+ * The per-patient transform / stage checkpoint / per-slide transform are opaque `path` inputs to
  * the warp processes and are never read in stub mode, so small tracked fixtures stand in
  * for them. (In a real run the checkpoint is a directory; the distinction does not reach
  * the channel logic under test.)
@@ -72,8 +78,9 @@ nextflow_workflow {
                     ['P001', file('$projectDir/tests/testdata/sample_size_log1.csv')]
                 )
 
-                // tiled-only channel, unused on this branch
+                // tiled-only channel, unused on this branch -- the adapters' null object
                 input[3] = Channel.empty()
+                input[4] = 'valis'
                 """
             }
         }
@@ -124,6 +131,7 @@ nextflow_workflow {
                 // whole QC path; `remainder: true` keeps it total.
                 input[2] = Channel.empty()
                 input[3] = Channel.empty()
+                input[4] = 'valis'
                 """
             }
         }
@@ -178,6 +186,7 @@ nextflow_workflow {
                     [[patient_id: 'P002', id: 'P002_mov1', is_reference: false, channels: ['DAPI', 'CD3']],
                      file('$projectDir/tests/testdata/model_config_min.json')]
                 ])
+                input[4] = 'tiled'
                 """
             }
         }
@@ -192,6 +201,83 @@ nextflow_workflow {
                 // The tiled scorer reports its own stage set, proving WARP_SEG_QC_TILED ran
                 // rather than the VALIS process.
                 { assert path(workflow.out.metrics[0][1]).json.stage_order == ['native', 'rigid', 'refined'] }
+            )
+        }
+    }
+
+    test("the method ARGUMENT wins over params.registration_method") {
+
+        tag "stub"
+        options "-stub"
+
+        // The guard for the whole point of Task 5: SEG_QC dispatches on its `method`
+        // argument, never on the global. Without this case every other test in this file
+        // sets params.registration_method to AGREE with input[4], so reverting seg_qc.nf's
+        // `if (method == 'tiled')` back to `if (params.registration_method == 'tiled')`
+        // would leave the entire suite green -- exactly the one-hop-short shape that
+        // add_cycle.nf.test had before Task 4 closed it. Mirrors
+        // register_patient.nf.test's pair of arg-vs-param mismatch cases one level up.
+        //
+        // The param says tiled; the caller says valis. The caller must win.
+        //
+        // CRITICAL to the design of this case: BOTH transform channels are populated, and
+        // both are valid for their own branch. If input[3] were empty (as it is in the two
+        // valis cases above), the tiled branch would produce zero warp tasks anyway and the
+        // WARP_SEG_QC_TILED == 0 assertion would pass VACUOUSLY -- it would prove nothing
+        // about which branch ran. With both populated, each branch produces warp tasks, so
+        // the only thing that decides which process appears in the trace is the argument.
+
+        when {
+            params {
+                outdir = "$outputDir"
+                registration_method = 'tiled'
+            }
+            workflow {
+                """
+                input[0] = Channel.fromList([
+                    [[patient_id: 'P001', id: 'P001_ref',  is_reference: true,  channels: ['DAPI', 'PANCK']],
+                     file('$projectDir/tests/testdata/P001_ref.ome.tiff',  checkIfExists: true)],
+                    [[patient_id: 'P001', id: 'P001_mov1', is_reference: false, channels: ['DAPI', 'CD3']],
+                     file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)]
+                ])
+
+                // Per-patient transform — what the valis branch joins on.
+                input[1] = Channel.of(
+                    ['P001', file('$projectDir/tests/testdata/sample_versions.yml')]
+                )
+
+                input[2] = Channel.empty()
+
+                // Per-slide transform, correctly keyed — what the tiled branch joins on.
+                // Populated on purpose: the tiled branch WOULD produce a warp task from
+                // this, so WARP_SEG_QC_TILED == 0 below is a real observation.
+                input[3] = Channel.of(
+                    [[patient_id: 'P001', id: 'P001_mov1', is_reference: false, channels: ['DAPI', 'CD3']],
+                     file('$projectDir/tests/testdata/model_config_min.json')]
+                )
+
+                input[4] = 'valis'
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                // `\b` discriminates the two process names: WARP_SEG_QC is a prefix of
+                // WARP_SEG_QC_TILED, but `_` is a word character so no boundary follows
+                // WARP_SEG_QC there. Same idiom as register_patient.nf.test's REGISTER\b.
+                { assert workflow.trace.tasks().findAll {
+                    it.name.contains('WARP_SEG_QC_TILED')
+                }.size() == 0 },
+                { assert workflow.trace.tasks().findAll {
+                    it.name =~ /(^|:)WARP_SEG_QC\b/
+                }.size() > 0 },
+                { assert workflow.out.metrics.size() == 1 },
+                // Positive confirmation, not just absence: the VALIS scorer reports its own
+                // four-stage set, the tiled one reports ['native', 'rigid', 'refined'].
+                { assert path(workflow.out.metrics[0][1]).json.stage_order ==
+                         ['native', 'rigid', 'non_rigid', 'micro'] }
             )
         }
     }

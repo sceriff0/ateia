@@ -13,6 +13,30 @@
                          per tile) -> TILED_SOLVE -> TILED_STITCH. Maximises parallelism.
 
     Input:  ch_grouped_meta - Channel of [patient_id, reference_item, all_items]
+
+    THE ADAPTER CONTRACT (identical in adapters/valis_adapter.nf, and binding on any third
+    adapter). Every registration adapter takes [patient_id, reference_item, all_items]
+    and emits EXACTLY these names:
+
+        registered          [meta, file]                registered slides (+ passthroughs)
+        transform           [patient_id, transform]     ONE transform object per patient
+        transform_by_slide  [meta, transform]           one transform per MOVING slide
+        stage_checkpoint    [patient_id, dir]           intermediate-stage fields
+        intrinsic_tre       file                        the method's OWN target-registration
+                                                        -error estimate, whatever its format
+        size_logs / versions
+
+    `intrinsic_tre` is deliberately NOT named after any one method. Both shipped backends
+    estimate a TRE from their own registration -- VALIS a feature-distance CSV, STARE a
+    *_tre.json -- and the seam used to call the slot `summary` and then re-emit it as
+    `valis_summary`, which pinned one method's name into the artifact vocabulary all the way
+    out to the QC report. Formats are NOT normalised here; that is the reader's job.
+
+    A method that produces no artifact for one of these emits `Channel.empty()` for it --
+    a NULL OBJECT, never a missing emit and never an error. That is what lets
+    REGISTER_PATIENT wire both backends with one short branch, and it is why nothing
+    downstream of that branch has to know which method ran. A future adapter inherits the
+    rule: declare every name; empty the ones your method cannot produce.
 ========================================================================================
 */
 
@@ -62,8 +86,13 @@ workflow TILED_ADAPTER {
     ch_grouped_meta   // [patient_id, reference_item, all_items]
 
     main:
-    // The reference is the frame — it passes through unregistered.
-    ch_reference = ch_grouped_meta.map { _pid, ref_item, _items -> ref_item }  // [meta, file]
+    // The reference is the frame — it passes through unregistered. is_passthrough says
+    // so to registration.nf's checkpoint writer: an unwarped reference is published by
+    // whoever produced it, not into <pid>/registered/ where no tiled process writes it.
+    // Map addition, never meta.clone() — see the aliasing note at valis_adapter.nf:82-88.
+    ch_reference = ch_grouped_meta.map { _pid, ref_item, _items ->
+        [ref_item[0] + [is_passthrough: true], ref_item[1]]
+    }  // [meta, file]
 
     // One stream item per moving (non-reference) slide: [meta, reference_file, moving_file].
     ch_moving = ch_grouped_meta.flatMap { _pid, ref_item, items ->
@@ -132,27 +161,33 @@ workflow TILED_ADAPTER {
             .mix(TILED_REG_TILE.out.versions.first())
             .mix(TILED_SOLVE.out.versions.first())
             .mix(TILED_STITCH.out.versions.first())
-        ch_summary           = TILED_SOLVE.out.tre.map { _meta, f -> f }
+        ch_intrinsic_tre     = TILED_SOLVE.out.tre.map { _meta, f -> f }
     } else {
         TILED_REGISTER(ch_moving)
         ch_registered_moving = TILED_REGISTER.out.registered
         ch_manifest_by_meta  = TILED_REGISTER.out.manifest
         ch_size_logs         = TILED_REGISTER.out.size_log
         ch_versions          = TILED_REGISTER.out.versions.first()
-        ch_summary           = TILED_REGISTER.out.tre.map { _meta, f -> f }
+        ch_intrinsic_tre     = TILED_REGISTER.out.tre.map { _meta, f -> f }
     }
 
     ch_registered = ch_registered_moving.mix(ch_reference)
 
     emit:
     registered       = ch_registered
-    // Manifest keyed by patient, mirroring VALIS_ADAPTER.out.registrar.
-    manifest         = ch_manifest_by_meta.map { meta, m -> tuple(meta.patient_id, m) }
-    // Same manifests keyed by meta — the reg_qc=2 seg-QC joins one manifest per moving slide.
-    manifest_by_meta = ch_manifest_by_meta
-    // The tiled method composes no stages destructively, so it needs no pre-micro checkpoint.
+    // The STARE transform manifest keyed by patient — the same slot VALIS fills with its
+    // registrar pickle. A patient with several moving slides contributes several items here.
+    transform        = ch_manifest_by_meta.map { meta, m -> tuple(meta.patient_id, m) }
+    // The same manifests keyed by meta. Unlike VALIS, the tiled method DOES have one transform
+    // per moving slide, and the reg_qc=2 seg-QC joins them per slide.
+    transform_by_slide = ch_manifest_by_meta
+    // The tiled method composes no stages destructively, so it needs no pre-micro checkpoint:
+    // the null object the contract above requires.
     stage_checkpoint = Channel.empty()
     size_logs        = ch_size_logs
     versions         = ch_versions
-    summary          = ch_summary
+    // STARE's intrinsic TRE: *_tre.json from bin/utils/tre_report.py. A DIFFERENT format
+    // from VALIS's CSV, on purpose — the channel vocabulary is unified, the file formats
+    // are not, and teaching the report reader both shapes is a separate change.
+    intrinsic_tre    = ch_intrinsic_tre
 }

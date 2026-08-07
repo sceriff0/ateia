@@ -18,13 +18,13 @@
     positional channels. A caller mixes in what it has; a kind nobody contributes
     simply yields an empty branch here, which is what removes the
     `Channel.empty().collect().ifEmpty([])` placeholders both callers used to
-    repeat. (add_cycle contributes no preprocess_qc / valis_summary /
+    repeat. (add_cycle contributes no preprocess_qc / registration_tre /
     postprocess_qc: it calls PREPROCESSING internally without re-exposing its QC
     pngs, and it has no POSTPROCESSING step at all — masks are reused, not
     re-segmented.)
 
     Recognised kinds:
-      preprocess_qc | registration_qc | valis_summary | postprocess_qc | seg_qc
+      preprocess_qc | registration_qc | registration_tre | postprocess_qc | seg_qc
         -> staged into the matching GENERATE_QC_REPORT input directory
       versions   -> deduplicated and collated into collated_versions.yml
       size_log   -> merged into raw_input_sizes.csv for AGGREGATE_SIZE_LOGS
@@ -63,19 +63,22 @@ include { GENERATE_QC_REPORT  } from '../../modules/local/generate_qc_report'
 // 11 in the standard path) and nothing else checks that the two vocabularies
 // agree — so this list is the check.
 //
+// Derived from ParamUtils.STEPS (lib/ParamUtils.groovy), the single table
+// answering "what is a step?": each step's own `qcKinds` (preprocess_qc /
+// registration_qc+registration_tre+seg_qc / postprocess_qc) plus the two kinds
+// every step emits and which therefore belong to no single step,
+// UNIVERSAL_QC_KINDS ('versions', 'size_log' -- see the header comment there).
+//
+// The registration_tre entry is the registration method's OWN target-registration-error
+// estimate. NOT named after a method: both backends produce one (VALIS a feature-distance
+// CSV, STARE a *_tre.json) and a backend that produced none would contribute nothing, which
+// the .collect().ifEmpty([]) below already tolerates.
+//
 // Deliberately a bare top-level assignment, not `def`: a script-level `def` in
 // Groovy is scoped to this file's implicit `run()` method and would be
 // invisible to artifactsOf()/buildManifest() below even though they live in
 // the same file. This looks like a missing `def` but is not one.
-KNOWN_ARTIFACT_KINDS = [
-    'preprocess_qc',
-    'registration_qc',
-    'valis_summary',
-    'postprocess_qc',
-    'seg_qc',
-    'versions',
-    'size_log',
-]
+KNOWN_ARTIFACT_KINDS = ParamUtils.STEPS.collectMany { it.qcKinds } + ParamUtils.UNIVERSAL_QC_KINDS
 
 // Pull one kind out of the tagged artifact stream. Nextflow channels are
 // broadcast, so applying this repeatedly to the same source is fine.
@@ -191,7 +194,7 @@ workflow FINAL_QC {
         GENERATE_QC_REPORT(
             artifactsOf(ch_artifacts, 'preprocess_qc').collect().ifEmpty([]),
             artifactsOf(ch_artifacts, 'registration_qc').collect().ifEmpty([]),
-            artifactsOf(ch_artifacts, 'valis_summary').collect().ifEmpty([]),
+            artifactsOf(ch_artifacts, 'registration_tre').collect().ifEmpty([]),
             artifactsOf(ch_artifacts, 'postprocess_qc').collect().ifEmpty([]),
             artifactsOf(ch_artifacts, 'versions').unique().collectFile(name: 'collated_versions.yml'),
             ch_run_summary,

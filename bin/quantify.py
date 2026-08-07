@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent / "utils"))
 # Import from lib for DRY principle
 from image_utils import ensure_dir, load_image
 from logger import configure_logging, get_logger
+from measurements import COMPARTMENTS
 
 logger = get_logger(__name__)
 
@@ -37,7 +38,8 @@ __all__ = [
 
 # Per-compartment quantification: compartment names in the order they are emitted.
 # These become part of the QuPath measurement key "<marker>: <Compartment>: <Stat>".
-COMPARTMENT_NAMES = ("Nucleus", "Cytoplasm", "Cell")
+# (single source of truth: bin/utils/measurements.py)
+COMPARTMENT_NAMES = COMPARTMENTS
 
 
 def _safe_mean(sums: NDArray, counts: NDArray) -> NDArray:

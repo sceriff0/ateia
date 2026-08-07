@@ -39,9 +39,10 @@ workflow.onComplete {
     try {
         def script    = "${projectDir}/bin/generate_resource_report.py"
         def trace_txt = "${params.trace_dir}/trace.txt"
-        def size_log  = "${params.outdir}/size_logs/input_sizes.csv"
-        def out_html  = "${params.outdir}/qc/mirage_resource_report.html"
-        new File("${params.outdir}/qc").mkdirs()
+        def size_log  = "${Layout.runDir(params.outdir, 'size_logs')}/input_sizes.csv"
+        def qc_dir    = Layout.runDir(params.outdir, 'qc')
+        def out_html  = "${qc_dir}/mirage_resource_report.html"
+        new File(qc_dir).mkdirs()
         def cmd = [
             'python3', script,
             '--trace', trace_txt,

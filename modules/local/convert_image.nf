@@ -3,7 +3,6 @@
  */
 process CONVERT_IMAGE {
     tag "${meta.patient_id}"
-    label 'process_medium'
 
     container "bolt3x/attend_image_analysis:convert_bioformats_2"
 

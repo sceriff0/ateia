@@ -39,7 +39,7 @@ workflow MIRAGE {
 
     /* -------------------- MODE: ADD_CYCLE -------------------- */
     if (params.mode == 'add_cycle') {
-        ParamUtils.validateAddCycle(params.prior_outdir)
+        ParamUtils.validateAddCycle(params.outdir, params.prior_outdir)
         ParamUtils.validateCompartmentQuant(params.quantify_compartments, params.expanded_quantification)
         ParamUtils.validateAddCyclePhenotyping(params)  // add_cycle has no PHENOTYPE stage
         // add_cycle re-registers the new cycle via the classic VALIS_ADAPTER only; the
@@ -62,7 +62,7 @@ workflow MIRAGE {
         // Fast-fail: every new-cycle patient must exist in the prior run's
         // postprocessed checkpoint, else its masks/base-table can't be sourced.
         def newPatients   = CsvUtils.countImagesPerPatient(params.input).keySet()
-        def priorPostCsv  = "${params.prior_outdir}/csv/postprocessed.csv"
+        def priorPostCsv  = Layout.checkpointCsv(params.prior_outdir, Layout.POSTPROCESSED)
         def priorPatients = CsvUtils.countImagesPerPatient(priorPostCsv).keySet()
         def orphans = newPatients - priorPatients
         if (orphans) {
@@ -71,7 +71,7 @@ workflow MIRAGE {
         }
 
         if (params.dry_run) {
-            log.info "DRY RUN (add_cycle): validations passed for --input=${params.input}, --prior_outdir=${params.prior_outdir}; mask extraction will run against ${params.prior_outdir}/csv/postprocessed.csv's pyramid column."
+            log.info "DRY RUN (add_cycle): validations passed for --input=${params.input}, --prior_outdir=${params.prior_outdir}; mask extraction will run against ${priorPostCsv}'s pyramid column."
             return
         }
 
@@ -84,7 +84,7 @@ workflow MIRAGE {
         // --prior_outdir's checkpoint CSVs.
         ADD_CYCLE(INPUT_CHECK.out.samples)
 
-        // ADD_CYCLE has no preprocess_qc / valis_summary / postprocess_qc of its own
+        // ADD_CYCLE has no preprocess_qc / registration_tre / postprocess_qc of its own
         // (it calls PREPROCESSING internally without re-exposing its QC pngs, and has
         // no POSTPROCESSING step at all — masks are reused, not re-segmented). Those
         // kinds are simply not contributed; FINAL_QC defaults them to empty.
@@ -149,11 +149,7 @@ workflow MIRAGE {
     // checkpoint CSV names the file that step produced. Later steps consume the
     // previous step's channel directly (streaming, patient-level parallelism), so
     // only the entry step ever reads the sheet.
-    def entry_column = [
-        preprocessing : 'path_to_file',
-        registration  : 'preprocessed_image',
-        postprocessing: 'registered_image',
-    ][params.start]
+    def entry_column = ParamUtils.entryColumnForStep(params.start)
 
     // autoReference = params.allow_auto_reference: when a patient marks no reference,
     // registration.nf promotes its first image, which keeps that slide's nuclear
@@ -170,7 +166,7 @@ workflow MIRAGE {
 
     if (run_registration) {
         REGISTRATION(
-            params.start == 'registration'
+            ParamUtils.isEntryPoint(params, 'registration')
                 ? INPUT_CHECK.out.samples
                 : PREPROCESSING.out.preprocessed  // Direct channel - enables patient-level parallelism!
         )
@@ -180,7 +176,7 @@ workflow MIRAGE {
 
     if (run_postprocessing) {
 
-        def ch_for_postprocessing = params.start == 'postprocessing'
+        def ch_for_postprocessing = ParamUtils.isEntryPoint(params, 'postprocessing')
             ? INPUT_CHECK.out.samples
             : REGISTRATION.out.registered  // Direct channel - enables patient-level parallelism!
 
@@ -188,10 +184,10 @@ workflow MIRAGE {
         // when REGISTRATION actually ran in this session — with --start postprocessing
         // there is no REGISTRATION output to reference, so pass empty channels and let
         // the export write a store without registration QC rather than fail.
-        def ch_reg_qc_for_post = params.start == 'postprocessing'
+        def ch_reg_qc_for_post = ParamUtils.isEntryPoint(params, 'postprocessing')
             ? Channel.empty()
             : REGISTRATION.out.seg_qc
-        def ch_reg_residuals_for_post = params.start == 'postprocessing'
+        def ch_reg_residuals_for_post = ParamUtils.isEntryPoint(params, 'postprocessing')
             ? Channel.empty()
             : REGISTRATION.out.seg_residuals
 
@@ -214,11 +210,11 @@ workflow MIRAGE {
     }
     if (run_registration) {
         ch_qc_artifacts = ch_qc_artifacts
-            .mix(REGISTRATION.out.qc.map            { _meta, files -> ['registration_qc', files] })
-            .mix(REGISTRATION.out.seg_qc.map        { _meta, files -> ['seg_qc', files] })
-            .mix(REGISTRATION.out.valis_summary.map { f -> ['valis_summary', f] })
-            .mix(REGISTRATION.out.versions.map      { f -> ['versions', f] })
-            .mix(REGISTRATION.out.size_logs.map     { f -> ['size_log', f] })
+            .mix(REGISTRATION.out.qc.map               { _meta, files -> ['registration_qc', files] })
+            .mix(REGISTRATION.out.seg_qc.map           { _meta, files -> ['seg_qc', files] })
+            .mix(REGISTRATION.out.registration_tre.map { f -> ['registration_tre', f] })
+            .mix(REGISTRATION.out.versions.map         { f -> ['versions', f] })
+            .mix(REGISTRATION.out.size_logs.map        { f -> ['size_log', f] })
     }
     if (run_postprocessing) {
         ch_qc_artifacts = ch_qc_artifacts
