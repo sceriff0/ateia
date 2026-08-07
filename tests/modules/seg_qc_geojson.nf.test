@@ -98,14 +98,17 @@ nextflow_process {
                     "rendered command missing --pmin/--pmax: " + rendered.join(' --- ') },
                 { assert rendered.every { it.contains('--prob-thresh 0.3') },
                     "rendered command missing --prob-thresh: " + rendered.join(' --- ') },
-                // Two things this shared list must NOT leak in either direction:
-                // --model-dir is conditional on segmentation_model_dir (null under the
-                // test profile), and --expand-distance is SEGMENT-only (starDistCommonFlags()'s
-                // class comment explains why SEG_QC_GEOJSON has no equivalent knob).
+                // --expand-distance is shared too: bin/segment_to_geojson.py calls the
+                // same segment.segment_nuclei() SEGMENT's stardist backend does, and its
+                // cell_mask is exactly what becomes these contours -- so it comes from
+                // starDistCommonFlags() like the rest, not appended per-caller.
+                { assert rendered.every { it.contains('--expand-distance 10') },
+                    "rendered command missing --expand-distance: " + rendered.join(' --- ') },
+                // --model-dir is the one flag this shared list must NOT leak here: it's
+                // conditional on segmentation_model_dir, which is null under the test
+                // profile.
                 { assert rendered.every { !it.contains('--model-dir') },
-                    "rendered command carries --model-dir despite segmentation_model_dir=null: " + rendered.join(' --- ') },
-                { assert rendered.every { !it.contains('--expand-distance') },
-                    "rendered command carries SEGMENT-only --expand-distance: " + rendered.join(' --- ') }
+                    "rendered command carries --model-dir despite segmentation_model_dir=null: " + rendered.join(' --- ') }
             )
         }
     }
