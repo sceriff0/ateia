@@ -291,7 +291,14 @@ workflow POSTPROCESSING {
 
     ch_checkpoint_csv = ch_base_checkpoint
         .map { patient_id, cell_csv, cell_geojson, merged_csv, cell_mask, pyramid ->
-            "${patient_id},${cell_csv},${cell_geojson},${merged_csv},${cell_mask},${pyramid}"
+            Checkpoint.row(Layout.POSTPROCESSED, [
+                patient_id  : patient_id,
+                cell_csv    : cell_csv,
+                cell_geojson: cell_geojson,
+                merged_csv  : merged_csv,
+                cell_mask   : cell_mask,
+                pyramid     : pyramid,
+            ])
         }
         .collectFile(
             name: Layout.checkpointCsvName(Layout.POSTPROCESSED),
@@ -305,7 +312,7 @@ workflow POSTPROCESSING {
             // string order IS "patient id, then file" — and the `seed:` header is
             // written first regardless of sorting.
             storeDir: Layout.checkpointDir(params.outdir),
-            seed: 'patient_id,cell_csv,cell_geojson,merged_csv,cell_mask,pyramid'
+            seed: Checkpoint.header(Layout.POSTPROCESSED)
         )
 
     // Collect size logs from all postprocessing processes

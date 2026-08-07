@@ -47,6 +47,20 @@ ROOT = Path(__file__).resolve().parent.parent
 PARAM_UTILS_PATH = ROOT / "lib" / "ParamUtils.groovy"
 SCHEMA_PATH = ROOT / "nextflow_schema.json"
 
+# lib/Checkpoint.groovy (added alongside this file's second check) is a second,
+# LEGITIMATE exception to "no file but ParamUtils.groovy quotes 2+ entryColumn
+# values". Its STEPS table maps a checkpoint step -> its FULL ordered column
+# list, not step -> entryColumn -- a different table serving a different
+# consumer (the checkpoint CSV writers/readers, see Checkpoint.row/header).
+# Two of ITS column names ('preprocessed_image', 'registered_image') happen to
+# also be ParamUtils.STEPS' entryColumn values for the NEXT step, and that is
+# not a coincidence to route away: entryColumn(step) is, by construction, the
+# image-path column of the checkpoint the previous step wrote. That coupling is
+# real domain structure, not an accidental restatement -- Checkpoint.groovy
+# never maps a step name to a single entryColumn the way the old
+# lib/CsvUtils.groovy pathColumn map did.
+ENTRY_COLUMN_EXEMPT_PATHS = {PARAM_UTILS_PATH, ROOT / "lib" / "Checkpoint.groovy"}
+
 STEPS_BLOCK_RE = re.compile(r"static final List STEPS = \[(.*?)\n    \]\n", re.S)
 STEP_NAME_RE = re.compile(r"name\s*:\s*'([^']*)'")
 ENTRY_COLUMN_RE = re.compile(r"entryColumn\s*:\s*'([^']*)'")
@@ -194,7 +208,7 @@ def test_no_parallel_entry_column_mapping_outside_param_utils() -> None:
     offenders: list[str] = []
     for pattern in SCANNED_GLOBS:
         for path in ROOT.glob(pattern):
-            if path == PARAM_UTILS_PATH:
+            if path in ENTRY_COLUMN_EXEMPT_PATHS:
                 continue
             text = path.read_text()
             found = [col for col in entry_columns if f"'{col}'" in text]
@@ -202,8 +216,9 @@ def test_no_parallel_entry_column_mapping_outside_param_utils() -> None:
                 offenders.append(f"  {path.relative_to(ROOT)}: {found}")
 
     assert not offenders, (
-        "Found file(s) other than lib/ParamUtils.groovy quoting 2+ of STEPS' "
-        f"entryColumn values ({entry_columns}) -- this looks like a parallel "
-        "step->column mapping outside ParamUtils.STEPS:\n" + "\n".join(offenders) +
+        "Found file(s) other than lib/ParamUtils.groovy (and the documented "
+        "lib/Checkpoint.groovy exception) quoting 2+ of STEPS' entryColumn "
+        f"values ({entry_columns}) -- this looks like a parallel step->column "
+        "mapping outside ParamUtils.STEPS:\n" + "\n".join(offenders) +
         "\nRoute it through ParamUtils.entryColumnForStep(step) instead."
     )

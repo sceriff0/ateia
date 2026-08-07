@@ -70,9 +70,12 @@ workflow PREPROCESSING {
     // Use collectFile() for non-blocking aggregation (enables patient-level parallelism)
     ch_checkpoint_csv = ch_preprocessed_with_meta
         .map { meta, image_file ->
-            def image_path = Layout.publishedPath(params.outdir, meta.patient_id, Layout.PREPROCESSED, image_file)
-            def channels = meta.channels.join('|')
-            "${meta.patient_id},${image_path},${meta.is_reference},${channels}"
+            Checkpoint.row(Layout.PREPROCESSED, [
+                patient_id        : meta.patient_id,
+                preprocessed_image: Layout.publishedPath(params.outdir, meta.patient_id, Layout.PREPROCESSED, image_file),
+                is_reference      : meta.is_reference,
+                channels          : meta.channels.join('|'),
+            ])
         }
         .collectFile(
             name: Layout.checkpointCsvName(Layout.PREPROCESSED),
@@ -86,7 +89,7 @@ workflow PREPROCESSING {
             // string order IS "patient id, then file" — and the `seed:` header is
             // written first regardless of sorting.
             storeDir: Layout.checkpointDir(params.outdir),
-            seed: 'patient_id,preprocessed_image,is_reference,channels'
+            seed: Checkpoint.header(Layout.PREPROCESSED)
         )
 
     // Collect size logs from all processes

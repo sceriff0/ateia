@@ -74,7 +74,15 @@ workflow ADD_CYCLE {
     // in the prior postprocessed.csv, --mode add_cycle) are validated in
     // workflows/mirage.nf before this subworkflow is ever invoked.
 
-    // registered.csv: patient_id,registered_image,is_reference,channels
+    // Columns come from lib/Checkpoint.groovy, the writer's owner: this reader
+    // never restates the schema.
+    //
+    // Fail loudly here if the writer's schema drifts from what this reader indexes.
+    ['registered_image', 'is_reference', 'channels'].each { col ->
+        assert col in Checkpoint.columns(Layout.REGISTERED),
+            "add_cycle reads '${col}' from ${Layout.checkpointCsvRelative(Layout.REGISTERED)}, " +
+            "which Checkpoint no longer declares"
+    }
     ch_prior_ref = Channel
         .fromPath(Layout.checkpointCsv(params.prior_outdir, Layout.REGISTERED), checkIfExists: true)
         .splitCsv(header: true)
@@ -84,11 +92,17 @@ workflow ADD_CYCLE {
             [row.patient_id, chans, file(row.registered_image)]
         }
 
-    // postprocessed.csv: patient_id,cell_csv,cell_geojson,merged_csv,cell_mask,pyramid
-    // The cell_mask column is parsed (so a checkpoint missing it still fails loudly,
-    // as before) but deliberately NOT used: the reusable masks come from the prior
-    // pyramid's embedded mask series, which is the copy that is registered to the
-    // pyramid's own frame.
+    // Columns come from lib/Checkpoint.groovy, the writer's owner: this reader
+    // never restates the schema. Only `merged_csv`, `cell_mask` and `pyramid` are
+    // used here — the masks are re-extracted from the pyramid's Image:1 series by
+    // EXTRACT_MASK_SERIES below, so the cell_mask column is read and discarded.
+    //
+    // Fail loudly here if the writer's schema drifts from what this reader indexes.
+    ['merged_csv', 'cell_mask', 'pyramid'].each { col ->
+        assert col in Checkpoint.columns(Layout.POSTPROCESSED),
+            "add_cycle reads '${col}' from ${Layout.checkpointCsvRelative(Layout.POSTPROCESSED)}, " +
+            "which Checkpoint no longer declares"
+    }
     ch_prior_rows = Channel
         .fromPath(Layout.checkpointCsv(params.prior_outdir, Layout.POSTPROCESSED), checkIfExists: true)
         .splitCsv(header: true)

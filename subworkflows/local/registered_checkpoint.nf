@@ -13,11 +13,9 @@
     all, and its `--outdir` could therefore never be the `--prior_outdir` of a
     second add_cycle. Making the writer mode-independent is what closes that.
 
-    The row format is the contract with every reader (add_cycle.nf's
-    `ch_prior_ref`, CsvUtils' checkpoint validation, the `--start` samplesheet
-    parser), so it lives in exactly one place:
-
-        patient_id,registered_image,is_reference,channels
+    The row format is the contract with every reader (add_cycle.nf's `ch_prior_ref`,
+    CsvUtils' checkpoint validation, the `--start` samplesheet parser). It is owned by
+    lib/Checkpoint.groovy — this file names the columns nowhere, it asks for them.
 
     Input:
         ch_registered: [meta, file] — every slide that reached the registered
@@ -48,7 +46,12 @@ workflow REGISTERED_CHECKPOINT {
             def published_path = meta.is_passthrough
                 ? Layout.passthroughPath(params.outdir, meta.patient_id, file)
                 : Layout.publishedPath(params.outdir, meta.patient_id, Layout.REGISTERED, file)
-            "${meta.patient_id},${published_path},${meta.is_reference},${meta.channels.join('|')}"
+            Checkpoint.row(Layout.REGISTERED, [
+                patient_id      : meta.patient_id,
+                registered_image: published_path,
+                is_reference    : meta.is_reference,
+                channels        : meta.channels.join('|'),
+            ])
         }
         .collectFile(
             name: Layout.checkpointCsvName(Layout.REGISTERED),
@@ -62,7 +65,7 @@ workflow REGISTERED_CHECKPOINT {
             // string order IS "patient id, then file" — and the `seed:` header is
             // written first regardless of sorting.
             storeDir: Layout.checkpointDir(params.outdir),
-            seed: 'patient_id,registered_image,is_reference,channels'
+            seed: Checkpoint.header(Layout.REGISTERED)
         )
 
     emit:

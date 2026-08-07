@@ -18,8 +18,8 @@
     THE ROW BUILDER IS THE POINT. `row(step, map)` orders values by the DECLARED
     column list, so insertion order at the call site is irrelevant, and it throws on
     a missing or unknown key rather than emitting an empty field. An empty field in
-    a checkpoint row is a path that does not exist — the failure mode that shipped
-    in csv/postprocessed.csv for two releases.
+    a checkpoint row is a path that does not exist — the failure mode the
+    postprocessing checkpoint manifest shipped with for two releases.
 
     SCOPE. Like Layout, this class never reads `params`: every method takes what it
     needs as an argument, so it is callable from an onComplete handler and from
