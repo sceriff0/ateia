@@ -1,32 +1,35 @@
 # Usage
 
-Everything you need to run MIRAGE: the three-stage model, the samplesheet, the
+Everything you need to run MIRAGE: the four-stage model, the samplesheet, the
 command shapes, resuming from checkpoints, where outputs land, and the most common
 fixes. For the full flag surface see [Parameters](parameters.md); to install see
 [Installation](installation.md).
 
-## The three-stage model
+## The four-stage model
 
-MIRAGE runs in **three stages, always in this order**. You choose where to enter
-and exit with `--start` and `--stop` (both accept `preprocessing`, `registration`,
-or `postprocessing`). A stage runs only when it falls within the `--start … --stop`
-window; omit `--stop` to run to the end, and use `--start X --stop X` for exactly
-one stage.
+MIRAGE runs in **four stages, always in this order**. You choose where to enter
+and exit with `--start` and `--stop` (all four accept `preprocessing`, `registration`,
+`segmentation`, or `postprocessing`). A stage runs only when it falls within the
+`--start … --stop` window; omit `--stop` to run to the end, and use `--start X --stop X`
+for exactly one stage.
 
 ```mermaid
 flowchart LR
     A[Raw multi-channel<br/>images + CSV] --> B[Preprocessing<br/>convert + illumination correct]
     B --> C[Registration<br/>VALIS align panels]
-    C --> D[Postprocessing<br/>segment + quantify + export]
-    D --> E[GeoJSON cells<br/>+ pyramidal OME-TIFF]
+    C --> D[Segmentation<br/>segment + extract properties]
+    D --> E[Postprocessing<br/>quantify + export]
+    E --> F[GeoJSON cells<br/>+ pyramidal OME-TIFF]
     style B fill:#e3f2fd,stroke:#1976d2
     style C fill:#e8f5e9,stroke:#388e3c
-    style D fill:#fff3e0,stroke:#f57c00
+    style D fill:#fce4ec,stroke:#c2185b
+    style E fill:#fff3e0,stroke:#f57c00
 ```
 
 - **Preprocessing** — Bio-Formats conversion (DAPI → channel 0) + BaSiC illumination correction.
 - **Registration** — VALIS whole-slide alignment of every panel onto the reference panel.
-- **Postprocessing** — segmentation + per-cell quantification + QuPath GeoJSON export + pyramidal OME-TIFF.
+- **Segmentation** — cell/nucleus segmentation on the reference panel + morphology/contour extraction.
+- **Postprocessing** — per-cell quantification + QuPath GeoJSON export + pyramidal OME-TIFF.
 
 !!! info "Optional phenotyping"
     By default MIRAGE does not assign cell types — the exported GeoJSON carries **raw
@@ -73,7 +76,7 @@ profiles, comma-combined — e.g. `-profile slurm,singularity` on a cluster or
 |---|---|:---:|---|
 | `--input` | param | yes | Samplesheet CSV. Columns depend on `--start` — see [the samplesheet](#the-samplesheet). |
 | `--outdir` | param | yes | Output root directory. Checkpoints are written to `<outdir>/csv/`. |
-| `--start` | param | no | Entry stage: `preprocessing` (default), `registration`, `postprocessing`. |
+| `--start` | param | no | Entry stage: `preprocessing` (default), `registration`, `segmentation`, `postprocessing`. |
 | `--stop` | param | no | Last stage to run. Omitted = run to the end. |
 | `--dry_run true` | param | no | Validate inputs and the samplesheet, then exit without running tasks. |
 | `-profile` | option | no | Execution/config profiles, comma-combined (e.g. `slurm,singularity`). |
@@ -171,7 +174,8 @@ samplesheet — feed it back in with a matching `--start`.
 
 ```text
 <outdir>/csv/preprocessed.csv     # after preprocessing  → feeds --start registration
-<outdir>/csv/registered.csv       # after registration   → feeds --start postprocessing
+<outdir>/csv/registered.csv       # after registration   → feeds --start segmentation
+<outdir>/csv/segmented.csv        # after segmentation    → feeds --start postprocessing
 <outdir>/csv/postprocessed.csv    # after postprocessing  → manifest of final outputs
 ```
 
@@ -379,15 +383,18 @@ These open directly in QuPath, napari, and OMERO, and feed
     weight download via `DEEPCELL_ACCESS_TOKEN`, or a local `--cellsam_model_path`).
 
 ??? failure "Launch fails on an invalid value"
-    `--start`/`--stop` must be `preprocessing|registration|postprocessing`;
+    `--start`/`--stop` must be `preprocessing|registration|segmentation|postprocessing`;
     `--registration_method` must be `valis|tiled`; `--seg_method` must be
     `stardist|instantseg|cellsam`. Typos exit before any process is submitted.
 
 ??? failure "`--input` validation error / wrong columns"
     The most common mistake is feeding the **preprocessing** samplesheet to
     `--start registration`. Each stage needs its own column (`path_to_file` →
-    `preprocessed_image` → `registered_image`). Feed the checkpoint CSV that
-    matches the stage you're resuming.
+    `preprocessed_image` → `registered_image`; `registration` and `segmentation`
+    both key on `registered_image`, and `--start postprocessing` additionally
+    requires `cell_mask`, since `segmented.csv` carries the segmentation masks
+    alongside the image path). Feed the checkpoint CSV that matches the stage
+    you're resuming.
 
 ??? failure "Out-of-memory / exit code 137 or 140"
     Almost always the job exceeded its memory/time grant. Raise `--max_memory`,

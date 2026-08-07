@@ -373,6 +373,82 @@ nextflow_pipeline {
         }
     }
 
+    test("every path in every checkpoint CSV exists — --start segmentation (reused registered.csv)") {
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                // Precisely the shape a `csv/registered.csv` from a completed
+                // registration run has -- reusing the existing single-slide-reference
+                // fixture (its name predates the segmentation step; before it,
+                // 'postprocessing' was the step keyed on 'registered_image', the same
+                // column 'segmentation' now shares). --start segmentation reads this
+                // through INPUT_CHECK, so `registered_image`'s value is ALREADY an
+                // absolute published path from outside this run -- exactly the shape
+                // review found segmentation.nf's writer mis-recording (it applied
+                // Layout.publishedPath unconditionally, double-nesting/rewriting the
+                // path against the wrong outdir; fixed via Layout.publishedOrAsIs's
+                // isUnderTaskDir check). No --stop, so this run continues into
+                // postprocessing too, exercising the chained failure review also
+                // found ("--start postprocessing against that file fails").
+                input  = "$projectDir/tests/testdata/valid_checkpoint_postprocessing.csv"
+                outdir = "$outputDir"
+                start  = 'segmentation'
+            }
+        }
+
+        then {
+            assert workflow.success
+
+            def csvDir = new File("${outputDir}/csv".toString())
+            assert csvDir.isDirectory() : "no csv/ directory was published"
+
+            // Only segmented.csv + postprocessed.csv: entry is 'segmentation', so
+            // preprocessed.csv/registered.csv are never written this run.
+            def manifests = (csvDir.listFiles() ?: [])
+                .findAll { it.name.endsWith('.csv') }
+                .sort { it.name }
+            assert manifests*.name == ['postprocessed.csv', 'segmented.csv'] :
+                "expected postprocessed.csv + segmented.csv, found ${manifests*.name}"
+
+            // segmented.csv's registered_image must be the ORIGINAL fixture path
+            // (already published, outside this run entirely) -- not rewritten
+            // against this run's outdir. This is the exact property Critical 1
+            // broke: publishedPath applied unconditionally reconstructed it as
+            // <outputDir>/P001/registered/<name>, which nothing ever publishes.
+            def segLines = manifests.find { it.name == 'segmented.csv' }.readLines()
+            def segRow = segLines[1].split(',')
+            assert segRow[1] == "$projectDir/tests/testdata/P001_ref.ome.tiff".toString() :
+                "segmented.csv rewrote registered_image against the wrong outdir: ${segRow[1]}"
+
+            def work = new File("${workDir}".toString()).absolutePath
+            def problems = []
+            def checked  = 0
+            manifests.each { csv ->
+                csv.readLines().drop(1).findAll { it.trim() }.each { line ->
+                    line.split(',').each { field ->
+                        if (field.startsWith('/')) {
+                            checked++
+                            if (new File(field).absolutePath.startsWith(work + File.separator))
+                                problems << "${csv.name}: inside the work directory (scratch, unpublished) -> ${field}"
+                            else if (!new File(field).exists())
+                                problems << "${csv.name}: does not exist -> ${field}"
+                        }
+                    }
+                }
+            }
+            // 5 segmented (registered_image, cell_mask, nuclei_mask, contours,
+            // nucleus_contours) + 5 postprocessed (cell_csv, cell_geojson, merged_csv,
+            // cell_mask, pyramid), one row each.
+            assert checked == 10 :
+                "expected 10 recorded paths, examined ${checked} — did the CSV columns change?"
+            assert problems.isEmpty() :
+                "checkpoint manifest has ${problems.size()} bad path(s):\n  " +
+                problems.join("\n  ")
+        }
+    }
+
     test("every path in every checkpoint CSV exists — mode=add_cycle") {
         tag "stub"
         options "-stub"

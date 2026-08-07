@@ -156,8 +156,18 @@ workflow {
     // A step's requiredColumns ARE the previous step's checkpoint columns — that is what
     // makes --start <step> able to read the checkpoint the previous step wrote. The two
     // tables state it independently, so assert they agree rather than trusting them to.
+    // segmentation keeps the exact invariant (its requiredColumns == registered.csv's
+    // full column list). postprocessing no longer can: segmented.csv gained four
+    // columns beyond the base four, and postprocessing only requires the one it
+    // dereferences before READ_SEGMENTED_CHECKPOINT runs (cell_mask) -- so assert its
+    // exact (smaller) list, plus that every column it names is still a real column of
+    // the checkpoint it reads (a subset check, not an equality).
     assert ParamUtils.STEPS.find { it.name == 'registration'   }.requiredColumns == Checkpoint.columns(Layout.PREPROCESSED)
-    assert ParamUtils.STEPS.find { it.name == 'postprocessing' }.requiredColumns == Checkpoint.columns(Layout.REGISTERED)
+    assert ParamUtils.STEPS.find { it.name == 'segmentation'   }.requiredColumns == Checkpoint.columns(Layout.REGISTERED)
+    assert ParamUtils.STEPS.find { it.name == 'postprocessing' }.requiredColumns ==
+        ['patient_id', 'registered_image', 'is_reference', 'channels', 'cell_mask']
+    assert ParamUtils.STEPS.find { it.name == 'postprocessing' }.requiredColumns
+        .every { it in Checkpoint.columns(Layout.SEGMENTED) }
 
     // columns() must hand out an IMMUTABLE list. Checkpoint.STEPS' outer list is
     // .asImmutable() but a naive implementation leaves each entry's inner `columns`
@@ -200,16 +210,19 @@ workflow {
     assert Checkpoint.header(Layout.SEGMENTED) ==
         'patient_id,registered_image,is_reference,channels,cell_mask,nuclei_mask,contours,nucleus_contours'
 
-    // Empty string means "artifact not produced" — nuclei_mask and nucleus_contours are
-    // empty when --quantify_compartments is false. row() must accept '' (it is a value,
-    // not a missing key) and emit it as an empty field.
+    // Empty string means "artifact not produced" — nucleus_contours is empty when
+    // --quantify_compartments is false (nuclei_mask is NOT similarly gated: SEGMENT
+    // always produces it — see Checkpoint's EMPTY VALUES note). row() must accept ''
+    // (it is a value, not a missing key) and emit it as an empty field regardless of
+    // which column carries it.
     assert Checkpoint.row(Layout.SEGMENTED, [
         patient_id: 'P001', registered_image: '/o/P001/registered/a.tif',
         is_reference: true, channels: 'DAPI|CD3',
         cell_mask: '/o/P001/segmentation/P001_cell_mask.tif',
-        nuclei_mask: '', contours: '/o/P001/cell_properties/contours.json',
+        nuclei_mask: '/o/P001/segmentation/P001_nuclei_mask.tif',
+        contours: '/o/P001/cell_properties/contours.json',
         nucleus_contours: '',
-    ]) == 'P001,/o/P001/registered/a.tif,true,DAPI|CD3,/o/P001/segmentation/P001_cell_mask.tif,,/o/P001/cell_properties/contours.json,'
+    ]) == 'P001,/o/P001/registered/a.tif,true,DAPI|CD3,/o/P001/segmentation/P001_cell_mask.tif,/o/P001/segmentation/P001_nuclei_mask.tif,/o/P001/cell_properties/contours.json,'
 
     // The step vocabulary gains one entry, and a step's requiredColumns are still the
     // previous checkpoint's columns for the columns it shares.

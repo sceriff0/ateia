@@ -26,7 +26,7 @@ shown here are the values in
 
 | Parameter | Default | Description |
 |---|---|---|
-| `start` | `preprocessing` | Entry stage: `preprocessing`, `registration`, or `postprocessing`. |
+| `start` | `preprocessing` | Entry stage: `preprocessing`, `registration`, `segmentation`, or `postprocessing`. |
 | `stop` | `null` | Stop after this stage. `null` = run to the end. |
 | `dry_run` | `false` | Validate inputs and exit without launching tasks. |
 | `debug_channels` | `false` | Emit `.view` channel-topology debug output. |

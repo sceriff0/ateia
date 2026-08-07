@@ -36,11 +36,16 @@
     class exists.
 
     EMPTY VALUES. A column whose artifact a run did not produce carries the empty
-    string, not a missing key: `nuclei_mask` and `nucleus_contours` are empty when
-    --quantify_compartments is false. row() rejects a MISSING KEY (the caller forgot a
-    column) but accepts an EMPTY VALUE (the caller means "not produced"), and readers
-    test for emptiness rather than for the column's absence. Keeping the schema fixed
-    across param settings is what lets one header serve every run.
+    string, not a missing key: `nucleus_contours` is empty when --quantify_compartments
+    is false (EXTRACT_NUCLEI_PROPERTIES does not run at all in that case). `nuclei_mask`
+    is NOT similarly gated -- SEGMENT always produces it regardless of
+    --quantify_compartments, and it is recorded unconditionally: a later join against
+    it (see subworkflows/local/postprocess.nf's `ch_mask`) is a plain, non-remainder
+    join on exactly that invariant, and withholding it here would silently empty that
+    join for every patient. row() rejects a MISSING KEY (the caller forgot a column)
+    but accepts an EMPTY VALUE (the caller means "not produced"), and readers test for
+    emptiness rather than for the column's absence. Keeping the schema fixed across
+    param settings is what lets one header serve every run.
 ========================================================================================
 */
 

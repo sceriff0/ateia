@@ -147,11 +147,14 @@ workflow MIRAGE {
 
     /* -------------------- INPUT -------------------- */
 
-    // The samplesheet is read exactly once, at the entry step: which column holds
-    // the image to carry forward is fixed by --start, because each step's
-    // checkpoint CSV names the file that step produced. Later steps consume the
-    // previous step's channel directly (streaming, patient-level parallelism), so
-    // only the entry step ever reads the sheet.
+    // INPUT_CHECK reads the samplesheet once here, at the entry step, for every
+    // sample/count-derived need downstream (PREPROCESSING/REGISTRATION/SEGMENTATION's
+    // inputs, FINAL_QC's manifest). Which column holds the image to carry forward is
+    // fixed by --start, because each step's checkpoint CSV names the file that step
+    // produced. postprocessing's entry is the one exception: segmented.csv carries
+    // four columns INPUT_CHECK's [meta, one_file] shape cannot express, so
+    // READ_SEGMENTED_CHECKPOINT (subworkflows/local/segmentation.nf) reads it a
+    // second time, below, for the extra mask/contour columns specifically.
     def entry_column = ParamUtils.entryColumnForStep(params.start)
 
     // autoReference = params.allow_auto_reference: when a patient marks no reference,
@@ -187,6 +190,16 @@ workflow MIRAGE {
 
     /* -------------------- POSTPROCESSING -------------------- */
 
+    // READ_SEGMENTED_CHECKPOINT re-runs EXTRACT_CELL_PROPERTIES (and, under
+    // --quantify_compartments, EXTRACT_NUCLEI_PROPERTIES) to recover contours from a
+    // reused mask at --start postprocessing -- the one entry point where
+    // run_segmentation is false, so ch_qc_artifacts below cannot get their
+    // versions/size_log from SEGMENTATION.out. Declared here (not inside the
+    // isEntryPoint branch below) so the FINAL QC section can read it regardless;
+    // stays Channel.empty() at every other entry point.
+    def ch_seg_reader_versions  = Channel.empty()
+    def ch_seg_reader_size_logs = Channel.empty()
+
     if (run_postprocessing) {
 
         // Registration QC feeds the SpatialData export's `uns`/`obsm`. It only exists
@@ -219,6 +232,8 @@ workflow MIRAGE {
             ch_contours_for_post        = READ_SEGMENTED_CHECKPOINT.out.contours
             ch_nucleus_contours_for_post = READ_SEGMENTED_CHECKPOINT.out.nucleus_contours
             ch_morphology_for_post      = READ_SEGMENTED_CHECKPOINT.out.morphology
+            ch_seg_reader_versions      = READ_SEGMENTED_CHECKPOINT.out.versions
+            ch_seg_reader_size_logs     = READ_SEGMENTED_CHECKPOINT.out.size_logs
         } else {
             // postprocessing is not the entry, so segmentation ran this session
             // (the only other way to reach postprocessing in the linear gate).
@@ -280,6 +295,11 @@ workflow MIRAGE {
             .mix(POSTPROCESSING.out.postprocess_qc.map { f -> ['postprocess_qc', f] })
             .mix(POSTPROCESSING.out.versions.map       { f -> ['versions', f] })
             .mix(POSTPROCESSING.out.size_logs.map      { f -> ['size_log', f] })
+            // READ_SEGMENTED_CHECKPOINT's re-run EXTRACT_CELL_PROPERTIES (+
+            // EXTRACT_NUCLEI_PROPERTIES) versions/size_log, at --start postprocessing
+            // only -- Channel.empty() (declared above) at every other entry point.
+            .mix(ch_seg_reader_versions.map  { f -> ['versions', f] })
+            .mix(ch_seg_reader_size_logs.map { f -> ['size_log', f] })
     }
 
     FINAL_QC(

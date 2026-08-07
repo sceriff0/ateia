@@ -170,15 +170,57 @@ class Layout {
     }
 
     /**
-     * Where a slide that was NOT registered will be published.
+     * Like {@link #publishedPath}, but tolerant of a `file` that is ALREADY an
+     * absolute path to a previously published artifact rather than a fresh output in
+     * this run's own task directory -- e.g. a mask read back from an earlier
+     * checkpoint CSV via `--start postprocessing`, which segmentation.nf's
+     * READ_SEGMENTED_CHECKPOINT hands to POSTPROCESSING as a plain `file(row.cell_mask)`,
+     * or a registered image read back via `--start segmentation`'s INPUT_CHECK.
      *
-     * A single-slide patient has nothing to register, so registration.nf branches its
-     * reference straight through (`ch_passthrough`); the tiled backend does the same
-     * for every patient's reference, which defines the frame and is never warped.
-     * NOTHING publishes those into `<pid>/registered/` - no process emitted them -
-     * so recording them there names a file that does not exist. Verified against a
-     * stub run: a single-slide patient's output tree contains no `P001/registered/`
-     * directory at all.
+     * Applying `publishedPath` unconditionally to such a file mis-records it. Two
+     * failure shapes, both fixed by the same check:
+     *
+     *   - A flat artifact (no producer subdirectory, e.g. SEGMENT's cell_mask):
+     *     double-nests the kind directory. `producerSubdir` sees a parent named e.g.
+     *     'segmentation' (not a task hash) and treats it as a producer subdirectory
+     *     to preserve, yielding `<outdir>/<pid>/segmentation/segmentation/<name>`
+     *     instead of the already-correct path the file already sits at.
+     *   - An artifact published one level down (e.g. REGISTER's `registered_slides/`):
+     *     the file's immediate parent is a producer-subdirectory NAME in BOTH the
+     *     fresh-this-run case and the already-published case (a prior run's
+     *     `.../registered/registered_slides/<name>` has a parent named
+     *     'registered_slides' too), so a one-level `isTaskDir(path.parent)` check
+     *     cannot tell them apart. It reconstructs the path against the WRONG outdir
+     *     (this run's, not wherever the file actually is) and, when the recorded
+     *     `kind` differs from the file's real one (e.g. a passthrough slide
+     *     published under 'preprocessed/' but asked about as 'registered'), against
+     *     the wrong kind too.
+     *
+     * {@link #isUnderTaskDir} checks the immediate parent AND grandparent, which
+     * covers every producer-subdirectory depth this codebase's publishDir blocks
+     * actually use (one level: `registered_slides/`, `export/`, `nuclei/` -- see
+     * {@link #publishedPath}'s docblock). When neither is a task directory, `file` is
+     * already an absolute published path from wherever it actually lives (this run
+     * or a prior one) and is returned as-is, whole -- reconstructing it against THIS
+     * run's outdir would be wrong precisely because it is not this run's file.
+     */
+    static String publishedOrAsIs(def outdir, def patientId, String kind, def file) {
+        def path = resolve(file)
+        if (path == null)
+            throw new IllegalArgumentException("Layout.publishedOrAsIs: no file given")
+        return isUnderTaskDir(path.parent)
+            ? publishedPath(outdir, patientId, kind, path)
+            : path.toString()
+    }
+
+    /**
+     * Where a slide that was NOT registered will be published. A single-slide patient
+     * has nothing to register, so registration.nf branches its reference straight
+     * through (`ch_passthrough`); the tiled backend does the same for every patient's
+     * reference, which defines the frame and is never warped. NOTHING publishes those
+     * into `<pid>/registered/` - no process emitted them - so recording them there
+     * names a file that does not exist. Verified against a stub run: a single-slide
+     * patient's output tree contains no `P001/registered/` directory at all.
      *
      * The slide is still published, just by whoever produced it:
      *
@@ -186,42 +228,12 @@ class Layout {
      *   supplied by a `--start registration` samplesheet -> already an absolute
      *                                       path to an existing file; record it as is
      *
-     * `isTaskDir` tells the two apart exactly: a file at the top of a Nextflow task
-     * directory came from a task in this run, anything else came from outside it.
+     * A thin, PREPROCESSED-pinned wrapper over {@link #publishedOrAsIs} -- this
+     * predates it and is kept as the named entry point every existing caller uses,
+     * not because the logic differs.
      */
     static String passthroughPath(def outdir, def patientId, def file) {
-        def path = resolve(file)
-        if (path == null)
-            throw new IllegalArgumentException("Layout.passthroughPath: no file given")
-        return isTaskDir(path.parent)
-            ? publishedPath(outdir, patientId, PREPROCESSED, path)
-            : path.toString()
-    }
-
-    /**
-     * Like {@link #publishedPath}, but tolerant of a `file` that is ALREADY an
-     * absolute path to a previously published artifact rather than a fresh output in
-     * this run's own task directory -- e.g. a mask read back from an earlier
-     * checkpoint CSV via `--start postprocessing`, which segmentation.nf's
-     * READ_SEGMENTED_CHECKPOINT hands to POSTPROCESSING as a plain `file(row.cell_mask)`.
-     *
-     * Applying `publishedPath` unconditionally to such a file double-nests the kind
-     * directory: `producerSubdir` sees a parent named e.g. 'segmentation' (not a task
-     * hash) and treats it as a producer subdirectory to preserve, yielding
-     * `<outdir>/<pid>/segmentation/segmentation/<name>` instead of the already-correct
-     * path the file already sits at. Generalises the same {@link #isTaskDir} check
-     * {@link #passthroughPath} already applies for the one kind it is pinned to
-     * (PREPROCESSED); this is for any kind whose channel can carry either a fresh
-     * task-dir output or a checkpoint-reused published path, depending on the run's
-     * entry point.
-     */
-    static String publishedOrAsIs(def outdir, def patientId, String kind, def file) {
-        def path = resolve(file)
-        if (path == null)
-            throw new IllegalArgumentException("Layout.publishedOrAsIs: no file given")
-        return isTaskDir(path.parent)
-            ? publishedPath(outdir, patientId, kind, path)
-            : path.toString()
+        return publishedOrAsIs(outdir, patientId, PREPROCESSED, file)
     }
 
     /**
@@ -261,6 +273,26 @@ class Layout {
         if (!name || !name.matches(/^[0-9a-f]{30,32}$/)) return false
         def prefix = dir.parent?.name?.toString()
         return prefix != null && prefix.matches(/^[0-9a-f]{2}$/)
+    }
+
+    /**
+     * True when `dir` IS a task directory, or is a producer subdirectory ONE level
+     * below one (REGISTER's `registered_slides/`, EXPORT_GEOJSON's `export/`,
+     * EXTRACT_NUCLEI_PROPERTIES's `nuclei/` -- every nesting depth this codebase's
+     * publishDir blocks actually use; see {@link #publishedPath}'s docblock).
+     *
+     * A single-level `isTaskDir(dir)` check cannot tell a FRESH one-level-nested
+     * output from an ALREADY-PUBLISHED path with the same producer-subdirectory
+     * name: `.../registered/registered_slides/<name>` (a prior run's published file)
+     * and `<workDir>/xx/yyyy.../registered_slides/<name>` (this run's live task
+     * output) both have a parent literally named 'registered_slides', which never
+     * matches the hex-hash pattern either way. Checking the grandparent too is what
+     * {@link #publishedOrAsIs} needs to tell "fresh, needs publishedPath" from
+     * "already published elsewhere, use as-is" for a channel that can carry either,
+     * depending on the run's entry point.
+     */
+    static boolean isUnderTaskDir(def dir) {
+        return dir != null && (isTaskDir(dir) || isTaskDir(dir.parent))
     }
 
     /* ------------------------------------------------------------------ *

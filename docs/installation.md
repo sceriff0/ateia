@@ -177,6 +177,6 @@ Profiles are defined in `nextflow.config` and combined with commas. Pick one **e
 
 ## Next steps
 
-Head to **[Usage](usage.md)** — the three-stage model, the samplesheet, the
+Head to **[Usage](usage.md)** — the four-stage model, the samplesheet, the
 end-to-end run on synthetic data, resuming from checkpoints, and what lands in
 `--outdir`. To tune the run, see **[Parameters](parameters.md)**.

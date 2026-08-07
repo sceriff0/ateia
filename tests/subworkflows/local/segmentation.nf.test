@@ -1,0 +1,214 @@
+// UNVERIFIED LOCALLY: nf-test resolves -profile test,docker and hangs under qemu on
+// this host (see CLAUDE.md's "Verification reality"). Written to cover the two new
+// workflows in subworkflows/local/segmentation.nf and the exact regression this
+// task's review found (nuclei_mask silently withheld when --quantify_compartments
+// is false, which drops every patient from postprocess.nf's plain
+// `ch_cell_mask.join(ch_nuclei_mask)`), but never run.
+
+nextflow_workflow {
+
+    name "Test SEGMENTATION subworkflow"
+    script "subworkflows/local/segmentation.nf"
+    workflow "SEGMENTATION"
+
+    tag "subworkflow"
+    tag "segmentation"
+
+    test("Should segment the reference and write one checkpoint row per slide - stub") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                outdir = "$outputDir"
+                seg_gpu = false
+            }
+            workflow {
+                """
+                input[0] = Channel.fromList([
+                    [[patient_id: 'P001', id: 'P001', is_reference: true,  channels: ['DAPI', 'PANCK', 'SMA']],
+                     file('$projectDir/tests/testdata/P001_ref.ome.tiff')],
+                    [[patient_id: 'P001', id: 'P001', is_reference: false, channels: ['DAPI', 'CD3', 'CD8']],
+                     file('$projectDir/tests/testdata/P001_mov1.ome.tiff')],
+                    [[patient_id: 'P001', id: 'P001', is_reference: false, channels: ['DAPI', 'VIMENTIN', 'CD45']],
+                     file('$projectDir/tests/testdata/P001_mov2.ome.tiff')]
+                ])
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.out.cell_mask },
+                { assert workflow.out.nuclei_mask },
+                { assert workflow.out.contours },
+                { assert workflow.out.checkpoint_csv },
+                // One row per SLIDE (denormalised masks), not one per patient --
+                // see segmentation.nf's own comment on ch_checkpoint_csv.
+                { with(workflow.out.checkpoint_csv) {
+                    def csv = get(0)
+                    def lines = file(csv).readLines()
+                    assert lines[0] == 'patient_id,registered_image,is_reference,channels,cell_mask,nuclei_mask,contours,nucleus_contours'
+                    assert lines.drop(1).findAll { it.trim() }.size() == 3
+                }}
+            )
+        }
+    }
+
+    test("Should record nuclei_mask unconditionally when --quantify_compartments is false - stub") {
+
+        // THE regression this task's review found: SEGMENT always emits nuclei_mask
+        // regardless of --quantify_compartments, and postprocess.nf's `ch_mask =
+        // ch_cell_mask.join(ch_nuclei_mask, by: 0)` is a PLAIN join on that
+        // invariant. Withholding nuclei_mask here (as an earlier version of this
+        // checkpoint writer did, treating it as gated the same way nucleus_contours
+        // is) silently emptied that join for every patient -- --start postprocessing
+        // exited 0 with no postprocessed.csv, no quantification/, no geojson/ at all.
+        // Only nucleus_contours -- EXTRACT_NUCLEI_PROPERTIES's own output, which does
+        // not run at all under this flag -- may legitimately be empty.
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                outdir = "$outputDir"
+                seg_gpu = false
+                quantify_compartments   = false
+                expanded_quantification = false
+            }
+            workflow {
+                """
+                input[0] = Channel.fromList([
+                    [[patient_id: 'P001', id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK', 'SMA']],
+                     file('$projectDir/tests/testdata/P001_ref.ome.tiff')]
+                ])
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { with(workflow.out.checkpoint_csv) {
+                    def csv = get(0)
+                    def row = file(csv).readLines()[1].split(',')
+                    // patient_id, registered_image, is_reference, channels, cell_mask,
+                    // nuclei_mask, contours, nucleus_contours
+                    assert row[4] : "cell_mask must never be empty"
+                    assert row[5] : "nuclei_mask must be populated even with --quantify_compartments false -- SEGMENT always produces it, and postprocess.nf's mask join depends on that"
+                    assert row[6] : "contours must never be empty"
+                    assert row.size() == 7 || row[7] == '' : "nucleus_contours is the one column allowed to be empty here"
+                }}
+            )
+        }
+    }
+
+    test("Should error when no reference image is present - stub") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                outdir = "$outputDir"
+                seg_gpu = false
+            }
+            workflow {
+                """
+                input[0] = Channel.fromList([
+                    [[patient_id: 'P001', id: 'P001', is_reference: false, channels: ['DAPI', 'CD3', 'CD8']],
+                     file('$projectDir/tests/testdata/P001_mov1.ome.tiff')]
+                ])
+                """
+            }
+        }
+
+        then {
+            assert !workflow.success
+        }
+    }
+}
+
+nextflow_workflow {
+
+    name "Test READ_SEGMENTED_CHECKPOINT subworkflow"
+    script "subworkflows/local/segmentation.nf"
+    workflow "READ_SEGMENTED_CHECKPOINT"
+
+    tag "subworkflow"
+    tag "segmentation"
+    tag "read_segmented_checkpoint"
+
+    test("Should read samples and re-derive contours/morphology from checkpoint masks - stub") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                outdir = "$outputDir"
+                seg_gpu = false
+            }
+            workflow {
+                """
+                input[0] = "$projectDir/tests/testdata/valid_checkpoint_segmented.csv"
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                // Two rows in the fixture (reference + one moving slide) -> two samples.
+                { with(workflow.out.samples) { assert size() == 2 } },
+                // Mask/contour/morphology channels are per-PATIENT (reference row
+                // only), so exactly one each for the single-patient fixture.
+                { with(workflow.out.cell_mask)   { assert size() == 1 } },
+                { with(workflow.out.nuclei_mask) { assert size() == 1 } },
+                { with(workflow.out.contours)    { assert size() == 1 } },
+                { with(workflow.out.morphology)  { assert size() == 1 } },
+                { assert workflow.out.versions },
+                { assert workflow.out.size_logs }
+            )
+        }
+    }
+
+    test("Should keep nuclei_mask populated but nucleus_contours empty when the checkpoint recorded no compartments - stub") {
+
+        // The read-side twin of SEGMENTATION's own regression test above: a
+        // checkpoint written under --quantify_compartments false still has a
+        // populated nuclei_mask column (only nucleus_contours is blank), and this
+        // reader must not filter nuclei_mask out because SOME row happens to have
+        // an empty nucleus_contours -- the two columns are independent.
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                outdir = "$outputDir"
+                seg_gpu = false
+                quantify_compartments   = false
+                expanded_quantification = false
+            }
+            workflow {
+                """
+                input[0] = "$projectDir/tests/testdata/valid_checkpoint_segmented_no_compartments.csv"
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { with(workflow.out.cell_mask)   { assert size() == 1 } },
+                { with(workflow.out.nuclei_mask) { assert size() == 1 } },
+                // quantify_compartments false -> EXTRACT_NUCLEI_PROPERTIES never runs,
+                // so nucleus_contours is empty (Channel.empty()), not merely unfiltered.
+                { with(workflow.out.nucleus_contours) { assert size() == 0 } }
+            )
+        }
+    }
+}

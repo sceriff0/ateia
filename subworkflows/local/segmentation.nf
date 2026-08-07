@@ -92,49 +92,63 @@ workflow SEGMENTATION {
     // is denormalised on purpose — it is what keeps the entry contract a single image
     // column per row.
     //
-    // registered_image's published path is derived exactly as
-    // subworkflows/local/registered_checkpoint.nf derives it for csv/registered.csv
-    // (same channel, same meta) -- see that file for why the passthrough branch exists.
+    // registered_image's published path uses publishedOrAsIs, not the plain
+    // is_passthrough branch subworkflows/local/registered_checkpoint.nf uses for
+    // csv/registered.csv. registered_checkpoint.nf's ch_registered is ALWAYS a fresh
+    // channel from THIS run's own REGISTRATION (it is only ever called from inside
+    // registration.nf), so a bare is_passthrough check is enough there. This file's
+    // ch_registered is not: at `--start segmentation`, it is INPUT_CHECK.out.samples
+    // reading csv/registered.csv back -- ALREADY an absolute published path from a
+    // prior run -- and INPUT_CHECK never sets meta.is_passthrough (only
+    // register_patient.nf and tiled_adapter.nf do), so the passthrough branch could
+    // never fire for it. publishedOrAsIs's isUnderTaskDir check tells "fresh, needs
+    // publishedPath" from "already published elsewhere, use as-is" correctly in both
+    // cases, including passthrough's own producer ambiguity: the kind argument
+    // (PREPROCESSED for a passthrough slide, REGISTERED otherwise) only matters in
+    // the fresh branch, since the as-is branch returns the file's own path unchanged.
     ch_registered_for_ckpt = ch_registered
         .map { meta, file ->
             def published_path = meta.is_passthrough
-                ? Layout.passthroughPath(params.outdir, meta.patient_id, file)
-                : Layout.publishedPath(params.outdir, meta.patient_id, Layout.REGISTERED, file)
+                ? Layout.publishedOrAsIs(params.outdir, meta.patient_id, Layout.PREPROCESSED, file)
+                : Layout.publishedOrAsIs(params.outdir, meta.patient_id, Layout.REGISTERED, file)
             [meta.patient_id, meta, published_path]
         }
 
-    // cell_mask / contours are unconditional: SEGMENT always emits both masks, and
-    // EXTRACT_CELL_PROPERTIES always runs on the cell mask. Exactly one row per
-    // patient, matching ch_references' patient set 1:1 (enforced by the ifEmpty
-    // check above), so a plain combine() below cannot drop a row.
+    // cell_mask / nuclei_mask / contours are ALL unconditional: SEGMENT always emits
+    // BOTH masks regardless of --quantify_compartments (only EXTRACT_NUCLEI_PROPERTIES
+    // -- which produces nucleus_contours, not nuclei_mask -- is gated on it), and
+    // EXTRACT_CELL_PROPERTIES always runs on the cell mask. Recording nuclei_mask
+    // unconditionally matters beyond completeness: postprocess.nf's
+    // `ch_mask = ch_cell_mask.join(ch_nuclei_mask, by: 0)` is a PLAIN inner join on the
+    // documented invariant "the nuclear mask is always available from SEGMENT" --
+    // withholding it here when compartments are off would make that join drop every
+    // patient silently (an empty ch_nuclei_mask joined against anything is empty),
+    // gutting the ENTIRE postprocessing output tree while the run exits 0. That was
+    // caught in review; nucleus_contours alone carries the empty-column convention.
+    //
+    // All three match ch_references' patient set 1:1 (enforced by the ifEmpty check
+    // above), so a plain combine() below cannot drop a row for any of them.
     ch_cell_mask_path = ch_cell_mask.map { meta, m ->
+        [meta.patient_id, Layout.publishedPath(params.outdir, meta.patient_id, 'segmentation', m)]
+    }
+    ch_nuclei_mask_path = ch_nuclei_mask.map { meta, m ->
         [meta.patient_id, Layout.publishedPath(params.outdir, meta.patient_id, 'segmentation', m)]
     }
     ch_contours_path = ch_contours.map { pid, j ->
         [pid, Layout.publishedPath(params.outdir, pid, 'cell_properties', j)]
     }
 
-    // nuclei_mask / nucleus_contours are recorded ONLY under --quantify_compartments:
-    // nuclei_mask feeds compartment-level QUANTIFY and nucleus_contours comes from
-    // EXTRACT_NUCLEI_PROPERTIES, which does not run at all when compartments are off
+    // nucleus_contours ALONE is recorded only under --quantify_compartments:
+    // EXTRACT_NUCLEI_PROPERTIES does not run at all when compartments are off
     // (ch_nucleus_contours above is Channel.empty() in that case). A plain
     // combine()/join() of an EMPTY optional channel against the per-patient backbone
     // below would silently DROP every patient's row from the checkpoint instead of
     // recording an empty field — subworkflows/local/seg_qc.nf:96-101 solves exactly
     // this shape (join(..., remainder: true) against a per-key placeholder, so a
-    // missing optional value becomes '' rather than an absent row) and is copied here
-    // for both columns.
-    ch_nuclei_mask_value = params.quantify_compartments
-        ? ch_nuclei_mask.map { meta, m -> [meta.patient_id, Layout.publishedPath(params.outdir, meta.patient_id, 'segmentation', m)] }
-        : Channel.empty()
+    // missing optional value becomes '' rather than an absent row) and is copied here.
     ch_nucleus_contours_value = params.quantify_compartments
         ? ch_nucleus_contours.map { pid, j -> [pid, Layout.publishedPath(params.outdir, pid, 'cell_properties', j)] }
         : Channel.empty()
-
-    ch_nuclei_mask_total = ch_cell_mask_path
-        .map { pid, _path -> tuple(pid, '') }
-        .join(ch_nuclei_mask_value, by: 0, remainder: true)
-        .map { pid, placeholder, real -> tuple(pid, real ?: placeholder) }
 
     ch_nucleus_contours_total = ch_cell_mask_path
         .map { pid, _path -> tuple(pid, '') }
@@ -143,7 +157,7 @@ workflow SEGMENTATION {
 
     ch_checkpoint_csv = ch_registered_for_ckpt
         .combine(ch_cell_mask_path, by: 0)
-        .combine(ch_nuclei_mask_total, by: 0)
+        .combine(ch_nuclei_mask_path, by: 0)
         .combine(ch_contours_path, by: 0)
         .combine(ch_nucleus_contours_total, by: 0)
         .map { pid, meta, reg_path, cell_mask, nuclei_mask, contours, nucleus_contours ->
@@ -235,12 +249,20 @@ workflow SEGMENTATION {
     Output:
         samples          [meta, file]        — same shape as INPUT_CHECK.out.samples
         cell_mask        [meta, file]        — reference rows only
-        nuclei_mask      [meta, file]        — reference rows with a non-empty column
+        nuclei_mask      [meta, file]        — reference rows only (SEGMENT always
+                                                produces it; see Checkpoint's
+                                                'segmented' columns)
         contours         [patient_id, file]  — re-derived from cell_mask
         nucleus_contours [patient_id, file]  — re-derived from nuclei_mask;
                                                 Channel.empty() when
                                                 !params.quantify_compartments
         morphology       [meta, file]        — re-derived from cell_mask
+        size_logs, versions                  — of the re-run EXTRACT_CELL_PROPERTIES
+                                                (+ EXTRACT_NUCLEI_PROPERTIES when
+                                                compartments run); workflows/mirage.nf
+                                                mixes these into FINAL_QC at the
+                                                postprocessing-entry point, where
+                                                SEGMENTATION never ran this session
 ========================================================================================
 */
 
@@ -283,18 +305,19 @@ workflow READ_SEGMENTED_CHECKPOINT {
     ch_ref_rows = ch_rows.filter { meta, _row -> meta.is_reference }
 
     ch_cell_mask   = ch_ref_rows.map { meta, row -> [meta, file(row.cell_mask)] }
-    // Empty string means "not produced" (see lib/Checkpoint.groovy's EMPTY VALUES
-    // note) -- filter on the raw column, not on the constructed file(), so an empty
-    // value never reaches file() at all.
-    ch_nuclei_mask = ch_ref_rows
-        .filter { _meta, row -> row.nuclei_mask }
-        .map { meta, row -> [meta, file(row.nuclei_mask)] }
+    // Unconditional, like cell_mask: SEGMENT always produces nuclei_mask regardless
+    // of --quantify_compartments (only nucleus_contours, below, is genuinely gated),
+    // so this column is never empty -- no emptiness filter needed here.
+    ch_nuclei_mask = ch_ref_rows.map { meta, row -> [meta, file(row.nuclei_mask)] }
 
     // Re-derive contours + morphology from the reused cell mask (see the class
     // comment above for why this is a re-run, not a checkpoint re-read).
     EXTRACT_CELL_PROPERTIES(ch_cell_mask)
     ch_contours   = EXTRACT_CELL_PROPERTIES.out.contours.map { meta, j -> [meta.patient_id, j] }
     ch_morphology = EXTRACT_CELL_PROPERTIES.out.morphology
+
+    ch_size_logs = Channel.empty().mix(EXTRACT_CELL_PROPERTIES.out.size_log)
+    ch_versions  = Channel.empty().mix(EXTRACT_CELL_PROPERTIES.out.versions.first())
 
     // Nucleus contours: only under --quantify_compartments, same gate as
     // SEGMENTATION's live-run block above (and add_cycle.nf:233-239).
@@ -307,6 +330,8 @@ workflow READ_SEGMENTED_CHECKPOINT {
         EXTRACT_NUCLEI_PROPERTIES(ch_nuclei_props_in)
         ch_nucleus_contours = EXTRACT_NUCLEI_PROPERTIES.out.contours
             .map { meta, j -> [meta.patient_id, j] }
+        ch_size_logs = ch_size_logs.mix(EXTRACT_NUCLEI_PROPERTIES.out.size_log)
+        ch_versions  = ch_versions.mix(EXTRACT_NUCLEI_PROPERTIES.out.versions.first())
     }
 
     emit:
@@ -316,4 +341,12 @@ workflow READ_SEGMENTED_CHECKPOINT {
     contours         = ch_contours
     nucleus_contours = ch_nucleus_contours
     morphology       = ch_morphology
+    // Re-run versions/size_log (EXTRACT_CELL_PROPERTIES + EXTRACT_NUCLEI_PROPERTIES).
+    // At a46d2d6 (before this task) these ran inside POSTPROCESSING at every entry
+    // point including --start postprocessing, so their versions.yml always reached
+    // FINAL_QC. Emitting them here restores that at the one entry point where
+    // run_segmentation is false and mirage.nf cannot get them from SEGMENTATION.out
+    // instead (see workflows/mirage.nf's postprocessing-entry branch).
+    size_logs        = ch_size_logs
+    versions         = ch_versions
 }

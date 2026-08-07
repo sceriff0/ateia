@@ -84,7 +84,12 @@ nextflow_workflow {
         }
     }
 
-    test("Should segment reference images only - stub") {
+    test("Should quantify multiple registered slides against pre-made masks - stub") {
+        // Renamed from "Should segment reference images only": POSTPROCESSING no
+        // longer runs SEGMENT (moved to segmentation.nf), so this no longer segments
+        // anything. What it actually exercises: multiple registered slides
+        // (reference + 2 moving) quantified against masks supplied directly, with no
+        // registration QC -- the --start postprocessing shortcut shape.
 
         tag "stub"
         options "-stub"

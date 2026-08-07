@@ -60,7 +60,15 @@ class ParamUtils {
         ],
         [
             name           : 'postprocessing',
-            requiredColumns: ['patient_id', 'registered_image', 'is_reference', 'channels'],
+            // 'cell_mask' (beyond the registered-image base four) makes a plain
+            // csv/registered.csv -- still what every doc's `--start postprocessing`
+            // example names, pre-dating the segmentation step -- fail HERE with a
+            // clear "Missing required column" error. Without it, CsvUtils.validateInputCSV
+            // and validateInputSemantics both pass (registered.csv satisfies the base
+            // four), and the run dies much later inside segmentation.nf's
+            // READ_SEGMENTED_CHECKPOINT with "Argument of 'file' function cannot be
+            // null" -- a two-layer validation contract that silently skipped its job.
+            requiredColumns: ['patient_id', 'registered_image', 'is_reference', 'channels', 'cell_mask'],
             entryColumn    : 'registered_image',
             qcKinds        : ['postprocess_qc'],
         ],

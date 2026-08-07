@@ -15,12 +15,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`Layout.SEGMENTED` / `Checkpoint.columns('segmented')`). `--start`/`--stop` now
   accept `segmentation` between `registration` and `postprocessing`
   (`ParamUtils.STEP_ORDER` and `nextflow_schema.json`'s `start`/`stop` enums both
-  updated). `nuclei_mask` and `nucleus_contours` are recorded as the empty string
-  when `--quantify_compartments` is false (see `lib/Checkpoint.groovy`'s EMPTY
-  VALUES note) — the checkpoint schema stays fixed across that param setting.
+  updated). Only `nucleus_contours` is recorded as the empty string when
+  `--quantify_compartments` is false (see `lib/Checkpoint.groovy`'s EMPTY VALUES
+  note) — `nuclei_mask` is always populated, since `SEGMENT` always produces it and
+  `postprocess.nf`'s mask join depends on that being true unconditionally. The
+  checkpoint schema stays fixed across that param setting either way.
+  `--start postprocessing`'s samplesheet must now additionally carry a `cell_mask`
+  column (`ParamUtils.STEPS`'s `postprocessing` entry), so a plain `registered.csv`
+  fails validation loudly instead of dying deep inside `segmentation.nf`.
   **Published-output change:** `csv/segmented.csv` is a new published file, one row
   per registered slide. `csv/preprocessed.csv`, `csv/registered.csv` and
-  `csv/postprocessed.csv` are byte-identical to before this change.
+  `csv/postprocessed.csv` are byte-identical to before this change. At
+  `--start postprocessing`, `csv/postprocessed.csv`'s `cell_mask` column now
+  correctly names a path under the PRIOR run's `--outdir` (wherever segmentation
+  actually ran), not this run's — a new cross-outdir dependency in that manifest,
+  unlike every other column in it.
+- **`lib/Layout.groovy` gained `publishedOrAsIs`/`isUnderTaskDir`.** A channel that can
+  carry either a fresh task-directory output (this run) or an already-published path
+  read back from an earlier checkpoint (`--start segmentation`'s `INPUT_CHECK`,
+  `--start postprocessing`'s `READ_SEGMENTED_CHECKPOINT`) needs `Layout.publishedPath`
+  applied only in the first case — in the second, the file is already correct and
+  reconstructing it against this run's `--outdir` mis-records it (wrong outdir, and
+  for a one-level producer subdirectory like `registered_slides/`, potentially the
+  wrong kind too). `isUnderTaskDir` checks the immediate parent and grandparent,
+  which covers every producer-subdirectory depth this pipeline's `publishDir` blocks
+  use. `Layout.passthroughPath` now delegates to `publishedOrAsIs` rather than
+  duplicating the same check.
 - **`lib/Checkpoint.groovy`** — the checkpoint CSV's column list, header and row builder
   now have one owner. The three writers ask for the header instead of restating it, and
   `Checkpoint.row()` orders values by the declared column list and throws on a missing or

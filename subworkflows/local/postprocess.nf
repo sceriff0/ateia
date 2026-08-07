@@ -243,6 +243,14 @@ workflow POSTPROCESSING {
             // 'segmentation' and treats it as a producer subdirectory to preserve),
             // e.g. <outdir>/<pid>/segmentation/segmentation/<name>. See
             // Layout.publishedOrAsIs for the full explanation.
+            //
+            // NEW CROSS-OUTDIR DEPENDENCY: at --start postprocessing this correctly
+            // records the PRIOR run's path (wherever segmentation.nf actually
+            // published it), not this run's --outdir -- unlike every other column in
+            // this checkpoint, which all name files this run itself just wrote. That
+            // is correct (the mask genuinely was not recomputed), but it means
+            // csv/postprocessed.csv can point outside its own --outdir when written
+            // this way, which no prior checkpoint in this pipeline ever did.
             def published_path = Layout.publishedOrAsIs(params.outdir, meta.patient_id, 'segmentation', mask)
             [meta.patient_id, published_path]
         })
