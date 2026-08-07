@@ -89,9 +89,26 @@ KNOWN_ARTIFACT_KINDS = ParamUtils.STEPS.collectMany { it.qcKinds } + ParamUtils.
 // and a typo there (e.g. 'seg_qcc') would match nothing and silently empty
 // that report slot while every test stayed green -- the same failure class
 // the subscribe guard exists to catch, from the other side.
+// Kinds that some artifactsOf() call in this file actually consumes. Populated as a
+// side effect of the calls in `main:` below, and checked against KNOWN_ARTIFACT_KINDS
+// at the end of the workflow.
+//
+// WHY. The two existing guards cover two of the three ways this seam breaks: the
+// subscribe below rejects an unknown TAG at the producer, and artifactsOf() rejects
+// an unknown FILTER literal here. Neither catches the third: a kind that is declared
+// in ParamUtils.STEPS.qcKinds, correctly tagged at the call site, and read by NO
+// artifactsOf() call. That artifact is silently dropped from the report and the run
+// exits 0 — the exact failure the other two guards exist to prevent, arriving from
+// the one direction they do not watch.
+//
+// Bare top-level assignment for the same reason as KNOWN_ARTIFACT_KINDS above: a
+// script-level `def` would be invisible to the functions in this file.
+CONSUMED_ARTIFACT_KINDS = [] as Set
+
 def artifactsOf(ch_artifacts, String kind) {
     if (!(kind in KNOWN_ARTIFACT_KINDS))
         throw new IllegalArgumentException("FINAL_QC: artifactsOf('${kind}') is not a known artifact kind: ${KNOWN_ARTIFACT_KINDS.join(', ')}")
+    CONSUMED_ARTIFACT_KINDS << kind
     return ch_artifacts.filter { it[0] == kind }.map { it[1] }
 }
 
@@ -209,6 +226,22 @@ workflow FINAL_QC {
         AGGREGATE_SIZE_LOGS(
             artifactsOf(ch_artifacts, 'size_log').collectFile(name: 'raw_input_sizes.csv', sort: true)
         )
+    }
+
+    // Every declared kind must have a consumer. See CONSUMED_ARTIFACT_KINDS above.
+    //
+    // Registered only when both outputs are enabled: --skip_final_qc_report or
+    // --enable_trace=false legitimately leaves that half of the vocabulary
+    // unconsumed, and failing then would break a supported run mode. The guard is
+    // therefore about WIRING, checked on the default path, not about run policy.
+    if (!params.skip_final_qc_report && params.enable_trace) {
+        def unconsumed = KNOWN_ARTIFACT_KINDS.toSet() - CONSUMED_ARTIFACT_KINDS
+        if (unconsumed) {
+            error "FINAL_QC: artifact kind(s) ${unconsumed as List} are declared but no " +
+                  "artifactsOf() call consumes them, so anything tagged with them is dropped " +
+                  "from every report while the run stays green. Wire each to a report slot in " +
+                  "this file, or remove it from ParamUtils.STEPS' qcKinds / UNIVERSAL_QC_KINDS."
+        }
     }
 
     // Neither GENERATE_QC_REPORT.out.versions nor AGGREGATE_SIZE_LOGS.out.versions is
