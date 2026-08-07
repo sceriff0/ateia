@@ -22,7 +22,6 @@
  */
 process WARP_SEG_QC {
     tag "${meta.patient_id}:${moving_geojson.simpleName}"
-    label 'process_medium'
 
     container "cdgatenbee/valis-wsi:1.0.0"
 

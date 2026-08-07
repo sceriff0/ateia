@@ -8,7 +8,6 @@
 
 process MERGE_AND_PYRAMID {
     tag "${meta.patient_id}"
-    label 'process_high'
 
     container "bolt3x/attend_image_analysis:merge"
 

@@ -13,7 +13,6 @@
  */
 process WARP_SEG_QC_TILED {
     tag "${meta.patient_id}:${moving_geojson.simpleName}"
-    label 'process_low'
 
     container 'bolt3x/attend_image_analysis:tiled'
 

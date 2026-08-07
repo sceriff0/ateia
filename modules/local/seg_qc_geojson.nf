@@ -8,7 +8,6 @@
  */
 process SEG_QC_GEOJSON {
     tag "${meta.patient_id}:${image.simpleName}"
-    label 'process_high'
 
     container "bolt3x/attend_image_analysis:segmentation_gpu"
 

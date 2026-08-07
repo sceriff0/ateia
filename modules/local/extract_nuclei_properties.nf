@@ -11,7 +11,6 @@
  */
 process EXTRACT_NUCLEI_PROPERTIES {
     tag "${meta.patient_id}"
-    label 'process_medium'
 
     container "bolt3x/attend_image_analysis:quantification_gpu"
 

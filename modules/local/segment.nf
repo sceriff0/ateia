@@ -21,7 +21,6 @@
  */
 process SEGMENT {
     tag "${meta.patient_id}"
-    label 'process_high'
 
     container { SegBackends.container(params.seg_method) }
 
