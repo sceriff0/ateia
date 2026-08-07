@@ -1,0 +1,319 @@
+/*
+========================================================================================
+    SUBWORKFLOW: SEGMENTATION
+========================================================================================
+    Carves segmentation out of the old monolithic POSTPROCESSING step: SEGMENT the
+    reference image, extract cell (and optionally nucleus) contours/morphology, and
+    write the `segmented` checkpoint (Layout.SEGMENTED / Checkpoint.columns('segmented')).
+
+    This is the block that used to live at subworkflows/local/postprocess.nf:50-85,
+    moved verbatim, plus the checkpoint writer that gives it its own resume point.
+
+    Input:
+        ch_registered: [meta, file] — ALL slides (reference + moving) that reached
+                       the registered stream. Only the reference subset is segmented;
+                       every slide gets a row in the checkpoint (see the writer below).
+
+    Output:
+        cell_mask        [meta, file]         — SEGMENT.out.cell_mask, unchanged
+        nuclei_mask      [meta, file]         — SEGMENT.out.nuclei_mask, unchanged
+        contours         [patient_id, file]   — EXTRACT_CELL_PROPERTIES.out.contours, re-keyed
+        nucleus_contours [patient_id, file]   — EXTRACT_NUCLEI_PROPERTIES.out.contours, re-keyed;
+                                                 Channel.empty() when !params.quantify_compartments
+        checkpoint_csv                        — csv/segmented.csv
+        size_logs, versions                   — SEGMENT + EXTRACT_CELL_PROPERTIES (+
+                                                 EXTRACT_NUCLEI_PROPERTIES when compartments run)
+
+    Also defines READ_SEGMENTED_CHECKPOINT, the `--start postprocessing` reader: unlike
+    every other step, postprocessing's entry checkpoint (segmented.csv) carries FOUR
+    extra columns INPUT_CHECK's `[meta, one_file]` shape cannot express. It lives here,
+    not in workflows/mirage.nf, so Task 3 (which needs the same four columns for its own
+    entry point) can reuse it without copying the splitCsv shape a second time.
+========================================================================================
+*/
+
+include { SEGMENT                   } from '../../modules/local/segment'
+include { EXTRACT_CELL_PROPERTIES   } from '../../modules/local/extract_cell_properties'
+include { EXTRACT_NUCLEI_PROPERTIES } from '../../modules/local/extract_nuclei_properties'
+
+workflow SEGMENTATION {
+    take:
+    ch_registered       // [meta, file] — all slides (reference + moving)
+
+    main:
+
+    // ========================================================================
+    // SEGMENTATION - Process reference images only
+    // ========================================================================
+    ch_references = ch_registered
+        .filter { meta, file -> meta.is_reference }
+
+    ch_references.ifEmpty {
+        error "No reference images found (is_reference=true). Cannot run segmentation."
+    }
+
+    SEGMENT(ch_references)
+
+    def ch_cell_mask   = SEGMENT.out.cell_mask
+    def ch_nuclei_mask = SEGMENT.out.nuclei_mask
+
+    // ========================================================================
+    // CELL PROPERTIES - Extract morphology + contours from mask (runs in PARALLEL with SPLIT_CHANNELS)
+    // Computes regionprops ONCE instead of N times in QUANTIFY
+    // ========================================================================
+    EXTRACT_CELL_PROPERTIES(ch_cell_mask)
+
+    def ch_contours = EXTRACT_CELL_PROPERTIES.out.contours
+        .map { meta, json_file -> [meta.patient_id, json_file] }
+
+    // Nucleus contours (re-keyed to cell labels) for dual-segmentation GeoJSON export.
+    // Only computed when per-compartment quantification is enabled.
+    // Default to empty so the channel is always defined (the export join below
+    // only consumes it when quantify_compartments is set, but an unassigned
+    // `def` is a fragile null to leave in a channel expression).
+    def ch_nucleus_contours = Channel.empty()
+    if (params.quantify_compartments) {
+        ch_nuclei_props_in = ch_nuclei_mask
+            .map { meta, mask -> [meta.patient_id, meta, mask] }
+            .join(ch_cell_mask.map { meta, mask -> [meta.patient_id, mask] }, by: 0)
+            .map { _patient_id, meta, nuclei_mask, cell_mask -> [meta, nuclei_mask, cell_mask] }
+        EXTRACT_NUCLEI_PROPERTIES(ch_nuclei_props_in)
+        ch_nucleus_contours = EXTRACT_NUCLEI_PROPERTIES.out.contours
+            .map { meta, json_file -> [meta.patient_id, json_file] }
+    }
+
+    // ========================================================================
+    // CHECKPOINT - csv/segmented.csv
+    // ========================================================================
+    // One row per SLIDE (not per patient), because the next step needs the registered
+    // images as well as the masks: --start postprocessing reads this file, and
+    // INPUT_CHECK/READ_SEGMENTED_CHECKPOINT take one image column per row. The
+    // per-patient mask columns are therefore repeated across a patient's rows, which
+    // is denormalised on purpose — it is what keeps the entry contract a single image
+    // column per row.
+    //
+    // registered_image's published path is derived exactly as
+    // subworkflows/local/registered_checkpoint.nf derives it for csv/registered.csv
+    // (same channel, same meta) -- see that file for why the passthrough branch exists.
+    ch_registered_for_ckpt = ch_registered
+        .map { meta, file ->
+            def published_path = meta.is_passthrough
+                ? Layout.passthroughPath(params.outdir, meta.patient_id, file)
+                : Layout.publishedPath(params.outdir, meta.patient_id, Layout.REGISTERED, file)
+            [meta.patient_id, meta, published_path]
+        }
+
+    // cell_mask / contours are unconditional: SEGMENT always emits both masks, and
+    // EXTRACT_CELL_PROPERTIES always runs on the cell mask. Exactly one row per
+    // patient, matching ch_references' patient set 1:1 (enforced by the ifEmpty
+    // check above), so a plain combine() below cannot drop a row.
+    ch_cell_mask_path = ch_cell_mask.map { meta, m ->
+        [meta.patient_id, Layout.publishedPath(params.outdir, meta.patient_id, 'segmentation', m)]
+    }
+    ch_contours_path = ch_contours.map { pid, j ->
+        [pid, Layout.publishedPath(params.outdir, pid, 'cell_properties', j)]
+    }
+
+    // nuclei_mask / nucleus_contours are recorded ONLY under --quantify_compartments:
+    // nuclei_mask feeds compartment-level QUANTIFY and nucleus_contours comes from
+    // EXTRACT_NUCLEI_PROPERTIES, which does not run at all when compartments are off
+    // (ch_nucleus_contours above is Channel.empty() in that case). A plain
+    // combine()/join() of an EMPTY optional channel against the per-patient backbone
+    // below would silently DROP every patient's row from the checkpoint instead of
+    // recording an empty field — subworkflows/local/seg_qc.nf:96-101 solves exactly
+    // this shape (join(..., remainder: true) against a per-key placeholder, so a
+    // missing optional value becomes '' rather than an absent row) and is copied here
+    // for both columns.
+    ch_nuclei_mask_value = params.quantify_compartments
+        ? ch_nuclei_mask.map { meta, m -> [meta.patient_id, Layout.publishedPath(params.outdir, meta.patient_id, 'segmentation', m)] }
+        : Channel.empty()
+    ch_nucleus_contours_value = params.quantify_compartments
+        ? ch_nucleus_contours.map { pid, j -> [pid, Layout.publishedPath(params.outdir, pid, 'cell_properties', j)] }
+        : Channel.empty()
+
+    ch_nuclei_mask_total = ch_cell_mask_path
+        .map { pid, _path -> tuple(pid, '') }
+        .join(ch_nuclei_mask_value, by: 0, remainder: true)
+        .map { pid, placeholder, real -> tuple(pid, real ?: placeholder) }
+
+    ch_nucleus_contours_total = ch_cell_mask_path
+        .map { pid, _path -> tuple(pid, '') }
+        .join(ch_nucleus_contours_value, by: 0, remainder: true)
+        .map { pid, placeholder, real -> tuple(pid, real ?: placeholder) }
+
+    ch_checkpoint_csv = ch_registered_for_ckpt
+        .combine(ch_cell_mask_path, by: 0)
+        .combine(ch_nuclei_mask_total, by: 0)
+        .combine(ch_contours_path, by: 0)
+        .combine(ch_nucleus_contours_total, by: 0)
+        .map { pid, meta, reg_path, cell_mask, nuclei_mask, contours, nucleus_contours ->
+            Checkpoint.row(Layout.SEGMENTED, [
+                patient_id      : pid,
+                registered_image: reg_path,
+                is_reference    : meta.is_reference,
+                channels        : meta.channels.join('|'),
+                cell_mask       : cell_mask,
+                nuclei_mask     : nuclei_mask,
+                contours        : contours,
+                nucleus_contours: nucleus_contours,
+            ])
+        }
+        .collectFile(
+            name: Layout.checkpointCsvName(Layout.SEGMENTED),
+            newLine: true,
+            sort: true,
+            // sort: true for the same reproducibility reason as every other
+            // checkpoint writer — see postprocess.nf's identical comment.
+            storeDir: Layout.checkpointDir(params.outdir),
+            seed: Checkpoint.header(Layout.SEGMENTED)
+        )
+
+    ch_size_logs = Channel.empty()
+        .mix(SEGMENT.out.size_log)
+        .mix(EXTRACT_CELL_PROPERTIES.out.size_log)
+    if (params.quantify_compartments) {
+        ch_size_logs = ch_size_logs.mix(EXTRACT_NUCLEI_PROPERTIES.out.size_log)
+    }
+
+    ch_versions = Channel.empty()
+        .mix(SEGMENT.out.versions.first())
+        .mix(EXTRACT_CELL_PROPERTIES.out.versions.first())
+    if (params.quantify_compartments) {
+        ch_versions = ch_versions.mix(EXTRACT_NUCLEI_PROPERTIES.out.versions.first())
+    }
+
+    emit:
+    cell_mask        = ch_cell_mask
+    nuclei_mask      = ch_nuclei_mask
+    contours         = ch_contours
+    nucleus_contours = ch_nucleus_contours
+    // [meta, file] — EXTRACT_CELL_PROPERTIES.out.morphology, unchanged. Not part of
+    // the checkpoint (morphology.csv is a same-run-only intermediate, never read back
+    // by a later --start), but POSTPROCESSING still needs it to join against the
+    // per-marker intensity CSVs (ch_morphology) and, when phenotyping, against
+    // MERGE_QUANT_CSVS' output -- both joins moved out of this file with SEGMENT and
+    // EXTRACT_CELL_PROPERTIES, so the raw output has to cross the seam somewhere.
+    morphology       = EXTRACT_CELL_PROPERTIES.out.morphology
+    checkpoint_csv   = ch_checkpoint_csv
+    size_logs        = ch_size_logs
+    versions         = ch_versions
+}
+
+/*
+========================================================================================
+    WORKFLOW: READ_SEGMENTED_CHECKPOINT
+========================================================================================
+    The `--start postprocessing` reader for csv/segmented.csv. Follows
+    subworkflows/local/add_cycle.nf:77-95's precedent exactly: read the checkpoint
+    with splitCsv(header: true), fail loudly if the columns this reader indexes have
+    drifted from what Checkpoint declares, and never restate the schema by hand.
+
+    INPUT_CHECK's `[meta, one_file]` shape is enough for every other step's entry
+    point (each earlier checkpoint names exactly one path column per row). This one
+    is not: postprocessing's entry additionally needs the four segmentation
+    artifacts, which live as four more columns on the SAME row rather than in a
+    separate file — hence a dedicated reader instead of a second INPUT_CHECK column.
+
+    CONTOURS / MORPHOLOGY ARE RE-DERIVED, NOT RE-READ. The checkpoint's own 'contours'
+    and 'nucleus_contours' columns record where SEGMENTATION's run published them (a
+    complete manifest), but this reader does not read those two columns back: it
+    re-runs EXTRACT_CELL_PROPERTIES (and, under --quantify_compartments,
+    EXTRACT_NUCLEI_PROPERTIES) on the checkpoint's masks instead, exactly as
+    subworkflows/local/add_cycle.nf:225-239 already does when it reuses a prior run's
+    cell/nuclei masks. Two reasons: (1) morphology.csv is NOT a checkpoint column at
+    all (see lib/Checkpoint.groovy's 'segmented' entry) — it is a same-run-only
+    intermediate POSTPROCESSING needs for its quantification/phenotyping joins, so it
+    has no persisted path to read back regardless; and (2) re-deriving contours
+    alongside it, from the same mask, keeps this reader symmetric with add_cycle's
+    only other "resume from a persisted mask" consumer instead of adding a second way
+    to reconstruct the same polygons.
+
+    Input:
+        csv_path: path to a `segmented` checkpoint CSV (segmented.csv or add_cycle's
+                  future analogue re-using this same shape)
+
+    Output:
+        samples          [meta, file]        — same shape as INPUT_CHECK.out.samples
+        cell_mask        [meta, file]        — reference rows only
+        nuclei_mask      [meta, file]        — reference rows with a non-empty column
+        contours         [patient_id, file]  — re-derived from cell_mask
+        nucleus_contours [patient_id, file]  — re-derived from nuclei_mask;
+                                                Channel.empty() when
+                                                !params.quantify_compartments
+        morphology       [meta, file]        — re-derived from cell_mask
+========================================================================================
+*/
+
+workflow READ_SEGMENTED_CHECKPOINT {
+    take:
+    csv_path
+
+    main:
+    // Columns come from lib/Checkpoint.groovy, the writer's owner: this reader
+    // never restates the schema.
+    //
+    // Fail loudly here if the writer's schema drifts from what this reader indexes.
+    ['patient_id', 'registered_image', 'is_reference', 'channels',
+     'cell_mask', 'nuclei_mask'].each { col ->
+        assert col in Checkpoint.columns(Layout.SEGMENTED),
+            "READ_SEGMENTED_CHECKPOINT reads '${col}' from a 'segmented' checkpoint, " +
+            "which Checkpoint no longer declares"
+    }
+
+    ch_rows = Channel
+        .fromPath(csv_path, checkIfExists: true)
+        .splitCsv(header: true)
+        .map { row ->
+            def chans = (row.channels ?: '').split('\\|').collect { it.trim() }.findAll { it }
+            def meta = [
+                patient_id  : row.patient_id,
+                id          : row.patient_id,
+                is_reference: row.is_reference?.toLowerCase() == 'true',
+                channels    : chans,
+            ]
+            [meta, row]
+        }
+
+    ch_samples = ch_rows.map { meta, row -> [meta, file(row.registered_image)] }
+
+    // Mask columns are denormalised across a patient's rows (see the writer's
+    // comment in SEGMENTATION above) -- read them off the reference row only, so each
+    // patient contributes exactly one row to cell_mask/nuclei_mask, matching
+    // SEGMENTATION's own emit shapes.
+    ch_ref_rows = ch_rows.filter { meta, _row -> meta.is_reference }
+
+    ch_cell_mask   = ch_ref_rows.map { meta, row -> [meta, file(row.cell_mask)] }
+    // Empty string means "not produced" (see lib/Checkpoint.groovy's EMPTY VALUES
+    // note) -- filter on the raw column, not on the constructed file(), so an empty
+    // value never reaches file() at all.
+    ch_nuclei_mask = ch_ref_rows
+        .filter { _meta, row -> row.nuclei_mask }
+        .map { meta, row -> [meta, file(row.nuclei_mask)] }
+
+    // Re-derive contours + morphology from the reused cell mask (see the class
+    // comment above for why this is a re-run, not a checkpoint re-read).
+    EXTRACT_CELL_PROPERTIES(ch_cell_mask)
+    ch_contours   = EXTRACT_CELL_PROPERTIES.out.contours.map { meta, j -> [meta.patient_id, j] }
+    ch_morphology = EXTRACT_CELL_PROPERTIES.out.morphology
+
+    // Nucleus contours: only under --quantify_compartments, same gate as
+    // SEGMENTATION's live-run block above (and add_cycle.nf:233-239).
+    ch_nucleus_contours = Channel.empty()
+    if (params.quantify_compartments) {
+        ch_nuclei_props_in = ch_nuclei_mask
+            .map { meta, mask -> [meta.patient_id, meta, mask] }
+            .join(ch_cell_mask.map { meta, mask -> [meta.patient_id, mask] }, by: 0)
+            .map { _patient_id, meta, nuclei_mask, cell_mask -> [meta, nuclei_mask, cell_mask] }
+        EXTRACT_NUCLEI_PROPERTIES(ch_nuclei_props_in)
+        ch_nucleus_contours = EXTRACT_NUCLEI_PROPERTIES.out.contours
+            .map { meta, j -> [meta.patient_id, j] }
+    }
+
+    emit:
+    samples          = ch_samples
+    cell_mask        = ch_cell_mask
+    nuclei_mask      = ch_nuclei_mask
+    contours         = ch_contours
+    nucleus_contours = ch_nucleus_contours
+    morphology       = ch_morphology
+}

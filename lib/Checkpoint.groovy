@@ -34,6 +34,13 @@
     (`channels` uses `|` as its separator precisely for this reason). If that ever
     changes, quoting belongs here — in one place — which is the other reason this
     class exists.
+
+    EMPTY VALUES. A column whose artifact a run did not produce carries the empty
+    string, not a missing key: `nuclei_mask` and `nucleus_contours` are empty when
+    --quantify_compartments is false. row() rejects a MISSING KEY (the caller forgot a
+    column) but accepts an EMPTY VALUE (the caller means "not produced"), and readers
+    test for emptiness rather than for the column's absence. Keeping the schema fixed
+    across param settings is what lets one header serve every run.
 ========================================================================================
 */
 
@@ -57,6 +64,11 @@ class Checkpoint {
         [
             name   : 'registered',
             columns: ['patient_id', 'registered_image', 'is_reference', 'channels'].asImmutable(),
+        ],
+        [
+            name   : 'segmented',
+            columns: ['patient_id', 'registered_image', 'is_reference', 'channels',
+                      'cell_mask', 'nuclei_mask', 'contours', 'nucleus_contours'].asImmutable(),
         ],
         [
             name   : 'postprocessed',

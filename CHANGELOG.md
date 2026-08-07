@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **A new `segmentation` step, carved out of `postprocessing`.** `SEGMENT`,
+  `EXTRACT_CELL_PROPERTIES` and `EXTRACT_NUCLEI_PROPERTIES` (the latter under
+  `--quantify_compartments`) moved from `subworkflows/local/postprocess.nf` into their
+  own `subworkflows/local/segmentation.nf`, with a resumable checkpoint
+  (`Layout.SEGMENTED` / `Checkpoint.columns('segmented')`). `--start`/`--stop` now
+  accept `segmentation` between `registration` and `postprocessing`
+  (`ParamUtils.STEP_ORDER` and `nextflow_schema.json`'s `start`/`stop` enums both
+  updated). `nuclei_mask` and `nucleus_contours` are recorded as the empty string
+  when `--quantify_compartments` is false (see `lib/Checkpoint.groovy`'s EMPTY
+  VALUES note) — the checkpoint schema stays fixed across that param setting.
+  **Published-output change:** `csv/segmented.csv` is a new published file, one row
+  per registered slide. `csv/preprocessed.csv`, `csv/registered.csv` and
+  `csv/postprocessed.csv` are byte-identical to before this change.
 - **`lib/Checkpoint.groovy`** — the checkpoint CSV's column list, header and row builder
   now have one owner. The three writers ask for the header instead of restating it, and
   `Checkpoint.row()` orders values by the declared column list and throws on a missing or
@@ -77,6 +90,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `MIRAGE:FINAL_QC:AGGREGATE_SIZE_LOGS` (diagnostic string only; no functional effect).
 
 ### Fixed
+- **`EXTRACT_NUCLEI_PROPERTIES` now writes its outputs into a `nuclei/` subdirectory of
+  its own task directory** (`modules/local/extract_nuclei_properties.nf`), instead of
+  the task directory root. The published location is unchanged
+  (`<outdir>/<pid>/cell_properties/nuclei/*`, via `conf/modules.config`'s default
+  subdirectory-preserving `publishDir`, no `path:`-only override) — this only fixes a
+  latent gap where `Layout.publishedPath(outdir, pid, 'cell_properties', file)` could
+  not recover the `nuclei/` segment from the file's own task-directory structure (it
+  only saw the config's hardcoded path suffix), which the new `segmented` checkpoint
+  (above) needs in order to record `nucleus_contours`' real published path rather than
+  colliding with `contours`' path. `EXTRACT_NUCLEI_PROPERTIES`'s own size-log CSV now
+  publishes to `<outdir>/<pid>/cell_properties/` instead of `.../cell_properties/nuclei/`
+  (a diagnostic-only artifact, not read by any checkpoint or downstream consumer).
 - **The per-cell registration residuals now reach the QC report on the standard
   (linear) path.** `SEG_QC.out.per_cell` was emitted through
   `REGISTRATION.out.seg_residuals` and routed to the SpatialData export, but never

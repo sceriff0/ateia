@@ -56,10 +56,11 @@ class Layout {
      */
     static final String PREPROCESSED  = 'preprocessed'
     static final String REGISTERED    = 'registered'
+    static final String SEGMENTED     = 'segmented'
     static final String POSTPROCESSED = 'postprocessed'
 
     static final List<String> CHECKPOINT_STEPS =
-        [PREPROCESSED, REGISTERED, POSTPROCESSED].asImmutable()
+        [PREPROCESSED, REGISTERED, SEGMENTED, POSTPROCESSED].asImmutable()
 
     /** The two checkpoints a `mode='add_cycle'` run reads out of --prior_outdir. */
     static final List<String> ADD_CYCLE_CHECKPOINTS =
@@ -194,6 +195,32 @@ class Layout {
             throw new IllegalArgumentException("Layout.passthroughPath: no file given")
         return isTaskDir(path.parent)
             ? publishedPath(outdir, patientId, PREPROCESSED, path)
+            : path.toString()
+    }
+
+    /**
+     * Like {@link #publishedPath}, but tolerant of a `file` that is ALREADY an
+     * absolute path to a previously published artifact rather than a fresh output in
+     * this run's own task directory -- e.g. a mask read back from an earlier
+     * checkpoint CSV via `--start postprocessing`, which segmentation.nf's
+     * READ_SEGMENTED_CHECKPOINT hands to POSTPROCESSING as a plain `file(row.cell_mask)`.
+     *
+     * Applying `publishedPath` unconditionally to such a file double-nests the kind
+     * directory: `producerSubdir` sees a parent named e.g. 'segmentation' (not a task
+     * hash) and treats it as a producer subdirectory to preserve, yielding
+     * `<outdir>/<pid>/segmentation/segmentation/<name>` instead of the already-correct
+     * path the file already sits at. Generalises the same {@link #isTaskDir} check
+     * {@link #passthroughPath} already applies for the one kind it is pinned to
+     * (PREPROCESSED); this is for any kind whose channel can carry either a fresh
+     * task-dir output or a checkpoint-reused published path, depending on the run's
+     * entry point.
+     */
+    static String publishedOrAsIs(def outdir, def patientId, String kind, def file) {
+        def path = resolve(file)
+        if (path == null)
+            throw new IllegalArgumentException("Layout.publishedOrAsIs: no file given")
+        return isTaskDir(path.parent)
+            ? publishedPath(outdir, patientId, kind, path)
             : path.toString()
     }
 

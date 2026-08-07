@@ -5,9 +5,6 @@
 ========================================================================================
 */
 
-include { SEGMENT                  } from '../../modules/local/segment'
-include { EXTRACT_CELL_PROPERTIES } from '../../modules/local/extract_cell_properties'
-include { EXTRACT_NUCLEI_PROPERTIES } from '../../modules/local/extract_nuclei_properties'
 include { SPLIT_CHANNELS           } from '../../modules/local/split_channels'
 include { MERGE_QUANT_CSVS         } from '../../modules/local/merge_quant_csvs'
 include { COMPILE_PANEL            } from '../../modules/local/compile_panel'
@@ -24,12 +21,24 @@ include { ASSEMBLE_EXPORT          } from './assemble_export'
     SUBWORKFLOW:POSTPROCESSING
 ========================================================================================
     Description:
-        Segments reference image, splits multichannel images to single channels,
-        quantifies marker intensities per cell, merges results, and exports
-        QuPath-compatible GeoJSON with raw measurements for FlowPath gating.
+        Splits multichannel images to single channels, quantifies marker intensities
+        per cell against masks produced upstream by subworkflows/local/segmentation.nf,
+        merges results, and exports QuPath-compatible GeoJSON with raw measurements
+        for FlowPath gating.
+
+        SEGMENT / EXTRACT_CELL_PROPERTIES / EXTRACT_NUCLEI_PROPERTIES no longer run
+        here — they moved to segmentation.nf, their own resumable step
+        (Layout.SEGMENTED / Checkpoint.columns('segmented')). This file takes their
+        outputs as plain [meta/patient_id, file] inputs instead.
 
     Input:
-        ch_registered: Channel of [meta, file] tuples for registered images
+        ch_registered:       [meta, file] — all registered slides (reference + moving)
+        ch_cell_mask:        [meta, file] — from segmentation.nf
+        ch_nuclei_mask:      [meta, file] — from segmentation.nf
+        ch_contours:         [patient_id, file] — from segmentation.nf
+        ch_nucleus_contours: [patient_id, file] — from segmentation.nf;
+                              Channel.empty() when !params.quantify_compartments
+        ch_morphology:       [meta, file] — from segmentation.nf
 
     Output:
         geojson: QuPath-compatible GeoJSON with cell detections and raw measurements
@@ -42,47 +51,16 @@ include { ASSEMBLE_EXPORT          } from './assemble_export'
 workflow POSTPROCESSING {
     take:
     ch_registered       // Channel of [meta, file] tuples
+    ch_cell_mask        // [meta, file] — subworkflows/local/segmentation.nf's SEGMENT.out.cell_mask
+    ch_nuclei_mask      // [meta, file] — segmentation.nf's SEGMENT.out.nuclei_mask
+    ch_contours         // [patient_id, file] — segmentation.nf's EXTRACT_CELL_PROPERTIES.out.contours
+    ch_nucleus_contours // [patient_id, file] — segmentation.nf's EXTRACT_NUCLEI_PROPERTIES.out.contours;
+                        // Channel.empty() when !params.quantify_compartments
+    ch_morphology       // [meta, file] — segmentation.nf's EXTRACT_CELL_PROPERTIES.out.morphology
     ch_reg_qc           // Registration QC JSONs (may be empty)
     ch_reg_residuals    // Per-cell registration residual CSVs (may be empty)
 
     main:
-
-    // ========================================================================
-    // SEGMENTATION - Process reference images only
-    // ========================================================================
-    ch_references = ch_registered
-        .filter { meta, file -> meta.is_reference }
-
-    ch_references.ifEmpty {
-        error "No reference images found (is_reference=true). Cannot run segmentation."
-    }
-
-    SEGMENT(ch_references)
-
-    def ch_cell_mask   = SEGMENT.out.cell_mask
-    def ch_nuclei_mask = SEGMENT.out.nuclei_mask
-
-    // ========================================================================
-    // CELL PROPERTIES - Extract morphology + contours from mask (runs in PARALLEL with SPLIT_CHANNELS)
-    // Computes regionprops ONCE instead of N times in QUANTIFY
-    // ========================================================================
-    EXTRACT_CELL_PROPERTIES(ch_cell_mask)
-
-    // Nucleus contours (re-keyed to cell labels) for dual-segmentation GeoJSON export.
-    // Only computed when per-compartment quantification is enabled.
-    // Default to empty so the channel is always defined (the export join below
-    // only consumes it when quantify_compartments is set, but an unassigned
-    // `def` is a fragile null to leave in a channel expression).
-    def ch_nucleus_contours = Channel.empty()
-    if (params.quantify_compartments) {
-        ch_nuclei_props_in = ch_nuclei_mask
-            .map { meta, mask -> [meta.patient_id, meta, mask] }
-            .join(ch_cell_mask.map { meta, mask -> [meta.patient_id, mask] }, by: 0)
-            .map { _patient_id, meta, nuclei_mask, cell_mask -> [meta, nuclei_mask, cell_mask] }
-        EXTRACT_NUCLEI_PROPERTIES(ch_nuclei_props_in)
-        ch_nucleus_contours = EXTRACT_NUCLEI_PROPERTIES.out.contours
-            .map { meta, json_file -> [meta.patient_id, json_file] }
-    }
 
     // ========================================================================
     // CHANNEL SPLITTING - Split all multichannel images (runs in PARALLEL with EXTRACT_CELL_PROPERTIES)
@@ -109,13 +87,14 @@ workflow POSTPROCESSING {
     QUANTIFY_MARKERS(SPLIT_CHANNELS.out.channels, ch_mask)
     ch_grouped_csvs = QUANTIFY_MARKERS.out.grouped_csv
 
-    // Join grouped intensity CSVs with morphology.csv from EXTRACT_CELL_PROPERTIES
-    ch_morphology = EXTRACT_CELL_PROPERTIES.out.morphology
+    // Join grouped intensity CSVs with morphology.csv (segmentation.nf's
+    // EXTRACT_CELL_PROPERTIES.out.morphology, taken in via ch_morphology)
+    ch_morphology_by_patient = ch_morphology
         .map { meta, csv -> [meta.patient_id, csv] }
 
     ch_for_quant_merge = ch_grouped_csvs
         .map { meta, csvs -> [meta.patient_id, meta, csvs] }
-        .join(ch_morphology, by: 0)
+        .join(ch_morphology_by_patient, by: 0)
         .map { _patient_id, meta, csvs, morphology_csv -> [meta, csvs, morphology_csv] }
 
     MERGE_QUANT_CSVS(ch_for_quant_merge)
@@ -123,8 +102,8 @@ workflow POSTPROCESSING {
     // ========================================================================
     // PHENOTYPING (optional) - compile panel + classify cells per patient
     // ========================================================================
-    ch_contours = EXTRACT_CELL_PROPERTIES.out.contours
-        .map { meta, json_file -> [meta.patient_id, json_file] }
+    // ch_contours arrives via take: (segmentation.nf's EXTRACT_CELL_PROPERTIES.out.contours,
+    // already re-keyed to patient_id) — nothing to derive here any more.
     ch_nuc_contours_for_export = params.quantify_compartments ? ch_nucleus_contours : ch_contours
 
     def do_pheno = (params.panel_spec != null) || (params.panel_model != null)
@@ -140,7 +119,7 @@ workflow POSTPROCESSING {
 
         ch_pheno_in = MERGE_QUANT_CSVS.out.merged_csv
             .map { meta, csv -> [meta.patient_id, meta, csv] }
-            .join(ch_morphology, by: 0)
+            .join(ch_morphology_by_patient, by: 0)
             .map { _pid, meta, csv, morph -> [meta, csv, morph] }
         PHENOTYPE(ch_pheno_in, ch_model_config)
         ch_phenotypes = PHENOTYPE.out.phenotypes
@@ -256,7 +235,15 @@ workflow POSTPROCESSING {
             [meta.patient_id, published_path]
         })
         .join(ch_cell_mask.map { meta, mask ->
-            def published_path = Layout.publishedPath(params.outdir, meta.patient_id, 'segmentation', mask)
+            // publishedOrAsIs, not publishedPath: with --start postprocessing,
+            // ch_cell_mask is READ_SEGMENTED_CHECKPOINT's file(row.cell_mask) --
+            // ALREADY an absolute published path from segmentation.nf's run, not a
+            // task-dir output of this run. Calling publishedPath unconditionally
+            // would double-nest it (producerSubdir sees a parent literally named
+            // 'segmentation' and treats it as a producer subdirectory to preserve),
+            // e.g. <outdir>/<pid>/segmentation/segmentation/<name>. See
+            // Layout.publishedOrAsIs for the full explanation.
+            def published_path = Layout.publishedOrAsIs(params.outdir, meta.patient_id, 'segmentation', mask)
             [meta.patient_id, published_path]
         })
         .join(ASSEMBLE_EXPORT.out.pyramid.map { meta, pyramid ->
@@ -315,10 +302,14 @@ workflow POSTPROCESSING {
             seed: Checkpoint.header(Layout.POSTPROCESSED)
         )
 
-    // Collect size logs from all postprocessing processes
+    // Collect size logs from all postprocessing processes. SEGMENT /
+    // EXTRACT_CELL_PROPERTIES / EXTRACT_NUCLEI_PROPERTIES moved to
+    // subworkflows/local/segmentation.nf and report their own size_logs/versions
+    // there now -- workflows/mirage.nf mixes SEGMENTATION.out.{size_logs,versions}
+    // into the run-wide QC stream directly, the same way it already does for every
+    // other step's aggregate output (this file's checkpoint_csv/postprocess_qc
+    // pattern), so nothing from that step is double-counted or dropped here.
     ch_size_logs = Channel.empty()
-        .mix(SEGMENT.out.size_log)
-        .mix(EXTRACT_CELL_PROPERTIES.out.size_log)
         .mix(SPLIT_CHANNELS.out.size_log)
         .mix(QUANTIFY_MARKERS.out.size_logs)
         .mix(MERGE_QUANT_CSVS.out.size_log)
@@ -334,17 +325,10 @@ workflow POSTPROCESSING {
             .mix(GENERATE_POSTPROCESSING_QC.out.size_log)
     }
 
-    // Fold in nucleus-properties traces/versions when compartment quantification ran.
-    if (params.quantify_compartments) {
-        ch_size_logs = ch_size_logs.mix(EXTRACT_NUCLEI_PROPERTIES.out.size_log)
-    }
-
     // Collect versions from all postprocessing processes.
     // QUANTIFY_MARKERS / ASSEMBLE_EXPORT already applied `.first()` internally
     // (see the comments on their `versions` emits) — do not re-apply it here.
     ch_versions = Channel.empty()
-        .mix(SEGMENT.out.versions.first())
-        .mix(EXTRACT_CELL_PROPERTIES.out.versions.first())
         .mix(SPLIT_CHANNELS.out.versions.first())
         .mix(QUANTIFY_MARKERS.out.versions)
         .mix(MERGE_QUANT_CSVS.out.versions.first())
@@ -360,11 +344,6 @@ workflow POSTPROCESSING {
     if (!params.skip_postprocessing_qc) {
         ch_versions = ch_versions
             .mix(GENERATE_POSTPROCESSING_QC.out.versions.first())
-    }
-
-    if (params.quantify_compartments) {
-        ch_versions = ch_versions
-            .mix(EXTRACT_NUCLEI_PROPERTIES.out.versions.first())
     }
 
     emit:

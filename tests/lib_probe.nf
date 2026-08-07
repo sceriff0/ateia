@@ -82,7 +82,7 @@ workflow {
     // ------------------------------------------------------------------ //
     // ParamUtils — the step vocabulary
     // ------------------------------------------------------------------ //
-    assert ParamUtils.STEP_ORDER == ['preprocessing', 'registration', 'postprocessing']
+    assert ParamUtils.STEP_ORDER == ['preprocessing', 'registration', 'segmentation', 'postprocessing']
     assert ParamUtils.entryColumnForStep('registration')      == 'preprocessed_image'
     assert ParamUtils.requiredColumnsForStep('preprocessing') ==
         ['patient_id', 'path_to_file', 'is_reference', 'channels']
@@ -91,8 +91,11 @@ workflow {
     assert !ParamUtils.shouldRun('preprocessing',  'registration',  'postprocessing')
     assert !ParamUtils.shouldRun('postprocessing', 'preprocessing', 'registration')
 
+    // 'segmentation' is now a REAL step (added by this task) and must not be used
+    // here as the "unknown step" example any more -- use a name that is genuinely
+    // absent from STEPS instead.
     def badTarget = false
-    try { ParamUtils.shouldRun('segmentation', 'preprocessing', 'postprocessing') }
+    try { ParamUtils.shouldRun('quantification', 'preprocessing', 'postprocessing') }
     catch (IllegalArgumentException ignored) { badTarget = true }
     assert badTarget, 'ParamUtils.shouldRun must reject an unknown step'
 
@@ -184,6 +187,34 @@ workflow {
     // unreachable by construction, and has been removed rather than kept "just in case".)
     assert kinds == ['preprocess_qc', 'registration_qc', 'registration_tre', 'seg_qc',
                      'seg_residuals', 'postprocess_qc', 'versions', 'size_log']
+
+    // ------------------------------------------------------------------ //
+    // The segmentation checkpoint
+    // ------------------------------------------------------------------ //
+    assert Layout.SEGMENTED == 'segmented'
+    assert Layout.CHECKPOINT_STEPS == ['preprocessed', 'registered', 'segmented', 'postprocessed']
+    assert Checkpoint.columns(Layout.SEGMENTED) == [
+        'patient_id', 'registered_image', 'is_reference', 'channels',
+        'cell_mask', 'nuclei_mask', 'contours', 'nucleus_contours',
+    ]
+    assert Checkpoint.header(Layout.SEGMENTED) ==
+        'patient_id,registered_image,is_reference,channels,cell_mask,nuclei_mask,contours,nucleus_contours'
+
+    // Empty string means "artifact not produced" — nuclei_mask and nucleus_contours are
+    // empty when --quantify_compartments is false. row() must accept '' (it is a value,
+    // not a missing key) and emit it as an empty field.
+    assert Checkpoint.row(Layout.SEGMENTED, [
+        patient_id: 'P001', registered_image: '/o/P001/registered/a.tif',
+        is_reference: true, channels: 'DAPI|CD3',
+        cell_mask: '/o/P001/segmentation/P001_cell_mask.tif',
+        nuclei_mask: '', contours: '/o/P001/cell_properties/contours.json',
+        nucleus_contours: '',
+    ]) == 'P001,/o/P001/registered/a.tif,true,DAPI|CD3,/o/P001/segmentation/P001_cell_mask.tif,,/o/P001/cell_properties/contours.json,'
+
+    // The step vocabulary gains one entry, and a step's requiredColumns are still the
+    // previous checkpoint's columns for the columns it shares.
+    assert ParamUtils.STEP_ORDER == ['preprocessing', 'registration', 'segmentation', 'postprocessing']
+    assert ParamUtils.entryColumnForStep('segmentation') == 'registered_image'
 
     // println, NOT log.info: nf-test's underlying `nextflow ... -quiet` run
     // suppresses log.info from stdout entirely (observed directly: a log.info

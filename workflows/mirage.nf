@@ -17,6 +17,7 @@ include { validateParameters  } from 'plugin/nf-schema'
 include { INPUT_CHECK         } from '../subworkflows/local/input_check'
 include { PREPROCESSING       } from '../subworkflows/local/preprocess'
 include { REGISTRATION        } from '../subworkflows/local/registration'
+include { SEGMENTATION; READ_SEGMENTED_CHECKPOINT } from '../subworkflows/local/segmentation'
 include { POSTPROCESSING      } from '../subworkflows/local/postprocess'
 include { ADD_CYCLE           } from '../subworkflows/local/add_cycle'
 include { FINAL_QC            } from '../subworkflows/local/final_qc'
@@ -115,6 +116,7 @@ workflow MIRAGE {
     // strict Nextflow parser cannot invoke a closure-typed local as a function.)
     boolean run_preprocessing  = ParamUtils.shouldRun('preprocessing', params.start, effective_stop)
     boolean run_registration   = ParamUtils.shouldRun('registration', params.start, effective_stop)
+    boolean run_segmentation   = ParamUtils.shouldRun('segmentation', params.start, effective_stop)
     boolean run_postprocessing = ParamUtils.shouldRun('postprocessing', params.start, effective_stop)
 
     if (run_postprocessing) {
@@ -173,26 +175,73 @@ workflow MIRAGE {
         )
     }
 
+    /* -------------------- SEGMENTATION -------------------- */
+
+    if (run_segmentation) {
+        SEGMENTATION(
+            ParamUtils.isEntryPoint(params, 'segmentation')
+                ? INPUT_CHECK.out.samples
+                : REGISTRATION.out.registered  // Direct channel - enables patient-level parallelism!
+        )
+    }
+
     /* -------------------- POSTPROCESSING -------------------- */
 
     if (run_postprocessing) {
 
-        def ch_for_postprocessing = ParamUtils.isEntryPoint(params, 'postprocessing')
-            ? INPUT_CHECK.out.samples
-            : REGISTRATION.out.registered  // Direct channel - enables patient-level parallelism!
-
         // Registration QC feeds the SpatialData export's `uns`/`obsm`. It only exists
-        // when REGISTRATION actually ran in this session — with --start postprocessing
-        // there is no REGISTRATION output to reference, so pass empty channels and let
-        // the export write a store without registration QC rather than fail.
-        def ch_reg_qc_for_post = ParamUtils.isEntryPoint(params, 'postprocessing')
-            ? Channel.empty()
-            : REGISTRATION.out.seg_qc
-        def ch_reg_residuals_for_post = ParamUtils.isEntryPoint(params, 'postprocessing')
-            ? Channel.empty()
-            : REGISTRATION.out.seg_residuals
+        // when REGISTRATION actually ran IN THIS SESSION. Gated on run_registration
+        // itself (not on isEntryPoint('postprocessing')): with the segmentation step
+        // now sitting between registration and postprocessing, "postprocessing is not
+        // the entry point" no longer implies registration ran this session — entry
+        // could be 'segmentation' instead, in which case REGISTRATION was never
+        // invoked and referencing REGISTRATION.out would fail outright.
+        def ch_reg_qc_for_post        = run_registration ? REGISTRATION.out.seg_qc        : Channel.empty()
+        def ch_reg_residuals_for_post = run_registration ? REGISTRATION.out.seg_residuals : Channel.empty()
 
-        POSTPROCESSING(ch_for_postprocessing, ch_reg_qc_for_post, ch_reg_residuals_for_post)
+        def ch_for_postprocessing
+        def ch_cell_mask_for_post
+        def ch_nuclei_mask_for_post
+        def ch_contours_for_post
+        def ch_nucleus_contours_for_post
+        def ch_morphology_for_post
+
+        if (ParamUtils.isEntryPoint(params, 'postprocessing')) {
+            // The ONE place INPUT_CHECK's [meta, one_file] shape is not enough:
+            // postprocessing's entry checkpoint (segmented.csv) carries four more
+            // columns beyond a single image path. READ_SEGMENTED_CHECKPOINT
+            // (subworkflows/local/segmentation.nf) is the dedicated reader —
+            // mirrors add_cycle.nf's own splitCsv checkpoint readers.
+            READ_SEGMENTED_CHECKPOINT(params.input)
+            ch_for_postprocessing       = READ_SEGMENTED_CHECKPOINT.out.samples
+            ch_cell_mask_for_post       = READ_SEGMENTED_CHECKPOINT.out.cell_mask
+            ch_nuclei_mask_for_post     = READ_SEGMENTED_CHECKPOINT.out.nuclei_mask
+            ch_contours_for_post        = READ_SEGMENTED_CHECKPOINT.out.contours
+            ch_nucleus_contours_for_post = READ_SEGMENTED_CHECKPOINT.out.nucleus_contours
+            ch_morphology_for_post      = READ_SEGMENTED_CHECKPOINT.out.morphology
+        } else {
+            // postprocessing is not the entry, so segmentation ran this session
+            // (the only other way to reach postprocessing in the linear gate).
+            ch_for_postprocessing = ParamUtils.isEntryPoint(params, 'segmentation')
+                ? INPUT_CHECK.out.samples
+                : REGISTRATION.out.registered  // Direct channel - enables patient-level parallelism!
+            ch_cell_mask_for_post        = SEGMENTATION.out.cell_mask
+            ch_nuclei_mask_for_post      = SEGMENTATION.out.nuclei_mask
+            ch_contours_for_post         = SEGMENTATION.out.contours
+            ch_nucleus_contours_for_post = SEGMENTATION.out.nucleus_contours
+            ch_morphology_for_post       = SEGMENTATION.out.morphology
+        }
+
+        POSTPROCESSING(
+            ch_for_postprocessing,
+            ch_cell_mask_for_post,
+            ch_nuclei_mask_for_post,
+            ch_contours_for_post,
+            ch_nucleus_contours_for_post,
+            ch_morphology_for_post,
+            ch_reg_qc_for_post,
+            ch_reg_residuals_for_post
+        )
     }
 
     /* -------------------- FINAL QC + TRACE -------------------- */
@@ -217,6 +266,14 @@ workflow MIRAGE {
             .mix(REGISTRATION.out.registration_tre.map { f -> ['registration_tre', f] })
             .mix(REGISTRATION.out.versions.map         { f -> ['versions', f] })
             .mix(REGISTRATION.out.size_logs.map        { f -> ['size_log', f] })
+    }
+    if (run_segmentation) {
+        // No dedicated QC-image kind: ParamUtils.STEPS' 'segmentation' entry declares
+        // qcKinds: [] on purpose (see its comment) — SEGMENT and the two property
+        // extractors only ever contribute the two UNIVERSAL_QC_KINDS.
+        ch_qc_artifacts = ch_qc_artifacts
+            .mix(SEGMENTATION.out.versions.map  { f -> ['versions', f] })
+            .mix(SEGMENTATION.out.size_logs.map { f -> ['size_log', f] })
     }
     if (run_postprocessing) {
         ch_qc_artifacts = ch_qc_artifacts

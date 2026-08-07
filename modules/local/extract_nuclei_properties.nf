@@ -18,8 +18,8 @@ process EXTRACT_NUCLEI_PROPERTIES {
     tuple val(meta), path(nuclei_mask), path(cell_mask)
 
     output:
-    tuple val(meta), path("morphology.csv") , emit: morphology
-    tuple val(meta), path("contours.json")  , emit: contours
+    tuple val(meta), path("nuclei/morphology.csv") , emit: morphology
+    tuple val(meta), path("nuclei/contours.json")  , emit: contours
     path "versions.yml"                      , emit: versions
     path("*.size.csv")                       , emit: size_log
 
@@ -35,10 +35,18 @@ process EXTRACT_NUCLEI_PROPERTIES {
 
     echo "Sample: ${meta.patient_id}"
 
+    # Written into a nuclei/ subdirectory (not '.') so Layout.publishedPath's
+    # producerSubdir heuristic (lib/Layout.groovy) can recover the 'nuclei'
+    # path segment from the file's own task-directory structure, the same
+    # mechanism REGISTER's registered_slides/ and EXPORT_GEOJSON's export/ use.
+    # Without this, the checkpoint writer (subworkflows/local/segmentation.nf)
+    # has no way to record this file's true published path using only
+    # Layout.publishedPath(outdir, pid, 'cell_properties', file).
+    mkdir -p nuclei
     extract_cell_properties.py \\
         --mask_file ${nuclei_mask} \\
         --reference_mask ${cell_mask} \\
-        --outdir . \\
+        --outdir nuclei \\
         ${args}
 
     cat <<-END_VERSIONS > versions.yml
@@ -50,7 +58,8 @@ process EXTRACT_NUCLEI_PROPERTIES {
 
     stub:
     """
-    touch morphology.csv contours.json
+    mkdir -p nuclei
+    touch nuclei/morphology.csv nuclei/contours.json
     echo "STUB,${meta.patient_id},stub,0" > ${meta.patient_id}.EXTRACT_NUCLEI_PROPERTIES.size.csv
 
     cat <<-END_VERSIONS > versions.yml

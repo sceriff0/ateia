@@ -36,6 +36,7 @@
                     "enum": [
                         "preprocessing",
                         "registration",
+                        "segmentation",
                         "postprocessing"
                     ]
                 },
@@ -49,6 +50,7 @@
                     "enum": [
                         "preprocessing",
                         "registration",
+                        "segmentation",
                         "postprocessing",
                         null
                     ]

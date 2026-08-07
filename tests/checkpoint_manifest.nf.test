@@ -1,11 +1,13 @@
 /*
  * THE INVARIANT: a checkpoint manifest never names a file that does not exist.
  *
- * csv/preprocessed.csv, csv/registered.csv and csv/postprocessed.csv are published
- * artifacts AND restart inputs — `--start registration` opens the paths
- * registered.csv names, `--start postprocessing` opens the ones postprocessed.csv
- * names. A row pointing at a path nothing published is not a cosmetic defect; it is
- * a restart that fails, or a downstream consumer silently reading the wrong file.
+ * csv/preprocessed.csv, csv/registered.csv, csv/segmented.csv and csv/postprocessed.csv
+ * are published artifacts AND restart inputs — `--start registration` opens the paths
+ * registered.csv names, `--start postprocessing` opens the ones segmented.csv names
+ * (csv/segmented.csv, Task 1 of arch-B-split, is the fourth manifest the "globbed, not
+ * hardcoded" counts below now pick up automatically). A row pointing at a path nothing
+ * published is not a cosmetic defect; it is a restart that fails, or a downstream
+ * consumer silently reading the wrong file.
  *
  * These paths are CONSTRUCTED, not observed: the workflow predicts where publishDir
  * will put a file. THREE independent ways to mispredict it had accumulated by the
@@ -86,8 +88,8 @@ nextflow_pipeline {
             def manifests = (csvDir.listFiles() ?: [])
                 .findAll { it.name.endsWith('.csv') }
                 .sort { it.name }
-            assert manifests.size() == 3 :
-                "expected 3 checkpoint manifests, found ${manifests.size()}: " +
+            assert manifests.size() == 4 :
+                "expected 4 checkpoint manifests, found ${manifests.size()}: " +
                 manifests*.name
 
             def work = new File("${workDir}".toString()).absolutePath
@@ -110,8 +112,8 @@ nextflow_pipeline {
             }
             // Exact, not a lower bound: a lower bound lets a path column disappear
             // from a manifest without anyone noticing.
-            assert checked == 9 :
-                "expected 9 recorded paths, examined ${checked} — did the CSV columns change?"
+            assert checked == 19 :
+                "expected 19 recorded paths, examined ${checked} — did the CSV columns change?"
             // ONE assertion covering both properties, deliberately: Groovy aborts at
             // the first failed assert, so splitting them would hide the work-directory
             // findings behind the existence findings whenever a change breaks both.
@@ -168,8 +170,8 @@ nextflow_pipeline {
             def manifests = (csvDir.listFiles() ?: [])
                 .findAll { it.name.endsWith('.csv') }
                 .sort { it.name }
-            assert manifests.size() == 3 :
-                "expected 3 checkpoint manifests, found ${manifests.size()}: " +
+            assert manifests.size() == 4 :
+                "expected 4 checkpoint manifests, found ${manifests.size()}: " +
                 manifests*.name
 
             def work = new File("${workDir}".toString()).absolutePath
@@ -192,8 +194,8 @@ nextflow_pipeline {
             }
             // Exact, not a lower bound: a lower bound lets a path column disappear
             // from a manifest without anyone noticing.
-            assert checked == 7 :
-                "expected 7 recorded paths, examined ${checked} — did the CSV columns change?"
+            assert checked == 12 :
+                "expected 12 recorded paths, examined ${checked} — did the CSV columns change?"
             // ONE assertion covering both properties, deliberately: Groovy aborts at
             // the first failed assert, so splitting them would hide the work-directory
             // findings behind the existence findings whenever a change breaks both.
@@ -252,8 +254,8 @@ nextflow_pipeline {
             def manifests = (csvDir.listFiles() ?: [])
                 .findAll { it.name.endsWith('.csv') }
                 .sort { it.name }
-            assert manifests.size() == 3 :
-                "expected 3 checkpoint manifests, found ${manifests.size()}: " +
+            assert manifests.size() == 4 :
+                "expected 4 checkpoint manifests, found ${manifests.size()}: " +
                 manifests*.name
 
             def work = new File("${workDir}".toString()).absolutePath
@@ -276,8 +278,8 @@ nextflow_pipeline {
             }
             // Exact, not a lower bound: a lower bound lets a path column disappear
             // from a manifest without anyone noticing.
-            assert checked == 9 :
-                "expected 9 recorded paths, examined ${checked} — did the CSV columns change?"
+            assert checked == 19 :
+                "expected 19 recorded paths, examined ${checked} — did the CSV columns change?"
             // ONE assertion covering both properties, deliberately: Groovy aborts at
             // the first failed assert, so splitting them would hide the work-directory
             // findings behind the existence findings whenever a change breaks both.
@@ -336,8 +338,8 @@ nextflow_pipeline {
             def manifests = (csvDir.listFiles() ?: [])
                 .findAll { it.name.endsWith('.csv') }
                 .sort { it.name }
-            assert manifests.size() == 3 :
-                "expected 3 checkpoint manifests, found ${manifests.size()}: " +
+            assert manifests.size() == 4 :
+                "expected 4 checkpoint manifests, found ${manifests.size()}: " +
                 manifests*.name
 
             def work = new File("${workDir}".toString()).absolutePath
@@ -360,8 +362,8 @@ nextflow_pipeline {
             }
             // Exact, not a lower bound: a lower bound lets a path column disappear
             // from a manifest without anyone noticing.
-            assert checked == 9 :
-                "expected 9 recorded paths, examined ${checked} — did the CSV columns change?"
+            assert checked == 19 :
+                "expected 19 recorded paths, examined ${checked} — did the CSV columns change?"
             // ONE assertion covering both properties, deliberately: Groovy aborts at
             // the first failed assert, so splitting them would hide the work-directory
             // findings behind the existence findings whenever a change breaks both.

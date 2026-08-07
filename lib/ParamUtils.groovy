@@ -47,6 +47,18 @@ class ParamUtils {
             qcKinds        : ['registration_qc', 'registration_tre', 'seg_qc', 'seg_residuals'],
         ],
         [
+            name           : 'segmentation',
+            requiredColumns: ['patient_id', 'registered_image', 'is_reference', 'channels'],
+            entryColumn    : 'registered_image',
+            // Empty by design, not an oversight: SEGMENT and the two property
+            // extractors emit only 'versions' and 'size_log', which are
+            // UNIVERSAL_QC_KINDS below, so they contribute nothing here. No QC
+            // image belongs to segmentation alone — GENERATE_POSTPROCESSING_QC
+            // consumes the mask AND the merged quantification table, so it stays
+            // postprocessing's.
+            qcKinds        : [],
+        ],
+        [
             name           : 'postprocessing',
             requiredColumns: ['patient_id', 'registered_image', 'is_reference', 'channels'],
             entryColumn    : 'registered_image',
