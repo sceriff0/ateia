@@ -232,6 +232,40 @@ with open(OUT_DIR / "valid_checkpoint_postprocessing.csv", "w") as f:
     f.write(f"P001,{TESTDATA_ABS}/P001_ref.ome.tiff,true,DAPI|PANCK|SMA\n")
 print("  Created valid_checkpoint_postprocessing.csv")
 
+# 3c-bis. Valid checkpoint CSVs for the segmentation step (tests/subworkflows/local/
+#         segmentation.nf.test's READ_SEGMENTED_CHECKPOINT tests). Same TESTDATA_ABS
+#         convention as every other valid_checkpoint_*.csv above: absolute paths
+#         resolved at generation time, so the fixture is rooted at whatever checkout
+#         is running it, not a hardcoded worktree path. P001_nuclei_mask.tif is the
+#         hand-authored fixture the generator does not write (see .gitignore's
+#         comment on this file); P001_cell_mask.tif and sample_contours.json are
+#         both written elsewhere in this script.
+with open(OUT_DIR / "valid_checkpoint_segmented.csv", "w") as f:
+    f.write("patient_id,registered_image,is_reference,channels,cell_mask,nuclei_mask,contours,nucleus_contours\n")
+    f.write(
+        f"P001,{TESTDATA_ABS}/P001_ref.ome.tiff,true,DAPI|PANCK|SMA,"
+        f"{TESTDATA_ABS}/P001_cell_mask.tif,{TESTDATA_ABS}/P001_nuclei_mask.tif,"
+        f"{TESTDATA_ABS}/sample_contours.json,{TESTDATA_ABS}/sample_contours.json\n"
+    )
+    f.write(
+        f"P001,{TESTDATA_ABS}/P001_mov1.ome.tiff,false,DAPI|CD3|CD8,"
+        f"{TESTDATA_ABS}/P001_cell_mask.tif,{TESTDATA_ABS}/P001_nuclei_mask.tif,"
+        f"{TESTDATA_ABS}/sample_contours.json,{TESTDATA_ABS}/sample_contours.json\n"
+    )
+print("  Created valid_checkpoint_segmented.csv")
+
+# nuclei_mask populated, nucleus_contours empty -- the shape a checkpoint written
+# under --quantify_compartments false actually has (EXTRACT_NUCLEI_PROPERTIES never
+# ran, but SEGMENT always produces nuclei_mask regardless of that flag).
+with open(OUT_DIR / "valid_checkpoint_segmented_no_compartments.csv", "w") as f:
+    f.write("patient_id,registered_image,is_reference,channels,cell_mask,nuclei_mask,contours,nucleus_contours\n")
+    f.write(
+        f"P001,{TESTDATA_ABS}/P001_ref.ome.tiff,true,DAPI|PANCK|SMA,"
+        f"{TESTDATA_ABS}/P001_cell_mask.tif,{TESTDATA_ABS}/P001_nuclei_mask.tif,"
+        f"{TESTDATA_ABS}/sample_contours.json,\n"
+    )
+print("  Created valid_checkpoint_segmented_no_compartments.csv")
+
 # 3d. A minimal "prior completed run" for the add_cycle path. ADD_CYCLE rebuilds
 #     the assets it reuses from these two checkpoint CSVs under
 #     <prior_outdir>/csv/, so tests/subworkflows/add_cycle.nf.test only has to
@@ -387,6 +421,8 @@ print("  - P002_ref.ome.tiff")
 print("  - P001_cell_mask.npy, P002_cell_mask.npy")
 print("  - valid_preprocessing.csv")
 print("  - valid_checkpoint_registration.csv")
+print("  - valid_checkpoint_segmented.csv")
+print("  - valid_checkpoint_segmented_no_compartments.csv")
 print("  - valid_checkpoint_postprocessing.csv")
 print("  - test_input.csv")
 print("\nInvalid data (for validation testing):")
@@ -451,6 +487,8 @@ print("  - P002_ref.ome.tiff")
 print("  - P001_cell_mask.npy, P002_cell_mask.npy")
 print("  - valid_preprocessing.csv")
 print("  - valid_checkpoint_registration.csv")
+print("  - valid_checkpoint_segmented.csv")
+print("  - valid_checkpoint_segmented_no_compartments.csv")
 print("  - valid_checkpoint_postprocessing.csv")
 print("  - test_input.csv")
 print("\nInvalid data (for validation testing):")

@@ -34,7 +34,7 @@ MIRAGE is a Nextflow DSL2 pipeline for whole slide image (WSI) processing. It su
 
 ### Full pipeline from raw images
 
-Use `--start` to choose the entry point and `--stop` to terminate early at a given step. All four accept `preprocessing`, `registration`, `segmentation`, or `postprocessing`. If `--stop` is omitted, the pipeline runs through to the end.
+Use `--start` to choose the entry point and `--stop` to terminate early at a given step. Both flags accept `preprocessing`, `registration`, `segmentation`, or `postprocessing`. If `--stop` is omitted, the pipeline runs through to the end.
 
 ```bash
 nextflow run . \
@@ -59,11 +59,22 @@ nextflow run . \
   -resume
 ```
 
-### Resume from postprocessing checkpoint
+### Resume from segmentation checkpoint
 
 ```bash
 nextflow run . \
   --input results/csv/registered.csv \
+  --start segmentation \
+  --outdir results \
+  -profile slurm \
+  -resume
+```
+
+### Resume from postprocessing checkpoint
+
+```bash
+nextflow run . \
+  --input results/csv/segmented.csv \
   --start postprocessing \
   --outdir results \
   -profile slurm \

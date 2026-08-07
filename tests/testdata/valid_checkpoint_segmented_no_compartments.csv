@@ -1,2 +1,0 @@
-patient_id,registered_image,is_reference,channels,cell_mask,nuclei_mask,contours,nucleus_contours
-P001,/Users/valer/Desktop/Github/mirage/.worktrees/arch-B-split/tests/testdata/P001_ref.ome.tiff,true,DAPI|PANCK|SMA,/Users/valer/Desktop/Github/mirage/.worktrees/arch-B-split/tests/testdata/P001_cell_mask.tif,/Users/valer/Desktop/Github/mirage/.worktrees/arch-B-split/tests/testdata/P001_nuclei_mask.tif,/Users/valer/Desktop/Github/mirage/.worktrees/arch-B-split/tests/testdata/sample_contours.json,

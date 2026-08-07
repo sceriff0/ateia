@@ -110,6 +110,8 @@ tests/testdata/P002_cell_mask.npy
 tests/testdata/P002_cell_mask.tif
 tests/testdata/valid_preprocessing.csv
 tests/testdata/valid_checkpoint_registration.csv
+tests/testdata/valid_checkpoint_segmented.csv
+tests/testdata/valid_checkpoint_segmented_no_compartments.csv
 tests/testdata/valid_checkpoint_postprocessing.csv
 tests/testdata/invalid_multi_ref.csv
 tests/testdata/invalid_no_ref.csv

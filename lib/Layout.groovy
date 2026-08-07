@@ -197,9 +197,19 @@ class Layout {
      *     the wrong kind too.
      *
      * {@link #isUnderTaskDir} checks the immediate parent AND grandparent, which
-     * covers every producer-subdirectory depth this codebase's publishDir blocks
-     * actually use (one level: `registered_slides/`, `export/`, `nuclei/` -- see
-     * {@link #publishedPath}'s docblock). When neither is a task directory, `file` is
+     * covers every producer-subdirectory depth this method is CURRENTLY ASKED
+     * ABOUT (one level: `registered_slides/`, `export/`, `nuclei/` -- see
+     * {@link #publishedPath}'s docblock). It is NOT a claim that one level is the
+     * most this codebase's publishDir blocks ever use -- REGISTER's own
+     * `pattern: "preprocessed/data/*.csv"` (conf/modules.config) is two levels, and
+     * nothing stops a future emit from being deeper still. That two-level emit is
+     * harmless today only because nothing ever hands it to Layout. If one ever did,
+     * a fresh two-level output would fall through `isUnderTaskDir` to the as-is
+     * branch and get recorded VERBATIM AS ITS WORK-DIRECTORY PATH -- silently
+     * wrong, not loudly. Widen this check (or add a depth-aware variant) before
+     * routing a second-level producer subdirectory through `publishedOrAsIs`.
+     *
+     * When neither the parent nor grandparent is a task directory, `file` is
      * already an absolute published path from wherever it actually lives (this run
      * or a prior one) and is returned as-is, whole -- reconstructing it against THIS
      * run's outdir would be wrong precisely because it is not this run's file.
@@ -278,8 +288,14 @@ class Layout {
     /**
      * True when `dir` IS a task directory, or is a producer subdirectory ONE level
      * below one (REGISTER's `registered_slides/`, EXPORT_GEOJSON's `export/`,
-     * EXTRACT_NUCLEI_PROPERTIES's `nuclei/` -- every nesting depth this codebase's
-     * publishDir blocks actually use; see {@link #publishedPath}'s docblock).
+     * EXTRACT_NUCLEI_PROPERTIES's `nuclei/` -- every depth {@link #publishedOrAsIs}
+     * is CURRENTLY ASKED ABOUT; see {@link #publishedPath}'s docblock). This is not
+     * the deepest nesting this codebase's publishDir blocks use in general --
+     * REGISTER's `pattern: "preprocessed/data/*.csv"` is two levels -- it is the
+     * deepest that has ever needed to survive THIS check. A future two-level
+     * caller would silently fall through to the as-is branch and get its live
+     * work-directory path recorded as though it were already published; widen this
+     * check first if that ever happens (see {@link #publishedOrAsIs}'s docblock).
      *
      * A single-level `isTaskDir(dir)` check cannot tell a FRESH one-level-nested
      * output from an ALREADY-PUBLISHED path with the same producer-subdirectory

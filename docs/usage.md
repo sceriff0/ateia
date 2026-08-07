@@ -8,7 +8,7 @@ fixes. For the full flag surface see [Parameters](parameters.md); to install see
 ## The four-stage model
 
 MIRAGE runs in **four stages, always in this order**. You choose where to enter
-and exit with `--start` and `--stop` (all four accept `preprocessing`, `registration`,
+and exit with `--start` and `--stop` (both flags accept `preprocessing`, `registration`,
 `segmentation`, or `postprocessing`). A stage runs only when it falls within the
 `--start … --stop` window; omit `--stop` to run to the end, and use `--start X --stop X`
 for exactly one stage.
@@ -110,10 +110,17 @@ For the complete parameter list see [Parameters](parameters.md).
       --start registration -profile docker -resume
     ```
 
-=== "Resume at postprocessing"
+=== "Resume at segmentation"
 
     ```bash
     nextflow run . --input results/csv/registered.csv --outdir results \
+      --start segmentation -profile docker -resume
+    ```
+
+=== "Resume at postprocessing"
+
+    ```bash
+    nextflow run . --input results/csv/segmented.csv --outdir results \
       --start postprocessing -profile docker -resume
     ```
 
@@ -145,7 +152,8 @@ different kind of image:
 |---|---|---|---|
 | `preprocessing` | `path_to_file` | `patient_id`, `is_reference`, `channels` | your raw samplesheet |
 | `registration` | `preprocessed_image` | `patient_id`, `is_reference`, `channels` | `<outdir>/csv/preprocessed.csv` |
-| `postprocessing` | `registered_image` | `patient_id`, `is_reference`, `channels` | `<outdir>/csv/registered.csv` |
+| `segmentation` | `registered_image` | `patient_id`, `is_reference`, `channels` | `<outdir>/csv/registered.csv` |
+| `postprocessing` | `registered_image` | `patient_id`, `is_reference`, `channels`, `cell_mask` | `<outdir>/csv/segmented.csv` |
 
 Example raw samplesheet (`--start preprocessing`):
 
@@ -175,8 +183,8 @@ samplesheet — feed it back in with a matching `--start`.
 ```text
 <outdir>/csv/preprocessed.csv     # after preprocessing  → feeds --start registration
 <outdir>/csv/registered.csv       # after registration   → feeds --start segmentation
-<outdir>/csv/segmented.csv        # after segmentation    → feeds --start postprocessing
-<outdir>/csv/postprocessed.csv    # after postprocessing  → manifest of final outputs
+<outdir>/csv/segmented.csv        # after segmentation   → feeds --start postprocessing
+<outdir>/csv/postprocessed.csv    # after postprocessing → manifest of final outputs
 ```
 
 !!! danger "Checkpoints are in `<outdir>/csv/`, NOT `<outdir>/<patient>/csv/`"

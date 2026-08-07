@@ -229,6 +229,77 @@ workflow {
     assert ParamUtils.STEP_ORDER == ['preprocessing', 'registration', 'segmentation', 'postprocessing']
     assert ParamUtils.entryColumnForStep('segmentation') == 'registered_image'
 
+    // ------------------------------------------------------------------ //
+    // Layout.isUnderTaskDir / publishedOrAsIs — the fix for Critical 1
+    // (--start segmentation recording paths that do not exist). A one-level
+    // isTaskDir(path.parent) check cannot tell a FRESH one-level-nested output
+    // (REGISTER's registered_slides/) from an ALREADY-PUBLISHED path with the
+    // same producer-subdirectory name -- both have a parent literally named
+    // 'registered_slides', which never matches the hex-hash pattern either way.
+    // These six cases are exactly what review's own probe checked directly
+    // against lib/, unreachable from any stub-run assertion at the workflow
+    // level: reverting isUnderTaskDir to a parent-only check `isTaskDir(dir)`
+    // makes case 2 fail (a live registered_slides/ output would be treated as
+    // already-published and returned verbatim as its work-directory path).
+    // ------------------------------------------------------------------ //
+    def taskHash   = 'c' * 30
+    def workDirPre = "/work/ab/${taskHash}"
+
+    // 1. Fresh, flat (no producer subdirectory) -- e.g. SEGMENT's cell_mask.
+    def freshFlat = file("${workDirPre}/P001_cell_mask.tif")
+    assert Layout.isUnderTaskDir(freshFlat.parent)
+    assert Layout.publishedOrAsIs('/out', 'P001', 'segmentation', freshFlat) ==
+        Layout.publishedPath('/out', 'P001', 'segmentation', freshFlat)
+    assert Layout.publishedOrAsIs('/out', 'P001', 'segmentation', freshFlat) ==
+        '/out/P001/segmentation/P001_cell_mask.tif'
+
+    // 2. Fresh, ONE level down -- REGISTER's registered_slides/. THE case a
+    // parent-only isTaskDir check gets wrong (see the comment above).
+    def freshNested = file("${workDirPre}/registered_slides/P001_x_registered.ome.tiff")
+    assert Layout.isUnderTaskDir(freshNested.parent)
+    assert Layout.publishedOrAsIs('/out', 'P001', Layout.REGISTERED, freshNested) ==
+        '/out/P001/registered/registered_slides/P001_x_registered.ome.tiff'
+
+    // 3. Already-published, same producer-subdirectory NAME as case 2 -- a prior
+    // run's registered.csv entry read back via --start segmentation's INPUT_CHECK.
+    // Neither the parent ('registered_slides') nor the grandparent ('registered')
+    // is a task hash, so this must be returned AS-IS, not reconstructed against
+    // the new outdir (that was Critical 1).
+    def publishedNested = file('/prior/P001/registered/registered_slides/P001_x_registered.ome.tiff')
+    assert !Layout.isUnderTaskDir(publishedNested.parent)
+    assert Layout.publishedOrAsIs('/out', 'P001', Layout.REGISTERED, publishedNested) ==
+        '/prior/P001/registered/registered_slides/P001_x_registered.ome.tiff'
+
+    // 4. A single-slide passthrough, published under 'preprocessed/' but asked
+    // about with kind REGISTERED -- the exact P002 shape from Critical 1's repro.
+    // The kind argument must be IGNORED once the as-is branch fires: returning
+    // the file's own path unchanged is what makes the wrong kind harmless here.
+    def publishedPassthrough = file('/prior/P002/preprocessed/P002_ref_corrected.ome.tif')
+    assert !Layout.isUnderTaskDir(publishedPassthrough.parent)
+    assert Layout.publishedOrAsIs('/out', 'P002', Layout.REGISTERED, publishedPassthrough) ==
+        '/prior/P002/preprocessed/P002_ref_corrected.ome.tif'
+
+    // 5. Already-published, flat (no producer subdirectory) -- a prior run's
+    // segmentation.nf cell_mask read back via --start postprocessing.
+    def publishedFlat = file('/prior/P001/segmentation/P001_cell_mask.tif')
+    assert !Layout.isUnderTaskDir(publishedFlat.parent)
+    assert Layout.publishedOrAsIs('/out', 'P001', 'segmentation', publishedFlat) ==
+        '/prior/P001/segmentation/P001_cell_mask.tif'
+
+    // 6. Fresh, ONE level down via nuclei/ -- EXTRACT_NUCLEI_PROPERTIES's own
+    // producer subdirectory (the fix for I5's published-path regression).
+    def freshNuclei = file("${workDirPre}/nuclei/contours.json")
+    assert Layout.isUnderTaskDir(freshNuclei.parent)
+    assert Layout.publishedOrAsIs('/out', 'P001', 'cell_properties', freshNuclei) ==
+        '/out/P001/cell_properties/nuclei/contours.json'
+
+    // passthroughPath now delegates to publishedOrAsIs pinned to PREPROCESSED --
+    // assert the delegation is behaviourally identical, not just present.
+    assert Layout.passthroughPath('/out', 'P001', freshFlat) ==
+        Layout.publishedOrAsIs('/out', 'P001', Layout.PREPROCESSED, freshFlat)
+    assert Layout.passthroughPath('/out', 'P002', publishedPassthrough) ==
+        Layout.publishedOrAsIs('/out', 'P002', Layout.PREPROCESSED, publishedPassthrough)
+
     // println, NOT log.info: nf-test's underlying `nextflow ... -quiet` run
     // suppresses log.info from stdout entirely (observed directly: a log.info
     // line here never appears in workflow.stdout under nf-test, even though the
