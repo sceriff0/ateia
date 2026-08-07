@@ -3,14 +3,28 @@
  * gate, shared by POSTPROCESSING and ADD_CYCLE (which carried verbatim copies of both).
  *
  * UNVERIFIED LOCALLY (see CLAUDE.md's "Verification reality" -- nf-test hangs under
- * qemu on this host): take: gained a 7th input, compartment_mode
- * (ParamUtils.compartmentMode(params)) -- Task 4 (arch-B-split)'s seam for
- * --quantify_compartments / --expanded_quantification / --embed_masks, replacing this
- * workflow's own former `params.embed_masks && params.quantify_compartments &&
- * params.expanded_quantification` raw read. Every test below sets
- * input[6] = ParamUtils.compartmentMode(params), which resolves off the SAME params{}
- * block each test already declares, so the embed_masks/quantify_compartments/
- * expanded_quantification values under test are unchanged.
+ * qemu on this host): take: gained a 7th input, compartment_mode -- Task 4
+ * (arch-B-split)'s seam for --quantify_compartments / --expanded_quantification /
+ * --embed_masks, replacing this workflow's own former `params.embed_masks &&
+ * params.quantify_compartments && params.expanded_quantification` raw read.
+ *
+ * The two "embed_masks on"/"embed_masks off" tests pass input[6] as a LITERAL map
+ * that DIVERGES from (in fact conflicts with) the embed_masks value set in
+ * params{} -- proving ASSEMBLE_EXPORT honours the compartment_mode ARGUMENT, not a
+ * re-read of the global param, the same way tests/subworkflows/add_cycle.nf.test's
+ * registration_method='tiled' + literal 'valis' proves the literal wins for that
+ * seam. `ParamUtils.compartmentMode(params)` (computing input[6] FROM the same
+ * params{} block) would prove nothing beyond "the resolver maps params
+ * correctly" -- already covered by tests/lib_probe.nf -- since an argument that
+ * always agrees with a global params re-read cannot distinguish "reads the
+ * argument" from "still reads params.embed_masks directly". The
+ * "quantify_compartments off" test is the one exception that keeps params and
+ * input[6] in agreement, and says why at its own params{} block: its
+ * geojson_wholecell assertion depends on modules/local/export_geojson.nf's own
+ * direct (out-of-seam) read of params.quantify_compartments, so the raw param
+ * cannot diverge from what the test needs there. The first ("assembles the export
+ * tuple...") test is the baseline positive path and keeps
+ * ParamUtils.compartmentMode(params) for input[6].
  *
  * What can and cannot be asserted here:
  *   - The gate itself is observable: when embed_masks is OFF the mask channel must never
@@ -101,10 +115,14 @@ nextflow_workflow {
 
         when {
             params {
+                // embed_masks/quantify_compartments/expanded_quantification
+                // deliberately NOT set here (embed_masks defaults to false) --
+                // input[6] below is a LITERAL map with embedMasks: true, so this
+                // test proves ASSEMBLE_EXPORT honours the ARGUMENT, not params,
+                // the same way tests/subworkflows/add_cycle.nf.test's
+                // registration_method='tiled' + literal 'valis' proves the
+                // literal wins for that seam.
                 outdir = "$outputDir"
-                embed_masks = true
-                quantify_compartments = true
-                expanded_quantification = true
                 pixel_size = 0.325
                 pyramid_resolutions = 8
                 pyramid_scale = 2
@@ -135,7 +153,7 @@ nextflow_workflow {
                     ['P002', file('$projectDir/tests/testdata/P002_cell_mask.tif',   checkIfExists: true),
                              file('$projectDir/tests/testdata/P001_nuclei_mask.tif', checkIfExists: true)]
                 ])
-                input[6] = ParamUtils.compartmentMode(params)
+                input[6] = [compartments: true, expanded: true, embedMasks: true]
                 """
             }
         }
@@ -158,8 +176,19 @@ nextflow_workflow {
         when {
             params {
                 outdir = "$outputDir"
-                // quantify_compartments/expanded are on; only embed_masks turns the gate off.
-                embed_masks = false
+                // Deliberately the OPPOSITE of what the gate needs: embed_masks=true
+                // here, but input[6] below is a LITERAL with embedMasks: false. If
+                // ASSEMBLE_EXPORT read params.embed_masks itself instead of its
+                // compartment_mode argument, this would join the empty mask channel
+                // and empty the pyramid; asserting pyramid.size() == 1 anyway proves
+                // the argument -- not the (conflicting) global param -- wins, the
+                // same way tests/subworkflows/add_cycle.nf.test's
+                // registration_method='tiled' + literal 'valis' proves the literal
+                // wins for that seam. (embed_masks has no OTHER raw reader in
+                // production -- unlike quantify_compartments, which
+                // modules/local/export_geojson.nf also reads directly -- so this
+                // flag is safe to diverge from params here.)
+                embed_masks = true
                 quantify_compartments = true
                 expanded_quantification = true
                 pixel_size = 0.325
@@ -181,7 +210,7 @@ nextflow_workflow {
                 // Nothing on the mask channel at all. An unconditional join here would
                 // empty the pyramid output entirely.
                 input[5] = Channel.empty()
-                input[6] = ParamUtils.compartmentMode(params)
+                input[6] = [compartments: true, expanded: true, embedMasks: false]
                 """
             }
         }
@@ -202,6 +231,17 @@ nextflow_workflow {
 
         when {
             params {
+                // Cannot diverge params.quantify_compartments from input[6] here,
+                // unlike the two embed_masks tests above: this test's
+                // geojson_wholecell assertion is driven by
+                // modules/local/export_geojson.nf's OWN direct read of
+                // params.quantify_compartments (a script:/stub: leaf, out of the
+                // compartment_mode seam by design -- see
+                // tests/test_compartment_mode_routing.py's ALLOWED_FILES), so the
+                // raw param must actually be false for that module's stub branch
+                // to skip cells_wholecell.geojson. input[6] is still a literal
+                // (not ParamUtils.compartmentMode(params)) matching params, so this
+                // test is not exercising the resolver's own correctness twice.
                 outdir = "$outputDir"
                 embed_masks = false
                 quantify_compartments = false
@@ -224,7 +264,7 @@ nextflow_workflow {
                                        [file('$projectDir/tests/testdata/sample_DAPI.tif',  checkIfExists: true),
                                         file('$projectDir/tests/testdata/sample_PANCK.tif', checkIfExists: true)]])
                 input[5] = Channel.empty()
-                input[6] = ParamUtils.compartmentMode(params)
+                input[6] = [compartments: false, expanded: false, embedMasks: false]
                 """
             }
         }

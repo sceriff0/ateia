@@ -90,9 +90,16 @@ embeds the segmentation masks in the output pyramid OME-TIFF:
   series: mixing a >65,535-cell uint32 label mask into the intensity channels
   would force the whole intensity image to uint32, which QuPath/Bio-Formats
   cannot open as a normal multi-channel image.
-- When `embed_masks=false`, or `quantify_compartments`/`expanded_quantification`
-  are off, `MERGE_AND_PYRAMID` produces a plain intensity-only pyramid — this
-  is unchanged from behavior before mask embedding existed.
+- When `embed_masks=false` (with `quantify_compartments`/`expanded_quantification`
+  set however you like), `MERGE_AND_PYRAMID` produces a plain intensity-only
+  pyramid — this is unchanged from behavior before mask embedding existed.
+- `embed_masks=true` REQUIRES both `quantify_compartments=true` and
+  `expanded_quantification=true` — `ParamUtils.validateCompartmentQuant` now
+  rejects `embed_masks=true` with either sibling off at launch, rather than
+  silently falling back to a plain pyramid. (Before this check existed, that
+  combination exited `0` with no mask series, discovered only later when the
+  pyramid was handed to `mode=add_cycle` as `--prior_outdir` — see "Fast-fail
+  behavior" below.)
 
 Cell objects are always delivered separately via `cells.geojson`; the embedded
 mask series is an additional, optional way to carry the raw label masks —
@@ -102,11 +109,13 @@ mask series is an additional, optional way to carry the raw label masks —
 `mode=add_cycle` extracts the reusable cell/nuclei masks from the **prior**
 pyramid's embedded mask series via `EXTRACT_MASK_SERIES`
 (`bin/extract_mask_series.py`), rather than recomputing segmentation. If the
-prior run's pyramid has fewer than two OME series (i.e. it was not produced
-with `embed_masks=true` together with `quantify_compartments` and
-`expanded_quantification`), extraction fails immediately with a clear error
-identifying the missing mask series — before any registration or quantification
-work runs on the new cycle. There is no silent fallback to re-segmentation.
+prior run's pyramid has fewer than two OME series (i.e. the prior run used
+`embed_masks=false`, the only way to reach that state now that
+`ParamUtils.validateCompartmentQuant` rejects `embed_masks=true` with either
+`quantify_compartments` or `expanded_quantification` off at launch — see "Mask
+pyramid" above), extraction fails immediately with a clear error identifying
+the missing mask series — before any registration or quantification work runs
+on the new cycle. There is no silent fallback to re-segmentation.
 
 ## Cluster verification note
 The mask-carrying pyramid's intensity series (`Image:0`) opens normally in

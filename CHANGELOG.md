@@ -108,6 +108,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   StarDist.
 - **`<outdir>/size_logs/versions.yml`'s single key changed** to
   `MIRAGE:FINAL_QC:AGGREGATE_SIZE_LOGS` (diagnostic string only; no functional effect).
+- **`--quantify_compartments`/`--expanded_quantification`/`--embed_masks` are now
+  resolved once (`ParamUtils.compartmentMode`) and threaded down as an argument**,
+  the same seam `--registration_method` already has, replacing a ternary that used to
+  be copied verbatim between `postprocess.nf` and `add_cycle.nf` plus several
+  independent raw reads across `segmentation.nf`/`postprocess.nf`/`add_cycle.nf`/
+  `assemble_export.nf`. No published-output change — behaviour verified
+  byte-identical across the full stub scenario matrix.
+  **Behaviour change: `ParamUtils.validateCompartmentQuant` now also rejects
+  `--embed_masks true` unless BOTH `--quantify_compartments` and
+  `--expanded_quantification` are also true.** Previously `--embed_masks true
+  --quantify_compartments false` (or with `--expanded_quantification false`) exited
+  `0` and silently published a pyramid OME-TIFF with **no** mask series
+  (`assemble_export.nf`'s `embed_masks` gate is `embed_masks && quantify_compartments
+  && expanded_quantification`), a gap only discovered later when that `--outdir` was
+  handed to `mode='add_cycle'` as `--prior_outdir` and `EXTRACT_MASK_SERIES` found no
+  `Image:1` to reuse. A launch that used to succeed under that combination now fails
+  fast with a clear error instead. **To recover:** either drop `--embed_masks` (if you
+  do not need the mask series in the pyramid), or set both
+  `--quantify_compartments true --expanded_quantification true` alongside it.
 
 ### Fixed
 - **`EXTRACT_NUCLEI_PROPERTIES` now writes its outputs into a `nuclei/` subdirectory of

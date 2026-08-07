@@ -258,13 +258,18 @@ Full walkthrough: [Incremental cycles](add_cycle.md).
 |---|---|---|
 | `mode` | `standard` | `standard` = normal `--start`/`--stop` pipeline; `add_cycle` = incremental cyclic-IF. |
 | `prior_outdir` | `null` | **Required for `add_cycle`.** The `--outdir` of the previously completed run (supplies the reusable reference, mask, and quantification via its checkpoint CSVs). |
-| `embed_masks` | `false` | Embed the segmentation masks as a second uint32 series in the pyramid OME-TIFF. Written only when `embed_masks && quantify_compartments && expanded_quantification`; `add_cycle` consumes this series, so a prior run must have it to be extendable. |
+| `embed_masks` | `false` | Embed the segmentation masks as a second uint32 series in the pyramid OME-TIFF. Written only when `embed_masks && quantify_compartments && expanded_quantification`; `add_cycle` consumes this series, so a prior run must have it to be extendable. `--embed_masks true` REQUIRES both `--quantify_compartments` and `--expanded_quantification` also true — the launch validation rejects the combination otherwise (see warning below). |
 
 !!! warning "`add_cycle` prerequisites"
     `embed_masks` defaults to `false`, so a default run is **not** add_cycle-extendable.
     Set `--embed_masks true` (together with `--quantify_compartments` and
-    `--expanded_quantification`, both on by default) to make a run extendable. Without the
-    embedded mask series, `mode=add_cycle` **fast-fails** before doing any work. See
+    `--expanded_quantification`, both on by default) to make a run extendable.
+    `--embed_masks true` with either sibling off is rejected **at launch**
+    (`ParamUtils.validateCompartmentQuant`) rather than silently producing a
+    plain pyramid, so a prior run either failed to launch with `embed_masks=true`
+    misconfigured, or has the mask series if `embed_masks=true` was accepted at
+    all. Without the embedded mask series, `mode=add_cycle` **fast-fails** before
+    doing any work. See
     [Incremental cycles → Fast-fail behavior](add_cycle.md#fast-fail-behavior).
 
 ## Parameter presets

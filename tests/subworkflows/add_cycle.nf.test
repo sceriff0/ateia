@@ -11,10 +11,16 @@ nextflow_workflow {
      * tests/testdata/prior_run/ is a minimal stand-in for a completed run, written
      * by tests/testdata/generate_complete_testdata.py.
      *
-     * take: gained a second input, compartment_mode
-     * (ParamUtils.compartmentMode(params)) -- Task 4 (arch-B-split)'s seam for
-     * --quantify_compartments / --expanded_quantification / --embed_masks, resolved
-     * once by workflows/mirage.nf in production and threaded down the same way here.
+     * take: gained a second input, compartment_mode -- Task 4 (arch-B-split)'s seam
+     * for --quantify_compartments / --expanded_quantification / --embed_masks,
+     * resolved once by workflows/mirage.nf in production and threaded down the same
+     * way here. The two compartments-off tests below pass input[1] as a LITERAL map
+     * that DIVERGES from params (left at its true default), proving ADD_CYCLE
+     * honours the argument rather than re-reading params.quantify_compartments --
+     * the same "the literal wins" proof the registration_method='tiled' + literal
+     * 'valis' assertion in the third test already makes for that sibling seam. The
+     * middle ("compartment path runs") test keeps input[1] in agreement with params
+     * since it exercises the positive path, not the argument-vs-global distinction.
      * UNVERIFIED LOCALLY (nf-test hangs under qemu on this host).
      */
 
@@ -31,15 +37,19 @@ nextflow_workflow {
                       channels: ['DAPI','CD8'], images_count: 1, channels_count: 2 ],
                     file('tests/testdata/P001_image.tiff')
                 ])
-                input[1] = ParamUtils.compartmentMode(params)
+                input[1] = [compartments: false, expanded: false, embedMasks: false]
                 """
             }
             params {
+                // quantify_compartments deliberately NOT overridden (defaults true)
+                // -- input[1] above is a LITERAL with compartments: false, proving
+                // ADD_CYCLE honours the compartment_mode ARGUMENT (which gates
+                // whether EXTRACT_NUCLEI_PROPERTIES runs), not a re-read of the --
+                // here, conflicting -- global param.
                 outdir = "$outputDir"
                 mode = 'add_cycle'
                 prior_outdir = "$projectDir/tests/testdata/prior_run"
                 reg_qc = 1
-                quantify_compartments = false
             }
         }
 
@@ -63,10 +73,15 @@ nextflow_workflow {
                       channels: ['DAPI','CD8'], images_count: 1, channels_count: 2 ],
                     file('tests/testdata/P001_image.tiff')
                 ])
-                input[1] = ParamUtils.compartmentMode(params)
+                input[1] = [compartments: true, expanded: true, embedMasks: false]
                 """
             }
             params {
+                // The positive path (compartments genuinely on): input[1] agrees
+                // with params here on purpose, since this test's whole point (per
+                // its name) is exercising the "compartment path runs" behaviour,
+                // not the argument-vs-global distinction the two compartments-off
+                // tests in this file prove.
                 outdir = "$outputDir"
                 mode = 'add_cycle'
                 prior_outdir = "$projectDir/tests/testdata/prior_run"
@@ -96,15 +111,17 @@ nextflow_workflow {
                       channels: ['DAPI','CD8'], images_count: 1, channels_count: 2 ],
                     file('tests/testdata/P001_image.tiff')
                 ])
-                input[1] = ParamUtils.compartmentMode(params)
+                input[1] = [compartments: false, expanded: false, embedMasks: false]
                 """
             }
             params {
+                // quantify_compartments deliberately NOT overridden (defaults true)
+                // -- input[1] above is a LITERAL with compartments: false, same
+                // argument-vs-global proof as the first test in this file.
                 outdir = "$outputDir"
                 mode = 'add_cycle'
                 prior_outdir = "$projectDir/tests/testdata/prior_run"
                 reg_qc = 1
-                quantify_compartments = false
                 // ADD_CYCLE registers with VALIS unconditionally: it passes the
                 // LITERAL 'valis' to the shared REGISTER_PATIENT, never
                 // params.registration_method. workflows/mirage.nf rejects
