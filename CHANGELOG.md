@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`lib/Checkpoint.groovy`** — the checkpoint CSV's column list, header and row builder
+  now have one owner. The three writers ask for the header instead of restating it, and
+  `Checkpoint.row()` orders values by the declared column list and throws on a missing or
+  unknown column. No published header, column or path changes.
+- **`tests/lib_probe.nf`** — a unit-test surface for `lib/*.groovy`. nf-test's assertion
+  context cannot see `lib/` classes, so the assertions live in a pipeline script, run by
+  CI's `nextflow-stub` job and by `tests/lib_probe.nf.test`.
 - **`nuclear_markers`** parameter (default `['DAPI', 'CELLTOX']`) — an ordered preference list
   naming the nuclear/fiducial channel. The first marker present (resolved from channel metadata,
   never the filename) is moved to channel 0 by `CONVERT_IMAGE`. Fails fast if none is present
@@ -70,6 +77,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `MIRAGE:FINAL_QC:AGGREGATE_SIZE_LOGS` (diagnostic string only; no functional effect).
 
 ### Fixed
+- **The per-cell registration residuals now reach the QC report.** `SEG_QC.out.per_cell`
+  was emitted through `REGISTRATION.out.seg_residuals` and routed to the SpatialData
+  export, but never tagged into the artifact stream, so no report ever showed it. It is
+  now the artifact kind `seg_residuals`. `FINAL_QC` additionally fails the run if any
+  declared artifact kind has no consumer — previously such a kind was silently dropped.
+- **`tests/test_register.py` could never fail.** It imported `merge_first_file`, which
+  `bin/register.py` does not define, behind a `pytest.importorskip("valis")` that meant
+  the `ImportError` was never reached.
 - **The checkpoint manifests no longer name files that do not exist.** `csv/postprocessed.csv`'s
   `cell_csv` and `cell_geojson` columns previously recorded `<pid>/geojson/cells.geojson` — a
   basename-only path that omitted the `export/` subdirectory `EXPORT_GEOJSON`'s `publishDir`
