@@ -106,10 +106,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   registration backends, with container, flags, stage list, version rows and stub extras
   coming from `lib/WarpBackends.groovy` — the same shape `SEGMENT` already uses for its
   three segmentation backends. The two processes shared ~77% of their bodies.
-  **Published-output change:** the tiled path's size log is named
-  `<prefix>.WARP_SEG_QC.size.csv` instead of `<prefix>.WARP_SEG_QC_TILED.size.csv`. The
-  `*_seg_qc.json` and `*_reg_residuals.csv` filenames, contents and locations are
-  unchanged. `params.registration_method` is still read exactly once on the linear path.
+  **`<outdir>/size_logs/input_sizes.csv` row change (not a new published file):** the
+  tiled path's `process` column now reads `WARP_SEG_QC` instead of
+  `WARP_SEG_QC_TILED` — the per-task `<prefix>.*.size.csv` this aggregates from is
+  never itself published (`WARP_SEG_QC`'s `publishDir` pattern is `*_seg_qc.json`
+  only). The `*_seg_qc.json` and `*_reg_residuals.csv` filenames, contents and
+  locations are unchanged. `params.registration_method` is still read exactly once
+  for DISPATCH, in `subworkflows/local/registration.nf`; `WARP_SEG_QC`'s
+  `--jvm-heap-gb 8` (VALIS-only) is resolved from the `method` process input via
+  `lib/WarpBackends.groovy`, not from the param, so the two can never disagree.
 
 ### Fixed
 - **The checkpoint manifests no longer name files that do not exist.** `csv/postprocessed.csv`'s

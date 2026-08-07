@@ -25,11 +25,24 @@
     branch already passes `[]` for patients whose checkpoint is missing (seg_qc.nf's
     ch_ckpt_by_patient makes that join total precisely so a missing checkpoint costs a
     stage rather than dropping the patient). The tiled method needs no checkpoint at all,
-    so it passes `[]` for every slide. One 7-element input tuple serves both.
+    so it passes `[]` for every slide. One 8-element input tuple serves both.
 
     SHELL FRAGMENTS ARE RETURNED AS A LIST OF LINES, never pre-indented — the caller
     joins them with its own indentation, because Nextflow applies stripIndent() to the
     finished script. Same rule as SegBackends.
+
+    `--jvm-heap-gb 8` LIVES HERE, NOT IN conf/modules.config's ext.args, EVEN THOUGH
+    CLAUDE.md says tool arguments belong in ext.args. That rule is for genuinely TUNABLE
+    values; this is a hardcoded literal that is also backend-specific — exactly like
+    `--method tiled` two lines below. It used to live in a
+    `params.registration_method == 'tiled' ? '' : '--jvm-heap-gb 8'` ternary in
+    conf/modules.config, which reads the GLOBAL PARAM while WARP_SEG_QC selects its
+    backend from the `method` INPUT — on the linear path the two always agree, but the
+    flag was one config edit away from leaking into a tiled render (observed once, by
+    review, in this task). Resolving it from `backend.flags`, which already closes over
+    `method`, makes the leak structurally impossible instead of conditionally absent, and
+    keeps conf/modules.config's `ext.args` free for its actual purpose: user-supplied
+    tunables layered on top, never backend selection.
 
     All methods are static; nothing here reads params. `method` arrives as an argument,
     which is what keeps params.registration_method read exactly once on the linear path
@@ -56,6 +69,13 @@ class WarpBackends {
                     "--micro-reg ${ctx.micro_reg}",
                 ]
                 if (ctx.stage_checkpoint) out << "--checkpoint-dir ${ctx.stage_checkpoint}"
+                // WARP_SEG_QC stages no TIFFs, so the auto-sizer in valis_config.init_jvm
+                // always fell through to its 8 GB floor; pinning it makes the reservation a
+                // decision instead of an accident of the input-directory scan. A VALIS-only
+                // knob, resolved here (not conf/modules.config's ext.args) so it can never
+                // leak onto the JVM-free tiled backend regardless of what
+                // params.registration_method says — see the class header.
+                out << '--jvm-heap-gb 8'
                 return out
             },
             stubExtras  : { ctx -> [

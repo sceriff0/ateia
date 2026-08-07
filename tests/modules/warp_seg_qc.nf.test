@@ -209,6 +209,13 @@ nextflow_process {
                     "tiled rendered command must not carry --micro-reg (valis-only flag): " + rendered.join(' --- ') },
                 { assert rendered.every { !it.contains('--checkpoint-dir') },
                     "tiled rendered command must not carry --checkpoint-dir (valis-only flag): " + rendered.join(' --- ') },
+                // --jvm-heap-gb is VALIS's own JVM-heap knob (the tiled container is
+                // JVM-free); it must be structurally impossible to leak here regardless of
+                // params.registration_method, not merely absent by default -- see
+                // lib/WarpBackends.groovy's class header for why this used to be an
+                // ext.args ternary keyed on the global param instead of the `method` input.
+                { assert rendered.every { !it.contains('--jvm-heap-gb') },
+                    "tiled rendered command must not carry --jvm-heap-gb (valis-only flag): " + rendered.join(' --- ') },
                 { assert rendered.every { !it.contains('valis: $(python') },
                     "tiled rendered versions.yml must not carry the valis probe row: " + rendered.join(' --- ') }
             )
