@@ -34,7 +34,6 @@ process GENERATE_QC_REPORT {
     script:
     def args = task.ext.args ?: ''
     def timestamp = new java.text.SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date())
-    def residuals_arg = seg_residuals ? "--seg-residuals seg_residuals" : ''
     """
     generate_qc_report.py \\
         --preprocess-qc preprocess_qc/ \\
@@ -44,7 +43,7 @@ process GENERATE_QC_REPORT {
         --versions ${versions_yml} \\
         --run-summary ${run_summary_json} \\
         --seg-qc seg_qc/ \\
-        ${residuals_arg} \\
+        --seg-residuals seg_residuals/ \\
         --output mirage_qc_report_${timestamp}.html \\
         --data-dir mirage_qc_data_${timestamp}/ \\
         ${args}

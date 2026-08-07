@@ -85,11 +85,12 @@ KNOWN_ARTIFACT_KINDS = ParamUtils.STEPS.collectMany { it.qcKinds } + ParamUtils.
 // broadcast, so applying this repeatedly to the same source is fine.
 //
 // Validates `kind` itself, not just the tags flowing through `ch_artifacts`
-// (that's the subscribe guard below): the seven artifactsOf() call sites in
+// (that's the subscribe guard below): the eight artifactsOf() call sites in
 // this file's `main:` are a second, textually separate copy of the vocabulary,
 // and a typo there (e.g. 'seg_qcc') would match nothing and silently empty
 // that report slot while every test stayed green -- the same failure class
 // the subscribe guard exists to catch, from the other side.
+
 // Kinds that some artifactsOf() call in this file actually consumes. Populated as a
 // side effect of the calls in `main:` below, and checked against KNOWN_ARTIFACT_KINDS
 // at the end of the workflow.

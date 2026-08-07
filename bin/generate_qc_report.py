@@ -815,8 +815,17 @@ def seg_qc_section(seg_qc_dir):
     return section("Segmentation Warp QC", "\n".join(parts))
 
 
+# bin/warp_seg_qc.py's write_per_cell_csv writes one row per matched cell pair,
+# uncapped -- a real slide can be 10^4-10^6 rows. Every OTHER CSV/JSON table in this
+# report is per-slide or per-stage (a few dozen rows at most); inlining every residual
+# row into one HTML file would produce a browser-killing document the 535-byte stub
+# fixtures never surface. Cap what is rendered and say so, rather than either silently
+# truncating or dumping the whole thing.
+SEG_RESIDUALS_MAX_ROWS = 500
+
+
 def seg_residuals_section(seg_residuals_dir):
-    """Render per-cell registration-residual CSVs (one table per file)."""
+    """Render per-cell registration-residual CSVs (one table per file, row-capped)."""
     csvs = list_files(seg_residuals_dir, "*.csv")
     if not csvs:
         body = '<p class="empty-notice">No per-cell registration residuals found.</p>'
@@ -835,7 +844,14 @@ def seg_residuals_section(seg_residuals_dir):
                 f"{html.escape(Path(csv_path).name)}: {html.escape(str(exc))}</p>"
             )
             continue
-        parts.append(_html_table(headers, rows))
+        total = len(rows)
+        shown = rows[:SEG_RESIDUALS_MAX_ROWS]
+        if total > len(shown):
+            parts.append(
+                "<p style='font-size:0.8rem;color:#888;margin:0 0 6px;'>"
+                f"Showing {len(shown)} of {total} rows.</p>"
+            )
+        parts.append(_html_table(headers, shown))
     return section("Per-Cell Registration Residuals", "\n".join(parts))
 
 

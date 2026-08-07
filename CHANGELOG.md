@@ -80,8 +80,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The per-cell registration residuals now reach the QC report.** `SEG_QC.out.per_cell`
   was emitted through `REGISTRATION.out.seg_residuals` and routed to the SpatialData
   export, but never tagged into the artifact stream, so no report ever showed it. It is
-  now the artifact kind `seg_residuals`. `FINAL_QC` additionally fails the run if any
-  declared artifact kind has no consumer — previously such a kind was silently dropped.
+  now the artifact kind `seg_residuals`. `FINAL_QC` additionally fails the run, on the
+  default path (`--skip_final_qc_report=false` and `--enable_trace=true`, both shipped
+  defaults), if any declared artifact kind has no consumer — previously such a kind was
+  silently dropped.
 - **`tests/test_register.py` could never fail.** It imported `merge_first_file`, which
   `bin/register.py` does not define, behind a `pytest.importorskip("valis")` that meant
   the `ImportError` was never reached.

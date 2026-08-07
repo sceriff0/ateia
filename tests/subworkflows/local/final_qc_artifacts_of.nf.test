@@ -1,5 +1,5 @@
 /*
- * artifactsOf() -- the seven `artifactsOf(ch_artifacts, '<kind>')` call sites inside
+ * artifactsOf() -- the eight `artifactsOf(ch_artifacts, '<kind>')` call sites inside
  * FINAL_QC's `main:` (subworkflows/local/final_qc.nf) are a second, textually separate
  * copy of the artifact-kind vocabulary from KNOWN_ARTIFACT_KINDS. The `ch_artifacts.subscribe`
  * guard (see final_qc.nf.test's "unknown artifact kind" tests) only validates tags flowing

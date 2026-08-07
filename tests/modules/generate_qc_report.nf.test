@@ -124,6 +124,12 @@ nextflow_process {
                     "rendered command: " + rendered.join(' --- ') },
                 { assert rendered.every { !it.contains('--valis-summary') },
                     "rendered command still carries the VALIS-specific flag: " + rendered.join(' --- ') },
+                // Same blind spot, one artifact kind later: `--seg-residuals` and its
+                // `stageAs: 'seg_residuals/*'` directive were added in the seg_residuals
+                // fix and are likewise invisible to any `-stub` run. Pinned here so a
+                // misspelling of either leaves no gate red.
+                { assert rendered.every { it.contains('--seg-residuals seg_residuals/') },
+                    "rendered command: " + rendered.join(' --- ') },
                 // The other half `-stub` cannot see: the `stageAs:` directive, which decides
                 // both what the script finds on disk and the folder name inside the published
                 // mirage_qc_data_*/ bundle. It appears in the staging script, not in
@@ -132,6 +138,8 @@ nextflow_process {
                     "no GENERATE_QC_REPORT .command.run found under the task work dir" },
                 { assert staged.every { it.contains('registration_tre/') },
                     "stageAs directory not renamed in the staging script" },
+                { assert staged.every { it.contains('seg_residuals/') },
+                    "stageAs directory for seg_residuals missing from the staging script" },
                 { assert staged.every { !it.contains('valis_summary/') },
                     "staging script still stages into valis_summary/" }
             )

@@ -160,9 +160,15 @@ workflow {
     // The artifact vocabulary
     // ------------------------------------------------------------------ //
     def kinds = ParamUtils.STEPS.collectMany { it.qcKinds } + ParamUtils.UNIVERSAL_QC_KINDS
+    // Order is load-bearing here: the kind order is the report-slot order, so this is
+    // an ordered-literal equality, not a set/sorted comparison. That same equality
+    // already subsumes uniqueness -- a duplicate member makes this list one element
+    // longer than the literal on the right, which fails equality before any separate
+    // uniqueness check could run. (A prior version of this file carried a
+    // `kinds.size() == kinds.toSet().size()` line after this assert; it was dead code,
+    // unreachable by construction, and has been removed rather than kept "just in case".)
     assert kinds == ['preprocess_qc', 'registration_qc', 'registration_tre', 'seg_qc',
                      'seg_residuals', 'postprocess_qc', 'versions', 'size_log']
-    assert kinds.size() == kinds.toSet().size(), 'artifact kinds must be unique'
 
     // println, NOT log.info: nf-test's underlying `nextflow ... -quiet` run
     // suppresses log.info from stdout entirely (observed directly: a log.info
