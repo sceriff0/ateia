@@ -79,14 +79,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   overwrote the first** on every multi-patient run. Nothing in the pipeline reads the
   published copies, so the run stayed green and the loss was invisible. No checkpoint
   CSV column, no other published path, and no GeoJSON measurement key changes.
+- **`EXTRACT_MASK_SERIES` (the `--mode add_cycle` mask-reuse step) now publishes per
+  patient too.** **Published-output change:** `<outdir>/extract_mask_series/cell_mask.tif`
+  and `.../nuclei_mask.tif` move to `<outdir>/<patient_id>/segmentation/`. This process
+  had the identical unprefixed-filename defect `SPLIT_CHANNELS` had: on a two-patient
+  `add_cycle` run it published exactly two files total — one `cell_mask.tif`, one
+  `nuclei_mask.tif` — for both patients combined, the second silently overwriting the
+  first. It shares the `segmentation` leaf with `SEGMENT`'s own masks; this is safe
+  because `--mode add_cycle` requires a fresh `--outdir` distinct from `--prior_outdir`
+  (`ParamUtils.validateAddCycle`), so `<pid>/segmentation/` is never occupied by anything
+  else in that run.
 - **The fall-through `publishDir` default is now a guard.** A process with no explicit
   `publishDir` publishes to `<outdir>/_UNROUTED_PUBLISH/<process>` instead of to a
   plausible-looking run-level directory, and `tests/test_layout.py` fails the build if
-  any process reaches it. Two other already-unrouted processes surfaced by this guard
-  (`EXTRACT_MASK_SERIES`, and the shared `TILED_COARSE|TILED_REG_TILE` block) publish
-  only internal, re-derivable intermediates (a prior run's re-extracted mask series;
-  per-tile registration control points consumed by `TILED_SOLVE`), so they were given
-  an explicit `publishDir = [ enabled: false ]` rather than a new output path.
+  any process reaches it.
+  **Published-output change:** `<outdir>/tiled_coarse/` and `<outdir>/tiled_reg_tile/`
+  (the STARE tiled-registration fan-out's per-tile anchor JSON, tile-plan CSV, and
+  per-tile control-point JSON — `reg_tiled_fanout=true` only) are no longer published at
+  all; both processes were already relying on the same unrouted default this change
+  closes off, and their content is purely intermediate — `TILED_SOLVE` consumes it and
+  is the one that publishes the durable artifacts: the registration manifest, and the
+  `*_tre.json` whose `"tiles"` records (see `bin/utils/tre_report.py`) carry the same
+  per-tile diagnostic information forward. Both got an explicit
+  `publishDir = [ enabled: false ]` so this is a declared decision, not a silent gap.
 
 ### Fixed
 - **The checkpoint manifests no longer name files that do not exist.** `csv/postprocessed.csv`'s

@@ -126,8 +126,10 @@ class Layout {
      * 'spatialdata' is deliberately NOT here: EXPORT_SPATIALDATA publishes to the bare
      * patient root (`${params.outdir}/${meta.patient_id}`, no trailing leaf) because its
      * .zarr output already carries `spatialdata/` from the process's own `pattern:` —
-     * publishing it under a `.../spatialdata` kind directory would double-nest it. There
-     * is no `<outdir>/<pid>/spatialdata` leaf for a caller to ask Layout for.
+     * publishing it under a `.../spatialdata` kind directory would double-nest it. The
+     * `<outdir>/<pid>/spatialdata/` directory does exist on disk; what does NOT exist is
+     * a `path:` in conf/modules.config that names 'spatialdata' as a segment, so there is
+     * nothing for a caller to ask Layout for.
      *
      * Ordered as the pipeline produces them, not alphabetically.
      */
@@ -163,8 +165,6 @@ class Layout {
         requireKind(kind)
         if (!patientId?.toString()?.trim())
             throw new IllegalArgumentException("Layout.patientDir: patient_id is required")
-        if (!kind?.trim())
-            throw new IllegalArgumentException("Layout.patientDir: kind is required")
         return "${requireOutdir(outdir)}/${patientId}/${kind}"
     }
 

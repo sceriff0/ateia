@@ -288,6 +288,85 @@ def test_no_declared_kind_is_dead():
     )
 
 
+def _skip_non_code(text: str, i: int) -> int:
+    """If `text[i:]` opens a `//` line comment, a `/* */` block comment, or a quoted
+    string literal (single, double, or Groovy triple-quoted), return the index just
+    past it. Otherwise return `i` unchanged.
+
+    Shared by the block-extent walk and the comment/string stripper below, so a `{`
+    or `}` — or the word `publishDir` — appearing inside a comment or a GString's
+    `${...}` interpolation is treated as non-code exactly once, the same way, by
+    both.
+    """
+    n = len(text)
+    if text[i : i + 2] == "//":
+        j = text.find("\n", i)
+        return j if j != -1 else n
+    if text[i : i + 2] == "/*":
+        j = text.find("*/", i + 2)
+        return j + 2 if j != -1 else n
+    if text[i] in ("'", '"'):
+        quote = text[i]
+        if text[i : i + 3] == quote * 3:
+            j = text.find(quote * 3, i + 3)
+            return j + 3 if j != -1 else n
+        j = i + 1
+        while j < n and text[j] != quote:
+            j += 2 if text[j] == "\\" else 1
+        return min(j + 1, n)
+    return i
+
+
+def _block_extent(text: str, start: int) -> int:
+    """Given `start` just past a block's opening `{`, return the index of the
+    matching closing `}` — walking depth-first while skipping over comments and
+    string literals, so a stray `{`/`}` inside either cannot mis-balance the walk.
+
+    A naive character-by-character brace count treats a `{` inside an ordinary
+    line comment (e.g. "note the closure syntax is { x -> ...") as real nesting,
+    which makes the walk run past the block's own closing brace and silently
+    borrow the NEXT block's publishDir. conf/modules.config has three places that
+    mention publishDir in prose; this is why the walk must be comment-aware rather
+    than merely finding *some* balanced brace span.
+    """
+    n = len(text)
+    depth, i = 1, start
+    while i < n and depth:
+        skip_to = _skip_non_code(text, i)
+        if skip_to != i:
+            i = skip_to
+            continue
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+        i += 1
+    return i
+
+
+def _strip_comments_and_strings(text: str) -> str:
+    """Blank `//`/`/* */` comments and quoted-string contents to spaces (preserving
+    newlines), so a `re.M`-anchored search over the result cannot match text that
+    only appears in a comment or inside a string literal.
+
+    Comments are the concrete failure this exists to prevent: a block that merely
+    *mentions* `publishDir` in a `// TODO: decide a publishDir for this one later`
+    comment previously satisfied `"publishDir" in block` — a substring check with no
+    idea what a comment is — and was silently counted as routed.
+    """
+    out = []
+    i, n = 0, len(text)
+    while i < n:
+        skip_to = _skip_non_code(text, i)
+        if skip_to != i:
+            out.append(re.sub(r"[^\n]", " ", text[i:skip_to]))
+            i = skip_to
+        else:
+            out.append(text[i])
+            i += 1
+    return "".join(out)
+
+
 def test_no_process_relies_on_the_fall_through_publish_default():
     """Every process in modules/local/ must have a withName: block that sets publishDir.
 
@@ -303,24 +382,60 @@ def test_no_process_relies_on_the_fall_through_publish_default():
             processes.add(m.group(1))
 
     # Which process names appear in a withName: selector whose block sets publishDir.
+    # The block's own extent is found by a comment/string-aware brace walk (see
+    # _block_extent), and "sets publishDir" means a real top-level assignment in the
+    # comment/string-stripped block body, not the word appearing anywhere at all —
+    # both of which conf/modules.config's own publishDir-referencing comments would
+    # otherwise defeat.
     routed = set()
     for m in re.finditer(r"withName:\s*'([^']+)'\s*\{", config):
         names = m.group(1).split("|")
         start = m.end()
-        depth, i = 1, start
-        while i < len(config) and depth:
-            if config[i] == "{":
-                depth += 1
-            elif config[i] == "}":
-                depth -= 1
-            i += 1
-        if "publishDir" in config[start:i]:
+        end = _block_extent(config, start)
+        block_clean = _strip_comments_and_strings(config[start:end])
+        if re.search(r"^\s*publishDir\s*=", block_clean, re.M):
             routed.update(n.strip() for n in names)
 
     unrouted = processes - routed
     assert not unrouted, (
         f"{sorted(unrouted)} have no withName: block setting publishDir, so they fall "
-        "through to the _UNROUTED_PUBLISH default. Give each an explicit publishDir."
+        "through to the _UNROUTED_PUBLISH default. Give each an explicit publishDir "
+        "(or `publishDir = [ enabled: false ]` if its output is intentionally not "
+        "published)."
+    )
+
+
+def test_every_publishdir_path_closure_matches_the_literal_shape_the_parser_reads():
+    """_per_patient_publish_leaves() understands exactly one shape: a `path:` closure
+    that interpolates `${params.outdir}/${meta.patient_id}/<literal segments>`
+    directly. A closure that reaches the same directory through a local variable,
+    string concatenation, or any other Groovy expression is invisible to that regex —
+    conf/modules.config could publish into an undeclared leaf and
+    test_every_per_patient_publish_leaf_is_a_declared_kind would stay green, which is
+    exactly the failure that test exists to catch.
+
+    This targets any `path:` closure that reaches for the patient ID at all (the
+    `patient_id` substring, not just the literal `meta.patient_id` spelling) and
+    requires the WHOLE closure to be in the one shape the parser can read — so an
+    unreadable shape fails loudly here instead of silently escaping the
+    reverse-direction check two tests up.
+    """
+    config = MODULES_CONFIG.read_text()
+    literal_patient_path = re.compile(
+        r'^\s*path:\s*\{\s*"\$\{params\.outdir\}/\$\{meta\.patient_id\}'
+        r'(?:/[A-Za-z0-9_/]*)?"\s*\}\s*,?\s*$'
+    )
+    offenders = []
+    for i, line in enumerate(config.splitlines(), 1):
+        stripped = line.strip()
+        if not stripped.startswith("path:") or "patient_id" not in stripped:
+            continue
+        if not literal_patient_path.match(line):
+            offenders.append(f"conf/modules.config:{i}: {stripped}")
+    assert offenders == [], (
+        "publishDir path: closure(s) reach for the patient ID in a shape "
+        "_per_patient_publish_leaves() cannot parse — Layout's kind-agreement check "
+        "cannot see these paths at all:\n" + "\n".join(offenders)
     )
 
 
