@@ -103,6 +103,53 @@ workflow {
             "step '${step.name}': entryColumn '${step.entryColumn}' not in requiredColumns"
     }
 
+    // ------------------------------------------------------------------ //
+    // Checkpoint — filename AND columns, one owner
+    // ------------------------------------------------------------------ //
+    assert Checkpoint.columns(Layout.PREPROCESSED) ==
+        ['patient_id', 'preprocessed_image', 'is_reference', 'channels']
+    assert Checkpoint.columns(Layout.REGISTERED) ==
+        ['patient_id', 'registered_image', 'is_reference', 'channels']
+    assert Checkpoint.columns(Layout.POSTPROCESSED) ==
+        ['patient_id', 'cell_csv', 'cell_geojson', 'merged_csv', 'cell_mask', 'pyramid']
+
+    // The header IS the seed: string the three writers pass to collectFile. These
+    // three literals are the published contract — Group A must not change them.
+    assert Checkpoint.header(Layout.PREPROCESSED)  == 'patient_id,preprocessed_image,is_reference,channels'
+    assert Checkpoint.header(Layout.REGISTERED)    == 'patient_id,registered_image,is_reference,channels'
+    assert Checkpoint.header(Layout.POSTPROCESSED) == 'patient_id,cell_csv,cell_geojson,merged_csv,cell_mask,pyramid'
+
+    // row() emits values in DECLARED COLUMN ORDER regardless of map insertion order.
+    // This is the whole point: a writer can no longer transpose two columns.
+    assert Checkpoint.row(Layout.REGISTERED, [
+        channels: 'DAPI|CD3', patient_id: 'P001',
+        registered_image: '/out/P001/registered/x.ome.tiff', is_reference: false
+    ]) == 'P001,/out/P001/registered/x.ome.tiff,false,DAPI|CD3'
+
+    // A missing column must throw, not silently emit an empty field — an empty field
+    // is a checkpoint row naming a path that does not exist, which is exactly the
+    // failure csv/postprocessed.csv shipped with for two releases.
+    def missingCol = false
+    try { Checkpoint.row(Layout.REGISTERED, [patient_id: 'P001']) }
+    catch (IllegalArgumentException ignored) { missingCol = true }
+    assert missingCol, 'Checkpoint.row must reject a missing column'
+
+    // An unknown key must throw too — it means the caller thinks the schema is
+    // something it is not.
+    def unknownCol = false
+    try {
+        Checkpoint.row(Layout.REGISTERED, [
+            patient_id: 'P001', registered_image: '/x', is_reference: false,
+            channels: 'DAPI', typo_column: 'oops'
+        ])
+    }
+    catch (IllegalArgumentException ignored) { unknownCol = true }
+    assert unknownCol, 'Checkpoint.row must reject an unknown column'
+
+    // Checkpoint and Layout must agree on the step vocabulary. Two tables that drift
+    // is the exact failure this extraction exists to prevent.
+    assert Checkpoint.STEPS*.name == Layout.CHECKPOINT_STEPS
+
     // println, NOT log.info: nf-test's underlying `nextflow ... -quiet` run
     // suppresses log.info from stdout entirely (observed directly: a log.info
     // line here never appears in workflow.stdout under nf-test, even though the
