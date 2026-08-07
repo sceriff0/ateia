@@ -16,7 +16,7 @@ import json
 import numpy as np
 
 
-def mask_to_feature_collection(mask, simplify_tolerance: float = 0.5) -> dict:
+def mask_to_feature_collection(mask, simplify_tolerance: float = 1.0) -> dict:
     """Trace each label's outer contour into a GeoJSON FeatureCollection (pixel x,y)."""
     from scipy import ndimage as ndi
     from skimage.measure import approximate_polygon, find_contours
@@ -53,7 +53,7 @@ def mask_to_feature_collection(mask, simplify_tolerance: float = 0.5) -> dict:
     return {"type": "FeatureCollection", "features": features}
 
 
-def write_geojson(mask_path, out_path, simplify_tolerance: float = 0.5) -> int:
+def write_geojson(mask_path, out_path, simplify_tolerance: float = 1.0) -> int:
     """Read a label-mask TIFF, convert, write GeoJSON. Returns the cell count."""
     import tifffile
 
@@ -70,7 +70,11 @@ def main():
     ap = argparse.ArgumentParser(description="StarDist cell-mask TIFF -> cell GeoJSON.")
     ap.add_argument("--mask", required=True)
     ap.add_argument("--out", required=True)
-    ap.add_argument("--tolerance", type=float, default=0.5)
+    # Matches segment_to_geojson.py's --tolerance default: it passes this same
+    # Douglas-Peucker quantity straight through to mask_to_feature_collection()
+    # (segment_to_geojson.py:74-76), so this is not a different value with its own
+    # meaning -- it's the identical parameter, only reachable standalone here.
+    ap.add_argument("--tolerance", type=float, default=1.0)
     a = ap.parse_args()
     n = write_geojson(a.mask, a.out, simplify_tolerance=a.tolerance)
     print(f"Wrote {n} cells to {a.out}")

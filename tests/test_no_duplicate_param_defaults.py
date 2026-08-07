@@ -199,11 +199,21 @@ def test_no_duplicate_param_defaults():
 # straight name-equality check that shipped before this exists purely as the
 # LAST-resort fallback, below both derived maps -- it's still correct when it
 # fires, just not the primary authority. Full precedence: per-script map ->
-# flag-only map -> name-equality. A flag like `segment_to_geojson.py`'s
-# `--tolerance` matches no param named `tolerance` via any of the three and
-# stays out of scope by design -- and is now counted as such (see the
-# `no_correspondence` bucket in `find_argparse_default_sites`), not silently
-# dropped.
+# flag-only map -> name-equality. A flag like `bin/warp_seg_qc.py`'s
+# `--method` is never sourced from `params.*` at either of its two call sites
+# (`modules/local/warp_seg_qc.nf` omits it, relying on the Python default;
+# `modules/local/warp_seg_qc_tiled.nf` passes the literal `--method tiled`) --
+# it stays out of scope by design, permanently, not just until someone wires
+# it -- and is counted as such (see the `no_correspondence` bucket in
+# `find_argparse_default_sites`), not silently dropped.
+#
+# (`segment_to_geojson.py`'s `--tolerance` was this section's example until
+# Task 6 (arch-1-8) wired `--tolerance ${params.simplify_tolerance}` into
+# `conf/modules.config`'s `SEG_QC_GEOJSON` ext.args -- it now resolves via the
+# flag-only map into the `matched` bucket instead, which is exactly the
+# mechanism this comment is illustrating. Swapped the example for one that
+# cannot be resolved by any config wiring, so it does not rot the same way a
+# second time.)
 
 # Deliberate divergences between a bin/*.py argparse default and the
 # nextflow.config default its flag resolves to (via the derived map or the
@@ -270,22 +280,18 @@ ARGPARSE_DEFAULT_ALLOWLIST = {
             "the script's own help text."
         ),
     },
-    "mask_to_geojson.py:--tolerance": {
-        "reason": (
-            "Flag-name coincidence, not a real correspondence, resolved via the "
-            "flag-only fallback because conf/modules.config's SEG_QC_GEOJSON "
-            "ext.args now passes `--tolerance ${params.simplify_tolerance}` to "
-            "segment_to_geojson.py (Task 6, ruling R1). mask_to_geojson.py is a "
-            "library segment_to_geojson.py imports (`mask_to_feature_collection`), "
-            "not a script any process invokes by name -- its own `main()`/CLI is "
-            "for standalone use only, and its docstring records that its contour "
-            "convention deliberately diverges from extract_cell_properties.py's "
-            "(no +0.5 corner-of-pixel offset, because these contours feed VALIS's "
-            "warp_geojson reg-QC path). Keeping its default independent of "
-            "nextflow.config's simplify_tolerance is intentional."
-        ),
-    },
 }
+# NOTE: `mask_to_geojson.py:--tolerance` is deliberately NOT here either. An earlier
+# version of this allowlist exempted it as a "flag-name coincidence, not a real
+# correspondence" -- wrong on both counts: it IS the same Douglas-Peucker quantity as
+# segment_to_geojson.py's --tolerance, not a coincidence (segment_to_geojson.py:74-76
+# passes its own --tolerance value straight into mask_to_feature_collection()'s
+# simplify_tolerance), and the cited "+0.5 corner-of-pixel offset" justification
+# (bin/mask_to_geojson.py:36-40) is about contour OFFSET, an unrelated concern, not
+# simplification tolerance -- it does not support keeping a divergent default. Per this
+# file's own policy ("a divergence that is simply a bug gets fixed, not allowlisted"),
+# bin/mask_to_geojson.py's --tolerance default was changed 0.5 -> 1.0 to match its
+# sibling instead of being exempted.
 # NOTE: `segment.py:--model-name` and `segment_to_geojson.py:--model-name`
 # are deliberately NOT here. Both are `required=True` with no `default=` at
 # all, so their comparison against `segmentation_model` was a moot,
