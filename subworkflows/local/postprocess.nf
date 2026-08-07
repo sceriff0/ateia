@@ -155,7 +155,14 @@ workflow POSTPROCESSING {
     // geojson/ and quantification/ but not the pyramid, and so be missing from
     // csv/postprocessed.csv, half-published and invisible to any later --start
     // postprocessing or add_cycle run. These two groupings must keep identical
-    // channels_count semantics even though their downstream failure modes differ.
+    // channels_count semantics even though their downstream failure modes differ --
+    // WITHIN THIS FILE: both read the same meta.channels_count for the same
+    // patient. That equality is NOT a cross-file invariant: add_cycle.nf's own
+    // pyramid grouping deliberately uses a DIFFERENT total (new_count + prior_count,
+    // since it merges two pyramids' worth of channels) than its own QUANTIFY_MARKERS
+    // call (new-cycle channels only, because the prior quantification columns are
+    // merged onto the CSV separately, not re-quantified) -- the two counts SHOULD
+    // differ there. Do not "reconcile" them to match this file's equality.
     // The channels_count-sized groupKey + remainder:true grouping itself is
     // groupTiffsByPatient (subworkflows/local/quantify_markers.nf), shared with
     // add_cycle.nf's own version of this same grouping — see that function's doc

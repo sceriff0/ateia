@@ -28,6 +28,11 @@ nextflow run . -profile <profile> \
 - `--prior_outdir`: the previous run's `--outdir`.
 - `--outdir`: a FRESH directory; the complete combined outputs (all markers,
   all cycles) are written here. The prior outdir is left intact.
+- `--start`/`--stop` **do not apply in this mode and are rejected at launch.**
+  `add_cycle` runs a fixed path — preprocess the new cycle, register it against
+  the frozen prior reference, quantify, export — there is no partial-run choice
+  to make. Passing `--stop` at all, or `--start` with anything other than its
+  own default (`preprocessing`), is a launch-time error.
 
 ## What is reused vs recomputed
 - Reused: reference image, prior marker columns (the prior run's merged

@@ -338,22 +338,48 @@ workflow ADD_CYCLE {
     // on time), whereas under-counting this specific grouping is the one failure
     // mode that ABORTS the run outright — see groupTiffsByPatient's doc comment.
     //
-    // new_count is SUMMED across SPLIT_CHANNELS.out.channels' emissions for a
-    // patient, not read off a single one: a patient can have more than one
-    // new-cycle slide (REGISTER_PATIENT/ch_grouped above fans out per new item),
-    // in which case SPLIT_CHANNELS runs once per slide and this must add them
-    // all up, or it would under-count exactly the failure mode this exists to
-    // avoid. SPLIT_PRIOR_PYRAMID, in contrast, runs exactly once per patient
-    // (one prior pyramid), so no grouping is needed on that side.
-    ch_new_channel_counts = SPLIT_CHANNELS.out.channels
+    // Built as `.mix()` of BOTH count streams into a single `groupTuple(by:0)` +
+    // `.sum()`, not a `.join()` of two separately-summed streams: a join silently
+    // DROPS a patient entirely when either side has no entry for it. SPLIT_CHANNELS
+    // and SPLIT_PRIOR_PYRAMID both declare `path("*.tiff")` as a mandatory output,
+    // so a missing emission normally means a failed task -- but
+    // conf/modules.config's `errorStrategy 'ignore'` branch can swallow exactly
+    // that failure, and a join would then turn "pyramid from the surviving side's
+    // channels only" into "no pyramid at all, run still green" for that patient.
+    // `.mix()` + `groupTuple` + `.sum()` degrades instead of disappearing: a
+    // patient present on only one side still gets a count (and downstream, a
+    // pyramid) from whatever it does have.
+    //
+    // Both sides are summed the same way, not just the new-cycle side: a patient
+    // can emit more than one entry on EITHER stream. SPLIT_CHANNELS runs once per
+    // new-cycle slide when a patient contributes more than one (see ch_grouped's
+    // fan-out above), which is why new_count could never be read off a single
+    // emission. SPLIT_PRIOR_PYRAMID runs exactly once per patient TODAY (one row
+    // per patient in the prior postprocessed checkpoint) -- but summing here costs
+    // nothing and removes "the prior checkpoint is single-row-per-patient" as a
+    // correctness dependency of this grouping rather than a mere observation about
+    // today's writer.
+    //
+    // One honest caveat: the streaming hint this enables is currently INERT on
+    // this path. `ch_deduped_channels`'s own dedup step above is a bare
+    // `groupTuple(by:0)` with no size hint (grouping by [pid, marker], not
+    // patient_id, so it has no single patient-level count to key on) — an
+    // unsized groupTuple cannot know a given key is "done" until the ENTIRE
+    // upstream channel closes, so it is already a full barrier. groupTiffsByPatient
+    // downstream therefore cannot emit any patient earlier than "every patient's
+    // channels have arrived" regardless of how accurately channels_count is sized
+    // here. Getting the size right is still correct and still matches
+    // postprocess.nf's semantics (see that file's comment for why the two must NOT
+    // be assumed numerically equal) — it just does not buy add_cycle any actual
+    // parallelism today, unlike postprocess.nf, which has no such upstream barrier.
+    ch_channel_counts = SPLIT_CHANNELS.out.channels
         .map { meta, tiffs -> [meta.patient_id, (tiffs instanceof List ? tiffs.size() : 1)] }
+        .mix(
+            SPLIT_PRIOR_PYRAMID.out.channels
+                .map { meta, tiffs -> [meta.patient_id, (tiffs instanceof List ? tiffs.size() : 1)] }
+        )
         .groupTuple(by: 0)
         .map { pid, counts -> [pid, counts.sum()] }
-    ch_prior_channel_counts = SPLIT_PRIOR_PYRAMID.out.channels
-        .map { meta, tiffs -> [meta.patient_id, (tiffs instanceof List ? tiffs.size() : 1)] }
-    ch_channel_counts = ch_new_channel_counts
-        .join(ch_prior_channel_counts, by: 0)
-        .map { pid, new_count, prior_count -> [pid, new_count + prior_count] }
 
     ch_all_channels = groupTiffsByPatient(
         ch_deduped_channels

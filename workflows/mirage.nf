@@ -66,6 +66,12 @@ workflow MIRAGE {
 
     /* -------------------- MODE: ADD_CYCLE -------------------- */
     if (params.mode == 'add_cycle') {
+        // add_cycle has a FIXED path (no --start/--stop choice), so a caller who
+        // passes either is rejected here rather than accepted-and-ignored: the
+        // earlier behaviour let --stop registration run the ENTIRE path through
+        // export while run_summary.json claimed the run stopped after
+        // registration — an accuracy bug at the label's source, not the label.
+        ParamUtils.validateAddCycleStepFlags(params)
         ParamUtils.validateAddCycle(params.outdir, params.prior_outdir)
         ParamUtils.validateCompartmentQuant(params.quantify_compartments, params.expanded_quantification)
         ParamUtils.validateAddCyclePhenotyping(params)  // add_cycle has no PHENOTYPE stage
@@ -123,16 +129,16 @@ workflow MIRAGE {
                 .mix(ADD_CYCLE.out.seg_residuals.map { _meta, files -> ['seg_residuals', files] })
                 .mix(ADD_CYCLE.out.versions.map      { f -> ['versions', f] })
                 .mix(ADD_CYCLE.out.size_logs.map     { f -> ['size_log', f] }),
-            // effective_stop (computed above, shared with the standard path), NOT
-            // the literal 'add_cycle' this used to smuggle in: 'add_cycle' is not a
-            // member of ParamUtils.STEP_ORDER, so FINAL_QC's run_summary.json used to
-            // carry a `run.stop` value that would index to -1 in any consumer that
-            // looked it up there. buildRunSummary (subworkflows/local/final_qc.nf)
-            // only ever writes this straight into the JSON report as a label, so the
-            // real effective stop (defaulting to 'postprocessing', the last step,
-            // since add_cycle always carries the run through to export) is both
-            // accurate and STEP_ORDER-safe.
-            INPUT_CHECK.out.counts.map { counts -> counts + [stop: effective_stop] }
+            // ParamUtils.STEP_ORDER.last() ('postprocessing'), NOT effective_stop and NOT
+            // the literal 'add_cycle' this used to smuggle in. Neither of those was safe:
+            // 'add_cycle' is not a member of STEP_ORDER, so a consumer indexing it would
+            // get -1; effective_stop reflects whatever --stop the caller passed, but
+            // validateAddCycleStepFlags (above) now REJECTS a non-default --start/--stop
+            // in this mode, so the only value that can ever reach here honestly is "ran
+            // the whole fixed path through export" — the last step, unconditionally. Before
+            // that rejection existed, an accepted-and-ignored --stop registration ran the
+            // FULL path through export while still labelling itself "registration" here.
+            INPUT_CHECK.out.counts.map { counts -> counts + [stop: ParamUtils.STEP_ORDER.last()] }
         )
 
         return   // do NOT fall through to the standard start/stop flow

@@ -57,7 +57,7 @@
                 },
                 "mode": {
                     "type": "string",
-                    "description": "Execution mode. 'standard' runs the linear start/stop step flow; 'add_cycle' bypasses it to fold a new imaging cycle into a completed patient run (requires --prior_outdir).",
+                    "description": "Execution mode. 'standard' runs the linear start/stop step flow; 'add_cycle' rejects --start/--stop (it runs a fixed path from the new-cycle samplesheet through export) to fold a new imaging cycle into a completed patient run (requires --prior_outdir).",
                     "default": "standard",
                     "enum": [
                         "standard",

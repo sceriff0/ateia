@@ -184,6 +184,33 @@ class ParamUtils {
         }
     }
 
+    /**
+     * add_cycle runs a FIXED path — new-cycle samplesheet -> preprocess -> register against
+     * the frozen prior reference -> quantify -> export — there is no --start/--stop choice
+     * to make, and 'add_cycle' is not itself a member of STEP_ORDER (it is a mode, not a
+     * step; see the header comment on STEPS). Accepting either flag and silently ignoring it
+     * used to let a run report whatever --stop the caller typed as though it had been
+     * honoured (e.g. --stop registration completing the FULL path through export while
+     * run_summary.json claimed the run stopped after registration) — accept-and-ignore is
+     * the defect, not the label, so this rejects both rather than trying to describe
+     * whatever was ignored.
+     *
+     * --stop defaults to null, so an explicit --stop is exactly `params.stop != null`.
+     * --start defaults to 'preprocessing', so an explicit non-default --start is exactly
+     * `params.start != 'preprocessing'` — a caller who explicitly passes
+     * --start preprocessing is indistinguishable from one who passed neither flag, and
+     * that ambiguity is harmless: 'preprocessing' is also the only correct description of
+     * where add_cycle's own fixed path begins.
+     */
+    static void validateAddCycleStepFlags(Map params) {
+        if (params.stop != null || params.start != 'preprocessing') {
+            throw new IllegalArgumentException(
+                "mode='add_cycle' runs a fixed path from the new-cycle samplesheet through " +
+                "export (preprocess -> register against the frozen prior reference -> " +
+                "quantify -> export) — --start/--stop do not apply in this mode and must be omitted.")
+        }
+    }
+
     static void validateCompartmentQuant(boolean quantifyCompartments, boolean expanded) {
         if (expanded && !quantifyCompartments) {
             throw new IllegalArgumentException(
