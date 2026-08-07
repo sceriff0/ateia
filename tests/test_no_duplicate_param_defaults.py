@@ -200,11 +200,12 @@ def test_no_duplicate_param_defaults():
 # LAST-resort fallback, below both derived maps -- it's still correct when it
 # fires, just not the primary authority. Full precedence: per-script map ->
 # flag-only map -> name-equality. A flag like `bin/warp_seg_qc.py`'s
-# `--method` is never sourced from `params.*` at either of its two call sites
-# (`modules/local/warp_seg_qc.nf` omits it, relying on the Python default;
-# `modules/local/warp_seg_qc_tiled.nf` passes the literal `--method tiled`) --
-# it stays out of scope by design, permanently, not just until someone wires
-# it -- and is counted as such (see the `no_correspondence` bucket in
+# `--method` is never sourced from `params.*`: `modules/local/warp_seg_qc.nf`
+# dispatches it via `lib/WarpBackends.groovy`, keyed on the `method` INPUT --
+# the valis backend omits the flag, relying on the Python default, and the
+# tiled backend passes the literal `--method tiled` -- it stays out of scope
+# by design, permanently, not just until someone wires it -- and is counted
+# as such (see the `no_correspondence` bucket in
 # `find_argparse_default_sites`), not silently dropped.
 #
 # (`segment_to_geojson.py`'s `--tolerance` was this section's example until

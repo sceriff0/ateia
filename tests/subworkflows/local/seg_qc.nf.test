@@ -146,7 +146,7 @@ nextflow_workflow {
         }
     }
 
-    test("tiled: dispatches to WARP_SEG_QC_TILED and joins one manifest per moving slide") {
+    test("tiled: dispatches WARP_SEG_QC's tiled backend and joins one manifest per moving slide") {
 
         tag "stub"
         options "-stub"
@@ -198,8 +198,8 @@ nextflow_workflow {
                 { assert workflow.out.metrics.size() == 3 },
                 { assert workflow.out.metrics.collect { it[0].id }.toSorted() ==
                          ['P001_mov1', 'P001_mov2', 'P002_mov1'] },
-                // The tiled scorer reports its own stage set, proving WARP_SEG_QC_TILED ran
-                // rather than the VALIS process.
+                // The tiled scorer reports its own stage set, proving WARP_SEG_QC's tiled
+                // backend ran rather than its VALIS backend.
                 { assert path(workflow.out.metrics[0][1]).json.stage_order == ['native', 'rigid', 'refined'] }
             )
         }
@@ -223,9 +223,17 @@ nextflow_workflow {
         // CRITICAL to the design of this case: BOTH transform channels are populated, and
         // both are valid for their own branch. If input[3] were empty (as it is in the two
         // valis cases above), the tiled branch would produce zero warp tasks anyway and the
-        // WARP_SEG_QC_TILED == 0 assertion would pass VACUOUSLY -- it would prove nothing
-        // about which branch ran. With both populated, each branch produces warp tasks, so
-        // the only thing that decides which process appears in the trace is the argument.
+        // stage_order assertion below would pass VACUOUSLY -- it would prove nothing about
+        // which branch ran. With both populated, each branch produces warp tasks, so the
+        // only thing that decides which backend's stage set comes back is the argument.
+        //
+        // WARP_SEG_QC and WARP_SEG_QC_TILED used to be two processes, so this case could
+        // assert on the process NAME in workflow.trace. Since Task 3 merged them into one
+        // process dispatching on a `method` INPUT (lib/WarpBackends.groovy), the process
+        // name is always "WARP_SEG_QC" regardless of which backend ran -- the only
+        // observable left is the emitted record's stage_order, which is backend-specific
+        // by construction (valis: native/rigid/non_rigid/micro; tiled:
+        // native/rigid/refined).
 
         when {
             params {
@@ -264,18 +272,14 @@ nextflow_workflow {
         then {
             assertAll(
                 { assert workflow.success },
-                // `\b` discriminates the two process names: WARP_SEG_QC is a prefix of
-                // WARP_SEG_QC_TILED, but `_` is a word character so no boundary follows
-                // WARP_SEG_QC there. Same idiom as register_patient.nf.test's REGISTER\b.
-                { assert workflow.trace.tasks().findAll {
-                    it.name.contains('WARP_SEG_QC_TILED')
-                }.size() == 0 },
                 { assert workflow.trace.tasks().findAll {
                     it.name =~ /(^|:)WARP_SEG_QC\b/
                 }.size() > 0 },
                 { assert workflow.out.metrics.size() == 1 },
-                // Positive confirmation, not just absence: the VALIS scorer reports its own
-                // four-stage set, the tiled one reports ['native', 'rigid', 'refined'].
+                // Positive confirmation that the ARGUMENT (not the param) picked the
+                // backend: the VALIS backend reports its own four-stage set. Had
+                // params.registration_method won instead, this would be
+                // ['native', 'rigid', 'refined'] -- the tiled backend's stage list.
                 { assert path(workflow.out.metrics[0][1]).json.stage_order ==
                          ['native', 'rigid', 'non_rigid', 'micro'] }
             )

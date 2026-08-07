@@ -148,7 +148,8 @@ workflow REGISTRATION {
 
     // Level 2 warps polygons through the registrar the method produced — the VALIS pickle (via the
     // BioFormats JVM) or the STARE manifest (JVM-free). The scorer is identical; only the warper
-    // differs (WARP_SEG_QC vs WARP_SEG_QC_TILED). Segmentation of the native slides is shared.
+    // differs (WARP_SEG_QC's two backends, keyed by lib/WarpBackends.groovy). Segmentation of
+    // the native slides is shared.
     def do_seg_qc = reg_qc_level >= 2
 
     // ========================================================================

@@ -157,6 +157,32 @@ workflow {
     assert keysOf(envVersions) == keysOf(envVersionsStub)
     assert keysOf(envVersions) == ['python', 'numpy', 'scikit-image'].toSet()
 
+    // ------------------------------------------------------------------ //
+    // WarpBackends — one seam for the reg_qc=2 warp
+    // ------------------------------------------------------------------ //
+    assert WarpBackends.methods().toSorted() == ['tiled', 'valis']
+    assert WarpBackends.container('valis') == 'cdgatenbee/valis-wsi:1.0.0'
+    assert WarpBackends.container('tiled') == 'bolt3x/attend_image_analysis:tiled'
+    assert WarpBackends.of('valis').stages == ['native', 'rigid', 'non_rigid', 'micro']
+    assert WarpBackends.of('tiled').stages == ['native', 'rigid', 'refined']
+
+    // The tiled backend must pass --method tiled; VALIS must not.
+    assert WarpBackends.of('tiled').flags([:]).any { it.contains('--method tiled') }
+    def valisFlags = WarpBackends.of('valis').flags(
+        [ref_slide: 'R', moving_slide: 'M', stage_checkpoint: null, micro_reg: 2])
+    assert !valisFlags.any { it.contains('--method') }
+    assert valisFlags.any { it.contains('--micro-reg 2') }
+    // Absent checkpoint is a null object, not an empty flag.
+    assert !valisFlags.any { it.contains('--checkpoint-dir') }
+    assert WarpBackends.of('valis').flags(
+        [ref_slide: 'R', moving_slide: 'M', stage_checkpoint: 'ckpt/', micro_reg: 2]
+    ).any { it.contains('--checkpoint-dir ckpt/') }
+
+    def badMethod = false
+    try { WarpBackends.of('stare') }
+    catch (IllegalArgumentException ignored) { badMethod = true }
+    assert badMethod, 'WarpBackends.of must reject an unknown method'
+
     // println, NOT log.info: nf-test's underlying `nextflow ... -quiet` run
     // suppresses log.info from stdout entirely (observed directly: a log.info
     // line here never appears in workflow.stdout under nf-test, even though the

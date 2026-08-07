@@ -104,27 +104,87 @@ def _extract_calls(text):
     return calls
 
 
-def test_versions_calls_pass_a_literal_tool_list():
-    """Every ProcessEnvelope.versions()/versionsStub() call must be parseable into a
-    literal `task.process, ['a', 'b']` tool list, or the guard below that compares
-    script: against stub: cannot see it at all -- see _extract_calls' docstring.
+def _norm(text):
+    return re.sub(r"\s+", "", text)
+
+
+def test_versions_calls_are_literal_or_symmetric_between_script_and_stub():
+    """Every ProcessEnvelope.versions()/versionsStub() call must be EITHER a literal
+    `task.process, ['a', 'b']` tool list, OR a non-literal expression (a variable, a
+    method call, a ternary) that is textually IDENTICAL -- modulo whitespace -- to its
+    counterpart in the same module.
+
+    Why a non-literal expression is allowed at all, when the docstring of
+    _extract_calls above warns a ternary can fool this guard: the risk a ternary poses
+    is picking a DIFFERENT branch in script: than in stub: (or matching the trailing
+    literal branch only, in the regex-based approach this guard used to take). That
+    risk is closed by requiring the two call sites to be the SAME source expression,
+    not merely two expressions that might evaluate the same. Two identical expressions
+    evaluated against the same `method` input cannot diverge -- there is no way for
+    `ProcessEnvelope.versions(task.process, backend.versionTools)` to name a different
+    tool list than `ProcessEnvelope.versionsStub(task.process, backend.versionTools)`
+    for the same task, because they read the same variable. That is exactly Task 3's
+    warp_seg_qc.nf shape: `backend` is resolved once per task from the `method` input,
+    and both the script: and stub: blocks pass `backend.versionTools` verbatim.
+
+    What is NOT allowed: a non-literal expression that appears in only one of the two
+    blocks (an unpaired call), or two non-literal expressions that differ at all --
+    including a ternary naming two *different* literal lists per branch, which is
+    exactly the shape that would defeat a same-branch-only literal check.
     """
     unparseable = []
     for nf in MODULES:
         text = nf.read_text()
-        for method, args in _extract_calls(text):
-            if args is None or not LITERAL_ARGS_RE.match(args):
-                unparseable.append((nf.name, method, args))
+        calls = _extract_calls(text)
+        script_args = [args for method, args in calls if method == "versions"]
+        stub_args = [args for method, args in calls if method == "versionsStub"]
+
+        non_literal_script = [a for a in script_args if a is None or not LITERAL_ARGS_RE.match(a)]
+        non_literal_stub = [a for a in stub_args if a is None or not LITERAL_ARGS_RE.match(a)]
+        if not non_literal_script and not non_literal_stub:
+            continue
+
+        # Symmetric-non-literal exception: exactly one non-literal versions() call and
+        # exactly one non-literal versionsStub() call, sharing the module with no other
+        # (literal or non-literal) calls, and their argument text matches exactly.
+        symmetric = (
+            len(script_args) == 1
+            and len(stub_args) == 1
+            and non_literal_script == script_args
+            and non_literal_stub == stub_args
+            and script_args[0] is not None
+            and stub_args[0] is not None
+            and _norm(script_args[0]) == _norm(stub_args[0])
+        )
+        if symmetric:
+            continue
+
+        for args in non_literal_script:
+            unparseable.append((nf.name, "versions", args))
+        for args in non_literal_stub:
+            unparseable.append((nf.name, "versionsStub", args))
+
     assert not unparseable, (
-        f"ProcessEnvelope call(s) that are not a literal `task.process, [...]` tool "
-        f"list, so test_script_and_stub_ask_for_the_same_tool_list cannot compare "
-        f"them: {unparseable}. A ternary or a variable tool list needs its own "
-        f"explicit case in this guard, not a silent pass-through."
+        f"ProcessEnvelope call(s) that are neither a literal `task.process, [...]` tool "
+        f"list NOR a non-literal expression textually IDENTICAL to its script:/stub: "
+        f"counterpart, so test_script_and_stub_ask_for_the_same_tool_list cannot verify "
+        f"them: {unparseable}. A ternary or a variable tool list must be the exact same "
+        f"expression in both versions() and versionsStub(), with no other calls in the "
+        f"module, or it needs its own explicit case in this guard rather than a silent "
+        f"pass-through."
     )
 
 
 def test_script_and_stub_ask_for_the_same_tool_list():
-    """The failure this whole refactor exists to prevent: two lists, one invisible."""
+    """The failure this whole refactor exists to prevent: two lists, one invisible.
+
+    Literal calls are compared by their parsed tool list. Non-literal calls are not
+    re-parsed here -- test_versions_calls_are_literal_or_symmetric_between_script_and_stub
+    already proved any non-literal pair present is textually identical, which is the
+    strongest equality this guard can assert without evaluating Groovy -- so a module
+    using only the symmetric non-literal shape has nothing left to compare and is
+    skipped, exactly like a module with no ProcessEnvelope calls at all.
+    """
     mismatches = []
     for nf in MODULES:
         text = nf.read_text()

@@ -102,6 +102,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `*_tre.json` whose `"tiles"` records (see `bin/utils/tre_report.py`) carry the same
   per-tile diagnostic information forward. Both got an explicit
   `publishDir = [ enabled: false ]` so this is a declared decision, not a silent gap.
+- **`WARP_SEG_QC_TILED` is merged into `WARP_SEG_QC`.** One process now serves both
+  registration backends, with container, flags, stage list, version rows and stub extras
+  coming from `lib/WarpBackends.groovy` — the same shape `SEGMENT` already uses for its
+  three segmentation backends. The two processes shared ~77% of their bodies.
+  **Published-output change:** the tiled path's size log is named
+  `<prefix>.WARP_SEG_QC.size.csv` instead of `<prefix>.WARP_SEG_QC_TILED.size.csv`. The
+  `*_seg_qc.json` and `*_reg_residuals.csv` filenames, contents and locations are
+  unchanged. `params.registration_method` is still read exactly once on the linear path.
 
 ### Fixed
 - **The checkpoint manifests no longer name files that do not exist.** `csv/postprocessed.csv`'s

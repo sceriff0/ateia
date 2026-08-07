@@ -12,18 +12,26 @@
 
     The scorer (bin/warp_seg_qc.py) is method-agnostic; only the *warper* differs, so the
     method dispatch lives here rather than at the call sites:
-      * valis  -> WARP_SEG_QC       (per-PATIENT transform, BioFormats JVM, pre-micro checkpoint)
-      * tiled  -> WARP_SEG_QC_TILED (per-SLIDE transform, JVM-free, no checkpoint)
+      * valis  -> per-PATIENT transform, BioFormats JVM, pre-micro checkpoint
+      * tiled  -> per-SLIDE transform, JVM-free, no checkpoint
 
-    The two warp PROCESSES stay separate deliberately. They run in different containers (the
-    multi-GB VALIS/BioFormats image vs the ~438 MB JVM-free tiled one) and take differently
-    shaped inputs, so merging them would need a conditional `container` directive and
-    conditional process inputs — method knowledge pushed back INSIDE a process body, which is
-    the thing this seam exists to prevent. Concentrating the dispatch in this one `if` is the
-    design, not a leftover.
+    ONE WARP PROCESS, TWO BACKENDS. WARP_SEG_QC's container, flags, stage list, version
+    rows and stub extras come from lib/WarpBackends.groovy, keyed on the `method`
+    argument. This file's `if` shapes the input tuple — the two joins genuinely differ,
+    because tiled has one transform per moving slide and VALIS one registrar per patient
+    — and then calls the one process.
 
-    `method` is an ARGUMENT, not a read of params.registration_method — the same rule
-    REGISTER_PATIENT follows and for the same reason: ADD_CYCLE is VALIS-only by construction
+    This reverses an earlier decision recorded here, which argued the two processes should
+    stay separate because merging would need a conditional container directive and
+    conditional inputs. modules/local/segment.nf does exactly that for three segmentation
+    backends and ships green; holding both positions cost more than either. The absent
+    stage checkpoint is a null object (`[]`), which is the idiom the VALIS arm already
+    used for patients whose checkpoint was missing.
+
+    `method` is an ARGUMENT here — an argument to this subworkflow and an input to the
+    process — never a read of params.registration_method, which is read exactly once, in
+    subworkflows/local/registration.nf. That is the same rule REGISTER_PATIENT follows
+    and for the same reason: ADD_CYCLE is VALIS-only by construction
     (workflows/mirage.nf rejects `--registration_method tiled` in add_cycle mode) and passes
     the literal 'valis', so sharing this subworkflow must not be what quietly lifts that
     rejection.
@@ -49,7 +57,6 @@
 
 include { SEG_QC_GEOJSON    } from '../../modules/local/seg_qc_geojson'
 include { WARP_SEG_QC       } from '../../modules/local/warp_seg_qc'
-include { WARP_SEG_QC_TILED } from '../../modules/local/warp_seg_qc_tiled'
 
 workflow SEG_QC {
     take:
@@ -71,26 +78,26 @@ workflow SEG_QC {
     // moving: [patient_id, meta, moving_geojson, moving_slide_name]
     ch_mov_gj = ch_gj.moving.map { meta, gj -> [meta.patient_id, meta, gj, gj.simpleName] }
 
+    // Both arms shape the same 8-element tuple WARP_SEG_QC takes —
+    // [meta, method, transform, ref_slide, moving_slide, ref_geojson, moving_geojson,
+    // stage_checkpoint] — and differ only in how `transform` and `stage_checkpoint` are
+    // joined, because the two methods' transforms are keyed differently (per-slide vs
+    // per-patient) and only VALIS has a stage checkpoint at all.
     if (method == 'tiled') {
         // Tiled: one transform per moving slide (meta-keyed). Join it to the moving GeoJSON by
         // (patient, sorted-channels) so each slide is scored against its own transform. No
-        // stage checkpoint (stages are separable by construction) and no JVM.
+        // stage checkpoint (stages are separable by construction) and no JVM — `[]` is the
+        // null object WARP_SEG_QC's tiled backend never reads.
         ch_manifest_keyed = ch_transform_by_slide
             .map { meta, m -> [meta.patient_id, meta.channels.toSorted().join('|'), m] }
 
-        ch_for_warp_tiled = ch_mov_gj
+        ch_for_warp = ch_mov_gj
             .map { pid, meta, gj, name -> [pid, meta.channels.toSorted().join('|'), meta, gj, name] }
             .combine(ch_ref_gj, by: 0)
             .combine(ch_manifest_keyed, by: [0, 1])
             .map { _pid, _sig, meta, mov_gj, mov_name, ref_gj, ref_name, m ->
-                tuple(meta, m, ref_name, mov_name, ref_gj, mov_gj)
+                tuple(meta, method, m, ref_name, mov_name, ref_gj, mov_gj, [])
             }
-
-        WARP_SEG_QC_TILED(ch_for_warp_tiled)
-        ch_metrics      = WARP_SEG_QC_TILED.out.metrics
-        ch_per_cell     = WARP_SEG_QC_TILED.out.per_cell
-        ch_warp_size    = WARP_SEG_QC_TILED.out.size_log
-        ch_warp_versions = WARP_SEG_QC_TILED.out.versions
     } else {
         // VALIS: one transform (the registrar pickle) per patient. Exactly one stage-checkpoint
         // entry per patient that has one — the real directory where REGISTER wrote it, `[]`
@@ -109,15 +116,15 @@ workflow SEG_QC {
             .combine(ch_transform, by: 0)
             .combine(ch_ckpt_by_patient, by: 0)
             .map { pid, meta, mov_gj, mov_name, ref_gj, ref_name, pickle, ckpt ->
-                tuple(meta, pickle, ref_name, mov_name, ref_gj, mov_gj, ckpt)
+                tuple(meta, method, pickle, ref_name, mov_name, ref_gj, mov_gj, ckpt)
             }
-
-        WARP_SEG_QC(ch_for_warp)
-        ch_metrics       = WARP_SEG_QC.out.metrics
-        ch_per_cell      = WARP_SEG_QC.out.per_cell
-        ch_warp_size     = WARP_SEG_QC.out.size_log
-        ch_warp_versions = WARP_SEG_QC.out.versions
     }
+
+    WARP_SEG_QC(ch_for_warp)
+    ch_metrics       = WARP_SEG_QC.out.metrics
+    ch_per_cell      = WARP_SEG_QC.out.per_cell
+    ch_warp_size     = WARP_SEG_QC.out.size_log
+    ch_warp_versions = WARP_SEG_QC.out.versions
 
     emit:
     metrics  = ch_metrics
