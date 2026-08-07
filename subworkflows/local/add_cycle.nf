@@ -78,7 +78,7 @@ workflow ADD_CYCLE {
     // never restates the schema.
     //
     // Fail loudly here if the writer's schema drifts from what this reader indexes.
-    ['registered_image', 'is_reference', 'channels'].each { col ->
+    ['patient_id', 'registered_image', 'is_reference', 'channels'].each { col ->
         assert col in Checkpoint.columns(Layout.REGISTERED),
             "add_cycle reads '${col}' from ${Layout.checkpointCsvRelative(Layout.REGISTERED)}, " +
             "which Checkpoint no longer declares"
@@ -98,7 +98,7 @@ workflow ADD_CYCLE {
     // EXTRACT_MASK_SERIES below, so the cell_mask column is read and discarded.
     //
     // Fail loudly here if the writer's schema drifts from what this reader indexes.
-    ['merged_csv', 'cell_mask', 'pyramid'].each { col ->
+    ['patient_id', 'merged_csv', 'cell_mask', 'pyramid'].each { col ->
         assert col in Checkpoint.columns(Layout.POSTPROCESSED),
             "add_cycle reads '${col}' from ${Layout.checkpointCsvRelative(Layout.POSTPROCESSED)}, " +
             "which Checkpoint no longer declares"

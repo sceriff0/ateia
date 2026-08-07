@@ -84,10 +84,11 @@ workflow MIRAGE {
         // --prior_outdir's checkpoint CSVs.
         ADD_CYCLE(INPUT_CHECK.out.samples)
 
-        // ADD_CYCLE has no preprocess_qc / registration_tre / postprocess_qc of its own
-        // (it calls PREPROCESSING internally without re-exposing its QC pngs, and has
-        // no POSTPROCESSING step at all — masks are reused, not re-segmented). Those
-        // kinds are simply not contributed; FINAL_QC defaults them to empty.
+        // ADD_CYCLE has no preprocess_qc / registration_tre / postprocess_qc / seg_residuals
+        // of its own (it calls PREPROCESSING internally without re-exposing its QC pngs, has
+        // no POSTPROCESSING step at all — masks are reused, not re-segmented — and calls
+        // SEG_QC without capturing `.out.per_cell`). Those kinds are simply not contributed;
+        // FINAL_QC defaults them to empty.
         FINAL_QC(
             Channel.empty()
                 .mix(ADD_CYCLE.out.qc.map        { _meta, files -> ['registration_qc', files] })

@@ -77,13 +77,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `MIRAGE:FINAL_QC:AGGREGATE_SIZE_LOGS` (diagnostic string only; no functional effect).
 
 ### Fixed
-- **The per-cell registration residuals now reach the QC report.** `SEG_QC.out.per_cell`
-  was emitted through `REGISTRATION.out.seg_residuals` and routed to the SpatialData
-  export, but never tagged into the artifact stream, so no report ever showed it. It is
-  now the artifact kind `seg_residuals`. `FINAL_QC` additionally fails the run, on the
-  default path (`--skip_final_qc_report=false` and `--enable_trace=true`, both shipped
-  defaults), if any declared artifact kind has no consumer — previously such a kind was
-  silently dropped.
+- **The per-cell registration residuals now reach the QC report on the standard
+  (linear) path.** `SEG_QC.out.per_cell` was emitted through
+  `REGISTRATION.out.seg_residuals` and routed to the SpatialData export, but never
+  tagged into the artifact stream, so no report ever showed it. It is now the artifact
+  kind `seg_residuals`, rendered in the report as a capped table (first 500 rows per
+  CSV; `bin/generate_qc_report.py`'s `SEG_RESIDUALS_MAX_ROWS`). **This fix is
+  standard-path only** — `add_cycle` calls `SEG_QC` too but does not capture
+  `.out.per_cell`, so an `add_cycle` run's report still has no residuals section.
+  **`GENERATE_QC_REPORT`'s input arity changed from 7 to 8** (a new
+  `seg_residuals`/`path(..., stageAs: 'seg_residuals/*')` slot) — any external caller
+  of that module directly must add the new argument. `FINAL_QC` additionally fails the
+  run, on the default path (`--skip_final_qc_report=false` and `--enable_trace=true`,
+  both shipped defaults), if any declared artifact kind has no consumer — previously
+  such a kind was silently dropped.
 - **`tests/test_register.py` could never fail.** It imported `merge_first_file`, which
   `bin/register.py` does not define, behind a `pytest.importorskip("valis")` that meant
   the `ImportError` was never reached.

@@ -156,6 +156,21 @@ workflow {
     assert ParamUtils.STEPS.find { it.name == 'registration'   }.requiredColumns == Checkpoint.columns(Layout.PREPROCESSED)
     assert ParamUtils.STEPS.find { it.name == 'postprocessing' }.requiredColumns == Checkpoint.columns(Layout.REGISTERED)
 
+    // columns() must hand out an IMMUTABLE list. Checkpoint.STEPS' outer list is
+    // .asImmutable() but a naive implementation leaves each entry's inner `columns`
+    // ArrayList mutable, so a caller mutating the returned list permanently corrupts
+    // the schema every later header()/row() call in the run sees. Demonstrated before
+    // the fix: `Checkpoint.columns(Layout.PREPROCESSED) << 'injected'` succeeded
+    // silently and mutated the live table in place, so a subsequent header() call
+    // returned 'patient_id,preprocessed_image,is_reference,channels,injected'.
+    def columnsThrew = false
+    try { Checkpoint.columns(Layout.PREPROCESSED) << 'injected' }
+    catch (UnsupportedOperationException ignored) { columnsThrew = true }
+    assert columnsThrew, 'Checkpoint.columns() must return an immutable list; mutating it must throw'
+    assert Checkpoint.columns(Layout.PREPROCESSED) ==
+        ['patient_id', 'preprocessed_image', 'is_reference', 'channels'],
+        'Checkpoint.columns() schema must be unaffected by the mutation attempt above'
+
     // ------------------------------------------------------------------ //
     // The artifact vocabulary
     // ------------------------------------------------------------------ //

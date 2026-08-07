@@ -17,9 +17,13 @@
 
     THE ROW BUILDER IS THE POINT. `row(step, map)` orders values by the DECLARED
     column list, so insertion order at the call site is irrelevant, and it throws on
-    a missing or unknown key rather than emitting an empty field. An empty field in
-    a checkpoint row is a path that does not exist — the failure mode the
-    postprocessing checkpoint manifest shipped with for two releases.
+    a missing or unknown KEY rather than silently omitting a column. A column whose
+    key is absent from the map would emit an empty field, and an empty field in a
+    checkpoint row is a path that does not exist — the failure mode the
+    postprocessing checkpoint manifest shipped with for two releases. This checks key
+    presence only: a key present with a `null` (or empty-string) VALUE is not caught
+    here and is written through as-is (e.g. the literal text `null`) — unchanged from
+    the hand-written GStrings this class replaced.
 
     SCOPE. Like Layout, this class never reads `params`: every method takes what it
     needs as an argument, so it is callable from an onComplete handler and from
@@ -48,27 +52,42 @@ class Checkpoint {
     static final List<Map> STEPS = [
         [
             name   : 'preprocessed',
-            columns: ['patient_id', 'preprocessed_image', 'is_reference', 'channels'],
+            columns: ['patient_id', 'preprocessed_image', 'is_reference', 'channels'].asImmutable(),
         ],
         [
             name   : 'registered',
-            columns: ['patient_id', 'registered_image', 'is_reference', 'channels'],
+            columns: ['patient_id', 'registered_image', 'is_reference', 'channels'].asImmutable(),
         ],
         [
             name   : 'postprocessed',
-            columns: ['patient_id', 'cell_csv', 'cell_geojson', 'merged_csv', 'cell_mask', 'pyramid'],
+            columns: ['patient_id', 'cell_csv', 'cell_geojson', 'merged_csv', 'cell_mask', 'pyramid'].asImmutable(),
         ],
     ].asImmutable()
 
     private static Map requireStep(String step) {
         def entry = STEPS.find { it.name == step }
         if (!entry)
-            throw new IllegalArgumentException(
-                "Unknown checkpoint step: '${step}'. Valid: ${STEPS*.name}")
+            throw new Checkpoint.UnknownStepException(
+                "Checkpoint: unknown checkpoint step: '${step}'. Valid: ${STEPS*.name}")
         return entry
     }
 
-    /** The ordered column list for a checkpoint. */
+    /**
+     * Thrown when a caller names a step that is not in {@link #STEPS}. Its own class
+     * (rather than a bare {@code IllegalArgumentException}) so a caller can tell, from
+     * the exception type alone, that Checkpoint — not Layout, which throws the same
+     * message text for the same reason — is the one that rejected the name.
+     */
+    static class UnknownStepException extends IllegalArgumentException {
+        UnknownStepException(String message) { super(message) }
+    }
+
+    /**
+     * The ordered column list for a checkpoint. The returned list is immutable
+     * (`asImmutable()` is applied to each `columns:` entry in {@link #STEPS} above,
+     * not just to the outer list) — mutating it must throw rather than silently
+     * rewrite the schema every later `header()`/`row()` call in the run sees.
+     */
     static List<String> columns(String step) {
         return requireStep(step).columns
     }
@@ -83,6 +102,9 @@ class Checkpoint {
      *
      * Throws on a missing key (an empty field is a path that does not resolve) and
      * on an unknown key (the caller's idea of the schema disagrees with this one).
+     * Does NOT validate the VALUES: a key present with a `null` value passes through
+     * and is joined as the literal text `null`, exactly as the hand-written GStrings
+     * this class replaced did. Only key presence is a contract here.
      */
     static String row(String step, Map values) {
         def cols    = columns(step)

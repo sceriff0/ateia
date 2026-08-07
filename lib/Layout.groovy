@@ -67,9 +67,19 @@ class Layout {
 
     private static String requireStep(String step) {
         if (!CHECKPOINT_STEPS.contains(step))
-            throw new IllegalArgumentException(
-                "Unknown checkpoint step: '${step}'. Valid: ${CHECKPOINT_STEPS}")
+            throw new Layout.UnknownStepException(
+                "Layout: unknown checkpoint step: '${step}'. Valid: ${CHECKPOINT_STEPS}")
         return step
+    }
+
+    /**
+     * Thrown when a caller names a step that is not in {@link #CHECKPOINT_STEPS}. Its
+     * own class (rather than a bare {@code IllegalArgumentException}) so a caller can
+     * tell, from the exception type alone, that Layout — not Checkpoint, which throws
+     * the same message text for the same reason — is the one that rejected the name.
+     */
+    static class UnknownStepException extends IllegalArgumentException {
+        UnknownStepException(String message) { super(message) }
     }
 
     private static String requireOutdir(def outdir) {
