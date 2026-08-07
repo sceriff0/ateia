@@ -11,7 +11,54 @@
  */
 class ParamUtils {
 
-    static final List STEP_ORDER = ['preprocessing', 'registration', 'postprocessing']
+    /*
+     * The single table answering "what is a step?". Everything else that used
+     * to restate the step vocabulary — STEP_ORDER, requiredColumnsForStep,
+     * mirage.nf's entry_column map, final_qc.nf's KNOWN_ARTIFACT_KINDS, and
+     * nextflow_schema.json's start/stop enums — is either derived from this or
+     * checked against it (the schema can't be generated at build time, so
+     * tests/test_step_vocabulary_consistency.py asserts it agrees instead).
+     *
+     *   name            - the step's canonical identifier; also the value
+     *                      --start/--stop accept.
+     *   requiredColumns - samplesheet columns CsvUtils must find when this step
+     *                      is the run's entry point (its own input, not a
+     *                      downstream checkpoint column).
+     *   entryColumn     - the checkpoint-CSV column INPUT_CHECK reads when this
+     *                      step is the run's entry point (mirage.nf reads the
+     *                      sheet exactly once, at --start).
+     *   qcKinds         - the artifact-stream tags this step alone contributes
+     *                      to FINAL_QC (see final_qc.nf). 'versions' and
+     *                      'size_log' are cross-cutting — every step emits them
+     *                      — so they are not listed per-step; they are added
+     *                      once in UNIVERSAL_QC_KINDS below.
+     */
+    static final List STEPS = [
+        [
+            name           : 'preprocessing',
+            requiredColumns: ['patient_id', 'path_to_file', 'is_reference', 'channels'],
+            entryColumn    : 'path_to_file',
+            qcKinds        : ['preprocess_qc'],
+        ],
+        [
+            name           : 'registration',
+            requiredColumns: ['patient_id', 'preprocessed_image', 'is_reference', 'channels'],
+            entryColumn    : 'preprocessed_image',
+            qcKinds        : ['registration_qc', 'registration_tre', 'seg_qc'],
+        ],
+        [
+            name           : 'postprocessing',
+            requiredColumns: ['patient_id', 'registered_image', 'is_reference', 'channels'],
+            entryColumn    : 'registered_image',
+            qcKinds        : ['postprocess_qc'],
+        ],
+    ]
+
+    // Artifact-stream tags every step contributes, so they belong to no single
+    // step's qcKinds. See final_qc.nf's KNOWN_ARTIFACT_KINDS derivation.
+    static final List UNIVERSAL_QC_KINDS = ['versions', 'size_log']
+
+    static final List STEP_ORDER = STEPS.collect { it.name }
 
     static void validateOutdir(String outdir) {
         if (!outdir?.trim()) {
@@ -105,17 +152,34 @@ class ParamUtils {
     }
 
     static List requiredColumnsForStep(String step) {
-        def requirements = [
-            preprocessing : ['patient_id','path_to_file','is_reference','channels'],
-            registration  : ['patient_id','preprocessed_image','is_reference','channels'],
-            postprocessing: ['patient_id','registered_image','is_reference','channels']
-        ]
-
-        if (!requirements.containsKey(step)) {
+        def entry = STEPS.find { it.name == step }
+        if (!entry) {
             throw new IllegalArgumentException("No column requirements defined for step: ${step}")
         }
+        return entry.requiredColumns
+    }
 
-        return requirements[step]
+    /**
+     * The checkpoint-CSV column to read when `step` is the run's entry point
+     * (--start). Replaces mirage.nf's hand-written entry_column map.
+     */
+    static String entryColumnForStep(String step) {
+        def entry = STEPS.find { it.name == step }
+        if (!entry) {
+            throw new IllegalArgumentException("No entry column defined for step: ${step}")
+        }
+        return entry.entryColumn
+    }
+
+    /**
+     * Whether `step` is this run's --start step -- i.e. whether the channel for
+     * `step` must come from INPUT_CHECK.out.samples rather than the previous
+     * step's direct output. Named helper so mirage.nf's routing reads its intent
+     * instead of repeating the raw `params.start == '...'` comparison at every
+     * branch point.
+     */
+    static boolean isEntryPoint(Map params, String step) {
+        return params.start == step
     }
 
     /**

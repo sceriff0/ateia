@@ -149,11 +149,7 @@ workflow MIRAGE {
     // checkpoint CSV names the file that step produced. Later steps consume the
     // previous step's channel directly (streaming, patient-level parallelism), so
     // only the entry step ever reads the sheet.
-    def entry_column = [
-        preprocessing : 'path_to_file',
-        registration  : 'preprocessed_image',
-        postprocessing: 'registered_image',
-    ][params.start]
+    def entry_column = ParamUtils.entryColumnForStep(params.start)
 
     // autoReference = params.allow_auto_reference: when a patient marks no reference,
     // registration.nf promotes its first image, which keeps that slide's nuclear
@@ -170,7 +166,7 @@ workflow MIRAGE {
 
     if (run_registration) {
         REGISTRATION(
-            params.start == 'registration'
+            ParamUtils.isEntryPoint(params, 'registration')
                 ? INPUT_CHECK.out.samples
                 : PREPROCESSING.out.preprocessed  // Direct channel - enables patient-level parallelism!
         )
@@ -180,7 +176,7 @@ workflow MIRAGE {
 
     if (run_postprocessing) {
 
-        def ch_for_postprocessing = params.start == 'postprocessing'
+        def ch_for_postprocessing = ParamUtils.isEntryPoint(params, 'postprocessing')
             ? INPUT_CHECK.out.samples
             : REGISTRATION.out.registered  // Direct channel - enables patient-level parallelism!
 
@@ -188,10 +184,10 @@ workflow MIRAGE {
         // when REGISTRATION actually ran in this session — with --start postprocessing
         // there is no REGISTRATION output to reference, so pass empty channels and let
         // the export write a store without registration QC rather than fail.
-        def ch_reg_qc_for_post = params.start == 'postprocessing'
+        def ch_reg_qc_for_post = ParamUtils.isEntryPoint(params, 'postprocessing')
             ? Channel.empty()
             : REGISTRATION.out.seg_qc
-        def ch_reg_residuals_for_post = params.start == 'postprocessing'
+        def ch_reg_residuals_for_post = ParamUtils.isEntryPoint(params, 'postprocessing')
             ? Channel.empty()
             : REGISTRATION.out.seg_residuals
 

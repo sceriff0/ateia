@@ -63,23 +63,22 @@ include { GENERATE_QC_REPORT  } from '../../modules/local/generate_qc_report'
 // 11 in the standard path) and nothing else checks that the two vocabularies
 // agree — so this list is the check.
 //
+// Derived from ParamUtils.STEPS (lib/ParamUtils.groovy), the single table
+// answering "what is a step?": each step's own `qcKinds` (preprocess_qc /
+// registration_qc+registration_tre+seg_qc / postprocess_qc) plus the two kinds
+// every step emits and which therefore belong to no single step,
+// UNIVERSAL_QC_KINDS ('versions', 'size_log' -- see the header comment there).
+//
+// The registration_tre entry is the registration method's OWN target-registration-error
+// estimate. NOT named after a method: both backends produce one (VALIS a feature-distance
+// CSV, STARE a *_tre.json) and a backend that produced none would contribute nothing, which
+// the .collect().ifEmpty([]) below already tolerates.
+//
 // Deliberately a bare top-level assignment, not `def`: a script-level `def` in
 // Groovy is scoped to this file's implicit `run()` method and would be
 // invisible to artifactsOf()/buildManifest() below even though they live in
 // the same file. This looks like a missing `def` but is not one.
-KNOWN_ARTIFACT_KINDS = [
-    'preprocess_qc',
-    'registration_qc',
-    // The registration method's OWN target-registration-error estimate. NOT named after a
-    // method: both backends produce one (VALIS a feature-distance CSV, STARE a *_tre.json)
-    // and a backend that produced none would contribute nothing, which the
-    // .collect().ifEmpty([]) below already tolerates.
-    'registration_tre',
-    'postprocess_qc',
-    'seg_qc',
-    'versions',
-    'size_log',
-]
+KNOWN_ARTIFACT_KINDS = ParamUtils.STEPS.collectMany { it.qcKinds } + ParamUtils.UNIVERSAL_QC_KINDS
 
 // Pull one kind out of the tagged artifact stream. Nextflow channels are
 // broadcast, so applying this repeatedly to the same source is fine.
