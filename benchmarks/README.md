@@ -191,7 +191,9 @@ Verify the whole harness with no data at all:
     error bar `--repeats` buys you (empty/degenerate when the plan has no replicates).
   - `benchmarks/analysis/figures/scaling_<PROCESS>.pdf` + `.svg` — peak-RSS-vs-input fits per process.
   - `benchmarks/analysis/modules.optimized.config` — regression-derived memory directives,
-    `memory = { check_max( ( <input_gb>*slope + intercept + sigma*task.attempt ).GB, 'memory' ) }`.
+    `memory = { ( <input_gb>*slope + intercept + sigma*task.attempt ).GB }`. No `check_max()`
+    wrapper — that helper does not exist in this repo; `process.resourceLimits` (top-level in
+    `nextflow.config`) clamps every request against `params.max_*` centrally.
     Processes with a known input expression are **live** blocks; others are emitted as
     **commented** blocks for you to fill in (so the file is valid Groovy as-is). It never
     overwrites the live config — review and diff:

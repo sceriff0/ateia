@@ -1,8 +1,15 @@
 """Emit a regression-derived conf/modules.optimized.config.
 
 Reproduces the additive-sigma buffer from notebooks/resource_regression.ipynb:
-    memory = { check_max( ( <input_expr>*slope + intercept + sigma*task.attempt ).GB, 'memory' ) }
+    memory = { ( <input_expr>*slope + intercept + sigma*task.attempt ).GB }
 Writes a SEPARATE file (never overwrites the live conf/modules.config) for review.
+
+NB: no check_max() wrapper. That nf-core helper does not exist in this repo
+(nextflow.config: "there is no check_max() helper in this repo") -- Mirage clamps
+centrally with the top-level `process.resourceLimits` closure, which caps cpus/
+memory/time against params.max_* for EVERY process without per-process wrapping.
+Emitting check_max() produced a config that parsed fine and then died with a
+MissingMethodException the first time a closure was evaluated at task-submit time.
 """
 from __future__ import annotations
 
@@ -36,14 +43,14 @@ def memory_closure(process: str, model: dict, input_expr: str | None = None) -> 
     if expr is None:
         # No known input-size expression: emit an INERT commented block so the
         # config stays valid Groovy. The operator fills in the real expression.
-        body = (f"check_max( ( <input_gb> * {slope} + {intercept} + "
-                f"{sigma} * task.attempt ).GB, 'memory' )")
+        body = (f"( <input_gb> * {slope} + {intercept} + "
+                f"{sigma} * task.attempt ).GB")
         return ("    // TODO set the input-size (GiB) expression for this process, then uncomment:\n"
                 f"    // withName: '{process}' {{\n"
                 f"    //     memory = {{ {body} }}\n"
                 "    // }")
-    body = (f"check_max( ( {expr} * {slope} + {intercept} + "
-            f"{sigma} * task.attempt ).GB, 'memory' )")
+    body = (f"( {expr} * {slope} + {intercept} + "
+            f"{sigma} * task.attempt ).GB")
     return f"    withName: '{process}' {{\n        memory = {{ {body} }}\n    }}"
 
 
@@ -51,7 +58,9 @@ def write_optimized_config(models: dict, out_path) -> None:
     lines = [
         "// conf/modules.optimized.config",
         "// AUTO-GENERATED from benchmark regression (benchmarks/analysis). REVIEW before use.",
-        "// memory = check_max((input_gb*slope + intercept + sigma*task.attempt).GB, 'memory')",
+        "// memory = { (input_gb*slope + intercept + sigma*task.attempt).GB }",
+        "// Clamped by the top-level process.resourceLimits closure in nextflow.config",
+        "// (params.max_cpus/max_memory/max_time). There is no check_max() helper in this repo.",
         "process {",
     ]
     for process, model in sorted(models.items()):

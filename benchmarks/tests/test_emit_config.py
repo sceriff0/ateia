@@ -4,12 +4,27 @@ from benchmarks.analysis.lib import emit_config
 def test_memory_closure_formats_additive_sigma_buffer():
     model = {"slope": 7.0, "intercept": 8.0, "sigma": 4.0, "r2": 0.97, "n": 5}
     line = emit_config.memory_closure("SEGMENT", model, input_expr="file_gb")
-    # check_max(( <expr>*slope + intercept + sigma*task.attempt ).GB, 'memory')
+    # memory = { ( <expr>*slope + intercept + sigma*task.attempt ).GB }
     assert "withName: 'SEGMENT'" in line
     assert "file_gb * 7.0" in line
     assert "+ 8.0" in line
     assert "+ 4.0 * task.attempt" in line
-    assert "check_max(" in line and ".GB, 'memory'" in line
+    assert ".GB" in line
+
+
+def test_emitted_config_never_calls_check_max():
+    """check_max() does not exist in this repo -- emitting it produces a config that
+    parses but dies with MissingMethodException when the closure is evaluated.
+
+    Mirage clamps centrally via the top-level `process.resourceLimits` closure in
+    nextflow.config, so the emitted closure must be a bare `.GB` expression.
+    """
+    model = {"slope": 7.0, "intercept": 8.0, "sigma": 4.0, "r2": 0.97, "n": 5}
+    live = emit_config.memory_closure("SEGMENT", model, input_expr="file_gb")
+    inert = emit_config.memory_closure("NO_SUCH_PROCESS", model)
+    for line in (live, inert):
+        assert "check_max" not in line, f"check_max() leaked into: {line}"
+        assert "'memory'" not in line, f"check_max's clamp arg leaked into: {line}"
 
 
 def test_write_optimized_config_emits_header_and_blocks(tmp_path):

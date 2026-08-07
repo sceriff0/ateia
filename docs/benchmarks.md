@@ -123,4 +123,6 @@ python -m benchmarks.analysis.make_figures \
 
 The derived config is written separately and never overwrites the live one —
 diff `conf/modules.config` against `conf/modules.optimized.config` and adopt
-deliberately, keeping `check_max` so values stay within `--max_memory`.
+deliberately. The emitted closures are bare `.GB` expressions: this repo has no
+`check_max()` helper — the top-level `process.resourceLimits` closure in
+`nextflow.config` already clamps every request to `--max_cpus/--max_memory/--max_time`.
