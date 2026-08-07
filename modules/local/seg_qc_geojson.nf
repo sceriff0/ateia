@@ -54,12 +54,7 @@ process SEG_QC_GEOJSON {
         ${nuclear_args} \\
         ${args}
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: \$(python --version 2>&1 | sed 's/Python //')
-        stardist: \$(python -c "import stardist; print(stardist.__version__)" 2>/dev/null || echo "unknown")
-        scikit-image: \$(python -c "import skimage; print(skimage.__version__)" 2>/dev/null || echo "unknown")
-    END_VERSIONS
+    ${ProcessEnvelope.versions(task.process, ['stardist', 'skimage'])}
     """
 
     stub:
@@ -67,11 +62,6 @@ process SEG_QC_GEOJSON {
     """
     echo '{"type": "FeatureCollection", "features": []}' > ${prefix}.geojson
     echo "STUB,${meta.patient_id},stub,0" > ${prefix}.SEG_QC_GEOJSON.size.csv
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: stub
-        stardist: stub
-        scikit-image: stub
-    END_VERSIONS
+    ${ProcessEnvelope.versionsStub(task.process, ['stardist', 'skimage'])}
     """
 }

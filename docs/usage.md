@@ -354,6 +354,12 @@ provision is the copy that runs. Re-provisioning is only needed when the pin in
 Two output locations: per-patient **results** under `--outdir`, and aggregated
 **checkpoints** under `<outdir>/csv/` (above).
 
+The per-patient leaf directories below are the closed vocabulary
+`lib/Layout.groovy`'s `PUBLISHED_KINDS` declares — a process publishing anywhere else
+under `<outdir>/<patient_id>/` fails `tests/test_layout.py`. `spatialdata/` is the one
+per-patient exception: it is published at the patient root by `EXPORT_SPATIALDATA`'s own
+`pattern:` (see `conf/modules.config`), not through a `Layout.patientDir` kind.
+
 ```text
 results/                          # = --outdir
 ├── <patient_id>/
@@ -361,11 +367,19 @@ results/                          # = --outdir
 │   ├── preprocessed/             # *_corrected.ome.tif (BaSiC)
 │   ├── registered/               # *_registered.ome.tiff (+ summary/ error CSVs)
 │   ├── segmentation/             # *_nuclei_mask.tif, *_cell_mask.tif
-│   ├── cell_properties/          # morphology.csv, contours.json
+│   ├── cell_properties/          # morphology.csv, contours.json (+ nuclei/ subdir)
+│   ├── split_channels/           # *.tiff, one per marker (add_cycle: + prior/ subdir,
+│   │                             #   the prior run's re-split pyramid channels)
+│   ├── quantify/                 # <patient>_<marker>_quant.csv, per-marker, pre-merge
 │   ├── quantification/           # merged_quant.csv
+│   ├── phenotyping/              # phenotypes.csv, constraint_audit.csv,
+│   │                             #   phenotype_qc.json (--pheno_alpha etc.)
 │   ├── geojson/                  # cells.geojson, cells_data.csv
 │   ├── pyramid/                  # *.ome.tiff (multi-resolution)
+│   ├── spatialdata/              # <id>.zarr (only with --export_spatialdata)
 │   └── qc/                       # preprocess / registration / postprocessing QC
+├── phenotyping/                  # model_config.json, spec_report.html (run-level,
+│                                 #   COMPILE_PANEL — one panel/model shared across patients)
 ├── csv/                          # checkpoint CSVs (all patients)
 └── qc/                           # aggregated HTML QC report
 ```

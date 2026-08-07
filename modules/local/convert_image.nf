@@ -43,13 +43,7 @@ process CONVERT_IMAGE {
         --nuclear-markers ${nuclear_markers} \\
         ${args}
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: \$(python --version 2>&1 | sed 's/Python //')
-        tifffile: \$(python -c "import tifffile; print(tifffile.__version__)" 2>/dev/null || echo "unknown")
-        aicsimageio: \$(python -c "import aicsimageio; print(aicsimageio.__version__)" 2>/dev/null || echo "unknown")
-        h5py: \$(python -c "import h5py; print(h5py.__version__)" 2>/dev/null || echo "unknown")
-    END_VERSIONS
+    ${ProcessEnvelope.versions(task.process, ['tifffile', 'aicsimageio', 'h5py'])}
     """
 
     stub:
@@ -60,12 +54,6 @@ process CONVERT_IMAGE {
     echo "${channels}" > ${prefix}_channels.txt
     echo "STUB,${meta.patient_id},stub,0" > ${meta.patient_id}_${image_file.simpleName}.CONVERT_IMAGE.size.csv
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: stub
-        tifffile: stub
-        aicsimageio: stub
-        h5py: stub
-    END_VERSIONS
+    ${ProcessEnvelope.versionsStub(task.process, ['tifffile', 'aicsimageio', 'h5py'])}
     """
 }

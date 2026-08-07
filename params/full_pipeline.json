@@ -33,6 +33,8 @@
     "reg_micro_reg": 2,
 
     "_comment_seg": "=== Segmentation ===",
+    "_comment_seg_method": "seg_method must be 'stardist' to activate segmentation_model/segmentation_model_dir/seg_n_tiles_x/seg_n_tiles_y/seg_pmin/seg_pmax below -- nextflow.config defaults seg_method to 'instantseg', which reads a different flag set entirely, so leaving this unset silently discards every StarDist value in this file",
+    "seg_method": "stardist",
     "seg_gpu": true,
     "seg_pmin": 1.0,
     "seg_pmax": 99.8,

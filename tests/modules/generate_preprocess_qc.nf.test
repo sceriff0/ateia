@@ -143,6 +143,74 @@ nextflow_process {
         }
     }
 
+    test("Should render every tool in the versions heredoc - rendered command") {
+
+        // Tagged `stub` so CI's blocking `nf-test test --tag stub` gate runs it, but
+        // deliberately WITHOUT `options "-stub"`. `-stub` never evaluates a `script:`
+        // block, so no stub run can see whether lib/ProcessEnvelope.groovy's
+        // `versions()` call actually renders the tool probes into the heredoc — a stub
+        // diff would report "identical" even if the escaping were wrong and the
+        // heredoc empty. This is exactly the shape of bug that shipped once already:
+        // an over-escaped `\$(...)` rendered as literal shell text in every real run,
+        // caught only by a reviewer, because nothing in this suite executed script:.
+        //
+        // UNLIKE tests/modules/generate_qc_report.nf.test's rendered-command case, this
+        // one is NOT "safe to run for real" on its own merits — CI runs `--tag stub
+        // --profile test` container-less, so generate_preprocess_qc.py actually
+        // executes here, and this host's bare Python has numpy/tifffile but not
+        // scikit-image, so the process exits 1. It survives, and this assertion still
+        // gets to run, ONLY because conf/modules.config's withName selector for this
+        // process (the GENERATE_*_QC / SEG_QC_GEOJSON / WARP_SEG_QC group) resolves
+        // `errorStrategy` to 'ignore' for a plain exit 1 -- the assertions below read
+        // `.command.sh` off disk, not `process.success`, so a failed-but-ignored task
+        // still leaves behind the rendered command this test needs. If that
+        // errorStrategy ever stops covering this process, this case still runs but no
+        // longer proves anything "for free" -- it would need its own real dependency
+        // set or a `real`/`slow` tag instead.
+        tag "stub"
+
+        when {
+            params {
+                preprocess_qc_scale_factor = 0.25
+            }
+            process {
+                """
+                input[0] = [
+                    [
+                        patient_id: 'P001',
+                        is_reference: true,
+                        channels: ['DAPI', 'PANCK', 'SMA']
+                    ],
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            // Nextflow lays tasks out as <workDir>/<2 hex>/<30 hex>/.command.sh.
+            def rendered = []
+            new File("$workDir").eachFileRecurse { f ->
+                if (f.name == '.command.sh' && f.text.contains('generate_preprocess_qc.py')) {
+                    rendered << f.text
+                }
+            }
+
+            assertAll(
+                { assert rendered.size() >= 1,
+                    "no rendered GENERATE_PREPROCESS_QC .command.sh found under the task work dir" },
+                { assert rendered.every { it.contains('python: $(python --version') },
+                    "rendered command: " + rendered.join(' --- ') },
+                { assert rendered.every { it.contains('numpy: $(python -c "import numpy; print(numpy.__version__)"') },
+                    "rendered command: " + rendered.join(' --- ') },
+                { assert rendered.every { it.contains('tifffile: $(python -c "import tifffile; print(tifffile.__version__)"') },
+                    "rendered command: " + rendered.join(' --- ') },
+                { assert rendered.every { it.contains('scikit-image: $(python -c "import skimage; print(skimage.__version__)"') },
+                    "rendered command: " + rendered.join(' --- ') }
+            )
+        }
+    }
+
     test("Should generate preprocessing QC images - real") {
 
         tag "real"

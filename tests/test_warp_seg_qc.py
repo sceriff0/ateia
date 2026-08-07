@@ -535,3 +535,68 @@ def test_parse_args_accepts_micro_reg_level():
         ]
     )
     assert a.micro_reg == 1
+
+
+# ── the tiled (STARE) dispatch: JVM-free, driven through the real CLI main() ────
+#
+# Folded in from the former tests/test_warp_seg_qc_tiled.py when
+# modules/local/warp_seg_qc_tiled.nf was merged into modules/local/warp_seg_qc.nf
+# (lib/WarpBackends.groovy) -- both exercise the same, method-agnostic
+# bin/warp_seg_qc.py, which this merge left unchanged.
+def test_reg_qc2_tiled_cli_scores_through_a_manifest_without_a_jvm(tmp_path):
+    # manifest: reference is identity; moving rigid-aligns to within 4px, a uniform mesh finishes it
+    manifest = {
+        "ref_slide": "ref",
+        "slides": {
+            "ref": {"M0": [[1, 0, 0], [0, 1, 0], [0, 0, 1]], "mesh": None},
+            "mov": {
+                "M0": [[1, 0, -96], [0, 1, 0], [0, 0, 1]],
+                "mesh": {
+                    "grid_x": [0.0, 1000.0],
+                    "grid_y": [0.0, 1000.0],
+                    "displacements": [
+                        [[-4.0, 0.0], [-4.0, 0.0]],
+                        [[-4.0, 0.0], [-4.0, 0.0]],
+                    ],
+                },
+            },
+        },
+    }
+    man_f = _write(tmp_path, "manifest.json", manifest)
+    ref_gj = _write(tmp_path, "ref.geojson", _grid_fc())
+    mov_gj = _write(tmp_path, "mov.geojson", _grid_fc(dx=100.0))
+    out_f = tmp_path / "seg_qc.json"
+
+    # returns None (no JVM path taken); would raise if it tried to import/boot VALIS
+    wsq.main(
+        [
+            "--method",
+            "tiled",
+            "--pickle",
+            man_f,
+            "--ref-slide",
+            "ref",
+            "--moving-slide",
+            "mov",
+            "--ref-geojson",
+            ref_gj,
+            "--moving-geojson",
+            mov_gj,
+            "--output",
+            str(out_f),
+            "--patient-id",
+            "P001",
+            "--supersample",
+            "4",
+        ]
+    )
+
+    rec = json.loads(out_f.read_text())
+    assert rec["stage_order"] == ["native", "rigid", "refined"]
+    assert rec["stages_separable"] is True
+    assert "micro_reg" not in rec  # a tiled run has no micro stage to report
+    s = rec["stages"]
+    assert s["rigid"]["displacement_px_p50"] == pytest.approx(4.0)
+    assert s["refined"]["displacement_px_p50"] == pytest.approx(0.0, abs=1e-9)
+    assert s["rigid"]["iou_mean"] < s["refined"]["iou_mean"]
+    assert rec["matching"]["n_pairs"] == 6

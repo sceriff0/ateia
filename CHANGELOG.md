@@ -108,6 +108,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (micro-registration can add ~30–120 min per registration).
 - **`--seg_method` with an unrecognised value now fails fast** instead of silently running
   StarDist.
+- **`params/full_pipeline.json` now sets `"seg_method": "stardist"`.** The file already set
+  `segmentation_model`, `segmentation_model_dir`, `seg_n_tiles_x`, `seg_n_tiles_y`, `seg_pmin`
+  and `seg_pmax` — all StarDist-only flags — but `nextflow.config` defaults `seg_method` to
+  `instantseg`, so a run launched with `-params-file params/full_pipeline.json` silently
+  discarded all six values and segmented with InstanSeg instead. Launching from this preset
+  now runs StarDist: a different backend, container, and set of `versions.yml`/mask outputs
+  than before this fix. Anyone relying on the file's prior (InstanSeg) behaviour must now pass
+  `--seg_method instantseg` explicitly.
 - **`<outdir>/size_logs/versions.yml`'s single key changed** to
   `MIRAGE:FINAL_QC:AGGREGATE_SIZE_LOGS` (diagnostic string only; no functional effect).
 - **`--quantify_compartments`/`--expanded_quantification`/`--embed_masks` are now
@@ -129,6 +137,78 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fast with a clear error instead. **To recover:** either drop `--embed_masks` (if you
   do not need the mask series in the pyramid), or set both
   `--quantify_compartments true --expanded_quantification true` alongside it.
+- **`SPLIT_CHANNELS` and `QUANTIFY` now publish per patient.**
+  **Published-output change:** `<outdir>/split_channels/<marker>.tiff` moves to
+  `<outdir>/<patient_id>/split_channels/<marker>.tiff`, and
+  `<outdir>/quantify/<patient>_<marker>_quant.csv` moves to
+  `<outdir>/<patient_id>/quantify/`. Both processes previously had no `publishDir` of
+  their own and inherited a run-level, patient-unaware default. Because
+  `split_multichannel.py` names its outputs by sanitised channel name alone, **two
+  patients sharing a marker published to the same path and the second silently
+  overwrote the first** on every multi-patient run. Nothing in the pipeline reads the
+  published copies, so the run stayed green and the loss was invisible. No checkpoint
+  CSV column, no other published path, and no GeoJSON measurement key changes.
+- **`add_cycle`-only: `SPLIT_PRIOR_PYRAMID` now publishes to its own leaf.**
+  **Published-output change:** `<outdir>/<patient_id>/split_channels/prior/<marker>.tiff`
+  is new; nothing at `<outdir>/<patient_id>/split_channels/<marker>.tiff` moves.
+  `subworkflows/local/add_cycle.nf` includes `SPLIT_CHANNELS` a second time as
+  `SPLIT_PRIOR_PYRAMID` (re-splitting the prior run's pyramid so its channels can be
+  deduped against the new cycle's). Nextflow's `withName:` selector matches an alias
+  against both its own name and the process' original declared name, so
+  `withName: 'SPLIT_CHANNELS'` was routing **both** invocations to the same
+  `<pid>/split_channels/` directory — whichever finished last silently overwrote the
+  other's file for any marker name the two shared. This is a **published-artifact**
+  collision only: the in-memory channel deduplication `add_cycle.nf` already does
+  before building the pyramid (new-cycle channel wins, `DAPI` always protected — see
+  `docs/add_cycle.md`'s Marker collisions section) reads each task's staged output
+  directly and was never affected. Pre-existing since `add_cycle.nf:40` first aliased
+  the include; not introduced by this branch.
+- **`EXTRACT_MASK_SERIES` (the `--mode add_cycle` mask-reuse step) now publishes per
+  patient too.** **Published-output change:** `<outdir>/extract_mask_series/cell_mask.tif`
+  and `.../nuclei_mask.tif` move to `<outdir>/<patient_id>/segmentation/`. This process
+  had the identical unprefixed-filename defect `SPLIT_CHANNELS` had: on a two-patient
+  `add_cycle` run it published exactly two files total — one `cell_mask.tif`, one
+  `nuclei_mask.tif` — for both patients combined, the second silently overwriting the
+  first. It shares the `segmentation` leaf with `SEGMENT`'s own masks; this is safe
+  because `--mode add_cycle` requires a fresh `--outdir` distinct from `--prior_outdir`
+  (`ParamUtils.validateAddCycle`), so `<pid>/segmentation/` is never occupied by anything
+  else in that run.
+- **The fall-through `publishDir` default is now a guard.** A process with no explicit
+  `publishDir` publishes to `<outdir>/_UNROUTED_PUBLISH/<process>` instead of to a
+  plausible-looking run-level directory, and `tests/test_layout.py` fails the build if
+  any process reaches it.
+  **Published-output change:** `<outdir>/tiled_coarse/` and `<outdir>/tiled_reg_tile/`
+  (the STARE tiled-registration fan-out's per-tile anchor JSON, tile-plan CSV, and
+  per-tile control-point JSON — `reg_tiled_fanout=true` only) are no longer published at
+  all; both processes were already relying on the same unrouted default this change
+  closes off, and their content is purely intermediate — `TILED_SOLVE` consumes it and
+  is the one that publishes the durable artifacts: the registration manifest, and the
+  `*_tre.json` whose `"tiles"` records (see `bin/utils/tre_report.py`) carry the same
+  per-tile diagnostic information forward. Both got an explicit
+  `publishDir = [ enabled: false ]` so this is a declared decision, not a silent gap.
+- **Every module's `versions.yml` (`script:` and `stub:`) now renders from one tool list**
+  (`lib/ProcessEnvelope.groovy`) instead of two hand-written, independently-maintained
+  heredocs. Touches 26 of 27 `modules/local/*.nf` files (`segment.nf` is the one documented
+  exception — see its `ProcessEnvelope` comment). No published `versions.yml` content
+  changes on a stub run; on a **real** run, the same two modules — `extract_mask_series.nf`
+  and `merge_and_pyramid.nf` — pick up two deltas each: they now probe `python` instead of
+  `python3` for their version rows (both run on an image where `python` exists; `python3`
+  was inconsistent authoring, not a deliberate choice), and their probes now fail soft
+  (`|| echo "unknown"`) instead of erroring the task if a tool's import fails — a fallback
+  their hand-written `python3` heredocs never had.
+- **`WARP_SEG_QC_TILED` is merged into `WARP_SEG_QC`.** One process now serves both
+  registration backends, with container, flags, stage list, version rows and stub extras
+  coming from `lib/WarpBackends.groovy` — the same shape `SEGMENT` already uses for its
+  three segmentation backends. The two processes shared ~77% of their bodies.
+  **`<outdir>/size_logs/input_sizes.csv` row change (not a new published file):** the
+  tiled path's `process` column now reads `WARP_SEG_QC` instead of
+  `WARP_SEG_QC_TILED` — the per-task `<prefix>.*.size.csv` this aggregates from is
+  never itself published (`WARP_SEG_QC`'s `publishDir` pattern is `*_seg_qc.json`
+  only). The `*_seg_qc.json` and `*_reg_residuals.csv` filenames, contents and
+  locations are unchanged. `params.registration_method` is still read exactly once
+  for DISPATCH, in `subworkflows/local/registration.nf`; `WARP_SEG_QC`'s
+  `--jvm-heap-gb 8` (VALIS-only) is resolved from the `method` process input via
+  `lib/WarpBackends.groovy`, not from the param, so the two can never disagree.
 
 ### Fixed
 - **`EXTRACT_NUCLEI_PROPERTIES` now writes its outputs into a `nuclei/` subdirectory of

@@ -172,11 +172,7 @@ process REGISTER {
     rm -rf preprocessed/deformation_fields preprocessed/masks preprocessed/overlaps \
            preprocessed/rigid_registration preprocessed/non_rigid_registration preprocessed/processed
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: \$(python --version 2>&1 | sed 's/Python //')
-        valis: \$(python -c "import valis; print(valis.__version__)" 2>/dev/null || echo "unknown")
-    END_VERSIONS
+    ${ProcessEnvelope.versions(task.process, ['valis'])}
     """
 
     stub:
@@ -208,10 +204,6 @@ process REGISTER {
     echo "STUB,${patient_id},stub,0" > ${patient_id}.REGISTER.size.csv
     ${stub_ckpt}
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: stub
-        valis: stub
-    END_VERSIONS
+    ${ProcessEnvelope.versionsStub(task.process, ['valis'])}
     """
 }

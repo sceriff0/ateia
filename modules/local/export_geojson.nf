@@ -63,12 +63,7 @@ process EXPORT_GEOJSON {
         ${pheno_arg} \\
         ${args}
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: \$(python --version 2>&1 | sed 's/Python //')
-        pandas: \$(python -c "import pandas; print(pandas.__version__)" 2>/dev/null || echo "unknown")
-        scipy: \$(python -c "import scipy; print(scipy.__version__)" 2>/dev/null || echo "unknown")
-    END_VERSIONS
+    ${ProcessEnvelope.versions(task.process, ['pandas', 'scipy'])}
     """
 
     stub:
@@ -80,11 +75,6 @@ process EXPORT_GEOJSON {
     ${(params.panel_spec || params.panel_model) ? 'touch export/panel_model.json' : ''}
     echo "STUB,${meta.patient_id},stub,0" > ${meta.patient_id}.EXPORT_GEOJSON.size.csv
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: stub
-        pandas: stub
-        scipy: stub
-    END_VERSIONS
+    ${ProcessEnvelope.versionsStub(task.process, ['pandas', 'scipy'])}
     """
 }
