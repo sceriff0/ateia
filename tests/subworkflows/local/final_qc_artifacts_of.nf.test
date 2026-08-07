@@ -57,4 +57,24 @@ nextflow_function {
             assert function.success
         }
     }
+
+    test("artifactsOf accepts seg_residuals (the live instance this task fixes)") {
+
+        function "artifactsOf"
+
+        when {
+            function {
+                """
+                input[0] = Channel.of(
+                    ['seg_residuals', file('$projectDir/tests/testdata/sample_reg_residuals.csv')]
+                )
+                input[1] = 'seg_residuals'
+                """
+            }
+        }
+
+        then {
+            assert function.success
+        }
+    }
 }

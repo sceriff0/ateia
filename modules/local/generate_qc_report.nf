@@ -18,6 +18,10 @@ process GENERATE_QC_REPORT {
     path(versions_yml)
     path(run_summary_json)
     path(seg_qc_jsons, stageAs: 'seg_qc/*')
+    // Per-cell registration residual CSVs (SEG_QC.out.per_cell). Optional: a run with
+    // --start postprocessing has no REGISTRATION output to source them from, so this
+    // may stage nothing.
+    path(seg_residuals, stageAs: 'seg_residuals/*')
 
     output:
     path "mirage_qc_report_*.html", emit: report
@@ -30,6 +34,7 @@ process GENERATE_QC_REPORT {
     script:
     def args = task.ext.args ?: ''
     def timestamp = new java.text.SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date())
+    def residuals_arg = seg_residuals ? "--seg-residuals seg_residuals" : ''
     """
     generate_qc_report.py \\
         --preprocess-qc preprocess_qc/ \\
@@ -39,6 +44,7 @@ process GENERATE_QC_REPORT {
         --versions ${versions_yml} \\
         --run-summary ${run_summary_json} \\
         --seg-qc seg_qc/ \\
+        ${residuals_arg} \\
         --output mirage_qc_report_${timestamp}.html \\
         --data-dir mirage_qc_data_${timestamp}/ \\
         ${args}

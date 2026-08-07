@@ -59,6 +59,11 @@ def parse_args():
         default="seg_qc/",
         help="Directory of warp-segmentation QC JSONs",
     )
+    p.add_argument(
+        "--seg-residuals",
+        default="seg_residuals/",
+        help="Directory of per-cell registration residual CSVs (SEG_QC.out.per_cell)",
+    )
     p.add_argument("--output", default="mirage_qc_report.html", help="Output HTML path")
     p.add_argument(
         "--data-dir",
@@ -810,6 +815,30 @@ def seg_qc_section(seg_qc_dir):
     return section("Segmentation Warp QC", "\n".join(parts))
 
 
+def seg_residuals_section(seg_residuals_dir):
+    """Render per-cell registration-residual CSVs (one table per file)."""
+    csvs = list_files(seg_residuals_dir, "*.csv")
+    if not csvs:
+        body = '<p class="empty-notice">No per-cell registration residuals found.</p>'
+        return section("Per-Cell Registration Residuals", body)
+    parts = []
+    for csv_path in csvs:
+        parts.append(
+            "<p style='font-size:0.85rem;color:#666;margin:8px 0 4px;'>"
+            f"{html.escape(Path(csv_path).name)}</p>"
+        )
+        try:
+            headers, rows = parse_csv_table(csv_path)
+        except Exception as exc:  # noqa: BLE001 - report, never crash
+            parts.append(
+                '<p class="empty-notice">Could not parse '
+                f"{html.escape(Path(csv_path).name)}: {html.escape(str(exc))}</p>"
+            )
+            continue
+        parts.append(_html_table(headers, rows))
+    return section("Per-Cell Registration Residuals", "\n".join(parts))
+
+
 def seg_overlay_section(postprocess_dir):
     """Dedicated section for the *_seg_overlay* PNGs (the most-inspected QC)."""
     all_pngs = list_files(postprocess_dir, "*.png")
@@ -838,6 +867,7 @@ def copy_data(args):
     copy_glob(args.registration_tre, "*_tre.json", "registration_tre")
     copy_glob(args.postprocess_qc, "*.png", "postprocess_qc")
     copy_glob(args.seg_qc, "*.json", "seg_qc")
+    copy_glob(args.seg_residuals, "*.csv", "seg_residuals")
     if args.run_summary and Path(args.run_summary).exists():
         shutil.copy2(args.run_summary, data_dir / "run_summary.json")
     if args.versions and Path(args.versions).exists():
@@ -875,6 +905,7 @@ def main():
         )
     )
     html_parts.append(reconciliation_section(args.registration_tre, args.seg_qc))
+    html_parts.append(seg_residuals_section(args.seg_residuals))
     html_parts.append(seg_overlay_section(args.postprocess_qc))
     html_parts.append(postprocess_qc_section(args.postprocess_qc))
     html_parts.append(versions_section(args.versions))

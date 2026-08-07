@@ -25,6 +25,7 @@
 
     Recognised kinds:
       preprocess_qc | registration_qc | registration_tre | postprocess_qc | seg_qc
+        | seg_residuals
         -> staged into the matching GENERATE_QC_REPORT input directory
       versions   -> deduplicated and collated into collated_versions.yml
       size_log   -> merged into raw_input_sizes.csv for AGGREGATE_SIZE_LOGS
@@ -58,9 +59,9 @@ import groovy.json.JsonOutput
 include { AGGREGATE_SIZE_LOGS } from '../../modules/local/aggregate_size_logs'
 include { GENERATE_QC_REPORT  } from '../../modules/local/generate_qc_report'
 
-// The complete artifact vocabulary. Both call sites hand-write these tags (15
+// The complete artifact vocabulary. Both call sites hand-write these tags (16
 // literals across workflows/mirage.nf's two FINAL_QC calls -- 4 in add_cycle,
-// 11 in the standard path) and nothing else checks that the two vocabularies
+// 12 in the standard path) and nothing else checks that the two vocabularies
 // agree — so this list is the check.
 //
 // Derived from ParamUtils.STEPS (lib/ParamUtils.groovy), the single table
@@ -207,7 +208,11 @@ workflow FINAL_QC {
             .collectFile(name: 'run_summary.json')
 
         // GENERATE_QC_REPORT's input arity and order are fixed (nf-test snapshots
-        // pin them) — this call must keep all seven slots in this order.
+        // pin them) — this call must keep all EIGHT slots in this order. Nextflow
+        // process inputs are statically declared and fixed-arity, so a new artifact
+        // kind necessarily means a new slot here and a new `path(...)` in
+        // modules/local/generate_qc_report.nf. That is a hard error when missed,
+        // which is why the arity is not data-driven.
         GENERATE_QC_REPORT(
             artifactsOf(ch_artifacts, 'preprocess_qc').collect().ifEmpty([]),
             artifactsOf(ch_artifacts, 'registration_qc').collect().ifEmpty([]),
@@ -216,6 +221,7 @@ workflow FINAL_QC {
             artifactsOf(ch_artifacts, 'versions').unique().collectFile(name: 'collated_versions.yml'),
             ch_run_summary,
             artifactsOf(ch_artifacts, 'seg_qc').collect().ifEmpty([]),
+            artifactsOf(ch_artifacts, 'seg_residuals').collect().ifEmpty([]),
         )
     }
 

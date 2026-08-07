@@ -44,7 +44,7 @@ class ParamUtils {
             name           : 'registration',
             requiredColumns: ['patient_id', 'preprocessed_image', 'is_reference', 'channels'],
             entryColumn    : 'preprocessed_image',
-            qcKinds        : ['registration_qc', 'registration_tre', 'seg_qc'],
+            qcKinds        : ['registration_qc', 'registration_tre', 'seg_qc', 'seg_residuals'],
         ],
         [
             name           : 'postprocessing',

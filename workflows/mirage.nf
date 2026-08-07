@@ -212,6 +212,7 @@ workflow MIRAGE {
         ch_qc_artifacts = ch_qc_artifacts
             .mix(REGISTRATION.out.qc.map               { _meta, files -> ['registration_qc', files] })
             .mix(REGISTRATION.out.seg_qc.map           { _meta, files -> ['seg_qc', files] })
+            .mix(REGISTRATION.out.seg_residuals.map    { _meta, files -> ['seg_residuals', files] })
             .mix(REGISTRATION.out.registration_tre.map { f -> ['registration_tre', f] })
             .mix(REGISTRATION.out.versions.map         { f -> ['versions', f] })
             .mix(REGISTRATION.out.size_logs.map        { f -> ['size_log', f] })

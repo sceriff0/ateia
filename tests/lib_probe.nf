@@ -156,6 +156,14 @@ workflow {
     assert ParamUtils.STEPS.find { it.name == 'registration'   }.requiredColumns == Checkpoint.columns(Layout.PREPROCESSED)
     assert ParamUtils.STEPS.find { it.name == 'postprocessing' }.requiredColumns == Checkpoint.columns(Layout.REGISTERED)
 
+    // ------------------------------------------------------------------ //
+    // The artifact vocabulary
+    // ------------------------------------------------------------------ //
+    def kinds = ParamUtils.STEPS.collectMany { it.qcKinds } + ParamUtils.UNIVERSAL_QC_KINDS
+    assert kinds == ['preprocess_qc', 'registration_qc', 'registration_tre', 'seg_qc',
+                     'seg_residuals', 'postprocess_qc', 'versions', 'size_log']
+    assert kinds.size() == kinds.toSet().size(), 'artifact kinds must be unique'
+
     // println, NOT log.info: nf-test's underlying `nextflow ... -quiet` run
     // suppresses log.info from stdout entirely (observed directly: a log.info
     // line here never appears in workflow.stdout under nf-test, even though the

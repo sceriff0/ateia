@@ -30,6 +30,7 @@ nextflow_workflow {
                     ['registration_tre', file('$projectDir/tests/testdata/sample_valis_summary.csv')],
                     ['postprocess_qc',  file('$projectDir/tests/testdata/sample_SMA.tif')],
                     ['seg_qc',          file('$projectDir/tests/testdata/sample_seg_qc.json')],
+                    ['seg_residuals',   file('$projectDir/tests/testdata/sample_reg_residuals.csv')],
                     ['versions',        file('$projectDir/tests/testdata/sample_versions.yml')],
                     ['size_log',        file('$projectDir/tests/testdata/sample_size_log1.csv')],
                     ['size_log',        file('$projectDir/tests/testdata/sample_size_log2.csv')]

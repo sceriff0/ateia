@@ -33,6 +33,9 @@ nextflow_process {
                 input[6] = [
                     file('${projectDir}/tests/testdata/sample_seg_qc.json', checkIfExists: true)
                 ]
+                input[7] = [
+                    file('${projectDir}/tests/testdata/sample_reg_residuals.csv', checkIfExists: true)
+                ]
                 """
             }
         }
@@ -89,6 +92,9 @@ nextflow_process {
                 input[5] = file('${projectDir}/tests/testdata/sample_run_summary.json', checkIfExists: true)
                 input[6] = [
                     file('${projectDir}/tests/testdata/sample_seg_qc.json', checkIfExists: true)
+                ]
+                input[7] = [
+                    file('${projectDir}/tests/testdata/sample_reg_residuals.csv', checkIfExists: true)
                 ]
                 """
             }
