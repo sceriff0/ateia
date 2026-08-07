@@ -43,10 +43,7 @@ process GENERATE_QC_REPORT {
         --data-dir mirage_qc_data_${timestamp}/ \\
         ${args}
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: \$(python --version 2>&1 | sed 's/Python //')
-    END_VERSIONS
+    ${ProcessEnvelope.versions(task.process, [])}
     """
 
     stub:
@@ -55,9 +52,6 @@ process GENERATE_QC_REPORT {
     mkdir -p mirage_qc_data_${timestamp}
     touch mirage_qc_report_${timestamp}.html
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: stub
-    END_VERSIONS
+    ${ProcessEnvelope.versionsStub(task.process, [])}
     """
 }

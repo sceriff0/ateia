@@ -47,12 +47,7 @@ process WARP_SEG_QC_TILED {
         --patient-id ${meta.patient_id} \\
         ${args}
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: \$(python --version 2>&1 | sed 's/Python //')
-        scikit-image: \$(python -c "import skimage; print(skimage.__version__)" 2>/dev/null || echo "unknown")
-        scipy: \$(python -c "import scipy; print(scipy.__version__)" 2>/dev/null || echo "unknown")
-    END_VERSIONS
+    ${ProcessEnvelope.versions(task.process, ['skimage', 'scipy'])}
     """
 
     stub:
@@ -74,11 +69,6 @@ process WARP_SEG_QC_TILED {
     echo '${stub_json}' > ${prefix}_seg_qc.json
     printf 'moving,ref_x,ref_y,residual_px,stage\\n' > ${prefix}_reg_residuals.csv
     echo "STUB,${meta.patient_id},stub,0" > ${prefix}.WARP_SEG_QC_TILED.size.csv
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: stub
-        scikit-image: stub
-        scipy: stub
-    END_VERSIONS
+    ${ProcessEnvelope.versionsStub(task.process, ['skimage', 'scipy'])}
     """
 }

@@ -63,14 +63,7 @@ process EXPORT_SPATIALDATA {
         -o spatialdata/${meta.patient_id}.zarr \\
         ${args}
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: \$(python --version 2>&1 | sed 's/Python //')
-        spatialdata: \$(python -c "import spatialdata; print(spatialdata.__version__)" 2>/dev/null || echo "unknown")
-        anndata: \$(python -c "import anndata; print(anndata.__version__)" 2>/dev/null || echo "unknown")
-        geopandas: \$(python -c "import geopandas; print(geopandas.__version__)" 2>/dev/null || echo "unknown")
-        zarr: \$(python -c "import zarr; print(zarr.__version__)" 2>/dev/null || echo "unknown")
-    END_VERSIONS
+    ${ProcessEnvelope.versions(task.process, ['spatialdata', 'anndata', 'geopandas', 'zarr'])}
     """
 
     stub:
@@ -79,13 +72,6 @@ process EXPORT_SPATIALDATA {
     echo '{"zarr_format":2}' > spatialdata/${meta.patient_id}.zarr/.zgroup
     echo "STUB,${meta.patient_id},stub,0" > ${meta.patient_id}.EXPORT_SPATIALDATA.size.csv
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: stub
-        spatialdata: stub
-        anndata: stub
-        geopandas: stub
-        zarr: stub
-    END_VERSIONS
+    ${ProcessEnvelope.versionsStub(task.process, ['spatialdata', 'anndata', 'geopandas', 'zarr'])}
     """
 }

@@ -45,6 +45,7 @@ class ProcessEnvelope {
         'skimage'   : 'scikit-image',
         'sklearn'   : 'scikit-learn',
         'PIL'       : 'pillow',
+        'yaml'      : 'pyyaml',
     ].asImmutable()
 
     private static String yamlKey(String tool) {

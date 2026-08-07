@@ -28,21 +28,13 @@ process COMPILE_PANEL {
         --validate-only --accept-all \\
         ${args}
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: \$(python --version 2>&1 | sed 's/Python //')
-        pyyaml: \$(python -c "import yaml; print(yaml.__version__)" 2>/dev/null || echo "unknown")
-    END_VERSIONS
+    ${ProcessEnvelope.versions(task.process, ['yaml'])}
     """
 
     stub:
     """
     echo '{"feasible_set":[],"constraints":{"never":[],"enforce":[],"audit":[],"requires":[]},"palette":{},"phenotypes":[],"markers":{}}' > model_config.json
     touch spec_report.html
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: stub
-        pyyaml: stub
-    END_VERSIONS
+    ${ProcessEnvelope.versionsStub(task.process, ['yaml'])}
     """
 }

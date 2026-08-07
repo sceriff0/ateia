@@ -38,12 +38,7 @@ process GENERATE_REGISTRATION_QC {
         --scale-factor ${scale_factor} \\
         ${args}
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: \$(python --version 2>&1 | sed 's/Python //')
-        numpy: \$(python -c "import numpy; print(numpy.__version__)" 2>/dev/null || echo "unknown")
-        tifffile: \$(python -c "import tifffile; print(tifffile.__version__)" 2>/dev/null || echo "unknown")
-    END_VERSIONS
+    ${ProcessEnvelope.versions(task.process, ['numpy', 'tifffile'])}
     """
 
     stub:
@@ -53,11 +48,6 @@ process GENERATE_REGISTRATION_QC {
     touch qc/${registered.simpleName}_QC_RGB_fullres.tif
     echo "STUB,${meta.patient_id},stub,0" > ${meta.patient_id}_${registered.simpleName}.GENERATE_REGISTRATION_QC.size.csv
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: stub
-        numpy: stub
-        tifffile: stub
-    END_VERSIONS
+    ${ProcessEnvelope.versionsStub(task.process, ['numpy', 'tifffile'])}
     """
 }

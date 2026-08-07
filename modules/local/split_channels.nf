@@ -53,12 +53,7 @@ process SPLIT_CHANNELS {
         ${nuclear_args} \\
         ${args}
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: \$(python --version 2>&1 | sed 's/Python //')
-        tifffile: \$(python -c "import tifffile; print(tifffile.__version__)" 2>/dev/null || echo "unknown")
-        numpy: \$(python -c "import numpy; print(numpy.__version__)" 2>/dev/null || echo "unknown")
-    END_VERSIONS
+    ${ProcessEnvelope.versions(task.process, ['tifffile', 'numpy'])}
     """
 
     stub:
@@ -79,11 +74,6 @@ process SPLIT_CHANNELS {
 
     echo "STUB,${meta.patient_id},stub,0" > ${meta.patient_id}_${registered_image.simpleName}.SPLIT_CHANNELS.size.csv
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: stub
-        tifffile: stub
-        numpy: stub
-    END_VERSIONS
+    ${ProcessEnvelope.versionsStub(task.process, ['tifffile', 'numpy'])}
     """
 }

@@ -63,12 +63,7 @@ process MERGE_AND_PYRAMID {
         ${masks_arg} \\
         ${args}
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: \$(python3 --version | sed 's/Python //')
-        tifffile: \$(python3 -c "import tifffile; print(tifffile.__version__)")
-        numpy: \$(python3 -c "import numpy; print(numpy.__version__)")
-    END_VERSIONS
+    ${ProcessEnvelope.versions(task.process, ['tifffile', 'numpy'])}
     """
 
     stub:
@@ -76,11 +71,6 @@ process MERGE_AND_PYRAMID {
     touch pyramid.ome.tiff
     echo "STUB,${meta.patient_id},stub,0" > ${meta.patient_id}.MERGE_AND_PYRAMID.size.csv
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: stub
-        tifffile: stub
-        numpy: stub
-    END_VERSIONS
+    ${ProcessEnvelope.versionsStub(task.process, ['tifffile', 'numpy'])}
     """
 }

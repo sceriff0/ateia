@@ -121,6 +121,36 @@ workflow {
     catch (IllegalArgumentException ignored) { badPatientKind = true }
     assert badPatientKind, 'Layout.patientDir must reject an unknown kind'
 
+    // ------------------------------------------------------------------ //
+    // ProcessEnvelope — the versions.yml envelope
+    // ------------------------------------------------------------------ //
+    def envVersions     = ProcessEnvelope.versions('TEST:PROC', ['numpy', 'skimage'])
+    def envVersionsStub = ProcessEnvelope.versionsStub('TEST:PROC', ['numpy', 'skimage'])
+
+    // The python: row is prepended automatically, in both renderings.
+    assert envVersions.contains('python: \\$(python --version')
+    assert envVersionsStub.contains('python: stub')
+
+    // skimage -> scikit-image: the import name and the published YAML key differ, and
+    // bin/generate_qc_report.py's hand-rolled parser is keyed on the YAML key, not the
+    // import name.
+    assert envVersions.contains('scikit-image: \\$(python -c "import skimage;')
+    assert !envVersions.contains('skimage: \\$(python -c "import skimage;')
+    assert envVersionsStub.contains('scikit-image: stub')
+
+    // The property this whole task exists to guarantee: versions() and versionsStub()
+    // must never be able to name a different set of tools. Comparing the two heredocs'
+    // YAML KEYS (the text before each ':') is what -stub could never see for itself,
+    // because -stub never evaluates the script: block that versions() renders.
+    def keysOf = { String heredoc ->
+        heredoc.readLines()
+            .findAll { it.startsWith('    ') }
+            .collect { it.trim().split(':')[0].trim() }
+            .toSet()
+    }
+    assert keysOf(envVersions) == keysOf(envVersionsStub)
+    assert keysOf(envVersions) == ['python', 'numpy', 'scikit-image'].toSet()
+
     // println, NOT log.info: nf-test's underlying `nextflow ... -quiet` run
     // suppresses log.info from stdout entirely (observed directly: a log.info
     // line here never appears in workflow.stdout under nf-test, even though the

@@ -24,23 +24,13 @@ process EXTRACT_MASK_SERIES {
     """
     extract_mask_series.py --pyramid ${pyramid} --outdir .
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: \$(python3 --version | sed 's/Python //')
-        tifffile: \$(python3 -c "import tifffile; print(tifffile.__version__)")
-        numpy: \$(python3 -c "import numpy; print(numpy.__version__)")
-    END_VERSIONS
+    ${ProcessEnvelope.versions(task.process, ['tifffile', 'numpy'])}
     """
 
     stub:
     """
     touch cell_mask.tif nuclei_mask.tif
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: stub
-        tifffile: stub
-        numpy: stub
-    END_VERSIONS
+    ${ProcessEnvelope.versionsStub(task.process, ['tifffile', 'numpy'])}
     """
 }
