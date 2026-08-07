@@ -1,0 +1,93 @@
+/*
+========================================================================================
+    ProcessEnvelope — the versions.yml and size-log boilerplate, rendered once
+========================================================================================
+    Every process in modules/local/ ends its script: block with a versions.yml heredoc
+    and (usually) begins it with a size-log line. Both were written out by hand in every
+    module, and the versions heredoc was written TWICE per module — once in script:, once
+    in stub: with every value replaced by the literal `stub`.
+
+    WHY THAT WAS DANGEROUS RATHER THAN MERELY REPETITIVE. `-stub` never evaluates a
+    script: block. So the stub copy is not a mirror the test suite compares against the
+    real one — it is a second, independently maintained list that the entire blocking CI
+    gate cannot see diverge. A tool added to script: and forgotten in stub: produces a
+    versions.yml that reports fewer tools under -stub than in a real run, silently.
+
+    Rendering both from ONE list per module removes the second copy entirely: the stub
+    block asks for the same `tools` list the script block does.
+
+    PRECEDENT. modules/local/segment.nf already renders its version rows from
+    lib/SegBackends.groovy for exactly this reason. This class generalises that to the
+    envelope every module shares.
+
+    INDENTATION IS THE CALLER'S PROBLEM, AND THAT IS DELIBERATE. Nextflow applies
+    stripIndent() to the finished script, so a pre-indented block from here would fight
+    the caller's own indentation. Every method returns lines joined with '\n' at column
+    zero; the caller interpolates it where the heredoc belongs. Same rule as
+    SegBackends' shell fragments.
+
+    All methods are static; nothing here reads params.
+========================================================================================
+*/
+
+class ProcessEnvelope {
+
+    /*
+     * Python module name -> the YAML key the QC report expects. Only modules whose import
+     * name differs from their reported name need an entry; everything else reports under
+     * its own name.
+     *
+     * bin/generate_qc_report.py's parse_versions_yml is a hand-rolled two-level parser
+     * keyed on these strings, and the report renders them verbatim in its Process | Tool |
+     * Version table. Changing a value here changes a published report.
+     */
+    private static final Map<String, String> YAML_KEY = [
+        'skimage'   : 'scikit-image',
+        'sklearn'   : 'scikit-learn',
+        'PIL'       : 'pillow',
+    ].asImmutable()
+
+    private static String yamlKey(String tool) {
+        // NOT YAML_KEY.get(tool, tool): Groovy's DefaultGroovyMethods.get(Map, key, default)
+        // extension inserts the default into the map when the key is absent (a put(), not a
+        // read) and throws UnsupportedOperationException against an immutable map. getOrDefault
+        // is the plain java.util.Map method and never mutates.
+        return YAML_KEY.getOrDefault(tool, tool)
+    }
+
+    /** The version-probe line for one tool, as it appears inside the heredoc. */
+    private static String probe(String tool) {
+        return "    ${yamlKey(tool)}: \\\$(python -c \"import ${tool}; print(${tool}.__version__)\" 2>/dev/null || echo \"unknown\")"
+    }
+
+    /**
+     * The full versions.yml heredoc for a `script:` block.
+     *
+     * `python:` is prepended automatically — 25 of 28 modules reported it and the three
+     * that did not were the anomaly, not the rule. Pass tools in the order they should
+     * appear in the report.
+     */
+    static String versions(String process, List<String> tools) {
+        def lines = ['cat <<-END_VERSIONS > versions.yml',
+                     "\"${process}\":",
+                     '    python: \\$(python --version 2>&1 | sed \'s/Python //\')']
+        lines += tools.collect { probe(it) }
+        lines << 'END_VERSIONS'
+        return lines.join('\n')
+    }
+
+    /**
+     * The same heredoc for a `stub:` block, every value the literal `stub`.
+     *
+     * Takes the SAME tools list as versions(). That is the whole point: the two blocks
+     * can no longer name different tools.
+     */
+    static String versionsStub(String process, List<String> tools) {
+        def lines = ['cat <<-END_VERSIONS > versions.yml',
+                     "\"${process}\":",
+                     '    python: stub']
+        lines += tools.collect { "    ${yamlKey(it)}: stub" }
+        lines << 'END_VERSIONS'
+        return lines.join('\n')
+    }
+}

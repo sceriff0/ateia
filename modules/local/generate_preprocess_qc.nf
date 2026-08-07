@@ -38,13 +38,7 @@ process GENERATE_PREPROCESS_QC {
         --prefix ${prefix} \\
         ${args}
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: \$(python --version 2>&1 | sed 's/Python //')
-        numpy: \$(python -c "import numpy; print(numpy.__version__)" 2>/dev/null || echo "unknown")
-        tifffile: \$(python -c "import tifffile; print(tifffile.__version__)" 2>/dev/null || echo "unknown")
-        scikit-image: \$(python -c "import skimage; print(skimage.__version__)" 2>/dev/null || echo "unknown")
-    END_VERSIONS
+    ${ProcessEnvelope.versions(task.process, ['numpy', 'tifffile', 'skimage'])}
     """
 
     stub:
@@ -55,12 +49,6 @@ process GENERATE_PREPROCESS_QC {
     touch qc/${prefix}_channel1.png
     echo "STUB,${meta.patient_id},stub,0" > ${meta.patient_id}_${preprocessed.simpleName}.GENERATE_PREPROCESS_QC.size.csv
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: stub
-        numpy: stub
-        tifffile: stub
-        scikit-image: stub
-    END_VERSIONS
+    ${ProcessEnvelope.versionsStub(task.process, ['numpy', 'tifffile', 'skimage'])}
     """
 }
