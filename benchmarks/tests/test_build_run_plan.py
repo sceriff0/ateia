@@ -328,3 +328,143 @@ def test_project_sweep_caps_and_grids():
     # input-scaling dimensions are owned by the grids, not double-covered as OFAT axes
     for k in ("target_px", "n_channels", "n_register_images"):
         assert k not in sweep["axes"], f"{k} should not be an OFAT axis"
+
+
+# ---------------------------------------------------------------------------
+# Coverage registry: every pipeline param is either SWEPT or excluded here with
+# a reason. test_every_pipeline_param_is_swept_or_excused fails on any param that
+# is in neither set, so a param added to nextflow.config cannot silently escape
+# the benchmark. This is the coverage counterpart to
+# test_project_sweep_baseline_matches_pipeline_defaults (which pins the values).
+# ---------------------------------------------------------------------------
+NOT_SWEPT = {
+    # --- run identity / where the data is. Not knobs: they select the job, not its cost. ---
+    "input": "samplesheet path — supplied per run by run_sweep.sh",
+    "outdir": "output path — supplied per run by run_sweep.sh",
+    "prior_outdir": "add_cycle input; the sweep benchmarks standard mode only",
+    "mode": "'standard' vs 'add_cycle' — a different PIPELINE, not a knob (see docs/add_cycle.md)",
+    "start": "step gate — every sweep run is a full pipeline; a partial run is not comparable",
+    "stop": "step gate — see start",
+
+    # --- site / scheduler. Properties of the cluster, not of the pipeline. ---
+    "max_cpus": "resourceLimits clamp — a site ceiling; varying it benchmarks the machine",
+    "max_memory": "resourceLimits clamp — see max_cpus",
+    "max_time": "resourceLimits clamp — see max_cpus",
+    "slurm_account": "scheduler identity",
+    "slurm_partition": "scheduler identity",
+    "slurm_qos": "scheduler identity",
+    "gpu_type": "site GPU selector — the hardware under test, not a pipeline knob",
+
+    # --- asset paths. Site-local files; a path string has no cost curve. ---
+    "segmentation_model": "StarDist model NAME — an asset, not a knob",
+    "segmentation_model_dir": "StarDist model dir — site-local asset path",
+    "instanseg_model_dir": "InstanSeg model dir — site-local asset path",
+    "cellsam_model_path": "CellSAM weights — site-local asset path",
+    "panel_spec": "phenotyping panel spec — an input file; absent, phenotyping never runs",
+    "panel_model": "phenotyping model — an input file; see panel_spec",
+
+    # --- phenotyping. Gated behind panel_spec, which the synthetic matrix cannot supply. ---
+    "pheno_alpha": "phenotyping is gated behind panel_spec (not supplied by the synthetic matrix)",
+    "pheno_max_enumerate": "gated behind panel_spec — see pheno_alpha",
+    "pheno_min_cal": "gated behind panel_spec — see pheno_alpha",
+
+    # --- properties of the INPUT DATA, fixed by generate_matrix.py. ---
+    "pixel_size": "a property of the synthetic images, set by the matrix generator",
+    "nuclear_markers": "channel naming contract — the matrix generator fixes the panel",
+    "allow_auto_reference": "samplesheet semantics — the generated sheet always names a reference",
+
+    # --- developer / trace plumbing. ---
+    "debug_channels": "debug output only",
+    "dry_run": "dry_run does not execute the pipeline",
+    "enable_trace": "held ON — the sweep's own measurement plumbing (size_logs feed the regression)",
+    "trace_dir": "trace output path",
+
+    # --- gated behind a backend/method choice: a flat OFAT run would be a no-op. ---
+    # Same rule test_project_sweep_has_no_dead_axes enforces: pin the gate, cross the knob.
+    "seg_pmin": "seg_method=stardist only (starDistCommonFlags) — belongs in segmentation_grid.stardist",
+    "seg_pmax": "seg_method=stardist only — see seg_pmin",
+    "seg_prob_thresh": "seg_method=stardist only — see seg_pmin",
+    "seg_expand_distance": (
+        "reaches SEGMENT only via starDistCommonFlags; at the instantseg baseline it would move "
+        "only SEG_QC_GEOJSON's contours — i.e. change the accuracy MEASUREMENT rather than the "
+        "pipeline's own segmentation. Belongs in segmentation_grid.stardist."),
+    "seg_instantseg_model": "seg_method=instantseg only — an asset name, not a cost knob",
+    "seg_instantseg_target": "seg_method=instantseg only — selects which outputs are produced",
+    "seg_cellsam_overlap": "seg_method=cellsam only — add to segmentation_grid.cellsam if needed",
+    "seg_cellsam_use_wsi": "seg_method=cellsam only — see seg_cellsam_overlap",
+    "reg_tiled_halo": "registration_method=tiled only — secondary accuracy knob, held at default",
+    "reg_tiled_upsample": "registration_method=tiled only — see reg_tiled_halo",
+    "reg_tiled_out_tile": "registration_method=tiled only — write-side I/O, held at default",
+    "reg_tiled_dapi_index": "registration_method=tiled only — a channel index, not a cost knob",
+
+    # --- secondary knobs deliberately held at defaults (add an axis if a curve is ever needed). ---
+    "reg_micro_reg_fraction": "secondary micro-registration knob; reg_micro_reg (the DEPTH) is crossed instead",
+    "preprocess_qc_scale_factor": "preprocess-QC render scale; qc_scale_factor already prices QC rendering",
+    "spatialdata_residual_join_max_px": "join tolerance — changes the export's matching, not its cost",
+    "embed_masks": "embeds masks in the OME-TIFF; a niche output-format toggle",
+
+    # --- QC gates held ON: the paper's quality tables are harvested from these artifacts. ---
+    # Flipping them off yields runs absent from every quality table (same caveat as reg_qc<2).
+    "skip_preprocess_qc": "held ON — turning QC off drops the run from the quality tables",
+    "skip_registration_qc": "held ON — see skip_preprocess_qc",
+    "skip_postprocessing_qc": "held ON — see skip_preprocess_qc",
+    "skip_final_qc_report": "held ON — the final report is where versions/size_logs are aggregated",
+}
+
+
+def _sweep_covered_params(sweep) -> set:
+    """Every pipeline param the sweep touches, in the baseline or any axis/grid."""
+    covered = set(sweep["baseline"]) | set(sweep.get("axes", {}))
+    for grid in ("scaling_grid", "registration_grid", "registration_param_grid"):
+        covered |= set(sweep.get(grid, {}))
+    for grid in ("segmentation_grid", "registration_method_grid"):
+        for per_method in sweep.get(grid, {}).values():
+            covered |= set(per_method)
+    return covered
+
+
+def test_every_pipeline_param_is_swept_or_excused():
+    """No pipeline param may be silently unbenchmarked.
+
+    The benchmark's claim is that it characterises the pipeline. A param that is neither
+    swept nor listed in NOT_SWEPT is a hole in that claim -- and the failure mode is silent,
+    because nothing else in the suite reads nextflow.config's full param list. Adding a param
+    to nextflow.config now forces a decision here: sweep it, or say why not.
+    """
+    import yaml
+    sweep = yaml.safe_load(
+        (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text())
+    params = set(pipeline_param_defaults())
+
+    unaccounted = params - _sweep_covered_params(sweep) - set(NOT_SWEPT)
+    assert not unaccounted, (
+        "pipeline params neither swept nor excused: " + ", ".join(sorted(unaccounted)) +
+        "\nEither add an axis/baseline entry in benchmarks/configs/sweep.yaml, or add the "
+        "param to NOT_SWEPT with the reason it is not benchmarkable."
+    )
+
+
+def test_not_swept_registry_has_no_stale_entries():
+    """NOT_SWEPT must not excuse a param that no longer exists, or one now swept.
+
+    Without this, a deleted param leaves a dead excuse behind (and a param later promoted to
+    a real axis keeps a stale 'not benchmarked' note contradicting the sweep).
+    """
+    import yaml
+    sweep = yaml.safe_load(
+        (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text())
+    params = set(pipeline_param_defaults())
+
+    ghosts = set(NOT_SWEPT) - params
+    assert not ghosts, f"NOT_SWEPT excuses params that no longer exist in nextflow.config: {sorted(ghosts)}"
+
+    contradictory = set(NOT_SWEPT) & _sweep_covered_params(sweep)
+    assert not contradictory, (
+        f"params are BOTH swept and listed as not-swept: {sorted(contradictory)} -- drop the NOT_SWEPT entry"
+    )
+
+
+def test_every_not_swept_entry_states_a_reason():
+    for name, reason in NOT_SWEPT.items():
+        assert isinstance(reason, str) and len(reason) > 15, (
+            f"NOT_SWEPT['{name}'] must state a real reason, got {reason!r}")

@@ -82,6 +82,11 @@ baseline:
                                       # centroid displacement (um) per stage. Harvested into
                                       # registration_accuracy.csv (bin/warp_seg_qc.py; docs/registration_qc.md).
   reg_jvm_heap_gb: null               # auto-size; the reg_jvm_heap_gb axis varies it (RAM elasticity)
+  reg_max_image_dim: 4000             # pipeline default: VALIS's max processing dimension (px). THE
+                                      # VALIS accuracy/cost tradeoff — every image is downscaled to fit
+                                      # this before feature detection, so it sets both registration
+                                      # runtime and the resolution the transform is solved at.
+                                      # Live at this baseline (registration_method=valis).
   reg_tiled_fanout: false             # STARE execution SHAPE, pipeline default: false = one Nextflow task
                                       # per slide (tiled internally); true = per-TILE fan-out
                                       # (TILED_COARSE -> TILED_REG_TILE -> TILED_SOLVE -> TILED_STITCH).
@@ -92,6 +97,9 @@ baseline:
   preproc_overlap: 0
   preproc_tile_size: 1950             # pipeline default (BaSiC tile size)
   preproc_no_darkfield: false         # pipeline default (darkfield correction ON)
+  preproc_skip_dapi: true             # pipeline default: DAPI channels skip BaSiC correction. Ungated
+                                      # (modules/local/preprocess.nf) — a cost AND correction-quality
+                                      # knob, since flipping it puts every DAPI channel through BaSiC.
   preproc_autotune: false             # pipeline default
   preproc_pool_workers: null          # pipeline default (null = task.cpus); the preproc_pool_workers axis
                                       # varies it to explicit thread counts
@@ -124,9 +132,16 @@ baseline:
   # --- OME-TIFF / GeoJSON export (output size + write time; no effect on quantification) ---
   compression: zstd                   # pipeline default OME-TIFF codec
   pyramid_resolutions: 8              # pipeline default pyramid level count
+  pyramid_scale: 2                    # pipeline default downsample factor BETWEEN pyramid levels
+                                      # (modules/local/merge_and_pyramid.nf). Independent of the level
+                                      # COUNT above: together they set the pyramid's total size.
   tilex: 512                          # pipeline default OME-TIFF tile size (px)
   simplify_tolerance: 1.0             # pipeline default; display-only (quantification is mask-derived)
   geojson_coord_precision: 2          # pipeline default; display-only
+  # --- QC render cost ---
+  qc_scale_factor: 0.25               # pipeline default: downsample factor for the registration-QC
+                                      # renders (modules/local/generate_registration_qc.nf). Pure QC
+                                      # cost — it changes no measurement, only the rendered overlay.
 
 # Axes to vary (OFAT: one run per non-baseline value of each axis). These hold
 # input size FIXED at the baseline cell and vary a single pipeline knob.
@@ -137,6 +152,11 @@ axes:
   # --- registration resource elasticity ---
   reg_jvm_heap_gb:            [16, 32, 64]        # does more BioFormats JVM heap speed up REGISTER, or
                                                   # just reserve idle RAM? (classic path; RAM response curve)
+  reg_max_image_dim:          [2000, 4000, 8000]  # VALIS max processing dimension (px). Ungated and live
+                                                  # at the VALIS baseline. Doubling it roughly quadruples
+                                                  # the pixels VALIS solves on, so this is simultaneously
+                                                  # the dominant VALIS runtime axis AND an accuracy axis
+                                                  # (reg_qc=2 scores it) — read the two together.
   # --- preprocessing ---
   preproc_pool_workers:       [1, 4, 8]           # preprocessing parallelism (null pipeline default = task.cpus)
   preproc_tile_size:          [1024, 1950, 3000]  # BaSiC tile size — illumination-fit cost vs field size
@@ -144,6 +164,9 @@ axes:
                                                   # changes the corrected image, so this is a cost AND
                                                   # correction-quality axis, not a free saving
   preproc_autotune:           [false, true]       # BaSiC autotune: extra fitting passes for a better fit
+  preproc_skip_dapi:          [true, false]       # false puts DAPI through BaSiC too: more PREPROCESS
+                                                  # work, and it changes the DAPI the whole downstream
+                                                  # chain (registration + segmentation) consumes
   # --- segmentation ---
   seg_gpu:                    [true, false]       # NB: false may not be a true CPU run (issue #20)
   # --- quantification ---
@@ -161,11 +184,15 @@ axes:
                                                   # regression's x-axis — read it as an I/O axis, not as
                                                   # a free comparison against the zstd runs.
   pyramid_resolutions:        [4, 8]              # pyramid level count
+  pyramid_scale:              [2, 4]              # downsample factor between levels — with the level
+                                                  # count above, the other half of pyramid total size
   tilex:                      [256, 512, 1024]    # OME-TIFF tile size (write pattern / random-access cost)
   simplify_tolerance:         [0.0, 1.0, 2.0]     # display-only
   geojson_coord_precision:    [1, 2, 3]           # display-only
   # --- MEASUREMENT SETTINGS (these change what is measured, so runs are NOT comparable across values;
   #     swept to price the QC itself, never to compare quality between values) ---
+  qc_scale_factor:            [0.25, 0.5]         # registration-QC render downsampling. Pure QC render
+                                                  # cost; changes no measured quantity.
   reg_qc:                     [0, 1, 2]           # CAVEAT: reg_qc<2 emits NO staged accuracy metric, so
                                                   # those runs are absent from registration_accuracy.csv.
                                                   # Cost characterisation of the QC stage only.
