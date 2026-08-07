@@ -284,11 +284,15 @@ class CsvUtils {
      */
     static void validateInputSemantics(def csv, String step, boolean allowAutoReference, def nuclearMarkers) {
 
-        def pathColumn = [
-            preprocessing : 'path_to_file',
-            registration  : 'preprocessed_image',
-            postprocessing: 'registered_image',
-        ][step]
+        // ParamUtils.STEPS is the single source of truth for "what is a step?"
+        // (name / requiredColumns / entryColumn / qcKinds) -- see its header
+        // comment in lib/ParamUtils.groovy. entryColumnForStep throws on an
+        // unrecognised step rather than the old map literal's silent `null`,
+        // but both call sites below only ever pass a step already validated
+        // by nextflow_schema.json's enum (or the add_cycle branch's hardcoded
+        // 'preprocessing'), so that stricter failure mode is unreachable in
+        // practice and loud instead of silent if it ever is reached.
+        def pathColumn = ParamUtils.entryColumnForStep(step)
 
         def lines = readCsvLines(csv)
         if (lines.size() < 2)
