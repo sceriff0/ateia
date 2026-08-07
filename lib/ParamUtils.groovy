@@ -202,19 +202,4 @@ class ParamUtils {
     static boolean isEntryPoint(Map params, String step) {
         return params.start == step
     }
-
-    /**
-     * Parse a parameter that may be a List, a stringified list like "['a','b']", or a comma-separated string.
-     * Returns a cleaned List<String> with empty entries removed.
-     */
-    static List<String> parseListParam(param) {
-        if (param instanceof List) {
-            return param.collect { it.toString().trim() }.findAll { it }
-        }
-        return (param ?: '').toString()
-            .replaceAll(/^\[|\]$/, '')    // strip outer brackets only
-            .tokenize(',')
-            .collect { it.trim().replaceAll(/^['"]|['"]$/, '') }  // strip surrounding quotes per element
-            .findAll { it }
-    }
 }
