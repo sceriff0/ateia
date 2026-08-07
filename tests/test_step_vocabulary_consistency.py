@@ -51,6 +51,18 @@ STEPS_BLOCK_RE = re.compile(r"static final List STEPS = \[(.*?)\n    \]\n", re.S
 STEP_NAME_RE = re.compile(r"name\s*:\s*'([^']*)'")
 ENTRY_COLUMN_RE = re.compile(r"entryColumn\s*:\s*'([^']*)'")
 
+# One match per step entry: its name, its requiredColumns list (as raw quoted
+# strings), and its entryColumn. Non-greedy up to the first ']' after each field
+# is safe here because requiredColumns is a flat string list (no nested brackets)
+# and entryColumn is a single quoted scalar, so the first ']' following
+# requiredColumns really is that list's own close bracket.
+STEP_ENTRY_RE = re.compile(
+    r"name\s*:\s*'(?P<name>[^']*)'.*?"
+    r"requiredColumns\s*:\s*\[(?P<cols>[^\]]*)\].*?"
+    r"entryColumn\s*:\s*'(?P<entry>[^']*)'",
+    re.S,
+)
+
 # Source globs scanned for a parallel step->column mapping. Groovy libs +
 # every Nextflow file that could plausibly branch on a step name.
 SCANNED_GLOBS = ["lib/**/*.groovy", "workflows/**/*.nf", "subworkflows/**/*.nf"]
@@ -77,6 +89,21 @@ def extract_entry_columns() -> list[str]:
     return ENTRY_COLUMN_RE.findall(_steps_block_text())
 
 
+def extract_step_entries() -> list[dict]:
+    """Each STEPS row as {name, requiredColumns, entryColumn}, parsed from source."""
+    entries = []
+    for m in STEP_ENTRY_RE.finditer(_steps_block_text()):
+        cols = [c.strip().strip("'") for c in m.group("cols").split(",") if c.strip()]
+        entries.append(
+            {
+                "name": m.group("name"),
+                "requiredColumns": cols,
+                "entryColumn": m.group("entry"),
+            }
+        )
+    return entries
+
+
 def extract_schema_enum(schema: dict, prop: str) -> list:
     """The raw enum list for schema property `prop`, wherever it lives."""
     props: dict[str, dict] = dict(schema.get("properties", {}))
@@ -92,6 +119,31 @@ def extract_schema_enum(schema: dict, prop: str) -> list:
 def test_steps_table_is_nonempty() -> None:
     steps = extract_step_names()
     assert steps, "ParamUtils.STEPS parsed to zero step names -- regex or table broke"
+
+
+def test_entry_column_is_in_required_columns_for_every_step() -> None:
+    """Each step's entryColumn must be one of its own requiredColumns.
+
+    entryColumn is the checkpoint-CSV column INPUT_CHECK reads when that step is
+    the run's --start point; requiredColumns is what CsvUtils.validateInputCSV
+    demands be present for that same entry point. If entryColumn were not itself
+    in requiredColumns, a samplesheet that validateInputCSV happily accepts as a
+    valid entry point for the step could still be missing the very column
+    INPUT_CHECK is about to read.
+
+    No local nf-test starts at 'registration' or 'postprocessing' (every pipeline
+    nf-test uses the default/'preprocessing' --start), so this relationship is
+    otherwise exercised for exactly one of the three STEPS rows.
+    """
+    entries = extract_step_entries()
+    assert entries, "no step entries parsed -- did STEPS get reshaped?"
+    for entry in entries:
+        assert entry["entryColumn"] in entry["requiredColumns"], (
+            f"STEPS['{entry['name']}'].entryColumn ({entry['entryColumn']!r}) is not "
+            f"one of its own requiredColumns ({entry['requiredColumns']}) -- a "
+            "samplesheet CsvUtils.validateInputCSV accepts as this step's entry "
+            "point could still be missing the column INPUT_CHECK reads."
+        )
 
 
 def test_schema_start_enum_matches_steps() -> None:

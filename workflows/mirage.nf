@@ -39,7 +39,7 @@ workflow MIRAGE {
 
     /* -------------------- MODE: ADD_CYCLE -------------------- */
     if (params.mode == 'add_cycle') {
-        ParamUtils.validateAddCycle(params.prior_outdir)
+        ParamUtils.validateAddCycle(params.outdir, params.prior_outdir)
         ParamUtils.validateCompartmentQuant(params.quantify_compartments, params.expanded_quantification)
         ParamUtils.validateAddCyclePhenotyping(params)  // add_cycle has no PHENOTYPE stage
         // add_cycle re-registers the new cycle via the classic VALIS_ADAPTER only; the

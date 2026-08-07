@@ -78,10 +78,31 @@ class ParamUtils {
         }
     }
 
-    static void validateAddCycle(String priorOutdir) {
+    static void validateAddCycle(String outdir, String priorOutdir) {
         if (!priorOutdir?.trim()) {
             throw new IllegalArgumentException(
                 "mode='add_cycle' requires --prior_outdir pointing at the previous run's --outdir")
+        }
+        // add_cycle writes its registered-checkpoint CSV via collectFile(storeDir:),
+        // which OVERWRITES. If --outdir resolved to the same directory as
+        // --prior_outdir, that write would clobber the prior run's complete
+        // manifest with add_cycle's partial one, while the postprocessed-checkpoint
+        // CSV (untouched by add_cycle) survives — leaving --prior_outdir internally
+        // inconsistent and unrecoverable. Compare canonical paths, not raw strings:
+        // a trailing slash, a '.', or a symlink must not defeat this check.
+        if (outdir?.trim()) {
+            def outdirCanonical = new File(outdir).canonicalPath
+            def priorOutdirCanonical = new File(priorOutdir).canonicalPath
+            if (outdirCanonical == priorOutdirCanonical) {
+                def registeredRel = Layout.checkpointCsvRelative(Layout.REGISTERED)
+                def postprocessedRel = Layout.checkpointCsvRelative(Layout.POSTPROCESSED)
+                throw new IllegalArgumentException(
+                    "mode='add_cycle': --outdir must not be the same directory as --prior_outdir " +
+                    "('${priorOutdir}'). add_cycle's '${registeredRel}' checkpoint write overwrites " +
+                    "in place, which would clobber the prior run's manifest while '${postprocessedRel}' " +
+                    "survives untouched, leaving --prior_outdir internally inconsistent. Use a FRESH " +
+                    "--outdir for the incremental run, as docs/add_cycle.md describes.")
+            }
         }
         // Which checkpoints a prior run must have left behind, and where they live,
         // is Layout's to state — add_cycle.nf reads the very same two files.

@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   naming the nuclear/fiducial channel. The first marker present (resolved from channel metadata,
   never the filename) is moved to channel 0 by `CONVERT_IMAGE`. Fails fast if none is present
   (single-channel images excepted).
+- **An `--mode add_cycle` run now writes `csv/registered.csv` into its `--outdir`.** It never did
+  before — only the linear `REGISTRATION` path wrote that checkpoint, so an `add_cycle` run's
+  `--outdir` could never itself serve as a second `add_cycle`'s `--prior_outdir`. Chaining two
+  `add_cycle` runs is still **not** supported: `csv/postprocessed.csv` is still not written
+  (`add_cycle` has no `POSTPROCESSING` step), and `ParamUtils.validateAddCycle` requires both
+  checkpoints to be present.
 
 ### Changed
 - **The registration method's intrinsic TRE is no longer named after VALIS.** Both backends
@@ -62,6 +68,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   StarDist.
 - **`<outdir>/size_logs/versions.yml`'s single key changed** to
   `MIRAGE:FINAL_QC:AGGREGATE_SIZE_LOGS` (diagnostic string only; no functional effect).
+
+### Fixed
+- **The checkpoint manifests no longer name files that do not exist.** `csv/postprocessed.csv`'s
+  `cell_csv` and `cell_geojson` columns previously recorded `<pid>/geojson/cells.geojson` — a
+  basename-only path that omitted the `export/` subdirectory `EXPORT_GEOJSON`'s `publishDir`
+  actually carries the file into, so the recorded path pointed at nothing. All published paths
+  now go through `lib/Layout.groovy`, which preserves the producer subdirectory, so the columns
+  name the real files. **Published-output change (explicitly authorised):** the two path values
+  in `csv/postprocessed.csv` change; the published tree itself does not.
+- **The three checkpoint CSVs (`preprocessed.csv`, `registered.csv`, `postprocessed.csv`) now
+  have deterministic row order.** `collectFile` wrote rows in task-completion order, so two runs
+  of the same commit could produce differently-ordered (though content-identical) CSVs. Rows are
+  now sorted (`sort: true`, patient ID then path). **Published-output change (explicitly
+  authorised):** row order in the three manifests changes; contents and column order do not.
 
 ### Removed
 - **`reg_reference_markers`** — removed. It only fed a filename-based fallback for reference-image

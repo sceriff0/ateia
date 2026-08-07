@@ -108,10 +108,11 @@ def parse_args(argv=None):
     ap.add_argument("--n-tiles", type=int, nargs=2, default=[1, 1], metavar=("Y", "X"))
     ap.add_argument("--expand-distance", type=int, default=10)
     ap.add_argument("--prob-thresh", type=float, default=None)
-    # Matches nextflow.config's simplify_tolerance (1.0), not mask_to_geojson.py's own
-    # standalone default (0.5): the pipeline always passes --tolerance explicitly
-    # (conf/modules.config's SEG_QC_GEOJSON ext.args), so this default only matters for
-    # standalone invocation, and should behave the same as the pipeline by default.
+    # Matches nextflow.config's simplify_tolerance (1.0), which is also
+    # mask_to_geojson.py's own standalone default: the pipeline always passes
+    # --tolerance explicitly (conf/modules.config's SEG_QC_GEOJSON ext.args), so this
+    # default only matters for standalone invocation, and should behave the same as
+    # the pipeline by default.
     ap.add_argument("--tolerance", type=float, default=1.0)
     return ap.parse_args(argv)
 

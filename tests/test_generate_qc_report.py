@@ -182,7 +182,7 @@ def test_end_to_end_cli_smoke(tmp_path):
     # Minimal inputs: run summary + versions only; everything else empty dirs.
     (tmp_path / "preprocess_qc").mkdir()
     (tmp_path / "registration_qc").mkdir()
-    (tmp_path / "valis_summary").mkdir()
+    (tmp_path / "registration_tre").mkdir()
     (tmp_path / "postprocess_qc").mkdir()
     (tmp_path / "seg_qc").mkdir()
     rs = _summary(tmp_path)
@@ -198,7 +198,7 @@ def test_end_to_end_cli_smoke(tmp_path):
             "--registration-qc",
             str(tmp_path / "registration_qc"),
             "--registration-tre",
-            str(tmp_path / "valis_summary"),
+            str(tmp_path / "registration_tre"),
             "--postprocess-qc",
             str(tmp_path / "postprocess_qc"),
             "--seg-qc",
@@ -239,7 +239,7 @@ def test_end_to_end_cli_smoke(tmp_path):
 #   non_rigid   feature-TRE = non_rigid_D from the PRE-micro summary
 #   micro       feature-TRE = non_rigid_D from the FINAL (post-micro) summary
 def _valis_csvs(tmp_path):
-    d = tmp_path / "valis_summary"
+    d = tmp_path / "registration_tre"
     d.mkdir()
     (d / "P001_preprocessed_summary.csv").write_text(
         "from,rigid_D,non_rigid_D\nmov,2.0,0.5\n"  # final: non_rigid_D = micro TRE
@@ -307,7 +307,7 @@ def test_reconcile_non_rigid_tre_falls_back_to_final_without_premicro_summary(tm
     # rather than n/a. This is the shipped-default (micro_reg=0) configuration, so getting a real
     # value here is exactly the point of the reconciliation.
     gqr = _load()
-    d = tmp_path / "valis_summary"
+    d = tmp_path / "registration_tre"
     d.mkdir()
     (d / "P001_preprocessed_summary.csv").write_text(
         "from,rigid_D,non_rigid_D\nmov,2.0,0.5\n"
@@ -390,7 +390,7 @@ def test_fanout_tre_without_post_refinement_shows_na(tmp_path):
 
 def test_registration_section_renders_stare_tre_from_valis_dir(tmp_path):
     gqr = _load()
-    valis = tmp_path / "valis_summary"
+    valis = tmp_path / "registration_tre"
     valis.mkdir()
     _write_tre(
         valis,
