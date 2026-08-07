@@ -38,6 +38,32 @@ workflow MIRAGE {
 
     ParamUtils.validateOutdir(params.outdir)
 
+    /* -------------------- STEP GATE -------------------- */
+
+    // Validate and resolve --stop: default to last step if not provided. Computed
+    // HERE, before the mode branch, so add_cycle shares it with the standard path
+    // instead of bypassing it: add_cycle used to fall straight into its own
+    // validation block and never look at --start/--stop at all, so a contradictory
+    // pair (e.g. --start postprocessing --stop preprocessing) silently passed
+    // --dry_run instead of erroring the way the standard path always has.
+    if (params.stop) {
+        ParamUtils.validateStop(params.stop, params.start)
+    }
+    def effective_stop = params.stop ?: ParamUtils.STEP_ORDER.last()
+
+    // Which steps this run covers. Computed once: the gate is a pure function of
+    // (start, stop), so re-asking it at every site only creates opportunities for
+    // the three arguments to disagree. (A closure would read better still, but the
+    // strict Nextflow parser cannot invoke a closure-typed local as a function.)
+    // add_cycle does not consume these booleans below -- it has its own fixed
+    // recompute-registration-and-quantification flow, gated by validateAddCycle's
+    // own prerequisites, not by --start/--stop -- but it shares the validation
+    // above them, which is the point of moving this block up.
+    boolean run_preprocessing  = ParamUtils.shouldRun('preprocessing', params.start, effective_stop)
+    boolean run_registration   = ParamUtils.shouldRun('registration', params.start, effective_stop)
+    boolean run_segmentation   = ParamUtils.shouldRun('segmentation', params.start, effective_stop)
+    boolean run_postprocessing = ParamUtils.shouldRun('postprocessing', params.start, effective_stop)
+
     /* -------------------- MODE: ADD_CYCLE -------------------- */
     if (params.mode == 'add_cycle') {
         ParamUtils.validateAddCycle(params.outdir, params.prior_outdir)
@@ -85,39 +111,32 @@ workflow MIRAGE {
         // --prior_outdir's checkpoint CSVs.
         ADD_CYCLE(INPUT_CHECK.out.samples)
 
-        // ADD_CYCLE has no preprocess_qc / registration_tre / postprocess_qc / seg_residuals
-        // of its own (it calls PREPROCESSING internally without re-exposing its QC pngs, has
-        // no POSTPROCESSING step at all — masks are reused, not re-segmented — and calls
-        // SEG_QC without capturing `.out.per_cell`). Those kinds are simply not contributed;
-        // FINAL_QC defaults them to empty.
+        // ADD_CYCLE has no preprocess_qc / registration_tre / postprocess_qc of its own
+        // (it calls PREPROCESSING internally without re-exposing its QC pngs, and has no
+        // POSTPROCESSING step at all — masks are reused, not re-segmented). Those kinds
+        // are simply not contributed; FINAL_QC defaults them to empty. seg_residuals IS
+        // now contributed: ADD_CYCLE captures SEG_QC.out.per_cell (previously dropped).
         FINAL_QC(
             Channel.empty()
-                .mix(ADD_CYCLE.out.qc.map        { _meta, files -> ['registration_qc', files] })
-                .mix(ADD_CYCLE.out.seg_qc.map    { _meta, files -> ['seg_qc', files] })
-                .mix(ADD_CYCLE.out.versions.map  { f -> ['versions', f] })
-                .mix(ADD_CYCLE.out.size_logs.map { f -> ['size_log', f] }),
-            INPUT_CHECK.out.counts.map { counts -> counts + [stop: 'add_cycle'] }
+                .mix(ADD_CYCLE.out.qc.map            { _meta, files -> ['registration_qc', files] })
+                .mix(ADD_CYCLE.out.seg_qc.map        { _meta, files -> ['seg_qc', files] })
+                .mix(ADD_CYCLE.out.seg_residuals.map { _meta, files -> ['seg_residuals', files] })
+                .mix(ADD_CYCLE.out.versions.map      { f -> ['versions', f] })
+                .mix(ADD_CYCLE.out.size_logs.map     { f -> ['size_log', f] }),
+            // effective_stop (computed above, shared with the standard path), NOT
+            // the literal 'add_cycle' this used to smuggle in: 'add_cycle' is not a
+            // member of ParamUtils.STEP_ORDER, so FINAL_QC's run_summary.json used to
+            // carry a `run.stop` value that would index to -1 in any consumer that
+            // looked it up there. buildRunSummary (subworkflows/local/final_qc.nf)
+            // only ever writes this straight into the JSON report as a label, so the
+            // real effective stop (defaulting to 'postprocessing', the last step,
+            // since add_cycle always carries the run through to export) is both
+            // accurate and STEP_ORDER-safe.
+            INPUT_CHECK.out.counts.map { counts -> counts + [stop: effective_stop] }
         )
 
         return   // do NOT fall through to the standard start/stop flow
     }
-
-    /* -------------------- STEP GATE -------------------- */
-
-    // Validate and resolve --stop: default to last step if not provided
-    if (params.stop) {
-        ParamUtils.validateStop(params.stop, params.start)
-    }
-    def effective_stop = params.stop ?: ParamUtils.STEP_ORDER.last()
-
-    // Which steps this run covers. Computed once: the gate is a pure function of
-    // (start, stop), so re-asking it at every site only creates opportunities for
-    // the three arguments to disagree. (A closure would read better still, but the
-    // strict Nextflow parser cannot invoke a closure-typed local as a function.)
-    boolean run_preprocessing  = ParamUtils.shouldRun('preprocessing', params.start, effective_stop)
-    boolean run_registration   = ParamUtils.shouldRun('registration', params.start, effective_stop)
-    boolean run_segmentation   = ParamUtils.shouldRun('segmentation', params.start, effective_stop)
-    boolean run_postprocessing = ParamUtils.shouldRun('postprocessing', params.start, effective_stop)
 
     if (run_postprocessing) {
         ParamUtils.validateCompartmentQuant(params.quantify_compartments, params.expanded_quantification)

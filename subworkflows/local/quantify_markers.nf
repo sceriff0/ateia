@@ -16,6 +16,12 @@
     run's reused masks) and in what they do with the grouped CSVs afterwards
     (join morphology.csv vs merge onto a prior base table). Both differences are
     parameterised through `take:`/`emit:` — nothing in here branches on params.mode.
+
+    This file also exports `groupTiffsByPatient`, a plain function (not a process
+    or workflow — Nextflow's `include` can pull in either) used by both callers'
+    OWN pyramid-channel grouping, the same drift-prone shape as the CSV grouping
+    above. See its own doc comment for why it lives here rather than in
+    postprocess.nf or assemble_export.nf.
 ========================================================================================
 */
 
@@ -26,6 +32,43 @@ include { QUANTIFY } from '../../modules/local/quantify'
 // is one implementation and one caller file. Off unless --debug_channels, log-only.
 def viewIfDebug(channel, Closure formatter) {
     return params.debug_channels ? channel.view(formatter) : channel
+}
+
+// The pyramid-channel grouping shared by postprocess.nf's ch_split_grouped and
+// add_cycle.nf's ch_all_channels. Both group one-tiff-per-marker entries into a
+// single per-patient list feeding ASSEMBLE_EXPORT/MERGE_AND_PYRAMID, and both need
+// the EXACT SAME channels_count-sized groupKey + remainder:true streaming hint
+// this file's CSV grouping above uses, for the same reason: an under-count here is
+// the worse of the two grouping's failure modes (see the GROUP comment above) — it
+// trips MERGE_AND_PYRAMID's memory closure (conf/modules.config:330-337) and
+// ABORTS the run outright, rather than silently degrading. add_cycle's own copy of
+// this grouping used to be a bare `.groupTuple()` with no size hint at all — this
+// is the fix, and the reason it now lives in exactly one place.
+//
+// ch_tagged: [patient_id, channels_count, tiff] — one entry per patient+marker,
+// ALREADY deduplicated by [patient_id, marker] by the caller (postprocess.nf keeps
+// the first occurrence of a repeated marker name; add_cycle keeps whichever cycle's
+// tiff should win a new-vs-prior collision). channels_count may be null, in which
+// case grouping falls back to a bare key — correct, just non-streaming.
+def groupTiffsByPatient(ch_tagged) {
+    return ch_tagged
+        .map { patient_id, channels_count, tiff ->
+            def gkey = channels_count
+                ? groupKey(patient_id, channels_count)
+                : patient_id
+            [gkey, tiff]
+        }
+        .groupTuple(by: 0, remainder: true)
+        .map { patient_id, tiffs ->
+            // Extract actual patient_id from groupKey wrapper if needed
+            def pid = patient_id.toString()
+            def patient_meta = [
+                id: pid,
+                patient_id: pid,
+                is_reference: false  // Not relevant at patient level
+            ]
+            [patient_meta, tiffs]
+        }
 }
 
 workflow QUANTIFY_MARKERS {

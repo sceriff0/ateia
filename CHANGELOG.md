@@ -123,19 +123,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   publishes to `<outdir>/<pid>/cell_properties/` instead of `.../cell_properties/nuclei/`
   (a diagnostic-only artifact, not read by any checkpoint or downstream consumer).
 - **The per-cell registration residuals now reach the QC report on the standard
-  (linear) path.** `SEG_QC.out.per_cell` was emitted through
-  `REGISTRATION.out.seg_residuals` and routed to the SpatialData export, but never
-  tagged into the artifact stream, so no report ever showed it. It is now the artifact
-  kind `seg_residuals`, rendered in the report as a capped table (first 500 rows per
-  CSV; `bin/generate_qc_report.py`'s `SEG_RESIDUALS_MAX_ROWS`). **This fix is
-  standard-path only** — `add_cycle` calls `SEG_QC` too but does not capture
-  `.out.per_cell`, so an `add_cycle` run's report still has no residuals section.
+  (linear) path, and, as of this change, on `add_cycle` too.** `SEG_QC.out.per_cell`
+  was emitted through `REGISTRATION.out.seg_residuals` and routed to the SpatialData
+  export, but never tagged into the artifact stream, so no report ever showed it. It
+  is now the artifact kind `seg_residuals`, rendered in the report as a capped table
+  (first 500 rows per CSV; `bin/generate_qc_report.py`'s `SEG_RESIDUALS_MAX_ROWS`).
+  `add_cycle.nf` calls `SEG_QC` too and, until now, never captured `.out.per_cell` at
+  all — that gap is closed in the same change that wires it into
+  `workflows/mirage.nf`'s `add_cycle` `FINAL_QC` call site.
   **`GENERATE_QC_REPORT`'s input arity changed from 7 to 8** (a new
   `seg_residuals`/`path(..., stageAs: 'seg_residuals/*')` slot) — any external caller
   of that module directly must add the new argument. `FINAL_QC` additionally fails the
   run, on the default path (`--skip_final_qc_report=false` and `--enable_trace=true`,
   both shipped defaults), if any declared artifact kind has no consumer — previously
   such a kind was silently dropped.
+- **`--mode add_cycle` now respects `--start`/`--stop`.** It used to validate its own
+  prerequisites and return before the linear step gate ever ran, so a contradictory
+  pair like `--start postprocessing --stop preprocessing` reported "validations
+  passed" under `--dry_run` instead of the hard error the standard path always gave
+  for the same pair. `ParamUtils.validateStop` and the `shouldRun` gate computation
+  now run once, before the `params.mode == 'add_cycle'` branch, so both paths share
+  them (`add_cycle` still ignores the resulting `run_*` booleans — it has its own
+  fixed recompute-registration-and-quantification flow — but it can no longer bypass
+  the ordering check). **Also fixed:** `add_cycle`'s `FINAL_QC` call used to pass the
+  literal string `'add_cycle'` as the run summary's `stop` label — not a member of
+  `ParamUtils.STEP_ORDER`, so any future consumer indexing it would get `-1`. It now
+  passes the real effective stop (`params.stop ?: ParamUtils.STEP_ORDER.last()`),
+  matching the standard path.
+- **`add_cycle.nf`'s pyramid-channel grouping now carries the same
+  `groupKey(patient_id, channels_count)` + `remainder: true` streaming hint as
+  `postprocess.nf`'s.** It had drifted to a bare `.groupTuple()` with no size hint at
+  all. The grouping itself — group tagged `[patient_id, channels_count, tiff]` triples
+  into one per-patient list and build the patient-level meta — is now
+  `groupTiffsByPatient`, a shared function in `subworkflows/local/quantify_markers.nf`
+  (a plain function, not a process/workflow, imported via the same `include` syntax).
+  `add_cycle`'s combined channel count is `new_count + prior_count`, deliberately not
+  correcting for a marker-name collision: an over-count is safe here (the group still
+  closes complete, just via `remainder: true` instead of exactly on time), while an
+  under-count is the failure mode that aborts `MERGE_AND_PYRAMID` outright (see
+  `groupTiffsByPatient`'s doc comment). No published-output change: verified via a
+  before/after stub-run tree diff (43 files both times, differing only in the
+  QC report's timestamped filename).
 - **`tests/test_register.py` could never fail.** It imported `merge_first_file`, which
   `bin/register.py` does not define, behind a `pytest.importorskip("valis")` that meant
   the `ImportError` was never reached.

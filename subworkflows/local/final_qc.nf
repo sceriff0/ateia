@@ -19,10 +19,10 @@
     simply yields an empty branch here, which is what removes the
     `Channel.empty().collect().ifEmpty([])` placeholders both callers used to
     repeat. (add_cycle contributes no preprocess_qc / registration_tre /
-    postprocess_qc / seg_residuals: it calls PREPROCESSING internally without
-    re-exposing its QC pngs, it has no POSTPROCESSING step at all — masks are
-    reused, not re-segmented — and it calls SEG_QC without capturing
-    `.out.per_cell` (see subworkflows/local/add_cycle.nf).)
+    postprocess_qc: it calls PREPROCESSING internally without re-exposing its QC
+    pngs, and it has no POSTPROCESSING step at all — masks are reused, not
+    re-segmented. It DOES contribute seg_residuals, from SEG_QC.out.per_cell,
+    same as the linear path — see subworkflows/local/add_cycle.nf.)
 
     Recognised kinds:
       preprocess_qc | registration_qc | registration_tre | postprocess_qc | seg_qc

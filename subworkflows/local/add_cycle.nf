@@ -43,7 +43,10 @@ include { GENERATE_REGISTRATION_QC } from '../../modules/local/generate_registra
 include { SEG_QC                   } from './seg_qc'
 // Shared with subworkflows/local/postprocess.nf. These used to be copied inline here;
 // the copy had already drifted (bare .groupTuple() instead of the sized groupKey).
-include { QUANTIFY_MARKERS         } from './quantify_markers'
+// groupTiffsByPatient is a plain function, not a process/workflow, but Nextflow's
+// `include` pulls in either — it is the fix for this file's OWN pyramid-channel
+// grouping, which had drifted the same way (see its call site below).
+include { QUANTIFY_MARKERS; groupTiffsByPatient } from './quantify_markers'
 include { ASSEMBLE_EXPORT          } from './assemble_export'
 
 workflow ADD_CYCLE {
@@ -176,8 +179,13 @@ workflow ADD_CYCLE {
     // ------------------------------------------------------------------ //
     // 3. REGISTRATION-DRIFT QC (non-gating)
     // ------------------------------------------------------------------ //
-    ch_qc     = Channel.empty()
-    ch_seg_qc = Channel.empty()
+    ch_qc            = Channel.empty()
+    ch_seg_qc        = Channel.empty()
+    // Per-cell registration residuals (final stage). registration.nf's twin of this
+    // block (subworkflows/local/registration.nf:207) has captured SEG_QC.out.per_cell
+    // since Group A; this file called SEG_QC without ever capturing it, so add_cycle
+    // residuals reached nothing downstream.
+    ch_seg_residuals = Channel.empty()
     def reg_qc_level = ParamUtils.regQcLevel(params)
 
     // Level 2 needs the classic registrar pickle, which the classic VALIS adapter produces.
@@ -214,6 +222,7 @@ workflow ADD_CYCLE {
         SEG_QC(ch_native, ch_transform, REGISTER_PATIENT.out.stage_checkpoint,
                REGISTER_PATIENT.out.transform_by_slide, 'valis')
         ch_seg_qc          = SEG_QC.out.metrics
+        ch_seg_residuals   = SEG_QC.out.per_cell
         ch_seg_qc_size_log = SEG_QC.out.size_log
         ch_seg_qc_versions = SEG_QC.out.versions
     }
@@ -312,14 +321,45 @@ workflow ADD_CYCLE {
     ch_prior_tagged = SPLIT_PRIOR_PYRAMID.out.channels.flatMap { meta, tiffs ->
         (tiffs instanceof List ? tiffs : [tiffs]).collect { tiff -> [[meta.patient_id, tiff.baseName], 1, tiff] }
     }
-    ch_all_channels = ch_new_tagged.mix(ch_prior_tagged)
+    ch_deduped_channels = ch_new_tagged.mix(ch_prior_tagged)
         .groupTuple(by: 0)   // [[pid, marker], [priorities...], [tiffs...]]
         .map { key, prios, tiffs ->
             def winner = [prios, tiffs].transpose().sort { a, b -> a[0] <=> b[0] }.first()
             [key[0], winner[1]]   // [pid, winning_tiff] — lowest priority (new) wins
         }
-        .groupTuple()
-        .map { pid, tiffs -> [[patient_id: pid, id: pid, is_reference: false], tiffs] }
+
+    // Per-patient combined channel count, feeding groupTiffsByPatient's
+    // channels_count-sized groupKey — the SAME streaming hint postprocess.nf's
+    // twin grouping uses (subworkflows/local/quantify_markers.nf, shared by both;
+    // this file's own copy used to be a bare `.groupTuple()` with no size hint at
+    // all). Deliberately new_count + prior_count WITHOUT subtracting a marker
+    // collision: over-counting is the safe direction here (the group still
+    // closes complete, just at channel-end via remainder:true rather than exactly
+    // on time), whereas under-counting this specific grouping is the one failure
+    // mode that ABORTS the run outright — see groupTiffsByPatient's doc comment.
+    //
+    // new_count is SUMMED across SPLIT_CHANNELS.out.channels' emissions for a
+    // patient, not read off a single one: a patient can have more than one
+    // new-cycle slide (REGISTER_PATIENT/ch_grouped above fans out per new item),
+    // in which case SPLIT_CHANNELS runs once per slide and this must add them
+    // all up, or it would under-count exactly the failure mode this exists to
+    // avoid. SPLIT_PRIOR_PYRAMID, in contrast, runs exactly once per patient
+    // (one prior pyramid), so no grouping is needed on that side.
+    ch_new_channel_counts = SPLIT_CHANNELS.out.channels
+        .map { meta, tiffs -> [meta.patient_id, (tiffs instanceof List ? tiffs.size() : 1)] }
+        .groupTuple(by: 0)
+        .map { pid, counts -> [pid, counts.sum()] }
+    ch_prior_channel_counts = SPLIT_PRIOR_PYRAMID.out.channels
+        .map { meta, tiffs -> [meta.patient_id, (tiffs instanceof List ? tiffs.size() : 1)] }
+    ch_channel_counts = ch_new_channel_counts
+        .join(ch_prior_channel_counts, by: 0)
+        .map { pid, new_count, prior_count -> [pid, new_count + prior_count] }
+
+    ch_all_channels = groupTiffsByPatient(
+        ch_deduped_channels
+            .combine(ch_channel_counts, by: 0)
+            .map { pid, tiff, channels_count -> [pid, channels_count, tiff] }
+    )
 
     // ------------------------------------------------------------------ //
     // 10. EXPORT + PYRAMID (ASSEMBLE_EXPORT, shared with postprocess.nf)
@@ -390,6 +430,7 @@ workflow ADD_CYCLE {
     pyramid     = ASSEMBLE_EXPORT.out.pyramid
     qc          = ch_qc
     seg_qc      = ch_seg_qc
+    seg_residuals = ch_seg_residuals
     versions    = ch_versions
     size_logs   = ch_size_logs
 }

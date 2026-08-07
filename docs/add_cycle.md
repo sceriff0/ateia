@@ -30,10 +30,19 @@ nextflow run . -profile <profile> \
   all cycles) are written here. The prior outdir is left intact.
 
 ## What is reused vs recomputed
-- Reused: reference image, `*_cell_mask.tif` / `*_nuclei_mask.tif` (no SEGMENT),
-  morphology/contours, prior marker columns.
-- Recomputed: preprocess + register the new slide; quantify new markers; rebuild
-  `cells.geojson` and the pyramid from the combined set.
+- Reused: reference image, prior marker columns (the prior run's merged
+  quantification table, joined onto the new-cycle CSVs by cell label), and the
+  cell + nuclei segmentation masks (no SEGMENT re-run) -- but NOT read back from
+  the prior run's `<pid>/segmentation/` files. They are re-extracted from the
+  **prior pyramid's embedded `Image:1` mask series** via `EXTRACT_MASK_SERIES`
+  (see [Fast-fail behavior](#fast-fail-behavior)), which is why the prior run
+  must have been produced with `embed_masks=true`.
+- Recomputed: preprocess + register the new slide; cell contours (and nucleus
+  contours, under `--quantify_compartments`) via `EXTRACT_CELL_PROPERTIES` /
+  `EXTRACT_NUCLEI_PROPERTIES` against the reused masks -- contours are NOT
+  reused from the prior run, only the masks they're recomputed from are;
+  quantify new markers; rebuild `cells.geojson` and the pyramid from the
+  combined set.
 
 ## Marker collisions
 A new-cycle marker that shares a name with a prior column overwrites it
@@ -42,7 +51,18 @@ A new-cycle marker that shares a name with a prior column overwrites it
 ## Caveat
 New-marker intensities are read through the cycle-1 mask, valid only if the new
 cycle registers accurately. Check `--reg_qc 1` (DAPI overlay) QC per patient;
-poor registration means the new markers for that patient are unreliable.
+poor registration means the new markers for that patient are unreliable. At
+`--reg_qc 2`, the per-cell registration-residual CSVs (`SEG_QC`'s staged
+seg-overlap QC) are included in the QC report the same way they are on the
+standard path -- an earlier version of `add_cycle` computed them but never
+surfaced them anywhere.
+
+**Known limitation:** a new cycle contributing more than one slide for the same
+patient currently fails during registration QC (`--reg_qc >= 2`, the shipped
+default) -- `SEG_QC` cross-multiplies each moving slide against every
+transform registered for that patient, producing duplicate-named QC files that
+collide when the report stages them. `--reg_qc 0` avoids it; a single slide
+per patient per cycle is otherwise unaffected.
 
 ## Chaining cycles
 **Not yet supported.** `--prior_outdir` must contain BOTH `csv/registered.csv` and

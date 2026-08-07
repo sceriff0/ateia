@@ -12,8 +12,9 @@ include { PHENOTYPE                } from '../../modules/local/phenotype'
 include { GENERATE_POSTPROCESSING_QC    } from '../../modules/local/generate_postprocessing_qc'
 include { EXPORT_SPATIALDATA } from '../../modules/local/export_spatialdata'
 // Shared with subworkflows/local/add_cycle.nf — see those files for why the shaping
-// lives there rather than being copied into each caller.
-include { QUANTIFY_MARKERS         } from './quantify_markers'
+// lives there rather than being copied into each caller. groupTiffsByPatient is a
+// plain function, not a process/workflow, but Nextflow's `include` pulls in either.
+include { QUANTIFY_MARKERS; groupTiffsByPatient } from './quantify_markers'
 include { ASSEMBLE_EXPORT          } from './assemble_export'
 
 /*
@@ -155,7 +156,11 @@ workflow POSTPROCESSING {
     // csv/postprocessed.csv, half-published and invisible to any later --start
     // postprocessing or add_cycle run. These two groupings must keep identical
     // channels_count semantics even though their downstream failure modes differ.
-    ch_split_grouped = SPLIT_CHANNELS.out.channels
+    // The channels_count-sized groupKey + remainder:true grouping itself is
+    // groupTiffsByPatient (subworkflows/local/quantify_markers.nf), shared with
+    // add_cycle.nf's own version of this same grouping — see that function's doc
+    // comment for why an under-count here is worse than for the CSV-merge paths.
+    ch_split_tagged = SPLIT_CHANNELS.out.channels
         .flatMap { meta, tiffs ->
             // Normalize to List and create entries keyed by [patient_id, marker]
             // Carry channels_count for groupKey
@@ -165,25 +170,8 @@ workflow POSTPROCESSING {
             }
         }
         .unique { patient_id, _channels_count, marker, _tiff -> [patient_id, marker] }  // Keep first occurrence of each patient+marker
-        .map { patient_id, channels_count, _marker, tiff ->
-            // Use groupKey for streaming if channels_count is available
-            def gkey = channels_count
-                ? groupKey(patient_id, channels_count)
-                : patient_id
-            [gkey, tiff]
-        }
-        .groupTuple(by: 0, remainder: true)
-        .map { patient_id, tiffs ->
-            // Create patient-level metadata
-            // Extract actual patient_id from groupKey wrapper
-            def pid = patient_id.toString()
-            def patient_meta = [
-                id: pid,
-                patient_id: pid,
-                is_reference: false  // Not relevant at patient level
-            ]
-            [patient_meta, tiffs]
-        }
+        .map { patient_id, channels_count, _marker, tiff -> [patient_id, channels_count, tiff] }
+    ch_split_grouped = groupTiffsByPatient(ch_split_tagged)
 
     // EXPORT_GEOJSON tuple assembly + the embed_masks pyramid gate live in
     // ASSEMBLE_EXPORT, shared with add_cycle.nf.
