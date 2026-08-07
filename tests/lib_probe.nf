@@ -300,6 +300,63 @@ workflow {
     assert Layout.passthroughPath('/out', 'P002', publishedPassthrough) ==
         Layout.publishedOrAsIs('/out', 'P002', Layout.PREPROCESSED, publishedPassthrough)
 
+    // ------------------------------------------------------------------ //
+    // ParamUtils.compartmentMode / validateCompartmentQuant -- the
+    // --quantify_compartments seam (mirrors --registration_method's: resolved
+    // once, threaded down as an argument; see workflows/mirage.nf's
+    // `compartment_mode` and tests/test_compartment_mode_routing.py).
+    // ------------------------------------------------------------------ //
+
+    // 1. Plain field mapping, all three flags on.
+    def modeAllOn = ParamUtils.compartmentMode([
+        quantify_compartments: true, expanded_quantification: true, embed_masks: true,
+    ])
+    assert modeAllOn == [compartments: true, expanded: true, embedMasks: true]
+
+    // 2. All three off.
+    def modeAllOff = ParamUtils.compartmentMode([
+        quantify_compartments: false, expanded_quantification: false, embed_masks: false,
+    ])
+    assert modeAllOff == [compartments: false, expanded: false, embedMasks: false]
+
+    // 3. The map is immutable -- a caller cannot mutate the shared snapshot out
+    // from under another reader of the same resolved value.
+    try {
+        modeAllOn.compartments = false
+        assert false : "compartmentMode() map must be immutable"
+    } catch (UnsupportedOperationException ignored) {
+        // expected
+    }
+
+    // 4. validateCompartmentQuant: expanded requires compartments (pre-existing
+    // rule, now driven off the resolved map instead of two raw booleans).
+    ParamUtils.validateCompartmentQuant([compartments: true, expanded: true, embedMasks: false])   // ok
+    ParamUtils.validateCompartmentQuant([compartments: true, expanded: false, embedMasks: false])  // ok
+    try {
+        ParamUtils.validateCompartmentQuant([compartments: false, expanded: true, embedMasks: false])
+        assert false : "expanded=true, compartments=false must be rejected"
+    } catch (IllegalArgumentException ignored) {
+        // expected
+    }
+
+    // 5. validateCompartmentQuant: the delayed-cost gap this task closes --
+    // embedMasks requires BOTH compartments AND expanded. Each way to violate
+    // that must be rejected, not just the case where compartments is off.
+    ParamUtils.validateCompartmentQuant([compartments: true, expanded: true, embedMasks: true])    // ok
+    try {
+        ParamUtils.validateCompartmentQuant([compartments: false, expanded: false, embedMasks: true])
+        assert false : "embedMasks=true with compartments=false, expanded=false must be rejected"
+    } catch (IllegalArgumentException ignored) {
+        // expected -- this exact combination used to exit 0 and silently publish
+        // a pyramid with no mask series (assemble_export.nf's embed_masks gate).
+    }
+    try {
+        ParamUtils.validateCompartmentQuant([compartments: true, expanded: false, embedMasks: true])
+        assert false : "embedMasks=true with expanded=false must be rejected even when compartments=true"
+    } catch (IllegalArgumentException ignored) {
+        // expected
+    }
+
     // println, NOT log.info: nf-test's underlying `nextflow ... -quiet` run
     // suppresses log.info from stdout entirely (observed directly: a log.info
     // line here never appears in workflow.stdout under nf-test, even though the

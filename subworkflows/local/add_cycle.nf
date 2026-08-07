@@ -22,8 +22,8 @@
     (The distributed/tiled low-memory path was archived 2026-07-24; see git tag
     archive/tiled-valis-2026-07-24.)
 
-    Per-compartment (expanded) quantification is supported: when
-    params.quantify_compartments, the reused nuclei mask feeds QUANTIFY and
+    Per-compartment (expanded) quantification is supported: under
+    --quantify_compartments, the reused nuclei mask feeds QUANTIFY and
     EXTRACT_NUCLEI_PROPERTIES supplies nucleus contours for EXPORT_GEOJSON.
 ========================================================================================
 */
@@ -52,6 +52,13 @@ include { ASSEMBLE_EXPORT          } from './assemble_export'
 workflow ADD_CYCLE {
     take:
     ch_new_input     // [meta, raw_file]  (new cycle slides, is_reference=false)
+    compartment_mode // ParamUtils.compartmentMode(params) — resolved once by
+                     // workflows/mirage.nf and threaded down, the same seam
+                     // --registration_method has (this file passes 'valis' as a
+                     // LITERAL to REGISTER_PATIENT for exactly that reason — see
+                     // the REGISTER_PATIENT call below). Only `.compartments` is
+                     // read here directly; passed straight through to
+                     // ASSEMBLE_EXPORT.
 
     main:
     // ------------------------------------------------------------------ //
@@ -239,7 +246,7 @@ workflow ADD_CYCLE {
 
     // Nucleus contours (re-keyed to cell labels) — only when compartments enabled.
     ch_nucleus_contours = Channel.empty()
-    if (params.quantify_compartments) {
+    if (compartment_mode.compartments) {
         ch_nuclei_props_in = ch_prior_assets.map { pid, prior ->
             [[patient_id: pid, id: pid], prior.nuclei_mask, prior.cell_mask]
         }
@@ -293,7 +300,7 @@ workflow ADD_CYCLE {
     //    add_cycle mode (ParamUtils.validateAddCyclePhenotyping), so EXPORT_GEOJSON's
     //    arg guard is always off here and the legacy constant-"Cell" export is kept.
     // ------------------------------------------------------------------ //
-    ch_nuc_for_export = params.quantify_compartments ? ch_nucleus_contours : ch_contours
+    ch_nuc_for_export = compartment_mode.compartments ? ch_nucleus_contours : ch_contours
     // No PHENOTYPE stage here: both phenotype slots reuse the cell contours file.
     ch_pheno_extras = ch_contours.map { pid, contours -> [pid, contours, contours] }
 
@@ -400,7 +407,8 @@ workflow ADD_CYCLE {
         ch_nuc_for_export,
         ch_pheno_extras,
         ch_all_channels,
-        ch_masks
+        ch_masks,
+        compartment_mode
     )
 
     // ------------------------------------------------------------------ //
@@ -441,7 +449,7 @@ workflow ADD_CYCLE {
         ch_versions  = ch_versions.mix(ch_seg_qc_versions)
         ch_size_logs = ch_size_logs.mix(ch_seg_qc_size_log)
     }
-    if (params.quantify_compartments) {
+    if (compartment_mode.compartments) {
         ch_versions  = ch_versions.mix(EXTRACT_NUCLEI_PROPERTIES.out.versions.first())
         ch_size_logs = ch_size_logs.mix(EXTRACT_NUCLEI_PROPERTIES.out.size_log)
     }

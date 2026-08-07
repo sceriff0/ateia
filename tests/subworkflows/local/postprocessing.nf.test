@@ -10,11 +10,15 @@ nextflow_workflow {
     // POSTPROCESSING no longer runs SEGMENT / EXTRACT_CELL_PROPERTIES /
     // EXTRACT_NUCLEI_PROPERTIES itself (Task 1, arch-B-split: they moved to
     // subworkflows/local/segmentation.nf, its own resumable step). Its take:
-    // grew from 3 inputs (ch_registered, ch_reg_qc, ch_reg_residuals) to 8:
+    // grew from 3 inputs (ch_registered, ch_reg_qc, ch_reg_residuals) to 9:
     // ch_registered, ch_cell_mask, ch_nuclei_mask, ch_contours,
-    // ch_nucleus_contours, ch_morphology, ch_reg_qc, ch_reg_residuals. Every
-    // test below now feeds pre-made mask/contours/morphology fixtures for
-    // input[1..5] instead of relying on this workflow to derive them.
+    // ch_nucleus_contours, ch_morphology, ch_reg_qc, ch_reg_residuals,
+    // compartment_mode. Every test below now feeds pre-made mask/contours/
+    // morphology fixtures for input[1..5] instead of relying on this workflow
+    // to derive them, and input[8] = ParamUtils.compartmentMode(params) --
+    // Task 4's seam for --quantify_compartments / --expanded_quantification /
+    // --embed_masks, resolved once by workflows/mirage.nf in production and
+    // threaded down the same way here.
     //
     // UNVERIFIED LOCALLY: nf-test resolves -profile test,docker and hangs
     // under qemu on this host (see CLAUDE.md's "Verification reality"). Updated
@@ -72,6 +76,7 @@ nextflow_workflow {
                 input[7] = Channel.fromList([
                     [[patient_id: 'P001'], file('$projectDir/tests/testdata/sample_reg_residuals.csv')]
                 ])
+                input[8] = ParamUtils.compartmentMode(params)
                 """
             }
         }
@@ -135,6 +140,7 @@ nextflow_workflow {
                 // No REGISTRATION output in this session (--start postprocessing path).
                 input[6] = Channel.empty()
                 input[7] = Channel.empty()
+                input[8] = ParamUtils.compartmentMode(params)
                 """
             }
         }
@@ -188,6 +194,7 @@ nextflow_workflow {
                 ])
                 input[6] = Channel.empty()
                 input[7] = Channel.empty()
+                input[8] = ParamUtils.compartmentMode(params)
                 """
             }
         }
@@ -253,6 +260,7 @@ nextflow_workflow {
                 ])
                 input[6] = Channel.empty()
                 input[7] = Channel.empty()
+                input[8] = ParamUtils.compartmentMode(params)
                 """
             }
         }
@@ -306,6 +314,7 @@ nextflow_workflow {
                 ])
                 input[6] = Channel.empty()
                 input[7] = Channel.empty()
+                input[8] = ParamUtils.compartmentMode(params)
                 """
             }
         }
@@ -361,6 +370,7 @@ nextflow_workflow {
                 ])
                 input[6] = Channel.empty()
                 input[7] = Channel.empty()
+                input[8] = ParamUtils.compartmentMode(params)
                 """
             }
         }
@@ -415,6 +425,7 @@ nextflow_workflow {
                 ])
                 input[6] = Channel.empty()
                 input[7] = Channel.empty()
+                input[8] = ParamUtils.compartmentMode(params)
                 """
             }
         }

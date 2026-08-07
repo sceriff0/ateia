@@ -38,7 +38,7 @@ include { ASSEMBLE_EXPORT          } from './assemble_export'
         ch_nuclei_mask:      [meta, file] — from segmentation.nf
         ch_contours:         [patient_id, file] — from segmentation.nf
         ch_nucleus_contours: [patient_id, file] — from segmentation.nf;
-                              Channel.empty() when !params.quantify_compartments
+                              Channel.empty() when --quantify_compartments is false
         ch_morphology:       [meta, file] — from segmentation.nf
 
     Output:
@@ -60,6 +60,11 @@ workflow POSTPROCESSING {
     ch_morphology       // [meta, file] — segmentation.nf's EXTRACT_CELL_PROPERTIES.out.morphology
     ch_reg_qc           // Registration QC JSONs (may be empty)
     ch_reg_residuals    // Per-cell registration residual CSVs (may be empty)
+    compartment_mode    // ParamUtils.compartmentMode(params) — resolved once by
+                        // workflows/mirage.nf and threaded down, the same seam
+                        // --registration_method has. Passed straight through to
+                        // ASSEMBLE_EXPORT below; `.compartments` is also read here
+                        // directly for the nucleus-contour ternary.
 
     main:
 
@@ -105,7 +110,7 @@ workflow POSTPROCESSING {
     // ========================================================================
     // ch_contours arrives via take: (segmentation.nf's EXTRACT_CELL_PROPERTIES.out.contours,
     // already re-keyed to patient_id) — nothing to derive here any more.
-    ch_nuc_contours_for_export = params.quantify_compartments ? ch_nucleus_contours : ch_contours
+    ch_nuc_contours_for_export = compartment_mode.compartments ? ch_nucleus_contours : ch_contours
 
     def do_pheno = (params.panel_spec != null) || (params.panel_model != null)
     def ch_model_config = Channel.empty()
@@ -188,7 +193,8 @@ workflow POSTPROCESSING {
         ch_nuc_contours_for_export,
         ch_pheno_extras,
         ch_split_grouped,
-        ch_mask
+        ch_mask,
+        compartment_mode
     )
 
     // ========================================================================

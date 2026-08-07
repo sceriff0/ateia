@@ -64,6 +64,15 @@ workflow MIRAGE {
     boolean run_segmentation   = ParamUtils.shouldRun('segmentation', params.start, effective_stop)
     boolean run_postprocessing = ParamUtils.shouldRun('postprocessing', params.start, effective_stop)
 
+    // --quantify_compartments / --expanded_quantification / --embed_masks, resolved
+    // ONCE here (the single decision site on every path, standard and add_cycle
+    // alike) and threaded down as an argument -- the same seam
+    // --registration_method has in subworkflows/local/registration.nf. Nothing
+    // below this line should read params.quantify_compartments /
+    // params.expanded_quantification / params.embed_masks directly;
+    // tests/test_compartment_mode_routing.py enforces that.
+    def compartment_mode = ParamUtils.compartmentMode(params)
+
     /* -------------------- MODE: ADD_CYCLE -------------------- */
     if (params.mode == 'add_cycle') {
         // add_cycle has a FIXED path (no --start/--stop choice), so a caller who
@@ -73,7 +82,7 @@ workflow MIRAGE {
         // registration — an accuracy bug at the label's source, not the label.
         ParamUtils.validateAddCycleStepFlags(params)
         ParamUtils.validateAddCycle(params.outdir, params.prior_outdir)
-        ParamUtils.validateCompartmentQuant(params.quantify_compartments, params.expanded_quantification)
+        ParamUtils.validateCompartmentQuant(compartment_mode)
         ParamUtils.validateAddCyclePhenotyping(params)  // add_cycle has no PHENOTYPE stage
         // add_cycle re-registers the new cycle via the classic VALIS_ADAPTER only; the
         // STARE 'tiled' backend is not wired into the incremental path — reject it loudly
@@ -115,7 +124,7 @@ workflow MIRAGE {
 
         // ADD_CYCLE rebuilds the prior run's reusable assets itself, from
         // --prior_outdir's checkpoint CSVs.
-        ADD_CYCLE(INPUT_CHECK.out.samples)
+        ADD_CYCLE(INPUT_CHECK.out.samples, compartment_mode)
 
         // ADD_CYCLE has no preprocess_qc / registration_tre / postprocess_qc of its own
         // (it calls PREPROCESSING internally without re-exposing its QC pngs, and has no
@@ -145,7 +154,7 @@ workflow MIRAGE {
     }
 
     if (run_postprocessing) {
-        ParamUtils.validateCompartmentQuant(params.quantify_compartments, params.expanded_quantification)
+        ParamUtils.validateCompartmentQuant(compartment_mode)
     }
 
     if (!params.input) {
@@ -209,7 +218,8 @@ workflow MIRAGE {
         SEGMENTATION(
             ParamUtils.isEntryPoint(params, 'segmentation')
                 ? INPUT_CHECK.out.samples
-                : REGISTRATION.out.registered  // Direct channel - enables patient-level parallelism!
+                : REGISTRATION.out.registered,  // Direct channel - enables patient-level parallelism!
+            compartment_mode
         )
     }
 
@@ -250,7 +260,7 @@ workflow MIRAGE {
             // columns beyond a single image path. READ_SEGMENTED_CHECKPOINT
             // (subworkflows/local/segmentation.nf) is the dedicated reader —
             // mirrors add_cycle.nf's own splitCsv checkpoint readers.
-            READ_SEGMENTED_CHECKPOINT(params.input)
+            READ_SEGMENTED_CHECKPOINT(params.input, compartment_mode)
             ch_for_postprocessing       = READ_SEGMENTED_CHECKPOINT.out.samples
             ch_cell_mask_for_post       = READ_SEGMENTED_CHECKPOINT.out.cell_mask
             ch_nuclei_mask_for_post     = READ_SEGMENTED_CHECKPOINT.out.nuclei_mask
@@ -280,7 +290,8 @@ workflow MIRAGE {
             ch_nucleus_contours_for_post,
             ch_morphology_for_post,
             ch_reg_qc_for_post,
-            ch_reg_residuals_for_post
+            ch_reg_residuals_for_post,
+            compartment_mode
         )
     }
 

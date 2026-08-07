@@ -2,6 +2,16 @@
  * ASSEMBLE_EXPORT — EXPORT_GEOJSON's six-slot input tuple plus the embed_masks pyramid
  * gate, shared by POSTPROCESSING and ADD_CYCLE (which carried verbatim copies of both).
  *
+ * UNVERIFIED LOCALLY (see CLAUDE.md's "Verification reality" -- nf-test hangs under
+ * qemu on this host): take: gained a 7th input, compartment_mode
+ * (ParamUtils.compartmentMode(params)) -- Task 4 (arch-B-split)'s seam for
+ * --quantify_compartments / --expanded_quantification / --embed_masks, replacing this
+ * workflow's own former `params.embed_masks && params.quantify_compartments &&
+ * params.expanded_quantification` raw read. Every test below sets
+ * input[6] = ParamUtils.compartmentMode(params), which resolves off the SAME params{}
+ * block each test already declares, so the embed_masks/quantify_compartments/
+ * expanded_quantification values under test are unchanged.
+ *
  * What can and cannot be asserted here:
  *   - The gate itself is observable: when embed_masks is OFF the mask channel must never
  *     be joined, so an EMPTY mask channel still has to produce a pyramid. If the gate
@@ -61,6 +71,7 @@ nextflow_workflow {
                 ])
                 // embed_masks is off, so this channel must never be consumed.
                 input[5] = Channel.empty()
+                input[6] = ParamUtils.compartmentMode(params)
                 """
             }
         }
@@ -124,6 +135,7 @@ nextflow_workflow {
                     ['P002', file('$projectDir/tests/testdata/P002_cell_mask.tif',   checkIfExists: true),
                              file('$projectDir/tests/testdata/P001_nuclei_mask.tif', checkIfExists: true)]
                 ])
+                input[6] = ParamUtils.compartmentMode(params)
                 """
             }
         }
@@ -169,6 +181,7 @@ nextflow_workflow {
                 // Nothing on the mask channel at all. An unconditional join here would
                 // empty the pyramid output entirely.
                 input[5] = Channel.empty()
+                input[6] = ParamUtils.compartmentMode(params)
                 """
             }
         }
@@ -211,6 +224,7 @@ nextflow_workflow {
                                        [file('$projectDir/tests/testdata/sample_DAPI.tif',  checkIfExists: true),
                                         file('$projectDir/tests/testdata/sample_PANCK.tif', checkIfExists: true)]])
                 input[5] = Channel.empty()
+                input[6] = ParamUtils.compartmentMode(params)
                 """
             }
         }

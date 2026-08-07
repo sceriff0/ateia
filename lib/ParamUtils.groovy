@@ -211,10 +211,61 @@ class ParamUtils {
         }
     }
 
-    static void validateCompartmentQuant(boolean quantifyCompartments, boolean expanded) {
-        if (expanded && !quantifyCompartments) {
+    /**
+     * Resolve --quantify_compartments / --expanded_quantification / --embed_masks
+     * into ONE immutable snapshot, the same seam --registration_method has
+     * (subworkflows/local/registration.nf: read once, threaded down as an
+     * argument, never re-read). Call this once per top-level entry point
+     * (workflows/mirage.nf; subworkflows/local/segmentation.nf's two workflows,
+     * which are invoked directly from mirage.nf on their own path) and pass the
+     * returned map down to any subworkflow that used to re-derive these booleans
+     * itself (postprocess.nf, add_cycle.nf, assemble_export.nf). Config
+     * (`conf/modules.config`'s `ext.args`) and module `script:`/`stub:` blocks
+     * (e.g. modules/local/quantify.nf) are explicitly out of scope: config cannot
+     * take arguments or see this class, and a module reading its own param to
+     * build its own flags is this repo's established pattern for both.
+     * tests/test_compartment_mode_routing.py enforces that nothing else reads
+     * the three raw params directly.
+     */
+    static Map compartmentMode(Map params) {
+        return [
+            compartments: params.quantify_compartments as boolean,
+            expanded    : params.expanded_quantification as boolean,
+            embedMasks  : params.embed_masks as boolean,
+        ].asImmutable()
+    }
+
+    /**
+     * Cross-parameter rules for the compartment-quantification trio, both derived
+     * from `mode` (see compartmentMode above) rather than read raw:
+     *
+     *   expanded ⇒ compartments      (long-standing: per-compartment Mean/Sum
+     *                                 needs a per-compartment signal to sum)
+     *   embedMasks ⇒ compartments && expanded
+     *                                 (assemble_export.nf's embed_masks gate --
+     *                                 `params.embed_masks && params.quantify_compartments
+     *                                 && params.expanded_quantification` -- decides
+     *                                 whether the pyramid gets a mask series (Image:1).
+     *                                 --embed_masks true with either sibling off used to
+     *                                 exit 0 and silently publish a pyramid with NO mask
+     *                                 series; that run only fails months later, when its
+     *                                 --outdir is handed to a --prior_outdir add_cycle run
+     *                                 and EXTRACT_MASK_SERIES finds no Image:1.)
+     */
+    static void validateCompartmentQuant(Map mode) {
+        if (mode.expanded && !mode.compartments) {
             throw new IllegalArgumentException(
                 "--expanded_quantification requires --quantify_compartments to be true."
+            )
+        }
+        if (mode.embedMasks && !(mode.compartments && mode.expanded)) {
+            throw new IllegalArgumentException(
+                "--embed_masks requires both --quantify_compartments and " +
+                "--expanded_quantification to be true -- without both, the pyramid's " +
+                "mask series (Image:1) is never written, and a run advertising " +
+                "--embed_masks that silently omits it is only discovered later, when " +
+                "this --outdir is handed to mode='add_cycle' as --prior_outdir and " +
+                "EXTRACT_MASK_SERIES finds no Image:1 to reuse."
             )
         }
     }

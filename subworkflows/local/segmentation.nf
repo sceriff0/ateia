@@ -19,7 +19,7 @@
         nuclei_mask      [meta, file]         — SEGMENT.out.nuclei_mask, unchanged
         contours         [patient_id, file]   — EXTRACT_CELL_PROPERTIES.out.contours, re-keyed
         nucleus_contours [patient_id, file]   — EXTRACT_NUCLEI_PROPERTIES.out.contours, re-keyed;
-                                                 Channel.empty() when !params.quantify_compartments
+                                                 Channel.empty() when --quantify_compartments is false
         checkpoint_csv                        — csv/segmented.csv
         size_logs, versions                   — SEGMENT + EXTRACT_CELL_PROPERTIES (+
                                                  EXTRACT_NUCLEI_PROPERTIES when compartments run)
@@ -39,6 +39,9 @@ include { EXTRACT_NUCLEI_PROPERTIES } from '../../modules/local/extract_nuclei_p
 workflow SEGMENTATION {
     take:
     ch_registered       // [meta, file] — all slides (reference + moving)
+    compartment_mode    // ParamUtils.compartmentMode(params) — resolved once by
+                        // workflows/mirage.nf and threaded down; see that file's
+                        // comment on the seam. Only `.compartments` is read here.
 
     main:
 
@@ -72,7 +75,7 @@ workflow SEGMENTATION {
     // only consumes it when quantify_compartments is set, but an unassigned
     // `def` is a fragile null to leave in a channel expression).
     def ch_nucleus_contours = Channel.empty()
-    if (params.quantify_compartments) {
+    if (compartment_mode.compartments) {
         ch_nuclei_props_in = ch_nuclei_mask
             .map { meta, mask -> [meta.patient_id, meta, mask] }
             .join(ch_cell_mask.map { meta, mask -> [meta.patient_id, mask] }, by: 0)
@@ -146,7 +149,7 @@ workflow SEGMENTATION {
     // recording an empty field — subworkflows/local/seg_qc.nf:96-101 solves exactly
     // this shape (join(..., remainder: true) against a per-key placeholder, so a
     // missing optional value becomes '' rather than an absent row) and is copied here.
-    ch_nucleus_contours_value = params.quantify_compartments
+    ch_nucleus_contours_value = compartment_mode.compartments
         ? ch_nucleus_contours.map { pid, j -> [pid, Layout.publishedPath(params.outdir, pid, 'cell_properties', j)] }
         : Channel.empty()
 
@@ -185,14 +188,14 @@ workflow SEGMENTATION {
     ch_size_logs = Channel.empty()
         .mix(SEGMENT.out.size_log)
         .mix(EXTRACT_CELL_PROPERTIES.out.size_log)
-    if (params.quantify_compartments) {
+    if (compartment_mode.compartments) {
         ch_size_logs = ch_size_logs.mix(EXTRACT_NUCLEI_PROPERTIES.out.size_log)
     }
 
     ch_versions = Channel.empty()
         .mix(SEGMENT.out.versions.first())
         .mix(EXTRACT_CELL_PROPERTIES.out.versions.first())
-    if (params.quantify_compartments) {
+    if (compartment_mode.compartments) {
         ch_versions = ch_versions.mix(EXTRACT_NUCLEI_PROPERTIES.out.versions.first())
     }
 
@@ -255,7 +258,7 @@ workflow SEGMENTATION {
         contours         [patient_id, file]  — re-derived from cell_mask
         nucleus_contours [patient_id, file]  — re-derived from nuclei_mask;
                                                 Channel.empty() when
-                                                !params.quantify_compartments
+                                                --quantify_compartments is false
         morphology       [meta, file]        — re-derived from cell_mask
         size_logs, versions                  — of the re-run EXTRACT_CELL_PROPERTIES
                                                 (+ EXTRACT_NUCLEI_PROPERTIES when
@@ -269,6 +272,8 @@ workflow SEGMENTATION {
 workflow READ_SEGMENTED_CHECKPOINT {
     take:
     csv_path
+    compartment_mode    // ParamUtils.compartmentMode(params) -- see SEGMENTATION's
+                        // take: comment above; only `.compartments` is read here.
 
     main:
     // Columns come from lib/Checkpoint.groovy, the writer's owner: this reader
@@ -322,7 +327,7 @@ workflow READ_SEGMENTED_CHECKPOINT {
     // Nucleus contours: only under --quantify_compartments, same gate as
     // SEGMENTATION's live-run block above (and add_cycle.nf:233-239).
     ch_nucleus_contours = Channel.empty()
-    if (params.quantify_compartments) {
+    if (compartment_mode.compartments) {
         ch_nuclei_props_in = ch_nuclei_mask
             .map { meta, mask -> [meta.patient_id, meta, mask] }
             .join(ch_cell_mask.map { meta, mask -> [meta.patient_id, mask] }, by: 0)
