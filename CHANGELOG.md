@@ -20,9 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   note) — `nuclei_mask` is always populated, since `SEGMENT` always produces it and
   `postprocess.nf`'s mask join depends on that being true unconditionally. The
   checkpoint schema stays fixed across that param setting either way.
-  `--start postprocessing`'s samplesheet must now additionally carry a `cell_mask`
-  column (`ParamUtils.STEPS`'s `postprocessing` entry), so a plain `registered.csv`
-  fails validation loudly instead of dying deep inside `segmentation.nf`.
+  `--start postprocessing`'s samplesheet must now additionally carry `cell_mask` and
+  `nuclei_mask` columns (`ParamUtils.STEPS`'s `postprocessing` entry — both are
+  dereferenced unconditionally by `segmentation.nf`'s `READ_SEGMENTED_CHECKPOINT`),
+  so a plain `registered.csv` fails validation loudly instead of dying deep inside
+  `segmentation.nf` with "Argument of `file` function cannot be null".
   **Published-output change:** `csv/segmented.csv` is a new published file, one row
   per registered slide. `csv/preprocessed.csv`, `csv/registered.csv` and
   `csv/postprocessed.csv` are byte-identical to before this change. At
@@ -156,19 +158,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   run, on the default path (`--skip_final_qc_report=false` and `--enable_trace=true`,
   both shipped defaults), if any declared artifact kind has no consumer — previously
   such a kind was silently dropped.
-- **`--mode add_cycle` now respects `--start`/`--stop`.** It used to validate its own
-  prerequisites and return before the linear step gate ever ran, so a contradictory
-  pair like `--start postprocessing --stop preprocessing` reported "validations
-  passed" under `--dry_run` instead of the hard error the standard path always gave
-  for the same pair. `ParamUtils.validateStop` and the `shouldRun` gate computation
-  now run once, before the `params.mode == 'add_cycle'` branch, so both paths share
-  them (`add_cycle` still ignores the resulting `run_*` booleans — it has its own
-  fixed recompute-registration-and-quantification flow — but it can no longer bypass
-  the ordering check). **Also fixed:** `add_cycle`'s `FINAL_QC` call used to pass the
-  literal string `'add_cycle'` as the run summary's `stop` label — not a member of
-  `ParamUtils.STEP_ORDER`, so any future consumer indexing it would get `-1`. It now
-  passes the real effective stop (`params.stop ?: ParamUtils.STEP_ORDER.last()`),
-  matching the standard path.
+- **`--mode add_cycle` now rejects `--start`/`--stop` outright, instead of accepting
+  and silently ignoring them**, matching `docs/add_cycle.md`. It used to validate its
+  own prerequisites and return before the linear step gate ever ran, so a
+  contradictory pair like `--start postprocessing --stop preprocessing` reported
+  "validations passed" under `--dry_run` instead of the hard error the standard path
+  always gave for the same pair — and a value like `--stop registration` ran the
+  ENTIRE fixed path through export while `run_summary.json`'s `stop` label claimed
+  the run had stopped after registration. `ParamUtils.validateStop` and the
+  `shouldRun` gate computation now run once, before the `params.mode == 'add_cycle'`
+  branch, so both paths share the ordering check; `add_cycle` itself then calls the
+  new `ParamUtils.validateAddCycleStepFlags`, which throws unless `--stop` is left
+  unset and `--start` is left at its default `preprocessing`.
+  **Behaviour change: a launch that used to succeed with a non-default `--start`/
+  `--stop` under `--mode add_cycle` now fails fast instead.** `add_cycle` runs a
+  FIXED path (new-cycle samplesheet -> preprocess -> register against the frozen
+  prior reference -> quantify -> export) — there is no `--start`/`--stop` choice to
+  make. **To recover:** omit both flags. **Also fixed:** `add_cycle`'s `FINAL_QC`
+  call used to pass the literal string `'add_cycle'` as the run summary's `stop`
+  label — not a member of `ParamUtils.STEP_ORDER`, so any future consumer indexing
+  it would get `-1`. It now unconditionally passes `ParamUtils.STEP_ORDER.last()`
+  (`'postprocessing'`), not `effective_stop` — the rejection above guarantees the
+  fixed path always runs through export, so that is the only honest label.
 - **`add_cycle.nf`'s pyramid-channel grouping now carries the same
   `groupKey(patient_id, channels_count)` + `remainder: true` streaming hint as
   `postprocess.nf`'s.** It had drifted to a bare `.groupTuple()` with no size hint at

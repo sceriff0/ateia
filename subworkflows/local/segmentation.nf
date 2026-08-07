@@ -221,7 +221,7 @@ workflow SEGMENTATION {
     WORKFLOW: READ_SEGMENTED_CHECKPOINT
 ========================================================================================
     The `--start postprocessing` reader for csv/segmented.csv. Follows
-    subworkflows/local/add_cycle.nf:77-95's precedent exactly: read the checkpoint
+    subworkflows/local/add_cycle.nf:87-105's precedent exactly: read the checkpoint
     with splitCsv(header: true), fail loudly if the columns this reader indexes have
     drifted from what Checkpoint declares, and never restate the schema by hand.
 
@@ -236,7 +236,7 @@ workflow SEGMENTATION {
     complete manifest), but this reader does not read those two columns back: it
     re-runs EXTRACT_CELL_PROPERTIES (and, under --quantify_compartments,
     EXTRACT_NUCLEI_PROPERTIES) on the checkpoint's masks instead, exactly as
-    subworkflows/local/add_cycle.nf:225-239 already does when it reuses a prior run's
+    subworkflows/local/add_cycle.nf:241-255 already does when it reuses a prior run's
     cell/nuclei masks. Two reasons: (1) morphology.csv is NOT a checkpoint column at
     all (see lib/Checkpoint.groovy's 'segmented' entry) — it is a same-run-only
     intermediate POSTPROCESSING needs for its quantification/phenotyping joins, so it
@@ -325,7 +325,7 @@ workflow READ_SEGMENTED_CHECKPOINT {
     ch_versions  = Channel.empty().mix(EXTRACT_CELL_PROPERTIES.out.versions.first())
 
     // Nucleus contours: only under --quantify_compartments, same gate as
-    // SEGMENTATION's live-run block above (and add_cycle.nf:233-239).
+    // SEGMENTATION's live-run block above (and add_cycle.nf:247-255).
     ch_nucleus_contours = Channel.empty()
     if (compartment_mode.compartments) {
         ch_nuclei_props_in = ch_nuclei_mask

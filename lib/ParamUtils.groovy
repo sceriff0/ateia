@@ -60,15 +60,16 @@ class ParamUtils {
         ],
         [
             name           : 'postprocessing',
-            // 'cell_mask' (beyond the registered-image base four) makes a plain
-            // csv/registered.csv -- still what every doc's `--start postprocessing`
+            // 'cell_mask' and 'nuclei_mask' (beyond the registered-image base four) make
+            // a plain csv/registered.csv -- still what every doc's `--start postprocessing`
             // example names, pre-dating the segmentation step -- fail HERE with a
-            // clear "Missing required column" error. Without it, CsvUtils.validateInputCSV
+            // clear "Missing required column" error. Without them, CsvUtils.validateInputCSV
             // and validateInputSemantics both pass (registered.csv satisfies the base
             // four), and the run dies much later inside segmentation.nf's
-            // READ_SEGMENTED_CHECKPOINT with "Argument of 'file' function cannot be
+            // READ_SEGMENTED_CHECKPOINT -- which dereferences BOTH file(row.cell_mask) and
+            // file(row.nuclei_mask) unconditionally -- with "Argument of 'file' function cannot be
             // null" -- a two-layer validation contract that silently skipped its job.
-            requiredColumns: ['patient_id', 'registered_image', 'is_reference', 'channels', 'cell_mask'],
+            requiredColumns: ['patient_id', 'registered_image', 'is_reference', 'channels', 'cell_mask', 'nuclei_mask'],
             entryColumn    : 'registered_image',
             qcKinds        : ['postprocess_qc'],
         ],
@@ -216,10 +217,12 @@ class ParamUtils {
      * into ONE immutable snapshot, the same seam --registration_method has
      * (subworkflows/local/registration.nf: read once, threaded down as an
      * argument, never re-read). Call this once per top-level entry point
-     * (workflows/mirage.nf; subworkflows/local/segmentation.nf's two workflows,
-     * which are invoked directly from mirage.nf on their own path) and pass the
-     * returned map down to any subworkflow that used to re-derive these booleans
-     * itself (postprocess.nf, add_cycle.nf, assemble_export.nf). Config
+     * (workflows/mirage.nf) and pass the returned map down to any subworkflow
+     * that takes it as a `take:` argument or used to re-derive these booleans
+     * itself (subworkflows/local/segmentation.nf's two workflows — SEGMENTATION
+     * (`take:`, segmentation.nf:42) and READ_SEGMENTED_CHECKPOINT (`take:`,
+     * segmentation.nf:275) — plus postprocess.nf, add_cycle.nf,
+     * assemble_export.nf). Config
      * (`conf/modules.config`'s `ext.args`) and module `script:`/`stub:` blocks
      * (e.g. modules/local/quantify.nf) are explicitly out of scope: config cannot
      * take arguments or see this class, and a module reading its own param to

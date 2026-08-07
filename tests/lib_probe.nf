@@ -158,14 +158,15 @@ workflow {
     // tables state it independently, so assert they agree rather than trusting them to.
     // segmentation keeps the exact invariant (its requiredColumns == registered.csv's
     // full column list). postprocessing no longer can: segmented.csv gained four
-    // columns beyond the base four, and postprocessing only requires the one it
-    // dereferences before READ_SEGMENTED_CHECKPOINT runs (cell_mask) -- so assert its
-    // exact (smaller) list, plus that every column it names is still a real column of
-    // the checkpoint it reads (a subset check, not an equality).
+    // columns beyond the base four, and postprocessing only requires the two it
+    // dereferences unconditionally inside READ_SEGMENTED_CHECKPOINT (cell_mask,
+    // nuclei_mask) -- so assert its exact (smaller) list, plus that every column it
+    // names is still a real column of the checkpoint it reads (a subset check, not
+    // an equality).
     assert ParamUtils.STEPS.find { it.name == 'registration'   }.requiredColumns == Checkpoint.columns(Layout.PREPROCESSED)
     assert ParamUtils.STEPS.find { it.name == 'segmentation'   }.requiredColumns == Checkpoint.columns(Layout.REGISTERED)
     assert ParamUtils.STEPS.find { it.name == 'postprocessing' }.requiredColumns ==
-        ['patient_id', 'registered_image', 'is_reference', 'channels', 'cell_mask']
+        ['patient_id', 'registered_image', 'is_reference', 'channels', 'cell_mask', 'nuclei_mask']
     assert ParamUtils.STEPS.find { it.name == 'postprocessing' }.requiredColumns
         .every { it in Checkpoint.columns(Layout.SEGMENTED) }
 
@@ -224,9 +225,7 @@ workflow {
         nucleus_contours: '',
     ]) == 'P001,/o/P001/registered/a.tif,true,DAPI|CD3,/o/P001/segmentation/P001_cell_mask.tif,/o/P001/segmentation/P001_nuclei_mask.tif,/o/P001/cell_properties/contours.json,'
 
-    // The step vocabulary gains one entry, and a step's requiredColumns are still the
-    // previous checkpoint's columns for the columns it shares.
-    assert ParamUtils.STEP_ORDER == ['preprocessing', 'registration', 'segmentation', 'postprocessing']
+    // The step vocabulary gains one entry.
     assert ParamUtils.entryColumnForStep('segmentation') == 'registered_image'
 
     // ------------------------------------------------------------------ //

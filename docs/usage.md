@@ -153,7 +153,7 @@ different kind of image:
 | `preprocessing` | `path_to_file` | `patient_id`, `is_reference`, `channels` | your raw samplesheet |
 | `registration` | `preprocessed_image` | `patient_id`, `is_reference`, `channels` | `<outdir>/csv/preprocessed.csv` |
 | `segmentation` | `registered_image` | `patient_id`, `is_reference`, `channels` | `<outdir>/csv/registered.csv` |
-| `postprocessing` | `registered_image` | `patient_id`, `is_reference`, `channels`, `cell_mask` | `<outdir>/csv/segmented.csv` |
+| `postprocessing` | `registered_image` | `patient_id`, `is_reference`, `channels`, `cell_mask`, `nuclei_mask` | `<outdir>/csv/segmented.csv` |
 
 Example raw samplesheet (`--start preprocessing`):
 
@@ -400,9 +400,9 @@ These open directly in QuPath, napari, and OMERO, and feed
     `--start registration`. Each stage needs its own column (`path_to_file` →
     `preprocessed_image` → `registered_image`; `registration` and `segmentation`
     both key on `registered_image`, and `--start postprocessing` additionally
-    requires `cell_mask`, since `segmented.csv` carries the segmentation masks
-    alongside the image path). Feed the checkpoint CSV that matches the stage
-    you're resuming.
+    requires `cell_mask` and `nuclei_mask`, since `segmented.csv` carries the
+    segmentation masks alongside the image path). Feed the checkpoint CSV that
+    matches the stage you're resuming.
 
 ??? failure "Out-of-memory / exit code 137 or 140"
     Almost always the job exceeded its memory/time grant. Raise `--max_memory`,

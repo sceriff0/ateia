@@ -20,6 +20,11 @@ nextflow_workflow {
     // --embed_masks, resolved once by workflows/mirage.nf in production and
     // threaded down the same way here.
     //
+    // input[8] stays a live ParamUtils.compartmentMode(params) call rather than a
+    // literal map on purpose: none of the 7 tests below overrides
+    // --quantify_compartments / --expanded_quantification / --embed_masks, so there
+    // is no "off" case here that a literal map would exercise any differently.
+    //
     // UNVERIFIED LOCALLY: nf-test resolves -profile test,docker and hangs
     // under qemu on this host (see CLAUDE.md's "Verification reality"). Updated
     // to match the new interface but not run.

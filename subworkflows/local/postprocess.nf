@@ -42,10 +42,11 @@ include { ASSEMBLE_EXPORT          } from './assemble_export'
         ch_morphology:       [meta, file] — from segmentation.nf
 
     Output:
-        geojson: QuPath-compatible GeoJSON with cell detections and raw measurements
-        cell_csv: Cell data CSV with raw intensities and z-scores
-        merged_csv: Merged quantification CSV
-        cell_mask: Cell segmentation mask
+        checkpoint_csv: file — the collected 'postprocessed' checkpoint (see
+                        Layout.POSTPROCESSED / Checkpoint.columns), one row per patient
+        postprocess_qc: GENERATE_POSTPROCESSING_QC's per-patient QC artifacts
+        size_logs:      input size-log CSVs from this step's processes
+        versions:       versions.yml from this step's processes
 ========================================================================================
 */
 
