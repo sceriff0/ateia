@@ -158,8 +158,8 @@ class Layout {
     /**
      * `<outdir>/<patient_id>/<kind>` - the per-patient publish root.
      *
-     * `kind` is the leaf conf/modules.config publishes into: 'preprocessed',
-     * 'registered', 'segmentation', 'quantification', 'geojson', 'pyramid', ...
+     * `kind` is the leaf conf/modules.config publishes into — one of the closed set in
+     * PUBLISHED_KINDS above (enforced by requireKind() below), not an open-ended list.
      */
     static String patientDir(def outdir, def patientId, String kind) {
         requireKind(kind)

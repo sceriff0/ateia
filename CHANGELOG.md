@@ -66,6 +66,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (micro-registration can add ~30–120 min per registration).
 - **`--seg_method` with an unrecognised value now fails fast** instead of silently running
   StarDist.
+- **`params/full_pipeline.json` now sets `"seg_method": "stardist"`.** The file already set
+  `segmentation_model`, `segmentation_model_dir`, `seg_n_tiles_x`, `seg_n_tiles_y`, `seg_pmin`
+  and `seg_pmax` — all StarDist-only flags — but `nextflow.config` defaults `seg_method` to
+  `instantseg`, so a run launched with `-params-file params/full_pipeline.json` silently
+  discarded all six values and segmented with InstanSeg instead. Launching from this preset
+  now runs StarDist: a different backend, container, and set of `versions.yml`/mask outputs
+  than before this fix. Anyone relying on the file's prior (InstanSeg) behaviour must now pass
+  `--seg_method instantseg` explicitly.
 - **`<outdir>/size_logs/versions.yml`'s single key changed** to
   `MIRAGE:FINAL_QC:AGGREGATE_SIZE_LOGS` (diagnostic string only; no functional effect).
 - **`SPLIT_CHANNELS` and `QUANTIFY` now publish per patient.**
@@ -79,6 +87,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   overwrote the first** on every multi-patient run. Nothing in the pipeline reads the
   published copies, so the run stayed green and the loss was invisible. No checkpoint
   CSV column, no other published path, and no GeoJSON measurement key changes.
+- **`add_cycle`-only: `SPLIT_PRIOR_PYRAMID` now publishes to its own leaf.**
+  **Published-output change:** `<outdir>/<patient_id>/split_channels/prior/<marker>.tiff`
+  is new; nothing at `<outdir>/<patient_id>/split_channels/<marker>.tiff` moves.
+  `subworkflows/local/add_cycle.nf` includes `SPLIT_CHANNELS` a second time as
+  `SPLIT_PRIOR_PYRAMID` (re-splitting the prior run's pyramid so its channels can be
+  deduped against the new cycle's). Nextflow's `withName:` selector matches an alias
+  against both its own name and the process' original declared name, so
+  `withName: 'SPLIT_CHANNELS'` was routing **both** invocations to the same
+  `<pid>/split_channels/` directory — whichever finished last silently overwrote the
+  other's file for any marker name the two shared. This is a **published-artifact**
+  collision only: the in-memory channel deduplication `add_cycle.nf` already does
+  before building the pyramid (new-cycle channel wins, `DAPI` always protected — see
+  `docs/add_cycle.md`'s Marker collisions section) reads each task's staged output
+  directly and was never affected. Pre-existing since `add_cycle.nf:40` first aliased
+  the include; not introduced by this branch.
 - **`EXTRACT_MASK_SERIES` (the `--mode add_cycle` mask-reuse step) now publishes per
   patient too.** **Published-output change:** `<outdir>/extract_mask_series/cell_mask.tif`
   and `.../nuclei_mask.tif` move to `<outdir>/<patient_id>/segmentation/`. This process
@@ -102,6 +125,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `*_tre.json` whose `"tiles"` records (see `bin/utils/tre_report.py`) carry the same
   per-tile diagnostic information forward. Both got an explicit
   `publishDir = [ enabled: false ]` so this is a declared decision, not a silent gap.
+- **Every module's `versions.yml` (`script:` and `stub:`) now renders from one tool list**
+  (`lib/ProcessEnvelope.groovy`) instead of two hand-written, independently-maintained
+  heredocs. Touches 26 of 27 `modules/local/*.nf` files (`segment.nf` is the one documented
+  exception — see its `ProcessEnvelope` comment). No published `versions.yml` content
+  changes on a stub run; on a **real** run, the same two modules — `extract_mask_series.nf`
+  and `merge_and_pyramid.nf` — pick up two deltas each: they now probe `python` instead of
+  `python3` for their version rows (both run on an image where `python` exists; `python3`
+  was inconsistent authoring, not a deliberate choice), and their probes now fail soft
+  (`|| echo "unknown"`) instead of erroring the task if a tool's import fails — a fallback
+  their hand-written `python3` heredocs never had.
 - **`WARP_SEG_QC_TILED` is merged into `WARP_SEG_QC`.** One process now serves both
   registration backends, with container, flags, stage list, version rows and stub extras
   coming from `lib/WarpBackends.groovy` — the same shape `SEGMENT` already uses for its

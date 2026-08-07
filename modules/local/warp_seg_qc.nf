@@ -51,7 +51,14 @@ process WARP_SEG_QC {
     // the tiled backend's flags closure, but harmless to compute either way.
     def ctx = [meta: meta, ref_slide: ref_slide, moving_slide: moving_slide,
                stage_checkpoint: stage_checkpoint, micro_reg: ParamUtils.microRegLevel(params)]
-    def backend_flags = backend.flags(ctx).collect { "        ${it} \\" }.join('\n')
+    // `?: ['']` guards against a future backend whose `flags` closure returns `[]`: with
+    // no fallback, `backend_flags` would be the empty string and the interpolation below
+    // (column 0, right after a line ending in `\`) would land a BLANK line between two
+    // backslash-continued lines, ending the shell command early and letting `${args}`
+    // execute as its own separate command. A single empty-string flag renders as a
+    // harmless whitespace-only continuation line instead. Not reachable today — both
+    // backends emit at least one flag.
+    def backend_flags = (backend.flags(ctx) ?: ['']).collect { "        ${it} \\" }.join('\n')
     """
     echo "${task.process},${meta.patient_id},${moving_geojson.name},0" > ${prefix}.WARP_SEG_QC.size.csv
 

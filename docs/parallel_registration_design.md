@@ -298,6 +298,12 @@ dedicated lean `withName:'TILED_*'` overrides (2–8 GB) or pair with a memory-c
   `subworkflows/local/seg_qc.nf` (called from `registration.nf`) feed it one manifest per moving
   slide. **Stub run green at reg_qc=2** — emits the `native/rigid/refined`
   `_seg_qc.json`. Unit-tested through the real CLI `main()`.
+  (Historical: this status entry describes the state as of `feat/tiled-registration`.
+  `WARP_SEG_QC_TILED` was later merged into `WARP_SEG_QC`, dispatching on the `method`
+  input via `lib/WarpBackends.groovy` — Task 3 of arch-group-c-config, 2026-08-07 — so
+  the process name above no longer exists; the dispatch behavior it describes still
+  does. See `containers/README.md` and `containers/tiled/Dockerfile` for the
+  already-updated references.)
 - **Slim container (done):** `containers/tiled/` (`python:3.11-slim` + numpy/scipy/scikit-image/
   tifffile, no JVM/libvips/GPU). **Built and verified locally** — the CLIs import and run
   in-container; **~438 MB** vs the multi-GB VALIS image. Added to the `build-images.yml` matrix.

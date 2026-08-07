@@ -1,11 +1,12 @@
 /*
 ========================================================================================
-    ProcessEnvelope — the versions.yml and size-log boilerplate, rendered once
+    ProcessEnvelope — the versions.yml boilerplate, rendered once
 ========================================================================================
-    Every process in modules/local/ ends its script: block with a versions.yml heredoc
-    and (usually) begins it with a size-log line. Both were written out by hand in every
-    module, and the versions heredoc was written TWICE per module — once in script:, once
-    in stub: with every value replaced by the literal `stub`.
+    Every process in modules/local/ ends its script: block with a versions.yml heredoc.
+    (Most also begin their script: block with a hand-written size-log line — this class
+    renders none of that; every module still writes its own.) The versions.yml heredoc
+    was written out by hand in every module, and written TWICE per module — once in
+    script:, once in stub: with every value replaced by the literal `stub`.
 
     WHY THAT WAS DANGEROUS RATHER THAN MERELY REPETITIVE. `-stub` never evaluates a
     script: block. So the stub copy is not a mirror the test suite compares against the
@@ -76,9 +77,13 @@ class ProcessEnvelope {
     /**
      * The full versions.yml heredoc for a `script:` block.
      *
-     * `python:` is prepended automatically — 25 of 28 modules reported it and the three
-     * that did not were the anomaly, not the rule. Pass tools in the order they should
-     * appear in the report.
+     * `python:` is prepended automatically — at the time this class was introduced, 27
+     * of the then-28 modules reported it (`aggregate_size_logs.nf`, bash-only, was the
+     * sole exception; two others called `python3` instead of `python` — still a
+     * `python:` report, just a different interpreter name, not a non-report). One of
+     * those 28 modules (`warp_seg_qc_tiled.nf`) was later merged away, so the count as
+     * of this comment is 27 of 27. Pass tools in the order they should appear in the
+     * report.
      */
     static String versions(String process, List<String> tools) {
         def lines = ['cat <<-END_VERSIONS > versions.yml',
