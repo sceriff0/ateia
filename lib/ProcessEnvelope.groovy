@@ -58,7 +58,19 @@ class ProcessEnvelope {
 
     /** The version-probe line for one tool, as it appears inside the heredoc. */
     private static String probe(String tool) {
-        return "    ${yamlKey(tool)}: \\\$(python -c \"import ${tool}; print(${tool}.__version__)\" 2>/dev/null || echo \"unknown\")"
+        // ONE level of escaping, not two. `${...}` splices this returned String verbatim
+        // into the caller's """...""" GString -- it is not re-parsed for Groovy escapes.
+        // A single `\$` in THIS source produces a bare `$` in the returned string (Groovy's
+        // GString escape for "literal dollar, don't interpolate"), which is what needs to
+        // land in .command.sh: `<<-END_VERSIONS` is an UNQUOTED heredoc, so bash performs
+        // command substitution on a bare `$(...)`. Writing `\\\$` here (two escapes) instead
+        // produces a literal backslash-dollar in the returned string, which survives into
+        // .command.sh as `\$(...)` -- an ESCAPED dollar that bash prints as literal text
+        // instead of executing. That shipped once: every real (non-stub) run wrote the
+        // command text itself into versions.yml instead of a version number, and nothing
+        // caught it because `-stub` never evaluates script: and bin/generate_qc_report.py's
+        // parser only splits on ":" -- it never validates what it finds.
+        return "    ${yamlKey(tool)}: \$(python -c \"import ${tool}; print(${tool}.__version__)\" 2>/dev/null || echo \"unknown\")"
     }
 
     /**
@@ -71,7 +83,11 @@ class ProcessEnvelope {
     static String versions(String process, List<String> tools) {
         def lines = ['cat <<-END_VERSIONS > versions.yml',
                      "\"${process}\":",
-                     '    python: \\$(python --version 2>&1 | sed \'s/Python //\')']
+                     // Single-quoted Groovy string: `$` has no interpolation meaning here
+                     // at all, so it needs no escaping -- a bare `$(...)` is exactly what
+                     // must land in .command.sh for bash to execute it. See probe()'s
+                     // comment for what happens when this is over-escaped instead.
+                     '    python: $(python --version 2>&1 | sed \'s/Python //\')']
         lines += tools.collect { probe(it) }
         lines << 'END_VERSIONS'
         return lines.join('\n')

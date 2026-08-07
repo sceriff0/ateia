@@ -127,15 +127,21 @@ workflow {
     def envVersions     = ProcessEnvelope.versions('TEST:PROC', ['numpy', 'skimage'])
     def envVersionsStub = ProcessEnvelope.versionsStub('TEST:PROC', ['numpy', 'skimage'])
 
-    // The python: row is prepended automatically, in both renderings.
-    assert envVersions.contains('python: \\$(python --version')
+    // The python: row is prepended automatically, in both renderings. A BARE `$(`, not
+    // `\$(` -- `<<-END_VERSIONS` is an unquoted heredoc, so bash performs command
+    // substitution on the former and prints the latter as literal text. This assertion
+    // is the one that would have caught the over-escaping bug: it asserted `\\$(` (an
+    // escaped, unexecuted dollar) until a reviewer caught that the real published
+    // versions.yml was showing shell commands instead of version numbers.
+    assert envVersions.contains('python: $(python --version')
+    assert !envVersions.contains('python: \\$(python --version')
     assert envVersionsStub.contains('python: stub')
 
     // skimage -> scikit-image: the import name and the published YAML key differ, and
     // bin/generate_qc_report.py's hand-rolled parser is keyed on the YAML key, not the
     // import name.
-    assert envVersions.contains('scikit-image: \\$(python -c "import skimage;')
-    assert !envVersions.contains('skimage: \\$(python -c "import skimage;')
+    assert envVersions.contains('scikit-image: $(python -c "import skimage;')
+    assert !envVersions.contains('skimage: $(python -c "import skimage;')
     assert envVersionsStub.contains('scikit-image: stub')
 
     // The property this whole task exists to guarantee: versions() and versionsStub()

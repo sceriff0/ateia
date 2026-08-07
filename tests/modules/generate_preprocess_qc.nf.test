@@ -150,8 +150,23 @@ nextflow_process {
         // block, so no stub run can see whether lib/ProcessEnvelope.groovy's
         // `versions()` call actually renders the tool probes into the heredoc — a stub
         // diff would report "identical" even if the escaping were wrong and the
-        // heredoc empty. Same shape as
-        // tests/modules/generate_qc_report.nf.test's rendered-command case.
+        // heredoc empty. This is exactly the shape of bug that shipped once already:
+        // an over-escaped `\$(...)` rendered as literal shell text in every real run,
+        // caught only by a reviewer, because nothing in this suite executed script:.
+        //
+        // UNLIKE tests/modules/generate_qc_report.nf.test's rendered-command case, this
+        // one is NOT "safe to run for real" on its own merits — CI runs `--tag stub
+        // --profile test` container-less, so generate_preprocess_qc.py actually
+        // executes here, and this host's bare Python has numpy/tifffile but not
+        // scikit-image, so the process exits 1. It survives, and this assertion still
+        // gets to run, ONLY because conf/modules.config's withName selector for this
+        // process (the GENERATE_*_QC / SEG_QC_GEOJSON / WARP_SEG_QC group) resolves
+        // `errorStrategy` to 'ignore' for a plain exit 1 -- the assertions below read
+        // `.command.sh` off disk, not `process.success`, so a failed-but-ignored task
+        // still leaves behind the rendered command this test needs. If that
+        // errorStrategy ever stops covering this process, this case still runs but no
+        // longer proves anything "for free" -- it would need its own real dependency
+        // set or a `real`/`slow` tag instead.
         tag "stub"
 
         when {
