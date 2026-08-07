@@ -150,6 +150,12 @@ workflow {
     // is the exact failure this extraction exists to prevent.
     assert Checkpoint.STEPS*.name == Layout.CHECKPOINT_STEPS
 
+    // A step's requiredColumns ARE the previous step's checkpoint columns — that is what
+    // makes --start <step> able to read the checkpoint the previous step wrote. The two
+    // tables state it independently, so assert they agree rather than trusting them to.
+    assert ParamUtils.STEPS.find { it.name == 'registration'   }.requiredColumns == Checkpoint.columns(Layout.PREPROCESSED)
+    assert ParamUtils.STEPS.find { it.name == 'postprocessing' }.requiredColumns == Checkpoint.columns(Layout.REGISTERED)
+
     // println, NOT log.info: nf-test's underlying `nextflow ... -quiet` run
     // suppresses log.info from stdout entirely (observed directly: a log.info
     // line here never appears in workflow.stdout under nf-test, even though the
