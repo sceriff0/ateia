@@ -7,6 +7,28 @@ nextflow_workflow {
     tag "subworkflow"
     tag "postprocessing"
 
+    // POSTPROCESSING no longer runs SEGMENT / EXTRACT_CELL_PROPERTIES /
+    // EXTRACT_NUCLEI_PROPERTIES itself (Task 1, arch-B-split: they moved to
+    // subworkflows/local/segmentation.nf, its own resumable step). Its take:
+    // grew from 3 inputs (ch_registered, ch_reg_qc, ch_reg_residuals) to 9:
+    // ch_registered, ch_cell_mask, ch_nuclei_mask, ch_contours,
+    // ch_nucleus_contours, ch_morphology, ch_reg_qc, ch_reg_residuals,
+    // compartment_mode. Every test below now feeds pre-made mask/contours/
+    // morphology fixtures for input[1..5] instead of relying on this workflow
+    // to derive them, and input[8] = ParamUtils.compartmentMode(params) --
+    // Task 4's seam for --quantify_compartments / --expanded_quantification /
+    // --embed_masks, resolved once by workflows/mirage.nf in production and
+    // threaded down the same way here.
+    //
+    // input[8] stays a live ParamUtils.compartmentMode(params) call rather than a
+    // literal map on purpose: none of the 7 tests below overrides
+    // --quantify_compartments / --expanded_quantification / --embed_masks, so there
+    // is no "off" case here that a literal map would exercise any differently.
+    //
+    // UNVERIFIED LOCALLY: nf-test resolves -profile test,docker and hangs
+    // under qemu on this host (see CLAUDE.md's "Verification reality"). Updated
+    // to match the new interface but not run.
+
     test("Should run full postprocessing - stub") {
 
         tag "stub"
@@ -30,17 +52,36 @@ nextflow_workflow {
                     [[patient_id: 'P001', is_reference: false, channels: ['DAPI', 'PANCK', 'SMA']],
                      file('$projectDir/tests/testdata/P001_mov1.ome.tiff')]
                 ])
+                input[1] = Channel.fromList([
+                    [[patient_id: 'P001', id: 'P001', is_reference: true],
+                     file('$projectDir/tests/testdata/P001_cell_mask.tif')]
+                ])
+                input[2] = Channel.fromList([
+                    [[patient_id: 'P001', id: 'P001', is_reference: true],
+                     file('$projectDir/tests/testdata/P001_nuclei_mask.tif')]
+                ])
+                input[3] = Channel.fromList([
+                    ['P001', file('$projectDir/tests/testdata/sample_contours.json')]
+                ])
+                input[4] = Channel.fromList([
+                    ['P001', file('$projectDir/tests/testdata/sample_contours.json')]
+                ])
+                input[5] = Channel.fromList([
+                    [[patient_id: 'P001', id: 'P001', is_reference: true],
+                     file('$projectDir/tests/testdata/sample_morphology.csv')]
+                ])
                 // Non-empty ch_reg_qc / ch_reg_residuals, shaped like
                 // REGISTRATION.out.seg_qc / .out.seg_residuals ([meta, file] tuples
                 // from WARP_SEG_QC), to exercise the EXPORT_SPATIALDATA fold-in path
                 // in postprocess.nf (the normal full-pipeline path, not the
                 // --start postprocessing shortcut covered by the other tests below).
-                input[1] = Channel.fromList([
+                input[6] = Channel.fromList([
                     [[patient_id: 'P001'], file('$projectDir/tests/testdata/sample_reg_qc.json')]
                 ])
-                input[2] = Channel.fromList([
+                input[7] = Channel.fromList([
                     [[patient_id: 'P001'], file('$projectDir/tests/testdata/sample_reg_residuals.csv')]
                 ])
+                input[8] = ParamUtils.compartmentMode(params)
                 """
             }
         }
@@ -53,7 +94,12 @@ nextflow_workflow {
         }
     }
 
-    test("Should segment reference images only - stub") {
+    test("Should quantify multiple registered slides against pre-made masks - stub") {
+        // Renamed from "Should segment reference images only": POSTPROCESSING no
+        // longer runs SEGMENT (moved to segmentation.nf), so this no longer segments
+        // anything. What it actually exercises: multiple registered slides
+        // (reference + 2 moving) quantified against masks supplied directly, with no
+        // registration QC -- the --start postprocessing shortcut shape.
 
         tag "stub"
         options "-stub"
@@ -78,9 +124,28 @@ nextflow_workflow {
                     [[patient_id: 'P001', is_reference: false, channels: ['DAPI', 'PANCK', 'SMA']],
                      file('$projectDir/tests/testdata/P001_mov2.ome.tiff')]
                 ])
+                input[1] = Channel.fromList([
+                    [[patient_id: 'P001', id: 'P001', is_reference: true],
+                     file('$projectDir/tests/testdata/P001_cell_mask.tif')]
+                ])
+                input[2] = Channel.fromList([
+                    [[patient_id: 'P001', id: 'P001', is_reference: true],
+                     file('$projectDir/tests/testdata/P001_nuclei_mask.tif')]
+                ])
+                input[3] = Channel.fromList([
+                    ['P001', file('$projectDir/tests/testdata/sample_contours.json')]
+                ])
+                input[4] = Channel.fromList([
+                    ['P001', file('$projectDir/tests/testdata/sample_contours.json')]
+                ])
+                input[5] = Channel.fromList([
+                    [[patient_id: 'P001', id: 'P001', is_reference: true],
+                     file('$projectDir/tests/testdata/sample_morphology.csv')]
+                ])
                 // No REGISTRATION output in this session (--start postprocessing path).
-                input[1] = Channel.empty()
-                input[2] = Channel.empty()
+                input[6] = Channel.empty()
+                input[7] = Channel.empty()
+                input[8] = ParamUtils.compartmentMode(params)
                 """
             }
         }
@@ -114,8 +179,27 @@ nextflow_workflow {
                     [[patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK', 'SMA']],
                      file('$projectDir/tests/testdata/P001_ref.ome.tiff')]
                 ])
-                input[1] = Channel.empty()
-                input[2] = Channel.empty()
+                input[1] = Channel.fromList([
+                    [[patient_id: 'P001', id: 'P001', is_reference: true],
+                     file('$projectDir/tests/testdata/P001_cell_mask.tif')]
+                ])
+                input[2] = Channel.fromList([
+                    [[patient_id: 'P001', id: 'P001', is_reference: true],
+                     file('$projectDir/tests/testdata/P001_nuclei_mask.tif')]
+                ])
+                input[3] = Channel.fromList([
+                    ['P001', file('$projectDir/tests/testdata/sample_contours.json')]
+                ])
+                input[4] = Channel.fromList([
+                    ['P001', file('$projectDir/tests/testdata/sample_contours.json')]
+                ])
+                input[5] = Channel.fromList([
+                    [[patient_id: 'P001', id: 'P001', is_reference: true],
+                     file('$projectDir/tests/testdata/sample_morphology.csv')]
+                ])
+                input[6] = Channel.empty()
+                input[7] = Channel.empty()
+                input[8] = ParamUtils.compartmentMode(params)
                 """
             }
         }
@@ -153,8 +237,35 @@ nextflow_workflow {
                     [[patient_id: 'P002', is_reference: true, channels: ['DAPI', 'PANCK', 'SMA']],
                      file('$projectDir/tests/testdata/P002_ref.ome.tiff')]
                 ])
-                input[1] = Channel.empty()
-                input[2] = Channel.empty()
+                input[1] = Channel.fromList([
+                    [[patient_id: 'P001', id: 'P001', is_reference: true],
+                     file('$projectDir/tests/testdata/P001_cell_mask.tif')],
+                    [[patient_id: 'P002', id: 'P002', is_reference: true],
+                     file('$projectDir/tests/testdata/P002_cell_mask.tif')]
+                ])
+                input[2] = Channel.fromList([
+                    [[patient_id: 'P001', id: 'P001', is_reference: true],
+                     file('$projectDir/tests/testdata/P001_nuclei_mask.tif')],
+                    [[patient_id: 'P002', id: 'P002', is_reference: true],
+                     file('$projectDir/tests/testdata/P001_nuclei_mask.tif')]
+                ])
+                input[3] = Channel.fromList([
+                    ['P001', file('$projectDir/tests/testdata/sample_contours.json')],
+                    ['P002', file('$projectDir/tests/testdata/sample_contours.json')]
+                ])
+                input[4] = Channel.fromList([
+                    ['P001', file('$projectDir/tests/testdata/sample_contours.json')],
+                    ['P002', file('$projectDir/tests/testdata/sample_contours.json')]
+                ])
+                input[5] = Channel.fromList([
+                    [[patient_id: 'P001', id: 'P001', is_reference: true],
+                     file('$projectDir/tests/testdata/sample_morphology.csv')],
+                    [[patient_id: 'P002', id: 'P002', is_reference: true],
+                     file('$projectDir/tests/testdata/sample_morphology.csv')]
+                ])
+                input[6] = Channel.empty()
+                input[7] = Channel.empty()
+                input[8] = ParamUtils.compartmentMode(params)
                 """
             }
         }
@@ -188,8 +299,27 @@ nextflow_workflow {
                     [[patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK', 'SMA']],
                      file('$projectDir/tests/testdata/P001_ref.ome.tiff')]
                 ])
-                input[1] = Channel.empty()
-                input[2] = Channel.empty()
+                input[1] = Channel.fromList([
+                    [[patient_id: 'P001', id: 'P001', is_reference: true],
+                     file('$projectDir/tests/testdata/P001_cell_mask.tif')]
+                ])
+                input[2] = Channel.fromList([
+                    [[patient_id: 'P001', id: 'P001', is_reference: true],
+                     file('$projectDir/tests/testdata/P001_nuclei_mask.tif')]
+                ])
+                input[3] = Channel.fromList([
+                    ['P001', file('$projectDir/tests/testdata/sample_contours.json')]
+                ])
+                input[4] = Channel.fromList([
+                    ['P001', file('$projectDir/tests/testdata/sample_contours.json')]
+                ])
+                input[5] = Channel.fromList([
+                    [[patient_id: 'P001', id: 'P001', is_reference: true],
+                     file('$projectDir/tests/testdata/sample_morphology.csv')]
+                ])
+                input[6] = Channel.empty()
+                input[7] = Channel.empty()
+                input[8] = ParamUtils.compartmentMode(params)
                 """
             }
         }
@@ -225,8 +355,27 @@ nextflow_workflow {
                     [[patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK']],
                      file('$projectDir/tests/testdata/P001_ref.ome.tiff')]
                 ])
-                input[1] = Channel.empty()
-                input[2] = Channel.empty()
+                input[1] = Channel.fromList([
+                    [[patient_id: 'P001', id: 'P001', is_reference: true],
+                     file('$projectDir/tests/testdata/P001_cell_mask.tif')]
+                ])
+                input[2] = Channel.fromList([
+                    [[patient_id: 'P001', id: 'P001', is_reference: true],
+                     file('$projectDir/tests/testdata/P001_nuclei_mask.tif')]
+                ])
+                input[3] = Channel.fromList([
+                    ['P001', file('$projectDir/tests/testdata/sample_contours.json')]
+                ])
+                input[4] = Channel.fromList([
+                    ['P001', file('$projectDir/tests/testdata/sample_contours.json')]
+                ])
+                input[5] = Channel.fromList([
+                    [[patient_id: 'P001', id: 'P001', is_reference: true],
+                     file('$projectDir/tests/testdata/sample_morphology.csv')]
+                ])
+                input[6] = Channel.empty()
+                input[7] = Channel.empty()
+                input[8] = ParamUtils.compartmentMode(params)
                 """
             }
         }
@@ -261,8 +410,27 @@ nextflow_workflow {
                     [[patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK', 'SMA']],
                      file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)]
                 ])
-                input[1] = Channel.empty()
-                input[2] = Channel.empty()
+                input[1] = Channel.fromList([
+                    [[patient_id: 'P001', id: 'P001', is_reference: true],
+                     file('$projectDir/tests/testdata/P001_cell_mask.tif', checkIfExists: true)]
+                ])
+                input[2] = Channel.fromList([
+                    [[patient_id: 'P001', id: 'P001', is_reference: true],
+                     file('$projectDir/tests/testdata/P001_nuclei_mask.tif', checkIfExists: true)]
+                ])
+                input[3] = Channel.fromList([
+                    ['P001', file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true)]
+                ])
+                input[4] = Channel.fromList([
+                    ['P001', file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true)]
+                ])
+                input[5] = Channel.fromList([
+                    [[patient_id: 'P001', id: 'P001', is_reference: true],
+                     file('$projectDir/tests/testdata/sample_morphology.csv', checkIfExists: true)]
+                ])
+                input[6] = Channel.empty()
+                input[7] = Channel.empty()
+                input[8] = ParamUtils.compartmentMode(params)
                 """
             }
         }

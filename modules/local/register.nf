@@ -12,7 +12,6 @@ process REGISTER {
     // multiple per-slide metas are grouped into a single patient-level invocation.
     // patient_id is the grouping key; all_metas carries the per-slide metadata list.
     tag "${patient_id}"
-    label 'process_high'
 
     // VALIS uses the maintained upstream image (linux/amd64); we do not rebuild
     // it (its from-source libvips build is heavy and not vendored). See containers/README.md.
@@ -173,11 +172,7 @@ process REGISTER {
     rm -rf preprocessed/deformation_fields preprocessed/masks preprocessed/overlaps \
            preprocessed/rigid_registration preprocessed/non_rigid_registration preprocessed/processed
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: \$(python --version 2>&1 | sed 's/Python //')
-        valis: \$(python -c "import valis; print(valis.__version__)" 2>/dev/null || echo "unknown")
-    END_VERSIONS
+    ${ProcessEnvelope.versions(task.process, ['valis'])}
     """
 
     stub:
@@ -209,10 +204,6 @@ process REGISTER {
     echo "STUB,${patient_id},stub,0" > ${patient_id}.REGISTER.size.csv
     ${stub_ckpt}
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: stub
-        valis: stub
-    END_VERSIONS
+    ${ProcessEnvelope.versionsStub(task.process, ['valis'])}
     """
 }

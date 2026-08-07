@@ -37,14 +37,7 @@ process GENERATE_POSTPROCESSING_QC {
         --prefix ${prefix} \\
         ${args}
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: \$(python --version 2>&1 | sed 's/Python //')
-        numpy: \$(python -c "import numpy; print(numpy.__version__)" 2>/dev/null || echo "unknown")
-        pandas: \$(python -c "import pandas; print(pandas.__version__)" 2>/dev/null || echo "unknown")
-        matplotlib: \$(python -c "import matplotlib; print(matplotlib.__version__)" 2>/dev/null || echo "unknown")
-        scikit-image: \$(python -c "import skimage; print(skimage.__version__)" 2>/dev/null || echo "unknown")
-    END_VERSIONS
+    ${ProcessEnvelope.versions(task.process, ['numpy', 'pandas', 'matplotlib', 'skimage'])}
     """
 
     stub:
@@ -56,13 +49,6 @@ process GENERATE_POSTPROCESSING_QC {
     touch qc/${prefix}_intensity_distributions.png
     echo "STUB,${meta.patient_id},stub,0" > ${meta.patient_id}.GENERATE_POSTPROCESSING_QC.size.csv
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: stub
-        numpy: stub
-        pandas: stub
-        matplotlib: stub
-        scikit-image: stub
-    END_VERSIONS
+    ${ProcessEnvelope.versionsStub(task.process, ['numpy', 'pandas', 'matplotlib', 'skimage'])}
     """
 }

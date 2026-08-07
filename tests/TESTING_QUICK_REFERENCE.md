@@ -23,7 +23,7 @@ python tests/testdata/generate_complete_testdata.py
 ```bash
 # Complete test suite (recommended before PR)
 pytest -v tests/                                    # Python tests
-nf-test test --profile test,docker -stub            # Process tests
+nf-test test --tag stub --profile test              # Process tests (matches CI's blocking gate)
 bash tests/run_validation_tests.sh                  # Validation tests
 nextflow run . -profile test,docker -stub            # Full pipeline
 ```

@@ -14,6 +14,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
+from measurements import measurement_key  # noqa: E402
 from phenotyping.calibration import (  # noqa: E402
     finalize_calibration,
     marker_calibration_weights,
@@ -55,7 +56,7 @@ def tree_path(name: str, parents: Dict[str, Optional[str]]) -> str:
 
 
 def _marker_values(df: pd.DataFrame, marker: str, spec: dict):
-    key = f"{marker}: {spec['compartment']}: {spec['statistic']}"
+    key = measurement_key(marker, spec["compartment"], spec["statistic"])
     if key in df.columns:
         return df[key].to_numpy(dtype=float), False
     if marker in df.columns:

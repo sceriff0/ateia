@@ -9,7 +9,6 @@
  */
 process QUANTIFY {
     tag "${meta.patient_id} - ${meta.channel_name}"
-    label 'process_low'
 
     container "bolt3x/attend_image_analysis:quantification_gpu"
 
@@ -52,12 +51,7 @@ process QUANTIFY {
         --output_file ${meta.id}_quant.csv \\
         ${args}
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: \$(python --version 2>&1 | sed 's/Python //')
-        pandas: \$(python -c "import pandas; print(pandas.__version__)" 2>/dev/null || echo "unknown")
-        scikit-image: \$(python -c "import skimage; print(skimage.__version__)" 2>/dev/null || echo "unknown")
-    END_VERSIONS
+    ${ProcessEnvelope.versions(task.process, ['pandas', 'skimage'])}
     """
 
     stub:
@@ -65,11 +59,6 @@ process QUANTIFY {
     touch ${meta.id}_quant.csv
     echo "STUB,${meta.id},stub,0" > ${meta.id}.QUANTIFY.size.csv
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: stub
-        pandas: stub
-        scikit-image: stub
-    END_VERSIONS
+    ${ProcessEnvelope.versionsStub(task.process, ['pandas', 'skimage'])}
     """
 }

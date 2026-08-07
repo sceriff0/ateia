@@ -40,9 +40,12 @@ def parse_args():
         help="Directory of registration QC PNGs",
     )
     p.add_argument(
-        "--valis-summary",
-        default="valis_summary/",
-        help="Directory of Valis summary CSVs",
+        "--registration-tre",
+        default="registration_tre/",
+        help=(
+            "Directory of the registration method's own target-registration-error "
+            "artifacts (VALIS *_summary.csv / STARE *_tre.json)"
+        ),
     )
     p.add_argument(
         "--postprocess-qc",
@@ -55,6 +58,11 @@ def parse_args():
         "--seg-qc",
         default="seg_qc/",
         help="Directory of warp-segmentation QC JSONs",
+    )
+    p.add_argument(
+        "--seg-residuals",
+        default="seg_residuals/",
+        help="Directory of per-cell registration residual CSVs (SEG_QC.out.per_cell)",
     )
     p.add_argument("--output", default="mirage_qc_report.html", help="Output HTML path")
     p.add_argument(
@@ -644,10 +652,23 @@ def _to_float(v):
         return None
 
 
-def _read_valis_tre(valis_dir):
-    """slide -> {'final': {col: val}, 'premicro': {col: val}} of feature distances from CSVs."""
+def _read_intrinsic_tre(tre_dir):
+    """slide -> {'final': {col: val}, 'premicro': {col: val}} of intrinsic TRE, either method's shape.
+
+    VALIS emits per-patient ``*_summary[.csv]`` rows (and a ``_premicro`` variant) keyed by the
+    ``from``/``filename`` column: read unchanged into ``final``/``premicro``.
+
+    STARE (tiled) emits one per-slide ``*_tre.json``, keyed by its ``moving`` field. Per
+    ``bin/utils/tre_report.py``'s module docstring, ``coarse_tre_px`` is the rigid-stage TRE
+    ("directly comparable to VALIS's rigid error") and ``residual_after_px`` is the
+    post-registration number ("the analogue of VALIS's non-rigid error"); its p50 is used so it
+    lines up with the seg-QC side's ``displacement_*_p50``. STARE has no separate pre-micro stage,
+    so both values land in ``final`` — the existing non-rigid fallback in ``reconcile_rows``
+    (final's ``non_rigid_D`` when no premicro summary exists) already covers it. Both formats
+    write into the same slide dict so a directory containing both is a merge, not a shadow.
+    """
     out = {}
-    for csv_path in list_files(valis_dir, "*.csv"):
+    for csv_path in list_files(tre_dir, "*.csv"):
         which = (
             "premicro" if csv_path.name.endswith("_summary_premicro.csv") else "final"
         )
@@ -665,6 +686,15 @@ def _read_valis_tre(valis_dir):
                             slot[col] = _to_float(row[col])
         except (OSError, csv.Error):
             continue
+    for json_path in list_files(tre_dir, "*_tre.json"):
+        try:
+            info = parse_tiled_tre_json(json_path)
+        except (OSError, ValueError):
+            continue
+        slide = info["moving"]
+        slot = out.setdefault(str(slide), {"final": {}, "premicro": {}})["final"]
+        slot["rigid_D"] = _to_float(info["coarse_tre_px"])
+        slot["non_rigid_D"] = _to_float(info["final_p50"])
     return out
 
 
@@ -695,15 +725,16 @@ def _read_seg_cell_disp(seg_qc_dir):
     return out
 
 
-def reconcile_rows(valis_dir, seg_qc_dir):
-    """Pair VALIS feature-TRE with WARP_SEG_QC cell displacement, per slide per stage.
+def reconcile_rows(tre_dir, seg_qc_dir):
+    """Pair the registration method's intrinsic TRE with WARP_SEG_QC cell displacement, per slide per stage.
 
     Returns a list of dicts: ``slide``, ``stage``, ``feature_tre_um``, ``cell_disp_um``,
     ``divergent`` (True/False, or None when either number is missing so no verdict is possible).
-    Slides are keyed by VALIS slide name (``from`` == ``moving``); rows are only emitted for
-    slides that appear in the seg-QC output.
+    Slides are keyed by slide name (VALIS's ``from``/``filename`` or STARE's ``moving`` — both
+    resolve to the same identifier); rows are only emitted for slides that appear in the seg-QC
+    output.
     """
-    tre = _read_valis_tre(valis_dir)
+    tre = _read_intrinsic_tre(tre_dir)
     cell = _read_seg_cell_disp(seg_qc_dir)
     rows = []
     for slide in sorted(cell):
@@ -736,14 +767,14 @@ def reconcile_rows(valis_dir, seg_qc_dir):
     return rows
 
 
-def reconciliation_section(valis_dir, seg_qc_dir):
+def reconciliation_section(tre_dir, seg_qc_dir):
     """Render the feature-TRE vs cell-displacement reconciliation table."""
     title = "Feature-TRE vs Cell-Displacement Reconciliation"
-    rows = reconcile_rows(valis_dir, seg_qc_dir)
+    rows = reconcile_rows(tre_dir, seg_qc_dir)
     if not rows:
         return section(
             title,
-            '<p class="empty-notice">No overlapping VALIS summary + segmentation-warp QC '
+            '<p class="empty-notice">No overlapping registration TRE + segmentation-warp QC '
             "found to reconcile.</p>",
         )
 
@@ -784,6 +815,46 @@ def seg_qc_section(seg_qc_dir):
     return section("Segmentation Warp QC", "\n".join(parts))
 
 
+# bin/warp_seg_qc.py's write_per_cell_csv writes one row per matched cell pair,
+# uncapped -- a real slide can be 10^4-10^6 rows. Every OTHER CSV/JSON table in this
+# report is per-slide or per-stage (a few dozen rows at most); inlining every residual
+# row into one HTML file would produce a browser-killing document the 535-byte stub
+# fixtures never surface. Cap what is rendered and say so, rather than either silently
+# truncating or dumping the whole thing.
+SEG_RESIDUALS_MAX_ROWS = 500
+
+
+def seg_residuals_section(seg_residuals_dir):
+    """Render per-cell registration-residual CSVs (one table per file, row-capped)."""
+    csvs = list_files(seg_residuals_dir, "*.csv")
+    if not csvs:
+        body = '<p class="empty-notice">No per-cell registration residuals found.</p>'
+        return section("Per-Cell Registration Residuals", body)
+    parts = []
+    for csv_path in csvs:
+        parts.append(
+            "<p style='font-size:0.85rem;color:#666;margin:8px 0 4px;'>"
+            f"{html.escape(Path(csv_path).name)}</p>"
+        )
+        try:
+            headers, rows = parse_csv_table(csv_path)
+        except Exception as exc:  # noqa: BLE001 - report, never crash
+            parts.append(
+                '<p class="empty-notice">Could not parse '
+                f"{html.escape(Path(csv_path).name)}: {html.escape(str(exc))}</p>"
+            )
+            continue
+        total = len(rows)
+        shown = rows[:SEG_RESIDUALS_MAX_ROWS]
+        if total > len(shown):
+            parts.append(
+                "<p style='font-size:0.8rem;color:#888;margin:0 0 6px;'>"
+                f"Showing {len(shown)} of {total} rows.</p>"
+            )
+        parts.append(_html_table(headers, shown))
+    return section("Per-Cell Registration Residuals", "\n".join(parts))
+
+
 def seg_overlay_section(postprocess_dir):
     """Dedicated section for the *_seg_overlay* PNGs (the most-inspected QC)."""
     all_pngs = list_files(postprocess_dir, "*.png")
@@ -808,9 +879,11 @@ def copy_data(args):
 
     copy_glob(args.preprocess_qc, "*.png", "preprocess_qc")
     copy_glob(args.registration_qc, "*.png", "registration_qc")
-    copy_glob(args.valis_summary, "*.csv", "valis_summary")
+    copy_glob(args.registration_tre, "*.csv", "registration_tre")
+    copy_glob(args.registration_tre, "*_tre.json", "registration_tre")
     copy_glob(args.postprocess_qc, "*.png", "postprocess_qc")
     copy_glob(args.seg_qc, "*.json", "seg_qc")
+    copy_glob(args.seg_residuals, "*.csv", "seg_residuals")
     if args.run_summary and Path(args.run_summary).exists():
         shutil.copy2(args.run_summary, data_dir / "run_summary.json")
     if args.versions and Path(args.versions).exists():
@@ -843,11 +916,12 @@ def main():
     html_parts.append(
         registration_qc_section(
             args.registration_qc,
-            args.valis_summary,
+            args.registration_tre,
             args.seg_qc,
         )
     )
-    html_parts.append(reconciliation_section(args.valis_summary, args.seg_qc))
+    html_parts.append(reconciliation_section(args.registration_tre, args.seg_qc))
+    html_parts.append(seg_residuals_section(args.seg_residuals))
     html_parts.append(seg_overlay_section(args.postprocess_qc))
     html_parts.append(postprocess_qc_section(args.postprocess_qc))
     html_parts.append(versions_section(args.versions))

@@ -9,7 +9,6 @@
  */
 process PREPROCESS {
     tag "${meta.patient_id}"
-    label 'process_medium'
 
     container "bolt3x/attend_image_analysis:preprocess"
 
@@ -49,11 +48,7 @@ process PREPROCESS {
         ${no_darkfield_flag} \\
         ${args}
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: \$(python --version 2>&1 | sed 's/Python //')
-        numpy: \$(python -c "import numpy; print(numpy.__version__)" 2>/dev/null || echo "unknown")
-    END_VERSIONS
+    ${ProcessEnvelope.versions(task.process, ['numpy'])}
     """
 
     stub:
@@ -62,10 +57,6 @@ process PREPROCESS {
     touch ${ome_tiff.simpleName}_dims.txt
     echo "STUB,${meta.patient_id},stub,0" > ${meta.patient_id}_${ome_tiff.simpleName}.PREPROCESS.size.csv
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: "stub"
-        numpy: "stub"
-    END_VERSIONS
+    ${ProcessEnvelope.versionsStub(task.process, ['numpy'])}
     """
 }

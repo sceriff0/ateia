@@ -10,11 +10,18 @@ process GENERATE_QC_REPORT {
     input:
     path(preprocess_qc_pngs, stageAs: 'preprocess_qc/*')
     path(registration_qc_pngs, stageAs: 'registration_qc/*')
-    path(valis_summary_csvs, stageAs: 'valis_summary/*')
+    // The registration method's own TRE estimate (VALIS *_summary.csv / STARE *_tre.json).
+    // Renaming this stageAs directory renames the matching folder inside the published
+    // mirage_qc_data_*/ bundle — an accepted, deliberate change of published output.
+    path(registration_tre_files, stageAs: 'registration_tre/*')
     path(postprocess_qc_pngs, stageAs: 'postprocess_qc/*')
     path(versions_yml)
     path(run_summary_json)
     path(seg_qc_jsons, stageAs: 'seg_qc/*')
+    // Per-cell registration residual CSVs (SEG_QC.out.per_cell). Optional: a run with
+    // --start postprocessing has no REGISTRATION output to source them from, so this
+    // may stage nothing.
+    path(seg_residuals, stageAs: 'seg_residuals/*')
 
     output:
     path "mirage_qc_report_*.html", emit: report
@@ -31,19 +38,17 @@ process GENERATE_QC_REPORT {
     generate_qc_report.py \\
         --preprocess-qc preprocess_qc/ \\
         --registration-qc registration_qc/ \\
-        --valis-summary valis_summary/ \\
+        --registration-tre registration_tre/ \\
         --postprocess-qc postprocess_qc/ \\
         --versions ${versions_yml} \\
         --run-summary ${run_summary_json} \\
         --seg-qc seg_qc/ \\
+        --seg-residuals seg_residuals/ \\
         --output mirage_qc_report_${timestamp}.html \\
         --data-dir mirage_qc_data_${timestamp}/ \\
         ${args}
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: \$(python --version 2>&1 | sed 's/Python //')
-    END_VERSIONS
+    ${ProcessEnvelope.versions(task.process, [])}
     """
 
     stub:
@@ -52,9 +57,6 @@ process GENERATE_QC_REPORT {
     mkdir -p mirage_qc_data_${timestamp}
     touch mirage_qc_report_${timestamp}.html
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: stub
-    END_VERSIONS
+    ${ProcessEnvelope.versionsStub(task.process, [])}
     """
 }

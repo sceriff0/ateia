@@ -375,7 +375,7 @@ def parse_args():
     parser.add_argument(
         "--block-size",
         type=int,
-        default=400,
+        default=1024,
         help="Tile block size (px) for WSI mode",
     )
 

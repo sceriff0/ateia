@@ -17,25 +17,45 @@ This test derives its allowlist directly from `nextflow.config`'s `params {}`
 block, so it keeps working whether a param is null-declared today or someone
 flips it to a concrete value tomorrow (or vice versa) -- no hand-curated list
 to fall out of sync.
+
+A second, independent check below closes the same blind spot on the Python
+side: `bin/**/*.py` argparse defaults are just as capable of drifting from
+`nextflow.config` as a Groovy `?:` fallback, and the pipeline never notices
+because it always passes the flag explicitly -- only hand-invocation of the
+script sees the stale default. That check is name-based (a flag normalizes
+to a params key or it's out of scope -- no fuzzy/value matching) and parses
+Python with `ast`, not regex, so a non-literal `default=` (a variable, a
+call, an f-string) can be detected and skipped rather than mis-compared.
 """
 
 from __future__ import annotations
 
+import ast
 import re
+import warnings
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = ROOT / "nextflow.config"
+BIN_DIR = ROOT / "bin"
+MODULES_CONFIG_PATH = ROOT / "conf/modules.config"
 
 # `params.<name> ?:` -- the pattern under audit.
 FALLBACK_RE = re.compile(r"params\.([A-Za-z_][A-Za-z0-9_]*)\s*\?:")
 
 # Files scanned for `params.x ?: <literal>` fallbacks.
+#
+# `lib/*.groovy` is in the list because parameter reads move there: SegBackends holds
+# the per-backend defaults SEGMENT's script block used to inline, including
+# `params.instanseg_model_dir ?: "$PWD/.instanseg_cache"`. A fallback that escaped the
+# scan by being one directory over would be exactly the drift this test exists to catch.
 SCANNED_GLOBS = [
+    "main.nf",
     "modules/local/*.nf",
-    "conf/modules.config",
+    "conf/*.config",
     "workflows/*.nf",
     "subworkflows/**/*.nf",
+    "lib/*.groovy",
 ]
 
 
@@ -146,3 +166,562 @@ def test_no_duplicate_param_defaults():
         "unless nextflow.config declares the param `null` (in which case `?:` "
         "is the live null-means-derive contract):\n" + "\n".join(offending)
     )
+
+
+# ---------------------------------------------------------------------------
+# bin/**/*.py argparse defaults vs. nextflow.config
+# ---------------------------------------------------------------------------
+#
+# The `?:` check above only sees Groovy. A `bin/foo.py` argparse `default=`
+# is just as capable of drifting from `nextflow.config` -- the pipeline
+# always passes the flag explicitly (ext.args / a process script), so a
+# stale Python default only bites hand-invocation of the script.
+#
+# The authority for "which param does this flag mean" is the pipeline's own
+# invocation text, not a guess from the flag's spelling. `build_flag_param_maps`
+# scans `modules/local/*.nf` + `conf/modules.config` for the two shapes the
+# pipeline actually uses (`--flag ${params.key}` directly, or one level of
+# `def var = params.key` aliasing) and derives TWO maps:
+#
+#   - a PER-SCRIPT map, keyed by `(invoking_script_basename, flag)`. This is
+#     the primary authority: it disambiguates a flag that means different
+#     params in different scripts, e.g. `--scale-factor` is `qc_scale_factor`
+#     when `generate_registration_qc.py` is the invoking script but
+#     `preprocess_qc_scale_factor` when it's `generate_preprocess_qc.py` --
+#     genuinely unambiguous once you know which script is being invoked, even
+#     though the bare flag name collides.
+#   - a flag-only map (the same shape the original version of this check
+#     shipped with), used as a fallback when no invoking script could be
+#     identified for a given occurrence.
+#
+# A flag whose name happens to equal a params key (e.g. `--pyramid-resolutions`
+# / `pyramid_resolutions`) is *also* covered by the direct form, so the
+# straight name-equality check that shipped before this exists purely as the
+# LAST-resort fallback, below both derived maps -- it's still correct when it
+# fires, just not the primary authority. Full precedence: per-script map ->
+# flag-only map -> name-equality. A flag like `bin/warp_seg_qc.py`'s
+# `--method` is never sourced from `params.*`: `modules/local/warp_seg_qc.nf`
+# dispatches it via `lib/WarpBackends.groovy`, keyed on the `method` INPUT --
+# the valis backend omits the flag, relying on the Python default, and the
+# tiled backend passes the literal `--method tiled` -- it stays out of scope
+# by design, permanently, not just until someone wires it -- and is counted
+# as such (see the `no_correspondence` bucket in
+# `find_argparse_default_sites`), not silently dropped.
+#
+# (`segment_to_geojson.py`'s `--tolerance` was this section's example until
+# Task 6 (arch-1-8) wired `--tolerance ${params.simplify_tolerance}` into
+# `conf/modules.config`'s `SEG_QC_GEOJSON` ext.args -- it now resolves via the
+# flag-only map into the `matched` bucket instead, which is exactly the
+# mechanism this comment is illustrating. Swapped the example for one that
+# cannot be resolved by any config wiring, so it does not rot the same way a
+# second time.)
+
+# Deliberate divergences between a bin/*.py argparse default and the
+# nextflow.config default its flag resolves to (via the derived map or the
+# name-equality fallback). Keyed by "<file>:<flag>". Every entry here is a
+# documented, intentional standalone-use fallback (verified against the
+# script's own help text/docstring) -- not a placeholder for a fix deferred
+# out of scope. A divergence that is simply a bug gets fixed, not allowlisted
+# (see bin/segment_cellsam.py's --block-size, which the derived map caught
+# and was fixed rather than exempted).
+ARGPARSE_DEFAULT_ALLOWLIST = {
+    "extract_cell_properties.py:--outdir": {
+        "reason": (
+            "Not actually the same 'outdir' as nextflow.config's: "
+            "modules/local/extract_cell_properties.nf:43 and "
+            "modules/local/extract_nuclei_properties.nf:42 (which reuses this "
+            "same script) both hardcode `--outdir .` -- a literal, not "
+            "`${params.outdir}` -- because Nextflow already isolates each "
+            "task in its own work dir; `publishDir` (driven by the real, "
+            "pipeline-wide params.outdir) copies the results out afterward. "
+            "This flag's name-equality match to the top-level `outdir` param "
+            "is a coincidence, not a real correspondence -- the script's own "
+            "default='.' (for standalone hand-invocation, writing to the "
+            "cwd) is correct to keep as-is."
+        ),
+    },
+    "quantify.py:--outdir": {
+        "reason": (
+            "Same non-correspondence as extract_cell_properties.py's --outdir: "
+            "modules/local/quantify.nf:51 hardcodes `--outdir .` (a literal, "
+            "not `${params.outdir}`) for the same task-local-vs-publishDir "
+            "reason. The name-equality match to the top-level `outdir` param "
+            "is coincidental."
+        ),
+    },
+    "segment_instantseg.py:--pixel-size": {
+        "reason": (
+            "default=None is a real fallback, not a stale literal: the "
+            "script's own help text says 'Override pixel size (um/px). If "
+            "omitted, InstanSeg auto-detects from OME metadata.' The pipeline "
+            "always passes an explicit value regardless (conf/modules.config's "
+            "instantseg ext.args has `--pixel-size ${params.pixel_size}`), so "
+            "this default only matters for standalone use, where auto-detect "
+            "is the more useful behavior than silently assuming 0.325."
+        ),
+    },
+    "segment_to_geojson.py:--nuclear-markers": {
+        "reason": (
+            "default=None is intentional per the script's own help text: "
+            "'SEG_QC_GEOJSON always passes params.nuclear_markers; the "
+            "default is only for standalone use.' Confirmed true: "
+            "modules/local/seg_qc_geojson.nf:44 always builds and passes "
+            "`--nuclear-markers ${MarkerUtils.markerList(params.nuclear_"
+            "markers).join(' ')}`, so the pipeline never relies on this "
+            "default."
+        ),
+    },
+    "split_multichannel.py:--nuclear-markers": {
+        "reason": (
+            "Same pattern as segment_to_geojson.py, confirmed the same way: "
+            "modules/local/split_channels.nf:40 always builds and passes "
+            "`--nuclear-markers ${MarkerUtils.markerList(params.nuclear_"
+            "markers).join(' ')}` -- 'SPLIT_CHANNELS always passes params."
+            "nuclear_markers; the default is only for standalone use' per "
+            "the script's own help text."
+        ),
+    },
+}
+# NOTE: `mask_to_geojson.py:--tolerance` is deliberately NOT here either. An earlier
+# version of this allowlist exempted it as a "flag-name coincidence, not a real
+# correspondence" -- wrong on both counts: it IS the same Douglas-Peucker quantity as
+# segment_to_geojson.py's --tolerance, not a coincidence (segment_to_geojson.py:74-76
+# passes its own --tolerance value straight into mask_to_feature_collection()'s
+# simplify_tolerance), and the cited "+0.5 corner-of-pixel offset" justification
+# (bin/mask_to_geojson.py:36-40) is about contour OFFSET, an unrelated concern, not
+# simplification tolerance -- it does not support keeping a divergent default. Per this
+# file's own policy ("a divergence that is simply a bug gets fixed, not allowlisted"),
+# bin/mask_to_geojson.py's --tolerance default was changed 0.5 -> 1.0 to match its
+# sibling instead of being exempted.
+# NOTE: `segment.py:--model-name` and `segment_to_geojson.py:--model-name`
+# are deliberately NOT here. Both are `required=True` with no `default=` at
+# all, so their comparison against `segmentation_model` was a moot,
+# unreachable-default artifact, not a real divergence -- `find_argparse_
+# default_sites` now excludes every `required=True` add_argument() call from
+# comparison entirely (see the `required` bucket below), so these two simply
+# never reach a point where they'd need an exemption.
+
+
+def _config_value_to_python(text: str):
+    """Translate a `nextflow.config` params{} RHS into a comparable Python value.
+
+    Groovy's `true`/`false`/`null` aren't Python literals; quoted strings,
+    numbers, and list literals of those already parse as valid Python via
+    `ast.literal_eval` (Groovy's `['a', 'b']` is also a valid Python list
+    literal).
+    """
+    keyword_literals = {"true": True, "false": False, "null": None}
+    if text in keyword_literals:
+        return keyword_literals[text]
+    return ast.literal_eval(text)
+
+
+def _normalize_flag(flag: str) -> str:
+    """`--foo-bar` / `--foo_bar` (or a short `-x`) -> `foo_bar` / `x`."""
+    return flag.lstrip("-").replace("-", "_")
+
+
+# A CLI flag immediately followed by one-or-more consecutive `${...}`
+# interpolations, e.g. `--n_iter ${params.preproc_n_iter}` or
+# `--n-tiles ${params.seg_n_tiles_y} ${params.seg_n_tiles_x}` (two
+# interpolations -- a composite flag this check deliberately does not
+# resolve; see `build_flag_param_maps`).
+_FLAG_INTERP_RE = re.compile(r"--([A-Za-z0-9][A-Za-z0-9_-]*)((?:\s+\$\{[^}]*\})+)")
+# A single `${...}` interpolation's content, only when it is one bare token
+# (a dotted `params.key` reference or a plain variable name) with no
+# surrounding whitespace -- i.e. not `${params.x ?: task.cpus}` or
+# `${row.ix}`-via-method-call style expressions, which are one level deeper
+# than this check resolves.
+_INTERP_ATOM_RE = re.compile(r"\$\{\s*([^}\s]+)\s*\}")
+# `def <var> = params.<key>` -- the one level of aliasing this check resolves.
+_DEF_ALIAS_RE = re.compile(
+    r"^\s*def\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*params\.([A-Za-z_][A-Za-z0-9_]*)\s*$",
+    re.MULTILINE,
+)
+# A line in a `modules/local/*.nf` `script:` block consisting solely of the
+# invoked bin/*.py script's name (Nextflow's `stripIndent()`'d triple-quoted
+# strings escape a trailing line-continuation as one or two literal `\`
+# characters, hence `\\*` rather than `\\?`). This is how this check learns
+# "which script is this text talking about" -- e.g. `preprocess.py \\` in
+# modules/local/preprocess.nf.
+_SCRIPT_LINE_RE = re.compile(r"^[ \t]*([A-Za-z_][A-Za-z0-9_]*\.py)[ \t]*\\*[ \t]*$", re.MULTILINE)
+# A backend-table entry in a `lib/*.groovy` file shaped like SegBackends.groovy's
+# `stardist: [container: '...', entrypoint: 'segment.py', ...]`: a bare
+# identifier key, immediately opening a list whose first two fields are
+# `container:` then `entrypoint: '<script>.py'`. This is how this check
+# resolves conf/modules.config's SEGMENT `ext.args`, which dispatches THREE
+# different bin/*.py scripts through a `params.seg_method`-keyed map of flag
+# lists but (unlike every other process in conf/modules.config) never spells
+# any of those three scripts' names in that map -- the entrypoint->script
+# correspondence lives only in this backend table. Keys are discovered
+# generically (whatever backends the table declares), not hardcoded to
+# 'stardist'/'instantseg'/'cellsam', so a future backend needs no code change
+# here to be picked up.
+_ENTRYPOINT_RE = re.compile(
+    r"([A-Za-z_][A-Za-z0-9_]*)\s*:\s*\[\s*container\s*:.*?entrypoint\s*:\s*'([\w.]+\.py)'",
+    re.DOTALL,
+)
+
+
+def _extract_atoms(
+    text: str, aliases: dict[str, str]
+) -> tuple[list[tuple[str, str]], set[str]]:
+    """Find `--flag ${...}` occurrences in `text`.
+
+    Returns `(resolved, multivalue)`: `resolved` is `(flag, param_key)` for
+    every occurrence resolving to exactly one bare `params.key` or aliased
+    variable; `multivalue` is the set of flag names seen with more than one
+    interpolation (a composite/nargs-style flag -- see `build_flag_param_maps`).
+    """
+    resolved: list[tuple[str, str]] = []
+    multivalue: set[str] = set()
+    for m in _FLAG_INTERP_RE.finditer(text):
+        flag = _normalize_flag(m.group(1))
+        atoms = _INTERP_ATOM_RE.findall(m.group(2))
+        if len(atoms) != 1:
+            multivalue.add(flag)
+            continue
+        atom = atoms[0]
+        if atom.startswith("params."):
+            resolved.append((flag, atom[len("params.") :].split(".")[0]))
+        elif atom in aliases:
+            resolved.append((flag, aliases[atom]))
+        # else: not a bare params ref and not a known simple alias -- a `?:`
+        # fallback or a method call -- one level too deep, left unresolved.
+    return resolved, multivalue
+
+
+def build_flag_param_maps() -> tuple[dict[tuple[str, str], str], dict[str, str]]:
+    """Derive authoritative flag->param correspondences from how the
+    pipeline itself invokes bin/*.py scripts, instead of guessing from the
+    flag's spelling.
+
+    Scans `modules/local/*.nf` and `conf/modules.config` for exactly two
+    shapes (this is deliberately NOT a general expression evaluator -- it
+    resolves at most one level):
+
+      - direct:      `--flag ${params.key}`
+      - def-aliased: `def var = params.key`  ...  `--flag ${var}`
+
+    Returns `(per_script, flag_only)`:
+
+      - `per_script`: keyed by `(invoking_script_basename, flag)`. This is
+        the primary authority, because it disambiguates flags that mean
+        different params in different scripts -- e.g. `--overlap` is
+        `preproc_overlap` when `preprocess.py` is the invoking script, but
+        `seg_cellsam_overlap` when it's `segment_cellsam.py`. The invoking
+        script for a `modules/local/*.nf` file's flags is read from the
+        nearest preceding `_SCRIPT_LINE_RE` match in that file (the file is
+        split into per-script segments, so a file invoking more than one
+        script, like register.nf's register.py then
+        create_channels_manifest.py, attributes each flag to the right one).
+        For `conf/modules.config`'s SEGMENT `ext.args` -- the one process
+        that dispatches three different scripts through a
+        `params.seg_method`-keyed flag-list map, without ever naming any of
+        them in that map -- the invoking script per backend key is resolved
+        via `_ENTRYPOINT_RE` against `lib/*.groovy`'s backend table (the only
+        place that correspondence is actually declared).
+      - `flag_only`: the flag-name-only map (no script disambiguation),
+        aggregated across every occurrence everywhere (including ones
+        already captured in `per_script`). Serves as the fallback when a
+        flag's invoking script couldn't be identified for a given
+        occurrence.
+
+    A (script, flag) pair -- or, for `flag_only`, a bare flag -- is excluded
+    from its map when:
+
+      - it resolves to more than one *distinct* param key within that same
+        scope. For `flag_only` this is common and expected (that's exactly
+        why `per_script` exists: e.g. bare `--model-name` is ambiguous
+        between `segmentation_model` and `seg_instantseg_model`, but
+        `("segment.py", "model_name")` and `("segment_instantseg.py",
+        "model_name")` are each unambiguous). Within `per_script`, a
+        collision would mean the same script's own flag maps to two
+        different params, which never happens in this codebase but would
+        indicate a scan bug if it did.
+      - any occurrence of the flag is followed by more than one
+        interpolation -- a composite/nargs-style flag consuming multiple
+        params at once, e.g. `--n-tiles ${params.seg_n_tiles_y}
+        ${params.seg_n_tiles_x}` (comparing a 2-element argparse default
+        against one scalar param would be a category error, not a real
+        drift check); or
+      - the interpolated expression isn't a bare `params.key` or a bare
+        aliased variable -- e.g. `${params.preproc_pool_workers ?:
+        task.cpus}` is a fallback expression one level deeper than this
+        resolves, so `--n_workers` is intentionally left unmapped rather
+        than compared against `preproc_pool_workers`'s null default (which
+        would be a false positive: null there means "derive at runtime",
+        the exact contract `test_no_duplicate_param_defaults` already
+        recognizes for the Groovy `?:` check above).
+    """
+    per_script_raw: dict[tuple[str, str], set[str]] = {}
+    flag_only_raw: dict[str, set[str]] = {}
+    multivalue: set[str] = set()
+
+    def record(script: str | None, flag: str, key: str) -> None:
+        if script is not None:
+            per_script_raw.setdefault((script, flag), set()).add(key)
+        flag_only_raw.setdefault(flag, set()).add(key)
+
+    for path in sorted(ROOT.glob("modules/local/*.nf")):
+        text = path.read_text()
+        aliases = dict(_DEF_ALIAS_RE.findall(text))
+        script_matches = list(_SCRIPT_LINE_RE.finditer(text))
+        # Text before the first script-name line (rare, but flags here can't
+        # be attributed to any particular script).
+        segments: list[tuple[str | None, str]] = [
+            (None, text[: script_matches[0].start()] if script_matches else text)
+        ]
+        for i, sm in enumerate(script_matches):
+            end = script_matches[i + 1].start() if i + 1 < len(script_matches) else len(text)
+            segments.append((sm.group(1), text[sm.end() : end]))
+        for script, segment_text in segments:
+            resolved, mv = _extract_atoms(segment_text, aliases)
+            multivalue |= mv
+            for flag, key in resolved:
+                record(script, flag, key)
+
+    config_text = MODULES_CONFIG_PATH.read_text()
+    backend_script: dict[str, str] = {}
+    for lib_path in sorted(ROOT.glob("lib/*.groovy")):
+        for m in _ENTRYPOINT_RE.finditer(lib_path.read_text()):
+            backend_script[m.group(1)] = m.group(2)
+
+    backend_spans: list[tuple[int, int]] = []
+    if backend_script:
+        alternation = "|".join(re.escape(key) for key in backend_script)
+        backend_block_re = re.compile(rf"({alternation})\s*:\s*\[(.*?)\]", re.DOTALL)
+        for m in backend_block_re.finditer(config_text):
+            backend_spans.append((m.start(), m.end()))
+            resolved, mv = _extract_atoms(m.group(2), {})
+            multivalue |= mv
+            for flag, key in resolved:
+                record(backend_script.get(m.group(1)), flag, key)
+
+    # Mask out the backend blocks already handled above so the remaining,
+    # non-backend-dispatched ext.args entries are only counted once (into
+    # flag_only, since conf/modules.config's other withName blocks don't
+    # multiplex several scripts through one block the way SEGMENT does).
+    remainder = list(config_text)
+    for start, end in backend_spans:
+        for i in range(start, end):
+            remainder[i] = " "
+    resolved, mv = _extract_atoms("".join(remainder), {})
+    multivalue |= mv
+    for flag, key in resolved:
+        record(None, flag, key)
+
+    per_script = {
+        k: next(iter(v)) for k, v in per_script_raw.items() if len(v) == 1
+    }
+    flag_only = {
+        f: next(iter(v))
+        for f, v in flag_only_raw.items()
+        if len(v) == 1 and f not in multivalue
+    }
+    return per_script, flag_only
+
+
+def _iter_add_argument_calls(tree: ast.AST):
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "add_argument"
+        ):
+            yield node
+
+
+def _is_required_true(call: ast.Call) -> bool:
+    """True iff this `add_argument()` call has a literal `required=True`.
+
+    A `required=True` argument can never fall back to its `default=` --
+    argparse raises if the flag is omitted, so nothing can silently drift to
+    an unreachable default. This is true whether or not the call even has a
+    `default=` kwarg: an argument that is BOTH `required=True` AND carries a
+    `default=` is unusual but legal, and that default is dead code -- it can
+    never execute -- for exactly the same reason, so it is excluded from
+    comparison identically to the more common required-with-no-default case.
+    A non-literal `required=` (a variable, an expression) is treated as NOT
+    required, matching this file's general policy of only acting on what can
+    be statically confirmed.
+    """
+    for kw in call.keywords:
+        if kw.arg == "required":
+            try:
+                return ast.literal_eval(kw.value) is True
+            except (ValueError, TypeError):
+                return False
+    return False
+
+
+def find_argparse_default_sites():
+    """Scan `bin/**/*.py` for `add_argument()` calls whose flag resolves to a
+    `nextflow.config` params{} key, via the per-script map, the flag-only
+    map, or (as a last resort) exact name-equality.
+
+    Returns `(matched, skipped, required, no_correspondence, declared)`:
+      - `matched`: `(path, flag, param_name, python_default, via)` for calls
+        with a literal `default=` (or no `default=` kwarg at all, which
+        argparse itself treats as `default=None`), where the argument is
+        NOT `required=True`. `via` is `"per-script"`, `"flag-only"`, or
+        `"name-eq"`, per the resolution precedence.
+      - `skipped`: `(path, flag, param_name, via)` for calls whose
+        `default=` is a non-literal expression (a variable, a call, an
+        f-string, ...) that `ast.literal_eval` cannot statically evaluate.
+      - `required`: `(path, flag, param_name, via)` for calls with a literal
+        `required=True` -- excluded from comparison regardless of whether a
+        `default=` is present, because a required argument's default (if
+        any) is dead code that can never be reached (see
+        `_is_required_true`).
+      - `no_correspondence`: `(path, flag)` for flags that resolved via
+        none of the three paths -- genuinely out of scope (e.g.
+        `--tolerance`), not a silently dropped result.
+      - `declared`: the `nextflow.config` params{} block, as parsed by
+        `parse_declared_params`.
+
+    Every argparse flag this function examines lands in exactly one of
+    `matched`, `skipped`, `required`, or `no_correspondence`, so their
+    combined length accounts for all of them.
+    """
+    declared = parse_declared_params(CONFIG_PATH.read_text())
+    per_script_map, flag_only_map = build_flag_param_maps()
+
+    matched: list[tuple[Path, str, str, object, str]] = []
+    skipped: list[tuple[Path, str, str, str]] = []
+    required: list[tuple[Path, str, str, str]] = []
+    no_correspondence: list[tuple[Path, str]] = []
+    for path in sorted(BIN_DIR.rglob("*.py")):
+        try:
+            tree = ast.parse(path.read_text(), filename=str(path))
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+        for call in _iter_add_argument_calls(tree):
+            flags = [
+                arg.value
+                for arg in call.args
+                if isinstance(arg, ast.Constant)
+                and isinstance(arg.value, str)
+                and arg.value.startswith("-")
+            ]
+            default_kw = next(
+                (kw.value for kw in call.keywords if kw.arg == "default"), None
+            )
+            is_required = _is_required_true(call)
+            for flag in flags:
+                name = _normalize_flag(flag)
+                if (path.name, name) in per_script_map:
+                    key, via = per_script_map[(path.name, name)], "per-script"
+                elif name in flag_only_map:
+                    key, via = flag_only_map[name], "flag-only"
+                elif name in declared:
+                    key, via = name, "name-eq"
+                else:
+                    no_correspondence.append((path, flag))
+                    continue
+                if is_required:
+                    required.append((path, flag, key, via))
+                    continue
+                if default_kw is None:
+                    matched.append((path, flag, key, None, via))
+                    continue
+                try:
+                    python_default = ast.literal_eval(default_kw)
+                except (ValueError, TypeError):
+                    skipped.append((path, flag, key, via))
+                    continue
+                matched.append((path, flag, key, python_default, via))
+    return matched, skipped, required, no_correspondence, declared
+
+
+def test_no_duplicate_bin_argparse_defaults():
+    """Every `bin/**/*.py` argparse default that resolves to a
+    `nextflow.config` param (via the per-script map, the flag-only map, or
+    exact name-equality as a last resort) must equal that param's default --
+    unless the argument is `required=True`, in which case its default (if
+    it even has one) is dead code that can never execute, so it is excluded
+    from comparison rather than compared against a value it can never
+    actually take.
+
+    Non-literal defaults (a variable, a call, an f-string) can't be
+    statically compared and are skipped. Flags with no correspondence at all
+    are genuinely out of scope. All three of these, plus the required-and-
+    excluded case, are counted, not silently dropped -- the warning this
+    test always emits reports FIVE numbers (checked via either derived map;
+    checked via name-equality; skipped as non-literal; excluded as
+    required=True; no correspondence found) whose sum is every argparse flag
+    this function examined, so no flag can fall out of the accounting
+    unobserved.
+    """
+    matched, skipped, required, no_correspondence, declared = (
+        find_argparse_default_sites()
+    )
+    total_examined = (
+        len(matched) + len(skipped) + len(required) + len(no_correspondence)
+    )
+
+    assert total_examined, (
+        "No bin/**/*.py argparse add_argument() call was found at all -- "
+        "the scan may be broken."
+    )
+
+    offending = []
+    for path, flag, key, python_default, via in matched:
+        allowlist_key = f"{path.name}:{flag}"
+        if allowlist_key in ARGPARSE_DEFAULT_ALLOWLIST:
+            continue
+        config_default = _config_value_to_python(declared[key])
+        if python_default != config_default:
+            offending.append(
+                f"{path.relative_to(ROOT)}: {flag} default={python_default!r} "
+                f"but nextflow.config's {key} = {config_default!r} (resolved "
+                f"via {via}). Either fix the Python default to match, or add "
+                f"an ARGPARSE_DEFAULT_ALLOWLIST entry keyed {allowlist_key!r} "
+                "with a reason."
+            )
+
+    via_per_script = sum(1 for *_, via in matched if via == "per-script")
+    via_flag_only = sum(1 for *_, via in matched if via == "flag-only")
+    via_map = via_per_script + via_flag_only
+    via_name_eq = sum(1 for *_, via in matched if via == "name-eq")
+    warnings.warn(
+        f"bin argparse-default check examined {total_examined} flag(s) total: "
+        f"{via_map} checked via the derived flag->param map "
+        f"({via_per_script} per-script, {via_flag_only} flag-only), "
+        f"{via_name_eq} via the name-equality fallback, {len(skipped)} "
+        "skipped (non-literal default=, cannot be statically compared), "
+        f"{len(required)} excluded as required=True (default, if any, is "
+        f"dead code), {len(no_correspondence)} with no correspondence found "
+        f"at all (out of scope). {via_map} + {via_name_eq} + {len(skipped)} "
+        f"+ {len(required)} + {len(no_correspondence)} = {total_examined}."
+        + (
+            " Skipped: "
+            + ", ".join(f"{p.relative_to(ROOT)}:{f}" for p, f, _, _ in skipped)
+            if skipped
+            else ""
+        ),
+        stacklevel=1,
+    )
+
+    assert not offending, (
+        f"{len(offending)} bin/*.py argparse default(s) drifted from "
+        "nextflow.config:\n" + "\n".join(offending)
+    )
+
+
+def test_argparse_default_allowlist_entries_have_reasons():
+    """Every `ARGPARSE_DEFAULT_ALLOWLIST` entry must be a `{reason}` dict.
+
+    Forces a non-empty, structured reason instead of a bare string or a
+    silently-forgotten entry -- mirrors the shape enforced on
+    `test_no_dead_bin_modules.py`'s `ALLOWLIST`.
+    """
+    for key, entry in ARGPARSE_DEFAULT_ALLOWLIST.items():
+        assert isinstance(entry, dict) and set(entry) == {"reason"}, (
+            f"ARGPARSE_DEFAULT_ALLOWLIST[{key!r}] must be a dict with exactly "
+            "a 'reason' key."
+        )
+        assert isinstance(entry["reason"], str) and entry["reason"].strip(), (
+            f"ARGPARSE_DEFAULT_ALLOWLIST[{key!r}]['reason'] must be a "
+            "non-empty string."
+        )

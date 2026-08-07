@@ -58,11 +58,7 @@ process TILED_REGISTER {
         --moving-name ${slidename} \\
         ${args}
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: \$(python --version 2>&1 | sed 's/Python //')
-        scikit-image: \$(python -c "import skimage; print(skimage.__version__)" 2>/dev/null || echo "unknown")
-    END_VERSIONS
+    ${ProcessEnvelope.versions(task.process, ['skimage'])}
     """
 
     stub:
@@ -74,10 +70,6 @@ process TILED_REGISTER {
     echo '{"moving":"${slidename}","reference":"ref","n_tiles":0,"mesh_refined":false}' > ${meta.patient_id}_${slidename}_tre.json
     echo "STUB,${meta.patient_id},stub,0" > ${meta.patient_id}_${slidename}.TILED_REGISTER.size.csv
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: stub
-        scikit-image: stub
-    END_VERSIONS
+    ${ProcessEnvelope.versionsStub(task.process, ['skimage'])}
     """
 }

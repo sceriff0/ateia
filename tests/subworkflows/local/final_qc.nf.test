@@ -1,0 +1,239 @@
+/*
+ * FINAL_QC — the end-of-run aggregation, shared by the linear path and by
+ * add_cycle. Both used to carry their own copy of it ("Mirrors the standard-path
+ * aggregation below").
+ *
+ * The contract under test is that ONE module serves both callers even though they
+ * contribute different sets of artifact kinds: add_cycle has no preprocess_qc, no
+ * registration_tre and no postprocess_qc. If the missing kinds were not defaulted to
+ * an empty list inside the module, `.collect()` on an empty channel would simply
+ * never emit and GENERATE_QC_REPORT would silently never run — a green pipeline
+ * with no report. Hence the explicit task-count assertions rather than
+ * `assert workflow.success` alone.
+ */
+nextflow_workflow {
+
+    name "Test FINAL_QC subworkflow (stub)"
+    script "subworkflows/local/final_qc.nf"
+    workflow "FINAL_QC"
+
+    test("standard path: every artifact kind present -> one report, one size rollup") {
+        tag "stub"
+        options "-stub"
+
+        when {
+            workflow {
+                """
+                input[0] = Channel.of(
+                    ['preprocess_qc',   file('$projectDir/tests/testdata/sample_DAPI.tif')],
+                    ['registration_qc', file('$projectDir/tests/testdata/sample_PANCK.tif')],
+                    ['registration_tre', file('$projectDir/tests/testdata/sample_valis_summary.csv')],
+                    ['postprocess_qc',  file('$projectDir/tests/testdata/sample_SMA.tif')],
+                    ['seg_qc',          file('$projectDir/tests/testdata/sample_seg_qc.json')],
+                    ['seg_residuals',   file('$projectDir/tests/testdata/sample_reg_residuals.csv')],
+                    ['versions',        file('$projectDir/tests/testdata/sample_versions.yml')],
+                    ['size_log',        file('$projectDir/tests/testdata/sample_size_log1.csv')],
+                    ['size_log',        file('$projectDir/tests/testdata/sample_size_log2.csv')]
+                )
+                input[1] = Channel.value([stop: 'postprocessing', patients: [P001: 2], channels: [P001: 5], declared_channels: [P001: 6]])
+                """
+            }
+            params {
+                outdir = "$outputDir"
+                skip_final_qc_report = false
+                enable_trace = true
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.contains('GENERATE_QC_REPORT') }.size() == 1 },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.contains('AGGREGATE_SIZE_LOGS') }.size() == 1 },
+                { assert path("$outputDir/qc").list().any { it.toString().contains('mirage_qc_report_') } }
+            )
+        }
+    }
+
+    test("add_cycle path: only the kinds add_cycle emits -> the same single report") {
+        tag "stub"
+        options "-stub"
+
+        when {
+            workflow {
+                """
+                // No preprocess_qc / registration_tre / postprocess_qc: ADD_CYCLE re-uses
+                // the prior segmentation and does not re-expose PREPROCESSING's QC.
+                input[0] = Channel.of(
+                    ['registration_qc', file('$projectDir/tests/testdata/sample_PANCK.tif')],
+                    ['seg_qc',          file('$projectDir/tests/testdata/sample_seg_qc.json')],
+                    ['versions',        file('$projectDir/tests/testdata/sample_versions.yml')],
+                    ['size_log',        file('$projectDir/tests/testdata/sample_size_log1.csv')]
+                )
+                input[1] = Channel.value([stop: 'add_cycle', patients: [P001: 1], channels: [P001: 2], declared_channels: [P001: 3]])
+                """
+            }
+            params {
+                outdir = "$outputDir"
+                mode = 'add_cycle'
+                skip_final_qc_report = false
+                enable_trace = true
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                // Same module, same arity, one invocation — the three absent kinds are
+                // defaulted inside FINAL_QC, not padded at the call site.
+                { assert workflow.trace.tasks().findAll {
+                    it.name.contains('GENERATE_QC_REPORT') }.size() == 1 },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.contains('AGGREGATE_SIZE_LOGS') }.size() == 1 },
+                { assert path("$outputDir/qc").list().any { it.toString().contains('mirage_qc_report_') } }
+            )
+        }
+    }
+
+    test("--skip_final_qc_report suppresses the report but not the size rollup") {
+        tag "stub"
+        options "-stub"
+
+        when {
+            workflow {
+                """
+                input[0] = Channel.of(
+                    ['versions', file('$projectDir/tests/testdata/sample_versions.yml')],
+                    ['size_log', file('$projectDir/tests/testdata/sample_size_log1.csv')]
+                )
+                input[1] = Channel.value([stop: 'postprocessing', patients: [P001: 2], channels: [P001: 5], declared_channels: [P001: 6]])
+                """
+            }
+            params {
+                outdir = "$outputDir"
+                skip_final_qc_report = true
+                enable_trace = true
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.contains('GENERATE_QC_REPORT') }.size() == 0 },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.contains('AGGREGATE_SIZE_LOGS') }.size() == 1 }
+            )
+        }
+    }
+
+    /*
+     * The tag vocabulary is hand-written at both call sites. A typo ('registration_QC')
+     * matches no artifactsOf() filter, so that whole QC category would vanish from the
+     * report — the run stays green, GENERATE_QC_REPORT still runs exactly once, and every
+     * OTHER test in this file still passes, because they assert task counts and not report
+     * contents. Under the old positional signature the same typo was a parse-time
+     * resolution error. This test is the replacement for that safety.
+     */
+    test("an unknown artifact kind fails loudly instead of dropping the category") {
+        tag "stub"
+        options "-stub"
+
+        when {
+            workflow {
+                """
+                input[0] = Channel.of(
+                    ['registration_QC', file('$projectDir/tests/testdata/sample_PANCK.tif')],
+                    ['versions',        file('$projectDir/tests/testdata/sample_versions.yml')]
+                )
+                input[1] = Channel.value([stop: 'postprocessing', patients: [P001: 2], channels: [P001: 5], declared_channels: [P001: 6]])
+                """
+            }
+            params {
+                outdir = "$outputDir"
+                skip_final_qc_report = false
+                enable_trace = true
+            }
+        }
+
+        then {
+            def report = (workflow.stdout + workflow.stderr).join('\n') + (workflow.errorReport ?: '') + (workflow.errorMessage ?: '')
+            assertAll(
+                { assert workflow.failed },
+                // The message must name the offending tag, not just "invalid input".
+                { assert report.contains('registration_QC') },
+                { assert report.contains('unknown artifact kind') }
+            )
+        }
+    }
+
+    /*
+     * The guard is registered outside both param gates, so it fires even on a run that
+     * asks for neither output — otherwise a typo would sit undetected until someone
+     * turned the report back on.
+     */
+    test("the vocabulary guard fires even with both outputs switched off") {
+        tag "stub"
+        options "-stub"
+
+        when {
+            workflow {
+                """
+                input[0] = Channel.of(
+                    ['size_logs', file('$projectDir/tests/testdata/sample_size_log1.csv')]
+                )
+                input[1] = Channel.value([stop: 'postprocessing', patients: [P001: 2], channels: [P001: 5], declared_channels: [P001: 6]])
+                """
+            }
+            params {
+                outdir = "$outputDir"
+                skip_final_qc_report = true
+                enable_trace = false
+            }
+        }
+
+        then {
+            def report = (workflow.stdout + workflow.stderr).join('\n') + (workflow.errorReport ?: '') + (workflow.errorMessage ?: '')
+            assertAll(
+                { assert workflow.failed },
+                // 'size_logs' is the plural near-miss of the real kind, 'size_log'.
+                { assert report.contains('size_logs') }
+            )
+        }
+    }
+
+    test("--enable_trace false suppresses the size rollup but not the report") {
+        tag "stub"
+        options "-stub"
+
+        when {
+            workflow {
+                """
+                input[0] = Channel.of(
+                    ['versions', file('$projectDir/tests/testdata/sample_versions.yml')],
+                    ['size_log', file('$projectDir/tests/testdata/sample_size_log1.csv')]
+                )
+                input[1] = Channel.value([stop: 'postprocessing', patients: [P001: 2], channels: [P001: 5], declared_channels: [P001: 6]])
+                """
+            }
+            params {
+                outdir = "$outputDir"
+                skip_final_qc_report = false
+                enable_trace = false
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.contains('GENERATE_QC_REPORT') }.size() == 1 },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.contains('AGGREGATE_SIZE_LOGS') }.size() == 0 }
+            )
+        }
+    }
+
+}

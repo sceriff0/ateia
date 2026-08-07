@@ -331,7 +331,7 @@ def parse_args():
     parser.add_argument(
         "--batch-size",
         type=int,
-        default=1,
+        default=16,
         help="Tiles per forward pass; raise on large GPUs for throughput",
     )
 

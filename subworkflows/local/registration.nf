@@ -8,8 +8,9 @@ include { GENERATE_REGISTRATION_QC          } from '../../modules/local/generate
 
 include { SEG_QC                            } from './seg_qc'
 
-include { VALIS_ADAPTER                     } from './adapters/valis_adapter'
-include { TILED_ADAPTER                     } from './adapters/tiled_adapter'
+// The passthrough branch, the VALIS/tiled dispatch and the checkpoint manifest are
+// REGISTER_PATIENT's, shared with add_cycle.nf.
+include { REGISTER_PATIENT                  } from './register_patient'
 
 
 /*
@@ -19,11 +20,14 @@ include { TILED_ADAPTER                     } from './adapters/tiled_adapter'
     Configuration:
         - params.skip_registration_qc: true | false (skip QC generation)
         - params.qc_scale_factor: float (QC downsampling factor, default 0.25)
-        - method: 'valis'
+        - params.registration_method: 'valis' | 'tiled' -- read ONCE here, the single
+          decision site on this path, and handed as an ARGUMENT to both REGISTER_PATIENT
+          (which owns the adapter dispatch) and SEG_QC (which owns the warp dispatch).
+          Neither reads the global, so neither can be what lifts add_cycle's VALIS-only
+          guarantee.
 
     Input:
         ch_preprocessed: Channel of [meta, file] tuples
-        method: Registration method name
 
     Output:
         registered: Channel of [meta, file] tuples (standard format)
@@ -107,51 +111,36 @@ workflow REGISTRATION {
             [patient_id, ref, items]
         }
 
-    // Single-slide patients (only the reference, nothing to register) must NOT
-    // be sent to the registration adapter: VALIS crashes on a lone image
-    // ("negative dimensions are not allowed" / "M is None — no transformation
-    // matrix"). For such a patient the reference IS the registered output, so we
-    // branch it out here and pass it straight through to ch_registered below.
-    ch_grouped_split = ch_grouped.branch { pid, ref, items ->
-        single: items.size() == 1
-        multi:  true
-    }
-    ch_grouped_multi = ch_grouped_split.multi
-    ch_passthrough   = ch_grouped_split.single.map { pid, ref, items -> ref }  // [meta, file]
-
-    // Flattened back to [meta, file] for consumers (seg-QC) that segment individual slides
-    // rather than patient groups. Single-slide patients are excluded here on purpose: they
-    // have no moving slide to score against, so segmenting their reference would compute a
-    // full GPU StarDist WSI segmentation and discard it.
-    //
-    // NOTE: unlike the raw ch_preprocessed stream, `items` here comes out of the grouping
-    // closure above, so under allow_auto_reference=true it carries that closure's
-    // is_reference: true fill-in (registration.nf:100) for patients whose CSV marked no
-    // reference. seg_qc.nf's reference/moving branch reads meta.is_reference, so this
-    // channel is what lets an auto-reference multi-slide patient be scored at all — sourced
-    // from the raw stream, that patient's reference branch was empty and it silently
-    // produced zero seg-QC output.
-    ch_images_multi = ch_grouped_multi.flatMap { pid, ref, items -> items }
-
     // ========================================================================
-    // STEP 3: RUN REGISTRATION VIA METHOD-SPECIFIC ADAPTER
+    // STEP 3: REGISTER EACH PATIENT GROUP
     // ========================================================================
-    // Each adapter:
-    //   - Takes: ch_grouped (patient-grouped structure with references identified)
-    //   - Converts to method-specific format
-    //   - Runs registration
-    //   - Converts output back to [meta, file] standard format
-
-    // Default registration runs via the classic monolithic VALIS adapter (single-process
-    // REGISTER). NOTE: the *old distributed-VALIS* low-memory path was archived 2026-07-24
-    // (git tag archive/tiled-valis-2026-07-24). The current `registration_method='tiled'`
-    // is a SEPARATE, live STARE backend dispatched via TILED_ADAPTER below — not that
-    // archived path. Don't confuse the two.
+    // The single-slide passthrough branch, the method dispatch (VALIS / tiled) and
+    // the checkpoint manifest all live in REGISTER_PATIENT, which add_cycle.nf also
+    // calls — it used to reimplement them, and had lost two of the three.
     //
-    // Registrar pickle (per patient) for the GeoJSON seg-QC, and the pre-micro displacement
-    // fields (only when reg_qc >= 2 asked REGISTER for them), both come from classic VALIS.
-    ch_registrar_pickle = Channel.empty()
-    ch_stage_checkpoint = Channel.empty()
+    // The GROUPING above stays here: the linear path's sized groupKey and its
+    // allow_auto_reference resolution have no counterpart on the add_cycle path,
+    // whose reference is the frozen prior one.
+    // The ONE read of params.registration_method on this path. Bound once and passed as an
+    // argument to both consumers, so there is a single decision site instead of two reads
+    // that could drift apart.
+    def registration_method = params.registration_method
+
+    REGISTER_PATIENT(ch_grouped, registration_method)
+
+    ch_registered         = REGISTER_PATIENT.out.registered
+    ch_images_multi       = REGISTER_PATIENT.out.images_multi
+    // The method's transform, per patient (VALIS registrar pickle / STARE manifest) and --
+    // where the method has one -- per moving slide. The unfilled one is Channel.empty().
+    ch_transform          = REGISTER_PATIENT.out.transform
+    ch_transform_by_slide = REGISTER_PATIENT.out.transform_by_slide
+    ch_stage_checkpoint   = REGISTER_PATIENT.out.stage_checkpoint
+    ch_adapter_logs       = REGISTER_PATIENT.out.size_logs
+    ch_adapter_versions   = REGISTER_PATIENT.out.versions
+    // The method's OWN target-registration-error estimate. Both backends produce one
+    // (VALIS a feature-distance CSV, STARE a *_tre.json); a backend that produced none
+    // would emit Channel.empty() here and every consumer must tolerate that.
+    ch_registration_tre   = REGISTER_PATIENT.out.intrinsic_tre
 
     // reg_qc: 0 = none, 1 = DAPI overlay, 2 = + segmentation overlap (legacy
     // skip_registration_qc=true forces 0). ParamUtils.regQcLevel is the single definition.
@@ -159,36 +148,9 @@ workflow REGISTRATION {
 
     // Level 2 warps polygons through the registrar the method produced — the VALIS pickle (via the
     // BioFormats JVM) or the STARE manifest (JVM-free). The scorer is identical; only the warper
-    // differs (WARP_SEG_QC vs WARP_SEG_QC_TILED). Segmentation of the native slides is shared.
+    // differs (WARP_SEG_QC's two backends, keyed by lib/WarpBackends.groovy). Segmentation of
+    // the native slides is shared.
     def do_seg_qc = reg_qc_level >= 2
-
-    // Per-moving-slide STARE manifest (meta-keyed), used by the tiled reg_qc=2 seg-QC join.
-    ch_manifest_by_meta = Channel.empty()
-
-    // Dispatch on the registration method. Both adapters emit the identical channel contract,
-    // so everything downstream (QC, checkpoint, error estimation) is method-agnostic.
-    if (params.registration_method == 'tiled') {
-        TILED_ADAPTER(ch_grouped_multi)
-        ch_registered       = TILED_ADAPTER.out.registered
-        ch_registrar_pickle = TILED_ADAPTER.out.manifest
-        ch_manifest_by_meta = TILED_ADAPTER.out.manifest_by_meta
-        ch_stage_checkpoint = TILED_ADAPTER.out.stage_checkpoint
-        ch_adapter_logs     = TILED_ADAPTER.out.size_logs
-        ch_adapter_versions = TILED_ADAPTER.out.versions
-        ch_adapter_summary  = TILED_ADAPTER.out.summary
-    } else {
-        VALIS_ADAPTER(ch_grouped_multi)
-        ch_registered       = VALIS_ADAPTER.out.registered
-        ch_registrar_pickle = VALIS_ADAPTER.out.registrar
-        ch_stage_checkpoint = VALIS_ADAPTER.out.stage_checkpoint
-        ch_adapter_logs     = VALIS_ADAPTER.out.size_logs
-        ch_adapter_versions = VALIS_ADAPTER.out.versions
-        ch_adapter_summary  = VALIS_ADAPTER.out.summary
-    }
-
-    // Re-introduce single-slide patients (reference passed through unregistered)
-    // into the registered stream for QC, checkpointing and postprocessing.
-    ch_registered = ch_registered.mix(ch_passthrough)
 
     // ========================================================================
     // STEP 3b: GENERATE QC (Method-independent)
@@ -235,12 +197,13 @@ workflow REGISTRATION {
     ch_seg_qc_size_log = Channel.empty()
     ch_seg_qc_versions = Channel.empty()
     // The whole block (segment natives -> branch -> checkpoint totalisation -> method-specific
-    // warp) lives in subworkflows/local/seg_qc.nf, shared with add_cycle.nf. The valis/tiled
-    // dispatch is SEG_QC's business, so nothing here reaches back through the adapter seam:
-    // the tiled-only and valis-only channels are handed over together and SEG_QC reads the
-    // ones its branch needs (the other side is Channel.empty() and is never consumed).
+    // warp) lives in subworkflows/local/seg_qc.nf, shared with add_cycle.nf. Both transform
+    // channels are handed over under the adapters' shared names; whichever one the method does
+    // not produce is Channel.empty() (the adapters' null-object contract) and is never read.
+    // The method reaches SEG_QC as an ARGUMENT — the same value REGISTER_PATIENT got above.
     if (do_seg_qc) {
-        SEG_QC(ch_images_multi, ch_registrar_pickle, ch_stage_checkpoint, ch_manifest_by_meta)
+        SEG_QC(ch_images_multi, ch_transform, ch_stage_checkpoint, ch_transform_by_slide,
+               registration_method)
         ch_seg_qc          = SEG_QC.out.metrics
         ch_seg_residuals   = SEG_QC.out.per_cell
         ch_seg_qc_size_log = SEG_QC.out.size_log
@@ -250,38 +213,9 @@ workflow REGISTRATION {
     // ========================================================================
     // STEP 4: CHECKPOINT
     // ========================================================================
-    // Use collectFile() for non-blocking aggregation (enables patient-level parallelism)
-    ch_checkpoint_csv = ch_registered
-        .map { meta, file ->
-            // Construct the path where the file will be published
-            // Must match the publishDir configuration in modules.config
-            //
-            // METHOD-AGNOSTIC APPROACH:
-            // Detect if file is in a subdirectory by checking parent directory name length.
-            // Nextflow work dirs are 32-char hex hashes (e.g., e6194a65f430c8860ff1f93c4a556c).
-            // Real subdirectories (e.g., "registered_slides") have different lengths.
-            //
-            // - VALIS: work/.../registered_slides/file.tiff → parent="registered_slides" (17 chars)
-            // - CPU/GPU: work/.../e6194a65f430c8860ff1f93c4a556c/file.tiff → parent=hash (32 chars)
-            // - References: work/.../de93746794b82349b3fde77bf41502/file.tif → parent=hash (32 chars)
-
-            def file_path = file instanceof List ? file[0] : file
-            def filename = file_path.name
-            def parent_name = file_path.parent?.name ?: ''
-
-            // If parent name is NOT a Nextflow work hash (32 hex chars), it's a real subdirectory
-            def is_work_hash = parent_name.length() == 32 && parent_name.matches(/^[0-9a-f]{32}$/)
-            def relative_path = is_work_hash ? filename : "${parent_name}/${filename}"
-
-            def published_path = "${params.outdir}/${meta.patient_id}/registered/${relative_path}"
-            "${meta.patient_id},${published_path},${meta.is_reference},${meta.channels.join('|')}"
-        }
-        .collectFile(
-            name: 'registered.csv',
-            newLine: true,
-            storeDir: "${params.outdir}/csv",
-            seed: 'patient_id,registered_image,is_reference,channels'
-        )
+    // Written by REGISTER_PATIENT (via REGISTERED_CHECKPOINT), so the add_cycle path
+    // — which does not come through here — produces the identical manifest.
+    ch_checkpoint_csv = REGISTER_PATIENT.out.checkpoint_csv
 
     // Collect size logs from all registration processes
     ch_size_logs = Channel.empty()
@@ -317,7 +251,7 @@ workflow REGISTRATION {
     qc               = ch_qc
     seg_qc           = ch_seg_qc
     seg_residuals    = ch_seg_residuals
-    valis_summary    = ch_adapter_summary
+    registration_tre = ch_registration_tre
     size_logs        = ch_size_logs
     versions         = ch_versions
 }

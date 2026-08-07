@@ -2,107 +2,26 @@
 ================================================================================
     MIRAGE WSI Processing Pipeline — Main Workflow
 ================================================================================
-*/
+    This file has ONE job: validate the launch parameters and route the run to
+    the right subworkflow. Anything that shapes a channel, assembles a
+    subworkflow's inputs, or aggregates its outputs belongs to that subworkflow:
 
-import groovy.json.JsonOutput
+      samplesheet -> sample channel        subworkflows/local/input_check.nf
+      prior-run asset reconstruction       subworkflows/local/add_cycle.nf
+      QC report + size-log aggregation     subworkflows/local/final_qc.nf
+================================================================================
+*/
 
 include { validateParameters  } from 'plugin/nf-schema'
 
+include { INPUT_CHECK         } from '../subworkflows/local/input_check'
 include { PREPROCESSING       } from '../subworkflows/local/preprocess'
 include { REGISTRATION        } from '../subworkflows/local/registration'
+include { SEGMENTATION; READ_SEGMENTED_CHECKPOINT } from '../subworkflows/local/segmentation'
 include { POSTPROCESSING      } from '../subworkflows/local/postprocess'
 include { ADD_CYCLE           } from '../subworkflows/local/add_cycle'
-include { AGGREGATE_SIZE_LOGS         } from '../modules/local/aggregate_size_logs'
-include { GENERATE_QC_REPORT          } from '../modules/local/generate_qc_report'
-include { EXTRACT_MASK_SERIES         } from '../modules/local/extract_mask_series'
+include { FINAL_QC            } from '../subworkflows/local/final_qc'
 
-
-/*
-================================================================================
-    HELPER FUNCTIONS
-================================================================================
-*/
-
-def loadInputChannel(csv_path, image_column, patient_counts = null, channel_counts = null) {
-    def ch = Channel
-        .fromPath(csv_path, checkIfExists: true)
-        .splitCsv(header: true)
-        .map { row ->
-            def meta = CsvUtils.parseMetadata(row, "CSV ${csv_path}")
-            // Per-image unique id (patient_id + source-image stem). Drives output
-            // file naming so a patient's multiple images do not produce identically
-            // named files that collide when collected downstream (QC, registration).
-            def stem = file(row[image_column]).simpleName
-            meta.id = stem.startsWith(meta.patient_id) ? stem : "${meta.patient_id}_${stem}"
-            return tuple(meta, file(row[image_column]))
-        }
-
-    // If patient counts provided, add images_count to meta for streaming groupTuple
-    if (patient_counts) {
-        def counts_ch = Channel.fromList(patient_counts.collect { k, v -> [k, v] })
-        ch = ch
-            .map { meta, f -> [meta.patient_id, meta, f] }
-            .combine(counts_ch, by: 0)
-            .map { patient_id, meta, f, count ->
-                // `+` creates a new top-level map, but Groovy's Map.plus() is
-                // cloneSimilarMap(left).putAll(right) -- clone-then-putAll,
-                // operationally identical to clone(). meta.channels is still
-                // the same List reference as in the original meta. See
-                // subworkflows/local/adapters/valis_adapter.nf:82-88 for why
-                // that matters and why toSorted() (not sort()) is mandatory
-                // wherever meta.channels is read.
-                def updated_meta = meta + [images_count: count]
-                [updated_meta, f]
-            }
-    }
-
-    // If channel counts provided, add channels_count to meta for streaming groupTuple in postprocessing
-    if (channel_counts) {
-        def ch_counts = Channel.fromList(channel_counts.collect { k, v -> [k, v] })
-        ch = ch
-            .map { meta, f -> [meta.patient_id, meta, f] }
-            .combine(ch_counts, by: 0)
-            .map { patient_id, meta, f, count ->
-                // `+` creates a new top-level map, but Groovy's Map.plus() is
-                // cloneSimilarMap(left).putAll(right) -- clone-then-putAll,
-                // operationally identical to clone(). meta.channels is still
-                // the same List reference as in the original meta. See
-                // subworkflows/local/adapters/valis_adapter.nf:82-88 for why
-                // that matters and why toSorted() (not sort()) is mandatory
-                // wherever meta.channels is read.
-                def updated_meta = meta + [channels_count: count]
-                [updated_meta, f]
-            }
-    }
-
-    // Fail-fast guard: `.combine(by: 0)` above is an INNER join keyed on
-    // patient_id. If a row's patient_id does not exactly match a key in the
-    // pre-computed counts map (e.g. stray whitespace CsvUtils.parseMetadata
-    // failed to trim), the row is silently dropped with no warning or error —
-    // that is the exact mechanism of the samplesheet-row-drop bug this guard
-    // closes. Compare what actually reaches the channel against the
-    // independently-computed per-patient image total and error loudly (not
-    // log.warn) on any shortfall, naming patient_id so the cause is obvious.
-    if (patient_counts) {
-        def expected_count = patient_counts.values().sum() ?: 0
-        ch.count().subscribe { emitted ->
-            if (emitted < expected_count) {
-                error "loadInputChannel(${csv_path}): ${expected_count - emitted} row(s) were silently dropped " +
-                      "joining on patient_id (expected ${expected_count} row(s), got ${emitted}). This means a " +
-                      "row's patient_id does not exactly match the value used to pre-compute per-patient counts " +
-                      "(e.g. leading/trailing whitespace) so the inner-join combine(by: 0) discarded it."
-            }
-        }
-    }
-
-    return ch
-}
-
-/*
-================================================================================
-    WORKFLOW
-================================================================================
-*/
 
 workflow MIRAGE {
 
@@ -119,10 +38,51 @@ workflow MIRAGE {
 
     ParamUtils.validateOutdir(params.outdir)
 
+    /* -------------------- STEP GATE -------------------- */
+
+    // Validate and resolve --stop: default to last step if not provided. Computed
+    // HERE, before the mode branch, so add_cycle shares it with the standard path
+    // instead of bypassing it: add_cycle used to fall straight into its own
+    // validation block and never look at --start/--stop at all, so a contradictory
+    // pair (e.g. --start postprocessing --stop preprocessing) silently passed
+    // --dry_run instead of erroring the way the standard path always has.
+    if (params.stop) {
+        ParamUtils.validateStop(params.stop, params.start)
+    }
+    def effective_stop = params.stop ?: ParamUtils.STEP_ORDER.last()
+
+    // Which steps this run covers. Computed once: the gate is a pure function of
+    // (start, stop), so re-asking it at every site only creates opportunities for
+    // the three arguments to disagree. (A closure would read better still, but the
+    // strict Nextflow parser cannot invoke a closure-typed local as a function.)
+    // add_cycle does not consume these booleans below -- it has its own fixed
+    // recompute-registration-and-quantification flow, gated by validateAddCycle's
+    // own prerequisites, not by --start/--stop -- but it shares the validation
+    // above them, which is the point of moving this block up.
+    boolean run_preprocessing  = ParamUtils.shouldRun('preprocessing', params.start, effective_stop)
+    boolean run_registration   = ParamUtils.shouldRun('registration', params.start, effective_stop)
+    boolean run_segmentation   = ParamUtils.shouldRun('segmentation', params.start, effective_stop)
+    boolean run_postprocessing = ParamUtils.shouldRun('postprocessing', params.start, effective_stop)
+
+    // --quantify_compartments / --expanded_quantification / --embed_masks, resolved
+    // ONCE here (the single decision site on every path, standard and add_cycle
+    // alike) and threaded down as an argument -- the same seam
+    // --registration_method has in subworkflows/local/registration.nf. Nothing
+    // below this line should read params.quantify_compartments /
+    // params.expanded_quantification / params.embed_masks directly;
+    // tests/test_compartment_mode_routing.py enforces that.
+    def compartment_mode = ParamUtils.compartmentMode(params)
+
     /* -------------------- MODE: ADD_CYCLE -------------------- */
     if (params.mode == 'add_cycle') {
-        ParamUtils.validateAddCycle(params.prior_outdir)
-        ParamUtils.validateCompartmentQuant(params.quantify_compartments, params.expanded_quantification)
+        // add_cycle has a FIXED path (no --start/--stop choice), so a caller who
+        // passes either is rejected here rather than accepted-and-ignored: the
+        // earlier behaviour let --stop registration run the ENTIRE path through
+        // export while run_summary.json claimed the run stopped after
+        // registration — an accuracy bug at the label's source, not the label.
+        ParamUtils.validateAddCycleStepFlags(params)
+        ParamUtils.validateAddCycle(params.outdir, params.prior_outdir)
+        ParamUtils.validateCompartmentQuant(compartment_mode)
         ParamUtils.validateAddCyclePhenotyping(params)  // add_cycle has no PHENOTYPE stage
         // add_cycle re-registers the new cycle via the classic VALIS_ADAPTER only; the
         // STARE 'tiled' backend is not wired into the incremental path — reject it loudly
@@ -139,12 +99,12 @@ workflow MIRAGE {
         // this CSV). Pass allow-no-reference=true so validation does not reject
         // the by-design zero-reference sheet. (Registration still uses the prior
         // reference — ADD_CYCLE forces the new cycle to is_reference=false.)
-        CsvUtils.validateInputSemantics(params.input, 'preprocessing', true)
+        CsvUtils.validateInputSemantics(params.input, 'preprocessing', true, params.nuclear_markers)
 
         // Fast-fail: every new-cycle patient must exist in the prior run's
         // postprocessed checkpoint, else its masks/base-table can't be sourced.
         def newPatients   = CsvUtils.countImagesPerPatient(params.input).keySet()
-        def priorPostCsv  = "${params.prior_outdir}/csv/postprocessed.csv"
+        def priorPostCsv  = Layout.checkpointCsv(params.prior_outdir, Layout.POSTPROCESSED)
         def priorPatients = CsvUtils.countImagesPerPatient(priorPostCsv).keySet()
         def orphans = newPatients - priorPatients
         if (orphans) {
@@ -153,129 +113,48 @@ workflow MIRAGE {
         }
 
         if (params.dry_run) {
-            log.info "DRY RUN (add_cycle): validations passed for --input=${params.input}, --prior_outdir=${params.prior_outdir}; mask extraction will run against ${params.prior_outdir}/csv/postprocessed.csv's pyramid column."
+            log.info "DRY RUN (add_cycle): validations passed for --input=${params.input}, --prior_outdir=${params.prior_outdir}; mask extraction will run against ${priorPostCsv}'s pyramid column."
             return
         }
 
-        // New-cycle raw images -> [meta, file] (reuse existing loader + counts).
-        def new_counts    = CsvUtils.countImagesPerPatient(params.input)
-        def new_ch_counts = CsvUtils.countChannelsPerPatient(params.input)
-        def ch_new_input  = loadInputChannel(params.input, 'path_to_file', new_counts, new_ch_counts)
+        // autoReference = false: add_cycle registers against the PRIOR run's reference,
+        // which is never a row in this sheet, so no row here keeps its nuclear channel
+        // and the new cycle's markers are the declared channels minus the nuclear one.
+        INPUT_CHECK(params.input, 'path_to_file', false)
 
-        // Prior reusable assets from the previous run's checkpoint CSVs.
-        // registered.csv: patient_id,registered_image,is_reference,channels
-        def ch_prior_ref = Channel
-            .fromPath("${params.prior_outdir}/csv/registered.csv", checkIfExists: true)
-            .splitCsv(header: true)
-            .filter { row -> row.is_reference?.toLowerCase() == 'true' }
-            .map { row ->
-                def chans = (row.channels ?: '').split('\\|').collect { it.trim() }.findAll { it }
-                [row.patient_id, chans, file(row.registered_image)]
-            }
+        // ADD_CYCLE rebuilds the prior run's reusable assets itself, from
+        // --prior_outdir's checkpoint CSVs.
+        ADD_CYCLE(INPUT_CHECK.out.samples, compartment_mode)
 
-        // postprocessed.csv: patient_id,cell_csv,cell_geojson,merged_csv,cell_mask,pyramid
-        def ch_prior_rows = Channel
-            .fromPath("${params.prior_outdir}/csv/postprocessed.csv", checkIfExists: true)
-            .splitCsv(header: true)
-            .map { row -> [row.patient_id, file(row.merged_csv), file(row.cell_mask), file(row.pyramid)] }
-
-        // Extract masks from the prior pyramid's Image:1 series (fast-fails in the
-        // process if the prior run was not embed_masks+expanded+compartment).
-        EXTRACT_MASK_SERIES(ch_prior_rows.map { pid, _merged_csv, _cell_mask, pyramid -> [[patient_id: pid, id: pid], pyramid] })
-        def ch_masks = EXTRACT_MASK_SERIES.out.cell_mask.map { m, f -> [m.patient_id, f] }
-            .join(EXTRACT_MASK_SERIES.out.nuclei_mask.map { m, f -> [m.patient_id, f] }, by: 0)
-
-        def ch_prior_post = ch_prior_rows
-            .map { pid, merged_csv, _cell_mask, pyramid -> [pid, merged_csv, pyramid] }
-            .join(ch_masks, by: 0)
-            .map { pid, merged_csv, pyramid, cell_mask, nuclei_mask ->
-                [pid, merged_csv, cell_mask, nuclei_mask, pyramid] }
-
-        // Join into a single per-patient asset tuple.
-        def ch_prior_assets = ch_prior_ref
-            .join(ch_prior_post, by: 0)
-            .map { pid, ref_channels, ref_image, merged_csv, cell_mask, nuclei_mask, pyramid ->
-                [pid, ref_channels, ref_image, merged_csv, cell_mask, nuclei_mask, pyramid]
-            }
-
-        ADD_CYCLE(ch_new_input, ch_prior_assets)
-
-        /* -------------------- FINAL QC REPORT (add_cycle) -------------------- */
-        // Mirrors the standard-path aggregation below (version collation + QC report +
-        // optional size-log aggregation), scoped to what ADD_CYCLE actually emits.
-        // ADD_CYCLE has no separate PREPROCESSING-QC / VALIS-summary / POSTPROCESSING-QC
-        // emits of its own (it calls PREPROCESSING internally but does not re-expose its
-        // QC pngs, and it has no POSTPROCESSING step at all — masks are reused, not
-        // re-segmented) — those three report inputs are deliberately left empty here
-        // rather than silently dropping the whole report.
-        if (!params.skip_final_qc_report) {
-            def ch_collated_versions = ADD_CYCLE.out.versions
-                .unique()
-                .collectFile(name: 'collated_versions.yml')
-
-            def run_summary_map = [
-                pipeline: [name: workflow.manifest.name, version: workflow.manifest.version],
-                run: [
-                    timestamp: new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss 'UTC'")
-                        .format(new Date()),
-                    mode: 'add_cycle',
-                    start: params.start,
-                    stop: 'add_cycle',
-                ],
-                params: [
-                    registration_method: params.registration_method,
-                    seg_method: params.seg_method,
-                    quantify_compartments: params.quantify_compartments,
-                    expanded_quantification: params.expanded_quantification,
-                    pixel_size: params.pixel_size,
-                ],
-                manifest: [
-                    totals: [
-                        patients: new_counts.size(),
-                        images: (new_counts.values().sum() ?: 0),
-                        channels: (new_ch_counts.values().sum() ?: 0),
-                    ],
-                    patients: new_counts.collectEntries { pid, imgs ->
-                        [(pid): [images: imgs, channels: (new_ch_counts[pid] ?: 0)]]
-                    },
-                ],
-            ]
-            def ch_run_summary = Channel
-                .of(JsonOutput.prettyPrint(JsonOutput.toJson(run_summary_map)))
-                .collectFile(name: 'run_summary.json')
-
-            GENERATE_QC_REPORT(
-                Channel.empty().collect().ifEmpty([]),                             // preprocess_qc_pngs (not re-emitted by ADD_CYCLE)
-                ADD_CYCLE.out.qc.map { meta, files -> files }.collect().ifEmpty([]),
-                Channel.empty().collect().ifEmpty([]),                             // valis_summary_csvs (not re-emitted by ADD_CYCLE)
-                Channel.empty().collect().ifEmpty([]),                             // postprocess_qc_pngs (no POSTPROCESSING call in add_cycle)
-                ch_collated_versions,
-                ch_run_summary,
-                ADD_CYCLE.out.seg_qc.map { meta, files -> files }.collect().ifEmpty([]),
-            )
-        }
-
-        /* -------------------- TRACE AGGREGATION (add_cycle) -------------------- */
-        if (params.enable_trace) {
-            def ch_merged_sizes = ADD_CYCLE.out.size_logs.collectFile(name: 'raw_input_sizes.csv', sort: true)
-            AGGREGATE_SIZE_LOGS(ch_merged_sizes)
-        }
+        // ADD_CYCLE has no preprocess_qc / registration_tre / postprocess_qc of its own
+        // (it calls PREPROCESSING internally without re-exposing its QC pngs, and has no
+        // POSTPROCESSING step at all — masks are reused, not re-segmented). Those kinds
+        // are simply not contributed; FINAL_QC defaults them to empty. seg_residuals IS
+        // now contributed: ADD_CYCLE captures SEG_QC.out.per_cell (previously dropped).
+        FINAL_QC(
+            Channel.empty()
+                .mix(ADD_CYCLE.out.qc.map            { _meta, files -> ['registration_qc', files] })
+                .mix(ADD_CYCLE.out.seg_qc.map        { _meta, files -> ['seg_qc', files] })
+                .mix(ADD_CYCLE.out.seg_residuals.map { _meta, files -> ['seg_residuals', files] })
+                .mix(ADD_CYCLE.out.versions.map      { f -> ['versions', f] })
+                .mix(ADD_CYCLE.out.size_logs.map     { f -> ['size_log', f] }),
+            // ParamUtils.STEP_ORDER.last() ('postprocessing'), NOT effective_stop and NOT
+            // the literal 'add_cycle' this used to smuggle in. Neither of those was safe:
+            // 'add_cycle' is not a member of STEP_ORDER, so a consumer indexing it would
+            // get -1; effective_stop reflects whatever --stop the caller passed, but
+            // validateAddCycleStepFlags (above) now REJECTS a non-default --start/--stop
+            // in this mode, so the only value that can ever reach here honestly is "ran
+            // the whole fixed path through export" — the last step, unconditionally. Before
+            // that rejection existed, an accepted-and-ignored --stop registration ran the
+            // FULL path through export while still labelling itself "registration" here.
+            INPUT_CHECK.out.counts.map { counts -> counts + [stop: ParamUtils.STEP_ORDER.last()] }
+        )
 
         return   // do NOT fall through to the standard start/stop flow
     }
 
-    // Validate and resolve --stop: default to last step if not provided
-    if (params.stop) {
-        ParamUtils.validateStop(params.stop, params.start)
-    }
-    def effective_stop = params.stop ?: ParamUtils.STEP_ORDER.last()
-
-    // Per-step gate: ParamUtils.shouldRun(step, start, stop). Called inline at
-    // each site because the strict Nextflow parser does not support invoking a
-    // closure-typed local variable as a function.
-
-    if (ParamUtils.shouldRun('postprocessing', params.start, effective_stop)) {
-        ParamUtils.validateCompartmentQuant(params.quantify_compartments, params.expanded_quantification)
+    if (run_postprocessing) {
+        ParamUtils.validateCompartmentQuant(compartment_mode)
     }
 
     if (!params.input) {
@@ -291,7 +170,8 @@ workflow MIRAGE {
     CsvUtils.validateInputSemantics(
         params.input,
         params.start,
-        params.allow_auto_reference
+        params.allow_auto_reference,
+        params.nuclear_markers
     )
 
     if (params.dry_run) {
@@ -299,156 +179,167 @@ workflow MIRAGE {
         return
     }
 
+    /* -------------------- INPUT -------------------- */
+
+    // INPUT_CHECK reads the samplesheet once here, at the entry step, for every
+    // sample/count-derived need downstream (PREPROCESSING/REGISTRATION/SEGMENTATION's
+    // inputs, FINAL_QC's manifest). Which column holds the image to carry forward is
+    // fixed by --start, because each step's checkpoint CSV names the file that step
+    // produced. postprocessing's entry is the one exception: segmented.csv carries
+    // four columns INPUT_CHECK's [meta, one_file] shape cannot express, so
+    // READ_SEGMENTED_CHECKPOINT (subworkflows/local/segmentation.nf) reads it a
+    // second time, below, for the extra mask/contour columns specifically.
+    def entry_column = ParamUtils.entryColumnForStep(params.start)
+
+    // autoReference = params.allow_auto_reference: when a patient marks no reference,
+    // registration.nf promotes its first image, which keeps that slide's nuclear
+    // channel in the split output and therefore in the count.
+    INPUT_CHECK(params.input, entry_column, params.allow_auto_reference)
+
     /* -------------------- PREPROCESSING -------------------- */
 
-    // Pre-count images and channels per patient for streaming groupTuple operations
-    // (called after null-guard above ensures params.input is valid)
-    def patient_counts = params.input ? CsvUtils.countImagesPerPatient(params.input) : [:]
-    def channel_counts = params.input ? CsvUtils.countChannelsPerPatient(params.input) : [:]
-
-    if (ParamUtils.shouldRun('preprocessing', params.start, effective_stop)) {
-        def ch_input = loadInputChannel(params.input, 'path_to_file', patient_counts, channel_counts)
-        PREPROCESSING(ch_input)
+    if (run_preprocessing) {
+        PREPROCESSING(INPUT_CHECK.out.samples)
     }
 
     /* -------------------- REGISTRATION -------------------- */
 
-    if (ParamUtils.shouldRun('registration', params.start, effective_stop)) {
+    if (run_registration) {
+        REGISTRATION(
+            ParamUtils.isEntryPoint(params, 'registration')
+                ? INPUT_CHECK.out.samples
+                : PREPROCESSING.out.preprocessed  // Direct channel - enables patient-level parallelism!
+        )
+    }
 
-        // When starting from registration, params.input is a string path to CSV
-        // When continuing from preprocessing, use direct channel (streaming, no wait)
-        def ch_for_registration = params.start == 'registration'
-            ? loadInputChannel(params.input, 'preprocessed_image', patient_counts, channel_counts)
-            : PREPROCESSING.out.preprocessed  // Direct channel - enables patient-level parallelism!
+    /* -------------------- SEGMENTATION -------------------- */
 
-        REGISTRATION(ch_for_registration)
+    if (run_segmentation) {
+        SEGMENTATION(
+            ParamUtils.isEntryPoint(params, 'segmentation')
+                ? INPUT_CHECK.out.samples
+                : REGISTRATION.out.registered,  // Direct channel - enables patient-level parallelism!
+            compartment_mode
+        )
     }
 
     /* -------------------- POSTPROCESSING -------------------- */
 
-    if (ParamUtils.shouldRun('postprocessing', params.start, effective_stop)) {
+    // READ_SEGMENTED_CHECKPOINT re-runs EXTRACT_CELL_PROPERTIES (and, under
+    // --quantify_compartments, EXTRACT_NUCLEI_PROPERTIES) to recover contours from a
+    // reused mask at --start postprocessing -- the one entry point where
+    // run_segmentation is false, so ch_qc_artifacts below cannot get their
+    // versions/size_log from SEGMENTATION.out. Declared here (not inside the
+    // isEntryPoint branch below) so the FINAL QC section can read it regardless;
+    // stays Channel.empty() at every other entry point.
+    def ch_seg_reader_versions  = Channel.empty()
+    def ch_seg_reader_size_logs = Channel.empty()
 
-        // When starting from postprocessing, params.input is a string path to CSV
-        // When continuing from registration, use direct channel (streaming, no wait)
-        def ch_for_postprocessing = params.start == 'postprocessing'
-            ? loadInputChannel(params.input, 'registered_image', patient_counts, channel_counts)
-            : REGISTRATION.out.registered  // Direct channel - enables patient-level parallelism!
+    if (run_postprocessing) {
 
         // Registration QC feeds the SpatialData export's `uns`/`obsm`. It only exists
-        // when REGISTRATION actually ran in this session — with --start postprocessing
-        // there is no REGISTRATION output to reference, so pass empty channels and let
-        // the export write a store without registration QC rather than fail.
-        def ch_reg_qc_for_post = params.start == 'postprocessing'
-            ? Channel.empty()
-            : REGISTRATION.out.seg_qc
-        def ch_reg_residuals_for_post = params.start == 'postprocessing'
-            ? Channel.empty()
-            : REGISTRATION.out.seg_residuals
+        // when REGISTRATION actually ran IN THIS SESSION. Gated on run_registration
+        // itself (not on isEntryPoint('postprocessing')): with the segmentation step
+        // now sitting between registration and postprocessing, "postprocessing is not
+        // the entry point" no longer implies registration ran this session — entry
+        // could be 'segmentation' instead, in which case REGISTRATION was never
+        // invoked and referencing REGISTRATION.out would fail outright.
+        def ch_reg_qc_for_post        = run_registration ? REGISTRATION.out.seg_qc        : Channel.empty()
+        def ch_reg_residuals_for_post = run_registration ? REGISTRATION.out.seg_residuals : Channel.empty()
 
-        POSTPROCESSING(ch_for_postprocessing, ch_reg_qc_for_post, ch_reg_residuals_for_post)
-    }
+        def ch_for_postprocessing
+        def ch_cell_mask_for_post
+        def ch_nuclei_mask_for_post
+        def ch_contours_for_post
+        def ch_nucleus_contours_for_post
+        def ch_morphology_for_post
 
-    /* -------------------- FINAL QC REPORT -------------------- */
-
-    // Aggregate QC outputs from all steps into a single HTML report
-    if (!params.skip_final_qc_report) {
-        // Collect QC outputs from each step (empty channels for steps not run)
-        def ch_preprocess_qc_pngs   = Channel.empty()
-        def ch_registration_qc_pngs = Channel.empty()
-        def ch_valis_summary_csvs   = Channel.empty()
-        def ch_postprocess_qc_pngs  = Channel.empty()
-        def ch_versions             = Channel.empty()
-        def ch_seg_qc_jsons   = Channel.empty()
-
-        if (ParamUtils.shouldRun('preprocessing', params.start, effective_stop)) {
-            ch_preprocess_qc_pngs = ch_preprocess_qc_pngs.mix(PREPROCESSING.out.preprocess_qc)
-            ch_versions = ch_versions.mix(PREPROCESSING.out.versions)
+        if (ParamUtils.isEntryPoint(params, 'postprocessing')) {
+            // The ONE place INPUT_CHECK's [meta, one_file] shape is not enough:
+            // postprocessing's entry checkpoint (segmented.csv) carries four more
+            // columns beyond a single image path. READ_SEGMENTED_CHECKPOINT
+            // (subworkflows/local/segmentation.nf) is the dedicated reader —
+            // mirrors add_cycle.nf's own splitCsv checkpoint readers.
+            READ_SEGMENTED_CHECKPOINT(params.input, compartment_mode)
+            ch_for_postprocessing       = READ_SEGMENTED_CHECKPOINT.out.samples
+            ch_cell_mask_for_post       = READ_SEGMENTED_CHECKPOINT.out.cell_mask
+            ch_nuclei_mask_for_post     = READ_SEGMENTED_CHECKPOINT.out.nuclei_mask
+            ch_contours_for_post        = READ_SEGMENTED_CHECKPOINT.out.contours
+            ch_nucleus_contours_for_post = READ_SEGMENTED_CHECKPOINT.out.nucleus_contours
+            ch_morphology_for_post      = READ_SEGMENTED_CHECKPOINT.out.morphology
+            ch_seg_reader_versions      = READ_SEGMENTED_CHECKPOINT.out.versions
+            ch_seg_reader_size_logs     = READ_SEGMENTED_CHECKPOINT.out.size_logs
+        } else {
+            // postprocessing is not the entry, so segmentation ran this session
+            // (the only other way to reach postprocessing in the linear gate).
+            ch_for_postprocessing = ParamUtils.isEntryPoint(params, 'segmentation')
+                ? INPUT_CHECK.out.samples
+                : REGISTRATION.out.registered  // Direct channel - enables patient-level parallelism!
+            ch_cell_mask_for_post        = SEGMENTATION.out.cell_mask
+            ch_nuclei_mask_for_post      = SEGMENTATION.out.nuclei_mask
+            ch_contours_for_post         = SEGMENTATION.out.contours
+            ch_nucleus_contours_for_post = SEGMENTATION.out.nucleus_contours
+            ch_morphology_for_post       = SEGMENTATION.out.morphology
         }
-        if (ParamUtils.shouldRun('registration', params.start, effective_stop)) {
-            ch_registration_qc_pngs = ch_registration_qc_pngs
-                .mix(REGISTRATION.out.qc.map { meta, files -> files })
-            ch_valis_summary_csvs = ch_valis_summary_csvs
-                .mix(REGISTRATION.out.valis_summary)
-            ch_versions = ch_versions.mix(REGISTRATION.out.versions)
-            ch_seg_qc_jsons = ch_seg_qc_jsons
-                .mix(REGISTRATION.out.seg_qc.map { meta, files -> files })
-        }
-        if (ParamUtils.shouldRun('postprocessing', params.start, effective_stop)) {
-            ch_postprocess_qc_pngs = ch_postprocess_qc_pngs.mix(POSTPROCESSING.out.postprocess_qc)
-            ch_versions = ch_versions.mix(POSTPROCESSING.out.versions)
-        }
 
-        // Collate versions into a single file
-        def ch_collated_versions = ch_versions
-            .unique()
-            .collectFile(name: 'collated_versions.yml')
-
-        // Run-context summary for the report's overview card (pipeline, run,
-        // params, sample manifest). Built from data already computed above
-        // (patient_counts/channel_counts) rather than re-parsing the CSV.
-        def manifest_patients = patient_counts.collectEntries { pid, imgs ->
-            [(pid): [images: imgs, channels: (channel_counts[pid] ?: 0)]]
-        }
-        def run_summary_map = [
-            pipeline: [name: workflow.manifest.name, version: workflow.manifest.version],
-            run: [
-                timestamp: new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss 'UTC'")
-                    .format(new Date()),
-                mode: params.mode,
-                start: params.start,
-                stop: effective_stop,
-            ],
-            params: [
-                registration_method: params.registration_method,
-                seg_method: params.seg_method,
-                quantify_compartments: params.quantify_compartments,
-                expanded_quantification: params.expanded_quantification,
-                pixel_size: params.pixel_size,
-            ],
-            manifest: [
-                totals: [
-                    patients: patient_counts.size(),
-                    images: (patient_counts.values().sum() ?: 0),
-                    channels: (channel_counts.values().sum() ?: 0),
-                ],
-                patients: manifest_patients,
-            ],
-        ]
-        def ch_run_summary = Channel
-            .of(JsonOutput.prettyPrint(JsonOutput.toJson(run_summary_map)))
-            .collectFile(name: 'run_summary.json')
-
-        GENERATE_QC_REPORT(
-            ch_preprocess_qc_pngs.collect().ifEmpty([]),
-            ch_registration_qc_pngs.collect().ifEmpty([]),
-            ch_valis_summary_csvs.collect().ifEmpty([]),
-            ch_postprocess_qc_pngs.collect().ifEmpty([]),
-            ch_collated_versions,
-            ch_run_summary,
-            ch_seg_qc_jsons.collect().ifEmpty([]),
+        POSTPROCESSING(
+            ch_for_postprocessing,
+            ch_cell_mask_for_post,
+            ch_nuclei_mask_for_post,
+            ch_contours_for_post,
+            ch_nucleus_contours_for_post,
+            ch_morphology_for_post,
+            ch_reg_qc_for_post,
+            ch_reg_residuals_for_post,
+            compartment_mode
         )
     }
 
-    /* -------------------- TRACE AGGREGATION -------------------- */
+    /* -------------------- FINAL QC + TRACE -------------------- */
 
-    // Aggregate input size logs from all processes (only if tracing enabled)
-    if (params.enable_trace) {
-        def ch_all_sizes = Channel.empty()
+    // One tagged stream of everything the run produced for reporting. FINAL_QC
+    // owns both end-of-run aggregations and both of their param gates
+    // (--skip_final_qc_report, --enable_trace), so there is nothing to branch on
+    // here — steps that did not run simply contribute nothing.
+    def ch_qc_artifacts = Channel.empty()
 
-        if (ParamUtils.shouldRun('preprocessing', params.start, effective_stop)) {
-            ch_all_sizes = ch_all_sizes.mix(PREPROCESSING.out.size_logs)
-        }
-        if (ParamUtils.shouldRun('registration', params.start, effective_stop)) {
-            ch_all_sizes = ch_all_sizes.mix(REGISTRATION.out.size_logs)
-        }
-        if (ParamUtils.shouldRun('postprocessing', params.start, effective_stop)) {
-            ch_all_sizes = ch_all_sizes.mix(POSTPROCESSING.out.size_logs)
-        }
-
-        // Merge by content (not by staging many same-named files) so AGGREGATE
-        // receives a single file and cannot hit a work-dir name collision —
-        // several processes emit identically-named *.size.csv logs.
-        def ch_merged_sizes = ch_all_sizes.collectFile(name: 'raw_input_sizes.csv', sort: true)
-        AGGREGATE_SIZE_LOGS(ch_merged_sizes)
+    if (run_preprocessing) {
+        ch_qc_artifacts = ch_qc_artifacts
+            .mix(PREPROCESSING.out.preprocess_qc.map { f -> ['preprocess_qc', f] })
+            .mix(PREPROCESSING.out.versions.map      { f -> ['versions', f] })
+            .mix(PREPROCESSING.out.size_logs.map     { f -> ['size_log', f] })
     }
+    if (run_registration) {
+        ch_qc_artifacts = ch_qc_artifacts
+            .mix(REGISTRATION.out.qc.map               { _meta, files -> ['registration_qc', files] })
+            .mix(REGISTRATION.out.seg_qc.map           { _meta, files -> ['seg_qc', files] })
+            .mix(REGISTRATION.out.seg_residuals.map    { _meta, files -> ['seg_residuals', files] })
+            .mix(REGISTRATION.out.registration_tre.map { f -> ['registration_tre', f] })
+            .mix(REGISTRATION.out.versions.map         { f -> ['versions', f] })
+            .mix(REGISTRATION.out.size_logs.map        { f -> ['size_log', f] })
+    }
+    if (run_segmentation) {
+        // No dedicated QC-image kind: ParamUtils.STEPS' 'segmentation' entry declares
+        // qcKinds: [] on purpose (see its comment) — SEGMENT and the two property
+        // extractors only ever contribute the two UNIVERSAL_QC_KINDS.
+        ch_qc_artifacts = ch_qc_artifacts
+            .mix(SEGMENTATION.out.versions.map  { f -> ['versions', f] })
+            .mix(SEGMENTATION.out.size_logs.map { f -> ['size_log', f] })
+    }
+    if (run_postprocessing) {
+        ch_qc_artifacts = ch_qc_artifacts
+            .mix(POSTPROCESSING.out.postprocess_qc.map { f -> ['postprocess_qc', f] })
+            .mix(POSTPROCESSING.out.versions.map       { f -> ['versions', f] })
+            .mix(POSTPROCESSING.out.size_logs.map      { f -> ['size_log', f] })
+            // READ_SEGMENTED_CHECKPOINT's re-run EXTRACT_CELL_PROPERTIES (+
+            // EXTRACT_NUCLEI_PROPERTIES) versions/size_log, at --start postprocessing
+            // only -- Channel.empty() (declared above) at every other entry point.
+            .mix(ch_seg_reader_versions.map  { f -> ['versions', f] })
+            .mix(ch_seg_reader_size_logs.map { f -> ['size_log', f] })
+    }
+
+    FINAL_QC(
+        ch_qc_artifacts,
+        INPUT_CHECK.out.counts.map { counts -> counts + [stop: effective_stop] }
+    )
 }

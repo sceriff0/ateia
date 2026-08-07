@@ -45,14 +45,17 @@ flowchart LR
       D[VALIS whole-slide<br/>alignment]
     end
     D --> E
+    subgraph SEG[Segmentation]
+      E[Segment cells<br/>+ extract properties]
+    end
+    E --> F
     subgraph POST[Postprocessing]
-      E[Segment cells] --> F[Quantify markers<br/>per cell]
-      F --> G[GeoJSON + pyramid<br/>OME-TIFF]
+      F[Quantify markers<br/>per cell] --> G[GeoJSON + pyramid<br/>OME-TIFF]
     end
     G --> H[(QuPath · napari ·<br/>FlowPath)]
 ```
 
-The three stages — **preprocessing → registration → postprocessing** — run in that
+The four stages — **preprocessing → registration → segmentation → postprocessing** — run in that
 order and are independently restartable, so you can re-run just the part you're
 tuning. By default MIRAGE **stops at quantified cells** — the exported GeoJSON carries
 raw marker intensities, and you gate/phenotype downstream in QuPath or the
@@ -86,7 +89,7 @@ python tests/testdata/generate_complete_testdata.py
 nextflow run . -profile test,docker --outdir results
 ```
 
-That's the full preprocessing → registration → postprocessing run. [Usage](usage.md)
+That's the full preprocessing → registration → segmentation → postprocessing run. [Usage](usage.md)
 tours every file it produces.
 
 ## Get started
@@ -106,7 +109,7 @@ tours every file it produces.
 
     ---
 
-    The three-stage model, the samplesheet, resuming from checkpoints, and what
+    The four-stage model, the samplesheet, resuming from checkpoints, and what
     lands in `--outdir`.
 
     [:octicons-arrow-right-24: Usage](usage.md)

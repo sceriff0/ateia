@@ -13,7 +13,6 @@
  */
 process EXTRACT_CELL_PROPERTIES {
     tag "${meta.patient_id}"
-    label 'process_medium'
 
     container "bolt3x/attend_image_analysis:quantification_gpu"
 
@@ -43,11 +42,7 @@ process EXTRACT_CELL_PROPERTIES {
         --outdir . \\
         ${args}
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: \$(python --version 2>&1 | sed 's/Python //')
-        scikit-image: \$(python -c "import skimage; print(skimage.__version__)" 2>/dev/null || echo "unknown")
-    END_VERSIONS
+    ${ProcessEnvelope.versions(task.process, ['skimage'])}
     """
 
     stub:
@@ -55,10 +50,6 @@ process EXTRACT_CELL_PROPERTIES {
     touch morphology.csv contours.json
     echo "STUB,${meta.patient_id},stub,0" > ${meta.patient_id}.EXTRACT_CELL_PROPERTIES.size.csv
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: stub
-        scikit-image: stub
-    END_VERSIONS
+    ${ProcessEnvelope.versionsStub(task.process, ['skimage'])}
     """
 }

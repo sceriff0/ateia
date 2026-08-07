@@ -1,0 +1,197 @@
+/*
+ * buildManifest / buildRunSummary — the run_summary.json content builders pulled out
+ * of FINAL_QC's ch_run_summary .map{} closure (subworkflows/local/final_qc.nf).
+ *
+ * Task 4's review found that NOTHING in the whole suite inspects run_summary.json,
+ * despite byte-identity being this branch's headline constraint and
+ * tests/testdata/sample_run_summary.json existing as a fixture: GENERATE_QC_REPORT's
+ * stub (modules/local/generate_qc_report.nf) never copies run_summary.json anywhere a
+ * workflow-level nf-test could inspect its content, so every claim about that file
+ * rested on a manual diff in a report. These tests call the Groovy that actually
+ * builds it directly, the same way tiled_adapter_group_size.nf.test pins
+ * countTileRows/requireTilesCount.
+ *
+ * buildRunSummary takes params/pipeline-info/timestamp as explicit arguments (rather
+ * than reading params./workflow.manifest itself) specifically so it is callable here
+ * with no live params{}/workflow binding -- see its doc comment. Passing a fixed
+ * timestamp string also means "excluding run.timestamp" needs no special-casing: the
+ * test controls that value directly and simply asserts it came through unchanged.
+ *
+ * The linear and add_cycle cases below are chosen to be the one place
+ * `channels` (channels_count's exact, post-nuclear-drop count) and
+ * `declared_channels` (the samplesheet's raw union, feeding the manifest) provably
+ * differ -- see input_check.nf.test's matching case and CsvUtils.groovy's docs on
+ * both functions.
+ */
+nextflow_function {
+
+    name "Test buildManifest / buildRunSummary (run_summary.json content)"
+    script "subworkflows/local/final_qc.nf"
+
+    tag "stub"
+
+    test("buildManifest reads declared_channels, not channels -- linear path") {
+
+        function "buildManifest"
+
+        when {
+            function {
+                """
+                input[0] = [
+                    stop: 'postprocessing',
+                    patients: [P001: 2],
+                    channels: [P001: 4],
+                    declared_channels: [P001: 5],
+                ]
+                """
+            }
+        }
+
+        then {
+            assert function.success
+            assert function.result == [
+                totals: [patients: 1, images: 2, channels: 5],
+                patients: [P001: [images: 2, channels: 5]],
+            ]
+        }
+    }
+
+    test("buildManifest reads declared_channels, not channels -- add_cycle path") {
+
+        // The regression this whole task closes: add_cycle's 3-channel new cycle
+        // declares DAPI on its (non-reference) rows, but channels_count drops DAPI
+        // since add_cycle's INPUT_CHECK always runs with autoReference=false. Before
+        // this task the manifest read `channels` and silently reported 2.
+        function "buildManifest"
+
+        when {
+            function {
+                """
+                input[0] = [
+                    stop: 'add_cycle',
+                    patients: [P001: 1],
+                    channels: [P001: 2],
+                    declared_channels: [P001: 3],
+                ]
+                """
+            }
+        }
+
+        then {
+            assert function.success
+            assert function.result == [
+                totals: [patients: 1, images: 1, channels: 3],
+                patients: [P001: [images: 1, channels: 3]],
+            ]
+        }
+    }
+
+    test("buildRunSummary assembles the complete run_summary.json content -- linear path") {
+
+        function "buildRunSummary"
+
+        when {
+            function {
+                """
+                input[0] = [
+                    stop: 'postprocessing',
+                    patients: [P001: 2],
+                    channels: [P001: 4],
+                    declared_channels: [P001: 5],
+                ]
+                input[1] = [
+                    mode: null,
+                    start: 'preprocessing',
+                    registration_method: 'valis',
+                    seg_method: 'cellpose',
+                    quantify_compartments: false,
+                    expanded_quantification: false,
+                    pixel_size: 0.5,
+                ]
+                input[2] = [name: 'mirage', version: '1.0.0']
+                input[3] = '2026-08-06 00:00:00 UTC'
+                """
+            }
+        }
+
+        then {
+            assert function.success
+            // Content assertion excluding nothing but what we ourselves fixed as an
+            // input (the timestamp) -- every other field of run_summary.json is
+            // pinned exactly, both totals and per-patient.
+            assert function.result == [
+                pipeline: [name: 'mirage', version: '1.0.0'],
+                run: [
+                    timestamp: '2026-08-06 00:00:00 UTC',
+                    mode: null,
+                    start: 'preprocessing',
+                    stop: 'postprocessing',
+                ],
+                params: [
+                    registration_method: 'valis',
+                    seg_method: 'cellpose',
+                    quantify_compartments: false,
+                    expanded_quantification: false,
+                    pixel_size: 0.5,
+                ],
+                manifest: [
+                    totals: [patients: 1, images: 2, channels: 5],
+                    patients: [P001: [images: 2, channels: 5]],
+                ],
+            ]
+        }
+    }
+
+    test("buildRunSummary assembles the complete run_summary.json content -- add_cycle path") {
+
+        function "buildRunSummary"
+
+        when {
+            function {
+                """
+                input[0] = [
+                    stop: 'add_cycle',
+                    patients: [P001: 1],
+                    channels: [P001: 2],
+                    declared_channels: [P001: 3],
+                ]
+                input[1] = [
+                    mode: 'add_cycle',
+                    start: 'preprocessing',
+                    registration_method: 'valis',
+                    seg_method: 'cellpose',
+                    quantify_compartments: false,
+                    expanded_quantification: false,
+                    pixel_size: 0.5,
+                ]
+                input[2] = [name: 'mirage', version: '1.0.0']
+                input[3] = '2026-08-06 00:00:00 UTC'
+                """
+            }
+        }
+
+        then {
+            assert function.success
+            assert function.result == [
+                pipeline: [name: 'mirage', version: '1.0.0'],
+                run: [
+                    timestamp: '2026-08-06 00:00:00 UTC',
+                    mode: 'add_cycle',
+                    start: 'preprocessing',
+                    stop: 'add_cycle',
+                ],
+                params: [
+                    registration_method: 'valis',
+                    seg_method: 'cellpose',
+                    quantify_compartments: false,
+                    expanded_quantification: false,
+                    pixel_size: 0.5,
+                ],
+                manifest: [
+                    totals: [patients: 1, images: 1, channels: 3],
+                    patients: [P001: [images: 1, channels: 3]],
+                ],
+            ]
+        }
+    }
+}

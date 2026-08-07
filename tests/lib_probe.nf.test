@@ -1,0 +1,41 @@
+/*
+ * nf-test does NOT resolve lib/ for a script under tests/ on its own.
+ *
+ * Nextflow's automatic lib/ classpath discovery looks for a `lib` directory next
+ * to the SCRIPT being run, not next to the repo root / current working
+ * directory. tests/lib_probe.nf lives under tests/, so both a plain
+ * `nextflow run tests/lib_probe.nf` (no -lib) and nf-test's own invocation (which
+ * never passes -lib on its own, confirmed via .nextflow.log history) fail with
+ * `No such variable: Layout` / `No such property: Layout`. Passing `--lib lib`
+ * to `nf-test test` itself does not help either: that flag is nf-test's OWN
+ * "library extension path" for its Groovy test DSL, unrelated to the pipeline
+ * run it launches.
+ *
+ * The fix is the `options "-lib $projectDir/lib"` below, which forwards an
+ * ABSOLUTE path as an explicit CLI arg to the underlying `nextflow run`
+ * nf-test performs. A relative `-lib lib` resolves against nf-test's own scratch
+ * workdir (.nf-test/tests/<hash>/) and fails with "Cannot find specified
+ * library" — only the absolute, $projectDir-anchored form works.
+ */
+nextflow_pipeline {
+
+    name "lib/ probe — direct assertions against lib/*.groovy"
+    script "tests/lib_probe.nf"
+    tag "stub"
+
+    test("every lib/ assertion holds") {
+        // NO `options "-stub"`: this script declares no processes, so there is
+        // nothing to stub, and stub mode would add nothing. The assertions live in
+        // the script body, which always runs.
+        options "-lib $projectDir/lib"
+        when {
+            params {
+                outdir = "$outputDir"
+            }
+        }
+        then {
+            assert workflow.success
+            assert workflow.stdout.any { it.contains("LIB PROBE: all assertions passed") }
+        }
+    }
+}

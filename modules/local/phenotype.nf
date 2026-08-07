@@ -4,7 +4,6 @@
  */
 process PHENOTYPE {
     tag "${meta.patient_id}"
-    label 'process_medium'
 
     container "bolt3x/attend_image_analysis:quantification_gpu"
 
@@ -37,13 +36,7 @@ process PHENOTYPE {
         --qc phenotype_qc.json \\
         ${args}
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: \$(python --version 2>&1 | sed 's/Python //')
-        numpy: \$(python -c "import numpy; print(numpy.__version__)" 2>/dev/null || echo "unknown")
-        scipy: \$(python -c "import scipy; print(scipy.__version__)" 2>/dev/null || echo "unknown")
-        pandas: \$(python -c "import pandas; print(pandas.__version__)" 2>/dev/null || echo "unknown")
-    END_VERSIONS
+    ${ProcessEnvelope.versions(task.process, ['numpy', 'scipy', 'pandas'])}
     """
 
     stub:
@@ -52,12 +45,6 @@ process PHENOTYPE {
     echo "id,markers,observed,nominal,density_corr,neighbour_contact_corr,verdict" > constraint_audit.csv
     echo '{}' > phenotype_qc.json
     echo "STUB,${meta.patient_id},stub,0" > ${meta.patient_id}.PHENOTYPE.size.csv
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: stub
-        numpy: stub
-        scipy: stub
-        pandas: stub
-    END_VERSIONS
+    ${ProcessEnvelope.versionsStub(task.process, ['numpy', 'scipy', 'pandas'])}
     """
 }

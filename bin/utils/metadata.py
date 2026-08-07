@@ -18,6 +18,7 @@ split_multichannel.py, convert_image.py, and segment_to_geojson.py.
 from __future__ import annotations
 
 import logging
+import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import List
@@ -26,6 +27,7 @@ import tifffile
 
 __all__ = [
     "extract_channel_names_from_ome",
+    "is_nuclear",
     "pick_nuclear_index",
     "DEFAULT_NUCLEAR_MARKERS",
 ]
@@ -33,7 +35,59 @@ __all__ = [
 # Ordered preference for the nuclear/fiducial channel (the marker used to drive
 # both cell segmentation and the registration fiducial). The first marker that
 # matches any channel name wins. Mirrors params.nuclear_markers in nextflow.config.
+#
+# This tuple is the ONE permitted Python mirror of that default -- lib/MarkerUtils.groovy
+# deliberately has none and throws instead, so nextflow.config stays the single place a
+# parameter default lives (tests/test_no_duplicate_param_defaults.py). Every caller in
+# the pipeline is handed the list explicitly; the fallback exists only so these helpers
+# stay usable when a script is run by hand outside Nextflow.
 DEFAULT_NUCLEAR_MARKERS = ("DAPI", "CELLTOX")
+
+
+def _resolve_markers(nuclear_markers):
+    """The configured markers, trimmed and upper-cased, or the default mirror.
+
+    Each element is also split on commas and whitespace, mirroring
+    ``lib/MarkerUtils.groovy``'s ``markerList``. A single ``"DAPI,CELLTOX"`` element is
+    a marker that matches NO channel, and the failure is silent in both languages --
+    every channel is classified non-nuclear, the nuclear channel is never dropped from
+    moving slides, and the pre-computed group sizes are wrong with no error anywhere.
+    """
+    markers = [
+        part.upper()
+        for m in (nuclear_markers or ())
+        for part in re.split(r"[,\s]+", str(m).strip())
+        if part
+    ]
+    return markers or [str(m).upper() for m in DEFAULT_NUCLEAR_MARKERS]
+
+
+def is_nuclear(channel_name, nuclear_markers=None):
+    """True when ``channel_name`` names one of the configured nuclear markers.
+
+    Case-insensitive SUBSTRING match, so ``DAPI_nuclear`` counts as nuclear. This is
+    the same rule as ``lib/MarkerUtils.groovy``'s ``isNuclear``, and the two MUST stay
+    in agreement: Groovy uses it to pre-compute how many single-channel TIFFs
+    ``SPLIT_CHANNELS`` will emit for a patient (``CsvUtils.countChannelsPerPatient``),
+    while Python uses it to decide which channels ``split_multichannel.py`` actually
+    writes. A disagreement is an over- or under-count of a ``groupTuple`` size, not a
+    crash -- see ``tests/unit/test_nuclear_markers.py``.
+
+    Parameters
+    ----------
+    channel_name : str
+        A single channel name, from metadata (never a filename).
+    nuclear_markers : sequence of str, optional
+        Marker names. Defaults to ``DEFAULT_NUCLEAR_MARKERS``.
+
+    Returns
+    -------
+    bool
+    """
+    name = str(channel_name or "").strip().upper()
+    if not name:
+        return False
+    return any(marker in name for marker in _resolve_markers(nuclear_markers))
 
 
 def pick_nuclear_index(channel_names, nuclear_markers=None):
@@ -57,12 +111,10 @@ def pick_nuclear_index(channel_names, nuclear_markers=None):
     int or None
         Index of the first matching channel, or ``None`` if no marker matches.
     """
-    markers = list(nuclear_markers) if nuclear_markers else list(DEFAULT_NUCLEAR_MARKERS)
     names = [str(n).upper() for n in (channel_names or [])]
-    for marker in markers:
-        needle = str(marker).upper()
+    for marker in _resolve_markers(nuclear_markers):
         for i, name in enumerate(names):
-            if needle in name:
+            if marker in name:
                 return i
     return None
 

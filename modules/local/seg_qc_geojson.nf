@@ -8,7 +8,6 @@
  */
 process SEG_QC_GEOJSON {
     tag "${meta.patient_id}:${image.simpleName}"
-    label 'process_high'
 
     container "bolt3x/attend_image_analysis:segmentation_gpu"
 
@@ -24,17 +23,27 @@ process SEG_QC_GEOJSON {
     task.ext.when == null || task.ext.when
 
     script:
+    // The StarDist flags (model, tiling, thresholds, --tolerance) come from ext.args now
+    // (conf/modules.config), shared with SEGMENT via that config file's
+    // starDistCommonFlags() -- see the withName: 'SEG_QC_GEOJSON' block's comment for
+    // what each flag is.
     def args = task.ext.args ?: ''
     // Name the GeoJSON with VALIS's own slide-name convention (valtils.get_name strips
     // .ome.tif/.ome.tiff), so the stem == the registrar slide_dict key WARP_SEG_QC looks up.
     def prefix = image.name.replaceAll(/\.ome\.tiff?$/, '').replaceAll(/\.tiff?$/, '')
-    def use_gpu_flag = params.seg_gpu ? '--use-gpu' : ''
-    def pmin = params.seg_pmin
-    def pmax = params.seg_pmax
-    def n_tiles_y = params.seg_n_tiles_y
-    def n_tiles_x = params.seg_n_tiles_x
-    def model_dir_arg = params.segmentation_model_dir ? "--model-dir ${params.segmentation_model_dir}" : ''
-    def prob_arg = (params.seg_prob_thresh != null) ? "--prob-thresh ${params.seg_prob_thresh}" : ''
+    // --nuclear-markers stays built HERE rather than in ext.args, unlike the rest of the
+    // StarDist flags: lib/MarkerUtils.groovy is on the classpath the pipeline SCRIPT
+    // compiles with, but conf/modules.config is parsed by a separate Nextflow
+    // ConfigParser pass that cannot resolve it (confirmed the same way as
+    // starDistCommonFlags() -- see that function's comment).
+    //
+    // The nuclear channel is resolved inside the Python script too (no --dapi-channel is
+    // passed), so the configured marker list has to travel with it. Without this the
+    // script fell back to bin/utils/metadata.py's DEFAULT_NUCLEAR_MARKERS, and a run
+    // configured for a marker outside that default scored registration QC on the wrong
+    // channel -- silently, because find_nuclear_index() falls back to index 0 rather
+    // than failing.
+    def nuclear_args = "--nuclear-markers ${MarkerUtils.markerList(params.nuclear_markers).join(' ')}"
     """
     bytes=\$(stat -L --printf="%s" ${image} 2>/dev/null || echo 0)
     echo "${task.process},${meta.patient_id},${image.name},\${bytes}" > ${prefix}.SEG_QC_GEOJSON.size.csv
@@ -42,20 +51,10 @@ process SEG_QC_GEOJSON {
     segment_to_geojson.py \\
         --image ${image} \\
         --output ${prefix}.geojson \\
-        --model-name ${params.segmentation_model} \\
-        ${model_dir_arg} \\
-        ${use_gpu_flag} \\
-        --pmin ${pmin} --pmax ${pmax} \\
-        --n-tiles ${n_tiles_y} ${n_tiles_x} \\
-        ${prob_arg} \\
+        ${nuclear_args} \\
         ${args}
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: \$(python --version 2>&1 | sed 's/Python //')
-        stardist: \$(python -c "import stardist; print(stardist.__version__)" 2>/dev/null || echo "unknown")
-        scikit-image: \$(python -c "import skimage; print(skimage.__version__)" 2>/dev/null || echo "unknown")
-    END_VERSIONS
+    ${ProcessEnvelope.versions(task.process, ['stardist', 'skimage'])}
     """
 
     stub:
@@ -63,11 +62,6 @@ process SEG_QC_GEOJSON {
     """
     echo '{"type": "FeatureCollection", "features": []}' > ${prefix}.geojson
     echo "STUB,${meta.patient_id},stub,0" > ${prefix}.SEG_QC_GEOJSON.size.csv
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: stub
-        stardist: stub
-        scikit-image: stub
-    END_VERSIONS
+    ${ProcessEnvelope.versionsStub(task.process, ['stardist', 'skimage'])}
     """
 }

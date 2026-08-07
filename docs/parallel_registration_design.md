@@ -298,6 +298,12 @@ dedicated lean `withName:'TILED_*'` overrides (2–8 GB) or pair with a memory-c
   `subworkflows/local/seg_qc.nf` (called from `registration.nf`) feed it one manifest per moving
   slide. **Stub run green at reg_qc=2** — emits the `native/rigid/refined`
   `_seg_qc.json`. Unit-tested through the real CLI `main()`.
+  (Historical: this status entry describes the state as of `feat/tiled-registration`.
+  `WARP_SEG_QC_TILED` was later merged into `WARP_SEG_QC`, dispatching on the `method`
+  input via `lib/WarpBackends.groovy` — Task 3 of arch-group-c-config, 2026-08-07 — so
+  the process name above no longer exists; the dispatch behavior it describes still
+  does. See `containers/README.md` and `containers/tiled/Dockerfile` for the
+  already-updated references.)
 - **Slim container (done):** `containers/tiled/` (`python:3.11-slim` + numpy/scipy/scikit-image/
   tifffile, no JVM/libvips/GPU). **Built and verified locally** — the CLIs import and run
   in-container; **~438 MB** vs the multi-GB VALIS image. Added to the `build-images.yml` matrix.
@@ -309,7 +315,7 @@ dedicated lean `withName:'TILED_*'` overrides (2–8 GB) or pair with a memory-c
   `bin/utils/tre_report.py`; the fan-out (`TILED_SOLVE`) now emits the rigid spatial heatmap too
   (previously dropped). The fan-out's final-accuracy residual comes from the reg_benchmark harness.
 - **Final QC-report integration (done):** the `_tre.json` already flowed into the report's
-  `valis_summary/` input; `generate_qc_report.py` now renders it as a "Registration Accuracy
+  `registration_tre/` input; `generate_qc_report.py` now renders it as a "Registration Accuracy
   (STARE Tiled TRE)" subsection — a per-slide table (coarse / rigid p50-p90 / post-refinement final
   p50-p90 / refined / tiles) plus a **per-tile SVG heatmap** of the spatial TRE, sitting alongside
   the VALIS rTRE, feature-distance, and seg-QC tables. Unit-tested.

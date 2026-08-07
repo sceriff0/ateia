@@ -1,0 +1,281 @@
+/*
+ * ASSEMBLE_EXPORT — EXPORT_GEOJSON's six-slot input tuple plus the embed_masks pyramid
+ * gate, shared by POSTPROCESSING and ADD_CYCLE (which carried verbatim copies of both).
+ *
+ * UNVERIFIED LOCALLY (see CLAUDE.md's "Verification reality" -- nf-test hangs under
+ * qemu on this host): take: gained a 7th input, compartment_mode -- Task 4
+ * (arch-B-split)'s seam for --quantify_compartments / --expanded_quantification /
+ * --embed_masks, replacing this workflow's own former `params.embed_masks &&
+ * params.quantify_compartments && params.expanded_quantification` raw read.
+ *
+ * The two "embed_masks on"/"embed_masks off" tests pass input[6] as a LITERAL map
+ * that DIVERGES from (in fact conflicts with) the embed_masks value set in
+ * params{} -- proving ASSEMBLE_EXPORT honours the compartment_mode ARGUMENT, not a
+ * re-read of the global param, the same way tests/subworkflows/add_cycle.nf.test's
+ * registration_method='tiled' + literal 'valis' proves the literal wins for that
+ * seam. `ParamUtils.compartmentMode(params)` (computing input[6] FROM the same
+ * params{} block) would prove nothing beyond "the resolver maps params
+ * correctly" -- already covered by tests/lib_probe.nf -- since an argument that
+ * always agrees with a global params re-read cannot distinguish "reads the
+ * argument" from "still reads params.embed_masks directly". The
+ * "quantify_compartments off" test is the one exception that keeps params and
+ * input[6] in agreement, and says why at its own params{} block: its
+ * geojson_wholecell assertion depends on modules/local/export_geojson.nf's own
+ * direct (out-of-seam) read of params.quantify_compartments, so the raw param
+ * cannot diverge from what the test needs there. The first ("assembles the export
+ * tuple...") test is the baseline positive path and keeps
+ * ParamUtils.compartmentMode(params) for input[6].
+ *
+ * What can and cannot be asserted here:
+ *   - The gate itself is observable: when embed_masks is OFF the mask channel must never
+ *     be joined, so an EMPTY mask channel still has to produce a pyramid. If the gate
+ *     regressed to always joining, that test empties the pyramid output and fails.
+ *   - When the gate is ON, MERGE_AND_PYRAMID's stub writes the same pyramid.ome.tiff
+ *     regardless of what was staged, so "the masks were actually embedded" is NOT
+ *     covered here — only that the join is total for patients present in both channels.
+ *   - The phenotype/model-config slots are `path` inputs never read in stub mode; the
+ *     tests pin that the placeholder shape (both slots = the contours file, the add_cycle
+ *     and no-panel case) and the real shape both reach EXPORT_GEOJSON.
+ */
+nextflow_workflow {
+
+    name "Test ASSEMBLE_EXPORT subworkflow"
+    script "subworkflows/local/assemble_export.nf"
+    workflow "ASSEMBLE_EXPORT"
+
+    tag "subworkflow"
+    tag "assemble_export"
+    tag "postprocessing"
+
+    test("assembles the export tuple and emits geojson + csv + pyramid per patient") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                outdir = "$outputDir"
+                embed_masks = false
+                quantify_compartments = true
+                expanded_quantification = true
+                pixel_size = 0.325
+                pyramid_resolutions = 8
+                pyramid_scale = 2
+                tilex = 512
+                compression = 'zstd'
+            }
+            workflow {
+                """
+                def contours = file('$projectDir/tests/testdata/model_config_min.json', checkIfExists: true)
+                input[0] = Channel.fromList([
+                    [[patient_id: 'P001', id: 'P001'], file('$projectDir/tests/testdata/P001_merged_quant.csv', checkIfExists: true)],
+                    [[patient_id: 'P002', id: 'P002'], file('$projectDir/tests/testdata/P001_merged_quant.csv', checkIfExists: true)]
+                ])
+                input[1] = Channel.fromList([['P001', contours], ['P002', contours]])
+                input[2] = Channel.fromList([['P001', contours], ['P002', contours]])
+                // No-panel / add_cycle placeholder shape: both slots reuse the contours file.
+                input[3] = Channel.fromList([['P001', contours, contours], ['P002', contours, contours]])
+                input[4] = Channel.fromList([
+                    [[patient_id: 'P001', id: 'P001', is_reference: false],
+                     [file('$projectDir/tests/testdata/sample_DAPI.tif',  checkIfExists: true),
+                      file('$projectDir/tests/testdata/sample_PANCK.tif', checkIfExists: true)]],
+                    [[patient_id: 'P002', id: 'P002', is_reference: false],
+                     [file('$projectDir/tests/testdata/sample_DAPI.tif',  checkIfExists: true),
+                      file('$projectDir/tests/testdata/sample_SMA.tif',   checkIfExists: true)]]
+                ])
+                // embed_masks is off, so this channel must never be consumed.
+                input[5] = Channel.empty()
+                input[6] = ParamUtils.compartmentMode(params)
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.out.geojson.size() == 2 },
+                { assert workflow.out.csv.size() == 2 },
+                { assert workflow.out.pyramid.size() == 2 },
+                { assert workflow.out.geojson.collect { it[0].patient_id }.toSorted() == ['P001', 'P002'] },
+                { assert workflow.out.geojson.every { file(it[1]).name == 'cells.geojson' } },
+                { assert workflow.out.csv.every { file(it[1]).name == 'cells_data.csv' } },
+                { assert workflow.out.pyramid.every { file(it[1]).name == 'pyramid.ome.tiff' } },
+                // quantify_compartments is on, so the whole-cell companion is written too.
+                { assert workflow.out.geojson_wholecell.size() == 2 },
+                { assert workflow.out.versions },
+                { assert workflow.out.size_logs }
+            )
+        }
+    }
+
+    test("embed_masks on: the mask pair is joined and every patient still reaches the pyramid") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                // embed_masks/quantify_compartments/expanded_quantification
+                // deliberately NOT set here (embed_masks defaults to false) --
+                // input[6] below is a LITERAL map with embedMasks: true, so this
+                // test proves ASSEMBLE_EXPORT honours the ARGUMENT, not params,
+                // the same way tests/subworkflows/add_cycle.nf.test's
+                // registration_method='tiled' + literal 'valis' proves the
+                // literal wins for that seam.
+                outdir = "$outputDir"
+                pixel_size = 0.325
+                pyramid_resolutions = 8
+                pyramid_scale = 2
+                tilex = 512
+                compression = 'zstd'
+            }
+            workflow {
+                """
+                def contours = file('$projectDir/tests/testdata/model_config_min.json', checkIfExists: true)
+                input[0] = Channel.fromList([
+                    [[patient_id: 'P001', id: 'P001'], file('$projectDir/tests/testdata/P001_merged_quant.csv', checkIfExists: true)],
+                    [[patient_id: 'P002', id: 'P002'], file('$projectDir/tests/testdata/P001_merged_quant.csv', checkIfExists: true)]
+                ])
+                input[1] = Channel.fromList([['P001', contours], ['P002', contours]])
+                input[2] = Channel.fromList([['P001', contours], ['P002', contours]])
+                input[3] = Channel.fromList([['P001', contours, contours], ['P002', contours, contours]])
+                input[4] = Channel.fromList([
+                    [[patient_id: 'P001', id: 'P001', is_reference: false],
+                     [file('$projectDir/tests/testdata/sample_DAPI.tif',  checkIfExists: true),
+                      file('$projectDir/tests/testdata/sample_PANCK.tif', checkIfExists: true)]],
+                    [[patient_id: 'P002', id: 'P002', is_reference: false],
+                     [file('$projectDir/tests/testdata/sample_DAPI.tif',  checkIfExists: true),
+                      file('$projectDir/tests/testdata/sample_SMA.tif',   checkIfExists: true)]]
+                ])
+                input[5] = Channel.fromList([
+                    ['P001', file('$projectDir/tests/testdata/P001_cell_mask.tif',   checkIfExists: true),
+                             file('$projectDir/tests/testdata/P001_nuclei_mask.tif', checkIfExists: true)],
+                    ['P002', file('$projectDir/tests/testdata/P002_cell_mask.tif',   checkIfExists: true),
+                             file('$projectDir/tests/testdata/P001_nuclei_mask.tif', checkIfExists: true)]
+                ])
+                input[6] = [compartments: true, expanded: true, embedMasks: true]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.out.pyramid.size() == 2 },
+                { assert workflow.out.pyramid.collect { it[0].patient_id }.toSorted() == ['P001', 'P002'] },
+                { assert workflow.out.geojson.size() == 2 }
+            )
+        }
+    }
+
+    test("embed_masks off with an empty mask channel: the gate short-circuits the join") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                outdir = "$outputDir"
+                // Deliberately the OPPOSITE of what the gate needs: embed_masks=true
+                // here, but input[6] below is a LITERAL with embedMasks: false. If
+                // ASSEMBLE_EXPORT read params.embed_masks itself instead of its
+                // compartment_mode argument, this would join the empty mask channel
+                // and empty the pyramid; asserting pyramid.size() == 1 anyway proves
+                // the argument -- not the (conflicting) global param -- wins, the
+                // same way tests/subworkflows/add_cycle.nf.test's
+                // registration_method='tiled' + literal 'valis' proves the literal
+                // wins for that seam. (embed_masks has no OTHER raw reader in
+                // production -- unlike quantify_compartments, which
+                // modules/local/export_geojson.nf also reads directly -- so this
+                // flag is safe to diverge from params here.)
+                embed_masks = true
+                quantify_compartments = true
+                expanded_quantification = true
+                pixel_size = 0.325
+                pyramid_resolutions = 8
+                pyramid_scale = 2
+                tilex = 512
+                compression = 'zstd'
+            }
+            workflow {
+                """
+                def contours = file('$projectDir/tests/testdata/model_config_min.json', checkIfExists: true)
+                input[0] = Channel.of([[patient_id: 'P001', id: 'P001'], file('$projectDir/tests/testdata/P001_merged_quant.csv', checkIfExists: true)])
+                input[1] = Channel.of(['P001', contours])
+                input[2] = Channel.of(['P001', contours])
+                input[3] = Channel.of(['P001', contours, contours])
+                input[4] = Channel.of([[patient_id: 'P001', id: 'P001', is_reference: false],
+                                       [file('$projectDir/tests/testdata/sample_DAPI.tif',  checkIfExists: true),
+                                        file('$projectDir/tests/testdata/sample_PANCK.tif', checkIfExists: true)]])
+                // Nothing on the mask channel at all. An unconditional join here would
+                // empty the pyramid output entirely.
+                input[5] = Channel.empty()
+                input[6] = [compartments: true, expanded: true, embedMasks: false]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.out.pyramid.size() == 1 },
+                { assert workflow.out.pyramid[0][0].patient_id == 'P001' }
+            )
+        }
+    }
+
+    test("quantify_compartments off: no whole-cell companion, contours reused in the nucleus slot") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                // Cannot diverge params.quantify_compartments from input[6] here,
+                // unlike the two embed_masks tests above: this test's
+                // geojson_wholecell assertion is driven by
+                // modules/local/export_geojson.nf's OWN direct read of
+                // params.quantify_compartments (a script:/stub: leaf, out of the
+                // compartment_mode seam by design -- see
+                // tests/test_compartment_mode_routing.py's ALLOWED_FILES), so the
+                // raw param must actually be false for that module's stub branch
+                // to skip cells_wholecell.geojson. input[6] is still a literal
+                // (not ParamUtils.compartmentMode(params)) matching params, so this
+                // test is not exercising the resolver's own correctness twice.
+                outdir = "$outputDir"
+                embed_masks = false
+                quantify_compartments = false
+                expanded_quantification = false
+                pixel_size = 0.325
+                pyramid_resolutions = 8
+                pyramid_scale = 2
+                tilex = 512
+                compression = 'zstd'
+            }
+            workflow {
+                """
+                def contours = file('$projectDir/tests/testdata/model_config_min.json', checkIfExists: true)
+                input[0] = Channel.of([[patient_id: 'P001', id: 'P001'], file('$projectDir/tests/testdata/P001_merged_quant.csv', checkIfExists: true)])
+                input[1] = Channel.of(['P001', contours])
+                // Caller passes the cell contours as the nucleus placeholder.
+                input[2] = Channel.of(['P001', contours])
+                input[3] = Channel.of(['P001', contours, contours])
+                input[4] = Channel.of([[patient_id: 'P001', id: 'P001', is_reference: false],
+                                       [file('$projectDir/tests/testdata/sample_DAPI.tif',  checkIfExists: true),
+                                        file('$projectDir/tests/testdata/sample_PANCK.tif', checkIfExists: true)]])
+                input[5] = Channel.empty()
+                input[6] = [compartments: false, expanded: false, embedMasks: false]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.out.geojson.size() == 1 },
+                { assert workflow.out.geojson_wholecell.size() == 0 },
+                { assert workflow.out.pyramid.size() == 1 }
+            )
+        }
+    }
+}

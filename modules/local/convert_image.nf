@@ -3,7 +3,6 @@
  */
 process CONVERT_IMAGE {
     tag "${meta.patient_id}"
-    label 'process_medium'
 
     container "bolt3x/attend_image_analysis:convert_bioformats_2"
 
@@ -23,7 +22,13 @@ process CONVERT_IMAGE {
     def prefix = task.ext.prefix ?: (meta.id ?: meta.patient_id)
     def pixel_size = params.pixel_size
     def channels = meta.channels.join(',')
-    def nuclear_markers = params.nuclear_markers.join(' ')
+    // Through MarkerUtils, like every other consumer. params.nuclear_markers is a List
+    // in nextflow.config but a bare String for `--nuclear_markers CELLTOX` on the command
+    // line, and "CELLTOX".join(' ') does NOT throw -- it dispatches to Java's static
+    // String.join(CharSequence, CharSequence...) with zero varargs and returns the EMPTY
+    // string, so the rendered command carries a bare `--nuclear-markers` and fails
+    // convert_image.py's nargs="+" with exit 2 halfway through the run.
+    def nuclear_markers = MarkerUtils.markerList(params.nuclear_markers).join(' ')
     """
     # Log input size for tracing (-L follows symlinks)
     input_bytes=\$(stat -L --printf="%s" ${image_file} 2>/dev/null || echo 0)
@@ -38,13 +43,7 @@ process CONVERT_IMAGE {
         --nuclear-markers ${nuclear_markers} \\
         ${args}
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: \$(python --version 2>&1 | sed 's/Python //')
-        tifffile: \$(python -c "import tifffile; print(tifffile.__version__)" 2>/dev/null || echo "unknown")
-        aicsimageio: \$(python -c "import aicsimageio; print(aicsimageio.__version__)" 2>/dev/null || echo "unknown")
-        h5py: \$(python -c "import h5py; print(h5py.__version__)" 2>/dev/null || echo "unknown")
-    END_VERSIONS
+    ${ProcessEnvelope.versions(task.process, ['tifffile', 'aicsimageio', 'h5py'])}
     """
 
     stub:
@@ -55,12 +54,6 @@ process CONVERT_IMAGE {
     echo "${channels}" > ${prefix}_channels.txt
     echo "STUB,${meta.patient_id},stub,0" > ${meta.patient_id}_${image_file.simpleName}.CONVERT_IMAGE.size.csv
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: stub
-        tifffile: stub
-        aicsimageio: stub
-        h5py: stub
-    END_VERSIONS
+    ${ProcessEnvelope.versionsStub(task.process, ['tifffile', 'aicsimageio', 'h5py'])}
     """
 }

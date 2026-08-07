@@ -1,0 +1,170 @@
+/*
+ * INPUT_CHECK — samplesheet in, sample channel out, with the per-patient counts
+ * injected into every meta. The injection is what lets the downstream sized
+ * groupTuples stream; a silently-missing count degrades those to "wait for
+ * everything", and a silently-WRONG one drops or duplicates patients (see
+ * tests/main.nf.test's MERGE_QUANT_CSVS count assertions). Neither shows up as a
+ * failed run, so it is pinned here directly.
+ */
+nextflow_workflow {
+
+    name "Test INPUT_CHECK subworkflow"
+    script "subworkflows/local/input_check.nf"
+    workflow "INPUT_CHECK"
+
+    test("injects images_count and channels_count into every meta") {
+        tag "stub"
+
+        when {
+            workflow {
+                """
+                input[0] = "$projectDir/tests/testdata/test_input.csv"
+                input[1] = 'path_to_file'
+                input[2] = false
+                """
+            }
+            params {
+                outdir = "$outputDir"
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                // test_input.csv: P001 with 2 images (one reference DAPI|PANCK|SMA,
+                // one moving DAPI|CD3|CD8).
+                { assert workflow.out.samples.size() == 2 },
+                { assert workflow.out.samples.every { it[0].images_count == 2 } },
+                // Markers reaching QUANTIFY: DAPI+PANCK+SMA from the reference (which
+                // keeps its nuclear channel) + CD3+CD8 from the moving slide = 5.
+                { assert workflow.out.samples.every { it[0].channels_count == 5 } },
+                // Per-image unique id, prefixed with patient_id so a patient's images
+                // cannot produce identically named outputs.
+                { assert workflow.out.samples.every { it[0].id.startsWith('P001') } },
+                { assert workflow.out.samples.collect { it[0].id }.unique().size() == 2 }
+            )
+        }
+    }
+
+    test("emits the same counts it injected, for the QC report manifest") {
+        tag "stub"
+
+        when {
+            workflow {
+                """
+                input[0] = "$projectDir/tests/testdata/test_input.csv"
+                input[1] = 'path_to_file'
+                input[2] = false
+                """
+            }
+            params {
+                outdir = "$outputDir"
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                // One count per run: FINAL_QC's manifest is built from THIS emit, so it
+                // cannot disagree with what the groupings were sized by.
+                { assert workflow.out.counts.size() == 1 },
+                { assert workflow.out.counts[0].patients == [P001: 2] },
+                { assert workflow.out.counts[0].channels == [P001: 5] }
+            )
+        }
+    }
+
+    test("reads the column belonging to the entry step") {
+        tag "stub"
+
+        when {
+            workflow {
+                """
+                // A registration checkpoint sheet: the image lives in
+                // preprocessed_image, not path_to_file.
+                input[0] = "$projectDir/tests/testdata/valid_checkpoint_registration.csv"
+                input[1] = 'preprocessed_image'
+                input[2] = false
+                """
+            }
+            params {
+                outdir = "$outputDir"
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.out.samples.size() == 2 },
+                { assert workflow.out.samples.every { it[0].images_count == 2 } },
+                { assert workflow.out.samples.every { it[1].toString().endsWith('.ome.tiff') } }
+            )
+        }
+    }
+
+    test("declared_channels (manifest) and channels_count (groupKey) provably differ") {
+        tag "stub"
+
+        when {
+            workflow {
+                """
+                // invalid_no_ref.csv: two non-reference rows, each declaring DAPI
+                // (P001,...,false,DAPI|CD3|CD8 / P001,...,false,DAPI|VIMENTIN|CD45).
+                // auto_reference=false mirrors mode=add_cycle: INPUT_CHECK is always
+                // called with autoReference=false there, since the reference is the
+                // prior run's and never a row in this sheet.
+                input[0] = "$projectDir/tests/testdata/invalid_no_ref.csv"
+                input[1] = 'path_to_file'
+                input[2] = false
+                """
+            }
+            params {
+                outdir = "$outputDir"
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                // Declared union for the manifest: DAPI+CD3+CD8+VIMENTIN+CD45 = 5,
+                // with no reference/nuclear awareness at all.
+                { assert workflow.out.counts[0].declared_channels.P001 == 5 },
+                // Exact count for channels_count/the groupKey: DAPI is dropped from
+                // BOTH rows (neither is a reference) = CD3+CD8+VIMENTIN+CD45 = 4.
+                // This is the one place the two must provably differ.
+                { assert workflow.out.counts[0].channels.P001 == 4 },
+                { assert workflow.out.samples.every { it[0].channels_count == 4 } }
+            )
+        }
+    }
+
+    test("auto_reference widens the channel count when no row is the reference") {
+        tag "stub"
+
+        when {
+            workflow {
+                """
+                // invalid_no_ref.csv marks no reference; with allow_auto_reference the
+                // first image is promoted, keeping its nuclear channel in the count.
+                input[0] = "$projectDir/tests/testdata/invalid_no_ref.csv"
+                input[1] = 'path_to_file'
+                input[2] = true
+                """
+            }
+            params {
+                outdir = "$outputDir"
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.out.samples.size() == 2 },
+                // 2 slides x (DAPI + 2 markers): the promoted reference keeps DAPI
+                // (3 channels), the other contributes its 2 non-nuclear markers.
+                { assert workflow.out.counts[0].channels.P001 == 5 }
+            )
+        }
+    }
+
+}

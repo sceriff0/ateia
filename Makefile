@@ -35,8 +35,12 @@ testdata:
 	python tests/testdata/generate_complete_testdata.py
 
 # Tier 1: Fast stub tests — runs in CI on every push/PR (< 5 min)
+# Matches CI's actual blocking gate (.github/workflows/ci.yml): container-free
+# (--profile test, no docker) and tag-filtered (--tag stub). --profile test,docker
+# pulls (and on arm64, qemu-emulates) container images even in stub mode, since
+# stub only skips script: execution, not image resolution -- that combination hangs.
 test-stub: testdata
-	nf-test test --profile test,docker --verbose
+	nf-test test --tag stub --profile test --verbose
 
 # Tier 2: Real execution tests with containers — runs in CI on main/dev push (~15 min)
 test-real: testdata

@@ -176,6 +176,13 @@ jobs:
         run: |
           bash tests/run_validation_tests.sh
 
+      - name: lib/ probe — assert lib/*.groovy behaviour
+        # The unit-test surface for lib/*.groovy. Assertions live inside the
+        # script because nf-test's assertion context cannot see lib/ classes.
+        # A failing assert exits nonzero and fails this blocking job.
+        run: |
+          nextflow run tests/lib_probe.nf -lib lib
+
       - name: Run pipeline with test profile (stub mode)
         # Stub blocks only `touch` outputs — no container engine needed. Running
         # container-free keeps stub CI green without pulling per-process images

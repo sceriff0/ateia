@@ -431,7 +431,182 @@ nextflow_pipeline {
         }
 
         then {
-            assert workflow.success
+            assertAll(
+                { assert workflow.success },
+                // The per-patient groupKey sizes come from
+                // CsvUtils.countChannelsPerPatient, which drops the nuclear channel for
+                // NON-reference rows. Under allow_auto_reference no row is marked
+                // reference in the CSV, but registration.nf promotes the patient's first
+                // image, so that slide's nuclear channel IS kept and the count must
+                // include it (5 markers here, not 4). Counting 4 instead would make
+                // groupTuple emit at size and then emit the surplus as a SECOND group —
+                // and the two per-patient consumers do NOT fail the same way:
+                // MERGE_QUANT_CSVS's `.join(ch_morphology, by: 0)` (postprocess.nf) is a
+                // keyed inner join, so the surplus group would be silently DISCARDED
+                // (merged_quant.csv loses markers, no error); MERGE_AND_PYRAMID's
+                // sized-group + remainder (postprocess.nf's ch_split_grouped) would instead
+                // trip the memory closure (conf/modules.config:330-337) on the one-file
+                // surplus and ABORT the run. See QUANTIFY_MARKERS' GROUP comment
+                // (subworkflows/local/quantify_markers.nf) for the full account.
+                // `assert workflow.success` alone does not see any of that, hence the
+                // explicit task counts below, which pin the correct (non-miscounted) run.
+                { assert workflow.trace.tasks().findAll {
+                    it.name.startsWith('MIRAGE:POSTPROCESSING:QUANTIFY_MARKERS:QUANTIFY') }.size() == 5 },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.startsWith('MIRAGE:POSTPROCESSING:MERGE_QUANT_CSVS') }.size() == 1 },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.startsWith('MIRAGE:POSTPROCESSING:ASSEMBLE_EXPORT:MERGE_AND_PYRAMID') }.size() == 1 }
+            )
+        }
+    }
+
+    test("a non-reference CELLTOX slide is counted as one dropped nuclear channel") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                // NOTE: nuclear_markers is deliberately NOT overridden. This runs on the
+                // SHIPPED DEFAULT ['DAPI','CELLTOX'], whose CELLTOX half was unreachable
+                // while every consumer hardcoded the literal 'DAPI'.
+                input  = "$projectDir/tests/testdata/celltox_nonreference.csv"
+                outdir = "$outputDir"
+                start  = "preprocessing"
+                max_cpus = 2
+                max_memory = '6.GB'
+                seg_gpu = false
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                // Reference keeps {DAPI,PANCK,SMA}; the non-reference slide's nuclear
+                // channel (CELLTOX) is dropped, leaving {CD3,CD8}. Five markers, so five
+                // QUANTIFY tasks and ONE per-patient consumer of the group.
+                //
+                // This is the count HALF of the invariant. The other half --
+                // bin/split_multichannel.py emitting exactly these five in a real run --
+                // is pinned by tests/unit/test_nuclear_markers.py against the same
+                // channel table, because the stub block resolves the drop in Groovy
+                // (MarkerUtils) and so cannot see a Python-side disagreement. Keep the
+                // two expectations in step.
+                { assert workflow.trace.tasks().findAll {
+                    it.name.startsWith('MIRAGE:POSTPROCESSING:QUANTIFY_MARKERS:QUANTIFY') }.size() == 5 },
+                // This assertion would NOT catch an under-count by going to 2: this
+                // MERGE_QUANT_CSVS is fed via postprocess.nf's `.join(ch_morphology, by: 0)`,
+                // a keyed inner join, so an under-count's surplus groupTuple emission would
+                // be silently DISCARDED (merged_quant.csv loses markers, no error, no second
+                // task) rather than producing a second MERGE_QUANT_CSVS run. See
+                // QUANTIFY_MARKERS' GROUP comment (subworkflows/local/quantify_markers.nf)
+                // for the full per-caller account of what an under-count actually does.
+                { assert workflow.trace.tasks().findAll {
+                    it.name.startsWith('MIRAGE:POSTPROCESSING:MERGE_QUANT_CSVS') }.size() == 1 },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.startsWith('MIRAGE:POSTPROCESSING:ASSEMBLE_EXPORT:MERGE_AND_PYRAMID') }.size() == 1 }
+            )
+        }
+    }
+
+    test("a CELLTOX-only samplesheet runs end to end under --nuclear_markers CELLTOX") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                // No DAPI channel anywhere. CsvUtils used to reject this sheet before the
+                // run started ("DAPI channel not found") and SEGMENT rejected it again at
+                // runtime, so the marker list was configurable in name only.
+                input           = "$projectDir/tests/testdata/celltox_only.csv"
+                nuclear_markers = ['CELLTOX']
+                outdir          = "$outputDir"
+                start           = "preprocessing"
+                max_cpus = 2
+                max_memory = '6.GB'
+                seg_gpu = false
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                // {CELLTOX,PANCK,SMA} from the reference + {CD3,CD8} from the moving
+                // slide = 5, exactly as for the DAPI-configured sheet.
+                { assert workflow.trace.tasks().findAll {
+                    it.name.startsWith('MIRAGE:POSTPROCESSING:QUANTIFY_MARKERS:QUANTIFY') }.size() == 5 },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.startsWith('MIRAGE:POSTPROCESSING:MERGE_QUANT_CSVS') }.size() == 1 }
+            )
+        }
+    }
+
+    test("a scalar --nuclear_markers is not iterated character by character") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                // Nextflow hands `--nuclear_markers CELLTOX` through as a bare String.
+                // Iterating it as a List yields the CHARACTERS C,E,L,L,T,O,X, and then
+                // 'PANCK' matches on 'C' and is classified nuclear -- dropping a real
+                // marker from every non-reference slide. MarkerUtils.markerList coerces
+                // the scalar instead, so this must count the same 5 markers as the List
+                // spelling above.
+                input           = "$projectDir/tests/testdata/celltox_only.csv"
+                nuclear_markers = 'CELLTOX'
+                outdir          = "$outputDir"
+                start           = "preprocessing"
+                max_cpus = 2
+                max_memory = '6.GB'
+                seg_gpu = false
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.startsWith('MIRAGE:POSTPROCESSING:QUANTIFY_MARKERS:QUANTIFY') }.size() == 5 }
+            )
+        }
+    }
+
+    test("a comma-joined nuclear_markers element is split, not taken as one marker") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                // The shape a params file produces when the list is written as a single
+                // string. It is a valid Collection, so nothing coerces it -- unsplit, the
+                // one marker 'CELLTOX,DAPI' matches NO channel, every channel is
+                // classified non-reference-safe, and SPLIT_CHANNELS keeps the nuclear
+                // channel on the moving slide. That emits SIX files against a groupTuple
+                // sized 5 (the union dedupes CELLTOX, so the count is unchanged), which
+                // is the surplus-second-group case: 6 QUANTIFY and TWO MERGE_QUANT_CSVS
+                // writing the same merged_quant.csv. Silent -- no error anywhere.
+                input           = "$projectDir/tests/testdata/celltox_only.csv"
+                nuclear_markers = ['CELLTOX,DAPI']
+                outdir          = "$outputDir"
+                start           = "preprocessing"
+                max_cpus = 2
+                max_memory = '6.GB'
+                seg_gpu = false
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.startsWith('MIRAGE:POSTPROCESSING:QUANTIFY_MARKERS:QUANTIFY') }.size() == 5 },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.startsWith('MIRAGE:POSTPROCESSING:MERGE_QUANT_CSVS') }.size() == 1 }
+            )
         }
     }
 
@@ -591,6 +766,128 @@ nextflow_pipeline {
 
         then {
             assert workflow.success
+        }
+    }
+
+    //==========================================================================
+    // ROUTER SHAPE — one input read, one QC aggregation
+    //==========================================================================
+
+    /*
+     * The router used to carry TWO copies of the end-of-run aggregation (the
+     * add_cycle copy was introduced as "Mirrors the standard-path aggregation
+     * below"). Both paths now go through subworkflows/local/final_qc.nf, so the
+     * QC report must come from exactly one call site — and the fully-qualified
+     * task name is the evidence of which one. Asserting only that a report exists
+     * would still pass if a second, differently-fed aggregation reappeared and
+     * overwrote it.
+     */
+    test("Should aggregate QC exactly once, through FINAL_QC - stub") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                input = "$projectDir/tests/testdata/test_input.csv"
+                outdir = "$outputDir"
+                start = "preprocessing"
+
+                max_cpus = 2
+                max_memory = '6.GB'
+                seg_gpu = false
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.startsWith('MIRAGE:FINAL_QC:GENERATE_QC_REPORT') }.size() == 1 },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.contains('GENERATE_QC_REPORT') }.size() == 1 },
+                // --enable_trace defaults true, so the size rollup is the other half
+                // of FINAL_QC and must also run exactly once.
+                { assert workflow.trace.tasks().findAll {
+                    it.name.startsWith('MIRAGE:FINAL_QC:AGGREGATE_SIZE_LOGS') }.size() == 1 },
+                { assert path("$outputDir/qc").list().any {
+                    it.toString().contains('mirage_qc_report_') } },
+                { assert path("$outputDir/size_logs/input_sizes.csv").exists() }
+            )
+        }
+    }
+
+    /*
+     * FINAL_QC is now invoked unconditionally; the two gates live inside it. A run
+     * that wants neither half must still complete cleanly rather than hang on an
+     * unconsumed artifact channel.
+     */
+    test("Should complete with no report and no size rollup when both are off - stub") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                input = "$projectDir/tests/testdata/test_input.csv"
+                outdir = "$outputDir"
+                start = "preprocessing"
+                skip_final_qc_report = true
+                enable_trace = false
+
+                max_cpus = 2
+                max_memory = '6.GB'
+                seg_gpu = false
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.contains('GENERATE_QC_REPORT') }.size() == 0 },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.contains('AGGREGATE_SIZE_LOGS') }.size() == 0 },
+                // The rest of the pipeline is unaffected.
+                { assert path("$outputDir/csv/postprocessed.csv").exists() }
+            )
+        }
+    }
+
+    /*
+     * The samplesheet is read exactly once, by INPUT_CHECK, with the column fixed
+     * by --start. Starting mid-pipeline must read the checkpoint's own column
+     * (registered_image here) — reading path_to_file instead would fail at launch
+     * rather than silently, but only if the mapping stays in step with --start.
+     */
+    test("Should read the entry step's image column, once - stub") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                input = "$projectDir/tests/testdata/valid_checkpoint_postprocessing.csv"
+                outdir = "$outputDir"
+                start = "postprocessing"
+
+                max_cpus = 2
+                max_memory = '6.GB'
+                seg_gpu = false
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                // One patient, one image -> exactly one SEGMENT and one merge. A second
+                // read of the sheet (or a lost images_count) would change these.
+                { assert workflow.trace.tasks().findAll {
+                    it.name.startsWith('MIRAGE:POSTPROCESSING:SEGMENT') }.size() == 1 },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.startsWith('MIRAGE:POSTPROCESSING:MERGE_QUANT_CSVS') }.size() == 1 },
+                { assert path("$outputDir/csv/postprocessed.csv").exists() }
+            )
         }
     }
 

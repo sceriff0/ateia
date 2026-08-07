@@ -1,0 +1,261 @@
+/*
+ * QUANTIFY_MARKERS — the per-marker fan-out + QUANTIFY + per-patient grouping chain
+ * shared by POSTPROCESSING and ADD_CYCLE.
+ *
+ * These tests exist because the grouping is the piece the two callers had forked, and
+ * the fork was invisible from either file alone: add_cycle grouped with a bare
+ * `.groupTuple()` while postprocess used `groupKey(patient_id, channels_count)`.
+ *
+ * What can and cannot be asserted here:
+ *   - A sized groupKey and a bare key emit IDENTICAL values, so no assertion on
+ *     grouped_csv can prove the streaming hint is present. What the tests below pin is
+ *     the observable consequence of the size being *wrong*: groupTuple discards
+ *     under-sized groups unless `remainder: true`, so "patient still emitted when
+ *     channels_count over-counts the markers" fails loudly if the size is applied
+ *     without the remainder safety net — which is exactly the state add_cycle would
+ *     have inherited from a naive extraction (verified: MERGE_QUANT_CSVS and
+ *     EXPORT_GEOJSON stopped running in an add_cycle stub run).
+ *   - `channels_count` being read at all is pinned by the grouped meta carrying it
+ *     through, plus the no-channels_count fallback case.
+ *   - Early (streaming) emission itself is not observable through nf-test's collected
+ *     outputs and is NOT covered.
+ */
+nextflow_workflow {
+
+    name "Test QUANTIFY_MARKERS subworkflow"
+    script "subworkflows/local/quantify_markers.nf"
+    workflow "QUANTIFY_MARKERS"
+
+    tag "subworkflow"
+    tag "quantify_markers"
+    tag "postprocessing"
+
+    test("groups per patient, one CSV per marker, keyed by patient_id") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                outdir = "$outputDir"
+            }
+            workflow {
+                """
+                // Two patients. P001's three markers arrive as TWO split images
+                // (2 + 1), the shape the linear path produces for a reference plus a
+                // moving slide; the group must span both.
+                input[0] = Channel.fromList([
+                    [[patient_id: 'P001', id: 'P001_a', channels_count: 3],
+                     [file('$projectDir/tests/testdata/sample_DAPI.tif',  checkIfExists: true),
+                      file('$projectDir/tests/testdata/sample_PANCK.tif', checkIfExists: true)]],
+                    [[patient_id: 'P001', id: 'P001_b', channels_count: 3],
+                     [file('$projectDir/tests/testdata/sample_SMA.tif',   checkIfExists: true)]],
+                    [[patient_id: 'P002', id: 'P002_a', channels_count: 2],
+                     [file('$projectDir/tests/testdata/sample_DAPI.tif',  checkIfExists: true),
+                      file('$projectDir/tests/testdata/sample_PANCK.tif', checkIfExists: true)]]
+                ])
+                input[1] = Channel.fromList([
+                    ['P001', file('$projectDir/tests/testdata/P001_cell_mask.tif',   checkIfExists: true),
+                             file('$projectDir/tests/testdata/P001_nuclei_mask.tif', checkIfExists: true)],
+                    ['P002', file('$projectDir/tests/testdata/P002_cell_mask.tif',   checkIfExists: true),
+                             file('$projectDir/tests/testdata/P001_nuclei_mask.tif', checkIfExists: true)]
+                ])
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                // One grouped entry per patient, not per split image.
+                { assert workflow.out.grouped_csv.size() == 2 },
+                { assert workflow.out.grouped_csv.collect { it[0].patient_id }.toSorted() ==
+                         ['P001', 'P002'] },
+                // The grouped meta is re-keyed to the patient (id == patient_id), which is
+                // what MERGE_QUANT_CSVS tags and names its output from.
+                { assert workflow.out.grouped_csv.every { it[0].id == it[0].patient_id } },
+                // channels_count survives into the grouped meta — the field the sized key
+                // is derived from is present in the data the grouping reads.
+                { assert workflow.out.grouped_csv.find { it[0].patient_id == 'P001' }[0].channels_count == 3 },
+                // 3 markers for P001 (across two split images), 2 for P002.
+                { assert workflow.out.grouped_csv.find { it[0].patient_id == 'P001' }[1].size() == 3 },
+                { assert workflow.out.grouped_csv.find { it[0].patient_id == 'P002' }[1].size() == 2 },
+                // Per-marker CSVs are named <patient>_<marker>_quant.csv.
+                { assert workflow.out.grouped_csv.find { it[0].patient_id == 'P001' }[1]
+                        .collect { file(it).name }.toSorted() ==
+                        ['P001_sample_DAPI_quant.csv',
+                         'P001_sample_PANCK_quant.csv',
+                         'P001_sample_SMA_quant.csv'] },
+                { assert workflow.out.versions },
+                { assert workflow.out.size_logs }
+            )
+        }
+    }
+
+    test("an over-declared channels_count does NOT drop the patient (add_cycle's DAPI-drop shape)") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                outdir = "$outputDir"
+            }
+            workflow {
+                """
+                // add_cycle's real shape: the samplesheet declares DAPI|KI67|CD20 so
+                // CsvUtils.countChannelsPerPatient reports channels_count = 3, but
+                // SPLIT_CHANNELS drops DAPI from a non-reference slide, so only TWO
+                // markers ever reach QUANTIFY. Without `remainder: true` the sized
+                // groupKey never fills and groupTuple silently discards the patient.
+                input[0] = Channel.of(
+                    [[patient_id: 'P001', id: 'P001_new', channels_count: 3],
+                     [file('$projectDir/tests/testdata/sample_PANCK.tif', checkIfExists: true),
+                      file('$projectDir/tests/testdata/sample_SMA.tif',   checkIfExists: true)]]
+                )
+                input[1] = Channel.of(
+                    ['P001', file('$projectDir/tests/testdata/P001_cell_mask.tif',   checkIfExists: true),
+                             file('$projectDir/tests/testdata/P001_nuclei_mask.tif', checkIfExists: true)]
+                )
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.out.grouped_csv.size() == 1 },
+                { assert workflow.out.grouped_csv[0][0].patient_id == 'P001' },
+                { assert workflow.out.grouped_csv[0][1].size() == 2 }
+            )
+        }
+    }
+
+    test("an UNDER-declared channels_count splits the patient into two groups") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                outdir = "$outputDir"
+            }
+            workflow {
+                """
+                // The dangerous direction. `remainder: true` makes an OVER-count harmless
+                // (the surplus slot never fills, so nothing extra is emitted), but an
+                // UNDER-count makes groupTuple emit at size and then emit the surplus as a
+                // SECOND group for the same patient — AT THIS SUBWORKFLOW BOUNDARY, which
+                // is exactly what this test pins below. Before `remainder` the surplus was
+                // silently discarded instead.
+                //
+                // What the CALLER does with those two same-patient-id emissions is NOT
+                // uniform, and is deliberately out of scope for this subworkflow-level
+                // test — see QUANTIFY_MARKERS' own GROUP comment
+                // (subworkflows/local/quantify_markers.nf) for the full per-caller account:
+                // add_cycle.nf's `.combine(by: 0)` runs MERGE_QUANT_CSVS twice onto the same
+                // published path; postprocess.nf's `.join(ch_morphology, by: 0)` silently
+                // discards the surplus instead; postprocess.nf's separate pyramid grouping
+                // aborts the run entirely via the MERGE_AND_PYRAMID memory closure
+                // (conf/modules.config:330-337). This test pins the behaviour so the
+                // trade-off is visible: countChannelsPerPatient must never under-count, and
+                // errs high when it cannot be certain (see lib/CsvUtils.groovy).
+                input[0] = Channel.of(
+                    [[patient_id: 'P001', id: 'P001_a', channels_count: 1],
+                     [file('$projectDir/tests/testdata/sample_DAPI.tif',  checkIfExists: true),
+                      file('$projectDir/tests/testdata/sample_PANCK.tif', checkIfExists: true)]]
+                )
+                input[1] = Channel.of(
+                    ['P001', file('$projectDir/tests/testdata/P001_cell_mask.tif',   checkIfExists: true),
+                             file('$projectDir/tests/testdata/P001_nuclei_mask.tif', checkIfExists: true)]
+                )
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                // TWO groups for ONE patient — not one group of two, and not one of one.
+                { assert workflow.out.grouped_csv.size() == 2 },
+                { assert workflow.out.grouped_csv.every { it[0].patient_id == 'P001' } },
+                { assert workflow.out.grouped_csv.collect { it[1].size() }.toSorted() == [1, 1] },
+                // Between them the groups are still TOTAL: no CSV was discarded.
+                { assert workflow.out.grouped_csv.collectMany { it[1] }.collect { file(it).name }.toSorted() ==
+                         ['P001_sample_DAPI_quant.csv', 'P001_sample_PANCK_quant.csv'] }
+            )
+        }
+    }
+
+    test("a meta without channels_count falls back to an unsized key and still groups") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                outdir = "$outputDir"
+            }
+            workflow {
+                """
+                input[0] = Channel.of(
+                    [[patient_id: 'P001', id: 'P001_a'],
+                     [file('$projectDir/tests/testdata/sample_DAPI.tif',  checkIfExists: true),
+                      file('$projectDir/tests/testdata/sample_PANCK.tif', checkIfExists: true)]]
+                )
+                input[1] = Channel.of(
+                    ['P001', file('$projectDir/tests/testdata/P001_cell_mask.tif',   checkIfExists: true),
+                             file('$projectDir/tests/testdata/P001_nuclei_mask.tif', checkIfExists: true)]
+                )
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.out.grouped_csv.size() == 1 },
+                { assert workflow.out.grouped_csv[0][1].size() == 2 }
+            )
+        }
+    }
+
+    test("a repeated [patient, marker] pair is quantified once") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                outdir = "$outputDir"
+            }
+            workflow {
+                """
+                // The same marker file arrives from two split images for the same
+                // patient. QUANTIFY writes <patient>_<marker>_quant.csv, so keeping both
+                // would stage two identically-named CSVs into MERGE_QUANT_CSVS.
+                input[0] = Channel.fromList([
+                    [[patient_id: 'P001', id: 'P001_a', channels_count: 2],
+                     [file('$projectDir/tests/testdata/sample_DAPI.tif',  checkIfExists: true),
+                      file('$projectDir/tests/testdata/sample_PANCK.tif', checkIfExists: true)]],
+                    [[patient_id: 'P001', id: 'P001_b', channels_count: 2],
+                     [file('$projectDir/tests/testdata/sample_PANCK.tif', checkIfExists: true)]]
+                ])
+                input[1] = Channel.of(
+                    ['P001', file('$projectDir/tests/testdata/P001_cell_mask.tif',   checkIfExists: true),
+                             file('$projectDir/tests/testdata/P001_nuclei_mask.tif', checkIfExists: true)]
+                )
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.out.grouped_csv.size() == 1 },
+                { assert workflow.out.grouped_csv[0][1].collect { file(it).name }.toSorted() ==
+                         ['P001_sample_DAPI_quant.csv', 'P001_sample_PANCK_quant.csv'] }
+            )
+        }
+    }
+}

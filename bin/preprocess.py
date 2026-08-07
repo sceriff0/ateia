@@ -503,7 +503,7 @@ def parse_args():
     )
 
     parser.add_argument(
-        "--n_iter", type=int, default=3, help="Number of autotuning iterations"
+        "--n_iter", type=int, default=100, help="Number of autotuning iterations"
     )
 
     parser.add_argument(

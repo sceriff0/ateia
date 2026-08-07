@@ -11,7 +11,75 @@
  */
 class ParamUtils {
 
-    static final List STEP_ORDER = ['preprocessing', 'registration', 'postprocessing']
+    /*
+     * The single table answering "what is a step?". Everything else that used
+     * to restate the step vocabulary — STEP_ORDER, requiredColumnsForStep,
+     * mirage.nf's entry_column map, final_qc.nf's KNOWN_ARTIFACT_KINDS, and
+     * nextflow_schema.json's start/stop enums — is either derived from this or
+     * checked against it (the schema can't be generated at build time, so
+     * tests/test_step_vocabulary_consistency.py asserts it agrees instead).
+     *
+     *   name            - the step's canonical identifier; also the value
+     *                      --start/--stop accept.
+     *   requiredColumns - samplesheet columns CsvUtils must find when this step
+     *                      is the run's entry point (its own input, not a
+     *                      downstream checkpoint column).
+     *   entryColumn     - the checkpoint-CSV column INPUT_CHECK reads when this
+     *                      step is the run's entry point (mirage.nf reads the
+     *                      sheet exactly once, at --start).
+     *   qcKinds         - the artifact-stream tags this step alone contributes
+     *                      to FINAL_QC (see final_qc.nf). 'versions' and
+     *                      'size_log' are cross-cutting — every step emits them
+     *                      — so they are not listed per-step; they are added
+     *                      once in UNIVERSAL_QC_KINDS below.
+     */
+    static final List STEPS = [
+        [
+            name           : 'preprocessing',
+            requiredColumns: ['patient_id', 'path_to_file', 'is_reference', 'channels'],
+            entryColumn    : 'path_to_file',
+            qcKinds        : ['preprocess_qc'],
+        ],
+        [
+            name           : 'registration',
+            requiredColumns: ['patient_id', 'preprocessed_image', 'is_reference', 'channels'],
+            entryColumn    : 'preprocessed_image',
+            qcKinds        : ['registration_qc', 'registration_tre', 'seg_qc', 'seg_residuals'],
+        ],
+        [
+            name           : 'segmentation',
+            requiredColumns: ['patient_id', 'registered_image', 'is_reference', 'channels'],
+            entryColumn    : 'registered_image',
+            // Empty by design, not an oversight: SEGMENT and the two property
+            // extractors emit only 'versions' and 'size_log', which are
+            // UNIVERSAL_QC_KINDS below, so they contribute nothing here. No QC
+            // image belongs to segmentation alone — GENERATE_POSTPROCESSING_QC
+            // consumes the mask AND the merged quantification table, so it stays
+            // postprocessing's.
+            qcKinds        : [],
+        ],
+        [
+            name           : 'postprocessing',
+            // 'cell_mask' and 'nuclei_mask' (beyond the registered-image base four) make
+            // a plain csv/registered.csv -- still what every doc's `--start postprocessing`
+            // example names, pre-dating the segmentation step -- fail HERE with a
+            // clear "Missing required column" error. Without them, CsvUtils.validateInputCSV
+            // and validateInputSemantics both pass (registered.csv satisfies the base
+            // four), and the run dies much later inside segmentation.nf's
+            // READ_SEGMENTED_CHECKPOINT -- which dereferences BOTH file(row.cell_mask) and
+            // file(row.nuclei_mask) unconditionally -- with "Argument of 'file' function cannot be
+            // null" -- a two-layer validation contract that silently skipped its job.
+            requiredColumns: ['patient_id', 'registered_image', 'is_reference', 'channels', 'cell_mask', 'nuclei_mask'],
+            entryColumn    : 'registered_image',
+            qcKinds        : ['postprocess_qc'],
+        ],
+    ]
+
+    // Artifact-stream tags every step contributes, so they belong to no single
+    // step's qcKinds. See final_qc.nf's KNOWN_ARTIFACT_KINDS derivation.
+    static final List UNIVERSAL_QC_KINDS = ['versions', 'size_log']
+
+    static final List STEP_ORDER = STEPS.collect { it.name }
 
     static void validateOutdir(String outdir) {
         if (!outdir?.trim()) {
@@ -31,13 +99,37 @@ class ParamUtils {
         }
     }
 
-    static void validateAddCycle(String priorOutdir) {
+    static void validateAddCycle(String outdir, String priorOutdir) {
         if (!priorOutdir?.trim()) {
             throw new IllegalArgumentException(
                 "mode='add_cycle' requires --prior_outdir pointing at the previous run's --outdir")
         }
-        ['csv/registered.csv', 'csv/postprocessed.csv'].each { rel ->
-            def f = new File("${priorOutdir}/${rel}")
+        // add_cycle writes its registered-checkpoint CSV via collectFile(storeDir:),
+        // which OVERWRITES. If --outdir resolved to the same directory as
+        // --prior_outdir, that write would clobber the prior run's complete
+        // manifest with add_cycle's partial one, while the postprocessed-checkpoint
+        // CSV (untouched by add_cycle) survives — leaving --prior_outdir internally
+        // inconsistent and unrecoverable. Compare canonical paths, not raw strings:
+        // a trailing slash, a '.', or a symlink must not defeat this check.
+        if (outdir?.trim()) {
+            def outdirCanonical = new File(outdir).canonicalPath
+            def priorOutdirCanonical = new File(priorOutdir).canonicalPath
+            if (outdirCanonical == priorOutdirCanonical) {
+                def registeredRel = Layout.checkpointCsvRelative(Layout.REGISTERED)
+                def postprocessedRel = Layout.checkpointCsvRelative(Layout.POSTPROCESSED)
+                throw new IllegalArgumentException(
+                    "mode='add_cycle': --outdir must not be the same directory as --prior_outdir " +
+                    "('${priorOutdir}'). add_cycle's '${registeredRel}' checkpoint write overwrites " +
+                    "in place, which would clobber the prior run's manifest while '${postprocessedRel}' " +
+                    "survives untouched, leaving --prior_outdir internally inconsistent. Use a FRESH " +
+                    "--outdir for the incremental run, as docs/add_cycle.md describes.")
+            }
+        }
+        // Which checkpoints a prior run must have left behind, and where they live,
+        // is Layout's to state — add_cycle.nf reads the very same two files.
+        Layout.ADD_CYCLE_CHECKPOINTS.each { step ->
+            def rel = Layout.checkpointCsvRelative(step)
+            def f = new File(Layout.checkpointCsv(priorOutdir, step))
             if (!f.exists()) {
                 throw new FileNotFoundException(
                     "mode='add_cycle': required checkpoint '${rel}' not found under --prior_outdir '${priorOutdir}'. " +
@@ -93,40 +185,122 @@ class ParamUtils {
         }
     }
 
-    static void validateCompartmentQuant(boolean quantifyCompartments, boolean expanded) {
-        if (expanded && !quantifyCompartments) {
+    /**
+     * add_cycle runs a FIXED path — new-cycle samplesheet -> preprocess -> register against
+     * the frozen prior reference -> quantify -> export — there is no --start/--stop choice
+     * to make, and 'add_cycle' is not itself a member of STEP_ORDER (it is a mode, not a
+     * step; see the header comment on STEPS). Accepting either flag and silently ignoring it
+     * used to let a run report whatever --stop the caller typed as though it had been
+     * honoured (e.g. --stop registration completing the FULL path through export while
+     * run_summary.json claimed the run stopped after registration) — accept-and-ignore is
+     * the defect, not the label, so this rejects both rather than trying to describe
+     * whatever was ignored.
+     *
+     * --stop defaults to null, so an explicit --stop is exactly `params.stop != null`.
+     * --start defaults to 'preprocessing', so an explicit non-default --start is exactly
+     * `params.start != 'preprocessing'` — a caller who explicitly passes
+     * --start preprocessing is indistinguishable from one who passed neither flag, and
+     * that ambiguity is harmless: 'preprocessing' is also the only correct description of
+     * where add_cycle's own fixed path begins.
+     */
+    static void validateAddCycleStepFlags(Map params) {
+        if (params.stop != null || params.start != 'preprocessing') {
+            throw new IllegalArgumentException(
+                "mode='add_cycle' runs a fixed path from the new-cycle samplesheet through " +
+                "export (preprocess -> register against the frozen prior reference -> " +
+                "quantify -> export) — --start/--stop do not apply in this mode and must be omitted.")
+        }
+    }
+
+    /**
+     * Resolve --quantify_compartments / --expanded_quantification / --embed_masks
+     * into ONE immutable snapshot, the same seam --registration_method has
+     * (subworkflows/local/registration.nf: read once, threaded down as an
+     * argument, never re-read). Call this once per top-level entry point
+     * (workflows/mirage.nf) and pass the returned map down to any subworkflow
+     * that takes it as a `take:` argument or used to re-derive these booleans
+     * itself (subworkflows/local/segmentation.nf's two workflows — SEGMENTATION
+     * (`take:`, segmentation.nf:42) and READ_SEGMENTED_CHECKPOINT (`take:`,
+     * segmentation.nf:275) — plus postprocess.nf, add_cycle.nf,
+     * assemble_export.nf). Config
+     * (`conf/modules.config`'s `ext.args`) and module `script:`/`stub:` blocks
+     * (e.g. modules/local/quantify.nf) are explicitly out of scope: config cannot
+     * take arguments or see this class, and a module reading its own param to
+     * build its own flags is this repo's established pattern for both.
+     * tests/test_compartment_mode_routing.py enforces that nothing else reads
+     * the three raw params directly.
+     */
+    static Map compartmentMode(Map params) {
+        return [
+            compartments: params.quantify_compartments as boolean,
+            expanded    : params.expanded_quantification as boolean,
+            embedMasks  : params.embed_masks as boolean,
+        ].asImmutable()
+    }
+
+    /**
+     * Cross-parameter rules for the compartment-quantification trio, both derived
+     * from `mode` (see compartmentMode above) rather than read raw:
+     *
+     *   expanded ⇒ compartments      (long-standing: per-compartment Mean/Sum
+     *                                 needs a per-compartment signal to sum)
+     *   embedMasks ⇒ compartments && expanded
+     *                                 (assemble_export.nf's embed_masks gate --
+     *                                 `params.embed_masks && params.quantify_compartments
+     *                                 && params.expanded_quantification` -- decides
+     *                                 whether the pyramid gets a mask series (Image:1).
+     *                                 --embed_masks true with either sibling off used to
+     *                                 exit 0 and silently publish a pyramid with NO mask
+     *                                 series; that run only fails months later, when its
+     *                                 --outdir is handed to a --prior_outdir add_cycle run
+     *                                 and EXTRACT_MASK_SERIES finds no Image:1.)
+     */
+    static void validateCompartmentQuant(Map mode) {
+        if (mode.expanded && !mode.compartments) {
             throw new IllegalArgumentException(
                 "--expanded_quantification requires --quantify_compartments to be true."
+            )
+        }
+        if (mode.embedMasks && !(mode.compartments && mode.expanded)) {
+            throw new IllegalArgumentException(
+                "--embed_masks requires both --quantify_compartments and " +
+                "--expanded_quantification to be true -- without both, the pyramid's " +
+                "mask series (Image:1) is never written, and a run advertising " +
+                "--embed_masks that silently omits it is only discovered later, when " +
+                "this --outdir is handed to mode='add_cycle' as --prior_outdir and " +
+                "EXTRACT_MASK_SERIES finds no Image:1 to reuse."
             )
         }
     }
 
     static List requiredColumnsForStep(String step) {
-        def requirements = [
-            preprocessing : ['patient_id','path_to_file','is_reference','channels'],
-            registration  : ['patient_id','preprocessed_image','is_reference','channels'],
-            postprocessing: ['patient_id','registered_image','is_reference','channels']
-        ]
-
-        if (!requirements.containsKey(step)) {
+        def entry = STEPS.find { it.name == step }
+        if (!entry) {
             throw new IllegalArgumentException("No column requirements defined for step: ${step}")
         }
-
-        return requirements[step]
+        return entry.requiredColumns
     }
 
     /**
-     * Parse a parameter that may be a List, a stringified list like "['a','b']", or a comma-separated string.
-     * Returns a cleaned List<String> with empty entries removed.
+     * The checkpoint-CSV column to read when `step` is the run's entry point
+     * (--start). Replaces mirage.nf's hand-written entry_column map.
      */
-    static List<String> parseListParam(param) {
-        if (param instanceof List) {
-            return param.collect { it.toString().trim() }.findAll { it }
+    static String entryColumnForStep(String step) {
+        def entry = STEPS.find { it.name == step }
+        if (!entry) {
+            throw new IllegalArgumentException("No entry column defined for step: ${step}")
         }
-        return (param ?: '').toString()
-            .replaceAll(/^\[|\]$/, '')    // strip outer brackets only
-            .tokenize(',')
-            .collect { it.trim().replaceAll(/^['"]|['"]$/, '') }  // strip surrounding quotes per element
-            .findAll { it }
+        return entry.entryColumn
+    }
+
+    /**
+     * Whether `step` is this run's --start step -- i.e. whether the channel for
+     * `step` must come from INPUT_CHECK.out.samples rather than the previous
+     * step's direct output. Named helper so mirage.nf's routing reads its intent
+     * instead of repeating the raw `params.start == '...'` comparison at every
+     * branch point.
+     */
+    static boolean isEntryPoint(Map params, String step) {
+        return params.start == step
     }
 }

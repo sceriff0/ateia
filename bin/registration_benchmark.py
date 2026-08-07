@@ -9,6 +9,13 @@ output to compare — e.g. VALIS vs the tiled (STARE) method on the same slide:
     registration_benchmark.py --reference ref.ome.tiff --registered tiled_out.ome.tiff --output tiled.json
 
 Optionally pass --moving to also report the before-registration residual (the improvement).
+
+This script is a deliberately unreferenced manual harness: no Nextflow process or module
+invokes it (see docs/parallel_registration_design.md), it is only ever run by hand to compare
+registration methods. That is a separate fact from its dependency, bin/utils/reg_benchmark.py,
+which *is* genuinely imported (by this script and by tests/test_reg_benchmark.py and
+tests/test_tiled_fanout.py) and is therefore correctly detected as alive by
+tests/test_no_dead_bin_modules.py without needing an allowlist entry.
 """
 
 from __future__ import annotations

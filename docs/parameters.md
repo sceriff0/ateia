@@ -26,7 +26,7 @@ shown here are the values in
 
 | Parameter | Default | Description |
 |---|---|---|
-| `start` | `preprocessing` | Entry stage: `preprocessing`, `registration`, or `postprocessing`. |
+| `start` | `preprocessing` | Entry stage: `preprocessing`, `registration`, `segmentation`, or `postprocessing`. |
 | `stop` | `null` | Stop after this stage. `null` = run to the end. |
 | `dry_run` | `false` | Validate inputs and exit without launching tasks. |
 | `debug_channels` | `false` | Emit `.view` channel-topology debug output. |
@@ -61,7 +61,7 @@ whole-slide alignment) and **STARE tiled** (JVM-free, fully parallel, laptop-fri
 |---|---|---|
 | `registration_method` | `valis` | Registration backend: `valis` (VALIS whole-slide) or `tiled` (STARE — see [Tiled / STARE](#tiled--stare-registration_methodtiled)). |
 | `allow_auto_reference` | `false` | If no `is_reference=true` row, use the first panel as reference. |
-| `nuclear_markers` | `['DAPI','CELLTOX']` | Ordered preference of nuclear/fiducial marker names. The first present (resolved from channel metadata, never the filename) is moved to channel 0 and drives both cell segmentation and the registration fiducial. Fails fast if none present (single-channel images excepted). |
+| `nuclear_markers` | `['DAPI','CELLTOX']` | Ordered preference of nuclear/fiducial marker names. The first present (resolved from channel metadata, never the filename) is moved to channel 0 and drives both cell segmentation and the registration fiducial. Fails fast if none present (single-channel images excepted). Accepts a **list** (config or `-params-file`) or a **comma/space-separated string**, which is the only shape a command line can produce: `--nuclear_markers CELLTOX` and `--nuclear_markers DAPI,CELLTOX` both work. Matching is case-insensitive **substring**, so `DAPI_nuclear` counts as nuclear. |
 
 ### VALIS
 
@@ -258,13 +258,18 @@ Full walkthrough: [Incremental cycles](add_cycle.md).
 |---|---|---|
 | `mode` | `standard` | `standard` = normal `--start`/`--stop` pipeline; `add_cycle` = incremental cyclic-IF. |
 | `prior_outdir` | `null` | **Required for `add_cycle`.** The `--outdir` of the previously completed run (supplies the reusable reference, mask, and quantification via its checkpoint CSVs). |
-| `embed_masks` | `false` | Embed the segmentation masks as a second uint32 series in the pyramid OME-TIFF. Written only when `embed_masks && quantify_compartments && expanded_quantification`; `add_cycle` consumes this series, so a prior run must have it to be extendable. |
+| `embed_masks` | `false` | Embed the segmentation masks as a second uint32 series in the pyramid OME-TIFF. Written only when `embed_masks && quantify_compartments && expanded_quantification`; `add_cycle` consumes this series, so a prior run must have it to be extendable. `--embed_masks true` REQUIRES both `--quantify_compartments` and `--expanded_quantification` also true — the launch validation rejects the combination otherwise (see warning below). |
 
 !!! warning "`add_cycle` prerequisites"
     `embed_masks` defaults to `false`, so a default run is **not** add_cycle-extendable.
     Set `--embed_masks true` (together with `--quantify_compartments` and
-    `--expanded_quantification`, both on by default) to make a run extendable. Without the
-    embedded mask series, `mode=add_cycle` **fast-fails** before doing any work. See
+    `--expanded_quantification`, both on by default) to make a run extendable.
+    `--embed_masks true` with either sibling off is rejected **at launch**
+    (`ParamUtils.validateCompartmentQuant`) rather than silently producing a
+    plain pyramid, so a prior run either failed to launch with `embed_masks=true`
+    misconfigured, or has the mask series if `embed_masks=true` was accepted at
+    all. Without the embedded mask series, `mode=add_cycle` **fast-fails** before
+    doing any work. See
     [Incremental cycles → Fast-fail behavior](add_cycle.md#fast-fail-behavior).
 
 ## Parameter presets

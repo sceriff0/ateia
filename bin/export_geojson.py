@@ -35,24 +35,14 @@ sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
 from image_utils import ensure_dir
 from logger import configure_logging, get_logger
+from measurements import MORPHOLOGY_COLS, identify_marker_columns
 
 logger = get_logger(__name__)
 
 # Columns that are morphological / metadata, not marker intensities
-MORPHOLOGY_COLS = {
-    "label",
-    "y",
-    "x",
-    "area",
-    "eccentricity",
-    "perimeter",
-    "convex_area",
-    "axis_major_length",
-    "axis_minor_length",
-    "solidity",
-    "fov",
-    "cell_size",
-}
+# (single source of truth: bin/utils/measurements.py). Wrapped in a set here
+# since this module does membership tests in a loop.
+MORPHOLOGY_COLS = set(MORPHOLOGY_COLS)
 
 # Default classification color for "Cell" (cyan)
 CELL_COLOR_RGB = (0, 255, 255)
@@ -184,18 +174,6 @@ def _feature_class_and_extra(row, pheno_lookup, palette, patient_id, feasible_na
     extra = pheno_extra_measurements(prow, feasible_names or [], lineage or [], states or [])
     fid = stamped_id(patient_id, label) if patient_id is not None else None
     return fid, name, color, extra
-
-
-def identify_marker_columns(df: pd.DataFrame) -> List[str]:
-    """Identify marker intensity columns (all numeric columns not in morphology set)."""
-    markers = []
-    for col in df.columns:
-        if col in MORPHOLOGY_COLS:
-            continue
-        if not pd.api.types.is_numeric_dtype(df[col]):
-            continue
-        markers.append(col)
-    return markers
 
 
 def compute_zscores(df: pd.DataFrame, marker_cols: List[str]) -> pd.DataFrame:

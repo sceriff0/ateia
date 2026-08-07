@@ -8,16 +8,287 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **A new `segmentation` step, carved out of `postprocessing`.** `SEGMENT`,
+  `EXTRACT_CELL_PROPERTIES` and `EXTRACT_NUCLEI_PROPERTIES` (the latter under
+  `--quantify_compartments`) moved from `subworkflows/local/postprocess.nf` into their
+  own `subworkflows/local/segmentation.nf`, with a resumable checkpoint
+  (`Layout.SEGMENTED` / `Checkpoint.columns('segmented')`). `--start`/`--stop` now
+  accept `segmentation` between `registration` and `postprocessing`
+  (`ParamUtils.STEP_ORDER` and `nextflow_schema.json`'s `start`/`stop` enums both
+  updated). Only `nucleus_contours` is recorded as the empty string when
+  `--quantify_compartments` is false (see `lib/Checkpoint.groovy`'s EMPTY VALUES
+  note) — `nuclei_mask` is always populated, since `SEGMENT` always produces it and
+  `postprocess.nf`'s mask join depends on that being true unconditionally. The
+  checkpoint schema stays fixed across that param setting either way.
+  `--start postprocessing`'s samplesheet must now additionally carry `cell_mask` and
+  `nuclei_mask` columns (`ParamUtils.STEPS`'s `postprocessing` entry — both are
+  dereferenced unconditionally by `segmentation.nf`'s `READ_SEGMENTED_CHECKPOINT`),
+  so a plain `registered.csv` fails validation loudly instead of dying deep inside
+  `segmentation.nf` with "Argument of `file` function cannot be null".
+  **Published-output change:** `csv/segmented.csv` is a new published file, one row
+  per registered slide. `csv/preprocessed.csv`, `csv/registered.csv` and
+  `csv/postprocessed.csv` are byte-identical to before this change. At
+  `--start postprocessing`, `csv/postprocessed.csv`'s `cell_mask` column now
+  correctly names a path under the PRIOR run's `--outdir` (wherever segmentation
+  actually ran), not this run's — a new cross-outdir dependency in that manifest,
+  unlike every other column in it.
+- **`lib/Layout.groovy` gained `publishedOrAsIs`/`isUnderTaskDir`.** A channel that can
+  carry either a fresh task-directory output (this run) or an already-published path
+  read back from an earlier checkpoint (`--start segmentation`'s `INPUT_CHECK`,
+  `--start postprocessing`'s `READ_SEGMENTED_CHECKPOINT`) needs `Layout.publishedPath`
+  applied only in the first case — in the second, the file is already correct and
+  reconstructing it against this run's `--outdir` mis-records it (wrong outdir, and
+  for a one-level producer subdirectory like `registered_slides/`, potentially the
+  wrong kind too). `isUnderTaskDir` checks the immediate parent and grandparent,
+  which covers every producer-subdirectory depth this pipeline's `publishDir` blocks
+  use. `Layout.passthroughPath` now delegates to `publishedOrAsIs` rather than
+  duplicating the same check.
+- **`lib/Checkpoint.groovy`** — the checkpoint CSV's column list, header and row builder
+  now have one owner. The three writers ask for the header instead of restating it, and
+  `Checkpoint.row()` orders values by the declared column list and throws on a missing or
+  unknown column. No published header, column or path changes.
+- **`tests/lib_probe.nf`** — a unit-test surface for `lib/*.groovy`. nf-test's assertion
+  context cannot see `lib/` classes, so the assertions live in a pipeline script, run by
+  CI's `nextflow-stub` job and by `tests/lib_probe.nf.test`.
 - **`nuclear_markers`** parameter (default `['DAPI', 'CELLTOX']`) — an ordered preference list
   naming the nuclear/fiducial channel. The first marker present (resolved from channel metadata,
-  never the filename) is moved to channel 0 by `CONVERT_IMAGE` and drives **both** cell
-  segmentation and the registration fiducial. Fails fast if none is present (single-channel images
-  excepted).
+  never the filename) is moved to channel 0 by `CONVERT_IMAGE`. Fails fast if none is present
+  (single-channel images excepted).
+- **An `--mode add_cycle` run now writes `csv/registered.csv` into its `--outdir`.** It never did
+  before — only the linear `REGISTRATION` path wrote that checkpoint, so an `add_cycle` run's
+  `--outdir` could never itself serve as a second `add_cycle`'s `--prior_outdir`. Chaining two
+  `add_cycle` runs is still **not** supported: `csv/postprocessed.csv` is still not written
+  (`add_cycle` has no `POSTPROCESSING` step), and `ParamUtils.validateAddCycle` requires both
+  checkpoints to be present.
 
 ### Changed
+- **The registration method's intrinsic TRE is no longer named after VALIS.** Both backends
+  estimate a target registration error from their own registration — VALIS a feature-distance
+  `*_summary.csv`, STARE a `*_tre.json` — but the QC pipeline called the slot `valis_summary`
+  end to end. It is now `registration_tre`: the adapters emit `intrinsic_tre`, `REGISTRATION`
+  emits `registration_tre`, and that is the artifact kind `FINAL_QC` recognises.
+  **Published-output change:** the folder inside the `qc/mirage_qc_data_*/` report bundle that
+  holds these raw artifacts is renamed `valis_summary/` -> `registration_tre/`. Nothing else
+  about the published tree changes — no path, filename or checkpoint-CSV column moves.
+  `GENERATE_QC_REPORT`'s `--valis-summary` flag is likewise now `--registration-tre` (an
+  internal process-to-script interface; the parameter surface is unchanged).
+- **`nuclear_markers` is now honoured by every consumer**, not only `CONVERT_IMAGE`:
+  `SPLIT_CHANNELS`/`split_multichannel.py`, `SEGMENT`, `SEG_QC_GEOJSON`, and `CsvUtils`'
+  samplesheet validation and channel counting all resolve the nuclear/fiducial channel from the
+  same rule now, so it genuinely drives both cell segmentation and the registration fiducial.
+  **Behaviour change under the shipped default `['DAPI', 'CELLTOX']`:** a samplesheet with a
+  channel whose name *contains* `CELLTOX` (case-insensitive) now has that channel dropped from
+  non-reference slides, exactly as `DAPI` always was. On an affected run, `add_cycle`'s
+  double-written `merged_quant.csv` becomes a single correct file, and the redundant per-cycle
+  fiducial disappears from `*_quant.csv`. Users who want the old behaviour should set
+  `--nuclear_markers DAPI`.
+- **`--nuclear_markers` now accepts a comma/space-separated string as well as a list**, so
+  `--nuclear_markers CELLTOX` works on the command line (`nextflow_schema.json` type widened to
+  `["array", "string"]`).
+- **`SEG_QC_GEOJSON` (the `reg_qc=2` GeoJSON registration-QC path) now passes
+  `--tolerance ${simplify_tolerance}` to `segment_to_geojson.py`.** Previously it passed no
+  tolerance at all, so its contours were simplified at the script's own default (`0.5`) while
+  `EXTRACT_CELL_PROPERTIES` — the GeoJSON `WARP_SEG_QC` compares this one against — used the
+  configured `simplify_tolerance` (`1.0`). The two GeoJSONs `WARP_SEG_QC` diffs were therefore
+  simplified at different tolerances. **Behaviour change:** `reg_qc=2` registration-QC scores
+  (dice/displacement) from before this change are **not comparable** to scores computed after
+  it, on any run using the GeoJSON path. Also factored the StarDist flags SEGMENT and
+  SEG_QC_GEOJSON both need (model, tiling, cell-expansion distance, pmin/pmax, prob-threshold)
+  into one shared definition (`conf/modules.config`'s `starDistCommonFlags()`), which had
+  drifted apart into two hand-built copies; `--nuclear-markers` stays built in
+  `seg_qc_geojson.nf`'s script block (unchanged behaviour — see that file's comment for why it
+  could not move alongside the rest). **`--expand-distance` is now wired to
+  `params.seg_expand_distance` for `SEG_QC_GEOJSON` too** (it previously always used
+  `segment_to_geojson.py`'s Python default, `10`, regardless of `--seg_expand_distance`) —
+  behaviourally a no-op under the shipped default (both are `10`), but an operator overriding
+  `--seg_expand_distance` now gets consistent expansion between `SEGMENT` and `SEG_QC_GEOJSON`
+  instead of the same "compared at different settings" defect `--tolerance` had.
 - **`reg_micro_reg` now defaults to `2`** (maximum: micro-rigid + micro non-rigid), previously `0`.
   Registrations run the full micro-registration by default — a quality-over-speed change
   (micro-registration can add ~30–120 min per registration).
+- **`--seg_method` with an unrecognised value now fails fast** instead of silently running
+  StarDist.
+- **`params/full_pipeline.json` now sets `"seg_method": "stardist"`.** The file already set
+  `segmentation_model`, `segmentation_model_dir`, `seg_n_tiles_x`, `seg_n_tiles_y`, `seg_pmin`
+  and `seg_pmax` — all StarDist-only flags — but `nextflow.config` defaults `seg_method` to
+  `instantseg`, so a run launched with `-params-file params/full_pipeline.json` silently
+  discarded all six values and segmented with InstanSeg instead. Launching from this preset
+  now runs StarDist: a different backend, container, and set of `versions.yml`/mask outputs
+  than before this fix. Anyone relying on the file's prior (InstanSeg) behaviour must now pass
+  `--seg_method instantseg` explicitly.
+- **`<outdir>/size_logs/versions.yml`'s single key changed** to
+  `MIRAGE:FINAL_QC:AGGREGATE_SIZE_LOGS` (diagnostic string only; no functional effect).
+- **`--quantify_compartments`/`--expanded_quantification`/`--embed_masks` are now
+  resolved once (`ParamUtils.compartmentMode`) and threaded down as an argument**,
+  the same seam `--registration_method` already has, replacing a ternary that used to
+  be copied verbatim between `postprocess.nf` and `add_cycle.nf` plus several
+  independent raw reads across `segmentation.nf`/`postprocess.nf`/`add_cycle.nf`/
+  `assemble_export.nf`. No published-output change — behaviour verified
+  byte-identical across the full stub scenario matrix.
+  **Behaviour change: `ParamUtils.validateCompartmentQuant` now also rejects
+  `--embed_masks true` unless BOTH `--quantify_compartments` and
+  `--expanded_quantification` are also true.** Previously `--embed_masks true
+  --quantify_compartments false` (or with `--expanded_quantification false`) exited
+  `0` and silently published a pyramid OME-TIFF with **no** mask series
+  (`assemble_export.nf`'s `embed_masks` gate is `embed_masks && quantify_compartments
+  && expanded_quantification`), a gap only discovered later when that `--outdir` was
+  handed to `mode='add_cycle'` as `--prior_outdir` and `EXTRACT_MASK_SERIES` found no
+  `Image:1` to reuse. A launch that used to succeed under that combination now fails
+  fast with a clear error instead. **To recover:** either drop `--embed_masks` (if you
+  do not need the mask series in the pyramid), or set both
+  `--quantify_compartments true --expanded_quantification true` alongside it.
+- **`SPLIT_CHANNELS` and `QUANTIFY` now publish per patient.**
+  **Published-output change:** `<outdir>/split_channels/<marker>.tiff` moves to
+  `<outdir>/<patient_id>/split_channels/<marker>.tiff`, and
+  `<outdir>/quantify/<patient>_<marker>_quant.csv` moves to
+  `<outdir>/<patient_id>/quantify/`. Both processes previously had no `publishDir` of
+  their own and inherited a run-level, patient-unaware default. Because
+  `split_multichannel.py` names its outputs by sanitised channel name alone, **two
+  patients sharing a marker published to the same path and the second silently
+  overwrote the first** on every multi-patient run. Nothing in the pipeline reads the
+  published copies, so the run stayed green and the loss was invisible. No checkpoint
+  CSV column, no other published path, and no GeoJSON measurement key changes.
+- **`add_cycle`-only: `SPLIT_PRIOR_PYRAMID` now publishes to its own leaf.**
+  **Published-output change:** `<outdir>/<patient_id>/split_channels/prior/<marker>.tiff`
+  is new; nothing at `<outdir>/<patient_id>/split_channels/<marker>.tiff` moves.
+  `subworkflows/local/add_cycle.nf` includes `SPLIT_CHANNELS` a second time as
+  `SPLIT_PRIOR_PYRAMID` (re-splitting the prior run's pyramid so its channels can be
+  deduped against the new cycle's). Nextflow's `withName:` selector matches an alias
+  against both its own name and the process' original declared name, so
+  `withName: 'SPLIT_CHANNELS'` was routing **both** invocations to the same
+  `<pid>/split_channels/` directory — whichever finished last silently overwrote the
+  other's file for any marker name the two shared. This is a **published-artifact**
+  collision only: the in-memory channel deduplication `add_cycle.nf` already does
+  before building the pyramid (new-cycle channel wins, `DAPI` always protected — see
+  `docs/add_cycle.md`'s Marker collisions section) reads each task's staged output
+  directly and was never affected. Pre-existing since `add_cycle.nf:40` first aliased
+  the include; not introduced by this branch.
+- **`EXTRACT_MASK_SERIES` (the `--mode add_cycle` mask-reuse step) now publishes per
+  patient too.** **Published-output change:** `<outdir>/extract_mask_series/cell_mask.tif`
+  and `.../nuclei_mask.tif` move to `<outdir>/<patient_id>/segmentation/`. This process
+  had the identical unprefixed-filename defect `SPLIT_CHANNELS` had: on a two-patient
+  `add_cycle` run it published exactly two files total — one `cell_mask.tif`, one
+  `nuclei_mask.tif` — for both patients combined, the second silently overwriting the
+  first. It shares the `segmentation` leaf with `SEGMENT`'s own masks; this is safe
+  because `--mode add_cycle` requires a fresh `--outdir` distinct from `--prior_outdir`
+  (`ParamUtils.validateAddCycle`), so `<pid>/segmentation/` is never occupied by anything
+  else in that run.
+- **The fall-through `publishDir` default is now a guard.** A process with no explicit
+  `publishDir` publishes to `<outdir>/_UNROUTED_PUBLISH/<process>` instead of to a
+  plausible-looking run-level directory, and `tests/test_layout.py` fails the build if
+  any process reaches it.
+  **Published-output change:** `<outdir>/tiled_coarse/` and `<outdir>/tiled_reg_tile/`
+  (the STARE tiled-registration fan-out's per-tile anchor JSON, tile-plan CSV, and
+  per-tile control-point JSON — `reg_tiled_fanout=true` only) are no longer published at
+  all; both processes were already relying on the same unrouted default this change
+  closes off, and their content is purely intermediate — `TILED_SOLVE` consumes it and
+  is the one that publishes the durable artifacts: the registration manifest, and the
+  `*_tre.json` whose `"tiles"` records (see `bin/utils/tre_report.py`) carry the same
+  per-tile diagnostic information forward. Both got an explicit
+  `publishDir = [ enabled: false ]` so this is a declared decision, not a silent gap.
+- **Every module's `versions.yml` (`script:` and `stub:`) now renders from one tool list**
+  (`lib/ProcessEnvelope.groovy`) instead of two hand-written, independently-maintained
+  heredocs. Touches 26 of 27 `modules/local/*.nf` files (`segment.nf` is the one documented
+  exception — see its `ProcessEnvelope` comment). No published `versions.yml` content
+  changes on a stub run; on a **real** run, the same two modules — `extract_mask_series.nf`
+  and `merge_and_pyramid.nf` — pick up two deltas each: they now probe `python` instead of
+  `python3` for their version rows (both run on an image where `python` exists; `python3`
+  was inconsistent authoring, not a deliberate choice), and their probes now fail soft
+  (`|| echo "unknown"`) instead of erroring the task if a tool's import fails — a fallback
+  their hand-written `python3` heredocs never had.
+- **`WARP_SEG_QC_TILED` is merged into `WARP_SEG_QC`.** One process now serves both
+  registration backends, with container, flags, stage list, version rows and stub extras
+  coming from `lib/WarpBackends.groovy` — the same shape `SEGMENT` already uses for its
+  three segmentation backends. The two processes shared ~77% of their bodies.
+  **`<outdir>/size_logs/input_sizes.csv` row change (not a new published file):** the
+  tiled path's `process` column now reads `WARP_SEG_QC` instead of
+  `WARP_SEG_QC_TILED` — the per-task `<prefix>.*.size.csv` this aggregates from is
+  never itself published (`WARP_SEG_QC`'s `publishDir` pattern is `*_seg_qc.json`
+  only). The `*_seg_qc.json` and `*_reg_residuals.csv` filenames, contents and
+  locations are unchanged. `params.registration_method` is still read exactly once
+  for DISPATCH, in `subworkflows/local/registration.nf`; `WARP_SEG_QC`'s
+  `--jvm-heap-gb 8` (VALIS-only) is resolved from the `method` process input via
+  `lib/WarpBackends.groovy`, not from the param, so the two can never disagree.
+
+### Fixed
+- **`EXTRACT_NUCLEI_PROPERTIES` now writes its outputs into a `nuclei/` subdirectory of
+  its own task directory** (`modules/local/extract_nuclei_properties.nf`), instead of
+  the task directory root. The published location is unchanged
+  (`<outdir>/<pid>/cell_properties/nuclei/*`, via `conf/modules.config`'s default
+  subdirectory-preserving `publishDir`, no `path:`-only override) — this only fixes a
+  latent gap where `Layout.publishedPath(outdir, pid, 'cell_properties', file)` could
+  not recover the `nuclei/` segment from the file's own task-directory structure (it
+  only saw the config's hardcoded path suffix), which the new `segmented` checkpoint
+  (above) needs in order to record `nucleus_contours`' real published path rather than
+  colliding with `contours`' path. `EXTRACT_NUCLEI_PROPERTIES`'s own size-log CSV now
+  publishes to `<outdir>/<pid>/cell_properties/` instead of `.../cell_properties/nuclei/`
+  (a diagnostic-only artifact, not read by any checkpoint or downstream consumer).
+- **The per-cell registration residuals now reach the QC report on the standard
+  (linear) path, and, as of this change, on `add_cycle` too.** `SEG_QC.out.per_cell`
+  was emitted through `REGISTRATION.out.seg_residuals` and routed to the SpatialData
+  export, but never tagged into the artifact stream, so no report ever showed it. It
+  is now the artifact kind `seg_residuals`, rendered in the report as a capped table
+  (first 500 rows per CSV; `bin/generate_qc_report.py`'s `SEG_RESIDUALS_MAX_ROWS`).
+  `add_cycle.nf` calls `SEG_QC` too and, until now, never captured `.out.per_cell` at
+  all — that gap is closed in the same change that wires it into
+  `workflows/mirage.nf`'s `add_cycle` `FINAL_QC` call site.
+  **`GENERATE_QC_REPORT`'s input arity changed from 7 to 8** (a new
+  `seg_residuals`/`path(..., stageAs: 'seg_residuals/*')` slot) — any external caller
+  of that module directly must add the new argument. `FINAL_QC` additionally fails the
+  run, on the default path (`--skip_final_qc_report=false` and `--enable_trace=true`,
+  both shipped defaults), if any declared artifact kind has no consumer — previously
+  such a kind was silently dropped.
+- **`--mode add_cycle` now rejects `--start`/`--stop` outright, instead of accepting
+  and silently ignoring them**, matching `docs/add_cycle.md`. It used to validate its
+  own prerequisites and return before the linear step gate ever ran, so a
+  contradictory pair like `--start postprocessing --stop preprocessing` reported
+  "validations passed" under `--dry_run` instead of the hard error the standard path
+  always gave for the same pair — and a value like `--stop registration` ran the
+  ENTIRE fixed path through export while `run_summary.json`'s `stop` label claimed
+  the run had stopped after registration. `ParamUtils.validateStop` and the
+  `shouldRun` gate computation now run once, before the `params.mode == 'add_cycle'`
+  branch, so both paths share the ordering check; `add_cycle` itself then calls the
+  new `ParamUtils.validateAddCycleStepFlags`, which throws unless `--stop` is left
+  unset and `--start` is left at its default `preprocessing`.
+  **Behaviour change: a launch that used to succeed with a non-default `--start`/
+  `--stop` under `--mode add_cycle` now fails fast instead.** `add_cycle` runs a
+  FIXED path (new-cycle samplesheet -> preprocess -> register against the frozen
+  prior reference -> quantify -> export) — there is no `--start`/`--stop` choice to
+  make. **To recover:** omit both flags. **Also fixed:** `add_cycle`'s `FINAL_QC`
+  call used to pass the literal string `'add_cycle'` as the run summary's `stop`
+  label — not a member of `ParamUtils.STEP_ORDER`, so any future consumer indexing
+  it would get `-1`. It now unconditionally passes `ParamUtils.STEP_ORDER.last()`
+  (`'postprocessing'`), not `effective_stop` — the rejection above guarantees the
+  fixed path always runs through export, so that is the only honest label.
+- **`add_cycle.nf`'s pyramid-channel grouping now carries the same
+  `groupKey(patient_id, channels_count)` + `remainder: true` streaming hint as
+  `postprocess.nf`'s.** It had drifted to a bare `.groupTuple()` with no size hint at
+  all. The grouping itself — group tagged `[patient_id, channels_count, tiff]` triples
+  into one per-patient list and build the patient-level meta — is now
+  `groupTiffsByPatient`, a shared function in `subworkflows/local/quantify_markers.nf`
+  (a plain function, not a process/workflow, imported via the same `include` syntax).
+  `add_cycle`'s combined channel count is `new_count + prior_count`, deliberately not
+  correcting for a marker-name collision: an over-count is safe here (the group still
+  closes complete, just via `remainder: true` instead of exactly on time), while an
+  under-count is the failure mode that aborts `MERGE_AND_PYRAMID` outright (see
+  `groupTiffsByPatient`'s doc comment). No published-output change: verified via a
+  before/after stub-run tree diff (43 files both times, differing only in the
+  QC report's timestamped filename).
+- **`tests/test_register.py` could never fail.** It imported `merge_first_file`, which
+  `bin/register.py` does not define, behind a `pytest.importorskip("valis")` that meant
+  the `ImportError` was never reached.
+- **The checkpoint manifests no longer name files that do not exist.** `csv/postprocessed.csv`'s
+  `cell_csv` and `cell_geojson` columns previously recorded `<pid>/geojson/cells.geojson` — a
+  basename-only path that omitted the `export/` subdirectory `EXPORT_GEOJSON`'s `publishDir`
+  actually carries the file into, so the recorded path pointed at nothing. All published paths
+  now go through `lib/Layout.groovy`, which preserves the producer subdirectory, so the columns
+  name the real files. **Published-output change (explicitly authorised):** the two path values
+  in `csv/postprocessed.csv` change; the published tree itself does not.
+- **The three checkpoint CSVs (`preprocessed.csv`, `registered.csv`, `postprocessed.csv`) now
+  have deterministic row order.** `collectFile` wrote rows in task-completion order, so two runs
+  of the same commit could produce differently-ordered (though content-identical) CSVs. Rows are
+  now sorted (`sort: true`, patient ID then path). **Published-output change (explicitly
+  authorised):** row order in the three manifests changes; contents and column order do not.
 
 ### Removed
 - **`reg_reference_markers`** — removed. It only fed a filename-based fallback for reference-image

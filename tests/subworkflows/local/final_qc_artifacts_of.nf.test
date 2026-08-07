@@ -1,0 +1,80 @@
+/*
+ * artifactsOf() -- the eight `artifactsOf(ch_artifacts, '<kind>')` call sites inside
+ * FINAL_QC's `main:` (subworkflows/local/final_qc.nf) are a second, textually separate
+ * copy of the artifact-kind vocabulary from KNOWN_ARTIFACT_KINDS. The `ch_artifacts.subscribe`
+ * guard (see final_qc.nf.test's "unknown artifact kind" tests) only validates tags flowing
+ * IN through the channel; it says nothing about the literal `kind` string handed to
+ * artifactsOf() itself. A typo there (e.g. 'seg_qcc') would match nothing, silently empty
+ * that report slot, and every existing test would stay green -- the same failure class the
+ * subscribe guard was added to prevent, from the other side.
+ *
+ * These tests call artifactsOf() directly, the same way final_qc_run_summary.nf.test calls
+ * buildManifest/buildRunSummary directly.
+ */
+nextflow_function {
+
+    name "Test artifactsOf (own-kind vocabulary guard)"
+    script "subworkflows/local/final_qc.nf"
+
+    tag "stub"
+
+    test("artifactsOf fails loudly when handed a kind not in KNOWN_ARTIFACT_KINDS") {
+
+        function "artifactsOf"
+
+        when {
+            function {
+                """
+                input[0] = Channel.of(['versions', file('$projectDir/tests/testdata/sample_versions.yml')])
+                input[1] = 'seg_qcc'
+                """
+            }
+        }
+
+        then {
+            assert function.failed
+            assert function.stdout.join('\n').contains("artifactsOf('seg_qcc') is not a known artifact kind")
+        }
+    }
+
+    test("artifactsOf passes a known kind through unchanged") {
+
+        function "artifactsOf"
+
+        when {
+            function {
+                """
+                input[0] = Channel.of(
+                    ['versions', file('$projectDir/tests/testdata/sample_versions.yml')],
+                    ['size_log', file('$projectDir/tests/testdata/sample_size_log1.csv')]
+                )
+                input[1] = 'versions'
+                """
+            }
+        }
+
+        then {
+            assert function.success
+        }
+    }
+
+    test("artifactsOf accepts seg_residuals (the live instance this task fixes)") {
+
+        function "artifactsOf"
+
+        when {
+            function {
+                """
+                input[0] = Channel.of(
+                    ['seg_residuals', file('$projectDir/tests/testdata/sample_reg_residuals.csv')]
+                )
+                input[1] = 'seg_residuals'
+                """
+            }
+        }
+
+        then {
+            assert function.success
+        }
+    }
+}

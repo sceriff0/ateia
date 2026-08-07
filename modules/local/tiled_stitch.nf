@@ -37,11 +37,7 @@ process TILED_STITCH {
         --out-tile ${out_tile} \\
         --out registered/${prefix}_registered.ome.tiff
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: \$(python --version 2>&1 | sed 's/Python //')
-        tifffile: \$(python -c "import tifffile; print(tifffile.__version__)" 2>/dev/null || echo "unknown")
-    END_VERSIONS
+    ${ProcessEnvelope.versions(task.process, ['tifffile'])}
     """
 
     stub:
@@ -50,10 +46,6 @@ process TILED_STITCH {
     mkdir -p registered
     touch registered/${prefix}_registered.ome.tiff
     echo "STUB,${meta.patient_id},stub,0" > ${prefix}.TILED_STITCH.size.csv
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: stub
-        tifffile: stub
-    END_VERSIONS
+    ${ProcessEnvelope.versionsStub(task.process, ['tifffile'])}
     """
 }

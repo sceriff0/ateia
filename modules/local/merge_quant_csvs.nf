@@ -41,11 +41,7 @@ process MERGE_QUANT_CSVS {
         --output merged_quant.csv \\
         ${args}
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: \$(python --version 2>&1 | sed 's/Python //')
-        pandas: \$(python -c "import pandas; print(pandas.__version__)" 2>/dev/null || echo "unknown")
-    END_VERSIONS
+    ${ProcessEnvelope.versions(task.process, ['pandas'])}
     """
 
     stub:
@@ -53,10 +49,6 @@ process MERGE_QUANT_CSVS {
     touch merged_quant.csv
     echo "STUB,${meta.patient_id},stub,0" > ${meta.patient_id}.MERGE_QUANT_CSVS.size.csv
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: stub
-        pandas: stub
-    END_VERSIONS
+    ${ProcessEnvelope.versionsStub(task.process, ['pandas'])}
     """
 }

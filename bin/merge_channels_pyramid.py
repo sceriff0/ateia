@@ -858,8 +858,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--pyramid-resolutions",
         type=int,
-        default=5,
-        help="Number of pyramid levels (default: 5)",
+        default=8,
+        help="Number of pyramid levels (default: 8)",
     )
     parser.add_argument(
         "--pyramid-scale",

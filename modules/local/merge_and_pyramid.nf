@@ -8,7 +8,6 @@
 
 process MERGE_AND_PYRAMID {
     tag "${meta.patient_id}"
-    label 'process_high'
 
     container "bolt3x/attend_image_analysis:merge"
 
@@ -35,8 +34,9 @@ process MERGE_AND_PYRAMID {
     def compression = params.compression
 
     // Embed cell + nuclei segmentation masks as a second, single-resolution
-    // uint32 OME series only when masks were actually staged. postprocess.nf
-    // is the single source of truth for the embed_masks decision (it only
+    // uint32 OME series only when masks were actually staged.
+    // subworkflows/local/assemble_export.nf is the single source of truth for the
+    // embed_masks decision, for both the linear and the add_cycle path (it only
     // wires mask_files into this process's input when
     // embed_masks && quantify_compartments && expanded_quantification); an
     // empty mask_files list means Nextflow staged no masks/ dir.
@@ -63,12 +63,7 @@ process MERGE_AND_PYRAMID {
         ${masks_arg} \\
         ${args}
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: \$(python3 --version | sed 's/Python //')
-        tifffile: \$(python3 -c "import tifffile; print(tifffile.__version__)")
-        numpy: \$(python3 -c "import numpy; print(numpy.__version__)")
-    END_VERSIONS
+    ${ProcessEnvelope.versions(task.process, ['tifffile', 'numpy'])}
     """
 
     stub:
@@ -76,11 +71,6 @@ process MERGE_AND_PYRAMID {
     touch pyramid.ome.tiff
     echo "STUB,${meta.patient_id},stub,0" > ${meta.patient_id}.MERGE_AND_PYRAMID.size.csv
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: stub
-        tifffile: stub
-        numpy: stub
-    END_VERSIONS
+    ${ProcessEnvelope.versionsStub(task.process, ['tifffile', 'numpy'])}
     """
 }

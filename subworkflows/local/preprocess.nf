@@ -70,15 +70,26 @@ workflow PREPROCESSING {
     // Use collectFile() for non-blocking aggregation (enables patient-level parallelism)
     ch_checkpoint_csv = ch_preprocessed_with_meta
         .map { meta, image_file ->
-            def image_path = "${params.outdir}/${meta.patient_id}/preprocessed/${image_file.name}"
-            def channels = meta.channels.join('|')
-            "${meta.patient_id},${image_path},${meta.is_reference},${channels}"
+            Checkpoint.row(Layout.PREPROCESSED, [
+                patient_id        : meta.patient_id,
+                preprocessed_image: Layout.publishedPath(params.outdir, meta.patient_id, Layout.PREPROCESSED, image_file),
+                is_reference      : meta.is_reference,
+                channels          : meta.channels.join('|'),
+            ])
         }
         .collectFile(
-            name: 'preprocessed.csv',
+            name: Layout.checkpointCsvName(Layout.PREPROCESSED),
             newLine: true,
-            storeDir: "${params.outdir}/csv",
-            seed: 'patient_id,preprocessed_image,is_reference,channels'
+            sort: true,
+            // sort: true makes the manifest REPRODUCIBLE. Without it collectFile
+            // writes rows in completion order, so two runs of the same commit
+            // produced different files (found while capturing this branch's golden
+            // baseline; a rerun of the UNMODIFIED branch differed from itself). The
+            // rows begin with patient_id followed by the published path, so natural
+            // string order IS "patient id, then file" — and the `seed:` header is
+            // written first regardless of sorting.
+            storeDir: Layout.checkpointDir(params.outdir),
+            seed: Checkpoint.header(Layout.PREPROCESSED)
         )
 
     // Collect size logs from all processes

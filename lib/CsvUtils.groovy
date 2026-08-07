@@ -74,11 +74,103 @@ class CsvUtils {
     }
 
     /**
-     * Count unique channels per patient from a CSV file.
-     * Returns a Map of patient_id -> unique channel count
-     * Used for streaming groupTuple with groupKey in postprocessing.
+     * Count the channels per patient that actually reach quantification.
+     *
+     * This is the size the postprocessing groupKeys are built from (feeds
+     * meta.channels_count via input_check.nf), so it must equal the number of
+     * single-channel TIFFs SPLIT_CHANNELS produces for the patient -- not the number
+     * of channels the samplesheet declares. The two differ because the
+     * nuclear/fiducial channel is kept only on the reference slide (see
+     * MarkerUtils.splitOutputChannels): a reference-less sheet declaring
+     * `DAPI|KI67|CD20` yields TWO markers, not three. Unioning declared channels with
+     * no reference awareness (what this did before) over-counted exactly that case,
+     * and an over-counted groupKey never fills.
+     *
+     * Do NOT point run_summary.json's input manifest at this. The manifest should
+     * report what the samplesheet declared, not what survives the nuclear-channel
+     * drop -- that consumer is countDeclaredChannelsPerPatient below. Feeding the
+     * manifest from THIS function is the exact regression closed in the branch that
+     * added it: for add_cycle it silently reported 2 channels for a declared 3-channel
+     * cycle. One number, one purpose; see that function's doc for the other half.
+     *
+     * @param csvPath        path to the samplesheet
+     * @param nuclearMarkers params.nuclear_markers -- required, never defaulted here
+     * @param autoReference  whether a patient with NO is_reference=true row will have
+     *                       one auto-promoted from its own rows. True mirrors
+     *                       params.allow_auto_reference on the linear path, where
+     *                       registration.nf promotes the patient's first image and so
+     *                       keeps its nuclear channel. FALSE for mode=add_cycle, whose
+     *                       reference is the prior run's and never a row in this sheet.
+     *
+     * Returns a Map of patient_id -> channel count.
      */
-    static Map<String, Integer> countChannelsPerPatient(String csvPath) {
+    static Map<String, Integer> countChannelsPerPatient(String csvPath, def nuclearMarkers, boolean autoReference) {
+        def file = new File(csvPath)
+        if (!file.exists()) return [:]
+
+        def lines = readCsvLines(file.path)
+        if (lines.size() < 2) return [:]  // Header only or empty
+
+        def header = parseCsvLine(lines[0])
+        def patientIdx = header.findIndexOf { it == 'patient_id' }
+        def channelsIdx = header.findIndexOf { it == 'channels' }
+        def refIdx = header.findIndexOf { it == 'is_reference' }
+        if (patientIdx == -1 || channelsIdx == -1) return [:]
+
+        // Collect the rows per patient first: whether a patient has an explicit
+        // reference is only knowable after every row has been read.
+        def rowsByPatient = [:].withDefault { [] }
+        lines.drop(1).each { line ->
+            def cols = parseCsvLine(line)
+            if (cols.size() > Math.max(patientIdx, channelsIdx)) {
+                def patientId = cols[patientIdx].trim()
+                if (!patientId) return  // ignore blank patient_id cells
+                // Lenient parse: validateInputSemantics has already rejected malformed
+                // values with a better message by the time counting runs. A missing
+                // is_reference column degrades to "every row is a reference", which
+                // over-counts rather than under-counts -- the safe direction.
+                def isRef = refIdx == -1 ? true
+                    : (refIdx < cols.size() && cols[refIdx]?.trim()?.toLowerCase() == 'true')
+                def channels = cols[channelsIdx].split('\\|')*.trim().findAll { it }
+                rowsByPatient[patientId] << [isRef, channels]
+            }
+        }
+
+        return rowsByPatient.collectEntries { patientId, rows ->
+            def effective = rows
+            if (autoReference && !rows.any { it[0] }) {
+                // registration.nf promotes the patient's FIRST image to reference, which
+                // keeps that slide's nuclear channel in the split output.
+                effective = [[true, rows[0][1]]] + rows.drop(1)
+            }
+            def kept = new HashSet<String>()
+            effective.each { isRef, channels ->
+                kept.addAll(MarkerUtils.splitOutputChannels(channels, isRef, nuclearMarkers)*.toUpperCase())
+            }
+            [patientId, kept.size()]
+        }
+    }
+
+    /**
+     * Count the DECLARED channels per patient: the union of the samplesheet's
+     * `channels` column values, patient-wide -- no reference awareness, no
+     * nuclear-marker awareness, no extra arguments. This is deliberately
+     * countChannelsPerPatient's exact pre-Task-3 behaviour, kept alive for a
+     * different consumer: run_summary.json's input manifest
+     * (`manifest.totals.channels` / `manifest.patients[pid].channels`), which should
+     * report what the samplesheet SAID, not what reaches QUANTIFY.
+     *
+     * Do NOT feed this into channels_count / the groupKey size. That reintroduces
+     * the exact bug countChannelsPerPatient's exactness fixed: unioning declared
+     * channels with no reference awareness over-counts a reference-less sheet by its
+     * dropped nuclear channel, and an over-counted groupKey never fills (the run
+     * hangs). See countChannelsPerPatient's doc for that consumer's requirements.
+     *
+     * @param csvPath path to the samplesheet
+     *
+     * Returns a Map of patient_id -> declared channel count.
+     */
+    static Map<String, Integer> countDeclaredChannelsPerPatient(String csvPath) {
         def file = new File(csvPath)
         if (!file.exists()) return [:]
 
@@ -101,11 +193,10 @@ class CsvUtils {
             }
         }
 
-        // Convert Set sizes to counts
         return channelSets.collectEntries { k, v -> [k, v.size()] }
     }
 
-    static Map validateMetadata(Map meta, String context = 'unknown') {
+    static Map validateMetadata(Map meta, def nuclearMarkers, String context = 'unknown') {
 
         if (!meta.patient_id)
             throw new IllegalArgumentException("Missing patient_id in ${context}")
@@ -119,10 +210,13 @@ class CsvUtils {
         if (meta.channels.any { it == null || it.trim().isEmpty() })
             throw new IllegalArgumentException("Empty channel name found for patient ${meta.patient_id}")
 
-        // DAPI may appear at ANY position (segmentation locates it by name, not index).
-        // Only its presence is required.
-        if (!meta.channels.any { it.toUpperCase() == 'DAPI' }) {
-            throw new IllegalStateException("DAPI channel not found for patient ${meta.patient_id} (${context}). Found channels: ${meta.channels}")
+        // The nuclear/fiducial marker may appear at ANY position (segmentation and the
+        // registration fiducial locate it by name, not index). Only its presence is
+        // required, and WHICH names qualify comes from params.nuclear_markers via
+        // MarkerUtils — not a hardcoded 'DAPI', which rejected an otherwise valid
+        // CELLTOX-only samplesheet before the run could start.
+        if (!MarkerUtils.hasNuclear(meta.channels, nuclearMarkers)) {
+            throw new IllegalStateException("No nuclear channel (${MarkerUtils.markerList(nuclearMarkers).join(', ')}) found for patient ${meta.patient_id} (${context}). Found channels: ${meta.channels}")
         }
 
         return meta
@@ -140,7 +234,7 @@ class CsvUtils {
         throw new IllegalArgumentException("Invalid is_reference value '${value}' in ${context}. Must be 'true' or 'false'.")
     }
 
-    static Map parseMetadata(Map row, String context = 'parseMetadata') {
+    static Map parseMetadata(Map row, def nuclearMarkers, String context = 'parseMetadata') {
 
         def channels = row.channels
             ?.split('\\|')
@@ -152,7 +246,7 @@ class CsvUtils {
             channels    : channels
         ]
 
-        return validateMetadata(meta, "${context} (${row.patient_id})")
+        return validateMetadata(meta, nuclearMarkers, "${context} (${row.patient_id})")
     }
 
     static void validateInputCSV(def csv, List required_cols) {
@@ -179,21 +273,26 @@ class CsvUtils {
      * checks that otherwise only fire later during channel construction.
      *
      * Validates, for every data row: is_reference format, channel list /
-     * DAPI presence, and existence of the step's image file. Validates, per
+     * nuclear-marker presence, and existence of the step's image file. Validates, per
      * patient: exactly one reference image (zero allowed only when
      * allow_auto_reference is set; more than one is always ambiguous).
      *
      * @param csv                  path to the input samplesheet
      * @param step                 pipeline start step (selects the path column)
      * @param allowAutoReference   whether a patient may omit an explicit reference
+     * @param nuclearMarkers       params.nuclear_markers — required, never defaulted here
      */
-    static void validateInputSemantics(def csv, String step, boolean allowAutoReference) {
+    static void validateInputSemantics(def csv, String step, boolean allowAutoReference, def nuclearMarkers) {
 
-        def pathColumn = [
-            preprocessing : 'path_to_file',
-            registration  : 'preprocessed_image',
-            postprocessing: 'registered_image',
-        ][step]
+        // ParamUtils.STEPS is the single source of truth for "what is a step?"
+        // (name / requiredColumns / entryColumn / qcKinds) -- see its header
+        // comment in lib/ParamUtils.groovy. entryColumnForStep throws on an
+        // unrecognised step rather than the old map literal's silent `null`,
+        // but both call sites below only ever pass a step already validated
+        // by nextflow_schema.json's enum (or the add_cycle branch's hardcoded
+        // 'preprocessing'), so that stricter failure mode is unreachable in
+        // practice and loud instead of silent if it ever is reached.
+        def pathColumn = ParamUtils.entryColumnForStep(step)
 
         def lines = readCsvLines(csv)
         if (lines.size() < 2)
@@ -219,8 +318,8 @@ class CsvUtils {
                 channels    : chIdx  >= 0 && chIdx < cols.size() ? cols[chIdx] : null,
             ]
 
-            // Per-row format + DAPI/channel validation (throws on problems).
-            def parsed = parseMetadata(row, ctx)
+            // Per-row format + nuclear-channel validation (throws on problems).
+            def parsed = parseMetadata(row, nuclearMarkers, ctx)
 
             // Image file must exist (resolved against the launch directory for
             // relative paths). Skipped only if the path column is absent.
