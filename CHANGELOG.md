@@ -211,6 +211,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `lib/WarpBackends.groovy`, not from the param, so the two can never disagree.
 
 ### Fixed
+- **The `tiled` image now installs `procps`, which every task in it needed to start at
+  all.** `containers/tiled/Dockerfile` is `FROM python:3.11-slim` and had no `apt-get`
+  layer, so it shipped without `ps`. Because `params.enable_trace` defaults to `true`,
+  Nextflow injects its task-metrics wrapper into every task, and that wrapper's first
+  line is `command -v ps &>/dev/null || { >&2 echo "Command 'ps' required by nextflow to
+  collect task metrics cannot be found"; exit 1; }` — it runs *before* the `script:`
+  block. Every `registration_method='tiled'` run therefore died at the first
+  `TILED_COARSE` task with **exit status 1, empty stdout and no traceback**, which reads
+  like a silent crash in `tiled_coarse.py` rather than a missing system package. The
+  Dockerfile now installs `procps` and asserts `ps -e -o pid= -o ppid=` at build time, so
+  a regression fails the image build instead of an HPC run. `containers/README.md` gains
+  a "Runtime requirements every image must satisfy" section stating the invariant. No
+  other image is affected: `preprocess` and `spatialdata` already installed `procps`, and
+  the remaining CUDA/PyTorch/TensorFlow-derived bases carry it — all of them are proven
+  by prior end-to-end runs, which ran under the same always-on trace wrapper.
+  **Operational note:** the descriptive tag `bolt3x/attend_image_analysis:tiled` is
+  mutable and was re-pushed in place, so cluster-side Singularity caches must be
+  refreshed (delete the local `.img`/`.sif` and re-pull) before the fix takes effect.
 - **`EXTRACT_NUCLEI_PROPERTIES` now writes its outputs into a `nuclei/` subdirectory of
   its own task directory** (`modules/local/extract_nuclei_properties.nf`), instead of
   the task directory root. The published location is unchanged
