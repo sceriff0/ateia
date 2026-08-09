@@ -62,33 +62,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   checkpoints to be present.
 
 ### Changed
-- **`reg_tiled_fanout` now defaults to `true`.** The per-tile fan-out
-  (`TILED_COARSE` → `TILED_REG_TILE` ×tiles → `TILED_SOLVE` → `TILED_STITCH`) is the only
-  STARE execution shape whose memory is actually bounded: every process' peak is a
-  function of a parameter — `reg_tiled_coarse_max_dim`, `reg_tiled_tile` +
-  `reg_tiled_halo`, `reg_tiled_out_tile` — rather than of the slide's dimensions.
-  Measured peak RSS across the whole chain on a 16384² 2-channel tiled OME-TIFF:
-  **0.91 / 1.31 / <1.31 / 1.35 GB**, against an 8 GB budget.
-
-  The old default, `false`, runs a single `TILED_REGISTER` task per slide. That path is
-  *not* region-streamed despite its name: `bin/tiled_register.py` holds the whole
-  reference stack, the whole moving stack, a float32 all-channel copy (`mov_hwc`) and
-  the full-size warped output simultaneously, and `tiled_pipeline.register_slide`
-  additionally materialises a whole-slide float64 `mov_rigid`. It remains available for
-  users who would rather have a handful of large tasks than hundreds of small ones, and
-  its budget is now derived from input size, but it is no longer what you get by
-  default.
-
-  **Two consequences worth knowing.** Scheduler load rises sharply: at the default
-  `reg_tiled_tile = 2048` a 26k² slide plans ~169 `TILED_REG_TILE` tasks *per moving
-  slide* (capped at `maxForks = 20`), where before it was one task. And nf-test cases
-  that select `registration_method = 'tiled'` without pinning `reg_tiled_fanout` now
-  exercise the fan-out chain rather than `TILED_REGISTER`; the two produce an identical
-  manifest and identical pixels, but `TILED_REGISTER` consequently loses its incidental
-  default coverage — `tests/checkpoint_manifest.nf.test` pins the fan-out path
-  explicitly, and the single-task path now needs a test that pins
-  `reg_tiled_fanout = false` if it is to stay covered.
-
 - **The registration method's intrinsic TRE is no longer named after VALIS.** Both backends
   estimate a target registration error from their own registration — VALIS a feature-distance
   `*_summary.csv`, STARE a `*_tre.json` — but the QC pipeline called the slot `valis_summary`
@@ -371,6 +344,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   authorised):** row order in the three manifests changes; contents and column order do not.
 
 ### Removed
+- **`reg_tiled_fanout` is gone, along with the single-task `TILED_REGISTER` path it
+  selected.** STARE now has exactly one execution shape: the per-tile fan-out
+  `TILED_COARSE` → `TILED_REG_TILE` (×tiles) → `TILED_SOLVE` → `TILED_STITCH`. Its memory is
+  bounded — every process' peak is a function of a parameter (`reg_tiled_coarse_max_dim`,
+  `reg_tiled_tile` + `reg_tiled_halo`, `reg_tiled_out_tile`) rather than of the slide's
+  dimensions. Measured peak RSS on a 16384² 2-channel tiled OME-TIFF: **0.91 / 1.31 / <1.31 /
+  1.35 GB** against an 8 GB budget.
+
+  The removed alternative held both whole slides, a float32 all-channel copy (`mov_hwc`) and the
+  full-size warped output simultaneously, and `tiled_pipeline.register_slide` additionally
+  materialised a whole-slide float64 `mov_rigid` — roughly 10–15× the decompressed moving stack,
+  which is why its budget had to be derived from file size. It produced identical pixels and an
+  identical manifest, so nothing is lost but the footgun: a flag whose "off" position silently
+  reintroduced unbounded memory.
+
+  **Deleted:** `modules/local/tiled_register.nf`, `bin/tiled_register.py`,
+  `tests/test_tiled_register_cli.py`, the `withName: 'TILED_REGISTER'` block in
+  `conf/modules.config`, the `params.reg_tiled_fanout` declaration and its
+  `nextflow_schema.json` property, and the branch in
+  `subworkflows/local/adapters/tiled_adapter.nf` (the adapter now runs the fan-out
+  unconditionally). `bin/utils/tiled_pipeline.py` is **kept** — still imported by
+  `tests/test_tiled_pipeline.py` and `tests/test_reg_benchmark.py`, though it no longer has a
+  production caller.
+
+  Scheduler load is the trade: at the default `reg_tiled_tile = 2048` a 26k² slide plans ~169
+  `TILED_REG_TILE` tasks per moving slide (capped by `maxForks = 20`). Raise `reg_tiled_tile` to
+  trade task count against mesh resolution.
+
 - **`reg_reference_markers`** — removed. It only fed a filename-based fallback for reference-image
   selection that the pipeline never reached (the reference slide is chosen by `is_reference`, and
   `--reference` is always passed to VALIS). Nuclear-channel selection is now `nuclear_markers`

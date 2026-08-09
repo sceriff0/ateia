@@ -214,7 +214,7 @@ nextflow_pipeline {
                 // The tiled backend passes EVERY patient's reference through
                 // unregistered (it defines the frame), so this exercises the
                 // passthrough branch on a MULTI-slide patient — and
-                // TILED_REGISTER's own `registered/` output subdirectory on the
+                // TILED_STITCH's own `registered/` output subdirectory on the
                 // moving slide.
                 input               = "$projectDir/tests/testdata/test_input.csv"
                 outdir              = "$outputDir"
@@ -295,14 +295,13 @@ nextflow_pipeline {
 
         when {
             params {
-                // reg_tiled_fanout swaps TILED_REGISTER for the per-tile fan-out
-                // ending in TILED_STITCH — a different producer publishing into
-                // the same `registered/` subdirectory. Asserted separately so a
-                // change to either producer's output layout fails here.
+                // The STARE method is a per-tile fan-out ending in TILED_STITCH —
+                // a different producer from VALIS's REGISTER, publishing into the
+                // same `registered/` subdirectory. Asserted separately so a change
+                // to either producer's output layout fails here.
                 input               = "$projectDir/tests/testdata/test_input.csv"
                 outdir              = "$outputDir"
                 registration_method = 'tiled'
-                reg_tiled_fanout    = true
             }
         }
 
