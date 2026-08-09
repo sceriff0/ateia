@@ -211,6 +211,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `lib/WarpBackends.groovy`, not from the param, so the two can never disagree.
 
 ### Fixed
+- **`TILED_COARSE` OOM-killed (exit 137) on real slides — the STARE anchor was never
+  the thumbnail step the design specified.** `docs/parallel_registration_design.md`
+  has always listed `COARSE  thumbnail feature-align (ORB + RANSAC) -> M0  ~1-2 GB`,
+  and the "8 GB is generous" sanity-check only ever analysed `REG_TILE`/`WARP_TILE`/
+  `STITCH`. `bin/tiled_coarse.py` implemented no thumbnail: it called
+  `dapi_channel(load_channels(path))` — the eager whole-slide `tifffile.imread` that
+  `tests/test_tiled_reg_tile_lazy.py` had already retired from the per-tile step, and
+  the last caller of it — then ran ORB at native resolution, where
+  `coarse_align._orb_features` promotes to float64 and scikit-image stacks a Gaussian
+  pyramid plus FAST/Harris responses on top. Measured at ~40 bytes per source pixel:
+  ~35 GB on a 26k x 26k slide, against `8.GB * task.attempt`, which is how one patient
+  burned all four attempts and aborted the run. Both slides are now read through
+  `open_lazy` in byte-budgeted row bands (`tiled_io.read_decimated`, 64 MB/band) and
+  decimated by **one shared factor** (`tiled_io.decimation_factor` — a per-slide factor
+  would put the two thumbnails at different scales and bake a bogus scale term into
+  M0), so peak is ~2 GB regardless of slide size. `M0` and its residual TRE are lifted
+  back to full-resolution pixels via `coarse_align.scale_transform_to_full_res`;
+  `ref_h`/`ref_w` stay full-resolution so the tile plan still spans the frame. New
+  `params.reg_tiled_coarse_max_dim` (default 4096 px, 0 disables) is the cost/accuracy
+  knob. `TILED_COARSE`'s retry ramp now **doubles** (8/16/32/64 GB) instead of scaling
+  linearly — a slide that overshoots an 8 GB estimate overshoots it by multiples, so
+  the old 8/16/24/32 ramp spent every attempt and still died. Guarded by
+  `tests/test_tiled_coarse_thumbnail.py` (8 cases, each watched failing against a
+  targeted mutation) and `tests/modules/tiled_coarse.nf.test`'s rendered-command case,
+  which asserts `--max-dim` reaches the command line — `-stub` cannot see a `script:`
+  block, so nothing else could catch that flag being dropped.
+- **`TILED_REGISTER`'s memory budget was the fan-out budget applied to a
+  non-fan-out process.** Its `withName:` comment claimed it was "tile-streamed"; it is
+  not. `bin/tiled_register.py` holds the whole reference stack, the whole moving stack,
+  a float32 all-channel `mov_hwc` copy and the full-size warped output at once, and
+  `tiled_pipeline.register_slide` additionally promotes both DAPI planes to float64 and
+  materialises a whole-slide `mov_rigid` — ~10-15x the decompressed moving stack, not
+  8 GB. The budget is now derived from input size (`~10 GB per GB on disk`, the
+  `PREPROCESS` pattern). This is a *derived* figure, not a measured one: the genuinely
+  memory-bounded path is `--reg_tiled_fanout true`, which is now correct end to end.
 - **The `tiled` image now installs `procps`, which every task in it needed to start at
   all.** `containers/tiled/Dockerfile` is `FROM python:3.11-slim` and had no `apt-get`
   layer, so it shipped without `ps`. Because `params.enable_trace` defaults to `true`,

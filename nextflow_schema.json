@@ -247,6 +247,12 @@
                     "description": "STARE only: streaming stitch write-tile size (px), gigapixel-safe.",
                     "default": 1024
                 },
+                "reg_tiled_coarse_max_dim": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "STARE only: longest side (px) of the thumbnail the coarse anchor (M0) is estimated on. Bounds COARSE memory independently of slide size; 0 disables decimation.",
+                    "default": 4096
+                },
                 "reg_tiled_fanout": {
                     "type": "boolean",
                     "description": "STARE only: false = one Nextflow task per slide, tiled internally (<=8 GB); true = per-tile Nextflow fan-out (COARSE->REG_TILE->SOLVE->STITCH).",

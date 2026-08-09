@@ -23,6 +23,7 @@ process TILED_COARSE {
     def dapi_index = params.reg_tiled_dapi_index
     def tile       = params.reg_tiled_tile
     def halo       = params.reg_tiled_halo
+    def max_dim    = params.reg_tiled_coarse_max_dim
     """
     tiled_coarse.py \\
         --reference ${reference} \\
@@ -30,6 +31,7 @@ process TILED_COARSE {
         --dapi-index ${dapi_index} \\
         --tile ${tile} \\
         --halo ${halo} \\
+        --max-dim ${max_dim} \\
         --out-m0 ${prefix}_m0.json \\
         --out-tiles ${prefix}_tiles.csv
 

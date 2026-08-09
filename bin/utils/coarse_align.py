@@ -15,7 +15,11 @@ from __future__ import annotations
 
 import numpy as np
 
-__all__ = ["estimate_transform_from_matches", "estimate_rigid"]
+__all__ = [
+    "estimate_transform_from_matches",
+    "estimate_rigid",
+    "scale_transform_to_full_res",
+]
 
 _MIN_SAMPLES = {"euclidean": 2, "similarity": 2, "affine": 3}
 
@@ -99,6 +103,21 @@ def estimate_transform_from_matches(
     m = np.asarray(tform.params, dtype=float)
     residual = _rms(tform(src[inliers]) - dst[inliers])
     return m, residual, int(np.count_nonzero(inliers))
+
+
+def scale_transform_to_full_res(m, factor):
+    """Lift a transform estimated on ``factor``-decimated images back to full-resolution pixels.
+
+    A decimated coordinate relates to the full-resolution one by ``p_ds = p_full / factor``, so
+    the full-resolution map is ``diag(f, f, 1) @ M_ds @ diag(1/f, 1/f, 1)``. The two scalings
+    cancel across the linear 2x2 block and survive only on the translation column -- i.e. the
+    rotation/scale part is invariant and only the offsets grow by ``factor``. Returning ``M_ds``
+    unchanged is the natural mistake, and it under-translates by exactly ``factor``.
+    """
+    m = np.array(m, dtype=float, copy=True)
+    factor = float(factor)
+    m[:2, 2] *= factor
+    return m
 
 
 def _orb_features(img, n_keypoints, fast_threshold):

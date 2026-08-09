@@ -45,7 +45,7 @@ counterexamples (see CLAUDE.md's verification-reality note on
      possible there and none is owed.
 
   2. `conf/modules.config` reading `params.expanded_quantification` directly
-     at line 658 (`ext.args = { params.expanded_quantification ? '--expanded'
+     at line 684 (`ext.args = { params.expanded_quantification ? '--expanded'
      : '' }`) -- genuinely unavoidable: `conf/*.config` closures cannot see
      `lib/*.groovy` classes (a class name referenced there resolves against
      ConfigObject and fails only when the closure runs -- see CLAUDE.md's
@@ -123,7 +123,7 @@ ALLOWED_FILES = {
 # whole-file exemption would hide either regressing into this file silently.
 ALLOWED_LINES = {
     "conf/modules.config": {
-        658: (
+        684: (
             "ext.args = { params.expanded_quantification ? '--expanded' : "
             "'' } -- conf/*.config closures cannot see lib/*.groovy classes, "
             "so ext.args must read params raw here."

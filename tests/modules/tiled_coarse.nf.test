@@ -1,0 +1,92 @@
+nextflow_process {
+
+    name "Test TILED_COARSE process"
+    script "modules/local/tiled_coarse.nf"
+    process "TILED_COARSE"
+
+    tag "modules"
+    tag "modules_local"
+    tag "tiled_coarse"
+
+    test("Should emit an M0 anchor and a tile plan - stub") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [ patient_id: 'P001', channels: ['DAPI', 'CD3'], is_reference: false ],
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            assert process.success
+            assert process.out.m0
+            assert process.out.tiles
+            assert process.out.versions
+            with(process.out.m0) {
+                assert size() == 1
+                assert get(0).get(1).toString().endsWith('_m0.json')
+            }
+        }
+    }
+
+    test("Should render --max-dim so the anchor runs on a thumbnail - rendered command") {
+
+        // Tagged `stub` so CI's blocking `nf-test test --tag stub` gate collects it, but
+        // deliberately WITHOUT `options "-stub"` -- `-stub` never evaluates a `script:`
+        // block, so no stub run can observe a rendered command. Same shape as
+        // tests/modules/seg_qc_geojson.nf.test's "rendered command" case.
+        //
+        // This is the assertion with teeth for the OOM fix: --max-dim is what bounds the
+        // COARSE anchor to a thumbnail. Without it the module falls back to running ORB at
+        // native resolution, which measures at ~40 bytes per source pixel (float64 promotion
+        // + Gaussian pyramid + FAST/Harris responses) -- ~35 GB on a 26k x 26k slide against
+        // a budget of 8 GB, which is how patient 052 exhausted all four attempts with exit
+        // status 137. The pre-change module rendered no such flag at all.
+        //
+        // The assertions read the rendered .command.sh rather than the process outcome, so
+        // the case holds whether tiled_coarse.py itself succeeds; under `--profile test` no
+        // container engine is active and the host may lack skimage/zarr.
+        tag "stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [ patient_id: 'P001', channels: ['DAPI', 'CD3'], is_reference: false ],
+                    file('${projectDir}/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    file('${projectDir}/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            def rendered = []
+            new File("$workDir").eachFileRecurse { f ->
+                if (f.name == '.command.sh' && f.text.contains('tiled_coarse.py')) {
+                    rendered << f.text
+                }
+            }
+
+            assertAll(
+                { assert rendered.size() >= 1,
+                    "no rendered TILED_COARSE .command.sh found under the task work dir" },
+                { assert rendered.every { it.contains('--max-dim 4096') },
+                    "rendered command missing --max-dim (params.reg_tiled_coarse_max_dim default 4096): " + rendered.join(' --- ') },
+                // the pre-existing flags must survive the change
+                { assert rendered.every { it.contains('--tile 2048') },
+                    "rendered command missing --tile: " + rendered.join(' --- ') },
+                { assert rendered.every { it.contains('--halo 256') },
+                    "rendered command missing --halo: " + rendered.join(' --- ') }
+            )
+        }
+    }
+}
