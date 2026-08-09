@@ -87,11 +87,15 @@ baseline:
                                       # this before feature detection, so it sets both registration
                                       # runtime and the resolution the transform is solved at.
                                       # Live at this baseline (registration_method=valis).
-  reg_tiled_fanout: false             # STARE execution SHAPE, pipeline default: false = one Nextflow task
-                                      # per slide (tiled internally); true = per-TILE fan-out
-                                      # (TILED_COARSE -> TILED_REG_TILE -> TILED_SOLVE -> TILED_STITCH).
-                                      # Crossed by registration_method_grid: at false those four processes
-                                      # NEVER execute, so the fan-out path was previously unmeasured.
+  reg_tiled_fanout: true              # STARE execution SHAPE, pipeline default (flipped false -> true on
+                                      # main: the per-TILE fan-out is the only shape whose memory is bounded
+                                      # by parameters rather than by slide size). true = TILED_COARSE ->
+                                      # TILED_REG_TILE -> TILED_SOLVE -> TILED_STITCH; false = one
+                                      # TILED_REGISTER task per slide. Still crossed BOTH ways by
+                                      # registration_method_grid, so flipping this default changes which
+                                      # shape the baseline names, not which shapes get measured. Inert at
+                                      # this baseline cell itself (registration_method=valis); declared for
+                                      # column uniformity.
   # --- preprocessing (BaSiC illumination correction) ---
   preproc_n_iter: 100
   preproc_overlap: 0

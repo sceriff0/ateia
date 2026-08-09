@@ -96,9 +96,10 @@ Verify the whole harness with no data at all:
     (StarDist tile grid; InstanSeg tile size × batch size; CellSAM block size × bbox threshold).
     All three shipped backends are covered.
   - `registration_method_grid:` — pins `registration_method` and crosses that method's knobs.
-    The `tiled`/STARE entry crosses `reg_tiled_fanout`, which is the only way the per-tile
-    fan-out processes (`TILED_COARSE`/`TILED_REG_TILE`/`TILED_SOLVE`/`TILED_STITCH`) execute
-    at all — at the default `false` they never run in any sweep run.
+    The `tiled`/STARE entry crosses `reg_tiled_fanout` both ways, so both execution shapes are
+    measured: `true` (the pipeline default since the fan-out was shown to be the only
+    memory-bounded shape) runs `TILED_COARSE`/`TILED_REG_TILE`/`TILED_SOLVE`/`TILED_STITCH`,
+    and `false` runs the single-task `TILED_REGISTER` instead.
 - **The `baseline:` map must equal the shipped `nextflow.config` defaults**, and must declare
   every param any grid or axis varies (so all configs share CSV columns).
   `test_project_sweep_baseline_matches_pipeline_defaults` reads `nextflow.config` directly and
