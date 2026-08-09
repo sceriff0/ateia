@@ -2,7 +2,9 @@ import json
 import os
 
 import numpy as np
+import pytest
 from utils.phenotyping.classify import (
+    _CHUNK_CELLS,
     CellOutcome,
     classify_cell,
     classify_cells_vectorized,
@@ -57,10 +59,24 @@ def test_minimal_violated_requires():
     assert vid == 5
 
 
+# Tracked fixture (a real compiled panel: 12 lineage markers, 104 feasible
+# patterns — see `git ls-files tests/testdata/model_config_full_panel.json`),
+# committed alongside the small `model_config_min.json` other tests depend on.
+# Path is relative to this test file, not the SDD scratch directory (which is
+# untracked and deleted when the plan finishes — a prior version of these tests
+# pointed at `.superpowers/sdd/...` and would FileNotFoundError in CI).
 _MODEL_CONFIG_PATH = os.path.join(
-    os.path.dirname(__file__), "..", ".superpowers", "sdd", "2026-08-09-phenotype-perf",
-    "model_config.json",
+    os.path.dirname(__file__), "testdata", "model_config_full_panel.json",
 )
+
+# Module-level fixture: parsed once, reused by every test below instead of each
+# test re-opening/re-parsing the file.
+with open(_MODEL_CONFIG_PATH) as _fh:
+    _FULL_CFG = json.load(_fh)
+FULL_LINEAGE = _FULL_CFG["lineage_markers"]
+FULL_FEASIBLE = _FULL_CFG["feasible_set"]
+FULL_NEVER = _FULL_CFG["constraints"]["never"]
+FULL_REQUIRES = _FULL_CFG["constraints"]["requires"]
 
 
 def _naive_classify_cell_oracle(signs, feasible, never, requires, lineage):
@@ -111,34 +127,42 @@ def test_classify_cells_vectorized_matches_naive_oracle():
     bug in the batch path would show up identically on both sides. The oracle
     above is written independently, so it can't share a bug with the code under
     test. (It is exercised too, transitively, via the equality assertions below.)
-    """
-    with open(_MODEL_CONFIG_PATH) as fh:
-        cfg = json.load(fh)
-    lineage = cfg["lineage_markers"]
-    feasible = cfg["feasible_set"]
-    never = cfg["constraints"]["never"]
-    requires = cfg["constraints"]["requires"]
 
+    n=5000 exceeds `_CHUNK_CELLS` (4096), so this also crosses the chunk-block
+    seam in classify_cells_vectorized at least once (see
+    test_classify_cells_vectorized_crosses_chunk_boundary for a seam-focused
+    check with an exact, deliberately-chosen cell count).
+    """
     n = 5000
+    assert n > _CHUNK_CELLS, "test intent: exercise more than one chunk block"
     rng = np.random.default_rng(1234)
     sign_values = np.array(["pos", "neg", "free", "contra"], dtype=object)
-    # Skew away from contra/free so plenty of cells land in every outcome bucket
-    # (committed, Ambiguous, Unclassified, Conflict, Artefact).
-    probs = [0.35, 0.45, 0.15, 0.05]
+    # Biased toward free/neg: a 12-marker/104-pattern panel with the markers
+    # closer to uniform pos/neg/free (as an earlier version of this test used)
+    # sends ~94% of cells to Artefact/Conflict, leaving only ~4.7% (committed +
+    # Ambiguous) to actually reach the match-grouping code this test guards.
+    # These probabilities were tuned (see task-1-report.md) to land ~300
+    # committed and ~940 Ambiguous cells out of 5000, so the minimums asserted
+    # below have real headroom instead of being satisfied by a single lucky cell.
+    probs = [0.15, 0.35, 0.45, 0.05]  # pos, neg, free, contra
     sm = {
         m: rng.choice(sign_values, size=n, p=probs)
-        for m in lineage
+        for m in FULL_LINEAGE
     }
 
-    got = classify_cells_vectorized(sm, feasible, never, requires, lineage)
+    got = classify_cells_vectorized(sm, FULL_FEASIBLE, FULL_NEVER, FULL_REQUIRES, FULL_LINEAGE)
     assert len(got) == n
 
-    seen_outcomes = set()
+    committed_count = 0
+    ambiguous_count = 0
     for i in range(n):
-        signs_i = {m: sm[m][i] for m in lineage}
-        want = _naive_classify_cell_oracle(signs_i, feasible, never, requires, lineage)
+        signs_i = {m: sm[m][i] for m in FULL_LINEAGE}
+        want = _naive_classify_cell_oracle(signs_i, FULL_FEASIBLE, FULL_NEVER, FULL_REQUIRES, FULL_LINEAGE)
         g = got[i]
-        seen_outcomes.add(g.outcome)
+        if g.empty_type == 0 and g.outcome != "Ambiguous":
+            committed_count += 1
+        if g.outcome == "Ambiguous":
+            ambiguous_count += 1
         assert g.outcome == want.outcome, f"cell {i}: outcome"
         assert g.empty_type == want.empty_type, f"cell {i}: empty_type"
         assert g.violated_constraint_id == want.violated_constraint_id, (
@@ -147,28 +171,81 @@ def test_classify_cells_vectorized_matches_naive_oracle():
         assert g.candidate_names == want.candidate_names, f"cell {i}: candidate_names"
         assert g.candidate_patterns == want.candidate_patterns, f"cell {i}: candidate_patterns"
 
-    # Sanity: the randomized sweep actually exercised more than one outcome bucket,
-    # otherwise this test would be a tautology over a degenerate case.
-    assert len(seen_outcomes) > 1
+    # The match-grouping code (the code this test actually guards) is only
+    # reached by committed/Ambiguous cells. Require real coverage of both, not
+    # just "more than one outcome bucket" (which {Artefact, Conflict} alone
+    # would satisfy without ever touching match-grouping).
+    assert committed_count >= 100, (
+        f"only {committed_count} committed cells — not enough coverage of the "
+        "match-grouping path"
+    )
+    assert ambiguous_count >= 100, (
+        f"only {ambiguous_count} Ambiguous cells — not enough coverage of the "
+        "multi-name match-grouping path"
+    )
+
+
+def test_classify_cells_vectorized_crosses_chunk_boundary():
+    """classify_cells_vectorized processes cells in blocks of `_CHUNK_CELLS` to
+    bound match-matrix memory (see classify.py). Deliberately pick a cell count
+    just past one chunk boundary (`_CHUNK_CELLS + 123`, three blocks for a
+    smaller chunk-independent sanity check would also cross, but +123 keeps this
+    fast) and confirm every cell — including ones on both sides of the seam —
+    still agrees with the naive oracle. Uses the tiny hand-built FEASIBLE set
+    (not the full panel) so this stays cheap despite the larger n.
+    """
+    n = _CHUNK_CELLS + 123
+    rng = np.random.default_rng(7)
+    sign_values = np.array(["pos", "neg", "free", "contra"], dtype=object)
+    probs = [0.2, 0.3, 0.45, 0.05]
+    sm = {m: rng.choice(sign_values, size=n, p=probs) for m in LINEAGE}
+
+    got = classify_cells_vectorized(sm, FEASIBLE, NEVER, REQUIRES, LINEAGE)
+    assert len(got) == n
+
+    # Focus the comparison on cells straddling the chunk seam plus a scattered
+    # sample of the rest, rather than all n (this fixture is tiny/fast, so a
+    # full sweep is cheap too, but the seam is the specific thing under test).
+    check_indices = list(range(_CHUNK_CELLS - 5, _CHUNK_CELLS + 5)) + list(range(0, n, 37))
+    for i in sorted(set(check_indices)):
+        signs_i = {m: sm[m][i] for m in LINEAGE}
+        want = _naive_classify_cell_oracle(signs_i, FEASIBLE, NEVER, REQUIRES, LINEAGE)
+        g = got[i]
+        assert g == want, f"cell {i} (chunk boundary at {_CHUNK_CELLS})"
 
 
 def test_classify_cell_adapter_matches_naive_oracle():
     """classify_cell is now a thin single-row adapter over classify_cells_vectorized
     (see classify.py). Confirm the adapter itself — not just the batch path —
-    agrees with the independent naive oracle, on a handful of hand-picked cells
-    covering each outcome bucket using the real compiled panel fixture.
+    agrees with the independent naive oracle, on 200 randomized cells (same sign
+    distribution as the batch equivalence test) using the real compiled panel
+    fixture.
     """
-    with open(_MODEL_CONFIG_PATH) as fh:
-        cfg = json.load(fh)
-    lineage = cfg["lineage_markers"]
-    feasible = cfg["feasible_set"]
-    never = cfg["constraints"]["never"]
-    requires = cfg["constraints"]["requires"]
-
     rng = np.random.default_rng(99)
     sign_values = ["pos", "neg", "free", "contra"]
     for _ in range(200):
-        signs = {m: rng.choice(sign_values, p=[0.35, 0.45, 0.15, 0.05]) for m in lineage}
-        want = _naive_classify_cell_oracle(signs, feasible, never, requires, lineage)
-        got = classify_cell(signs, feasible, never, requires, lineage)
+        signs = {m: rng.choice(sign_values, p=[0.15, 0.35, 0.45, 0.05]) for m in FULL_LINEAGE}
+        want = _naive_classify_cell_oracle(signs, FULL_FEASIBLE, FULL_NEVER, FULL_REQUIRES, FULL_LINEAGE)
+        got = classify_cell(signs, FULL_FEASIBLE, FULL_NEVER, FULL_REQUIRES, FULL_LINEAGE)
         assert got == want
+
+
+def test_classify_cells_vectorized_rejects_empty_lineage():
+    """An empty `lineage` list must fail loudly, not fabricate n=0 and silently
+    return `[]` — the batch path used to derive `n = len(sm[lineage[0]])` (an
+    IndexError on empty `lineage`, previously uncaught), and `classify_all` would
+    then hand `run_phenotyping` an empty outcome list, producing a silently
+    short/empty `phenotypes.csv` instead of failing the run.
+    """
+    with pytest.raises(ValueError, match="at least one lineage marker"):
+        classify_cells_vectorized({}, FEASIBLE, NEVER, REQUIRES, [])
+
+
+def test_classify_cell_adapter_rejects_empty_lineage():
+    """The classify_cell adapter must surface the same clear error as the batch
+    path for an empty lineage list — not the raw IndexError this raised before
+    the fix (`classify_cell({}, feasible, [], [], [])` is the reviewer's exact
+    repro).
+    """
+    with pytest.raises(ValueError, match="at least one lineage marker"):
+        classify_cell({}, FEASIBLE, [], [], [])

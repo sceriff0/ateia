@@ -28,10 +28,23 @@ from typing import Dict, List, Optional
 
 import numpy as np
 
-# uint64 bitmask packing (see classify_cells_vectorized) can address at most 64
-# lineage markers. enumerate_feasible already refuses to enumerate more than 16
-# (2 ** len(lin) > max_enumerate), so this is a generous, defensive ceiling.
+# Each feasible pattern is packed into a single uint64 bitmask (one bit per
+# lineage marker; see classify_cells_vectorized), capping lineage at 64 markers.
+# This is unreachable in practice regardless of the user-tunable
+# pheno_max_enumerate: enumerate_feasible materializes
+# itertools.product((0, 1), repeat=len(lineage)) into a list, so lineage counts
+# anywhere near 64 (2**64 candidate patterns) are intractable in finite time, not
+# merely blocked by a knob.
 _MAX_VECTORIZED_LINEAGE = 64
+
+# Match-matrix memory for one chunk is chunk_cells * F bytes (dtype=bool). Bound
+# that to the low hundreds of MB even at F's practical ceiling: enumerate_feasible
+# refuses more than 16 lineage markers by default, i.e. up to 2**16 = 65,536
+# patterns. Budgeting a 256 MiB block against that ceiling:
+# 256 * 2**20 // 65_536 = 4096 cells/chunk. Peak memory is then chunk_cells * F,
+# independent of n -- n=40,000 at F=65,536 would otherwise be a 2.6 GB single
+# allocation.
+_CHUNK_CELLS = 4096
 
 
 @dataclass
@@ -87,21 +100,35 @@ def classify_cells_vectorized(
     markers need no handling — they are absent from both masks. This bounds lineage
     to `_MAX_VECTORIZED_LINEAGE` (64) markers (uint64); above that a `ValueError` is
     raised rather than silently truncating high-order markers into the wrong mask.
-    `enumerate_feasible` already refuses to enumerate a panel above 16 lineage
-    markers at the default `pheno_max_enumerate`, so this ceiling is far above
-    anything reachable through the supported compilation path.
-    """
-    n = len(sm[lineage[0]]) if lineage else 0
-    lin_count = len(lineage)
 
+    Memory scaling: the n x F match matrix is never materialized in full. Cells are
+    processed in blocks of `_CHUNK_CELLS`, so peak memory is `_CHUNK_CELLS * F`
+    booleans (bounded to the low hundreds of MB even at F's practical ceiling — see
+    `_CHUNK_CELLS`'s comment), not `n * F` — the naive per-cell scan this replaces
+    was O(1) in this dimension, and an unchunked n x F matrix would reintroduce an
+    OOM mode at large n and/or a raised `pheno_max_enumerate`.
+
+    Raises `ValueError` if `lineage` is empty (there is no marker column to derive
+    the cell count `n` from, and a zero-lineage panel cannot be classified against
+    any pattern) or if `len(lineage) > _MAX_VECTORIZED_LINEAGE`.
+    """
+    if not lineage:
+        raise ValueError(
+            "classify_cells_vectorized requires at least one lineage marker; got "
+            "an empty `lineage` list. The cell count `n` cannot be derived from "
+            "`sm` without a marker column, and a zero-lineage panel cannot be "
+            "classified against any feasible pattern."
+        )
+    lin_count = len(lineage)
     if lin_count > _MAX_VECTORIZED_LINEAGE:
         raise ValueError(
             f"classify_cells_vectorized supports at most {_MAX_VECTORIZED_LINEAGE} "
-            f"lineage markers (uint64 bitmask packing); got {lin_count}. "
-            "enumerate_feasible already refuses to enumerate a panel above 16 "
-            "lineage markers at the default pheno_max_enumerate, so this should be "
-            "unreachable through the supported compilation path."
+            f"lineage markers, because each feasible pattern is packed into a "
+            f"single uint64 bitmask (one bit per marker); got {lin_count}."
         )
+
+    n = len(sm[lineage[0]])
+    f_count = len(feasible)
 
     bit = {m: np.uint64(1) << np.uint64(i) for i, m in enumerate(lineage)}
     pat_mask = np.array(
@@ -119,42 +146,50 @@ def classify_cells_vectorized(
         neg_req |= np.where(col == "neg", bit[m], np.uint64(0)).astype(np.uint64)
         contra |= col == "contra"
 
-    f_count = len(feasible)
-    match = np.empty((n, f_count), dtype=bool)
-    for j in range(f_count):
-        p = pat_mask[j]
-        match[:, j] = ((pos_req & ~p) == 0) & ((neg_req & p) == 0)
-    match[contra] = False
-
-    # Group matching feasible-entry indices by cell. np.nonzero on a C-order 2D
-    # array yields (row, col) pairs sorted by row then col, so `cols` already
-    # lists each cell's matches in `feasible` order.
-    rows, cols = np.nonzero(match)
-    counts = np.bincount(rows, minlength=n)
-    offsets = np.concatenate(([0], np.cumsum(counts)))
-
     outs: List[CellOutcome] = []
-    for i in range(n):
-        if contra[i]:
-            outs.append(CellOutcome("Artefact", 2, -1, [], []))
-            continue
+    for start in range(0, n, _CHUNK_CELLS):
+        end = min(start + _CHUNK_CELLS, n)
+        block_n = end - start
+        block_pos = pos_req[start:end]
+        block_neg = neg_req[start:end]
+        block_contra = contra[start:end]
 
-        idx = cols[offsets[i]:offsets[i + 1]]
-        if idx.size == 0:
-            signs_i = {m: sm[m][i] for m in lineage}
-            vid = minimal_violated_constraint(signs_i, never, requires)
-            if vid is not None:
-                outs.append(CellOutcome("Conflict", 1, vid, [], []))
-            else:
+        match = np.empty((block_n, f_count), dtype=bool)
+        for j in range(f_count):
+            p = pat_mask[j]
+            match[:, j] = ((block_pos & ~p) == 0) & ((block_neg & p) == 0)
+        match[block_contra] = False
+
+        # Group matching feasible-entry indices by cell within this block.
+        # np.nonzero on a C-order 2D array yields (row, col) pairs sorted by row
+        # then col, so `cols` already lists each cell's matches in `feasible`
+        # order.
+        rows, cols = np.nonzero(match)
+        counts = np.bincount(rows, minlength=block_n)
+        offsets = np.concatenate(([0], np.cumsum(counts)))
+
+        for local_i in range(block_n):
+            i = start + local_i
+            if block_contra[local_i]:
                 outs.append(CellOutcome("Artefact", 2, -1, [], []))
-            continue
+                continue
 
-        patterns_i = [feasible[j] for j in idx]
-        names_i = sorted(set(pattern_names[idx].tolist()))
-        if len(names_i) == 1:
-            outs.append(CellOutcome(names_i[0], 0, -1, names_i, patterns_i))
-        else:
-            outs.append(CellOutcome("Ambiguous", 0, -1, names_i, patterns_i))
+            idx = cols[offsets[local_i]:offsets[local_i + 1]]
+            if idx.size == 0:
+                signs_i = {m: sm[m][i] for m in lineage}
+                vid = minimal_violated_constraint(signs_i, never, requires)
+                if vid is not None:
+                    outs.append(CellOutcome("Conflict", 1, vid, [], []))
+                else:
+                    outs.append(CellOutcome("Artefact", 2, -1, [], []))
+                continue
+
+            patterns_i = [feasible[j] for j in idx]
+            names_i = sorted(set(pattern_names[idx].tolist()))
+            if len(names_i) == 1:
+                outs.append(CellOutcome(names_i[0], 0, -1, names_i, patterns_i))
+            else:
+                outs.append(CellOutcome("Ambiguous", 0, -1, names_i, patterns_i))
     return outs
 
 
