@@ -55,6 +55,22 @@ def tree_path(name: str, parents: Dict[str, Optional[str]]) -> str:
     return "/".join(reversed(chain))
 
 
+def _round6(values: np.ndarray) -> np.ndarray:
+    """Elementwise round(x, 6) using Python's round(), NOT np.round().
+
+    np.round(x, 6) computes rint(x * 1e6) / 1e6; the multiply is itself
+    inexact, so when x*1e6 lands within an ULP of a .5 boundary, rint can
+    round the wrong way relative to the exact binary value of x. This is
+    reachable in practice: conformal p-values here are ratios
+    (sum of weights)/(sum of weights), and when GMM responsibilities
+    saturate to 0.0/1.0 the ratio's denominator is an exact integer — e.g.
+    m/640 disagrees with np.round(m/640, 6) for ~20% of m. Python's round()
+    is correctly rounded from the exact binary value and matches the
+    per-cell round() used for pheno_score:* elsewhere in this module.
+    """
+    return np.fromiter((round(float(v), 6) for v in values), dtype=np.float64, count=len(values))
+
+
 def _marker_values(df: pd.DataFrame, marker: str, spec: dict):
     key = measurement_key(marker, spec["compartment"], spec["statistic"])
     if key in df.columns:
@@ -172,15 +188,24 @@ def run_phenotyping(
     outcome_col = np.array([o.outcome for o in outs], dtype=object)
     candidates_col = np.array([";".join(o.candidate_names) for o in outs], dtype=object)
     n_candidates_col = np.fromiter((len(o.candidate_names) for o in outs), dtype=np.int64, count=n)
-    tree_path_col = np.array([tree_path(name, parents) for name in outcome_col], dtype=object)
+    # tree_path(name, parents) is a pure function of the outcome name; memoize
+    # over the small set of distinct outcomes instead of recomputing per cell.
+    _tree_path_by_outcome: Dict[str, str] = {}
+    tree_path_col = np.empty(n, dtype=object)
+    for _i, _name in enumerate(outcome_col):
+        cached = _tree_path_by_outcome.get(_name)
+        if cached is None:
+            cached = tree_path(_name, parents)
+            _tree_path_by_outcome[_name] = cached
+        tree_path_col[_i] = cached
     empty_type_col = np.fromiter((o.empty_type for o in outs), dtype=np.int64, count=n)
     violated_constraint_id_col = np.fromiter(
         (o.violated_constraint_id for o in outs), dtype=np.int64, count=n
     )
     density_bin_col = bins.astype(np.int64)
     provenance_col = np.zeros(n, dtype=np.int64)
-    p_neg_cols = {m: np.round(p_neg[m], 6) for m in lineage + states}
-    p_pos_cols = {m: np.round(p_pos[m], 6) for m in lineage + states}
+    p_neg_cols = {m: _round6(p_neg[m]) for m in lineage + states}
+    p_pos_cols = {m: _round6(p_pos[m]) for m in lineage + states}
     sign_cols = {m: np.array([sign_char(s) for s in sm[m]], dtype=object) for m in lineage}
     state_cols = {m: state_ann[m].astype(np.int64) for m in states}
 
@@ -215,7 +240,10 @@ def run_phenotyping(
         "n_candidates": n_candidates_col,
         "tree_path": tree_path_col,
         "density_bin": density_bin_col,
-        "outcome": outcome_col,
+        # "outcome" duplicates "phenotype" by value (both are o.outcome); use
+        # an explicit copy rather than relying on pd.DataFrame(dict) copying
+        # on construction, so the two columns are never accidentally aliased.
+        "outcome": outcome_col.copy(),
         "empty_type": empty_type_col,
         "violated_constraint_id": violated_constraint_id_col,
         "provenance": provenance_col,
