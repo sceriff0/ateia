@@ -187,31 +187,61 @@ def test_classify_cells_vectorized_matches_naive_oracle():
 
 def test_classify_cells_vectorized_crosses_chunk_boundary():
     """classify_cells_vectorized processes cells in blocks of `_CHUNK_CELLS` to
-    bound match-matrix memory (see classify.py). Deliberately pick a cell count
-    just past one chunk boundary (`_CHUNK_CELLS + 123`, three blocks for a
-    smaller chunk-independent sanity check would also cross, but +123 keeps this
-    fast) and confirm every cell — including ones on both sides of the seam —
-    still agrees with the naive oracle. Uses the tiny hand-built FEASIBLE set
-    (not the full panel) so this stays cheap despite the larger n.
+    bound match-matrix memory (see classify.py). The block-local -> global index
+    translation (`i = start + local_i`) matters ONLY for cells that land in the
+    `idx.size == 0` (no matching feasible pattern) branch, where `i` is used to
+    re-look-up that cell's own signs for the never/requires check. A dropped
+    `start +` there does not raise or crash — it silently substitutes a
+    DIFFERENT cell's signs: whichever cell sits at global index `local_i` (i.e.
+    always a block-0 cell, since `local_i < _CHUNK_CELLS`), regardless of which
+    later block is actually being processed. That only becomes observable when
+    the substituted cell's true outcome differs from the real one, and a
+    randomized sign matrix (this test's previous form) can pass "by luck" if the
+    sampled signs at those two positions happen to agree.
+
+    So this test builds signs directly rather than sampling them, guaranteeing
+    the mismatch by construction:
+      - global cells 0-9 (the exact `local_i` values the boundary windows below
+        probe) are pinned to a deterministic ARTEFACT (no feasible match, no
+        never/requires violation);
+      - cells straddling TWO chunk boundaries (`_CHUNK_CELLS` and
+        `2 * _CHUNK_CELLS`, so an offset bug that only manifests from the
+        second block onward is also caught, not just the first seam) are pinned
+        to a deterministic CONFLICT (no feasible match, NEVER violated -> vid=0)
+        — a different outcome on every `CellOutcome` field from the ARTEFACT
+        cells at 0-9.
+    A dropped `start +` replaces the boundary cells' CONFLICT with block 0's
+    ARTEFACT; comparing every field against the oracle catches that.
     """
-    n = _CHUNK_CELLS + 123
-    rng = np.random.default_rng(7)
-    sign_values = np.array(["pos", "neg", "free", "contra"], dtype=object)
-    probs = [0.2, 0.3, 0.45, 0.05]
-    sm = {m: rng.choice(sign_values, size=n, p=probs) for m in LINEAGE}
+    n = 2 * _CHUNK_CELLS + 50  # 3 blocks: [0, 4096), [4096, 8192), [8192, 8242)
+
+    # Deterministic Artefact: PanCK/CD45 both "neg" keeps every FEASIBLE entry
+    # from matching (all entries need at least one of PanCK/CD45 == 1), and
+    # CD8 "neg" keeps REQUIRES from ever triggering (its `if` marker is CD8).
+    signs_artefact = {"CD3": "pos", "CD4": "pos", "CD45": "neg", "CD8": "neg", "PanCK": "neg"}
+    # Deterministic Conflict: PanCK+CD45 both "pos" matches no FEASIBLE entry
+    # either (their PanCK/CD45 pairs are all (1,0)/(0,1)/(0,0)) and fires
+    # NEVER's PanCK+CD45-both-pos constraint (id=0).
+    signs_conflict = {"PanCK": "pos", "CD45": "pos", "CD3": "free", "CD4": "free", "CD8": "free"}
+
+    per_cell = [signs_conflict] * n
+    for i in range(10):  # the block-local offsets the boundary windows below probe
+        per_cell[i] = signs_artefact
+
+    sm = {m: np.array([per_cell[i][m] for i in range(n)], dtype=object) for m in LINEAGE}
 
     got = classify_cells_vectorized(sm, FEASIBLE, NEVER, REQUIRES, LINEAGE)
     assert len(got) == n
 
-    # Focus the comparison on cells straddling the chunk seam plus a scattered
-    # sample of the rest, rather than all n (this fixture is tiny/fast, so a
-    # full sweep is cheap too, but the seam is the specific thing under test).
-    check_indices = list(range(_CHUNK_CELLS - 5, _CHUNK_CELLS + 5)) + list(range(0, n, 37))
-    for i in sorted(set(check_indices)):
-        signs_i = {m: sm[m][i] for m in LINEAGE}
-        want = _naive_classify_cell_oracle(signs_i, FEASIBLE, NEVER, REQUIRES, LINEAGE)
-        g = got[i]
-        assert g == want, f"cell {i} (chunk boundary at {_CHUNK_CELLS})"
+    boundaries = [_CHUNK_CELLS, 2 * _CHUNK_CELLS]
+    checked = 0
+    for boundary in boundaries:
+        for i in range(boundary - 5, boundary + 6):
+            want = _naive_classify_cell_oracle(per_cell[i], FEASIBLE, NEVER, REQUIRES, LINEAGE)
+            g = got[i]
+            assert g == want, f"cell {i} (chunk boundary at {boundary}): got {g}, want {want}"
+            checked += 1
+    assert checked == len(boundaries) * 11
 
 
 def test_classify_cell_adapter_matches_naive_oracle():
