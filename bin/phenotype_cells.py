@@ -167,7 +167,27 @@ def run_phenotyping(
         state_signs[m] = resolve_signs(p_neg[m], p_pos[m], chosen_alpha)
     state_ann = {m: state_annotations(state_signs[m]) for m in states}
 
-    rows = []
+    # Columns that depend only on already-materialized per-marker arrays (no
+    # per-cell python object needed) are filled in a single vectorized pass.
+    outcome_col = np.array([o.outcome for o in outs], dtype=object)
+    candidates_col = np.array([";".join(o.candidate_names) for o in outs], dtype=object)
+    n_candidates_col = np.fromiter((len(o.candidate_names) for o in outs), dtype=np.int64, count=n)
+    tree_path_col = np.array([tree_path(name, parents) for name in outcome_col], dtype=object)
+    empty_type_col = np.fromiter((o.empty_type for o in outs), dtype=np.int64, count=n)
+    violated_constraint_id_col = np.fromiter(
+        (o.violated_constraint_id for o in outs), dtype=np.int64, count=n
+    )
+    density_bin_col = bins.astype(np.int64)
+    provenance_col = np.zeros(n, dtype=np.int64)
+    p_neg_cols = {m: np.round(p_neg[m], 6) for m in lineage + states}
+    p_pos_cols = {m: np.round(p_pos[m], 6) for m in lineage + states}
+    sign_cols = {m: np.array([sign_char(s) for s in sm[m]], dtype=object) for m in lineage}
+    state_cols = {m: state_ann[m].astype(np.int64) for m in states}
+
+    # pheno_score:* still needs the per-cell softmax call (out of scope to
+    # vectorize) but writes straight into preallocated per-name columns
+    # instead of building an intermediate per-cell dict.
+    pheno_score_cols = {name: np.empty(n, dtype=np.float64) for name in all_names}
     for i in range(n):
         o = outs[i]
         signs_row = {m: sm[m][i] for m in lineage}
@@ -176,29 +196,8 @@ def run_phenotyping(
         ps = softmax_pheno_scores(
             o.candidate_patterns, all_names, pneg_row, ppos_row, signs_row, enforce, lineage
         )
-        row = {
-            "label": labels[i],
-            "phenotype": o.outcome,
-            "candidates": ";".join(o.candidate_names),
-            "n_candidates": len(o.candidate_names),
-            "tree_path": tree_path(o.outcome, parents),
-            "density_bin": int(bins[i]),
-            "outcome": o.outcome,
-            "empty_type": o.empty_type,
-            "violated_constraint_id": o.violated_constraint_id,
-            "provenance": 0,
-        }
         for name in all_names:
-            row[f"pheno_score:{name}"] = round(float(ps.get(name, 0.0)), 6)
-        for m in lineage + states:
-            row[f"p_neg:{m}"] = round(float(p_neg[m][i]), 6)
-        for m in lineage + states:
-            row[f"p_pos:{m}"] = round(float(p_pos[m][i]), 6)
-        for m in lineage:
-            row[f"sign:{m}"] = sign_char(sm[m][i])
-        for m in states:
-            row[f"state:{m}"] = int(state_ann[m][i])
-        rows.append(row)
+            pheno_score_cols[name][i] = round(float(ps.get(name, 0.0)), 6)
 
     columns = (
         ["label", "phenotype", "candidates", "n_candidates", "tree_path", "density_bin",
@@ -209,7 +208,29 @@ def run_phenotyping(
         + [f"sign:{m}" for m in lineage]
         + [f"state:{m}" for m in states]
     )
-    pheno_df = pd.DataFrame(rows, columns=columns)
+    data = {
+        "label": labels,
+        "phenotype": outcome_col,
+        "candidates": candidates_col,
+        "n_candidates": n_candidates_col,
+        "tree_path": tree_path_col,
+        "density_bin": density_bin_col,
+        "outcome": outcome_col,
+        "empty_type": empty_type_col,
+        "violated_constraint_id": violated_constraint_id_col,
+        "provenance": provenance_col,
+    }
+    for name in all_names:
+        data[f"pheno_score:{name}"] = pheno_score_cols[name]
+    for m in lineage + states:
+        data[f"p_neg:{m}"] = p_neg_cols[m]
+    for m in lineage + states:
+        data[f"p_pos:{m}"] = p_pos_cols[m]
+    for m in lineage:
+        data[f"sign:{m}"] = sign_cols[m]
+    for m in states:
+        data[f"state:{m}"] = state_cols[m]
+    pheno_df = pd.DataFrame(data, columns=columns)
 
     # constraint audit table
     committed_mask = pheno_df["n_candidates"] == 1

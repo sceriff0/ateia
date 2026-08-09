@@ -126,4 +126,26 @@ def test_qc_and_audit_written(tmp_path):
              "--alpha-target", "0.1", "--min-calibration", "20"])
     qc = json.loads((tmp_path / "qc.json").read_text())
     assert "chosen_alpha" in qc and "degraded_markers" in qc and "reporting_mode" in qc
+
+
+def test_phenotypes_csv_byte_identical_to_frozen_fixture(tmp_path):
+    # Row assembly in run_phenotyping builds phenotypes.csv from preallocated
+    # per-column arrays rather than a list of per-cell dicts (perf change, see
+    # .superpowers/sdd/2026-08-09-phenotype-perf/task-3-brief.md). This test
+    # pins the emitted CSV bytes against a fixture generated from the
+    # pre-change code on this same deterministic input, so any future drift
+    # in column order, dtype, or rounding is caught. Whole-file text
+    # comparison (not DataFrame equality) is deliberate: DataFrame equality
+    # can be blind to formatting differences (e.g. an int column silently
+    # becoming float and writing "1.0" instead of "1") that a downstream CSV
+    # consumer would still see.
+    cfg_path, quant, morph = _make_inputs(tmp_path)
+    out_csv = tmp_path / "phenotypes.csv"
+    rc = pc.main(["--merged_quant", str(quant), "--morphology", str(morph),
+                  "--model_config", str(cfg_path), "--out", str(out_csv),
+                  "--audit", str(tmp_path / "audit.csv"), "--qc", str(tmp_path / "qc.json"),
+                  "--alpha-target", "0.1", "--min-calibration", "20"])
+    assert rc == 0
+    expected = (_ROOT / "tests" / "testdata" / "phenotype_cells_regression_expected.csv").read_text()
+    assert out_csv.read_text() == expected
     assert (tmp_path / "audit.csv").exists()   # no audit pairs here -> header-only file is fine
