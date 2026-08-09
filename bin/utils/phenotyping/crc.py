@@ -86,14 +86,22 @@ def crc_select_alpha(
 ) -> float:
     """Select alpha: largest grid value with UCB risk <= alpha_target.
 
-    Risk is monotone increasing in alpha, so scanning in ascending order
-    and keeping the last (largest) qualifying alpha yields the
-    least-abstention alpha that still honors the risk guarantee. If none
-    qualifies, fall back to the smallest (most conservative) alpha.
+    Risk is monotone increasing in alpha, so the qualifying alphas
+    (UCB risk <= alpha_target) form a prefix of the ascending grid, and a
+    binary search for the rightmost element of that prefix yields the same
+    least-abstention alpha that an ascending linear scan keeping the last
+    qualifying value would — in O(log n) calls to `risk_ucb_fn` instead of
+    O(n). If none qualifies, fall back to the smallest (most conservative)
+    alpha.
     """
     grid = sorted(alpha_grid)
-    chosen = None
-    for alpha in grid:
-        if risk_ucb_fn(alpha) <= alpha_target:
-            chosen = alpha
-    return chosen if chosen is not None else grid[0]
+    lo, hi = 0, len(grid) - 1
+    best_idx = -1
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        if risk_ucb_fn(grid[mid]) <= alpha_target:
+            best_idx = mid
+            lo = mid + 1
+        else:
+            hi = mid - 1
+    return grid[best_idx] if best_idx != -1 else grid[0]
