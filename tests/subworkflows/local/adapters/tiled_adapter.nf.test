@@ -1,5 +1,5 @@
 /*
- * TILED_ADAPTER fan-in group size (reg_tiled_fanout=true path) -- end-to-end functional check.
+ * TILED_ADAPTER fan-in group size -- end-to-end functional check.
  *
  * subworkflows/local/adapters/tiled_adapter.nf:94-97 used to gather every tile's control
  * point with a bare `.groupTuple(by: 0)` -- no size hint -- so no slide's TILED_SOLVE could
@@ -30,7 +30,7 @@
  */
 nextflow_workflow {
 
-    name "Test TILED_ADAPTER fan-out gather (reg_tiled_fanout=true)"
+    name "Test TILED_ADAPTER fan-out gather"
     script "subworkflows/local/adapters/tiled_adapter.nf"
     workflow "TILED_ADAPTER"
 
@@ -45,7 +45,6 @@ nextflow_workflow {
         when {
             params {
                 registration_method = 'tiled'
-                reg_tiled_fanout    = true
             }
             workflow {
                 """

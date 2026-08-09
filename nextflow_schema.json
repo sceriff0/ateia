@@ -252,11 +252,6 @@
                     "minimum": 0,
                     "description": "STARE only: longest side (px) of the thumbnail the coarse anchor (M0) is estimated on. Bounds COARSE memory independently of slide size; 0 disables decimation.",
                     "default": 4096
-                },
-                "reg_tiled_fanout": {
-                    "type": "boolean",
-                    "description": "STARE only: true (default) = per-tile Nextflow fan-out (COARSE->REG_TILE->SOLVE->STITCH), the memory-bounded shape where every process peak is set by a parameter rather than by slide size; false = one TILED_REGISTER task per slide, whose memory scales with the input.",
-                    "default": true
                 }
             }
         },

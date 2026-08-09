@@ -7,15 +7,16 @@
     independently and in parallel. Unlike the VALIS adapter there is no batch graph build and
     no per-slide OME-channel re-matching — each task already carries its slide's meta.
 
-    Two execution modes (params.reg_tiled_fanout), same channel contract as VALIS_ADAPTER:
-      * true (default): per-TILE Nextflow fan-out — TILED_COARSE -> TILED_REG_TILE (one task
-                        per tile) -> TILED_SOLVE -> TILED_STITCH. Maximises parallelism, and is
-                        the only shape whose memory is genuinely bounded: each process' peak is
-                        a function of a parameter (reg_tiled_coarse_max_dim, tile+halo,
-                        out_tile), not of the slide's dimensions.
-      * false:          one TILED_REGISTER task per moving slide. Fewer scheduler tasks, but it
-                        holds both whole slides, an all-channel float32 copy and the full warped
-                        output simultaneously, so its memory scales with the input.
+    ONE execution shape, same channel contract as VALIS_ADAPTER: a per-TILE Nextflow fan-out —
+    TILED_COARSE -> TILED_REG_TILE (one task per tile) -> TILED_SOLVE -> TILED_STITCH. It
+    maximises parallelism, and every process' peak memory is a function of a parameter
+    (reg_tiled_coarse_max_dim, tile+halo, out_tile) rather than of the slide's dimensions.
+
+    A second, single-task shape used to sit behind a boolean flag. Both the flag and that process
+    were removed, because it could not hold that bound — it kept both whole slides, an
+    all-channel float32 copy and the full warped output live at once, so its memory scaled with
+    the input and had to be budgeted from file size. Keeping an unbounded alternative behind a
+    flag was shipping a footgun. See CHANGELOG (Unreleased -> Removed).
 
     Input:  ch_grouped_meta - Channel of [patient_id, reference_item, all_items]
 
@@ -45,7 +46,6 @@
 ========================================================================================
 */
 
-include { TILED_REGISTER } from '../../../modules/local/tiled_register'
 include { TILED_COARSE   } from '../../../modules/local/tiled_coarse'
 include { TILED_REG_TILE } from '../../../modules/local/tiled_reg_tile'
 include { TILED_SOLVE    } from '../../../modules/local/tiled_solve'
@@ -106,75 +106,66 @@ workflow TILED_ADAPTER {
              .collect { mov -> tuple(mov[0], ref_file, mov[1]) }
     }
 
-    if (params.reg_tiled_fanout) {
-        TILED_COARSE(ch_moving)
+    TILED_COARSE(ch_moving)
 
-        // Tile count per slide, derived from the tile-plan CSV file itself -- NOT from the
-        // splitCsv rows below: splitCsv streams one item per row, so the closure that sees a
-        // row cannot know how many rows the file has in total. The CSV is tiny (one row per
-        // tile, plus a header), so counting lines is cheap.
-        ch_tile_counts = TILED_COARSE.out.tiles
-            .map { meta, csv -> tuple(slideKey(meta), requirePositiveTileCount(countTileRows(csv), meta)) }
+    // Tile count per slide, derived from the tile-plan CSV file itself -- NOT from the
+    // splitCsv rows below: splitCsv streams one item per row, so the closure that sees a
+    // row cannot know how many rows the file has in total. The CSV is tiny (one row per
+    // tile, plus a header), so counting lines is cheap.
+    ch_tile_counts = TILED_COARSE.out.tiles
+        .map { meta, csv -> tuple(slideKey(meta), requirePositiveTileCount(countTileRows(csv), meta)) }
 
-        // Context per slide: meta (+tiles_count) + reference + moving + M0, keyed for the
-        // per-tile join. Map addition (never meta.clone()) -- see the aliasing note at
-        // valis_adapter.nf:82-88.
-        ch_ctx = ch_moving
-            .map { meta, ref, mov -> tuple(slideKey(meta), meta, ref, mov) }
-            .join(TILED_COARSE.out.m0.map { meta, m0 -> tuple(slideKey(meta), m0) }, by: 0)
-            .join(ch_tile_counts, by: 0)
-            .map { k, meta, ref, mov, m0, n -> tuple(k, meta + [tiles_count: n], ref, mov, m0) }
+    // Context per slide: meta (+tiles_count) + reference + moving + M0, keyed for the
+    // per-tile join. Map addition (never meta.clone()) -- see the aliasing note at
+    // valis_adapter.nf:82-88.
+    ch_ctx = ch_moving
+        .map { meta, ref, mov -> tuple(slideKey(meta), meta, ref, mov) }
+        .join(TILED_COARSE.out.m0.map { meta, m0 -> tuple(slideKey(meta), m0) }, by: 0)
+        .join(ch_tile_counts, by: 0)
+        .map { k, meta, ref, mov, m0, n -> tuple(k, meta + [tiles_count: n], ref, mov, m0) }
 
-        // Fan out: one item per tile (splitCsv), attach the slide context.
-        ch_tile_items = TILED_COARSE.out.tiles
-            .splitCsv(header: true, elem: 1)
-            .map { meta, row -> tuple(slideKey(meta), row) }
-            .combine(ch_ctx, by: 0)
-            .map { _k, row, meta, ref, mov, m0 -> tuple(meta, m0, ref, mov, row) }
+    // Fan out: one item per tile (splitCsv), attach the slide context.
+    ch_tile_items = TILED_COARSE.out.tiles
+        .splitCsv(header: true, elem: 1)
+        .map { meta, row -> tuple(slideKey(meta), row) }
+        .combine(ch_ctx, by: 0)
+        .map { _k, row, meta, ref, mov, m0 -> tuple(meta, m0, ref, mov, row) }
 
-        TILED_REG_TILE(ch_tile_items)
+    TILED_REG_TILE(ch_tile_items)
 
-        // Gather every tile's control point back per slide. groupKey(slideKey, tiles_count)
-        // lets a slide's group close -- and TILED_SOLVE start -- as soon as that slide's own
-        // tiles have all arrived, instead of the bare groupTuple(by: 0) this replaces, which
-        // buffered every key until the WHOLE upstream channel closed (i.e. until every tile of
-        // every slide of every patient had finished). requireTilesCount errors rather than
-        // silently falling back to an unsized key if the count is ever missing.
-        ch_controls = TILED_REG_TILE.out.control
-            .map { meta, c -> tuple(groupKey(slideKey(meta), requireTilesCount(meta)), meta, c) }
-            .groupTuple(by: 0)
-            .map { _k, metas, controls -> tuple(metas[0], controls) }
+    // Gather every tile's control point back per slide. groupKey(slideKey, tiles_count)
+    // lets a slide's group close -- and TILED_SOLVE start -- as soon as that slide's own
+    // tiles have all arrived, instead of the bare groupTuple(by: 0) this replaces, which
+    // buffered every key until the WHOLE upstream channel closed (i.e. until every tile of
+    // every slide of every patient had finished). requireTilesCount errors rather than
+    // silently falling back to an unsized key if the count is ever missing.
+    ch_controls = TILED_REG_TILE.out.control
+        .map { meta, c -> tuple(groupKey(slideKey(meta), requireTilesCount(meta)), meta, c) }
+        .groupTuple(by: 0)
+        .map { _k, metas, controls -> tuple(metas[0], controls) }
 
-        ch_solve_in = ch_controls
-            .map { meta, controls -> tuple(slideKey(meta), meta, controls) }
-            .join(TILED_COARSE.out.m0.map { meta, m0 -> tuple(slideKey(meta), m0) }, by: 0)
-            .map { _k, meta, controls, m0 -> tuple(meta, m0, controls) }
+    ch_solve_in = ch_controls
+        .map { meta, controls -> tuple(slideKey(meta), meta, controls) }
+        .join(TILED_COARSE.out.m0.map { meta, m0 -> tuple(slideKey(meta), m0) }, by: 0)
+        .map { _k, meta, controls, m0 -> tuple(meta, m0, controls) }
 
-        TILED_SOLVE(ch_solve_in)
+    TILED_SOLVE(ch_solve_in)
 
-        ch_stitch_in = TILED_SOLVE.out.manifest
-            .map { meta, m -> tuple(slideKey(meta), meta, m) }
-            .join(ch_moving.map { meta, _ref, mov -> tuple(slideKey(meta), mov) }, by: 0)
-            .map { _k, meta, m, mov -> tuple(meta, m, mov) }
+    ch_stitch_in = TILED_SOLVE.out.manifest
+        .map { meta, m -> tuple(slideKey(meta), meta, m) }
+        .join(ch_moving.map { meta, _ref, mov -> tuple(slideKey(meta), mov) }, by: 0)
+        .map { _k, meta, m, mov -> tuple(meta, m, mov) }
 
-        TILED_STITCH(ch_stitch_in)
+    TILED_STITCH(ch_stitch_in)
 
-        ch_registered_moving = TILED_STITCH.out.registered
-        ch_manifest_by_meta  = TILED_SOLVE.out.manifest
-        ch_size_logs         = TILED_STITCH.out.size_log
-        ch_versions          = TILED_COARSE.out.versions.first()
-            .mix(TILED_REG_TILE.out.versions.first())
-            .mix(TILED_SOLVE.out.versions.first())
-            .mix(TILED_STITCH.out.versions.first())
-        ch_intrinsic_tre     = TILED_SOLVE.out.tre.map { _meta, f -> f }
-    } else {
-        TILED_REGISTER(ch_moving)
-        ch_registered_moving = TILED_REGISTER.out.registered
-        ch_manifest_by_meta  = TILED_REGISTER.out.manifest
-        ch_size_logs         = TILED_REGISTER.out.size_log
-        ch_versions          = TILED_REGISTER.out.versions.first()
-        ch_intrinsic_tre     = TILED_REGISTER.out.tre.map { _meta, f -> f }
-    }
+    ch_registered_moving = TILED_STITCH.out.registered
+    ch_manifest_by_meta  = TILED_SOLVE.out.manifest
+    ch_size_logs         = TILED_STITCH.out.size_log
+    ch_versions          = TILED_COARSE.out.versions.first()
+        .mix(TILED_REG_TILE.out.versions.first())
+        .mix(TILED_SOLVE.out.versions.first())
+        .mix(TILED_STITCH.out.versions.first())
+    ch_intrinsic_tre     = TILED_SOLVE.out.tre.map { _meta, f -> f }
 
     ch_registered = ch_registered_moving.mix(ch_reference)
 

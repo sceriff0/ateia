@@ -23,12 +23,12 @@ A second `registration_method` alongside `valis` that is:
    (per slide *and per tile*), so a cluster runs them all at once and a laptop runs a few at a
    time. No monolithic per-patient task.
 2. **The default choice for laptops / low-end machines** — **every process fits in ≤8 GB.**
-   `reg_tiled_fanout` defaults to `true`, so the fan-out path *is* the default, and it is the one
-   that holds this property: measured peaks on a 16384² 2-channel slide are COARSE 0.91 GB,
-   REG_TILE 1.31 GB, SOLVE <1.31 GB, STITCH 1.35 GB. (Opting out with `--reg_tiled_fanout false`
-   selects the single-task `TILED_REGISTER`, which does *not* hold it: it keeps both whole slides
-   plus an all-channel float32 copy and the full warped output live at once, so its budget is
-   derived from input size instead.) No
+   The per-tile fan-out is the *only* STARE shape, and it holds this property unconditionally:
+   measured peaks on a 16384² 2-channel slide are COARSE 0.91 GB, REG_TILE 1.31 GB,
+   SOLVE <1.31 GB, STITCH 1.35 GB. (A single-task `TILED_REGISTER` alternative existed behind a
+   flag; it could not hold the bound — both whole slides plus an all-channel float32 copy and the
+   full warped output live at once — so the flag and the process were removed rather than left as
+   an unbounded opt-out.) No
    JVM, no BioFormats, no whole-slide-in-RAM step. The tiling and stitching processes are
    themselves low-memory and stream.
 3. **Native TRE** — emits a VALIS-style Target Registration Error per slide *and* a spatial TRE
@@ -315,7 +315,8 @@ dedicated lean `withName:'TILED_*'` overrides (2–8 GB) or pair with a memory-c
 - **CLI:** `bin/tiled_register.py` (100755) — real OME-TIFF I/O, smoke-tested.
 - **Nextflow wiring:** `modules/local/tiled_register.nf`, `subworkflows/local/adapters/tiled_adapter.nf`,
   the `registration.nf` method branch, `validateRegistrationMethod += 'tiled'`, `reg_tiled_*`
-  params, and a lean 8 GB `TILED_REGISTER` resource block. **Stub run green** end-to-end, JVM-free.
+  params, and a lean 8 GB resource block. **Stub run green** end-to-end, JVM-free.
+  (The single-task `TILED_REGISTER` described here was later removed — see CHANGELOG.)
 - **reg_qc=2 seg-QC dispatch (done):** `warp_seg_qc.py --method tiled` builds the warper from the
   STARE manifest (no JVM), and `WARP_SEG_QC_TILED` + the valis/tiled dispatch branch in
   `subworkflows/local/seg_qc.nf` (called from `registration.nf`) feed it one manifest per moving
@@ -346,7 +347,7 @@ dedicated lean `withName:'TILED_*'` overrides (2–8 GB) or pair with a memory-c
   a ground-truth-free residual-TRE + correlation metric that runs on any method's output, so
   VALIS vs tiled is a direct number-to-number comparison on the same slide. Validated on synthetic
   ground truth (STARE drops the residual TRE below 2 px; a pure 11.66 px shift is fully removed).
-- **Per-tile Nextflow fan-out (done):** `reg_tiled_fanout=true` switches the adapter to
+- **Per-tile Nextflow fan-out (done, and now the only shape):** the adapter runs
   `TILED_COARSE → TILED_REG_TILE (one task per tile) → TILED_SOLVE → TILED_STITCH` — the
   little-process-per-tile design, all JVM-free. `warp_image` gained an `out_origin` so each tile
   task warps only its window (and the stitch warps in row strips). The fan-out chain is proven to
