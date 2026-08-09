@@ -41,12 +41,12 @@ SIZE_VARYING_AXES = {"baseline", "scaling_grid", "registration_grid", "target_px
 #
 # registration_method (valis|tiled) + reg_micro_reg (micro-reg depth 0/1/2) replace the old boolean
 # skip_micro_registration, which was removed on main; reg_tiled_* are the STARE knobs swept by
-# registration_method_grid, reg_tiled_fanout being the execution shape (per-slide vs per-tile fan-out).
+# registration_method_grid. STARE has a single execution shape (the per-tile fan-out).
 CONFIG_COLS = (
     "varied_axis", "target_px", "n_channels", "n_register_images",
     # registration
     "registration_method", "memory_mode", "reg_micro_reg", "reg_jvm_heap_gb",
-    "reg_tiled_tile", "reg_tiled_gate_tre", "reg_tiled_fanout", "reg_tiled_coarse_max_dim",
+    "reg_tiled_tile", "reg_tiled_gate_tre", "reg_tiled_coarse_max_dim",
     # preprocessing
     "preproc_pool_workers", "preproc_tile_size", "preproc_no_darkfield", "preproc_autotune",
     # segmentation (per-backend knobs, crossed by segmentation_grid)
@@ -169,7 +169,7 @@ _DICTS = {
          ("reg_micro_reg", "-", "Micro-registration depth (0=none | 1=micro-rigid | 2=+micro non-rigid)."),
          ("reg_tiled_tile", "px", "STARE tile core / mesh resolution (only when registration_method=tiled)."),
          ("reg_tiled_gate_tre", "px", "STARE per-tile non-rigid refine gate (only when registration_method=tiled)."),
-         ("reg_tiled_coarse_max_dim", "px", "STARE coarse-anchor thumbnail, longest side — the resolution M0 is solved at; the counterpart to VALIS reg_max_image_dim (only when registration_method=tiled and reg_tiled_fanout=true)."),
+         ("reg_tiled_coarse_max_dim", "px", "STARE coarse-anchor thumbnail, longest side — the resolution M0 is solved at; the counterpart to VALIS reg_max_image_dim (only when registration_method=tiled)."),
          ("seg_method", "-", "Segmentation backend (stardist/cellsam/instantseg)."),
          ("total_realtime_s", "s", "Sum of all process realtimes."),
          ("cpu_hours", "cpu-h", "Sum of realtime x allocated cpus over all processes."),

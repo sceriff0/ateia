@@ -96,22 +96,15 @@ Verify the whole harness with no data at all:
     (StarDist tile grid; InstanSeg tile size × batch size; CellSAM block size × bbox threshold).
     All three shipped backends are covered.
   - `registration_method_grid:` — pins `registration_method` and crosses that method's knobs.
-    A method maps to **either** one dict (a single cross) **or** a list of independent
-    **sub-grids**, each with an optional `_label` that suffixes `varied_axis`. `_label` is a tag,
-    never a pipeline param. The `tiled`/STARE entry uses two sub-grids:
-    - `shape` — `reg_tiled_tile` × `reg_tiled_gate_tre` × `reg_tiled_fanout`, so both execution
-      shapes are measured: `true` (the pipeline default, since the fan-out is the only
-      memory-bounded shape) runs `TILED_COARSE`/`TILED_REG_TILE`/`TILED_SOLVE`/`TILED_STITCH`,
-      and `false` runs the single-task `TILED_REGISTER`.
-    - `coarse_res` — `reg_tiled_coarse_max_dim`, the resolution STARE solves its global `M0` at.
-      This is STARE's counterpart to VALIS's `reg_max_image_dim`; sweeping one and not the other
-      would compare a *tuned* VALIS against an *untuned* STARE, so
-      `test_project_stare_resolution_axis_mirrors_the_valis_one` requires it to be swept and to
-      bracket its default in both directions. `reg_tiled_fanout` is **pinned** `true` here rather
-      than crossed — only `modules/local/tiled_coarse.nf` reads the knob and that process exists
-      only in the fan-out shape, so crossing it would spend half the runs varying a value the
-      pipeline never reads. That is the same dead-axis rule, applied *within* a method;
-      `test_project_coarse_res_sub_grid_pins_the_fanout_gate` enforces it.
+    The `tiled`/STARE entry crosses `reg_tiled_tile` × `reg_tiled_gate_tre` ×
+    `reg_tiled_coarse_max_dim`. The last of these is the resolution STARE solves its global `M0`
+    at — the counterpart to VALIS's `reg_max_image_dim`; sweeping one and not the other would
+    compare a *tuned* VALIS against an *untuned* STARE, so
+    `test_project_stare_resolution_axis_mirrors_the_valis_one` requires it to be swept and to
+    bracket its default in both directions. STARE has a single execution shape (the per-tile
+    fan-out `TILED_COARSE`/`TILED_REG_TILE`/`TILED_SOLVE`/`TILED_STITCH`); the
+    `reg_tiled_fanout` flag and the single-task `TILED_REGISTER` path it selected were removed
+    upstream, so there is no execution shape left to cross.
 - **The `baseline:` map must equal the shipped `nextflow.config` defaults**, and must declare
   every param any grid or axis varies (so all configs share CSV columns).
   `test_project_sweep_baseline_matches_pipeline_defaults` reads `nextflow.config` directly and

@@ -92,15 +92,6 @@ baseline:
                                       # reg_max_image_dim. Crossed by registration_method_grid.tiled's
                                       # coarse_res sub-grid; declared here for column uniformity, and
                                       # inert at this baseline cell (registration_method=valis).
-  reg_tiled_fanout: true              # STARE execution SHAPE, pipeline default (flipped false -> true on
-                                      # main: the per-TILE fan-out is the only shape whose memory is bounded
-                                      # by parameters rather than by slide size). true = TILED_COARSE ->
-                                      # TILED_REG_TILE -> TILED_SOLVE -> TILED_STITCH; false = one
-                                      # TILED_REGISTER task per slide. Still crossed BOTH ways by
-                                      # registration_method_grid, so flipping this default changes which
-                                      # shape the baseline names, not which shapes get measured. Inert at
-                                      # this baseline cell itself (registration_method=valis); declared for
-                                      # column uniformity.
   # --- preprocessing (BaSiC illumination correction) ---
   preproc_n_iter: 100
   preproc_overlap: 0
@@ -212,8 +203,6 @@ axes:
   # NOTE — seg_method and its per-method params (seg_n_tiles_*, seg_cellsam_*, seg_instantseg_*) are NOT
   # OFAT axes: segmentation_grid below runs each method with its OWN live params (an OFAT run of a
   # backend-specific param off the instantseg baseline would be a no-op).
-  # NOTE — reg_tiled_fanout is NOT an OFAT axis: it only means anything under registration_method=tiled,
-  # so registration_method_grid crosses it (see there).
 
 # REGISTRATION PARAMETER GRID (VALIS) — memory_mode x reg_micro_reg crossed at the baseline cell, VALIS
 # path only. Characterises the effect of the VALIS registration knobs on cost + accuracy. reg_micro_reg is
@@ -250,42 +239,28 @@ segmentation_grid:
 # resolution (nextflow.config), so a finer grid gives STARE more local (piecewise) deformation freedom.
 # reg_tiled_gate_tre gates which tiles get non-rigid refinement (accuracy vs cost).
 #
-# reg_tiled_fanout is the EXECUTION SHAPE, not an accuracy knob, and it is crossed here because at its
-# default (false) four pipeline processes — TILED_COARSE, TILED_REG_TILE, TILED_SOLVE, TILED_STITCH —
-# never execute at all, in any run of the sweep. Crossing it is the only way the benchmark measures the
-# per-tile Nextflow fan-out: same registration result, completely different scheduling and per-task
-# resource profile (many small tasks vs one big one), which is exactly what the cost tables exist to
-# compare. Held at pipeline defaults: reg_tiled_halo / reg_tiled_upsample (secondary accuracy) and
+# reg_tiled_coarse_max_dim is the resolution the GLOBAL M0 anchor is solved at — STARE's counterpart
+# to VALIS's reg_max_image_dim, and the dominant runtime-and-accuracy axis of the method.
+#
+# There is no execution-shape axis: STARE has ONE shape, the per-tile Nextflow fan-out
+# (TILED_COARSE -> TILED_REG_TILE -> TILED_SOLVE -> TILED_STITCH). The old boolean that selected a
+# single-task TILED_REGISTER instead was removed upstream, because that path could not bound its
+# memory. Every tiled run in this sweep therefore exercises the four fan-out processes.
+#
+# Held at pipeline defaults: reg_tiled_halo / reg_tiled_upsample (secondary accuracy) and
 # reg_tiled_out_tile (write-side I/O) — add them here if a curve for them is ever needed.
 registration_method_grid:
-  # A method may map to one dict (a single cross) or a LIST of independent SUB-GRIDS. STARE uses
-  # two, because one of its knobs is gated behind another knob of the SAME method — see below.
   tiled:
-    - _label: shape                          # accuracy knobs x execution shape
-      reg_tiled_tile:     [1024, 2048, 4096] # grid granularity / mesh resolution (px) — the fairness knob
-      reg_tiled_gate_tre: [0.5, 1.0, 2.0]    # per-tile non-rigid refine gate (rigid-stage TRE, px)
-      reg_tiled_fanout:   [false, true]      # execution shape: one task/slide vs per-TILE Nextflow fan-out
-
-    # STARE's counterpart to VALIS's reg_max_image_dim: the resolution the GLOBAL transform is
+    reg_tiled_tile:     [1024, 2048, 4096]         # grid granularity / mesh resolution (px) — the fairness knob
+    reg_tiled_gate_tre: [0.5, 1.0, 2.0]            # per-tile non-rigid refine gate (rigid-stage TRE, px)
+    # STARE's counterpart to VALIS's reg_max_image_dim: the resolution the GLOBAL M0 transform is
     # solved at. Both are the dominant runtime-and-accuracy axis of their method, so sweeping one
     # and not the other would compare a TUNED VALIS against an UNTUNED STARE. Brackets the default
     # 4096 in both directions, mirroring reg_max_image_dim's [2000, 4000, 8000] around its 4000.
     #
-    # reg_tiled_fanout is PINNED true rather than crossed: only modules/local/tiled_coarse.nf reads
-    # reg_tiled_coarse_max_dim, and that process exists only in the fan-out shape, so half of a
-    # flat cross would vary a value the pipeline never reads. This is the "pin the gate, cross the
-    # now-live knobs" rule applied WITHIN a method.
-    #
     # COST NOTE: ORB is superlinear in thumbnail area — measured 48 s at a 1024 px thumbnail and
     # 255 s at 2048 px on deliberately corner-dense synthetic input, i.e. roughly 5x per doubling.
-    # 8192 is therefore the walltime risk in this sub-grid (TILED_COARSE has 2 h x task.attempt
-    # from process_low). Drop the 8192 point if these runs start hitting the wall; memory is NOT
-    # the concern — peak is flat across this axis (~0.9 GB) by construction.
-    - _label: coarse_res
-      reg_tiled_fanout:          [true]              # PINNED — the gate, not an axis
-      reg_tiled_coarse_max_dim:  [2048, 4096, 8192]  # M0 anchor thumbnail, longest side (px)
-
-# NOTE — a param that is DEAD unless another param enables it must never be a flat OFAT axis:
-# varying it would change a value the pipeline never reads (full run cost, zero signal). Pin the
-# gate and cross the now-live knobs instead, the way segmentation_grid and registration_method_grid
-# do. Guarded by test_project_sweep_has_no_dead_axes.
+    # 8192 is therefore the walltime risk on this axis (TILED_COARSE has 2 h x task.attempt from
+    # process_low). Drop the 8192 point if these runs start hitting the wall; memory is NOT the
+    # concern — peak is flat across this axis (~0.9 GB) by construction.
+    reg_tiled_coarse_max_dim: [2048, 4096, 8192]   # M0 anchor thumbnail, longest side (px)
