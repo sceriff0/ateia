@@ -95,7 +95,7 @@ params apply only when `--registration_method tiled`.
 | `reg_tiled_upsample` | `10` | Phase-correlation sub-pixel upsample factor (per tile). |
 | `reg_tiled_out_tile` | `1024` | Streaming stitch write-tile size (px) — gigapixel-safe. |
 | `reg_tiled_coarse_max_dim` | `4096` | Longest side (px) of the thumbnail the coarse anchor (M0) is estimated on. **This is what bounds COARSE memory**, not tile size: ORB costs ~40 bytes per source pixel, so a native-resolution anchor on a gigapixel slide needs tens of GB. Lower = cheaper and coarser; the M0 residual grows with the decimation factor and must stay well inside `reg_tiled_halo`. `0` disables decimation. |
-| `reg_tiled_fanout` | `false` | `false`: one Nextflow task per slide (`TILED_REGISTER`). Despite the name this path is **not** region-streamed — it holds both whole slides, an all-channel float32 copy and the full warped output at once, so its memory is derived from input size. `true`: per-tile Nextflow fan-out (COARSE→REG_TILE→SOLVE→STITCH), which *is* bounded — prefer it on large slides. |
+| `reg_tiled_fanout` | `true` | `true` (default): per-tile Nextflow fan-out (COARSE→REG_TILE→SOLVE→STITCH). The memory-**bounded** shape — every process' peak is set by a parameter, not by slide size (measured on a 16384² 2-channel slide: 0.91 / 1.31 / <1.31 / 1.35 GB). `false`: one `TILED_REGISTER` task per slide — fewer scheduler tasks, but it holds both whole slides, an all-channel float32 copy and the full warped output at once, so its memory scales with the input. |
 
 ## Segmentation
 

@@ -22,10 +22,13 @@ A second `registration_method` alongside `valis` that is:
 1. **Fully parallel at the Nextflow level** — every expensive unit is an independent process
    (per slide *and per tile*), so a cluster runs them all at once and a laptop runs a few at a
    time. No monolithic per-patient task.
-2. **The default choice for laptops / low-end machines** — **every process in the fan-out path
-   (`--reg_tiled_fanout true`) fits in ≤8 GB** (the single-task `TILED_REGISTER` path does *not*:
-   it holds both whole slides plus an all-channel float32 copy and the full warped output, and its
-   budget is derived from input size instead), no
+2. **The default choice for laptops / low-end machines** — **every process fits in ≤8 GB.**
+   `reg_tiled_fanout` defaults to `true`, so the fan-out path *is* the default, and it is the one
+   that holds this property: measured peaks on a 16384² 2-channel slide are COARSE 0.91 GB,
+   REG_TILE 1.31 GB, SOLVE <1.31 GB, STITCH 1.35 GB. (Opting out with `--reg_tiled_fanout false`
+   selects the single-task `TILED_REGISTER`, which does *not* hold it: it keeps both whole slides
+   plus an all-channel float32 copy and the full warped output live at once, so its budget is
+   derived from input size instead.) No
    JVM, no BioFormats, no whole-slide-in-RAM step. The tiling and stitching processes are
    themselves low-memory and stream.
 3. **Native TRE** — emits a VALIS-style Target Registration Error per slide *and* a spatial TRE
