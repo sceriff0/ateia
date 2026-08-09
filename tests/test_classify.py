@@ -3,6 +3,7 @@ import os
 
 import numpy as np
 from utils.phenotyping.classify import (
+    CellOutcome,
     classify_cell,
     classify_cells_vectorized,
     minimal_violated_constraint,
@@ -62,15 +63,54 @@ _MODEL_CONFIG_PATH = os.path.join(
 )
 
 
-def test_classify_cells_vectorized_matches_classify_cell_reference():
-    """Guard for the whole vectorization: classify_cells_vectorized must agree with
-    classify_cell, field-for-field, on every cell — over randomized sign matrices
-    (including contra and free signs) against the real compiled panel fixture.
+def _naive_classify_cell_oracle(signs, feasible, never, requires, lineage):
+    """TEST ORACLE — NOT production code.
 
-    This is deliberately hardened beyond vec.py's prototype comparison (which only
-    checked the raw match matrix): it drives the full classify_cell/classify_cells_
-    vectorized public surface, including the Conflict/Artefact minimal_violated_
-    constraint path and candidate_patterns identity/order, not just boolean matches.
+    The obvious per-cell/per-pattern/per-marker scan that `classify_cells_vectorized`
+    replaces (its uint64-bitmask match is the sole production implementation now;
+    see classify.py). Kept here, independent of production, purely so the
+    equivalence test below has something to compare against that couldn't share a
+    bug with the code under test.
+    """
+    if any(signs.get(m) == "contra" for m in lineage):
+        return CellOutcome("Artefact", 2, -1, [], [])
+    matches = []
+    for entry in feasible:
+        pat = entry["pattern"]
+        ok = True
+        for m in lineage:
+            s = signs.get(m, "free")
+            if s == "pos" and pat[m] != 1:
+                ok = False
+                break
+            if s == "neg" and pat[m] != 0:
+                ok = False
+                break
+        if ok:
+            matches.append(entry)
+    names = sorted({e["phenotype"] for e in matches})
+    if len(names) == 1:
+        return CellOutcome(names[0], 0, -1, names, matches)
+    if len(names) > 1:
+        return CellOutcome("Ambiguous", 0, -1, names, matches)
+    vid = minimal_violated_constraint(signs, never, requires)
+    if vid is not None:
+        return CellOutcome("Conflict", 1, vid, [], [])
+    return CellOutcome("Artefact", 2, -1, [], [])
+
+
+def test_classify_cells_vectorized_matches_naive_oracle():
+    """Guard for the whole vectorization: classify_cells_vectorized (production)
+    must agree with the naive per-cell/per-pattern/per-marker oracle above,
+    field-for-field, on every cell — over randomized sign matrices (including
+    contra and free signs) against the real compiled panel fixture.
+
+    Deliberately does NOT compare against `classify_cell`: since production now
+    holds only the vectorized path, `classify_cell` is a thin adapter over
+    `classify_cells_vectorized` and comparing the two would be tautological — a
+    bug in the batch path would show up identically on both sides. The oracle
+    above is written independently, so it can't share a bug with the code under
+    test. (It is exercised too, transitively, via the equality assertions below.)
     """
     with open(_MODEL_CONFIG_PATH) as fh:
         cfg = json.load(fh)
@@ -96,7 +136,7 @@ def test_classify_cells_vectorized_matches_classify_cell_reference():
     seen_outcomes = set()
     for i in range(n):
         signs_i = {m: sm[m][i] for m in lineage}
-        want = classify_cell(signs_i, feasible, never, requires, lineage)
+        want = _naive_classify_cell_oracle(signs_i, feasible, never, requires, lineage)
         g = got[i]
         seen_outcomes.add(g.outcome)
         assert g.outcome == want.outcome, f"cell {i}: outcome"
@@ -110,3 +150,25 @@ def test_classify_cells_vectorized_matches_classify_cell_reference():
     # Sanity: the randomized sweep actually exercised more than one outcome bucket,
     # otherwise this test would be a tautology over a degenerate case.
     assert len(seen_outcomes) > 1
+
+
+def test_classify_cell_adapter_matches_naive_oracle():
+    """classify_cell is now a thin single-row adapter over classify_cells_vectorized
+    (see classify.py). Confirm the adapter itself — not just the batch path —
+    agrees with the independent naive oracle, on a handful of hand-picked cells
+    covering each outcome bucket using the real compiled panel fixture.
+    """
+    with open(_MODEL_CONFIG_PATH) as fh:
+        cfg = json.load(fh)
+    lineage = cfg["lineage_markers"]
+    feasible = cfg["feasible_set"]
+    never = cfg["constraints"]["never"]
+    requires = cfg["constraints"]["requires"]
+
+    rng = np.random.default_rng(99)
+    sign_values = ["pos", "neg", "free", "contra"]
+    for _ in range(200):
+        signs = {m: rng.choice(sign_values, p=[0.35, 0.45, 0.15, 0.05]) for m in lineage}
+        want = _naive_classify_cell_oracle(signs, feasible, never, requires, lineage)
+        got = classify_cell(signs, feasible, never, requires, lineage)
+        assert got == want
