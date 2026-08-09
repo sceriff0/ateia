@@ -87,6 +87,14 @@ def run_phenotyping(
     with open(model_config) as fh:
         cfg = json.load(fh)
     lineage = cfg["lineage_markers"]
+    if not lineage:
+        raise ValueError(
+            "model_config declares no lineage markers (lineage_markers is empty), "
+            "so no cell can be classified against any phenotype pattern. This "
+            "means the compiled panel has no marker with `role: lineage` — fix "
+            "the source panel (panel.yaml) to give at least one marker "
+            "`role: lineage`, then recompile it with compile_panel.py."
+        )
     states = cfg["state_markers"]
     feasible = cfg["feasible_set"]
     never = cfg["constraints"]["never"]
@@ -183,21 +191,23 @@ def run_phenotyping(
         state_signs[m] = resolve_signs(p_neg[m], p_pos[m], chosen_alpha)
     state_ann = {m: state_annotations(state_signs[m]) for m in states}
 
-    # Columns that depend only on already-materialized per-marker arrays (no
-    # per-cell python object needed) are filled in a single vectorized pass.
+    # Columns derived from the per-cell CellOutcome list `outs` (outcome,
+    # candidates, n_candidates, tree_path, empty_type, violated_constraint_id)
+    # or already-materialized per-marker arrays (density_bin, provenance) are
+    # filled here in one pass, without building an intermediate per-cell dict.
     outcome_col = np.array([o.outcome for o in outs], dtype=object)
     candidates_col = np.array([";".join(o.candidate_names) for o in outs], dtype=object)
     n_candidates_col = np.fromiter((len(o.candidate_names) for o in outs), dtype=np.int64, count=n)
     # tree_path(name, parents) is a pure function of the outcome name; memoize
     # over the small set of distinct outcomes instead of recomputing per cell.
-    _tree_path_by_outcome: Dict[str, str] = {}
+    tree_path_by_outcome: Dict[str, str] = {}
     tree_path_col = np.empty(n, dtype=object)
-    for _i, _name in enumerate(outcome_col):
-        cached = _tree_path_by_outcome.get(_name)
+    for i, name in enumerate(outcome_col):
+        cached = tree_path_by_outcome.get(name)
         if cached is None:
-            cached = tree_path(_name, parents)
-            _tree_path_by_outcome[_name] = cached
-        tree_path_col[_i] = cached
+            cached = tree_path(name, parents)
+            tree_path_by_outcome[name] = cached
+        tree_path_col[i] = cached
     empty_type_col = np.fromiter((o.empty_type for o in outs), dtype=np.int64, count=n)
     violated_constraint_id_col = np.fromiter(
         (o.violated_constraint_id for o in outs), dtype=np.int64, count=n

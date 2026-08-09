@@ -64,41 +64,43 @@ def _naive_scan_oracle(alpha_grid, risk_ucb_fn, alpha_target):
     return chosen if chosen is not None else grid[0]
 
 
-def test_crc_select_alpha_binary_search_matches_oracle_all_cutpoints():
-    """For every monotone boolean qualification pattern over a 6-element
-    grid (7 possible cut points: 0 qualify .. all 6 qualify), the
-    production binary search must return exactly what the naive ascending
-    linear scan returns, and must call `risk_ucb_fn` strictly fewer times
-    for the mid cut points.
+def test_crc_select_alpha_matches_oracle_all_interval_shapes():
+    """For every INTERVAL qualification shape over a 6-element grid — every
+    `(lo, hi)` with `0 <= lo <= hi <= len(grid)`, where grid index `i`
+    qualifies (UCB <= target) iff `lo <= i < hi` — the production function
+    must return exactly what the naive ascending linear-scan oracle
+    returns: the largest qualifying alpha, or `grid[0]` when none qualify.
+
+    This is the real qualification shape: the UCB's width term
+    `sqrt(ln(1/delta) / (2n(alpha)))` shrinks as alpha grows (more cells
+    commit), while risk tends to grow with alpha, so the qualifying set is
+    an interior interval of the sorted grid, not a prefix. A prefix-only
+    enumeration (`lo == 0` here) cannot exercise that shape and previously
+    let a monotonicity-assuming binary search pass while being wrong on
+    interior intervals — this enumeration includes prefixes as a subset
+    (`lo == 0`) plus every non-prefix interval, including the empty
+    interval (`lo == hi`, nothing qualifies) and the full range
+    (`lo=0, hi=len(grid)`, everything qualifies).
     """
     grid = [0.005, 0.01, 0.02, 0.05, 0.1, 0.2]
-    alpha_target = 0.5  # predicate below ignores this; only cut matters
+    alpha_target = 0.5  # predicate below ignores this; only (lo, hi) matters
+    n = len(grid)
 
-    for cut in range(len(grid) + 1):
-        # First `cut` (ascending) alphas qualify (risk 0.0 <= target);
-        # the rest do not (risk 1.0 > target). This is the monotone
-        # "qualifying prefix" shape crc_select_alpha's docstring assumes.
-        def make_risk_fn(counter):
-            def risk_fn(alpha):
-                counter[0] += 1
-                idx = grid.index(alpha)
-                return 0.0 if idx < cut else 1.0
+    for lo in range(n + 1):
+        for hi in range(lo, n + 1):
 
-            return risk_fn
+            def make_risk_fn(lo=lo, hi=hi):
+                def risk_fn(alpha):
+                    idx = grid.index(alpha)
+                    return 0.0 if lo <= idx < hi else 1.0
 
-        oracle_calls = [0]
-        prod_calls = [0]
+                return risk_fn
 
-        expected = _naive_scan_oracle(grid, make_risk_fn(oracle_calls), alpha_target)
-        actual = crc_select_alpha(grid, make_risk_fn(prod_calls), alpha_target)
+            expected = _naive_scan_oracle(grid, make_risk_fn(), alpha_target)
+            actual = crc_select_alpha(grid, make_risk_fn(), alpha_target)
 
-        assert actual == expected, f"cut={cut}: expected {expected}, got {actual}"
-        # Oracle always walks the full grid; production binary-searches.
-        assert oracle_calls[0] == len(grid)
-        if 1 <= cut <= len(grid) - 1:
-            # mid cut points: production must do strictly less work
-            assert prod_calls[0] < oracle_calls[0], (
-                f"cut={cut}: prod={prod_calls[0]} oracle={oracle_calls[0]}"
+            assert actual == expected, (
+                f"lo={lo}, hi={hi}: expected {expected}, got {actual}"
             )
 
 

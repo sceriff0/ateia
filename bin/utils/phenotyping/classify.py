@@ -154,6 +154,14 @@ def classify_cells_vectorized(
         block_neg = neg_req[start:end]
         block_contra = contra[start:end]
 
+        # Looping over the F patterns here (one vectorized op per pattern, over
+        # all block_n cells) rather than broadcasting block_pos/block_neg against
+        # pat_mask in one shot is a deliberate memory trade, not an oversight: the
+        # broadcast form needs 3 simultaneous (block_n x f_count) temporaries
+        # (`block_pos[:, None] & ~pat_mask`, the neg equivalent, and their
+        # combination) alongside `match` itself, where this loop needs only
+        # `match` plus a handful of length-block_n vectors. Rewriting this as a
+        # broadcast would roughly triple peak memory for this step.
         match = np.empty((block_n, f_count), dtype=bool)
         for j in range(f_count):
             p = pat_mask[j]

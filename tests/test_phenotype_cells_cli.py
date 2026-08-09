@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 
 _ROOT = Path(__file__).resolve().parent.parent
 
@@ -129,17 +130,54 @@ def test_qc_and_audit_written(tmp_path):
     assert (tmp_path / "audit.csv").exists()   # no audit pairs here -> header-only file is fine
 
 
+def test_run_phenotyping_rejects_empty_lineage_before_expensive_work(tmp_path):
+    # A state-only panel (no marker with `role: lineage`) compiles cleanly --
+    # compile_panel.py --validate-only exits 0 and yields `lineage_markers: []`.
+    # classify.py's ValueError guard (test_classify.py's
+    # test_classify_cells_vectorized_rejects_empty_lineage) is a correct backstop,
+    # but it only fires after CSV load, density computation and every GMM
+    # calibration -- potentially minutes into a real run. run_phenotyping must
+    # raise its OWN actionable ValueError immediately after parsing the config,
+    # before merged_quant/morphology are even read. We assert this by pointing
+    # `--merged_quant`/`--morphology` at paths that do not exist: if the guard
+    # fired late, pandas would raise FileNotFoundError instead of our ValueError.
+    panel = tmp_path / "panel.yaml"
+    panel.write_text(
+        "markers:\n"
+        "  Ki67: {role: state, compartment: cell, statistic: Mean}\n"
+        "phenotypes: {}\n"
+    )
+    cfg_path = tmp_path / "model_config.json"
+    rc = cp.main(["--panel", str(panel), "--out", str(cfg_path),
+                  "--report", str(tmp_path / "r.html"), "--validate-only", "--accept-all"])
+    assert rc == 0
+    cfg = json.loads(cfg_path.read_text())
+    assert cfg["lineage_markers"] == []
+
+    missing_quant = tmp_path / "does_not_exist_quant.csv"
+    missing_morph = tmp_path / "does_not_exist_morph.csv"
+    assert not missing_quant.exists() and not missing_morph.exists()
+
+    with pytest.raises(ValueError, match="no lineage markers"):
+        pc.run_phenotyping(
+            str(missing_quant), str(missing_morph), str(cfg_path),
+            alpha_target=0.1, min_calibration=20,
+        )
+
+
 def test_phenotypes_csv_byte_identical_to_frozen_fixture(tmp_path):
     # Row assembly in run_phenotyping builds phenotypes.csv from preallocated
     # per-column arrays rather than a list of per-cell dicts (perf change, see
     # .superpowers/sdd/2026-08-09-phenotype-perf/task-3-brief.md). This test
     # pins the emitted CSV bytes against a fixture generated from the
-    # pre-change code on this same deterministic input, so any future drift
-    # in column order, dtype, or rounding is caught. Whole-file text
-    # comparison (not DataFrame equality) is deliberate: DataFrame equality
-    # can be blind to formatting differences (e.g. an int column silently
-    # becoming float and writing "1.0" instead of "1") that a downstream CSV
-    # consumer would still see.
+    # pre-change code at git rev c7d4ddb (Task 3's parent commit — i.e. after
+    # Tasks 1, 2 and 4 had already landed, so this fixture pins Task 3's row
+    # assembly specifically, not the whole branch against main) on this same
+    # deterministic input, so any future drift in column order, dtype, or
+    # rounding is caught. Whole-file text comparison (not DataFrame equality)
+    # is deliberate: DataFrame equality can be blind to formatting
+    # differences (e.g. an int column silently becoming float and writing
+    # "1.0" instead of "1") that a downstream CSV consumer would still see.
     cfg_path, quant, morph = _make_inputs(tmp_path)
     out_csv = tmp_path / "phenotypes.csv"
     rc = pc.main(["--merged_quant", str(quant), "--morphology", str(morph),
@@ -156,9 +194,13 @@ def test_phenotypes_csv_byte_identical_full_panel_fixture():
     # marker / 3 phenotypes / 13 columns. The perf change (and the bench in
     # the task brief) targets the real 12-lineage/7-state/104-pattern panel,
     # which produces the full 81-column shape. This test pins that shape and
-    # its rounding against a committed fixture generated from the pre-change
-    # code (git rev c7d4ddb) on the same tracked inputs, confirmed
-    # byte-identical to the post-change code before being committed.
+    # its rounding against a committed fixture generated from the code at
+    # merge base a077035 (`git archive a077035 bin | tar -x -C <scratch>`,
+    # imported and run against these same tracked inputs) — i.e. anchored
+    # against main, not a mid-branch commit — and confirmed byte-identical
+    # to this branch's post-change output before being committed. Re-verified
+    # 2026-08-09: regenerating from a077035 reproduces this file byte for
+    # byte.
     cfg_path = _ROOT / "tests" / "testdata" / "model_config_full_panel.json"
     quant = _ROOT / "tests" / "testdata" / "phenotype_cells_full_panel_merged_quant.csv"
     morph = _ROOT / "tests" / "testdata" / "phenotype_cells_full_panel_morphology.csv"

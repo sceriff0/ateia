@@ -261,11 +261,13 @@ def test_classify_cell_adapter_matches_naive_oracle():
 
 
 def test_classify_cells_vectorized_rejects_empty_lineage():
-    """An empty `lineage` list must fail loudly, not fabricate n=0 and silently
-    return `[]` — the batch path used to derive `n = len(sm[lineage[0]])` (an
-    IndexError on empty `lineage`, previously uncaught), and `classify_all` would
-    then hand `run_phenotyping` an empty outcome list, producing a silently
-    short/empty `phenotypes.csv` instead of failing the run.
+    """An empty `lineage` list must fail loudly, not raise a confusing IndexError
+    deep in numpy indexing. On `main` (pre-vectorization), `classify_cell` handled
+    an empty `lineage` list fine — its per-marker loops are simply no-ops, so it
+    returns valid (if uninteresting) output for a state-only panel. The IndexError
+    was introduced mid-branch by this vectorized batch path, which derives
+    `n = len(sm[lineage[0]])` and so indexes `lineage[0]` unconditionally; that bug
+    is what this guard (and the explicit `ValueError` below) fixes.
     """
     with pytest.raises(ValueError, match="at least one lineage marker"):
         classify_cells_vectorized({}, FEASIBLE, NEVER, REQUIRES, [])

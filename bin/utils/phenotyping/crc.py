@@ -10,11 +10,11 @@ D8/D14). Three primitives:
   how much the observed co-positivity rate of audited marker pairs exceeds
   each pair's nominal (expected) rate, averaged over pairs and floored at
   zero (a pair being *less* co-positive than nominal is not risk).
-- `crc_select_alpha`: the selection rule. Risk is monotone increasing in
-  alpha (looser thresholds commit more cells, so co-positivity can only
-  grow), so the largest alpha whose UCB risk clears `alpha_target` is the
-  least-abstention choice that still honors the guarantee. If no alpha in
-  the grid qualifies, fall back to the smallest (most conservative) alpha.
+- `crc_select_alpha`: the selection rule — scans the full ascending grid and
+  keeps the largest alpha whose UCB risk clears `alpha_target`. The UCB is
+  NOT monotone in alpha (see the function docstring for why), so this scan
+  is exhaustive by necessity, not a shortcut. If no alpha in the grid
+  qualifies, fall back to the smallest (most conservative) alpha.
 """
 
 from __future__ import annotations
@@ -86,22 +86,30 @@ def crc_select_alpha(
 ) -> float:
     """Select alpha: largest grid value with UCB risk <= alpha_target.
 
-    Risk is monotone increasing in alpha, so the qualifying alphas
-    (UCB risk <= alpha_target) form a prefix of the ascending grid, and a
-    binary search for the rightmost element of that prefix yields the same
-    least-abstention alpha that an ascending linear scan keeping the last
-    qualifying value would — in O(log n) calls to `risk_ucb_fn` instead of
-    O(n). If none qualifies, fall back to the smallest (most conservative)
-    alpha.
+    This MUST be an exhaustive linear scan, not a binary search. The UCB is
+
+        UCB(alpha) = R(alpha) + sqrt(ln(1/delta) / (2 * n(alpha)))
+
+    where `n(alpha)` is the count of committed cells, which grows with
+    alpha (looser sign thresholds commit more cells). The width term
+    therefore *shrinks* as alpha grows, while the risk term `R(alpha)`
+    tends to grow — the two effects compete, so `UCB(alpha)` is not
+    monotone in alpha. Empirically it is U-shaped: small alpha commits few
+    cells, the width term dominates and the bound fails; mid-range alpha
+    commits enough cells to shrink the width term while risk is still low;
+    large alpha's risk term eventually dominates again. The qualifying set
+    (UCB <= alpha_target) is therefore an INTERIOR INTERVAL of the sorted
+    grid, not a prefix, so a binary search over the grid can miss a
+    qualifying alpha entirely (a probe that lands past the interval reads
+    as "everything below fails" when it does not). Scanning in ascending
+    order and keeping the last (largest) qualifying alpha is the only
+    correct way to find the least-abstention alpha that honors the risk
+    guarantee. If none qualifies, fall back to the smallest (most
+    conservative) alpha.
     """
     grid = sorted(alpha_grid)
-    lo, hi = 0, len(grid) - 1
-    best_idx = -1
-    while lo <= hi:
-        mid = (lo + hi) // 2
-        if risk_ucb_fn(grid[mid]) <= alpha_target:
-            best_idx = mid
-            lo = mid + 1
-        else:
-            hi = mid - 1
-    return grid[best_idx] if best_idx != -1 else grid[0]
+    chosen = None
+    for alpha in grid:
+        if risk_ucb_fn(alpha) <= alpha_target:
+            chosen = alpha
+    return chosen if chosen is not None else grid[0]
