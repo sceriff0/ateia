@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from benchmarks.build_run_plan import build_run_plan
+from benchmarks.build_run_plan import _configs, build_run_plan
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -195,6 +195,103 @@ def test_project_sweep_covers_every_shipped_segmentation_backend():
     # nextflow.config's seg_method enum -- all three must be benchmarked somewhere in the plan.
     plan = build_run_plan(sweep, repeats=1)
     assert {r["seg_method"] for r in plan} == {"stardist", "instantseg", "cellsam"}
+
+
+def test_method_grid_accepts_sub_grids_and_keeps_them_independent():
+    """A method may map to a LIST of sub-grids, each crossed on its own and labelled separately.
+
+    The list form is what lets a knob gated behind ANOTHER knob of the same method be swept at all:
+    the sub-grid pins the gate instead of crossing it. Against the pre-change builder (which did
+    `for method, mparams in rmgrid.items(): itertools.product(*mparams.values())`) a list value
+    raises or produces nonsense, because a list has no .values()/keys.
+    """
+    sweep = {
+        "strategy": "ofat",
+        "baseline": {"target_px": 4096, "n_channels": 2, "registration_method": "valis",
+                     "reg_tiled_tile": 2048, "reg_tiled_fanout": True,
+                     "reg_tiled_coarse_max_dim": 4096},
+        "registration_method_grid": {
+            "tiled": [
+                {"_label": "shape", "reg_tiled_tile": [1024, 2048], "reg_tiled_fanout": [False, True]},
+                {"_label": "coarse_res", "reg_tiled_fanout": [True],
+                 "reg_tiled_coarse_max_dim": [2048, 8192]},
+            ]
+        },
+    }
+    plan = _configs(sweep)
+    by_label = {}
+    for cfg, lab in plan:
+        by_label.setdefault(lab, []).append(cfg)
+
+    assert len(by_label["registration_method_grid:tiled:shape"]) == 4      # 2 x 2
+    assert len(by_label["registration_method_grid:tiled:coarse_res"]) == 2  # 2, gate pinned
+
+    # the two sub-grids must not contaminate each other
+    for cfg in by_label["registration_method_grid:tiled:shape"]:
+        assert cfg["reg_tiled_coarse_max_dim"] == 4096, "shape sub-grid must sit at the baseline max_dim"
+    for cfg in by_label["registration_method_grid:tiled:coarse_res"]:
+        assert cfg["reg_tiled_tile"] == 2048, "coarse_res sub-grid must sit at the baseline tile"
+
+    # `_label` is a tag, never a pipeline param
+    assert all("_label" not in cfg for cfg, _ in plan)
+    # a plain dict must still work (backward compatibility)
+    legacy = _configs({"strategy": "ofat",
+                       "baseline": {"target_px": 4096, "registration_method": "valis",
+                                    "reg_tiled_tile": 2048},
+                       "registration_method_grid": {"tiled": {"reg_tiled_tile": [1024, 4096]}}})
+    assert len(legacy) == 3  # baseline + 2
+    assert any(lab == "registration_method_grid:tiled" for _, lab in legacy)
+
+
+def test_project_coarse_res_sub_grid_pins_the_fanout_gate():
+    """reg_tiled_coarse_max_dim is only read when reg_tiled_fanout is true.
+
+    Only modules/local/tiled_coarse.nf passes --max-dim, and TILED_COARSE exists only in the
+    fan-out shape. Any sweep cell that varies the knob with the gate off would burn a full
+    pipeline run changing a value nothing reads -- the same no-op this file's dead-axis rule
+    forbids for flat OFAT axes, applied WITHIN a method grid.
+    """
+    import yaml
+    sweep = yaml.safe_load(
+        (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text())
+    offenders = []
+    for cfg, lab in _configs(sweep):
+        if lab.startswith("registration_method_grid:") and cfg.get("registration_method") == "tiled":
+            if cfg.get("reg_tiled_coarse_max_dim") != sweep["baseline"]["reg_tiled_coarse_max_dim"] \
+                    and not cfg.get("reg_tiled_fanout"):
+                offenders.append(lab)
+    assert not offenders, (
+        "cells vary reg_tiled_coarse_max_dim with reg_tiled_fanout off, so the pipeline never "
+        f"reads the value: {sorted(set(offenders))}"
+    )
+
+
+def test_project_stare_resolution_axis_mirrors_the_valis_one():
+    """Both methods' transform-resolution knob must be swept, or the head-to-head is biased.
+
+    reg_max_image_dim (VALIS) and reg_tiled_coarse_max_dim (STARE) are the same thing for their
+    respective methods: the resolution the global transform is solved at, and the dominant
+    runtime-and-accuracy axis of each. Sweeping one and holding the other at its default compares
+    a TUNED VALIS against an UNTUNED STARE -- a bias that is invisible in the output tables.
+    """
+    import yaml
+    sweep = yaml.safe_load(
+        (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text())
+    valis_swept = "reg_max_image_dim" in sweep.get("axes", {})
+    stare_values = set()
+    for entry in [sweep["registration_method_grid"]["tiled"]]:
+        for sub in (entry if isinstance(entry, list) else [entry]):
+            stare_values |= set(sub.get("reg_tiled_coarse_max_dim", []))
+    assert valis_swept, "reg_max_image_dim is no longer swept — re-check this test's premise"
+    assert len(stare_values) >= 3, (
+        "reg_max_image_dim is swept but reg_tiled_coarse_max_dim is not (or has <3 points): "
+        f"{sorted(stare_values)}"
+    )
+    base = sweep["baseline"]["reg_tiled_coarse_max_dim"]
+    assert min(stare_values) < base < max(stare_values), (
+        f"the STARE resolution axis must bracket its default {base} in both directions, "
+        f"as reg_max_image_dim does: {sorted(stare_values)}"
+    )
 
 
 def test_project_sweep_has_no_dead_axes():
@@ -396,17 +493,6 @@ NOT_SWEPT = {
     "reg_tiled_upsample": "registration_method=tiled only — see reg_tiled_halo",
     "reg_tiled_out_tile": "registration_method=tiled only — write-side I/O, held at default",
     "reg_tiled_dapi_index": "registration_method=tiled only — a channel index, not a cost knob",
-    # DOUBLE-gated: registration_method=tiled AND reg_tiled_fanout=true. Only modules/local/
-    # tiled_coarse.nf reads it, and that process exists only in the fan-out shape, so it cannot
-    # be a flat OFAT axis and would be dead for the fanout=false half of registration_method_
-    # grid.tiled. NOTE the asymmetry this leaves: reg_max_image_dim -- the resolution VALIS
-    # solves its transform at -- IS swept as "the dominant VALIS runtime AND accuracy axis",
-    # and reg_tiled_coarse_max_dim is its exact STARE counterpart (the resolution the STARE
-    # anchor M0 is solved at). Pricing one method's resolution knob and not the other's biases
-    # the head-to-head. To close it, add a fanout=true-pinned sub-grid to registration_method_
-    # grid.tiled crossing [2048, 4096, 8192] -- deliberately deferred: it multiplies the tiled
-    # cell count and that is a compute-budget decision, not a correctness one.
-    "reg_tiled_coarse_max_dim": "registration_method=tiled AND reg_tiled_fanout=true only — the STARE coarse-anchor thumbnail resolution; needs a fanout-pinned sub-grid, not an axis (see note above)",
 
     # --- secondary knobs deliberately held at defaults (add an axis if a curve is ever needed). ---
     "reg_micro_reg_fraction": "secondary micro-registration knob; reg_micro_reg (the DEPTH) is crossed instead",
@@ -429,8 +515,10 @@ def _sweep_covered_params(sweep) -> set:
     for grid in ("scaling_grid", "registration_grid", "registration_param_grid"):
         covered |= set(sweep.get(grid, {}))
     for grid in ("segmentation_grid", "registration_method_grid"):
-        for per_method in sweep.get(grid, {}).values():
-            covered |= set(per_method)
+        for entry in sweep.get(grid, {}).values():
+            # a method maps to one dict of {param: [values]}, or a LIST of such sub-grids
+            for per_method in (entry if isinstance(entry, list) else [entry]):
+                covered |= set(per_method) - {"_label"}   # _label is a tag, not a pipeline param
     return covered
 
 

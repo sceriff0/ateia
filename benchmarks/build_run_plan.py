@@ -94,13 +94,29 @@ def _configs(sweep: dict) -> list[tuple[dict, str]]:
     #     VALIS baseline would be a no-op, so per-method grids are correct. Labelled
     #     registration_method_grid:<method>. Needs a --paired matrix (a moving panel to register). The
     #     baseline run is the VALIS anchor, so this grid typically only carries the 'tiled' method.
+    #     A method may map to EITHER one dict of {param: [values]} (one cross) OR a LIST of such
+    #     dicts -- independent SUB-GRIDS. The list form exists because a knob can be gated behind
+    #     another knob *within* the same method: reg_tiled_coarse_max_dim is only read when
+    #     reg_tiled_fanout is true (only modules/local/tiled_coarse.nf passes it, and that process
+    #     exists only in the fan-out shape). Crossing it against reg_tiled_fanout [false, true] in
+    #     one flat product would spend half its runs varying a value the pipeline never reads --
+    #     the same no-op failure the OFAT loop is guarded against below. A sub-grid instead PINS
+    #     the gate (reg_tiled_fanout: [true]) and crosses only the knobs that are live under it.
+    #     An optional reserved `_label` key suffixes the varied_axis label so the analysis can tell
+    #     sub-grids apart; it is not a pipeline param and never reaches the cross.
     rmgrid = sweep.get("registration_method_grid")
     if rmgrid:
-        for method, mparams in rmgrid.items():
-            keys = list(mparams)
-            for combo in itertools.product(*(mparams[k] for k in keys)):
-                configs.append((dict(baseline, registration_method=method, **dict(zip(keys, combo))),
-                                f"registration_method_grid:{method}"))
+        for method, entry in rmgrid.items():
+            for mparams in (entry if isinstance(entry, list) else [entry]):
+                mparams = dict(mparams)
+                label = mparams.pop("_label", None)
+                keys = list(mparams)
+                tag = f"registration_method_grid:{method}"
+                if label:
+                    tag += f":{label}"
+                for combo in itertools.product(*(mparams[k] for k in keys)):
+                    configs.append((dict(baseline, registration_method=method,
+                                         **dict(zip(keys, combo))), tag))
 
     # NOTE: a param that is DEAD unless another param enables it must never reach the OFAT loop
     #       below — a flat run off the baseline changes a value the pipeline never reads, so it

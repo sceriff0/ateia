@@ -97,7 +97,7 @@ def run(results_root, run_plan_csv, manifest_csv, reg_eval_csv, outdir, formats=
     per_run = runs_df.drop_duplicates("run_id")[
         [c for c in ("run_id", "varied_axis", "target_px", "n_channels", "n_register_images",
                      "registration_method", "memory_mode", "reg_micro_reg",
-                     "reg_tiled_tile", "reg_tiled_gate_tre", "seg_method")
+                     "reg_tiled_tile", "reg_tiled_gate_tre", "reg_tiled_coarse_max_dim", "seg_method")
          if c in runs_df.columns]] if not runs_df.empty else pd.DataFrame(columns=["run_id"])
     try:
         seg_cnt = quality.harvest_segmentation_counts(results_root, run_plan_csv)  # reads masks (I/O)
