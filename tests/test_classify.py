@@ -1,4 +1,12 @@
-from utils.phenotyping.classify import classify_cell, minimal_violated_constraint
+import json
+import os
+
+import numpy as np
+from utils.phenotyping.classify import (
+    classify_cell,
+    classify_cells_vectorized,
+    minimal_violated_constraint,
+)
 
 LINEAGE = ["CD3", "CD4", "CD45", "CD8", "PanCK"]
 # Minimal feasible set fragment (patterns already screened for never/requires).
@@ -46,3 +54,59 @@ def test_artefact_on_contradiction():
 def test_minimal_violated_requires():
     vid = minimal_violated_constraint(_signs(CD8="pos", CD3="neg"), NEVER, REQUIRES)
     assert vid == 5
+
+
+_MODEL_CONFIG_PATH = os.path.join(
+    os.path.dirname(__file__), "..", ".superpowers", "sdd", "2026-08-09-phenotype-perf",
+    "model_config.json",
+)
+
+
+def test_classify_cells_vectorized_matches_classify_cell_reference():
+    """Guard for the whole vectorization: classify_cells_vectorized must agree with
+    classify_cell, field-for-field, on every cell — over randomized sign matrices
+    (including contra and free signs) against the real compiled panel fixture.
+
+    This is deliberately hardened beyond vec.py's prototype comparison (which only
+    checked the raw match matrix): it drives the full classify_cell/classify_cells_
+    vectorized public surface, including the Conflict/Artefact minimal_violated_
+    constraint path and candidate_patterns identity/order, not just boolean matches.
+    """
+    with open(_MODEL_CONFIG_PATH) as fh:
+        cfg = json.load(fh)
+    lineage = cfg["lineage_markers"]
+    feasible = cfg["feasible_set"]
+    never = cfg["constraints"]["never"]
+    requires = cfg["constraints"]["requires"]
+
+    n = 5000
+    rng = np.random.default_rng(1234)
+    sign_values = np.array(["pos", "neg", "free", "contra"], dtype=object)
+    # Skew away from contra/free so plenty of cells land in every outcome bucket
+    # (committed, Ambiguous, Unclassified, Conflict, Artefact).
+    probs = [0.35, 0.45, 0.15, 0.05]
+    sm = {
+        m: rng.choice(sign_values, size=n, p=probs)
+        for m in lineage
+    }
+
+    got = classify_cells_vectorized(sm, feasible, never, requires, lineage)
+    assert len(got) == n
+
+    seen_outcomes = set()
+    for i in range(n):
+        signs_i = {m: sm[m][i] for m in lineage}
+        want = classify_cell(signs_i, feasible, never, requires, lineage)
+        g = got[i]
+        seen_outcomes.add(g.outcome)
+        assert g.outcome == want.outcome, f"cell {i}: outcome"
+        assert g.empty_type == want.empty_type, f"cell {i}: empty_type"
+        assert g.violated_constraint_id == want.violated_constraint_id, (
+            f"cell {i}: violated_constraint_id"
+        )
+        assert g.candidate_names == want.candidate_names, f"cell {i}: candidate_names"
+        assert g.candidate_patterns == want.candidate_patterns, f"cell {i}: candidate_patterns"
+
+    # Sanity: the randomized sweep actually exercised more than one outcome bucket,
+    # otherwise this test would be a tautology over a degenerate case.
+    assert len(seen_outcomes) > 1

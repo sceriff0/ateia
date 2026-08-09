@@ -26,6 +26,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
+import numpy as np
+
+# uint64 bitmask packing (see classify_cells_vectorized) can address at most 64
+# lineage markers. enumerate_feasible already refuses to enumerate more than 16
+# (2 ** len(lin) > max_enumerate), so this is a generous, defensive ceiling.
+_MAX_VECTORIZED_LINEAGE = 64
+
 
 @dataclass
 class CellOutcome:
@@ -106,3 +113,95 @@ def classify_cell(
     if vid is not None:
         return CellOutcome("Conflict", 1, vid, [], [])
     return CellOutcome("Artefact", 2, -1, [], [])
+
+
+def classify_cells_vectorized(
+    sm: Dict[str, np.ndarray],
+    feasible: List[Dict],
+    never: List[dict],
+    requires: List[dict],
+    lineage: List[str],
+) -> List[CellOutcome]:
+    """Batch equivalent of calling `classify_cell` once per cell, in order.
+
+    `sm` maps each lineage marker to a length-n array of resolved signs
+    (`"pos"|"neg"|"free"|"contra"`), e.g. `{m: resolve_signs(...) for m in lineage}`.
+    Returns the same list of `CellOutcome` that `[classify_cell({m: sm[m][i] for m in
+    lineage}, feasible, never, requires, lineage) for i in range(n)]` would produce —
+    `classify_cell` and `matching_patterns` remain the reference implementation and
+    are unchanged; this is purely a faster way to compute the same result over many
+    cells at once.
+
+    The feasible-pattern match (`matching_patterns`'s per-cell/per-pattern/per-marker
+    triple loop) is replaced by encoding each pattern's positive markers as a
+    `uint64` bitmask and each cell's `pos`/`neg` sign requirements as two more
+    `uint64` values: a pattern matches a cell iff
+    `(pos_req & ~pattern_mask) == 0 and (neg_req & pattern_mask) == 0`. `free`
+    markers need no handling — they are absent from both masks. This bounds lineage
+    to `_MAX_VECTORIZED_LINEAGE` (64) markers; above that, uint64 packing would
+    silently truncate high-order markers, so this falls back to the per-cell
+    reference path instead.
+    """
+    n = len(sm[lineage[0]]) if lineage else 0
+    lin_count = len(lineage)
+
+    if lin_count > _MAX_VECTORIZED_LINEAGE:
+        return [
+            classify_cell({m: sm[m][i] for m in lineage}, feasible, never, requires, lineage)
+            for i in range(n)
+        ]
+    assert lin_count <= _MAX_VECTORIZED_LINEAGE
+
+    bit = {m: np.uint64(1) << np.uint64(i) for i, m in enumerate(lineage)}
+    pat_mask = np.array(
+        [sum(int(bit[m]) for m in lineage if entry["pattern"][m] == 1) for entry in feasible],
+        dtype=np.uint64,
+    )
+    pattern_names = np.array([entry["phenotype"] for entry in feasible])
+
+    pos_req = np.zeros(n, dtype=np.uint64)
+    neg_req = np.zeros(n, dtype=np.uint64)
+    contra = np.zeros(n, dtype=bool)
+    for m in lineage:
+        col = sm[m]
+        pos_req |= np.where(col == "pos", bit[m], np.uint64(0)).astype(np.uint64)
+        neg_req |= np.where(col == "neg", bit[m], np.uint64(0)).astype(np.uint64)
+        contra |= col == "contra"
+
+    f_count = len(feasible)
+    match = np.empty((n, f_count), dtype=bool)
+    for j in range(f_count):
+        p = pat_mask[j]
+        match[:, j] = ((pos_req & ~p) == 0) & ((neg_req & p) == 0)
+    match[contra] = False
+
+    # Group matching feasible-entry indices by cell. np.nonzero on a C-order 2D
+    # array yields (row, col) pairs sorted by row then col, so `cols` already
+    # lists each cell's matches in the same order matching_patterns would.
+    rows, cols = np.nonzero(match)
+    counts = np.bincount(rows, minlength=n)
+    offsets = np.concatenate(([0], np.cumsum(counts)))
+
+    outs: List[CellOutcome] = []
+    for i in range(n):
+        if contra[i]:
+            outs.append(CellOutcome("Artefact", 2, -1, [], []))
+            continue
+
+        idx = cols[offsets[i]:offsets[i + 1]]
+        if idx.size == 0:
+            signs_i = {m: sm[m][i] for m in lineage}
+            vid = minimal_violated_constraint(signs_i, never, requires)
+            if vid is not None:
+                outs.append(CellOutcome("Conflict", 1, vid, [], []))
+            else:
+                outs.append(CellOutcome("Artefact", 2, -1, [], []))
+            continue
+
+        patterns_i = [feasible[j] for j in idx]
+        names_i = sorted(set(pattern_names[idx].tolist()))
+        if len(names_i) == 1:
+            outs.append(CellOutcome(names_i[0], 0, -1, names_i, patterns_i))
+        else:
+            outs.append(CellOutcome("Ambiguous", 0, -1, names_i, patterns_i))
+    return outs

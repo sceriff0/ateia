@@ -19,7 +19,7 @@ from phenotyping.calibration import (  # noqa: E402
     finalize_calibration,
     marker_calibration_weights,
 )
-from phenotyping.classify import classify_cell  # noqa: E402
+from phenotyping.classify import classify_cells_vectorized  # noqa: E402
 from phenotyping.conformal import (  # noqa: E402
     conformal_scores,
     ks_uniform,
@@ -135,10 +135,7 @@ def run_phenotyping(
 
     def classify_all(alpha):
         sm = {m: resolve_signs(p_neg[m], p_pos[m], alpha) for m in lineage}
-        outs = []
-        for i in range(n):
-            signs = {m: sm[m][i] for m in lineage}
-            outs.append(classify_cell(signs, feasible, never, requires, lineage))
+        outs = classify_cells_vectorized(sm, feasible, never, requires, lineage)
         return sm, outs
 
     crc_ran = bool(audit)
