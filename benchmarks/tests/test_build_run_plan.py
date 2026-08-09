@@ -396,6 +396,17 @@ NOT_SWEPT = {
     "reg_tiled_upsample": "registration_method=tiled only — see reg_tiled_halo",
     "reg_tiled_out_tile": "registration_method=tiled only — write-side I/O, held at default",
     "reg_tiled_dapi_index": "registration_method=tiled only — a channel index, not a cost knob",
+    # DOUBLE-gated: registration_method=tiled AND reg_tiled_fanout=true. Only modules/local/
+    # tiled_coarse.nf reads it, and that process exists only in the fan-out shape, so it cannot
+    # be a flat OFAT axis and would be dead for the fanout=false half of registration_method_
+    # grid.tiled. NOTE the asymmetry this leaves: reg_max_image_dim -- the resolution VALIS
+    # solves its transform at -- IS swept as "the dominant VALIS runtime AND accuracy axis",
+    # and reg_tiled_coarse_max_dim is its exact STARE counterpart (the resolution the STARE
+    # anchor M0 is solved at). Pricing one method's resolution knob and not the other's biases
+    # the head-to-head. To close it, add a fanout=true-pinned sub-grid to registration_method_
+    # grid.tiled crossing [2048, 4096, 8192] -- deliberately deferred: it multiplies the tiled
+    # cell count and that is a compute-budget decision, not a correctness one.
+    "reg_tiled_coarse_max_dim": "registration_method=tiled AND reg_tiled_fanout=true only — the STARE coarse-anchor thumbnail resolution; needs a fanout-pinned sub-grid, not an axis (see note above)",
 
     # --- secondary knobs deliberately held at defaults (add an axis if a curve is ever needed). ---
     "reg_micro_reg_fraction": "secondary micro-registration knob; reg_micro_reg (the DEPTH) is crossed instead",

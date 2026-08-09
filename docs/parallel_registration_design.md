@@ -22,7 +22,10 @@ A second `registration_method` alongside `valis` that is:
 1. **Fully parallel at the Nextflow level** — every expensive unit is an independent process
    (per slide *and per tile*), so a cluster runs them all at once and a laptop runs a few at a
    time. No monolithic per-patient task.
-2. **The default choice for laptops / low-end machines** — **every process fits in ≤8 GB**, no
+2. **The default choice for laptops / low-end machines** — **every process in the fan-out path
+   (`--reg_tiled_fanout true`) fits in ≤8 GB** (the single-task `TILED_REGISTER` path does *not*:
+   it holds both whole slides plus an all-channel float32 copy and the full warped output, and its
+   budget is derived from input size instead), no
    JVM, no BioFormats, no whole-slide-in-RAM step. The tiling and stitching processes are
    themselves low-memory and stream.
 3. **Native TRE** — emits a VALIS-style Target Registration Error per slide *and* a spatial TRE
@@ -135,11 +138,28 @@ because inter-cycle repositioning can carry rotation and small scale; after M₀
 residual is near-pure-translation, so REG_TILE uses **phase-correlation** (ASHLAR's whitened,
 Hann-windowed `phase_cross_correlation`) — cheapest possible, no keypoints needed.
 
-**Memory sanity-check (8 GB is generous):** REG_TILE loads only **DAPI** for a 4096² moving tile
-(~32 MB) + reference region + halo (~64 MB). WARP_TILE loads that tile's *all* channels
-(4096² × ~10 ch × 2 B ≈ 320 MB). STITCH holds a few tiles for blending. Nothing approaches 8 GB;
-8192² tiles are safe if you want fewer tasks. Tile size *is* the mesh-grid resolution knob:
-smaller tiles → finer non-rigid but more tasks.
+**Memory sanity-check (8 GB is generous) — and the knob that controls each step.** This table
+covers *every* step, which the original version of this paragraph did not: it analysed REG_TILE,
+WARP_TILE and STITCH and took COARSE on trust from the word "thumbnail" above. COARSE was in fact
+implemented with a full-resolution ORB over an eagerly decoded slide, and OOM-killed at 32 GB on a
+26k² input before it was made to match this design (see CHANGELOG, Unreleased → Fixed).
+
+| step | peak driver | ~peak | knob | what you pay for cheapening it |
+|---|---|---|---|---|
+| COARSE | ORB over the anchor thumbnail | ~2 GB | `--reg_tiled_coarse_max_dim` (4096) | M0 residual scales with the decimation factor; it must stay well inside `--reg_tiled_halo` |
+| REG_TILE | one DAPI tile + halo, both slides | ~50 MB | `--reg_tiled_tile` (2048), `--reg_tiled_halo` (256) | smaller tiles → finer mesh but more tasks; smaller halo → less tolerance for M0 error |
+| SOLVE | control points only (kB) | ~10 MB | — | — |
+| STITCH | one output write-tile, all channels | ~100 MB | `--reg_tiled_out_tile` (1024) | smaller tiles → more write calls, no accuracy cost |
+
+ORB is the term worth internalising: scikit-image promotes its input to float64 and stacks a
+Gaussian pyramid plus FAST/Harris response arrays on it, which measures at **~40 bytes per source
+pixel**. Handed a native-resolution gigapixel plane that is tens of GB, which is why the anchor is
+estimated on a thumbnail and `reg_tiled_coarse_max_dim` — not tile size — is the knob that bounds
+COARSE. Everything else is genuinely region-streamed: `tiled_io.open_lazy` region reads for
+REG_TILE and STITCH, byte-budgeted row bands for COARSE's decimated read.
+
+Tile size *is* the mesh-grid resolution knob: smaller tiles → finer non-rigid but more tasks;
+8192² tiles are safe if you want fewer tasks.
 
 ---
 
