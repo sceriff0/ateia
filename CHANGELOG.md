@@ -62,6 +62,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   checkpoints to be present.
 
 ### Changed
+- **`reg_tiled_fanout` now defaults to `true`.** The per-tile fan-out
+  (`TILED_COARSE` → `TILED_REG_TILE` ×tiles → `TILED_SOLVE` → `TILED_STITCH`) is the only
+  STARE execution shape whose memory is actually bounded: every process' peak is a
+  function of a parameter — `reg_tiled_coarse_max_dim`, `reg_tiled_tile` +
+  `reg_tiled_halo`, `reg_tiled_out_tile` — rather than of the slide's dimensions.
+  Measured peak RSS across the whole chain on a 16384² 2-channel tiled OME-TIFF:
+  **0.91 / 1.31 / <1.31 / 1.35 GB**, against an 8 GB budget.
+
+  The old default, `false`, runs a single `TILED_REGISTER` task per slide. That path is
+  *not* region-streamed despite its name: `bin/tiled_register.py` holds the whole
+  reference stack, the whole moving stack, a float32 all-channel copy (`mov_hwc`) and
+  the full-size warped output simultaneously, and `tiled_pipeline.register_slide`
+  additionally materialises a whole-slide float64 `mov_rigid`. It remains available for
+  users who would rather have a handful of large tasks than hundreds of small ones, and
+  its budget is now derived from input size, but it is no longer what you get by
+  default.
+
+  **Two consequences worth knowing.** Scheduler load rises sharply: at the default
+  `reg_tiled_tile = 2048` a 26k² slide plans ~169 `TILED_REG_TILE` tasks *per moving
+  slide* (capped at `maxForks = 20`), where before it was one task. And nf-test cases
+  that select `registration_method = 'tiled'` without pinning `reg_tiled_fanout` now
+  exercise the fan-out chain rather than `TILED_REGISTER`; the two produce an identical
+  manifest and identical pixels, but `TILED_REGISTER` consequently loses its incidental
+  default coverage — `tests/checkpoint_manifest.nf.test` pins the fan-out path
+  explicitly, and the single-task path now needs a test that pins
+  `reg_tiled_fanout = false` if it is to stay covered.
+
 - **The registration method's intrinsic TRE is no longer named after VALIS.** Both backends
   estimate a target registration error from their own registration — VALIS a feature-distance
   `*_summary.csv`, STARE a `*_tre.json` — but the QC pipeline called the slot `valis_summary`

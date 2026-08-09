@@ -255,8 +255,8 @@
                 },
                 "reg_tiled_fanout": {
                     "type": "boolean",
-                    "description": "STARE only: false = one Nextflow task per slide, tiled internally (<=8 GB); true = per-tile Nextflow fan-out (COARSE->REG_TILE->SOLVE->STITCH).",
-                    "default": false
+                    "description": "STARE only: true (default) = per-tile Nextflow fan-out (COARSE->REG_TILE->SOLVE->STITCH), the memory-bounded shape where every process peak is set by a parameter rather than by slide size; false = one TILED_REGISTER task per slide, whose memory scales with the input.",
+                    "default": true
                 }
             }
         },

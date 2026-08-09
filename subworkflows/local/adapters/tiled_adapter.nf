@@ -8,9 +8,14 @@
     no per-slide OME-channel re-matching — each task already carries its slide's meta.
 
     Two execution modes (params.reg_tiled_fanout), same channel contract as VALIS_ADAPTER:
-      * false (default): one TILED_REGISTER task per moving slide, tiled internally (≤8 GB).
-      * true:            per-TILE Nextflow fan-out — TILED_COARSE -> TILED_REG_TILE (one task
-                         per tile) -> TILED_SOLVE -> TILED_STITCH. Maximises parallelism.
+      * true (default): per-TILE Nextflow fan-out — TILED_COARSE -> TILED_REG_TILE (one task
+                        per tile) -> TILED_SOLVE -> TILED_STITCH. Maximises parallelism, and is
+                        the only shape whose memory is genuinely bounded: each process' peak is
+                        a function of a parameter (reg_tiled_coarse_max_dim, tile+halo,
+                        out_tile), not of the slide's dimensions.
+      * false:          one TILED_REGISTER task per moving slide. Fewer scheduler tasks, but it
+                        holds both whole slides, an all-channel float32 copy and the full warped
+                        output simultaneously, so its memory scales with the input.
 
     Input:  ch_grouped_meta - Channel of [patient_id, reference_item, all_items]
 
