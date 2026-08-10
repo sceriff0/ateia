@@ -24,10 +24,16 @@ __all__ = ["feature_residual", "benchmark"]
 
 
 def _orb_xy(img, n_keypoints, fast_threshold):
+    # normalize_for_orb is imported rather than duplicated so the unit-scale contract has ONE
+    # owner: `fast_threshold` is an absolute intensity difference, so raw uint16 counts make
+    # FAST fire on ~38% of pixels and corner_peaks (quadratic in that count) turns minutes into
+    # hours. This path is the more exposed of the two -- feature_residual scores FULL-RESOLUTION
+    # registered slides, not the bounded thumbnail COARSE works on.
+    from coarse_align import normalize_for_orb
     from skimage.feature import ORB
 
     orb = ORB(n_keypoints=n_keypoints, fast_threshold=fast_threshold)
-    orb.detect_and_extract(np.asarray(img, dtype=float))
+    orb.detect_and_extract(normalize_for_orb(img))
     return orb.keypoints[:, ::-1], orb.descriptors  # (x, y), descriptors
 
 

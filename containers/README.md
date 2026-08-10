@@ -41,7 +41,7 @@ the HPC/cluster side (unlike GHCR, whose default-private packages caused
 | `merge` | `bolt3x/attend_image_analysis:merge` | `MERGE_AND_PYRAMID` | `pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime` + tifffile/imagecodecs pyramid stack |
 | `debug_diffeo` | `bolt3x/attend_image_analysis:debug_diffeo` | `GENERATE_REGISTRATION_QC` | `nvidia/cuda:12.2.2-cudnn8-devel-ubuntu22.04` + Miniconda/bftools + StarDist/cudipy diffeo QC stack |
 | `tiled` | `bolt3x/attend_image_analysis:tiled` | `TILED_REGISTER`, `WARP_SEG_QC` (tiled backend, STARE `registration_method='tiled'`) | `python:3.11-slim` + numpy/scipy/scikit-image/tifffile — **no JVM/BioFormats/libvips/GPU** (~438 MB, vs the multi-GB VALIS image) |
-| `spatialdata` | `bolt3x/attend_image_analysis:spatialdata` | `EXPORT_SPATIALDATA` (+ the out-of-band `bin/join_flowpath.py` cohort join) | `python:3.11-slim` + spatialdata/anndata/geopandas/zarr 3 — CPU only, no JVM/GPU |
+| `spatialdata` | `bolt3x/attend_image_analysis:spatialdata` | `EXPORT_SPATIALDATA` (+ the out-of-band `bin/join_flowpath.py` cohort join) | `python:3.12-slim` + spatialdata/anndata/geopandas/zarr 3 — CPU only, no JVM/GPU |
 | VALIS (not vendored) | `cdgatenbee/valis-wsi:1.0.0` (upstream) | `REGISTER` | upstream maintained image — **not rebuilt or published by us** (see note below) |
 
 > **zarr major versions differ on purpose.** `spatialdata` pins `zarr>=3.0.0`
@@ -67,6 +67,32 @@ Dockerfile that installs `meson`/`ninja` before the libvips build and re-add
 `valis` to the build matrix.
 
 All published images are built for **`linux/amd64`** (the pipeline's HPC target).
+
+## Runtime requirements every image must satisfy
+
+**`procps` (i.e. `ps`) is mandatory in every image**, regardless of what the process
+actually runs. `params.enable_trace` defaults to `true` (`nextflow.config`), so Nextflow
+injects its task-metrics wrapper into *every* task, and that wrapper begins with a hard
+guard (`nextflow/executor/command-trace.txt`):
+
+```bash
+command -v ps &>/dev/null || { >&2 echo "Command 'ps' required by nextflow to collect task metrics cannot be found"; exit 1; }
+```
+
+It runs **before** the process's `script:` block, so a missing `ps` fails the task with
+**exit status 1, empty stdout and no traceback** — the failure looks like the tool
+crashed silently, not like a missing system package. Debian/Ubuntu bases do **not** ship
+`procps`: `python:*-slim` and `ubuntu:22.04` both lack it, which is why `preprocess`,
+`spatialdata` and `tiled` install it explicitly. Bases derived from the CUDA/PyTorch/
+TensorFlow images happen to carry it already.
+
+When adding a new build context, either install `procps` or verify the base has it, and
+add a build-time assertion so a regression fails the **build** rather than a cluster run:
+
+```dockerfile
+RUN ps -e -o pid= -o ppid= > /dev/null && echo "procps OK"
+```
+
 
 ## Orphaned / legacy contexts NOT vendored
 

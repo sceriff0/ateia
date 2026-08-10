@@ -62,6 +62,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   checkpoints to be present.
 
 ### Changed
+- **The tiled (STARE) steps now reserve memory derived from the parameter that sets it,
+  instead of a flat constant.** Every tiled process was designed so its peak is a function of
+  a *parameter* rather than of the slide (`tiled_adapter.nf`'s header). Measured peak RSS on
+  this codebase confirms the design holds — `TILED_COARSE` 1.97 GB, `TILED_REG_TILE` 1.33 GB,
+  `TILED_SOLVE` 0.03 GB, `TILED_STITCH` 1.42 GB, all on an 8192² pair, and flat in slide size
+  because each task reads a bounded window through lazy zarr regions. But the *reservations*
+  were constants, so the guarantee was only a comment: raising `reg_tiled_tile` or
+  `reg_tiled_out_tile` grew the need while the request stayed at 8 GB, and the overrun
+  surfaced as a SIGKILL rather than a validation error. `conf/modules.config` now derives both
+  from the measured cost line (`REG_TILE ≈ 0.4 GB + 0.10 GB/Mpx` of `(tile + 2·halo)²`;
+  `STITCH ≈ 0.6 GB + 0.17 GB/Mpx` of `out_tile²`), doubled, with a 4 GB floor. Shipped defaults
+  now ask **4 GB instead of 8 GB** for both, while `--reg_tiled_tile 4096` reserves 6 GB and
+  `--reg_tiled_out_tile 4096` reserves 7 GB (verified against `-with-trace`). `TILED_SOLVE`
+  drops **4 GB → 1 GB**: it was reserving ~120× its measured 33 MB peak for a 0.11 s reduction
+  over a few hundred bytes of JSON per tile. `TILED_COARSE` is deliberately left on its
+  doubling ramp — unlike the other three, part of its peak is the source plane's zarr chunk,
+  which is slide-dependent and cannot be bounded from a parameter.
+  - Both helpers are **self-contained by necessity**, not by preference. A top-level `def` in
+    `conf/modules.config` can be called *from* a resource closure (as `starDistCommonFlags()`
+    is from `ext.args`), but inside that invocation it cannot call *another* top-level `def` —
+    the body resolves against the closure's delegate, not the config script. Factoring the
+    shared arithmetic into one `tiledWindowGb(px, base, slope)` helper parsed fine and then
+    aborted every task with `Unknown method invocation 'tiledWindowGb' on _parse_closure5
+    type`. This is the same class of trap as "conf/*.config cannot see lib/*.groovy", and it
+    is equally invisible until a real submission: **`-stub` does not exercise these closures.**
+- **The tiled size parameters are validated up front.** `reg_tiled_tile`, `reg_tiled_halo`,
+  `reg_tiled_out_tile`, `reg_tiled_upsample`, `reg_tiled_dapi_index` and `reg_tiled_gate_tre`
+  had no `minimum` and no `ParamUtils` check, so nonsense values failed deep inside a container
+  or not at all. `reg_tiled_out_tile` additionally now carries `multipleOf: 16`: tifffile
+  rejects any other tile shape, so `--reg_tiled_out_tile 1000` used to run `TILED_COARSE`,
+  every `TILED_REG_TILE` and `TILED_SOLVE` before dying in the final `TILED_STITCH` with
+  `ValueError: invalid tile shape`. It is now caught by `validateParameters()` before any
+  process is instantiated.
 - **The registration method's intrinsic TRE is no longer named after VALIS.** Both backends
   estimate a target registration error from their own registration — VALIS a feature-distance
   `*_summary.csv`, STARE a `*_tre.json` — but the QC pipeline called the slot `valis_summary`
@@ -211,6 +244,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `lib/WarpBackends.groovy`, not from the param, so the two can never disagree.
 
 ### Fixed
+- **`TILED_COARSE` never finished inside its 2 h walltime — ORB was being thresholded
+  against raw uint16 counts.** scikit-image's `ORB(fast_threshold=...)` is an *absolute*
+  intensity difference, and `img_as_float` rescales only **integer** inputs — so the
+  `np.asarray(img, dtype=float)` cast in `coarse_align._orb_features` was precisely what
+  stopped the data being rescaled. The planes reaching it come from
+  `tiled_io.read_decimated` as raw microscopy counts widened to float32 (0..65535), where
+  the `0.05` default sits ~6 orders of magnitude below the data range: FAST fired on ~38%
+  of all pixels instead of ~3%, and `corner_peaks`' spacing pass — quadratic in the
+  candidate count — turned the anchor into a multi-hour step. Measured on a 2048² thumbnail,
+  same image: **8.0 s normalised vs 522.1 s raw (65×)**; the gap widens with area (~×15.7 per
+  ×4 px), so at the `reg_tiled_coarse_max_dim=4096` default it is ~2.8 h *per slide* — two
+  slides per task, against `process_low`'s `2.h * task.attempt`. Nothing failed loudly: the
+  step has no intermediate output, so it presented as a hang and then a walltime kill.
+  `coarse_align.normalize_for_orb` now rescales each plane into [0, 1] over a robust
+  percentile window (p1–p99.9, not `img/img.max()`, which one hot pixel would wreck) before
+  ORB sees it. This is a **correctness** fix as much as a speed one: reference and moving
+  come from different cycles with different exposures, so a single absolute threshold applied
+  to two different dynamic ranges could starve one slide of keypoints and silently produce a
+  bogus `M0`. `reg_benchmark._orb_xy` carried the identical bug and now imports the same
+  helper — that path is the more exposed of the two, since `feature_residual` scores
+  full-resolution registered slides rather than a bounded thumbnail. The existing ORB smoke
+  test could never have caught this: it normalises its own input, so it only ever exercised
+  the healthy regime. `tests/test_coarse_align.py` now pins scale-invariance directly
+  (same field at 1× and 65535× must yield identical keypoints) rather than asserting a
+  wall-clock time, which would be flaky on shared CI and would test the symptom.
+- **`TILED_COARSE` was silent for its entire runtime.** It emitted exactly one log line, at
+  the very end, so a stuck or merely slow anchor was indistinguishable from a hang and left
+  nothing in `.command.out` to diagnose. It now logs each stage as it completes — inputs and
+  sizes, both slides' dimensions/dtype/channel counts, the decimation factor and band size,
+  per-slide read time with the observed **intensity percentiles** (the summary that makes the
+  scale bug above visible rather than fatal), per-slide ORB keypoint counts and timings, the
+  match count, the resulting `M0` translation/rotation, and the tile count as the downstream
+  fan-out width. It also now warns on conditions that previously exited 0 in silence: a
+  residual at or beyond `--halo` (the per-tile step reads a window that will not contain the
+  true match — a mis-registered slide that still succeeds), fewer than 10 inliers, too few
+  matches for the requested model, a non-finite residual, and a `--dapi-index` out of range
+  for either slide.
 - **`TILED_COARSE` OOM-killed (exit 137) on real slides — the STARE anchor was never
   the thumbnail step the design specified.** `docs/parallel_registration_design.md`
   has always listed `COARSE  thumbnail feature-align (ORB + RANSAC) -> M0  ~1-2 GB`,
@@ -246,6 +316,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   8 GB. The budget is now derived from input size (`~10 GB per GB on disk`, the
   `PREPROCESS` pattern). This is a *derived* figure, not a measured one: the genuinely
   memory-bounded path is `--reg_tiled_fanout true`, which is now correct end to end.
+- **The `tiled` image now installs `procps`, which every task in it needed to start at
+  all.** `containers/tiled/Dockerfile` is `FROM python:3.11-slim` and had no `apt-get`
+  layer, so it shipped without `ps`. Because `params.enable_trace` defaults to `true`,
+  Nextflow injects its task-metrics wrapper into every task, and that wrapper's first
+  line is `command -v ps &>/dev/null || { >&2 echo "Command 'ps' required by nextflow to
+  collect task metrics cannot be found"; exit 1; }` — it runs *before* the `script:`
+  block. Every `registration_method='tiled'` run therefore died at the first
+  `TILED_COARSE` task with **exit status 1, empty stdout and no traceback**, which reads
+  like a silent crash in `tiled_coarse.py` rather than a missing system package. The
+  Dockerfile now installs `procps` and asserts `ps -e -o pid= -o ppid=` at build time, so
+  a regression fails the image build instead of an HPC run. `containers/README.md` gains
+  a "Runtime requirements every image must satisfy" section stating the invariant. No
+  other image is affected: `preprocess` and `spatialdata` already installed `procps`, and
+  the remaining CUDA/PyTorch/TensorFlow-derived bases carry it — all of them are proven
+  by prior end-to-end runs, which ran under the same always-on trace wrapper.
+  **Operational note:** the descriptive tag `bolt3x/attend_image_analysis:tiled` is
+  mutable and was re-pushed in place, so cluster-side Singularity caches must be
+  refreshed (delete the local `.img`/`.sif` and re-pull) before the fix takes effect.
 - **`EXTRACT_NUCLEI_PROPERTIES` now writes its outputs into a `nuclei/` subdirectory of
   its own task directory** (`modules/local/extract_nuclei_properties.nf`), instead of
   the task directory root. The published location is unchanged
