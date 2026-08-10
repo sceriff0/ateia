@@ -24,7 +24,8 @@ nextflow run . -profile <profile> \
   --outdir results_cycle2
 ```
 - `--input`: same schema as a preprocessing start (`patient_id,path_to_file,is_reference,channels`),
-  one row per new-cycle slide, `is_reference=false`, `DAPI` present.
+  one row per new-cycle slide, `is_reference=false`, a `params.nuclear_markers`
+  channel present (default `DAPI`/`CELLTOX`, matched case-insensitively).
 - `--prior_outdir`: the previous run's `--outdir`.
 - `--outdir`: a FRESH directory; the complete combined outputs (all markers,
   all cycles) are written here. The prior outdir is left intact.
@@ -51,7 +52,8 @@ nextflow run . -profile <profile> \
 
 ## Marker collisions
 A new-cycle marker that shares a name with a prior column overwrites it
-(new cycle wins). `DAPI` is protected and never overwritten.
+(new cycle wins). The nuclear/fiducial marker (`params.nuclear_markers`,
+default `DAPI`/`CELLTOX`) is protected and never overwritten.
 
 ## Caveat
 New-marker intensities are read through the cycle-1 mask, valid only if the new

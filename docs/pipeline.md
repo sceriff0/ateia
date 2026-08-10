@@ -210,10 +210,13 @@ Chips give real defaults. Every process runs in a pinned container and emits
     `VALIS_ADAPTER` and `TILED_ADAPTER` present the *same* interface — same input
     tuple, same emit names (`transform`, `transform_by_slide`, `intrinsic_tre`,
     `stage_checkpoint`, `registered`, `size_logs`, `versions`).
-    `params.registration_method` is read **once**, in
-    `subworkflows/local/registration.nf`, and passed down as an argument.
-    Optional emits use a null object: an adapter for a method that produces no
-    TRE emits `Channel.empty()`, and consumers tolerate zero artifacts.
+    `params.registration_method` is read **once on the linear registration path**, in
+    `subworkflows/local/registration.nf`, and passed down as an argument
+    (`workflows/mirage.nf` also reads it once, separately, to reject
+    `--registration_method tiled` under `mode=add_cycle`, which the incremental
+    path doesn't support). Optional emits use a null object: an adapter for a
+    method that produces no TRE emits `Channel.empty()`, and consumers tolerate
+    zero artifacts.
 
 ---
 

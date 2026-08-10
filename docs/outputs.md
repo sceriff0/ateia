@@ -111,9 +111,12 @@ aggregates at the `<outdir>` root.
 
 The per-patient leaf directories are the closed vocabulary declared by
 `Layout.PUBLISHED_KINDS` — a process publishing anywhere else under
-`<outdir>/<patient_id>/` fails `tests/test_layout.py`. `spatialdata/` is the one
-per-patient exception: `EXPORT_SPATIALDATA` publishes at the patient root and its
-own `pattern:` supplies the directory name, so there is no `Layout` kind for it.
+`<outdir>/<patient_id>/` fails `tests/test_layout.py`. There are two per-patient
+exceptions: `spatialdata/`, where `EXPORT_SPATIALDATA` publishes at the patient
+root with its own `pattern:` supplying the directory name (no `Layout` kind for
+it), and `qc/`, which `tests/test_layout.py` explicitly excludes from the check
+because no checkpoint CSV names it — it is likewise absent from
+`Layout.PUBLISHED_KINDS`.
 
 ```text
 results/                              # = --outdir

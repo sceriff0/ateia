@@ -326,7 +326,9 @@ memory-heavy registration tasks can be in flight at once.
 
 ## Containers
 
-Every process pins an immutable image tag — never `:latest`.
+Every process pins a fixed image tag — never `:latest`. The `bolt3x/attend_image_analysis`
+tags are content-descriptive (e.g. `preprocess`, `tiled`), not immutable version
+tags — see [Installation → Pre-pulling container images](installation.md#pre-pulling-container-images-optional).
 
 | Image | Processes |
 |---|---|

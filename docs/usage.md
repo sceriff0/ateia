@@ -16,7 +16,7 @@ for exactly one stage.
 ```mermaid
 flowchart LR
     A[Raw multi-channel<br/>images + CSV] --> B[Preprocessing<br/>convert + illumination correct]
-    B --> C[Registration<br/>VALIS align panels]
+    B --> C[Registration<br/>align panels: VALIS or tiled/STARE]
     C --> D[Segmentation<br/>segment + extract properties]
     D --> E[Postprocessing<br/>quantify + export]
     E --> F[GeoJSON cells<br/>+ pyramidal OME-TIFF]
@@ -28,7 +28,9 @@ flowchart LR
 
 - **Preprocessing** — Bio-Formats conversion (nuclear marker → channel 0) + BaSiC illumination
   correction. The correction is optional (`--skip_preprocessing`); the conversion is not.
-- **Registration** — VALIS whole-slide alignment of every panel onto the reference panel.
+- **Registration** — whole-slide alignment of every panel onto the reference panel, via
+  `--registration_method`: **VALIS** (default, graph-based) or **tiled/STARE**
+  (JVM-free, fully parallel — see [Parameters → Tiled / STARE](parameters.md#tiled-stare-registration_methodtiled)).
 - **Segmentation** — cell/nucleus segmentation on the reference panel + morphology/contour extraction.
 - **Postprocessing** — per-cell quantification + QuPath GeoJSON export + pyramidal OME-TIFF.
 
@@ -140,8 +142,10 @@ independently and in parallel.
     - One row per image; group rows by `patient_id`.
     - Exactly **one** `is_reference=true` row per patient (its coordinate space is
       the registration target).
-    - `channels` is pipe-separated, in acquisition order, and **must include DAPI**
-      (matched case-insensitively; `CONVERT_IMAGE` moves it to channel 0).
+    - `channels` is pipe-separated, in acquisition order, and **must include one of
+      `params.nuclear_markers`** (default `DAPI`, `CELLTOX`; matched
+      case-insensitively as a substring — a DAPI-free CELLTOX row is valid;
+      `CONVERT_IMAGE` moves the matched channel to channel 0).
     - The image column depends on `--start`.
 
 The required columns change with the entry point, because each stage consumes a
@@ -374,9 +378,11 @@ Two output locations: per-patient **results** under `--outdir`, and aggregated
 
 The per-patient leaf directories below are the closed vocabulary
 `lib/Layout.groovy`'s `PUBLISHED_KINDS` declares — a process publishing anywhere else
-under `<outdir>/<patient_id>/` fails `tests/test_layout.py`. `spatialdata/` is the one
-per-patient exception: it is published at the patient root by `EXPORT_SPATIALDATA`'s own
-`pattern:` (see `conf/modules.config`), not through a `Layout.patientDir` kind.
+under `<outdir>/<patient_id>/` fails `tests/test_layout.py`. Two per-patient leaves are
+exceptions: `spatialdata/`, published at the patient root by `EXPORT_SPATIALDATA`'s own
+`pattern:` (see `conf/modules.config`) rather than through a `Layout.patientDir` kind,
+and `qc/`, which `tests/test_layout.py` skips outright (no checkpoint CSV names it) and
+which is likewise absent from `PUBLISHED_KINDS`.
 
 ```text
 results/                          # = --outdir
@@ -417,10 +423,12 @@ key grammar is a cross-repository contract — see
 ## Troubleshooting & FAQ
 
 ??? question "Which segmentation backend should I use?"
-    Pick with `--seg_method`: **`stardist`** (default; robust, needs DAPI at
-    channel 0 — guaranteed upstream), **`instantseg`** (channel-invariant; tune
-    batch/tile size for GPU memory), **`cellsam`** (finds DAPI by name; needs a
-    weight download via `DEEPCELL_ACCESS_TOKEN`, or a local `--cellsam_model_path`).
+    Pick with `--seg_method`: **`instantseg`** (default; channel-invariant, runs
+    on an unconfigured clone; tune batch/tile size for GPU memory), **`stardist`**
+    (reads channel 0, hardcoded — needs a nuclear marker there and a configured
+    `segmentation_model_dir`), **`cellsam`** (finds the nuclear channel by name;
+    needs a weight download via `DEEPCELL_ACCESS_TOKEN`, or a local
+    `--cellsam_model_path`).
 
 ??? failure "Launch fails on an invalid value"
     `--start`/`--stop` must be `preprocessing|registration|segmentation|postprocessing`;
