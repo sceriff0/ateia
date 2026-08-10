@@ -345,9 +345,15 @@ def test_exactly_one_resource_owner_per_process():
 #     pass whenever it coincided with a tier constant or a byte-shift operand in
 #     the same closure: CONVERT_IMAGE's base documented as 48 GB (a tier constant
 #     two clauses away) and SPLIT_CHANNELS' `f<5` threshold documented as `f<30`
-#     (the `>> 30` shift) both passed. Flat requests are matched against their
-#     attempt-1..4 values; tiered closures against exact multisets of their
-#     `N.GB` literals AND their `<` thresholds. See memory_cell_mismatch.
+#     (the `>> 30` shift) both passed.
+#   * memory is also compared PAIRWISE, not as pools of numbers. A tier ladder
+#     is an ordered list of (threshold, magnitude) rungs; a size-linear request
+#     is a (coefficient, addend) position pair. The pooled version let a doc cell
+#     hold every right number in the wrong place and pass: SPLIT_CHANNELS
+#     documented as `f<5 -> 64, f<15 -> 32` against a config saying the inverse,
+#     and PREPROCESS's `7`/`8` swapped between the per-GiB coefficient and the
+#     flat addend. Both now fail by name. See memory_cell_mismatch, which knows
+#     exactly three shapes and refuses loudly on a fourth.
 #
 # What is deliberately NOT compared, and why:
 #   * `TILED_REG_TILE` / `TILED_STITCH` memory is `tiledRegTileGb(params)` /
@@ -367,6 +373,18 @@ def test_exactly_one_resource_owner_per_process():
 #     one anyway -- it is a documented GPU/QC cost -- and ALIASES below maps it
 #     back to SEGMENT so its numbers are still checked against a real config
 #     block rather than skipped.
+#   * The **ramp SHAPE** of a flat request. `32.GB * (2 ** (task.attempt - 1))`
+#     documented as `32 GB x attempt` still passes: only magnitudes are compared,
+#     and 32 is the attempt-1 value either way. Known, disclosed, left as-is --
+#     a wrong RUNG COUNT is caught (the later rungs would not be in the computed
+#     set), only the notation between them is not.
+#   * Everything in docs/resources.md outside the per-process tables. The label
+#     tier table, the conf/base.config fallback table, the `maxForks` column, the
+#     global-ceiling and profile tables, the retry-policy tables and the
+#     container table are all hand-maintained and unguarded. Only rows whose
+#     table's first header cell is literally `Process` are read.
+#   * Prose. A cell whose numbers are right but whose words are wrong (e.g.
+#     "tier on channels + masks" naming the wrong inputs) passes.
 # ---------------------------------------------------------------------------
 
 DOCS_RESOURCES = ROOT / "docs" / "resources.md"
@@ -397,17 +415,40 @@ HOURS_RE = re.compile(r"(\d+(?:\.\d+)?)\s*\.\s*h\b")
 # the numeric comparison and what is asserted instead.
 DERIVED_HELPER_RE = re.compile(r"\b(\w+)\(\s*params\s*\)")
 
-# A `<` comparison in a config expression -- the tier threshold a size-keyed
-# memory closure switches on (`file_gb < 10 ? 32.GB : ...`). The lookarounds keep
-# `<<`, `<=` and `!<` out; conf/modules.config uses none of them today, but a
-# threshold parser that silently matched a shift operator would compare garbage.
-CONFIG_THRESHOLD_RE = re.compile(r"(?<![<=!>])<(?!=)\s*(\d+(?:\.\d+)?)")
+# One rung of a size-tier ladder, CONFIG side: `file_gb < 10 ? 32.GB`. Threshold
+# and magnitude are captured TOGETHER, in one match, so the pair cannot come
+# apart. An earlier revision collected thresholds and magnitudes into two
+# independent multisets, which meant a doc cell could state the right set of
+# each and pair them backwards -- `f<5 -> 64, f<15 -> 32` against a config that
+# says the opposite -- and pass. That is a reader sizing an allocation from a
+# table that states the inverse of the truth.
+CONFIG_TIER_RE = re.compile(r"<\s*(\d+(?:\.\d+)?)\s*\?\s*(\d+(?:\.\d+)?)\s*\.GB")
 
-# The same threshold as docs/resources.md writes it: `f<10`, `f < 10`.
-DOC_THRESHOLD_RE = re.compile(r"f\s*<\s*(\d+(?:\.\d+)?)")
+# The ladder's final `else` branch: the first `: N.GB` after its last rung.
+CONFIG_ELSE_RE = re.compile(r":\s*(\d+(?:\.\d+)?)\s*\.GB")
 
-# The doubling ramp as the doc renders it: `2^(attempt−1)` (Unicode minus) or
-# `2^(attempt-1)`. Its `2` and `1` are notation, not memory magnitudes, so the
+# The one non-ladder size-dependent shape in conf/modules.config: PREPROCESS's
+# `... * 7.GB * task.attempt + 8.GB`, linear in file size. The two numbers play
+# DIFFERENT roles -- 7 is the per-GiB-of-input coefficient, 8 a flat addend --
+# so they are captured positionally rather than pooled.
+CONFIG_SIZE_LINEAR_RE = re.compile(
+    r"\*\s*(\d+(?:\.\d+)?)\s*\.GB\s*\*\s*task\.attempt\s*\+\s*(\d+(?:\.\d+)?)\s*\.GB"
+)
+
+# The same three shapes as docs/resources.md writes them.
+#   rung:   `f<10` -> 32       (backtick and `+` sign both optional)
+#   else:   else 128 GB / else +64 GB
+#   linear: `f x 7 GB x attempt + 8 GB`
+DOC_TIER_RE = re.compile(
+    r"f\s*<\s*(\d+(?:\.\d+)?)\s*`?\s*(?:\u2192|->)\s*\+?\s*(\d+(?:\.\d+)?)"
+)
+DOC_ELSE_RE = re.compile(r"else\s*\+?\s*(\d+(?:\.\d+)?)")
+DOC_SIZE_LINEAR_RE = re.compile(
+    r"f\s*\u00d7\s*(\d+(?:\.\d+)?)\s*GB\s*\u00d7\s*attempt\s*\+\s*(\d+(?:\.\d+)?)\s*GB"
+)
+
+# The doubling ramp as the doc renders it: `2^(attempt-1)` (Unicode minus or
+# ASCII hyphen). Its `2` and `1` are notation, not memory magnitudes, so the
 # whole token is removed before the cell's numbers are read.
 DOC_RAMP_RE = re.compile(r"\d+\s*\^\s*\(\s*attempt\s*[\u2212-]\s*\d+\s*\)")
 
@@ -592,29 +633,77 @@ def _gb_literal_counts(expr: str) -> Counter:
     )
 
 
-def _config_threshold_counts(expr: str) -> Counter:
-    return Counter(float(m.group(1)) for m in CONFIG_THRESHOLD_RE.finditer(expr))
-
-
-def _doc_threshold_counts(cell: str) -> Counter:
-    return Counter(float(m.group(1)) for m in DOC_THRESHOLD_RE.finditer(cell))
-
-
 def _doc_magnitude_counts(cell: str) -> Counter:
-    """Multiset of the GB magnitudes a doc memory cell states.
+    """Multiset of the GB magnitudes a doc memory cell states, for a FLAT row.
 
-    Tier thresholds (`f<10`) and the doubling-ramp notation (`2^(attempt−1)`)
-    are removed first: both are structure, not magnitudes, and they are compared
-    separately against the config's own thresholds.
+    The doubling-ramp notation (`2^(attempt-1)`) is removed first: its `2` and
+    `1` are structure, not magnitudes. Tiered and size-linear rows do not use
+    this -- they are compared as (threshold, magnitude) pairs and as positional
+    roles respectively, which is the whole point of _ladder/_size_linear below.
     """
-    stripped = DOC_THRESHOLD_RE.sub(" ", DOC_RAMP_RE.sub(" ", cell))
+    stripped = DOC_RAMP_RE.sub(" ", cell)
     return Counter(float(m.group(0)) for m in NUMBER_RE.finditer(stripped))
+
+
+def _config_ladder(expr: str):
+    """Return (rungs, else_gb, leftover_gb) for a size-tier ladder, or None.
+
+    `rungs` is an ORDERED list of (threshold, GB) pairs read straight off the
+    ternary chain, so `file_gb < 5 ? 32.GB : file_gb < 15 ? 64.GB : 128.GB`
+    gives [(5, 32), (15, 64)] with else_gb 128. `leftover_gb` is the multiset of
+    `N.GB` literals outside the ladder -- CONVERT_IMAGE's `+ 24.GB *
+    task.attempt` per-attempt base is the only one today.
+    """
+    rungs = [(float(m.group(1)), float(m.group(2))) for m in CONFIG_TIER_RE.finditer(expr)]
+    if not rungs:
+        return None
+    last = list(CONFIG_TIER_RE.finditer(expr))[-1]
+    else_match = CONFIG_ELSE_RE.search(expr, last.end())
+    else_gb = float(else_match.group(1)) if else_match else None
+    consumed = Counter(gb for _, gb in rungs)
+    if else_gb is not None:
+        consumed[else_gb] += 1
+    return rungs, else_gb, _gb_literal_counts(expr) - consumed
+
+
+def _doc_ladder(cell: str):
+    """Return (rungs, else_gb, leftover_gb) as docs/resources.md states them."""
+    rungs = [(float(m.group(1)), float(m.group(2))) for m in DOC_TIER_RE.finditer(cell)]
+    else_match = DOC_ELSE_RE.search(cell)
+    else_gb = float(else_match.group(1)) if else_match else None
+    leftover_text = DOC_TIER_RE.sub(" ", DOC_RAMP_RE.sub(" ", cell))
+    if else_match:
+        leftover_text = leftover_text.replace(else_match.group(0), " ", 1)
+    leftover = Counter(float(m.group(0)) for m in NUMBER_RE.finditer(leftover_text))
+    return rungs, else_gb, leftover
+
+
+def _config_size_linear(expr: str):
+    """Return (coefficient, addend, leftover_gb) for `* A.GB * attempt + B.GB`, or None."""
+    match = CONFIG_SIZE_LINEAR_RE.search(expr)
+    if not match:
+        return None
+    coefficient, addend = float(match.group(1)), float(match.group(2))
+    return coefficient, addend, _gb_literal_counts(expr) - Counter([coefficient, addend])
+
+
+def _doc_size_linear(cell: str):
+    """Return (coefficient, addend, leftover_gb) as docs/resources.md states it, or None."""
+    match = DOC_SIZE_LINEAR_RE.search(cell)
+    if not match:
+        return None
+    coefficient, addend = float(match.group(1)), float(match.group(2))
+    leftover_text = cell.replace(match.group(0), " ", 1)
+    leftover = Counter(float(m.group(0)) for m in NUMBER_RE.finditer(leftover_text))
+    return coefficient, addend, leftover
 
 
 def memory_cell_mismatch(expr: str, cell: str) -> str | None:
     """Return why `cell` misstates `expr`, or None if it states it correctly.
 
-    Two shapes, because conf/modules.config has two:
+    Three shapes, because conf/modules.config has exactly three. Anything else
+    fails loudly rather than falling through to a looser comparison -- the
+    fall-through is what produced every hole found in review so far.
 
     * a **flat** request (`32.GB * task.attempt`, `100.GB + 100.GB *
       task.attempt`, `32.GB * (2 ** (task.attempt - 1))`) is evaluated on
@@ -623,11 +712,20 @@ def memory_cell_mismatch(expr: str, cell: str) -> str | None:
       COMPUTED values -- not against every integer that appears in the
       expression -- is what stops a tier constant or a `>> 30` byte shift from
       laundering a wrong number.
-    * a **size-tiered** closure (`(file_gb < 10 ? 32.GB : ...) * task.attempt`)
-      cannot be evaluated without a file, so its `N.GB` literals and its `<`
-      thresholds are compared as multisets against the doc cell's. Exact
-      equality in both, so neither a changed constant nor a changed threshold
-      can hide behind another number in the same closure.
+    * a **size-tier ladder** (`(file_gb < 10 ? 32.GB : ...) * task.attempt`)
+      cannot be evaluated without a file, so its rungs are compared as an
+      ORDERED list of (threshold, magnitude) PAIRS, plus the `else` branch, plus
+      a multiset of any `N.GB` outside the ladder. Pairs, not two independent
+      multisets: with the latter, a doc cell stating the right thresholds and
+      the right magnitudes but pairing them backwards -- `f<5 -> 64,
+      f<15 -> 32` against a config that says `f<5 -> 32, f<15 -> 64` -- passed.
+    * a **size-linear** request (PREPROCESS's `* 7.GB * task.attempt + 8.GB`)
+      has no `<` at all, so it is not a ladder; its two numbers are compared
+      POSITIONALLY, coefficient against coefficient and addend against addend.
+      Pooling them let `7` and `8` be swapped in the doc and still pass, even
+      though they mean different things. Given its own shape rather than a loud
+      refusal because the shape is genuinely checkable and a refusal would need
+      an exemption that checks nothing.
     """
     values = expr_values_per_attempt(expr)
     if values is not None:
@@ -644,28 +742,60 @@ def memory_cell_mismatch(expr: str, cell: str) -> str | None:
             return f"never states the attempt-1 value {values[0]} GB of `{expr}`"
         return None
 
-    config_gb = _gb_literal_counts(expr)
-    if not config_gb:
-        return (
-            f"cannot be checked: `{expr}` is neither a plain number this guard can "
-            "evaluate nor a tier naming `N.GB` literals. Extend "
-            "expr_values_per_attempt/memory_cell_mismatch or exempt the row "
-            "explicitly -- do not leave the field silently unchecked"
-        )
-    doc_thresholds = _doc_threshold_counts(cell)
-    config_thresholds = _config_threshold_counts(expr)
-    if doc_thresholds != config_thresholds:
-        return (
-            f"tiers on thresholds {sorted(doc_thresholds.elements())} but `{expr}` "
-            f"tiers on {sorted(config_thresholds.elements())}"
-        )
-    doc_gb = _doc_magnitude_counts(cell)
-    if doc_gb != config_gb:
-        return (
-            f"states GB values {sorted(doc_gb.elements())} but `{expr}` asks for "
-            f"{sorted(config_gb.elements())}"
-        )
-    return None
+    ladder = _config_ladder(expr)
+    if ladder is not None:
+        config_rungs, config_else, config_extra = ladder
+        doc_rungs, doc_else, doc_extra = _doc_ladder(cell)
+        if doc_rungs != config_rungs:
+            mispaired = [
+                f"f<{int(th) if th.is_integer() else th} states "
+                f"{int(gb) if gb.is_integer() else gb} GB"
+                for th, gb in doc_rungs
+                if (th, gb) not in config_rungs
+            ]
+            return (
+                f"tiers as {doc_rungs} but `{expr}` tiers as {config_rungs}"
+                + (f" -- mispaired: {mispaired}" if mispaired else "")
+            )
+        if doc_else != config_else:
+            return f"gives the else branch {doc_else} GB but `{expr}` gives {config_else}"
+        if doc_extra != config_extra:
+            return (
+                f"states {sorted(doc_extra.elements())} GB outside the tier ladder "
+                f"but `{expr}` has {sorted(config_extra.elements())}"
+            )
+        return None
+
+    linear = _config_size_linear(expr)
+    if linear is not None:
+        config_coefficient, config_addend, config_extra = linear
+        documented = _doc_size_linear(cell)
+        if documented is None:
+            return (
+                f"does not state `{expr}`'s size-linear shape "
+                f"(`f x {config_coefficient} GB x attempt + {config_addend} GB`)"
+            )
+        doc_coefficient, doc_addend, doc_extra = documented
+        if (doc_coefficient, doc_addend) != (config_coefficient, config_addend):
+            return (
+                f"states coefficient {doc_coefficient} GB/GiB and addend "
+                f"{doc_addend} GB, but `{expr}` has coefficient "
+                f"{config_coefficient} GB/GiB and addend {config_addend} GB"
+            )
+        if doc_extra != config_extra:
+            return (
+                f"states {sorted(doc_extra.elements())} GB outside the size-linear "
+                f"term but `{expr}` has {sorted(config_extra.elements())}"
+            )
+        return None
+
+    return (
+        f"cannot be checked: `{expr}` is none of the three shapes this guard "
+        "knows -- a flat request it can evaluate, a `< N ? M.GB` tier ladder, or "
+        "a `* A.GB * task.attempt + B.GB` size-linear term. Teach "
+        "memory_cell_mismatch the new shape or exempt the row explicitly; do not "
+        "leave the field silently unchecked"
+    )
 
 
 def parse_doc_process_table() -> dict[str, dict[str, str]]:
@@ -787,6 +917,47 @@ def test_expr_values_per_attempt_handles_the_shapes_in_modules_config():
     assert expr_values_per_attempt("8") == [8, 8, 8, 8]
     assert expr_values_per_attempt("(Math.ceil(tiledRegTileGb(params)) as int).GB * task.attempt") is None
     assert expr_values_per_attempt("(file_gb < 10 ? 32.GB : 64.GB) * task.attempt") is None
+
+
+def test_memory_cell_mismatch_compares_pairs_not_pooled_numbers():
+    """The tiered and size-linear paths must bind each number to its role.
+
+    Every assertion here is a shape that PASSED an earlier revision: the
+    comparison pooled thresholds and magnitudes into two independent multisets,
+    so a doc cell could hold the right numbers in the wrong places. The last two
+    cases are the other direction -- duplicate magnitudes and duplicate
+    thresholds are legitimate config, and a pairing comparison is exactly where
+    they would false-positive.
+    """
+    ladder = "(file_gb < 5 ? 32.GB : file_gb < 15 ? 64.GB : 128.GB) * task.attempt"
+    correct = "tier: `f<5` \u2192 32, `f<15` \u2192 64, else 128 GB, `\u00d7 attempt`"
+    swapped = "tier: `f<5` \u2192 64, `f<15` \u2192 32, else 128 GB, `\u00d7 attempt`"
+    assert memory_cell_mismatch(ladder, correct) is None
+    assert "mispaired" in (memory_cell_mismatch(ladder, swapped) or "")
+
+    linear = "(ome_tiff.size() >> 30 ?: 1) * 7.GB * task.attempt + 8.GB"
+    assert memory_cell_mismatch(linear, "`f \u00d7 7 GB \u00d7 attempt + 8 GB`") is None
+    assert "coefficient" in (
+        memory_cell_mismatch(linear, "`f \u00d7 8 GB \u00d7 attempt + 7 GB`") or ""
+    )
+
+    # Anything that is none of the three known shapes must refuse loudly rather
+    # than fall through to a looser comparison.
+    assert "cannot be checked" in (
+        memory_cell_mismatch("Runtime.getRuntime().maxMemory()", "`64 GB`") or ""
+    )
+
+    # Legitimate shapes a pairing comparison could wrongly reject:
+    # two tiers sharing one magnitude, and two tiers sharing one threshold.
+    same_gb = "(file_gb < 10 ? 32.GB : file_gb < 30 ? 32.GB : 128.GB) * task.attempt"
+    assert memory_cell_mismatch(
+        same_gb, "tier: `f<10` \u2192 32, `f<30` \u2192 32, else 128 GB, `\u00d7 attempt`"
+    ) is None
+    same_threshold = "(a < 10 ? 32.GB : b < 10 ? 64.GB : 128.GB) * task.attempt"
+    assert memory_cell_mismatch(
+        same_threshold,
+        "tier: `f<10` \u2192 32, `f<10` \u2192 64, else 128 GB, `\u00d7 attempt`",
+    ) is None
 
 
 def test_every_documented_process_matches_conf_modules_config():
