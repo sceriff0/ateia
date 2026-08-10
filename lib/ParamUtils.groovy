@@ -153,28 +153,31 @@ class ParamUtils {
      * registration.nf / add_cycle.nf so the QC gate has a single source of truth.
      */
     /*
-     * WHY THESE TWO HELPERS HAVE A SCALAR OVERLOAD
+     * WHY regQcLevelOf / microRegLevelOf ARE SCALAR
      *
      * Nextflow hashes the FREE VARIABLES a process's `script:` block references. A block
-     * that says `ParamUtils.microRegLevel(params)` therefore hashes `params` -- the WHOLE
+     * that says `ParamUtils.regQcLevel(params)` therefore hashes `params` -- the WHOLE
      * map, as one opaque entry -- and re-runs whenever ANY parameter anywhere changes.
      * Measured: changing only `--pyramid_resolutions` (postprocessing) re-ran REGISTER and
      * cascaded 20 of 28 tasks. `-dump-hashes` showed every individually-named entry
      * unchanged and only `params=ScriptBinding$ParamsMap@...` differing.
      *
-     * A `params.reg_micro_reg` access is recorded as its OWN hash entry, so passing the
-     * scalar keeps the process bound to just the parameters it actually reads.
+     * A `params.reg_qc` / `params.reg_micro_reg` access is recorded as its OWN hash entry,
+     * so passing the scalar keeps the process bound to just the parameters it actually reads.
      *
-     * The Map overloads stay: workflow/subworkflow code is not hashed this way, reads
-     * better with `params`, and there is exactly one implementation behind both -- the
-     * scalar form is where the logic lives and the Map form delegates to it, so the two
-     * cannot drift. CALL THE `...Of` FORM FROM A `script:` BLOCK; either form elsewhere.
+     * regQcLevel(Map) stays: workflow/subworkflow code (registration.nf, add_cycle.nf) is
+     * not hashed this way, reads better with `params`, and there is exactly one
+     * implementation behind it -- the scalar form is where the logic lives and the Map
+     * form delegates to it, so the two cannot drift. `microRegLevelOf` has no Map
+     * counterpart -- every call site is inside a `script:` block (register.nf,
+     * warp_seg_qc.nf), so there is no workflow-level caller to justify one. CALL THE
+     * `...Of` FORM FROM A `script:` BLOCK; either form elsewhere.
      *
-     * They are named `regQcLevelOf` / `microRegLevelOf` rather than being overloads of the
-     * Map versions because `microRegLevel(Map)` and a same-arity `microRegLevel(def)` are
-     * ambiguous for a NULL argument -- and null is the expected input here, it is what
-     * selects the default. Groovy would pick the more specific Map candidate and NPE on
-     * `params.reg_micro_reg`. A distinct name removes the dispatch question entirely.
+     * `regQcLevelOf` is named rather than being an overload of `regQcLevel(Map)` because
+     * `regQcLevel(Map)` and a same-arity `regQcLevel(def)` are ambiguous for a NULL
+     * argument -- and null is the expected input here, it is what selects the default.
+     * Groovy would pick the more specific Map candidate and NPE on `params.reg_qc`. A
+     * distinct name removes the dispatch question entirely.
      */
     static int regQcLevelOf(def skipRegistrationQc, def regQc) {
         return skipRegistrationQc ? 0 : (regQc == null ? 2 : (regQc as int))
@@ -196,11 +199,6 @@ class ParamUtils {
      */
     static int microRegLevelOf(def regMicroReg) {
         return regMicroReg == null ? 2 : (regMicroReg as int)
-    }
-
-    /** Map form -- see the note above regQcLevel. Delegates; holds no logic of its own. */
-    static int microRegLevel(Map params) {
-        return microRegLevelOf(params.reg_micro_reg)
     }
 
     /**

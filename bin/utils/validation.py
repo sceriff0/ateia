@@ -24,7 +24,6 @@ __all__ = [
     "log_image_stats",
     "detect_negative_values",
     "clip_negative_values",
-    "validate_image_range",
     "detect_wrapped_values",
 ]
 
@@ -225,91 +224,3 @@ def clip_negative_values(
         _logger.debug(f"[{stage_name}] No negative values to clip")
 
     return data
-
-
-def validate_image_range(
-    data: NDArray,
-    stage_name: str,
-    expected_dtype: Optional[np.dtype] = None,
-    logger: Optional[logging.Logger] = None,
-    fix_issues: bool = False,
-) -> Tuple[bool, NDArray]:
-    """Validate image values are within expected range.
-
-    Parameters
-    ----------
-    data : NDArray
-        Image data array.
-    stage_name : str
-        Name of processing stage for logging.
-    expected_dtype : np.dtype, optional
-        Expected data type. If None, uses data's current dtype.
-    logger : logging.Logger, optional
-        Logger to use.
-    fix_issues : bool, default=False
-        If True, clip values to valid range.
-
-    Returns
-    -------
-    is_valid : bool
-        True if all values are within valid range.
-    data : NDArray
-        Original or fixed data array.
-    """
-    _logger = logger or logging.getLogger(__name__)
-
-    dtype = expected_dtype or data.dtype
-    min_val = data.min()
-    max_val = data.max()
-
-    # Determine valid range
-    if np.issubdtype(dtype, np.unsignedinteger):
-        valid_min = 0
-        valid_max = np.iinfo(dtype).max
-    elif np.issubdtype(dtype, np.signedinteger):
-        valid_min = np.iinfo(dtype).min
-        valid_max = np.iinfo(dtype).max
-    elif np.issubdtype(dtype, np.floating):
-        # For floats, we typically want non-negative for images
-        valid_min = 0
-        valid_max = np.finfo(dtype).max
-    else:
-        _logger.warning(f"[{stage_name}] Unknown dtype: {dtype}")
-        return True, data
-
-    issues = []
-
-    if min_val < valid_min:
-        issues.append(f"min={min_val} < {valid_min}")
-
-    if max_val > valid_max:
-        issues.append(f"max={max_val} > {valid_max}")
-
-    # For uint16, also check for wrapped values
-    if dtype == np.uint16:
-        has_wrapped, wrap_count, wrap_pct = detect_wrapped_values(data, logger=_logger)
-        if has_wrapped:
-            issues.append(f"{wrap_count} potentially wrapped values ({wrap_pct:.4f}%)")
-
-    is_valid = len(issues) == 0
-
-    if not is_valid:
-        _logger.warning(f"[{stage_name}] Value range issues: {', '.join(issues)}")
-
-        if fix_issues:
-            _logger.info(f"[{stage_name}] Fixing value range issues...")
-
-            # Clip to valid range
-            data = np.clip(data, valid_min, valid_max)
-
-            # Convert dtype if needed
-            if data.dtype != dtype:
-                data = data.astype(dtype)
-
-            _logger.info(
-                f"[{stage_name}] After fix: min={data.min()}, max={data.max()}"
-            )
-    else:
-        _logger.debug(f"[{stage_name}] Value range OK: min={min_val}, max={max_val}")
-
-    return is_valid, data

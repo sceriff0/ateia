@@ -4,8 +4,7 @@ A slide is divided into **core** tiles that partition it exactly — every pixel
 core, with no gaps or overlaps — so the stitch step can place each warped core back without
 reconciling seams. Each core is *read* with a surrounding **halo** (clamped to the image), giving
 per-tile registration the overlap context it needs. Each core's centre is a control point of the
-mesh field, so :func:`grid_axes` returns axes that line up one-to-one with a
-:class:`mesh_field.MeshField` grid.
+mesh field, one-to-one with a :class:`mesh_field.MeshField` grid.
 
 Pure geometry — no image data, no third-party deps beyond the standard library.
 """
@@ -14,7 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-__all__ = ["Tile", "tile_grid", "grid_axes"]
+__all__ = ["Tile", "tile_grid"]
 
 
 @dataclass(frozen=True)
@@ -47,19 +46,6 @@ def _edges(size, tile):
         raise ValueError(f"tile size must be positive, got {tile}")
     n = (size + tile - 1) // tile  # ceil(size / tile)
     return [min(i * tile, size) for i in range(n + 1)]
-
-
-def grid_axes(width, height, tile):
-    """Return ``(xs, ys)`` — the core-centre coordinate along each axis.
-
-    ``xs`` has one entry per column, ``ys`` one per row; together they are the control-grid axes a
-    :class:`MeshField` is built on.
-    """
-    ex = _edges(width, tile)
-    ey = _edges(height, tile)
-    xs = [(ex[i] + ex[i + 1]) / 2.0 for i in range(len(ex) - 1)]
-    ys = [(ey[j] + ey[j + 1]) / 2.0 for j in range(len(ey) - 1)]
-    return xs, ys
 
 
 def tile_grid(width, height, tile, halo):

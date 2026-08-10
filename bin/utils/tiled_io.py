@@ -119,18 +119,3 @@ def read_decimated(src, index, factor, band_bytes=DEFAULT_BAND_BYTES):
         for y0 in range(0, h, band)
     ]
     return rows[0] if len(rows) == 1 else _np.concatenate(rows, axis=0)
-
-
-def write_ome_nonneg(path, arr_chw, src_dtype):
-    """Write a ``(C, H, W)`` array as OME-TIFF, clamped non-negative and cast to ``src_dtype``.
-
-    Bilinear warping keeps values within the source range, but clamp + round here as the final
-    guarantee that downstream quantification never sees a negative pixel.
-    """
-    import tifffile
-
-    out = np.clip(np.asarray(arr_chw, dtype=float), 0.0, None)
-    if np.issubdtype(src_dtype, np.integer):
-        info = np.iinfo(src_dtype)
-        out = np.clip(np.rint(out), info.min, info.max)
-    tifffile.imwrite(str(path), out.astype(src_dtype), photometric="minisblack")
