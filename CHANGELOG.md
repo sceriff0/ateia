@@ -470,10 +470,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`bin/compile_panel.py`, `bin/phenotype_cells.py`, `bin/utils/phenotyping/`), the five
   parameters `panel_spec` / `panel_model` / `pheno_alpha` / `pheno_min_cal` /
   `pheno_max_enumerate` (the params block now declares 75, was 80), the `phenotyping/`
-  publish kind, `assets/import_phenotype.groovy`, `panel.yaml`, and 20 unit/module
-  tests. `EXPORT_GEOJSON` is back to a four-slot input tuple and emits the constant
-  `"Cell"` classification with no `panel_model.json` sidecar — gate downstream in
-  QuPath/FlowPath. The FlowPath-side phenotype join (`bin/join_flowpath.py`,
+  publish kind, `assets/import_phenotype.groovy`, `panel.yaml`, and 22 test files
+  (20 pytest + `tests/modules/{compile_panel,phenotype}.nf.test`). `EXPORT_GEOJSON` is
+  back to a four-slot input tuple and emits the constant `"Cell"` classification with no
+  `panel_model.json` sidecar — gate downstream in QuPath/FlowPath. The one case in
+  `test_export_geojson_phenotype.py` that was NOT about phenotyping — the constant
+  `"Cell"`, no-stamped-`id` contract — survives as `tests/test_export_geojson.py`.
+  The FlowPath-side phenotype join (`bin/join_flowpath.py`,
   `export_spatialdata.py --attach-phenotypes`) is unaffected; it is a different,
   post-pipeline feature.
 - **`reg_tiled_fanout` is gone, along with the single-task `TILED_REGISTER` path it
