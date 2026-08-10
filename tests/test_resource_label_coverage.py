@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import ast
 import re
+from collections import Counter
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -333,6 +334,21 @@ def test_exactly_one_resource_owner_per_process():
 #     actually sets;
 #   * every process that has a label or a `withName:` resource block has a row.
 #
+# How the numbers are compared, and why not more loosely:
+#   * cpus and time are evaluated to integers on both sides. If a config
+#     expression is something this guard cannot evaluate, the row FAILS with the
+#     expression quoted -- it does not skip. An earlier revision guarded on
+#     `if expected: ...`, so `cpus = { params.seg_gpu ? 16 : 12 }` deleted the
+#     check silently and the suite stayed green with the doc saying `1`.
+#   * memory is compared against COMPUTED values, never against "every integer
+#     that appears in the expression". That looser rule let a wrong doc number
+#     pass whenever it coincided with a tier constant or a byte-shift operand in
+#     the same closure: CONVERT_IMAGE's base documented as 48 GB (a tier constant
+#     two clauses away) and SPLIT_CHANNELS' `f<5` threshold documented as `f<30`
+#     (the `>> 30` shift) both passed. Flat requests are matched against their
+#     attempt-1..4 values; tiered closures against exact multisets of their
+#     `N.GB` literals AND their `<` thresholds. See memory_cell_mismatch.
+#
 # What is deliberately NOT compared, and why:
 #   * `TILED_REG_TILE` / `TILED_STITCH` memory is `tiledRegTileGb(params)` /
 #     `tiledStitchGb(params)` -- derived from `reg_tiled_tile`/`reg_tiled_halo`
@@ -381,6 +397,20 @@ HOURS_RE = re.compile(r"(\d+(?:\.\d+)?)\s*\.\s*h\b")
 # the numeric comparison and what is asserted instead.
 DERIVED_HELPER_RE = re.compile(r"\b(\w+)\(\s*params\s*\)")
 
+# A `<` comparison in a config expression -- the tier threshold a size-keyed
+# memory closure switches on (`file_gb < 10 ? 32.GB : ...`). The lookarounds keep
+# `<<`, `<=` and `!<` out; conf/modules.config uses none of them today, but a
+# threshold parser that silently matched a shift operator would compare garbage.
+CONFIG_THRESHOLD_RE = re.compile(r"(?<![<=!>])<(?!=)\s*(\d+(?:\.\d+)?)")
+
+# The same threshold as docs/resources.md writes it: `f<10`, `f < 10`.
+DOC_THRESHOLD_RE = re.compile(r"f\s*<\s*(\d+(?:\.\d+)?)")
+
+# The doubling ramp as the doc renders it: `2^(attempt−1)` (Unicode minus) or
+# `2^(attempt-1)`. Its `2` and `1` are notation, not memory magnitudes, so the
+# whole token is removed before the cell's numbers are read.
+DOC_RAMP_RE = re.compile(r"\d+\s*\^\s*\(\s*attempt\s*[\u2212-]\s*\d+\s*\)")
+
 # Nextflow retries up to maxRetries = 3 (conf/base.config), so a task runs on
 # attempt 1..4 and a ramp has exactly four rungs. docs/resources.md enumerates
 # them for WARP_SEG_QC ("32 / 64 / 128 / 256"); computing the same four values
@@ -405,19 +435,19 @@ def _brace_match(text: str, open_brace_index: int) -> str:
 def _strip_comments(text: str) -> str:
     """Drop `/* */` and `//` comments from an extracted expression.
 
-    Not load-bearing today, and said so rather than implied: no `cpus`/`memory`/
-    `time` right-hand side in conf/modules.config currently contains a comment.
-    The annotations that look like they would (WARP_SEG_QC's
-    `// 32 / 64 / 128 / 256` at conf/modules.config:456, TILED_SOLVE's note about
-    the 4 GB it used to ask for at :337-340) sit OUTSIDE the closure braces the
-    extractor reads, so they never reach here.
-
-    It stays because CONVERT_IMAGE, SEGMENT, SPLIT_CHANNELS, MERGE_AND_PYRAMID
-    and GENERATE_REGISTRATION_QC all have multi-line memory closures, and a
-    `// was 64.GB` added inside one would otherwise be read as a config value and
-    silently license that stale number in the doc. test_strip_comments_removes
-    _numbers_a_maintainer_would_annotate_with exercises it directly, so it is not
-    untested code waiting to be wrong.
+    Load-bearing, and demonstrated in situ rather than asserted. An earlier
+    revision of this docstring called it a no-op on the grounds that no
+    expression in conf/modules.config contains a comment today -- true of the
+    annotations that look like they would (WARP_SEG_QC's `// 32 / 64 / 128 / 256`
+    at conf/modules.config:456, TILED_SOLVE's note at :337-340), which sit
+    OUTSIDE the closure braces the extractor reads. But CONVERT_IMAGE, SEGMENT,
+    SPLIT_CHANNELS, MERGE_AND_PYRAMID and GENERATE_REGISTRATION_QC all have
+    MULTI-LINE memory closures whose interior is fair game for a comment.
+    Verified: adding `// was 999.GB before the rewrite` inside CONVERT_IMAGE's
+    closure, with `999 GB` in the doc cell, FAILS the doc/config comparison with
+    this helper active and PASSES with it neutered to `return text` -- i.e.
+    without it, a stale number parked in a config comment silently licenses the
+    same stale number in the documentation.
     """
     text = re.sub(r"/\*.*?\*/", " ", text, flags=re.DOTALL)
     return re.sub(r"//[^\n]*", " ", text)
@@ -550,8 +580,92 @@ def _numbers(text: str) -> set[float]:
     return {float(m.group(0)) for m in NUMBER_RE.finditer(text)}
 
 
-def _gb_literals(expr: str) -> set[float]:
-    return {float(m.group(1)) for m in re.finditer(r"(\d+(?:\.\d+)?)\s*\.GB", expr)}
+def _gb_literal_counts(expr: str) -> Counter:
+    """Multiset of the `N.GB` magnitudes a config expression names.
+
+    A multiset, not a set: CONVERT_IMAGE's closure names `24.GB` twice (once as
+    the per-attempt base, once as a tier constant) and collapsing them would let
+    the doc drop one of the two and still pass.
+    """
+    return Counter(
+        float(m.group(1)) for m in re.finditer(r"(\d+(?:\.\d+)?)\s*\.GB", expr)
+    )
+
+
+def _config_threshold_counts(expr: str) -> Counter:
+    return Counter(float(m.group(1)) for m in CONFIG_THRESHOLD_RE.finditer(expr))
+
+
+def _doc_threshold_counts(cell: str) -> Counter:
+    return Counter(float(m.group(1)) for m in DOC_THRESHOLD_RE.finditer(cell))
+
+
+def _doc_magnitude_counts(cell: str) -> Counter:
+    """Multiset of the GB magnitudes a doc memory cell states.
+
+    Tier thresholds (`f<10`) and the doubling-ramp notation (`2^(attempt−1)`)
+    are removed first: both are structure, not magnitudes, and they are compared
+    separately against the config's own thresholds.
+    """
+    stripped = DOC_THRESHOLD_RE.sub(" ", DOC_RAMP_RE.sub(" ", cell))
+    return Counter(float(m.group(0)) for m in NUMBER_RE.finditer(stripped))
+
+
+def memory_cell_mismatch(expr: str, cell: str) -> str | None:
+    """Return why `cell` misstates `expr`, or None if it states it correctly.
+
+    Two shapes, because conf/modules.config has two:
+
+    * a **flat** request (`32.GB * task.attempt`, `100.GB + 100.GB *
+      task.attempt`, `32.GB * (2 ** (task.attempt - 1))`) is evaluated on
+      attempts 1..4; every magnitude in the doc cell must be one of those four
+      values, and the attempt-1 value must be among them. Comparing against the
+      COMPUTED values -- not against every integer that appears in the
+      expression -- is what stops a tier constant or a `>> 30` byte shift from
+      laundering a wrong number.
+    * a **size-tiered** closure (`(file_gb < 10 ? 32.GB : ...) * task.attempt`)
+      cannot be evaluated without a file, so its `N.GB` literals and its `<`
+      thresholds are compared as multisets against the doc cell's. Exact
+      equality in both, so neither a changed constant nor a changed threshold
+      can hide behind another number in the same closure.
+    """
+    values = expr_values_per_attempt(expr)
+    if values is not None:
+        documented = _doc_magnitude_counts(cell)
+        if not documented:
+            return f"states no GB value at all against a flat request of {values[0]} GB"
+        extra = sorted(set(documented) - set(values))
+        if extra:
+            return (
+                f"states {extra} GB, which is not a value `{expr}` takes on any "
+                f"attempt (it gives {values})"
+            )
+        if values[0] not in documented:
+            return f"never states the attempt-1 value {values[0]} GB of `{expr}`"
+        return None
+
+    config_gb = _gb_literal_counts(expr)
+    if not config_gb:
+        return (
+            f"cannot be checked: `{expr}` is neither a plain number this guard can "
+            "evaluate nor a tier naming `N.GB` literals. Extend "
+            "expr_values_per_attempt/memory_cell_mismatch or exempt the row "
+            "explicitly -- do not leave the field silently unchecked"
+        )
+    doc_thresholds = _doc_threshold_counts(cell)
+    config_thresholds = _config_threshold_counts(expr)
+    if doc_thresholds != config_thresholds:
+        return (
+            f"tiers on thresholds {sorted(doc_thresholds.elements())} but `{expr}` "
+            f"tiers on {sorted(config_thresholds.elements())}"
+        )
+    doc_gb = _doc_magnitude_counts(cell)
+    if doc_gb != config_gb:
+        return (
+            f"states GB values {sorted(doc_gb.elements())} but `{expr}` asks for "
+            f"{sorted(config_gb.elements())}"
+        )
+    return None
 
 
 def parse_doc_process_table() -> dict[str, dict[str, str]]:
@@ -623,9 +737,10 @@ def effective_exprs(name: str, field: str) -> list[str]:
 def test_strip_comments_removes_numbers_a_maintainer_would_annotate_with():
     """A number inside a comment in a memory closure must not count as config.
 
-    conf/modules.config has no such comment today (see _strip_comments), so this
-    is the only place the branch is exercised -- without it the helper would be
-    dead code that could rot unnoticed.
+    conf/modules.config has no such comment today, so this is the only place the
+    branch is exercised in the checked-in tree -- but it is not hypothetical:
+    see _strip_comments for the in-situ demonstration that adding one to
+    CONVERT_IMAGE's closure lets a stale doc number pass without this helper.
     """
     annotated = "32.GB * task.attempt   // was 64.GB before the bounding-box rewrite"
     assert _strip_comments(annotated).strip() == "32.GB * task.attempt"
@@ -700,33 +815,46 @@ def test_every_documented_process_matches_conf_modules_config():
             )
             continue
 
-        # --- cpus ----------------------------------------------------------
-        exprs = effective_exprs(name, "cpus")
-        expected_cpus = set()
-        for expr in exprs:
-            values = expr_values_per_attempt(expr)
-            if values:
-                expected_cpus.add(values[0])
-        documented_cpus = _numbers(row.get("cpus", ""))
-        if expected_cpus and not (documented_cpus and documented_cpus <= expected_cpus):
-            problems.append(
-                f"{name}: doc table says cpus {sorted(documented_cpus)} but "
-                f"conf/modules.config gives {sorted(expected_cpus)}"
-            )
-
-        # --- time ----------------------------------------------------------
-        exprs = effective_exprs(name, "time")
-        expected_time = set()
-        for expr in exprs:
-            values = expr_values_per_attempt(expr)
-            if values:
-                expected_time.add(values[0])
-        documented_time = {float(m.group(1)) for m in HOURS_RE.finditer(row.get("time", ""))}
-        if expected_time and not (documented_time and documented_time <= expected_time):
-            problems.append(
-                f"{name}: doc table says time {sorted(documented_time)} h but "
-                f"conf/modules.config gives {sorted(expected_time)} h"
-            )
+        # --- cpus and time -------------------------------------------------
+        # Both are plain integers everywhere in conf/modules.config today, so
+        # both are compared the same way -- and both FAIL LOUDLY rather than
+        # skipping when the expression is something this guard cannot evaluate.
+        # An earlier revision guarded on `if expected: ...`, which meant one
+        # config edit (`cpus = { params.seg_gpu ? 16 : 12 }`) silently deleted
+        # the check for that field with no message at all. That is this repo's
+        # signature defect -- a guard that passes because it stopped looking.
+        for field, documented in (
+            ("cpus", _numbers(row.get("cpus", ""))),
+            ("time", {float(m.group(1)) for m in HOURS_RE.finditer(row.get("time", ""))}),
+        ):
+            exprs = effective_exprs(name, field)
+            if not exprs:
+                problems.append(
+                    f"{name}: nothing in conf/modules.config sets `{field}` -- neither a "
+                    "`withName:` block nor the module's label. The doc row cannot be "
+                    "checked and the process would run on conf/base.config's defaults."
+                )
+                continue
+            expected = set()
+            unevaluable = [e for e in exprs if expr_values_per_attempt(e) is None]
+            if unevaluable:
+                problems.append(
+                    f"{name}: conf/modules.config's `{field}` is not a plain number this "
+                    f"guard can evaluate: {unevaluable}. The doc row states "
+                    f"{sorted(documented)} and NOTHING is checking it. Simplify the "
+                    "config expression, or teach expr_values_per_attempt the new shape, "
+                    "or exempt the row explicitly the way the derived memory closures "
+                    "are -- silently skipping the field is not an option."
+                )
+                continue
+            for expr in exprs:
+                expected.add(expr_values_per_attempt(expr)[0])
+            if not (documented and documented <= expected):
+                unit = "" if field == "cpus" else " h"
+                problems.append(
+                    f"{name}: doc table says {field} {sorted(documented)}{unit} but "
+                    f"conf/modules.config gives {sorted(expected)}{unit}"
+                )
 
         # --- memory --------------------------------------------------------
         exprs = effective_exprs(name, "memory")
@@ -740,31 +868,21 @@ def test_every_documented_process_matches_conf_modules_config():
                     "but the doc cell does not name the helper -- a doc row stating a "
                     f"flat number here would be wrong the moment a parameter changes: {cell!r}"
                 )
-        elif exprs:
-            allowed: set[float] = set()
-            required_options: list[set[float]] = []
-            for expr in exprs:
-                allowed |= _numbers(expr)
-                values = expr_values_per_attempt(expr)
-                if values:
-                    allowed |= set(values)
-                    required_options.append({values[0]})
-                else:
-                    required_options.append(_gb_literals(expr))
-            documented_memory = _numbers(cell)
-            unjustified = sorted(documented_memory - allowed)
-            if unjustified:
-                problems.append(
-                    f"{name}: doc table's memory cell states {unjustified} GB, which "
-                    "appears nowhere in the conf/modules.config expression "
-                    f"{exprs!r} nor in its attempt-1..4 ramp"
-                )
-            if required_options and not any(opt <= documented_memory for opt in required_options):
-                problems.append(
-                    f"{name}: conf/modules.config asks for "
-                    f"{[sorted(o) for o in required_options]} GB but the doc table's "
-                    f"memory cell does not state it: {cell!r}"
-                )
+        elif not exprs:
+            problems.append(
+                f"{name}: nothing in conf/modules.config sets `memory` -- neither a "
+                "`withName:` block nor the module's label."
+            )
+        else:
+            # One expression normally; two when the module's label is a ternary,
+            # in which case either branch is a legitimate thing to document.
+            reasons = [memory_cell_mismatch(expr, cell) for expr in exprs]
+            if all(reasons):
+                # More than one reason only when the module's label is a ternary
+                # and neither branch matches -- then say so for both branches
+                # rather than picking one arbitrarily.
+                joined = "; also ".join(dict.fromkeys(r for r in reasons if r))
+                problems.append(f"{name}: doc table's memory cell {cell!r} {joined}")
 
         # --- owner ---------------------------------------------------------
         case = resource_owner_case(base)

@@ -124,7 +124,8 @@ defaults" figures above are the shipped-default evaluation of those helpers, not
 independent constants — the helper names, not the numbers, are what
 `tests/test_resource_label_coverage.py` checks for these two rows.
 
-Its memory is bounded. Measured peak RSS on a 16384² 2-channel tiled OME-TIFF:
+The STARE method's memory is bounded. Measured peak RSS on a 16384² 2-channel
+tiled OME-TIFF:
 `TILED_COARSE` 0.91 GB, `TILED_REG_TILE` 1.31 GB, `TILED_SOLVE` < 1.31 GB,
 `TILED_STITCH` 1.35 GB — each set by a parameter (`reg_tiled_coarse_max_dim`,
 `reg_tiled_tile` + `reg_tiled_halo`, `reg_tiled_out_tile`) rather than by slide
