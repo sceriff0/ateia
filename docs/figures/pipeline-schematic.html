@@ -1,17 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
 <meta charset="utf-8">
-<title>WSI Pipeline — Supplementary Figure</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MIRAGE Supplementary Figure S1 — Pipeline</title>
 <style>
-  /* ============ sober monochrome print figure — white paper, black ink ============
-     Deliberately single-theme: this is a journal supplementary figure, and the
-     paper ground is the design. Token set is shared verbatim with S2, and is
-     ported to the documentation site in docs/stylesheets/extra.css. */
+  /* ======================================================================
+     MIRAGE supplementary figures — shared design base (S1 · S2 · S3)
+     ----------------------------------------------------------------------
+     DUPLICATED ON PURPOSE, not extracted to a shared file. Each figure in
+     this set has to survive being detached from the repository — attached to
+     a submission, mailed, opened from file:// — so it may not reference an
+     external stylesheet, not even a sibling one. This block is therefore
+     repeated verbatim in docs/figures/pipeline-schematic.html,
+     docs/figures/registration-schematic.html and docs/figures/qc-schematic.html,
+     and is ported (with the slate counterpart the figures deliberately lack)
+     to docs/stylesheets/extra.css. Change one, change all four.
+
+     SINGLE THEME BY DESIGN: white paper, black ink. A journal figure has a
+     paper ground.
+
+     ONE FONT STACK, shared with docs/stylesheets/extra.css so the site and
+     the figures really do read as one artefact (that file's header claimed
+     they did while leading with a different family).
+
+     ONE BREAKPOINT LADDER for the whole set: 1040 · 880 · 760 · 640 · 520.
+     No figure introduces a sixth rung.
+
+     ONE SIZING SCALE: .tag/.tag-def/.tag-alt .53rem / 1px 4px · .pp span
+     .62rem / 1px 5px · table.pr td.k .7rem, td.v/td.val .68rem ·
+     .masthead h1 max-width 72ch.
+
+     OVERFLOW DISCIPLINE: every grid track is minmax(0,…) and every grid or
+     flex item carries min-width:0. Without it a track's automatic minimum is
+     min-content, so one long identifier (GENERATE_POSTPROCESSING_QC) widens
+     its column and pushes the whole grid outside the panel border instead of
+     wrapping.
+     ====================================================================== */
   :root{
     --paper:#ffffff; --panel:#ffffff; --sub:#f6f7f8; --sub-2:#eef0f2;
     --ink:#0f1113; --ink-2:#3c4147; --ink-3:#767c83;
     --rule:#c3c8cd; --rule-2:#e5e8ea; --bar:#1b1e22;
     --serif:Georgia,"Times New Roman",Cambria,"Noto Serif",serif;
-    --sans:"Helvetica Neue",Helvetica,Arial,"Segoe UI",system-ui,sans-serif;
-    --mono:"SF Mono",ui-monospace,"JetBrains Mono",Menlo,Consolas,monospace;
+    --sans:"Inter","Helvetica Neue",Helvetica,Arial,"Segoe UI",system-ui,sans-serif;
+    --mono:"JetBrains Mono","SF Mono",ui-monospace,Menlo,Consolas,monospace;
     color-scheme:light;
   }
   *{box-sizing:border-box;}
@@ -24,6 +56,16 @@
   .masthead h1{font-weight:700;font-size:1.32rem;letter-spacing:-.01em;margin:.3em 0 0;max-width:72ch;line-height:1.26;text-wrap:balance;}
   .standfirst{font-family:var(--serif);font-size:.95rem;color:var(--ink-2);margin:12px 0 30px;max-width:82ch;}
 
+  /* Figure-set navigation. Relative filenames, so the strip works both from
+     file:// on a detached copy sitting beside its siblings and from the built
+     MkDocs site, which copies docs/figures/ through verbatim. */
+  .figset{display:flex;gap:0;flex-wrap:wrap;align-items:center;margin:12px 0 0;
+    font-family:var(--mono);font-size:.63rem;letter-spacing:.05em;text-transform:uppercase;}
+  .figset a,.figset span{border:1px solid var(--rule);padding:4px 9px;margin:0 -1px 0 0;
+    color:var(--ink-2);text-decoration:none;white-space:nowrap;}
+  .figset a:hover{border-color:var(--ink);color:var(--ink);}
+  .figset .self{background:var(--ink);border-color:var(--ink);color:#fff;font-weight:700;}
+
   .panel{position:relative;background:var(--panel);border:1px solid var(--rule);padding:20px 20px 18px;margin:0 0 20px;}
   .panel > .plabel{position:absolute;top:-1px;left:-1px;background:var(--ink);color:#fff;font-weight:700;
     font-size:.85rem;line-height:1;padding:6px 9px;}
@@ -33,6 +75,33 @@
 
   code{font-family:var(--mono);font-size:.82em;background:var(--sub);border:1px solid var(--rule-2);border-radius:2px;padding:.5px 4px;}
   .tbl-scroll{overflow-x:auto;}
+
+  /* parameter chips */
+  .pp{display:flex;flex-wrap:wrap;gap:4px;margin-top:7px;min-width:0;}
+  .pp span{font-family:var(--mono);font-size:.62rem;background:var(--sub);border:1px solid var(--rule-2);padding:1px 5px;
+    color:var(--ink-2);max-width:100%;min-width:0;overflow-wrap:anywhere;}
+  .pp b{color:var(--ink);font-weight:700;}
+  .tag{font-family:var(--mono);font-size:.53rem;text-transform:uppercase;letter-spacing:.04em;padding:1px 4px;
+    font-weight:700;border:1px solid var(--rule);color:var(--ink-2);background:var(--sub-2);white-space:nowrap;}
+  .tag-on{border-color:var(--ink);color:var(--ink);background:#fff;}
+  .tag-def{font-family:var(--mono);font-size:.53rem;background:var(--ink);color:#fff;padding:1px 4px;font-weight:700;white-space:nowrap;}
+  .tag-alt{font-family:var(--mono);font-size:.53rem;background:var(--sub);color:var(--ink-2);border:1px solid var(--rule);padding:1px 4px;white-space:nowrap;}
+
+  /* parameter tables (td.v in S1/S3, td.val in S2 — same scale) */
+  table.pr{border-collapse:collapse;width:100%;font-size:.78rem;}
+  table.pr td{padding:3.5px 4px;border-bottom:1px solid var(--rule-2);vertical-align:top;}
+  table.pr tr:last-child td{border-bottom:none;}
+  table.pr td.k{font-family:var(--mono);font-size:.7rem;font-weight:700;white-space:nowrap;}
+  table.pr td.v,table.pr td.val{font-family:var(--mono);font-size:.68rem;color:var(--ink-2);white-space:nowrap;
+    padding-right:8px;font-variant-numeric:tabular-nums;}
+  table.pr td.v.w{white-space:normal;overflow-wrap:anywhere;}
+  table.pr td.d{color:var(--ink-2);}
+  .nul{color:var(--ink-3);font-style:italic;}
+
+  .caption{font-family:var(--serif);font-size:.83rem;color:var(--ink-2);line-height:1.62;border-top:1px solid var(--rule);padding-top:16px;margin-top:8px;}
+  .caption b{color:var(--ink);}
+  .footnote{font-family:var(--sans);font-size:.72rem;color:var(--ink-3);margin-top:14px;display:block;}
+
 
   /* a — samplesheet */
   table.ss{border-collapse:collapse;width:100%;font-family:var(--mono);font-size:.72rem;font-variant-numeric:tabular-nums;}
@@ -54,12 +123,7 @@
   .gnote{font-family:var(--mono);font-size:.73rem;color:var(--ink-2);margin-top:11px;display:flex;gap:14px;flex-wrap:wrap;}
   .gnote b{color:var(--ink);}
 
-  /* c — pipeline lanes
-     Every grid/flex item below carries min-width:0. Without it a track's
-     automatic minimum is min-content, so a single long identifier
-     (GENERATE_POSTPROCESSING_QC) widens its column and pushes the whole grid
-     outside the panel border instead of wrapping. minmax(0,1fr) is the same
-     fix stated on the track. */
+  /* c — pipeline lanes (overflow discipline: see the shared base above) */
   .flow{display:grid;grid-template-columns:minmax(0,1fr) 16px minmax(0,1fr) 16px minmax(0,1fr) 16px minmax(0,1fr);
     gap:3px;align-items:start;}
   @media(max-width:1040px){.flow{grid-template-columns:minmax(0,1fr);}}
@@ -73,13 +137,6 @@
   .mod .n{font-family:var(--mono);font-weight:700;font-size:.71rem;display:flex;flex-wrap:wrap;gap:5px;align-items:center;
     min-width:0;overflow-wrap:anywhere;}
   .mod .x{font-size:.75rem;color:var(--ink-2);margin-top:4px;overflow-wrap:anywhere;}
-  .mod .pp{display:flex;flex-wrap:wrap;gap:4px;margin-top:7px;min-width:0;}
-  .pp span{font-family:var(--mono);font-size:.62rem;background:var(--sub);border:1px solid var(--rule-2);padding:1px 5px;
-    color:var(--ink-2);max-width:100%;overflow-wrap:anywhere;}
-  .pp b{color:var(--ink);font-weight:700;}
-  .tag{font-family:var(--mono);font-size:.53rem;text-transform:uppercase;letter-spacing:.04em;padding:1px 4px;
-    font-weight:700;border:1px solid var(--rule);color:var(--ink-2);background:var(--sub-2);white-space:nowrap;}
-  .tag-on{border-color:var(--ink);color:var(--ink);background:#fff;}
   .arrow{display:flex;align-items:center;justify-content:center;padding-top:40px;color:var(--ink-3);font-size:1rem;}
   @media(max-width:1040px){.arrow{padding:2px;transform:rotate(90deg);}}
   .ckpt{font-family:var(--mono);font-size:.61rem;color:var(--ink-2);border:1px dashed var(--rule);padding:5px 7px;
@@ -90,15 +147,13 @@
   .grp .opt .oh{font-family:var(--mono);font-weight:700;font-size:.66rem;display:flex;justify-content:space-between;gap:5px;
     flex-wrap:wrap;align-items:center;min-width:0;overflow-wrap:anywhere;}
   .grp .opt .ox{font-size:.7rem;color:var(--ink-2);margin-top:2px;overflow-wrap:anywhere;}
-  .tag-def{font-family:var(--mono);font-size:.53rem;background:var(--ink);color:#fff;padding:1px 4px;font-weight:700;white-space:nowrap;}
-  .tag-alt{font-family:var(--mono);font-size:.53rem;background:var(--sub);color:var(--ink-2);border:1px solid var(--rule);padding:1px 4px;white-space:nowrap;}
   .after{display:flex;gap:12px;flex-wrap:wrap;margin-top:14px;}
   .after .mod{flex:1 1 260px;min-width:0;}
 
   /* e — outputs */
   .outs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;}
   @media(max-width:880px){.outs{grid-template-columns:repeat(2,minmax(0,1fr));}}
-  @media(max-width:520px){.outs{grid-template-columns:1fr;}}
+  @media(max-width:520px){.outs{grid-template-columns:minmax(0,1fr);}}
   .out{border:1px solid var(--rule);border-top:2.5px solid var(--ink);background:var(--panel);padding:11px 12px;min-width:0;}
   .out .p{font-family:var(--mono);font-size:.66rem;font-weight:700;word-break:break-all;}
   .out .role{font-family:var(--mono);font-size:.55rem;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-3);margin-top:5px;}
@@ -133,7 +188,7 @@
   /* f — resources */
   .rescols{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px 22px;align-items:start;}
   .rescols > div{min-width:0;}
-  @media(max-width:820px){.rescols{grid-template-columns:1fr;}}
+  @media(max-width:880px){.rescols{grid-template-columns:minmax(0,1fr);}}
   .rh{font-family:var(--mono);font-size:.63rem;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-2);
     margin:0 0 5px;padding-bottom:3px;border-bottom:1px solid var(--ink);}
   table.rs{border-collapse:collapse;width:100%;font-family:var(--mono);font-size:.66rem;font-variant-numeric:tabular-nums;}
@@ -165,7 +220,7 @@
   .harness .h.pipe{border:1.5px solid var(--ink);color:var(--ink);font-weight:700;}
   .harness .a{color:var(--ink-3);}
   .sigs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;}
-  @media(max-width:800px){.sigs{grid-template-columns:1fr;}}
+  @media(max-width:880px){.sigs{grid-template-columns:minmax(0,1fr);}}
   .sig{border:1px solid var(--rule);border-top:2.5px solid var(--ink);padding:11px 12px;background:var(--panel);min-width:0;overflow-wrap:anywhere;}
   .sig h4{margin:0 0 3px;font-size:.87rem;}
   .sig .src{font-family:var(--mono);font-size:.6rem;color:var(--ink-3);margin-bottom:7px;}
@@ -182,25 +237,16 @@
   .pgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 26px;}
   @media(max-width:760px){.pgrid{grid-template-columns:minmax(0,1fr);}}
   .pcol{min-width:0;}
-  /* Below ~900px the two .pgrid tracks are too narrow for the longest keys
+  /* Below the 880 rung the two .pgrid tracks are too narrow for the longest keys
      (spatialdata_residual_join_max_px) to stay on one line. */
-  @media(max-width:900px){table.pr td.k,table.pr td.v{white-space:normal;overflow-wrap:anywhere;}}
+  @media(max-width:880px){table.pr td.k,table.pr td.v{white-space:normal;overflow-wrap:anywhere;}}
   .pcol h4{font-family:var(--mono);font-size:.66rem;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-2);
     margin:14px 0 4px;padding-bottom:3px;border-bottom:1px solid var(--ink);}
   .pcol h4:first-child{margin-top:0;}
-  table.pr{border-collapse:collapse;width:100%;font-size:.78rem;}
-  table.pr td{padding:3.5px 4px;border-bottom:1px solid var(--rule-2);vertical-align:top;}
-  table.pr tr:last-child td{border-bottom:none;}
-  table.pr td.k{font-family:var(--mono);font-size:.7rem;font-weight:700;white-space:nowrap;}
-  table.pr td.v{font-family:var(--mono);font-size:.68rem;color:var(--ink-2);white-space:nowrap;padding-right:8px;font-variant-numeric:tabular-nums;}
-  table.pr td.v.w{white-space:normal;overflow-wrap:anywhere;}
-  table.pr td.d{color:var(--ink-2);}
-  .nul{color:var(--ink-3);font-style:italic;}
 
-  .caption{font-family:var(--serif);font-size:.83rem;color:var(--ink-2);line-height:1.62;border-top:1px solid var(--rule);padding-top:16px;margin-top:8px;}
-  .caption b{color:var(--ink);}
-  .footnote{font-family:var(--sans);font-size:.72rem;color:var(--ink-3);margin-top:14px;display:block;}
 </style>
+</head>
+<body>
 
 <div class="sheet">
 
@@ -208,6 +254,11 @@
     <div class="kick">Supplementary Figure S1</div>
     <h1>A whole-slide multiplex image processing pipeline: modules, segmentation backends, defaults, outputs, resource model, and benchmarking</h1>
   </div>
+  <nav class="figset" aria-label="Supplementary figure set">
+    <span class="self">S1 · pipeline</span>
+    <a href="registration-schematic.html">S2 · registration</a>
+    <a href="qc-schematic.html">S3 · quality control</a>
+  </nav>
   <p class="standfirst">A step-gated Nextflow DSL2 workflow that aligns multiplexed immunofluorescence slides,
     segments every cell, quantifies each marker per compartment, and exports QuPath-compatible GeoJSON, a
     pyramidal OME-TIFF, and a scverse-native SpatialData store. The nuclear/fiducial channel is resolved by
@@ -309,15 +360,17 @@
               <div class="pp" style="margin-top:6px"><span>memory_mode <b>high</b></span><span>micro_reg <b>2</b></span><span>max_dim <b>4000</b></span></div></div>
             <div class="opt"><div class="oh"><span>tiled → STARE</span><span class="tag-alt">method=tiled</span></div>
               <div class="ox">JVM-free tiled rigid + mesh warp into the reference's shape; fiducial = channel 0.
-                Laptop-viable. Optional per-tile fan-out.</div>
-              <div class="pp" style="margin-top:6px"><span>tile <b>2048</b></span><span>halo <b>256</b></span><span>gate_tre <b>1.0</b></span><span>fanout <b>false</b></span></div></div>
+                Laptop-viable. Step 2 fans out to one task per tile — the only shape it has.</div>
+              <div class="pp" style="margin-top:6px"><span>tile <b>2048</b></span><span>halo <b>256</b></span><span>gate_tre <b>1.0</b></span><span>coarse_max_dim <b>4096</b></span></div></div>
           </div>
           <div class="mod"><div class="n">GENERATE_REGISTRATION_QC <span class="tag tag-on">reg_qc≥1</span></div>
             <div class="x">Nuclear-channel overlay, registered vs reference.</div></div>
-          <div class="mod"><div class="n">SEG_QC_GEOJSON → WARP_SEG_QC <span class="tag tag-on">reg_qc=2</span></div>
-            <div class="x">Segment nuclei on the native slides, warp the polygons through the transform, score
-              Dice and centroid displacement per registration stage. Also emits a <b>per-cell residual</b> table
-              consumed by the SpatialData export. Default on.</div></div>
+          <div class="mod"><div class="n">SEG_QC_SEGMENT → SEG_QC_GEOJSON → WARP_SEG_QC <span class="tag tag-on">reg_qc=2</span></div>
+            <div class="x">Segment each slide on its <b>native</b> image with the run's own segmenter
+              (<code>SEG_QC_SEGMENT</code> is <code>SEGMENT</code> aliased, so it follows
+              <code>--seg_method</code>), trace the mask to polygons, then warp those through the transform and
+              score IoU and centroid displacement per registration stage. Also emits a <b>per-cell residual</b>
+              table consumed by the SpatialData export. Default on — see figure <b>S3</b>.</div></div>
           <div class="ckpt">→ csv/registered.csv</div>
         </div>
       </div>
@@ -505,7 +558,7 @@
       </div>
       <div class="out">
         <div class="p">qc/ · csv/ · size_logs/</div><div class="role">evidence</div>
-        <ul><li>Aggregated HTML QC report</li><li>Computational resource report</li><li>Per-stage Dice / displacement</li><li>Four resumable checkpoint CSVs</li></ul>
+        <ul><li>Aggregated HTML QC report</li><li>Computational resource report</li><li>Per-stage IoU / Dice / displacement</li><li>Four resumable checkpoint CSVs</li></ul>
       </div>
     </div>
     <p class="outnote">The store's <code>instance_key</code> is the segmentation label — the only stable cell
@@ -551,9 +604,10 @@
           </tbody></table></div>
         <p class="resnote">Retry fires on 104/134/135/137/139/140/143 (connection reset and the signal kills,
           including the OOM killer); anything else finishes the run. <code>REGISTER</code> additionally retries on
-          exit 1, which is how VALIS reports a tile-read failure or a JVM out-of-heap. The six QC processes fall
-          back to <b>ignore</b> rather than finish once their budget is spent — a broken QC step must never stop a
-          multi-day run.</p>
+          exit 1, which is how VALIS reports a tile-read failure or a JVM out-of-heap. The <b>seven</b> QC
+          processes are non-gating: they retry the whole 130–145 signal range plus 104, then fall back to
+          <b>ignore</b> rather than finish — a broken QC step must never stop a multi-day run. Figure <b>S3</b>
+          takes that contract apart.</p>
       </div>
 
       <div>
@@ -565,11 +619,12 @@
             <tr><td>PREPROCESS</td><td class="n">4</td><td>7 GB/GiB + 8</td><td>3 h</td><td><span class="own own-w">name</span></td></tr>
             <tr><td>REGISTER</td><td class="n">8</td><td>300 GB</td><td>24 h</td><td><span class="own own-w">name</span></td></tr>
             <tr><td>TILED_COARSE</td><td class="n">2</td><td>8 GB ×2ⁿ</td><td>2 h</td><td><span class="own">both</span></td></tr>
-            <tr><td>TILED_REG_TILE</td><td class="n">2</td><td>8 GB</td><td>2 h</td><td><span class="own">both</span></td></tr>
-            <tr><td>TILED_SOLVE</td><td class="n">1</td><td>4 GB</td><td>8 h</td><td><span class="own">both</span></td></tr>
-            <tr><td>TILED_STITCH</td><td class="n">4</td><td>8 GB</td><td>4 h</td><td><span class="own">both</span></td></tr>
+            <tr><td>TILED_REG_TILE</td><td class="n">2</td><td>4 GB §</td><td>2 h</td><td><span class="own">both</span></td></tr>
+            <tr><td>TILED_SOLVE</td><td class="n">1</td><td>1 GB</td><td>8 h</td><td><span class="own">both</span></td></tr>
+            <tr><td>TILED_STITCH</td><td class="n">4</td><td>4 GB §</td><td>4 h</td><td><span class="own">both</span></td></tr>
             <tr><td>GENERATE_REGISTRATION_QC</td><td class="n">1</td><td>100–300 GB †</td><td>12 h</td><td><span class="own">both</span></td></tr>
-            <tr><td>SEG_QC_GEOJSON</td><td class="n">8</td><td>32–128 GB †</td><td>4 h</td><td><span class="own own-w">name</span></td></tr>
+            <tr><td>SEG_QC_SEGMENT</td><td class="n">8</td><td>32–128 GB †</td><td>4 h</td><td><span class="own own-w">name</span></td></tr>
+            <tr><td>SEG_QC_GEOJSON</td><td class="n">1</td><td>64 GB</td><td>4 h</td><td><span class="own own-w">name</span></td></tr>
             <tr><td>WARP_SEG_QC</td><td class="n">2</td><td>32 GB ‡</td><td>3 h</td><td><span class="own own-w">name</span></td></tr>
             <tr><td>SEGMENT</td><td class="n">8</td><td>32–128 GB †</td><td>4 h</td><td><span class="own own-w">name</span></td></tr>
             <tr><td>EXTRACT_*_PROPERTIES</td><td class="n">1</td><td>64 GB</td><td>12 h</td><td><span class="own own-w">name</span></td></tr>
@@ -577,13 +632,18 @@
             <tr><td>QUANTIFY</td><td class="n">1</td><td>128 GB</td><td>12 h</td><td><span class="own own-w">name</span></td></tr>
             <tr><td>EXPORT_GEOJSON</td><td class="n">1</td><td>32 GB</td><td>2 h</td><td><span class="own own-w">name</span></td></tr>
             <tr><td>MERGE_AND_PYRAMID</td><td class="n">2</td><td>200–300 GB †</td><td>8 h</td><td><span class="own own-w">name</span></td></tr>
-            <tr><td>EXPORT_SPATIALDATA</td><td class="n">1</td><td>6 GB</td><td>4 h</td><td><span class="own">base</span></td></tr>
+            <tr><td>EXPORT_SPATIALDATA</td><td class="n">4</td><td>200 GB</td><td>4 h</td><td><span class="own">both</span></td></tr>
           </tbody></table></div>
         <p class="resnote">† tiered on input size, read from the staged file at submission time.
-          ‡ doubling ramp (32/64/128/256) rather than linear. GPU is requested by <code>SEGMENT</code> and
-          <code>SEG_QC_GEOJSON</code> when <code>seg_gpu=true</code>, via <code>--gres=gpu:$gpu_type</code> plus
-          <code>--gpus all</code> (Docker) or <code>--nv</code> (Singularity). The tiled/STARE backend is
-          deliberately sized at 8 GB — JVM-free and tile-streamed, which is what makes it laptop-viable.</p>
+          ‡ doubling ramp (32/64/128/256) rather than linear. § derived from a parameter, not a constant:
+          <code>reg_tiled_tile</code>&nbsp;+&nbsp;2·<code>reg_tiled_halo</code> for REG_TILE and
+          <code>reg_tiled_out_tile</code> for STITCH, each the measured linear fit doubled and floored at 4 GB.
+          GPU is requested by <code>SEGMENT</code> — and therefore by its alias
+          <code>SEG_QC_SEGMENT</code> — when <code>seg_gpu=true</code>, via <code>--gres=gpu:$gpu_type</code>
+          plus <code>--gpus all</code> (Docker) or <code>--nv</code> (Singularity);
+          <code>SEG_QC_GEOJSON</code> is pure-CPU contour tracing and asks for none. The whole STARE backend
+          fits in 8 / 4 / 1 / 4 GB across its four processes — JVM-free and tile-streamed, which is what makes
+          it laptop-viable.</p>
       </div>
 
     </div>
@@ -644,7 +704,7 @@
     <div class="panel-head"><h2>Default parameters</h2>
       <p>Values taken verbatim from the <code>params{}</code> block of <code>nextflow.config</code>, which is the
         only place a default may be declared — a test forbids a second declaration anywhere else. Selected from
-        84 parameters; the full surface is in the documentation.</p></div>
+        the <b>75</b> parameters that block declares; the full surface is in the documentation.</p></div>
     <div class="pgrid">
       <div class="pcol">
         <h4>Workflow &amp; channels</h4>
@@ -736,8 +796,12 @@
     quantification. <b>(h)</b> A separate branch benchmarks the unmodified pipeline by parameter sweep,
     harvesting resource, registration-accuracy, and segmentation-stability signals from QC the pipeline
     already emits, plus external landmark datasets. <b>(i)</b> Default parameters.
+    Supplementary Figure <b>S2</b> takes registration apart backend by backend; Supplementary Figure <b>S3</b>
+    does the same for the quality-control architecture summarised in <b>(c)</b> and <b>(f)</b>.
     <span class="footnote">Parameter defaults, published paths, and resource requests are taken verbatim from the
     pipeline source (<code>nextflow.config</code>, <code>conf/modules.config</code>, <code>lib/Layout.groovy</code>)
     and verified against a stub run.</span>
   </p>
 </div>
+</body>
+</html>
