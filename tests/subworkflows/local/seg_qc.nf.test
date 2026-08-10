@@ -336,9 +336,15 @@ nextflow_workflow {
      * the parameter" from "hardcoded to this value" -- which is precisely the bug being
      * fixed, in the opposite direction.
      *
-     * versions.yml is where a stub run records it: SEGMENT's stub block writes
-     * `seg_method: ${params.seg_method}`. The masks themselves are `touch`ed and carry no
-     * backend identity, and the container directive is never exercised without an engine.
+     * versions.yml is where a stub run records it: SEGMENT's stub block reports the
+     * chosen backend's OWN TOOLS (lib/SegBackends.groovy's `versionTools`, rendered by
+     * lib/ProcessEnvelope.groovy). It used to report a bare `seg_method: ${params.seg_method}`
+     * row instead -- a key no real run ever emitted, because the script: and stub: heredocs
+     * were hand-written separately and `-stub` never evaluates script:. The tool rows are a
+     * strictly stronger witness: they name the stack the backend actually loads, so a run
+     * that reported the right backend NAME while rendering another backend's probes would
+     * now be caught here too. The masks themselves are `touch`ed and carry no backend
+     * identity, and the container directive is never exercised without an engine.
      */
     test("the QC segments with params.seg_method - instantseg") {
 
@@ -376,8 +382,10 @@ nextflow_workflow {
                 { assert seg_versions.size() == 1,
                     "expected exactly one SEG_QC_SEGMENT versions.yml (the subworkflow " +
                     ".first()s it); got " + seg_versions.size() },
-                { assert seg_versions.every { it.text.contains('seg_method: instantseg') },
+                { assert seg_versions.every { it.text.contains('instanseg: stub') },
                     "the QC did not segment with params.seg_method: " + seg_versions*.text.join(' --- ') },
+                { assert seg_versions.every { !it.text.contains('cellSAM') },
+                    "the QC reported the cellsam backend's tools: " + seg_versions*.text.join(' --- ') },
                 // One reference + one moving slide in, one scored pair out. Pins that the
                 // added segmentation step did not drop or duplicate a slide on the way to
                 // the warp.
@@ -424,8 +432,10 @@ nextflow_workflow {
                 // this case stayed green under a sabotage the instantseg case caught.
                 { assert seg_versions.size() == 1,
                     "expected exactly one SEG_QC_SEGMENT versions.yml; got " + seg_versions.size() },
-                { assert seg_versions.every { it.text.contains('seg_method: cellsam') },
-                    "the QC did not segment with params.seg_method: " + seg_versions*.text.join(' --- ') }
+                { assert seg_versions.every { it.text.contains('cellSAM: stub') },
+                    "the QC did not segment with params.seg_method: " + seg_versions*.text.join(' --- ') },
+                { assert seg_versions.every { !it.text.contains('instanseg') },
+                    "the QC reported the instantseg backend's tools: " + seg_versions*.text.join(' --- ') }
             )
         }
     }

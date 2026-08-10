@@ -8,7 +8,9 @@ three near-duplicate script blocks, a per-backend block of flag construction, an
 in all four. `lib/SegBackends.groovy` is now the single table, and this test pins the
 properties that make it safe to be single:
 
-  * every backend names a container, an entry point and its own versions rows;
+  * every backend names a container, an entry point and its own tool list for
+    versions.yml -- as BARE MODULE NAMES, not rendered YAML, so segment.nf's script:
+    and stub: blocks can both render it through lib/ProcessEnvelope.groovy;
   * the entry points exist and are tracked EXECUTABLE (Nextflow stages `bin/` onto
     $PATH and execs them by name -- a 100644 script fails at runtime with exit 126,
     `Permission denied`, and only on the cluster's fresh checkout);
@@ -80,14 +82,79 @@ def test_every_backend_declares_its_container_and_entrypoint():
         )
 
 
+VERSION_TOOLS_RE = re.compile(r"versionTools\s*:\s*\[([^\]]*)\]")
+
+
+def _version_tools(block: str) -> tuple[str, ...]:
+    """The backend's declared tool list, parsed from its `versionTools: [...]` entry."""
+    m = VERSION_TOOLS_RE.search(block)
+    assert m, "backend entry declares no versionTools list"
+    return tuple(re.findall(r"'([^']*)'", m.group(1)))
+
+
 def test_versions_rows_stay_backend_specific():
-    """A shared versions.yml would report the wrong stack for two of three backends."""
+    """A shared versions.yml would report the wrong stack for two of three backends.
+
+    Exact ORDERED equality, not containment: `torch` is named by both instantseg and
+    cellsam, so a containment check would still pass if the two lists were merged into
+    one shared list and handed to all three backends -- which is precisely the mistake
+    this test exists to refuse, since stardist loads no torch at all and reporting a
+    torch version for a StarDist run is a fabricated provenance record. Exactly one
+    backend runs per task, so the repeated `torch` entry is not a duplicate to dedupe.
+    """
     blocks = _backend_blocks()
     for method, (_container, _entrypoint, versions) in EXPECTED.items():
-        for tool in versions:
-            assert f"{tool}: $(" in blocks[method], (
-                f"seg_method '{method}' must report a {tool} version in versions.yml"
-            )
+        assert _version_tools(blocks[method]) == versions, (
+            f"seg_method '{method}' must declare versionTools {list(versions)}"
+        )
+
+
+def test_backends_declare_tool_names_not_rendered_yaml():
+    """The rendering belongs to lib/ProcessEnvelope.groovy, and only there.
+
+    This table used to hand-write six probe strings of exactly the form
+    ProcessEnvelope.probe() renders. Because they were pre-rendered YAML lines, they
+    could not be reused by segment.nf's stub: block (a stub reports no real versions),
+    so that block hand-wrote a DIFFERENT set of keys and `-stub` -- the whole blocking
+    CI gate -- could never see the two disagree. Storing bare module names is what makes
+    one list serve both blocks, so a reintroduced probe string here is the regression.
+    """
+    text = BACKENDS_GROOVY.read_text()
+    assert "python -c" not in text, (
+        "lib/SegBackends.groovy must declare tool NAMES (versionTools: ['deepcell', ...]), "
+        "not pre-rendered version-probe shell. ProcessEnvelope.probe() renders the probe, "
+        "which is what lets segment.nf's script: and stub: blocks share one list."
+    )
+    assert "END_VERSIONS" not in text, (
+        "the versions.yml heredoc belongs to ProcessEnvelope, not to the backend table"
+    )
+
+
+def test_segment_renders_both_blocks_from_the_one_backend_list():
+    """segment.nf's script: and stub: must each render versions.yml from
+    `backend.versionTools`, and nothing else.
+
+    tests/test_versions_envelope.py proves this generically for every module (identical
+    ProcessEnvelope call text, identical `*Backends.of(...)` binding in both halves).
+    This case names segment.nf specifically because it was the LAST holdout and the
+    single clearest live instance of the divergence: script: reported the backend's real
+    tools while stub: reported a bare `seg_method: <name>` that is not a tool at all.
+    """
+    text = SEGMENT_NF.read_text()
+    assert "END_VERSIONS" not in text, (
+        "segment.nf must not hand-write a versions.yml heredoc in either block"
+    )
+    assert (
+        "ProcessEnvelope.versions(task.process, backend.versionTools)" in text
+        and "ProcessEnvelope.versionsStub(task.process, backend.versionTools)" in text
+    ), "segment.nf must render BOTH blocks from backend.versionTools"
+    # Both blocks must resolve `backend` from the same expression, or two identical
+    # `backend.versionTools` reads still name two different backends' tools.
+    bindings = re.findall(r"=\s*(SegBackends\.of\([^)\n]*\))", text)
+    assert len(bindings) == 2 and bindings[0] == bindings[1] == "SegBackends.of(params.seg_method)", (
+        f"segment.nf must bind `backend` from the same SegBackends.of(...) expression in "
+        f"script: and stub:, found: {bindings}"
+    )
 
 
 def test_container_tags_are_immutable():

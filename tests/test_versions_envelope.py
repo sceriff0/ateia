@@ -16,24 +16,17 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 MODULES = sorted((ROOT / "modules" / "local").glob("*.nf"))
 
-# Documented exceptions -- not oversights:
+# Documented exception -- not an oversight. There is exactly ONE now:
 #
-# segment.nf renders its version ROWS from lib/SegBackends.groovy's `versions` map, and
-# those entries are pre-rendered YAML lines (e.g. a full
-# 'deepcell: $(python -c "import deepcell; ...")' string), not plain python module
-# names. ProcessEnvelope.versions()/versionsStub() only know how to turn a bare module
-# name into a probe; routing segment.nf through them would mean teaching SegBackends to
-# speak ProcessEnvelope's vocabulary instead, which is a rewrite of a class that predates
-# this task and belongs to Task 3's neighbour, not this one.
-#
-# THIS IS NOT A HYPOTHETICAL RISK -- segment.nf is, RIGHT NOW, the single clearest live
-# instance of the exact divergence this whole task exists to eliminate: its script:
-# block reports `python` plus the chosen backend's rows (e.g. `deepcell`/`tensorflow`
-# for StarDist), while its stub: block reports `python` plus a bare `seg_method: <name>`
-# -- two DISJOINT key sets, hand-maintained, that -stub can never catch drifting apart.
-# It is correctly out of scope for this task (see above), not "merely legacy" -- fixing
-# it means SegBackends learning ProcessEnvelope's vocabulary, which is real work for
-# whichever task inherits SegBackends next.
+# segment.nf used to be the second. It hand-wrote both heredocs and they named DISJOINT
+# key sets -- script: reported `python` plus the chosen backend's rows (`deepcell`/
+# `tensorflow` for StarDist), stub: reported `python` plus a bare `seg_method: <name>`,
+# which is not a tool at all. lib/SegBackends.groovy now stores each backend's tools as
+# BARE MODULE NAMES (`versionTools`, same key as lib/WarpBackends.groovy) instead of
+# pre-rendered YAML lines, so both blocks render through ProcessEnvelope from that one
+# list and the three checks below cover it like any other module. Recorded here rather
+# than deleted because "SegBackends stores rendered lines" was the stated reason this
+# file allowed the exception, and that reason is now false.
 #
 # aggregate_size_logs.nf runs in `container 'ubuntu:22.04'` and reports a `bash:` version
 # row, not a `python:` one -- it has no Python interpreter at all. ProcessEnvelope always
@@ -42,7 +35,7 @@ MODULES = sorted((ROOT / "modules" / "local").glob("*.nf"))
 # since warp_seg_qc_tiled.nf, since merged away, was also present and also reported
 # `python:`), so routing this module through it would add a fabricated/`unknown` python
 # entry to a published report that has never carried one.
-ALLOWED_HANDWRITTEN = {"segment.nf", "aggregate_size_logs.nf"}
+ALLOWED_HANDWRITTEN = {"aggregate_size_logs.nf"}
 
 
 def test_no_module_hand_writes_a_versions_heredoc():
@@ -228,15 +221,13 @@ def test_backend_binding_is_identical_between_script_and_stub():
     against itself -- and fails if a module has bindings in both halves that are
     not textually identical (modulo whitespace).
 
-    Scoped to modules that call `ProcessEnvelope.` at all: `modules/local/segment.nf`
-    also binds `backend = SegBackends.of(params.seg_method)`, but ONLY in script:, and
-    it never routes that backend through ProcessEnvelope at all (it hand-writes its own
-    versions heredoc via SegBackends.versions -- the documented, out-of-scope divergence
-    this file's module docstring already names, see ALLOWED_HANDWRITTEN above). Widening
-    this check to every module regardless of ProcessEnvelope usage would flag that known,
-    accepted case as a false positive instead of catching the thing this test exists
-    for: a backend binding that disagrees ACROSS THE TWO HALVES OF A CALL THIS FILE
-    OTHERWISE TRUSTS AS SYMMETRIC.
+    `modules/local/segment.nf` is the second module in scope: it binds
+    `backend = SegBackends.of(params.seg_method)` in BOTH halves and forwards
+    `backend.versionTools` to ProcessEnvelope from both. It used to bind only in script:
+    and hand-write its stub heredoc, which is why this docstring previously named it as
+    the reason for scoping to ProcessEnvelope users; that scoping is kept anyway, because
+    a module that binds a backend for some other purpose entirely and never renders
+    versions from it has nothing this test can meaningfully say about.
     """
     mismatches = []
     for nf in MODULES:
