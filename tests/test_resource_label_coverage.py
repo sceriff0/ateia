@@ -40,6 +40,16 @@ LABEL_LINE_RE = re.compile(r"^\s*label\s+.+$")
 # Every single- or double-quoted string literal on a line.
 QUOTED_STRING_RE = re.compile(r"'([^']*)'|\"([^\"]*)\"")
 
+# A trailing `// ...` line comment, or an inline `/* ... */` block comment.
+# Stripped before label extraction: extraction deliberately takes *every*
+# quoted string off a `label` line (to catch the ternary shape), so a quoted
+# word inside a comment would otherwise be read as a live label. Measured:
+# `label 'process_high'  // was 'process_low'` made the doc-table cross-check
+# below pass while the process asked for 4x the cpus and ~10x the memory the
+# doc promised -- a tier bump plus the comment explaining it silently
+# disarmed the guard.
+COMMENT_RE = re.compile(r"//.*$|/\*.*?\*/")
+
 # `withLabel: 'name' { ... }` selectors in conf/modules.config.
 WITH_LABEL_RE = re.compile(r"withLabel:\s*(?:'([^']+)'|\"([^\"]+)\")")
 
@@ -68,8 +78,16 @@ def extract_labels_from_line(line: str) -> list[str]:
     `label cond ? 'process_high_memory' : 'process_medium'` yields both
     branches -- this is the shape that produced the original bug, so any
     extraction that only handles a single literal would miss it.
+
+    Comments are stripped first, so an annotation such as
+    `label 'process_high'  // was 'process_low'` yields only the live label.
+    Taking every quoted string is what makes the ternary work and what makes
+    a commented-out label dangerous; the strip is the price of the former.
     """
-    return [m.group(1) if m.group(1) is not None else m.group(2) for m in QUOTED_STRING_RE.finditer(line)]
+    return [
+        m.group(1) if m.group(1) is not None else m.group(2)
+        for m in QUOTED_STRING_RE.finditer(COMMENT_RE.sub("", line))
+    ]
 
 
 def find_module_label_sites() -> list[tuple[Path, int, str, list[str]]]:
@@ -101,6 +119,22 @@ def test_extract_labels_handles_ternary_expression():
 
     literal_line = "    label 'process_high'"
     assert extract_labels_from_line(literal_line) == ["process_high"]
+
+
+def test_extract_labels_ignores_commented_out_labels():
+    """A quoted label inside a comment must not count as a live label.
+
+    Measured on `modules/local/merge_quant_csvs.nf`: bumping
+    `label 'process_low'` to `'process_high'` is caught by the doc-table
+    cross-check below, but the *same* bump annotated
+    `// was 'process_low'` was not -- the stale label came back out of the
+    comment, matched the unchanged `docs/resources.md` row, and the guard
+    went green while the process asked for 8 cpu / 300 GB against a doc
+    promising 2 cpu / 32 GB.
+    """
+    assert extract_labels_from_line("    label 'process_high'  // was 'process_low'") == ["process_high"]
+    assert extract_labels_from_line("    label /* 'process_low' */ 'process_high'") == ["process_high"]
+    assert extract_labels_from_line("    label 'process_medium' // bumped, see #123") == ["process_medium"]
 
 
 def test_every_module_label_resolves_to_a_conf_modules_config_selector():

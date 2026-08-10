@@ -365,12 +365,39 @@ def _leaking_reads(key: str, body: str) -> list[re.Match]:
             continue
         if body[: mo.start()].endswith("String.valueOf("):
             continue
-        if re.match(r"\s*:(?!:)", tail):
-            continue  # a map-literal key / named argument, not a read
+        # A map-literal key / named argument (`[patient_id: pid]`) is a label,
+        # not a read -- but a Groovy ternary's THEN branch has the identical
+        # tail shape (`cond ? group_key : fallback`), and that IS a leak. The
+        # two are told apart by what precedes the name: a map key only ever
+        # opens an entry, so it follows `[`, `,`, `(` or the start of the body,
+        # while a ternary's then-branch follows `?`. Measured: without the head
+        # check, `def patient_id = metas.size() > 1 ? group_key : ...` planted
+        # in registration.nf passed this guard (2 passed).
+        head = body[: mo.start()].rstrip()
+        if re.match(r"\s*:(?!:)", tail) and (head == "" or head[-1] in "[,("):
+            continue
         if mo.start() and body[mo.start() - 1] == ".":
             continue  # a property of something else that shares the name
         reads.append(mo)
     return reads
+
+
+def test_leaking_reads_tells_a_map_key_from_a_ternary():
+    """The map-literal skip must not swallow a ternary's then-branch.
+
+    `[k: v]` is a label and must be skipped -- `quantify_markers.nf`'s
+    `patient_id: pid` entry depends on it, and deleting the skip fails there.
+    `cond ? k : v` wears the same `name` + `:` tail and is a real leak. Both
+    directions are pinned so neither can regress into the other.
+    """
+    # map-literal keys and named arguments: skipped
+    assert _leaking_reads("k", "[k: 1]") == []
+    assert _leaking_reads("k", "def m = [\n    id: x,\n    k: y,\n]") == []
+    assert _leaking_reads("k", "foo(k: 1)") == []
+    assert _leaking_reads("k", "k: 1") == []
+    # ternary then-branch: a genuine leak, on one line and split over three
+    assert len(_leaking_reads("k", "def id = n > 1 ? k : other")) == 1
+    assert len(_leaking_reads("k", "def id = n > 1\n    ? k\n    : other")) == 1
 
 
 def test_group_key_sites_are_found():
