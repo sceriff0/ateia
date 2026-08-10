@@ -36,7 +36,16 @@ workflow INPUT_CHECK {
     // Callers run CsvUtils.validateInputCSV / validateInputSemantics before getting
     // here, so the sheet is known parseable at this point.
     def patient_counts = CsvUtils.countImagesPerPatient(samplesheet)
-    def channel_counts = CsvUtils.countChannelsPerPatient(samplesheet, params.nuclear_markers, auto_reference)
+    def channel_counts = CsvUtils.countChannelsPerPatient(samplesheet, image_column, params.nuclear_markers, auto_reference)
+
+    // THE reference decision, made once, here, from the samplesheet -- before any
+    // channel exists and therefore before anything can depend on task timing.
+    // subworkflows/local/registration.nf used to make it instead, from a
+    // `.groupTuple()` result, i.e. from whichever slide finished preprocessing first;
+    // see CsvUtils.resolveReferenceRows for what that cost. Resolving here also puts
+    // it upstream of the first checkpoint writer, which is what lets the resolved
+    // `is_reference=true` reach csv/preprocessed.csv instead of being lost.
+    def reference_image = CsvUtils.resolveReferenceRows(samplesheet, image_column, auto_reference)
     // Declared union -- FINAL_QC's run_summary.json manifest only, NEVER meta.channels_count.
     // See CsvUtils.countDeclaredChannelsPerPatient's doc for why the manifest cannot share
     // channel_counts' source.
@@ -47,6 +56,15 @@ workflow INPUT_CHECK {
         .splitCsv(header: true)
         .map { row ->
             def meta = CsvUtils.parseMetadata(row, params.nuclear_markers, "CSV ${samplesheet}")
+            // Overwrite the row's declared is_reference with the RESOLVED one. For a
+            // sheet that declares a reference these agree by construction (rule 1 of
+            // resolveReferenceRows returns that very row); they differ only where the
+            // sheet declares none and auto-promotion applies, which is exactly the case
+            // that must not be left to a downstream guess. A patient with no resolvable
+            // reference (add_cycle's by-design zero-reference sheet) matches nothing and
+            // keeps every row false.
+            meta.is_reference = reference_image[meta.patient_id] != null &&
+                                reference_image[meta.patient_id] == row[image_column]?.toString()?.trim()
             // Per-image unique id (patient_id + source-image stem). Drives output
             // file naming so a patient's multiple images do not produce identically
             // named files that collide when collected downstream (QC, registration).

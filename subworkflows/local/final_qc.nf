@@ -215,15 +215,21 @@ workflow FINAL_QC {
         // kind necessarily means a new slot here and a new `path(...)` in
         // modules/local/generate_qc_report.nf. That is a hard error when missed,
         // which is why the arity is not data-driven.
+        // Every list slot below is collect(sort: true), never a bare collect().
+        // GENERATE_QC_REPORT's inputs are `path` collections that Nextflow hashes
+        // POSITIONALLY, and collect() emits in arrival order -- so identical reruns
+        // produced different task hashes. collated_versions.yml carries sort: true for
+        // the same reason at the level of file CONTENT: without it the collected yaml's
+        // line order varied by completion order.
         GENERATE_QC_REPORT(
-            artifactsOf(ch_artifacts, 'preprocess_qc').collect().ifEmpty([]),
-            artifactsOf(ch_artifacts, 'registration_qc').collect().ifEmpty([]),
-            artifactsOf(ch_artifacts, 'registration_tre').collect().ifEmpty([]),
-            artifactsOf(ch_artifacts, 'postprocess_qc').collect().ifEmpty([]),
-            artifactsOf(ch_artifacts, 'versions').unique().collectFile(name: 'collated_versions.yml'),
+            artifactsOf(ch_artifacts, 'preprocess_qc').collect(sort: true).ifEmpty([]),
+            artifactsOf(ch_artifacts, 'registration_qc').collect(sort: true).ifEmpty([]),
+            artifactsOf(ch_artifacts, 'registration_tre').collect(sort: true).ifEmpty([]),
+            artifactsOf(ch_artifacts, 'postprocess_qc').collect(sort: true).ifEmpty([]),
+            artifactsOf(ch_artifacts, 'versions').unique().collectFile(name: 'collated_versions.yml', sort: true),
             ch_run_summary,
-            artifactsOf(ch_artifacts, 'seg_qc').collect().ifEmpty([]),
-            artifactsOf(ch_artifacts, 'seg_residuals').collect().ifEmpty([]),
+            artifactsOf(ch_artifacts, 'seg_qc').collect(sort: true).ifEmpty([]),
+            artifactsOf(ch_artifacts, 'seg_residuals').collect(sort: true).ifEmpty([]),
         )
     }
 

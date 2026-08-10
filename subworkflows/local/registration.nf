@@ -79,33 +79,42 @@ workflow REGISTRATION {
         }
         .groupTuple()
         .map { patient_id, metas, files ->
-            // Combine metas and files into items
-            def items = [metas, files].transpose()
+            // CANONICAL ORDER. groupTuple() emits in ARRIVAL order -- whichever slide
+            // finished preprocessing first -- and everything below carries that order
+            // into REGISTER as `preproc_files` / `all_metas`, which Nextflow hashes
+            // POSITIONALLY. So an identical rerun produced a different task hash and
+            // -resume missed on REGISTER, cascading a re-run of the entire downstream
+            // pipeline. Sorting by meta.id makes the order a function of the data.
+            //
+            // SORT AFTER transpose(), NEVER `groupTuple(sort:)`. groupTuple's own sort
+            // orders each grouped list INDEPENDENTLY, so metas and files are sorted by
+            // their own natural orders and silently re-paired:
+            //     in:  ['k','zeta','a.txt'], ['k','alpha','z.txt']
+            //     groupTuple(sort:true) -> [k, [alpha, zeta], [a.txt, z.txt]]
+            //                                   ^ alpha now pairs with a.txt -- WRONG
+            // Pairing first and sorting the pairs is the only safe form.
+            // subworkflows/local/add_cycle.nf:334 is the existing precedent.
+            def items = [metas, files].transpose().toSorted { it[0].id }
 
-            // Find reference image
+            // The reference was RESOLVED at samplesheet-read time (INPUT_CHECK, via
+            // CsvUtils.resolveReferenceRows) and travels in meta.is_reference. This is
+            // a guard on that invariant, not a fallback: it used to promote items[0]
+            // here, which meant the reference was whichever slide arrived first AND was
+            // decided downstream of the preprocessing checkpoint writer, so an
+            // --allow_auto_reference run wrote csv/preprocessed.csv with is_reference
+            // false on every row and its own `--start registration` then refused to
+            // read it. Reaching this error now means the samplesheet had no reference
+            // and auto-promotion did not apply -- at any entry point after
+            // preprocessing that is deliberate (ParamUtils.autoReferenceAllowed): a
+            // checkpoint missing its reference is corrupt, and inferring one would
+            // register against a different slide than the run that produced it.
             def ref = items.find { item -> item[0].is_reference }
-
             if (!ref) {
-                if (params.allow_auto_reference) {
-                    log.warn """
-                    WARNING: No reference marked for patient ${patient_id}
-                    Using first image as reference (allow_auto_reference=true)
-                    To make this an error, set allow_auto_reference=false
-                    """.stripIndent()
-                    // Mark the auto-picked image as the reference so downstream
-                    // steps (registration QC branch, segmentation's is_reference
-                    // filter) see exactly one reference — otherwise the registered
-                    // output carries is_reference=false for every image and
-                    // postprocessing fails with "No reference images found".
-                    items[0] = [items[0][0] + [is_reference: true], items[0][1]]
-                    ref = items[0]
-                } else {
-                    throw new Exception("""
-                    No reference image found for patient ${patient_id}
-                    Fix: Set is_reference=true for one image in your input CSV
-                    OR set allow_auto_reference=true to use first image automatically
-                    """.stripIndent())
-                }
+                throw new Exception("""
+                No reference image found for patient ${patient_id}
+                Fix: Set is_reference=true for one image in your input CSV
+                OR, at --start preprocessing only, set allow_auto_reference=true
+                """.stripIndent())
             }
 
             [patient_id, ref, items]

@@ -55,7 +55,14 @@ workflow SEGMENTATION {
         error "No reference images found (is_reference=true). Cannot run segmentation."
     }
 
-    SEGMENT(ch_references)
+    // The parameter slice the backends read, resolved ONCE here. Workflow code is not
+    // hashed by Nextflow's free-variable rule, so reading `params` at this level is free;
+    // reading it inside SEGMENT's script block was not -- it bound the task's cache key to
+    // every parameter in the pipeline. SegBackends owns WHICH keys (CTX_PARAM_KEYS), so
+    // the process body stays backend-agnostic.
+    def seg_params = SegBackends.ctxParams(params)
+
+    SEGMENT(ch_references.map { meta, f -> tuple(meta, f, seg_params) })
 
     def ch_cell_mask   = SEGMENT.out.cell_mask
     def ch_nuclei_mask = SEGMENT.out.nuclei_mask

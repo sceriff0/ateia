@@ -167,10 +167,19 @@ workflow MIRAGE {
 
     // Fail-fast semantic validation (per-row format + per-patient reference
     // counts + file existence). Runs here so it is also exercised by --dry_run.
+    // ParamUtils.autoReferenceAllowed, NOT params.allow_auto_reference: auto-promotion
+    // applies at --start preprocessing ONLY. At every later entry point the sheet IS a
+    // checkpoint this pipeline wrote, which always records exactly one reference per
+    // patient, so a missing one means a corrupt or hand-edited checkpoint and must be an
+    // error rather than a silent re-pick against a different slide. Passing the raw
+    // param here is how `--start registration --allow_auto_reference true` used to
+    // accept an all-false csv/preprocessed.csv and promote whichever row it liked.
+    def auto_reference = ParamUtils.autoReferenceAllowed(params)
+
     CsvUtils.validateInputSemantics(
         params.input,
         params.start,
-        params.allow_auto_reference,
+        auto_reference,
         params.nuclear_markers
     )
 
@@ -191,10 +200,11 @@ workflow MIRAGE {
     // second time, below, for the extra mask/contour columns specifically.
     def entry_column = ParamUtils.entryColumnForStep(params.start)
 
-    // autoReference = params.allow_auto_reference: when a patient marks no reference,
-    // registration.nf promotes its first image, which keeps that slide's nuclear
-    // channel in the split output and therefore in the count.
-    INPUT_CHECK(params.input, entry_column, params.allow_auto_reference)
+    // INPUT_CHECK resolves the reference from this sheet (CsvUtils.resolveReferenceRows)
+    // and stamps it into meta.is_reference, so the decision is made once, here, and every
+    // step downstream -- including the checkpoint writers -- carries it rather than
+    // re-deriving it. registration.nf used to derive it instead, from arrival order.
+    INPUT_CHECK(params.input, entry_column, auto_reference)
 
     /* -------------------- PREPROCESSING -------------------- */
 

@@ -26,7 +26,8 @@ nextflow_process {
                         patient_id: 'P001',
                         channels: ['DAPI', 'PANCK', 'SMA']
                     ],
-                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    SegBackends.ctxParams(params)
                 ]
                 """
             }
@@ -75,7 +76,8 @@ nextflow_process {
                         patient_id: 'P001',
                         channels: ['PANCK', 'DAPI', 'SMA']  // DAPI NOT FIRST
                     ],
-                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    SegBackends.ctxParams(params)
                 ]
                 """
             }
@@ -106,7 +108,8 @@ nextflow_process {
                         patient_id: 'P001',
                         channels: ['DAPI', 'PANCK', 'SMA']
                     ],
-                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    SegBackends.ctxParams(params)
                 ]
                 """
             }
@@ -146,7 +149,8 @@ nextflow_process {
                         patient_id: 'P001',
                         channels: ['DAPI', 'PANCK', 'SMA']
                     ],
-                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    SegBackends.ctxParams(params)
                 ]
                 """
             }
@@ -193,7 +197,8 @@ nextflow_process {
                         patient_id: 'P001',
                         channels: ['PANCK', 'DAPI', 'SMA']  // DAPI NOT FIRST - InstanSeg is channel-invariant
                     ],
-                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    SegBackends.ctxParams(params)
                 ]
                 """
             }
@@ -221,7 +226,8 @@ nextflow_process {
                         patient_id: 'P001',
                         channels: ['DAPI', 'PANCK', 'SMA']
                     ],
-                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    SegBackends.ctxParams(params)
                 ]
                 """
             }
@@ -268,7 +274,8 @@ nextflow_process {
                         patient_id: 'P001',
                         channels: ['PANCK', 'DAPI', 'SMA']  // DAPI NOT FIRST - CellSAM path skips the channel-0 check
                     ],
-                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    SegBackends.ctxParams(params)
                 ]
                 """
             }
@@ -306,7 +313,8 @@ nextflow_process {
                         patient_id: 'P001',
                         channels: ['DAPI', 'PANCK', 'SMA']
                     ],
-                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    SegBackends.ctxParams(params)
                 ]
                 """
             }
@@ -346,7 +354,8 @@ nextflow_process {
                         patient_id: 'P001',
                         channels: ['DAPI', 'PANCK', 'SMA']
                     ],
-                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    SegBackends.ctxParams(params)
                 ]
                 """
             }
@@ -378,7 +387,8 @@ nextflow_process {
                         patient_id: 'P001',
                         channels: ['DAPI', 'PANCK', 'SMA']
                     ],
-                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    SegBackends.ctxParams(params)
                 ]
                 """
             }

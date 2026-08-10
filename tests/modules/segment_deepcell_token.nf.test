@@ -48,7 +48,8 @@ nextflow_process {
                         patient_id: 'P001',
                         channels: ['DAPI', 'PANCK', 'SMA']
                     ],
-                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    SegBackends.ctxParams(params)
                 ]
                 """
             }

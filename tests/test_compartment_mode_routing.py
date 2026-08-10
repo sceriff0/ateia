@@ -123,7 +123,7 @@ ALLOWED_FILES = {
 # whole-file exemption would hide either regressing into this file silently.
 ALLOWED_LINES = {
     "conf/modules.config": {
-        707: (
+        718: (
             "ext.args = { params.expanded_quantification ? '--expanded' : "
             "'' } -- conf/*.config closures cannot see lib/*.groovy classes, "
             "so ext.args must read params raw here."

@@ -25,7 +25,15 @@ process SEGMENT {
     container { SegBackends.container(params.seg_method) }
 
     input:
-    tuple val(meta), path(merged_file)
+    // seg_params is SegBackends.ctxParams(params) -- the SLICE of params the backends
+    // read, resolved in subworkflows/local/segmentation.nf and arriving here as an
+    // opaque value. It is an input rather than a `params` read in the script block
+    // because Nextflow hashes the free variables a script block references: a bare
+    // `params` there bound this task's cache key to EVERY pipeline parameter, so an
+    // unrelated change (measured: --pyramid_resolutions) re-ran segmentation and
+    // everything after it. Keeping the key list in SegBackends also keeps this process
+    // body backend-agnostic, which tests/test_seg_backends.py enforces.
+    tuple val(meta), path(merged_file), val(seg_params)
 
     output:
     tuple val(meta), path("*_nuclei_mask.tif"), emit: nuclei_mask
@@ -40,7 +48,7 @@ process SEGMENT {
     def args = task.ext.args ?: ''
     def prefix = task.ext.prefix ?: "${meta.patient_id}"
     def backend = SegBackends.of(params.seg_method)
-    def ctx = [meta: meta, prefix: prefix, params: params]
+    def ctx = [meta: meta, prefix: prefix, params: seg_params]
     // Shell fragments arrive as lines and are indented HERE, by the block that owns the
     // indentation: Nextflow stripIndent()s the finished script, so a fragment carrying
     // its own leading whitespace would flatten the surrounding block.

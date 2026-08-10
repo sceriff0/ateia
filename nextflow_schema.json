@@ -184,7 +184,7 @@
                 },
                 "allow_auto_reference": {
                     "type": "boolean",
-                    "description": "Allow automatic reference selection.",
+                    "description": "Allow automatic reference selection: when a patient has no is_reference=true row, promote its FIRST samplesheet row. Applies at --start preprocessing ONLY -- at a later entry point the samplesheet is a checkpoint CSV this pipeline wrote, which already names the reference, and inferring one there would silently register against a different slide than the run that produced the checkpoint.",
                     "default": false
                 },
                 "reg_jvm_heap_gb": {

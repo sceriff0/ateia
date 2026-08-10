@@ -24,9 +24,10 @@
  *               deepcell/tensorflow, InstanSeg instanseg/torch, CellSAM cellSAM/torch.
  *
  * `flags`, `guard` take a context map: [meta: task meta, prefix: output prefix,
- * params: the params map]. Passing `params` rather than pre-extracted values is what
- * keeps each backend's parameter knowledge with that backend instead of leaking back
- * into the process body.
+ * params: THE SLICE OF params THE BACKENDS READ -- see ctxParams below]. Passing a map
+ * rather than pre-extracted values is what keeps each backend's parameter knowledge with
+ * that backend instead of leaking back into the process body; passing a SLICE rather than
+ * the whole params map is what keeps SEGMENT's cache key narrow.
  *
  * SHELL FRAGMENTS ARE RETURNED AS A LIST OF LINES, never as one pre-indented string.
  * The caller joins them with its own indentation, because Nextflow applies
@@ -36,6 +37,43 @@
  * shell expansions such as ${DEEPCELL_ACCESS_TOKEN:-} survive to the shell verbatim.
  */
 class SegBackends {
+
+    /**
+     * The parameters the backends above read off `ctx.params`, and the only ones SEGMENT
+     * is allowed to depend on.
+     *
+     * WHY A SLICE AND NOT `params`. Nextflow hashes the free variables a process
+     * `script:` block references. modules/local/segment.nf used to build its ctx as
+     * `[..., params: params]`, so the WHOLE params map entered SEGMENT's task hash and
+     * any unrelated parameter change re-ran segmentation and everything downstream of it.
+     * Measured: `--pyramid_resolutions 6` alone (a postprocessing knob) re-ran SEGMENT,
+     * both property extractors, all five QUANTIFY tasks and both exports.
+     *
+     * The slice is built HERE, not in the process body, because which parameters a
+     * backend needs is backend knowledge -- the whole point of this class, and what
+     * tests/test_seg_backends.py's "process body is backend-agnostic" check protects.
+     * It is applied in subworkflows/local/segmentation.nf (workflow code is not hashed
+     * this way) and arrives at SEGMENT as an opaque value.
+     *
+     * KEYS ARE STRINGS ON PURPOSE. `params.subMap(...)` never names a parameter as
+     * `params.<name>`, so adding a key here does not create a raw parameter read for
+     * tests/test_nuclear_marker_routing.py to flag -- `nuclear_markers` still reaches
+     * MarkerUtils, which is what that guard is actually about.
+     *
+     * ADDING A NEW PARAMETER READ TO A BACKEND MEANS ADDING ITS KEY HERE. A missing key reads
+     * as null and produces an empty flag with no error, so
+     * tests/test_seg_backends_ctx_params.py checks the two lists agree.
+     */
+    static final List<String> CTX_PARAM_KEYS = [
+        'nuclear_markers',
+        'instanseg_model_dir',
+        'cellsam_model_path',
+    ].asImmutable()
+
+    /** The `ctx.params` value SEGMENT should be given. Call from workflow code, never from a `script:` block. */
+    static Map ctxParams(Map params) {
+        return params.subMap(CTX_PARAM_KEYS)
+    }
 
     private static final Map BACKENDS = [
 

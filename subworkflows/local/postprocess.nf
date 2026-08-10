@@ -281,8 +281,11 @@ workflow POSTPROCESSING {
         // running when reg_qc=0 or the run started at postprocessing.
         EXPORT_SPATIALDATA(
             ch_sd_in,
-            ch_reg_qc.map { it instanceof List ? it[-1] : it }.flatten().collect().ifEmpty([]),
-            ch_reg_residuals.map { it instanceof List ? it[-1] : it }.flatten().collect().ifEmpty([])
+            // collect(sort: true), not collect(): these lists become EXPORT_SPATIALDATA's
+            // `path` inputs, which Nextflow hashes POSITIONALLY, and a bare collect()
+            // emits in arrival order -- so an identical rerun re-ran the export.
+            ch_reg_qc.map { it instanceof List ? it[-1] : it }.flatten().collect(sort: true).ifEmpty([]),
+            ch_reg_residuals.map { it instanceof List ? it[-1] : it }.flatten().collect(sort: true).ifEmpty([])
         )
     }
 

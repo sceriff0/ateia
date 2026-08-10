@@ -94,6 +94,9 @@ class CsvUtils {
      * cycle. One number, one purpose; see that function's doc for the other half.
      *
      * @param csvPath        path to the samplesheet
+     * @param imageColumn    the column holding the image this step consumes; passed
+     *                       straight through to resolveReferenceRows so the reference
+     *                       used for counting is the same row registration will use
      * @param nuclearMarkers params.nuclear_markers -- required, never defaulted here
      * @param autoReference  whether a patient with NO is_reference=true row will have
      *                       one auto-promoted from its own rows. True mirrors
@@ -104,7 +107,89 @@ class CsvUtils {
      *
      * Returns a Map of patient_id -> channel count.
      */
-    static Map<String, Integer> countChannelsPerPatient(String csvPath, def nuclearMarkers, boolean autoReference) {
+    /**
+     * patient_id -> the value of `imageColumn` on the row that IS that patient's
+     * registration reference. THE one place the reference is decided.
+     *
+     * Rules, in order:
+     *   1. the row declaring `is_reference=true` wins;
+     *   2. otherwise, when `autoReference`, the patient's FIRST row IN SAMPLESHEET
+     *      ORDER;
+     *   3. otherwise the patient is absent from the returned map -- it has no
+     *      reference, which is legitimate for mode='add_cycle' (whose reference is
+     *      the prior run's and never a row in its sheet).
+     *
+     * WHY SAMPLESHEET ORDER, AND WHY HERE. This rule used to exist TWICE, resolved
+     * from two different orderings of the same data:
+     *
+     *   countChannelsPerPatient (below)  promoted rows[0]  -- samplesheet order
+     *   subworkflows/local/registration.nf  promoted items[0] -- ARRIVAL order
+     *
+     * The second is a `.groupTuple()` result, so it is whichever slide finished
+     * preprocessing first. Two runs of the same data could therefore register against
+     * different references. Worse, the first sizes `channels_count`, which sizes the
+     * streaming groupKey the whole pipeline's fan-in rests on: when the two copies
+     * disagree AND the two slides differ in nuclear-marker content, the group is sized
+     * for a slide that is not the reference. Latent rather than observed today only
+     * because the test data's two slides both carry DAPI.
+     *
+     * Resolving at samplesheet-read time also puts the decision UPSTREAM of the first
+     * checkpoint writer, which is what lets `is_reference=true` reach
+     * `csv/preprocessed.csv`. It previously did not: registration.nf promoted after
+     * that file was written, so an --allow_auto_reference run emitted an all-false
+     * checkpoint that its own `--start registration` then refused to read.
+     *
+     * THIS METHOD RESOLVES; IT DOES NOT VALIDATE. "Exactly one reference per patient"
+     * and "no reference is an error unless allowed" stay in validateInputSemantics,
+     * which runs first and has the better messages. Throwing here would break
+     * add_cycle, whose zero-reference sheet is by design.
+     *
+     * @param imageColumn the column holding the image this step consumes -- the same
+     *                    `entry_column` INPUT_CHECK carries forward, so both callers
+     *                    key the resolution identically. Assumes that value is unique
+     *                    per row within a patient: true for every checkpoint CSV
+     *                    (paths are distinct) and for any sheet not listing one image
+     *                    twice.
+     */
+    static Map<String, String> resolveReferenceRows(String csvPath, String imageColumn, boolean autoReference) {
+        def file = new File(csvPath)
+        if (!file.exists()) return [:]
+
+        def lines = readCsvLines(file.path)
+        if (lines.size() < 2) return [:]
+
+        def header = parseCsvLine(lines[0])
+        def patientIdx = header.findIndexOf { it == 'patient_id' }
+        def imageIdx   = header.findIndexOf { it == imageColumn }
+        def refIdx     = header.findIndexOf { it == 'is_reference' }
+        if (patientIdx == -1 || imageIdx == -1) return [:]
+
+        // Rows per patient, IN SAMPLESHEET ORDER -- rule 2 depends on that order, so
+        // this must stay an ordered accumulation.
+        def rowsByPatient = [:].withDefault { [] }
+        lines.drop(1).each { line ->
+            def cols = parseCsvLine(line)
+            if (cols.size() <= Math.max(patientIdx, imageIdx)) return
+            def patientId = cols[patientIdx].trim()
+            if (!patientId) return  // ignore blank patient_id cells
+            // Lenient parse, matching countChannelsPerPatient below: validateInputSemantics
+            // has already rejected malformed values with a better message.
+            def isRef = refIdx != -1 && refIdx < cols.size() &&
+                        cols[refIdx]?.trim()?.toLowerCase() == 'true'
+            rowsByPatient[patientId] << [isRef, cols[imageIdx].trim()]
+        }
+
+        def resolved = [:]
+        rowsByPatient.each { patientId, rows ->
+            def declared = rows.find { it[0] }
+            if (declared) { resolved[patientId] = declared[1]; return }
+            if (autoReference && rows) resolved[patientId] = rows[0][1]
+            // else: no reference for this patient -- omitted deliberately (rule 3).
+        }
+        return resolved
+    }
+
+    static Map<String, Integer> countChannelsPerPatient(String csvPath, String imageColumn, def nuclearMarkers, boolean autoReference) {
         def file = new File(csvPath)
         if (!file.exists()) return [:]
 
@@ -114,41 +199,33 @@ class CsvUtils {
         def header = parseCsvLine(lines[0])
         def patientIdx = header.findIndexOf { it == 'patient_id' }
         def channelsIdx = header.findIndexOf { it == 'channels' }
-        def refIdx = header.findIndexOf { it == 'is_reference' }
-        if (patientIdx == -1 || channelsIdx == -1) return [:]
+        def imageIdx = header.findIndexOf { it == imageColumn }
+        if (patientIdx == -1 || channelsIdx == -1 || imageIdx == -1) return [:]
 
-        // Collect the rows per patient first: whether a patient has an explicit
-        // reference is only knowable after every row has been read.
-        def rowsByPatient = [:].withDefault { [] }
+        // WHICH slide is the reference is resolved by resolveReferenceRows, not decided
+        // here. This method used to promote rows[0] itself, which is how it came to
+        // disagree with registration.nf's arrival-order pick -- see that method's
+        // docblock. Asking the one resolver makes agreement structural rather than a
+        // convention two files had to keep by eye.
+        def referenceImage = resolveReferenceRows(csvPath, imageColumn, autoReference)
+
+        def kept = [:].withDefault { new HashSet<String>() }
         lines.drop(1).each { line ->
             def cols = parseCsvLine(line)
-            if (cols.size() > Math.max(patientIdx, channelsIdx)) {
-                def patientId = cols[patientIdx].trim()
-                if (!patientId) return  // ignore blank patient_id cells
-                // Lenient parse: validateInputSemantics has already rejected malformed
-                // values with a better message by the time counting runs. A missing
-                // is_reference column degrades to "every row is a reference", which
-                // over-counts rather than under-counts -- the safe direction.
-                def isRef = refIdx == -1 ? true
-                    : (refIdx < cols.size() && cols[refIdx]?.trim()?.toLowerCase() == 'true')
-                def channels = cols[channelsIdx].split('\\|')*.trim().findAll { it }
-                rowsByPatient[patientId] << [isRef, channels]
-            }
+            if (cols.size() <= Math.max(patientIdx, Math.max(channelsIdx, imageIdx))) return
+            def patientId = cols[patientIdx].trim()
+            if (!patientId) return  // ignore blank patient_id cells
+            // The reference keeps its nuclear channel in the split output; every other
+            // slide drops it. A patient absent from referenceImage (add_cycle's
+            // by-design zero-reference sheet) has no row matching null, so every row
+            // is treated as non-reference -- the pre-existing behaviour.
+            def isRef = referenceImage[patientId] != null &&
+                        referenceImage[patientId] == cols[imageIdx].trim()
+            def channels = cols[channelsIdx].split('\\|')*.trim().findAll { it }
+            kept[patientId].addAll(MarkerUtils.splitOutputChannels(channels, isRef, nuclearMarkers)*.toUpperCase())
         }
 
-        return rowsByPatient.collectEntries { patientId, rows ->
-            def effective = rows
-            if (autoReference && !rows.any { it[0] }) {
-                // registration.nf promotes the patient's FIRST image to reference, which
-                // keeps that slide's nuclear channel in the split output.
-                effective = [[true, rows[0][1]]] + rows.drop(1)
-            }
-            def kept = new HashSet<String>()
-            effective.each { isRef, channels ->
-                kept.addAll(MarkerUtils.splitOutputChannels(channels, isRef, nuclearMarkers)*.toUpperCase())
-            }
-            [patientId, kept.size()]
-        }
+        return kept.collectEntries { patientId, markers -> [patientId, markers.size()] }
     }
 
     /**
@@ -340,7 +417,7 @@ class CsvUtils {
             if (refs > 1)
                 throw new IllegalStateException("Multiple reference images found for patient ${patientId} (${refs} found). Exactly one image per patient may set is_reference=true.")
             if (refs == 0 && !allowAutoReference)
-                throw new IllegalStateException("No reference image found for patient ${patientId}. Set is_reference=true for one image, or run with --allow_auto_reference true.")
+                throw new IllegalStateException("No reference image found for patient ${patientId}. Set is_reference=true for one image, or run with --allow_auto_reference true (which applies at --start preprocessing ONLY -- at a later entry point the samplesheet is a checkpoint this pipeline wrote and must already name its reference; see ParamUtils.autoReferenceAllowed).")
         }
     }
 }

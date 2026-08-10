@@ -193,11 +193,30 @@ samplesheet — feed it back in with a matching `--start`.
     consistent across stages so resume commands point `--input` at the right file.
 
 !!! note "`-resume` vs `--start` — different mechanisms"
-    - `-resume` reuses the **Nextflow work cache** within a run lineage; only
-      changed/failed tasks re-run.
-    - `--start` **skips earlier stages entirely** by feeding a checkpoint CSV.
+    - `-resume` reuses the **Nextflow work cache**; only changed tasks and their
+      descendants re-run. Needs `work/` to still exist.
+    - `--start` **skips earlier stages entirely** by feeding a checkpoint CSV. Needs
+      only `--outdir`, so it is what you use when `work/` is gone — purged scratch, a
+      different machine.
 
-    They combine freely, e.g. `--start postprocessing … -resume`.
+    **Prefer `-resume` when `work/` survives.** Changing a parameter and re-running
+    with `-resume` re-runs only the tasks that parameter actually affects, with no
+    checkpoint CSV and no `--start`: e.g. changing `--pyramid_resolutions` re-runs the
+    pyramid and the exports and reuses the other 24 tasks.
+
+    They compose (`--start postprocessing … -resume`), but understand what you get:
+    `--start` reads its inputs from published paths under `--outdir`, which are
+    different files from the `work/` originals as far as the cache is concerned, so
+    the combination reuses **nothing** from a prior run's work directory. `-resume`
+    there only helps across successive `--start postprocessing` runs.
+
+!!! warning "Two tasks always re-run"
+    `GENERATE_QC_REPORT` and `AGGREGATE_SIZE_LOGS` are declared `cache = false`. Their
+    inputs are `collectFile()` results, which are rebuilt into a fresh
+    `work/tmp/<hash>/` on every run and so can never match the cache; the QC report
+    also embeds a run timestamp. Both are cheap and terminal. Seeing exactly these two
+    re-run on an otherwise fully-cached resume is correct — seeing anything *else*
+    re-run is a determinism bug (`tests/resume_check.sh` checks precisely that).
 
 ## Execution profiles
 
