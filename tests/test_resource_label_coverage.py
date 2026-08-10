@@ -23,6 +23,7 @@ caused this bug.
 
 from __future__ import annotations
 
+import ast
 import re
 from pathlib import Path
 
@@ -307,4 +308,532 @@ def test_exactly_one_resource_owner_per_process():
     assert not no_owner, (
         f"{len(no_owner)} process(es) have no resource owner for one or more of "
         "cpus/memory/time:\n" + "\n".join(no_owner)
+    )
+
+
+# ---------------------------------------------------------------------------
+# docs/resources.md's per-process table vs conf/modules.config.
+#
+# `docs/resources.md` restates every process's cpus/memory/time by hand. Nothing
+# stopped those numbers drifting from `conf/modules.config`, and four rows were
+# still wrong when this guard was written: TILED_SOLVE documented as 4 GB against
+# a config that says 1 GB (conf/modules.config:340); TILED_REG_TILE and
+# TILED_STITCH documented as flat 8 GB after both became parameter-derived
+# closures (:317, :360); and EXPORT_SPATIALDATA described as having "no label at
+# all", which cascaded into a false claim that it was the one process relying on
+# conf/base.config's fallback -- its label is a ternary, so it has one either way
+# (modules/local/export_spatialdata.nf:22). A fifth, PHENOTYPE, had already gone
+# with the process it described. Three of the four are reproduced as watched
+# failures below before this guard was trusted.
+#
+# This is the same shape as tests/test_layout.py: one file describes, one file
+# enforces, and the guard checks both directions --
+#   * every row in the doc table names a real process, and its cpus / memory /
+#     time / owner agree with what conf/modules.config (or the module's label)
+#     actually sets;
+#   * every process that has a label or a `withName:` resource block has a row.
+#
+# What is deliberately NOT compared, and why:
+#   * `TILED_REG_TILE` / `TILED_STITCH` memory is `tiledRegTileGb(params)` /
+#     `tiledStitchGb(params)` -- derived from `reg_tiled_tile`/`reg_tiled_halo`
+#     and `reg_tiled_out_tile` at task submission, not a literal. Re-deriving it
+#     here would duplicate the very
+#     formula this guard exists to stop duplicating, and evaluating Groovy from
+#     pytest is not on the table. So for these two rows the guard asserts the
+#     HELPER NAME appears in both the config expression and the doc cell, and
+#     leaves the illustrative "4 GB at defaults" figure unchecked. Renaming or
+#     replacing a helper therefore still fails the build; re-tuning the formula
+#     without touching its name does not. docs/resources.md says so in the same
+#     words, so the unchecked figure is labelled as such where a reader sees it.
+#   * `SPLIT_PRIOR_PYRAMID` and `SEG_QC_SEGMENT` are ALIASES, not modules. Their
+#     `withName:` blocks set no resource field (they override publishDir /
+#     ext.prefix only), so neither is required to have a row. SEG_QC_SEGMENT has
+#     one anyway -- it is a documented GPU/QC cost -- and ALIASES below maps it
+#     back to SEGMENT so its numbers are still checked against a real config
+#     block rather than skipped.
+# ---------------------------------------------------------------------------
+
+DOCS_RESOURCES = ROOT / "docs" / "resources.md"
+
+# Process names in docs/resources.md that are Nextflow ALIASES of another
+# process, so conf/modules.config configures them under the original name.
+ALIASES = {"SEG_QC_SEGMENT": "SEGMENT"}
+
+# `withLabel: 'name' { ... }` -- the opening brace is needed to brace-match the
+# body, exactly as WITH_NAME_OPEN_RE does for withName blocks.
+WITH_LABEL_OPEN_RE = re.compile(r"withLabel:\s*(?:'([^']+)'|\"([^\"]+)\")\s*\{")
+
+# The start of a `cpus = ` / `memory = ` / `time = ` assignment. Same anchoring
+# as RESOURCE_FIELD_RE, but this one is used to locate the right-hand side so
+# the expression can be read out, not merely to note that the field is set.
+FIELD_ASSIGN_RE = re.compile(r"^[ \t]*(cpus|memory|time)[ \t]*=[ \t]*", re.MULTILINE)
+
+# Any decimal number, in a config expression or a doc table cell.
+NUMBER_RE = re.compile(r"\d+(?:\.\d+)?")
+
+# A duration written the way both conf/modules.config and the doc write it:
+# `2.h`, `12.h`. Restricting the doc side to this shape keeps the CPU count and
+# the tier thresholds in neighbouring cells from being read as hours.
+HOURS_RE = re.compile(r"(\d+(?:\.\d+)?)\s*\.\s*h\b")
+
+# `tiledRegTileGb(params)` -- a per-task value derived from params at submission
+# time rather than a literal. See the header above for why these are exempt from
+# the numeric comparison and what is asserted instead.
+DERIVED_HELPER_RE = re.compile(r"\b(\w+)\(\s*params\s*\)")
+
+# Nextflow retries up to maxRetries = 3 (conf/base.config), so a task runs on
+# attempt 1..4 and a ramp has exactly four rungs. docs/resources.md enumerates
+# them for WARP_SEG_QC ("32 / 64 / 128 / 256"); computing the same four values
+# from the config expression is what makes those numbers checkable.
+ATTEMPTS = (1, 2, 3, 4)
+
+
+def _brace_match(text: str, open_brace_index: int) -> str:
+    """Return the body between `text[open_brace_index] == '{'` and its partner."""
+    assert text[open_brace_index] == "{"
+    depth = 1
+    pos = open_brace_index + 1
+    while depth > 0 and pos < len(text):
+        if text[pos] == "{":
+            depth += 1
+        elif text[pos] == "}":
+            depth -= 1
+        pos += 1
+    return text[open_brace_index + 1 : pos - 1]
+
+
+def _strip_comments(text: str) -> str:
+    """Drop `/* */` and `//` comments from an extracted expression.
+
+    Not load-bearing today, and said so rather than implied: no `cpus`/`memory`/
+    `time` right-hand side in conf/modules.config currently contains a comment.
+    The annotations that look like they would (WARP_SEG_QC's
+    `// 32 / 64 / 128 / 256` at conf/modules.config:456, TILED_SOLVE's note about
+    the 4 GB it used to ask for at :337-340) sit OUTSIDE the closure braces the
+    extractor reads, so they never reach here.
+
+    It stays because CONVERT_IMAGE, SEGMENT, SPLIT_CHANNELS, MERGE_AND_PYRAMID
+    and GENERATE_REGISTRATION_QC all have multi-line memory closures, and a
+    `// was 64.GB` added inside one would otherwise be read as a config value and
+    silently license that stale number in the doc. test_strip_comments_removes
+    _numbers_a_maintainer_would_annotate_with exercises it directly, so it is not
+    untested code waiting to be wrong.
+    """
+    text = re.sub(r"/\*.*?\*/", " ", text, flags=re.DOTALL)
+    return re.sub(r"//[^\n]*", " ", text)
+
+
+def parse_resource_exprs(body: str) -> dict[str, str]:
+    """Return {field: right-hand-side expression} for a withName/withLabel body.
+
+    The right-hand side is either a closure (`memory = { ... }`, read by
+    brace-matching, since it nests) or a bare literal to end of line
+    (`cpus = 8`).
+    """
+    exprs: dict[str, str] = {}
+    for match in FIELD_ASSIGN_RE.finditer(body):
+        pos = match.end()
+        if pos < len(body) and body[pos] == "{":
+            expr = _brace_match(body, pos)
+        else:
+            end = body.find("\n", pos)
+            expr = body[pos:] if end == -1 else body[pos:end]
+        exprs[match.group(1)] = _strip_comments(expr).strip()
+    return exprs
+
+
+def find_label_resource_exprs() -> dict[str, dict[str, str]]:
+    """Return {label: {field: expression}} for every `withLabel:` block."""
+    text = MODULES_CONFIG.read_text()
+    return {
+        (m.group(1) if m.group(1) is not None else m.group(2)): parse_resource_exprs(
+            _brace_match(text, m.end() - 1)
+        )
+        for m in WITH_LABEL_OPEN_RE.finditer(text)
+    }
+
+
+def find_withname_resource_exprs() -> dict[str, dict[str, str]]:
+    """Return {PROCESS: {field: expression}} unioned over matching withName blocks."""
+    text = MODULES_CONFIG.read_text()
+    exprs: dict[str, dict[str, str]] = {}
+    for match in WITH_NAME_OPEN_RE.finditer(text):
+        selector = match.group(1) if match.group(1) is not None else match.group(2)
+        body = _brace_match(text, match.end() - 1)
+        found = parse_resource_exprs(body)
+        for name in selector.split("|"):
+            exprs.setdefault(name, {}).update(found)
+    return exprs
+
+
+def find_process_labels() -> dict[str, list[str]]:
+    """Return {PROCESS: [labels it can resolve to]} for modules/local/*.nf.
+
+    A list, not a single value: `export_spatialdata.nf`'s label is a ternary and
+    can resolve to either branch depending on `--spatialdata_include_image`.
+    """
+    labels: dict[str, list[str]] = {}
+    for name, path in find_module_processes().items():
+        found: list[str] = []
+        for line in path.read_text().splitlines():
+            if LABEL_LINE_RE.match(line):
+                found.extend(extract_labels_from_line(line))
+        labels[name] = found
+    return labels
+
+
+def _eval_arithmetic(expr: str) -> float | None:
+    """Evaluate a pure-arithmetic expression, or return None if it is not one.
+
+    Only numbers and `+ - * / ** ( )` are honoured. Anything else -- a ternary,
+    a `.size()` call, a `?:` -- returns None, which is how a size-dependent tier
+    is distinguished from a flat request. Uses `ast` rather than `eval` so a
+    stray identifier cannot be executed.
+    """
+    try:
+        tree = ast.parse(expr, mode="eval")
+    except SyntaxError:
+        return None
+
+    def walk(node):
+        if isinstance(node, ast.Expression):
+            return walk(node.body)
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+            return node.value
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+            operand = walk(node.operand)
+            return None if operand is None else (operand if isinstance(node.op, ast.UAdd) else -operand)
+        if isinstance(node, ast.BinOp):
+            left, right = walk(node.left), walk(node.right)
+            if left is None or right is None:
+                return None
+            if isinstance(node.op, ast.Add):
+                return left + right
+            if isinstance(node.op, ast.Sub):
+                return left - right
+            if isinstance(node.op, ast.Mult):
+                return left * right
+            if isinstance(node.op, ast.Div):
+                return left / right
+            if isinstance(node.op, ast.Pow):
+                return left**right
+        return None
+
+    return walk(tree)
+
+
+def expr_values_per_attempt(expr: str) -> list[float] | None:
+    """Return the expression's value on attempts 1..4, or None if not a constant.
+
+    `12.GB * task.attempt` -> [12, 24, 36, 48]; `100.GB + 100.GB * task.attempt`
+    -> [200, 300, 400, 500]; `32.GB * (2 ** (task.attempt - 1))` ->
+    [32, 64, 128, 256]. A tiered closure (`(f < 10 ? 32.GB : ...)`) or a
+    param-derived one returns None -- those are compared differently.
+    """
+    if DERIVED_HELPER_RE.search(expr):
+        return None
+    values = []
+    for attempt in ATTEMPTS:
+        arithmetic = (
+            expr.replace("task.attempt", str(attempt))
+            .replace(".GB", "")
+            .replace(".h", "")
+        )
+        value = _eval_arithmetic(arithmetic)
+        if value is None:
+            return None
+        values.append(value)
+    return values
+
+
+def _numbers(text: str) -> set[float]:
+    return {float(m.group(0)) for m in NUMBER_RE.finditer(text)}
+
+
+def _gb_literals(expr: str) -> set[float]:
+    return {float(m.group(1)) for m in re.finditer(r"(\d+(?:\.\d+)?)\s*\.GB", expr)}
+
+
+def parse_doc_process_table() -> dict[str, dict[str, str]]:
+    """Return {PROCESS: {column: cell}} for every per-process row in docs/resources.md.
+
+    Only tables whose first header cell is literally `Process` are read, which
+    excludes the label table (`Label`), the fallback table (`Resource`), the
+    ceiling tables and the container table. Column lookup is by header name, so
+    the tiled table's extra `maxForks` column does not shift the others.
+    """
+    lines = DOCS_RESOURCES.read_text().splitlines()
+    rows: dict[str, dict[str, str]] = {}
+    headers: list[str] | None = None
+    for line in lines:
+        stripped = line.strip()
+        if not stripped.startswith("|"):
+            headers = None
+            continue
+        cells = [c.strip() for c in stripped.strip("|").split("|")]
+        if set(stripped) <= set("|- "):  # the `|---|---|` separator row
+            continue
+        normalised = [
+            (c.replace("`", "").replace("*", "").split() or [""])[0].lower() for c in cells
+        ]
+        if normalised and normalised[0] == "process":
+            headers = normalised
+            continue
+        if headers is None:
+            continue
+        name = cells[0].strip("`")
+        if not re.fullmatch(r"[A-Z][A-Z0-9_]*", name):
+            continue
+        rows[name] = dict(zip(headers, cells))
+    return rows
+
+
+def resource_owner_case(name: str) -> str:
+    """Return 'withName', 'label' or 'partial' for a module process.
+
+    Mirrors the three cases docs/resources.md's `<div class="gate">` names, and
+    is what the per-row Owner column and the three case counts are checked
+    against.
+    """
+    fields = find_withname_resource_fields().get(name, set())
+    if not find_process_labels().get(name):
+        return "withName"
+    return "label" if not fields else "partial"
+
+
+def effective_exprs(name: str, field: str) -> list[str]:
+    """Return the expression(s) that can supply `field` for `name`.
+
+    One entry normally; two when the module's `label` is a ternary and the field
+    is label-owned, since either branch is reachable at runtime.
+    """
+    base = ALIASES.get(name, name)
+    withname = find_withname_resource_exprs()
+    expr = withname.get(name, {}).get(field) or withname.get(base, {}).get(field)
+    if expr:
+        return [expr]
+    label_exprs = find_label_resource_exprs()
+    return [
+        label_exprs[label][field]
+        for label in find_process_labels().get(base, [])
+        if field in label_exprs.get(label, {})
+    ]
+
+
+def test_strip_comments_removes_numbers_a_maintainer_would_annotate_with():
+    """A number inside a comment in a memory closure must not count as config.
+
+    conf/modules.config has no such comment today (see _strip_comments), so this
+    is the only place the branch is exercised -- without it the helper would be
+    dead code that could rot unnoticed.
+    """
+    annotated = "32.GB * task.attempt   // was 64.GB before the bounding-box rewrite"
+    assert _strip_comments(annotated).strip() == "32.GB * task.attempt"
+    assert 64.0 not in _numbers(_strip_comments(annotated))
+    assert _strip_comments("1.GB /* 4.GB was 120x the observed peak */ * task.attempt").split() == [
+        "1.GB",
+        "*",
+        "task.attempt",
+    ]
+
+
+def test_doc_table_parser_finds_the_per_process_rows_only():
+    """Regression guard on the doc-table parser itself.
+
+    It must pick up the per-process tables and skip the label table -- whose
+    rows (`process_single`, ...) are lower-case and whose first header cell is
+    `Label`, not `Process`. A parser that swallowed those would compare a label
+    against conf/modules.config as if it were a process and could never fail,
+    and one that mis-indexed columns would compare cpus against memory.
+    """
+    rows = parse_doc_process_table()
+    assert "SEGMENT" in rows, "per-process tables not parsed -- scan pattern may be stale"
+    assert "process_single" not in rows, "the `Label` table must not be read as processes"
+    assert rows["SEGMENT"]["cpus"] == "`8`"
+    assert rows["SEGMENT"]["time"] == "`4.h × attempt`"
+    assert rows["SEGMENT"]["owner"] == "`withName`"
+    # The tiled table carries an extra trailing column; lookup is by header
+    # name, so `time` must still be the time and not shift into `maxForks`.
+    assert rows["TILED_SOLVE"]["time"] == "`8.h × attempt` *(label)*"
+    assert rows["TILED_SOLVE"]["maxforks"] == "—"
+
+
+def test_expr_values_per_attempt_handles_the_shapes_in_modules_config():
+    """Regression guard on the evaluator.
+
+    It must fold the two ramp shapes conf/modules.config uses (linear and
+    doubling) and the `A + B * attempt` shape of the medium/high labels, and it
+    must REFUSE a tiered or param-derived closure rather than silently returning
+    a partial number that would then be compared as if it were the whole rule.
+    """
+    assert expr_values_per_attempt("12.GB * task.attempt") == [12, 24, 36, 48]
+    assert expr_values_per_attempt("100.GB + 100.GB * task.attempt") == [200, 300, 400, 500]
+    assert expr_values_per_attempt("32.GB * (2 ** (task.attempt - 1))") == [32, 64, 128, 256]
+    assert expr_values_per_attempt("8") == [8, 8, 8, 8]
+    assert expr_values_per_attempt("(Math.ceil(tiledRegTileGb(params)) as int).GB * task.attempt") is None
+    assert expr_values_per_attempt("(file_gb < 10 ? 32.GB : 64.GB) * task.attempt") is None
+
+
+def test_every_documented_process_matches_conf_modules_config():
+    """Direction 1: every row in docs/resources.md agrees with the config.
+
+    cpus and time are compared as numbers. Memory is compared as the set of
+    magnitudes the config expression can produce (its literals plus its value on
+    attempts 1..4), with the attempt-1 value required to appear for a flat
+    request and every `N.GB` literal required to appear for a size-tiered one.
+    The two param-derived rows are matched on helper NAME instead -- see the
+    header of this section.
+    """
+    doc_rows = parse_doc_process_table()
+    processes = find_module_processes()
+    assert doc_rows, "No per-process rows parsed from docs/resources.md -- pattern may be stale."
+
+    problems: list[str] = []
+    for name in sorted(doc_rows):
+        row = doc_rows[name]
+        base = ALIASES.get(name, name)
+        if base not in processes:
+            problems.append(
+                f"{name}: documented in docs/resources.md but no `process {base} {{` "
+                "exists under modules/local/ -- delete the row or add the alias to "
+                "ALIASES in this test."
+            )
+            continue
+
+        # --- cpus ----------------------------------------------------------
+        exprs = effective_exprs(name, "cpus")
+        expected_cpus = set()
+        for expr in exprs:
+            values = expr_values_per_attempt(expr)
+            if values:
+                expected_cpus.add(values[0])
+        documented_cpus = _numbers(row.get("cpus", ""))
+        if expected_cpus and not (documented_cpus and documented_cpus <= expected_cpus):
+            problems.append(
+                f"{name}: doc table says cpus {sorted(documented_cpus)} but "
+                f"conf/modules.config gives {sorted(expected_cpus)}"
+            )
+
+        # --- time ----------------------------------------------------------
+        exprs = effective_exprs(name, "time")
+        expected_time = set()
+        for expr in exprs:
+            values = expr_values_per_attempt(expr)
+            if values:
+                expected_time.add(values[0])
+        documented_time = {float(m.group(1)) for m in HOURS_RE.finditer(row.get("time", ""))}
+        if expected_time and not (documented_time and documented_time <= expected_time):
+            problems.append(
+                f"{name}: doc table says time {sorted(documented_time)} h but "
+                f"conf/modules.config gives {sorted(expected_time)} h"
+            )
+
+        # --- memory --------------------------------------------------------
+        exprs = effective_exprs(name, "memory")
+        cell = row.get("memory", "")
+        helpers = {m.group(1) for expr in exprs for m in DERIVED_HELPER_RE.finditer(expr)}
+        if helpers:
+            missing = sorted(h for h in helpers if h not in cell)
+            if missing:
+                problems.append(
+                    f"{name}: memory is derived from {missing} in conf/modules.config, "
+                    "but the doc cell does not name the helper -- a doc row stating a "
+                    f"flat number here would be wrong the moment a parameter changes: {cell!r}"
+                )
+        elif exprs:
+            allowed: set[float] = set()
+            required_options: list[set[float]] = []
+            for expr in exprs:
+                allowed |= _numbers(expr)
+                values = expr_values_per_attempt(expr)
+                if values:
+                    allowed |= set(values)
+                    required_options.append({values[0]})
+                else:
+                    required_options.append(_gb_literals(expr))
+            documented_memory = _numbers(cell)
+            unjustified = sorted(documented_memory - allowed)
+            if unjustified:
+                problems.append(
+                    f"{name}: doc table's memory cell states {unjustified} GB, which "
+                    "appears nowhere in the conf/modules.config expression "
+                    f"{exprs!r} nor in its attempt-1..4 ramp"
+                )
+            if required_options and not any(opt <= documented_memory for opt in required_options):
+                problems.append(
+                    f"{name}: conf/modules.config asks for "
+                    f"{[sorted(o) for o in required_options]} GB but the doc table's "
+                    f"memory cell does not state it: {cell!r}"
+                )
+
+        # --- owner ---------------------------------------------------------
+        case = resource_owner_case(base)
+        owner_cell = row.get("owner", "")
+        if case == "withName":
+            ok = "withName" in owner_cell
+        elif case == "partial":
+            ok = "partial" in owner_cell
+        else:
+            ok = any(label in owner_cell for label in find_process_labels()[base])
+        if not ok:
+            problems.append(
+                f"{name}: doc table's Owner column says {owner_cell!r}, but "
+                f"conf/modules.config makes it a '{case}' process"
+            )
+
+    assert not problems, (
+        f"{len(problems)} row(s) in docs/resources.md disagree with "
+        "conf/modules.config. conf/modules.config is the source of truth; fix "
+        "the doc:\n" + "\n".join(problems)
+    )
+
+
+def test_every_configured_process_is_documented():
+    """Direction 2: every process with a resource owner has a doc-table row.
+
+    A process added to modules/local/ with a label or a `withName:` resource
+    block but no row is invisible to anyone sizing a cluster allocation from
+    docs/resources.md -- the table silently under-reports what the run will ask
+    the scheduler for.
+    """
+    documented = {ALIASES.get(n, n) for n in parse_doc_process_table()}
+    labels = find_process_labels()
+    withname_fields = find_withname_resource_fields()
+
+    missing = sorted(
+        name
+        for name in find_module_processes()
+        if (labels.get(name) or withname_fields.get(name)) and name not in documented
+    )
+    assert not missing, (
+        f"{len(missing)} process(es) have a resource owner in conf/modules.config "
+        "but no row in docs/resources.md's per-process table -- add one under the "
+        f"matching section: {missing}"
+    )
+
+
+def test_one_owner_rule_case_counts_match_conf_modules_config():
+    """The three counts in docs/resources.md's `case 1/2/3` panel must be real.
+
+    They were 14 / 6 / 7 against a tree holding 12 / 6 / 6 -- stale since the
+    phenotyping processes were removed, and wrong about EXPORT_SPATIALDATA,
+    which was counted as having no label at all.
+    """
+    counts = {"withName": 0, "label": 0, "partial": 0}
+    for name in find_module_processes():
+        counts[resource_owner_case(name)] += 1
+
+    text = DOCS_RESOURCES.read_text()
+    documented = [
+        int(m.group(1))
+        for m in re.finditer(r'<div class="d">[^<]*?(\d+) processes\.</div>', text)
+    ]
+    assert len(documented) == 3, (
+        "Expected three `N processes.` counts in the one-owner-rule panel of "
+        f"docs/resources.md, found {len(documented)} -- scan pattern may be stale."
+    )
+    assert documented == [counts["withName"], counts["label"], counts["partial"]], (
+        f"docs/resources.md's one-owner-rule panel claims {documented} processes "
+        f"in cases 1/2/3, but conf/modules.config + modules/local/*.nf give "
+        f"{[counts['withName'], counts['label'], counts['partial']]}."
     )
