@@ -423,44 +423,6 @@
                 }
             }
         },
-        "phenotyping_options": {
-            "title": "Phenotyping options",
-            "type": "object",
-            "description": "Optional panel-agnostic phenotyping. When panel_spec and panel_model are both null, phenotyping is skipped (constant 'Cell' classification). Not run in mode='add_cycle'.",
-            "properties": {
-                "panel_spec": {
-                    "type": [
-                        "string",
-                        "null"
-                    ],
-                    "description": "Path to the panel authoring spec (panel.yaml). Enables phenotyping when set.",
-                    "default": null
-                },
-                "panel_model": {
-                    "type": [
-                        "string",
-                        "null"
-                    ],
-                    "description": "Path to a frozen, compiled model_config.json (produced by COMPILE_PANEL).",
-                    "default": null
-                },
-                "pheno_alpha": {
-                    "type": "number",
-                    "description": "Conformal-risk-control target risk alpha (per-marker miscoverage budget).",
-                    "default": 0.05
-                },
-                "pheno_min_cal": {
-                    "type": "integer",
-                    "description": "Minimum per-marker calibration-set size.",
-                    "default": 50
-                },
-                "pheno_max_enumerate": {
-                    "type": "integer",
-                    "description": "Feasible-set brute-force enumeration ceiling.",
-                    "default": 100000
-                }
-            }
-        },
         "output_options": {
             "title": "Output options",
             "type": "object",
@@ -597,9 +559,6 @@
         },
         {
             "$ref": "#/$defs/quantification_options"
-        },
-        {
-            "$ref": "#/$defs/phenotyping_options"
         },
         {
             "$ref": "#/$defs/output_options"

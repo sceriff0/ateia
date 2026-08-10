@@ -214,9 +214,9 @@ workflow SEGMENTATION {
     // [meta, file] — EXTRACT_CELL_PROPERTIES.out.morphology, unchanged. Not part of
     // the checkpoint (morphology.csv is a same-run-only intermediate, never read back
     // by a later --start), but POSTPROCESSING still needs it to join against the
-    // per-marker intensity CSVs (ch_morphology) and, when phenotyping, against
-    // MERGE_QUANT_CSVS' output -- both joins moved out of this file with SEGMENT and
-    // EXTRACT_CELL_PROPERTIES, so the raw output has to cross the seam somewhere.
+    // per-marker intensity CSVs (ch_morphology) -- that join moved out of this file
+    // with SEGMENT and EXTRACT_CELL_PROPERTIES, so the raw output has to cross the
+    // seam somewhere.
     morphology       = EXTRACT_CELL_PROPERTIES.out.morphology
     checkpoint_csv   = ch_checkpoint_csv
     size_logs        = ch_size_logs
@@ -246,7 +246,7 @@ workflow SEGMENTATION {
     subworkflows/local/add_cycle.nf:241-255 already does when it reuses a prior run's
     cell/nuclei masks. Two reasons: (1) morphology.csv is NOT a checkpoint column at
     all (see lib/Checkpoint.groovy's 'segmented' entry) — it is a same-run-only
-    intermediate POSTPROCESSING needs for its quantification/phenotyping joins, so it
+    intermediate POSTPROCESSING needs for its quantification joins, so it
     has no persisted path to read back regardless; and (2) re-deriving contours
     alongside it, from the same mask, keeps this reader symmetric with add_cycle's
     only other "resume from a persisted mask" consumer instead of adding a second way

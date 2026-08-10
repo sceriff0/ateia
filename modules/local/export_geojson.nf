@@ -22,7 +22,7 @@ process EXPORT_GEOJSON {
     // and EXTRACT_NUCLEI_PROPERTIES emit a file literally named contours.json, and
     // (when compartments are disabled) the same cell-contours file is passed into
     // both slots — either way an unstaged duplicate would collide in the work dir.
-    tuple val(meta), path(quant_csv), path(contours_json), path(nucleus_contours_json, stageAs: 'nucleus_contours.json'), path(phenotypes, stageAs: 'phenotypes.csv'), path(model_config, stageAs: 'model_config.json')
+    tuple val(meta), path(quant_csv), path(contours_json), path(nucleus_contours_json, stageAs: 'nucleus_contours.json')
 
     output:
     tuple val(meta), path("export/cells.geojson"), emit: geojson
@@ -31,7 +31,6 @@ process EXPORT_GEOJSON {
     // in QuPath; same measurements, so FlowPath compartment gating still works.
     tuple val(meta), path("export/cells_wholecell.geojson"), optional: true, emit: geojson_wholecell
     tuple val(meta), path("export/cells_data.csv"), emit: csv
-    tuple val(meta), path("export/panel_model.json"), optional: true, emit: panel_model
     path "versions.yml"                            , emit: versions
     path("*.size.csv")                             , emit: size_log
 
@@ -43,10 +42,6 @@ process EXPORT_GEOJSON {
     // Per-compartment quantification: pass the nucleus contours (re-keyed to cell
     // labels) so each cell gets a nucleusGeometry in the single combined cells.geojson.
     def nucleus_arg = params.quantify_compartments ? "--nucleus_contours_json ${nucleus_contours_json}" : ''
-    // Phenotype-aware export: only wired up when a panel is configured. Otherwise
-    // export_geojson.py falls back to its legacy constant-"Cell" classification and
-    // writes no panel_model.json sidecar.
-    def pheno_arg = (params.panel_spec || params.panel_model) ? "--phenotypes ${phenotypes} --panel_model ${model_config} --patient_id ${meta.patient_id}" : ''
     """
     # Log input size for tracing (-L follows symlinks)
     input_bytes=\$(stat -L --printf="%s" ${quant_csv} 2>/dev/null || echo 0)
@@ -60,7 +55,6 @@ process EXPORT_GEOJSON {
         -o export \\
         --contours_json ${contours_json} \\
         ${nucleus_arg} \\
-        ${pheno_arg} \\
         ${args}
 
     ${ProcessEnvelope.versions(task.process, ['pandas', 'scipy'])}
@@ -72,7 +66,6 @@ process EXPORT_GEOJSON {
     touch export/cells.geojson
     ${params.quantify_compartments ? 'touch export/cells_wholecell.geojson' : ''}
     touch export/cells_data.csv
-    ${(params.panel_spec || params.panel_model) ? 'touch export/panel_model.json' : ''}
     echo "STUB,${meta.patient_id},stub,0" > ${meta.patient_id}.EXPORT_GEOJSON.size.csv
 
     ${ProcessEnvelope.versionsStub(task.process, ['pandas', 'scipy'])}
