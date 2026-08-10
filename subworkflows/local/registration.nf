@@ -78,7 +78,33 @@ workflow REGISTRATION {
             [key, meta, file]
         }
         .groupTuple()
-        .map { patient_id, metas, files ->
+        .map { group_key, metas, files ->
+            // UNWRAP THE groupKey. `groupKey(id, size)` above is a STREAMING SIZE HINT,
+            // nothing more -- but groupTuple() emits the nextflow.extension.GroupKey
+            // OBJECT itself as element 0, and it used to travel on from here as the
+            // patient id: into REGISTER's `val(patient_id)` and back out on
+            // REGISTER.out.registrar / .stage_checkpoint. GroupKey delegates hashCode()
+            // to the id it wraps but its equals() is ASYMMETRIC --
+            // `groupKey('P001',2).equals('P001')` is true, `'P001'.equals(groupKey(...))`
+            // is false -- so a HashMap lookup matches in one direction only.
+            //
+            // That is a silent, ~1-run-in-2-under-load data loss, not a cosmetic issue.
+            // seg_qc.nf keys its GeoJSON tuples off the plain String meta.patient_id and
+            // combines them with the transform, whose key was this GroupKey.
+            // CombineOp.emit() stores each side in a HashMap under the `by` values and
+            // crosses with what the other side has already stored, so WHICHEVER SIDE
+            // ARRIVES FIRST decides the stored key type: GeoJSON first -> stored under
+            // String, and the later GroupKey lookup hits; transform first -> stored under
+            // GroupKey, and the later String lookup MISSES and the patient's whole
+            // registration QC is dropped with the run still exiting 0.
+            //
+            // The id is a plain String everywhere else it is used (meta.patient_id, from
+            // the samplesheet), so it must be a plain String here too. Unwrapped the
+            // moment the group exists -- the hint has done its job by then.
+            // tests/test_group_key_unwrapped.py fails if any groupKey escapes its
+            // grouping again.
+            def patient_id = group_key.toString()
+
             // CANONICAL ORDER. groupTuple() emits in ARRIVAL order -- whichever slide
             // finished preprocessing first -- and everything below carries that order
             // into REGISTER as `preproc_files` / `all_metas`, which Nextflow hashes
