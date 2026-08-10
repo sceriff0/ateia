@@ -12,7 +12,7 @@ Examples
 Notes
 -----
 This module consolidates metadata extraction logic used by register.py,
-split_multichannel.py, convert_image.py, and segment_to_geojson.py.
+split_multichannel.py, and convert_image.py.
 """
 
 from __future__ import annotations

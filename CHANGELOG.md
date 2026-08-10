@@ -244,6 +244,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `lib/WarpBackends.groovy`, not from the param, so the two can never disagree.
 
 ### Fixed
+- **The `reg_qc=2` registration QC now segments with the run's own segmenter, and at
+  stock defaults it runs at all.** `SEG_QC_GEOJSON` ran StarDist itself
+  (`bin/segment_to_geojson.py` + `starDistCommonFlags()`), making it the one segmenter
+  in the pipeline that ignored `params.seg_method`. Two consequences, both live:
+  at the shipped default (`seg_method='instantseg'`) the QC scored cells found by a
+  *different* segmenter than the one whose masks the run ships; and because
+  `segmentation_model_dir` defaults to null while `segmentation_model` is not a StarDist
+  built-in, the process raised `FileNotFoundError` — swallowed by the QC block's
+  `errorStrategy` `'ignore'` branch, so a stock run (where `reg_qc = 2` is the DEFAULT)
+  silently produced **no registration QC at all** and still exited 0. Only
+  `conf/test.config` escaped it, by overriding `segmentation_model` to a real built-in.
+  `subworkflows/local/seg_qc.nf` now segments the native slides with `SEGMENT` itself,
+  aliased `SEG_QC_SEGMENT`, so the backend follows `--seg_method` by construction;
+  `SEG_QC_GEOJSON` keeps only the label-image → polygon half, via `bin/mask_to_geojson.py`
+  (now tracked executable — it is invoked by name for the first time).
+  `bin/segment_to_geojson.py` is deleted.
+  **Not a scoring change for a fixed backend.** The deleted script's last act was to call
+  the same `mask_to_feature_collection()` on the same in-memory `cell_mask`; the only new
+  step is a lossless zlib-TIFF round trip, pinned by
+  `tests/test_seg_qc_geojson_equivalence.py`. **Two things do change on purpose:** the
+  default run now segments with InstanSeg rather than StarDist (that is the fix), and on
+  the stardist backend the nuclear channel is chosen positionally (`--dapi-channel 0`,
+  guarded by `SegBackends`' channel-0 check) instead of resolved from OME channel names.
+  These agree for `CONVERT_IMAGE` output, which is everything reaching this QC, because
+  `CONVERT_IMAGE` normalises the nuclear channel to index 0. Where they diverge, they
+  diverge in two directions and both are deliberate: a slide whose nuclear marker sits at
+  index *n* > 0 was previously segmented at *n* and now fails the guard instead — the same
+  contract `SEGMENT` already enforces on the registered image, so the QC stops being more
+  permissive than the pipeline it is measuring; and a slide with no matching marker at all
+  was previously segmented at index 0 *silently* (`find_nuclear_index`'s fallback) and now
+  fails there too. A failure here is swallowed by the QC `errorStrategy`, so the visible
+  effect in both cases is a missing GeoJSON rather than a failed run.
+  **Published output is unchanged:** verified by diffing a full `-profile test -stub`
+  tree against the same run at `1ad1271` — 62 files both sides, identical but for the
+  QC report's timestamped filename. The QC's per-slide masks are deliberately not
+  published (`publishDir = [ enabled: false ]`): `<pid>/segmentation/` is indexed by
+  `csv/segmented.csv`, which names exactly one per-patient mask.
+- **An aliased process silently inherited the base process' `publishDir`.** Nextflow
+  matches a config selector against an alias' own name *and* its process' original
+  declared name, so `withName: 'SEGMENT'` governs `SEG_QC_SEGMENT` too. That is wanted for
+  container/resources/`ext.args` and a data-loss bug for `publishDir` — it already fired
+  once here, on `SPLIT_CHANNELS`/`SPLIT_PRIOR_PYRAMID`. `tests/test_process_alias_config.py`
+  now fails if any alias of a publishing process lacks its own `publishDir` override, or
+  places it textually *before* the block it means to override (later matching selectors
+  win, per field).
+- **`SEGMENT`'s size log is named from `task.ext.prefix`, not `meta.patient_id`.**
+  Unchanged for `SEGMENT` itself (one task per patient), but the QC alias runs once per
+  *slide*, so every slide of a patient would have written the same
+  `<pid>.SEGMENT.size.csv` into the directory `AGGREGATE_SIZE_LOGS` stages them all into.
+
 - **`TILED_COARSE` never finished inside its 2 h walltime — ORB was being thresholded
   against raw uint16 counts.** scikit-image's `ORB(fast_threshold=...)` is an *absolute*
   intensity difference, and `img_as_float` rescales only **integer** inputs — so the

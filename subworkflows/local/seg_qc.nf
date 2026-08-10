@@ -5,10 +5,19 @@
     Shared by REGISTRATION (linear pipeline) and ADD_CYCLE (incremental cyclic-IF), which
     previously carried near-verbatim copies of this block.
 
-    What it does: segment each slide's DAPI on its NATIVE (pre-registration) image into a
-    cell GeoJSON, then warp those polygons through the registrar the registration method
-    produced and score BEFORE-vs-AFTER overlap (Dice/IoU/instance-F1) plus per-cell
-    centroid residuals.
+    What it does: segment each slide on its NATIVE (pre-registration) image, trace the
+    resulting cell mask into a GeoJSON, then warp those polygons through the registrar the
+    registration method produced and score BEFORE-vs-AFTER overlap (Dice/IoU/instance-F1)
+    plus per-cell centroid residuals.
+
+    THE QC SEGMENTS WITH THE RUN'S OWN SEGMENTER. SEG_QC_SEGMENT is `SEGMENT` under an
+    alias, so `params.seg_method` selects the backend here exactly as it does for the
+    shipped masks. Until this change SEG_QC_GEOJSON ran StarDist unconditionally, which
+    (a) scored a different segmenter's cells than the run shipped at the default
+    seg_method='instantseg', and (b) could not run at all at stock defaults -- see that
+    module's header. Segmenting the clean NATIVE image rather than a warped one is
+    unchanged and still the point: it isolates registration quality from
+    segment-on-interpolated-pixels bias.
 
     The scorer (bin/warp_seg_qc.py) is method-agnostic; only the *warper* differs, so the
     method dispatch lives here rather than at the call sites:
@@ -50,13 +59,15 @@
     Output:
         metrics   [meta, *_seg_qc.json]
         per_cell  [meta, *_reg_residuals.csv]  (optional output of the warp process)
-        size_log  size logs of SEG_QC_GEOJSON + whichever warp process ran
-        versions  versions.yml of SEG_QC_GEOJSON + whichever warp process ran (already .first())
+        size_log  size logs of SEG_QC_SEGMENT + SEG_QC_GEOJSON + whichever warp process ran
+        versions  versions.yml of SEG_QC_SEGMENT + SEG_QC_GEOJSON + whichever warp process
+                  ran (already .first())
 ========================================================================================
 */
 
-include { SEG_QC_GEOJSON    } from '../../modules/local/seg_qc_geojson'
-include { WARP_SEG_QC       } from '../../modules/local/warp_seg_qc'
+include { SEGMENT as SEG_QC_SEGMENT } from '../../modules/local/segment'
+include { SEG_QC_GEOJSON            } from '../../modules/local/seg_qc_geojson'
+include { WARP_SEG_QC               } from '../../modules/local/warp_seg_qc'
 
 workflow SEG_QC {
     take:
@@ -67,7 +78,44 @@ workflow SEG_QC {
     method
 
     main:
-    SEG_QC_GEOJSON(ch_native_images)
+    // ── segment the native slides with THE RUN'S OWN SEGMENTER ──────────────────
+    // SEGMENT itself, aliased. Not a second segmentation code path that happens to
+    // agree with it: the alias is the same process body, the same lib/SegBackends
+    // table, the same container/guard/flags, so the QC follows params.seg_method for
+    // free and cannot drift from what the run actually ships. Before this, SEG_QC_GEOJSON
+    // ran StarDist unconditionally -- see that module's header for the two bugs that
+    // caused, including a silent no-op at stock defaults.
+    //
+    // ALIASING INHERITS CONFIG, INCLUDING publishDir -- which is the trap here. Nextflow
+    // matches a `withName:` selector against an alias' own name AND its process' original
+    // declared name, so conf/modules.config's `withName: 'SEGMENT'` already governs
+    // SEG_QC_SEGMENT (container, resources, backend ext.args, GPU wiring -- all of which we
+    // want) and would also publish these masks into <pid>/segmentation/, a tree
+    // csv/segmented.csv indexes and which must contain exactly one per-patient mask. A
+    // `withName: 'SEG_QC_SEGMENT'` block, textually after SEGMENT's, turns publishing off
+    // and sets a per-slide ext.prefix. This is the same shape, and the same hazard, as
+    // SPLIT_CHANNELS / SPLIT_PRIOR_PYRAMID -- see that pair's comment in
+    // conf/modules.config for the debug-log evidence. tests/test_process_alias_config.py
+    // fails if an aliased process ever loses that override.
+    def seg_params = SegBackends.ctxParams(params)
+
+    // The slide name is resolved ONCE, here, from the native image, and travels as
+    // meta.qc_slide. It must equal the registrar's slide_dict key -- VALIS's own
+    // convention (valtils.get_name strips .ome.tif/.ome.tiff) -- because WARP_SEG_QC looks
+    // the slide up by it. It cannot be recovered downstream from the mask's filename: the
+    // stardist backend names masks after the image stem ('foo.ome'), instantseg and cellsam
+    // after ext.prefix. Carrying it on meta rather than joining it back keeps the pairing
+    // structural instead of dependent on Map equality holding across a process boundary.
+    ch_to_segment = ch_native_images.map { meta, img ->
+        tuple(meta + [qc_slide: img.name.replaceAll(/\.ome\.tiff?$/, '').replaceAll(/\.tiff?$/, '')],
+              img,
+              seg_params)
+    }
+    SEG_QC_SEGMENT(ch_to_segment)
+
+    // Label image -> polygons. Backend-agnostic by construction: it reads a plain label
+    // TIFF, which all three backends emit under the same `*_cell_mask.tif` contract.
+    SEG_QC_GEOJSON(SEG_QC_SEGMENT.out.cell_mask)
 
     ch_gj = SEG_QC_GEOJSON.out.geojson.branch { meta, gj ->
         reference: meta.is_reference
@@ -129,6 +177,8 @@ workflow SEG_QC {
     emit:
     metrics  = ch_metrics
     per_cell = ch_per_cell
-    size_log = SEG_QC_GEOJSON.out.size_log.mix(ch_warp_size)
-    versions = SEG_QC_GEOJSON.out.versions.first().mix(ch_warp_versions.first())
+    size_log = SEG_QC_SEGMENT.out.size_log.mix(SEG_QC_GEOJSON.out.size_log).mix(ch_warp_size)
+    versions = SEG_QC_SEGMENT.out.versions.first()
+        .mix(SEG_QC_GEOJSON.out.versions.first())
+        .mix(ch_warp_versions.first())
 }

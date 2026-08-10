@@ -261,17 +261,6 @@ ARGPARSE_DEFAULT_ALLOWLIST = {
             "is the more useful behavior than silently assuming 0.325."
         ),
     },
-    "segment_to_geojson.py:--nuclear-markers": {
-        "reason": (
-            "default=None is intentional per the script's own help text: "
-            "'SEG_QC_GEOJSON always passes params.nuclear_markers; the "
-            "default is only for standalone use.' Confirmed true: "
-            "modules/local/seg_qc_geojson.nf:44 always builds and passes "
-            "`--nuclear-markers ${MarkerUtils.markerList(params.nuclear_"
-            "markers).join(' ')}`, so the pipeline never relies on this "
-            "default."
-        ),
-    },
     "merge_quant_csvs.py:--nuclear-markers": {
         "reason": (
             "Same contract as preprocess.py's and split_multichannel.py's "

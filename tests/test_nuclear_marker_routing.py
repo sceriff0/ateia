@@ -92,10 +92,16 @@ def test_scan_actually_finds_the_consumers():
     assert len(sites) >= 6, f"only {len(sites)} read sites found -- globs may be stale"
     # The consumers this task routed. If one disappears, that is a real change worth
     # noticing rather than a scan silently going quiet.
+    # seg_qc_geojson.nf was on this list until the reg_qc=2 QC stopped segmenting for
+    # itself. It read params.nuclear_markers only to tell its own StarDist invocation
+    # which channel was nuclear; that invocation is now SEGMENT's (aliased
+    # SEG_QC_SEGMENT), so the read moved to the place that already owned it --
+    # SegBackends.groovy, still on this list, where the stardist guard and the cellsam
+    # index both route through MarkerUtils. Removed rather than replaced: nothing new
+    # reads the parameter, one duplicate reader stopped.
     for expected in (
         "convert_image.nf",
         "split_channels.nf",
-        "seg_qc_geojson.nf",
         "SegBackends.groovy",
         "input_check.nf",
     ):
