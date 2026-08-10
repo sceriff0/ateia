@@ -84,13 +84,13 @@ process REGISTER {
     echo "=== Copying input files to preprocessed/ ==="
 
     # Collect all OME-TIFF files from staged ref/ and input_*/ directories
-    find -L ref input_* -maxdepth 1 -type f \\( -name "*.ome.tif" -o -name "*.ome.tiff" \\) 2>/dev/null > /tmp/files_to_copy.txt || true
+    find -L ref input_* -maxdepth 1 -type f \\( -name "*.ome.tif" -o -name "*.ome.tiff" \\) 2>/dev/null > files_to_copy.txt || true
 
     echo "Files to copy:"
-    cat /tmp/files_to_copy.txt
+    cat files_to_copy.txt
 
     # Parallel hard-link copy; cp -Ln skips duplicates (reference may also be in input files)
-    cat /tmp/files_to_copy.txt | xargs -P ${task.cpus} -I {} sh -c '
+    cat files_to_copy.txt | xargs -P ${task.cpus} -I {} sh -c '
         dest="preprocessed/\$(basename "{}")"
         cp -Ln "{}" "\$dest" 2>/dev/null && echo "Copied: {}" || echo "Skipped (already exists): {}"
     '

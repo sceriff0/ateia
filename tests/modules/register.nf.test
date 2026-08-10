@@ -151,6 +151,71 @@ nextflow_process {
         }
     }
 
+    test("Should stage its file list at a task-relative path, not /tmp - rendered command") {
+
+        // Tagged `stub` so CI's blocking `nf-test test --tag stub` gate runs it, but
+        // deliberately WITHOUT `options "-stub"` — `-stub` never evaluates a `script:`
+        // block, so a stub run cannot see the `/tmp/files_to_copy.txt` fix at all (same
+        // blind spot documented in generate_qc_report.nf.test). This pins the fix: REGISTER
+        // is per-patient with maxForks > 1, and under Singularity /tmp is host-bind-mounted,
+        // so two concurrent tasks sharing a constant /tmp path would each stage the other's
+        // slide list. The list must live at a plain relative path inside the task's own
+        // work directory instead.
+        //
+        // The blocking gate runs `--profile test` (no docker), so this executes register.py
+        // for real on the bare host rather than in the VALIS container; register.py is not
+        // expected to succeed there. That is fine — like the GENERATE_QC_REPORT precedent,
+        // the assertions read the rendered .command.sh rather than process outcome, so the
+        // case holds whether or not the script completes.
+        tag "stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [patient_id: 'P001'],
+                    'P001',
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    [
+                        file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)
+                    ],
+                    [
+                        [patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK', 'SMA']],
+                        [patient_id: 'P001', is_reference: false, channels: ['DAPI', 'PANCK', 'SMA']]
+                    ]
+                ]
+                """
+            }
+        }
+
+        then {
+            // Nextflow lays tasks out as <workDir>/<2 hex>/<30 hex>/.command.sh.
+            def rendered = []
+            new File("$workDir").eachFileRecurse { f ->
+                if (f.name == '.command.sh' && f.text.contains('files_to_copy.txt')) {
+                    rendered << f.text
+                }
+            }
+
+            assertAll(
+                { assert rendered.size() >= 1,
+                    "no rendered REGISTER .command.sh found under the task work dir" },
+                // The assertion with teeth: against the pre-fix module this reads
+                // `/tmp/files_to_copy.txt` in all three spots (find redirect, and two cats)
+                // and this fails.
+                { assert rendered.every { !it.contains('/tmp/files_to_copy.txt') },
+                    "rendered command still writes/reads the shared /tmp path: " + rendered.join(' --- ') },
+                // The replacement path must be plain and relative (no leading '/'), which
+                // keeps it inside the task's own work directory rather than any shared or
+                // absolute location.
+                { assert rendered.every { it.contains('> files_to_copy.txt') },
+                    "rendered command: " + rendered.join(' --- ') },
+                { assert rendered.every { it.contains('cat files_to_copy.txt') },
+                    "rendered command: " + rendered.join(' --- ') }
+            )
+        }
+    }
+
     test("Should run VALIS batch registration - real") {
 
         tag "real"
