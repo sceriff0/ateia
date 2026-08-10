@@ -84,17 +84,73 @@ read -- so the guard PASSED on genuinely buggy code::
 
 A guard that silently passes on a real leak is the exact defect class this
 branch exists to remove, so `_code_view()` masks comments AND string contents in
-one pass: `'...'`, `"..."`, `'''...'''`, triple-double-quoted, and slashy
-`/.../`, honouring backslash escapes. GString interpolation is deliberately NOT
-masked -- `${...}` and `$ident` stay verbatim, so their braces still balance and
-a read hidden inside an interpolation is still counted (a GString is not an
-unwrap: `GString.equals(String)` is false too).
+one pass: `'...'`, `"..."`, `'''...'''`, triple-double-quoted, slashy `/.../`
+and dollar-slashy `$/.../$`, honouring backslash escapes everywhere except
+`$/.../$`, where Groovy makes a backslash a literal character. GString
+interpolation is deliberately NOT masked -- `${...}` and `$ident` stay verbatim,
+so their braces still balance and a read hidden inside an interpolation is still
+counted (a GString is not an unwrap: `GString.equals(String)` is false too).
 
-And because a tokenizer can always be wrong about something -- Groovy's `/` is
-genuinely ambiguous between division and a slashy string -- `_code_view()` ends
-by asserting that the masked file's delimiters balance. Anything it
-mis-tokenizes therefore RAISES, naming the file and line. There is no path on
-which this check truncates a body and passes.
+WHAT THIS GUARD GUARANTEES, AND WHAT IT DOES NOT
+------------------------------------------------
+An earlier revision of this docstring claimed "there is no path on which this
+check truncates a body and passes". That was false, and review built the
+counterexample: Groovy allows a slashy string after a keyword (`return /re/`),
+where the preceding CHARACTER is alphanumeric, so a character-only classifier
+read it as division; a stray quote inside the misread body then opened a real
+string state that blanked a later leaking read out of the view -- and because
+that spurious mask spanned no brackets, the balance assertion never fired. A
+guard that overstates its own coverage is the failure this branch exists to
+remove, so the honest statement is:
+
+GUARANTEED
+  * comments and the string forms below are masked before anything is parsed;
+  * the operator chain is walked structurally, so the audited closure is the
+    group's real consumer or the check fails (never a lexically nearby one);
+  * `_assert_balanced` runs over EVERY scanned `.nf` on every test run, so a
+    mis-mask that changes any bracket, brace or parenthesis count RAISES,
+    naming file and line;
+  * a raw newline inside a `'` or `"` string RAISES -- Groovy forbids it, so
+    reaching one means the opening quote was not really a string opener. This
+    is the second net under the `/` heuristic, and it is the one that catches a
+    spurious mask which hides code WITHOUT touching a delimiter, where
+    `_assert_balanced` would see nothing. Watched firing on
+    `println /it's <newline> def bad = g <newline> fine/` -- `println` is not
+    in `_SLASHY_KEYWORDS`, so the `/` is read as division and the `'` opens a
+    spurious string, exactly the shape review built.
+
+NOT GUARANTEED -- known residual limits
+  1. The `/` classification is a HEURISTIC. It treats `/` as opening a slashy
+     string when the preceding significant token is expression-opening
+     punctuation or one of `_SLASHY_KEYWORDS`. A slashy string opened in some
+     other expression-start context this list does not name would still be read
+     as division. For a leak to then slip through, the misread body would have
+     to contain an odd number of quote characters AND the resulting spurious
+     mask would have to close before the end of its line AND blank a leaking
+     read AND remove no delimiter. Narrow, but not impossible: it is a limit,
+     not a guarantee.
+  2. When either net fires, the guard REFUSES TO AUDIT and names the delimiter
+     or quote it choked on -- which can be nowhere near the leak. Review's
+     `return /it's ... fine'` reproducer is now classified as a slashy string
+     (correctly: Groovy reads it the same way, and the closure's `}` therefore
+     sits INSIDE the string), so the file is genuinely unbalanced and the
+     failure reads "registration.nf:51: unclosed '{'" -- the workflow's own
+     opening brace, not the `def bad = g` line. Loud and never silent, but a
+     refusal to scan, not a diagnosis of the leaking read.
+  3. Dollar-slashy `$/.../$` is masked, but its `$$` and `$/` escapes are not
+     modelled, so a body containing them can terminate early. Before this
+     round the form was not recognised at all and its body was scanned AS CODE
+     -- an earlier revision of this list claimed that "raises unterminated
+     string literal, which is loud"; it does not, it passed silently.
+  4. The group is followed only as far as its own operator chain. A
+     `groupTuple()` whose result is assigned to a variable and consumed in a
+     later statement is not traced; it fails rule 3 ("ends its chain") instead.
+     That is conservative and loud, never silent, but it is a false-positive
+     shape a future refactor could legitimately hit.
+
+A hand-rolled Groovy lexer will never be provably complete. Three rounds of
+hardening bought the two assertions above; what is left is stated here rather
+than chased.
 
 This check is static because the failure is a ~1-in-2 arrival-order race: a
 behavioural test passes by luck far too often to be worth anything.
@@ -114,6 +170,18 @@ _CLOSE = ")]}"
 
 
 _SLASHY_PRECEDERS = set("([{,;=~!&|?:+-*%<>^")
+
+# Groovy allows a slashy string wherever an expression may START, and after a
+# keyword the preceding CHARACTER is alphanumeric -- `return /re/`, `case /re/:`.
+# Looking only at the character therefore misread those as division, which is how
+# a spurious quote inside the misread body could open a string state and blank
+# real code out of the view. The classification is token-aware for that reason.
+_SLASHY_KEYWORDS = frozenset(
+    {
+        "return", "case", "in", "when", "else", "assert", "new", "instanceof",
+        "if", "while", "do", "switch", "throw", "yield", "and", "or", "not",
+    }
+)
 
 
 def _code_view(path: Path) -> str:
@@ -137,11 +205,20 @@ def _code_view(path: Path) -> str:
             if out[k] != "\n":
                 out[k] = " "
 
-    def prev_code_char(pos: int):
+    def prev_significant(pos: int):
+        """(previous non-space char, the identifier ending at it or None)."""
         k = pos - 1
         while k >= 0 and out[k] in " \t\r\n":
             k -= 1
-        return out[k] if k >= 0 else None
+        if k < 0:
+            return None, None
+        ch = out[k]
+        if not (ch.isalnum() or ch == "_"):
+            return ch, None
+        j = k
+        while j >= 0 and (out[j].isalnum() or out[j] == "_"):
+            j -= 1
+        return ch, "".join(out[j + 1 : k + 1])
 
     while i < n:
         if state is None:
@@ -171,21 +248,31 @@ def _code_view(path: Path) -> str:
                 blank(i, j + 2)
                 i = j + 2
                 continue
+            if src.startswith("$/", i):
+                # Dollar-slashy `$/ ... /$`. Without this branch its body was
+                # scanned AS CODE, so a brace or a quote inside it stayed live --
+                # the round-2 truncation defect wearing a different delimiter.
+                state = {"q": "/$", "interp": True, "line": _line_of(src, i)}
+                i += 2
+                continue
             if src.startswith("'''", i) or src.startswith('"""', i):
-                state = {"q": src[i : i + 3], "interp": c == '"'}
+                state = {"q": src[i : i + 3], "interp": c == '"', "line": _line_of(src, i)}
                 i += 3
                 continue
             if c in "'\"":
-                state = {"q": c, "interp": c == '"'}
+                state = {"q": c, "interp": c == '"', "line": _line_of(src, i)}
                 i += 1
                 continue
             if c == "/":
-                # Groovy's one genuine ambiguity: slashy string vs division. The
-                # preceding significant character settles it, and the balance
-                # assertion below catches any case where it does not.
-                prev = prev_code_char(i)
-                if prev is None or prev in _SLASHY_PRECEDERS:
-                    state = {"q": "/", "interp": True}
+                # Groovy's one genuine ambiguity: slashy string vs division.
+                # Settled by the preceding significant TOKEN -- punctuation that
+                # opens an expression, or a keyword that does. This is a
+                # heuristic and is documented as one; the two assertions below
+                # (delimiter balance, and no raw newline inside a '' or ""
+                # string) are what catch the cases it gets wrong.
+                prev, word = prev_significant(i)
+                if prev is None or prev in _SLASHY_PRECEDERS or word in _SLASHY_KEYWORDS:
+                    state = {"q": "/", "interp": True, "line": _line_of(src, i)}
                     i += 1
                     continue
             i += 1
@@ -194,10 +281,29 @@ def _code_view(path: Path) -> str:
         # --- inside a string literal ---
         q = state["q"]
         c = src[i]
-        if c == "\\":
+        if c == "\\" and q != "/$":
+            # `\` escapes in every Groovy string form EXCEPT `$/ ... /$`, where
+            # it is a literal character and the escapes are `$$` and `$/`.
             blank(i, i + 2)
             i += 2
             continue
+        if c == "\n" and len(q) == 1 and q != "/":
+            # Groovy forbids a raw newline inside a '' or "" string (an escaped
+            # one is consumed by the branch above), so reaching here means the
+            # opening quote was not really a string opener -- the classic
+            # symptom of a slashy string misread as division, whose body then
+            # contained a stray quote. That spurious mask can blank real code
+            # while removing no delimiters, so `_assert_balanced` would never
+            # see it. Raise instead.
+            raise AssertionError(
+                f"{path}:{state['line']}: a {q}-quoted string opened here is "
+                f"still open at the end of line {_line_of(src, i)}, which Groovy "
+                "does not allow. The "
+                "scanner has mis-tokenized something before it (most likely a "
+                "slashy string read as division), so this file's code view "
+                "cannot be trusted. Refusing to audit rather than risk blanking "
+                "a real read."
+            )
         if src.startswith(q, i):
             blank(i, i + len(q))
             state = None
