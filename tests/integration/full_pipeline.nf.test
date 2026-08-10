@@ -114,7 +114,7 @@ nextflow_pipeline {
 
         when {
             params {
-                input = "$projectDir/tests/testdata/valid_checkpoint_postprocessing.csv"
+                input = "$projectDir/tests/testdata/valid_checkpoint_segmented.csv"
                 outdir = "$outputDir"
                 start = "postprocessing"
 
