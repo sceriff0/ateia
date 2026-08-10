@@ -152,7 +152,7 @@ def test_every_module_label_resolves_to_a_conf_modules_config_selector():
 #
 # Both are bugs; exactly one of {label, full withName coverage} must be true
 # per process. A *partial* withName override (some but not all of
-# cpus/memory/time -- e.g. TILED_REGISTER's withName block sets only
+# cpus/memory/time -- e.g. TILED_SOLVE's withName block sets only
 # `memory`, leaving `cpus`/`time` to the label's tier) is not a violation:
 # the label is still the sole owner of the field(s) withName leaves alone,
 # so removing it would silently change that field's value -- exactly the
