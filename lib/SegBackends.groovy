@@ -20,8 +20,21 @@
  *   guard       the backend's PRECONDITION, as shell lines. These are three different
  *               checks, not boilerplate, and each is meaningless for the other two
  *               backends -- see the per-backend comments below.
- *   versions    the backend-specific rows of versions.yml. StarDist reports
- *               deepcell/tensorflow, InstanSeg instanseg/torch, CellSAM cellSAM/torch.
+ *   versionTools the backend's own tools, as BARE PYTHON MODULE NAMES -- not rendered
+ *               YAML. StarDist reports deepcell/tensorflow, InstanSeg instanseg/torch,
+ *               CellSAM cellSAM/torch. lib/ProcessEnvelope.groovy turns each name into
+ *               its probe row and prepends the shared `python:` row, and
+ *               modules/local/segment.nf feeds THIS ONE LIST to both
+ *               ProcessEnvelope.versions() (script:) and ProcessEnvelope.versionsStub()
+ *               (stub:). That is the point of storing names rather than lines: this
+ *               table used to hand-write six probe strings of exactly the form
+ *               ProcessEnvelope.probe() already renders, and segment.nf's stub: block
+ *               -- unable to reuse them, since a stub reports no real versions --
+ *               hand-wrote a DIFFERENT set of keys (`seg_method: <name>`). Two disjoint
+ *               key sets, and `-stub` (the whole blocking CI gate) can never see a
+ *               script: block to compare against. Same key name as
+ *               lib/WarpBackends.groovy's `versionTools`, deliberately: both are read by
+ *               tests/test_versions_envelope.py's generic `*Backends.of(...)` guard.
  *
  * `flags`, `guard` take a context map: [meta: task meta, prefix: output prefix,
  * params: THE SLICE OF params THE BACKENDS READ -- see ctxParams below]. Passing a map
@@ -102,10 +115,7 @@ class SegBackends {
                     'echo "Validated: channel 0 is a configured nuclear marker"',
                 ]
             },
-            versions  : [
-                '''deepcell: $(python -c "import deepcell; print(deepcell.__version__)" 2>/dev/null || echo "unknown")''',
-                '''tensorflow: $(python -c "import tensorflow; print(tensorflow.__version__)" 2>/dev/null || echo "unknown")''',
-            ],
+            versionTools: ['deepcell', 'tensorflow'],
         ],
 
         // InstanSeg. Channel-invariant -- it consumes the multichannel image directly,
@@ -128,10 +138,12 @@ class SegBackends {
                     'echo "Note: InstanSeg is channel-invariant; no nuclear-channel-0 check is enforced."',
                 ]
             },
-            versions  : [
-                '''instanseg: $(python -c "import instanseg; print(getattr(instanseg, '__version__', 'unknown'))" 2>/dev/null || echo "unknown")''',
-                '''torch: $(python -c "import torch; print(torch.__version__)" 2>/dev/null || echo "unknown")''',
-            ],
+            // `torch` is NOT hoisted into a shared list even though cellsam names it too:
+            // exactly one backend runs per task, so the two entries are never rendered
+            // together, and stardist genuinely does not use torch. A shared list would have
+            // to be subtracted from rather than added to -- the failure mode being a
+            // versions.yml that reports a framework the task never loaded.
+            versionTools: ['instanseg', 'torch'],
         ],
 
         // CellSAM. Segments ONE nuclear channel like StarDist, but is told which one, so
@@ -169,10 +181,7 @@ class SegBackends {
                     'fi',
                 ]
             },
-            versions  : [
-                '''cellSAM: $(python -c "import cellSAM; print(getattr(cellSAM, '__version__', 'unknown'))" 2>/dev/null || echo "unknown")''',
-                '''torch: $(python -c "import torch; print(torch.__version__)" 2>/dev/null || echo "unknown")''',
-            ],
+            versionTools: ['cellSAM', 'torch'],
         ],
     ]
 

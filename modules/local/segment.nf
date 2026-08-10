@@ -11,10 +11,19 @@
  *
  * The backend is chosen ONCE, here, and everything that differs between the three
  * comes from ``lib/SegBackends.groovy``: container, entry point, resolved flags,
- * precondition guard, and versions rows. The tunables come from ``ext.args``
- * (``conf/modules.config``). This process body is backend-agnostic -- one size-log
- * preamble, one invocation, one versions heredoc -- so the shared parts cannot drift
- * apart between backends the way three copy-pasted script blocks did.
+ * precondition guard, and the tool names for versions.yml. The tunables come from
+ * ``ext.args`` (``conf/modules.config``). This process body is backend-agnostic -- one
+ * size-log preamble, one invocation, one versions envelope -- so the shared parts cannot
+ * drift apart between backends the way three copy-pasted script blocks did.
+ *
+ * versions.yml IS RENDERED BY ``lib/ProcessEnvelope.groovy``, IN BOTH BLOCKS, FROM ONE
+ * LIST. Until this was done, ``script:`` and ``stub:`` each hand-wrote their own heredoc
+ * and they named DISJOINT keys: script: reported ``python`` plus the backend's real tools
+ * (deepcell/tensorflow, instanseg/torch, cellSAM/torch), stub: reported ``python`` plus a
+ * bare ``seg_method: <name>`` that is not a tool at all. ``-stub`` never evaluates a
+ * ``script:`` block, and CI's blocking gate is ``nf-test --tag stub``, so the branch that
+ * ships was the branch nothing ran. Both blocks now pass ``backend.versionTools``, and
+ * both resolve ``backend`` from the same ``SegBackends.of(params.seg_method)`` expression.
  *
  * All backends produce the same outputs (``*_nuclei_mask.tif`` / ``*_cell_mask.tif`` /
  * ``versions.yml`` / ``*.size.csv``) so all downstream modules are contract-preserving.
@@ -53,7 +62,6 @@ process SEGMENT {
     // indentation: Nextflow stripIndent()s the finished script, so a fragment carrying
     // its own leading whitespace would flatten the surrounding block.
     def guard = backend.guard(ctx).join('\n    ')
-    def version_rows = backend.versions.join('\n        ')
     """
     # Log input size for tracing (-L follows symlinks)
     input_bytes=\$(stat -L --printf="%s" ${merged_file} 2>/dev/null || echo 0)
@@ -71,24 +79,21 @@ process SEGMENT {
         ${backend.flags(ctx)} \\
         ${args}
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: \$(python --version 2>&1 | sed 's/Python //')
-        ${version_rows}
-    END_VERSIONS
+    ${ProcessEnvelope.versions(task.process, backend.versionTools)}
     """
 
     stub:
     def prefix = task.ext.prefix ?: "${meta.patient_id}"
+    // Resolved from the SAME expression as script:'s binding above, which is the whole
+    // point -- tests/test_versions_envelope.py compares the two `SegBackends.of(...)`
+    // call sites textually, because two identical `backend.versionTools` reads prove
+    // nothing if `backend` was bound to different backends in the two blocks.
+    def backend = SegBackends.of(params.seg_method)
     """
     touch ${prefix}_nuclei_mask.tif
     touch ${prefix}_cell_mask.tif
     echo "STUB,${meta.patient_id},stub,0" > ${prefix}.SEGMENT.size.csv
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: stub
-        seg_method: ${params.seg_method}
-    END_VERSIONS
+    ${ProcessEnvelope.versionsStub(task.process, backend.versionTools)}
     """
 }
