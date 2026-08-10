@@ -316,8 +316,10 @@
         <div class="kind" style="margin-top:7px">emits <b>versions</b> · <b>size_log</b></div></div>
       <div class="mod"><div class="n">FINAL_QC <span class="tag tag-on">shared</span></div>
         <div class="x">One subworkflow, called by both the linear pipeline and <code>--mode add_cycle</code>.
-          add_cycle contributes only four of the eight kinds; the rest are simply absent, which is exactly what
-          the tagged-stream interface makes cost nothing.</div></div>
+          add_cycle contributes <b>five</b> of the eight kinds — it lacks <code>preprocess_qc</code>,
+          <code>registration_tre</code> and <code>postprocess_qc</code>, because it calls preprocessing
+          internally without re-exposing its PNGs and has no postprocessing step at all. Those three are simply
+          absent, which is exactly what the tagged-stream interface makes cost nothing.</div></div>
     </div>
   </section>
 
@@ -340,8 +342,9 @@
           &nbsp;&nbsp;+ ParamUtils.UNIVERSAL_QC_KINDS<br>
           <span class="cm">&nbsp;&nbsp;→ 8 kinds; see panel c for the split</span></div>
         <div class="callout"><b>The vocabulary is derived, not restated.</b> The two <code>FINAL_QC</code> call
-          sites hand-write <b>16</b> tag literals between them — 12 on the standard path, 4 in add_cycle — and
-          nothing else checks that the two agree. <code>KNOWN_ARTIFACT_KINDS</code> is that check, and it is
+          sites hand-write <b>21</b> tag literals between them — <b>16</b> on the standard path (across four
+          <code>if</code> blocks, in which <code>versions</code> and <code>size_log</code> each appear five
+          times) and <b>5</b> in add_cycle — and nothing else checks that the two agree. <code>KNOWN_ARTIFACT_KINDS</code> is that check, and it is
           computed from the same step table that fixes each step's required samplesheet columns and the values
           <code>--start</code>/<code>--stop</code> accept.</div>
       </div>
@@ -499,7 +502,7 @@
           once at the rigid anchor, and score per-pair IoU and centroid residual at every stage. One process, two
           backends.</div>
         <div class="res">2 cpu · <b>32 GB × 2^(attempt−1)</b> → 32/64/128/256 · 3 h × attempt<br>
-          publishes *_seg_qc.json · optional *_reg_residuals.csv</div></div>
+          publishes <b>*_seg_qc.json only</b> — see the note below</div></div>
     </div>
 
     <div class="callout"><b>The alias inherits config, which is the trap.</b> Nextflow matches a
@@ -524,6 +527,14 @@
           <td><i>none</i> — passed as <code>[]</code>, the null object</td></tr>
       </tbody>
     </table></div>
+    <p class="outnote"><b>The per-cell residual CSV is never published.</b> <code>WARP_SEG_QC</code>'s
+      <code>publishDir</code> carries <code>pattern: "*_seg_qc.json"</code> and replaces the process-level
+      default, so <code>*_reg_residuals.csv</code> — an optional <code>output:</code> emit — reaches
+      <code>--outdir</code> through no path at all. It travels as the <code>seg_residuals</code> kind into the
+      report's data bundle (panel <b>f</b>, slot 8) and is separately joined onto the cell mask by the
+      SpatialData export. The published QC tree under <code>&lt;pid&gt;/qc/registration/</code> therefore holds
+      the metrics JSON, the tiled backend's <code>*_tre.json</code>, and nothing else at that level.</p>
+
     <p class="outnote">The JVM-only <code>--jvm-heap-gb 8</code> lives in the backend table rather than in
       <code>ext.args</code>, and that is the point: an <code>ext.args</code> ternary keyed on
       <code>params.registration_method</code> would read the <b>global param</b> while the process selects its

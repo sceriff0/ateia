@@ -60,10 +60,16 @@ import groovy.json.JsonOutput
 include { AGGREGATE_SIZE_LOGS } from '../../modules/local/aggregate_size_logs'
 include { GENERATE_QC_REPORT  } from '../../modules/local/generate_qc_report'
 
-// The complete artifact vocabulary. Both call sites hand-write these tags (16
-// literals across workflows/mirage.nf's two FINAL_QC calls -- 4 in add_cycle,
-// 12 in the standard path) and nothing else checks that the two vocabularies
-// agree — so this list is the check.
+// The complete artifact vocabulary. Both call sites hand-write these tags (21
+// literals across workflows/mirage.nf's two FINAL_QC calls -- 5 in add_cycle
+// (mirage.nf:135-139) and 16 in the standard path (mirage.nf:317-347, four `if`
+// blocks in which 'versions' and 'size_log' each appear five times)) and nothing
+// else checks that the two vocabularies agree — so this list is the check.
+//
+// Counted, not estimated: `grep -oE "\['[a-z_]+'," workflows/mirage.nf` returns
+// 21 matches on 21 distinct lines. The previous count here read "16 -- 4 in
+// add_cycle, 12 in the standard path", which was wrong in both terms and was
+// copied verbatim into a supplementary figure before anyone re-counted.
 //
 // Derived from ParamUtils.STEPS (lib/ParamUtils.groovy), the single table
 // answering "what is a step?": each step's own `qcKinds` (preprocess_qc /

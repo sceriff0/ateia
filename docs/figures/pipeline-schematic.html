@@ -317,7 +317,10 @@
   <section class="panel">
     <span class="plabel">c</span>
     <div class="panel-head"><h2>Modules and default parameters</h2>
-      <p>Each lane is one step's subworkflow; boxes are processes in execution order. Chips give real defaults.
+      <p>Each lane is one step's subworkflow; boxes are processes in execution order. Chips give real defaults;
+        chip names drop the stage prefix a parameter carries in <code>nextflow.config</code>
+        (<code>micro_reg</code> = <code>reg_micro_reg</code>, <code>max_dim</code> = <code>reg_max_image_dim</code>,
+        and every chip on the tiled fork = <code>reg_tiled_*</code>) — panel <b>i</b> gives the full names.
         Every process runs in a pinned container and emits <code>versions.yml</code>.</p></div>
     <div class="flow">
 
