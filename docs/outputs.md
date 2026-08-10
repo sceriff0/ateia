@@ -62,8 +62,6 @@ existence.
 
 | Input | Parameter | Notes |
 |---|---|---|
-| Panel spec | `--panel_spec` | `panel.yaml`. Optional; enables phenotyping. |
-| Compiled panel model | `--panel_model` | A frozen `model_config.json` from a previous `COMPILE_PANEL`. Use instead of `--panel_spec` to reuse a calibration. |
 | StarDist model dir | `--segmentation_model_dir` | Required when `--seg_method stardist` — no model ships with the repo. |
 | InstanSeg cache | `--instanseg_model_dir` | Writable BioImage.IO cache; exported as `INSTANSEG_BIOIMAGEIO_PATH`. |
 | CellSAM weights | `--cellsam_model_path` | Pre-downloaded weights. If unset, weights auto-download and need `DEEPCELL_ACCESS_TOKEN` in the launch environment. |
@@ -138,11 +136,9 @@ results/                              # = --outdir
 │   │   └── prior/                    # add_cycle only: prior pyramid re-split
 │   ├── quantify/                     # <id>_quant.csv, per-marker, pre-merge — QUANTIFY
 │   ├── quantification/               # merged_quant.csv      — MERGE_QUANT_CSVS
-│   ├── phenotyping/                  # phenotypes.csv, constraint_audit.csv,
-│   │                                 #   phenotype_qc.json   — PHENOTYPE (if a panel is set)
 │   ├── geojson/
 │   │   └── export/                   # cells.geojson, cells_wholecell.geojson,
-│   │                                 #   cells_data.csv, panel_model.json — EXPORT_GEOJSON
+│   │                                 #   cells_data.csv        — EXPORT_GEOJSON
 │   ├── pyramid/                      # pyramid.ome.tiff      — MERGE_AND_PYRAMID
 │   ├── spatialdata/                  # <patient_id>.zarr     — EXPORT_SPATIALDATA
 │   └── qc/
@@ -150,8 +146,6 @@ results/                              # = --outdir
 │       ├── registration/             # *_QC_RGB.{png,tif}, *_seg_qc.json, *_tre.json
 │       │   └── geojson/              # *.geojson — SEG_QC_GEOJSON (reg_qc=2)
 │       └── postprocessing/           # *.png
-├── phenotyping/                      # model_config.json, spec_report.html — COMPILE_PANEL
-│                                     #   (run-level: one panel shared across patients)
 ├── csv/                              # checkpoint CSVs, all patients
 ├── size_logs/                        # input_sizes.csv — AGGREGATE_SIZE_LOGS
 └── qc/                               # mirage_qc_report_<timestamp>.html
@@ -222,8 +216,8 @@ Written to `--trace_dir` (default `.trace`, **independent of `--outdir`**) when
 
 ## The measurement-key contract
 
-`quantify.py` produces, and `export_geojson.py` / `export_spatialdata.py` /
-`phenotype_cells.py` consume, a single key grammar:
+`quantify.py` produces, and `export_geojson.py` / `export_spatialdata.py`
+consume, a single key grammar:
 
 ```text
 "<marker>: <Compartment>: <Statistic>"
