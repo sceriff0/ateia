@@ -47,8 +47,8 @@ CONFIG_COLS = (
     # registration
     "registration_method", "memory_mode", "reg_micro_reg", "reg_jvm_heap_gb",
     "reg_tiled_tile", "reg_tiled_gate_tre", "reg_tiled_coarse_max_dim",
-    # preprocessing
-    "preproc_pool_workers", "preproc_tile_size", "preproc_no_darkfield", "preproc_autotune",
+    # preprocessing — the pipeline exposes exactly these three (see sweep.yaml)
+    "skip_preprocessing", "preproc_skip_nuclear", "preproc_tile_size",
     # segmentation (per-backend knobs, crossed by segmentation_grid)
     "seg_method", "seg_gpu", "seg_n_tiles_x", "seg_n_tiles_y",
     "seg_instantseg_tile_size", "seg_instantseg_batch_size",

@@ -8,6 +8,12 @@
 # the matrix was generated with --paired (reference+moving panel per cell, distinct
 # channel names). Without --paired, registration is a single-slide passthrough no-op.
 #
+# REMOVED axes (preprocessing): preproc_autotune, preproc_n_iter, preproc_overlap,
+# preproc_no_darkfield and preproc_pool_workers were deleted from the pipeline — BaSiC now runs at
+# its own defaults and PREPROCESS's cpus are owned by conf/modules.config — so those params no
+# longer exist to sweep. preproc_skip_dapi was renamed preproc_skip_nuclear (marker-driven rather
+# than hardcoding 'DAPI'), and skip_preprocessing is new: a stage-level on/off, swept below.
+#
 # REMOVED axes: reg_use_tiled_registration, reg_tile_size, reg_n_workers (VALIS auto-tiles
 # internally, so they were no-ops) and reg_parallel_warping (parallel warping was removed;
 # warping is always sequential). The OLD distributed/tiled VALIS path was archived out of the
@@ -93,16 +99,23 @@ baseline:
                                       # coarse_res sub-grid; declared here for column uniformity, and
                                       # inert at this baseline cell (registration_method=valis).
   # --- preprocessing (BaSiC illumination correction) ---
-  preproc_n_iter: 100
-  preproc_overlap: 0
-  preproc_tile_size: 1950             # pipeline default (BaSiC tile size)
-  preproc_no_darkfield: false         # pipeline default (darkfield correction ON)
-  preproc_skip_dapi: true             # pipeline default: DAPI channels skip BaSiC correction. Ungated
+  # The pipeline exposes exactly THREE preprocessing knobs. BaSiC's own defaults stand in for
+  # everything else (darkfield estimation on, no autotune, non-overlapping FOVs) and PREPROCESS's
+  # cpus are owned outright by conf/modules.config — see the REMOVED axes note at the top.
+  skip_preprocessing: false           # pipeline default: BaSiC correction ON. TRUE skips the whole
+                                      # correction (CONVERT_IMAGE still runs, so the step still emits
+                                      # one image per slide), which makes this the preprocessing
+                                      # counterpart to skip_spatialdata_export: one axis that prices
+                                      # an entire stage.
+  preproc_skip_nuclear: true          # pipeline default: the nuclear/fiducial channels named by
+                                      # nuclear_markers bypass BaSiC. Ungated
                                       # (modules/local/preprocess.nf) — a cost AND correction-quality
-                                      # knob, since flipping it puts every DAPI channel through BaSiC.
-  preproc_autotune: false             # pipeline default
-  preproc_pool_workers: null          # pipeline default (null = task.cpus); the preproc_pool_workers axis
-                                      # varies it to explicit thread counts
+                                      # knob, since flipping it puts every nuclear channel through
+                                      # BaSiC and so changes the very channel the downstream chain
+                                      # (registration + segmentation) consumes. Replaces
+                                      # preproc_skip_dapi, which hardcoded the marker name and so
+                                      # silently corrected a CELLTOX fiducial while sparing a DAPI one.
+  preproc_tile_size: 1950             # pipeline default (BaSiC FOV tile size)
   # --- segmentation ---
   # seg_method mirrors the PIPELINE DEFAULT, which is 'instantseg' (nextflow.config): it is the only
   # backend that runs on a fresh clone (StarDist needs a trained model via segmentation_model_dir, and
@@ -158,15 +171,14 @@ axes:
                                                   # the dominant VALIS runtime axis AND an accuracy axis
                                                   # (reg_qc=2 scores it) — read the two together.
   # --- preprocessing ---
-  preproc_pool_workers:       [1, 4, 8]           # preprocessing parallelism (null pipeline default = task.cpus)
+  skip_preprocessing:         [false, true]       # true skips BaSiC entirely (conversion still runs):
+                                                  # prices the WHOLE PREPROCESS stage in one axis, the
+                                                  # way skip_spatialdata_export prices EXPORT_SPATIALDATA
   preproc_tile_size:          [1024, 1950, 3000]  # BaSiC tile size — illumination-fit cost vs field size
-  preproc_no_darkfield:       [false, true]       # skipping the darkfield term cuts BaSiC cost; it also
-                                                  # changes the corrected image, so this is a cost AND
-                                                  # correction-quality axis, not a free saving
-  preproc_autotune:           [false, true]       # BaSiC autotune: extra fitting passes for a better fit
-  preproc_skip_dapi:          [true, false]       # false puts DAPI through BaSiC too: more PREPROCESS
-                                                  # work, and it changes the DAPI the whole downstream
-                                                  # chain (registration + segmentation) consumes
+  preproc_skip_nuclear:       [true, false]       # false puts the nuclear/fiducial channels through
+                                                  # BaSiC too: more PREPROCESS work, and it changes the
+                                                  # very channel the downstream chain (registration +
+                                                  # segmentation) consumes — a cost AND quality axis
   # --- segmentation ---
   seg_gpu:                    [true, false]       # NB: false may not be a true CPU run (issue #20)
   # --- quantification ---

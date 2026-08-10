@@ -145,9 +145,9 @@ if (nrow(reg) > 0) {
 # (both paths) and the segmentation tile knobs to plots 9/9b (per method).
 knob_targets <- tribble(
   ~axis,                       ~proc,          ~metric,
-  "preproc_n_iter",            "PREPROCESS",   "realtime_s",
-  "preproc_overlap",           "PREPROCESS",   "realtime_s",
-  "preproc_pool_workers",      "PREPROCESS",   "realtime_s",
+  "skip_preprocessing",        "PREPROCESS",   "realtime_s",
+  "preproc_skip_nuclear",      "PREPROCESS",   "realtime_s",
+  "preproc_tile_size",         "PREPROCESS",   "realtime_s",
   "seg_gpu",                   "SEGMENT",      "realtime_s",
   "quantify_compartments",     "QUANTIFY",     "realtime_s",
   "expanded_quantification",   "QUANTIFY",     "realtime_s"
