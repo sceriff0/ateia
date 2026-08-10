@@ -5,8 +5,8 @@ Combines morphology (from EXTRACT_CELL_PROPERTIES) with per-marker intensity
 CSVs (from QUANTIFY) by joining on the cell label column. Validates that no
 cells are lost during the merge and reorders columns for downstream analysis.
 
-Output columns are ordered: fov, cell_size, morphology columns, DAPI, then
-remaining markers sorted alphabetically.
+Output columns are ordered: fov, cell_size, morphology columns, the
+nuclear/fiducial marker, then remaining markers sorted alphabetically.
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
 from logger import configure_logging, get_logger
 from measurements import MORPHOLOGY_COLS
+from metadata import is_nuclear
 
 logger = get_logger(__name__)
 
@@ -54,7 +55,7 @@ def load_intensity_csvs(
 def merge_intensities(
     morphology: pd.DataFrame,
     csv_files: list[Path],
-    protected_cols: tuple[str, ...] = ("DAPI",),
+    protected_cols: tuple[str, ...] = (),
 ) -> pd.DataFrame:
     """Merge each intensity CSV into the base table by label.
 
@@ -116,18 +117,28 @@ def merge_intensities(
     return merged
 
 
-def reorder_columns(merged: pd.DataFrame, patient_id: str) -> pd.DataFrame:
-    """Reorder columns and add fov/cell_size for downstream analysis."""
+def reorder_columns(
+    merged: pd.DataFrame, patient_id: str, nuclear_markers=None
+) -> pd.DataFrame:
+    """Reorder columns and add fov/cell_size for downstream analysis.
+
+    The nuclear/fiducial marker leads the marker block. Which channel that is
+    comes from ``nuclear_markers`` (``params.nuclear_markers``, passed down by
+    MERGE_QUANT_CSVS) via the shared ``utils.metadata.is_nuclear`` rule -- this
+    used to test for the literal string ``"DAPI"``, so a CELLTOX panel silently
+    got alphabetical ordering instead. Ordering is presentational (every consumer
+    reads by column NAME), but it should not depend on how a panel is named.
+    """
     # Separate morphology and marker columns
     morpho_present = [col for col in MORPHOLOGY_COLS if col in merged.columns]
     marker_cols_all = [col for col in merged.columns if col not in MORPHOLOGY_COLS]
 
-    # Put DAPI first among markers if present
-    if "DAPI" in marker_cols_all:
-        marker_cols_all.remove("DAPI")
-        final_column_order = morpho_present + ["DAPI"] + sorted(marker_cols_all)
-    else:
-        final_column_order = morpho_present + sorted(marker_cols_all)
+    # Put the nuclear/fiducial marker first among markers if present. There is at
+    # most one in practice (SPLIT_CHANNELS keeps it from the reference slide only),
+    # but sort any ties so the order stays deterministic.
+    nuclear = sorted(c for c in marker_cols_all if is_nuclear(c, nuclear_markers))
+    rest = sorted(c for c in marker_cols_all if c not in nuclear)
+    final_column_order = morpho_present + nuclear + rest
     merged = merged[final_column_order]
 
     # Add required columns for Pixie cell clustering
@@ -182,6 +193,14 @@ def main() -> None:
         required=True,
         help="Output path for merged CSV",
     )
+    parser.add_argument(
+        "--nuclear-markers",
+        dest="nuclear_markers",
+        nargs="+",
+        default=None,
+        help="Ordered nuclear/fiducial marker names. MERGE_QUANT_CSVS passes "
+        "params.nuclear_markers; the default is only for standalone use.",
+    )
     args = parser.parse_args()
 
     configure_logging()
@@ -200,7 +219,17 @@ def main() -> None:
     )
     logger.info("Merging %d intensity CSVs with morphology...", len(csv_files))
 
-    merged = merge_intensities(morphology, csv_files, protected_cols=("DAPI",))
+    # The nuclear/fiducial marker is the protected column: it is identical across
+    # cycles, so on an add_cycle run the PRIOR table's copy is authoritative and an
+    # incoming one is dropped rather than overwriting it. This was pinned to the
+    # literal "DAPI", which made the protection silently inert for any other
+    # configured fiducial.
+    nuclear_cols = tuple(
+        col
+        for col in morphology.columns
+        if col not in MORPHOLOGY_COLS and is_nuclear(col, args.nuclear_markers)
+    )
+    merged = merge_intensities(morphology, csv_files, protected_cols=nuclear_cols)
 
     # Validate the row count is exactly preserved. A left merge on 'label' can
     # both LOSE cells (fewer rows) and FAN OUT (more rows) — the latter happens
@@ -223,7 +252,7 @@ def main() -> None:
         logger.info("All %d cells preserved", len(merged))
 
     # Reorder columns and add metadata
-    merged = reorder_columns(merged, args.patient_id)
+    merged = reorder_columns(merged, args.patient_id, args.nuclear_markers)
 
     # Save merged CSV
     merged.to_csv(args.output, index=False)

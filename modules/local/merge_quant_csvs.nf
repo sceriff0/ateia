@@ -27,6 +27,13 @@ process MERGE_QUANT_CSVS {
 
     script:
     def args = task.ext.args ?: ''
+    // Which column is the nuclear/fiducial marker decides two things in the merge:
+    // it is the one protected from being overwritten on an add_cycle run, and it
+    // leads the marker block. Both were pinned to the literal 'DAPI'. MarkerUtils
+    // is the one sanctioned reader of params.nuclear_markers -- it normalises the
+    // bare-String and comma-joined shapes that fail SILENTLY when read raw
+    // (tests/test_nuclear_marker_routing.py).
+    def nuclear_args = "--nuclear-markers ${MarkerUtils.markerList(params.nuclear_markers).join(' ')}"
     """
     # Log input size for tracing
     total_bytes=\$(find . -name '*_quant.csv' -exec stat -L --printf="%s\\n" {} + 2>/dev/null | awk '{sum+=\$1} END {print sum}')
@@ -39,6 +46,7 @@ process MERGE_QUANT_CSVS {
         --morphology ${morphology_csv} \\
         --patient-id ${meta.patient_id} \\
         --output merged_quant.csv \\
+        ${nuclear_args} \\
         ${args}
 
     ${ProcessEnvelope.versions(task.process, ['pandas'])}

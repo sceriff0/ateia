@@ -272,6 +272,20 @@ ARGPARSE_DEFAULT_ALLOWLIST = {
             "default."
         ),
     },
+    "merge_quant_csvs.py:--nuclear-markers": {
+        "reason": (
+            "Same contract as preprocess.py's and split_multichannel.py's "
+            "--nuclear-markers: default=None is intentional per the script's own "
+            "help text, 'MERGE_QUANT_CSVS passes params.nuclear_markers; the "
+            "default is only for standalone use.' Confirmed true -- "
+            "modules/local/merge_quant_csvs.nf builds the flag unconditionally from "
+            "MarkerUtils.markerList, so the pipeline never reaches the default. "
+            "Mirroring ['DAPI','CELLTOX'] here would be a SECOND declaration of "
+            "that default in Python; utils/metadata.py's DEFAULT_NUCLEAR_MARKERS is "
+            "the one permitted mirror, and passing None is how this script defers "
+            "to it."
+        ),
+    },
     "preprocess.py:--nuclear-markers": {
         "reason": (
             "Same contract as split_multichannel.py's --nuclear-markers below: "
