@@ -4,6 +4,11 @@
  * Applies BaSiC illumination correction with FOV tiling for flat-field and
  * dark-field estimation. Corrects shading artifacts in multi-channel images.
  *
+ * BaSiC runs at its own defaults; the pipeline exposes only the FOV tile size
+ * (params.preproc_tile_size) and whether the nuclear/fiducial channels are left
+ * uncorrected (params.preproc_skip_nuclear). Whether this process runs at all is
+ * params.skip_preprocessing, gated in subworkflows/local/preprocess.nf.
+ *
  * Input: Raw OME-TIFF image with channel metadata
  * Output: Illumination-corrected OME-TIFF
  */
@@ -25,10 +30,15 @@ process PREPROCESS {
 
     script:
     def args = task.ext.args ?: ''
-    def skip_dapi_flag = params.preproc_skip_dapi ? '--skip_dapi' : ''
-    def autotune_flag = params.preproc_autotune ? '--autotune' : ''
-    def no_darkfield_flag = params.preproc_no_darkfield ? '--no_darkfield' : ''
-    def overlap = params.preproc_overlap
+    def skip_nuclear_flag = params.preproc_skip_nuclear ? '--skip_nuclear' : ''
+    // The skip-the-fiducial decision is made in Python, so the marker list has to
+    // travel with the call. MarkerUtils.markerList is the one sanctioned reader of
+    // params.nuclear_markers -- it normalises the bare-String form Nextflow produces
+    // for `--nuclear_markers CELLTOX` and the one-element comma-joined form a params
+    // file can produce, both of which fail SILENTLY if read raw
+    // (tests/test_nuclear_marker_routing.py). Same rule, same spelling, as
+    // SPLIT_CHANNELS and CONVERT_IMAGE.
+    def nuclear_args = "--nuclear-markers ${MarkerUtils.markerList(params.nuclear_markers).join(' ')}"
     def channels = meta.channels.join(' ')
     """
     # Log input size for tracing (-L follows symlinks)
@@ -40,12 +50,9 @@ process PREPROCESS {
         --output_dir . \\
         --channels ${channels} \\
         --fov_size ${params.preproc_tile_size} \\
-        --n_workers ${params.preproc_pool_workers ?: task.cpus} \\
-        --n_iter ${params.preproc_n_iter} \\
-        --overlap ${overlap} \\
-        ${skip_dapi_flag} \\
-        ${autotune_flag} \\
-        ${no_darkfield_flag} \\
+        --n_workers ${task.cpus} \\
+        ${skip_nuclear_flag} \\
+        ${nuclear_args} \\
         ${args}
 
     ${ProcessEnvelope.versions(task.process, ['numpy'])}

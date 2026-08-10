@@ -30,34 +30,19 @@ from numpy.typing import NDArray
 
 os.environ["JAX_PLATFORM_NAME"] = "cpu"  # Force CPU for JAX
 
-# Check BaSiCPy and Pydantic versions for compatibility
 import basicpy
-import pydantic
-from packaging import version
 
 BASICPY_VERSION = getattr(basicpy, "__version__", "unknown")
-PYDANTIC_VERSION = getattr(pydantic, "__version__", "unknown")
-AUTOTUNE_AVAILABLE = False
-
-# autotune requires BaSiCPy >= 1.1.0 and Pydantic v2
-if BASICPY_VERSION != "unknown" and PYDANTIC_VERSION != "unknown":
-    try:
-        basicpy_ok = version.parse(BASICPY_VERSION) >= version.parse("1.1.0")
-        pydantic_ok = version.parse(PYDANTIC_VERSION) >= version.parse("2.0.0")
-        AUTOTUNE_AVAILABLE = basicpy_ok and pydantic_ok
-    except Exception:
-        pass
 
 from basicpy import BaSiC  # type: ignore  # noqa: E402
 from image_utils import ensure_dir  # noqa: E402
+from metadata import is_nuclear  # noqa: E402
 from validation import detect_negative_values, log_image_stats  # noqa: E402
 
 logger = get_logger(__name__)
 
 # Log version info at import time
 logger.info(f"BaSiCPy version: {BASICPY_VERSION}")
-logger.info(f"Pydantic version: {PYDANTIC_VERSION}")
-logger.info(f"Autotune available: {AUTOTUNE_AVAILABLE}")
 
 __all__ = [
     "split_image_into_fovs",
@@ -68,24 +53,21 @@ __all__ = [
 
 
 def count_fovs(
-    image_shape: Tuple[int, int], fov_size: Tuple[int, int], overlap: int = 0
+    image_shape: Tuple[int, int], fov_size: Tuple[int, int]
 ) -> Tuple[int, int]:
-    """Calculate how many FOVs are needed to cover an image with given FOV size and overlap.
+    """Calculate how many FOVs are needed to cover an image with a given FOV size.
 
-    Note: `overlap` changes only the FOV tile COUNT used for BaSiC fitting;
-    extraction (split_image_into_fovs) is non-overlapping by design.
+    Tiling is non-overlapping, matching split_image_into_fovs, which extracts
+    adjacent tiles and distributes the remainder pixels across them.
     """
     height, width = image_shape[:2]
     fov_h, fov_w = fov_size
 
-    if overlap >= fov_h or overlap >= fov_w:
-        raise ValueError("Overlap cannot be >= FOV size")
+    if fov_h <= 0 or fov_w <= 0:
+        raise ValueError(f"FOV size must be positive, got {fov_size}")
 
-    step_y = fov_h - overlap
-    step_x = fov_w - overlap
-
-    n_fovs_y = math.ceil((height - fov_h) / step_y) + 1 if height > fov_h else 1
-    n_fovs_x = math.ceil((width - fov_w) / step_x) + 1 if width > fov_w else 1
+    n_fovs_y = math.ceil(height / fov_h)
+    n_fovs_x = math.ceil(width / fov_w)
 
     return n_fovs_y, n_fovs_x
 
@@ -168,28 +150,22 @@ def reconstruct_image_from_fovs(
 def apply_basic_correction(
     image: NDArray,
     fov_size: Tuple[int, int] = (1950, 1950),
-    get_darkfield: bool = True,
-    autotune: bool = False,
-    n_iter: int = 100,
-    overlap: int = 0,
-    **basic_kwargs,
 ) -> Tuple[NDArray, object]:
     """
     Apply BaSiC illumination correction to a single channel image (H, W).
+
+    BaSiC is run at its own defaults (darkfield estimation on, no autotune).
+    `fov_size` is the only knob the pipeline exposes -- see params.preproc_tile_size.
     """
     if image.ndim != 2:
         raise ValueError(
             f"apply_basic_correction requires a 2D image, got shape {image.shape}"
         )
 
-    n_fovs_y, n_fovs_x = count_fovs(image.shape, fov_size, overlap=overlap)
+    n_fovs_y, n_fovs_x = count_fovs(image.shape, fov_size)
     fov_stack, positions, _ = split_image_into_fovs(image, n_fovs_x, n_fovs_y)
 
-    basic = BaSiC(get_darkfield=get_darkfield, smoothness_flatfield=1)
-
-    if autotune:
-        logger.info(f"  [OK] Autotuning BaSiC parameters for {n_iter} iterations")
-        basic.autotune(fov_stack, n_iter=n_iter)
+    basic = BaSiC(get_darkfield=True, smoothness_flatfield=1)
 
     corrected_fovs = basic.fit_transform(fov_stack)
 
@@ -214,13 +190,18 @@ def _process_single_channel_from_stack(
     channel_index: int,
     channel_name: str,
     fov_size: Tuple[int, int],
-    skip_dapi: bool,
-    autotune: bool,
-    n_iter: int,
-    basic_kwargs: dict,
-    auto_detect: bool = True,
+    skip_nuclear: bool,
+    nuclear_markers: List[str] | None,
 ) -> Tuple[int, NDArray, bool]:
     """Worker function to process a single channel slice from a stack.
+
+    Which channel counts as nuclear comes from ``nuclear_markers``
+    (``params.nuclear_markers``, passed down by PREPROCESS) and is resolved by the
+    shared ``utils.metadata.is_nuclear`` rule -- the same one CONVERT_IMAGE and
+    ``split_multichannel.py`` use. This used to test ``"DAPI" in name.upper()``
+    directly, which silently ignored a configured CELLTOX fiducial: it was BaSiC-
+    corrected while DAPI was not, so the channel driving registration and
+    segmentation differed depending on which marker a panel happened to use.
 
     Returns
     -------
@@ -233,19 +214,15 @@ def _process_single_channel_from_stack(
     """
     logger.debug(f"Processing channel #{channel_index} ({channel_name})")
 
-    # Automatic detection of whether to apply BaSiC
-    if skip_dapi and "DAPI" in channel_name.upper():
-        logger.debug("  [SKIP] BaSiC correction for DAPI (user setting)")
+    if skip_nuclear and is_nuclear(channel_name, nuclear_markers):
+        logger.debug(
+            f"  [SKIP] BaSiC correction for nuclear channel {channel_name!r} "
+            f"(preproc_skip_nuclear)"
+        )
         return channel_index, channel_image, False
 
     logger.debug("  [OK] Applying BaSiC correction")
-    corrected, _ = apply_basic_correction(
-        channel_image,
-        fov_size=fov_size,
-        autotune=autotune,
-        n_iter=n_iter,
-        **basic_kwargs,
-    )
+    corrected, _ = apply_basic_correction(channel_image, fov_size=fov_size)
     return channel_index, corrected, True
 
 
@@ -254,11 +231,9 @@ def preprocess_multichannel_image(
     channel_names: List[str],
     output_path: str,
     fov_size: Tuple[int, int] = (1950, 1950),
-    skip_dapi: bool = True,
-    autotune: bool = False,
-    n_iter: int = 3,
+    skip_nuclear: bool = True,
+    nuclear_markers: List[str] | None = None,
     n_workers: int = 4,
-    **basic_kwargs,
 ) -> NDArray:
     """
     Apply BaSiC preprocessing to a single multichannel image in parallel and save as TIFF.
@@ -354,10 +329,8 @@ def preprocess_multichannel_image(
                 i,
                 channel_names[i],
                 fov_size,
-                skip_dapi,
-                autotune,
-                n_iter,
-                basic_kwargs,
+                skip_nuclear,
+                nuclear_markers,
             )
             futures.append(future)
 
@@ -493,30 +466,19 @@ def parse_args():
     )
 
     parser.add_argument(
-        "--skip_dapi",
+        "--skip_nuclear",
         action="store_true",
-        help="Skip BaSiC correction for DAPI channel",
+        help="Skip BaSiC correction on the nuclear/fiducial channels named by "
+        "--nuclear-markers",
     )
 
     parser.add_argument(
-        "--autotune", action="store_true", help="Autotune BaSiC parameters"
-    )
-
-    parser.add_argument(
-        "--n_iter", type=int, default=100, help="Number of autotuning iterations"
-    )
-
-    parser.add_argument(
-        "--overlap",
-        type=int,
-        default=0,
-        help="Overlap between FOV tiles for BaSiC correction",
-    )
-
-    parser.add_argument(
-        "--no_darkfield",
-        action="store_true",
-        help="Disable darkfield estimation in BaSiC",
+        "--nuclear-markers",
+        dest="nuclear_markers",
+        nargs="+",
+        default=None,
+        help="Ordered nuclear/fiducial marker names. PREPROCESS passes "
+        "params.nuclear_markers; the default is only for standalone use.",
     )
 
     return parser.parse_args()
@@ -554,19 +516,14 @@ def main():
     logger.info(f"Starting preprocessing: {image_path}")
     logger.info(f"Expected channel order: {channel_names}")
 
-    # Build BaSiC kwargs
-    basic_kwargs = {"overlap": args.overlap, "get_darkfield": not args.no_darkfield}
-
     preprocessed = preprocess_multichannel_image(
         image_path=image_path,
         channel_names=channel_names,
         output_path=output_path,
         fov_size=(args.fov_size, args.fov_size),
-        skip_dapi=args.skip_dapi,
-        autotune=args.autotune,
-        n_iter=args.n_iter,
+        skip_nuclear=args.skip_nuclear,
+        nuclear_markers=args.nuclear_markers,
         n_workers=args.n_workers,
-        **basic_kwargs,
     )
 
     logger.info(f"Preprocessing completed successfully. Output: {output_path}")

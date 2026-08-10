@@ -42,13 +42,16 @@ Bio-Formats conversion + BaSiC illumination correction.
 | Parameter | Default | Description |
 |---|---|---|
 | `pixel_size` | `0.325` | Fallback physical pixel size in µm. The real value is read from the input OME metadata and **preserved** through the pipeline; `0.325` is used only when the input carries no pixel size. Governs µm conversion in GeoJSON and InstanSeg. |
-| `preproc_tile_size` | `1950` | FOV tile size (px) for BaSiC. |
-| `preproc_skip_dapi` | `true` | Skip BaSiC correction on the DAPI channel. |
-| `preproc_autotune` | `false` | Enable BaSiC autotune. |
-| `preproc_n_iter` | `100` | BaSiC optimization iterations. |
-| `preproc_pool_workers` | `null` | Worker threads for BaSiC preprocessing. `null` = use the process CPU count (`task.cpus`). |
-| `preproc_overlap` | `0` | FOV tile overlap (px). |
-| `preproc_no_darkfield` | `false` | Disable darkfield estimation. |
+| `skip_preprocessing` | `false` | Skip BaSiC illumination correction entirely. Conversion still runs — everything downstream assumes the standardised OME-TIFF layout — so the step still emits one image per input and `csv/preprocessed.csv` still has a row per slide; the row points at `<pid>/converted/` instead of `<pid>/preprocessed/`. |
+| `preproc_skip_nuclear` | `true` | Leave the nuclear/fiducial channels named by [`nuclear_markers`](#common) uncorrected. Those channels drive both registration and segmentation, so correcting them changes what both consume. |
+| `preproc_tile_size` | `1950` | BaSiC FOV tile size (px). |
+
+BaSiC otherwise runs at its own defaults — darkfield estimation on, no autotune,
+non-overlapping FOVs — and uses the process CPU allocation. The knobs that exposed
+those (`preproc_autotune`, `preproc_n_iter`, `preproc_overlap`, `preproc_no_darkfield`,
+`preproc_pool_workers`) were removed: nothing tuned them, and `preproc_pool_workers`
+additionally set `PREPROCESS`'s `cpus`, which is now owned outright by
+`conf/modules.config`.
 
 ## Registration
 

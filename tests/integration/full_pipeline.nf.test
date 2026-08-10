@@ -21,7 +21,6 @@ nextflow_pipeline {
                 seg_gpu = false
 
                 preproc_tile_size = 256
-                preproc_n_iter = 1
             }
         }
 
@@ -164,7 +163,6 @@ nextflow_pipeline {
                 seg_gpu = false
 
                 preproc_tile_size = 256
-                preproc_n_iter = 1
             }
         }
 

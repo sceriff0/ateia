@@ -78,43 +78,21 @@
             "title": "Preprocessing options",
             "type": "object",
             "properties": {
-                "preproc_tile_size": {
-                    "type": "integer",
-                    "description": "Tile size for preprocessing.",
-                    "default": 1950
-                },
-                "preproc_skip_dapi": {
+                "skip_preprocessing": {
                     "type": "boolean",
-                    "description": "Skip DAPI channel during preprocessing.",
+                    "description": "Skip BaSiC illumination correction entirely. Images are still converted to standardised OME-TIFF; the preprocessed checkpoint then records the converted image.",
+                    "default": false
+                },
+                "preproc_skip_nuclear": {
+                    "type": "boolean",
+                    "description": "Skip BaSiC correction on the nuclear/fiducial channels named by nuclear_markers. Those channels drive registration and segmentation, so correcting them changes what both consume.",
                     "default": true
                 },
-                "preproc_autotune": {
-                    "type": "boolean",
-                    "description": "Enable autotune for preprocessing.",
-                    "default": false
-                },
-                "preproc_n_iter": {
+                "preproc_tile_size": {
                     "type": "integer",
-                    "description": "Number of iterations for preprocessing.",
-                    "default": 100
-                },
-                "preproc_pool_workers": {
-                    "type": [
-                        "integer",
-                        "null"
-                    ],
-                    "description": "Worker threads for preprocessing parallelism. null = use task.cpus.",
-                    "default": null
-                },
-                "preproc_overlap": {
-                    "type": "integer",
-                    "description": "Tile overlap for preprocessing.",
-                    "default": 0
-                },
-                "preproc_no_darkfield": {
-                    "type": "boolean",
-                    "description": "Disable darkfield correction in preprocessing.",
-                    "default": false
+                    "description": "BaSiC FOV tile size in pixels.",
+                    "default": 1950,
+                    "minimum": 1
                 },
                 "preprocess_qc_scale_factor": {
                     "type": "number",

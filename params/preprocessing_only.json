@@ -6,13 +6,9 @@
     "stop": "preprocessing",
 
     "_comment_preproc": "=== Preprocessing ===",
+    "skip_preprocessing": false,
+    "preproc_skip_nuclear": true,
     "preproc_tile_size": 1950,
-    "preproc_skip_dapi": true,
-    "preproc_autotune": false,
-    "preproc_n_iter": 100,
-    "preproc_pool_workers": 3,
-    "preproc_overlap": 0,
-    "preproc_no_darkfield": false,
     "preprocess_qc_scale_factor": 0.25,
     "pixel_size": 0.325,
 

@@ -15,7 +15,6 @@ nextflow_workflow {
         when {
             params {
                 preproc_tile_size = 256
-                preproc_n_iter = 1
             }
             workflow {
                 """
@@ -171,7 +170,6 @@ nextflow_workflow {
             params {
                 outdir = "$outputDir"
                 preproc_tile_size = 256
-                preproc_n_iter = 1
             }
             workflow {
                 """
@@ -215,6 +213,68 @@ nextflow_workflow {
                     assert header.contains('is_reference')
                     assert header.contains('channels')
                 }}
+            )
+        }
+    }
+
+    test("Should skip BaSiC but still emit a row per slide when skip_preprocessing - stub") {
+
+        // The gate has to preserve two properties that are easy to break together:
+        //
+        //  1. Every input slide still reaches the checkpoint. PREPROCESS is what
+        //     normally produces the rows, so switching it off must not drop them --
+        //     a `--start registration` run reads this CSV and would silently see
+        //     fewer slides.
+        //  2. The recorded path names the directory the file was ACTUALLY published
+        //     into. Nothing publishes into <pid>/preprocessed/ on a skipped run, so a
+        //     row pointing there names a directory that does not exist -- the defect
+        //     Layout.passthroughPath documents for unregistered slides, and the one
+        //     tests/checkpoint_manifest.nf.test fails on.
+        //
+        // Conversion is deliberately NOT skipped: CONVERT_IMAGE is what standardises
+        // the OME-TIFF and moves the fiducial to channel 0, which every downstream
+        // step assumes.
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                skip_preprocessing = true
+            }
+            workflow {
+                """
+                input[0] = Channel.fromList([
+                    [[patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK', 'SMA']],
+                     file('$projectDir/tests/testdata/P001_ref.ome.tiff')],
+                    [[patient_id: 'P001', is_reference: false, channels: ['DAPI', 'PANCK', 'SMA']],
+                     file('$projectDir/tests/testdata/P001_mov1.ome.tiff')]
+                ])
+                """
+            }
+        }
+
+        then {
+            def rows = file(workflow.out.checkpoint_csv.get(0)).readLines().findAll { it.trim() }
+            def header = rows[0].split(',').toList()
+            def imgCol = header.findIndexOf { it.trim() == 'preprocessed_image' }
+            def paths  = rows.drop(1).collect { it.split(',')[imgCol].trim() }
+
+            assertAll(
+                { assert workflow.success },
+                // Property 1: one row per input slide, header included.
+                { assert rows.size() == 3,
+                    "expected a header + 2 slides, got: " + rows.join(' | ') },
+                { assert workflow.out.preprocessed.size() == 2 },
+                // Property 2: the rows point at converted/, which CONVERT_IMAGE really
+                // published into -- never at preprocessed/, which nothing wrote here.
+                { assert paths.every { it.contains('/converted/') },
+                    "checkpoint rows do not point at converted/: " + paths.join(' | ') },
+                { assert paths.every { !it.contains('/preprocessed/') },
+                    "checkpoint names <pid>/preprocessed/ on a run that never ran PREPROCESS: " + paths.join(' | ') },
+                // The images handed downstream are the CONVERTED ones, so they must not
+                // carry PREPROCESS's _corrected suffix.
+                { assert workflow.out.preprocessed.every { !it[1].toString().contains('_corrected') },
+                    "skipped run emitted a _corrected image: " + workflow.out.preprocessed }
             )
         }
     }
