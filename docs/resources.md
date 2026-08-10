@@ -20,16 +20,23 @@ A process's `cpus` / `memory` / `time` come from **either** a resource `label`
 inert and misleading; those have been removed. What remains is three cases:
 
 <div class="gate">
-  <div class="g"><div class="k">case 1</div><div class="v">withName owns all three</div><div class="d">No label. The block sets cpus, memory and time. 14 processes.</div></div>
+  <div class="g"><div class="k">case 1</div><div class="v">withName owns all three</div><div class="d">No label. The block sets cpus, memory and time. 12 processes.</div></div>
   <div class="g"><div class="k">case 2</div><div class="v">label owns all three</div><div class="d">The withName block, if any, sets only publishDir / ext.args. 6 processes.</div></div>
-  <div class="g"><div class="k">case 3</div><div class="v">partial override</div><div class="d">withName sets one or two fields; a label (or base.config) supplies the rest. 7 processes.</div></div>
+  <div class="g"><div class="k">case 3</div><div class="v">partial override</div><div class="d">withName sets one or two fields; a label supplies the rest. 6 processes.</div></div>
 </div>
 
 Case 3 is the one that surprises people: `TILED_SOLVE` carries
 `process_single` **and** a `withName:` block, but that block sets `memory`
-only — so the label still owns its `cpus` and `time`. The six tiled/STARE and
-registration-QC processes work this way; `EXPORT_SPATIALDATA` is the seventh and
-has no label at all, so its `cpus` and `memory` fall through to `conf/base.config`.
+only — so the label still owns its `cpus` and `time`. All four tiled/STARE
+processes work this way, and so do `GENERATE_REGISTRATION_QC` (`withName` sets
+`cpus` and `memory`; the `process_high` label still owns `time`) and
+`EXPORT_SPATIALDATA` (`withName` sets `time` alone).
+
+`EXPORT_SPATIALDATA` is also the one process in the repo whose `label` is an
+*expression* rather than a literal —
+`params.spatialdata_include_image ? 'process_high' : 'process_medium'`
+(`modules/local/export_spatialdata.nf:22`) — so its `cpus` and `memory` follow
+that flag.
 
 ---
 
@@ -61,8 +68,11 @@ falls through to `conf/base.config`:
 | `memory` | `6.GB × attempt` |
 | `time` | `4.h × attempt` |
 
-Only `EXPORT_SPATIALDATA` currently relies on this — its `withName:` block sets
-`time` alone, so its CPU and memory come from here.
+**No process currently relies on this.** Every process has a `label` or a
+`withName:` field covering each of `cpus` / `memory` / `time`, and
+`tests/test_resource_label_coverage.py` fails the build if one does not. The
+table above is what a *new* process would silently get if it were added with
+neither — which is why that guard exists.
 
 ---
 
@@ -97,12 +107,22 @@ laptop-viable.
 | Process | `cpus` | `memory` (attempt 1) | `time` | Owner | `maxForks` |
 |---|---|---|---|---|---|
 | `TILED_COARSE` | `2` *(label)* | `8 GB × 2^(attempt−1)` *(withName)* | `2.h × attempt` *(label)* | partial | `20` |
-| `TILED_REG_TILE` | `2` *(label)* | `8 GB × attempt` *(withName)* | `2.h × attempt` *(label)* | partial | `20` |
-| `TILED_SOLVE` | `1` *(label)* | `4 GB × attempt` *(withName)* | `8.h × attempt` *(label)* | partial | — |
-| `TILED_STITCH` | `4` *(label)* | `8 GB × attempt` *(withName)* | `4.h × attempt` *(label)* | partial | `10` |
+| `TILED_REG_TILE` | `2` *(label)* | `tiledRegTileGb(params) × attempt` *(withName)* — 4 GB at defaults | `2.h × attempt` *(label)* | partial | `20` |
+| `TILED_SOLVE` | `1` *(label)* | `1 GB × attempt` *(withName)* | `8.h × attempt` *(label)* | partial | — |
+| `TILED_STITCH` | `4` *(label)* | `tiledStitchGb(params) × attempt` *(withName)* — 4 GB at defaults | `4.h × attempt` *(label)* | partial | `10` |
 
 `TILED_COARSE` / `TILED_REG_TILE` / `TILED_SOLVE` / `TILED_STITCH` are the STARE method —
 the only shape it has.
+
+`TILED_REG_TILE` and `TILED_STITCH` are the only two processes whose memory
+request is **derived from a parameter** instead of being a constant:
+`tiledRegTileGb(params)` scales with `reg_tiled_tile + 2 × reg_tiled_halo` and
+`tiledStitchGb(params)` with `reg_tiled_out_tile`, each the measured linear fit
+doubled and floored at 4 GB (`conf/modules.config:103-113`). Raising a tile size
+therefore raises the reservation rather than producing a SIGKILL. The "4 GB at
+defaults" figures above are the shipped-default evaluation of those helpers, not
+independent constants — the helper names, not the numbers, are what
+`tests/test_resource_label_coverage.py` checks for these two rows.
 
 Its memory is bounded. Measured peak RSS on a 16384² 2-channel tiled OME-TIFF:
 `TILED_COARSE` 0.91 GB, `TILED_REG_TILE` 1.31 GB, `TILED_SOLVE` < 1.31 GB,
@@ -155,8 +175,13 @@ unaffected by that number.
 | `MERGE_QUANT_CSVS` | `2` | `32 GB × attempt` | `2.h × attempt` | `process_low` |
 | `EXPORT_GEOJSON` | `1` | `32 GB × attempt` | `2.h × attempt` | `withName` |
 | `MERGE_AND_PYRAMID` | `2` | tier on channels + masks: `f<20` → 200, else 300 GB, `× attempt` | `8.h × attempt` | `withName` |
-| `EXPORT_SPATIALDATA` | `1 × attempt` *(base)* | `6 GB × attempt` *(base)* | `4.h × attempt` *(withName)* | partial |
+| `EXPORT_SPATIALDATA` | `4` *(label)* | `200 GB` *(label)* | `4.h × attempt` *(withName)* | partial |
 | `GENERATE_POSTPROCESSING_QC` | `4` | `200 GB` | `4.h × attempt` | `process_medium` |
+
+`EXPORT_SPATIALDATA`'s label is chosen at runtime —
+`params.spatialdata_include_image ? 'process_high' : 'process_medium'`. The row
+above is the default (`false` → `process_medium`); with `--spatialdata_include_image`
+it asks for `8` cpus and `300 GB` instead.
 
 ### Run-level
 
@@ -338,8 +363,10 @@ per-process rollup, resource-vs-input-size fits, the top-N heaviest and slowest
 tasks, and a retry/failure list. Re-runnable by hand:
 
 ```bash
-python bin/generate_resource_report.py --trace .trace/trace.txt \
-  --sizes results/size_logs/input_sizes.csv --out resource_report.html
+python bin/generate_resource_report.py \
+  --trace .trace/trace.txt \
+  --size-log results/size_logs/input_sizes.csv \
+  --output resource_report.html
 ```
 
 That table is the right starting point for lowering a `withName:` request that
