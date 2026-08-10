@@ -30,11 +30,12 @@ MODULES = sorted((ROOT / "modules" / "local").glob("*.nf"))
 #
 # aggregate_size_logs.nf runs in `container 'ubuntu:22.04'` and reports a `bash:` version
 # row, not a `python:` one -- it has no Python interpreter at all. ProcessEnvelope always
-# prepends a `python:` row (27 of the 27 modules in modules/local/ report one; this is
-# the genuine anomaly -- at the time ProcessEnvelope was introduced it was 27 of 28,
-# since warp_seg_qc_tiled.nf, since merged away, was also present and also reported
-# `python:`), so routing this module through it would add a fabricated/`unknown` python
-# entry to a published report that has never carried one.
+# prepends a `python:` row (23 of the 24 modules in modules/local/ report one; this is
+# the genuine anomaly -- at the time ProcessEnvelope was introduced it was 27 of 28, and
+# the four modules removed since -- compile_panel.nf, phenotype.nf, tiled_register.nf,
+# warp_seg_qc_tiled.nf -- all reported `python:`), so routing this module through it
+# would add a fabricated/`unknown` python entry to a published report that has never
+# carried one.
 ALLOWED_HANDWRITTEN = {"aggregate_size_logs.nf"}
 
 

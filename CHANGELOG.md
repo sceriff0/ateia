@@ -221,8 +221,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `publishDir = [ enabled: false ]` so this is a declared decision, not a silent gap.
 - **Every module's `versions.yml` (`script:` and `stub:`) now renders from one tool list**
   (`lib/ProcessEnvelope.groovy`) instead of two hand-written, independently-maintained
-  heredocs. Touches 26 of 27 `modules/local/*.nf` files (`segment.nf` is the one documented
-  exception — see its `ProcessEnvelope` comment). No published `versions.yml` content
+  heredocs. `modules/local/segment.nf` is no longer the exception it started as: rather
+  than holding each backend's version rows PRE-RENDERED, `lib/SegBackends.groovy` now
+  stores them as bare module names (`versionTools`, the same key `lib/WarpBackends.groovy`
+  uses) and `segment.nf`'s two blocks render from that one list like every other module's.
+  That leaves 23 of the 24 `modules/local/*.nf` files routed through `ProcessEnvelope`,
+  with `aggregate_size_logs.nf` the sole documented exception — it runs in
+  `ubuntu:22.04`, has no Python interpreter, and reports a `bash:` row that
+  `ProcessEnvelope`'s automatic `python:` row would falsify. No published `versions.yml` content
   changes on a stub run; on a **real** run, the same two modules — `extract_mask_series.nf`
   and `merge_and_pyramid.nf` — pick up two deltas each: they now probe `python` instead of
   `python3` for their version rows (both run on an image where `python` exists; `python3`
@@ -244,6 +250,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `lib/WarpBackends.groovy`, not from the param, so the two can never disagree.
 
 ### Fixed
+- **A `nextflow.extension.GroupKey` leaked out of `groupTuple()` and travelled as a
+  channel key, silently dropping registration QC on roughly half of contended runs.**
+  `subworkflows/local/registration.nf` passed the object `groupTuple()` emits straight on
+  as the patient id, into `REGISTER`'s `val(patient_id)` and back out on its outputs.
+  `GroupKey` delegates `hashCode()` to the String it wraps but its `equals()` is
+  **asymmetric** (measured on Nextflow 25.04.7): `groupKey('P001', 2).equals('P001')` is
+  true, `'P001'.equals(groupKey('P001', 2))` is false, and both hash to 2430945. Equal
+  hashes put the two in the same `HashMap` bucket and `HashMap` compares
+  `queryKey.equals(storedKey)`, so the lookup succeeds in exactly one direction —
+  and `CombineOp.emit()` stores each side of a `combine(by:)` in such a map, so whichever
+  side arrives FIRST decides the stored key type. In `subworkflows/local/seg_qc.nf`'s
+  VALIS warp fan-in: GeoJSON first, the key is stored as a String and the later `GroupKey`
+  lookup hits; transform first, the key is stored as a `GroupKey` and the later String
+  lookup **misses**, `WARP_SEG_QC` is started but never receives an input tuple, and the
+  patient's whole registration QC (`*_seg_qc.json`) is silently absent from a run that
+  exits 0. Idle, `conf/test.config`'s `max_cpus = 2` fixes the arrival order and the safe
+  side always won (12/12 green), which is how this survived; under CPU contention it
+  dropped 14 of 24 runs, every one exiting 0. Fixed at the source — the groupKey is a
+  streaming size hint and has no business leaving its own `groupTuple()` — so `seg_qc.nf`,
+  `conf/modules.config` and `warp_seg_qc.nf` are untouched: no `errorStrategy` change, no
+  retry, the metrics output stays mandatory. After the fix the contended configuration is
+  24/24 and the sequential one 12/12. `tests/test_group_key_unwrapped.py` fails if any
+  `groupKey()` ever escapes its `groupTuple()` again. **`-resume` is unaffected and
+  existing work directories stay valid:** `GroupKey` implements `CacheFunnel` and funnels
+  its wrapped target, so task hashes were never sensitive to the wrapper.
+- **`REGISTER` wrote its staging file list to a fixed `/tmp/files_to_copy.txt`.** The
+  process is per-patient with concurrent forks, and under Singularity `/tmp` is
+  host-bind-mounted by default, so two concurrent `REGISTER` tasks on one node could share
+  that one file and each stage the other's slide list. (Never observed under Docker, where
+  each task gets its own `/tmp`.) All three references now use a plain task-relative
+  filename, so the list lives inside the task's own work directory; `cp -Ln`,
+  `xargs -P ${task.cpus}` and the `find -L` expression are unchanged. Covered by a
+  rendered-command nf-test rather than a stub one, since `-stub` never evaluates a
+  `script:` block and cannot see this class of fix.
 - **The `reg_qc=2` registration QC now segments with the run's own segmenter, and at
   stock defaults it runs at all.** `SEG_QC_GEOJSON` ran StarDist itself
   (`bin/segment_to_geojson.py` + `starDistCommonFlags()`), making it the one segmenter

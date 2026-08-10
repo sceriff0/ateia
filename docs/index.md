@@ -74,8 +74,9 @@ raw marker intensities, and you gate/phenotype downstream in QuPath or the
   **CellSAM** with a single `--seg_method` flag.
 - **Single-cell quantification** — per-cell marker intensities, optional
   nucleus / cytoplasm / cell compartments, and morphology.
-- **QuPath-native export** — GeoJSON with raw intensities and z-scores, plus a
-  pyramidal OME-TIFF for interactive viewing and gating.
+- **QuPath-native export** — GeoJSON with raw intensities (z-scores travel in the
+  companion `cells_data.csv`), plus a pyramidal OME-TIFF for interactive viewing and
+  gating.
 - **Restartable & HPC-ready** — checkpoint CSVs between stages, SLURM/Singularity
   profiles, and resource-aware retries.
 

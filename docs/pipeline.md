@@ -123,8 +123,8 @@ Chips give real defaults. Every process runs in a pinned container and emits
           <div class="pp"><span>memory_mode <b>high</b></span><span>micro_reg <b>2</b></span><span>max_dim <b>4000</b></span></div></div>
         <div class="opt"><div class="oh"><span>tiled → STARE</span><span class="tag-alt">method=tiled</span></div>
           <div class="ox">JVM-free tiled rigid + mesh warp into the reference's shape; fiducial is
-            channel 0. Laptop-viable. Optional per-tile fan-out.</div>
-          <div class="pp"><span>tile <b>2048</b></span><span>halo <b>256</b></span><span>gate_tre <b>1.0</b></span><span>fanout <b>false</b></span></div></div>
+            channel 0. Laptop-viable. The per-tile fan-out is the only shape.</div>
+          <div class="pp"><span>tile <b>2048</b></span><span>halo <b>256</b></span><span>gate_tre <b>1.0</b></span></div></div>
       </div>
       <div class="mod"><div class="n">GENERATE_REGISTRATION_QC <span class="tag tag-on">reg_qc≥1</span></div>
         <div class="x">Nuclear-channel overlay, registered vs reference.</div></div>
