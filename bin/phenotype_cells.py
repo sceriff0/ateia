@@ -19,7 +19,7 @@ from phenotyping.calibration import (  # noqa: E402
     finalize_calibration,
     marker_calibration_weights,
 )
-from phenotyping.classify import classify_cell  # noqa: E402
+from phenotyping.classify import classify_cells_vectorized  # noqa: E402
 from phenotyping.conformal import (  # noqa: E402
     conformal_scores,
     ks_uniform,
@@ -55,6 +55,22 @@ def tree_path(name: str, parents: Dict[str, Optional[str]]) -> str:
     return "/".join(reversed(chain))
 
 
+def _round6(values: np.ndarray) -> np.ndarray:
+    """Elementwise round(x, 6) using Python's round(), NOT np.round().
+
+    np.round(x, 6) computes rint(x * 1e6) / 1e6; the multiply is itself
+    inexact, so when x*1e6 lands within an ULP of a .5 boundary, rint can
+    round the wrong way relative to the exact binary value of x. This is
+    reachable in practice: conformal p-values here are ratios
+    (sum of weights)/(sum of weights), and when GMM responsibilities
+    saturate to 0.0/1.0 the ratio's denominator is an exact integer — e.g.
+    m/640 disagrees with np.round(m/640, 6) for ~20% of m. Python's round()
+    is correctly rounded from the exact binary value and matches the
+    per-cell round() used for pheno_score:* elsewhere in this module.
+    """
+    return np.fromiter((round(float(v), 6) for v in values), dtype=np.float64, count=len(values))
+
+
 def _marker_values(df: pd.DataFrame, marker: str, spec: dict):
     key = measurement_key(marker, spec["compartment"], spec["statistic"])
     if key in df.columns:
@@ -71,6 +87,14 @@ def run_phenotyping(
     with open(model_config) as fh:
         cfg = json.load(fh)
     lineage = cfg["lineage_markers"]
+    if not lineage:
+        raise ValueError(
+            "model_config declares no lineage markers (lineage_markers is empty), "
+            "so no cell can be classified against any phenotype pattern. This "
+            "means the compiled panel has no marker with `role: lineage` — fix "
+            "the source panel (panel.yaml) to give at least one marker "
+            "`role: lineage`, then recompile it with compile_panel.py."
+        )
     states = cfg["state_markers"]
     feasible = cfg["feasible_set"]
     never = cfg["constraints"]["never"]
@@ -135,10 +159,7 @@ def run_phenotyping(
 
     def classify_all(alpha):
         sm = {m: resolve_signs(p_neg[m], p_pos[m], alpha) for m in lineage}
-        outs = []
-        for i in range(n):
-            signs = {m: sm[m][i] for m in lineage}
-            outs.append(classify_cell(signs, feasible, never, requires, lineage))
+        outs = classify_cells_vectorized(sm, feasible, never, requires, lineage)
         return sm, outs
 
     crc_ran = bool(audit)
@@ -170,7 +191,38 @@ def run_phenotyping(
         state_signs[m] = resolve_signs(p_neg[m], p_pos[m], chosen_alpha)
     state_ann = {m: state_annotations(state_signs[m]) for m in states}
 
-    rows = []
+    # Columns derived from the per-cell CellOutcome list `outs` (outcome,
+    # candidates, n_candidates, tree_path, empty_type, violated_constraint_id)
+    # or already-materialized per-marker arrays (density_bin, provenance) are
+    # filled here in one pass, without building an intermediate per-cell dict.
+    outcome_col = np.array([o.outcome for o in outs], dtype=object)
+    candidates_col = np.array([";".join(o.candidate_names) for o in outs], dtype=object)
+    n_candidates_col = np.fromiter((len(o.candidate_names) for o in outs), dtype=np.int64, count=n)
+    # tree_path(name, parents) is a pure function of the outcome name; memoize
+    # over the small set of distinct outcomes instead of recomputing per cell.
+    tree_path_by_outcome: Dict[str, str] = {}
+    tree_path_col = np.empty(n, dtype=object)
+    for i, name in enumerate(outcome_col):
+        cached = tree_path_by_outcome.get(name)
+        if cached is None:
+            cached = tree_path(name, parents)
+            tree_path_by_outcome[name] = cached
+        tree_path_col[i] = cached
+    empty_type_col = np.fromiter((o.empty_type for o in outs), dtype=np.int64, count=n)
+    violated_constraint_id_col = np.fromiter(
+        (o.violated_constraint_id for o in outs), dtype=np.int64, count=n
+    )
+    density_bin_col = bins.astype(np.int64)
+    provenance_col = np.zeros(n, dtype=np.int64)
+    p_neg_cols = {m: _round6(p_neg[m]) for m in lineage + states}
+    p_pos_cols = {m: _round6(p_pos[m]) for m in lineage + states}
+    sign_cols = {m: np.array([sign_char(s) for s in sm[m]], dtype=object) for m in lineage}
+    state_cols = {m: state_ann[m].astype(np.int64) for m in states}
+
+    # pheno_score:* still needs the per-cell softmax call (out of scope to
+    # vectorize) but writes straight into preallocated per-name columns
+    # instead of building an intermediate per-cell dict.
+    pheno_score_cols = {name: np.empty(n, dtype=np.float64) for name in all_names}
     for i in range(n):
         o = outs[i]
         signs_row = {m: sm[m][i] for m in lineage}
@@ -179,29 +231,8 @@ def run_phenotyping(
         ps = softmax_pheno_scores(
             o.candidate_patterns, all_names, pneg_row, ppos_row, signs_row, enforce, lineage
         )
-        row = {
-            "label": labels[i],
-            "phenotype": o.outcome,
-            "candidates": ";".join(o.candidate_names),
-            "n_candidates": len(o.candidate_names),
-            "tree_path": tree_path(o.outcome, parents),
-            "density_bin": int(bins[i]),
-            "outcome": o.outcome,
-            "empty_type": o.empty_type,
-            "violated_constraint_id": o.violated_constraint_id,
-            "provenance": 0,
-        }
         for name in all_names:
-            row[f"pheno_score:{name}"] = round(float(ps.get(name, 0.0)), 6)
-        for m in lineage + states:
-            row[f"p_neg:{m}"] = round(float(p_neg[m][i]), 6)
-        for m in lineage + states:
-            row[f"p_pos:{m}"] = round(float(p_pos[m][i]), 6)
-        for m in lineage:
-            row[f"sign:{m}"] = sign_char(sm[m][i])
-        for m in states:
-            row[f"state:{m}"] = int(state_ann[m][i])
-        rows.append(row)
+            pheno_score_cols[name][i] = round(float(ps.get(name, 0.0)), 6)
 
     columns = (
         ["label", "phenotype", "candidates", "n_candidates", "tree_path", "density_bin",
@@ -212,7 +243,32 @@ def run_phenotyping(
         + [f"sign:{m}" for m in lineage]
         + [f"state:{m}" for m in states]
     )
-    pheno_df = pd.DataFrame(rows, columns=columns)
+    data = {
+        "label": labels,
+        "phenotype": outcome_col,
+        "candidates": candidates_col,
+        "n_candidates": n_candidates_col,
+        "tree_path": tree_path_col,
+        "density_bin": density_bin_col,
+        # "outcome" duplicates "phenotype" by value (both are o.outcome); use
+        # an explicit copy rather than relying on pd.DataFrame(dict) copying
+        # on construction, so the two columns are never accidentally aliased.
+        "outcome": outcome_col.copy(),
+        "empty_type": empty_type_col,
+        "violated_constraint_id": violated_constraint_id_col,
+        "provenance": provenance_col,
+    }
+    for name in all_names:
+        data[f"pheno_score:{name}"] = pheno_score_cols[name]
+    for m in lineage + states:
+        data[f"p_neg:{m}"] = p_neg_cols[m]
+    for m in lineage + states:
+        data[f"p_pos:{m}"] = p_pos_cols[m]
+    for m in lineage:
+        data[f"sign:{m}"] = sign_cols[m]
+    for m in states:
+        data[f"state:{m}"] = state_cols[m]
+    pheno_df = pd.DataFrame(data, columns=columns)
 
     # constraint audit table
     committed_mask = pheno_df["n_candidates"] == 1

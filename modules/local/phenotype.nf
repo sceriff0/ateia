@@ -27,6 +27,15 @@ process PHENOTYPE {
     input_bytes=\$(stat -L --printf="%s" ${merged_quant} 2>/dev/null || echo 0)
     echo "${task.process},${meta.patient_id},${merged_quant.name},\${input_bytes}" > ${meta.patient_id}.PHENOTYPE.size.csv
 
+    # Pin numpy's BLAS backend to a single thread: this task requests 1 cpu, but
+    # an unpinned pool sizes itself to the node's core count (64-128 on HPC under
+    # SLURM), not the cgroup's — see the withName: 'PHENOTYPE' comment in
+    # conf/modules.config for the measurement behind this.
+    export OMP_NUM_THREADS=1
+    export OPENBLAS_NUM_THREADS=1
+    export MKL_NUM_THREADS=1
+    export VECLIB_MAXIMUM_THREADS=1
+
     phenotype_cells.py \\
         --merged_quant ${merged_quant} \\
         --morphology ${morphology} \\

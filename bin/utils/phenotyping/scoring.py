@@ -12,7 +12,8 @@ phenotype), else `log(1 − p_neg_k)` if the pattern calls for marker `k` positi
 `log(1 − p_pos_k)`.
 
 `softmax_pheno_scores` turns a cell's list of candidate patterns (as produced by
-`classify.classify_cell`, each `{"pattern": {...}, "phenotype": name}`) into a
+`classify.classify_cells_vectorized`, each `{"pattern": {...}, "phenotype": name}`)
+into a
 probability distribution over phenotype names via a (shift-stabilized) softmax over
 `score_pattern`, summing mass across candidates that share a phenotype name. Every
 name in `all_pheno_names` is present in the output, `0.0` for names with no candidate
