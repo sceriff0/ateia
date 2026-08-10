@@ -3,9 +3,20 @@
 At `reg_qc = 2` the pipeline answers a question the DAPI overlay cannot: **which registration
 stage actually improved the alignment, and by how much?**
 
-It does that by segmenting nuclei on each slide's native image, establishing cell-to-cell
+It does that by segmenting each slide's native image, establishing cell-to-cell
 correspondence **once**, and then re-measuring those same cell pairs after each stage of the
 VALIS transform.
+
+The chain is three processes — `SEG_QC_SEGMENT` → `SEG_QC_GEOJSON` → `WARP_SEG_QC`.
+`SEG_QC_SEGMENT` is `SEGMENT` under an alias, so the QC segments with **the run's own
+segmenter** (`--seg_method`, default `instantseg`) rather than with a second, fixed one.
+
+!!! abstract "See it as a figure"
+    This ladder is panel **f** of **Supplementary Figure S2** —
+    [registration](figures/registration-schematic.html){ target=_blank } — and panel **e** of
+    **Supplementary Figure S3** —
+    [quality control](figures/qc-schematic.html){ target=_blank }, which places it in the
+    pipeline-wide QC architecture.
 
 ## Why the correspondence is fixed, and fixed *there*
 
@@ -120,8 +131,8 @@ pairing itself is thin — check the rigid stage before trusting the later numbe
 - **`n_pairs_scored` vs `n_pairs`** — the difference is pairs whose bounding box exceeded
   `--max-pair-window-px` (a warp artifact or merged blob). A large gap means distorted geometry,
   not a bad alignment.
-- **IoU is bounded by segmentation agreement, not just registration.** Two independent StarDist
-  runs on the same nucleus in different rounds do not produce identical outlines, so `iou_mean`
+- **IoU is bounded by segmentation agreement, not just registration.** Two independent
+  segmentation runs on the same nucleus in different rounds do not produce identical outlines, so `iou_mean`
   has a ceiling below 1 even under perfect registration. The *delta* between stages is the
   registration signal; the absolute level is not.
 - **Vertices are not clipped to the aligned frame by default**, unlike `Slide.warp_geojson`.

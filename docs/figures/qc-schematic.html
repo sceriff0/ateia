@@ -1,0 +1,722 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MIRAGE Supplementary Figure S3 — Quality control</title>
+<style>
+  /* ======================================================================
+     MIRAGE supplementary figures — shared design base (S1 · S2 · S3)
+     ----------------------------------------------------------------------
+     DUPLICATED ON PURPOSE, not extracted to a shared file. Each figure in
+     this set has to survive being detached from the repository — attached to
+     a submission, mailed, opened from file:// — so it may not reference an
+     external stylesheet, not even a sibling one. This block is therefore
+     repeated verbatim in docs/figures/pipeline-schematic.html,
+     docs/figures/registration-schematic.html and docs/figures/qc-schematic.html,
+     and is ported (with the slate counterpart the figures deliberately lack)
+     to docs/stylesheets/extra.css. Change one, change all four.
+
+     SINGLE THEME BY DESIGN: white paper, black ink. A journal figure has a
+     paper ground.
+
+     ONE FONT STACK, shared with docs/stylesheets/extra.css so the site and
+     the figures really do read as one artefact (that file's header claimed
+     they did while leading with a different family).
+
+     ONE BREAKPOINT LADDER for the whole set: 1040 · 880 · 760 · 640 · 520.
+     No figure introduces a sixth rung.
+
+     ONE SIZING SCALE: .tag/.tag-def/.tag-alt .53rem / 1px 4px · .pp span
+     .62rem / 1px 5px · table.pr td.k .7rem, td.v/td.val .68rem ·
+     .masthead h1 max-width 72ch.
+
+     OVERFLOW DISCIPLINE: every grid track is minmax(0,…) and every grid or
+     flex item carries min-width:0. Without it a track's automatic minimum is
+     min-content, so one long identifier (GENERATE_POSTPROCESSING_QC) widens
+     its column and pushes the whole grid outside the panel border instead of
+     wrapping.
+     ====================================================================== */
+  :root{
+    --paper:#ffffff; --panel:#ffffff; --sub:#f6f7f8; --sub-2:#eef0f2;
+    --ink:#0f1113; --ink-2:#3c4147; --ink-3:#767c83;
+    --rule:#c3c8cd; --rule-2:#e5e8ea; --bar:#1b1e22;
+    --serif:Georgia,"Times New Roman",Cambria,"Noto Serif",serif;
+    --sans:"Inter","Helvetica Neue",Helvetica,Arial,"Segoe UI",system-ui,sans-serif;
+    --mono:"JetBrains Mono","SF Mono",ui-monospace,Menlo,Consolas,monospace;
+    color-scheme:light;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);
+    font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased;overflow-x:hidden;}
+  .sheet{max-width:1060px;margin:0 auto;padding:40px 26px 72px;}
+
+  .masthead{border-bottom:2px solid var(--ink);padding-bottom:12px;}
+  .masthead .kick{font-size:.71rem;letter-spacing:.15em;text-transform:uppercase;color:var(--ink-3);font-weight:700;}
+  .masthead h1{font-weight:700;font-size:1.32rem;letter-spacing:-.01em;margin:.3em 0 0;max-width:72ch;line-height:1.26;text-wrap:balance;}
+  .standfirst{font-family:var(--serif);font-size:.95rem;color:var(--ink-2);margin:12px 0 30px;max-width:82ch;}
+
+  /* Figure-set navigation. Relative filenames, so the strip works both from
+     file:// on a detached copy sitting beside its siblings and from the built
+     MkDocs site, which copies docs/figures/ through verbatim. */
+  .figset{display:flex;gap:0;flex-wrap:wrap;align-items:center;margin:12px 0 0;
+    font-family:var(--mono);font-size:.63rem;letter-spacing:.05em;text-transform:uppercase;}
+  .figset a,.figset span{border:1px solid var(--rule);padding:4px 9px;margin:0 -1px 0 0;
+    color:var(--ink-2);text-decoration:none;white-space:nowrap;}
+  .figset a:hover{border-color:var(--ink);color:var(--ink);}
+  .figset .self{background:var(--ink);border-color:var(--ink);color:#fff;font-weight:700;}
+
+  .panel{position:relative;background:var(--panel);border:1px solid var(--rule);padding:20px 20px 18px;margin:0 0 20px;}
+  .panel > .plabel{position:absolute;top:-1px;left:-1px;background:var(--ink);color:#fff;font-weight:700;
+    font-size:.85rem;line-height:1;padding:6px 9px;}
+  .panel-head{margin:2px 0 16px 26px;}
+  .panel-head h2{font-size:1.02rem;font-weight:700;letter-spacing:-.01em;margin:0;}
+  .panel-head p{font-size:.85rem;color:var(--ink-2);margin:3px 0 0;max-width:84ch;}
+
+  code{font-family:var(--mono);font-size:.82em;background:var(--sub);border:1px solid var(--rule-2);border-radius:2px;padding:.5px 4px;}
+  .tbl-scroll{overflow-x:auto;}
+
+  /* parameter chips */
+  .pp{display:flex;flex-wrap:wrap;gap:4px;margin-top:7px;min-width:0;}
+  .pp span{font-family:var(--mono);font-size:.62rem;background:var(--sub);border:1px solid var(--rule-2);padding:1px 5px;
+    color:var(--ink-2);max-width:100%;min-width:0;overflow-wrap:anywhere;}
+  .pp b{color:var(--ink);font-weight:700;}
+  .tag{font-family:var(--mono);font-size:.53rem;text-transform:uppercase;letter-spacing:.04em;padding:1px 4px;
+    font-weight:700;border:1px solid var(--rule);color:var(--ink-2);background:var(--sub-2);white-space:nowrap;}
+  .tag-on{border-color:var(--ink);color:var(--ink);background:#fff;}
+  .tag-def{font-family:var(--mono);font-size:.53rem;background:var(--ink);color:#fff;padding:1px 4px;font-weight:700;white-space:nowrap;}
+  .tag-alt{font-family:var(--mono);font-size:.53rem;background:var(--sub);color:var(--ink-2);border:1px solid var(--rule);padding:1px 4px;white-space:nowrap;}
+
+  /* parameter tables (td.v in S1/S3, td.val in S2 — same scale) */
+  table.pr{border-collapse:collapse;width:100%;font-size:.78rem;}
+  table.pr td{padding:3.5px 4px;border-bottom:1px solid var(--rule-2);vertical-align:top;}
+  table.pr tr:last-child td{border-bottom:none;}
+  table.pr td.k{font-family:var(--mono);font-size:.7rem;font-weight:700;white-space:nowrap;}
+  table.pr td.v,table.pr td.val{font-family:var(--mono);font-size:.68rem;color:var(--ink-2);white-space:nowrap;
+    padding-right:8px;font-variant-numeric:tabular-nums;}
+  table.pr td.v.w{white-space:normal;overflow-wrap:anywhere;}
+  table.pr td.d{color:var(--ink-2);}
+  .nul{color:var(--ink-3);font-style:italic;}
+
+  .caption{font-family:var(--serif);font-size:.83rem;color:var(--ink-2);line-height:1.62;border-top:1px solid var(--rule);padding-top:16px;margin-top:8px;}
+  .caption b{color:var(--ink);}
+  .footnote{font-family:var(--sans);font-size:.72rem;color:var(--ink-3);margin-top:14px;display:block;}
+
+  /* a — the QC ladder across the four steps */
+  .flow{display:grid;grid-template-columns:minmax(0,1fr) 16px minmax(0,1fr) 16px minmax(0,1fr) 16px minmax(0,1fr);
+    gap:3px;align-items:start;}
+  @media(max-width:1040px){.flow{grid-template-columns:minmax(0,1fr);}}
+  .lane{border:1px solid var(--rule);min-width:0;}
+  .lane > h3{margin:0;font-family:var(--mono);font-size:.68rem;font-weight:700;letter-spacing:.03em;
+    padding:8px 9px;background:var(--bar);color:#fff;display:flex;justify-content:space-between;align-items:center;gap:5px;
+    min-width:0;overflow-wrap:anywhere;}
+  .lane > h3 span:last-child{font-weight:400;color:#c7cacd;white-space:nowrap;flex:none;}
+  .lane .body{padding:9px;display:flex;flex-direction:column;gap:8px;background:var(--sub);min-width:0;}
+  .mod{background:var(--panel);border:1px solid var(--rule);border-left:2.5px solid var(--ink);padding:8px 9px;min-width:0;}
+  .mod.off{border-left-style:dashed;border-left-color:var(--ink-3);background:var(--sub-2);}
+  .mod .n{font-family:var(--mono);font-weight:700;font-size:.71rem;display:flex;flex-wrap:wrap;gap:5px;align-items:center;
+    min-width:0;overflow-wrap:anywhere;}
+  .mod .x{font-size:.75rem;color:var(--ink-2);margin-top:4px;overflow-wrap:anywhere;}
+  .kind{font-family:var(--mono);font-size:.6rem;color:var(--ink-2);border:1px dashed var(--rule);padding:5px 7px;
+    background:var(--panel);min-width:0;overflow-wrap:anywhere;}
+  .kind b{color:var(--ink);}
+  .arrow{display:flex;align-items:center;justify-content:center;padding-top:40px;color:var(--ink-3);font-size:1rem;}
+  @media(max-width:1040px){.arrow{padding:2px;transform:rotate(90deg);}}
+  .after{display:flex;gap:12px;flex-wrap:wrap;margin-top:14px;}
+  .after .mod{flex:1 1 260px;min-width:0;}
+
+  /* b — the tagged-stream seam */
+  .seam{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;align-items:start;}
+  @media(max-width:880px){.seam{grid-template-columns:minmax(0,1fr);}}
+  .seam > div{min-width:0;}
+  .sig{border:1px solid var(--rule);background:var(--sub);padding:10px 12px;font-family:var(--mono);
+    font-size:.72rem;color:var(--ink);overflow-x:auto;}
+  .sig .cm{color:var(--ink-3);}
+  .guards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:14px;}
+  @media(max-width:880px){.guards{grid-template-columns:minmax(0,1fr);}}
+  .gd{border:1px solid var(--rule);border-top:2.5px solid var(--ink);background:var(--panel);padding:10px 11px;min-width:0;}
+  .gd .h{font-family:var(--mono);font-weight:700;font-size:.68rem;overflow-wrap:anywhere;}
+  .gd .src{font-family:var(--mono);font-size:.58rem;color:var(--ink-3);margin-top:2px;}
+  .gd .x{font-size:.76rem;color:var(--ink-2);margin-top:6px;}
+  .gd .x b{color:var(--ink);}
+
+  /* c — ownership map */
+  table.own{border-collapse:collapse;width:100%;font-size:.76rem;}
+  table.own th{text-align:left;font-weight:700;font-size:.78rem;color:var(--ink);border-bottom:1.5px solid var(--ink);
+    padding:6px 9px;vertical-align:bottom;}
+  table.own td{padding:6px 9px;border-bottom:1px solid var(--rule-2);vertical-align:top;color:var(--ink-2);}
+  table.own tr:last-child td{border-bottom:none;}
+  table.own td.st{font-family:var(--mono);font-size:.68rem;font-weight:700;color:var(--ink);white-space:nowrap;}
+  table.own td.kd{font-family:var(--mono);font-size:.66rem;color:var(--ink);}
+  table.own tr.univ td{background:var(--sub);}
+  table.own tr.none td.kd{color:var(--ink-3);font-style:italic;}
+
+  /* d — renderers */
+  .rend{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;}
+  @media(max-width:880px){.rend{grid-template-columns:minmax(0,1fr);}}
+  .rn{border:1px solid var(--rule);border-top:2.5px solid var(--ink);background:var(--panel);padding:11px 12px;min-width:0;}
+  .rn h4{margin:0;font-family:var(--mono);font-size:.7rem;font-weight:700;overflow-wrap:anywhere;}
+  .rn .gate{font-family:var(--mono);font-size:.58rem;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-3);margin-top:3px;}
+  .rn .x{font-size:.76rem;color:var(--ink-2);margin:7px 0 0;}
+  .rn dl{margin:8px 0 0;font-size:.72rem;}
+  .rn dt{font-family:var(--mono);font-size:.57rem;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-3);margin-top:6px;}
+  .rn dd{margin:1px 0 0;font-family:var(--mono);font-size:.63rem;color:var(--ink-2);overflow-wrap:anywhere;}
+
+  /* e — SEG_QC chain */
+  .chain{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;}
+  @media(max-width:880px){.chain{grid-template-columns:minmax(0,1fr);}}
+  .ch{border:1px solid var(--rule);background:var(--panel);padding:10px 11px;min-width:0;position:relative;}
+  .ch .num{font-family:var(--mono);font-size:.58rem;background:var(--ink);color:#fff;padding:1px 5px;}
+  .ch .nm{font-family:var(--mono);font-weight:700;font-size:.7rem;margin-top:5px;overflow-wrap:anywhere;}
+  .ch .x{font-size:.76rem;color:var(--ink-2);margin-top:5px;}
+  .ch .res{font-family:var(--mono);font-size:.6rem;color:var(--ink-2);margin-top:7px;border-top:1px solid var(--rule-2);padding-top:5px;overflow-wrap:anywhere;}
+  .ch .res b{color:var(--ink);}
+  .callout{border-left:3px solid var(--ink);background:var(--sub);padding:9px 12px;font-size:.8rem;color:var(--ink-2);margin:13px 0 0;}
+  .callout b{color:var(--ink);}
+  table.bk{border-collapse:collapse;width:100%;font-size:.75rem;margin-top:13px;}
+  table.bk th{text-align:left;font-weight:700;font-size:.78rem;color:var(--ink);border-bottom:1.5px solid var(--ink);padding:6px 9px;}
+  table.bk th:first-child{width:130px;}
+  table.bk td{padding:6px 9px;border-bottom:1px solid var(--rule-2);vertical-align:top;color:var(--ink-2);}
+  table.bk tr:last-child td{border-bottom:none;}
+  table.bk td.rk{font-family:var(--mono);font-size:.63rem;text-transform:uppercase;letter-spacing:.04em;
+    color:var(--ink-3);font-weight:700;white-space:nowrap;}
+  table.bk b{color:var(--ink);}
+
+  /* f — aggregation */
+  .slots{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;}
+  @media(max-width:880px){.slots{grid-template-columns:repeat(2,minmax(0,1fr));}}
+  @media(max-width:520px){.slots{grid-template-columns:minmax(0,1fr);}}
+  .slot{border:1px solid var(--rule);background:var(--panel);padding:8px 9px;min-width:0;}
+  .slot .i{font-family:var(--mono);font-size:.56rem;color:var(--ink-3);}
+  .slot .k{font-family:var(--mono);font-weight:700;font-size:.64rem;margin-top:2px;overflow-wrap:anywhere;}
+  .slot .r{font-family:var(--mono);font-size:.58rem;color:var(--ink-2);margin-top:4px;overflow-wrap:anywhere;}
+
+  /* g — non-gating */
+  .warnbox{border:1px solid var(--ink);background:#fff;padding:9px 12px;font-size:.79rem;color:var(--ink-2);margin:12px 0 0;}
+  .warnbox b{color:var(--ink);}
+  .warnbox .wl{font-family:var(--mono);font-size:.57rem;text-transform:uppercase;letter-spacing:.07em;
+    color:var(--ink);font-weight:700;display:block;margin-bottom:3px;}
+  .procrow{display:flex;flex-wrap:wrap;gap:5px;margin-top:11px;}
+  .procrow span{font-family:var(--mono);font-size:.64rem;border:1.5px solid var(--ink);background:var(--panel);
+    padding:4px 7px;white-space:nowrap;font-weight:700;}
+  .math{font-family:var(--mono);font-size:.74rem;background:var(--sub);border:1px solid var(--rule-2);
+    padding:8px 10px;margin:11px 0 0;overflow-x:auto;white-space:nowrap;color:var(--ink);}
+  .math .cm{color:var(--ink-3);}
+
+  /* h — params */
+  .pgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 26px;}
+  @media(max-width:760px){.pgrid{grid-template-columns:minmax(0,1fr);}}
+  .pcol{min-width:0;}
+  @media(max-width:880px){table.pr td.k,table.pr td.v{white-space:normal;overflow-wrap:anywhere;}}
+  .pcol h4{font-family:var(--mono);font-size:.66rem;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-2);
+    margin:14px 0 4px;padding-bottom:3px;border-bottom:1px solid var(--ink);}
+  .pcol h4:first-child{margin-top:0;}
+  .outnote{font-family:var(--serif);font-size:.78rem;color:var(--ink-2);margin-top:12px;}
+  .outnote b{color:var(--ink);}
+</style>
+</head>
+<body>
+
+<div class="sheet">
+
+  <div class="masthead">
+    <div class="kick">Supplementary Figure S3 · quality control</div>
+    <h1>Quality control as one seam: a tagged artifact stream, a step-owned kind vocabulary, three guards, and a contract that can never stop the run</h1>
+  </div>
+  <nav class="figset" aria-label="Supplementary figure set">
+    <a href="pipeline-schematic.html">S1 · pipeline</a>
+    <a href="registration-schematic.html">S2 · registration</a>
+    <span class="self">S3 · quality control</span>
+  </nav>
+  <p class="standfirst">Every step of the pipeline emits quality-control artifacts, and every one of them reaches
+    the end-of-run report through the <i>same</i> one-channel interface: a stream of <code>[kind, file]</code>
+    pairs. What a kind <i>is</i> has a single owner — the same step table that defines <code>--start</code> and
+    <code>--stop</code> — and three separate guards make a mistyped or unwired kind a hard error rather than a
+    silently empty section of a green report. Every QC gate below is <b>on by default</b>, and every QC process is
+    <b>non-gating</b>: it retries, then gives up, and never fails the run.</p>
+  <div class="figset" style="margin-top:11px;text-transform:none;letter-spacing:0">
+    <span style="border:none;padding-left:0;color:var(--ink-3)">defaults: <code>reg_qc = 2</code> ·
+    <code>skip_preprocess_qc = false</code> · <code>skip_postprocessing_qc = false</code> ·
+    <code>skip_final_qc_report = false</code> · <code>enable_trace = true</code></span>
+  </div>
+
+  <!-- a — WHAT EACH STEP CONTRIBUTES -->
+  <section class="panel">
+    <span class="plabel">a</span>
+    <div class="panel-head"><h2>What each step contributes, and under which gate</h2>
+      <p>The four steps of <code>ParamUtils.STEPS</code>. Each QC process sits behind its own parameter, so the
+        router needs no <code>if</code> of its own; each emits one or more tagged artifact <i>kinds</i> into the
+        single stream panel <b>b</b> describes. Every gate shown is open at the shipped defaults.</p></div>
+    <div class="flow">
+
+      <div class="lane">
+        <h3><span>PREPROCESSING</span><span>1</span></h3>
+        <div class="body">
+          <div class="mod"><div class="n">GENERATE_PREPROCESS_QC <span class="tag tag-on">!skip_preprocess_qc</span></div>
+            <div class="x">Per-channel downsampled PNGs of the corrected image, one task per slide.</div>
+            <div class="pp"><span>preprocess_qc_scale_factor <b>0.25</b></span></div></div>
+          <div class="kind">emits <b>preprocess_qc</b></div>
+        </div>
+      </div>
+
+      <div class="arrow">→</div>
+
+      <div class="lane">
+        <h3><span>REGISTRATION</span><span>2</span></h3>
+        <div class="body">
+          <div class="mod"><div class="n">GENERATE_REGISTRATION_QC <span class="tag tag-on">reg_qc ≥ 1</span></div>
+            <div class="x">Nuclear-channel RGB overlay, registered against reference — full-resolution TIFF plus a
+              downsampled PNG.</div>
+            <div class="pp"><span>qc_scale_factor <b>0.25</b></span></div></div>
+          <div class="mod"><div class="n">SEG_QC <span class="tag tag-on">reg_qc = 2 · default</span></div>
+            <div class="x">Three processes — panel <b>e</b>. Scores IoU and centroid residual per cell pair at
+              every registration stage, and emits a per-cell residual table the SpatialData export joins in.</div>
+            <div class="pp"><span>reg_qc <b>2</b></span><span>skip_registration_qc <b>false</b></span></div></div>
+          <div class="mod off"><div class="n">the backend's own TRE</div>
+            <div class="x">Not a QC process: the registration method's <i>intrinsic</i> error estimate, emitted by
+              whichever adapter ran (VALIS <code>*_summary.csv</code>, STARE <code>*_tre.json</code>).</div></div>
+          <div class="kind">emits <b>registration_qc</b> · <b>registration_tre</b> · <b>seg_qc</b> ·
+            <b>seg_residuals</b></div>
+        </div>
+      </div>
+
+      <div class="arrow">→</div>
+
+      <div class="lane">
+        <h3><span>SEGMENTATION</span><span>3</span></h3>
+        <div class="body">
+          <div class="mod off"><div class="n">— no QC process —</div>
+            <div class="x"><code>SEGMENT</code> and the two property extractors emit only <code>versions.yml</code>
+              and a size log, and both of those are universal. No QC <i>image</i> belongs to segmentation alone:
+              <code>GENERATE_POSTPROCESSING_QC</code> needs the mask <b>and</b> the merged quantification table,
+              so it stays postprocessing's.</div></div>
+          <div class="kind">emits <b>nothing step-specific</b> — an empty <code>qcKinds</code> by design, not by
+            oversight</div>
+        </div>
+      </div>
+
+      <div class="arrow">→</div>
+
+      <div class="lane">
+        <h3><span>POSTPROCESSING</span><span>4</span></h3>
+        <div class="body">
+          <div class="mod"><div class="n">GENERATE_POSTPROCESSING_QC <span class="tag tag-on">!skip_postprocessing_qc</span></div>
+            <div class="x">Mask and quantification overlays from the cell mask plus the merged per-patient
+              measurement CSV.</div></div>
+          <div class="kind">emits <b>postprocess_qc</b></div>
+        </div>
+      </div>
+
+    </div>
+    <div class="after">
+      <div class="mod"><div class="n">every process, every step <span class="tag">universal</span></div>
+        <div class="x">A <code>versions.yml</code> and a <code>*.size.csv</code> come out of <i>every</i> process
+          in the pipeline, so they belong to no single step's <code>qcKinds</code> — they are
+          <code>UNIVERSAL_QC_KINDS</code>.</div>
+        <div class="kind" style="margin-top:7px">emits <b>versions</b> · <b>size_log</b></div></div>
+      <div class="mod"><div class="n">FINAL_QC <span class="tag tag-on">shared</span></div>
+        <div class="x">One subworkflow, called by both the linear pipeline and <code>--mode add_cycle</code>.
+          add_cycle contributes only four of the eight kinds; the rest are simply absent, which is exactly what
+          the tagged-stream interface makes cost nothing.</div></div>
+    </div>
+  </section>
+
+  <!-- b — THE SEAM -->
+  <section class="panel">
+    <span class="plabel">b</span>
+    <div class="panel-head"><h2>The interface — one stream of <code>[kind, file]</code>, and three guards on it</h2>
+      <p>Artifacts arrive as <b>one</b> channel of tagged pairs, not as eight positional channels. A caller mixes
+        in what it has; a kind nobody contributes is an empty branch. That removes the
+        <code>Channel.empty().collect().ifEmpty([])</code> placeholders both callers used to repeat — but it also
+        removes the compiler's help, because a mistyped tag is now a runtime string rather than a parse-time
+        resolution failure. Three guards put that safety back.</p></div>
+
+    <div class="seam">
+      <div>
+        <div class="sig">FINAL_QC( ch_artifacts, ch_run_facts )<br>
+          &nbsp;&nbsp;<span class="cm">ch_artifacts : Channel&lt;[String kind, Path file]&gt;</span></div>
+        <div class="sig" style="margin-top:11px">KNOWN_ARTIFACT_KINDS<br>
+          &nbsp;&nbsp;= ParamUtils.STEPS.collectMany { it.qcKinds }<br>
+          &nbsp;&nbsp;+ ParamUtils.UNIVERSAL_QC_KINDS<br>
+          <span class="cm">&nbsp;&nbsp;→ 8 kinds; see panel c for the split</span></div>
+        <div class="callout"><b>The vocabulary is derived, not restated.</b> The two <code>FINAL_QC</code> call
+          sites hand-write <b>16</b> tag literals between them — 12 on the standard path, 4 in add_cycle — and
+          nothing else checks that the two agree. <code>KNOWN_ARTIFACT_KINDS</code> is that check, and it is
+          computed from the same step table that fixes each step's required samplesheet columns and the values
+          <code>--start</code>/<code>--stop</code> accept.</div>
+      </div>
+      <div>
+        <div class="guards" style="margin-top:0;grid-template-columns:minmax(0,1fr)">
+          <div class="gd"><div class="h">1 · unknown tag at the producer</div>
+            <div class="src">subscribe on ch_artifacts</div>
+            <div class="x">A tag not in the vocabulary is a hard <b>error</b>. Registered unconditionally — outside
+              both parameter gates — so a typo is caught even on a run that asks for neither output. Without it an
+              unknown tag would match no filter and that whole QC category would vanish from the report
+              <b>while the run stayed green</b>.</div></div>
+          <div class="gd"><div class="h">2 · unknown literal at the consumer</div>
+            <div class="src">artifactsOf(ch, kind)</div>
+            <div class="x">The eight <code>artifactsOf()</code> calls are a second, textually separate copy of the
+              vocabulary. The helper validates its own <code>kind</code> argument, so
+              <code>artifactsOf(ch, 'seg_qcc')</code> throws instead of quietly emptying a report slot.</div></div>
+          <div class="gd"><div class="h">3 · declared but never consumed</div>
+            <div class="src">CONSUMED_ARTIFACT_KINDS</div>
+            <div class="x">The third failure the first two cannot see: a kind correctly declared, correctly tagged,
+              and read by <b>no</b> <code>artifactsOf()</code> call — dropped from every report, exit&nbsp;0.
+              Checked at the end of the workflow, and only when both outputs are enabled, because
+              <code>--skip_final_qc_report</code> or <code>--enable_trace false</code> legitimately leaves half
+              the vocabulary unconsumed.</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- c — OWNERSHIP -->
+  <section class="panel">
+    <span class="plabel">c</span>
+    <div class="panel-head"><h2>Who owns which kind — <code>ParamUtils.STEPS</code></h2>
+      <p>The same ordered table that answers "what is a step?" also answers "what QC does this step contribute?".
+        <code>STEP_ORDER</code>, the required-column contract, the entry column each <code>--start</code> reads,
+        and this vocabulary are all derived from it, so they cannot drift apart.</p></div>
+    <div class="tbl-scroll"><table class="own">
+      <thead><tr><th>step</th><th>qcKinds</th><th>what it is</th></tr></thead>
+      <tbody>
+        <tr><td class="st">preprocessing</td><td class="kd">preprocess_qc</td>
+          <td>Per-channel PNG thumbnails of the illumination-corrected image.</td></tr>
+        <tr><td class="st">registration</td>
+          <td class="kd">registration_qc<br>registration_tre<br>seg_qc<br>seg_residuals</td>
+          <td>The overlay PNG/TIFF; the backend's own target-registration-error file (deliberately <i>not</i> named
+            after a method — VALIS emits a CSV, STARE a JSON); the staged cell-overlap metrics; and the per-cell
+            residual table.</td></tr>
+        <tr class="none"><td class="st">segmentation</td><td class="kd">— empty —</td>
+          <td><b>By design, and commented as such.</b> <code>SEGMENT</code> and the two property extractors emit
+            only <code>versions</code> and <code>size_log</code>, which are universal, so segmentation contributes
+            nothing of its own. The one candidate — <code>GENERATE_POSTPROCESSING_QC</code> — consumes the mask
+            <i>and</i> the merged quantification table, so it belongs to postprocessing. An empty list here is a
+            statement, not an omission: guard&nbsp;3 in panel <b>b</b> would fire on a kind declared here and
+            never wired.</td></tr>
+        <tr><td class="st">postprocessing</td><td class="kd">postprocess_qc</td>
+          <td>Mask and quantification overlay PNGs.</td></tr>
+        <tr class="univ"><td class="st">— every step —</td><td class="kd">versions<br>size_log</td>
+          <td><code>UNIVERSAL_QC_KINDS</code>. Cross-cutting, so listing them under any one step would be a lie
+            about ownership; they are added once, next to the table.</td></tr>
+      </tbody>
+    </table></div>
+    <p class="outnote">Because the schema's <code>--start</code>/<code>--stop</code> enums cannot be generated at
+      build time, a test asserts they still agree with this table — the same discipline applied to the QC
+      vocabulary by <code>KNOWN_ARTIFACT_KINDS</code>.</p>
+  </section>
+
+  <!-- d — THE RENDERERS -->
+  <section class="panel">
+    <span class="plabel">d</span>
+    <div class="panel-head"><h2>The three per-step renderers</h2>
+      <p>One process per step that produces a QC <i>image</i>. Each is gated by its own parameter, runs in a pinned
+        container, and publishes under the patient's <code>qc/</code> tree. Resource owner as
+        <code>conf/modules.config</code> assigns it: a resource <b>label</b>, a <code>withName:</code> block, or —
+        for the registration renderer — a partial override where the label still owns <code>time</code>.</p></div>
+    <div class="rend">
+
+      <div class="rn">
+        <h4>GENERATE_PREPROCESS_QC</h4>
+        <div class="gate">gate · !skip_preprocess_qc</div>
+        <p class="x">Reads one preprocessed slide and writes a downsampled PNG per channel, named from the
+          slide's own channel list.</p>
+        <dl>
+          <dt>container</dt><dd>…attend_image_analysis:preprocess</dd>
+          <dt>resources</dt><dd>label process_medium — 4 cpu · 200 GB · 4 h × attempt</dd>
+          <dt>publishes</dt><dd>&lt;pid&gt;/qc/preprocess/qc/*.png</dd>
+          <dt>kind</dt><dd>preprocess_qc</dd>
+        </dl>
+      </div>
+
+      <div class="rn">
+        <h4>GENERATE_REGISTRATION_QC</h4>
+        <div class="gate">gate · reg_qc ≥ 1</div>
+        <p class="x">Reads the registered slide <i>and</i> the reference together and writes an RGB overlay —
+          a full-resolution TIFF plus a scaled PNG. It is the one process whose memory tier is keyed on the
+          <b>combined</b> size of two inputs, because it holds both.</p>
+        <dl>
+          <dt>container</dt><dd>…attend_image_analysis:debug_diffeo</dd>
+          <dt>resources</dt><dd>1 cpu (withName) · 100 / 200 / 300 GB × attempt, tiered · 12 h × attempt (label process_high)</dd>
+          <dt>publishes</dt><dd>&lt;pid&gt;/qc/registration/qc/*_QC_RGB.{png,tif} · *_QC_RGB_fullres.tif</dd>
+          <dt>kind</dt><dd>registration_qc</dd>
+        </dl>
+      </div>
+
+      <div class="rn">
+        <h4>GENERATE_POSTPROCESSING_QC</h4>
+        <div class="gate">gate · !skip_postprocessing_qc</div>
+        <p class="x">Reads the cell mask and the merged per-patient measurement CSV and renders segmentation and
+          quantification overlays. Needing both is why this belongs to postprocessing and not to segmentation.</p>
+        <dl>
+          <dt>container</dt><dd>…attend_image_analysis:quantification_gpu</dd>
+          <dt>resources</dt><dd>label process_medium — 4 cpu · 200 GB · 4 h × attempt</dd>
+          <dt>publishes</dt><dd>&lt;pid&gt;/qc/postprocessing/qc/*.png</dd>
+          <dt>kind</dt><dd>postprocess_qc</dd>
+        </dl>
+      </div>
+
+    </div>
+    <p class="outnote">The repeated <code>qc/</code> in those three paths is real, not a typo. All three
+      renderers declare their outputs as <code>path("qc/*.png")</code> and publish with a <code>pattern:</code>
+      naming that same subdirectory, and Nextflow carries a matched subdirectory into the published path rather
+      than flattening it — the identical mechanism that puts <code>EXPORT_GEOJSON</code>'s output at
+      <code>&lt;pid&gt;/geojson/export/cells.geojson</code>. <code>WARP_SEG_QC</code> and
+      <code>SEG_QC_GEOJSON</code> declare flat output patterns, so their artifacts land directly in
+      <code>&lt;pid&gt;/qc/registration/</code> and <code>…/registration/geojson/</code>. Verified against a
+      stub run's published tree, not inferred.</p>
+  </section>
+
+  <!-- e — SEG_QC -->
+  <section class="panel">
+    <span class="plabel">e</span>
+    <div class="panel-head"><h2><code>SEG_QC</code> — the <code>reg_qc = 2</code> chain, shared by two callers</h2>
+      <p>One subworkflow, used by the linear registration path and by <code>--mode add_cycle</code>, which
+        previously carried near-verbatim copies of it. Three processes, in order. The registration method arrives
+        as an <b>argument</b>, never as a read of <code>params.registration_method</code> — that global is read
+        exactly once on the linear path, in <code>registration.nf</code>.</p></div>
+
+    <div class="chain">
+      <div class="ch"><span class="num">1</span>
+        <div class="nm">SEG_QC_SEGMENT</div>
+        <div class="x">Segment each slide on its <b>native</b>, pre-registration image — which is the whole point:
+          it isolates registration quality from segment-on-interpolated-pixels bias. This is
+          <code>SEGMENT</code> under an alias, so the QC follows <code>--seg_method</code> for free and cannot
+          drift from the segmenter the run actually ships.</div>
+        <div class="res">8 cpu · <b>32 / 64 / 128 GB</b> tiered × attempt · 4 h × attempt<br>
+          container + flags from <code>lib/SegBackends.groovy</code></div></div>
+      <div class="ch"><span class="num">2</span>
+        <div class="nm">SEG_QC_GEOJSON</div>
+        <div class="x">Label image → one polygon per cell. Backend-agnostic by construction: it reads a plain
+          label TIFF, which all three segmentation backends emit under the same <code>*_cell_mask.tif</code>
+          contract. Its one tunable is the simplification tolerance, which must equal what
+          <code>EXTRACT_CELL_PROPERTIES</code> gets so the two GeoJSONs stay comparable.</div>
+        <div class="res">1 cpu · <b>64 GB</b> × attempt · 4 h × attempt · no GPU<br>
+          publishes &lt;pid&gt;/qc/registration/geojson/*.geojson</div></div>
+      <div class="ch"><span class="num">3</span>
+        <div class="nm">WARP_SEG_QC</div>
+        <div class="x">Warp the polygon <i>vertices</i> — not pixels — through each registration stage, pair cells
+          once at the rigid anchor, and score per-pair IoU and centroid residual at every stage. One process, two
+          backends.</div>
+        <div class="res">2 cpu · <b>32 GB × 2^(attempt−1)</b> → 32/64/128/256 · 3 h × attempt<br>
+          publishes *_seg_qc.json · optional *_reg_residuals.csv</div></div>
+    </div>
+
+    <div class="callout"><b>The alias inherits config, which is the trap.</b> Nextflow matches a
+      <code>withName:</code> selector against an alias' own name <i>and</i> its process' original declared name, so
+      <code>withName: 'SEGMENT'</code> already governs <code>SEG_QC_SEGMENT</code> — container, resources, backend
+      flags, GPU wiring, all of which is wanted — and would also publish these per-slide masks into
+      <code>&lt;pid&gt;/segmentation/</code>, a tree the segmented checkpoint CSV indexes and which must hold
+      exactly one per-patient mask. A <code>withName: 'SEG_QC_SEGMENT'</code> block, textually <i>after</i>
+      SEGMENT's, turns publishing off and sets a per-slide prefix. A test fails if that override is ever lost.</div>
+
+    <div class="tbl-scroll"><table class="bk">
+      <caption style="font-family:var(--mono);font-size:.63rem;text-transform:uppercase;letter-spacing:.07em;color:var(--ink-3);text-align:left;padding:0 0 7px;">one warp process, two backends — lib/WarpBackends.groovy, keyed on the <code>method</code> input</caption>
+      <thead><tr><th>&nbsp;</th><th>valis <span class="tag-def">default</span></th><th>tiled <span class="tag-alt">method=tiled</span></th></tr></thead>
+      <tbody>
+        <tr><td class="rk">container</td><td>cdgatenbee/valis-wsi:1.0.0</td><td>bolt3x/attend_image_analysis:tiled</td></tr>
+        <tr><td class="rk">stages</td><td>native · rigid · non_rigid · micro</td><td>native · rigid · refined</td></tr>
+        <tr><td class="rk">versionTools</td><td>valis · skimage · scipy</td><td>skimage · scipy</td></tr>
+        <tr><td class="rk">extra flags</td><td>moving/reference name · <code>--micro-reg</code> · optional
+          <code>--checkpoint-dir</code> · <b><code>--jvm-heap-gb 8</code></b></td><td><code>--method tiled</code></td></tr>
+        <tr><td class="rk">transform key</td><td>one registrar per <b>patient</b></td><td>one manifest per <b>moving slide</b></td></tr>
+        <tr><td class="rk">stage checkpoint</td><td>required — the micro pass composes destructively</td>
+          <td><i>none</i> — passed as <code>[]</code>, the null object</td></tr>
+      </tbody>
+    </table></div>
+    <p class="outnote">The JVM-only <code>--jvm-heap-gb 8</code> lives in the backend table rather than in
+      <code>ext.args</code>, and that is the point: an <code>ext.args</code> ternary keyed on
+      <code>params.registration_method</code> would read the <b>global param</b> while the process selects its
+      backend from an <b>input</b>. Resolving it from the table — which already closes over <code>method</code> —
+      makes leaking a VALIS flag onto the JVM-free path structurally impossible instead of conditionally absent.
+      One 8-element input tuple serves both backends; only the two joins upstream differ.</p>
+  </section>
+
+  <!-- f — AGGREGATION -->
+  <section class="panel">
+    <span class="plabel">f</span>
+    <div class="panel-head"><h2>Aggregation — eight fixed slots, and a size-log rollup</h2>
+      <p><code>GENERATE_QC_REPORT</code>'s input arity is <b>fixed and ordered</b>: Nextflow process inputs are
+        statically declared, so a new artifact kind necessarily means a new slot here and a new <code>path(...)</code>
+        in the module. That is a hard error when missed, which is why the arity is deliberately not data-driven.</p></div>
+    <div class="slots">
+      <div class="slot"><div class="i">slot 1</div><div class="k">preprocess_qc</div><div class="r">collect(sort: true).ifEmpty([])</div></div>
+      <div class="slot"><div class="i">slot 2</div><div class="k">registration_qc</div><div class="r">collect(sort: true).ifEmpty([])</div></div>
+      <div class="slot"><div class="i">slot 3</div><div class="k">registration_tre</div><div class="r">collect(sort: true).ifEmpty([])</div></div>
+      <div class="slot"><div class="i">slot 4</div><div class="k">postprocess_qc</div><div class="r">collect(sort: true).ifEmpty([])</div></div>
+      <div class="slot"><div class="i">slot 5</div><div class="k">versions</div><div class="r">unique().collectFile('collated_versions.yml', sort: true)</div></div>
+      <div class="slot"><div class="i">slot 6</div><div class="k">run_summary.json</div><div class="r">built here, not from a process</div></div>
+      <div class="slot"><div class="i">slot 7</div><div class="k">seg_qc</div><div class="r">collect(sort: true).ifEmpty([])</div></div>
+      <div class="slot"><div class="i">slot 8</div><div class="k">seg_residuals</div><div class="r">collect(sort: true).ifEmpty([])</div></div>
+    </div>
+
+    <div class="seam" style="margin-top:14px">
+      <div>
+        <div class="rn" style="border-top-width:2.5px">
+          <h4>GENERATE_QC_REPORT</h4>
+          <div class="gate">gate · !skip_final_qc_report</div>
+          <p class="x">One HTML report plus a data bundle, both timestamped. Its <code>versions.yml</code> is
+            dropped at publish time by a <code>saveAs</code> that returns null for it.</p>
+          <dl>
+            <dt>container</dt><dd>…attend_image_analysis:preprocess</dd>
+            <dt>resources</dt><dd>label process_low — 2 cpu · 32 GB × attempt · 2 h × attempt</dd>
+            <dt>publishes</dt><dd>&lt;outdir&gt;/qc/mirage_qc_report_&lt;ts&gt;.html · mirage_qc_data_&lt;ts&gt;/</dd>
+          </dl>
+        </div>
+      </div>
+      <div>
+        <div class="rn" style="border-top-width:2.5px">
+          <h4>AGGREGATE_SIZE_LOGS</h4>
+          <div class="gate">gate · enable_trace</div>
+          <p class="x">Merges every process's <code>*.size.csv</code> <b>by content</b> — several processes emit
+            identically-named logs, so staging them all into one directory would collide. Unlike the report, its
+            <code>versions.yml</code> <i>is</i> published, and its single key is the fully-qualified process name.</p>
+          <dl>
+            <dt>container</dt><dd>ubuntu:22.04</dd>
+            <dt>resources</dt><dd>label process_single — 1 cpu · 12 GB × attempt · 8 h × attempt</dd>
+            <dt>publishes</dt><dd>&lt;outdir&gt;/size_logs/input_sizes.csv</dd>
+          </dl>
+        </div>
+      </div>
+    </div>
+
+    <div class="callout"><b>A third artifact lands in <code>&lt;outdir&gt;/qc/</code> and is not in the stream
+      at all.</b> <code>mirage_resource_report.html</code> is written by a <code>workflow.onComplete</code>
+      handler in <code>main.nf</code>, not by a process, because <code>trace.txt</code> is only finalised at
+      workflow completion and an in-DAG process could not read it. It is best-effort in the strongest sense: any
+      failure — no <code>python3</code> on the head node, no trace file — logs a warning and never fails the run.
+      It is gated by <code>enable_trace</code>, the same parameter as the size-log rollup.</div>
+
+    <div class="warnbox"><span class="wl">both are declared cache = false, and that is correct</span>
+      Their inputs come from <code>collectFile()</code>, which is an <b>operator</b>, not a task: it re-executes
+      every run and writes to a fresh <code>work/tmp/&lt;hash&gt;/</code>, so under Nextflow's default hashing the
+      input is a new file each time and the task could never cache. <code>run_summary.json</code> additionally
+      embeds a wall-clock timestamp, so its <i>content</i> legitimately differs every run. Declaring it changes no
+      behaviour — but it is what makes the resume guard assertable: on a fully cached <code>-resume</code>,
+      <b>these two and only these two</b> re-run.
+    </div>
+    <div class="callout">Every list slot is <code>collect(sort: true)</code>, never a bare <code>collect()</code>.
+      Process <code>path</code> collections are hashed <b>positionally</b> and <code>collect()</code> emits in
+      arrival order, so identical reruns produced different task hashes. <code>collated_versions.yml</code> carries
+      <code>sort: true</code> for the same reason one level down, at the level of file <i>content</i>.</div>
+  </section>
+
+  <!-- g — NON-GATING -->
+  <section class="panel">
+    <span class="plabel">g</span>
+    <div class="panel-head"><h2>The non-gating contract — and what it costs you</h2>
+      <p>QC output is informational, and every consumer of it is a <code>collect()</code> /
+        <code>collectFile()</code> / <code>combine()</code> / <code>join()</code> — none of which requires a fixed
+        item count. A missing QC artifact is therefore simply absent and can never deadlock the DAG. One
+        <code>withName:</code> selector states the policy for all <b>seven</b> QC processes at once.</p></div>
+    <div class="procrow">
+      <span>GENERATE_PREPROCESS_QC</span><span>GENERATE_REGISTRATION_QC</span><span>GENERATE_POSTPROCESSING_QC</span>
+      <span>GENERATE_QC_REPORT</span><span>SEG_QC_SEGMENT</span><span>SEG_QC_GEOJSON</span><span>WARP_SEG_QC</span>
+    </div>
+    <div class="math">errorStrategy = { task.exitStatus in ((130..145) + 104) &amp;&amp; task.attempt &lt;= 3 ? 'retry' : 'ignore' }
+      &nbsp;&nbsp;<span class="cm">maxRetries = 3, pinned here</span></div>
+    <div class="seam" style="margin-top:13px">
+      <div>
+        <div class="callout" style="margin-top:0"><b>Why the whole 130–145 range.</b> That is the entire
+          "killed by a signal" band, not a hand-picked subset. The kill actually observed on
+          <code>WARP_SEG_QC</code> was <b>140 = 128 + 12 = SIGUSR2</b> — SLURM's pre-walltime warning, not the
+          SIGTERM an older comment claimed. With an enumerated subset, anything outside it was ignored on attempt 1
+          and threw away the entire retry budget. Compare the pipeline-wide default, which retries only
+          104/134/135/137/139/140/143 and <b>finishes</b> the run on anything else.</div>
+        <div class="callout"><b>Why <code>maxRetries</code> is pinned here rather than inherited.</b> A dynamic
+          strategy that returns <code>'retry'</code> after the budget is exhausted is treated as fatal — precisely
+          what this block exists to avoid. Pinning keeps the closure's cutoff in lockstep with the budget on every
+          profile.</div>
+      </div>
+      <div>
+        <div class="warnbox" style="margin-top:0"><span class="wl">read this before trusting a green run</span>
+          The fallback is <code>'ignore'</code>, so a QC task that exhausts its budget is <b>dropped without
+          failing the run</b>. That is the intended trade — a broken QC step must never stop a multi-day
+          registration — but it means <b>exit&nbsp;0 does not imply a complete QC tree</b>. Check the published
+          artifacts, not just the exit code: a report section that is empty because its producer was ignored looks
+          exactly like a report section that is empty because the step did not run.</div>
+        <div class="callout"><b>The guards in panel b are the other half of the same problem.</b> The
+          errorStrategy makes a <i>failed</i> QC task silent on purpose; the three vocabulary guards make a
+          <i>miswired</i> one loud, because that silence would be an accident rather than a policy.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- h — PARAMETERS -->
+  <section class="panel">
+    <span class="plabel">h</span>
+    <div class="panel-head"><h2>Quality-control parameters</h2>
+      <p>Values verbatim from the <code>params{}</code> block of <code>nextflow.config</code>, the only place a
+        default may be declared. Every gate is open at the shipped defaults — QC is on unless you turn it off.</p></div>
+    <div class="pgrid">
+      <div class="pcol">
+        <h4>Gates — all open by default</h4>
+        <table class="pr">
+          <tr><td class="k">skip_preprocess_qc</td><td class="v">false</td><td class="d">GENERATE_PREPROCESS_QC</td></tr>
+          <tr><td class="k">reg_qc</td><td class="v">2</td><td class="d">0 none · 1 overlay · 2 + cell overlap</td></tr>
+          <tr><td class="k">skip_registration_qc</td><td class="v">false</td><td class="d">legacy; true forces reg_qc = 0</td></tr>
+          <tr><td class="k">skip_postprocessing_qc</td><td class="v">false</td><td class="d">GENERATE_POSTPROCESSING_QC</td></tr>
+          <tr><td class="k">skip_final_qc_report</td><td class="v">false</td><td class="d">GENERATE_QC_REPORT</td></tr>
+          <tr><td class="k">enable_trace</td><td class="v">true</td><td class="d">size logs + AGGREGATE_SIZE_LOGS</td></tr>
+        </table>
+        <h4>Rendering</h4>
+        <table class="pr">
+          <tr><td class="k">preprocess_qc_scale_factor</td><td class="v">0.25</td><td class="d">preprocessing PNG downsample</td></tr>
+          <tr><td class="k">qc_scale_factor</td><td class="v">0.25</td><td class="d">registration overlay PNG downsample</td></tr>
+          <tr><td class="k">trace_dir</td><td class="v">.trace</td><td class="d">trace/report/timeline, outside --outdir</td></tr>
+        </table>
+      </div>
+      <div class="pcol">
+        <h4>What the reg_qc = 2 chain reads</h4>
+        <table class="pr">
+          <tr><td class="k">seg_method</td><td class="v">instantseg</td><td class="d">SEG_QC_SEGMENT is SEGMENT aliased</td></tr>
+          <tr><td class="k">simplify_tolerance</td><td class="v">1.0</td><td class="d">SEG_QC_GEOJSON <code>--tolerance</code>; must equal EXTRACT_CELL_PROPERTIES'</td></tr>
+          <tr><td class="k">reg_micro_reg</td><td class="v">2</td><td class="d">WARP_SEG_QC <code>--micro-reg</code>: whether 'rigid' includes micro-rigid</td></tr>
+          <tr><td class="k">registration_method</td><td class="v">valis</td><td class="d">read once, in registration.nf; reaches SEG_QC as an argument</td></tr>
+        </table>
+        <h4>Where the QC leaves the QC tree</h4>
+        <table class="pr">
+          <tr><td class="k">spatialdata_residual_join_max_px</td><td class="v">15.0</td><td class="d">max centroid distance when joining seg_residuals onto cell_mask</td></tr>
+          <tr><td class="k">skip_spatialdata_export</td><td class="v">false</td><td class="d">the .zarr that carries the per-cell residual</td></tr>
+        </table>
+        <p class="outnote"><b>seg_residuals is the one QC kind with a second consumer.</b> Every other kind ends in
+          the HTML report; the per-cell residual table is also spatially joined onto the cell mask by the
+          SpatialData export, which is why the QC segmentation — a separate native-image run sharing no label
+          space with <code>cell_mask</code> — needs a distance tolerance at all.</p>
+      </div>
+    </div>
+  </section>
+
+  <p class="caption">
+    <b>Supplementary Figure S3. The quality-control architecture.</b>
+    <b>(a)</b> Each of the four ordered steps contributes QC behind its own parameter gate, all of them open at the
+    shipped defaults; segmentation contributes no step-specific kind, and every process in the pipeline contributes
+    the two universal ones. <b>(b)</b> All of it reaches the end-of-run aggregation through a single channel of
+    <code>[kind, file]</code> pairs rather than eight positional channels — an interface that costs nothing for an
+    absent kind but replaces a parse-time resolution failure with a runtime string, so three guards restore the
+    lost safety: an unknown tag at the producer, an unknown filter literal at the consumer, and a declared kind
+    that no consumer reads. <b>(c)</b> The kind vocabulary is derived from <code>ParamUtils.STEPS</code>, the same
+    table that fixes step order, required samplesheet columns and entry columns, plus a separate list of the
+    cross-cutting kinds every step emits. <b>(d)</b> Three per-step renderers produce the QC images, each pinned to
+    a container and published under the patient's <code>qc/</code> tree. <b>(e)</b> At <code>reg_qc = 2</code> a
+    shared subworkflow segments each slide on its native image with the run's <i>own</i> segmenter — an alias of
+    <code>SEGMENT</code>, so the QC cannot drift from what the run ships — traces the mask to polygons, and warps
+    those polygons through every registration stage in one process that serves both registration backends from a
+    table keyed on the method <i>argument</i>. <b>(f)</b> Aggregation is eight fixed, sorted input slots plus a
+    size-log rollup, both uncacheable by construction. <b>(g)</b> All seven QC processes retry the whole signal
+    range and then fall back to <code>ignore</code>, never <code>finish</code> — so a broken QC step cannot stop a
+    multi-day run, and a green run correspondingly does not prove a complete QC tree. <b>(h)</b> QC defaults.
+    Supplementary Figure <b>S1</b> places these processes in the whole workflow; Supplementary Figure <b>S2</b>
+    takes the <code>reg_qc</code> ladder apart per registration backend.
+    <span class="footnote">Process names, containers, resource requests, published paths, parameter defaults and
+    the artifact vocabulary are read verbatim from the pipeline source
+    (<code>subworkflows/local/final_qc.nf</code>, <code>subworkflows/local/seg_qc.nf</code>,
+    <code>lib/ParamUtils.groovy</code>, <code>lib/WarpBackends.groovy</code>,
+    <code>modules/local/generate_{preprocess,registration,postprocessing}_qc.nf</code>,
+    <code>modules/local/generate_qc_report.nf</code>, <code>modules/local/aggregate_size_logs.nf</code>,
+    <code>modules/local/{seg_qc_geojson,warp_seg_qc}.nf</code>, <code>conf/modules.config</code>,
+    <code>conf/base.config</code>, <code>nextflow.config</code>).</span>
+  </p>
+</div>
+</body>
+</html>

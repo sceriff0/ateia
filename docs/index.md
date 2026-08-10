@@ -117,7 +117,7 @@ tours every file it produces.
 
     ---
 
-    All 84 parameters, grouped by stage, with defaults and guidance.
+    All 75 parameters, grouped by stage, with defaults and guidance.
 
     [:octicons-arrow-right-24: Parameters](parameters.md)
 
@@ -129,6 +129,16 @@ tours every file it produces.
     backends — the site rendering of Supplementary Figure S1.
 
     [:octicons-arrow-right-24: Pipeline](pipeline.md)
+
+-   :material-image-multiple:{ .lg .middle } **Supplementary figures**
+
+    ---
+
+    Three self-contained figures — S1 the whole pipeline,
+    [S2 registration](figures/registration-schematic.html){ target=_blank },
+    [S3 quality control](figures/qc-schematic.html){ target=_blank }.
+
+    [:octicons-arrow-right-24: S1 · pipeline](figures/pipeline-schematic.html){ target=_blank }
 
 -   :material-file-tree:{ .lg .middle } **Inputs & outputs**
 

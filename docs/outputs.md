@@ -142,23 +142,35 @@ results/                              # = --outdir
 │   ├── pyramid/                      # pyramid.ome.tiff      — MERGE_AND_PYRAMID
 │   ├── spatialdata/                  # <patient_id>.zarr     — EXPORT_SPATIALDATA
 │   └── qc/
-│       ├── preprocess/               # *.png
-│       ├── registration/             # *_QC_RGB.{png,tif}, *_seg_qc.json, *_tre.json
+│       ├── preprocess/
+│       │   └── qc/                   # *.png — GENERATE_PREPROCESS_QC
+│       ├── registration/             # *_seg_qc.json — WARP_SEG_QC
+│       │   │                         # *_tre.json    — TILED_SOLVE (tiled backend)
+│       │   ├── qc/                   # *_QC_RGB.{png,tif}, *_QC_RGB_fullres.tif
+│       │   │                         #   — GENERATE_REGISTRATION_QC
 │       │   └── geojson/              # *.geojson — SEG_QC_GEOJSON (reg_qc=2)
-│       └── postprocessing/           # *.png
+│       └── postprocessing/
+│           └── qc/                   # *.png — GENERATE_POSTPROCESSING_QC
 ├── csv/                              # checkpoint CSVs, all patients
-├── size_logs/                        # input_sizes.csv — AGGREGATE_SIZE_LOGS
-└── qc/                               # mirage_qc_report_<timestamp>.html
-                                      # mirage_resource_report.html
+├── size_logs/                        # input_sizes.csv, versions.yml — AGGREGATE_SIZE_LOGS
+└── qc/                               # mirage_qc_report_<timestamp>.html — GENERATE_QC_REPORT
+                                      # mirage_resource_report.html — main.nf's
+                                      #   workflow.onComplete handler, not a process
 ```
 
-!!! info "Why `geojson/export/` and `registered/registered_slides/`"
+!!! info "Why `geojson/export/`, `registered/registered_slides/` and the repeated `qc/`"
     A process that writes into a named subdirectory of its task directory and
     publishes with a `pattern:` naming that subdirectory gets the subdirectory
     carried into the published path. `Layout.publishedPath` reproduces that
     faithfully rather than flattening it — a checkpoint row that named
     `<pid>/geojson/cells.geojson` instead of `<pid>/geojson/export/cells.geojson`
     pointed at a file that does not exist for two releases.
+
+    The same rule is why the three QC renderers land under a *second* `qc/`:
+    each declares `path("qc/*.png")` and publishes with `pattern: "qc/*.png"`,
+    so the real path is `<pid>/qc/preprocess/qc/*.png`, not
+    `<pid>/qc/preprocess/*.png`. The tree above used to show the flattened form.
+    `WARP_SEG_QC` and `SEG_QC_GEOJSON` declare flat patterns and are unaffected.
 
 ### Trace outputs
 

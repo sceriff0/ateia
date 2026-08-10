@@ -1,6 +1,6 @@
 # Parameters
 
-<p class="standfirst">The complete, canonical parameter surface — all 84 parameters, grouped by
+<p class="standfirst">The complete, canonical parameter surface — all 75 parameters, grouped by
 pipeline stage, each with the default that ships in <code>nextflow.config</code>. Nothing here is
 approximate: <code>tests/test_no_duplicate_param_defaults.py</code> forbids a second declaration of
 any default anywhere else in the repository, so this page and the config cannot disagree about a

@@ -5,10 +5,19 @@ slides, segments every cell, quantifies each marker per compartment, and exports
 GeoJSON, a pyramidal OME-TIFF, and a scverse-native SpatialData store. The nuclear/fiducial channel is
 resolved by marker name from image metadata and drives both segmentation and registration.</p>
 
-This page is the site rendering of **Supplementary Figure S1**
-(`pipeline-schematic.html`). Every process, default and path below is read from
-the pipeline source — `nextflow.config`, `conf/modules.config`,
-`lib/ParamUtils.groovy` and `lib/Layout.groovy`.
+This page is the site rendering of **Supplementary Figure S1** —
+[open the figure itself](figures/pipeline-schematic.html){ target=_blank }, a
+single self-contained page that also opens straight from the filesystem. Every
+process, default and path below is read from the pipeline source —
+`nextflow.config`, `conf/modules.config`, `lib/ParamUtils.groovy` and
+`lib/Layout.groovy`.
+
+!!! abstract "The supplementary figure set"
+    - **S1 · pipeline** — [figure](figures/pipeline-schematic.html){ target=_blank } · this page
+    - **S2 · registration** — [figure](figures/registration-schematic.html){ target=_blank } ·
+      the two backends, step by step
+    - **S3 · quality control** — [figure](figures/qc-schematic.html){ target=_blank } ·
+      the tagged artifact stream, the kind vocabulary, and the non-gating contract
 
 ---
 
@@ -278,3 +287,7 @@ Per-process figures, the retry policy, and the QC non-gating rule:
 - :material-file-tree: **Every input and output path** — [Inputs & outputs](outputs.md)
 - :material-server: **Every resource request** — [Resources](resources.md)
 - :material-console: **Command recipes** — [Usage](usage.md)
+- :material-image-outline: **Supplementary Figure S2 · registration** —
+  [figure](figures/registration-schematic.html){ target=_blank }
+- :material-image-outline: **Supplementary Figure S3 · quality control** —
+  [figure](figures/qc-schematic.html){ target=_blank }

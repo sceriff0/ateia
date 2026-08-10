@@ -2,8 +2,12 @@
    MIRAGE documentation — "supplementary figure" design language
    ---------------------------------------------------------------------------
    The token set and the component vocabulary below are ported from
-   pipeline-schematic.html (Supplementary Figure S1) so the site and the figure
-   read as one artefact: sober monochrome, hard edges, serif prose, mono data.
+   docs/figures/pipeline-schematic.html (Supplementary Figure S1) so the site and
+   the figures read as one artefact: sober monochrome, hard edges, serif prose,
+   mono data. The three figures (S1 pipeline, S2 registration, S3 quality
+   control) carry that token block verbatim and self-contained -- each has to
+   open from file:// with no external stylesheet -- so a change here is a change
+   in four files, not one.
 
    The figure is deliberately single-theme (white paper, black ink) because a
    journal figure has a paper ground. The site has a theme toggle, so every
@@ -21,7 +25,7 @@
    --------------------------------------------------------------------------- */
 
 :root {
-  /* Figure tokens — verbatim from pipeline-schematic.html */
+  /* Figure tokens — verbatim from docs/figures/*-schematic.html */
   --paper:  #ffffff;
   --panel:  #ffffff;
   --sub:    #f6f7f8;
@@ -322,7 +326,7 @@ body,
 /* ---------------------------------------------------------------------------
    8. Ported figure components
    ---------------------------------------------------------------------------
-   Everything below mirrors pipeline-schematic.html one-for-one. Wrap markdown
+   Everything below mirrors docs/figures/pipeline-schematic.html one-for-one. Wrap markdown
    in <div class="panel" markdown> … </div> and it renders as a figure panel.
    --------------------------------------------------------------------------- */
 
