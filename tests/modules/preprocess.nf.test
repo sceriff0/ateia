@@ -46,8 +46,6 @@ nextflow_process {
         when {
             params {
                 preproc_tile_size = 256
-                preproc_n_iter = 1
-                preproc_no_darkfield = true
             }
             process {
                 """
@@ -111,6 +109,84 @@ nextflow_process {
                     assert get(0).get(0).channels == ['DAPI', 'PANCK']
                 }},
                 { assert snapshot(process.out.preprocessed.get(0).get(0)).match() }
+            )
+        }
+    }
+
+    test("Should render the nuclear-marker flags, not a hardcoded DAPI - rendered command") {
+
+        // Tagged `stub` so CI's blocking `nf-test test --tag stub` gate runs it, but
+        // deliberately WITHOUT `options "-stub"` -- same shape as
+        // tests/modules/seg_qc_geojson.nf.test's "rendered command" case. `-stub` never
+        // evaluates a `script:` block, so no stub run can observe a rendered command at
+        // all, and the whole point of this case is WHAT preprocess.py is invoked with.
+        //
+        // What changed: the skip-the-fiducial decision used to be `--skip_dapi` plus a
+        // hardcoded `"DAPI" in name.upper()` test inside bin/preprocess.py, so a panel
+        // whose fiducial is CELLTOX had it BaSiC-corrected while a DAPI panel did not.
+        // The marker list now travels with the call via MarkerUtils, exactly as
+        // SPLIT_CHANNELS and CONVERT_IMAGE do. Also asserted: the five removed knobs
+        // (--autotune / --n_iter / --overlap / --no_darkfield, and the
+        // preproc_pool_workers-driven --n_workers) are no longer rendered.
+        //
+        // No container engine is active under `-profile test`, so this runs
+        // bin/preprocess.py directly and it may fail importing BaSiCPy/JAX on a host
+        // without them. That is fine -- the assertions read the rendered .command.sh
+        // rather than the process outcome.
+        tag "stub"
+
+        when {
+            params {
+                preproc_tile_size = 256
+                nuclear_markers = ['DAPI', 'CELLTOX']
+            }
+            process {
+                """
+                input[0] = [
+                    [
+                        patient_id: 'P001',
+                        is_reference: true,
+                        channels: ['DAPI', 'PANCK', 'SMA']
+                    ],
+                    file('${projectDir}/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            // Nextflow lays tasks out as <workDir>/<2 hex>/<30 hex>/.command.sh.
+            def rendered = []
+            new File("$workDir").eachFileRecurse { f ->
+                if (f.name == '.command.sh' && f.text.contains('preprocess.py')) {
+                    rendered << f.text
+                }
+            }
+
+            assertAll(
+                { assert rendered.size() >= 1,
+                    "no rendered PREPROCESS .command.sh found under the task work dir" },
+                // The assertion with teeth: the marker list is passed through, so the
+                // fiducial is resolved by configuration rather than by the literal
+                // string DAPI baked into the Python.
+                { assert rendered.every { it.contains('--nuclear-markers DAPI CELLTOX') },
+                    "rendered command missing --nuclear-markers: " + rendered.join(' --- ') },
+                { assert rendered.every { it.contains('--skip_nuclear') },
+                    "rendered command missing --skip_nuclear: " + rendered.join(' --- ') },
+                { assert rendered.every { !it.contains('--skip_dapi') },
+                    "rendered command still carries the removed --skip_dapi: " + rendered.join(' --- ') },
+                { assert rendered.every { it.contains('--fov_size 256') },
+                    "rendered command missing --fov_size: " + rendered.join(' --- ') },
+                // The removed knobs must not reappear. Each was a parameter nothing
+                // tuned; BaSiC's own defaults now stand in for all of them.
+                { assert rendered.every { !it.contains('--autotune') },
+                    "rendered command carries removed --autotune: " + rendered.join(' --- ') },
+                { assert rendered.every { !it.contains('--n_iter') },
+                    "rendered command carries removed --n_iter: " + rendered.join(' --- ') },
+                { assert rendered.every { !it.contains('--overlap') },
+                    "rendered command carries removed --overlap: " + rendered.join(' --- ') },
+                { assert rendered.every { !it.contains('--no_darkfield') },
+                    "rendered command carries removed --no_darkfield: " + rendered.join(' --- ') }
             )
         }
     }

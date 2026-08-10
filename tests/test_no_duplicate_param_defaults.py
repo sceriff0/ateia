@@ -11,7 +11,8 @@ default.
 
 `params.x ?: <literal>` is only legitimate where `nextflow.config` declares
 `x = null` — there, `?:` is the live "null means derive a value at runtime"
-contract (e.g. `preproc_pool_workers`, which falls back to `task.cpus`).
+contract (e.g. `reg_jvm_heap_gb`, which falls back to a task.attempt-derived
+heap size in modules/local/register.nf).
 
 This test derives its allowlist directly from `nextflow.config`'s `params {}`
 block, so it keeps working whether a param is null-declared today or someone
@@ -271,6 +272,20 @@ ARGPARSE_DEFAULT_ALLOWLIST = {
             "default."
         ),
     },
+    "preprocess.py:--nuclear-markers": {
+        "reason": (
+            "Same contract as split_multichannel.py's --nuclear-markers below: "
+            "default=None is intentional per the script's own help text, "
+            "'PREPROCESS passes params.nuclear_markers; the default is only for "
+            "standalone use.' Confirmed true -- modules/local/preprocess.nf builds "
+            "`--nuclear-markers ${MarkerUtils.markerList(params.nuclear_markers)"
+            ".join(' ')}` unconditionally, so the pipeline never reaches the "
+            "default. Mirroring ['DAPI','CELLTOX'] here instead would be a SECOND "
+            "declaration of that default in Python; utils/metadata.py's "
+            "DEFAULT_NUCLEAR_MARKERS is the one permitted mirror, and passing "
+            "None is how this script defers to it."
+        ),
+    },
     "split_multichannel.py:--nuclear-markers": {
         "reason": (
             "Same pattern as segment_to_geojson.py, confirmed the same way: "
@@ -322,7 +337,7 @@ def _normalize_flag(flag: str) -> str:
 
 
 # A CLI flag immediately followed by one-or-more consecutive `${...}`
-# interpolations, e.g. `--n_iter ${params.preproc_n_iter}` or
+# interpolations, e.g. `--fov_size ${params.preproc_tile_size}` or
 # `--n-tiles ${params.seg_n_tiles_y} ${params.seg_n_tiles_x}` (two
 # interpolations -- a composite flag this check deliberately does not
 # resolve; see `build_flag_param_maps`).
@@ -407,9 +422,9 @@ def build_flag_param_maps() -> tuple[dict[tuple[str, str], str], dict[str, str]]
 
       - `per_script`: keyed by `(invoking_script_basename, flag)`. This is
         the primary authority, because it disambiguates flags that mean
-        different params in different scripts -- e.g. `--overlap` is
-        `preproc_overlap` when `preprocess.py` is the invoking script, but
-        `seg_cellsam_overlap` when it's `segment_cellsam.py`. The invoking
+        different params in different scripts -- e.g. `--model-name` is
+        `segmentation_model` when `segment.py` is the invoking script, but
+        `seg_instantseg_model` when it's `segment_instantseg.py`. The invoking
         script for a `modules/local/*.nf` file's flags is read from the
         nearest preceding `_SCRIPT_LINE_RE` match in that file (the file is
         split into per-script segments, so a file invoking more than one
@@ -446,13 +461,13 @@ def build_flag_param_maps() -> tuple[dict[tuple[str, str], str], dict[str, str]]
         against one scalar param would be a category error, not a real
         drift check); or
       - the interpolated expression isn't a bare `params.key` or a bare
-        aliased variable -- e.g. `${params.preproc_pool_workers ?:
-        task.cpus}` is a fallback expression one level deeper than this
-        resolves, so `--n_workers` is intentionally left unmapped rather
-        than compared against `preproc_pool_workers`'s null default (which
-        would be a false positive: null there means "derive at runtime",
-        the exact contract `test_no_duplicate_param_defaults` already
-        recognizes for the Groovy `?:` check above).
+        aliased variable -- e.g. an expression like `${params.some_knob ?:
+        task.cpus}` is a fallback one level deeper than this resolves, so
+        its flag is intentionally left unmapped rather than compared
+        against a null default (which would be a false positive: null
+        there means "derive at runtime", the exact contract
+        `test_no_duplicate_param_defaults` already recognizes for the
+        Groovy `?:` check above).
     """
     per_script_raw: dict[tuple[str, str], set[str]] = {}
     flag_only_raw: dict[str, set[str]] = {}
