@@ -1,0 +1,935 @@
+<meta charset="utf-8">
+<title>WSI Registration — Supplementary Figure</title>
+<style>
+  /* ============ sober monochrome print figure — white paper, black ink ============ */
+  :root{
+    --paper:#ffffff; --panel:#ffffff; --sub:#f6f7f8; --sub-2:#eef0f2;
+    --ink:#0f1113; --ink-2:#3c4147; --ink-3:#767c83;
+    --rule:#c3c8cd; --rule-2:#e5e8ea; --bar:#1b1e22;
+    --serif:Georgia,"Times New Roman",Cambria,"Noto Serif",serif;
+    --sans:"Helvetica Neue",Helvetica,Arial,"Segoe UI",system-ui,sans-serif;
+    --mono:"SF Mono",ui-monospace,"JetBrains Mono",Menlo,Consolas,monospace;
+    color-scheme:light;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);
+    font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased;overflow-x:hidden;}
+  .sheet{max-width:1060px;margin:0 auto;padding:40px 26px 72px;}
+
+  .masthead{border-bottom:2px solid var(--ink);padding-bottom:12px;}
+  .masthead .kick{font-size:.71rem;letter-spacing:.15em;text-transform:uppercase;color:var(--ink-3);font-weight:700;}
+  .masthead h1{font-weight:700;font-size:1.32rem;letter-spacing:-.01em;margin:.3em 0 0;max-width:72ch;line-height:1.26;}
+  .standfirst{font-family:var(--serif);font-size:.95rem;color:var(--ink-2);margin:12px 0 30px;max-width:82ch;}
+
+  .panel{position:relative;background:var(--panel);border:1px solid var(--rule);padding:20px 20px 18px;margin:0 0 20px;}
+  .panel > .plabel{position:absolute;top:-1px;left:-1px;background:var(--ink);color:#fff;font-weight:700;
+    font-size:.85rem;line-height:1;padding:6px 9px;}
+  .panel-head{margin:2px 0 16px 26px;}
+  .panel-head h2{font-size:1.02rem;font-weight:700;letter-spacing:-.01em;margin:0;}
+  .panel-head p{font-size:.85rem;color:var(--ink-2);margin:3px 0 0;max-width:84ch;}
+
+  code{font-family:var(--mono);font-size:.82em;background:var(--sub);border:1px solid var(--rule-2);border-radius:2px;padding:.5px 4px;}
+  .tbl-scroll{overflow-x:auto;}
+
+  /* method-agnostic frame — horizontal rail */
+  .rail{display:flex;align-items:stretch;gap:0;border:1px solid var(--rule);flex-wrap:wrap;}
+  .rail .r{flex:1 1 150px;padding:11px 13px;border-right:1px solid var(--rule);border-top:3px solid var(--ink);min-width:150px;}
+  .rail .r:last-child{border-right:none;}
+  .rail .r.disp{border-top-color:var(--ink-3);border-top-style:dashed;background:var(--sub);}
+  .rail .r .t{font-family:var(--mono);font-size:.62rem;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3);}
+  .rail .r .v{font-weight:700;font-family:var(--mono);font-size:.74rem;margin-top:3px;}
+  .rail .r .d{font-size:.76rem;color:var(--ink-2);margin-top:4px;}
+  .railnote{font-family:var(--mono);font-size:.72rem;color:var(--ink-2);margin-top:11px;display:flex;gap:16px;flex-wrap:wrap;}
+  .railnote b{color:var(--ink);}
+
+  /* two-backend header strip */
+  .bkhead{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;
+    background:var(--bar);color:#fff;padding:9px 13px;font-family:var(--mono);}
+  .bkhead .name{font-weight:700;font-size:.86rem;letter-spacing:.02em;}
+  .bkhead .sub{font-size:.68rem;color:#c7cacd;}
+  .bkhead .flag{font-size:.6rem;background:#fff;color:var(--ink);padding:1px 6px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;}
+  .bkhead .flag-alt{background:transparent;color:#fff;border:1px solid #6b7075;}
+
+  /* ordered stage stack */
+  .stack{border:1px solid var(--rule);border-top:none;background:var(--sub);padding:11px;display:flex;flex-direction:column;gap:0;}
+  .stg{background:var(--panel);border:1px solid var(--rule);border-left:2.5px solid var(--ink);padding:9px 11px;position:relative;}
+  .stg + .stg{margin-top:16px;}
+  .stg::before{content:"↓";position:absolute;top:-14px;left:14px;font-family:var(--mono);font-size:.7rem;color:var(--rule);}
+  .stg:first-child::before{content:none;}
+  .stg .sn{font-family:var(--mono);font-weight:700;font-size:.74rem;display:flex;flex-wrap:wrap;gap:7px;align-items:center;}
+  .stg .sn .num{background:var(--ink);color:#fff;font-size:.6rem;padding:1px 5px;border-radius:2px;}
+  .stg .sx{font-size:.79rem;color:var(--ink-2);margin-top:5px;}
+  .stg .pp{display:flex;flex-wrap:wrap;gap:4px;margin-top:7px;}
+  .pp span{font-family:var(--mono);font-size:.63rem;background:var(--sub);border:1px solid var(--rule-2);padding:1px 5px;color:var(--ink-2);white-space:nowrap;}
+  .pp b{color:var(--ink);font-weight:700;}
+  .tag{font-family:var(--mono);font-size:.54rem;text-transform:uppercase;letter-spacing:.04em;padding:1px 5px;
+    font-weight:700;border:1px solid var(--rule);color:var(--ink-2);background:var(--sub-2);}
+  .tag-on{border-color:var(--ink);color:var(--ink);background:#fff;}
+  .tag-skip{border-style:dashed;color:var(--ink-3);}
+
+  .emit{border:1px dashed var(--ink-3);background:var(--sub-2);padding:8px 10px;margin-top:11px;
+    font-family:var(--mono);font-size:.7rem;color:var(--ink-2);}
+  .emit b{color:var(--ink);}
+  .emit .lbl{text-transform:uppercase;letter-spacing:.05em;font-size:.58rem;color:var(--ink-3);display:block;margin-bottom:4px;}
+
+  .callout{border-left:3px solid var(--ink);background:var(--sub);padding:8px 12px;font-size:.8rem;color:var(--ink-2);margin:12px 0 0;}
+  .callout b{color:var(--ink);}
+
+  /* mode branch (fanout) */
+  .branch{border:1px dashed var(--ink-3);background:var(--sub-2);padding:9px;display:flex;flex-direction:column;gap:8px;margin-top:11px;}
+  .branch .bh{font-family:var(--mono);font-size:.61rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-2);}
+  .branch .opt{background:var(--panel);border:1px solid var(--rule);padding:8px 9px;}
+  .branch .opt .oh{font-family:var(--mono);font-weight:700;font-size:.7rem;display:flex;justify-content:space-between;gap:6px;flex-wrap:wrap;align-items:center;}
+  .branch .opt .ox{font-size:.75rem;color:var(--ink-2);margin-top:3px;}
+  .branch .opt .chain{font-family:var(--mono);font-size:.64rem;color:var(--ink);margin-top:6px;overflow-x:auto;white-space:nowrap;}
+  .tag-def{font-family:var(--mono);font-size:.54rem;background:var(--ink);color:#fff;padding:1px 5px;font-weight:700;}
+  .tag-alt{font-family:var(--mono);font-size:.54rem;background:var(--sub);color:var(--ink-2);border:1px solid var(--rule);padding:1px 5px;}
+
+  /* comparison / spec tables */
+  table.rc{border-collapse:collapse;width:100%;font-family:var(--mono);font-size:.72rem;font-variant-numeric:tabular-nums;}
+  table.rc caption{font-family:var(--mono);font-size:.63rem;text-transform:uppercase;letter-spacing:.07em;color:var(--ink-3);text-align:left;padding:0 0 7px;}
+  table.rc th{text-align:left;font-weight:700;color:var(--ink-2);border-bottom:1.5px solid var(--ink);padding:6px 9px;vertical-align:bottom;}
+  table.rc th.v,table.rc td.v{width:31%;}
+  table.rc td{padding:6px 9px;border-bottom:1px solid var(--rule-2);vertical-align:top;}
+  table.rc tr:last-child td{border-bottom:none;}
+  table.rc td.k{color:var(--ink-3);white-space:nowrap;}
+  table.rc td .em{color:var(--ink);font-weight:700;}
+  .valwin{background:#f2f4f5;}
+
+  table.ss{border-collapse:collapse;width:100%;font-family:var(--mono);font-size:.72rem;}
+  table.ss th{text-align:left;font-weight:700;color:var(--ink-2);border-bottom:1.5px solid var(--ink);padding:5px 8px;white-space:nowrap;}
+  table.ss td{padding:5px 8px;border-bottom:1px solid var(--rule-2);vertical-align:top;}
+  table.ss tr:last-child td{border-bottom:none;}
+
+  /* reg_qc ladder */
+  .ladder{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
+  @media(max-width:760px){.ladder{grid-template-columns:1fr;}}
+  .lv{border:1px solid var(--rule);border-top:2.5px solid var(--ink);padding:10px 11px;background:var(--panel);}
+  .lv .h{font-family:var(--mono);font-weight:700;font-size:.72rem;display:flex;justify-content:space-between;align-items:center;gap:6px;}
+  .lv .h .n{background:var(--ink);color:#fff;font-size:.58rem;padding:1px 5px;}
+  .lv .x{font-size:.77rem;color:var(--ink-2);margin-top:5px;}
+  .lv .proc{font-family:var(--mono);font-size:.62rem;color:var(--ink-3);margin-top:6px;}
+
+  /* parameters */
+  .pgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:0 26px;}
+  @media(max-width:760px){.pgrid{grid-template-columns:1fr;}}
+  .pcol h4{font-family:var(--mono);font-size:.66rem;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-2);
+    margin:14px 0 4px;padding-bottom:3px;border-bottom:1px solid var(--ink);}
+  table.pr{border-collapse:collapse;width:100%;font-size:.78rem;}
+  table.pr td{padding:3.5px 4px;border-bottom:1px solid var(--rule-2);vertical-align:top;}
+  table.pr td.k{font-family:var(--mono);font-size:.71rem;font-weight:700;white-space:nowrap;}
+  table.pr td.val{font-family:var(--mono);font-size:.69rem;color:var(--ink-2);white-space:nowrap;padding-right:8px;}
+  table.pr td.d{color:var(--ink-2);}
+  .nul{color:var(--ink-3);font-style:italic;}
+
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+  @media(max-width:820px){.grid2{grid-template-columns:1fr;}}
+
+  .caption{font-family:var(--serif);font-size:.83rem;color:var(--ink-2);line-height:1.62;border-top:1px solid var(--rule);padding-top:16px;margin-top:8px;}
+  .caption b{color:var(--ink);}
+  .footnote{font-family:var(--sans);font-size:.72rem;color:var(--ink-3);margin-top:14px;}
+
+  /* ---- added: two-step teaching components ---- */
+  .twoq{display:grid;grid-template-columns:1fr 1fr;gap:0;border:1px solid var(--rule);}
+  @media(max-width:820px){.twoq{grid-template-columns:1fr;}}
+  .twoq .q{padding:13px 15px;border-right:1px solid var(--rule);}
+  .twoq .q:last-child{border-right:none;}
+  @media(max-width:820px){.twoq .q{border-right:none;border-bottom:1px solid var(--rule);}
+    .twoq .q:last-child{border-bottom:none;}}
+  .twoq .q .qn{font-family:var(--mono);font-size:.6rem;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);}
+  .twoq .q h3{font-size:.94rem;margin:4px 0 6px;font-weight:700;letter-spacing:-.01em;}
+  .twoq .q p{font-size:.81rem;color:var(--ink-2);margin:0 0 8px;}
+  .twoq .q dl{margin:0;font-size:.78rem;}
+  .twoq .q dt{font-family:var(--mono);font-size:.6rem;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-3);margin-top:8px;}
+  .twoq .q dd{margin:2px 0 0;color:var(--ink-2);}
+  .twoq .q dd b{color:var(--ink);}
+
+  figure.dia{margin:14px 0 0;border:1px solid var(--rule);background:var(--sub);padding:12px 12px 8px;}
+  figure.dia svg{display:block;width:100%;height:auto;max-width:920px;margin:0 auto;}
+  figure.dia figcaption{font-size:.75rem;color:var(--ink-2);margin-top:8px;font-family:var(--sans);}
+  figure.dia figcaption b{color:var(--ink);}
+
+  /* deep two-step anatomy block */
+  .step{border:1px solid var(--rule);background:var(--panel);margin-top:14px;}
+  .step > .sh{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;background:var(--sub-2);
+    border-bottom:1px solid var(--rule);padding:8px 12px;}
+  .step > .sh .k{font-family:var(--mono);font-size:.6rem;font-weight:700;letter-spacing:.06em;
+    text-transform:uppercase;background:var(--ink);color:#fff;padding:2px 6px;}
+  .step > .sh .ttl{font-weight:700;font-size:.9rem;letter-spacing:-.01em;}
+  .step > .sh .who{font-family:var(--mono);font-size:.66rem;color:var(--ink-3);margin-left:auto;}
+  .step .sb{padding:11px 13px 13px;}
+  .step .sb > p{margin:0 0 9px;font-size:.83rem;color:var(--ink-2);}
+  .step .sb > p:last-child{margin-bottom:0;}
+  .step .sb b{color:var(--ink);}
+  table.qa{border-collapse:collapse;width:100%;font-size:.79rem;margin:2px 0 0;}
+  table.qa td{padding:5px 8px 5px 0;border-bottom:1px solid var(--rule-2);vertical-align:top;color:var(--ink-2);}
+  table.qa tr:last-child td{border-bottom:none;}
+  table.qa td.q{font-family:var(--mono);font-size:.61rem;text-transform:uppercase;letter-spacing:.05em;
+    color:var(--ink-3);white-space:nowrap;width:150px;padding-top:7px;}
+  table.qa td b{color:var(--ink);}
+  .math{font-family:var(--mono);font-size:.76rem;background:var(--sub);border:1px solid var(--rule-2);
+    padding:7px 10px;margin:9px 0;overflow-x:auto;white-space:nowrap;color:var(--ink);}
+  .math .cm{color:var(--ink-3);}
+  .warnbox{border-left:3px solid var(--ink);background:#fff;border:1px solid var(--ink);
+    padding:8px 12px;font-size:.79rem;color:var(--ink-2);margin:10px 0 0;}
+  .warnbox b{color:var(--ink);}
+  .warnbox .wl{font-family:var(--mono);font-size:.57rem;text-transform:uppercase;letter-spacing:.07em;
+    color:var(--ink);font-weight:700;display:block;margin-bottom:3px;}
+  ul.tight{margin:6px 0 0;padding-left:18px;font-size:.8rem;color:var(--ink-2);}
+  ul.tight li{margin:3px 0;}
+  ul.tight b{color:var(--ink);}
+  .procmap{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:11px;}
+  @media(max-width:820px){.procmap{grid-template-columns:1fr 1fr;}}
+  @media(max-width:520px){.procmap{grid-template-columns:1fr;}}
+  .procmap .pm{border:1px solid var(--rule);border-top:2.5px solid var(--ink);background:var(--panel);padding:9px 10px;}
+  .procmap .pm .nm{font-family:var(--mono);font-weight:700;font-size:.68rem;}
+  .procmap .pm .fk{font-family:var(--mono);font-size:.58rem;color:var(--ink-3);margin-top:2px;}
+  .procmap .pm .ds{font-size:.74rem;color:var(--ink-2);margin-top:5px;}
+  .procmap .pm .mem{font-family:var(--mono);font-size:.6rem;margin-top:6px;border-top:1px solid var(--rule-2);padding-top:5px;color:var(--ink-2);}
+  .procmap .pm .mem b{color:var(--ink);}
+  .stalebox{border:1px solid var(--rule);background:var(--sub);padding:10px 13px;margin-top:14px;}
+  .stalebox h4{margin:0 0 6px;font-family:var(--mono);font-size:.62rem;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-2);}
+  .stalebox ul{margin:0;padding-left:17px;font-size:.77rem;color:var(--ink-2);}
+  .stalebox li{margin:2.5px 0;}
+  .stalebox b{color:var(--ink);}
+</style>
+
+<div class="sheet">
+
+  <div class="masthead">
+    <div class="kick">Supplementary Figure S2 · registration detail</div>
+    <h1>Slide registration: one method-agnostic frame, two interchangeable backends (VALIS &amp; STARE&nbsp;tiled)</h1>
+  </div>
+  <p class="standfirst">Registration aligns every moving slide of a patient onto that patient's reference slide.
+    The subworkflow (<code>subworkflows/local/registration.nf</code>) performs all method-independent work —
+    grouping by patient, resolving the reference, passing single-slide patients through, generating QC, writing the
+    checkpoint — then dispatches to one of two <b>adapters</b> that emit an <i>identical channel contract</i>.
+    Underneath, the backends are unrelated algorithms: a JVM deep-feature batch registrar versus a JVM-free
+    per-slide star. Both solve the same problem in the same <b>two steps</b> — a global pose fit, then a local
+    residual field — and panels&nbsp;b–d take those two steps apart in full. The nuclear/fiducial channel
+    (channel&nbsp;0) is what drives the alignment in both.</p>
+  <div class="railnote" style="margin:10px 0 0;justify-content:flex-start"><span><b>source of truth:</b> mirage @ <code>a077035</code> · verified 2026-08-09</span><span><b>method default:</b> <code>registration_method = valis</code></span><span><b>QC default:</b> <code>reg_qc = 2</code></span></div>
+
+  <!-- a — THE METHOD-AGNOSTIC FRAME -->
+  <section class="panel">
+    <span class="plabel">a</span>
+    <div class="panel-head"><h2>The frame — what happens regardless of method</h2>
+      <p>A strategy/adapter pattern. Both <code>VALIS_ADAPTER</code> and <code>TILED_ADAPTER</code> take the same
+        patient-grouped input and emit the same seven channel names. Everything to the right of dispatch is
+        method-blind.</p></div>
+    <div class="rail">
+      <div class="r"><div class="t">step 1 · group</div><div class="v">groupTuple(by patient)</div>
+        <div class="d">Streaming group keyed on <code>patient_id</code>, sized by <code>images_count</code> from meta — a patient emits the moment its slides arrive, without waiting for the cohort.</div></div>
+      <div class="r"><div class="t">step 2 · reference</div><div class="v">is_reference == true</div>
+        <div class="d">Exactly one reference per patient. None found → hard error, unless <code>allow_auto_reference</code> promotes the first slide (and marks it, so downstream filters see one reference).</div></div>
+      <div class="r"><div class="t">step 2b · single-slide</div><div class="v">items.size()==1 → passthrough</div>
+        <div class="d">A lone reference skips the adapter entirely (VALIS crashes on one image); the reference <i>is</i> its own registered output, flagged <code>is_passthrough</code>.</div></div>
+      <div class="r"><div class="t">step 3 · dispatch</div><div class="v">registration_method</div>
+        <div class="d"><code>'valis'</code> (default) → VALIS_ADAPTER · <code>'tiled'</code> → TILED_ADAPTER. Read <b>once</b>, in <code>registration.nf</code>, and passed down as an argument.</div></div>
+      <div class="r"><div class="t">step 3b–4 · QC + checkpoint</div><div class="v">method-blind</div>
+        <div class="d">DAPI-overlay QC, segmentation-overlap QC, then <code>csv/registered.csv</code> via the shared checkpoint writer.</div></div>
+    </div>
+    <div class="railnote">
+      <span><b>reference frame:</b> moving slides warp <i>into</i> the reference; the reference is never moved.</span>
+      <span><b>fiducial:</b> alignment is estimated on channel&nbsp;0 (the resolved nuclear marker), then applied to all channels.</span>
+      <span><b>one core:</b> <code>REGISTER_PATIENT</code> — shared with <code>add_cycle.nf</code>.</span>
+    </div>
+
+    <div class="grid2" style="margin-top:13px">
+      <div>
+        <div class="tbl-scroll"><table class="ss">
+          <caption style="font-family:var(--mono);font-size:.63rem;text-transform:uppercase;letter-spacing:.07em;color:var(--ink-3);text-align:left;padding:0 0 7px;">the adapter contract — every name, both backends</caption>
+          <thead><tr><th>emit</th><th>shape</th><th>VALIS</th><th>STARE</th></tr></thead>
+          <tbody>
+            <tr><td><b>registered</b></td><td>[meta, file]</td><td>warped + passthroughs</td><td>warped + reference</td></tr>
+            <tr><td><b>transform</b></td><td>[patient_id, file]</td><td><code>registrar.pickle</code></td><td><code>*_manifest.json</code></td></tr>
+            <tr><td><b>transform_by_slide</b></td><td>[meta, file]</td><td><i>empty</i></td><td>manifest per slide</td></tr>
+            <tr><td><b>stage_checkpoint</b></td><td>[patient_id, dir]</td><td>pre-micro fields</td><td><i>empty</i></td></tr>
+            <tr><td><b>intrinsic_tre</b></td><td>file</td><td><code>*_summary.csv</code></td><td><code>*_tre.json</code></td></tr>
+            <tr><td><b>size_logs · versions</b></td><td>file</td><td colspan="2">universal QC kinds — every process emits both</td></tr>
+          </tbody></table></div>
+      </div>
+      <div>
+        <div class="callout" style="margin-top:0"><b>The null-object rule.</b> A backend that cannot produce one of
+          these emits <code>Channel.empty()</code> for it — never a missing emit, never an error. That is what lets
+          <code>REGISTER_PATIENT</code> wire both backends with one two-line branch, and why nothing downstream has to
+          know which method ran. A third backend inherits the rule: <i>declare every name, empty the ones your method
+          lacks.</i></div>
+        <div class="callout" style="margin-top:11px"><b>Why <code>intrinsic_tre</code> is not called
+          <code>summary</code>.</b> Both backends estimate a target-registration error from their own registration, in
+          different file formats. The slot used to be named after VALIS's artifact (<code>valis_summary</code>) all the
+          way out to the QC report. The <i>channel vocabulary</i> is now unified; the <i>file formats</i> deliberately
+          are not — normalising them is the reader's job, not the seam's.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- b — THE TWO STEPS, IN GENERAL -->
+  <section class="panel">
+    <span class="plabel">b</span>
+    <div class="panel-head"><h2>The two steps every backend performs — and why it must be two</h2>
+      <p>This is the one idea to carry away. Both backends answer the same two questions in the same order, with
+        different machinery. Understand the two questions and both implementations become readable.</p></div>
+
+    <div class="twoq">
+      <div class="q">
+        <div class="qn">question 1 · pose</div>
+        <h3>“Where is this slide, roughly?”</h3>
+        <p>Consecutive sections of the same block are placed on the microscope stage independently: they arrive
+          <b>shifted, rotated, sometimes flipped</b>, by hundreds or thousands of pixels. One transform, applied to the
+          whole slide, removes all of it.</p>
+        <dl>
+          <dt>what is estimated</dt><dd>ONE matrix for the whole slide — <b>3–6 degrees of freedom</b> (translation, rotation, ± scale/shear).</dd>
+          <dt>search range</dt><dd><b>Unbounded.</b> Descriptor matching does not care how far apart the two slides start; it compares appearance, not position.</dd>
+          <dt>cannot represent</dt><dd>Any deformation that varies across the slide — a fold, a stretched edge, a torn region. A single matrix moves every pixel by the same rule.</dd>
+          <dt>failure mode</dt><dd>Too few or wrong correspondences → a confidently wrong matrix. Both backends therefore report an <b>inlier count</b> alongside the fit.</dd>
+        </dl>
+      </div>
+      <div class="q">
+        <div class="qn">question 2 · deformation</div>
+        <h3>“What is still wrong, locally?”</h3>
+        <p>Sectioning physically deforms tissue: it compresses, folds and stretches, differently in different places.
+          What remains after step&nbsp;1 is a small, <b>spatially varying</b> residual — typically single-digit to a few
+          tens of pixels, and different at every location.</p>
+        <dl>
+          <dt>what is estimated</dt><dd>A <b>displacement field</b> — a (dx, dy) per location, thousands of degrees of freedom.</dd>
+          <dt>search range</dt><dd><b>Local only.</b> Optical flow and phase correlation both find the <i>nearest</i> match, within a capture radius. Beyond it they lock onto the wrong structure — silently.</dd>
+          <dt>cannot represent</dt><dd>Gross pose. Handed unregistered slides it produces a smooth, plausible, meaningless field.</dd>
+          <dt>failure mode</dt><dd>Step&nbsp;1's residual exceeding step&nbsp;2's capture radius. This is the single most important invariant in both backends.</dd>
+        </dl>
+      </div>
+    </div>
+
+    <figure class="dia">
+      <svg viewBox="0 0 920 246" role="img" aria-label="Three-stage diagram: unregistered slides, after the global step, after the local step.">
+        <defs>
+          <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#0f1113"/>
+          </marker>
+          <marker id="ahs" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#3c4147"/>
+          </marker>
+        </defs>
+
+        <!-- ============ column A : before ============ -->
+        <text x="145" y="22" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="11" font-weight="700" fill="#0f1113">INPUT</text>
+        <rect x="70" y="46" width="150" height="132" fill="none" stroke="#0f1113" stroke-width="1.6"/>
+        <text x="76" y="60" font-family="ui-monospace,Menlo,monospace" font-size="9" fill="#767c83">reference</text>
+        <g transform="rotate(-9 145 112) translate(30 -8)">
+          <rect x="70" y="46" width="150" height="132" fill="none" stroke="#3c4147" stroke-width="1.4" stroke-dasharray="5 3"/>
+        </g>
+        <text x="248" y="176" text-anchor="end" font-family="ui-monospace,Menlo,monospace" font-size="9" fill="#767c83">moving</text>
+        <text x="145" y="205" text-anchor="middle" font-size="11" fill="#3c4147">offset + rotation, 10²–10³ px</text>
+        <text x="145" y="222" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="9.5" fill="#767c83">two independent stage placements</text>
+
+        <!-- arrow A→B -->
+        <line x1="288" y1="112" x2="330" y2="112" stroke="#0f1113" stroke-width="1.4" marker-end="url(#ah)"/>
+        <text x="309" y="102" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="9.5" font-weight="700" fill="#0f1113">STEP 1</text>
+        <text x="309" y="128" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="8.5" fill="#767c83">global M</text>
+
+        <!-- ============ column B : after step 1 ============ -->
+        <text x="455" y="22" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="11" font-weight="700" fill="#0f1113">AFTER THE GLOBAL FIT</text>
+        <rect x="380" y="46" width="150" height="132" fill="none" stroke="#0f1113" stroke-width="1.6"/>
+        <g transform="rotate(-0.8 455 112) translate(3 2)">
+          <rect x="380" y="46" width="150" height="132" fill="none" stroke="#3c4147" stroke-width="1.4" stroke-dasharray="5 3"/>
+        </g>
+        <!-- residual arrows, varying -->
+        <g stroke="#3c4147" stroke-width="1.3" marker-end="url(#ahs)">
+          <line x1="410" y1="76"  x2="419" y2="72"/>
+          <line x1="455" y1="76"  x2="460" y2="83"/>
+          <line x1="500" y1="76"  x2="493" y2="81"/>
+          <line x1="410" y1="112" x2="403" y2="118"/>
+          <line x1="455" y1="112" x2="463" y2="107"/>
+          <line x1="500" y1="112" x2="509" y2="116"/>
+          <line x1="410" y1="148" x2="416" y2="155"/>
+          <line x1="455" y1="148" x2="448" y2="142"/>
+          <line x1="500" y1="148" x2="504" y2="140"/>
+        </g>
+        <text x="455" y="205" text-anchor="middle" font-size="11" fill="#3c4147">residual <tspan font-style="italic">r</tspan>: small, and different everywhere</text>
+        <text x="455" y="222" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="9.5" fill="#767c83">must satisfy  r &lt; step-2 capture radius</text>
+
+        <!-- arrow B→C -->
+        <line x1="598" y1="112" x2="640" y2="112" stroke="#0f1113" stroke-width="1.4" marker-end="url(#ah)"/>
+        <text x="619" y="102" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="9.5" font-weight="700" fill="#0f1113">STEP 2</text>
+        <text x="619" y="128" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="8.5" fill="#767c83">field F</text>
+
+        <!-- ============ column C : after step 2 ============ -->
+        <text x="765" y="22" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="11" font-weight="700" fill="#0f1113">AFTER THE LOCAL FIELD</text>
+        <rect x="690" y="46" width="150" height="132" fill="none" stroke="#0f1113" stroke-width="1.6"/>
+        <rect x="690" y="46" width="150" height="132" fill="none" stroke="#3c4147" stroke-width="1.4" stroke-dasharray="5 3"/>
+        <g stroke="#c3c8cd" stroke-width="0.9">
+          <line x1="740" y1="46" x2="740" y2="178"/><line x1="790" y1="46" x2="790" y2="178"/>
+          <line x1="690" y1="90" x2="840" y2="90"/><line x1="690" y1="134" x2="840" y2="134"/>
+        </g>
+        <g fill="#0f1113">
+          <circle cx="715" cy="68" r="2"/><circle cx="765" cy="68" r="2"/><circle cx="815" cy="68" r="2"/>
+          <circle cx="715" cy="112" r="2"/><circle cx="765" cy="112" r="2"/><circle cx="815" cy="112" r="2"/>
+          <circle cx="715" cy="156" r="2"/><circle cx="765" cy="156" r="2"/><circle cx="815" cy="156" r="2"/>
+        </g>
+        <text x="765" y="205" text-anchor="middle" font-size="11" fill="#3c4147">field interpolated between control points</text>
+        <text x="765" y="222" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="9.5" fill="#767c83">continuous — no per-tile discontinuity</text>
+      </svg>
+      <figcaption><b>The order is not a convention, it is a requirement.</b> Step&nbsp;1 has few parameters and an
+        unlimited search range; step&nbsp;2 has many parameters and a bounded one. Run step&nbsp;2 alone and it never
+        finds the match; run step&nbsp;1 alone and the tissue deformation survives untouched. The whole engineering
+        problem is making step&nbsp;1's residual land inside step&nbsp;2's capture radius — and <i>knowing</i> when it
+        did not.</figcaption>
+    </figure>
+
+    <div class="tbl-scroll" style="margin-top:14px"><table class="rc">
+      <caption>the same two steps, two implementations</caption>
+      <thead><tr><th>&nbsp;</th><th class="v">step 1 — global pose</th><th class="v">step 2 — local deformation</th></tr></thead>
+      <tbody>
+        <tr><td class="k"><span class="em">VALIS</span></td>
+          <td class="v">SuperPoint keypoints + SuperGlue matching over <i>all</i> the patient's slides → a match graph → a rigid/affine matrix <code>slide.M</code> per slide<br><span style="color:#767c83">(+ <code>MicroRigidRegistrar</code> re-fit at higher resolution)</span></td>
+          <td class="v"><code>OpticalFlowWarper</code> — a dense displacement field per slide, estimated at up to 4096&nbsp;px<br><span style="color:#767c83">(+ <code>register_micro()</code> re-estimate on a 12.5% crop, composed in)</span></td></tr>
+        <tr><td class="k"><span class="em">STARE tiled</span></td>
+          <td class="v">ORB keypoints + RANSAC euclidean fit on a shared <b>thumbnail</b> of both DAPI planes → one matrix <code>M0</code> per moving slide</td>
+          <td class="v">Phase cross-correlation per <b>tile</b> → one (dx, dy) at each tile centre → a TRE-gated, bilinearly interpolated <b>mesh field</b> <code>F</code></td></tr>
+        <tr><td class="k">capture radius of step 2</td>
+          <td class="v">the optical-flow pyramid, at <code>max_non_rigid_registration_dim_px</code></td>
+          <td class="v">explicit and tunable: <code>reg_tiled_halo</code> (default <b>256&nbsp;px</b>)</td></tr>
+        <tr><td class="k">how step 1's residual is reported</td>
+          <td class="v"><code>error_df</code> from <code>measure_error()</code>, saved <i>before</i> the micro pass overwrites it</td>
+          <td class="v"><code>coarse_tre</code> = RMS of the RANSAC inliers, lifted to full-res; warns if ≥ <code>halo</code></td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <!-- c — VALIS BACKEND -->
+  <section class="panel">
+    <span class="plabel">c</span>
+    <div class="panel-head"><h2>Backend 1 — VALIS (default): the two steps as a deep-feature batch registrar</h2>
+      <p>One <code>REGISTER</code> process per patient, on the upstream <code>cdgatenbee/valis-wsi:1.0.0</code> image.
+        VALIS ingests <i>all</i> of a patient's slides at once, so step&nbsp;1 is solved jointly over the whole series
+        rather than pair by pair. Features are learned (SuperPoint), matching is learned (SuperGlue), and both steps
+        run over a Bio-Formats <b>JVM</b>. The pipeline's entire configuration of VALIS lives in one function,
+        <code>build_registrar_kwargs()</code> in <code>bin/utils/valis_config.py</code>.</p></div>
+
+    <div class="bkhead">
+      <span class="name">VALIS_ADAPTER → REGISTER → bin/register.py</span>
+      <span class="sub">batch graph over all slides · SuperPoint + SuperGlue · JVM / Bio-Formats · 1 task per patient</span>
+      <span class="flag">default</span>
+    </div>
+
+    <div style="border:1px solid var(--rule);border-top:none;background:var(--sub);padding:12px;">
+
+      <div class="step" style="margin-top:0">
+        <div class="sh"><span class="k">setup</span><span class="ttl">Ingest the whole patient group at once</span>
+          <span class="who">registration.Valis(...)</span></div>
+        <div class="sb">
+          <p>Every slide of the patient — reference included — is hard-linked into one input directory and handed to a
+            single <code>Valis</code> object. The reference is named explicitly via <code>reference_img_f</code>; the
+            pipeline always knows it, so <code>register.py</code>'s standalone marker-search fallback never runs here.</p>
+          <div class="pp">
+            <span>align_to_reference <b>True</b></span><span>crop <b>reference</b></span>
+            <span>create_masks <b>True</b></span><span>affine_optimizer_cls <b>None</b></span>
+            <span>max_image_dim_px <b>4000</b></span>
+          </div>
+          <ul class="tight">
+            <li><b><code>crop='reference'</code></b> is what makes every output share the reference's raster — the
+              reference defines the frame and is never moved.</li>
+            <li><b><code>affine_optimizer_cls=None</code></b>: VALIS's intensity-based affine refiner needs SimpleITK
+              with Elastix bindings, which the image does not carry. Alignment is therefore purely feature-driven.</li>
+            <li>Files are <b>copied, not symlinked</b>, into <code>preprocessed/</code> — VALIS loses track of
+              <code>src_f</code> through Nextflow's symlinks.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="sh"><span class="k">step 1</span><span class="ttl">Global pose — learned features, one graph over the series</span>
+          <span class="who">registrar.register()</span></div>
+        <div class="sb">
+          <table class="qa">
+            <tr><td class="q">estimates</td><td>One matrix <b><code>slide.M</code></b> per slide, mapping that slide's pixels into the reference frame.</td></tr>
+            <tr><td class="q">sees</td><td>Each slide's <b>channel 0</b> (the resolved nuclear marker), downscaled so the longest side is <b><code>max_processed_image_dim_px</code></b> — 2048&nbsp;px under the default <code>high</code> preset.</td></tr>
+            <tr><td class="q">how</td><td><b>SuperPointFD</b> detects up to <b>5000</b> keypoints per slide and describes each with a learned 256-d descriptor. <b>SuperGlueMatcher</b> — a graph neural network — matches two descriptor sets jointly, reasoning about all candidate pairs at once instead of independent nearest-neighbour lookups. VALIS matches across the whole series, builds a graph whose edges are those match sets, and derives each slide's transform toward the reference along it, so the slides land in <i>one</i> consistent space rather than in N independently-fitted ones.</td></tr>
+            <tr><td class="q">why learned</td><td>Consecutive IF cycles are photometrically unlike each other (different exposures, bleaching, sometimes different stains). Hand-crafted descriptors degrade across that gap; SuperPoint/SuperGlue were trained to survive it. This is VALIS's core accuracy claim and the reason it is the default.</td></tr>
+            <tr><td class="q">cost</td><td>Working resolution is the memory knob, and the <i>only</i> thing the three presets change.</td></tr>
+          </table>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="sh"><span class="k">step 1b</span><span class="ttl">Micro-rigid — re-fit the same matrix at higher resolution</span>
+          <span class="who">MicroRigidRegistrar · micro_reg ≥ 1</span></div>
+        <div class="sb">
+          <p>Passed as <code>micro_rigid_registrar_cls</code>, so it runs <i>inside</i> <code>register()</code> —
+            <b>before</b> the non-rigid stage, not after it. It re-detects features on higher-resolution crops and
+            sharpens <code>slide.M</code>. It does not add a new kind of transform; it improves the accuracy of the
+            step-1 answer.</p>
+          <div class="warnbox"><span class="wl">consequence for QC</span>At <code>micro_reg ≥ 1</code> the QC
+            stage labelled <code>rigid</code> means <b>affine ∘ micro-rigid</b>, not the raw affine. By the time the
+            non-rigid stage runs, <code>slide.M</code> is already final.</div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="sh"><span class="k">step 2</span><span class="ttl">Local deformation — a dense optical-flow field</span>
+          <span class="who">OpticalFlowWarper</span></div>
+        <div class="sb">
+          <table class="qa">
+            <tr><td class="q">estimates</td><td>A dense <b>displacement field</b> per slide — one (dx, dy) per pixel — held as <code>bk_dxdy</code> (backward, used for resampling) and <code>fwd_dxdy</code> (forward, used to warp <i>points</i>, which is what the reg_qc=2 scorer needs).</td></tr>
+            <tr><td class="q">sees</td><td>The <b>rigidly aligned</b> images, at up to <b><code>max_non_rigid_registration_dim_px</code></b> — 4096&nbsp;px under <code>high</code> and <code>medium</code>, 1024&nbsp;px under <code>low</code>. The field is then scaled up to full resolution.</td></tr>
+            <tr><td class="q">how</td><td>Dense optical flow between the aligned nuclear channels: every pixel is allowed to move independently, regularised toward smoothness. With <code>align_to_reference=True</code> each slide is deformed <i>directly onto the reference</i>, rather than serially through its neighbours — errors therefore do not accumulate along the stack.</td></tr>
+            <tr><td class="q">gotcha</td><td>VALIS auto-switches to <code>NonRigidTileRegistrar</code> above an internal ~10&nbsp;GB estimate. That path returns <code>fwd_dxdy</code> as a <code>pyvips.Image</code>, which the <code>Slide</code> setter silently rejects — leaving <code>fwd_dxdy = None</code> and making rigid and non-rigid errors come out <i>identical</i>. <code>register.py</code> carries an explicit safety net that recomputes it by inverting <code>bk_dxdy</code> and re-runs <code>measure_error()</code>. Passing the tile registrar explicitly is deliberately avoided.</td></tr>
+          </table>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="sh"><span class="k">step 2b</span><span class="ttl">Micro non-rigid — a second field on a crop, composed in</span>
+          <span class="who">register_micro() · micro_reg = 2 · default</span></div>
+        <div class="sb">
+          <p>A <b>separate method call</b> after <code>register()</code> returns. It re-estimates the non-rigid field
+            at higher effective resolution on a crop of <code>floor(min_max_size × <b>0.125</b>)</code>, then
+            <b>adds</b> that residual into each slide's existing field:
+            <code>fwd_dxdy ← fwd_dxdy + micro_residual</code>. This is the shipped default (depth 2 = maximum).</p>
+          <div class="warnbox"><span class="wl">why a checkpoint must be taken before it</span>The composition is
+            <b>destructive</b> — afterwards there is no attribute anywhere in the registrar that still holds the
+            pre-micro field, and <code>register_micro()</code> also overwrites <code>{name}_summary.csv</code> with
+            post-micro numbers. The instant between <code>register()</code> and <code>register_micro()</code> is
+            therefore the <i>only</i> moment at which the <code>non_rigid</code> stage can be told apart from
+            <code>micro</code>. That is exactly what <code>--stage-checkpoint-dir</code> captures at
+            <code>reg_qc ≥ 2</code>, and why <code>REGISTER</code> is the only place it can be captured.</div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="sh"><span class="k">step 3</span><span class="ttl">Warp and save every slide, all channels</span>
+          <span class="who">registered_slides/*_registered.ome.tiff</span></div>
+        <div class="sb">
+          <p>Each slide's full channel stack is resampled through <code>M</code> then the field, and written as
+            OME-TIFF cropped to the reference. The process then <b>hard-fails</b> unless the output count equals the
+            input count — a partial warp is a silent data loss otherwise.</p>
+          <div class="math">x<sub>ref</sub> &nbsp;=&nbsp; D( M · x<sub>mov</sub> ) &nbsp;&nbsp;<span class="cm">— M from steps 1+1b, D the field from steps 2+2b, composed into one</span></div>
+          <p>The adapter then re-matches each output file to its slide metadata by <b>OME channel signature</b> — the
+            sorted, lower-cased channel-name set read from a manifest of the written OME-XML — never by filename. Two
+            slides of one patient sharing a channel set is a hard error, because the match would silently be
+            ambiguous.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid2" style="margin-top:14px">
+      <div>
+        <div class="tbl-scroll"><table class="rc">
+          <caption>memory_mode presets — bin/utils/valis_config.py</caption>
+          <thead><tr><th>preset</th><th class="v">step 1 dim</th><th class="v">step 2 dim</th></tr></thead>
+          <tbody>
+            <tr class="valwin"><td class="k"><span class="em">high</span> (default)</td><td class="v">2048&nbsp;px</td><td class="v">4096&nbsp;px</td></tr>
+            <tr><td class="k">medium</td><td class="v">1024&nbsp;px</td><td class="v">4096&nbsp;px</td></tr>
+            <tr><td class="k">low</td><td class="v">256&nbsp;px</td><td class="v">1024&nbsp;px</td></tr>
+          </tbody></table></div>
+        <div class="callout" style="margin-top:11px">All three presets share SuperPoint&nbsp;+&nbsp;SuperGlue and 5000
+          features; <b>only the working dimensions change</b>. <code>low</code> additionally sets
+          <code>tile_wh=512</code> / <code>tile_buffer=100</code>. Higher dim = more accurate, more RAM.</div>
+        <div class="callout" style="margin-top:11px"><b>Resources.</b> <code>REGISTER</code> asks for
+          <b>8&nbsp;CPU · 300&nbsp;GB × attempt · 24&nbsp;h × attempt</b>, <code>maxForks 10</code>, and retries on
+          exit&nbsp;1 as well as the usual OOM/kill signals — VALIS tile-read failures and JVM OOM both surface as
+          exit&nbsp;1.</div>
+      </div>
+      <div>
+        <div class="emit"><span class="lbl">REGISTER emits (per patient)</span>
+          <b>registered</b> — one OME-TIFF per slide, in the reference frame<br>
+          <b>registrar</b> — <code>*_registrar.pickle</code>: the whole transform object, replayable by the reg_qc=2 warper<br>
+          <b>summary</b> — <code>preprocessed/data/*.csv</code>, the pre-micro <code>error_df</code> → the contract's <code>intrinsic_tre</code><br>
+          <b>stage_checkpoint</b> — pre-micro displacement fields <span class="tag tag-on">reg_qc ≥ 2 only</span><br>
+          <b>channels_manifest.json</b> · <b>size_log</b> · <b>versions</b><br>
+          <span class="nul">transform_by_slide — empty: the registrar is one group-wide object, not decomposable per slide</span></div>
+        <div class="callout" style="margin-top:11px"><b>JVM heap.</b> <code>REGISTER</code> always passes an explicit
+          value: <code>min(reg_jvm_heap_gb ?: 32 + 16·task.attempt, task.memory − 4&nbsp;GiB)</code>. So the heap
+          <b>climbs with the retry ramp</b> — 48 / 64 / 80&nbsp;GiB — which is the fix for the OOMs seen on merged,
+          high-LZW multi-channel references. The older <code>max(8, min(0.75·sysGB, 3·inputGB + 8))</code> heuristic
+          survives only as <code>valis_config.init_jvm</code>'s fallback for callers that pass nothing, and
+          <code>WARP_SEG_QC</code> pins itself at 8&nbsp;GB rather than use it.</div>
+        <div class="callout" style="margin-top:11px"><b>Disk.</b> The process deletes its working copies and VALIS's
+          <code>deformation_fields/ masks/ overlaps/ rigid_registration/ non_rigid_registration/ processed/</code>
+          intermediates before exiting — but never the staged inputs, which Nextflow needs intact for a retry.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- d — STARE TILED BACKEND -->
+  <section class="panel">
+    <span class="plabel">d</span>
+    <div class="panel-head"><h2>Backend 2 — STARE tiled: the same two steps, JVM-free and fanned out</h2>
+      <p>Selected with <code>--registration_method tiled</code>. No batch graph: every moving slide registers
+        <i>directly and independently</i> to the fixed reference — a star topology, which is where the name comes from.
+        Pure NumPy&nbsp;+&nbsp;scikit-image&nbsp;+&nbsp;tifffile: no JVM, no Bio-Formats, no deep-learning weights.
+        The two steps map onto <b>four Nextflow processes</b>, and step&nbsp;2 fans out to <b>one task per tile</b>.</p></div>
+
+    <div class="bkhead">
+      <span class="name">TILED_ADAPTER → COARSE → REG_TILE (×N) → SOLVE → STITCH</span>
+      <span class="sub">star topology · ORB + RANSAC · phase-correlation mesh · bounded memory · bolt3x/attend_image_analysis:tiled</span>
+      <span class="flag flag-alt">method = tiled</span>
+    </div>
+
+    <div class="procmap">
+      <div class="pm"><div class="nm">TILED_COARSE</div><div class="fk">1 task / moving slide</div>
+        <div class="ds"><b>Step 1.</b> Estimates <code>M0</code> on a thumbnail and writes the tile plan.</div>
+        <div class="mem">asks <b>8 GB × 2^(n−1)</b> · peak ~2 GB</div></div>
+      <div class="pm"><div class="nm">TILED_REG_TILE</div><div class="fk">1 task / <b>tile</b></div>
+        <div class="ds"><b>Step 2a.</b> Measures one tile's leftover shift. The embarrassingly-parallel part.</div>
+        <div class="mem">asks <b>4 GB</b> · peak 1.33 GB · maxForks 20</div></div>
+      <div class="pm"><div class="nm">TILED_SOLVE</div><div class="fk">1 task / moving slide</div>
+        <div class="ds"><b>Step 2b.</b> Gathers every tile's answer into the mesh + manifest + TRE report.</div>
+        <div class="mem">asks <b>1 GB</b> · peak 33 MB / 0.11 s</div></div>
+      <div class="pm"><div class="nm">TILED_STITCH</div><div class="fk">1 task / moving slide</div>
+        <div class="ds"><b>Apply.</b> Streams every channel through <code>M0 + F</code> into the registered OME-TIFF.</div>
+        <div class="mem">asks <b>4 GB</b> · peak 1.42 GB · maxForks 10</div></div>
+    </div>
+    <div class="callout" style="margin-top:11px"><b>Why the memory asks are constants.</b> Every one of these peaks is
+      a function of a <i>parameter</i> — the thumbnail cap, the tile+halo window, the write-tile — and not of the
+      slide's dimensions. A 26k&nbsp;×&nbsp;26k slide and a 4k&nbsp;×&nbsp;4k slide cost the same per task; only the
+      <i>number</i> of tasks changes. That is the whole point of the shape, and the reason the alternative was deleted
+      rather than kept behind a flag.</div>
+
+    <div style="border:1px solid var(--rule);background:var(--sub);padding:12px;margin-top:14px;">
+
+      <div class="step" style="margin-top:0">
+        <div class="sh"><span class="k">step 1</span><span class="ttl">Global pose — ORB + RANSAC on a shared thumbnail</span>
+          <span class="who">TILED_COARSE · bin/tiled_coarse.py</span></div>
+        <div class="sb">
+          <table class="qa">
+            <tr><td class="q">estimates</td><td>One 3×3 matrix <b><code>M0</code></b> per moving slide, mapping moving pixels → reference pixels. Default model <b><code>euclidean</code></b>: rotation + translation only, 3 DOF. (<code>similarity</code> and <code>affine</code> are available; euclidean is right when both sections come off the same microscope at the same magnification, and refusing the extra DOF is what stops RANSAC fitting a bogus scale to a weak match.)</td></tr>
+            <tr><td class="q">sees</td><td>Both slides' DAPI plane (<code>reg_tiled_dapi_index</code>, default 0), read <b>lazily in row bands</b> and decimated by <b>one shared integer factor</b> chosen so the longer side is ≤ <code>reg_tiled_coarse_max_dim</code> (4096&nbsp;px). Peak memory is a band plus the thumbnail — not the plane.</td></tr>
+            <tr><td class="q">how</td><td>Each thumbnail is <b>percentile-normalised to [0,1]</b> over p1–p99.9, then <b>ORB</b> detects up to 800 keypoints and extracts binary descriptors. Descriptors are <b>cross-check matched</b> (a pair survives only if each is the other's best match), and <b>RANSAC</b> fits the model — 1000 trials, 3&nbsp;px inlier threshold — discarding correspondences that disagree with the consensus. The fit and its residual are then lifted from thumbnail pixels to full resolution.</td></tr>
+            <tr><td class="q">then</td><td>It writes the <b>tile plan</b>: <b>cores</b> that partition the reference frame exactly — every pixel belongs to one core, no gaps, no overlaps — each paired with a <b>read box</b> = core expanded by <code>halo</code> and clamped to the image. Each core's centre is one control point of the future mesh. The row count of this CSV <i>is</i> the fan-out width.</td></tr>
+          </table>
+
+          <div class="math">M<sub>full</sub> = diag(f,f,1) · M<sub>ds</sub> · diag(1/f,1/f,1) &nbsp;&nbsp;⇒&nbsp;&nbsp; rotation unchanged, translation × f &nbsp;&nbsp;<span class="cm">— returning M_ds unchanged under-translates by exactly f</span></div>
+
+          <ul class="tight">
+            <li><b>Why ORB and not phase correlation for this step.</b> Phase correlation recovers translation only.
+              Inter-cycle rotation is real and would survive it; feature matching handles both.</li>
+            <li><b>Why one decimation factor for both slides.</b> ORB matches descriptors <i>across</i> the two
+              thumbnails. Per-slide factors would inject a scale difference that a euclidean <code>M0</code> cannot
+              honestly represent.</li>
+            <li><b>Why normalise before ORB.</b> ORB's <code>fast_threshold</code> is an <i>absolute</i> intensity
+              difference, and raw uint16 counts sit ~6 orders of magnitude above it: FAST then fires on ~38% of pixels
+              instead of ~3%, and <code>corner_peaks</code> — quadratic in candidate count — turns a ~1&nbsp;min step
+              into a ~5&nbsp;h one (measured: 1.1&nbsp;s vs 319&nbsp;s on a 2048² thumbnail). It is also a
+              <b>correctness</b> fix: two cycles with different exposures under one absolute threshold yield hundreds
+              of keypoints on one slide and almost none on the other. The window is p99.9, not p99, because DAPI
+              nuclei <i>are</i> the bright minority — clipping at p99 saturates the very structure being matched.</li>
+            <li><b>Why <code>max_dim</code> is not free to raise.</b> Cost grows roughly with the <i>square</i> of the
+              pixel count: measured 2048&nbsp;→&nbsp;~13&nbsp;s, 4096&nbsp;→&nbsp;~154&nbsp;s per slide, two slides per
+              task. 8192 would be tens of minutes each.</li>
+          </ul>
+
+          <div class="warnbox"><span class="wl">the load-bearing invariant</span>
+            <b>coarse_tre must stay well below <code>halo</code>.</b> A residual of <i>r</i> thumbnail px becomes
+            <i>r&nbsp;×&nbsp;factor</i> full-res px. If that exceeds the read halo, each tile's true match lies
+            <i>outside</i> the pixels the tile task read — step&nbsp;2 then measures a shift to the wrong structure and
+            the slide is mis-registered while the run <b>still exits 0</b>. <code>tiled_coarse.py</code> logs a warning
+            (residual ≥ halo, and separately if fewer than 10 inliers support <code>M0</code>) but nothing downstream
+            checks it, and nothing fails. <i>Read the COARSE log.</i></div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="sh"><span class="k">step 2a</span><span class="ttl">Local deformation — one phase correlation per tile</span>
+          <span class="who">TILED_REG_TILE · one Nextflow task per tile</span></div>
+        <div class="sb">
+          <table class="qa">
+            <tr><td class="q">estimates</td><td>For its one tile: <b>(dx, dy)</b>, the leftover shift at that tile's centre, plus <b>tre = hypot(dx, dy)</b> — the tile's local rigid-stage misalignment.</td></tr>
+            <tr><td class="q">sees</td><td>Two windows of size <code>tile + 2·halo</code> (2560² by default): the reference's read box straight from disk, and the <i>same</i> box of the moving slide after being rigid-warped through <code>M0</code>. Both are in reference-frame coordinates, so what remains between them is pure residual. Only the moving pixels that box draws from are decoded — never the slide.</td></tr>
+            <tr><td class="q">how</td><td><b>Whiten</b> each crop (subtract a σ=3 Gaussian blur) to strip the low-frequency intensity mismatch between two differently-stained cycles; <b>Hann window</b> it to taper the non-periodic tile edges the FFT would otherwise wrap around; then <b>cross-correlate</b> with <code>upsample_factor = 10</code> for 0.1&nbsp;px precision. The kernel mirrors ASHLAR's.</td></tr>
+            <tr><td class="q">deliberate</td><td><code>normalization=None</code> — plain cross-correlation, <i>not</i> phase-normalised. Phase normalisation amplifies exactly the high-frequency noise whitening leaves behind, and destabilises the sub-pixel peak on tiles this small.</td></tr>
+            <tr><td class="q">parallelism</td><td>These tasks are fully independent: a 16k² slide at <code>tile=2048</code> is 8×8 = <b>64 tasks</b>; a 26k² slide is 13×13 = <b>169</b>. The gather is sized with each slide's own tile count, so a slide's mesh solve starts as soon as <i>its</i> tiles land — not when the whole cohort's do.</td></tr>
+          </table>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="sh"><span class="k">step 2b</span><span class="ttl">Assemble the mesh — with TRE gating</span>
+          <span class="who">TILED_SOLVE · bin/tiled_solve.py</span></div>
+        <div class="sb">
+          <p>Lays every tile's control point onto the grid at its <code>(ix, iy)</code> index. The gate is the one
+            piece of judgement in this step:</p>
+          <div class="math">disp[iy][ix] = (dx, dy) &nbsp;<b>if</b>&nbsp; tre ≥ gate_tre &nbsp;&nbsp;<b>else</b>&nbsp; (0, 0) &nbsp;&nbsp;<span class="cm">— gate_tre = reg_tiled_gate_tre, default 1.0 px</span></div>
+          <p>A tile already aligned to better than a pixel <b>contributes nothing</b> and stays purely rigid. This is
+            not a speed optimisation — a sub-pixel "correction" measured on a low-texture tile is mostly noise, and
+            writing it into the mesh would bend the field around nothing. If <i>every</i> tile is gated out the entry
+            collapses to <code>mesh: null</code> and the warp is a clean affine, with no interpolation error
+            introduced at all.</p>
+          <p>The surviving control points define a <b><code>MeshField</code></b>: a regular grid whose values are
+            <b>bilinearly interpolated</b> into a single continuous displacement field over the whole slide,
+            edge-clamped (constant extrapolation) beyond the outermost control points. Continuity is the reason a cell
+            straddling a tile boundary is not torn — there is no per-tile discontinuity to fall into. The same field
+            object is sampled by the image warp <i>and</i> by the reg_qc=2 point warper, so QC measures exactly the
+            transform that shipped.</p>
+          <div class="emit"><span class="lbl">TILED_SOLVE writes</span>
+            <b>*_manifest.json</b> — <code>{ref_slide, slides: {name: {M0, mesh, out_shape}}}</code>, the reference
+            carried as an identity entry. Self-contained JSON, ~kB, three readers.<br>
+            <b>*_tre.json</b> — <code>coarse_tre_px</code>, <code>n_inliers</code>, <code>n_tiles</code>,
+            <code>mesh_refined</code>, mean/p50/p90/max of the per-tile rigid TRE, and the full per-tile list — a
+            <b>spatial TRE heatmap</b> VALIS does not provide.</div>
+          <div class="warnbox"><span class="wl">honest limitation</span>The fan-out's <code>*_tre.json</code> reports
+            the <b>rigid-stage</b> error only. Measuring the residual <i>after</i> the mesh is applied would need a
+            re-warp, which this reduction deliberately does not do; the field is carried as
+            <code>"note": "post-refinement residual not measured here"</code>. For a post-registration number, use
+            <b>reg_qc = 2</b> (panel f) or the benchmark harness.</div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="sh"><span class="k">apply</span><span class="ttl">Warp every channel, streamed tile by tile</span>
+          <span class="who">TILED_STITCH · bin/tiled_stitch.py</span></div>
+        <div class="sb">
+          <p>The forward map composes the global matrix with the field. <b>The field lives in the reference
+            frame</b> — it is applied <i>after</i> <code>M0</code>, not before:</p>
+          <div class="math">forward: &nbsp; v = M0 · x &nbsp;&nbsp;then&nbsp;&nbsp; u = v + F(v) &nbsp;&nbsp;&nbsp;&nbsp;<span class="cm">x = moving px, u = reference px</span></div>
+          <p>Resampling needs the <b>inverse</b>: for each output pixel <code>u</code>, where in the moving slide did
+            it come from? Because <code>F</code> is small and smooth, that is solved by <b>three fixed-point
+            iterations</b>, then one exact affine inverse:</p>
+          <div class="math">inverse: &nbsp; v ← u − F(v) &nbsp;(×3) &nbsp;&nbsp;then&nbsp;&nbsp; x = M0<sup>−1</sup> · v &nbsp;&nbsp;&nbsp;&nbsp;<span class="cm">with no mesh, exactly x = M0⁻¹u</span></div>
+          <ul class="tight">
+            <li><b>Bilinear, on purpose.</b> A bilinear sample is a <i>convex combination</i> of four neighbours —
+              weights non-negative, summing to 1 — so the result can never leave their [min, max]. A non-negative
+              image stays non-negative. Bicubic or Lanczos overshoot near edges and manufacture negative values, which
+              would corrupt downstream marker quantification. Output is then clipped at 0, rounded, and cast back to
+              the <b>source dtype</b>, so quantification sees the same integer range it would have on the native slide.</li>
+            <li><b>Gigapixel-safe streaming.</b> Output is generated one <code>reg_tiled_out_tile</code> (1024²) tile
+              at a time, straight into a tiled OME-TIFF writer. For each output tile, <code>source_region</code>
+              inverse-maps its four corners, pads by the mesh's largest displacement plus a bilinear pixel, and reads
+              <i>only</i> that box. Peak = one source crop + one output tile, per channel. Neither the whole moving
+              slide nor the whole output is ever resident.</li>
+            <li><b>Windowed warp = cropped full warp.</b> <code>out_origin</code> shifts the sample grid rather than
+              re-deriving it, so tiles reassemble seamlessly by construction.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="emit" style="margin-top:13px"><span class="lbl">TILED_ADAPTER emits</span>
+      <b>registered</b> — one OME-TIFF per moving slide in the reference frame, plus the reference itself flagged
+      <code>is_passthrough</code> (it defines the frame, so it is never warped and is not republished into
+      <code>registered/</code>) &nbsp;·&nbsp; <b>transform</b> + <b>transform_by_slide</b> — the same manifest, keyed
+      per patient and per slide &nbsp;·&nbsp; <b>intrinsic_tre</b> — <code>*_tre.json</code> &nbsp;·&nbsp;
+      <span class="nul">stage_checkpoint — empty: STARE composes nothing destructively, so every stage is
+      reconstructible from the manifest and no snapshot is needed.</span></div>
+
+    <div class="stalebox">
+      <h4>◆ what changed — the single-task shape is gone</h4>
+      <ul>
+        <li>A single-process <code>TILED_REGISTER</code> alternative used to sit behind a <code>reg_tiled_fanout</code>
+          flag. It produced <b>identical pixels</b>, but held both whole slides, an all-channel float32 copy and the
+          full warped output live at once — so its memory scaled with the <i>input</i> and had to be budgeted from
+          file size.</li>
+        <li>Both the flag and the process were <b>removed</b>, not merely defaulted off: shipping an unbounded opt-out
+          behind a boolean is a footgun, and the per-tile fan-out is now <b>the only STARE shape</b>.</li>
+        <li>The single-process reference implementation still exists as
+          <code>bin/utils/tiled_pipeline.register_slide</code>, but only as a test and benchmark oracle — the
+          production path is the four processes above. <code>bin/tiled_register.py</code> no longer exists.</li>
+        <li>Unrelated and often confused: the old <b>distributed-VALIS</b> low-memory path (<code>REG_TILE</code>,
+          <code>REG_WARP_TILE</code>, …) was archived on 2026-07-24 under
+          <code>archive/tiled-valis-2026-07-24</code>. <code>registration_method = 'tiled'</code> is a separate, live
+          backend and has nothing to do with it.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- e — HEAD TO HEAD -->
+  <section class="panel">
+    <span class="plabel">e</span>
+    <div class="panel-head"><h2>Head-to-head</h2>
+      <p>Same job, same two steps, opposite engineering trade-offs. VALIS maximises accuracy and cross-slide
+        consistency at the cost of a heavy JVM footprint and one enormous task; STARE trades some accuracy for a
+        JVM-free, bounded-memory, embarrassingly-parallel path.</p></div>
+    <div class="tbl-scroll"><table class="rc">
+      <thead><tr><th>property</th><th class="v">VALIS <span class="tag-def">default</span></th><th class="v">STARE tiled <span class="tag-alt">method=tiled</span></th></tr></thead>
+      <tbody>
+        <tr><td class="k">topology</td><td class="v"><span class="em">batch graph</span> over all a patient's slides at once</td><td class="v"><span class="em">star</span> — each moving slide → reference, independently</td></tr>
+        <tr><td class="k">step 1 · features</td><td class="v">SuperPoint + SuperGlue (learned, cross-modal)</td><td class="v">ORB + cross-check + RANSAC (classical)</td></tr>
+        <tr><td class="k">step 1 · model</td><td class="v">rigid / affine, graph-consistent</td><td class="v">euclidean — rotation + translation (3 DOF)</td></tr>
+        <tr><td class="k">step 1 · resolution</td><td class="v">2048 px working image (<code>high</code>)</td><td class="v">4096 px shared thumbnail</td></tr>
+        <tr><td class="k">step 2 · model</td><td class="v">dense per-pixel optical-flow field + up to 2 micro passes</td><td class="v">TRE-gated control grid, bilinearly interpolated</td></tr>
+        <tr><td class="k">step 2 · capture radius</td><td class="v">implicit (optical-flow pyramid)</td><td class="v"><span class="em">explicit</span> — <code>reg_tiled_halo</code>, 256 px</td></tr>
+        <tr><td class="k">estimation channel</td><td class="v">channel 0 — the resolved nuclear marker</td><td class="v">channel 0 — <code>reg_tiled_dapi_index</code></td></tr>
+        <tr><td class="k">resampler</td><td class="v">VALIS / pyvips internals</td><td class="v">bilinear, non-negativity preserved by construction</td></tr>
+        <tr><td class="k">JVM / Bio-Formats</td><td class="v">required (heap climbs with the retry ramp)</td><td class="v"><span class="em">none</span> — NumPy / scikit-image / tifffile</td></tr>
+        <tr><td class="k">container</td><td class="v"><code>cdgatenbee/valis-wsi:1.0.0</code></td><td class="v"><code>bolt3x/attend_image_analysis:tiled</code></td></tr>
+        <tr><td class="k">memory request</td><td class="v"><span class="em">300 GB</span> × attempt, 8 CPU, 24 h</td><td class="v"><span class="em">8 / 4 / 1 / 4 GB</span> across the four processes</td></tr>
+        <tr><td class="k">memory scales with</td><td class="v">the slides (heap sized from inputs / task memory)</td><td class="v"><span class="em">parameters only</span> — thumbnail, tile+halo, out_tile</td></tr>
+        <tr><td class="k">parallelism grain</td><td class="v">one task per <span class="em">patient</span></td><td class="v">one task per <span class="em">tile</span> for step 2; per slide elsewhere</td></tr>
+        <tr><td class="k">transform artifact</td><td class="v"><code>registrar.pickle</code> — one per patient, replayed through the JVM</td><td class="v"><code>manifest.json</code> — M0 + mesh, per slide, JVM-free</td></tr>
+        <tr><td class="k">intrinsic TRE</td><td class="v"><code>*_summary.csv</code> — pre-micro <code>error_df</code>, per stage</td><td class="v"><code>*_tre.json</code> — rigid-stage, with a per-tile spatial heatmap</td></tr>
+        <tr><td class="k">reg_qc=2 stages scored</td><td class="v"><code>native · rigid · non_rigid · micro</code></td><td class="v"><code>native · rigid · refined</code></td></tr>
+        <tr><td class="k">stage checkpoint</td><td class="v">required — micro composes destructively</td><td class="v">not needed — nothing is composed destructively</td></tr>
+        <tr><td class="k">single-slide patient</td><td class="v">must bypass (crashes on a lone image)</td><td class="v">bypasses via the same shared passthrough</td></tr>
+        <tr><td class="k">add_cycle mode</td><td class="v"><span class="em">supported</span> — new cycle → frozen prior reference</td><td class="v">rejected up front in <code>workflows/mirage.nf</code></td></tr>
+      </tbody>
+    </table></div>
+    <div class="callout" style="margin-top:12px"><b>Which to pick.</b> Default to <b>VALIS</b> when accuracy across a
+      whole series matters and a 300&nbsp;GB, multi-hour task is affordable — the joint graph and the learned
+      cross-modal matcher are its real advantages. Pick <b>STARE</b> when the cluster cannot give one task that much
+      memory, when there is no JVM, when turnaround matters more than the last fraction of a pixel (tiles run
+      concurrently), or when you want an <i>explicit, inspectable</i> transform: a JSON manifest and a per-tile TRE
+      heatmap beat an opaque pickle for debugging a bad alignment.</div>
+  </section>
+
+  <!-- f — QC & ERROR -->
+  <section class="panel">
+    <span class="plabel">f</span>
+    <div class="panel-head"><h2>Registration QC — one ladder, both backends</h2>
+      <p><code>reg_qc</code> (default <b>2</b>) sets how hard the alignment is checked.
+        <code>ParamUtils.regQcLevel</code> is the single definition; the legacy
+        <code>skip_registration_qc=true</code> forces level&nbsp;0. QC consumes whichever transform the backend
+        produced — only the <i>warper</i> is method-specific, and both live behind one process.</p></div>
+    <div class="ladder">
+      <div class="lv"><div class="h"><span>none</span><span class="n">0</span></div>
+        <div class="x">No QC images and no metrics. Registration still emits its own <code>intrinsic_tre</code>.</div>
+        <div class="proc">— no processes —</div></div>
+      <div class="lv"><div class="h"><span>DAPI overlay</span><span class="n">1</span></div>
+        <div class="x">Per moving slide, a nuclear-channel overlay of registered vs reference — full-res TIFF plus a
+          <code>qc_scale_factor</code>-downsampled PNG for eyeballing. Qualitative, but it is what catches a
+          catastrophically wrong <code>M0</code> at a glance.</div>
+        <div class="proc">GENERATE_REGISTRATION_QC</div></div>
+      <div class="lv"><div class="h"><span>+ cell-overlap</span><span class="n">2 · default</span></div>
+        <div class="x">Segment each slide's DAPI on its <b>native</b> image, then warp those cell polygons through
+          every registration stage and score how well they land — per stage, per cell.</div>
+        <div class="proc">SEG_QC_GEOJSON → WARP_SEG_QC</div></div>
+    </div>
+
+    <div class="grid2" style="margin-top:14px">
+      <div>
+        <div class="step" style="margin-top:0">
+          <div class="sh"><span class="k">level 2</span><span class="ttl">How the cell-overlap score works</span></div>
+          <div class="sb">
+            <ul class="tight">
+              <li><b>Segment the natives.</b> Cells are segmented on each slide's own pre-registration image, so the
+                polygons are ground truth for that slide and are not themselves a registration product.</li>
+              <li><b>Warp points, not pixels.</b> The polygon vertices are pushed through the registrar once per stage
+                — VALIS's <code>fwd_dxdy</code>, or STARE's <code>MeshField.warp_points</code>. The scorer
+                (<code>bin/warp_seg_qc.py</code>) is method-agnostic and takes <code>--method</code>.</li>
+              <li><b>Pair cells once, at the rigid stage, then hold it fixed.</b> After rigid, nearest-neighbour
+                pairing is reliable; and because the rigid transform is the one every later stage builds on, the
+                pairing stays valid for all of them. Re-deriving it per stage would let a score move because
+                <i>different cells got paired</i> — not a registration effect.</li>
+              <li><b>Two metrics per stage:</b> per-pair <b>IoU</b> and <b>centroid residual</b>. Residual in pixels is
+                the one that reads directly — "1.4 µm after non-rigid" is a sentence a pathologist can act on, and it
+                degrades gracefully where a thresholded IoU falls off a cliff.</li>
+              <li><b>Deltas are reported against the rigid anchor</b>, so
+                <code>delta_vs_anchor.micro.displacement_px_p50</code> literally reads as "what the non-rigid and micro
+                stages bought over rigid alone" — and, with the wrong sign, as a warning that a stage made things
+                <i>worse</i>.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="tbl-scroll"><table class="ss">
+          <caption style="font-family:var(--mono);font-size:.63rem;text-transform:uppercase;letter-spacing:.07em;color:var(--ink-3);text-align:left;padding:0 0 7px;">stage vocabulary — lib/WarpBackends.groovy</caption>
+          <thead><tr><th>stage</th><th>VALIS</th><th>STARE</th></tr></thead>
+          <tbody>
+            <tr><td><code>native</code></td><td colspan="2">no transform — the raw misalignment</td></tr>
+            <tr><td><code>rigid</code></td><td>M, incl. micro-rigid — <b>the anchor</b></td><td>M0 only — <b>the anchor</b></td></tr>
+            <tr><td><code>non_rigid</code></td><td>+ wave-1 field <i>(needs the checkpoint)</i></td><td>—</td></tr>
+            <tr><td><code>micro</code></td><td>+ micro residual — what ships</td><td>—</td></tr>
+            <tr><td><code>refined</code></td><td>—</td><td>M0 + mesh — what ships</td></tr>
+          </tbody></table></div>
+        <div class="callout" style="margin-top:11px"><b>VALIS's stage list is conditional</b>, and conflating the three
+          cases is how a QC report lies. <i>Checkpoint present and micro ran</i> → all four stages are distinct.
+          <i>Checkpoint present, micro skipped</i> → the field <i>is</i> the wave-1 field, so <code>micro</code> would
+          duplicate <code>non_rigid</code> and is not emitted. <i>No checkpoint</i> → the micro residual is already
+          composed in and unrecoverable, so <code>non_rigid</code> is not emitted. Each case ships an explicit
+          <code>note</code>.</div>
+        <div class="callout" style="margin-top:11px"><b>One process, two backends.</b>
+          <code>WARP_SEG_QC_TILED</code> was merged into <code>WARP_SEG_QC</code>; container, stage list, version tools
+          and extra flags now come from <code>lib/WarpBackends.groovy</code>, keyed on the <code>method</code>
+          <i>argument</i> — not on <code>params.registration_method</code>. That is deliberate: resolving VALIS-only
+          flags such as <code>--jvm-heap-gb 8</code> from the backend table makes it structurally impossible for them
+          to leak onto the JVM-free path.</div>
+      </div>
+    </div>
+
+    <div class="callout" style="margin-top:12px"><b>Why segment on the native slide?</b> Warping cell polygons through
+      the transform and measuring how well they land on the reference's cells converts registration error into the
+      unit biologists actually care about — cell overlap — instead of an abstract pixel shift. It is also the only
+      check that is sensitive to <i>where</i> the error is: a slide can have an excellent mean TRE and a folded corner
+      that ruins every cell in it.</div>
+  </section>
+
+  <!-- g — PARAMETERS -->
+  <section class="panel">
+    <span class="plabel">g</span>
+    <div class="panel-head"><h2>Registration parameters</h2>
+      <p>Defaults verbatim from the <code>params{}</code> block of <code>nextflow.config</code> — the only place a
+        default is declared. Types, enums and ranges are additionally enforced by
+        <code>nextflow_schema.json</code> before any process starts.</p></div>
+    <div class="pgrid">
+      <div class="pcol">
+        <h4>Dispatch &amp; shared</h4>
+        <table class="pr">
+          <tr><td class="k">registration_method</td><td class="val">valis</td><td class="d">valis | tiled (STARE)</td></tr>
+          <tr><td class="k">nuclear_markers</td><td class="val">[DAPI, CELLTOX]</td><td class="d">ordered preference → channel 0</td></tr>
+          <tr><td class="k">allow_auto_reference</td><td class="val">false</td><td class="d">error if no is_reference</td></tr>
+          <tr><td class="k">reg_qc</td><td class="val">2</td><td class="d">0 none · 1 overlay · 2 +cell overlap</td></tr>
+          <tr><td class="k">skip_registration_qc</td><td class="val">false</td><td class="d">legacy; true forces reg_qc=0</td></tr>
+          <tr><td class="k">qc_scale_factor</td><td class="val">0.25</td><td class="d">QC PNG downsample</td></tr>
+        </table>
+        <h4>VALIS backend</h4>
+        <table class="pr">
+          <tr><td class="k">memory_mode</td><td class="val">high</td><td class="d">high | medium | low preset</td></tr>
+          <tr><td class="k">reg_max_image_dim</td><td class="val">4000</td><td class="d">max_image_dim_px — cached image cap</td></tr>
+          <tr><td class="k">reg_micro_reg</td><td class="val">2</td><td class="d">0 none · 1 micro-rigid · 2 +micro non-rigid</td></tr>
+          <tr><td class="k">reg_micro_reg_fraction</td><td class="val">0.125</td><td class="d">micro non-rigid crop fraction</td></tr>
+          <tr><td class="k">reg_jvm_heap_gb</td><td class="val nul">null</td><td class="d">null → 32 + 16·attempt, capped at task.memory − 4</td></tr>
+        </table>
+      </div>
+      <div class="pcol">
+        <h4>STARE tiled backend</h4>
+        <table class="pr">
+          <tr><td class="k">reg_tiled_dapi_index</td><td class="val">0</td><td class="d">channel the transform is estimated on</td></tr>
+          <tr><td class="k">reg_tiled_coarse_max_dim</td><td class="val">4096</td><td class="d">M₀ thumbnail longest side; 0 = no decimation</td></tr>
+          <tr><td class="k">reg_tiled_tile</td><td class="val">2048</td><td class="d">tile core = mesh grid resolution (px)</td></tr>
+          <tr><td class="k">reg_tiled_halo</td><td class="val">256</td><td class="d">read halo = step-2 capture radius (px)</td></tr>
+          <tr><td class="k">reg_tiled_upsample</td><td class="val">10</td><td class="d">phase-correlation sub-pixel factor</td></tr>
+          <tr><td class="k">reg_tiled_gate_tre</td><td class="val">1.0</td><td class="d">a tile refines only above this TRE (px)</td></tr>
+          <tr><td class="k">reg_tiled_out_tile</td><td class="val">1024</td><td class="d">streaming stitch write-tile (px)</td></tr>
+        </table>
+        <h4>Tuning notes</h4>
+        <table class="pr">
+          <tr><td class="k">coarse slow?</td><td class="d" colspan="2"><b>Lower</b> <code>coarse_max_dim</code> — ORB cost is ~quadratic in pixel count.</td></tr>
+          <tr><td class="k">residual ≥ halo?</td><td class="d" colspan="2"><b>Raise</b> <code>halo</code> (costs memory per tile) <i>or</i> <b>raise</b> <code>coarse_max_dim</code> (costs COARSE time).</td></tr>
+          <tr><td class="k">mesh too coarse?</td><td class="d" colspan="2"><b>Lower</b> <code>tile</code> — more control points, more tasks, same memory each.</td></tr>
+          <tr><td class="k">mesh is null?</td><td class="d" colspan="2">Every tile scored under <code>gate_tre</code>: the slide genuinely needed no deformation. Lower the gate only if you trust sub-pixel measurements on your tissue.</td></tr>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <p class="caption">
+    <b>Supplementary Figure S2. Slide registration.</b>
+    <b>(a)</b> The registration subworkflow performs all method-independent work — streaming group-by-patient,
+    reference resolution, single-slide passthrough — then dispatches on <code>registration_method</code> to one of two
+    adapters emitting an identical seven-name channel contract, any slot a backend cannot fill being a
+    <code>Channel.empty()</code> null object; all downstream QC and checkpointing are therefore method-blind.
+    <b>(b)</b> Both backends solve the same two problems in the same order: a <i>global</i> pose fit with few degrees of
+    freedom and unbounded search range, then a <i>local</i> displacement field with many degrees of freedom and a
+    bounded capture radius. The engineering constraint common to both is that step 1's residual must land inside step
+    2's capture radius. <b>(c)</b> The default <b>VALIS</b> backend registers all of a patient's slides together as one
+    graph using learned features (SuperPoint + SuperGlue) for step 1, and a dense optical-flow field plus up to two
+    micro passes for step 2; it runs on a Bio-Formats JVM whose heap climbs with the retry ramp, and emits a replayable
+    registrar pickle. Because the micro pass composes destructively, a pre-micro checkpoint is the only way to score
+    the <code>non_rigid</code> stage separately. <b>(d)</b> The <b>STARE tiled</b> backend registers each moving slide
+    independently to the reference with an ORB + RANSAC euclidean fit on a shared thumbnail (step 1), then one
+    phase-correlation per tile assembled into a TRE-gated bilinear mesh (step 2), all in pure NumPy/scikit-image across
+    four Nextflow processes whose peak memory is a function of parameters rather than slide size. <b>(e)</b> The two
+    backends trade accuracy and cross-slide consistency against memory footprint, parallelism and transform
+    inspectability. <b>(f)</b> A shared three-level QC ladder checks alignment; at level 2 native-slide cell polygons
+    are warped through each stage and scored against a correspondence fixed at the rigid anchor, with the two backends'
+    warpers behind one process. <b>(g)</b> Registration defaults.
+    <span class="footnote">All algorithm details and parameter defaults are read verbatim from the pipeline source at
+    the commit stamped at the top of this figure (<code>subworkflows/local/registration.nf</code>,
+    <code>subworkflows/local/register_patient.nf</code>, <code>subworkflows/local/adapters/*.nf</code>,
+    <code>modules/local/register.nf</code>, <code>modules/local/tiled_*.nf</code>, <code>bin/register.py</code>,
+    <code>bin/tiled_{coarse,reg_tile,solve,stitch}.py</code>,
+    <code>bin/utils/{valis_config,coarse_align,tile_grid,tile_residual,tiled_manifest,mesh_field,tiled_warp,tre_report}.py</code>,
+    <code>bin/warp_seg_qc.py</code>, <code>lib/WarpBackends.groovy</code>, <code>conf/modules.config</code>,
+    <code>nextflow.config</code>).</span>
+  </p>
+</div>

@@ -6,9 +6,9 @@ hide:
 
 <div class="mirage-hero" markdown>
 
-# MIRAGE
+<div class="kick">Multiplex Imaging Registration, Analysis &amp; GeoJSON Export</div>
 
-**Multiplex Imaging Registration, Analysis, & GeoJSON Export**
+# MIRAGE
 
 A Nextflow DSL2 pipeline that takes raw whole-slide microscopy from many panels
 and turns it into aligned images, segmented cells, single-cell marker tables, and
@@ -17,6 +17,7 @@ QuPath-ready GeoJSON — reproducibly, on your laptop or an HPC cluster.
 <div class="mirage-badges" markdown>
 [:material-rocket-launch: Install](installation.md){ .md-button .md-button--primary }
 [:material-walk: How to use](usage.md){ .md-button }
+[:material-sitemap: The pipeline](pipeline.md){ .md-button }
 [:fontawesome-brands-github: Source](https://github.com/sceriff0/mirage){ .md-button }
 </div>
 
@@ -118,9 +119,36 @@ tours every file it produces.
 
     ---
 
-    Every flag, grouped by stage, with defaults and guidance.
+    All 84 parameters, grouped by stage, with defaults and guidance.
 
     [:octicons-arrow-right-24: Parameters](parameters.md)
+
+-   :material-sitemap:{ .lg .middle } **The pipeline**
+
+    ---
+
+    Every process in execution order, its defaults, and the two registration
+    backends — the site rendering of Supplementary Figure S1.
+
+    [:octicons-arrow-right-24: Pipeline](pipeline.md)
+
+-   :material-file-tree:{ .lg .middle } **Inputs & outputs**
+
+    ---
+
+    The samplesheet contract per entry point, the checkpoint CSVs, the full
+    published tree, and the measurement-key grammar.
+
+    [:octicons-arrow-right-24: Inputs & outputs](outputs.md)
+
+-   :material-server:{ .lg .middle } **Resources**
+
+    ---
+
+    What each process asks the scheduler for, how it grows on a retry, what
+    clamps it, and which container it runs in.
+
+    [:octicons-arrow-right-24: Resources](resources.md)
 
 </div>
 

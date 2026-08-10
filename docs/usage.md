@@ -26,7 +26,8 @@ flowchart LR
     style E fill:#fff3e0,stroke:#f57c00
 ```
 
-- **Preprocessing** — Bio-Formats conversion (DAPI → channel 0) + BaSiC illumination correction.
+- **Preprocessing** — Bio-Formats conversion (nuclear marker → channel 0) + BaSiC illumination
+  correction. The correction is optional (`--skip_preprocessing`); the conversion is not.
 - **Registration** — VALIS whole-slide alignment of every panel onto the reference panel.
 - **Segmentation** — cell/nucleus segmentation on the reference panel + morphology/contour extraction.
 - **Postprocessing** — per-cell quantification + QuPath GeoJSON export + pyramidal OME-TIFF.
@@ -382,8 +383,8 @@ per-patient exception: it is published at the patient root by `EXPORT_SPATIALDAT
 ```text
 results/                          # = --outdir
 ├── <patient_id>/
-│   ├── converted/                # standardized OME-TIFF (DAPI → ch0)
-│   ├── preprocessed/             # *_corrected.ome.tif (BaSiC)
+│   ├── converted/                # standardized OME-TIFF (nuclear marker → ch0)
+│   ├── preprocessed/             # *_corrected.ome.tif (BaSiC; absent if --skip_preprocessing)
 │   ├── registered/               # *_registered.ome.tiff (+ summary/ error CSVs)
 │   ├── segmentation/             # *_nuclei_mask.tif, *_cell_mask.tif
 │   ├── cell_properties/          # morphology.csv, contours.json (+ nuclei/ subdir)
@@ -393,9 +394,10 @@ results/                          # = --outdir
 │   ├── quantification/           # merged_quant.csv
 │   ├── phenotyping/              # phenotypes.csv, constraint_audit.csv,
 │   │                             #   phenotype_qc.json (--pheno_alpha etc.)
-│   ├── geojson/                  # cells.geojson, cells_data.csv
-│   ├── pyramid/                  # *.ome.tiff (multi-resolution)
-│   ├── spatialdata/              # <id>.zarr (only with --export_spatialdata)
+│   ├── geojson/export/           # cells.geojson, cells_wholecell.geojson, cells_data.csv
+│   ├── pyramid/                  # pyramid.ome.tiff (multi-resolution)
+│   ├── spatialdata/              # <patient_id>.zarr (written by default;
+│   │                             #   disable with --skip_spatialdata_export)
 │   └── qc/                       # preprocess / registration / postprocessing QC
 ├── phenotyping/                  # model_config.json, spec_report.html (run-level,
 │                                 #   COMPILE_PANEL — one panel/model shared across patients)
@@ -407,13 +409,16 @@ The tables you'll analyze:
 
 | File | What it is |
 |---|---|
-| `quantification/merged_quant.csv` | One row per cell; all markers (mean intensity) + morphology joined. With `--quantify_compartments`, adds `<MARKER>: Nucleus/Cytoplasm/Cell: Mean`; with `--expanded_quantification`, also Median and Sum. |
-| `geojson/cells.geojson` | One QuPath feature per cell: whole-cell polygon + measurement array (centroid µm, marker intensities, morphology). Carries `nucleusGeometry` in compartment mode. |
-| `geojson/cells_data.csv` | The cell table with per-marker **z-scores** added. |
+| `quantification/merged_quant.csv` | One row per cell; morphology joined in. Per marker: a bare column (whole-cell mean, kept for FlowPath's fast path) plus `<MARKER>: <Compartment>: <Statistic>` keys. **Median is always emitted**; `--expanded_quantification` adds Mean and Sum; `--quantify_compartments` adds the Nucleus and Cytoplasm compartments alongside Cell. |
+| `geojson/export/cells.geojson` | One QuPath feature per cell: whole-cell polygon + measurement array (centroid µm, marker intensities, morphology). Carries `nucleusGeometry` in compartment mode. |
+| `geojson/export/cells_wholecell.geojson` | The same detections without nucleus geometry — lighter and faster to import. Compartment mode only. |
+| `geojson/export/cells_data.csv` | The cell table with per-marker **z-scores** added. |
 | `segmentation/*_cell_mask.tif` | Whole-cell instance labels (uint32); each non-zero value is one cell. |
 
 These open directly in QuPath, napari, and OMERO, and feed
-[FlowPath](https://flowpath.readthedocs.io/) for interactive gating.
+[FlowPath](https://flowpath.readthedocs.io/) for interactive gating. The exact
+key grammar is a cross-repository contract — see
+[Inputs & outputs → The measurement-key contract](outputs.md#the-measurement-key-contract).
 
 ## Troubleshooting & FAQ
 
