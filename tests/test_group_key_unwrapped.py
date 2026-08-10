@@ -68,6 +68,34 @@ IMMEDIATELY after it must be a `.map {}` -- a `groupTuple()` whose result flows
 anywhere else (into a variable used by a process call, into an `emit:`, into any
 other operator) fails, because that is precisely how the wrapper escapes.
 
+WHY THE SCAN IS TOKENIZED AND NOT REGEXED
+-----------------------------------------
+Masking comments alone is not enough either. Review showed that an unmatched
+brace inside a STRING LITERAL, sitting inside the consuming closure itself,
+truncated the extracted closure body at the stray brace -- before the leaking
+read -- so the guard PASSED on genuinely buggy code::
+
+    .groupTuple()
+    .map { g, m, f ->
+        def label = "unmatched } here in a string"
+        def bad = g          // real leak, never reached by the old scan
+        [ "x", m, f ]
+    }
+
+A guard that silently passes on a real leak is the exact defect class this
+branch exists to remove, so `_code_view()` masks comments AND string contents in
+one pass: `'...'`, `"..."`, `'''...'''`, triple-double-quoted, and slashy
+`/.../`, honouring backslash escapes. GString interpolation is deliberately NOT
+masked -- `${...}` and `$ident` stay verbatim, so their braces still balance and
+a read hidden inside an interpolation is still counted (a GString is not an
+unwrap: `GString.equals(String)` is false too).
+
+And because a tokenizer can always be wrong about something -- Groovy's `/` is
+genuinely ambiguous between division and a slashy string -- `_code_view()` ends
+by asserting that the masked file's delimiters balance. Anything it
+mis-tokenizes therefore RAISES, naming the file and line. There is no path on
+which this check truncates a body and passes.
+
 This check is static because the failure is a ~1-in-2 arrival-order race: a
 behavioural test passes by luck far too often to be worth anything.
 """
@@ -85,32 +113,149 @@ _OPEN = "([{"
 _CLOSE = ")]}"
 
 
-def _blank_comments(src: str) -> str:
-    """Replace comment bodies with spaces, preserving length and line breaks.
+_SLASHY_PRECEDERS = set("([{,;=~!&|?:+-*%<>^")
 
-    Keeping the offsets stable means the positions we find afterwards still map
-    onto the real file, so failure messages quote real line numbers.
+
+def _code_view(path: Path) -> str:
+    """The file with comment and string CONTENT blanked, offsets preserved.
+
+    Blanking in place (spaces, newlines kept) means every position found in the
+    result still maps onto the real file, so failure messages quote real line
+    numbers. GString interpolation -- `${...}` and `$ident.path` -- is kept
+    verbatim: its braces must stay balanced with the code around them, and an
+    identifier read inside an interpolation is a genuine read.
     """
+    src = path.read_text()
     out = list(src)
-    i, n = 0, len(src)
-    while i < n:
-        two = src[i : i + 2]
-        if two == "//":
-            j = src.find("\n", i)
-            j = n if j == -1 else j
-            for k in range(i, j):
+    n = len(src)
+    i = 0
+    state = None  # None -> code; else {"q": terminator, "interp": bool}
+    interp: list = []  # [[outer string state, brace depth], ...]
+
+    def blank(a: int, b: int) -> None:
+        for k in range(a, min(b, n)):
+            if out[k] != "\n":
                 out[k] = " "
-            i = j
-        elif two == "/*":
-            j = src.find("*/", i + 2)
-            j = n if j == -1 else j + 2
-            for k in range(i, j):
-                if out[k] != "\n":
-                    out[k] = " "
-            i = j
-        else:
+
+    def prev_code_char(pos: int):
+        k = pos - 1
+        while k >= 0 and out[k] in " \t\r\n":
+            k -= 1
+        return out[k] if k >= 0 else None
+
+    while i < n:
+        if state is None:
+            c = src[i]
+            if interp:
+                # inside `${ ... }`: track depth so its closing brace is found
+                if c == "{":
+                    interp[-1][1] += 1
+                    i += 1
+                    continue
+                if c == "}":
+                    if interp[-1][1] == 0:
+                        state = interp.pop()[0]
+                        i += 1
+                        continue
+                    interp[-1][1] -= 1
+                    i += 1
+                    continue
+            if src.startswith("//", i):
+                j = src.find("\n", i)
+                blank(i, n if j == -1 else j)
+                i = n if j == -1 else j
+                continue
+            if src.startswith("/*", i):
+                j = src.find("*/", i + 2)
+                assert j != -1, f"{path}: unterminated block comment"
+                blank(i, j + 2)
+                i = j + 2
+                continue
+            if src.startswith("'''", i) or src.startswith('"""', i):
+                state = {"q": src[i : i + 3], "interp": c == '"'}
+                i += 3
+                continue
+            if c in "'\"":
+                state = {"q": c, "interp": c == '"'}
+                i += 1
+                continue
+            if c == "/":
+                # Groovy's one genuine ambiguity: slashy string vs division. The
+                # preceding significant character settles it, and the balance
+                # assertion below catches any case where it does not.
+                prev = prev_code_char(i)
+                if prev is None or prev in _SLASHY_PRECEDERS:
+                    state = {"q": "/", "interp": True}
+                    i += 1
+                    continue
             i += 1
-    return "".join(out)
+            continue
+
+        # --- inside a string literal ---
+        q = state["q"]
+        c = src[i]
+        if c == "\\":
+            blank(i, i + 2)
+            i += 2
+            continue
+        if src.startswith(q, i):
+            blank(i, i + len(q))
+            state = None
+            i += len(q)
+            continue
+        if state["interp"] and src.startswith("${", i):
+            interp.append([state, 0])  # `${` kept verbatim: braces must balance
+            state = None
+            i += 2
+            continue
+        if (
+            state["interp"]
+            and c == "$"
+            and i + 1 < n
+            and (src[i + 1].isalpha() or src[i + 1] == "_")
+        ):
+            j = i + 1
+            while j < n and (src[j].isalnum() or src[j] in "_."):
+                j += 1
+            i = j  # `$ident.path` kept verbatim: it is a real read
+            continue
+        blank(i, i + 1)
+        i += 1
+
+    assert state is None and not interp, (
+        f"{path}: unterminated string literal -- refusing to audit this file "
+        "rather than scan a truncated view of it."
+    )
+    code = "".join(out)
+    _assert_balanced(path, code)
+    return code
+
+
+def _assert_balanced(path: Path, code: str) -> None:
+    """The masked file's delimiters must balance, or the mask is wrong.
+
+    This is the loudness net under `_code_view`. If any string form was
+    mis-tokenized, the delimiters it wrongly hid or exposed will almost certainly
+    unbalance here, and the guard RAISES instead of quietly auditing a truncated
+    closure body -- which is exactly how the previous revision could pass on a
+    real leak.
+    """
+    pairs = {")": "(", "]": "[", "}": "{"}
+    stack: list = []
+    for i, c in enumerate(code):
+        if c in "([{":
+            stack.append((c, i))
+        elif c in ")]}":
+            assert stack and stack[-1][0] == pairs[c], (
+                f"{path}:{_line_of(code, i)}: delimiters do not balance after "
+                "comment/string masking, so the scan cannot be trusted. Refusing "
+                "to audit rather than risk a truncated closure body."
+            )
+            stack.pop()
+    assert not stack, (
+        f"{path}:{_line_of(code, stack[0][1])}: unclosed {stack[0][0]!r} after "
+        "comment/string masking, so the scan cannot be trusted."
+    )
 
 
 def _line_of(src: str, pos: int) -> int:
@@ -118,15 +263,22 @@ def _line_of(src: str, pos: int) -> int:
 
 
 def _match_delim(src: str, i: int) -> int:
-    """Index of the delimiter closing the `(`/`[`/`{` at ``i``."""
+    """Index of the delimiter closing the `(`/`[`/`{` at ``i``.
+
+    Type-aware: a mismatched pair raises rather than silently pairing a brace
+    with a bracket. Callers only ever pass positions taken from `_code_view()`,
+    whose balance assertion has already run over the whole file.
+    """
     assert src[i] in _OPEN, f"expected an opening delimiter at {i}, got {src[i]!r}"
-    depth = 0
+    pairs = {")": "(", "]": "[", "}": "{"}
+    stack: list = []
     for j in range(i, len(src)):
         if src[j] in _OPEN:
-            depth += 1
+            stack.append(src[j])
         elif src[j] in _CLOSE:
-            depth -= 1
-            if depth == 0:
+            assert stack and stack[-1] == pairs[src[j]], "mismatched delimiters"
+            stack.pop()
+            if not stack:
                 return j
     raise AssertionError("unbalanced delimiters")
 
@@ -209,7 +361,7 @@ def _group_key_sites() -> list[dict]:
     sites: list[dict] = []
     for d in SCAN_DIRS:
         for path in sorted((REPO_ROOT / d).rglob("*.nf")):
-            src = _blank_comments(path.read_text())
+            src = _code_view(path)
             for m in re.finditer(r"\bgroupKey\s*\(", src):
                 rel = path.relative_to(REPO_ROOT)
                 site = {
@@ -285,10 +437,13 @@ def _group_key_sites() -> list[dict]:
 # Every accepted way of turning the GroupKey back into a plain String. A GString
 # (`"${k}"`) is deliberately NOT here: GString.equals(String) is false too, so
 # interpolation swaps one asymmetric key for another.
+# `.toString()`, `?.toString()` (safe navigation) and `k .toString()` (spaced).
+_CALL_TOSTRING = r"\s*\??\s*\.\s*toString\(\)"
 _UNWRAP_TAIL = re.compile(
-    r"\.toString\(\)"  # k.toString()
-    r"|\s*\[\s*0\s*\]\s*\.toString\(\)"  # k[0].toString()  (single-param closure)
-    r"|\s+as\s+String\b"  # k as String
+    _CALL_TOSTRING  # k.toString()
+    + r"|\s*\[\s*0\s*\]"
+    + _CALL_TOSTRING  # k[0].toString()  (single-parameter closure)
+    + r"|\s+as\s+String\b"  # k as String
 )
 
 
