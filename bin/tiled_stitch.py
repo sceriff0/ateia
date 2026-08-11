@@ -107,7 +107,11 @@ def main(argv=None) -> int:
     src, dtype, close = open_lazy(a.moving)  # lazy (C, H, W) — nothing loaded yet
     try:
         c_n = src.shape[0]
-        with tifffile.TiffWriter(str(a.out)) as tw:
+        # bigtiff is mandatory, not an optimisation: a registered slide is written
+        # uncompressed at full resolution, so classic TIFF's 32-bit offsets overflow
+        # (struct.error: 'I' format requires 0 <= number <= 4294967295) the moment the
+        # output crosses 4 GB -- C x H x W x itemsize, reached by any real WSI.
+        with tifffile.TiffWriter(str(a.out), bigtiff=True) as tw:
             tw.write(
                 stream_tiles(src, m0, mesh, margin, out_h, out_w, a.out_tile, dtype),
                 shape=(c_n, out_h, out_w),
