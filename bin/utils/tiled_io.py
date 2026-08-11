@@ -1,6 +1,6 @@
 """Small OME-TIFF I/O helpers shared by the tiled ('STARE') fan-out CLIs.
 
-Keeps channel handling (promote 2-D to ``(C, H, W)``, pick the DAPI channel, clamp to non-negative
+Keeps channel handling (promote 2-D to ``(C, H, W)``, pick the nuclear/fiducial channel, clamp to non-negative
 and restore the source dtype on write) in one place so tiled_coarse / tiled_reg_tile / tiled_stitch
 stay thin wrappers over the tested cores.
 """
@@ -22,10 +22,10 @@ def load_channels(path):
     return arr
 
 
-def dapi_channel(arr_chw, index):
+def nuclear_channel(arr_chw, index):
     """Return the ``index`` channel of a ``(C, H, W)`` array as float32."""
     if not 0 <= index < arr_chw.shape[0]:
-        raise ValueError(f"--dapi-index {index} out of range for C={arr_chw.shape[0]}")
+        raise ValueError(f"--nuclear-index {index} out of range for C={arr_chw.shape[0]}")
     return arr_chw[index].astype(np.float32)
 
 
@@ -109,7 +109,7 @@ def read_decimated(src, index, factor, band_bytes=DEFAULT_BAND_BYTES):
 
     c_n, h, w = src.shape
     if not 0 <= index < c_n:
-        raise ValueError(f"--dapi-index {index} out of range for C={c_n}")
+        raise ValueError(f"--nuclear-index {index} out of range for C={c_n}")
     factor = max(1, int(factor))
     band = band_rows_for(w, factor, band_bytes)
     rows = [

@@ -20,7 +20,21 @@ process TILED_COARSE {
 
     script:
     def prefix     = "${meta.patient_id}_${meta.channels.join('_')}"
-    def dapi_index = params.reg_tiled_dapi_index
+    // Resolve the nuclear/fiducial channel the transform is estimated from, the same
+    // way SEGMENT's CellSAM backend does (lib/SegBackends.groovy): from THIS slide's
+    // channel metadata against params.nuclear_markers. params.reg_tiled_nuclear_index
+    // is an explicit override, not the source of truth -- the old fixed param restated
+    // an invariant CONVERT_IMAGE already guarantees, and named it after one marker, so
+    // a CELLTOX panel was read through something called "the DAPI index".
+    def nuclear_index = params.reg_tiled_nuclear_index != null
+        ? params.reg_tiled_nuclear_index
+        : MarkerUtils.nuclearIndex(meta.channels ?: [], params.nuclear_markers)
+    if (nuclear_index < 0)
+        throw new IllegalArgumentException(
+            "${task.process}: no nuclear/fiducial channel among ${meta.channels} for " +
+            "patient ${meta.patient_id}. Configured nuclear_markers: " +
+            "${MarkerUtils.markerList(params.nuclear_markers).join(', ')}. " +
+            "Set params.reg_tiled_nuclear_index to override.")
     def tile       = params.reg_tiled_tile
     def halo       = params.reg_tiled_halo
     def max_dim    = params.reg_tiled_coarse_max_dim
@@ -28,7 +42,7 @@ process TILED_COARSE {
     tiled_coarse.py \\
         --reference ${reference} \\
         --moving ${moving} \\
-        --dapi-index ${dapi_index} \\
+        --nuclear-index ${nuclear_index} \\
         --tile ${tile} \\
         --halo ${halo} \\
         --max-dim ${max_dim} \\

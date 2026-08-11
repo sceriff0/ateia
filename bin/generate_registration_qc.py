@@ -2,7 +2,7 @@
 """Generate registration quality control images.
 
 This script creates RGB composite images for visual assessment of registration
-quality by overlaying reference and registered DAPI channels.
+quality by overlaying reference and registered nuclear/fiducial channels.
 
 Examples
 --------
@@ -81,6 +81,7 @@ def parse_args() -> argparse.Namespace:
         - registered: List of paths to registered images
         - output: Path to output directory
         - scale_factor: Downsampling factor
+        - nuclear_markers: Ordered nuclear/fiducial marker preference list
         - no_fullres: Skip full-resolution output
         - no_png: Skip PNG output
         - no_tiff: Skip downsampled TIFF output
@@ -150,6 +151,18 @@ Output:
     )
 
     parser.add_argument(
+        "--nuclear-markers",
+        nargs="+",
+        default=None,
+        help=(
+            "Ordered preference list of nuclear/fiducial marker names "
+            "(params.nuclear_markers). The first marker present in the image's OME "
+            "channel names selects the channel the overlay is built from. Defaults to "
+            "metadata.DEFAULT_NUCLEAR_MARKERS when omitted."
+        ),
+    )
+
+    parser.add_argument(
         "--verbose", action="store_true", help="Enable verbose (DEBUG) logging"
     )
 
@@ -165,6 +178,7 @@ def process_single_image(
     save_png: bool,
     save_tiff: bool,
     logger,
+    nuclear_markers=None,
 ) -> Tuple[bool, str]:
     """Process a single registered image to generate QC outputs.
 
@@ -186,6 +200,8 @@ def process_single_image(
         Whether to save downsampled TIFF output.
     logger : logging.Logger
         Logger instance.
+    nuclear_markers : sequence of str, optional
+        Ordered nuclear/fiducial marker preference list.
 
     Returns
     -------
@@ -208,6 +224,7 @@ def process_single_image(
             save_fullres=save_fullres,
             save_png=save_png,
             save_tiff=save_tiff,
+            nuclear_markers=nuclear_markers,
         )
 
         return True, "Success"
@@ -265,6 +282,7 @@ def main() -> int:
     logger.info(f"Reference image: {args.reference}")
     logger.info(f"Output directory: {args.output}")
     logger.info(f"Scale factor: {args.scale_factor}")
+    logger.info(f"Nuclear markers: {args.nuclear_markers or 'default'}")
     logger.info(f"Save full-res: {not args.no_fullres}")
     logger.info(f"Save PNG: {not args.no_png}")
     logger.info(f"Save TIFF: {not args.no_tiff}")
@@ -299,6 +317,7 @@ def main() -> int:
             save_png=not args.no_png,
             save_tiff=not args.no_tiff,
             logger=logger,
+            nuclear_markers=args.nuclear_markers,
         )
 
         if success:

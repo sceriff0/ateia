@@ -261,6 +261,19 @@ ARGPARSE_DEFAULT_ALLOWLIST = {
             "is the more useful behavior than silently assuming 0.325."
         ),
     },
+    "generate_registration_qc.py:--nuclear-markers": {
+        "reason": (
+            "Same contract as merge_quant_csvs.py's and split_multichannel.py's "
+            "--nuclear-markers: default=None is intentional per the script's own help "
+            "text, 'Defaults to metadata.DEFAULT_NUCLEAR_MARKERS when omitted.' "
+            "Confirmed true -- modules/local/generate_registration_qc.nf builds "
+            "`--nuclear-markers ${MarkerUtils.markerList(params.nuclear_markers)"
+            ".join(' ')}` unconditionally, so the pipeline never reaches the default. "
+            "Mirroring ['DAPI','CELLTOX'] here would be a SECOND declaration of that "
+            "default in Python; utils/metadata.py's DEFAULT_NUCLEAR_MARKERS is the one "
+            "permitted mirror, and passing None is how this script defers to it."
+        ),
+    },
     "merge_quant_csvs.py:--nuclear-markers": {
         "reason": (
             "Same contract as preprocess.py's and split_multichannel.py's "

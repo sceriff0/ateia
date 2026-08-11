@@ -1,6 +1,6 @@
 """Memory-shape + correctness tests for the thumbnail coarse anchor in tiled_coarse.py.
 
-TILED_COARSE was the last caller of the eager ``dapi_channel(load_channels(path))`` whole-slide
+TILED_COARSE was the last caller of the eager ``nuclear_channel(load_channels(path))`` whole-slide
 decode that test_tiled_reg_tile_lazy.py already retired from the per-tile step. On top of the
 full decode it ran ORB at *native* resolution, and ``_orb_features`` promotes its input to
 float64 -- measured at ~40 bytes per source pixel once the Gaussian pyramid and the FAST/Harris
@@ -73,9 +73,9 @@ def _write_pair(tmp_path, n=1024, shift=(16, -12), ref_n=None):
 
     # moving = reference content translated by `shift`; np.roll keeps it exact (no interpolation)
     tx, ty = shift
-    mov_dapi = np.roll(_textured(0, n, n), (ty, tx), axis=(0, 1))
+    mov_nuc = np.roll(_textured(0, n, n), (ty, tx), axis=(0, 1))
     mov_marker = np.roll(_textured(1, n, n), (ty, tx), axis=(0, 1))
-    mov = (np.stack([mov_marker, mov_dapi]) * 60000).astype(np.uint16)
+    mov = (np.stack([mov_marker, mov_nuc]) * 60000).astype(np.uint16)
 
     ref_f = tmp_path / "ref.ome.tiff"
     mov_f = tmp_path / "mov.ome.tiff"
@@ -84,14 +84,14 @@ def _write_pair(tmp_path, n=1024, shift=(16, -12), ref_n=None):
     return ref_f, mov_f
 
 
-def _run(tmp_path, ref_f, mov_f, max_dim, dapi_index=1, tile=256, halo=32):
+def _run(tmp_path, ref_f, mov_f, max_dim, nuclear_index=1, tile=256, halo=32):
     m0_f = tmp_path / "m0.json"
     tiles_f = tmp_path / "tiles.csv"
     tiled_coarse.main(
         [
             "--reference", str(ref_f),
             "--moving", str(mov_f),
-            "--dapi-index", str(dapi_index),
+            "--nuclear-index", str(nuclear_index),
             "--tile", str(tile),
             "--halo", str(halo),
             "--max-dim", str(max_dim),

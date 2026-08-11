@@ -2,7 +2,7 @@
 
 tiled_reg_tile is the per-tile fan-out step: it runs once per tile (N tasks), unlike
 tiled_stitch which runs once per slide. The old implementation called
-``dapi_channel(load_channels(path))`` on both the reference and moving slide on every
+``nuclear_channel(load_channels(path))`` on both the reference and moving slide on every
 invocation — a full whole-slide decode, N times over. This mirrors what
 test_tiled_stitch_streaming.py already pins for the stitch step: the lazy zarr-region-read
 path must produce numerically identical output to the old full-decode path, while actually
@@ -10,7 +10,7 @@ bounding the region read.
 
 Three properties are pinned here:
   1. Numerical equivalence: the lazy path's (dx, dy, tre) match an independently computed
-     "old style" oracle (full dapi_channel/load_channels + whole-image warp_image) exactly.
+     "old style" oracle (full nuclear_channel/load_channels + whole-image warp_image) exactly.
   2. Bounded read: for an interior tile that is 1/16 of the frame, the region actually read
      off the moving slide is a small fraction (< 25%) of the full slide — this is the test
      that fails against the pre-change code (it reads the whole slide, i.e. 100%).
@@ -43,7 +43,7 @@ tifffile = pytest.importorskip("tifffile")
 
 import tiled_reg_tile  # noqa: E402
 from tile_residual import residual_displacement  # noqa: E402
-from tiled_io import dapi_channel, load_channels  # noqa: E402
+from tiled_io import load_channels, nuclear_channel  # noqa: E402
 from tiled_warp import warp_image  # noqa: E402
 
 
@@ -89,24 +89,24 @@ def _write_pair(tmp_path, n=512, translation=(3.0, -2.0), rotation_deg=1.0):
     return ref_f, mov_f, m0_f, m0, ref, mov
 
 
-def _old_style_oracle(ref_f, mov_f, m0, dapi_index, rx0, ry0, rx1, ry1, upsample=10):
+def _old_style_oracle(ref_f, mov_f, m0, nuclear_index, rx0, ry0, rx1, ry1, upsample=10):
     """Reproduce the pre-change tiled_reg_tile.py logic verbatim: full decode, whole-image warp."""
-    ref_dapi = dapi_channel(load_channels(ref_f), dapi_index)
-    mov_dapi = dapi_channel(load_channels(mov_f), dapi_index)
-    ref_tile = ref_dapi[ry0:ry1, rx0:rx1]
+    ref_nuc = nuclear_channel(load_channels(ref_f), nuclear_index)
+    mov_nuc = nuclear_channel(load_channels(mov_f), nuclear_index)
+    ref_tile = ref_nuc[ry0:ry1, rx0:rx1]
     mov_tile = warp_image(
-        mov_dapi, m0, None, (ry1 - ry0, rx1 - rx0), out_origin=(rx0, ry0)
+        mov_nuc, m0, None, (ry1 - ry0, rx1 - rx0), out_origin=(rx0, ry0)
     )
     return residual_displacement(ref_tile, mov_tile, upsample=upsample)
 
 
 def test_lazy_path_matches_old_full_decode_oracle(tmp_path):
     ref_f, mov_f, m0_f, m0, _ref, _mov = _write_pair(tmp_path)
-    dapi_index = 1
+    nuclear_index = 1
     rx0, ry0, rx1, ry1 = 192, 192, 320, 320  # interior tile, well clear of any edge
 
     dx_old, dy_old, tre_old = _old_style_oracle(
-        ref_f, mov_f, m0, dapi_index, rx0, ry0, rx1, ry1
+        ref_f, mov_f, m0, nuclear_index, rx0, ry0, rx1, ry1
     )
 
     out_f = tmp_path / "ctrl.json"
@@ -118,8 +118,8 @@ def test_lazy_path_matches_old_full_decode_oracle(tmp_path):
             str(mov_f),
             "--m0",
             str(m0_f),
-            "--dapi-index",
-            str(dapi_index),
+            "--nuclear-index",
+            str(nuclear_index),
             "--ix",
             "0",
             "--iy",
@@ -155,7 +155,7 @@ def test_lazy_path_matches_old_full_decode_oracle(tmp_path):
 def test_moving_slide_region_read_is_bounded(tmp_path, monkeypatch):
     """The moving-slide read must be a small fraction of the full slide for an interior tile.
 
-    This is the test that fails against the pre-change code: dapi_channel(load_channels(path))
+    This is the test that fails against the pre-change code: nuclear_channel(load_channels(path))
     decodes the *entire* slide on every tile invocation, so the read region would be 100% of
     the full slide, not < 25%.
     """
@@ -203,7 +203,7 @@ def test_moving_slide_region_read_is_bounded(tmp_path, monkeypatch):
             str(mov_f),
             "--m0",
             str(m0_f),
-            "--dapi-index",
+            "--nuclear-index",
             "0",
             "--ix",
             "0",
@@ -267,7 +267,7 @@ def test_edge_tile_outside_moving_slide_yields_zero_tile(tmp_path, monkeypatch):
             str(mov_f),
             "--m0",
             str(m0_f),
-            "--dapi-index",
+            "--nuclear-index",
             "0",
             "--ix",
             "0",
@@ -298,10 +298,10 @@ def test_edge_tile_outside_moving_slide_yields_zero_tile(tmp_path, monkeypatch):
     assert set(result.keys()) == {"ix", "iy", "cx", "cy", "dx", "dy", "tre"}
 
 
-def test_dapi_index_out_of_range_raises_same_message(tmp_path):
+def test_nuclear_index_out_of_range_raises_same_message(tmp_path):
     ref_f, mov_f, m0_f, _m0, _ref, _mov = _write_pair(tmp_path, n=64)
     out_f = tmp_path / "ctrl.json"
-    with pytest.raises(ValueError, match=r"--dapi-index 7 out of range for C=2"):
+    with pytest.raises(ValueError, match=r"--nuclear-index 7 out of range for C=2"):
         tiled_reg_tile.main(
             [
                 "--reference",
@@ -310,7 +310,7 @@ def test_dapi_index_out_of_range_raises_same_message(tmp_path):
                 str(mov_f),
                 "--m0",
                 str(m0_f),
-                "--dapi-index",
+                "--nuclear-index",
                 "7",
                 "--ix",
                 "0",
@@ -335,7 +335,7 @@ def test_dapi_index_out_of_range_raises_same_message(tmp_path):
 
 
 def _reg_tile_args(
-    ref_f, mov_f, m0_f, out_f, dapi_index=0, rx0=0, ry0=0, rx1=32, ry1=32
+    ref_f, mov_f, m0_f, out_f, nuclear_index=0, rx0=0, ry0=0, rx1=32, ry1=32
 ):
     """Small argv builder used only by the two close-callable tests below — the four tests above
     are left as-is (a full `_run(...)` refactor of the whole file is a deferred minor, out of
@@ -347,8 +347,8 @@ def _reg_tile_args(
         str(mov_f),
         "--m0",
         str(m0_f),
-        "--dapi-index",
-        str(dapi_index),
+        "--nuclear-index",
+        str(nuclear_index),
         "--ix",
         "0",
         "--iy",
@@ -417,7 +417,7 @@ def test_reference_handle_closed_when_moving_open_raises(tmp_path, monkeypatch):
 
 
 def test_both_handles_closed_when_exception_raised_inside_try(tmp_path, monkeypatch):
-    """Both opens succeed, then an exception inside the try block (out-of-range --dapi-index)
+    """Both opens succeed, then an exception inside the try block (out-of-range --nuclear-index)
     must still close both handles."""
     ref_f, mov_f, m0_f, _m0, _ref, _mov = _write_pair(tmp_path, n=64)
 
@@ -437,7 +437,7 @@ def test_both_handles_closed_when_exception_raised_inside_try(tmp_path, monkeypa
 
     out_f = tmp_path / "ctrl.json"
     with pytest.raises(ValueError, match="out of range"):
-        tiled_reg_tile.main(_reg_tile_args(ref_f, mov_f, m0_f, out_f, dapi_index=99))
+        tiled_reg_tile.main(_reg_tile_args(ref_f, mov_f, m0_f, out_f, nuclear_index=99))
 
     assert closed["ref"] is True
     assert closed["mov"] is True

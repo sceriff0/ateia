@@ -1,6 +1,6 @@
 # Staged registration QC (`reg_qc = 2`)
 
-At `reg_qc = 2` the pipeline answers a question the DAPI overlay cannot: **which registration
+At `reg_qc = 2` the pipeline answers a question the nuclear-channel overlay cannot: **which registration
 stage actually improved the alignment, and by how much?**
 
 It does that by segmenting each slide's native image, establishing cell-to-cell

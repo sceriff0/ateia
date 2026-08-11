@@ -34,10 +34,10 @@ from tiled_warp import source_region, warp_image  # noqa: E402
 logger = get_logger(__name__)
 
 
-def _check_dapi_index(index, c_n):
-    """Same out-of-range check + message ``tiled_io.dapi_channel`` raised, for a lazy source."""
+def _check_nuclear_index(index, c_n):
+    """Same out-of-range check + message ``tiled_io.nuclear_channel`` raised, for a lazy source."""
     if not 0 <= index < c_n:
-        raise ValueError(f"--dapi-index {index} out of range for C={c_n}")
+        raise ValueError(f"--nuclear-index {index} out of range for C={c_n}")
 
 
 def main(argv=None) -> int:
@@ -46,7 +46,18 @@ def main(argv=None) -> int:
     ap.add_argument("--reference", required=True)
     ap.add_argument("--moving", required=True)
     ap.add_argument("--m0", required=True, help="M0 JSON from tiled_coarse")
-    ap.add_argument("--dapi-index", type=int, default=0)
+    ap.add_argument(
+        "--nuclear-index",
+        "--dapi-index",  # deprecated alias, kept so hand-run commands keep working
+        dest="nuclear_index",
+        type=int,
+        default=0,
+        help=(
+            "Index of the nuclear/fiducial channel the transform is estimated from. "
+            "The pipeline resolves this from channel metadata (MarkerUtils) and passes "
+            "it explicitly; 0 is CONVERT_IMAGE's promoted position."
+        ),
+    )
     ap.add_argument("--ix", type=int, required=True)
     ap.add_argument("--iy", type=int, required=True)
     ap.add_argument("--cx", type=float, required=True)
@@ -69,11 +80,11 @@ def main(argv=None) -> int:
     try:
         mov_src, _mov_dtype, mov_close = open_lazy(a.moving)
         try:
-            _check_dapi_index(a.dapi_index, ref_src.shape[0])
-            _check_dapi_index(a.dapi_index, mov_src.shape[0])
+            _check_nuclear_index(a.nuclear_index, ref_src.shape[0])
+            _check_nuclear_index(a.nuclear_index, mov_src.shape[0])
             out_h, out_w = a.ry1 - a.ry0, a.rx1 - a.rx0
             ref_tile = np.asarray(
-                ref_src[a.dapi_index, slice(a.ry0, a.ry1), slice(a.rx0, a.rx1)],
+                ref_src[a.nuclear_index, slice(a.ry0, a.ry1), slice(a.rx0, a.rx1)],
                 dtype=np.float32,
             )
             _c, mh, mw = mov_src.shape
@@ -82,7 +93,7 @@ def main(argv=None) -> int:
             )
             if sx1 > sx0 and sy1 > sy0:
                 crop = np.asarray(
-                    mov_src[a.dapi_index, slice(sy0, sy1), slice(sx0, sx1)],
+                    mov_src[a.nuclear_index, slice(sy0, sy1), slice(sx0, sx1)],
                     dtype=float,
                 )
                 mov_tile = warp_image(
