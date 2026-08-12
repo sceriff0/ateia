@@ -465,3 +465,27 @@ def test_a_fixed_pairing_tracks_the_same_cells_through_successive_warps():
     assert np.allclose(d1, 0.0, atol=1e-9)
     assert iou0[s0].mean() < iou1[s1].mean()
     assert iou1[s1] == pytest.approx(1.0)
+
+
+# ── pairing dispatcher ─────────────────────────────────────────────────────────
+def test_match_cells_defaults_to_lsa():
+    a = np.array([[0.0, 0.0], [3.0, 0.0]])
+    b = np.array([[1.0, 0.0], [7.0, 0.0]])
+    ia, ib, _, stats = cp.match_cells(a, b, radius=5.0)
+    assert stats["method"] == "lsa_centroid"
+    assert set(zip(ia.tolist(), ib.tolist())) == {(0, 0), (1, 1)}
+    assert stats["n_components"] >= 1
+
+
+def test_match_cells_can_select_mutual_nn():
+    a = np.array([[0.0, 0.0], [3.0, 0.0]])
+    b = np.array([[1.0, 0.0], [7.0, 0.0]])
+    ia, ib, _, stats = cp.match_cells(a, b, radius=5.0, method="mutual_nn")
+    assert stats == {"method": "mutual_nn_centroid"}
+    assert set(zip(ia.tolist(), ib.tolist())) == {(0, 0)}
+
+
+def test_match_cells_rejects_an_unknown_method():
+    a = np.array([[0.0, 0.0]])
+    with pytest.raises(ValueError, match="unknown pairing method"):
+        cp.match_cells(a, a, radius=5.0, method="hungarian")

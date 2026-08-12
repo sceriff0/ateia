@@ -374,6 +374,36 @@ def match_lsa(cent_a, cent_b, radius, max_component_cells=DEFAULT_MAX_COMPONENT_
     return ok_a[ia], ok_b[ib], dist, stats
 
 
+PAIRING_METHODS = ("lsa", "mutual_nn")
+DEFAULT_PAIRING = "lsa"
+
+
+def match_cells(
+    cent_a,
+    cent_b,
+    radius,
+    method=DEFAULT_PAIRING,
+    max_component_cells=DEFAULT_MAX_COMPONENT_CELLS,
+):
+    """Pair cells within ``radius`` using the named backend.
+
+    Returns ``(idx_a, idx_b, dist, stats)``. ``stats`` is merged wholesale into the QC JSON's
+    ``matching`` block by bin/warp_seg_qc.py, which is how a backend reports its own
+    diagnostics without a second plumbing path.
+    """
+    if method == "mutual_nn":
+        idx_a, idx_b, dist = match_mutual_nn(cent_a, cent_b, radius)
+        return idx_a, idx_b, dist, {"method": "mutual_nn_centroid"}
+    if method == "lsa":
+        idx_a, idx_b, dist, stats = match_lsa(
+            cent_a, cent_b, radius, max_component_cells=max_component_cells
+        )
+        return idx_a, idx_b, dist, {"method": "lsa_centroid", **stats}
+    raise ValueError(
+        f"unknown pairing method {method!r}; expected one of {PAIRING_METHODS}"
+    )
+
+
 def centroid_distance(cent_a, cent_b, idx_a, idx_b) -> np.ndarray:
     """Euclidean distance between the members of each pair, in the current frame."""
     ca = np.asarray(cent_a, dtype=float)[np.asarray(idx_a, dtype=np.int64)]
