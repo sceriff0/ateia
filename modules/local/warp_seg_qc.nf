@@ -4,9 +4,12 @@
  * Loads the registration transform (a VALIS registrar pickle, or a STARE transform
  * manifest for the tiled method) and warps the reference and moving native-cell
  * GeoJSONs through each registration stage in turn. Cell-to-cell correspondence is
- * established ONCE at the rigid stage (mutual-nearest centroid within a nuclear
- * radius) and then held fixed, so each stage's per-pair IoU and centroid residual
- * describe the same cells and the deltas are pure registration effects.
+ * established ONCE at the rigid stage (optimal one-to-one assignment minimising total
+ * centroid distance within 1.5 median nuclear radii, solved exactly per connected
+ * component — see bin/utils/cell_pairs.py's match_lsa; the older mutual-nearest-centroid
+ * rule remains selectable via params.seg_qc_pairing) and then held fixed, so each
+ * stage's per-pair IoU and centroid residual describe the same cells and the deltas are
+ * pure registration effects.
  *
  * The pre-micro stage checkpoint from REGISTER is optional but load-bearing on the
  * VALIS path: VALIS composes the micro residual into the same displacement field, so
@@ -99,7 +102,7 @@ ${backend_flags}
         stage_order     : stages,
         stages          : stages.collectEntries { [(it): stage_stub] },
         delta_vs_anchor : (stages - 'rigid').collectEntries { [(it): [:]] },
-        matching        : [method: 'mutual_nn_centroid', anchor_stage: 'rigid', n_pairs: 0],
+        matching        : [method: 'lsa_centroid', anchor_stage: 'rigid', n_pairs: 0],
         counts          : [features_ref: 0, features_moving: 0],
     ]
     def stub_json = groovy.json.JsonOutput.toJson(base + backend.stubExtras(ctx) + rest)
