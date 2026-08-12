@@ -50,6 +50,7 @@ process PREPROCESS {
         --output_dir . \\
         --channels ${channels} \\
         --fov_size ${params.preproc_tile_size} \\
+        --pixel-size ${params.pixel_size} \\
         --n_workers ${task.cpus} \\
         ${skip_nuclear_flag} \\
         ${nuclear_args} \\

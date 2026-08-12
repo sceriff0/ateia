@@ -34,6 +34,7 @@ sys.path.insert(0, str(Path(__file__).parent / "utils"))
 from image_utils import ensure_dir, normalize_image_dimensions
 from logger import configure_logging, get_logger
 from metadata import extract_channel_names_from_ome, is_nuclear
+from pixel_size import read_ome_pixel_size, warn_on_pixel_size_mismatch
 from validation import clip_negative_values
 
 logger = get_logger(__name__)
@@ -42,7 +43,12 @@ __all__ = ["main"]
 
 
 def split_multichannel_tiff(
-    input_path, output_dir, is_reference=False, channel_names=None, nuclear_markers=None
+    input_path,
+    output_dir,
+    is_reference=False,
+    channel_names=None,
+    nuclear_markers=None,
+    pixel_size=0.325,
 ):
     """
     Split a multichannel TIFF into single-channel TIFFs.
@@ -107,6 +113,19 @@ def split_multichannel_tiff(
     # Create output directory
     ensure_dir(output_dir)
 
+    # These single-channel TIFFs used to be written with no scale at all -- a bare
+    # imwrite, no resolution tags, no OME header -- so anything that opened one directly
+    # saw 1 px = 1 unit, and MERGE_AND_PYRAMID had nothing to read even in principle.
+    # They now carry the configured scale as standard TIFF resolution tags. Standard
+    # tags rather than an OME header on purpose: an OME header here would be a second,
+    # channel-less source of channel names for extract_channel_names_from_ome to find.
+    detected = read_ome_pixel_size(input_path)
+    warn_on_pixel_size_mismatch(
+        detected, pixel_size, source=Path(input_path).name, logger=logger
+    )
+    # CENTIMETER, so resolution is pixels-per-cm: 1e4 µm/cm divided by µm/px.
+    resolution = (1e4 / pixel_size, 1e4 / pixel_size)
+
     # Save each channel (skip the nuclear channel if not reference)
     saved_paths = []
     skipped_count = 0
@@ -145,7 +164,14 @@ def split_multichannel_tiff(
         output_path = os.path.join(output_dir, f"{clean_name}.tiff")
 
         channel_data = data[i]
-        tifffile.imwrite(output_path, channel_data, bigtiff=True, compression="zlib")
+        tifffile.imwrite(
+            output_path,
+            channel_data,
+            bigtiff=True,
+            compression="zlib",
+            resolution=resolution,
+            resolutionunit="CENTIMETER",
+        )
 
         saved_paths.append(output_path)
         status = " (nuclear channel from reference)" if is_nuclear_channel else ""
@@ -191,6 +217,16 @@ def main():
         "params.nuclear_markers; the default is only for standalone use.",
     )
 
+    parser.add_argument(
+        "--pixel-size",
+        dest="pixel_size",
+        type=float,
+        default=0.325,
+        help="Configured scale in µm/px (SPLIT_CHANNELS passes params.pixel_size). "
+        "Stamped on each single-channel TIFF as resolution tags, and the value the "
+        "input's own scale is checked against.",
+    )
+
     args = parser.parse_args()
 
     configure_logging(level=logging.INFO)
@@ -205,6 +241,7 @@ def main():
         args.is_reference,
         args.channels,
         args.nuclear_markers,
+        args.pixel_size,
     )
 
     logger.info("=" * 80)

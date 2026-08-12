@@ -250,6 +250,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `lib/WarpBackends.groovy`, not from the param, so the two can never disagree.
 
 ### Fixed
+- **A scale disagreement between an image and `params.pixel_size` was silent.**
+  `params.pixel_size` is the single owner of every µm conversion in the pipeline — the
+  measurements in `cells.geojson`, the published pyramid's `PhysicalSize`, InstantSeg's
+  rescaling — but nothing ever compared it against what the input images themselves
+  claimed. A cohort scanned at a different objective was converted, registered,
+  segmented and quantified at the configured scale with nothing said, and the symptom
+  surfaced in QuPath: the sibling `qupath-extension-flowpath` warns about a scale it
+  can see but cannot explain. `docs/parameters.md` additionally documented the opposite
+  of the truth ("the real value is read from the input OME metadata and **preserved**
+  through the pipeline"), which is corrected here.
+  - The rule now lives in one place, `bin/utils/pixel_size.py`. `CONVERT_IMAGE` and
+    `PREPROCESS` log `[SCALE MISMATCH]` naming both numbers and the percentage apart
+    when an input's OME `PhysicalSize` differs from the configured value by more than
+    1%. Ownership is unchanged by design: `warn_on_pixel_size_mismatch` returns a
+    bool, never a scale, so no caller can start preferring the metadata and become a
+    second owner. **No published number changes.**
+  - `bin/preprocess.py` had its own OME-XML walk with its own hardcoded `0.325`
+    fallback, so a run with `--pixel_size` set to anything else silently fell back to
+    a number nothing in the run had asked for. It now uses the shared reader and falls
+    back to the configured value.
+  - `bin/convert_image.py`'s readers returned `PIXEL_SIZE_UM` where a file said
+    nothing, making "detected" and "absent" indistinguishable. They return `None`; the
+    fallback is applied once, at the point the two values are compared.
+  - **`SPLIT_CHANNELS` and `TILED_STITCH` wrote their outputs with no scale at all** —
+    a bare `imwrite`, no resolution tags, no OME header — so every file between
+    registration and the pyramid claimed 1 px = 1 unit and `MERGE_AND_PYRAMID` had
+    nothing to read even in principle. Both now stamp the configured scale as standard
+    TIFF resolution tags (not an OME header: that would be a second, channel-less
+    source of channel names for `SPLIT_CHANNELS` to find).
+  - Guarded in both directions. `tests/test_pixel_size_is_passed.py` fails if a `bin/`
+    script that accepts a scale is not handed one (it would silently use its argparse
+    default — a second owner), resolving `SEGMENT`'s backend through
+    `lib/SegBackends.groovy` rather than by name. `tests/modules/split_channels.nf.test`
+    asserts the *rendered* `--pixel-size 0.325`, tagged `stub` but deliberately without
+    `options "-stub"`, since `-stub` never evaluates a `script:` block.
 - **`cells.geojson` now carries the segmentation `label` as a measurement.** It was the
   one identity column `cells_data.csv` kept and the GeoJSON dropped: `label` is in
   `MORPHOLOGY_COLS`, which `merge_quant_csvs.reorder_columns` uses to *group* columns

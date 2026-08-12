@@ -232,4 +232,53 @@ nextflow_process {
             )
         }
     }
+
+    test("Should render --pixel-size from params - rendered command") {
+
+        // Tagged `stub` so CI's blocking `nf-test test --tag stub` gate collects it, but
+        // deliberately WITHOUT `options "-stub"`: `-stub` never evaluates a `script:`
+        // block, so no stub run can observe a rendered command. Same shape and same
+        // reasoning as tests/modules/generate_qc_report.nf.test's rendered-command case.
+        //
+        // What it pins: the per-channel TIFFs SPLIT_CHANNELS writes used to carry no
+        // scale at all -- a bare imwrite, no resolution tags -- so MERGE_AND_PYRAMID had
+        // nothing to read and params.pixel_size was taken on faith downstream with no way
+        // to notice a disagreement. Dropping this flag would silently restore that, and
+        // every stub assertion in this file would stay green through it.
+        tag "stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [
+                        patient_id: 'P001',
+                        channels: ['DAPI', 'PANCK', 'SMA']
+                    ],
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    true
+                ]
+                """
+            }
+        }
+
+        then {
+            def rendered = []
+            new File("$workDir").eachFileRecurse { f ->
+                if (f.name == '.command.sh' && f.text.contains('split_multichannel.py')) {
+                    rendered << f.text
+                }
+            }
+
+            assertAll(
+                { assert rendered.size() >= 1,
+                    "no rendered SPLIT_CHANNELS .command.sh found under the task work dir" },
+                // The value, not just the flag: `--pixel-size` rendered with an empty or
+                // wrong value is the failure mode a presence-only check would miss, and
+                // params.pixel_size is 0.325 in nextflow.config.
+                { assert rendered.every { it.contains('--pixel-size 0.325') },
+                    "rendered command: " + rendered.join(' --- ') }
+            )
+        }
+    }
 }
