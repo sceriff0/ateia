@@ -152,6 +152,19 @@
                     "description": "Scale factor for registration QC images.",
                     "default": 0.25
                 },
+                "seg_qc_pairing": {
+                    "type": "string",
+                    "description": "reg_qc=2 cell correspondence: 'lsa' (optimal one-to-one assignment within the match radius) or 'mutual_nn' (greedy mutual nearest neighbour).",
+                    "default": "lsa",
+                    "enum": ["lsa", "mutual_nn"]
+                },
+                "seg_qc_match_radius_factor": {
+                    "type": "number",
+                    "description": "reg_qc=2 match radius in median nuclear radii; applies to both pairing methods.",
+                    "default": 1.5,
+                    "minimum": 0.1,
+                    "maximum": 10
+                },
                 "reg_micro_reg_fraction": {
                     "type": "number",
                     "description": "Fraction for micro registration.",
