@@ -432,7 +432,12 @@ NOT_SWEPT = {
     "reg_tiled_halo": "registration_method=tiled only — secondary accuracy knob, held at default",
     "reg_tiled_upsample": "registration_method=tiled only — see reg_tiled_halo",
     "reg_tiled_out_tile": "registration_method=tiled only — write-side I/O, held at default",
-    "reg_tiled_dapi_index": "registration_method=tiled only — a channel index, not a cost knob",
+    "reg_tiled_nuclear_index": (
+        "registration_method=tiled only — a channel index, not a cost knob. Renamed "
+        "from reg_tiled_dapi_index, and its default is now null (resolve from the "
+        "slide's channel metadata) rather than 0; sweeping it would only re-test "
+        "MarkerUtils' resolution, which tests/ already covers."
+    ),
 
     # --- secondary knobs deliberately held at defaults (add an axis if a curve is ever needed). ---
     "reg_micro_reg_fraction": "secondary micro-registration knob; reg_micro_reg (the DEPTH) is crossed instead",
