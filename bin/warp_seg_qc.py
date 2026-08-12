@@ -76,11 +76,15 @@ from utils.valis_stage_warp import (
 logger = get_logger(__name__)
 
 ANCHOR_STAGE = STAGE_RIGID
-# Pair two cells only if each is the other's nearest centroid AND they are within this many
-# median nuclear radii. 1.0 is deliberately tight: after a rigid alignment a correctly matched
-# nucleus sits well inside one radius, and anything further is more likely a neighbour than a
-# partner. Loosening it trades precision for recall in the pairing, not in the registration.
-DEFAULT_MATCH_RADIUS_FACTOR = 1.0
+# Pair two cells only if they are within this many median nuclear radii. The gate is HARD --
+# it is what makes match_lsa's component decomposition exact, and what keeps a cell with no
+# true partner (tissue tear, fold, out-of-overlap region) from being assigned one.
+#
+# 1.5, widened from the 1.0 that mutual-NN needed. Under mutual-NN a wider gate directly buys
+# wrong pairs, because a wrong nearest neighbour becomes a wrong pair. LSA resolves contention
+# globally, so the gate stops being a match-quality knob and becomes purely an
+# "is there a partner at all" filter -- which wants to be generous, not tight.
+DEFAULT_MATCH_RADIUS_FACTOR = 1.5
 DEFAULT_SUPERSAMPLE = 2
 DEFAULT_IOU_THRESH = 0.5
 # Deltas are reported only for these — the headline numbers. Counts and percentile widths are
@@ -210,6 +214,7 @@ def run(
     moving_slide=None,
     match_radius_factor=DEFAULT_MATCH_RADIUS_FACTOR,
     match_radius_px=None,
+    pairing=cp.DEFAULT_PAIRING,
     iou_thresh=DEFAULT_IOU_THRESH,
     supersample=DEFAULT_SUPERSAMPLE,
     max_pair_window_px=cp.DEFAULT_MAX_PAIR_WINDOW_PX,
@@ -249,10 +254,12 @@ def run(
         if match_radius_px
         else float(match_radius_factor) * cell_radius
     )
-    idx_ref, idx_mov, _ = cp.match_mutual_nn(a_cent_ref, a_cent_mov, radius)
+    idx_ref, idx_mov, _, pairing_stats = cp.match_cells(
+        a_cent_ref, a_cent_mov, radius, method=pairing
+    )
     _log(
-        f"anchor '{ANCHOR_STAGE}': median cell radius {cell_radius:.2f} px -> match radius "
-        f"{radius:.2f} px -> {idx_ref.size} pairs",
+        f"anchor '{ANCHOR_STAGE}': pairing={pairing} median cell radius {cell_radius:.2f} px "
+        f"-> match radius {radius:.2f} px -> {idx_ref.size} pairs",
         t0,
     )
     if idx_ref.size == 0:
@@ -263,7 +270,7 @@ def run(
 
     denom = min(ref_native.n_features, mov_native.n_features) or 1
     matching = {
-        "method": "mutual_nn_centroid",
+        **pairing_stats,
         "anchor_stage": ANCHOR_STAGE,
         "radius_px": radius,
         "radius_factor": None if match_radius_px else float(match_radius_factor),
@@ -555,10 +562,18 @@ def parse_args(argv=None):
         "edge in both slides, inflating their IoU for non-registration reasons.",
     )
     ap.add_argument(
+        "--pairing",
+        choices=cp.PAIRING_METHODS,
+        default=cp.DEFAULT_PAIRING,
+        help="cell correspondence at the anchor stage: 'lsa' = optimal one-to-one "
+        "assignment within the match radius (default); 'mutual_nn' = the older greedy "
+        "mutual-nearest-neighbour rule",
+    )
+    ap.add_argument(
         "--match-radius-factor",
         type=float,
         default=DEFAULT_MATCH_RADIUS_FACTOR,
-        help="match radius in median nuclear radii (default 1.0)",
+        help="match radius in median nuclear radii",
     )
     ap.add_argument(
         "--match-radius-px",
@@ -664,6 +679,7 @@ def _main_tiled(a):
         separable=True,
         match_radius_factor=a.match_radius_factor,
         match_radius_px=a.match_radius_px,
+        pairing=a.pairing,
         iou_thresh=a.iou_thresh,
         supersample=a.supersample,
         max_pair_window_px=a.max_pair_window_px,
@@ -721,6 +737,7 @@ def main(argv=None):
             pixel_size_um=a.pixel_size_um,
             match_radius_factor=a.match_radius_factor,
             match_radius_px=a.match_radius_px,
+            pairing=a.pairing,
             iou_thresh=a.iou_thresh,
             supersample=a.supersample,
             max_pair_window_px=a.max_pair_window_px,

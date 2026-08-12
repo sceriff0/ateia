@@ -180,14 +180,14 @@ def test_match_radius_is_derived_from_the_cells_themselves(tmp_path):
     out = wsq.run(
         ref, mov, warp, [STAGE_RIGID, STAGE_MICRO], ref_slide=REF, moving_slide=MOV
     )
-    # A 10x10 square has equivalent radius sqrt(100/pi) ~= 5.64; factor 1.0 -> that radius.
+    # A 10x10 square has equivalent radius sqrt(100/pi) ~= 5.64; factor 1.5 -> 1.5x that.
     assert out["matching"]["median_cell_radius_px"] == pytest.approx(
         math.sqrt(100 / math.pi)
     )
     assert out["matching"]["radius_px"] == pytest.approx(
-        out["matching"]["median_cell_radius_px"]
+        1.5 * out["matching"]["median_cell_radius_px"]
     )
-    assert out["matching"]["method"] == "mutual_nn_centroid"
+    assert out["matching"]["method"] == "lsa_centroid"
     assert out["matching"]["anchor_stage"] == STAGE_RIGID
 
 
@@ -224,6 +224,45 @@ def test_a_match_radius_too_tight_to_pair_anything_is_reported_not_crashed(tmp_p
     assert out["matching"]["n_pairs"] == 0
     assert out["stages"][STAGE_RIGID]["n_pairs"] == 0
     assert out["stages"][STAGE_RIGID]["iou_n"] == 0
+
+
+def test_run_records_lsa_as_the_default_pairing(tmp_path):
+    ref = _write(tmp_path, "ref.geojson", _grid_fc())
+    mov = _write(tmp_path, "mov.geojson", _grid_fc(dx=2.0))
+    warp = _shift_warp({STAGE_NATIVE: 0.0, STAGE_RIGID: -2.0})
+    out = wsq.run(
+        ref, mov, warp, [STAGE_NATIVE, STAGE_RIGID], ref_slide=REF, moving_slide=MOV
+    )
+    m = out["matching"]
+    assert m["method"] == "lsa_centroid"
+    assert m["n_pairs"] == 6
+    assert m["n_components"] >= 1
+    assert m["n_fallback_components"] == 0
+    assert m["n_fallback_cells"] == 0
+
+
+def test_run_honours_pairing_mutual_nn(tmp_path):
+    ref = _write(tmp_path, "ref.geojson", _grid_fc())
+    mov = _write(tmp_path, "mov.geojson", _grid_fc(dx=2.0))
+    warp = _shift_warp({STAGE_NATIVE: 0.0, STAGE_RIGID: -2.0})
+    out = wsq.run(
+        ref,
+        mov,
+        warp,
+        [STAGE_NATIVE, STAGE_RIGID],
+        ref_slide=REF,
+        moving_slide=MOV,
+        pairing="mutual_nn",
+    )
+    m = out["matching"]
+    assert m["method"] == "mutual_nn_centroid"
+    assert m["n_pairs"] == 6
+    # The mutual-NN backend reports no component diagnostics -- it has none.
+    assert "n_components" not in m
+
+
+def test_default_match_radius_factor_is_widened_for_lsa():
+    assert wsq.DEFAULT_MATCH_RADIUS_FACTOR == 1.5
 
 
 # ── per-stage metrics + deltas ─────────────────────────────────────────────────
@@ -522,6 +561,7 @@ def test_parse_args_defaults_match_the_documented_behaviour():
     assert a.iou_thresh == wsq.DEFAULT_IOU_THRESH
     assert a.crop == "overlap"
     assert a.micro_reg is None  # unknown unless the caller passes it
+    assert a.pairing == "lsa"
 
 
 def test_parse_args_accepts_micro_reg_level():
