@@ -250,6 +250,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `lib/WarpBackends.groovy`, not from the param, so the two can never disagree.
 
 ### Fixed
+- **`cells.geojson` now carries the segmentation `label` as a measurement.** It was the
+  one identity column `cells_data.csv` kept and the GeoJSON dropped: `label` is in
+  `MORPHOLOGY_COLS`, which `merge_quant_csvs.reorder_columns` uses to *group* columns
+  (they all stay in the CSV) but which `export_geojson` uses to *exclude* from the
+  measurement array. The two published artefacts were therefore joinable only by
+  position — and position is wrong whenever a cell has a NaN centroid, since that row
+  stays in the CSV and never becomes a feature (`export_geojson()`'s `skipped`
+  counter), silently and undetectably from the artefacts alone. `bin/join_flowpath.py`
+  already warned about exactly this ("Add the label measurement to the GeoJSON export
+  to make this exact") and fell back to a centroid join, whose correctness depends on
+  `--pixel-size` being right; the exact label join is now the reachable path. Costs
+  nothing downstream: FlowPath's `DetectionIngest.MORPHOLOGY_PREFIXES` already filters
+  `label` out of the marker panel, and `CellIndex` already resolves a measurement named
+  `label`.
 - **A `nextflow.extension.GroupKey` leaked out of `groupTuple()` and travelled as a
   channel key, silently dropping registration QC on roughly half of contended runs.**
   `subworkflows/local/registration.nf` passed the object `groupTuple()` emits straight on

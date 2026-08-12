@@ -101,6 +101,22 @@ def build_measurements(
     """
     measurements = []
 
+    # Segmentation identity, emitted first. `label` ties this cell to its contour (the
+    # lookup export_geojson() does ten lines below) and to every row of cells_data.csv,
+    # and it was the one column the CSV kept and the GeoJSON dropped: MORPHOLOGY_COLS
+    # excludes it from marker_cols, so nothing else in this function emits it.
+    #
+    # Joining CSV row i to feature i cannot stand in for it. A cell with a NaN centroid
+    # stays in the CSV and never becomes a feature (the `skipped` counter in
+    # export_geojson()), so the two orderings diverge the moment one row is skipped --
+    # silently, and not detectably from the published artefacts alone.
+    #
+    # Safe on the QuPath side: FlowPath's MORPHOLOGY_PREFIXES filters "label" out of the
+    # marker panel, so it does not appear as a gateable channel.
+    label = row.get("label")
+    if pd.notna(label):
+        measurements.append({"name": "label", "value": int(label)})
+
     # Centroid in micrometers (apply +0.5 for corner-of-pixel convention consistency)
     x_px = float(row.get("x", 0)) + 0.5
     y_px = float(row.get("y", 0)) + 0.5

@@ -48,4 +48,46 @@ def test_no_panel_supplied_is_constant_cell_classification(tmp_path):
     names = {m["name"] for m in f0["properties"]["measurements"]}
     assert "PanCK: Cytoplasm: Mean" in names        # the marker key is still emitted
     assert "pheno_score: Tumour" not in names
-    assert not any(n.startswith("pheno_score:") or n == "label" for n in names)
+    assert not any(n.startswith("pheno_score:") for n in names)
+
+
+def test_label_is_emitted_as_a_measurement(tmp_path):
+    """`label` rides along as a measurement, not just as the contour lookup key.
+
+    It is the only join key a QuPath-side consumer can use to get back to
+    cells_data.csv. FlowPath resolves a measurement named "label"
+    (CellIndex.resolveMeasurementKey) and filters it out of the marker panel
+    (DetectionIngest.MORPHOLOGY_PREFIXES), so emitting it costs nothing there.
+    """
+    quant = pd.DataFrame({"label": [7, 9], "x": [5, 6], "y": [7, 8],
+                          "PanCK: Cytoplasm: Mean": [10.0, 0.0], "area": [100, 100]})
+    out = tmp_path / "cells.geojson"
+    eg.export_geojson(quant, str(out), pixel_size=0.325,
+                      marker_cols=["PanCK: Cytoplasm: Mean"], contours=None)
+    features = json.loads(out.read_text())["features"]
+    labels = [
+        next(m["value"] for m in f["properties"]["measurements"] if m["name"] == "label")
+        for f in features
+    ]
+    assert labels == [7, 9]
+
+
+def test_label_survives_a_skipped_row(tmp_path):
+    """The case positional CSV<->feature joining gets wrong.
+
+    A NaN centroid keeps the row in cells_data.csv but drops the feature, so feature
+    index and CSV row index diverge. The emitted label is what stays correct: the
+    second feature must be label 3, not the label of CSV row 1.
+    """
+    quant = pd.DataFrame({"label": [1, 2, 3], "x": [5, float("nan"), 6],
+                          "y": [7, 8, 9], "area": [100, 100, 100]})
+    out = tmp_path / "cells.geojson"
+    n = eg.export_geojson(quant, str(out), pixel_size=0.325, marker_cols=[],
+                          contours=None)
+    features = json.loads(out.read_text())["features"]
+    assert n == 2 and len(features) == 2
+    labels = [
+        next(m["value"] for m in f["properties"]["measurements"] if m["name"] == "label")
+        for f in features
+    ]
+    assert labels == [1, 3]
