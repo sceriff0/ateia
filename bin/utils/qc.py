@@ -28,14 +28,14 @@ import cv2
 import numpy as np
 import tifffile
 from logger import get_logger
-from metadata import extract_channel_names_from_ome
+from metadata import extract_channel_names_from_ome, pick_nuclear_index
 from numpy.typing import NDArray
 from registration_utils import autoscale
 from skimage.transform import rescale
 
 __all__ = [
     "create_registration_qc",
-    "create_dapi_overlay",
+    "create_nuclear_overlay",
     "autoscale_for_display",
 ]
 
@@ -83,17 +83,17 @@ def autoscale_for_display(img: NDArray, method: str = "minmax") -> NDArray[np.ui
         raise ValueError(f"Unknown method: {method}. Use 'minmax' or 'percentile'.")
 
 
-def create_dapi_overlay(
-    reference_dapi: NDArray, registered_dapi: NDArray, scale_factor: float = 0.25
+def create_nuclear_overlay(
+    reference_nuc: NDArray, registered_nuc: NDArray, scale_factor: float = 0.25
 ) -> Tuple[NDArray, NDArray]:
-    """Create RGB overlay of reference and registered DAPI channels.
+    """Create RGB overlay of the reference and registered nuclear/fiducial channels.
 
     Parameters
     ----------
-    reference_dapi : NDArray
-        Reference DAPI channel (2D array).
-    registered_dapi : NDArray
-        Registered DAPI channel (2D array).
+    reference_nuc : NDArray
+        Reference nuclear/fiducial channel (2D array).
+    registered_nuc : NDArray
+        Registered nuclear/fiducial channel (2D array).
     scale_factor : float, default=0.25
         Downsampling factor for output images (0.25 = 4x smaller).
 
@@ -118,7 +118,7 @@ def create_dapi_overlay(
     --------
     >>> ref = np.random.randint(0, 4096, (2048, 2048), dtype=np.uint16)
     >>> reg = np.random.randint(0, 4096, (2048, 2048), dtype=np.uint16)
-    >>> rgb_bgr, rgb_cyx = create_dapi_overlay(ref, reg, scale_factor=0.25)
+    >>> rgb_bgr, rgb_cyx = create_nuclear_overlay(ref, reg, scale_factor=0.25)
     >>> rgb_bgr.shape
     (512, 512, 3)
     >>> rgb_cyx.shape
@@ -130,16 +130,16 @@ def create_dapi_overlay(
     autoscale_for_display : Scaling function used internally
     """
     # Validate matching shapes
-    if reference_dapi.shape != registered_dapi.shape:
+    if reference_nuc.shape != registered_nuc.shape:
         raise ValueError(
-            f"Shape mismatch: reference DAPI {reference_dapi.shape} != "
-            f"registered DAPI {registered_dapi.shape}. "
+            f"Shape mismatch: reference nuclear channel {reference_nuc.shape} != "
+            f"registered nuclear channel {registered_nuc.shape}. "
             f"Images must have the same dimensions after registration."
         )
 
     # Autoscale each channel independently
-    ref_scaled = autoscale_for_display(reference_dapi, method="minmax")
-    reg_scaled = autoscale_for_display(registered_dapi, method="minmax")
+    ref_scaled = autoscale_for_display(reference_nuc, method="minmax")
+    reg_scaled = autoscale_for_display(registered_nuc, method="minmax")
 
     # Downsample if requested
     if scale_factor != 1.0:
@@ -187,12 +187,13 @@ def create_registration_qc(
     save_fullres: bool = True,
     save_png: bool = True,
     save_tiff: bool = True,
+    nuclear_markers=None,
 ) -> None:
     """Create QC visualizations for registration assessment.
 
-    This function generates RGB composite images showing the overlay of
-    reference and registered DAPI channels. Perfect registration appears
-    as yellow (red + green), while misalignment shows red/green fringing.
+    This function generates RGB composite images showing the overlay of the
+    reference and registered nuclear/fiducial channels. Perfect registration
+    appears as yellow (red + green), while misalignment shows red/green fringing.
 
     Parameters
     ----------
@@ -211,6 +212,12 @@ def create_registration_qc(
         Save downsampled PNG preview.
     save_tiff : bool, default=True
         Save downsampled TIFF for ImageJ.
+    nuclear_markers : sequence of str, optional
+        Ordered preference list of nuclear/fiducial marker names, i.e.
+        ``params.nuclear_markers``. Resolved against each image's OME channel
+        names by ``metadata.pick_nuclear_index``, the same rule
+        ``lib/MarkerUtils.groovy`` and ``split_multichannel.py`` use. Defaults to
+        ``metadata.DEFAULT_NUCLEAR_MARKERS`` so the script stays usable by hand.
 
     Returns
     -------
@@ -254,7 +261,7 @@ def create_registration_qc(
 
     See Also
     --------
-    create_dapi_overlay : Lower-level overlay creation
+    create_nuclear_overlay : Lower-level overlay creation
     """
     reference_path = Path(reference_path)
     registered_path = Path(registered_path)
@@ -278,53 +285,59 @@ def create_registration_qc(
     if reg_img.ndim == 2:
         reg_img = reg_img[np.newaxis, ...]
 
-    # Find DAPI channels from OME metadata (convert_image guarantees OME-XML is always present)
+    # Resolve the nuclear/fiducial channel from OME metadata (convert_image guarantees
+    # OME-XML is always present). This MUST go through pick_nuclear_index rather than
+    # testing for the literal "DAPI": nuclear_markers is configurable and a CELLTOX-only
+    # panel is a supported input. The old literal test worked only by accident -- it
+    # fell back to channel 0, which CONVERT_IMAGE happens to reserve for the nuclear
+    # channel -- so it produced a correct overlay and a spurious warning on every
+    # non-DAPI slide, and would have picked the wrong channel the moment that promotion
+    # invariant changed.
     ref_channels = extract_channel_names_from_ome(reference_path)
     reg_channels = extract_channel_names_from_ome(registered_path)
 
-    # Find DAPI index (default to first channel if not found)
-    ref_dapi_idx = next(
-        (i for i, ch in enumerate(ref_channels) if "DAPI" in ch.upper()), None
-    )
-    if ref_dapi_idx is None:
+    ref_nuc_idx = pick_nuclear_index(ref_channels, nuclear_markers)
+    if ref_nuc_idx is None:
         logger.warning(
-            f"No DAPI channel found in reference image {reference_path.name} "
-            f"(channels: {ref_channels}). Falling back to channel 0."
+            f"No nuclear/fiducial channel found in reference image "
+            f"{reference_path.name} (channels: {ref_channels}, markers: "
+            f"{list(nuclear_markers) if nuclear_markers else 'default'}). "
+            f"Falling back to channel 0."
         )
-        ref_dapi_idx = 0
+        ref_nuc_idx = 0
 
-    reg_dapi_idx = next(
-        (i for i, ch in enumerate(reg_channels) if "DAPI" in ch.upper()), None
-    )
-    if reg_dapi_idx is None:
+    reg_nuc_idx = pick_nuclear_index(reg_channels, nuclear_markers)
+    if reg_nuc_idx is None:
         logger.warning(
-            f"No DAPI channel found in registered image {registered_path.name} "
-            f"(channels: {reg_channels}). Falling back to channel 0."
+            f"No nuclear/fiducial channel found in registered image "
+            f"{registered_path.name} (channels: {reg_channels}, markers: "
+            f"{list(nuclear_markers) if nuclear_markers else 'default'}). "
+            f"Falling back to channel 0."
         )
-        reg_dapi_idx = 0
+        reg_nuc_idx = 0
 
     if ref_channels:
         logger.debug(
-            f"Reference DAPI: channel {ref_dapi_idx} ({ref_channels[ref_dapi_idx]})"
+            f"Reference nuclear channel: {ref_nuc_idx} ({ref_channels[ref_nuc_idx]})"
         )
     if reg_channels:
         logger.debug(
-            f"Registered DAPI: channel {reg_dapi_idx} ({reg_channels[reg_dapi_idx]})"
+            f"Registered nuclear channel: {reg_nuc_idx} ({reg_channels[reg_nuc_idx]})"
         )
 
-    ref_dapi = ref_img[ref_dapi_idx]
-    reg_dapi = reg_img[reg_dapi_idx]
+    ref_nuc = ref_img[ref_nuc_idx]
+    reg_nuc = reg_img[reg_nuc_idx]
 
     # Save full-resolution QC (compressed)
     if save_fullres:
-        ref_dapi_scaled = autoscale_for_display(ref_dapi, method="minmax")
-        reg_dapi_scaled = autoscale_for_display(reg_dapi, method="minmax")
+        ref_nuc_scaled = autoscale_for_display(ref_nuc, method="minmax")
+        reg_nuc_scaled = autoscale_for_display(reg_nuc, method="minmax")
 
         rgb_stack_full = np.stack(
             [
-                reg_dapi_scaled,  # Red channel (registered)
-                ref_dapi_scaled,  # Green channel (reference)
-                np.zeros_like(ref_dapi_scaled, dtype=np.uint8),  # Blue channel
+                reg_nuc_scaled,  # Red channel (registered)
+                ref_nuc_scaled,  # Green channel (reference)
+                np.zeros_like(ref_nuc_scaled, dtype=np.uint8),  # Blue channel
             ],
             axis=0,
         )
@@ -341,8 +354,8 @@ def create_registration_qc(
         del rgb_stack_full
 
     # Create downsampled overlay
-    rgb_bgr, rgb_cyx = create_dapi_overlay(
-        ref_dapi, reg_dapi, scale_factor=scale_factor
+    rgb_bgr, rgb_cyx = create_nuclear_overlay(
+        ref_nuc, reg_nuc, scale_factor=scale_factor
     )
 
     # Save PNG (OpenCV uses BGR order)

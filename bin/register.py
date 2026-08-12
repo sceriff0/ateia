@@ -140,7 +140,7 @@ def find_reference_image(
     required_markers : list of str
         Marker names that must appear in filename (case-insensitive)
     valid_extensions : list of str, optional
-        Valid file extensions. Default: ['.tif', '.tiff', '.ome.tif']
+        Valid file extensions. Default: ['.tif', '.tiff', '.ome.tif', '.ome.tiff']
 
     Returns
     -------
@@ -213,10 +213,17 @@ def valis_registration(
     reference : str, optional
         Filename of reference image (takes precedence over reference_markers)
     reference_markers : list of str, optional
-        Markers to identify reference image (legacy fallback). Default: ['DAPI', 'SMA']
+        Legacy fallback for standalone runs: marker names that must all appear in the
+        reference image's FILENAME. No default -- the pipeline always passes
+        ``--reference`` (see modules/local/register.nf), and a hardcoded marker pair
+        here would be both cohort-specific and filename-based, which the rest of the
+        pipeline forbids (channel identity comes from metadata, never the filename).
+        When neither ``reference`` nor ``reference_markers`` is given, the
+        alphabetically first slide is used.
     memory_mode : str, optional
-        Memory preset: "high" (SuperPoint/SuperGlue, 1024/4096px) or
-        "low" (BRISK/RANSAC, 256/1024px). Default: "high"
+        Memory preset, from bin/utils/valis_config.py's MEMORY_PRESETS: "high"
+        (2048/4096 px), "medium" (1024/4096 px) or "low" (256/1024 px). All three use
+        SuperPoint + SuperGlue with 5000 features. Default: "high"
     micro_reg_fraction : float, optional
         Fraction of image size for micro-registration. Default: 0.125
     max_image_dim_px : int, optional
@@ -269,10 +276,6 @@ def valis_registration(
     jvm_mem_gb = init_jvm(input_dir, override_gb=jvm_heap_gb)
     logger.info(f"JVM initialized with {jvm_mem_gb}GB heap")
 
-    # Configuration
-    if reference_markers is None:
-        reference_markers = ["DAPI", "SMA"]
-
     ensure_dir(os.path.dirname(out) or ".")
 
     # Use output directory as results directory for VALIS internal files
@@ -304,8 +307,24 @@ def valis_registration(
                 f"Specified reference image not found: {ref_image_path}"
             )
         ref_image = ref_basename
+    elif not reference_markers:
+        # Neither a reference filename nor a marker list: take the alphabetically first
+        # slide. Deliberately NOT a marker guess -- find_reference_image matches on the
+        # FILENAME, so any default marker list here would both hardcode one cohort's
+        # panel naming and contradict the pipeline's metadata-only channel identity rule.
+        files = sorted(
+            set(glob.glob(os.path.join(input_dir, "*.ome.tif")))
+            | set(glob.glob(os.path.join(input_dir, "*.ome.tiff")))
+        )
+        if not files:
+            raise FileNotFoundError(f"No .ome.tif or .ome.tiff files in {input_dir}")
+        ref_image = os.path.basename(files[0])
+        logger.info(
+            "No --reference and no --reference-markers given; using the "
+            f"alphabetically first slide as reference: {ref_image}"
+        )
     else:
-        # Legacy approach: search by markers
+        # Legacy approach: search by markers in the filename
         logger.info(f"Searching for reference image with markers: {reference_markers}")
         try:
             ref_image = find_reference_image(
@@ -934,8 +953,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--reference-markers",
         nargs="+",
-        default=["DAPI", "SMA"],
-        help="Markers to identify reference image (legacy fallback)",
+        default=None,
+        help=(
+            "Legacy fallback for standalone runs: marker names that must all appear in "
+            "the reference image's FILENAME. No default -- the pipeline always passes "
+            "--reference. Without either flag the alphabetically first slide is used."
+        ),
     )
 
     # Registration parameters
@@ -944,8 +967,13 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default="high",
         choices=["high", "medium", "low"],
-        help='Memory preset. "high": SuperPoint/SuperGlue, 2048/4096px dimensions. (medium is same with 1048/4096px) '
-        '"low": BRISK/RANSAC, 256/1024px dimensions.',
+        help=(
+            "Memory preset, from MEMORY_PRESETS in bin/utils/valis_config.py. All three "
+            "use SuperPoint + SuperGlue with 5000 features and differ only in the "
+            "processed / non-rigid registration dimensions: "
+            '"high" 2048/4096 px, "medium" 1024/4096 px, "low" 256/1024 px '
+            "(low additionally warps in 512 px tiles)."
+        ),
     )
     parser.add_argument(
         "--micro-reg-fraction",

@@ -195,10 +195,13 @@
                     "description": "JVM heap (GiB) for VALIS/Bio-Formats in REGISTER. null = derive from task.memory at runtime.",
                     "default": null
                 },
-                "reg_tiled_dapi_index": {
-                    "type": "integer",
-                    "description": "STARE (registration_method=tiled) only: DAPI channel index used to estimate the transform.",
-                    "default": 0,
+                "reg_tiled_nuclear_index": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "description": "STARE (registration_method=tiled) only: nuclear/fiducial channel index used to estimate the transform. null = resolve from channel metadata against nuclear_markers.",
+                    "default": null,
                     "minimum": 0
                 },
                 "reg_tiled_tile": {
