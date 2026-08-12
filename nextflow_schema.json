@@ -139,7 +139,7 @@
                 },
                 "reg_qc": {
                     "type": "integer",
-                    "description": "Registration QC depth: 0=none, 1=DAPI overlay only, 2=DAPI overlay + segmentation-overlap metric (Dice/IoU/instance-F1).",
+                    "description": "Registration QC depth: 0=none, 1=DAPI overlay only, 2=DAPI overlay + segmentation-overlap metrics (per-pair IoU, dice_matched, centroid residuals).",
                     "default": 2,
                     "enum": [
                         0,

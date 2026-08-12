@@ -220,7 +220,8 @@ workflow REGISTRATION {
         ch_qc = Channel.empty()
     }
 
-    // Level >= 2: GeoJSON segmentation-overlap QC (Dice/IoU/instance-F1) BEFORE vs AFTER.
+    // Level >= 2: GeoJSON segmentation-overlap QC (per-pair IoU, dice_matched, centroid
+    // residuals) BEFORE vs AFTER.
     // Segment each slide's DAPI on its NATIVE (pre-registration) image -> cell GeoJSON,
     // then warp the polygons through the registrar and score overlap. Classic VALIS only
     // (needs the registrar pickle; distributed produces none).

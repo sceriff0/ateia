@@ -7,7 +7,7 @@
 
     What it does: segment each slide on its NATIVE (pre-registration) image, trace the
     resulting cell mask into a GeoJSON, then warp those polygons through the registrar the
-    registration method produced and score BEFORE-vs-AFTER overlap (Dice/IoU/instance-F1)
+    registration method produced and score BEFORE-vs-AFTER overlap (per-pair IoU, dice_matched)
     plus per-cell centroid residuals.
 
     THE QC SEGMENTS WITH THE RUN'S OWN SEGMENTER. SEG_QC_SEGMENT is `SEGMENT` under an
