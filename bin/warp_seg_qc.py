@@ -267,6 +267,22 @@ def run(
             "WARNING: no cells paired at the anchor. Every stage record will be empty; this "
             "usually means the rigid stage failed or the two slides share no tissue."
         )
+    if pairing_stats.get("n_fallback_components", 0) > 0:
+        _log(
+            f"WARNING: {pairing_stats['n_fallback_components']} candidate-graph component(s) "
+            f"({pairing_stats.get('n_fallback_cells', 0)} cells, largest "
+            f"{pairing_stats.get('largest_component_cells', 0)} cells) exceeded "
+            "--max-component-cells and fell back to mutual-NN pairing instead of the exact "
+            "assignment; this usually means dense/percolating tissue, not a bug."
+        )
+    if pairing == "mutual_nn" and (
+        match_radius_px is None and float(match_radius_factor) > 1.0
+    ):
+        _log(
+            "NOTE: --pairing mutual_nn with --match-radius-factor > 1.0: the shared default "
+            "(1.5) is tuned for lsa's exact assignment, and a wider gate buys wrong pairs "
+            "under mutual-NN's greedy rule."
+        )
 
     denom = min(ref_native.n_features, mov_native.n_features) or 1
     matching = {

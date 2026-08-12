@@ -228,7 +228,9 @@ def median_equivalent_radius(area: np.ndarray) -> float:
 # ── correspondence ─────────────────────────────────────────────────────────────
 def _finite_rows(cent):
     """``(rows, index)``: the rows of ``cent`` whose coordinates are all finite, and where
-    they came from. Both matchers must drop NaN centroids before building a KD-tree."""
+    they came from. This is :func:`match_lsa`'s NaN filter; :func:`match_mutual_nn` keeps
+    its own inline equivalent (``np.flatnonzero(np.isfinite(...).all(axis=1))``) rather than
+    calling this helper, and is left that way deliberately."""
     cent = np.asarray(cent, dtype=float)
     if cent.size == 0:
         return cent.reshape(0, 2), np.empty(0, dtype=np.int64)
@@ -293,6 +295,11 @@ def match_lsa(cent_a, cent_b, radius, max_component_cells=DEFAULT_MAX_COMPONENT_
     component could contain (at most ``n_members`` of them, each <= ``radius``), so an
     assignment using k forbidden entries always costs more than one using k-1. That yields
     maximum cardinality first, then minimum distance -- from a bound, not a tuned constant.
+
+    ``stats["n_components"]`` counts only components with candidates on **both** sides -- the
+    ones the assignment loop actually solves. Singleton nodes (a cell with no candidate partner
+    within ``radius``) are their own connected component in the underlying graph but are
+    skipped before counting, so they are not included.
     """
     from scipy.optimize import linear_sum_assignment
     from scipy.sparse import coo_matrix
@@ -328,8 +335,7 @@ def match_lsa(cent_a, cent_b, radius, max_component_cells=DEFAULT_MAX_COMPONENT_
     adj = coo_matrix(
         (np.ones(cols.size), (rows, na + cols)), shape=(n_nodes, n_nodes)
     )
-    n_comp, labels = connected_components(adj, directed=False)
-    stats["n_components"] = int(n_comp)
+    _, labels = connected_components(adj, directed=False)
 
     order = np.argsort(labels, kind="stable")
     bounds = np.flatnonzero(np.diff(labels[order])) + 1
@@ -339,6 +345,7 @@ def match_lsa(cent_a, cent_b, radius, max_component_cells=DEFAULT_MAX_COMPONENT_
         bi = members[members >= na] - na
         if ai.size == 0 or bi.size == 0:
             continue  # an isolated cell: no candidate on the other slide
+        stats["n_components"] += 1
         n_members = int(ai.size + bi.size)
         stats["largest_component_cells"] = max(
             stats["largest_component_cells"], n_members
