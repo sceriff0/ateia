@@ -756,3 +756,58 @@ def test_argparse_default_allowlist_entries_have_reasons():
             f"ARGPARSE_DEFAULT_ALLOWLIST[{key!r}]['reason'] must be a "
             "non-empty string."
         )
+
+
+def test_seg_qc_pairing_and_radius_factor_match_bin_defaults():
+    """Close the one blind spot `test_no_duplicate_bin_argparse_defaults` warns about
+    but cannot check.
+
+    `warp_seg_qc.py`'s `--pairing` and `--match-radius-factor` resolve (via
+    `build_flag_param_maps`) to `nextflow.config`'s `seg_qc_pairing` and
+    `seg_qc_match_radius_factor`, but their argparse `default=` is a NAME
+    (`cp.DEFAULT_PAIRING`, `DEFAULT_MATCH_RADIUS_FACTOR`), not a literal --
+    `ast.literal_eval` can't evaluate a name, so `find_argparse_default_sites()`
+    files both under `skipped` and the comparison in
+    `test_no_duplicate_bin_argparse_defaults` silently never runs for them (that
+    test's own warning message says so under "skipped"). Nothing today would
+    fail if `nextflow.config` said `seg_qc_match_radius_factor = 1.2` while
+    `bin/warp_seg_qc.py`'s `DEFAULT_MATCH_RADIUS_FACTOR` stayed `1.5`.
+
+    This test runs the actual Python constants (rather than statically parsing
+    them) and compares them directly against `nextflow.config`'s declared
+    defaults, closing the gap in both directions.
+    """
+    import sys
+
+    bin_dir = str(BIN_DIR)
+    bin_utils_dir = str(BIN_DIR / "utils")
+    added = [p for p in (bin_dir, bin_utils_dir) if p not in sys.path]
+    for p in added:
+        sys.path.insert(0, p)
+    try:
+        import warp_seg_qc as wsq
+        from utils import cell_pairs as cp
+    finally:
+        for p in added:
+            sys.path.remove(p)
+
+    declared = parse_declared_params(CONFIG_PATH.read_text())
+
+    config_pairing = _config_value_to_python(declared["seg_qc_pairing"])
+    assert config_pairing == cp.DEFAULT_PAIRING, (
+        f"nextflow.config's seg_qc_pairing = {config_pairing!r} but "
+        f"bin/utils/cell_pairs.py's DEFAULT_PAIRING = {cp.DEFAULT_PAIRING!r} "
+        "-- these must match (warp_seg_qc.py's --pairing default is "
+        "cp.DEFAULT_PAIRING)."
+    )
+
+    config_radius_factor = _config_value_to_python(
+        declared["seg_qc_match_radius_factor"]
+    )
+    assert config_radius_factor == wsq.DEFAULT_MATCH_RADIUS_FACTOR, (
+        "nextflow.config's seg_qc_match_radius_factor = "
+        f"{config_radius_factor!r} but bin/warp_seg_qc.py's "
+        f"DEFAULT_MATCH_RADIUS_FACTOR = {wsq.DEFAULT_MATCH_RADIUS_FACTOR!r} "
+        "-- these must match (warp_seg_qc.py's --match-radius-factor default "
+        "is this constant)."
+    )

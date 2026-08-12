@@ -221,4 +221,49 @@ nextflow_process {
             )
         }
     }
+
+    test("Should render the pairing flags from ext.args - rendered command") {
+
+        // Tagged `stub` for CI's blocking gate, deliberately WITHOUT `options "-stub"`:
+        // a stub run never evaluates `script:`, so it cannot observe an ext.args change at
+        // all. Same shape as the two rendered-command tests above. The task will fail for
+        // environmental reasons (no container engine under `--profile test`); the
+        // assertions read .command.sh, not the process outcome.
+        tag "stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [ patient_id: 'P001' ],
+                    'valis',
+                    file('$projectDir/tests/testdata/single_sample.csv', checkIfExists: true),
+                    'P001_ref_corrected',
+                    'P001_mov1_corrected',
+                    file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true),
+                    file('$projectDir/tests/testdata/sample_merged_quant.csv', checkIfExists: true),
+                    file('$projectDir/tests/testdata', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            def rendered = []
+            new File("$workDir").eachFileRecurse { f ->
+                if (f.name == '.command.sh' && f.text.contains('warp_seg_qc.py')) {
+                    rendered << f.text
+                }
+            }
+
+            assertAll(
+                { assert rendered.size() >= 1,
+                    "no rendered WARP_SEG_QC .command.sh found under the task work dir" },
+                { assert rendered.every { it.contains('--pairing lsa') },
+                    "rendered command missing --pairing lsa: " + rendered.join(' --- ') },
+                { assert rendered.every { it.contains('--match-radius-factor 1.5') },
+                    "rendered command missing --match-radius-factor 1.5: " + rendered.join(' --- ') }
+            )
+        }
+    }
 }

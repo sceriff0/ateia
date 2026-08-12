@@ -698,7 +698,7 @@ seg_qc_record = {
     "stages": stage_records,
     "delta_vs_anchor": delta_vs_anchor,
     "matching": {
-        "method": "mutual_nn_centroid",
+        "method": "lsa_centroid",
         "anchor_stage": ANCHOR_STAGE,
         "n_pairs": 20,
     },
