@@ -193,4 +193,59 @@ nextflow_process {
             )
         }
     }
+
+    test("Should pass the configured nuclear markers to the QC script - rendered command") {
+
+        // The teeth for the DAPI-hardcode fix in bin/utils/qc.py. That script used to pick
+        // the overlay channel with `"DAPI" in ch.upper()`, and this process never passed
+        // it params.nuclear_markers at all -- so the resolver could not be used even in
+        // principle. It worked only because the literal test fell back to channel 0, which
+        // CONVERT_IMAGE reserves for the nuclear channel; a CELLTOX panel got a warning on
+        // every slide and would have picked the wrong channel had that invariant changed.
+        //
+        // Asserting the CELLTOX-first override (not just the shipped default) is what makes
+        // this a real check: it proves the flag is built from params.nuclear_markers rather
+        // than hardcoded to the default list.
+        //
+        // `stub` tag but NO `options "-stub"`: -stub never evaluates a script: block, so no
+        // stub run can observe a rendered command. Same shape as
+        // tests/modules/tiled_coarse.nf.test's rendered-command cases.
+        tag "stub"
+
+        when {
+            params {
+                qc_scale_factor = 0.25
+                nuclear_markers = ['CELLTOX', 'DAPI']
+            }
+            process {
+                """
+                input[0] = [
+                    [
+                        patient_id: 'P001',
+                        is_reference: false,
+                        channels: ['DAPI', 'PANCK', 'SMA']
+                    ],
+                    file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            def rendered = []
+            new File("$workDir").eachFileRecurse { f ->
+                if (f.name == '.command.sh' && f.text.contains('generate_registration_qc.py')) {
+                    rendered << f.text
+                }
+            }
+
+            assertAll(
+                { assert rendered.size() >= 1,
+                    "no rendered GENERATE_REGISTRATION_QC .command.sh found under the task work dir" },
+                { assert rendered.every { it.contains('--nuclear-markers CELLTOX DAPI') },
+                    "rendered command did not carry params.nuclear_markers: " + rendered.join(' --- ') }
+            )
+        }
+    }
 }

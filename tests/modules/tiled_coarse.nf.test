@@ -89,4 +89,85 @@ nextflow_process {
             )
         }
     }
+
+    test("Should resolve the nuclear index from channel metadata, not a fixed 0 - rendered command") {
+
+        // The teeth for the DAPI-hardcode fix. `channels` here has NO DAPI and puts the
+        // nuclear marker (CELLTOX, params.nuclear_markers' second entry) at index 1, so a
+        // correct module renders `--nuclear-index 1`. The pre-change module read the fixed
+        // `params.reg_tiled_dapi_index = 0` and rendered `--dapi-index 0` for this same
+        // input -- estimating the whole-slide anchor from CD3 instead of the fiducial.
+        //
+        // `stub` tag but NO `options "-stub"`: -stub never evaluates a script: block, and
+        // the rendered command is the whole assertion. Same shape as the --max-dim case above.
+        tag "stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [ patient_id: 'P001', channels: ['CD3', 'CELLTOX'], is_reference: false ],
+                    file('${projectDir}/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    file('${projectDir}/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            def rendered = []
+            new File("$workDir").eachFileRecurse { f ->
+                if (f.name == '.command.sh' && f.text.contains('tiled_coarse.py')) {
+                    rendered << f.text
+                }
+            }
+
+            assertAll(
+                { assert rendered.size() >= 1,
+                    "no rendered TILED_COARSE .command.sh found under the task work dir" },
+                { assert rendered.every { it.contains('--nuclear-index 1') },
+                    "nuclear index not resolved from channel metadata (expected 1 for ['CD3','CELLTOX']): " + rendered.join(' --- ') },
+                { assert rendered.every { !it.contains('--dapi-index') },
+                    "the renamed flag is gone from the module; --dapi-index survives only as a deprecated Python alias: " + rendered.join(' --- ') }
+            )
+        }
+    }
+
+    test("Should let reg_tiled_nuclear_index override the resolved index - rendered command") {
+
+        tag "stub"
+
+        when {
+            params {
+                reg_tiled_nuclear_index = 0
+            }
+            process {
+                """
+                input[0] = [
+                    [ patient_id: 'P001', channels: ['CD3', 'CELLTOX'], is_reference: false ],
+                    file('${projectDir}/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    file('${projectDir}/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            def rendered = []
+            new File("$workDir").eachFileRecurse { f ->
+                if (f.name == '.command.sh' && f.text.contains('tiled_coarse.py')) {
+                    rendered << f.text
+                }
+            }
+
+            assertAll(
+                { assert rendered.size() >= 1,
+                    "no rendered TILED_COARSE .command.sh found under the task work dir" },
+                // 0 is what metadata resolution would NOT pick here, so this proves the
+                // override is honoured rather than coincidentally agreeing with the resolver.
+                { assert rendered.every { it.contains('--nuclear-index 0') },
+                    "explicit params.reg_tiled_nuclear_index was not honoured: " + rendered.join(' --- ') }
+            )
+        }
+    }
 }

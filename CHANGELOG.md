@@ -62,6 +62,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   checkpoints to be present.
 
 ### Changed
+- **`reg_tiled_dapi_index` → `reg_tiled_nuclear_index`, default `0` → `null`.** `null`
+  resolves the index from the slide's own channel metadata via
+  `MarkerUtils.nuclearIndex`, matching how `SEGMENT`'s CellSAM backend already resolves
+  it (`lib/SegBackends.groovy`); an integer overrides. `TILED_COARSE` and
+  `TILED_REG_TILE` fail loudly, naming the configured markers, when no nuclear channel
+  is present. The Python flag is now `--nuclear-index`, with `--dapi-index` kept as a
+  deprecated alias so hand-run commands still work. `tiled_io.dapi_channel` is renamed
+  `nuclear_channel`. **Breaking for anyone passing `--reg_tiled_dapi_index` on the
+  command line or in a params file** — rename it.
+- `bin/tiled_coarse.py`'s range check was `index >= min(C_ref, C_mov)`, which a
+  negative index passes before silently reading the *last* channel through Python's
+  wraparound. Now `0 <= index < min(...)`.
+
 - **The tiled (STARE) steps now reserve memory derived from the parameter that sets it,
   instead of a flat constant.** Every tiled process was designed so its peak is a function of
   a *parameter* rather than of the slide (`tiled_adapter.nf`'s header). Measured peak RSS on
@@ -250,6 +263,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `lib/WarpBackends.groovy`, not from the param, so the two can never disagree.
 
 ### Fixed
+- **Three `DAPI` hardcodes removed; the nuclear/fiducial channel is now resolved the
+  same way everywhere.** `params.nuclear_markers` was already the declared source of
+  truth (`lib/MarkerUtils.groovy`, `bin/utils/metadata.py`), but three sites still
+  spelled `DAPI` themselves:
+  - `bin/utils/qc.py`'s `create_registration_qc` picked the overlay channel with
+    `"DAPI" in ch.upper()`. `GENERATE_REGISTRATION_QC` was never handed
+    `nuclear_markers` at all, so the resolver could not be used even in principle. It
+    now receives `--nuclear-markers` (same `MarkerUtils.markerList` normalisation
+    `SPLIT_CHANNELS` uses) and resolves via `metadata.pick_nuclear_index`. The old
+    code was correct only by coincidence — it fell back to channel 0, which
+    `CONVERT_IMAGE` reserves for the nuclear channel — so the visible symptom was a
+    `No DAPI channel found ... Falling back to channel 0` warning on every slide of a
+    CellTox panel, and the latent one was picking the wrong channel had that promotion
+    invariant ever changed. `create_dapi_overlay` is renamed `create_nuclear_overlay`.
+  - `bin/register.py`'s `--reference-markers` defaulted to `["DAPI", "SMA"]`, a
+    cohort-specific pair matched against the **filename** — which the rest of the
+    pipeline forbids (channel identity comes from metadata). The default is now `None`;
+    with neither `--reference` nor `--reference-markers`, the alphabetically first
+    slide is used. Unreachable from the pipeline either way: `modules/local/register.nf`
+    always passes `--reference`.
+  - STARE's channel index was the fixed param `reg_tiled_dapi_index = 0`, restating an
+    invariant `CONVERT_IMAGE` already guarantees under one marker's name.
+
 - **A scale disagreement between an image and `params.pixel_size` was silent.**
   `params.pixel_size` is the single owner of every µm conversion in the pipeline — the
   measurements in `cells.geojson`, the published pyramid's `PhysicalSize`, InstantSeg's

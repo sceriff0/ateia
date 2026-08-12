@@ -88,7 +88,18 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="STARE coarse anchor + tile plan.")
     ap.add_argument("--reference", required=True)
     ap.add_argument("--moving", required=True)
-    ap.add_argument("--dapi-index", type=int, default=0)
+    ap.add_argument(
+        "--nuclear-index",
+        "--dapi-index",  # deprecated alias, kept so hand-run commands keep working
+        dest="nuclear_index",
+        type=int,
+        default=0,
+        help=(
+            "Index of the nuclear/fiducial channel the transform is estimated from. "
+            "The pipeline resolves this from channel metadata (MarkerUtils) and passes "
+            "it explicitly; 0 is CONVERT_IMAGE's promoted position."
+        ),
+    )
     ap.add_argument("--tile", type=int, default=2048)
     ap.add_argument("--halo", type=int, default=256)
     ap.add_argument(
@@ -108,7 +119,7 @@ def main(argv=None) -> int:
     logger.info(
         f"coarse: start | reference={Path(a.reference).name} "
         f"({_size_gb(a.reference):.2f} GB) moving={Path(a.moving).name} "
-        f"({_size_gb(a.moving):.2f} GB) | dapi_index={a.dapi_index} model={a.model} "
+        f"({_size_gb(a.moving):.2f} GB) | nuclear_index={a.nuclear_index} model={a.model} "
         f"max_dim={a.max_dim} tile={a.tile} halo={a.halo}"
     )
 
@@ -129,22 +140,24 @@ def main(argv=None) -> int:
                 f"decimation 1/{factor} -> ~{w // factor}x{h // factor} thumbnail, "
                 f"streamed in {band_rows_for(w, factor)}-row bands"
             )
-            if a.dapi_index >= min(_c, _mc):
+            # `not 0 <= i < C`, not `i >= C`: a negative index passes the upper-bound
+            # test and then silently reads the LAST channel via Python's wraparound.
+            if not 0 <= a.nuclear_index < min(_c, _mc):
                 # read_decimated raises on this, but naming BOTH channel counts up front turns
                 # "index out of range for C=3" into an actionable message.
                 logger.warning(
-                    f"coarse: --dapi-index {a.dapi_index} is out of range for "
+                    f"coarse: --nuclear-index {a.nuclear_index} is out of range for "
                     f"reference C={_c} / moving C={_mc}"
                 )
-            ref_dapi = _timed_read(ref_src, a.dapi_index, factor, "reference")
-            mov_dapi = _timed_read(mov_src, a.dapi_index, factor, "moving")
+            ref_nuc = _timed_read(ref_src, a.nuclear_index, factor, "reference")
+            mov_nuc = _timed_read(mov_src, a.nuclear_index, factor, "moving")
         finally:
             mov_close()
     finally:
         ref_close()
 
     t0 = time.perf_counter()
-    m0_ds, coarse_tre_ds, n_inliers = estimate_rigid(ref_dapi, mov_dapi, model=a.model)
+    m0_ds, coarse_tre_ds, n_inliers = estimate_rigid(ref_nuc, mov_nuc, model=a.model)
     logger.info(f"coarse: anchor estimated in {time.perf_counter() - t0:.1f}s")
     # The fit lives in thumbnail pixels; everything downstream (tile plan, per-tile source
     # regions, the stitch) is full-resolution, so lift both the map and its residual here.
@@ -187,7 +200,7 @@ def main(argv=None) -> int:
     if n_inliers < 10:
         logger.warning(
             f"coarse: only {n_inliers} inliers support M0 -- treat this slide's anchor as "
-            f"unverified (low tissue texture, wrong --dapi-index, or a failed match)"
+            f"unverified (low tissue texture, wrong --nuclear-index, or a failed match)"
         )
 
     tiles = tile_grid(w, h, a.tile, a.halo)

@@ -1,10 +1,14 @@
 # Parameters
 
-<p class="standfirst">The complete, canonical parameter surface — all 75 parameters, grouped by
-pipeline stage, each with the default that ships in <code>nextflow.config</code>. Nothing here is
-approximate: <code>tests/test_no_duplicate_param_defaults.py</code> forbids a second declaration of
-any default anywhere else in the repository, so this page and the config cannot disagree about a
-value.</p>
+<p class="standfirst">The complete parameter surface — all 75 parameters, grouped by pipeline
+stage, each with the default that ships in <code>nextflow.config</code>. That file is the single
+source of truth: <code>tests/test_no_duplicate_param_defaults.py</code> forbids a second
+declaration of any default in the pipeline code it scans (<code>main.nf</code>,
+<code>modules/local/</code>, <code>conf/</code>, <code>workflows/</code>,
+<code>subworkflows/</code>, <code>lib/</code>), and <code>tests/check_param_consistency.py</code>
+holds <code>nextflow_schema.json</code> to the same defaults. This page is <em>not</em>
+machine-checked against either — update it by hand when a default changes, and read
+<code>nextflow config -flat</code> for the values a specific run actually resolved.</p>
 
 !!! abstract "Canonical sources"
     - **Defaults** — `nextflow.config` (`params { … }`)
@@ -72,7 +76,7 @@ whole-slide alignment) and **STARE tiled** (JVM-free, fully parallel, laptop-fri
 
 | Parameter | Default | Description |
 |---|---|---|
-| `memory_mode` | `high` | `low` (BRISK/RANSAC, small dims), `medium`, or `high` (SuperPoint/SuperGlue, larger dims). |
+| `memory_mode` | `high` | Registration resolution preset (processed / non-rigid dims): `high` = 2048/4096 px, `medium` = 1024/4096 px, `low` = 256/1024 px with a tiled warp. All three use SuperPoint + SuperGlue with 5000 features — the preset changes resolution, not the feature matcher. Source: `MEMORY_PRESETS` in `bin/utils/valis_config.py`. |
 | `reg_micro_reg_fraction` | `0.125` | Image fraction used for micro-registration. |
 | `reg_max_image_dim` | `4000` | Max cached image dimension during registration. |
 | `reg_micro_reg` | `2` | Micro-registration depth (nested, default MAX): `0` = none, `1` = micro-rigid only (refines `slide.M`), `2` = + micro non-rigid (`register_micro`). At `>=1` the QC `rigid` stage means affine ∘ micro-rigid. |
@@ -93,7 +97,7 @@ params apply only when `--registration_method tiled`.
 
 | Parameter | Default | Description |
 |---|---|---|
-| `reg_tiled_dapi_index` | `0` | DAPI channel index used to estimate the transform. |
+| `reg_tiled_nuclear_index` | `null` | Nuclear/fiducial channel index used to estimate the transform. `null` resolves it from the slide's channel metadata against `nuclear_markers`; set an integer only to override. |
 | `reg_tiled_tile` | `2048` | Tile core size (px); also the mesh-grid resolution. |
 | `reg_tiled_halo` | `256` | Per-tile read halo (px) for registration context. |
 | `reg_tiled_gate_tre` | `1.0` | Refine only tiles whose rigid-stage TRE (px) exceeds this. |

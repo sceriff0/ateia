@@ -42,7 +42,7 @@ from reg_benchmark import benchmark, feature_residual  # noqa: E402
 logger = get_logger(__name__)
 
 
-def _dapi(path, index):
+def _nuclear(path, index):
     arr = np.asarray(tifffile.imread(str(path)))
     if arr.ndim == 2:
         return arr.astype(np.float32)
@@ -59,18 +59,29 @@ def main(argv=None) -> int:
     ap.add_argument(
         "--moving", default=None, help="optional: also report the before residual"
     )
-    ap.add_argument("--dapi-index", type=int, default=0)
+    ap.add_argument(
+        "--nuclear-index",
+        "--dapi-index",  # deprecated alias, kept so hand-run commands keep working
+        dest="nuclear_index",
+        type=int,
+        default=0,
+        help=(
+            "Index of the nuclear/fiducial channel the transform is estimated from. "
+            "The pipeline resolves this from channel metadata (MarkerUtils) and passes "
+            "it explicitly; 0 is CONVERT_IMAGE's promoted position."
+        ),
+    )
     ap.add_argument("--output", required=True, help="output metrics JSON")
     ap.add_argument(
         "--method", default=None, help="label recorded in the report (e.g. valis/tiled)"
     )
     a = ap.parse_args(argv)
 
-    ref = _dapi(a.reference, a.dapi_index)
-    reg = _dapi(a.registered, a.dapi_index)
+    ref = _nuclear(a.reference, a.nuclear_index)
+    reg = _nuclear(a.registered, a.nuclear_index)
 
     if a.moving:
-        report = benchmark(ref, _dapi(a.moving, a.dapi_index), reg)
+        report = benchmark(ref, _nuclear(a.moving, a.nuclear_index), reg)
     else:
         report = {"after": feature_residual(ref, reg)}
     report["method"] = a.method
