@@ -17,9 +17,14 @@
     Rendering both from ONE list per module removes the second copy entirely: the stub
     block asks for the same `tools` list the script block does.
 
-    PRECEDENT. modules/local/segment.nf already renders its version rows from
-    lib/SegBackends.groovy for exactly this reason. This class generalises that to the
-    envelope every module shares.
+    SEGMENT.NF IS A CONSUMER, NOT THE PRECEDENT. It used to be the precedent:
+    lib/SegBackends.groovy held each backend's version rows PRE-RENDERED and
+    modules/local/segment.nf spliced them in. That relationship is now inverted —
+    SegBackends stores bare module NAMES (`versionTools`, the same key
+    lib/WarpBackends.groovy uses) and this class renders them, so segment.nf goes
+    through ProcessEnvelope exactly like every other module. It is only unusual in
+    that its tool list is chosen at runtime from params.seg_method rather than
+    written literally at the call site.
 
     INDENTATION IS THE CALLER'S PROBLEM, AND THAT IS DELIBERATE. Nextflow applies
     stripIndent() to the finished script, so a pre-indented block from here would fight
@@ -80,10 +85,11 @@ class ProcessEnvelope {
      * `python:` is prepended automatically — at the time this class was introduced, 27
      * of the then-28 modules reported it (`aggregate_size_logs.nf`, bash-only, was the
      * sole exception; two others called `python3` instead of `python` — still a
-     * `python:` report, just a different interpreter name, not a non-report). One of
-     * those 28 modules (`warp_seg_qc_tiled.nf`) was later merged away, so the count as
-     * of this comment is 27 of 27. Pass tools in the order they should appear in the
-     * report.
+     * `python:` report, just a different interpreter name, not a non-report). Four of
+     * those 28 modules have since gone (`compile_panel.nf`, `phenotype.nf`,
+     * `tiled_register.nf`, `warp_seg_qc_tiled.nf`), so the count as of this comment is
+     * 23 of 24 — still the one bash-only exception. Pass tools in the order they should
+     * appear in the report.
      */
     static String versions(String process, List<String> tools) {
         def lines = ['cat <<-END_VERSIONS > versions.yml',

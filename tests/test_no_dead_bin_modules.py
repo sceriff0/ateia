@@ -1,11 +1,24 @@
-"""Guard test: every bin/utils/*.py module must have a real importer.
+"""Guard test: every bin/utils/*.py module must have a real PRODUCTION importer.
 
 This repo uses two import conventions for `bin/utils/*.py` (because many
 scripts do `sys.path.insert(0, .../bin/utils)` before importing):
 
 - flat:      `from image_utils import ensure_dir`
 - package:   `from utils.metadata import ...`, `from utils import cell_pairs as cp`
-- relative:  `from .gmm import fit_two_component_gmm` (within bin/utils/phenotyping/)
+
+"Real importer" means a module under `bin/` (a script or another `bin/utils/`
+module) -- not a test. The haystack is deliberately split into a production
+half (`_production_haystack_files()`, everything under `bin/`) and a test
+half (`_test_haystack_files()`, everything under `tests/`): only the
+production half counts as proof of life for the main guard
+(`test_bin_utils_module_has_a_real_importer`). A module imported
+*exclusively* by its own test file is exactly the false "alive" this split
+exists to catch. Earlier this test merged both halves into one haystack, so
+a module wired up only for its own test (never called from any real script)
+counted as "used" -- a guard that could never actually fail this way is not
+evidence of anything. `tiled_pipeline.py` is the one module that genuinely
+has no production importer; it is allowlisted below with its reason rather
+than silently passing through the old merged haystack.
 
 A naive "does the bare word 'tiling' appear anywhere" scan produces false
 negatives for short names (`qc`, `retry`, `validation` all appear constantly
@@ -16,18 +29,18 @@ counts genuine `import`/`from ... import ...` statements, resolved against
 each module's basename and its dotted path under `utils.`.
 
 bin/utils/__init__.py is deliberately excluded from the set of files this
-test treats as "importers". Historically it barrel re-exported `cli.py`
-(`create_base_parser`, `setup_logging_from_args`, `add_input_output_args`)
-and `constants.py` (`ExitCode`, `DEFAULT_FOV_SIZE`, etc.) even though
-nothing downstream ever consumed those re-exported names (verified by
-exhaustive grep across bin/, tests/, modules/, conf/, docs/, and
-containers/ for every symbol in both modules). Counting that barrel import
-as "usage" would have hidden both modules' deadness behind their own
-package's re-export statement -- the exact false-negative this exclusion
-exists to prevent. Both modules have since been deleted (see git history);
-__init__.py now only re-exports `logger.py`, which is independently alive
-via direct imports elsewhere (see `test_known_alive_modules_are_not_false_
-flagged`). Modules used elsewhere via `from logger import ...`, `from
+test treats as "importers", as defense in depth against a barrel re-export
+being counted as usage. Historically it barrel re-exported `cli.py`
+(`create_base_parser`, `setup_logging_from_args`, `add_input_output_args`),
+`constants.py` (`ExitCode`, `DEFAULT_FOV_SIZE`, etc.), and later `logger.py`
+(`log_timing`, `timed`) even though nothing downstream ever consumed those
+re-exported names (verified by exhaustive grep across bin/, tests/,
+modules/, conf/, docs/, and containers/ for every symbol in all three
+modules). Counting that barrel import as "usage" would have hidden each
+module's deadness behind its own package's re-export statement -- the exact
+false-negative this exclusion exists to prevent. All three re-export blocks
+have since been deleted (see git history); __init__.py currently re-exports
+nothing. Modules used elsewhere via `from logger import ...`, `from
 metadata import ...`, etc. are unaffected, since those imports come
 directly from consumer scripts, not through the barrel.
 
@@ -41,8 +54,8 @@ import <a_symbol_defined_inside_that_module>` back to the module that
 defines it, since the symbol's name need not match the module's basename
 (e.g. `get_logger` vs. `logger.py`). Not currently triggered -- verified:
 `logger.py` is alive via direct imports (`from utils.logger import ...` /
-`from logger import ...`) independent of the barrel, and no other
-bin/utils module is consumed exclusively through a barrel-exported symbol.
+`from logger import ...`), and no bin/utils module is consumed exclusively
+through a barrel-exported symbol (the barrel currently re-exports nothing).
 A future module that *is* exposed and consumed only that way would need
 either a direct import somewhere or an ALLOWLIST entry to avoid a false
 "dead" flag.
@@ -81,7 +94,18 @@ HAYSTACK_EXCLUDE = {UTILS_DIR / "__init__.py"}
 #                         warning on every run, not just skipped quietly.
 _ALLOWED_STATUSES = {"permanent", "pending_removal"}
 
-ALLOWLIST: dict[str, dict[str, str]] = {}
+ALLOWLIST: dict[str, dict[str, str]] = {
+    "tiled_pipeline": {
+        "status": "permanent",
+        "reason": (
+            "No production importer: only tests/test_tiled_pipeline.py and "
+            "tests/test_reg_benchmark.py import it. It is a deliberate "
+            "test/benchmark oracle for the STARE registration path, documented "
+            "at CHANGELOG.md:487-488 -- not dead code, just never called from "
+            "a production script."
+        ),
+    },
+}
 
 
 def _candidate_modules() -> list[Path]:
@@ -94,14 +118,27 @@ def _candidate_modules() -> list[Path]:
     return mods
 
 
-def _haystack_files() -> list[Path]:
-    """Every .py file under bin/ or tests/ that could plausibly import a module."""
-    files = list(BIN_DIR.rglob("*.py")) + list(TESTS_DIR.rglob("*.py"))
+def _production_haystack_files() -> list[Path]:
+    """Every .py file under bin/ (scripts and other bin/utils/ modules).
+
+    The only files whose imports count as proof a module is genuinely used. A test
+    importing a module does not belong here; see the module docstring for why.
+    """
+    files = list(BIN_DIR.rglob("*.py"))
     return [f for f in files if f not in HAYSTACK_EXCLUDE]
 
 
+def _test_haystack_files() -> list[Path]:
+    """Every .py file under tests/.
+
+    Only used for allowlist bookkeeping (e.g. confirming a kept-for-tests module
+    really is reached from a test); never as proof of life for the main guard.
+    """
+    return list(TESTS_DIR.rglob("*.py"))
+
+
 def _dotted_parts(module_path: Path) -> tuple[str, ...]:
-    """Dotted path parts relative to bin/utils, e.g. ('phenotyping', 'gmm')."""
+    """Dotted path parts relative to bin/utils, e.g. ('image_utils',)."""
     rel = module_path.relative_to(UTILS_DIR).with_suffix("")
     return rel.parts
 
@@ -116,19 +153,17 @@ def _imported_leaf_names(py_file: Path) -> set[str]:
     leaves: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            # import tiling / import utils.tiling / import utils.phenotyping.gmm
+            # import tiling / import utils.tiling
             for alias in node.names:
                 leaves.add(alias.name.split(".")[-1])
         elif isinstance(node, ast.ImportFrom):
             if node.module:
                 mod_parts = node.module.split(".")
-                # from tiling import X / from utils.tiling import X /
-                # from .tiling import X / from ..phenotyping.gmm import X
+                # from tiling import X / from utils.tiling import X
                 leaves.add(mod_parts[-1])
-                # from utils import cell_pairs / from utils.phenotyping import gmm:
-                # the package itself is named, and the real submodule reference
-                # is one of the imported names.
-                if mod_parts[-1] in ("utils", "phenotyping"):
+                # from utils import cell_pairs: the package itself is named, and
+                # the real submodule reference is one of the imported names.
+                if mod_parts[-1] == "utils":
                     for alias in node.names:
                         leaves.add(alias.name)
             else:
@@ -164,31 +199,76 @@ def test_bin_utils_module_has_a_real_importer(module_path: Path) -> None:
         entry = ALLOWLIST[basename]
         pytest.skip(f"allowlisted ({entry['status']}): {entry['reason']}")
 
-    haystack = _haystack_files()
+    haystack = _production_haystack_files()
     assert _is_imported_anywhere(module_path, haystack), (
         f"bin/utils/{module_path.relative_to(UTILS_DIR)} is not imported by any real "
-        "import statement (flat, package, or relative form) under bin/ or tests/. "
-        "If it's genuinely dead, delete it; if it should be kept, add it to "
-        "ALLOWLIST in this test with a reason."
+        "import statement (flat or package form) under bin/. A test-only import does "
+        "not count -- see the module docstring. If it's genuinely dead, delete it; if "
+        "it should be kept, add it to ALLOWLIST in this test with a reason."
     )
 
 
 def test_known_alive_modules_are_not_false_flagged() -> None:
     """Sanity check the matcher itself against modules known to be genuinely used."""
-    haystack = _haystack_files()
-    # logger.py is the one remaining barrel-exported-but-genuinely-alive
-    # module: bin/utils/__init__.py re-exports get_logger/configure_logging/
-    # etc., but this test must confirm the matcher finds it alive through
-    # *direct* imports (`from utils.logger import ...` / `from logger import
-    # ...`), independent of that barrel -- exactly the case the module
-    # docstring's design rationale (and its documented latent limitation)
-    # argues about.
+    haystack = _production_haystack_files()
+    # logger.py is alive purely through direct imports (`from utils.logger import
+    # ...` / `from logger import ...`) -- bin/utils/__init__.py currently re-exports
+    # nothing, so this also confirms the matcher doesn't depend on the (excluded)
+    # barrel to find it.
     for name in ("image_utils", "validation", "metadata", "cell_pairs", "logger"):
         candidates = [p for p in CANDIDATES if p.stem == name]
         assert candidates, f"expected to find bin/utils/{name}.py among candidates"
         assert _is_imported_anywhere(candidates[0], haystack), (
             f"matcher false-negatived a module known to be alive: {name}"
         )
+
+
+def test_test_only_import_is_not_proof_of_life(tmp_path: Path) -> None:
+    """A module imported ONLY by a test must NOT count as alive.
+
+    This is the specific hole the production/test haystack split closes. Before the
+    split, `_haystack_files()` merged bin/ and tests/ into one list, so a module
+    wired up only for its own test (never called from any real script) satisfied
+    `_is_imported_anywhere` -- proof of life from a test-only import. Plants a test
+    file that imports a module name found nowhere else, and asserts: the test
+    haystack DOES see the import (the plant is realistic), but the production
+    haystack -- the only one the main guard consults -- does not, which is exactly
+    what would make the main guard flag such a module as dead.
+    """
+    fake_module_name = "planted_dead_module"
+    fake_test = tmp_path / "test_planted_dead_module.py"
+    fake_test.write_text(f"from {fake_module_name} import unused\n")
+
+    assert fake_module_name in _imported_leaf_names(fake_test), (
+        "sanity check failed: the plant itself isn't realistic"
+    )
+
+    production_leaves: set[str] = set()
+    for f in _production_haystack_files():
+        production_leaves |= _imported_leaf_names(f)
+    assert fake_module_name not in production_leaves, (
+        "a module imported only by a test must not be found in the real "
+        "production haystack"
+    )
+
+
+def test_allowlisted_tiled_pipeline_has_no_production_importer() -> None:
+    """Confirms the tiled_pipeline ALLOWLIST reason is still true, not stale prose.
+
+    tiled_pipeline.py should have zero production importers (it's kept as a
+    test/benchmark oracle, not a live dependency) but at least one test importer
+    (otherwise it isn't even that, and should be deleted rather than allowlisted).
+    """
+    candidates = [p for p in CANDIDATES if p.stem == "tiled_pipeline"]
+    assert candidates, "expected to find bin/utils/tiled_pipeline.py among candidates"
+    assert not _is_imported_anywhere(candidates[0], _production_haystack_files()), (
+        "tiled_pipeline.py now has a production importer -- the ALLOWLIST entry's "
+        "reason (test/benchmark-only oracle) is stale; remove it from ALLOWLIST."
+    )
+    assert _is_imported_anywhere(candidates[0], _test_haystack_files()), (
+        "tiled_pipeline.py has neither a production nor a test importer -- it's "
+        "genuinely dead, not a kept oracle; delete it instead of allowlisting."
+    )
 
 
 def test_allowlist_entries_declare_a_valid_status() -> None:

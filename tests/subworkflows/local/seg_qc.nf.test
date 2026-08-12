@@ -16,6 +16,15 @@
  *     registration.nf.test sets skip_registration_qc = true in every params block (so it
  *     never reaches reg_qc >= 1 at all) and add_cycle.nf.test is VALIS-only.
  *
+ *  3. That the QC segments with the RUN'S OWN segmenter. SEG_QC_SEGMENT is `SEGMENT`
+ *     aliased, so params.seg_method selects the backend here exactly as it does for the
+ *     shipped masks. Until this was wired, SEG_QC_GEOJSON ran StarDist unconditionally --
+ *     which at the shipped default (instantseg) scored a different segmenter's cells than
+ *     the run shipped, and at stock defaults could not run at all. Nothing about that was
+ *     observable from a green run: the failure lands in the QC errorStrategy's 'ignore'
+ *     branch. The last two cases below read the backend back out of the stub's
+ *     versions.yml, which is the one place stub mode records it.
+ *
  * The method arrives as an ARGUMENT (input[4]), never from params.registration_method. The
  * params blocks below still set the param, and deliberately so: in the two valis cases the
  * param says 'valis' and in the tiled case it says 'tiled', so if the argument were ever
@@ -317,6 +326,116 @@ nextflow_workflow {
                 // alone would NOT catch the mutation above -- see the header comment).
                 { assert path(workflow.out.metrics[0][1]).json.stage_order ==
                          ['native', 'rigid', 'non_rigid', 'micro'] }
+            )
+        }
+    }
+
+    /*
+     * The two cases below differ ONLY in params.seg_method, and assert the backend that
+     * reaches the QC's segmentation task. One case alone would not distinguish "follows
+     * the parameter" from "hardcoded to this value" -- which is precisely the bug being
+     * fixed, in the opposite direction.
+     *
+     * versions.yml is where a stub run records it: SEGMENT's stub block reports the
+     * chosen backend's OWN TOOLS (lib/SegBackends.groovy's `versionTools`, rendered by
+     * lib/ProcessEnvelope.groovy). It used to report a bare `seg_method: ${params.seg_method}`
+     * row instead -- a key no real run ever emitted, because the script: and stub: heredocs
+     * were hand-written separately and `-stub` never evaluates script:. The tool rows are a
+     * strictly stronger witness: they name the stack the backend actually loads, so a run
+     * that reported the right backend NAME while rendering another backend's probes would
+     * now be caught here too. The masks themselves are `touch`ed and carry no backend
+     * identity, and the container directive is never exercised without an engine.
+     */
+    test("the QC segments with params.seg_method - instantseg") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                outdir = "$outputDir"
+                registration_method = 'valis'
+                seg_method = 'instantseg'
+            }
+            workflow {
+                """
+                input[0] = Channel.fromList([
+                    [[patient_id: 'P001', id: 'P001_ref',  is_reference: true,  channels: ['DAPI', 'PANCK']],
+                     file('$projectDir/tests/testdata/P001_ref.ome.tiff',  checkIfExists: true)],
+                    [[patient_id: 'P001', id: 'P001_mov1', is_reference: false, channels: ['DAPI', 'CD3']],
+                     file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)]
+                ])
+                input[1] = Channel.of(['P001', file('$projectDir/tests/testdata/P001_merged_quant.csv', checkIfExists: true)])
+                input[2] = Channel.empty()
+                input[3] = Channel.empty()
+                input[4] = 'valis'
+                """
+            }
+        }
+
+        then {
+            def seg_versions = workflow.out.versions.collect { new File(it.toString()) }
+                .findAll { it.text.contains('SEG_QC_SEGMENT') }
+
+            assertAll(
+                { assert workflow.success },
+                { assert seg_versions.size() == 1,
+                    "expected exactly one SEG_QC_SEGMENT versions.yml (the subworkflow " +
+                    ".first()s it); got " + seg_versions.size() },
+                { assert seg_versions.every { it.text.contains('instanseg: stub') },
+                    "the QC did not segment with params.seg_method: " + seg_versions*.text.join(' --- ') },
+                { assert seg_versions.every { !it.text.contains('cellSAM') },
+                    "the QC reported the cellsam backend's tools: " + seg_versions*.text.join(' --- ') },
+                // One reference + one moving slide in, one scored pair out. Pins that the
+                // added segmentation step did not drop or duplicate a slide on the way to
+                // the warp.
+                { assert workflow.out.metrics.size() == 1 }
+            )
+        }
+    }
+
+    test("the QC segments with params.seg_method - cellsam") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                outdir = "$outputDir"
+                registration_method = 'valis'
+                seg_method = 'cellsam'
+            }
+            workflow {
+                """
+                input[0] = Channel.fromList([
+                    [[patient_id: 'P001', id: 'P001_ref',  is_reference: true,  channels: ['DAPI', 'PANCK']],
+                     file('$projectDir/tests/testdata/P001_ref.ome.tiff',  checkIfExists: true)],
+                    [[patient_id: 'P001', id: 'P001_mov1', is_reference: false, channels: ['DAPI', 'CD3']],
+                     file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)]
+                ])
+                input[1] = Channel.of(['P001', file('$projectDir/tests/testdata/P001_merged_quant.csv', checkIfExists: true)])
+                input[2] = Channel.empty()
+                input[3] = Channel.empty()
+                input[4] = 'valis'
+                """
+            }
+        }
+
+        then {
+            def seg_versions = workflow.out.versions.collect { new File(it.toString()) }
+                .findAll { it.text.contains('SEG_QC_SEGMENT') }
+
+            assertAll(
+                { assert workflow.success },
+                // Non-vacuity: `.every` on an empty list is true, so an unrun (or renamed)
+                // SEG_QC_SEGMENT would satisfy the backend assertion below. Observed --
+                // this case stayed green under a sabotage the instantseg case caught.
+                { assert seg_versions.size() == 1,
+                    "expected exactly one SEG_QC_SEGMENT versions.yml; got " + seg_versions.size() },
+                { assert seg_versions.every { it.text.contains('cellSAM: stub') },
+                    "the QC did not segment with params.seg_method: " + seg_versions*.text.join(' --- ') },
+                { assert seg_versions.every { !it.text.contains('instanseg') },
+                    "the QC reported the instantseg backend's tools: " + seg_versions*.text.join(' --- ') }
             )
         }
     }

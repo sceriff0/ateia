@@ -99,4 +99,59 @@ nextflow_process {
             )
         }
     }
+
+    test("Should render the configured nuclear markers, not a hardcoded DAPI - rendered command") {
+
+        // Tagged `stub` so CI's blocking `nf-test test --tag stub` gate runs it, but
+        // deliberately WITHOUT `options "-stub"` -- same shape as
+        // tests/modules/preprocess.nf.test's and seg_qc_geojson.nf.test's rendered-command
+        // cases. `-stub` never evaluates a `script:` block, so no stub run can observe
+        // what merge_quant_csvs.py is invoked with, and that invocation is what changed.
+        //
+        // Two behaviours in the merge depend on knowing which column is the fiducial:
+        // it is protected from being overwritten on an add_cycle run, and it leads the
+        // marker block. Both were pinned to the literal string "DAPI", so a CELLTOX
+        // panel silently lost the protection and the ordering. A non-default marker
+        // list is used here precisely so a regression to the literal cannot pass.
+        tag "stub"
+
+        when {
+            params {
+                nuclear_markers = ['CELLTOX']
+            }
+            process {
+                """
+                input[0] = [
+                    [patient_id: 'P001', channels: ['CELLTOX', 'PANCK', 'SMA'], is_reference: true],
+                    [
+                        file('${projectDir}/tests/testdata/sample_DAPI_intensity.csv', checkIfExists: true),
+                        file('${projectDir}/tests/testdata/sample_PANCK_intensity.csv', checkIfExists: true)
+                    ],
+                    file('${projectDir}/tests/testdata/sample_morphology.csv', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            // Nextflow lays tasks out as <workDir>/<2 hex>/<30 hex>/.command.sh.
+            def rendered = []
+            new File("$workDir").eachFileRecurse { f ->
+                if (f.name == '.command.sh' && f.text.contains('merge_quant_csvs.py')) {
+                    rendered << f.text
+                }
+            }
+
+            assertAll(
+                { assert rendered.size() >= 1,
+                    "no rendered MERGE_QUANT_CSVS .command.sh found under the task work dir" },
+                { assert rendered.every { it.contains('--nuclear-markers CELLTOX') },
+                    "rendered command does not carry the configured marker: " + rendered.join(' --- ') },
+                // The literal must not survive: params.nuclear_markers says CELLTOX only,
+                // so a rendered 'DAPI' would mean the marker list was not consulted.
+                { assert rendered.every { !(it =~ /--nuclear-markers[^\n]*DAPI/) },
+                    "rendered command carries DAPI despite nuclear_markers=['CELLTOX']: " + rendered.join(' --- ') }
+            )
+        }
+    }
 }

@@ -325,7 +325,7 @@ nextflow_pipeline {
 
         when {
             params {
-                input = "$projectDir/tests/testdata/valid_checkpoint_postprocessing.csv"
+                input = "$projectDir/tests/testdata/valid_checkpoint_segmented.csv"
                 outdir = "$outputDir"
                 start = "postprocessing"
 
@@ -866,7 +866,7 @@ nextflow_pipeline {
 
         when {
             params {
-                input = "$projectDir/tests/testdata/valid_checkpoint_postprocessing.csv"
+                input = "$projectDir/tests/testdata/valid_checkpoint_segmented.csv"
                 outdir = "$outputDir"
                 start = "postprocessing"
 
@@ -879,12 +879,23 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // One patient, one image -> exactly one SEGMENT and one merge. A second
-                // read of the sheet (or a lost images_count) would change these.
+                // One patient, TWO registered images -> two per-image SPLIT_CHANNELS and
+                // one per-patient merge. A second read of the sheet (or a lost
+                // images_count) would change these. This asserted one
+                // MIRAGE:POSTPROCESSING:SEGMENT until the segmentation step was split
+                // out: SEGMENT is neither under POSTPROCESSING nor run at all at
+                // --start postprocessing, where the masks come from the checkpoint --
+                // so the old assertion could only ever have matched zero tasks. It was
+                // masked because this test pointed at the pre-segmentation-step
+                // 4-column fixture and died in validateInputCSV before reaching here.
                 { assert workflow.trace.tasks().findAll {
-                    it.name.startsWith('MIRAGE:POSTPROCESSING:SEGMENT') }.size() == 1 },
+                    it.name.startsWith('MIRAGE:POSTPROCESSING:SPLIT_CHANNELS') }.size() == 2 },
                 { assert workflow.trace.tasks().findAll {
                     it.name.startsWith('MIRAGE:POSTPROCESSING:MERGE_QUANT_CSVS') }.size() == 1 },
+                // --start postprocessing REUSES the checkpoint's masks; re-segmenting
+                // here would silently discard them.
+                { assert workflow.trace.tasks().findAll {
+                    it.name.contains(':SEGMENT') }.size() == 0 },
                 { assert path("$outputDir/csv/postprocessed.csv").exists() }
             )
         }

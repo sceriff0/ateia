@@ -8,7 +8,7 @@ nextflow_process {
     tag "modules_local"
     tag "seg_qc_geojson"
 
-    test("Should emit a cell GeoJSON for a native slide - stub") {
+    test("Should trace a cell mask into a GeoJSON named for the slide - stub") {
 
         tag "stub"
         options "-stub"
@@ -17,8 +17,9 @@ nextflow_process {
             process {
                 """
                 input[0] = [
-                    [ patient_id: 'P001', channels: ['DAPI', 'CD3', 'CD8'], is_reference: false ],
-                    file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)
+                    [ patient_id: 'P001', channels: ['DAPI', 'CD3', 'CD8'],
+                      is_reference: false, qc_slide: 'P001_mov1' ],
+                    file('$projectDir/tests/testdata/P001_cell_mask.tif', checkIfExists: true)
                 ]
                 """
             }
@@ -31,40 +32,45 @@ nextflow_process {
             with(process.out.geojson) {
                 assert size() == 1
                 assert get(0).get(0).patient_id == 'P001'
-                assert get(0).get(1).toString().endsWith('.geojson')
+                // The stem is meta.qc_slide, NOT the mask's filename. WARP_SEG_QC looks the
+                // slide up in the registrar by this name, and the mask cannot supply it: the
+                // stardist backend names masks after the input image stem while instantseg
+                // and cellsam name them after ext.prefix.
+                assert get(0).get(1).toString().endsWith('P001_mov1.geojson')
             }
         }
     }
 
-    test("Should render the shared StarDist flags, including --tolerance - rendered command") {
+    test("Should invoke mask_to_geojson.py with --tolerance and NO segmentation flags - rendered command") {
 
         // Tagged `stub` so CI's blocking `nf-test test --tag stub` gate runs it, but
-        // deliberately WITHOUT `options "-stub"` -- same shape as
-        // tests/modules/generate_qc_report.nf.test's "rendered command" case (Task 5).
-        // `-stub` never evaluates a `script:` block, so no stub run can observe a
-        // rendered command at all. That is exactly what this task changed: the eight
-        // StarDist flags moved out of being rebuilt by hand in seg_qc_geojson.nf's
-        // script: block and into conf/modules.config's ext.args (shared with SEGMENT's
-        // stardist backend via conf/modules.config's starDistCommonFlags()), and `--tolerance` is now passed
-        // for the first time ever -- ruling R1's one intentional behaviour change in this
-        // task (registration-QC scores are not comparable across this commit).
+        // deliberately WITHOUT `options "-stub"` -- `-stub` never evaluates a `script:`
+        // block, so no stub run can observe a rendered command at all.
         //
-        // No container engine is active under `--profile test` (docker.enabled is only
-        // true in the `docker` profile, which this suite is told never to combine with
-        // `test` on this arm64 machine), so this runs bin/segment_to_geojson.py directly
-        // and it will fail importing StarDist/TensorFlow on a host without them
-        // installed. That is fine: like GENERATE_QC_REPORT's rendered-command case, the
-        // assertions read the rendered .command.sh rather than the process outcome, so
-        // the case holds whether the script itself succeeds or fails for unrelated
-        // environmental reasons.
+        // This case is the one that pins the change. SEG_QC_GEOJSON used to run StarDist
+        // itself (bin/segment_to_geojson.py + starDistCommonFlags()), which made it the one
+        // segmenter in the pipeline that ignored params.seg_method: at the shipped default
+        // (seg_method='instantseg') the registration QC scored a different segmenter's cells
+        // than the run shipped, and at stock defaults it could not run at all
+        // (segmentation_model is not a StarDist built-in and segmentation_model_dir is null
+        // -> FileNotFoundError, swallowed by the QC errorStrategy's 'ignore' branch). The
+        // segmentation moved to SEG_QC_SEGMENT -- `SEGMENT` aliased -- so the NEGATIVE
+        // assertions below are the substance: a rendered command carrying any StarDist flag
+        // means the old code path came back.
+        //
+        // No container engine is active under `-profile test`, so this runs
+        // bin/mask_to_geojson.py directly against the real fixture mask. It happens to
+        // succeed where the StarDist version could not, but the assertions read the
+        // rendered .command.sh rather than the outcome either way.
         tag "stub"
 
         when {
             process {
                 """
                 input[0] = [
-                    [ patient_id: 'P001', channels: ['DAPI', 'CD3', 'CD8'], is_reference: false ],
-                    file('${projectDir}/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)
+                    [ patient_id: 'P001', channels: ['DAPI', 'CD3', 'CD8'],
+                      is_reference: false, qc_slide: 'P001_mov1' ],
+                    file('${projectDir}/tests/testdata/P001_cell_mask.tif', checkIfExists: true)
                 ]
                 """
             }
@@ -74,7 +80,7 @@ nextflow_process {
             // Nextflow lays tasks out as <workDir>/<2 hex>/<30 hex>/.command.sh.
             def rendered = []
             new File("$workDir").eachFileRecurse { f ->
-                if (f.name == '.command.sh' && f.text.contains('segment_to_geojson.py')) {
+                if (f.name == '.command.sh' && f.text.contains('mask_to_geojson.py')) {
                     rendered << f.text
                 }
             }
@@ -82,33 +88,29 @@ nextflow_process {
             assertAll(
                 { assert rendered.size() >= 1,
                     "no rendered SEG_QC_GEOJSON .command.sh found under the task work dir" },
-                // The assertion with teeth: against the pre-refactor module, ext.args was
-                // permanently empty (SEG_QC_GEOJSON had no ext.args entry at all), so
-                // none of these flags -- least of all --tolerance, which was never passed
-                // at any tolerance -- appear in the rendered command.
+                // The one tunable left, and it must equal what EXTRACT_CELL_PROPERTIES gets
+                // (params.simplify_tolerance) or the two GeoJSONs WARP_SEG_QC compares stop
+                // being comparable.
                 { assert rendered.every { it.contains('--tolerance 1.0') },
                     "rendered command missing --tolerance: " + rendered.join(' --- ') },
-                { assert rendered.every { it.contains('--nuclear-markers DAPI CELLTOX') },
-                    "rendered command missing --nuclear-markers: " + rendered.join(' --- ') },
-                { assert rendered.every { it.contains('--model-name 2D_versatile_fluo') },
-                    "rendered command missing --model-name: " + rendered.join(' --- ') },
-                { assert rendered.every { it.contains('--n-tiles 2 2') },
-                    "rendered command missing --n-tiles: " + rendered.join(' --- ') },
-                { assert rendered.every { it.contains('--pmin 1.0') && it.contains('--pmax 99.8') },
-                    "rendered command missing --pmin/--pmax: " + rendered.join(' --- ') },
-                { assert rendered.every { it.contains('--prob-thresh 0.3') },
-                    "rendered command missing --prob-thresh: " + rendered.join(' --- ') },
-                // --expand-distance is shared too: bin/segment_to_geojson.py calls the
-                // same segment.segment_nuclei() SEGMENT's stardist backend does, and its
-                // cell_mask is exactly what becomes these contours -- so it comes from
-                // starDistCommonFlags() like the rest, not appended per-caller.
-                { assert rendered.every { it.contains('--expand-distance 10') },
-                    "rendered command missing --expand-distance: " + rendered.join(' --- ') },
-                // --model-dir is the one flag this shared list must NOT leak here: it's
-                // conditional on segmentation_model_dir, which is null under the test
-                // profile.
-                { assert rendered.every { !it.contains('--model-dir') },
-                    "rendered command carries --model-dir despite segmentation_model_dir=null: " + rendered.join(' --- ') }
+                { assert rendered.every { it.contains('--out P001_mov1.geojson') },
+                    "rendered command does not name the GeoJSON after meta.qc_slide: " + rendered.join(' --- ') },
+                // The assertions with teeth: every one of these appeared in this process'
+                // rendered command before the change and must never appear again.
+                { assert rendered.every { !it.contains('segment_to_geojson.py') },
+                    "SEG_QC_GEOJSON is segmenting again: " + rendered.join(' --- ') },
+                { assert rendered.every { !it.contains('--model-name') && !it.contains('--model-dir') },
+                    "rendered command carries a StarDist model flag: " + rendered.join(' --- ') },
+                { assert rendered.every { !it.contains('--n-tiles') && !it.contains('--prob-thresh') },
+                    "rendered command carries StarDist inference flags: " + rendered.join(' --- ') },
+                { assert rendered.every { !it.contains('--expand-distance') },
+                    "rendered command carries --expand-distance: the mask is already expanded by " +
+                    "SEG_QC_SEGMENT: " + rendered.join(' --- ') },
+                { assert rendered.every { !it.contains('--nuclear-markers') && !it.contains('--dapi-channel') },
+                    "rendered command still resolves a nuclear channel; that is the segmenter's " +
+                    "job now: " + rendered.join(' --- ') },
+                { assert rendered.every { !it.contains('--use-gpu') },
+                    "rendered command asks for a GPU; contour tracing is pure CPU: " + rendered.join(' --- ') }
             )
         }
     }

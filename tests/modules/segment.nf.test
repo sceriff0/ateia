@@ -26,7 +26,8 @@ nextflow_process {
                         patient_id: 'P001',
                         channels: ['DAPI', 'PANCK', 'SMA']
                     ],
-                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    SegBackends.ctxParams(params)
                 ]
                 """
             }
@@ -55,7 +56,23 @@ nextflow_process {
             // case covers the StarDist branch of the dispatch without saying so in its
             // own params block. Named explicitly so a profile change is a test diff.
             assert process.out.versions.get(0).toString().endsWith('versions.yml')
-            assert path(process.out.versions.get(0)).text.contains('seg_method: stardist')
+            // THE STUB versions.yml NOW NAMES THE BACKEND'S REAL TOOLS. It used to say
+            // `seg_method: stardist` -- a key no real run ever emits -- because the two
+            // heredocs were hand-written independently and `-stub` never evaluates the
+            // script: block that would have contradicted it. Both blocks now render
+            // through ProcessEnvelope from SegBackends' one `versionTools` list, so this
+            // stub run is direct evidence about what a REAL run reports.
+            with(path(process.out.versions.get(0)).text) {
+                assert contains('deepcell: stub')
+                assert contains('tensorflow: stub')
+                assert contains('python: stub')
+                // The old hand-written key, and the OTHER backends' tools: a stub that
+                // names either is reporting a stack this task never loaded.
+                assert !contains('seg_method')
+                assert !contains('torch')
+                assert !contains('instanseg')
+                assert !contains('cellSAM')
+            }
             assert process.out.size_log.get(0).toString().endsWith('.SEGMENT.size.csv')
         }
     }
@@ -75,7 +92,8 @@ nextflow_process {
                         patient_id: 'P001',
                         channels: ['PANCK', 'DAPI', 'SMA']  // DAPI NOT FIRST
                     ],
-                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    SegBackends.ctxParams(params)
                 ]
                 """
             }
@@ -106,7 +124,8 @@ nextflow_process {
                         patient_id: 'P001',
                         channels: ['DAPI', 'PANCK', 'SMA']
                     ],
-                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    SegBackends.ctxParams(params)
                 ]
                 """
             }
@@ -146,7 +165,8 @@ nextflow_process {
                         patient_id: 'P001',
                         channels: ['DAPI', 'PANCK', 'SMA']
                     ],
-                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    SegBackends.ctxParams(params)
                 ]
                 """
             }
@@ -171,8 +191,17 @@ nextflow_process {
                 assert get(0).get(1).toString().endsWith('_cell_mask.tif')
             }
 
-            // Same four outputs, same names, different backend.
-            assert path(process.out.versions.get(0)).text.contains('seg_method: instantseg')
+            // Same four outputs, same names, different backend -- and the stub's
+            // versions.yml follows the backend, which is exactly what the single
+            // `versionTools` list buys. Under the old hand-written stub heredoc every
+            // backend reported the same two keys (`python` + `seg_method`).
+            with(path(process.out.versions.get(0)).text) {
+                assert contains('instanseg: stub')
+                assert contains('torch: stub')
+                assert !contains('seg_method')
+                assert !contains('deepcell')
+                assert !contains('cellSAM')
+            }
             assert process.out.size_log.get(0).toString().endsWith('.SEGMENT.size.csv')
         }
     }
@@ -193,7 +222,8 @@ nextflow_process {
                         patient_id: 'P001',
                         channels: ['PANCK', 'DAPI', 'SMA']  // DAPI NOT FIRST - InstanSeg is channel-invariant
                     ],
-                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    SegBackends.ctxParams(params)
                 ]
                 """
             }
@@ -221,7 +251,8 @@ nextflow_process {
                         patient_id: 'P001',
                         channels: ['DAPI', 'PANCK', 'SMA']
                     ],
-                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    SegBackends.ctxParams(params)
                 ]
                 """
             }
@@ -247,7 +278,13 @@ nextflow_process {
             }
 
             // Same four outputs, same names, third backend.
-            assert path(process.out.versions.get(0)).text.contains('seg_method: cellsam')
+            with(path(process.out.versions.get(0)).text) {
+                assert contains('cellSAM: stub')
+                assert contains('torch: stub')
+                assert !contains('seg_method')
+                assert !contains('deepcell')
+                assert !contains('instanseg: stub')
+            }
             assert process.out.size_log.get(0).toString().endsWith('.SEGMENT.size.csv')
         }
     }
@@ -268,7 +305,8 @@ nextflow_process {
                         patient_id: 'P001',
                         channels: ['PANCK', 'DAPI', 'SMA']  // DAPI NOT FIRST - CellSAM path skips the channel-0 check
                     ],
-                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    SegBackends.ctxParams(params)
                 ]
                 """
             }
@@ -306,7 +344,8 @@ nextflow_process {
                         patient_id: 'P001',
                         channels: ['DAPI', 'PANCK', 'SMA']
                     ],
-                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    SegBackends.ctxParams(params)
                 ]
                 """
             }
@@ -346,7 +385,8 @@ nextflow_process {
                         patient_id: 'P001',
                         channels: ['DAPI', 'PANCK', 'SMA']
                     ],
-                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    SegBackends.ctxParams(params)
                 ]
                 """
             }
@@ -378,7 +418,8 @@ nextflow_process {
                         patient_id: 'P001',
                         channels: ['DAPI', 'PANCK', 'SMA']
                     ],
-                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    SegBackends.ctxParams(params)
                 ]
                 """
             }
@@ -399,6 +440,87 @@ nextflow_process {
                 },
                 // Size log should have been generated
                 { assert process.out.size_log }
+            )
+        }
+    }
+
+    test("Should render the backend's versions.yml probes, not a seg_method row - rendered command") {
+
+        // Tagged `stub` so CI's blocking `nf-test test --tag stub` gate runs it, but
+        // deliberately WITHOUT `options "-stub"`. That is the entire point of this case:
+        // `-stub` never evaluates a `script:` block, so the stub cases above -- however
+        // thorough -- say nothing about the versions.yml a REAL run writes. The heredoc
+        // this task replaced lived only in `script:`, which means every assertion that
+        // could see it had to be a rendered-command assertion. Same shape and same reason
+        // as tests/modules/generate_qc_report.nf.test's `-rendered command` case.
+        //
+        // SEGMENT is not runnable without its container, and that is fine: the assertions
+        // read the rendered .command.sh, which Nextflow writes before it executes
+        // anything, so this case holds whether the task succeeds or dies importing
+        // deepcell. It asserts nothing about process outcome for exactly that reason.
+        tag "stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [
+                        patient_id: 'P001',
+                        channels: ['DAPI', 'PANCK', 'SMA']
+                    ],
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    SegBackends.ctxParams(params)
+                ]
+                """
+            }
+        }
+
+        then {
+            // Nextflow lays tasks out as <workDir>/<2 hex>/<30 hex>/.command.sh.
+            def rendered = []
+            new File("$workDir").eachFileRecurse { f ->
+                if (f.name == '.command.sh' && f.text.contains('.SEGMENT.size.csv')) {
+                    rendered << f.text
+                }
+            }
+
+            assertAll(
+                { assert rendered.size() >= 1,
+                    "no rendered SEGMENT .command.sh found under the task work dir" },
+
+                // The `test` profile pins seg_method='stardist', so the rendered command
+                // must carry StarDist's two probes -- the rows ProcessEnvelope built from
+                // SegBackends' versionTools list, byte-for-byte what the hand-written
+                // heredoc used to contain.
+                { assert rendered.every {
+                    it.contains('deepcell: $(python -c "import deepcell; print(deepcell.__version__)" 2>/dev/null || echo "unknown")') },
+                    "rendered command: " + rendered.join(' --- ') },
+                { assert rendered.every {
+                    it.contains('tensorflow: $(python -c "import tensorflow; print(tensorflow.__version__)" 2>/dev/null || echo "unknown")') },
+                    "rendered command: " + rendered.join(' --- ') },
+
+                // The shared `python:` row ProcessEnvelope prepends, with a BARE `$(`.
+                // `<<-END_VERSIONS` is an unquoted heredoc, so bash command-substitutes a
+                // bare `$(...)` and prints an escaped `\$(...)` as literal text -- the
+                // over-escaping bug that once wrote shell commands into every published
+                // versions.yml, invisibly, because -stub never runs script:.
+                { assert rendered.every { it.contains('python: $(python --version 2>&1 | sed \'s/Python //\')') },
+                    "rendered command: " + rendered.join(' --- ') },
+                { assert rendered.every { !it.contains('\\$(python') },
+                    "versions probe is escaped, so bash prints it instead of running it: " + rendered.join(' --- ') },
+
+                // And the heredoc is still a heredoc: one open, one terminator.
+                { assert rendered.every { it.contains('cat <<-END_VERSIONS > versions.yml') },
+                    "rendered command: " + rendered.join(' --- ') },
+
+                // The negative with teeth. `seg_method` is not a tool and no real run ever
+                // reported it -- it existed ONLY in the stub heredoc. Its appearance in a
+                // rendered command means the two blocks are being maintained separately
+                // again. Likewise the other backends' tools: exactly one backend runs.
+                { assert rendered.every { !it.contains('seg_method:') },
+                    "rendered command carries the stub-only seg_method row: " + rendered.join(' --- ') },
+                { assert rendered.every { !it.contains('import torch') },
+                    "StarDist run reports a torch version it never loaded: " + rendered.join(' --- ') }
             )
         }
     }

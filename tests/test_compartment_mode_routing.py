@@ -123,7 +123,15 @@ ALLOWED_FILES = {
 # whole-file exemption would hide either regressing into this file silently.
 ALLOWED_LINES = {
     "conf/modules.config": {
-        722: (
+        # Line-pinned on purpose (see test_scan_actually_finds_the_consumers): an
+        # exemption keyed to a file rather than a line would cover the next raw read
+        # added anywhere in it. The cost is that unrelated edits above this line move
+        # it -- 718 -> 722 when the reg_qc=2 QC stopped segmenting for itself and
+        # SEG_QC_GEOJSON's block shrank. Re-pin, do not widen. (Re-pin from the file,
+        # not by guessing: `grep -n "params.expanded_quantification ?" conf/modules.config`.)
+        # 722 on main, 737 here: this branch's conf/modules.config carries the
+        # benchmarking-only process blocks, so the same line sits lower.
+        737: (
             "ext.args = { params.expanded_quantification ? '--expanded' : "
             "'' } -- conf/*.config closures cannot see lib/*.groovy classes, "
             "so ext.args must read params raw here."

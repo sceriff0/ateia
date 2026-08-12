@@ -35,6 +35,7 @@ process TILED_STITCH {
         --manifest ${manifest} \\
         --moving-name '${slidename}' \\
         --out-tile ${out_tile} \\
+        --pixel-size ${params.pixel_size} \\
         --out registered/${prefix}_registered.ome.tiff
 
     ${ProcessEnvelope.versions(task.process, ['tifffile'])}

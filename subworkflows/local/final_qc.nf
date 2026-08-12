@@ -60,10 +60,16 @@ import groovy.json.JsonOutput
 include { AGGREGATE_SIZE_LOGS } from '../../modules/local/aggregate_size_logs'
 include { GENERATE_QC_REPORT  } from '../../modules/local/generate_qc_report'
 
-// The complete artifact vocabulary. Both call sites hand-write these tags (16
-// literals across workflows/mirage.nf's two FINAL_QC calls -- 4 in add_cycle,
-// 12 in the standard path) and nothing else checks that the two vocabularies
-// agree — so this list is the check.
+// The complete artifact vocabulary. Both call sites hand-write these tags (21
+// literals across workflows/mirage.nf's two FINAL_QC calls -- 5 in add_cycle
+// (mirage.nf:135-139) and 16 in the standard path (mirage.nf:317-347, four `if`
+// blocks in which 'versions' and 'size_log' each appear five times)) and nothing
+// else checks that the two vocabularies agree — so this list is the check.
+//
+// Counted, not estimated: `grep -oE "\['[a-z_]+'," workflows/mirage.nf` returns
+// 21 matches on 21 distinct lines. The previous count here read "16 -- 4 in
+// add_cycle, 12 in the standard path", which was wrong in both terms and was
+// copied verbatim into a supplementary figure before anyone re-counted.
 //
 // Derived from ParamUtils.STEPS (lib/ParamUtils.groovy), the single table
 // answering "what is a step?": each step's own `qcKinds` (preprocess_qc /
@@ -215,15 +221,21 @@ workflow FINAL_QC {
         // kind necessarily means a new slot here and a new `path(...)` in
         // modules/local/generate_qc_report.nf. That is a hard error when missed,
         // which is why the arity is not data-driven.
+        // Every list slot below is collect(sort: true), never a bare collect().
+        // GENERATE_QC_REPORT's inputs are `path` collections that Nextflow hashes
+        // POSITIONALLY, and collect() emits in arrival order -- so identical reruns
+        // produced different task hashes. collated_versions.yml carries sort: true for
+        // the same reason at the level of file CONTENT: without it the collected yaml's
+        // line order varied by completion order.
         GENERATE_QC_REPORT(
-            artifactsOf(ch_artifacts, 'preprocess_qc').collect().ifEmpty([]),
-            artifactsOf(ch_artifacts, 'registration_qc').collect().ifEmpty([]),
-            artifactsOf(ch_artifacts, 'registration_tre').collect().ifEmpty([]),
-            artifactsOf(ch_artifacts, 'postprocess_qc').collect().ifEmpty([]),
-            artifactsOf(ch_artifacts, 'versions').unique().collectFile(name: 'collated_versions.yml'),
+            artifactsOf(ch_artifacts, 'preprocess_qc').collect(sort: true).ifEmpty([]),
+            artifactsOf(ch_artifacts, 'registration_qc').collect(sort: true).ifEmpty([]),
+            artifactsOf(ch_artifacts, 'registration_tre').collect(sort: true).ifEmpty([]),
+            artifactsOf(ch_artifacts, 'postprocess_qc').collect(sort: true).ifEmpty([]),
+            artifactsOf(ch_artifacts, 'versions').unique().collectFile(name: 'collated_versions.yml', sort: true),
             ch_run_summary,
-            artifactsOf(ch_artifacts, 'seg_qc').collect().ifEmpty([]),
-            artifactsOf(ch_artifacts, 'seg_residuals').collect().ifEmpty([]),
+            artifactsOf(ch_artifacts, 'seg_qc').collect(sort: true).ifEmpty([]),
+            artifactsOf(ch_artifacts, 'seg_residuals').collect(sort: true).ifEmpty([]),
         )
     }
 

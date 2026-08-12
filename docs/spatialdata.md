@@ -60,9 +60,11 @@ Region metadata follows the SpatialData contract: `region="cell_mask"`,
 after registration, letting you drop cells in poorly-registered regions *before*
 phenotyping — the cyclic-IF failure mode around tissue folds and slide edges.
 
-It is a **spatial** join, not an identity join: `SEG_QC_GEOJSON` segments each
+It is a **spatial** join, not an identity join: `SEG_QC_SEGMENT` segments each
 slide's native, pre-registration image, while `SEGMENT` segments the registered
-reference, so the two share a coordinate frame but no label space. Consequences:
+reference, so the two share a coordinate frame but no label space. (They are the
+same process under two names, so `--seg_method` picks the segmenter for both — but
+different inputs mean different cells regardless.) Consequences:
 
 * A cell with no QC evidence gets `NaN` and `obs["qc_reg_matched"] = False`.
   **Unmatched is not the same as well-registered.**

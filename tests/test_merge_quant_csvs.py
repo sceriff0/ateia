@@ -87,3 +87,61 @@ def test_reorder_columns_preserves_prior_cell_size_without_area():
     # fov is still (unconditionally, unrelated to this change) refreshed to
     # the current patient_id -- required for Pixie fov tagging.
     assert list(out["fov"]) == ["cycle2_patient"] * 3
+
+
+# ---------------------------------------------------------------------------
+# The nuclear/fiducial marker is whatever params.nuclear_markers says it is.
+# Both behaviours below used to key off the literal string "DAPI", so a panel
+# whose fiducial is CELLTOX silently lost the protection and the ordering.
+# ---------------------------------------------------------------------------
+
+
+def test_reorder_puts_the_configured_fiducial_first_not_literal_dapi():
+    """CELLTOX leads the marker block when it is the configured fiducial.
+
+    Without the marker list it sorts alphabetically -- CD3 would come first --
+    which is what the hardcoded "DAPI" check produced for every non-DAPI panel.
+    """
+    df = pd.DataFrame(
+        {"label": [1, 2], "CD3": [1.0, 2.0], "CELLTOX": [3.0, 4.0], "PANCK": [5.0, 6.0]}
+    )
+    out = mqc.reorder_columns(df.copy(), "p1", nuclear_markers=["CELLTOX"])
+    markers = [c for c in out.columns if c in ("CD3", "CELLTOX", "PANCK")]
+    assert markers == ["CELLTOX", "CD3", "PANCK"], markers
+
+
+def test_reorder_still_puts_dapi_first_under_the_shipped_default():
+    """The shipped default must not regress: DAPI still leads for a DAPI panel."""
+    df = pd.DataFrame(
+        {"label": [1], "CD3": [1.0], "DAPI": [2.0], "PANCK": [3.0]}
+    )
+    out = mqc.reorder_columns(df.copy(), "p1", nuclear_markers=["DAPI", "CELLTOX"])
+    markers = [c for c in out.columns if c in ("CD3", "DAPI", "PANCK")]
+    assert markers == ["DAPI", "CD3", "PANCK"], markers
+
+
+def test_a_marker_outside_the_configured_list_does_not_lead():
+    """DAPI is an ordinary marker when it is not the configured fiducial."""
+    df = pd.DataFrame({"label": [1], "CD3": [1.0], "DAPI": [2.0]})
+    out = mqc.reorder_columns(df.copy(), "p1", nuclear_markers=["CELLTOX"])
+    markers = [c for c in out.columns if c in ("CD3", "DAPI")]
+    assert markers == ["CD3", "DAPI"], markers
+
+
+def test_configured_fiducial_is_protected_from_overwrite(tmp_path):
+    """The prior cycle's fiducial column wins over an incoming one.
+
+    protected_cols is now derived from the marker list by the caller, so this
+    pins the mechanism the CLI wires up: a protected column keeps the BASE value
+    and drops the incoming one, while an unprotected marker is overwritten.
+    """
+    base = pd.DataFrame({"label": [1, 2], "CELLTOX": [10.0, 20.0], "CD3": [1.0, 2.0]})
+    incoming = tmp_path / "new_quant.csv"
+    pd.DataFrame({"label": [1, 2], "CELLTOX": [99.0, 99.0], "CD3": [7.0, 8.0]}).to_csv(
+        incoming, index=False
+    )
+
+    out = mqc.merge_intensities(base.copy(), [incoming], protected_cols=("CELLTOX",))
+
+    assert list(out["CELLTOX"]) == [10.0, 20.0], "protected fiducial was overwritten"
+    assert list(out["CD3"]) == [7.0, 8.0], "unprotected marker was not overwritten"

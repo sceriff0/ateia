@@ -20,13 +20,27 @@
  *   guard       the backend's PRECONDITION, as shell lines. These are three different
  *               checks, not boilerplate, and each is meaningless for the other two
  *               backends -- see the per-backend comments below.
- *   versions    the backend-specific rows of versions.yml. StarDist reports
- *               deepcell/tensorflow, InstanSeg instanseg/torch, CellSAM cellSAM/torch.
+ *   versionTools the backend's own tools, as BARE PYTHON MODULE NAMES -- not rendered
+ *               YAML. StarDist reports deepcell/tensorflow, InstanSeg instanseg/torch,
+ *               CellSAM cellSAM/torch. lib/ProcessEnvelope.groovy turns each name into
+ *               its probe row and prepends the shared `python:` row, and
+ *               modules/local/segment.nf feeds THIS ONE LIST to both
+ *               ProcessEnvelope.versions() (script:) and ProcessEnvelope.versionsStub()
+ *               (stub:). That is the point of storing names rather than lines: this
+ *               table used to hand-write six probe strings of exactly the form
+ *               ProcessEnvelope.probe() already renders, and segment.nf's stub: block
+ *               -- unable to reuse them, since a stub reports no real versions --
+ *               hand-wrote a DIFFERENT set of keys (`seg_method: <name>`). Two disjoint
+ *               key sets, and `-stub` (the whole blocking CI gate) can never see a
+ *               script: block to compare against. Same key name as
+ *               lib/WarpBackends.groovy's `versionTools`, deliberately: both are read by
+ *               tests/test_versions_envelope.py's generic `*Backends.of(...)` guard.
  *
  * `flags`, `guard` take a context map: [meta: task meta, prefix: output prefix,
- * params: the params map]. Passing `params` rather than pre-extracted values is what
- * keeps each backend's parameter knowledge with that backend instead of leaking back
- * into the process body.
+ * params: THE SLICE OF params THE BACKENDS READ -- see ctxParams below]. Passing a map
+ * rather than pre-extracted values is what keeps each backend's parameter knowledge with
+ * that backend instead of leaking back into the process body; passing a SLICE rather than
+ * the whole params map is what keeps SEGMENT's cache key narrow.
  *
  * SHELL FRAGMENTS ARE RETURNED AS A LIST OF LINES, never as one pre-indented string.
  * The caller joins them with its own indentation, because Nextflow applies
@@ -36,6 +50,43 @@
  * shell expansions such as ${DEEPCELL_ACCESS_TOKEN:-} survive to the shell verbatim.
  */
 class SegBackends {
+
+    /**
+     * The parameters the backends above read off `ctx.params`, and the only ones SEGMENT
+     * is allowed to depend on.
+     *
+     * WHY A SLICE AND NOT `params`. Nextflow hashes the free variables a process
+     * `script:` block references. modules/local/segment.nf used to build its ctx as
+     * `[..., params: params]`, so the WHOLE params map entered SEGMENT's task hash and
+     * any unrelated parameter change re-ran segmentation and everything downstream of it.
+     * Measured: `--pyramid_resolutions 6` alone (a postprocessing knob) re-ran SEGMENT,
+     * both property extractors, all five QUANTIFY tasks and both exports.
+     *
+     * The slice is built HERE, not in the process body, because which parameters a
+     * backend needs is backend knowledge -- the whole point of this class, and what
+     * tests/test_seg_backends.py's "process body is backend-agnostic" check protects.
+     * It is applied in subworkflows/local/segmentation.nf (workflow code is not hashed
+     * this way) and arrives at SEGMENT as an opaque value.
+     *
+     * KEYS ARE STRINGS ON PURPOSE. `params.subMap(...)` never names a parameter as
+     * `params.<name>`, so adding a key here does not create a raw parameter read for
+     * tests/test_nuclear_marker_routing.py to flag -- `nuclear_markers` still reaches
+     * MarkerUtils, which is what that guard is actually about.
+     *
+     * ADDING A NEW PARAMETER READ TO A BACKEND MEANS ADDING ITS KEY HERE. A missing key reads
+     * as null and produces an empty flag with no error, so
+     * tests/test_seg_backends_ctx_params.py checks the two lists agree.
+     */
+    static final List<String> CTX_PARAM_KEYS = [
+        'nuclear_markers',
+        'instanseg_model_dir',
+        'cellsam_model_path',
+    ].asImmutable()
+
+    /** The `ctx.params` value SEGMENT should be given. Call from workflow code, never from a `script:` block. */
+    static Map ctxParams(Map params) {
+        return params.subMap(CTX_PARAM_KEYS)
+    }
 
     private static final Map BACKENDS = [
 
@@ -64,10 +115,7 @@ class SegBackends {
                     'echo "Validated: channel 0 is a configured nuclear marker"',
                 ]
             },
-            versions  : [
-                '''deepcell: $(python -c "import deepcell; print(deepcell.__version__)" 2>/dev/null || echo "unknown")''',
-                '''tensorflow: $(python -c "import tensorflow; print(tensorflow.__version__)" 2>/dev/null || echo "unknown")''',
-            ],
+            versionTools: ['deepcell', 'tensorflow'],
         ],
 
         // InstanSeg. Channel-invariant -- it consumes the multichannel image directly,
@@ -90,10 +138,12 @@ class SegBackends {
                     'echo "Note: InstanSeg is channel-invariant; no nuclear-channel-0 check is enforced."',
                 ]
             },
-            versions  : [
-                '''instanseg: $(python -c "import instanseg; print(getattr(instanseg, '__version__', 'unknown'))" 2>/dev/null || echo "unknown")''',
-                '''torch: $(python -c "import torch; print(torch.__version__)" 2>/dev/null || echo "unknown")''',
-            ],
+            // `torch` is NOT hoisted into a shared list even though cellsam names it too:
+            // exactly one backend runs per task, so the two entries are never rendered
+            // together, and stardist genuinely does not use torch. A shared list would have
+            // to be subtracted from rather than added to -- the failure mode being a
+            // versions.yml that reports a framework the task never loaded.
+            versionTools: ['instanseg', 'torch'],
         ],
 
         // CellSAM. Segments ONE nuclear channel like StarDist, but is told which one, so
@@ -131,10 +181,7 @@ class SegBackends {
                     'fi',
                 ]
             },
-            versions  : [
-                '''cellSAM: $(python -c "import cellSAM; print(getattr(cellSAM, '__version__', 'unknown'))" 2>/dev/null || echo "unknown")''',
-                '''torch: $(python -c "import torch; print(torch.__version__)" 2>/dev/null || echo "unknown")''',
-            ],
+            versionTools: ['cellSAM', 'torch'],
         ],
     ]
 

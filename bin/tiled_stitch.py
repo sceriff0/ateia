@@ -96,6 +96,14 @@ def main(argv=None) -> int:
     ap.add_argument(
         "--out-tile", type=int, default=1024, help="output write-tile size (px)"
     )
+    ap.add_argument(
+        "--pixel-size",
+        dest="pixel_size",
+        type=float,
+        default=0.325,
+        help="Configured scale in µm/px (TILED_STITCH passes params.pixel_size), "
+        "stamped on the stitched slide as resolution tags.",
+    )
     a = ap.parse_args(argv)
 
     manifest = json.loads(Path(a.manifest).read_text())
@@ -107,13 +115,26 @@ def main(argv=None) -> int:
     src, dtype, close = open_lazy(a.moving)  # lazy (C, H, W) — nothing loaded yet
     try:
         c_n = src.shape[0]
-        with tifffile.TiffWriter(str(a.out)) as tw:
+        # bigtiff is mandatory, not an optimisation: a registered slide is written
+        # uncompressed at full resolution, so classic TIFF's 32-bit offsets overflow
+        # (struct.error: 'I' format requires 0 <= number <= 4294967295) the moment the
+        # output crosses 4 GB -- C x H x W x itemsize, reached by any real WSI.
+        with tifffile.TiffWriter(str(a.out), bigtiff=True) as tw:
             tw.write(
                 stream_tiles(src, m0, mesh, margin, out_h, out_w, a.out_tile, dtype),
                 shape=(c_n, out_h, out_w),
                 dtype=dtype,
                 tile=(a.out_tile, a.out_tile),
                 photometric="minisblack",
+                # The stitched slide used to be written with no scale of any kind, so
+                # everything downstream of the STARE path -- SPLIT_CHANNELS, and through
+                # it the published pyramid -- had nothing but params.pixel_size to go on
+                # and no way to notice a disagreement. Standard resolution tags rather
+                # than an OME header: an OME header here would become a second,
+                # channel-less source of channel names for SPLIT_CHANNELS to find.
+                # CENTIMETER means pixels-per-cm, i.e. 1e4 µm/cm over µm/px.
+                resolution=(1e4 / a.pixel_size, 1e4 / a.pixel_size),
+                resolutionunit="CENTIMETER",
             )
     finally:
         close()

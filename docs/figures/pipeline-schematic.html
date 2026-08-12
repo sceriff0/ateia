@@ -1,0 +1,810 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MIRAGE Supplementary Figure S1 — Pipeline</title>
+<style>
+  /* ======================================================================
+     MIRAGE supplementary figures — shared design base (S1 · S2 · S3)
+     ----------------------------------------------------------------------
+     DUPLICATED ON PURPOSE, not extracted to a shared file. Each figure in
+     this set has to survive being detached from the repository — attached to
+     a submission, mailed, opened from file:// — so it may not reference an
+     external stylesheet, not even a sibling one. This block is therefore
+     repeated verbatim in docs/figures/pipeline-schematic.html,
+     docs/figures/registration-schematic.html and docs/figures/qc-schematic.html,
+     and is ported (with the slate counterpart the figures deliberately lack)
+     to docs/stylesheets/extra.css. Change one, change all four.
+
+     SINGLE THEME BY DESIGN: white paper, black ink. A journal figure has a
+     paper ground.
+
+     ONE FONT STACK, shared with docs/stylesheets/extra.css so the site and
+     the figures really do read as one artefact (that file's header claimed
+     they did while leading with a different family).
+
+     ONE BREAKPOINT LADDER for the whole set: 1040 · 880 · 760 · 640 · 520.
+     No figure introduces a sixth rung.
+
+     ONE SIZING SCALE: .tag/.tag-def/.tag-alt .53rem / 1px 4px · .pp span
+     .62rem / 1px 5px · table.pr td.k .7rem, td.v/td.val .68rem ·
+     .masthead h1 max-width 72ch.
+
+     OVERFLOW DISCIPLINE: every grid track is minmax(0,…) and every grid or
+     flex item carries min-width:0. Without it a track's automatic minimum is
+     min-content, so one long identifier (GENERATE_POSTPROCESSING_QC) widens
+     its column and pushes the whole grid outside the panel border instead of
+     wrapping.
+     ====================================================================== */
+  :root{
+    --paper:#ffffff; --panel:#ffffff; --sub:#f6f7f8; --sub-2:#eef0f2;
+    --ink:#0f1113; --ink-2:#3c4147; --ink-3:#767c83;
+    --rule:#c3c8cd; --rule-2:#e5e8ea; --bar:#1b1e22;
+    --serif:Georgia,"Times New Roman",Cambria,"Noto Serif",serif;
+    --sans:"Inter","Helvetica Neue",Helvetica,Arial,"Segoe UI",system-ui,sans-serif;
+    --mono:"JetBrains Mono","SF Mono",ui-monospace,Menlo,Consolas,monospace;
+    color-scheme:light;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);
+    font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased;overflow-x:hidden;}
+  .sheet{max-width:1060px;margin:0 auto;padding:40px 26px 72px;}
+
+  .masthead{border-bottom:2px solid var(--ink);padding-bottom:12px;}
+  .masthead .kick{font-size:.71rem;letter-spacing:.15em;text-transform:uppercase;color:var(--ink-3);font-weight:700;}
+  .masthead h1{font-weight:700;font-size:1.32rem;letter-spacing:-.01em;margin:.3em 0 0;max-width:72ch;line-height:1.26;text-wrap:balance;}
+  .standfirst{font-family:var(--serif);font-size:.95rem;color:var(--ink-2);margin:12px 0 30px;max-width:82ch;}
+
+  /* Figure-set navigation. Relative filenames, so the strip works both from
+     file:// on a detached copy sitting beside its siblings and from the built
+     MkDocs site, which copies docs/figures/ through verbatim. */
+  .figset{display:flex;gap:0;flex-wrap:wrap;align-items:center;margin:12px 0 0;
+    font-family:var(--mono);font-size:.63rem;letter-spacing:.05em;text-transform:uppercase;}
+  .figset a,.figset span{border:1px solid var(--rule);padding:4px 9px;margin:0 -1px 0 0;
+    color:var(--ink-2);text-decoration:none;white-space:nowrap;}
+  .figset a:hover{border-color:var(--ink);color:var(--ink);}
+  .figset .self{background:var(--ink);border-color:var(--ink);color:#fff;font-weight:700;}
+
+  .panel{position:relative;background:var(--panel);border:1px solid var(--rule);padding:20px 20px 18px;margin:0 0 20px;}
+  .panel > .plabel{position:absolute;top:-1px;left:-1px;background:var(--ink);color:#fff;font-weight:700;
+    font-size:.85rem;line-height:1;padding:6px 9px;}
+  .panel-head{margin:2px 0 16px 26px;}
+  .panel-head h2{font-size:1.02rem;font-weight:700;letter-spacing:-.01em;margin:0;}
+  .panel-head p{font-size:.85rem;color:var(--ink-2);margin:3px 0 0;max-width:84ch;}
+
+  code{font-family:var(--mono);font-size:.82em;background:var(--sub);border:1px solid var(--rule-2);border-radius:2px;padding:.5px 4px;}
+  .tbl-scroll{overflow-x:auto;}
+
+  /* parameter chips */
+  .pp{display:flex;flex-wrap:wrap;gap:4px;margin-top:7px;min-width:0;}
+  .pp span{font-family:var(--mono);font-size:.62rem;background:var(--sub);border:1px solid var(--rule-2);padding:1px 5px;
+    color:var(--ink-2);max-width:100%;min-width:0;overflow-wrap:anywhere;}
+  .pp b{color:var(--ink);font-weight:700;}
+  .tag{font-family:var(--mono);font-size:.53rem;text-transform:uppercase;letter-spacing:.04em;padding:1px 4px;
+    font-weight:700;border:1px solid var(--rule);color:var(--ink-2);background:var(--sub-2);white-space:nowrap;}
+  .tag-on{border-color:var(--ink);color:var(--ink);background:#fff;}
+  .tag-def{font-family:var(--mono);font-size:.53rem;background:var(--ink);color:#fff;padding:1px 4px;font-weight:700;white-space:nowrap;}
+  .tag-alt{font-family:var(--mono);font-size:.53rem;background:var(--sub);color:var(--ink-2);border:1px solid var(--rule);padding:1px 4px;white-space:nowrap;}
+
+  /* parameter tables (td.v in S1/S3, td.val in S2 — same scale) */
+  table.pr{border-collapse:collapse;width:100%;font-size:.78rem;}
+  table.pr td{padding:3.5px 4px;border-bottom:1px solid var(--rule-2);vertical-align:top;}
+  table.pr tr:last-child td{border-bottom:none;}
+  table.pr td.k{font-family:var(--mono);font-size:.7rem;font-weight:700;white-space:nowrap;}
+  table.pr td.v,table.pr td.val{font-family:var(--mono);font-size:.68rem;color:var(--ink-2);white-space:nowrap;
+    padding-right:8px;font-variant-numeric:tabular-nums;}
+  table.pr td.v.w{white-space:normal;overflow-wrap:anywhere;}
+  table.pr td.d{color:var(--ink-2);}
+  .nul{color:var(--ink-3);font-style:italic;}
+
+  .caption{font-family:var(--serif);font-size:.83rem;color:var(--ink-2);line-height:1.62;border-top:1px solid var(--rule);padding-top:16px;margin-top:8px;}
+  .caption b{color:var(--ink);}
+  .footnote{font-family:var(--sans);font-size:.72rem;color:var(--ink-3);margin-top:14px;display:block;}
+
+
+  /* a — samplesheet */
+  table.ss{border-collapse:collapse;width:100%;font-family:var(--mono);font-size:.72rem;font-variant-numeric:tabular-nums;}
+  table.ss caption{font-family:var(--mono);font-size:.65rem;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-3);text-align:left;padding:0 0 6px;}
+  table.ss th{text-align:left;font-weight:700;color:var(--ink-2);border-bottom:1.5px solid var(--ink);padding:5px 8px;white-space:nowrap;}
+  table.ss td{padding:5px 8px;border-bottom:1px solid var(--rule-2);white-space:nowrap;}
+  table.ss tr:last-child td{border-bottom:none;}
+  .t{font-weight:700;color:var(--ink);} .f{color:var(--ink-3);}
+  .nuc{font-weight:700;text-decoration:underline;text-decoration-thickness:1.5px;text-underline-offset:2px;}
+  .ssnote{font-family:var(--serif);font-size:.78rem;color:var(--ink-2);margin-top:9px;}
+
+  /* b — step gate */
+  .gate{display:flex;border:1px solid var(--rule);flex-wrap:wrap;}
+  .gate .g{flex:1 1 150px;min-width:0;padding:12px 14px;border-right:1px solid var(--rule);border-top:3px solid var(--ink);overflow-wrap:anywhere;}
+  .gate .g:last-child{border-right:none;}
+  .gate .g .k{font-family:var(--mono);font-size:.63rem;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);}
+  .gate .g .v{font-weight:700;margin-top:2px;}
+  .gate .g .d{font-size:.8rem;color:var(--ink-2);margin-top:3px;}
+  .gnote{font-family:var(--mono);font-size:.73rem;color:var(--ink-2);margin-top:11px;display:flex;gap:14px;flex-wrap:wrap;}
+  .gnote b{color:var(--ink);}
+
+  /* c — pipeline lanes (overflow discipline: see the shared base above) */
+  .flow{display:grid;grid-template-columns:minmax(0,1fr) 16px minmax(0,1fr) 16px minmax(0,1fr) 16px minmax(0,1fr);
+    gap:3px;align-items:start;}
+  @media(max-width:1040px){.flow{grid-template-columns:minmax(0,1fr);}}
+  .lane{border:1px solid var(--rule);min-width:0;}
+  .lane > h3{margin:0;font-family:var(--mono);font-size:.68rem;font-weight:700;letter-spacing:.03em;
+    padding:8px 9px;background:var(--bar);color:#fff;display:flex;justify-content:space-between;align-items:center;gap:5px;
+    min-width:0;overflow-wrap:anywhere;}
+  .lane > h3 span:last-child{font-weight:400;color:#c7cacd;white-space:nowrap;flex:none;}
+  .lane .body{padding:9px;display:flex;flex-direction:column;gap:8px;background:var(--sub);min-width:0;}
+  .mod{background:var(--panel);border:1px solid var(--rule);border-left:2.5px solid var(--ink);padding:8px 9px;min-width:0;}
+  .mod .n{font-family:var(--mono);font-weight:700;font-size:.71rem;display:flex;flex-wrap:wrap;gap:5px;align-items:center;
+    min-width:0;overflow-wrap:anywhere;}
+  .mod .x{font-size:.75rem;color:var(--ink-2);margin-top:4px;overflow-wrap:anywhere;}
+  .arrow{display:flex;align-items:center;justify-content:center;padding-top:40px;color:var(--ink-3);font-size:1rem;}
+  @media(max-width:1040px){.arrow{padding:2px;transform:rotate(90deg);}}
+  .ckpt{font-family:var(--mono);font-size:.61rem;color:var(--ink-2);border:1px dashed var(--rule);padding:5px 7px;
+    background:var(--panel);min-width:0;overflow-wrap:anywhere;}
+  .grp{border:1px dashed var(--ink-3);background:var(--sub-2);padding:7px;display:flex;flex-direction:column;gap:7px;min-width:0;}
+  .grp .bh{font-family:var(--mono);font-size:.6rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-2);}
+  .grp .opt{background:var(--panel);border:1px solid var(--rule);padding:6px 7px;min-width:0;}
+  .grp .opt .oh{font-family:var(--mono);font-weight:700;font-size:.66rem;display:flex;justify-content:space-between;gap:5px;
+    flex-wrap:wrap;align-items:center;min-width:0;overflow-wrap:anywhere;}
+  .grp .opt .ox{font-size:.7rem;color:var(--ink-2);margin-top:2px;overflow-wrap:anywhere;}
+  .after{display:flex;gap:12px;flex-wrap:wrap;margin-top:14px;}
+  .after .mod{flex:1 1 260px;min-width:0;}
+
+  /* e — outputs */
+  .outs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;}
+  @media(max-width:880px){.outs{grid-template-columns:repeat(2,minmax(0,1fr));}}
+  @media(max-width:520px){.outs{grid-template-columns:minmax(0,1fr);}}
+  .out{border:1px solid var(--rule);border-top:2.5px solid var(--ink);background:var(--panel);padding:11px 12px;min-width:0;}
+  .out .p{font-family:var(--mono);font-size:.66rem;font-weight:700;word-break:break-all;}
+  .out .role{font-family:var(--mono);font-size:.55rem;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-3);margin-top:5px;}
+  .out ul{margin:6px 0 0;padding-left:14px;font-size:.75rem;color:var(--ink-2);}
+  .out li{margin:2px 0;}
+  .outnote{font-family:var(--serif);font-size:.78rem;color:var(--ink-2);margin-top:11px;}
+
+  /* d — segmentation backends */
+  table.bk{border-collapse:collapse;width:100%;font-size:.75rem;}
+  table.bk th{text-align:left;font-weight:700;font-size:.78rem;color:var(--ink);border-bottom:1.5px solid var(--ink);
+    padding:6px 9px;vertical-align:bottom;}
+  table.bk th:first-child{width:110px;}
+  table.bk td{padding:6px 9px;border-bottom:1px solid var(--rule-2);vertical-align:top;color:var(--ink-2);}
+  table.bk tr:last-child td{border-bottom:none;}
+  table.bk td.rk{font-family:var(--mono);font-size:.63rem;text-transform:uppercase;letter-spacing:.04em;
+    color:var(--ink-3);font-weight:700;white-space:nowrap;}
+  table.bk td.rk .sm{text-transform:none;letter-spacing:0;font-weight:400;font-size:.9em;}
+  table.bk td.hi{background:var(--sub);color:var(--ink);}
+  table.bk b{color:var(--ink);}
+  /* Two columns, not four: each of these holds a three-column parameter table
+     whose key alone runs to ~175px (seg_cellsam_bbox_threshold). At four
+     columns the track is 232px and the table overflowed the panel at every
+     viewport width. minmax(0,…) + the td overrides below keep it contained. */
+  .bkp{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 22px;margin-top:20px;}
+  @media(max-width:640px){.bkp{grid-template-columns:minmax(0,1fr);}}
+  .bkp > div{min-width:0;}
+  /* Parameter names here are long and the track is narrow, so they wrap rather
+     than push the table wide. The two-column .pgrid in panel i is roughly twice
+     as wide and keeps the nowrap default. */
+  .bkp table.pr td.k,.bkp table.pr td.v{white-space:normal;overflow-wrap:anywhere;}
+
+  /* f — resources */
+  .rescols{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px 22px;align-items:start;}
+  .rescols > div{min-width:0;}
+  @media(max-width:880px){.rescols{grid-template-columns:minmax(0,1fr);}}
+  .rh{font-family:var(--mono);font-size:.63rem;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-2);
+    margin:0 0 5px;padding-bottom:3px;border-bottom:1px solid var(--ink);}
+  table.rs{border-collapse:collapse;width:100%;font-family:var(--mono);font-size:.66rem;font-variant-numeric:tabular-nums;}
+  table.rs th{text-align:left;font-weight:700;color:var(--ink-2);border-bottom:1.5px solid var(--ink);padding:4px 6px;white-space:nowrap;}
+  table.rs th.n,table.rs td.n{text-align:right;}
+  table.rs td{padding:3px 6px;border-bottom:1px solid var(--rule-2);white-space:nowrap;}
+  table.rs tr:last-child td{border-bottom:none;}
+  table.rs td.lbl{color:var(--ink-3);}
+  .own{font-family:var(--mono);font-size:.52rem;text-transform:uppercase;letter-spacing:.03em;padding:0 3px;
+    border:1px solid var(--rule);color:var(--ink-2);}
+  .own-w{border-color:var(--ink);color:var(--ink);font-weight:700;}
+  .resnote{font-family:var(--serif);font-size:.78rem;color:var(--ink-2);margin-top:12px;}
+
+  /* g — add_cycle */
+  .cyc{border:1px solid var(--rule);background:var(--sub);padding:14px 15px;}
+  .cyc .cmd{font-family:var(--mono);font-size:.72rem;color:var(--ink);font-weight:700;overflow-x:auto;
+    border-left:2.5px solid var(--ink);padding-left:10px;}
+  .cyc .steps{display:flex;gap:9px;flex-wrap:wrap;margin-top:12px;}
+  .cyc .st{flex:1 1 150px;min-width:0;background:var(--panel);border:1px solid var(--rule);border-top:2.5px solid var(--ink);padding:9px 10px;overflow-wrap:anywhere;}
+  .cyc .st .h{font-family:var(--mono);font-weight:700;font-size:.7rem;}
+  .cyc .st .d{font-size:.75rem;color:var(--ink-2);margin-top:3px;}
+  .cyc .st .r{display:inline-block;font-family:var(--mono);font-size:.54rem;background:var(--ink);color:#fff;padding:1px 5px;margin-top:6px;font-weight:700;}
+
+  /* h — benchmark */
+  .bnote{border-left:3px solid var(--ink);background:var(--sub);padding:9px 12px;font-family:var(--mono);font-size:.73rem;color:var(--ink-2);margin-bottom:16px;}
+  .bnote b{color:var(--ink);}
+  .harness{display:flex;flex-wrap:wrap;gap:5px;align-items:center;font-family:var(--mono);font-size:.67rem;margin-bottom:18px;}
+  .harness .h{border:1px solid var(--rule);background:var(--panel);padding:5px 8px;white-space:nowrap;}
+  .harness .h.pipe{border:1.5px solid var(--ink);color:var(--ink);font-weight:700;}
+  .harness .a{color:var(--ink-3);}
+  .sigs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;}
+  @media(max-width:880px){.sigs{grid-template-columns:minmax(0,1fr);}}
+  .sig{border:1px solid var(--rule);border-top:2.5px solid var(--ink);padding:11px 12px;background:var(--panel);min-width:0;overflow-wrap:anywhere;}
+  .sig h4{margin:0 0 3px;font-size:.87rem;}
+  .sig .src{font-family:var(--mono);font-size:.6rem;color:var(--ink-3);margin-bottom:7px;}
+  .sig ul{margin:0;padding-left:15px;font-size:.77rem;color:var(--ink-2);}
+  .sig li{margin:2px 0;}
+  table.dl{border-collapse:collapse;width:100%;font-size:.75rem;margin-top:16px;}
+  table.dl th{text-align:left;font-family:var(--mono);font-size:.63rem;text-transform:uppercase;letter-spacing:.05em;
+    color:var(--ink-3);border-bottom:1.5px solid var(--ink);padding:5px 7px;}
+  table.dl td{padding:4px 7px;border-bottom:1px solid var(--rule-2);vertical-align:top;color:var(--ink-2);}
+  table.dl tr:last-child td{border-bottom:none;}
+  table.dl td.k{font-family:var(--mono);font-size:.68rem;font-weight:700;color:var(--ink);white-space:nowrap;}
+
+  /* i — parameters */
+  .pgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 26px;}
+  @media(max-width:760px){.pgrid{grid-template-columns:minmax(0,1fr);}}
+  .pcol{min-width:0;}
+  /* Below the 880 rung the two .pgrid tracks are too narrow for the longest keys
+     (spatialdata_residual_join_max_px) to stay on one line. */
+  @media(max-width:880px){table.pr td.k,table.pr td.v{white-space:normal;overflow-wrap:anywhere;}}
+  .pcol h4{font-family:var(--mono);font-size:.66rem;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-2);
+    margin:14px 0 4px;padding-bottom:3px;border-bottom:1px solid var(--ink);}
+  .pcol h4:first-child{margin-top:0;}
+
+</style>
+</head>
+<body>
+
+<div class="sheet">
+
+  <div class="masthead">
+    <div class="kick">Supplementary Figure S1</div>
+    <h1>A whole-slide multiplex image processing pipeline: modules, segmentation backends, defaults, outputs, resource model, and benchmarking</h1>
+  </div>
+  <nav class="figset" aria-label="Supplementary figure set">
+    <span class="self">S1 · pipeline</span>
+    <a href="registration-schematic.html">S2 · registration</a>
+    <a href="qc-schematic.html">S3 · quality control</a>
+  </nav>
+  <p class="standfirst">A step-gated Nextflow DSL2 workflow that aligns multiplexed immunofluorescence slides,
+    segments every cell, quantifies each marker per compartment, and exports QuPath-compatible GeoJSON, a
+    pyramidal OME-TIFF, and a scverse-native SpatialData store. The nuclear/fiducial channel is resolved by
+    marker name from image metadata and drives both segmentation and registration.</p>
+
+  <!-- a — INPUT -->
+  <section class="panel">
+    <span class="plabel">a</span>
+    <div class="panel-head"><h2>Input — the samplesheet</h2>
+      <p>Every run is driven by a samplesheet CSV — no images are needed to describe the design. Each row is one
+        image; exactly one image per patient is the registration reference (<code>is_reference=true</code>).
+        Channel identity is declared metadata, never parsed from filenames.</p></div>
+    <div class="tbl-scroll">
+      <table class="ss">
+        <caption>samplesheet.csv (--input)</caption>
+        <thead><tr><th>patient_id</th><th>path_to_file</th><th>is_reference</th><th>channels</th></tr></thead>
+        <tbody>
+          <tr><td>P001</td><td>c1.ome.tif</td><td class="t">true</td><td><span class="nuc">DAPI</span>|PanCK|CD45</td></tr>
+          <tr><td>P001</td><td>c2.ome.tif</td><td class="f">false</td><td><span class="nuc">DAPI</span>|CD8|CD68</td></tr>
+          <tr><td>P001</td><td>c3.ome.tif</td><td class="f">false</td><td><span class="nuc">DAPI</span>|PD-L1|Ki-67</td></tr>
+          <tr><td>P002</td><td>p2c1.ome.tif</td><td class="t">true</td><td><span class="nuc">DAPI</span>|PanCK|CD45</td></tr>
+          <tr><td>P002</td><td>p2c2.ome.tif</td><td class="f">false</td><td><span class="nuc">CELLTOX</span>|CD3|FoxP3</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="ssnote">The <span class="nuc">underlined</span> channel is the resolved nuclear/fiducial marker.
+      With <code>nuclear_markers = [DAPI, CELLTOX]</code>, DAPI is used where present; the last row has no DAPI,
+      so CELLTOX is used instead. That channel is moved to index 0 at conversion. Per-patient image counts are
+      read from this file up front and injected into the channel metadata, so every downstream grouping streams
+      (patient B preprocesses while patient A registers) instead of waiting for the whole cohort. A later
+      <code>--start</code> reads the corresponding checkpoint CSV instead, whose columns are the ones that step
+      requires (<code>preprocessed_image</code>, <code>registered_image</code>, or the latter plus
+      <code>cell_mask</code>/<code>nuclei_mask</code>).</p>
+  </section>
+
+  <!-- b — STEP GATE -->
+  <section class="panel">
+    <span class="plabel">b</span>
+    <div class="panel-head"><h2>Execution gate — <code>--start</code> / <code>--stop</code></h2>
+      <p>Four ordered steps; each writes a checkpoint CSV, so any step can resume from a prior run's output.
+        The step vocabulary has one owner (<code>ParamUtils.STEPS</code>), which also fixes each step's required
+        samplesheet columns and the QC artifacts it contributes.</p></div>
+    <div class="gate">
+      <div class="g"><div class="k">step 1 · default start</div><div class="v">preprocessing</div><div class="d">Standardize to OME-TIFF; BaSiC illumination correction (optional).</div></div>
+      <div class="g"><div class="k">step 2</div><div class="v">registration</div><div class="d">Align each moving slide to the patient's reference.</div></div>
+      <div class="g"><div class="k">step 3</div><div class="v">segmentation</div><div class="d">Detect every cell; extract contours and morphology.</div></div>
+      <div class="g"><div class="k">step 4 · default stop</div><div class="v">postprocessing</div><div class="d">Quantify and export.</div></div>
+    </div>
+    <div class="gnote">
+      <span><b>--start preprocessing</b> (default)</span><span><b>--stop</b> omitted → to end</span>
+      <span><b>--start X --stop X</b> → one step</span><span><b>--mode add_cycle</b> → bypasses gate (g)</span>
+    </div>
+  </section>
+
+  <!-- c — MODULES -->
+  <section class="panel">
+    <span class="plabel">c</span>
+    <div class="panel-head"><h2>Modules and default parameters</h2>
+      <p>Each lane is one step's subworkflow; boxes are processes in execution order. Chips give real defaults;
+        chip names drop the stage prefix a parameter carries in <code>nextflow.config</code>
+        (<code>micro_reg</code> = <code>reg_micro_reg</code>, <code>max_dim</code> = <code>reg_max_image_dim</code>,
+        and every chip on the tiled fork = <code>reg_tiled_*</code>) — panel <b>i</b> gives the full names.
+        Every process runs in a pinned container and emits <code>versions.yml</code>.</p></div>
+    <div class="flow">
+
+      <div class="lane">
+        <h3><span>PREPROCESSING</span><span>1</span></h3>
+        <div class="body">
+          <div class="mod"><div class="n">CONVERT_IMAGE</div>
+            <div class="x">Standardize any vendor format to OME-TIFF. Resolves the nuclear marker by name
+              (<code>nuclear_markers</code>) from metadata and moves it to channel 0; fails fast if none present.</div>
+            <div class="pp"><span>nuclear_markers <b>DAPI,CELLTOX</b></span></div></div>
+          <div class="mod"><div class="n">PREPROCESS <span class="tag">opt</span></div>
+            <div class="x">BaSiC illumination correction — flatfield/darkfield shading model, estimated on an FOV stack,
+              at BaSiC's own defaults. The nuclear/fiducial channels are left uncorrected by default: they drive both
+              registration and segmentation, so correcting them changes what each consumes.
+              <b>skip_preprocessing</b> turns the correction off entirely — conversion still runs, so the step still
+              emits one image per slide and the checkpoint still has a row per slide, pointing at
+              <code>converted/</code> instead.</div>
+            <div class="pp"><span>skip_preprocessing <b>false</b></span><span>skip_nuclear <b>true</b></span><span>tile <b>1950</b></span></div></div>
+          <div class="mod"><div class="n">GENERATE_PREPROCESS_QC <span class="tag">opt</span></div>
+            <div class="x">Per-channel downsampled PNG for visual inspection.</div>
+            <div class="pp"><span>scale <b>0.25</b></span></div></div>
+          <div class="ckpt">→ csv/preprocessed.csv</div>
+        </div>
+      </div>
+
+      <div class="arrow">→</div>
+
+      <div class="lane">
+        <h3><span>REGISTRATION</span><span>2</span></h3>
+        <div class="body">
+          <div class="mod"><div class="n">group by patient</div>
+            <div class="x">Patients whose only slide is the reference bypass the backend entirely (a lone image
+              has no transform to solve) and pass through unregistered.</div>
+            <div class="pp"><span>allow_auto_reference <b>false</b></span></div></div>
+          <div class="grp">
+            <div class="bh">fork — registration_method</div>
+            <div class="opt"><div class="oh"><span>valis → REGISTER</span><span class="tag-def">default</span></div>
+              <div class="ox">Feature-based rigid + non-rigid warp (JVM/Bio-Formats), resolving all slides into a
+                shared space. Micro-registration at maximum depth by default.</div>
+              <div class="pp" style="margin-top:6px"><span>memory_mode <b>high</b></span><span>micro_reg <b>2</b></span><span>max_dim <b>4000</b></span></div></div>
+            <div class="opt"><div class="oh"><span>tiled → STARE</span><span class="tag-alt">method=tiled</span></div>
+              <div class="ox">JVM-free tiled rigid + mesh warp into the reference's shape; fiducial = channel 0.
+                Laptop-viable. Step 2 fans out to one task per tile — the only shape it has.</div>
+              <div class="pp" style="margin-top:6px"><span>tile <b>2048</b></span><span>halo <b>256</b></span><span>gate_tre <b>1.0</b></span><span>coarse_max_dim <b>4096</b></span></div></div>
+          </div>
+          <div class="mod"><div class="n">GENERATE_REGISTRATION_QC <span class="tag tag-on">reg_qc≥1</span></div>
+            <div class="x">Nuclear-channel overlay, registered vs reference.</div></div>
+          <div class="mod"><div class="n">SEG_QC_SEGMENT → SEG_QC_GEOJSON → WARP_SEG_QC <span class="tag tag-on">reg_qc=2</span></div>
+            <div class="x">Segment each slide on its <b>native</b> image with the run's own segmenter
+              (<code>SEG_QC_SEGMENT</code> is <code>SEGMENT</code> aliased, so it follows
+              <code>--seg_method</code>), trace the mask to polygons, then warp those through the transform and
+              score IoU and centroid displacement per registration stage. Also emits a <b>per-cell residual</b>
+              table consumed by the SpatialData export. Default on — see figure <b>S3</b>.</div></div>
+          <div class="ckpt">→ csv/registered.csv</div>
+        </div>
+      </div>
+
+      <div class="arrow">→</div>
+
+      <div class="lane">
+        <h3><span>SEGMENTATION</span><span>3</span></h3>
+        <div class="body">
+          <div class="mod"><div class="n">SEGMENT <span class="tag">reference slide</span></div>
+            <div class="x">Detect every cell. Always emits both a whole-cell mask and a nuclei mask.
+              Three interchangeable backends — see panel <b>d</b>.</div>
+            <div class="pp"><span>gpu <b>true</b></span></div></div>
+          <div class="grp">
+            <div class="bh">fork — seg_method</div>
+            <div class="opt"><div class="oh"><span>instantseg</span><span class="tag-def">default</span></div>
+              <div class="ox">Channel-invariant; native cell + nuclei output.</div></div>
+            <div class="opt"><div class="oh"><span>stardist</span><span class="tag-alt">needs model</span></div>
+              <div class="ox">Nuclear channel 0 only; cells expanded from nuclei.</div></div>
+            <div class="opt"><div class="oh"><span>cellsam</span><span class="tag-alt">gated weights</span></div>
+              <div class="ox">Nuclear channel by name; cells expanded from nuclei.</div></div>
+          </div>
+          <div class="mod"><div class="n">EXTRACT_CELL_PROPERTIES</div>
+            <div class="x"><code>regionprops</code> once, not once per marker: <code>morphology.csv</code> plus
+              simplified cell contours.</div>
+            <div class="pp"><span>simplify <b>1.0</b></span><span>precision <b>2</b></span></div></div>
+          <div class="mod"><div class="n">EXTRACT_NUCLEI_PROPERTIES <span class="tag tag-on">compartments</span></div>
+            <div class="x">Re-keys nucleus contours to cell labels, so one detection can carry both geometries.</div></div>
+          <div class="ckpt">→ csv/segmented.csv</div>
+        </div>
+      </div>
+
+      <div class="arrow">→</div>
+
+      <div class="lane">
+        <h3><span>POSTPROCESSING</span><span>4</span></h3>
+        <div class="body">
+          <div class="mod"><div class="n">SPLIT_CHANNELS → QUANTIFY</div>
+            <div class="x">Per-cell marker intensity against the mask, one task per channel, merged per patient.
+              Median always; Mean/Sum added by <code>expanded_quantification</code>.</div>
+            <div class="pp"><span>compartments <b>true</b></span><span>expanded <b>true</b></span></div></div>
+          <div class="mod"><div class="n">EXPORT_GEOJSON</div>
+            <div class="x">QuPath/FlowPath <code>cells.geojson</code> with raw per-marker measurements, plus a
+              lighter whole-cell-only variant.</div>
+            <div class="pp"><span>pixel_size <b>0.325</b></span></div></div>
+          <div class="mod"><div class="n">MERGE_AND_PYRAMID</div>
+            <div class="x">Pyramidal OME-TIFF preserving channel metadata; masks optionally embedded as a second series.</div>
+            <div class="pp"><span>tilex <b>512</b></span><span>levels <b>8</b></span><span>zstd</span></div></div>
+          <div class="mod"><div class="n">EXPORT_SPATIALDATA <span class="tag tag-on">default on</span></div>
+            <div class="x">Serialize the run into a scverse-native <code>.zarr</code>. Recomputes nothing.</div></div>
+          <div class="mod"><div class="n">GENERATE_POSTPROCESSING_QC <span class="tag">opt</span></div>
+            <div class="x">Mask + quantification overlays for visual inspection.</div></div>
+          <div class="ckpt">→ csv/postprocessed.csv</div>
+        </div>
+      </div>
+
+    </div>
+    <div class="after">
+      <div class="mod"><div class="n">GENERATE_QC_REPORT</div><div class="x">Aggregate every step's QC and every <code>versions.yml</code> into one HTML report.</div></div>
+      <div class="mod"><div class="n">AGGREGATE_SIZE_LOGS <span class="tag">enable_trace</span></div><div class="x">Per-process input-size logs (default on) — the benchmark's raw resource data.</div></div>
+    </div>
+  </section>
+
+  <!-- d — SEGMENTATION BACKENDS -->
+  <section class="panel">
+    <span class="plabel">d</span>
+    <div class="panel-head"><h2>Segmentation backends — <code>--seg_method</code></h2>
+      <p>One process, three genuinely different segmenters. They differ in what they read, how the
+        whole-cell mask is produced, what they require before they will run, and how their weights are
+        licensed. Every column below is taken from <code>lib/SegBackends.groovy</code> and the
+        <code>ext.args</code> block in <code>conf/modules.config</code>.</p></div>
+
+    <div class="tbl-scroll"><table class="bk">
+      <thead><tr>
+        <th>&nbsp;</th>
+        <th>instantseg <span class="tag-def">default</span></th>
+        <th>stardist</th>
+        <th>cellsam</th>
+      </tr></thead>
+      <tbody>
+        <tr><td class="rk">reads</td>
+          <td class="hi">the full multichannel image — <b>channel-invariant</b></td>
+          <td>one channel, hardcoded to <b>index 0</b></td>
+          <td>one nuclear channel, <b>resolved by marker name</b></td></tr>
+        <tr><td class="rk">whole-cell mask</td>
+          <td class="hi">predicted natively, alongside nuclei</td>
+          <td>expanded from nuclei by <code>seg_expand_distance</code></td>
+          <td>expanded from nuclei by <code>seg_expand_distance</code></td></tr>
+        <tr><td class="rk">precondition<br><span class="sm">(enforced at task start)</span></td>
+          <td class="hi">a writable model cache; none on the image itself</td>
+          <td>channel 0 <b>must</b> be a nuclear marker — else <b>exit 1</b></td>
+          <td>a nuclear channel must exist — a negative index is <b>exit 1</b></td></tr>
+        <tr><td class="rk">weights</td>
+          <td class="hi">Apache-2.0, auto-downloaded from BioImage.IO</td>
+          <td><b>none ship with the repo</b> — a trained model must be supplied</td>
+          <td><b>gated</b> — needs <code>DEEPCELL_ACCESS_TOKEN</code> to auto-download</td></tr>
+        <tr><td class="rk">runs on a fresh clone?</td>
+          <td class="hi"><b>yes</b> — the reason it is the default</td>
+          <td>no — set <code>segmentation_model_dir</code></td>
+          <td>no — set <code>cellsam_model_path</code> or export a token</td></tr>
+        <tr><td class="rk">entry point</td>
+          <td class="hi">segment_instantseg.py</td>
+          <td>segment.py</td>
+          <td>segment_cellsam.py</td></tr>
+        <tr><td class="rk">container tag</td>
+          <td class="hi">…:instant_seg</td>
+          <td>…:segmentation_gpu</td>
+          <td>…:cellsam</td></tr>
+      </tbody>
+    </table></div>
+
+    <div class="bkp">
+      <div class="bkc">
+        <div class="rh">shared by all three</div>
+        <table class="pr">
+          <tr><td class="k">seg_method</td><td class="v">instantseg</td><td class="d">backend selector</td></tr>
+          <tr><td class="k">seg_gpu</td><td class="v">true</td><td class="d">adds --gres + --nv / --gpus all</td></tr>
+          <tr><td class="k">gpu_type</td><td class="v">nvidia_h200:1</td><td class="d">SLURM GRES string</td></tr>
+        </table>
+      </div>
+      <div class="bkc">
+        <div class="rh">instantseg only</div>
+        <table class="pr">
+          <tr><td class="k">seg_instantseg_model</td><td class="v w">fluorescence_nuclei_and_cells</td><td class="d">BioImage.IO weights</td></tr>
+          <tr><td class="k">seg_instantseg_target</td><td class="v">all_outputs</td><td class="d">all_outputs | cells | nuclei</td></tr>
+          <tr><td class="k">seg_instantseg_tile_size</td><td class="v">512</td><td class="d">tiled inference (px)</td></tr>
+          <tr><td class="k">seg_instantseg_batch_size</td><td class="v">16</td><td class="d">tiles per forward pass</td></tr>
+          <tr><td class="k">instanseg_model_dir</td><td class="v nul">null</td><td class="d">writable model cache</td></tr>
+          <tr><td class="k">pixel_size</td><td class="v">0.325</td><td class="d">µm/px, sets working scale</td></tr>
+        </table>
+      </div>
+      <div class="bkc">
+        <div class="rh">stardist only</div>
+        <table class="pr">
+          <tr><td class="k">segmentation_model_dir</td><td class="v nul">null</td><td class="d"><b>required</b> — no model ships</td></tr>
+          <tr><td class="k">segmentation_model</td><td class="v w">stardist_full_e200_…</td><td class="d">not a StarDist built-in</td></tr>
+          <tr><td class="k">seg_n_tiles_y / _x</td><td class="v">16 / 16</td><td class="d">inference tile grid</td></tr>
+          <tr><td class="k">seg_pmin / seg_pmax</td><td class="v">1.0 / 99.8</td><td class="d">normalization percentiles</td></tr>
+          <tr><td class="k">seg_prob_thresh</td><td class="v nul">null</td><td class="d">null → the model's own default</td></tr>
+          <tr><td class="k">seg_expand_distance</td><td class="v">10</td><td class="d">nuclei → cell (px)</td></tr>
+        </table>
+      </div>
+      <div class="bkc">
+        <div class="rh">cellsam only</div>
+        <table class="pr">
+          <tr><td class="k">cellsam_model_path</td><td class="v nul">null</td><td class="d">null → auto-download (token)</td></tr>
+          <tr><td class="k">seg_cellsam_bbox_threshold</td><td class="v">0.4</td><td class="d">precision / recall knob</td></tr>
+          <tr><td class="k">seg_cellsam_use_wsi</td><td class="v">true</td><td class="d">native whole-slide tiling</td></tr>
+          <tr><td class="k">seg_cellsam_block_size</td><td class="v">1024</td><td class="d">tile side (px), range 256–2048</td></tr>
+          <tr><td class="k">seg_cellsam_overlap</td><td class="v">56</td><td class="d">tile overlap (px)</td></tr>
+          <tr><td class="k">seg_expand_distance</td><td class="v">10</td><td class="d">nuclei → cell (px)</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <p class="outnote"><b>Why InstanSeg is the default.</b> It is the only backend that produces a mask on a
+      fresh clone: StarDist's configured model name is not one of the StarDist built-ins, so without
+      <code>segmentation_model_dir</code> it raises <code>FileNotFoundError</code>, and CellSAM's weights are
+      gated behind a DeepCell token. InstanSeg's weights are Apache-2.0 and unencumbered. It is also the only
+      one of the three that predicts the whole-cell mask directly rather than dilating nuclei by a fixed
+      radius — so <code>seg_expand_distance</code> has no effect when it is selected. An unrecognised
+      <code>--seg_method</code> is rejected by name at launch rather than silently falling back to a
+      different segmenter.</p>
+  </section>
+
+  <!-- e — OUTPUTS -->
+  <section class="panel">
+    <span class="plabel">e</span>
+    <div class="panel-head"><h2>What a completed run leaves on disk</h2>
+      <p>Per patient, under <code>--outdir</code>. The GeoJSON and the OME-TIFF are the primary artifacts — they
+        are what QuPath and FlowPath open. The SpatialData store is additive: the same run, readable by
+        <code>scanpy</code>, <code>squidpy</code>, <code>napari-spatialdata</code> and Vitessce without conversion.</p></div>
+    <div class="outs">
+      <div class="out">
+        <div class="p">geojson/export/cells.geojson</div><div class="role">primary · QuPath / FlowPath</div>
+        <ul><li>One detection per cell</li><li>Cell + nucleus geometry</li><li><code>"CD3: Nucleus: Median"</code> measurement keys</li></ul>
+      </div>
+      <div class="out">
+        <div class="p">pyramid/pyramid.ome.tiff</div><div class="role">primary · image</div>
+        <ul><li>8 pyramid levels, zstd</li><li>Channel names preserved</li><li>Optional second mask series</li></ul>
+      </div>
+      <div class="out">
+        <div class="p">spatialdata/&lt;pid&gt;.zarr</div><div class="role">additive · scverse</div>
+        <ul><li><code>labels</code> cell + nuclei masks</li><li><code>shapes</code> cell + nucleus polygons</li><li><code>table</code> AnnData: X raw, <code>zscore</code> layer</li><li><code>obsm</code> centroids + per-cell registration residual</li><li><code>uns</code> QC verbatim + provenance</li></ul>
+      </div>
+      <div class="out">
+        <div class="p">qc/ · csv/ · size_logs/</div><div class="role">evidence</div>
+        <ul><li>Aggregated HTML QC report</li><li>Computational resource report</li><li>Per-stage IoU / Dice / displacement</li><li>Four resumable checkpoint CSVs</li></ul>
+      </div>
+    </div>
+    <p class="outnote">The store's <code>instance_key</code> is the segmentation label — the only stable cell
+      identifier the pipeline produces — so every join is keyed on it and a mismatch is fatal rather than
+      silently positional. <code>points/</code> is absent by design: this is protein imaging, so there are no
+      transcripts to store. The pyramid is excluded from the <code>.zarr</code> by default
+      (<code>spatialdata_include_image</code>) because writing it duplicates the largest artifact of the run.
+      Published paths have a single owner (<code>lib/Layout.groovy</code>); a test asserts that every path
+      recorded in every checkpoint CSV exists on disk and lies outside the work directory.</p>
+  </section>
+
+  <!-- f — RESOURCES -->
+  <section class="panel">
+    <span class="plabel">f</span>
+    <div class="panel-head"><h2>Resource model</h2>
+      <p>Every process's <code>cpus</code>/<code>memory</code>/<code>time</code> has exactly one owner: a resource
+        <b>label</b> or a <code>withName:</code> block, never both. Memory and time scale with
+        <code>task.attempt</code>, so a retry after an out-of-memory kill climbs the ramp automatically, and every
+        request is clamped to the <code>max_*</code> ceilings.</p></div>
+    <div class="rescols">
+
+      <div>
+        <div class="rh">resource labels</div>
+        <div class="tbl-scroll"><table class="rs">
+          <thead><tr><th>label</th><th class="n">cpus</th><th>memory</th><th>time</th></tr></thead>
+          <tbody>
+            <tr><td>process_single</td><td class="n">1</td><td>12 GB × a</td><td>8 h × a</td></tr>
+            <tr><td>process_low</td><td class="n">2</td><td>32 GB × a</td><td>2 h × a</td></tr>
+            <tr><td>process_medium</td><td class="n">4</td><td>100 + 100 GB × a</td><td>4 h × a</td></tr>
+            <tr><td>process_high</td><td class="n">8</td><td>200 + 100 GB × a</td><td>12 h × a</td></tr>
+            <tr><td class="lbl">(base default)</td><td class="n lbl">1 × a</td><td class="lbl">6 GB × a</td><td class="lbl">4 h × a</td></tr>
+          </tbody></table></div>
+
+        <div class="rh" style="margin-top:16px">ceilings &amp; retry</div>
+        <div class="tbl-scroll"><table class="rs">
+          <thead><tr><th>setting</th><th>default</th><th>local</th></tr></thead>
+          <tbody>
+            <tr><td>max_cpus</td><td>128</td><td>4</td></tr>
+            <tr><td>max_memory</td><td>700 GB</td><td>16 GB</td></tr>
+            <tr><td>max_time</td><td>240 h</td><td>72 h</td></tr>
+            <tr><td>maxRetries</td><td>3</td><td>3</td></tr>
+            <tr><td>queueSize</td><td>20</td><td>20</td></tr>
+          </tbody></table></div>
+        <p class="resnote">Retry fires on 104/134/135/137/139/140/143 (connection reset and the signal kills,
+          including the OOM killer); anything else finishes the run. <code>REGISTER</code> additionally retries on
+          exit 1, which is how VALIS reports a tile-read failure or a JVM out-of-heap. The <b>seven</b> QC
+          processes are non-gating: they retry the whole 130–145 signal range plus 104, then fall back to
+          <b>ignore</b> rather than finish — a broken QC step must never stop a multi-day run. Figure <b>S3</b>
+          takes that contract apart.</p>
+      </div>
+
+      <div>
+        <div class="rh">per-process request (attempt 1)</div>
+        <div class="tbl-scroll"><table class="rs">
+          <thead><tr><th>process</th><th class="n">cpus</th><th>memory</th><th>time</th><th>owner</th></tr></thead>
+          <tbody>
+            <tr><td>CONVERT_IMAGE</td><td class="n">1</td><td>24–88 GB †</td><td>2 h</td><td><span class="own own-w">name</span></td></tr>
+            <tr><td>PREPROCESS</td><td class="n">4</td><td>7 GB/GiB + 8</td><td>3 h</td><td><span class="own own-w">name</span></td></tr>
+            <tr><td>REGISTER</td><td class="n">8</td><td>300 GB</td><td>24 h</td><td><span class="own own-w">name</span></td></tr>
+            <tr><td>TILED_COARSE</td><td class="n">2</td><td>8 GB ×2ⁿ</td><td>2 h</td><td><span class="own">both</span></td></tr>
+            <tr><td>TILED_REG_TILE</td><td class="n">2</td><td>4 GB §</td><td>2 h</td><td><span class="own">both</span></td></tr>
+            <tr><td>TILED_SOLVE</td><td class="n">1</td><td>1 GB</td><td>8 h</td><td><span class="own">both</span></td></tr>
+            <tr><td>TILED_STITCH</td><td class="n">4</td><td>4 GB §</td><td>4 h</td><td><span class="own">both</span></td></tr>
+            <tr><td>GENERATE_REGISTRATION_QC</td><td class="n">1</td><td>100–300 GB †</td><td>12 h</td><td><span class="own">both</span></td></tr>
+            <tr><td>SEG_QC_SEGMENT</td><td class="n">8</td><td>32–128 GB †</td><td>4 h</td><td><span class="own own-w">name</span></td></tr>
+            <tr><td>SEG_QC_GEOJSON</td><td class="n">1</td><td>64 GB</td><td>4 h</td><td><span class="own own-w">name</span></td></tr>
+            <tr><td>WARP_SEG_QC</td><td class="n">2</td><td>32 GB ‡</td><td>3 h</td><td><span class="own own-w">name</span></td></tr>
+            <tr><td>SEGMENT</td><td class="n">8</td><td>32–128 GB †</td><td>4 h</td><td><span class="own own-w">name</span></td></tr>
+            <tr><td>EXTRACT_*_PROPERTIES</td><td class="n">1</td><td>64 GB</td><td>12 h</td><td><span class="own own-w">name</span></td></tr>
+            <tr><td>SPLIT_CHANNELS</td><td class="n">1</td><td>32–128 GB †</td><td>2 h</td><td><span class="own own-w">name</span></td></tr>
+            <tr><td>QUANTIFY</td><td class="n">1</td><td>128 GB</td><td>12 h</td><td><span class="own own-w">name</span></td></tr>
+            <tr><td>EXPORT_GEOJSON</td><td class="n">1</td><td>32 GB</td><td>2 h</td><td><span class="own own-w">name</span></td></tr>
+            <tr><td>MERGE_AND_PYRAMID</td><td class="n">2</td><td>200–300 GB †</td><td>8 h</td><td><span class="own own-w">name</span></td></tr>
+            <tr><td>EXPORT_SPATIALDATA</td><td class="n">4</td><td>200 GB</td><td>4 h</td><td><span class="own">both</span></td></tr>
+          </tbody></table></div>
+        <p class="resnote">† tiered on input size, read from the staged file at submission time.
+          ‡ doubling ramp (32/64/128/256) rather than linear. § derived from a parameter, not a constant:
+          <code>reg_tiled_tile</code>&nbsp;+&nbsp;2·<code>reg_tiled_halo</code> for REG_TILE and
+          <code>reg_tiled_out_tile</code> for STITCH, each the measured linear fit doubled and floored at 4 GB.
+          GPU is requested by <code>SEGMENT</code> — and therefore by its alias
+          <code>SEG_QC_SEGMENT</code> — when <code>seg_gpu=true</code>, via <code>--gres=gpu:$gpu_type</code>
+          plus <code>--gpus all</code> (Docker) or <code>--nv</code> (Singularity);
+          <code>SEG_QC_GEOJSON</code> is pure-CPU contour tracing and asks for none. The whole STARE backend
+          fits in 8 / 4 / 1 / 4 GB across its four processes — JVM-free and tile-streamed, which is what makes
+          it laptop-viable.</p>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- g — ADD_CYCLE -->
+  <section class="panel">
+    <span class="plabel">g</span>
+    <div class="panel-head"><h2>Incremental mode — <code>--mode add_cycle</code></h2>
+      <p>Fold a new imaging cycle into a completed patient run, reusing prior assets; bypasses the step gate.</p></div>
+    <div class="cyc">
+      <div class="cmd">nextflow run . --mode add_cycle --prior_outdir results/ --input new_cycle.csv --outdir results_c2</div>
+      <div class="steps">
+        <div class="st"><div class="h">reuse reference</div><div class="d">Register the new cycle to the frozen prior reference.</div><span class="r">registered.csv</span></div>
+        <div class="st"><div class="h">EXTRACT_MASK_SERIES</div><div class="d">Read existing cell + nuclei masks from the prior pyramid.</div><span class="r">no re-segmentation</span></div>
+        <div class="st"><div class="h">register new cycle</div><div class="d">Only the new slides go through VALIS.</div><span class="r">valis only</span></div>
+        <div class="st"><div class="h">quantify new markers</div><div class="d">Measure new markers on the reused mask; old markers carried over.</div><span class="r">prior columns</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- h — BENCHMARK -->
+  <section class="panel">
+    <span class="plabel">h</span>
+    <div class="panel-head"><h2>Benchmarking</h2>
+      <p>A separate <code>benchmarking</code> branch changes no pipeline code; it sweeps parameters over the
+        unmodified pipeline and harvests QC the pipeline already writes.</p></div>
+    <div class="bnote"><b>0</b> changes to workflows / subworkflows / modules / nextflow.config — the sweep
+      harness lives entirely under <code>benchmarks/</code> and drives the pipeline as a black box.</div>
+    <div class="harness">
+      <span class="h">sweep.yaml</span><span class="a">→</span><span class="h">generate_matrix.py</span><span class="a">→</span>
+      <span class="h">build_run_plan.py</span><span class="a">→</span><span class="h">run_sweep.sh</span><span class="a">→</span>
+      <span class="h pipe">unmodified pipeline</span><span class="a">→</span><span class="h">make_tables.py</span><span class="a">→</span><span class="h">paper_data/*.csv</span>
+    </div>
+    <div class="sigs">
+      <div class="sig"><h4>Resource scaling</h4><div class="src">← trace.txt + size_logs</div>
+        <ul><li>Linear fit per stage: <code>peak_rss ~ input_gb</code>, <code>realtime ~ input_gb</code></li><li>Slope = marginal cost per input GiB</li><li>Intercept = fixed overhead</li></ul></div>
+      <div class="sig"><h4>Registration accuracy</h4><div class="src">← reg_qc=2 seg_qc.json · VALIS summary · public landmarks</div>
+        <ul><li>Seg-based Dice + centroid displacement per stage</li><li>Δ-vs-rigid isolates registration from segmentation noise</li><li>VALIS feature rTRE as an independent second signal</li><li>ANHIR / ACROBAT landmark TRE as an external check</li></ul></div>
+      <div class="sig"><h4>Segmentation stability</h4><div class="src">← cross-method agreement</div>
+        <ul><li>Instance-F1 between backends on a shared cell population</li><li>Foreground IoU</li><li>instantseg / stardist / cellsam</li></ul></div>
+    </div>
+    <div class="tbl-scroll"><table class="dl">
+      <thead><tr><th>paper_data table</th><th>one row per</th><th>carries</th></tr></thead>
+      <tbody>
+        <tr><td class="k">runs_master.csv</td><td>run</td><td>input dims, per-stage peak RAM / wall-time, cost</td></tr>
+        <tr><td class="k">scaling_fits.csv</td><td>stage</td><td>slope, intercept, r² for RAM and runtime vs input GiB</td></tr>
+        <tr><td class="k">registration_accuracy.csv</td><td>run × slide × stage</td><td>matched Dice, centroid displacement (µm), Δ vs rigid</td></tr>
+        <tr><td class="k">registration_valis_rtre.csv</td><td>run × slide</td><td>VALIS's own feature-based rTRE</td></tr>
+        <tr><td class="k">segmentation_agreement.csv</td><td>method pair</td><td>instance-F1, foreground IoU</td></tr>
+        <tr><td class="k">param_matrix.csv</td><td>run</td><td>every knob's cost <i>and</i> quality, joined wide</td></tr>
+      </tbody></table></div>
+  </section>
+
+  <!-- i — PARAMETERS -->
+  <section class="panel">
+    <span class="plabel">i</span>
+    <div class="panel-head"><h2>Default parameters</h2>
+      <p>Values taken verbatim from the <code>params{}</code> block of <code>nextflow.config</code>, which is the
+        only place a default may be declared — a test forbids a second declaration anywhere else. Selected from
+        the <b>75</b> parameters that block declares; the full surface is in the documentation.</p></div>
+    <div class="pgrid">
+      <div class="pcol">
+        <h4>Workflow &amp; channels</h4>
+        <table class="pr">
+          <tr><td class="k">start</td><td class="v">preprocessing</td><td class="d">first of four steps</td></tr>
+          <tr><td class="k">stop</td><td class="v nul">null</td><td class="d">run to end</td></tr>
+          <tr><td class="k">mode</td><td class="v">standard</td><td class="d">standard | add_cycle</td></tr>
+          <tr><td class="k">nuclear_markers</td><td class="v">[DAPI, CELLTOX]</td><td class="d">nuclear/fiducial marker, by name</td></tr>
+          <tr><td class="k">allow_auto_reference</td><td class="v">false</td><td class="d">error if no reference marked</td></tr>
+          <tr><td class="k">dry_run</td><td class="v">false</td><td class="d">validate and exit</td></tr>
+        </table>
+        <h4>Preprocessing</h4>
+        <table class="pr">
+          <tr><td class="k">skip_preprocessing</td><td class="v">false</td><td class="d">true &rarr; convert only, no BaSiC</td></tr>
+          <tr><td class="k">preproc_skip_nuclear</td><td class="v">true</td><td class="d">don't correct nuclear markers</td></tr>
+          <tr><td class="k">preproc_tile_size</td><td class="v">1950</td><td class="d">BaSiC tile (px)</td></tr>
+        </table>
+        <h4>Registration</h4>
+        <table class="pr">
+          <tr><td class="k">registration_method</td><td class="v">valis</td><td class="d">valis | tiled (STARE)</td></tr>
+          <tr><td class="k">reg_qc</td><td class="v">2</td><td class="d">0 none · 1 overlay · 2 +seg</td></tr>
+          <tr><td class="k">reg_micro_reg</td><td class="v">2</td><td class="d">micro-reg depth (MAX default)</td></tr>
+          <tr><td class="k">memory_mode</td><td class="v">high</td><td class="d">VALIS profile</td></tr>
+          <tr><td class="k">reg_max_image_dim</td><td class="v">4000</td><td class="d">VALIS working max dim</td></tr>
+          <tr><td class="k">reg_jvm_heap_gb</td><td class="v nul">null</td><td class="d">null → derive from task.memory</td></tr>
+        </table>
+        <h4>Registration — tiled / STARE</h4>
+        <table class="pr">
+          <tr><td class="k">reg_tiled_tile</td><td class="v">2048</td><td class="d">tile core + mesh (px)</td></tr>
+          <tr><td class="k">reg_tiled_halo</td><td class="v">256</td><td class="d">per-tile read halo (px)</td></tr>
+          <tr><td class="k">reg_tiled_gate_tre</td><td class="v">1.0</td><td class="d">refine above this TRE</td></tr>
+        </table>
+      </div>
+      <div class="pcol">
+        <h4>Segmentation — see panel d</h4>
+        <table class="pr">
+          <tr><td class="k">seg_method</td><td class="v">instantseg</td><td class="d">instantseg | stardist | cellsam</td></tr>
+          <tr><td class="k">seg_gpu</td><td class="v">true</td><td class="d">use GPU</td></tr>
+          <tr><td class="k">seg_expand_distance</td><td class="v">10</td><td class="d">nuclei→cell (px); stardist + cellsam only</td></tr>
+        </table>
+        <p style="font-size:.73rem;color:var(--ink-3);margin:5px 0 0">The 17 backend-specific parameters
+          (5 instantseg · 7 stardist · 5 cellsam) are in panel <b>d</b>, grouped by the backend that reads them.</p>
+        <h4>Quantify &amp; export</h4>
+        <table class="pr">
+          <tr><td class="k">quantify_compartments</td><td class="v">true</td><td class="d">Nucleus/Cyto/Cell</td></tr>
+          <tr><td class="k">expanded_quantification</td><td class="v">true</td><td class="d">+Mean/Sum on top of Median</td></tr>
+          <tr><td class="k">simplify_tolerance</td><td class="v">1.0</td><td class="d">contour simplification (px)</td></tr>
+          <tr><td class="k">geojson_coord_precision</td><td class="v">2</td><td class="d">coordinate decimals</td></tr>
+          <tr><td class="k">pixel_size</td><td class="v">0.325</td><td class="d">µm/px fallback</td></tr>
+        </table>
+        <h4>SpatialData</h4>
+        <table class="pr">
+          <tr><td class="k">skip_spatialdata_export</td><td class="v">false</td><td class="d">.zarr written by default</td></tr>
+          <tr><td class="k">spatialdata_include_image</td><td class="v">false</td><td class="d">embed the pyramid too</td></tr>
+          <tr><td class="k">spatialdata_residual_join_max_px</td><td class="v">15.0</td><td class="d">spatial join for per-cell residuals</td></tr>
+        </table>
+        <h4>Output &amp; limits</h4>
+        <table class="pr">
+          <tr><td class="k">pyramid_resolutions</td><td class="v">8</td><td class="d">pyramid levels, zstd</td></tr>
+          <tr><td class="k">embed_masks</td><td class="v">false</td><td class="d">masks as 2nd OME series</td></tr>
+          <tr><td class="k">enable_trace</td><td class="v">true</td><td class="d">per-process trace + size logs</td></tr>
+          <tr><td class="k">max_memory / max_cpus</td><td class="v">700GB / 128</td><td class="d">ceilings</td></tr>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <p class="caption">
+    <b>Supplementary Figure S1. Whole-slide multiplex image processing pipeline.</b>
+    <b>(a)</b> The workflow is driven by a samplesheet in which each row is one image and exactly one image per
+    patient is the registration reference. Channel identity is taken from image metadata; the nuclear (fiducial)
+    channel is resolved by marker name using an ordered preference list (<code>nuclear_markers</code>, default
+    DAPI then CELLTOX) and moved to channel 0 — DAPI is used where present, otherwise CELLTOX.
+    <b>(b)</b> Execution is gated by <code>--start</code>/<code>--stop</code> across four ordered steps, each
+    writing a resumable checkpoint. <b>(c)</b> Preprocessing standardizes and illumination-corrects images;
+    registration aligns each moving slide to the reference through either the VALIS or the JVM-free tiled/STARE
+    backend, with staged registration QC on by default and micro-registration at maximum depth; segmentation
+    detects every cell on the reference and extracts morphology and contours once per mask; postprocessing
+    quantifies each marker per compartment and exports. <b>(d)</b> The three
+    segmentation backends compared on what they read, how the whole-cell mask is produced, what each requires
+    before it will run, and how its weights are licensed — with the 17 backend-specific parameters grouped by
+    the backend that reads them. InstanSeg is the default because it is the only one that produces a mask on
+    an unconfigured clone. <b>(e)</b> Each run yields a QuPath-compatible GeoJSON and a pyramidal OME-TIFF as
+    primary artifacts, plus an additive SpatialData <code>.zarr</code> that re-serializes the same masks,
+    polygons, measurements and QC — including a per-cell registration residual — for the scverse ecosystem.
+    <b>(f)</b> Each process's CPU, memory and wall-time request has a single owner and scales with the retry
+    attempt under global ceilings; quality-control processes are explicitly non-gating. <b>(g)</b> An
+    incremental mode folds a new imaging cycle into a completed run, reusing the prior reference, masks, and
+    quantification. <b>(h)</b> A separate branch benchmarks the unmodified pipeline by parameter sweep,
+    harvesting resource, registration-accuracy, and segmentation-stability signals from QC the pipeline
+    already emits, plus external landmark datasets. <b>(i)</b> Default parameters.
+    Supplementary Figure <b>S2</b> takes registration apart backend by backend; Supplementary Figure <b>S3</b>
+    does the same for the quality-control architecture summarised in <b>(c)</b> and <b>(f)</b>.
+    <span class="footnote">Parameter defaults, published paths, and resource requests are taken verbatim from the
+    pipeline source (<code>nextflow.config</code>, <code>conf/modules.config</code>, <code>lib/Layout.groovy</code>)
+    and verified against a stub run.</span>
+  </p>
+</div>
+</body>
+</html>

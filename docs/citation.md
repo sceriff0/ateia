@@ -7,7 +7,7 @@ If you use MIRAGE in your research, please cite the pipeline itself **and** the 
 Include in your methods section:
 
 - The pipeline name: **MIRAGE**
-- The specific version: use a tagged release (e.g. `v0.1.0`) or the commit SHA from `git rev-parse HEAD`
+- The specific version: use a tagged release (e.g. `v1.0.0`) or the commit SHA from `git rev-parse HEAD`
 - The repository URL: <https://github.com/sceriff0/mirage>
 
 A DOI for the pipeline will be published alongside a tagged release. Until then, citing the commit SHA or release tag is the most reliable way to make a run reproducible.

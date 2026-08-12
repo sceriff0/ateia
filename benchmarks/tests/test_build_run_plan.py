@@ -1,4 +1,5 @@
 import importlib.util
+import sys
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,11 @@ def _param_checker():
     literal parser in the repo instead of a second, drifting copy here.
     """
     path = REPO_ROOT / "tests" / "check_param_consistency.py"
+    # That module imports its sibling `_code_view` flat, the way everything in tests/
+    # does -- but loading a file by path does not put its directory on sys.path, so the
+    # sibling import fails with ModuleNotFoundError before a single assertion runs.
+    if str(path.parent) not in sys.path:
+        sys.path.insert(0, str(path.parent))
     spec = importlib.util.spec_from_file_location("_check_param_consistency", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -391,13 +397,13 @@ NOT_SWEPT = {
     "segmentation_model_dir": "StarDist model dir — site-local asset path",
     "instanseg_model_dir": "InstanSeg model dir — site-local asset path",
     "cellsam_model_path": "CellSAM weights — site-local asset path",
-    "panel_spec": "phenotyping panel spec — an input file; absent, phenotyping never runs",
-    "panel_model": "phenotyping model — an input file; see panel_spec",
 
-    # --- phenotyping. Gated behind panel_spec, which the synthetic matrix cannot supply. ---
-    "pheno_alpha": "phenotyping is gated behind panel_spec (not supplied by the synthetic matrix)",
-    "pheno_max_enumerate": "gated behind panel_spec — see pheno_alpha",
-    "pheno_min_cal": "gated behind panel_spec — see pheno_alpha",
+    # The automated-phenotyping params (panel_spec, panel_model, pheno_alpha,
+    # pheno_max_enumerate, pheno_min_cal) used to be excused here. They left
+    # nextflow.config when that feature was extracted from main, and this registry is
+    # not allowed to carry excuses for params that no longer exist -- a dead excuse is
+    # indistinguishable from a deliberate coverage gap. If phenotyping returns, the
+    # other direction of this guard will demand they be re-added.
 
     # --- properties of the INPUT DATA, fixed by generate_matrix.py. ---
     "pixel_size": "a property of the synthetic images, set by the matrix generator",

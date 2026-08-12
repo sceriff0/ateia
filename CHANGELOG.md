@@ -221,8 +221,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `publishDir = [ enabled: false ]` so this is a declared decision, not a silent gap.
 - **Every module's `versions.yml` (`script:` and `stub:`) now renders from one tool list**
   (`lib/ProcessEnvelope.groovy`) instead of two hand-written, independently-maintained
-  heredocs. Touches 26 of 27 `modules/local/*.nf` files (`segment.nf` is the one documented
-  exception — see its `ProcessEnvelope` comment). No published `versions.yml` content
+  heredocs. `modules/local/segment.nf` is no longer the exception it started as: rather
+  than holding each backend's version rows PRE-RENDERED, `lib/SegBackends.groovy` now
+  stores them as bare module names (`versionTools`, the same key `lib/WarpBackends.groovy`
+  uses) and `segment.nf`'s two blocks render from that one list like every other module's.
+  That leaves 23 of the 24 `modules/local/*.nf` files routed through `ProcessEnvelope`,
+  with `aggregate_size_logs.nf` the sole documented exception — it runs in
+  `ubuntu:22.04`, has no Python interpreter, and reports a `bash:` row that
+  `ProcessEnvelope`'s automatic `python:` row would falsify. No published `versions.yml` content
   changes on a stub run; on a **real** run, the same two modules — `extract_mask_series.nf`
   and `merge_and_pyramid.nf` — pick up two deltas each: they now probe `python` instead of
   `python3` for their version rows (both run on an image where `python` exists; `python3`
@@ -244,6 +250,139 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `lib/WarpBackends.groovy`, not from the param, so the two can never disagree.
 
 ### Fixed
+- **A scale disagreement between an image and `params.pixel_size` was silent.**
+  `params.pixel_size` is the single owner of every µm conversion in the pipeline — the
+  measurements in `cells.geojson`, the published pyramid's `PhysicalSize`, InstantSeg's
+  rescaling — but nothing ever compared it against what the input images themselves
+  claimed. A cohort scanned at a different objective was converted, registered,
+  segmented and quantified at the configured scale with nothing said, and the symptom
+  surfaced in QuPath: the sibling `qupath-extension-flowpath` warns about a scale it
+  can see but cannot explain. `docs/parameters.md` additionally documented the opposite
+  of the truth ("the real value is read from the input OME metadata and **preserved**
+  through the pipeline"), which is corrected here.
+  - The rule now lives in one place, `bin/utils/pixel_size.py`. `CONVERT_IMAGE` and
+    `PREPROCESS` log `[SCALE MISMATCH]` naming both numbers and the percentage apart
+    when an input's OME `PhysicalSize` differs from the configured value by more than
+    1%. Ownership is unchanged by design: `warn_on_pixel_size_mismatch` returns a
+    bool, never a scale, so no caller can start preferring the metadata and become a
+    second owner. **No published number changes.**
+  - `bin/preprocess.py` had its own OME-XML walk with its own hardcoded `0.325`
+    fallback, so a run with `--pixel_size` set to anything else silently fell back to
+    a number nothing in the run had asked for. It now uses the shared reader and falls
+    back to the configured value.
+  - `bin/convert_image.py`'s readers returned `PIXEL_SIZE_UM` where a file said
+    nothing, making "detected" and "absent" indistinguishable. They return `None`; the
+    fallback is applied once, at the point the two values are compared.
+  - **`SPLIT_CHANNELS` and `TILED_STITCH` wrote their outputs with no scale at all** —
+    a bare `imwrite`, no resolution tags, no OME header — so every file between
+    registration and the pyramid claimed 1 px = 1 unit and `MERGE_AND_PYRAMID` had
+    nothing to read even in principle. Both now stamp the configured scale as standard
+    TIFF resolution tags (not an OME header: that would be a second, channel-less
+    source of channel names for `SPLIT_CHANNELS` to find).
+  - Guarded in both directions. `tests/test_pixel_size_is_passed.py` fails if a `bin/`
+    script that accepts a scale is not handed one (it would silently use its argparse
+    default — a second owner), resolving `SEGMENT`'s backend through
+    `lib/SegBackends.groovy` rather than by name. `tests/modules/split_channels.nf.test`
+    asserts the *rendered* `--pixel-size 0.325`, tagged `stub` but deliberately without
+    `options "-stub"`, since `-stub` never evaluates a `script:` block.
+- **`cells.geojson` now carries the segmentation `label` as a measurement.** It was the
+  one identity column `cells_data.csv` kept and the GeoJSON dropped: `label` is in
+  `MORPHOLOGY_COLS`, which `merge_quant_csvs.reorder_columns` uses to *group* columns
+  (they all stay in the CSV) but which `export_geojson` uses to *exclude* from the
+  measurement array. The two published artefacts were therefore joinable only by
+  position — and position is wrong whenever a cell has a NaN centroid, since that row
+  stays in the CSV and never becomes a feature (`export_geojson()`'s `skipped`
+  counter), silently and undetectably from the artefacts alone. `bin/join_flowpath.py`
+  already warned about exactly this ("Add the label measurement to the GeoJSON export
+  to make this exact") and fell back to a centroid join, whose correctness depends on
+  `--pixel-size` being right; the exact label join is now the reachable path. Costs
+  nothing downstream: FlowPath's `DetectionIngest.MORPHOLOGY_PREFIXES` already filters
+  `label` out of the marker panel, and `CellIndex` already resolves a measurement named
+  `label`.
+- **A `nextflow.extension.GroupKey` leaked out of `groupTuple()` and travelled as a
+  channel key, silently dropping registration QC on roughly half of contended runs.**
+  `subworkflows/local/registration.nf` passed the object `groupTuple()` emits straight on
+  as the patient id, into `REGISTER`'s `val(patient_id)` and back out on its outputs.
+  `GroupKey` delegates `hashCode()` to the String it wraps but its `equals()` is
+  **asymmetric** (measured on Nextflow 25.04.7): `groupKey('P001', 2).equals('P001')` is
+  true, `'P001'.equals(groupKey('P001', 2))` is false, and both hash to 2430945. Equal
+  hashes put the two in the same `HashMap` bucket and `HashMap` compares
+  `queryKey.equals(storedKey)`, so the lookup succeeds in exactly one direction —
+  and `CombineOp.emit()` stores each side of a `combine(by:)` in such a map, so whichever
+  side arrives FIRST decides the stored key type. In `subworkflows/local/seg_qc.nf`'s
+  VALIS warp fan-in: GeoJSON first, the key is stored as a String and the later `GroupKey`
+  lookup hits; transform first, the key is stored as a `GroupKey` and the later String
+  lookup **misses**, `WARP_SEG_QC` is started but never receives an input tuple, and the
+  patient's whole registration QC (`*_seg_qc.json`) is silently absent from a run that
+  exits 0. Idle, `conf/test.config`'s `max_cpus = 2` fixes the arrival order and the safe
+  side always won (12/12 green), which is how this survived; under CPU contention it
+  dropped 14 of 24 runs, every one exiting 0. Fixed at the source — the groupKey is a
+  streaming size hint and has no business leaving its own `groupTuple()` — so `seg_qc.nf`,
+  `conf/modules.config` and `warp_seg_qc.nf` are untouched: no `errorStrategy` change, no
+  retry, the metrics output stays mandatory. After the fix the contended configuration is
+  24/24 and the sequential one 12/12. `tests/test_group_key_unwrapped.py` fails if any
+  `groupKey()` ever escapes its `groupTuple()` again. **`-resume` is unaffected and
+  existing work directories stay valid:** `GroupKey` implements `CacheFunnel` and funnels
+  its wrapped target, so task hashes were never sensitive to the wrapper.
+- **`REGISTER` wrote its staging file list to a fixed `/tmp/files_to_copy.txt`.** The
+  process is per-patient with concurrent forks, and under Singularity `/tmp` is
+  host-bind-mounted by default, so two concurrent `REGISTER` tasks on one node could share
+  that one file and each stage the other's slide list. (Never observed under Docker, where
+  each task gets its own `/tmp`.) All three references now use a plain task-relative
+  filename, so the list lives inside the task's own work directory; `cp -Ln`,
+  `xargs -P ${task.cpus}` and the `find -L` expression are unchanged. Covered by a
+  rendered-command nf-test rather than a stub one, since `-stub` never evaluates a
+  `script:` block and cannot see this class of fix.
+- **The `reg_qc=2` registration QC now segments with the run's own segmenter, and at
+  stock defaults it runs at all.** `SEG_QC_GEOJSON` ran StarDist itself
+  (`bin/segment_to_geojson.py` + `starDistCommonFlags()`), making it the one segmenter
+  in the pipeline that ignored `params.seg_method`. Two consequences, both live:
+  at the shipped default (`seg_method='instantseg'`) the QC scored cells found by a
+  *different* segmenter than the one whose masks the run ships; and because
+  `segmentation_model_dir` defaults to null while `segmentation_model` is not a StarDist
+  built-in, the process raised `FileNotFoundError` — swallowed by the QC block's
+  `errorStrategy` `'ignore'` branch, so a stock run (where `reg_qc = 2` is the DEFAULT)
+  silently produced **no registration QC at all** and still exited 0. Only
+  `conf/test.config` escaped it, by overriding `segmentation_model` to a real built-in.
+  `subworkflows/local/seg_qc.nf` now segments the native slides with `SEGMENT` itself,
+  aliased `SEG_QC_SEGMENT`, so the backend follows `--seg_method` by construction;
+  `SEG_QC_GEOJSON` keeps only the label-image → polygon half, via `bin/mask_to_geojson.py`
+  (now tracked executable — it is invoked by name for the first time).
+  `bin/segment_to_geojson.py` is deleted.
+  **Not a scoring change for a fixed backend.** The deleted script's last act was to call
+  the same `mask_to_feature_collection()` on the same in-memory `cell_mask`; the only new
+  step is a lossless zlib-TIFF round trip, pinned by
+  `tests/test_seg_qc_geojson_equivalence.py`. **Two things do change on purpose:** the
+  default run now segments with InstanSeg rather than StarDist (that is the fix), and on
+  the stardist backend the nuclear channel is chosen positionally (`--dapi-channel 0`,
+  guarded by `SegBackends`' channel-0 check) instead of resolved from OME channel names.
+  These agree for `CONVERT_IMAGE` output, which is everything reaching this QC, because
+  `CONVERT_IMAGE` normalises the nuclear channel to index 0. Where they diverge, they
+  diverge in two directions and both are deliberate: a slide whose nuclear marker sits at
+  index *n* > 0 was previously segmented at *n* and now fails the guard instead — the same
+  contract `SEGMENT` already enforces on the registered image, so the QC stops being more
+  permissive than the pipeline it is measuring; and a slide with no matching marker at all
+  was previously segmented at index 0 *silently* (`find_nuclear_index`'s fallback) and now
+  fails there too. A failure here is swallowed by the QC `errorStrategy`, so the visible
+  effect in both cases is a missing GeoJSON rather than a failed run.
+  **Published output is unchanged:** verified by diffing a full `-profile test -stub`
+  tree against the same run at `1ad1271` — 62 files both sides, identical but for the
+  QC report's timestamped filename. The QC's per-slide masks are deliberately not
+  published (`publishDir = [ enabled: false ]`): `<pid>/segmentation/` is indexed by
+  `csv/segmented.csv`, which names exactly one per-patient mask.
+- **An aliased process silently inherited the base process' `publishDir`.** Nextflow
+  matches a config selector against an alias' own name *and* its process' original
+  declared name, so `withName: 'SEGMENT'` governs `SEG_QC_SEGMENT` too. That is wanted for
+  container/resources/`ext.args` and a data-loss bug for `publishDir` — it already fired
+  once here, on `SPLIT_CHANNELS`/`SPLIT_PRIOR_PYRAMID`. `tests/test_process_alias_config.py`
+  now fails if any alias of a publishing process lacks its own `publishDir` override, or
+  places it textually *before* the block it means to override (later matching selectors
+  win, per field).
+- **`SEGMENT`'s size log is named from `task.ext.prefix`, not `meta.patient_id`.**
+  Unchanged for `SEGMENT` itself (one task per patient), but the QC alias runs once per
+  *slide*, so every slide of a patient would have written the same
+  `<pid>.SEGMENT.size.csv` into the directory `AGGREGATE_SIZE_LOGS` stages them all into.
+
 - **`TILED_COARSE` never finished inside its 2 h walltime — ORB was being thresholded
   against raw uint16 counts.** scikit-image's `ORB(fast_threshold=...)` is an *absolute*
   intensity difference, and `img_as_float` rescales only **integer** inputs — so the
@@ -414,6 +553,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   authorised):** row order in the three manifests changes; contents and column order do not.
 
 ### Removed
+- **Automated panel-agnostic phenotyping is extracted off this branch, and preserved
+  intact on `feat/automated-phenotyping` (at `56a3a46`).** It is work in progress and
+  is parked there rather than deleted. Gone from here: `COMPILE_PANEL` and `PHENOTYPE`
+  (`bin/compile_panel.py`, `bin/phenotype_cells.py`, `bin/utils/phenotyping/`), the five
+  parameters `panel_spec` / `panel_model` / `pheno_alpha` / `pheno_min_cal` /
+  `pheno_max_enumerate` (the params block now declares 75, was 80), the `phenotyping/`
+  publish kind, `assets/import_phenotype.groovy`, `panel.yaml`, and 22 test files
+  (20 pytest + `tests/modules/{compile_panel,phenotype}.nf.test`). `EXPORT_GEOJSON` is
+  back to a four-slot input tuple and emits the constant `"Cell"` classification with no
+  `panel_model.json` sidecar — gate downstream in QuPath/FlowPath. The one case in
+  `test_export_geojson_phenotype.py` that was NOT about phenotyping — the constant
+  `"Cell"`, no-stamped-`id` contract — survives as `tests/test_export_geojson.py`.
+  The FlowPath-side phenotype join (`bin/join_flowpath.py`,
+  `export_spatialdata.py --attach-phenotypes`) is unaffected; it is a different,
+  post-pipeline feature.
 - **`reg_tiled_fanout` is gone, along with the single-task `TILED_REGISTER` path it
   selected.** STARE now has exactly one execution shape: the per-tile fan-out
   `TILED_COARSE` → `TILED_REG_TILE` (×tiles) → `TILED_SOLVE` → `TILED_STITCH`. Its memory is
@@ -454,8 +608,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.0.0] - 2026-07-29
 
 First public release. End-to-end multiplex WSI processing: preprocessing, registration,
-segmentation, per-cell quantification, optional phenotyping, and QuPath-compatible
-GeoJSON + pyramidal OME-TIFF export.
+segmentation, per-cell quantification, and QuPath-compatible GeoJSON + pyramidal
+OME-TIFF export.
 
 ### Added
 - **Preprocessing** — BaSiC illumination correction with FOV tiling; Bio-Formats/ND2 →
@@ -471,8 +625,6 @@ GeoJSON + pyramidal OME-TIFF export.
   and CellSAM; GPU or CPU; configurable nuclei→whole-cell expansion.
 - **Quantification** — per-cell morphology and per-channel intensity; optional
   per-compartment (Nucleus / Cytoplasm / Cell) signal and expanded Mean/Sum statistics.
-- **Phenotyping (optional, panel-agnostic)** — conformal-risk-controlled cell-type
-  assignment when a panel is supplied (`panel_spec` / `panel_model`); skipped by default.
 - **Reference-free segmentation-quality evaluation** — CellSegmentationEvaluator
   `QualityScore` with a `cse_max_pixels` downsample cap.
 - **Export** — QuPath-compatible `cells.geojson` and pyramidal OME-TIFF; configurable

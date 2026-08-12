@@ -5,12 +5,6 @@ due to transient issues like memory pressure or I/O contention.
 
 Examples
 --------
-Using the decorator:
->>> @retry_on_exception(max_attempts=3, delay_seconds=1.0)
-... def flaky_operation():
-...     # May fail intermittently
-...     pass
-
 Using the context manager:
 >>> retry_ctx = RetryContext(max_attempts=2, delay_seconds=2.0)
 >>> for attempt in retry_ctx:
@@ -23,99 +17,17 @@ Using the context manager:
 
 from __future__ import annotations
 
-import functools
 import gc
 import logging
 import time
 from typing import Callable, Optional, Tuple, Type
 
 __all__ = [
-    "retry_on_exception",
     "RetryContext",
 ]
 
 
 logger = logging.getLogger(__name__)
-
-
-def retry_on_exception(
-    max_attempts: int = 3,
-    delay_seconds: float = 1.0,
-    backoff_factor: float = 2.0,
-    exceptions: Tuple[Type[Exception], ...] = (Exception,),
-    on_retry: Optional[Callable[[Exception, int], None]] = None,
-) -> Callable:
-    """Decorator for retrying operations on transient failures.
-
-    Parameters
-    ----------
-    max_attempts : int, default=3
-        Maximum number of retry attempts (including first try)
-    delay_seconds : float, default=1.0
-        Initial delay between retries in seconds
-    backoff_factor : float, default=2.0
-        Multiplier for delay after each retry (exponential backoff)
-    exceptions : tuple of Exception types, default=(Exception,)
-        Exception types to catch and retry on
-    on_retry : callable, optional
-        Function called on each retry with (exception, attempt_number)
-
-    Returns
-    -------
-    callable
-        Decorated function with retry logic
-
-    Examples
-    --------
-    >>> @retry_on_exception(max_attempts=3, delay_seconds=0.5)
-    ... def fetch_data():
-    ...     return requests.get(url)
-
-    >>> @retry_on_exception(
-    ...     max_attempts=2,
-    ...     exceptions=(IOError, TimeoutError),
-    ...     on_retry=lambda e, n: print(f"Retry {n}: {e}")
-    ... )
-    ... def save_file(data):
-    ...     with open("output.txt", "w") as f:
-    ...         f.write(data)
-    """
-
-    def decorator(func: Callable) -> Callable:
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            last_exception = None
-            delay = delay_seconds
-
-            for attempt in range(1, max_attempts + 1):
-                try:
-                    return func(*args, **kwargs)
-                except exceptions as e:
-                    last_exception = e
-
-                    if attempt == max_attempts:
-                        logger.error(
-                            f"{func.__name__} failed after {max_attempts} attempts: {e}"
-                        )
-                        raise
-
-                    if on_retry:
-                        on_retry(e, attempt)
-
-                    logger.warning(
-                        f"{func.__name__} failed (attempt {attempt}/{max_attempts}): {e}. "
-                        f"Retrying in {delay:.1f}s..."
-                    )
-                    time.sleep(delay)
-                    delay *= backoff_factor
-
-            # Should not reach here, but just in case
-            if last_exception:
-                raise last_exception
-
-        return wrapper
-
-    return decorator
 
 
 class RetryContext:

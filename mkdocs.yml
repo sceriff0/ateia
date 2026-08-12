@@ -28,20 +28,24 @@ theme:
   favicon: assets/favicon.png
   icon:
     repo: fontawesome/brands/github
+  # Monochrome, matching the supplementary-figure design language in
+  # docs/stylesheets/extra.css (white paper / black ink). `primary: black` and
+  # `accent: grey` are the closest Material presets; extra.css overrides the
+  # remaining hue-carrying variables in both schemes.
   palette:
     # Light mode
     - media: "(prefers-color-scheme: light)"
       scheme: default
-      primary: teal
-      accent: cyan
+      primary: black
+      accent: grey
       toggle:
         icon: material/weather-night
         name: Switch to dark mode
     # Dark mode
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
-      primary: teal
-      accent: cyan
+      primary: black
+      accent: grey
       toggle:
         icon: material/weather-sunny
         name: Switch to light mode
@@ -93,7 +97,10 @@ nav:
   - Home: index.md
   - Installation: installation.md
   - Usage: usage.md
+  - Pipeline: pipeline.md
   - Parameters: parameters.md
+  - Inputs & outputs: outputs.md
+  - Resources: resources.md
   - Incremental cycles: add_cycle.md
   - Registration QC: registration_qc.md
   - SpatialData & FlowPath: spatialdata.md

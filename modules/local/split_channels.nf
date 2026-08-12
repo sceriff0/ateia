@@ -51,6 +51,7 @@ process SPLIT_CHANNELS {
         ${ref_flag} \\
         ${channel_args} \\
         ${nuclear_args} \\
+        --pixel-size ${params.pixel_size} \\
         ${args}
 
     ${ProcessEnvelope.versions(task.process, ['tifffile', 'numpy'])}

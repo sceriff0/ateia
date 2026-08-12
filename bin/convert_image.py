@@ -23,6 +23,7 @@ import tifffile
 sys.path.insert(0, str(Path(__file__).parent / "utils"))
 from logger import configure_logging, get_logger
 from metadata import DEFAULT_NUCLEAR_MARKERS, pick_nuclear_index
+from pixel_size import warn_on_pixel_size_mismatch
 
 logger = get_logger(__name__)
 
@@ -102,8 +103,12 @@ def read_image_bioio(file_path: Path) -> Tuple[np.ndarray, dict]:
         image_data = img.data
 
     ps = img.physical_pixel_sizes
-    pixel_size_x = ps.X if ps.X is not None else PIXEL_SIZE_UM
-    pixel_size_y = ps.Y if ps.Y is not None else PIXEL_SIZE_UM
+    # None means "the file did not say", not "0.325". The one fallback lives in
+    # convert_to_ome_tiff, so that a missing scale and a scale that genuinely equals the
+    # default stay distinguishable up to that point -- warn_on_pixel_size_mismatch has
+    # to be able to tell them apart.
+    pixel_size_x = ps.X
+    pixel_size_y = ps.Y
     pixel_size_z = ps.Z
 
     logger.info(
@@ -153,7 +158,9 @@ def parse_ndpis(ndpis_path: Path) -> List[Path]:
     return ndpi_files
 
 
-def read_single_ndpi(file_path: Path) -> Tuple[np.ndarray, float, float]:
+def read_single_ndpi(
+    file_path: Path,
+) -> Tuple[np.ndarray, Optional[float], Optional[float]]:
     """Read a single NDPI file using tifffile, return image and pixel sizes."""
     with tifffile.TiffFile(file_path) as tif:
         series = tif.series[0]
@@ -161,9 +168,9 @@ def read_single_ndpi(file_path: Path) -> Tuple[np.ndarray, float, float]:
 
         logger.info(f"  {file_path.name}: shape={image_data.shape}, axes={series.axes}")
 
-        # Extract pixel size from TIFF tags
-        pixel_size_x = PIXEL_SIZE_UM
-        pixel_size_y = PIXEL_SIZE_UM
+        # Extract pixel size from TIFF tags (None until a tag actually provides one)
+        pixel_size_x = None
+        pixel_size_y = None
 
         page = tif.pages[0]
         if page.tags.get("XResolution") and page.tags.get("YResolution"):
@@ -220,8 +227,8 @@ def read_image_tifffile(file_path: Path) -> Tuple[np.ndarray, dict]:
 
         # Read all NDPI files and stack them
         channel_images = []
-        pixel_size_x = PIXEL_SIZE_UM
-        pixel_size_y = PIXEL_SIZE_UM
+        pixel_size_x = None
+        pixel_size_y = None
 
         for ndpi_path in ndpi_files:
             if not ndpi_path.exists():
@@ -276,10 +283,12 @@ def _find_first_image_dataset(group):
     return None
 
 
-def _extract_h5_pixel_sizes(h5obj) -> Tuple[float, float, Optional[float]]:
-    """Extract pixel size metadata from HDF5 attributes."""
-    px_x = PIXEL_SIZE_UM
-    px_y = PIXEL_SIZE_UM
+def _extract_h5_pixel_sizes(
+    h5obj,
+) -> Tuple[Optional[float], Optional[float], Optional[float]]:
+    """Extract pixel size metadata from HDF5 attributes, or Nones if there are none."""
+    px_x = None
+    px_y = None
     px_z = None
 
     for attr_name in ("element_size_um", "pixel_size", "resolution", "pixelSize"):
@@ -313,7 +322,7 @@ def read_image_h5(file_path: Path) -> Tuple[np.ndarray, dict]:
 
         # Extract pixel sizes from dataset attrs, then root attrs as fallback
         px_x, px_y, px_z = _extract_h5_pixel_sizes(ds)
-        if px_x == PIXEL_SIZE_UM:
+        if px_x is None:
             px_x, px_y, px_z = _extract_h5_pixel_sizes(f)
 
         # Extract channel names from attributes if available
@@ -412,7 +421,9 @@ def convert_to_ome_tiff(
 
     # Resolve the nuclear/fiducial channel by marker name (ordered preference).
     # Identity comes from the declared/metadata channel names, never the filename.
-    markers = list(nuclear_markers) if nuclear_markers else list(DEFAULT_NUCLEAR_MARKERS)
+    markers = (
+        list(nuclear_markers) if nuclear_markers else list(DEFAULT_NUCLEAR_MARKERS)
+    )
     nuclear_index = pick_nuclear_index(channel_names, markers)
 
     if nuclear_index is None:
@@ -449,8 +460,18 @@ def convert_to_ome_tiff(
     logger.info(f"Input channels: {channel_names}")
     logger.info(f"Output channels: {output_channels}")
 
-    px_x = metadata.get("physical_pixel_size_x", pixel_size_um)
-    px_y = metadata.get("physical_pixel_size_y", pixel_size_um)
+    # The single fallback point. params.pixel_size owns every downstream µm
+    # conversion (GeoJSON measurements, the published pyramid's PhysicalSize,
+    # InstantSeg's rescaling), so a file that claims a different scale does not change
+    # any of them -- but the operator has to be told, here, rather than finding out from
+    # a scale-disagreement warning in QuPath several steps later.
+    det_x = metadata.get("physical_pixel_size_x")
+    det_y = metadata.get("physical_pixel_size_y")
+    warn_on_pixel_size_mismatch(
+        (det_x, det_y), pixel_size_um, source=input_path.name, logger=logger
+    )
+    px_x = det_x if det_x is not None else pixel_size_um
+    px_y = det_y if det_y is not None else pixel_size_um
     px_z = metadata.get("physical_pixel_size_z")
 
     # Normalize dimensions to standard OME-TIFF order (C before spatial dims)

@@ -20,6 +20,8 @@ import json
 import re
 from pathlib import Path
 
+from _code_view import code_view
+
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = ROOT / "nextflow.config"
 SCHEMA_PATH = ROOT / "nextflow_schema.json"
@@ -131,6 +133,26 @@ def extract_config_defaults(config_text: str) -> dict[str, object]:
 
 
 def extract_param_references() -> set[str]:
+    """Every `params.<name>` READ across pipeline code.
+
+    A naive scan of raw file text over-reports in two ways that both bit this
+    checker in practice (`lib/SegBackends.groovy`'s `ctxParams()` docstring):
+
+    1. **Comments and filenames inside comments.** A `/* */` block explaining
+       ``params.subMap(...)`` reads as a reference to a param named `subMap`, and
+       the same block's mention of `tests/test_seg_backends_ctx_params.py` contains
+       the literal substring `params.py`, reading as a param named `py`. Scanning
+       `code_view(path)` (shared with `test_group_key_unwrapped.py`, see
+       `_code_view.py`) instead of raw text blanks comments and string contents
+       before the regex ever runs, so neither can match.
+    2. **`Map` method calls.** `params.subMap(CTX_PARAM_KEYS)` and
+       `params.containsKey(...)` are calls to methods `java.util.Map` (which
+       `params` behaves as) provides, not reads of a parameter named `subMap` or
+       `containsKey`. Rather than denylist specific method names -- a list that
+       silently goes stale the moment a new `Map` method is called this way --
+       any match immediately followed by `(` is excluded on that structural
+       ground: a real parameter read is never itself invoked as a method.
+    """
     refs: set[str] = set()
     patterns = [
         "main.nf",
@@ -141,8 +163,12 @@ def extract_param_references() -> set[str]:
     ]
     for pattern in patterns:
         for path in ROOT.glob(pattern):
-            text = path.read_text()
-            refs.update(PARAM_REF_RE.findall(text))
+            text = code_view(path)
+            for m in PARAM_REF_RE.finditer(text):
+                tail = text[m.end() :].lstrip()
+                if tail.startswith("("):
+                    continue  # a Map method call (params.subMap(...)), not a param read
+                refs.add(m.group(1))
     return refs
 
 

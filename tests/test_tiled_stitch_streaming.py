@@ -98,3 +98,8 @@ def test_streaming_stitch_equals_the_whole_image_warp(tmp_path):
     # the output is genuinely tiled (gigapixel-friendly), not one giant strip
     with tifffile.TiffFile(str(out_f)) as tif:
         assert tif.pages[0].is_tiled
+        # ...and carries 64-bit offsets. A real registered slide (C x H x W x itemsize,
+        # written uncompressed) crosses classic TIFF's 4 GB offset ceiling and dies mid-write
+        # with "struct.error: 'I' format requires 0 <= number <= 4294967295". This assertion
+        # is the only thing that catches it, since the test slide itself is tiny.
+        assert tif.is_bigtiff

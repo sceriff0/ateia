@@ -1,8 +1,10 @@
 # Parameters
 
-The complete, canonical parameter surface, grouped by pipeline stage. Defaults
-shown here are the values in
-[`nextflow.config`](https://github.com/sceriff0/mirage/blob/main/nextflow.config).
+<p class="standfirst">The complete, canonical parameter surface — all 75 parameters, grouped by
+pipeline stage, each with the default that ships in <code>nextflow.config</code>. Nothing here is
+approximate: <code>tests/test_no_duplicate_param_defaults.py</code> forbids a second declaration of
+any default anywhere else in the repository, so this page and the config cannot disagree about a
+value.</p>
 
 !!! abstract "Canonical sources"
     - **Defaults** — `nextflow.config` (`params { … }`)
@@ -41,7 +43,7 @@ Bio-Formats conversion + BaSiC illumination correction.
 
 | Parameter | Default | Description |
 |---|---|---|
-| `pixel_size` | `0.325` | Fallback physical pixel size in µm. The real value is read from the input OME metadata and **preserved** through the pipeline; `0.325` is used only when the input carries no pixel size. Governs µm conversion in GeoJSON and InstanSeg. |
+| `pixel_size` | `0.325` | Physical pixel size in µm, and the **single owner** of every µm conversion in the pipeline: GeoJSON centroids and areas, the published pyramid's `PhysicalSize`, and InstantSeg's rescaling all use this value and nothing else. An input's own OME `PhysicalSizeX` is *not* preferred over it — it is compared against it, and `CONVERT_IMAGE`/`PREPROCESS` log a `[SCALE MISMATCH]` warning naming both numbers when the two disagree by more than 1%. If your slides are not 0.325 µm/px, set this; the warning will not do it for you. See `bin/utils/pixel_size.py`. |
 | `skip_preprocessing` | `false` | Skip BaSiC illumination correction entirely. Conversion still runs — everything downstream assumes the standardised OME-TIFF layout — so the step still emits one image per input and `csv/preprocessed.csv` still has a row per slide; the row points at `<pid>/converted/` instead of `<pid>/preprocessed/`. |
 | `preproc_skip_nuclear` | `true` | Leave the nuclear/fiducial channels named by [`nuclear_markers`](#common) uncorrected. Those channels drive both registration and segmentation, so correcting them changes what both consume. |
 | `preproc_tile_size` | `1950` | BaSiC FOV tile size (px). |
@@ -62,8 +64,8 @@ whole-slide alignment) and **STARE tiled** (JVM-free, fully parallel, laptop-fri
 
 | Parameter | Default | Description |
 |---|---|---|
-| `registration_method` | `valis` | Registration backend: `valis` (VALIS whole-slide) or `tiled` (STARE — see [Tiled / STARE](#tiled--stare-registration_methodtiled)). |
-| `allow_auto_reference` | `false` | If no `is_reference=true` row, use the first panel as reference. |
+| `registration_method` | `valis` | Registration backend: `valis` (VALIS whole-slide) or `tiled` (STARE — see [Tiled / STARE](#tiled-stare-registration_methodtiled)). |
+| `allow_auto_reference` | `false` | If no `is_reference=true` row, use the first samplesheet row as reference. **`--start preprocessing` only** — later entry points read a checkpoint that already names the reference, and will error rather than infer one. |
 | `nuclear_markers` | `['DAPI','CELLTOX']` | Ordered preference of nuclear/fiducial marker names. The first present (resolved from channel metadata, never the filename) is moved to channel 0 and drives both cell segmentation and the registration fiducial. Fails fast if none present (single-channel images excepted). Accepts a **list** (config or `-params-file`) or a **comma/space-separated string**, which is the only shape a command line can produce: `--nuclear_markers CELLTOX` and `--nuclear_markers DAPI,CELLTOX` both work. Matching is case-insensitive **substring**, so `DAPI_nuclear` counts as nuclear. |
 
 ### VALIS
@@ -101,15 +103,47 @@ params apply only when `--registration_method tiled`.
 
 ## Segmentation
 
-Backend selected by `--seg_method`.
+One process, `SEGMENT`, dispatching to three genuinely different segmenters via
+`--seg_method`. They are **not** drop-in equivalents: they read different things,
+build the whole-cell mask differently, and have different prerequisites.
+
+### Choosing a backend
+
+| | `instantseg` **(default)** | `stardist` | `cellsam` |
+|---|---|---|---|
+| **Reads** | The full multichannel image — **channel-invariant** | One channel, hardcoded to **index 0** | One nuclear channel, **resolved by marker name** |
+| **Whole-cell mask** | Predicted natively, alongside nuclei | Expanded from nuclei by `seg_expand_distance` | Expanded from nuclei by `seg_expand_distance` |
+| **Precondition** | A writable model cache | Channel 0 **must** be a nuclear marker — otherwise the task exits 1 | A nuclear channel must exist — a negative index exits 1 |
+| **Weights** | Apache-2.0, auto-downloaded from BioImage.IO | **None ship with the repo** | **Gated** — needs `DEEPCELL_ACCESS_TOKEN` |
+| **Runs on a fresh clone?** | **Yes** | No — set `segmentation_model_dir` | No — set `cellsam_model_path` or export a token |
+| **Container tag** | `…:instant_seg` | `…:segmentation_gpu` | `…:cellsam` |
+| **Entry point** | `segment_instantseg.py` | `segment.py` | `segment_cellsam.py` |
+
+!!! tip "Why InstanSeg is the default"
+    It is the only backend that produces a mask on an unconfigured clone. The
+    shipped `segmentation_model` name is **not** a StarDist built-in, so without
+    `segmentation_model_dir` StarDist raises `FileNotFoundError`; CellSAM's
+    weights sit behind a DeepCell token. InstanSeg's are Apache-2.0 and
+    unencumbered.
+
+    It is also the only one that predicts the whole-cell mask directly rather
+    than dilating nuclei by a fixed radius — so **`seg_expand_distance` has no
+    effect when InstanSeg is selected**. An unrecognised `--seg_method` is
+    rejected by name at launch rather than silently running a different
+    segmenter.
+
+All three write both a `*_cell_mask.tif` and a `*_nuclei_mask.tif` regardless of
+backend, so everything downstream is backend-agnostic.
 
 ### Backend selection & shared
 
+These three apply to every backend.
+
 | Parameter | Default | Description |
 |---|---|---|
-| `seg_method` | `instantseg` | Backend: `stardist`, `instantseg`, or `cellsam`. The container is chosen automatically. `instantseg` is the default because it is the only backend that runs on a fresh clone — `stardist` needs a trained model supplied via `segmentation_model_dir`, and `cellsam` needs a DeepCell access token. InstanSeg is Apache-2.0 with unencumbered weights. |
-| `seg_gpu` | `true` | Use GPU (adds SLURM `--gres` + Singularity `--nv`). Set `false` to force CPU. |
-| `seg_expand_distance` | `10` | Pixels to expand nuclei into the whole-cell mask (StarDist & CellSAM). |
+| `seg_method` | `instantseg` | Backend: `instantseg`, `stardist`, or `cellsam`. The container, entry point and preconditions all follow from this one value. |
+| `seg_gpu` | `true` | Use GPU — adds SLURM `--gres=gpu:$gpu_type` plus Docker `--gpus all` / Singularity `--nv`. Set `false` to force CPU. |
+| `seg_expand_distance` | `10` | Pixels to expand nuclei into the whole-cell mask. **StarDist and CellSAM only** — ignored by InstanSeg, which predicts cells natively. |
 
 ### StarDist (`seg_method=stardist`)
 
@@ -167,26 +201,6 @@ Per-cell marker intensity.
     Setting `--expanded_quantification true` without `--quantify_compartments true`
     fails at launch with a clear error.
 
-## Phenotyping (panel-agnostic)
-
-Optional constrained cell-type classification. When **both** `panel_spec` and
-`panel_model` are `null` (the default), phenotyping is skipped and the GeoJSON carries
-the constant `"Cell"` classification (raw intensities only — gate downstream). Supplying a
-panel enables conformal-risk-controlled (CRC) phenotype assignment written into the
-exported `cells.geojson`.
-
-| Parameter | Default | Description |
-|---|---|---|
-| `panel_spec` | `null` | Path to the panel authoring spec (`panel.yaml`). |
-| `panel_model` | `null` | Path to a frozen, compiled `model_config.json` (produced by `COMPILE_PANEL`). |
-| `pheno_alpha` | `0.05` | CRC target risk α (per-marker miscoverage budget). |
-| `pheno_min_cal` | `50` | Minimum per-marker calibration-set size. |
-| `pheno_max_enumerate` | `100000` | Feasible-set brute-force enumeration ceiling. |
-
-!!! note "Incremental cycles"
-    Phenotyping is **not** run in `--mode add_cycle`; setting `panel_spec`/`panel_model`
-    in add_cycle mode is rejected at launch.
-
 ## Visualization & export
 
 Pyramidal OME-TIFF assembly and GeoJSON.
@@ -199,6 +213,19 @@ Pyramidal OME-TIFF assembly and GeoJSON.
 | `compression` | `zstd` | Codec: `zstd`, `lzw`, `zlib`, `jpeg`, `none`. |
 | `simplify_tolerance` | `1.0` | Douglas–Peucker tolerance (px) for GeoJSON contour simplification. Display-only — quantification is mask-derived, so this does not affect measurements. |
 | `geojson_coord_precision` | `2` | Decimal places for GeoJSON coordinates. Display-only. |
+
+## SpatialData export
+
+An **additive** scverse-native `.zarr` store, written by default. OME-TIFF and
+GeoJSON remain the primary artifacts; this recomputes nothing, it re-serializes
+the same masks, polygons, measurements and QC. Full store layout:
+[SpatialData & FlowPath](spatialdata.md).
+
+| Parameter | Default | Description |
+|---|---|---|
+| `skip_spatialdata_export` | `false` | Skip the `.zarr` export. The store **is** written by default. |
+| `spatialdata_include_image` | `false` | Also embed the pyramid image in the store. Off by default because `spatialdata.write()` materializes every element, so including it duplicates the largest artifact the run produces. Turn on for a self-contained, depositable object. |
+| `spatialdata_residual_join_max_px` | `15.0` | Max centroid distance (px) when joining `WARP_SEG_QC`'s per-cell registration residuals onto `cell_mask`. The QC segmentation is a separate native-image run and shares no label space with `cell_mask`, so the join is **spatial**, not by label. |
 
 ## Quality control & reports { #quality-control--reports }
 
@@ -227,7 +254,9 @@ Pyramidal OME-TIFF assembly and GeoJSON.
 
 ## Cluster & resources
 
-HPC details: [Running on HPC / SLURM](usage.md#running-on-hpc).
+Per-process requests, resource labels, retry policy and containers:
+**[Resources](resources.md)**. Cluster invocations:
+[Running on HPC / SLURM](usage.md#running-on-hpc).
 
 | Parameter | Default | Description |
 |---|---|---|
@@ -235,14 +264,17 @@ HPC details: [Running on HPC / SLURM](usage.md#running-on-hpc).
 | `slurm_account` | `null` | SLURM account (`--account`). |
 | `slurm_qos` | `null` | SLURM QoS (`--qos`). |
 | `gpu_type` | `nvidia_h200:1` | GRES string for GPU jobs (`--gres=gpu:<value>`). Match `sinfo -o "%G"`. |
-| `max_memory` | `700.GB` | Global memory cap per process. |
-| `max_cpus` | `128` | Global CPU cap per process. |
-| `max_time` | `240.h` | Global walltime cap per process. |
+| `max_memory` | `700.GB` | Global memory ceiling. Clamps every process's request via `process.resourceLimits`. |
+| `max_cpus` | `128` | Global CPU ceiling. |
+| `max_time` | `240.h` | Global walltime ceiling. |
 
 !!! info "How resources scale"
-    Per-process memory and time scale with `task.attempt`, so a retry roughly
-    doubles them (bounded by the caps above). See the resource-label table in
-    [Running on HPC / SLURM](usage.md#running-on-hpc).
+    Per-process memory and time scale with `task.attempt`, bounded by the
+    ceilings above, so a retry after an OOM kill automatically climbs the ramp.
+    `-profile local` lowers the ceilings to 4 CPUs / 16 GB / 72 h. Every
+    process's `cpus`/`memory`/`time` has exactly one owner — a resource label
+    **or** a `withName:` block, never both. Full table:
+    [Resources → Per-process requests](resources.md#per-process-requests).
 
 ## Tracing
 
@@ -296,6 +328,9 @@ nextflow run . -profile slurm,singularity \
 
 ## See also
 
+- :material-sitemap: **What each process does, in order** — [The pipeline](pipeline.md)
+- :material-file-tree: **Every input column and output path** — [Inputs & outputs](outputs.md)
+- :material-server: **Every resource request, retry rule and container** — [Resources](resources.md)
 - :material-console: **Command recipes & the samplesheet** — [Usage](usage.md)
 - :material-help-circle: **Common questions** — [Usage → Troubleshooting & FAQ](usage.md#troubleshooting-faq)
 - :material-book-open-variant: **How to cite** — [Citation](citation.md)

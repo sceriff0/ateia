@@ -6,9 +6,9 @@ hide:
 
 <div class="mirage-hero" markdown>
 
-# MIRAGE
+<div class="kick">Multiplex Imaging Registration, Analysis &amp; GeoJSON Export</div>
 
-**Multiplex Imaging Registration, Analysis, & GeoJSON Export**
+# MIRAGE
 
 A Nextflow DSL2 pipeline that takes raw whole-slide microscopy from many panels
 and turns it into aligned images, segmented cells, single-cell marker tables, and
@@ -17,6 +17,7 @@ QuPath-ready GeoJSON — reproducibly, on your laptop or an HPC cluster.
 <div class="mirage-badges" markdown>
 [:material-rocket-launch: Install](installation.md){ .md-button .md-button--primary }
 [:material-walk: How to use](usage.md){ .md-button }
+[:material-sitemap: The pipeline](pipeline.md){ .md-button }
 [:fontawesome-brands-github: Source](https://github.com/sceriff0/mirage){ .md-button }
 </div>
 
@@ -42,7 +43,7 @@ flowchart LR
     end
     C --> D
     subgraph REG[Registration]
-      D[VALIS whole-slide<br/>alignment]
+      D[Whole-slide alignment<br/>VALIS or tiled/STARE]
     end
     D --> E
     subgraph SEG[Segmentation]
@@ -59,22 +60,23 @@ The four stages — **preprocessing → registration → segmentation → postpr
 order and are independently restartable, so you can re-run just the part you're
 tuning. By default MIRAGE **stops at quantified cells** — the exported GeoJSON carries
 raw marker intensities, and you gate/phenotype downstream in QuPath or the
-[FlowPath](https://flowpath.readthedocs.io/) ecosystem. Optional built-in
-[phenotyping](parameters.md#phenotyping-panel-agnostic) (panel-driven, conformal-risk
-controlled) can assign cell types directly into the GeoJSON when a panel is supplied.
+[FlowPath](https://flowpath.readthedocs.io/) ecosystem.
 
 ## Highlights
 
 - **Any Bio-Formats input** — reads ND2, CZI, LIF, NDPI, TIFF, HDF5 and more,
-  normalizes to OME-TIFF, and guarantees DAPI lands on channel 0.
-- **VALIS registration** — deep-feature rigid + non-rigid alignment of every panel
-  to a shared reference, with quantitative error metrics.
+  normalizes to OME-TIFF, and moves the configured nuclear marker
+  (`params.nuclear_markers`, default `DAPI`/`CELLTOX`) to channel 0.
+- **Two registration backends** — **VALIS** (default, deep-feature rigid + non-rigid
+  alignment) or **tiled/STARE** (JVM-free, fully parallel), both aligning every panel
+  to a shared reference with quantitative error metrics.
 - **Three segmentation backends** — swap between **StarDist**, **InstanSeg**, and
   **CellSAM** with a single `--seg_method` flag.
 - **Single-cell quantification** — per-cell marker intensities, optional
   nucleus / cytoplasm / cell compartments, and morphology.
-- **QuPath-native export** — GeoJSON with raw intensities and z-scores, plus a
-  pyramidal OME-TIFF for interactive viewing and gating.
+- **QuPath-native export** — GeoJSON with raw intensities (z-scores travel in the
+  companion `cells_data.csv`), plus a pyramidal OME-TIFF for interactive viewing and
+  gating.
 - **Restartable & HPC-ready** — checkpoint CSVs between stages, SLURM/Singularity
   profiles, and resource-aware retries.
 
@@ -118,9 +120,46 @@ tours every file it produces.
 
     ---
 
-    Every flag, grouped by stage, with defaults and guidance.
+    All 75 parameters, grouped by stage, with defaults and guidance.
 
     [:octicons-arrow-right-24: Parameters](parameters.md)
+
+-   :material-sitemap:{ .lg .middle } **The pipeline**
+
+    ---
+
+    Every process in execution order, its defaults, and the two registration
+    backends — the site rendering of Supplementary Figure S1.
+
+    [:octicons-arrow-right-24: Pipeline](pipeline.md)
+
+-   :material-image-multiple:{ .lg .middle } **Supplementary figures**
+
+    ---
+
+    Three self-contained figures — S1 the whole pipeline,
+    [S2 registration](figures/registration-schematic.html){ target=_blank },
+    [S3 quality control](figures/qc-schematic.html){ target=_blank }.
+
+    [:octicons-arrow-right-24: S1 · pipeline](figures/pipeline-schematic.html){ target=_blank }
+
+-   :material-file-tree:{ .lg .middle } **Inputs & outputs**
+
+    ---
+
+    The samplesheet contract per entry point, the checkpoint CSVs, the full
+    published tree, and the measurement-key grammar.
+
+    [:octicons-arrow-right-24: Inputs & outputs](outputs.md)
+
+-   :material-server:{ .lg .middle } **Resources**
+
+    ---
+
+    What each process asks the scheduler for, how it grows on a retry, what
+    clamps it, and which container it runs in.
+
+    [:octicons-arrow-right-24: Resources](resources.md)
 
 </div>
 

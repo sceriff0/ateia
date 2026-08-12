@@ -152,8 +152,40 @@ class ParamUtils {
      * Legacy skip_registration_qc=true forces 0. Defined once and shared by
      * registration.nf / add_cycle.nf so the QC gate has a single source of truth.
      */
+    /*
+     * WHY regQcLevelOf / microRegLevelOf ARE SCALAR
+     *
+     * Nextflow hashes the FREE VARIABLES a process's `script:` block references. A block
+     * that says `ParamUtils.regQcLevel(params)` therefore hashes `params` -- the WHOLE
+     * map, as one opaque entry -- and re-runs whenever ANY parameter anywhere changes.
+     * Measured: changing only `--pyramid_resolutions` (postprocessing) re-ran REGISTER and
+     * cascaded 20 of 28 tasks. `-dump-hashes` showed every individually-named entry
+     * unchanged and only `params=ScriptBinding$ParamsMap@...` differing.
+     *
+     * A `params.reg_qc` / `params.reg_micro_reg` access is recorded as its OWN hash entry,
+     * so passing the scalar keeps the process bound to just the parameters it actually reads.
+     *
+     * regQcLevel(Map) stays: workflow/subworkflow code (registration.nf, add_cycle.nf) is
+     * not hashed this way, reads better with `params`, and there is exactly one
+     * implementation behind it -- the scalar form is where the logic lives and the Map
+     * form delegates to it, so the two cannot drift. `microRegLevelOf` has no Map
+     * counterpart -- every call site is inside a `script:` block (register.nf,
+     * warp_seg_qc.nf), so there is no workflow-level caller to justify one. CALL THE
+     * `...Of` FORM FROM A `script:` BLOCK; either form elsewhere.
+     *
+     * `regQcLevelOf` is named rather than being an overload of `regQcLevel(Map)` because
+     * `regQcLevel(Map)` and a same-arity `regQcLevel(def)` are ambiguous for a NULL
+     * argument -- and null is the expected input here, it is what selects the default.
+     * Groovy would pick the more specific Map candidate and NPE on `params.reg_qc`. A
+     * distinct name removes the dispatch question entirely.
+     */
+    static int regQcLevelOf(def skipRegistrationQc, def regQc) {
+        return skipRegistrationQc ? 0 : (regQc == null ? 2 : (regQc as int))
+    }
+
+    /** Map form -- see the note above. Delegates; holds no logic of its own. */
     static int regQcLevel(Map params) {
-        return params.skip_registration_qc ? 0 : (params.reg_qc == null ? 2 : (params.reg_qc as int))
+        return regQcLevelOf(params.skip_registration_qc, params.reg_qc)
     }
 
     /**
@@ -165,24 +197,8 @@ class ParamUtils {
      * micro non-rigid), matching nextflow.config. Single source of truth for register.nf /
      * warp_seg_qc.nf so the QC can honestly say what the 'rigid' stage means for a given run.
      */
-    static int microRegLevel(Map params) {
-        return params.reg_micro_reg == null ? 2 : (params.reg_micro_reg as int)
-    }
-
-    /**
-     * add_cycle does NOT run phenotyping: the incremental subworkflow has no
-     * COMPILE_PANEL/PHENOTYPE, and EXPORT_GEOJSON reuses the cell-contours file as a
-     * placeholder in the phenotype/model_config slots. If a panel were configured,
-     * EXPORT_GEOJSON's arg guard (params.panel_spec || params.panel_model) would activate
-     * --phenotypes/--panel_model against that placeholder and mis-classify. Reject the
-     * combination at launch rather than silently emit a wrong cells.geojson.
-     */
-    static void validateAddCyclePhenotyping(Map params) {
-        if (params.panel_spec || params.panel_model) {
-            throw new IllegalArgumentException(
-                "mode='add_cycle' does not support phenotyping. Unset --panel_spec / --panel_model " +
-                "for the incremental run — the new cycle inherits the base run's classification.")
-        }
+    static int microRegLevelOf(def regMicroReg) {
+        return regMicroReg == null ? 2 : (regMicroReg as int)
     }
 
     /**
@@ -302,5 +318,31 @@ class ParamUtils {
      */
     static boolean isEntryPoint(Map params, String step) {
         return params.start == step
+    }
+
+    /**
+     * Whether a patient with no `is_reference=true` row may have one auto-promoted.
+     *
+     * TRUE ONLY AT `--start preprocessing`. At every later entry point the samplesheet
+     * IS a checkpoint CSV this pipeline wrote, and a checkpoint always records exactly
+     * one reference per patient (INPUT_CHECK resolves it before the first checkpoint is
+     * written, so the decision is made once and then carried). A later entry point
+     * therefore never NEEDS to infer -- and must not: a checkpoint arriving without its
+     * reference is corrupt or hand-edited, and quietly promoting some row would register
+     * against a different slide than the run that produced the checkpoint, with nothing
+     * in the output saying so.
+     *
+     * This was real behaviour, not a hypothetical: feeding an all-false
+     * `csv/preprocessed.csv` to `--start registration --allow_auto_reference true` used
+     * to promote whichever slide arrived first.
+     *
+     * The ONE site that computes this. `params.allow_auto_reference` is the user's
+     * request; this is whether the request applies. Three callers ask (mirage.nf's two
+     * CsvUtils validations and its INPUT_CHECK call) and none re-derives it.
+     * mode='add_cycle' passes `false` directly and never comes through here -- its
+     * reference is the prior run's and is never a row in its sheet.
+     */
+    static boolean autoReferenceAllowed(Map params) {
+        return params.allow_auto_reference && isEntryPoint(params, 'preprocessing')
     }
 }

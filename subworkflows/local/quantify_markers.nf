@@ -59,7 +59,14 @@ def groupTiffsByPatient(ch_tagged) {
             [gkey, tiff]
         }
         .groupTuple(by: 0, remainder: true)
-        .map { patient_id, tiffs ->
+        .map { patient_id, tiffs_unordered ->
+            // CANONICAL ORDER. groupTuple emits in ARRIVAL order, and this list becomes
+            // MERGE_AND_PYRAMID's `path` input, which Nextflow hashes POSITIONALLY -- so
+            // an identical rerun produced a different task hash and -resume missed.
+            // Sorting by name makes the order a function of the data. Safe to sort in
+            // isolation here (unlike the metas+csvs grouping below) because this group
+            // carries exactly ONE list, so there is no pairing to break.
+            def tiffs = tiffs_unordered.toSorted { it.name }
             // Extract actual patient_id from groupKey wrapper if needed
             def pid = patient_id.toString()
             def patient_meta = [
@@ -185,7 +192,24 @@ workflow QUANTIFY_MARKERS {
             [gkey, meta, csv]
         }
         .groupTuple(by: 0, remainder: true)
-        .map { patient_id, metas, csvs ->
+        .map { patient_id, metas_unordered, csvs_unordered ->
+            // CANONICAL ORDER, and it is not only a caching concern here. groupTuple
+            // emits in ARRIVAL order, so BOTH the csv list reaching MERGE_QUANT_CSVS
+            // (hashed positionally -> -resume missed) AND `metas[0]` below were
+            // whichever marker finished quantifying first. Two identical runs picked
+            // different metas, so the channels/is_reference/channel_name carried into
+            // MERGE_QUANT_CSVS, EXPORT_GEOJSON and EXPORT_SPATIALDATA differed run to
+            // run:
+            //     run A: [... is_reference:true,  channels:[DAPI, PANCK, SMA], channel_name:SMA]
+            //     run B: [... is_reference:false, channels:[DAPI, CD3, CD8],   channel_name:CD3]
+            //
+            // Pair FIRST, then sort the pairs. NEVER `groupTuple(sort:)` -- it orders
+            // each grouped list independently and silently re-pairs meta with the wrong
+            // file (see registration.nf's grouping for the worked example).
+            def paired = [metas_unordered, csvs_unordered].transpose()
+                            .toSorted { it[0].channel_name }
+            def metas = paired.collect { it[0] }
+            def csvs  = paired.collect { it[1] }
             // `+` creates a new top-level map, but Groovy's Map.plus() is
             // cloneSimilarMap(left).putAll(right) -- clone-then-putAll,
             // operationally identical to clone(). metas[0].channels is still

@@ -5,7 +5,7 @@ Purpose: Provide concise, actionable context so an AI coding agent can be produc
 Big picture
 - This repository is a Nextflow DSL2 pipeline (root `main.nf`) that includes the workflow defined at `workflows/wsi_processing/main.nf`:
   - Example: `include { WSI_PROCESSING } from './workflows/wsi_processing/main.nf'` and `WSI_PROCESSING(params.input)` in `main.nf`.
-- Processing stages are organized as modules under `modules/` (one stage per subfolder, each with a `main.nf`). Common modules: `preprocessing`, `segmentation`, `quantification`, `registration`, `phenotyping`.
+- Processing stages are organized as modules under `modules/` (one stage per subfolder, each with a `main.nf`). Common modules: `preprocessing`, `segmentation`, `quantification`, `registration`.
 - Small Python helper scripts live in `scripts/` (e.g. `preprocess.py`, `quantify.py`, `segment.py`) and are invoked by Nextflow processes.
 
 Key files to inspect

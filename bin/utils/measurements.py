@@ -6,8 +6,8 @@ in several `bin/*.py` scripts, kept in sync only by a comment:
 - ``MORPHOLOGY_COLS``: the columns in the merged quantification CSV that
   describe cell geometry/identity rather than marker signal.
 - The measurement-key grammar ``"<marker>: <Compartment>: <Statistic>"``
-  produced by ``quantify.py`` and consumed by ``export_geojson.py``,
-  ``export_spatialdata.py``, and ``phenotype_cells.py``.
+  produced by ``quantify.py`` and consumed by ``export_geojson.py`` and
+  ``export_spatialdata.py``.
 
 G5 contract: the measurement-key format is consumed by the sibling repo
 ``qupath-extension-flowpath`` and is case- and space-sensitive. Do not change
@@ -58,9 +58,8 @@ def measurement_key(marker: str, compartment: str, statistic: str) -> str:
 
     G5 contract with qupath-extension-flowpath: exact spacing and case.
     Reproduces the format independently built by
-    ``quantify.py::compute_compartment_intensities`` (the producer) and
-    ``phenotype_cells.py::_marker_values`` (a consumer), and parsed by
-    ``export_spatialdata.py::parse_measurement_key``.
+    ``quantify.py::compute_compartment_intensities`` (the producer) and parsed
+    by ``export_spatialdata.py::parse_measurement_key``.
     """
     return f"{marker}: {compartment}: {statistic}"
 

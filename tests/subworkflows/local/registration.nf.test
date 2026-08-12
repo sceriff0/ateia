@@ -143,7 +143,24 @@ nextflow_workflow {
         }
     }
 
-    test("Should handle allow_auto_reference fallback - stub") {
+    /*
+     * REGISTRATION does NOT auto-promote a reference, EVEN WITH allow_auto_reference=true.
+     * It used to: the grouping closure promoted items[0], i.e. whichever slide arrived
+     * first, and it did so DOWNSTREAM of the preprocessing checkpoint writer -- so an
+     * --allow_auto_reference run wrote csv/preprocessed.csv with is_reference=false on
+     * every row and its own `--start registration` then refused to read it. The decision
+     * now happens once, at samplesheet-read time, in INPUT_CHECK via
+     * CsvUtils.resolveReferenceRows; what survives here is a guard.
+     *
+     * So this test asserts the guard fires regardless of the flag. The FALLBACK ITSELF is
+     * covered end to end, at the level that now owns it, by main.nf.test's "Should accept
+     * no reference when allow_auto_reference=true".
+     *
+     * Together with "Should fail when no reference and allow_auto_reference=false" below,
+     * this pins BOTH settings to the same outcome at this level -- which is the point:
+     * the flag no longer changes anything here.
+     */
+    test("Should reject a reference-less patient even with allow_auto_reference - stub") {
 
         tag "stub"
         options "-stub"
@@ -156,20 +173,22 @@ nextflow_workflow {
             }
             workflow {
                 """
-                // No is_reference=true - should use first image
+                // No is_reference=true anywhere. INPUT_CHECK would have resolved one
+                // before this point on a real run; reaching REGISTRATION without one
+                // means the samplesheet or checkpoint never named a reference.
                 input[0] = Channel.fromList([
                     [[patient_id: 'P001', is_reference: false, channels: ['DAPI']],
                      file('$projectDir/tests/testdata/P001_ref.ome.tiff')],
                     [[patient_id: 'P001', is_reference: false, channels: ['DAPI', 'CD3']],
                      file('$projectDir/tests/testdata/P001_mov1.ome.tiff')]
                 ])
-                // REGISTRATION now takes only ch_preprocessed (VALIS-only)
                 """
             }
         }
 
         then {
-            assert workflow.success
+            assert !workflow.success
+            assert workflow.stdout.any { it.contains('No reference image found for patient P001') }
         }
     }
 
@@ -267,18 +286,23 @@ nextflow_workflow {
 
     test("Should seg-QC score a multi-slide patient auto-picked as reference - stub") {
 
-        // Regression guard for a metadata-shape difference introduced when SEG_QC's
-        // source switched from the raw ch_preprocessed stream to the grouped closure's
-        // `items` (see ch_images_multi above): when no image is CSV-marked
-        // is_reference and allow_auto_reference=true, the grouping closure mutates the
-        // auto-picked item's meta to carry is_reference: true *inside the grouped
-        // list* (registration.nf:100) — the raw stream never saw that mutation.
-        // seg_qc.nf's reference/moving branch (seg_qc.nf:52-55) reads meta.is_reference,
-        // so a multi-slide auto-reference patient previously produced ZERO seg-QC
-        // output (the reference branch was empty, so the combine-by-patient join
-        // matched nothing). Feeding SEG_QC from the grouped/flattened channel carries
-        // the mutated meta through, so this patient is now scored correctly. Assert
-        // that positively here, since it was uncovered before and after this task.
+        // A multi-slide patient whose reference was AUTO-PICKED must still be seg-QC
+        // scored. seg_qc.nf's reference/moving branch (seg_qc.nf:52-55) reads
+        // meta.is_reference, and such a patient once produced ZERO seg-QC output: the
+        // reference branch was empty, so the combine-by-patient join matched nothing.
+        //
+        // The MECHANISM that used to break it is gone. registration.nf's grouping closure
+        // mutated the auto-picked item's meta to is_reference: true *inside the grouped
+        // list*, so whether a consumer saw the mutation depended on which channel it read
+        // from. The reference is now resolved once in INPUT_CHECK
+        // (CsvUtils.resolveReferenceRows) and arrives already stamped, so no consumer can
+        // disagree about it -- which is why the input below carries is_reference: true on
+        // the first slide: that is exactly what INPUT_CHECK now hands REGISTRATION for a
+        // sheet marking no reference under --allow_auto_reference.
+        //
+        // The assertion still earns its place: it pins the OUTCOME (this patient gets
+        // scored) rather than the mechanism, so it survives the next reshuffle of where
+        // SEG_QC draws its stream from.
 
         tag "stub"
         options "-stub"
@@ -291,10 +315,11 @@ nextflow_workflow {
             }
             workflow {
                 """
-                // Two slides, neither CSV-marked is_reference -> auto-reference picks
-                // the first one and mutates its meta inside the grouped closure.
+                // Two slides. The sheet marked neither; INPUT_CHECK resolved the first
+                // one and stamped is_reference: true, which is the shape REGISTRATION
+                // now receives.
                 input[0] = Channel.fromList([
-                    [[patient_id: 'P003', is_reference: false, channels: ['DAPI']],
+                    [[patient_id: 'P003', is_reference: true, channels: ['DAPI']],
                      file('$projectDir/tests/testdata/P002_ref.ome.tiff')],
                     [[patient_id: 'P003', is_reference: false, channels: ['DAPI', 'CD3']],
                      file('$projectDir/tests/testdata/P001_mov1.ome.tiff')]

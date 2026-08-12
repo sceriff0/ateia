@@ -2,8 +2,7 @@
 
 A slide is split into core tiles that *partition* it (no gaps, no overlaps) so stitching just
 places each core back; each core is read with a halo (clamped to the image) so per-tile
-registration has surrounding context. Tile centres are the control points of the mesh field, so
-the grid axes line up with a MeshField grid exactly.
+registration has surrounding context. Tile centres are the control points of the mesh field.
 """
 
 from __future__ import annotations
@@ -18,7 +17,7 @@ sys.path.insert(
     ),
 )
 
-from tile_grid import grid_axes, tile_grid
+from tile_grid import tile_grid
 
 
 def test_cores_partition_the_image_with_no_gaps_or_overlaps():
@@ -54,19 +53,3 @@ def test_read_box_is_the_core_expanded_by_halo_and_clamped_to_the_image():
         assert ry0 == max(0, cy0 - halo)
         assert rx1 == min(w, cx1 + halo)
         assert ry1 == min(h, cy1 + halo)
-
-
-def test_centres_are_core_centres_and_match_the_mesh_grid_axes():
-    w, h, tile = 100, 60, 40
-    tiles = tile_grid(w, h, tile, halo=8)
-    xs, ys = grid_axes(w, h, tile)
-
-    # one centre per column / row
-    assert len(xs) == 3 and len(ys) == 2
-    # first column core 0-40 -> centre 20; last column 80-100 -> centre 90
-    assert xs[0] == 20.0 and xs[-1] == 90.0
-    assert ys[0] == 20.0 and ys[-1] == 50.0
-
-    for t in tiles:
-        assert t.cx == xs[t.ix]
-        assert t.cy == ys[t.iy]

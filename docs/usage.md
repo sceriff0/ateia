@@ -16,7 +16,7 @@ for exactly one stage.
 ```mermaid
 flowchart LR
     A[Raw multi-channel<br/>images + CSV] --> B[Preprocessing<br/>convert + illumination correct]
-    B --> C[Registration<br/>VALIS align panels]
+    B --> C[Registration<br/>align panels: VALIS or tiled/STARE]
     C --> D[Segmentation<br/>segment + extract properties]
     D --> E[Postprocessing<br/>quantify + export]
     E --> F[GeoJSON cells<br/>+ pyramidal OME-TIFF]
@@ -26,17 +26,18 @@ flowchart LR
     style E fill:#fff3e0,stroke:#f57c00
 ```
 
-- **Preprocessing** — Bio-Formats conversion (DAPI → channel 0) + BaSiC illumination correction.
-- **Registration** — VALIS whole-slide alignment of every panel onto the reference panel.
+- **Preprocessing** — Bio-Formats conversion (nuclear marker → channel 0) + BaSiC illumination
+  correction. The correction is optional (`--skip_preprocessing`); the conversion is not.
+- **Registration** — whole-slide alignment of every panel onto the reference panel, via
+  `--registration_method`: **VALIS** (default, graph-based) or **tiled/STARE**
+  (JVM-free, fully parallel — see [Parameters → Tiled / STARE](parameters.md#tiled-stare-registration_methodtiled)).
 - **Segmentation** — cell/nucleus segmentation on the reference panel + morphology/contour extraction.
 - **Postprocessing** — per-cell quantification + QuPath GeoJSON export + pyramidal OME-TIFF.
 
-!!! info "Optional phenotyping"
-    By default MIRAGE does not assign cell types — the exported GeoJSON carries **raw
-    marker intensities**, so you can gate and phenotype downstream in QuPath or
-    [FlowPath](https://flowpath.readthedocs.io/). Optionally, supplying a panel
-    (`--panel_spec` / `--panel_model`) enables built-in conformal-risk-controlled
-    phenotype assignment — see [Phenotyping](parameters.md#phenotyping-panel-agnostic).
+!!! info "No built-in cell typing"
+    MIRAGE does not assign cell types — the exported GeoJSON carries **raw marker
+    intensities** with a constant `"Cell"` classification, so you gate and phenotype
+    downstream in QuPath or [FlowPath](https://flowpath.readthedocs.io/).
 
 !!! tip "Adding a new imaging cycle later?"
     To fold a fresh cyclic-IF cycle into an already-completed run — reusing the prior
@@ -141,8 +142,10 @@ independently and in parallel.
     - One row per image; group rows by `patient_id`.
     - Exactly **one** `is_reference=true` row per patient (its coordinate space is
       the registration target).
-    - `channels` is pipe-separated, in acquisition order, and **must include DAPI**
-      (matched case-insensitively; `CONVERT_IMAGE` moves it to channel 0).
+    - `channels` is pipe-separated, in acquisition order, and **must include one of
+      `params.nuclear_markers`** (default `DAPI`, `CELLTOX`; matched
+      case-insensitively as a substring — a DAPI-free CELLTOX row is valid;
+      `CONVERT_IMAGE` moves the matched channel to channel 0).
     - The image column depends on `--start`.
 
 The required columns change with the entry point, because each stage consumes a
@@ -193,11 +196,30 @@ samplesheet — feed it back in with a matching `--start`.
     consistent across stages so resume commands point `--input` at the right file.
 
 !!! note "`-resume` vs `--start` — different mechanisms"
-    - `-resume` reuses the **Nextflow work cache** within a run lineage; only
-      changed/failed tasks re-run.
-    - `--start` **skips earlier stages entirely** by feeding a checkpoint CSV.
+    - `-resume` reuses the **Nextflow work cache**; only changed tasks and their
+      descendants re-run. Needs `work/` to still exist.
+    - `--start` **skips earlier stages entirely** by feeding a checkpoint CSV. Needs
+      only `--outdir`, so it is what you use when `work/` is gone — purged scratch, a
+      different machine.
 
-    They combine freely, e.g. `--start postprocessing … -resume`.
+    **Prefer `-resume` when `work/` survives.** Changing a parameter and re-running
+    with `-resume` re-runs only the tasks that parameter actually affects, with no
+    checkpoint CSV and no `--start`: e.g. changing `--pyramid_resolutions` re-runs the
+    pyramid and the exports and reuses the other 24 tasks.
+
+    They compose (`--start postprocessing … -resume`), but understand what you get:
+    `--start` reads its inputs from published paths under `--outdir`, which are
+    different files from the `work/` originals as far as the cache is concerned, so
+    the combination reuses **nothing** from a prior run's work directory. `-resume`
+    there only helps across successive `--start postprocessing` runs.
+
+!!! warning "Two tasks always re-run"
+    `GENERATE_QC_REPORT` and `AGGREGATE_SIZE_LOGS` are declared `cache = false`. Their
+    inputs are `collectFile()` results, which are rebuilt into a fresh
+    `work/tmp/<hash>/` on every run and so can never match the cache; the QC report
+    also embeds a run timestamp. Both are cheap and terminal. Seeing exactly these two
+    re-run on an otherwise fully-cached resume is correct — seeing anything *else*
+    re-run is a determinism bug (`tests/resume_check.sh` checks precisely that).
 
 ## Execution profiles
 
@@ -356,15 +378,17 @@ Two output locations: per-patient **results** under `--outdir`, and aggregated
 
 The per-patient leaf directories below are the closed vocabulary
 `lib/Layout.groovy`'s `PUBLISHED_KINDS` declares — a process publishing anywhere else
-under `<outdir>/<patient_id>/` fails `tests/test_layout.py`. `spatialdata/` is the one
-per-patient exception: it is published at the patient root by `EXPORT_SPATIALDATA`'s own
-`pattern:` (see `conf/modules.config`), not through a `Layout.patientDir` kind.
+under `<outdir>/<patient_id>/` fails `tests/test_layout.py`. Two per-patient leaves are
+exceptions: `spatialdata/`, published at the patient root by `EXPORT_SPATIALDATA`'s own
+`pattern:` (see `conf/modules.config`) rather than through a `Layout.patientDir` kind,
+and `qc/`, which `tests/test_layout.py` skips outright (no checkpoint CSV names it) and
+which is likewise absent from `PUBLISHED_KINDS`.
 
 ```text
 results/                          # = --outdir
 ├── <patient_id>/
-│   ├── converted/                # standardized OME-TIFF (DAPI → ch0)
-│   ├── preprocessed/             # *_corrected.ome.tif (BaSiC)
+│   ├── converted/                # standardized OME-TIFF (nuclear marker → ch0)
+│   ├── preprocessed/             # *_corrected.ome.tif (BaSiC; absent if --skip_preprocessing)
 │   ├── registered/               # *_registered.ome.tiff (+ summary/ error CSVs)
 │   ├── segmentation/             # *_nuclei_mask.tif, *_cell_mask.tif
 │   ├── cell_properties/          # morphology.csv, contours.json (+ nuclei/ subdir)
@@ -372,14 +396,11 @@ results/                          # = --outdir
 │   │                             #   the prior run's re-split pyramid channels)
 │   ├── quantify/                 # <patient>_<marker>_quant.csv, per-marker, pre-merge
 │   ├── quantification/           # merged_quant.csv
-│   ├── phenotyping/              # phenotypes.csv, constraint_audit.csv,
-│   │                             #   phenotype_qc.json (--pheno_alpha etc.)
-│   ├── geojson/                  # cells.geojson, cells_data.csv
-│   ├── pyramid/                  # *.ome.tiff (multi-resolution)
-│   ├── spatialdata/              # <id>.zarr (only with --export_spatialdata)
+│   ├── geojson/export/           # cells.geojson, cells_wholecell.geojson, cells_data.csv
+│   ├── pyramid/                  # pyramid.ome.tiff (multi-resolution)
+│   ├── spatialdata/              # <patient_id>.zarr (written by default;
+│   │                             #   disable with --skip_spatialdata_export)
 │   └── qc/                       # preprocess / registration / postprocessing QC
-├── phenotyping/                  # model_config.json, spec_report.html (run-level,
-│                                 #   COMPILE_PANEL — one panel/model shared across patients)
 ├── csv/                          # checkpoint CSVs (all patients)
 └── qc/                           # aggregated HTML QC report
 ```
@@ -388,21 +409,26 @@ The tables you'll analyze:
 
 | File | What it is |
 |---|---|
-| `quantification/merged_quant.csv` | One row per cell; all markers (mean intensity) + morphology joined. With `--quantify_compartments`, adds `<MARKER>: Nucleus/Cytoplasm/Cell: Mean`; with `--expanded_quantification`, also Median and Sum. |
-| `geojson/cells.geojson` | One QuPath feature per cell: whole-cell polygon + measurement array (centroid µm, marker intensities, morphology). Carries `nucleusGeometry` in compartment mode. |
-| `geojson/cells_data.csv` | The cell table with per-marker **z-scores** added. |
+| `quantification/merged_quant.csv` | One row per cell; morphology joined in. Per marker: a bare column (whole-cell mean, kept for FlowPath's fast path) plus `<MARKER>: <Compartment>: <Statistic>` keys. **Median is always emitted**; `--expanded_quantification` adds Mean and Sum; `--quantify_compartments` adds the Nucleus and Cytoplasm compartments alongside Cell. |
+| `geojson/export/cells.geojson` | One QuPath feature per cell: whole-cell polygon + measurement array (centroid µm, marker intensities, morphology). Carries `nucleusGeometry` in compartment mode. |
+| `geojson/export/cells_wholecell.geojson` | The same detections without nucleus geometry — lighter and faster to import. Compartment mode only. |
+| `geojson/export/cells_data.csv` | The cell table with per-marker **z-scores** added. |
 | `segmentation/*_cell_mask.tif` | Whole-cell instance labels (uint32); each non-zero value is one cell. |
 
 These open directly in QuPath, napari, and OMERO, and feed
-[FlowPath](https://flowpath.readthedocs.io/) for interactive gating.
+[FlowPath](https://flowpath.readthedocs.io/) for interactive gating. The exact
+key grammar is a cross-repository contract — see
+[Inputs & outputs → The measurement-key contract](outputs.md#the-measurement-key-contract).
 
 ## Troubleshooting & FAQ
 
 ??? question "Which segmentation backend should I use?"
-    Pick with `--seg_method`: **`stardist`** (default; robust, needs DAPI at
-    channel 0 — guaranteed upstream), **`instantseg`** (channel-invariant; tune
-    batch/tile size for GPU memory), **`cellsam`** (finds DAPI by name; needs a
-    weight download via `DEEPCELL_ACCESS_TOKEN`, or a local `--cellsam_model_path`).
+    Pick with `--seg_method`: **`instantseg`** (default; channel-invariant, runs
+    on an unconfigured clone; tune batch/tile size for GPU memory), **`stardist`**
+    (reads channel 0, hardcoded — needs a nuclear marker there and a configured
+    `segmentation_model_dir`), **`cellsam`** (finds the nuclear channel by name;
+    needs a weight download via `DEEPCELL_ACCESS_TOKEN`, or a local
+    `--cellsam_model_path`).
 
 ??? failure "Launch fails on an invalid value"
     `--start`/`--stop` must be `preprocessing|registration|segmentation|postprocessing`;

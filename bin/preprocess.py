@@ -37,6 +37,10 @@ BASICPY_VERSION = getattr(basicpy, "__version__", "unknown")
 from basicpy import BaSiC  # type: ignore  # noqa: E402
 from image_utils import ensure_dir  # noqa: E402
 from metadata import is_nuclear  # noqa: E402
+from pixel_size import (  # noqa: E402
+    read_ome_pixel_size,
+    warn_on_pixel_size_mismatch,
+)
 from validation import detect_negative_values, log_image_stats  # noqa: E402
 
 logger = get_logger(__name__)
@@ -234,54 +238,36 @@ def preprocess_multichannel_image(
     skip_nuclear: bool = True,
     nuclear_markers: List[str] | None = None,
     n_workers: int = 4,
+    pixel_size: float = 0.325,
 ) -> NDArray:
     """
     Apply BaSiC preprocessing to a single multichannel image in parallel and save as TIFF.
     """
     logger.info(f"Loading multichannel image from {image_path}")
 
-    # Read and log input file metadata
-    # Extract pixel size from input OME metadata (fallback to 0.325 µm)
-    pixel_size_x = 0.325
-    pixel_size_y = 0.325
+    # Read and log input file metadata.
+    #
+    # The scale is read through the shared rule in utils/pixel_size.py rather than
+    # parsed here: this module used to carry its own OME-XML walk with its own hardcoded
+    # 0.325 fallback, which meant a run with --pixel_size set to anything else silently
+    # fell back to a number nothing in the run had asked for.
+    detected_x, detected_y = read_ome_pixel_size(image_path)
+    warn_on_pixel_size_mismatch(
+        (detected_x, detected_y),
+        pixel_size,
+        source=Path(image_path).name,
+        logger=logger,
+    )
+    # What gets stamped on the preprocessed intermediate is what the input claimed, so
+    # the provenance survives; the configured value is the fallback, and it is what every
+    # downstream µm conversion uses regardless (see utils/pixel_size.py).
+    pixel_size_x = detected_x if detected_x is not None else pixel_size
+    pixel_size_y = detected_y if detected_y is not None else pixel_size
+    if detected_x is not None:
+        logger.info(
+            f"  Pixel size from input OME metadata: X={pixel_size_x}, Y={pixel_size_y} µm"
+        )
     with tifffile.TiffFile(image_path) as tif:
-        has_ome = hasattr(tif, "ome_metadata") and tif.ome_metadata
-        has_physical_size = has_ome and "PhysicalSizeX" in tif.ome_metadata
-        if has_ome:
-            logger.debug(
-                f"  Input metadata: OME=True, PhysicalSize={has_physical_size}"
-            )
-            if has_physical_size:
-                try:
-                    import xml.etree.ElementTree as ET
-
-                    ome_xml = tif.ome_metadata
-                    root = ET.fromstring(ome_xml) if isinstance(ome_xml, str) else None
-                    if root is not None:
-                        ns = {
-                            "ome": "http://www.openmicroscopy.org/Schemas/OME/2016-06"
-                        }
-                        pixels = root.find(".//ome:Pixels", ns)
-                        if pixels is None:
-                            # Try without namespace
-                            pixels = root.find(".//{*}Pixels")
-                        if pixels is not None:
-                            px = pixels.get("PhysicalSizeX")
-                            py = pixels.get("PhysicalSizeY")
-                            if px:
-                                pixel_size_x = float(px)
-                            if py:
-                                pixel_size_y = float(py)
-                            logger.info(
-                                f"  Extracted pixel size from OME: X={pixel_size_x}, Y={pixel_size_y} µm"
-                            )
-                except Exception as e:
-                    logger.warning(
-                        f"  Failed to parse pixel size from OME metadata: {e}, using default 0.325 µm"
-                    )
-        else:
-            logger.warning("  [WARN] Input file has no OME metadata")
-
         if tif.pages and len(tif.pages) > 0:
             first_page = tif.pages[0]
             logger.debug(
@@ -380,7 +366,8 @@ def preprocess_multichannel_image(
 
     # Save as OME-TIFF with proper metadata
     # VALIS expects OME-TIFF with proper channel dimension and physical size metadata
-    # Default pixel size is 0.325 µm (matching convert_nd2.py)
+    # PhysicalSize is whatever the input claimed, falling back to the configured
+    # --pixel-size. VALIS reads this off the slide, so it has to be present.
     metadata = {
         "axes": "CYX",
         "Channel": {"Name": channel_names[: preprocessed.shape[0]]},
@@ -481,6 +468,16 @@ def parse_args():
         "params.nuclear_markers; the default is only for standalone use.",
     )
 
+    parser.add_argument(
+        "--pixel-size",
+        dest="pixel_size",
+        type=float,
+        default=0.325,
+        help="Configured scale in µm/px (PREPROCESS passes params.pixel_size). Used as "
+        "the fallback when the input carries no OME scale, and as the value the "
+        "input's own scale is checked against.",
+    )
+
     return parser.parse_args()
 
 
@@ -524,6 +521,7 @@ def main():
         skip_nuclear=args.skip_nuclear,
         nuclear_markers=args.nuclear_markers,
         n_workers=args.n_workers,
+        pixel_size=args.pixel_size,
     )
 
     logger.info(f"Preprocessing completed successfully. Output: {output_path}")

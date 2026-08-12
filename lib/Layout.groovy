@@ -153,7 +153,6 @@ class Layout {
         'split_channels',
         'quantify',
         'quantification',
-        'phenotyping',
         'geojson',
         'pyramid',
     ].asImmutable()
@@ -196,8 +195,8 @@ class Layout {
      *
      *   REGISTER (VALIS)  pattern 'registered_slides/*_registered.ome.tiff'
      *                     -> <outdir>/<pid>/registered/registered_slides/<name>
-     *   TILED_REGISTER /  pattern 'registered/*_registered.ome.tiff'
-     *   TILED_STITCH      -> <outdir>/<pid>/registered/registered/<name>
+     *   TILED_STITCH      pattern 'registered/*_registered.ome.tiff'
+     *                     -> <outdir>/<pid>/registered/registered/<name>
      *   EXPORT_GEOJSON    output path("export/cells.geojson"), published bare
      *                     -> <outdir>/<pid>/geojson/export/cells.geojson
      *

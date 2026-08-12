@@ -49,13 +49,13 @@ process REGISTER {
     def micro_reg_fraction = params.reg_micro_reg_fraction
     def max_image_dim = params.reg_max_image_dim
     // Micro-registration depth (0/1/2), resolved via the single-source ParamUtils helper.
-    def micro_reg = ParamUtils.microRegLevel(params)
+    def micro_reg = ParamUtils.microRegLevelOf(params.reg_micro_reg)
     // reg_qc >= 2 scores each registration stage separately, which needs the post-non-rigid,
     // pre-micro displacement fields. VALIS composes micro into the same attribute, so nothing
     // downstream can recover them — REGISTER is the only place they can be captured.
     // ParamUtils.regQcLevel is the single source of truth (null reg_qc -> 2), shared with
     // registration.nf/add_cycle.nf so this process can't drift from the rest of the pipeline.
-    def reg_qc_level = ParamUtils.regQcLevel(params)
+    def reg_qc_level = ParamUtils.regQcLevelOf(params.skip_registration_qc, params.reg_qc)
     def stage_ckpt = reg_qc_level >= 2 ? '--stage-checkpoint-dir reg_stage_checkpoint' : ''
     // JVM heap scales with retry attempts: base 32GB + 16GB per attempt
     def jvm_heap_gb = Math.min(params.reg_jvm_heap_gb ?: (32 + 16 * task.attempt), task.memory.toGiga() - 4)
@@ -84,13 +84,13 @@ process REGISTER {
     echo "=== Copying input files to preprocessed/ ==="
 
     # Collect all OME-TIFF files from staged ref/ and input_*/ directories
-    find -L ref input_* -maxdepth 1 -type f \\( -name "*.ome.tif" -o -name "*.ome.tiff" \\) 2>/dev/null > /tmp/files_to_copy.txt || true
+    find -L ref input_* -maxdepth 1 -type f \\( -name "*.ome.tif" -o -name "*.ome.tiff" \\) 2>/dev/null > files_to_copy.txt || true
 
     echo "Files to copy:"
-    cat /tmp/files_to_copy.txt
+    cat files_to_copy.txt
 
     # Parallel hard-link copy; cp -Ln skips duplicates (reference may also be in input files)
-    cat /tmp/files_to_copy.txt | xargs -P ${task.cpus} -I {} sh -c '
+    cat files_to_copy.txt | xargs -P ${task.cpus} -I {} sh -c '
         dest="preprocessed/\$(basename "{}")"
         cp -Ln "{}" "\$dest" 2>/dev/null && echo "Copied: {}" || echo "Skipped (already exists): {}"
     '
@@ -190,8 +190,8 @@ process REGISTER {
     // Mirror the real path: the stage checkpoint exists only at reg_qc >= 2, so stub runs
     // exercise the same channel wiring the real run does (including its absence at reg_qc<2).
     // Uses the same ParamUtils.regQcLevel default (null -> 2) as the script block above.
-    def stub_qc_level = ParamUtils.regQcLevel(params)
-    def stub_micro_reg = ParamUtils.microRegLevel(params)
+    def stub_qc_level = ParamUtils.regQcLevelOf(params.skip_registration_qc, params.reg_qc)
+    def stub_micro_reg = ParamUtils.microRegLevelOf(params.reg_micro_reg)
     def stub_ckpt = stub_qc_level < 2 ? '' : """
     mkdir -p reg_stage_checkpoint
     echo '{"version": 1, "stage": "post_non_rigid_pre_micro", "micro_registration": ${stub_micro_reg >= 2}, "slides": {}, "errors": []}' > reg_stage_checkpoint/stage_checkpoint.json

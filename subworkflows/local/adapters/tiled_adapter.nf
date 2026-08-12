@@ -142,7 +142,17 @@ workflow TILED_ADAPTER {
     ch_controls = TILED_REG_TILE.out.control
         .map { meta, c -> tuple(groupKey(slideKey(meta), requireTilesCount(meta)), meta, c) }
         .groupTuple(by: 0)
-        .map { _k, metas, controls -> tuple(metas[0], controls) }
+        .map { _k, metas, controls ->
+            // CANONICAL ORDER -- same defect and same fix as
+            // subworkflows/local/quantify_markers.nf's marker grouping. groupTuple
+            // emits in ARRIVAL order, so both the control list reaching TILED_SOLVE
+            // (hashed positionally, so -resume missed) and `metas[0]` were whichever
+            // TILE finished first. Pair FIRST, then sort the pairs; never
+            // `groupTuple(sort:)`, which orders each list independently and re-pairs
+            // meta with the wrong control file.
+            def paired = [metas, controls].transpose().toSorted { it[1].name }
+            tuple(paired[0][0], paired.collect { it[1] })
+        }
 
     ch_solve_in = ch_controls
         .map { meta, controls -> tuple(slideKey(meta), meta, controls) }

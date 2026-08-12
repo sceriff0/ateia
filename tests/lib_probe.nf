@@ -411,6 +411,45 @@ workflow {
     assert keysOf(envVersions) == ['python', 'numpy', 'scikit-image'].toSet()
 
     // ------------------------------------------------------------------ //
+    // SegBackends — the segmentation seam's versions.yml tool lists
+    // ------------------------------------------------------------------ //
+    // Declared as BARE MODULE NAMES, not rendered YAML. That is what lets
+    // modules/local/segment.nf hand the SAME list to ProcessEnvelope.versions()
+    // (script:) and ProcessEnvelope.versionsStub() (stub:). Before this, the table
+    // stored six pre-rendered probe strings, which a stub block cannot reuse -- so
+    // segment.nf's stub: hand-wrote `seg_method: <name>` instead, a key that is not a
+    // tool and that no real run ever emits. `-stub` never evaluates script:, so nothing
+    // in the blocking gate could see the two key sets were disjoint.
+    assert SegBackends.methods().toSorted() == ['cellsam', 'instantseg', 'stardist']
+    assert SegBackends.of('stardist').versionTools   == ['deepcell', 'tensorflow']
+    assert SegBackends.of('instantseg').versionTools == ['instanseg', 'torch']
+    assert SegBackends.of('cellsam').versionTools    == ['cellSAM', 'torch']
+
+    // `torch` is deliberately repeated across two backends rather than hoisted into a
+    // shared list: exactly ONE backend runs per task, and stardist loads no torch at
+    // all, so a shared list would fabricate a torch row for every StarDist run.
+    assert !SegBackends.of('stardist').versionTools.contains('torch')
+
+    // The property the whole envelope exists for, asserted end-to-end for every
+    // backend: rendering the SAME list through versions() and versionsStub() yields
+    // the SAME YAML keys. Compare keys (the text before each ':'), because the values
+    // are exactly what differs between a real run and a stub.
+    def yamlKeysOf = { String heredoc ->
+        heredoc.readLines()
+            .findAll { it.startsWith('    ') }
+            .collect { it.trim().split(':')[0].trim() }
+    }
+    SegBackends.methods().each { m ->
+        def tools = SegBackends.of(m).versionTools
+        def real  = yamlKeysOf(ProcessEnvelope.versions('SEGMENT', tools))
+        def stub  = yamlKeysOf(ProcessEnvelope.versionsStub('SEGMENT', tools))
+        assert real == stub, "SEGMENT/${m}: script: and stub: versions.yml keys differ"
+        assert real == ['python'] + tools, "SEGMENT/${m}: unexpected versions.yml keys ${real}"
+        // The old stub key must not come back under any backend.
+        assert !real.contains('seg_method')
+    }
+
+    // ------------------------------------------------------------------ //
     // WarpBackends — one seam for the reg_qc=2 warp
     // ------------------------------------------------------------------ //
     assert WarpBackends.methods().toSorted() == ['tiled', 'valis']

@@ -261,15 +261,18 @@ ARGPARSE_DEFAULT_ALLOWLIST = {
             "is the more useful behavior than silently assuming 0.325."
         ),
     },
-    "segment_to_geojson.py:--nuclear-markers": {
+    "merge_quant_csvs.py:--nuclear-markers": {
         "reason": (
-            "default=None is intentional per the script's own help text: "
-            "'SEG_QC_GEOJSON always passes params.nuclear_markers; the "
-            "default is only for standalone use.' Confirmed true: "
-            "modules/local/seg_qc_geojson.nf:44 always builds and passes "
-            "`--nuclear-markers ${MarkerUtils.markerList(params.nuclear_"
-            "markers).join(' ')}`, so the pipeline never relies on this "
-            "default."
+            "Same contract as preprocess.py's and split_multichannel.py's "
+            "--nuclear-markers: default=None is intentional per the script's own "
+            "help text, 'MERGE_QUANT_CSVS passes params.nuclear_markers; the "
+            "default is only for standalone use.' Confirmed true -- "
+            "modules/local/merge_quant_csvs.nf builds the flag unconditionally from "
+            "MarkerUtils.markerList, so the pipeline never reaches the default. "
+            "Mirroring ['DAPI','CELLTOX'] here would be a SECOND declaration of "
+            "that default in Python; utils/metadata.py's DEFAULT_NUCLEAR_MARKERS is "
+            "the one permitted mirror, and passing None is how this script defers "
+            "to it."
         ),
     },
     "preprocess.py:--nuclear-markers": {
