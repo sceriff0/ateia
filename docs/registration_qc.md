@@ -44,10 +44,17 @@ because *different cells got paired* — or because a cell that was occluded in 
 reappeared in another's. Neither is a registration effect. With the pairing fixed, every change
 between stages is geometry.
 
-Pairing rule: **mutual nearest centroid within one median nuclear radius**. Mutuality stops a
-dense cluster collapsing onto one popular target; the radius stops a cell with no true partner
-pairing with whatever happens to be nearest. Both are tunable
-(`--match-radius-factor`, `--match-radius-px`).
+Pairing rule: **optimal one-to-one assignment** (`scipy.optimize.linear_sum_assignment`)
+minimising total centroid distance, within **1.5 median nuclear radii**, solved exactly per
+connected component of the candidate graph — components on rigid-aligned tissue are normally
+1-4 cells, so this is exact, not an approximation, and never materializes a whole-slide cost
+matrix. A component whose size exceeds `--max-component-cells` falls back to mutual-NN inside
+that component only. The older **mutual nearest centroid** rule (each cell pairs only if it is
+the other's nearest neighbour, which stops a dense cluster collapsing onto one popular target)
+remains selectable via `params.seg_qc_pairing` / `--pairing mutual_nn`. The radius, in both
+cases, stops a cell with no true partner pairing with whatever happens to be nearest, and is
+tunable (`params.seg_qc_match_radius_factor` / `--match-radius-factor`, or an absolute
+`--match-radius-px`).
 
 ## Metrics
 
@@ -100,10 +107,14 @@ that and the QC omits the `micro` stage rather than reporting a byte-for-byte du
   "stages_separable": true,
   "stage_order": ["native", "rigid", "non_rigid", "micro"],
   "matching": {
-    "method": "mutual_nn_centroid",
+    "method": "lsa_centroid",
     "anchor_stage": "rigid",
-    "radius_px": 6.2,
+    "radius_px": 9.3,
     "median_cell_radius_px": 6.2,
+    "n_components": 181940,
+    "largest_component_cells": 4,
+    "n_fallback_components": 0,
+    "n_fallback_cells": 0,
     "n_pairs": 184203,
     "pair_fraction": 0.91
   },
