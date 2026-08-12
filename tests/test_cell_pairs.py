@@ -204,6 +204,102 @@ def test_mutual_nn_skips_nan_centroids():
     assert ia.tolist() == [1] and ib.tolist() == [0]
 
 
+# ── optimal (LSA) matching ─────────────────────────────────────────────────────
+def _dense_lsa(a, b, radius):
+    """Reference solve: one dense big-M assignment over the whole graph, no components."""
+    from scipy.optimize import linear_sum_assignment
+
+    d = np.hypot(a[:, None, 0] - b[None, :, 0], a[:, None, 1] - b[None, :, 1])
+    big_m = (a.shape[0] + b.shape[0]) * radius + 1.0
+    cost = np.where(d <= radius, d, big_m)
+    ri, ci = linear_sum_assignment(cost)
+    keep = cost[ri, ci] < big_m
+    return set(zip(ri[keep].tolist(), ci[keep].tolist()))
+
+
+def test_lsa_recovers_the_pair_mutual_nn_drops():
+    # a1's nearest is b0, but b0's nearest is a0, so mutual-NN drops a1 entirely.
+    # The optimal assignment takes (a0,b0) and (a1,b1) instead: 1 + 4 beats M + 2.
+    a = np.array([[0.0, 0.0], [3.0, 0.0]])
+    b = np.array([[1.0, 0.0], [7.0, 0.0]])
+
+    ia, ib, _ = cp.match_mutual_nn(a, b, radius=5.0)
+    assert set(zip(ia.tolist(), ib.tolist())) == {(0, 0)}, "premise: mutual-NN drops a1"
+
+    ja, jb, dist, stats = cp.match_lsa(a, b, radius=5.0)
+    assert set(zip(ja.tolist(), jb.tolist())) == {(0, 0), (1, 1)}
+    assert np.allclose(dist, [1.0, 4.0])
+    assert stats["n_fallback_components"] == 0
+
+
+def test_lsa_component_decomposition_equals_a_dense_solve():
+    # The load-bearing correctness claim: per-component LSA IS the global optimum.
+    rng = np.random.default_rng(7)
+    a = rng.uniform(0, 300, size=(60, 2))
+    b = a + rng.normal(0, 2.0, size=a.shape)
+    radius = 6.0
+    ia, ib, _, _ = cp.match_lsa(a, b, radius=radius)
+    assert set(zip(ia.tolist(), ib.tolist())) == _dense_lsa(a, b, radius)
+
+
+def test_lsa_pairs_at_least_as_many_cells_as_mutual_nn():
+    # NB: LSA's *total* distance is usually HIGHER than mutual-NN's, because it pairs
+    # strictly more cells. Cardinality is the property that holds.
+    for seed in range(5):
+        rng = np.random.default_rng(seed)
+        a = rng.uniform(0, 200, size=(80, 2))
+        b = a + rng.normal(0, 2.5, size=a.shape)
+        n_nn = cp.match_mutual_nn(a, b, radius=5.0)[0].size
+        n_lsa = cp.match_lsa(a, b, radius=5.0)[0].size
+        assert n_lsa >= n_nn, f"seed {seed}: LSA paired {n_lsa} < mutual-NN {n_nn}"
+
+
+def test_lsa_is_one_to_one_on_both_sides():
+    rng = np.random.default_rng(3)
+    a = rng.uniform(0, 100, size=(50, 2))
+    b = rng.uniform(0, 100, size=(50, 2))
+    ia, ib, _, _ = cp.match_lsa(a, b, radius=20.0)
+    assert len(set(ia.tolist())) == ia.size
+    assert len(set(ib.tolist())) == ib.size
+
+
+def test_lsa_respects_the_radius():
+    a = np.array([[0.0, 0.0]])
+    b = np.array([[10.0, 0.0]])
+    assert cp.match_lsa(a, b, radius=5.0)[0].size == 0
+    assert cp.match_lsa(a, b, radius=15.0)[0].size == 1
+
+
+def test_lsa_falls_back_to_mutual_nn_on_a_percolated_component():
+    # A 6-cell chain: every consecutive pair is 1 apart, so one component spans all of it.
+    a = np.array([[0.0, 0.0], [2.0, 0.0], [4.0, 0.0]])
+    b = np.array([[1.0, 0.0], [3.0, 0.0], [5.0, 0.0]])
+    ia, ib, _, stats = cp.match_lsa(a, b, radius=1.5, max_component_cells=4)
+    assert stats["n_fallback_components"] == 1
+    assert stats["n_fallback_cells"] == 6
+    assert stats["largest_component_cells"] == 6
+    assert len(set(ia.tolist())) == ia.size and len(set(ib.tolist())) == ib.size
+
+
+def test_lsa_handles_empty_nan_and_nonpositive_radius():
+    a = np.array([[0.0, 0.0]])
+    assert cp.match_lsa(a, np.empty((0, 2)), radius=5.0)[0].size == 0
+    assert cp.match_lsa(a, a, radius=0.0)[0].size == 0
+    nan_a = np.array([[np.nan, np.nan], [0.0, 0.0]])
+    ia, ib, _, _ = cp.match_lsa(nan_a, np.array([[0.5, 0.0]]), radius=5.0)
+    assert ia.tolist() == [1] and ib.tolist() == [0]
+
+
+def test_lsa_is_deterministic():
+    rng = np.random.default_rng(11)
+    a = rng.uniform(0, 150, size=(70, 2))
+    b = a + rng.normal(0, 2.0, size=a.shape)
+    first = cp.match_lsa(a, b, radius=6.0)
+    second = cp.match_lsa(a, b, radius=6.0)
+    assert np.array_equal(first[0], second[0])
+    assert np.array_equal(first[1], second[1])
+
+
 # ── per-pair IoU ───────────────────────────────────────────────────────────────
 def test_pair_iou_of_identical_squares_is_one():
     ps = cp.from_feature_collection(_fc(_square(0, 0, 10)))
