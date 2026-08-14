@@ -52,40 +52,44 @@ def _ref(n=200, seed=0):
 
 
 @pytest.mark.parametrize("alpha", [0.005, 0.01, 0.02, 0.05, 0.1, 0.2])
-def test_tail_threshold_roundtrip_neg_side(alpha):
-    """t_pos is the smallest reference score with p_neg <= alpha, and it is attained."""
+def test_tail_threshold_neg_side_is_an_exact_decision_boundary(alpha):
+    """`value > t_pos` must agree with `p_neg(value) <= alpha` for EVERY value, not just
+    at reference scores. The interval is open, so the boundary is the last FAILING
+    score -- taking the first satisfying one mis-signs everything strictly between two
+    reference scores, which is most cells."""
     scores, weights = _ref()
     t = tail_threshold(scores, weights, "neg", alpha)
-    if t is None:
-        p = weighted_tail_pvalues(np.sort(scores), scores, weights, "neg")
-        assert (p > alpha).all()
-        return
-    assert float(weighted_tail_pvalues(np.array([t]), scores, weights, "neg")[0]) <= alpha
-    below = np.sort(scores[scores < t])
-    if below.size:
-        prev = below[-1]
-        assert float(weighted_tail_pvalues(np.array([prev]), scores, weights, "neg")[0]) > alpha
+    probe = np.concatenate([scores, (scores[:-1] + scores[1:]) / 2.0,
+                            [scores.min() - 1.0, scores.max() + 1.0]])
+    p = weighted_tail_pvalues(probe, scores, weights, "neg")
+    predicted = np.zeros(probe.shape, dtype=bool) if t is None else probe > t
+    assert (predicted == (p <= alpha)).all()
 
 
 @pytest.mark.parametrize("alpha", [0.005, 0.01, 0.02, 0.05, 0.1, 0.2])
-def test_tail_threshold_roundtrip_pos_side(alpha):
-    """t_neg is the largest reference score with p_pos <= alpha, and it is attained."""
+def test_tail_threshold_pos_side_is_an_exact_decision_boundary(alpha):
+    """Mirror image: `value < t_neg` must agree with `p_pos(value) <= alpha` everywhere."""
     scores, weights = _ref(seed=1)
     t = tail_threshold(scores, weights, "pos", alpha)
-    if t is None:
-        p = weighted_tail_pvalues(np.sort(scores), scores, weights, "pos")
-        assert (p > alpha).all()
-        return
-    assert float(weighted_tail_pvalues(np.array([t]), scores, weights, "pos")[0]) <= alpha
-    above = np.sort(scores[scores > t])
-    if above.size:
-        nxt = above[0]
-        assert float(weighted_tail_pvalues(np.array([nxt]), scores, weights, "pos")[0]) > alpha
+    probe = np.concatenate([scores, (scores[:-1] + scores[1:]) / 2.0,
+                            [scores.min() - 1.0, scores.max() + 1.0]])
+    p = weighted_tail_pvalues(probe, scores, weights, "pos")
+    predicted = np.zeros(probe.shape, dtype=bool) if t is None else probe < t
+    assert (predicted == (p <= alpha)).all()
+
+
+def test_tail_threshold_known_answer_by_hand():
+    """scores {1,2,3}, unit weights, alpha=0.4.  p_neg = 1, 2/3, 1/3 and p_pos = 1/3,
+    2/3, 1, so both boundaries sit at 2: a cell reads pos above 2 and neg below 2."""
+    scores = np.array([1.0, 2.0, 3.0])
+    weights = np.ones(3)
+    assert tail_threshold(scores, weights, "neg", 0.4) == 2.0
+    assert tail_threshold(scores, weights, "pos", 0.4) == 2.0
 
 
 def test_tail_threshold_is_an_actual_reference_score():
-    """Attainment, not interpolation -- this is what licenses the NON-STRICT
-    comparison downstream (a cell exactly on the threshold is a confident call)."""
+    """The boundary is a real reference score, which is what makes the decision
+    reproducible exactly rather than up to an interpolation."""
     scores, weights = _ref(seed=2)
     for side in ("neg", "pos"):
         t = tail_threshold(scores, weights, side, 0.05)
@@ -109,13 +113,14 @@ def test_tail_threshold_zero_weight_reference_returns_none():
     assert tail_threshold(scores, np.zeros(3), "pos", 0.05) is None
 
 
-def test_tail_threshold_unattainable_alpha_returns_none():
-    """alpha below the reference's weight granularity: no score reaches the bound.
-    The threshold view of a marker that is silently never-positive."""
+def test_tail_threshold_returns_none_only_when_the_side_never_fires():
+    """None means THAT SIDE NEVER FIRES. alpha=1 makes every p_neg <= alpha, so no
+    reference score fails and there is no boundary to report."""
     scores = np.array([1.0, 2.0, 3.0, 4.0])
     weights = np.ones(4)
-    # smallest achievable p_neg is 1/4 = 0.25 (only the max score is >= itself)
-    assert tail_threshold(scores, weights, "neg", 0.1) is None
+    assert tail_threshold(scores, weights, "neg", 1.0) is None
+    # A tiny alpha is NOT the none case: a cell above every reference still reads pos.
+    assert tail_threshold(scores, weights, "neg", 0.1) == 4.0
 
 
 def test_tail_threshold_rejects_unknown_side():

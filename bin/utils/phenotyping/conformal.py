@@ -85,7 +85,7 @@ def weighted_tail_pvalues(
 def tail_threshold(
     ref_scores: np.ndarray, ref_weights: np.ndarray, side: str, alpha: float
 ):
-    """Invert `weighted_tail_pvalues`: the score at which the tail first reaches `alpha`.
+    """Invert `weighted_tail_pvalues`: the score at which the tail crosses `alpha`.
 
     THE single owner of the forward rule's inverse. `phenotype_cells.py` calls this on
     the same `MarkerCalibration` object, at the same `chosen_alpha`, that produced the
@@ -93,42 +93,48 @@ def tail_threshold(
     of the decision rule and would diverge, which is exactly the failure `panel_schema.py`
     documents for VALID_STATS.
 
-        side="neg" -> t_pos = inf { q : p_neg(q) <= alpha }   (a cell at or above reads pos)
-        side="pos" -> t_neg = sup { q : p_pos(q) <= alpha }   (a cell at or below reads neg)
+        side="neg" -> t_pos, and a cell reads pos iff  value >  t_pos
+        side="pos" -> t_neg, and a cell reads neg iff  value <  t_neg
 
-    Note the crossing: `t_pos` comes from the NEGATIVE reference and `t_neg` from the
-    POSITIVE one. Swapping them still round-trips within each side, so it is not a
-    mistake the round-trip property can catch on its own.
+    THE COMPARISONS ARE STRICT, and the returned value is the LAST reference score that
+    FAILS the bound -- not the first that satisfies it. Both facts follow from where the
+    step functions jump:
 
-    Both tails are monotone STEP functions over the reference scores, so each bound is
-    ATTAINED at an actual reference score. Returning that score rather than an
-    interpolated quantile is what makes the round-trip exact, and what licenses the
-    NON-STRICT comparison downstream: `p_neg(t_pos) <= alpha` holds by construction, so a
-    cell sitting exactly on the threshold is a confident call, not a free one.
+        p_neg(q) = mass{s >= q}  is non-increasing and LEFT-continuous: at q = s_k the
+        mass still includes s_k, and only drops for q just above it. So
+        {q : p_neg(q) <= alpha} is the OPEN interval (t_pos, inf), whose infimum is the
+        largest reference score still failing.
 
-    Returns `None` when no reference score satisfies the bound -- either the reference
-    carries no weight (matching `weighted_tail_pvalues`' all-1.0 degrade convention) or
-    `alpha` is below the reference's weight granularity. `None` means "no cell can be
-    called on this side at this alpha", which is the threshold view of a marker that is
-    silently never-positive.
+    Taking the first satisfying score instead is an off-by-one that mis-signs every cell
+    lying strictly between two reference scores, which is most of them. `p_pos` is the
+    mirror image (non-decreasing, right-continuous), giving the open interval
+    (-inf, t_neg).
+
+    Note the crossing: `t_pos` inverts the NEGATIVE reference and `t_neg` the POSITIVE
+    one, matching `resolve_sign`'s two one-sided tests. Swapping them still round-trips
+    within each side, so it is not a mistake the round-trip property catches on its own.
+
+    Returns `None` when no reference score fails the bound -- including the zero-weight
+    and empty-reference cases, where `weighted_tail_pvalues` degrades to all-1.0. `None`
+    means THAT SIDE NEVER FIRES, so a marker with both sides `None` is undetermined
+    everywhere, matching the degrade convention.
     """
     if side not in ("neg", "pos"):
         raise ValueError(f"side must be 'neg' or 'pos', got {side!r}")
 
     ref_scores = np.asarray(ref_scores, dtype=float)
     ref_weights = np.asarray(ref_weights, dtype=float)
-    total = float(ref_weights.sum())
-    if total <= 1e-12 or ref_scores.size == 0:
+    if ref_scores.size == 0 or float(ref_weights.sum()) <= 1e-12:
         return None
 
     candidates = np.unique(ref_scores)
     pvals = weighted_tail_pvalues(candidates, ref_scores, ref_weights, side)
-    ok = np.nonzero(pvals <= alpha)[0]
-    if ok.size == 0:
+    failing = np.nonzero(pvals > alpha)[0]
+    if failing.size == 0:
         return None
-    # p_neg is non-increasing in q -> the FIRST satisfying score is the infimum.
-    # p_pos is non-decreasing in q -> the LAST satisfying score is the supremum.
-    return float(candidates[ok[0] if side == "neg" else ok[-1]])
+    # p_neg fails on a PREFIX of the sorted scores -> the boundary is the last failure.
+    # p_pos fails on a SUFFIX -> the boundary is the first failure.
+    return float(candidates[failing[-1] if side == "neg" else failing[0]])
 
 
 def ks_uniform(pvals: np.ndarray) -> float:

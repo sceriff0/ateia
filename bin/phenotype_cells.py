@@ -24,6 +24,7 @@ from phenotyping.conformal import (  # noqa: E402
     conformal_scores,
     ks_uniform,
     resolve_signs,
+    tail_threshold,
 )
 from phenotyping.crc import (  # noqa: E402
     crc_select_alpha,
@@ -72,12 +73,20 @@ def _round6(values: np.ndarray) -> np.ndarray:
 
 
 def _marker_values(df: pd.DataFrame, marker: str, spec: dict):
+    """Return ``(values, missing, column)``.
+
+    ``column`` is the measurement ACTUALLY read, which is a per-patient fact: the bare
+    ``<marker>`` fallback fires only when this patient's merged_quant lacks the
+    compartment key. A consumer comparing a cell against this marker's thresholds has to
+    read that same column, so it travels in the sidecar rather than being rebuilt from
+    the panel -- rebuilding it would silently compare against a different statistic.
+    """
     key = measurement_key(marker, spec["compartment"], spec["statistic"])
     if key in df.columns:
-        return df[key].to_numpy(dtype=float), False
+        return df[key].to_numpy(dtype=float), False, key
     if marker in df.columns:
-        return df[marker].to_numpy(dtype=float), False
-    return np.zeros(len(df)), True  # missing -> degraded
+        return df[marker].to_numpy(dtype=float), False, marker
+    return np.zeros(len(df)), True, key  # missing -> degraded
 
 
 def run_phenotyping(
@@ -126,9 +135,16 @@ def run_phenotyping(
     p_neg: Dict[str, np.ndarray] = {}
     p_pos: Dict[str, np.ndarray] = {}
     calibration_ks: Dict[str, dict] = {}
+    # Retained so the thresholds block below can INVERT the same calibration the
+    # classification used, at the same chosen_alpha. Without this the objects go out of
+    # scope and the only way to recover a threshold is to re-derive it -- a second
+    # implementation of the decision rule.
+    calibrations: Dict[str, object] = {}
+    resolved_measurement: Dict[str, str] = {}
     for m in list(markers_cfg):
-        vals, missing = _marker_values(df, m, markers_cfg[m])
+        vals, missing, column = _marker_values(df, m, markers_cfg[m])
         values[m] = vals
+        resolved_measurement[m] = column
         if missing:
             degraded.append(m)
     for m in list(markers_cfg):
@@ -138,6 +154,7 @@ def run_phenotyping(
             continue
         w_neg_m, w_pos_m = marker_calibration_weights(m, values, references)
         cal = finalize_calibration(m, values[m], w_neg_m, w_pos_m, bins, min_calibration)
+        calibrations[m] = cal
         if cal.degraded and m not in degraded:
             degraded.append(m)
         p_neg[m], p_pos[m] = conformal_scores(values[m], cal)
@@ -297,6 +314,39 @@ def run_phenotyping(
         columns=["id", "markers", "observed", "nominal", "density_corr", "neighbour_contact_corr", "verdict"],
     )
 
+    # Per-marker, per-bin sign thresholds: the INVERSE of the tail this run used, taken
+    # from the same MarkerCalibration objects at the same chosen_alpha. This is the only
+    # place they are computed.
+    thresholds: Dict[str, dict] = {}
+    n_mondrian_bins = len(np.unique(bins))
+    for m in list(markers_cfg):
+        cal = calibrations.get(m)
+        entry = {"measurement": resolved_measurement[m]}
+        if cal is None or cal.degraded:
+            entry.update({"degraded": True, "collapsed": False, "bins": []})
+            thresholds[m] = entry
+            continue
+        # cal.bins is the EFFECTIVE binning -- finalize_calibration zeroes it when a
+        # marker lacks per-bin calibration mass. The CELL carries the pre-collapse
+        # Mondrian bin, so a consumer indexing by density_bin needs this flag to know to
+        # use bin 0 instead. The collapse is per marker: one marker can keep three bins
+        # while another has one, in the same patient.
+        collapsed = bool(len(np.unique(cal.bins)) == 1 and n_mondrian_bins > 1)
+        rows = []
+        for b in sorted({int(x) for x in cal.bins}):
+            neg_s, neg_w = cal.neg_by_bin.get(b, (np.array([]), np.array([])))
+            pos_s, pos_w = cal.pos_by_bin.get(b, (np.array([]), np.array([])))
+            rows.append({
+                "bin": b,
+                "n_cells": int(np.sum(cal.bins == b)),
+                # Crossed on purpose: t_neg inverts the POSITIVE reference and t_pos the
+                # NEGATIVE one, matching resolve_sign's two one-sided tests.
+                "t_neg": tail_threshold(pos_s, pos_w, "pos", chosen_alpha),
+                "t_pos": tail_threshold(neg_s, neg_w, "neg", chosen_alpha),
+            })
+        entry.update({"degraded": False, "collapsed": collapsed, "bins": rows})
+        thresholds[m] = entry
+
     qc = {
         "chosen_alpha": chosen_alpha,
         "alpha_target": alpha_target,
@@ -307,6 +357,7 @@ def run_phenotyping(
         "density_radius": radius,
         "n_bins": int(len(np.unique(bins))),
         "calibration_ks": calibration_ks,
+        "thresholds": thresholds,
     }
     return pheno_df, audit_df, qc
 

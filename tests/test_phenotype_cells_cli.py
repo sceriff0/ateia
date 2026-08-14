@@ -259,3 +259,78 @@ def test_round6_exact_counterexample_via_weighted_tail_pvalues():
     assert correct != wrong_via_numpy
 
     assert pc._round6(p_neg)[0] == correct
+
+
+# ── thresholds in phenotype_qc.json ───────────────────────────────────────────
+# These license dropping per-cell p_neg/p_pos from cells.geojson: a consumer holding
+# (density_bin, raw value, t_neg, t_pos) must reproduce resolve_sign exactly.
+
+
+def test_qc_thresholds_reproduce_resolve_signs(tmp_path):
+    from utils.phenotyping.conformal import resolve_sign
+
+    cfg_path, quant_csv, morph_csv = _make_inputs(tmp_path)
+    pheno_df, _audit, qc = pc.run_phenotyping(
+        str(quant_csv), str(morph_csv), str(cfg_path),
+        alpha_target=0.1, min_calibration=20,
+    )
+    assert "thresholds" in qc
+    quant = pd.read_csv(quant_csv).set_index("label")
+
+    checked = 0
+    for marker, entry in qc["thresholds"].items():
+        assert "measurement" in entry and "collapsed" in entry
+        if entry["degraded"]:
+            assert entry["bins"] == []
+            continue
+        assert entry["measurement"] in quant.columns
+        by_bin = {b["bin"]: b for b in entry["bins"]}
+        values = quant[entry["measurement"]]
+        for _, row in pheno_df.iterrows():
+            b = 0 if entry["collapsed"] else int(row["density_bin"])
+            t = by_bin[b]
+            v = float(values[row["label"]])
+            # Undefined within one export rounding unit of a threshold: the exporter
+            # writes round(value, 4) while the classifier read full precision.
+            near = [x for x in (t["t_neg"], t["t_pos"]) if x is not None]
+            if any(abs(v - x) <= 5e-5 for x in near):
+                continue
+            pos = t["t_pos"] is not None and v > t["t_pos"]
+            neg = t["t_neg"] is not None and v < t["t_neg"]
+            got = "contra" if (pos and neg) else "pos" if pos else "neg" if neg else "free"
+            expected = resolve_sign(
+                float(row[f"p_neg:{marker}"]), float(row[f"p_pos:{marker}"]),
+                qc["chosen_alpha"],
+            )
+            assert got == expected, f"{marker} label={row['label']} v={v} bin={b} t={t}"
+            checked += 1
+    assert checked > 0, "fixture exercised no non-degraded marker"
+
+
+def test_qc_thresholds_record_the_collapsed_flag(tmp_path):
+    """A marker collapsed to one bin must say so: density_bin on the cell is the
+    PRE-collapse Mondrian bin, so indexing a collapsed marker by it reads a bin the
+    marker does not have."""
+    cfg_path, quant_csv, morph_csv = _make_inputs(tmp_path)
+    _pheno, _audit, qc = pc.run_phenotyping(
+        str(quant_csv), str(morph_csv), str(cfg_path),
+        alpha_target=0.1, min_calibration=10_000,
+    )
+    # min_calibration far above the cell count forces every marker to collapse or degrade.
+    for marker, entry in qc["thresholds"].items():
+        assert entry["degraded"] or len(entry["bins"]) == 1, marker
+
+
+def test_qc_thresholds_name_the_column_actually_read(tmp_path):
+    """_marker_values falls back to the bare <marker> column when the compartment key
+    is absent for this patient -- a per-patient fact nothing recorded before."""
+    cfg_path, quant_csv, morph_csv = _make_inputs(tmp_path)
+    quant = pd.read_csv(quant_csv)
+    quant["PanCK"] = quant.pop("PanCK: Cell: Mean")   # force the fallback for one marker
+    quant.to_csv(quant_csv, index=False)
+    _pheno, _audit, qc = pc.run_phenotyping(
+        str(quant_csv), str(morph_csv), str(cfg_path),
+        alpha_target=0.1, min_calibration=20,
+    )
+    assert qc["thresholds"]["PanCK"]["measurement"] == "PanCK"
+    assert qc["thresholds"]["CD45"]["measurement"] == "CD45: Cell: Mean"
