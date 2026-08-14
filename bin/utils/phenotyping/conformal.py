@@ -82,6 +82,55 @@ def weighted_tail_pvalues(
     return mass / total
 
 
+def tail_threshold(
+    ref_scores: np.ndarray, ref_weights: np.ndarray, side: str, alpha: float
+):
+    """Invert `weighted_tail_pvalues`: the score at which the tail first reaches `alpha`.
+
+    THE single owner of the forward rule's inverse. `phenotype_cells.py` calls this on
+    the same `MarkerCalibration` object, at the same `chosen_alpha`, that produced the
+    classification -- re-deriving a threshold from a GMM would be a second implementation
+    of the decision rule and would diverge, which is exactly the failure `panel_schema.py`
+    documents for VALID_STATS.
+
+        side="neg" -> t_pos = inf { q : p_neg(q) <= alpha }   (a cell at or above reads pos)
+        side="pos" -> t_neg = sup { q : p_pos(q) <= alpha }   (a cell at or below reads neg)
+
+    Note the crossing: `t_pos` comes from the NEGATIVE reference and `t_neg` from the
+    POSITIVE one. Swapping them still round-trips within each side, so it is not a
+    mistake the round-trip property can catch on its own.
+
+    Both tails are monotone STEP functions over the reference scores, so each bound is
+    ATTAINED at an actual reference score. Returning that score rather than an
+    interpolated quantile is what makes the round-trip exact, and what licenses the
+    NON-STRICT comparison downstream: `p_neg(t_pos) <= alpha` holds by construction, so a
+    cell sitting exactly on the threshold is a confident call, not a free one.
+
+    Returns `None` when no reference score satisfies the bound -- either the reference
+    carries no weight (matching `weighted_tail_pvalues`' all-1.0 degrade convention) or
+    `alpha` is below the reference's weight granularity. `None` means "no cell can be
+    called on this side at this alpha", which is the threshold view of a marker that is
+    silently never-positive.
+    """
+    if side not in ("neg", "pos"):
+        raise ValueError(f"side must be 'neg' or 'pos', got {side!r}")
+
+    ref_scores = np.asarray(ref_scores, dtype=float)
+    ref_weights = np.asarray(ref_weights, dtype=float)
+    total = float(ref_weights.sum())
+    if total <= 1e-12 or ref_scores.size == 0:
+        return None
+
+    candidates = np.unique(ref_scores)
+    pvals = weighted_tail_pvalues(candidates, ref_scores, ref_weights, side)
+    ok = np.nonzero(pvals <= alpha)[0]
+    if ok.size == 0:
+        return None
+    # p_neg is non-increasing in q -> the FIRST satisfying score is the infimum.
+    # p_pos is non-decreasing in q -> the LAST satisfying score is the supremum.
+    return float(candidates[ok[0] if side == "neg" else ok[-1]])
+
+
 def ks_uniform(pvals: np.ndarray) -> float:
     """One-sample Kolmogorov–Smirnov distance of ``pvals`` to Uniform(0,1).
 
