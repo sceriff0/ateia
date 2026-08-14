@@ -165,7 +165,18 @@ from _code_view import code_view as _code_view
 from _code_view import line_of as _line_of
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SCAN_DIRS = ("subworkflows", "workflows", "modules", "tests")
+# (directory, glob). lib/ carries `.groovy`, and it is scanned for the same reason
+# tests/test_resume_determinism.py scans it: the per-patient grouping ritual moved into
+# lib/PatientGroup.groovy, so a scan restricted to *.nf would have quietly stopped
+# covering four of the seven groupKey sites it was written for -- a guard whose glob no
+# longer reaches the code is this file's own documented failure mode.
+SCAN_DIRS = (
+    ("subworkflows", "*.nf"),
+    ("workflows", "*.nf"),
+    ("modules", "*.nf"),
+    ("tests", "*.nf"),
+    ("lib", "*.groovy"),
+)
 
 _IDENT = r"[A-Za-z_]\w*"
 _OPEN = "([{"
@@ -269,8 +280,8 @@ def _group_key_sites() -> list[dict]:
     which case there is nothing left to audit inside a closure.
     """
     sites: list[dict] = []
-    for d in SCAN_DIRS:
-        for path in sorted((REPO_ROOT / d).rglob("*.nf")):
+    for d, pattern in SCAN_DIRS:
+        for path in sorted((REPO_ROOT / d).rglob(pattern)):
             src = _code_view(path)
             for m in re.finditer(r"\bgroupKey\s*\(", src):
                 rel = path.relative_to(REPO_ROOT)
@@ -411,7 +422,12 @@ def test_group_key_sites_are_found():
     sites = _group_key_sites()
     files = sorted({str(s["path"]) for s in sites})
     assert files == [
-        "subworkflows/local/adapters/tiled_adapter.nf",
+        # THE grouping. The four sized per-patient/per-slide fan-ins (registration,
+        # both quantify_markers groupings, the tiled control-point gather) each used to
+        # build their own groupKey; they call this one now, and the unwrap it performs
+        # is the only one standing between four downstream join(by:)/combine(by:) call
+        # sites and an asymmetric GroupKey key.
+        "lib/PatientGroup.groovy",
         # The one grouping every checkpoint CSV goes through. Its size hint is what
         # lets a finished patient's rows be published while other patients are still
         # running, instead of at channel close -- so a leak here would not merely
@@ -419,12 +435,12 @@ def test_group_key_sites_are_found():
         "subworkflows/local/checkpoint_writer.nf",
         # Two sites: the reg_qc=2 metrics and the per-cell residuals, each grouped
         # per patient before EXPORT_SPATIALDATA. They replaced a run-wide collect()
-        # that broadcast every patient's QC into every patient's .zarr.
+        # that broadcast every patient's QC into every patient's .zarr. Both size
+        # themselves `images_count - 1`, which PatientGroup's `size:` (a meta KEY, read
+        # as-is) cannot express, so they are still written out here.
         "subworkflows/local/postprocess.nf",
-        "subworkflows/local/quantify_markers.nf",
-        "subworkflows/local/registration.nf",
     ], f"groupKey() call sites moved; scan found {files}"
-    assert len(sites) == 7, f"expected 7 groupKey() sites, found {len(sites)}"
+    assert len(sites) == 4, f"expected 4 groupKey() sites, found {len(sites)}"
 
 
 def test_group_key_never_escapes_its_group_tuple():

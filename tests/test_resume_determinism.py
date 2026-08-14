@@ -33,11 +33,17 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 NF_DIRS = ["subworkflows", "workflows", "modules"]
+# lib/ is scanned too, and not as a formality: the per-patient grouping ritual moved
+# into lib/PatientGroup.groovy, so a scan restricted to *.nf would leave the ONE place
+# groupTuple is now called unguarded -- this file's own documented failure mode (a guard
+# whose glob no longer matches the code it names) applied to the guard itself.
+LIB_DIR = "lib"
 
 
 def _nf_files():
     for d in NF_DIRS:
         yield from sorted((ROOT / d).rglob("*.nf"))
+    yield from sorted((ROOT / LIB_DIR).glob("*.groovy"))
 
 
 def _strip_comments(text: str) -> str:
@@ -72,24 +78,38 @@ def test_group_tuple_sort_option_is_never_used():
 
 # site -> (file, a regex the file MUST match, why)
 ORDERED_FAN_INS = {
+    # The four sized per-patient/per-slide fan-ins no longer each carry a transpose:
+    # they call lib/PatientGroup.groovy, which does the pairing and the sorting once.
+    # So there are two things to pin, and both are here: that PatientGroup still pairs
+    # BEFORE it sorts, and that each site still hands it a sort key. A site that
+    # dropped `sortBy` would not silently revert to arrival order -- PatientGroup
+    # refuses to build without it -- but the sort key it passes is the part that is
+    # site-specific and reviewable, and swapping it for something that ties is the
+    # remaining way to get arrival order back.
+    "PatientGroup: pairs before it sorts": (
+        "lib/PatientGroup.groovy",
+        r"\[metas,\s*payloads\]\.transpose\(\)\.toSorted",
+        "The one implementation all four sized fan-ins now share. Sorting the two "
+        "lists independently re-pairs every meta with the wrong payload.",
+    ),
     "registration: REGISTER's slide list": (
         "subworkflows/local/registration.nf",
-        r"\[metas,\s*files\]\.transpose\(\)\.toSorted",
+        r"sortBy\s*:\s*\{\s*meta,\s*_file\s*->\s*meta\.id\s*\}",
         "REGISTER receives preproc_files/all_metas positionally; arrival order changed its hash.",
     ),
     "quantify_markers: MERGE_AND_PYRAMID's tiff list": (
         "subworkflows/local/quantify_markers.nf",
-        r"tiffs_unordered\.toSorted",
+        r"sortBy\s*:\s*\{\s*_meta,\s*tiff\s*->\s*tiff\.name\s*\}",
         "MERGE_AND_PYRAMID stages the tiff list positionally.",
     ),
     "quantify_markers: MERGE_QUANT_CSVS' csv list and metas[0]": (
         "subworkflows/local/quantify_markers.nf",
-        r"\[metas_unordered,\s*csvs_unordered\]\.transpose\(\)\s*\n?\s*\.toSorted",
+        r"sortBy\s*:\s*\{\s*meta,\s*_csv\s*->\s*meta\.channel_name\s*\}",
         "metas[0] fed channels/is_reference into MERGE_QUANT_CSVS and both exports.",
     ),
     "tiled_adapter: TILED_SOLVE's control list and metas[0]": (
         "subworkflows/local/adapters/tiled_adapter.nf",
-        r"\[metas,\s*controls\]\.transpose\(\)\.toSorted",
+        r"sortBy\s*:\s*\{\s*_meta,\s*control\s*->\s*control\.name\s*\}",
         "Same metas[0] shape as quantify_markers, on the STARE backend.",
     ),
     # Replaced test_postprocess_reg_qc_collects_are_sorted, which regexed

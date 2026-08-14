@@ -54,33 +54,21 @@ include { TILED_STITCH   } from '../../../modules/local/tiled_stitch'
 // Stable per-moving-slide join key (patient + its channel set).
 def slideKey(meta) { "${meta.patient_id}#${meta.channels.toSorted().join('_')}" }
 
-// The control-point gather (below) must size its groupKey with the real tile count so each
-// slide's group can close as soon as ITS OWN tiles have arrived, instead of waiting for the
-// whole upstream channel to close (every tile of every slide of every patient). Unlike the
-// three existing groupKey call sites in this repo, this one must NOT degrade to a bare,
-// unsized key when the count is missing -- that silently reverts to the full-barrier behaviour
-// this fix removes, with no warning. Fail loudly instead.
-def requireTilesCount(meta) {
-    if (meta.tiles_count == null) {
-        error "TILED_ADAPTER: tiles_count missing from meta for ${slideKey(meta)} -- cannot size the control-point gather"
-    }
-    meta.tiles_count
-}
-
 // Counts a tile-plan CSV's data rows: total non-blank lines minus the header. Extracted (not
 // left inline in the ch_tile_counts closure below) so the counting logic itself is unit-testable
 // in isolation -- this is the number that ends up sizing the groupKey at the gather, so an
 // off-by-one here either hangs the pipeline (count too high, the group never closes) or
 // truncates the control points TILED_SOLVE fits its mesh from (count too low, the group closes
 // early on a silently mis-registered slide). Neither failure mode looks like a crash, which is
-// exactly why the count itself -- not just the null-check in requireTilesCount -- needs direct
-// coverage.
+// exactly why the count itself -- not just PatientGroup's mandatory-size check at the gather --
+// needs direct coverage.
 def countTileRows(csv) {
     csv.readLines().findAll { it.trim() }.size() - 1
 }
 
-// Fails loudly (naming the slide) on an empty tile plan, mirroring requireTilesCount's
-// never-silently-degrade contract for the other half of the count derivation.
+// Fails loudly (naming the slide) on an empty tile plan, mirroring PatientGroup's
+// never-silently-degrade contract for the other half of the count derivation: the gather
+// refuses a MISSING tiles_count, this refuses a tile plan that would derive one of zero.
 def requirePositiveTileCount(n, meta) {
     if (n < 1) error "TILED_COARSE emitted no tiles for ${slideKey(meta)} (n=${n})"
     n
@@ -133,26 +121,21 @@ workflow TILED_ADAPTER {
 
     TILED_REG_TILE(ch_tile_items)
 
-    // Gather every tile's control point back per slide. groupKey(slideKey, tiles_count)
-    // lets a slide's group close -- and TILED_SOLVE start -- as soon as that slide's own
-    // tiles have all arrived, instead of the bare groupTuple(by: 0) this replaces, which
-    // buffered every key until the WHOLE upstream channel closed (i.e. until every tile of
-    // every slide of every patient had finished). requireTilesCount errors rather than
-    // silently falling back to an unsized key if the count is ever missing.
-    ch_controls = TILED_REG_TILE.out.control
-        .map { meta, c -> tuple(groupKey(slideKey(meta), requireTilesCount(meta)), meta, c) }
-        .groupTuple(by: 0)
-        .map { _k, metas, controls ->
-            // CANONICAL ORDER -- same defect and same fix as
-            // subworkflows/local/quantify_markers.nf's marker grouping. groupTuple
-            // emits in ARRIVAL order, so both the control list reaching TILED_SOLVE
-            // (hashed positionally, so -resume missed) and `metas[0]` were whichever
-            // TILE finished first. Pair FIRST, then sort the pairs; never
-            // `groupTuple(sort:)`, which orders each list independently and re-pairs
-            // meta with the wrong control file.
-            def paired = [metas, controls].transpose().toSorted { it[1].name }
-            tuple(paired[0][0], paired.collect { it[1] })
-        }
+    // Gather every tile's control point back per slide. The size is the slide's own
+    // tile count, so its group closes -- and TILED_SOLVE starts -- as soon as THAT
+    // slide's tiles have arrived, instead of waiting for every tile of every slide of
+    // every patient. This is the one gather in the pipeline whose unit is a slide
+    // rather than a patient, hence byKey rather than byPatient. The mandatory-size
+    // rule that used to live here as `requireTilesCount` is lib/PatientGroup.groovy's
+    // now, and applies to every grouping instead of only this one.
+    ch_controls = PatientGroup.byKey(
+            TILED_REG_TILE.out.control,
+            name  : 'TILED_ADAPTER: the per-slide control-point gather feeding TILED_SOLVE',
+            size  : 'tiles_count',
+            key   : { meta -> slideKey(meta) },
+            sortBy: { _meta, control -> control.name },
+        )
+        .map { _k, pairs -> tuple(pairs[0][0], pairs.collect { pair -> pair[1] }) }
 
     ch_solve_in = ch_controls
         .map { meta, controls -> tuple(slideKey(meta), meta, controls) }

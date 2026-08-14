@@ -64,64 +64,22 @@ workflow REGISTRATION {
     // ========================================================================
     // STEP 2: GROUP BY PATIENT AND IDENTIFY REFERENCES
     // ========================================================================
-    // This is common preparation needed by all methods
     // Output: [patient_id, reference_item, all_items]
     //   where reference_item = [meta, file]
     //   and all_items = [[meta1, file1], [meta2, file2], ...]
     //
-    // Use groupKey for streaming - emits as soon as images_count items collected
-    // This enables patient-level parallelism (Patient A processes while Patient B preprocesses)
-
-    ch_grouped = ch_images
-        .map { meta, file ->
-            def key = meta.images_count ? groupKey(meta.patient_id, meta.images_count) : meta.patient_id
-            [key, meta, file]
-        }
-        .groupTuple()
-        .map { group_key, metas, files ->
-            // UNWRAP THE groupKey. `groupKey(id, size)` above is a STREAMING SIZE HINT,
-            // nothing more -- but groupTuple() emits the nextflow.extension.GroupKey
-            // OBJECT itself as element 0, and it used to travel on from here as the
-            // patient id: into REGISTER's `val(patient_id)` and back out on
-            // REGISTER.out.registrar / .stage_checkpoint. GroupKey delegates hashCode()
-            // to the id it wraps but its equals() is ASYMMETRIC --
-            // `groupKey('P001',2).equals('P001')` is true, `'P001'.equals(groupKey(...))`
-            // is false -- so a HashMap lookup matches in one direction only.
-            //
-            // That is a silent, ~1-run-in-2-under-load data loss, not a cosmetic issue.
-            // seg_qc.nf keys its GeoJSON tuples off the plain String meta.patient_id and
-            // combines them with the transform, whose key was this GroupKey.
-            // CombineOp.emit() stores each side in a HashMap under the `by` values and
-            // crosses with what the other side has already stored, so WHICHEVER SIDE
-            // ARRIVES FIRST decides the stored key type: GeoJSON first -> stored under
-            // String, and the later GroupKey lookup hits; transform first -> stored under
-            // GroupKey, and the later String lookup MISSES and the patient's whole
-            // registration QC is dropped with the run still exiting 0.
-            //
-            // The id is a plain String everywhere else it is used (meta.patient_id, from
-            // the samplesheet), so it must be a plain String here too. Unwrapped the
-            // moment the group exists -- the hint has done its job by then.
-            // tests/test_group_key_unwrapped.py fails if any groupKey escapes its
-            // grouping again.
-            def patient_id = group_key.toString()
-
-            // CANONICAL ORDER. groupTuple() emits in ARRIVAL order -- whichever slide
-            // finished preprocessing first -- and everything below carries that order
-            // into REGISTER as `preproc_files` / `all_metas`, which Nextflow hashes
-            // POSITIONALLY. So an identical rerun produced a different task hash and
-            // -resume missed on REGISTER, cascading a re-run of the entire downstream
-            // pipeline. Sorting by meta.id makes the order a function of the data.
-            //
-            // SORT AFTER transpose(), NEVER `groupTuple(sort:)`. groupTuple's own sort
-            // orders each grouped list INDEPENDENTLY, so metas and files are sorted by
-            // their own natural orders and silently re-paired:
-            //     in:  ['k','zeta','a.txt'], ['k','alpha','z.txt']
-            //     groupTuple(sort:true) -> [k, [alpha, zeta], [a.txt, z.txt]]
-            //                                   ^ alpha now pairs with a.txt -- WRONG
-            // Pairing first and sorting the pairs is the only safe form.
-            // subworkflows/local/add_cycle.nf:334 is the existing precedent.
-            def items = [metas, files].transpose().toSorted { it[0].id }
-
+    // The sized groupKey, remainder:true, the GroupKey unwrap and the canonical
+    // ordering are lib/PatientGroup.groovy's -- read its header for what each one
+    // prevents. What is local to this site is only WHICH count sizes the group
+    // (images_count: one item per slide) and WHAT orders it (meta.id, the
+    // patient-prefixed source-image stem, which is unique per slide).
+    ch_grouped = PatientGroup.byPatient(
+            ch_images,
+            name  : 'REGISTRATION: the per-patient slide group feeding REGISTER',
+            size  : 'images_count',
+            sortBy: { meta, _file -> meta.id },
+        )
+        .map { patient_id, items ->
             // The reference was RESOLVED at samplesheet-read time (INPUT_CHECK, via
             // CsvUtils.resolveReferenceRows) and travels in meta.is_reference. This is
             // a guard on that invariant, not a fallback: it used to promote items[0]
