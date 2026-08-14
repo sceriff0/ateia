@@ -61,8 +61,16 @@ nextflow_workflow {
         then {
             assertAll(
                 { assert workflow.success },
+                // `=~ /(^|:)REGISTER\b/`, not `.contains('REGISTER')`: the
+                // substring also matches this subworkflow's OWN name and every task
+                // nested under it -- REGISTER_PATIENT:REGISTERED_CHECKPOINT:
+                // CHECKPOINT_WRITER:WRITE_CHECKPOINT_FRAGMENT among them -- so it
+                // counted the checkpoint writer as a registration. The word boundary
+                // rejects REGISTER_PATIENT and REGISTERED_CHECKPOINT (both continue
+                // with a word character) and keeps only the VALIS process itself.
+                // Same form the tiled case below already used.
                 { assert workflow.trace.tasks().findAll {
-                    it.name.contains('REGISTER')
+                    it.name =~ /(^|:)REGISTER\b/
                 }.size() == 1 },
                 { assert workflow.trace.tasks().findAll {
                     it.name.contains('TILED_')
@@ -142,7 +150,7 @@ nextflow_workflow {
                 { assert workflow.success },
                 // Nothing registered — VALIS crashes on a lone image.
                 { assert workflow.trace.tasks().findAll {
-                    it.name.contains('REGISTER')
+                    it.name =~ /(^|:)REGISTER\b/
                 }.size() == 0 },
                 // ...but the slide still reaches the registered stream, and the
                 // checkpoint still records it (at its PREPROCESSED/native location,
