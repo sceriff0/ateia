@@ -412,10 +412,14 @@ def test_group_key_sites_are_found():
     files = sorted({str(s["path"]) for s in sites})
     assert files == [
         "subworkflows/local/adapters/tiled_adapter.nf",
+        # Two sites: the reg_qc=2 metrics and the per-cell residuals, each grouped
+        # per patient before EXPORT_SPATIALDATA. They replaced a run-wide collect()
+        # that broadcast every patient's QC into every patient's .zarr.
+        "subworkflows/local/postprocess.nf",
         "subworkflows/local/quantify_markers.nf",
         "subworkflows/local/registration.nf",
     ], f"groupKey() call sites moved; scan found {files}"
-    assert len(sites) == 4, f"expected 4 groupKey() sites, found {len(sites)}"
+    assert len(sites) == 6, f"expected 6 groupKey() sites, found {len(sites)}"
 
 
 def test_group_key_never_escapes_its_group_tuple():

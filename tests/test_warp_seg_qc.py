@@ -674,3 +674,67 @@ def test_reg_qc2_tiled_cli_scores_through_a_manifest_without_a_jvm(tmp_path):
     assert s["refined"]["displacement_px_p50"] == pytest.approx(0.0, abs=1e-9)
     assert s["rigid"]["iou_mean"] < s["refined"]["iou_mean"]
     assert rec["matching"]["n_pairs"] == 6
+
+
+# ── the per-cell residual CSV names its patient ────────────────────────────────
+def test_per_cell_csv_records_the_patient_id(tmp_path):
+    """Every residual row names the patient it belongs to.
+
+    The residual CSV is the ONLY reg_qc=2 artifact that leaves this script without
+    patient identity on it — the JSON record has carried `patient_id` since it was
+    written. Downstream, EXPORT_SPATIALDATA joins these rows onto a single
+    patient's cell centroids by raw reference-frame pixel coordinate; every
+    patient's reference frame is its own grid rooted at (0, 0), so a row from
+    another patient joins just as happily and just as meaninglessly. Recovering
+    the patient from the filename would work only because
+    modules/local/warp_seg_qc.nf happens to prefix it; identity belongs in the
+    data.
+    """
+    import csv as _csv
+
+    ref = _write(tmp_path, "ref.geojson", _grid_fc())
+    mov = _write(tmp_path, "mov.geojson", _grid_fc(dx=2.0))
+    out_f = tmp_path / "P001_mov_seg_qc.json"
+    per_cell = tmp_path / "P001_mov_reg_residuals.csv"
+
+    wsq.write_report(
+        None,
+        REF,
+        MOV,
+        ref,
+        mov,
+        str(out_f),
+        patient_id="P001",
+        warp=_shift_warp({STAGE_NATIVE: 0.0, STAGE_RIGID: -1.0, STAGE_MICRO: -2.0}),
+        stages=[STAGE_NATIVE, STAGE_RIGID, STAGE_MICRO],
+        per_cell_csv=str(per_cell),
+    )
+
+    with open(per_cell, newline="") as fh:
+        rows = list(_csv.DictReader(fh))
+    assert rows, "the fixture pairs cells, so the CSV must have data rows"
+    assert list(rows[0]) == [
+        "patient_id",
+        "moving",
+        "ref_x",
+        "ref_y",
+        "residual_px",
+        "stage",
+    ]
+    assert {r["patient_id"] for r in rows} == {"P001"}
+
+
+def test_per_cell_csv_header_names_the_patient_even_with_no_pairs(tmp_path):
+    """A slide that paired nothing still writes the full header.
+
+    The consumer distinguishes "ran, found nothing" from "never ran" by the file
+    existing with its header; a header that changes shape when the table is empty
+    would make that distinction unreadable.
+    """
+    per_cell = tmp_path / "empty_reg_residuals.csv"
+    n = wsq.write_per_cell_csv(str(per_cell), None, "mov1", patient_id="P001")
+    assert n == 0
+    assert (
+        per_cell.read_text().strip()
+        == "patient_id,moving,ref_x,ref_y,residual_px,stage"
+    )

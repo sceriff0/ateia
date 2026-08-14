@@ -104,6 +104,7 @@ tests/testdata/P001_ref.ome.tiff
 tests/testdata/P001_mov1.ome.tiff
 tests/testdata/P001_mov2.ome.tiff
 tests/testdata/P002_ref.ome.tiff
+tests/testdata/P002_mov1.ome.tiff
 tests/testdata/P001_cell_mask.npy
 tests/testdata/P001_cell_mask.tif
 tests/testdata/P002_cell_mask.npy
@@ -125,6 +126,7 @@ tests/testdata/tiles_12_rows_trailing_blank.csv
 tests/testdata/tiles_12_rows_blank_interspersed.csv
 tests/testdata/tiles_header_only.csv
 tests/testdata/test_input.csv
+tests/testdata/test_input_two_patients.csv
 tests/testdata/sample_merged_quant.csv
 tests/testdata/empty_samplesheet.csv
 tests/testdata/single_sample.csv

@@ -147,13 +147,27 @@ create_multichannel_image(
     rng=_img_rng,
 )
 
-# Patient P002 - Single slide (reference only); its own shared anatomy.
+# Patient P002 - reference + one moving slide; its own shared anatomy.
+#
+# P002_mov1 exists so the repo has a MULTI-PATIENT samplesheet whose every patient
+# reaches registration and the reg_qc=2 seg-QC. Until it did, `test_input.csv` was
+# one patient and two slides, and every cross-patient defect in the run-wide QC
+# fan-in (see EXPORT_SPATIALDATA's per-patient join in subworkflows/local/
+# postprocess.nf) was unreachable from the test suite: with one patient, "collect
+# every QC file in the run" and "collect this patient's QC files" are the same set.
 p002_anatomy = make_anatomy((128, 128), n_cells=40, rng=_img_rng)
 create_multichannel_image(
     OUT_DIR / "P002_ref.ome.tiff",
     p002_anatomy,
     channel_names=["DAPI", "PANCK", "SMA"],
     shift=(0, 0),
+    rng=_img_rng,
+)
+create_multichannel_image(
+    OUT_DIR / "P002_mov1.ome.tiff",
+    p002_anatomy,
+    channel_names=["DAPI", "CD3", "CD8"],
+    shift=(4, -6),
     rng=_img_rng,
 )
 
@@ -411,20 +425,33 @@ with open(OUT_DIR / "test_input.csv", "w") as f:
     f.write(f"P001,{TESTDATA_ABS}/P001_mov1.ome.tiff,false,DAPI|CD3|CD8\n")
 print("  Created test_input.csv for test profile")
 
+# The multi-patient counterpart of test_input.csv. TWO patients, each with a
+# reference and one moving slide, so every per-patient fan-in in the pipeline is
+# exercised with something to get wrong. test_input.csv stays single-patient (it
+# is what -profile test runs, and doubling it doubles every CI stub run); this one
+# is opted into with `--input`.
+with open(OUT_DIR / "test_input_two_patients.csv", "w") as f:
+    f.write("patient_id,path_to_file,is_reference,channels\n")
+    f.write(f"P001,{TESTDATA_ABS}/P001_ref.ome.tiff,true,DAPI|PANCK|SMA\n")
+    f.write(f"P001,{TESTDATA_ABS}/P001_mov1.ome.tiff,false,DAPI|CD3|CD8\n")
+    f.write(f"P002,{TESTDATA_ABS}/P002_ref.ome.tiff,true,DAPI|PANCK|SMA\n")
+    f.write(f"P002,{TESTDATA_ABS}/P002_mov1.ome.tiff,false,DAPI|CD3|CD8\n")
+print("  Created test_input_two_patients.csv (multi-patient fixture)")
+
 print("\n" + "=" * 70)
 print("✓ Test data generation complete!")
 print("=" * 70)
 print(f"\nGenerated files in {OUT_DIR}:")
 print("\nValid data:")
 print("  - P001_ref.ome.tiff, P001_mov1.ome.tiff, P001_mov2.ome.tiff")
-print("  - P002_ref.ome.tiff")
+print("  - P002_ref.ome.tiff, P002_mov1.ome.tiff")
 print("  - P001_cell_mask.npy, P002_cell_mask.npy")
 print("  - valid_preprocessing.csv")
 print("  - valid_checkpoint_registration.csv")
 print("  - valid_checkpoint_segmented.csv")
 print("  - valid_checkpoint_segmented_no_compartments.csv")
 print("  - valid_checkpoint_postprocessing.csv")
-print("  - test_input.csv")
+print("  - test_input.csv, test_input_two_patients.csv")
 print("\nInvalid data (for validation testing):")
 print("  - invalid_multi_ref.csv")
 print("  - invalid_no_ref.csv")
@@ -483,14 +510,14 @@ print("=" * 70)
 print(f"\nGenerated files in {OUT_DIR}:")
 print("\nValid data:")
 print("  - P001_ref.ome.tiff, P001_mov1.ome.tiff, P001_mov2.ome.tiff")
-print("  - P002_ref.ome.tiff")
+print("  - P002_ref.ome.tiff, P002_mov1.ome.tiff")
 print("  - P001_cell_mask.npy, P002_cell_mask.npy")
 print("  - valid_preprocessing.csv")
 print("  - valid_checkpoint_registration.csv")
 print("  - valid_checkpoint_segmented.csv")
 print("  - valid_checkpoint_segmented_no_compartments.csv")
 print("  - valid_checkpoint_postprocessing.csv")
-print("  - test_input.csv")
+print("  - test_input.csv, test_input_two_patients.csv")
 print("\nInvalid data (for validation testing):")
 print("  - invalid_multi_ref.csv")
 print("  - invalid_no_ref.csv")
@@ -716,14 +743,18 @@ with open(OUT_DIR / "sample_reg_qc.json", "w") as f:
     json.dump(seg_qc_record, f, indent=2)
 print("  Created sample_reg_qc.json")
 
+# Header must track bin/warp_seg_qc.py's PER_CELL_COLUMNS. `patient_id` leads it:
+# ref_x/ref_y are pixels in ONE patient's reference frame and mean nothing in
+# another's, so EXPORT_SPATIALDATA refuses rows that name a different patient than
+# the store it is building.
 with open(OUT_DIR / "sample_reg_residuals.csv", "w") as f:
-    f.write("moving,ref_x,ref_y,residual_px,stage\n")
+    f.write("patient_id,moving,ref_x,ref_y,residual_px,stage\n")
     rng_res = np.random.default_rng(7)
     for i in range(10):
         x = round(float(rng_res.uniform(10, 118)), 4)
         y = round(float(rng_res.uniform(10, 118)), 4)
         d = round(float(rng_res.uniform(0.2, 2.5)), 6)
-        f.write(f"P001_mov1.ome.tiff,{x},{y},{d},micro\n")
+        f.write(f"P001,P001_mov1.ome.tiff,{x},{y},{d},micro\n")
 print("  Created sample_reg_residuals.csv")
 
 # =============================================================================
