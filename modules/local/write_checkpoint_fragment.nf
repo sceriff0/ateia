@@ -50,21 +50,32 @@ process WRITE_CHECKPOINT_FRAGMENT {
     task.ext.when == null || task.ext.when
 
     script:
-    // Column zero, deliberately: `body` is a multi-line block and every line after the
-    // first lands verbatim in .command.sh. Interpolating it at an indented position
-    // would indent only its FIRST line and corrupt the CSV. Nextflow's stripIndent()
-    // then finds a minimum indent of 0 and strips nothing, which is what puts the
-    // quoted heredoc terminator at column 0 where bash needs it. Same rule as
-    // lib/ProcessEnvelope's returned blocks.
+    // THE WHOLE SCRIPT SITS AT COLUMN ZERO, and that is not a style choice.
+    //
+    // `body` is a multi-line block whose every line after the first lands verbatim in
+    // .command.sh, so interpolating it at an indented position would indent only its
+    // FIRST line and corrupt the CSV. It therefore has to start at column 0 -- and
+    // that drives the MINIMUM indentation of the whole script to 0, so Nextflow's
+    // stripIndent() strips nothing and every other line keeps exactly the indentation
+    // written here.
+    //
+    // Which is why the versions heredoc below is at column 0 too. It was written
+    // indented, copying every other module in the repo, and those modules are safe only
+    // because stripIndent() removes their indentation before bash sees it. Here it does
+    // not: `<<-END_VERSIONS` strips leading TABS, never spaces, so the indented
+    // terminator never terminated, `cat` ran to EOF, and every published
+    // collated_versions.yml carried four entries that were indented under the previous
+    // process and ended with a literal END_VERSIONS line. Caught by this module's own
+    // nf-test reading versions.yml's contents, which is the only thing that ever looks.
     def body = Checkpoint.fragment(step, rows)
     """
 cat > ${Layout.checkpointFragmentName(patient_id)} <<'CHECKPOINT_FRAGMENT'
 ${body}CHECKPOINT_FRAGMENT
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        bash: \$(bash --version | head -n1 | sed 's/GNU bash, version //')
-    END_VERSIONS
+cat <<END_VERSIONS > versions.yml
+"${task.process}":
+    bash: \$(bash --version | head -n1 | sed 's/GNU bash, version //')
+END_VERSIONS
     """
 
     stub:
@@ -77,9 +88,9 @@ ${body}CHECKPOINT_FRAGMENT
 cat > ${Layout.checkpointFragmentName(patient_id)} <<'CHECKPOINT_FRAGMENT'
 ${body}CHECKPOINT_FRAGMENT
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        bash: stub
-    END_VERSIONS
+cat <<END_VERSIONS > versions.yml
+"${task.process}":
+    bash: stub
+END_VERSIONS
     """
 }

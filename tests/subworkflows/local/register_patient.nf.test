@@ -76,6 +76,18 @@ nextflow_workflow {
                     it.name.contains('TILED_')
                 }.size() == 0 },
                 { assert workflow.out.checkpoint_csv },
+                // The checkpoint writer's versions row must reach THIS subworkflow's
+                // versions emit. It is the only CHECKPOINT_WRITER instance a
+                // `--start registration --stop registration` run has, and this emit is
+                // the only route out: preprocess/segmentation/postprocess each mix their
+                // own instance in, so a registration-only run was the one shape that
+                // published a QC report missing the process entirely. Version tracking
+                // is a stated repo invariant, and a dangling emit is how it gets lost
+                // for exactly one entry point.
+                { assert workflow.out.versions.any {
+                    new File(it.toString()).text.contains('WRITE_CHECKPOINT_FRAGMENT') },
+                    "REGISTER_PATIENT.out.versions does not carry the checkpoint " +
+                    "writer's row: " + workflow.out.versions },
             )
         }
     }

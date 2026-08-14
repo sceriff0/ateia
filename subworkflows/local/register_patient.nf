@@ -48,7 +48,8 @@
         transform_by_slide [meta, manifest] — one per moving slide (empty under VALIS)
         stage_checkpoint   [patient_id, reg_stage_checkpoint/] (VALIS, reg_qc>=2 only)
         intrinsic_tre      the method's own TRE estimate (VALIS CSV / STARE JSON)
-        size_logs / versions — the adapter's, unaggregated
+        size_logs        — the adapter's, unaggregated
+        versions         — the adapter's, PLUS the checkpoint writer's
 
     Those last six are passed through from the adapter UNRENAMED. Both adapters emit the
     same vocabulary and fill any slot their method lacks with `Channel.empty()` (the
@@ -148,5 +149,12 @@ workflow REGISTER_PATIENT {
     stage_checkpoint   = ch_adapter.stage_checkpoint
     intrinsic_tre      = ch_adapter.intrinsic_tre
     size_logs          = ch_adapter.size_logs
-    versions           = ch_adapter.versions
+    // The checkpoint writer's versions row is mixed in HERE, not left dangling on
+    // REGISTERED_CHECKPOINT.out. Every other caller of CHECKPOINT_WRITER
+    // (preprocess/segmentation/postprocess) mixes it into its own versions stream; this
+    // path did not, so a `--start registration --stop registration` run -- the only run
+    // in which this is the sole CHECKPOINT_WRITER instance -- published a QC report
+    // missing the row. `.first()` because one row per process is what the report wants,
+    // not one per patient; same as every other version mix in this repo.
+    versions           = ch_adapter.versions.mix(REGISTERED_CHECKPOINT.out.versions.first())
 }

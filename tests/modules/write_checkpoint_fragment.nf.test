@@ -45,7 +45,29 @@ nextflow_process {
                     'P001,/out/P001/registered/registered_slides/a.ome.tiff,true,DAPI|PANCK|SMA',
                     'P001,/out/P001/registered/registered_slides/b.ome.tiff,false,DAPI|CD3|CD8'
                 ] },
-                { assert process.out.versions }
+                { assert process.out.versions },
+                // versions.yml must be a VALID two-line document: the process key at
+                // column zero, one indented tool row, and nothing else.
+                //
+                // This is not defensive padding. Nextflow applies stripIndent() to the
+                // finished script, and this module interpolates the fragment body at
+                // COLUMN ZERO -- which drives the minimum indentation to 0, so
+                // stripIndent removes nothing and every other line keeps the 4 spaces it
+                // has in the source. `<<-END_VERSIONS` strips leading TABS, never
+                // spaces, so an indented terminator does not terminate: `cat` runs to
+                // EOF and writes the heredoc's own delimiter into the file. That
+                // shipped -- four malformed entries in every collated_versions.yml --
+                // and nothing caught it, because no test had ever read this file's
+                // CONTENTS. Every other module in the repo is safe from it only because
+                // nothing in them sits at column zero.
+                { def vlines = path(process.out.versions[0]).readLines()
+                  assert !vlines.any { line -> line.contains('END_VERSIONS') } :
+                      "the heredoc delimiter leaked into versions.yml -- its terminator is " +
+                      "indented and never matched: ${vlines}"
+                  assert vlines.size() == 2 : "versions.yml is not two lines: ${vlines}"
+                  assert vlines[0].startsWith('"') && vlines[0].endsWith('WRITE_CHECKPOINT_FRAGMENT":') :
+                      "the process key is missing or indented: ${vlines[0]}"
+                  assert vlines[1] ==~ /\s+bash: .+/ : "no bash version row: ${vlines[1]}" }
             )
         }
     }
