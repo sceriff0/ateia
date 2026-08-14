@@ -9,10 +9,17 @@ Creates realistic test data including:
 """
 
 import json
+import sys
 from pathlib import Path
 
 import numpy as np
 import tifffile
+
+# The tile-plan schema has one owner per language; these fixtures must be the shape
+# TILED_COARSE really writes, not a fourth hand-maintained copy of the column list.
+# See lib/TilePlan.groovy and tests/test_tile_plan_schema.py.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "bin" / "utils"))
+from tile_grid import TILE_PLAN_COLUMNS  # noqa: E402
 
 # Deterministic seed — ensures identical test data across runs and CI environments
 np.random.seed(42)
@@ -366,7 +373,7 @@ print("  Created invalid_file_not_found.csv (file not found)")
 #     header-only plan (must hit the n < 1 guard).
 # =============================================================================
 print("\n4h. Creating tile-plan CSV fixtures for the tiled fan-in gather...")
-_TILE_HEADER = "ix,iy,cx,cy,x0,y0,x1,y1,rx0,ry0,rx1,ry1"
+_TILE_HEADER = ",".join(TILE_PLAN_COLUMNS)
 
 
 def _tile_row(ix, iy):

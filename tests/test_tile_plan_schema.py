@@ -33,6 +33,13 @@ COARSE_PY = ROOT / "bin" / "tiled_coarse.py"
 REG_TILE_PY = ROOT / "bin" / "tiled_reg_tile.py"
 COARSE_NF = ROOT / "modules" / "local" / "tiled_coarse.nf"
 REG_TILE_NF = ROOT / "modules" / "local" / "tiled_reg_tile.nf"
+LIB_PROBE = ROOT / "tests" / "lib_probe.nf"
+
+# The only two files allowed to spell the header out: this guard, and the lib/ probe that
+# ASSERTS TilePlan.header()'s value. Both compare against the literal rather than consume
+# it — an exemption for a use site would defeat the whole check, so
+# test_the_header_exemptions_are_assertions_not_uses keeps these two honest.
+_NAMES_THE_HEADER_ON_PURPOSE = {Path(__file__).resolve(), LIB_PROBE.resolve()}
 
 
 def _groovy_list(name: str) -> list[str]:
@@ -70,12 +77,38 @@ def test_every_consumed_column_is_a_flag_the_python_consumer_accepts():
 
 
 def test_nobody_restates_the_column_list():
-    """The literal header must appear only in the two owners."""
+    """The literal header may appear nowhere at all — both owners build it from a list.
+
+    Scope is deliberately wide (bin/, lib/, modules/, subworkflows/, workflows/, tests/):
+    the restatement this replaced was in three places, and a fourth was hiding in
+    ``tests/testdata/generate_complete_testdata.py``'s tile-plan fixtures, where a drift
+    would have made the fan-in gather's own fixtures the wrong shape.
+    """
     header = ",".join(TILE_PLAN_COLUMNS)
-    for nf in (COARSE_NF, REG_TILE_NF):
-        assert header not in nf.read_text(), (
-            f"{nf.relative_to(ROOT)} hand-writes the tile-plan header; use TilePlan.header()"
-        )
+    scanned = []
+    offenders = []
+    for pattern in (
+        "bin/**/*.py",
+        "lib/*.groovy",
+        "modules/**/*.nf",
+        "subworkflows/**/*.nf",
+        "workflows/*.nf",
+        "tests/**/*.py",
+        "tests/**/*.nf",
+    ):
+        for path in sorted(ROOT.glob(pattern)):
+            if path.resolve() in _NAMES_THE_HEADER_ON_PURPOSE:
+                continue
+            scanned.append(path)
+            if header in path.read_text():
+                offenders.append(str(path.relative_to(ROOT)))
+    assert len(scanned) > 50, (
+        f"the scan only saw {len(scanned)} files -- globs are stale"
+    )
+    assert not offenders, (
+        f"{len(offenders)} file(s) hand-write the tile-plan header instead of building it "
+        f"from the schema owner (TilePlan.header() / TILE_PLAN_COLUMNS): {offenders}"
+    )
     # the Python writer must not spell the columns out at its call site either
     coarse = COARSE_PY.read_text()
     assert '"ix", "iy"' not in coarse and "'ix', 'iy'" not in coarse, (
@@ -127,3 +160,14 @@ def test_the_python_scripts_still_exist_where_this_guard_expects_them(path):
     assert path.exists(), (
         f"{os.fspath(path)} is missing; this guard is checking nothing"
     )
+
+
+def test_the_header_exemptions_are_assertions_not_uses():
+    """Both exempted files must COMPARE against the literal header, never emit it."""
+    header = ",".join(TILE_PLAN_COLUMNS)
+    probe = LIB_PROBE.read_text()
+    assert f"assert TilePlan.header() == '{header}'" in probe, (
+        "tests/lib_probe.nf is exempted from the no-restatement scan because it pins "
+        "TilePlan.header()'s value; that assertion is gone, so the exemption is now a hole"
+    )
+    assert 'header = ",".join(TILE_PLAN_COLUMNS)' in Path(__file__).read_text()
