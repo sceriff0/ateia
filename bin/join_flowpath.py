@@ -49,6 +49,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
 from logger import configure_logging, get_logger  # noqa: E402
+from pixel_convention import corner_to_centre  # noqa: E402
 
 logger = get_logger(__name__)
 
@@ -139,15 +140,18 @@ def join_by_centroid(
 ) -> Tuple[np.ndarray, Dict]:
     """Mutual-nearest centroid join, used when FlowPath exported no ``label``.
 
-    FlowPath centroids are micrometres; MIRAGE wrote them as
-    ``(x_px + 0.5) * pixel_size``, so the inverse is exact. Matching is **mutual**
+    FlowPath centroids are micrometres in QuPath's pixel-CORNER convention;
+    MIRAGE wrote them as ``(x_px + 0.5) * pixel_size``, so the inverse is exact.
+    ``corner_to_centre`` lands them in the same pixel-CENTRE convention as
+    ``obsm["spatial"]`` — the two must stay the same decision, which is why both
+    are spelt in ``bin/utils/pixel_convention.py``. Matching is **mutual**
     nearest-neighbour: a FlowPath cell and a table cell must each be the other's
     closest, which prevents one dense cluster from absorbing several rows.
     """
     from scipy.spatial import cKDTree
 
-    flow_px = (
-        flow[["centroid_x", "centroid_y"]].to_numpy(dtype=float) / pixel_size - 0.5
+    flow_px = corner_to_centre(
+        flow[["centroid_x", "centroid_y"]].to_numpy(dtype=float) / pixel_size
     )
 
     tree_flow = cKDTree(flow_px)

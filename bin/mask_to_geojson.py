@@ -12,8 +12,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
+from pathlib import Path
 
 import numpy as np
+
+sys.path.insert(0, str(Path(__file__).parent / "utils"))
+
+from pixel_convention import keep_centre  # noqa: E402
 
 
 def mask_to_feature_collection(mask, simplify_tolerance: float = 1.0) -> dict:
@@ -33,12 +39,12 @@ def mask_to_feature_collection(mask, simplify_tolerance: float = 1.0) -> dict:
             continue
         contour = max(contours, key=len)
         simp = approximate_polygon(contour, tolerance=simplify_tolerance)
-        # NOTE: no +0.5 corner offset here — intentionally kept in skimage's
-        # center-of-pixel convention because these contours feed VALIS's
-        # warp_geojson reg-QC path. This diverges on purpose from
-        # extract_cell_properties.py's +0.5 QuPath corner-of-pixel contours;
-        # each serves a different consumer's pixel convention.
-        ring = [[float(c - 1 + minc), float(r - 1 + minr)] for r, c in simp]
+        # keep_centre, not centre_to_corner: these contours feed VALIS's
+        # warp_geojson reg-QC path, which is pixel-CENTRE like find_contours
+        # itself. This diverges on purpose from extract_cell_properties.py's
+        # QuPath pixel-CORNER contours; each serves a different consumer's
+        # convention (see bin/utils/pixel_convention.py).
+        ring = keep_centre([[float(c - 1 + minc), float(r - 1 + minr)] for r, c in simp])
         if len(ring) < 3:
             continue
         if ring[0] != ring[-1]:
