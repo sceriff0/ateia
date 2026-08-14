@@ -92,10 +92,38 @@ nextflow_pipeline {
                 "expected 4 checkpoint manifests, found ${manifests.size()}: " +
                 manifests*.name
 
+            // The per-patient fragments are checkpoints too — same header, same row
+            // grammar, published per patient as each one finishes
+            // (lib/Layout.groovy's checkpointFragment). The invariant binds them
+            // identically, and more urgently: the fragments are the copy a run that
+            // lost its driver leaves behind, i.e. the copy most likely to be the one
+            // someone actually restarts from.
+            def fragments = []
+            csvDir.eachFileRecurse { f ->
+                if (f.isFile() && f.name.endsWith('.csv') && f.parentFile.name.endsWith('.parts'))
+                    fragments << f
+            }
+            assert !fragments.isEmpty() : "no per-patient checkpoint fragments were published"
+
+            // ONE SCHEMA, NOT TWO. Each aggregate's header is byte-identical to its
+            // fragments', and its rows are exactly the union of theirs. A second row
+            // grammar for the same checkpoint fails here rather than at someone's
+            // restart.
+            manifests.each { csv ->
+                def step = csv.name - '.csv'
+                def mine = fragments.findAll { it.parentFile.name == "${step}.parts".toString() }
+                assert !mine.isEmpty() : "csv/${csv.name} has no per-patient fragments"
+                assert mine.every { it.readLines()[0] == csv.readLines()[0] } :
+                    "a fragment of csv/${csv.name} has a different header"
+                assert mine.collectMany { it.readLines().drop(1) }.findAll { it.trim() }.toSorted() ==
+                       csv.readLines().drop(1).findAll { it.trim() }.toSorted() :
+                    "csv/${csv.name} and its fragments do not carry the same rows"
+            }
+
             def work = new File("${workDir}".toString()).absolutePath
             def problems = []
             def checked  = 0
-            manifests.each { csv ->
+            (manifests + fragments).each { csv ->
                 csv.readLines().drop(1).findAll { it.trim() }.each { line ->
                     line.split(',').each { field ->
                         // Absolute fields only: the rest are ids, booleans and
@@ -112,8 +140,8 @@ nextflow_pipeline {
             }
             // Exact, not a lower bound: a lower bound lets a path column disappear
             // from a manifest without anyone noticing.
-            assert checked == 19 :
-                "expected 19 recorded paths, examined ${checked} — did the CSV columns change?"
+            assert checked == 38 :
+                "expected 38 recorded paths, examined ${checked} — did the CSV columns change?"
             // ONE assertion covering both properties, deliberately: Groovy aborts at
             // the first failed assert, so splitting them would hide the work-directory
             // findings behind the existence findings whenever a change breaks both.
@@ -174,10 +202,38 @@ nextflow_pipeline {
                 "expected 4 checkpoint manifests, found ${manifests.size()}: " +
                 manifests*.name
 
+            // The per-patient fragments are checkpoints too — same header, same row
+            // grammar, published per patient as each one finishes
+            // (lib/Layout.groovy's checkpointFragment). The invariant binds them
+            // identically, and more urgently: the fragments are the copy a run that
+            // lost its driver leaves behind, i.e. the copy most likely to be the one
+            // someone actually restarts from.
+            def fragments = []
+            csvDir.eachFileRecurse { f ->
+                if (f.isFile() && f.name.endsWith('.csv') && f.parentFile.name.endsWith('.parts'))
+                    fragments << f
+            }
+            assert !fragments.isEmpty() : "no per-patient checkpoint fragments were published"
+
+            // ONE SCHEMA, NOT TWO. Each aggregate's header is byte-identical to its
+            // fragments', and its rows are exactly the union of theirs. A second row
+            // grammar for the same checkpoint fails here rather than at someone's
+            // restart.
+            manifests.each { csv ->
+                def step = csv.name - '.csv'
+                def mine = fragments.findAll { it.parentFile.name == "${step}.parts".toString() }
+                assert !mine.isEmpty() : "csv/${csv.name} has no per-patient fragments"
+                assert mine.every { it.readLines()[0] == csv.readLines()[0] } :
+                    "a fragment of csv/${csv.name} has a different header"
+                assert mine.collectMany { it.readLines().drop(1) }.findAll { it.trim() }.toSorted() ==
+                       csv.readLines().drop(1).findAll { it.trim() }.toSorted() :
+                    "csv/${csv.name} and its fragments do not carry the same rows"
+            }
+
             def work = new File("${workDir}".toString()).absolutePath
             def problems = []
             def checked  = 0
-            manifests.each { csv ->
+            (manifests + fragments).each { csv ->
                 csv.readLines().drop(1).findAll { it.trim() }.each { line ->
                     line.split(',').each { field ->
                         // Absolute fields only: the rest are ids, booleans and
@@ -194,8 +250,8 @@ nextflow_pipeline {
             }
             // Exact, not a lower bound: a lower bound lets a path column disappear
             // from a manifest without anyone noticing.
-            assert checked == 12 :
-                "expected 12 recorded paths, examined ${checked} — did the CSV columns change?"
+            assert checked == 24 :
+                "expected 24 recorded paths, examined ${checked} — did the CSV columns change?"
             // ONE assertion covering both properties, deliberately: Groovy aborts at
             // the first failed assert, so splitting them would hide the work-directory
             // findings behind the existence findings whenever a change breaks both.
@@ -258,10 +314,38 @@ nextflow_pipeline {
                 "expected 4 checkpoint manifests, found ${manifests.size()}: " +
                 manifests*.name
 
+            // The per-patient fragments are checkpoints too — same header, same row
+            // grammar, published per patient as each one finishes
+            // (lib/Layout.groovy's checkpointFragment). The invariant binds them
+            // identically, and more urgently: the fragments are the copy a run that
+            // lost its driver leaves behind, i.e. the copy most likely to be the one
+            // someone actually restarts from.
+            def fragments = []
+            csvDir.eachFileRecurse { f ->
+                if (f.isFile() && f.name.endsWith('.csv') && f.parentFile.name.endsWith('.parts'))
+                    fragments << f
+            }
+            assert !fragments.isEmpty() : "no per-patient checkpoint fragments were published"
+
+            // ONE SCHEMA, NOT TWO. Each aggregate's header is byte-identical to its
+            // fragments', and its rows are exactly the union of theirs. A second row
+            // grammar for the same checkpoint fails here rather than at someone's
+            // restart.
+            manifests.each { csv ->
+                def step = csv.name - '.csv'
+                def mine = fragments.findAll { it.parentFile.name == "${step}.parts".toString() }
+                assert !mine.isEmpty() : "csv/${csv.name} has no per-patient fragments"
+                assert mine.every { it.readLines()[0] == csv.readLines()[0] } :
+                    "a fragment of csv/${csv.name} has a different header"
+                assert mine.collectMany { it.readLines().drop(1) }.findAll { it.trim() }.toSorted() ==
+                       csv.readLines().drop(1).findAll { it.trim() }.toSorted() :
+                    "csv/${csv.name} and its fragments do not carry the same rows"
+            }
+
             def work = new File("${workDir}".toString()).absolutePath
             def problems = []
             def checked  = 0
-            manifests.each { csv ->
+            (manifests + fragments).each { csv ->
                 csv.readLines().drop(1).findAll { it.trim() }.each { line ->
                     line.split(',').each { field ->
                         // Absolute fields only: the rest are ids, booleans and
@@ -278,8 +362,8 @@ nextflow_pipeline {
             }
             // Exact, not a lower bound: a lower bound lets a path column disappear
             // from a manifest without anyone noticing.
-            assert checked == 19 :
-                "expected 19 recorded paths, examined ${checked} — did the CSV columns change?"
+            assert checked == 38 :
+                "expected 38 recorded paths, examined ${checked} — did the CSV columns change?"
             // ONE assertion covering both properties, deliberately: Groovy aborts at
             // the first failed assert, so splitting them would hide the work-directory
             // findings behind the existence findings whenever a change breaks both.
@@ -341,10 +425,38 @@ nextflow_pipeline {
                 "expected 4 checkpoint manifests, found ${manifests.size()}: " +
                 manifests*.name
 
+            // The per-patient fragments are checkpoints too — same header, same row
+            // grammar, published per patient as each one finishes
+            // (lib/Layout.groovy's checkpointFragment). The invariant binds them
+            // identically, and more urgently: the fragments are the copy a run that
+            // lost its driver leaves behind, i.e. the copy most likely to be the one
+            // someone actually restarts from.
+            def fragments = []
+            csvDir.eachFileRecurse { f ->
+                if (f.isFile() && f.name.endsWith('.csv') && f.parentFile.name.endsWith('.parts'))
+                    fragments << f
+            }
+            assert !fragments.isEmpty() : "no per-patient checkpoint fragments were published"
+
+            // ONE SCHEMA, NOT TWO. Each aggregate's header is byte-identical to its
+            // fragments', and its rows are exactly the union of theirs. A second row
+            // grammar for the same checkpoint fails here rather than at someone's
+            // restart.
+            manifests.each { csv ->
+                def step = csv.name - '.csv'
+                def mine = fragments.findAll { it.parentFile.name == "${step}.parts".toString() }
+                assert !mine.isEmpty() : "csv/${csv.name} has no per-patient fragments"
+                assert mine.every { it.readLines()[0] == csv.readLines()[0] } :
+                    "a fragment of csv/${csv.name} has a different header"
+                assert mine.collectMany { it.readLines().drop(1) }.findAll { it.trim() }.toSorted() ==
+                       csv.readLines().drop(1).findAll { it.trim() }.toSorted() :
+                    "csv/${csv.name} and its fragments do not carry the same rows"
+            }
+
             def work = new File("${workDir}".toString()).absolutePath
             def problems = []
             def checked  = 0
-            manifests.each { csv ->
+            (manifests + fragments).each { csv ->
                 csv.readLines().drop(1).findAll { it.trim() }.each { line ->
                     line.split(',').each { field ->
                         // Absolute fields only: the rest are ids, booleans and
@@ -361,8 +473,8 @@ nextflow_pipeline {
             }
             // Exact, not a lower bound: a lower bound lets a path column disappear
             // from a manifest without anyone noticing.
-            assert checked == 19 :
-                "expected 19 recorded paths, examined ${checked} — did the CSV columns change?"
+            assert checked == 38 :
+                "expected 38 recorded paths, examined ${checked} — did the CSV columns change?"
             // ONE assertion covering both properties, deliberately: Groovy aborts at
             // the first failed assert, so splitting them would hide the work-directory
             // findings behind the existence findings whenever a change breaks both.
@@ -421,10 +533,38 @@ nextflow_pipeline {
             assert segRow[1] == "$projectDir/tests/testdata/P001_ref.ome.tiff".toString() :
                 "segmented.csv rewrote registered_image against the wrong outdir: ${segRow[1]}"
 
+            // The per-patient fragments are checkpoints too — same header, same row
+            // grammar, published per patient as each one finishes
+            // (lib/Layout.groovy's checkpointFragment). The invariant binds them
+            // identically, and more urgently: the fragments are the copy a run that
+            // lost its driver leaves behind, i.e. the copy most likely to be the one
+            // someone actually restarts from.
+            def fragments = []
+            csvDir.eachFileRecurse { f ->
+                if (f.isFile() && f.name.endsWith('.csv') && f.parentFile.name.endsWith('.parts'))
+                    fragments << f
+            }
+            assert !fragments.isEmpty() : "no per-patient checkpoint fragments were published"
+
+            // ONE SCHEMA, NOT TWO. Each aggregate's header is byte-identical to its
+            // fragments', and its rows are exactly the union of theirs. A second row
+            // grammar for the same checkpoint fails here rather than at someone's
+            // restart.
+            manifests.each { csv ->
+                def step = csv.name - '.csv'
+                def mine = fragments.findAll { it.parentFile.name == "${step}.parts".toString() }
+                assert !mine.isEmpty() : "csv/${csv.name} has no per-patient fragments"
+                assert mine.every { it.readLines()[0] == csv.readLines()[0] } :
+                    "a fragment of csv/${csv.name} has a different header"
+                assert mine.collectMany { it.readLines().drop(1) }.findAll { it.trim() }.toSorted() ==
+                       csv.readLines().drop(1).findAll { it.trim() }.toSorted() :
+                    "csv/${csv.name} and its fragments do not carry the same rows"
+            }
+
             def work = new File("${workDir}".toString()).absolutePath
             def problems = []
             def checked  = 0
-            manifests.each { csv ->
+            (manifests + fragments).each { csv ->
                 csv.readLines().drop(1).findAll { it.trim() }.each { line ->
                     line.split(',').each { field ->
                         if (field.startsWith('/')) {
@@ -440,8 +580,8 @@ nextflow_pipeline {
             // 5 segmented (registered_image, cell_mask, nuclei_mask, contours,
             // nucleus_contours) + 5 postprocessed (cell_csv, cell_geojson, merged_csv,
             // cell_mask, pyramid), one row each.
-            assert checked == 10 :
-                "expected 10 recorded paths, examined ${checked} — did the CSV columns change?"
+            assert checked == 20 :
+                "expected 20 recorded paths, examined ${checked} — did the CSV columns change?"
             assert problems.isEmpty() :
                 "checkpoint manifest has ${problems.size()} bad path(s):\n  " +
                 problems.join("\n  ")
@@ -511,10 +651,38 @@ nextflow_pipeline {
             // --- the invariant ------------------------------------------------
             // Identical to the linear cases: every recorded path exists, and none of
             // them lies inside the (cleanable, unpublished) work directory.
+            // The per-patient fragments are checkpoints too — same header, same row
+            // grammar, published per patient as each one finishes
+            // (lib/Layout.groovy's checkpointFragment). The invariant binds them
+            // identically, and more urgently: the fragments are the copy a run that
+            // lost its driver leaves behind, i.e. the copy most likely to be the one
+            // someone actually restarts from.
+            def fragments = []
+            csvDir.eachFileRecurse { f ->
+                if (f.isFile() && f.name.endsWith('.csv') && f.parentFile.name.endsWith('.parts'))
+                    fragments << f
+            }
+            assert !fragments.isEmpty() : "no per-patient checkpoint fragments were published"
+
+            // ONE SCHEMA, NOT TWO. Each aggregate's header is byte-identical to its
+            // fragments', and its rows are exactly the union of theirs. A second row
+            // grammar for the same checkpoint fails here rather than at someone's
+            // restart.
+            manifests.each { csv ->
+                def step = csv.name - '.csv'
+                def mine = fragments.findAll { it.parentFile.name == "${step}.parts".toString() }
+                assert !mine.isEmpty() : "csv/${csv.name} has no per-patient fragments"
+                assert mine.every { it.readLines()[0] == csv.readLines()[0] } :
+                    "a fragment of csv/${csv.name} has a different header"
+                assert mine.collectMany { it.readLines().drop(1) }.findAll { it.trim() }.toSorted() ==
+                       csv.readLines().drop(1).findAll { it.trim() }.toSorted() :
+                    "csv/${csv.name} and its fragments do not carry the same rows"
+            }
+
             def work = new File("${workDir}".toString()).absolutePath
             def problems = []
             def checked  = 0
-            manifests.each { csv ->
+            (manifests + fragments).each { csv ->
                 csv.readLines().drop(1).findAll { it.trim() }.each { line ->
                     line.split(',').each { field ->
                         if (field.startsWith('/')) {
@@ -528,8 +696,8 @@ nextflow_pipeline {
                 }
             }
             // 1 preprocessed row + 2 registered rows, one path each.
-            assert checked == 3 :
-                "expected 3 recorded paths, examined ${checked} — did the CSV columns change?"
+            assert checked == 6 :
+                "expected 6 recorded paths, examined ${checked} — did the CSV columns change?"
             assert problems.isEmpty() :
                 "checkpoint manifest has ${problems.size()} bad path(s):\n  " +
                 problems.join("\n  ")

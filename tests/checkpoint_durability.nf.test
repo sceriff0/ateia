@@ -1,0 +1,136 @@
+/*
+ * THE INVARIANT: a patient's checkpoint rows are on disk as soon as THAT PATIENT's
+ * step finishes — not only when the whole run's step finishes.
+ *
+ * WHY IT MATTERS. Every checkpoint CSV is written by `collectFile()`, an OPERATOR,
+ * not a task. collectFile writes its file exactly once, when the upstream channel
+ * closes. Until that moment the run's entire index to its own completed work exists
+ * only inside the driver JVM's memory. Patients 1..11 of 20 can be finished,
+ * published, and paid for, and there is still nothing on disk that names their
+ * outputs. Lose the driver — a walltime kill on the head job, an OOM, a node
+ * failure, Ctrl-C — and the expensive work survives while the index to it does not:
+ * a `--start segmentation` restart has no manifest to read, and `--prior_outdir`
+ * has no registered.csv to freeze a reference from.
+ *
+ * WHAT WAS MEASURED, AND WHAT THE REVIEW GOT WRONG. The architecture review stated
+ * the loss differently: "a hard failure on patient 12 of 20 means the channel never
+ * closes normally, so csv/registered.csv is never written at all". That is NOT what
+ * happens, and it was checked rather than assumed. Under conf/base.config's shipped
+ * errorStrategy ('finish' for any non-signal exit status) Nextflow performs an
+ * orderly shutdown: the channels DO close, collectFile's completion handler DOES
+ * fire, and csv/registered.csv is written holding exactly the completed patients'
+ * rows. The same is true under an explicit 'terminate'. Both were run against the
+ * two-patient fixture; both wrote the manifest.
+ *
+ * The durability gap is real, but it is a gap in TIME, not in the abort path: the
+ * rows are un-durable for the whole span between "this patient finished" and "every
+ * patient finished". That is the property these two cases pin, and it is why the
+ * first case observes the filesystem from INSIDE the run — see
+ * tests/testdata/slow_p002_registration.config.
+ *
+ * Tagged "stub" because CI's blocking gate is `nf-test test --tag stub`; an untagged
+ * file never runs there. Both cases need more than one patient, so both use the
+ * two-patient fixture.
+ */
+
+nextflow_pipeline {
+
+    name "Checkpoint durability — a finished patient's rows do not wait for the run"
+    script "main.nf"
+
+    tag "pipeline"
+    tag "checkpoint_durability"
+
+    test("P001's registration rows are on disk while P002 is still registering") {
+        tag "stub"
+        options "-stub"
+        config "tests/testdata/slow_p002_registration.config"
+
+        when {
+            params {
+                input  = "$projectDir/tests/testdata/test_input_two_patients.csv"
+                outdir = "$outputDir"
+            }
+        }
+
+        then {
+            assert workflow.success
+
+            // The witness ran inside P002's REGISTER task, ten seconds after P001's
+            // registration had finished and published. If this file is missing the
+            // injected config never took effect and every assertion below would be
+            // vacuous — so its absence is a failure, not a skip.
+            def witness = new File("${outputDir}/witness/p001_registered_rows.txt".toString())
+            assert witness.exists() :
+                "the witness never ran — tests/testdata/slow_p002_registration.config " +
+                "did not take effect, so this case proves nothing"
+            assert witness.text.trim() == 'PRESENT' :
+                "P001 had finished registering, and its registration rows were still " +
+                "not on disk while P002 was registering. The checkpoint is only " +
+                "durable when the LAST patient finishes — lose the driver before then " +
+                "and every completed patient's index is lost with it."
+
+            // ... and what landed is a usable checkpoint for that patient on its own:
+            // the step's header and only that patient's rows.
+            def fragment = new File("${outputDir}/csv/registered.parts/P001.csv".toString())
+            assert fragment.exists()
+            def lines = fragment.readLines().findAll { it.trim() }
+            assert lines[0] == 'patient_id,registered_image,is_reference,channels' :
+                "fragment header drifted from the aggregate's: ${lines[0]}"
+            assert lines.size() == 3 :
+                "expected the header + P001's two registered slides, got ${lines.size()} lines"
+            assert lines.drop(1).every { it.startsWith('P001,') } :
+                "a per-patient fragment must hold exactly one patient's rows: ${lines}"
+        }
+    }
+
+    test("a hard failure on P002 leaves P001's completed rows on disk") {
+        tag "stub"
+        options "-stub"
+        config "tests/testdata/failing_p002_registration.config"
+
+        when {
+            params {
+                input  = "$projectDir/tests/testdata/test_input_two_patients.csv"
+                outdir = "$outputDir"
+            }
+        }
+
+        then {
+            // The run itself fails — that is the scenario, not an accident.
+            assert !workflow.success :
+                "the injected P002 failure did not fail the run"
+
+            // P001 completed registration before P002 died. Its rows must be on disk.
+            def fragment = new File("${outputDir}/csv/registered.parts/P001.csv".toString())
+            assert fragment.exists() :
+                "P001 finished registering and its outputs are published, but nothing " +
+                "on disk records where they are"
+            def lines = fragment.readLines().findAll { it.trim() }
+            assert lines[0] == 'patient_id,registered_image,is_reference,channels'
+            assert lines.size() == 3
+            assert lines.drop(1).every { it.startsWith('P001,') }
+
+            // Every path the surviving fragment names must actually exist and must not
+            // point into the (cleanable, unpublished) work directory — the same
+            // invariant tests/checkpoint_manifest.nf.test holds the aggregates to. A
+            // fragment that survives a failure but names scratch paths is not a
+            // resumable checkpoint.
+            def work = new File("${workDir}".toString()).absolutePath
+            lines.drop(1).each { line ->
+                line.split(',').findAll { it.startsWith('/') }.each { field ->
+                    assert !new File(field).absolutePath.startsWith(work + File.separator) :
+                        "fragment records a work-directory path: ${field}"
+                    assert new File(field).exists() :
+                        "fragment records a path that does not exist: ${field}"
+                }
+            }
+
+            // P002 never finished registering, so it must have no fragment at all. A
+            // fragment for a patient whose step did not complete would be worse than
+            // no fragment: a restart would read it and carry on with a missing slide.
+            assert !new File("${outputDir}/csv/registered.parts/P002.csv".toString()).exists() :
+                "P002's registration failed, but a fragment claims it completed"
+        }
+    }
+}

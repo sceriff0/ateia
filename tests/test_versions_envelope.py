@@ -36,7 +36,19 @@ MODULES = sorted((ROOT / "modules" / "local").glob("*.nf"))
 # warp_seg_qc_tiled.nf -- all reported `python:`), so routing this module through it
 # would add a fabricated/`unknown` python entry to a published report that has never
 # carried one.
-ALLOWED_HANDWRITTEN = {"aggregate_size_logs.nf"}
+# write_checkpoint_fragment.nf is the second, for the identical reason: it runs in
+# `container 'ubuntu:22.04'` and its whole task is `cat > <patient>.csv`. There is no
+# Python interpreter in that image, and ProcessEnvelope always prepends a `python:` row,
+# so routing it through would put a fabricated (or `unknown`) python version into a
+# published report for a process that never touched Python. It reports `bash:`, like
+# aggregate_size_logs.nf.
+#
+# The script:/stub: divergence this guard exists to prevent is closed for that module by
+# a different mechanism, not left open: BOTH blocks render their payload from one
+# Checkpoint.fragment() call, which is the same "one list, two blocks" shape
+# ProcessEnvelope applies to versions.yml. Only the two-line version heredoc is
+# hand-written, and it names one tool.
+ALLOWED_HANDWRITTEN = {"aggregate_size_logs.nf", "write_checkpoint_fragment.nf"}
 
 
 def test_no_module_hand_writes_a_versions_heredoc():

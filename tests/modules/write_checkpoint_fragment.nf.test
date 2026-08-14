@@ -1,0 +1,113 @@
+nextflow_process {
+
+    name "Test WRITE_CHECKPOINT_FRAGMENT process"
+    script "modules/local/write_checkpoint_fragment.nf"
+    process "WRITE_CHECKPOINT_FRAGMENT"
+
+    tag "modules"
+    tag "modules_local"
+    tag "write_checkpoint_fragment"
+
+    test("Should write one patient's rows under the step's header - stub") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    'registered',
+                    'P001',
+                    [
+                        'P001,/out/P001/registered/registered_slides/a.ome.tiff,true,DAPI|PANCK|SMA',
+                        'P001,/out/P001/registered/registered_slides/b.ome.tiff,false,DAPI|CD3|CD8'
+                    ]
+                ]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                // Named for the patient, not for the step: the step is the DIRECTORY
+                // (conf/modules.config publishes into csv/<step>.parts/), so two steps'
+                // fragments for one patient cannot collide.
+                { assert process.out.fragment[0][2].toString().endsWith('/P001.csv') },
+                // The contents are the contract. A stub run is the ONLY mode CI's
+                // blocking gate runs, and for this process the stub block is not a
+                // placeholder -- the fragment is data, not computation, so it writes
+                // the real file. Header first, then exactly the rows it was handed,
+                // in the order it was handed them.
+                { assert path(process.out.fragment[0][2]).readLines() == [
+                    'patient_id,registered_image,is_reference,channels',
+                    'P001,/out/P001/registered/registered_slides/a.ome.tiff,true,DAPI|PANCK|SMA',
+                    'P001,/out/P001/registered/registered_slides/b.ome.tiff,false,DAPI|CD3|CD8'
+                ] },
+                { assert process.out.versions }
+            )
+        }
+    }
+
+    test("Should render the same bytes from script: as from stub: - rendered command") {
+
+        // Tagged `stub` so CI's blocking `nf-test test --tag stub` gate runs it, but
+        // deliberately WITHOUT `options "-stub"` -- the precedent set by
+        // tests/modules/generate_qc_report.nf.test. `-stub` never evaluates a `script:`
+        // block, so no stub run can observe one, and for THIS process that blind spot
+        // is unusually dangerous: the stub block is the one CI exercises, so a script:
+        // block that wrote a different file (a missing header, a different quoting, an
+        // indented first row) would ship green. Both blocks build their payload from
+        // one Checkpoint.fragment() call; this is what checks that they still do.
+        //
+        // Safe to run for real on any host: the whole task is `cat > file` plus a
+        // `bash --version` probe.
+        tag "stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    'postprocessed',
+                    'P042',
+                    ['P042,/out/a.csv,/out/a.geojson,/out/m.csv,/out/mask.tif,/out/p.ome.tiff']
+                ]
+                """
+            }
+        }
+
+        then {
+            // Nextflow lays tasks out as <workDir>/<2 hex>/<30 hex>/.command.sh.
+            def rendered = []
+            new File("$workDir").eachFileRecurse { f ->
+                if (f.name == '.command.sh' && f.text.contains('CHECKPOINT_FRAGMENT'))
+                    rendered << f.text
+            }
+
+            assertAll(
+                { assert rendered.size() >= 1,
+                    "no rendered WRITE_CHECKPOINT_FRAGMENT .command.sh found" },
+                // The step's header, verbatim, from lib/Checkpoint.groovy's STEPS table.
+                { assert rendered.every {
+                    it.contains('patient_id,cell_csv,cell_geojson,merged_csv,cell_mask,pyramid') },
+                    "rendered command: " + rendered.join(' --- ') },
+                // The row, at COLUMN ZERO. Indent it and the published CSV's first field
+                // gains leading spaces, which no reader strips -- the paths would still
+                // look right in a diff and resolve to nothing on disk.
+                { assert rendered.every {
+                    it.contains('\nP042,/out/a.csv,/out/a.geojson,/out/m.csv,/out/mask.tif,/out/p.ome.tiff\n') },
+                    "the row is not rendered at column zero: " + rendered.join(' --- ') },
+                // A QUOTED heredoc delimiter. Unquoted, bash would expand any `$` in a
+                // path and command-substitute any `$(...)`, silently rewriting the
+                // recorded path.
+                { assert rendered.every { it.contains("<<'CHECKPOINT_FRAGMENT'") },
+                    "the heredoc delimiter is not quoted: " + rendered.join(' --- ') },
+                // The terminator must be alone at column zero or `cat` swallows the rest
+                // of the script into the CSV.
+                { assert rendered.every { it.contains('\nCHECKPOINT_FRAGMENT\n') },
+                    "heredoc terminator is not at column zero: " + rendered.join(' --- ') }
+            )
+        }
+    }
+}

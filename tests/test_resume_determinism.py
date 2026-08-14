@@ -103,6 +103,20 @@ ORDERED_FAN_INS = {
     # EITHER chain, so deleting one stream's ordering would still match the other's and
     # the guard would be back to checking nothing. Watched failing with each toSorted
     # removed in turn.
+    # The rows are Strings, not paths, but the hazard is identical: they reach
+    # WRITE_CHECKPOINT_FRAGMENT as a `val` LIST, and Nextflow hashes a list input
+    # positionally whatever it holds. Unsorted, the fragment for a patient whose rows
+    # arrived in a different order this run is a cache MISS -- and, worse than a wasted
+    # task, the published fragment then differs from itself between two runs of the same
+    # commit, exactly the non-reproducibility `sort: true` was added to the aggregate to
+    # end. Sorting also makes the fragment's row order match the aggregate's, which is
+    # what tests/checkpoint_manifest.nf.test's union comparison assumes.
+    "checkpoint_writer: WRITE_CHECKPOINT_FRAGMENT's row list": (
+        "subworkflows/local/checkpoint_writer.nf",
+        r"rows\.toSorted\(\)",
+        "The grouped row list is a val input hashed positionally, and groupTuple() emits "
+        "in ARRIVAL order.",
+    ),
     "postprocess: EXPORT_SPATIALDATA's two per-patient QC lists": (
         "subworkflows/local/postprocess.nf",
         r"ch_reg_qc_by_patient[\s\S]*?\.toSorted\s*\{[\s\S]*?ch_reg_residuals_by_patient[\s\S]*?\.toSorted\s*\{",
