@@ -9,7 +9,7 @@
  * workflow-level nf-test could inspect its content, so every claim about that file
  * rested on a manual diff in a report. These tests call the Groovy that actually
  * builds it directly, the same way tiled_adapter_group_size.nf.test pins
- * countTileRows/requireTilesCount.
+ * countTileRows/requirePositiveTileCount.
  *
  * buildRunSummary takes params/pipeline-info/timestamp as explicit arguments (rather
  * than reading params./workflow.manifest itself) specifically so it is callable here

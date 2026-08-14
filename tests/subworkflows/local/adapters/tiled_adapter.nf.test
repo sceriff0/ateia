@@ -4,10 +4,10 @@
  * subworkflows/local/adapters/tiled_adapter.nf:94-97 used to gather every tile's control
  * point with a bare `.groupTuple(by: 0)` -- no size hint -- so no slide's TILED_SOLVE could
  * start until every tile of every slide of every patient had finished. The gather now keys
- * with groupKey(slideKey(meta), meta.tiles_count) (tiled_adapter.nf:110) so a slide's group
- * can close as soon as its own tiles have arrived. See tiled_adapter_group_size.nf.test for the
- * requireTilesCount()/countTileRows()/requirePositiveTileCount() function tests (the guard
- * behind that groupKey call and the count it is sized with).
+ * through PatientGroup.byKey with a tiles_count-sized key, so a slide's group can close as
+ * soon as its own tiles have arrived. See tiled_adapter_group_size.nf.test for the
+ * countTileRows()/requirePositiveTileCount() function tests (the count that key is sized
+ * with) and tests/patient_group_probe.nf.test for the mandatory-size guard itself.
  *
  * This test is a regression/functional-equivalence check for the "Done when" requirement that
  * the set of control points reaching TILED_SOLVE per slide is unchanged: two patients run the
