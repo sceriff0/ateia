@@ -1,0 +1,20 @@
+markers:
+  PanCK: {role: lineage, compartment: cytoplasm, statistic: Mean, negative_reference: auto}
+  CD45:  {role: lineage, compartment: cytoplasm, statistic: Mean, negative_reference: auto}
+  CD3:   {role: lineage, compartment: cytoplasm, statistic: Mean}
+  CD8:   {role: lineage, compartment: cytoplasm, statistic: Mean}
+  CD4:   {role: lineage, compartment: cytoplasm, statistic: Mean}
+  Ki67:  {role: state,   compartment: nuclear,   statistic: Median}
+phenotypes:
+  Tumour: {PanCK: "+", CD45: "-"}
+  Immune: {CD45: "+", PanCK: "-"}
+  T_cell: {parent: Immune, CD3: "+"}
+  CD8_T:  {parent: T_cell, CD8: "+", CD4: "-"}
+  CD4_T:  {parent: T_cell, CD4: "+", CD8: "-"}
+constraints:
+  exclusive:
+    - {markers: [PanCK, CD45], rate: never}
+    - {markers: [CD4, CD8],    rate: rare}
+  requires:
+    - {if: CD4, then: CD3}
+    - {if: CD8, then: CD3}

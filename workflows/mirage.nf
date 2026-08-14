@@ -83,6 +83,7 @@ workflow MIRAGE {
         ParamUtils.validateAddCycleStepFlags(params)
         ParamUtils.validateAddCycle(params.outdir, params.prior_outdir)
         ParamUtils.validateCompartmentQuant(compartment_mode)
+        ParamUtils.validateAddCyclePhenotyping(params)  // add_cycle has no PHENOTYPE stage
         // add_cycle re-registers the new cycle via the classic VALIS_ADAPTER only; the
         // STARE 'tiled' backend is not wired into the incremental path — reject it loudly
         // rather than silently registering with VALIS.

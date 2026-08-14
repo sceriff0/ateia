@@ -1,0 +1,55 @@
+nextflow_process {
+
+    name "Test PHENOTYPE process"
+    script "modules/local/phenotype.nf"
+    process "PHENOTYPE"
+
+    tag "modules"
+    tag "modules_local"
+    tag "phenotype"
+
+    test("Should phenotype cells - stub") {
+        tag "stub"
+        options "-stub"
+        when {
+            process {
+                """
+                input[0] = [
+                    [patient_id: 'P001'],
+                    file('$projectDir/tests/testdata/pheno_merged_quant.csv', checkIfExists: true),
+                    file('$projectDir/tests/testdata/pheno_morphology.csv', checkIfExists: true)
+                ]
+                input[1] = file('$projectDir/tests/testdata/model_config_min.json', checkIfExists: true)
+                """
+            }
+        }
+        then {
+            assert process.success
+            assert process.out.phenotypes
+            assert process.out.versions
+        }
+    }
+
+    test("Should emit phenotypes.csv with outcome column - real") {
+        tag "real"
+        when {
+            process {
+                """
+                input[0] = [
+                    [patient_id: 'P001'],
+                    file('$projectDir/tests/testdata/pheno_merged_quant.csv', checkIfExists: true),
+                    file('$projectDir/tests/testdata/pheno_morphology.csv', checkIfExists: true)
+                ]
+                input[1] = file('$projectDir/tests/testdata/model_config_min.json', checkIfExists: true)
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert process.success },
+                { def hdr = path(process.out.phenotypes.get(0).get(1)).readLines()[0]
+                  assert hdr.contains('outcome') && hdr.contains('n_candidates') && hdr.contains('provenance') }
+            )
+        }
+    }
+}

@@ -153,6 +153,7 @@ class Layout {
         'split_channels',
         'quantify',
         'quantification',
+        'phenotyping',
         'geojson',
         'pyramid',
     ].asImmutable()
