@@ -1,0 +1,145 @@
+nextflow_process {
+
+    name "Test TILED_REG_TILE process"
+    script "modules/local/tiled_reg_tile.nf"
+    process "TILED_REG_TILE"
+
+    tag "modules"
+    tag "modules_local"
+    tag "tiled_reg_tile"
+
+    test("Should emit one control point per tile - stub") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [ patient_id: 'P001', channels: ['DAPI', 'CD3'], is_reference: false ],
+                    file('$projectDir/tests/testdata/P001_m0.json', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true),
+                    // splitCsv(header: true) yields STRING fields, so the row is spelled
+                    // the way the adapter really hands it over.
+                    [ ix: '3', iy: '2', cx: '3584.0', cy: '2560.0',
+                      rx0: '2816', ry0: '1792', rx1: '5376', ry1: '4352' ]
+                ]
+                """
+            }
+        }
+
+        then {
+            assert process.success
+            assert process.out.control
+            assert process.out.versions
+            with(process.out.control) {
+                assert size() == 1
+                // the tile's grid position is part of the filename, so the fan-in gather
+                // can order control points deterministically
+                assert get(0).get(1).toString().endsWith('_3_2_ctrl.json')
+            }
+        }
+    }
+
+    test("Should render the tile's read box and the upsample knob - rendered command") {
+
+        // Tagged `stub` so CI's blocking `nf-test test --tag stub` gate collects it, but
+        // deliberately WITHOUT `options "-stub"` -- `-stub` never evaluates a `script:`
+        // block, so no stub run can observe a rendered command. Same shape as
+        // tests/modules/tiled_coarse.nf.test's rendered-command cases.
+        //
+        // The teeth: every per-tile flag is rendered by TilePlan.regTileArgs from the
+        // tile-plan schema, and --upsample carries params.reg_tiled_upsample. A tile
+        // whose READ box (rx*) were rendered from the CORE box instead would register
+        // each tile without its halo context and still exit 0.
+        //
+        // The assertions read .command.sh rather than the process outcome: under
+        // `--profile test` no container engine is active, so tiled_reg_tile.py itself
+        // may not run at all on the host.
+        tag "stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [ patient_id: 'P001', channels: ['DAPI', 'CD3'], is_reference: false ],
+                    file('$projectDir/tests/testdata/P001_m0.json', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true),
+                    [ ix: '3', iy: '2', cx: '3584.0', cy: '2560.0',
+                      rx0: '2816', ry0: '1792', rx1: '5376', ry1: '4352' ]
+                ]
+                """
+            }
+        }
+
+        then {
+            def rendered = []
+            new File("$workDir").eachFileRecurse { f ->
+                if (f.name == '.command.sh' && f.text.contains('tiled_reg_tile.py')) {
+                    rendered << f.text
+                }
+            }
+
+            assertAll(
+                { assert rendered.size() >= 1,
+                    "no rendered TILED_REG_TILE .command.sh found under the task work dir" },
+                // the whole flag string TilePlan.regTileArgs owns, asserted verbatim
+                { assert rendered.every { it.contains('--ix 3 --iy 2 --cx 3584.0 --cy 2560.0 --rx0 2816 --ry0 1792 --rx1 5376 --ry1 4352') },
+                    "per-tile flags not rendered from the tile-plan schema: " + rendered.join(' --- ') },
+                { assert rendered.every { it.contains('--upsample 10') },
+                    "rendered command missing --upsample (params.reg_tiled_upsample default 10): " + rendered.join(' --- ') },
+                { assert rendered.every { it.contains('--m0 ') },
+                    "rendered command does not pass the COARSE anchor: " + rendered.join(' --- ') },
+                // the core box is the stitch's business, not the residual's
+                { assert rendered.every { !it.contains('--x0 ') && !it.contains('--y0 ') },
+                    "the tile CORE box must not be passed to the per-tile residual: " + rendered.join(' --- ') }
+            )
+        }
+    }
+
+    test("Should resolve the same nuclear index TILED_COARSE resolves - rendered command") {
+
+        // COARSE fits M0 on one channel and REG_TILE measures each tile's residual on it,
+        // so the two MUST agree. They used to carry fifteen byte-identical lines each;
+        // both now call MarkerUtils.requireNuclearIndex. `channels` here has NO DAPI and
+        // puts the nuclear marker (CELLTOX) at index 1, so a correct module renders
+        // `--nuclear-index 1` -- the same assertion tiled_coarse.nf.test makes.
+        tag "stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [ patient_id: 'P001', channels: ['CD3', 'CELLTOX'], is_reference: false ],
+                    file('$projectDir/tests/testdata/P001_m0.json', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true),
+                    [ ix: '0', iy: '0', cx: '8', cy: '8',
+                      rx0: '0', ry0: '0', rx1: '16', ry1: '16' ]
+                ]
+                """
+            }
+        }
+
+        then {
+            def rendered = []
+            new File("$workDir").eachFileRecurse { f ->
+                if (f.name == '.command.sh' && f.text.contains('tiled_reg_tile.py')) {
+                    rendered << f.text
+                }
+            }
+
+            assertAll(
+                { assert rendered.size() >= 1,
+                    "no rendered TILED_REG_TILE .command.sh found under the task work dir" },
+                { assert rendered.every { it.contains('--nuclear-index 1') },
+                    "nuclear index not resolved from channel metadata (expected 1 for ['CD3','CELLTOX']): " + rendered.join(' --- ') },
+                { assert rendered.every { !it.contains('--dapi-index') },
+                    "the renamed flag is gone from the module; --dapi-index survives only as a deprecated Python alias: " + rendered.join(' --- ') }
+            )
+        }
+    }
+}
