@@ -21,6 +21,7 @@ from logger import configure_logging, get_logger  # noqa: E402
 from pixel_size import (  # noqa: E402
     Microns,
     Pixels,
+    UnitError,
     Unrecorded,
     to_microns,
 )
@@ -769,7 +770,10 @@ def _as_um(measurement, pixel_size_um):
         return None, None
     try:
         return to_microns(measurement, pixel_size_um).value, None
-    except TypeError as exc:
+    except UnitError as exc:
+        # UnitError ONLY. A broader `except TypeError` here would also catch a coding
+        # error inside the conversion and render it as a "no verdict — ..." cell, which
+        # reads exactly like the legitimate refusal it is not.
         return None, str(exc)
 
 
@@ -864,7 +868,12 @@ def reconciliation_section(tre_dir, seg_qc_dir, pixel_size_um=None):
         "cell displacement is measured on independently segmented nuclei. A flagged row means "
         f"the two disagree by more than {RECONCILE_DIVERGENCE_RATIO:g}× — worth a look. "
         "Each figure is shown with the unit it is actually in: a row is only compared when "
-        "both sides could be expressed in µm, and the reason is given when they could not.</p>",
+        "both sides could be expressed in µm, and the reason is given when they could not. "
+        "On the VALIS backend every row reads &ldquo;no verdict&rdquo; by design &mdash; VALIS "
+        "measures its feature-TRE on its own processed image and records no unit for it, so "
+        "the run&rsquo;s pixel size cannot put the two sides in one unit; recording that unit "
+        "in <code>bin/register.py</code> is what would restore the comparison. The "
+        "cell-displacement column is unaffected and still worth reading on its own.</p>",
         "<table><thead><tr><th>Slide</th><th>Stage</th><th>Feature-TRE</th>"
         "<th>Cell disp. p50</th><th>Agreement</th></tr></thead><tbody>",
     ]

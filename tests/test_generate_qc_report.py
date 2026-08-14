@@ -670,3 +670,40 @@ def test_seg_qc_pixel_fallback_is_converted_not_relabelled(tmp_path):
         for r in gqr.reconcile_rows(str(tre), str(seg), pixel_size_um=0.5)
     }
     assert rows[("mov", "rigid")]["cell_disp_um"] == pytest.approx(2.0)
+
+
+def test_a_coding_error_inside_the_conversion_is_not_rendered_as_a_reason(
+    tmp_path, monkeypatch
+):
+    """A swallowed bug that renders as normal-looking output is the worst shape a bug
+    can take in a QC report.
+
+    `_as_um` catches the exception `to_microns` raises to say "this cannot be expressed
+    in µm" -- an expected STATE. If that catch is broad enough to also swallow a genuine
+    coding error inside the conversion, the report grows a plausible-looking "no verdict
+    — ..." cell instead of failing, and nobody ever learns. Only the dedicated
+    unit-refusal exception may be caught.
+    """
+    gqr = _load()
+    tre = _stare_tre_dir(tmp_path, coarse=4.0, final_p50=2.0)
+    seg = _seg_qc_dir_with(tmp_path, {"rigid": {"displacement_um_p50": 1.3}})
+
+    def boom(measurement, pixel_size_um):
+        # The shape a real bug takes: a plain TypeError from inside the arithmetic.
+        raise TypeError("unsupported operand type(s) for *: 'Pixels' and 'str'")
+
+    monkeypatch.setattr(gqr, "to_microns", boom)
+    with pytest.raises(TypeError, match="unsupported operand"):
+        gqr.reconcile_rows(str(tre), str(seg), pixel_size_um=0.325)
+
+
+def test_the_blurb_tells_an_operator_why_valis_rows_carry_no_verdict(tmp_path):
+    """On the default backend EVERY row reads "no verdict", and the per-row reason is
+    developer-facing. The section blurb has to say what an operator should conclude."""
+    gqr = _load()
+    html = gqr.reconciliation_section(
+        str(_valis_csvs(tmp_path)), str(_seg_qc_json(tmp_path)), pixel_size_um=0.325
+    )
+    assert "VALIS" in html
+    assert "no verdict" in html
+    assert "register.py" in html, "the blurb does not say what would restore the row"

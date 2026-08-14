@@ -43,6 +43,7 @@ __all__ = [
     "Microns",
     "Unrecorded",
     "Measurement",
+    "UnitError",
     "to_microns",
 ]
 
@@ -66,6 +67,21 @@ __all__ = [
 # to nothing at all.
 
 
+class UnitError(TypeError):
+    """A conversion to µm that cannot be justified -- an expected STATE, not a bug.
+
+    Dedicated so that ``bin/generate_qc_report.py`` can catch "this value cannot be
+    expressed in µm" and render a reason, WITHOUT that same ``except`` also swallowing a
+    genuine coding error inside the conversion and rendering it as a plausible-looking
+    QC cell. A swallowed error that looks like normal output is the worst shape a bug
+    can take in a QC report.
+
+    Still a ``TypeError``: the brief's rule is that a px value reaching a µm field is a
+    *type* error rather than a naming convention, and subclassing keeps that true for
+    any caller that catches the broad type.
+    """
+
+
 class Measurement:
     """A number that knows what it is measured in.
 
@@ -80,6 +96,15 @@ class Measurement:
     unit = "unrecorded"
 
     def __init__(self, value: float) -> None:
+        # Abstract: the base is the isinstance root and the type alias, never a value.
+        # An instantiable base is a fourth, unit-less measurement type hiding inside the
+        # vocabulary -- and `to_microns` would tell it it was "a bare number, not a
+        # measurement", which is false about the object it was just handed.
+        if type(self) is Measurement:
+            raise TypeError(
+                "Measurement is abstract; use Pixels(...), Microns(...) or "
+                "Unrecorded(...) so the value carries a unit"
+            )
         self.value = float(value)
 
     def __eq__(self, other: object) -> bool:
@@ -124,26 +149,27 @@ def to_microns(measurement: Measurement, pixel_size_um: Optional[float]) -> Micr
     "resolve the scale for me" helper would. That is the same property
     ``warn_on_pixel_size_mismatch`` protects by never returning a scale.
 
-    Raises ``TypeError`` -- one exception for every way the conversion cannot be
+    Raises ``UnitError`` -- one exception for every way the conversion cannot be
     justified -- when the argument is a bare number rather than a measurement, when its
     unit was never recorded, or when no usable scale was supplied. Refusing is the
-    point: every one of those cases used to render as a confident µm figure.
+    point: every one of those cases used to render as a confident µm figure. Anything
+    else raised from here is a bug and is left to propagate.
     """
     if isinstance(measurement, Microns):
         return measurement
     if isinstance(measurement, Unrecorded):
-        raise TypeError(
+        raise UnitError(
             f"cannot express {measurement.value!r} in µm: its producer recorded no "
             "unit, so no scale can convert it"
         )
     if not isinstance(measurement, Pixels):
-        raise TypeError(
+        raise UnitError(
             f"{measurement!r} is a bare number, not a measurement; wrap it in "
             "Pixels(...) or Microns(...) at the point it is read so the unit travels "
             "with the value"
         )
     if not pixel_size_um:
-        raise TypeError(
+        raise UnitError(
             f"cannot express {measurement.value!r} px in µm: no pixel size was "
             "supplied (params.pixel_size is the one owner of that scale)"
         )

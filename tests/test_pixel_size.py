@@ -186,3 +186,26 @@ def test_each_measurement_renders_with_its_unit():
     assert ps.Pixels(4.0).unit == "px"
     assert ps.Microns(1.3).unit == "µm"
     assert ps.Unrecorded(4.0).unit == "unrecorded"
+
+
+def test_the_base_measurement_cannot_be_instantiated():
+    """`Measurement` is the isinstance base and the type alias, not a usable value.
+
+    An instantiable base is a fourth, unit-less measurement type hiding in the
+    vocabulary: `to_microns(Measurement(4.0))` used to report "is a bare number, not a
+    measurement", which is false about the very object it was handed.
+    """
+    with pytest.raises(TypeError, match="abstract"):
+        ps.Measurement(4.0)
+
+
+def test_the_unit_refusal_exception_is_dedicated_and_still_a_type_error():
+    """Dedicated so a caller can catch it WITHOUT swallowing a genuine coding error;
+    still a TypeError so the brief's "make the mismatch a type error" holds."""
+    assert issubclass(ps.UnitError, TypeError)
+    with pytest.raises(ps.UnitError):
+        ps.to_microns(ps.Pixels(4.0), None)
+    with pytest.raises(ps.UnitError):
+        ps.to_microns(4.0, 0.325)
+    with pytest.raises(ps.UnitError):
+        ps.to_microns(ps.Unrecorded(4.0), 0.325)

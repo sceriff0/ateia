@@ -25,14 +25,18 @@ BIN = ROOT / "bin"
 MODULES = ROOT / "modules" / "local"
 MODULES_CONFIG = ROOT / "conf" / "modules.config"
 
-# Every spelling of the flag, not just the bare one. An earlier version of this regex
-# required the flag to END right after `--pixel[-_]size`, so `--pixel-size-um` -- the
-# spelling `bin/warp_seg_qc.py` used -- slipped past by one suffix and that script was
-# never covered. The optional suffix group is what makes the scan honest; the
-# `[^\s'"]*` tail then refuses any *further* suffix, so a new spelling has to be added
-# here deliberately rather than escaping silently again.
-FLAG_RE = re.compile(r'add_argument\(\s*["\'](--pixel[-_]size(?:[-_]um)?)["\']')
-PASSED_RE = re.compile(r"--pixel[-_]size(?:[-_]um)?\s+\$\{([^}]+)\}")
+# ONE pattern for "any spelling of the scale flag", shared by every scan in this file.
+# An earlier version of FLAG_RE required the flag to END right after `--pixel[-_]size`,
+# so `--pixel-size-um` -- the spelling `bin/warp_seg_qc.py` used -- slipped past by one
+# suffix and that script was never covered by the guard written to cover it. The `[a-z_-]*`
+# tail is what closes that class of escape: it runs PAST the canonical spelling, so a
+# fourth invention (`--pixel-size-microns`, say) is scanned rather than skipped. Nothing
+# here enumerates the spellings that happen to exist today -- enumerating them is how the
+# hole appeared.
+ANY_SPELLING = r"--pixel[-_]size[a-z_-]*"
+
+FLAG_RE = re.compile(r'add_argument\(\s*["\']({})["\']'.format(ANY_SPELLING))
+PASSED_RE = re.compile(ANY_SPELLING + r"\s+\$\{([^}]+)\}")
 
 # Scripts that are operator tools rather than pipeline processes: no module invokes
 # them, so there is no call site to check. Each must stay unreferenced by modules/ for
@@ -144,9 +148,7 @@ def test_every_scale_accepting_script_is_handed_the_configured_scale(script):
 # every declaration uses it, and no call site renders anything else.
 CANONICAL_FLAG = "--pixel-size"
 
-# Matches any spelling, including suffixed ones, so a NEW divergent spelling is caught
-# rather than skipped. `[a-z_-]*` deliberately runs past the canonical form.
-ANY_SPELLING_RE = re.compile(r"--pixel[-_]size[a-z_-]*")
+ANY_SPELLING_RE = re.compile(ANY_SPELLING)
 
 
 def _spellings_in(text: str) -> set[str]:
@@ -157,9 +159,7 @@ def test_every_declaration_uses_the_one_spelling():
     """Each bin/ script's argparse declaration of the scale flag."""
     offenders = {}
     for path in sorted(BIN.glob("*.py")):
-        for m in re.finditer(
-            r'add_argument\(\s*["\'](--pixel[-_]size[a-z_-]*)["\']', path.read_text()
-        ):
+        for m in FLAG_RE.finditer(path.read_text()):
             if m.group(1) != CANONICAL_FLAG:
                 offenders.setdefault(path.name, set()).add(m.group(1))
     assert not offenders, (
@@ -180,3 +180,28 @@ def test_every_call_site_renders_the_one_spelling():
         f"these call sites render a non-canonical spelling of the scale flag: "
         f"{offenders}; the one spelling is {CANONICAL_FLAG}"
     )
+
+
+def test_the_scan_pattern_covers_a_spelling_nobody_has_invented_yet():
+    """The comment on ANY_SPELLING makes a claim; this executes it.
+
+    The previous version of that comment described a `[^\\s'"]*` tail that was not in
+    the regex at all, and under it `--pixel-size-microns` escaped FLAG_RE exactly as
+    `--pixel-size-um` had. A comment asserting a mechanism the code does not have is the
+    same defect this whole file exists to catch, one level up.
+    """
+    for spelling in (
+        "--pixel_size",
+        "--pixel-size",
+        "--pixel-size-um",
+        "--pixel-size-microns",  # nobody's spelling; the point is that it is scanned
+        "--pixel_size_um",
+    ):
+        assert FLAG_RE.search(f'add_argument("{spelling}",'), (
+            f"FLAG_RE does not see {spelling}: a script declaring it would be skipped "
+            f"by the call-site scan entirely"
+        )
+        assert FLAG_RE.search(f'add_argument("{spelling}",').group(1) == spelling
+        assert PASSED_RE.search(spelling + " ${params.pixel_size}"), (
+            f"PASSED_RE does not see {spelling} at a call site"
+        )
