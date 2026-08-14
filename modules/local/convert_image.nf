@@ -39,7 +39,7 @@ process CONVERT_IMAGE {
         --output_dir . \\
         --patient_id ${prefix} \\
         --channels ${channels} \\
-        --pixel_size ${pixel_size} \\
+        --pixel-size ${pixel_size} \\
         --nuclear-markers ${nuclear_markers} \\
         ${args}
 

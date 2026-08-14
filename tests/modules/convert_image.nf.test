@@ -200,7 +200,14 @@ nextflow_process {
                 // `--nuclear-markers` followed by the shell line-continuation, so the
                 // value is simply absent and this fails.
                 { assert rendered.every { it.contains('--nuclear-markers CELLTOX') },
-                    "rendered command lost the marker value: " + rendered.join(' --- ') }
+                    "rendered command lost the marker value: " + rendered.join(' --- ') },
+                // The scale flag has ONE spelling across bin/ and modules/: `--pixel-size`.
+                // CONVERT_IMAGE used to render the odd-one-out `--pixel_size`, which is
+                // what made "is the scale passed here?" a per-file question.
+                { assert rendered.every { it.contains('--pixel-size 0.325') },
+                    "rendered command missing --pixel-size 0.325: " + rendered.join(' --- ') },
+                { assert rendered.every { !it.contains('--pixel_size') },
+                    "rendered command still carries the old --pixel_size spelling: " + rendered.join(' --- ') }
             )
         }
     }

@@ -25,8 +25,14 @@ BIN = ROOT / "bin"
 MODULES = ROOT / "modules" / "local"
 MODULES_CONFIG = ROOT / "conf" / "modules.config"
 
-FLAG_RE = re.compile(r'add_argument\(\s*["\'](--pixel[-_]size)["\']')
-PASSED_RE = re.compile(r"--pixel[-_]size\s+\$\{([^}]+)\}")
+# Every spelling of the flag, not just the bare one. An earlier version of this regex
+# required the flag to END right after `--pixel[-_]size`, so `--pixel-size-um` -- the
+# spelling `bin/warp_seg_qc.py` used -- slipped past by one suffix and that script was
+# never covered. The optional suffix group is what makes the scan honest; the
+# `[^\s'"]*` tail then refuses any *further* suffix, so a new spelling has to be added
+# here deliberately rather than escaping silently again.
+FLAG_RE = re.compile(r'add_argument\(\s*["\'](--pixel[-_]size(?:[-_]um)?)["\']')
+PASSED_RE = re.compile(r"--pixel[-_]size(?:[-_]um)?\s+\$\{([^}]+)\}")
 
 # Scripts that are operator tools rather than pipeline processes: no module invokes
 # them, so there is no call site to check. Each must stay unreferenced by modules/ for
@@ -100,6 +106,10 @@ def test_the_scan_found_the_scripts_it_is_meant_to_cover():
         "split_multichannel.py",
         "tiled_stitch.py",
         "export_geojson.py",
+        # Never covered until the FLAG_RE above was widened: it declared the flag as
+        # `--pixel-size-um`, one suffix past what the old regex would match, so the scan
+        # skipped it entirely and `warp_seg_qc.nf` passed no scale at all.
+        "warp_seg_qc.py",
     } <= set(SCRIPTS), sorted(SCRIPTS)
 
 
@@ -123,3 +133,50 @@ def test_every_scale_accepting_script_is_handed_the_configured_scale(script):
             f"{nf.name} passes {SCRIPTS[script]} as '{found.group(1)}', which does not "
             f"resolve to params.pixel_size — a second owner of the scale"
         )
+
+
+# ── one spelling ───────────────────────────────────────────────────────────────
+# Three spellings were in use at once -- `--pixel_size`, `--pixel-size` and
+# `--pixel-size-um` -- and the third is exactly how `bin/warp_seg_qc.py` escaped the
+# scan above for as long as it existed. A flag with more than one spelling cannot be
+# grepped for, cannot be guarded by one regex, and makes "is the scale passed here?"
+# a question you have to answer per file. One spelling, asserted in both directions:
+# every declaration uses it, and no call site renders anything else.
+CANONICAL_FLAG = "--pixel-size"
+
+# Matches any spelling, including suffixed ones, so a NEW divergent spelling is caught
+# rather than skipped. `[a-z_-]*` deliberately runs past the canonical form.
+ANY_SPELLING_RE = re.compile(r"--pixel[-_]size[a-z_-]*")
+
+
+def _spellings_in(text: str) -> set[str]:
+    return set(ANY_SPELLING_RE.findall(text))
+
+
+def test_every_declaration_uses_the_one_spelling():
+    """Each bin/ script's argparse declaration of the scale flag."""
+    offenders = {}
+    for path in sorted(BIN.glob("*.py")):
+        for m in re.finditer(
+            r'add_argument\(\s*["\'](--pixel[-_]size[a-z_-]*)["\']', path.read_text()
+        ):
+            if m.group(1) != CANONICAL_FLAG:
+                offenders.setdefault(path.name, set()).add(m.group(1))
+    assert not offenders, (
+        f"these scripts declare the scale flag under a non-canonical spelling: "
+        f"{ {k: sorted(v) for k, v in offenders.items()} }; "
+        f"the one spelling is {CANONICAL_FLAG}"
+    )
+
+
+def test_every_call_site_renders_the_one_spelling():
+    """Each module file and conf/modules.config `ext.args` that passes the scale."""
+    offenders = {}
+    for path in sorted(MODULES.glob("*.nf")) + [MODULES_CONFIG]:
+        bad = {s for s in _spellings_in(path.read_text()) if s != CANONICAL_FLAG}
+        if bad:
+            offenders[path.name] = sorted(bad)
+    assert not offenders, (
+        f"these call sites render a non-canonical spelling of the scale flag: "
+        f"{offenders}; the one spelling is {CANONICAL_FLAG}"
+    )

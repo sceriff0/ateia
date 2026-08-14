@@ -411,7 +411,7 @@ def parse_args() -> argparse.Namespace:
         "cells.geojson gets a top-level nucleusGeometry field for per-compartment quantification.",
     )
     parser.add_argument(
-        "--pixel_size",
+        "--pixel-size",
         type=float,
         default=0.325,
         help="Pixel size in micrometers",

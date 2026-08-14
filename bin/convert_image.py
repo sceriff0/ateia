@@ -602,7 +602,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Comma-separated channel names (optional, reads metadata when omitted)",
     )
-    parser.add_argument("--pixel_size", type=float, default=PIXEL_SIZE_UM)
+    parser.add_argument("--pixel-size", type=float, default=PIXEL_SIZE_UM)
     parser.add_argument(
         "--nuclear-markers",
         nargs="+",

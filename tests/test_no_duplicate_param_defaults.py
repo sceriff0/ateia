@@ -261,6 +261,19 @@ ARGPARSE_DEFAULT_ALLOWLIST = {
             "is the more useful behavior than silently assuming 0.325."
         ),
     },
+    "warp_seg_qc.py:--pixel-size": {
+        "reason": (
+            "default=None means 'no scale was supplied', which is a distinct state "
+            "rather than a stale literal: bin/warp_seg_qc.py emits the "
+            "displacement_um_* statistics ONLY when it has a scale, and "
+            "bin/generate_qc_report.py refuses to reconcile a px figure against a µm "
+            "one when it cannot convert. Mirroring 0.325 here would manufacture a "
+            "second silent owner of the scale and turn 'unknown' into 'plausible'. "
+            "The pipeline never reaches the default -- modules/local/warp_seg_qc.nf "
+            "renders `--pixel-size ${params.pixel_size}` unconditionally, which "
+            "tests/test_pixel_size_is_passed.py asserts."
+        ),
+    },
     "generate_registration_qc.py:--nuclear-markers": {
         "reason": (
             "Same contract as merge_quant_csvs.py's and split_multichannel.py's "

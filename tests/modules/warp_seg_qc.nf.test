@@ -166,7 +166,18 @@ nextflow_process {
                 { assert rendered.every { !it.contains('--method') },
                     "valis rendered command must not carry --method (tiled-only flag): " + rendered.join(' --- ') },
                 { assert rendered.every { it.contains('valis: $(python -c "import valis;') },
-                    "valis rendered versions.yml missing the valis probe row: " + rendered.join(' --- ') }
+                    "valis rendered versions.yml missing the valis probe row: " + rendered.join(' --- ') },
+                // The scale, with its value and not just its flag. WARP_SEG_QC used to
+                // pass NO scale at all -- bin/warp_seg_qc.py spelled the flag
+                // `--pixel-size-um`, one suffix past what
+                // tests/test_pixel_size_is_passed.py's regex matched, so the static guard
+                // never covered it and the script fell back to reading a fourth pixel
+                // size off the VALIS registrar. params.pixel_size is 0.325 in
+                // nextflow.config.
+                { assert rendered.every { it.contains('--pixel-size 0.325') },
+                    "valis rendered command missing --pixel-size 0.325: " + rendered.join(' --- ') },
+                { assert rendered.every { !it.contains('--pixel-size-um') },
+                    "rendered command still carries the old --pixel-size-um spelling: " + rendered.join(' --- ') }
             )
         }
     }

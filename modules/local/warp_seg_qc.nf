@@ -74,6 +74,7 @@ process WARP_SEG_QC {
         --output ${prefix}_seg_qc.json \\
         --per-cell-csv ${prefix}_reg_residuals.csv \\
         --patient-id ${meta.patient_id} \\
+        --pixel-size ${params.pixel_size} \\
 ${backend_flags}
         ${args}
 

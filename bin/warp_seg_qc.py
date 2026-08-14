@@ -639,10 +639,11 @@ def parse_args(argv=None):
         help="a pair spanning a larger window is counted but not scored",
     )
     ap.add_argument(
-        "--pixel-size-um",
+        "--pixel-size",
+        dest="pixel_size_um",
         type=float,
         default=None,
-        help="physical pixel size; default = read from the slide metadata",
+        help="configured scale in µm/px (WARP_SEG_QC passes params.pixel_size)",
     )
     ap.add_argument(
         "--jvm-heap-gb",
