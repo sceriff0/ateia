@@ -44,6 +44,7 @@ process GENERATE_QC_REPORT {
         --run-summary ${run_summary_json} \\
         --seg-qc seg_qc/ \\
         --seg-residuals seg_residuals/ \\
+        --pixel-size ${params.pixel_size} \\
         --output mirage_qc_report_${timestamp}.html \\
         --data-dir mirage_qc_data_${timestamp}/ \\
         ${args}

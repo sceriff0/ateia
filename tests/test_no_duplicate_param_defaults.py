@@ -261,6 +261,17 @@ ARGPARSE_DEFAULT_ALLOWLIST = {
             "is the more useful behavior than silently assuming 0.325."
         ),
     },
+    "generate_qc_report.py:--pixel-size": {
+        "reason": (
+            "Same contract as warp_seg_qc.py's --pixel-size: default=None means 'no "
+            "scale available', and the reconciliation table's whole point is that it "
+            "REFUSES a px-vs-µm comparison in that state rather than converting at an "
+            "assumed 0.325. Mirroring the config default here would restore exactly the "
+            "silent second owner this file exists to forbid. The pipeline never reaches "
+            "the default -- modules/local/generate_qc_report.nf renders "
+            "`--pixel-size ${params.pixel_size}` unconditionally."
+        ),
+    },
     "warp_seg_qc.py:--pixel-size": {
         "reason": (
             "default=None means 'no scale was supplied', which is a distinct state "

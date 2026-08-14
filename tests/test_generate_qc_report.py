@@ -4,8 +4,17 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO = Path(__file__).resolve().parents[1]
 SCRIPT = REPO / "bin" / "generate_qc_report.py"
+
+# Imported the way bin/generate_qc_report.py imports it -- through sys.path, so
+# `sys.modules["pixel_size"]` holds ONE module object and the unit classes compared
+# below are the same classes the script under test constructs. Loading a second copy by
+# path would give equal-looking values of two unrelated types.
+sys.path.insert(0, str(REPO / "bin" / "utils"))
+import pixel_size as ps  # noqa: E402
 
 
 def _load():
@@ -207,6 +216,10 @@ def test_end_to_end_cli_smoke(tmp_path):
             str(rs),
             "--versions",
             str(v),
+            # The scale, exercised end-to-end: modules/local/generate_qc_report.nf
+            # always renders it, so the subprocess path must parse it.
+            "--pixel-size",
+            "0.325",
             "--output",
             str(out),
             "--data-dir",
@@ -279,26 +292,56 @@ def test_reconcile_maps_each_stage_to_the_right_tre_source(tmp_path):
         )
     }
 
-    assert rows[("mov", "rigid")]["feature_tre_um"] == 2.0
-    assert rows[("mov", "non_rigid")]["feature_tre_um"] == 1.0  # from PRE-micro summary
-    assert rows[("mov", "micro")]["feature_tre_um"] == 0.5  # from FINAL summary
+    # Asserted on `feature_tre` -- the measurement as read -- rather than on
+    # `feature_tre_um`. VALIS's D columns arrive with no recorded unit, so there is no
+    # µm figure for them; the stage→source mapping this test exists to pin is unchanged.
+    assert rows[("mov", "rigid")]["feature_tre"] == ps.Unrecorded(2.0)
+    assert rows[("mov", "non_rigid")]["feature_tre"] == ps.Unrecorded(1.0)  # PRE-micro
+    assert rows[("mov", "micro")]["feature_tre"] == ps.Unrecorded(0.5)  # FINAL summary
     assert rows[("mov", "rigid")]["cell_disp_um"] == 2.1
     assert rows[("mov", "micro")]["cell_disp_um"] == 6.0
 
 
 def test_reconcile_flags_divergence_when_features_and_cells_disagree(tmp_path):
+    """The divergence rule itself, exercised where both sides CAN be put in one unit.
+
+    Was written against the VALIS fixture, whose D columns carry no recorded unit; that
+    made it a test of an arithmetic comparison between two numbers of unknown and
+    possibly different units. Re-pointed at the STARE fixture, where the feature side is
+    px and the scale is supplied, so the 3× rule is applied to two µm figures.
+    """
+    gqr = _load()
+    tre = tmp_path / "registration_tre"
+    tre.mkdir()
+    # 6.0 px * 0.325 = 1.95 µm rigid; 1.0 px * 0.325 = 0.325 µm for non_rigid/micro.
+    _write_tre(tre, "mov", coarse=6.0, rigid_p50=6.0, final_p50=1.0)
+    rows = {
+        (r["slide"], r["stage"]): r
+        for r in gqr.reconcile_rows(
+            str(tre), str(_seg_qc_json(tmp_path)), pixel_size_um=0.325
+        )
+    }
+
+    # rigid: 1.95 µm vs 2.1 µm -> corroborating. micro: 0.325 µm vs 6.0 µm -> 18×.
+    assert rows[("mov", "rigid")]["divergent"] is False
+    assert rows[("mov", "non_rigid")]["divergent"] is True
+    assert rows[("mov", "micro")]["divergent"] is True
+
+
+def test_reconcile_refuses_a_verdict_for_valis_tre_whose_unit_is_unrecorded(tmp_path):
+    """The VALIS fixture this test used to run on: no unit, therefore no verdict."""
     gqr = _load()
     rows = {
         (r["slide"], r["stage"]): r
         for r in gqr.reconcile_rows(
-            str(_valis_csvs(tmp_path)), str(_seg_qc_json(tmp_path))
+            str(_valis_csvs(tmp_path)),
+            str(_seg_qc_json(tmp_path)),
+            pixel_size_um=0.325,
         )
     }
-
-    # rigid/non_rigid agree closely -> not divergent; micro: features say 0.5µm, cells say 6µm.
-    assert rows[("mov", "rigid")]["divergent"] is False
-    assert rows[("mov", "non_rigid")]["divergent"] is False
-    assert rows[("mov", "micro")]["divergent"] is True
+    for stage in ("rigid", "non_rigid", "micro"):
+        assert rows[("mov", stage)]["divergent"] is None, stage
+        assert rows[("mov", stage)]["reason"], stage
 
 
 def test_reconcile_non_rigid_tre_falls_back_to_final_without_premicro_summary(tmp_path):
@@ -316,10 +359,10 @@ def test_reconcile_non_rigid_tre_falls_back_to_final_without_premicro_summary(tm
         (r["slide"], r["stage"]): r
         for r in gqr.reconcile_rows(str(d), str(_seg_qc_json(tmp_path)))
     }
-    # non_rigid feature-TRE falls back to the final summary's non_rigid_D (0.5); cell disp is 1.1,
-    # 1.1 <= 3*0.5 so the stage corroborates (not divergent).
-    assert rows[("mov", "non_rigid")]["feature_tre_um"] == 0.5
-    assert rows[("mov", "non_rigid")]["divergent"] is False
+    # non_rigid feature-TRE falls back to the final summary's non_rigid_D (0.5). Whether
+    # that corroborates the cell displacement is a separate question the VALIS path
+    # cannot answer -- its D columns record no unit -- so only the fallback is pinned here.
+    assert rows[("mov", "non_rigid")]["feature_tre"] == ps.Unrecorded(0.5)
 
 
 def test_reconciliation_section_renders_and_marks_divergence(tmp_path):
@@ -415,8 +458,14 @@ def test_registration_section_renders_stare_tre_from_valis_dir(tmp_path):
 def test_read_intrinsic_tre_valis_csv_shape_preserved(tmp_path):
     gqr = _load()
     out = gqr._read_intrinsic_tre(str(_valis_csvs(tmp_path)))
-    assert out["mov"]["final"] == {"rigid_D": 2.0, "non_rigid_D": 0.5}
-    assert out["mov"]["premicro"] == {"rigid_D": 2.0, "non_rigid_D": 1.0}
+    assert out["mov"]["final"] == {
+        "rigid_D": ps.Unrecorded(2.0),
+        "non_rigid_D": ps.Unrecorded(0.5),
+    }
+    assert out["mov"]["premicro"] == {
+        "rigid_D": ps.Unrecorded(2.0),
+        "non_rigid_D": ps.Unrecorded(1.0),
+    }
 
 
 def test_read_intrinsic_tre_reads_stare_json(tmp_path):
@@ -425,7 +474,10 @@ def test_read_intrinsic_tre_reads_stare_json(tmp_path):
     d.mkdir()
     _write_tre(d, "P1_DAPI", coarse=2.5, rigid_p50=4.0, final_p50=0.4)
     out = gqr._read_intrinsic_tre(str(d))
-    assert out["P1_DAPI"]["final"] == {"rigid_D": 2.5, "non_rigid_D": 0.4}
+    assert out["P1_DAPI"]["final"] == {
+        "rigid_D": ps.Pixels(2.5),
+        "non_rigid_D": ps.Pixels(0.4),
+    }
     assert out["P1_DAPI"]["premicro"] == {}
 
 
@@ -435,13 +487,17 @@ def test_reconcile_rows_from_stare_tre_json_are_nonempty(tmp_path):
     d.mkdir()
     _write_tre(d, "mov", coarse=2.0, rigid_p50=3.0, final_p50=0.5)
     seg_qc = _seg_qc_json(tmp_path)  # slide "mov", matches _write_tre's moving field
-    rows = {(r["slide"], r["stage"]): r for r in gqr.reconcile_rows(str(d), str(seg_qc))}
+    rows = {
+        (r["slide"], r["stage"]): r
+        for r in gqr.reconcile_rows(str(d), str(seg_qc), pixel_size_um=0.5)
+    }
     assert rows  # non-empty: the JSON-only input still reconciles
-    assert rows[("mov", "rigid")]["feature_tre_um"] == 2.0  # coarse_tre_px
-    # No premicro summary for STARE -> non_rigid falls back to final's non_rigid_D (0.5),
+    # coarse_tre_px = 2.0 px at 0.5 µm/px = 1.0 µm. The un-converted value is 2.0.
+    assert rows[("mov", "rigid")]["feature_tre_um"] == pytest.approx(1.0)
+    # No premicro summary for STARE -> non_rigid falls back to final's non_rigid_D (0.5 px),
     # same fallback path VALIS uses when micro_reg < 2.
-    assert rows[("mov", "non_rigid")]["feature_tre_um"] == 0.5
-    assert rows[("mov", "micro")]["feature_tre_um"] == 0.5
+    assert rows[("mov", "non_rigid")]["feature_tre_um"] == pytest.approx(0.25)
+    assert rows[("mov", "micro")]["feature_tre_um"] == pytest.approx(0.25)
 
 
 def test_reconciliation_section_neither_format_is_method_neutral_and_does_not_raise(tmp_path):
@@ -484,7 +540,133 @@ def test_reconcile_rows_merges_valis_csv_and_stare_json_rather_than_shadowing(tm
         )
     )
 
-    rows = {(r["slide"], r["stage"]): r for r in gqr.reconcile_rows(str(d), str(seg_qc))}
+    rows = {
+        (r["slide"], r["stage"]): r
+        for r in gqr.reconcile_rows(str(d), str(seg_qc), pixel_size_um=0.5)
+    }
     # Both slides are present: the CSV reader did not shadow the JSON reader, or vice versa.
-    assert rows[("mov_valis", "rigid")]["feature_tre_um"] == 2.0
-    assert rows[("mov_stare", "rigid")]["feature_tre_um"] == 1.5
+    # Read back as measurements, since only the STARE side has a unit to convert.
+    assert rows[("mov_valis", "rigid")]["feature_tre"] == ps.Unrecorded(2.0)
+    assert rows[("mov_stare", "rigid")]["feature_tre"] == ps.Pixels(1.5)
+    assert rows[("mov_stare", "rigid")]["feature_tre_um"] == pytest.approx(0.75)
+
+
+# ── units: the reconciliation table must not render px under a µm header ────────
+# `coarse_tre_px` is a PIXEL count; `displacement_um_p50` is MICRONS. Both used to be
+# assigned straight into `feature_tre_um` / `cell_disp_um` and rendered under "(µm)"
+# headers, with no conversion anywhere on the path. At the shipped pixel_size of 0.325
+# a px↔µm mix-up is a 1/0.325 = 3.08x error -- the same magnitude as
+# RECONCILE_DIVERGENCE_RATIO = 3.0, so the flag meant to catch bad registration cannot
+# be told apart from the unit bug that triggers it.
+def _stare_tre_dir(tmp_path, coarse, final_p50):
+    d = tmp_path / "registration_tre"
+    d.mkdir()
+    _write_tre(d, "mov", coarse=coarse, rigid_p50=coarse, final_p50=final_p50)
+    return d
+
+
+def _seg_qc_dir_with(tmp_path, stages):
+    d = tmp_path / "seg_qc"
+    d.mkdir()
+    (d / "P001_mov_seg_qc.json").write_text(
+        json.dumps(
+            {"patient_id": "P001", "moving": "mov", "reference": "ref",
+             "stages": stages}
+        )
+    )
+    return d
+
+
+def test_pixel_tre_is_converted_to_microns_with_the_configured_scale(tmp_path):
+    """A px-named producer field rendered under a µm header must be CONVERTED."""
+    gqr = _load()
+    tre = _stare_tre_dir(tmp_path, coarse=4.0, final_p50=2.0)
+    seg = _seg_qc_dir_with(tmp_path, {"rigid": {"displacement_um_p50": 1.3}})
+    rows = {
+        (r["slide"], r["stage"]): r
+        for r in gqr.reconcile_rows(str(tre), str(seg), pixel_size_um=0.325)
+    }
+    # 4.0 px * 0.325 µm/px = 1.3 µm. The un-converted value is 4.0.
+    assert rows[("mov", "rigid")]["feature_tre_um"] == pytest.approx(1.3)
+    assert rows[("mov", "rigid")]["cell_disp_um"] == pytest.approx(1.3)
+    assert rows[("mov", "rigid")]["divergent"] is False
+
+
+def test_reconciliation_section_renders_the_converted_micron_figure(tmp_path):
+    gqr = _load()
+    tre = _stare_tre_dir(tmp_path, coarse=4.0, final_p50=2.0)
+    seg = _seg_qc_dir_with(tmp_path, {"rigid": {"displacement_um_p50": 1.3}})
+    html = gqr.reconciliation_section(str(tre), str(seg), pixel_size_um=0.325)
+    assert "1.300" in html, html
+    assert "4.000" not in html, "the raw pixel count is still being rendered:\n" + html
+
+
+def test_mixed_units_refuse_rather_than_flagging_divergence(tmp_path):
+    """The case where a unit bug and a real 3x divergence are indistinguishable.
+
+    Feature-TRE is 1.0 PIXEL; cell displacement is 1.0 MICRON. Numerically identical,
+    so an unconverted comparison says "agree". Converted at 0.325 µm/px they are
+    0.325 µm vs 1.0 µm -- a ratio of 3.08, i.e. divergent. Same two numbers, opposite
+    verdicts, and the only thing that separates them is the scale. Without a scale the
+    table must refuse to answer instead of picking one.
+    """
+    gqr = _load()
+    tre = _stare_tre_dir(tmp_path, coarse=1.0, final_p50=1.0)
+    seg = _seg_qc_dir_with(tmp_path, {"rigid": {"displacement_um_p50": 1.0}})
+
+    rows = {
+        (r["slide"], r["stage"]): r
+        for r in gqr.reconcile_rows(str(tre), str(seg), pixel_size_um=None)
+    }
+    row = rows[("mov", "rigid")]
+    assert row["divergent"] is None, "claimed a verdict it cannot support"
+    assert row["reason"], "refused without saying why"
+    assert "µm" in row["reason"] or "scale" in row["reason"], row["reason"]
+
+    # And with the scale, it is a genuine divergence -- not "agree".
+    with_scale = {
+        (r["slide"], r["stage"]): r
+        for r in gqr.reconcile_rows(str(tre), str(seg), pixel_size_um=0.325)
+    }
+    assert with_scale[("mov", "rigid")]["divergent"] is True
+
+
+def test_reconciliation_section_says_why_it_refused(tmp_path):
+    gqr = _load()
+    tre = _stare_tre_dir(tmp_path, coarse=1.0, final_p50=1.0)
+    seg = _seg_qc_dir_with(tmp_path, {"rigid": {"displacement_um_p50": 1.0}})
+    html = gqr.reconciliation_section(str(tre), str(seg), pixel_size_um=None)
+    assert "divergent" not in html, "flagged divergence it cannot establish:\n" + html
+    assert "no verdict" in html, html
+
+
+def test_valis_tre_carries_no_recorded_unit_so_it_is_not_labelled_microns(tmp_path):
+    """VALIS's error_df D columns are copied through bin/register.py unmodified.
+
+    Nothing in this pipeline records what unit they are in -- VALIS measures on its own
+    processed image, whose pixels are neither the slide's pixels nor micrometres -- so
+    `params.pixel_size` cannot convert them and the table must not pretend it did.
+    """
+    gqr = _load()
+    tre = _valis_csvs(tmp_path)
+    seg = _seg_qc_dir_with(tmp_path, {"rigid": {"displacement_um_p50": 2.1}})
+    rows = {
+        (r["slide"], r["stage"]): r
+        for r in gqr.reconcile_rows(str(tre), str(seg), pixel_size_um=0.325)
+    }
+    row = rows[("mov", "rigid")]
+    assert row["feature_tre_um"] is None, "converted a value with no recorded unit"
+    assert row["divergent"] is None
+    assert row["reason"]
+
+
+def test_seg_qc_pixel_fallback_is_converted_not_relabelled(tmp_path):
+    """`displacement_px_p50` is the fallback when no µm stats were written. It is px."""
+    gqr = _load()
+    tre = _stare_tre_dir(tmp_path, coarse=4.0, final_p50=4.0)
+    seg = _seg_qc_dir_with(tmp_path, {"rigid": {"displacement_px_p50": 4.0}})
+    rows = {
+        (r["slide"], r["stage"]): r
+        for r in gqr.reconcile_rows(str(tre), str(seg), pixel_size_um=0.5)
+    }
+    assert rows[("mov", "rigid")]["cell_disp_um"] == pytest.approx(2.0)

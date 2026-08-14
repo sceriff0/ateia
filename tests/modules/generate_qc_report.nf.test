@@ -130,6 +130,12 @@ nextflow_process {
                 // misspelling of either leaves no gate red.
                 { assert rendered.every { it.contains('--seg-residuals seg_residuals/') },
                     "rendered command: " + rendered.join(' --- ') },
+                // The scale, with its value. Without it the reconciliation table cannot
+                // express STARE's `coarse_tre_px` in µm and refuses every row -- and
+                // before this flag existed it rendered the raw pixel count under a
+                // "(µm)" header instead. params.pixel_size is 0.325 in nextflow.config.
+                { assert rendered.every { it.contains('--pixel-size 0.325') },
+                    "rendered command missing --pixel-size 0.325: " + rendered.join(' --- ') },
                 // The other half `-stub` cannot see: the `stageAs:` directive, which decides
                 // both what the script finds on disk and the folder name inside the published
                 // mirage_qc_data_*/ bundle. It appears in the staging script, not in

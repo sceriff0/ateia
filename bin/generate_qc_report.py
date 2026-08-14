@@ -18,6 +18,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent / "utils"))
 from logger import configure_logging, get_logger  # noqa: E402
+from pixel_size import (  # noqa: E402
+    Microns,
+    Pixels,
+    Unrecorded,
+    to_microns,
+)
 
 logger = get_logger(__name__)
 
@@ -63,6 +69,17 @@ def parse_args():
         "--seg-residuals",
         default="seg_residuals/",
         help="Directory of per-cell registration residual CSVs (SEG_QC.out.per_cell)",
+    )
+    p.add_argument(
+        "--pixel-size",
+        type=float,
+        default=None,
+        help=(
+            "Configured scale in µm/px (GENERATE_QC_REPORT passes params.pixel_size). "
+            "Used to express pixel-valued QC figures in µm. Omitted means 'no scale "
+            "available', which makes the reconciliation table refuse a mixed-unit "
+            "comparison rather than print a plausible number."
+        ),
     )
     p.add_argument("--output", default="mirage_qc_report.html", help="Output HTML path")
     p.add_argument(
@@ -683,7 +700,15 @@ def _read_intrinsic_tre(tre_dir):
                     ]
                     for col in ("rigid_D", "non_rigid_D"):
                         if col in row:
-                            slot[col] = _to_float(row[col])
+                            v = _to_float(row[col])
+                            # VALIS's error_df is copied into this CSV by
+                            # bin/register.py unmodified and nothing on the path
+                            # records what unit it is in -- VALIS measures on its own
+                            # processed image, whose pixels are neither the slide's
+                            # pixels nor micrometres, so params.pixel_size cannot
+                            # convert it. Labelling it honestly is what stops the
+                            # reconciliation comparing it against a µm figure.
+                            slot[col] = None if v is None else Unrecorded(v)
         except (OSError, csv.Error):
             continue
     for json_path in list_files(tre_dir, "*_tre.json"):
@@ -693,13 +718,25 @@ def _read_intrinsic_tre(tre_dir):
             continue
         slide = info["moving"]
         slot = out.setdefault(str(slide), {"final": {}, "premicro": {}})["final"]
-        slot["rigid_D"] = _to_float(info["coarse_tre_px"])
-        slot["non_rigid_D"] = _to_float(info["final_p50"])
+        # Both fields are named `_px` by their producer (bin/utils/tre_report.py) and
+        # are pixel counts in the slide's own pixel grid, so params.pixel_size does
+        # convert them.
+        coarse = _to_float(info["coarse_tre_px"])
+        final = _to_float(info["final_p50"])
+        slot["rigid_D"] = None if coarse is None else Pixels(coarse)
+        slot["non_rigid_D"] = None if final is None else Pixels(final)
     return out
 
 
 def _read_seg_cell_disp(seg_qc_dir):
-    """slide -> {stage: displacement_µm_p50} from the WARP_SEG_QC JSONs (px if no µm present)."""
+    """slide -> {stage: Measurement} from the WARP_SEG_QC JSONs.
+
+    ``displacement_um_p50`` is µm and ``displacement_px_p50`` is px, and which one
+    bin/warp_seg_qc.py wrote depends on whether it was handed a scale. The fallback
+    used to be silent: a px number landed in a field called ``cell_disp_um`` and was
+    rendered under a "(µm)" header. Tagging it here is what makes the substitution
+    visible one seam later.
+    """
     out = {}
     for jp in list_files(seg_qc_dir, "*.json"):
         try:
@@ -715,21 +752,43 @@ def _read_seg_cell_disp(seg_qc_dir):
         for stage, metrics in stages.items():
             if not isinstance(metrics, dict):
                 continue
-            val = metrics.get("displacement_um_p50")
-            if val is None:
-                val = metrics.get(
-                    "displacement_px_p50"
-                )  # fall back to px if no pixel size
-            per_stage[stage] = _to_float(val)
+            val = _to_float(metrics.get("displacement_um_p50"))
+            if val is not None:
+                per_stage[stage] = Microns(val)
+                continue
+            # No µm stats: warp_seg_qc.py had no scale. Fall back to px, LABELLED px.
+            val = _to_float(metrics.get("displacement_px_p50"))
+            per_stage[stage] = None if val is None else Pixels(val)
         out[str(slide)] = per_stage
     return out
 
 
-def reconcile_rows(tre_dir, seg_qc_dir):
+def _as_um(measurement, pixel_size_um):
+    """(µm value, refusal reason). Exactly one of the two is None."""
+    if measurement is None:
+        return None, None
+    try:
+        return to_microns(measurement, pixel_size_um).value, None
+    except TypeError as exc:
+        return None, str(exc)
+
+
+def reconcile_rows(tre_dir, seg_qc_dir, pixel_size_um=None):
     """Pair the registration method's intrinsic TRE with WARP_SEG_QC cell displacement, per slide per stage.
 
-    Returns a list of dicts: ``slide``, ``stage``, ``feature_tre_um``, ``cell_disp_um``,
-    ``divergent`` (True/False, or None when either number is missing so no verdict is possible).
+    Returns a list of dicts: ``slide``, ``stage``, ``feature_tre`` / ``cell_disp`` (the
+    measurements as read, each carrying its own unit), ``feature_tre_um`` /
+    ``cell_disp_um`` (the same values expressed in µm, or None when they cannot be),
+    ``divergent`` (True/False, or None when no verdict is possible) and ``reason`` (why,
+    when there is no verdict).
+
+    The comparison happens in µm on BOTH sides or not at all. It used to happen on
+    whatever numbers arrived: STARE's ``coarse_tre_px`` against a µm cell displacement,
+    with the px→µm factor (1/0.325 = 3.08 at the shipped scale) sitting right on top of
+    ``RECONCILE_DIVERGENCE_RATIO`` = 3.0, so the flag could not tell a badly registered
+    slide from a unit mix-up. Refusing is the only honest answer to that, and it is why
+    every refusal carries a ``reason`` rather than a plausible number.
+
     Slides are keyed by slide name (VALIS's ``from``/``filename`` or STARE's ``moving`` — both
     resolve to the same identifier); rows are only emitted for slides that appear in the seg-QC
     output.
@@ -751,26 +810,39 @@ def reconcile_rows(tre_dir, seg_qc_dir):
             if feature is None and stage == "non_rigid" and which == "premicro":
                 feature = slide_tre.get("final", {}).get(col)
             disp = cell.get(slide, {}).get(stage)
+            feature_um, feature_why = _as_um(feature, pixel_size_um)
+            disp_um, disp_why = _as_um(disp, pixel_size_um)
             divergent = None
-            if feature is not None and disp is not None:
-                lo, hi = sorted((abs(feature), abs(disp)))
+            reason = None
+            if feature_um is not None and disp_um is not None:
+                lo, hi = sorted((abs(feature_um), abs(disp_um)))
                 divergent = hi > RECONCILE_DIVERGENCE_RATIO * lo if lo > 0 else hi > 0
+            elif feature is None or disp is None:
+                reason = None  # simply nothing to compare; rendered as n/a, as before
+            else:
+                reason = (
+                    "cannot compare in one unit: "
+                    + "; ".join(w for w in (feature_why, disp_why) if w)
+                )
             rows.append(
                 {
                     "slide": slide,
                     "stage": stage,
-                    "feature_tre_um": feature,
-                    "cell_disp_um": disp,
+                    "feature_tre": feature,
+                    "cell_disp": disp,
+                    "feature_tre_um": feature_um,
+                    "cell_disp_um": disp_um,
                     "divergent": divergent,
+                    "reason": reason,
                 }
             )
     return rows
 
 
-def reconciliation_section(tre_dir, seg_qc_dir):
+def reconciliation_section(tre_dir, seg_qc_dir, pixel_size_um=None):
     """Render the feature-TRE vs cell-displacement reconciliation table."""
     title = "Feature-TRE vs Cell-Displacement Reconciliation"
-    rows = reconcile_rows(tre_dir, seg_qc_dir)
+    rows = reconcile_rows(tre_dir, seg_qc_dir, pixel_size_um=pixel_size_um)
     if not rows:
         return section(
             title,
@@ -778,19 +850,34 @@ def reconciliation_section(tre_dir, seg_qc_dir):
             "found to reconcile.</p>",
         )
 
-    def fmt(v):
-        return f"{v:.3f}" if isinstance(v, float) else "—"
+    def fmt(measurement, um_value):
+        """Every rendered figure carries its unit, so the column header cannot lie."""
+        if um_value is not None:
+            return f"{um_value:.3f} µm"
+        if measurement is None:
+            return "—"
+        return f"{measurement.value:.3f} {measurement.unit}"
 
     body = [
         "<p style='font-size:0.85rem;color:#666;margin:0 0 8px;'>"
         "VALIS feature-TRE is measured on its own SuperPoint/SuperGlue keypoints (optimistic); "
         "cell displacement is measured on independently segmented nuclei. A flagged row means "
-        f"the two disagree by more than {RECONCILE_DIVERGENCE_RATIO:g}× — worth a look.</p>",
-        "<table><thead><tr><th>Slide</th><th>Stage</th><th>Feature-TRE (µm)</th>"
-        "<th>Cell disp. p50 (µm)</th><th>Agreement</th></tr></thead><tbody>",
+        f"the two disagree by more than {RECONCILE_DIVERGENCE_RATIO:g}× — worth a look. "
+        "Each figure is shown with the unit it is actually in: a row is only compared when "
+        "both sides could be expressed in µm, and the reason is given when they could not.</p>",
+        "<table><thead><tr><th>Slide</th><th>Stage</th><th>Feature-TRE</th>"
+        "<th>Cell disp. p50</th><th>Agreement</th></tr></thead><tbody>",
     ]
     for r in rows:
-        if r["divergent"] is None:
+        if r["divergent"] is None and r["reason"]:
+            flag = (
+                "<span style='color:#999;' title='"
+                + html.escape(r["reason"], quote=True)
+                + "'>no verdict — "
+                + html.escape(r["reason"])
+                + "</span>"
+            )
+        elif r["divergent"] is None:
             flag = "<span style='color:#999;'>n/a</span>"
         elif r["divergent"]:
             flag = "<span style='color:#c0392b;font-weight:600;'>⚠ divergent</span>"
@@ -798,7 +885,8 @@ def reconciliation_section(tre_dir, seg_qc_dir):
             flag = "<span style='color:#27ae60;'>✓ agree</span>"
         body.append(
             f"<tr><td>{r['slide']}</td><td>{r['stage']}</td>"
-            f"<td>{fmt(r['feature_tre_um'])}</td><td>{fmt(r['cell_disp_um'])}</td>"
+            f"<td>{fmt(r['feature_tre'], r['feature_tre_um'])}</td>"
+            f"<td>{fmt(r['cell_disp'], r['cell_disp_um'])}</td>"
             f"<td>{flag}</td></tr>"
         )
     body.append("</tbody></table>")
@@ -920,7 +1008,11 @@ def main():
             args.seg_qc,
         )
     )
-    html_parts.append(reconciliation_section(args.registration_tre, args.seg_qc))
+    html_parts.append(
+        reconciliation_section(
+            args.registration_tre, args.seg_qc, pixel_size_um=args.pixel_size
+        )
+    )
     html_parts.append(seg_residuals_section(args.seg_residuals))
     html_parts.append(seg_overlay_section(args.postprocess_qc))
     html_parts.append(postprocess_qc_section(args.postprocess_qc))
