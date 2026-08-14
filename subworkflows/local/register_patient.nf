@@ -129,7 +129,14 @@ workflow REGISTER_PATIENT {
     // ========================================================================
     // CHECKPOINT
     // ========================================================================
-    REGISTERED_CHECKPOINT(ch_registered)
+    // How many manifest rows each patient contributes: one per slide in the group,
+    // passthrough included. Taken from the GROUP rather than from meta.images_count
+    // because those two disagree on the add_cycle path — see REGISTERED_CHECKPOINT's
+    // header. This is the only place both callers' groups are visible, which is why
+    // the count is derived here rather than inside the writer.
+    ch_expected_rows = ch_grouped.map { pid, _ref, items -> [pid, items.size()] }
+
+    REGISTERED_CHECKPOINT(ch_registered, ch_expected_rows)
 
     emit:
     registered         = ch_registered

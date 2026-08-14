@@ -116,6 +116,67 @@ class Layout {
         return "${requireOutdir(outdir)}/${checkpointCsvRelative(step)}"
     }
 
+    /*
+     * ------------------------------------------------------------------
+     * Per-patient checkpoint FRAGMENTS
+     * ------------------------------------------------------------------
+     * `<outdir>/csv/<step>.parts/<patient_id>.csv` - one patient's rows of one
+     * checkpoint, published by WRITE_CHECKPOINT_FRAGMENT the moment that patient's
+     * step finishes.
+     *
+     * WHY THE AGGREGATE IS NOT ENOUGH. csv/<step>.csv is written by collectFile(),
+     * an OPERATOR: it writes once, when the upstream channel closes, i.e. when the
+     * LAST patient finishes. Between "patient 3 of 20 finished" and "patient 20
+     * finished" the only record of patients 1-3's published outputs lives in the
+     * driver JVM's memory. A walltime kill on the head job, an OOM, or a node
+     * failure in that window loses the index while the work itself sits published
+     * on disk. The fragments close that window: each is a complete, standalone
+     * checkpoint CSV for one patient - same header, same rows, same grammar (see
+     * lib/Checkpoint.groovy, which owns all three) - so the aggregate is the
+     * convenient artifact rather than the only record.
+     *
+     * THE SUFFIX IS MIRRORED IN conf/modules.config. WRITE_CHECKPOINT_FRAGMENT's
+     * publishDir has to spell `${params.outdir}/csv/${step}.parts` by hand, because
+     * conf/*.config cannot see lib/*.groovy classes (it fails SILENTLY - see
+     * CLAUDE.md). That is the same hand-maintained agreement every other publish
+     * path in this class has with the config, and tests/test_layout.py asserts this
+     * one mechanically rather than by eye.
+     *
+     * NOT A SEPARATE `kind`. PUBLISHED_KINDS is the per-PATIENT publish vocabulary
+     * (`<outdir>/<pid>/<kind>`); fragments are run-level, under csv/, keyed by
+     * patient in the FILENAME. patientDir() must not be asked for them.
+     */
+
+    /** The directory-name suffix marking a checkpoint's per-patient fragments. */
+    static final String FRAGMENT_DIR_SUFFIX = '.parts'
+
+    /** `<step>.parts` - the csv/-relative directory holding a step's fragments. */
+    static String checkpointFragmentDirName(String step) {
+        return "${requireStep(step)}${FRAGMENT_DIR_SUFFIX}"
+    }
+
+    /** `<outdir>/csv/<step>.parts` - the absolute fragment directory. */
+    static String checkpointFragmentDir(def outdir, String step) {
+        return "${checkpointDir(outdir)}/${checkpointFragmentDirName(step)}"
+    }
+
+    /** `<patient_id>.csv` - the fragment's basename, and the process's output name. */
+    static String checkpointFragmentName(def patientId) {
+        if (!patientId?.toString()?.trim())
+            throw new IllegalArgumentException("Layout.checkpointFragmentName: patient_id is required")
+        return "${patientId}.csv"
+    }
+
+    /** `csv/<step>.parts/<patient_id>.csv` - outdir-relative, for messages and checks. */
+    static String checkpointFragmentRelative(String step, def patientId) {
+        return "${CSV_DIR}/${checkpointFragmentDirName(step)}/${checkpointFragmentName(patientId)}"
+    }
+
+    /** `<outdir>/csv/<step>.parts/<patient_id>.csv` - the absolute fragment path. */
+    static String checkpointFragment(def outdir, String step, def patientId) {
+        return "${requireOutdir(outdir)}/${checkpointFragmentRelative(step, patientId)}"
+    }
+
     /* ------------------------------------------------------------------ *
      * Published directories
      * ------------------------------------------------------------------ */

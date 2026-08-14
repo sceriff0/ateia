@@ -21,7 +21,7 @@ inert and misleading; those have been removed. What remains is three cases:
 
 <div class="gate">
   <div class="g"><div class="k">case 1</div><div class="v">withName owns all three</div><div class="d">No label. The block sets cpus, memory and time. 12 processes.</div></div>
-  <div class="g"><div class="k">case 2</div><div class="v">label owns all three</div><div class="d">The withName block, if any, sets only publishDir / ext.args. 6 processes.</div></div>
+  <div class="g"><div class="k">case 2</div><div class="v">label owns all three</div><div class="d">The withName block, if any, sets only publishDir / ext.args. 7 processes.</div></div>
   <div class="g"><div class="k">case 3</div><div class="v">partial override</div><div class="d">withName sets one or two fields; a label supplies the rest. 6 processes.</div></div>
 </div>
 
@@ -190,6 +190,7 @@ it asks for `8` cpus and `300 GB` instead.
 |---|---|---|---|---|
 | `GENERATE_QC_REPORT` | `2` | `32 GB × attempt` | `2.h × attempt` | `process_low` |
 | `AGGREGATE_SIZE_LOGS` | `1` | `12 GB × attempt` | `8.h × attempt` | `process_single` |
+| `WRITE_CHECKPOINT_FRAGMENT` | `1` | `12 GB × attempt` | `8.h × attempt` | `process_single` |
 
 ---
 
@@ -344,7 +345,7 @@ tags — see [Installation → Pre-pulling container images](installation.md#pre
 | `bolt3x/attend_image_analysis:quantification_gpu` | `SEG_QC_GEOJSON`, `QUANTIFY`, `MERGE_QUANT_CSVS`, `EXTRACT_CELL_PROPERTIES`, `EXTRACT_NUCLEI_PROPERTIES`, `EXPORT_GEOJSON`, `GENERATE_POSTPROCESSING_QC` |
 | `bolt3x/attend_image_analysis:merge` | `MERGE_AND_PYRAMID`, `EXTRACT_MASK_SERIES` |
 | `bolt3x/attend_image_analysis:spatialdata` | `EXPORT_SPATIALDATA` |
-| `ubuntu:22.04` | `AGGREGATE_SIZE_LOGS` |
+| `ubuntu:22.04` | `AGGREGATE_SIZE_LOGS`, `WRITE_CHECKPOINT_FRAGMENT` |
 
 `SEGMENT` and `WARP_SEG_QC` resolve their image from a backend table
 (`lib/SegBackends.groovy`, `lib/WarpBackends.groovy`) rather than a literal, so

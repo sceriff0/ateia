@@ -100,6 +100,42 @@ nextflow run . --input results/csv/preprocessed.csv --outdir results --start reg
 (for the frozen reference) and `csv/postprocessed.csv` (for the mask pyramid and
 the merged quantification table).
 
+### Per-patient fragments
+
+Alongside each aggregate, every step also publishes one CSV **per patient**:
+
+```
+csv/registered.csv                 # every patient — written when the LAST one finishes
+csv/registered.parts/P001.csv      # P001 only    — written when P001 finishes
+csv/registered.parts/P002.csv
+```
+
+Same header, same rows, same grammar — a fragment is a complete checkpoint for one
+patient, and `--start` accepts it directly:
+
+```bash
+nextflow run . --input results/csv/registered.parts/P001.csv --outdir results --start segmentation
+```
+
+The aggregate is written by `collectFile()`, which writes **once**, when the last
+patient's step finishes. Until that moment the run's index to its own completed work
+exists only in the driver's memory, so losing the driver — a walltime kill on the head
+job, an OOM, a node failure — leaves every finished patient's output published but
+unrecorded. The fragments are written per patient as each one completes, so that window
+is closed: whatever finished is on disk.
+
+To rebuild an aggregate from the fragments of a run that did not reach the end:
+
+```bash
+{ head -1 results/csv/registered.parts/*.csv | head -1; \
+  tail -q -n +2 results/csv/registered.parts/*.csv; } > registered.csv
+```
+
+!!! warning "A fragment means the patient FINISHED that step"
+    A patient whose step failed part-way has no fragment at all, deliberately — a
+    half-written one would be a manifest that a restart reads and silently continues
+    from with a slide missing.
+
 ---
 
 ## Outputs
@@ -155,6 +191,9 @@ results/                              # = --outdir
 │       └── postprocessing/
 │           └── qc/                   # *.png — GENERATE_POSTPROCESSING_QC
 ├── csv/                              # checkpoint CSVs, all patients
+│   └── <step>.parts/                 # <patient_id>.csv — the same checkpoint, one
+│                                     #   patient per file, published as each finishes
+│                                     #   — WRITE_CHECKPOINT_FRAGMENT
 ├── size_logs/                        # input_sizes.csv, versions.yml — AGGREGATE_SIZE_LOGS
 └── qc/                               # mirage_qc_report_<timestamp>.html — GENERATE_QC_REPORT
                                       # mirage_resource_report.html — main.nf's

@@ -123,6 +123,31 @@ class Checkpoint {
      * and is joined as the literal text `null`, exactly as the hand-written GStrings
      * this class replaced did. Only key presence is a contract here.
      */
+    /**
+     * The full TEXT of a per-patient checkpoint fragment: the step's header, then the
+     * rows, newline-terminated.
+     *
+     * ONE SCHEMA, NOT TWO. A fragment (`<outdir>/csv/<step>.parts/<pid>.csv`, see
+     * lib/Layout.groovy) and the aggregate (`<outdir>/csv/<step>.csv`) are the same
+     * checkpoint at two granularities, so they must be the same FILE FORMAT: a reader
+     * that can open one opens the other. Both get their header from {@link #header}
+     * and their rows from {@link #row}; this method only decides that the header comes
+     * first and the lines are separated by newlines — exactly what collectFile's
+     * `seed:` + `newLine: true` do for the aggregate.
+     *
+     * IT IS ALSO WHY modules/local/write_checkpoint_fragment.nf's `script:` and `stub:`
+     * blocks cannot diverge. `-stub` never evaluates a `script:` block, so a stub block
+     * that built the file its own way would be the only version CI's blocking gate ever
+     * runs, and the real one could rot unseen. Both blocks call this. Same reasoning as
+     * lib/ProcessEnvelope.groovy's versions()/versionsStub() pair.
+     *
+     * The trailing newline is deliberate: a POSIX text file ends in one, and
+     * collectFile's `newLine: true` gives the aggregate the same.
+     */
+    static String fragment(String step, List<String> rows) {
+        return ([header(step)] + (rows ?: [])).join('\n') + '\n'
+    }
+
     static String row(String step, Map values) {
         def cols    = columns(step)
         def missing = cols.findAll { !values.containsKey(it) }

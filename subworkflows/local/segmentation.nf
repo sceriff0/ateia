@@ -35,6 +35,7 @@
 include { SEGMENT                   } from '../../modules/local/segment'
 include { EXTRACT_CELL_PROPERTIES   } from '../../modules/local/extract_cell_properties'
 include { EXTRACT_NUCLEI_PROPERTIES } from '../../modules/local/extract_nuclei_properties'
+include { CHECKPOINT_WRITER         } from './checkpoint_writer'
 
 workflow SEGMENTATION {
     take:
@@ -165,13 +166,22 @@ workflow SEGMENTATION {
         .join(ch_nucleus_contours_value, by: 0, remainder: true)
         .map { pid, placeholder, real -> tuple(pid, real ?: placeholder) }
 
-    ch_checkpoint_csv = ch_registered_for_ckpt
+    // meta.images_count is the size hint CHECKPOINT_WRITER needs: this checkpoint has
+    // one row per SLIDE (see the comment above), and ch_registered carries exactly the
+    // patient's slides in both of this subworkflow's entry modes -- from REGISTRATION on
+    // the linear path, or from INPUT_CHECK reading csv/registered.csv at
+    // `--start segmentation`. Both derive their metas from input_check.nf, which injects
+    // images_count into every one of them; the adapters carry the meta through unchanged
+    // (valis_adapter.nf matches registered files back to the ORIGINAL metas). add_cycle,
+    // the one path where that count disagrees with the registered row count, never runs
+    // segmentation at all.
+    ch_checkpoint_rows = ch_registered_for_ckpt
         .combine(ch_cell_mask_path, by: 0)
         .combine(ch_nuclei_mask_path, by: 0)
         .combine(ch_contours_path, by: 0)
         .combine(ch_nucleus_contours_total, by: 0)
         .map { pid, meta, reg_path, cell_mask, nuclei_mask, contours, nucleus_contours ->
-            Checkpoint.row(Layout.SEGMENTED, [
+            [pid, meta.images_count, Checkpoint.row(Layout.SEGMENTED, [
                 patient_id      : pid,
                 registered_image: reg_path,
                 is_reference    : meta.is_reference,
@@ -180,17 +190,11 @@ workflow SEGMENTATION {
                 nuclei_mask     : nuclei_mask,
                 contours        : contours,
                 nucleus_contours: nucleus_contours,
-            ])
+            ])]
         }
-        .collectFile(
-            name: Layout.checkpointCsvName(Layout.SEGMENTED),
-            newLine: true,
-            sort: true,
-            // sort: true for the same reproducibility reason as every other
-            // checkpoint writer — see postprocess.nf's identical comment.
-            storeDir: Layout.checkpointDir(params.outdir),
-            seed: Checkpoint.header(Layout.SEGMENTED)
-        )
+
+    CHECKPOINT_WRITER(Layout.SEGMENTED, ch_checkpoint_rows)
+    ch_checkpoint_csv = CHECKPOINT_WRITER.out.csv
 
     ch_size_logs = Channel.empty()
         .mix(SEGMENT.out.size_log)
@@ -202,6 +206,7 @@ workflow SEGMENTATION {
     ch_versions = Channel.empty()
         .mix(SEGMENT.out.versions.first())
         .mix(EXTRACT_CELL_PROPERTIES.out.versions.first())
+        .mix(CHECKPOINT_WRITER.out.versions.first())
     if (compartment_mode.compartments) {
         ch_versions = ch_versions.mix(EXTRACT_NUCLEI_PROPERTIES.out.versions.first())
     }

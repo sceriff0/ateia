@@ -14,6 +14,7 @@ include { EXPORT_SPATIALDATA } from '../../modules/local/export_spatialdata'
 // plain function, not a process/workflow, but Nextflow's `include` pulls in either.
 include { QUANTIFY_MARKERS; groupTiffsByPatient } from './quantify_markers'
 include { ASSEMBLE_EXPORT          } from './assemble_export'
+include { CHECKPOINT_WRITER        } from './checkpoint_writer'
 
 /*
 ========================================================================================
@@ -300,31 +301,23 @@ workflow POSTPROCESSING {
         EXPORT_SPATIALDATA(ch_sd_in)
     }
 
-    ch_checkpoint_csv = ch_base_checkpoint
+    // The size hint is the literal 1, not a count read off a meta: ch_base_checkpoint is
+    // a join chain keyed BY patient, so this checkpoint has exactly one row per patient
+    // by construction. Nothing to count, and nothing that could disagree.
+    ch_checkpoint_rows = ch_base_checkpoint
         .map { patient_id, cell_csv, cell_geojson, merged_csv, cell_mask, pyramid ->
-            Checkpoint.row(Layout.POSTPROCESSED, [
+            [patient_id, 1, Checkpoint.row(Layout.POSTPROCESSED, [
                 patient_id  : patient_id,
                 cell_csv    : cell_csv,
                 cell_geojson: cell_geojson,
                 merged_csv  : merged_csv,
                 cell_mask   : cell_mask,
                 pyramid     : pyramid,
-            ])
+            ])]
         }
-        .collectFile(
-            name: Layout.checkpointCsvName(Layout.POSTPROCESSED),
-            newLine: true,
-            sort: true,
-            // sort: true makes the manifest REPRODUCIBLE. Without it collectFile
-            // writes rows in completion order, so two runs of the same commit
-            // produced different files (found while capturing this branch's golden
-            // baseline; a rerun of the UNMODIFIED branch differed from itself). The
-            // rows begin with patient_id followed by the published path, so natural
-            // string order IS "patient id, then file" — and the `seed:` header is
-            // written first regardless of sorting.
-            storeDir: Layout.checkpointDir(params.outdir),
-            seed: Checkpoint.header(Layout.POSTPROCESSED)
-        )
+
+    CHECKPOINT_WRITER(Layout.POSTPROCESSED, ch_checkpoint_rows)
+    ch_checkpoint_csv = CHECKPOINT_WRITER.out.csv
 
     // Collect size logs from all postprocessing processes. SEGMENT /
     // EXTRACT_CELL_PROPERTIES / EXTRACT_NUCLEI_PROPERTIES moved to
@@ -353,6 +346,7 @@ workflow POSTPROCESSING {
         .mix(QUANTIFY_MARKERS.out.versions)
         .mix(MERGE_QUANT_CSVS.out.versions.first())
         .mix(ASSEMBLE_EXPORT.out.versions)
+        .mix(CHECKPOINT_WRITER.out.versions.first())
 
     if (!params.skip_postprocessing_qc) {
         ch_versions = ch_versions

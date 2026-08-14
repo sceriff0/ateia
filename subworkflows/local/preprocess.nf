@@ -7,6 +7,7 @@
 include { CONVERT_IMAGE           } from '../../modules/local/convert_image'
 include { PREPROCESS              } from '../../modules/local/preprocess'
 include { GENERATE_PREPROCESS_QC  } from '../../modules/local/generate_preprocess_qc'
+include { CHECKPOINT_WRITER       } from './checkpoint_writer'
 
 /*
 ========================================================================================
@@ -83,11 +84,19 @@ workflow PREPROCESSING {
         GENERATE_PREPROCESS_QC ( ch_preprocessed_with_meta )
     }
 
-    // Generate checkpoint CSV for restart from preprocessing step
-    // Use collectFile() for non-blocking aggregation (enables patient-level parallelism)
-    ch_checkpoint_csv = ch_preprocessed_with_meta
+    // Generate checkpoint CSV for restart from preprocessing step.
+    // CHECKPOINT_WRITER publishes each patient's rows as soon as that patient is done
+    // AND collects the aggregate csv/preprocessed.csv; see that file for why both.
+    //
+    // meta.images_count is the right size hint HERE (unlike on the registration path):
+    // this step emits exactly one row per input image, and input_check.nf injects that
+    // count into every meta it produces — including the add_cycle path, whose
+    // PREPROCESSING sees only the new cycle's samplesheet. It is uniformly present or
+    // uniformly absent across a patient's rows, which is what CHECKPOINT_WRITER's size
+    // hint requires.
+    ch_checkpoint_rows = ch_preprocessed_with_meta
         .map { meta, image_file ->
-            Checkpoint.row(Layout.PREPROCESSED, [
+            [meta.patient_id, meta.images_count, Checkpoint.row(Layout.PREPROCESSED, [
                 patient_id        : meta.patient_id,
                 // Both kinds are spelled out as LITERAL arguments rather than resolved
                 // through a variable: tests/test_layout.py statically scans for
@@ -100,22 +109,11 @@ workflow PREPROCESSING {
                     : Layout.publishedPath(params.outdir, meta.patient_id, Layout.PREPROCESSED, image_file),
                 is_reference      : meta.is_reference,
                 channels          : meta.channels.join('|'),
-            ])
+            ])]
         }
-        .collectFile(
-            name: Layout.checkpointCsvName(Layout.PREPROCESSED),
-            newLine: true,
-            sort: true,
-            // sort: true makes the manifest REPRODUCIBLE. Without it collectFile
-            // writes rows in completion order, so two runs of the same commit
-            // produced different files (found while capturing this branch's golden
-            // baseline; a rerun of the UNMODIFIED branch differed from itself). The
-            // rows begin with patient_id followed by the published path, so natural
-            // string order IS "patient id, then file" — and the `seed:` header is
-            // written first regardless of sorting.
-            storeDir: Layout.checkpointDir(params.outdir),
-            seed: Checkpoint.header(Layout.PREPROCESSED)
-        )
+
+    CHECKPOINT_WRITER(Layout.PREPROCESSED, ch_checkpoint_rows)
+    ch_checkpoint_csv = CHECKPOINT_WRITER.out.csv
 
     // Collect size logs from all processes
     ch_size_logs = Channel.empty()
@@ -124,6 +122,7 @@ workflow PREPROCESSING {
     // Collect versions from all processes
     ch_versions = Channel.empty()
         .mix(CONVERT_IMAGE.out.versions.first())
+        .mix(CHECKPOINT_WRITER.out.versions.first())
 
     if (!params.skip_preprocessing) {
         ch_size_logs = ch_size_logs.mix(PREPROCESS.out.size_log)
