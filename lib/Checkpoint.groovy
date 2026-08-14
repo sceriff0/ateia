@@ -186,12 +186,43 @@ class Checkpoint {
      *                never read raw: it goes to CsvUtils.countChannelsPerPatient and
      *                CsvUtils.parseMetadata, both of which funnel into
      *                MarkerUtils.markerList (tests/test_nuclear_marker_routing.py).
-     *                `auto_reference` — mirrors INPUT_CHECK's argument of the same name;
-     *                defaults to false, which is right for every checkpoint (a
-     *                checkpoint this pipeline wrote always names its own reference).
+     *                It is the ONLY accepted key: {@link #OPTIONS} is closed and an
+     *                unknown one throws, exactly as an unknown column does in row().
+     *
+     * THERE IS NO auto_reference OPTION, deliberately. An earlier draft carried
+     * `opts.auto_reference ?: false`, which re-encoded a rule ParamUtils already owns
+     * (autoReferenceAllowed) in a class no duplicate-default guard scans — and neither
+     * caller ever passed it. It cannot be needed: auto-promotion applies at
+     * `--start preprocessing` ONLY, and preprocessing's input is a user samplesheet,
+     * never a checkpoint. So for everything this method can legitimately be handed the
+     * answer is false by construction, and it is passed as the literal below rather
+     * than as a second declaration of somebody else's rule.
      */
+    /**
+     * The complete set of keys {@link #read} accepts. Closed on purpose: a typo'd or
+     * invented option that is silently ignored is how a caller comes to believe it
+     * configured something it did not.
+     */
+    static final List<String> OPTIONS = ['nuclear_markers'].asImmutable()
+
+    /**
+     * A checkpoint always names its own reference, so a checkpoint reader never
+     * auto-promotes one. Named rather than a bare `false` at two call sites so the
+     * claim is greppable and points at its owner: ParamUtils.autoReferenceAllowed,
+     * which returns true only at --start preprocessing -- an entry point whose input
+     * is a samplesheet, and therefore never reaches this class.
+     */
+    private static final boolean NO_AUTO_REFERENCE = false
+
     static List<List> read(String step, def csvPath, Map opts = [:]) {
         def cols = columns(step)                      // throws UnknownStepException first
+
+        def unknownOpts = (opts ?: [:]).keySet().findAll { !(it in OPTIONS) }
+        if (unknownOpts)
+            throw new IllegalArgumentException(
+                "Checkpoint.read('${step}'): unknown option(s) ${unknownOpts as List}. " +
+                "Valid options: ${OPTIONS}. (There is no auto_reference option — a " +
+                "checkpoint always names its own reference; see ParamUtils.autoReferenceAllowed.)")
         def path = csvPath?.toString()
         if (!path?.trim())
             throw new IllegalArgumentException(
@@ -225,18 +256,17 @@ class Checkpoint {
                 "declares a 'channels' column — meta.channels_count is the count of markers " +
                 "that survive the nuclear-channel drop, which cannot be derived without it. " +
                 "Pass the pipeline's nuclear_markers parameter as opts.nuclear_markers.")
-        boolean autoRef = opts.auto_reference ?: false
 
         def imageCounts   = CsvUtils.countImagesPerPatient(path)
         def channelCounts = hasChannels
-            ? CsvUtils.countChannelsPerPatient(path, imageCol, nuclear, autoRef)
+            ? CsvUtils.countChannelsPerPatient(path, imageCol, nuclear, NO_AUTO_REFERENCE)
             : [:]
         // THE reference decision, made once per file, from the file — the same call
         // INPUT_CHECK makes and the same call countChannelsPerPatient makes internally,
         // so the reference that SIZED channels_count and the reference stamped into meta
         // are the same row by construction rather than by convention.
         def referenceImage = hasRefCol && imageCol
-            ? CsvUtils.resolveReferenceRows(path, imageCol, autoRef)
+            ? CsvUtils.resolveReferenceRows(path, imageCol, NO_AUTO_REFERENCE)
             : [:]
 
         return rows.withIndex().collect { row, i ->
