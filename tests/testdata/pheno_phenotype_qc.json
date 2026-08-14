@@ -1,0 +1,110 @@
+{
+  "chosen_alpha": 0.05,
+  "alpha_target": 0.05,
+  "crc_ran": false,
+  "reporting_mode": true,
+  "degraded_markers": [
+    "Ki67"
+  ],
+  "n_cells": 6,
+  "density_radius": 12.5,
+  "n_bins": 2,
+  "calibration_ks": {},
+  "thresholds": {
+    "CD3": {
+      "measurement": "CD3: Cell: Mean",
+      "collapsed": false,
+      "degraded": false,
+      "bins": [
+        {
+          "bin": 0,
+          "n_cells": 10,
+          "t_neg": 1.0,
+          "t_pos": 5.0
+        },
+        {
+          "bin": 1,
+          "n_cells": 10,
+          "t_neg": 1.2,
+          "t_pos": 5.4
+        }
+      ]
+    },
+    "CD4": {
+      "measurement": "CD4: Cell: Mean",
+      "collapsed": true,
+      "degraded": false,
+      "bins": [
+        {
+          "bin": 0,
+          "n_cells": 20,
+          "t_neg": 0.8,
+          "t_pos": 4.1
+        }
+      ]
+    },
+    "CD45": {
+      "measurement": "CD45",
+      "collapsed": false,
+      "degraded": false,
+      "bins": [
+        {
+          "bin": 0,
+          "n_cells": 10,
+          "t_neg": 2.0,
+          "t_pos": 6.0
+        },
+        {
+          "bin": 1,
+          "n_cells": 10,
+          "t_neg": 2.1,
+          "t_pos": 6.3
+        }
+      ]
+    },
+    "CD8": {
+      "measurement": "CD8: Cell: Mean",
+      "collapsed": false,
+      "degraded": false,
+      "bins": [
+        {
+          "bin": 0,
+          "n_cells": 10,
+          "t_neg": 1.5,
+          "t_pos": 5.5
+        },
+        {
+          "bin": 1,
+          "n_cells": 10,
+          "t_neg": 1.6,
+          "t_pos": 5.7
+        }
+      ]
+    },
+    "PanCK": {
+      "measurement": "PanCK: Cell: Mean",
+      "collapsed": false,
+      "degraded": false,
+      "bins": [
+        {
+          "bin": 0,
+          "n_cells": 10,
+          "t_neg": 3.0,
+          "t_pos": 9.0
+        },
+        {
+          "bin": 1,
+          "n_cells": 10,
+          "t_neg": 3.1,
+          "t_pos": 9.2
+        }
+      ]
+    },
+    "Ki67": {
+      "measurement": "Ki67: Cell: Mean",
+      "collapsed": false,
+      "degraded": true,
+      "bins": []
+    }
+  }
+}

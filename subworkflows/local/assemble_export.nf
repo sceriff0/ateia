@@ -45,7 +45,7 @@ workflow ASSEMBLE_EXPORT {
     ch_merged_csv       // [meta, merged_quant.csv]
     ch_contours         // [patient_id, contours.json]
     ch_nuc_contours     // [patient_id, nucleus_contours.json | contours.json placeholder]
-    ch_pheno_extras     // [patient_id, phenotypes, model_config]  (placeholders allowed)
+    ch_pheno_extras     // [patient_id, phenotypes, model_config, phenotype_qc]  (placeholders allowed)
     ch_pyramid_channels // [meta, [per-marker tiffs]]  — one entry per patient
     ch_pyramid_masks    // [patient_id, cell_mask, nuclei_mask]
     compartment_mode    // ParamUtils.compartmentMode(params) — resolved once by
@@ -63,8 +63,8 @@ workflow ASSEMBLE_EXPORT {
         .join(ch_contours, by: 0)
         .join(ch_nuc_contours, by: 0)
         .join(ch_pheno_extras, by: 0)
-        .map { _pid, meta, csv, contours_json, nuc_json, phenotypes, model_config ->
-            [meta, csv, contours_json, nuc_json, phenotypes, model_config]
+        .map { _pid, meta, csv, contours_json, nuc_json, phenotypes, model_config, pheno_qc ->
+            [meta, csv, contours_json, nuc_json, phenotypes, model_config, pheno_qc]
         }
 
     EXPORT_GEOJSON(ch_for_export)

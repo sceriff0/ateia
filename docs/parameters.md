@@ -290,6 +290,27 @@ exported `cells.geojson`.
 |---|---|---|
 | `panel_spec` | `null` | Path to the panel authoring spec (`panel.yaml`). |
 | `panel_model` | `null` | Path to a frozen, compiled `model_config.json` (produced by `COMPILE_PANEL`). |
+
+The panel file itself carries one behavioural setting, whose default lives in
+`bin/utils/phenotyping/panel_schema.py` (it is a panel setting, not a pipeline
+parameter):
+
+```yaml
+settings:
+  ambiguous_fallback: ancestor    # ancestor (default) | none
+```
+
+`ancestor` replaces an `Ambiguous` cell's label with the nearest phenotype that is an
+ancestor of **every** surviving candidate, so the cell draws in a real palette colour and
+carries a resume point rather than a grey bucket. The taxonomy verdict is untouched:
+`phenotypes.csv` keeps `outcome = Ambiguous` and gains `ambiguous` (boolean) and
+`ancestor_depth` (links from the ancestor to the nearest candidate, `-1` when not
+collapsed), while `phenotype` becomes the usable label.
+
+A candidate set spanning independent roots has no common ancestor and stays `Ambiguous`
+automatically, so there is no depth or count knob to tune. The collapse runs after CRC
+and the constraint audit and cannot change `chosen_alpha` or `constraint_audit.csv`.
+Set `none` to leave `Ambiguous` strictly alone.
 | `pheno_alpha` | `0.05` | CRC target risk α (per-marker miscoverage budget). |
 | `pheno_min_cal` | `50` | Minimum per-marker calibration-set size. |
 | `pheno_max_enumerate` | `100000` | Feasible-set brute-force enumeration ceiling. |

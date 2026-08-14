@@ -132,13 +132,19 @@ workflow POSTPROCESSING {
         ch_phenotypes = PHENOTYPE.out.phenotypes
     }
 
-    // Phenotype/model-config slots for EXPORT_GEOJSON, keyed by patient_id.
-    // With a panel: the real PHENOTYPE output plus the compiled model config.
+    // Phenotype/model-config/QC slots for EXPORT_GEOJSON, keyed by patient_id.
+    // With a panel: PHENOTYPE's phenotypes.csv and phenotype_qc.json (joined on
+    // patient_id, since they are separate emits of the same task) plus the run-level
+    // compiled model config.
     // Without: reuse the contours file as harmless placeholders; the module guard
-    // (params.panel_spec || params.panel_model) suppresses the args.
+    // (params.panel_spec || params.panel_model) suppresses the args. The placeholder
+    // arity must match the real one or the join downstream silently mismatches.
     def ch_pheno_extras = do_pheno
-        ? ch_phenotypes.map { meta, ph -> [meta.patient_id, ph] }.combine(ch_model_config)
-        : ch_contours.map { pid, contours_json -> [pid, contours_json, contours_json] }
+        ? ch_phenotypes.map { meta, ph -> [meta.patient_id, ph] }
+            .join(PHENOTYPE.out.qc.map { meta, qc -> [meta.patient_id, qc] })
+            .combine(ch_model_config)
+            .map { pid, ph, qc, cfg -> [pid, ph, cfg, qc] }
+        : ch_contours.map { pid, contours_json -> [pid, contours_json, contours_json, contours_json] }
 
     // ========================================================================
     // MERGE - Combine split channel TIFFs with segmentation mask (per patient)

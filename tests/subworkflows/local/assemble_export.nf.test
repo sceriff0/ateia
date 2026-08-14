@@ -74,7 +74,9 @@ nextflow_workflow {
                 input[1] = Channel.fromList([['P001', contours], ['P002', contours]])
                 input[2] = Channel.fromList([['P001', contours], ['P002', contours]])
                 // No-panel / add_cycle placeholder shape: both slots reuse the contours file.
-                input[3] = Channel.fromList([['P001', contours, contours], ['P002', contours, contours]])
+                // 4 elements: [pid, phenotypes, model_config, phenotype_qc]. Placeholders, as in
+                // the no-panel branch of postprocess.nf -- the arity must still match.
+                input[3] = Channel.fromList([['P001', contours, contours, contours], ['P002', contours, contours, contours]])
                 input[4] = Channel.fromList([
                     [[patient_id: 'P001', id: 'P001', is_reference: false],
                      [file('$projectDir/tests/testdata/sample_DAPI.tif',  checkIfExists: true),
@@ -138,7 +140,9 @@ nextflow_workflow {
                 ])
                 input[1] = Channel.fromList([['P001', contours], ['P002', contours]])
                 input[2] = Channel.fromList([['P001', contours], ['P002', contours]])
-                input[3] = Channel.fromList([['P001', contours, contours], ['P002', contours, contours]])
+                // 4 elements: [pid, phenotypes, model_config, phenotype_qc]. Placeholders, as in
+                // the no-panel branch of postprocess.nf -- the arity must still match.
+                input[3] = Channel.fromList([['P001', contours, contours, contours], ['P002', contours, contours, contours]])
                 input[4] = Channel.fromList([
                     [[patient_id: 'P001', id: 'P001', is_reference: false],
                      [file('$projectDir/tests/testdata/sample_DAPI.tif',  checkIfExists: true),
@@ -203,7 +207,7 @@ nextflow_workflow {
                 input[0] = Channel.of([[patient_id: 'P001', id: 'P001'], file('$projectDir/tests/testdata/P001_merged_quant.csv', checkIfExists: true)])
                 input[1] = Channel.of(['P001', contours])
                 input[2] = Channel.of(['P001', contours])
-                input[3] = Channel.of(['P001', contours, contours])
+                input[3] = Channel.of(['P001', contours, contours, contours])
                 input[4] = Channel.of([[patient_id: 'P001', id: 'P001', is_reference: false],
                                        [file('$projectDir/tests/testdata/sample_DAPI.tif',  checkIfExists: true),
                                         file('$projectDir/tests/testdata/sample_PANCK.tif', checkIfExists: true)]])
@@ -259,7 +263,7 @@ nextflow_workflow {
                 input[1] = Channel.of(['P001', contours])
                 // Caller passes the cell contours as the nucleus placeholder.
                 input[2] = Channel.of(['P001', contours])
-                input[3] = Channel.of(['P001', contours, contours])
+                input[3] = Channel.of(['P001', contours, contours, contours])
                 input[4] = Channel.of([[patient_id: 'P001', id: 'P001', is_reference: false],
                                        [file('$projectDir/tests/testdata/sample_DAPI.tif',  checkIfExists: true),
                                         file('$projectDir/tests/testdata/sample_PANCK.tif', checkIfExists: true)]])

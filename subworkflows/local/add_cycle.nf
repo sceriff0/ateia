@@ -301,8 +301,10 @@ workflow ADD_CYCLE {
     //    arg guard is always off here and the legacy constant-"Cell" export is kept.
     // ------------------------------------------------------------------ //
     ch_nuc_for_export = compartment_mode.compartments ? ch_nucleus_contours : ch_contours
-    // No PHENOTYPE stage here: both phenotype slots reuse the cell contours file.
-    ch_pheno_extras = ch_contours.map { pid, contours -> [pid, contours, contours] }
+    // No PHENOTYPE stage here: all three phenotype slots reuse the cell contours file.
+    // The arity must track ASSEMBLE_EXPORT's take: even though this path never
+    // phenotypes -- a short tuple here is a silent cardinality mismatch downstream.
+    ch_pheno_extras = ch_contours.map { pid, contours -> [pid, contours, contours, contours] }
 
     // ------------------------------------------------------------------ //
     // 9. REBUILD complete pyramid: recover prior channels from the prior

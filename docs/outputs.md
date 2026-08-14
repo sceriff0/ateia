@@ -145,7 +145,8 @@ results/                              # = --outdir
 │   │                                 #   phenotype_qc.json   — PHENOTYPE (if a panel is set)
 │   ├── geojson/
 │   │   └── export/                   # cells.geojson, cells_wholecell.geojson,
-│   │                                 #   cells_data.csv, panel_model.json — EXPORT_GEOJSON
+│   │                                 #   cells_data.csv, panel_model.json,
+│   │                                 #   calibration_model.json — EXPORT_GEOJSON
 │   ├── pyramid/                      # pyramid.ome.tiff      — MERGE_AND_PYRAMID
 │   ├── spatialdata/                  # <patient_id>.zarr     — EXPORT_SPATIALDATA
 │   └── qc/
@@ -166,6 +167,73 @@ results/                              # = --outdir
                                       # mirage_resource_report.html — main.nf's
                                       #   workflow.onComplete handler, not a process
 ```
+
+### The phenotyping sidecars
+
+When a panel is configured, `EXPORT_GEOJSON` writes **two** JSON sidecars beside
+`cells.geojson`. Each is a projection of an artifact a different stage already
+published, and the split follows the only seam that matters here — **panel facts are
+run-level, calibration facts are per patient**:
+
+| Sidecar | Projection of | Scope | Carries |
+|---|---|---|---|
+| `panel_model.json` | `<outdir>/phenotyping/model_config.json` | run-level | the phenotype tree, feasible set, palette, constraint table, and a `contract` block |
+| `calibration_model.json` | `<outdir>/<pid>/phenotyping/phenotype_qc.json` | **per patient** | `chosen_alpha`, degraded markers, and the per-marker, per-density-bin sign thresholds |
+
+Calibration cannot live in `panel_model.json`: the dead band depends on that patient's
+cells, that patient's density bins, and the `chosen_alpha` CRC selected for them, so a
+run-level copy would be right for at most one patient.
+
+`panel_model.json`'s `contract` block makes the rest self-describing — a consumer
+hardcodes the two filenames and the key `contract`, and reads the measurement prefix,
+the phenotype and lineage orderings, and the reserved outcome names from the file.
+
+#### Reconstructing a marker's call
+
+Per-cell `p_neg` / `p_pos` are **not** on `cells.geojson` — they stay columns of
+`phenotypes.csv`. They are not needed to reproduce the decision, because the thresholds
+do it:
+
+```
+entry = thresholds[marker]
+if entry.degraded:  sign = free
+else:
+    bin   = entry.collapsed ? 0 : cell["_pheno.density_bin"]
+    value = cell[entry.measurement]
+    t     = entry.bins[bin]
+    pos   = t.t_pos is not null and value >  t.t_pos      # STRICT
+    neg   = t.t_neg is not null and value <  t.t_neg      # STRICT
+```
+
+Four details are load-bearing:
+
+- **`collapsed` is per marker.** Calibration may collapse one marker to a single global
+  bin while another keeps three, in the same patient. `_pheno.density_bin` on the cell is
+  the *pre-collapse* bin, so a collapsed marker must be read at bin 0.
+- **`measurement` names the column verbatim.** It is not always
+  `<marker>: <Compartment>: <Statistic>` — the classifier falls back to the bare
+  `<marker>` column when the compartment key is absent for that patient.
+- **The comparisons are strict.** A threshold is the last reference score that *fails*
+  the conformal bound, so a value sitting exactly on it is not a confident call.
+- **`t_pos` and `t_neg` can cross.** The overlap is a genuine contradiction band, and it
+  is reported rather than clamped.
+
+The exporter rounds marker measurements to 4 decimal places while the classifier reads
+full precision, so the reconstruction is exact only outside one rounding unit (5e-5) of a
+threshold.
+
+#### Per-cell measurements
+
+Eight dense `_pheno.*` keys on every cell — `free_mask`, `ambiguous`, `n_candidates`,
+`depth`, `empty_type`, `violated_constraint_id`, `provenance`, `density_bin` — plus a
+sparse `_pheno.score.<Name>` block where an absent key means a score of 0. `free_mask`
+packs one bit per entry of `lineage_order`; `depth` is `-1` when the cell was not
+collapsed to an ancestor.
+
+The single prefix is what keeps these out of a downstream gating panel: QuPath-side
+marker discovery falls back to the raw measurement name when a name does not parse as
+`<marker>: <Compartment>: <Statistic>`, so an unprefixed `n_candidates` would register
+as a marker channel that does not exist.
 
 !!! info "Why `geojson/export/`, `registered/registered_slides/` and the repeated `qc/`"
     A process that writes into a named subdirectory of its task directory and
