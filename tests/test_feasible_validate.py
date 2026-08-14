@@ -74,3 +74,54 @@ def test_unrelated_overlap_is_subsumption_warning():
         "constraints": {},
     })
     assert any("subsumption" in w.lower() for w in warns)
+
+
+# ── common_ancestor ───────────────────────────────────────────────────────────
+
+PARENTS = {
+    "Immune": None, "T_cell": "Immune", "T_helper": "T_cell", "CD4_Treg": "T_cell",
+    "Tumour": None,
+}
+
+
+def test_common_ancestor_of_siblings():
+    from utils.phenotyping.feasible import common_ancestor
+
+    assert common_ancestor(PARENTS, ["T_helper", "CD4_Treg"]) == ("T_cell", 1)
+
+
+def test_common_ancestor_when_a_candidate_is_itself_the_ancestor():
+    from utils.phenotyping.feasible import common_ancestor
+
+    # depth 0 = the ancestor IS one of the candidates. It must not be -1, which is
+    # the reserved "not collapsed" sentinel.
+    assert common_ancestor(PARENTS, ["T_cell", "T_helper"]) == ("T_cell", 0)
+
+
+def test_common_ancestor_depth_counts_to_the_nearest_candidate():
+    from utils.phenotyping.feasible import common_ancestor
+
+    # Immune is two links above T_helper but zero above itself -> nearest wins.
+    assert common_ancestor(PARENTS, ["T_helper", "Immune"]) == ("Immune", 0)
+    # T_cell is one link above both siblings.
+    assert common_ancestor(PARENTS, ["T_helper", "CD4_Treg"]) == ("T_cell", 1)
+
+
+def test_common_ancestor_none_across_independent_roots():
+    from utils.phenotyping.feasible import common_ancestor
+
+    assert common_ancestor(PARENTS, ["T_helper", "Tumour"]) == (None, -1)
+
+
+def test_common_ancestor_needs_two_candidates():
+    from utils.phenotyping.feasible import common_ancestor
+
+    assert common_ancestor(PARENTS, ["T_helper"]) == (None, -1)
+    assert common_ancestor(PARENTS, []) == (None, -1)
+
+
+def test_common_ancestor_ignores_unknown_names():
+    from utils.phenotyping.feasible import common_ancestor
+
+    # "Unclassified" is a feasible-set name with no node in the phenotype tree.
+    assert common_ancestor(PARENTS, ["T_helper", "Unclassified"]) == (None, -1)

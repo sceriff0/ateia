@@ -32,6 +32,8 @@ from phenotyping.crc import (  # noqa: E402
     risk_excess_copositivity,
 )
 from phenotyping.density import compute_density, mondrian_bins  # noqa: E402
+from phenotyping.feasible import common_ancestor  # noqa: E402
+from phenotyping.panel_schema import DEFAULT_AMBIGUOUS_FALLBACK  # noqa: E402
 from phenotyping.scoring import softmax_pheno_scores  # noqa: E402
 from phenotyping.states import state_annotations  # noqa: E402
 
@@ -112,6 +114,8 @@ def run_phenotyping(
     audit = cfg["constraints"]["audit"]
     markers_cfg = cfg["markers"]
     parents = {p["name"]: p["parent"] for p in cfg["phenotypes"]}
+    # The constant is IMPORTED, never re-spelled -- a second default silently diverges.
+    fallback = cfg["runtime"].get("ambiguous_fallback", DEFAULT_AMBIGUOUS_FALLBACK)
     references = {
         m: {"neg_source": markers_cfg[m]["neg_source"], "pos_source": markers_cfg[m]["pos_source"]}
         for m in markers_cfg
@@ -215,15 +219,41 @@ def run_phenotyping(
     outcome_col = np.array([o.outcome for o in outs], dtype=object)
     candidates_col = np.array([";".join(o.candidate_names) for o in outs], dtype=object)
     n_candidates_col = np.fromiter((len(o.candidate_names) for o in outs), dtype=np.int64, count=n)
-    # tree_path(name, parents) is a pure function of the outcome name; memoize
-    # over the small set of distinct outcomes instead of recomputing per cell.
-    tree_path_by_outcome: Dict[str, str] = {}
+    # ── ancestor collapse: presentation only ──────────────────────────────────
+    # Runs AFTER classify_all and AFTER CRC, and writes only into NEW columns plus
+    # `phenotype`. `outcome`, `n_candidates`, `candidates` and every pheno_score keep
+    # the classifier's verdict, so nothing the CRC risk function or the constraint
+    # audit reads can move as a side effect of a display setting.
+    label_col = np.empty(n, dtype=object)
+    ancestor_depth_col = np.full(n, -1, dtype=np.int64)
+    ancestor_cache: Dict[tuple, tuple] = {}
+    for i, o in enumerate(outs):
+        label_col[i] = o.outcome
+        if fallback != "ancestor" or len(o.candidate_names) < 2:
+            continue
+        key = tuple(sorted(o.candidate_names))
+        hit = ancestor_cache.get(key)
+        if hit is None:
+            hit = common_ancestor(parents, list(key))
+            ancestor_cache[key] = hit
+        name, depth = hit
+        if name is not None:
+            label_col[i] = name
+            ancestor_depth_col[i] = depth
+
+    ambiguous_col = n_candidates_col > 1
+
+    # tree_path renders a LABEL's position in the hierarchy, so it follows `phenotype`,
+    # not `outcome`. After a collapse the label is the ancestor, and keying off
+    # `outcome` would blank the path on exactly the cells whose tree position is the
+    # point. Memoized over the small set of distinct labels.
+    tree_path_by_name: Dict[str, str] = {}
     tree_path_col = np.empty(n, dtype=object)
-    for i, name in enumerate(outcome_col):
-        cached = tree_path_by_outcome.get(name)
+    for i, name in enumerate(label_col):
+        cached = tree_path_by_name.get(name)
         if cached is None:
             cached = tree_path(name, parents)
-            tree_path_by_outcome[name] = cached
+            tree_path_by_name[name] = cached
         tree_path_col[i] = cached
     empty_type_col = np.fromiter((o.empty_type for o in outs), dtype=np.int64, count=n)
     violated_constraint_id_col = np.fromiter(
@@ -253,7 +283,8 @@ def run_phenotyping(
 
     columns = (
         ["label", "phenotype", "candidates", "n_candidates", "tree_path", "density_bin",
-         "outcome", "empty_type", "violated_constraint_id", "provenance"]
+         "outcome", "ambiguous", "ancestor_depth", "empty_type",
+         "violated_constraint_id", "provenance"]
         + [f"pheno_score:{name}" for name in all_names]
         + [f"p_neg:{m}" for m in lineage + states]
         + [f"p_pos:{m}" for m in lineage + states]
@@ -262,16 +293,18 @@ def run_phenotyping(
     )
     data = {
         "label": labels,
-        "phenotype": outcome_col,
+        # `phenotype` is the USABLE LABEL (committed name, ancestor when collapsed, or a
+        # reserved outcome); `outcome` is the taxonomy VERDICT. They were the same column
+        # twice before the collapse existed.
+        "phenotype": label_col,
         "candidates": candidates_col,
         "n_candidates": n_candidates_col,
         "tree_path": tree_path_col,
         "density_bin": density_bin_col,
-        # "outcome" duplicates "phenotype" by value (both are o.outcome); use
-        # an explicit copy rather than relying on pd.DataFrame(dict) copying
-        # on construction, so the two columns are never accidentally aliased.
-        "outcome": outcome_col.copy(),
+        "outcome": outcome_col,
         "empty_type": empty_type_col,
+        "ambiguous": ambiguous_col,
+        "ancestor_depth": ancestor_depth_col,
         "violated_constraint_id": violated_constraint_id_col,
         "provenance": provenance_col,
     }

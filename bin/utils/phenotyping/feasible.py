@@ -140,3 +140,41 @@ def validate(panel: Panel, feasible: List[Dict]) -> Tuple[List[str], List[str]]:
             warnings.append(f"Marker {m!r} declared but used by nothing (dead channel).")
 
     return errors, warnings
+
+
+def common_ancestor(parents: Dict[str, str], names: List[str]):
+    """The nearest phenotype that is an ancestor of every candidate.
+
+    Returns ``(name, depth)`` -- or ``(None, -1)`` when there are fewer than two
+    distinct candidates, when any candidate has no node in the tree, or when they
+    share no common ancestor. A candidate that is itself an ancestor of the others
+    IS the answer; specificity naming makes that reachable.
+
+    ``depth`` = parent-links from the ancestor down to the NEAREST candidate, so 0
+    means the ancestor is itself one of the candidates and 1 means it is their direct
+    parent. It is a resume-cost hint: how far above the leaves the suspended call sits.
+    ``-1`` is reserved for "not collapsed" and is never a real depth -- an earlier
+    ``links - 1`` definition made a candidate-is-the-ancestor collapse indistinguishable
+    from no collapse at all.
+
+    THE one owner of this rule. FlowPath's ReconciliationQueue.propagateUp implemented
+    the same semantics independently; that copy is deleted and the consumer reads the
+    label this function produces.
+    """
+    uniq = sorted(set(names))
+    if len(uniq) < 2 or any(n not in parents for n in uniq):
+        return None, -1
+
+    def chain(name):
+        out, cur, seen = [], name, set()
+        while cur is not None and cur not in seen:
+            seen.add(cur)
+            out.append(cur)
+            cur = parents.get(cur)
+        return out
+
+    chains = {n: chain(n) for n in uniq}
+    for cand in chains[uniq[0]]:      # self first, then ancestors -> deepest common wins
+        if all(cand in chains[n] for n in uniq):
+            return cand, min(chains[n].index(cand) for n in uniq)
+    return None, -1

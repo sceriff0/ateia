@@ -84,7 +84,8 @@ def test_phenotypes_csv_has_frozen_columns_and_taxonomy(tmp_path):
     states = cfg["state_markers"]
     names = sorted({e["phenotype"] for e in cfg["feasible_set"]})
     expected = (["label", "phenotype", "candidates", "n_candidates", "tree_path",
-                 "density_bin", "outcome", "empty_type", "violated_constraint_id", "provenance"]
+                 "density_bin", "outcome", "ambiguous", "ancestor_depth", "empty_type",
+                 "violated_constraint_id", "provenance"]
                 + [f"pheno_score:{n}" for n in names]
                 + [f"p_neg:{m}" for m in lineage + states]
                 + [f"p_pos:{m}" for m in lineage + states]
@@ -207,7 +208,7 @@ def test_phenotypes_csv_byte_identical_full_panel_fixture():
     ph, _audit, _qc = pc.run_phenotyping(
         str(quant), str(morph), str(cfg_path), alpha_target=0.1, min_calibration=10
     )
-    assert ph.shape[1] == 81
+    assert ph.shape[1] == 83   # 81 + ambiguous + ancestor_depth
     expected_path = _ROOT / "tests" / "testdata" / "phenotype_cells_full_panel_expected.csv"
     assert ph.to_csv(index=False) == expected_path.read_text()
 
@@ -334,3 +335,89 @@ def test_qc_thresholds_name_the_column_actually_read(tmp_path):
     )
     assert qc["thresholds"]["PanCK"]["measurement"] == "PanCK"
     assert qc["thresholds"]["CD45"]["measurement"] == "CD45: Cell: Mean"
+
+
+# ── ancestor collapse ─────────────────────────────────────────────────────────
+
+
+def _cfg_with_fallback(tmp_path, cfg_path, fallback):
+    cfg = json.loads(Path(cfg_path).read_text())
+    cfg["runtime"]["ambiguous_fallback"] = fallback
+    out = tmp_path / f"cfg_{fallback}.json"
+    out.write_text(json.dumps(cfg))
+    return out
+
+
+def _full_panel_paths():
+    """The full 12-lineage panel -- the ONLY fixture here with a phenotype HIERARCHY.
+
+    `_make_inputs`' Tumour/Immune panel gives both phenotypes `parent: None`, so no
+    candidate set can ever have a common ancestor and the collapse never runs. A
+    non-interference test built on it passes no matter what the collapse does, which is
+    exactly the vacuous-guard failure this repo keeps hitting."""
+    return (str(_ROOT / "tests" / "testdata" / "phenotype_cells_full_panel_merged_quant.csv"),
+            str(_ROOT / "tests" / "testdata" / "phenotype_cells_full_panel_morphology.csv"),
+            _ROOT / "tests" / "testdata" / "model_config_full_panel.json")
+
+
+def test_the_collapse_fixture_actually_collapses(tmp_path):
+    """Guards the guards below: if this ever reports zero, the two tests that follow
+    are asserting nothing."""
+    quant, morph, cfg_path = _full_panel_paths()
+    df, _a, _q = pc.run_phenotyping(quant, morph, str(cfg_path),
+                                    alpha_target=0.1, min_calibration=10)
+    assert int((df["ancestor_depth"] >= 0).sum()) > 0
+
+
+def test_ancestor_collapse_does_not_perturb_crc_or_audit(tmp_path):
+    """The collapse is presentation-only. If it leaked into the CRC risk function or
+    the audit denominator, a display setting would silently move chosen_alpha."""
+    quant, morph, cfg_path = _full_panel_paths()
+
+    def run(fallback):
+        p = _cfg_with_fallback(tmp_path, cfg_path, fallback)
+        return pc.run_phenotyping(quant, morph, str(p),
+                                  alpha_target=0.1, min_calibration=10)
+
+    off_df, off_audit, off_qc = run("none")
+    on_df, on_audit, on_qc = run("ancestor")
+
+    # The collapse must change SOMETHING, or this test proves nothing.
+    assert list(off_df["phenotype"]) != list(on_df["phenotype"])
+
+    assert off_qc["chosen_alpha"] == on_qc["chosen_alpha"]
+    assert off_audit.equals(on_audit)
+    for col in ["n_candidates", "outcome", "candidates", "empty_type",
+                "violated_constraint_id"]:
+        assert list(off_df[col]) == list(on_df[col]), col
+    for col in [c for c in off_df.columns if c.startswith("pheno_score:")]:
+        assert list(off_df[col]) == list(on_df[col]), col
+
+
+def test_ancestor_columns_and_tree_path(tmp_path):
+    quant, morph, cfg_path = _full_panel_paths()
+    df, _a, _q = pc.run_phenotyping(quant, morph, str(cfg_path),
+                                    alpha_target=0.1, min_calibration=10)
+
+    assert "ambiguous" in df.columns and "ancestor_depth" in df.columns
+    assert list(df["ambiguous"]) == [n > 1 for n in df["n_candidates"]]
+
+    plain = df[df["ancestor_depth"] < 0]
+    assert (plain["phenotype"] == plain["outcome"]).all()
+
+    collapsed = df[df["ancestor_depth"] >= 0]
+    assert len(collapsed) > 0
+    assert (collapsed["outcome"] == "Ambiguous").all()
+    assert (collapsed["phenotype"] != "Ambiguous").all()
+    # tree_path follows `phenotype` (the usable label), not `outcome` (the verdict),
+    # so a collapsed cell gets a real path instead of "".
+    assert (collapsed["tree_path"] != "").all()
+
+
+def test_fallback_none_leaves_phenotype_equal_to_outcome(tmp_path):
+    quant, morph, cfg_path = _full_panel_paths()
+    p = _cfg_with_fallback(tmp_path, cfg_path, "none")
+    df, _a, _q = pc.run_phenotyping(quant, morph, str(p),
+                                    alpha_target=0.1, min_calibration=10)
+    assert (df["phenotype"] == df["outcome"]).all()
+    assert (df["ancestor_depth"] == -1).all()

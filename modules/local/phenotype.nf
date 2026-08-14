@@ -50,7 +50,7 @@ process PHENOTYPE {
 
     stub:
     """
-    echo "label,phenotype,candidates,n_candidates,tree_path,density_bin,outcome,empty_type,violated_constraint_id,provenance" > phenotypes.csv
+    echo "label,phenotype,candidates,n_candidates,tree_path,density_bin,outcome,ambiguous,ancestor_depth,empty_type,violated_constraint_id,provenance" > phenotypes.csv
     echo "id,markers,observed,nominal,density_corr,neighbour_contact_corr,verdict" > constraint_audit.csv
     echo '{}' > phenotype_qc.json
     echo "STUB,${meta.patient_id},stub,0" > ${meta.patient_id}.PHENOTYPE.size.csv
