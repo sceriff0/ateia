@@ -92,6 +92,24 @@ ORDERED_FAN_INS = {
         r"\[metas,\s*controls\]\.transpose\(\)\.toSorted",
         "Same metas[0] shape as quantify_markers, on the STARE backend.",
     ),
+    # Replaced test_postprocess_reg_qc_collects_are_sorted, which regexed
+    # `ch_reg_(qc|residuals)...collect()`. That construct is gone -- EXPORT_SPATIALDATA's
+    # QC is now grouped PER PATIENT rather than collected run-wide -- so the old test
+    # matched nothing and passed vacuously, which is this file's own documented failure
+    # mode applied to the hazard the change re-created.
+    #
+    # The pattern is SEQUENTIAL on purpose: qc's toSorted, then the residuals variable,
+    # then residuals' toSorted. A single `...toSorted...` regex would be satisfied by
+    # EITHER chain, so deleting one stream's ordering would still match the other's and
+    # the guard would be back to checking nothing. Watched failing with each toSorted
+    # removed in turn.
+    "postprocess: EXPORT_SPATIALDATA's two per-patient QC lists": (
+        "subworkflows/local/postprocess.nf",
+        r"ch_reg_qc_by_patient[\s\S]*?\.toSorted\s*\{[\s\S]*?ch_reg_residuals_by_patient[\s\S]*?\.toSorted\s*\{",
+        "Both grouped lists become EXPORT_SPATIALDATA `path` inputs, hashed positionally, "
+        "and groupTuple() emits in ARRIVAL order -- the same hazard collect(sort: true) "
+        "used to cover on this call site.",
+    ),
 }
 
 
@@ -124,15 +142,6 @@ def test_final_qc_collects_are_sorted():
         "collated_versions.yml lost `sort: true`. Without it the collected yaml's LINE ORDER "
         "varies by task completion order, so its content -- not just its mtime -- differs "
         "between identical runs."
-    )
-
-
-def test_postprocess_reg_qc_collects_are_sorted():
-    body = _strip_comments((ROOT / "subworkflows/local/postprocess.nf").read_text())
-    bare = re.findall(r"ch_reg_(?:qc|residuals)[^\n]*\.collect\(\)", body)
-    assert not bare, (
-        f"EXPORT_SPATIALDATA's registration-QC input(s) use a bare .collect(): {bare}. "
-        "Use .collect(sort: true) -- these become `path` inputs hashed positionally."
     )
 
 
