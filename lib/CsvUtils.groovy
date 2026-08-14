@@ -257,10 +257,19 @@ class CsvUtils {
             if (cols.size() <= Math.max(patientIdx, imageIdx)) return
             def patientId = cols[patientIdx].trim()
             if (!patientId) return  // ignore blank patient_id cells
-            // Lenient parse, matching countChannelsPerPatient below: validateInputSemantics
-            // has already rejected malformed values with a better message.
+            // STRICT parse. This used to be `cols[refIdx]?.toLowerCase() == 'true'`,
+            // on the argument that validateInputSemantics had already rejected anything
+            // malformed with a better message. That argument only ever held for
+            // --input: this function is now also reached from Checkpoint.read, which
+            // opens a PRIOR RUN's checkpoints under --prior_outdir, and those never pass
+            // through validateInputSemantics at all. Under the lenient rule a reference
+            // row reading 'yes' silently stopped being a reference, so the patient
+            // resolved to no reference (rule 3) and every join keyed on it dropped it --
+            // green, and empty. A step with no is_reference COLUMN (the postprocessed
+            // checkpoint) still means "no reference here", which is a schema fact rather
+            // than a malformed value, so that stays a plain false.
             def isRef = refIdx != -1 && refIdx < cols.size() &&
-                        cols[refIdx]?.trim()?.toLowerCase() == 'true'
+                        parseIsReference(cols[refIdx], "is_reference column of ${csvPath} (patient ${patientId})")
             rowsByPatient[patientId] << [isRef, cols[imageIdx].trim()]
         }
 
