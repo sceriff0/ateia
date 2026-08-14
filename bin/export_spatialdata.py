@@ -106,14 +106,68 @@ def sanitize_for_uns(obj):
     return obj
 
 
-def load_qc(reg_qc_paths: List[str], versions_paths: List[str]) -> Tuple[Dict, Dict]:
+def check_patient(found, seen: set, patient_id: Optional[str], source: str) -> None:
+    """Refuse QC that belongs to a patient other than the one being exported.
+
+    One store is one patient. Every reg_qc=2 artifact reports coordinates and
+    metrics in that patient's own reference frame — its own pixel grid, rooted at
+    (0, 0) like every other patient's — so an artifact from a different patient is
+    not noise to be filtered out but a measurement in the wrong coordinate system.
+    Joining it produces a confident wrong answer; dropping it silently produces a
+    store that looks complete while a caller's expectation about what reached it
+    was wrong. Both are worse than stopping.
+
+    Two rules, so this holds whether or not the caller knows the patient:
+
+    * ``patient_id`` given (the pipeline always gives it, from ``--patient-id``):
+      anything naming a different patient is rejected outright.
+    * ``patient_id`` unknown: a *set* of artifacts naming more than one patient is
+      rejected, because whatever the answer is, it cannot be all of them.
+
+    ``found`` falsy means the artifact does not state a patient at all — a QC doc
+    or residual CSV written before the field existed. Those are accepted: the
+    per-patient channel join in ``subworkflows/local/postprocess.nf`` is what
+    guarantees only this patient's files arrive, and this check is defence in
+    depth behind it, not a reason to refuse data that predates it.
+    """
+    if not found:
+        return
+    found = str(found)
+    if patient_id is not None and found != str(patient_id):
+        raise ValueError(
+            f"{source} carries registration QC for patient {found!r}, but this export "
+            f"is for patient {str(patient_id)!r}. Every QC coordinate is in its own "
+            "patient's reference frame, so joining it here would silently attach one "
+            "patient's registration evidence to another's cells."
+        )
+    seen.add(found)
+    if len(seen) > 1:
+        raise ValueError(
+            f"registration QC for more than one patient reached a single export "
+            f"({', '.join(sorted(seen))}); {source} is the artifact that made it "
+            "ambiguous. One .zarr is one patient: these artifacts must be joined by "
+            "patient_id, not collected run-wide."
+        )
+
+
+def load_qc(
+    reg_qc_paths: List[str],
+    versions_paths: List[str],
+    patient_id: Optional[str] = None,
+) -> Tuple[Dict, Dict]:
     """Collect QC into a flattened dict (``uns['qc']``) and verbatim JSON strings.
 
     Storing both is deliberate: the flattened form is what people actually index
     into, and the verbatim string guarantees nothing is lost to flattening.
+
+    Keys are moving-slide names, which are unique WITHIN a patient and nothing
+    more — so the docs are checked against ``patient_id`` (which every doc carries;
+    see ``bin/warp_seg_qc.py``'s ``build_record``) before they are keyed. See
+    ``check_patient``.
     """
     qc: Dict = {"registration": {}}
     raw: Dict = {"registration": {}}
+    seen: set = set()
 
     for p in reg_qc_paths:
         try:
@@ -121,6 +175,7 @@ def load_qc(reg_qc_paths: List[str], versions_paths: List[str]) -> Tuple[Dict, D
         except (OSError, json.JSONDecodeError) as exc:
             logger.warning("skipping unreadable registration QC %s: %s", p, exc)
             continue
+        check_patient(doc.get("patient_id"), seen, patient_id, Path(p).name)
         key = str(doc.get("moving") or Path(p).stem)
         qc["registration"][key] = sanitize_for_uns(doc)
         raw["registration"][key] = json.dumps(doc)
@@ -140,6 +195,7 @@ def join_reg_residuals(
     centroids_xy: np.ndarray,
     labels: np.ndarray,
     max_dist_px: float,
+    patient_id: Optional[str] = None,
 ) -> Tuple[pd.DataFrame, Dict]:
     """Spatially join per-cell registration residuals onto segmentation labels.
 
@@ -155,6 +211,13 @@ def join_reg_residuals(
     ``stats`` records how well the join went — an unmatched cell means "no QC
     evidence", NOT "well registered", and conflating those would invert the
     signal's meaning.
+
+    ``ref_x``/``ref_y`` are raw pixels in **this** patient's reference frame, and
+    every patient's frame is its own grid rooted at (0, 0) — so another patient's
+    rows would land on whatever cell happens to sit within ``max_dist_px`` and be
+    written out as a residual column with a plausible ``join_fraction``. Each CSV's
+    ``patient_id`` column is therefore checked before its rows are joined; see
+    ``check_patient``.
     """
     from scipy.spatial import cKDTree
 
@@ -163,6 +226,7 @@ def join_reg_residuals(
     if not residual_paths or centroids_xy.size == 0:
         return out, stats
 
+    seen: set = set()
     tree = cKDTree(centroids_xy)
     for p in residual_paths:
         try:
@@ -173,6 +237,17 @@ def join_reg_residuals(
         if df.empty or not {"ref_x", "ref_y", "residual_px"} <= set(df.columns):
             logger.warning("residual CSV %s has no usable rows; skipping", p)
             continue
+        if "patient_id" in df.columns:
+            for pid in df["patient_id"].dropna().unique():
+                check_patient(pid, seen, patient_id, Path(p).name)
+        else:
+            logger.warning(
+                "residual CSV %s predates the patient_id column; its rows cannot be "
+                "checked against patient %s and are trusted to the channel that "
+                "staged them",
+                p,
+                patient_id,
+            )
 
         moving = str(df["moving"].iloc[0]) if "moving" in df.columns else Path(p).stem
         query = df[["ref_x", "ref_y"]].to_numpy(dtype=float)
@@ -439,10 +514,16 @@ def build_spatialdata(args) -> "object":
         else np.empty((0, 2))
     )
     residuals, residual_stats = join_reg_residuals(
-        args.reg_residuals or [], centroids, labels_arr, args.residual_join_max_px
+        args.reg_residuals or [],
+        centroids,
+        labels_arr,
+        args.residual_join_max_px,
+        patient_id=args.patient_id,
     )
 
-    qc, extras = load_qc(args.qc_json or [], args.versions or [])
+    qc, extras = load_qc(
+        args.qc_json or [], args.versions or [], patient_id=args.patient_id
+    )
     table = build_table(
         args.quant_csv, args.patient_id, residuals, qc, extras, residual_stats
     )

@@ -390,13 +390,26 @@ def run(
     }
 
 
-def write_per_cell_csv(path, per_cell, moving_name) -> int:
+PER_CELL_COLUMNS = ["patient_id", "moving", "ref_x", "ref_y", "residual_px", "stage"]
+
+
+def write_per_cell_csv(path, per_cell, moving_name, *, patient_id) -> int:
     """Write the final-stage per-pair registration residuals as CSV.
 
-    Columns are ``moving,ref_x,ref_y,residual_px,stage``. ``ref_x``/``ref_y`` are
-    reference-cell centroids **in the final stage's frame** — i.e. the frame the
+    Columns are ``patient_id,moving,ref_x,ref_y,residual_px,stage``. ``ref_x``/``ref_y``
+    are reference-cell centroids **in the final stage's frame** — i.e. the frame the
     registered reference image (and therefore ``cell_mask``) lives in, which is what
     makes a downstream spatial join onto cell labels well-posed.
+
+    ``patient_id`` is required rather than optional, and is written on every row.
+    That frame is per patient: it is each patient's own pixel grid rooted at
+    (0, 0), so these coordinates mean nothing outside the patient they were
+    measured in, and a consumer that joins them onto the wrong patient's cells
+    gets a plausible answer rather than an error. The QC JSON has named its
+    patient since it was first written; this file is the artifact that did not,
+    and its identity was recoverable only from the prefix
+    ``modules/local/warp_seg_qc.nf`` happens to give the filename. Identity
+    belongs in the data.
 
     Always writes a header, so a slide that paired no cells yields an empty table
     rather than a missing file (the consumer can then distinguish "ran, found
@@ -406,16 +419,21 @@ def write_per_cell_csv(path, per_cell, moving_name) -> int:
     """
     import csv as _csv
 
+    # A unit run with no patient (write_report's patient_id defaults to None) writes
+    # the column empty rather than omitting it: "unknown" and "not stated" read the
+    # same to a consumer, and a header that changes shape is worse than either.
+    pid = "" if patient_id is None else str(patient_id)
+
     with open(path, "w", newline="") as fh:
         w = _csv.writer(fh)
-        w.writerow(["moving", "ref_x", "ref_y", "residual_px", "stage"])
+        w.writerow(PER_CELL_COLUMNS)
         if not per_cell:
             return 0
         xy = np.asarray(per_cell["ref_xy"], dtype=float)
         dist = np.asarray(per_cell["residual_px"], dtype=float)
         stage = per_cell["stage"]
         for (x, y), d in zip(xy, dist):
-            w.writerow([moving_name, f"{x:.4f}", f"{y:.4f}", f"{d:.6f}", stage])
+            w.writerow([pid, moving_name, f"{x:.4f}", f"{y:.4f}", f"{d:.6f}", stage])
         return int(dist.size)
 
 
@@ -506,7 +524,9 @@ def write_report(
     # numpy arrays (not serializable) and per-cell rather than per-slide.
     per_cell = result.pop("_per_cell", None)
     if per_cell_csv:
-        write_per_cell_csv(per_cell_csv, per_cell, moving_name or moving_slide)
+        write_per_cell_csv(
+            per_cell_csv, per_cell, moving_name or moving_slide, patient_id=patient_id
+        )
 
     record = build_record(
         result,
@@ -532,8 +552,10 @@ def parse_args(argv=None):
         default=None,
         help=(
             "Optional path for final-stage per-pair registration residuals "
-            "(moving,ref_x,ref_y,residual_px,stage). ref_x/ref_y are in the registered "
-            "reference frame, for spatial joining onto cell_mask downstream."
+            "(patient_id,moving,ref_x,ref_y,residual_px,stage). ref_x/ref_y are in "
+            "the registered reference frame -- this patient's own pixel grid -- for "
+            "spatial joining onto cell_mask downstream; patient_id is what lets the "
+            "consumer refuse rows measured in a different patient's frame."
         ),
     )
     ap.add_argument("--pickle", required=True, help="VALIS registrar pickle")

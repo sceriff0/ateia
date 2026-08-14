@@ -23,10 +23,17 @@ process EXPORT_SPATIALDATA {
 
     container "bolt3x/attend_image_analysis:spatialdata"
 
+    // ONE input, because this is a PER-PATIENT process. `qc_json` and `reg_residuals`
+    // ride the same tuple as everything else, joined by patient_id upstream. They used
+    // to be two separate `path` inputs fed by a run-wide `collect()`, which made them
+    // value channels broadcast into EVERY patient's task: each store then carried the
+    // whole run's registration QC, and export_spatialdata.py joined other patients'
+    // residual coordinates onto this patient's cells (every reference frame is its own
+    // pixel grid rooted at (0,0), so foreign coordinates land somewhere plausible). A
+    // second input channel is the shape that bug needs; there is no longer one.
+    // tests/test_spatialdata_qc_per_patient.py fails if either half comes back.
     input:
-    tuple val(meta), path(quant_csv), path(contours_json), path(nucleus_contours_json, stageAs: 'nucleus_contours.json'), path(cell_mask), path(nuclei_mask), path(pyramid)
-    path qc_json
-    path reg_residuals
+    tuple val(meta), path(quant_csv), path(contours_json), path(nucleus_contours_json, stageAs: 'nucleus_contours.json'), path(cell_mask), path(nuclei_mask), path(pyramid), path(qc_json), path(reg_residuals)
 
     output:
     tuple val(meta), path("spatialdata/${meta.patient_id}.zarr"), emit: zarr

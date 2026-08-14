@@ -232,6 +232,51 @@ workflow POSTPROCESSING {
     // SPATIALDATA EXPORT - scverse-native .zarr (additive; OME-TIFF + GeoJSON stay primary)
     // ========================================================================
     if (!params.skip_spatialdata_export) {
+        // THE reg_qc=2 ARTIFACTS ARE JOINED PER PATIENT, NOT COLLECTED RUN-WIDE.
+        //
+        // They used to reach EXPORT_SPATIALDATA on two separate value channels built with
+        // `.collect(sort: true)` over the whole run, and a value channel is broadcast to
+        // every task — so each patient's .zarr received EVERY patient's *_seg_qc.json and
+        // *_reg_residuals.csv. That is silent cross-patient contamination, not a tidiness
+        // problem: bin/export_spatialdata.py joins residual rows onto this patient's cell
+        // centroids by RAW reference-frame pixel coordinate, and every patient's reference
+        // frame is its own pixel grid rooted at (0,0), so a foreign patient's rows land on
+        // whatever cell sits within params.spatialdata_residual_join_max_px and become an
+        // obsm column — a column whose entire purpose is to EXCLUDE cells — with a
+        // plausible join_fraction. Reproduced on a two-patient stub run: both export tasks
+        // staged all four QC files. It was invisible to CI because tests/testdata/
+        // test_input.csv is one patient, and with one patient "the run's QC" and "this
+        // patient's QC" are the same set. tests/testdata/test_input_two_patients.csv now
+        // exists so a two-patient run is reachable.
+        //
+        // groupKey(patient_id, images_count - 1) is the streaming size hint: one QC
+        // artifact per MOVING slide, and images_count counts the reference too. It only
+        // makes a group close EARLY — `remainder: true` is what makes the group close at
+        // all when the count is short (WARP_SEG_QC's per_cell output is `optional: true`,
+        // and a group that never closes would hang the run rather than lose a file).
+        // Patients with no QC at all (reg_qc < 2, a single-slide patient, or entry at
+        // postprocessing) simply have no key here; the `remainder: true` on the joins
+        // below keeps them in the export with an empty list.
+        def ch_reg_qc_by_patient = ch_reg_qc
+            .flatMap { meta, qc ->
+                def key = meta.images_count ? groupKey(meta.patient_id, meta.images_count - 1) : meta.patient_id
+                (qc instanceof List ? qc : [qc]).collect { f -> [key, f] }
+            }
+            .groupTuple(remainder: true)
+            // Unwrap the groupKey immediately (tests/test_group_key_unwrapped.py), and sort
+            // the group: these lists become `path` inputs, which Nextflow hashes
+            // POSITIONALLY, and groupTuple emits in ARRIVAL order — the same reason the
+            // replaced code used collect(sort: true) rather than a bare collect().
+            .map { group_key, files -> [group_key.toString(), files.toSorted { a, b -> a.name <=> b.name }] }
+
+        def ch_reg_residuals_by_patient = ch_reg_residuals
+            .flatMap { meta, resid ->
+                def key = meta.images_count ? groupKey(meta.patient_id, meta.images_count - 1) : meta.patient_id
+                (resid instanceof List ? resid : [resid]).collect { f -> [key, f] }
+            }
+            .groupTuple(remainder: true)
+            .map { group_key, files -> [group_key.toString(), files.toSorted { a, b -> a.name <=> b.name }] }
+
         def ch_sd_in = MERGE_QUANT_CSVS.out.merged_csv
             .map { meta, csv -> [meta.patient_id, meta, csv] }
             .join(ch_contours, by: 0)
@@ -239,21 +284,20 @@ workflow POSTPROCESSING {
             .join(ch_cell_mask.map { meta, m -> [meta.patient_id, m] }, by: 0)
             .join(ch_nuclei_mask.map { meta, m -> [meta.patient_id, m] }, by: 0)
             .join(ASSEMBLE_EXPORT.out.pyramid.map { meta, p -> [meta.patient_id, p] }, by: 0)
-            .map { _pid, meta, csv, contours, nuc_contours, cmask, nmask, pyramid ->
-                [meta, csv, contours, nuc_contours, cmask, nmask, pyramid]
+            // remainder: true — the QC is genuinely optional (reg_qc < 2, single-slide
+            // patient, --start postprocessing). A plain join would DROP those patients'
+            // exports entirely, which is how an optional input silently becomes required.
+            .join(ch_reg_qc_by_patient, by: 0, remainder: true)
+            .join(ch_reg_residuals_by_patient, by: 0, remainder: true)
+            // `remainder: true` also emits keys present ONLY on the QC side, padded with
+            // nulls (a patient with registration QC but no quantification — not reachable
+            // today, but the operator can produce it and the map below cannot).
+            .filter { it[1] != null }
+            .map { _pid, meta, csv, contours, nuc_contours, cmask, nmask, pyramid, qc, resid ->
+                [meta, csv, contours, nuc_contours, cmask, nmask, pyramid, qc ?: [], resid ?: []]
             }
 
-        // QC is collected run-wide rather than per patient: these channels are already
-        // flat file streams by the time they arrive, and `.ifEmpty([])` keeps the export
-        // running when reg_qc=0 or the run started at postprocessing.
-        EXPORT_SPATIALDATA(
-            ch_sd_in,
-            // collect(sort: true), not collect(): these lists become EXPORT_SPATIALDATA's
-            // `path` inputs, which Nextflow hashes POSITIONALLY, and a bare collect()
-            // emits in arrival order -- so an identical rerun re-ran the export.
-            ch_reg_qc.map { it instanceof List ? it[-1] : it }.flatten().collect(sort: true).ifEmpty([]),
-            ch_reg_residuals.map { it instanceof List ? it[-1] : it }.flatten().collect(sort: true).ifEmpty([])
-        )
+        EXPORT_SPATIALDATA(ch_sd_in)
     }
 
     ch_checkpoint_csv = ch_base_checkpoint
