@@ -174,6 +174,8 @@ unaffected by that number.
 | `SPLIT_CHANNELS` | `1` | tier: `f<5` → 32, `f<15` → 64, else 128 GB, `× attempt` | `2.h × attempt` | `withName` |
 | `QUANTIFY` | `1` | `128 GB × attempt` | `12.h × attempt` | `withName` |
 | `MERGE_QUANT_CSVS` | `2` | `32 GB × attempt` | `2.h × attempt` | `process_low` |
+| `COMPILE_PANEL` | `1` | `4 GB × attempt` | `30.min × attempt` | `withName` |
+| `PHENOTYPE` | `4` | `32 GB × attempt` | `4.h × attempt` | `withName` |
 | `EXPORT_GEOJSON` | `1` | `32 GB × attempt` | `2.h × attempt` | `withName` |
 | `MERGE_AND_PYRAMID` | `2` | tier on channels + masks: `f<20` → 200, else 300 GB, `× attempt` | `8.h × attempt` | `withName` |
 | `EXPORT_SPATIALDATA` | `4` *(label)* | `200 GB` *(label)* | `4.h × attempt` *(withName)* | partial |
@@ -341,7 +343,7 @@ tags — see [Installation → Pre-pulling container images](installation.md#pre
 | `bolt3x/attend_image_analysis:instant_seg` | `SEGMENT` / `SEG_QC_SEGMENT` when `--seg_method instantseg` *(default)* |
 | `bolt3x/attend_image_analysis:cellsam` | `SEGMENT` / `SEG_QC_SEGMENT` when `--seg_method cellsam` |
 | *(per backend, `lib/WarpBackends.groovy`)* | `WARP_SEG_QC` |
-| `bolt3x/attend_image_analysis:quantification_gpu` | `SEG_QC_GEOJSON`, `QUANTIFY`, `MERGE_QUANT_CSVS`, `EXTRACT_CELL_PROPERTIES`, `EXTRACT_NUCLEI_PROPERTIES`, `EXPORT_GEOJSON`, `GENERATE_POSTPROCESSING_QC` |
+| `bolt3x/attend_image_analysis:quantification_gpu` | `SEG_QC_GEOJSON`, `QUANTIFY`, `MERGE_QUANT_CSVS`, `EXTRACT_CELL_PROPERTIES`, `EXTRACT_NUCLEI_PROPERTIES`, `EXPORT_GEOJSON`, `COMPILE_PANEL`, `PHENOTYPE`, `GENERATE_POSTPROCESSING_QC` |
 | `bolt3x/attend_image_analysis:merge` | `MERGE_AND_PYRAMID`, `EXTRACT_MASK_SERIES` |
 | `bolt3x/attend_image_analysis:spatialdata` | `EXPORT_SPATIALDATA` |
 | `ubuntu:22.04` | `AGGREGATE_SIZE_LOGS` |

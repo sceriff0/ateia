@@ -34,10 +34,12 @@ flowchart LR
 - **Segmentation** — cell/nucleus segmentation on the reference panel + morphology/contour extraction.
 - **Postprocessing** — per-cell quantification + QuPath GeoJSON export + pyramidal OME-TIFF.
 
-!!! info "No built-in cell typing"
-    MIRAGE does not assign cell types — the exported GeoJSON carries **raw marker
-    intensities** with a constant `"Cell"` classification, so you gate and phenotype
-    downstream in QuPath or [FlowPath](https://flowpath.readthedocs.io/).
+!!! info "Optional phenotyping"
+    By default MIRAGE does not assign cell types — the exported GeoJSON carries **raw
+    marker intensities**, so you can gate and phenotype downstream in QuPath or
+    [FlowPath](https://flowpath.readthedocs.io/). Optionally, supplying a panel
+    (`--panel_spec` / `--panel_model`) enables built-in conformal-risk-controlled
+    phenotype assignment — see [Phenotyping](parameters.md#phenotyping-panel-agnostic).
 
 !!! tip "Adding a new imaging cycle later?"
     To fold a fresh cyclic-IF cycle into an already-completed run — reusing the prior
@@ -396,11 +398,15 @@ results/                          # = --outdir
 │   │                             #   the prior run's re-split pyramid channels)
 │   ├── quantify/                 # <patient>_<marker>_quant.csv, per-marker, pre-merge
 │   ├── quantification/           # merged_quant.csv
+│   ├── phenotyping/              # phenotypes.csv, constraint_audit.csv,
+│   │                             #   phenotype_qc.json (--pheno_alpha etc.)
 │   ├── geojson/export/           # cells.geojson, cells_wholecell.geojson, cells_data.csv
 │   ├── pyramid/                  # pyramid.ome.tiff (multi-resolution)
 │   ├── spatialdata/              # <patient_id>.zarr (written by default;
 │   │                             #   disable with --skip_spatialdata_export)
 │   └── qc/                       # preprocess / registration / postprocessing QC
+├── phenotyping/                  # model_config.json, spec_report.html (run-level,
+│                                 #   COMPILE_PANEL — one panel/model shared across patients)
 ├── csv/                          # checkpoint CSVs (all patients)
 └── qc/                           # aggregated HTML QC report
 ```
