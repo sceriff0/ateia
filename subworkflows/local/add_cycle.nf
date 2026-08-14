@@ -273,7 +273,7 @@ workflow ADD_CYCLE {
     ch_masks = ch_prior_assets.map { pid, prior ->
         [pid, prior.cell_mask, prior.nuclei_mask]
     }
-    QUANTIFY_MARKERS(SPLIT_CHANNELS.out.channels, ch_masks)
+    QUANTIFY_MARKERS(SPLIT_CHANNELS.out.channels, ch_masks, compartment_mode)
 
     // ------------------------------------------------------------------ //
     // 7. MERGE new marker CSVs onto the prior merged table (base) by label

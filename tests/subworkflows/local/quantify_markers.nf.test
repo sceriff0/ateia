@@ -60,6 +60,9 @@ nextflow_workflow {
                     ['P002', file('$projectDir/tests/testdata/P002_cell_mask.tif',   checkIfExists: true),
                              file('$projectDir/tests/testdata/P001_nuclei_mask.tif', checkIfExists: true)]
                 ])
+                // QUANTIFY_MARKERS takes the resolved compartment mode as its third
+                // input; `.statistics` decides whether REDSEA_MATRIX runs.
+                input[2] = [compartments: true, statistics: ['Median'], expanded: false, embedMasks: false]
                 """
             }
         }
@@ -117,6 +120,9 @@ nextflow_workflow {
                     ['P001', file('$projectDir/tests/testdata/P001_cell_mask.tif',   checkIfExists: true),
                              file('$projectDir/tests/testdata/P001_nuclei_mask.tif', checkIfExists: true)]
                 )
+                // QUANTIFY_MARKERS takes the resolved compartment mode as its third
+                // input; `.statistics` decides whether REDSEA_MATRIX runs.
+                input[2] = [compartments: true, statistics: ['Median'], expanded: false, embedMasks: false]
                 """
             }
         }
@@ -169,6 +175,9 @@ nextflow_workflow {
                     ['P001', file('$projectDir/tests/testdata/P001_cell_mask.tif',   checkIfExists: true),
                              file('$projectDir/tests/testdata/P001_nuclei_mask.tif', checkIfExists: true)]
                 )
+                // QUANTIFY_MARKERS takes the resolved compartment mode as its third
+                // input; `.statistics` decides whether REDSEA_MATRIX runs.
+                input[2] = [compartments: true, statistics: ['Median'], expanded: false, embedMasks: false]
                 """
             }
         }
@@ -207,6 +216,9 @@ nextflow_workflow {
                     ['P001', file('$projectDir/tests/testdata/P001_cell_mask.tif',   checkIfExists: true),
                              file('$projectDir/tests/testdata/P001_nuclei_mask.tif', checkIfExists: true)]
                 )
+                // QUANTIFY_MARKERS takes the resolved compartment mode as its third
+                // input; `.statistics` decides whether REDSEA_MATRIX runs.
+                input[2] = [compartments: true, statistics: ['Median'], expanded: false, embedMasks: false]
                 """
             }
         }
@@ -245,6 +257,9 @@ nextflow_workflow {
                     ['P001', file('$projectDir/tests/testdata/P001_cell_mask.tif',   checkIfExists: true),
                              file('$projectDir/tests/testdata/P001_nuclei_mask.tif', checkIfExists: true)]
                 )
+                // QUANTIFY_MARKERS takes the resolved compartment mode as its third
+                // input; `.statistics` decides whether REDSEA_MATRIX runs.
+                input[2] = [compartments: true, statistics: ['Median'], expanded: false, embedMasks: false]
                 """
             }
         }

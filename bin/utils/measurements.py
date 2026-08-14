@@ -51,20 +51,94 @@ MORPHOLOGY_COLS: tuple = (
 # "<marker>: <Compartment>: <Statistic>".
 COMPARTMENTS: tuple = ("Nucleus", "Cytoplasm", "Cell")
 
-# REDSEA-compensated statistics (bin/utils/redsea.py). Whole-cell only, and
-# Sum/Mean only: the compensation subtracts a fraction of a neighbour's
-# INTEGRATED boundary counts, so it is defined on sums and has no median
-# analogue, and it is a whole-cell membrane correction with no
-# nucleus/cytoplasm decomposition.
-#
-# ADDITIVE, and that is the whole reason it is safe under the G5 contract with
-# qupath-extension-flowpath: no existing key changes, FlowPath's statistic
-# selector still defaults to Median, and a consumer that does not know these
-# names simply does not select them. `parse_measurement_key` stays unambiguous
-# because "X: Cell: REDSEA Sum" does not end with ": Cell: Sum".
-REDSEA_STATISTICS: tuple = ("REDSEA Sum", "REDSEA Mean")
+# ── the statistic vocabulary ──────────────────────────────────────────────────
+# `params.quantify_statistics` selects a SUBSET of STATISTICS below. The list is
+# COMPOSED, not hand-written: every base statistic crossed with every
+# normalisation. Writing the twelve names out by hand is how two of them end up
+# spelled differently.
 
-STATISTICS: tuple = ("Median", "Mean", "Sum") + REDSEA_STATISTICS
+# What is measured.
+#
+# REDSEA is the odd one out twice over: it is WHOLE-CELL ONLY (a membrane
+# correction has no nucleus/cytoplasm decomposition, so `<marker>: Cell: REDSEA`
+# exists while `<marker>: Nucleus: REDSEA` deliberately does not), and it is
+# already size-normalised -- the reference implementation's recommended output,
+# `dataRedSeaScaleSizeFCS.fcs`.
+REDSEA_STATISTIC: str = "REDSEA"
+COMPARTMENT_STATISTICS: tuple = ("Median", "Mean", "Sum")
+BASE_STATISTICS: tuple = COMPARTMENT_STATISTICS + (REDSEA_STATISTIC,)
+
+# How it is standardised across the cells of ONE PATIENT.
+#
+# Population: every cell of that patient, for that marker and compartment. That
+# is exactly what a QUANTIFY task already holds, which is why per-patient z needs
+# no aggregation stage -- a COHORT z, pooled across patients, would.
+#
+# Two flavours because they answer differently on multiplexed-IF data. Classic z
+# uses mean/SD; a handful of very bright cells inflate SD and squash everyone
+# else toward zero. Robust z uses median/MAD scaled by 1.4826 (which makes it
+# consistent with SD for normally distributed data), and is the usual choice for
+# skewed intensity distributions.
+NORMALIZATIONS: tuple = ("", " Z", " RobustZ")
+
+# Every name a `--quantify_statistics` list (or a panel spec) may carry, grouped
+# by base statistic so a marker's variants stay adjacent in the output.
+#
+# G5 contract with qupath-extension-flowpath: these appear verbatim in the
+# measurement key. Note that no name is a suffix of another once the compartment
+# prefix is included -- "X: Cell: Median Z" does not end with ": Cell: Median" --
+# so suffix-matching parsers stay unambiguous.
+STATISTICS: tuple = tuple(
+    base + norm for base in BASE_STATISTICS for norm in NORMALIZATIONS
+)
+
+# The default when `params.quantify_statistics` is unset. Declared here for
+# standalone invocation of bin/quantify.py; nextflow.config carries the
+# pipeline-facing default and is the only place a PARAMETER default may live.
+DEFAULT_STATISTICS: tuple = ("Median",)
+
+
+def split_statistic(statistic: str):
+    """``"Mean RobustZ"`` -> ``("Mean", " RobustZ")``.
+
+    The one place the composed name is taken apart, so producers and consumers
+    cannot disagree about where the base ends and the normalisation begins.
+    Longest normalisation first: " Z" is a suffix of nothing here, but " RobustZ"
+    would be mis-split by a shorter match if the order were reversed.
+    """
+    for norm in sorted(NORMALIZATIONS, key=len, reverse=True):
+        if norm and statistic.endswith(norm):
+            return statistic[: -len(norm)], norm
+    return statistic, ""
+
+
+def zscore(values, robust: bool = False):
+    """Standardise ``values`` across the cells of one patient.
+
+    ``robust=False``  (x - mean) / SD
+    ``robust=True``   (x - median) / (1.4826 * MAD)
+
+    A ZERO SPREAD RETURNS ZEROS, not NaN or inf. Every cell carrying the same
+    value really is exactly at the centre, so 0 is the correct z -- and a marker
+    that is constant across a patient (an empty channel, or a compartment that
+    never overlaps) is common enough that propagating inf would poison a gate
+    rather than reporting one. Same reasoning as the neighbourless-cell guard in
+    ``bin/utils/redsea.py``.
+    """
+    import numpy as np
+
+    v = np.asarray(values, dtype=np.float64)
+    if v.size == 0:
+        return v
+    if robust:
+        centre = np.median(v)
+        spread = 1.4826 * np.median(np.abs(v - centre))
+    else:
+        centre = v.mean()
+        spread = v.std()
+    if not np.isfinite(spread) or spread <= 0:
+        return np.zeros_like(v)
+    return (v - centre) / spread
 
 
 def measurement_key(marker: str, compartment: str, statistic: str) -> str:

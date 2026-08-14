@@ -199,23 +199,68 @@ Per-cell marker intensity.
 | Parameter | Default | Description |
 |---|---|---|
 | `quantify_compartments` | `true` | Emit per-compartment signal (Nucleus / Cytoplasm / Cell) by routing the nuclear mask into quantification. |
-| `expanded_quantification` | `true` | Also emit Mean and Sum per compartment (per-compartment Median is always emitted). **Requires** `quantify_compartments=true`. |
+| `quantify_statistics` | `['Median']` | Which per-cell statistics to emit — see the composition below. Order is irrelevant; columns are always emitted in canonical order. |
+
+The vocabulary is **composed**, base × normalisation, giving 12 names:
+
+| Base | Compartments | Meaning |
+|---|---|---|
+| `Median` | Nucleus / Cytoplasm / Cell | Per-cell median. The expensive one — a per-label order statistic, not a `bincount`. |
+| `Mean` | Nucleus / Cytoplasm / Cell | Per-cell mean. |
+| `Sum` | Nucleus / Cytoplasm / Cell | Integrated density. |
+| `REDSEA` | **Cell only** | Spillover-compensated, size-normalised. |
+
+| Normalisation | Suffix | Formula |
+|---|---|---|
+| none | — | the raw statistic |
+| classic z | ` Z` | `(x − mean) / SD` |
+| robust z | ` RobustZ` | `(x − median) / (1.4826 · MAD)` |
+
+So `--quantify_statistics "Median,Median RobustZ,REDSEA"` emits per-compartment
+`Median` and `Median RobustZ` plus a whole-cell `REDSEA`.
+
+!!! info "The z population is one patient"
+    Z-scores standardise across **that patient's cells**, for that marker and
+    compartment — the population a `QUANTIFY` task already holds, which is why
+    this costs no extra stage. It is *not* a cohort z: every patient is centred
+    on its own zero, so a `Z` column is for comparing cells **within** a patient,
+    not patients with each other.
+
+!!! tip "Prefer `RobustZ` for intensities"
+    A handful of very bright cells inflate SD and squash everyone else toward
+    zero. Measured on a spiked population, classic z retained 0.32 of the original
+    spread where robust z retained 0.83 — about 2.6× less compression.
+
+!!! warning "Split on commas, not spaces"
+    Composed names contain a space. `--quantify_statistics "Mean Z,Median"` is
+    correct; anything that splits on whitespace turns `Mean Z` into an unknown
+    statistic `Z`.
 
 !!! danger "Validation rule"
-    Setting `--expanded_quantification true` without `--quantify_compartments true`
-    fails at launch with a clear error.
+    Asking for **both** `Mean` and `Sum` requires `--quantify_compartments true`;
+    the combination fails at launch. (This preserves the old
+    `expanded_quantification ⇒ quantify_compartments` rule exactly — `expanded` is now derived as "Mean and Sum both requested" — and the
+    `embed_masks` gate still keys on it.)
+
+!!! warning "The default output is smaller than it used to be"
+    `quantify_statistics` replaces the boolean `expanded_quantification`, which
+    **defaulted to `true`**. A default run therefore now emits `Median` only —
+    3 columns per marker instead of 9. Pass
+    `--quantify_statistics Median,Mean,Sum` to restore the old output. Median is
+    also the expensive statistic (a per-label order statistic, not a `bincount`),
+    so a run that does not need it gets faster by omitting it.
 
 ### REDSEA lateral-spillover compensation
 
 Corrects marker signal leaking across the boundary between touching cells
-(Bai *et al.*, *Front. Immunol.* 2021;12:652631). Purely additive — it appends
-`<marker>: Cell: REDSEA Sum` / `... REDSEA Mean` and changes no existing column.
+(Bai *et al.*, *Front. Immunol.* 2021;12:652631). **Enabled by putting `REDSEA`
+in `quantify_statistics`** — there is no separate switch. It appends one column,
+`<marker>: Cell: REDSEA`, and changes no existing column.
 Full guide: [REDSEA compensation](redsea.md).
 
 | Parameter | Default | Description |
 |---|---|---|
-| `redsea` | `false` | Master switch. |
-| `redsea_markers` | *(empty)* | Comma-separated **surface/membrane** markers to compensate, e.g. `CD3,CD8,CD20`. Required when `redsea=true`. Matching is case-insensitive EXACT, so `CD4` never selects `CD45`. |
+| `redsea_markers` | *(empty)* | Comma-separated **surface/membrane** markers to compensate, e.g. `CD3,CD8,CD20`. Required when `REDSEA` is in `quantify_statistics`. Matching is case-insensitive EXACT, so `CD4` never selects `CD45`. |
 | `redsea_element_size` | `null` | Boundary-band depth in pixels. `null` calibrates it from the actual segmentation mask — **the recommended setting**. |
 | `redsea_target_band_fraction` | `0.56` | Calibration target: the fraction of cell area the band should cover. `0.56` is where both of the paper's own calibration points land. |
 | `redsea_element_shape` | `disk` | Band metric. `disk` = Euclidean; `square`/`diamond` reproduce the original's `strel('square')`/`strel('diamond')`. |
@@ -223,9 +268,9 @@ Full guide: [REDSEA compensation](redsea.md).
 | `redsea_cell_diameter_um` | `20.0` | Advisory only — feeds the `recommended_element_size` line in the per-patient QC JSON. |
 
 !!! danger "Validation rule"
-    `--redsea true` with an empty `--redsea_markers` fails at launch. It would
+    `REDSEA` in `--quantify_statistics` with an empty `--redsea_markers` fails at launch. It would
     otherwise compute the compensation geometry for every patient and compensate
-    nothing, producing output identical to `--redsea false` with no error anywhere.
+    nothing, producing output identical to omitting it, with no error anywhere.
 
 !!! warning "Do not port `elementSize = 2` from the paper"
     The published value is calibrated for MIBI's 0.781 µm/px on ~9 µm cells. At
@@ -353,12 +398,12 @@ Full walkthrough: [Incremental cycles](add_cycle.md).
 |---|---|---|
 | `mode` | `standard` | `standard` = normal `--start`/`--stop` pipeline; `add_cycle` = incremental cyclic-IF. |
 | `prior_outdir` | `null` | **Required for `add_cycle`.** The `--outdir` of the previously completed run (supplies the reusable reference, mask, and quantification via its checkpoint CSVs). |
-| `embed_masks` | `false` | Embed the segmentation masks as a second uint32 series in the pyramid OME-TIFF. Written only when `embed_masks && quantify_compartments && expanded_quantification`; `add_cycle` consumes this series, so a prior run must have it to be extendable. `--embed_masks true` REQUIRES both `--quantify_compartments` and `--expanded_quantification` also true — the launch validation rejects the combination otherwise (see warning below). |
+| `embed_masks` | `false` | Embed the segmentation masks as a second uint32 series in the pyramid OME-TIFF. Written only when `embed_masks && quantify_compartments && Mean+Sum in quantify_statistics`; `add_cycle` consumes this series, so a prior run must have it to be extendable. `--embed_masks true` REQUIRES `--quantify_compartments true` and both `Mean` and `Sum` in `--quantify_statistics` — the launch validation rejects the combination otherwise (see warning below). |
 
 !!! warning "`add_cycle` prerequisites"
     `embed_masks` defaults to `false`, so a default run is **not** add_cycle-extendable.
     Set `--embed_masks true` (together with `--quantify_compartments` and
-    `--expanded_quantification`, both on by default) to make a run extendable.
+    `Mean` and `Sum` in `--quantify_statistics`) to make a run extendable.
     `--embed_masks true` with either sibling off is rejected **at launch**
     (`ParamUtils.validateCompartmentQuant`) rather than silently producing a
     plain pyramid, so a prior run either failed to launch with `embed_masks=true`

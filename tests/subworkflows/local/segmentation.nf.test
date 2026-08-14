@@ -103,7 +103,7 @@ nextflow_workflow {
                     [[patient_id: 'P001', id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK', 'SMA']],
                      file('$projectDir/tests/testdata/P001_ref.ome.tiff')]
                 ])
-                input[1] = [compartments: false, expanded: false, embedMasks: false]
+                input[1] = [compartments: false, statistics: ['Median'], expanded: false, embedMasks: false]
                 """
             }
         }
@@ -221,7 +221,7 @@ nextflow_workflow {
             workflow {
                 """
                 input[0] = "$projectDir/tests/testdata/valid_checkpoint_segmented_no_compartments.csv"
-                input[1] = [compartments: false, expanded: false, embedMasks: false]
+                input[1] = [compartments: false, statistics: ['Median'], expanded: false, embedMasks: false]
                 """
             }
         }

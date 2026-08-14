@@ -308,15 +308,15 @@ workflow {
 
     // 1. Plain field mapping, all three flags on.
     def modeAllOn = ParamUtils.compartmentMode([
-        quantify_compartments: true, expanded_quantification: true, embed_masks: true,
+        quantify_compartments: true, quantify_statistics: ['Median','Mean','Sum'], embed_masks: true,
     ])
-    assert modeAllOn == [compartments: true, expanded: true, embedMasks: true]
+    assert modeAllOn == [compartments: true, statistics: ['Median','Mean','Sum'], expanded: true, embedMasks: true]
 
     // 2. All three off.
     def modeAllOff = ParamUtils.compartmentMode([
-        quantify_compartments: false, expanded_quantification: false, embed_masks: false,
+        quantify_compartments: false, quantify_statistics: ['Median'], embed_masks: false,
     ])
-    assert modeAllOff == [compartments: false, expanded: false, embedMasks: false]
+    assert modeAllOff == [compartments: false, statistics: ['Median'], expanded: false, embedMasks: false]
 
     // 3. The map is immutable -- a caller cannot mutate the shared snapshot out
     // from under another reader of the same resolved value.

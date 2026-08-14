@@ -16,7 +16,7 @@ parameter is chosen differently. Both are explained below.
 ```bash
 nextflow run . -profile <profile> \
     --input samplesheet.csv --outdir results \
-    --redsea true \
+    --quantify_statistics Median,REDSEA \
     --redsea_markers CD3,CD8,CD20,CD4,CD68
 ```
 
@@ -29,13 +29,24 @@ numbers.** It reports the band fraction that was achieved; see
 
 ## What it adds
 
-REDSEA is **purely additive**. It appends two whole-cell columns per opted-in
+REDSEA is **purely additive**. It appends **one** whole-cell column per opted-in
 marker and changes nothing that existed before:
 
 | Column | Meaning |
 |---|---|
-| `<marker>: Cell: REDSEA Sum` | Compensated integrated intensity |
-| `<marker>: Cell: REDSEA Mean` | Compensated integrated intensity ÷ cell area |
+| `<marker>: Cell: REDSEA` | Compensated integrated intensity ÷ cell area |
+
+One column, not two, and specifically the **size-normalised** value: that is the
+reference implementation's own recommendation. `github.com/nolanlab/REDSEA` writes
+four FCS files and marks `dataRedSeaScaleSizeFCS.fcs` — "size-normalized
+compensated counts" — as *(recommended)*. Emitting the raw compensated sum
+alongside it would be a second column nobody is advised to use.
+
+`REDSEA` is one of the base statistics `--quantify_statistics` accepts, alongside
+`Median`, `Mean` and `Sum`. **Listing it is what turns compensation on** — there is
+no separate boolean switch. It also takes the normalisation suffixes, so
+`REDSEA Z` and `REDSEA RobustZ` standardise the compensated value across the
+patient's cells.
 
 These flow through `merge_quant_csvs` → `export_geojson` / `export_spatialdata`
 unchanged, so they reach QuPath/FlowPath as ordinary measurements under the same
@@ -47,11 +58,14 @@ Three things it deliberately does **not** produce:
 * **No compensated Median.** The compensation subtracts a fraction of a
   neighbour's *integrated* boundary counts. That algebra is defined on sums; a
   median has no equivalent. Mirage's default `Median` statistic is emitted
-  un-compensated alongside.
+  un-compensated alongside. (A pixel-level variant *could* produce a compensated
+  Median, but it cannot express REDSEA's reinforcement term — which has no
+  pixel-level home, since the donated photons physically sit in the neighbour's
+  pixels — so it would no longer be the published method.)
 * **No per-compartment compensation.** REDSEA is a whole-cell membrane
   correction — there is no nucleus/cytoplasm decomposition of it.
-* **No change to any existing column.** Turning `--redsea` on cannot alter a
-  number an earlier run produced.
+* **No change to any existing column.** Adding `REDSEA` to
+  `--quantify_statistics` cannot alter a number an earlier run produced.
 
 > **Compensated sums are not on the raw sums' scale.** With the default
 > `--redsea_checker 1` ("subtract and reinforce"), each cell is handed back the
@@ -75,7 +89,7 @@ explicitly.
 Matching is case-insensitive **exact** on the marker name — deliberately *not* the
 substring rule `--nuclear_markers` uses, so `CD4` never silently selects `CD45`.
 
-Running with `--redsea true` and an empty marker list is rejected up front: it
+Listing `REDSEA` with an empty marker list is rejected up front: it
 would compute the geometry for every patient and compensate nothing, producing
 output byte-identical to `--redsea false` with no error anywhere.
 
@@ -159,8 +173,8 @@ run or compare against the published MATLAB.
 
 | Parameter | Default | Notes |
 |---|---|---|
-| `--redsea` | `false` | Master switch. |
-| `--redsea_markers` | *(empty)* | Surface/membrane markers to compensate. Required when `--redsea` is on. |
+| `--quantify_statistics` | `[Median]` | Include `REDSEA` to enable compensation. |
+| `--redsea_markers` | *(empty)* | Surface/membrane markers to compensate. Required when `REDSEA` is listed. |
 | `--redsea_element_size` | `null` | Band depth in pixels. `null` = calibrate from the mask (**recommended**). |
 | `--redsea_target_band_fraction` | `0.56` | Calibration target. |
 | `--redsea_element_shape` | `disk` | Band metric. `disk` = Euclidean; `square`/`diamond` reproduce the original's `strel('square')`/`strel('diamond')`. |
@@ -217,13 +231,13 @@ published MATLAB allocates would be **3 TB**; the sparse form is a few tens of M
 ### With `mode=add_cycle`
 
 Incremental cyclic-IF goes through the same `QUANTIFY_MARKERS` subworkflow, so
-`--redsea` works there too and applies to the new cycle's markers. Note the
+`REDSEA` works there too and applies to the new cycle's markers. Note the
 consequence: if the prior run had REDSEA off and the new cycle has it on, the
 merged table carries REDSEA columns **only for the new cycle's markers** — the
 prior markers' quantification is reused, not recomputed. To get compensated
 columns for every marker, re-run the linear path rather than adding a cycle.
 
-When `--redsea false`, `REDSEA_MATRIX` does not run and every `QUANTIFY` task is
+When `REDSEA` is absent from `--quantify_statistics`, `REDSEA_MATRIX` does not run and every `QUANTIFY` task is
 handed `assets/NO_REDSEA` — a placeholder that keeps the process's input arity
 fixed rather than making `QUANTIFY` two different processes depending on a
 parameter.

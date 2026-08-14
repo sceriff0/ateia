@@ -128,14 +128,14 @@ def test_panel_may_gate_on_a_redsea_compensated_statistic():
     artefact that makes a neighbour of a CD3+ cell look CD3+ — i.e. precisely the
     failure a lineage gate suffers from. A panel must be able to ask for it.
     """
-    from utils.measurements import REDSEA_STATISTICS
+    from utils.measurements import REDSEA_STATISTIC
 
     panel = dict(PANEL)
     panel["markers"] = dict(panel["markers"])
     panel["markers"]["PanCK"] = {
         "role": "lineage",
         "compartment": "cell",
-        "statistic": REDSEA_STATISTICS[0],
+        "statistic": REDSEA_STATISTIC,
         "negative_reference": "auto",
     }
     typecheck(parse_panel(panel))

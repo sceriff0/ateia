@@ -64,12 +64,12 @@ workflow MIRAGE {
     boolean run_segmentation   = ParamUtils.shouldRun('segmentation', params.start, effective_stop)
     boolean run_postprocessing = ParamUtils.shouldRun('postprocessing', params.start, effective_stop)
 
-    // --quantify_compartments / --expanded_quantification / --embed_masks, resolved
+    // --quantify_compartments / --quantify_statistics / --embed_masks, resolved
     // ONCE here (the single decision site on every path, standard and add_cycle
     // alike) and threaded down as an argument -- the same seam
     // --registration_method has in subworkflows/local/registration.nf. Nothing
     // below this line should read params.quantify_compartments /
-    // params.expanded_quantification / params.embed_masks directly;
+    // params.quantify_statistics / params.embed_masks directly;
     // tests/test_compartment_mode_routing.py enforces that.
     def compartment_mode = ParamUtils.compartmentMode(params)
     // REDSEA's own resolved-once map. Validated on both paths below, next to

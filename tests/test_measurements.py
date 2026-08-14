@@ -119,7 +119,7 @@ def test_measurement_key_matches_quantify_producer_output():
     cell_mask = np.array([[1, 1], [2, 2]], dtype=np.int32)
     channel = np.array([[10.0, 20.0], [30.0, 40.0]])
     df = quantify.compute_compartment_intensities(
-        cell_mask, None, channel, "CD3", expanded=False
+        cell_mask, None, channel, "CD3", statistics=["Median"]
     )
     expected_key = m.measurement_key("CD3", "Cell", "Median")
     assert expected_key in df.columns

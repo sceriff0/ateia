@@ -171,7 +171,7 @@ Chips give real defaults. Every process runs in a pinned container and emits
       <div class="mod"><div class="n">SPLIT_CHANNELS → QUANTIFY</div>
         <div class="x">Per-cell marker intensity against the mask, one task per channel, merged
           per patient by <code>MERGE_QUANT_CSVS</code>. Median always; Mean/Sum added by
-          <code>expanded_quantification</code>.</div>
+          <code>quantify_statistics</code>.</div>
         <div class="pp"><span>compartments <b>true</b></span><span>expanded <b>true</b></span></div></div>
       <div class="mod"><div class="n">COMPILE_PANEL → PHENOTYPE <span class="tag">if panel</span></div>
         <div class="x">Conformal-risk-controlled cell classification; runs only when a panel is

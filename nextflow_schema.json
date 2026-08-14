@@ -399,16 +399,35 @@
                     "description": "Quantify signal per compartment (Nucleus / Cytoplasm / Cell) by routing the nuclear mask into QUANTIFY alongside the whole-cell mask, and emit both segmentations into the GeoJSON. Cytoplasm = whole-cell minus nucleus.",
                     "default": true
                 },
-                "expanded_quantification": {
-                    "type": "boolean",
-                    "description": "With quantify_compartments, also emit Mean and Sum (integrated density) per compartment; per-compartment Median is always emitted. Requires quantify_compartments.",
-                    "default": true
-                },
-                "redsea": {
-                    "type": "boolean",
-                    "default": false,
-                    "description": "Enable REDSEA lateral-spillover compensation (Bai et al. 2021).",
-                    "help_text": "Adds '<marker>: Cell: REDSEA Sum' and '<marker>: Cell: REDSEA Mean' columns for the markers named in --redsea_markers. Purely additive: no existing measurement changes. Requires --redsea_markers."
+                "quantify_statistics": {
+                    "type": [
+                        "array",
+                        "string"
+                    ],
+                    "default": [
+                        "Median"
+                    ],
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "Median",
+                            "Median Z",
+                            "Median RobustZ",
+                            "Mean",
+                            "Mean Z",
+                            "Mean RobustZ",
+                            "Sum",
+                            "Sum Z",
+                            "Sum RobustZ",
+                            "REDSEA",
+                            "REDSEA Z",
+                            "REDSEA RobustZ"
+                        ]
+                    },
+                    "uniqueItems": true,
+                    "minItems": 1,
+                    "description": "Which per-cell statistics to emit. Median/Mean/Sum are emitted per compartment; REDSEA is whole-cell only. ' Z' / ' RobustZ' variants standardise across the patient's cells.",
+                    "help_text": "Composed as base x normalisation. Bases: Median, Mean, Sum, REDSEA. Normalisations: none, ' Z' (mean/SD), ' RobustZ' (median/MAD x 1.4826, preferred for skewed IF intensities). The z population is ONE PATIENT's cells for that marker and compartment -- which is what a QUANTIFY task already holds, so it costs no extra stage. Listing REDSEA (or a REDSEA variant) enables spillover compensation and then requires redsea_markers. Accepts a list or a COMMA-separated string; do not split on spaces, composed names contain one. Median is the expensive base (a per-label order statistic, not a bincount), so omitting it is a real saving."
                 },
                 "redsea_markers": {
                     "type": [

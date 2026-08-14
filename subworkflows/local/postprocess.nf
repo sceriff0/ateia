@@ -91,7 +91,7 @@ workflow POSTPROCESSING {
     // streaming hint) all live in QUANTIFY_MARKERS, shared with add_cycle.nf.
     // The --debug_channels views for this whole chain moved there with it, so this
     // file no longer carries a debug-view helper of its own.
-    QUANTIFY_MARKERS(SPLIT_CHANNELS.out.channels, ch_mask)
+    QUANTIFY_MARKERS(SPLIT_CHANNELS.out.channels, ch_mask, compartment_mode)
     ch_grouped_csvs = QUANTIFY_MARKERS.out.grouped_csv
 
     // Join grouped intensity CSVs with morphology.csv (segmentation.nf's

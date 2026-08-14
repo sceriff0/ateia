@@ -83,6 +83,12 @@ workflow QUANTIFY_MARKERS {
     take:
     ch_split_channels   // [meta, tiffs]                        — SPLIT_CHANNELS.out.channels
     ch_masks            // [patient_id, cell_mask, nuclei_mask]
+    compartment_mode    // ParamUtils.compartmentMode(params) — resolved ONCE by
+                        // workflows/mirage.nf and threaded down, the same seam
+                        // --registration_method has. `.statistics` is read here to
+                        // decide whether REDSEA runs; this subworkflow must NOT read
+                        // params.quantify_statistics itself
+                        // (tests/test_compartment_mode_routing.py enforces that).
 
     main:
 
@@ -134,9 +140,8 @@ workflow QUANTIFY_MARKERS {
     // ========================================================================
     // REDSEA - lateral spillover compensation geometry (once per patient)
     // ========================================================================
-    // `params.redsea` is read HERE and only here, the same seam
-    // registration.nf gives --registration_method: one subworkflow owns the
-    // decision and everything downstream takes the result as data. Neither
+    // REDSEA runs iff the caller's resolved statistic list names it. There is no
+    // `params.redsea` boolean -- membership of the list IS the switch. Neither
     // caller (postprocess.nf, add_cycle.nf) knows REDSEA exists, and both get it,
     // because both already hand this subworkflow the masks it needs.
     //
@@ -152,7 +157,7 @@ workflow QUANTIFY_MARKERS {
     // depending on a param -- so when REDSEA is off every task is handed
     // assets/NO_REDSEA and modules/local/quantify.nf tests for that name. The
     // placeholder is a few bytes and stages once per task.
-    def redsea_enabled = params.redsea
+    def redsea_enabled = compartment_mode.statistics.contains('REDSEA')
     ch_cell_mask_only = ch_masks_viewed.map { patient_id, cell_mask, _nuclei ->
         [[id: patient_id.toString(), patient_id: patient_id.toString()], cell_mask]
     }

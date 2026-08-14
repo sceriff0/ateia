@@ -166,7 +166,7 @@ def buildRunSummary(Map facts, Map runParams, Map pipelineInfo, String timestamp
             registration_method: runParams.registration_method,
             seg_method: runParams.seg_method,
             quantify_compartments: runParams.quantify_compartments,
-            expanded_quantification: runParams.expanded_quantification,
+            quantify_statistics: runParams.quantify_statistics,
             pixel_size: runParams.pixel_size,
         ],
         manifest: buildManifest(facts),

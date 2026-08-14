@@ -247,9 +247,9 @@ Written to `--trace_dir` (default `.trace`, **independent of `--outdir`**) when
 | Vocabulary | Values | Governed by |
 |---|---|---|
 | `<Compartment>` | `Nucleus`, `Cytoplasm`, `Cell` | `--quantify_compartments` — when `false`, only `Cell` is produced |
-| `<Statistic>` | `Median`, `Mean`, `Sum` | `Median` is **always** produced; `--expanded_quantification` adds `Mean` and `Sum` |
+| `<Statistic>` | `Median`, `Mean`, `Sum`, `REDSEA`, each optionally suffixed ` Z` or ` RobustZ` | Whichever `--quantify_statistics` names (default `Median`). `Median`/`Mean`/`Sum` appear per compartment; `REDSEA` is whole-cell only. The `Z` variants are standardised across one patient's cells. |
 
-So a default run (`quantify_compartments=true`, `expanded_quantification=true`)
+So a run with `quantify_compartments=true` and `--quantify_statistics Median,Mean,Sum`
 emits nine keys per marker:
 
 ```text

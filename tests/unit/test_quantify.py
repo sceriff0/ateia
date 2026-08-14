@@ -180,7 +180,7 @@ class TestCompartmentQuantification:
 
         cell_mask, nuclei_mask, channel = self._synthetic()
         df = compute_compartment_intensities(
-            cell_mask, nuclei_mask, channel, "CD3", expanded=True
+            cell_mask, nuclei_mask, channel, "CD3", statistics=["Median", "Mean", "Sum"]
         )
         row = df.iloc[0]
         assert row["CD3: Cell: Sum"] == pytest.approx(
@@ -194,7 +194,7 @@ class TestCompartmentQuantification:
 
         cell_mask, nuclei_mask, channel = self._synthetic()
         df = compute_compartment_intensities(
-            cell_mask, nuclei_mask, channel, "CD3", expanded=True
+            cell_mask, nuclei_mask, channel, "CD3", statistics=["Median", "Mean", "Sum"]
         )
         row = df.iloc[0]
         assert row["CD3: Nucleus: Median"] == pytest.approx(100.0)

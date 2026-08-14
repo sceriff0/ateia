@@ -45,22 +45,31 @@ def _redsea_tuple(geom, checker=1):
 
 
 # ── column contract ───────────────────────────────────────────────────────────
-def test_redsea_adds_exactly_two_whole_cell_columns(scene):
+def test_redsea_adds_exactly_one_whole_cell_column(scene):
+    """ONE metric, not two. It is the size-normalised compensated value -- the
+    reference implementation's own recommended output (dataRedSeaScaleSizeFCS)."""
     mask, geom, channel = scene
-    plain = quantify.compute_compartment_intensities(mask, None, channel, "CD3")
+    plain = quantify.compute_compartment_intensities(
+        mask, None, channel, "CD3", statistics=["Median"]
+    )
     comped = quantify.compute_compartment_intensities(
-        mask, None, channel, "CD3", redsea=_redsea_tuple(geom)
+        mask, None, channel, "CD3", statistics=["Median", "REDSEA"],
+        redsea=_redsea_tuple(geom),
     )
     added = [c for c in comped.columns if c not in plain.columns]
-    assert added == ["CD3: Cell: REDSEA Sum", "CD3: Cell: REDSEA Mean"]
+    assert added == ["CD3: Cell: REDSEA"]
 
 
 def test_redsea_leaves_every_pre_existing_column_untouched(scene):
     """The additive claim, tested. Not "roughly the same" — identical."""
     mask, geom, channel = scene
-    plain = quantify.compute_compartment_intensities(mask, None, channel, "CD3", expanded=True)
+    base = ["Median", "Mean", "Sum"]
+    plain = quantify.compute_compartment_intensities(
+        mask, None, channel, "CD3", statistics=base
+    )
     comped = quantify.compute_compartment_intensities(
-        mask, None, channel, "CD3", expanded=True, redsea=_redsea_tuple(geom)
+        mask, None, channel, "CD3", statistics=base + ["REDSEA"],
+        redsea=_redsea_tuple(geom),
     )
     pd.testing.assert_frame_equal(comped[plain.columns], plain)
 
@@ -72,39 +81,52 @@ def test_redsea_is_whole_cell_only_even_with_a_nuclear_mask(scene):
     nuclei[15:25, 5:15] = 1
     nuclei[15:25, 25:35] = 2
     df = quantify.compute_compartment_intensities(
-        mask, nuclei, channel, "CD3", expanded=True, redsea=_redsea_tuple(geom)
+        mask, nuclei, channel, "CD3",
+        statistics=["Median", "Mean", "Sum", "REDSEA"], redsea=_redsea_tuple(geom),
     )
     redsea_cols = [c for c in df.columns if "REDSEA" in c]
-    assert redsea_cols == ["CD3: Cell: REDSEA Sum", "CD3: Cell: REDSEA Mean"]
+    assert redsea_cols == ["CD3: Cell: REDSEA"]
 
 
-def test_redsea_mean_is_the_sum_over_cell_area(scene):
+def test_redsea_is_the_size_normalised_compensated_value(scene):
+    """The single metric == compensated integrated counts / cell area.
+
+    Pinned against redsea.compensate directly, so the column cannot silently
+    become the raw compensated sum (which is a different, much larger number).
+    """
     mask, geom, channel = scene
     df = quantify.compute_compartment_intensities(
-        mask, None, channel, "CD3", redsea=_redsea_tuple(geom)
+        mask, None, channel, "CD3", statistics=["REDSEA"], redsea=_redsea_tuple(geom)
     )
-    areas = np.bincount(mask.ravel())[df["label"].to_numpy()]
-    expected = df["CD3: Cell: REDSEA Sum"].to_numpy() / areas
-    assert df["CD3: Cell: REDSEA Mean"].to_numpy() == pytest.approx(expected)
+    whole, edge = redsea.band_sums(mask, geom.band, channel,
+                                   n_labels=geom.weights.shape[0])
+    comp = redsea.compensate(whole, edge, geom.weights, redsea_checker=1)
+    labels = df["label"].to_numpy()
+    areas = np.bincount(mask.ravel(), minlength=geom.weights.shape[0])[labels]
+    assert df["CD3: Cell: REDSEA"].to_numpy() == pytest.approx(comp[labels] / areas)
 
 
 # ── the correction actually corrects ──────────────────────────────────────────
 def test_spillover_only_cell_is_suppressed(scene):
     mask, geom, channel = scene
     df = quantify.compute_compartment_intensities(
-        mask, None, channel, "CD3", expanded=True, redsea=_redsea_tuple(geom)
+        mask, None, channel, "CD3", statistics=["Median","Mean","Sum","REDSEA"],
+        redsea=_redsea_tuple(geom)
     )
+    leaked_area = int(np.bincount(mask.ravel())[2])
     leaked = df.loc[df.label == 2].iloc[0]
-    assert leaked["CD3: Cell: REDSEA Sum"] < leaked["CD3: Cell: Sum"] * 0.5
+    assert leaked["CD3: Cell: REDSEA"] * leaked_area < leaked["CD3: Cell: Sum"] * 0.5
 
 
 def test_true_positive_cell_keeps_its_signal(scene):
     mask, geom, channel = scene
     df = quantify.compute_compartment_intensities(
-        mask, None, channel, "CD3", expanded=True, redsea=_redsea_tuple(geom)
+        mask, None, channel, "CD3", statistics=["Median","Mean","Sum","REDSEA"],
+        redsea=_redsea_tuple(geom)
     )
+    src_area = int(np.bincount(mask.ravel())[1])
     src = df.loc[df.label == 1].iloc[0]
-    assert src["CD3: Cell: REDSEA Sum"] >= src["CD3: Cell: Sum"] * 0.8
+    assert src["CD3: Cell: REDSEA"] * src_area >= src["CD3: Cell: Sum"] * 0.8
 
 
 # ── shape guards ──────────────────────────────────────────────────────────────
@@ -117,7 +139,7 @@ def test_geometry_from_a_different_mask_is_rejected(scene):
     wrong = redsea.redsea_geometry(other, element_size=4)
     with pytest.raises(ValueError, match="band/mask shape mismatch"):
         quantify.compute_compartment_intensities(
-            mask, None, channel, "CD3", redsea=_redsea_tuple(wrong)
+            mask, None, channel, "CD3", statistics=["REDSEA"], redsea=_redsea_tuple(wrong)
         )
 
 
@@ -132,7 +154,7 @@ def test_geometry_with_too_few_labels_is_rejected():
     band = np.zeros(mask.shape, dtype=bool)
     with pytest.raises(ValueError, match="labels"):
         quantify.compute_compartment_intensities(
-            mask, None, channel, "CD3", redsea=(geom.weights, band, 1)
+            mask, None, channel, "CD3", statistics=["REDSEA"], redsea=(geom.weights, band, 1)
         )
 
 
@@ -181,11 +203,11 @@ def test_opted_out_marker_matches_a_redsea_off_run_exactly(tmp_path, scene):
 
     off = quantify.run_quantification(
         str(d / "mask.npy"), str(d / "CD3.tif"), str(d / "off.csv"),
-        channel_name="DAPI", expanded=True,
+        channel_name="DAPI", statistics=["Median","Mean","Sum"],
     )
     on = quantify.run_quantification(
         str(d / "mask.npy"), str(d / "CD3.tif"), str(d / "on.csv"),
-        channel_name="DAPI", expanded=True,
+        channel_name="DAPI", statistics=["Median","Mean","Sum","REDSEA"],
         redsea_geometry_path=str(d / "g.npz"), redsea_markers=["CD3"],
     )
     pd.testing.assert_frame_equal(on, off)
@@ -197,12 +219,12 @@ def test_opted_in_marker_gains_the_columns_through_the_cli_seam(tmp_path, scene)
     d = _write_scene(tmp_path, mask, channel, geom)
     df = quantify.run_quantification(
         str(d / "mask.npy"), str(d / "CD3.tif"), str(d / "on.csv"),
-        channel_name="CD3", expanded=True,
+        channel_name="CD3", statistics=["Median","REDSEA"],
         redsea_geometry_path=str(d / "g.npz"), redsea_markers="CD3,CD8",
     )
-    assert "CD3: Cell: REDSEA Sum" in df.columns
+    assert "CD3: Cell: REDSEA" in df.columns
     written = pd.read_csv(d / "on.csv")
-    assert "CD3: Cell: REDSEA Sum" in written.columns
+    assert "CD3: Cell: REDSEA" in written.columns
 
 
 def test_checker_zero_reaches_the_algebra(tmp_path, scene):
@@ -210,7 +232,7 @@ def test_checker_zero_reaches_the_algebra(tmp_path, scene):
     mask, geom, channel = scene
     d = _write_scene(tmp_path, mask, channel, geom)
     kw = dict(
-        channel_name="CD3", expanded=True,
+        channel_name="CD3", statistics=["Median", "REDSEA"],
         redsea_geometry_path=str(d / "g.npz"), redsea_markers=["CD3"],
     )
     one = quantify.run_quantification(
@@ -220,5 +242,5 @@ def test_checker_zero_reaches_the_algebra(tmp_path, scene):
         str(d / "mask.npy"), str(d / "CD3.tif"), str(d / "b.csv"), redsea_checker=0, **kw
     )
     assert not np.allclose(
-        one["CD3: Cell: REDSEA Sum"], zero["CD3: Cell: REDSEA Sum"]
+        one["CD3: Cell: REDSEA"], zero["CD3: Cell: REDSEA"]
     ), "redsea_checker had no effect — it is not reaching redsea.compensate"

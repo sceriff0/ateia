@@ -216,10 +216,10 @@ def test_no_per_pixel_dataframe_in_source():
     import inspect
 
     src = inspect.getsource(compute_compartment_intensities)
-    # Isolate the median block (between the MEDIAN comment and the `if expanded:`
-    # branch) and make sure it contains no pd.DataFrame / groupby call.
-    start = src.index("Default statistic: MEDIAN")
-    end = src.index("if expanded:")
+    # Isolate the median block (between its own gate and the Mean gate) and make
+    # sure it contains no pd.DataFrame / groupby call.
+    start = src.index('if "Median" in needed_bases:')
+    end = src.index('if "Mean" in needed_bases:')
     median_block = src[start:end]
     assert "pd.DataFrame" not in median_block
     assert ".groupby(" not in median_block

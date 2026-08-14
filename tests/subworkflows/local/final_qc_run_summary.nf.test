@@ -105,7 +105,7 @@ nextflow_function {
                     registration_method: 'valis',
                     seg_method: 'cellpose',
                     quantify_compartments: false,
-                    expanded_quantification: false,
+                    quantify_statistics: ['Median'],
                     pixel_size: 0.5,
                 ]
                 input[2] = [name: 'mirage', version: '1.0.0']
@@ -131,7 +131,7 @@ nextflow_function {
                     registration_method: 'valis',
                     seg_method: 'cellpose',
                     quantify_compartments: false,
-                    expanded_quantification: false,
+                    quantify_statistics: ['Median'],
                     pixel_size: 0.5,
                 ],
                 manifest: [
@@ -161,7 +161,7 @@ nextflow_function {
                     registration_method: 'valis',
                     seg_method: 'cellpose',
                     quantify_compartments: false,
-                    expanded_quantification: false,
+                    quantify_statistics: ['Median'],
                     pixel_size: 0.5,
                 ]
                 input[2] = [name: 'mirage', version: '1.0.0']
@@ -184,7 +184,7 @@ nextflow_function {
                     registration_method: 'valis',
                     seg_method: 'cellpose',
                     quantify_compartments: false,
-                    expanded_quantification: false,
+                    quantify_statistics: ['Median'],
                     pixel_size: 0.5,
                 ],
                 manifest: [

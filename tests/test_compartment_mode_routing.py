@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """Static guard: nothing reads `params.quantify_compartments` /
-`params.expanded_quantification` / `params.embed_masks` raw except the resolver
+`params.quantify_statistics` / `params.embed_masks` raw except the resolver
 (`lib/ParamUtils.groovy`'s `compartmentMode()`) and a small, explicit allowlist
 of config/module sites that legitimately keep their own read.
 
 All THREE params are in scope, not just `quantify_compartments`: they are the
 three fields `ParamUtils.compartmentMode()` resolves together into one map, and
 `assemble_export.nf:78`'s original defect --
-`params.embed_masks && params.quantify_compartments && params.expanded_quantification`
+`params.embed_masks && params.quantify_compartments && Mean+Sum in params.quantify_statistics`
 -- read all three raw in the SAME expression. A guard that only watched
 `quantify_compartments` would pass while that exact line regressed, having
 caught none of the other two names. (Confirmed directly: a planted
-`params.embed_masks && params.expanded_quantification` read in
+`params.embed_masks && params.quantify_statistics` read in
 assemble_export.nf passed an earlier, narrower version of this guard 2/2 green.)
 
 `quantify_compartments` used to be read directly at every consumer across
@@ -44,8 +44,8 @@ counterexamples (see CLAUDE.md's verification-reality note on
      never re-exports the decision to another file, so no seam threading is
      possible there and none is owed.
 
-  2. `conf/modules.config` reading `params.expanded_quantification` directly
-     at line 645 (`ext.args = { params.expanded_quantification ? '--expanded'
+  2. `conf/modules.config` reading `params.quantify_statistics` directly
+     in QUANTIFY's ext.args (`quantifyStatistics(params.quantify_statistics)`
      : '' }`) -- genuinely unavoidable: `conf/*.config` closures cannot see
      `lib/*.groovy` classes (a class name referenced there resolves against
      ConfigObject and fails only when the closure runs -- see CLAUDE.md's
@@ -86,7 +86,7 @@ ROUTER_FILE = "ParamUtils.groovy"
 # All three fields ParamUtils.compartmentMode() resolves together -- see the
 # module docstring for why watching only one of the three is not enough.
 READ_RE = re.compile(
-    r"(?:\w+\.)?params\.(?:quantify_compartments|expanded_quantification|embed_masks)"
+    r"(?:\w+\.)?params\.(?:quantify_compartments|quantify_statistics|embed_masks)"
 )
 
 # path-relative-to-ROOT -> reason. A WHOLE-FILE exemption: every raw read in
@@ -130,13 +130,15 @@ ALLOWED_LINES = {
         # SEG_QC_GEOJSON's block shrank; 722 -> 727 when feat/lsa-cell-pairing's
         # rewritten WARP_SEG_QC ext.args comment added 5 net lines above it;
         # 727 -> 786 when REDSEA added redseaMarkerList() near the top of the file
-        # and a REDSEA_MATRIX withName: block above QUANTIFY's. Re-pin,
+        # and a REDSEA_MATRIX withName: block above QUANTIFY's; -> 807 when the
+        # z-score work added a comment line to quantifyStatistics(). Re-pin,
         # do not widen. (Re-pin from the file, not by guessing:
         # `grep -n "params.expanded_quantification ?" conf/modules.config`.)
-        786: (
-            "ext.args = { params.expanded_quantification ? '--expanded' : "
-            "'' } -- conf/*.config closures cannot see lib/*.groovy classes, "
-            "so ext.args must read params raw here."
+        807: (
+            "ext.args = { ... quantifyStatistics(params.quantify_statistics) ... } "
+            "-- conf/*.config closures cannot see lib/*.groovy classes, so "
+            "ParamUtils.statisticsList is unreachable and ext.args must read the "
+            "param raw here."
         ),
     },
 }

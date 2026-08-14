@@ -37,7 +37,7 @@ nextflow_workflow {
                       channels: ['DAPI','CD8'], images_count: 1, channels_count: 2 ],
                     file('tests/testdata/P001_image.tiff')
                 ])
-                input[1] = [compartments: false, expanded: false, embedMasks: false]
+                input[1] = [compartments: false, statistics: ['Median'], expanded: false, embedMasks: false]
                 """
             }
             params {
@@ -73,7 +73,7 @@ nextflow_workflow {
                       channels: ['DAPI','CD8'], images_count: 1, channels_count: 2 ],
                     file('tests/testdata/P001_image.tiff')
                 ])
-                input[1] = [compartments: true, expanded: true, embedMasks: false]
+                input[1] = [compartments: true, statistics: ['Median','Mean','Sum'], expanded: true, embedMasks: false]
                 """
             }
             params {
@@ -111,7 +111,7 @@ nextflow_workflow {
                       channels: ['DAPI','CD8'], images_count: 1, channels_count: 2 ],
                     file('tests/testdata/P001_image.tiff')
                 ])
-                input[1] = [compartments: false, expanded: false, embedMasks: false]
+                input[1] = [compartments: false, statistics: ['Median'], expanded: false, embedMasks: false]
                 """
             }
             params {

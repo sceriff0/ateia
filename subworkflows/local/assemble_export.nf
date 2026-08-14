@@ -52,7 +52,7 @@ workflow ASSEMBLE_EXPORT {
                         // workflows/mirage.nf, threaded through postprocess.nf /
                         // add_cycle.nf unchanged. Replaces this workflow's own former
                         // `params.embed_masks && params.quantify_compartments &&
-                        // params.expanded_quantification` raw read below.
+                        // params.quantify_statistics` raw read below.
 
     main:
 

@@ -10,7 +10,7 @@ A previous run completed through postprocessing, producing under its `--outdir`:
 
 **To be extendable incrementally, the prior run must have embedded its
 segmentation masks in the pyramid** — i.e. it must have been run with
-`--embed_masks true --quantify_compartments --expanded_quantification` (see
+`--embed_masks true --quantify_compartments --quantify_statistics Median,Mean,Sum` (see
 [Mask pyramid (`embed_masks`)](#mask-pyramid-embed_masks) below). If the prior
 pyramid has no embedded mask series, `mode=add_cycle` **fast-fails** before
 doing any work — see [Fast-fail behavior](#fast-fail-behavior).
@@ -83,7 +83,7 @@ its `--prior_outdir` from a full linear run.
 `params.embed_masks` (default `false`) controls whether `MERGE_AND_PYRAMID`
 embeds the segmentation masks in the output pyramid OME-TIFF:
 
-- When `embed_masks && quantify_compartments && expanded_quantification`, the
+- When `embed_masks && quantify_compartments && Mean+Sum in quantify_statistics`, the
   process writes the cell + nuclei segmentation masks as a **second uint32
   image series** (`Image:1`) inside the pyramid, in addition to the normal
   intensity series (`Image:0`). This mask series is single full-resolution
@@ -92,11 +92,11 @@ embeds the segmentation masks in the output pyramid OME-TIFF:
   series: mixing a >65,535-cell uint32 label mask into the intensity channels
   would force the whole intensity image to uint32, which QuPath/Bio-Formats
   cannot open as a normal multi-channel image.
-- When `embed_masks=false` (with `quantify_compartments`/`expanded_quantification`
+- When `embed_masks=false` (with `quantify_compartments`/`quantify_statistics`
   set however you like), `MERGE_AND_PYRAMID` produces a plain intensity-only
   pyramid — this is unchanged from behavior before mask embedding existed.
 - `embed_masks=true` REQUIRES both `quantify_compartments=true` and
-  `expanded_quantification=true` — `ParamUtils.validateCompartmentQuant` now
+  Mean+Sum requested — `ParamUtils.validateCompartmentQuant` now
   rejects `embed_masks=true` with either sibling off at launch, rather than
   silently falling back to a plain pyramid. (Before this check existed, that
   combination exited `0` with no mask series, discovered only later when the
@@ -114,7 +114,7 @@ pyramid's embedded mask series via `EXTRACT_MASK_SERIES`
 prior run's pyramid has fewer than two OME series (i.e. the prior run used
 `embed_masks=false`, the only way to reach that state now that
 `ParamUtils.validateCompartmentQuant` rejects `embed_masks=true` with either
-`quantify_compartments` or `expanded_quantification` off at launch — see "Mask
+`quantify_compartments` off, or Mean/Sum out of `quantify_statistics`, at launch — see "Mask
 pyramid" above), extraction fails immediately with a clear error identifying
 the missing mask series — before any registration or quantification work runs
 on the new cycle. There is no silent fallback to re-segmentation.

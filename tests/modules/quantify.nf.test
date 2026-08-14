@@ -228,4 +228,85 @@ nextflow_process {
             )
         }
     }
+
+    test("Should render the DEFAULT statistic list and nothing more - rendered command") {
+
+        // Tagged `stub` for CI's blocking gate but WITHOUT `options "-stub"`: the
+        // statistic list is built in conf/modules.config's ext.args closure and
+        // rendered into `script:`, and `-stub` evaluates neither.
+        //
+        // The default is now ["Median"], NOT the old expanded_quantification=true
+        // (Median+Mean+Sum). That is a deliberate narrowing -- Median is the only
+        // statistic emitted out of the box -- and it is exactly the kind of change
+        // that would otherwise be discovered by a user finding columns missing.
+        tag "stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA'], id: 'P001_DAPI', channel_name: 'DAPI'],
+                    file('$projectDir/tests/testdata/sample_DAPI.tif', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_cell_mask.npy', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_cell_mask.tif', checkIfExists: true),
+                    file('$projectDir/assets/NO_REDSEA', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            def rendered = []
+            new File("$workDir").eachFileRecurse { f ->
+                if (f.name == '.command.sh' && f.text.contains('quantify.py')) { rendered << f.text }
+            }
+            assertAll(
+                { assert rendered.size() >= 1, "no rendered QUANTIFY .command.sh found" },
+                { assert rendered.every { it.contains("--statistics 'Median'") },
+                    "default statistic list is not Median-only: " + rendered.join(' --- ') },
+                // The old boolean is gone; a surviving --expanded means a stale ext.args.
+                { assert rendered.every { !it.contains('--expanded') },
+                    "the removed --expanded flag is still being rendered: " + rendered.join(' --- ') }
+            )
+        }
+    }
+
+    test("Should render every requested statistic, REDSEA included - rendered command") {
+
+        // The other half: a gate that only ever renders the default is
+        // indistinguishable from one hard-wired to it.
+        tag "stub"
+
+        when {
+            params {
+                quantify_statistics = ['Sum', 'Median', 'REDSEA']
+                redsea_markers      = ['CD3']
+            }
+            process {
+                """
+                input[0] = [
+                    [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA'], id: 'P001_CD3', channel_name: 'CD3'],
+                    file('$projectDir/tests/testdata/sample_DAPI.tif', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_cell_mask.npy', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_cell_mask.tif', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_redsea.npz', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            def rendered = []
+            new File("$workDir").eachFileRecurse { f ->
+                if (f.name == '.command.sh' && f.text.contains('quantify.py')) { rendered << f.text }
+            }
+            assertAll(
+                { assert rendered.size() >= 1, "no rendered QUANTIFY .command.sh found" },
+                { assert rendered.every { it.contains('Sum') && it.contains('Median') && it.contains('REDSEA') },
+                    "not every requested statistic reached the command: " + rendered.join(' --- ') },
+                { assert rendered.every { it.contains("--redsea-markers 'CD3'") },
+                    "REDSEA marker list did not reach the command: " + rendered.join(' --- ') }
+            )
+        }
+    }
 }

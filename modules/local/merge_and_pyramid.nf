@@ -38,7 +38,7 @@ process MERGE_AND_PYRAMID {
     // subworkflows/local/assemble_export.nf is the single source of truth for the
     // embed_masks decision, for both the linear and the add_cycle path (it only
     // wires mask_files into this process's input when
-    // embed_masks && quantify_compartments && expanded_quantification); an
+    // embed_masks && quantify_compartments && Mean+Sum requested); an
     // empty mask_files list means Nextflow staged no masks/ dir.
     def masks_arg = mask_files ? "--masks-dir masks" : ""
 
