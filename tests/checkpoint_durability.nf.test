@@ -28,6 +28,13 @@
  * first case observes the filesystem from INSIDE the run — see
  * tests/testdata/slow_p002_registration.config.
  *
+ * BOTH HALVES ARE PINNED, not just the new one. The second case asserts the aggregate
+ * survives the failure holding exactly the completed patient's rows, because that
+ * finding is what decided the design — it is why the fix adds per-patient fragments
+ * and does NOT also rewrite the aggregate as a driver-side incremental write. A
+ * finding that steers a design and is guarded by nothing is a finding that quietly
+ * expires.
+ *
  * Tagged "stub" because CI's blocking gate is `nf-test test --tag stub`; an untagged
  * file never runs there. Both cases need more than one patient, so both use the
  * two-patient fixture.
@@ -131,6 +138,43 @@ nextflow_pipeline {
             // no fragment: a restart would read it and carry on with a missing slide.
             assert !new File("${outputDir}/csv/registered.parts/P002.csv".toString()).exists() :
                 "P002's registration failed, but a fragment claims it completed"
+
+            // --- and the AGGREGATE survives this too -----------------------------
+            // This is the header's refutation, pinned. The architecture review this
+            // task came from asserted that a hard failure means csv/registered.csv is
+            // "never written at all"; it is written, because conf/base.config maps a
+            // non-signal exit status to 'finish' and Nextflow's orderly shutdown closes
+            // the channels, which fires collectFile's completion handler.
+            //
+            // That claim is load-bearing: it is why this task did NOT also rebuild the
+            // aggregate as a driver-side incremental write, and why the durability gap
+            // is described as a window in TIME rather than a hole in the abort path. If
+            // it ever stops being true — a change to the shipped errorStrategy, a
+            // Nextflow that abandons the flush — the reasoning behind the design has to
+            // be revisited, and this is what will say so.
+            //
+            // Asserted on the SAME run as everything above: pinning it costs no extra
+            // pipeline execution, which is why it lives here rather than in a case of
+            // its own.
+            def aggregate = new File("${outputDir}/csv/registered.csv".toString())
+            assert aggregate.exists() :
+                "csv/registered.csv was NOT written after a hard task failure. The " +
+                "refutation in this file's header no longer holds: the aggregate is " +
+                "now all-or-nothing after all, and the design decision that followed " +
+                "from it (fragments only, no driver-side aggregate write) needs redoing."
+            def aggLines = aggregate.readLines().findAll { it.trim() }
+            assert aggLines[0] == 'patient_id,registered_image,is_reference,channels'
+            // Exactly the COMPLETED patient's rows — not fewer (the flush is not partial)
+            // and not P002's (nothing records a patient that did not finish).
+            assert aggLines.size() == 3 :
+                "expected the header + P001's two rows, got ${aggLines.size()}: ${aggLines}"
+            assert aggLines.drop(1).every { it.startsWith('P001,') } :
+                "the aggregate names a patient that never finished registering: ${aggLines}"
+            // The two copies agree, on a run that did not reach the end — which is the
+            // only condition under which anyone would reach for the fragments.
+            assert aggLines.drop(1).toSorted() == lines.drop(1).toSorted() :
+                "after a failure the aggregate and P001's fragment disagree:\n" +
+                "  aggregate: ${aggLines.drop(1)}\n  fragment:  ${lines.drop(1)}"
         }
     }
 }
