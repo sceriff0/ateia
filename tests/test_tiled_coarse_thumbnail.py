@@ -14,6 +14,10 @@ The thumbnail is what these tests pin.
 Properties pinned here:
   1. ORB never sees a full-resolution plane: the arrays handed to estimate_rigid have their
      longest side bounded by --max-dim. This is the test that fails against the pre-change code.
+     The spy patches ``tiled_pipeline.estimate_rigid``, not ``tiled_coarse.estimate_rigid``:
+     the decimate-estimate-lift contract now lives in the shared STARE module
+     (``tiled_pipeline.coarse_anchor``) so the in-process driver goes through the same lift,
+     and this script calls it rather than ORB directly.
   2. No whole-slide array is ever materialised: every region read off either slide is a bounded
      row band, not the whole plane.
   3. M0 is written in FULL-RESOLUTION coordinates -- estimating on a decimated pair and
@@ -48,6 +52,7 @@ pytest.importorskip("zarr")
 tifffile = pytest.importorskip("tifffile")
 
 import tiled_coarse  # noqa: E402
+import tiled_pipeline  # noqa: E402
 
 
 def _textured(seed, h, w, sigma=2.0):
@@ -112,13 +117,13 @@ def test_orb_never_sees_a_full_resolution_plane(tmp_path, monkeypatch):
     ref_f, mov_f = _write_pair(tmp_path, n=n, shift=(16, -8))
 
     seen = []
-    orig = tiled_coarse.estimate_rigid
+    orig = tiled_pipeline.estimate_rigid
 
     def spy(ref, mov, **kw):
         seen.append((ref.shape, mov.shape))
         return orig(ref, mov, **kw)
 
-    monkeypatch.setattr(tiled_coarse, "estimate_rigid", spy)
+    monkeypatch.setattr(tiled_pipeline, "estimate_rigid", spy)
     _run(tmp_path, ref_f, mov_f, max_dim=max_dim)
 
     assert seen, "estimate_rigid was never called"
@@ -264,13 +269,13 @@ def test_reference_and_moving_share_one_decimation_factor(tmp_path, monkeypatch)
     ref_f, mov_f = _write_pair(tmp_path, n=512, ref_n=1024, shift=(0, 0))
 
     seen = []
-    orig = tiled_coarse.estimate_rigid
+    orig = tiled_pipeline.estimate_rigid
 
     def spy(ref, mov, **kw):
         seen.append((ref.shape, mov.shape))
         return orig(ref, mov, **kw)
 
-    monkeypatch.setattr(tiled_coarse, "estimate_rigid", spy)
+    monkeypatch.setattr(tiled_pipeline, "estimate_rigid", spy)
     _run(tmp_path, ref_f, mov_f, max_dim=128)
 
     ref_shape, mov_shape = seen[0]
@@ -288,13 +293,13 @@ def test_small_slide_is_not_decimated(tmp_path, monkeypatch):
     ref_f, mov_f = _write_pair(tmp_path, n=n, shift=(6, -4))
 
     seen = []
-    orig = tiled_coarse.estimate_rigid
+    orig = tiled_pipeline.estimate_rigid
 
     def spy(ref, mov, **kw):
         seen.append((ref.shape, mov.shape))
         return orig(ref, mov, **kw)
 
-    monkeypatch.setattr(tiled_coarse, "estimate_rigid", spy)
+    monkeypatch.setattr(tiled_pipeline, "estimate_rigid", spy)
     m0_doc, _ = _run(tmp_path, ref_f, mov_f, max_dim=4096, tile=128, halo=16)
 
     assert seen[0] == ((n, n), (n, n)), "small slide must not be decimated"

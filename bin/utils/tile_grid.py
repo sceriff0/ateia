@@ -7,13 +7,37 @@ per-tile registration the overlap context it needs. Each core's centre is a cont
 mesh field, one-to-one with a :class:`mesh_field.MeshField` grid.
 
 Pure geometry — no image data, no third-party deps beyond the standard library.
+
+This module also owns the **tile-plan CSV schema** (:data:`TILE_PLAN_COLUMNS` +
+:func:`write_tile_plan`): the artifact TILED_COARSE hands to the Nextflow fan-out and
+TILED_REG_TILE reads back as CLI flags. Its Groovy counterpart is ``lib/TilePlan.groovy``
+(used by the stub and by the consumer's flag rendering); the two are tied together by
+``tests/test_tile_plan_schema.py``. Nobody else may spell the column list out.
 """
 
 from __future__ import annotations
 
+import csv
 from dataclasses import dataclass
 
-__all__ = ["Tile", "tile_grid"]
+__all__ = ["Tile", "tile_grid", "TILE_PLAN_COLUMNS", "write_tile_plan"]
+
+# The tile-plan CSV schema. Column names ARE the flag names bin/tiled_reg_tile.py takes,
+# so a rename here is a rename of the CLI contract -- see tests/test_tile_plan_schema.py.
+TILE_PLAN_COLUMNS = (
+    "ix",
+    "iy",
+    "cx",
+    "cy",
+    "x0",
+    "y0",
+    "x1",
+    "y1",
+    "rx0",
+    "ry0",
+    "rx1",
+    "ry1",
+)
 
 
 @dataclass(frozen=True)
@@ -75,3 +99,12 @@ def tile_grid(width, height, tile, halo):
                 )
             )
     return tiles
+
+
+def write_tile_plan(path, tiles):
+    """Write ``tiles`` as the tile-plan CSV, header and field order from TILE_PLAN_COLUMNS."""
+    with open(path, "w", newline="") as f:
+        wr = csv.writer(f)
+        wr.writerow(list(TILE_PLAN_COLUMNS))
+        for t in tiles:
+            wr.writerow([t.ix, t.iy, t.cx, t.cy, *t.core, *t.read])

@@ -62,6 +62,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   checkpoints to be present.
 
 ### Changed
+- **The STARE registration method now has ONE implementation, with two thin drivers.**
+  It previously existed twice: as the four shipped fan-out processes
+  (`bin/tiled_coarse.py` → `tiled_reg_tile.py` → `tiled_solve.py` → `tiled_stitch.py`)
+  and as `bin/utils/tiled_pipeline.py`'s `register_slide`, a tested in-process oracle with
+  **zero production importers**. The two orchestrations differed in three ways no test
+  could see:
+  1. the fan-out estimated the anchor on a decimated thumbnail and lifted the fit back to
+     full-resolution pixels; `register_slide` had no decimation or lift at all;
+  2. the fan-out read lazy per-tile crops (`source_region` + `open_lazy`);
+     `register_slide` materialised a whole-slide rigid pre-warp;
+  3. `tiled_solve.py` re-implemented the TRE-gating grid assembly locally
+     (`_grid_from_controls`) instead of calling the shared
+     `tiled_manifest.assemble_control_grid` `register_slide` already used.
+
+  `bin/utils/tiled_pipeline.py` is now the shared module and both differences that are
+  real are **explicit options** — `coarse_anchor(..., factor)` for the decimate-and-lift
+  contract and `TileWindows(..., lazy=...)` for per-tile-crop vs whole-slide-pre-warp.
+  `bin/tiled_coarse.py` and `bin/tiled_reg_tile.py` call them, so the module has real
+  production importers and its `tests/test_no_dead_bin_modules.py` ALLOWLIST entry is
+  gone (the allowlist is now empty). `tiled_solve.py` calls the shared gate. **No
+  behaviour change:** `register_slide`'s defaults are the pre-change ones
+  (`coarse_max_dim=0`, `lazy_tiles=False`) and `tests/test_stare_characterisation.py`
+  pins its output bit-for-bit against a longhand restatement of the old implementation.
+  The upside is coverage: selecting the production options puts the decimate-and-lift and
+  the tile-boundary offset arithmetic under the in-process tests too
+  (`tests/test_stare_unified_options.py`), and
+  `tests/test_tiled_coarse_decimation.py` pins the lift against the shipped CLI.
+- **The nuclear-index resolution and the tile-plan CSV schema each have one owner.**
+  Fifteen byte-identical lines of nuclear-index resolution in `TILED_COARSE` and
+  `TILED_REG_TILE` became `MarkerUtils.requireNuclearIndex`; the tile-plan column list,
+  previously hand-written in `bin/tiled_coarse.py`, `TILED_COARSE`'s stub,
+  `TILED_REG_TILE`'s per-field interpolation and the testdata generator, is now
+  `bin/utils/tile_grid.py`'s `TILE_PLAN_COLUMNS` plus `lib/TilePlan.groovy`, held equal
+  by `tests/test_tile_plan_schema.py`. Published artifacts are byte-identical.
 - **`reg_tiled_dapi_index` → `reg_tiled_nuclear_index`, default `0` → `null`.** `null`
   resolves the index from the slide's own channel metadata via
   `MarkerUtils.nuclearIndex`, matching how `SEGMENT`'s CellSAM backend already resolves

@@ -9,10 +9,17 @@ Creates realistic test data including:
 """
 
 import json
+import sys
 from pathlib import Path
 
 import numpy as np
 import tifffile
+
+# The tile-plan schema has one owner per language; these fixtures must be the shape
+# TILED_COARSE really writes, not a fourth hand-maintained copy of the column list.
+# See lib/TilePlan.groovy and tests/test_tile_plan_schema.py.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "bin" / "utils"))
+from tile_grid import TILE_PLAN_COLUMNS  # noqa: E402
 
 # Deterministic seed — ensures identical test data across runs and CI environments
 np.random.seed(42)
@@ -380,7 +387,7 @@ print("  Created invalid_file_not_found.csv (file not found)")
 #     header-only plan (must hit the n < 1 guard).
 # =============================================================================
 print("\n4h. Creating tile-plan CSV fixtures for the tiled fan-in gather...")
-_TILE_HEADER = "ix,iy,cx,cy,x0,y0,x1,y1,rx0,ry0,rx1,ry1"
+_TILE_HEADER = ",".join(TILE_PLAN_COLUMNS)
 
 
 def _tile_row(ix, iy):
@@ -414,6 +421,65 @@ print("  Created tiles_12_rows_blank_interspersed.csv (blank line mid-file)")
 with open(OUT_DIR / "tiles_header_only.csv", "w") as f:
     f.write(_TILE_HEADER + "\n")
 print("  Created tiles_header_only.csv (no data rows)")
+
+# =============================================================================
+# 4i. STARE fan-out artifacts: the M0 anchor, per-tile control points and the
+#     transform manifest, for tests/modules/tiled_reg_tile|solve|stitch.nf.test.
+#     Built through the REAL writers (tiled_manifest.slide_entry/build_manifest)
+#     rather than hand-written JSON, so a fixture cannot describe a manifest shape
+#     bin/tiled_solve.py would never emit.
+# =============================================================================
+print("\n4i. Creating STARE fan-out fixtures (M0, control points, manifest)...")
+from tiled_manifest import build_manifest, slide_entry  # noqa: E402
+
+_M0 = [[1.0, 0.0, 12.0], [0.0, 1.0, -7.0], [0.0, 0.0, 1.0]]
+_STARE_REF = "P001_ref"
+_STARE_MOV = "DAPI_CD3_CD8"
+
+with open(OUT_DIR / "P001_m0.json", "w") as f:
+    json.dump(
+        {
+            "M0": _M0,
+            "ref_h": 128,
+            "ref_w": 128,
+            "ref_name": _STARE_REF,
+            "coarse_tre": 1.5,
+            "n_inliers": 64,
+            "coarse_factor": 1,
+        },
+        f,
+        indent=2,
+    )
+print("  Created P001_m0.json (COARSE anchor, full-resolution frame)")
+
+# Two control points, one either side of the default gate (params.reg_tiled_gate_tre = 1.0).
+_CONTROLS = [
+    {"ix": 0, "iy": 0, "cx": 32.0, "cy": 32.0, "dx": 0.9, "dy": -1.2, "tre": 2.5},
+    {"ix": 1, "iy": 0, "cx": 96.0, "cy": 32.0, "dx": 0.05, "dy": 0.01, "tre": 0.2},
+]
+for _c in _CONTROLS:
+    with open(OUT_DIR / f"P001_{_c['ix']}_{_c['iy']}_ctrl.json", "w") as f:
+        json.dump(_c, f)
+print(f"  Created {len(_CONTROLS)} per-tile control-point JSONs")
+
+_grid_x = [c["cx"] for c in _CONTROLS]
+_grid_y = [_CONTROLS[0]["cy"]]
+_disp = [[[c["dx"], c["dy"]] if c["tre"] >= 1.0 else [0.0, 0.0] for c in _CONTROLS]]
+_entry = slide_entry(_M0, _grid_x, _grid_y, _disp)
+_entry["out_shape"] = [128, 128]
+with open(OUT_DIR / "P001_manifest.json", "w") as f:
+    json.dump(
+        build_manifest(
+            _STARE_REF,
+            {
+                _STARE_REF: {"M0": np.eye(3).tolist(), "mesh": None},
+                _STARE_MOV: _entry,
+            },
+        ),
+        f,
+        indent=2,
+    )
+print("  Created P001_manifest.json (M0 + TRE-gated mesh, via tiled_manifest)")
 
 # =============================================================================
 # 5. Update test.config input to use valid data

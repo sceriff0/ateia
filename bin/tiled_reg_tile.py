@@ -29,7 +29,7 @@ import numpy as np  # noqa: E402
 from logger import configure_logging, get_logger  # noqa: E402
 from tile_residual import residual_displacement  # noqa: E402
 from tiled_io import open_lazy  # noqa: E402
-from tiled_warp import source_region, warp_image  # noqa: E402
+from tiled_pipeline import TileWindows  # noqa: E402
 
 logger = get_logger(__name__)
 
@@ -82,30 +82,14 @@ def main(argv=None) -> int:
         try:
             _check_nuclear_index(a.nuclear_index, ref_src.shape[0])
             _check_nuclear_index(a.nuclear_index, mov_src.shape[0])
-            out_h, out_w = a.ry1 - a.ry0, a.rx1 - a.rx0
-            ref_tile = np.asarray(
-                ref_src[a.nuclear_index, slice(a.ry0, a.ry1), slice(a.rx0, a.rx1)],
-                dtype=np.float32,
+            # lazy=True is THE production windowing: only this tile's reference window and
+            # the small moving crop its inverse map draws from are decoded. The same class
+            # backs the in-process driver's lazy option, so the two agree by construction
+            # instead of by two hand-maintained copies of the offset arithmetic.
+            windows = TileWindows(
+                ref_src, mov_src, m0, nuclear_index=a.nuclear_index, lazy=True
             )
-            _c, mh, mw = mov_src.shape
-            sx0, sy0, sx1, sy1 = source_region(
-                m0, None, (a.rx0, a.ry0), (out_h, out_w), src_shape=(mh, mw)
-            )
-            if sx1 > sx0 and sy1 > sy0:
-                crop = np.asarray(
-                    mov_src[a.nuclear_index, slice(sy0, sy1), slice(sx0, sx1)],
-                    dtype=float,
-                )
-                mov_tile = warp_image(
-                    crop,
-                    m0,
-                    None,
-                    (out_h, out_w),
-                    out_origin=(a.rx0, a.ry0),
-                    src_origin=(sx0, sy0),
-                )
-            else:
-                mov_tile = np.zeros((out_h, out_w), dtype=float)
+            ref_tile, mov_tile = windows((a.rx0, a.ry0, a.rx1, a.ry1))
         finally:
             mov_close()
     finally:

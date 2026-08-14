@@ -125,6 +125,10 @@ tests/testdata/tiles_12_rows.csv
 tests/testdata/tiles_12_rows_trailing_blank.csv
 tests/testdata/tiles_12_rows_blank_interspersed.csv
 tests/testdata/tiles_header_only.csv
+tests/testdata/P001_m0.json
+tests/testdata/P001_0_0_ctrl.json
+tests/testdata/P001_1_0_ctrl.json
+tests/testdata/P001_manifest.json
 tests/testdata/test_input.csv
 tests/testdata/test_input_two_patients.csv
 tests/testdata/sample_merged_quant.csv

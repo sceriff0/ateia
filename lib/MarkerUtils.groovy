@@ -98,6 +98,31 @@ class MarkerUtils {
     }
 
     /**
+     * The nuclear/fiducial channel index a per-slide registration process estimates its
+     * transform from — `override` when the operator set one, otherwise resolved from the
+     * slide's own channel metadata — or throw naming the slide.
+     *
+     * TILED_COARSE and TILED_REG_TILE must agree on this index for the same slide: COARSE
+     * fits M0 on one channel and REG_TILE measures each tile's residual on it, so a
+     * disagreement registers the slide against the wrong marker without failing. They used
+     * to carry fifteen byte-identical lines each (resolution + the throw), which is exactly
+     * the shape that drifts. `override` is honoured verbatim, including a negative value,
+     * which still throws — an explicit out-of-range index is an operator error, not a
+     * request to fall back to metadata.
+     */
+    static int requireNuclearIndex(def override, List channels, def nuclearMarkers,
+                                   def processName, def patientId) {
+        def index = override != null ? (override as int) : nuclearIndex(channels ?: [], nuclearMarkers)
+        if (index < 0)
+            throw new IllegalArgumentException(
+                "${processName}: no nuclear/fiducial channel among ${channels} for " +
+                "patient ${patientId}. Configured nuclear_markers: " +
+                "${markerList(nuclearMarkers).join(', ')}. " +
+                "Set params.reg_tiled_nuclear_index to override.")
+        return index
+    }
+
+    /**
      * The channels SPLIT_CHANNELS emits for ONE slide.
      *
      * The nuclear channel is identical across cycles, so it is kept only on the

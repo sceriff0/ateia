@@ -309,7 +309,8 @@ dedicated lean `withName:'TILED_*'` overrides (2–8 GB) or pair with a memory-c
   `warp_seg_qc` scorer runs a `[native, rigid, refined]` plan through the tiled warper unchanged.
 - **Phase 2 — rigid core:** `tile_grid`, `coarse_align` (ORB+RANSAC M0 + residual TRE),
   `tile_residual` (whitened/Hann phase-corr), `tiled_warp` (inverse-map bilinear, non-negative),
-  `tiled_manifest` (TRE-gated control grid), `tiled_pipeline.register_slide` (end-to-end). An
+  `tiled_manifest` (TRE-gated control grid), `tiled_pipeline` (the shared STARE module:
+  `coarse_anchor`, `TileWindows`, and `register_slide` end-to-end over both). An
   end-to-end test realigns a synthetically warped slide (corr > 0.9), a pure shift needs no mesh,
   a non-rigid warp is captured by the mesh.
 - **CLI:** `bin/tiled_register.py` (100755) — real OME-TIFF I/O, smoke-tested.

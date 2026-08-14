@@ -1,0 +1,137 @@
+nextflow_process {
+
+    name "Test TILED_STITCH process"
+    script "modules/local/tiled_stitch.nf"
+    process "TILED_STITCH"
+
+    tag "modules"
+    tag "modules_local"
+    tag "tiled_stitch"
+
+    test("Should emit a registered slide and a size log - stub") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [ patient_id: 'P001', channels: ['DAPI', 'CD3', 'CD8'], is_reference: false ],
+                    file('$projectDir/tests/testdata/P001_manifest.json', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            assert process.success
+            assert process.out.registered
+            assert process.out.versions
+            // the trace layer's input-size row; params.enable_trace aggregates these
+            assert process.out.size_log
+            with(process.out.registered) {
+                assert size() == 1
+                // published under registered/ -- registration.nf's checkpoint writer
+                // distinguishes a warped moving slide from a passthrough reference by
+                // exactly this location
+                assert get(0).get(1).toString().contains('/registered/')
+                assert get(0).get(1).toString().endsWith('_registered.ome.tiff')
+            }
+        }
+    }
+
+    test("Should render the write-tile size and the pixel scale - rendered command") {
+
+        // Tagged `stub` so CI's blocking `nf-test test --tag stub` gate collects it, but
+        // deliberately WITHOUT `options "-stub"`: `-stub` never evaluates a `script:` block.
+        //
+        // Both flags are load-bearing and invisible to a stub run:
+        //   --out-tile    is the gigapixel-safety knob. TILED_STITCH's memory budget in
+        //                 conf/modules.config is computed from params.reg_tiled_out_tile
+        //                 (tiledStitchGb), so a command that did not pass it would run at
+        //                 bin/tiled_stitch.py's own default against a budget sized for
+        //                 something else.
+        //   --pixel-size  is stamped on the stitched slide as its resolution tags. The
+        //                 stitched slide used to carry no scale at all, so SPLIT_CHANNELS
+        //                 and the published pyramid inherited params.pixel_size with no way
+        //                 to notice a disagreement.
+        tag "stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [ patient_id: 'P001', channels: ['DAPI', 'CD3', 'CD8'], is_reference: false ],
+                    file('$projectDir/tests/testdata/P001_manifest.json', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            def rendered = []
+            new File("$workDir").eachFileRecurse { f ->
+                if (f.name == '.command.sh' && f.text.contains('tiled_stitch.py')) {
+                    rendered << f.text
+                }
+            }
+
+            assertAll(
+                { assert rendered.size() >= 1,
+                    "no rendered TILED_STITCH .command.sh found under the task work dir" },
+                { assert rendered.every { it.contains('--out-tile 1024') },
+                    "rendered command missing --out-tile (params.reg_tiled_out_tile default 1024): " + rendered.join(' --- ') },
+                { assert rendered.every { it.contains('--pixel-size 0.325') },
+                    "rendered command missing --pixel-size (params.pixel_size default 0.325): " + rendered.join(' --- ') },
+                // the manifest carries several slides; the stitch must be told which one
+                { assert rendered.every { it.contains("--moving-name 'DAPI_CD3_CD8'") },
+                    "the stitch must name the slide it is warping: " + rendered.join(' --- ') },
+                { assert rendered.every { it.contains('--manifest ') },
+                    "rendered command does not pass the transform manifest: " + rendered.join(' --- ') }
+            )
+        }
+    }
+
+    test("Should honour non-default reg_tiled_out_tile and pixel_size - rendered command") {
+
+        // The defaults cannot distinguish "reads the param" from "hardcodes the default".
+        tag "stub"
+
+        when {
+            params {
+                reg_tiled_out_tile = 512
+                pixel_size         = 0.2125
+            }
+            process {
+                """
+                input[0] = [
+                    [ patient_id: 'P001', channels: ['DAPI', 'CD3', 'CD8'], is_reference: false ],
+                    file('$projectDir/tests/testdata/P001_manifest.json', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            def rendered = []
+            new File("$workDir").eachFileRecurse { f ->
+                if (f.name == '.command.sh' && f.text.contains('tiled_stitch.py')) {
+                    rendered << f.text
+                }
+            }
+
+            assertAll(
+                { assert rendered.size() >= 1,
+                    "no rendered TILED_STITCH .command.sh found under the task work dir" },
+                { assert rendered.every { it.contains('--out-tile 512') },
+                    "params.reg_tiled_out_tile was not honoured: " + rendered.join(' --- ') },
+                { assert rendered.every { it.contains('--pixel-size 0.2125') },
+                    "params.pixel_size was not honoured: " + rendered.join(' --- ') }
+            )
+        }
+    }
+}

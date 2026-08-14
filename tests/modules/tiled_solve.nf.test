@@ -1,0 +1,141 @@
+nextflow_process {
+
+    name "Test TILED_SOLVE process"
+    script "modules/local/tiled_solve.nf"
+    process "TILED_SOLVE"
+
+    tag "modules"
+    tag "modules_local"
+    tag "tiled_solve"
+
+    test("Should emit a transform manifest and an intrinsic-TRE summary - stub") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [ patient_id: 'P001', channels: ['DAPI', 'CD3', 'CD8'], is_reference: false ],
+                    file('$projectDir/tests/testdata/P001_m0.json', checkIfExists: true),
+                    [
+                        file('$projectDir/tests/testdata/P001_0_0_ctrl.json', checkIfExists: true),
+                        file('$projectDir/tests/testdata/P001_1_0_ctrl.json', checkIfExists: true)
+                    ]
+                ]
+                """
+            }
+        }
+
+        then {
+            assert process.success
+            // BOTH artifacts, not just the manifest: *_tre.json is the tiled adapter's
+            // `intrinsic_tre` null-object slot, and the fan-out used to drop it entirely.
+            assert process.out.manifest
+            assert process.out.tre
+            assert process.out.versions
+            with(process.out.manifest) {
+                assert size() == 1
+                assert get(0).get(1).toString().endsWith('_manifest.json')
+            }
+            with(process.out.tre) {
+                assert size() == 1
+                assert get(0).get(1).toString().endsWith('_tre.json')
+            }
+        }
+    }
+
+    test("Should render the TRE gate, the control glob and the slide name - rendered command") {
+
+        // Tagged `stub` so CI's blocking `nf-test test --tag stub` gate collects it, but
+        // deliberately WITHOUT `options "-stub"`: `-stub` never evaluates a `script:` block,
+        // so no stub run can observe a rendered command.
+        //
+        // Three things carry meaning here and none of them is visible to a stub run:
+        //   --gate-tre     decides which tiles refine and which stay rigid. Losing it would
+        //                  silently fall back to bin/tiled_solve.py's own argparse default
+        //                  rather than params.reg_tiled_gate_tre.
+        //   --controls     the glob must match the `ctrl_?/*` staging pattern in the input
+        //                  declaration; a mismatch raises "no control-point JSONs matched"
+        //                  only at runtime, per-patient.
+        //   --moving-name  keys the slide's entry in the manifest, and TILED_STITCH looks
+        //                  the entry up by the same name.
+        tag "stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [ patient_id: 'P001', channels: ['DAPI', 'CD3', 'CD8'], is_reference: false ],
+                    file('$projectDir/tests/testdata/P001_m0.json', checkIfExists: true),
+                    [
+                        file('$projectDir/tests/testdata/P001_0_0_ctrl.json', checkIfExists: true),
+                        file('$projectDir/tests/testdata/P001_1_0_ctrl.json', checkIfExists: true)
+                    ]
+                ]
+                """
+            }
+        }
+
+        then {
+            def rendered = []
+            new File("$workDir").eachFileRecurse { f ->
+                if (f.name == '.command.sh' && f.text.contains('tiled_solve.py')) {
+                    rendered << f.text
+                }
+            }
+
+            assertAll(
+                { assert rendered.size() >= 1,
+                    "no rendered TILED_SOLVE .command.sh found under the task work dir" },
+                { assert rendered.every { it.contains('--gate-tre 1.0') },
+                    "rendered command missing --gate-tre (params.reg_tiled_gate_tre default 1.0): " + rendered.join(' --- ') },
+                { assert rendered.every { it.contains("--controls 'ctrl_*/*_ctrl.json'") },
+                    "the control glob must match the ctrl_?/* stageAs pattern: " + rendered.join(' --- ') },
+                { assert rendered.every { it.contains("--moving-name 'DAPI_CD3_CD8'") },
+                    "the moving slide name must be the slide's channel set: " + rendered.join(' --- ') },
+                { assert rendered.every { it.contains('--out-tre ') },
+                    "the intrinsic-TRE summary must be requested; the fan-out used to drop it: " + rendered.join(' --- ') }
+            )
+        }
+    }
+
+    test("Should honour a non-default reg_tiled_gate_tre - rendered command") {
+
+        // 1.0 is the default, so the case above cannot tell "reads the param" from
+        // "hardcodes the same number". This one can.
+        tag "stub"
+
+        when {
+            params {
+                reg_tiled_gate_tre = 2.5
+            }
+            process {
+                """
+                input[0] = [
+                    [ patient_id: 'P001', channels: ['DAPI', 'CD3', 'CD8'], is_reference: false ],
+                    file('$projectDir/tests/testdata/P001_m0.json', checkIfExists: true),
+                    [ file('$projectDir/tests/testdata/P001_0_0_ctrl.json', checkIfExists: true) ]
+                ]
+                """
+            }
+        }
+
+        then {
+            def rendered = []
+            new File("$workDir").eachFileRecurse { f ->
+                if (f.name == '.command.sh' && f.text.contains('tiled_solve.py')) {
+                    rendered << f.text
+                }
+            }
+
+            assertAll(
+                { assert rendered.size() >= 1,
+                    "no rendered TILED_SOLVE .command.sh found under the task work dir" },
+                { assert rendered.every { it.contains('--gate-tre 2.5') },
+                    "params.reg_tiled_gate_tre was not honoured: " + rendered.join(' --- ') }
+            )
+        }
+    }
+}
