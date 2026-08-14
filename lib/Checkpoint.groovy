@@ -227,7 +227,10 @@ class Checkpoint {
         if (!path?.trim())
             throw new IllegalArgumentException(
                 "Checkpoint.read('${step}'): no CSV path given (got ${csvPath == null ? 'null' : "'${csvPath}'"})")
-        if (!new File(path).exists())
+        // CsvUtils.exists, not new File(...).exists(): a checkpoint may live behind a
+        // URI scheme (add_cycle's --prior_outdir on object storage), and `new File`
+        // reads 's3://bucket/...' as a relative local name that quietly does not exist.
+        if (!CsvUtils.exists(path))
             throw new FileNotFoundException("Checkpoint.read('${step}'): no such checkpoint CSV: ${path}")
 
         // The column check the three readers each hand-rolled. Theirs asserted that the

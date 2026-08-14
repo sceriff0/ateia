@@ -7,6 +7,34 @@
  */
 class CsvUtils {
 
+    /**
+     * The path a CSV string names, resolved through Nextflow's filesystem providers --
+     * the same lookup `Channel.fromPath` performs, so 's3://', 'gs://', 'az://',
+     * 'http://' and 'file://' resolve to their provider instead of being mistaken for
+     * local names.
+     *
+     * WHY NOT java.io.File. Every file access in this class used to construct one, and
+     * `new File("s3://bucket/run/csv/registered.csv")` is a RELATIVE LOCAL path: a file
+     * named 'registered.csv' under directories 's3:' / '' / 'bucket'. It does not
+     * throw; it simply does not exist, so a reader reports "no such file" for a URI the
+     * rest of the pipeline handles fine. That stayed invisible while these CSVs were
+     * only ever opened through Channel.fromPath, and became a real narrowing the moment
+     * lib/Checkpoint.groovy's reader took over add_cycle's --prior_outdir reads. One
+     * helper, so the rule cannot be half-applied.
+     *
+     * Public because lib/Checkpoint.groovy's existence check needs the same resolution.
+     * Pinned by tests/lib_probe.nf against both a 'file://' URI (read end to end) and an
+     * 's3://' one (resolution only -- no credentials, no network).
+     */
+    static java.nio.file.Path pathOf(def csvPath) {
+        return nextflow.file.FileHelper.asPath(csvPath?.toString())
+    }
+
+    /** Whether the CSV a string names exists, URI schemes included. See {@link #pathOf}. */
+    static boolean exists(def csvPath) {
+        return java.nio.file.Files.exists(pathOf(csvPath))
+    }
+
     private static List<String> parseCsvLine(String line) {
         def fields = []
         def current = new StringBuilder()
@@ -41,7 +69,7 @@ class CsvUtils {
      * validation. Stripping it once here protects every reader below.
      */
     private static List<String> readCsvLines(String csvPath) {
-        def lines = new File(csvPath).readLines()
+        def lines = pathOf(csvPath).readLines()
         if (lines && lines[0] && ((int) lines[0].charAt(0)) == 0xFEFF)
             lines[0] = lines[0].substring(1)
         return lines
@@ -83,10 +111,9 @@ class CsvUtils {
     }
 
     private static List<String> requireLines(String csvPath) {
-        def file = new File(csvPath)
-        if (!file.exists())
+        if (!exists(csvPath))
             throw new FileNotFoundException("CSV not found: ${csvPath}")
-        def lines = readCsvLines(file.path)
+        def lines = readCsvLines(csvPath)
         if (lines.isEmpty())
             throw new IllegalStateException("CSV is empty: ${csvPath}")
         return lines
@@ -137,11 +164,10 @@ class CsvUtils {
      * Returns a Map of patient_id -> count
      */
     static Map<String, Integer> countImagesPerPatient(String csvPath) {
-        def file = new File(csvPath)
-        if (!file.exists()) return [:]
+        if (!exists(csvPath)) return [:]
 
         def counts = [:].withDefault { 0 }
-        def lines = readCsvLines(file.path)
+        def lines = readCsvLines(csvPath)
         if (lines.size() < 2) return [:]  // Header only or empty
 
         def header = parseCsvLine(lines[0])
@@ -237,10 +263,9 @@ class CsvUtils {
      *                    twice.
      */
     static Map<String, String> resolveReferenceRows(String csvPath, String imageColumn, boolean autoReference) {
-        def file = new File(csvPath)
-        if (!file.exists()) return [:]
+        if (!exists(csvPath)) return [:]
 
-        def lines = readCsvLines(file.path)
+        def lines = readCsvLines(csvPath)
         if (lines.size() < 2) return [:]
 
         def header = parseCsvLine(lines[0])
@@ -284,10 +309,9 @@ class CsvUtils {
     }
 
     static Map<String, Integer> countChannelsPerPatient(String csvPath, String imageColumn, def nuclearMarkers, boolean autoReference) {
-        def file = new File(csvPath)
-        if (!file.exists()) return [:]
+        if (!exists(csvPath)) return [:]
 
-        def lines = readCsvLines(file.path)
+        def lines = readCsvLines(csvPath)
         if (lines.size() < 2) return [:]  // Header only or empty
 
         def header = parseCsvLine(lines[0])
@@ -342,11 +366,10 @@ class CsvUtils {
      * Returns a Map of patient_id -> declared channel count.
      */
     static Map<String, Integer> countDeclaredChannelsPerPatient(String csvPath) {
-        def file = new File(csvPath)
-        if (!file.exists()) return [:]
+        if (!exists(csvPath)) return [:]
 
         def channelSets = [:].withDefault { new HashSet<String>() }
-        def lines = readCsvLines(file.path)
+        def lines = readCsvLines(csvPath)
         if (lines.size() < 2) return [:]  // Header only or empty
 
         def header = parseCsvLine(lines[0])
@@ -422,11 +445,10 @@ class CsvUtils {
 
     static void validateInputCSV(def csv, List required_cols) {
 
-        def file = new File(csv)
-        if (!file.exists())
+        if (!exists(csv))
             throw new FileNotFoundException("Input CSV not found: ${csv}")
 
-        def lines = readCsvLines(file.path)
+        def lines = readCsvLines(csv)
         if (lines.isEmpty())
             throw new RuntimeException("CSV is empty: ${csv}")
 
@@ -498,7 +520,10 @@ class CsvUtils {
                 def p = cols[pathIdx].trim()
                 if (!p)
                     throw new IllegalArgumentException("Empty path in column '${pathColumn}' for patient ${row.patient_id} (${ctx})")
-                if (!new File(p).exists())
+                // Same provider-aware resolution as the CSV itself: a samplesheet may
+                // legitimately name remote images, and java.io.File called every one of
+                // them missing.
+                if (!exists(p))
                     throw new FileNotFoundException("Input file does not exist: ${p} (patient ${row.patient_id}, ${ctx})")
             }
 
