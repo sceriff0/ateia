@@ -21,9 +21,23 @@ class ParamUtils {
      *
      *   name            - the step's canonical identifier; also the value
      *                      --start/--stop accept.
-     *   requiredColumns - samplesheet columns CsvUtils must find when this step
-     *                      is the run's entry point (its own input, not a
-     *                      downstream checkpoint column).
+     *   entryCheckpoint - the lib/Checkpoint.groovy step whose CSV IS this step's
+     *                      input when it is the run's entry point, or null when the
+     *                      input is a real samplesheet (preprocessing only). Naming
+     *                      it makes "an entry point whose input is a checkpoint" a
+     *                      concept rather than an implied coincidence, and it is
+     *                      what requiredColumnsForStep derives from.
+     *   requiredColumns - literal column list, and ONLY for a step with no
+     *                      entryCheckpoint. Every other step's list comes from
+     *                      Checkpoint, which is authoritative because
+     *                      Checkpoint.columns is the WRITER's header seed
+     *                      (Checkpoint.header): derive the writer's header from a
+     *                      reader's minimum instead and a lax entry contract would
+     *                      shrink a published file. The two used to be stated
+     *                      independently and had already drifted -- postprocessing
+     *                      listed six of segmented.csv's eight columns, so
+     *                      CsvUtils.validateInputCSV accepted a file
+     *                      Checkpoint.read then rejected a few lines later.
      *   entryColumn     - the checkpoint-CSV column INPUT_CHECK reads when this
      *                      step is the run's entry point (mirage.nf reads the
      *                      sheet exactly once, at --start).
@@ -36,19 +50,23 @@ class ParamUtils {
     static final List STEPS = [
         [
             name           : 'preprocessing',
+            // The ONE entry point whose input is a user-authored samplesheet rather
+            // than a checkpoint this pipeline wrote, so it has no entryCheckpoint and
+            // its columns stay a literal.
+            entryCheckpoint: null,
             requiredColumns: ['patient_id', 'path_to_file', 'is_reference', 'channels'],
             entryColumn    : 'path_to_file',
             qcKinds        : ['preprocess_qc'],
         ],
         [
             name           : 'registration',
-            requiredColumns: ['patient_id', 'preprocessed_image', 'is_reference', 'channels'],
+            entryCheckpoint: Layout.PREPROCESSED,
             entryColumn    : 'preprocessed_image',
             qcKinds        : ['registration_qc', 'registration_tre', 'seg_qc', 'seg_residuals'],
         ],
         [
             name           : 'segmentation',
-            requiredColumns: ['patient_id', 'registered_image', 'is_reference', 'channels'],
+            entryCheckpoint: Layout.REGISTERED,
             entryColumn    : 'registered_image',
             // Empty by design, not an oversight: SEGMENT and the two property
             // extractors emit only 'versions' and 'size_log', which are
@@ -60,16 +78,22 @@ class ParamUtils {
         ],
         [
             name           : 'postprocessing',
-            // 'cell_mask' and 'nuclei_mask' (beyond the registered-image base four) make
-            // a plain csv/registered.csv -- still what every doc's `--start postprocessing`
-            // example names, pre-dating the segmentation step -- fail HERE with a
-            // clear "Missing required column" error. Without them, CsvUtils.validateInputCSV
-            // and validateInputSemantics both pass (registered.csv satisfies the base
-            // four), and the run dies much later inside segmentation.nf's
-            // READ_SEGMENTED_CHECKPOINT -- which dereferences BOTH file(row.cell_mask) and
-            // file(row.nuclei_mask) unconditionally -- with "Argument of 'file' function cannot be
-            // null" -- a two-layer validation contract that silently skipped its job.
-            requiredColumns: ['patient_id', 'registered_image', 'is_reference', 'channels', 'cell_mask', 'nuclei_mask'],
+            // segmented.csv, whose 'cell_mask' / 'nuclei_mask' columns (beyond the
+            // registered-image base four) make a plain csv/registered.csv -- still what
+            // every doc's `--start postprocessing` example names, pre-dating the
+            // segmentation step -- fail HERE with a clear "Missing required column"
+            // error. Without them, CsvUtils.validateInputCSV and validateInputSemantics
+            // both pass (registered.csv satisfies the base four), and the run dies much
+            // later inside segmentation.nf's READ_SEGMENTED_CHECKPOINT -- which
+            // dereferences BOTH file(row.cell_mask) and file(row.nuclei_mask)
+            // unconditionally -- with "Argument of 'file' function cannot be null" -- a
+            // two-layer validation contract that silently skipped its job.
+            //
+            // Naming the checkpoint rather than six of its eight columns also closes the
+            // residual gap: 'contours' / 'nucleus_contours' are now demanded here too,
+            // so the entry validator and Checkpoint.read agree on the verdict instead of
+            // the reader having to re-reject what the validator waved through.
+            entryCheckpoint: Layout.SEGMENTED,
             entryColumn    : 'registered_image',
             qcKinds        : ['postprocess_qc'],
         ],
@@ -417,7 +441,11 @@ class ParamUtils {
         if (!entry) {
             throw new IllegalArgumentException("No column requirements defined for step: ${step}")
         }
-        return entry.requiredColumns
+        // Resolved on CALL, not baked into STEPS at class-init: this class references
+        // Checkpoint and CsvUtils references this class, so keeping the lookup lazy
+        // removes any static-initialisation order to reason about. Checkpoint itself
+        // never references ParamUtils, so there is no cycle either way.
+        return entry.entryCheckpoint ? Checkpoint.columns(entry.entryCheckpoint) : entry.requiredColumns
     }
 
     /**
