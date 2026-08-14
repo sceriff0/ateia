@@ -31,6 +31,12 @@ VALID_STATS = set(STATISTICS)
 EXPANDED_STATS = {"Mean", "Sum"}  # produced only with quantify --expanded (default-on)
 VALID_ROLES = {"lineage", "state"}
 VALID_RATES = {"never", "rare", "soft"}
+VALID_FALLBACKS = {"none", "ancestor"}
+# THE one owner of this default. Never re-spell it as a `.get(key, "ancestor")`
+# elsewhere -- a second declaration silently wins or diverges. Same rule
+# nextflow.config's params obey, and tests/test_no_duplicate_param_defaults.py
+# enforces for the Nextflow half; this is the Python half of the same hazard.
+DEFAULT_AMBIGUOUS_FALLBACK = "ancestor"
 
 
 class PanelError(Exception):
@@ -67,6 +73,7 @@ class Panel:
     phenotypes: Dict[str, Phenotype] = field(default_factory=dict)
     exclusive: List[Constraint] = field(default_factory=list)
     requires: List[Tuple[str, str]] = field(default_factory=list)
+    settings: Dict[str, str] = field(default_factory=dict)
 
 
 def _load(src: Union[str, Path, dict]) -> dict:
@@ -125,12 +132,21 @@ def parse_panel(src: Union[str, Path, dict]) -> Panel:
     requires: List[Tuple[str, str]] = [
         (c["if"], c["then"]) for c in (cons.get("requires") or [])
     ]
+    settings = dict(raw.get("settings") or {})
+    settings.setdefault("ambiguous_fallback", DEFAULT_AMBIGUOUS_FALLBACK)
     return Panel(
-        markers=markers, phenotypes=phenotypes, exclusive=exclusive, requires=requires
+        markers=markers, phenotypes=phenotypes, exclusive=exclusive,
+        requires=requires, settings=settings,
     )
 
 
 def typecheck(panel: Panel) -> None:
+    fallback = panel.settings.get("ambiguous_fallback", DEFAULT_AMBIGUOUS_FALLBACK)
+    if fallback not in VALID_FALLBACKS:
+        raise PanelError(
+            f"settings.ambiguous_fallback must be "
+            f"{'|'.join(sorted(VALID_FALLBACKS))}, got {fallback!r}"
+        )
     for name, mk in panel.markers.items():
         if mk.role not in VALID_ROLES:
             raise PanelError(

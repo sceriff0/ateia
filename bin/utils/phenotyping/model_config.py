@@ -22,8 +22,9 @@ import html
 import json
 from typing import Dict, List
 
+from .classify import OUTCOME_NAMES
 from .feasible import inherited_signature, lineage_markers
-from .panel_schema import Panel
+from .panel_schema import DEFAULT_AMBIGUOUS_FALLBACK, Panel
 
 
 def build_model_config(
@@ -65,6 +66,12 @@ def build_model_config(
             "is_leaf": is_leaf[name],
         })
 
+    lineage_order = lineage_markers(panel)
+    # The CANDIDATE domain: names reachable as a most-specific match. Exactly the set
+    # export_geojson.py calls `feasible_names` and phenotype_cells.py calls `all_names`,
+    # derived once here so all three agree.
+    phenotype_order = sorted({e["phenotype"] for e in feasible})
+
     return {
         "markers": markers,
         "phenotypes": phenotypes,
@@ -79,9 +86,15 @@ def build_model_config(
             "alpha_target": alpha_target,
             "min_calibration": min_calibration,
             "statistic_default": "Median",
+            "ambiguous_fallback": panel.settings.get(
+                "ambiguous_fallback", DEFAULT_AMBIGUOUS_FALLBACK
+            ),
         },
         "palette": palette,
-        "lineage_markers": lineage_markers(panel),
+        "lineage_markers": lineage_order,
+        "lineage_order": lineage_order,
+        "phenotype_order": phenotype_order,
+        "outcome_names": list(OUTCOME_NAMES),
         "state_markers": sorted(m for m, mk in panel.markers.items() if mk.role == "state"),
         "spec_version": spec_version,
         "compiled_at": None,

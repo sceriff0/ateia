@@ -14,12 +14,11 @@ from __future__ import annotations
 import colorsys
 from typing import Dict, List
 
-RESERVED = {
-    "Ambiguous": [150, 150, 150],
-    "Conflict": [230, 140, 0],
-    "Artefact": [220, 50, 50],
-    "Unclassified": [120, 120, 120],
-}
+from .classify import OUTCOME_NAMES
+
+# Colours only -- the NAMES are owned by classify.OUTCOME_NAMES.
+_RESERVED_RGB = ([150, 150, 150], [230, 140, 0], [220, 50, 50], [120, 120, 120])
+RESERVED = {n: list(rgb) for n, rgb in zip(OUTCOME_NAMES, _RESERVED_RGB)}
 
 
 def build_palette(phenotype_names: List[str]) -> Dict[str, List[int]]:

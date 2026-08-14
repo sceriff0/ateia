@@ -36,6 +36,7 @@ sys.path.insert(0, str(Path(__file__).parent / "utils"))
 from image_utils import ensure_dir
 from logger import configure_logging, get_logger
 from measurements import MORPHOLOGY_COLS, identify_marker_columns
+from phenotyping.palette import RESERVED as PALETTE_RESERVED
 
 logger = get_logger(__name__)
 
@@ -56,10 +57,10 @@ def rgb_to_qupath_color(r: int, g: int, b: int, a: int = 255) -> int:
     return value
 
 
-RESERVED_CLASSES = {
-    "Ambiguous": [150, 150, 150], "Conflict": [230, 140, 0],
-    "Artefact": [220, 50, 50], "Unclassified": [120, 120, 120],
-}
+# Colours for the reserved outcome buckets. The NAMES are owned by
+# classify.OUTCOME_NAMES and reach here through palette.RESERVED -- this used to be an
+# independent literal, i.e. a third copy of the taxonomy.
+RESERVED_CLASSES = dict(PALETTE_RESERVED)
 
 
 def load_model_config(path: str) -> Dict:

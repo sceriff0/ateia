@@ -44,3 +44,42 @@ def test_spec_report_writes_html(tmp_path):
     write_spec_report_html(cfg, [], ["a warning"], str(out))
     text = out.read_text()
     assert "<html" in text.lower() and "a warning" in text
+
+
+def test_runtime_carries_ambiguous_fallback():
+    from utils.phenotyping.model_config import build_model_config
+    from utils.phenotyping.panel_schema import parse_panel
+
+    panel = parse_panel(
+        {"markers": {}, "phenotypes": {}, "settings": {"ambiguous_fallback": "none"}}
+    )
+    cfg = build_model_config(
+        panel, [], {"never": [], "enforce": [], "audit": [], "requires": []}, {}, {},
+        alpha_target=0.05, min_calibration=50, spec_version="test",
+    )
+    assert cfg["runtime"]["ambiguous_fallback"] == "none"
+
+
+def test_orderings_are_derived_not_literal():
+    from utils.phenotyping.model_config import build_model_config
+    from utils.phenotyping.panel_schema import parse_panel
+
+    panel = parse_panel({
+        "markers": {
+            "CD3": {"role": "lineage", "compartment": "cell", "statistic": "Median"},
+            "KI67": {"role": "state", "compartment": "nuclear", "statistic": "Median"},
+        },
+        "phenotypes": {"T_cell": {"CD3": "+"}},
+    })
+    feasible = [{"pattern": {"CD3": 1}, "phenotype": "T_cell"},
+                {"pattern": {"CD3": 0}, "phenotype": "Unclassified"}]
+    cfg = build_model_config(
+        panel, feasible, {"never": [], "enforce": [], "audit": [], "requires": []},
+        {"CD3": {"neg_source": {}, "pos_source": {}},
+         "KI67": {"neg_source": {}, "pos_source": {}}},
+        {}, alpha_target=0.05, min_calibration=50, spec_version="test",
+    )
+    assert cfg["phenotype_order"] == ["T_cell", "Unclassified"]
+    # lineage_order IS lineage_markers -- the same object, never a second sort.
+    assert cfg["lineage_order"] == cfg["lineage_markers"] == ["CD3"]
+    assert cfg["outcome_names"] == ["Ambiguous", "Conflict", "Artefact", "Unclassified"]

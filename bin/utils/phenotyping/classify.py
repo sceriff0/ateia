@@ -46,6 +46,14 @@ _MAX_VECTORIZED_LINEAGE = 64
 # allocation.
 _CHUNK_CELLS = 4096
 
+# THE reserved non-phenotype outcome names, in taxonomy order. Owned here because this
+# module is what produces them. `palette.RESERVED` and `export_geojson.RESERVED_CLASSES`
+# supply COLOURS keyed off this tuple, and `build_model_config` emits it as
+# `outcome_names` so no consumer enumerates the taxonomy itself. It was declared
+# independently in three places before, byte-identical -- the VALID_STATS pattern
+# (panel_schema.py) one edit from firing.
+OUTCOME_NAMES = ("Ambiguous", "Conflict", "Artefact", "Unclassified")
+
 
 @dataclass
 class CellOutcome:

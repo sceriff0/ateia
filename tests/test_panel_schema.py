@@ -153,3 +153,37 @@ def test_a_bogus_statistic_is_still_rejected():
     }
     with pytest.raises(PanelError, match="statistic must be one of"):
         typecheck(parse_panel(panel))
+
+
+# ── settings.ambiguous_fallback ───────────────────────────────────────────────
+
+
+def test_ambiguous_fallback_defaults_to_ancestor():
+    """Default ON: phenotyping is not on main, so there is no installed base to
+    protect, and an opt-in resume path never gets exercised on real data."""
+    from utils.phenotyping.panel_schema import DEFAULT_AMBIGUOUS_FALLBACK, parse_panel
+
+    panel = parse_panel({"markers": {}, "phenotypes": {}})
+    assert panel.settings["ambiguous_fallback"] == DEFAULT_AMBIGUOUS_FALLBACK == "ancestor"
+
+
+def test_ambiguous_fallback_accepts_none():
+    from utils.phenotyping.panel_schema import parse_panel
+
+    panel = parse_panel(
+        {"markers": {}, "phenotypes": {}, "settings": {"ambiguous_fallback": "none"}}
+    )
+    assert panel.settings["ambiguous_fallback"] == "none"
+
+
+def test_ambiguous_fallback_rejects_unknown_value():
+    import pytest
+    from utils.phenotyping.panel_schema import PanelError, parse_panel, typecheck
+
+    panel = parse_panel({
+        "markers": {"CD3": {"role": "lineage", "compartment": "cell", "statistic": "Median"}},
+        "phenotypes": {},
+        "settings": {"ambiguous_fallback": "sideways"},
+    })
+    with pytest.raises(PanelError, match="ambiguous_fallback"):
+        typecheck(panel)

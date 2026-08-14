@@ -281,3 +281,15 @@ def test_classify_cell_adapter_rejects_empty_lineage():
     """
     with pytest.raises(ValueError, match="at least one lineage marker"):
         classify_cell({}, FEASIBLE, [], [], [])
+
+
+def test_reserved_outcome_names_have_exactly_one_owner():
+    """palette.RESERVED and export_geojson.RESERVED_CLASSES carry COLOURS; the NAMES
+    come from classify.OUTCOME_NAMES. Three independent byte-identical copies is the
+    VALID_STATS bug (panel_schema.py) waiting to happen."""
+    import export_geojson
+    from utils.phenotyping import palette
+    from utils.phenotyping.classify import OUTCOME_NAMES
+
+    assert set(palette.RESERVED) == set(OUTCOME_NAMES)
+    assert set(export_geojson.RESERVED_CLASSES) == set(OUTCOME_NAMES)
