@@ -136,6 +136,12 @@ workflow {
     // ------------------------------------------------------------------ //
     // ParamUtils — the step vocabulary
     // ------------------------------------------------------------------ //
+    // Fixture root, used by the ParamUtils and Checkpoint sections below.
+    // `projectDir` for this script is <repo>/tests (it is the script's own directory,
+    // not the repo root — confirmed for both `nextflow run tests/lib_probe.nf -lib lib`
+    // and nf-test's invocation), so fixtures are one level down from here.
+    def fixtures = "${projectDir}/testdata"
+
     assert ParamUtils.STEP_ORDER == ['preprocessing', 'registration', 'segmentation', 'postprocessing']
     assert ParamUtils.entryColumnForStep('registration')      == 'preprocessed_image'
     assert ParamUtils.requiredColumnsForStep('preprocessing') ==
@@ -156,7 +162,11 @@ workflow {
     // Every step's entryColumn must be one of its own requiredColumns, or the
     // samplesheet parser reads a column validation never demanded.
     ParamUtils.STEPS.each { step ->
-        assert step.entryColumn in step.requiredColumns,
+        // requiredColumnsForStep, not step.requiredColumns: for an entry point whose
+        // input is a checkpoint the field is absent and the list comes from
+        // Checkpoint. Reading the raw field here would compare against `null` and
+        // pass vacuously for three of the four steps.
+        assert step.entryColumn in ParamUtils.requiredColumnsForStep(step.name),
             "step '${step.name}': entryColumn '${step.entryColumn}' not in requiredColumns"
     }
 
@@ -207,22 +217,51 @@ workflow {
     // is the exact failure this extraction exists to prevent.
     assert Checkpoint.STEPS*.name == Layout.CHECKPOINT_STEPS
 
-    // A step's requiredColumns ARE the previous step's checkpoint columns — that is what
-    // makes --start <step> able to read the checkpoint the previous step wrote. The two
-    // tables state it independently, so assert they agree rather than trusting them to.
-    // segmentation keeps the exact invariant (its requiredColumns == registered.csv's
-    // full column list). postprocessing no longer can: segmented.csv gained four
-    // columns beyond the base four, and postprocessing only requires the two it
-    // dereferences unconditionally inside READ_SEGMENTED_CHECKPOINT (cell_mask,
-    // nuclei_mask) -- so assert its exact (smaller) list, plus that every column it
-    // names is still a real column of the checkpoint it reads (a subset check, not
-    // an equality).
-    assert ParamUtils.STEPS.find { it.name == 'registration'   }.requiredColumns == Checkpoint.columns(Layout.PREPROCESSED)
-    assert ParamUtils.STEPS.find { it.name == 'segmentation'   }.requiredColumns == Checkpoint.columns(Layout.REGISTERED)
-    assert ParamUtils.STEPS.find { it.name == 'postprocessing' }.requiredColumns ==
-        ['patient_id', 'registered_image', 'is_reference', 'channels', 'cell_mask', 'nuclei_mask']
-    assert ParamUtils.STEPS.find { it.name == 'postprocessing' }.requiredColumns
-        .every { it in Checkpoint.columns(Layout.SEGMENTED) }
+    // A step whose ENTRY IS A CHECKPOINT requires exactly that checkpoint's columns.
+    // The two tables used to state it independently and had already drifted:
+    // postprocessing listed six of segmented.csv's eight, so CsvUtils.validateInputCSV
+    // accepted a file Checkpoint.read then rejected a few lines later -- two answers
+    // to "what must this file contain", checked in sequence.
+    //
+    // The derivation runs reader-from-WRITER, and the direction is the point.
+    // Checkpoint.columns IS the writer's header seed (Checkpoint.header), so deriving
+    // it from an entry contract instead would let a lax reader shrink a published
+    // file. requiredColumnsForStep asks Checkpoint; Checkpoint never asks ParamUtils.
+    assert ParamUtils.requiredColumnsForStep('registration')   == Checkpoint.columns(Layout.PREPROCESSED)
+    assert ParamUtils.requiredColumnsForStep('segmentation')   == Checkpoint.columns(Layout.REGISTERED)
+    assert ParamUtils.requiredColumnsForStep('postprocessing') == Checkpoint.columns(Layout.SEGMENTED)
+
+    // preprocessing is the one entry point whose input is a real samplesheet rather
+    // than a checkpoint this pipeline wrote, so it keeps a literal list and no
+    // entryCheckpoint. That asymmetry is the whole reason the field is nullable.
+    assert ParamUtils.STEPS.find { it.name == 'preprocessing' }.entryCheckpoint == null
+    assert ParamUtils.STEPS.findAll { it.entryCheckpoint }*.entryCheckpoint ==
+        [Layout.PREPROCESSED, Layout.REGISTERED, Layout.SEGMENTED]
+    // Every entryCheckpoint must be a checkpoint step that really exists, or
+    // requiredColumnsForStep would throw at the first --start that used it.
+    ParamUtils.STEPS.findAll { it.entryCheckpoint }.each {
+        assert it.entryCheckpoint in Layout.CHECKPOINT_STEPS
+    }
+
+    // The tightening, stated as behaviour rather than as a list: a segmented.csv
+    // missing the two contour columns is now refused by the ENTRY validator, where it
+    // used to be waved through and refused later by Checkpoint.read with a worse
+    // message.
+    def partialSheet = "${fixtures}/invalid_checkpoint_segmented_partial.csv"
+    def partialRejected = false
+    try { CsvUtils.validateInputCSV(partialSheet, ParamUtils.requiredColumnsForStep('postprocessing')) }
+    catch (IllegalArgumentException e) {
+        partialRejected = true
+        assert e.message.contains('contours')
+    }
+    assert partialRejected,
+        'validateInputCSV must reject a segmented.csv missing columns the writer emits'
+    // ...and the same file is still refused by the reader, so the two layers agree on
+    // the verdict and differ only in which one speaks first.
+    def partialReadRejected = false
+    try { Checkpoint.read(Layout.SEGMENTED, partialSheet, [nuclear_markers: 'DAPI']) }
+    catch (IllegalArgumentException ignored) { partialReadRejected = true }
+    assert partialReadRejected, 'Checkpoint.read must still reject the same partial checkpoint'
 
     // columns() must hand out an IMMUTABLE list. Checkpoint.STEPS' outer list is
     // .asImmutable() but a naive implementation leaves each entry's inner `columns`
@@ -385,12 +424,6 @@ workflow {
     // ------------------------------------------------------------------ //
     // Checkpoint.read — the READ side of the schema owner
     // ------------------------------------------------------------------ //
-    // `projectDir` for this script is <repo>/tests (it is the script's own
-    // directory, not the repo root — confirmed for both `nextflow run
-    // tests/lib_probe.nf -lib lib` and nf-test's invocation), so fixtures are one
-    // level down from here.
-    def fixtures = "${projectDir}/testdata"
-
     // The id rule INPUT_CHECK has always applied, now a named function so the
     // samplesheet reader and the checkpoint reader cannot drift. simpleName must
     // reproduce Nextflow's Path.simpleName exactly: everything from the FIRST dot
@@ -494,6 +527,45 @@ workflow {
     }
     assert noChannels, 'Checkpoint.read must reject a checkpoint missing a declared column'
 
+    // requireCount, watched failing. THE guard requirement 4 is about, and until this
+    // fixture existed nothing observed it raising: the "no channels column" case above
+    // trips the HEADER check several lines earlier, so the count branch was a
+    // defensive arm nobody had ever seen fire. Here every declared column is present
+    // and every row parses -- the single row is simply non-reference and carries only
+    // the nuclear channel, so MarkerUtils.splitOutputChannels drops it and the patient
+    // reaches quantification with ZERO markers. channels_count is 0, and a groupKey
+    // sized 0 never fills: the run would hang rather than fail.
+    def zeroCount = false
+    try {
+        Checkpoint.read(Layout.SEGMENTED,
+                        "${fixtures}/invalid_checkpoint_segmented_zero_markers.csv",
+                        [nuclear_markers: 'DAPI'])
+    }
+    catch (IllegalStateException e) {
+        zeroCount = true
+        assert e.message.contains('channels_count')
+        assert e.message.contains('P001')        // names the patient, not just the file
+        assert e.message.contains('got 0')
+    }
+    assert zeroCount, 'Checkpoint.read must raise when a count derives to 0, not emit it'
+
+    // The opts map is closed, and auto_reference is deliberately NOT a key. Auto-
+    // promotion applies at --start preprocessing only (ParamUtils.autoReferenceAllowed
+    // owns that rule), and preprocessing's input is a samplesheet, never a checkpoint --
+    // so a checkpoint reader that accepted the flag would be re-encoding a rule it can
+    // never legitimately exercise. Rejecting the key is what stops that copy coming
+    // back silently, the same way Checkpoint.row rejects an unknown column.
+    def unknownOpt = false
+    try {
+        Checkpoint.read(Layout.SEGMENTED, "${fixtures}/valid_checkpoint_segmented.csv",
+                        [nuclear_markers: 'DAPI', auto_reference: true])
+    }
+    catch (IllegalArgumentException e) {
+        unknownOpt = true
+        assert e.message.contains('auto_reference')
+    }
+    assert unknownOpt, 'Checkpoint.read must reject an unknown option key'
+
     // A step that declares `channels` cannot derive channels_count without knowing
     // which markers are nuclear, and guessing 'DAPI' would be a second, silent
     // default for params.nuclear_markers.
@@ -507,6 +579,29 @@ workflow {
     try { Checkpoint.read('nonsense', "${fixtures}/valid_checkpoint_segmented.csv") }
     catch (Checkpoint.UnknownStepException ignored) { badReadStep = true }
     assert badReadStep, 'Checkpoint.read must reject an unknown step'
+
+    // A URI, not just a local path. Every file access in CsvUtils used to be
+    // `new File(csvPath)`, which treats 's3://bucket/k.csv' as a RELATIVE LOCAL path
+    // (a file 'k.csv' under a directory literally named 's3:'), so it silently does
+    // not exist. That was harmless while these CSVs were only ever reached through
+    // Channel.fromPath -- which resolves URIs through Nextflow's filesystem providers
+    // -- and became a real narrowing when Checkpoint.read took over add_cycle's
+    // --prior_outdir reads. CsvUtils.pathOf goes through the same provider lookup
+    // Channel.fromPath uses.
+    //
+    // Proved WITHOUT a network: 'file://' is a genuine URI scheme with a provider, and
+    // `new File('file:///abs/path')` does not exist while asPath resolves it.
+    def fileUri = "file://${fixtures}/valid_checkpoint_segmented.csv"
+    assert !(new File(fileUri).exists()), 'fixture is meant to be unreachable as a raw File path'
+    def uriRows = Checkpoint.read(Layout.SEGMENTED, fileUri, [nuclear_markers: 'DAPI'])
+    assert uriRows.size() == 2
+    assert uriRows.collect { it[0].id } == ['P001_ref', 'P001_mov1']
+
+    // A remote scheme resolves to that scheme's provider rather than to a local file.
+    // Not read here (no credentials, no network) -- the resolution is the contract.
+    assert CsvUtils.pathOf('s3://bucket/run/csv/registered.csv').toUriString() ==
+        's3://bucket/run/csv/registered.csv'
+    assert CsvUtils.pathOf('/tmp/plain.csv').toString() == '/tmp/plain.csv'
 
     // A missing file must name itself rather than surface as an empty channel.
     def missingFile = false

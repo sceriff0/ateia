@@ -25,9 +25,11 @@ nextflow_workflow {
     // --quantify_compartments / --quantify_statistics / --embed_masks, so there
     // is no "off" case here that a literal map would exercise any differently.
     //
-    // UNVERIFIED LOCALLY: nf-test resolves -profile test,docker and hangs
-    // under qemu on this host (see CLAUDE.md's "Verification reality"). Updated
-    // to match the new interface but not run.
+    // RUNS LOCALLY, contrary to an older note here: it is nf-test.config's default
+    // `test,docker` profile that hangs pulling amd64 images under qemu, not nf-test
+    // itself. `nf-test test --tag stub --profile test` runs CI's whole blocking gate
+    // in about 16 minutes, and is the only local check that catches an nf-test file
+    // missing its `stub` tag.
 
     test("Should run full postprocessing - stub") {
 

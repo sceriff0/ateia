@@ -81,17 +81,64 @@ STEPS_BLOCK_RE = re.compile(r"static final List STEPS = \[(.*?)\n    \]\n", re.S
 STEP_NAME_RE = re.compile(r"name\s*:\s*'([^']*)'")
 ENTRY_COLUMN_RE = re.compile(r"entryColumn\s*:\s*'([^']*)'")
 
-# One match per step entry: its name, its requiredColumns list (as raw quoted
-# strings), and its entryColumn. Non-greedy up to the first ']' after each field
-# is safe here because requiredColumns is a flat string list (no nested brackets)
-# and entryColumn is a single quoted scalar, so the first ']' following
-# requiredColumns really is that list's own close bracket.
-STEP_ENTRY_RE = re.compile(
-    r"name\s*:\s*'(?P<name>[^']*)'.*?"
-    r"requiredColumns\s*:\s*\[(?P<cols>[^\]]*)\].*?"
-    r"entryColumn\s*:\s*'(?P<entry>[^']*)'",
-    re.S,
+# Per-step field regexes, applied to ONE step's chunk at a time (see
+# _split_step_chunks). An earlier version of this file matched name +
+# requiredColumns + entryColumn in a single non-greedy sweep over the whole
+# table. That worked only while EVERY step carried a literal requiredColumns:
+# the moment three of the four steps swapped it for `entryCheckpoint`, the
+# sweep matched exactly ONE step and every test below passed vacuously on a
+# quarter of the table. Chunking first, then asserting the chunk count equals
+# the step-name count, is what makes going quiet impossible rather than
+# unlikely.
+REQUIRED_COLUMNS_RE = re.compile(r"requiredColumns\s*:\s*\[([^\]]*)\]", re.S)
+ENTRY_CHECKPOINT_RE = re.compile(r"entryCheckpoint\s*:\s*(?:Layout\.(\w+)|null)")
+
+# lib/Checkpoint.groovy's own STEPS table: checkpoint step name -> ordered columns.
+# This file has to resolve `entryCheckpoint: Layout.SEGMENTED` to a column list the
+# same way ParamUtils.requiredColumnsForStep does at runtime, so it parses the two
+# tables it derives from rather than restating either.
+CHECKPOINT_PATH = ROOT / "lib" / "Checkpoint.groovy"
+LAYOUT_PATH = ROOT / "lib" / "Layout.groovy"
+CHECKPOINT_STEPS_BLOCK_RE = re.compile(
+    r"static final List<Map> STEPS = \[(.*?)\n    \]\.asImmutable\(\)", re.S
 )
+CHECKPOINT_ENTRY_RE = re.compile(
+    r"name\s*:\s*'(?P<name>[^']*)'.*?columns\s*:\s*\[(?P<cols>[^\]]*)\]", re.S
+)
+LAYOUT_CONST_RE = re.compile(r"static final String (\w+)\s*=\s*'([^']*)'")
+
+
+def _quoted_list(raw: str) -> list[str]:
+    return [c.strip().strip("'") for c in raw.split(",") if c.strip()]
+
+
+def _layout_constants() -> dict[str, str]:
+    """Layout's checkpoint-step constants: 'SEGMENTED' -> 'segmented'."""
+    consts = dict(LAYOUT_CONST_RE.findall(LAYOUT_PATH.read_text()))
+    assert consts, f"parsed no `static final String` constants from {LAYOUT_PATH}"
+    return consts
+
+
+def _checkpoint_columns() -> dict[str, list[str]]:
+    """Checkpoint.STEPS as {step name: ordered column list}, parsed from source."""
+    text = CHECKPOINT_PATH.read_text()
+    m = CHECKPOINT_STEPS_BLOCK_RE.search(text)
+    assert m is not None, (
+        f"Could not locate `static final List<Map> STEPS = [ ... ].asImmutable()` in "
+        f"{CHECKPOINT_PATH}. Did the schema table get renamed or reshaped?"
+    )
+    cols = {
+        e.group("name"): _quoted_list(e.group("cols"))
+        for e in CHECKPOINT_ENTRY_RE.finditer(m.group(1))
+    }
+    assert cols, "parsed no checkpoint steps -- Checkpoint.STEPS regex is stale"
+    return cols
+
+
+def _split_step_chunks(block: str) -> list[str]:
+    """The STEPS block cut into one text chunk per `name:` entry."""
+    starts = [m.start() for m in STEP_NAME_RE.finditer(block)]
+    return [block[a:b] for a, b in zip(starts, starts[1:] + [len(block)])]
 
 # Source globs scanned for a parallel step->column mapping. Groovy libs +
 # every Nextflow file that could plausibly branch on a step name.
@@ -120,18 +167,72 @@ def extract_entry_columns() -> list[str]:
 
 
 def extract_step_entries() -> list[dict]:
-    """Each STEPS row as {name, requiredColumns, entryColumn}, parsed from source."""
+    """Each STEPS row as {name, requiredColumns, entryColumn}, parsed from source.
+
+    `requiredColumns` is the RESOLVED list -- Checkpoint's columns for a step that
+    names an entryCheckpoint, the literal otherwise -- so it is what
+    ParamUtils.requiredColumnsForStep would return at runtime, not the raw field.
+    """
+    checkpoint_columns = _checkpoint_columns()
+    layout = _layout_constants()
     entries = []
-    for m in STEP_ENTRY_RE.finditer(_steps_block_text()):
-        cols = [c.strip().strip("'") for c in m.group("cols").split(",") if c.strip()]
+    for chunk in _split_step_chunks(_steps_block_text()):
+        name = STEP_NAME_RE.search(chunk).group(1)
+        entry_column_m = ENTRY_COLUMN_RE.search(chunk)
+        assert entry_column_m, f"STEPS['{name}'] has no entryColumn"
+
+        checkpoint_m = ENTRY_CHECKPOINT_RE.search(chunk)
+        assert checkpoint_m, (
+            f"STEPS['{name}'] declares no entryCheckpoint (not even an explicit "
+            "null). It is a required field: a step whose entry is a checkpoint "
+            "derives its columns from Checkpoint, and one whose entry is a real "
+            "samplesheet must say so rather than leave it to be inferred."
+        )
+        constant = checkpoint_m.group(1)
+        if constant:
+            step_name = layout.get(constant)
+            assert step_name, (
+                f"STEPS['{name}'].entryCheckpoint names Layout.{constant}, which is "
+                f"not a String constant in {LAYOUT_PATH}"
+            )
+            assert step_name in checkpoint_columns, (
+                f"STEPS['{name}'].entryCheckpoint resolves to '{step_name}', which is "
+                "not a step in Checkpoint.STEPS"
+            )
+            required = checkpoint_columns[step_name]
+        else:
+            required_m = REQUIRED_COLUMNS_RE.search(chunk)
+            assert required_m, (
+                f"STEPS['{name}'] has neither an entryCheckpoint nor a literal "
+                "requiredColumns -- validateInputCSV would demand nothing of its input."
+            )
+            required = _quoted_list(required_m.group(1))
+
         entries.append(
             {
-                "name": m.group("name"),
-                "requiredColumns": cols,
-                "entryColumn": m.group("entry"),
+                "name": name,
+                "requiredColumns": required,
+                "entryColumn": entry_column_m.group(1),
             }
         )
     return entries
+
+
+def test_every_step_entry_is_parsed() -> None:
+    """The parse must cover the WHOLE table, or every check below goes quiet.
+
+    Watched fail: with the previous single-sweep regex and three steps switched to
+    entryCheckpoint, this parsed 1 of 4 entries and
+    test_entry_column_is_in_required_columns_for_every_step still passed.
+    """
+    names = extract_step_names()
+    parsed = [e["name"] for e in extract_step_entries()]
+    assert parsed == names, (
+        "extract_step_entries() did not parse every row of ParamUtils.STEPS.\n"
+        f"  step names: {names}\n"
+        f"  parsed:     {parsed}\n"
+        "Every test that iterates the entries is only as wide as this parse."
+    )
 
 
 def extract_schema_enum(schema: dict, prop: str) -> list:

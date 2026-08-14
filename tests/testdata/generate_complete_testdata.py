@@ -441,6 +441,43 @@ with open(OUT_DIR / "invalid_checkpoint_segmented_no_channels.csv", "w") as f:
     )
 print("  Created invalid_checkpoint_segmented_no_channels.csv (no channels column)")
 
+# 4f-quinquies. A 'segmented' checkpoint carrying only the SIX columns
+#               ParamUtils.STEPS used to list as postprocessing's requiredColumns --
+#               i.e. `contours` and `nucleus_contours` removed. It is a real
+#               csv/segmented.csv minus two columns, and it used to sail through
+#               CsvUtils.validateInputCSV and then be rejected a few lines later by
+#               Checkpoint.read, which demands the writer's full declared header. Two
+#               answers to "what must this file contain", checked in sequence; the
+#               entry contract now derives from the writer's, so the FIRST check is
+#               the one that fires.
+with open(OUT_DIR / "invalid_checkpoint_segmented_partial.csv", "w") as f:
+    f.write("patient_id,registered_image,is_reference,channels,cell_mask,nuclei_mask\n")
+    f.write(
+        f"P001,{TESTDATA_ABS}/P001_ref.ome.tiff,true,DAPI|PANCK|SMA,"
+        f"{TESTDATA_ABS}/P001_cell_mask.tif,{TESTDATA_ABS}/P001_nuclei_mask.tif\n"
+    )
+print("  Created invalid_checkpoint_segmented_partial.csv (missing contours columns)")
+
+# 4f-sexies. A 'segmented' checkpoint whose ONLY row is non-reference and whose only
+#            channel is the nuclear one. Every column the schema declares is present
+#            and every row parses, so neither the header check nor parseMetadata fires
+#            -- but MarkerUtils.splitOutputChannels drops the nuclear channel from a
+#            non-reference slide, leaving the patient with ZERO markers reaching
+#            quantification. channels_count is therefore 0: a groupKey sized 0 never
+#            fills and the run hangs. This is the fixture that makes Checkpoint.read's
+#            requireCount the thing that raises, rather than a guard nobody has
+#            watched fail.
+with open(OUT_DIR / "invalid_checkpoint_segmented_zero_markers.csv", "w") as f:
+    f.write(
+        "patient_id,registered_image,is_reference,channels,cell_mask,nuclei_mask,contours,nucleus_contours\n"
+    )
+    f.write(
+        f"P001,{TESTDATA_ABS}/P001_mov1.ome.tiff,false,DAPI,"
+        f"{TESTDATA_ABS}/P001_cell_mask.tif,{TESTDATA_ABS}/P001_nuclei_mask.tif,"
+        f"{TESTDATA_ABS}/sample_contours.json,{TESTDATA_ABS}/sample_contours.json\n"
+    )
+print("  Created invalid_checkpoint_segmented_zero_markers.csv (channels_count would be 0)")
+
 # 4f-quater. A prior completed run whose registered.csv reference row reads 'yes'.
 #            Byte-identical to prior_run/ above apart from that one cell, so an
 #            ADD_CYCLE test can point --prior_outdir here and change nothing else.
@@ -614,6 +651,8 @@ print("  - invalid_checkpoint_missing_col.csv")
 print("  - invalid_checkpoint_bad_ref.csv")
 print("  - invalid_checkpoint_segmented_bad_ref.csv")
 print("  - invalid_checkpoint_segmented_no_channels.csv")
+print("  - invalid_checkpoint_segmented_partial.csv")
+print("  - invalid_checkpoint_segmented_zero_markers.csv")
 print("  - prior_run_bad_ref/csv/{registered,postprocessed}.csv")
 print("  - invalid_file_not_found.csv")
 print("\nTile-plan CSV fixtures:")
@@ -684,6 +723,8 @@ print("  - invalid_checkpoint_missing_col.csv")
 print("  - invalid_checkpoint_bad_ref.csv")
 print("  - invalid_checkpoint_segmented_bad_ref.csv")
 print("  - invalid_checkpoint_segmented_no_channels.csv")
+print("  - invalid_checkpoint_segmented_partial.csv")
+print("  - invalid_checkpoint_segmented_zero_markers.csv")
 print("  - prior_run_bad_ref/csv/{registered,postprocessed}.csv")
 print("  - invalid_file_not_found.csv")
 print("\nModule test fixtures:")

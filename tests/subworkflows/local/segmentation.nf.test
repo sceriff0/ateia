@@ -1,9 +1,15 @@
-// UNVERIFIED LOCALLY: nf-test resolves -profile test,docker and hangs under qemu on
-// this host (see CLAUDE.md's "Verification reality"). Written to cover the two new
-// workflows in subworkflows/local/segmentation.nf and the exact regression this
-// task's review found (nuclei_mask silently withheld when --quantify_compartments
-// is false, which drops every patient from postprocess.nf's plain
-// `ch_cell_mask.join(ch_nuclei_mask)`), but never run.
+// RUN LOCALLY, and these tests pass. An earlier header here said "UNVERIFIED
+// LOCALLY: nf-test ... hangs under qemu on this host ... but never run", which was
+// wrong in a way that mattered: it is nf-test.config's DEFAULT profile (test,docker)
+// that hangs, because it resolves and pulls amd64 images under qemu. Drop docker and
+// `nf-test test --tag stub --profile test` runs the whole blocking gate in about 16
+// minutes. Believing the old note means skipping the only local check that catches an
+// nf-test file missing its `stub` tag -- which CI's gate would then never run either.
+//
+// Covers the two workflows in subworkflows/local/segmentation.nf and the exact
+// regression that task's review found: nuclei_mask silently withheld when
+// --quantify_compartments is false, which drops every patient from postprocess.nf's
+// plain `ch_cell_mask.join(ch_nuclei_mask)`.
 //
 // Both SEGMENTATION and READ_SEGMENTED_CHECKPOINT gained a second take: input,
 // compartment_mode -- Task 4 (arch-B-split)'s seam for --quantify_compartments /
@@ -313,7 +319,14 @@ nextflow_workflow {
         }
 
         then {
-            assert !workflow.success
+            assertAll(
+                { assert !workflow.success },
+                // WHICH failure. `!workflow.success` on its own passes just as happily
+                // on a typo'd fixture path as on the rejection under test, so it is not
+                // a test of anything -- name the cause.
+                { assert workflow.stdout.any { it.contains("Invalid is_reference value 'yes'") } },
+                { assert workflow.stdout.any { it.contains("Must be 'true' or 'false'") } }
+            )
         }
     }
 
@@ -342,7 +355,12 @@ nextflow_workflow {
         }
 
         then {
-            assert !workflow.success
+            assertAll(
+                { assert !workflow.success },
+                // Named cause, not merely a non-zero exit -- see the note above.
+                { assert workflow.stdout.any { it.contains("missing column(s) [channels]") } },
+                { assert workflow.stdout.any { it.contains("invalid_checkpoint_segmented_no_channels.csv") } }
+            )
         }
     }
 }

@@ -195,7 +195,14 @@ nextflow_workflow {
         }
 
         then {
-            assert !workflow.success
+            assertAll(
+                { assert !workflow.success },
+                // Named cause, matching its two twins in
+                // tests/subworkflows/local/segmentation.nf.test and
+                // tests/subworkflows/add_cycle.nf.test: a bare !workflow.success would
+                // pass on a typo'd fixture path just as well as on the rejection.
+                { assert workflow.stdout.any { it.contains("Invalid is_reference value 'yes'") } }
+            )
         }
     }
 }

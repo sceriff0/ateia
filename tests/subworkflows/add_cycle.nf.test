@@ -21,7 +21,10 @@ nextflow_workflow {
      * 'valis' assertion in the third test already makes for that sibling seam. The
      * middle ("compartment path runs") test keeps input[1] in agreement with params
      * since it exercises the positive path, not the argument-vs-global distinction.
-     * UNVERIFIED LOCALLY (nf-test hangs under qemu on this host).
+     * RUNS LOCALLY. An older note here read "UNVERIFIED LOCALLY (nf-test hangs under
+     * qemu on this host)"; it is nf-test.config's default `test,docker` profile that
+     * hangs pulling amd64 images, not nf-test. Use
+     * `nf-test test --tag stub --profile test`.
      */
 
     test("folds a new cycle: emits combined geojson, merged csv, and pyramid") {
@@ -193,7 +196,16 @@ nextflow_workflow {
         }
 
         then {
-            assert !workflow.success
+            assertAll(
+                { assert !workflow.success },
+                // WHICH failure. A mistyped --prior_outdir would satisfy
+                // `!workflow.success` on its own, so name the cause: the strict
+                // is_reference parse rejecting the prior run's reference cell.
+                { assert workflow.stdout.any { it.contains("Invalid is_reference value 'yes'") } },
+                // ...and that it is the PRIOR run's registered.csv being read, not the
+                // new-cycle samplesheet.
+                { assert workflow.stdout.any { it.contains("registered.csv") } }
+            )
         }
     }
 

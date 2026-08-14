@@ -2,8 +2,11 @@
  * ASSEMBLE_EXPORT — EXPORT_GEOJSON's six-slot input tuple plus the embed_masks pyramid
  * gate, shared by POSTPROCESSING and ADD_CYCLE (which carried verbatim copies of both).
  *
- * UNVERIFIED LOCALLY (see CLAUDE.md's "Verification reality" -- nf-test hangs under
- * qemu on this host): take: gained a 7th input, compartment_mode -- Task 4
+ * RUNS LOCALLY (an older note here said otherwise: it is nf-test.config's default
+ * `test,docker` profile that hangs pulling amd64 images under qemu, not nf-test --
+ * `nf-test test --tag stub --profile test` is the working local gate).
+ *
+ * take: gained a 7th input, compartment_mode -- Task 4
  * (arch-B-split)'s seam for --quantify_compartments / --quantify_statistics /
  * --embed_masks, replacing this workflow's own former `params.embed_masks &&
  * params.quantify_statistics` raw read.

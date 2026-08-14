@@ -158,7 +158,7 @@ def test_every_read_is_routed_through_markerutils():
 # into MarkerUtils.markerList: countChannelsPerPatient via splitOutputChannels,
 # parseMetadata via validateMetadata's hasNuclear check.
 CHECKPOINT_READ_FUNNELS = (
-    "CsvUtils.countChannelsPerPatient(path, imageCol, nuclear, autoRef)",
+    "CsvUtils.countChannelsPerPatient(path, imageCol, nuclear, NO_AUTO_REFERENCE)",
     "CsvUtils.parseMetadata(row, nuclear, ctx)",
 )
 
