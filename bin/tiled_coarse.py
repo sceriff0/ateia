@@ -41,7 +41,6 @@ os.environ.setdefault("XDG_CACHE_HOME", "/tmp/xdg_cache")
 sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
 import numpy as np  # noqa: E402
-from coarse_align import estimate_rigid, scale_transform_to_full_res  # noqa: E402
 from logger import configure_logging, get_logger  # noqa: E402
 from tile_grid import tile_grid, write_tile_plan  # noqa: E402
 from tiled_io import (  # noqa: E402
@@ -50,6 +49,7 @@ from tiled_io import (  # noqa: E402
     open_lazy,
     read_decimated,
 )
+from tiled_pipeline import coarse_anchor  # noqa: E402
 
 logger = get_logger(__name__)
 
@@ -156,12 +156,12 @@ def main(argv=None) -> int:
         ref_close()
 
     t0 = time.perf_counter()
-    m0_ds, coarse_tre_ds, n_inliers = estimate_rigid(ref_nuc, mov_nuc, model=a.model)
-    logger.info(f"coarse: anchor estimated in {time.perf_counter() - t0:.1f}s")
     # The fit lives in thumbnail pixels; everything downstream (tile plan, per-tile source
-    # regions, the stitch) is full-resolution, so lift both the map and its residual here.
-    m0 = scale_transform_to_full_res(m0_ds, factor)
-    coarse_tre = float(coarse_tre_ds) * factor
+    # regions, the stitch) is full-resolution. coarse_anchor owns that lift -- shared with
+    # the in-process driver so there is one decimate-and-lift contract, not two.
+    m0, coarse_tre, n_inliers = coarse_anchor(ref_nuc, mov_nuc, factor, model=a.model)
+    coarse_tre_ds = coarse_tre / factor
+    logger.info(f"coarse: anchor estimated in {time.perf_counter() - t0:.1f}s")
 
     Path(a.out_m0).write_text(
         json.dumps(

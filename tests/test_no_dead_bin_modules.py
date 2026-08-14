@@ -16,9 +16,10 @@ production half counts as proof of life for the main guard
 exists to catch. Earlier this test merged both halves into one haystack, so
 a module wired up only for its own test (never called from any real script)
 counted as "used" -- a guard that could never actually fail this way is not
-evidence of anything. `tiled_pipeline.py` is the one module that genuinely
-has no production importer; it is allowlisted below with its reason rather
-than silently passing through the old merged haystack.
+evidence of anything. `tiled_pipeline.py` used to be the one module with no
+production importer and carried the sole ALLOWLIST entry; it is now the shared
+STARE module both drivers call, so the allowlist is empty and every candidate
+must earn its place through a real import.
 
 A naive "does the bare word 'tiling' appear anywhere" scan produces false
 negatives for short names (`qc`, `retry`, `validation` all appear constantly
@@ -94,18 +95,12 @@ HAYSTACK_EXCLUDE = {UTILS_DIR / "__init__.py"}
 #                         warning on every run, not just skipped quietly.
 _ALLOWED_STATUSES = {"permanent", "pending_removal"}
 
-ALLOWLIST: dict[str, dict[str, str]] = {
-    "tiled_pipeline": {
-        "status": "permanent",
-        "reason": (
-            "No production importer: only tests/test_tiled_pipeline.py and "
-            "tests/test_reg_benchmark.py import it. It is a deliberate "
-            "test/benchmark oracle for the STARE registration path, documented "
-            "at CHANGELOG.md:487-488 -- not dead code, just never called from "
-            "a production script."
-        ),
-    },
-}
+# Currently EMPTY, and that is the point. Its one entry was `tiled_pipeline`, kept
+# because the STARE method existed twice -- once as the four shipped tiled_*.py
+# processes and once as a tested-but-uncalled in-process oracle. The oracle is now the
+# shared module both drivers go through (bin/tiled_coarse.py and bin/tiled_reg_tile.py
+# import it), so it is alive by this test's own standard and needs no exemption.
+ALLOWLIST: dict[str, dict[str, str]] = {}
 
 
 def _candidate_modules() -> list[Path]:
@@ -249,25 +244,6 @@ def test_test_only_import_is_not_proof_of_life(tmp_path: Path) -> None:
     assert fake_module_name not in production_leaves, (
         "a module imported only by a test must not be found in the real "
         "production haystack"
-    )
-
-
-def test_allowlisted_tiled_pipeline_has_no_production_importer() -> None:
-    """Confirms the tiled_pipeline ALLOWLIST reason is still true, not stale prose.
-
-    tiled_pipeline.py should have zero production importers (it's kept as a
-    test/benchmark oracle, not a live dependency) but at least one test importer
-    (otherwise it isn't even that, and should be deleted rather than allowlisted).
-    """
-    candidates = [p for p in CANDIDATES if p.stem == "tiled_pipeline"]
-    assert candidates, "expected to find bin/utils/tiled_pipeline.py among candidates"
-    assert not _is_imported_anywhere(candidates[0], _production_haystack_files()), (
-        "tiled_pipeline.py now has a production importer -- the ALLOWLIST entry's "
-        "reason (test/benchmark-only oracle) is stale; remove it from ALLOWLIST."
-    )
-    assert _is_imported_anywhere(candidates[0], _test_haystack_files()), (
-        "tiled_pipeline.py has neither a production nor a test importer -- it's "
-        "genuinely dead, not a kept oracle; delete it instead of allowlisting."
     )
 
 
