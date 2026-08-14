@@ -158,4 +158,43 @@ nextflow_workflow {
         }
     }
 
+
+    test("rejects a prior checkpoint whose is_reference reads 'yes'") {
+
+        // ADD_CYCLE's prior-run reader carried the third copy of
+        // `row.is_reference?.toLowerCase() == 'true'`. Unlike the samplesheet, the
+        // PRIOR run's checkpoints never pass through CsvUtils.validateInputSemantics
+        // -- only --input does -- so nothing upstream had ever looked at this cell.
+        // 'yes' therefore made the reference row simply not a reference: ch_prior_ref
+        // emitted nothing, every join keyed on it dropped the patient, and the run
+        // finished green having folded no cycle into anything. prior_run_bad_ref/ is
+        // byte-identical to prior_run/ apart from that one cell.
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            workflow {
+                """
+                input[0] = Channel.of([
+                    [ id: 'P001_cycle2', patient_id: 'P001', is_reference: false,
+                      channels: ['DAPI','CD8'], images_count: 1, channels_count: 2 ],
+                    file('tests/testdata/P001_image.tiff')
+                ])
+                input[1] = [compartments: false, statistics: ['Median'], embedMasks: false]
+                """
+            }
+            params {
+                outdir = "$outputDir"
+                mode = 'add_cycle'
+                prior_outdir = "$projectDir/tests/testdata/prior_run_bad_ref"
+                reg_qc = 1
+            }
+        }
+
+        then {
+            assert !workflow.success
+        }
+    }
+
 }

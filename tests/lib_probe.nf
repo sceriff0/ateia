@@ -382,5 +382,148 @@ workflow {
     }
 
 
+    // ------------------------------------------------------------------ //
+    // Checkpoint.read — the READ side of the schema owner
+    // ------------------------------------------------------------------ //
+    // `projectDir` for this script is <repo>/tests (it is the script's own
+    // directory, not the repo root — confirmed for both `nextflow run
+    // tests/lib_probe.nf -lib lib` and nf-test's invocation), so fixtures are one
+    // level down from here.
+    def fixtures = "${projectDir}/testdata"
+
+    // The id rule INPUT_CHECK has always applied, now a named function so the
+    // samplesheet reader and the checkpoint reader cannot drift. simpleName must
+    // reproduce Nextflow's Path.simpleName exactly: everything from the FIRST dot
+    // is an extension, and a leading dot belongs to the name.
+    assert CsvUtils.simpleName('/a/b/P001_ref.ome.tiff') == 'P001_ref'
+    assert CsvUtils.simpleName('/a/b/c.tif')             == 'c'
+    assert CsvUtils.simpleName('/a/b/no_ext')            == 'no_ext'
+    assert CsvUtils.simpleName('/a/b/.hidden.tif')       == '.hidden'
+    // Prefix only when the stem does not already carry the patient id — the exact
+    // rule input_check.nf applied inline.
+    assert CsvUtils.imageId('P001', '/a/b/P001_ref.ome.tiff') == 'P001_ref'
+    assert CsvUtils.imageId('P001', '/a/b/slideA.ome.tiff')   == 'P001_slideA'
+
+    // A 'segmented' checkpoint: two rows, one patient.
+    def segRows = Checkpoint.read(Layout.SEGMENTED,
+                                  "${fixtures}/valid_checkpoint_segmented.csv",
+                                  [nuclear_markers: 'DAPI'])
+    assert segRows.size() == 2
+    def segMetas = segRows.collect { it[0] }
+
+    // THE meta shape: exactly the keys INPUT_CHECK emits, no more and no fewer.
+    // An asserted key SET (not a spot-check of one key) is what makes this a shape
+    // test — a reader that quietly stopped deriving channels_count would still pass
+    // any per-key assertion that did not name it.
+    def expectedKeys = ['channels', 'channels_count', 'id', 'images_count',
+                        'is_reference', 'patient_id']
+    segMetas.each { assert it.keySet().toList().toSorted() == expectedKeys }
+
+    // `id` is the patient-prefixed source-image stem, NOT row.patient_id. This is
+    // the behaviour change: at --start postprocessing every row used to collapse to
+    // the same id, so two slides of one patient produced identically named outputs
+    // at the one entry point where multiple patients share a collect.
+    assert segMetas*.id == ['P001_ref', 'P001_mov1']
+    assert segMetas*.id.unique().size() == 2
+    assert segMetas*.patient_id == ['P001', 'P001']
+    assert segMetas*.is_reference == [true, false]
+    assert segMetas[0].channels == ['DAPI', 'PANCK', 'SMA']
+
+    // Counts are DERIVED here, the same way INPUT_CHECK derives them: two images,
+    // and five markers reaching quantification (the reference keeps its nuclear
+    // channel — DAPI, PANCK, SMA — and the moving slide drops it, leaving CD3, CD8).
+    assert segMetas.every { it.images_count == 2 }
+    assert segMetas.every { it.channels_count == 5 }
+
+    // The same shape from a different checkpoint step, given a different CSV: the
+    // point of one reader is that the shape is the reader's, not the caller's.
+    def regRows = Checkpoint.read(Layout.REGISTERED,
+                                  "${fixtures}/prior_run/csv/registered.csv",
+                                  [nuclear_markers: 'DAPI'])
+    assert regRows.size() == 1
+    assert regRows[0][0].keySet().toList().toSorted() == expectedKeys
+    assert regRows[0][0].id == 'P001_image'
+    assert regRows[0][0].is_reference
+    assert regRows[0][0].images_count == 1
+    assert regRows[0][0].channels_count == 2      // DAPI|PANCK, on the reference row
+
+    // The row map is handed back untouched, keyed by column name — the same shape
+    // splitCsv(header: true) gave the callers this reader replaces, so a consumer
+    // still writes file(row.registered_image).
+    assert regRows[0][1].registered_image.endsWith('P001_image.tiff')
+
+    // 'postprocessed' declares neither is_reference nor channels, so its meta
+    // carries neither — and neither a channels_count it could only have invented.
+    // The shape is the SCHEMA's, and one row per patient is why `id` is the
+    // patient_id here rather than an image stem.
+    def postRows = Checkpoint.read(Layout.POSTPROCESSED,
+                                   "${fixtures}/prior_run/csv/postprocessed.csv")
+    assert postRows.size() == 1
+    assert postRows[0][0].keySet().toList().toSorted() == ['id', 'images_count', 'patient_id']
+    assert postRows[0][0].id == 'P001'
+
+    // 'yes' must RAISE. It used to raise at one entry point and silently become
+    // `false` at the other two, so a checkpoint whose reference row read 'yes'
+    // became a checkpoint with no reference at all — and both readers carried on.
+    def badRef = false
+    try {
+        Checkpoint.read(Layout.SEGMENTED,
+                        "${fixtures}/invalid_checkpoint_segmented_bad_ref.csv",
+                        [nuclear_markers: 'DAPI'])
+    }
+    catch (IllegalArgumentException e) {
+        badRef = true
+        assert e.message.contains('is_reference')
+        assert e.message.contains('yes')
+    }
+    assert badRef, "Checkpoint.read must reject is_reference 'yes', not coerce it to false"
+
+    // A checkpoint missing the column the counts are derived FROM must be refused by
+    // name. A silent absence is the defect: a meta with no channels_count makes every
+    // per-patient grouping take its unsized fallback, so streaming turns off for the
+    // whole run and nothing reports it.
+    def noChannels = false
+    try {
+        Checkpoint.read(Layout.SEGMENTED,
+                        "${fixtures}/invalid_checkpoint_segmented_no_channels.csv",
+                        [nuclear_markers: 'DAPI'])
+    }
+    catch (IllegalArgumentException e) {
+        noChannels = true
+        assert e.message.contains('channels')
+    }
+    assert noChannels, 'Checkpoint.read must reject a checkpoint missing a declared column'
+
+    // A step that declares `channels` cannot derive channels_count without knowing
+    // which markers are nuclear, and guessing 'DAPI' would be a second, silent
+    // default for params.nuclear_markers.
+    def noMarkers = false
+    try { Checkpoint.read(Layout.SEGMENTED, "${fixtures}/valid_checkpoint_segmented.csv") }
+    catch (IllegalArgumentException e) { noMarkers = true; assert e.message.contains('nuclear_markers') }
+    assert noMarkers, 'Checkpoint.read must demand nuclear_markers when the step declares channels'
+
+    // Unknown step: Checkpoint's own exception type, as everywhere else in this class.
+    def badReadStep = false
+    try { Checkpoint.read('nonsense', "${fixtures}/valid_checkpoint_segmented.csv") }
+    catch (Checkpoint.UnknownStepException ignored) { badReadStep = true }
+    assert badReadStep, 'Checkpoint.read must reject an unknown step'
+
+    // A missing file must name itself rather than surface as an empty channel.
+    def missingFile = false
+    try { Checkpoint.read(Layout.SEGMENTED, "${fixtures}/does_not_exist.csv", [nuclear_markers: 'DAPI']) }
+    catch (FileNotFoundException ignored) { missingFile = true }
+    assert missingFile, 'Checkpoint.read must reject a missing checkpoint CSV'
+
+    // imageColumn is the third table this file cross-checks rather than trusts:
+    // ParamUtils.STEPS names the column each `--start` reads, Checkpoint.STEPS names
+    // the column each checkpoint's id is derived from, and for the three steps whose
+    // entry IS a checkpoint those must be the same string.
+    assert Checkpoint.imageColumn(Layout.PREPROCESSED) == ParamUtils.entryColumnForStep('registration')
+    assert Checkpoint.imageColumn(Layout.REGISTERED)   == ParamUtils.entryColumnForStep('segmentation')
+    assert Checkpoint.imageColumn(Layout.SEGMENTED)    == ParamUtils.entryColumnForStep('postprocessing')
+    // postprocessed is the one checkpoint with no per-image column: one row per
+    // patient, so there is no stem to prefix and `id` is the patient_id.
+    assert Checkpoint.imageColumn(Layout.POSTPROCESSED) == null
+
     println "LIB PROBE: all assertions passed"
 }

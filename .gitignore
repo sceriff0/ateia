@@ -121,6 +121,8 @@ tests/testdata/invalid_dapi_position.csv
 tests/testdata/invalid_no_dapi.csv
 tests/testdata/invalid_checkpoint_missing_col.csv
 tests/testdata/invalid_checkpoint_bad_ref.csv
+tests/testdata/invalid_checkpoint_segmented_bad_ref.csv
+tests/testdata/invalid_checkpoint_segmented_no_channels.csv
 tests/testdata/invalid_file_not_found.csv
 tests/testdata/tiles_12_rows.csv
 tests/testdata/tiles_12_rows_trailing_blank.csv
@@ -162,4 +164,5 @@ tests/testdata/expected/reg_checkpoint_columns.txt
 # Minimal "prior completed run" checkpoint CSVs for the add_cycle subworkflow test,
 # and the new-cycle samplesheet that pairs with it.
 tests/testdata/prior_run/
+tests/testdata/prior_run_bad_ref/
 tests/testdata/new_cycle.csv

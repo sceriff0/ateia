@@ -401,6 +401,63 @@ with open(OUT_DIR / "invalid_checkpoint_bad_ref.csv", "w") as f:
     )  # 'yes' not 'true'
 print("  Created invalid_checkpoint_bad_ref.csv (invalid is_reference)")
 
+# 4f-bis. The SAME malformed is_reference ('yes'), in the two checkpoint shapes the
+#         other two readers open. invalid_checkpoint_bad_ref.csv above is a
+#         'preprocessed'-shaped sheet and only ever reaches INPUT_CHECK, which has
+#         always rejected 'yes' strictly (CsvUtils.parseIsReference). The other two
+#         entry points -- READ_SEGMENTED_CHECKPOINT (segmented.csv) and ADD_CYCLE
+#         (a prior run's registered.csv) -- used to coerce it to FALSE silently, each
+#         with its own `value?.toLowerCase() == 'true'` copy. A checkpoint whose
+#         reference row reads 'yes' therefore became a checkpoint with NO reference:
+#         READ_SEGMENTED_CHECKPOINT emitted no cell_mask/nuclei_mask at all, and
+#         ADD_CYCLE's join dropped the patient outright -- both exiting 0. These two
+#         fixtures are what makes that observable. The valid_* fixtures are left
+#         untouched on purpose: this is an added variant, not an edit.
+with open(OUT_DIR / "invalid_checkpoint_segmented_bad_ref.csv", "w") as f:
+    f.write(
+        "patient_id,registered_image,is_reference,channels,cell_mask,nuclei_mask,contours,nucleus_contours\n"
+    )
+    f.write(
+        f"P001,{TESTDATA_ABS}/P001_ref.ome.tiff,yes,DAPI|PANCK|SMA,"  # 'yes' not 'true'
+        f"{TESTDATA_ABS}/P001_cell_mask.tif,{TESTDATA_ABS}/P001_nuclei_mask.tif,"
+        f"{TESTDATA_ABS}/sample_contours.json,{TESTDATA_ABS}/sample_contours.json\n"
+    )
+print("  Created invalid_checkpoint_segmented_bad_ref.csv (invalid is_reference)")
+
+# 4f-ter. A 'segmented' checkpoint with the `channels` column removed entirely. The
+#         count columns are what size every per-patient groupTuple; a reader that
+#         tolerates their absence produces a meta with no channels_count, which
+#         silently degrades the grouping to its unsized fallback for the whole run.
+#         Checkpoint.read must refuse this file by name rather than emit a countless
+#         meta.
+with open(OUT_DIR / "invalid_checkpoint_segmented_no_channels.csv", "w") as f:
+    f.write(
+        "patient_id,registered_image,is_reference,cell_mask,nuclei_mask,contours,nucleus_contours\n"
+    )
+    f.write(
+        f"P001,{TESTDATA_ABS}/P001_ref.ome.tiff,true,"
+        f"{TESTDATA_ABS}/P001_cell_mask.tif,{TESTDATA_ABS}/P001_nuclei_mask.tif,"
+        f"{TESTDATA_ABS}/sample_contours.json,{TESTDATA_ABS}/sample_contours.json\n"
+    )
+print("  Created invalid_checkpoint_segmented_no_channels.csv (no channels column)")
+
+# 4f-quater. A prior completed run whose registered.csv reference row reads 'yes'.
+#            Byte-identical to prior_run/ above apart from that one cell, so an
+#            ADD_CYCLE test can point --prior_outdir here and change nothing else.
+PRIOR_BAD_DIR = OUT_DIR / "prior_run_bad_ref" / "csv"
+PRIOR_BAD_DIR.mkdir(parents=True, exist_ok=True)
+with open(PRIOR_BAD_DIR / "registered.csv", "w") as f:
+    f.write("patient_id,registered_image,is_reference,channels\n")
+    f.write(f"P001,{TESTDATA_ABS}/P001_image.tiff,yes,DAPI|PANCK\n")  # 'yes' not 'true'
+with open(PRIOR_BAD_DIR / "postprocessed.csv", "w") as f:
+    f.write("patient_id,cell_csv,cell_geojson,merged_csv,cell_mask,pyramid\n")
+    f.write(
+        f"P001,{TESTDATA_ABS}/P001_merged_quant.csv,{TESTDATA_ABS}/sample_contours.json,"
+        f"{TESTDATA_ABS}/P001_merged_quant.csv,{TESTDATA_ABS}/P001_cell_mask.tif,"
+        f"{TESTDATA_ABS}/P001_pyramid.ome.tiff\n"
+    )
+print("  Created prior_run_bad_ref/csv/{registered,postprocessed}.csv")
+
 # 4g. File does not exist
 with open(OUT_DIR / "invalid_file_not_found.csv", "w") as f:
     f.write("patient_id,path_to_file,is_reference,channels\n")
@@ -555,6 +612,9 @@ print("  - invalid_dapi_position.csv")
 print("  - invalid_no_dapi.csv")
 print("  - invalid_checkpoint_missing_col.csv")
 print("  - invalid_checkpoint_bad_ref.csv")
+print("  - invalid_checkpoint_segmented_bad_ref.csv")
+print("  - invalid_checkpoint_segmented_no_channels.csv")
+print("  - prior_run_bad_ref/csv/{registered,postprocessed}.csv")
 print("  - invalid_file_not_found.csv")
 print("\nTile-plan CSV fixtures:")
 print("  - tiles_12_rows.csv, tiles_12_rows_trailing_blank.csv")
@@ -622,6 +682,9 @@ print("  - invalid_dapi_position.csv")
 print("  - invalid_no_dapi.csv")
 print("  - invalid_checkpoint_missing_col.csv")
 print("  - invalid_checkpoint_bad_ref.csv")
+print("  - invalid_checkpoint_segmented_bad_ref.csv")
+print("  - invalid_checkpoint_segmented_no_channels.csv")
+print("  - prior_run_bad_ref/csv/{registered,postprocessed}.csv")
 print("  - invalid_file_not_found.csv")
 print("\nModule test fixtures:")
 print("  - sample_merged_quant.csv")

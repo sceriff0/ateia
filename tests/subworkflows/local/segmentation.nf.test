@@ -237,4 +237,112 @@ nextflow_workflow {
             )
         }
     }
+
+    test("Should emit the same meta INPUT_CHECK does: patient-prefixed id and both counts - stub") {
+
+        // ONE meta shape, from one reader. This entry point used to build its own:
+        // `id: row.patient_id` (so every one of a patient's slides carried the SAME
+        // id, at the one entry point where multiple patients share a collect) and no
+        // counts at all (so both per-patient groupings downstream took their silent
+        // unsized fallback and streaming turned off for the whole run, unreported).
+        //
+        // The numbers below are exactly what tests/subworkflows/local/input_check.nf.test
+        // pins for the same two-slide, one-patient shape: ids 'P001_ref'/'P001_mov1',
+        // images_count 2, and channels_count 5 (the reference keeps DAPI|PANCK|SMA, the
+        // moving slide drops its nuclear channel and contributes CD3|CD8).
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                outdir = "$outputDir"
+                seg_gpu = false
+            }
+            workflow {
+                """
+                input[0] = "$projectDir/tests/testdata/valid_checkpoint_segmented.csv"
+                input[1] = ParamUtils.compartmentMode(params)
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.out.samples.size() == 2 },
+                // Per-IMAGE id, patient-prefixed and unique — not row.patient_id.
+                { assert workflow.out.samples.collect { it[0].id }.toSorted() == ['P001_mov1', 'P001_ref'] },
+                { assert workflow.out.samples.every { it[0].images_count == 2 } },
+                { assert workflow.out.samples.every { it[0].channels_count == 5 } },
+                // The key SET, not a spot-check: a reader that quietly stopped
+                // deriving one of the counts would pass every assertion above that
+                // did not name it.
+                { assert workflow.out.samples.every {
+                    it[0].keySet().toList().toSorted() ==
+                        ['channels', 'channels_count', 'id', 'images_count', 'is_reference', 'patient_id']
+                }}
+            )
+        }
+    }
+
+    test("Should reject is_reference 'yes' rather than silently coercing it to false - stub") {
+
+        // This reader carried its own `row.is_reference?.toLowerCase() == 'true'`,
+        // one of three structurally identical lenient copies of a rule
+        // CsvUtils.parseIsReference already owned strictly. 'yes' therefore became
+        // FALSE here: the checkpoint's only reference row stopped being a reference,
+        // cell_mask/nuclei_mask came out empty, and the run exited 0 having read a
+        // corrupt checkpoint. It must raise, the same way the samplesheet entry
+        // point always has.
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                outdir = "$outputDir"
+                seg_gpu = false
+            }
+            workflow {
+                """
+                input[0] = "$projectDir/tests/testdata/invalid_checkpoint_segmented_bad_ref.csv"
+                input[1] = ParamUtils.compartmentMode(params)
+                """
+            }
+        }
+
+        then {
+            assert !workflow.success
+        }
+    }
+
+    test("Should refuse a checkpoint with no channels column instead of emitting a countless meta - stub") {
+
+        // The count columns size every per-patient groupTuple. A reader that
+        // tolerates their absence emits a meta with no channels_count, which makes
+        // the grouping fall back to unsized — the run still finishes, still exits 0,
+        // and streaming is off for the whole of it with nothing said. An absent count
+        // must be an explicit error at the read, not a silent degradation later.
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                outdir = "$outputDir"
+                seg_gpu = false
+            }
+            workflow {
+                """
+                input[0] = "$projectDir/tests/testdata/invalid_checkpoint_segmented_no_channels.csv"
+                input[1] = ParamUtils.compartmentMode(params)
+                """
+            }
+        }
+
+        then {
+            assert !workflow.success
+        }
+    }
 }

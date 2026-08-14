@@ -167,4 +167,35 @@ nextflow_workflow {
         }
     }
 
+
+    test("rejects is_reference 'yes' rather than coercing it to false") {
+
+        // The THIRD of the three checkpoint entry points, and the only one that has
+        // always been strict: INPUT_CHECK goes through CsvUtils.parseMetadata ->
+        // parseIsReference, which accepts 'true'/'false' and nothing else. Written
+        // together with its twins in tests/subworkflows/local/segmentation.nf.test
+        // and tests/subworkflows/add_cycle.nf.test, which were RED when this one was
+        // already green -- the asymmetry that made a 'yes' cell an error here and a
+        // silent `false` at the other two readers. Pinned so a later "simplification"
+        // of the reader cannot quietly take the lenient branch back.
+
+        tag "stub"
+
+        when {
+            workflow {
+                """
+                input[0] = "$projectDir/tests/testdata/invalid_checkpoint_bad_ref.csv"
+                input[1] = 'preprocessed_image'
+                input[2] = false
+                """
+            }
+            params {
+                outdir = "$outputDir"
+            }
+        }
+
+        then {
+            assert !workflow.success
+        }
+    }
 }
