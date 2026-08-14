@@ -132,11 +132,17 @@ def check_patient(found, seen: set, patient_id: Optional[str], source: str) -> N
     """
     if not found:
         return
-    found = str(found)
-    if patient_id is not None and found != str(patient_id):
+    # Compared as stripped strings: the samplesheet reader strips patient_id (see
+    # tests/testdata/whitespace_patient_id.csv), so " P001" and "P001" are the same
+    # patient everywhere else in the pipeline and must be here too.
+    found = str(found).strip()
+    expected = None if patient_id is None else str(patient_id).strip()
+    if not found:
+        return
+    if expected is not None and found != expected:
         raise ValueError(
             f"{source} carries registration QC for patient {found!r}, but this export "
-            f"is for patient {str(patient_id)!r}. Every QC coordinate is in its own "
+            f"is for patient {expected!r}. Every QC coordinate is in its own "
             "patient's reference frame, so joining it here would silently attach one "
             "patient's registration evidence to another's cells."
         )
@@ -230,7 +236,16 @@ def join_reg_residuals(
     tree = cKDTree(centroids_xy)
     for p in residual_paths:
         try:
-            df = pd.read_csv(p)
+            # dtype={"patient_id": str}: pandas infers an all-numeric column as int64,
+            # so patient "007" reads back as 7 and str(7) != "007" -- the export would
+            # reject the patient's OWN residuals as foreign. Worse in the other
+            # direction: "007" and "0007" both become 7, so a genuinely foreign
+            # patient's rows would pass the check. Nothing constrains patient_id to be
+            # non-numeric (the samplesheet column is free text; there is no
+            # assets/schema_input.json), so both are reachable. A dtype key for a
+            # column the file does not have is ignored, so this is safe on the legacy
+            # header too.
+            df = pd.read_csv(p, dtype={"patient_id": str})
         except (OSError, pd.errors.EmptyDataError) as exc:
             logger.warning("skipping unreadable residual CSV %s: %s", p, exc)
             continue

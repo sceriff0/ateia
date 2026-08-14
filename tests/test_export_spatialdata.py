@@ -275,6 +275,11 @@ def test_join_fraction_counts_only_this_patients_slides(tmp_path):
     Two moving slides for P001, one of which pairs a cell the mask does not have.
     The fractions must be computed slide by slide over that slide's own rows —
     not diluted or inflated by another patient's rows sharing the coordinate.
+
+    The second half exercises the cross-patient path this test's NAME claims: a
+    foreign slide whose rows sit on the very same centroid, which would otherwise
+    acquire a `join_fraction` of 1.0 and be reported as evidence about P001.
+    Without that half, deleting `check_patient` outright left this test green.
     """
     centroids = np.array([[10.0, 10.0]])
     labels = np.array([1])
@@ -293,6 +298,19 @@ def test_join_fraction_counts_only_this_patients_slides(tmp_path):
     assert set(stats["slides"]) == {"P001_mov1", "P001_mov2"}
     assert stats["slides"]["P001_mov1"]["join_fraction"] == 0.5
     assert stats["slides"]["P001_mov2"]["join_fraction"] == 1.0
+
+    # A foreign slide sitting on the same centroid would join at 1.0 and appear in
+    # stats["slides"] as if it said something about P001. It cannot get that far.
+    foreign = _residual_csv(
+        tmp_path / "foreign.csv",
+        [(10.0, 10.0, 4.0)],
+        moving="P002_mov1",
+        patient_id="P002",
+    )
+    with pytest.raises(ValueError, match="P002"):
+        esd.join_reg_residuals(
+            [a, b, foreign], centroids, labels, 15.0, patient_id="P001"
+        )
 
 
 def test_foreign_patient_residual_row_raises(tmp_path):
@@ -328,3 +346,31 @@ def test_residual_csv_without_patient_id_column_is_still_joined(tmp_path):
     )
     assert out["cycle2"].iloc[0] == 2.0
     assert stats["slides"]["cycle2"]["joined"] == 1
+
+
+def test_zero_padded_numeric_patient_id_survives_the_csv_round_trip(tmp_path):
+    """Patient `007` must stay `"007"`, and must not be confused with `"0007"`.
+
+    A bare `pd.read_csv` infers an all-numeric column as int64, so both ids read
+    back as `7`. That breaks the check in BOTH directions: `str(7) != "007"` makes
+    the export reject a patient's OWN residuals with the cross-patient error, and
+    `7 == 7` makes a genuinely foreign `"0007"` look like a match. Nothing
+    constrains patient_id to be non-numeric — the samplesheet column is free text
+    and the repo has no `assets/schema_input.json`.
+    """
+    own = _residual_csv(
+        tmp_path / "own.csv", [(0.0, 0.0, 1.5)], moving="s1", patient_id="007"
+    )
+    out, stats = esd.join_reg_residuals(
+        [own], np.array([[0.0, 0.0]]), np.array([1]), 15.0, patient_id="007"
+    )
+    assert out["s1"].iloc[0] == 1.5
+    assert stats["slides"]["s1"]["joined"] == 1
+
+    foreign = _residual_csv(
+        tmp_path / "foreign.csv", [(0.0, 0.0, 9.0)], moving="s2", patient_id="0007"
+    )
+    with pytest.raises(ValueError, match="0007"):
+        esd.join_reg_residuals(
+            [foreign], np.array([[0.0, 0.0]]), np.array([1]), 15.0, patient_id="007"
+        )
