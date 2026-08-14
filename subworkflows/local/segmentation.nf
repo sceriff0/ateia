@@ -28,7 +28,7 @@
     every other step, postprocessing's entry checkpoint (segmented.csv) carries FOUR
     extra columns INPUT_CHECK's `[meta, one_file]` shape cannot express. It lives here,
     not in workflows/mirage.nf, so Task 3 (which needs the same four columns for its own
-    entry point) can reuse it without copying the splitCsv shape a second time.
+    entry point) can reuse it without opening the checkpoint a second way.
 ========================================================================================
 */
 
@@ -232,10 +232,21 @@ workflow SEGMENTATION {
 ========================================================================================
     WORKFLOW: READ_SEGMENTED_CHECKPOINT
 ========================================================================================
-    The `--start postprocessing` reader for csv/segmented.csv. Follows
-    subworkflows/local/add_cycle.nf:87-105's precedent exactly: read the checkpoint
-    with splitCsv(header: true), fail loudly if the columns this reader indexes have
-    drifted from what Checkpoint declares, and never restate the schema by hand.
+    The `--start postprocessing` reader for csv/segmented.csv. Reading is
+    lib/Checkpoint.groovy's job -- the same class that declares the schema and writes
+    the rows -- so this workflow asks for `[meta, row]` and never restates a column
+    name, an is_reference rule or a count. subworkflows/local/add_cycle.nf's
+    prior-run readers go through the same call.
+
+    WHAT MOVED, AND WHY IT MATTERS HERE. This reader used to build its own meta:
+    `id: row.patient_id` and no counts. Both were wrong at exactly this entry point.
+    `id` drives output file naming, and --start postprocessing is where several
+    patients' outputs meet in one collect, so collapsing every slide of a patient onto
+    one id is where identically named files actually overwrite each other. And the
+    absent counts left every per-patient groupTuple downstream unsized, turning
+    streaming off for the whole run with nothing said. Checkpoint.read supplies the
+    same meta INPUT_CHECK does, so --start postprocessing now sees what every other
+    entry point sees.
 
     INPUT_CHECK's `[meta, one_file]` shape is enough for every other step's entry
     point (each earlier checkpoint names exactly one path column per row). This one
@@ -288,30 +299,16 @@ workflow READ_SEGMENTED_CHECKPOINT {
                         // take: comment above; only `.compartments` is read here.
 
     main:
-    // Columns come from lib/Checkpoint.groovy, the writer's owner: this reader
-    // never restates the schema.
-    //
-    // Fail loudly here if the writer's schema drifts from what this reader indexes.
-    ['patient_id', 'registered_image', 'is_reference', 'channels',
-     'cell_mask', 'nuclei_mask'].each { col ->
-        assert col in Checkpoint.columns(Layout.SEGMENTED),
-            "READ_SEGMENTED_CHECKPOINT reads '${col}' from a 'segmented' checkpoint, " +
-            "which Checkpoint no longer declares"
-    }
-
-    ch_rows = Channel
-        .fromPath(csv_path, checkIfExists: true)
-        .splitCsv(header: true)
-        .map { row ->
-            def chans = (row.channels ?: '').split('\\|').collect { it.trim() }.findAll { it }
-            def meta = [
-                patient_id  : row.patient_id,
-                id          : row.patient_id,
-                is_reference: row.is_reference?.toLowerCase() == 'true',
-                channels    : chans,
-            ]
-            [meta, row]
-        }
+    // lib/Checkpoint.groovy owns BOTH sides of a checkpoint CSV now: it declares the
+    // schema and it reads it. What used to stand here -- a hand-rolled loop asserting
+    // that six column names Checkpoint declares, then a splitCsv + inline meta builder
+    // -- is entirely subsumed: read() checks the file's header against the declared
+    // column list (in both directions, unlike the assert), applies the strict
+    // is_reference rule, derives the patient-prefixed per-image id, and derives both
+    // counts or raises. The three readers of these files no longer get to disagree.
+    ch_rows = Channel.fromList(
+        Checkpoint.read(Layout.SEGMENTED, csv_path, [nuclear_markers: params.nuclear_markers])
+    )
 
     ch_samples = ch_rows.map { meta, row -> [meta, file(row.registered_image)] }
 

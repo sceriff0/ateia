@@ -70,12 +70,23 @@ workflow ADD_CYCLE {
     // eleven times with `_`-prefixed throwaways. It lives here now, and the
     // per-patient payload is a NAMED map:
     //
-    //   [patient_id, [ ref_channels : List<String>  channels of the frozen reference
+    //   [patient_id, [ ref_meta     : Map           meta of the frozen reference ROW,
+    //                                               as lib/Checkpoint.groovy read it
     //                , ref_image    : path          the frozen registration target
+    //                , post_meta    : Map           meta of the prior postprocessed ROW
     //                , base_csv     : path          prior merged quantification table
     //                , cell_mask    : path          prior segmentation cell mask
     //                , nuclei_mask  : path          prior segmentation nuclei mask
     //                , pyramid      : path          prior combined pyramid ]]
+    //
+    // THE TWO METAS ARE CARRIED, NOT THE RAW COLUMNS. This map used to hold
+    // `ref_channels` -- one column, lifted out -- and every consumer below then
+    // assembled its own `[patient_id: pid, id: ..., is_reference: ..., channels: ...]`
+    // literal from it, six times. Those literals are what a shared reader exists to
+    // delete: each one was an independent chance to omit a key (all six omitted both
+    // counts), and none of them could be checked against anything. Consumers now do
+    // `prior.ref_meta` / `prior.post_meta`, adding a key with `meta + [k: v]` where
+    // this path genuinely needs one.
     //
     // patient_id stays a bare first element so the joins/combines below can key
     // on it with `by: 0`.
@@ -84,53 +95,46 @@ workflow ADD_CYCLE {
     // in the prior postprocessed.csv, --mode add_cycle) are validated in
     // workflows/mirage.nf before this subworkflow is ever invoked.
 
-    // Columns come from lib/Checkpoint.groovy, the writer's owner: this reader
-    // never restates the schema.
+    // lib/Checkpoint.groovy owns both sides of a checkpoint CSV: it declares the
+    // schema, writes the rows, and reads them back. The two hand-rolled column
+    // assertions that stood here (plus the splitCsv + inline meta each guarded) are
+    // subsumed by read(), which additionally checks the FILE has the columns rather
+    // than only that Checkpoint still declares them.
     //
-    // Fail loudly here if the writer's schema drifts from what this reader indexes.
-    ['patient_id', 'registered_image', 'is_reference', 'channels'].each { col ->
-        assert col in Checkpoint.columns(Layout.REGISTERED),
-            "add_cycle reads '${col}' from ${Layout.checkpointCsvRelative(Layout.REGISTERED)}, " +
-            "which Checkpoint no longer declares"
-    }
+    // The strict is_reference rule matters most HERE. --input goes through
+    // CsvUtils.validateInputSemantics before anything reads it; a PRIOR RUN's
+    // checkpoints under --prior_outdir never do. This file's own
+    // `row.is_reference?.toLowerCase() == 'true'` was therefore the only thing that
+    // ever looked at that cell, and it turned 'yes' into a patient with no reference
+    // at all -- ch_prior_ref empty, every join below dropping the patient, exit 0.
+    def prior_reg_csv = Layout.checkpointCsv(params.prior_outdir, Layout.REGISTERED)
     ch_prior_ref = Channel
-        .fromPath(Layout.checkpointCsv(params.prior_outdir, Layout.REGISTERED), checkIfExists: true)
-        .splitCsv(header: true)
-        .filter { row -> row.is_reference?.toLowerCase() == 'true' }
-        .map { row ->
-            def chans = (row.channels ?: '').split('\\|').collect { it.trim() }.findAll { it }
-            [row.patient_id, chans, file(row.registered_image)]
-        }
+        .fromList(Checkpoint.read(Layout.REGISTERED, prior_reg_csv, [nuclear_markers: params.nuclear_markers]))
+        .filter { meta, _row -> meta.is_reference }
+        .map { meta, row -> [meta.patient_id, meta, file(row.registered_image)] }
 
-    // Columns come from lib/Checkpoint.groovy, the writer's owner: this reader
-    // never restates the schema. Only `merged_csv`, `cell_mask` and `pyramid` are
-    // used here — the masks are re-extracted from the pyramid's Image:1 series by
-    // EXTRACT_MASK_SERIES below, so the cell_mask column is read and discarded.
-    //
-    // Fail loudly here if the writer's schema drifts from what this reader indexes.
-    ['patient_id', 'merged_csv', 'cell_mask', 'pyramid'].each { col ->
-        assert col in Checkpoint.columns(Layout.POSTPROCESSED),
-            "add_cycle reads '${col}' from ${Layout.checkpointCsvRelative(Layout.POSTPROCESSED)}, " +
-            "which Checkpoint no longer declares"
-    }
+    // Only `merged_csv` and `pyramid` are consumed downstream — the masks are
+    // re-extracted from the pyramid's Image:1 series by EXTRACT_MASK_SERIES below, so
+    // the checkpoint's own cell_mask column is deliberately not carried forward.
+    def prior_post_csv = Layout.checkpointCsv(params.prior_outdir, Layout.POSTPROCESSED)
     ch_prior_rows = Channel
-        .fromPath(Layout.checkpointCsv(params.prior_outdir, Layout.POSTPROCESSED), checkIfExists: true)
-        .splitCsv(header: true)
-        .map { row -> [row.patient_id, file(row.merged_csv), file(row.cell_mask), file(row.pyramid)] }
+        .fromList(Checkpoint.read(Layout.POSTPROCESSED, prior_post_csv))
+        .map { meta, row -> [meta.patient_id, meta, file(row.merged_csv), file(row.pyramid)] }
 
     // Extract masks from the prior pyramid's Image:1 series (fast-fails in the
     // process if the prior run was not embed_masks+expanded+compartment).
-    EXTRACT_MASK_SERIES(ch_prior_rows.map { pid, _merged_csv, _cell_mask, pyramid -> [[patient_id: pid, id: pid], pyramid] })
+    EXTRACT_MASK_SERIES(ch_prior_rows.map { _pid, post_meta, _merged_csv, pyramid -> [post_meta, pyramid] })
     ch_extracted_masks = EXTRACT_MASK_SERIES.out.cell_mask.map { m, f -> [m.patient_id, f] }
         .join(EXTRACT_MASK_SERIES.out.nuclei_mask.map { m, f -> [m.patient_id, f] }, by: 0)
 
     ch_prior_assets = ch_prior_ref
-        .join(ch_prior_rows.map { pid, merged_csv, _cell_mask, pyramid -> [pid, merged_csv, pyramid] }, by: 0)
+        .join(ch_prior_rows, by: 0)
         .join(ch_extracted_masks, by: 0)
-        .map { pid, ref_channels, ref_image, base_csv, pyramid, cell_mask, nuclei_mask ->
+        .map { pid, ref_meta, ref_image, post_meta, base_csv, pyramid, cell_mask, nuclei_mask ->
             [pid, [
-                ref_channels: ref_channels,
+                ref_meta    : ref_meta,
                 ref_image   : ref_image,
+                post_meta   : post_meta,
                 base_csv    : base_csv,
                 cell_mask   : cell_mask,
                 nuclei_mask : nuclei_mask,
@@ -150,9 +154,15 @@ workflow ADD_CYCLE {
     // Build [patient_id, ref_item, all_items] with the prior reference marked
     // is_reference=true. The reference is a fixed frame (passed through
     // unregistered by VALIS); we discard its output and keep only the new cycle.
+    // The reference's meta is the one lib/Checkpoint.groovy read out of the prior run's
+    // registered.csv, not a fresh literal: that is where its channels, its
+    // is_reference (already true — this stream is the filtered reference row) and its
+    // two counts come from. The ONE key overridden is `id`, and deliberately: `id`
+    // names this run's output files, and a frozen prior-run reference is not a slide of
+    // this run. Keeping the '<pid>_reference' name it has always had also keeps the
+    // published QC filenames of an add_cycle run unchanged by this refactor.
     ch_ref_item = ch_prior_assets.map { pid, prior ->
-        def ref_meta = [patient_id: pid, id: "${pid}_reference", is_reference: true, channels: prior.ref_channels]
-        [pid, [ref_meta, prior.ref_image]]
+        [pid, [prior.ref_meta + [id: "${pid}_reference"], prior.ref_image]]
     }
     ch_grouped = ch_new_pre
         .map { meta, file -> [meta.patient_id, [meta + [is_reference: false], file]] }
@@ -223,7 +233,9 @@ workflow ADD_CYCLE {
         ch_native = ch_new_pre
             .map { meta, f -> [meta + [is_reference: false], f] }
             .mix(ch_prior_assets.map { pid, prior ->
-                [[patient_id: pid, id: "${pid}_reference", is_reference: true, channels: prior.ref_channels], prior.ref_image]
+                // Same meta the registration group above carries — one construction
+                // rule for the reference, not two that have to be kept in step by eye.
+                [prior.ref_meta + [id: "${pid}_reference"], prior.ref_image]
             })
 
         SEG_QC(ch_native, ch_transform, REGISTER_PATIENT.out.stage_checkpoint,
@@ -238,8 +250,12 @@ workflow ADD_CYCLE {
     // 4. REUSE prior masks -> cell contours (+ nucleus contours if compartments)
     //    Masks are unchanged, so cell labels are identical.
     // ------------------------------------------------------------------ //
-    ch_prior_cell_mask = ch_prior_assets.map { pid, prior ->
-        [[patient_id: pid, id: pid, is_reference: true], prior.cell_mask]
+    // post_meta is the prior postprocessed.csv row's meta: one row per patient, so its
+    // `id` IS the patient_id — the same value this literal used to restate. is_reference
+    // is added here because the postprocessed checkpoint declares no such column (the
+    // prior masks are the patient's, taken off the reference frame).
+    ch_prior_cell_mask = ch_prior_assets.map { _pid, prior ->
+        [prior.post_meta + [is_reference: true], prior.cell_mask]
     }
     EXTRACT_CELL_PROPERTIES(ch_prior_cell_mask)
     ch_contours = EXTRACT_CELL_PROPERTIES.out.contours.map { meta, j -> [meta.patient_id, j] }
@@ -247,8 +263,8 @@ workflow ADD_CYCLE {
     // Nucleus contours (re-keyed to cell labels) — only when compartments enabled.
     ch_nucleus_contours = Channel.empty()
     if (compartment_mode.compartments) {
-        ch_nuclei_props_in = ch_prior_assets.map { pid, prior ->
-            [[patient_id: pid, id: pid], prior.nuclei_mask, prior.cell_mask]
+        ch_nuclei_props_in = ch_prior_assets.map { _pid, prior ->
+            [prior.post_meta, prior.nuclei_mask, prior.cell_mask]
         }
         EXTRACT_NUCLEI_PROPERTIES(ch_nuclei_props_in)
         ch_nucleus_contours = EXTRACT_NUCLEI_PROPERTIES.out.contours.map { meta, j -> [meta.patient_id, j] }
@@ -283,10 +299,10 @@ workflow ADD_CYCLE {
     // MERGE_QUANT_CSVS slot carries the prior base table instead).
     ch_new_quant_grouped = QUANTIFY_MARKERS.out.grouped_csv
         .map { meta, csvs -> [meta.patient_id, csvs] }
-    ch_base = ch_prior_assets.map { pid, prior -> [pid, prior.base_csv] }
+    ch_base = ch_prior_assets.map { pid, prior -> [pid, prior.post_meta, prior.base_csv] }
     ch_for_merge = ch_new_quant_grouped
         .combine(ch_base, by: 0)
-        .map { pid, csvs, base_csv -> [[patient_id: pid, id: pid], csvs, base_csv] }
+        .map { _pid, csvs, post_meta, base_csv -> [post_meta, csvs, base_csv] }
     MERGE_QUANT_CSVS(ch_for_merge)
 
     // ------------------------------------------------------------------ //
@@ -311,8 +327,11 @@ workflow ADD_CYCLE {
     //    pyramid (is_reference=true keeps ref DAPI + all old markers), then
     //    merge with the new cycle's channels.
     // ------------------------------------------------------------------ //
-    ch_prior_pyramid = ch_prior_assets.map { pid, prior ->
-        [[patient_id: pid, id: pid, is_reference: true, channels: []], prior.pyramid, true]
+    // channels: [] is deliberate and is NOT the checkpoint's channel list — SPLIT_
+    // PRIOR_PYRAMID reads the channel names out of the pyramid's own OME metadata, and
+    // the postprocessed checkpoint declares no channels column to draw them from anyway.
+    ch_prior_pyramid = ch_prior_assets.map { _pid, prior ->
+        [prior.post_meta + [is_reference: true, channels: []], prior.pyramid, true]
     }
     SPLIT_PRIOR_PYRAMID(ch_prior_pyramid)
 

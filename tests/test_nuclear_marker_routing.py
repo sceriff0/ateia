@@ -57,7 +57,13 @@ ROUTER_FILE = "MarkerUtils.groovy"
 READ_RE = re.compile(r"(?:\w+\.)?params\.nuclear_markers")
 # Rule A: the raw read with a method call or an index hung directly off it.
 RAW_USE_RE = re.compile(r"(?:\w+\.)?params\.nuclear_markers\s*(?:\.\w|\[)")
-ROUTERS = ("MarkerUtils.", "CsvUtils.")
+# `Checkpoint.read` is a router too, not an exception to the rule: it takes
+# nuclear_markers only to hand it to CsvUtils.countChannelsPerPatient and
+# CsvUtils.parseMetadata, both of which funnel into markerList. An allowlist entry
+# whose stated reason nothing checks is how these guards go quiet, so
+# `test_checkpoint_read_really_routes_to_csvutils` below asserts that funnel exists
+# rather than taking this comment's word for it.
+ROUTERS = ("MarkerUtils.", "CsvUtils.", "Checkpoint.read")
 # Rule B fallback: a bare argument line inside a multi-line call.
 BARE_ARG_RE = re.compile(r"^\(?\s*(?:\w+\.)?params\.nuclear_markers\s*[,)]?\s*$")
 # How far back a bare argument line may look for its callee.
@@ -104,6 +110,9 @@ def test_scan_actually_finds_the_consumers():
         "split_channels.nf",
         "SegBackends.groovy",
         "input_check.nf",
+        # The two checkpoint readers, which pass the parameter to Checkpoint.read.
+        "segmentation.nf",
+        "add_cycle.nf",
     ):
         assert expected in files, f"{expected} no longer reads params.nuclear_markers"
 
@@ -142,4 +151,41 @@ def test_every_read_is_routed_through_markerutils():
         "markerList() is the single place the parameter's three possible shapes are "
         "normalised; a site that bypasses it is a silent divergence, not an error.\n"
         + "\n".join(offenders)
+    )
+
+
+# The two CsvUtils entry points Checkpoint.read hands nuclear_markers to. Both funnel
+# into MarkerUtils.markerList: countChannelsPerPatient via splitOutputChannels,
+# parseMetadata via validateMetadata's hasNuclear check.
+CHECKPOINT_READ_FUNNELS = (
+    "CsvUtils.countChannelsPerPatient(path, imageCol, nuclear, autoRef)",
+    "CsvUtils.parseMetadata(row, nuclear, ctx)",
+)
+
+
+def test_checkpoint_read_really_routes_to_csvutils():
+    """The reason `Checkpoint.read` is in ROUTERS, checked rather than asserted.
+
+    Two call sites pass `params.nuclear_markers` straight into `Checkpoint.read`, and
+    Rule B accepts those lines only because that method funnels the value onward. If
+    read() ever stopped doing so -- inlining its own channel-count arithmetic, say --
+    Rule B would keep passing on the strength of a name, which is precisely the
+    "allowlist entry whose stated reason no longer holds" failure this file's other
+    tests exist to prevent. Pin the funnel itself.
+
+    Watched fail: changing read()'s countChannelsPerPatient call to pass a literal
+    marker list instead of `nuclear` fails this test on that exact string, while all
+    three tests above stay green.
+    """
+    src = (ROOT / "lib" / "Checkpoint.groovy").read_text()
+    read_at = src.index("static List<List> read(")
+    body = src[read_at:]
+
+    missing = [call for call in CHECKPOINT_READ_FUNNELS if call not in body]
+    assert not missing, (
+        "Checkpoint.read is in ROUTERS because it hands nuclear_markers to CsvUtils "
+        "entry points that funnel into MarkerUtils.markerList. It no longer makes "
+        f"{len(missing)} of those call(s) with the value bound from opts:\n"
+        + "\n".join(missing)
+        + "\nEither restore the routing or take Checkpoint.read out of ROUTERS."
     )

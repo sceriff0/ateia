@@ -31,11 +31,11 @@
                        stylistic choice: under mode='add_cycle' the registered stream
                        carries TWO rows for a patient (the frozen prior reference plus
                        the new cycle) while the new slide's meta.images_count is 1 and
-                       the synthesised reference meta has no images_count at all. A
-                       size hint of 1 would close the group after one row and the
-                       second row would open a second group, whose fragment overwrites
-                       the first. The group size is the only count that is right on
-                       both callers' paths.
+                       the reference row's is the PRIOR run's row count, read out of
+                       that run's registered.csv — neither is 2. A size hint of 1 would
+                       close the group after one row and the second row would open a
+                       second group, whose fragment overwrites the first. The group
+                       size is the only count that is right on both callers' paths.
 
     Output:
         csv: the collected registration checkpoint manifest

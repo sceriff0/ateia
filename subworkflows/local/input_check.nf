@@ -68,8 +68,11 @@ workflow INPUT_CHECK {
             // Per-image unique id (patient_id + source-image stem). Drives output
             // file naming so a patient's multiple images do not produce identically
             // named files that collide when collected downstream (QC, registration).
-            def stem = file(row[image_column]).simpleName
-            meta.id = stem.startsWith(meta.patient_id) ? stem : "${meta.patient_id}_${stem}"
+            // The rule itself is CsvUtils.imageId, shared with Checkpoint.read: this
+            // file's inline copy WAS the rule, and the checkpoint reader in
+            // subworkflows/local/segmentation.nf used `row.patient_id` instead, so the
+            // same CSV produced two different ids depending on which reader opened it.
+            meta.id = CsvUtils.imageId(meta.patient_id, row[image_column])
             return tuple(meta, file(row[image_column]))
         }
 

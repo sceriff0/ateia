@@ -273,7 +273,9 @@ workflow MIRAGE {
             // postprocessing's entry checkpoint (segmented.csv) carries four more
             // columns beyond a single image path. READ_SEGMENTED_CHECKPOINT
             // (subworkflows/local/segmentation.nf) is the dedicated reader —
-            // mirrors add_cycle.nf's own splitCsv checkpoint readers.
+            // like add_cycle.nf's prior-run readers it goes through
+            // Checkpoint.read, so its meta is the same one INPUT_CHECK builds
+            // from this very file.
             READ_SEGMENTED_CHECKPOINT(params.input, compartment_mode)
             ch_for_postprocessing       = READ_SEGMENTED_CHECKPOINT.out.samples
             ch_cell_mask_for_post       = READ_SEGMENTED_CHECKPOINT.out.cell_mask
