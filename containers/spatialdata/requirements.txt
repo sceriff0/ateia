@@ -17,6 +17,11 @@ pyarrow>=15.0.0        # GeoParquet writer for shapes/, and Parquet for any poin
 
 # Lazy, chunked reads of the merged pyramid — peak memory is one chunk, not one slide.
 dask[array]>=2024.8.0
+# tifffile>=2024.7.2 is a deliberate lower bound, not a hard pin (see the
+# header comment above on why: the scverse on-disk format is still moving).
+# Left unchanged by Task 11b (2026-08-14) -- it already satisfies "explicit
+# pin" and already matches the floor the other images converge on. See
+# docs/containers.md.
 tifffile>=2024.7.2
 imagecodecs>=2024.6.1  # zstd/LZW codecs used by MERGE_AND_PYRAMID's OME-TIFF
 

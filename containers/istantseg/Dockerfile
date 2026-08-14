@@ -19,4 +19,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir instanseg-torch imagecodecs
+# tifffile is not a direct dependency of either instanseg-torch or
+# imagecodecs' base install (only under their optional extras); it arrives
+# transitively via instanseg-torch's unconditional `scikit-image>=0.21.0`,
+# which itself only floors tifffile at >=2022.8.12 -- so before Task 11b
+# this image had no explicit tifffile pin at all and floated to whatever
+# scikit-image's resolver picked on that day's build. Pinned explicitly at
+# 2024.7.2 to converge with containers/tiled, containers/merge and
+# containers/quantification -- see docs/containers.md.
+RUN pip install --no-cache-dir instanseg-torch imagecodecs tifffile==2024.7.2

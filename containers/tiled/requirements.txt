@@ -3,6 +3,12 @@
 numpy==1.26.4
 scipy==1.13.1
 scikit-image==0.24.0
+# tifffile==2024.7.2 is the Task 11b (2026-08-14) convergence target: three
+# other images that had no explicit tifffile pin at all (containers/merge,
+# containers/quantification, containers/istantseg) were pinned to match this
+# value rather than inventing a new one. See docs/containers.md. Do NOT bump
+# this independently of the zarr line below without re-checking tifffile's
+# aszarr reader against whatever zarr version you land on.
 tifffile==2024.7.2
 zarr==2.18.3          # lazy region reads for the streaming gigapixel stitch (tifffile aszarr)
 numcodecs==0.13.1     # pinned: newer numcodecs drops blosc.cbuffer_sizes that zarr 2.18 imports
