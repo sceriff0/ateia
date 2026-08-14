@@ -305,6 +305,64 @@ class ParamUtils {
         }
     }
 
+    /**
+     * The REDSEA trio, resolved once — same shape as compartmentMode above.
+     *
+     * REDSEA (Bai et al., Front. Immunol. 2021;12:652631) is read exactly once on
+     * the quantification path, in subworkflows/local/quantify_markers.nf, and
+     * passed down as data. This method exists so the CROSS-parameter rules below
+     * run at validation time, before any process is instantiated, rather than
+     * surfacing as an empty column set at the end of a long run.
+     */
+    static Map redseaMode(Map params) {
+        return [
+            enabled: params.redsea as boolean,
+            markers: params.redsea_markers,
+        ].asImmutable()
+    }
+
+    /**
+     * The ONE cross-parameter rule REDSEA has: enabled ⇒ a non-empty marker list.
+     *
+     * REDSEA with no markers runs REDSEA_MATRIX for every patient — the whole mask
+     * pass — and then compensates nothing. The run is green, every output is
+     * byte-identical to a `--redsea false` run, and the only symptom is a missing
+     * set of columns nobody thinks to look for.
+     *
+     * Nothing else belongs here. `--redsea_element_size` must be a positive integer
+     * and `--redsea_element_shape` must be one of three names, but those are
+     * SINGLE-parameter range/enum rules, so nextflow_schema.json owns them and
+     * `validateParameters()` runs first — a copy here would be a guard that can
+     * never fire (verified: `--redsea_element_size 0` is rejected by the schema
+     * with "0 is less than 1" before this method is reached).
+     */
+    static void validateRedsea(Map mode) {
+        if (!mode.enabled) return
+
+        def markers = mode.markers
+        def flat = (markers instanceof CharSequence) ? [markers]
+                 : (markers instanceof Object[])     ? (markers as List)
+                 : (markers instanceof Collection)   ? (markers as List)
+                 : (markers == null ? [] : [markers])
+        def names = flat
+            .collectMany { it == null ? [] : it.toString().split(/[,]/) as List }
+            .collect { it?.trim() }
+            .findAll { it }
+        if (!names) {
+            throw new IllegalArgumentException(
+                "--redsea is on but --redsea_markers is empty. REDSEA is opt-in per " +
+                "marker because it is only valid for SURFACE/MEMBRANE markers: the " +
+                "method assumes the signal sits on the membrane and is brighter in " +
+                "the source cell than in the leak. With no markers the run would " +
+                "compute the compensation geometry for every patient and then " +
+                "compensate nothing, producing output identical to --redsea false " +
+                "with no error anywhere. Name the surface markers, e.g. " +
+                "--redsea_markers CD3,CD8,CD20."
+            )
+        }
+
+    }
+
     static List requiredColumnsForStep(String step) {
         def entry = STEPS.find { it.name == step }
         if (!entry) {

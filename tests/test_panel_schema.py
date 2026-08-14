@@ -103,3 +103,53 @@ def test_bad_statistic_errors():
     }
     with pytest.raises(PanelError, match="statistic"):
         typecheck(parse_panel(bad))
+
+
+# ── the statistic vocabulary has ONE owner ────────────────────────────────────
+def test_valid_stats_is_derived_from_measurements_not_re_declared():
+    """VALID_STATS must BE the measurement vocabulary, not a copy of it.
+
+    It used to be a literal ``{"Mean", "Median", "Sum"}``. That is a second,
+    independent declaration of something ``bin/utils/measurements.py`` already
+    owns, and the two diverged the instant REDSEA added its compensated
+    statistics — a panel naming a column ``quantify.py`` really emits was
+    rejected as invalid.
+    """
+    from utils.measurements import STATISTICS
+    from utils.phenotyping.panel_schema import VALID_STATS
+
+    assert VALID_STATS == set(STATISTICS)
+
+
+def test_panel_may_gate_on_a_redsea_compensated_statistic():
+    """The point of pairing REDSEA with phenotyping: gate on compensated signal.
+
+    REDSEA removes lateral spillover from touching cells, which is exactly the
+    artefact that makes a neighbour of a CD3+ cell look CD3+ — i.e. precisely the
+    failure a lineage gate suffers from. A panel must be able to ask for it.
+    """
+    from utils.measurements import REDSEA_STATISTICS
+
+    panel = dict(PANEL)
+    panel["markers"] = dict(panel["markers"])
+    panel["markers"]["PanCK"] = {
+        "role": "lineage",
+        "compartment": "cell",
+        "statistic": REDSEA_STATISTICS[0],
+        "negative_reference": "auto",
+    }
+    typecheck(parse_panel(panel))
+
+
+def test_a_bogus_statistic_is_still_rejected():
+    """Widening the vocabulary must not turn the check into a no-op."""
+    panel = dict(PANEL)
+    panel["markers"] = dict(panel["markers"])
+    panel["markers"]["PanCK"] = {
+        "role": "lineage",
+        "compartment": "cell",
+        "statistic": "Avg",
+        "negative_reference": "auto",
+    }
+    with pytest.raises(PanelError, match="statistic must be one of"):
+        typecheck(parse_panel(panel))

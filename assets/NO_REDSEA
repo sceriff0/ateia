@@ -1,0 +1,2 @@
+REDSEA disabled. modules/local/quantify.nf tests for this filename to decide whether
+to pass --redsea-geometry to bin/quantify.py. See subworkflows/local/quantify_markers.nf.

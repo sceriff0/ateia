@@ -72,6 +72,10 @@ workflow MIRAGE {
     // params.expanded_quantification / params.embed_masks directly;
     // tests/test_compartment_mode_routing.py enforces that.
     def compartment_mode = ParamUtils.compartmentMode(params)
+    // REDSEA's own resolved-once map. Validated on both paths below, next to
+    // validateCompartmentQuant, because both reach QUANTIFY_MARKERS -- add_cycle
+    // quantifies the new cycle's markers through the same subworkflow.
+    def redsea_mode = ParamUtils.redseaMode(params)
 
     /* -------------------- MODE: ADD_CYCLE -------------------- */
     if (params.mode == 'add_cycle') {
@@ -84,6 +88,7 @@ workflow MIRAGE {
         ParamUtils.validateAddCycle(params.outdir, params.prior_outdir)
         ParamUtils.validateCompartmentQuant(compartment_mode)
         ParamUtils.validateAddCyclePhenotyping(params)  // add_cycle has no PHENOTYPE stage
+        ParamUtils.validateRedsea(redsea_mode)
         // add_cycle re-registers the new cycle via the classic VALIS_ADAPTER only; the
         // STARE 'tiled' backend is not wired into the incremental path — reject it loudly
         // rather than silently registering with VALIS.
@@ -155,6 +160,7 @@ workflow MIRAGE {
 
     if (run_postprocessing) {
         ParamUtils.validateCompartmentQuant(compartment_mode)
+        ParamUtils.validateRedsea(redsea_mode)
     }
 
     if (!params.input) {

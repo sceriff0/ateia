@@ -103,6 +103,7 @@ nav:
   - Resources: resources.md
   - Incremental cycles: add_cycle.md
   - Registration QC: registration_qc.md
+  - REDSEA compensation: redsea.md
   - SpatialData & FlowPath: spatialdata.md
   - Citation: citation.md
 

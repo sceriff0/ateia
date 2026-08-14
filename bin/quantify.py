@@ -25,13 +25,15 @@ sys.path.insert(0, str(Path(__file__).parent / "utils"))
 # Import from lib for DRY principle
 from image_utils import ensure_dir, load_image
 from logger import configure_logging, get_logger
-from measurements import COMPARTMENTS
+from measurements import COMPARTMENTS, REDSEA_STATISTICS
+from redsea import band_sums, compensate
 
 logger = get_logger(__name__)
 
 
 __all__ = [
     "compute_compartment_intensities",
+    "is_redsea_marker",
     "quantify_single_channel",
     "run_quantification",
 ]
@@ -40,6 +42,29 @@ __all__ = [
 # These become part of the QuPath measurement key "<marker>: <Compartment>: <Stat>".
 # (single source of truth: bin/utils/measurements.py)
 COMPARTMENT_NAMES = COMPARTMENTS
+
+
+def is_redsea_marker(channel_name: str, redsea_markers) -> bool:
+    """Whether this marker opts in to REDSEA compensation.
+
+    Case-insensitive exact match on the trimmed name, against the list from
+    ``params.redsea_markers``. Deliberately NOT the substring match
+    ``MarkerUtils.isNuclear`` uses: nuclear detection wants 'DAPI' to catch
+    'DAPI_nuclear', whereas here a substring rule would make 'CD4' silently
+    select 'CD45' too -- and compensating the wrong marker produces plausible
+    numbers, not an error.
+
+    REDSEA is only valid for markers whose signal sits on the membrane and is
+    brighter in the source cell than in the leak (the paper's own stated
+    assumption). Nuclear and diffuse-cytoplasmic markers violate it, which is why
+    this is an explicit opt-in list rather than "every channel".
+    """
+    if not redsea_markers:
+        return False
+    if isinstance(redsea_markers, str):
+        redsea_markers = redsea_markers.split(",")
+    wanted = {m.strip().upper() for m in redsea_markers if m and m.strip()}
+    return channel_name.strip().upper() in wanted
 
 
 def _safe_mean(sums: NDArray, counts: NDArray) -> NDArray:
@@ -55,6 +80,7 @@ def compute_compartment_intensities(
     channel: NDArray,
     channel_name: str,
     expanded: bool = False,
+    redsea: Optional[tuple] = None,
 ) -> pd.DataFrame:
     """Compute per-cell signal for one channel — Median-first.
 
@@ -96,6 +122,17 @@ def compute_compartment_intensities(
         Marker name used to build measurement keys.
     expanded : bool
         If True, also emit Mean and Sum (integrated density) per compartment.
+    redsea : tuple or None
+        ``(weights, band, redsea_checker)`` from ``bin/redsea_matrix.py``. When
+        given, two extra WHOLE-CELL columns are appended:
+        ``"<marker>: Cell: REDSEA Sum"`` and ``"<marker>: Cell: REDSEA Mean"``.
+
+        Only whole-cell, and only Sum/Mean, both on purpose. REDSEA's algebra
+        subtracts a fraction of a neighbour's *integrated* boundary counts, so it
+        is defined on sums; a median has no such algebra, which is why the
+        pipeline's default Median statistic is emitted un-compensated alongside.
+        And the method is a whole-cell membrane correction — it has no
+        nucleus/cytoplasm decomposition, so it is not emitted per compartment.
 
     Returns
     -------
@@ -189,6 +226,30 @@ def compute_compartment_intensities(
         for comp in compartments:
             out[f"{channel_name}: {comp}: Sum"] = sums[comp][valid_labels]
 
+    if redsea is not None:
+        weights, band, redsea_checker = redsea
+        if band.shape != cell_mask.shape:
+            raise ValueError(
+                f"REDSEA band/mask shape mismatch: {band.shape} vs {cell_mask.shape}. "
+                "The geometry was built from a different segmentation than the one "
+                "being quantified."
+            )
+        if weights.shape[0] < n:
+            raise ValueError(
+                f"REDSEA geometry covers {weights.shape[0] - 1} labels but the mask "
+                f"has {n - 1}. Rebuild the geometry from this mask."
+            )
+        # `cell_sum` is already the whole-cell sum; band_sums recomputes it so the
+        # two vectors are guaranteed to share a length and label indexing with the
+        # geometry (which is sized from the mask that built it, not this channel).
+        whole, edge = band_sums(cell_mask, band, channel, n_labels=weights.shape[0])
+        comp_sum = compensate(whole, edge, weights, redsea_checker=redsea_checker)
+        area = np.bincount(flat_cell, minlength=weights.shape[0])[: weights.shape[0]]
+        out[f"{channel_name}: Cell: {REDSEA_STATISTICS[0]}"] = comp_sum[valid_labels]
+        out[f"{channel_name}: Cell: {REDSEA_STATISTICS[1]}"] = _safe_mean(
+            comp_sum, area
+        )[valid_labels]
+
     return pd.DataFrame(out)
 
 
@@ -198,6 +259,7 @@ def quantify_single_channel(
     channel_name: str,
     nuclei_mask: Optional[NDArray] = None,
     expanded: bool = False,
+    redsea: Optional[tuple] = None,
 ) -> pd.DataFrame:
     """Quantify a single channel (intensity only).
 
@@ -230,7 +292,7 @@ def quantify_single_channel(
     """
     mask = np.ascontiguousarray(mask.squeeze())
     return compute_compartment_intensities(
-        mask, nuclei_mask, channel_image, channel_name, expanded=expanded
+        mask, nuclei_mask, channel_image, channel_name, expanded=expanded, redsea=redsea
     )
 
 
@@ -249,6 +311,9 @@ def run_quantification(
     channel_name: str = None,
     nuclei_mask_path: Optional[str] = None,
     expanded: bool = False,
+    redsea_geometry_path: Optional[str] = None,
+    redsea_markers=None,
+    redsea_checker: int = 1,
 ) -> pd.DataFrame:
     """Run quantification for a single channel.
 
@@ -268,6 +333,16 @@ def run_quantification(
         (Nucleus / Cytoplasm / Cell) is performed instead of whole-cell only.
     expanded : bool
         With ``nuclei_mask_path``, also emit Mean and Sum per compartment.
+    redsea_geometry_path : str, optional
+        ``<patient>_redsea.npz`` from ``bin/redsea_matrix.py``. Present on every
+        marker task of a REDSEA-enabled run; whether it is actually *used* is
+        decided per marker by ``redsea_markers``.
+    redsea_markers : list or str, optional
+        Markers that opt in to compensation. A channel not in this list is
+        quantified exactly as before, so turning REDSEA on never silently changes
+        an existing column.
+    redsea_checker : int
+        1 = subtract and reinforce (the paper's default), 0 = subtract only.
 
     Returns
     -------
@@ -350,6 +425,27 @@ def run_quantification(
             f"Per-compartment quantification enabled: Nucleus/Cytoplasm/Cell, {mode}"
         )
 
+    # Optionally load the REDSEA geometry. Two independent gates, both cheap and
+    # both needed: the run must have a geometry at all, and THIS marker must be one
+    # the user opted in (REDSEA is only valid for membrane markers -- see
+    # is_redsea_marker). A non-opted marker never even opens the npz.
+    redsea = None
+    if redsea_geometry_path and is_redsea_marker(channel_name, redsea_markers):
+        sys.path.insert(0, str(Path(__file__).parent))
+        from redsea_matrix import load_geometry
+
+        logger.info(f"REDSEA: loading geometry {redsea_geometry_path}")
+        weights, band, _labels = load_geometry(redsea_geometry_path)
+        redsea = (weights, band, redsea_checker)
+        logger.info(
+            f"REDSEA: compensating '{channel_name}' "
+            f"(REDSEAChecker={redsea_checker}, {weights.nnz} cell-pair weights)"
+        )
+    elif redsea_geometry_path:
+        logger.info(
+            f"REDSEA: '{channel_name}' is not in --redsea-markers, quantifying uncompensated"
+        )
+
     # Quantify
     result_df = quantify_single_channel(
         mask,
@@ -357,6 +453,7 @@ def run_quantification(
         channel_name,
         nuclei_mask=nuclei_mask,
         expanded=expanded,
+        redsea=redsea,
     )
 
     # Save
@@ -376,6 +473,8 @@ def run_quantification(
         if expanded:
             cols += [f"{channel_name}: {c}: Mean" for c in comps]
             cols += [f"{channel_name}: {c}: Sum" for c in comps]
+        if redsea is not None:
+            cols += [f"{channel_name}: Cell: {st}" for st in REDSEA_STATISTICS]
         empty_df = pd.DataFrame(columns=cols)
         empty_df.to_csv(output_path, index=False)
 
@@ -428,6 +527,30 @@ def parse_args():
         default=None,
         help="Explicit channel name (if not provided, will parse from filename)",
     )
+    parser.add_argument(
+        "--redsea-geometry",
+        type=str,
+        default=None,
+        help="Per-patient REDSEA geometry (.npz) from redsea_matrix.py. Adds "
+        "'<marker>: Cell: REDSEA Sum' and '... REDSEA Mean' for markers listed in "
+        "--redsea-markers; every other column is unchanged.",
+    )
+    parser.add_argument(
+        "--redsea-markers",
+        type=str,
+        default=None,
+        help="Comma-separated markers to compensate. Surface/membrane markers only "
+        "-- REDSEA assumes the signal sits on the membrane and is brighter in the "
+        "source cell than in the leak.",
+    )
+    parser.add_argument(
+        "--redsea-checker",
+        type=int,
+        default=1,
+        choices=[0, 1],
+        help="REDSEAChecker: 1 = subtract and reinforce (paper default), "
+        "0 = subtract only.",
+    )
 
     return parser.parse_args()
 
@@ -462,6 +585,9 @@ def main():
         channel_name=effective_channel_name,
         nuclei_mask_path=args.nuclei_mask_file,
         expanded=args.expanded,
+        redsea_geometry_path=args.redsea_geometry,
+        redsea_markers=args.redsea_markers,
+        redsea_checker=args.redsea_checker,
     )
 
     return 0

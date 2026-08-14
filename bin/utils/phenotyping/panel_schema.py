@@ -8,7 +8,26 @@ import yaml
 
 COMPARTMENT_MAP = {"nuclear": "Nucleus", "cytoplasm": "Cytoplasm", "cell": "Cell"}
 DEFAULT_STAT = {"Nucleus": "Median", "Cytoplasm": "Mean", "Cell": "Mean"}
-VALID_STATS = {"Mean", "Median", "Sum"}
+# DERIVED, never re-declared. This used to be a literal
+# ``{"Mean", "Median", "Sum"}`` -- a second, independent copy of the statistic
+# vocabulary that ``bin/utils/measurements.py`` already owns. The two silently
+# diverged the moment REDSEA added its compensated statistics: a panel asking for
+# ``statistic: "REDSEA Sum"`` names a column ``quantify.py`` really does emit, and
+# this validator rejected it with "statistic must be Mean|Median|Sum".
+#
+# The dual import is not defensiveness -- this module is genuinely imported under
+# two different package roots. ``bin/compile_panel.py`` puts ``bin/utils`` on
+# sys.path and imports ``phenotyping.panel_schema`` (so ``measurements`` is
+# top-level); ``tests/conftest.py`` puts ``bin`` on sys.path and imports
+# ``utils.phenotyping.panel_schema`` (so it is ``utils.measurements``). A relative
+# ``from ..measurements import`` works only in the second and raises "attempted
+# relative import beyond top-level package" in the first.
+try:  # bin/utils on sys.path (bin/compile_panel.py, bin/phenotype_cells.py)
+    from measurements import STATISTICS
+except ImportError:  # bin on sys.path (tests/conftest.py)
+    from utils.measurements import STATISTICS
+
+VALID_STATS = set(STATISTICS)
 EXPANDED_STATS = {"Mean", "Sum"}  # produced only with quantify --expanded (default-on)
 VALID_ROLES = {"lineage", "state"}
 VALID_RATES = {"never", "rare", "soft"}
@@ -123,7 +142,8 @@ def typecheck(panel: Panel) -> None:
             )
         if mk.statistic not in VALID_STATS:
             raise PanelError(
-                f"marker {name}: statistic must be Mean|Median|Sum, got {mk.statistic!r}"
+                f"marker {name}: statistic must be one of "
+                f"{'|'.join(sorted(VALID_STATS))}, got {mk.statistic!r}"
             )
     for c in panel.exclusive:
         if c.rate not in VALID_RATES:
