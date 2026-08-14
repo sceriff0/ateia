@@ -22,21 +22,17 @@ process TILED_REG_TILE {
 
     script:
     def prefix     = "${meta.patient_id}_${meta.channels.join('_')}_${row.ix}_${row.iy}"
-    // Resolve the nuclear/fiducial channel the transform is estimated from, the same
-    // way SEGMENT's CellSAM backend does (lib/SegBackends.groovy): from THIS slide's
-    // channel metadata against params.nuclear_markers. params.reg_tiled_nuclear_index
-    // is an explicit override, not the source of truth -- the old fixed param restated
-    // an invariant CONVERT_IMAGE already guarantees, and named it after one marker, so
-    // a CELLTOX panel was read through something called "the DAPI index".
-    def nuclear_index = params.reg_tiled_nuclear_index != null
-        ? params.reg_tiled_nuclear_index
-        : MarkerUtils.nuclearIndex(meta.channels ?: [], params.nuclear_markers)
-    if (nuclear_index < 0)
-        throw new IllegalArgumentException(
-            "${task.process}: no nuclear/fiducial channel among ${meta.channels} for " +
-            "patient ${meta.patient_id}. Configured nuclear_markers: " +
-            "${MarkerUtils.markerList(params.nuclear_markers).join(', ')}. " +
-            "Set params.reg_tiled_nuclear_index to override.")
+    // Resolved the same way SEGMENT's CellSAM backend does (lib/SegBackends.groovy): from
+    // THIS slide's channel metadata against params.nuclear_markers, with
+    // params.reg_tiled_nuclear_index as an explicit override rather than the source of
+    // truth. TILED_COARSE and TILED_REG_TILE must resolve the SAME index for a slide, so
+    // the rule lives in MarkerUtils, not in fifteen duplicated lines per module.
+    def nuclear_index = MarkerUtils.requireNuclearIndex(
+        params.reg_tiled_nuclear_index,
+        meta.channels,
+        params.nuclear_markers,
+        task.process,
+        meta.patient_id)
     def upsample   = params.reg_tiled_upsample
     """
     tiled_reg_tile.py \\
@@ -44,8 +40,7 @@ process TILED_REG_TILE {
         --moving ${moving} \\
         --m0 ${m0} \\
         --nuclear-index ${nuclear_index} \\
-        --ix ${row.ix} --iy ${row.iy} --cx ${row.cx} --cy ${row.cy} \\
-        --rx0 ${row.rx0} --ry0 ${row.ry0} --rx1 ${row.rx1} --ry1 ${row.ry1} \\
+        ${TilePlan.regTileArgs(row)} \\
         --upsample ${upsample} \\
         --out ${prefix}_ctrl.json
 

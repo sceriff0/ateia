@@ -27,7 +27,6 @@ residual approaches ``--halo``.
 from __future__ import annotations
 
 import argparse
-import csv
 import json
 import os
 import sys
@@ -44,7 +43,7 @@ sys.path.insert(0, str(Path(__file__).parent / "utils"))
 import numpy as np  # noqa: E402
 from coarse_align import estimate_rigid, scale_transform_to_full_res  # noqa: E402
 from logger import configure_logging, get_logger  # noqa: E402
-from tile_grid import tile_grid  # noqa: E402
+from tile_grid import tile_grid, write_tile_plan  # noqa: E402
 from tiled_io import (  # noqa: E402
     band_rows_for,
     decimation_factor,
@@ -204,13 +203,9 @@ def main(argv=None) -> int:
         )
 
     tiles = tile_grid(w, h, a.tile, a.halo)
-    with open(a.out_tiles, "w", newline="") as f:
-        wr = csv.writer(f)
-        wr.writerow(
-            ["ix", "iy", "cx", "cy", "x0", "y0", "x1", "y1", "rx0", "ry0", "rx1", "ry1"]
-        )
-        for t in tiles:
-            wr.writerow([t.ix, t.iy, t.cx, t.cy, *t.core, *t.read])
+    # Schema owner is tile_grid.TILE_PLAN_COLUMNS (Groovy counterpart: lib/TilePlan.groovy);
+    # spelling the header out here is what let the stub and the consumer drift.
+    write_tile_plan(a.out_tiles, tiles)
 
     # The tile count IS the downstream fan-out width: TILED_REG_TILE runs once per row here,
     # so this number is what a reader needs to size the rest of the patient's registration.

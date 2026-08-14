@@ -79,6 +79,60 @@ workflow {
     assert MarkerUtils.splitOutputChannels(['DAPI', 'CD3'], true,  ['DAPI']) == ['DAPI', 'CD3']
     assert MarkerUtils.splitOutputChannels(['DAPI', 'CD3'], false, ['DAPI']) == ['CD3']
 
+    // requireNuclearIndex — the rule TILED_COARSE and TILED_REG_TILE now share instead of
+    // carrying fifteen byte-identical lines each. Both processes MUST resolve the same
+    // index for a slide: COARSE fits M0 on that channel and REG_TILE measures each tile's
+    // residual on it, so a drift between the two copies registered against the wrong marker
+    // without failing.
+    assert MarkerUtils.requireNuclearIndex(null, ['CD3', 'CELLTOX'], ['DAPI', 'CELLTOX'], 'P', 'p1') == 1
+    // an explicit override wins over what metadata would resolve to...
+    assert MarkerUtils.requireNuclearIndex(0, ['CD3', 'CELLTOX'], ['DAPI', 'CELLTOX'], 'P', 'p1') == 0
+    // ...and 0 is a real override, not "unset" — the null check must not be a truthiness check.
+    assert MarkerUtils.requireNuclearIndex(0, ['CD3', 'CD8'], ['DAPI'], 'P', 'p1') == 0
+
+    def noNuclear = false
+    try { MarkerUtils.requireNuclearIndex(null, ['CD3', 'CD8'], ['DAPI'], 'TILED_COARSE', 'p9') }
+    catch (IllegalArgumentException e) {
+        noNuclear = true
+        // the message must still name the process, the slide and the configured markers
+        assert e.message.contains('TILED_COARSE')
+        assert e.message.contains('p9')
+        assert e.message.contains('DAPI')
+    }
+    assert noNuclear, 'requireNuclearIndex must throw when no channel is nuclear'
+
+    // A negative EXPLICIT override is an operator error, not a request to fall back.
+    def badOverride = false
+    try { MarkerUtils.requireNuclearIndex(-1, ['DAPI', 'CD3'], ['DAPI'], 'P', 'p1') }
+    catch (IllegalArgumentException ignored) { badOverride = true }
+    assert badOverride, 'a negative --reg_tiled_nuclear_index must throw'
+
+    // ------------------------------------------------------------------ //
+    // TilePlan — the tile-plan CSV schema, one owner
+    // ------------------------------------------------------------------ //
+    assert TilePlan.header() == 'ix,iy,cx,cy,x0,y0,x1,y1,rx0,ry0,rx1,ry1'
+    assert TilePlan.REG_TILE_COLUMNS.every { it in TilePlan.COLUMNS }
+    // The stub row must carry EVERY column, in COLUMNS order — a short row is a stub
+    // publishing a CSV shape the real TILED_COARSE never writes.
+    assert TilePlan.row(TilePlan.STUB_TILE) == '0,0,8,8,0,0,16,16,0,0,16,16'
+    assert TilePlan.row(TilePlan.STUB_TILE).split(',').size() == TilePlan.COLUMNS.size()
+
+    // A column name IS a flag name: this is the exact string TILED_REG_TILE renders.
+    assert TilePlan.regTileArgs(TilePlan.STUB_TILE) ==
+        '--ix 0 --iy 0 --cx 8 --cy 8 --rx0 0 --ry0 0 --rx1 16 --ry1 16'
+
+    // A row missing a column must throw rather than render `--rx0 null`, which
+    // bin/tiled_reg_tile.py would reject only after the container had started.
+    def shortRow = false
+    try { TilePlan.regTileArgs([ix: 0, iy: 0, cx: 8, cy: 8]) }
+    catch (IllegalArgumentException ignored) { shortRow = true }
+    assert shortRow, 'regTileArgs must throw on a row missing a consumed column'
+
+    def shortPlanRow = false
+    try { TilePlan.row([ix: 0, iy: 0]) }
+    catch (IllegalArgumentException ignored) { shortPlanRow = true }
+    assert shortPlanRow, 'TilePlan.row must throw on a row missing a column'
+
     // ------------------------------------------------------------------ //
     // ParamUtils — the step vocabulary
     // ------------------------------------------------------------------ //
