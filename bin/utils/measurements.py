@@ -50,7 +50,21 @@ MORPHOLOGY_COLS: tuple = (
 # The measurement-key grammar shared with QuPath/FlowPath:
 # "<marker>: <Compartment>: <Statistic>".
 COMPARTMENTS: tuple = ("Nucleus", "Cytoplasm", "Cell")
-STATISTICS: tuple = ("Median", "Mean", "Sum")
+
+# REDSEA-compensated statistics (bin/utils/redsea.py). Whole-cell only, and
+# Sum/Mean only: the compensation subtracts a fraction of a neighbour's
+# INTEGRATED boundary counts, so it is defined on sums and has no median
+# analogue, and it is a whole-cell membrane correction with no
+# nucleus/cytoplasm decomposition.
+#
+# ADDITIVE, and that is the whole reason it is safe under the G5 contract with
+# qupath-extension-flowpath: no existing key changes, FlowPath's statistic
+# selector still defaults to Median, and a consumer that does not know these
+# names simply does not select them. `parse_measurement_key` stays unambiguous
+# because "X: Cell: REDSEA Sum" does not end with ": Cell: Sum".
+REDSEA_STATISTICS: tuple = ("REDSEA Sum", "REDSEA Mean")
+
+STATISTICS: tuple = ("Median", "Mean", "Sum") + REDSEA_STATISTICS
 
 
 def measurement_key(marker: str, compartment: str, statistic: str) -> str:

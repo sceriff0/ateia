@@ -20,7 +20,11 @@ nextflow_process {
                     [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA'], id: 'P001_DAPI', channel_name: 'DAPI'],
                     file('$projectDir/tests/testdata/sample_DAPI.tif', checkIfExists: true),
                     file('$projectDir/tests/testdata/P001_cell_mask.npy', checkIfExists: true),
-                    file('$projectDir/tests/testdata/P001_cell_mask.tif', checkIfExists: true)
+                    file('$projectDir/tests/testdata/P001_cell_mask.tif', checkIfExists: true),
+                    // 5th slot: the REDSEA geometry. Always present so QUANTIFY has ONE
+                    // input arity regardless of --redsea; assets/NO_REDSEA is the
+                    // placeholder the module gates on by filename.
+                    file('$projectDir/assets/NO_REDSEA', checkIfExists: true)
                 ]
                 """
             }
@@ -51,7 +55,11 @@ nextflow_process {
                     [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA'], id: 'P001_DAPI', channel_name: 'DAPI'],
                     file('$projectDir/tests/testdata/sample_DAPI.tif', checkIfExists: true),
                     file('$projectDir/tests/testdata/P001_cell_mask.npy', checkIfExists: true),
-                    file('$projectDir/tests/testdata/P001_cell_mask.tif', checkIfExists: true)
+                    file('$projectDir/tests/testdata/P001_cell_mask.tif', checkIfExists: true),
+                    // 5th slot: the REDSEA geometry. Always present so QUANTIFY has ONE
+                    // input arity regardless of --redsea; assets/NO_REDSEA is the
+                    // placeholder the module gates on by filename.
+                    file('$projectDir/assets/NO_REDSEA', checkIfExists: true)
                 ]
                 """
             }
@@ -96,7 +104,11 @@ nextflow_process {
                     [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA'], id: 'P001_DAPI', channel_name: 'DAPI'],
                     file('$projectDir/tests/testdata/sample_DAPI.tif', checkIfExists: true),
                     file('$projectDir/tests/testdata/P001_cell_mask.npy', checkIfExists: true),
-                    file('$projectDir/tests/testdata/P001_cell_mask.tif', checkIfExists: true)
+                    file('$projectDir/tests/testdata/P001_cell_mask.tif', checkIfExists: true),
+                    // 5th slot: the REDSEA geometry. Always present so QUANTIFY has ONE
+                    // input arity regardless of --redsea; assets/NO_REDSEA is the
+                    // placeholder the module gates on by filename.
+                    file('$projectDir/assets/NO_REDSEA', checkIfExists: true)
                 ]
                 """
             }
@@ -133,6 +145,86 @@ nextflow_process {
                         assert label > 0, "Label must be > 0 (background excluded)"
                     }
                 }
+            )
+        }
+    }
+
+    test("Should NOT pass --redsea-geometry when handed the NO_REDSEA placeholder - rendered command") {
+
+        // Tagged `stub` so CI's blocking `nf-test test --tag stub` gate runs it, but
+        // deliberately WITHOUT `options "-stub"`: `-stub` never evaluates a `script:`
+        // block, and the REDSEA gate lives entirely in `script:`. A stub run cannot
+        // observe this at all -- it would pass whatever the gate did.
+        //
+        // This is the assertion with teeth. The gate is `redsea_npz.name == 'NO_REDSEA'`,
+        // so a rename of assets/NO_REDSEA, or a change to how the placeholder is staged,
+        // silently starts passing a text file to --redsea-geometry and every marker of
+        // every REDSEA-disabled run fails inside numpy. That failure is then eligible for
+        // conf/modules.config's errorStrategy 'ignore' branch.
+        tag "stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA'], id: 'P001_DAPI', channel_name: 'DAPI'],
+                    file('$projectDir/tests/testdata/sample_DAPI.tif', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_cell_mask.npy', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_cell_mask.tif', checkIfExists: true),
+                    file('$projectDir/assets/NO_REDSEA', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            def rendered = []
+            new File("$workDir").eachFileRecurse { f ->
+                if (f.name == '.command.sh' && f.text.contains('quantify.py')) {
+                    rendered << f.text
+                }
+            }
+            assertAll(
+                { assert rendered.size() >= 1,
+                    "no rendered QUANTIFY .command.sh found under the task work dir" },
+                { assert rendered.every { !it.contains('--redsea-geometry') },
+                    "REDSEA disabled, but the placeholder was passed as a geometry: " + rendered.join(' --- ') }
+            )
+        }
+    }
+
+    test("Should pass --redsea-geometry when handed a real geometry file - rendered command") {
+
+        // The other half of the gate. Both halves are needed: an assertion that only
+        // checks the disabled case is satisfied by a gate that is hard-wired off.
+        tag "stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA'], id: 'P001_CD3', channel_name: 'CD3'],
+                    file('$projectDir/tests/testdata/sample_DAPI.tif', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_cell_mask.npy', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_cell_mask.tif', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_redsea.npz', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            def rendered = []
+            new File("$workDir").eachFileRecurse { f ->
+                if (f.name == '.command.sh' && f.text.contains('quantify.py')) {
+                    rendered << f.text
+                }
+            }
+            assertAll(
+                { assert rendered.size() >= 1,
+                    "no rendered QUANTIFY .command.sh found under the task work dir" },
+                { assert rendered.every { it.contains('--redsea-geometry P001_redsea.npz') },
+                    "a real geometry was staged but not passed through: " + rendered.join(' --- ') }
             )
         }
     }

@@ -250,6 +250,63 @@ ARGPARSE_DEFAULT_ALLOWLIST = {
             "is coincidental."
         ),
     },
+    "warp_seg_qc.py:--pixel-size-um": {
+        "reason": (
+            "default=None is a real fallback, and the flag->param mapping that "
+            "makes it visible here is not this script's. conf/modules.config's "
+            "WARP_SEG_QC block does NOT pass --pixel-size-um at all; the flag "
+            "became resolvable only when REDSEA_MATRIX's ext.args introduced "
+            "`--pixel-size-um ${params.pixel_size}`, and the flag-only map is "
+            "global rather than per-script, so the mapping was attributed here "
+            "too. The script's own help text states the contract -- 'physical "
+            "pixel size; default = read from the slide metadata' -- which is the "
+            "same shape as segment_instantseg.py's --pixel-size below: reading it "
+            "from the image is strictly better than assuming 0.325, and mirroring "
+            "the config default here would be a second declaration of it."
+        ),
+    },
+    "redsea_matrix.py:--pixel-size-um": {
+        "reason": (
+            "Advisory only, and default=None is what turns the advice OFF. This "
+            "flag feeds nothing but the 'recommended_element_size' line in the "
+            "per-patient REDSEA QC JSON -- the band depth actually used comes "
+            "from --element-size or from calibration against the mask. With no "
+            "value the line is simply omitted, which is the right behaviour for "
+            "standalone invocation. conf/modules.config always passes "
+            "${params.pixel_size}, so the default is never reached in-pipeline; "
+            "hardcoding 0.325 here would be a second declaration of it."
+        ),
+    },
+    "redsea_matrix.py:--cell-diameter-um": {
+        "reason": (
+            "Same contract as this script's --pixel-size-um above: advisory only, "
+            "feeding the QC JSON's 'recommended_element_size' line and nothing "
+            "else. default=None omits the line. conf/modules.config always passes "
+            "${params.redsea_cell_diameter_um}."
+        ),
+    },
+    "redsea_matrix.py:--outdir": {
+        "reason": (
+            "Same non-correspondence as quantify.py's and "
+            "extract_cell_properties.py's --outdir: modules/local/redsea_matrix.nf "
+            "hardcodes `--outdir .` (a literal, not `${params.outdir}`) because "
+            "Nextflow already isolates each task in its own work dir and "
+            "publishDir copies the results out. The name-equality match to the "
+            "top-level `outdir` param is coincidental."
+        ),
+    },
+    "quantify.py:--redsea-markers": {
+        "reason": (
+            "None and [] are the same state -- 'no markers opted in' -- so there "
+            "is no drift to catch here, only a type difference between argparse "
+            "(which parses a comma string) and nextflow.config (which holds a "
+            "list). The Python side cannot hold [] as an argparse default without "
+            "changing the flag's type away from the comma string "
+            "conf/modules.config's redseaMarkerList() produces, and there is no "
+            "default membership to declare twice: REDSEA is opt-in per marker "
+            "precisely because it is only valid for surface/membrane markers."
+        ),
+    },
     "segment_instantseg.py:--pixel-size": {
         "reason": (
             "default=None is a real fallback, not a stale literal: the "

@@ -205,6 +205,40 @@ Per-cell marker intensity.
     Setting `--expanded_quantification true` without `--quantify_compartments true`
     fails at launch with a clear error.
 
+### REDSEA lateral-spillover compensation
+
+Corrects marker signal leaking across the boundary between touching cells
+(Bai *et al.*, *Front. Immunol.* 2021;12:652631). Purely additive — it appends
+`<marker>: Cell: REDSEA Sum` / `... REDSEA Mean` and changes no existing column.
+Full guide: [REDSEA compensation](redsea.md).
+
+| Parameter | Default | Description |
+|---|---|---|
+| `redsea` | `false` | Master switch. |
+| `redsea_markers` | *(empty)* | Comma-separated **surface/membrane** markers to compensate, e.g. `CD3,CD8,CD20`. Required when `redsea=true`. Matching is case-insensitive EXACT, so `CD4` never selects `CD45`. |
+| `redsea_element_size` | `null` | Boundary-band depth in pixels. `null` calibrates it from the actual segmentation mask — **the recommended setting**. |
+| `redsea_target_band_fraction` | `0.56` | Calibration target: the fraction of cell area the band should cover. `0.56` is where both of the paper's own calibration points land. |
+| `redsea_element_shape` | `disk` | Band metric. `disk` = Euclidean; `square`/`diamond` reproduce the original's `strel('square')`/`strel('diamond')`. |
+| `redsea_checker` | `1` | `REDSEAChecker`: `1` = subtract and reinforce (paper default), `0` = subtract only. |
+| `redsea_cell_diameter_um` | `20.0` | Advisory only — feeds the `recommended_element_size` line in the per-patient QC JSON. |
+
+!!! danger "Validation rule"
+    `--redsea true` with an empty `--redsea_markers` fails at launch. It would
+    otherwise compute the compensation geometry for every patient and compensate
+    nothing, producing output identical to `--redsea false` with no error anywhere.
+
+!!! warning "Do not port `elementSize = 2` from the paper"
+    The published value is calibrated for MIBI's 0.781 µm/px on ~9 µm cells. At
+    this pipeline's 0.325 µm/px with ~20 µm cells the equivalent is ~11 px by the
+    paper's proportional rule, and ~7 px once real (non-disk) cell shape is
+    measured. Leave `redsea_element_size` unset and check
+    `band_fraction_mean` in `<outdir>/<patient>/quantify/<patient>_redsea_qc.json`.
+
+!!! note "Compensated sums are on their own scale"
+    With `redsea_checker=1` each cell is handed back the boundary signal it
+    donated, so a positive cell's compensated sum is typically larger than its raw
+    sum. Compare compensated to compensated.
+
 ## Visualization & export
 
 Pyramidal OME-TIFF assembly and GeoJSON.

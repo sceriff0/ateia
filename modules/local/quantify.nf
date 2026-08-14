@@ -13,7 +13,7 @@ process QUANTIFY {
     container "bolt3x/attend_image_analysis:quantification_gpu"
 
     input:
-    tuple val(meta), path(channel_tiff), path(cell_mask), path(nuclei_mask)
+    tuple val(meta), path(channel_tiff), path(cell_mask), path(nuclei_mask), path(redsea_npz)
 
     output:
     tuple val(meta), path("${meta.id}_quant.csv"), emit: individual_csv
@@ -31,6 +31,13 @@ process QUANTIFY {
     // The mask path is only available here (not in modules.config ext.args), so the
     // toggle is read from params; the --expanded flag arrives via ext.args.
     def nuclei_arg = params.quantify_compartments ? "--nuclei_mask_file ${nuclei_mask}" : ''
+    // REDSEA geometry is a required input so this process has ONE input arity
+    // regardless of --redsea; when the feature is off the staged file is
+    // assets/NO_REDSEA. Gating on the filename rather than on params keeps this
+    // `script:` block from growing a second `params` reference (a bare `params`
+    // here hashes the whole map -- see CLAUDE.md, "Verification reality"); the
+    // marker list and REDSEAChecker arrive through ext.args instead.
+    def redsea_arg = redsea_npz.name == 'NO_REDSEA' ? '' : "--redsea-geometry ${redsea_npz}"
     """
     # Log input sizes for tracing (sum of channel_tiff + cell_mask, -L follows symlinks)
     tiff_bytes=\$(stat -L --printf="%s" ${channel_tiff} 2>/dev/null || echo 0)
@@ -49,6 +56,7 @@ process QUANTIFY {
         ${nuclei_arg} \\
         --outdir . \\
         --output_file ${meta.id}_quant.csv \\
+        ${redsea_arg} \\
         ${args}
 
     ${ProcessEnvelope.versions(task.process, ['pandas', 'skimage'])}

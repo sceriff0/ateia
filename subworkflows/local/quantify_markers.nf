@@ -26,6 +26,7 @@
 */
 
 include { QUANTIFY } from '../../modules/local/quantify'
+include { REDSEA_MATRIX } from '../../modules/local/redsea_matrix'
 
 // The pipeline's only --debug_channels view helper. It used to be duplicated in
 // postprocess.nf; that copy went with the chain its `.view()` calls annotate, so there
@@ -130,13 +131,66 @@ workflow QUANTIFY_MARKERS {
         { patient_id, _cell, _nuc -> "Masks available: key=${patient_id}, cell=${_cell.name}, nuclei=${_nuc.name}" }
     )
 
+    // ========================================================================
+    // REDSEA - lateral spillover compensation geometry (once per patient)
+    // ========================================================================
+    // `params.redsea` is read HERE and only here, the same seam
+    // registration.nf gives --registration_method: one subworkflow owns the
+    // decision and everything downstream takes the result as data. Neither
+    // caller (postprocess.nf, add_cycle.nf) knows REDSEA exists, and both get it,
+    // because both already hand this subworkflow the masks it needs.
+    //
+    // REDSEA (Bai et al., Front. Immunol. 2021;12:652631) splits into a
+    // mask-only part and a channel-only part; that split is the whole reason it
+    // fits here rather than as a new stage. The mask part is one pass per
+    // patient (REDSEA_MATRIX); the channel part is a sparse mat-vec that rides
+    // along inside the per-marker QUANTIFY fan-out below, so turning REDSEA on
+    // adds no serialisation and no extra fan-out.
+    //
+    // The geometry is a REQUIRED input of QUANTIFY, not an optional one. A
+    // conditional input arity would make QUANTIFY two different processes
+    // depending on a param -- so when REDSEA is off every task is handed
+    // assets/NO_REDSEA and modules/local/quantify.nf tests for that name. The
+    // placeholder is a few bytes and stages once per task.
+    def redsea_enabled = params.redsea
+    ch_cell_mask_only = ch_masks_viewed.map { patient_id, cell_mask, _nuclei ->
+        [[id: patient_id.toString(), patient_id: patient_id.toString()], cell_mask]
+    }
+
+    // REDSEA_MATRIX.out.qc is deliberately NOT re-emitted from this subworkflow.
+    // It reaches the user through conf/modules.config's publishDir, at
+    // <outdir>/<patient>/quantify/<patient>_redsea_qc.json. Routing it into
+    // FINAL_QC's aggregated report would need a new ParamUtils.STEPS qcKind AND a
+    // new positional input on GENERATE_QC_REPORT; an emit added now against that
+    // future would be an unconsumed channel, which is the "keep it just in case"
+    // this repo deletes rather than keeps.
+    if (redsea_enabled) {
+        REDSEA_MATRIX(ch_cell_mask_only)
+        ch_redsea = REDSEA_MATRIX.out.geometry.map { meta, npz -> [meta.patient_id, npz] }
+        ch_redsea_versions = REDSEA_MATRIX.out.versions.first()
+        ch_redsea_sizes = REDSEA_MATRIX.out.size_log
+    }
+    else {
+        // Null object, the same convention the registration adapters use for an
+        // absent TRE: the downstream consumer tolerates the absence rather than
+        // the producer being made conditional.
+        ch_redsea = ch_cell_mask_only.map { meta, _cell ->
+            [meta.patient_id, file("${projectDir}/assets/NO_REDSEA", checkIfExists: true)]
+        }
+        ch_redsea_versions = Channel.empty()
+        ch_redsea_sizes = Channel.empty()
+    }
+
     // combine(by: 0), not join: one mask pair fans out over the patient's N markers.
     ch_for_quant = ch_for_combine
         .combine(ch_masks_viewed, by: 0)
-        .map { _patient_id, meta, tiff, cell_mask, nuclei_mask -> [meta, tiff, cell_mask, nuclei_mask] }
+        .combine(ch_redsea, by: 0)
+        .map { _patient_id, meta, tiff, cell_mask, nuclei_mask, redsea_npz ->
+            [meta, tiff, cell_mask, nuclei_mask, redsea_npz]
+        }
     ch_for_quant = viewIfDebug(
         ch_for_quant,
-        { meta, _tiff, _cell, _nuc -> "After combine: patient=${meta.patient_id}, channel=${meta.channel_name}" }
+        { meta, _tiff, _cell, _nuc, _rs -> "After combine: patient=${meta.patient_id}, channel=${meta.channel_name}" }
     )
 
     QUANTIFY(ch_for_quant)
@@ -225,11 +279,11 @@ workflow QUANTIFY_MARKERS {
     emit:
     // [meta, [per-marker quant csvs]] — one entry per patient.
     grouped_csv = ch_grouped_csvs
-    size_logs   = QUANTIFY.out.size_log
+    size_logs   = QUANTIFY.out.size_log.mix(ch_redsea_sizes)
     // `.first()` is applied HERE, inside the subworkflow, matching seg_qc.nf:112 and
     // adapters/valis_adapter.nf:151 — NOT the call-site style postprocess.nf:420-442
     // uses for its own inline processes. registration.nf:309 documents that
     // asymmetry; every new subworkflow de-duplicates its own versions so callers
     // never have to know which convention a given emit follows.
-    versions    = QUANTIFY.out.versions.first()
+    versions    = QUANTIFY.out.versions.first().mix(ch_redsea_versions)
 }

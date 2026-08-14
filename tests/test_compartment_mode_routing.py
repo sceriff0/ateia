@@ -128,10 +128,12 @@ ALLOWED_LINES = {
         # added anywhere in it. The cost is that unrelated edits above this line move
         # it -- 718 -> 722 when the reg_qc=2 QC stopped segmenting for itself and
         # SEG_QC_GEOJSON's block shrank; 722 -> 727 when feat/lsa-cell-pairing's
-        # rewritten WARP_SEG_QC ext.args comment added 5 net lines above it. Re-pin,
+        # rewritten WARP_SEG_QC ext.args comment added 5 net lines above it;
+        # 727 -> 786 when REDSEA added redseaMarkerList() near the top of the file
+        # and a REDSEA_MATRIX withName: block above QUANTIFY's. Re-pin,
         # do not widen. (Re-pin from the file, not by guessing:
         # `grep -n "params.expanded_quantification ?" conf/modules.config`.)
-        727: (
+        786: (
             "ext.args = { params.expanded_quantification ? '--expanded' : "
             "'' } -- conf/*.config closures cannot see lib/*.groovy classes, "
             "so ext.args must read params raw here."
