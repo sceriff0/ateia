@@ -222,6 +222,35 @@ def create_segmentation_mask(filename, size=(128, 128), n_cells=15):
 create_segmentation_mask(OUT_DIR / "P001_cell_mask.npy", n_cells=20)
 create_segmentation_mask(OUT_DIR / "P002_cell_mask.npy", n_cells=15)
 
+
+def create_redsea_geometry(mask_path, out_npz, element_size=2):
+    """REDSEA compensation geometry for a fixture mask.
+
+    Generated rather than committed, for the same reason the masks are: it is a
+    derived binary. tests/modules/quantify.nf.test stages this to prove QUANTIFY
+    passes --redsea-geometry through when handed a REAL geometry -- the other half
+    of the assets/NO_REDSEA gate, which a placeholder-only test cannot distinguish
+    from a gate hard-wired off.
+    """
+    import sys
+
+    bin_dir = OUT_DIR.parents[1] / "bin"
+    sys.path.insert(0, str(bin_dir / "utils"))
+    sys.path.insert(0, str(bin_dir))
+    from redsea import redsea_geometry
+    from redsea_matrix import save_geometry
+
+    mask = np.load(mask_path).squeeze()
+    geom = redsea_geometry(mask, element_size=element_size)
+    save_geometry(geom, out_npz)
+    print(
+        f"  Created {out_npz.name} - {geom.labels.size} cells, "
+        f"band fraction {geom.band_fraction.mean():.2f}"
+    )
+
+
+create_redsea_geometry(OUT_DIR / "P001_cell_mask.npy", OUT_DIR / "P001_redsea.npz")
+
 # =============================================================================
 # 3. Generate valid input CSVs for each pipeline entry point
 # =============================================================================
@@ -512,6 +541,7 @@ print("\nValid data:")
 print("  - P001_ref.ome.tiff, P001_mov1.ome.tiff, P001_mov2.ome.tiff")
 print("  - P002_ref.ome.tiff, P002_mov1.ome.tiff")
 print("  - P001_cell_mask.npy, P002_cell_mask.npy")
+print("  - P001_redsea.npz (REDSEA compensation geometry)")
 print("  - valid_preprocessing.csv")
 print("  - valid_checkpoint_registration.csv")
 print("  - valid_checkpoint_segmented.csv")
@@ -578,6 +608,7 @@ print("\nValid data:")
 print("  - P001_ref.ome.tiff, P001_mov1.ome.tiff, P001_mov2.ome.tiff")
 print("  - P002_ref.ome.tiff, P002_mov1.ome.tiff")
 print("  - P001_cell_mask.npy, P002_cell_mask.npy")
+print("  - P001_redsea.npz (REDSEA compensation geometry)")
 print("  - valid_preprocessing.csv")
 print("  - valid_checkpoint_registration.csv")
 print("  - valid_checkpoint_segmented.csv")
@@ -598,7 +629,7 @@ print("  - sample_DAPI.tif, sample_PANCK.tif, sample_SMA.tif")
 print("  - sample_channels.txt")
 # =============================================================================
 # 7. Fixtures for updated postprocessing: EXTRACT_CELL_PROPERTIES, intensity-only
-#    QUANTIFY, MERGE_QUANT_CSVS with morphology
+#    QUANTIFY, MERGE_QUANT_CSVS with morphology, PHENOTYPE with contours
 # =============================================================================
 print("\n7. Creating postprocessing fixtures (updated architecture)...")
 

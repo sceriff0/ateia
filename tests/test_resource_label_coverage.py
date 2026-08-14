@@ -443,6 +443,12 @@ NUMBER_RE = re.compile(r"\d+(?:\.\d+)?")
 # `2.h`, `12.h`. Restricting the doc side to this shape keeps the CPU count and
 # the tier thresholds in neighbouring cells from being read as hours.
 HOURS_RE = re.compile(r"(\d+(?:\.\d+)?)\s*\.\s*h\b")
+# `time` is compared in HOURS on both sides. COMPILE_PANEL is the one process
+# whose config states minutes (`30.min * task.attempt`), so a minute literal is
+# normalised to hours (30.min -> 0.5) rather than being left unevaluable -- the
+# guard fails loudly on anything it cannot evaluate, so an unhandled unit would
+# have blocked the row instead of silently skipping it.
+MINUTES_RE = re.compile(r"(\d+(?:\.\d+)?)\s*\.\s*min\b")
 
 # `tiledRegTileGb(params)` -- a per-task value derived from params at submission
 # time rather than a literal. See the header above for why these are exempt from
@@ -640,7 +646,10 @@ def expr_values_per_attempt(expr: str) -> list[float] | None:
     values = []
     for attempt in ATTEMPTS:
         arithmetic = (
-            expr.replace("task.attempt", str(attempt))
+            MINUTES_RE.sub(
+                lambda m: repr(float(m.group(1)) / 60.0),
+                expr.replace("task.attempt", str(attempt)),
+            )
             .replace(".GB", "")
             .replace(".h", "")
         )
@@ -1030,7 +1039,8 @@ def test_every_documented_process_matches_conf_modules_config():
         # signature defect -- a guard that passes because it stopped looking.
         for field, documented in (
             ("cpus", _numbers(row.get("cpus", ""))),
-            ("time", {float(m.group(1)) for m in HOURS_RE.finditer(row.get("time", ""))}),
+            ("time", {float(m.group(1)) for m in HOURS_RE.finditer(row.get("time", ""))}
+                     | {float(m.group(1)) / 60.0 for m in MINUTES_RE.finditer(row.get("time", ""))}),
         ):
             exprs = effective_exprs(name, field)
             if not exprs:

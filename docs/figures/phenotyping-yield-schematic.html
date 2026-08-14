@@ -1,0 +1,773 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MIRAGE Supplementary Figure S5 — Phenotyping yield</title>
+<style>
+  /* ======================================================================
+     MIRAGE supplementary figures — shared design base (S1 · S2 · S3)
+     ----------------------------------------------------------------------
+     DUPLICATED ON PURPOSE, not extracted to a shared file. Each figure in
+     this set has to survive being detached from the repository — attached to
+     a submission, mailed, opened from file:// — so it may not reference an
+     external stylesheet, not even a sibling one. This block is therefore
+     repeated verbatim in docs/figures/pipeline-schematic.html,
+     docs/figures/registration-schematic.html and docs/figures/qc-schematic.html,
+     and is ported (with the slate counterpart the figures deliberately lack)
+     to docs/stylesheets/extra.css. Change one, change all four.
+
+     SINGLE THEME BY DESIGN: white paper, black ink. A journal figure has a
+     paper ground.
+
+     ONE FONT STACK, shared with docs/stylesheets/extra.css so the site and
+     the figures really do read as one artefact (that file's header claimed
+     they did while leading with a different family).
+
+     ONE BREAKPOINT LADDER for the whole set: 1040 · 880 · 760 · 640 · 520.
+     No figure introduces a sixth rung.
+
+     ONE SIZING SCALE: .tag/.tag-def/.tag-alt .53rem / 1px 4px · .pp span
+     .62rem / 1px 5px · table.pr td.k .7rem, td.v/td.val .68rem ·
+     .masthead h1 max-width 72ch.
+
+     OVERFLOW DISCIPLINE: every grid track is minmax(0,…) and every grid or
+     flex item carries min-width:0. Without it a track's automatic minimum is
+     min-content, so one long identifier (GENERATE_POSTPROCESSING_QC) widens
+     its column and pushes the whole grid outside the panel border instead of
+     wrapping.
+     ====================================================================== */
+  :root{
+    --paper:#ffffff; --panel:#ffffff; --sub:#f6f7f8; --sub-2:#eef0f2;
+    --ink:#0f1113; --ink-2:#3c4147; --ink-3:#767c83;
+    --rule:#c3c8cd; --rule-2:#e5e8ea; --bar:#1b1e22;
+    --serif:Georgia,"Times New Roman",Cambria,"Noto Serif",serif;
+    --sans:"Inter","Helvetica Neue",Helvetica,Arial,"Segoe UI",system-ui,sans-serif;
+    --mono:"JetBrains Mono","SF Mono",ui-monospace,Menlo,Consolas,monospace;
+    color-scheme:light;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);
+    font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased;overflow-x:hidden;}
+  .sheet{max-width:1060px;margin:0 auto;padding:40px 26px 72px;}
+
+  .masthead{border-bottom:2px solid var(--ink);padding-bottom:12px;}
+  .masthead .kick{font-size:.71rem;letter-spacing:.15em;text-transform:uppercase;color:var(--ink-3);font-weight:700;}
+  .masthead h1{font-weight:700;font-size:1.32rem;letter-spacing:-.01em;margin:.3em 0 0;max-width:72ch;line-height:1.26;text-wrap:balance;}
+  .standfirst{font-family:var(--serif);font-size:.95rem;color:var(--ink-2);margin:12px 0 30px;max-width:82ch;}
+
+  /* Figure-set navigation. Relative filenames, so the strip works both from
+     file:// on a detached copy sitting beside its siblings and from the built
+     MkDocs site, which copies docs/figures/ through verbatim. */
+  .figset{display:flex;gap:0;flex-wrap:wrap;align-items:center;margin:12px 0 0;
+    font-family:var(--mono);font-size:.63rem;letter-spacing:.05em;text-transform:uppercase;}
+  .figset a,.figset span{border:1px solid var(--rule);padding:4px 9px;margin:0 -1px 0 0;
+    color:var(--ink-2);text-decoration:none;white-space:nowrap;}
+  .figset a:hover{border-color:var(--ink);color:var(--ink);}
+  .figset .self{background:var(--ink);border-color:var(--ink);color:#fff;font-weight:700;}
+
+  .panel{position:relative;background:var(--panel);border:1px solid var(--rule);padding:20px 20px 18px;margin:0 0 20px;}
+  .panel > .plabel{position:absolute;top:-1px;left:-1px;background:var(--ink);color:#fff;font-weight:700;
+    font-size:.85rem;line-height:1;padding:6px 9px;}
+  .panel-head{margin:2px 0 16px 26px;}
+  .panel-head h2{font-size:1.02rem;font-weight:700;letter-spacing:-.01em;margin:0;}
+  .panel-head p{font-size:.85rem;color:var(--ink-2);margin:3px 0 0;max-width:84ch;}
+
+  code{font-family:var(--mono);font-size:.82em;background:var(--sub);border:1px solid var(--rule-2);border-radius:2px;padding:.5px 4px;}
+  .tbl-scroll{overflow-x:auto;}
+
+  /* parameter chips */
+  .pp{display:flex;flex-wrap:wrap;gap:4px;margin-top:7px;min-width:0;}
+  .pp span{font-family:var(--mono);font-size:.62rem;background:var(--sub);border:1px solid var(--rule-2);padding:1px 5px;
+    color:var(--ink-2);max-width:100%;min-width:0;overflow-wrap:anywhere;}
+  .pp b{color:var(--ink);font-weight:700;}
+  .tag{font-family:var(--mono);font-size:.53rem;text-transform:uppercase;letter-spacing:.04em;padding:1px 4px;
+    font-weight:700;border:1px solid var(--rule);color:var(--ink-2);background:var(--sub-2);white-space:nowrap;}
+  .tag-on{border-color:var(--ink);color:var(--ink);background:#fff;}
+  .tag-def{font-family:var(--mono);font-size:.53rem;background:var(--ink);color:#fff;padding:1px 4px;font-weight:700;white-space:nowrap;}
+  .tag-alt{font-family:var(--mono);font-size:.53rem;background:var(--sub);color:var(--ink-2);border:1px solid var(--rule);padding:1px 4px;white-space:nowrap;}
+
+  /* parameter tables (td.v in S1/S3, td.val in S2 — same scale) */
+  table.pr{border-collapse:collapse;width:100%;font-size:.78rem;}
+  table.pr td{padding:3.5px 4px;border-bottom:1px solid var(--rule-2);vertical-align:top;}
+  table.pr tr:last-child td{border-bottom:none;}
+  table.pr td.k{font-family:var(--mono);font-size:.7rem;font-weight:700;white-space:nowrap;}
+  table.pr td.v,table.pr td.val{font-family:var(--mono);font-size:.68rem;color:var(--ink-2);white-space:nowrap;
+    padding-right:8px;font-variant-numeric:tabular-nums;}
+  table.pr td.v.w{white-space:normal;overflow-wrap:anywhere;}
+  table.pr td.d{color:var(--ink-2);}
+  .nul{color:var(--ink-3);font-style:italic;}
+
+  .caption{font-family:var(--serif);font-size:.83rem;color:var(--ink-2);line-height:1.62;border-top:1px solid var(--rule);padding-top:16px;margin-top:8px;}
+  .caption b{color:var(--ink);}
+  .footnote{font-family:var(--sans);font-size:.72rem;color:var(--ink-3);margin-top:14px;display:block;}
+
+  /* a — the QC ladder across the four steps */
+  .flow{display:grid;grid-template-columns:minmax(0,1fr) 16px minmax(0,1fr) 16px minmax(0,1fr) 16px minmax(0,1fr);
+    gap:3px;align-items:start;}
+  @media(max-width:1040px){.flow{grid-template-columns:minmax(0,1fr);}}
+  .lane{border:1px solid var(--rule);min-width:0;}
+  .lane > h3{margin:0;font-family:var(--mono);font-size:.68rem;font-weight:700;letter-spacing:.03em;
+    padding:8px 9px;background:var(--bar);color:#fff;display:flex;justify-content:space-between;align-items:center;gap:5px;
+    min-width:0;overflow-wrap:anywhere;}
+  .lane > h3 span:last-child{font-weight:400;color:#c7cacd;white-space:nowrap;flex:none;}
+  .lane .body{padding:9px;display:flex;flex-direction:column;gap:8px;background:var(--sub);min-width:0;}
+  .mod{background:var(--panel);border:1px solid var(--rule);border-left:2.5px solid var(--ink);padding:8px 9px;min-width:0;}
+  .mod.off{border-left-style:dashed;border-left-color:var(--ink-3);background:var(--sub-2);}
+  .mod .n{font-family:var(--mono);font-weight:700;font-size:.71rem;display:flex;flex-wrap:wrap;gap:5px;align-items:center;
+    min-width:0;overflow-wrap:anywhere;}
+  .mod .x{font-size:.75rem;color:var(--ink-2);margin-top:4px;overflow-wrap:anywhere;}
+  .kind{font-family:var(--mono);font-size:.6rem;color:var(--ink-2);border:1px dashed var(--rule);padding:5px 7px;
+    background:var(--panel);min-width:0;overflow-wrap:anywhere;}
+  .kind b{color:var(--ink);}
+  .arrow{display:flex;align-items:center;justify-content:center;padding-top:40px;color:var(--ink-3);font-size:1rem;}
+  @media(max-width:1040px){.arrow{padding:2px;transform:rotate(90deg);}}
+  .after{display:flex;gap:12px;flex-wrap:wrap;margin-top:14px;}
+  .after .mod{flex:1 1 260px;min-width:0;}
+
+  /* b — the tagged-stream seam */
+  .seam{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;align-items:start;}
+  @media(max-width:880px){.seam{grid-template-columns:minmax(0,1fr);}}
+  .seam > div{min-width:0;}
+  .sig{border:1px solid var(--rule);background:var(--sub);padding:10px 12px;font-family:var(--mono);
+    font-size:.72rem;color:var(--ink);overflow-x:auto;}
+  .sig .cm{color:var(--ink-3);}
+  .guards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:14px;}
+  @media(max-width:880px){.guards{grid-template-columns:minmax(0,1fr);}}
+  .gd{border:1px solid var(--rule);border-top:2.5px solid var(--ink);background:var(--panel);padding:10px 11px;min-width:0;}
+  .gd .h{font-family:var(--mono);font-weight:700;font-size:.68rem;overflow-wrap:anywhere;}
+  .gd .src{font-family:var(--mono);font-size:.58rem;color:var(--ink-3);margin-top:2px;}
+  .gd .x{font-size:.76rem;color:var(--ink-2);margin-top:6px;}
+  .gd .x b{color:var(--ink);}
+
+  /* c — ownership map */
+  table.own{border-collapse:collapse;width:100%;font-size:.76rem;}
+  table.own th{text-align:left;font-weight:700;font-size:.78rem;color:var(--ink);border-bottom:1.5px solid var(--ink);
+    padding:6px 9px;vertical-align:bottom;}
+  table.own td{padding:6px 9px;border-bottom:1px solid var(--rule-2);vertical-align:top;color:var(--ink-2);}
+  table.own tr:last-child td{border-bottom:none;}
+  table.own td.st{font-family:var(--mono);font-size:.68rem;font-weight:700;color:var(--ink);white-space:nowrap;}
+  table.own td.kd{font-family:var(--mono);font-size:.66rem;color:var(--ink);}
+  table.own tr.univ td{background:var(--sub);}
+  table.own tr.none td.kd{color:var(--ink-3);font-style:italic;}
+
+  /* d — renderers */
+  .rend{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;}
+  @media(max-width:880px){.rend{grid-template-columns:minmax(0,1fr);}}
+  .rn{border:1px solid var(--rule);border-top:2.5px solid var(--ink);background:var(--panel);padding:11px 12px;min-width:0;}
+  .rn h4{margin:0;font-family:var(--mono);font-size:.7rem;font-weight:700;overflow-wrap:anywhere;}
+  .rn .gate{font-family:var(--mono);font-size:.58rem;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-3);margin-top:3px;}
+  .rn .x{font-size:.76rem;color:var(--ink-2);margin:7px 0 0;}
+  .rn dl{margin:8px 0 0;font-size:.72rem;}
+  .rn dt{font-family:var(--mono);font-size:.57rem;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-3);margin-top:6px;}
+  .rn dd{margin:1px 0 0;font-family:var(--mono);font-size:.63rem;color:var(--ink-2);overflow-wrap:anywhere;}
+
+  /* e — SEG_QC chain */
+  .chain{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;}
+  @media(max-width:880px){.chain{grid-template-columns:minmax(0,1fr);}}
+  .ch{border:1px solid var(--rule);background:var(--panel);padding:10px 11px;min-width:0;position:relative;}
+  .ch .num{font-family:var(--mono);font-size:.58rem;background:var(--ink);color:#fff;padding:1px 5px;}
+  .ch .nm{font-family:var(--mono);font-weight:700;font-size:.7rem;margin-top:5px;overflow-wrap:anywhere;}
+  .ch .x{font-size:.76rem;color:var(--ink-2);margin-top:5px;}
+  .ch .res{font-family:var(--mono);font-size:.6rem;color:var(--ink-2);margin-top:7px;border-top:1px solid var(--rule-2);padding-top:5px;overflow-wrap:anywhere;}
+  .ch .res b{color:var(--ink);}
+  .callout{border-left:3px solid var(--ink);background:var(--sub);padding:9px 12px;font-size:.8rem;color:var(--ink-2);margin:13px 0 0;}
+  .callout b{color:var(--ink);}
+  table.bk{border-collapse:collapse;width:100%;font-size:.75rem;margin-top:13px;}
+  table.bk th{text-align:left;font-weight:700;font-size:.78rem;color:var(--ink);border-bottom:1.5px solid var(--ink);padding:6px 9px;}
+  table.bk th:first-child{width:130px;}
+  table.bk td{padding:6px 9px;border-bottom:1px solid var(--rule-2);vertical-align:top;color:var(--ink-2);}
+  table.bk tr:last-child td{border-bottom:none;}
+  table.bk td.rk{font-family:var(--mono);font-size:.63rem;text-transform:uppercase;letter-spacing:.04em;
+    color:var(--ink-3);font-weight:700;white-space:nowrap;}
+  table.bk b{color:var(--ink);}
+
+  /* f — aggregation */
+  .slots{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;}
+  @media(max-width:880px){.slots{grid-template-columns:repeat(2,minmax(0,1fr));}}
+  @media(max-width:520px){.slots{grid-template-columns:minmax(0,1fr);}}
+  .slot{border:1px solid var(--rule);background:var(--panel);padding:8px 9px;min-width:0;}
+  .slot .i{font-family:var(--mono);font-size:.56rem;color:var(--ink-3);}
+  .slot .k{font-family:var(--mono);font-weight:700;font-size:.64rem;margin-top:2px;overflow-wrap:anywhere;}
+  .slot .r{font-family:var(--mono);font-size:.58rem;color:var(--ink-2);margin-top:4px;overflow-wrap:anywhere;}
+
+  /* g — non-gating */
+  .warnbox{border:1px solid var(--ink);background:#fff;padding:9px 12px;font-size:.79rem;color:var(--ink-2);margin:12px 0 0;}
+  .warnbox b{color:var(--ink);}
+  .warnbox .wl{font-family:var(--mono);font-size:.57rem;text-transform:uppercase;letter-spacing:.07em;
+    color:var(--ink);font-weight:700;display:block;margin-bottom:3px;}
+  .procrow{display:flex;flex-wrap:wrap;gap:5px;margin-top:11px;}
+  .procrow span{font-family:var(--mono);font-size:.64rem;border:1.5px solid var(--ink);background:var(--panel);
+    padding:4px 7px;white-space:nowrap;font-weight:700;}
+  .math{font-family:var(--mono);font-size:.74rem;background:var(--sub);border:1px solid var(--rule-2);
+    padding:8px 10px;margin:11px 0 0;overflow-x:auto;white-space:nowrap;color:var(--ink);}
+  .math .cm{color:var(--ink-3);}
+
+  /* h — params */
+  .pgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 26px;}
+  @media(max-width:760px){.pgrid{grid-template-columns:minmax(0,1fr);}}
+  .pcol{min-width:0;}
+  @media(max-width:880px){table.pr td.k,table.pr td.v{white-space:normal;overflow-wrap:anywhere;}}
+  .pcol h4{font-family:var(--mono);font-size:.66rem;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-2);
+    margin:14px 0 4px;padding-bottom:3px;border-bottom:1px solid var(--ink);}
+  .pcol h4:first-child{margin-top:0;}
+  .outnote{font-family:var(--serif);font-size:.78rem;color:var(--ink-2);margin-top:12px;}
+  .outnote b{color:var(--ink);}
+</style>
+</head>
+<body>
+
+<div class="sheet">
+
+  <div class="masthead">
+    <div class="kick">Supplementary Figure S5 · phenotyping yield</div>
+    <h1>Why a 12-marker panel commits only a fifth of its cells: abstention is a conjunction, the confidence level is non-monotonic, and the classifier is right about the cells it keeps</h1>
+  </div>
+  <nav class="figset" aria-label="Supplementary figure set">
+    <a href="pipeline-schematic.html">S1 · pipeline</a>
+    <a href="registration-schematic.html">S2 · registration</a>
+    <a href="qc-schematic.html">S3 · quality control</a>
+    <a href="failure-schematic.html">S4 · failure semantics</a>
+    <span class="self">S5 · phenotyping yield</span>
+  </nav>
+  <p class="standfirst">A low classification rate reads like a data problem. It is not. The phenotyper resolves each
+    marker <i>independently</i> into one of four signs, and a cell is committed only when enough of those signs land
+    confidently — a <b>conjunction</b> over 12 markers, so per-marker confidence multiplies. On a simulated cohort with
+    known ground truth and clean separation, the shipped panel commits <b>6.5%</b> of cells while being <b>94.7%
+    accurate</b> on the ones it does commit. The missing cells are not misclassified; they are <i>abstained</i>. Three
+    levers recover most of them, and one of the three moves in the opposite direction to the obvious guess.</p>
+  <div class="figset" style="margin-top:11px;text-transform:none;letter-spacing:0">
+    <span style="border:none;padding-left:0;color:var(--ink-3)">defaults: <code>pheno_alpha = 0.05</code> ·
+    <code>pheno_min_cal = 50</code> · <code>pheno_max_enumerate = 100000</code> ·
+    <code>panel_spec = null</code> · <code>panel_model = null</code></span>
+  </div>
+
+  <!-- a — THE NAIVE EXPECTATION -->
+  <section class="panel">
+    <div class="plabel">a</div>
+    <div class="panel-head">
+      <h2>The expectation: more markers, sharper calls</h2>
+      <p>The panel declares 12 <i>lineage</i> markers that split the tree and 7 <i>state</i> markers that are recorded
+        but never affect the call. Biology prunes the cube hard — and that pruning is the part that works.</p>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;">
+      <div class="mod" style="min-width:0">
+        <div class="rn">the lineage cube</div>
+        <div class="math" style="font-size:1.5rem;text-align:center;margin:8px 0">2<sup>12</sup> = 4096</div>
+        <p class="62rem">Every assignment of <code>+</code>/<code>−</code> to the 12 lineage markers.</p>
+      </div>
+      <div class="mod" style="min-width:0">
+        <div class="rn">after never / requires</div>
+        <div class="math" style="font-size:1.5rem;text-align:center;margin:8px 0">|F| = 104</div>
+        <p class="62rem">4 <code>never</code> pairs and 10 <code>requires</code> implications delete 97.5% of the cube
+          before a single cell is read.</p>
+      </div>
+      <div class="mod" style="min-width:0">
+        <div class="rn">named leaves</div>
+        <div class="math" style="font-size:1.5rem;text-align:center;margin:8px 0">13</div>
+        <p class="62rem">Patterns are named by <i>specificity</i>, so many patterns collapse onto one phenotype name.
+          That collapse is deliberate and it helps.</p>
+      </div>
+    </div>
+    <div class="callout" style="margin-top:14px">
+      <b>The trap.</b> Constraint pruning is not the bottleneck — it is doing its job. The bottleneck is upstream of
+      <code>F</code>: whether each marker's sign is <i>known</i> for a given cell. Adding a marker to sharpen the tree
+      also adds one more sign that has to come back confident, and those requirements multiply.
+    </div>
+  </section>
+
+  <!-- b — THE FOUR SIGNS -->
+  <section class="panel">
+    <div class="plabel">b</div>
+    <div class="panel-head">
+      <h2>The atom: two one-sided conformal tests per marker, per cell</h2>
+      <p>Each marker gets two p-values against its own calibration set — <code>p_neg</code> (is this cell unusually
+        high for a negative?) and <code>p_pos</code> (unusually low for a positive?). A hypothesis stays in the
+        prediction set while its p-value exceeds α. The <i>size</i> of the surviving set is the sign.</p>
+    </div>
+    <div style="display:grid;grid-template-columns:minmax(0,340px) minmax(0,1fr);gap:18px;align-items:start">
+      <svg viewBox="0 0 300 300" style="width:100%;height:auto;max-width:340px" role="img"
+           aria-label="Decision square: p_neg on the x axis, p_pos on the y axis, split at alpha into four sign regions">
+        <rect x="45" y="18" width="230" height="230" fill="#fff" stroke="#111" stroke-width="1.1"/>
+        <line x1="45" y1="200" x2="275" y2="200" stroke="#111" stroke-width="1" stroke-dasharray="3 2"/>
+        <line x1="105" y1="18" x2="105" y2="248" stroke="#111" stroke-width="1" stroke-dasharray="3 2"/>
+        <rect x="45" y="18" width="60" height="182" fill="#111" opacity=".82"/>
+        <rect x="105" y="200" width="170" height="48" fill="#111" opacity=".42"/>
+        <rect x="105" y="18" width="170" height="182" fill="#000" opacity=".055"/>
+        <rect x="45" y="200" width="60" height="48" fill="#000" opacity=".16"/>
+        <text x="75" y="105" font-family="ui-monospace,monospace" font-size="13" font-weight="700" fill="#fff"
+              text-anchor="middle">pos</text>
+        <text x="75" y="122" font-family="ui-monospace,monospace" font-size="8" fill="#fff"
+              text-anchor="middle">committed +</text>
+        <text x="190" y="222" font-family="ui-monospace,monospace" font-size="13" font-weight="700" fill="#fff"
+              text-anchor="middle">neg</text>
+        <text x="190" y="236" font-family="ui-monospace,monospace" font-size="8" fill="#fff"
+              text-anchor="middle">committed −</text>
+        <text x="190" y="105" font-family="ui-monospace,monospace" font-size="13" font-weight="700" fill="#111"
+              text-anchor="middle">free</text>
+        <text x="190" y="122" font-family="ui-monospace,monospace" font-size="8" fill="#444"
+              text-anchor="middle">both survive → unknown</text>
+        <text x="75" y="222" font-family="ui-monospace,monospace" font-size="11" font-weight="700" fill="#111"
+              text-anchor="middle">contra</text>
+        <text x="75" y="236" font-family="ui-monospace,monospace" font-size="7.5" fill="#444"
+              text-anchor="middle">neither survives</text>
+        <text x="160" y="272" font-family="ui-monospace,monospace" font-size="10" fill="#111" text-anchor="middle">p_neg →</text>
+        <text x="18" y="140" font-family="ui-monospace,monospace" font-size="10" fill="#111" text-anchor="middle"
+              transform="rotate(-90 18 140)">p_pos →</text>
+        <text x="105" y="262" font-family="ui-monospace,monospace" font-size="9" fill="#111" text-anchor="middle">α</text>
+        <text x="34" y="203" font-family="ui-monospace,monospace" font-size="9" fill="#111" text-anchor="middle">α</text>
+      </svg>
+      <div style="min-width:0">
+        <div class="tbl-scroll">
+        <table style="width:100%;border-collapse:collapse;font-size:.78rem">
+          <tr style="border-bottom:1px solid var(--rule)">
+            <th style="text-align:left;padding:5px 6px">sign</th>
+            <th style="text-align:left;padding:5px 6px">prediction set</th>
+            <th style="text-align:left;padding:5px 6px">effect on the pattern match</th></tr>
+          <tr style="border-bottom:1px solid var(--rule-2)">
+            <td style="padding:5px 6px"><code>pos</code></td><td style="padding:5px 6px">{pos}</td>
+            <td style="padding:5px 6px">requires pattern value <b>1</b> — a real constraint</td></tr>
+          <tr style="border-bottom:1px solid var(--rule-2)">
+            <td style="padding:5px 6px"><code>neg</code></td><td style="padding:5px 6px">{neg}</td>
+            <td style="padding:5px 6px">requires pattern value <b>0</b> — a real constraint</td></tr>
+          <tr style="border-bottom:1px solid var(--rule-2)">
+            <td style="padding:5px 6px"><code>free</code></td><td style="padding:5px 6px">{pos, neg}</td>
+            <td style="padding:5px 6px"><b>matches any value</b> — constrains nothing</td></tr>
+          <tr>
+            <td style="padding:5px 6px"><code>contra</code></td><td style="padding:5px 6px">{ }</td>
+            <td style="padding:5px 6px"><b>forces no match at all</b> → Artefact</td></tr>
+        </table>
+        </div>
+        <div class="callout" style="margin-top:12px">
+          <b>α is a two-sided knob, and both sides bite.</b> Lowering α widens both prediction sets, pushing cells into
+          <code>free</code>. Raising it narrows both, and once <i>both</i> hypotheses are rejected the cell is
+          <code>contra</code>. The two failure modes sit on opposite corners of the same square, which is why the yield
+          curve in panel <b>e</b> has a peak rather than a slope.
+        </div>
+        <div class="pp"><span><b>source</b> resolve_sign · conformal.py:126–143</span>
+          <span><b>degraded marker</b> both p-values forced to 1.0 → always <code>free</code></span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- c — WHY FREE IS FATAL -->
+  <section class="panel">
+    <div class="plabel">c</div>
+    <div class="panel-head">
+      <h2>Why one undetermined marker can cost the whole call</h2>
+      <p>A <code>free</code> marker does not narrow the subcube, so the cell keeps every feasible pattern that agrees
+        with its <i>known</i> signs. Commitment needs the survivors to share a single <b>name</b> — not a single
+        pattern.</p>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px">
+      <div class="mod" style="min-width:0">
+        <div class="rn">absorbed — free costs nothing</div>
+        <p class="62rem" style="margin-bottom:8px">A CD45<code>−</code> cell: <code>requires</code> already forces
+          CD3, CD56, CD14 (and everything below them) to 0. Those markers may be <code>free</code> and it does not
+          matter — <code>F</code> pins them anyway.</p>
+        <div class="sig"><b>CD45</b> neg · <b>SMA</b> neg · <b>PANCK</b> pos · CD3 <i>free</i> · CD8 <i>free</i> ·
+          FOXP3 <i>free</i> · GZMB <i>free</i></div>
+        <div class="after" style="margin-top:8px">survivors all named <b>PANCK_Tumor</b> → <span class="tag tag-on">committed</span></div>
+      </div>
+      <div class="mod" style="min-width:0">
+        <div class="rn">not absorbed — free is fatal</div>
+        <p class="62rem" style="margin-bottom:8px">A CD45<code>+</code> CD3<code>+</code> cell with CD8, CD4 and FOXP3
+          undetermined spans four different T-cell leaves. Nothing in <code>F</code> can pick between them.</p>
+        <div class="sig"><b>CD45</b> pos · <b>CD3</b> pos · CD8 <i>free</i> · CD4 <i>free</i> · FOXP3 <i>free</i></div>
+        <div class="after" style="margin-top:8px">survivors named <b>T_helper</b>, <b>CD4_Treg</b>,
+          <b>T_cytotoxic</b>, <b>CD8_Treg</b> → <span class="tag">Ambiguous</span></div>
+      </div>
+    </div>
+    <div class="callout" style="margin-top:14px">
+      <b>The root gate is a single point of failure.</b> If <code>CD45</code> itself is <code>free</code>, the cell
+      straddles the immune and non-immune arms simultaneously and is Ambiguous no matter how clean every other marker
+      is. In the measured run below, <code>CD45</code> was <code>free</code> for <b>93%</b> of cells.
+    </div>
+  </section>
+
+  <!-- d — MEASURED -->
+  <section class="panel">
+    <div class="plabel">d</div>
+    <div class="panel-head">
+      <h2>Measured: abstention, not error</h2>
+      <p>20,000 cells simulated from the shipped panel with known ground truth and well-separated marker modes, then
+        run through the production phenotyper unmodified. CRC selected <code>α = 0.01</code> against a target of
+        <code>0.05</code>. No marker degraded.</p>
+    </div>
+    <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px;align-items:start">
+      <div style="min-width:0">
+        <svg viewBox="0 0 300 92" style="width:100%;height:auto" role="img"
+             aria-label="Outcome bar: 6.5 percent committed, 93.2 percent ambiguous, 0.2 percent artefact">
+          <rect x="0" y="14" width="19.5" height="34" fill="#111"/>
+          <rect x="19.5" y="14" width="279.6" height="34" fill="#000" opacity=".13"/>
+          <rect x="0" y="14" width="300" height="34" fill="none" stroke="#111" stroke-width="1"/>
+          <text x="4" y="10" font-family="ui-monospace,monospace" font-size="8" fill="#111">6.5% committed</text>
+          <text x="296" y="10" font-family="ui-monospace,monospace" font-size="8" fill="#111" text-anchor="end">93.2% Ambiguous</text>
+          <text x="150" y="36" font-family="ui-monospace,monospace" font-size="9.5" fill="#444" text-anchor="middle">
+            abstained — no phenotype written</text>
+          <text x="0" y="66" font-family="ui-monospace,monospace" font-size="8.5" fill="#111">
+            of the 6.5% it did commit: 94.7% were correct</text>
+          <text x="0" y="80" font-family="ui-monospace,monospace" font-size="8.5" fill="#444">
+            Artefact 0.2% · Conflict &lt;0.1%</text>
+        </svg>
+      </div>
+      <div style="min-width:0">
+        <div class="rn">share of cells left <code>free</code>, per marker</div>
+        <div class="tbl-scroll">
+        <table style="width:100%;border-collapse:collapse;font-size:.72rem;font-family:var(--mono)">
+          <tr style="border-bottom:1px solid var(--rule)">
+            <th style="text-align:left;padding:3px 5px">marker</th><th style="text-align:right;padding:3px 5px">free</th>
+            <th style="text-align:left;padding:3px 5px">marker</th><th style="text-align:right;padding:3px 5px">free</th></tr>
+          <tr><td style="padding:3px 5px">CD14</td><td style="text-align:right;padding:3px 5px">96%</td>
+              <td style="padding:3px 5px">PANCK</td><td style="text-align:right;padding:3px 5px">83%</td></tr>
+          <tr><td style="padding:3px 5px">CD3</td><td style="text-align:right;padding:3px 5px">94%</td>
+              <td style="padding:3px 5px">FOXP3</td><td style="text-align:right;padding:3px 5px">82%</td></tr>
+          <tr><td style="padding:3px 5px"><b>CD45</b></td><td style="text-align:right;padding:3px 5px"><b>93%</b></td>
+              <td style="padding:3px 5px">SMA</td><td style="text-align:right;padding:3px 5px">81%</td></tr>
+          <tr><td style="padding:3px 5px">CD163</td><td style="text-align:right;padding:3px 5px">84%</td>
+              <td style="padding:3px 5px">CD56</td><td style="text-align:right;padding:3px 5px">81%</td></tr>
+          <tr><td style="padding:3px 5px">CD4</td><td style="text-align:right;padding:3px 5px">81%</td>
+              <td style="padding:3px 5px">CD8</td><td style="text-align:right;padding:3px 5px">80%</td></tr>
+          <tr><td style="padding:3px 5px">VIMENTIN</td><td style="text-align:right;padding:3px 5px">58%</td>
+              <td style="padding:3px 5px">GZMB</td><td style="text-align:right;padding:3px 5px">49%</td></tr>
+        </table>
+        </div>
+        <p class="62rem" style="margin-top:8px">Median cell: <b>10 of 12</b> lineage markers undetermined. The
+          conjunction is the whole story — at a per-marker confidence of <i>q</i>, a cell needing <i>k</i> decisive
+          markers commits with probability ≈ <span class="math">q<sup>k</sup></span>.</p>
+      </div>
+    </div>
+    <div class="warnbox" style="margin-top:14px">
+      <b>Read this before tuning anything.</b> High accuracy with low yield means the machinery is <i>working</i> and
+      the operating point is wrong. A pipeline that misclassified cells would need a different fix entirely — check
+      <code>phenotype_qc.json</code> → <code>chosen_alpha</code> and <code>degraded_markers</code> first, because those
+      two fields separate "wrong operating point" from "broken calibration".
+    </div>
+  </section>
+
+  <!-- e — NON-MONOTONIC -->
+  <section class="panel">
+    <div class="plabel">e</div>
+    <div class="panel-head">
+      <h2>The counterintuitive part: yield peaks, then collapses</h2>
+      <p>Loosening α converts <code>free</code> into decided signs — until it starts converting decided signs into
+        <code>contra</code>. Past the peak, cells stop being Ambiguous and start being Artefact, which is worse: an
+        Ambiguous cell still carries a candidate list, an Artefact carries nothing.</p>
+    </div>
+    <svg viewBox="0 0 620 250" style="width:100%;height:auto" role="img"
+         aria-label="Committed percentage against alpha, peaking near alpha 0.05 to 0.1 and collapsing by 0.2">
+      <line x1="52" y1="205" x2="600" y2="205" stroke="#111" stroke-width="1.1"/>
+      <line x1="52" y1="20" x2="52" y2="205" stroke="#111" stroke-width="1.1"/>
+      <g font-family="ui-monospace,monospace" font-size="9" fill="#444">
+        <text x="46" y="208" text-anchor="end">0</text>
+        <text x="46" y="163" text-anchor="end">20</text>
+        <text x="46" y="118" text-anchor="end">40</text>
+        <text x="46" y="73" text-anchor="end">60</text>
+        <text x="46" y="31" text-anchor="end">%</text>
+      </g>
+      <line x1="52" y1="160" x2="600" y2="160" stroke="#000" stroke-opacity=".10"/>
+      <line x1="52" y1="115" x2="600" y2="115" stroke="#000" stroke-opacity=".10"/>
+      <line x1="52" y1="70"  x2="600" y2="70"  stroke="#000" stroke-opacity=".10"/>
+      <rect x="52" y="20" width="316" height="185" fill="#000" opacity=".035"/>
+      <rect x="428" y="20" width="172" height="185" fill="#000" opacity=".09"/>
+      <text x="200" y="36" font-family="ui-monospace,monospace" font-size="9" fill="#666" text-anchor="middle">
+        ambiguity-limited — markers undetermined</text>
+      <text x="516" y="36" font-family="ui-monospace,monospace" font-size="9" fill="#666" text-anchor="middle">
+        artefact-limited — contradictions</text>
+      <polyline points="70,198 140,190 210,170 300,89 368,86 428,167 500,200 570,205"
+                fill="none" stroke="#111" stroke-width="2.4"/>
+      <g fill="#111">
+        <circle cx="70" cy="198" r="3.4"/><circle cx="140" cy="190" r="3.4"/><circle cx="210" cy="170" r="3.4"/>
+        <circle cx="300" cy="89" r="4.6"/><circle cx="368" cy="86" r="4.6"/><circle cx="428" cy="167" r="3.4"/>
+        <circle cx="500" cy="200" r="3.4"/><circle cx="570" cy="205" r="3.4"/>
+      </g>
+      <polyline points="140,204 210,202 300,189 368,154 428,48"
+                fill="none" stroke="#111" stroke-width="1.3" stroke-dasharray="4 3"/>
+      <text x="446" y="52" font-family="ui-monospace,monospace" font-size="9" fill="#111">Artefact 69.6%</text>
+      <line x1="140" y1="20" x2="140" y2="205" stroke="#111" stroke-width="1" stroke-dasharray="2 3"/>
+      <text x="144" y="60" font-family="ui-monospace,monospace" font-size="9" fill="#111">CRC chose 0.01</text>
+      <text x="144" y="72" font-family="ui-monospace,monospace" font-size="9" fill="#666">6.5% committed</text>
+      <line x1="300" y1="20" x2="300" y2="205" stroke="#111" stroke-width="1" stroke-dasharray="2 3"/>
+      <text x="304" y="112" font-family="ui-monospace,monospace" font-size="9" fill="#111">pheno_alpha = 0.05</text>
+      <text x="304" y="124" font-family="ui-monospace,monospace" font-size="9" fill="#666">51.3% committed</text>
+      <g font-family="ui-monospace,monospace" font-size="9" fill="#444" text-anchor="middle">
+        <text x="70" y="220">.005</text><text x="140" y="220">.01</text><text x="210" y="220">.02</text>
+        <text x="300" y="220">.05</text><text x="368" y="220">.1</text><text x="428" y="220">.2</text>
+        <text x="500" y="220">.35</text><text x="570" y="220">.5</text>
+      </g>
+      <text x="326" y="240" font-family="ui-monospace,monospace" font-size="10" fill="#111" text-anchor="middle">α</text>
+      <text x="66" y="94" font-family="ui-monospace,monospace" font-size="9" fill="#111">committed</text>
+    </svg>
+    <div class="tbl-scroll" style="margin-top:12px">
+    <table style="width:100%;border-collapse:collapse;font-size:.74rem;font-family:var(--mono)">
+      <tr style="border-bottom:1px solid var(--rule)">
+        <th style="text-align:left;padding:4px 6px">α</th>
+        <th style="text-align:right;padding:4px 6px">committed</th>
+        <th style="text-align:right;padding:4px 6px">Ambiguous</th>
+        <th style="text-align:right;padding:4px 6px">Artefact</th>
+        <th style="text-align:right;padding:4px 6px">accuracy</th>
+        <th style="text-align:right;padding:4px 6px">free markers</th></tr>
+      <tr><td style="padding:4px 6px">0.005</td><td style="text-align:right;padding:4px 6px">3.2%</td><td style="text-align:right;padding:4px 6px">96.8%</td><td style="text-align:right;padding:4px 6px">—</td><td style="text-align:right;padding:4px 6px">95.6%</td><td style="text-align:right;padding:4px 6px">11/12</td></tr>
+      <tr style="background:var(--sub)"><td style="padding:4px 6px">0.01 <span class="tag">chosen</span></td><td style="text-align:right;padding:4px 6px">6.5%</td><td style="text-align:right;padding:4px 6px">93.2%</td><td style="text-align:right;padding:4px 6px">0.2%</td><td style="text-align:right;padding:4px 6px">94.7%</td><td style="text-align:right;padding:4px 6px">10/12</td></tr>
+      <tr><td style="padding:4px 6px">0.02</td><td style="text-align:right;padding:4px 6px">15.6%</td><td style="text-align:right;padding:4px 6px">83.0%</td><td style="text-align:right;padding:4px 6px">1.2%</td><td style="text-align:right;padding:4px 6px">92.5%</td><td style="text-align:right;padding:4px 6px">8/12</td></tr>
+      <tr style="background:var(--sub-2)"><td style="padding:4px 6px">0.05 <span class="tag tag-on">target</span></td><td style="text-align:right;padding:4px 6px"><b>51.3%</b></td><td style="text-align:right;padding:4px 6px">38.2%</td><td style="text-align:right;padding:4px 6px">7.3%</td><td style="text-align:right;padding:4px 6px">82.7%</td><td style="text-align:right;padding:4px 6px">4/12</td></tr>
+      <tr style="background:var(--sub-2)"><td style="padding:4px 6px">0.10</td><td style="text-align:right;padding:4px 6px"><b>52.7%</b></td><td style="text-align:right;padding:4px 6px">9.0%</td><td style="text-align:right;padding:4px 6px">22.6%</td><td style="text-align:right;padding:4px 6px">77.6%</td><td style="text-align:right;padding:4px 6px">2/12</td></tr>
+      <tr><td style="padding:4px 6px">0.20</td><td style="text-align:right;padding:4px 6px">16.9%</td><td style="text-align:right;padding:4px 6px">0.7%</td><td style="text-align:right;padding:4px 6px">69.6%</td><td style="text-align:right;padding:4px 6px">85.4%</td><td style="text-align:right;padding:4px 6px">1/12</td></tr>
+      <tr><td style="padding:4px 6px">0.35</td><td style="text-align:right;padding:4px 6px">2.0%</td><td style="text-align:right;padding:4px 6px">—</td><td style="text-align:right;padding:4px 6px">—</td><td style="text-align:right;padding:4px 6px">91.8%</td><td style="text-align:right;padding:4px 6px">0/12</td></tr>
+    </table>
+    </div>
+    <div class="callout" style="margin-top:12px">
+      <b>Accuracy falls as yield rises.</b> 94.7% → 82.7% between α = 0.01 and 0.05. This is a precision/recall dial,
+      not a free lunch — the right setting depends on whether a downstream analysis would rather have 51% of cells at
+      83% purity or 6.5% at 95%. State the choice in the methods; do not let it be chosen implicitly.
+    </div>
+  </section>
+
+  <!-- f — CRC -->
+  <section class="panel">
+    <div class="plabel">f</div>
+    <div class="panel-head">
+      <h2>You did not pick α — conformal risk control did, from one marker pair</h2>
+      <p><code>pheno_alpha</code> is not the level that gets used. It is a <i>risk target</i>. When the panel declares
+        any audited constraint, the run scans a fixed grid and keeps the largest α whose upper confidence bound on
+        excess co-positivity clears that target.</p>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px">
+      <div class="mod" style="min-width:0">
+        <div class="rn">the mechanism</div>
+        <div class="pp" style="margin-bottom:8px">
+          <span><b>grid</b> 0.005 · 0.01 · 0.02 · 0.05 · 0.1 · 0.2</span>
+          <span><b>UCB</b> R(α) + √(ln(1/δ) / 2n(α)), δ = 0.1</span></div>
+        <p class="62rem">The bound is <b>not monotone</b>: n(α), the committed-cell count, grows with α, so the width
+          term shrinks while the risk term grows. The qualifying set is an interior interval, which is why the scan is
+          exhaustive rather than a binary search.</p>
+        <div class="warnbox" style="margin-top:9px">
+          <b>The fallback is the most conservative value, not the target.</b> If no grid value qualifies, α becomes
+          <code>grid[0] = 0.005</code> — ten times stricter than the 0.05 you set, and the run says so only in
+          <code>phenotype_qc.json</code>.
+        </div>
+      </div>
+      <div class="mod" style="min-width:0">
+        <div class="rn">what it was calibrated against</div>
+        <p class="62rem" style="margin-bottom:8px">Rare and soft exclusivity pairs are two-coloured into
+          <code>enforce</code> and <code>audit</code> so that nothing is both penalised and used as an unbiased
+          check. Correct in principle — but on this panel it leaves a single audited pair.</p>
+        <div class="tbl-scroll">
+        <table style="width:100%;border-collapse:collapse;font-size:.72rem;font-family:var(--mono)">
+          <tr style="border-bottom:1px solid var(--rule)">
+            <th style="text-align:left;padding:3px 5px">pair</th><th style="text-align:right;padding:3px 5px">observed</th>
+            <th style="text-align:right;padding:3px 5px">nominal</th><th style="text-align:left;padding:3px 5px">verdict</th></tr>
+          <tr><td style="padding:3px 5px">CD4 | CD8</td><td style="text-align:right;padding:3px 5px">0.0199</td>
+              <td style="text-align:right;padding:3px 5px">0.01</td><td style="padding:3px 5px">REVIEW</td></tr>
+        </table>
+        </div>
+        <p class="62rem" style="margin-top:8px">One pair, doubling its nominal rate, set the confidence level for all
+          twelve markers and cost roughly <b>8×</b> the yield. The other two declared pairs
+          (<code>CD3|CD56</code>, <code>PANCK|VIMENTIN</code>) went to <code>enforce</code> and never entered the risk
+          estimate.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- g — THE FIXES -->
+  <section class="panel">
+    <div class="plabel">g</div>
+    <div class="panel-head">
+      <h2>Four improvements, measured where possible</h2>
+      <p>Ordered by yield per unit of effort. The first is the large one and it changes no statistics at all — it only
+        changes what is <i>reported</i> when the candidates disagree.</p>
+    </div>
+
+    <div class="mod" style="margin-bottom:14px">
+      <div class="rn">1 · report the lowest common ancestor instead of "Ambiguous"</div>
+      <div style="display:grid;grid-template-columns:minmax(0,300px) minmax(0,1fr);gap:16px;align-items:center">
+        <svg viewBox="0 0 280 150" style="width:100%;height:auto;max-width:300px" role="img"
+             aria-label="Tree showing four ambiguous T cell leaves collapsing to their common ancestor Immune">
+          <rect x="96" y="6" width="88" height="22" fill="#111"/>
+          <text x="140" y="21" font-family="ui-monospace,monospace" font-size="10" fill="#fff" text-anchor="middle">Immune</text>
+          <line x1="140" y1="28" x2="140" y2="46" stroke="#111"/>
+          <line x1="40" y1="46" x2="240" y2="46" stroke="#111"/>
+          <g stroke="#111"><line x1="40" y1="46" x2="40" y2="62"/><line x1="107" y1="46" x2="107" y2="62"/>
+             <line x1="173" y1="46" x2="173" y2="62"/><line x1="240" y1="46" x2="240" y2="62"/></g>
+          <g font-family="ui-monospace,monospace" font-size="7" text-anchor="middle">
+            <rect x="6" y="62" width="68" height="20" fill="none" stroke="#111" stroke-dasharray="2 2"/>
+            <text x="40" y="75" fill="#444">T_helper</text>
+            <rect x="73" y="62" width="68" height="20" fill="none" stroke="#111" stroke-dasharray="2 2"/>
+            <text x="107" y="75" fill="#444">CD4_Treg</text>
+            <rect x="139" y="62" width="68" height="20" fill="none" stroke="#111" stroke-dasharray="2 2"/>
+            <text x="173" y="75" fill="#444">T_cytotoxic</text>
+            <rect x="206" y="62" width="68" height="20" fill="none" stroke="#111" stroke-dasharray="2 2"/>
+            <text x="240" y="75" fill="#444">CD8_Treg</text>
+          </g>
+          <text x="140" y="103" font-family="ui-monospace,monospace" font-size="8" fill="#666" text-anchor="middle">
+            4 candidates, no single leaf</text>
+          <text x="140" y="122" font-family="ui-monospace,monospace" font-size="9" fill="#111" text-anchor="middle">
+            today: <tspan font-weight="700">Ambiguous</tspan> — cell discarded</text>
+          <text x="140" y="139" font-family="ui-monospace,monospace" font-size="9" fill="#111" text-anchor="middle">
+            proposed: <tspan font-weight="700">Immune</tspan> — true, just coarser</text>
+        </svg>
+        <div style="min-width:0">
+          <p class="62rem" style="margin-bottom:9px">Every candidate in the example is an immune cell. The classifier
+            already knows that with high confidence; it throws the knowledge away because it cannot pick the leaf. Walk
+            the <code>parent</code> chain the panel already declares and emit the deepest node all candidates share.</p>
+          <div class="tbl-scroll">
+          <table style="width:100%;border-collapse:collapse;font-size:.72rem;font-family:var(--mono)">
+            <tr style="border-bottom:1px solid var(--rule)">
+              <th style="text-align:left;padding:3px 5px">α</th><th style="text-align:right;padding:3px 5px">now</th>
+              <th style="text-align:right;padding:3px 5px">with LCA</th>
+              <th style="text-align:right;padding:3px 5px">LCA correct</th></tr>
+            <tr><td style="padding:3px 5px">0.01</td><td style="text-align:right;padding:3px 5px">6.5%</td>
+                <td style="text-align:right;padding:3px 5px"><b>28.1%</b></td><td style="text-align:right;padding:3px 5px">98.1%</td></tr>
+            <tr><td style="padding:3px 5px">0.02</td><td style="text-align:right;padding:3px 5px">15.6%</td>
+                <td style="text-align:right;padding:3px 5px"><b>42.9%</b></td><td style="text-align:right;padding:3px 5px">96.4%</td></tr>
+            <tr style="background:var(--sub-2)"><td style="padding:3px 5px">0.05</td><td style="text-align:right;padding:3px 5px">51.3%</td>
+                <td style="text-align:right;padding:3px 5px"><b>63.4%</b></td><td style="text-align:right;padding:3px 5px">93.9%</td></tr>
+          </table>
+          </div>
+          <p class="62rem" style="margin-top:8px">This is what TRACERx-PHLEX's TYPEx does when a cell is unassigned:
+            fall back to the high-confidence major lineage. It reports cutting Unassigned/Ambiguous from <b>44%</b> to
+            <b>4.7%</b>.</p>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px">
+      <div class="mod" style="min-width:0">
+        <div class="rn">2 · floor the CRC search</div>
+        <p class="62rem">Let the risk target lower α, but not below a stated floor — or drop to
+          <i>reporting mode</i> and use <code>pheno_alpha</code> directly when the audit rests on a single pair. Also
+          widen the audit set: a risk estimate built on one marker pair is a thin basis for a global decision.</p>
+        <div class="after" style="margin-top:7px">measured 6.5% → <b>51.3%</b> at α = 0.05</div>
+      </div>
+      <div class="mod" style="min-width:0">
+        <div class="rn">3 · give markers real anchors</div>
+        <p class="62rem"><b>15 of 19</b> markers compile with an unresolved reference and fall back to a GMM on their
+          own values, so the calibration is self-referential — the cells being tested also define the null. Declaring
+          <code>negative_reference</code> / <code>positive_reference</code> for the gate markers (as the panel already
+          does for GZMB, L1CAM, P53, PDL1, ARID1A) sharpens the p-values that everything else rests on.</p>
+        <div class="after" style="margin-top:7px">not measured here — panel authoring change</div>
+      </div>
+      <div class="mod" style="min-width:0">
+        <div class="rn">4 · fix the signal, not the statistics</div>
+        <p class="62rem">Lateral spillover in dense tissue is what makes modes overlap in the first place. Compensating
+          it at the segmentation boundary (REDSEA-style, using the shared perimeter between adjacent cells) raises
+          per-marker separation, which raises <i>every</i> marker's confidence and therefore compounds across the
+          conjunction.</p>
+        <div class="after" style="margin-top:7px">the only fix that raises yield <i>and</i> accuracy together</div>
+      </div>
+    </div>
+    <div class="callout" style="margin-top:14px">
+      <b>Already exported, already usable.</b> Every cell carries <code>pheno_score:&lt;Name&gt;</code> — a softmax over
+      its candidate patterns — plus <code>p_neg:</code>/<code>p_pos:</code> per marker and the candidate list. An
+      Ambiguous cell is not an empty row. Downstream analysis can threshold the soft scores itself without any change
+      to the pipeline.
+    </div>
+  </section>
+
+  <!-- h — KNOBS -->
+  <section class="panel">
+    <div class="plabel">h</div>
+    <div class="panel-head">
+      <h2>Every parameter that governs yield</h2>
+      <p>Defaults read from <code>nextflow.config</code>. Phenotyping runs only when one of the first two is set.</p>
+    </div>
+    <div class="tbl-scroll">
+    <table style="width:100%;border-collapse:collapse;font-size:.75rem">
+      <tr style="border-bottom:1px solid var(--rule)">
+        <th style="text-align:left;padding:5px 6px">parameter</th><th style="text-align:left;padding:5px 6px">default</th>
+        <th style="text-align:left;padding:5px 6px">effect on the share of cells committed</th></tr>
+      <tr style="border-bottom:1px solid var(--rule-2)"><td style="padding:5px 6px"><code>panel_spec</code></td>
+        <td style="padding:5px 6px"><span class="tag-def">null</span></td>
+        <td style="padding:5px 6px">path to <code>panel.yaml</code>; null on both this and <code>panel_model</code> skips phenotyping entirely</td></tr>
+      <tr style="border-bottom:1px solid var(--rule-2)"><td style="padding:5px 6px"><code>panel_model</code></td>
+        <td style="padding:5px 6px"><span class="tag-def">null</span></td>
+        <td style="padding:5px 6px">pre-compiled <code>model_config.json</code>, bypassing <code>COMPILE_PANEL</code></td></tr>
+      <tr style="border-bottom:1px solid var(--rule-2)"><td style="padding:5px 6px"><code>pheno_alpha</code></td>
+        <td style="padding:5px 6px"><span class="tag-def">0.05</span></td>
+        <td style="padding:5px 6px"><b>the dominant knob</b> — but a risk <i>target</i>, not the level applied; CRC may lower it to as little as 0.005</td></tr>
+      <tr style="border-bottom:1px solid var(--rule-2)"><td style="padding:5px 6px"><code>pheno_min_cal</code></td>
+        <td style="padding:5px 6px"><span class="tag-def">50</span></td>
+        <td style="padding:5px 6px">minimum effective calibration mass per density bin; falling short collapses bins, then degrades the marker to permanently <code>free</code></td></tr>
+      <tr><td style="padding:5px 6px"><code>pheno_max_enumerate</code></td>
+        <td style="padding:5px 6px"><span class="tag-def">100000</span></td>
+        <td style="padding:5px 6px">feasible-set ceiling; a hard error, never a silent truncation — no effect on yield</td></tr>
+    </table>
+    </div>
+    <div class="pp" style="margin-top:10px">
+      <span><b>diagnose first</b> <code>&lt;outdir&gt;/&lt;patient&gt;/phenotyping/phenotype_qc.json</code></span>
+      <span><b>chosen_alpha</b> the level actually applied</span>
+      <span><b>degraded_markers</b> permanently <code>free</code></span>
+      <span><b>calibration_ks</b> distance to uniform; large = calibration pathology</span>
+    </div>
+  </section>
+
+  <!-- i — LIMITS -->
+  <section class="panel">
+    <div class="plabel">i</div>
+    <div class="panel-head">
+      <h2>What this figure does not claim</h2>
+      <p>The honest boundary of the measurement above.</p>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px">
+      <div class="nul" style="min-width:0">
+        <b>The numbers are from simulation, not tissue.</b> Log-normal modes separated by 2.5σ, spatially uniform, no
+        spillover, no segmentation error, no batch effect. Real data will sit lower on every curve. The <i>shape</i> of
+        the α response and the LCA gain are structural and should transfer; the absolute percentages should not be
+        quoted as expected yield.
+      </div>
+      <div class="nul" style="min-width:0">
+        <b>The LCA fallback is not implemented.</b> Panel <b>g</b> measures it as a post-hoc analysis over the real
+        classifier's candidate lists. It is not in <code>classify.py</code>, and adding it needs a decision about how a
+        coarse call is represented downstream so an <code>Immune</code> row is never mistaken for a leaf call.
+      </div>
+      <div class="nul" style="min-width:0">
+        <b>No spatial information is used.</b> Each cell is classified independently. Methods that borrow strength from
+        neighbours (CELESTA, STELLAR) resolve exactly the marginal cells that end up Ambiguous here — but adopting one
+        is a different architecture, not a tuning change.
+      </div>
+      <div class="nul" style="min-width:0">
+        <b>A degraded marker fails quietly toward abstention.</b> Both p-values are forced to 1.0, so the marker is
+        <code>free</code> for every cell at every α and the yield loss looks exactly like a bad operating point. Only
+        <code>degraded_markers</code> in the QC JSON distinguishes them.
+      </div>
+    </div>
+  </section>
+
+  <p class="caption"><b>Supplementary Figure S5 — where phenotyping yield goes.</b>
+    <b>(a)</b> Constraint pruning takes the 2<sup>12</sup> lineage cube to 104 feasible patterns over 13 named
+    phenotypes, and is not the bottleneck. <b>(b)</b> Each marker is resolved independently into
+    <code>pos</code>/<code>neg</code>/<code>free</code>/<code>contra</code> by two one-sided conformal p-values
+    thresholded at α; <code>free</code> and <code>contra</code> occupy opposite corners of that decision square, which
+    is the origin of the non-monotonicity in <b>(e)</b>. <b>(c)</b> A <code>free</code> marker constrains nothing, so a
+    cell commits only when the surviving patterns share one phenotype <i>name</i>; the constraint graph absorbs free
+    markers below a closed gate but cannot absorb them across sibling leaves, and an undetermined root gate is
+    unrecoverable. <b>(d)</b> On 20,000 simulated cells with known truth the shipped panel commits 6.5% at 94.7%
+    accuracy, with a median of 10 of 12 markers undetermined — the loss is abstention, not error. <b>(e)</b> Yield
+    against α peaks near 0.05–0.1 and collapses beyond it as cells convert from Ambiguous to Artefact, while accuracy
+    falls monotonically: a precision/recall dial that must be chosen deliberately. <b>(f)</b> The applied α is selected
+    by conformal risk control over a fixed grid, falling back to the <i>most conservative</i> grid value when no
+    candidate clears the bound; here a single audited marker pair set the level for all twelve markers.
+    <b>(g)</b> Four improvements, the largest of which reports the deepest common ancestor of the candidate set instead
+    of discarding the cell. <b>(h)</b> The governing parameters and the three QC fields that separate a wrong operating
+    point from broken calibration. <b>(i)</b> Limits: the measurements are simulated, the ancestor fallback is analysed
+    but not implemented, no spatial context is used, and a degraded marker is indistinguishable from a bad α without
+    the QC JSON. Supplementary Figure <b>S1</b> places <code>COMPILE_PANEL</code> and <code>PHENOTYPE</code> in the
+    whole workflow.
+    <span class="footnote">Parameter defaults, the α grid, the sign rule, the risk-control fallback and the constraint
+    split are read verbatim from the pipeline source (<code>nextflow.config</code>:253–257,
+    <code>bin/phenotype_cells.py</code>:38 and 165–184,
+    <code>bin/utils/phenotyping/conformal.py</code>:110–143,
+    <code>bin/utils/phenotyping/crc.py</code>:27 and 115,
+    <code>bin/utils/phenotyping/classify.py</code>:92 and 196–200,
+    <code>bin/utils/phenotyping/constraints.py</code>:158–188,
+    <code>bin/utils/phenotyping/feasible.py</code>:64–76,
+    <code>bin/utils/phenotyping/calibration.py</code>:142, <code>panel.yaml</code>). Yield, accuracy, sign-resolution
+    and ancestor-fallback figures are measured by running the unmodified production phenotyper on a simulated
+    20,000-cell cohort compiled from <code>panel.yaml</code>. External comparisons: TRACERx-PHLEX/TYPEx
+    (Nat. Commun. 2024) for the unassigned-cell fallback and its 44% → 4.7% reduction; REDSEA
+    (Front. Immunol. 2021) for boundary spillover compensation; CELESTA (Nat. Methods 2022) and STELLAR
+    (Nat. Methods 2022) for spatially-informed annotation.</span>
+  </p>
+</div>
+</body>
+</html>

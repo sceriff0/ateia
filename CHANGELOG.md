@@ -623,21 +623,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   authorised):** row order in the three manifests changes; contents and column order do not.
 
 ### Removed
-- **Automated panel-agnostic phenotyping is extracted off this branch, and preserved
-  intact on `feat/automated-phenotyping` (at `56a3a46`).** It is work in progress and
-  is parked there rather than deleted. Gone from here: `COMPILE_PANEL` and `PHENOTYPE`
-  (`bin/compile_panel.py`, `bin/phenotype_cells.py`, `bin/utils/phenotyping/`), the five
-  parameters `panel_spec` / `panel_model` / `pheno_alpha` / `pheno_min_cal` /
-  `pheno_max_enumerate` (the params block now declares 75, was 80), the `phenotyping/`
-  publish kind, `assets/import_phenotype.groovy`, `panel.yaml`, and 22 test files
-  (20 pytest + `tests/modules/{compile_panel,phenotype}.nf.test`). `EXPORT_GEOJSON` is
-  back to a four-slot input tuple and emits the constant `"Cell"` classification with no
-  `panel_model.json` sidecar — gate downstream in QuPath/FlowPath. The one case in
-  `test_export_geojson_phenotype.py` that was NOT about phenotyping — the constant
-  `"Cell"`, no-stamped-`id` contract — survives as `tests/test_export_geojson.py`.
-  The FlowPath-side phenotype join (`bin/join_flowpath.py`,
-  `export_spatialdata.py --attach-phenotypes`) is unaffected; it is a different,
-  post-pipeline feature.
 - **`reg_tiled_fanout` is gone, along with the single-task `TILED_REGISTER` path it
   selected.** STARE now has exactly one execution shape: the per-tile fan-out
   `TILED_COARSE` → `TILED_REG_TILE` (×tiles) → `TILED_SOLVE` → `TILED_STITCH`. Its memory is
@@ -678,8 +663,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.0.0] - 2026-07-29
 
 First public release. End-to-end multiplex WSI processing: preprocessing, registration,
-segmentation, per-cell quantification, and QuPath-compatible GeoJSON + pyramidal
-OME-TIFF export.
+segmentation, per-cell quantification, optional phenotyping, and QuPath-compatible
+GeoJSON + pyramidal OME-TIFF export.
 
 ### Added
 - **Preprocessing** — BaSiC illumination correction with FOV tiling; Bio-Formats/ND2 →
@@ -695,6 +680,8 @@ OME-TIFF export.
   and CellSAM; GPU or CPU; configurable nuclei→whole-cell expansion.
 - **Quantification** — per-cell morphology and per-channel intensity; optional
   per-compartment (Nucleus / Cytoplasm / Cell) signal and expanded Mean/Sum statistics.
+- **Phenotyping (optional, panel-agnostic)** — conformal-risk-controlled cell-type
+  assignment when a panel is supplied (`panel_spec` / `panel_model`); skipped by default.
 - **Reference-free segmentation-quality evaluation** — CellSegmentationEvaluator
   `QualityScore` with a `cse_max_pixels` downsample cap.
 - **Export** — QuPath-compatible `cells.geojson` and pyramidal OME-TIFF; configurable

@@ -6,7 +6,7 @@
  * once in nextflow_schema.json and enforced by nf-schema's validateParameters()
  * at the top of workflows/mirage.nf. What remains below is what no JSON Schema
  * can express: cross-parameter rules (--stop must not precede --start,
- * --expanded_quantification implies --quantify_compartments), mode-conditional
+ * --quantify_statistics with Mean+Sum implies --quantify_compartments), mode-conditional
  * rules (add_cycle), filesystem prerequisites, and plain control-flow helpers.
  */
 class ParamUtils {
@@ -202,6 +202,22 @@ class ParamUtils {
     }
 
     /**
+     * add_cycle does NOT run phenotyping: the incremental subworkflow has no
+     * COMPILE_PANEL/PHENOTYPE, and EXPORT_GEOJSON reuses the cell-contours file as a
+     * placeholder in the phenotype/model_config slots. If a panel were configured,
+     * EXPORT_GEOJSON's arg guard (params.panel_spec || params.panel_model) would activate
+     * --phenotypes/--panel_model against that placeholder and mis-classify. Reject the
+     * combination at launch rather than silently emit a wrong cells.geojson.
+     */
+    static void validateAddCyclePhenotyping(Map params) {
+        if (params.panel_spec || params.panel_model) {
+            throw new IllegalArgumentException(
+                "mode='add_cycle' does not support phenotyping. Unset --panel_spec / --panel_model " +
+                "for the incremental run — the new cycle inherits the base run's classification.")
+        }
+    }
+
+    /**
      * add_cycle runs a FIXED path — new-cycle samplesheet -> preprocess -> register against
      * the frozen prior reference -> quantify -> export — there is no --start/--stop choice
      * to make, and 'add_cycle' is not itself a member of STEP_ORDER (it is a mode, not a
@@ -229,7 +245,7 @@ class ParamUtils {
     }
 
     /**
-     * Resolve --quantify_compartments / --expanded_quantification / --embed_masks
+     * Resolve --quantify_compartments / --quantify_statistics / --embed_masks
      * into ONE immutable snapshot, the same seam --registration_method has
      * (subworkflows/local/registration.nf: read once, threaded down as an
      * argument, never re-read). Call this once per top-level entry point
@@ -246,47 +262,154 @@ class ParamUtils {
      * tests/test_compartment_mode_routing.py enforces that nothing else reads
      * the three raw params directly.
      */
+    /**
+     * The statistic vocabulary, mirroring bin/utils/measurements.py's STATISTICS.
+     *
+     * COMPOSED from base x normalisation, exactly as bin/utils/measurements.py
+     * composes it -- twelve names written out by hand in two languages is how two
+     * of them end up spelled differently.
+     * tests/test_statistic_vocabulary.py asserts this list, measurements.STATISTICS
+     * and nextflow_schema.json's enum are the same set.
+     *
+     * Canonical ORDER, not just membership: columns are emitted in this order so two
+     * runs asking for {Sum, Median} and {Median, Sum} produce identical output.
+     * REDSEA is the only WHOLE-CELL-ONLY base -- the compensation is a membrane
+     * correction with no nucleus/cytoplasm decomposition. The " Z" / " RobustZ"
+     * variants standardise across ONE PATIENT's cells.
+     */
+    static final List<String> BASE_STATISTICS = ['Median', 'Mean', 'Sum', 'REDSEA'].asImmutable()
+    static final List<String> NORMALIZATIONS = ['', ' Z', ' RobustZ'].asImmutable()
+    static final List<String> STATISTICS =
+        BASE_STATISTICS.collectMany { base -> NORMALIZATIONS.collect { base + it } }.asImmutable()
+
+    /**
+     * THE ONLY WAY TO READ params.quantify_statistics.
+     *
+     * Same three-shape problem MarkerUtils.markerList documents for
+     * params.nuclear_markers, and the same two silent failures:
+     *
+     *   ['Median','REDSEA']  nextflow.config / params file   - the intended shape
+     *   'REDSEA'             `--quantify_statistics REDSEA` on the CLI (an array
+     *                        cannot be given on a command line)
+     *   ['Median,REDSEA']    a params file with the list written as one comma string
+     *
+     * The bare String iterated as a List yields the CHARACTERS R,E,D,S,E,A. The
+     * one-element comma string is a valid Collection so nothing coerces it, and the
+     * single entry 'Median,REDSEA' matches no known statistic.
+     *
+     * An unknown name THROWS rather than being dropped: a typo'd 'Meidan' that
+     * silently produced no Median column would surface months later as missing data,
+     * not as an error. nextflow_schema.json enums the ARRAY form, but it cannot enum
+     * the string form (a `--quantify_statistics Median,REDSEA` command line), so this
+     * check is genuinely reachable rather than a duplicate of the schema.
+     */
+    static List<String> statisticsList(def statistics) {
+        def raw
+        if (statistics == null)                      raw = []
+        else if (statistics instanceof CharSequence) raw = [statistics]
+        else if (statistics instanceof Object[])     raw = statistics as List
+        else if (statistics instanceof Collection)   raw = statistics as List
+        else                                         raw = [statistics]
+
+        def asked = raw
+            // COMMA only, never whitespace -- composed names carry a space
+            // ("Mean Z", "Median RobustZ"), and a /[,\s]+/ split would shred them
+            // into an unknown statistic "Z".
+            .collectMany { it == null ? [] : it.toString().split(/,/) as List }
+            .collect { it?.trim() }
+            .findAll { it }
+        if (!asked) {
+            throw new IllegalArgumentException(
+                "No statistics configured. Pass params.quantify_statistics; its " +
+                "default lives in nextflow.config and nowhere else. Valid: " +
+                STATISTICS.join(', ')
+            )
+        }
+        def byUpper = STATISTICS.collectEntries { [(it.toUpperCase()): it] }
+        def chosen = [] as Set
+        asked.each { name ->
+            def hit = byUpper[name.toUpperCase()]
+            if (!hit) {
+                throw new IllegalArgumentException(
+                    "Unknown statistic '${name}' in --quantify_statistics. Valid: " +
+                    STATISTICS.join(', ')
+                )
+            }
+            chosen << hit
+        }
+        return STATISTICS.findAll { chosen.contains(it) }
+    }
+
     static Map compartmentMode(Map params) {
+        def stats = statisticsList(params.quantify_statistics)
         return [
             compartments: params.quantify_compartments as boolean,
-            expanded    : params.expanded_quantification as boolean,
+            statistics  : stats.asImmutable(),
             embedMasks  : params.embed_masks as boolean,
         ].asImmutable()
     }
 
     /**
-     * Cross-parameter rules for the compartment-quantification trio, both derived
-     * from `mode` (see compartmentMode above) rather than read raw:
+     * The REDSEA trio, resolved once — same shape as compartmentMode above.
      *
-     *   expanded ⇒ compartments      (long-standing: per-compartment Mean/Sum
-     *                                 needs a per-compartment signal to sum)
-     *   embedMasks ⇒ compartments && expanded
-     *                                 (assemble_export.nf's embed_masks gate --
-     *                                 `params.embed_masks && params.quantify_compartments
-     *                                 && params.expanded_quantification` -- decides
-     *                                 whether the pyramid gets a mask series (Image:1).
-     *                                 --embed_masks true with either sibling off used to
-     *                                 exit 0 and silently publish a pyramid with NO mask
-     *                                 series; that run only fails months later, when its
-     *                                 --outdir is handed to a --prior_outdir add_cycle run
-     *                                 and EXTRACT_MASK_SERIES finds no Image:1.)
+     * There is deliberately NO `params.redsea` boolean: listing 'REDSEA' in
+     * params.quantify_statistics is the switch. Two parameters expressing one fact
+     * is the duplication that lets them disagree.
+     *
+     * REDSEA (Bai et al., Front. Immunol. 2021;12:652631) is read exactly once on
+     * the quantification path, in subworkflows/local/quantify_markers.nf, and
+     * passed down as data. This method exists so the CROSS-parameter rules below
+     * run at validation time, before any process is instantiated, rather than
+     * surfacing as an empty column set at the end of a long run.
      */
-    static void validateCompartmentQuant(Map mode) {
-        if (mode.expanded && !mode.compartments) {
+    static Map redseaMode(Map params) {
+        return [
+            enabled: statisticsList(params.quantify_statistics).contains('REDSEA'),
+            markers: params.redsea_markers,
+        ].asImmutable()
+    }
+
+    /**
+     * The ONE cross-parameter rule REDSEA has: enabled ⇒ a non-empty marker list.
+     *
+     * REDSEA with no markers runs REDSEA_MATRIX for every patient — the whole mask
+     * pass — and then compensates nothing. The run is green, every output is
+     * byte-identical to a `--redsea false` run, and the only symptom is a missing
+     * set of columns nobody thinks to look for.
+     *
+     * Nothing else belongs here. `--redsea_element_size` must be a positive integer
+     * and `--redsea_element_shape` must be one of three names, but those are
+     * SINGLE-parameter range/enum rules, so nextflow_schema.json owns them and
+     * `validateParameters()` runs first — a copy here would be a guard that can
+     * never fire (verified: `--redsea_element_size 0` is rejected by the schema
+     * with "0 is less than 1" before this method is reached).
+     */
+    static void validateRedsea(Map mode) {
+        if (!mode.enabled) return
+
+        def markers = mode.markers
+        def flat = (markers instanceof CharSequence) ? [markers]
+                 : (markers instanceof Object[])     ? (markers as List)
+                 : (markers instanceof Collection)   ? (markers as List)
+                 : (markers == null ? [] : [markers])
+        def names = flat
+            .collectMany { it == null ? [] : it.toString().split(/[,]/) as List }
+            .collect { it?.trim() }
+            .findAll { it }
+        if (!names) {
             throw new IllegalArgumentException(
-                "--expanded_quantification requires --quantify_compartments to be true."
+                "'REDSEA' is in --quantify_statistics but --redsea_markers is empty. REDSEA is opt-in per " +
+                "marker because it is only valid for SURFACE/MEMBRANE markers: the " +
+                "method assumes the signal sits on the membrane and is brighter in " +
+                "the source cell than in the leak. With no markers the run would " +
+                "compute the compensation geometry for every patient and then " +
+                "compensate nothing, producing output identical to omitting it " +
+                "with no error anywhere. Name the surface markers, e.g. " +
+                "--redsea_markers CD3,CD8,CD20, or drop REDSEA from " +
+                "--quantify_statistics."
             )
         }
-        if (mode.embedMasks && !(mode.compartments && mode.expanded)) {
-            throw new IllegalArgumentException(
-                "--embed_masks requires both --quantify_compartments and " +
-                "--expanded_quantification to be true -- without both, the pyramid's " +
-                "mask series (Image:1) is never written, and a run advertising " +
-                "--embed_masks that silently omits it is only discovered later, when " +
-                "this --outdir is handed to mode='add_cycle' as --prior_outdir and " +
-                "EXTRACT_MASK_SERIES finds no Image:1 to reuse."
-            )
-        }
+
     }
 
     static List requiredColumnsForStep(String step) {

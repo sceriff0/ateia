@@ -41,7 +41,8 @@
       "compartment": "Cytoplasm",
       "statistic": "Mean",
       "neg_source": {
-        "type": "gmm"
+        "type": "requires_neg",
+        "marker": "CD3"
       },
       "pos_source": {
         "type": "gmm"
@@ -52,7 +53,8 @@
       "compartment": "Cytoplasm",
       "statistic": "Mean",
       "neg_source": {
-        "type": "gmm"
+        "type": "requires_neg",
+        "marker": "CD3"
       },
       "pos_source": {
         "type": "gmm"
@@ -342,7 +344,8 @@
   "runtime": {
     "alpha_target": 0.05,
     "min_calibration": 50,
-    "statistic_default": "Median"
+    "statistic_default": "Median",
+    "ambiguous_fallback": "ancestor"
   },
   "palette": {
     "Tumour": [
@@ -398,9 +401,30 @@
     "CD8",
     "PanCK"
   ],
+  "lineage_order": [
+    "CD3",
+    "CD4",
+    "CD45",
+    "CD8",
+    "PanCK"
+  ],
+  "phenotype_order": [
+    "CD4_T",
+    "CD8_T",
+    "Immune",
+    "T_cell",
+    "Tumour",
+    "Unclassified"
+  ],
+  "outcome_names": [
+    "Ambiguous",
+    "Conflict",
+    "Artefact",
+    "Unclassified"
+  ],
   "state_markers": [
     "Ki67"
   ],
   "spec_version": "panel@sha256:c978013ef9b73f935b3ea1012021255e6dcaa6f97a79f3b0190e9e887a590502",
-  "compiled_at": "2026-07-28T17:04:03.849830+00:00"
+  "compiled_at": "2026-08-14T16:47:03.932125+00:00"
 }

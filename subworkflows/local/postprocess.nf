@@ -7,6 +7,8 @@
 
 include { SPLIT_CHANNELS           } from '../../modules/local/split_channels'
 include { MERGE_QUANT_CSVS         } from '../../modules/local/merge_quant_csvs'
+include { COMPILE_PANEL            } from '../../modules/local/compile_panel'
+include { PHENOTYPE                } from '../../modules/local/phenotype'
 include { GENERATE_POSTPROCESSING_QC    } from '../../modules/local/generate_postprocessing_qc'
 include { EXPORT_SPATIALDATA } from '../../modules/local/export_spatialdata'
 // Shared with subworkflows/local/add_cycle.nf — see those files for why the shaping
@@ -90,7 +92,7 @@ workflow POSTPROCESSING {
     // streaming hint) all live in QUANTIFY_MARKERS, shared with add_cycle.nf.
     // The --debug_channels views for this whole chain moved there with it, so this
     // file no longer carries a debug-view helper of its own.
-    QUANTIFY_MARKERS(SPLIT_CHANNELS.out.channels, ch_mask)
+    QUANTIFY_MARKERS(SPLIT_CHANNELS.out.channels, ch_mask, compartment_mode)
     ch_grouped_csvs = QUANTIFY_MARKERS.out.grouped_csv
 
     // Join grouped intensity CSVs with morphology.csv (segmentation.nf's
@@ -105,9 +107,45 @@ workflow POSTPROCESSING {
 
     MERGE_QUANT_CSVS(ch_for_quant_merge)
 
+    // ========================================================================
+    // PHENOTYPING (optional) - compile panel + classify cells per patient
+    // ========================================================================
     // ch_contours arrives via take: (segmentation.nf's EXTRACT_CELL_PROPERTIES.out.contours,
     // already re-keyed to patient_id) — nothing to derive here any more.
     ch_nuc_contours_for_export = compartment_mode.compartments ? ch_nucleus_contours : ch_contours
+
+    def do_pheno = (params.panel_spec != null) || (params.panel_model != null)
+    def ch_model_config = Channel.empty()
+    def ch_phenotypes = Channel.empty()
+    if (do_pheno) {
+        if (params.panel_spec) {
+            COMPILE_PANEL(Channel.value(file(params.panel_spec)))
+            ch_model_config = COMPILE_PANEL.out.model_config.first()
+        } else {
+            ch_model_config = Channel.value(file(params.panel_model))
+        }
+
+        ch_pheno_in = MERGE_QUANT_CSVS.out.merged_csv
+            .map { meta, csv -> [meta.patient_id, meta, csv] }
+            .join(ch_morphology_by_patient, by: 0)
+            .map { _pid, meta, csv, morph -> [meta, csv, morph] }
+        PHENOTYPE(ch_pheno_in, ch_model_config)
+        ch_phenotypes = PHENOTYPE.out.phenotypes
+    }
+
+    // Phenotype/model-config/QC slots for EXPORT_GEOJSON, keyed by patient_id.
+    // With a panel: PHENOTYPE's phenotypes.csv and phenotype_qc.json (joined on
+    // patient_id, since they are separate emits of the same task) plus the run-level
+    // compiled model config.
+    // Without: reuse the contours file as harmless placeholders; the module guard
+    // (params.panel_spec || params.panel_model) suppresses the args. The placeholder
+    // arity must match the real one or the join downstream silently mismatches.
+    def ch_pheno_extras = do_pheno
+        ? ch_phenotypes.map { meta, ph -> [meta.patient_id, ph] }
+            .join(PHENOTYPE.out.qc.map { meta, qc -> [meta.patient_id, qc] })
+            .combine(ch_model_config)
+            .map { pid, ph, qc, cfg -> [pid, ph, cfg, qc] }
+        : ch_contours.map { pid, contours_json -> [pid, contours_json, contours_json, contours_json] }
 
     // ========================================================================
     // MERGE - Combine split channel TIFFs with segmentation mask (per patient)
@@ -161,6 +199,7 @@ workflow POSTPROCESSING {
         MERGE_QUANT_CSVS.out.merged_csv,
         ch_contours,
         ch_nuc_contours_for_export,
+        ch_pheno_extras,
         ch_split_grouped,
         ch_mask,
         compartment_mode
@@ -332,6 +371,10 @@ workflow POSTPROCESSING {
         .mix(MERGE_QUANT_CSVS.out.size_log)
         .mix(ASSEMBLE_EXPORT.out.size_logs)
 
+    if (do_pheno) {
+        ch_size_logs = ch_size_logs.mix(PHENOTYPE.out.size_log)
+    }
+
     // Add postprocessing QC size logs if enabled
     if (!params.skip_postprocessing_qc) {
         ch_size_logs = ch_size_logs
@@ -347,6 +390,13 @@ workflow POSTPROCESSING {
         .mix(MERGE_QUANT_CSVS.out.versions.first())
         .mix(ASSEMBLE_EXPORT.out.versions)
         .mix(CHECKPOINT_WRITER.out.versions.first())
+
+    if (do_pheno) {
+        ch_versions = ch_versions.mix(PHENOTYPE.out.versions.first())
+        if (params.panel_spec) {
+            ch_versions = ch_versions.mix(COMPILE_PANEL.out.versions.first())
+        }
+    }
 
     if (!params.skip_postprocessing_qc) {
         ch_versions = ch_versions

@@ -250,6 +250,48 @@ ARGPARSE_DEFAULT_ALLOWLIST = {
             "is coincidental."
         ),
     },
+    "redsea_matrix.py:--pixel-size": {
+        "reason": (
+            "Advisory only, and default=None is what turns the advice OFF. This "
+            "flag feeds nothing but the 'recommended_element_size' line in the "
+            "per-patient REDSEA QC JSON -- the band depth actually used comes "
+            "from --element-size or from calibration against the mask. With no "
+            "value the line is simply omitted, which is the right behaviour for "
+            "standalone invocation. conf/modules.config always passes "
+            "${params.pixel_size}, so the default is never reached in-pipeline; "
+            "hardcoding 0.325 here would be a second declaration of it."
+        ),
+    },
+    "redsea_matrix.py:--cell-diameter-um": {
+        "reason": (
+            "Same contract as this script's --pixel-size above: advisory only, "
+            "feeding the QC JSON's 'recommended_element_size' line and nothing "
+            "else. default=None omits the line. conf/modules.config always passes "
+            "${params.redsea_cell_diameter_um}."
+        ),
+    },
+    "redsea_matrix.py:--outdir": {
+        "reason": (
+            "Same non-correspondence as quantify.py's and "
+            "extract_cell_properties.py's --outdir: modules/local/redsea_matrix.nf "
+            "hardcodes `--outdir .` (a literal, not `${params.outdir}`) because "
+            "Nextflow already isolates each task in its own work dir and "
+            "publishDir copies the results out. The name-equality match to the "
+            "top-level `outdir` param is coincidental."
+        ),
+    },
+    "quantify.py:--redsea-markers": {
+        "reason": (
+            "None and [] are the same state -- 'no markers opted in' -- so there "
+            "is no drift to catch here, only a type difference between argparse "
+            "(which parses a comma string) and nextflow.config (which holds a "
+            "list). The Python side cannot hold [] as an argparse default without "
+            "changing the flag's type away from the comma string "
+            "conf/modules.config's redseaMarkerList() produces, and there is no "
+            "default membership to declare twice: REDSEA is opt-in per marker "
+            "precisely because it is only valid for surface/membrane markers."
+        ),
+    },
     "segment_instantseg.py:--pixel-size": {
         "reason": (
             "default=None is a real fallback, not a stale literal: the "

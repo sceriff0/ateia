@@ -7,7 +7,7 @@
 //
 // Both SEGMENTATION and READ_SEGMENTED_CHECKPOINT gained a second take: input,
 // compartment_mode -- Task 4 (arch-B-split)'s seam for --quantify_compartments /
-// --expanded_quantification / --embed_masks, resolved once by workflows/mirage.nf
+// --quantify_statistics / --embed_masks, resolved once by workflows/mirage.nf
 // in production and threaded down the same way here. Every test below sets
 // input[1] accordingly. The two "compartments off"/"no compartments" tests pass a
 // LITERAL map ([compartments: false, ...]) that DIVERGES from params (left at its
@@ -88,7 +88,7 @@ nextflow_workflow {
         when {
             params {
                 // Deliberately NOT overriding quantify_compartments/
-                // expanded_quantification here (both default true) -- input[1]
+                // quantify_statistics here -- input[1]
                 // below is a LITERAL map with compartments: false, so this proves
                 // SEGMENTATION honours the compartment_mode ARGUMENT, not a re-read
                 // of the (here, conflicting) global param. No module downstream of
@@ -103,7 +103,7 @@ nextflow_workflow {
                     [[patient_id: 'P001', id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK', 'SMA']],
                      file('$projectDir/tests/testdata/P001_ref.ome.tiff')]
                 ])
-                input[1] = [compartments: false, expanded: false, embedMasks: false]
+                input[1] = [compartments: false, statistics: ['Median'], embedMasks: false]
                 """
             }
         }
@@ -210,7 +210,7 @@ nextflow_workflow {
         when {
             params {
                 // Deliberately NOT overriding quantify_compartments/
-                // expanded_quantification (both default true) -- input[1] below is
+                // quantify_statistics -- input[1] below is
                 // a LITERAL map with compartments: false, proving
                 // READ_SEGMENTED_CHECKPOINT honours the compartment_mode ARGUMENT
                 // (which gates whether EXTRACT_NUCLEI_PROPERTIES runs at all), not
@@ -221,7 +221,7 @@ nextflow_workflow {
             workflow {
                 """
                 input[0] = "$projectDir/tests/testdata/valid_checkpoint_segmented_no_compartments.csv"
-                input[1] = [compartments: false, expanded: false, embedMasks: false]
+                input[1] = [compartments: false, statistics: ['Median'], embedMasks: false]
                 """
             }
         }

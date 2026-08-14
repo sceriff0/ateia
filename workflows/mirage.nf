@@ -64,14 +64,18 @@ workflow MIRAGE {
     boolean run_segmentation   = ParamUtils.shouldRun('segmentation', params.start, effective_stop)
     boolean run_postprocessing = ParamUtils.shouldRun('postprocessing', params.start, effective_stop)
 
-    // --quantify_compartments / --expanded_quantification / --embed_masks, resolved
+    // --quantify_compartments / --quantify_statistics / --embed_masks, resolved
     // ONCE here (the single decision site on every path, standard and add_cycle
     // alike) and threaded down as an argument -- the same seam
     // --registration_method has in subworkflows/local/registration.nf. Nothing
     // below this line should read params.quantify_compartments /
-    // params.expanded_quantification / params.embed_masks directly;
+    // params.quantify_statistics / params.embed_masks directly;
     // tests/test_compartment_mode_routing.py enforces that.
     def compartment_mode = ParamUtils.compartmentMode(params)
+    // REDSEA's own resolved-once map. Validated on both paths below, because
+    // both reach QUANTIFY_MARKERS -- add_cycle
+    // quantifies the new cycle's markers through the same subworkflow.
+    def redsea_mode = ParamUtils.redseaMode(params)
 
     /* -------------------- MODE: ADD_CYCLE -------------------- */
     if (params.mode == 'add_cycle') {
@@ -82,7 +86,8 @@ workflow MIRAGE {
         // registration — an accuracy bug at the label's source, not the label.
         ParamUtils.validateAddCycleStepFlags(params)
         ParamUtils.validateAddCycle(params.outdir, params.prior_outdir)
-        ParamUtils.validateCompartmentQuant(compartment_mode)
+        ParamUtils.validateAddCyclePhenotyping(params)  // add_cycle has no PHENOTYPE stage
+        ParamUtils.validateRedsea(redsea_mode)
         // add_cycle re-registers the new cycle via the classic VALIS_ADAPTER only; the
         // STARE 'tiled' backend is not wired into the incremental path — reject it loudly
         // rather than silently registering with VALIS.
@@ -153,7 +158,7 @@ workflow MIRAGE {
     }
 
     if (run_postprocessing) {
-        ParamUtils.validateCompartmentQuant(compartment_mode)
+        ParamUtils.validateRedsea(redsea_mode)
     }
 
     if (!params.input) {

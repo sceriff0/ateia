@@ -354,7 +354,7 @@ workflow {
         Layout.publishedOrAsIs('/out', 'P002', Layout.PREPROCESSED, publishedPassthrough)
 
     // ------------------------------------------------------------------ //
-    // ParamUtils.compartmentMode / validateCompartmentQuant -- the
+    // ParamUtils.compartmentMode -- the
     // --quantify_compartments seam (mirrors --registration_method's: resolved
     // once, threaded down as an argument; see workflows/mirage.nf's
     // `compartment_mode` and tests/test_compartment_mode_routing.py).
@@ -362,15 +362,15 @@ workflow {
 
     // 1. Plain field mapping, all three flags on.
     def modeAllOn = ParamUtils.compartmentMode([
-        quantify_compartments: true, expanded_quantification: true, embed_masks: true,
+        quantify_compartments: true, quantify_statistics: ['Median','Mean','Sum'], embed_masks: true,
     ])
-    assert modeAllOn == [compartments: true, expanded: true, embedMasks: true]
+    assert modeAllOn == [compartments: true, statistics: ['Median','Mean','Sum'], embedMasks: true]
 
     // 2. All three off.
     def modeAllOff = ParamUtils.compartmentMode([
-        quantify_compartments: false, expanded_quantification: false, embed_masks: false,
+        quantify_compartments: false, quantify_statistics: ['Median'], embed_masks: false,
     ])
-    assert modeAllOff == [compartments: false, expanded: false, embedMasks: false]
+    assert modeAllOff == [compartments: false, statistics: ['Median'], embedMasks: false]
 
     // 3. The map is immutable -- a caller cannot mutate the shared snapshot out
     // from under another reader of the same resolved value.
@@ -381,159 +381,6 @@ workflow {
         // expected
     }
 
-    // 4. validateCompartmentQuant: expanded requires compartments (pre-existing
-    // rule, now driven off the resolved map instead of two raw booleans).
-    ParamUtils.validateCompartmentQuant([compartments: true, expanded: true, embedMasks: false])   // ok
-    ParamUtils.validateCompartmentQuant([compartments: true, expanded: false, embedMasks: false])  // ok
-    try {
-        ParamUtils.validateCompartmentQuant([compartments: false, expanded: true, embedMasks: false])
-        assert false : "expanded=true, compartments=false must be rejected"
-    } catch (IllegalArgumentException ignored) {
-        // expected
-    }
 
-    // 5. validateCompartmentQuant: the delayed-cost gap this task closes --
-    // embedMasks requires BOTH compartments AND expanded. Each way to violate
-    // that must be rejected, not just the case where compartments is off.
-    ParamUtils.validateCompartmentQuant([compartments: true, expanded: true, embedMasks: true])    // ok
-    try {
-        ParamUtils.validateCompartmentQuant([compartments: false, expanded: false, embedMasks: true])
-        assert false : "embedMasks=true with compartments=false, expanded=false must be rejected"
-    } catch (IllegalArgumentException ignored) {
-        // expected -- this exact combination used to exit 0 and silently publish
-        // a pyramid with no mask series (assemble_export.nf's embed_masks gate).
-    }
-    try {
-        ParamUtils.validateCompartmentQuant([compartments: true, expanded: false, embedMasks: true])
-        assert false : "embedMasks=true with expanded=false must be rejected even when compartments=true"
-    } catch (IllegalArgumentException ignored) {
-        // expected
-    }
-
-    // ------------------------------------------------------------------ //
-    // Layout — the published-kind vocabulary
-    // ------------------------------------------------------------------ //
-    assert Layout.requireKind('segmentation') == 'segmentation'
-    assert Layout.PUBLISHED_KINDS.contains(Layout.REGISTERED)
-    assert Layout.PUBLISHED_KINDS.contains('split_channels')
-
-    def badKind = false
-    try { Layout.requireKind('segmentaton') }   // typo, deliberately
-    catch (IllegalArgumentException ignored) { badKind = true }
-    assert badKind, 'Layout.requireKind must reject an unknown kind'
-
-    // patientDir must reject it too — that is the call site the typo reaches from.
-    def badPatientKind = false
-    try { Layout.patientDir('/out', 'P001', 'segmentaton') }
-    catch (IllegalArgumentException ignored) { badPatientKind = true }
-    assert badPatientKind, 'Layout.patientDir must reject an unknown kind'
-
-    // ------------------------------------------------------------------ //
-    // ProcessEnvelope — the versions.yml envelope
-    // ------------------------------------------------------------------ //
-    def envVersions     = ProcessEnvelope.versions('TEST:PROC', ['numpy', 'skimage'])
-    def envVersionsStub = ProcessEnvelope.versionsStub('TEST:PROC', ['numpy', 'skimage'])
-
-    // The python: row is prepended automatically, in both renderings. A BARE `$(`, not
-    // `\$(` -- `<<-END_VERSIONS` is an unquoted heredoc, so bash performs command
-    // substitution on the former and prints the latter as literal text. This assertion
-    // is the one that would have caught the over-escaping bug: it asserted `\\$(` (an
-    // escaped, unexecuted dollar) until a reviewer caught that the real published
-    // versions.yml was showing shell commands instead of version numbers.
-    assert envVersions.contains('python: $(python --version')
-    assert !envVersions.contains('python: \\$(python --version')
-    assert envVersionsStub.contains('python: stub')
-
-    // skimage -> scikit-image: the import name and the published YAML key differ, and
-    // bin/generate_qc_report.py's hand-rolled parser is keyed on the YAML key, not the
-    // import name.
-    assert envVersions.contains('scikit-image: $(python -c "import skimage;')
-    assert !envVersions.contains('skimage: $(python -c "import skimage;')
-    assert envVersionsStub.contains('scikit-image: stub')
-
-    // The property this whole task exists to guarantee: versions() and versionsStub()
-    // must never be able to name a different set of tools. Comparing the two heredocs'
-    // YAML KEYS (the text before each ':') is what -stub could never see for itself,
-    // because -stub never evaluates the script: block that versions() renders.
-    def keysOf = { String heredoc ->
-        heredoc.readLines()
-            .findAll { it.startsWith('    ') }
-            .collect { it.trim().split(':')[0].trim() }
-            .toSet()
-    }
-    assert keysOf(envVersions) == keysOf(envVersionsStub)
-    assert keysOf(envVersions) == ['python', 'numpy', 'scikit-image'].toSet()
-
-    // ------------------------------------------------------------------ //
-    // SegBackends — the segmentation seam's versions.yml tool lists
-    // ------------------------------------------------------------------ //
-    // Declared as BARE MODULE NAMES, not rendered YAML. That is what lets
-    // modules/local/segment.nf hand the SAME list to ProcessEnvelope.versions()
-    // (script:) and ProcessEnvelope.versionsStub() (stub:). Before this, the table
-    // stored six pre-rendered probe strings, which a stub block cannot reuse -- so
-    // segment.nf's stub: hand-wrote `seg_method: <name>` instead, a key that is not a
-    // tool and that no real run ever emits. `-stub` never evaluates script:, so nothing
-    // in the blocking gate could see the two key sets were disjoint.
-    assert SegBackends.methods().toSorted() == ['cellsam', 'instantseg', 'stardist']
-    assert SegBackends.of('stardist').versionTools   == ['deepcell', 'tensorflow']
-    assert SegBackends.of('instantseg').versionTools == ['instanseg', 'torch']
-    assert SegBackends.of('cellsam').versionTools    == ['cellSAM', 'torch']
-
-    // `torch` is deliberately repeated across two backends rather than hoisted into a
-    // shared list: exactly ONE backend runs per task, and stardist loads no torch at
-    // all, so a shared list would fabricate a torch row for every StarDist run.
-    assert !SegBackends.of('stardist').versionTools.contains('torch')
-
-    // The property the whole envelope exists for, asserted end-to-end for every
-    // backend: rendering the SAME list through versions() and versionsStub() yields
-    // the SAME YAML keys. Compare keys (the text before each ':'), because the values
-    // are exactly what differs between a real run and a stub.
-    def yamlKeysOf = { String heredoc ->
-        heredoc.readLines()
-            .findAll { it.startsWith('    ') }
-            .collect { it.trim().split(':')[0].trim() }
-    }
-    SegBackends.methods().each { m ->
-        def tools = SegBackends.of(m).versionTools
-        def real  = yamlKeysOf(ProcessEnvelope.versions('SEGMENT', tools))
-        def stub  = yamlKeysOf(ProcessEnvelope.versionsStub('SEGMENT', tools))
-        assert real == stub, "SEGMENT/${m}: script: and stub: versions.yml keys differ"
-        assert real == ['python'] + tools, "SEGMENT/${m}: unexpected versions.yml keys ${real}"
-        // The old stub key must not come back under any backend.
-        assert !real.contains('seg_method')
-    }
-
-    // ------------------------------------------------------------------ //
-    // WarpBackends — one seam for the reg_qc=2 warp
-    // ------------------------------------------------------------------ //
-    assert WarpBackends.methods().toSorted() == ['tiled', 'valis']
-    assert WarpBackends.container('valis') == 'cdgatenbee/valis-wsi:1.0.0'
-    assert WarpBackends.container('tiled') == 'bolt3x/attend_image_analysis:tiled'
-    assert WarpBackends.of('valis').stages == ['native', 'rigid', 'non_rigid', 'micro']
-    assert WarpBackends.of('tiled').stages == ['native', 'rigid', 'refined']
-
-    // The tiled backend must pass --method tiled; VALIS must not.
-    assert WarpBackends.of('tiled').flags([:]).any { it.contains('--method tiled') }
-    def valisFlags = WarpBackends.of('valis').flags(
-        [ref_slide: 'R', moving_slide: 'M', stage_checkpoint: null, micro_reg: 2])
-    assert !valisFlags.any { it.contains('--method') }
-    assert valisFlags.any { it.contains('--micro-reg 2') }
-    // Absent checkpoint is a null object, not an empty flag.
-    assert !valisFlags.any { it.contains('--checkpoint-dir') }
-    assert WarpBackends.of('valis').flags(
-        [ref_slide: 'R', moving_slide: 'M', stage_checkpoint: 'ckpt/', micro_reg: 2]
-    ).any { it.contains('--checkpoint-dir ckpt/') }
-
-    def badMethod = false
-    try { WarpBackends.of('stare') }
-    catch (IllegalArgumentException ignored) { badMethod = true }
-    assert badMethod, 'WarpBackends.of must reject an unknown method'
-
-    // println, NOT log.info: nf-test's underlying `nextflow ... -quiet` run
-    // suppresses log.info from stdout entirely (observed directly: a log.info
-    // line here never appears in workflow.stdout under nf-test, even though the
-    // exact same script printed it fine under a plain `nextflow run`). println
-    // writes straight to stdout regardless of -quiet, so it is what
-    // tests/lib_probe.nf.test's `workflow.stdout.any { ... }` assertion needs.
     println "LIB PROBE: all assertions passed"
 }

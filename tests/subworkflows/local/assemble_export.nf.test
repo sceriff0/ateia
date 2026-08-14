@@ -1,30 +1,30 @@
 /*
- * ASSEMBLE_EXPORT — EXPORT_GEOJSON's four-slot input tuple plus the embed_masks pyramid
+ * ASSEMBLE_EXPORT — EXPORT_GEOJSON's six-slot input tuple plus the embed_masks pyramid
  * gate, shared by POSTPROCESSING and ADD_CYCLE (which carried verbatim copies of both).
  *
  * UNVERIFIED LOCALLY (see CLAUDE.md's "Verification reality" -- nf-test hangs under
- * qemu on this host): take: gained a 6th input, compartment_mode -- Task 4
- * (arch-B-split)'s seam for --quantify_compartments / --expanded_quantification /
+ * qemu on this host): take: gained a 7th input, compartment_mode -- Task 4
+ * (arch-B-split)'s seam for --quantify_compartments / --quantify_statistics /
  * --embed_masks, replacing this workflow's own former `params.embed_masks &&
- * params.quantify_compartments && params.expanded_quantification` raw read.
+ * params.quantify_statistics` raw read.
  *
- * The two "embed_masks on"/"embed_masks off" tests pass input[5] as a LITERAL map
+ * The two "embed_masks on"/"embed_masks off" tests pass input[6] as a LITERAL map
  * that DIVERGES from (in fact conflicts with) the embed_masks value set in
  * params{} -- proving ASSEMBLE_EXPORT honours the compartment_mode ARGUMENT, not a
  * re-read of the global param, the same way tests/subworkflows/add_cycle.nf.test's
  * registration_method='tiled' + literal 'valis' proves the literal wins for that
- * seam. `ParamUtils.compartmentMode(params)` (computing input[5] FROM the same
+ * seam. `ParamUtils.compartmentMode(params)` (computing input[6] FROM the same
  * params{} block) would prove nothing beyond "the resolver maps params
  * correctly" -- already covered by tests/lib_probe.nf -- since an argument that
  * always agrees with a global params re-read cannot distinguish "reads the
  * argument" from "still reads params.embed_masks directly". The
  * "quantify_compartments off" test is the one exception that keeps params and
- * input[5] in agreement, and says why at its own params{} block: its
+ * input[6] in agreement, and says why at its own params{} block: its
  * geojson_wholecell assertion depends on modules/local/export_geojson.nf's own
  * direct (out-of-seam) read of params.quantify_compartments, so the raw param
  * cannot diverge from what the test needs there. The first ("assembles the export
  * tuple...") test is the baseline positive path and keeps
- * ParamUtils.compartmentMode(params) for input[5].
+ * ParamUtils.compartmentMode(params) for input[6].
  *
  * What can and cannot be asserted here:
  *   - The gate itself is observable: when embed_masks is OFF the mask channel must never
@@ -33,6 +33,9 @@
  *   - When the gate is ON, MERGE_AND_PYRAMID's stub writes the same pyramid.ome.tiff
  *     regardless of what was staged, so "the masks were actually embedded" is NOT
  *     covered here — only that the join is total for patients present in both channels.
+ *   - The phenotype/model-config slots are `path` inputs never read in stub mode; the
+ *     tests pin that the placeholder shape (both slots = the contours file, the add_cycle
+ *     and no-panel case) and the real shape both reach EXPORT_GEOJSON.
  */
 nextflow_workflow {
 
@@ -54,7 +57,7 @@ nextflow_workflow {
                 outdir = "$outputDir"
                 embed_masks = false
                 quantify_compartments = true
-                expanded_quantification = true
+                quantify_statistics = ['Median','Mean','Sum']
                 pixel_size = 0.325
                 pyramid_resolutions = 8
                 pyramid_scale = 2
@@ -70,7 +73,11 @@ nextflow_workflow {
                 ])
                 input[1] = Channel.fromList([['P001', contours], ['P002', contours]])
                 input[2] = Channel.fromList([['P001', contours], ['P002', contours]])
-                input[3] = Channel.fromList([
+                // No-panel / add_cycle placeholder shape: both slots reuse the contours file.
+                // 4 elements: [pid, phenotypes, model_config, phenotype_qc]. Placeholders, as in
+                // the no-panel branch of postprocess.nf -- the arity must still match.
+                input[3] = Channel.fromList([['P001', contours, contours, contours], ['P002', contours, contours, contours]])
+                input[4] = Channel.fromList([
                     [[patient_id: 'P001', id: 'P001', is_reference: false],
                      [file('$projectDir/tests/testdata/sample_DAPI.tif',  checkIfExists: true),
                       file('$projectDir/tests/testdata/sample_PANCK.tif', checkIfExists: true)]],
@@ -79,8 +86,8 @@ nextflow_workflow {
                       file('$projectDir/tests/testdata/sample_SMA.tif',   checkIfExists: true)]]
                 ])
                 // embed_masks is off, so this channel must never be consumed.
-                input[4] = Channel.empty()
-                input[5] = ParamUtils.compartmentMode(params)
+                input[5] = Channel.empty()
+                input[6] = ParamUtils.compartmentMode(params)
                 """
             }
         }
@@ -110,9 +117,9 @@ nextflow_workflow {
 
         when {
             params {
-                // embed_masks/quantify_compartments/expanded_quantification
+                // embed_masks (alone)
                 // deliberately NOT set here (embed_masks defaults to false) --
-                // input[5] below is a LITERAL map with embedMasks: true, so this
+                // input[6] below is a LITERAL map with embedMasks: true, so this
                 // test proves ASSEMBLE_EXPORT honours the ARGUMENT, not params,
                 // the same way tests/subworkflows/add_cycle.nf.test's
                 // registration_method='tiled' + literal 'valis' proves the
@@ -133,7 +140,10 @@ nextflow_workflow {
                 ])
                 input[1] = Channel.fromList([['P001', contours], ['P002', contours]])
                 input[2] = Channel.fromList([['P001', contours], ['P002', contours]])
-                input[3] = Channel.fromList([
+                // 4 elements: [pid, phenotypes, model_config, phenotype_qc]. Placeholders, as in
+                // the no-panel branch of postprocess.nf -- the arity must still match.
+                input[3] = Channel.fromList([['P001', contours, contours, contours], ['P002', contours, contours, contours]])
+                input[4] = Channel.fromList([
                     [[patient_id: 'P001', id: 'P001', is_reference: false],
                      [file('$projectDir/tests/testdata/sample_DAPI.tif',  checkIfExists: true),
                       file('$projectDir/tests/testdata/sample_PANCK.tif', checkIfExists: true)]],
@@ -141,13 +151,13 @@ nextflow_workflow {
                      [file('$projectDir/tests/testdata/sample_DAPI.tif',  checkIfExists: true),
                       file('$projectDir/tests/testdata/sample_SMA.tif',   checkIfExists: true)]]
                 ])
-                input[4] = Channel.fromList([
+                input[5] = Channel.fromList([
                     ['P001', file('$projectDir/tests/testdata/P001_cell_mask.tif',   checkIfExists: true),
                              file('$projectDir/tests/testdata/P001_nuclei_mask.tif', checkIfExists: true)],
                     ['P002', file('$projectDir/tests/testdata/P002_cell_mask.tif',   checkIfExists: true),
                              file('$projectDir/tests/testdata/P001_nuclei_mask.tif', checkIfExists: true)]
                 ])
-                input[5] = [compartments: true, expanded: true, embedMasks: true]
+                input[6] = [compartments: true, statistics: ['Median','Mean','Sum'], embedMasks: true]
                 """
             }
         }
@@ -171,7 +181,7 @@ nextflow_workflow {
             params {
                 outdir = "$outputDir"
                 // Deliberately the OPPOSITE of what the gate needs: embed_masks=true
-                // here, but input[5] below is a LITERAL with embedMasks: false. If
+                // here, but input[6] below is a LITERAL with embedMasks: false. If
                 // ASSEMBLE_EXPORT read params.embed_masks itself instead of its
                 // compartment_mode argument, this would join the empty mask channel
                 // and empty the pyramid; asserting pyramid.size() == 1 anyway proves
@@ -184,7 +194,7 @@ nextflow_workflow {
                 // flag is safe to diverge from params here.)
                 embed_masks = true
                 quantify_compartments = true
-                expanded_quantification = true
+                quantify_statistics = ['Median','Mean','Sum']
                 pixel_size = 0.325
                 pyramid_resolutions = 8
                 pyramid_scale = 2
@@ -197,13 +207,14 @@ nextflow_workflow {
                 input[0] = Channel.of([[patient_id: 'P001', id: 'P001'], file('$projectDir/tests/testdata/P001_merged_quant.csv', checkIfExists: true)])
                 input[1] = Channel.of(['P001', contours])
                 input[2] = Channel.of(['P001', contours])
-                input[3] = Channel.of([[patient_id: 'P001', id: 'P001', is_reference: false],
+                input[3] = Channel.of(['P001', contours, contours, contours])
+                input[4] = Channel.of([[patient_id: 'P001', id: 'P001', is_reference: false],
                                        [file('$projectDir/tests/testdata/sample_DAPI.tif',  checkIfExists: true),
                                         file('$projectDir/tests/testdata/sample_PANCK.tif', checkIfExists: true)]])
                 // Nothing on the mask channel at all. An unconditional join here would
                 // empty the pyramid output entirely.
-                input[4] = Channel.empty()
-                input[5] = [compartments: true, expanded: true, embedMasks: false]
+                input[5] = Channel.empty()
+                input[6] = [compartments: true, statistics: ['Median','Mean','Sum'], embedMasks: false]
                 """
             }
         }
@@ -224,7 +235,7 @@ nextflow_workflow {
 
         when {
             params {
-                // Cannot diverge params.quantify_compartments from input[5] here,
+                // Cannot diverge params.quantify_compartments from input[6] here,
                 // unlike the two embed_masks tests above: this test's
                 // geojson_wholecell assertion is driven by
                 // modules/local/export_geojson.nf's OWN direct read of
@@ -232,13 +243,13 @@ nextflow_workflow {
                 // compartment_mode seam by design -- see
                 // tests/test_compartment_mode_routing.py's ALLOWED_FILES), so the
                 // raw param must actually be false for that module's stub branch
-                // to skip cells_wholecell.geojson. input[5] is still a literal
+                // to skip cells_wholecell.geojson. input[6] is still a literal
                 // (not ParamUtils.compartmentMode(params)) matching params, so this
                 // test is not exercising the resolver's own correctness twice.
                 outdir = "$outputDir"
                 embed_masks = false
                 quantify_compartments = false
-                expanded_quantification = false
+                quantify_statistics = ['Median']
                 pixel_size = 0.325
                 pyramid_resolutions = 8
                 pyramid_scale = 2
@@ -252,11 +263,12 @@ nextflow_workflow {
                 input[1] = Channel.of(['P001', contours])
                 // Caller passes the cell contours as the nucleus placeholder.
                 input[2] = Channel.of(['P001', contours])
-                input[3] = Channel.of([[patient_id: 'P001', id: 'P001', is_reference: false],
+                input[3] = Channel.of(['P001', contours, contours, contours])
+                input[4] = Channel.of([[patient_id: 'P001', id: 'P001', is_reference: false],
                                        [file('$projectDir/tests/testdata/sample_DAPI.tif',  checkIfExists: true),
                                         file('$projectDir/tests/testdata/sample_PANCK.tif', checkIfExists: true)]])
-                input[4] = Channel.empty()
-                input[5] = [compartments: false, expanded: false, embedMasks: false]
+                input[5] = Channel.empty()
+                input[6] = [compartments: false, statistics: ['Median'], embedMasks: false]
                 """
             }
         }

@@ -57,7 +57,7 @@ prior run's output.
   <div class="g"><div class="k">step 1 · default start</div><div class="v">preprocessing</div><div class="d">Standardize to OME-TIFF; BaSiC illumination correction (optional).</div></div>
   <div class="g"><div class="k">step 2</div><div class="v">registration</div><div class="d">Align each moving slide to the patient's reference.</div></div>
   <div class="g"><div class="k">step 3</div><div class="v">segmentation</div><div class="d">Detect every cell; extract contours and morphology.</div></div>
-  <div class="g"><div class="k">step 4 · default stop</div><div class="v">postprocessing</div><div class="d">Quantify and export.</div></div>
+  <div class="g"><div class="k">step 4 · default stop</div><div class="v">postprocessing</div><div class="d">Quantify, optionally phenotype, export.</div></div>
 </div>
 
 <div class="gnote">
@@ -171,8 +171,12 @@ Chips give real defaults. Every process runs in a pinned container and emits
       <div class="mod"><div class="n">SPLIT_CHANNELS → QUANTIFY</div>
         <div class="x">Per-cell marker intensity against the mask, one task per channel, merged
           per patient by <code>MERGE_QUANT_CSVS</code>. Median always; Mean/Sum added by
-          <code>expanded_quantification</code>.</div>
+          <code>quantify_statistics</code>.</div>
         <div class="pp"><span>compartments <b>true</b></span><span>expanded <b>true</b></span></div></div>
+      <div class="mod"><div class="n">COMPILE_PANEL → PHENOTYPE <span class="tag">if panel</span></div>
+        <div class="x">Conformal-risk-controlled cell classification; runs only when a panel is
+          supplied. Skipped entirely by default.</div>
+        <div class="pp"><span>pheno_alpha <b>0.05</b></span></div></div>
       <div class="mod"><div class="n">EXPORT_GEOJSON</div>
         <div class="x">QuPath / FlowPath <code>cells.geojson</code> with raw per-marker
           measurements, plus a lighter whole-cell-only variant.</div>
@@ -265,7 +269,7 @@ nextflow run . --mode add_cycle --prior_outdir results/ --input new_cycle.csv --
 | Reference | Register the new cycle to the **frozen prior reference** | from `csv/registered.csv` |
 | `EXTRACT_MASK_SERIES` | Read cell + nuclei masks out of the prior pyramid's `Image:1` | no re-segmentation |
 | Registration | Only the new slides go through the backend | VALIS only |
-| Quantification | Measure new markers on the reused mask; old markers carried over | prior columns |
+| Quantification | Measure new markers on the reused mask; old markers carried over | no phenotyping |
 
 Full walkthrough, prerequisites and fast-fail behaviour:
 [Incremental cycles](add_cycle.md).

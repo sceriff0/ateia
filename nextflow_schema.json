@@ -125,7 +125,10 @@
                     ]
                 },
                 "nuclear_markers": {
-                    "type": ["array", "string"],
+                    "type": [
+                        "array",
+                        "string"
+                    ],
                     "description": "Ordered preference of nuclear/fiducial marker names; the first present (resolved from channel metadata, never the filename) is moved to channel 0 and drives both cell segmentation and the registration fiducial. Accepts a list (config/params file) or a comma- or space-separated string, which is the only shape Nextflow can produce for `--nuclear_markers CELLTOX` on the command line; MarkerUtils.markerList normalises both.",
                     "default": [
                         "DAPI",
@@ -156,7 +159,10 @@
                     "type": "string",
                     "description": "reg_qc=2 cell correspondence: 'lsa' (optimal one-to-one assignment within the match radius) or 'mutual_nn' (greedy mutual nearest neighbour).",
                     "default": "lsa",
-                    "enum": ["lsa", "mutual_nn"]
+                    "enum": [
+                        "lsa",
+                        "mutual_nn"
+                    ]
                 },
                 "seg_qc_match_radius_factor": {
                     "type": "number",
@@ -393,10 +399,90 @@
                     "description": "Quantify signal per compartment (Nucleus / Cytoplasm / Cell) by routing the nuclear mask into QUANTIFY alongside the whole-cell mask, and emit both segmentations into the GeoJSON. Cytoplasm = whole-cell minus nucleus.",
                     "default": true
                 },
-                "expanded_quantification": {
-                    "type": "boolean",
-                    "description": "With quantify_compartments, also emit Mean and Sum (integrated density) per compartment; per-compartment Median is always emitted. Requires quantify_compartments.",
-                    "default": true
+                "quantify_statistics": {
+                    "type": [
+                        "array",
+                        "string"
+                    ],
+                    "default": [
+                        "Median"
+                    ],
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "Median",
+                            "Median Z",
+                            "Median RobustZ",
+                            "Mean",
+                            "Mean Z",
+                            "Mean RobustZ",
+                            "Sum",
+                            "Sum Z",
+                            "Sum RobustZ",
+                            "REDSEA",
+                            "REDSEA Z",
+                            "REDSEA RobustZ"
+                        ]
+                    },
+                    "uniqueItems": true,
+                    "minItems": 1,
+                    "description": "Which per-cell statistics to emit. Median/Mean/Sum are emitted per compartment; REDSEA is whole-cell only. ' Z' / ' RobustZ' variants standardise across the patient's cells.",
+                    "help_text": "Composed as base x normalisation. Bases: Median, Mean, Sum, REDSEA. Normalisations: none, ' Z' (mean/SD), ' RobustZ' (median/MAD x 1.4826, preferred for skewed IF intensities). The z population is ONE PATIENT's cells for that marker and compartment -- which is what a QUANTIFY task already holds, so it costs no extra stage. Listing REDSEA (or a REDSEA variant) enables spillover compensation and then requires redsea_markers. Accepts a list or a COMMA-separated string; do not split on spaces, composed names contain one. Median is the expensive base (a per-label order statistic, not a bincount), so omitting it is a real saving."
+                },
+                "redsea_markers": {
+                    "type": [
+                        "array",
+                        "string"
+                    ],
+                    "description": "Comma-separated SURFACE/MEMBRANE markers to compensate (e.g. CD3,CD8,CD20).",
+                    "help_text": "REDSEA assumes the marker sits on the membrane and is brighter in the source cell than in the leak; nuclear and diffuse-cytoplasmic markers violate that assumption and produce plausible-but-wrong numbers rather than an error. Matching is case-insensitive EXACT, so CD4 never selects CD45.",
+                    "default": []
+                },
+                "redsea_element_size": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "minimum": 1,
+                    "description": "Boundary-band depth in pixels. Leave unset to calibrate from the mask (recommended).",
+                    "help_text": "The paper's 'proportional to cell size' rule is disk geometry and over-shoots on real cell shapes. Unset, bin/redsea_matrix.py sweeps the candidate depths on the actual segmentation and picks the one hitting --redsea_target_band_fraction.",
+                    "default": null
+                },
+                "redsea_target_band_fraction": {
+                    "type": "number",
+                    "default": 0.56,
+                    "minimum": 0.05,
+                    "maximum": 0.95,
+                    "description": "Calibration target for the boundary-band fraction of cell area.",
+                    "help_text": "0.56 is where both of the paper's own calibration points land (MIBI elementSize 2 on 11.7 px cells; CyCIF 3-4 px on 20.3 px cells)."
+                },
+                "redsea_element_shape": {
+                    "type": "string",
+                    "default": "disk",
+                    "enum": [
+                        "disk",
+                        "square",
+                        "diamond"
+                    ],
+                    "description": "Boundary-band metric. disk = Euclidean (recommended).",
+                    "help_text": "square/diamond reproduce the original's strel('square')/strel('diamond'), which are noticeably anisotropic once the radius exceeds a few pixels."
+                },
+                "redsea_checker": {
+                    "type": "integer",
+                    "default": 1,
+                    "enum": [
+                        0,
+                        1
+                    ],
+                    "description": "REDSEAChecker: 1 = subtract and reinforce (paper default), 0 = subtract only.",
+                    "help_text": "Reinforcement hands each cell back the boundary signal it donated to neighbours, so compensated sums are not on the same absolute scale as raw sums."
+                },
+                "redsea_cell_diameter_um": {
+                    "type": "number",
+                    "default": 20.0,
+                    "minimum": 0.1,
+                    "description": "Typical cell diameter (um), advisory only.",
+                    "help_text": "Used solely for the 'recommended_element_size' line in the per-patient REDSEA QC JSON. The actual band depth comes from --redsea_element_size or from calibration."
                 },
                 "simplify_tolerance": {
                     "type": "number",
@@ -436,6 +522,44 @@
                     "help_text": "The reg-QC segmentation is a separate native-image run and shares no label space with cell_mask, so the join is spatial.",
                     "default": 15.0,
                     "minimum": 0
+                }
+            }
+        },
+        "phenotyping_options": {
+            "title": "Phenotyping options",
+            "type": "object",
+            "description": "Optional panel-agnostic phenotyping. When panel_spec and panel_model are both null, phenotyping is skipped (constant 'Cell' classification). Not run in mode='add_cycle'.",
+            "properties": {
+                "panel_spec": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "description": "Path to the panel authoring spec (panel.yaml). Enables phenotyping when set.",
+                    "default": null
+                },
+                "panel_model": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "description": "Path to a frozen, compiled model_config.json (produced by COMPILE_PANEL).",
+                    "default": null
+                },
+                "pheno_alpha": {
+                    "type": "number",
+                    "description": "Conformal-risk-control target risk alpha (per-marker miscoverage budget).",
+                    "default": 0.05
+                },
+                "pheno_min_cal": {
+                    "type": "integer",
+                    "description": "Minimum per-marker calibration-set size.",
+                    "default": 50
+                },
+                "pheno_max_enumerate": {
+                    "type": "integer",
+                    "description": "Feasible-set brute-force enumeration ceiling.",
+                    "default": 100000
                 }
             }
         },
@@ -575,6 +699,9 @@
         },
         {
             "$ref": "#/$defs/quantification_options"
+        },
+        {
+            "$ref": "#/$defs/phenotyping_options"
         },
         {
             "$ref": "#/$defs/output_options"

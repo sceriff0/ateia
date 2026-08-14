@@ -34,10 +34,12 @@ flowchart LR
 - **Segmentation** — cell/nucleus segmentation on the reference panel + morphology/contour extraction.
 - **Postprocessing** — per-cell quantification + QuPath GeoJSON export + pyramidal OME-TIFF.
 
-!!! info "No built-in cell typing"
-    MIRAGE does not assign cell types — the exported GeoJSON carries **raw marker
-    intensities** with a constant `"Cell"` classification, so you gate and phenotype
-    downstream in QuPath or [FlowPath](https://flowpath.readthedocs.io/).
+!!! info "Optional phenotyping"
+    By default MIRAGE does not assign cell types — the exported GeoJSON carries **raw
+    marker intensities**, so you can gate and phenotype downstream in QuPath or
+    [FlowPath](https://flowpath.readthedocs.io/). Optionally, supplying a panel
+    (`--panel_spec` / `--panel_model`) enables built-in conformal-risk-controlled
+    phenotype assignment — see [Phenotyping](parameters.md#phenotyping-panel-agnostic).
 
 !!! tip "Adding a new imaging cycle later?"
     To fold a fresh cyclic-IF cycle into an already-completed run — reusing the prior
@@ -317,7 +319,7 @@ same applies to numbers — a quoted `"reg_qc": "2"` is a string too and is now
 rejected rather than silently coerced.
 
 Rules a JSON Schema cannot express — `--stop` must not precede `--start`,
-`--expanded_quantification` requires `--quantify_compartments`, samplesheet
+samplesheet
 semantics, `add_cycle` prerequisites — are still checked in `lib/` and fire
 right after schema validation.
 
@@ -396,11 +398,15 @@ results/                          # = --outdir
 │   │                             #   the prior run's re-split pyramid channels)
 │   ├── quantify/                 # <patient>_<marker>_quant.csv, per-marker, pre-merge
 │   ├── quantification/           # merged_quant.csv
+│   ├── phenotyping/              # phenotypes.csv, constraint_audit.csv,
+│   │                             #   phenotype_qc.json (--pheno_alpha etc.)
 │   ├── geojson/export/           # cells.geojson, cells_wholecell.geojson, cells_data.csv
 │   ├── pyramid/                  # pyramid.ome.tiff (multi-resolution)
 │   ├── spatialdata/              # <patient_id>.zarr (written by default;
 │   │                             #   disable with --skip_spatialdata_export)
 │   └── qc/                       # preprocess / registration / postprocessing QC
+├── phenotyping/                  # model_config.json, spec_report.html (run-level,
+│                                 #   COMPILE_PANEL — one panel/model shared across patients)
 ├── csv/                          # checkpoint CSVs (all patients)
 └── qc/                           # aggregated HTML QC report
 ```
@@ -409,7 +415,7 @@ The tables you'll analyze:
 
 | File | What it is |
 |---|---|
-| `quantification/merged_quant.csv` | One row per cell; morphology joined in. Per marker: a bare column (whole-cell mean, kept for FlowPath's fast path) plus `<MARKER>: <Compartment>: <Statistic>` keys. **Median is always emitted**; `--expanded_quantification` adds Mean and Sum; `--quantify_compartments` adds the Nucleus and Cytoplasm compartments alongside Cell. |
+| `quantification/merged_quant.csv` | One row per cell; morphology joined in. Per marker: a bare column (whole-cell mean, kept for FlowPath's fast path) plus `<MARKER>: <Compartment>: <Statistic>` keys. `--quantify_statistics` selects the statistics (default `Median`; `REDSEA` is whole-cell only); `--quantify_compartments` adds the Nucleus and Cytoplasm compartments alongside Cell. |
 | `geojson/export/cells.geojson` | One QuPath feature per cell: whole-cell polygon + measurement array (centroid µm, marker intensities, morphology). Carries `nucleusGeometry` in compartment mode. |
 | `geojson/export/cells_wholecell.geojson` | The same detections without nucleus geometry — lighter and faster to import. Compartment mode only. |
 | `geojson/export/cells_data.csv` | The cell table with per-marker **z-scores** added. |
@@ -461,10 +467,6 @@ key grammar is a cross-repository contract — see
     export NXF_SINGULARITY_CACHEDIR=$HOME/.singularity_cache
     export SINGULARITY_CACHEDIR=$HOME/.singularity_cache
     ```
-
-??? failure "`--expanded_quantification requires --quantify_compartments`"
-    Expanded output depends on compartments. Either add `--quantify_compartments`,
-    or drop `--expanded_quantification` for a flat per-cell table.
 
 ??? question "Do I need a GPU?"
     No — run CPU-only with `--seg_gpu false`. A GPU mainly accelerates `SEGMENT`.

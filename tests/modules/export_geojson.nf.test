@@ -20,6 +20,12 @@ nextflow_process {
                     [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA']],
                     file('$projectDir/tests/testdata/sample_merged_quant.csv', checkIfExists: true),
                     file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true),
+                    file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true),
+                    file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true),
+                    file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true),
+                    // 7th slot: phenotype_qc.json. Placeholder here, as in the no-panel
+                    // branch of postprocess.nf / add_cycle.nf -- the module guard
+                    // suppresses the arg when no panel is configured.
                     file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true)
                 ]
                 """
@@ -57,6 +63,12 @@ nextflow_process {
                     [patient_id: 'P002', channels: ['DAPI', 'PANCK'], custom_field: 'preserved'],
                     file('$projectDir/tests/testdata/sample_merged_quant.csv', checkIfExists: true),
                     file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true),
+                    file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true),
+                    file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true),
+                    file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true),
+                    // 7th slot: phenotype_qc.json. Placeholder here, as in the no-panel
+                    // branch of postprocess.nf / add_cycle.nf -- the module guard
+                    // suppresses the arg when no panel is configured.
                     file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true)
                 ]
                 """
@@ -86,6 +98,12 @@ nextflow_process {
                     [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA']],
                     file('$projectDir/tests/testdata/sample_merged_quant.csv', checkIfExists: true),
                     file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true),
+                    file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true),
+                    file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true),
+                    file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true),
+                    // 7th slot: phenotype_qc.json. Placeholder here, as in the no-panel
+                    // branch of postprocess.nf / add_cycle.nf -- the module guard
+                    // suppresses the arg when no panel is configured.
                     file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true)
                 ]
                 """
@@ -113,6 +131,12 @@ nextflow_process {
                     [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA']],
                     file('$projectDir/tests/testdata/sample_merged_quant.csv', checkIfExists: true),
                     file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true),
+                    file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true),
+                    file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true),
+                    file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true),
+                    // 7th slot: phenotype_qc.json. Placeholder here, as in the no-panel
+                    // branch of postprocess.nf / add_cycle.nf -- the module guard
+                    // suppresses the arg when no panel is configured.
                     file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true)
                 ]
                 """
@@ -196,6 +220,12 @@ nextflow_process {
                     [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA']],
                     file('$projectDir/tests/testdata/sample_merged_quant.csv', checkIfExists: true),
                     file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true),
+                    file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true),
+                    file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true),
+                    file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true),
+                    // 7th slot: phenotype_qc.json. Placeholder here, as in the no-panel
+                    // branch of postprocess.nf / add_cycle.nf -- the module guard
+                    // suppresses the arg when no panel is configured.
                     file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true)
                 ]
                 """
@@ -228,6 +258,66 @@ nextflow_process {
                         }
                     }
                 }
+            )
+        }
+    }
+
+    test("Should stamp id and classification when panel supplied - real") {
+        tag "real"
+        tag "phenotype"
+        when {
+            params { panel_model = "$projectDir/tests/testdata/model_config_min.json" }
+            process {
+                """
+                input[0] = [
+                    [patient_id: 'P001', channels: ['DAPI', 'PANCK']],
+                    file('$projectDir/tests/testdata/pheno_merged_quant.csv', checkIfExists: true),
+                    file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true),
+                    file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true),
+                    file('$projectDir/tests/testdata/pheno_phenotypes.csv', checkIfExists: true),
+                    file('$projectDir/tests/testdata/model_config_min.json', checkIfExists: true),
+                    file('$projectDir/tests/testdata/pheno_phenotype_qc.json', checkIfExists: true)
+                ]
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.panel_model },
+                { assert process.out.calibration_model },
+                // The sidecar is self-describing: a consumer hardcodes two filenames
+                // and the key "contract", and reads the rest.
+                { def pm = new groovy.json.JsonSlurper().parseText(path(process.out.panel_model.get(0).get(1)).text)
+                  assert pm.contract.measurement_prefix == '_pheno.'
+                  assert pm.contract.calibration_sidecar == 'calibration_model.json'
+                  assert pm.lineage_order instanceof List
+                  assert pm.outcome_names.contains('Ambiguous') },
+                // Per-marker collapsed/measurement survive the projection -- without
+                // them the sign reconstruction reads the wrong bin or the wrong column.
+                { def cm = new groovy.json.JsonSlurper().parseText(path(process.out.calibration_model.get(0).get(1)).text)
+                  assert cm.contract.kind == 'calibration'
+                  assert cm.thresholds.CD4.collapsed == true
+                  assert cm.thresholds.CD45.measurement == 'CD45'
+                  assert cm.thresholds.Ki67.degraded == true },
+                { def gj = new groovy.json.JsonSlurper().parseText(path(process.out.geojson.get(0).get(1)).text)
+                  assert gj.features[0].id.toString().startsWith('P001:')
+                  def cls = gj.features.collect { it.properties.classification.name } as Set
+                  assert cls.every { it in ['Tumour','Immune','T_cell','CD4_T','CD8_T','Ambiguous','Conflict','Artefact','Unclassified'] }
+                  // No legacy phenotype key survives: each would register as a phantom
+                  // marker channel in the consumer's gating panel.
+                  def names = gj.features.collectMany { it.properties.measurements.collect { m -> m.name } } as Set
+                  assert names.any { it.startsWith('_pheno.') }
+                  assert !names.any { it.startsWith('pheno_score: ') }
+                  assert !names.any { it.endsWith(': p_neg') || it.endsWith(': p_pos') }
+                  assert !names.contains('n_candidates')
+                  // Eight dense keys on every feature, whatever its outcome.
+                  gj.features.each { f ->
+                      def n = f.properties.measurements.collect { m -> m.name } as Set
+                      assert n.containsAll(['_pheno.free_mask','_pheno.ambiguous','_pheno.n_candidates',
+                                            '_pheno.depth','_pheno.empty_type','_pheno.violated_constraint_id',
+                                            '_pheno.provenance','_pheno.density_bin'])
+                  } }
             )
         }
     }

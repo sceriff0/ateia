@@ -1,0 +1,424 @@
+#!/usr/bin/env python3
+"""Per-patient constrained phenotyping: merged_quant.csv + morphology.csv + model_config.json
+-> phenotypes.csv + constraint_audit.csv + phenotype_qc.json (§5)."""
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+from typing import Dict, Optional, Tuple
+
+import numpy as np
+import pandas as pd
+
+sys.path.insert(0, str(Path(__file__).parent / "utils"))
+
+from measurements import measurement_key  # noqa: E402
+from phenotyping.calibration import (  # noqa: E402
+    finalize_calibration,
+    marker_calibration_weights,
+)
+from phenotyping.classify import classify_cells_vectorized  # noqa: E402
+from phenotyping.conformal import (  # noqa: E402
+    conformal_scores,
+    ks_uniform,
+    resolve_signs,
+    tail_threshold,
+)
+from phenotyping.crc import (  # noqa: E402
+    crc_select_alpha,
+    hoeffding_ucb,
+    risk_excess_copositivity,
+)
+from phenotyping.density import compute_density, mondrian_bins  # noqa: E402
+from phenotyping.feasible import common_ancestor  # noqa: E402
+from phenotyping.panel_schema import DEFAULT_AMBIGUOUS_FALLBACK  # noqa: E402
+from phenotyping.scoring import softmax_pheno_scores  # noqa: E402
+from phenotyping.states import state_annotations  # noqa: E402
+
+_SIGN_CHAR = {"pos": "1", "neg": "0", "free": "·", "contra": "x"}
+_ALPHA_GRID = [0.005, 0.01, 0.02, 0.05, 0.1, 0.2]
+
+
+def sign_char(sign: str) -> str:
+    return _SIGN_CHAR.get(sign, "·")
+
+
+def tree_path(name: str, parents: Dict[str, Optional[str]]) -> str:
+    if name not in parents:
+        return ""
+    chain = []
+    cur = name
+    seen = set()
+    while cur is not None and cur not in seen:
+        seen.add(cur)
+        chain.append(cur)
+        cur = parents.get(cur)
+    return "/".join(reversed(chain))
+
+
+def _round6(values: np.ndarray) -> np.ndarray:
+    """Elementwise round(x, 6) using Python's round(), NOT np.round().
+
+    np.round(x, 6) computes rint(x * 1e6) / 1e6; the multiply is itself
+    inexact, so when x*1e6 lands within an ULP of a .5 boundary, rint can
+    round the wrong way relative to the exact binary value of x. This is
+    reachable in practice: conformal p-values here are ratios
+    (sum of weights)/(sum of weights), and when GMM responsibilities
+    saturate to 0.0/1.0 the ratio's denominator is an exact integer — e.g.
+    m/640 disagrees with np.round(m/640, 6) for ~20% of m. Python's round()
+    is correctly rounded from the exact binary value and matches the
+    per-cell round() used for pheno_score:* elsewhere in this module.
+    """
+    return np.fromiter((round(float(v), 6) for v in values), dtype=np.float64, count=len(values))
+
+
+def _marker_values(df: pd.DataFrame, marker: str, spec: dict):
+    """Return ``(values, missing, column)``.
+
+    ``column`` is the measurement ACTUALLY read, which is a per-patient fact: the bare
+    ``<marker>`` fallback fires only when this patient's merged_quant lacks the
+    compartment key. A consumer comparing a cell against this marker's thresholds has to
+    read that same column, so it travels in the sidecar rather than being rebuilt from
+    the panel -- rebuilding it would silently compare against a different statistic.
+    """
+    key = measurement_key(marker, spec["compartment"], spec["statistic"])
+    if key in df.columns:
+        return df[key].to_numpy(dtype=float), False, key
+    if marker in df.columns:
+        return df[marker].to_numpy(dtype=float), False, marker
+    return np.zeros(len(df)), True, key  # missing -> degraded
+
+
+def run_phenotyping(
+    merged_csv, morphology_csv, model_config, *, alpha_target, min_calibration,
+    density_c: float = 1.0, max_bins: int = 5,
+) -> Tuple[pd.DataFrame, pd.DataFrame, dict]:
+    with open(model_config) as fh:
+        cfg = json.load(fh)
+    lineage = cfg["lineage_markers"]
+    if not lineage:
+        raise ValueError(
+            "model_config declares no lineage markers (lineage_markers is empty), "
+            "so no cell can be classified against any phenotype pattern. This "
+            "means the compiled panel has no marker with `role: lineage` — fix "
+            "the source panel (panel.yaml) to give at least one marker "
+            "`role: lineage`, then recompile it with compile_panel.py."
+        )
+    states = cfg["state_markers"]
+    feasible = cfg["feasible_set"]
+    never = cfg["constraints"]["never"]
+    requires = cfg["constraints"]["requires"]
+    enforce = cfg["constraints"]["enforce"]
+    audit = cfg["constraints"]["audit"]
+    markers_cfg = cfg["markers"]
+    parents = {p["name"]: p["parent"] for p in cfg["phenotypes"]}
+    # The constant is IMPORTED, never re-spelled -- a second default silently diverges.
+    fallback = cfg["runtime"].get("ambiguous_fallback", DEFAULT_AMBIGUOUS_FALLBACK)
+    references = {
+        m: {"neg_source": markers_cfg[m]["neg_source"], "pos_source": markers_cfg[m]["pos_source"]}
+        for m in markers_cfg
+    }
+    all_names = sorted({e["phenotype"] for e in feasible})
+
+    quant = pd.read_csv(merged_csv)
+    morph = pd.read_csv(morphology_csv)[["label", "x", "y"]]
+    df = quant.merge(morph, on="label", how="left", suffixes=("", "_morph"))
+    n = len(df)
+    labels = df["label"].to_numpy()
+    centroids = df[["x", "y"]].to_numpy(dtype=float)
+
+    rho, radius = compute_density(centroids, c=density_c)
+    bins = mondrian_bins(rho, min_calibration, max_bins=max_bins)
+    if len(bins) != n:
+        bins = np.zeros(n, dtype=int)
+
+    values: Dict[str, np.ndarray] = {}
+    degraded = []
+    p_neg: Dict[str, np.ndarray] = {}
+    p_pos: Dict[str, np.ndarray] = {}
+    calibration_ks: Dict[str, dict] = {}
+    # Retained so the thresholds block below can INVERT the same calibration the
+    # classification used, at the same chosen_alpha. Without this the objects go out of
+    # scope and the only way to recover a threshold is to re-derive it -- a second
+    # implementation of the decision rule.
+    calibrations: Dict[str, object] = {}
+    resolved_measurement: Dict[str, str] = {}
+    for m in list(markers_cfg):
+        vals, missing, column = _marker_values(df, m, markers_cfg[m])
+        values[m] = vals
+        resolved_measurement[m] = column
+        if missing:
+            degraded.append(m)
+    for m in list(markers_cfg):
+        if m in degraded:
+            p_neg[m] = np.ones(n)
+            p_pos[m] = np.ones(n)
+            continue
+        w_neg_m, w_pos_m = marker_calibration_weights(m, values, references)
+        cal = finalize_calibration(m, values[m], w_neg_m, w_pos_m, bins, min_calibration)
+        calibrations[m] = cal
+        if cal.degraded and m not in degraded:
+            degraded.append(m)
+        p_neg[m], p_pos[m] = conformal_scores(values[m], cal)
+        # Fix 4: label-free calibration diagnostic. On confidently-negative
+        # cells (high w_neg) p_neg should be ~Uniform(0,1); likewise p_pos on
+        # confident positives. KS-to-uniform near 0 = well calibrated; a large
+        # value flags the old truncation pathology. Only reported when enough
+        # confident reference cells exist to make the KS meaningful.
+        if m not in degraded:
+            ks_entry = {}
+            neg_ref = w_neg_m > 0.9
+            pos_ref = w_pos_m > 0.9
+            if int(neg_ref.sum()) >= 30:
+                ks_entry["neg"] = round(ks_uniform(p_neg[m][neg_ref]), 4)
+            if int(pos_ref.sum()) >= 30:
+                ks_entry["pos"] = round(ks_uniform(p_pos[m][pos_ref]), 4)
+            if ks_entry:
+                calibration_ks[m] = ks_entry
+
+    def classify_all(alpha):
+        sm = {m: resolve_signs(p_neg[m], p_pos[m], alpha) for m in lineage}
+        outs = classify_cells_vectorized(sm, feasible, never, requires, lineage)
+        return sm, outs
+
+    crc_ran = bool(audit)
+    if crc_ran:
+        audit_markers = sorted({mk for c in audit for mk in c["markers"]})
+        nominal = {c["id"]: c["r"] for c in audit}
+
+        def risk_ucb(alpha):
+            sm, outs = classify_all(alpha)
+            committed = np.array(
+                [i for i, o in enumerate(outs) if len(o.candidate_names) == 1], dtype=int
+            )
+            cs = {
+                mk: (sm[mk][committed] == "pos").astype(int) if committed.size else np.array([], dtype=int)
+                for mk in audit_markers
+            }
+            risk, nc = risk_excess_copositivity(cs, audit, nominal)
+            return hoeffding_ucb(risk, nc)
+
+        chosen_alpha = crc_select_alpha(_ALPHA_GRID, risk_ucb, alpha_target)
+    else:
+        chosen_alpha = alpha_target
+
+    sm, outs = classify_all(chosen_alpha)
+
+    # state markers
+    state_signs = {}
+    for m in states:
+        state_signs[m] = resolve_signs(p_neg[m], p_pos[m], chosen_alpha)
+    state_ann = {m: state_annotations(state_signs[m]) for m in states}
+
+    # Columns derived from the per-cell CellOutcome list `outs` (outcome,
+    # candidates, n_candidates, tree_path, empty_type, violated_constraint_id)
+    # or already-materialized per-marker arrays (density_bin, provenance) are
+    # filled here in one pass, without building an intermediate per-cell dict.
+    outcome_col = np.array([o.outcome for o in outs], dtype=object)
+    candidates_col = np.array([";".join(o.candidate_names) for o in outs], dtype=object)
+    n_candidates_col = np.fromiter((len(o.candidate_names) for o in outs), dtype=np.int64, count=n)
+    # ── ancestor collapse: presentation only ──────────────────────────────────
+    # Runs AFTER classify_all and AFTER CRC, and writes only into NEW columns plus
+    # `phenotype`. `outcome`, `n_candidates`, `candidates` and every pheno_score keep
+    # the classifier's verdict, so nothing the CRC risk function or the constraint
+    # audit reads can move as a side effect of a display setting.
+    label_col = np.empty(n, dtype=object)
+    ancestor_depth_col = np.full(n, -1, dtype=np.int64)
+    ancestor_cache: Dict[tuple, tuple] = {}
+    for i, o in enumerate(outs):
+        label_col[i] = o.outcome
+        if fallback != "ancestor" or len(o.candidate_names) < 2:
+            continue
+        key = tuple(sorted(o.candidate_names))
+        hit = ancestor_cache.get(key)
+        if hit is None:
+            hit = common_ancestor(parents, list(key))
+            ancestor_cache[key] = hit
+        name, depth = hit
+        if name is not None:
+            label_col[i] = name
+            ancestor_depth_col[i] = depth
+
+    ambiguous_col = n_candidates_col > 1
+
+    # tree_path renders a LABEL's position in the hierarchy, so it follows `phenotype`,
+    # not `outcome`. After a collapse the label is the ancestor, and keying off
+    # `outcome` would blank the path on exactly the cells whose tree position is the
+    # point. Memoized over the small set of distinct labels.
+    tree_path_by_name: Dict[str, str] = {}
+    tree_path_col = np.empty(n, dtype=object)
+    for i, name in enumerate(label_col):
+        cached = tree_path_by_name.get(name)
+        if cached is None:
+            cached = tree_path(name, parents)
+            tree_path_by_name[name] = cached
+        tree_path_col[i] = cached
+    empty_type_col = np.fromiter((o.empty_type for o in outs), dtype=np.int64, count=n)
+    violated_constraint_id_col = np.fromiter(
+        (o.violated_constraint_id for o in outs), dtype=np.int64, count=n
+    )
+    density_bin_col = bins.astype(np.int64)
+    provenance_col = np.zeros(n, dtype=np.int64)
+    p_neg_cols = {m: _round6(p_neg[m]) for m in lineage + states}
+    p_pos_cols = {m: _round6(p_pos[m]) for m in lineage + states}
+    sign_cols = {m: np.array([sign_char(s) for s in sm[m]], dtype=object) for m in lineage}
+    state_cols = {m: state_ann[m].astype(np.int64) for m in states}
+
+    # pheno_score:* still needs the per-cell softmax call (out of scope to
+    # vectorize) but writes straight into preallocated per-name columns
+    # instead of building an intermediate per-cell dict.
+    pheno_score_cols = {name: np.empty(n, dtype=np.float64) for name in all_names}
+    for i in range(n):
+        o = outs[i]
+        signs_row = {m: sm[m][i] for m in lineage}
+        pneg_row = {m: float(p_neg[m][i]) for m in lineage}
+        ppos_row = {m: float(p_pos[m][i]) for m in lineage}
+        ps = softmax_pheno_scores(
+            o.candidate_patterns, all_names, pneg_row, ppos_row, signs_row, enforce, lineage
+        )
+        for name in all_names:
+            pheno_score_cols[name][i] = round(float(ps.get(name, 0.0)), 6)
+
+    columns = (
+        ["label", "phenotype", "candidates", "n_candidates", "tree_path", "density_bin",
+         "outcome", "ambiguous", "ancestor_depth", "empty_type",
+         "violated_constraint_id", "provenance"]
+        + [f"pheno_score:{name}" for name in all_names]
+        + [f"p_neg:{m}" for m in lineage + states]
+        + [f"p_pos:{m}" for m in lineage + states]
+        + [f"sign:{m}" for m in lineage]
+        + [f"state:{m}" for m in states]
+    )
+    data = {
+        "label": labels,
+        # `phenotype` is the USABLE LABEL (committed name, ancestor when collapsed, or a
+        # reserved outcome); `outcome` is the taxonomy VERDICT. They were the same column
+        # twice before the collapse existed.
+        "phenotype": label_col,
+        "candidates": candidates_col,
+        "n_candidates": n_candidates_col,
+        "tree_path": tree_path_col,
+        "density_bin": density_bin_col,
+        "outcome": outcome_col,
+        "empty_type": empty_type_col,
+        "ambiguous": ambiguous_col,
+        "ancestor_depth": ancestor_depth_col,
+        "violated_constraint_id": violated_constraint_id_col,
+        "provenance": provenance_col,
+    }
+    for name in all_names:
+        data[f"pheno_score:{name}"] = pheno_score_cols[name]
+    for m in lineage + states:
+        data[f"p_neg:{m}"] = p_neg_cols[m]
+    for m in lineage + states:
+        data[f"p_pos:{m}"] = p_pos_cols[m]
+    for m in lineage:
+        data[f"sign:{m}"] = sign_cols[m]
+    for m in states:
+        data[f"state:{m}"] = state_cols[m]
+    pheno_df = pd.DataFrame(data, columns=columns)
+
+    # constraint audit table
+    committed_mask = pheno_df["n_candidates"] == 1
+    audit_rows = []
+    for c in audit:
+        a, b = c["markers"]
+        va = (pheno_df.loc[committed_mask, f"sign:{a}"] == "1").to_numpy() if a in lineage else np.array([])
+        vb = (pheno_df.loc[committed_mask, f"sign:{b}"] == "1").to_numpy() if b in lineage else np.array([])
+        nboth = int(np.sum(va & vb)) if va.size else 0
+        obs = (nboth / va.size) if va.size else 0.0
+        rho_c = rho[committed_mask.to_numpy()]
+        copos = (va & vb).astype(float) if va.size else np.array([])
+        dens_corr = float(np.corrcoef(rho_c, copos)[0, 1]) if copos.size and copos.std() > 0 else 0.0
+        verdict = (
+            "SEGMENTATION (spillover)" if dens_corr > 0.5
+            else "REVIEW: raise r or rate rare->never" if obs > c["r"]
+            else "OK"
+        )
+        audit_rows.append({
+            "id": c["id"], "markers": f"{a}|{b}", "observed": round(obs, 4),
+            "nominal": c["r"], "density_corr": round(dens_corr, 4),
+            "neighbour_contact_corr": round(dens_corr, 4), "verdict": verdict,
+        })
+    audit_df = pd.DataFrame(
+        audit_rows,
+        columns=["id", "markers", "observed", "nominal", "density_corr", "neighbour_contact_corr", "verdict"],
+    )
+
+    # Per-marker, per-bin sign thresholds: the INVERSE of the tail this run used, taken
+    # from the same MarkerCalibration objects at the same chosen_alpha. This is the only
+    # place they are computed.
+    thresholds: Dict[str, dict] = {}
+    n_mondrian_bins = len(np.unique(bins))
+    for m in list(markers_cfg):
+        cal = calibrations.get(m)
+        entry = {"measurement": resolved_measurement[m]}
+        if cal is None or cal.degraded:
+            entry.update({"degraded": True, "collapsed": False, "bins": []})
+            thresholds[m] = entry
+            continue
+        # cal.bins is the EFFECTIVE binning -- finalize_calibration zeroes it when a
+        # marker lacks per-bin calibration mass. The CELL carries the pre-collapse
+        # Mondrian bin, so a consumer indexing by density_bin needs this flag to know to
+        # use bin 0 instead. The collapse is per marker: one marker can keep three bins
+        # while another has one, in the same patient.
+        collapsed = bool(len(np.unique(cal.bins)) == 1 and n_mondrian_bins > 1)
+        rows = []
+        for b in sorted({int(x) for x in cal.bins}):
+            neg_s, neg_w = cal.neg_by_bin.get(b, (np.array([]), np.array([])))
+            pos_s, pos_w = cal.pos_by_bin.get(b, (np.array([]), np.array([])))
+            rows.append({
+                "bin": b,
+                "n_cells": int(np.sum(cal.bins == b)),
+                # Crossed on purpose: t_neg inverts the POSITIVE reference and t_pos the
+                # NEGATIVE one, matching resolve_sign's two one-sided tests.
+                "t_neg": tail_threshold(pos_s, pos_w, "pos", chosen_alpha),
+                "t_pos": tail_threshold(neg_s, neg_w, "neg", chosen_alpha),
+            })
+        entry.update({"degraded": False, "collapsed": collapsed, "bins": rows})
+        thresholds[m] = entry
+
+    qc = {
+        "chosen_alpha": chosen_alpha,
+        "alpha_target": alpha_target,
+        "crc_ran": crc_ran,
+        "reporting_mode": not crc_ran,
+        "degraded_markers": sorted(set(degraded)),
+        "n_cells": n,
+        "density_radius": radius,
+        "n_bins": int(len(np.unique(bins))),
+        "calibration_ks": calibration_ks,
+        "thresholds": thresholds,
+    }
+    return pheno_df, audit_df, qc
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(description="Per-patient constrained phenotyping")
+    ap.add_argument("--merged_quant", required=True)
+    ap.add_argument("--morphology", required=True)
+    ap.add_argument("--model_config", required=True)
+    ap.add_argument("--out", required=True)
+    ap.add_argument("--audit", required=True)
+    ap.add_argument("--qc", required=True)
+    ap.add_argument("--alpha-target", type=float, default=0.05)
+    ap.add_argument("--min-calibration", type=int, default=50)
+    args = ap.parse_args(argv)
+
+    pheno_df, audit_df, qc = run_phenotyping(
+        args.merged_quant, args.morphology, args.model_config,
+        alpha_target=args.alpha_target, min_calibration=args.min_calibration,
+    )
+    pheno_df.to_csv(args.out, index=False)
+    audit_df.to_csv(args.audit, index=False)
+    with open(args.qc, "w") as fh:
+        json.dump(qc, fh, indent=2)
+    for m in qc["degraded_markers"]:
+        print(f"[WARN] marker {m} degraded to undetermined (calibration failed)", file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -2,12 +2,21 @@
 """Export cell data to QuPath-compatible GeoJSON.
 
 Generates a QuPath-native GeoJSON FeatureCollection with raw marker intensities
-and morphological measurements for all cells. No phenotype classification is
-applied — gating is handled downstream by FlowPath in QuPath.
+and morphological measurements for all cells.
+
+By default (no ``--panel_model``/``--phenotypes``) every cell gets a constant
+"Cell" classification and no ``id`` is stamped — gating is handled downstream
+by FlowPath in QuPath. When a compiled panel (``model_config.json``) and a
+``phenotypes.csv`` are supplied, each feature additionally gets a stamped
+``id`` ("<patient_id>:<label>"), a five-state classification (<Phenotype> /
+Ambiguous / Conflict / Artefact / Unclassified), numeric phenotype
+measurements (pheno_score, p_neg/p_pos, state, and QC fields), and a
+``panel_model.json`` sidecar is written alongside the GeoJSON outputs.
 
 Outputs:
     - cells.geojson: QuPath-compatible cell detections (native array measurement format)
     - cells_data.csv: Full cell data with raw intensities and z-scores per marker
+    - panel_model.json: FlowPath-facing panel projection (only when phenotyping is active)
 """
 
 from __future__ import annotations
@@ -26,7 +35,13 @@ sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
 from image_utils import ensure_dir
 from logger import configure_logging, get_logger
-from measurements import MORPHOLOGY_COLS, identify_marker_columns
+from measurements import (
+    MORPHOLOGY_COLS,
+    PHENO_PREFIX,
+    identify_marker_columns,
+    pheno_key,
+)
+from phenotyping.palette import RESERVED as PALETTE_RESERVED
 from pixel_convention import centre_to_corner
 
 logger = get_logger(__name__)
@@ -46,6 +61,174 @@ def rgb_to_qupath_color(r: int, g: int, b: int, a: int = 255) -> int:
     if value >= 0x80000000:
         value -= 0x100000000
     return value
+
+
+# Colours for the reserved outcome buckets. The NAMES are owned by
+# classify.OUTCOME_NAMES and reach here through palette.RESERVED -- this used to be an
+# independent literal, i.e. a third copy of the taxonomy.
+RESERVED_CLASSES = dict(PALETTE_RESERVED)
+
+
+def load_model_config(path: str) -> Dict:
+    """Load a compiled panel's ``model_config.json`` (Task 6 shape)."""
+    with open(path) as fh:
+        return json.load(fh)
+
+
+def load_phenotypes(path: str) -> Dict[int, Dict]:
+    """Load ``phenotypes.csv`` (Task 18 columns) into a per-label row dict."""
+    df = pd.read_csv(path)
+    return {int(r["label"]): {k: r[k] for k in df.columns} for _, r in df.iterrows()}
+
+
+def stamped_id(patient_id: str, label) -> str:
+    """Stable feature id ``"<patient_id>:<label>"`` (label coerced to int)."""
+    return f"{patient_id}:{int(float(label))}"
+
+
+def resolve_classification(prow: Dict, palette: Dict[str, List[int]]):
+    """Resolve a phenotype row's ``phenotype`` column to ``(name, qupath_color_int)``.
+
+    Reads ``phenotype``, NOT ``outcome``. Since the ancestor collapse the two differ:
+    the collapse puts a real, palette-backed ancestor name in ``phenotype`` while
+    ``outcome`` keeps the verdict "Ambiguous". Reading ``outcome`` here would leave
+    every collapsed cell grey and make the whole resume path invisible in QuPath.
+    """
+    name = str(prow.get("phenotype", "Cell"))
+    rgb = palette.get(name) or RESERVED_CLASSES.get(name) or list(CELL_COLOR_RGB)
+    return name, rgb_to_qupath_color(int(rgb[0]), int(rgb[1]), int(rgb[2]))
+
+
+def pheno_extra_measurements(prow: Dict, lineage: List[str]) -> List[Dict]:
+    """The ``_pheno.`` block: eight dense keys plus a sparse score block.
+
+    Everything reconstructible from the two sidecars is deliberately absent. p_neg /
+    p_pos / sign / state stay per-cell columns of phenotypes.csv and never reach the
+    GeoJSON: ``density_bin`` selects the bin in calibration_model.json's thresholds,
+    the raw marker measurement is already on the feature, and comparing them reproduces
+    `resolve_sign` exactly. QuPath parses this file before any consumer is reachable at
+    all, so the per-cell block is a budget -- 62 measurements down to 9-12.
+
+    ``depth`` is DENSE with -1 meaning "not collapsed", because 0 is a real depth (the
+    ancestor is itself a candidate) and an absent-means-zero encoding would be ambiguous
+    exactly where the field is load-bearing.
+    """
+    out: List[Dict] = []
+
+    def _num(v, default=0.0):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return default
+
+    # Which lineage markers were left undetermined for THIS cell. Complements a
+    # consumer's own "which markers could separate these candidates" computation:
+    # a marker is worth gating only if it is both decisive and free here.
+    free_mask = 0
+    for i, m in enumerate(lineage):
+        if str(prow.get(f"sign:{m}", "")) == "\u00b7":
+            free_mask |= 1 << i
+    out.append({"name": pheno_key("free_mask"), "value": free_mask})
+
+    n_candidates = int(_num(prow.get("n_candidates"), 0))
+    out.append({"name": pheno_key("ambiguous"), "value": 1 if n_candidates > 1 else 0})
+    out.append({"name": pheno_key("n_candidates"), "value": n_candidates})
+    out.append({"name": pheno_key("depth"), "value": int(_num(prow.get("ancestor_depth"), -1))})
+    for field in ("empty_type", "violated_constraint_id", "provenance", "density_bin"):
+        out.append({"name": pheno_key(field), "value": int(_num(prow.get(field), 0))})
+
+    # Sparse: a key is present only when its value is > 0, so the set of present keys IS
+    # the candidate set -- which is already how the candidate set was defined. Emitting
+    # |F| dense zeros would put a panel-sized block on every cell.
+    for key, value in prow.items():
+        skey = str(key)
+        if not skey.startswith("pheno_score:"):
+            continue
+        v = _num(value, 0.0)
+        if v > 0.0:
+            out.append({"name": pheno_key("score", skey.split(":", 1)[1]),
+                        "value": round(v, 6)})
+    return out
+
+
+def write_panel_model_sidecar(cfg: Dict, out_path: str) -> None:
+    """Write ``panel_model.json``: a FlowPath-facing projection of the compiled panel.
+
+    ``constraint_table`` is FLATTENED (a list of ``{id, markers, kind, rate}``) for
+    every never/enforce/audit/requires entry — NOT a nested constraints object,
+    since the flowpath reader consumes the flat table directly.
+    """
+    table = []
+    for kind in ("never", "enforce", "audit"):
+        for c in cfg.get("constraints", {}).get(kind, []):
+            table.append({"id": c["id"], "markers": c["markers"], "kind": kind, "rate": c.get("rate", kind)})
+    for c in cfg.get("constraints", {}).get("requires", []):
+        table.append({"id": c["id"], "markers": [c["if"], c["then"]], "kind": "requires", "rate": "requires"})
+    side = {
+        # The consumer hardcodes two filenames and the key "contract"; everything else
+        # it reads. `sparse_zero` applies to _pheno.score.<Name> only -- absent means 0.
+        # Every other _pheno.* key is dense and present on every cell.
+        "contract": {
+            "version": 1,
+            "measurement_prefix": PHENO_PREFIX,
+            "sparse_zero": True,
+            "calibration_sidecar": "calibration_model.json",
+        },
+        "phenotype_order": cfg.get("phenotype_order", []),
+        "lineage_order": cfg.get("lineage_order", []),
+        "outcome_names": cfg.get("outcome_names", []),
+        "phenotypes": cfg.get("phenotypes", []),
+        "feasible_set": cfg.get("feasible_set", []),
+        "markers": {m: {"role": v.get("role"), "compartment": v.get("compartment")}
+                    for m, v in cfg.get("markers", {}).items()},
+        "palette": cfg.get("palette", {}),
+        "reserved_classes": RESERVED_CLASSES,
+        "constraint_table": table,
+        "spec_version": cfg.get("spec_version"),
+    }
+    with open(out_path, "w") as fh:
+        json.dump(side, fh)
+
+
+def write_calibration_model_sidecar(qc: Dict, patient_id, out_path: str) -> None:
+    """Write ``calibration_model.json``: the consumer-facing projection of phenotype_qc.json.
+
+    A projection published HERE rather than left under the `phenotyping` publish kind,
+    because `Layout.groovy` owns published paths -- reaching across kinds would mean a
+    hand-written `../../phenotyping/` relative path encoded on the consumer side, which
+    breaks the moment a publish dir moves. Same producer-to-projection seam as
+    model_config.json -> panel_model.json.
+    """
+    side = {
+        "contract": {"version": 1, "kind": "calibration"},
+        "patient_id": patient_id,
+        "thresholds": qc.get("thresholds", {}),
+    }
+    for key in ("chosen_alpha", "alpha_target", "crc_ran", "degraded_markers",
+                "n_bins", "density_radius", "calibration_ks"):
+        if key in qc:
+            side[key] = qc[key]
+    with open(out_path, "w") as fh:
+        json.dump(side, fh)
+
+
+def _feature_class_and_extra(row, pheno_lookup, palette, patient_id, lineage):
+    """Return (feature_id, class_name, color_int, extra_measurements) for one cell.
+
+    When ``pheno_lookup`` is None (no panel supplied), returns today's constant
+    "Cell" classification with no stamped id and no extra measurements — the
+    exact pre-phenotyping behaviour.
+    """
+    if pheno_lookup is None:
+        return None, "Cell", rgb_to_qupath_color(*CELL_COLOR_RGB), []
+    label = row.get("label")
+    prow = pheno_lookup.get(int(float(label))) if label is not None else None
+    if prow is None:
+        return None, "Cell", rgb_to_qupath_color(*CELL_COLOR_RGB), []
+    name, color = resolve_classification(prow, palette)
+    extra = pheno_extra_measurements(prow, lineage or [])
+    fid = stamped_id(patient_id, label) if patient_id is not None else None
+    return fid, name, color, extra
 
 
 def compute_zscores(df: pd.DataFrame, marker_cols: List[str]) -> pd.DataFrame:
@@ -178,6 +361,8 @@ def build_feature(
     object_type: str = "detection",
     nucleus_geometry: Optional[Dict] = None,
     object_id: Optional[str] = "PathDetectionObject",
+    class_name: str = "Cell",
+    feature_id: Optional[str] = None,
 ) -> Dict:
     """Assemble a single QuPath-native GeoJSON Feature.
 
@@ -185,16 +370,22 @@ def build_feature(
     Feature (sibling of ``geometry``), exactly matching QuPath's own serialization
     of cell objects (qupath.lib.io.QuPathTypeAdapters). It is only meaningful when
     ``object_type == "cell"``.
+
+    ``feature_id``, when given, takes precedence over ``object_id`` (the stamped
+    "<patient_id>:<label>" id used when phenotyping is active). ``class_name``
+    defaults to the legacy constant "Cell" classification.
     """
     feature: Dict = {"type": "Feature"}
-    if object_id is not None:
+    if feature_id is not None:
+        feature["id"] = feature_id
+    elif object_id is not None:
         feature["id"] = object_id
     feature["geometry"] = geometry
     if nucleus_geometry is not None:
         feature["nucleusGeometry"] = nucleus_geometry
     feature["properties"] = {
         "objectType": object_type,
-        "classification": {"name": "Cell", "colorRGB": color_int},
+        "classification": {"name": class_name, "colorRGB": color_int},
         "isLocked": False,
         "measurements": measurements,
     }
@@ -207,6 +398,10 @@ def export_geojson(
     pixel_size: float = 0.325,
     marker_cols: Optional[List[str]] = None,
     contours: Optional[Dict[str, List[List[float]]]] = None,
+    pheno_lookup: Optional[Dict[int, Dict]] = None,
+    palette: Optional[Dict[str, List[int]]] = None,
+    patient_id: Optional[str] = None,
+    lineage: Optional[List[str]] = None,
 ) -> int:
     """Export cells to QuPath-native GeoJSON format.
 
@@ -222,6 +417,10 @@ def export_geojson(
         Marker columns to include. If None, auto-detected.
     contours : dict, optional
         Pre-computed contours mapping str(label) -> [[x,y], ...] polygon ring.
+    pheno_lookup, palette, patient_id, lineage : optional
+        Phenotype classification inputs (Task 18/6). All default to ``None``,
+        which reproduces today's behaviour exactly: constant "Cell"
+        classification, no stamped ``id``, no extra measurements.
 
     Returns
     -------
@@ -233,8 +432,6 @@ def export_geojson(
 
     logger.info(f"Exporting {len(df)} cells to GeoJSON: {output_path}")
     logger.info(f"  Markers: {marker_cols}")
-
-    color_int = rgb_to_qupath_color(*CELL_COLOR_RGB)
 
     features = []
     skipped = 0
@@ -263,12 +460,19 @@ def export_geojson(
 
         # Build measurements array (QuPath native format)
         measurements = build_measurements(row, marker_cols, pixel_size)
+        fid, class_name, color_int_row, extra = _feature_class_and_extra(
+            row, pheno_lookup, palette, patient_id, lineage
+        )
+        measurements.extend(extra)
         # object_id=None: do not stamp every cell with the same constant id
         # ("PathDetectionObject"), which QuPath treats as a per-object UUID — a
         # shared id across all detections breaks re-import. (Matches the
-        # compartment export path, which already passes object_id=None.)
+        # compartment export path, which already passes object_id=None.) When
+        # phenotyping is active, feature_id=fid supplies the stamped
+        # "<patient_id>:<label>" id instead.
         features.append(
-            build_feature(measurements, geometry, color_int, object_id=None)
+            build_feature(measurements, geometry, color_int_row, object_id=None,
+                          class_name=class_name, feature_id=fid)
         )
 
     logger.info(f"  Exported {len(features)} cells, skipped {skipped}")
@@ -301,6 +505,10 @@ def export_combined_geojson(
     cell_contours: Optional[Dict[str, List[List[float]]]],
     nucleus_contours: Optional[Dict[str, List[List[float]]]],
     prefix: str = "cells",
+    pheno_lookup: Optional[Dict[int, Dict]] = None,
+    palette: Optional[Dict[str, List[int]]] = None,
+    patient_id: Optional[str] = None,
+    lineage: Optional[List[str]] = None,
 ) -> Dict[str, int]:
     """Export one combined GeoJSON for per-compartment quantification.
 
@@ -314,8 +522,6 @@ def export_combined_geojson(
     EXTRACT_NUCLEI_PROPERTIES via ``--reference_mask``), so lookup is a plain
     identity on the cell label.
     """
-    color_int = rgb_to_qupath_color(*CELL_COLOR_RGB)
-
     cells_combined: List[Dict] = []
     n_with_nucleus = 0
     skipped = 0
@@ -342,15 +548,21 @@ def export_combined_geojson(
             n_with_nucleus += 1
 
         measurements = build_measurements(row, marker_cols, pixel_size)
+        fid, class_name, color_int_row, extra = _feature_class_and_extra(
+            row, pheno_lookup, palette, patient_id, lineage
+        )
+        measurements.extend(extra)
 
         cells_combined.append(
             build_feature(
                 measurements,
                 cell_geom,
-                color_int,
+                color_int_row,
                 object_type="cell",
                 nucleus_geometry=nucleus_geom,
                 object_id=None,
+                class_name=class_name,
+                feature_id=fid,
             )
         )
 
@@ -425,6 +637,10 @@ def parse_args() -> argparse.Namespace:
         default="cells",
         help="Prefix for output files",
     )
+    parser.add_argument("--phenotypes", default=None, help="phenotypes.csv from PHENOTYPE")
+    parser.add_argument("--panel_model", default=None, help="model_config.json (compiled panel)")
+    parser.add_argument("--phenotype_qc", default=None, help="phenotype_qc.json from PHENOTYPE")
+    parser.add_argument("--patient_id", default=None, help="patient id for stamped feature ids")
     return parser.parse_args()
 
 
@@ -452,6 +668,30 @@ def main() -> int:
     # Identify marker columns
     marker_cols = identify_marker_columns(cell_df)
     logger.info(f"Detected {len(marker_cols)} marker channels: {marker_cols}")
+
+    # Optional phenotype support: only active when both a compiled panel and a
+    # phenotypes.csv are supplied. Otherwise every new kwarg stays None and the
+    # exporter behaves exactly as before.
+    pheno_lookup = palette = lineage = None
+    patient_id = args.patient_id
+    if args.phenotypes and args.panel_model:
+        logger.info(f"Loading panel model: {args.panel_model}")
+        cfg = load_model_config(args.panel_model)
+        logger.info(f"Loading phenotypes: {args.phenotypes}")
+        pheno_lookup = load_phenotypes(args.phenotypes)
+        palette = cfg.get("palette", {})
+        lineage = cfg.get("lineage_markers", [])
+        if patient_id is None and "fov" in cell_df.columns and len(cell_df):
+            patient_id = str(cell_df["fov"].iloc[0])
+        write_panel_model_sidecar(cfg, str(Path(args.output_dir) / "panel_model.json"))
+        logger.info(f"Wrote panel_model.json sidecar ({len(pheno_lookup)} phenotyped cells)")
+        if args.phenotype_qc:
+            with open(args.phenotype_qc) as fh:
+                qc = json.load(fh)
+            write_calibration_model_sidecar(
+                qc, patient_id, str(Path(args.output_dir) / "calibration_model.json")
+            )
+            logger.info("Wrote calibration_model.json sidecar")
 
     # Load whole-cell contours
     contours = None
@@ -483,6 +723,10 @@ def main() -> int:
             cell_contours=contours,
             nucleus_contours=nucleus_contours,
             prefix=args.output_prefix,
+            pheno_lookup=pheno_lookup,
+            palette=palette,
+            patient_id=patient_id,
+            lineage=lineage,
         )
         num_exported = counts[args.output_prefix]
     else:
@@ -493,6 +737,10 @@ def main() -> int:
             pixel_size=args.pixel_size,
             marker_cols=marker_cols,
             contours=contours,
+            pheno_lookup=pheno_lookup,
+            palette=palette,
+            patient_id=patient_id,
+            lineage=lineage,
         )
 
     # Save CSV with both raw and z-score columns

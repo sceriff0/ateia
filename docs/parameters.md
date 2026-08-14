@@ -199,11 +199,125 @@ Per-cell marker intensity.
 | Parameter | Default | Description |
 |---|---|---|
 | `quantify_compartments` | `true` | Emit per-compartment signal (Nucleus / Cytoplasm / Cell) by routing the nuclear mask into quantification. |
-| `expanded_quantification` | `true` | Also emit Mean and Sum per compartment (per-compartment Median is always emitted). **Requires** `quantify_compartments=true`. |
+| `quantify_statistics` | `['Median']` | Which per-cell statistics to emit — see the composition below. Order is irrelevant; columns are always emitted in canonical order. |
+
+The vocabulary is **composed**, base × normalisation, giving 12 names:
+
+| Base | Compartments | Meaning |
+|---|---|---|
+| `Median` | Nucleus / Cytoplasm / Cell | Per-cell median. The expensive one — a per-label order statistic, not a `bincount`. |
+| `Mean` | Nucleus / Cytoplasm / Cell | Per-cell mean. |
+| `Sum` | Nucleus / Cytoplasm / Cell | Integrated density. |
+| `REDSEA` | **Cell only** | Spillover-compensated, size-normalised. |
+
+| Normalisation | Suffix | Formula |
+|---|---|---|
+| none | — | the raw statistic |
+| classic z | ` Z` | `(x − mean) / SD` |
+| robust z | ` RobustZ` | `(x − median) / (1.4826 · MAD)` |
+
+So `--quantify_statistics "Median,Median RobustZ,REDSEA"` emits per-compartment
+`Median` and `Median RobustZ` plus a whole-cell `REDSEA`.
+
+!!! info "The z population is one patient"
+    Z-scores standardise across **that patient's cells**, for that marker and
+    compartment — the population a `QUANTIFY` task already holds, which is why
+    this costs no extra stage. It is *not* a cohort z: every patient is centred
+    on its own zero, so a `Z` column is for comparing cells **within** a patient,
+    not patients with each other.
+
+!!! tip "Prefer `RobustZ` for intensities"
+    A handful of very bright cells inflate SD and squash everyone else toward
+    zero. Measured on a spiked population, classic z retained 0.32 of the original
+    spread where robust z retained 0.83 — about 2.6× less compression.
+
+!!! warning "Split on commas, not spaces"
+    Composed names contain a space. `--quantify_statistics "Mean Z,Median"` is
+    correct; anything that splits on whitespace turns `Mean Z` into an unknown
+    statistic `Z`.
+
+!!! warning "The default output is smaller than it used to be"
+    `quantify_statistics` replaces the boolean `expanded_quantification`, which
+    **defaulted to `true`**. A default run therefore now emits `Median` only —
+    3 columns per marker instead of 9. Pass
+    `--quantify_statistics Median,Mean,Sum` to restore the old output. Median is
+    also the expensive statistic (a per-label order statistic, not a `bincount`),
+    so a run that does not need it gets faster by omitting it.
+
+### REDSEA lateral-spillover compensation
+
+Corrects marker signal leaking across the boundary between touching cells
+(Bai *et al.*, *Front. Immunol.* 2021;12:652631). **Enabled by putting `REDSEA`
+in `quantify_statistics`** — there is no separate switch. It appends one column,
+`<marker>: Cell: REDSEA`, and changes no existing column.
+Full guide: [REDSEA compensation](redsea.md).
+
+| Parameter | Default | Description |
+|---|---|---|
+| `redsea_markers` | *(empty)* | Comma-separated **surface/membrane** markers to compensate, e.g. `CD3,CD8,CD20`. Required when `REDSEA` is in `quantify_statistics`. Matching is case-insensitive EXACT, so `CD4` never selects `CD45`. |
+| `redsea_element_size` | `null` | Boundary-band depth in pixels. `null` calibrates it from the actual segmentation mask — **the recommended setting**. |
+| `redsea_target_band_fraction` | `0.56` | Calibration target: the fraction of cell area the band should cover. `0.56` is where both of the paper's own calibration points land. |
+| `redsea_element_shape` | `disk` | Band metric. `disk` = Euclidean; `square`/`diamond` reproduce the original's `strel('square')`/`strel('diamond')`. |
+| `redsea_checker` | `1` | `REDSEAChecker`: `1` = subtract and reinforce (paper default), `0` = subtract only. |
+| `redsea_cell_diameter_um` | `20.0` | Advisory only — feeds the `recommended_element_size` line in the per-patient QC JSON. |
 
 !!! danger "Validation rule"
-    Setting `--expanded_quantification true` without `--quantify_compartments true`
-    fails at launch with a clear error.
+    `REDSEA` in `--quantify_statistics` with an empty `--redsea_markers` fails at launch. It would
+    otherwise compute the compensation geometry for every patient and compensate
+    nothing, producing output identical to omitting it, with no error anywhere.
+
+!!! warning "Do not port `elementSize = 2` from the paper"
+    The published value is calibrated for MIBI's 0.781 µm/px on ~9 µm cells. At
+    this pipeline's 0.325 µm/px with ~20 µm cells the equivalent is ~11 px by the
+    paper's proportional rule, and ~7 px once real (non-disk) cell shape is
+    measured. Leave `redsea_element_size` unset and check
+    `band_fraction_mean` in `<outdir>/<patient>/quantify/<patient>_redsea_qc.json`.
+
+!!! note "Compensated sums are on their own scale"
+    With `redsea_checker=1` each cell is handed back the boundary signal it
+    donated, so a positive cell's compensated sum is typically larger than its raw
+    sum. Compare compensated to compensated.
+
+## Phenotyping (panel-agnostic)
+
+Optional constrained cell-type classification. When **both** `panel_spec` and
+`panel_model` are `null` (the default), phenotyping is skipped and the GeoJSON carries
+the constant `"Cell"` classification (raw intensities only — gate downstream). Supplying a
+panel enables conformal-risk-controlled (CRC) phenotype assignment written into the
+exported `cells.geojson`.
+
+| Parameter | Default | Description |
+|---|---|---|
+| `panel_spec` | `null` | Path to the panel authoring spec (`panel.yaml`). |
+| `panel_model` | `null` | Path to a frozen, compiled `model_config.json` (produced by `COMPILE_PANEL`). |
+
+The panel file itself carries one behavioural setting, whose default lives in
+`bin/utils/phenotyping/panel_schema.py` (it is a panel setting, not a pipeline
+parameter):
+
+```yaml
+settings:
+  ambiguous_fallback: ancestor    # ancestor (default) | none
+```
+
+`ancestor` replaces an `Ambiguous` cell's label with the nearest phenotype that is an
+ancestor of **every** surviving candidate, so the cell draws in a real palette colour and
+carries a resume point rather than a grey bucket. The taxonomy verdict is untouched:
+`phenotypes.csv` keeps `outcome = Ambiguous` and gains `ambiguous` (boolean) and
+`ancestor_depth` (links from the ancestor to the nearest candidate, `-1` when not
+collapsed), while `phenotype` becomes the usable label.
+
+A candidate set spanning independent roots has no common ancestor and stays `Ambiguous`
+automatically, so there is no depth or count knob to tune. The collapse runs after CRC
+and the constraint audit and cannot change `chosen_alpha` or `constraint_audit.csv`.
+Set `none` to leave `Ambiguous` strictly alone.
+| `pheno_alpha` | `0.05` | CRC target risk α (per-marker miscoverage budget). |
+| `pheno_min_cal` | `50` | Minimum per-marker calibration-set size. |
+| `pheno_max_enumerate` | `100000` | Feasible-set brute-force enumeration ceiling. |
+
+!!! note "Incremental cycles"
+    Phenotyping is **not** run in `--mode add_cycle`; setting `panel_spec`/`panel_model`
+    in add_cycle mode is rejected at launch.
 
 ## Visualization & export
 
@@ -299,18 +413,13 @@ Full walkthrough: [Incremental cycles](add_cycle.md).
 |---|---|---|
 | `mode` | `standard` | `standard` = normal `--start`/`--stop` pipeline; `add_cycle` = incremental cyclic-IF. |
 | `prior_outdir` | `null` | **Required for `add_cycle`.** The `--outdir` of the previously completed run (supplies the reusable reference, mask, and quantification via its checkpoint CSVs). |
-| `embed_masks` | `false` | Embed the segmentation masks as a second uint32 series in the pyramid OME-TIFF. Written only when `embed_masks && quantify_compartments && expanded_quantification`; `add_cycle` consumes this series, so a prior run must have it to be extendable. `--embed_masks true` REQUIRES both `--quantify_compartments` and `--expanded_quantification` also true — the launch validation rejects the combination otherwise (see warning below). |
+| `embed_masks` | `false` | Embed the segmentation masks as a second uint32 series (`Image:1`) in the pyramid OME-TIFF. **This flag alone decides it** — `SEGMENT` emits both masks unconditionally, so nothing else is required. `add_cycle` consumes the series, so a prior run must have it to be extendable. |
 
 !!! warning "`add_cycle` prerequisites"
     `embed_masks` defaults to `false`, so a default run is **not** add_cycle-extendable.
-    Set `--embed_masks true` (together with `--quantify_compartments` and
-    `--expanded_quantification`, both on by default) to make a run extendable.
-    `--embed_masks true` with either sibling off is rejected **at launch**
-    (`ParamUtils.validateCompartmentQuant`) rather than silently producing a
-    plain pyramid, so a prior run either failed to launch with `embed_masks=true`
-    misconfigured, or has the mask series if `embed_masks=true` was accepted at
-    all. Without the embedded mask series, `mode=add_cycle` **fast-fails** before
-    doing any work. See
+    Set `--embed_masks true` to make one extendable — it is the only condition, so
+    a run with the flag set always carries the mask series. Without it,
+    `mode=add_cycle` **fast-fails** before doing any work. See
     [Incremental cycles → Fast-fail behavior](add_cycle.md#fast-fail-behavior).
 
 ## Parameter presets

@@ -273,7 +273,7 @@ workflow ADD_CYCLE {
     ch_masks = ch_prior_assets.map { pid, prior ->
         [pid, prior.cell_mask, prior.nuclei_mask]
     }
-    QUANTIFY_MARKERS(SPLIT_CHANNELS.out.channels, ch_masks)
+    QUANTIFY_MARKERS(SPLIT_CHANNELS.out.channels, ch_masks, compartment_mode)
 
     // ------------------------------------------------------------------ //
     // 7. MERGE new marker CSVs onto the prior merged table (base) by label
@@ -294,8 +294,17 @@ workflow ADD_CYCLE {
     //    nucleus slot: real nucleus contours when compartments enabled,
     //    else the cell contours (harmless placeholder — EXPORT_GEOJSON only
     //    passes --nucleus_contours_json under params.quantify_compartments).
+    //    add_cycle does not run phenotyping (no COMPILE_PANEL/PHENOTYPE here):
+    //    the phenotypes/model_config slots reuse the cell contours file as a
+    //    harmless placeholder. panel_spec/panel_model are REJECTED at launch in
+    //    add_cycle mode (ParamUtils.validateAddCyclePhenotyping), so EXPORT_GEOJSON's
+    //    arg guard is always off here and the legacy constant-"Cell" export is kept.
     // ------------------------------------------------------------------ //
     ch_nuc_for_export = compartment_mode.compartments ? ch_nucleus_contours : ch_contours
+    // No PHENOTYPE stage here: all three phenotype slots reuse the cell contours file.
+    // The arity must track ASSEMBLE_EXPORT's take: even though this path never
+    // phenotypes -- a short tuple here is a silent cardinality mismatch downstream.
+    ch_pheno_extras = ch_contours.map { pid, contours -> [pid, contours, contours, contours] }
 
     // ------------------------------------------------------------------ //
     // 9. REBUILD complete pyramid: recover prior channels from the prior
@@ -398,6 +407,7 @@ workflow ADD_CYCLE {
         MERGE_QUANT_CSVS.out.merged_csv,
         ch_contours,
         ch_nuc_for_export,
+        ch_pheno_extras,
         ch_all_channels,
         ch_masks,
         compartment_mode

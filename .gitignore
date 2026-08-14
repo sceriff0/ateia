@@ -109,6 +109,7 @@ tests/testdata/P001_cell_mask.npy
 tests/testdata/P001_cell_mask.tif
 tests/testdata/P002_cell_mask.npy
 tests/testdata/P002_cell_mask.tif
+tests/testdata/P001_redsea.npz
 tests/testdata/valid_preprocessing.csv
 tests/testdata/valid_checkpoint_registration.csv
 tests/testdata/valid_checkpoint_segmented.csv

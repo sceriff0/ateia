@@ -1,0 +1,126 @@
+nextflow_process {
+
+    name "Test REDSEA_MATRIX process"
+    script "modules/local/redsea_matrix.nf"
+    process "REDSEA_MATRIX"
+
+    tag "modules"
+    tag "modules_local"
+    tag "redsea_matrix"
+
+    test("Should emit geometry and QC keyed by patient - stub") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [ id: 'P001', patient_id: 'P001' ],
+                    file('$projectDir/tests/testdata/P001_cell_mask.npy', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            assert process.success
+            assert process.out.geometry
+            assert process.out.qc
+            assert process.out.versions
+            with(process.out.geometry) {
+                assert size() == 1
+                assert get(0).get(0).patient_id == 'P001'
+                assert get(0).get(1).toString().endsWith('P001_redsea.npz')
+            }
+        }
+    }
+
+    test("Should calibrate --element-size from the mask when the param is null - rendered command") {
+
+        // Tagged `stub` for CI's blocking gate but WITHOUT `options "-stub"`: the
+        // element-size decision is made in conf/modules.config's ext.args closure and
+        // rendered into `script:`, and `-stub` evaluates neither.
+        //
+        // The substance is the NEGATIVE assertion. params.redsea_element_size defaults
+        // to null, which must render as NO --element-size flag at all, because that
+        // absence is what makes bin/redsea_matrix.py calibrate the depth against the
+        // actual segmentation. If the closure ever renders `--element-size null` or
+        // `--element-size 0`, calibration is silently switched off and every patient
+        // gets whatever literal leaked through -- a green run with a quietly wrong
+        // compensation radius, which is precisely the failure the calibration exists
+        // to prevent.
+        tag "stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [ id: 'P001', patient_id: 'P001' ],
+                    file('$projectDir/tests/testdata/P001_cell_mask.npy', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            def rendered = []
+            new File("$workDir").eachFileRecurse { f ->
+                if (f.name == '.command.sh' && f.text.contains('redsea_matrix.py')) {
+                    rendered << f.text
+                }
+            }
+            assertAll(
+                { assert rendered.size() >= 1,
+                    "no rendered REDSEA_MATRIX .command.sh found under the task work dir" },
+                { assert rendered.every { !it.contains('--element-size') },
+                    "params.redsea_element_size is null but --element-size was rendered, " +
+                    "which switches off mask-driven calibration: " + rendered.join(' --- ') },
+                { assert rendered.every { it.contains('--element-shape disk') },
+                    "rendered command missing the band metric: " + rendered.join(' --- ') },
+                { assert rendered.every { it.contains('--target-band-fraction 0.56') },
+                    "rendered command missing the calibration target: " + rendered.join(' --- ') },
+                // pixel_size is the pipeline-wide param, not a REDSEA-local copy.
+                { assert rendered.every { it.contains('--pixel-size 0.325') },
+                    "rendered command does not carry params.pixel_size: " + rendered.join(' --- ') }
+            )
+        }
+    }
+
+    test("Should pin --element-size when the param is set - rendered command") {
+
+        // The other half: a gate that only ever omits the flag is indistinguishable
+        // from one hard-wired to omit it.
+        tag "stub"
+
+        when {
+            params {
+                redsea_element_size = 4
+            }
+            process {
+                """
+                input[0] = [
+                    [ id: 'P001', patient_id: 'P001' ],
+                    file('$projectDir/tests/testdata/P001_cell_mask.npy', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            def rendered = []
+            new File("$workDir").eachFileRecurse { f ->
+                if (f.name == '.command.sh' && f.text.contains('redsea_matrix.py')) {
+                    rendered << f.text
+                }
+            }
+            assertAll(
+                { assert rendered.size() >= 1,
+                    "no rendered REDSEA_MATRIX .command.sh found under the task work dir" },
+                { assert rendered.every { it.contains('--element-size 4') },
+                    "a pinned redsea_element_size did not reach the command: " + rendered.join(' --- ') }
+            )
+        }
+    }
+}
