@@ -47,6 +47,7 @@ from measurements import (  # noqa: E402
     STATISTICS,
     identify_marker_columns,
 )
+from pixel_convention import corner_to_centre  # noqa: E402
 
 logger = get_logger(__name__)
 
@@ -301,6 +302,12 @@ def build_shapes(contours_path: str, labels: np.ndarray, name: str):
 
     Indexed by ``label`` so it lines up with the table's ``instance_key``. Cells
     without a contour are omitted rather than given a placeholder geometry.
+
+    ``contours.json`` is written in QuPath's pixel-CORNER convention (it is the
+    same file ``export_geojson.py`` hands to QuPath), while this store's
+    ``obsm["spatial"]`` centroids are ``regionprops``' pixel-CENTRE. The rings
+    are converted on the way in so that one ``.zarr`` describes each cell at one
+    position; ``contours.json`` itself is left alone for its QuPath consumer.
     """
     import geopandas as gpd
     from shapely.geometry import Polygon
@@ -311,7 +318,7 @@ def build_shapes(contours_path: str, labels: np.ndarray, name: str):
         ring = contours.get(str(int(lab)))
         if not ring or len(ring) < 3:
             continue
-        geoms.append(Polygon(ring))
+        geoms.append(Polygon(corner_to_centre(ring)))
         idx.append(int(lab))
     if not geoms:
         logger.warning("no usable contours in %s for element %r", contours_path, name)
@@ -423,6 +430,13 @@ def build_table(
         # Pixels, not micrometres: SpatialData's convention is intrinsic pixel
         # coordinates plus a transformation carrying the scale. Storing µm here
         # would double-apply pixel_size on any cross-modality alignment.
+        #
+        # Convention: skimage/regionprops pixel-CENTRE, i.e. the quant CSV's raw
+        # `x`/`y` unshifted. This is the store's one convention -- `build_shapes`
+        # converts its QuPath-corner rings down to match. Do NOT add +0.5 here to
+        # "make the shapes agree": `join_flowpath.py`'s centroid fallback inverts
+        # FlowPath's µm centroids into exactly this convention, so a shift here
+        # silently biases that join by half a pixel (see bin/utils/pixel_convention.py).
         adata.obsm["spatial"] = df[["x", "y"]].to_numpy(dtype=np.float64)
 
     # Per-slide z-scores, matching what EXPORT_GEOJSON writes for QuPath display.

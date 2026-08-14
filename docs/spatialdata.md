@@ -46,6 +46,19 @@ Region metadata follows the SpatialData contract: `region="cell_mask"`,
     Storing µm directly would double-apply the scale on any cross-modality
     alignment.
 
+!!! note "The store is entirely in skimage's pixel-centre convention"
+    `shapes` and `obsm["spatial"]` describe each cell at the same position:
+    pixel `(0, 0)`'s **centre** is `0.0`, which is what `regionprops` centroids
+    and `find_contours` traces are natively in, and what the scverse stack
+    expects. The QuPath GeoJSON — and the `contours.json` that feeds it — stay in
+    QuPath/ImageJ's **pixel-corner** convention, `+0.5` away; `EXPORT_SPATIALDATA`
+    converts those rings back on the way into the store. Both directions are
+    spelt once, in `bin/utils/pixel_convention.py`.
+
+    Do not "fix" the store by shifting `obsm["spatial"]` up by `+0.5` instead:
+    the FlowPath centroid fallback below inverts µm centroids into pixel-centre,
+    so that would bias the join by half a pixel.
+
 ### Parameters
 
 | Parameter | Default | Description |
