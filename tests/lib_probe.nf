@@ -620,5 +620,128 @@ workflow {
     // patient, so there is no stem to prefix and `id` is the patient_id.
     assert Checkpoint.imageColumn(Layout.POSTPROCESSED) == null
 
+    // ------------------------------------------------------------------ //
+    // PatientGroup — the one per-patient grouping
+    // ------------------------------------------------------------------ //
+    // pairAndSort IS the -resume cascade fix, in isolation. The worked example is
+    // the one groupTuple(sort:) gets wrong: two items arriving as
+    // (zeta, a.txt) and (alpha, z.txt). Sorting the two grouped lists
+    // INDEPENDENTLY yields [alpha, zeta] and [a.txt, z.txt], so alpha is now
+    // paired with a.txt -- silently, with no error anywhere. Pairing first and
+    // sorting the PAIRS keeps each meta with its own file.
+    def pgPairs = PatientGroup.pairAndSort(
+        [[id: 'zeta'], [id: 'alpha']],
+        ['a.txt', 'z.txt'],
+        { meta, _f -> meta.id })
+    assert pgPairs == [[[id: 'alpha'], 'z.txt'], [[id: 'zeta'], 'a.txt']]
+    // Stated the other way round, because this is the assertion that would have
+    // caught the bug: the grouped order changed, the PAIRING did not.
+    assert pgPairs.collect { it[0].id } == ['alpha', 'zeta']
+    assert pgPairs.collect { it[1] }    == ['z.txt', 'a.txt']
+
+    // A sort key that does not separate two items leaves their relative order to
+    // arrival -- i.e. it is not a canonical order at all, which is the whole point
+    // of sorting here. That must be an error, not a silently partial ordering.
+    def pgTied = false
+    try { PatientGroup.pairAndSort([[id: 'a'], [id: 'a']], ['x', 'y'], { meta, _f -> meta.id }) }
+    catch (IllegalStateException e) {
+        pgTied = true
+        assert e.message.contains('a')
+    }
+    assert pgTied, 'PatientGroup.pairAndSort must reject a sort key that ties'
+
+    // transpose() on unequal lists TRUNCATES silently, which would drop a file.
+    def pgRagged = false
+    try { PatientGroup.pairAndSort([[id: 'a']], ['x', 'y'], { meta, _f -> meta.id }) }
+    catch (IllegalStateException ignored) { pgRagged = true }
+    assert pgRagged, 'PatientGroup.pairAndSort must reject unequal metas/payloads'
+
+    // requireSize is what makes the unsized fallback unwritable. The message must
+    // name the channel (which grouping refused), the meta key (what to inject) and
+    // the group (whose meta was short) -- the run aborts inside an operator
+    // closure, so the message is the only context the reader gets.
+    assert PatientGroup.requireSize([images_count: 3], 'images_count', 'ch', 'P001') == 3
+    ['a channel', 'images_count', 'P001'].each { needle ->
+        def missing = false
+        try { PatientGroup.requireSize([patient_id: 'P001'], 'images_count', 'a channel', 'P001') }
+        catch (IllegalStateException e) {
+            missing = true
+            assert e.message.contains(needle), "requireSize message must name ${needle}"
+        }
+        assert missing, 'PatientGroup.requireSize must reject an absent size'
+    }
+    // 0 and a non-Integer are the same defect as absent: a groupKey sized 0 never
+    // fills, so the run HANGS rather than fails. Checkpoint.requireCount refuses
+    // both upstream for the same reason; this is the second, independent refusal.
+    [0, -1, null, '3', 3.5].each { bad ->
+        def rejected = false
+        try { PatientGroup.requireSize([images_count: bad], 'images_count', 'ch', 'P001') }
+        catch (IllegalStateException ignored) { rejected = true }
+        assert rejected, "PatientGroup.requireSize must reject images_count=${bad}"
+    }
+
+    // End to end through real channel operators: the size hint is applied, the
+    // GroupKey wrapper is unwrapped to a plain String (see
+    // tests/test_group_key_unwrapped.py for why that is not cosmetic), and every
+    // meta is still paired with its own payload in sort-key order. Asserted inside
+    // .subscribe {} -- a failing assert there aborts the run with a nonzero exit,
+    // which is the mechanism this whole probe is built on.
+    PatientGroup.byPatient(
+        Channel.of(
+            [[patient_id: 'P001', id: 'P001_c', images_count: 3], 'c.tiff'],
+            [[patient_id: 'P001', id: 'P001_a', images_count: 3], 'a.tiff'],
+            [[patient_id: 'P001', id: 'P001_b', images_count: 3], 'b.tiff'],
+        ),
+        name  : 'lib probe: the per-patient grouping',
+        size  : 'images_count',
+        sortBy: { meta, _f -> meta.id },
+    ).subscribe { row ->
+        assert row[0] == 'P001'
+        assert row[0].getClass() == String, 'the GroupKey wrapper must not escape the grouping'
+        assert row[1].collect { it[0].id } == ['P001_a', 'P001_b', 'P001_c']
+        assert row[1].collect { it[1] }    == ['a.tiff', 'b.tiff', 'c.tiff']
+    }
+
+    // byPatient IS byKey with the patient key bound. Handing it a `key` would be a
+    // second, competing answer to "what is a patient group keyed on", so it is
+    // refused rather than silently overridden either way.
+    def pgKeyOpt = false
+    try {
+        PatientGroup.byPatient(Channel.empty(),
+                               name: 'ch', size: 'images_count',
+                               key: { meta -> meta.id }, sortBy: { m, f -> m.id })
+    }
+    catch (IllegalArgumentException ignored) { pgKeyOpt = true }
+    assert pgKeyOpt, 'PatientGroup.byPatient must reject a caller-supplied key'
+
+    // The opts map is closed, like Checkpoint.read's: a typo'd option must not be
+    // accepted and then ignored, which is how `sortby:` would silently reinstate
+    // arrival order.
+    def pgUnknownOpt = false
+    try {
+        PatientGroup.byPatient(Channel.empty(),
+                               name: 'ch', size: 'images_count',
+                               sortBy: { m, f -> m.id }, sortby: { m, f -> m.id })
+    }
+    catch (IllegalArgumentException e) {
+        pgUnknownOpt = true
+        assert e.message.contains('sortby')
+    }
+    assert pgUnknownOpt, 'PatientGroup must reject an unknown option'
+
+    // Every required option is required by NAME. A grouping missing `sortBy` is an
+    // arrival-ordered grouping, which is the defect, not a default.
+    ['name', 'size', 'sortBy'].each { opt ->
+        def opts = [name: 'ch', size: 'images_count', sortBy: { m, f -> m.id }]
+        opts.remove(opt)
+        def omitted = false
+        try { PatientGroup.byPatient(opts, Channel.empty()) }
+        catch (IllegalArgumentException e) {
+            omitted = true
+            assert e.message.contains(opt)
+        }
+        assert omitted, "PatientGroup must require the '${opt}' option"
+    }
+
     println "LIB PROBE: all assertions passed"
 }

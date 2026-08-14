@@ -1,0 +1,61 @@
+/*
+ * The half of PatientGroup's contract that can only be observed as a FAILED run:
+ * a per-patient grouping whose streaming size is absent must abort, naming the
+ * channel and the missing meta key, instead of silently degrading to an unsized
+ * full-run barrier. See tests/patient_group_probe.nf's header for the defect.
+ *
+ * `options "-lib $projectDir/lib"` for the same reason tests/lib_probe.nf.test
+ * carries it: nf-test never passes -lib itself, and Nextflow's automatic lib/
+ * discovery looks next to the SCRIPT (tests/), not next to the repo root.
+ *
+ * No `options "-stub"`: this script declares no processes, and the assertions are
+ * in the script body, which always runs.
+ */
+nextflow_pipeline {
+
+    name "PatientGroup — an absent streaming size aborts the run"
+    script "tests/patient_group_probe.nf"
+    tag "stub"
+
+    test("byPatient: a meta with no images_count aborts, naming the channel and the key") {
+        options "-lib $projectDir/lib"
+        when {
+            params {
+                outdir  = "$outputDir"
+                pg_case = "patient"
+            }
+        }
+        then {
+            assert workflow.failed
+            def out = workflow.stdout.join('\n') + workflow.stderr.join('\n')
+            // The channel, so the reader knows WHICH grouping refused.
+            assert out.contains('REGISTRATION: the per-patient slide group feeding REGISTER')
+            // The meta key, so the reader knows what to inject.
+            assert out.contains('images_count')
+            // The group whose meta was short.
+            assert out.contains('P001')
+            // The run must not have produced a group at all.
+            assert !out.contains('GROUPED UNSIZED')
+        }
+    }
+
+    test("byKey: the error names the computed group key, not just the patient") {
+        options "-lib $projectDir/lib"
+        when {
+            params {
+                outdir  = "$outputDir"
+                pg_case = "slide"
+            }
+        }
+        then {
+            assert workflow.failed
+            def out = workflow.stdout.join('\n') + workflow.stderr.join('\n')
+            assert out.contains('TILED_ADAPTER: the control-point gather feeding TILED_SOLVE')
+            assert out.contains('tiles_count')
+            // This is what requireTilesCount used to say, and the reason a compound
+            // key must be reported as computed rather than as meta.patient_id.
+            assert out.contains('P002#DAPI')
+            assert !out.contains('GROUPED UNSIZED')
+        }
+    }
+}
