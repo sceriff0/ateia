@@ -52,3 +52,35 @@ def test_cli_hard_panel_error_writes_report_not_traceback(tmp_path):
     assert rc != 0
     assert report.exists()
     assert "unknown marker" in report.read_text()
+
+
+def test_compile_refuses_more_than_53_lineage_markers():
+    """free_mask is a QuPath double: integers above 2**53 are not exactly
+    representable, so bit 53 would be dropped silently -- no error, a wrong free set."""
+    import pytest
+
+    # `cp` was loaded from the file, so it put bin/utils on sys.path and its
+    # PanelError is `phenotyping.panel_schema.PanelError`. Importing
+    # `utils.phenotyping.panel_schema.PanelError` here would be a DIFFERENT class
+    # object -- the dual-root import hazard panel_schema.py documents -- and
+    # pytest.raises would not match it. Use the module's own symbol.
+    from utils.phenotyping.panel_schema import parse_panel
+
+    markers = {
+        f"M{i}": {"role": "lineage", "compartment": "cell", "statistic": "Median"}
+        for i in range(54)
+    }
+    panel = parse_panel({"markers": markers, "phenotypes": {}})
+    with pytest.raises(Exception, match=r"2\*\*53") as exc:
+        cp.guard_mask_width(panel)
+    assert type(exc.value).__name__ == "PanelError"
+
+
+def test_compile_accepts_exactly_53_lineage_markers():
+    from utils.phenotyping.panel_schema import parse_panel
+
+    markers = {
+        f"M{i}": {"role": "lineage", "compartment": "cell", "statistic": "Median"}
+        for i in range(53)
+    }
+    cp.guard_mask_width(parse_panel({"markers": markers, "phenotypes": {}}))

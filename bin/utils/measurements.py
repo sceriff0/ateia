@@ -165,3 +165,27 @@ def identify_marker_columns(df: "pd.DataFrame") -> List[str]:
         for col in df.columns
         if col not in MORPHOLOGY_COLS and pd.api.types.is_numeric_dtype(df[col])
     ]
+
+
+# ── the phenotype measurement namespace ──────────────────────────────────────
+# Every phenotyping measurement on cells.geojson lives under this prefix, and the
+# separator is "." rather than the quantification grammar's ": ".
+#
+# This is not cosmetic. FlowPath discovers its marker panel with
+# MeasurementKeys.collapseToBaseMarkers, which parses each measurement name and, when
+# parsing FAILS, falls back to the raw name -- so a bare "n_candidates" or a
+# one-separator "CD3: p_neg" registers as a PHANTOM marker channel in the gating panel.
+# Its only defence there is a hardcoded Java deny-list, which would need one entry per
+# feasible phenotype and per marker: panel-dependent, therefore unhardcodable. One
+# prefix replaces the deny-list with one rule, and the rule is READ from the sidecar's
+# `contract.measurement_prefix` rather than spelled on the consumer side.
+PHENO_PREFIX: str = "_pheno."
+
+
+def pheno_key(*parts: str) -> str:
+    """Build a phenotype measurement key: ``_pheno.<part>[.<part>...]``.
+
+    G5 contract with qupath-extension-flowpath. THE one owner of this spelling -- do
+    not reproduce it in export_geojson.py or phenotype_cells.py.
+    """
+    return PHENO_PREFIX + ".".join(parts)

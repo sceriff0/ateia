@@ -147,3 +147,38 @@ def test_identify_marker_columns_excludes_morphology_and_non_numeric():
         }
     )
     assert m.identify_marker_columns(df) == ["CD3: Cell: Median", "DAPI"]
+
+
+# ── the phenotype measurement namespace ───────────────────────────────────────
+
+
+def test_pheno_key_uses_a_dot_separator_not_a_colon_space():
+    """A ': ' separator lets the FlowPath side's collapseToBaseMarkers fall through to
+    the raw name and register a PHANTOM marker channel."""
+    from measurements import PHENO_PREFIX, pheno_key
+
+    assert PHENO_PREFIX == "_pheno."
+    assert pheno_key("free_mask") == "_pheno.free_mask"
+    assert pheno_key("score", "T_helper") == "_pheno.score.T_helper"
+    assert ": " not in pheno_key("score", "T_helper")
+
+
+def test_pheno_keys_never_collide_with_the_quantification_grammar():
+    from measurements import COMPARTMENTS, STATISTICS, measurement_key, pheno_key
+
+    quant = {measurement_key("CD3", c, s) for c in COMPARTMENTS for s in STATISTICS}
+    pheno = {pheno_key("score", "CD3"), pheno_key("free_mask"), pheno_key("density_bin")}
+    assert quant.isdisjoint(pheno)
+
+
+def test_pheno_prefix_has_exactly_one_owner():
+    """No second copy of the literal prefix anywhere in bin/."""
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parents[1] / "bin"
+    offenders = [
+        str(p.relative_to(root))
+        for p in root.rglob("*.py")
+        if p.name != "measurements.py" and '"_pheno.' in p.read_text()
+    ]
+    assert offenders == [], offenders

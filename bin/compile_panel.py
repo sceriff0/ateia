@@ -12,8 +12,13 @@ from typing import List, Optional, Tuple
 
 sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
+from measurements import pheno_key  # noqa: E402
 from phenotyping.constraints import split_constraints  # noqa: E402
-from phenotyping.feasible import enumerate_feasible, validate  # noqa: E402
+from phenotyping.feasible import (  # noqa: E402
+    enumerate_feasible,
+    lineage_markers,
+    validate,
+)
 from phenotyping.model_config import (  # noqa: E402
     build_model_config,
     write_spec_report_html,
@@ -28,6 +33,7 @@ def compile_panel(panel_src, *, alpha_target: float, min_calibration: int,
                   ) -> Tuple[dict, List[str], List[str]]:
     panel = parse_panel(panel_src)
     typecheck(panel)  # §4.1 — raises PanelError on hard type errors
+    guard_mask_width(panel)  # the exported free_mask must fit a QuPath double
     feasible = enumerate_feasible(panel, max_enumerate=max_enumerate)
     split = split_constraints(panel)
     references, ref_warns = resolve_references(panel, split)
@@ -43,6 +49,27 @@ def compile_panel(panel_src, *, alpha_target: float, min_calibration: int,
 def _spec_version(path: str) -> str:
     digest = hashlib.sha256(Path(path).read_bytes()).hexdigest()
     return f"panel@sha256:{digest}"
+
+
+def guard_mask_width(panel) -> None:
+    """Refuse to compile a panel whose free_mask would not fit a QuPath measurement.
+
+    QuPath detection measurements are IEEE-754 doubles: integers are exact only to
+    2**53. A 54th lineage marker would set a bit that is silently dropped on import --
+    no error, a wrong `free` set for every cell. Same reasoning as classify.py's
+    _MAX_VECTORIZED_LINEAGE, one bit tighter because a mask crosses into a measurement.
+
+    `phenotype_order` needs no such guard: scores are keyed by NAME, not packed into
+    bits.
+    """
+    lineage = lineage_markers(panel)
+    if len(lineage) > 53:
+        raise PanelError(
+            f"panel declares {len(lineage)} lineage markers; the exported "
+            f"{pheno_key('free_mask')} packs one bit per lineage marker into a QuPath "
+            f"measurement, which is a double and exact only to 2**53. Reduce lineage "
+            f"markers to 53 or fewer."
+        )
 
 
 def main(argv: Optional[List[str]] = None) -> int:
