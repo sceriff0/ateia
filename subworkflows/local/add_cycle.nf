@@ -294,8 +294,15 @@ workflow ADD_CYCLE {
     //    nucleus slot: real nucleus contours when compartments enabled,
     //    else the cell contours (harmless placeholder — EXPORT_GEOJSON only
     //    passes --nucleus_contours_json under params.quantify_compartments).
+    //    add_cycle does not run phenotyping (no COMPILE_PANEL/PHENOTYPE here):
+    //    the phenotypes/model_config slots reuse the cell contours file as a
+    //    harmless placeholder. panel_spec/panel_model are REJECTED at launch in
+    //    add_cycle mode (ParamUtils.validateAddCyclePhenotyping), so EXPORT_GEOJSON's
+    //    arg guard is always off here and the legacy constant-"Cell" export is kept.
     // ------------------------------------------------------------------ //
     ch_nuc_for_export = compartment_mode.compartments ? ch_nucleus_contours : ch_contours
+    // No PHENOTYPE stage here: both phenotype slots reuse the cell contours file.
+    ch_pheno_extras = ch_contours.map { pid, contours -> [pid, contours, contours] }
 
     // ------------------------------------------------------------------ //
     // 9. REBUILD complete pyramid: recover prior channels from the prior
@@ -398,6 +405,7 @@ workflow ADD_CYCLE {
         MERGE_QUANT_CSVS.out.merged_csv,
         ch_contours,
         ch_nuc_for_export,
+        ch_pheno_extras,
         ch_all_channels,
         ch_masks,
         compartment_mode

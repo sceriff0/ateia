@@ -10,7 +10,8 @@ bin/quantify.py:
   generate_postprocessing_qc.py), with merge_quant_csvs.py's copy actually
   short by two entries (fov, cell_size);
 - the measurement-key grammar "<marker>: <Compartment>: <Statistic>", built
-  independently in quantify.py and parsed in export_spatialdata.py.
+  independently in quantify.py and phenotype_cells.py and parsed in
+  export_spatialdata.py.
 
 This test asserts all four former copies now resolve back to the same
 canonical set, and pins measurement_key()'s exact output (G5: a
@@ -101,7 +102,10 @@ def test_measurement_key_exact_literal_string():
     This is the format qupath-extension-flowpath parses from GeoJSON
     measurement names ("marker: Compartment: Statistic"), reproduced from
     quantify.py::compute_compartment_intensities
-    (`f"{channel_name}: {comp}: Median"`, bin/quantify.py:180).
+    (`f"{channel_name}: {comp}: Median"`, bin/quantify.py:180) and
+    phenotype_cells.py::_marker_values
+    (`f"{marker}: {spec['compartment']}: {spec['statistic']}"`,
+    bin/phenotype_cells.py:58, pre-refactor).
     """
     assert m.measurement_key("CD3", "Nucleus", "Median") == "CD3: Nucleus: Median"
 

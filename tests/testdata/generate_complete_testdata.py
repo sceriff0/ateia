@@ -505,7 +505,7 @@ print("  - sample_DAPI.tif, sample_PANCK.tif, sample_SMA.tif")
 print("  - sample_channels.txt")
 # =============================================================================
 # 7. Fixtures for updated postprocessing: EXTRACT_CELL_PROPERTIES, intensity-only
-#    QUANTIFY, MERGE_QUANT_CSVS with morphology
+#    QUANTIFY, MERGE_QUANT_CSVS with morphology, PHENOTYPE with contours
 # =============================================================================
 print("\n7. Creating postprocessing fixtures (updated architecture)...")
 
