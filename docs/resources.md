@@ -353,6 +353,10 @@ the container follows `--seg_method` and the registration method respectively.
 An unrecognised `--seg_method` is rejected by name rather than silently falling
 back to a different segmenter.
 
+For which *imaging library versions* (`tifffile` and friends) each of these
+images pins — and why some diverge and can't be safely converged — see
+[Containers](containers.md).
+
 ---
 
 ## Measuring what a run actually used

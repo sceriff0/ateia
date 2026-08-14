@@ -33,6 +33,13 @@ WORKDIR /app
 # Upgrade pip
 RUN python3 -m pip install --no-cache-dir --upgrade pip setuptools wheel
 
+# tifffile==2023.7.10 is left as-is (Task 11b, 2026-08-14): this image also
+# pins numpy==1.24.3, scikit-image==0.21.0 and jax[cpu]==0.4.20, an
+# already-old, presumably-tested combination. This task's hard constraint
+# (no image builds available here) means a version bump can't be verified
+# against that specific combination, and PREPROCESS's illumination-corrected
+# output feeding every downstream step makes a silent behavioural drift the
+# worst place to guess. Left untouched. See docs/containers.md.
 # Install Python dependencies for preprocessing
 RUN pip install --no-cache-dir \
     numpy==1.24.3 \

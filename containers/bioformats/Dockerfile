@@ -39,6 +39,15 @@ RUN wget -q "https://github.com/glencoesoftware/raw2ometiff/releases/download/v$
     && ln -s "/opt/raw2ometiff-${R2OT_VERSION}/bin/raw2ometiff" /usr/local/bin/raw2ometiff \
     && rm "raw2ometiff-${R2OT_VERSION}.zip"
 
+# tifffile==2024.7.24 is left as-is (Task 11b, 2026-08-14): it is the
+# newest pin in the codebase and is already an isolated single-image
+# convergence target of one -- moving it to 2024.7.2 (the version
+# containers/tiled, containers/merge, containers/quantification and
+# containers/istantseg converge on) or leaving it here are both one-image
+# divergences, and this task's hard constraint (no image builds available)
+# means there is no way to verify a version bump doesn't change this
+# process's channel-reorder output. Left untouched rather than guessed at.
+# See docs/containers.md.
 RUN pip3 install --no-cache-dir \
         tifffile==2024.7.24 \
 	imagecodecs \
