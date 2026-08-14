@@ -4,6 +4,11 @@ This directory vendors the Docker build contexts for every image the Mirage
 pipeline runs. Each subdirectory is a self-contained build context
 (`containers/<name>/Dockerfile` plus any `requirements.txt` / helper files).
 
+> For which processes run in each image **and** which version of `tifffile`
+> (and other pinned imaging libraries) each image installs, see
+> [`docs/containers.md`](../docs/containers.md). This file covers build/publish
+> mechanics; that one covers the per-image pin reconciliation done in Task 11b.
+
 Images are built and published to **Docker Hub**, in a single public repository
 using one descriptive tag per image:
 
