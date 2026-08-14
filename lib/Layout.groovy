@@ -139,8 +139,13 @@ class Layout {
      * publishDir has to spell `${params.outdir}/csv/${step}.parts` by hand, because
      * conf/*.config cannot see lib/*.groovy classes (it fails SILENTLY - see
      * CLAUDE.md). That is the same hand-maintained agreement every other publish
-     * path in this class has with the config, and tests/test_layout.py asserts this
-     * one mechanically rather than by eye.
+     * path in this class has with the config, except that this one is asserted
+     * MECHANICALLY rather than by eye - by tests/test_checkpoint_fragments.py, which
+     * parses the publishDir closure and rebuilds the expected path from the two
+     * constants below. NOT by tests/test_layout.py: that file guards the per-patient
+     * `<outdir>/<pid>/<kind>` vocabulary and contains no fragment case at all. Naming
+     * the wrong guard is how a guard on this codebase gets believed without being
+     * read, so the name here is the one to go and open.
      *
      * NOT A SEPARATE `kind`. PUBLISHED_KINDS is the per-PATIENT publish vocabulary
      * (`<outdir>/<pid>/<kind>`); fragments are run-level, under csv/, keyed by

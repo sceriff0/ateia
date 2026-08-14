@@ -23,7 +23,15 @@
  */
 process WRITE_CHECKPOINT_FRAGMENT {
     tag "${step}:${patient_id}"
-    label 'process_single'
+
+    // NO label, deliberately. Resources come from the `withName:` block in
+    // conf/modules.config, which sets all three fields -- one owner, not two
+    // (tests/test_resource_label_coverage.py fails on both a label PLUS full withName
+    // coverage and on neither). The label this carried was `process_single`, which on
+    // this repo means 12 GB and 8 h; a 20-patient run queues four of these tasks per
+    // patient, so it was reserving 960 GB-hours of scheduler allocation to write a few
+    // hundred bytes of CSV -- a cost regression on the exact axis this process exists
+    // to improve. The withName block asks for what a `cat` actually needs.
 
     // Bash-only, like AGGREGATE_SIZE_LOGS: the whole task is `cat > file`. No Python
     // interpreter is involved, which is why the versions.yml heredoc below is hand-
@@ -50,7 +58,7 @@ process WRITE_CHECKPOINT_FRAGMENT {
     // lib/ProcessEnvelope's returned blocks.
     def body = Checkpoint.fragment(step, rows)
     """
-    cat > ${Layout.checkpointFragmentName(patient_id)} <<'CHECKPOINT_FRAGMENT'
+cat > ${Layout.checkpointFragmentName(patient_id)} <<'CHECKPOINT_FRAGMENT'
 ${body}CHECKPOINT_FRAGMENT
 
     cat <<-END_VERSIONS > versions.yml
@@ -66,7 +74,7 @@ ${body}CHECKPOINT_FRAGMENT
     // Checkpoint.fragment() call as script: above.
     def body = Checkpoint.fragment(step, rows)
     """
-    cat > ${Layout.checkpointFragmentName(patient_id)} <<'CHECKPOINT_FRAGMENT'
+cat > ${Layout.checkpointFragmentName(patient_id)} <<'CHECKPOINT_FRAGMENT'
 ${body}CHECKPOINT_FRAGMENT
 
     cat <<-END_VERSIONS > versions.yml
