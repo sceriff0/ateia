@@ -13,6 +13,7 @@ import glob
 import json
 import os
 import sys
+from collections import namedtuple
 from pathlib import Path
 
 os.environ.setdefault("NUMBA_CACHE_DIR", "/tmp/numba_cache")
@@ -22,24 +23,33 @@ sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
 import numpy as np  # noqa: E402
 from logger import configure_logging, get_logger  # noqa: E402
-from tiled_manifest import build_manifest, slide_entry  # noqa: E402
+from tiled_manifest import (  # noqa: E402
+    assemble_control_grid,
+    build_manifest,
+    slide_entry,
+)
 from tre_report import build_tre_report  # noqa: E402
 
 logger = get_logger(__name__)
 
 
-def _grid_from_controls(controls, gate_tre):
-    nx = max(c["ix"] for c in controls) + 1
-    ny = max(c["iy"] for c in controls) + 1
-    grid_x = [0.0] * nx
-    grid_y = [0.0] * ny
-    disp = [[[0.0, 0.0] for _ in range(nx)] for _ in range(ny)]
-    for c in controls:
-        grid_x[c["ix"]] = float(c["cx"])
-        grid_y[c["iy"]] = float(c["cy"])
-        if float(c["tre"]) >= gate_tre:
-            disp[c["iy"]][c["ix"]] = [float(c["dx"]), float(c["dy"])]
-    return grid_x, grid_y, disp
+# The gating rule itself lives in tiled_manifest.assemble_control_grid, which takes
+# (tile, residual) pairs -- the in-memory shape the monolithic path already has. This
+# reduction starts from serialized per-tile JSON instead, so all it has to supply is the
+# grid-position half of a tile. That is the ONLY reason a local adapter exists here; the
+# `tre >= gate_tre` decision is NOT restated (it used to be, in a hand-maintained copy that
+# could drift from the shared one in either direction).
+_ControlPoint = namedtuple("_ControlPoint", "ix iy cx cy")
+
+
+def _as_tiles_and_residuals(controls):
+    """Split control-point dicts into the (grid position, residual) pair the shared gate takes."""
+    tiles = [
+        _ControlPoint(int(c["ix"]), int(c["iy"]), float(c["cx"]), float(c["cy"]))
+        for c in controls
+    ]
+    residuals = [(float(c["dx"]), float(c["dy"]), float(c["tre"])) for c in controls]
+    return tiles, residuals
 
 
 def main(argv=None) -> int:
@@ -75,7 +85,9 @@ def main(argv=None) -> int:
         raise FileNotFoundError(f"no control-point JSONs matched {a.controls!r}")
     controls = [json.loads(Path(f).read_text()) for f in files]
 
-    grid_x, grid_y, disp = _grid_from_controls(controls, a.gate_tre)
+    grid_x, grid_y, disp = assemble_control_grid(
+        *_as_tiles_and_residuals(controls), a.gate_tre
+    )
     entry = slide_entry(m0, grid_x, grid_y, disp)
     # carry the reference frame so the stitch knows the output size without re-reading the reference
     entry["out_shape"] = [int(m0_doc["ref_h"]), int(m0_doc["ref_w"])]
