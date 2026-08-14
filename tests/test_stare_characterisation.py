@@ -81,7 +81,9 @@ def _locally_deformed(ref, amp=3.0, period=90.0):
     )
 
 
-def _oracle(ref_dapi, mov_dapi, *, tile, halo, gate_tre, upsample=10, model="euclidean"):
+def _oracle(
+    ref_dapi, mov_dapi, *, tile, halo, gate_tre, upsample=10, model="euclidean"
+):
     """The pre-refactor ``register_slide``, restated longhand. Nothing is imported from it."""
     ref_dapi = np.asarray(ref_dapi, dtype=float)
     mov_dapi = np.asarray(mov_dapi, dtype=float)
@@ -159,7 +161,9 @@ def _assert_matches_oracle(result, expected):
     assert len(result["residuals"]) == len(expected["residuals"])
     for got, want in zip(result["residuals"], expected["residuals"]):
         assert got == pytest.approx(want, abs=0.0)
-    assert result["tre_px"] == pytest.approx([r[2] for r in expected["residuals"]], abs=0.0)
+    assert result["tre_px"] == pytest.approx(
+        [r[2] for r in expected["residuals"]], abs=0.0
+    )
 
     # 3. the gated manifest entry (M0 + mesh grid + displacements), as serialized JSON would be
     assert result["entry"] == expected["entry"]
@@ -182,7 +186,9 @@ def test_register_slide_matches_the_longhand_oracle_when_a_mesh_survives_the_gat
     result = register_slide(ref, mov, **kw)
     expected = _oracle(ref, mov, **kw)
 
-    assert result["entry"]["mesh"] is not None, "fixture no longer exercises the mesh branch"
+    assert result["entry"]["mesh"] is not None, (
+        "fixture no longer exercises the mesh branch"
+    )
     _assert_matches_oracle(result, expected)
 
 
@@ -197,7 +203,9 @@ def test_register_slide_matches_the_longhand_oracle_when_the_gate_leaves_no_mesh
     result = register_slide(ref, mov, **kw)
     expected = _oracle(ref, mov, **kw)
 
-    assert result["entry"]["mesh"] is None, "fixture no longer exercises the rigid-only branch"
+    assert result["entry"]["mesh"] is None, (
+        "fixture no longer exercises the rigid-only branch"
+    )
     assert result["mesh"] is None
     assert result["tre_after_px"] == pytest.approx(result["tre_px"], abs=0.0)
     _assert_matches_oracle(result, expected)
