@@ -48,6 +48,91 @@ class CsvUtils {
     }
 
     /**
+     * The header of a CSV, quote-aware and BOM-stripped. Public because
+     * lib/Checkpoint.groovy's reader has to compare a file's header against the
+     * schema it declares, and re-parsing the first line by hand there would be a
+     * second CSV parser in the codebase.
+     */
+    static List<String> readHeader(String csvPath) {
+        def lines = requireLines(csvPath)
+        return parseCsvLine(lines[0])
+    }
+
+    /**
+     * A CSV's DATA rows as header-keyed maps -- the same shape Nextflow's
+     * `splitCsv(header: true)` produces, so a caller repointed from that operator to
+     * this method still writes `row.registered_image`.
+     *
+     * Fully-blank lines are skipped (validateInputSemantics does the same). A short
+     * row -- fewer fields than the header -- yields nulls for the missing trailing
+     * columns rather than throwing here: the column-presence contract belongs to the
+     * caller that knows which columns it dereferences (Checkpoint.read), and it gives
+     * a better message than an index error could.
+     */
+    static List<Map> readRows(String csvPath) {
+        def lines  = requireLines(csvPath)
+        def header = parseCsvLine(lines[0])
+        return lines.drop(1).findAll { line ->
+            !parseCsvLine(line).every { it == null || it.trim().isEmpty() }
+        }.collect { line ->
+            def cols = parseCsvLine(line)
+            def row  = [:]
+            header.eachWithIndex { name, i -> row[name] = i < cols.size() ? cols[i] : null }
+            return row
+        }
+    }
+
+    private static List<String> requireLines(String csvPath) {
+        def file = new File(csvPath)
+        if (!file.exists())
+            throw new FileNotFoundException("CSV not found: ${csvPath}")
+        def lines = readCsvLines(file.path)
+        if (lines.isEmpty())
+            throw new IllegalStateException("CSV is empty: ${csvPath}")
+        return lines
+    }
+
+    /**
+     * Nextflow's `Path.simpleName`, in plain Groovy.
+     *
+     * WHY THIS EXISTS. The per-image `id` rule below has to be callable from
+     * lib/Checkpoint.groovy, and a lib/ class has no `file()` -- that is a method on
+     * the pipeline script, not on the classpath. Reimplementing the rule with
+     * `lastIndexOf('.')` would silently disagree for `a.ome.tiff` (Nextflow answers
+     * `a`, the last-dot rule answers `a.ome`), which is precisely the extension every
+     * image in this pipeline carries.
+     *
+     * The rule: everything from the FIRST dot is extension, and a LEADING dot belongs
+     * to the name (`.hidden.tif` -> `.hidden`). Pinned by tests/lib_probe.nf against
+     * the four cases a live `nextflow run` was observed to produce.
+     */
+    static String simpleName(def path) {
+        def name = path?.toString()
+        if (!name) return name
+        int slash = name.lastIndexOf('/')
+        if (slash >= 0) name = name.substring(slash + 1)
+        int dot = name.indexOf('.', name.startsWith('.') ? 1 : 0)
+        return dot > 0 ? name.substring(0, dot) : name
+    }
+
+    /**
+     * The per-image unique id: the source image's stem, prefixed with the patient id
+     * unless it already starts with it.
+     *
+     * THE ONE RULE, NOT A CONVENTION. `id` drives output file naming, so two images of
+     * one patient whose ids collide produce identically named files that overwrite each
+     * other the moment anything downstream collects them across patients. INPUT_CHECK
+     * applied this inline; subworkflows/local/segmentation.nf's checkpoint reader used
+     * `row.patient_id` instead, which collapses every one of a patient's slides onto a
+     * single id -- at `--start postprocessing`, the entry point where the collision
+     * actually happens. Both go through here now, so they cannot disagree again.
+     */
+    static String imageId(String patientId, def imagePath) {
+        def stem = simpleName(imagePath)
+        return stem.startsWith(patientId) ? stem : "${patientId}_${stem}".toString()
+    }
+
+    /**
      * Count images per patient from a CSV file.
      * Returns a Map of patient_id -> count
      */

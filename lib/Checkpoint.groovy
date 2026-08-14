@@ -57,27 +57,38 @@ class Checkpoint {
      *   name    - the checkpoint's step name; the CSV basename Layout builds paths
      *             from, and a member of Layout.CHECKPOINT_STEPS.
      *   columns - the ordered column list. This IS the published contract with every
-     *             reader (`--start`'s samplesheet parser, add_cycle's splitCsv,
-     *             tests/checkpoint_manifest.nf.test). Changing an entry changes a
-     *             published file's header.
+     *             reader (`--start`'s samplesheet parser, add_cycle's prior-run
+     *             readers, tests/checkpoint_manifest.nf.test) — all of which now come
+     *             through read() below. Changing an entry changes a published file's
+     *             header.
      */
     static final List<Map> STEPS = [
         [
-            name   : 'preprocessed',
-            columns: ['patient_id', 'preprocessed_image', 'is_reference', 'channels'].asImmutable(),
+            name       : 'preprocessed',
+            columns    : ['patient_id', 'preprocessed_image', 'is_reference', 'channels'].asImmutable(),
+            imageColumn: 'preprocessed_image',
         ],
         [
-            name   : 'registered',
-            columns: ['patient_id', 'registered_image', 'is_reference', 'channels'].asImmutable(),
+            name       : 'registered',
+            columns    : ['patient_id', 'registered_image', 'is_reference', 'channels'].asImmutable(),
+            imageColumn: 'registered_image',
         ],
         [
-            name   : 'segmented',
-            columns: ['patient_id', 'registered_image', 'is_reference', 'channels',
-                      'cell_mask', 'nuclei_mask', 'contours', 'nucleus_contours'].asImmutable(),
+            name       : 'segmented',
+            columns    : ['patient_id', 'registered_image', 'is_reference', 'channels',
+                          'cell_mask', 'nuclei_mask', 'contours', 'nucleus_contours'].asImmutable(),
+            imageColumn: 'registered_image',
         ],
         [
-            name   : 'postprocessed',
-            columns: ['patient_id', 'cell_csv', 'cell_geojson', 'merged_csv', 'cell_mask', 'pyramid'].asImmutable(),
+            name       : 'postprocessed',
+            columns    : ['patient_id', 'cell_csv', 'cell_geojson', 'merged_csv', 'cell_mask', 'pyramid'].asImmutable(),
+            // No per-image column, deliberately: this checkpoint has ONE row per
+            // patient (its artifacts are the patient's combined outputs, not a slide's),
+            // so there is no image stem to derive an id from and `id` is the patient_id.
+            // null is the null-object here, the same shape the adapters' optional emits
+            // use -- read() branches on it rather than every caller special-casing this
+            // step.
+            imageColumn: null,
         ],
     ].asImmutable()
 
@@ -112,6 +123,173 @@ class Checkpoint {
     /** The header line — the `seed:` value every writer passes to collectFile(). */
     static String header(String step) {
         return columns(step).join(',')
+    }
+
+    /**
+     * The column holding the image a row is ABOUT, or null for a checkpoint whose rows
+     * are per-patient rather than per-image (see 'postprocessed' in {@link #STEPS}).
+     * This is what {@link #read} derives `meta.id` from.
+     *
+     * It is the same string ParamUtils.STEPS gives as the `entryColumn` of the step
+     * that READS this checkpoint — two tables stating one fact, so tests/lib_probe.nf
+     * asserts they agree rather than trusting them to.
+     */
+    static String imageColumn(String step) {
+        return requireStep(step).imageColumn
+    }
+
+    /**
+     * Read a checkpoint CSV: `[[meta, row], ...]`, one entry per data row.
+     *
+     * WHY THE READ SIDE BELONGS HERE. This class owned writing and nothing else, so
+     * three callers wrote three readers of the files it produces: INPUT_CHECK
+     * (subworkflows/local/input_check.nf), READ_SEGMENTED_CHECKPOINT
+     * (subworkflows/local/segmentation.nf) and ADD_CYCLE's prior-run reader. They
+     * disagreed on all three things a reader decides:
+     *
+     *   `id`           INPUT_CHECK built a per-image, patient-prefixed stem; the
+     *                  segmented reader used row.patient_id, collapsing every one of a
+     *                  patient's slides onto ONE id at --start postprocessing --
+     *                  exactly the entry point where several patients share a collect
+     *                  and identically named files overwrite each other;
+     *   `is_reference` one strict parser (CsvUtils.parseIsReference) and three
+     *                  structurally identical `value?.toLowerCase() == 'true'` copies,
+     *                  so 'yes' raised at one entry point and became `false` at the
+     *                  other two -- a checkpoint's reference row quietly ceasing to be
+     *                  a reference;
+     *   the counts     INPUT_CHECK injected images_count/channels_count; the other two
+     *                  injected neither, so every per-patient groupTuple downstream of
+     *                  --start postprocessing took its unsized fallback and streaming
+     *                  was off for the whole run, unreported.
+     *
+     * THE META SHAPE IS THE SCHEMA'S, NOT THE CALLER'S. Every meta carries
+     * `patient_id`, `id` and `images_count`; it additionally carries `is_reference`,
+     * `channels` and `channels_count` exactly when the step DECLARES an `is_reference`
+     * / `channels` column. A step with no `channels` column has no channel fan-out to
+     * size, and inventing a count for it would be the same lie as omitting one where
+     * the column exists. What is forbidden is a SILENT absence: where a count is
+     * derivable it is derived, and a patient it cannot be derived for raises.
+     *
+     * EAGER, NOT A CHANNEL. It returns a plain List so it stays a pure static method
+     * (callable from tests/lib_probe.nf, like everything else here) and so a malformed
+     * checkpoint aborts at workflow-construction time with a message naming the file,
+     * rather than as a null dereference inside some later operator. Callers wrap it in
+     * `Channel.fromList(...)`. Checkpoints are one row per image, so reading one
+     * eagerly costs nothing -- and the counts already required a whole-file read.
+     *
+     * @param step    a member of {@link #STEPS}
+     * @param csvPath the checkpoint CSV to read
+     * @param opts    `nuclear_markers` — params.nuclear_markers; REQUIRED when the step
+     *                declares a `channels` column, since channels_count depends on which
+     *                markers are nuclear and defaulting it here would be a second,
+     *                silent declaration of a parameter nextflow.config already owns. It is
+     *                never read raw: it goes to CsvUtils.countChannelsPerPatient and
+     *                CsvUtils.parseMetadata, both of which funnel into
+     *                MarkerUtils.markerList (tests/test_nuclear_marker_routing.py).
+     *                `auto_reference` — mirrors INPUT_CHECK's argument of the same name;
+     *                defaults to false, which is right for every checkpoint (a
+     *                checkpoint this pipeline wrote always names its own reference).
+     */
+    static List<List> read(String step, def csvPath, Map opts = [:]) {
+        def cols = columns(step)                      // throws UnknownStepException first
+        def path = csvPath?.toString()
+        if (!path?.trim())
+            throw new IllegalArgumentException(
+                "Checkpoint.read('${step}'): no CSV path given (got ${csvPath == null ? 'null' : "'${csvPath}'"})")
+        if (!new File(path).exists())
+            throw new FileNotFoundException("Checkpoint.read('${step}'): no such checkpoint CSV: ${path}")
+
+        // The column check the three readers each hand-rolled. Theirs asserted that the
+        // columns THEY index are ones Checkpoint still declares (schema drift in one
+        // direction); this additionally asserts the FILE really has them (drift in the
+        // other), which is what a reader actually depends on.
+        def header  = CsvUtils.readHeader(path)
+        def missing = cols.findAll { !(it in header) }
+        if (missing)
+            throw new IllegalArgumentException(
+                "Checkpoint.read('${step}'): ${path} is missing column(s) ${missing}. " +
+                "A '${step}' checkpoint declares, in order: ${cols}. Header found: ${header}")
+
+        def rows = CsvUtils.readRows(path)
+        if (!rows)
+            throw new IllegalStateException(
+                "Checkpoint.read('${step}'): ${path} has a header but no data rows")
+
+        def hasChannels = 'channels' in cols
+        def hasRefCol   = 'is_reference' in cols
+        def imageCol    = imageColumn(step)
+        def nuclear     = opts.nuclear_markers
+        if (hasChannels && nuclear == null)
+            throw new IllegalArgumentException(
+                "Checkpoint.read('${step}'): nuclear_markers is required for a step that " +
+                "declares a 'channels' column — meta.channels_count is the count of markers " +
+                "that survive the nuclear-channel drop, which cannot be derived without it. " +
+                "Pass the pipeline's nuclear_markers parameter as opts.nuclear_markers.")
+        boolean autoRef = opts.auto_reference ?: false
+
+        def imageCounts   = CsvUtils.countImagesPerPatient(path)
+        def channelCounts = hasChannels
+            ? CsvUtils.countChannelsPerPatient(path, imageCol, nuclear, autoRef)
+            : [:]
+        // THE reference decision, made once per file, from the file — the same call
+        // INPUT_CHECK makes and the same call countChannelsPerPatient makes internally,
+        // so the reference that SIZED channels_count and the reference stamped into meta
+        // are the same row by construction rather than by convention.
+        def referenceImage = hasRefCol && imageCol
+            ? CsvUtils.resolveReferenceRows(path, imageCol, autoRef)
+            : [:]
+
+        return rows.withIndex().collect { row, i ->
+            def ctx = "row ${i + 2} of ${path}"
+            def pid = row.patient_id?.toString()?.trim()
+            if (!pid)
+                throw new IllegalArgumentException("Checkpoint.read('${step}'): blank patient_id in ${ctx}")
+
+            // parseMetadata is INPUT_CHECK's own base meta (patient_id + strict
+            // is_reference + channels, validated for a nuclear marker). Calling it rather
+            // than rebuilding those three keys is what makes "same meta shape" structural.
+            def meta = hasRefCol && hasChannels
+                ? CsvUtils.parseMetadata(row, nuclear, ctx)
+                : [patient_id: pid]
+            if (hasRefCol && imageCol)
+                meta.is_reference = referenceImage[pid] != null &&
+                                    referenceImage[pid] == row[imageCol]?.toString()?.trim()
+
+            if (imageCol) {
+                def image = row[imageCol]?.toString()?.trim()
+                if (!image)
+                    throw new IllegalArgumentException(
+                        "Checkpoint.read('${step}'): empty '${imageCol}' in ${ctx}. A checkpoint " +
+                        "row's image path is what every downstream file name is derived from.")
+                meta.id = CsvUtils.imageId(pid, image)
+            }
+            else {
+                meta.id = pid
+            }
+
+            meta.images_count = requireCount(imageCounts, pid, 'images_count', step, path)
+            if (hasChannels)
+                meta.channels_count = requireCount(channelCounts, pid, 'channels_count', step, path)
+
+            return [meta, row]
+        }
+    }
+
+    /**
+     * A count that is present and positive, or a named error. A count of null or 0 is
+     * what silently disables streaming for a whole run: every sized groupTuple falls
+     * back to "wait for the channel to close", the run still exits 0, and nothing says
+     * so. That is the failure this method exists to make loud.
+     */
+    private static Integer requireCount(Map counts, String pid, String key, String step, String path) {
+        def n = counts[pid]
+        if (!(n instanceof Integer) || n < 1)
+            throw new IllegalStateException(
+                "Checkpoint.read('${step}'): cannot derive ${key} for patient '${pid}' from ${path} " +
+                "(got ${n}). Every meta must carry both counts: they size the per-patient " +
+                "groupTuples, and an absent one silently degrades them to unsized for the " +
+                "whole run rather than failing.")
+        return n
     }
 
     /**
