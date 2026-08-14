@@ -35,7 +35,120 @@ from typing import Optional, Tuple
 
 import tifffile
 
-__all__ = ["read_ome_pixel_size", "warn_on_pixel_size_mismatch", "PIXEL_SIZE_RTOL"]
+__all__ = [
+    "read_ome_pixel_size",
+    "warn_on_pixel_size_mismatch",
+    "PIXEL_SIZE_RTOL",
+    "Pixels",
+    "Microns",
+    "Unrecorded",
+    "Measurement",
+    "to_microns",
+]
+
+
+# ---------------------------------------------------------------------------
+# A measurement carries its unit
+# ---------------------------------------------------------------------------
+# The µm conversion above is the pipeline's ONE rule, but a rule can only be applied
+# where somebody notices it is needed. `bin/generate_qc_report.py` assigned STARE's
+# `coarse_tre_px` -- a pixel count -- straight into a field called `feature_tre_um` and
+# rendered it under a "Feature-TRE (µm)" header, with no conversion anywhere on the
+# path, because the only thing distinguishing the two was a suffix in a dict key. At
+# the shipped 0.325 µm/px that mistake is a 1/0.325 = 3.08x error: numerically
+# indistinguishable from the 3.0x threshold the same table uses to flag bad
+# registration.
+#
+# These three types make the unit part of the value, so the mismatch is a TypeError at
+# the seam rather than a plausible number in a report. `Unrecorded` is not a hole in
+# the scheme -- it is the honest label for a producer that never stated a unit (VALIS's
+# `error_df` D columns, copied through `bin/register.py` unmodified), and it converts
+# to nothing at all.
+
+
+class Measurement:
+    """A number that knows what it is measured in.
+
+    Deliberately a plain class rather than a ``dataclass``: several test modules load
+    this file through ``importlib.util.spec_from_file_location`` without registering it
+    in ``sys.modules``, and ``dataclasses`` resolves field types by looking the module
+    up there -- which raises before a single assertion runs. A unit type that only works
+    under one import style is not a unit type.
+    """
+
+    __slots__ = ("value",)
+    unit = "unrecorded"
+
+    def __init__(self, value: float) -> None:
+        self.value = float(value)
+
+    def __eq__(self, other: object) -> bool:
+        return type(self) is type(other) and self.value == other.value
+
+    def __hash__(self) -> int:
+        return hash((type(self).__name__, self.value))
+
+    def __repr__(self) -> str:
+        return f"{type(self).__name__}({self.value!r})"
+
+    def __str__(self) -> str:
+        return f"{self.value:.3f} {self.unit}"
+
+
+class Pixels(Measurement):
+    """A distance in image pixels."""
+
+    __slots__ = ()
+    unit = "px"
+
+
+class Microns(Measurement):
+    """A distance in micrometres."""
+
+    __slots__ = ()
+    unit = "µm"
+
+
+class Unrecorded(Measurement):
+    """A number whose producer never stated a unit; convertible to nothing."""
+
+    __slots__ = ()
+    unit = "unrecorded"
+
+
+def to_microns(measurement: Measurement, pixel_size_um: Optional[float]) -> Microns:
+    """Convert a measurement to micrometres using the CONFIGURED scale.
+
+    A conversion, not a detection: the scale arrives as an argument and nothing here
+    reads an image, so this cannot become a second owner of the pixel size the way a
+    "resolve the scale for me" helper would. That is the same property
+    ``warn_on_pixel_size_mismatch`` protects by never returning a scale.
+
+    Raises ``TypeError`` -- one exception for every way the conversion cannot be
+    justified -- when the argument is a bare number rather than a measurement, when its
+    unit was never recorded, or when no usable scale was supplied. Refusing is the
+    point: every one of those cases used to render as a confident µm figure.
+    """
+    if isinstance(measurement, Microns):
+        return measurement
+    if isinstance(measurement, Unrecorded):
+        raise TypeError(
+            f"cannot express {measurement.value!r} in µm: its producer recorded no "
+            "unit, so no scale can convert it"
+        )
+    if not isinstance(measurement, Pixels):
+        raise TypeError(
+            f"{measurement!r} is a bare number, not a measurement; wrap it in "
+            "Pixels(...) or Microns(...) at the point it is read so the unit travels "
+            "with the value"
+        )
+    if not pixel_size_um:
+        raise TypeError(
+            f"cannot express {measurement.value!r} px in µm: no pixel size was "
+            "supplied (params.pixel_size is the one owner of that scale)"
+        )
+    return Microns(measurement.value * float(pixel_size_um))
+
 
 # Relative tolerance for calling two pixel sizes "the same". 1% is well below any real
 # objective/scanner difference (the smallest step between adjacent magnifications is

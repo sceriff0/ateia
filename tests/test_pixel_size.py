@@ -130,3 +130,59 @@ def test_never_returns_a_scale_to_use():
     assert ps.warn_on_pixel_size_mismatch(
         0.1, 0.325, source="x", logger=logging.getLogger()
     ) in (True, False)
+
+
+# ── the unit travels with the value ────────────────────────────────────────────
+# A measurement is a number AND a unit. Passing the number alone across a seam is how
+# `coarse_tre_px` came to be rendered under a "(µm)" header with no conversion on the
+# path: the field names disagreed, but nothing enforced them, so a naming convention
+# was the only thing standing between a pixel count and a micrometre figure. These
+# types make that mismatch a TypeError instead.
+
+
+def test_to_microns_scales_a_pixel_count_by_the_configured_size():
+    assert ps.to_microns(ps.Pixels(4.0), 0.325).value == pytest.approx(1.3)
+
+
+def test_to_microns_is_the_identity_on_a_value_already_in_microns():
+    assert ps.to_microns(ps.Microns(1.3), 0.325) == ps.Microns(1.3)
+
+
+def test_a_bare_float_is_not_a_measurement():
+    """The whole point: an unlabelled number cannot be assigned into a µm slot."""
+    with pytest.raises(TypeError):
+        ps.to_microns(4.0, 0.325)
+
+
+def test_a_value_whose_producer_recorded_no_unit_cannot_be_converted():
+    with pytest.raises(TypeError):
+        ps.to_microns(ps.Unrecorded(4.0), 0.325)
+
+
+def test_a_pixel_count_cannot_be_converted_without_a_scale():
+    """No scale means no µm figure -- not a plausible one at some assumed default."""
+    with pytest.raises(TypeError):
+        ps.to_microns(ps.Pixels(4.0), None)
+    with pytest.raises(TypeError):
+        ps.to_microns(ps.Pixels(4.0), 0.0)
+
+
+def test_to_microns_takes_the_scale_as_an_argument_rather_than_detecting_one():
+    """Conversion, not detection.
+
+    `warn_on_pixel_size_mismatch` deliberately never returns a scale so that no caller
+    can start preferring an image's own metadata over `params.pixel_size`. `to_microns`
+    keeps that property: it reads nothing, so the only scale it can use is the one the
+    caller was handed.
+    """
+    import inspect
+
+    src = inspect.getsource(ps.to_microns)
+    assert "read_ome_pixel_size" not in src
+    assert "pixel_size_um" in inspect.signature(ps.to_microns).parameters
+
+
+def test_each_measurement_renders_with_its_unit():
+    assert ps.Pixels(4.0).unit == "px"
+    assert ps.Microns(1.3).unit == "µm"
+    assert ps.Unrecorded(4.0).unit == "unrecorded"
