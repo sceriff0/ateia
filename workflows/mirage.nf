@@ -72,8 +72,8 @@ workflow MIRAGE {
     // params.quantify_statistics / params.embed_masks directly;
     // tests/test_compartment_mode_routing.py enforces that.
     def compartment_mode = ParamUtils.compartmentMode(params)
-    // REDSEA's own resolved-once map. Validated on both paths below, next to
-    // validateCompartmentQuant, because both reach QUANTIFY_MARKERS -- add_cycle
+    // REDSEA's own resolved-once map. Validated on both paths below, because
+    // both reach QUANTIFY_MARKERS -- add_cycle
     // quantifies the new cycle's markers through the same subworkflow.
     def redsea_mode = ParamUtils.redseaMode(params)
 
@@ -86,7 +86,6 @@ workflow MIRAGE {
         // registration — an accuracy bug at the label's source, not the label.
         ParamUtils.validateAddCycleStepFlags(params)
         ParamUtils.validateAddCycle(params.outdir, params.prior_outdir)
-        ParamUtils.validateCompartmentQuant(compartment_mode)
         ParamUtils.validateAddCyclePhenotyping(params)  // add_cycle has no PHENOTYPE stage
         ParamUtils.validateRedsea(redsea_mode)
         // add_cycle re-registers the new cycle via the classic VALIS_ADAPTER only; the
@@ -159,7 +158,6 @@ workflow MIRAGE {
     }
 
     if (run_postprocessing) {
-        ParamUtils.validateCompartmentQuant(compartment_mode)
         ParamUtils.validateRedsea(redsea_mode)
     }
 

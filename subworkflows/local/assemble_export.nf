@@ -51,8 +51,7 @@ workflow ASSEMBLE_EXPORT {
     compartment_mode    // ParamUtils.compartmentMode(params) — resolved once by
                         // workflows/mirage.nf, threaded through postprocess.nf /
                         // add_cycle.nf unchanged. Replaces this workflow's own former
-                        // `params.embed_masks && params.quantify_compartments &&
-                        // params.quantify_statistics` raw read below.
+                        // `params.embed_masks` raw read below.
 
     main:
 
@@ -80,7 +79,20 @@ workflow ASSEMBLE_EXPORT {
     // which Bio-Formats/QuPath cannot read as a normal multi-channel image.
     // Cell objects are always delivered separately via cells.geojson; this
     // second series is an optional, additional way to carry the raw masks.
-    def emit_masks = compartment_mode.embedMasks && compartment_mode.compartments && compartment_mode.expanded
+    // ONE condition. The gate used to also require quantify_compartments and
+    // "Mean and Sum both requested", and neither was a real dependency: SEGMENT
+    // emits cell_mask and nuclei_mask UNCONDITIONALLY (subworkflows/local/
+    // segmentation.nf:127 -- only nucleus_contours is gated on compartments), and
+    // which statistics were computed has nothing to do with a raw mask series.
+    //
+    // Those extra conditions were the reason ParamUtils.validateCompartmentQuant
+    // existed: --embed_masks true with either sibling off silently published a
+    // pyramid with NO mask series, and the run only failed months later when its
+    // --outdir was handed to add_cycle and EXTRACT_MASK_SERIES found no Image:1.
+    // With one condition that footgun cannot be built, so the validator was
+    // deleted rather than re-pointed -- a guard is worse than a design that makes
+    // the mistake unrepresentable.
+    def emit_masks = compartment_mode.embedMasks
     ch_pyramid_in = emit_masks
         ? ch_pyramid_channels
             .map { meta, tiffs -> [meta.patient_id, meta, tiffs] }

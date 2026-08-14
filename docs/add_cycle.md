@@ -10,7 +10,7 @@ A previous run completed through postprocessing, producing under its `--outdir`:
 
 **To be extendable incrementally, the prior run must have embedded its
 segmentation masks in the pyramid** — i.e. it must have been run with
-`--embed_masks true --quantify_compartments --quantify_statistics Median,Mean,Sum` (see
+`--embed_masks true` (see
 [Mask pyramid (`embed_masks`)](#mask-pyramid-embed_masks) below). If the prior
 pyramid has no embedded mask series, `mode=add_cycle` **fast-fails** before
 doing any work — see [Fast-fail behavior](#fast-fail-behavior).
@@ -83,7 +83,7 @@ its `--prior_outdir` from a full linear run.
 `params.embed_masks` (default `false`) controls whether `MERGE_AND_PYRAMID`
 embeds the segmentation masks in the output pyramid OME-TIFF:
 
-- When `embed_masks && quantify_compartments && Mean+Sum in quantify_statistics`, the
+- When `embed_masks` is true, the
   process writes the cell + nuclei segmentation masks as a **second uint32
   image series** (`Image:1`) inside the pyramid, in addition to the normal
   intensity series (`Image:0`). This mask series is single full-resolution
@@ -92,16 +92,15 @@ embeds the segmentation masks in the output pyramid OME-TIFF:
   series: mixing a >65,535-cell uint32 label mask into the intensity channels
   would force the whole intensity image to uint32, which QuPath/Bio-Formats
   cannot open as a normal multi-channel image.
-- When `embed_masks=false` (with `quantify_compartments`/`quantify_statistics`
-  set however you like), `MERGE_AND_PYRAMID` produces a plain intensity-only
-  pyramid — this is unchanged from behavior before mask embedding existed.
-- `embed_masks=true` REQUIRES both `quantify_compartments=true` and
-  Mean+Sum requested — `ParamUtils.validateCompartmentQuant` now
-  rejects `embed_masks=true` with either sibling off at launch, rather than
-  silently falling back to a plain pyramid. (Before this check existed, that
-  combination exited `0` with no mask series, discovered only later when the
-  pyramid was handed to `mode=add_cycle` as `--prior_outdir` — see "Fast-fail
-  behavior" below.)
+- When `embed_masks=false`, `MERGE_AND_PYRAMID` produces a plain intensity-only
+  pyramid — unchanged from behavior before mask embedding existed.
+- `embed_masks=true` is the **only** condition. `SEGMENT` emits `cell_mask` and
+  `nuclei_mask` unconditionally, so nothing else has to be enabled. The gate used
+  to also require `quantify_compartments` and Mean+Sum, and that combination could
+  exit `0` with no mask series — discovered only later when the pyramid was handed
+  to `mode=add_cycle` as `--prior_outdir`. A launch-time validator existed to catch
+  it; with one condition the mistake cannot be expressed, so the validator was
+  removed rather than re-pointed.
 
 Cell objects are always delivered separately via `cells.geojson`; the embedded
 mask series is an additional, optional way to carry the raw label masks —
@@ -112,10 +111,8 @@ mask series is an additional, optional way to carry the raw label masks —
 pyramid's embedded mask series via `EXTRACT_MASK_SERIES`
 (`bin/extract_mask_series.py`), rather than recomputing segmentation. If the
 prior run's pyramid has fewer than two OME series (i.e. the prior run used
-`embed_masks=false`, the only way to reach that state now that
-`ParamUtils.validateCompartmentQuant` rejects `embed_masks=true` with either
-`quantify_compartments` off, or Mean/Sum out of `quantify_statistics`, at launch — see "Mask
-pyramid" above), extraction fails immediately with a clear error identifying
+`embed_masks=false` — the only way to reach that state, since `embed_masks=true`
+now embeds the series unconditionally; see "Mask pyramid" above), extraction fails immediately with a clear error identifying
 the missing mask series — before any registration or quantification work runs
 on the new cycle. There is no silent fallback to re-segmentation.
 

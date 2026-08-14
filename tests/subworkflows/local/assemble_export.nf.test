@@ -4,9 +4,9 @@
  *
  * UNVERIFIED LOCALLY (see CLAUDE.md's "Verification reality" -- nf-test hangs under
  * qemu on this host): take: gained a 7th input, compartment_mode -- Task 4
- * (arch-B-split)'s seam for --quantify_compartments / --expanded_quantification /
+ * (arch-B-split)'s seam for --quantify_compartments / --quantify_statistics /
  * --embed_masks, replacing this workflow's own former `params.embed_masks &&
- * params.quantify_compartments && params.expanded_quantification` raw read.
+ * params.quantify_statistics` raw read.
  *
  * The two "embed_masks on"/"embed_masks off" tests pass input[6] as a LITERAL map
  * that DIVERGES from (in fact conflicts with) the embed_masks value set in
@@ -57,7 +57,7 @@ nextflow_workflow {
                 outdir = "$outputDir"
                 embed_masks = false
                 quantify_compartments = true
-                expanded_quantification = true
+                quantify_statistics = ['Median','Mean','Sum']
                 pixel_size = 0.325
                 pyramid_resolutions = 8
                 pyramid_scale = 2
@@ -115,7 +115,7 @@ nextflow_workflow {
 
         when {
             params {
-                // embed_masks/quantify_compartments/expanded_quantification
+                // embed_masks (alone)
                 // deliberately NOT set here (embed_masks defaults to false) --
                 // input[6] below is a LITERAL map with embedMasks: true, so this
                 // test proves ASSEMBLE_EXPORT honours the ARGUMENT, not params,
@@ -153,7 +153,7 @@ nextflow_workflow {
                     ['P002', file('$projectDir/tests/testdata/P002_cell_mask.tif',   checkIfExists: true),
                              file('$projectDir/tests/testdata/P001_nuclei_mask.tif', checkIfExists: true)]
                 ])
-                input[6] = [compartments: true, statistics: ['Median','Mean','Sum'], expanded: true, embedMasks: true]
+                input[6] = [compartments: true, statistics: ['Median','Mean','Sum'], embedMasks: true]
                 """
             }
         }
@@ -190,7 +190,7 @@ nextflow_workflow {
                 // flag is safe to diverge from params here.)
                 embed_masks = true
                 quantify_compartments = true
-                expanded_quantification = true
+                quantify_statistics = ['Median','Mean','Sum']
                 pixel_size = 0.325
                 pyramid_resolutions = 8
                 pyramid_scale = 2
@@ -210,7 +210,7 @@ nextflow_workflow {
                 // Nothing on the mask channel at all. An unconditional join here would
                 // empty the pyramid output entirely.
                 input[5] = Channel.empty()
-                input[6] = [compartments: true, statistics: ['Median','Mean','Sum'], expanded: true, embedMasks: false]
+                input[6] = [compartments: true, statistics: ['Median','Mean','Sum'], embedMasks: false]
                 """
             }
         }
@@ -245,7 +245,7 @@ nextflow_workflow {
                 outdir = "$outputDir"
                 embed_masks = false
                 quantify_compartments = false
-                expanded_quantification = false
+                quantify_statistics = ['Median']
                 pixel_size = 0.325
                 pyramid_resolutions = 8
                 pyramid_scale = 2
@@ -264,7 +264,7 @@ nextflow_workflow {
                                        [file('$projectDir/tests/testdata/sample_DAPI.tif',  checkIfExists: true),
                                         file('$projectDir/tests/testdata/sample_PANCK.tif', checkIfExists: true)]])
                 input[5] = Channel.empty()
-                input[6] = [compartments: false, statistics: ['Median'], expanded: false, embedMasks: false]
+                input[6] = [compartments: false, statistics: ['Median'], embedMasks: false]
                 """
             }
         }

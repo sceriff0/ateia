@@ -319,7 +319,7 @@ same applies to numbers — a quoted `"reg_qc": "2"` is a string too and is now
 rejected rather than silently coerced.
 
 Rules a JSON Schema cannot express — `--stop` must not precede `--start`,
-`Mean`+`Sum` in `--quantify_statistics` requires `--quantify_compartments`, samplesheet
+samplesheet
 semantics, `add_cycle` prerequisites — are still checked in `lib/` and fire
 right after schema validation.
 
@@ -467,10 +467,6 @@ key grammar is a cross-repository contract — see
     export NXF_SINGULARITY_CACHEDIR=$HOME/.singularity_cache
     export SINGULARITY_CACHEDIR=$HOME/.singularity_cache
     ```
-
-??? failure "`--quantify_statistics asks for both Mean and Sum, which requires --quantify_compartments`"
-    Expanded output depends on compartments. Either add `--quantify_compartments`,
-    or drop `Mean`/`Sum` from `--quantify_statistics` for a flat per-cell table.
 
 ??? question "Do I need a GPU?"
     No — run CPU-only with `--seg_gpu false`. A GPU mainly accelerates `SEGMENT`.

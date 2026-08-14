@@ -49,6 +49,14 @@ nextflow_process {
         tag "slow"
 
         when {
+            params {
+                // Asked for explicitly. This case's contract is the FULL
+                // per-compartment table, and the default is Median-only since
+                // quantify_statistics replaced expanded_quantification -- relying
+                // on the default here would silently reduce what it checks from
+                // 11 columns to 5 while still passing.
+                quantify_statistics = ['Median', 'Mean', 'Sum']
+            }
             process {
                 """
                 input[0] = [
@@ -69,9 +77,9 @@ nextflow_process {
             assertAll(
                 { assert process.success },
                 { assert process.out.individual_csv },
-                // Validate CSV content. Both quantify_compartments and
-                // expanded_quantification default to true (nextflow.config), so the
-                // real contract is: label + bare marker + {Median,Mean,Sum} x
+                // Validate CSV content. quantify_compartments defaults true and
+                // the params block above asks for all three compartment statistics,
+                // so the contract is: label + bare marker + {Median,Mean,Sum} x
                 // {Nucleus,Cytoplasm,Cell} = 2 + 3*3 = 11 columns.
                 {
                     def csvFile = process.out.individual_csv.get(0).get(1)

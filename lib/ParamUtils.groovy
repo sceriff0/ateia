@@ -345,50 +345,8 @@ class ParamUtils {
         return [
             compartments: params.quantify_compartments as boolean,
             statistics  : stats.asImmutable(),
-            // DERIVED, not a parameter. `expanded` used to be its own boolean
-            // meaning "Mean and Sum as well as Median"; it survives only as the
-            // exact predicate the embed_masks gate and the run-summary field
-            // already keyed on, so neither changes behaviour as a side effect of
-            // the parameter becoming a list.
-            expanded    : stats.contains('Mean') && stats.contains('Sum'),
             embedMasks  : params.embed_masks as boolean,
         ].asImmutable()
-    }
-
-    /**
-     * Cross-parameter rules for the compartment-quantification trio, both derived
-     * from `mode` (see compartmentMode above) rather than read raw:
-     *
-     *   expanded ⇒ compartments      (long-standing: per-compartment Mean/Sum
-     *                                 needs a per-compartment signal to sum)
-     *   embedMasks ⇒ compartments && expanded
-     *                                 (assemble_export.nf's embed_masks gate --
-     *                                 `params.embed_masks && params.quantify_compartments
-     *                                 && Mean+Sum in quantify_statistics` -- decides
-     *                                 whether the pyramid gets a mask series (Image:1).
-     *                                 --embed_masks true with either sibling off used to
-     *                                 exit 0 and silently publish a pyramid with NO mask
-     *                                 series; that run only fails months later, when its
-     *                                 --outdir is handed to a --prior_outdir add_cycle run
-     *                                 and EXTRACT_MASK_SERIES finds no Image:1.)
-     */
-    static void validateCompartmentQuant(Map mode) {
-        if (mode.expanded && !mode.compartments) {
-            throw new IllegalArgumentException(
-                "--quantify_statistics asks for both Mean and Sum, which requires " +
-                "--quantify_compartments to be true."
-            )
-        }
-        if (mode.embedMasks && !(mode.compartments && mode.expanded)) {
-            throw new IllegalArgumentException(
-                "--embed_masks requires both --quantify_compartments and " +
-                "Mean and Sum in --quantify_statistics -- without both, the pyramid's " +
-                "mask series (Image:1) is never written, and a run advertising " +
-                "--embed_masks that silently omits it is only discovered later, when " +
-                "this --outdir is handed to mode='add_cycle' as --prior_outdir and " +
-                "EXTRACT_MASK_SERIES finds no Image:1 to reuse."
-            )
-        }
     }
 
     /**

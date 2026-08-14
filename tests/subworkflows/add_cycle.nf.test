@@ -12,7 +12,7 @@ nextflow_workflow {
      * by tests/testdata/generate_complete_testdata.py.
      *
      * take: gained a second input, compartment_mode -- Task 4 (arch-B-split)'s seam
-     * for --quantify_compartments / --expanded_quantification / --embed_masks,
+     * for --quantify_compartments / --quantify_statistics / --embed_masks,
      * resolved once by workflows/mirage.nf in production and threaded down the same
      * way here. The two compartments-off tests below pass input[1] as a LITERAL map
      * that DIVERGES from params (left at its true default), proving ADD_CYCLE
@@ -37,7 +37,7 @@ nextflow_workflow {
                       channels: ['DAPI','CD8'], images_count: 1, channels_count: 2 ],
                     file('tests/testdata/P001_image.tiff')
                 ])
-                input[1] = [compartments: false, statistics: ['Median'], expanded: false, embedMasks: false]
+                input[1] = [compartments: false, statistics: ['Median'], embedMasks: false]
                 """
             }
             params {
@@ -73,7 +73,7 @@ nextflow_workflow {
                       channels: ['DAPI','CD8'], images_count: 1, channels_count: 2 ],
                     file('tests/testdata/P001_image.tiff')
                 ])
-                input[1] = [compartments: true, statistics: ['Median','Mean','Sum'], expanded: true, embedMasks: false]
+                input[1] = [compartments: true, statistics: ['Median','Mean','Sum'], embedMasks: false]
                 """
             }
             params {
@@ -87,7 +87,7 @@ nextflow_workflow {
                 prior_outdir = "$projectDir/tests/testdata/prior_run"
                 reg_qc = 2
                 quantify_compartments = true
-                expanded_quantification = true
+                quantify_statistics = ['Median','Mean','Sum']
             }
         }
 
@@ -111,7 +111,7 @@ nextflow_workflow {
                       channels: ['DAPI','CD8'], images_count: 1, channels_count: 2 ],
                     file('tests/testdata/P001_image.tiff')
                 ])
-                input[1] = [compartments: false, statistics: ['Median'], expanded: false, embedMasks: false]
+                input[1] = [compartments: false, statistics: ['Median'], embedMasks: false]
                 """
             }
             params {

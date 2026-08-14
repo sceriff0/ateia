@@ -62,7 +62,7 @@ nextflow_workflow {
                 ])
                 // QUANTIFY_MARKERS takes the resolved compartment mode as its third
                 // input; `.statistics` decides whether REDSEA_MATRIX runs.
-                input[2] = [compartments: true, statistics: ['Median'], expanded: false, embedMasks: false]
+                input[2] = [compartments: true, statistics: ['Median'], embedMasks: false]
                 """
             }
         }
@@ -122,7 +122,7 @@ nextflow_workflow {
                 )
                 // QUANTIFY_MARKERS takes the resolved compartment mode as its third
                 // input; `.statistics` decides whether REDSEA_MATRIX runs.
-                input[2] = [compartments: true, statistics: ['Median'], expanded: false, embedMasks: false]
+                input[2] = [compartments: true, statistics: ['Median'], embedMasks: false]
                 """
             }
         }
@@ -177,7 +177,7 @@ nextflow_workflow {
                 )
                 // QUANTIFY_MARKERS takes the resolved compartment mode as its third
                 // input; `.statistics` decides whether REDSEA_MATRIX runs.
-                input[2] = [compartments: true, statistics: ['Median'], expanded: false, embedMasks: false]
+                input[2] = [compartments: true, statistics: ['Median'], embedMasks: false]
                 """
             }
         }
@@ -218,7 +218,7 @@ nextflow_workflow {
                 )
                 // QUANTIFY_MARKERS takes the resolved compartment mode as its third
                 // input; `.statistics` decides whether REDSEA_MATRIX runs.
-                input[2] = [compartments: true, statistics: ['Median'], expanded: false, embedMasks: false]
+                input[2] = [compartments: true, statistics: ['Median'], embedMasks: false]
                 """
             }
         }
@@ -259,7 +259,7 @@ nextflow_workflow {
                 )
                 // QUANTIFY_MARKERS takes the resolved compartment mode as its third
                 // input; `.statistics` decides whether REDSEA_MATRIX runs.
-                input[2] = [compartments: true, statistics: ['Median'], expanded: false, embedMasks: false]
+                input[2] = [compartments: true, statistics: ['Median'], embedMasks: false]
                 """
             }
         }

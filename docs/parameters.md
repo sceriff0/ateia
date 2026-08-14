@@ -236,12 +236,6 @@ So `--quantify_statistics "Median,Median RobustZ,REDSEA"` emits per-compartment
     correct; anything that splits on whitespace turns `Mean Z` into an unknown
     statistic `Z`.
 
-!!! danger "Validation rule"
-    Asking for **both** `Mean` and `Sum` requires `--quantify_compartments true`;
-    the combination fails at launch. (This preserves the old
-    `expanded_quantification ⇒ quantify_compartments` rule exactly — `expanded` is now derived as "Mean and Sum both requested" — and the
-    `embed_masks` gate still keys on it.)
-
 !!! warning "The default output is smaller than it used to be"
     `quantify_statistics` replaces the boolean `expanded_quantification`, which
     **defaulted to `true`**. A default run therefore now emits `Median` only —
@@ -398,18 +392,13 @@ Full walkthrough: [Incremental cycles](add_cycle.md).
 |---|---|---|
 | `mode` | `standard` | `standard` = normal `--start`/`--stop` pipeline; `add_cycle` = incremental cyclic-IF. |
 | `prior_outdir` | `null` | **Required for `add_cycle`.** The `--outdir` of the previously completed run (supplies the reusable reference, mask, and quantification via its checkpoint CSVs). |
-| `embed_masks` | `false` | Embed the segmentation masks as a second uint32 series in the pyramid OME-TIFF. Written only when `embed_masks && quantify_compartments && Mean+Sum in quantify_statistics`; `add_cycle` consumes this series, so a prior run must have it to be extendable. `--embed_masks true` REQUIRES `--quantify_compartments true` and both `Mean` and `Sum` in `--quantify_statistics` — the launch validation rejects the combination otherwise (see warning below). |
+| `embed_masks` | `false` | Embed the segmentation masks as a second uint32 series (`Image:1`) in the pyramid OME-TIFF. **This flag alone decides it** — `SEGMENT` emits both masks unconditionally, so nothing else is required. `add_cycle` consumes the series, so a prior run must have it to be extendable. |
 
 !!! warning "`add_cycle` prerequisites"
     `embed_masks` defaults to `false`, so a default run is **not** add_cycle-extendable.
-    Set `--embed_masks true` (together with `--quantify_compartments` and
-    `Mean` and `Sum` in `--quantify_statistics`) to make a run extendable.
-    `--embed_masks true` with either sibling off is rejected **at launch**
-    (`ParamUtils.validateCompartmentQuant`) rather than silently producing a
-    plain pyramid, so a prior run either failed to launch with `embed_masks=true`
-    misconfigured, or has the mask series if `embed_masks=true` was accepted at
-    all. Without the embedded mask series, `mode=add_cycle` **fast-fails** before
-    doing any work. See
+    Set `--embed_masks true` to make one extendable — it is the only condition, so
+    a run with the flag set always carries the mask series. Without it,
+    `mode=add_cycle` **fast-fails** before doing any work. See
     [Incremental cycles → Fast-fail behavior](add_cycle.md#fast-fail-behavior).
 
 ## Parameter presets

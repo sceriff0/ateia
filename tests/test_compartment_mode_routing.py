@@ -133,7 +133,7 @@ ALLOWED_LINES = {
         # and a REDSEA_MATRIX withName: block above QUANTIFY's; -> 807 when the
         # z-score work added a comment line to quantifyStatistics(). Re-pin,
         # do not widen. (Re-pin from the file, not by guessing:
-        # `grep -n "params.expanded_quantification ?" conf/modules.config`.)
+        # `grep -n "quantifyStatistics(params.quantify_statistics)" conf/modules.config`.)
         807: (
             "ext.args = { ... quantifyStatistics(params.quantify_statistics) ... } "
             "-- conf/*.config closures cannot see lib/*.groovy classes, so "
@@ -195,7 +195,7 @@ def test_scan_actually_finds_the_consumers():
 
 def test_no_file_outside_the_resolver_and_allowlist_reads_it_raw():
     """The seam: every other consumer must hold ParamUtils.compartmentMode()'s
-    map, not read params.quantify_compartments / params.expanded_quantification
+    map, not read params.quantify_compartments / params.quantify_statistics
     / params.embed_masks itself."""
     offenders = [
         f"{path.relative_to(ROOT)}:{no}: {line.strip()}"
