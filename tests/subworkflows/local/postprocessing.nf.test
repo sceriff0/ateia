@@ -49,9 +49,9 @@ nextflow_workflow {
             workflow {
                 """
                 input[0] = Channel.fromList([
-                    [[patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK', 'SMA']],
+                    [[patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK', 'SMA'], channels_count: 3],
                      file('$projectDir/tests/testdata/P001_ref.ome.tiff')],
-                    [[patient_id: 'P001', is_reference: false, channels: ['DAPI', 'PANCK', 'SMA']],
+                    [[patient_id: 'P001', is_reference: false, channels: ['DAPI', 'PANCK', 'SMA'], channels_count: 3],
                      file('$projectDir/tests/testdata/P001_mov1.ome.tiff')]
                 ])
                 input[1] = Channel.fromList([
@@ -119,11 +119,11 @@ nextflow_workflow {
             workflow {
                 """
                 input[0] = Channel.fromList([
-                    [[patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK', 'SMA']],
+                    [[patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK', 'SMA'], channels_count: 3],
                      file('$projectDir/tests/testdata/P001_ref.ome.tiff')],
-                    [[patient_id: 'P001', is_reference: false, channels: ['DAPI', 'PANCK', 'SMA']],
+                    [[patient_id: 'P001', is_reference: false, channels: ['DAPI', 'PANCK', 'SMA'], channels_count: 3],
                      file('$projectDir/tests/testdata/P001_mov1.ome.tiff')],
-                    [[patient_id: 'P001', is_reference: false, channels: ['DAPI', 'PANCK', 'SMA']],
+                    [[patient_id: 'P001', is_reference: false, channels: ['DAPI', 'PANCK', 'SMA'], channels_count: 3],
                      file('$projectDir/tests/testdata/P001_mov2.ome.tiff')]
                 ])
                 input[1] = Channel.fromList([
@@ -178,7 +178,7 @@ nextflow_workflow {
             workflow {
                 """
                 input[0] = Channel.fromList([
-                    [[patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK', 'SMA']],
+                    [[patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK', 'SMA'], channels_count: 3],
                      file('$projectDir/tests/testdata/P001_ref.ome.tiff')]
                 ])
                 input[1] = Channel.fromList([
@@ -232,11 +232,11 @@ nextflow_workflow {
             workflow {
                 """
                 input[0] = Channel.fromList([
-                    [[patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK', 'SMA']],
+                    [[patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK', 'SMA'], channels_count: 3],
                      file('$projectDir/tests/testdata/P001_ref.ome.tiff')],
-                    [[patient_id: 'P001', is_reference: false, channels: ['DAPI', 'PANCK', 'SMA']],
+                    [[patient_id: 'P001', is_reference: false, channels: ['DAPI', 'PANCK', 'SMA'], channels_count: 3],
                      file('$projectDir/tests/testdata/P001_mov1.ome.tiff')],
-                    [[patient_id: 'P002', is_reference: true, channels: ['DAPI', 'PANCK', 'SMA']],
+                    [[patient_id: 'P002', is_reference: true, channels: ['DAPI', 'PANCK', 'SMA'], channels_count: 3],
                      file('$projectDir/tests/testdata/P002_ref.ome.tiff')]
                 ])
                 input[1] = Channel.fromList([
@@ -298,7 +298,7 @@ nextflow_workflow {
             workflow {
                 """
                 input[0] = Channel.fromList([
-                    [[patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK', 'SMA']],
+                    [[patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK', 'SMA'], channels_count: 3],
                      file('$projectDir/tests/testdata/P001_ref.ome.tiff')]
                 ])
                 input[1] = Channel.fromList([
@@ -354,7 +354,7 @@ nextflow_workflow {
             workflow {
                 """
                 input[0] = Channel.fromList([
-                    [[patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK']],
+                    [[patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK'], channels_count: 2],
                      file('$projectDir/tests/testdata/P001_ref.ome.tiff')]
                 ])
                 input[1] = Channel.fromList([
@@ -409,7 +409,7 @@ nextflow_workflow {
             workflow {
                 """
                 input[0] = Channel.fromList([
-                    [[patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK', 'SMA']],
+                    [[patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK', 'SMA'], channels_count: 3],
                      file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)]
                 ])
                 input[1] = Channel.fromList([

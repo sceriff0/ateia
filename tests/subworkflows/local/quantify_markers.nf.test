@@ -16,7 +16,10 @@
  *     have inherited from a naive extraction (verified: MERGE_QUANT_CSVS and
  *     EXPORT_GEOJSON stopped running in an add_cycle stub run).
  *   - `channels_count` being read at all is pinned by the grouped meta carrying it
- *     through, plus the no-channels_count fallback case.
+ *     through, plus the missing-channels_count case -- which used to assert that the
+ *     grouping FELL BACK to an unsized key and carried on. That fallback is gone
+ *     (lib/PatientGroup.groovy makes the size mandatory), so the same fixture now
+ *     asserts the opposite: the run aborts, naming this channel and the key.
  *   - Early (streaming) emission itself is not observable through nf-test's collected
  *     outputs and is NOT covered.
  */
@@ -196,7 +199,19 @@ nextflow_workflow {
         }
     }
 
-    test("a meta without channels_count falls back to an unsized key and still groups") {
+    test("a meta without channels_count aborts rather than silently degrading") {
+
+        // THE inversion. This test used to be called "falls back to an unsized key and
+        // still groups", and it passed: the grouping was
+        // `meta.channels_count ? groupKey(pid, meta.channels_count) : pid`, so a meta
+        // with no count silently produced an UNSIZED groupTuple. An unsized groupTuple
+        // cannot close a key until the ENTIRE upstream channel closes, so one absent
+        // count turns every per-patient stage into a full-run barrier -- on a run that
+        // exits 0 and looks identical. Nothing anywhere reported it.
+        //
+        // lib/Checkpoint.groovy now guarantees both counts on every meta it reads, and
+        // lib/PatientGroup.groovy refuses to group without one. The fixture is
+        // unchanged; only the expected outcome is inverted.
 
         tag "stub"
         options "-stub"
@@ -224,10 +239,17 @@ nextflow_workflow {
         }
 
         then {
+            def out = workflow.stdout.join('\n') + workflow.stderr.join('\n')
             assertAll(
-                { assert workflow.success },
-                { assert workflow.out.grouped_csv.size() == 1 },
-                { assert workflow.out.grouped_csv[0][1].size() == 2 }
+                { assert workflow.failed },
+                // Names the grouping that refused...
+                { assert out.contains('QUANTIFY_MARKERS: the per-patient marker CSVs feeding MERGE_QUANT_CSVS') },
+                // ...the meta key to inject...
+                { assert out.contains('channels_count') },
+                // ...and the patient whose meta was short.
+                { assert out.contains('P001') },
+                // Nothing was grouped: the barrier is not entered, not entered-and-warned.
+                { assert !workflow.out.grouped_csv }
             )
         }
     }
