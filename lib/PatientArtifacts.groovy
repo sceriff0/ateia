@@ -33,9 +33,19 @@
  * recorded the wrong file under the wrong column and the run stayed green.
  *
  * Here the producer is bound to the field BY NAME at declaration, and read back BY
- * NAME at use. There is no position anywhere in between for two files to trade places
- * in. `tests/patient_artifacts_probe.nf`'s `transposed` case executes the swap so the
- * assertions that catch it are themselves watched failing.
+ * NAME at use, so a POSITIONAL swap is unrepresentable: there is no position anywhere
+ * in between for two files to trade places in.
+ *
+ * BE PRECISE ABOUT WHAT THAT DOES NOT COVER. A MIS-DECLARATION is still perfectly
+ * writable -- `cell_csv: ASSEMBLE_EXPORT.out.geojson` is a legal line, and
+ * `Checkpoint.row` still validates key presence only. Nothing in this class can catch
+ * that, because "which producer belongs under which name" is not a property it can see.
+ * A TEST catches it: `tests/subworkflows/local/postprocessing.nf.test`'s
+ * "Should create checkpoint CSV" case asserts that every column of
+ * `csv/postprocessed.csv` names the artifact its column is named for (watched failing
+ * by swapping exactly those two bindings in `subworkflows/local/postprocess.nf`).
+ * `tests/patient_artifacts_probe.nf`'s `transposed` case does the same at the seam.
+ * So: a positional swap is unrepresentable; a mis-declaration is caught by those two.
  *
  * ---------------------------------------------------------------------------
  * 3. TWO KEYING CONVENTIONS, AND AN "OPTIONAL" THAT WAS AN EMPTY CHANNEL
@@ -139,6 +149,22 @@ class PatientArtifacts {
      *                               that meta becomes the bundle's `meta`, and that
      *                               field's patient set is the ROSTER every other
      *                               required field is checked against
+     *
+     * THE ROSTER IS RELATIVE, AND THAT IS THE RESIDUAL HALF OF THE HAZARD. `metaFrom`
+     * names a field of this same seam, so what is enforced is that every field agrees
+     * with every other -- not that they agree with how many patients the RUN has. A
+     * uniformly short roster therefore passes in silence. The entry point where that
+     * bites is `--start postprocessing`: `READ_SEGMENTED_CHECKPOINT` reads a
+     * `segmented.csv` that is ALREADY one patient short (a prior run lost one), every
+     * field of every bundle downstream is short by the same patient, nothing
+     * disagrees, and the run completes normally having quietly dropped it. The
+     * `subworkflows/local/input_check.nf` precedent this class follows does better
+     * there -- it compares against an INDEPENDENTLY DECLARED count
+     * (`CsvUtils.countImagesPerPatient`) rather than against a sibling channel -- and
+     * `bundle` has no such count to compare against. Closing that needs a declared
+     * expected roster threaded in from the samplesheet, which is a different input and
+     * a different task; it is written down here so it is not discoverable only by
+     * reading a review.
      *              fields   Map     field name -> a channel, or a spec map:
      *                                 channel     Channel  required
      *                                 optional    boolean  per-patient optional

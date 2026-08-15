@@ -346,7 +346,53 @@ nextflow_workflow {
                 { assert workflow.success },
                 { with(workflow.out.checkpoint_csv) {
                     assert size() == 1
-                }}
+                }},
+                // EVERY COLUMN NAMES THE ARTIFACT ITS COLUMN IS NAMED FOR.
+                //
+                // This is the assertion that guards PRODUCTION's field bindings in
+                // subworkflows/local/postprocess.nf's `ch_base_checkpoint` bundle, and
+                // it is here because nothing else covered them. Positional
+                // destructuring is gone -- lib/PatientArtifacts.groovy binds a producer
+                // to a field by NAME and the row builder reads it back by name -- so a
+                // POSITIONAL swap of cell_csv and cell_geojson is no longer writable at
+                // all. A MIS-DECLARATION still is: `cell_csv: ASSEMBLE_EXPORT.out.geojson`
+                // is a legal line, and `Checkpoint.row` validates key presence only.
+                //
+                // The two are the transposable pair (both are
+                // Layout.publishedPath(..., 'geojson', ...) of the same patient, and
+                // tests/checkpoint_manifest.nf.test's existence check is satisfied by
+                // either spelling), but every column is pinned rather than just those
+                // two -- a bundle field is exactly as mis-declarable as its neighbour.
+                //
+                // Watched failing: swapping the `cell_csv:` and `cell_geojson:`
+                // bindings in postprocess.nf makes this fail with
+                //   "cell_csv names 'cells.geojson', which is not /cells_data\.csv/"
+                //
+                // Matched on the BASENAME with `==~` (whole-string), not on the path:
+                // the directory a column publishes into is tests/checkpoint_manifest's
+                // job, and cell_csv and cell_geojson share theirs anyway -- geojson/ --
+                // so a path-prefix check could not tell the two apart at all.
+                { def rows = file(workflow.out.checkpoint_csv[0]).readLines().findAll { it.trim() }
+                  def header = rows[0].split(',') as List
+                  assert header == ['patient_id', 'cell_csv', 'cell_geojson', 'merged_csv',
+                                    'cell_mask', 'pyramid'] :
+                      "postprocessed.csv columns changed; this assertion pins them by name: ${header}"
+                  def expected = [
+                      cell_csv    : ~/cells_data\.csv/,
+                      cell_geojson: ~/cells\.geojson/,
+                      merged_csv  : ~/merged_quant\.csv/,
+                      cell_mask   : ~/.+_cell_mask\.tif/,
+                      pyramid     : ~/pyramid\.ome\.tiff/,
+                  ]
+                  rows.drop(1).each { line ->
+                      def fields = line.split(',') as List
+                      expected.each { column, pattern ->
+                          def base = fields[header.indexOf(column)].tokenize('/').last()
+                          assert base ==~ pattern :
+                              "${column} names '${base}', which is not ${pattern}"
+                      }
+                  }
+                }
             )
         }
     }

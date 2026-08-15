@@ -261,7 +261,13 @@ workflow POSTPROCESSING {
     //     `Checkpoint.row` validates key PRESENCE, not which file landed under which
     //     key, so the checkpoint recorded the wrong file under the wrong column and the
     //     run stayed green. Producer and field are bound BY NAME below, and read back by
-    //     name at the row builder — there is no position left between them.
+    //     name at the row builder — there is no position left between them, so a
+    //     POSITIONAL swap is unrepresentable. A MIS-DECLARATION (binding `cell_csv:`
+    //     to `ASSEMBLE_EXPORT.out.geojson`) still is not, and nothing structural can
+    //     catch it: tests/subworkflows/local/postprocessing.nf.test's "Should create
+    //     checkpoint CSV" case asserts every column of csv/postprocessed.csv names
+    //     the artifact its column is named for, and was watched failing by swapping
+    //     exactly these two bindings.
     //   * every one of those joins was a plain inner join, so an `errorStrategy
     //     'ignore'` drop anywhere in this step removed the patient from the chain
     //     without a word and published a checkpoint CSV one row short.

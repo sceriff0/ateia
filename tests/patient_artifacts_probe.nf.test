@@ -83,7 +83,7 @@ nextflow_pipeline {
         }
     }
 
-    test("a patient emitted twice on one field aborts") {
+    test("a patient emitted twice on one field aborts on the duplicate, not on something else") {
         options "-lib $projectDir/lib"
         when {
             params {
@@ -94,7 +94,17 @@ nextflow_pipeline {
         then {
             assert workflow.failed
             def out = workflow.stdout.join('\n') + workflow.stderr.join('\n')
-            assert out.contains('P002')
+            // The MECHANISM, not just the patient. An earlier version of this case
+            // asserted only `out.contains('P002')`, which ANY abort naming P002
+            // satisfies -- including one thrown for a completely unrelated reason, so
+            // the test could have passed while `failOnDuplicate` was silently dropped
+            // from the fold. This is Nextflow's own message, so it also pins that the
+            // duplicate is caught by the operator rather than fanning out into two
+            // checkpoint rows for one patient.
+            assert out.contains('Detected join operation duplicate emission') :
+                "the run failed, but not on the duplicate: ${out}"
+            assert out.contains('key=P002') :
+                "the duplicate abort did not name the patient it fired for"
         }
     }
 
