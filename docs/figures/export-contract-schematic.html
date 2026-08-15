@@ -1,0 +1,512 @@
+<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1">\n<title>Mirage Export Contract</title>\n<style>
+  /* ======================================================================
+     MIRAGE supplementary figures — shared design base (S1 · S2 · S3)
+     ----------------------------------------------------------------------
+     DUPLICATED ON PURPOSE, not extracted to a shared file. Each figure in
+     this set has to survive being detached from the repository — attached to
+     a submission, mailed, opened from file:// — so it may not reference an
+     external stylesheet, not even a sibling one. This block is therefore
+     repeated verbatim in docs/figures/pipeline-schematic.html,
+     docs/figures/registration-schematic.html and docs/figures/qc-schematic.html,
+     and is ported (with the slate counterpart the figures deliberately lack)
+     to docs/stylesheets/extra.css. Change one, change all four.
+
+     SINGLE THEME BY DESIGN: white paper, black ink. A journal figure has a
+     paper ground.
+
+     ONE FONT STACK, shared with docs/stylesheets/extra.css so the site and
+     the figures really do read as one artefact (that file's header claimed
+     they did while leading with a different family).
+
+     ONE BREAKPOINT LADDER for the whole set: 1040 · 880 · 760 · 640 · 520.
+     No figure introduces a sixth rung.
+
+     ONE SIZING SCALE: .tag/.tag-def/.tag-alt .53rem / 1px 4px · .pp span
+     .62rem / 1px 5px · table.pr td.k .7rem, td.v/td.val .68rem ·
+     .masthead h1 max-width 72ch.
+
+     OVERFLOW DISCIPLINE: every grid track is minmax(0,…) and every grid or
+     flex item carries min-width:0. Without it a track's automatic minimum is
+     min-content, so one long identifier (GENERATE_POSTPROCESSING_QC) widens
+     its column and pushes the whole grid outside the panel border instead of
+     wrapping.
+     ====================================================================== */
+  :root{
+    --paper:#ffffff; --panel:#ffffff; --sub:#f6f7f8; --sub-2:#eef0f2;
+    --ink:#0f1113; --ink-2:#3c4147; --ink-3:#767c83;
+    --rule:#c3c8cd; --rule-2:#e5e8ea; --bar:#1b1e22;
+    --serif:Georgia,"Times New Roman",Cambria,"Noto Serif",serif;
+    --sans:"Inter","Helvetica Neue",Helvetica,Arial,"Segoe UI",system-ui,sans-serif;
+    --mono:"JetBrains Mono","SF Mono",ui-monospace,Menlo,Consolas,monospace;
+    color-scheme:light;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);
+    font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased;overflow-x:hidden;}
+  .sheet{max-width:1060px;margin:0 auto;padding:40px 26px 72px;}
+
+  .masthead{border-bottom:2px solid var(--ink);padding-bottom:12px;}
+  .masthead .kick{font-size:.71rem;letter-spacing:.15em;text-transform:uppercase;color:var(--ink-3);font-weight:700;}
+  .masthead h1{font-weight:700;font-size:1.32rem;letter-spacing:-.01em;margin:.3em 0 0;max-width:72ch;line-height:1.26;text-wrap:balance;}
+  .standfirst{font-family:var(--serif);font-size:.95rem;color:var(--ink-2);margin:12px 0 30px;max-width:82ch;}
+
+  /* Figure-set navigation. Relative filenames, so the strip works both from
+     file:// on a detached copy sitting beside its siblings and from the built
+     MkDocs site, which copies docs/figures/ through verbatim. */
+  .figset{display:flex;gap:0;flex-wrap:wrap;align-items:center;margin:12px 0 0;
+    font-family:var(--mono);font-size:.63rem;letter-spacing:.05em;text-transform:uppercase;}
+  .figset a,.figset span{border:1px solid var(--rule);padding:4px 9px;margin:0 -1px 0 0;
+    color:var(--ink-2);text-decoration:none;white-space:nowrap;}
+  .figset a:hover{border-color:var(--ink);color:var(--ink);}
+  .figset .self{background:var(--ink);border-color:var(--ink);color:#fff;font-weight:700;}
+
+  .panel{position:relative;background:var(--panel);border:1px solid var(--rule);padding:20px 20px 18px;margin:0 0 20px;}
+  .panel > .plabel{position:absolute;top:-1px;left:-1px;background:var(--ink);color:#fff;font-weight:700;
+    font-size:.85rem;line-height:1;padding:6px 9px;}
+  .panel-head{margin:2px 0 16px 26px;}
+  .panel-head h2{font-size:1.02rem;font-weight:700;letter-spacing:-.01em;margin:0;}
+  .panel-head p{font-size:.85rem;color:var(--ink-2);margin:3px 0 0;max-width:84ch;}
+
+  code{font-family:var(--mono);font-size:.82em;background:var(--sub);border:1px solid var(--rule-2);border-radius:2px;padding:.5px 4px;}
+  .tbl-scroll{overflow-x:auto;}
+
+  /* parameter chips */
+  .pp{display:flex;flex-wrap:wrap;gap:4px;margin-top:7px;min-width:0;}
+  .pp span{font-family:var(--mono);font-size:.62rem;background:var(--sub);border:1px solid var(--rule-2);padding:1px 5px;
+    color:var(--ink-2);max-width:100%;min-width:0;overflow-wrap:anywhere;}
+  .pp b{color:var(--ink);font-weight:700;}
+  .tag{font-family:var(--mono);font-size:.53rem;text-transform:uppercase;letter-spacing:.04em;padding:1px 4px;
+    font-weight:700;border:1px solid var(--rule);color:var(--ink-2);background:var(--sub-2);white-space:nowrap;}
+  .tag-on{border-color:var(--ink);color:var(--ink);background:#fff;}
+  .tag-def{font-family:var(--mono);font-size:.53rem;background:var(--ink);color:#fff;padding:1px 4px;font-weight:700;white-space:nowrap;}
+  .tag-alt{font-family:var(--mono);font-size:.53rem;background:var(--sub);color:var(--ink-2);border:1px solid var(--rule);padding:1px 4px;white-space:nowrap;}
+
+  /* parameter tables (td.v in S1/S3, td.val in S2 — same scale) */
+  table.pr{border-collapse:collapse;width:100%;font-size:.78rem;}
+  table.pr td{padding:3.5px 4px;border-bottom:1px solid var(--rule-2);vertical-align:top;}
+  table.pr tr:last-child td{border-bottom:none;}
+  table.pr td.k{font-family:var(--mono);font-size:.7rem;font-weight:700;white-space:nowrap;}
+  table.pr td.v,table.pr td.val{font-family:var(--mono);font-size:.68rem;color:var(--ink-2);white-space:nowrap;
+    padding-right:8px;font-variant-numeric:tabular-nums;}
+  table.pr td.v.w{white-space:normal;overflow-wrap:anywhere;}
+  table.pr td.d{color:var(--ink-2);}
+  .nul{color:var(--ink-3);font-style:italic;}
+
+  .caption{font-family:var(--serif);font-size:.83rem;color:var(--ink-2);line-height:1.62;border-top:1px solid var(--rule);padding-top:16px;margin-top:8px;}
+  .caption b{color:var(--ink);}
+  .footnote{font-family:var(--sans);font-size:.72rem;color:var(--ink-3);margin-top:14px;display:block;}
+
+  /* a — the QC ladder across the four steps */
+  .flow{display:grid;grid-template-columns:minmax(0,1fr) 16px minmax(0,1fr) 16px minmax(0,1fr) 16px minmax(0,1fr);
+    gap:3px;align-items:start;}
+  @media(max-width:1040px){.flow{grid-template-columns:minmax(0,1fr);}}
+  .lane{border:1px solid var(--rule);min-width:0;}
+  .lane > h3{margin:0;font-family:var(--mono);font-size:.68rem;font-weight:700;letter-spacing:.03em;
+    padding:8px 9px;background:var(--bar);color:#fff;display:flex;justify-content:space-between;align-items:center;gap:5px;
+    min-width:0;overflow-wrap:anywhere;}
+  .lane > h3 span:last-child{font-weight:400;color:#c7cacd;white-space:nowrap;flex:none;}
+  .lane .body{padding:9px;display:flex;flex-direction:column;gap:8px;background:var(--sub);min-width:0;}
+  .mod{background:var(--panel);border:1px solid var(--rule);border-left:2.5px solid var(--ink);padding:8px 9px;min-width:0;}
+  .mod.off{border-left-style:dashed;border-left-color:var(--ink-3);background:var(--sub-2);}
+  .mod .n{font-family:var(--mono);font-weight:700;font-size:.71rem;display:flex;flex-wrap:wrap;gap:5px;align-items:center;
+    min-width:0;overflow-wrap:anywhere;}
+  .mod .x{font-size:.75rem;color:var(--ink-2);margin-top:4px;overflow-wrap:anywhere;}
+  .kind{font-family:var(--mono);font-size:.6rem;color:var(--ink-2);border:1px dashed var(--rule);padding:5px 7px;
+    background:var(--panel);min-width:0;overflow-wrap:anywhere;}
+  .kind b{color:var(--ink);}
+  .arrow{display:flex;align-items:center;justify-content:center;padding-top:40px;color:var(--ink-3);font-size:1rem;}
+  @media(max-width:1040px){.arrow{padding:2px;transform:rotate(90deg);}}
+  .after{display:flex;gap:12px;flex-wrap:wrap;margin-top:14px;}
+  .after .mod{flex:1 1 260px;min-width:0;}
+
+  /* b — the tagged-stream seam */
+  .seam{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;align-items:start;}
+  @media(max-width:880px){.seam{grid-template-columns:minmax(0,1fr);}}
+  .seam > div{min-width:0;}
+  .sig{border:1px solid var(--rule);background:var(--sub);padding:10px 12px;font-family:var(--mono);
+    font-size:.72rem;color:var(--ink);overflow-x:auto;}
+  .sig .cm{color:var(--ink-3);}
+  .guards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:14px;}
+  @media(max-width:880px){.guards{grid-template-columns:minmax(0,1fr);}}
+  .gd{border:1px solid var(--rule);border-top:2.5px solid var(--ink);background:var(--panel);padding:10px 11px;min-width:0;}
+  .gd .h{font-family:var(--mono);font-weight:700;font-size:.68rem;overflow-wrap:anywhere;}
+  .gd .src{font-family:var(--mono);font-size:.58rem;color:var(--ink-3);margin-top:2px;}
+  .gd .x{font-size:.76rem;color:var(--ink-2);margin-top:6px;}
+  .gd .x b{color:var(--ink);}
+
+  /* c — ownership map */
+  table.own{border-collapse:collapse;width:100%;font-size:.76rem;}
+  table.own th{text-align:left;font-weight:700;font-size:.78rem;color:var(--ink);border-bottom:1.5px solid var(--ink);
+    padding:6px 9px;vertical-align:bottom;}
+  table.own td{padding:6px 9px;border-bottom:1px solid var(--rule-2);vertical-align:top;color:var(--ink-2);}
+  table.own tr:last-child td{border-bottom:none;}
+  table.own td.st{font-family:var(--mono);font-size:.68rem;font-weight:700;color:var(--ink);white-space:nowrap;}
+  table.own td.kd{font-family:var(--mono);font-size:.66rem;color:var(--ink);}
+  table.own tr.univ td{background:var(--sub);}
+  table.own tr.none td.kd{color:var(--ink-3);font-style:italic;}
+
+  /* d — renderers */
+  .rend{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;}
+  @media(max-width:880px){.rend{grid-template-columns:minmax(0,1fr);}}
+  .rn{border:1px solid var(--rule);border-top:2.5px solid var(--ink);background:var(--panel);padding:11px 12px;min-width:0;}
+  .rn h4{margin:0;font-family:var(--mono);font-size:.7rem;font-weight:700;overflow-wrap:anywhere;}
+  .rn .gate{font-family:var(--mono);font-size:.58rem;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-3);margin-top:3px;}
+  .rn .x{font-size:.76rem;color:var(--ink-2);margin:7px 0 0;}
+  .rn dl{margin:8px 0 0;font-size:.72rem;}
+  .rn dt{font-family:var(--mono);font-size:.57rem;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-3);margin-top:6px;}
+  .rn dd{margin:1px 0 0;font-family:var(--mono);font-size:.63rem;color:var(--ink-2);overflow-wrap:anywhere;}
+
+  /* e — SEG_QC chain */
+  .chain{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;}
+  @media(max-width:880px){.chain{grid-template-columns:minmax(0,1fr);}}
+  .ch{border:1px solid var(--rule);background:var(--panel);padding:10px 11px;min-width:0;position:relative;}
+  .ch .num{font-family:var(--mono);font-size:.58rem;background:var(--ink);color:#fff;padding:1px 5px;}
+  .ch .nm{font-family:var(--mono);font-weight:700;font-size:.7rem;margin-top:5px;overflow-wrap:anywhere;}
+  .ch .x{font-size:.76rem;color:var(--ink-2);margin-top:5px;}
+  .ch .res{font-family:var(--mono);font-size:.6rem;color:var(--ink-2);margin-top:7px;border-top:1px solid var(--rule-2);padding-top:5px;overflow-wrap:anywhere;}
+  .ch .res b{color:var(--ink);}
+  .callout{border-left:3px solid var(--ink);background:var(--sub);padding:9px 12px;font-size:.8rem;color:var(--ink-2);margin:13px 0 0;}
+  .callout b{color:var(--ink);}
+  table.bk{border-collapse:collapse;width:100%;font-size:.75rem;margin-top:13px;}
+  table.bk th{text-align:left;font-weight:700;font-size:.78rem;color:var(--ink);border-bottom:1.5px solid var(--ink);padding:6px 9px;}
+  table.bk th:first-child{width:130px;}
+  table.bk td{padding:6px 9px;border-bottom:1px solid var(--rule-2);vertical-align:top;color:var(--ink-2);}
+  table.bk tr:last-child td{border-bottom:none;}
+  table.bk td.rk{font-family:var(--mono);font-size:.63rem;text-transform:uppercase;letter-spacing:.04em;
+    color:var(--ink-3);font-weight:700;white-space:nowrap;}
+  table.bk b{color:var(--ink);}
+
+  /* f — aggregation */
+  .slots{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;}
+  @media(max-width:880px){.slots{grid-template-columns:repeat(2,minmax(0,1fr));}}
+  @media(max-width:520px){.slots{grid-template-columns:minmax(0,1fr);}}
+  .slot{border:1px solid var(--rule);background:var(--panel);padding:8px 9px;min-width:0;}
+  .slot .i{font-family:var(--mono);font-size:.56rem;color:var(--ink-3);}
+  .slot .k{font-family:var(--mono);font-weight:700;font-size:.64rem;margin-top:2px;overflow-wrap:anywhere;}
+  .slot .r{font-family:var(--mono);font-size:.58rem;color:var(--ink-2);margin-top:4px;overflow-wrap:anywhere;}
+
+  /* g — non-gating */
+  .warnbox{border:1px solid var(--ink);background:#fff;padding:9px 12px;font-size:.79rem;color:var(--ink-2);margin:12px 0 0;}
+  .warnbox b{color:var(--ink);}
+  .warnbox .wl{font-family:var(--mono);font-size:.57rem;text-transform:uppercase;letter-spacing:.07em;
+    color:var(--ink);font-weight:700;display:block;margin-bottom:3px;}
+  .procrow{display:flex;flex-wrap:wrap;gap:5px;margin-top:11px;}
+  .procrow span{font-family:var(--mono);font-size:.64rem;border:1.5px solid var(--ink);background:var(--panel);
+    padding:4px 7px;white-space:nowrap;font-weight:700;}
+  .math{font-family:var(--mono);font-size:.74rem;background:var(--sub);border:1px solid var(--rule-2);
+    padding:8px 10px;margin:11px 0 0;overflow-x:auto;white-space:nowrap;color:var(--ink);}
+  .math .cm{color:var(--ink-3);}
+
+  /* h — params */
+  .pgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 26px;}
+  @media(max-width:760px){.pgrid{grid-template-columns:minmax(0,1fr);}}
+  .pcol{min-width:0;}
+  @media(max-width:880px){table.pr td.k,table.pr td.v{white-space:normal;overflow-wrap:anywhere;}}
+  .pcol h4{font-family:var(--mono);font-size:.66rem;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-2);
+    margin:14px 0 4px;padding-bottom:3px;border-bottom:1px solid var(--ink);}
+  .pcol h4:first-child{margin-top:0;}
+  .outnote{font-family:var(--serif);font-size:.78rem;color:var(--ink-2);margin-top:12px;}
+  .outnote b{color:var(--ink);}
+</style>\n</head>\n<body>
+
+<div class="sheet">
+
+  <div class="masthead">
+    <div class="kick">Supplementary Figure S6 · the export contract</div>
+    <h1>What a phenotyped run hands to QuPath: three files, six numbers per cell, and why the container costs more than the content</h1>
+  </div>
+  <nav class="figset" aria-label="Supplementary figure set">
+    <a href="pipeline-schematic.html">S1 · pipeline</a>
+    <a href="registration-schematic.html">S2 · registration</a>
+    <a href="qc-schematic.html">S3 · quality control</a>
+    <a href="failure-schematic.html">S4 · failure semantics</a>
+    <a href="phenotyping-yield-schematic.html">S5 · phenotyping yield</a>
+    <span class="self">S6 · the export contract</span>
+  </nav>
+  <p class="standfirst">The obvious reading is that <code>cells.geojson</code> <i>is</i> the contract. It is not. The
+    downstream extension never parses GeoJSON — <b>QuPath</b> imports the file and the extension reads QuPath's
+    per-detection measurement map. Every per-cell number therefore has to survive a round trip through QuPath's object
+    model as a named double, and that single constraint decides the shape of everything below: what can be a
+    measurement, what has to be a sidecar, and why the file is <b>3.5 GiB</b> for a million cells when the same
+    information is <b>0.56 GiB</b> in a columnar layout.</p>
+
+  <section class="panel">
+    <div class="plabel">a</div>
+    <div class="panel-head">
+      <h2>The constraint nobody chose</h2>
+      <p>The consumer reads QuPath detections, not files. So the transport is fixed before any design decision is
+        taken — and it is the most expensive part of the contract.</p>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;">
+      <div class="mod" style="min-width:0">
+        <div class="rn">what people assume</div>
+        <p class="62rem">Mirage writes <code>cells.geojson</code>; the extension opens it. If that were true, the file
+          format would be a free choice.</p>
+      </div>
+      <div class="mod" style="min-width:0">
+        <div class="rn">what actually happens</div>
+        <p class="62rem"><code>PathIO.readObjects</code> parses the GeoJSON into QuPath objects
+          (<code>assets/import_geojson.groovy:142</code>); the extension then reads each detection's measurement map.
+          It never sees the file.</p>
+      </div>
+      <div class="mod" style="min-width:0">
+        <div class="rn">the consequence</div>
+        <p class="62rem">Every per-cell datum must be a <b>numeric measurement with a name</b>. Anything that cannot be
+          is forced into a sidecar — or dropped.</p>
+      </div>
+    </div>
+    <div class="callout" style="margin-top:14px">
+      <b>Why this is the whole story.</b> A named double in JSON text costs roughly 25–45 bytes; the same value in a
+      binary column costs 8. The contract below is close to optimal <i>given</i> that transport. The transport is where
+      the remaining 6× sits.
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="plabel">b</div>
+    <div class="panel-head">
+      <h2>Three files, and only one directory the consumer opens</h2>
+      <p>Two of the three artifacts published by the pipeline are never read downstream. The two that are read are
+        <i>projections</i>, written beside the GeoJSON so the consumer hardcodes filenames and nothing else.</p>
+    </div>
+    <div class="tbl-scroll">
+      <table>
+        <thead><tr><th>published path</th><th>written by</th><th>read by</th><th>carries</th></tr></thead>
+        <tbody>
+          <tr><td><code>&lt;outdir&gt;/phenotyping/model_config.json</code><br><span class="footnote">conf/modules.config:1042</span></td>
+              <td>COMPILE_PANEL</td><td class="nul">the classifier only</td>
+              <td>compiled panel: tree, feasible set, constraints, palette</td></tr>
+          <tr><td><code>&lt;outdir&gt;/&lt;pid&gt;/phenotyping/phenotype_qc.json</code><br><span class="footnote">conf/modules.config:1077</span></td>
+              <td>PHENOTYPE</td><td class="nul">humans / QC report</td>
+              <td>chosen α, degraded markers, KS diagnostics, thresholds</td></tr>
+          <tr><td><code>&lt;outdir&gt;/&lt;pid&gt;/geojson/export/cells.geojson</code><br><span class="footnote">export_geojson.nf:28</span></td>
+              <td>EXPORT_GEOJSON</td><td><b>QuPath</b> → extension</td>
+              <td>geometry, classification, per-cell measurements</td></tr>
+          <tr><td><code>…/export/panel_model.json</code><br><span class="footnote">export_geojson.nf:34</span></td>
+              <td>EXPORT_GEOJSON</td><td><b>the extension</b></td>
+              <td>projection of <code>model_config</code>: tree, palette, constraint table, <code>contract</code></td></tr>
+          <tr><td><code>…/export/calibration_model.json</code><br><span class="footnote">export_geojson.nf:37</span></td>
+              <td>EXPORT_GEOJSON</td><td><b>the extension</b></td>
+              <td>projection of <code>phenotype_qc</code>: per-marker, per-bin sign thresholds</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout" style="margin-top:14px">
+      <b>One directory, two filenames.</b> Both sidecars land beside <code>cells.geojson</code>
+      (<code>conf/modules.config:915</code>). Reaching across to <code>…/phenotyping/</code> instead would put a
+      <code>../../</code> path inside the consumer, which breaks the moment a publish directory moves.
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="plabel">c</div>
+    <div class="panel-head">
+      <h2>Why two sidecars and not one</h2>
+      <p>The split is forced by <i>when</i> each fact is computed, not by taste.</p>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;">
+      <div class="mod" style="min-width:0">
+        <div class="rn">panel facts — run level</div>
+        <p class="62rem">COMPILE_PANEL runs <b>once per run</b>. The tree, the palette, the constraint table and the
+          marker roles are identical for every patient.</p>
+      </div>
+      <div class="mod" style="min-width:0">
+        <div class="rn">calibration facts — per patient</div>
+        <p class="62rem">PHENOTYPE runs <b>once per patient</b>, and the dead band depends on that patient's cells,
+          that patient's density bins and the α chosen for them.</p>
+      </div>
+    </div>
+    <div class="warnbox" style="margin-top:14px">
+      <b>A merged file would be wrong for every patient but one.</b> Thresholds are the only thing in the contract that
+      is genuinely per-patient; putting them in a run-level file is not a size trade-off, it is a correctness error.
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="plabel">d</div>
+    <div class="panel-head">
+      <h2>One cell, measured</h2>
+      <p>Six dense measurements on every cell, plus one per surviving candidate. Byte counts are
+        <code>json.dumps</code> of the emitted structures for a 12-lineage / 7-state panel at three compartments.</p>
+    </div>
+    <div class="tbl-scroll">
+      <table>
+        <thead><tr><th>block</th><th>measurements</th><th>bytes / cell</th><th>at 10<sup>6</sup> cells</th><th>share</th></tr></thead>
+        <tbody>
+          <tr><td>marker intensities + morphology</td><td>67</td><td>3,427</td><td>3.19 GiB</td><td><b>90%</b></td></tr>
+          <tr><td>phenotype block (6 dense + 2 sparse)</td><td>8</td><td>375</td><td>0.35 GiB</td><td>10%</td></tr>
+          <tr><td><b>total</b></td><td><b>75</b></td><td><b>3,802</b></td><td><b>3.54 GiB</b></td><td>100%</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:14px;">
+      <div class="mod" style="min-width:0">
+        <div class="rn">the six dense keys</div>
+        <p class="62rem"><code>_pheno.free_mask</code> · <code>ambiguous</code> · <code>n_candidates</code> ·
+          <code>depth</code> · <code>violated_constraint_id</code> · <code>density_bin</code>
+          <span class="footnote">bin/export_geojson.py:131–147</span></p>
+      </div>
+      <div class="mod" style="min-width:0">
+        <div class="rn">the sparse block</div>
+        <p class="62rem"><code>_pheno.score.&lt;Name&gt;</code>, emitted only where the score exceeds zero — so the set
+          of present keys <i>is</i> the candidate set. <span class="footnote">bin/export_geojson.py:158</span></p>
+      </div>
+    </div>
+    <div class="callout" style="margin-top:14px">
+      <b>The phenotype block stopped being the problem.</b> It was 65 measurements and 42% of the cell; it is now 8 and
+      10%. Everything left to save is in the marker block.
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="plabel">e</div>
+    <div class="panel-head">
+      <h2>What was removed, and the test each removal had to pass</h2>
+      <p>A field earns its place per cell only if it is <i>not</i> derivable from something already present — or if a
+        human filters on it in a UI that cannot compute.</p>
+    </div>
+    <div class="tbl-scroll">
+      <table>
+        <thead><tr><th>field</th><th>verdict</th><th>why</th></tr></thead>
+        <tbody>
+          <tr><td><code>&lt;marker&gt;: p_neg</code> / <code>p_pos</code> / <code>sign</code> / <code>state</code></td>
+              <td class="nul">removed</td><td>reconstructible from the thresholds sidecar — panel <b>f</b></td></tr>
+          <tr><td><code>pheno_score:&lt;Name&gt;</code> (dense over |F|)</td>
+              <td>sparse</td><td>zero for every non-candidate; absent now means zero</td></tr>
+          <tr><td><code>empty_type</code></td>
+              <td class="nul">removed</td><td>fully determined by <code>classification.name</code></td></tr>
+          <tr><td><code>provenance</code></td>
+              <td class="nul">removed</td><td>a <b>constant</b> on export — only the consumer ever writes 1</td></tr>
+          <tr><td><code>feasible_set</code> (in the sidecar)</td>
+              <td class="nul">removed</td><td>O(2<sup>|lineage|</sup>), 72% of the sidecar at 12 markers, and no consumer reads it</td></tr>
+          <tr><td><code>ambiguous</code>, <code>n_candidates</code></td>
+              <td><b>kept</b></td><td>derivable, but QuPath's filter UI cannot count sparse keys and these are what a human triages on</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout" style="margin-top:14px">
+      <b>Derivable is not the same as removable.</b> Two derivable fields were deliberately kept for the viewer, and two
+      were dropped because nobody filters on them. The distinction is the UI, not the information.
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="plabel">f</div>
+    <div class="panel-head">
+      <h2>The trade that shrank the block: thresholds instead of p-values</h2>
+      <p>Two numbers per marker per density bin replace two numbers per marker <i>per cell</i>. The sign is then
+        reconstructed from the raw intensity that is already on the feature.</p>
+    </div>
+    <div class="mod">
+      <div class="rn">the rule</div>
+      <pre class="math" style="white-space:pre-wrap;margin:6px 0">entry = thresholds[marker]
+bin   = entry.collapsed ? 0 : cell["_pheno.density_bin"]
+value = cell[entry.measurement]
+pos   = value &gt;  bins[bin].t_pos        neg = value &lt;  bins[bin].t_neg</pre>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:14px;">
+      <div class="mod" style="min-width:0">
+        <div class="rn">two fields exist only because the naive version is wrong</div>
+        <p class="62rem"><code>collapsed</code> — calibration collapses <i>per marker</i>, while the cell carries the
+          pre-collapse bin, so a collapsed marker must be read at bin 0.<br>
+          <code>measurement</code> — the classifier falls back to the bare <code>&lt;marker&gt;</code> column when the
+          compartment key is missing for that patient, so the column read is a per-patient fact.</p>
+      </div>
+      <div class="mod" style="min-width:0">
+        <div class="rn">two details that look cosmetic and are not</div>
+        <p class="62rem">Comparisons are <b>strict</b>: a threshold is the last reference score that <i>fails</i> the
+          conformal bound, so a value sitting exactly on it is not a confident call.<br>
+          <code>t_pos</code> and <code>t_neg</code> may <b>cross</b> — the overlap is a real contradiction band and is
+          reported, not clamped.</p>
+      </div>
+    </div>
+    <div class="warnbox" style="margin-top:14px">
+      <b>Not exact everywhere.</b> The exporter rounds intensities to 4 decimals while the classifier read full
+      precision, so the reconstruction is exact only outside one rounding unit (5×10<sup>−5</sup>) of a threshold.
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="plabel">g</div>
+    <div class="panel-head">
+      <h2>Same information, cheaper containers</h2>
+      <p>The load cost is dominated by the transport, not the payload. Three of these four options carry byte-identical
+        information; they differ only in how QuPath gets to it.</p>
+    </div>
+    <div class="tbl-scroll">
+      <table>
+        <thead><tr><th>container</th><th>at 10<sup>6</sup> cells</th><th>load path</th><th>status</th></tr></thead>
+        <tbody>
+          <tr><td>drag-and-drop GeoJSON</td><td>3.54 GiB</td>
+              <td class="nul">re-parses the whole file and resolves the hierarchy <b>on the UI thread, every time</b>
+                <span class="footnote">import_geojson.groovy:15</span></td>
+              <td class="nul">avoid</td></tr>
+          <tr><td>GeoJSON via <code>PathIO.readObjects</code></td><td>3.54 GiB</td>
+              <td>streaming parse once, objects added in batches of 25,000
+                <span class="footnote">import_geojson.groovy:43,142</span></td>
+              <td><b>current</b></td></tr>
+          <tr><td>QuPath project <code>.qpdata</code></td><td>binary, not measured here</td>
+              <td>binary object store; reopening the project is <b>near instant</b>
+                <span class="footnote">import_geojson.groovy:27–28</span></td>
+              <td><b>free win</b> — import once, save to a project, never pay the parse again</td></tr>
+          <tr><td>columnar table keyed by <code>label</code></td><td><b>0.56 GiB</b> (float64)</td>
+              <td>would bypass QuPath's object model entirely — <b>6.3× smaller</b> than the JSON text</td>
+              <td class="nul">no QuPath importer today; needs a consumer change</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout" style="margin-top:14px">
+      <b>The cheapest real win needs no code.</b> Import the GeoJSON once with the provided script, then save the image
+      into a QuPath project — every subsequent open reads the binary store instead of re-parsing 3.5 GiB of text. The
+      columnar option is strictly better on size but is not reachable without changing how the consumer reads cells,
+      because today it reads QuPath detections rather than files (panel <b>a</b>).
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="plabel">h</div>
+    <div class="panel-head">
+      <h2>What this contract does not do</h2>
+      <p>Stated so the figure is not read as a claim of completeness.</p>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;">
+      <div class="mod" style="min-width:0">
+        <div class="rn">it does not compress the marker block</div>
+        <p class="62rem">90% of the file is marker intensities and morphology, untouched by any of this. Every saving
+          described here is inside the remaining 10%.</p>
+      </div>
+      <div class="mod" style="min-width:0">
+        <div class="rn">it does not resolve uncertainty</div>
+        <p class="62rem">An ambiguous cell is exported as <i>suspended</i>, with the markers still undetermined named in
+          <code>free_mask</code>. Nothing here decides it; a human does.</p>
+      </div>
+      <div class="mod" style="min-width:0">
+        <div class="rn">the columnar figure is arithmetic, not a benchmark</div>
+        <p class="62rem">0.56 GiB is 8 bytes × the emitted value count. No columnar reader exists on either side, so
+          no load time was measured for it.</p>
+      </div>
+      <div class="mod" style="min-width:0">
+        <div class="rn">the consumer is not on main</div>
+        <p class="62rem">The extension that reads this contract lives on an unmerged branch, and the producer side does
+          too. Both halves are parked.</p>
+      </div>
+    </div>
+  </section>
+
+  <p class="caption"><b>Supplementary Figure S6 — the export contract.</b> A phenotyped Mirage run publishes five
+    artifacts, of which the downstream QuPath extension reads three, all in one directory: <code>cells.geojson</code>
+    for geometry, classification and per-cell measurements, plus two JSON sidecars that are projections of artifacts
+    produced earlier in the pipeline. The split between them follows the only seam that matters — panel facts are
+    computed once per run, calibration facts once per patient, and the per-marker sign thresholds are the one thing that
+    genuinely cannot be shared between patients. Per cell the contract is six dense measurements and one per surviving
+    candidate, down from sixty-five, because everything reconstructible from the thresholds sidecar was moved off the
+    cells. What remains is dominated not by phenotyping but by marker intensities, and above all by the container: the
+    consumer reads QuPath detections rather than files, so every value travels as named JSON text at roughly five times
+    its binary size. The practical consequence is smaller than it sounds — importing once and saving a QuPath project
+    replaces the parse with a binary load — and the larger one is architectural: a columnar side table keyed by cell
+    label would carry the same information in 0.56 GiB instead of 3.54, but only if the consumer were changed to read a
+    file rather than a detection.</p>
+
+</div>
+</body>
+</html>
