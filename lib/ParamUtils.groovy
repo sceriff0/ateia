@@ -151,10 +151,21 @@ class ParamUtils {
         }
         // Which checkpoints a prior run must have left behind, and where they live,
         // is Layout's to state — add_cycle.nf reads the very same two files.
+        //
+        // CsvUtils.exists, NOT `new File(...).exists()`. lib/Checkpoint.read and
+        // lib/CsvUtils were made provider-aware (FileHelper.asPath) precisely so a prior
+        // run on object storage could be folded into a new cycle — and this pre-flight
+        // ran first and undid it, because `new File("s3://bucket/run/csv/registered.csv")`
+        // is not a URI, it is a RELATIVE LOCAL path ('s3:'/''/'bucket'/...). It does not
+        // throw; it reports "not found", so every remote --prior_outdir died here with a
+        // message blaming the prior run. The capability shipped and did not work.
+        //
+        // The `new File(...).canonicalPath` above is deliberately NOT changed: it is
+        // resolving symlinks to compare DIRECTORY IDENTITY, which java.nio.Path has no
+        // equivalent for, and it is only ever asked about two local --outdir strings.
         Layout.ADD_CYCLE_CHECKPOINTS.each { step ->
             def rel = Layout.checkpointCsvRelative(step)
-            def f = new File(Layout.checkpointCsv(priorOutdir, step))
-            if (!f.exists()) {
+            if (!CsvUtils.exists(Layout.checkpointCsv(priorOutdir, step))) {
                 throw new FileNotFoundException(
                     "mode='add_cycle': required checkpoint '${rel}' not found under --prior_outdir '${priorOutdir}'. " +
                     "Was the prior run completed through postprocessing?")

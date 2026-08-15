@@ -62,13 +62,44 @@ ALLOWED_HANDWRITTEN = {
 }
 
 
+CALL_START_RE = re.compile(r"ProcessEnvelope\.(versions|versionsStub)\(")
+
+COMMENT_BLOCK_RE = re.compile(r"/\*.*?\*/", re.S)
+# `//` to end of line, but not the `//` of a URI scheme (`https://`), which appears in
+# module headers and in script: blocks.
+COMMENT_LINE_RE = re.compile(r"(?<!:)//.*$", re.M)
+
+
+def _strip_groovy_comments(text: str) -> str:
+    return COMMENT_LINE_RE.sub("", COMMENT_BLOCK_RE.sub("", text))
+
+
+def _renders_versions_via_envelope(text: str) -> bool:
+    """Does this module actually CALL ProcessEnvelope, outside comments?
+
+    The question used to be asked as `"ProcessEnvelope." in text`, and every one of
+    these satisfied it without a single call being rendered:
+
+        // rendered through ProcessEnvelope.versions()          <- a header comment
+        /* ... ProcessEnvelope.versions() ... */                <- a block comment
+        // ${ProcessEnvelope.versions(task.process, [...])}     <- a commented-OUT call
+
+    So a module could hand-write both heredocs, describe itself as going through
+    ProcessEnvelope, and pass the guard. That is not a hypothetical: a module passed
+    silently until its header was REWORDED, at which point the guard failed for the
+    first time and revealed it had never been checking that file. A guard a comment
+    can satisfy is a guard about comments.
+    """
+    return bool(CALL_START_RE.search(_strip_groovy_comments(text)))
+
+
 def test_no_module_hand_writes_a_versions_heredoc():
     offenders = []
     for nf in MODULES:
         if nf.name in ALLOWED_HANDWRITTEN:
             continue
         text = nf.read_text()
-        if "END_VERSIONS" in text and "ProcessEnvelope." not in text:
+        if "END_VERSIONS" in text and not _renders_versions_via_envelope(text):
             offenders.append(nf.name)
     assert not offenders, (
         f"{offenders} hand-write a versions.yml heredoc. Use "
@@ -76,8 +107,6 @@ def test_no_module_hand_writes_a_versions_heredoc():
         "cannot name different tools."
     )
 
-
-CALL_START_RE = re.compile(r"ProcessEnvelope\.(versions|versionsStub)\(")
 
 # A literal tools list: `task.process, ['a', 'b']` or `task.process, []`. Deliberately
 # strict -- see _extract_calls' docstring for why a call that ISN'T this shape must fail
@@ -256,7 +285,7 @@ def test_backend_binding_is_identical_between_script_and_stub():
     mismatches = []
     for nf in MODULES:
         text = nf.read_text()
-        if "ProcessEnvelope." not in text:
+        if not _renders_versions_via_envelope(text):
             continue
         script_half, stub_half = _split_script_stub(text)
         script_bindings = BACKEND_BINDING_RE.findall(script_half)

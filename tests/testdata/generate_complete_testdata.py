@@ -219,8 +219,50 @@ def create_segmentation_mask(filename, size=(128, 128), n_cells=15):
     return mask
 
 
-create_segmentation_mask(OUT_DIR / "P001_cell_mask.npy", n_cells=20)
+P001_CELL_MASK = create_segmentation_mask(OUT_DIR / "P001_cell_mask.npy", n_cells=20)
 create_segmentation_mask(OUT_DIR / "P002_cell_mask.npy", n_cells=15)
+
+
+def create_nuclei_mask(cell_mask, filename):
+    """Write a nuclear mask that pairs with a cell mask, by eroding every cell.
+
+    `P001_nuclei_mask.tif` used to be a TRACKED 0-byte file, described in this script as
+    "the hand-authored fixture the generator does not write (see .gitignore's comment on
+    this file)" -- three claims, none of them true: it was committed rather than
+    hand-authored, there was no .gitignore entry, and an empty TIFF is not a fixture. It
+    satisfied `checkIfExists: true` and `path().exists()`, so every stub test that stages
+    it (tests/testdata/valid_checkpoint_segmented.csv names it in the `nuclei_mask`
+    column) passed without ever opening it, and any real read would have failed.
+
+    Erosion, rather than a second independent random mask, is what makes the pair usable:
+    `--quantify_compartments` keys nuclear signal to the SAME cell label as whole-cell
+    signal (bin/quantify.py), so every nucleus must carry its own cell's label and lie
+    inside it. tests/test_testdata_masks.py asserts exactly that.
+    """
+    from scipy import ndimage
+
+    nuclei = np.zeros_like(cell_mask)
+    footprint = np.ones((3, 3), dtype=bool)
+    for label in np.unique(cell_mask):
+        if label == 0:
+            continue
+        cell = cell_mask == label
+        eroded = ndimage.binary_erosion(cell, structure=footprint)
+        if not eroded.any():
+            # A cell too small to erode still needs a nucleus, or the pair would
+            # silently disagree about how many cells the patient has.
+            ys, xs = np.nonzero(cell)
+            eroded = np.zeros_like(cell)
+            eroded[ys[len(ys) // 2], xs[len(xs) // 2]] = True
+        nuclei[eroded] = label
+
+    tifffile.imwrite(filename, nuclei.astype(np.uint32), compression="zlib")
+    n = len(np.unique(nuclei)) - 1
+    print(f"  Created {Path(filename).name} - {n} nuclei")
+    return nuclei
+
+
+create_nuclei_mask(P001_CELL_MASK, OUT_DIR / "P001_nuclei_mask.tif")
 
 
 def create_redsea_geometry(mask_path, out_npz, element_size=2):
@@ -286,10 +328,8 @@ print("  Created valid_checkpoint_postprocessing.csv")
 #         segmentation.nf.test's READ_SEGMENTED_CHECKPOINT tests). Same TESTDATA_ABS
 #         convention as every other valid_checkpoint_*.csv above: absolute paths
 #         resolved at generation time, so the fixture is rooted at whatever checkout
-#         is running it, not a hardcoded worktree path. P001_nuclei_mask.tif is the
-#         hand-authored fixture the generator does not write (see .gitignore's
-#         comment on this file); P001_cell_mask.tif and sample_contours.json are
-#         both written elsewhere in this script.
+#         is running it, not a hardcoded worktree path. P001_nuclei_mask.tif,
+#         P001_cell_mask.tif and sample_contours.json are all written by this script.
 with open(OUT_DIR / "valid_checkpoint_segmented.csv", "w") as f:
     f.write("patient_id,registered_image,is_reference,channels,cell_mask,nuclei_mask,contours,nucleus_contours\n")
     f.write(
@@ -634,7 +674,7 @@ print(f"\nGenerated files in {OUT_DIR}:")
 print("\nValid data:")
 print("  - P001_ref.ome.tiff, P001_mov1.ome.tiff, P001_mov2.ome.tiff")
 print("  - P002_ref.ome.tiff, P002_mov1.ome.tiff")
-print("  - P001_cell_mask.npy, P002_cell_mask.npy")
+print("  - P001_cell_mask.npy, P002_cell_mask.npy, P001_nuclei_mask.tif")
 print("  - P001_redsea.npz (REDSEA compensation geometry)")
 print("  - valid_preprocessing.csv")
 print("  - valid_checkpoint_registration.csv")
@@ -706,7 +746,7 @@ print(f"\nGenerated files in {OUT_DIR}:")
 print("\nValid data:")
 print("  - P001_ref.ome.tiff, P001_mov1.ome.tiff, P001_mov2.ome.tiff")
 print("  - P002_ref.ome.tiff, P002_mov1.ome.tiff")
-print("  - P001_cell_mask.npy, P002_cell_mask.npy")
+print("  - P001_cell_mask.npy, P002_cell_mask.npy, P001_nuclei_mask.tif")
 print("  - P001_redsea.npz (REDSEA compensation geometry)")
 print("  - valid_preprocessing.csv")
 print("  - valid_checkpoint_registration.csv")
