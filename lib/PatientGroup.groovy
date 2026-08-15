@@ -1,8 +1,11 @@
 /**
  * The one per-patient fan-in.
  *
- * Six places in this pipeline gathered a per-patient (or per-slide) group, and all
- * six wrote the same four-step ritual by hand:
+ * Nine places in this pipeline gather a per-patient (or per-slide) group. All nine
+ * once wrote the same four-step ritual by hand — six of them before this class
+ * existed, three more (postprocess.nf's two QC gathers, checkpoint_writer.nf's row
+ * gather) added afterwards, because their size is DERIVED and `size:` could not
+ * express it until `sizeOf:` was added:
  *
  *   1. wrap the key in `groupKey(id, size)`  — the STREAMING SIZE HINT
  *   2. `groupTuple()`                        — the gather
@@ -36,6 +39,21 @@
  * A size of 0, a negative size or a non-Integer is refused for the same reason
  * `Checkpoint.requireCount` refuses them: a groupKey sized 0 never fills, so the
  * failure mode is a HANG, which reads as "slow cluster", not as a bug.
+ *
+ * THE SIZE IS EITHER READ OR DERIVED, and both are here. `size:` names a meta KEY and
+ * is read as-is. `sizeOf:` is a `(meta, payload) -> int` closure, for a size no meta
+ * holds: `subworkflows/local/postprocess.nf`'s two per-patient QC gathers expect one
+ * artifact per MOVING slide, which is `meta.images_count - 1` because images_count
+ * counts the reference too. Before `sizeOf:` existed those two sites — and
+ * `subworkflows/local/checkpoint_writer.nf`'s row gather — could not be expressed
+ * here and went on hand-writing the ternary above, which is how this pipeline
+ * re-acquired the exact defect this class had just removed. Exactly one of the two
+ * must be named: naming both is two competing answers to how big the group is, and
+ * naming neither is the unsized gather itself.
+ *
+ * `sizeOf:` carries the identical refusals — a closure that cannot resolve a size
+ * returns null and the run ABORTS. It is not a softer door into the unsized key; a
+ * derived size that does not resolve is exactly as fatal as an absent meta key.
  *
  * ---------------------------------------------------------------------------
  * 2. `remainder: true`, ALWAYS
@@ -102,14 +120,18 @@
 class PatientGroup {
 
     /** The options every grouping must name; anything else is a typo, not a default. */
-    private static final List<String> REQUIRED_OPTS = ['name', 'size', 'sortBy']
-    private static final List<String> KNOWN_OPTS    = ['name', 'size', 'sortBy', 'key']
+    private static final List<String> REQUIRED_OPTS = ['name', 'sortBy']
+    /** Exactly one of these — see the header. Read (`size`) or derived (`sizeOf`). */
+    private static final List<String> SIZE_OPTS     = ['size', 'sizeOf']
+    private static final List<String> KNOWN_OPTS    = ['name', 'size', 'sizeOf', 'sortBy', 'key']
 
     /**
      * Group `ch` — a channel of `[meta, payload]` — per patient, streaming.
      *
      * @param opts  name   String  the channel, as it should read in an error message
      *              size   String  the meta key holding this group's item count
+     *              sizeOf Closure (meta, payload) -> this group's item count, for a
+     *                             size no meta holds. Exactly one of size/sizeOf.
      *              sortBy Closure (meta, payload) -> a comparable that TOTALLY orders
      *                             the group; ties are an error
      * @return  a channel of `[patient_id (String), [[meta, payload], ...]]`, the pairs
@@ -140,18 +162,36 @@ class PatientGroup {
         if (missing)
             throw new IllegalArgumentException(
                 "PatientGroup: missing required option(s) ${missing} for channel '${opts.name}'. " +
-                "None of them has a safe default: without 'size' the gather is a full-run " +
-                "barrier, without 'sortBy' it is ordered by arrival.")
+                "Neither has a safe default: without 'sortBy' the group is ordered by arrival, " +
+                "and without 'key' there is nothing to group on.")
+
+        // Exactly one of size/sizeOf. BOTH would be two competing answers to how big
+        // the group is, decided by whichever this method happened to read first —
+        // the same silent-precedence defect as an option accepted and ignored.
+        // NEITHER is the unsized gather itself: a full-run barrier on a run that
+        // still exits 0, which is the whole reason this class exists.
+        def sizeOpts = SIZE_OPTS.findAll { opts[it] }
+        if (sizeOpts.size() != 1)
+            throw new IllegalArgumentException(
+                "PatientGroup: channel '${opts.name}' must name EXACTLY ONE of ${SIZE_OPTS}, " +
+                "not ${sizeOpts ?: 'neither'}. 'size' is a meta KEY, read as-is; 'sizeOf' is a " +
+                "(meta, payload) closure for a size no meta holds — postprocess.nf's QC gathers " +
+                "expect one artifact per MOVING slide, i.e. meta.images_count - 1. Naming both " +
+                "leaves the winner to read order; naming neither leaves the gather unsized, " +
+                "which is a full-run barrier on a run that still exits 0.")
 
         String name    = opts.name
         String sizeKey = opts.size
+        Closure sizeOf = opts.sizeOf
         Closure keyOf  = opts.key
         Closure sortBy = opts.sortBy
 
         return ch
             .map { meta, payload ->
                 def k = keyOf(meta)
-                [nextflow.Nextflow.groupKey(k, requireSize(meta, sizeKey, name, k)), meta, payload]
+                def n = sizeKey ? requireSize(meta, sizeKey, name, k)
+                                : requireDerivedSize(sizeOf(meta, payload), name, k)
+                [nextflow.Nextflow.groupKey(k, n), meta, payload]
             }
             .groupTuple(by: 0, remainder: true)
             .map { group_key, metas, payloads ->
@@ -180,6 +220,36 @@ class PatientGroup {
                 "at all and the run hangs. Fix the PRODUCER so it injects ${sizeKey} — " +
                 "subworkflows/local/input_check.nf on the linear path, lib/Checkpoint.groovy " +
                 "at a checkpoint entry point.")
+        return n
+    }
+
+    /**
+     * The streaming size a `sizeOf:` closure computed, or a named error.
+     *
+     * The counterpart to `requireSize` for a DERIVED size, and deliberately just as
+     * fatal. A closure that cannot resolve a size returns null — it must not return
+     * "unsized", because there is no such thing here: `sizeOf:` exists so a derived
+     * size can be expressed WITHOUT reopening the ternary whose else-branch was an
+     * unsized key. If this refusal were softened, `sizeOf:` would become the second,
+     * quieter door back into the full-run barrier that `size:` already forbids.
+     *
+     * Same named-error contract as `requireSize`: raised inside an operator closure,
+     * with no task and no work directory to inspect, so the message is all the reader
+     * gets and it names the channel and the group.
+     */
+    static int requireDerivedSize(n, String name, key) {
+        if (!(n instanceof Integer) || n < 1)
+            throw new IllegalStateException(
+                "PatientGroup: channel '${name}' cannot be grouped — its 'sizeOf' closure " +
+                "returned ${n == null ? 'null' : "${n} (${n.getClass().simpleName})"} for group " +
+                "'${key}', not a positive Integer. The size is MANDATORY: it is the streaming " +
+                "hint that lets this group close as soon as its own items arrive. Without it " +
+                "groupTuple() must wait for the whole upstream channel to close, which turns " +
+                "every per-patient stage into a full-run barrier on a run that still exits 0; " +
+                "sized 0 it never closes at all and the run hangs. Fix whatever the closure " +
+                "reads — on a size derived from a count, that means the PRODUCER of the count " +
+                "(subworkflows/local/input_check.nf on the linear path, lib/Checkpoint.groovy " +
+                "at a checkpoint entry point).")
         return n
     }
 

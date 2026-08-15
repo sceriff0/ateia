@@ -335,33 +335,54 @@ workflow POSTPROCESSING {
         // patient's QC" are the same set. tests/testdata/test_input_two_patients.csv now
         // exists so a two-patient run is reachable.
         //
-        // groupKey(patient_id, images_count - 1) is the streaming size hint: one QC
-        // artifact per MOVING slide, and images_count counts the reference too. It only
-        // makes a group close EARLY — `remainder: true` is what makes the group close at
-        // all when the count is short (WARP_SEG_QC's per_cell output is `optional: true`,
-        // and a group that never closes would hang the run rather than lose a file).
+        // BOTH per-patient QC gathers, once. The sized groupKey, remainder:true, the
+        // GroupKey unwrap and the canonical ordering are lib/PatientGroup.groovy's;
+        // read its header for what each one is load-bearing for. Writing the gather
+        // twice by hand is what this helper removes — the two streams differ only in
+        // which channel they read, and the copy that drifts is the one that silently
+        // loses a property.
+        //
+        // WHAT IS LOCAL HERE IS THE SIZE, and it is why `sizeOf:` exists at all: the
+        // group holds one QC artifact per MOVING slide, and meta.images_count counts
+        // the REFERENCE too, so the size is `images_count - 1` — a number no meta
+        // holds and `size:` (a meta KEY, read as-is) cannot name. Both sites used to
+        // hand-write the ternary instead, whose else-branch was an unsized full-run
+        // barrier taken silently on a run that still exits 0. The closure returns
+        // null when there is no count to derive from, and PatientGroup ABORTS on
+        // null rather than falling back to that barrier.
+        //
+        // The size only makes a group close EARLY — `remainder: true` (PatientGroup's,
+        // applied unconditionally) is what makes the group close at ALL when the count
+        // is short, and WARP_SEG_QC's per_cell output is `optional: true`.
+        //
+        // sortBy because these lists become EXPORT_SPATIALDATA `path` inputs, which
+        // Nextflow hashes POSITIONALLY, while groupTuple emits in ARRIVAL order — the
+        // same reason the run-wide code this replaced used collect(sort: true).
+        //
         // Patients with no QC at all (reg_qc < 2, a single-slide patient, or entry at
         // postprocessing) simply have no key here; the `remainder: true` on the joins
         // below keeps them in the export with an empty list.
-        def ch_reg_qc_by_patient = ch_reg_qc
-            .flatMap { meta, qc ->
-                def key = meta.images_count ? groupKey(meta.patient_id, meta.images_count - 1) : meta.patient_id
-                (qc instanceof List ? qc : [qc]).collect { f -> [key, f] }
-            }
-            .groupTuple(remainder: true)
-            // Unwrap the groupKey immediately (tests/test_group_key_unwrapped.py), and sort
-            // the group: these lists become `path` inputs, which Nextflow hashes
-            // POSITIONALLY, and groupTuple emits in ARRIVAL order — the same reason the
-            // replaced code used collect(sort: true) rather than a bare collect().
-            .map { group_key, files -> [group_key.toString(), files.toSorted { a, b -> a.name <=> b.name }] }
+        def qcByPatient = { String label, ch_artifacts ->
+            PatientGroup.byPatient(
+                    ch_artifacts.flatMap { meta, artifacts ->
+                        (artifacts instanceof List ? artifacts : [artifacts]).collect { f -> [meta, f] }
+                    },
+                    name  : label,
+                    sizeOf: { meta, _artifact ->
+                        meta.images_count == null ? null : meta.images_count - 1
+                    },
+                    sortBy: { _meta, artifact -> artifact.name },
+                )
+                .map { patient_id, pairs -> [patient_id, pairs.collect { pair -> pair[1] }] }
+        }
 
-        def ch_reg_residuals_by_patient = ch_reg_residuals
-            .flatMap { meta, resid ->
-                def key = meta.images_count ? groupKey(meta.patient_id, meta.images_count - 1) : meta.patient_id
-                (resid instanceof List ? resid : [resid]).collect { f -> [key, f] }
-            }
-            .groupTuple(remainder: true)
-            .map { group_key, files -> [group_key.toString(), files.toSorted { a, b -> a.name <=> b.name }] }
+        def ch_reg_qc_by_patient = qcByPatient(
+            'POSTPROCESSING: the per-patient registration QC feeding EXPORT_SPATIALDATA',
+            ch_reg_qc)
+
+        def ch_reg_residuals_by_patient = qcByPatient(
+            'POSTPROCESSING: the per-patient registration residuals feeding EXPORT_SPATIALDATA',
+            ch_reg_residuals)
 
         def ch_sd_in = PatientArtifacts.bundle(
             name    : 'POSTPROCESSING: the per-patient EXPORT_SPATIALDATA tuple',

@@ -44,12 +44,15 @@
                  `expected_rows` is HOW MANY rows this patient contributes to this
                  checkpoint — the streaming size hint that lets a patient's fragment
                  be written the moment that patient is done instead of at channel
-                 close. Null is tolerated and means "unknown": the group then waits
-                 for the channel to close, which is correct but not durable, and the
-                 caller has given up the property this subworkflow exists for. Each
-                 caller must supply it consistently for ALL of a patient's rows — a
-                 mixture of sized and unsized keys for one patient would open two
-                 groups and the second fragment would overwrite the first.
+                 close. It is MANDATORY (a positive Integer): an absent or unusable
+                 count ABORTS the run, naming this channel, rather than degrading to
+                 a group that waits for the whole channel to close. Null used to be
+                 tolerated as "unknown", which silently gave up the exact property
+                 this subworkflow exists for on a run that still exited 0; see
+                 lib/PatientGroup.groovy's header. Each caller must supply it
+                 consistently for ALL of a patient's rows — a mixture of counts for
+                 one patient would open two groups and the second fragment would
+                 overwrite the first.
 
     Output:
         csv        the aggregate checkpoint CSV (unchanged in name, contents and byte
@@ -67,29 +70,35 @@ workflow CHECKPOINT_WRITER {
     ch_rows  // [patient_id, expected_rows, row]
 
     main:
-    ch_fragment_in = ch_rows
-        .map { patient_id, expected_rows, row ->
-            // groupKey(id, size) is a STREAMING SIZE HINT: groupTuple() closes the
-            // group as soon as `size` items have arrived instead of waiting for the
-            // whole channel. That is the entire mechanism by which a finished
-            // patient's fragment is written while other patients are still running.
-            [expected_rows ? groupKey(patient_id, expected_rows as int) : patient_id, row]
-        }
-        .groupTuple()
-        .map { key, rows ->
-            // UNWRAP THE groupKey immediately, in the very next operator — see
-            // tests/test_group_key_unwrapped.py. GroupKey's equals() is asymmetric, so
-            // letting the wrapper travel on makes any later join()/combine() succeed or
-            // fail on arrival order.
-            //
-            // toSorted() for the same reason collectFile carries `sort: true`: rows
-            // arrive in completion order, and Nextflow hashes a list input POSITIONALLY,
-            // so an unsorted list makes an otherwise identical rerun miss the cache and
-            // makes the published fragment differ from itself between runs. Sorting
-            // strings that begin with patient_id then the published path gives the same
-            // order the aggregate has.
-            tuple(step, key.toString(), rows.toSorted())
-        }
+    // The sized groupKey, remainder:true, the GroupKey unwrap and the canonical
+    // ordering are lib/PatientGroup.groovy's — read its header for what each one is
+    // load-bearing for. This site used to hand-write all four, including the ternary
+    // whose else-branch was an UNSIZED key: `expected_rows` was documented as
+    // optional, and an absent one silently traded the whole property this
+    // subworkflow exists for (a finished patient's fragment published while other
+    // patients still run) for a full-run barrier, on a run that still exits 0.
+    // It is now MANDATORY and an absent one aborts, naming this channel.
+    //
+    // ch_rows arrives as `[patient_id, expected_rows, row]`; PatientGroup takes the
+    // repo's universal `[meta, payload]` shape, so the two per-patient facts are
+    // reshaped into a meta here. `size:` (a meta KEY) then says it directly — no
+    // `as int` coercion, because a count that is not an Integer is a producer bug
+    // and requireSize says so rather than rounding it into one.
+    //
+    // sortBy for the same reason collectFile carries `sort: true`: rows arrive in
+    // completion order, Nextflow hashes a list input POSITIONALLY, so an unsorted
+    // list makes an otherwise identical rerun miss the cache AND makes the published
+    // fragment differ from itself between runs. The rows begin with patient_id then
+    // the published path, so natural String order is the order the aggregate has.
+    ch_fragment_in = PatientGroup.byPatient(
+            ch_rows.map { patient_id, expected_rows, row ->
+                [[patient_id: patient_id, expected_rows: expected_rows], row]
+            },
+            name  : 'CHECKPOINT_WRITER: the per-patient checkpoint rows feeding WRITE_CHECKPOINT_FRAGMENT',
+            size  : 'expected_rows',
+            sortBy: { _meta, row -> row },
+        )
+        .map { patient_id, pairs -> tuple(step, patient_id, pairs.collect { pair -> pair[1] }) }
 
     WRITE_CHECKPOINT_FRAGMENT(ch_fragment_in)
 
