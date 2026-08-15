@@ -18,6 +18,7 @@ import tifffile
 
 # Add path for utils
 sys.path.insert(0, str(Path(__file__).parent / "utils"))
+from image_io import open_tiff_writer
 from logger import configure_logging, get_logger
 
 try:
@@ -371,7 +372,13 @@ def write_pyramidal_ome_tiff(
     if compressionargs:
         options["compressionargs"] = compressionargs
 
-    with tifffile.TiffWriter(output_path, bigtiff=True, ome=True) as tif:
+    # The one true multi-resolution pyramid writer in the repo: base level with
+    # subifds reserved, one tif.write per level, plus an optional un-pyramided
+    # mask series. open_tiff_writer owns only that the file is BigTIFF (and that
+    # ome is stated rather than inferred from the filename); every decision about
+    # what goes in it stays here, and verify_ome_tiff() below still checks the
+    # structure consumers read.
+    with open_tiff_writer(output_path, ome=True) as tif:
         # Write base resolution with all channels
         # subifds parameter reserves space for pyramid levels
         log(f"  Writing base resolution ({width} x {height})...")

@@ -1,0 +1,83 @@
+/*
+ * THE INVARIANT: merging EXTRACT_CELL_PROPERTIES and EXTRACT_NUCLEI_PROPERTIES
+ * into one parameterised process does not move or rename a single published file.
+ *
+ * This is a CHARACTERISATION test, and deliberately so: it passed before the merge
+ * and must keep passing after it. That is the whole requirement -- "a consolidation,
+ * not a move". Nothing else in the suite pins these six names:
+ *
+ *   tests/checkpoint_manifest.nf.test asserts that every path a checkpoint CSV
+ *   NAMES exists, which covers contours.json and nuclei/contours.json but says
+ *   nothing about morphology.csv (never recorded in a checkpoint) and nothing at
+ *   all about the two *.size.csv files.
+ *
+ * The size-log names are the fragile pair. They used to be hardcoded, one per
+ * process file; one process cannot hardcode two, so the merged module derives the
+ * leaf from `task.process` -- which carries the invoking ALIAS. If that derivation
+ * breaks, both aliases publish the same filename into different directories and the
+ * only symptom is a size-log row attributed to the wrong process in the trace
+ * rollup. Watched to fail: renaming the alias in the module's stub block to a
+ * literal turns the two assertions below red.
+ *
+ * Tagged "stub" because CI's blocking gate is `nf-test test --tag stub`; `-stub` is
+ * enough here because the stub block writes the same filenames the script block
+ * does (that is the point of deriving them from one expression).
+ */
+
+nextflow_pipeline {
+
+    name "EXTRACT_PROPERTIES publishes the same six files under both aliases"
+    script "main.nf"
+
+    tag "pipeline"
+    tag "extract_properties_layout"
+
+    test("both invocations publish exactly where they did as two processes") {
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                input  = "$projectDir/tests/testdata/test_input.csv"
+                outdir = "$outputDir"
+                // The nucleus invocation is gated on this; it defaults to true in
+                // nextflow.config, but the gate is stated here so a default flip
+                // turns this test red instead of silently deleting half its subject.
+                quantify_compartments = true
+            }
+        }
+
+        then {
+            assert workflow.success
+
+            def props = new File("$outputDir/P001/cell_properties")
+            assert props.isDirectory(),
+                "no P001/cell_properties directory was published at all"
+
+            def published = []
+            props.eachFileRecurse { f -> if (f.isFile()) published << f.absolutePath - props.absolutePath }
+
+            assertAll(
+                // The cell invocation: flat, at the kind directory's root.
+                { assert published.contains('/morphology.csv'),
+                    "cell morphology moved: ${published}" },
+                { assert published.contains('/contours.json'),
+                    "cell contours moved: ${published}" },
+                { assert published.contains('/P001.EXTRACT_CELL_PROPERTIES.size.csv'),
+                    "the cell size log lost its per-alias name: ${published}" },
+                // The nucleus invocation: one level down, under the subdirectory the
+                // CALLER names (Layout.NUCLEI_SUBDIR) and hands to the producer.
+                { assert published.contains('/nuclei/morphology.csv'),
+                    "nucleus morphology moved: ${published}" },
+                { assert published.contains('/nuclei/contours.json'),
+                    "nucleus contours moved: ${published}" },
+                { assert published.contains('/nuclei/P001.EXTRACT_NUCLEI_PROPERTIES.size.csv'),
+                    "the nucleus size log lost its per-alias name: ${published}" },
+                // Nothing extra, and in particular no third copy of a size log under
+                // a name neither alias ever published.
+                { assert published.size() == 6,
+                    "P001/cell_properties published ${published.size()} files, expected 6: ${published}" }
+            )
+        }
+    }
+}

@@ -830,6 +830,19 @@ def valis_registration(
         warp_succeeded = False
         for attempt in retry_ctx:
             try:
+                # THE ONE TIFF WRITE THIS CODEBASE DOES NOT CONTROL.
+                #
+                # Every other TIFF in the pipeline is written by bin/utils/image_io.py,
+                # which guarantees bigtiff and picks the metadata convention. This one
+                # is written by VALIS itself (pyvips-backed) inside
+                # warp_and_save_slide: bigtiff, compression, tile shape and OME
+                # structure are all VALIS's choices, are not visible from here, and
+                # cannot be set from here without an upstream change. The registered
+                # slide is the single largest artifact the VALIS path produces, so
+                # that is worth knowing rather than assuming.
+                #
+                # Deliberately left as-is (Task 11 scope), and documented in
+                # docs/image_io.md so it is a known fact rather than an invisible gap.
                 slide_obj.warp_and_save_slide(
                     src_f=src_path,
                     dst_f=out_path,

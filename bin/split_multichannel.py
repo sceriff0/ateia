@@ -39,6 +39,7 @@ import tifffile
 sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
 from channel_name import file_stems as compute_file_stems
+from image_io import write_plain_tiff
 from image_utils import ensure_dir, normalize_image_dimensions
 from logger import configure_logging, get_logger
 from metadata import extract_channel_names_from_ome, is_nuclear
@@ -94,10 +95,39 @@ def split_multichannel_tiff(
     logger.info(f"Reading: {input_path}")
     logger.info(f"  Is reference: {is_reference}")
 
-    img = tifffile.imread(input_path)
+    # Memory-mapped, not decoded whole: this function writes ONE channel at a time
+    # (`data[i]` in the loop below), so the eager `tifffile.imread` held the entire
+    # C-channel slide in RAM to emit C single-channel files. Same read `segment.py`
+    # uses. The mapping is read-only and `normalize_image_dimensions`'s transpose is a
+    # view, so no ARRAY is copied here -- but see the note below on what the map costs.
+    #
+    # NOTE ON out="memmap" (same wording in split_multichannel.py, bin/utils/qc.py and
+    # extract_mask_series.py -- one rule, three sites):
+    # tifffile can map the file directly ONLY when the data is uncompressed. For a
+    # compressed TIFF it decodes into a full-size temporary file under $TMPDIR and maps
+    # that, so the peak moves from RAM to scratch disk -- it does not vanish. See
+    # docs/image_io.md's "Reads" section, which states the same trade.
+    # A numpy.memmap holds its own mapping, so it stays valid after the TiffFile is
+    # closed. split_multichannel.py and bin/utils/qc.py use the array past the `with`
+    # block on that basis; extract_mask_series.py keeps its use inside one because the
+    # block is short, which is a style choice, not a different rule.
+    #
+    # For THIS site specifically: the input is the registered slide, written by VALIS
+    # (bin/register.py) or by TILED_STITCH. TILED_STITCH's is uncompressed and maps
+    # directly; VALIS's compression is that library's choice and is not visible from
+    # this repo, so on the VALIS path this most likely IS the temp-file decode. That is
+    # still the better trade -- scratch disk instead of a whole WSI resident while C
+    # output files are written -- but it is a trade, not a free lunch, and no test on
+    # this branch exercises it (real nf-test does not run on the dev host).
+    with tifffile.TiffFile(input_path) as tif:
+        img = tif.asarray(out="memmap")
     logger.info(f"  Image shape: {img.shape}, dtype: {img.dtype}")
 
-    # Clip negative values (VALIS warping artifact)
+    # Clip negative values (VALIS warping artifact). For the unsigned dtypes this
+    # pipeline actually produces this is a no-op that returns the mapping untouched;
+    # only a signed/float slide with real negatives materialises a full copy here,
+    # and that copy is genuinely required -- np.clip cannot write back into a
+    # read-only mapping of the input file.
     img = clip_negative_values(img, logger, stage_name="split_multichannel")
 
     # Normalize to (C, H, W) format
@@ -185,10 +215,15 @@ def split_multichannel_tiff(
         output_path = os.path.join(output_dir, f"{clean_name}.tiff")
 
         channel_data = data[i]
-        tifffile.imwrite(
+        write_plain_tiff(
             output_path,
             channel_data,
-            bigtiff=True,
+            why_not_ome=(
+                "an OME header on a single-channel file would be a second, "
+                "channel-less source of channel names for "
+                "extract_channel_names_from_ome to find; the scale travels as "
+                "standard TIFF resolution tags instead"
+            ),
             compression="zlib",
             resolution=resolution,
             resolutionunit="CENTIMETER",

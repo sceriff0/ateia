@@ -332,12 +332,22 @@ def build_shapes(contours_path: str, labels: np.ndarray, name: str):
     return gpd.GeoDataFrame({"geometry": geoms}, index=pd.Index(idx, name=INSTANCE_KEY))
 
 
-def read_mask(path: str) -> np.ndarray:
-    """Read a label mask as 2-D integers, squeezing any singleton leading axis."""
+def read_mask(path: str):
+    """Lazily read a label mask as 2-D integers, squeezing any singleton leading axis.
+
+    Dask-backed for the same reason ``read_pyramid_lazy`` below is: a full-resolution
+    label mask is one of the largest arrays this script touches, and
+    ``Labels2DModel.parse`` keeps the dask array rather than materialising it, so the
+    eager ``tifffile.imread`` this used to do bought nothing and cost the whole mask
+    in RAM -- twice, since ``--nuclei-mask`` reads a second one. It was also an
+    inconsistency inside one file: the sibling two functions down already documents
+    that materialising here "would defeat the point of an out-of-core format".
+    """
+    import dask.array as da
     import tifffile
 
-    arr = tifffile.imread(path)
-    arr = np.squeeze(arr)
+    store = tifffile.imread(path, aszarr=True, level=0)
+    arr = da.from_zarr(store).squeeze()
     if arr.ndim != 2:
         raise ValueError(f"expected a 2-D label mask in {path}, got shape {arr.shape}")
     return arr

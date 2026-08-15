@@ -62,6 +62,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   checkpoints to be present.
 
 ### Changed
+- **`EXTRACT_CELL_PROPERTIES` and `EXTRACT_NUCLEI_PROPERTIES` are now one process under
+  two aliases**, `modules/local/extract_properties.nf`'s `EXTRACT_PROPERTIES`. The two
+  module files differed in exactly six mechanical ways (process name, one extra input,
+  the `--reference_mask` flag, a `nuclei/` vs `.` output prefix, the size-log variable,
+  and the stub's subdirectory) while sharing a container, an entrypoint script
+  (`bin/extract_cell_properties.py`) and an emit shape. The reference mask is now a
+  mandatory input filled with `assets/NO_REFERENCE_MASK` when absent — the same sentinel
+  idiom `assets/NO_REDSEA` serves `QUANTIFY` — and the output subdirectory is an explicit
+  `outsubdir` input. **No published path or filename changes**: both aliases publish
+  exactly where they did (`tests/extract_properties_layout.nf.test` pins all six names,
+  including the per-alias `*.size.csv`, which the merged process derives from
+  `task.process`). `conf/modules.config`'s two identical `withName:` blocks became one
+  alternation selector.
+  **One-time `-resume` cost:** both extractions gain a staged reference-mask input (the
+  sentinel) and a new `val` input (the output subdirectory), and Nextflow hashes a task on
+  its inputs -- so the FIRST `-resume` after this lands re-runs `EXTRACT_CELL_PROPERTIES`
+  and `EXTRACT_NUCLEI_PROPERTIES` once per patient even though their outputs are
+  byte-identical. Nothing downstream of them changes shape, so the cascade stops there and
+  the next `-resume` caches normally. Inherent to changing a process signature, not a
+  defect -- written down here so a user watching a "cached" run suddenly recompute finds
+  the reason instead of diagnosing it.
+- **The nucleus output subdirectory is now stated, not inferred.** `lib/Layout.groovy`
+  gains `NUCLEI_SUBDIR` and a five-argument `publishedPath(outdir, pid, kind, subdir,
+  file)` overload. `subworkflows/local/segmentation.nf` passes the same value to the
+  producer (as `outsubdir`) and to the checkpoint writer, so the `nuclei/` segment of
+  `<pid>/cell_properties/nuclei/` no longer depends on `producerSubdir` reading the name
+  back off the task directory. `producerSubdir` and the four-argument overload remain for
+  `REGISTER`'s `registered_slides/`, `TILED_STITCH`'s `registered/`, `EXPORT_GEOJSON`'s
+  `export/` and `publishedOrAsIs`.
 - **The STARE registration method now has ONE implementation, with two thin drivers.**
   It previously existed twice: as the four shipped fan-out processes
   (`bin/tiled_coarse.py` → `tiled_reg_tile.py` → `tiled_solve.py` → `tiled_stitch.py`)

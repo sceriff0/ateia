@@ -136,10 +136,12 @@ ALLOWED_LINES = {
         # grew the comment explaining why; -> 844 when its flat 12 h wall became
         # batch-scaled and grew its own; -> 856 when that wall's comment was
         # corrected (it had claimed a QUANTIFY walltime kill could be swallowed by
-        # the errorStrategy 'ignore' branch, which does not cover QUANTIFY).
+        # the errorStrategy 'ignore' branch, which does not cover QUANTIFY); -> 852
+        # when EXTRACT_CELL_PROPERTIES' and EXTRACT_NUCLEI_PROPERTIES' two withName:
+        # blocks collapsed into one, removing four lines above this point.
         # Re-pin, do not widen. (Re-pin from the file, not by guessing:
         # `grep -n "quantifyStatistics(params.quantify_statistics)" conf/modules.config`.)
-        856: (
+        852: (
             "ext.args = { ... quantifyStatistics(params.quantify_statistics) ... } "
             "-- conf/*.config closures cannot see lib/*.groovy classes, so "
             "ParamUtils.statisticsList is unreachable and ext.args must read the "

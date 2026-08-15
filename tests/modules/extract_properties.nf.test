@@ -1,0 +1,393 @@
+nextflow_process {
+
+    name "Test EXTRACT_PROPERTIES process"
+    script "modules/local/extract_properties.nf"
+    process "EXTRACT_PROPERTIES"
+
+    tag "modules"
+    tag "modules_local"
+    tag "extract_properties"
+
+    //==========================================================================
+    // Replaces tests/modules/extract_cell_properties.nf.test. EXTRACT_CELL_
+    // PROPERTIES and EXTRACT_NUCLEI_PROPERTIES are now ONE process invoked under
+    // two aliases, so the cases below cover BOTH parameterisations:
+    //
+    //   cell    reference_mask = assets/NO_REFERENCE_MASK, outsubdir = ''
+    //   nuclei  reference_mask = the cell mask,            outsubdir = 'nuclei'
+    //
+    // The three real/slow cases are carried over verbatim from the old file,
+    // re-shaped for the new input arity.
+    //==========================================================================
+
+    test("Should extract morphology and contours - stub") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA']],
+                    file('$projectDir/tests/testdata/P001_cell_mask.npy', checkIfExists: true),
+                    file('$projectDir/assets/NO_REFERENCE_MASK', checkIfExists: true)
+                ]
+                input[1] = ''
+                """
+            }
+        }
+
+        then {
+            assert process.success
+            assert process.out.morphology
+            assert process.out.contours
+            assert process.out.versions
+
+            with(process.out.morphology) {
+                assert size() == 1
+                assert get(0).get(0).patient_id == 'P001'
+                assert get(0).get(1).toString().endsWith('morphology.csv')
+                // The cell invocation emits at the TASK ROOT, not under a
+                // subdirectory: publishDir carries a task-relative subdirectory
+                // into the published path, so a stray one would move
+                // <pid>/cell_properties/morphology.csv.
+                assert !(get(0).get(1).toString().contains('/nuclei/'))
+            }
+
+            with(process.out.contours) {
+                assert size() == 1
+                assert get(0).get(0).patient_id == 'P001'
+                assert get(0).get(1).toString().endsWith('contours.json')
+            }
+
+            // versions.yml keys on task.process, which is EXTRACT_PROPERTIES here
+            // (a bare module test invokes the process under its own name, not an
+            // alias) -- the md5 therefore differs from the retired
+            // extract_cell_properties.nf.test.snap on purpose.
+            assert snapshot(process.out.versions).match()
+        }
+    }
+
+    test("Should emit under the caller's subdirectory when given one - stub") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA']],
+                    file('$projectDir/tests/testdata/P001_nuclei_mask.tif', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_cell_mask.tif', checkIfExists: true)
+                ]
+                input[1] = 'nuclei'
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                // The nucleus invocation's outputs sit one level down. That is
+                // what makes publishDir land them at
+                // <pid>/cell_properties/nuclei/ -- see lib/Layout.groovy's
+                // NUCLEI_SUBDIR and subworkflows/local/segmentation.nf.
+                { with(process.out.morphology) {
+                    assert size() == 1
+                    assert get(0).get(1).toString().endsWith('nuclei/morphology.csv')
+                }},
+                { with(process.out.contours) {
+                    assert size() == 1
+                    assert get(0).get(1).toString().endsWith('nuclei/contours.json')
+                }},
+                { with(process.out.size_log) {
+                    assert size() == 1
+                    assert get(0).toString().contains('/nuclei/')
+                }}
+            )
+        }
+    }
+
+    test("Should render the CELL invocation without --reference_mask - rendered command") {
+
+        // Tagged `stub` so CI's blocking `nf-test test --tag stub` gate runs it, but
+        // deliberately WITHOUT `options "-stub"`: `-stub` never evaluates a `script:`
+        // block, so no stub run can observe a rendered command at all. Merging two
+        // processes into one parameterised process changes exactly that -- WHAT the
+        // process is invoked with -- so this pair of cases is the only thing in the
+        // suite that can see the change at all.
+        //
+        // No container engine is active under `-profile test`; Nextflow stages bin/
+        // onto $PATH and bin/extract_cell_properties.py runs against the real fixture
+        // mask. The assertions read the rendered .command.sh either way.
+        tag "stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA']],
+                    file('$projectDir/tests/testdata/P001_cell_mask.npy', checkIfExists: true),
+                    file('$projectDir/assets/NO_REFERENCE_MASK', checkIfExists: true)
+                ]
+                input[1] = ''
+                """
+            }
+        }
+
+        then {
+            // Nextflow lays tasks out as <workDir>/<2 hex>/<30 hex>/.command.sh.
+            def rendered = []
+            new File("$workDir").eachFileRecurse { f ->
+                if (f.name == '.command.sh' && f.text.contains('extract_cell_properties.py')) {
+                    rendered << f.text
+                }
+            }
+
+            assertAll(
+                { assert rendered.size() >= 1,
+                    "no rendered EXTRACT_PROPERTIES .command.sh found under the task work dir" },
+                // THE assertion with teeth: the sentinel must suppress the flag
+                // entirely. If the merged process ever passes the staged
+                // assets/NO_REFERENCE_MASK through as a real reference, every cell
+                // contour gets silently re-keyed against an empty file.
+                { assert rendered.every { !it.contains('--reference_mask') },
+                    "cell invocation renders --reference_mask: " + rendered.join(' --- ') },
+                { assert rendered.every { !it.contains('NO_REFERENCE_MASK') },
+                    "the sentinel filename leaked into the command: " + rendered.join(' --- ') },
+                { assert rendered.every { it.contains('--outdir .') },
+                    "cell invocation does not write to the task root: " + rendered.join(' --- ') },
+                { assert rendered.every { it.contains('--mask_file P001_cell_mask.npy') },
+                    "cell invocation does not name the cell mask: " + rendered.join(' --- ') },
+                // ext.args comes from the MERGED withName block in conf/modules.config.
+                // If the selector stops matching, these two vanish and the GeoJSON
+                // polygons stop being comparable with SEG_QC_GEOJSON's.
+                { assert rendered.every { it.contains('--simplify_tolerance 1.0') },
+                    "merged withName block no longer supplies ext.args: " + rendered.join(' --- ') },
+                { assert rendered.every { it.contains('--coord_precision 2') },
+                    "merged withName block no longer supplies ext.args: " + rendered.join(' --- ') },
+                // Published filename, not an internal detail: the size log is
+                // published next to morphology.csv.
+                { assert rendered.every { it.contains('P001.EXTRACT_PROPERTIES.size.csv') },
+                    "size-log filename is not derived from the invoking process name: " + rendered.join(' --- ') },
+                { assert rendered.every { !it.contains('/P001.EXTRACT_PROPERTIES.size.csv') },
+                    "cell invocation writes its size log into a subdirectory: " + rendered.join(' --- ') }
+            )
+        }
+    }
+
+    test("Should render the NUCLEUS invocation with --reference_mask and the subdirectory - rendered command") {
+
+        // Same contract as the case above; see its comment for why this one carries
+        // `tag "stub"` but no `options "-stub"`.
+        tag "stub"
+
+        when {
+            process {
+                """
+                // tests/testdata/P001_nuclei_mask.tif is a 0-byte placeholder, so this
+                // case uses two REAL label masks instead: P002's stands in for the
+                // nuclear mask and P001's is the reference. The re-keying maths is not
+                // what is under assertion here (tests/unit/test_compartment_export.py
+                // owns that) -- the rendered command is -- but running for real keeps
+                // this case from depending on a failing task to produce a .command.sh.
+                input[0] = [
+                    [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA']],
+                    file('$projectDir/tests/testdata/P002_cell_mask.npy', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_cell_mask.npy', checkIfExists: true)
+                ]
+                input[1] = 'nuclei'
+                """
+            }
+        }
+
+        then {
+            def rendered = []
+            new File("$workDir").eachFileRecurse { f ->
+                if (f.name == '.command.sh' && f.text.contains('extract_cell_properties.py')) {
+                    rendered << f.text
+                }
+            }
+
+            assertAll(
+                { assert rendered.size() >= 1,
+                    "no rendered EXTRACT_PROPERTIES .command.sh found under the task work dir" },
+                // Without this flag the emitted contours.json is keyed by NUCLEUS
+                // label, and EXPORT_GEOJSON's identity lookup attaches every nucleus
+                // polygon to the wrong cell.
+                { assert rendered.every { it.contains('--reference_mask P001_cell_mask.npy') },
+                    "nucleus invocation lost --reference_mask: " + rendered.join(' --- ') },
+                { assert rendered.every { it.contains('--mask_file P002_cell_mask.npy') },
+                    "nucleus invocation does not name the nuclear mask: " + rendered.join(' --- ') },
+                { assert rendered.every { it.contains('--outdir nuclei') },
+                    "nucleus invocation does not write into its subdirectory: " + rendered.join(' --- ') },
+                { assert rendered.every { it.contains('mkdir -p nuclei') },
+                    "nucleus invocation does not create its subdirectory: " + rendered.join(' --- ') },
+                { assert rendered.every { it.contains('--simplify_tolerance 1.0') },
+                    "merged withName block no longer supplies ext.args: " + rendered.join(' --- ') },
+                { assert rendered.every { it.contains('nuclei/P001.EXTRACT_PROPERTIES.size.csv') },
+                    "the size log is not written beside the outputs it describes: " + rendered.join(' --- ') }
+            )
+        }
+    }
+
+    test("Should produce valid morphology CSV and contours JSON - real") {
+
+        tag "real"
+        tag "slow"
+
+        when {
+            params {
+                quant_min_area = 50
+            }
+            process {
+                """
+                input[0] = [
+                    [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA']],
+                    file('$projectDir/tests/testdata/P001_cell_mask.npy', checkIfExists: true),
+                    file('$projectDir/assets/NO_REFERENCE_MASK', checkIfExists: true)
+                ]
+                input[1] = ''
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.morphology },
+                { assert process.out.contours },
+                // Validate morphology CSV has header + data rows
+                {
+                    def csvFile = process.out.morphology.get(0).get(1)
+                    def lines = path(csvFile).readLines()
+                    assert lines.size() > 1, "morphology.csv should have header + data rows"
+                },
+                // Validate expected columns
+                {
+                    def csvFile = process.out.morphology.get(0).get(1)
+                    def header = path(csvFile).readLines()[0]
+                    def expected = ['label', 'y', 'x', 'area', 'eccentricity', 'perimeter',
+                                    'convex_area', 'axis_major_length', 'axis_minor_length']
+                    expected.each { col ->
+                        assert header.contains(col), "morphology.csv missing column: ${col}"
+                    }
+                },
+                // Validate all labels are positive integers
+                {
+                    def csvFile = process.out.morphology.get(0).get(1)
+                    def lines = path(csvFile).readLines()
+                    def headerCols = lines[0].split(',').toList()
+                    def labelIdx = headerCols.indexOf('label')
+                    lines[1..-1].each { line ->
+                        def label = line.split(',')[labelIdx] as int
+                        assert label > 0, "Label should be a positive integer, got: ${label}"
+                    }
+                },
+                // Validate all area values > 0
+                {
+                    def csvFile = process.out.morphology.get(0).get(1)
+                    def lines = path(csvFile).readLines()
+                    def headerCols = lines[0].split(',').toList()
+                    def areaIdx = headerCols.indexOf('area')
+                    lines[1..-1].each { line ->
+                        def area = line.split(',')[areaIdx] as double
+                        assert area > 0, "Area should be > 0, got: ${area}"
+                    }
+                },
+                // Validate contours.json is valid JSON
+                {
+                    def jsonFile = process.out.contours.get(0).get(1)
+                    def content = path(jsonFile).text
+                    new groovy.json.JsonSlurper().parseText(content)
+                },
+                // Metadata preserved
+                { assert process.out.morphology.get(0).get(0).patient_id == 'P001' },
+                { assert process.out.contours.get(0).get(0).patient_id == 'P001' }
+            )
+        }
+    }
+
+    test("Should produce correct cell count and valid morphology values - regression") {
+
+        tag "real"
+        tag "slow"
+        tag "regression"
+
+        when {
+            params {
+                quant_min_area = 0
+            }
+            process {
+                """
+                input[0] = [
+                    [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA']],
+                    file('$projectDir/tests/testdata/P001_cell_mask.npy', checkIfExists: true),
+                    file('$projectDir/assets/NO_REFERENCE_MASK', checkIfExists: true)
+                ]
+                input[1] = ''
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                // Cell count should match synthetic mask (20 cells)
+                {
+                    def csvFile = process.out.morphology.get(0).get(1)
+                    def lines = path(csvFile).readLines()
+                    def cellCount = lines.size() - 1
+                    assert cellCount == 20, "Expected 20 cells from synthetic mask, got ${cellCount}"
+                },
+                // All centroids should be within image bounds (128x128)
+                {
+                    def csvFile = process.out.morphology.get(0).get(1)
+                    def lines = path(csvFile).readLines()
+                    def headerCols = lines[0].split(',').toList()
+                    def yIdx = headerCols.indexOf('y')
+                    def xIdx = headerCols.indexOf('x')
+                    lines[1..-1].each { line ->
+                        def vals = line.split(',')
+                        def y = vals[yIdx] as double
+                        def x = vals[xIdx] as double
+                        assert y >= 0 && y < 128, "Centroid Y=${y} out of bounds [0, 128)"
+                        assert x >= 0 && x < 128, "Centroid X=${x} out of bounds [0, 128)"
+                    }
+                },
+                // Eccentricity should be in [0, 1] range
+                {
+                    def csvFile = process.out.morphology.get(0).get(1)
+                    def lines = path(csvFile).readLines()
+                    def headerCols = lines[0].split(',').toList()
+                    def eccIdx = headerCols.indexOf('eccentricity')
+                    lines[1..-1].each { line ->
+                        def ecc = line.split(',')[eccIdx] as double
+                        assert ecc >= 0 && ecc <= 1, "Eccentricity=${ecc} out of range [0, 1]"
+                    }
+                },
+                // Contours JSON should have entries for all cells in morphology
+                {
+                    def jsonFile = process.out.contours.get(0).get(1)
+                    def contours = new groovy.json.JsonSlurper().parseText(path(jsonFile).text)
+                    def csvFile = process.out.morphology.get(0).get(1)
+                    def cellCount = path(csvFile).readLines().size() - 1
+                    assert contours.size() == cellCount,
+                        "Contours (${contours.size()}) should match cell count (${cellCount})"
+                },
+                // Each contour should be a closed polygon (first == last point)
+                {
+                    def jsonFile = process.out.contours.get(0).get(1)
+                    def contours = new groovy.json.JsonSlurper().parseText(path(jsonFile).text)
+                    contours.each { label, ring ->
+                        assert ring.size() >= 4, "Polygon for cell ${label} needs >= 4 points, got ${ring.size()}"
+                        assert ring[0] == ring[-1], "Polygon for cell ${label} must be closed (first==last)"
+                    }
+                }
+            )
+        }
+    }
+
+}

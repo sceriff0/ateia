@@ -32,10 +32,15 @@
 ========================================================================================
 */
 
-include { SEGMENT                   } from '../../modules/local/segment'
-include { EXTRACT_CELL_PROPERTIES   } from '../../modules/local/extract_cell_properties'
-include { EXTRACT_NUCLEI_PROPERTIES } from '../../modules/local/extract_nuclei_properties'
-include { CHECKPOINT_WRITER         } from './checkpoint_writer'
+include { SEGMENT           } from '../../modules/local/segment'
+include { CHECKPOINT_WRITER } from './checkpoint_writer'
+
+// ONE process, two aliases -- DSL2 refuses to invoke a process twice in one workflow, and
+// this file invokes it twice. The alias names are load-bearing beyond readability:
+// conf/modules.config's withName: selector, the `task.process` written into each size-log
+// row, and the per-alias *.size.csv filename all key on them.
+include { EXTRACT_PROPERTIES as EXTRACT_CELL_PROPERTIES   } from '../../modules/local/extract_properties'
+include { EXTRACT_PROPERTIES as EXTRACT_NUCLEI_PROPERTIES } from '../../modules/local/extract_properties'
 
 workflow SEGMENTATION {
     take:
@@ -72,7 +77,15 @@ workflow SEGMENTATION {
     // CELL PROPERTIES - Extract morphology + contours from mask (runs in PARALLEL with SPLIT_CHANNELS)
     // Computes regionprops ONCE instead of N times in QUANTIFY
     // ========================================================================
-    EXTRACT_CELL_PROPERTIES(ch_cell_mask)
+    // The cell invocation has no reference mask. Staging a sentinel keeps
+    // EXTRACT_PROPERTIES at ONE input arity for both aliases -- assets/NO_REDSEA serves
+    // modules/local/quantify.nf the same way. checkIfExists so a deleted asset fails here,
+    // at workflow construction, rather than as a silently-absent --reference_mask.
+    def no_reference = file("${projectDir}/assets/NO_REFERENCE_MASK", checkIfExists: true)
+
+    // '' = emit into the task directory itself, so publishDir lands these at
+    // <pid>/cell_properties/ with no extra segment. Layout is handed the same '' below.
+    EXTRACT_CELL_PROPERTIES(ch_cell_mask.map { meta, m -> [meta, m, no_reference] }, '')
 
     def ch_contours = EXTRACT_CELL_PROPERTIES.out.contours
         .map { meta, json_file -> [meta.patient_id, json_file] }
@@ -88,7 +101,10 @@ workflow SEGMENTATION {
             .map { meta, mask -> [meta.patient_id, meta, mask] }
             .join(ch_cell_mask.map { meta, mask -> [meta.patient_id, mask] }, by: 0)
             .map { _patient_id, meta, nuclei_mask, cell_mask -> [meta, nuclei_mask, cell_mask] }
-        EXTRACT_NUCLEI_PROPERTIES(ch_nuclei_props_in)
+        // The cell mask goes in as --reference_mask, so the emitted contours.json comes out
+        // keyed by CELL label. The subdirectory is stated, not left to be discovered: the
+        // same Layout.NUCLEI_SUBDIR is handed to the checkpoint writer below.
+        EXTRACT_NUCLEI_PROPERTIES(ch_nuclei_props_in, Layout.NUCLEI_SUBDIR)
         ch_nucleus_contours = EXTRACT_NUCLEI_PROPERTIES.out.contours
             .map { meta, json_file -> [meta.patient_id, json_file] }
     }
@@ -145,8 +161,15 @@ workflow SEGMENTATION {
     ch_nuclei_mask_path = ch_nuclei_mask.map { meta, m ->
         [meta.patient_id, Layout.publishedPath(params.outdir, meta.patient_id, 'segmentation', m)]
     }
+    // Both cell_properties rows use publishedPath's EXPLICIT-subdirectory overload, and
+    // both pass the very value the producer was invoked with above ('' for the cell
+    // invocation, Layout.NUCLEI_SUBDIR for the nucleus one). The four-argument overload
+    // would infer the same answer today by reading the parent directory's name off the
+    // task directory -- which is precisely the backwards coupling that made the nucleus
+    // producer arrange its own working directory to suit a downstream string test. One
+    // value, stated once, given to producer and recorder alike.
     ch_contours_path = ch_contours.map { pid, j ->
-        [pid, Layout.publishedPath(params.outdir, pid, 'cell_properties', j)]
+        [pid, Layout.publishedPath(params.outdir, pid, 'cell_properties', '', j)]
     }
 
     // nucleus_contours ALONE is recorded only under --quantify_compartments:
@@ -158,7 +181,8 @@ workflow SEGMENTATION {
     // this shape (join(..., remainder: true) against a per-key placeholder, so a
     // missing optional value becomes '' rather than an absent row) and is copied here.
     ch_nucleus_contours_value = compartment_mode.compartments
-        ? ch_nucleus_contours.map { pid, j -> [pid, Layout.publishedPath(params.outdir, pid, 'cell_properties', j)] }
+        ? ch_nucleus_contours.map { pid, j ->
+            [pid, Layout.publishedPath(params.outdir, pid, 'cell_properties', Layout.NUCLEI_SUBDIR, j)] }
         : Channel.empty()
 
     ch_nucleus_contours_total = ch_cell_mask_path
@@ -325,8 +349,10 @@ workflow READ_SEGMENTED_CHECKPOINT {
     ch_nuclei_mask = ch_ref_rows.map { meta, row -> [meta, file(row.nuclei_mask)] }
 
     // Re-derive contours + morphology from the reused cell mask (see the class
-    // comment above for why this is a re-run, not a checkpoint re-read).
-    EXTRACT_CELL_PROPERTIES(ch_cell_mask)
+    // comment above for why this is a re-run, not a checkpoint re-read). Same sentinel
+    // and same '' output subdirectory as SEGMENTATION's live-run invocation above.
+    def no_reference = file("${projectDir}/assets/NO_REFERENCE_MASK", checkIfExists: true)
+    EXTRACT_CELL_PROPERTIES(ch_cell_mask.map { meta, m -> [meta, m, no_reference] }, '')
     ch_contours   = EXTRACT_CELL_PROPERTIES.out.contours.map { meta, j -> [meta.patient_id, j] }
     ch_morphology = EXTRACT_CELL_PROPERTIES.out.morphology
 
@@ -341,7 +367,7 @@ workflow READ_SEGMENTED_CHECKPOINT {
             .map { meta, mask -> [meta.patient_id, meta, mask] }
             .join(ch_cell_mask.map { meta, mask -> [meta.patient_id, mask] }, by: 0)
             .map { _patient_id, meta, nuclei_mask, cell_mask -> [meta, nuclei_mask, cell_mask] }
-        EXTRACT_NUCLEI_PROPERTIES(ch_nuclei_props_in)
+        EXTRACT_NUCLEI_PROPERTIES(ch_nuclei_props_in, Layout.NUCLEI_SUBDIR)
         ch_nucleus_contours = EXTRACT_NUCLEI_PROPERTIES.out.contours
             .map { meta, j -> [meta.patient_id, j] }
         ch_size_logs = ch_size_logs.mix(EXTRACT_NUCLEI_PROPERTIES.out.size_log)

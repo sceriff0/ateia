@@ -27,6 +27,7 @@ from typing import Tuple
 import cv2
 import numpy as np
 import tifffile
+from image_io import write_ome_tiff
 from logger import get_logger
 from metadata import extract_channel_names_from_ome, pick_nuclear_index
 from numpy.typing import NDArray
@@ -211,7 +212,7 @@ def create_registration_qc(
     save_png : bool, default=True
         Save downsampled PNG preview.
     save_tiff : bool, default=True
-        Save downsampled TIFF for ImageJ.
+        Save downsampled TIFF (OME, same convention as the full-resolution one).
     nuclear_markers : sequence of str, optional
         Ordered preference list of nuclear/fiducial marker names, i.e.
         ``params.nuclear_markers``. Resolved against each image's OME channel
@@ -227,9 +228,9 @@ def create_registration_qc(
     Notes
     -----
     Output files created:
-    - {output_path}_fullres.tif: Full resolution, compressed (if save_fullres=True)
+    - {output_path}_fullres.tif: Full resolution, compressed OME-TIFF (if save_fullres=True)
     - {output_path}.png: Downsampled PNG (if save_png=True)
-    - {output_path}.tif: Downsampled ImageJ TIFF (if save_tiff=True)
+    - {output_path}.tif: Downsampled OME-TIFF (if save_tiff=True)
 
     Channel assignment in composites:
     - Red: Registered image
@@ -275,9 +276,33 @@ def create_registration_qc(
     if not registered_path.exists():
         raise FileNotFoundError(f"Registered image not found: {registered_path}")
 
-    # Load images
-    ref_img = tifffile.imread(str(reference_path))
-    reg_img = tifffile.imread(str(registered_path))
+    # Load images. Memory-mapped, not decoded whole: exactly one channel of each
+    # slide is used below (the nuclear/fiducial channel `pick_nuclear_index`
+    # resolves), and GENERATE_REGISTRATION_QC opens the reference and the
+    # registered slide together -- so the eager `tifffile.imread` form held two
+    # complete multichannel WSIs in RAM at once to read two planes. This is the
+    # same read `segment.py` already does.
+    #
+    # NOTE ON out="memmap" (same wording in split_multichannel.py, bin/utils/qc.py and
+    # extract_mask_series.py -- one rule, three sites):
+    # tifffile can map the file directly ONLY when the data is uncompressed. For a
+    # compressed TIFF it decodes into a full-size temporary file under $TMPDIR and maps
+    # that, so the peak moves from RAM to scratch disk -- it does not vanish. See
+    # docs/image_io.md's "Reads" section, which states the same trade.
+    # A numpy.memmap holds its own mapping, so it stays valid after the TiffFile is
+    # closed. split_multichannel.py and bin/utils/qc.py use the array past the `with`
+    # block on that basis; extract_mask_series.py keeps its use inside one because the
+    # block is short, which is a style choice, not a different rule.
+    #
+    # For THIS site specifically: BOTH inputs are slides this repo did not write the
+    # compression of (the reference and the registered slide, the latter from VALIS),
+    # so both may be temp-file decodes rather than direct maps -- two of them, in one
+    # task. Still better than two whole WSIs resident, but it is a RAM-to-scratch
+    # shift, not an elimination.
+    with tifffile.TiffFile(str(reference_path)) as tif:
+        ref_img = tif.asarray(out="memmap")
+    with tifffile.TiffFile(str(registered_path)) as tif:
+        reg_img = tif.asarray(out="memmap")
 
     # Ensure 3D shape (C, H, W)
     if ref_img.ndim == 2:
@@ -343,11 +368,16 @@ def create_registration_qc(
         )
 
         fullres_output_path = output_path.with_name(output_path.stem + "_fullres.tif")
-        tifffile.imwrite(
-            str(fullres_output_path),
+        # OME, not ImageJ. This write and the downsampled one below used to sit in
+        # this same function under two different metadata conventions -- ImageJ here,
+        # OME there -- and, worse, only the *downsampled* one carried bigtiff. This
+        # one is the RGB stack of two full-size nuclear channels: the write in this
+        # function actually capable of crossing 4 GB. Both are OME now, and
+        # write_ome_tiff sets bigtiff on every write it makes.
+        write_ome_tiff(
+            fullres_output_path,
             rgb_stack_full,
-            imagej=True,
-            metadata={"axes": "CYX", "mode": "composite"},
+            metadata={"axes": "CYX"},
             compression="zlib",
         )
         logger.info(f"  Saved full-res QC TIFF: {fullres_output_path}")
@@ -364,15 +394,18 @@ def create_registration_qc(
         cv2.imwrite(str(png_output_path), rgb_bgr)
         logger.info(f"  Saved QC PNG: {png_output_path}")
 
-    # Save TIFF (ImageJ-compatible, CYX order)
+    # Save TIFF (OME, CYX order -- same convention as the full-res composite above).
+    # Uncompressed as before: this one is downsampled by `scale_factor`, so it is the
+    # small artifact of the pair. The "mode": "composite" key the previous call passed
+    # is gone because tifffile's OME writer silently drops it -- it is ImageJ metadata,
+    # and carrying it here only made the two writes look like they agreed.
     if save_tiff:
         tiff_output_path = output_path.with_suffix(".tif")
-        tifffile.imwrite(
-            str(tiff_output_path),
+        write_ome_tiff(
+            tiff_output_path,
             rgb_cyx,
-            ome=True,
-            bigtiff=True,
-            metadata={"axes": "CYX", "mode": "composite"},
+            metadata={"axes": "CYX"},
+            compression=None,
         )
         logger.info(f"  Saved QC TIFF: {tiff_output_path}")
 

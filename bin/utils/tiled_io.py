@@ -9,23 +9,22 @@ from __future__ import annotations
 
 import numpy as np
 
-
-def load_channels(path):
-    """Read an OME-TIFF as ``(C, H, W)`` (a 2-D image is promoted to ``C=1``)."""
-    import tifffile
-
-    arr = np.asarray(tifffile.imread(str(path)))
-    if arr.ndim == 2:
-        arr = arr[np.newaxis, ...]
-    elif arr.ndim != 3:
-        raise ValueError(f"{path}: expected 2-D or 3-D (C,H,W), got shape {arr.shape}")
-    return arr
+# There is deliberately no eager whole-slide reader here. `load_channels` used to
+# sit at this spot -- `tifffile.imread` of the entire slide, promoted to (C, H, W) --
+# and by the time TILED_COARSE and TILED_REG_TILE had both moved to `open_lazy`
+# below, it had no caller anywhere under bin/. `tests/test_no_dead_bin_modules.py`
+# exists to stop exactly that from accumulating, so it was deleted rather than kept
+# "in case". The pre-change eager behaviour still has one legitimate use, as the
+# oracle the lazy path is checked against, and it now lives in
+# tests/test_tiled_reg_tile_lazy.py where that is all it can be.
 
 
 def nuclear_channel(arr_chw, index):
     """Return the ``index`` channel of a ``(C, H, W)`` array as float32."""
     if not 0 <= index < arr_chw.shape[0]:
-        raise ValueError(f"--nuclear-index {index} out of range for C={arr_chw.shape[0]}")
+        raise ValueError(
+            f"--nuclear-index {index} out of range for C={arr_chw.shape[0]}"
+        )
     return arr_chw[index].astype(np.float32)
 
 

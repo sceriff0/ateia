@@ -3,14 +3,15 @@
 tiled_reg_tile is the per-tile fan-out step: it runs once per tile (N tasks), unlike
 tiled_stitch which runs once per slide. The old implementation called
 ``nuclear_channel(load_channels(path))`` on both the reference and moving slide on every
-invocation — a full whole-slide decode, N times over. This mirrors what
+invocation (``load_channels`` was deleted in Task 11; ``_load_channels_eager`` below
+reproduces it as the oracle) — a full whole-slide decode, N times over. This mirrors what
 test_tiled_stitch_streaming.py already pins for the stitch step: the lazy zarr-region-read
 path must produce numerically identical output to the old full-decode path, while actually
 bounding the region read.
 
 Three properties are pinned here:
   1. Numerical equivalence: the lazy path's (dx, dy, tre) match an independently computed
-     "old style" oracle (full nuclear_channel/load_channels + whole-image warp_image) exactly.
+     "old style" oracle (full eager decode + whole-image warp_image) exactly.
   2. Bounded read: for an interior tile that is 1/16 of the frame, the region actually read
      off the moving slide is a small fraction (< 25%) of the full slide — this is the test
      that fails against the pre-change code (it reads the whole slide, i.e. 100%).
@@ -43,8 +44,27 @@ tifffile = pytest.importorskip("tifffile")
 
 import tiled_reg_tile  # noqa: E402
 from tile_residual import residual_displacement  # noqa: E402
-from tiled_io import load_channels, nuclear_channel  # noqa: E402
+from tiled_io import nuclear_channel  # noqa: E402
 from tiled_warp import warp_image  # noqa: E402
+
+
+def _load_channels_eager(path):
+    """The pre-change eager whole-slide read, kept here as the oracle.
+
+    This was ``bin/utils/tiled_io.py``'s ``load_channels``. Once TILED_COARSE and
+    TILED_REG_TILE both moved to ``open_lazy`` it had no production caller left, so
+    Task 11 deleted it rather than leave a whole-array reader sitting next to the
+    lazy sibling that replaced it. Its behaviour is still needed *here*, and only
+    here: the point of these tests is that the lazy path reproduces the full-decode
+    answer exactly, which needs a full decode to compare against. Living in the test
+    file is what stops it from being reachable as an implementation choice again.
+    """
+    arr = np.asarray(tifffile.imread(str(path)))
+    if arr.ndim == 2:
+        arr = arr[np.newaxis, ...]
+    elif arr.ndim != 3:
+        raise ValueError(f"{path}: expected 2-D or 3-D (C,H,W), got shape {arr.shape}")
+    return arr
 
 
 def _textured(seed, n):
@@ -91,8 +111,8 @@ def _write_pair(tmp_path, n=512, translation=(3.0, -2.0), rotation_deg=1.0):
 
 def _old_style_oracle(ref_f, mov_f, m0, nuclear_index, rx0, ry0, rx1, ry1, upsample=10):
     """Reproduce the pre-change tiled_reg_tile.py logic verbatim: full decode, whole-image warp."""
-    ref_nuc = nuclear_channel(load_channels(ref_f), nuclear_index)
-    mov_nuc = nuclear_channel(load_channels(mov_f), nuclear_index)
+    ref_nuc = nuclear_channel(_load_channels_eager(ref_f), nuclear_index)
+    mov_nuc = nuclear_channel(_load_channels_eager(mov_f), nuclear_index)
     ref_tile = ref_nuc[ry0:ry1, rx0:rx1]
     mov_tile = warp_image(
         mov_nuc, m0, None, (ry1 - ry0, rx1 - rx0), out_origin=(rx0, ry0)
@@ -155,7 +175,7 @@ def test_lazy_path_matches_old_full_decode_oracle(tmp_path):
 def test_moving_slide_region_read_is_bounded(tmp_path, monkeypatch):
     """The moving-slide read must be a small fraction of the full slide for an interior tile.
 
-    This is the test that fails against the pre-change code: nuclear_channel(load_channels(path))
+    This is the test that fails against the pre-change code: the eager whole-slide read
     decodes the *entire* slide on every tile invocation, so the read region would be 100% of
     the full slide, not < 25%.
     """
