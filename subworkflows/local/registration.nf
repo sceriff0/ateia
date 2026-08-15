@@ -118,6 +118,13 @@ workflow REGISTRATION {
     // argument to both consumers, so there is a single decision site instead of two reads
     // that could drift apart.
     def registration_method = params.registration_method
+    // ... and resolved ONCE into the backend's declared emit cardinalities. Downstream, the
+    // NAME selects an implementation (which adapter workflow to call, which warp container)
+    // while the CONTRACT selects a data shape (which join `transform` needs). Keeping those
+    // two uses apart is the point: a third backend that fills `transform` per slide gets the
+    // per-slide join from its declaration, instead of from someone remembering to widen an
+    // `== 'tiled'` test in seg_qc.nf. of() refuses a method it has never heard of.
+    def registration_contract = AdapterContract.of(registration_method)
 
     REGISTER_PATIENT(ch_grouped, registration_method)
 
@@ -194,10 +201,11 @@ workflow REGISTRATION {
     // warp) lives in subworkflows/local/seg_qc.nf, shared with add_cycle.nf. Both transform
     // channels are handed over under the adapters' shared names; whichever one the method does
     // not produce is Channel.empty() (the adapters' null-object contract) and is never read.
-    // The method reaches SEG_QC as an ARGUMENT — the same value REGISTER_PATIENT got above.
+    // The contract reaches SEG_QC as an ARGUMENT — derived from the same single read
+    // REGISTER_PATIENT's method came from.
     if (do_seg_qc) {
         SEG_QC(ch_images_multi, ch_transform, ch_stage_checkpoint, ch_transform_by_slide,
-               registration_method)
+               registration_contract)
         ch_seg_qc          = SEG_QC.out.metrics
         ch_seg_residuals   = SEG_QC.out.per_cell
         ch_seg_qc_size_log = SEG_QC.out.size_log

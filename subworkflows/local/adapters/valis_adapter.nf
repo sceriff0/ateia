@@ -12,29 +12,16 @@
             and all_items = [[meta1, file1], [meta2, file2], ...] for all images
     Output: Channel of [meta, file] tuples (standard format)
 
-    THE ADAPTER CONTRACT (identical in adapters/tiled_adapter.nf, and binding on any third
-    adapter). Every registration adapter takes [patient_id, reference_item, all_items]
-    and emits EXACTLY these names:
-
-        registered          [meta, file]                registered slides (+ passthroughs)
-        transform           [patient_id, transform]     ONE transform object per patient
-        transform_by_slide  [meta, transform]           one transform per MOVING slide
-        stage_checkpoint    [patient_id, dir]           intermediate-stage fields
-        intrinsic_tre       file                        the method's OWN target-registration
-                                                        -error estimate, whatever its format
-        size_logs / versions
-
-    `intrinsic_tre` is deliberately NOT named after any one method. Both shipped backends
-    estimate a TRE from their own registration -- VALIS a feature-distance CSV, STARE a
-    *_tre.json -- and the seam used to call the slot `summary` and then re-emit it as
-    `valis_summary`, which pinned one method's name into the artifact vocabulary all the way
-    out to the QC report. Formats are NOT normalised here; that is the reader's job.
-
-    A method that produces no artifact for one of these emits `Channel.empty()` for it --
-    a NULL OBJECT, never a missing emit and never an error. That is what lets
-    REGISTER_PATIENT wire both backends with one short branch, and it is why nothing
-    downstream of that branch has to know which method ran. A future adapter inherits the
-    rule: declare every name; empty the ones your method cannot produce.
+    THE ADAPTER CONTRACT lives in lib/AdapterContract.groovy, not here. It declares the
+    emit names every adapter must fill, the tuple shape of each, and -- the part a comment
+    kept getting wrong -- the CARDINALITY each one carries under this backend. It used to
+    be a ~23-line table copied verbatim into both adapter files, so it was two tables, and
+    it declared only names -- while the emit named `transform` carries ONE ROW PER PATIENT
+    here and one row per MOVING SLIDE under the tiled adapter, which is the fact consumers
+    actually branch on.
+    tests/test_adapter_contract.py checks this file against that declaration, and
+    tests/subworkflows/local/adapters/adapter_cardinality.nf.test counts what it really
+    emits. Adding an emit, or a third backend, starts there.
 ========================================================================================
 */
 

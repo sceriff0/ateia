@@ -93,11 +93,21 @@ def _emit_block(text: str) -> list[str]:
     return names
 
 
-def _groovy_string_list(text: str, name: str) -> list[str]:
-    """`static final List<String> NAME = ['a', 'b']` -> ['a', 'b']."""
+def _groovy_constant_list(text: str, name: str) -> list[str]:
+    """`static final List<String> NAME = [A, B]` -> ['A', 'B'] (constant NAMES).
+
+    The vocabulary list is written in terms of the constants themselves, not their
+    string values, so that a constant renamed in one place and not the other is a
+    compile error in Groovy rather than a silent divergence here.
+    """
     m = re.search(rf"{name}\s*=\s*\[(.*?)\]", text, re.S)
     assert m, f"{name} not found in {CONTRACT.name}"
-    return re.findall(r"'([^']+)'", m.group(1))
+    return re.findall(r"\b([A-Z][A-Z_]+)\b", m.group(1))
+
+
+def _groovy_string_constants(text: str) -> dict[str, str]:
+    """Every `static final String NAME = 'value'` in the file."""
+    return dict(re.findall(r"static final String ([A-Z_]+)\s*=\s*'([^']+)'", text))
 
 
 def _groovy_map_keys(text: str, name: str) -> list[str]:
@@ -148,8 +158,22 @@ def _backend_declaration(text: str, method: str) -> dict[str, str]:
         elif text[i] == "]":
             depth -= 1
         i += 1
-    body = text[start : i - 1]
+    body = _strip_comments(text[start : i - 1])
     return dict(re.findall(r"([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([A-Z_]+)\b", body))
+
+
+def _strip_comments(text: str) -> str:
+    """Groovy/Nextflow source with `//` and `/* */` comments removed.
+
+    Load-bearing, not tidiness: the prose explaining a declaration necessarily
+    contains the very words the scanners below look for (`'tiled'`, `foo: BAR`), so a
+    scan of the raw text would match the comment that documents the rule instead of
+    the code that breaks it — a guard that can never fail.
+    """
+    text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+    return "\n".join(
+        line for line in text.splitlines() if not line.strip().startswith("//")
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -175,32 +199,27 @@ def test_each_backend_declares_every_emit_and_a_valid_cardinality():
     text = _contract_text()
     emits = set(_groovy_map_keys(text, "EMITS"))
     assert emits, "AdapterContract.EMITS is empty"
-    vocabulary = set(_groovy_string_list(text, "CARDINALITIES"))
+    vocabulary = set(_groovy_constant_list(text, "CARDINALITIES"))
     assert vocabulary, "AdapterContract.CARDINALITIES is empty"
+    constants = _groovy_string_constants(text)
 
     for method in _adapter_files():
         decl = _backend_declaration(text, method)
-        # Compared against the constant NAMES (PER_PATIENT, ...), which is what the
-        # table is written in; the values those constants hold are checked against
-        # CARDINALITIES below.
+        # The table is written in constant NAMES (PER_PATIENT, ...); those names are
+        # checked against CARDINALITIES, and CARDINALITIES against the constants that
+        # actually exist, so a typo cannot introduce a silent sixth cardinality.
         assert set(decl) == emits, (
             f"backend '{method}' declares cardinality for {sorted(decl)}, "
             f"but the seam's emits are {sorted(emits)}"
         )
-        constants = {
-            name: value
-            for name, value in re.findall(
-                r"static final String ([A-Z_]+)\s*=\s*'([^']+)'", text
-            )
-        }
         for emit, const in decl.items():
-            assert const in constants, (
+            assert const in vocabulary, (
                 f"backend '{method}' declares emit '{emit}' with '{const}', which is "
-                f"not one of AdapterContract's cardinality constants {sorted(constants)}"
+                f"not listed in AdapterContract.CARDINALITIES {sorted(vocabulary)}"
             )
-            assert constants[const] in vocabulary, (
-                f"cardinality constant {const} = '{constants[const]}' is not listed "
-                "in AdapterContract.CARDINALITIES"
+            assert const in constants, (
+                f"AdapterContract.CARDINALITIES names {const}, which is not declared "
+                "as a `static final String` constant"
             )
 
 
@@ -210,7 +229,7 @@ def test_adapter_emit_blocks_match_the_declared_vocabulary():
     text = _contract_text()
     emits = set(_groovy_map_keys(text, "EMITS"))
     for method, path in _adapter_files().items():
-        actual = set(_emit_block(path.read_text()))
+        actual = set(_emit_block(_strip_comments(path.read_text())))
         assert actual == emits, (
             f"{path.relative_to(ROOT)} emits {sorted(actual)}, but the seam's "
             f"declared vocabulary is {sorted(emits)}"
@@ -232,7 +251,7 @@ def test_a_none_cardinality_is_emitted_as_the_null_object():
 
     for method, path in _adapter_files().items():
         decl = _backend_declaration(text, method)
-        adapter = path.read_text()
+        adapter = _strip_comments(path.read_text())
         for emit, const in decl.items():
             wired_empty = bool(
                 re.search(rf"^\s*{emit}\s*=\s*Channel\.empty\(\)", adapter, re.M)
@@ -271,9 +290,7 @@ def test_seg_qc_branches_on_declared_cardinality_not_on_a_method_literal():
     join is the cardinality of `transform`, so that is what the branch must read.
     """
     text = SEG_QC.read_text()
-    code = "\n".join(
-        line for line in text.splitlines() if not line.strip().startswith("//")
-    )
+    code = _strip_comments(text)
     # The header comment legitimately names 'tiled' when explaining the two joins;
     # only executable code is scanned.
     assert "'tiled'" not in code and '"tiled"' not in code, (

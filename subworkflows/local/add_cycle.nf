@@ -221,10 +221,12 @@ workflow ADD_CYCLE {
     // Level >= 2: seg-overlap Dice/IoU. Segment DAPI on the NATIVE (pre-reg)
     // reference + new-cycle images -> cell GeoJSON, then warp through the
     // classic registrar pickle (classic adapter only — see do_seg_qc above).
-    // Shares subworkflows/local/seg_qc.nf with registration.nf. 'valis' is passed as a
-    // LITERAL for the same reason as the REGISTER_PATIENT call above: SEG_QC takes the method
-    // as an ARGUMENT and never reads params.registration_method, so sharing it cannot quietly
-    // lift mirage.nf's rejection of --registration_method tiled in this mode.
+    // Shares subworkflows/local/seg_qc.nf with registration.nf. The contract is built from
+    // the LITERAL 'valis' for the same reason as the REGISTER_PATIENT call above: SEG_QC
+    // takes it as an ARGUMENT and never reads params.registration_method, so sharing it
+    // cannot quietly lift mirage.nf's rejection of --registration_method tiled in this mode.
+    // AdapterContract.of('valis') declares transform as per-PATIENT, which is what selects
+    // the registrar-pickle join below.
     // REGISTER_PATIENT.out.transform_by_slide is Channel.empty() under VALIS by the adapters'
     // null-object contract, which is exactly what the valis branch expects.
     ch_seg_qc_size_log = Channel.empty()
@@ -239,7 +241,7 @@ workflow ADD_CYCLE {
             })
 
         SEG_QC(ch_native, ch_transform, REGISTER_PATIENT.out.stage_checkpoint,
-               REGISTER_PATIENT.out.transform_by_slide, 'valis')
+               REGISTER_PATIENT.out.transform_by_slide, AdapterContract.of('valis'))
         ch_seg_qc          = SEG_QC.out.metrics
         ch_seg_residuals   = SEG_QC.out.per_cell
         ch_seg_qc_size_log = SEG_QC.out.size_log
