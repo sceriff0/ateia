@@ -22,7 +22,7 @@
     The scorer (bin/warp_seg_qc.py) is method-agnostic; only the *warper* differs, so the
     dispatch lives here rather than at the call sites:
       * a per-PATIENT transform  -> combine by patient_id; BioFormats JVM; pre-micro checkpoint
-      * a per-SLIDE   transform  -> combine by (patient_id, channel signature); JVM-free
+      * a per-SLIDE   transform  -> combine by (patient_id, meta.id); JVM-free
 
     ONE WARP PROCESS, TWO BACKENDS. WARP_SEG_QC's container, flags, stage list, version
     rows and stub extras come from lib/WarpBackends.groovy, keyed on the `method`
@@ -147,17 +147,29 @@ workflow SEG_QC {
     def method = contract.method
     if (AdapterContract.isPerSlide(contract, 'transform')) {
         // A per-slide transform (meta-keyed) — join it to the moving GeoJSON by
-        // (patient, sorted-channels) so each slide is scored against its own transform. No
+        // (patient_id, meta.id) so each slide is scored against its own transform. No
         // stage checkpoint (a backend with a per-slide transform composes no stages
         // destructively) and no JVM — `[]` is the null object this backend never reads.
+        //
+        // THE KEY IS AN IDENTITY, NOT AN ATTRIBUTE. This used to join on the slide's
+        // sorted channel signature. `combine(by:)` is a CROSS JOIN, so a patient with two
+        // slides declaring the same panel — a repeat or QC re-image, ordinary in a
+        // multi-cycle study — produced FOUR warp tasks instead of two: each slide scored
+        // against the other's transform, each writing the same output filename, and
+        // nothing failed. Exactly the N**2 failure this file's header warns a third
+        // backend would hit by joining on patient_id alone, one attribute finer.
+        // meta.id is CsvUtils.imageId's per-image unique id ("THE ONE RULE, NOT A
+        // CONVENTION"), which is the only thing in a meta guaranteed distinct within a
+        // patient. REGISTER_PATIENT now refuses a repeated panel outright, but a join is
+        // not 1:1 because something three files away rejects the alternative.
         ch_manifest_keyed = ch_transform_by_slide
-            .map { meta, m -> [meta.patient_id, meta.channels.toSorted().join('|'), m] }
+            .map { meta, m -> [meta.patient_id, meta.id, m] }
 
         ch_for_warp = ch_mov_gj
-            .map { pid, meta, gj, name -> [pid, meta.channels.toSorted().join('|'), meta, gj, name] }
+            .map { pid, meta, gj, name -> [pid, meta.id, meta, gj, name] }
             .combine(ch_ref_gj, by: 0)
             .combine(ch_manifest_keyed, by: [0, 1])
-            .map { _pid, _sig, meta, mov_gj, mov_name, ref_gj, ref_name, m ->
+            .map { _pid, _id, meta, mov_gj, mov_name, ref_gj, ref_name, m ->
                 tuple(meta, method, m, ref_name, mov_name, ref_gj, mov_gj, [])
             }
     } else {
@@ -186,7 +198,7 @@ workflow SEG_QC {
     ch_metrics       = WARP_SEG_QC.out.metrics
     ch_per_cell      = WARP_SEG_QC.out.per_cell
     ch_warp_size     = WARP_SEG_QC.out.size_log
-    ch_warp_versions = WARP_SEG_QC.out.versions
+    ch_warp_versions = WARP_SEG_QC.out.versions.first()
 
     emit:
     metrics  = ch_metrics
@@ -194,5 +206,5 @@ workflow SEG_QC {
     size_log = SEG_QC_SEGMENT.out.size_log.mix(SEG_QC_GEOJSON.out.size_log).mix(ch_warp_size)
     versions = SEG_QC_SEGMENT.out.versions.first()
         .mix(SEG_QC_GEOJSON.out.versions.first())
-        .mix(ch_warp_versions.first())
+        .mix(ch_warp_versions)
 }

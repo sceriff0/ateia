@@ -80,7 +80,32 @@ workflow REGISTER_PATIENT {
         single: items.size() == 1
         multi:  true
     }
-    ch_grouped_multi = ch_grouped_split.multi
+    // EVERY SLIDE IN A PATIENT MUST DECLARE A DISTINCT PANEL, WHICHEVER BACKEND RUNS.
+    //
+    // This is the ONE place a repeated panel is judged, and it sits before the dispatch
+    // below on purpose. It used to be judged twice, differently: VALIS_ADAPTER threw its
+    // own message from inside its output-demux -- i.e. only after REGISTER had already
+    // spent the compute -- while the tiled path never checked at all and SEG_QC's
+    // `combine(by: [patient, signature])` cross-joined N slides against N transforms,
+    // scoring every slide with every other slide's warp and writing identical filenames.
+    // Same input, two outcomes. Checking on ch_grouped_multi means both adapters, both
+    // callers (REGISTRATION and ADD_CYCLE) and any third backend get the same answer
+    // without declaring anything.
+    //
+    // Note this runs on POST-preprocessing metas, which is the signature the adapters and
+    // SEG_QC actually key on -- not the samplesheet's. preprocess.nf drops the nuclear
+    // channel from every moving slide, so two slides that differ only in their nuclear
+    // marker (DAPI|CD3|CD8 and CELLTOX|CD3|CD8) become identical here and are caught,
+    // which a samplesheet-time check would miss.
+    //
+    // Why refusal rather than tolerance, given a repeat acquisition is legitimate science:
+    // see lib/PanelSignature.groovy's header. Short version -- everything past
+    // registration is keyed by MARKER NAME, so accepting the duplicate does not make the
+    // repeat work, it just moves the collision somewhere quieter.
+    ch_grouped_multi = ch_grouped_split.multi.map { pid, ref, items ->
+        PanelSignature.requireUniqueWithinPatient(pid, items.collect { it[0] })
+        [pid, ref, items]
+    }
     // is_passthrough marks a slide that reaches the registered stream WITHOUT having
     // been registered. It is what the checkpoint writer keys on: nothing publishes an
     // unregistered slide into <pid>/registered/, so recording it there names a file
@@ -178,9 +203,8 @@ workflow REGISTER_PATIENT {
     // (preprocess/segmentation/postprocess) mixes it into its own versions stream; this
     // path did not, so a `--start registration --stop registration` run -- the only run
     // in which this is the sole CHECKPOINT_WRITER instance -- published a QC report
-    // missing the row. `.first()` because one row per process is what the report wants,
-    // not one per patient; same as every other version mix in this repo.
+    // missing the row.
     versions           = ch_adapter.versions
-        .mix(REGISTERED_CHECKPOINT.out.versions.first())
+        .mix(REGISTERED_CHECKPOINT.out.versions)
         .mix(PUBLISH_PASSTHROUGH.out.versions.first())
 }

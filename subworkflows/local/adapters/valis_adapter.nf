@@ -87,31 +87,24 @@ workflow VALIS_ADAPTER {
             // Read OME channels manifest (maps filename -> channel names from OME-XML)
             def manifest = new groovy.json.JsonSlurper().parseText(manifest_file.text)
 
-            // Build lookup: sorted channel signature (from CSV meta) -> meta
-            def channel_key_to_meta = metas_list.collectEntries { meta ->
-                // IMPORTANT: Use toSorted() instead of sort() to avoid mutating meta.channels.
-                // (Elsewhere in the pipeline, meta.clone() was replaced with `meta + [...]`
-                // map addition — but Groovy's Map.plus() is implemented as
-                // cloneSimilarMap(left).putAll(right), i.e. clone-then-putAll, so the two
-                // are operationally identical. That was an idiom change, not a safety
-                // change: meta.channels is still a shared List reference across any
-                // derived metas that do not explicitly rebind it. sort()'s in-place
-                // mutation would corrupt that shared list for every other meta holding the
-                // same reference — hence toSorted(), here and at every future call site.)
-                def key = meta.channels.toSorted().join('_').toLowerCase()
-                [(key): meta]
-            }
+            // A slide's identity within a patient is its channel set, and what that means
+            // -- how it is spelled, and what a repeat does -- belongs to
+            // lib/PanelSignature.groovy, not to this file. This used to compute the key
+            // inline and throw its own message; SEG_QC computed the same concept with a
+            // different separator and had no opinion about repeats at all, which is how
+            // one input came to hard-fail here and silently cross-produce there.
+            //
+            // REGISTER_PATIENT already refused a duplicate before either adapter ran, so
+            // reaching this call means something bypassed the group (an adapter invoked
+            // directly, e.g. from an nf-test). It is one line and it is the point where an
+            // ambiguous signature would actually corrupt the matching below -- a duplicate
+            // key silently overwrites in collectEntries and one slide's file is then
+            // attributed to the other slide's metadata.
+            PanelSignature.requireUniqueWithinPatient(patient_id, metas_list)
 
-            // Guard against duplicate channel signatures (would silently overwrite)
-            if (channel_key_to_meta.size() != metas_list.size()) {
-                def signatures = metas_list.collect { it.channels.toSorted().join('_').toLowerCase() }
-                def duplicates = signatures.groupBy { it }.findAll { _sig, v -> v.size() > 1 }.keySet()
-                throw new Exception("""
-                VALIS adapter: duplicate channel signatures for patient ${patient_id}
-                ${metas_list.size()} slides but only ${channel_key_to_meta.size()} unique channel sets
-                Duplicated: ${duplicates.join(', ')}
-                Each slide must have a unique combination of channels
-                """.stripIndent())
+            // Build lookup: channel signature (from CSV meta) -> meta
+            def channel_key_to_meta = metas_list.collectEntries { meta ->
+                [(PanelSignature.of(meta)): meta]
             }
 
             // Match each registered file by its OME channel signature
@@ -127,8 +120,10 @@ workflow VALIS_ADAPTER {
                     throw new Exception(error_msg)
                 }
 
-                // Create sorted channel signature from OME metadata
-                def ome_key = (ome_channels as List).toSorted().join('_').toLowerCase()
+                // The same signature, computed from the OME-XML channel names the
+                // registered file actually carries. Both sides go through one function so
+                // the two spellings cannot drift apart and quietly match nothing.
+                def ome_key = PanelSignature.ofChannels(ome_channels)
                 def matched_meta = channel_key_to_meta[ome_key]
 
                 if (!matched_meta) {
