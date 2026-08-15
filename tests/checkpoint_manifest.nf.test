@@ -279,9 +279,14 @@ nextflow_pipeline {
             params {
                 // The tiled backend passes EVERY patient's reference through
                 // unregistered (it defines the frame), so this exercises the
-                // passthrough branch on a MULTI-slide patient — and
-                // TILED_STITCH's own `registered/` output subdirectory on the
-                // moving slide.
+                // passthrough path on a MULTI-slide patient: PUBLISH_PASSTHROUGH
+                // republishes it into registered/registered_slides/, where
+                // TILED_STITCH's warped moving slide also lands. This case is what
+                // catches a mis-recorded passthrough — including in csv/segmented.csv,
+                // whose writer carried the registered_slides/ producer subdirectory
+                // under the PREPROCESSED kind and named
+                // <pid>/preprocessed/registered_slides/<name>, a path nothing
+                // publishes, on a stub run that exited 0.
                 input               = "$projectDir/tests/testdata/test_input.csv"
                 outdir              = "$outputDir"
                 registration_method = 'tiled'

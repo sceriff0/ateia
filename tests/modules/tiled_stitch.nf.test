@@ -33,10 +33,15 @@ nextflow_process {
             assert process.out.size_log
             with(process.out.registered) {
                 assert size() == 1
-                // published under registered/ -- registration.nf's checkpoint writer
-                // distinguishes a warped moving slide from a passthrough reference by
-                // exactly this location
-                assert get(0).get(1).toString().contains('/registered/')
+                // Emitted into 'registered_slides/', NOT 'registered/'. publishDir
+                // carries a producer's output subdirectory into the published path, so
+                // this name is half of where a tiled run's slides end up -- and while it
+                // was 'registered/', the identical artifact was published to
+                // <pid>/registered/registered/ under this backend and
+                // <pid>/registered/registered_slides/ under VALIS. lib/Layout.groovy's
+                // REGISTERED_SUBDIR owns the name now; Layout.registeredPath REFUSES a
+                // registered slide emitted anywhere else.
+                assert get(0).get(1).toString().contains('/registered_slides/')
                 assert get(0).get(1).toString().endsWith('_registered.ome.tiff')
             }
         }
