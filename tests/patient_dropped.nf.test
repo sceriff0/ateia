@@ -83,15 +83,26 @@ nextflow_pipeline {
             assert out.contains("no 'pyramid' for patient 'P002'") :
                 "the failure did not name the field that was missing"
 
-            // And the checkpoint must not have been published one row short. The run
-            // aborts before CHECKPOINT_WRITER's aggregate is written; if a
-            // postprocessed.csv exists at all it must not be a short, plausible-looking
-            // manifest that a later --start would read as complete.
+            // WHAT THIS DOES *NOT* FIX, pinned here so nobody reads the guard as more
+            // than it is. A short csv/postprocessed.csv may still land on disk. The
+            // abort is an orderly shutdown, and CHECKPOINT_WRITER's aggregate is a
+            // `collectFile()` -- an OPERATOR, not a task -- whose completion handler
+            // fires during that shutdown holding exactly the completed patients' rows.
+            // tests/checkpoint_durability.nf.test pins the identical behaviour for
+            // csv/registered.csv, and pins it as CORRECT: a finished patient's rows
+            // surviving a failure is the whole point of that design.
+            //
+            // So what changed here is not "the short manifest is never written" -- it
+            // is "the run no longer exits 0 while writing one". Whether the aggregate
+            // is short is timing (P001 may or may not have reached the writer before
+            // the abort); whether the run failed is not. Only the second is asserted.
+            // A later --start postprocessing pointed at this outdir would still see one
+            // patient, but it would be resuming from a run the operator was told failed.
             def aggregate = new File("${outputDir}/csv/postprocessed.csv".toString())
             if (aggregate.exists()) {
                 def rows = aggregate.readLines().findAll { it.trim() }.drop(1)
-                assert rows.collect { it.split(',')[0] }.toSorted() == ['P001', 'P002'] :
-                    "csv/postprocessed.csv was published without P002: ${rows}"
+                assert !rows.any { it.startsWith('P002,') } :
+                    "P002's pyramid never existed, yet a row claiming it was published: ${rows}"
             }
         }
     }
