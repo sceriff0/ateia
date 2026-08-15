@@ -166,12 +166,20 @@ run_test \
     "" \
     --start preprocessing
 
-# Test 2.3: Invalid - missing DAPI channel
+# Test 2.3: Invalid - no nuclear channel at all.
+#
+# The rejection used to read "DAPI channel not found"; d5bcc06 deliberately
+# generalised it when the nuclear-marker rule moved into lib/MarkerUtils.groovy
+# and stopped hardcoding the literal 'DAPI' (a CELLTOX-only samplesheet is
+# valid). The expectation below is a BRE, so the marker list inside the
+# parentheses can change without this test drifting again — but it still
+# asserts the nuclear-channel reason and the offending patient, not merely
+# "the run failed".
 run_test \
-    "Invalid - missing DAPI channel" \
+    "Invalid - no nuclear channel" \
     "fail" \
     "$TESTDATA_DIR/invalid_no_dapi.csv" \
-    "DAPI channel not found" \
+    "No nuclear channel (.*) found for patient P001" \
     --start preprocessing
 
 # Test 2.4: Invalid - input file does not exist
