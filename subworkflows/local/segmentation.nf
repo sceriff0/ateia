@@ -210,7 +210,7 @@ workflow SEGMENTATION {
     ch_versions = Channel.empty()
         .mix(SEGMENT.out.versions.first())
         .mix(EXTRACT_CELL_PROPERTIES.out.versions.first())
-        .mix(CHECKPOINT_WRITER.out.versions.first())
+        .mix(CHECKPOINT_WRITER.out.versions)
     if (compartment_mode.compartments) {
         ch_versions = ch_versions.mix(EXTRACT_NUCLEI_PROPERTIES.out.versions.first())
     }

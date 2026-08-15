@@ -443,9 +443,6 @@ workflow ADD_CYCLE {
     // ------------------------------------------------------------------ //
     // Versions + size logs
     // ------------------------------------------------------------------ //
-    // QUANTIFY_MARKERS / ASSEMBLE_EXPORT already applied `.first()` internally
-    // (see the comments on their `versions` emits) — do not re-apply it here.
-    //
     // EXTRACT_MASK_SERIES.out.versions is deliberately NOT mixed in: it was not
     // collected when the process was invoked from workflows/mirage.nf either, and
     // adding it here would change collated_versions.yml (and therefore the QC
@@ -473,7 +470,7 @@ workflow ADD_CYCLE {
         ch_versions  = ch_versions.mix(GENERATE_REGISTRATION_QC.out.versions.first())
         ch_size_logs = ch_size_logs.mix(GENERATE_REGISTRATION_QC.out.size_log)
     }
-    // SEG_QC's emissions already cover SEG_QC_GEOJSON + WARP_SEG_QC (versions pre-.first()).
+    // SEG_QC's emissions already cover SEG_QC_GEOJSON + WARP_SEG_QC.
     if (do_seg_qc) {
         ch_versions  = ch_versions.mix(ch_seg_qc_versions)
         ch_size_logs = ch_size_logs.mix(ch_seg_qc_size_log)

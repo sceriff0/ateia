@@ -122,7 +122,7 @@ workflow PREPROCESSING {
     // Collect versions from all processes
     ch_versions = Channel.empty()
         .mix(CONVERT_IMAGE.out.versions.first())
-        .mix(CHECKPOINT_WRITER.out.versions.first())
+        .mix(CHECKPOINT_WRITER.out.versions)
 
     if (!params.skip_preprocessing) {
         ch_size_logs = ch_size_logs.mix(PREPROCESS.out.size_log)

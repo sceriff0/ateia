@@ -242,7 +242,6 @@ workflow REGISTRATION {
     if (reg_qc_level >= 1) {
         ch_versions = ch_versions.mix(GENERATE_REGISTRATION_QC.out.versions.first())
     }
-    // SEG_QC.out.versions is already de-duplicated per process (.first() applied inside).
     if (do_seg_qc) {
         ch_versions = ch_versions.mix(ch_seg_qc_versions)
     }
