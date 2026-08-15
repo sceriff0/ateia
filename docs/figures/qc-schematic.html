@@ -337,16 +337,18 @@
       <div>
         <div class="sig">FINAL_QC( ch_artifacts, ch_run_facts )<br>
           &nbsp;&nbsp;<span class="cm">ch_artifacts : Channel&lt;[String kind, Path file]&gt;</span></div>
-        <div class="sig" style="margin-top:11px">KNOWN_ARTIFACT_KINDS<br>
-          &nbsp;&nbsp;= ParamUtils.STEPS.collectMany { it.qcKinds }<br>
-          &nbsp;&nbsp;+ ParamUtils.UNIVERSAL_QC_KINDS<br>
-          <span class="cm">&nbsp;&nbsp;→ 8 kinds; see panel c for the split</span></div>
+        <div class="sig" style="margin-top:11px">ParamUtils.knownArtifactKinds()<br>
+          &nbsp;&nbsp;= STEPS.collectMany { it.qcKinds }<br>
+          &nbsp;&nbsp;+ UNIVERSAL_QC_KINDS<br>
+          <span class="cm">&nbsp;&nbsp;→ 8 kinds, a fresh List every call; see panel c for the split</span></div>
         <div class="callout"><b>The vocabulary is derived, not restated.</b> The two <code>FINAL_QC</code> call
           sites hand-write <b>21</b> tag literals between them — <b>16</b> on the standard path (across four
           <code>if</code> blocks, in which <code>versions</code> and <code>size_log</code> each appear five
-          times) and <b>5</b> in add_cycle — and nothing else checks that the two agree. <code>KNOWN_ARTIFACT_KINDS</code> is that check, and it is
+          times) and <b>5</b> in add_cycle — and nothing else checks that the two agree. <code>ParamUtils.knownArtifactKinds()</code> is that check, and it is
           computed from the same step table that fixes each step's required samplesheet columns and the values
-          <code>--start</code>/<code>--stop</code> accept.</div>
+          <code>--start</code>/<code>--stop</code> accept. It is a pure static accessor rather than file-level
+          state on purpose — Nextflow 26's strict parser rejects a bare top-level <code>KNOWN_ARTIFACT_KINDS = ...</code>
+          assignment in a subworkflow file outright.</div>
       </div>
       <div>
         <div class="guards" style="margin-top:0;grid-template-columns:minmax(0,1fr)">
@@ -362,10 +364,13 @@
               vocabulary. The helper validates its own <code>kind</code> argument, so
               <code>artifactsOf(ch, 'seg_qcc')</code> throws instead of quietly emptying a report slot.</div></div>
           <div class="gd"><div class="h">3 · declared but never consumed</div>
-            <div class="src">CONSUMED_ARTIFACT_KINDS</div>
+            <div class="src">consumed_kinds — 3rd arg to artifactsOf()</div>
             <div class="x">The third failure the first two cannot see: a kind correctly declared, correctly tagged,
               and read by <b>no</b> <code>artifactsOf()</code> call — dropped from every report, exit&nbsp;0.
-              Checked at the end of the workflow, and only when both outputs are enabled, because
+              <code>consumed_kinds</code> is a local <code>Set</code> declared in <code>main:</code>, not file-level
+              state (a static mutable Set in <code>lib/</code> would be shared across every run in the JVM), so it is
+              threaded as a mandatory third argument into all eight <code>artifactsOf()</code> call sites and checked
+              against the full vocabulary at the end of the workflow, and only when both outputs are enabled, because
               <code>--skip_final_qc_report</code> or <code>--enable_trace false</code> legitimately leaves half
               the vocabulary unconsumed.</div></div>
         </div>
@@ -406,7 +411,7 @@
     </table></div>
     <p class="outnote">Because the schema's <code>--start</code>/<code>--stop</code> enums cannot be generated at
       build time, a test asserts they still agree with this table — the same discipline applied to the QC
-      vocabulary by <code>KNOWN_ARTIFACT_KINDS</code>.</p>
+      vocabulary by <code>ParamUtils.knownArtifactKinds()</code>.</p>
   </section>
 
   <!-- d — THE RENDERERS -->
