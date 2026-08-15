@@ -1,11 +1,11 @@
 /**
  * The one per-patient fan-in.
  *
- * Nine places in this pipeline gather a per-patient (or per-slide) group. All nine
- * once wrote the same four-step ritual by hand — six of them before this class
- * existed, three more (postprocess.nf's two QC gathers, checkpoint_writer.nf's row
- * gather) added afterwards, because their size is DERIVED and `size:` could not
- * express it until `sizeOf:` was added:
+ * Six places in this pipeline gathered a per-patient (or per-slide) group, and all
+ * six wrote the same four-step ritual by hand. Three more (postprocess.nf's two QC
+ * gathers and checkpoint_writer.nf's row gather) went on writing it AFTER this class
+ * existed, because their size is DERIVED and `size:` could not express it until
+ * `sizeOf:` was added. The ritual:
  *
  *   1. wrap the key in `groupKey(id, size)`  — the STREAMING SIZE HINT
  *   2. `groupTuple()`                        — the gather
@@ -162,8 +162,10 @@ class PatientGroup {
         if (missing)
             throw new IllegalArgumentException(
                 "PatientGroup: missing required option(s) ${missing} for channel '${opts.name}'. " +
-                "Neither has a safe default: without 'sortBy' the group is ordered by arrival, " +
-                "and without 'key' there is nothing to group on.")
+                "None of them has a safe default: without 'sortBy' the group is ordered by " +
+                "arrival, without 'key' there is nothing to group on, and without 'name' an " +
+                "error raised inside an operator closure cannot say which channel refused. " +
+                "The streaming size is required too, and separately — see below.")
 
         // Exactly one of size/sizeOf. BOTH would be two competing answers to how big
         // the group is, decided by whichever this method happened to read first —
