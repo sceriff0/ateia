@@ -31,6 +31,87 @@ nextflow_workflow {
     // in about 16 minutes, and is the only local check that catches an nf-test file
     // missing its `stub` tag.
 
+    test("a QC artifact for a patient with no moving slide is named, not an opaque size-0 refusal") {
+
+        tag "stub"
+        options "-stub"
+
+        // THE CONSUMER HALF of the size invariant whose producer half is pinned in
+        // tests/subworkflows/local/seg_qc.nf.test ("a patient whose only slide is the
+        // reference produces NO QC artifact at all").
+        //
+        // The gather below sizes itself `images_count - 1` -- one artifact per MOVING
+        // slide. images_count == 1 makes that 0, and lib/PatientGroup.groovy refuses 0
+        // because a groupKey sized 0 never fills. That state is unreachable while SEG_QC
+        // scores moving slides only, but "unreachable" was previously an argument in a
+        // comment, and the failure mode if the argument is wrong is that a real run
+        // stops. So the contradiction is DETECTED and NAMED here instead of surfacing as
+        // "its 'sizeOf' closure returned 0", which says nothing about what to go and fix.
+        //
+        // This case constructs the impossible input on purpose. It is the only place it
+        // exists.
+        when {
+            params {
+                outdir = "$outputDir"
+                seg_gpu = false
+                pixel_size = 0.325
+            }
+            workflow {
+                """
+                input[0] = PatientArtifacts.channels(
+                    'nf-test', PatientArtifacts.SEGMENTATION_FIELDS, [
+                        samples         : Channel.fromList([
+                            [[patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK', 'SMA'], channels_count: 3],
+                            file('$projectDir/tests/testdata/P001_ref.ome.tiff')]
+                            ]),
+                        cell_mask       : Channel.fromList([
+                            [[patient_id: 'P001', id: 'P001', is_reference: true],
+                            file('$projectDir/tests/testdata/P001_cell_mask.tif')]
+                            ]),
+                        nuclei_mask     : Channel.fromList([
+                            [[patient_id: 'P001', id: 'P001', is_reference: true],
+                            file('$projectDir/tests/testdata/P001_nuclei_mask.tif')]
+                            ]),
+                        contours        : Channel.fromList([
+                            ['P001', file('$projectDir/tests/testdata/sample_contours.json')]
+                            ]),
+                        nucleus_contours: Channel.fromList([
+                            ['P001', file('$projectDir/tests/testdata/sample_contours.json')]
+                            ]),
+                        morphology      : Channel.fromList([
+                            [[patient_id: 'P001', id: 'P001', is_reference: true],
+                            file('$projectDir/tests/testdata/sample_morphology.csv')]
+                            ]),
+                    ])
+                // images_count: 1 -- a single-slide patient -- WITH a QC artifact. SEG_QC
+                // cannot produce this pairing; the fixture does, to pin what happens if
+                // something ever does.
+                input[1] = Channel.fromList([
+                    [[patient_id: 'P001', images_count: 1], file('$projectDir/tests/testdata/sample_reg_qc.json')]
+                ])
+                input[2] = Channel.empty()
+                input[3] = ParamUtils.compartmentMode(params)
+                """
+            }
+        }
+
+        then {
+            assert workflow.failed
+            def out = workflow.stdout.join('\n') + workflow.stderr.join('\n')
+            // The patient, so the reader knows whose count is wrong.
+            assert out.contains('P001')
+            // The count it actually carried, and what that means.
+            assert out.contains('images_count')
+            assert out.contains('no MOVING slide')
+            // The two places the fault can be, named, because from inside an operator
+            // closure there is no task and no work directory to go and look at.
+            assert out.contains('input_check.nf')
+            assert out.contains('seg_qc.nf')
+            // NOT the generic refusal -- if this reappears, the diagnosis was lost.
+            assert !out.contains("returned 0 (Integer)")
+        }
+    }
+
     test("Should run full postprocessing - stub") {
 
         tag "stub"

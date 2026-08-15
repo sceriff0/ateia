@@ -108,6 +108,73 @@ nextflow_workflow {
         }
     }
 
+    test("a patient whose only slide is the reference produces NO QC artifact at all") {
+
+        tag "stub"
+        options "-stub"
+
+        // THIS IS THE PRODUCER HALF OF postprocess.nf's SIZE INVARIANT, and it is here
+        // rather than argued in a comment there.
+        //
+        // postprocess.nf gathers the reg_qc=2 artifacts per patient and sizes that group
+        // `meta.images_count - 1` -- one artifact per MOVING slide, because images_count
+        // counts the reference too. For a single-slide patient that arithmetic is 0, and
+        // lib/PatientGroup.groovy refuses a size of 0 (a groupKey sized 0 never fills, so
+        // the failure mode is a hang). The consumer is therefore safe only while a
+        // single-slide patient produces NO artifact to gather -- i.e. only while this
+        // subworkflow scores moving slides exclusively.
+        //
+        // That is structural here: `ch_gj` branches on meta.is_reference and WARP_SEG_QC's
+        // input is built from `ch_mov_gj` alone. This case pins it behaviourally, so if a
+        // future change starts scoring the reference the failure lands HERE, naming
+        // seg_qc.nf, instead of surfacing as an unexplained abort inside postprocess.nf's
+        // grouping on someone's real run. Watched failing with ch_mov_gj built from the
+        // unbranched geojson channel.
+        when {
+            params {
+                outdir = "$outputDir"
+                registration_method = 'valis'
+            }
+            workflow {
+                """
+                // P001 is ordinary (reference + one moving). P002 is the case under test:
+                // a single slide, which is necessarily its own reference.
+                input[0] = Channel.fromList([
+                    [[patient_id: 'P001', id: 'P001_ref',  is_reference: true,  channels: ['DAPI', 'PANCK']],
+                     file('$projectDir/tests/testdata/P001_ref.ome.tiff',  checkIfExists: true)],
+                    [[patient_id: 'P001', id: 'P001_mov1', is_reference: false, channels: ['DAPI', 'CD3']],
+                     file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)],
+                    [[patient_id: 'P002', id: 'P002_ref',  is_reference: true,  channels: ['DAPI', 'PANCK']],
+                     file('$projectDir/tests/testdata/P002_ref.ome.tiff',  checkIfExists: true)]
+                ])
+
+                input[1] = Channel.fromList([
+                    ['P001', file('$projectDir/tests/testdata/sample_versions.yml')],
+                    ['P002', file('$projectDir/tests/testdata/sample_versions.yml')]
+                ])
+                input[2] = Channel.empty()
+                input[3] = Channel.empty()
+                input[4] = 'valis'
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                // The whole point: P002 contributes nothing to either QC stream, so
+                // postprocess.nf's gather never sees a meta whose images_count is 1 and
+                // never derives a size of 0.
+                { assert workflow.out.metrics.collect { it[0].patient_id }.toSorted() == ['P001'] },
+                { assert workflow.out.per_cell.collect { it[0].patient_id }.toSorted() == ['P001'] },
+                // Stated as a count too, so deleting either list assertion still leaves
+                // the "P002 produced nothing" claim covered.
+                { assert workflow.out.metrics.size() == 1 },
+                { assert workflow.out.per_cell.size() == 1 }
+            )
+        }
+    }
+
     test("valis: an entirely empty stage-checkpoint channel does not disable the QC") {
 
         tag "stub"
