@@ -4,7 +4,8 @@
  * One cheap per-slide reduction (kilobytes): gathers every tile's control point and writes the
  * self-contained transform manifest (M0 + gated mesh) the stitch and reg_qc=2 warper consume.
  * Control points are gated on correlation CONFIDENCE (--max-error) and range (--max-disp)
- * before the TRE gate, so background and section-edge tiles never reach the deformation mesh.
+ * before the TRE gate, which keeps background out of the deformation mesh. Tiles only PARTLY
+ * on-section are a known remaining exposure -- see the note on _accept in bin/tiled_solve.py.
  */
 process TILED_SOLVE {
     tag "${meta.patient_id}:${meta.channels.join('_')}"

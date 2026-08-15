@@ -9,7 +9,9 @@ Three gates, applied in this order, decide what reaches the mesh:
 
 1. **confidence** (``--max-error``) — reject a control point whose correlation found no real
    match. Background and section-edge tiles are the majority of a whole-slide grid and produce
-   plausibly *small* displacements, so this, not magnitude, is what keeps them out.
+   plausibly *small* displacements, so this, not magnitude, is what rejects them. It rejects
+   *pure* background outright; a PARTIALLY on-section tile can still get through with a wrong
+   displacement — see the "KNOWN, UNCLOSED EXPOSURE" note on ``_accept``.
 2. **range** (``--max-disp``, the read halo) — reject a match that was never inside the read
    window. A cheap secondary net.
 3. **TRE** (``--gate-tre``) — of the trustworthy points, refine only those actually misaligned.
@@ -59,6 +61,29 @@ def _accept(control, max_error, max_disp):
     A control point with no ``"error"`` key predates this gate. It is accepted -- unknown
     confidence, and the caller warns -- so a run resumed across the change does not silently lose
     every tile written before it.
+
+    KNOWN, UNCLOSED EXPOSURE -- partial-tissue tiles
+    ------------------------------------------------
+    The confidence gate is decisive at both ends of the "how much of this tile is off-section"
+    band and NOT in the middle. Measured over 21 blanking fractions x 4 geometries x 3 seeds
+    (``tests/test_tile_residual_confidence.py``):
+
+    - through ~30-35% blanked: accepted, and the true shift is recovered -- correct;
+    - roughly **40-90% blanked: the tile is ACCEPTED and the recovered shift is WRONG**, in
+      every one of the 12 configurations swept (4 to 9 of the 21 sampled fractions each),
+      injecting a bogus displacement of up to **131 px**;
+    - from ~95% blanked: rejected.
+
+    The range gate does not help: 131 px is well inside the default ``max_disp`` of 256
+    (``reg_tiled_halo``), which is the same reason the range gate rejects nothing on a realistic
+    grid. Nothing here distinguishes "correlated against the wrong part of the tile" from "a
+    real residual" -- both are confident peaks.
+
+    The real fix is FOREGROUND DETECTION (Otsu or equivalent): skip a tile whose moving crop is
+    mostly background instead of trying to score the correlation after the fact. That is
+    deliberately out of scope for this change and is tracked as a separate piece of work. Until
+    it lands, a section perimeter contributes some wrong control points to the mesh -- fewer and
+    smaller than before this gate existed, but not zero.
 
     Returns ``(accepted, reason)``; ``reason`` is None when accepted.
     """

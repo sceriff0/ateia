@@ -457,7 +457,12 @@ GRID_NY = GRID_NX = 20
 # tissue ellipse -> 108 tiles (27%), a one-tile section-edge ring -> 72 (18%),
 # pure background -> 220 (55%).
 _ELLIPSE = (9.5, 9.5, 6.5, 5.5)  # cy, cx, ry, rx
-_EDGE_BLANKED = 0.75  # fraction of a section-edge tile that is off-section
+# How much of a section-edge tile is off-section. THE HEADLINE REJECTION FRACTION TURNS ON
+# THIS CHOICE and it is not a property of the fix: measured on this grid, a 50%-blanked edge
+# model gives 55.0% overall and a 100%-blanked one gives 73.0%, because the edge tiles flip
+# from accepted to rejected between them (see the band test). 0.50 and 1.00 are swept so that
+# no assertion below can quietly depend on the easy end.
+_EDGE_MODELS = (0.50, 1.00)
 
 
 def _grid_tiles(rng, edge_blanked):
@@ -489,11 +494,19 @@ def _grid_tiles(rng, edge_blanked):
                 yield "background", ix, iy, blank(), blank()
 
 
-def test_rejection_fraction_on_a_realistic_grid():
-    """Measure the rejection fraction and pin the properties that hold across constructions."""
+@pytest.mark.parametrize("edge_blanked", _EDGE_MODELS)
+def test_rejection_fraction_on_a_realistic_grid(edge_blanked):
+    """Measure the rejection fraction and pin only what holds across edge models.
+
+    The overall fraction is NOT a property of the fix -- it is 55.0% at a 50%-blanked edge
+    model and 73.0% at a fully-blanked one, on this same grid. 73% is the BEST CASE, for the
+    edge model that is easiest to reject. What is asserted here is what held in every model
+    swept: no tissue tile rejected, every background tile rejected, no background displacement
+    reaching the mesh, and the range gate contributing nothing.
+    """
     rng = np.random.default_rng(SEED)
     controls, kinds = [], []
-    for kind, ix, iy, ref, mov in _grid_tiles(rng, _EDGE_BLANKED):
+    for kind, ix, iy, ref, mov in _grid_tiles(rng, edge_blanked):
         dx, dy, tre, error = residual_displacement(ref, mov, upsample=10)
         controls.append(_control(ix, iy, dx, dy, error))
         kinds.append(kind)
@@ -526,7 +539,7 @@ def test_rejection_fraction_on_a_realistic_grid():
 
     report = (
         f"\n  grid {GRID_NY}x{GRID_NX} = {total} tiles, "
-        f"section-edge tiles {_EDGE_BLANKED * 100:.0f}% blanked\n"
+        f"section-edge tiles {edge_blanked * 100:.0f}% blanked\n"
         + "".join(
             f"    {k:11} {per_kind[k][0]:4d} tiles  rejected {per_kind[k][1]:4d}  "
             f"({100.0 * per_kind[k][1] / per_kind[k][0]:5.1f}%)\n"
@@ -553,9 +566,12 @@ def test_rejection_fraction_on_a_realistic_grid():
     )
     assert by_gate["error"] == rejected, f"a rejection came from neither gate:{report}"
     assert placed_after < placed_before, f"the gates placed no fewer points:{report}"
-    # Every cell that still carries a displacement must be a tissue tile. (The count is
-    # <= the tissue count, not equal to it: a tissue tile that drew a 0 px shift is
-    # accepted but sits below the TRE gate, so it holds [0.0, 0.0] like the rest.)
+    # No BACKGROUND displacement may reach the mesh. This is the robust form of the claim.
+    # (An earlier version asserted `placed_kinds == ["tissue"]`, which held only at the pinned
+    # 0.75 edge model -- at 0.50/0.60/0.65 the section-edge tiles are accepted and the
+    # assertion fails with "carries displacements from ['edge', 'tissue']". Section-edge tiles
+    # reaching the mesh IS the known exposure the band test pins; it is not a background leak,
+    # and the assertion must distinguish the two rather than accidentally forbid both.)
     kind_at = {(c["iy"], c["ix"]): k for c, k in zip(controls, kinds)}
     placed_kinds = sorted(
         {
@@ -565,56 +581,139 @@ def test_rejection_fraction_on_a_realistic_grid():
             if d != [0.0, 0.0]
         }
     )
-    assert placed_kinds == ["tissue"], (
-        f"the mesh should now be built from tissue tiles only, but carries "
-        f"displacements from {placed_kinds}:{report}"
+    assert "background" not in placed_kinds, (
+        f"a pure-background displacement reached the mesh; placed kinds "
+        f"{placed_kinds}:{report}"
     )
-    assert placed_after <= per_kind["tissue"][0], report
     # --- the overall fraction, asserted only as a broad range (it is construction-dependent) ---
     frac = rejected / total
     assert 0.40 <= frac <= 0.90, (
         f"overall rejection fraction {frac:.3f} outside the broad expected band "
-        f"[0.40, 0.90]:{report}"
+        f"[0.40, 0.90]. Measured on this grid: 0.550 at a 50%-blanked edge model, 0.730 at a "
+        f"fully-blanked one:{report}"
     )
 
 
-@pytest.mark.parametrize("blanked", [0.0, 0.25, 0.5, 0.75, 1.0])
-def test_the_partial_tissue_band_is_where_the_gate_stops_being_decisive(blanked):
-    """Sweep how much of a tile is off-section, and record where the gate flips.
+BAND_GEOMETRIES = ("left", "right", "top", "bottom")
+BAND_SEEDS = (1234, 7, 99)
+BAND_FRACTIONS = tuple(round(i * 0.05, 2) for i in range(21))
 
-    This is the boundary the overall rejection fraction turns on: a grid whose section-edge
-    ring is modelled at 50% blanked and one modelled at 75% give very different headline
-    numbers, because the gate flips between them. The two ends are what is asserted -- a
-    fully-tissue tile must be accepted, a fully-blank one must be rejected -- and the middle
-    is measured and printed rather than pinned.
-    """
-    rng = np.random.default_rng(SEED)
+
+def _blanked_tile(seed, blanked, geom):
+    """A tile with `blanked` of its area replaced by background, in one of four geometries."""
+    rng = np.random.default_rng(seed)
     field = _tissue_field(rng)
     ref = field[PAD : PAD + N, PAD : PAD + N].copy()
     mov = field[PAD : PAD + N, PAD + 4 : PAD + 4 + N].copy()
     cut = int(N * blanked)
     if cut:
-        mov[:, :cut] = rng.normal(30.0, 3.0, (N, cut))
+        bg = rng.normal(30.0, 3.0, (N, N))
+        if geom == "left":
+            mov[:, :cut] = bg[:, :cut]
+        elif geom == "right":
+            mov[:, N - cut :] = bg[:, N - cut :]
+        elif geom == "top":
+            mov[:cut, :] = bg[:cut, :]
+        elif geom == "bottom":
+            mov[N - cut :, :] = bg[N - cut :, :]
+        else:
+            raise AssertionError(f"unknown geometry {geom!r}")
+    return ref, mov
 
-    dx, dy, tre, error = residual_displacement(ref, mov, upsample=10)
-    accepted, reason = tiled_solve._accept(
-        _control(0, 0, dx, dy, error), MAX_ERROR, HALO
-    )
-    shift_correct = abs(dx - 4.0) < 0.6 and abs(dy) < 0.6
-    ctx = (
-        f"blanked={blanked * 100:.0f}%  dx={dx:.2f} dy={dy:.2f} |d|={tre:.2f} "
-        f"error={error:.6f}  -> {'ACCEPTED' if accepted else f'rejected ({reason})'}, "
-        f"true 4 px shift {'recovered' if shift_correct else 'LOST'}"
+
+def _sweep_band(seed, geom):
+    """Return [(blanked, dx, dy, tre, error, accepted, shift_correct)] over the dense band."""
+    rows = []
+    for blanked in BAND_FRACTIONS:
+        ref, mov = _blanked_tile(seed, blanked, geom)
+        dx, dy, tre, error = residual_displacement(ref, mov, upsample=10)
+        accepted, _reason = tiled_solve._accept(
+            _control(0, 0, dx, dy, error), MAX_ERROR, HALO
+        )
+        rows.append(
+            (blanked, dx, dy, tre, error, accepted, abs(dx - 4.0) < 0.6 and abs(dy) < 0.6)
+        )
+    return rows
+
+
+def _band_table(seed, geom, rows):
+    head = f"\n  seed={seed} geometry={geom}  (true shift is dx=4.00, dy=0.00)\n"
+    return head + "".join(
+        f"    blanked {b * 100:5.0f}%  dx={dx:8.2f} dy={dy:8.2f} |d|={tre:7.2f} "
+        f"error={err:.4f}  {'ACCEPTED' if a else 'rejected':8}  "
+        f"shift {'recovered' if c else 'LOST'}"
+        f"{'   <== ACCEPTED WITH A WRONG SHIFT' if (a and not c) else ''}\n"
+        for b, dx, dy, tre, err, a, c in rows
     )
 
-    if blanked == 0.0:
-        assert accepted and shift_correct, f"a full-tissue tile must be accepted: {ctx}"
-    elif blanked == 1.0:
-        assert not accepted, f"a fully-blank tile must be rejected: {ctx}"
-    else:
-        # The middle of the band is measured, not pinned -- but the gate must never
-        # accept a tile whose recovered shift is wrong. That is the property that makes
-        # the gate worth having, and it is the one that would regress silently.
-        assert accepted == shift_correct or not accepted, (
-            f"the gate accepted a tile whose shift is wrong: {ctx}"
+
+# Measured bounds of the three regions, across all BAND_SEEDS x BAND_GEOMETRIES configs.
+# Deliberately loose: the exact flip points move with seed and geometry (the low region ends
+# anywhere from 35% to 55% blanked depending on the config, and the all-rejected region starts
+# anywhere from 70% to 95%), so these are the min/max envelope, not a single config's boundary.
+BAND_ALWAYS_GOOD_MAX = 0.30  # measured: every config still accepted+correct through 35%
+BAND_ALWAYS_REJECTED_MIN = 0.95  # measured: every config rejects everything from 95% on
+
+
+@pytest.mark.parametrize("geom", BAND_GEOMETRIES)
+@pytest.mark.parametrize("seed", BAND_SEEDS)
+def test_the_partial_tissue_band_has_a_documented_accept_but_wrong_region(seed, geom):
+    """Sweep how much of a tile is off-section and pin the SHAPE the gate actually has.
+
+    The confidence gate is decisive at both ends of this band and NOT in the middle. Three
+    regions, all measured over 21 blanking fractions x 4 geometries x 3 seeds:
+
+    1. **low blanking** (through 30%, measured 35%): accepted, and the true shift is recovered.
+    2. **middle**: the tile is ACCEPTED AND THE RECOVERED SHIFT IS WRONG -- between 4 and 9 of
+       the 21 sampled fractions in *every* config measured, injecting a bogus displacement of
+       up to 131 px. This is a KNOWN, UNCLOSED EXPOSURE, asserted here rather than avoided:
+       foreground/Otsu detection is the real fix and is deliberately out of scope
+       (see the note at ``_accept`` in bin/tiled_solve.py).
+    3. **high blanking** (from 95%): rejected.
+
+    An earlier version of this test parametrised [0.0, 0.25, 0.5, 0.75, 1.0] and passed, which
+    is why it now sweeps densely: those five points step straight over region 2, and the test
+    reported a boundary the gate does not have. A test that passes because of which points were
+    sampled is worse than no test.
+    """
+    rows = _sweep_band(seed, geom)
+    table = _band_table(seed, geom, rows)
+
+    low = [r for r in rows if r[0] <= BAND_ALWAYS_GOOD_MAX]
+    high = [r for r in rows if r[0] >= BAND_ALWAYS_REJECTED_MIN]
+    accepted_but_wrong = [r for r in rows if r[5] and not r[6]]
+
+    assert low and high, f"the sweep did not cover both ends of the band:{table}"
+
+    # 1. the low region: the gate must not throw away tiles it can register correctly
+    for b, dx, dy, tre, err, a, c in low:
+        assert a and c, (
+            f"a tile only {b * 100:.0f}% blanked was not accepted-and-correct; the confidence "
+            f"gate is rejecting registrable tissue:{table}"
+        )
+
+    # 2. the middle region: the known exposure. Asserted to EXIST so it cannot be quietly
+    #    forgotten, and so that anyone who closes it (with foreground detection) is forced to
+    #    come here, delete this assertion and update the docstring.
+    assert accepted_but_wrong, (
+        f"no accepted-but-wrong tile found in this sweep. If the gate genuinely no longer has "
+        f"this exposure, that is GOOD NEWS and this assertion (and the limitation note at "
+        f"_accept in bin/tiled_solve.py) must be updated -- do not simply delete it:{table}"
+    )
+    worst = max(r[3] for r in accepted_but_wrong)
+    assert worst > 20.0, (
+        f"the accepted-but-wrong displacements are all under 20 px ({worst:.1f} px worst), "
+        f"which would make this exposure immaterial; re-characterise it:{table}"
+    )
+    # and the range gate cannot save us here -- that is why it is not the load-bearing gate
+    assert worst < HALO, (
+        f"worst accepted-but-wrong |d| = {worst:.1f} px is at/over the halo ({HALO}), so the "
+        f"range gate would have caught it; the exposure would then not be what this pins:{table}"
+    )
+
+    # 3. the high region: a tile that is essentially all background must never get through
+    for b, dx, dy, tre, err, a, c in high:
+        assert not a, (
+            f"a tile {b * 100:.0f}% blanked was ACCEPTED; near-empty tiles must be "
+            f"rejected:{table}"
         )
