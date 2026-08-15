@@ -393,22 +393,53 @@ disambiguated **by position in the declared list** — `CD3_105`, then
 `CD3_105_2` — so the filename a marker gets does not depend on which slide is
 being split or on whether the run is a stub.
 
-!!! warning "Breaking change: keys for markers with punctuation"
-    Mirage used to rebuild the key from the **file stem**, so a panel declaring
-    `HLA.DR` published `HLA_DR: Cell: Median`. It now publishes
-    `HLA.DR: Cell: Median`.
+!!! warning "Breaking change: markers whose declared name is not `[A-Za-z0-9-_]`"
+    Mirage used to rebuild a marker's identity from its **file stem**. It now
+    carries the **declared** samplesheet name. **Only markers containing a
+    character outside `[A-Za-z0-9-_]` are affected** — `CD3`, `Ki-67` and
+    `CD8_beta` are unchanged in every respect below.
 
-    **Only markers containing a character outside `[A-Za-z0-9-_]` are
-    affected** — `CD3`, `Ki-67` and `CD8_beta` are unchanged. The grammar itself
-    (one space after each colon, case-sensitive) has not changed; only which
-    marker string fills the first slot.
+    Three things move for an affected marker, and only the first is a string.
 
-    A FlowPath project, a gating panel, or a phenotyping model config that was
-    written against the old sanitised spelling must be re-pointed at the declared
-    one. In the other direction the change is a fix, not a break:
-    `bin/phenotype_cells.py` always built its lookup from the **declared** panel
-    name, so an affected marker previously missed the column and fell through to
-    its degraded all-zero path in silence.
+    **1. The measurement key.** A panel declaring `HLA.DR` published
+    `HLA_DR: Cell: Median`; it now publishes `HLA.DR: Cell: Median`. The grammar
+    itself (one space after each colon, case-sensitive) has not changed — only
+    which marker string fills the first slot. A FlowPath project, a saved gating
+    panel, or a phenotyping model config written against the old sanitised
+    spelling must be re-pointed at the declared one.
+
+    In the other direction this is a fix, not a break: `bin/phenotype_cells.py`
+    always built its lookup from the **declared** panel name, so an affected
+    marker previously missed the column entirely and fell through to its degraded
+    all-zero path in silence.
+
+    **2. REDSEA compensation — a change in numbers, not in names.**
+    `--redsea_markers` is matched case-insensitively against the marker name, and
+    that name is now the declared one. A punctuated marker listed in
+    `--redsea_markers` therefore **never matched before** — spillover
+    compensation was silently skipped for it, and the run still produced a
+    plausible uncompensated `<marker>: Cell: REDSEA`-free result — and **now
+    matches**. If you re-run a panel that lists a punctuated marker for REDSEA,
+    that marker's intensities will legitimately differ from the previous run.
+
+    The converse also holds and is the easier one to miss: if you worked around
+    the old behaviour by writing the **sanitised** spelling into
+    `--redsea_markers` (`HLA_DR` for a channel declared `HLA.DR`), that entry
+    now stops matching. Write declared names. Unpunctuated markers are
+    unaffected either way. See [REDSEA](redsea.md).
+
+    **3. Filenames, but only for non-ASCII markers.** The stem allowlist is
+    strictly `[A-Za-z0-9-_]`. It was previously applied with Python's
+    `str.isalnum()`, which is *Unicode*-aware, so a marker spelled with (say) a
+    Greek β kept the β in `split_channels/β-catenin.tiff`; it is now
+    `_-catenin.tiff`. ASCII-named markers keep byte-identical filenames. The
+    published measurement key for such a marker is the declared name either way,
+    so this is an intermediate-artefact change only.
+
+    Collision numbering also became deterministic: two declared names reducing to
+    one stem are now numbered by position in the declared list rather than by
+    probing what is already on disk, so a slide that drops its nuclear channel no
+    longer numbers a collision differently from one that keeps it.
 
 Cytoplasm is computed as `Cell − Nucleus` by subtraction, per cell. A cell with
 no nuclear overlap yields an empty Nucleus/Cytoplasm compartment, which is

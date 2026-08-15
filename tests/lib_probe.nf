@@ -795,6 +795,35 @@ workflow {
     assert ChannelName.outputStems(['DAPI', 'HLA.DR'], false, ['DAPI']) == ['HLA_DR']
     assert ChannelName.outputStems([], false, ['DAPI']) == []
 
+    // THE stub-vs-script equality, asserted directly rather than inferred from two
+    // nf-tests that happen to expect the same literal.
+    //
+    // modules/local/split_channels.nf's `script:` hands Python
+    // `ChannelName.fileStems(meta.channels)`; its `stub:` touches
+    // `ChannelName.outputStems(meta.channels, is_reference, markers)`. The two paths
+    // agree iff outputStems is exactly fileStems with the dropped channels removed --
+    // never a re-sanitisation, never a different collision suffix. Assert that
+    // relation over a channel list carrying every awkward shape at once: a nuclear
+    // channel, a dot, a space, and a collision pair.
+    def probeChannels = ['DAPI', 'HLA.DR', 'CD3 alpha', 'CD3.105', 'CD3_105']
+    def probeStems    = ChannelName.fileStems(probeChannels)
+    assert probeStems == ['DAPI', 'HLA_DR', 'CD3_alpha', 'CD3_105', 'CD3_105_2']
+    // Reference slide: every declared channel is written, so the stub's list IS
+    // the script's list, in order.
+    assert ChannelName.outputStems(probeChannels, true, ['DAPI']) == probeStems
+    // Moving slide: the nuclear channel is dropped and NOTHING ELSE MOVES --
+    // in particular the collision suffix on 'CD3_105' does not shift, which is
+    // what an os.path.exists-style numbering could not guarantee.
+    assert ChannelName.outputStems(probeChannels, false, ['DAPI']) ==
+           probeStems.findAll { it != 'DAPI' }
+    // Stated as the general relation, not as three literals: whatever is emitted is
+    // a subsequence of the full stem list, never a re-derived spelling.
+    [true, false].each { isRef ->
+        def emitted = ChannelName.outputStems(probeChannels, isRef, ['DAPI'])
+        assert emitted == probeStems.findAll { it in emitted },
+               "outputStems(${isRef}) is not a subsequence of fileStems: ${emitted}"
+    }
+
     // shellQuote is what stops `--channels ${meta.channels.join(' ')}` word-splitting a
     // marker whose name contains a space. It must survive a single quote too, since a
     // naive "'" + it + "'" would end the quoted string and hand bash the rest.

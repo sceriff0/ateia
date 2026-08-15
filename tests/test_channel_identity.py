@@ -247,6 +247,32 @@ def test_phenotyping_reads_the_column_quantification_writes():
     assert stem_missing
 
 
+def test_redsea_opt_in_follows_the_declared_name_not_the_stem():
+    """The change of marker identity is a change of SCIENCE here, not of strings.
+
+    `--redsea_markers` is matched case-insensitively and EXACTLY against the
+    marker name. That name used to be the sanitised stem, so a channel declared
+    `HLA.DR` and listed as `HLA.DR` never matched -- REDSEA spillover
+    compensation was silently skipped for it, and the run still looked fine.
+    It matches now. The converse is the easier trap: a user who worked around the
+    old behaviour by writing `HLA_DR` into `--redsea_markers` now gets no match.
+
+    docs/outputs.md's breaking-change admonition and docs/redsea.md both state
+    both directions; this pins them so the docs cannot go stale silently.
+    """
+    quantify = _load_bin_module("quantify")
+
+    declared, stem = "HLA.DR", file_stem("HLA.DR")
+    assert quantify.is_redsea_marker(declared, [declared])
+    # The old pairing -- stem name against a declared opt-in list -- is the miss.
+    assert not quantify.is_redsea_marker(stem, [declared])
+    # ...and the workaround spelling no longer matches the name that now arrives.
+    assert not quantify.is_redsea_marker(declared, [stem])
+    # An unpunctuated marker is unaffected in both directions.
+    assert quantify.is_redsea_marker("CD3", ["CD3"])
+    assert file_stem("CD3") == "CD3"
+
+
 def test_quantify_builds_no_measurement_key_of_its_own():
     """Source-level: the grammar's separators appear in measurements.py only.
 

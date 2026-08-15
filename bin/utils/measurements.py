@@ -5,9 +5,12 @@ in several `bin/*.py` scripts, kept in sync only by a comment:
 
 - ``MORPHOLOGY_COLS``: the columns in the merged quantification CSV that
   describe cell geometry/identity rather than marker signal.
-- The measurement-key grammar ``"<marker>: <Compartment>: <Statistic>"``
-  produced by ``quantify.py`` and consumed by ``export_geojson.py``,
-  ``export_spatialdata.py``, and ``phenotype_cells.py``.
+- The measurement-key grammar ``"<marker>: <Compartment>: <Statistic>"``.
+  ``measurement_key()`` below is now the SOLE producer of that string: every
+  writer and every reader calls it rather than spelling the separators. It used
+  to have zero production callers while three copies of the f-string lived
+  elsewhere, and this docstring said the grammar was "produced by quantify.py" --
+  which is precisely what made the duplication look intentional.
 
 G5 contract: the measurement-key format is consumed by the sibling repo
 ``qupath-extension-flowpath`` and is case- and space-sensitive. Do not change
@@ -144,11 +147,29 @@ def zscore(values, robust: bool = False):
 def measurement_key(marker: str, compartment: str, statistic: str) -> str:
     """Build a measurement key: ``"<marker>: <Compartment>: <Statistic>"``.
 
-    G5 contract with qupath-extension-flowpath: exact spacing and case.
-    Reproduces the format independently built by
-    ``quantify.py::compute_compartment_intensities`` (the producer) and
-    ``phenotype_cells.py::_marker_values`` (a consumer), and parsed by
-    ``export_spatialdata.py::parse_measurement_key``.
+    G5 contract with qupath-extension-flowpath: exact spacing and case. THE ONE
+    PLACE this string is spelled. Every caller, on both sides of the contract:
+
+    - ``quantify.py::compute_compartment_intensities`` -- the producer, for the
+      populated columns;
+    - ``quantify.py::run_quantification`` -- the same header again for the
+      empty-result branch, so a channel with no cells ships an identical header;
+    - ``phenotype_cells.py::_marker_values`` -- the lookup, built from the
+      DECLARED panel marker name;
+    - ``export_spatialdata.py::parse_measurement_key`` -- the parser, which
+      derives its suffix from ``measurement_key("", comp, stat)`` so it cannot
+      drift from the grammar it reads.
+
+    Do NOT reproduce the format anywhere else. Three of the four call sites above
+    once carried their own f-string, and this docstring said this function
+    "reproduces the format independently built by quantify.py" -- describing the
+    duplication as the design. A second speller is a silent cross-repo break,
+    not a style issue: ``parse_measurement_key`` answers a mismatch with
+    ``(key, None, None)`` -- "this marker has no compartment" -- rather than an
+    error.
+
+    ``marker`` is the DECLARED samplesheet name (``HLA.DR``), never the sanitised
+    filename stem (``HLA_DR``); see ``lib/ChannelName.groovy``.
     """
     return f"{marker}: {compartment}: {statistic}"
 

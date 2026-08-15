@@ -233,6 +233,20 @@ nextflow_process {
         }
     }
 
+    // ── the stub/script filename pair ────────────────────────────────────────────
+    //
+    // THE SAME CHANNEL LIST feeds the two cases below, on purpose. They used to
+    // carry different lists, so they agreed only by both happening to expect
+    // `HLA_DR`; a divergence on a channel that only one of them carried would have
+    // slipped through both. The list holds every awkward shape at once: a nuclear
+    // channel, a dot, a space, and a pair that collides after sanitising.
+    //
+    // The general relation -- "the stub's filenames are the script's stem list with
+    // the dropped channels removed, never a re-derived spelling" -- is asserted
+    // directly against lib/ChannelName.groovy in tests/lib_probe.nf, which is the
+    // only place lib/ classes are on the classpath. These two cases pin that the
+    // process actually calls it, on both paths.
+
     test("Stub names a sanitised channel by its FILE STEM, not its declared name - stub") {
 
         // RED before the fix: the stub applied NO sanitiser at all, so it touched
@@ -248,7 +262,7 @@ nextflow_process {
                 input[0] = [
                     [
                         patient_id: 'P001',
-                        channels: ['DAPI', 'HLA.DR'],
+                        channels: ['DAPI', 'HLA.DR', 'CD3 alpha', 'CD3.105', 'CD3_105'],
                         is_reference: true
                     ],
                     file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
@@ -263,7 +277,12 @@ nextflow_process {
             with(process.out.channels) {
                 def files = get(0).get(1)
                 def fileList = (files instanceof List) ? files : [files]
-                assert fileList.collect { file(it).name }.sort() == ['DAPI.tiff', 'HLA_DR.tiff']
+                // Sorted, because the touch order is not the contract; the SET of
+                // filenames is. Note CD3_105 / CD3_105_2: the collision suffix is a
+                // function of the declared list's order, not of what is on disk.
+                assert fileList.collect { file(it).name }.sort() ==
+                       ['CD3_105.tiff', 'CD3_105_2.tiff', 'CD3_alpha.tiff',
+                        'DAPI.tiff', 'HLA_DR.tiff']
             }
         }
     }
@@ -290,7 +309,7 @@ nextflow_process {
                 input[0] = [
                     [
                         patient_id: 'P001',
-                        channels: ['DAPI', 'HLA.DR', 'CD3 alpha']
+                        channels: ['DAPI', 'HLA.DR', 'CD3 alpha', 'CD3.105', 'CD3_105']
                     ],
                     file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
                     true
@@ -310,9 +329,13 @@ nextflow_process {
             assertAll(
                 { assert rendered.size() >= 1,
                     "no rendered SPLIT_CHANNELS .command.sh found under the task work dir" },
-                { assert rendered.every { it.contains("--channels 'DAPI' 'HLA.DR' 'CD3 alpha'") },
+                { assert rendered.every {
+                        it.contains("--channels 'DAPI' 'HLA.DR' 'CD3 alpha' 'CD3.105' 'CD3_105'") },
                     "rendered command: " + rendered.join(' --- ') },
-                { assert rendered.every { it.contains("--file-stems 'DAPI' 'HLA_DR' 'CD3_alpha'") },
+                // Index-aligned with --channels, and carrying the same collision
+                // suffix the stub case above expects on disk.
+                { assert rendered.every {
+                        it.contains("--file-stems 'DAPI' 'HLA_DR' 'CD3_alpha' 'CD3_105' 'CD3_105_2'") },
                     "rendered command: " + rendered.join(' --- ') }
             )
         }

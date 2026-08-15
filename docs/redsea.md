@@ -78,6 +78,18 @@ Three things it deliberately does **not** produce:
 
 ## Which markers
 
+!!! warning "Punctuated marker names: matching changed"
+    `--redsea_markers` is matched against the marker's **declared** samplesheet
+    name. Mirage previously matched against the sanitised *filename stem*, so a
+    marker declared `HLA.DR` and listed as `HLA.DR` in `--redsea_markers` never
+    matched — compensation was silently skipped for it. It matches now, so that
+    marker's numbers will differ from an older run. The converse holds too: if
+    you worked around the old behaviour by writing the sanitised spelling
+    (`HLA_DR`) into `--redsea_markers`, that entry now stops matching — write
+    declared names. Markers whose declared name is already `[A-Za-z0-9-_]` are
+    unaffected. See
+    [the measurement-key contract](outputs.md#the-measurement-key-contract).
+
 `--redsea_markers` is an opt-in list and has no default, because the method's own
 assumptions restrict it:
 

@@ -22,6 +22,7 @@ repo).
 from __future__ import annotations
 
 import importlib.util
+import re
 import sys
 from pathlib import Path
 
@@ -213,3 +214,112 @@ def test_pheno_prefix_has_exactly_one_owner():
         if p.name != "measurements.py" and '"_pheno.' in p.read_text()
     ]
     assert offenders == [], offenders
+
+
+# ── measurement_key() is the SOLE producer, and its docstring says so truthfully ──
+GRAMMAR_FSTRING_RE = re.compile(r'f"\{[^"}]*\}: \{[^"}]*\}: \{')
+# A use of the shared builder, excluding `parse_measurement_key` (the `_` before it is
+# a word character, so the lookbehind rejects it).
+CALLS_BUILDER_RE = re.compile(r"(?<!\w)measurement_key\b")
+# How the docstring names a caller: ``module.py::function``.
+DOCSTRING_CALLER_RE = re.compile(r"``(\w+)\.py::")
+
+
+# The regex is STRUCTURAL -- "three interpolations separated by ': '" -- so it also
+# matches strings that merely share that shape. Exactly one such line exists, and it is
+# allowlisted BY REASON, not by silence: stage_checkpoint.py builds a
+# "<name>: <ExceptionType>: <message>" error line and has nothing to do with the
+# measurement contract. `test_the_grammar_allowlist_entry_is_outside_the_contract`
+# checks that reason instead of trusting this comment -- an allowlist entry whose
+# stated reason nothing verifies is how these guards go quiet.
+GRAMMAR_ALLOWLIST = {
+    "bin/utils/stage_checkpoint.py": 'errors.append(f"{name}: {type(e).__name__}: {e}")',
+}
+
+
+def _bin_python_files():
+    return sorted(
+        p
+        for p in BIN.rglob("*.py")
+        if p.name != "measurements.py" and "__pycache__" not in p.parts
+    )
+
+
+def test_no_bin_module_spells_the_measurement_grammar_itself():
+    """One producer, checked across all of bin/ rather than just quantify.py.
+
+    `measurement_key()`'s docstring now says "do NOT reproduce the format
+    anywhere else". This is what makes that sentence enforceable: a second
+    speller anywhere under bin/ is a silent cross-repo break, because
+    `parse_measurement_key` answers a mismatch with `(key, None, None)` -- "this
+    marker has no compartment" -- rather than raising.
+    """
+    offenders = []
+    for path in _bin_python_files():
+        rel = str(path.relative_to(REPO_ROOT))
+        for i, line in enumerate(path.read_text().splitlines(), 1):
+            if not GRAMMAR_FSTRING_RE.search(line):
+                continue
+            if GRAMMAR_ALLOWLIST.get(rel) == line.strip():
+                continue
+            offenders.append(f"{rel}:{i}: {line.strip()}")
+    assert offenders == [], (
+        "the '<marker>: <Compartment>: <Statistic>' grammar is spelled outside "
+        "bin/utils/measurements.py:\n" + "\n".join(offenders)
+    )
+
+
+def test_measurement_key_docstring_names_exactly_its_real_callers():
+    """The docstring's caller list is checked, not asserted.
+
+    `measurement_key()` spent its whole first life documented as "reproduces the
+    format independently built by quantify.py" while having ZERO production
+    callers -- a comment that made the duplication read as the design. Its
+    replacement names every caller, which is only an improvement if the list
+    cannot rot. Set equality in BOTH directions: a new caller that nobody adds to
+    the list fails here, and so does a listed caller that stopped calling.
+
+    "Calls" is textual -- the module NAMES the symbol -- so importing it under an
+    alias still counts. That is deliberate: the thing being pinned is which
+    modules depend on the shared builder, not which local name they give it.
+
+    Watched fail both ways: importing `measurement_key` into export_geojson.py
+    reports `calling but not named: ['export_geojson']`; dropping it from
+    export_spatialdata.py reports `named but not calling: ['export_spatialdata']`.
+    """
+    doc = m.measurement_key.__doc__
+    named = set(DOCSTRING_CALLER_RE.findall(doc))
+    actual = {
+        path.stem
+        for path in _bin_python_files()
+        if CALLS_BUILDER_RE.search(path.read_text())
+    }
+    assert named == actual, (
+        "measurement_key()'s docstring lists its callers and the list is stale.\n"
+        f"  named but not calling: {sorted(named - actual)}\n"
+        f"  calling but not named: {sorted(actual - named)}"
+    )
+
+
+def test_the_grammar_allowlist_entry_is_outside_the_contract():
+    """Every GRAMMAR_ALLOWLIST entry must still be a non-measurement file.
+
+    The stated reason is "this module has nothing to do with the measurement
+    contract", and the mechanical form of that is: it does not import from
+    `measurements` at all. If it ever does, its ': '-separated f-string stops
+    being obviously unrelated and the allowlist entry has to be re-argued.
+
+    Watched fail: adding `from measurements import COMPARTMENTS` to
+    bin/utils/stage_checkpoint.py fails here while every other test stays green.
+    """
+    for rel, line in GRAMMAR_ALLOWLIST.items():
+        path = REPO_ROOT / rel
+        src = path.read_text()
+        assert line in src, (
+            f"{rel} no longer contains the allowlisted line; drop the entry:\n  {line}"
+        )
+        assert "measurements" not in src, (
+            f"{rel} now imports the measurement vocabulary, so its "
+            "'<a>: <b>: <c>' f-string can no longer be assumed unrelated to the "
+            "measurement key. Re-argue or remove the GRAMMAR_ALLOWLIST entry."
+        )

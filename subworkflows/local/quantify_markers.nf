@@ -117,8 +117,15 @@ workflow QUANTIFY_MARKERS {
             // recovered from meta.channels by lib/ChannelName.groovy -- because it
             // fills the <marker> slot of the "<marker>: <Compartment>: <Statistic>"
             // key that qupath-extension-flowpath parses case-sensitively (G5).
-            // `channel_stem` is the sanitised filename form and is used for `id`,
-            // i.e. for the per-marker CSV's name, and for nothing else.
+            // `channel_stem` is the sanitised filename form. It names the
+            // per-marker CSV -- the grouping below builds
+            // `<patient>_<stem>_quant.csv` from it -- and nothing else. (`id` is
+            // built from `tiff.baseName` directly, one line down; an earlier
+            // version of this comment claimed `id` read `channel_stem`, which it
+            // never did.) The two forms are deliberately BOTH carried: the
+            // declared name cannot go in a filename and the stem cannot go in a
+            // key, so neither can be re-derived from the other at the point of
+            // use without reintroducing exactly this defect.
             //
             // This used to be `channel_name: tiff.baseName`: identity read back OFF
             // DISK, already mangled by the filename allowlist. A panel declaring
