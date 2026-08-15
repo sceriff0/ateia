@@ -25,8 +25,18 @@ process QUANTIFY {
 
     script:
     def args = task.ext.args ?: ''
-    // Channel name from CSV metadata (set in postprocess.nf from meta.channels)
+    // The marker's DECLARED name, resolved from meta.channels by
+    // quantify_markers.nf's ChannelName.declaredFor -- NOT the tiff's filename
+    // stem. It fills the <marker> slot of the "<marker>: <Compartment>:
+    // <Statistic>" key qupath-extension-flowpath parses case-sensitively, so it
+    // must arrive at bin/quantify.py byte-for-byte as the samplesheet spelled it.
+    //
+    // Which is why it is POSIX-quoted rather than wrapped in hand-written single
+    // quotes: a declared name is arbitrary samplesheet text, and until this seam
+    // existed the value reaching here had already been through a filename
+    // allowlist, so nothing unquotable could occur.
     def channel_name = meta.channel_name
+    def channel_arg = ChannelName.shellQuote(channel_name)
     // Per-compartment quantification: route the nuclear mask in when enabled.
     // The mask path is only available here (not in modules.config ext.args), so the
     // toggle is read from params; the --expanded flag arrives via ext.args.
@@ -46,12 +56,12 @@ process QUANTIFY {
     echo "${task.process},${meta.patient_id},${channel_tiff.name}+${cell_mask.name},\${total_bytes}" > ${meta.id}.QUANTIFY.size.csv
 
     echo "Sample: ${meta.patient_id}"
-    echo "Channel: ${channel_name}"
+    echo "Channel: "${channel_arg}
 
     # Run quantification on this single channel TIFF
     quantify.py \\
         --channel_tiff ${channel_tiff} \\
-        --channel-name '${channel_name}' \\
+        --channel-name ${channel_arg} \\
         --mask_file ${cell_mask} \\
         ${nuclei_arg} \\
         --outdir . \\

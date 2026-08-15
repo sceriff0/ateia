@@ -237,6 +237,92 @@ nextflow_process {
         }
     }
 
+    test("Should render the DECLARED marker name, shell-quoted - rendered command") {
+
+        // Tagged `stub` for CI's blocking gate, deliberately WITHOUT `options "-stub"`
+        // -- a stub run never evaluates a `script:` block.
+        //
+        // `--channel-name` fills the <marker> slot of the "<marker>: <Compartment>:
+        // <Statistic>" key that qupath-extension-flowpath parses case-sensitively, so
+        // what it renders IS the published contract. Two things are pinned:
+        //
+        //  - the value is meta.channel_name verbatim (`HLA.DR`), not the sanitised
+        //    stem the tiff on disk carries (`HLA_DR`);
+        //  - it is POSIX-quoted. Until identity started riding in meta, the value had
+        //    already been through a filename allowlist, so nothing unquotable could
+        //    reach a shell here. Declared samplesheet text has no such guarantee.
+        tag "stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [patient_id: 'P001', channels: ['DAPI', 'HLA.DR'],
+                     id: 'P001_HLA_DR', channel_stem: 'HLA_DR', channel_name: 'HLA.DR'],
+                    file('$projectDir/tests/testdata/HLA_DR.tiff', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_cell_mask.npy', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_cell_mask.tif', checkIfExists: true),
+                    file('$projectDir/assets/NO_REDSEA', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            def rendered = []
+            new File("$workDir").eachFileRecurse { f ->
+                if (f.name == '.command.sh' && f.text.contains('quantify.py')) { rendered << f.text }
+            }
+            assertAll(
+                { assert rendered.size() >= 1, "no rendered QUANTIFY .command.sh found" },
+                { assert rendered.every { it.contains("--channel-name 'HLA.DR'") },
+                    "rendered command: " + rendered.join(' --- ') },
+                { assert rendered.every { !it.contains("--channel-name 'HLA_DR'") },
+                    "the sanitised stem is still being published as the marker name: " +
+                    rendered.join(' --- ') }
+            )
+        }
+    }
+
+    test("Should shell-quote a marker name that cannot be wrapped in bare quotes - rendered command") {
+
+        // The half the previous case cannot see. `--channel-name '${channel_name}'`
+        // -- hand-written quotes around an interpolation -- is correct for every name
+        // that does not itself contain a single quote, and a marker's name reaching
+        // here had always been through a filename allowlist, so one never could.
+        // Identity now rides in meta as arbitrary samplesheet text. An apostrophe
+        // closes the hand-written quote and hands bash the remainder as code.
+        tag "stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [patient_id: 'P001', channels: ["O'Brien"],
+                     id: 'P001_O_Brien', channel_stem: 'O_Brien', channel_name: "O'Brien"],
+                    file('$projectDir/tests/testdata/sample_DAPI.tif', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_cell_mask.npy', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_cell_mask.tif', checkIfExists: true),
+                    file('$projectDir/assets/NO_REDSEA', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            def rendered = []
+            new File("$workDir").eachFileRecurse { f ->
+                if (f.name == '.command.sh' && f.text.contains('quantify.py')) { rendered << f.text }
+            }
+            assertAll(
+                { assert rendered.size() >= 1, "no rendered QUANTIFY .command.sh found" },
+                // close-escape-reopen: 'O'\''Brien' is the only POSIX spelling.
+                { assert rendered.every { it.contains("--channel-name 'O'\\''Brien'") },
+                    "rendered command: " + rendered.join(' --- ') }
+            )
+        }
+    }
+
     test("Should render the DEFAULT statistic list and nothing more - rendered command") {
 
         // Tagged `stub` for CI's blocking gate but WITHOUT `options "-stub"`: the
