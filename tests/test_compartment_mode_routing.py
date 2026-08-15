@@ -55,7 +55,8 @@ counterexamples (see CLAUDE.md's verification-reality note on
      anywhere in `conf/*.config` today (only a comment mentions the first
      name), so allowlisting the whole file "because config always gets a
      pass" would hide a real future regression of either. The allowlist entry
-     below names the one line, not the file wholesale.
+     below names the one SITE -- identified by the text that makes it
+     legitimate, the `quantifyStatistics(` call -- not the file wholesale.
 """
 
 from __future__ import annotations
@@ -115,35 +116,31 @@ ALLOWED_FILES = {
     ),
 }
 
-# path-relative-to-ROOT -> {1-based line numbers}. An EXACT-LINE exemption,
+# path-relative-to-ROOT -> {line-content marker: reason}. A SINGLE-SITE exemption,
 # stricter than ALLOWED_FILES: conf/modules.config's reason (ext.args cannot
-# see lib/*.groovy classes) applies to the ONE line that actually needs it,
+# see lib/*.groovy classes) applies to the ONE site that actually needs it,
 # not the file as a whole -- conf/modules.config does not read
 # params.quantify_compartments or params.embed_masks anywhere today, and a
 # whole-file exemption would hide either regressing into this file silently.
-ALLOWED_LINES = {
+#
+# The site is identified by CONTENT, not by line number. It used to be pinned to an
+# exact 1-based line, which is a position: nine unrelated edits ABOVE it moved that
+# position (718 -> 722 -> 727 -> 786 -> 807 -> 827 -> 844 -> 856 -> 852 -> 892),
+# it conflicted in all three of this branch's merges, and each forced re-pin was an
+# opportunity to widen the exemption by accident. A content marker moves with the
+# line it describes, so an edit above it costs nothing.
+#
+# Matching by content is not looser than matching by position, because the marker is
+# the very thing that makes the read legitimate -- the call to conf/modules.config's
+# own quantifyStatistics() helper, which exists precisely because a lib/ class is
+# unreachable from an ext.args closure. A raw read added ANYWHERE else in the file
+# does not carry it and is still an offender (proven by planting one), and
+# test_scan_actually_finds_the_consumers pins the match count at exactly ONE, so a
+# SECOND site cannot slip in behind the marker either -- which is the only thing the
+# line pin gave for free.
+ALLOWED_LINE_CONTENT = {
     "conf/modules.config": {
-        # Line-pinned on purpose (see test_scan_actually_finds_the_consumers): an
-        # exemption keyed to a file rather than a line would cover the next raw read
-        # added anywhere in it. The cost is that unrelated edits above this line move
-        # it -- 718 -> 722 when the reg_qc=2 QC stopped segmenting for itself and
-        # SEG_QC_GEOJSON's block shrank; 722 -> 727 when feat/lsa-cell-pairing's
-        # rewritten WARP_SEG_QC ext.args comment added 5 net lines above it;
-        # 727 -> 786 when REDSEA added redseaMarkerList() near the top of the file
-        # and a REDSEA_MATRIX withName: block above QUANTIFY's; 786 -> 807 when the
-        # z-score work added a comment line to quantifyStatistics().
-        # This pin has moved SIX times on one refactor branch, which is the finding:
-        # an exact-LINE exemption conflicts with every change above it in the file.
-        # 807 -> 827 (QUANTIFY's flat 128 GB became a size-derived tier ladder)
-        # -> 844 (its flat 12 h wall became batch-scaled)
-        # -> 856 (that wall's comment corrected: a QUANTIFY walltime kill is NOT
-        #         swallowed by the errorStrategy 'ignore' branch, which covers only
-        #         seven QC processes)
-        # -> 852 (EXTRACT_CELL/NUCLEI_PROPERTIES' two withName: blocks collapsed)
-        # -> 892 (PUBLISH_PASSTHROUGH added, and the adapter-cardinality work above)
-        # Re-pin, do not widen. (Re-pin from the file, not by guessing:
-        # `grep -n "quantifyStatistics(params.quantify_statistics)" conf/modules.config`.)
-        892: (
+        "quantifyStatistics(": (
             "ext.args = { ... quantifyStatistics(params.quantify_statistics) ... } "
             "-- conf/*.config closures cannot see lib/*.groovy classes, so "
             "ParamUtils.statisticsList is unreachable and ext.args must read the "
@@ -172,17 +169,16 @@ def _read_sites() -> list[tuple[Path, int, str]]:
     return sites
 
 
-def _is_allowed(rel_path: str, lineno: int) -> bool:
+def _is_allowed(rel_path: str, line: str) -> bool:
     if rel_path in ALLOWED_FILES:
         return True
-    return lineno in ALLOWED_LINES.get(rel_path, set())
+    return any(marker in line for marker in ALLOWED_LINE_CONTENT.get(rel_path, {}))
 
 
 def test_scan_actually_finds_the_consumers():
     """A scan matching nothing would pass the allowlist check vacuously."""
     sites = _read_sites()
     files = {str(path.relative_to(ROOT)) for path, _no, _line in sites}
-    lines = {(str(path.relative_to(ROOT)), no) for path, no, _line in sites}
     assert len(sites) >= 4, f"only {len(sites)} read site(s) found -- globs may be stale"
     for expected in ALLOWED_FILES:
         assert expected in files, (
@@ -192,13 +188,25 @@ def test_scan_actually_finds_the_consumers():
             "entry for a file that no longer needs it lets this test go "
             "quiet on the next regression."
         )
-    for expected_file, expected_linenos in ALLOWED_LINES.items():
-        for expected_lineno in expected_linenos:
-            assert (expected_file, expected_lineno) in lines, (
-                f"{expected_file}:{expected_lineno} no longer reads a "
-                "compartment-quantification param raw. Remove its ALLOWED_LINES "
-                "entry too, so a real regression on that exact line cannot hide "
-                "behind a stale exemption."
+    for expected_file, markers in ALLOWED_LINE_CONTENT.items():
+        for marker in markers:
+            matched = [
+                f"{path.relative_to(ROOT)}:{no}: {line.strip()}"
+                for path, no, line in sites
+                if str(path.relative_to(ROOT)) == expected_file and marker in line
+            ]
+            assert len(matched) == 1, (
+                f"{expected_file} has {len(matched)} raw read(s) carrying the "
+                f"exemption marker {marker!r}; exactly 1 is pinned.\n"
+                "  0 means the site was routed (or the marker was renamed) and the "
+                "ALLOWED_LINE_CONTENT entry is now stale -- remove it, so a real "
+                "regression cannot hide behind a dead exemption.\n"
+                "  2+ means a SECOND raw read appeared behind the same marker. The "
+                "exact-line pin this replaced would have caught that, so it is "
+                "caught here instead: route the new one through "
+                "ParamUtils.compartmentMode(), or, if it is genuinely a second "
+                "ext.args closure that cannot see lib/, raise the pinned count "
+                "deliberately and say why.\n" + "\n".join(matched)
             )
 
 
@@ -209,7 +217,7 @@ def test_no_file_outside_the_resolver_and_allowlist_reads_it_raw():
     offenders = [
         f"{path.relative_to(ROOT)}:{no}: {line.strip()}"
         for path, no, line in _read_sites()
-        if not _is_allowed(str(path.relative_to(ROOT)), no)
+        if not _is_allowed(str(path.relative_to(ROOT)), line)
     ]
     assert not offenders, (
         f"{len(offenders)} site(s) read a compartment-quantification param raw "
