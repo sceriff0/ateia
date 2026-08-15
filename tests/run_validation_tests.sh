@@ -32,6 +32,23 @@ echo ""
 rm -rf "$OUTPUT_DIR"
 mkdir -p "$OUTPUT_DIR"
 
+# `dry_run` is a `type: boolean` parameter in nextflow_schema.json and MUST NOT
+# be passed on the command line.
+#
+#   * Nextflow 25.04.x turned `--dry_run true` (and a bare `--dry_run`) into a
+#     real Boolean, so nf-schema accepted it.
+#   * Nextflow 26.04.x hands EVERY `--param` through to nf-schema as a String —
+#     `--dry_run true` AND a valueless `--dry_run` both arrive as the string
+#     "true" — and validateParameters() rejects the run with
+#         * --dry_run (true): Value is [string] but should be [boolean]
+#     (measured on NXF_VER=26.04.6; a valueless flag is NOT a workaround).
+#
+# A `-params-file` carries a real JSON boolean, which is a different code path
+# and is accepted unchanged by both engines. Any future boolean parameter this
+# script needs must go in this file, never on the command line.
+PARAMS_FILE="$OUTPUT_DIR/dry_run_params.json"
+printf '{ "dry_run": true }\n' > "$PARAMS_FILE"
+
 # Helper function to run a test.
 #
 # Usage: run_test <name> <pass|fail> <input_csv> <expected_error> [extra nextflow args...]
@@ -53,14 +70,16 @@ run_test() {
     local output_file="$OUTPUT_DIR/test_${TESTS_TOTAL}.log"
     local exit_code=0
 
-    # Run pipeline with dry_run for fast validation.
+    # Run pipeline with dry_run for fast validation. `dry_run` comes from
+    # $PARAMS_FILE, never the command line — see the comment where it is
+    # written; a CLI boolean is rejected on Nextflow 26.
     # ${arr[@]+"${arr[@]}"} safely expands a possibly-empty array under `set -u`
     # (bash 3.2 on macOS errors on a bare "${arr[@]}" when empty).
     cd "$PROJECT_ROOT"
     nextflow run main.nf \
+        -params-file "$PARAMS_FILE" \
         --input "$input_csv" \
         --outdir "$OUTPUT_DIR/test_${TESTS_TOTAL}" \
-        --dry_run true \
         ${extra_args[@]+"${extra_args[@]}"} \
         > "$output_file" 2>&1 || exit_code=$?
 

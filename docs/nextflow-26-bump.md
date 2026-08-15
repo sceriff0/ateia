@@ -108,14 +108,16 @@ command line across `docs/`, `.github/workflows/`, `params/*.json`,
   `-params-file`, which is a different code path from CLI-string parsing and
   was not the one that broke in Task 4's measurement.
 - `.github/workflows/*.yml` — no inline `--<bool> true|false` invocations
-  found directly in workflow YAML.
+  found directly in workflow YAML. Note this is *not* the same as "the
+  workflows are safe": they invoke `tests/run_validation_tests.sh`, which did
+  carry one (see below).
 
-**Actual pre-bump work — CLI invocations of a boolean param as a literal
-string, found by the grep sweep:**
+**CLI invocations of a boolean param as a literal string, found by the grep
+sweep.** Only the first row is executed; it is fixed, the rest are docs:
 
 | File | Line(s) | Flag | Executed by CI? |
 |---|---|---|---|
-| `tests/run_validation_tests.sh` | 63 | `--dry_run true` | **Yes** — `.github/workflows/ci.yml:185` and `.github/workflows/release.yml:129` both `bash tests/run_validation_tests.sh` directly |
+| `tests/run_validation_tests.sh` | ~~63~~ **FIXED** | ~~`--dry_run true`~~ → `-params-file` | **Yes, and on Nextflow 26 today** — `.github/workflows/ci.yml:185` runs it in the `nextflow-stub` job, whose matrix includes `latest-everything`; `.github/workflows/release.yml`'s test gate is `latest-everything` only |
 | `README.md` | 90 | `--dry_run true` | copy-paste example only |
 | `docs/usage.md` | 82, 132 | `--dry_run true` | copy-paste examples only |
 | `tests/test_validation.md` | 365 | `--dry_run true` | doc mirror of the script above |
@@ -127,14 +129,42 @@ string, found by the grep sweep:**
 | `docs/outputs.md` | 45, 94 | `--allow_auto_reference true`, `--quantify_compartments false` | prose examples only |
 | `CHANGELOG.md` | 175-177, 185, 536 | `--embed_masks true`, `--skip_final_qc_report=false`, `--enable_trace=true` | historical, not executed |
 
-**The one item that actually breaks CI on the day of the bump** is
-`tests/run_validation_tests.sh:63` — it is invoked directly by both
-`ci.yml` and `release.yml`, not just documented. It must be changed (e.g. to
-a `-params-file` with a real JSON boolean, or to whatever CLI spelling the
-bumped nf-schema still coerces, if any) as part of the same PR that performs
-the bump, or that PR's own CI goes red immediately. Everything else in the
-table is a documentation correctness problem, not a CI-breaking one, but all
-of it teaches users a spelling that stops working.
+#### This hazard is PRESENT TODAY — it does not wait for the bump
+
+`tests/run_validation_tests.sh` was **not** a "day of the bump" problem, and
+describing it as one was wrong. `.github/workflows/ci.yml`'s `nextflow-stub`
+job runs a matrix of `['25.04.0', 'latest-everything']`, and (as noted in
+section 2) `latest-everything` **already tracks whatever Nextflow is current**
+— which is Nextflow 26 today, on every push and every PR. That job runs
+`bash tests/run_validation_tests.sh` at `ci.yml:185`, and it is in the
+`all-tests` blocking gate. `.github/workflows/release.yml`'s test gate pins
+`version: 'latest-everything'` outright, so it is 26-only.
+
+In other words: raising `manifest.nextflowVersion` changes what the pipeline
+*claims* to support. It does not change which engine CI executes. The boolean
+hazard was live on the `latest-everything` leg the whole time, with no bump
+performed and none required to trigger it.
+
+**FIXED in this branch.** `tests/run_validation_tests.sh` now writes a tiny
+`{ "dry_run": true }` JSON file and passes it with `-params-file`, so the
+boolean reaches `validateParameters()` as a real JSON boolean. `dry_run` is no
+longer passed on the command line at all.
+
+**MEASURED, and it disproves the obvious workaround:** a *valueless*
+`--dry_run` is **not** a fix. On `NXF_VER=26.04.6` every `--param` reaches
+nf-schema as a `String`, including a flag given no value —
+
+```
+$ NXF_VER=26.04.6 nextflow run main.nf ... --dry_run
+* --dry_run (true): Value is [string] but should be [boolean]
+```
+
+whereas `NXF_VER=25.04.7` yields `class java.lang.Boolean` for the same bare
+flag. `-params-file` is the only spelling verified green on **both** engines.
+
+Everything else in the table is a documentation correctness problem, not a
+CI-breaking one, but all of it teaches users a spelling that stops working —
+and it stops working on the `latest-everything` leg now, not later.
 
 ### 3c. MEASURED: `NXF_SYNTAX_PARSER=v2` on 25.04.7 is not a faithful preview of 26
 
