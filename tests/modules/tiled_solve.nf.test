@@ -76,19 +76,32 @@ nextflow_process {
                     rendered << f.text
                 }
             }
+            // Extract each flag's COMPLETE value as a token. A substring match on the flag
+            // and value together is also satisfied by a LONGER value -- an assertion written
+            // for 0.99 is silently satisfied by 0.9999, which re-admits background (measured
+            // error 0.99947) into the mesh. That one-character config edit is exactly what
+            // these cases exist to catch, so the value is compared as a whole token.
+            def flagValue = { txt, flag ->
+                def m = (txt =~ (java.util.regex.Pattern.quote(flag) + /\s+(\S+)/))
+                m.find() ? m.group(1) : null
+            }
 
             assertAll(
                 { assert rendered.size() >= 1,
                     "no rendered TILED_SOLVE .command.sh found under the task work dir" },
-                { assert rendered.every { it.contains('--max-error 0.99') },
-                    "rendered command missing --max-error (params.reg_tiled_max_error default 0.99): " + rendered.join(' --- ') },
+                { assert rendered.every { flagValue(it, '--max-error') == '0.99' },
+                    "--max-error is not exactly 0.99 (params.reg_tiled_max_error default). A looser " +
+                    "value such as 0.9999 re-admits background into the mesh; got: " +
+                    rendered.collect { flagValue(it, '--max-error') }.join(', ') },
                 // reg_tiled_max_disp is declared null in nextflow.config so it DERIVES from the
                 // read halo: a match further than the halo was never inside the read window.
-                { assert rendered.every { it.contains('--max-disp 256') },
-                    "rendered command missing --max-disp derived from params.reg_tiled_halo (256): " + rendered.join(' --- ') },
+                { assert rendered.every { flagValue(it, '--max-disp') == '256' },
+                    "--max-disp is not exactly 256 (derived from params.reg_tiled_halo); got: " +
+                    rendered.collect { flagValue(it, '--max-disp') }.join(', ') },
                 // the pre-existing gate must survive the change
-                { assert rendered.every { it.contains('--gate-tre 1.0') },
-                    "rendered command missing --gate-tre: " + rendered.join(' --- ') }
+                { assert rendered.every { flagValue(it, '--gate-tre') == '1.0' },
+                    "--gate-tre is not exactly 1.0; got: " +
+                    rendered.collect { flagValue(it, '--gate-tre') }.join(', ') }
             )
         }
     }
@@ -121,12 +134,22 @@ nextflow_process {
                     rendered << f.text
                 }
             }
+            // Extract each flag's COMPLETE value as a token. A substring match on the flag
+            // and value together is also satisfied by a LONGER value -- an assertion written
+            // for 0.99 is silently satisfied by 0.9999, which re-admits background (measured
+            // error 0.99947) into the mesh. That one-character config edit is exactly what
+            // these cases exist to catch, so the value is compared as a whole token.
+            def flagValue = { txt, flag ->
+                def m = (txt =~ (java.util.regex.Pattern.quote(flag) + /\s+(\S+)/))
+                m.find() ? m.group(1) : null
+            }
 
             assertAll(
                 { assert rendered.size() >= 1,
                     "no rendered TILED_SOLVE .command.sh found under the task work dir" },
-                { assert rendered.every { it.contains('--max-disp 512') },
-                    "--max-disp did not follow reg_tiled_halo: " + rendered.join(' --- ') }
+                { assert rendered.every { flagValue(it, '--max-disp') == '512' },
+                    "--max-disp did not follow reg_tiled_halo; got: " +
+                    rendered.collect { flagValue(it, '--max-disp') }.join(', ') }
             )
         }
     }
@@ -158,16 +181,27 @@ nextflow_process {
                     rendered << f.text
                 }
             }
+            // Extract each flag's COMPLETE value as a token. A substring match on the flag
+            // and value together is also satisfied by a LONGER value -- an assertion written
+            // for 0.99 is silently satisfied by 0.9999, which re-admits background (measured
+            // error 0.99947) into the mesh. That one-character config edit is exactly what
+            // these cases exist to catch, so the value is compared as a whole token.
+            def flagValue = { txt, flag ->
+                def m = (txt =~ (java.util.regex.Pattern.quote(flag) + /\s+(\S+)/))
+                m.find() ? m.group(1) : null
+            }
 
             assertAll(
                 { assert rendered.size() >= 1,
                     "no rendered TILED_SOLVE .command.sh found under the task work dir" },
                 // 100 is not the halo (256), so this proves the override is honoured rather
                 // than coincidentally agreeing with the derived value.
-                { assert rendered.every { it.contains('--max-disp 100') },
-                    "explicit params.reg_tiled_max_disp was not honoured: " + rendered.join(' --- ') },
-                { assert rendered.every { it.contains('--max-error 0.8') },
-                    "explicit params.reg_tiled_max_error was not honoured: " + rendered.join(' --- ') }
+                { assert rendered.every { flagValue(it, '--max-disp') == '100' },
+                    "explicit params.reg_tiled_max_disp was not honoured; got: " +
+                    rendered.collect { flagValue(it, '--max-disp') }.join(', ') },
+                { assert rendered.every { flagValue(it, '--max-error') == '0.8' },
+                    "explicit params.reg_tiled_max_error was not honoured; got: " +
+                    rendered.collect { flagValue(it, '--max-error') }.join(', ') }
             )
         }
     }
