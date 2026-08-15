@@ -1,0 +1,176 @@
+/*
+ * PatientArtifacts — the per-patient fan-in that owns "a patient's artifacts".
+ *
+ * Two halves of the contract are observable only as a FAILED run (a missing patient,
+ * a duplicated one), so they need a script whose expected outcome is a nonzero exit;
+ * see tests/patient_artifacts_probe.nf's header for the defect each pins.
+ *
+ * `options "-lib $projectDir/lib"` for the same reason tests/patient_group_probe.nf.test
+ * and tests/lib_probe.nf.test carry it: nf-test never passes -lib itself, and Nextflow's
+ * automatic lib/ discovery looks next to the SCRIPT (tests/), not next to the repo root.
+ *
+ * No `options "-stub"`: the script declares no processes, and every assertion is in the
+ * script body, which always runs.
+ */
+nextflow_pipeline {
+
+    name "PatientArtifacts — a patient's artifacts, joined once and strictly"
+    script "tests/patient_artifacts_probe.nf"
+    tag "stub"
+
+    test("the defect: a hand-written positional chain drops the short patient and exits 0") {
+        options "-lib $projectDir/lib"
+        when {
+            params {
+                outdir  = "$outputDir"
+                pa_case = "legacy"
+            }
+        }
+        then {
+            // This is what the pipeline did before PatientArtifacts, kept executable so
+            // the silent drop is observed rather than remembered: two patients in, ONE
+            // row out, exit 0, nothing said.
+            assert workflow.success
+            def out = workflow.stdout.join('\n')
+            assert out.contains('ROW: P001')
+            assert !out.contains('ROW: P002')
+        }
+    }
+
+    test("a patient missing from one field aborts, naming the seam, the field and the patient") {
+        options "-lib $projectDir/lib"
+        when {
+            params {
+                outdir  = "$outputDir"
+                pa_case = "missing"
+            }
+        }
+        then {
+            assert workflow.failed
+            def out = workflow.stdout.join('\n') + workflow.stderr.join('\n')
+            // The seam, so the reader knows WHICH fan-in refused.
+            assert out.contains('POSTPROCESSING: the postprocessed checkpoint row')
+            // The field whose producer came up short.
+            assert out.contains('pyramid')
+            // The patient that went missing -- the whole point of the task.
+            assert out.contains('P002')
+            // And it must not have quietly emitted the patients that did survive.
+            assert !out.contains('ROW: P001')
+        }
+    }
+
+    test("a field carrying a patient the roster does not have aborts") {
+        options "-lib $projectDir/lib"
+        when {
+            params {
+                outdir  = "$outputDir"
+                pa_case = "extra"
+            }
+        }
+        then {
+            assert workflow.failed
+            def out = workflow.stdout.join('\n') + workflow.stderr.join('\n')
+            assert out.contains('POSTPROCESSING: the postprocessed checkpoint row')
+            assert out.contains('pyramid')
+            assert out.contains('P002')
+            // The roster field is named too: an extra key means one of the two is wrong,
+            // and the reader cannot tell which without knowing what defined the roster.
+            assert out.contains('cell_mask')
+        }
+    }
+
+    test("a patient emitted twice on one field aborts") {
+        options "-lib $projectDir/lib"
+        when {
+            params {
+                outdir  = "$outputDir"
+                pa_case = "duplicate"
+            }
+        }
+        then {
+            assert workflow.failed
+            def out = workflow.stdout.join('\n') + workflow.stderr.join('\n')
+            assert out.contains('P002')
+        }
+    }
+
+    test("every field reads back by name, from either keying convention") {
+        options "-lib $projectDir/lib"
+        when {
+            params {
+                outdir  = "$outputDir"
+                pa_case = "named"
+            }
+        }
+        then {
+            assert workflow.success
+            def out = workflow.stdout.join('\n')
+            // BOTH patients, and each field holding ITS OWN producer's file. These four
+            // assertions are what stands between cell_csv and cell_geojson; the
+            // `transposed` test below watches them be the ones that catch a swap.
+            assert out.contains('ROW: P001 meta_id=P001_ref cell_csv=P001_cells_data.csv ' +
+                                'cell_geojson=P001_cells.geojson merged_csv=P001_merged.csv ' +
+                                'cell_mask=P001_cell_mask.tif pyramid=P001_pyramid.ome.tif')
+            assert out.contains('ROW: P002 meta_id=P002_ref cell_csv=P002_cells_data.csv ' +
+                                'cell_geojson=P002_cells.geojson merged_csv=P002_merged.csv ' +
+                                'cell_mask=P002_cell_mask.tif pyramid=P002_pyramid.ome.tif')
+        }
+    }
+
+    test("swapping the cell_csv / cell_geojson producers is observable, so the named assertions catch it") {
+        options "-lib $projectDir/lib"
+        when {
+            params {
+                outdir  = "$outputDir"
+                pa_case = "transposed"
+            }
+        }
+        then {
+            // The inverted guard. A test that only ever asserts the correct binding
+            // proves nothing unless a wrong binding is shown to break it, and on this
+            // codebase a guard nobody watched fail has repeatedly turned out to be
+            // checking nothing. So the swap is executed here: the two files land under
+            // each other's field name, which is exactly what the `named` test forbids.
+            assert workflow.success
+            def out = workflow.stdout.join('\n')
+            assert out.contains('cell_csv=P001_cells.geojson')
+            assert out.contains('cell_geojson=P001_cells_data.csv')
+            // ...and the correct binding is therefore absent, i.e. `named` would fail.
+            assert !out.contains('cell_csv=P001_cells_data.csv')
+        }
+    }
+
+    test("a run-level gated field falls back to a named sibling instead of emptying the bundle") {
+        options "-lib $projectDir/lib"
+        when {
+            params {
+                outdir  = "$outputDir"
+                pa_case = "gate"
+            }
+        }
+        then {
+            assert workflow.success
+            def out = workflow.stdout.join('\n')
+            // Both patients survive --quantify_compartments being off, and the gated
+            // field carries the sibling it was declared to fall back to.
+            assert out.contains('GATED: P001 contours=P001_contours.json nucleus_contours=P001_contours.json')
+            assert out.contains('GATED: P002 contours=P002_contours.json nucleus_contours=P002_contours.json')
+        }
+    }
+
+    test("a per-patient optional field keeps the patient that has none") {
+        options "-lib $projectDir/lib"
+        when {
+            params {
+                outdir  = "$outputDir"
+                pa_case = "optional"
+            }
+        }
+        then {
+            assert workflow.success
+            def out = workflow.stdout.join('\n')
+            assert out.contains('OPTIONAL: P001 reg_qc=P001_seg_qc.json')
+            assert out.contains('OPTIONAL: P002 reg_qc=NONE')
+        }
+    }
+}
