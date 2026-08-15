@@ -173,7 +173,7 @@ unaffected by that number.
 |---|---|---|---|---|
 | `SPLIT_CHANNELS` | `1` | tier: `f<5` → 32, `f<15` → 64, else 128 GB, `× attempt` | `2.h × attempt` | `withName` |
 | `REDSEA_MATRIX` | `1` | `96 GB × attempt` | `6.h × attempt` | `withName` |
-| `QUANTIFY` | `1` | tier on masks + largest channel: `f<4` → 32, `f<12` → 64, else 128 GB, `× attempt` | `12.h × attempt` | `withName` |
+| `QUANTIFY` | `1` | tier on masks + largest channel: `f<4` → 32, `f<12` → 64, else 128 GB, `× attempt` | `12.h + 1.h × markers × attempt` | `withName` |
 | `MERGE_QUANT_CSVS` | `2` | `32 GB × attempt` | `2.h × attempt` | `process_low` |
 | `COMPILE_PANEL` | `1` | `4 GB × attempt` | `30.min × attempt` | `withName` |
 | `PHENOTYPE` | `1` | `16 GB × 2^(attempt−1)` → 16 / 32 / 64 / 128 | `4.h × attempt` | `withName` |

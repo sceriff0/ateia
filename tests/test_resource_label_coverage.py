@@ -487,6 +487,33 @@ DOC_SIZE_LINEAR_RE = re.compile(
     r"f\s*\u00d7\s*(\d+(?:\.\d+)?)\s*GB\s*\u00d7\s*attempt\s*\+\s*(\d+(?:\.\d+)?)\s*GB"
 )
 
+# The one BATCH-SCALED time shape: `12.h + 1.h * markers.size() * task.attempt`.
+# QUANTIFY quantifies a patient's whole panel in one task, so its wall must grow
+# with the batch; a flat number there is a walltime kill that takes the patient's
+# ENTIRE panel instead of one marker, and conf/modules.config's errorStrategy
+# 'ignore' branch can drop it from a green run.
+#
+# The two numbers play DIFFERENT roles -- the first is a floor that no batch may
+# fall below (a two-marker patient must not get less wall than the per-marker
+# fan-out gave one marker), the second is the per-marker allowance -- so they are
+# captured POSITIONALLY, exactly as CONFIG_SIZE_LINEAR_RE does for PREPROCESS.
+# Pooling them would let a doc cell state the right pair backwards.
+#
+# Without this pair, `expr_values_per_attempt` returns None for the shape and the
+# time check REFUSES the row outright ("not a plain number this guard can
+# evaluate ... NOTHING is checking it"). That refusal was confirmed empirically
+# before this was written, and it is the guard's own documented remedy: teach the
+# evaluator the new shape rather than exempt or simplify.
+CONFIG_TIME_BATCH_RE = re.compile(
+    r"(\d+(?:\.\d+)?)\s*\.\s*h\s*\+\s*(\d+(?:\.\d+)?)\s*\.\s*h\s*\*\s*"
+    r"markers\s*\.\s*size\(\)\s*\*\s*task\.attempt"
+)
+# The same shape as docs/resources.md writes it: `12.h + 1.h × markers × attempt`.
+DOC_TIME_BATCH_RE = re.compile(
+    r"(\d+(?:\.\d+)?)\s*\.?\s*h\s*\+\s*(\d+(?:\.\d+)?)\s*\.?\s*h\s*"
+    r"\u00d7\s*markers\s*\u00d7\s*attempt"
+)
+
 # The doubling ramp as the doc renders it: `2^(attempt-1)` (Unicode minus or
 # ASCII hyphen). Its `2` and `1` are notation, not memory magnitudes, so the
 # whole token is removed before the cell's numbers are read.
@@ -741,6 +768,41 @@ def _doc_size_linear(cell: str):
     return coefficient, addend, leftover
 
 
+def batch_time_mismatch(expr: str, cell: str) -> str | None:
+    """Why `cell` misstates a BATCH-SCALED time `expr`, or None if it states it.
+
+    Only called for expressions matching CONFIG_TIME_BATCH_RE. The floor and the
+    per-marker allowance are compared in their own positions, and any leftover
+    number in the doc cell is an error rather than noise -- a stray magnitude is
+    how a cell states two rules and is checked against one.
+    """
+    config = CONFIG_TIME_BATCH_RE.search(expr)
+    assert config, f"batch_time_mismatch called on a non-batch expression: {expr!r}"
+    documented = DOC_TIME_BATCH_RE.search(cell)
+    if not documented:
+        return (
+            f"does not state the batch-scaled shape at all. conf/modules.config "
+            f"says `{config.group(0)}`; the doc must say "
+            f"`{config.group(1)}.h + {config.group(2)}.h \u00d7 markers \u00d7 attempt`. "
+            "A cell that drops the `\u00d7 markers` reads as a flat wall, which is "
+            "the exact defect the scaling exists to remove."
+        )
+    floor, per_marker = float(config.group(1)), float(config.group(2))
+    doc_floor, doc_per = float(documented.group(1)), float(documented.group(2))
+    if (doc_floor, doc_per) != (floor, per_marker):
+        return (
+            f"states floor {doc_floor} h and {doc_per} h per marker, but "
+            f"conf/modules.config gives {floor} h and {per_marker} h per marker"
+        )
+    leftover = _numbers(cell.replace(documented.group(0), " ", 1))
+    if leftover:
+        return (
+            f"states {sorted(leftover)} outside the batch-scaled shape -- every "
+            "magnitude in the cell must belong to a rule the config actually has"
+        )
+    return None
+
+
 def memory_cell_mismatch(expr: str, cell: str) -> str | None:
     """Return why `cell` misstates `expr`, or None if it states it correctly.
 
@@ -962,6 +1024,37 @@ def test_expr_values_per_attempt_handles_the_shapes_in_modules_config():
     assert expr_values_per_attempt("(file_gb < 10 ? 32.GB : 64.GB) * task.attempt") is None
 
 
+def test_batch_time_mismatch_binds_each_number_to_its_role():
+    """The floor and the per-marker allowance must not be interchangeable.
+
+    QUANTIFY's wall is `12.h + 1.h * markers.size() * task.attempt`: a floor no
+    batch may fall below, plus an allowance per marker in the batch. A doc cell
+    stating the same two numbers in the other order describes a WILDLY different
+    rule (12 h per marker on top of a 1 h floor), so the two are compared in
+    their own positions. Every branch below was watched failing.
+    """
+    expr = "12.h + 1.h * markers.size() * task.attempt"
+    good = "`12.h + 1.h \u00d7 markers \u00d7 attempt`"
+    assert batch_time_mismatch(expr, good) is None
+
+    # swapped roles -- the failure a pooled comparison cannot see
+    assert "states floor 1.0 h and 12.0 h per marker" in (
+        batch_time_mismatch(expr, "`1.h + 12.h \u00d7 markers \u00d7 attempt`") or ""
+    )
+    # the `\u00d7 markers` dropped: reads as a flat wall, the defect the scaling removes
+    assert "does not state the batch-scaled shape at all" in (
+        batch_time_mismatch(expr, "`13.h \u00d7 attempt`") or ""
+    )
+    # a magnitude belonging to no rule the config has
+    assert "outside the batch-scaled shape" in (
+        batch_time_mismatch(expr, good + " (max 40)") or ""
+    )
+    # and the evaluator must still REFUSE the raw shape, so this comparator is
+    # the only thing that can accept it -- if expr_values_per_attempt ever folded
+    # it to a number, the doc cell would be compared against a fiction.
+    assert expr_values_per_attempt(expr) is None
+
+
 def test_memory_cell_mismatch_compares_pairs_not_pooled_numbers():
     """The tiered and size-linear paths must bind each number to its role.
 
@@ -1049,6 +1142,27 @@ def test_every_documented_process_matches_conf_modules_config():
                     "`withName:` block nor the module's label. The doc row cannot be "
                     "checked and the process would run on conf/base.config's defaults."
                 )
+                continue
+            # The batch-scaled time shape is not a plain number and never will be:
+            # its value depends on how many markers the task was handed. It is
+            # compared as (floor, per-marker) magnitudes instead -- checked, not
+            # skipped. Anything mixing the two shapes across a ternary label is
+            # refused rather than half-checked.
+            batch = [e for e in exprs if CONFIG_TIME_BATCH_RE.search(e)]
+            if batch:
+                if len(batch) != len(exprs):
+                    problems.append(
+                        f"{name}: `{field}` is batch-scaled on one branch and a plain "
+                        f"number on another ({exprs}); the doc cell can only state one."
+                    )
+                    continue
+                reasons = [
+                    r for r in (batch_time_mismatch(e, row.get(field, "")) for e in batch) if r
+                ]
+                if reasons:
+                    problems.append(
+                        f"{name}: doc table's {field} cell {row.get(field, '')!r} {reasons[0]}"
+                    )
                 continue
             expected = set()
             unevaluable = [e for e in exprs if expr_values_per_attempt(e) is None]

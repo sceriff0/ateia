@@ -256,6 +256,62 @@ nextflow_process {
         }
     }
 
+    test("Should refuse a short result set and log one size row per staged file - rendered command") {
+
+        // Both halves of the batching's silent-shortfall surface, in the ONE place
+        // -stub cannot see. Tagged `stub` for CI's blocking gate, deliberately
+        // WITHOUT `options "-stub"`.
+        //
+        //  - The output declaration had to widen from an exact filename to the glob
+        //    `*_quant.csv`, and a glob is satisfied by FEWER files than expected. A
+        //    partial write would then be a SUCCEEDING task with a short result set,
+        //    which postprocess.nf's keyed join carries into merged_quant.csv without
+        //    an error. The count check in `script:` is what turns that into exit 1.
+        //  - The size log emits one row per staged file, restoring the per-marker
+        //    provenance the fan-out's one-row-per-task format carried. A single
+        //    `channels/`-style row would lose which marker cost what.
+        tag "stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA'], id: 'P001', channel_name: 'DAPI'],
+                    [[name: 'DAPI',  output: 'P001_sample_DAPI_quant.csv'],
+                     [name: 'PANCK', output: 'P001_sample_PANCK_quant.csv'],
+                     [name: 'SMA',   output: 'P001_sample_SMA_quant.csv']],
+                    [file('$projectDir/tests/testdata/sample_DAPI.tif',  checkIfExists: true),
+                     file('$projectDir/tests/testdata/sample_PANCK.tif', checkIfExists: true),
+                     file('$projectDir/tests/testdata/sample_SMA.tif',   checkIfExists: true)],
+                    file('$projectDir/tests/testdata/P001_cell_mask.npy', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_cell_mask.tif', checkIfExists: true),
+                    file('$projectDir/assets/NO_REDSEA', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            def rendered = []
+            new File("$workDir").eachFileRecurse { f ->
+                if (f.name == '.command.sh' && f.text.contains('quantify.py')) { rendered << f.text }
+            }
+            assertAll(
+                { assert rendered.size() == 1, "expected ONE rendered QUANTIFY command" },
+                // The count is the MARKER COUNT, not a literal that can drift.
+                { assert rendered[0].contains('n_expected=3'),
+                    "rendered command: " + rendered[0] },
+                { assert rendered[0].contains('exit 1'),
+                    "a short result set does not fail the task: " + rendered[0] },
+                // One size row per staged file, not one per task.
+                { assert rendered[0].contains('for staged in sample_DAPI.tif sample_PANCK.tif sample_SMA.tif'),
+                    "size log lost its per-marker provenance: " + rendered[0] },
+                { assert !rendered[0].contains('channels/+'),
+                    "the collapsed single-row size log is still being written: " + rendered[0] }
+            )
+        }
+    }
+
     test("Should NOT pass --redsea-geometry when handed the NO_REDSEA placeholder - rendered command") {
 
         // Tagged `stub` so CI's blocking `nf-test test --tag stub` gate runs it, but

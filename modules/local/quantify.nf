@@ -78,11 +78,19 @@ process QUANTIFY {
     // marker list and REDSEAChecker arrive through ext.args instead.
     def redsea_arg = redsea_npz.name == 'NO_REDSEA' ? '' : "--redsea-geometry ${redsea_npz}"
     """
-    # Log input sizes for tracing (all channel tiffs + cell mask, -L follows symlinks)
-    tiff_bytes=\$(stat -L --printf="%s\\n" ${tiffs_arg} 2>/dev/null | awk '{sum+=\$1} END {print sum+0}')
-    mask_bytes=\$(stat -L --printf="%s" ${cell_mask} 2>/dev/null || echo 0)
-    total_bytes=\$((tiff_bytes + mask_bytes))
-    echo "${task.process},${meta.patient_id},channels/+${cell_mask.name},\${total_bytes}" > ${meta.patient_id}.QUANTIFY.size.csv
+    # Log input sizes for tracing: ONE ROW PER STAGED FILE, so the per-marker
+    # provenance the fan-out's rows carried survives the batching. -L follows
+    # symlinks. bin/generate_resource_report.py's parse_size_log reads only
+    # `process`, `sample_id` and `bytes` (it sums bytes per (process, sample)),
+    # so more rows change no number it computes -- verified by reading it, not
+    # assumed; the `filename` column is read by nothing in bin/ and exists for a
+    # human reading input_sizes.csv. AGGREGATE_SIZE_LOGS just cats the files.
+    : > ${meta.patient_id}.QUANTIFY.size.csv
+    for staged in ${tiffs_arg} ${cell_mask}; do
+        staged_bytes=\$(stat -L --printf="%s" "\${staged}" 2>/dev/null || echo 0)
+        echo "${task.process},${meta.patient_id},\$(basename "\${staged}"),\${staged_bytes}" \\
+            >> ${meta.patient_id}.QUANTIFY.size.csv
+    done
 
     echo "Sample: ${meta.patient_id}"
     echo "Markers: "${names_arg}
@@ -98,6 +106,19 @@ process QUANTIFY {
         --outdir . \\
         ${redsea_arg} \\
         ${args}
+
+    # A PARTIAL WRITE MUST FAIL THE TASK. The output declaration is a glob
+    # (`*_quant.csv`) because one task now writes N files, and a glob is satisfied
+    # by FEWER files than expected -- so without this the task would succeed with a
+    # short result set, and postprocess.nf's `.join(ch_morphology)` would carry the
+    # gap into merged_quant.csv with no error anywhere. Same silent-shortfall shape
+    # the batching was meant to remove, one level down.
+    n_expected=${marker_list.size()}
+    n_written=\$(ls -1 *_quant.csv 2>/dev/null | wc -l | tr -d ' ')
+    if [ "\${n_written}" -ne "\${n_expected}" ]; then
+        echo "QUANTIFY ${meta.patient_id}: wrote \${n_written} per-marker CSV(s), expected \${n_expected}" >&2
+        exit 1
+    fi
 
     ${ProcessEnvelope.versions(task.process, ['pandas', 'skimage'])}
     """
