@@ -13,9 +13,17 @@ particular shape:
 The naive shape — stack every channel into one array (or into a list) and then
 loop over it — produces byte-identical numbers and would pass every equivalence
 test in this repo, while multiplying peak resident memory by the marker count.
-A 128 GB request becomes a genuine multi-terabyte one, and the failure mode is
-an OOM kill that `conf/modules.config`'s errorStrategy `'ignore'` branch can
-drop without failing the run.
+A 128 GB request becomes a genuine multi-terabyte one.
+
+(An earlier revision of this docstring said that OOM could then be dropped by
+`conf/modules.config`'s errorStrategy `'ignore'` branch. That was FALSE and is
+corrected here rather than quietly deleted: the `'ignore'` branch at
+`conf/modules.config:248` is scoped by the `withName:` at `:241` to seven QC
+processes, and QUANTIFY is not one of them. QUANTIFY inherits
+`conf/base.config`, where exit 137 retries up to `maxRetries = 3` and then
+'finish'es — so the run FAILS. The naive shape is worth this much test because
+it costs a patient's entire panel and a loud, expensive failure, not because it
+hides.)
 
 So the load-bearing test here is a MEMORY test, not a numbers test. It is
 written against `bin/quantify.py`'s ONE channel-load seam, `_load_channel`, and

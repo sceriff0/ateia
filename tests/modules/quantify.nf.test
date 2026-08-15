@@ -322,8 +322,16 @@ nextflow_process {
         // This is the assertion with teeth. The gate is `redsea_npz.name == 'NO_REDSEA'`,
         // so a rename of assets/NO_REDSEA, or a change to how the placeholder is staged,
         // silently starts passing a text file to --redsea-geometry and every marker of
-        // every REDSEA-disabled run fails inside numpy. That failure is then eligible for
-        // conf/modules.config's errorStrategy 'ignore' branch.
+        // every REDSEA-disabled run fails inside numpy.
+        //
+        // (This comment used to end "That failure is then eligible for
+        // conf/modules.config's errorStrategy 'ignore' branch." It PREDATES this
+        // task -- 437fd05, the REDSEA feature -- and it is false: the 'ignore' branch
+        // at conf/modules.config:248 is scoped by the withName: at :241 to seven QC
+        // processes, and QUANTIFY is not among them. A numpy failure is exit 1, which
+        // conf/base.config does not retry, so the run 'finish'es as a FAILURE. The gate
+        // is worth this test because breaking it fails every REDSEA-disabled run
+        // outright, not because the failure would hide.)
         tag "stub"
 
         when {

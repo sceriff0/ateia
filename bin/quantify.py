@@ -601,9 +601,10 @@ def run_quantification_batch(
 
     -- produces byte-identical CSVs while holding N planes at once, so no
     equivalence test can tell the two apart. On a 17-marker panel it turns a
-    128 GB request into a multi-terabyte one, and the OOM that follows is
-    eligible for ``conf/modules.config``'s errorStrategy ``'ignore'`` branch,
-    i.e. it can vanish from a run that still exits 0.
+    128 GB request into a multi-terabyte one, and the OOM that follows takes the
+    patient's WHOLE panel: QUANTIFY inherits ``conf/base.config``'s strategy, so
+    exit 137 retries up to ``maxRetries = 3`` -- re-quantifying every marker from
+    scratch each time -- and then 'finish'es the run as a failure.
     ``tests/test_quantify_batch.py`` instruments ``_load_channel`` and fails if
     any earlier plane is still alive when the next is loaded; it was watched
     failing against exactly the list comprehension above.
