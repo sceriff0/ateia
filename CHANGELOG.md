@@ -75,6 +75,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   including the per-alias `*.size.csv`, which the merged process derives from
   `task.process`). `conf/modules.config`'s two identical `withName:` blocks became one
   alternation selector.
+  **One-time `-resume` cost:** both extractions gain a staged reference-mask input (the
+  sentinel) and a new `val` input (the output subdirectory), and Nextflow hashes a task on
+  its inputs -- so the FIRST `-resume` after this lands re-runs `EXTRACT_CELL_PROPERTIES`
+  and `EXTRACT_NUCLEI_PROPERTIES` once per patient even though their outputs are
+  byte-identical. Nothing downstream of them changes shape, so the cascade stops there and
+  the next `-resume` caches normally. Inherent to changing a process signature, not a
+  defect -- written down here so a user watching a "cached" run suddenly recompute finds
+  the reason instead of diagnosing it.
 - **The nucleus output subdirectory is now stated, not inferred.** `lib/Layout.groovy`
   gains `NUCLEI_SUBDIR` and a five-argument `publishedPath(outdir, pid, kind, subdir,
   file)` overload. `subworkflows/local/segmentation.nf` passes the same value to the

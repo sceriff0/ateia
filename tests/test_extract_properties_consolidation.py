@@ -69,13 +69,45 @@ def _code_files() -> list[Path]:
     lib/Layout.groovy is excluded: it is the owner. tests/ is excluded because a
     test asserting the published layout must be free to spell it out.
     """
-    files: list[Path] = [ROOT / "main.nf"]
+    files: list[Path] = [ROOT / "main.nf", ROOT / "nextflow.config"]
     files += sorted((ROOT / "modules").rglob("*.nf"))
     files += sorted((ROOT / "subworkflows").rglob("*.nf"))
     files += sorted((ROOT / "workflows").rglob("*.nf"))
     files += sorted(p for p in (ROOT / "lib").glob("*.groovy") if p != LAYOUT)
     files += sorted((ROOT / "conf").glob("*.config"))
     return [f for f in files if f.exists()]
+
+
+def test_the_sweep_reaches_the_root_config_and_every_scanned_tree():
+    """Regression guard on the sweep's SCOPE, not its pattern.
+
+    The first revision globbed `conf/*.config` and stopped there, so a restated
+    `'nuclei'` in the ROOT `nextflow.config` -- a config file like any other, and
+    the one place a param default would go -- sailed through. A scope glob that
+    excludes the interesting file is this repo's most-repeated guard failure, and
+    it is invisible from the outside: the sweep still passes, still reports
+    nothing, and still looks like coverage.
+
+    Pin the membership rather than the count, so adding a file cannot quietly
+    drop one.
+    """
+    scanned = {f.relative_to(ROOT).as_posix() for f in _code_files()}
+    for required in (
+        "nextflow.config",
+        "main.nf",
+        "conf/modules.config",
+        "lib/Checkpoint.groovy",
+        "modules/local/extract_properties.nf",
+        "subworkflows/local/segmentation.nf",
+        "subworkflows/local/add_cycle.nf",
+        "workflows/mirage.nf",
+    ):
+        assert required in scanned, (
+            f"{required} is outside the single-ownership sweep -- a restated "
+            "subdirectory literal there would never be seen"
+        )
+    # The owner must never be swept, or it would report itself.
+    assert "lib/Layout.groovy" not in scanned
 
 
 def test_the_sweep_can_see_a_restated_subdirectory():
