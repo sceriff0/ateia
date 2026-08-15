@@ -107,22 +107,26 @@ laptop-viable.
 | Process | `cpus` | `memory` (attempt 1) | `time` | Owner | `maxForks` |
 |---|---|---|---|---|---|
 | `TILED_COARSE` | `2` *(label)* | `8 GB × 2^(attempt−1)` *(withName)* | `2.h × attempt` *(label)* | partial | `20` |
-| `TILED_REG_TILE` | `2` *(label)* | `tiledRegTileGb(params) × attempt` *(withName)* — 4 GB at defaults | `2.h × attempt` *(label)* | partial | `20` |
+| `TILED_REG_TILE` | `2` *(label)* | derived from `reg_tiled_tile` + 2×`reg_tiled_halo`, `× attempt` *(withName)* — 4 GB at defaults | `2.h × attempt` *(label)* | partial | `20` |
 | `TILED_SOLVE` | `1` *(label)* | `1 GB × attempt` *(withName)* | `8.h × attempt` *(label)* | partial | — |
-| `TILED_STITCH` | `4` *(label)* | `tiledStitchGb(params) × attempt` *(withName)* — 4 GB at defaults | `4.h × attempt` *(label)* | partial | `10` |
+| `TILED_STITCH` | `4` *(label)* | derived from `reg_tiled_out_tile`, `× attempt` *(withName)* — 4 GB at defaults | `4.h × attempt` *(label)* | partial | `10` |
 
 `TILED_COARSE` / `TILED_REG_TILE` / `TILED_SOLVE` / `TILED_STITCH` are the STARE method —
 the only shape it has.
 
 `TILED_REG_TILE` and `TILED_STITCH` are the only two processes whose memory
-request is **derived from a parameter** instead of being a constant:
-`tiledRegTileGb(params)` scales with `reg_tiled_tile + 2 × reg_tiled_halo` and
-`tiledStitchGb(params)` with `reg_tiled_out_tile`, each the measured linear fit
-doubled and floored at 4 GB (`conf/modules.config:103-113`). Raising a tile size
-therefore raises the reservation rather than producing a SIGKILL. The "4 GB at
-defaults" figures above are the shipped-default evaluation of those helpers, not
-independent constants — the helper names, not the numbers, are what
-`tests/test_resource_label_coverage.py` checks for these two rows.
+request is **derived from a parameter** instead of being a constant: the first
+scales with `reg_tiled_tile + 2 × reg_tiled_halo`, the second with
+`reg_tiled_out_tile`, each the measured linear fit doubled and floored at 4 GB.
+Raising a tile size therefore raises the reservation rather than producing a
+SIGKILL. The arithmetic is written out inside each process' own
+`memory = { … }` closure in `conf/modules.config`, immediately under the block
+comment that derives it; the two closures are near-identical and that duplication
+is forced — Nextflow 26's strict config parser rejects a function declaration in
+a config file, so there is no legal way to share a helper between them. The
+"4 GB at defaults" figures above are the shipped-default evaluation of those
+formulas, not independent constants — the **parameter names**, not the numbers,
+are what `tests/test_resource_label_coverage.py` checks for these two rows.
 
 The STARE method's memory is bounded. Measured peak RSS on a 16384² 2-channel
 tiled OME-TIFF:

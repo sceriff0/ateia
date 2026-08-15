@@ -390,17 +390,21 @@ def test_exactly_one_resource_owner_per_process():
 #     exactly three shapes and refuses loudly on a fourth.
 #
 # What is deliberately NOT compared, and why:
-#   * `TILED_REG_TILE` / `TILED_STITCH` memory is `tiledRegTileGb(params)` /
-#     `tiledStitchGb(params)` -- derived from `reg_tiled_tile`/`reg_tiled_halo`
-#     and `reg_tiled_out_tile` at task submission, not a literal. Re-deriving it
-#     here would duplicate the very
+#   * `TILED_REG_TILE` / `TILED_STITCH` memory is derived from
+#     `reg_tiled_tile`/`reg_tiled_halo` and `reg_tiled_out_tile` at task
+#     submission, not a literal. Re-deriving it here would duplicate the very
 #     formula this guard exists to stop duplicating, and evaluating Groovy from
-#     pytest is not on the table. So for these two rows the guard asserts the
-#     HELPER NAME appears in both the config expression and the doc cell, and
-#     leaves the illustrative "4 GB at defaults" figure unchecked. Renaming or
-#     replacing a helper therefore still fails the build; re-tuning the formula
-#     without touching its name does not. docs/resources.md says so in the same
+#     pytest is not on the table. So for these two rows the guard asserts every
+#     DERIVATION SOURCE named in the config expression is named in the doc cell
+#     too, and leaves the illustrative "4 GB at defaults" figure unchecked.
+#     Changing which parameter the formula reads therefore still fails the build;
+#     re-tuning its constants does not. docs/resources.md says so in the same
 #     words, so the unchecked figure is labelled as such where a reader sees it.
+#     The two closures used to call a `tiledRegTileGb(params)` helper and the
+#     source asserted on was the HELPER name; Nextflow 26's strict config parser
+#     forbids declaring a function in a config file, so the arithmetic is now
+#     inlined and the sources asserted on are the `params.*` reads themselves --
+#     strictly more of the derivation than the helper name ever pinned.
 #   * `SPLIT_PRIOR_PYRAMID` and `SEG_QC_SEGMENT` are ALIASES, not modules. Their
 #     `withName:` blocks set no resource field (they override publishDir /
 #     ext.prefix only), so neither is required to have a row. SEG_QC_SEGMENT has
@@ -444,10 +448,18 @@ NUMBER_RE = re.compile(r"\d+(?:\.\d+)?")
 # the tier thresholds in neighbouring cells from being read as hours.
 HOURS_RE = re.compile(r"(\d+(?:\.\d+)?)\s*\.\s*h\b")
 
-# `tiledRegTileGb(params)` -- a per-task value derived from params at submission
-# time rather than a literal. See the header above for why these are exempt from
-# the numeric comparison and what is asserted instead.
-DERIVED_HELPER_RE = re.compile(r"\b(\w+)\(\s*params\s*\)")
+# A memory request derived from params at submission time rather than being a
+# literal -- either a `params.reg_tiled_tile` read (the inlined form the strict
+# config parser forces) or a legacy `tiledRegTileGb(params)` helper call. The
+# capture is the DERIVATION SOURCE: the parameter name, or the helper name. See
+# the header above for why these rows are exempt from the numeric comparison and
+# what is asserted in its place.
+#
+# Both alternatives are kept because both must keep returning None from
+# expr_values_per_attempt: a helper call is not arithmetic pytest can evaluate,
+# and neither is a param read. Only the second form occurs in conf/modules.config
+# today; test_derived_memory_detects_both_forms covers the first.
+DERIVED_HELPER_RE = re.compile(r"\b(\w+)\(\s*params\s*\)|\bparams\.(\w+)")
 
 # One rung of a size-tier ladder, CONFIG side: `file_gb < 10 ? 32.GB`. Threshold
 # and magnitude are captured TOGETHER, in one match, so the pair cannot come
@@ -951,6 +963,39 @@ def test_expr_values_per_attempt_handles_the_shapes_in_modules_config():
     assert expr_values_per_attempt("8") == [8, 8, 8, 8]
     assert expr_values_per_attempt("(Math.ceil(tiledRegTileGb(params)) as int).GB * task.attempt") is None
     assert expr_values_per_attempt("(file_gb < 10 ? 32.GB : 64.GB) * task.attempt") is None
+    assert expr_values_per_attempt(
+        "def win = ((params.reg_tiled_out_tile as int) as long)\n"
+        "(Math.ceil(Math.max(4d, (0.6d + 0.17d * mpx) * 2d)) as int).GB * task.attempt"
+    ) is None
+
+
+def test_derived_memory_detects_both_forms():
+    """DERIVED_HELPER_RE must capture the derivation SOURCE in either form.
+
+    The inlined form is the one conf/modules.config uses -- the strict config
+    parser forbids the helper -- and it is the one that matters: it is what makes
+    the doc cell name `reg_tiled_tile` rather than a helper name that pinned
+    nothing about which parameter the formula actually read. The helper form is
+    kept alive only so a config that reintroduces one (in a file the strict
+    parser does not govern) is still routed to the exemption rather than being
+    numerically compared against a number it does not have.
+    """
+
+    def sources(expr: str) -> set[str]:
+        return {
+            m.group(1) or m.group(2) for m in DERIVED_HELPER_RE.finditer(expr)
+        }
+
+    assert sources("(Math.ceil(tiledRegTileGb(params)) as int).GB * task.attempt") == {
+        "tiledRegTileGb"
+    }
+    assert sources(
+        "def win = (((params.reg_tiled_tile as int) + 2 * (params.reg_tiled_halo as int)) as long)"
+    ) == {"reg_tiled_tile", "reg_tiled_halo"}
+    # A constant request is NOT derived -- otherwise every row would take the
+    # exemption path and the numeric comparison would check nothing.
+    assert sources("32.GB * task.attempt") == set()
+    assert sources("(file_gb < 10 ? 32.GB : 64.GB) * task.attempt") == set()
 
 
 def test_memory_cell_mismatch_compares_pairs_not_pooled_numbers():
@@ -1064,14 +1109,19 @@ def test_every_documented_process_matches_conf_modules_config():
         # --- memory --------------------------------------------------------
         exprs = effective_exprs(name, "memory")
         cell = row.get("memory", "")
-        helpers = {m.group(1) for expr in exprs for m in DERIVED_HELPER_RE.finditer(expr)}
+        helpers = {
+            m.group(1) or m.group(2)
+            for expr in exprs
+            for m in DERIVED_HELPER_RE.finditer(expr)
+        }
         if helpers:
             missing = sorted(h for h in helpers if h not in cell)
             if missing:
                 problems.append(
                     f"{name}: memory is derived from {missing} in conf/modules.config, "
-                    "but the doc cell does not name the helper -- a doc row stating a "
-                    f"flat number here would be wrong the moment a parameter changes: {cell!r}"
+                    "but the doc cell does not name the derivation source -- a doc row "
+                    "stating a flat number here would be wrong the moment a parameter "
+                    f"changes: {cell!r}"
                 )
         elif not exprs:
             problems.append(
