@@ -139,13 +139,23 @@ ORDERED_FAN_INS = {
     # what tests/checkpoint_manifest.nf.test's union comparison assumes.
     "checkpoint_writer: WRITE_CHECKPOINT_FRAGMENT's row list": (
         "subworkflows/local/checkpoint_writer.nf",
-        r"rows\.toSorted\(\)",
+        r"sortBy\s*:\s*\{\s*_meta,\s*row\s*->\s*row\s*\}",
         "The grouped row list is a val input hashed positionally, and groupTuple() emits "
         "in ARRIVAL order.",
     ),
+    # This entry used to regex `ch_reg_qc_by_patient ... toSorted ... ch_reg_residuals_by_patient
+    # ... toSorted`, sequentially, so that deleting EITHER stream's ordering was caught.
+    # Both streams now go through ONE local helper, so there is a single sort key and
+    # the thing that has to be pinned changed shape: the sort key itself, AND that both
+    # channels are still built from the helper that carries it. All three are required
+    # sequentially for the same reason the two toSorteds were -- a pattern matching only
+    # the helper would still pass if one channel stopped using it and went back to a bare
+    # groupTuple. Watched failing with each of the three removed in turn.
     "postprocess: EXPORT_SPATIALDATA's two per-patient QC lists": (
         "subworkflows/local/postprocess.nf",
-        r"ch_reg_qc_by_patient[\s\S]*?\.toSorted\s*\{[\s\S]*?ch_reg_residuals_by_patient[\s\S]*?\.toSorted\s*\{",
+        r"sortBy\s*:\s*\{\s*_meta,\s*artifact\s*->\s*artifact\.name\s*\}"
+        r"[\s\S]*?ch_reg_qc_by_patient\s*=\s*qcByPatient"
+        r"[\s\S]*?ch_reg_residuals_by_patient\s*=\s*qcByPatient",
         "Both grouped lists become EXPORT_SPATIALDATA `path` inputs, hashed positionally, "
         "and groupTuple() emits in ARRIVAL order -- the same hazard collect(sort: true) "
         "used to cover on this call site.",

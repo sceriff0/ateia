@@ -58,4 +58,29 @@ nextflow_pipeline {
             assert !out.contains('GROUPED UNSIZED')
         }
     }
+
+    test("sizeOf: a closure that cannot resolve a size aborts, naming the channel and the group") {
+        options "-lib $projectDir/lib"
+        when {
+            params {
+                outdir  = "$outputDir"
+                pg_case = "derived"
+            }
+        }
+        then {
+            assert workflow.failed
+            def out = workflow.stdout.join('\n') + workflow.stderr.join('\n')
+            // The channel, so the reader knows WHICH grouping refused.
+            assert out.contains('POSTPROCESSING: the per-patient registration QC feeding EXPORT_SPATIALDATA')
+            // The group whose size could not be derived.
+            assert out.contains('P003')
+            // `sizeOf` is named, because that is what the reader has to go and fix --
+            // there is no meta key to inject here, there is a closure that returned
+            // nothing.
+            assert out.contains('sizeOf')
+            // The run must not have produced a group at all: a derived size that does
+            // not resolve must NOT degrade to an unsized key.
+            assert !out.contains('GROUPED UNSIZED')
+        }
+    }
 }

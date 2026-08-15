@@ -29,6 +29,12 @@
       patient  the linear per-patient shape (PatientGroup.byPatient, meta.patient_id)
       slide    the per-slide shape (PatientGroup.byKey, a compound key) — pins that
                the error names the COMPUTED GROUP KEY, not just the patient
+      derived  the DERIVED-size shape (PatientGroup.byPatient with `sizeOf:`), which
+               postprocess.nf's two per-patient QC gathers use because their size is
+               `meta.images_count - 1` and no meta holds that number. A closure that
+               cannot resolve a size returns null, and null must ABORT exactly as an
+               absent meta key does — otherwise `sizeOf:` would be a second, softer
+               way to reach the unsized key the `size:` form already forbids.
 ========================================================================================
 */
 
@@ -49,6 +55,14 @@ workflow {
             size  : 'tiles_count',
             key   : { meta -> "${meta.patient_id}#${meta.channels.toSorted().join('_')}".toString() },
             sortBy: { _meta, control -> control },
+        ).subscribe { row -> println "GROUPED UNSIZED: ${row}" }
+    }
+    else if (params.pg_case == 'derived') {
+        PatientGroup.byPatient(
+            Channel.of([[patient_id: 'P003'], 'seg_qc.json']),
+            name  : 'POSTPROCESSING: the per-patient registration QC feeding EXPORT_SPATIALDATA',
+            sizeOf: { meta, _f -> meta.images_count == null ? null : meta.images_count - 1 },
+            sortBy: { _meta, artifact -> artifact },
         ).subscribe { row -> println "GROUPED UNSIZED: ${row}" }
     }
     else {

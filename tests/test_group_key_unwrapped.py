@@ -415,32 +415,30 @@ def test_group_key_sites_are_found():
     """The scan must actually see the groupKey call sites it claims to guard.
 
     A guard whose glob matches nothing passes silently forever; this pins the
-    inventory so deleting or moving one is a deliberate act. Adding a genuinely
-    new groupKey() site means updating this list AND satisfying the escape check
-    below -- extending the list alone does not make a leak pass.
+    inventory so deleting or moving one is a deliberate act.
+
+    THIS INVENTORY IS A RATCHET, AND IT ONLY TURNS ONE WAY. It is now at its floor:
+    ONE site, in ONE file. A `groupKey()` written anywhere else fails this assert,
+    and the fix is to route the grouping through lib/PatientGroup.groovy -- NOT to
+    add the new file to this list. Growing it back is how the pipeline re-acquired
+    hand-written groupings twice already: PatientGroup absorbed six of them, and the
+    dataflow refactor then introduced three more (postprocess.nf's two QC gathers and
+    checkpoint_writer.nf's row gather) because their size is DERIVED and `size:`
+    -- a meta KEY read as-is -- could not express it. `sizeOf:` closed that gap, so
+    there is no longer a shape this class cannot express and no longer a reason for
+    a second site to exist.
     """
     sites = _group_key_sites()
     files = sorted({str(s["path"]) for s in sites})
     assert files == [
-        # THE grouping. The four sized per-patient/per-slide fan-ins (registration,
-        # both quantify_markers groupings, the tiled control-point gather) each used to
-        # build their own groupKey; they call this one now, and the unwrap it performs
-        # is the only one standing between four downstream join(by:)/combine(by:) call
-        # sites and an asymmetric GroupKey key.
+        # THE grouping, and now the ONLY one. Every sized per-patient/per-slide fan-in
+        # in the pipeline -- registration, both quantify_markers groupings, the tiled
+        # control-point gather, checkpoint_writer's rows, postprocess's two QC gathers
+        # -- calls this one, and the unwrap it performs is the only thing standing
+        # between every downstream join(by:)/combine(by:) and an asymmetric GroupKey.
         "lib/PatientGroup.groovy",
-        # The one grouping every checkpoint CSV goes through. Its size hint is what
-        # lets a finished patient's rows be published while other patients are still
-        # running, instead of at channel close -- so a leak here would not merely
-        # mis-key a join, it would stop the fragment writer being fed at all.
-        "subworkflows/local/checkpoint_writer.nf",
-        # Two sites: the reg_qc=2 metrics and the per-cell residuals, each grouped
-        # per patient before EXPORT_SPATIALDATA. They replaced a run-wide collect()
-        # that broadcast every patient's QC into every patient's .zarr. Both size
-        # themselves `images_count - 1`, which PatientGroup's `size:` (a meta KEY, read
-        # as-is) cannot express, so they are still written out here.
-        "subworkflows/local/postprocess.nf",
     ], f"groupKey() call sites moved; scan found {files}"
-    assert len(sites) == 4, f"expected 4 groupKey() sites, found {len(sites)}"
+    assert len(sites) == 1, f"expected 1 groupKey() site, found {len(sites)}"
 
 
 def test_group_key_never_escapes_its_group_tuple():

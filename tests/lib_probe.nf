@@ -743,6 +743,87 @@ workflow {
         assert omitted, "PatientGroup must require the '${opt}' option"
     }
 
+    // ---- the DERIVED size: `sizeOf:` -------------------------------------
+    // Three fan-ins size themselves from something no meta holds:
+    // postprocess.nf's two per-patient QC gathers want ONE ARTIFACT PER MOVING
+    // SLIDE, i.e. `meta.images_count - 1`. `size:` is a meta KEY read as-is and
+    // cannot say that, so those sites kept hand-writing the very ternary this
+    // class exists to delete:
+    //
+    //     def key = meta.images_count ? groupKey(meta.patient_id, meta.images_count - 1)
+    //                                 : meta.patient_id
+    //
+    // `sizeOf:` is the same guarantee for a derived size: mandatory, refused when
+    // it does not resolve, never falling through to an unsized key.
+    assert PatientGroup.requireDerivedSize(2, 'ch', 'P001') == 2
+    ['a channel', 'P001'].each { needle ->
+        def derivedMissing = false
+        try { PatientGroup.requireDerivedSize(null, 'a channel', 'P001') }
+        catch (IllegalStateException e) {
+            derivedMissing = true
+            assert e.message.contains(needle), "requireDerivedSize message must name ${needle}"
+        }
+        assert derivedMissing, 'PatientGroup.requireDerivedSize must reject an unresolved size'
+    }
+    // Same refusals as requireSize, for the same reasons: a groupKey sized 0 never
+    // fills and the run HANGS, and a non-Integer is a closure that computed
+    // something other than a count.
+    [0, -1, null, '3', 3.5].each { bad ->
+        def rejected = false
+        try { PatientGroup.requireDerivedSize(bad, 'ch', 'P001') }
+        catch (IllegalStateException ignored) { rejected = true }
+        assert rejected, "PatientGroup.requireDerivedSize must reject ${bad}"
+    }
+
+    // End to end, with the size DERIVED rather than read: images_count counts the
+    // reference too, so the QC gather's size is one less. Same guarantees as the
+    // `size:` form — GroupKey unwrapped to a plain String, every meta still paired
+    // with its own payload, in sort-key order.
+    PatientGroup.byPatient(
+        Channel.of(
+            [[patient_id: 'P001', id: 'P001_c', images_count: 4], 'c.json'],
+            [[patient_id: 'P001', id: 'P001_a', images_count: 4], 'a.json'],
+            [[patient_id: 'P001', id: 'P001_b', images_count: 4], 'b.json'],
+        ),
+        name  : 'lib probe: the per-patient grouping, derived size',
+        sizeOf: { meta, _f -> meta.images_count - 1 },
+        sortBy: { _meta, f -> f },
+    ).subscribe { row ->
+        assert row[0] == 'P001'
+        assert row[0].getClass() == String, 'the GroupKey wrapper must not escape the grouping'
+        assert row[1].collect { it[0].id } == ['P001_a', 'P001_b', 'P001_c']
+        assert row[1].collect { it[1] }    == ['a.json', 'b.json', 'c.json']
+    }
+
+    // EXACTLY ONE of size/sizeOf. Both is two competing answers to how big the
+    // group is, and whichever the implementation happened to read first would win
+    // silently — the same class of defect as an option accepted and ignored.
+    def pgBothSizes = false
+    try {
+        PatientGroup.byPatient(Channel.empty(),
+                               name: 'ch', size: 'images_count',
+                               sizeOf: { m, _f -> m.images_count - 1 },
+                               sortBy: { m, _f -> m.id })
+    }
+    catch (IllegalArgumentException e) {
+        pgBothSizes = true
+        assert e.message.contains('size')
+        assert e.message.contains('sizeOf')
+    }
+    assert pgBothSizes, 'PatientGroup must reject size AND sizeOf together'
+
+    // Neither is the unsized gather itself — a full-run barrier on a run that
+    // still exits 0. It must be as unwritable as it was before sizeOf existed.
+    def pgNoSize = false
+    try {
+        PatientGroup.byPatient(Channel.empty(), name: 'ch', sortBy: { m, _f -> m.id })
+    }
+    catch (IllegalArgumentException e) {
+        pgNoSize = true
+        assert e.message.contains('size')
+    }
+    assert pgNoSize, 'PatientGroup must reject a grouping that names neither size nor sizeOf'
+
     // ------------------------------------------------------------------ //
     // ChannelName — the declared name vs the file stem
     // ------------------------------------------------------------------ //
