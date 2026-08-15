@@ -58,8 +58,8 @@
     name-to-implementation lookup (lib/WarpBackends.groovy) rather than a shape decision.
 
     Whichever transform channel the taken branch does not read arrives as `Channel.empty()`
-    — the ADAPTERS' null-object contract (see either adapter's header), not filler invented
-    by the caller.
+    — the ADAPTERS' null-object contract (declared per backend in lib/AdapterContract.groovy,
+    where a `none` cardinality means exactly that), not filler invented by the caller.
 
     Input:
         ch_native_images      [meta, file]            slides to segment on their native grid
