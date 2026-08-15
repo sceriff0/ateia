@@ -306,3 +306,54 @@ def test_script_and_stub_ask_for_the_same_tool_list():
     assert not mismatches, (
         f"script: and stub: pass different tool lists in {[m[0] for m in mismatches]}: {mismatches}"
     )
+
+
+def test_a_comment_mentioning_process_envelope_does_not_satisfy_the_guard():
+    """The guard must look for a CALL, not for the string `ProcessEnvelope.`.
+
+    `test_no_module_hand_writes_a_versions_heredoc` used to ask
+    `"ProcessEnvelope." not in text`. Any occurrence anywhere in the file satisfied
+    that -- including a header comment saying "rendered through ProcessEnvelope."
+    and including a commented-OUT call. A module could therefore hand-write both
+    heredocs, describe itself as going through ProcessEnvelope, and pass. That
+    happened: a module passed this guard silently until its header was reworded,
+    at which point the guard suddenly failed and revealed it had never been
+    checking anything about that file.
+
+    The three plants below are the three ways the substring check was satisfiable
+    without a single call being rendered. The fourth is the real thing, and must
+    still be recognised -- a detector that says "no" to everything is not a fix.
+    """
+    heredoc = "cat <<-END_VERSIONS > versions.yml\nEND_VERSIONS\n"
+    assert not _renders_versions_via_envelope(
+        "// rendered through ProcessEnvelope.versions()\n" + heredoc
+    ), "a line comment naming ProcessEnvelope must not count as rendering one"
+    assert not _renders_versions_via_envelope(
+        "/*\n * ProcessEnvelope.versions() renders both blocks.\n */\n" + heredoc
+    ), "a block comment naming ProcessEnvelope must not count as rendering one"
+    assert not _renders_versions_via_envelope(
+        "    // ${ProcessEnvelope.versions(task.process, ['python'])}\n" + heredoc
+    ), "a commented-OUT call must not count as rendering one"
+    assert _renders_versions_via_envelope(
+        "    ${ProcessEnvelope.versions(task.process, ['python'])}\n"
+    ), "a real call must still be recognised"
+
+
+def test_every_non_allowlisted_module_actually_calls_process_envelope():
+    """The forward direction of the same fact, on the real tree.
+
+    The guard above proves the detector rejects comments; this proves the detector
+    does not reject everything. Every module outside ALLOWED_HANDWRITTEN must be
+    seen as a genuine ProcessEnvelope renderer -- if the detector were broken shut,
+    this fails for all of them at once rather than passing silently.
+    """
+    missing = [
+        nf.name
+        for nf in MODULES
+        if nf.name not in ALLOWED_HANDWRITTEN
+        and not _renders_versions_via_envelope(nf.read_text())
+    ]
+    assert not missing, (
+        f"{missing} do not render versions.yml through ProcessEnvelope, and are not "
+        "in ALLOWED_HANDWRITTEN."
+    )

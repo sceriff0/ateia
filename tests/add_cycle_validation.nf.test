@@ -50,6 +50,41 @@ nextflow_pipeline {
         }
     }
 
+    /*
+     * A --prior_outdir CARRYING A URI SCHEME REACHES THE READER.
+     *
+     * lib/Checkpoint.read and lib/CsvUtils were made provider-aware (FileHelper.asPath)
+     * precisely so a prior run living on object storage could be folded into a new cycle.
+     * That fix could never be observed end to end, because validateAddCycle's own
+     * pre-flight ran FIRST and used `new File(...).exists()` -- and
+     * `new File("s3://bucket/run/csv/registered.csv")` is not a URI at all, it is a
+     * RELATIVE LOCAL path ('s3:'/''/'bucket'/...). It does not throw; it simply reports
+     * "not found", so every remote prior run failed validation before any provider-aware
+     * reader was reached. The capability existed and did not work.
+     *
+     * `file://` is the only scheme testable without credentials or a network, and it
+     * exercises the identical code path: it is a URI, `new File` mangles it exactly the
+     * same way, and FileHelper.asPath resolves it. tests/lib_probe.nf pins the resolution
+     * of an `s3://` URI separately (resolution only).
+     */
+    test("Should accept a --prior_outdir carrying a URI scheme") {
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                input        = "$projectDir/tests/testdata/new_cycle.csv"
+                outdir       = "$outputDir"
+                mode         = 'add_cycle'
+                prior_outdir = "file://$projectDir/tests/testdata/prior_run"
+            }
+        }
+
+        then {
+            assert workflow.success
+        }
+    }
+
     test("Should accept --outdir != --prior_outdir") {
         tag "stub"
         options "-stub"
