@@ -1,0 +1,98 @@
+/*
+ * THE INVARIANT: a run that loses a patient must FAIL, naming that patient — not exit 0
+ * with a checkpoint CSV one row short.
+ *
+ * This is the end-to-end half of lib/PatientArtifacts.groovy's contract.
+ * tests/patient_artifacts_probe.nf pins the seam in isolation (and reproduces the old
+ * hand-written join chain dropping the short patient with its own `legacy` case); this
+ * file drives the WHOLE PIPELINE, two patients, with one patient's MERGE_AND_PYRAMID task
+ * dropped by `errorStrategy 'ignore'` — see tests/testdata/ignored_p002_pyramid.config for
+ * why that process and that strategy.
+ *
+ * WHAT THIS LOOKED LIKE BEFORE. Run verbatim against the same fixture at 4548705^:
+ *
+ *     EXIT=0
+ *     postprocessed.csv:
+ *     patient_id,cell_csv,cell_geojson,merged_csv,cell_mask,pyramid
+ *     P001,...
+ *
+ * Two patients in, one row out, exit 0, and every one of P002's other artifacts —
+ * cells.geojson, cells_data.csv, merged_quant.csv, both masks — published and paid for
+ * but named by nothing. `--start postprocessing` on that outdir sees one patient.
+ *
+ * That red is reproducible from this tree, which is the only reason it is worth quoting:
+ *
+ *     git checkout 4548705^ -- lib subworkflows workflows
+ *     nextflow -q run . -profile test -stub -w /tmp/_red_w --outdir /tmp/_red_out \
+ *         --input tests/testdata/test_input_two_patients.csv \
+ *         -c tests/testdata/ignored_p002_pyramid.config
+ *     echo $?; cat /tmp/_red_out/csv/postprocessed.csv
+ *     git checkout HEAD -- lib subworkflows workflows
+ *
+ * (The seam-level half of this contract was committed red first, at e411004, before
+ * lib/PatientArtifacts.groovy existed — see tests/patient_artifacts_probe.nf.test. This
+ * whole-pipeline case was written after the seam was wired, so its red phase is the
+ * recipe above rather than a commit.)
+ *
+ * Tagged "stub" because CI's blocking gate is `nf-test test --tag stub`; an untagged file
+ * never runs there. The case needs more than one patient, so it uses the two-patient
+ * fixture.
+ */
+
+nextflow_pipeline {
+
+    name "A dropped patient fails the run instead of shortening the checkpoint"
+    script "main.nf"
+
+    tag "pipeline"
+    tag "patient_dropped"
+
+    test("an ignored MERGE_AND_PYRAMID on P002 aborts the run, naming P002") {
+        tag "stub"
+        options "-stub"
+        config "tests/testdata/ignored_p002_pyramid.config"
+
+        when {
+            params {
+                input  = "$projectDir/tests/testdata/test_input_two_patients.csv"
+                outdir = "$outputDir"
+            }
+        }
+
+        then {
+            // The run must NOT succeed. This is the single highest-value assertion on the
+            // branch: it converts "silent 11-patient run out of 12" into a loud failure.
+            assert !workflow.success :
+                "P002's pyramid task was dropped and the run still exited 0 — the " +
+                "checkpoint chain lost a patient silently, which is the whole defect"
+
+            def out = workflow.stdout.join('\n') + workflow.stderr.join('\n')
+
+            // Named: the patient that went missing.
+            assert out.contains('P002') :
+                "the failure did not name the missing patient"
+            // Named: the seam that refused, so the reader knows WHICH fan-in. WHICH
+            // postprocessing seam trips first is a race — the checkpoint row and the
+            // SpatialData tuple both consume the pyramid channel, and either may reach
+            // its close first — so this asserts a POSTPROCESSING seam was named rather
+            // than pinning the winner of that race.
+            assert out.contains("PatientArtifacts: seam 'POSTPROCESSING:") :
+                "the failure did not name the seam that refused"
+            // Named: the field whose producer came up short, so the reader knows which
+            // task to look for in .nextflow.log.
+            assert out.contains("no 'pyramid' for patient 'P002'") :
+                "the failure did not name the field that was missing"
+
+            // And the checkpoint must not have been published one row short. The run
+            // aborts before CHECKPOINT_WRITER's aggregate is written; if a
+            // postprocessed.csv exists at all it must not be a short, plausible-looking
+            // manifest that a later --start would read as complete.
+            def aggregate = new File("${outputDir}/csv/postprocessed.csv".toString())
+            if (aggregate.exists()) {
+                def rows = aggregate.readLines().findAll { it.trim() }.drop(1)
+                assert rows.collect { it.split(',')[0] }.toSorted() == ['P001', 'P002'] :
+                    "csv/postprocessed.csv was published without P002: ${rows}"
+            }
+        }
+    }
+}
