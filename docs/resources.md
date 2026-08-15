@@ -20,7 +20,7 @@ A process's `cpus` / `memory` / `time` come from **either** a resource `label`
 inert and misleading; those have been removed. What remains is three cases:
 
 <div class="gate">
-  <div class="g"><div class="k">case 1</div><div class="v">withName owns all three</div><div class="d">No label. The block sets cpus, memory and time. 16 processes.</div></div>
+  <div class="g"><div class="k">case 1</div><div class="v">withName owns all three</div><div class="d">No label. The block sets cpus, memory and time. 17 processes.</div></div>
   <div class="g"><div class="k">case 2</div><div class="v">label owns all three</div><div class="d">The withName block, if any, sets only publishDir / ext.args. 6 processes.</div></div>
   <div class="g"><div class="k">case 3</div><div class="v">partial override</div><div class="d">withName sets one or two fields; a label supplies the rest. 6 processes.</div></div>
 </div>
@@ -97,6 +97,19 @@ Effective values on **attempt 1**. `f` denotes the relevant input size in GiB
 
 `REGISTER` also carries `maxForks = 10` and its own error strategy — see
 [Retry policy](#retry-policy).
+
+### Registration — passthrough slides (either backend)
+
+| Process | `cpus` | `memory` (attempt 1) | `time` | Owner |
+|---|---|---|---|---|
+| `PUBLISH_PASSTHROUGH` | `1` | `1 GB × attempt` | `1.h × attempt` | `withName` |
+
+A slide that reaches the registered stream without being registered — a single-slide
+patient's only image, or (under the tiled backend) every patient's reference — is
+published into `<pid>/registered/registered_slides/` by this process, so that
+`csv/registered.csv` has one layout rather than one per backend. Its whole task is an
+`ln -s`; the published copy, not the work directory, is where the bytes land, and it is
+the same copy the VALIS path has always made for a reference.
 
 ### Registration — tiled / STARE
 
@@ -348,7 +361,7 @@ tags — see [Installation → Pre-pulling container images](installation.md#pre
 | `bolt3x/attend_image_analysis:quantification_gpu` | `SEG_QC_GEOJSON`, `REDSEA_MATRIX`, `QUANTIFY`, `MERGE_QUANT_CSVS`, `EXTRACT_CELL_PROPERTIES`, `EXTRACT_NUCLEI_PROPERTIES`, `EXPORT_GEOJSON`, `COMPILE_PANEL`, `PHENOTYPE`, `GENERATE_POSTPROCESSING_QC` |
 | `bolt3x/attend_image_analysis:merge` | `MERGE_AND_PYRAMID`, `EXTRACT_MASK_SERIES` |
 | `bolt3x/attend_image_analysis:spatialdata` | `EXPORT_SPATIALDATA` |
-| `ubuntu:22.04` | `AGGREGATE_SIZE_LOGS`, `WRITE_CHECKPOINT_FRAGMENT` |
+| `ubuntu:22.04` | `AGGREGATE_SIZE_LOGS`, `WRITE_CHECKPOINT_FRAGMENT`, `PUBLISH_PASSTHROUGH` |
 
 `SEGMENT` and `WARP_SEG_QC` resolve their image from a backend table
 (`lib/SegBackends.groovy`, `lib/WarpBackends.groovy`) rather than a literal, so

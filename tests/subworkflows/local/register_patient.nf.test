@@ -164,9 +164,11 @@ nextflow_workflow {
                 { assert workflow.trace.tasks().findAll {
                     it.name =~ /(^|:)REGISTER\b/
                 }.size() == 0 },
-                // ...but the slide still reaches the registered stream, and the
-                // checkpoint still records it (at its PREPROCESSED/native location,
-                // via meta.is_passthrough — see tests/checkpoint_manifest.nf.test).
+                // ...but the slide still reaches the registered stream, republished
+                // as a registered slide by PUBLISH_PASSTHROUGH (meta.is_passthrough is
+                // what routes it there), so the checkpoint records it under
+                // <pid>/registered/registered_slides/ like every other row — see
+                // tests/registered_layout.nf.test and tests/checkpoint_manifest.nf.test.
                 { assert workflow.out.registered.size() == 1 },
                 { assert workflow.out.checkpoint_csv },
             )

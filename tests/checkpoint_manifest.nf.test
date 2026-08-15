@@ -19,8 +19,12 @@
  *       not exist.
  *   (c) A reference that is never registered — a single-slide patient's, or EVERY
  *       patient's under the tiled backend — was recorded under <pid>/registered/,
- *       where no process publishes it. For a single-slide patient that directory
- *       does not exist at all.
+ *       where no process published it. For a single-slide patient that directory did
+ *       not exist at all. Fixed twice: first by recording such a slide at
+ *       <pid>/preprocessed/ instead, which made the tree a slide landed in a function
+ *       of --registration_method; now by PUBLISH_PASSTHROUGH actually publishing it
+ *       into <pid>/registered/registered_slides/, so the manifest has ONE layout
+ *       (tests/registered_layout.nf.test) and Layout.registeredPath has no branch.
  *   (d) The work-hash test that was supposed to recognise a bare task-directory
  *       output tested for a 32-character hash. Nextflow task directories are 30
  *       characters (`<work>/<2 hex>/<30 hex>`), so it never fired, and a bare output
@@ -75,11 +79,14 @@ nextflow_pipeline {
             // someone runs `nextflow clean`.
             //
             // Deliberately NOT "every path must start with outputDir". That would be
-            // wrong: with --start registration a run legitimately records the
-            // passthrough reference at the PRIOR run's outdir (verified — a run with
-            // --outdir /tmp/A correctly wrote /tmp/B/P001/preprocessed/... into its
-            // own registered.csv). Excluding workDir is the correct shape; requiring
-            // an outputDir prefix is not.
+            // wrong for the manifests written from a stream that may carry an ALREADY
+            // published file from a prior run: csv/segmented.csv at --start
+            // segmentation records the registered image where it actually is, which is
+            // the --prior_outdir, via Layout.publishedOrAsIs. (csv/registered.csv no
+            // longer has such a row — PUBLISH_PASSTHROUGH republishes an unregistered
+            // slide into THIS run's outdir — but the shape of this check must stay
+            // general.) Excluding workDir is the correct shape; requiring an outputDir
+            // prefix is not.
             def csvDir = new File("${outputDir}/csv".toString())
             assert csvDir.isDirectory() : "no csv/ directory was published"
 
@@ -185,11 +192,14 @@ nextflow_pipeline {
             // someone runs `nextflow clean`.
             //
             // Deliberately NOT "every path must start with outputDir". That would be
-            // wrong: with --start registration a run legitimately records the
-            // passthrough reference at the PRIOR run's outdir (verified — a run with
-            // --outdir /tmp/A correctly wrote /tmp/B/P001/preprocessed/... into its
-            // own registered.csv). Excluding workDir is the correct shape; requiring
-            // an outputDir prefix is not.
+            // wrong for the manifests written from a stream that may carry an ALREADY
+            // published file from a prior run: csv/segmented.csv at --start
+            // segmentation records the registered image where it actually is, which is
+            // the --prior_outdir, via Layout.publishedOrAsIs. (csv/registered.csv no
+            // longer has such a row — PUBLISH_PASSTHROUGH republishes an unregistered
+            // slide into THIS run's outdir — but the shape of this check must stay
+            // general.) Excluding workDir is the correct shape; requiring an outputDir
+            // prefix is not.
             def csvDir = new File("${outputDir}/csv".toString())
             assert csvDir.isDirectory() : "no csv/ directory was published"
 
@@ -297,11 +307,14 @@ nextflow_pipeline {
             // someone runs `nextflow clean`.
             //
             // Deliberately NOT "every path must start with outputDir". That would be
-            // wrong: with --start registration a run legitimately records the
-            // passthrough reference at the PRIOR run's outdir (verified — a run with
-            // --outdir /tmp/A correctly wrote /tmp/B/P001/preprocessed/... into its
-            // own registered.csv). Excluding workDir is the correct shape; requiring
-            // an outputDir prefix is not.
+            // wrong for the manifests written from a stream that may carry an ALREADY
+            // published file from a prior run: csv/segmented.csv at --start
+            // segmentation records the registered image where it actually is, which is
+            // the --prior_outdir, via Layout.publishedOrAsIs. (csv/registered.csv no
+            // longer has such a row — PUBLISH_PASSTHROUGH republishes an unregistered
+            // slide into THIS run's outdir — but the shape of this check must stay
+            // general.) Excluding workDir is the correct shape; requiring an outputDir
+            // prefix is not.
             def csvDir = new File("${outputDir}/csv".toString())
             assert csvDir.isDirectory() : "no csv/ directory was published"
 
@@ -408,11 +421,14 @@ nextflow_pipeline {
             // someone runs `nextflow clean`.
             //
             // Deliberately NOT "every path must start with outputDir". That would be
-            // wrong: with --start registration a run legitimately records the
-            // passthrough reference at the PRIOR run's outdir (verified — a run with
-            // --outdir /tmp/A correctly wrote /tmp/B/P001/preprocessed/... into its
-            // own registered.csv). Excluding workDir is the correct shape; requiring
-            // an outputDir prefix is not.
+            // wrong for the manifests written from a stream that may carry an ALREADY
+            // published file from a prior run: csv/segmented.csv at --start
+            // segmentation records the registered image where it actually is, which is
+            // the --prior_outdir, via Layout.publishedOrAsIs. (csv/registered.csv no
+            // longer has such a row — PUBLISH_PASSTHROUGH republishes an unregistered
+            // slide into THIS run's outdir — but the shape of this check must stay
+            // general.) Excluding workDir is the correct shape; requiring an outputDir
+            // prefix is not.
             def csvDir = new File("${outputDir}/csv".toString())
             assert csvDir.isDirectory() : "no csv/ directory was published"
 
