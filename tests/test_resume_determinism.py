@@ -102,10 +102,16 @@ ORDERED_FAN_INS = {
         r"sortBy\s*:\s*\{\s*_meta,\s*tiff\s*->\s*tiff\.name\s*\}",
         "MERGE_AND_PYRAMID stages the tiff list positionally.",
     ),
-    "quantify_markers: MERGE_QUANT_CSVS' csv list and metas[0]": (
+    # This gather used to sit AFTER QUANTIFY, regathering per-marker CSVs
+    # (`sortBy: { meta, _csv -> meta.channel_name }`). QUANTIFY is now one task per
+    # patient, so the same gather happens one process earlier, on the tiffs -- and
+    # it orders MORE positionally-hashed inputs than before, not fewer: the tiff
+    # list AND the `markers` name/filename list QUANTIFY is invoked with.
+    "quantify_markers: QUANTIFY's tiff list, its marker list and metas[0]": (
         "subworkflows/local/quantify_markers.nf",
-        r"sortBy\s*:\s*\{\s*meta,\s*_csv\s*->\s*meta\.channel_name\s*\}",
-        "metas[0] fed channels/is_reference into MERGE_QUANT_CSVS and both exports.",
+        r"sortBy\s*:\s*\{\s*meta,\s*_tiff\s*->\s*meta\.channel_name\s*\}",
+        "metas[0] fed channels/is_reference into MERGE_QUANT_CSVS and both exports; "
+        "the same order names QUANTIFY's tiffs and its per-marker CSV filenames.",
     ),
     "tiled_adapter: TILED_SOLVE's control list and metas[0]": (
         "subworkflows/local/adapters/tiled_adapter.nf",

@@ -448,9 +448,26 @@ nextflow_pipeline {
                 // surplus and ABORT the run. See QUANTIFY_MARKERS' GROUP comment
                 // (subworkflows/local/quantify_markers.nf) for the full account.
                 // `assert workflow.success` alone does not see any of that, hence the
-                // explicit task counts below, which pin the correct (non-miscounted) run.
+                // explicit counts below, which pin the correct (non-miscounted) run.
+                //
+                // The MARKER count is read off the published per-marker CSVs rather
+                // than off the QUANTIFY task count, which used to stand in for it.
+                // QUANTIFY is now ONE task per patient, so the task count no longer
+                // varies with the panel and would have silently stopped checking this;
+                // it is asserted separately, below, as the batching invariant it now is.
+                { def quantCsvs = []
+                  new File("$outputDir").eachFileRecurse { f ->
+                      if (f.name.endsWith('_quant.csv') && f.name != 'merged_quant.csv') {
+                          quantCsvs << f.name
+                      }
+                  }
+                  assert quantCsvs.size() == 5,
+                      "expected 5 per-marker quant CSVs, found ${quantCsvs.size()}: ${quantCsvs.toSorted()}" },
+                // ONE QUANTIFY task for this one patient's five markers -- the whole
+                // point of the batching. Five tasks here would be the per-marker
+                // fan-out back, with five stagings of the same whole-cell mask.
                 { assert workflow.trace.tasks().findAll {
-                    it.name.startsWith('MIRAGE:POSTPROCESSING:QUANTIFY_MARKERS:QUANTIFY') }.size() == 5 },
+                    it.name.startsWith('MIRAGE:POSTPROCESSING:QUANTIFY_MARKERS:QUANTIFY') }.size() == 1 },
                 { assert workflow.trace.tasks().findAll {
                     it.name.startsWith('MIRAGE:POSTPROCESSING:MERGE_QUANT_CSVS') }.size() == 1 },
                 { assert workflow.trace.tasks().findAll {
@@ -482,8 +499,9 @@ nextflow_pipeline {
             assertAll(
                 { assert workflow.success },
                 // Reference keeps {DAPI,PANCK,SMA}; the non-reference slide's nuclear
-                // channel (CELLTOX) is dropped, leaving {CD3,CD8}. Five markers, so five
-                // QUANTIFY tasks and ONE per-patient consumer of the group.
+                // channel (CELLTOX) is dropped, leaving {CD3,CD8}. Five markers -- read
+                // off the five published per-marker CSVs, since QUANTIFY is one task per
+                // patient and its task count no longer tracks the panel size.
                 //
                 // This is the count HALF of the invariant. The other half --
                 // bin/split_multichannel.py emitting exactly these five in a real run --
@@ -491,8 +509,14 @@ nextflow_pipeline {
                 // channel table, because the stub block resolves the drop in Groovy
                 // (MarkerUtils) and so cannot see a Python-side disagreement. Keep the
                 // two expectations in step.
-                { assert workflow.trace.tasks().findAll {
-                    it.name.startsWith('MIRAGE:POSTPROCESSING:QUANTIFY_MARKERS:QUANTIFY') }.size() == 5 },
+                { def quantCsvs = []
+                  new File("$outputDir").eachFileRecurse { f ->
+                      if (f.name.endsWith('_quant.csv') && f.name != 'merged_quant.csv') {
+                          quantCsvs << f.name
+                      }
+                  }
+                  assert quantCsvs.size() == 5,
+                      "expected 5 per-marker quant CSVs, found ${quantCsvs.size()}: ${quantCsvs.toSorted()}" },
                 // This assertion would NOT catch an under-count by going to 2: this
                 // MERGE_QUANT_CSVS is fed via postprocess.nf's `.join(ch_morphology, by: 0)`,
                 // a keyed inner join, so an under-count's surplus groupTuple emission would
@@ -532,9 +556,16 @@ nextflow_pipeline {
             assertAll(
                 { assert workflow.success },
                 // {CELLTOX,PANCK,SMA} from the reference + {CD3,CD8} from the moving
-                // slide = 5, exactly as for the DAPI-configured sheet.
-                { assert workflow.trace.tasks().findAll {
-                    it.name.startsWith('MIRAGE:POSTPROCESSING:QUANTIFY_MARKERS:QUANTIFY') }.size() == 5 },
+                // slide = 5, exactly as for the DAPI-configured sheet. Counted from the
+                // published per-marker CSVs: one QUANTIFY task writes all five.
+                { def quantCsvs = []
+                  new File("$outputDir").eachFileRecurse { f ->
+                      if (f.name.endsWith('_quant.csv') && f.name != 'merged_quant.csv') {
+                          quantCsvs << f.name
+                      }
+                  }
+                  assert quantCsvs.size() == 5,
+                      "expected 5 per-marker quant CSVs, found ${quantCsvs.size()}: ${quantCsvs.toSorted()}" },
                 { assert workflow.trace.tasks().findAll {
                     it.name.startsWith('MIRAGE:POSTPROCESSING:MERGE_QUANT_CSVS') }.size() == 1 }
             )
@@ -567,8 +598,14 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                { assert workflow.trace.tasks().findAll {
-                    it.name.startsWith('MIRAGE:POSTPROCESSING:QUANTIFY_MARKERS:QUANTIFY') }.size() == 5 }
+                { def quantCsvs = []
+                  new File("$outputDir").eachFileRecurse { f ->
+                      if (f.name.endsWith('_quant.csv') && f.name != 'merged_quant.csv') {
+                          quantCsvs << f.name
+                      }
+                  }
+                  assert quantCsvs.size() == 5,
+                      "expected 5 per-marker quant CSVs, found ${quantCsvs.size()}: ${quantCsvs.toSorted()}" }
             )
         }
     }
@@ -586,8 +623,9 @@ nextflow_pipeline {
                 // classified non-reference-safe, and SPLIT_CHANNELS keeps the nuclear
                 // channel on the moving slide. That emits SIX files against a groupTuple
                 // sized 5 (the union dedupes CELLTOX, so the count is unchanged), which
-                // is the surplus-second-group case: 6 QUANTIFY and TWO MERGE_QUANT_CSVS
-                // writing the same merged_quant.csv. Silent -- no error anywhere.
+                // is the surplus-second-group case: TWO QUANTIFY tasks splitting the
+                // markers between them and TWO MERGE_QUANT_CSVS writing the same
+                // merged_quant.csv. Silent -- no error anywhere.
                 input           = "$projectDir/tests/testdata/celltox_only.csv"
                 nuclear_markers = ['CELLTOX,DAPI']
                 outdir          = "$outputDir"
@@ -601,8 +639,14 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                { assert workflow.trace.tasks().findAll {
-                    it.name.startsWith('MIRAGE:POSTPROCESSING:QUANTIFY_MARKERS:QUANTIFY') }.size() == 5 },
+                { def quantCsvs = []
+                  new File("$outputDir").eachFileRecurse { f ->
+                      if (f.name.endsWith('_quant.csv') && f.name != 'merged_quant.csv') {
+                          quantCsvs << f.name
+                      }
+                  }
+                  assert quantCsvs.size() == 5,
+                      "expected 5 per-marker quant CSVs, found ${quantCsvs.size()}: ${quantCsvs.toSorted()}" },
                 { assert workflow.trace.tasks().findAll {
                     it.name.startsWith('MIRAGE:POSTPROCESSING:MERGE_QUANT_CSVS') }.size() == 1 }
             )

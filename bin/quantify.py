@@ -1,8 +1,19 @@
 #!/usr/bin/env python3
-"""Cell quantification for single-channel processing.
+"""Cell quantification, one patient's whole marker panel per invocation.
 
-Designed for Nextflow pipelines where each channel is processed separately
-and results are merged afterward. Supports both CPU and GPU processing.
+Each channel is still measured independently and still written to its own
+``<patient>_<marker>_quant.csv``; MERGE_QUANT_CSVS joins them afterwards. What
+changed is the TASK boundary: QUANTIFY runs once per patient rather than once
+per (patient x marker), so the segmentation masks are read once instead of once
+per marker and the pipeline's largest fan-out (12 patients x 17 markers = 204
+tasks at a flat 128 GB each) collapses to one task per patient.
+
+That is only safe because ``run_quantification_batch`` loads the masks once and
+then handles ONE channel plane at a time -- load, compute, discard -- so peak
+resident memory is ``masks + one plane`` regardless of panel size. Read that
+function's docstring before touching its loop; the shape is the point, and the
+numbers it produces are identical either way, so only the memory guard in
+``tests/test_quantify_batch.py`` can tell a correct loop from a broken one.
 """
 
 from __future__ import annotations
@@ -47,6 +58,7 @@ __all__ = [
     "resolve_statistics",
     "quantify_single_channel",
     "run_quantification",
+    "run_quantification_batch",
 ]
 
 # Per-compartment quantification: compartment names in the order they are emitted.
@@ -387,11 +399,305 @@ def quantify_single_channel(
 
 
 def _load_mask(mask_path: str) -> NDArray:
-    """Load a segmentation mask from .npy or .tif, squeezed to 2D."""
+    """Load a segmentation mask from .npy or .tif, squeezed to 2D.
+
+    The ONE mask-load seam. A batched task reads each mask exactly once, no
+    matter how many markers it quantifies -- that saving (17 mask reads down to
+    1 on a full panel) is half of what batching buys.
+    """
     if mask_path.endswith(".npy"):
         return np.load(mask_path).squeeze()
     loaded, _ = load_image(mask_path)
     return loaded.squeeze()
+
+
+def _load_channel(channel_path: str) -> NDArray:
+    """Load ONE channel plane.
+
+    THE seam the memory guard is written against. Every channel plane this
+    module ever materialises comes through here, so
+    ``tests/test_quantify_batch.py`` can patch this one function and observe,
+    exactly, how many planes the batch loop is holding at once. Keep it that
+    way: a second load site is a hole in that guard.
+    """
+    image, _ = load_image(channel_path)
+    return image
+
+
+def _load_masks(
+    mask_path: str, nuclei_mask_path: Optional[str]
+) -> tuple:
+    """Both masks, once, with the errors the per-marker path used to raise."""
+    logger.info(f"Loading mask: {mask_path}")
+    try:
+        mask = _load_mask(mask_path)
+        logger.debug(f"  Mask shape: {mask.shape}")
+    except FileNotFoundError:
+        logger.error(f"[FAIL] Segmentation mask not found: {mask_path}")
+        raise FileNotFoundError(f"Segmentation mask not found: {mask_path}")
+    except Exception as e:
+        logger.error(f"[FAIL] Failed to load mask from {mask_path}: {e}")
+        raise ValueError(f"Failed to load mask from {mask_path}: {e}") from e
+
+    nuclei_mask = None
+    if nuclei_mask_path:
+        logger.info(f"Loading nuclei mask: {nuclei_mask_path}")
+        try:
+            nuclei_mask = _load_mask(nuclei_mask_path)
+        except FileNotFoundError:
+            logger.error(f"[FAIL] Nuclei mask not found: {nuclei_mask_path}")
+            raise FileNotFoundError(f"Nuclei mask not found: {nuclei_mask_path}")
+        except Exception as e:
+            logger.error(
+                f"[FAIL] Failed to load nuclei mask from {nuclei_mask_path}: {e}"
+            )
+            raise ValueError(
+                f"Failed to load nuclei mask from {nuclei_mask_path}: {e}"
+            ) from e
+    return mask, nuclei_mask
+
+
+class _RedseaGeometry:
+    """The per-patient REDSEA geometry, loaded at most ONCE per task.
+
+    Three independent gates decide whether a given marker is compensated, all
+    cheap, and the loading is deferred behind all three: REDSEA must be in the
+    requested statistics, the run must have a geometry, and THIS marker must be
+    one the user opted in (REDSEA is only valid for membrane markers -- see
+    ``is_redsea_marker``). A non-opted marker never opens the npz.
+
+    Under the per-marker fan-out each opted-in task loaded the file itself; a
+    batched task loads it once and hands the same read-only tuple to every
+    opted-in marker. ``tests/test_quantify_batch.py`` pins that the shared
+    object changes no numbers.
+    """
+
+    def __init__(self, geometry_path, redsea_markers, redsea_checker, wanted):
+        self._path = geometry_path if wanted else None
+        self._markers = redsea_markers
+        self._checker = redsea_checker
+        self._loaded: Optional[tuple] = None
+
+    def for_marker(self, channel_name: str) -> Optional[tuple]:
+        if not self._path:
+            return None
+        if not is_redsea_marker(channel_name, self._markers):
+            logger.info(
+                f"REDSEA: '{channel_name}' is not in --redsea-markers, "
+                "quantifying uncompensated"
+            )
+            return None
+        if self._loaded is None:
+            sys.path.insert(0, str(Path(__file__).parent))
+            from redsea_matrix import load_geometry
+
+            logger.info(f"REDSEA: loading geometry {self._path}")
+            weights, band, _labels = load_geometry(self._path)
+            self._loaded = (weights, band, self._checker)
+        weights = self._loaded[0]
+        logger.info(
+            f"REDSEA: compensating '{channel_name}' "
+            f"(REDSEAChecker={self._checker}, {weights.nnz} cell-pair weights)"
+        )
+        return self._loaded
+
+
+def _empty_columns(channel_name, nuclei_mask, resolved_statistics, redsea) -> list:
+    """The header a non-empty result would have, for a channel with no cells.
+
+    Mirrors ``compute_compartment_intensities``' emission loop exactly -- bare
+    column, one per-compartment key per requested compartment statistic, then
+    the whole-cell-only REDSEA key -- so an all-empty channel's header matches a
+    populated one and the downstream per-channel merge stays consistent.
+    Compartments = Cell only without a nuclear mask, else Nucleus/Cytoplasm/Cell.
+    """
+    comps = list(COMPARTMENT_NAMES) if nuclei_mask is not None else ["Cell"]
+    cols = ["label", channel_name]
+    for base in BASE_STATISTICS:
+        if base == REDSEA_STATISTIC and redsea is None:
+            continue
+        base_comps = ["Cell"] if base == REDSEA_STATISTIC else comps
+        for norm in NORMALIZATIONS:
+            name = base + norm
+            if name in resolved_statistics:
+                cols += [measurement_key(channel_name, c, name) for c in base_comps]
+    return cols
+
+
+def _quantify_and_write(
+    mask: NDArray,
+    nuclei_mask: Optional[NDArray],
+    channel_image: NDArray,
+    channel_name: str,
+    output_path: str,
+    resolved_statistics: list,
+    redsea: Optional[tuple],
+) -> pd.DataFrame:
+    """Quantify ONE already-loaded channel plane and write its CSV.
+
+    The single measurement path. Both entry points below -- the one-channel
+    ``run_quantification`` and the batched ``run_quantification_batch`` -- go
+    through here, which is why batching cannot move a number: there is no second
+    implementation to drift from.
+    """
+    if mask.shape != channel_image.squeeze().shape:
+        logger.error(
+            f"[FAIL] Shape mismatch: mask {mask.shape} vs channel {channel_image.squeeze().shape}"
+        )
+        raise ValueError(
+            f"Shape mismatch: mask {mask.shape} vs channel {channel_image.squeeze().shape}. "
+            f"Ensure the mask and channel images have the same spatial dimensions."
+        )
+
+    result_df = quantify_single_channel(
+        mask,
+        channel_image,
+        channel_name,
+        nuclei_mask=nuclei_mask,
+        statistics=resolved_statistics,
+        redsea=redsea,
+    )
+
+    if not result_df.empty:
+        result_df.to_csv(output_path, index=False)
+        logger.info(f"[OK] Saved {len(result_df)} cells to {output_path}")
+    else:
+        logger.warning("[WARN] No results to save")
+        empty_df = pd.DataFrame(
+            columns=_empty_columns(
+                channel_name, nuclei_mask, resolved_statistics, redsea
+            )
+        )
+        empty_df.to_csv(output_path, index=False)
+    return result_df
+
+
+def run_quantification_batch(
+    mask_path: str,
+    channel_paths: list,
+    channel_names: list,
+    output_paths: list,
+    nuclei_mask_path: Optional[str] = None,
+    statistics=None,
+    redsea_geometry_path: Optional[str] = None,
+    redsea_markers=None,
+    redsea_checker: int = 1,
+) -> list:
+    """Quantify ALL of one patient's channels in a single process.
+
+    THE MEMORY CONTRACT -- read before changing the loop below.
+
+    Peak resident memory is ``masks + ONE channel plane``, independent of how
+    many markers are in the batch. That is the entire reason QUANTIFY can be one
+    task per patient instead of one per (patient x marker): the task's memory
+    request did not have to grow with the panel.
+
+    It holds only because the loop is written as **load -> compute -> discard**,
+    releasing each plane before the next is read. The obvious alternative --
+
+        planes = [_load_channel(p) for p in channel_paths]   # DO NOT
+        for plane, name, out in zip(planes, channel_names, output_paths):
+            ...
+
+    -- produces byte-identical CSVs while holding N planes at once, so no
+    equivalence test can tell the two apart. On a 17-marker panel it turns a
+    128 GB request into a multi-terabyte one, and the OOM that follows is
+    eligible for ``conf/modules.config``'s errorStrategy ``'ignore'`` branch,
+    i.e. it can vanish from a run that still exits 0.
+    ``tests/test_quantify_batch.py`` instruments ``_load_channel`` and fails if
+    any earlier plane is still alive when the next is loaded; it was watched
+    failing against exactly the list comprehension above.
+
+    Parameters
+    ----------
+    mask_path : str
+        Whole-cell segmentation mask (.npy or .tif), read ONCE for the batch.
+    channel_paths, channel_names, output_paths : list
+        Index-aligned, and required to be the same length: ``zip`` truncates to
+        the shortest SILENTLY, which here would drop a patient's last markers
+        from the merged table on a run that still exits 0.
+    nuclei_mask_path : str, optional
+        Nuclear mask, read ONCE for the batch. Enables Nucleus/Cytoplasm.
+    statistics, redsea_geometry_path, redsea_markers, redsea_checker :
+        As ``run_quantification``. The REDSEA opt-in stays per MARKER; the
+        geometry is loaded at most once for the whole batch.
+
+    Returns
+    -------
+    list of str
+        ``output_paths``, in order. Deliberately NOT the DataFrames: returning
+        them would make the CALLER hold every marker's result at once, which is
+        the same defect one level up.
+    """
+    n = len(channel_paths)
+    if not (len(channel_names) == n and len(output_paths) == n):
+        raise ValueError(
+            "run_quantification_batch: channel_paths, channel_names and "
+            f"output_paths must be index-aligned and the same length; got "
+            f"{n}, {len(channel_names)}, {len(output_paths)}. zip() would "
+            "truncate to the shortest and drop the remaining markers silently."
+        )
+    duplicates = {p for p in output_paths if output_paths.count(p) > 1}
+    if duplicates:
+        raise ValueError(
+            "run_quantification_batch: repeated output path(s) "
+            f"{sorted(duplicates)}. In one task that is one CSV written twice, "
+            "with nothing downstream able to see that two markers arrived. "
+            "Deduplicate the markers before the batch is built."
+        )
+
+    resolved_statistics = resolve_statistics(statistics)
+    mask, nuclei_mask = _load_masks(mask_path, nuclei_mask_path)
+    if nuclei_mask is not None:
+        logger.info(
+            "Per-compartment quantification enabled: Nucleus/Cytoplasm/Cell, "
+            f"{', '.join(resolved_statistics)}"
+        )
+    geometry = _RedseaGeometry(
+        redsea_geometry_path,
+        redsea_markers,
+        redsea_checker,
+        wanted=REDSEA_STATISTIC in resolved_statistics,
+    )
+
+    for channel_path, channel_name, output_path in zip(
+        channel_paths, channel_names, output_paths
+    ):
+        logger.info("=" * 60)
+        logger.info(f"Quantifying channel: {channel_name}")
+        logger.info("=" * 60)
+        logger.info(f"Loading channel: {channel_path}")
+        try:
+            channel_image = _load_channel(channel_path)
+        except FileNotFoundError:
+            logger.error(f"[FAIL] Channel image not found: {channel_path}")
+            raise FileNotFoundError(f"Channel image not found: {channel_path}")
+        except Exception as e:
+            logger.error(f"[FAIL] Failed to load channel from {channel_path}: {e}")
+            raise ValueError(
+                f"Failed to load channel from {channel_path}: {e}"
+            ) from e
+        logger.debug(f"  Channel shape: {channel_image.shape}")
+
+        result_df = _quantify_and_write(
+            mask,
+            nuclei_mask,
+            channel_image,
+            channel_name,
+            output_path,
+            resolved_statistics,
+            geometry.for_marker(channel_name),
+        )
+        # THE DISCARD, and it is not decoration. Rebinding on the next iteration
+        # is NOT enough: `_load_channel` for channel k+1 is evaluated BEFORE the
+        # rebind, so channel k's plane would still be alive across that read and
+        # peak memory would be two planes rather than one. `result_df` goes with
+        # it -- accumulating the frames is how the same defect creeps back in a
+        # size the reader thinks is small.
+        del channel_image, result_df
+
+    logger.info("Quantification complete")
+    return list(output_paths)
 
 
 def run_quantification(
@@ -461,26 +767,16 @@ def run_quantification(
     logger.info(f"Quantifying channel: {channel_name}")
     logger.info("=" * 60)
 
-    # Load segmentation mask
-    logger.info(f"Loading mask: {mask_path}")
-    try:
-        if mask_path.endswith(".npy"):
-            mask = np.load(mask_path).squeeze()
-        else:
-            mask, _ = load_image(mask_path)
-            mask = mask.squeeze()
-        logger.debug(f"  Mask shape: {mask.shape}")
-    except FileNotFoundError:
-        logger.error(f"[FAIL] Segmentation mask not found: {mask_path}")
-        raise FileNotFoundError(f"Segmentation mask not found: {mask_path}")
-    except Exception as e:
-        logger.error(f"[FAIL] Failed to load mask from {mask_path}: {e}")
-        raise ValueError(f"Failed to load mask from {mask_path}: {e}") from e
+    mask, nuclei_mask = _load_masks(mask_path, nuclei_mask_path)
+    if nuclei_mask is not None:
+        logger.info(
+            "Per-compartment quantification enabled: Nucleus/Cytoplasm/Cell, "
+            f"{', '.join(resolved_statistics)}"
+        )
 
-    # Load channel image
     logger.info(f"Loading channel: {channel_path}")
     try:
-        channel_image, _ = load_image(channel_path)
+        channel_image = _load_channel(channel_path)
         logger.debug(f"  Channel shape: {channel_image.shape}")
     except FileNotFoundError:
         logger.error(f"[FAIL] Channel image not found: {channel_path}")
@@ -489,103 +785,21 @@ def run_quantification(
         logger.error(f"[FAIL] Failed to load channel from {channel_path}: {e}")
         raise ValueError(f"Failed to load channel from {channel_path}: {e}") from e
 
-    # Validate shapes match
-    if mask.shape != channel_image.squeeze().shape:
-        logger.error(
-            f"[FAIL] Shape mismatch: mask {mask.shape} vs channel {channel_image.squeeze().shape}"
-        )
-        raise ValueError(
-            f"Shape mismatch: mask {mask.shape} vs channel {channel_image.squeeze().shape}. "
-            f"Ensure the mask and channel images have the same spatial dimensions."
-        )
-
-    # Optionally load the nuclear mask for per-compartment quantification
-    nuclei_mask = None
-    if nuclei_mask_path:
-        logger.info(f"Loading nuclei mask: {nuclei_mask_path}")
-        try:
-            nuclei_mask = _load_mask(nuclei_mask_path)
-        except FileNotFoundError:
-            logger.error(f"[FAIL] Nuclei mask not found: {nuclei_mask_path}")
-            raise FileNotFoundError(f"Nuclei mask not found: {nuclei_mask_path}")
-        except Exception as e:
-            logger.error(
-                f"[FAIL] Failed to load nuclei mask from {nuclei_mask_path}: {e}"
-            )
-            raise ValueError(
-                f"Failed to load nuclei mask from {nuclei_mask_path}: {e}"
-            ) from e
-        logger.info(
-            "Per-compartment quantification enabled: Nucleus/Cytoplasm/Cell, "
-            f"{', '.join(resolved_statistics)}"
-        )
-
-    # Optionally load the REDSEA geometry. Two independent gates, both cheap and
-    # both needed: the run must have a geometry at all, and THIS marker must be one
-    # the user opted in (REDSEA is only valid for membrane markers -- see
-    # is_redsea_marker). A non-opted marker never even opens the npz.
-    # THREE independent gates, all cheap: REDSEA must be in the requested
-    # statistics, the run must have a geometry, and THIS marker must be one the
-    # user opted in (REDSEA is only valid for membrane markers -- see
-    # is_redsea_marker). Any one missing and the npz is never even opened.
-    redsea = None
-    want_redsea = REDSEA_STATISTIC in resolved_statistics
-    if want_redsea and redsea_geometry_path and is_redsea_marker(
-        channel_name, redsea_markers
-    ):
-        sys.path.insert(0, str(Path(__file__).parent))
-        from redsea_matrix import load_geometry
-
-        logger.info(f"REDSEA: loading geometry {redsea_geometry_path}")
-        weights, band, _labels = load_geometry(redsea_geometry_path)
-        redsea = (weights, band, redsea_checker)
-        logger.info(
-            f"REDSEA: compensating '{channel_name}' "
-            f"(REDSEAChecker={redsea_checker}, {weights.nnz} cell-pair weights)"
-        )
-    elif want_redsea and redsea_geometry_path:
-        logger.info(
-            f"REDSEA: '{channel_name}' is not in --redsea-markers, quantifying uncompensated"
-        )
-
-    # Quantify
-    result_df = quantify_single_channel(
+    geometry = _RedseaGeometry(
+        redsea_geometry_path,
+        redsea_markers,
+        redsea_checker,
+        wanted=REDSEA_STATISTIC in resolved_statistics,
+    )
+    result_df = _quantify_and_write(
         mask,
+        nuclei_mask,
         channel_image,
         channel_name,
-        nuclei_mask=nuclei_mask,
-        statistics=resolved_statistics,
-        redsea=redsea,
+        output_path,
+        resolved_statistics,
+        geometry.for_marker(channel_name),
     )
-
-    # Save
-    if not result_df.empty:
-        result_df.to_csv(output_path, index=False)
-        logger.info(f"[OK] Saved {len(result_df)} cells to {output_path}")
-    else:
-        logger.warning("[WARN] No results to save")
-        # Empty CSV with the SAME columns a non-empty result would have, so the
-        # downstream per-channel merge stays consistent when a channel's mask
-        # contains no cells. Mirrors compute_compartment_intensities: bare column,
-        # one per-compartment key per requested compartment statistic, then the
-        # whole-cell-only REDSEA key. Compartments = Cell only without a nuclear
-        # mask, else Nucleus/Cytoplasm/Cell.
-        comps = list(COMPARTMENT_NAMES) if nuclei_mask is not None else ["Cell"]
-        cols = ["label", channel_name]
-        # Same nesting as compute_compartment_intensities' emission loop, so an
-        # all-empty channel's header matches a populated one exactly.
-        for base in BASE_STATISTICS:
-            if base == REDSEA_STATISTIC and redsea is None:
-                continue
-            base_comps = ["Cell"] if base == REDSEA_STATISTIC else comps
-            for norm in NORMALIZATIONS:
-                name = base + norm
-                if name in resolved_statistics:
-                    cols += [
-                        measurement_key(channel_name, c, name) for c in base_comps
-                    ]
-        empty_df = pd.DataFrame(columns=cols)
-        empty_df.to_csv(output_path, index=False)
 
     logger.info("Quantification complete")
 
@@ -602,8 +816,10 @@ def parse_args():
     parser.add_argument(
         "--channel_tiff",
         type=str,
+        nargs="+",
         required=True,
-        help="Path to single channel TIFF image",
+        help="Single-channel TIFF images -- ALL of one patient's markers. Index-"
+        "aligned with --channel-name and --output_file.",
     )
     parser.add_argument(
         "--mask_file",
@@ -631,13 +847,22 @@ def parse_args():
     parser.add_argument(
         "--output_file",
         type=str,
-        help="Output CSV filename (default: {channel}_quant.csv)",
+        nargs="+",
+        default=None,
+        help="Output CSV filenames, one per --channel_tiff, resolved against "
+        "--outdir. Built by modules/local/quantify.nf from meta.channel_stem: "
+        "this script never derives a filename, for the same reason "
+        "SPLIT_CHANNELS is handed --file-stems (lib/ChannelName.groovy, "
+        "'ONE SANITISER, TWO LANGUAGES'). Default: {channel}_quant.csv.",
     )
     parser.add_argument(
         "--channel-name",
         type=str,
+        nargs="+",
         default=None,
-        help="Explicit channel name (if not provided, will parse from filename)",
+        help="Explicit channel names, one per --channel_tiff (if not provided, "
+        "parsed from the filenames). These are the DECLARED marker names and "
+        "fill the <marker> slot of the published measurement key.",
     )
     parser.add_argument(
         "--redsea-geometry",
@@ -668,7 +893,7 @@ def parse_args():
 
 
 def main():
-    """Main entry point."""
+    """Main entry point -- one invocation quantifies a patient's whole panel."""
     configure_logging(level=logging.INFO)
 
     args = parse_args()
@@ -676,25 +901,31 @@ def main():
     # Ensure output directory exists
     ensure_dir(args.outdir)
 
-    # Derive effective channel name once for consistency
-    effective_channel_name = (
-        args.channel_name or Path(args.channel_tiff).stem.split("_")[-1]
-    )
-
-    # Determine output path
-    if args.output_file:
-        output_path = os.path.join(args.outdir, args.output_file)
+    channel_paths = args.channel_tiff
+    # Derive effective channel names once for consistency. The fallback is only
+    # for standalone use; the pipeline always passes --channel-name, because the
+    # DECLARED name cannot be recovered from a sanitised filename stem.
+    if args.channel_name:
+        channel_names = args.channel_name
     else:
-        output_path = os.path.join(args.outdir, f"{effective_channel_name}_quant.csv")
+        channel_names = [Path(p).stem.split("_")[-1] for p in channel_paths]
+
+    if args.output_file:
+        output_names = args.output_file
+    else:
+        output_names = [f"{name}_quant.csv" for name in channel_names]
+    output_paths = [os.path.join(args.outdir, name) for name in output_names]
 
     # Run quantification (CPU mode)
     # Note: GPU mode removed - use GPU container if GPU acceleration needed
-    logger.info("Running CPU quantification")
-    run_quantification(
+    logger.info(
+        "Running CPU quantification for %d channel(s)", len(channel_paths)
+    )
+    run_quantification_batch(
         mask_path=args.mask_file,
-        channel_path=args.channel_tiff,
-        output_path=output_path,
-        channel_name=effective_channel_name,
+        channel_paths=channel_paths,
+        channel_names=channel_names,
+        output_paths=output_paths,
         nuclei_mask_path=args.nuclei_mask_file,
         statistics=args.statistics,
         redsea_geometry_path=args.redsea_geometry,
