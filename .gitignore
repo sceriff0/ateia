@@ -156,3 +156,4 @@ tests/testdata/expected/reg_checkpoint_columns.txt
 # and the new-cycle samplesheet that pairs with it.
 tests/testdata/prior_run/
 tests/testdata/new_cycle.csv
+.superpowers/
