@@ -1,0 +1,152 @@
+/*
+ * Both adapters, run on the same group, counted against their own declaration.
+ *
+ * THE CRUX. `transform` is emitted by both adapters under one name and one declared
+ * `[patient_id, transform]` shape, with opposite multiplicity: VALIS's is
+ * REGISTER.out.registrar — ONE joint alignment graph per PATIENT — while TILED's is
+ * TILED_SOLVE.out.manifest re-keyed to patient_id, one per MOVING SLIDE. Nothing in the
+ * seam said so, so seg_qc.nf discriminated on the backend's NAME instead, and a third
+ * backend filling `transform` per slide would have been joined by patient alone —
+ * `combine(by: 0)` being a cross join, that is N**2 mismatched pairs, silently.
+ *
+ * lib/AdapterContract.groovy now declares the cardinality. This file is the guard that
+ * the declaration describes the adapter that exists: the fixture is ONE patient with a
+ * reference and TWO moving slides, the only shape in which per-patient and per-slide
+ * produce different numbers.
+ *
+ * WATCHED FAIL. Flipping tiled's `transform` declaration from PER_MOVING_SLIDE to
+ * PER_PATIENT takes the tiled case from 2 <= 2 to 2 <= 1 and this test goes red — which
+ * is the direction that matters, since it is over-declaring scarcity that produces the
+ * N**2 join.
+ *
+ * See adapter_cardinality_probe.nf's header for why the assertion is an upper bound
+ * (two of the emits are legitimately optional) and for what `versions` is NOT covering.
+ */
+
+nextflow_workflow {
+
+    name "Both adapters satisfy their declared emit cardinality"
+    script "tests/subworkflows/local/adapters/adapter_cardinality_probe.nf"
+    workflow "ADAPTER_CARDINALITY_PROBE"
+
+    tag "subworkflow"
+    tag "adapter_contract"
+    tag "stub"
+
+    test("VALIS_ADAPTER emits no more rows than its declaration allows - stub") {
+
+        options "-stub"
+
+        when {
+            params {
+                registration_method = 'valis'
+            }
+            workflow {
+                """
+                input[0] = Channel.of([
+                    'P001',
+                    [[patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK', 'SMA']],
+                     file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)],
+                    [
+                        [[patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK', 'SMA']],
+                         file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)],
+                        [[patient_id: 'P001', is_reference: false, channels: ['DAPI', 'CD3', 'CD8']],
+                         file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)],
+                        [[patient_id: 'P001', is_reference: false, channels: ['DAPI', 'CD20', 'CD68']],
+                         file('$projectDir/tests/testdata/P001_mov2.ome.tiff', checkIfExists: true)]
+                    ]
+                ])
+                input[1] = 'valis'
+                input[2] = [patients: 1, slides: 3, moving_slides: 2]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { def observed = workflow.out.counts.collectEntries { row -> [(row[0]): row] }
+                  assert observed.size() == 7 : "expected one count per declared emit, got ${observed.keySet()}"
+
+                  observed.each { name, row ->
+                      def (_n, actual, cardinality, allowed) = row
+                      if (allowed >= 0) {
+                          assert actual <= allowed :
+                              "VALIS emits ${actual} rows on '${name}', declared ${cardinality} allows ${allowed}"
+                      } else {
+                          assert actual >= 1 :
+                              "VALIS emits nothing on '${name}', declared ${cardinality}"
+                      }
+                  }
+                },
+                // The crux, stated positively: the fixture has TWO moving slides and
+                // VALIS still puts exactly ONE transform on the wire. This is what makes
+                // seg_qc.nf's combine-by-patient safe, and it is the fact a per-slide
+                // backend must NOT inherit.
+                { def transform = workflow.out.counts.find { it[0] == 'transform' }
+                  assert transform[1] == 1 },
+                { def by_slide = workflow.out.counts.find { it[0] == 'transform_by_slide' }
+                  assert by_slide[1] == 0 }
+            )
+        }
+    }
+
+    test("TILED_ADAPTER emits no more rows than its declaration allows - stub") {
+
+        options "-stub"
+
+        when {
+            params {
+                registration_method = 'tiled'
+            }
+            workflow {
+                """
+                input[0] = Channel.of([
+                    'P001',
+                    [[patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK', 'SMA']],
+                     file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)],
+                    [
+                        [[patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK', 'SMA']],
+                         file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)],
+                        [[patient_id: 'P001', is_reference: false, channels: ['DAPI', 'CD3', 'CD8']],
+                         file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)],
+                        [[patient_id: 'P001', is_reference: false, channels: ['DAPI', 'CD20', 'CD68']],
+                         file('$projectDir/tests/testdata/P001_mov2.ome.tiff', checkIfExists: true)]
+                    ]
+                ])
+                input[1] = 'tiled'
+                input[2] = [patients: 1, slides: 3, moving_slides: 2]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { def observed = workflow.out.counts.collectEntries { row -> [(row[0]): row] }
+                  assert observed.size() == 7 : "expected one count per declared emit, got ${observed.keySet()}"
+
+                  observed.each { name, row ->
+                      def (_n, actual, cardinality, allowed) = row
+                      if (allowed >= 0) {
+                          assert actual <= allowed :
+                              "tiled emits ${actual} rows on '${name}', declared ${cardinality} allows ${allowed}"
+                      } else {
+                          assert actual >= 1 :
+                              "tiled emits nothing on '${name}', declared ${cardinality}"
+                      }
+                  }
+                },
+                // The opposite crux: the SAME emit name carries one row per MOVING SLIDE
+                // here. A consumer that joined this by patient_id alone would cross-join
+                // 2 slides against 2 transforms.
+                { def transform = workflow.out.counts.find { it[0] == 'transform' }
+                  assert transform[1] == 2 },
+                { def by_slide = workflow.out.counts.find { it[0] == 'transform_by_slide' }
+                  assert by_slide[1] == 2 },
+                { def ckpt = workflow.out.counts.find { it[0] == 'stage_checkpoint' }
+                  assert ckpt[1] == 0 }
+            )
+        }
+    }
+}
