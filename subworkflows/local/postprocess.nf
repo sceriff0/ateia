@@ -34,13 +34,19 @@ include { CHECKPOINT_WRITER        } from './checkpoint_writer'
         outputs as plain [meta/patient_id, file] inputs instead.
 
     Input:
-        ch_registered:       [meta, file] — all registered slides (reference + moving)
-        ch_cell_mask:        [meta, file] — from segmentation.nf
-        ch_nuclei_mask:      [meta, file] — from segmentation.nf
-        ch_contours:         [patient_id, file] — from segmentation.nf
-        ch_nucleus_contours: [patient_id, file] — from segmentation.nf;
-                              Channel.empty() when --quantify_compartments is false
-        ch_morphology:       [meta, file] — from segmentation.nf
+        ch_seg: PatientArtifacts.channels(..., PatientArtifacts.SEGMENTATION_FIELDS, ...)
+                — the named set of segmentation artifacts, produced either by
+                subworkflows/local/segmentation.nf's SEGMENTATION on the linear path or
+                by its READ_SEGMENTED_CHECKPOINT at `--start postprocessing`. Fields:
+                  samples          [meta, file] — all registered slides (reference + moving)
+                  cell_mask        [meta, file]
+                  nuclei_mask      [meta, file]
+                  contours         [patient_id, file]
+                  nucleus_contours [patient_id, file] — Channel.empty() when
+                                                        --quantify_compartments is false
+                  morphology       [meta, file]
+                Both keying conventions are present on purpose: lib/PatientArtifacts.groovy
+                absorbs the difference, so nothing in here re-keys by hand.
 
     Output:
         checkpoint_csv: file — the collected 'postprocessed' checkpoint (see
@@ -53,20 +59,16 @@ include { CHECKPOINT_WRITER        } from './checkpoint_writer'
 
 workflow POSTPROCESSING {
     take:
-    ch_registered       // Channel of [meta, file] tuples
-    ch_cell_mask        // [meta, file] — subworkflows/local/segmentation.nf's SEGMENT.out.cell_mask
-    ch_nuclei_mask      // [meta, file] — segmentation.nf's SEGMENT.out.nuclei_mask
-    ch_contours         // [patient_id, file] — segmentation.nf's EXTRACT_CELL_PROPERTIES.out.contours
-    ch_nucleus_contours // [patient_id, file] — segmentation.nf's EXTRACT_NUCLEI_PROPERTIES.out.contours;
-                        // Channel.empty() when !params.quantify_compartments
-    ch_morphology       // [meta, file] — segmentation.nf's EXTRACT_CELL_PROPERTIES.out.morphology
+    ch_seg              // PatientArtifacts.channels(..., SEGMENTATION_FIELDS, ...) — see
+                        // the Input: block above. One named record replaces the six
+                        // parallel channels this workflow used to take positionally.
     ch_reg_qc           // Registration QC JSONs (may be empty)
     ch_reg_residuals    // Per-cell registration residual CSVs (may be empty)
     compartment_mode    // ParamUtils.compartmentMode(params) — resolved once by
                         // workflows/mirage.nf and threaded down, the same seam
                         // --registration_method has. Passed straight through to
-                        // ASSEMBLE_EXPORT below; `.compartments` is also read here
-                        // directly for the nucleus-contour ternary.
+                        // ASSEMBLE_EXPORT below, which owns the nucleus-contour gate
+                        // this file used to spell out as a ternary.
 
     main:
 
@@ -74,49 +76,66 @@ workflow POSTPROCESSING {
     // CHANNEL SPLITTING - Split all multichannel images (runs in PARALLEL with EXTRACT_CELL_PROPERTIES)
     // ========================================================================
     SPLIT_CHANNELS(
-        ch_registered.map { meta, file -> [meta, file, meta.is_reference] }
+        ch_seg.samples.map { meta, file -> [meta, file, meta.is_reference] }
     )
 
     // ========================================================================
     // QUANTIFICATION - Join channels with their patient's mask
     // ========================================================================
-    // Carry BOTH masks (cell + nuclei) keyed by patient_id. The nuclear mask is
-    // always available from SEGMENT; QUANTIFY only uses it when
-    // params.quantify_compartments is set (per-compartment signal). The same pair
-    // feeds ASSEMBLE_EXPORT's embed_masks gate further down.
-    ch_mask = ch_cell_mask
-        .map { meta, mask -> [meta.patient_id, mask] }
-        .join(ch_nuclei_mask.map { meta, mask -> [meta.patient_id, mask] }, by: 0)
+    // Carry BOTH masks (cell + nuclei). The nuclear mask is always available from
+    // SEGMENT; QUANTIFY only uses it when params.quantify_compartments is set
+    // (per-compartment signal). The same pair feeds ASSEMBLE_EXPORT's embed_masks gate
+    // further down.
+    ch_masks = PatientArtifacts.bundle(
+        name    : 'POSTPROCESSING: the segmentation masks feeding QUANTIFY',
+        metaFrom: 'cell_mask',
+        fields  : [
+            cell_mask  : ch_seg.cell_mask,
+            nuclei_mask: ch_seg.nuclei_mask,
+        ],
+    )
 
     // Per-marker fan-out + QUANTIFY + per-patient grouping (with the groupKey
     // streaming hint) all live in QUANTIFY_MARKERS, shared with add_cycle.nf.
     // The --debug_channels views for this whole chain moved there with it, so this
     // file no longer carries a debug-view helper of its own.
-    QUANTIFY_MARKERS(SPLIT_CHANNELS.out.channels, ch_mask, compartment_mode)
+    QUANTIFY_MARKERS(
+        SPLIT_CHANNELS.out.channels,
+        ch_masks.map { b -> [b.patient_id, b.cell_mask, b.nuclei_mask] },
+        compartment_mode,
+    )
     ch_grouped_csvs = QUANTIFY_MARKERS.out.grouped_csv
 
     // Join grouped intensity CSVs with morphology.csv (segmentation.nf's
-    // EXTRACT_CELL_PROPERTIES.out.morphology, taken in via ch_morphology)
-    ch_morphology_by_patient = ch_morphology
-        .map { meta, csv -> [meta.patient_id, csv] }
+    // EXTRACT_CELL_PROPERTIES.out.morphology, carried on ch_seg.morphology).
+    ch_for_quant_merge = PatientArtifacts.bundle(
+        name    : 'POSTPROCESSING: the per-patient MERGE_QUANT_CSVS tuple',
+        metaFrom: 'grouped_csvs',
+        fields  : [
+            grouped_csvs: ch_grouped_csvs,
+            morphology  : ch_seg.morphology,
+        ],
+    )
 
-    ch_for_quant_merge = ch_grouped_csvs
-        .map { meta, csvs -> [meta.patient_id, meta, csvs] }
-        .join(ch_morphology_by_patient, by: 0)
-        .map { _patient_id, meta, csvs, morphology_csv -> [meta, csvs, morphology_csv] }
-
-    MERGE_QUANT_CSVS(ch_for_quant_merge)
+    MERGE_QUANT_CSVS(ch_for_quant_merge.map { b -> [b.meta, b.grouped_csvs, b.morphology] })
 
     // ========================================================================
     // PHENOTYPING (optional) - compile panel + classify cells per patient
     // ========================================================================
-    // ch_contours arrives via take: (segmentation.nf's EXTRACT_CELL_PROPERTIES.out.contours,
-    // already re-keyed to patient_id) — nothing to derive here any more.
-    ch_nuc_contours_for_export = compartment_mode.compartments ? ch_nucleus_contours : ch_contours
-
+    // The `--quantify_compartments` ternary that used to stand here
+    // (`compartment_mode.compartments ? ch_nucleus_contours : ch_contours`) moved into
+    // ASSEMBLE_EXPORT as a `when:` declaration — add_cycle.nf carried a byte-identical
+    // copy of it, and a run-level gate stated twice is a gate that can disagree with
+    // itself. The raw (possibly empty) channel is passed through untouched.
     def do_pheno = (params.panel_spec != null) || (params.panel_model != null)
     def ch_model_config = Channel.empty()
     def ch_phenotypes = Channel.empty()
+    def ch_phenotype_qc = Channel.empty()
+    // Per-patient view of the RUN-LEVEL compiled model config. The config is one file
+    // for the whole run, so it cannot be a bundle field as it stands; pairing it with
+    // the patients that have phenotypes is the one re-key left in this file, and it is
+    // a fan-out of a value channel rather than a join two producers could disagree on.
+    def ch_model_config_by_patient = Channel.empty()
     if (do_pheno) {
         if (params.panel_spec) {
             COMPILE_PANEL(Channel.value(file(params.panel_spec)))
@@ -125,27 +144,21 @@ workflow POSTPROCESSING {
             ch_model_config = Channel.value(file(params.panel_model))
         }
 
-        ch_pheno_in = MERGE_QUANT_CSVS.out.merged_csv
-            .map { meta, csv -> [meta.patient_id, meta, csv] }
-            .join(ch_morphology_by_patient, by: 0)
-            .map { _pid, meta, csv, morph -> [meta, csv, morph] }
-        PHENOTYPE(ch_pheno_in, ch_model_config)
-        ch_phenotypes = PHENOTYPE.out.phenotypes
-    }
-
-    // Phenotype/model-config/QC slots for EXPORT_GEOJSON, keyed by patient_id.
-    // With a panel: PHENOTYPE's phenotypes.csv and phenotype_qc.json (joined on
-    // patient_id, since they are separate emits of the same task) plus the run-level
-    // compiled model config.
-    // Without: reuse the contours file as harmless placeholders; the module guard
-    // (params.panel_spec || params.panel_model) suppresses the args. The placeholder
-    // arity must match the real one or the join downstream silently mismatches.
-    def ch_pheno_extras = do_pheno
-        ? ch_phenotypes.map { meta, ph -> [meta.patient_id, ph] }
-            .join(PHENOTYPE.out.qc.map { meta, qc -> [meta.patient_id, qc] })
+        ch_pheno_in = PatientArtifacts.bundle(
+            name    : 'POSTPROCESSING: the per-patient PHENOTYPE tuple',
+            metaFrom: 'merged_csv',
+            fields  : [
+                merged_csv: MERGE_QUANT_CSVS.out.merged_csv,
+                morphology: ch_seg.morphology,
+            ],
+        )
+        PHENOTYPE(ch_pheno_in.map { b -> [b.meta, b.merged_csv, b.morphology] }, ch_model_config)
+        ch_phenotypes   = PHENOTYPE.out.phenotypes
+        ch_phenotype_qc = PHENOTYPE.out.qc
+        ch_model_config_by_patient = ch_phenotypes
+            .map { meta, _ph -> meta.patient_id }
             .combine(ch_model_config)
-            .map { pid, ph, qc, cfg -> [pid, ph, cfg, qc] }
-        : ch_contours.map { pid, contours_json -> [pid, contours_json, contours_json, contours_json] }
+    }
 
     // ========================================================================
     // MERGE - Combine split channel TIFFs with segmentation mask (per patient)
@@ -194,15 +207,23 @@ workflow POSTPROCESSING {
     ch_split_grouped = groupTiffsByPatient(ch_split_tagged)
 
     // EXPORT_GEOJSON tuple assembly + the embed_masks pyramid gate live in
-    // ASSEMBLE_EXPORT, shared with add_cycle.nf.
+    // ASSEMBLE_EXPORT, shared with add_cycle.nf. Both the nucleus-contour placeholder
+    // and the three phenotype placeholders live there too now, as declarations — this
+    // file hands over the raw channels and says whether a panel was configured.
     ASSEMBLE_EXPORT(
-        MERGE_QUANT_CSVS.out.merged_csv,
-        ch_contours,
-        ch_nuc_contours_for_export,
-        ch_pheno_extras,
-        ch_split_grouped,
-        ch_mask,
-        compartment_mode
+        PatientArtifacts.channels('POSTPROCESSING -> ASSEMBLE_EXPORT', PatientArtifacts.EXPORT_FIELDS, [
+            merged_csv      : MERGE_QUANT_CSVS.out.merged_csv,
+            contours        : ch_seg.contours,
+            nucleus_contours: ch_seg.nucleus_contours,
+            phenotypes      : ch_phenotypes,
+            phenotype_qc    : ch_phenotype_qc,
+            model_config    : ch_model_config_by_patient,
+            pyramid_channels: ch_split_grouped,
+            cell_mask       : ch_masks.map { b -> [b.patient_id, b.cell_mask] },
+            nuclei_mask     : ch_masks.map { b -> [b.patient_id, b.nuclei_mask] },
+        ]),
+        compartment_mode,
+        do_pheno,
     )
 
     // ========================================================================
@@ -211,15 +232,16 @@ workflow POSTPROCESSING {
     ch_postprocess_qc = Channel.empty()
     if (!params.skip_postprocessing_qc) {
         // Join cell mask with merged CSV for QC visualization
-        ch_for_postprocess_qc = ch_cell_mask
-            .map { meta, mask -> [meta.patient_id, meta, mask] }
-            .join(
-                MERGE_QUANT_CSVS.out.merged_csv.map { meta, csv -> [meta.patient_id, csv] },
-                by: 0
-            )
-            .map { _patient_id, meta, mask, csv -> [meta, mask, csv] }
+        ch_for_postprocess_qc = PatientArtifacts.bundle(
+            name    : 'POSTPROCESSING: the per-patient GENERATE_POSTPROCESSING_QC tuple',
+            metaFrom: 'cell_mask',
+            fields  : [
+                cell_mask : ch_seg.cell_mask,
+                merged_csv: MERGE_QUANT_CSVS.out.merged_csv,
+            ],
+        )
 
-        GENERATE_POSTPROCESSING_QC(ch_for_postprocess_qc)
+        GENERATE_POSTPROCESSING_QC(ch_for_postprocess_qc.map { b -> [b.meta, b.cell_mask, b.merged_csv] })
         ch_postprocess_qc = GENERATE_POSTPROCESSING_QC.out.qc.map { meta, pngs -> pngs }
     }
 
@@ -227,46 +249,64 @@ workflow POSTPROCESSING {
     // CHECKPOINT - Collect all outputs by patient
     // ========================================================================
     // Use collectFile() for non-blocking aggregation (enables patient-level parallelism)
-    // The join chain is kept (it's per-patient and doesn't block other patients)
-
-    // Base checkpoint data (always present)
-    ch_base_checkpoint = ASSEMBLE_EXPORT.out.csv
-        .map { meta, csv ->
-            def published_path = Layout.publishedPath(params.outdir, meta.patient_id, 'geojson', csv)
-            [meta.patient_id, published_path]
-        }
-        .join(ASSEMBLE_EXPORT.out.geojson.map { meta, geojson ->
-            def published_path = Layout.publishedPath(params.outdir, meta.patient_id, 'geojson', geojson)
-            [meta.patient_id, published_path]
-        })
-        .join(MERGE_QUANT_CSVS.out.merged_csv.map { meta, csv ->
-            def published_path = Layout.publishedPath(params.outdir, meta.patient_id, 'quantification', csv)
-            [meta.patient_id, published_path]
-        })
-        .join(ch_cell_mask.map { meta, mask ->
-            // publishedOrAsIs, not publishedPath: with --start postprocessing,
-            // ch_cell_mask is READ_SEGMENTED_CHECKPOINT's file(row.cell_mask) --
-            // ALREADY an absolute published path from segmentation.nf's run, not a
-            // task-dir output of this run. Calling publishedPath unconditionally
-            // would double-nest it (producerSubdir sees a parent literally named
-            // 'segmentation' and treats it as a producer subdirectory to preserve),
-            // e.g. <outdir>/<pid>/segmentation/segmentation/<name>. See
-            // Layout.publishedOrAsIs for the full explanation.
-            //
-            // NEW CROSS-OUTDIR DEPENDENCY: at --start postprocessing this correctly
-            // records the PRIOR run's path (wherever segmentation.nf actually
-            // published it), not this run's --outdir -- unlike every other column in
-            // this checkpoint, which all name files this run itself just wrote. That
-            // is correct (the mask genuinely was not recomputed), but it means
-            // csv/postprocessed.csv can point outside its own --outdir when written
-            // this way, which no prior checkpoint in this pipeline ever did.
-            def published_path = Layout.publishedOrAsIs(params.outdir, meta.patient_id, 'segmentation', mask)
-            [meta.patient_id, published_path]
-        })
-        .join(ASSEMBLE_EXPORT.out.pyramid.map { meta, pyramid ->
-            def published_path = Layout.publishedPath(params.outdir, meta.patient_id, 'pyramid', pyramid)
-            [meta.patient_id, published_path]
-        })
+    // The join is per-patient and does not block other patients.
+    //
+    // THIS IS THE CHAIN THE PATIENT-ARTIFACTS MODULE WAS BUILT FOR. It used to be five
+    // chained `.join()`s producing a 6-tuple that was destructured about forty lines
+    // further down, and both of the failures that shape invites were live:
+    //
+    //   * `cell_csv` and `cell_geojson` are BOTH
+    //     `Layout.publishedPath(..., 'geojson', ...)` of the same patient, so swapping
+    //     two adjacent `.join()` clauses swapped the two checkpoint columns.
+    //     `Checkpoint.row` validates key PRESENCE, not which file landed under which
+    //     key, so the checkpoint recorded the wrong file under the wrong column and the
+    //     run stayed green. Producer and field are bound BY NAME below, and read back by
+    //     name at the row builder — there is no position left between them.
+    //   * every one of those joins was a plain inner join, so an `errorStrategy
+    //     'ignore'` drop anywhere in this step removed the patient from the chain
+    //     without a word and published a checkpoint CSV one row short.
+    //     lib/PatientArtifacts.groovy aborts instead, naming the patient.
+    //
+    // `cell_mask` is the roster: it is the one field that exists before this step runs
+    // (SEGMENT produced it, or READ_SEGMENTED_CHECKPOINT read it back), so a patient
+    // missing from any of the other four is a task this step lost.
+    ch_base_checkpoint = PatientArtifacts.bundle(
+        name    : 'POSTPROCESSING: the postprocessed checkpoint row',
+        metaFrom: 'cell_mask',
+        fields  : [
+            cell_mask   : ch_seg.cell_mask.map { meta, mask ->
+                // publishedOrAsIs, not publishedPath: with --start postprocessing,
+                // ch_seg.cell_mask is READ_SEGMENTED_CHECKPOINT's file(row.cell_mask) --
+                // ALREADY an absolute published path from segmentation.nf's run, not a
+                // task-dir output of this run. Calling publishedPath unconditionally
+                // would double-nest it (producerSubdir sees a parent literally named
+                // 'segmentation' and treats it as a producer subdirectory to preserve),
+                // e.g. <outdir>/<pid>/segmentation/segmentation/<name>. See
+                // Layout.publishedOrAsIs for the full explanation.
+                //
+                // NEW CROSS-OUTDIR DEPENDENCY: at --start postprocessing this correctly
+                // records the PRIOR run's path (wherever segmentation.nf actually
+                // published it), not this run's --outdir -- unlike every other column in
+                // this checkpoint, which all name files this run itself just wrote. That
+                // is correct (the mask genuinely was not recomputed), but it means
+                // csv/postprocessed.csv can point outside its own --outdir when written
+                // this way, which no prior checkpoint in this pipeline ever did.
+                [meta, Layout.publishedOrAsIs(params.outdir, meta.patient_id, 'segmentation', mask)]
+            },
+            cell_csv    : ASSEMBLE_EXPORT.out.csv.map { meta, csv ->
+                [meta, Layout.publishedPath(params.outdir, meta.patient_id, 'geojson', csv)]
+            },
+            cell_geojson: ASSEMBLE_EXPORT.out.geojson.map { meta, geojson ->
+                [meta, Layout.publishedPath(params.outdir, meta.patient_id, 'geojson', geojson)]
+            },
+            merged_csv  : MERGE_QUANT_CSVS.out.merged_csv.map { meta, csv ->
+                [meta, Layout.publishedPath(params.outdir, meta.patient_id, 'quantification', csv)]
+            },
+            pyramid     : ASSEMBLE_EXPORT.out.pyramid.map { meta, pyramid ->
+                [meta, Layout.publishedPath(params.outdir, meta.patient_id, 'pyramid', pyramid)]
+            },
+        ],
+    )
 
     // ========================================================================
     // SPATIALDATA EXPORT - scverse-native .zarr (additive; OME-TIFF + GeoJSON stay primary)
@@ -317,41 +357,54 @@ workflow POSTPROCESSING {
             .groupTuple(remainder: true)
             .map { group_key, files -> [group_key.toString(), files.toSorted { a, b -> a.name <=> b.name }] }
 
-        def ch_sd_in = MERGE_QUANT_CSVS.out.merged_csv
-            .map { meta, csv -> [meta.patient_id, meta, csv] }
-            .join(ch_contours, by: 0)
-            .join(ch_nuc_contours_for_export, by: 0)
-            .join(ch_cell_mask.map { meta, m -> [meta.patient_id, m] }, by: 0)
-            .join(ch_nuclei_mask.map { meta, m -> [meta.patient_id, m] }, by: 0)
-            .join(ASSEMBLE_EXPORT.out.pyramid.map { meta, p -> [meta.patient_id, p] }, by: 0)
-            // remainder: true — the QC is genuinely optional (reg_qc < 2, single-slide
-            // patient, --start postprocessing). A plain join would DROP those patients'
-            // exports entirely, which is how an optional input silently becomes required.
-            .join(ch_reg_qc_by_patient, by: 0, remainder: true)
-            .join(ch_reg_residuals_by_patient, by: 0, remainder: true)
-            // `remainder: true` also emits keys present ONLY on the QC side, padded with
-            // nulls (a patient with registration QC but no quantification — not reachable
-            // today, but the operator can produce it and the map below cannot).
-            .filter { it[1] != null }
-            .map { _pid, meta, csv, contours, nuc_contours, cmask, nmask, pyramid, qc, resid ->
-                [meta, csv, contours, nuc_contours, cmask, nmask, pyramid, qc ?: [], resid ?: []]
-            }
+        def ch_sd_in = PatientArtifacts.bundle(
+            name    : 'POSTPROCESSING: the per-patient EXPORT_SPATIALDATA tuple',
+            metaFrom: 'merged_csv',
+            fields  : [
+                merged_csv      : MERGE_QUANT_CSVS.out.merged_csv,
+                contours        : ch_seg.contours,
+                // The same run-level gate ASSEMBLE_EXPORT declares, for the same reason:
+                // without --quantify_compartments EXTRACT_NUCLEI_PROPERTIES never ran,
+                // so the channel is empty for everybody and the cell contours stand in.
+                nucleus_contours: [channel: ch_seg.nucleus_contours,
+                                   when: compartment_mode.compartments, orElseField: 'contours'],
+                cell_mask       : ch_seg.cell_mask,
+                nuclei_mask     : ch_seg.nuclei_mask,
+                pyramid         : ASSEMBLE_EXPORT.out.pyramid,
+                // Genuinely PER-PATIENT optional (reg_qc < 2, a single-slide patient,
+                // or entry at postprocessing), which is a different thing from the
+                // run-level gate above and is declared differently. Requiring it would
+                // drop those patients' exports entirely — that is how an optional input
+                // silently becomes a required one. The old chain expressed this as
+                // `join(..., remainder: true)` plus a `.filter { it[1] != null }` that
+                // ALSO swallowed keys present only on the QC side; those now abort,
+                // since a patient with registration QC but no quantification means one
+                // of the two producers lost a patient.
+                reg_qc          : [channel: ch_reg_qc_by_patient, optional: true, orElse: []],
+                reg_residuals   : [channel: ch_reg_residuals_by_patient, optional: true, orElse: []],
+            ],
+        )
 
-        EXPORT_SPATIALDATA(ch_sd_in)
+        EXPORT_SPATIALDATA(
+            ch_sd_in.map { b ->
+                [b.meta, b.merged_csv, b.contours, b.nucleus_contours, b.cell_mask,
+                 b.nuclei_mask, b.pyramid, b.reg_qc, b.reg_residuals]
+            }
+        )
     }
 
     // The size hint is the literal 1, not a count read off a meta: ch_base_checkpoint is
     // a join chain keyed BY patient, so this checkpoint has exactly one row per patient
     // by construction. Nothing to count, and nothing that could disagree.
     ch_checkpoint_rows = ch_base_checkpoint
-        .map { patient_id, cell_csv, cell_geojson, merged_csv, cell_mask, pyramid ->
-            [patient_id, 1, Checkpoint.row(Layout.POSTPROCESSED, [
-                patient_id  : patient_id,
-                cell_csv    : cell_csv,
-                cell_geojson: cell_geojson,
-                merged_csv  : merged_csv,
-                cell_mask   : cell_mask,
-                pyramid     : pyramid,
+        .map { b ->
+            [b.patient_id, 1, Checkpoint.row(Layout.POSTPROCESSED, [
+                patient_id  : b.patient_id,
+                cell_csv    : b.cell_csv,
+                cell_geojson: b.cell_geojson,
+                merged_csv  : b.merged_csv,
+                cell_mask   : b.cell_mask,
+                pyramid     : b.pyramid,
             ])]
         }
 

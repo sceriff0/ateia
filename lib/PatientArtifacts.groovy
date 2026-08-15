@@ -74,6 +74,58 @@
  */
 class PatientArtifacts {
 
+    /**
+     * The artifacts a segmentation step hands to postprocessing.
+     *
+     * Both producers of this set -- SEGMENTATION on the linear path and
+     * READ_SEGMENTED_CHECKPOINT at `--start postprocessing` -- used to be unpacked into
+     * six parallel `ch_*_for_post` variables in `workflows/mirage.nf`, assigned in two
+     * branches and then passed as six of nine positional arguments. Six assignments in
+     * one branch and five in the other left a silent null channel: the arity was checked
+     * by Nextflow, but WHICH channel went where was not checked by anything.
+     */
+    static final List<String> SEGMENTATION_FIELDS =
+        ['samples', 'cell_mask', 'nuclei_mask', 'contours', 'nucleus_contours', 'morphology']
+
+    /** The artifacts ASSEMBLE_EXPORT assembles into cells.geojson + the pyramid. */
+    static final List<String> EXPORT_FIELDS =
+        ['merged_csv', 'contours', 'nucleus_contours', 'phenotypes', 'phenotype_qc',
+         'model_config', 'pyramid_channels', 'cell_mask', 'nuclei_mask']
+
+    /**
+     * A named set of per-patient artifact CHANNELS, with its field names checked.
+     *
+     * This is deliberately NOT a joined channel. Joining a set at the producer would
+     * make every consumer of one field wait for the slowest field of the same patient
+     * -- quantification would sit behind EXTRACT_CELL_PROPERTIES, which the pipeline
+     * runs in parallel with it on purpose. So the set stays a set, and the joins happen
+     * where a single row is genuinely needed (`bundle`, below).
+     *
+     * What it buys is the thing an arity check cannot give: the field names are checked
+     * against a declared list, in both directions, so a producer that omits one or
+     * misspells one fails at parse time instead of feeding a null channel downstream.
+     */
+    static Map channels(String name, List<String> expected, Map given) {
+        def missing = expected - given.keySet().toList()
+        def unknown = given.keySet().toList() - expected
+        if (missing || unknown)
+            throw new IllegalArgumentException(
+                "PatientArtifacts.channels('${name}'): " +
+                (missing ? "missing field(s) ${missing}. " : '') +
+                (unknown ? "unknown field(s) ${unknown}. " : '') +
+                "The set is checked in BOTH directions because the failure it replaces was " +
+                "silent either way: an omitted field left a null channel that emptied every " +
+                "join downstream of it, and a misspelt one was accepted and never read.")
+        given.each { k, v ->
+            if (v == null)
+                throw new IllegalArgumentException(
+                    "PatientArtifacts.channels('${name}'): field '${k}' is null. A field that is " +
+                    "genuinely absent for this run must still be a channel -- Channel.empty() -- " +
+                    "so `bundle` can gate it with `when:` rather than silently reading null.")
+        }
+        return new LinkedHashMap(given)
+    }
+
     /** Options `bundle` understands; anything else is a typo, not a default. */
     private static final List<String> KNOWN_OPTS  = ['name', 'metaFrom', 'fields']
     /** Per-field spec keys. */

@@ -6,28 +6,33 @@
  * `test,docker` profile that hangs pulling amd64 images under qemu, not nf-test --
  * `nf-test test --tag stub --profile test` is the working local gate).
  *
- * take: gained a 7th input, compartment_mode -- Task 4
- * (arch-B-split)'s seam for --quantify_compartments / --quantify_statistics /
- * --embed_masks, replacing this workflow's own former `params.embed_masks &&
- * params.quantify_statistics` raw read.
+ * take: is now THREE inputs, not seven: one PatientArtifacts.channels record naming
+ * every per-patient artifact, plus compartment_mode (Task 4 (arch-B-split)'s seam for
+ * --quantify_compartments / --quantify_statistics / --embed_masks, replacing this
+ * workflow's own former `params.embed_masks && params.quantify_statistics` raw read)
+ * and a `pheno_enabled` flag. The two placeholder tuples the callers used to build --
+ * the nucleus-contour ternary and the four-slot [pid, phenotypes, model_config,
+ * phenotype_qc] shape whose arity they had to keep in step by hand -- are declarations
+ * inside the subworkflow now, so these tests pass the RAW (often empty) channels and
+ * let the `when:` gates bind the placeholders.
  *
- * The two "embed_masks on"/"embed_masks off" tests pass input[6] as a LITERAL map
+ * The two "embed_masks on"/"embed_masks off" tests pass input[1] as a LITERAL map
  * that DIVERGES from (in fact conflicts with) the embed_masks value set in
  * params{} -- proving ASSEMBLE_EXPORT honours the compartment_mode ARGUMENT, not a
  * re-read of the global param, the same way tests/subworkflows/add_cycle.nf.test's
  * registration_method='tiled' + literal 'valis' proves the literal wins for that
- * seam. `ParamUtils.compartmentMode(params)` (computing input[6] FROM the same
+ * seam. `ParamUtils.compartmentMode(params)` (computing input[1] FROM the same
  * params{} block) would prove nothing beyond "the resolver maps params
  * correctly" -- already covered by tests/lib_probe.nf -- since an argument that
  * always agrees with a global params re-read cannot distinguish "reads the
  * argument" from "still reads params.embed_masks directly". The
  * "quantify_compartments off" test is the one exception that keeps params and
- * input[6] in agreement, and says why at its own params{} block: its
+ * input[1] in agreement, and says why at its own params{} block: its
  * geojson_wholecell assertion depends on modules/local/export_geojson.nf's own
  * direct (out-of-seam) read of params.quantify_compartments, so the raw param
  * cannot diverge from what the test needs there. The first ("assembles the export
  * tuple...") test is the baseline positive path and keeps
- * ParamUtils.compartmentMode(params) for input[6].
+ * ParamUtils.compartmentMode(params) for input[1].
  *
  * What can and cannot be asserted here:
  *   - The gate itself is observable: when embed_masks is OFF the mask channel must never
@@ -70,27 +75,32 @@ nextflow_workflow {
             workflow {
                 """
                 def contours = file('$projectDir/tests/testdata/model_config_min.json', checkIfExists: true)
-                input[0] = Channel.fromList([
-                    [[patient_id: 'P001', id: 'P001'], file('$projectDir/tests/testdata/P001_merged_quant.csv', checkIfExists: true)],
-                    [[patient_id: 'P002', id: 'P002'], file('$projectDir/tests/testdata/P001_merged_quant.csv', checkIfExists: true)]
+                // The whole set is named, and PatientArtifacts.channels checks the names
+                // against EXPORT_FIELDS in both directions -- an omitted or misspelt field
+                // fails here rather than silently emptying a join inside the subworkflow.
+                input[0] = PatientArtifacts.channels('nf-test', PatientArtifacts.EXPORT_FIELDS, [
+                    merged_csv      : Channel.fromList([
+                        [[patient_id: 'P001', id: 'P001'], file('$projectDir/tests/testdata/P001_merged_quant.csv', checkIfExists: true)],
+                        [[patient_id: 'P002', id: 'P002'], file('$projectDir/tests/testdata/P001_merged_quant.csv', checkIfExists: true)],
+                    ]),
+                    contours        : Channel.fromList([['P001', contours], ['P002', contours]]),
+                    nucleus_contours: Channel.fromList([['P001', contours], ['P002', contours]]),
+                    phenotypes      : Channel.empty(),
+                    phenotype_qc    : Channel.empty(),
+                    model_config    : Channel.empty(),
+                    pyramid_channels: Channel.fromList([
+                        [[patient_id: 'P001', id: 'P001', is_reference: false],
+                         [file('$projectDir/tests/testdata/sample_DAPI.tif',  checkIfExists: true),
+                          file('$projectDir/tests/testdata/sample_PANCK.tif', checkIfExists: true)]],
+                        [[patient_id: 'P002', id: 'P002', is_reference: false],
+                         [file('$projectDir/tests/testdata/sample_DAPI.tif',  checkIfExists: true),
+                          file('$projectDir/tests/testdata/sample_SMA.tif',   checkIfExists: true)]],
+                    ]),
+                    cell_mask       : Channel.empty(),
+                    nuclei_mask     : Channel.empty(),
                 ])
-                input[1] = Channel.fromList([['P001', contours], ['P002', contours]])
-                input[2] = Channel.fromList([['P001', contours], ['P002', contours]])
-                // No-panel / add_cycle placeholder shape: both slots reuse the contours file.
-                // 4 elements: [pid, phenotypes, model_config, phenotype_qc]. Placeholders, as in
-                // the no-panel branch of postprocess.nf -- the arity must still match.
-                input[3] = Channel.fromList([['P001', contours, contours, contours], ['P002', contours, contours, contours]])
-                input[4] = Channel.fromList([
-                    [[patient_id: 'P001', id: 'P001', is_reference: false],
-                     [file('$projectDir/tests/testdata/sample_DAPI.tif',  checkIfExists: true),
-                      file('$projectDir/tests/testdata/sample_PANCK.tif', checkIfExists: true)]],
-                    [[patient_id: 'P002', id: 'P002', is_reference: false],
-                     [file('$projectDir/tests/testdata/sample_DAPI.tif',  checkIfExists: true),
-                      file('$projectDir/tests/testdata/sample_SMA.tif',   checkIfExists: true)]]
-                ])
-                // embed_masks is off, so this channel must never be consumed.
-                input[5] = Channel.empty()
-                input[6] = ParamUtils.compartmentMode(params)
+                input[1] = ParamUtils.compartmentMode(params)
+                input[2] = false  // no panel: ASSEMBLE_EXPORT binds the contours placeholder itself
                 """
             }
         }
@@ -122,7 +132,7 @@ nextflow_workflow {
             params {
                 // embed_masks (alone)
                 // deliberately NOT set here (embed_masks defaults to false) --
-                // input[6] below is a LITERAL map with embedMasks: true, so this
+                // input[1] below is a LITERAL map with embedMasks: true, so this
                 // test proves ASSEMBLE_EXPORT honours the ARGUMENT, not params,
                 // the same way tests/subworkflows/add_cycle.nf.test's
                 // registration_method='tiled' + literal 'valis' proves the
@@ -137,30 +147,35 @@ nextflow_workflow {
             workflow {
                 """
                 def contours = file('$projectDir/tests/testdata/model_config_min.json', checkIfExists: true)
-                input[0] = Channel.fromList([
-                    [[patient_id: 'P001', id: 'P001'], file('$projectDir/tests/testdata/P001_merged_quant.csv', checkIfExists: true)],
-                    [[patient_id: 'P002', id: 'P002'], file('$projectDir/tests/testdata/P001_merged_quant.csv', checkIfExists: true)]
+                input[0] = PatientArtifacts.channels('nf-test', PatientArtifacts.EXPORT_FIELDS, [
+                    merged_csv      : Channel.fromList([
+                        [[patient_id: 'P001', id: 'P001'], file('$projectDir/tests/testdata/P001_merged_quant.csv', checkIfExists: true)],
+                        [[patient_id: 'P002', id: 'P002'], file('$projectDir/tests/testdata/P001_merged_quant.csv', checkIfExists: true)],
+                    ]),
+                    contours        : Channel.fromList([['P001', contours], ['P002', contours]]),
+                    nucleus_contours: Channel.fromList([['P001', contours], ['P002', contours]]),
+                    phenotypes      : Channel.empty(),
+                    phenotype_qc    : Channel.empty(),
+                    model_config    : Channel.empty(),
+                    pyramid_channels: Channel.fromList([
+                        [[patient_id: 'P001', id: 'P001', is_reference: false],
+                         [file('$projectDir/tests/testdata/sample_DAPI.tif',  checkIfExists: true),
+                          file('$projectDir/tests/testdata/sample_PANCK.tif', checkIfExists: true)]],
+                        [[patient_id: 'P002', id: 'P002', is_reference: false],
+                         [file('$projectDir/tests/testdata/sample_DAPI.tif',  checkIfExists: true),
+                          file('$projectDir/tests/testdata/sample_SMA.tif',   checkIfExists: true)]],
+                    ]),
+                    cell_mask       : Channel.fromList([
+                        ['P001', file('$projectDir/tests/testdata/P001_cell_mask.tif', checkIfExists: true)],
+                        ['P002', file('$projectDir/tests/testdata/P002_cell_mask.tif', checkIfExists: true)],
+                    ]),
+                    nuclei_mask     : Channel.fromList([
+                        ['P001', file('$projectDir/tests/testdata/P001_nuclei_mask.tif', checkIfExists: true)],
+                        ['P002', file('$projectDir/tests/testdata/P001_nuclei_mask.tif', checkIfExists: true)],
+                    ]),
                 ])
-                input[1] = Channel.fromList([['P001', contours], ['P002', contours]])
-                input[2] = Channel.fromList([['P001', contours], ['P002', contours]])
-                // 4 elements: [pid, phenotypes, model_config, phenotype_qc]. Placeholders, as in
-                // the no-panel branch of postprocess.nf -- the arity must still match.
-                input[3] = Channel.fromList([['P001', contours, contours, contours], ['P002', contours, contours, contours]])
-                input[4] = Channel.fromList([
-                    [[patient_id: 'P001', id: 'P001', is_reference: false],
-                     [file('$projectDir/tests/testdata/sample_DAPI.tif',  checkIfExists: true),
-                      file('$projectDir/tests/testdata/sample_PANCK.tif', checkIfExists: true)]],
-                    [[patient_id: 'P002', id: 'P002', is_reference: false],
-                     [file('$projectDir/tests/testdata/sample_DAPI.tif',  checkIfExists: true),
-                      file('$projectDir/tests/testdata/sample_SMA.tif',   checkIfExists: true)]]
-                ])
-                input[5] = Channel.fromList([
-                    ['P001', file('$projectDir/tests/testdata/P001_cell_mask.tif',   checkIfExists: true),
-                             file('$projectDir/tests/testdata/P001_nuclei_mask.tif', checkIfExists: true)],
-                    ['P002', file('$projectDir/tests/testdata/P002_cell_mask.tif',   checkIfExists: true),
-                             file('$projectDir/tests/testdata/P001_nuclei_mask.tif', checkIfExists: true)]
-                ])
-                input[6] = [compartments: true, statistics: ['Median','Mean','Sum'], embedMasks: true]
+                input[1] = [compartments: true, statistics: ['Median','Mean','Sum'], embedMasks: true]
+                input[2] = false
                 """
             }
         }
@@ -184,7 +199,7 @@ nextflow_workflow {
             params {
                 outdir = "$outputDir"
                 // Deliberately the OPPOSITE of what the gate needs: embed_masks=true
-                // here, but input[6] below is a LITERAL with embedMasks: false. If
+                // here, but input[1] below is a LITERAL with embedMasks: false. If
                 // ASSEMBLE_EXPORT read params.embed_masks itself instead of its
                 // compartment_mode argument, this would join the empty mask channel
                 // and empty the pyramid; asserting pyramid.size() == 1 anyway proves
@@ -207,17 +222,23 @@ nextflow_workflow {
             workflow {
                 """
                 def contours = file('$projectDir/tests/testdata/model_config_min.json', checkIfExists: true)
-                input[0] = Channel.of([[patient_id: 'P001', id: 'P001'], file('$projectDir/tests/testdata/P001_merged_quant.csv', checkIfExists: true)])
-                input[1] = Channel.of(['P001', contours])
-                input[2] = Channel.of(['P001', contours])
-                input[3] = Channel.of(['P001', contours, contours, contours])
-                input[4] = Channel.of([[patient_id: 'P001', id: 'P001', is_reference: false],
-                                       [file('$projectDir/tests/testdata/sample_DAPI.tif',  checkIfExists: true),
-                                        file('$projectDir/tests/testdata/sample_PANCK.tif', checkIfExists: true)]])
-                // Nothing on the mask channel at all. An unconditional join here would
+                // Nothing on either mask channel at all. An unconditional join here would
                 // empty the pyramid output entirely.
-                input[5] = Channel.empty()
-                input[6] = [compartments: true, statistics: ['Median','Mean','Sum'], embedMasks: false]
+                input[0] = PatientArtifacts.channels('nf-test', PatientArtifacts.EXPORT_FIELDS, [
+                    merged_csv      : Channel.of([[patient_id: 'P001', id: 'P001'], file('$projectDir/tests/testdata/P001_merged_quant.csv', checkIfExists: true)]),
+                    contours        : Channel.of(['P001', contours]),
+                    nucleus_contours: Channel.of(['P001', contours]),
+                    phenotypes      : Channel.empty(),
+                    phenotype_qc    : Channel.empty(),
+                    model_config    : Channel.empty(),
+                    pyramid_channels: Channel.of([[patient_id: 'P001', id: 'P001', is_reference: false],
+                                       [file('$projectDir/tests/testdata/sample_DAPI.tif',  checkIfExists: true),
+                                        file('$projectDir/tests/testdata/sample_PANCK.tif', checkIfExists: true)]]),
+                    cell_mask       : Channel.empty(),
+                    nuclei_mask     : Channel.empty(),
+                ])
+                input[1] = [compartments: true, statistics: ['Median','Mean','Sum'], embedMasks: false]
+                input[2] = false
                 """
             }
         }
@@ -238,7 +259,7 @@ nextflow_workflow {
 
         when {
             params {
-                // Cannot diverge params.quantify_compartments from input[6] here,
+                // Cannot diverge params.quantify_compartments from input[1] here,
                 // unlike the two embed_masks tests above: this test's
                 // geojson_wholecell assertion is driven by
                 // modules/local/export_geojson.nf's OWN direct read of
@@ -246,7 +267,7 @@ nextflow_workflow {
                 // compartment_mode seam by design -- see
                 // tests/test_compartment_mode_routing.py's ALLOWED_FILES), so the
                 // raw param must actually be false for that module's stub branch
-                // to skip cells_wholecell.geojson. input[6] is still a literal
+                // to skip cells_wholecell.geojson. input[1] is still a literal
                 // (not ParamUtils.compartmentMode(params)) matching params, so this
                 // test is not exercising the resolver's own correctness twice.
                 outdir = "$outputDir"
@@ -262,16 +283,26 @@ nextflow_workflow {
             workflow {
                 """
                 def contours = file('$projectDir/tests/testdata/model_config_min.json', checkIfExists: true)
-                input[0] = Channel.of([[patient_id: 'P001', id: 'P001'], file('$projectDir/tests/testdata/P001_merged_quant.csv', checkIfExists: true)])
-                input[1] = Channel.of(['P001', contours])
-                // Caller passes the cell contours as the nucleus placeholder.
-                input[2] = Channel.of(['P001', contours])
-                input[3] = Channel.of(['P001', contours, contours, contours])
-                input[4] = Channel.of([[patient_id: 'P001', id: 'P001', is_reference: false],
+                // nucleus_contours is EMPTY, not a caller-built placeholder: with
+                // compartments off, EXTRACT_NUCLEI_PROPERTIES never ran, and the `when:`
+                // declaration inside ASSEMBLE_EXPORT is what substitutes the cell contours.
+                // Before this task the caller carried that ternary, and an empty channel
+                // reaching a plain join emptied the whole export.
+                input[0] = PatientArtifacts.channels('nf-test', PatientArtifacts.EXPORT_FIELDS, [
+                    merged_csv      : Channel.of([[patient_id: 'P001', id: 'P001'], file('$projectDir/tests/testdata/P001_merged_quant.csv', checkIfExists: true)]),
+                    contours        : Channel.of(['P001', contours]),
+                    nucleus_contours: Channel.empty(),
+                    phenotypes      : Channel.empty(),
+                    phenotype_qc    : Channel.empty(),
+                    model_config    : Channel.empty(),
+                    pyramid_channels: Channel.of([[patient_id: 'P001', id: 'P001', is_reference: false],
                                        [file('$projectDir/tests/testdata/sample_DAPI.tif',  checkIfExists: true),
-                                        file('$projectDir/tests/testdata/sample_PANCK.tif', checkIfExists: true)]])
-                input[5] = Channel.empty()
-                input[6] = [compartments: false, statistics: ['Median'], embedMasks: false]
+                                        file('$projectDir/tests/testdata/sample_PANCK.tif', checkIfExists: true)]]),
+                    cell_mask       : Channel.empty(),
+                    nuclei_mask     : Channel.empty(),
+                ])
+                input[1] = [compartments: false, statistics: ['Median'], embedMasks: false]
+                input[2] = false
                 """
             }
         }

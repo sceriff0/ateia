@@ -261,12 +261,16 @@ workflow MIRAGE {
         def ch_reg_qc_for_post        = run_registration ? REGISTRATION.out.seg_qc        : Channel.empty()
         def ch_reg_residuals_for_post = run_registration ? REGISTRATION.out.seg_residuals : Channel.empty()
 
-        def ch_for_postprocessing
-        def ch_cell_mask_for_post
-        def ch_nuclei_mask_for_post
-        def ch_contours_for_post
-        def ch_nucleus_contours_for_post
-        def ch_morphology_for_post
+        // ONE named record, not six parallel variables. Both branches below produce the
+        // same set of per-patient segmentation artifacts, and until this task they were
+        // unpacked into six `ch_*_for_post` `def`s assigned in each branch and then
+        // passed as six of POSTPROCESSING's nine positional arguments. Nextflow checks
+        // the ARITY of that call and nothing checks which channel went where, so a
+        // branch that assigned five of the six handed a null channel downstream — and a
+        // null channel empties every join it touches, on a run that exits 0.
+        // PatientArtifacts.channels checks the field names against
+        // SEGMENTATION_FIELDS in both directions instead.
+        def ch_seg
 
         if (ParamUtils.isEntryPoint(params, 'postprocessing')) {
             // The ONE place INPUT_CHECK's [meta, one_file] shape is not enough:
@@ -277,34 +281,37 @@ workflow MIRAGE {
             // Checkpoint.read, so its meta is the same one INPUT_CHECK builds
             // from this very file.
             READ_SEGMENTED_CHECKPOINT(params.input, compartment_mode)
-            ch_for_postprocessing       = READ_SEGMENTED_CHECKPOINT.out.samples
-            ch_cell_mask_for_post       = READ_SEGMENTED_CHECKPOINT.out.cell_mask
-            ch_nuclei_mask_for_post     = READ_SEGMENTED_CHECKPOINT.out.nuclei_mask
-            ch_contours_for_post        = READ_SEGMENTED_CHECKPOINT.out.contours
-            ch_nucleus_contours_for_post = READ_SEGMENTED_CHECKPOINT.out.nucleus_contours
-            ch_morphology_for_post      = READ_SEGMENTED_CHECKPOINT.out.morphology
+            ch_seg = PatientArtifacts.channels(
+                'READ_SEGMENTED_CHECKPOINT -> POSTPROCESSING',
+                PatientArtifacts.SEGMENTATION_FIELDS, [
+                    samples         : READ_SEGMENTED_CHECKPOINT.out.samples,
+                    cell_mask       : READ_SEGMENTED_CHECKPOINT.out.cell_mask,
+                    nuclei_mask     : READ_SEGMENTED_CHECKPOINT.out.nuclei_mask,
+                    contours        : READ_SEGMENTED_CHECKPOINT.out.contours,
+                    nucleus_contours: READ_SEGMENTED_CHECKPOINT.out.nucleus_contours,
+                    morphology      : READ_SEGMENTED_CHECKPOINT.out.morphology,
+                ])
             ch_seg_reader_versions      = READ_SEGMENTED_CHECKPOINT.out.versions
             ch_seg_reader_size_logs     = READ_SEGMENTED_CHECKPOINT.out.size_logs
         } else {
             // postprocessing is not the entry, so segmentation ran this session
             // (the only other way to reach postprocessing in the linear gate).
-            ch_for_postprocessing = ParamUtils.isEntryPoint(params, 'segmentation')
-                ? INPUT_CHECK.out.samples
-                : REGISTRATION.out.registered  // Direct channel - enables patient-level parallelism!
-            ch_cell_mask_for_post        = SEGMENTATION.out.cell_mask
-            ch_nuclei_mask_for_post      = SEGMENTATION.out.nuclei_mask
-            ch_contours_for_post         = SEGMENTATION.out.contours
-            ch_nucleus_contours_for_post = SEGMENTATION.out.nucleus_contours
-            ch_morphology_for_post       = SEGMENTATION.out.morphology
+            ch_seg = PatientArtifacts.channels(
+                'SEGMENTATION -> POSTPROCESSING',
+                PatientArtifacts.SEGMENTATION_FIELDS, [
+                    samples         : ParamUtils.isEntryPoint(params, 'segmentation')
+                        ? INPUT_CHECK.out.samples
+                        : REGISTRATION.out.registered,  // Direct channel - enables patient-level parallelism!
+                    cell_mask       : SEGMENTATION.out.cell_mask,
+                    nuclei_mask     : SEGMENTATION.out.nuclei_mask,
+                    contours        : SEGMENTATION.out.contours,
+                    nucleus_contours: SEGMENTATION.out.nucleus_contours,
+                    morphology      : SEGMENTATION.out.morphology,
+                ])
         }
 
         POSTPROCESSING(
-            ch_for_postprocessing,
-            ch_cell_mask_for_post,
-            ch_nuclei_mask_for_post,
-            ch_contours_for_post,
-            ch_nucleus_contours_for_post,
-            ch_morphology_for_post,
+            ch_seg,
             ch_reg_qc_for_post,
             ch_reg_residuals_for_post,
             compartment_mode

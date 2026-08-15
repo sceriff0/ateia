@@ -307,20 +307,17 @@ workflow ADD_CYCLE {
 
     // ------------------------------------------------------------------ //
     // 8. EXPORT complete cells.geojson from the COMBINED table.
-    //    nucleus slot: real nucleus contours when compartments enabled,
-    //    else the cell contours (harmless placeholder — EXPORT_GEOJSON only
-    //    passes --nucleus_contours_json under params.quantify_compartments).
-    //    add_cycle does not run phenotyping (no COMPILE_PANEL/PHENOTYPE here):
-    //    the phenotypes/model_config slots reuse the cell contours file as a
-    //    harmless placeholder. panel_spec/panel_model are REJECTED at launch in
-    //    add_cycle mode (ParamUtils.validateAddCyclePhenotyping), so EXPORT_GEOJSON's
-    //    arg guard is always off here and the legacy constant-"Cell" export is kept.
+    //    The nucleus-contour placeholder (cell contours when
+    //    --quantify_compartments is off) and the three phenotype placeholders
+    //    used to be built here, byte-identically to postprocess.nf's copies, and
+    //    this file carried a comment reading "the arity must track
+    //    ASSEMBLE_EXPORT's take:" above a line repeating the contours file three
+    //    times. Both are declarations inside ASSEMBLE_EXPORT now; this path just
+    //    says it has no phenotyping. panel_spec/panel_model are REJECTED at launch
+    //    in add_cycle mode (ParamUtils.validateAddCyclePhenotyping), so
+    //    EXPORT_GEOJSON's arg guard is always off here and the legacy
+    //    constant-"Cell" export is kept.
     // ------------------------------------------------------------------ //
-    ch_nuc_for_export = compartment_mode.compartments ? ch_nucleus_contours : ch_contours
-    // No PHENOTYPE stage here: all three phenotype slots reuse the cell contours file.
-    // The arity must track ASSEMBLE_EXPORT's take: even though this path never
-    // phenotypes -- a short tuple here is a silent cardinality mismatch downstream.
-    ch_pheno_extras = ch_contours.map { pid, contours -> [pid, contours, contours, contours] }
 
     // ------------------------------------------------------------------ //
     // 9. REBUILD complete pyramid: recover prior channels from the prior
@@ -423,13 +420,22 @@ workflow ADD_CYCLE {
     // ch_prior_assets (they are unchanged here — no re-derivation), so the
     // rebuilt combined pyramid carries the mask series whenever embed_masks is on.
     ASSEMBLE_EXPORT(
-        MERGE_QUANT_CSVS.out.merged_csv,
-        ch_contours,
-        ch_nuc_for_export,
-        ch_pheno_extras,
-        ch_all_channels,
-        ch_masks,
-        compartment_mode
+        PatientArtifacts.channels('ADD_CYCLE -> ASSEMBLE_EXPORT', PatientArtifacts.EXPORT_FIELDS, [
+            merged_csv      : MERGE_QUANT_CSVS.out.merged_csv,
+            contours        : ch_contours,
+            nucleus_contours: ch_nucleus_contours,
+            // No PHENOTYPE stage on this path at all -- `false` below is what makes
+            // ASSEMBLE_EXPORT bind the placeholders, so these three stay empty rather
+            // than being padded with a tuple whose shape this file cannot check.
+            phenotypes      : Channel.empty(),
+            phenotype_qc    : Channel.empty(),
+            model_config    : Channel.empty(),
+            pyramid_channels: ch_all_channels,
+            cell_mask       : ch_masks.map { pid, cell_mask, _nuclei -> [pid, cell_mask] },
+            nuclei_mask     : ch_masks.map { pid, _cell, nuclei_mask -> [pid, nuclei_mask] },
+        ]),
+        compartment_mode,
+        false,
     )
 
     // ------------------------------------------------------------------ //
