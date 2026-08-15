@@ -71,6 +71,8 @@ jobs:
   setup:
     name: Resolve build parameters
     runs-on: ubuntu-latest
+    # One shell step resolving a version string.
+    timeout-minutes: 5
     outputs:
       version: ${{ steps.resolve.outputs.version }}
       push: ${{ steps.resolve.outputs.push }}
@@ -104,6 +106,12 @@ jobs:
     name: Build ${{ matrix.dir }}
     needs: setup
     runs-on: ubuntu-latest
+    # Per-matrix-entry image build + push. The GPU/segmentation contexts are large
+    # and a cold cache builds them from scratch, so this is generous — but it still
+    # bounds the job well under GitHub's 360-minute default. release.yml calls this
+    # workflow via `uses:`, which cannot carry its own timeout-minutes, so THIS is
+    # where the release image build gets bounded.
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
