@@ -63,7 +63,9 @@ process PUBLISH_PASSTHROUGH {
     task.ext.when == null || task.ext.when
 
     script:
-    // IDENTICAL to the stub below, and that is the point: there is nothing to stand in
+    // The stub below is this block with ONE line changed -- the `bash:` version row, which
+    // is a `bash --version` call here and the literal `stub` there. Everything the process
+    // actually DOES is identical, and that is the point: there is nothing to stand in
     // for. The task's whole job is to make the file appear under registered_slides/, which
     // a stub run has to do too -- csv/registered.csv is written from the resulting path,
     // and tests/checkpoint_manifest.nf.test opens every path it names in stub runs (the

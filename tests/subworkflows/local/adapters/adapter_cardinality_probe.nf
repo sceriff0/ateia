@@ -39,12 +39,35 @@ workflow ADAPTER_CARDINALITY_PROBE {
     shape        // [patients: n, slides: n, moving_slides: n] — the fixture's shape
 
     main:
+    // EVERY DECLARED BACKEND MUST HAVE AN ARM HERE, and this is the refusal point that
+    // makes that true rather than hoped for.
+    //
+    // Nextflow cannot dispatch an `include` dynamically, so the arms below are written out
+    // one per adapter and this list is written out with them. Left unchecked, that is the
+    // hole: a third backend could be declared in lib/AdapterContract.groovy, wired into
+    // registration.nf, and never reach this probe -- so its declaration would be asserted
+    // to EXIST (tests/test_adapter_contract.py) and never asserted to be TRUE, which is
+    // precisely the mis-declaration that fans out N**2. The assert turns "silently
+    // unchecked" into "loudly unwired", the same shape as AdapterContract.of()'s refusal.
+    // tests/test_adapter_contract.py additionally requires a .nf.test CASE per backend, so
+    // adding an arm without exercising it does not satisfy this either.
+    def dispatchable = ['valis', 'tiled'] as Set
+    assert dispatchable == AdapterContract.methods() as Set :
+        "ADAPTER_CARDINALITY_PROBE can run ${dispatchable} but AdapterContract declares " +
+        "${AdapterContract.methods()}. Add an arm below (and a case in " +
+        "adapter_cardinality.nf.test) for every declared backend -- an unexercised " +
+        "declaration is an unchecked one."
+
     if (method == 'tiled') {
         TILED_ADAPTER(ch_grouped)
         adapter = TILED_ADAPTER.out
-    } else {
+    } else if (method == 'valis') {
         VALIS_ADAPTER(ch_grouped)
         adapter = VALIS_ADAPTER.out
+    } else {
+        // Not a fallthrough to VALIS: a typo'd method used to run the VALIS adapter and
+        // count its rows against the typo'd (i.e. undeclared) contract.
+        error "ADAPTER_CARDINALITY_PROBE: no arm for method '${method}'"
     }
 
     // Named explicitly rather than reflected off `.out`, so this map is itself a

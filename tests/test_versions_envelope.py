@@ -49,9 +49,10 @@ MODULES = sorted((ROOT / "modules" / "local").glob("*.nf"))
 # ProcessEnvelope applies to versions.yml. Only the two-line version heredoc is
 # hand-written, and it names one tool.
 # publish_passthrough.nf is the third and last, for that same reason: `ubuntu:22.04`,
-# and its whole task is one `ln -s`. It has no script:/stub: divergence to close at all --
-# the two blocks are byte-identical, deliberately, because there is nothing to stand in
-# for: the file has to appear under registered_slides/ in a stub run too, since
+# and its whole task is one `ln -s`. Its script:/stub: blocks differ in exactly the line
+# this guard is about -- the `bash:` version row -- and in nothing else, deliberately,
+# because there is nothing to stand in for: the file has to appear under
+# registered_slides/ in a stub run too, since
 # csv/registered.csv is written from the resulting path and tests/checkpoint_manifest.nf.test
 # opens every path it names in exactly that mode.
 ALLOWED_HANDWRITTEN = {

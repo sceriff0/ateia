@@ -304,6 +304,48 @@ def test_seg_qc_branches_on_declared_cardinality_not_on_a_method_literal():
     )
 
 
+def test_every_declared_backend_is_exercised_at_runtime():
+    """A declaration that exists is not a declaration that is TRUE.
+
+    The tests above force every adapter to HAVE a cardinality declaration. Only
+    tests/subworkflows/local/adapters/adapter_cardinality.nf.test checks that the
+    declaration describes the adapter that exists — by running it and counting — and
+    that file necessarily names its backends one at a time, because Nextflow cannot
+    dispatch an `include` dynamically.
+
+    So this is the guard on the guard: a third backend declared in AdapterContract but
+    never given a probe arm and a test case would be asserted to exist and never
+    asserted to be true — which is exactly the mis-declaration
+    (`transform: PER_PATIENT` on per-slide data) that produces the N**2 cross join this
+    whole task exists to prevent. Checked here statically AND at runtime by the probe's
+    own `dispatchable == AdapterContract.methods()` assert, because either one alone can
+    be satisfied without the other: the probe's assert passes if an arm is added but no
+    case exercises it, and a case with no arm hits the probe's `error`.
+    """
+    text = _contract_text()
+    declared = sorted(_groovy_map_keys(text, "BACKENDS"))
+
+    probe = _strip_comments(
+        (ADAPTER_DIR.parent.parent.parent / "tests" / "subworkflows" / "local"
+         / "adapters" / "adapter_cardinality_probe.nf").read_text()
+    )
+    cases = (
+        ROOT / "tests" / "subworkflows" / "local" / "adapters"
+        / "adapter_cardinality.nf.test"
+    ).read_text()
+
+    missing_arm = [m for m in declared if f"method == '{m}'" not in probe]
+    assert not missing_arm, (
+        f"adapter_cardinality_probe.nf has no arm for {missing_arm}; those backends' "
+        "declared cardinalities are never counted against what they really emit"
+    )
+    missing_case = [m for m in declared if f"input[1] = '{m}'" not in cases]
+    assert not missing_case, (
+        f"adapter_cardinality.nf.test never runs {missing_case}; an arm nothing "
+        "exercises checks nothing"
+    )
+
+
 def test_the_backend_vocabularies_agree_across_the_repo():
     """One backend name list, three places that must not drift apart.
 

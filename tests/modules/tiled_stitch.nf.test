@@ -95,7 +95,31 @@ nextflow_process {
                 { assert rendered.every { it.contains("--moving-name 'DAPI_CD3_CD8'") },
                     "the stitch must name the slide it is warping: " + rendered.join(' --- ') },
                 { assert rendered.every { it.contains('--manifest ') },
-                    "rendered command does not pass the transform manifest: " + rendered.join(' --- ') }
+                    "rendered command does not pass the transform manifest: " + rendered.join(' --- ') },
+                // THE OUTPUT DIRECTORY IS A PUBLISHED PATH, and it is rendered here.
+                // publishDir carries a producer's output subdirectory into the published
+                // path, so `--out registered_slides/...` (and the mkdir that precedes it)
+                // is half of where a tiled run's slides land -- while it read
+                // `registered/`, the identical artifact was published to
+                // <pid>/registered/registered/ under this backend and
+                // <pid>/registered/registered_slides/ under VALIS.
+                //
+                // Asserted HERE, in a rendered-command case, and not only in the -stub
+                // case above: `-stub` never evaluates a `script:` block, so the stub
+                // case's path assertion pins the STUB's mkdir and nothing about the real
+                // command. CI's blocking gate is stub-only, which is exactly the trap
+                // CLAUDE.md's "Verification reality" #1 describes -- real-mode drift back
+                // to 'registered/' would otherwise surface only on a real run.
+                { assert rendered.every { it.contains('mkdir -p registered_slides') },
+                    "the real script no longer creates Layout.REGISTERED_SUBDIR: " + rendered.join(' --- ') },
+                { assert rendered.every { it.contains('--out registered_slides/P001_DAPI_CD3_CD8_registered.ome.tiff') },
+                    "the real script writes its slide outside registered_slides/: " + rendered.join(' --- ') },
+                // Negative half, and not redundant: `--out registered_slides/x` also
+                // "contains" `registered/`-free text, but a revert to `--out registered/x`
+                // would satisfy every OTHER assertion in this block. This is the one that
+                // fails on it.
+                { assert rendered.every { !(it =~ /--out\s+registered\//) },
+                    "the real script writes into 'registered/', the name that split the published tree in two: " + rendered.join(' --- ') }
             )
         }
     }
@@ -135,7 +159,14 @@ nextflow_process {
                 { assert rendered.every { it.contains('--out-tile 512') },
                     "params.reg_tiled_out_tile was not honoured: " + rendered.join(' --- ') },
                 { assert rendered.every { it.contains('--pixel-size 0.2125') },
-                    "params.pixel_size was not honoured: " + rendered.join(' --- ') }
+                    "params.pixel_size was not honoured: " + rendered.join(' --- ') },
+                // The output directory is NOT a tunable: it is Layout.REGISTERED_SUBDIR,
+                // mirrored by hand into this module and conf/modules.config's `pattern:`
+                // (tests/test_layout.py checks all of them). Re-asserted under non-default
+                // params so a future ext.args or param-driven path cannot move it for some
+                // runs and not others.
+                { assert rendered.every { it.contains('--out registered_slides/') },
+                    "the output directory moved with the tunables: " + rendered.join(' --- ') }
             )
         }
     }
