@@ -72,7 +72,8 @@ prior run's output.
     `name`, the samplesheet `requiredColumns` when it is the entry point, the
     checkpoint `entryColumn` it reads, and the `qcKinds` it contributes.
     `STEP_ORDER`, `requiredColumnsForStep`, the entry-column lookup in
-    `workflows/mirage.nf` and `KNOWN_ARTIFACT_KINDS` in `final_qc.nf` are all
+    `workflows/mirage.nf` and `ParamUtils.knownArtifactKinds()` (called by
+    `final_qc.nf`) are all
     derived from it. `--stop` naming an earlier step than `--start` is rejected
     at launch.
 

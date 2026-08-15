@@ -3,7 +3,7 @@
 
 "What is a step?" has one source of truth: `ParamUtils.STEPS` in
 `lib/ParamUtils.groovy`. `STEP_ORDER`, `requiredColumnsForStep`,
-`entryColumnForStep`, and `final_qc.nf`'s `KNOWN_ARTIFACT_KINDS` are all
+`entryColumnForStep`, and `knownArtifactKinds()` (which final_qc.nf calls) are all
 derived from that table in Groovy, so a Groovy-side drift is structurally
 impossible. `nextflow_schema.json`'s `start`/`stop` enums cannot be derived
 the same way -- there is no generation step in this repo, and adding a

@@ -14,7 +14,7 @@ class ParamUtils {
     /*
      * The single table answering "what is a step?". Everything else that used
      * to restate the step vocabulary — STEP_ORDER, requiredColumnsForStep,
-     * mirage.nf's entry_column map, final_qc.nf's KNOWN_ARTIFACT_KINDS, and
+     * mirage.nf's entry_column map, knownArtifactKinds() below, and
      * nextflow_schema.json's start/stop enums — is either derived from this or
      * checked against it (the schema can't be generated at build time, so
      * tests/test_step_vocabulary_consistency.py asserts it agrees instead).
@@ -76,8 +76,32 @@ class ParamUtils {
     ]
 
     // Artifact-stream tags every step contributes, so they belong to no single
-    // step's qcKinds. See final_qc.nf's KNOWN_ARTIFACT_KINDS derivation.
+    // step's qcKinds. See knownArtifactKinds() below.
     static final List UNIVERSAL_QC_KINDS = ['versions', 'size_log']
+
+    /**
+     * The complete FINAL_QC artifact vocabulary: every step's own qcKinds plus the
+     * two kinds every step emits.
+     *
+     * This lives here rather than in final_qc.nf because it is a pure derivation of
+     * the table above and because a `.nf` file has nowhere to put it: under
+     * Nextflow 26's strict parser a bare top-level assignment is rejected
+     * ("Statements cannot be mixed with script declarations"), and the obvious
+     * alternative -- a script-level `def` -- is scoped to the file's implicit
+     * run() method and is therefore invisible to the functions in that same file.
+     * A static accessor has neither problem: it is visible from every call site,
+     * from a subworkflow body, and from an nf-test `nextflow_function` test.
+     *
+     * Returns a fresh list each call, so no caller can mutate the vocabulary for
+     * everyone else in the JVM.
+     *
+     * Both FINAL_QC call sites in workflows/mirage.nf hand-write these tags (21
+     * literals across the two calls) and nothing else checks that the two
+     * vocabularies agree -- this list is that check. See final_qc.nf's header.
+     */
+    static List knownArtifactKinds() {
+        return STEPS.collectMany { it.qcKinds } + UNIVERSAL_QC_KINDS
+    }
 
     static final List STEP_ORDER = STEPS.collect { it.name }
 

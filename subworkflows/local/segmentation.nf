@@ -289,9 +289,11 @@ workflow READ_SEGMENTED_CHECKPOINT {
     // Fail loudly here if the writer's schema drifts from what this reader indexes.
     ['patient_id', 'registered_image', 'is_reference', 'channels',
      'cell_mask', 'nuclei_mask'].each { col ->
-        assert col in Checkpoint.columns(Layout.SEGMENTED),
-            "READ_SEGMENTED_CHECKPOINT reads '${col}' from a 'segmented' checkpoint, " +
-            "which Checkpoint no longer declares"
+        if (!(col in Checkpoint.columns(Layout.SEGMENTED))) {
+            throw new IllegalStateException(
+                "READ_SEGMENTED_CHECKPOINT reads '${col}' from a 'segmented' checkpoint, " +
+                "which Checkpoint no longer declares")
+        }
     }
 
     ch_rows = Channel
