@@ -55,13 +55,26 @@ jobs:
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt || true
           fi
-          pip install pytest pytest-cov tifffile numpy pandas scikit-image scipy scikit-learn xmltodict
-          # zarr/numcodecs must be pinned together, and pinned HERE rather than left to
-          # transitive resolution: tests/test_tiled_stitch_streaming.py imports
-          # bin/utils/tiled_io.py, which imports zarr, and a newer numcodecs drops
-          # blosc.cbuffer_sizes that zarr 2.18 imports — so the test module fails at
-          # COLLECTION with `from zarr.meta import Metadata2, Metadata3`, taking the whole
-          # job down rather than failing one test. Same pair as containers/tiled/requirements.txt.
+          pip install pytest pytest-cov pandas scikit-learn xmltodict
+          # The imaging stack (numpy/scipy/scikit-image/tifffile/zarr/numcodecs) is
+          # pinned to containers/tiled/requirements.txt — the production image that
+          # actually runs the tiled path — and installed together in one command so
+          # there is no resolver window where an unpinned package can drag in a
+          # version incompatible with the others. This used to be two separate `pip
+          # install`s (an unpinned tifffile/numpy/scikit-image/scipy first, then
+          # zarr/numcodecs pinned "LAST so it wins"), which let CI resolve a tifffile
+          # requiring zarr>=3.2 and then force-downgrade zarr back to 2.18.3 afterward
+          # — an inconsistent install that read a blank thumbnail (intensity
+          # p1/p50/p99.9 = 0.0/0.0/0.0) and failed unrelated tiled tests with
+          # `RuntimeError: ORB found no features.` tests/test_ci_stack_pinned.py
+          # guards this pin against re-diverging from containers/tiled/requirements.txt.
+          #
+          # zarr/numcodecs must be pinned together: tests/test_tiled_stitch_streaming.py
+          # imports bin/utils/tiled_io.py, which imports zarr, and a newer numcodecs
+          # drops blosc.cbuffer_sizes that zarr 2.18 imports — so the test module fails
+          # at COLLECTION with `from zarr.meta import Metadata2, Metadata3`, taking the
+          # whole job down rather than failing one test.
+          pip install numpy==1.26.4 scipy==1.13.1 scikit-image==0.24.0 tifffile==2024.7.2 zarr==2.18.3 numcodecs==0.13.1
           # anndata powers tests/test_join_flowpath.py. Tolerated as optional because
           # anndata has dropped Python 3.9, which this matrix still covers; the test
           # module pytest.importorskip's it, so an unavailable anndata skips those
@@ -72,13 +85,6 @@ jobs:
           # 'ZarrTiffStore'`), which breaks the tiled streaming/fanout tests. 0.11.x works
           # with zarr 2 and is all these tests need — they only build in-memory AnnData.
           pip install 'anndata<0.12' || echo "anndata unavailable on Python ${{ matrix.python-version }} — test_join_flowpath will skip"
-          # ORDERING IS LOAD-BEARING: this pin goes LAST so it wins over anything the
-          # installs above dragged in transitively. zarr/numcodecs must move together —
-          # newer numcodecs drops blosc.cbuffer_sizes that zarr 2.18 imports, and
-          # tests/test_tiled_stitch_streaming.py imports bin/utils/tiled_io.py -> zarr, so
-          # a bad pair fails at COLLECTION and takes the whole job down rather than one
-          # test. Same pair as containers/tiled/requirements.txt.
-          pip install 'zarr==2.18.3' 'numcodecs==0.13.1'
 
       - name: Generate test data
         run: |
@@ -156,7 +162,10 @@ jobs:
 
       - name: Generate test data
         run: |
-          pip install numpy tifffile
+          # Pinned to containers/tiled/requirements.txt (the production tiled-path
+          # image) — guarded by tests/test_ci_stack_pinned.py, which requires every
+          # `pip install` of a guarded imaging package, in every job, to match.
+          pip install numpy==1.26.4 tifffile==2024.7.2
           python tests/testdata/generate_complete_testdata.py
 
       - name: Check all profiles parse without the gitignored site config
@@ -258,7 +267,10 @@ jobs:
 
       - name: Generate test data
         run: |
-          pip install numpy tifffile
+          # Pinned to containers/tiled/requirements.txt (the production tiled-path
+          # image) — guarded by tests/test_ci_stack_pinned.py, which requires every
+          # `pip install` of a guarded imaging package, in every job, to match.
+          pip install numpy==1.26.4 tifffile==2024.7.2
           python tests/testdata/generate_complete_testdata.py
 
       - name: Install nf-test
@@ -348,7 +360,10 @@ jobs:
 
       - name: Generate test data
         run: |
-          pip install numpy tifffile
+          # Pinned to containers/tiled/requirements.txt (the production tiled-path
+          # image) — guarded by tests/test_ci_stack_pinned.py, which requires every
+          # `pip install` of a guarded imaging package, in every job, to match.
+          pip install numpy==1.26.4 tifffile==2024.7.2
           python tests/testdata/generate_complete_testdata.py
 
       - name: Install nf-test
@@ -418,7 +433,10 @@ jobs:
 
       - name: Generate test data
         run: |
-          pip install numpy tifffile
+          # Pinned to containers/tiled/requirements.txt (the production tiled-path
+          # image) — guarded by tests/test_ci_stack_pinned.py, which requires every
+          # `pip install` of a guarded imaging package, in every job, to match.
+          pip install numpy==1.26.4 tifffile==2024.7.2
           python tests/testdata/generate_complete_testdata.py
 
       - name: Install nf-test
