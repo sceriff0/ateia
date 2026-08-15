@@ -34,10 +34,28 @@ def main() -> None:
             )
         # out="memmap" rather than a plain asarray: this is a full-resolution
         # 2-channel uint32 mask series -- the same read segment.py already does
-        # lazily (`tif.asarray(out="memmap")`). Everything below touches one
-        # plane at a time, so nothing needs both channels resident at once.
-        # The writes stay INSIDE this `with` block so the mapping is still
-        # backed by an open file when the planes are consumed.
+        # lazily. Everything below touches one plane at a time, so nothing needs
+        # both channels resident at once.
+        #
+        # NOTE ON out="memmap" (same wording in split_multichannel.py, bin/utils/qc.py and
+        # extract_mask_series.py -- one rule, three sites):
+        # tifffile can map the file directly ONLY when the data is uncompressed. For a
+        # compressed TIFF it decodes into a full-size temporary file under $TMPDIR and maps
+        # that, so the peak moves from RAM to scratch disk -- it does not vanish. See
+        # docs/image_io.md's "Reads" section, which states the same trade.
+        # A numpy.memmap holds its own mapping, so it stays valid after the TiffFile is
+        # closed. split_multichannel.py and bin/utils/qc.py use the array past the `with`
+        # block on that basis; extract_mask_series.py keeps its use inside one because the
+        # block is short, which is a style choice, not a different rule.
+        #
+        # For THIS site specifically: the input is MERGE_AND_PYRAMID's pyramid,
+        # written with --compression ${params.compression} (modules/local/
+        # merge_and_pyramid.nf:62; nextflow.config defaults it to 'zstd'), so unless
+        # an operator sets --compression none this IS the temp-file decode. Accepted:
+        # the alternative is both uint32 planes resident plus a second copy for the
+        # upcast.
+        # The writes below are kept inside this `with` purely because the block
+        # is three lines long; per the note above they would be correct outside it.
         masks = tif.series[1].asarray(out="memmap")
 
         if masks.ndim != 3 or masks.shape[0] != 2:

@@ -281,7 +281,24 @@ def create_registration_qc(
     # resolves), and GENERATE_REGISTRATION_QC opens the reference and the
     # registered slide together -- so the eager `tifffile.imread` form held two
     # complete multichannel WSIs in RAM at once to read two planes. This is the
-    # same read `segment.py` already does (`tif.asarray(out="memmap")`).
+    # same read `segment.py` already does.
+    #
+    # NOTE ON out="memmap" (same wording in split_multichannel.py, bin/utils/qc.py and
+    # extract_mask_series.py -- one rule, three sites):
+    # tifffile can map the file directly ONLY when the data is uncompressed. For a
+    # compressed TIFF it decodes into a full-size temporary file under $TMPDIR and maps
+    # that, so the peak moves from RAM to scratch disk -- it does not vanish. See
+    # docs/image_io.md's "Reads" section, which states the same trade.
+    # A numpy.memmap holds its own mapping, so it stays valid after the TiffFile is
+    # closed. split_multichannel.py and bin/utils/qc.py use the array past the `with`
+    # block on that basis; extract_mask_series.py keeps its use inside one because the
+    # block is short, which is a style choice, not a different rule.
+    #
+    # For THIS site specifically: BOTH inputs are slides this repo did not write the
+    # compression of (the reference and the registered slide, the latter from VALIS),
+    # so both may be temp-file decodes rather than direct maps -- two of them, in one
+    # task. Still better than two whole WSIs resident, but it is a RAM-to-scratch
+    # shift, not an elimination.
     with tifffile.TiffFile(str(reference_path)) as tif:
         ref_img = tif.asarray(out="memmap")
     with tifffile.TiffFile(str(registered_path)) as tif:

@@ -80,9 +80,28 @@ def split_multichannel_tiff(
 
     # Memory-mapped, not decoded whole: this function writes ONE channel at a time
     # (`data[i]` in the loop below), so the eager `tifffile.imread` held the entire
-    # C-channel registered slide in RAM to emit C single-channel files. Same read
-    # `segment.py` uses (`tif.asarray(out="memmap")`); the mapping is read-only and
-    # `normalize_image_dimensions`'s transpose is a view, so nothing is copied.
+    # C-channel slide in RAM to emit C single-channel files. Same read `segment.py`
+    # uses. The mapping is read-only and `normalize_image_dimensions`'s transpose is a
+    # view, so no ARRAY is copied here -- but see the note below on what the map costs.
+    #
+    # NOTE ON out="memmap" (same wording in split_multichannel.py, bin/utils/qc.py and
+    # extract_mask_series.py -- one rule, three sites):
+    # tifffile can map the file directly ONLY when the data is uncompressed. For a
+    # compressed TIFF it decodes into a full-size temporary file under $TMPDIR and maps
+    # that, so the peak moves from RAM to scratch disk -- it does not vanish. See
+    # docs/image_io.md's "Reads" section, which states the same trade.
+    # A numpy.memmap holds its own mapping, so it stays valid after the TiffFile is
+    # closed. split_multichannel.py and bin/utils/qc.py use the array past the `with`
+    # block on that basis; extract_mask_series.py keeps its use inside one because the
+    # block is short, which is a style choice, not a different rule.
+    #
+    # For THIS site specifically: the input is the registered slide, written by VALIS
+    # (bin/register.py) or by TILED_STITCH. TILED_STITCH's is uncompressed and maps
+    # directly; VALIS's compression is that library's choice and is not visible from
+    # this repo, so on the VALIS path this most likely IS the temp-file decode. That is
+    # still the better trade -- scratch disk instead of a whole WSI resident while C
+    # output files are written -- but it is a trade, not a free lunch, and no test on
+    # this branch exercises it (real nf-test does not run on the dev host).
     with tifffile.TiffFile(input_path) as tif:
         img = tif.asarray(out="memmap")
     logger.info(f"  Image shape: {img.shape}, dtype: {img.dtype}")

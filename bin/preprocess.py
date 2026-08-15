@@ -278,9 +278,15 @@ def preprocess_multichannel_image(
         # (`multichannel_stack[i, ...]` per worker below), and the transpose /
         # expand_dims fixups that follow are views, so nothing here needs the whole
         # multichannel stack resident. This is the read `segment.py` already does
-        # (`tif.asarray(out="memmap")`) on the same kind of file. The corrected
-        # output is a separate in-RAM stack, so the source mapping is read-only
-        # throughout and never aliases what gets written.
+        # on the same kind of file. The corrected output is a separate in-RAM stack,
+        # so the source mapping is read-only throughout and never aliases what gets
+        # written.
+        #
+        # Unlike split_multichannel.py and bin/utils/qc.py, this site really does get
+        # a zero-copy map: tifffile maps directly only for UNCOMPRESSED data, and
+        # PREPROCESS's input is CONVERT_IMAGE's output (subworkflows/local/preprocess.nf
+        # wires CONVERT_IMAGE.out.ome_tiff straight in), which convert_image.py writes
+        # with compression=None. No $TMPDIR decode happens here.
         multichannel_stack = tif.asarray(out="memmap")
         logger.info(f"Loaded image shape: {multichannel_stack.shape}")
 

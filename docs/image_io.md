@@ -39,6 +39,15 @@ composite in the same function went without.
 | `write_mask_tiff` | `segment.py`, `segment_cellsam.py`, `segment_instantseg.py`, `extract_mask_series.py` | A label mask has no markers to name and every consumer indexes it positionally, so no OME header; and it is always compressed, because label images compress by an order of magnitude and the raw variant was the site that reached the 4 GB limit soonest. dtype is written through unchanged — label IDs are categorical and a silent cast renumbers cells. |
 | `open_tiff_writer` | `tiled_stitch.py`, `merge_channels_pyramid.py` | The two cases that genuinely cannot be one call: a streamed tile generator (the slide is never materialised) and the true multi-resolution pyramid (base + `subifds` levels + an optional un-pyramided mask series). The caller keeps every decision about *what* is written; the wrapper owns only that the file is BigTIFF and that `ome` is stated rather than inferred from the filename. |
 
+!!! note "The registration-QC composites open differently in ImageJ now"
+    `*_QC_RGB_fullres.tif` used to be written with `imagej=True` and `mode: composite`, so Fiji
+    opened it as a single RGB composite. It is OME now, like its downsampled sibling always was,
+    so Fiji opens it via Bio-Formats as a 3-channel stack — the red/green overlay is still there,
+    but you may need *Image ▸ Color ▸ Merge Channels* (or the Bio-Formats importer's "composite"
+    view mode) to see it as one picture. Channel order is unchanged: 0 = registered (red),
+    1 = reference (green), 2 = zero. Choosing one metadata convention was the point of the change;
+    this is what it costs a person opening the file.
+
 `merge_channels_pyramid.py` is the **only** real pyramid writer in the repo. `convert_image.py`
 and `preprocess.py` write single-resolution OME-TIFFs; nothing else uses `subifds`. Its
 `verify_ome_tiff()` runs after every write and is the check that the structure consumers read has
@@ -86,7 +95,25 @@ Task 11 survey listed:
 A memory-mapped read of a *compressed* TIFF cannot map the file directly, so `tifffile` decodes
 into a temporary file instead: the array stops costing RAM and starts costing scratch disk of the
 same size. That is the trade every `out="memmap"` site above makes, and it is the one already made
-by `segment.py`.
+by `segment.py`. Which sites actually pay it:
+
+| Site | Input | Direct map, or `$TMPDIR` decode? |
+|---|---|---|
+| `preprocess.py` | `CONVERT_IMAGE.out.ome_tiff`, written `compression=None` | **direct map** — no temp file |
+| `split_multichannel.py` | the registered slide | `TILED_STITCH`'s is uncompressed (direct); **VALIS's compression is VALIS's choice and invisible here**, so on the VALIS path, a decode |
+| `bin/utils/qc.py` | the reference *and* the registered slide | likely **two** decodes in one task |
+| `extract_mask_series.py` | `MERGE_AND_PYRAMID`'s pyramid, `--compression` defaulting to `zstd` | a decode, unless `--compression none` |
+
+!!! warning "No `scratch` directive is set anywhere in this repo"
+    `grep -rn scratch nextflow.config conf/` returns nothing, so Nextflow's default
+    (`scratch = false`) applies: tasks run in their work directory, and `$TMPDIR` is whatever the
+    executor's environment provides — on SLURM, typically a node-local `/tmp` or a per-job
+    directory, **not** the work filesystem and **not** sized by the process's `memory` request.
+    A `out="memmap"` decode of a compressed WSI therefore lands somewhere no `conf/modules.config`
+    block accounts for. This is recorded, not fixed: setting `scratch` or a `TMPDIR` env is a
+    resource decision for the site profile, and `conf/modules.config`'s one-owner rule governs
+    what may be changed there. No site was observed failing on it — real (non-stub) runs do not
+    execute on the development host.
 
 Where a whole-array read is genuinely required, the site says so in a comment. The one deleted
 outright was `bin/utils/tiled_io.py`'s `load_channels`: an eager whole-slide reader sitting next to
@@ -104,6 +131,13 @@ which is the only use it had.
 2. If none of the four variants fits, add a fifth **to `image_io.py`**, with the reason in its
    docstring. A fifth variant that lives in a script is how the pipeline ended up with six
    mutually distinct mechanisms and no owner.
-3. Check `docs/containers.md` for the `tifffile` version your process's image pins before using a
+3. `tifffile` is not the only library here that can write a TIFF — `bin/generate_preprocess_qc.py`
+   imports `skimage.io.imsave` and `bin/utils/qc.py` calls `cv2.imwrite`. Both write PNG, which is
+   fine and out of scope. But `test_image_io_ownership.py::test_foreign_image_writer_cannot_write_a_tiff`
+   requires any such call's extension to be **statically visible** at the call site (a literal, an
+   f-string, or `.with_suffix`) and non-TIFF; a path it cannot resolve fails just as a `.tif` does.
+   PIL is closed by import: nothing under `bin/` imports it, and any `.save()` in a file that did
+   would be flagged.
+4. Check `docs/containers.md` for the `tifffile` version your process's image pins before using a
    feature that needs a newer one. The pins span `2023.2.28` to `2024.7.24`; `segmentation_gpu` is
    the floor, held there by `aicsimageio==4.14.0`'s `tifffile<2023.3.15` cap.
