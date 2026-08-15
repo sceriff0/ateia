@@ -5,7 +5,6 @@ This package provides common utilities for the MIRAGE image processing pipeline:
 - **logger**: Centralized logging configuration
 - **image_utils**: Image I/O and processing utilities
 - **metadata**: OME-TIFF metadata handling
-- **registration_utils**: Registration helper functions
 
 Examples
 --------
