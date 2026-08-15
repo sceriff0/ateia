@@ -7,6 +7,18 @@ nextflow_workflow {
     tag "subworkflow"
     tag "preprocessing"
 
+    // EVERY meta below carries images_count, and it is not decoration. PREPROCESSING
+    // hands it to CHECKPOINT_WRITER as `expected_rows` -- the streaming size hint that
+    // lets a finished patient's csv/preprocessed.parts/<pid>.csv be published while
+    // other patients are still running -- and lib/PatientGroup.groovy now ABORTS when
+    // it is absent instead of degrading to an unsized groupTuple. INPUT_CHECK injects
+    // the count into every meta it produces, so a fixture without it is not a leaner
+    // fixture, it is a meta this pipeline cannot produce. Until the size was mandatory
+    // these fixtures silently exercised the unsized full-run barrier while appearing
+    // to test the streaming path, and the checkpoint CSV still came out -- at channel
+    // close. The value must equal the number of rows that patient contributes to the
+    // checkpoint, i.e. the number of images it has in that test.
+
     test("Should run full preprocessing workflow - stub") {
 
         tag "stub"
@@ -19,9 +31,9 @@ nextflow_workflow {
             workflow {
                 """
                 input[0] = Channel.fromList([
-                    [[patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK', 'SMA']],
+                    [[patient_id: 'P001', images_count: 2, is_reference: true, channels: ['DAPI', 'PANCK', 'SMA']],
                      file('$projectDir/tests/testdata/P001_ref.ome.tiff')],
-                    [[patient_id: 'P001', is_reference: false, channels: ['DAPI', 'PANCK', 'SMA']],
+                    [[patient_id: 'P001', images_count: 2, is_reference: false, channels: ['DAPI', 'PANCK', 'SMA']],
                      file('$projectDir/tests/testdata/P001_mov1.ome.tiff')]
                 ])
                 """
@@ -52,7 +64,7 @@ nextflow_workflow {
             workflow {
                 """
                 input[0] = Channel.fromList([
-                    [[patient_id: 'P001', is_reference: true, channels: ['DAPI']],
+                    [[patient_id: 'P001', images_count: 1, is_reference: true, channels: ['DAPI']],
                      file('$projectDir/tests/testdata/P001_ref.ome.tiff')]
                 ])
                 """
@@ -79,11 +91,11 @@ nextflow_workflow {
             workflow {
                 """
                 input[0] = Channel.fromList([
-                    [[patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK']],
+                    [[patient_id: 'P001', images_count: 2, is_reference: true, channels: ['DAPI', 'PANCK']],
                      file('$projectDir/tests/testdata/P001_ref.ome.tiff')],
-                    [[patient_id: 'P001', is_reference: false, channels: ['DAPI', 'PANCK']],
+                    [[patient_id: 'P001', images_count: 2, is_reference: false, channels: ['DAPI', 'PANCK']],
                      file('$projectDir/tests/testdata/P001_mov1.ome.tiff')],
-                    [[patient_id: 'P002', is_reference: true, channels: ['DAPI', 'PANCK']],
+                    [[patient_id: 'P002', images_count: 1, is_reference: true, channels: ['DAPI', 'PANCK']],
                      file('$projectDir/tests/testdata/P002_ref.ome.tiff')]
                 ])
                 """
@@ -110,7 +122,7 @@ nextflow_workflow {
             workflow {
                 """
                 input[0] = Channel.fromList([
-                    [[patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK'], custom: 'value'],
+                    [[patient_id: 'P001', images_count: 1, is_reference: true, channels: ['DAPI', 'PANCK'], custom: 'value'],
                      file('$projectDir/tests/testdata/P001_ref.ome.tiff')]
                 ])
                 """
@@ -142,7 +154,7 @@ nextflow_workflow {
             workflow {
                 """
                 input[0] = Channel.fromList([
-                    [[patient_id: 'P001', is_reference: true, channels: ['DAPI']],
+                    [[patient_id: 'P001', images_count: 1, is_reference: true, channels: ['DAPI']],
                      file('$projectDir/tests/testdata/P001_ref.ome.tiff')]
                 ])
                 """
@@ -174,9 +186,9 @@ nextflow_workflow {
             workflow {
                 """
                 input[0] = Channel.fromList([
-                    [[patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK', 'SMA']],
+                    [[patient_id: 'P001', images_count: 2, is_reference: true, channels: ['DAPI', 'PANCK', 'SMA']],
                      file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)],
-                    [[patient_id: 'P001', is_reference: false, channels: ['DAPI', 'PANCK', 'SMA']],
+                    [[patient_id: 'P001', images_count: 2, is_reference: false, channels: ['DAPI', 'PANCK', 'SMA']],
                      file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)]
                 ])
                 """
@@ -244,9 +256,9 @@ nextflow_workflow {
             workflow {
                 """
                 input[0] = Channel.fromList([
-                    [[patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK', 'SMA']],
+                    [[patient_id: 'P001', images_count: 2, is_reference: true, channels: ['DAPI', 'PANCK', 'SMA']],
                      file('$projectDir/tests/testdata/P001_ref.ome.tiff')],
-                    [[patient_id: 'P001', is_reference: false, channels: ['DAPI', 'PANCK', 'SMA']],
+                    [[patient_id: 'P001', images_count: 2, is_reference: false, channels: ['DAPI', 'PANCK', 'SMA']],
                      file('$projectDir/tests/testdata/P001_mov1.ome.tiff')]
                 ])
                 """

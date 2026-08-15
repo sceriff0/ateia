@@ -80,11 +80,21 @@ nextflow_workflow {
                 // from WARP_SEG_QC), to exercise the EXPORT_SPATIALDATA fold-in path
                 // in postprocess.nf (the normal full-pipeline path, not the
                 // --start postprocessing shortcut covered by the other tests below).
+                //
+                // images_count is REQUIRED here, not decoration: postprocess.nf sizes
+                // its per-patient QC gather `images_count - 1` (one artifact per MOVING
+                // slide), and lib/PatientGroup.groovy ABORTS when that cannot be
+                // derived. These metas descend from INPUT_CHECK in the real pipeline,
+                // which injects the count into every meta it produces, so a meta
+                // without it is not a leaner fixture -- it is a meta the pipeline
+                // cannot produce. Before the size was mandatory this fixture silently
+                // exercised an UNSIZED groupTuple, i.e. the full-run barrier, while
+                // appearing to test the streaming gather.
                 input[1] = Channel.fromList([
-                    [[patient_id: 'P001'], file('$projectDir/tests/testdata/sample_reg_qc.json')]
+                    [[patient_id: 'P001', images_count: 2], file('$projectDir/tests/testdata/sample_reg_qc.json')]
                 ])
                 input[2] = Channel.fromList([
-                    [[patient_id: 'P001'], file('$projectDir/tests/testdata/sample_reg_residuals.csv')]
+                    [[patient_id: 'P001', images_count: 2], file('$projectDir/tests/testdata/sample_reg_residuals.csv')]
                 ])
                 input[3] = ParamUtils.compartmentMode(params)
                 """

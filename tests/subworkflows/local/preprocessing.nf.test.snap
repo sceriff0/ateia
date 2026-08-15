@@ -4,6 +4,7 @@
             [
                 {
                     "patient_id": "P001",
+                    "images_count": 2,
                     "is_reference": false,
                     "channels": [
                         "DAPI",
@@ -13,6 +14,7 @@
                 },
                 {
                     "patient_id": "P001",
+                    "images_count": 2,
                     "is_reference": true,
                     "channels": [
                         "DAPI",
