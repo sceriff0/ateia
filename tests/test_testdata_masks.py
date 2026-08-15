@@ -35,11 +35,38 @@ CELL_MASK = TESTDATA / "P001_cell_mask.tif"
 NUCLEI_MASK = TESTDATA / "P001_nuclei_mask.tif"
 
 
-def _require(path: Path):
-    if not path.exists():
-        pytest.skip(
-            f"{path.name} not generated -- run tests/testdata/generate_complete_testdata.py"
-        )
+# Every mask fixture the generator writes. Named explicitly, and cross-checked against a
+# glob below, so this file cannot go quiet either by a fixture vanishing or by the glob
+# that discovers them matching nothing.
+EXPECTED_MASKS = (
+    TESTDATA / "P001_cell_mask.tif",
+    TESTDATA / "P002_cell_mask.tif",
+    TESTDATA / "P001_cell_mask.npy",
+    TESTDATA / "P002_cell_mask.npy",
+    NUCLEI_MASK,
+)
+
+
+def _require(path: Path) -> Path:
+    """A missing fixture FAILS; it does not skip.
+
+    This used to `pytest.skip`, which made the whole file silently vacuous on a tree
+    where the generator had not been run -- a guard that disappears exactly when the
+    thing it guards is absent, which is the same defect class as the 0-byte fixture this
+    file exists to prevent from coming back.
+
+    Skipping would be right if the fixture were optional. It is not: every CI job that
+    runs pytest runs `python tests/testdata/generate_complete_testdata.py` first
+    (.github/workflows/ci.yml:85,160,262,352,422 and release.yml:115), so an absent mask
+    is a real defect -- either the generator stopped writing it or the working tree is
+    not set up, and both deserve a failure that says so.
+    """
+    assert path.exists(), (
+        f"{path.relative_to(TESTDATA.parent)} does not exist. Run "
+        "`python tests/testdata/generate_complete_testdata.py` -- every CI job that runs "
+        "pytest does. This is a failure and not a skip on purpose: a fixture guard that "
+        "opts out when the fixture is missing checks nothing."
+    )
     return path
 
 
@@ -92,15 +119,31 @@ def test_nuclei_labels_are_a_subset_of_the_cell_labels():
     )
 
 
-def test_no_tracked_mask_fixture_is_a_placeholder():
-    """The class, not just the instance.
+def test_no_mask_fixture_is_a_placeholder():
+    """The class, not just the instance -- and the discovery is checked too.
 
-    Both generated mask TIFFs go through the same check, so adding a third and
-    forgetting to write it is caught here rather than in whatever reads it first.
+    Every `*_mask.tif` / `*_mask.npy` under tests/testdata is discovered by glob, so a
+    SIXTH mask fixture added later and never written is caught here rather than in
+    whatever reads it first. A glob is only as good as its reach, though, so the
+    discovered set is first required to cover every fixture the generator is known to
+    write: a pattern that matched nothing would otherwise make this pass with an empty
+    list, which is the exact shape it is guarding against.
+
+    Watched fail: narrowing the pattern to `*_mask.tiff` discovers 0 files and this
+    reports the five expected fixtures as undiscovered; reverted.
     """
-    empty = [
-        p.name
-        for p in (CELL_MASK, NUCLEI_MASK)
-        if p.exists() and p.stat().st_size == 0
-    ]
-    assert not empty, f"0-byte mask fixtures: {empty}"
+    discovered = sorted(
+        set(TESTDATA.glob("*_mask.tif")) | set(TESTDATA.glob("*_mask.npy"))
+    )
+    for expected in EXPECTED_MASKS:
+        _require(expected)
+        assert expected in discovered, (
+            f"{expected.name} exists but the discovery glob did not find it -- the "
+            f"pattern is narrower than it looks (found {[p.name for p in discovered]})"
+        )
+
+    empty = [p.name for p in discovered if p.stat().st_size == 0]
+    assert not empty, (
+        f"0-byte mask fixtures: {empty}. They satisfy checkIfExists and path().exists() "
+        "and fail any real read."
+    )

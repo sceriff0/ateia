@@ -122,6 +122,66 @@ def offending_lines(lines: list[str]) -> list[tuple[int, str]]:
     return hits
 
 
+def test_the_sweep_actually_reaches_files():
+    """The sweep must SCAN something, not merely fail to find anything.
+
+    This is the half the two plant tests below do NOT cover: they call
+    `offending_lines()` on literal string lists, so they prove the DETECTOR works and
+    say nothing about the REACH. And this sweep was green on its very first run -- so
+    file reach is the only thing standing between "the tree is clean" and "the guard
+    scans nothing", which is precisely the scope-glob failure this repo keeps hitting.
+
+    `p.suffix in (".nf", ".test", ".groovy", ".config")` LOOKS right for a `.nf.test`
+    file (its suffix really is `.test`), but that is a reading of pathlib, not a test of
+    it. Each scanned suffix and each scanned directory is pinned to a file known to
+    exist, so narrowing either fails here loudly instead of silently emptying the
+    haystack.
+
+    Watched fail, each narrowing applied and reverted, counts measured not guessed
+    (sweep currently reaches 127 files: 56 `.test`, 50 `.nf`, 13 `.groovy`, 8 `.config`):
+
+      drop "tests" from SCAN_DIRS     127 -> 62,  tests/lib_probe.nf.test unreachable
+      drop ".nf"    from SCAN_SUFFIXES 127 -> 77,  subworkflows/local/seg_qc.nf unreachable
+      drop ".groovy"                   127 -> 114, lib/Layout.groovy unreachable
+      drop ".config"                   127 -> 119, conf/modules.config unreachable
+
+    One narrowing that does NOT break reach, recorded so the next reader does not
+    "simplify" the wrong half: dropping `".test"` from SCAN_SUFFIXES still reaches all
+    56 `.nf.test` files, because `_candidate_files` also matches
+    `p.name.endswith(".nf.test")` explicitly. The two conditions are deliberately
+    redundant for the one file type this repo's blocking CI gate runs.
+    """
+    files = _candidate_files()
+    assert files, "the sweep reached no files at all -- SCAN_DIRS/SCAN_SUFFIXES is wrong"
+
+    names = {str(p.relative_to(ROOT)) for p in files}
+
+    # One known-existing file per scanned suffix, so a narrowed suffix list cannot
+    # quietly shrink the haystack to a subset that happens to be clean.
+    for expected in (
+        "tests/lib_probe.nf.test",          # .nf.test -- the shape most at risk
+        "tests/lib_probe.nf",               # .nf
+        "lib/Layout.groovy",                # .groovy
+        "conf/modules.config",              # .config
+        "subworkflows/local/seg_qc.nf",     # a scanned dir other than tests/
+    ):
+        assert expected in names, (
+            f"{expected} exists but the sweep did not reach it: SCAN_DIRS/SCAN_SUFFIXES "
+            f"is narrower than it looks. Reached {len(files)} files."
+        )
+
+    nf_tests = [p for p in files if p.name.endswith(".nf.test")]
+    assert len(nf_tests) > 40, (
+        f"only {len(nf_tests)} .nf.test files reached; the suite has ~56, so the suffix "
+        "match is not doing what it appears to"
+    )
+    # A plausibility floor on the whole sweep, not just the interesting suffix: a
+    # SCAN_DIRS typo resolving to one directory would still pass the checks above if
+    # that directory happened to hold all five named files. Floors, not equalities --
+    # this must not fail every time somebody adds a module.
+    assert len(files) > 100, f"the sweep reached only {len(files)} files"
+
+
 def test_no_statement_is_continued_by_a_leading_operator():
     offenders: list[str] = []
     for p in _candidate_files():
