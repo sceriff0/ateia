@@ -989,5 +989,57 @@ workflow {
         [patient_id: 'P002', id: 'P002_ref', channels: ['DAPI', 'PANCK']],
     ])
 
+    // ---- POST-REBIND metas, which is what the call sites actually judge ----
+    //
+    // Every assertion above hand-builds its meta. Neither call site sees one of those:
+    // requireUniqueWithinPatient is called on ch_grouped_multi
+    // (subworkflows/local/register_patient.nf) and again at VALIS_ADAPTER's demux, and
+    // by then `channels` has been REBOUND by subworkflows/local/preprocess.nf to the
+    // list read back out of CONVERT_IMAGE's <prefix>_channels.txt. A review read that
+    // rebind as DROPPING the nuclear channel, which would make two slides differing
+    // only in their nuclear marker collide here and abort a legitimate patient.
+    //
+    // It does not drop it: bin/convert_image.py MOVES the nuclear channel to index 0
+    // (utils.metadata.nuclear_first), a permutation of the declared list, and
+    // tests/test_panel_signature_survives_preprocess.py pins that it never filters.
+    // This block is the Groovy half of the same fact -- pytest cannot load lib/.
+    //
+    // `rebind` is preprocess.nf's expression verbatim, applied to the channels-file
+    // body convert_image.py writes for each slide, so these metas have the shape the
+    // check receives rather than the shape a test author would type.
+    def rebind = { Map declaredMeta, String channelsFileText ->
+        declaredMeta + [channels: channelsFileText.trim().split(',').toList()]
+    }
+    def slideDapi    = rebind([patient_id: 'P003', id: 'P003_dapi',    channels: ['CD3', 'CD8', 'DAPI']],    'DAPI,CD3,CD8')
+    def slideCelltox = rebind([patient_id: 'P003', id: 'P003_celltox', channels: ['CD3', 'CD8', 'CELLTOX']], 'CELLTOX,CD3,CD8')
+
+    // The rebind reorders and nothing else, so the signature is the DECLARED one.
+    assert PanelSignature.of(slideDapi) ==
+           PanelSignature.ofChannels(['CD3', 'CD8', 'DAPI']),
+        'the post-rebind signature must equal the declared one'
+    assert slideDapi.channels.size() == 3,
+        "the rebind dropped a channel: ${slideDapi.channels}"
+
+    // ...so the pair the review was worried about is ACCEPTED, as it must be: these are
+    // two different panels and the run they belong to used to complete.
+    PanelSignature.requireUniqueWithinPatient('P003', [slideDapi, slideCelltox])
+
+    // ...and the check is still LIVE on rebound metas -- a genuine repeat, post-rebind,
+    // is still refused. Without this the accept above could pass because the check had
+    // quietly stopped judging anything.
+    def rebindDupRejected = false
+    try {
+        PanelSignature.requireUniqueWithinPatient('P004', [
+            rebind([patient_id: 'P004', id: 'P004_c1', channels: ['CD3', 'DAPI']], 'DAPI,CD3'),
+            rebind([patient_id: 'P004', id: 'P004_c2', channels: ['DAPI', 'CD3']], 'DAPI,CD3'),
+        ])
+    }
+    catch (IllegalArgumentException e) {
+        rebindDupRejected = true
+        assert e.message.contains('P004_c1') && e.message.contains('P004_c2')
+    }
+    assert rebindDupRejected,
+        'requireUniqueWithinPatient must still refuse a repeated panel on post-rebind metas'
+
     println "LIB PROBE: all assertions passed"
 }

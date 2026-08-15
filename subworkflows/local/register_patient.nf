@@ -93,10 +93,21 @@ workflow REGISTER_PATIENT {
     // without declaring anything.
     //
     // Note this runs on POST-preprocessing metas, which is the signature the adapters and
-    // SEG_QC actually key on -- not the samplesheet's. preprocess.nf drops the nuclear
-    // channel from every moving slide, so two slides that differ only in their nuclear
-    // marker (DAPI|CD3|CD8 and CELLTOX|CD3|CD8) become identical here and are caught,
-    // which a samplesheet-time check would miss.
+    // SEG_QC actually key on -- and that is the SAME channel SET the samplesheet declared.
+    // preprocess.nf rebinds meta.channels to the list CONVERT_IMAGE wrote into
+    // <prefix>_channels.txt, and that step MOVES the nuclear/fiducial channel to index 0
+    // rather than removing it (bin/convert_image.py, via utils.metadata.nuclear_first).
+    // PanelSignature sorts, so a permutation is one signature. The nuclear channel is not
+    // dropped until SPLIT_CHANNELS, in POSTPROCESSING, long after this.
+    //
+    // Worth stating because an earlier version of this comment claimed the drop happened
+    // in preprocessing, and concluded that two slides differing only in their nuclear
+    // marker (DAPI|CD3|CD8 and CELLTOX|CD3|CD8) collapse here and are refused. They do not
+    // collapse, and refusing them would abort a patient that used to complete. Both halves
+    // of that are now pinned rather than reasoned about: the conversion permutes and
+    // nothing else rebinds meta.channels (tests/test_panel_signature_survives_preprocess.py),
+    // and that exact pair, built through preprocess.nf's own rebind expression, is accepted
+    // (tests/lib_probe.nf).
     //
     // Why refusal rather than tolerance, given a repeat acquisition is legitimate science:
     // see lib/PanelSignature.groovy's header. Short version -- everything past

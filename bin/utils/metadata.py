@@ -28,6 +28,7 @@ import tifffile
 __all__ = [
     "extract_channel_names_from_ome",
     "is_nuclear",
+    "nuclear_first",
     "pick_nuclear_index",
     "DEFAULT_NUCLEAR_MARKERS",
 ]
@@ -117,6 +118,40 @@ def pick_nuclear_index(channel_names, nuclear_markers=None):
             if marker in name:
                 return i
     return None
+
+
+def nuclear_first(channel_names, nuclear_index):
+    """``channel_names`` with the nuclear/fiducial channel moved to index 0.
+
+    A PERMUTATION, NEVER A FILTER, and that is load-bearing outside this file.
+    CONVERT_IMAGE writes the returned list to ``<prefix>_channels.txt``, and
+    ``subworkflows/local/preprocess.nf`` rebinds ``meta.channels`` to it -- which
+    is the list ``PanelSignature.requireUniqueWithinPatient`` then judges a
+    patient's slides on. Removing a channel here would make two slides that differ
+    only in that channel (e.g. ``DAPI|CD3|CD8`` and ``CELLTOX|CD3|CD8``) share one
+    signature and abort a legitimate patient at registration.
+    ``tests/test_panel_signature_survives_preprocess.py`` pins the invariant.
+
+    The move itself exists because everything downstream -- segmentation, the
+    tiled registration fiducial -- trusts "channel 0 is the nuclear marker".
+
+    Parameters
+    ----------
+    channel_names : sequence of str
+        Channel names in image/channel order.
+    nuclear_index : int or None
+        Index of the nuclear channel, from :func:`pick_nuclear_index`. ``None``
+        or ``0`` leaves the order alone.
+
+    Returns
+    -------
+    list of str
+        A new list; the input is not mutated.
+    """
+    out = list(channel_names or [])
+    if nuclear_index:
+        out.insert(0, out.pop(nuclear_index))
+    return out
 
 
 def extract_channel_names_from_ome(filepath: str | Path) -> List[str]:

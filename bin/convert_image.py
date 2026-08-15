@@ -23,7 +23,7 @@ import tifffile
 sys.path.insert(0, str(Path(__file__).parent / "utils"))
 from image_io import write_ome_tiff
 from logger import configure_logging, get_logger
-from metadata import DEFAULT_NUCLEAR_MARKERS, pick_nuclear_index
+from metadata import DEFAULT_NUCLEAR_MARKERS, nuclear_first, pick_nuclear_index
 from pixel_size import warn_on_pixel_size_mismatch
 
 logger = get_logger(__name__)
@@ -444,13 +444,11 @@ def convert_to_ome_tiff(
 
     # Reorder: nuclear channel first. Downstream (segmentation, tiled registration
     # fiducial) trusts the invariant "channel 0 = nuclear marker".
-    output_channels = channel_names.copy()
+    output_channels = nuclear_first(channel_names, nuclear_index)
     if nuclear_index != 0:
         logger.info(
             f"Moving nuclear channel '{nuclear_name}' from position {nuclear_index} to 0"
         )
-        nuclear_ch = output_channels.pop(nuclear_index)
-        output_channels.insert(0, nuclear_ch)
     else:
         logger.info(f"Nuclear channel '{nuclear_name}' already in position 0")
 
