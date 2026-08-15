@@ -119,25 +119,29 @@ workflow SEGMENTATION {
     // is denormalised on purpose — it is what keeps the entry contract a single image
     // column per row.
     //
-    // registered_image's published path uses publishedOrAsIs, not the plain
-    // is_passthrough branch subworkflows/local/registered_checkpoint.nf uses for
-    // csv/registered.csv. registered_checkpoint.nf's ch_registered is ALWAYS a fresh
-    // channel from THIS run's own REGISTRATION (it is only ever called from inside
-    // registration.nf), so a bare is_passthrough check is enough there. This file's
-    // ch_registered is not: at `--start segmentation`, it is INPUT_CHECK.out.samples
-    // reading csv/registered.csv back -- ALREADY an absolute published path from a
-    // prior run -- and INPUT_CHECK never sets meta.is_passthrough (only
-    // register_patient.nf and tiled_adapter.nf do), so the passthrough branch could
-    // never fire for it. publishedOrAsIs's isUnderTaskDir check tells "fresh, needs
-    // publishedPath" from "already published elsewhere, use as-is" correctly in both
-    // cases, including passthrough's own producer ambiguity: the kind argument
-    // (PREPROCESSED for a passthrough slide, REGISTERED otherwise) only matters in
-    // the fresh branch, since the as-is branch returns the file's own path unchanged.
+    // registered_image's published path uses publishedOrAsIs rather than
+    // subworkflows/local/registered_checkpoint.nf's plain registeredPath, and the
+    // difference is where the file comes from, not what kind it is. That writer's
+    // ch_registered is ALWAYS fresh out of THIS run's REGISTRATION. This file's is not:
+    // at `--start segmentation` it is INPUT_CHECK.out.samples reading csv/registered.csv
+    // back -- already an absolute published path, possibly from a prior run's outdir --
+    // and reconstructing that against this run's outdir would name a file that is not
+    // there. publishedOrAsIs's isUnderTaskDir check tells the two apart.
+    //
+    // ONE kind, no branch on is_passthrough. There used to be one, asking for
+    // PREPROCESSED when the slide had never been warped, because that is where such a
+    // slide was published. PUBLISH_PASSTHROUGH publishes it as a registered slide now
+    // (see register_patient.nf), so the branch is not merely redundant -- it is wrong:
+    // the passthrough's file sits in a `registered_slides/` producer subdirectory, and
+    // publishedOrAsIs would carry that subdirectory under the PREPROCESSED kind and
+    // record <pid>/preprocessed/registered_slides/<name>, a path nothing publishes.
+    // Observed exactly that way on a tiled stub run, which exited 0 with the broken row
+    // in csv/segmented.csv; tests/checkpoint_manifest.nf.test's tiled case is what
+    // fails on it.
     ch_registered_for_ckpt = ch_registered
         .map { meta, file ->
-            def published_path = meta.is_passthrough
-                ? Layout.publishedOrAsIs(params.outdir, meta.patient_id, Layout.PREPROCESSED, file)
-                : Layout.publishedOrAsIs(params.outdir, meta.patient_id, Layout.REGISTERED, file)
+            def published_path =
+                Layout.publishedOrAsIs(params.outdir, meta.patient_id, Layout.REGISTERED, file)
             [meta.patient_id, meta, published_path]
         }
 
@@ -230,7 +234,7 @@ workflow SEGMENTATION {
     ch_versions = Channel.empty()
         .mix(SEGMENT.out.versions.first())
         .mix(EXTRACT_CELL_PROPERTIES.out.versions.first())
-        .mix(CHECKPOINT_WRITER.out.versions.first())
+        .mix(CHECKPOINT_WRITER.out.versions)
     if (compartment_mode.compartments) {
         ch_versions = ch_versions.mix(EXTRACT_NUCLEI_PROPERTIES.out.versions.first())
     }

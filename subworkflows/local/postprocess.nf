@@ -487,15 +487,15 @@ workflow POSTPROCESSING {
             .mix(GENERATE_POSTPROCESSING_QC.out.size_log)
     }
 
-    // Collect versions from all postprocessing processes.
-    // QUANTIFY_MARKERS / ASSEMBLE_EXPORT already applied `.first()` internally
-    // (see the comments on their `versions` emits) — do not re-apply it here.
+    // Collect versions from all postprocessing processes. One rule, no exceptions:
+    // `.first()` if and only if the name is a PROCESS -- see
+    // tests/test_versions_cardinality.py.
     ch_versions = Channel.empty()
         .mix(SPLIT_CHANNELS.out.versions.first())
         .mix(QUANTIFY_MARKERS.out.versions)
         .mix(MERGE_QUANT_CSVS.out.versions.first())
         .mix(ASSEMBLE_EXPORT.out.versions)
-        .mix(CHECKPOINT_WRITER.out.versions.first())
+        .mix(CHECKPOINT_WRITER.out.versions)
 
     if (do_pheno) {
         ch_versions = ch_versions.mix(PHENOTYPE.out.versions.first())

@@ -240,8 +240,12 @@ nextflow_workflow {
         //  2. The recorded path names the directory the file was ACTUALLY published
         //     into. Nothing publishes into <pid>/preprocessed/ on a skipped run, so a
         //     row pointing there names a directory that does not exist -- the defect
-        //     Layout.passthroughPath documents for unregistered slides, and the one
-        //     tests/checkpoint_manifest.nf.test fails on.
+        //     Layout.publishedOrAsIs documents, and the one
+        //     tests/checkpoint_manifest.nf.test fails on. (This used to cite
+        //     Layout.passthroughPath, which is deleted: an unregistered slide is
+        //     published as a registered slide by PUBLISH_PASSTHROUGH now, so
+        //     csv/registered.csv has one path rule and needs no PREPROCESSED-pinned
+        //     variant.)
         //
         // Conversion is deliberately NOT skipped: CONVERT_IMAGE is what standardises
         // the OME-TIFF and moves the fiducial to channel 0, which every downstream

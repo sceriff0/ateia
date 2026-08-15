@@ -6,7 +6,6 @@ This package provides common utilities for the MIRAGE image processing pipeline:
 - **image_io**: the one owner of TIFF writes (bigtiff on every write)
 - **image_utils**: image loading and array-shape utilities
 - **metadata**: OME-TIFF metadata handling
-- **registration_utils**: Registration helper functions
 
 Examples
 --------

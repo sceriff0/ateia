@@ -101,6 +101,7 @@ nav:
   - Parameters: parameters.md
   - Inputs & outputs: outputs.md
   - Resources: resources.md
+  - Meta map contract: meta_contract.md
   - Containers: containers.md
   - Image I/O: image_io.md
   - Incremental cycles: add_cycle.md

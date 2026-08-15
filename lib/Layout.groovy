@@ -62,6 +62,25 @@ class Layout {
     static final List<String> CHECKPOINT_STEPS =
         [PREPROCESSED, REGISTERED, SEGMENTED, POSTPROCESSED].asImmutable()
 
+    /**
+     * The producer subdirectory EVERY registered slide is emitted into, and therefore the
+     * only leaf of `<outdir>/<pid>/registered/` that csv/registered.csv ever names.
+     *
+     * publishDir carries a producer's output subdirectory into the published path (see
+     * publishedPath), so the name a process happens to `mkdir` decides where its slides
+     * land. Three processes produce a registered slide -- REGISTER (VALIS), TILED_STITCH
+     * (STARE) and PUBLISH_PASSTHROUGH (the unwarped ones) -- and they used to name that
+     * directory 'registered_slides', 'registered' and nothing at all, so the SAME logical
+     * slide was published under `registered/registered_slides/`, `registered/registered/`
+     * or `preprocessed/` purely as a function of --registration_method. A consumer of the
+     * manifest had to know which backend wrote it.
+     *
+     * This constant is that name's one owner. The three modules and conf/modules.config's
+     * three `pattern:` entries mirror it by hand -- conf/*.config cannot see lib/ classes
+     * (CLAUDE.md) -- and tests/test_layout.py checks all six against it.
+     */
+    static final String REGISTERED_SUBDIR = 'registered_slides'
+
     /** The two checkpoints a `mode='add_cycle'` run reads out of --prior_outdir. */
     static final List<String> ADD_CYCLE_CHECKPOINTS =
         [REGISTERED, POSTPROCESSED].asImmutable()
@@ -277,14 +296,18 @@ class Layout {
      *
      * A process that writes into a named subdirectory of its task directory and
      * publishes with a `pattern:` that names that subdirectory gets the subdirectory
-     * carried into the published path. conf/modules.config does this in three places:
+     * carried into the published path. conf/modules.config does this in four places:
      *
-     *   REGISTER (VALIS)  pattern 'registered_slides/*_registered.ome.tiff'
+     *   REGISTER (VALIS)     pattern 'registered_slides/*_registered.ome.tiff'
+     *   TILED_STITCH         pattern 'registered_slides/*_registered.ome.tiff'
+     *   PUBLISH_PASSTHROUGH  pattern 'registered_slides/*'
      *                     -> <outdir>/<pid>/registered/registered_slides/<name>
-     *   TILED_STITCH      pattern 'registered/*_registered.ome.tiff'
-     *                     -> <outdir>/<pid>/registered/registered/<name>
      *   EXPORT_GEOJSON    output path("export/cells.geojson"), published bare
      *                     -> <outdir>/<pid>/geojson/export/cells.geojson
+     *
+     * The first three deliberately share ONE subdirectory name (REGISTERED_SUBDIR).
+     * TILED_STITCH's used to be 'registered/', which is how the identical artifact came
+     * to have two published paths depending on --registration_method.
      *
      * So this is NOT an option a caller opts into - a caller that forgets records a
      * path that does not exist, which is exactly how csv/postprocessed.csv came to
@@ -382,27 +405,32 @@ class Layout {
             : path.toString()
     }
 
+
     /**
-     * Where a slide that was NOT registered will be published. A single-slide patient
-     * has nothing to register, so registration.nf branches its reference straight
-     * through (`ch_passthrough`); the tiled backend does the same for every patient's
-     * reference, which defines the frame and is never warped. NOTHING publishes those
-     * into `<pid>/registered/` - no process emitted them - so recording them there
-     * names a file that does not exist. Verified against a stub run: a single-slide
-     * patient's output tree contains no `P001/registered/` directory at all.
+     * Where a registered slide will be published: `<outdir>/<pid>/registered/registered_slides/<name>`.
      *
-     * The slide is still published, just by whoever produced it:
+     * THE ONE RULE FOR EVERY ROW OF csv/registered.csv, warped or not. The writer used to
+     * branch -- `meta.is_passthrough ? passthroughPath(...) : publishedPath(...)` -- which
+     * made the recorded tree a function of which backend ran, because only the tiled
+     * adapter produces a passthrough for a multi-slide patient. A passthrough is now
+     * published as a registered slide by PUBLISH_PASSTHROUGH, so the branch is gone and
+     * `is_passthrough` means only "this slide was never warped".
      *
-     *   produced by PREPROCESS this run  -> <outdir>/<pid>/preprocessed/<name>
-     *   supplied by a `--start registration` samplesheet -> already an absolute
-     *                                       path to an existing file; record it as is
-     *
-     * A thin, PREPROCESSED-pinned wrapper over {@link #publishedOrAsIs} -- this
-     * predates it and is kept as the named entry point every existing caller uses,
-     * not because the logic differs.
+     * The producer subdirectory is CHECKED, not assumed. A file emitted anywhere else
+     * fails here, naming the file, rather than being recorded at a path nothing published
+     * -- the failure mode tests/checkpoint_manifest.nf.test exists to catch, moved from
+     * "detected after the run" to "impossible to write".
      */
-    static String passthroughPath(def outdir, def patientId, def file) {
-        return publishedOrAsIs(outdir, patientId, PREPROCESSED, file)
+    static String registeredPath(def outdir, def patientId, def file) {
+        def sub = producerSubdir(file)
+        if (sub != REGISTERED_SUBDIR)
+            throw new IllegalArgumentException(
+                "Layout.registeredPath: '${basename(file)}' was emitted into " +
+                "'${sub ?: '(the task directory)'}', not '${REGISTERED_SUBDIR}'. Every " +
+                "registered slide -- warped or passed through -- is published into " +
+                "<outdir>/<patient_id>/${REGISTERED}/${REGISTERED_SUBDIR}/, so a checkpoint " +
+                "row for this file would name a path nothing publishes.")
+        return publishedPath(outdir, patientId, REGISTERED, file)
     }
 
     /**

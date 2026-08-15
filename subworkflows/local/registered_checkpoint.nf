@@ -20,7 +20,9 @@
     Input:
         ch_registered: [meta, file] — every slide that reached the registered
                        stream, INCLUDING passthroughs (a slide that was never
-                       registered; see meta.is_passthrough below).
+                       registered). REGISTER_PATIENT has already published each of
+                       them into <pid>/registered/registered_slides/, so this file
+                       records one path rule and no longer branches on provenance.
         ch_expected_rows: [patient_id, n] — how many slides this patient contributes
                        to the manifest, so CHECKPOINT_WRITER can publish that
                        patient's fragment the moment it is complete rather than at
@@ -52,17 +54,20 @@ workflow REGISTERED_CHECKPOINT {
     main:
     ch_rows = ch_registered
         .map { meta, file ->
-            // Where the file WILL be published. This must agree with REGISTER's /
-            // TILED_*'s publishDir in conf/modules.config, including the producer
-            // subdirectory those blocks' `pattern:` carries along ('registered_slides/'
-            // for VALIS, 'registered/' for tiled). Both rules live in Layout.
+            // Where the file WILL be published. ONE rule for every row -- warped or
+            // passed through, VALIS or tiled -- because every slide on this stream was
+            // emitted into `registered_slides/` by REGISTER, TILED_STITCH or
+            // PUBLISH_PASSTHROUGH, and publishDir carries that producer subdirectory into
+            // the published path. Layout owns both halves and REFUSES a file emitted
+            // anywhere else, rather than recording a path nothing publishes.
             //
-            // A passthrough slide was never registered, so no registration process
-            // published it and <pid>/registered/ may not even exist; Layout.passthroughPath
-            // records where it actually is instead.
-            def published_path = meta.is_passthrough
-                ? Layout.passthroughPath(params.outdir, meta.patient_id, file)
-                : Layout.publishedPath(params.outdir, meta.patient_id, Layout.REGISTERED, file)
+            // There used to be a branch here: `meta.is_passthrough ? passthroughPath :
+            // publishedPath`, which recorded an unwarped slide under <pid>/preprocessed/.
+            // Only the tiled adapter passes a multi-slide patient's reference through, so
+            // that branch made the recorded tree a function of --registration_method.
+            // is_passthrough still exists and still means "never warped"; it no longer
+            // means "published somewhere else".
+            def published_path = Layout.registeredPath(params.outdir, meta.patient_id, file)
             [meta.patient_id, Checkpoint.row(Layout.REGISTERED, [
                 patient_id      : meta.patient_id,
                 registered_image: published_path,

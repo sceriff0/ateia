@@ -1,0 +1,62 @@
+nextflow_process {
+
+    name "Test PUBLISH_PASSTHROUGH process"
+    script "modules/local/publish_passthrough.nf"
+    process "PUBLISH_PASSTHROUGH"
+
+    tag "modules"
+    tag "modules_local"
+    tag "publish_passthrough"
+
+    test("Should re-emit an unwarped slide under registered_slides/ - stub") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [patient_id: 'P001', is_reference: true, is_passthrough: true,
+                     channels: ['DAPI', 'PANCK', 'SMA']],
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                // THE OUTPUT SUBDIRECTORY IS THE WHOLE POINT. publishDir carries a
+                // producer's output subdirectory into the published path, and
+                // lib/Layout.groovy's registeredPath() refuses a file emitted anywhere
+                // else -- so if this ever landed bare in the task directory, every
+                // passthrough row of csv/registered.csv would fail to be written rather
+                // than silently name <pid>/registered/<name>.
+                { assert process.out.registered[0][1].toString()
+                        .contains('/registered_slides/') },
+                // The NAME is preserved: nothing renames a slide on its way through, so
+                // the manifest row and the file on disk agree.
+                { assert process.out.registered[0][1].toString()
+                        .endsWith('/P001_ref.ome.tiff') },
+                // The meta travels intact -- REGISTER_PATIENT mixes this straight back
+                // into the registered stream, where is_reference drives seg-QC's
+                // reference/moving branch and channels drive every downstream join.
+                { assert process.out.registered[0][0].is_reference },
+                { assert process.out.registered[0][0].is_passthrough },
+                { assert process.out.registered[0][0].channels == ['DAPI', 'PANCK', 'SMA'] },
+                // The stub is NOT a placeholder here: script: and stub: are identical
+                // because there is nothing to stand in for, and csv/registered.csv is
+                // written from this path in stub runs (the only mode CI's blocking gate
+                // runs). So the file must really exist, with the real bytes behind it --
+                // a `touch`ed stub would publish an empty slide over the real one's name.
+                { assert path(process.out.registered[0][1]).exists() },
+                { assert path(process.out.registered[0][1]).bytes ==
+                         path("$projectDir/tests/testdata/P001_ref.ome.tiff").bytes },
+                { assert process.out.versions },
+                { assert path(process.out.versions[0]).readLines().size() == 2 }
+            )
+        }
+    }
+}

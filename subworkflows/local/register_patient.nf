@@ -39,7 +39,9 @@
                     thing that quietly lifts it.
 
     Output:
-        registered       [meta, file] — registered slides PLUS passthroughs
+        registered       [meta, file] — registered slides PLUS passthroughs, every one of
+                                        them published into <pid>/registered/registered_slides/
+                                        (see PUBLISH_PASSTHROUGH and Layout.registeredPath)
         images_multi     [meta, file] — the native (pre-registration) slides of
                                         multi-slide patients only; seg-QC input
         checkpoint_csv   the registration checkpoint manifest (see
@@ -61,6 +63,7 @@
 include { VALIS_ADAPTER         } from './adapters/valis_adapter'
 include { TILED_ADAPTER         } from './adapters/tiled_adapter'
 include { REGISTERED_CHECKPOINT } from './registered_checkpoint'
+include { PUBLISH_PASSTHROUGH   } from '../../modules/local/publish_passthrough'
 
 workflow REGISTER_PATIENT {
     take:
@@ -77,7 +80,32 @@ workflow REGISTER_PATIENT {
         single: items.size() == 1
         multi:  true
     }
-    ch_grouped_multi = ch_grouped_split.multi
+    // EVERY SLIDE IN A PATIENT MUST DECLARE A DISTINCT PANEL, WHICHEVER BACKEND RUNS.
+    //
+    // This is the ONE place a repeated panel is judged, and it sits before the dispatch
+    // below on purpose. It used to be judged twice, differently: VALIS_ADAPTER threw its
+    // own message from inside its output-demux -- i.e. only after REGISTER had already
+    // spent the compute -- while the tiled path never checked at all and SEG_QC's
+    // `combine(by: [patient, signature])` cross-joined N slides against N transforms,
+    // scoring every slide with every other slide's warp and writing identical filenames.
+    // Same input, two outcomes. Checking on ch_grouped_multi means both adapters, both
+    // callers (REGISTRATION and ADD_CYCLE) and any third backend get the same answer
+    // without declaring anything.
+    //
+    // Note this runs on POST-preprocessing metas, which is the signature the adapters and
+    // SEG_QC actually key on -- not the samplesheet's. preprocess.nf drops the nuclear
+    // channel from every moving slide, so two slides that differ only in their nuclear
+    // marker (DAPI|CD3|CD8 and CELLTOX|CD3|CD8) become identical here and are caught,
+    // which a samplesheet-time check would miss.
+    //
+    // Why refusal rather than tolerance, given a repeat acquisition is legitimate science:
+    // see lib/PanelSignature.groovy's header. Short version -- everything past
+    // registration is keyed by MARKER NAME, so accepting the duplicate does not make the
+    // repeat work, it just moves the collision somewhere quieter.
+    ch_grouped_multi = ch_grouped_split.multi.map { pid, ref, items ->
+        PanelSignature.requireUniqueWithinPatient(pid, items.collect { it[0] })
+        [pid, ref, items]
+    }
     // is_passthrough marks a slide that reaches the registered stream WITHOUT having
     // been registered. It is what the checkpoint writer keys on: nothing publishes an
     // unregistered slide into <pid>/registered/, so recording it there names a file
@@ -125,7 +153,28 @@ workflow REGISTER_PATIENT {
 
     // Re-introduce single-slide patients (reference passed through unregistered)
     // into the registered stream for QC, checkpointing and postprocessing.
-    ch_registered = ch_adapter.registered.mix(ch_passthrough)
+    //
+    // EVERY PASSTHROUGH IS PUBLISHED AS A REGISTERED SLIDE, whichever adapter ran and
+    // whatever produced it. Two kinds arrive here: this file's single-slide branch above,
+    // and TILED_ADAPTER's reference (mixed into ch_adapter.registered already stamped
+    // is_passthrough). They used to be recorded in csv/registered.csv at the path their
+    // ORIGINAL producer published them to -- <pid>/preprocessed/ -- while warped slides
+    // were recorded under <pid>/registered/registered_slides/. Since only the tiled
+    // adapter passes a multi-slide patient's reference through, the tree a slide landed
+    // in was a function of --registration_method: same logical slide, two layouts, and
+    // every reader of the manifest had to know which backend wrote it.
+    //
+    // Routing them here rather than inside the adapter is what makes the fix
+    // backend-independent: a third adapter that passes some slide through gets the same
+    // treatment without doing anything, because the only thing it has to declare is
+    // is_passthrough (which it must set anyway -- see the branch's comment above).
+    ch_all = ch_adapter.registered.mix(ch_passthrough)
+    ch_by_provenance = ch_all.branch { meta, _file ->
+        passthrough: meta.is_passthrough
+        warped:      true
+    }
+    PUBLISH_PASSTHROUGH(ch_by_provenance.passthrough)
+    ch_registered = ch_by_provenance.warped.mix(PUBLISH_PASSTHROUGH.out.registered)
 
     // ========================================================================
     // CHECKPOINT
@@ -154,7 +203,8 @@ workflow REGISTER_PATIENT {
     // (preprocess/segmentation/postprocess) mixes it into its own versions stream; this
     // path did not, so a `--start registration --stop registration` run -- the only run
     // in which this is the sole CHECKPOINT_WRITER instance -- published a QC report
-    // missing the row. `.first()` because one row per process is what the report wants,
-    // not one per patient; same as every other version mix in this repo.
-    versions           = ch_adapter.versions.mix(REGISTERED_CHECKPOINT.out.versions.first())
+    // missing the row.
+    versions           = ch_adapter.versions
+        .mix(REGISTERED_CHECKPOINT.out.versions)
+        .mix(PUBLISH_PASSTHROUGH.out.versions.first())
 }

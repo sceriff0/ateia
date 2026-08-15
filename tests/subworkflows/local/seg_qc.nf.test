@@ -25,11 +25,14 @@
  *     branch. The last two cases below read the backend back out of the stub's
  *     versions.yml, which is the one place stub mode records it.
  *
- * The method arrives as an ARGUMENT (input[4]), never from params.registration_method. The
- * params blocks below still set the param, and deliberately so: in the two valis cases the
- * param says 'valis' and in the tiled case it says 'tiled', so if the argument were ever
- * ignored the cases would still pass. What pins the argument is
- * tests/subworkflows/local/register_patient.nf.test's pair of arg-vs-param mismatch cases.
+ * The backend arrives as an ARGUMENT (input[4]), never from params.registration_method --
+ * and since Task 9 it arrives as a CONTRACT (AdapterContract.of(method)) rather than a bare
+ * name, because what selects the join is the declared cardinality of `transform`, not the
+ * backend's name. The params blocks below still set the param, and deliberately so: in the
+ * two valis cases the param says 'valis' and in the tiled case it says 'tiled', so if the
+ * argument were ever ignored the cases would still pass. What pins the argument is the
+ * mismatch case below, plus tests/subworkflows/local/register_patient.nf.test's pair one
+ * level up.
  *
  * The per-patient transform / stage checkpoint / per-slide transform are opaque `path` inputs to
  * the warp processes and are never read in stub mode, so small tracked fixtures stand in
@@ -89,7 +92,7 @@ nextflow_workflow {
 
                 // tiled-only channel, unused on this branch -- the adapters' null object
                 input[3] = Channel.empty()
-                input[4] = 'valis'
+                input[4] = AdapterContract.of('valis')
                 """
             }
         }
@@ -207,7 +210,7 @@ nextflow_workflow {
                 // whole QC path; `remainder: true` keeps it total.
                 input[2] = Channel.empty()
                 input[3] = Channel.empty()
-                input[4] = 'valis'
+                input[4] = AdapterContract.of('valis')
                 """
             }
         }
@@ -262,7 +265,7 @@ nextflow_workflow {
                     [[patient_id: 'P002', id: 'P002_mov1', is_reference: false, channels: ['DAPI', 'CD3']],
                      file('$projectDir/tests/testdata/model_config_min.json')]
                 ])
-                input[4] = 'tiled'
+                input[4] = AdapterContract.of('tiled')
                 """
             }
         }
@@ -281,18 +284,94 @@ nextflow_workflow {
         }
     }
 
+    test("per-slide join: a REPEATED panel within a patient is scored once per slide, not N x N") {
+
+        tag "stub"
+        options "-stub"
+
+        /*
+         * A repeat or QC re-image of the SAME panel within a patient is an ordinary
+         * acquisition in a multi-cycle study. This arm used to key its transform join on
+         * (patient_id, sorted channel signature) -- a slide ATTRIBUTE, not a slide
+         * IDENTITY -- and `combine(by:)` is a CROSS JOIN, so two slides sharing a panel
+         * produced FOUR warp tasks: each slide scored against the other's transform, with
+         * identical output filenames, and no error anywhere. Silently wrong QC numbers,
+         * which is the same failure this file's header warns a third backend would hit by
+         * joining on patient_id alone.
+         *
+         * The key is meta.id now -- CsvUtils.imageId's per-image unique id, the one thing
+         * in a meta that is guaranteed distinct within a patient ("THE ONE RULE, NOT A
+         * CONVENTION"). This case is what pins that: both moving slides declare exactly
+         * the same channels, so a signature-keyed join CANNOT tell them apart and an
+         * id-keyed one cannot confuse them.
+         *
+         * Upstream, REGISTER_PATIENT now refuses a repeated panel outright (see
+         * lib/PanelSignature.groovy and register_patient.nf.test), so this state should
+         * not reach SEG_QC in a real run. That is exactly why the case is written HERE,
+         * against the subworkflow directly: a join that is only 1:1 because something
+         * three files away rejects the alternative is not a 1:1 join, and the next
+         * backend to fill `transform` per slide inherits the join, not the guard.
+         */
+        when {
+            params {
+                outdir = "$outputDir"
+                registration_method = 'tiled'
+            }
+            workflow {
+                """
+                // P001_mov1 and P001_mov2 are the SAME panel: a repeat acquisition.
+                input[0] = Channel.fromList([
+                    [[patient_id: 'P001', id: 'P001_ref',  is_reference: true,  channels: ['DAPI', 'PANCK']],
+                     file('$projectDir/tests/testdata/P001_ref.ome.tiff',  checkIfExists: true)],
+                    [[patient_id: 'P001', id: 'P001_mov1', is_reference: false, channels: ['DAPI', 'CD3']],
+                     file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)],
+                    [[patient_id: 'P001', id: 'P001_mov2', is_reference: false, channels: ['CD3', 'DAPI']],
+                     file('$projectDir/tests/testdata/P001_mov2.ome.tiff', checkIfExists: true)]
+                ])
+
+                input[1] = Channel.empty()
+                input[2] = Channel.empty()
+
+                // One transform per moving slide, same panel on both.
+                input[3] = Channel.fromList([
+                    [[patient_id: 'P001', id: 'P001_mov1', is_reference: false, channels: ['DAPI', 'CD3']],
+                     file('$projectDir/tests/testdata/model_config_min.json')],
+                    [[patient_id: 'P001', id: 'P001_mov2', is_reference: false, channels: ['CD3', 'DAPI']],
+                     file('$projectDir/tests/testdata/model_config_min.json')]
+                ])
+                input[4] = AdapterContract.of('tiled')
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                // TWO warp tasks. The signature-keyed join produced four.
+                { assert workflow.out.metrics.size() == 2 },
+                { assert workflow.out.metrics.collect { it[0].id }.toSorted() ==
+                         ['P001_mov1', 'P001_mov2'] },
+                // ...and no slide appears twice, which is what a cross join looks like
+                // once the duplicates are counted rather than the rows.
+                { assert workflow.out.metrics.collect { it[0].id }.unique().size() == 2 }
+            )
+        }
+    }
+
     test("the method ARGUMENT wins over params.registration_method") {
 
         tag "stub"
         options "-stub"
 
-        // The guard for the whole point of Task 5: SEG_QC dispatches on its `method`
-        // argument, never on the global. Without this case every other test in this file
-        // sets params.registration_method to AGREE with input[4], so reverting seg_qc.nf's
-        // `if (method == 'tiled')` back to `if (params.registration_method == 'tiled')`
-        // would leave the entire suite green -- exactly the one-hop-short shape that
-        // add_cycle.nf.test had before Task 4 closed it. Mirrors
-        // register_patient.nf.test's pair of arg-vs-param mismatch cases one level up.
+        // The guard for the whole point of Task 5: SEG_QC dispatches on its ARGUMENT,
+        // never on the global. Without this case every other test in this file sets
+        // params.registration_method to AGREE with input[4], so reverting seg_qc.nf's
+        // branch to `if (params.registration_method == 'tiled')` would leave the entire
+        // suite green -- exactly the one-hop-short shape that add_cycle.nf.test had before
+        // Task 4 closed it. Mirrors register_patient.nf.test's pair of arg-vs-param
+        // mismatch cases one level up. (Task 9 changed WHAT the argument is -- a contract,
+        // and the branch reads AdapterContract.isPerSlide(contract, 'transform') -- but not
+        // this case's teeth: the param still says tiled and the caller still says valis.)
         //
         // The param says tiled; the caller says valis. The caller must win.
         //
@@ -311,11 +390,11 @@ nextflow_workflow {
         // stage_order does NOT discriminate the branch either, despite being
         // backend-specific by construction (valis: native/rigid/non_rigid/micro; tiled:
         // native/rigid/refined) -- caught by review, verified by mutation. Both arms of
-        // seg_qc.nf's `if` build their tuple as `tuple(meta, method, ...)` (lines ~99 and
-        // ~119): the stub's stage_order comes from `WarpBackends.of(method).stages`, where
-        // `method` is this test's ARGUMENT ('valis') regardless of which arm ran. So under
-        // the exact mutation this case exists to catch -- reverting
-        // `if (method == 'tiled')` to `if (params.registration_method == 'tiled')` -- the
+        // seg_qc.nf's `if` build their tuple as `tuple(meta, method, ...)` with `method`
+        // = contract.method: the stub's stage_order comes from
+        // `WarpBackends.of(method).stages`, where `method` is this test's ARGUMENT
+        // ('valis') regardless of which arm ran. So under the exact mutation this case
+        // exists to catch -- reverting the branch to read params.registration_method -- the
         // TILED branch is taken (params.registration_method is 'tiled' here), but the
         // staged `method` value is still 'valis', so the stub still emits the four-stage
         // VALIS record. A `stage_order` assertion alone would stay green under that
@@ -356,7 +435,7 @@ nextflow_workflow {
                      file('$projectDir/tests/testdata/model_config_min.json')]
                 )
 
-                input[4] = 'valis'
+                input[4] = AdapterContract.of('valis')
                 """
             }
         }
@@ -435,7 +514,7 @@ nextflow_workflow {
                 input[1] = Channel.of(['P001', file('$projectDir/tests/testdata/P001_merged_quant.csv', checkIfExists: true)])
                 input[2] = Channel.empty()
                 input[3] = Channel.empty()
-                input[4] = 'valis'
+                input[4] = AdapterContract.of('valis')
                 """
             }
         }
@@ -483,7 +562,7 @@ nextflow_workflow {
                 input[1] = Channel.of(['P001', file('$projectDir/tests/testdata/P001_merged_quant.csv', checkIfExists: true)])
                 input[2] = Channel.empty()
                 input[3] = Channel.empty()
-                input[4] = 'valis'
+                input[4] = AdapterContract.of('valis')
                 """
             }
         }

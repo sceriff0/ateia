@@ -120,5 +120,11 @@ workflow CHECKPOINT_WRITER {
     emit:
     csv       = ch_csv
     fragments = WRITE_CHECKPOINT_FRAGMENT.out.fragment
-    versions  = WRITE_CHECKPOINT_FRAGMENT.out.versions
+    // `.first()` HERE, at the emitting boundary, not at each of the four call sites.
+    // WRITE_CHECKPOINT_FRAGMENT runs once per patient; the QC report wants one row per
+    // process. Emitting the raw per-task stream made every caller apply `.first()` to a
+    // SUBWORKFLOW's versions -- which happens to be harmless only because this
+    // subworkflow holds exactly one process, and would silently drop rows the moment it
+    // held two. See tests/test_versions_cardinality.py.
+    versions  = WRITE_CHECKPOINT_FRAGMENT.out.versions.first()
 }

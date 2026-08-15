@@ -164,8 +164,13 @@ results/                              # = --outdir
 │   │                                 #   absent when --skip_preprocessing; csv/preprocessed.csv
 │   │                                 #   then points at converted/ instead
 │   ├── registered/
-│   │   ├── registered_slides/        # *_registered.ome.tiff — REGISTER (VALIS)
-│   │   ├── registered/               # *_registered.ome.tiff — TILED_STITCH
+│   │   ├── registered_slides/        # every registered slide, whichever backend ran:
+│   │   │                             #   *_registered.ome.tiff from REGISTER (VALIS) or
+│   │   │                             #   TILED_STITCH, PLUS the unwarped ones
+│   │   │                             #   PUBLISH_PASSTHROUGH republishes here (a
+│   │   │                             #   single-slide patient's image; the tiled
+│   │   │                             #   backend's reference). csv/registered.csv names
+│   │   │                             #   this directory and no other — see Layout
 │   │   ├── manifest/                 # *_manifest.json       — tiled backend
 │   │   └── summary/                  # *.csv                 — VALIS error summary
 │   ├── segmentation/                 # *_cell_mask.tif, *_nuclei_mask.tif  — SEGMENT
@@ -281,6 +286,12 @@ as a marker channel that does not exist.
     faithfully rather than flattening it — a checkpoint row that named
     `<pid>/geojson/cells.geojson` instead of `<pid>/geojson/export/cells.geojson`
     pointed at a file that does not exist for two releases.
+
+    It is also why `registered_slides/` has ONE owner (`Layout.REGISTERED_SUBDIR`):
+    the subdirectory a producer happens to `mkdir` decides where its output lands, and
+    TILED_STITCH used to name its own `registered/` — so the identical artifact was
+    published to `<pid>/registered/registered/` under one backend and
+    `<pid>/registered/registered_slides/` under the other.
 
     The same rule is why the three QC renderers land under a *second* `qc/`:
     each declares `path("qc/*.png")` and publishes with `pattern: "qc/*.png"`,

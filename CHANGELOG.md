@@ -8,6 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`lib/AdapterContract.groovy`** — the registration-adapter seam declared as data:
+  the emit names, their tuple shapes, and each backend's **cardinality** for each emit
+  (`per_patient` / `per_slide` / `per_moving_slide` / `none` / `per_process`, read as
+  "at most one row per unit"). The seam previously declared names only, in a ~23-line
+  comment copied into both `subworkflows/local/adapters/*_adapter.nf` files — while the
+  emit named `transform` carries one row per PATIENT under VALIS (a joint alignment
+  graph) and one row per MOVING SLIDE under tiled. `subworkflows/local/seg_qc.nf` chose
+  its join by string-comparing the backend name; it now asks
+  `AdapterContract.isPerSlide(contract, 'transform')`, so a third backend gets the
+  correct join from its declaration instead of from someone remembering to widen an
+  `== 'tiled'` test — the alternative being a `combine(by:)` cross join, i.e. N**2
+  mismatched slide/transform pairs, silently. `AdapterContract.of()` refuses an
+  undeclared backend. No parameter, output or behaviour change for the two shipped
+  backends. Both adapters' duplicated headers are replaced by
+  `tests/test_adapter_contract.py` and
+  `tests/subworkflows/local/adapters/adapter_cardinality.nf.test`, which counts what
+  each adapter really emits against its declaration.
 - **A new `segmentation` step, carved out of `postprocessing`.** `SEGMENT`,
   `EXTRACT_CELL_PROPERTIES` and `EXTRACT_NUCLEI_PROPERTIES` (the latter under
   `--quantify_compartments`) moved from `subworkflows/local/postprocess.nf` into their
@@ -41,8 +58,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for a one-level producer subdirectory like `registered_slides/`, potentially the
   wrong kind too). `isUnderTaskDir` checks the immediate parent and grandparent,
   which covers every producer-subdirectory depth this pipeline's `publishDir` blocks
-  use. `Layout.passthroughPath` now delegates to `publishedOrAsIs` rather than
-  duplicating the same check.
+  use. `Layout.passthroughPath` was collapsed onto `publishedOrAsIs` rather than
+  duplicating the same check, and has since been deleted outright (see Removed) —
+  the branch that called it is gone.
 - **`lib/Checkpoint.groovy`** — the checkpoint CSV's column list, header and row builder
   now have one owner. The three writers ask for the header instead of restating it, and
   `Checkpoint.row()` orders values by the declared column list and throws on a missing or
@@ -91,6 +109,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   back off the task directory. `producerSubdir` and the four-argument overload remain for
   `REGISTER`'s `registered_slides/`, `TILED_STITCH`'s `registered/`, `EXPORT_GEOJSON`'s
   `export/` and `publishedOrAsIs`.
+- **`csv/registered.csv` now has ONE layout, whichever registration backend ran.**
+  Every row — reference or moving, warped or passed through — names a file under
+  `<outdir>/<patient_id>/registered/registered_slides/`. It previously depended on
+  `--registration_method`, in two independent ways:
+
+  **Published-output change (1/2): the tiled moving slide moved.**
+  `<pid>/registered/registered/*_registered.ome.tiff` →
+  `<pid>/registered/registered_slides/*_registered.ome.tiff`. `TILED_STITCH` emitted
+  into a `registered/` output subdirectory and `publishDir` carries a producer's
+  subdirectory into the published path, so the identical artifact was published one
+  directory apart from `REGISTER`'s. The name now has one owner
+  (`Layout.REGISTERED_SUBDIR`), mirrored by hand into the three producing modules and
+  `conf/modules.config`'s three `pattern:` entries and checked by
+  `tests/test_layout.py`. **`<pid>/registered/registered/` no longer exists** — a
+  consumer that hardcoded it must be updated; read the path out of
+  `csv/registered.csv` instead.
+
+  **Published-output change (2/2): the tiled reference slide moved trees.** It was
+  recorded at `<pid>/preprocessed/<name>` (where `PREPROCESS` published it) because
+  `registered_checkpoint.nf` branched on `meta.is_passthrough` to a different
+  `Layout` call. The tiled backend warps every moving slide into the reference's own
+  frame, so its reference is never re-written and only that backend produced such a
+  row — which made the recorded tree a function of the backend. The reference is now
+  republished as a registered slide (see `PUBLISH_PASSTHROUGH` below) and recorded
+  alongside every other row. `<pid>/preprocessed/<name>` is unchanged and still
+  published; the difference is which path `csv/registered.csv` names.
+  `csv/segmented.csv`'s `registered_image` column follows the same rule for the same
+  reason.
+
+  A VALIS run's `csv/registered.csv` is byte-identical to before this change.
+
+- **New process `PUBLISH_PASSTHROUGH`, and the disk it costs.** A slide that reaches
+  the registered stream without being registered — a single-slide patient's only
+  image, or (under `--registration_method tiled`) every patient's reference — is now
+  published into `<pid>/registered/registered_slides/` by this process, which is what
+  gives the manifest one layout. `publishDir` is the only mechanism Nextflow has for
+  putting a file somewhere, and it needs a task.
+
+  **This is new disk, not a relocation.** The passthrough slide stays where it was
+  AND gains a full-size published copy:
+
+  | run shape | extra published bytes |
+  |---|---|
+  | `tiled`, multi-slide patient | **one full-size copy of the reference, per patient** (it remains in `<pid>/preprocessed/` as well) |
+  | single-slide patient, either backend | **one full-size copy of that slide, per such patient** |
+  | `valis`, multi-slide patient | none — VALIS re-writes its reference into the registered frame, so it has no passthrough |
+
+  So a 20-patient tiled run publishes 20 extra reference-sized files. On
+  whole-slide inputs that is real capacity: size it as one reference image per
+  patient. What it is NOT is a second copy in the *work* directory — the task's
+  output is a symlink into its staged input and `publishDir`'s `copy` mode resolves
+  symlinks — and it is not extra compute (`ln -s`, `1 GB`, `1.h`, `ubuntu:22.04`).
+  Under `valis` the published tree is unchanged in both size and shape.
+
+- **`meta.is_passthrough` no longer selects a published path.** It means only "this
+  slide was never warped", and its one remaining consumer is `REGISTER_PATIENT`'s
+  routing of such a slide through `PUBLISH_PASSTHROUGH`.
 - **The STARE registration method now has ONE implementation, with two thin drivers.**
   It previously existed twice: as the four shipped fan-out processes
   (`bin/tiled_coarse.py` → `tiled_reg_tile.py` → `tiled_solve.py` → `tiled_stitch.py`)
@@ -652,6 +727,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   authorised):** row order in the three manifests changes; contents and column order do not.
 
 ### Removed
+- **`Layout.passthroughPath`** — a `PREPROCESSED`-pinned wrapper over
+  `publishedOrAsIs` that existed for exactly one caller: the registered-checkpoint
+  writer's `is_passthrough` branch. That branch is what made a slide's published tree
+  depend on `--registration_method`, and it is gone, leaving the method with no
+  production caller. Use `Layout.registeredPath` for a registered slide (it refuses a
+  file emitted outside `registered_slides/`) or `Layout.publishedOrAsIs` directly.
 - **`reg_tiled_fanout` is gone, along with the single-task `TILED_REGISTER` path it
   selected.** STARE now has exactly one execution shape: the per-tile fan-out
   `TILED_COARSE` → `TILED_REG_TILE` (×tiles) → `TILED_SOLVE` → `TILED_STITCH`. Its memory is

@@ -24,15 +24,19 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Tuple
 
-import cv2
 import numpy as np
 import tifffile
 from image_io import write_ome_tiff
 from logger import get_logger
 from metadata import extract_channel_names_from_ome, pick_nuclear_index
 from numpy.typing import NDArray
-from registration_utils import autoscale
 from skimage.transform import rescale
+
+# NOTE: cv2 is imported inside create_registration_qc, not here. It is needed for exactly
+# one call (cv2.imwrite of the PNG) and opencv is in neither requirements.txt nor CI's pip
+# line, so a module-level import made this whole module unimportable wherever the tests
+# run -- which is why autoscale_for_display, with four production call sites, had no test
+# at all. The pipeline containers all carry opencv; only the test environment does not.
 
 __all__ = [
     "create_registration_qc",
@@ -43,45 +47,37 @@ __all__ = [
 logger = get_logger(__name__)
 
 
-def autoscale_for_display(img: NDArray, method: str = "minmax") -> NDArray[np.uint8]:
-    """Autoscale image for display purposes.
+def autoscale_for_display(img: NDArray) -> NDArray[np.uint8]:
+    """Linearly rescale an image to the full 0-255 uint8 display range.
+
+    Min-max normalisation, which is the only scaling any caller has ever asked for. It
+    used to be selectable, and the alternative it selected is deleted -- see
+    tests/test_autoscale_for_display.py for what was removed and why it was unreachable.
 
     Parameters
     ----------
     img : NDArray
         Input image of any numeric dtype.
-    method : str, default="minmax"
-        Scaling method:
-        - 'minmax': Min-max normalization (linear)
-        - 'percentile': Percentile-based (robust to outliers)
 
     Returns
     -------
     NDArray[np.uint8]
-        Scaled image in 0-255 range.
+        Scaled image in 0-255 range. A constant image maps to all-zero rather than
+        dividing by zero.
 
     Examples
     --------
     >>> img = np.random.rand(100, 100) * 1000
-    >>> scaled = autoscale_for_display(img, method='minmax')
+    >>> scaled = autoscale_for_display(img)
     >>> scaled.min(), scaled.max()
     (0, 255)
-
-    See Also
-    --------
-    autoscale : Percentile-based scaling from registration_utils
     """
-    if method == "minmax":
-        img_min = img.min()
-        img_max = img.max()
-        range_val = max(img_max - img_min, 1e-6)
-        normalized = (img - img_min) / range_val
-        # Fix: Round before converting to uint8 to avoid truncation artifacts
-        return np.round(normalized * 255).astype(np.uint8)
-    elif method == "percentile":
-        return autoscale(img, low_p=1.0, high_p=99.0)
-    else:
-        raise ValueError(f"Unknown method: {method}. Use 'minmax' or 'percentile'.")
+    img_min = img.min()
+    img_max = img.max()
+    range_val = max(img_max - img_min, 1e-6)
+    normalized = (img - img_min) / range_val
+    # Round before converting to uint8 -- truncating darkens every level by up to one.
+    return np.round(normalized * 255).astype(np.uint8)
 
 
 def create_nuclear_overlay(
@@ -139,8 +135,8 @@ def create_nuclear_overlay(
         )
 
     # Autoscale each channel independently
-    ref_scaled = autoscale_for_display(reference_nuc, method="minmax")
-    reg_scaled = autoscale_for_display(registered_nuc, method="minmax")
+    ref_scaled = autoscale_for_display(reference_nuc)
+    reg_scaled = autoscale_for_display(registered_nuc)
 
     # Downsample if requested
     if scale_factor != 1.0:
@@ -355,8 +351,8 @@ def create_registration_qc(
 
     # Save full-resolution QC (compressed)
     if save_fullres:
-        ref_nuc_scaled = autoscale_for_display(ref_nuc, method="minmax")
-        reg_nuc_scaled = autoscale_for_display(reg_nuc, method="minmax")
+        ref_nuc_scaled = autoscale_for_display(ref_nuc)
+        reg_nuc_scaled = autoscale_for_display(reg_nuc)
 
         rgb_stack_full = np.stack(
             [
@@ -390,6 +386,10 @@ def create_registration_qc(
 
     # Save PNG (OpenCV uses BGR order)
     if save_png:
+        # The module's only opencv dependency, imported here rather than at module
+        # level -- see the note beside the imports at the top of this file.
+        import cv2
+
         png_output_path = output_path.with_suffix(".png")
         cv2.imwrite(str(png_output_path), rgb_bgr)
         logger.info(f"  Saved QC PNG: {png_output_path}")

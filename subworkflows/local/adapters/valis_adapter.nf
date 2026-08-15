@@ -12,29 +12,16 @@
             and all_items = [[meta1, file1], [meta2, file2], ...] for all images
     Output: Channel of [meta, file] tuples (standard format)
 
-    THE ADAPTER CONTRACT (identical in adapters/tiled_adapter.nf, and binding on any third
-    adapter). Every registration adapter takes [patient_id, reference_item, all_items]
-    and emits EXACTLY these names:
-
-        registered          [meta, file]                registered slides (+ passthroughs)
-        transform           [patient_id, transform]     ONE transform object per patient
-        transform_by_slide  [meta, transform]           one transform per MOVING slide
-        stage_checkpoint    [patient_id, dir]           intermediate-stage fields
-        intrinsic_tre       file                        the method's OWN target-registration
-                                                        -error estimate, whatever its format
-        size_logs / versions
-
-    `intrinsic_tre` is deliberately NOT named after any one method. Both shipped backends
-    estimate a TRE from their own registration -- VALIS a feature-distance CSV, STARE a
-    *_tre.json -- and the seam used to call the slot `summary` and then re-emit it as
-    `valis_summary`, which pinned one method's name into the artifact vocabulary all the way
-    out to the QC report. Formats are NOT normalised here; that is the reader's job.
-
-    A method that produces no artifact for one of these emits `Channel.empty()` for it --
-    a NULL OBJECT, never a missing emit and never an error. That is what lets
-    REGISTER_PATIENT wire both backends with one short branch, and it is why nothing
-    downstream of that branch has to know which method ran. A future adapter inherits the
-    rule: declare every name; empty the ones your method cannot produce.
+    THE ADAPTER CONTRACT lives in lib/AdapterContract.groovy, not here. It declares the
+    emit names every adapter must fill, the tuple shape of each, and -- the part a comment
+    kept getting wrong -- the CARDINALITY each one carries under this backend. It used to
+    be a ~23-line table copied verbatim into both adapter files, so it was two tables, and
+    it declared only names -- while the emit named `transform` carries ONE ROW PER PATIENT
+    here and one row per MOVING SLIDE under the tiled adapter, which is the fact consumers
+    actually branch on.
+    tests/test_adapter_contract.py checks this file against that declaration, and
+    tests/subworkflows/local/adapters/adapter_cardinality.nf.test counts what it really
+    emits. Adding an emit, or a third backend, starts there.
 ========================================================================================
 */
 
@@ -100,31 +87,24 @@ workflow VALIS_ADAPTER {
             // Read OME channels manifest (maps filename -> channel names from OME-XML)
             def manifest = new groovy.json.JsonSlurper().parseText(manifest_file.text)
 
-            // Build lookup: sorted channel signature (from CSV meta) -> meta
-            def channel_key_to_meta = metas_list.collectEntries { meta ->
-                // IMPORTANT: Use toSorted() instead of sort() to avoid mutating meta.channels.
-                // (Elsewhere in the pipeline, meta.clone() was replaced with `meta + [...]`
-                // map addition — but Groovy's Map.plus() is implemented as
-                // cloneSimilarMap(left).putAll(right), i.e. clone-then-putAll, so the two
-                // are operationally identical. That was an idiom change, not a safety
-                // change: meta.channels is still a shared List reference across any
-                // derived metas that do not explicitly rebind it. sort()'s in-place
-                // mutation would corrupt that shared list for every other meta holding the
-                // same reference — hence toSorted(), here and at every future call site.)
-                def key = meta.channels.toSorted().join('_').toLowerCase()
-                [(key): meta]
-            }
+            // A slide's identity within a patient is its channel set, and what that means
+            // -- how it is spelled, and what a repeat does -- belongs to
+            // lib/PanelSignature.groovy, not to this file. This used to compute the key
+            // inline and throw its own message; SEG_QC computed the same concept with a
+            // different separator and had no opinion about repeats at all, which is how
+            // one input came to hard-fail here and silently cross-produce there.
+            //
+            // REGISTER_PATIENT already refused a duplicate before either adapter ran, so
+            // reaching this call means something bypassed the group (an adapter invoked
+            // directly, e.g. from an nf-test). It is one line and it is the point where an
+            // ambiguous signature would actually corrupt the matching below -- a duplicate
+            // key silently overwrites in collectEntries and one slide's file is then
+            // attributed to the other slide's metadata.
+            PanelSignature.requireUniqueWithinPatient(patient_id, metas_list)
 
-            // Guard against duplicate channel signatures (would silently overwrite)
-            if (channel_key_to_meta.size() != metas_list.size()) {
-                def signatures = metas_list.collect { it.channels.toSorted().join('_').toLowerCase() }
-                def duplicates = signatures.groupBy { it }.findAll { _sig, v -> v.size() > 1 }.keySet()
-                throw new Exception("""
-                VALIS adapter: duplicate channel signatures for patient ${patient_id}
-                ${metas_list.size()} slides but only ${channel_key_to_meta.size()} unique channel sets
-                Duplicated: ${duplicates.join(', ')}
-                Each slide must have a unique combination of channels
-                """.stripIndent())
+            // Build lookup: channel signature (from CSV meta) -> meta
+            def channel_key_to_meta = metas_list.collectEntries { meta ->
+                [(PanelSignature.of(meta)): meta]
             }
 
             // Match each registered file by its OME channel signature
@@ -140,8 +120,10 @@ workflow VALIS_ADAPTER {
                     throw new Exception(error_msg)
                 }
 
-                // Create sorted channel signature from OME metadata
-                def ome_key = (ome_channels as List).toSorted().join('_').toLowerCase()
+                // The same signature, computed from the OME-XML channel names the
+                // registered file actually carries. Both sides go through one function so
+                // the two spellings cannot drift apart and quietly match nothing.
+                def ome_key = PanelSignature.ofChannels(ome_channels)
                 def matched_meta = channel_key_to_meta[ome_key]
 
                 if (!matched_meta) {

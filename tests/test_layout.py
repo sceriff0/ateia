@@ -178,6 +178,12 @@ def test_every_kind_asked_of_layout_is_published_by_modules_config():
         r"Layout\.(?:publishedPath|patientDir)\("
         r"\s*params\.\w+\s*,\s*[^,]+,\s*(?:'([^']+)'|Layout\.(\w+))"
     )
+    # registeredPath() takes no `kind` argument -- it is publishedPath pinned to
+    # REGISTERED, which is the whole point of it (one rule for every registered.csv row,
+    # warped or passed through). Scanned separately so this test still sees the
+    # registration checkpoint asking for a kind; without this the `{"registered",
+    # "preprocessed"} <=` assertion below would have quietly lost half its subject.
+    pinned = re.compile(r"Layout\.registeredPath\(")
     asked = []
     for f in _callers():
         text = f.read_text()
@@ -187,6 +193,9 @@ def test_every_kind_asked_of_layout_is_published_by_modules_config():
             kind = m.group(1) or consts.get(m.group(2))
             line_no = text[: m.start()].count("\n") + 1
             asked.append((f"{f.relative_to(ROOT)}:{line_no}", kind))
+        for m in pinned.finditer(text):
+            line_no = text[: m.start()].count("\n") + 1
+            asked.append((f"{f.relative_to(ROOT)}:{line_no}", consts["REGISTERED"]))
 
     assert asked, "no Layout published-path calls found — did the call sites move?"
     # The two kinds whose loss would break a restart; pinned by name so a call site
@@ -199,37 +208,102 @@ def test_every_kind_asked_of_layout_is_published_by_modules_config():
     )
 
 
-def test_the_unregistered_slide_path_has_its_own_owner():
-    """A slide that was never registered is published by whoever produced it, not
-    into <pid>/registered/. The checkpoint writer must ask Layout which case it is
-    in rather than assuming — that assumption is defect (c).
+def test_the_registered_manifest_has_one_path_rule():
+    """Every row of csv/registered.csv names <pid>/registered/registered_slides/<name>,
+    whatever produced the slide and whichever backend ran.
 
-    The writer moved out of registration.nf into its own subworkflow so the
-    add_cycle path could share it (an add_cycle run used to write no
-    csv/registered.csv at all). The property is unchanged; only its owner moved."""
+    THE DEFECT THIS REPLACES. The writer used to branch:
+    `meta.is_passthrough ? Layout.passthroughPath(...) : Layout.publishedPath(...)`
+    (passthroughPath is deleted — it had no other caller),
+    recording an unwarped slide under <pid>/preprocessed/. Only the tiled adapter
+    passes a multi-slide patient's reference through, so that branch made the tree a
+    slide was recorded in a function of --registration_method — the same logical slide,
+    two layouts, and every reader of the manifest had to know which backend wrote it
+    (tests/registered_layout.nf.test runs the pipeline both ways and compares).
+
+    The flag itself is NOT gone and must not be: it is what routes a slide through
+    PUBLISH_PASSTHROUGH, which is what makes the one path rule true. It now means only
+    "this slide was never warped".
+    """
     writer = (
         ROOT / "subworkflows" / "local" / "registered_checkpoint.nf"
     ).read_text()
-    assert "Layout.passthroughPath(" in writer, (
-        "the registered-checkpoint writer no longer routes unregistered slides "
-        "through Layout.passthroughPath — see tests/checkpoint_manifest.nf.test"
+    assert "Layout.registeredPath(" in writer, (
+        "the registered-checkpoint writer no longer routes rows through "
+        "Layout.registeredPath — see tests/registered_layout.nf.test"
     )
-    assert "is_passthrough" in writer
+    assert "publishedOrAsIs(" not in writer and "publishedPath(" not in writer, (
+        "the registered-checkpoint writer has grown a second path rule again; every "
+        "row goes through Layout.registeredPath, which is publishedPath pinned to "
+        "REGISTERED and refuses anything emitted outside registered_slides/"
+    )
 
-    # Both producers of an unregistered slide must set the flag the writer keys on:
-    # REGISTER_PATIENT's single-slide branch, and TILED_ADAPTER's every-patient
-    # reference. (The single-slide branch moved out of registration.nf with the rest
-    # of the shared registration core — add_cycle.nf had lost it entirely.)
+    # Both producers of an unregistered slide must still mark it — that is the fact
+    # REGISTER_PATIENT branches on to publish it into the registered tree.
     reg = (ROOT / "subworkflows" / "local" / "register_patient.nf").read_text()
     assert "is_passthrough" in reg, (
-        "REGISTER_PATIENT's single-slide passthrough branch no longer marks the "
-        "slide — its checkpoint row would name a file nothing publishes"
+        "REGISTER_PATIENT's single-slide passthrough branch no longer marks the slide"
+    )
+    assert "PUBLISH_PASSTHROUGH" in reg, (
+        "REGISTER_PATIENT no longer publishes passthrough slides into the registered "
+        "tree — their checkpoint rows would name files nothing publishes there"
     )
     tiled = (ROOT / "subworkflows" / "local" / "adapters" / "tiled_adapter.nf").read_text()
     assert "is_passthrough" in tiled, (
         "TILED_ADAPTER's reference passes through unregistered but is not marked "
-        "is_passthrough — its registered.csv row would name a file nothing publishes"
+        "is_passthrough — it would never reach PUBLISH_PASSTHROUGH"
     )
+
+
+def test_every_producer_of_a_registered_slide_uses_the_one_subdirectory():
+    """publishDir carries a producer's output subdirectory into the published path, so
+    the directory name a process happens to `mkdir` is half of where its slides land.
+
+    Three processes produce a registered slide and they used to disagree: REGISTER
+    emitted into 'registered_slides/', TILED_STITCH into 'registered/', and a
+    passthrough into nothing at all — three trees for one kind of artifact. The name
+    has one owner now (Layout.REGISTERED_SUBDIR) and this checks the three modules and
+    conf/modules.config against it, in the only way available: by hand, because
+    conf/*.config cannot see lib/*.groovy classes (CLAUDE.md).
+    """
+    subdir = _layout_constants().get("REGISTERED_SUBDIR")
+    assert subdir, "Layout.REGISTERED_SUBDIR is not declared"
+
+    producers = {
+        "register.nf": "registered_slides",
+        "tiled_stitch.nf": "registered_slides",
+        "publish_passthrough.nf": None,  # renders the constant itself
+    }
+    for name in producers:
+        module = (ROOT / "modules" / "local" / name).read_text()
+        emits = re.search(r"^\s*tuple val\(meta\).*?emit: registered", module, re.M) or \
+            re.search(r"^\s*tuple val\(patient_id\).*?emit: registered", module, re.M)
+        assert emits, f"modules/local/{name} declares no `emit: registered` output"
+        line = emits.group(0)
+        assert f"{subdir}/" in line or "Layout.REGISTERED_SUBDIR" in line, (
+            f"modules/local/{name} emits its registered slide outside "
+            f"'{subdir}/': {line.strip()}"
+        )
+
+    # Every publishDir whose path is the bare <pid>/registered leaf must carry the
+    # subdirectory in its pattern, or the published path and Layout's disagree.
+    conf = MODULES_CONFIG.read_text()
+    leaves = list(
+        re.finditer(r'\$\{params\.outdir\}/\$\{meta\.patient_id\}/registered"', conf)
+    )
+    assert len(leaves) >= 3, (
+        f"expected the three registered-slide publishers, found {len(leaves)} "
+        "publishDir blocks naming the bare <pid>/registered leaf"
+    )
+    for m in leaves:
+        window = conf[m.end() : m.end() + 600]
+        pattern = re.search(r'pattern:\s*"([^"]+)"', window)
+        line_no = conf[: m.start()].count("\n") + 1
+        assert pattern, f"conf/modules.config:{line_no}: publishes into <pid>/registered with no pattern"
+        assert pattern.group(1).startswith(f"{subdir}/"), (
+            f"conf/modules.config:{line_no}: publishes <pid>/registered with pattern "
+            f"{pattern.group(1)!r}, which does not carry '{subdir}/'"
+        )
 
 
 def _per_patient_publish_leaves() -> set[str]:

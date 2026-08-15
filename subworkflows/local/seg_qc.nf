@@ -20,9 +20,9 @@
     segment-on-interpolated-pixels bias.
 
     The scorer (bin/warp_seg_qc.py) is method-agnostic; only the *warper* differs, so the
-    method dispatch lives here rather than at the call sites:
-      * valis  -> per-PATIENT transform, BioFormats JVM, pre-micro checkpoint
-      * tiled  -> per-SLIDE transform, JVM-free, no checkpoint
+    dispatch lives here rather than at the call sites:
+      * a per-PATIENT transform  -> combine by patient_id; BioFormats JVM; pre-micro checkpoint
+      * a per-SLIDE   transform  -> combine by (patient_id, meta.id); JVM-free
 
     ONE WARP PROCESS, TWO BACKENDS. WARP_SEG_QC's container, flags, stage list, version
     rows and stub extras come from lib/WarpBackends.groovy, keyed on the `method`
@@ -37,24 +37,37 @@
     stage checkpoint is a null object (`[]`), which is the idiom the VALIS arm already
     used for patients whose checkpoint was missing.
 
-    `method` is an ARGUMENT here — an argument to this subworkflow and an input to the
-    process — never a read of params.registration_method, which is read exactly once, in
-    subworkflows/local/registration.nf. That is the same rule REGISTER_PATIENT follows
-    and for the same reason: ADD_CYCLE is VALIS-only by construction
-    (workflows/mirage.nf rejects `--registration_method tiled` in add_cycle mode) and passes
-    the literal 'valis', so sharing this subworkflow must not be what quietly lifts that
-    rejection.
+    WHICH JOIN IS CHOSEN BY THE DECLARED CARDINALITY, NOT BY THE BACKEND'S NAME. This file
+    used to read `if (method == 'tiled')`. That made the join shape depend on a product
+    name travelling out of band from params.registration_method, while the fact it was
+    really standing in for is the multiplicity of `transform` — and the two are only
+    accidentally the same thing. A third backend filling `transform` per slide, whose
+    author did not also find and edit this `if`, would have been combined by patient_id
+    alone; `combine(by:)` is a CROSS JOIN, so N moving slides against N transforms is
+    N**2 pairs, each slide scored against every transform of its patient. Silently wrong
+    QC numbers, not a crash. lib/AdapterContract.groovy declares the cardinality and this
+    file asks it, so a new backend's join follows from its declaration.
+
+    `contract` is an ARGUMENT here — never a read of params.registration_method, which is
+    read exactly once, in subworkflows/local/registration.nf. That is the same rule
+    REGISTER_PATIENT follows and for the same reason: ADD_CYCLE is VALIS-only by
+    construction (workflows/mirage.nf rejects `--registration_method tiled` in add_cycle
+    mode) and passes AdapterContract.of('valis'), so sharing this subworkflow must not be
+    what quietly lifts that rejection. WARP_SEG_QC still takes the backend NAME
+    (`contract.method`): it selects a container and a scorer flag, which is a genuine
+    name-to-implementation lookup (lib/WarpBackends.groovy) rather than a shape decision.
 
     Whichever transform channel the taken branch does not read arrives as `Channel.empty()`
-    — the ADAPTERS' null-object contract (see either adapter's header), not filler invented
-    by the caller.
+    — the ADAPTERS' null-object contract (declared per backend in lib/AdapterContract.groovy,
+    where a `none` cardinality means exactly that), not filler invented by the caller.
 
     Input:
         ch_native_images      [meta, file]            slides to segment on their native grid
         ch_transform          [patient_id, transform] per-PATIENT transform (valis branch)
         ch_stage_checkpoint   [patient_id, ckpt_dir]  REGISTER pre-micro checkpoint, may be empty
-        ch_transform_by_slide [meta, transform]       per-MOVING-SLIDE transform (tiled branch)
-        method                String                  'tiled' | anything else = valis
+        ch_transform_by_slide [meta, transform]       per-MOVING-SLIDE transform (per-slide branch)
+        contract              Map                     AdapterContract.of(method) — the running
+                                                      backend's declared emit cardinalities
 
     Output:
         metrics   [meta, *_seg_qc.json]
@@ -75,7 +88,7 @@ workflow SEG_QC {
     ch_transform
     ch_stage_checkpoint
     ch_transform_by_slide
-    method
+    contract
 
     main:
     // ── segment the native slides with THE RUN'S OWN SEGMENTER ──────────────────
@@ -131,23 +144,36 @@ workflow SEG_QC {
     // stage_checkpoint] — and differ only in how `transform` and `stage_checkpoint` are
     // joined, because the two methods' transforms are keyed differently (per-slide vs
     // per-patient) and only VALIS has a stage checkpoint at all.
-    if (method == 'tiled') {
-        // Tiled: one transform per moving slide (meta-keyed). Join it to the moving GeoJSON by
-        // (patient, sorted-channels) so each slide is scored against its own transform. No
-        // stage checkpoint (stages are separable by construction) and no JVM — `[]` is the
-        // null object WARP_SEG_QC's tiled backend never reads.
+    def method = contract.method
+    if (AdapterContract.isPerSlide(contract, 'transform')) {
+        // A per-slide transform (meta-keyed) — join it to the moving GeoJSON by
+        // (patient_id, meta.id) so each slide is scored against its own transform. No
+        // stage checkpoint (a backend with a per-slide transform composes no stages
+        // destructively) and no JVM — `[]` is the null object this backend never reads.
+        //
+        // THE KEY IS AN IDENTITY, NOT AN ATTRIBUTE. This used to join on the slide's
+        // sorted channel signature. `combine(by:)` is a CROSS JOIN, so a patient with two
+        // slides declaring the same panel — a repeat or QC re-image, ordinary in a
+        // multi-cycle study — produced FOUR warp tasks instead of two: each slide scored
+        // against the other's transform, each writing the same output filename, and
+        // nothing failed. Exactly the N**2 failure this file's header warns a third
+        // backend would hit by joining on patient_id alone, one attribute finer.
+        // meta.id is CsvUtils.imageId's per-image unique id ("THE ONE RULE, NOT A
+        // CONVENTION"), which is the only thing in a meta guaranteed distinct within a
+        // patient. REGISTER_PATIENT now refuses a repeated panel outright, but a join is
+        // not 1:1 because something three files away rejects the alternative.
         ch_manifest_keyed = ch_transform_by_slide
-            .map { meta, m -> [meta.patient_id, meta.channels.toSorted().join('|'), m] }
+            .map { meta, m -> [meta.patient_id, meta.id, m] }
 
         ch_for_warp = ch_mov_gj
-            .map { pid, meta, gj, name -> [pid, meta.channels.toSorted().join('|'), meta, gj, name] }
+            .map { pid, meta, gj, name -> [pid, meta.id, meta, gj, name] }
             .combine(ch_ref_gj, by: 0)
             .combine(ch_manifest_keyed, by: [0, 1])
-            .map { _pid, _sig, meta, mov_gj, mov_name, ref_gj, ref_name, m ->
+            .map { _pid, _id, meta, mov_gj, mov_name, ref_gj, ref_name, m ->
                 tuple(meta, method, m, ref_name, mov_name, ref_gj, mov_gj, [])
             }
     } else {
-        // VALIS: one transform (the registrar pickle) per patient. Exactly one stage-checkpoint
+        // A per-patient transform (VALIS's registrar pickle). Exactly one stage-checkpoint
         // entry per patient that has one — the real directory where REGISTER wrote it, `[]`
         // where it did not. Making it total matters: a plain combine on an optional channel
         // silently DROPS the patients that lack it, removing them from the QC instead of
@@ -172,7 +198,7 @@ workflow SEG_QC {
     ch_metrics       = WARP_SEG_QC.out.metrics
     ch_per_cell      = WARP_SEG_QC.out.per_cell
     ch_warp_size     = WARP_SEG_QC.out.size_log
-    ch_warp_versions = WARP_SEG_QC.out.versions
+    ch_warp_versions = WARP_SEG_QC.out.versions.first()
 
     emit:
     metrics  = ch_metrics
@@ -180,5 +206,5 @@ workflow SEG_QC {
     size_log = SEG_QC_SEGMENT.out.size_log.mix(SEG_QC_GEOJSON.out.size_log).mix(ch_warp_size)
     versions = SEG_QC_SEGMENT.out.versions.first()
         .mix(SEG_QC_GEOJSON.out.versions.first())
-        .mix(ch_warp_versions.first())
+        .mix(ch_warp_versions)
 }

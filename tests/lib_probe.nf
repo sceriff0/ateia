@@ -385,12 +385,22 @@ workflow {
     assert Layout.publishedOrAsIs('/out', 'P001', 'cell_properties', freshNuclei) ==
         '/out/P001/cell_properties/nuclei/contours.json'
 
-    // passthroughPath now delegates to publishedOrAsIs pinned to PREPROCESSED --
-    // assert the delegation is behaviourally identical, not just present.
-    assert Layout.passthroughPath('/out', 'P001', freshFlat) ==
-        Layout.publishedOrAsIs('/out', 'P001', Layout.PREPROCESSED, freshFlat)
-    assert Layout.passthroughPath('/out', 'P002', publishedPassthrough) ==
-        Layout.publishedOrAsIs('/out', 'P002', Layout.PREPROCESSED, publishedPassthrough)
+    // registeredPath -- the ONE rule for every csv/registered.csv row. It is
+    // publishedPath pinned to REGISTERED, and it REFUSES a file emitted outside
+    // Layout.REGISTERED_SUBDIR rather than recording a path nothing publishes. Both
+    // halves asserted: the happy path, and the refusal (which is the half that used to
+    // be a silent wrong answer -- a passthrough recorded under <pid>/registered/, or
+    // under <pid>/preprocessed/ depending on which backend ran).
+    def freshRegistered = file("${workDirPre}/${Layout.REGISTERED_SUBDIR}/P001_x_registered.ome.tiff")
+    assert Layout.registeredPath('/out', 'P001', freshRegistered) ==
+        "/out/P001/registered/${Layout.REGISTERED_SUBDIR}/P001_x_registered.ome.tiff"
+    def refused = false
+    try {
+        Layout.registeredPath('/out', 'P001', freshFlat)
+    } catch (IllegalArgumentException e) {
+        refused = e.message.contains(Layout.REGISTERED_SUBDIR)
+    }
+    assert refused : 'Layout.registeredPath accepted a file emitted outside registered_slides/'
 
     // ------------------------------------------------------------------ //
     // ParamUtils.compartmentMode -- the
@@ -912,6 +922,72 @@ workflow {
     assert ChannelName.shellQuote("O'Brien")   == "'O'\\''Brien'"
     assert ChannelName.shellList(['DAPI', 'CD3 alpha']) == "'DAPI' 'CD3 alpha'"
     assert ChannelName.shellList([]) == ''
+
+    // ------------------------------------------------------------------ //
+    // PanelSignature -- the within-patient slide identity
+    // ------------------------------------------------------------------ //
+    // In this pipeline a slide's identity WITHIN a patient is its channel set. Both
+    // registration backends key on it and they used to disagree about what a repeat
+    // means: VALIS_ADAPTER threw its own bespoke message, while SEG_QC's per-slide arm
+    // used the same signature as a combine() key and silently cross-produced. One owner,
+    // one answer.
+
+    // Order-independent and case-insensitive: the same panel declared two ways is one
+    // signature. (A samplesheet's `channels` column is author-ordered; nothing downstream
+    // treats that order as meaning anything.)
+    assert PanelSignature.of([patient_id: 'P1', channels: ['CD3', 'DAPI']]) ==
+           PanelSignature.of([patient_id: 'P1', channels: ['dapi', 'cd3']])
+    // ...and a different panel is a different signature.
+    assert PanelSignature.of([patient_id: 'P1', channels: ['CD3', 'DAPI']]) !=
+           PanelSignature.of([patient_id: 'P1', channels: ['CD8', 'DAPI']])
+
+    // The OME side of VALIS's demux hands it a bare channel-name list read out of the
+    // registered file, never a meta. Both must land on the same string or the demux
+    // matches nothing.
+    assert PanelSignature.ofChannels(['DAPI', 'CD3']) ==
+           PanelSignature.of([patient_id: 'P1', channels: ['CD3', 'DAPI']])
+
+    // MUST NOT MUTATE meta.channels. `meta + [k: v]` is clone-then-putAll, so every meta
+    // derived from another SHARES the same channels List reference; an in-place sort()
+    // here would silently reorder that list for every holder. This is the exact hazard
+    // subworkflows/local/adapters/valis_adapter.nf's toSorted() comment describes.
+    def sharedChannels = ['PANCK', 'DAPI', 'CD3']
+    PanelSignature.of([patient_id: 'P1', channels: sharedChannels])
+    assert sharedChannels == ['PANCK', 'DAPI', 'CD3'], 'PanelSignature.of mutated its input'
+
+    // Distinct panels within a patient: accepted, silently.
+    PanelSignature.requireUniqueWithinPatient('P001', [
+        [patient_id: 'P001', id: 'P001_ref',  channels: ['DAPI', 'PANCK']],
+        [patient_id: 'P001', id: 'P001_mov1', channels: ['DAPI', 'CD3']],
+    ])
+
+    // A repeated panel is REFUSED, and the message has to be actionable: it must name the
+    // patient, the duplicated panel, and the ids of the slides that collide. The reason it
+    // is refused rather than accepted is downstream, not here -- every artifact past
+    // registration (split channel TIFF, per-marker quantification column, merged CSV) is
+    // keyed by MARKER NAME, so two slides declaring the same markers overwrite each other
+    // at quantification whichever backend registered them.
+    def dupRejected = false
+    try {
+        PanelSignature.requireUniqueWithinPatient('P001', [
+            [patient_id: 'P001', id: 'P001_cyc1', channels: ['DAPI', 'CD3']],
+            [patient_id: 'P001', id: 'P001_cyc2', channels: ['CD3', 'DAPI']],
+        ])
+    }
+    catch (IllegalArgumentException e) {
+        dupRejected = true
+        assert e.message.contains('P001')
+        assert e.message.contains('P001_cyc1') && e.message.contains('P001_cyc2'),
+            "the message must name the colliding slides: ${e.message}"
+        assert e.message.toLowerCase().contains('cd3'),
+            "the message must name the duplicated panel: ${e.message}"
+    }
+    assert dupRejected, 'PanelSignature.requireUniqueWithinPatient must reject a repeated panel'
+
+    // A single slide can never collide with itself.
+    PanelSignature.requireUniqueWithinPatient('P002', [
+        [patient_id: 'P002', id: 'P002_ref', channels: ['DAPI', 'PANCK']],
+    ])
 
     println "LIB PROBE: all assertions passed"
 }

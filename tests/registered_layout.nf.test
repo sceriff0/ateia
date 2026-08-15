@@ -1,0 +1,123 @@
+/*
+ * THE INVARIANT: where a registered slide is published does not depend on which
+ * registration backend ran.
+ *
+ * csv/registered.csv is a published INDEX and a restart input: `--start segmentation`
+ * opens the paths it names, and `mode='add_cycle'` reads the frozen prior reference out
+ * of it. Its rows were laid out by the backend, not by the pipeline:
+ *
+ *   reference slide, --registration_method valis
+ *       <outdir>/<pid>/registered/registered_slides/<name>
+ *   reference slide, --registration_method tiled
+ *       <outdir>/<pid>/preprocessed/<name>          <-- a DIFFERENT tree entirely
+ *
+ *   moving slide,    valis  ->  <outdir>/<pid>/registered/registered_slides/<name>
+ *   moving slide,    tiled  ->  <outdir>/<pid>/registered/registered/<name>
+ *
+ * Two independent causes, both invisible from inside either backend:
+ *
+ *   1. TILED_ADAPTER passes the patient's reference through UNWARPED and stamped
+ *      `is_passthrough`, and registered_checkpoint.nf selected a different Layout
+ *      branch on that flag — so the reference row named the PREPROCESSING step's
+ *      artifact. VALIS re-writes its reference into the registered frame, so its row
+ *      named the registration step's. Same logical slide, two trees.
+ *   2. REGISTER and TILED_STITCH emit into differently-named output subdirectories
+ *      ('registered_slides/' vs 'registered/') and publishDir carries the producer's
+ *      subdirectory into the published path — so even the two backends' MOVING slides
+ *      landed in different directories.
+ *
+ * A consumer of registered.csv had to know which backend wrote it. This test pins the
+ * ONE layout: every row of csv/registered.csv, reference or moving, warped or passed
+ * through, names a file under `<outdir>/<pid>/registered/registered_slides/`.
+ *
+ * The two tests below are deliberately near-identical and assert the SAME expected
+ * directory — that redundancy IS the assertion. Collapsing them into one
+ * backend-parameterised expectation would be able to pass while the two backends still
+ * diverged.
+ *
+ * Existence of the recorded paths is tests/checkpoint_manifest.nf.test's job; this file
+ * is about the layout being one layout. Tagged "stub" because CI's blocking gate is
+ * `nf-test test --tag stub`.
+ */
+
+nextflow_pipeline {
+
+    name "csv/registered.csv has one layout under every registration backend"
+    script "main.nf"
+
+    tag "pipeline"
+    tag "registered_layout"
+    tag "stub"
+
+    test("VALIS: every registered.csv row is under registered/registered_slides/") {
+        options "-stub"
+
+        when {
+            params {
+                input               = "$projectDir/tests/testdata/test_input.csv"
+                outdir              = "$outputDir"
+                registration_method = 'valis'
+            }
+        }
+
+        then {
+            assert workflow.success
+
+            def csv  = new File("${outputDir}/csv/registered.csv".toString())
+            assert csv.exists() : "no csv/registered.csv was published"
+
+            def lines   = csv.readLines().findAll { it.trim() }
+            def header  = lines[0].split(',') as List
+            def rows    = lines[1..-1].collect { line ->
+                [header, line.split(',') as List].transpose().collectEntries()
+            }
+            assert rows.size() == 2 : "expected one row per slide of the two-slide fixture"
+
+            // The reference row is the one this test exists for: under VALIS it was
+            // already here, under tiled it was in <pid>/preprocessed/.
+            def reference = rows.find { it.is_reference == 'true' }
+            assert reference != null : "no reference row in csv/registered.csv"
+
+            rows.each { row ->
+                def dir = new File(row.registered_image).parent
+                assert dir == "${outputDir}/${row.patient_id}/registered/registered_slides".toString() :
+                    "row (is_reference=${row.is_reference}) is published at ${dir}"
+            }
+        }
+    }
+
+    test("tiled: every registered.csv row is under registered/registered_slides/") {
+        options "-stub"
+
+        when {
+            params {
+                input               = "$projectDir/tests/testdata/test_input.csv"
+                outdir              = "$outputDir"
+                registration_method = 'tiled'
+            }
+        }
+
+        then {
+            assert workflow.success
+
+            def csv  = new File("${outputDir}/csv/registered.csv".toString())
+            assert csv.exists() : "no csv/registered.csv was published"
+
+            def lines   = csv.readLines().findAll { it.trim() }
+            def header  = lines[0].split(',') as List
+            def rows    = lines[1..-1].collect { line ->
+                [header, line.split(',') as List].transpose().collectEntries()
+            }
+            assert rows.size() == 2 : "expected one row per slide of the two-slide fixture"
+
+            def reference = rows.find { it.is_reference == 'true' }
+            assert reference != null : "no reference row in csv/registered.csv"
+
+            rows.each { row ->
+                def dir = new File(row.registered_image).parent
+                assert dir == "${outputDir}/${row.patient_id}/registered/registered_slides".toString() :
+                    "row (is_reference=${row.is_reference}) is published at ${dir}"
+            }
+        }
+    }
+}

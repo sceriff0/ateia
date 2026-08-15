@@ -133,6 +133,155 @@ nextflow_workflow {
         }
     }
 
+    /*
+     * A REPEATED PANEL IS REFUSED IDENTICALLY BY BOTH BACKENDS.
+     *
+     * A repeat or QC re-image of the same panel within a patient is an ordinary
+     * acquisition. It used to hard-FAIL under VALIS (the adapter keys registered outputs
+     * back to metadata by sorted channel signature and threw its own bespoke message when
+     * two slides shared one) and pass silently under tiled, where SEG_QC then
+     * CROSS-PRODUCED over the same signature. Same input, two outcomes, neither of them
+     * stated anywhere a user would look.
+     *
+     * The check is one owner (lib/PanelSignature.groovy) called once, on the grouped
+     * channel BOTH adapters take, so it cannot depend on which backend runs and cannot be
+     * missed by a third. It runs BEFORE the adapter, which also means the run dies in the
+     * first seconds instead of after a multi-hour registration -- VALIS's version fired
+     * only once REGISTER had already produced the files it could not demux.
+     *
+     * Why refuse rather than accept: past registration, every artifact is keyed by MARKER
+     * NAME and not by slide -- SPLIT_CHANNELS names each file after its channel,
+     * QUANTIFY_MARKERS derives `id`/`channel_name` from that filename, MERGE_QUANT_CSVS
+     * joins per marker. Two slides declaring the same markers collide there, silently,
+     * with the second overwriting the first. Accepting the duplicate at registration would
+     * only move the failure somewhere quieter. The message says how to declare a genuine
+     * repeat instead (distinct marker labels, or its own patient_id).
+     */
+    test("a repeated panel is refused - valis") {
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                reg_qc = 0
+            }
+            workflow {
+                """
+                input[0] = Channel.of([
+                    'P001',
+                    [[patient_id: 'P001', id: 'P001_ref', is_reference: true, channels: ['DAPI','PANCK']],
+                     file('$projectDir/tests/testdata/P001_ref.ome.tiff')],
+                    [
+                      [[patient_id: 'P001', id: 'P001_ref', is_reference: true, channels: ['DAPI','PANCK']],
+                       file('$projectDir/tests/testdata/P001_ref.ome.tiff')],
+                      [[patient_id: 'P001', id: 'P001_cyc1', is_reference: false, channels: ['DAPI','CD3']],
+                       file('$projectDir/tests/testdata/P001_mov1.ome.tiff')],
+                      [[patient_id: 'P001', id: 'P001_cyc2', is_reference: false, channels: ['CD3','DAPI']],
+                       file('$projectDir/tests/testdata/P001_mov2.ome.tiff')]
+                    ]
+                ])
+                input[1] = 'valis'
+                """
+            }
+        }
+
+        then {
+            def report = (workflow.stdout + workflow.stderr).join('\n') +
+                         (workflow.errorReport ?: '') + (workflow.errorMessage ?: '')
+            assertAll(
+                { assert workflow.failed },
+                { assert report.contains('P001_cyc1') && report.contains('P001_cyc2') },
+                // It must die BEFORE the adapter, not after registration produced files
+                // nothing could match back to metadata.
+                { assert workflow.trace.tasks().findAll {
+                    it.name =~ /(^|:)REGISTER\b/
+                }.size() == 0 },
+            )
+        }
+    }
+
+    test("a repeated panel is refused - tiled, with the same message") {
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                reg_qc = 0
+            }
+            workflow {
+                """
+                input[0] = Channel.of([
+                    'P001',
+                    [[patient_id: 'P001', id: 'P001_ref', is_reference: true, channels: ['DAPI','PANCK']],
+                     file('$projectDir/tests/testdata/P001_ref.ome.tiff')],
+                    [
+                      [[patient_id: 'P001', id: 'P001_ref', is_reference: true, channels: ['DAPI','PANCK']],
+                       file('$projectDir/tests/testdata/P001_ref.ome.tiff')],
+                      [[patient_id: 'P001', id: 'P001_cyc1', is_reference: false, channels: ['DAPI','CD3']],
+                       file('$projectDir/tests/testdata/P001_mov1.ome.tiff')],
+                      [[patient_id: 'P001', id: 'P001_cyc2', is_reference: false, channels: ['CD3','DAPI']],
+                       file('$projectDir/tests/testdata/P001_mov2.ome.tiff')]
+                    ]
+                ])
+                input[1] = 'tiled'
+                """
+            }
+        }
+
+        then {
+            def report = (workflow.stdout + workflow.stderr).join('\n') +
+                         (workflow.errorReport ?: '') + (workflow.errorMessage ?: '')
+            assertAll(
+                { assert workflow.failed },
+                // The SAME refusal the valis case above asserts. This pair is the point of
+                // the item: one input, one outcome, whichever backend was asked for.
+                { assert report.contains('P001_cyc1') && report.contains('P001_cyc2') },
+                { assert workflow.trace.tasks().findAll {
+                    it.name =~ /(^|:)TILED_/
+                }.size() == 0 },
+            )
+        }
+    }
+
+    test("distinct panels within a patient are accepted - the guard is not a blanket refusal") {
+        tag "stub"
+        options "-stub"
+
+        // The other half of the pair above. A guard that refused every multi-slide group
+        // would pass both refusal cases and break the whole pipeline; this is what says
+        // the ordinary case still registers.
+        when {
+            params {
+                reg_qc = 0
+            }
+            workflow {
+                """
+                input[0] = Channel.of([
+                    'P001',
+                    [[patient_id: 'P001', id: 'P001_ref', is_reference: true, channels: ['DAPI','PANCK']],
+                     file('$projectDir/tests/testdata/P001_ref.ome.tiff')],
+                    [
+                      [[patient_id: 'P001', id: 'P001_ref', is_reference: true, channels: ['DAPI','PANCK']],
+                       file('$projectDir/tests/testdata/P001_ref.ome.tiff')],
+                      [[patient_id: 'P001', id: 'P001_mov1', is_reference: false, channels: ['DAPI','CD3']],
+                       file('$projectDir/tests/testdata/P001_mov1.ome.tiff')],
+                      [[patient_id: 'P001', id: 'P001_mov2', is_reference: false, channels: ['DAPI','CD8']],
+                       file('$projectDir/tests/testdata/P001_mov2.ome.tiff')]
+                    ]
+                ])
+                input[1] = 'valis'
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.out.registered.size() == 3 },
+            )
+        }
+    }
+
     test("a single-slide group never reaches the adapter") {
         tag "stub"
         options "-stub"
@@ -164,9 +313,11 @@ nextflow_workflow {
                 { assert workflow.trace.tasks().findAll {
                     it.name =~ /(^|:)REGISTER\b/
                 }.size() == 0 },
-                // ...but the slide still reaches the registered stream, and the
-                // checkpoint still records it (at its PREPROCESSED/native location,
-                // via meta.is_passthrough — see tests/checkpoint_manifest.nf.test).
+                // ...but the slide still reaches the registered stream, republished
+                // as a registered slide by PUBLISH_PASSTHROUGH (meta.is_passthrough is
+                // what routes it there), so the checkpoint records it under
+                // <pid>/registered/registered_slides/ like every other row — see
+                // tests/registered_layout.nf.test and tests/checkpoint_manifest.nf.test.
                 { assert workflow.out.registered.size() == 1 },
                 { assert workflow.out.checkpoint_csv },
             )

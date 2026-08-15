@@ -109,6 +109,9 @@ tests/testdata/P001_cell_mask.npy
 tests/testdata/P001_cell_mask.tif
 tests/testdata/P002_cell_mask.npy
 tests/testdata/P002_cell_mask.tif
+# Written by create_nuclei_mask(); was tracked and 0 bytes, which satisfied
+# checkIfExists and would have failed any real read.
+tests/testdata/P001_nuclei_mask.tif
 tests/testdata/P001_redsea.npz
 tests/testdata/valid_preprocessing.csv
 tests/testdata/valid_checkpoint_registration.csv

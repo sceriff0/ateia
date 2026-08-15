@@ -131,17 +131,18 @@ ALLOWED_LINES = {
         # rewritten WARP_SEG_QC ext.args comment added 5 net lines above it;
         # 727 -> 786 when REDSEA added redseaMarkerList() near the top of the file
         # and a REDSEA_MATRIX withName: block above QUANTIFY's; -> 807 when the
-        # z-score work added a comment line to quantifyStatistics(); -> 827 when
-        # QUANTIFY's flat 128 GB became a size-derived tier ladder and its closure
-        # grew the comment explaining why; -> 844 when its flat 12 h wall became
-        # batch-scaled and grew its own; -> 856 when that wall's comment was
-        # corrected (it had claimed a QUANTIFY walltime kill could be swallowed by
-        # the errorStrategy 'ignore' branch, which does not cover QUANTIFY); -> 852
-        # when EXTRACT_CELL_PROPERTIES' and EXTRACT_NUCLEI_PROPERTIES' two withName:
-        # blocks collapsed into one, removing four lines above this point.
+        # This pin has moved SIX times on one refactor branch, which is the finding:
+        # an exact-LINE exemption conflicts with every change above it in the file.
+        # 807 -> 827 (QUANTIFY's flat 128 GB became a size-derived tier ladder)
+        # -> 844 (its flat 12 h wall became batch-scaled)
+        # -> 856 (that wall's comment corrected: a QUANTIFY walltime kill is NOT
+        #         swallowed by the errorStrategy 'ignore' branch, which covers only
+        #         seven QC processes)
+        # -> 852 (EXTRACT_CELL/NUCLEI_PROPERTIES' two withName: blocks collapsed)
+        # -> 892 (PUBLISH_PASSTHROUGH added, and the adapter-cardinality work above)
         # Re-pin, do not widen. (Re-pin from the file, not by guessing:
         # `grep -n "quantifyStatistics(params.quantify_statistics)" conf/modules.config`.)
-        852: (
+        892: (
             "ext.args = { ... quantifyStatistics(params.quantify_statistics) ... } "
             "-- conf/*.config closures cannot see lib/*.groovy classes, so "
             "ParamUtils.statisticsList is unreachable and ext.args must read the "
