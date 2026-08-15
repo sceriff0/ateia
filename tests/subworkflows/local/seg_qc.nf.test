@@ -157,7 +157,7 @@ nextflow_workflow {
                 ])
                 input[2] = Channel.empty()
                 input[3] = Channel.empty()
-                input[4] = 'valis'
+                input[4] = AdapterContract.of('valis')
                 """
             }
         }

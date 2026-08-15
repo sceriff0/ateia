@@ -189,6 +189,38 @@ class AdapterContract {
         return [method: method, emits: emits].asImmutable()
     }
 
+    /**
+     * The backend NAME out of a contract, refusing anything that is not one.
+     *
+     * THE SEAM'S TYPE CHECK, AND IT IS NOT DECORATION. This interface CHANGED SHAPE
+     * mid-refactor: SEG_QC used to take the bare method String and now takes the contract
+     * {@link #of} returns. Two branches edited different call sites of it, git merged both
+     * cleanly because they touched different regions of the file, and one caller was left
+     * passing `'valis'`. Groovy is dynamic, so a String does not fail where the mistake
+     * is: `contract.method` surfaced as `No such variable: method` a hundred lines into
+     * the consumer, with the whole QC path already wired and five assertions failing at
+     * once. Neither branch's own gate could have caught it; only the merged tree runs
+     * both halves.
+     *
+     * So every consumer asks HERE, first, and a mismatch is refused at the seam with a
+     * message naming what arrived and the one-line fix.
+     */
+    static String methodOf(def contract) {
+        if (contract instanceof CharSequence)
+            throw new IllegalArgumentException(
+                "Adapter contract expected, got the bare method name '${contract}'. " +
+                "Pass AdapterContract.of('${contract}') instead: this seam takes the " +
+                "backend's DECLARED emit cardinalities, not its name -- the name alone " +
+                "cannot say whether `transform` is joined per patient or per slide.")
+        if (!(contract instanceof Map) || !contract.method || !contract.emits)
+            throw new IllegalArgumentException(
+                "Adapter contract expected, got " +
+                (contract == null ? 'null' : "${contract.getClass().name}: ${contract}") +
+                ". Build one with AdapterContract.of(<method>); declared methods: " +
+                "${methods()}.")
+        return contract.method
+    }
+
     /** The declared cardinality of one emit, from a contract returned by {@link #of}. */
     static String cardinalityOf(Map contract, String emit) {
         def cardinality = contract?.emits?.get(emit)
@@ -212,8 +244,9 @@ class AdapterContract {
      * one on patient_id alone. Asking here rather than comparing the backend's name is
      * what makes a third backend's join shape follow from its declaration.
      */
-    static boolean isPerSlide(Map contract, String emit) {
-        def cardinality = cardinalityOf(contract, emit)
+    static boolean isPerSlide(def contract, String emit) {
+        methodOf(contract)  // refuse a bare method name HERE, not 100 lines downstream
+        def cardinality = cardinalityOf(contract as Map, emit)
         return cardinality == PER_SLIDE || cardinality == PER_MOVING_SLIDE
     }
 

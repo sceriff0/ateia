@@ -91,6 +91,15 @@ workflow SEG_QC {
     contract
 
     main:
+    // WHAT `contract` MUST BE, checked before anything is wired. It is an
+    // AdapterContract map, not the backend's name -- and this argument's shape CHANGED
+    // during the refactor that introduced the contract, so a caller left passing 'valis'
+    // is a live possibility rather than a hypothetical (one was: a merge combined a test
+    // written against the old String signature with the new one, cleanly, and the run
+    // died 100 lines below as `No such variable: method`). AdapterContract.methodOf
+    // refuses the String here, naming the fix.
+    def method = AdapterContract.methodOf(contract)
+
     // ── segment the native slides with THE RUN'S OWN SEGMENTER ──────────────────
     // SEGMENT itself, aliased. Not a second segmentation code path that happens to
     // agree with it: the alias is the same process body, the same lib/SegBackends
@@ -144,7 +153,6 @@ workflow SEG_QC {
     // stage_checkpoint] — and differ only in how `transform` and `stage_checkpoint` are
     // joined, because the two methods' transforms are keyed differently (per-slide vs
     // per-patient) and only VALIS has a stage checkpoint at all.
-    def method = contract.method
     if (AdapterContract.isPerSlide(contract, 'transform')) {
         // A per-slide transform (meta-keyed) — join it to the moving GeoJSON by
         // (patient_id, meta.id) so each slide is scored against its own transform. No

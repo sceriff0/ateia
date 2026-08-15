@@ -304,6 +304,99 @@ def test_seg_qc_branches_on_declared_cardinality_not_on_a_method_literal():
     )
 
 
+def _seg_qc_call_arguments(text: str) -> list[list[str]]:
+    """Top-level arguments of every `SEG_QC(...)` call in `text`, parens balanced.
+
+    Balanced rather than line-based on purpose: registration.nf's call is wrapped
+    across two lines, and the argument this guard cares about is the last one.
+    """
+    calls = []
+    for match in re.finditer(r"\bSEG_QC\s*\(", text):
+        depth, i = 0, match.end() - 1
+        while i < len(text):
+            if text[i] == "(":
+                depth += 1
+            elif text[i] == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+            i += 1
+        inner, args, depth, current = text[match.end() : i], [], 0, ""
+        for char in inner:
+            if char in "([{":
+                depth += 1
+            elif char in ")]}":
+                depth -= 1
+            if char == "," and depth == 0:
+                args.append(current.strip())
+                current = ""
+            else:
+                current += char
+        args.append(current.strip())
+        calls.append(args)
+    return calls
+
+
+def test_seg_qc_is_never_handed_a_bare_method_name():
+    """SEG_QC's 5th argument is a CONTRACT. A quoted backend name is the bug class.
+
+    This argument changed shape mid-refactor -- SEG_QC used to take the method
+    String, and takes `AdapterContract.of(method)` now. Two branches edited
+    different call sites, git merged both cleanly (different regions of one file),
+    and `tests/subworkflows/local/seg_qc.nf.test` was left passing `'valis'`. The
+    consequence was not a type error at the call: Groovy read `.method` off a
+    String and the run died as `No such variable: method` at seg_qc.nf:147, with
+    five assertions failing at once and nothing naming the real cause.
+
+    `AdapterContract.methodOf` now refuses that at the seam, but that check only
+    fires when the case RUNS. This is the cheap half, in the python gate: no
+    SEG_QC call site anywhere -- production or nf-test -- may pass a string literal
+    where the contract goes. A variable (`registration_contract`) is fine; a quote
+    is not.
+    """
+    production = sorted(
+        p
+        for p in ROOT.glob("subworkflows/**/*.nf")
+        if "SEG_QC(" in _strip_comments(p.read_text())
+    )
+    assert len(production) >= 2, (
+        f"only {len(production)} production SEG_QC call site(s) found -- the glob is "
+        "stale. registration.nf and add_cycle.nf both call it."
+    )
+
+    offenders = []
+    for path in production:
+        for args in _seg_qc_call_arguments(_strip_comments(path.read_text())):
+            assert len(args) == 5, (
+                f"{path.relative_to(ROOT)}: SEG_QC called with {len(args)} arguments, "
+                f"expected 5: {args}"
+            )
+            if args[4].startswith(("'", '"')):
+                offenders.append(f"{path.relative_to(ROOT)}: SEG_QC(..., {args[4]})")
+
+    # The nf-test file wires the same argument positionally, and is where the real
+    # defect landed -- so it is in scope, not excluded as "just a test".
+    test_file = ROOT / "tests" / "subworkflows" / "local" / "seg_qc.nf.test"
+    assignments = re.findall(r"input\[4\]\s*=\s*(.+)", test_file.read_text())
+    assert len(assignments) >= 6, (
+        f"only {len(assignments)} `input[4]` assignment(s) found in "
+        f"{test_file.relative_to(ROOT)} -- the scan is stale."
+    )
+    offenders += [
+        f"{test_file.relative_to(ROOT)}: input[4] = {value.strip()}"
+        for value in assignments
+        if value.strip().startswith(("'", '"'))
+    ]
+
+    assert not offenders, (
+        f"{len(offenders)} SEG_QC call site(s) pass a bare method NAME where the "
+        "adapter CONTRACT goes.\nUse AdapterContract.of(<method>): the name alone "
+        "cannot say whether `transform` is joined per patient or per slide, which "
+        "is the whole reason this argument stopped being a String.\n"
+        + "\n".join(offenders)
+    )
+
+
 def test_every_declared_backend_is_exercised_at_runtime():
     """A declaration that exists is not a declaration that is TRUE.
 

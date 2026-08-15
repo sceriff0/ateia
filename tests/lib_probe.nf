@@ -924,6 +924,52 @@ workflow {
     assert ChannelName.shellList([]) == ''
 
     // ------------------------------------------------------------------ //
+    // AdapterContract.methodOf -- the seam's type check
+    // ------------------------------------------------------------------ //
+    // SEG_QC's last argument USED to be the backend name and is now the contract.
+    // Groovy will not notice the difference: `contract.method` on a String threw
+    // `No such variable: method` from seg_qc.nf:147, a hundred lines past the caller
+    // that got it wrong, after a clean git merge combined a test written against the
+    // old signature with the new one. methodOf is where that is refused instead.
+    assert AdapterContract.methodOf(AdapterContract.of('valis')) == 'valis'
+    assert AdapterContract.methodOf(AdapterContract.of('tiled')) == 'tiled'
+
+    def bareNameRejected = false
+    try {
+        AdapterContract.methodOf('valis')
+    }
+    catch (IllegalArgumentException e) {
+        bareNameRejected = true
+        // The message must carry the FIX, not just the complaint: the caller's next
+        // action is to wrap the very name they passed.
+        assert e.message.contains("AdapterContract.of('valis')"),
+            "the refusal must name the one-line fix: ${e.message}"
+    }
+    assert bareNameRejected, 'methodOf must refuse a bare method name'
+
+    def nullRejected = false
+    try { AdapterContract.methodOf(null) }
+    catch (IllegalArgumentException e) { nullRejected = true }
+    assert nullRejected, 'methodOf must refuse null'
+
+    // A Map is not enough — a half-built contract (no `emits`) would reach the join
+    // and answer nothing, which is the failure the cardinality table exists to prevent.
+    def halfContractRejected = false
+    try { AdapterContract.methodOf([method: 'valis']) }
+    catch (IllegalArgumentException e) { halfContractRejected = true }
+    assert halfContractRejected, 'methodOf must refuse a map that is not a contract'
+
+    // The other entry point consumers use gets the same refusal, and still answers
+    // correctly for a real contract — the two shipped backends disagree here, which is
+    // the whole reason seg_qc.nf asks.
+    def perSlideRejected = false
+    try { AdapterContract.isPerSlide('tiled', 'transform') }
+    catch (IllegalArgumentException e) { perSlideRejected = true }
+    assert perSlideRejected, 'isPerSlide must refuse a bare method name too'
+    assert AdapterContract.isPerSlide(AdapterContract.of('tiled'), 'transform')
+    assert !AdapterContract.isPerSlide(AdapterContract.of('valis'), 'transform')
+
+    // ------------------------------------------------------------------ //
     // PanelSignature -- the within-patient slide identity
     // ------------------------------------------------------------------ //
     // In this pipeline a slide's identity WITHIN a patient is its channel set. Both
