@@ -8,7 +8,7 @@ nextflow_process {
     tag "modules_local"
     tag "quantify"
 
-    test("Should quantify single channel - stub") {
+    test("Should quantify a whole patient in one task - stub") {
 
         tag "stub"
         options "-stub"
@@ -17,11 +17,12 @@ nextflow_process {
             process {
                 """
                 input[0] = [
-                    [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA'], id: 'P001_DAPI', channel_name: 'DAPI'],
-                    file('$projectDir/tests/testdata/sample_DAPI.tif', checkIfExists: true),
+                    [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA'], id: 'P001', channel_name: 'DAPI'],
+                    [[name: 'DAPI', output: 'P001_sample_DAPI_quant.csv']],
+                    [file('$projectDir/tests/testdata/sample_DAPI.tif', checkIfExists: true)],
                     file('$projectDir/tests/testdata/P001_cell_mask.npy', checkIfExists: true),
                     file('$projectDir/tests/testdata/P001_cell_mask.tif', checkIfExists: true),
-                    // 5th slot: the REDSEA geometry. Always present so QUANTIFY has ONE
+                    // 6th slot: the REDSEA geometry. Always present so QUANTIFY has ONE
                     // input arity regardless of --redsea; assets/NO_REDSEA is the
                     // placeholder the module gates on by filename.
                     file('$projectDir/assets/NO_REDSEA', checkIfExists: true)
@@ -43,6 +44,48 @@ nextflow_process {
         }
     }
 
+    test("Should emit one CSV per marker from a single task - stub") {
+
+        // The task-count change itself. Three markers used to be three tasks and
+        // three single-file emissions; they are now ONE task emitting a LIST of
+        // three CSVs, named exactly as the fan-out named them.
+        tag "stub"
+        options "-stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA'], id: 'P001', channel_name: 'DAPI'],
+                    [[name: 'DAPI',  output: 'P001_sample_DAPI_quant.csv'],
+                     [name: 'PANCK', output: 'P001_sample_PANCK_quant.csv'],
+                     [name: 'SMA',   output: 'P001_sample_SMA_quant.csv']],
+                    [file('$projectDir/tests/testdata/sample_DAPI.tif',  checkIfExists: true),
+                     file('$projectDir/tests/testdata/sample_PANCK.tif', checkIfExists: true),
+                     file('$projectDir/tests/testdata/sample_SMA.tif',   checkIfExists: true)],
+                    file('$projectDir/tests/testdata/P001_cell_mask.npy', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_cell_mask.tif', checkIfExists: true),
+                    file('$projectDir/assets/NO_REDSEA', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                // ONE emission (one task), carrying THREE CSVs.
+                { assert process.out.individual_csv.size() == 1 },
+                { assert process.out.individual_csv.get(0).get(1).collect { file(it).name }.toSorted() ==
+                         ['P001_sample_DAPI_quant.csv',
+                          'P001_sample_PANCK_quant.csv',
+                          'P001_sample_SMA_quant.csv'] },
+                // One size-log row per PATIENT now, not one per marker.
+                { assert process.out.size_log.size() == 1 }
+            )
+        }
+    }
+
     test("Should produce CSV with expected columns - real") {
 
         tag "real"
@@ -60,13 +103,11 @@ nextflow_process {
             process {
                 """
                 input[0] = [
-                    [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA'], id: 'P001_DAPI', channel_name: 'DAPI'],
-                    file('$projectDir/tests/testdata/sample_DAPI.tif', checkIfExists: true),
+                    [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA'], id: 'P001', channel_name: 'DAPI'],
+                    [[name: 'DAPI', output: 'P001_sample_DAPI_quant.csv']],
+                    [file('$projectDir/tests/testdata/sample_DAPI.tif', checkIfExists: true)],
                     file('$projectDir/tests/testdata/P001_cell_mask.npy', checkIfExists: true),
                     file('$projectDir/tests/testdata/P001_cell_mask.tif', checkIfExists: true),
-                    // 5th slot: the REDSEA geometry. Always present so QUANTIFY has ONE
-                    // input arity regardless of --redsea; assets/NO_REDSEA is the
-                    // placeholder the module gates on by filename.
                     file('$projectDir/assets/NO_REDSEA', checkIfExists: true)
                 ]
                 """
@@ -99,6 +140,7 @@ nextflow_process {
             )
         }
     }
+
     test("Should produce non-negative intensity values with correct cell count - regression") {
 
         tag "real"
@@ -109,13 +151,11 @@ nextflow_process {
             process {
                 """
                 input[0] = [
-                    [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA'], id: 'P001_DAPI', channel_name: 'DAPI'],
-                    file('$projectDir/tests/testdata/sample_DAPI.tif', checkIfExists: true),
+                    [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA'], id: 'P001', channel_name: 'DAPI'],
+                    [[name: 'DAPI', output: 'P001_sample_DAPI_quant.csv']],
+                    [file('$projectDir/tests/testdata/sample_DAPI.tif', checkIfExists: true)],
                     file('$projectDir/tests/testdata/P001_cell_mask.npy', checkIfExists: true),
                     file('$projectDir/tests/testdata/P001_cell_mask.tif', checkIfExists: true),
-                    // 5th slot: the REDSEA geometry. Always present so QUANTIFY has ONE
-                    // input arity regardless of --redsea; assets/NO_REDSEA is the
-                    // placeholder the module gates on by filename.
                     file('$projectDir/assets/NO_REDSEA', checkIfExists: true)
                 ]
                 """
@@ -137,7 +177,6 @@ nextflow_process {
                 {
                     def csvFile = process.out.individual_csv.get(0).get(1)
                     def lines = path(csvFile).readLines()
-                    def header = lines[0].split(',')
                     def valueIdx = 1  // second column is the intensity
                     lines[1..-1].each { line ->
                         def val = line.split(',')[valueIdx] as double
@@ -153,6 +192,66 @@ nextflow_process {
                         assert label > 0, "Label must be > 0 (background excluded)"
                     }
                 }
+            )
+        }
+    }
+
+    test("Should invoke quantify.py ONCE for a patient's whole panel - rendered command") {
+
+        // THE assertion for the batching. Tagged `stub` so CI's blocking gate runs
+        // it, deliberately WITHOUT `options "-stub"`: `-stub` never evaluates a
+        // `script:` block, so a stub run cannot see how the command is built at all.
+        //
+        // Three things are pinned, and all three are what "one task per patient"
+        // means at the command level:
+        //   - exactly ONE quantify.py invocation exists for three markers;
+        //   - all three tiffs are passed to it, positionally paired with...
+        //   - ...all three DECLARED names and all three output filenames.
+        // A regression to the fan-out would render three commands; a regression to
+        // one command per marker inside a loop would render one command with one
+        // tiff. Both fail here.
+        tag "stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA'], id: 'P001', channel_name: 'DAPI'],
+                    [[name: 'DAPI',  output: 'P001_sample_DAPI_quant.csv'],
+                     [name: 'PANCK', output: 'P001_sample_PANCK_quant.csv'],
+                     [name: 'SMA',   output: 'P001_sample_SMA_quant.csv']],
+                    [file('$projectDir/tests/testdata/sample_DAPI.tif',  checkIfExists: true),
+                     file('$projectDir/tests/testdata/sample_PANCK.tif', checkIfExists: true),
+                     file('$projectDir/tests/testdata/sample_SMA.tif',   checkIfExists: true)],
+                    file('$projectDir/tests/testdata/P001_cell_mask.npy', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_cell_mask.tif', checkIfExists: true),
+                    file('$projectDir/assets/NO_REDSEA', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            def rendered = []
+            new File("$workDir").eachFileRecurse { f ->
+                if (f.name == '.command.sh' && f.text.contains('quantify.py')) { rendered << f.text }
+            }
+            assertAll(
+                { assert rendered.size() == 1,
+                    "expected exactly ONE rendered QUANTIFY command for the patient's three " +
+                    "markers, found ${rendered.size()}" },
+                { assert rendered[0].contains(
+                        '--channel_tiff sample_DAPI.tif sample_PANCK.tif sample_SMA.tif'),
+                    "rendered command: " + rendered[0] },
+                { assert rendered[0].contains("--channel-name 'DAPI' 'PANCK' 'SMA'"),
+                    "rendered command: " + rendered[0] },
+                { assert rendered[0].contains(
+                        '--output_file P001_sample_DAPI_quant.csv P001_sample_PANCK_quant.csv ' +
+                        'P001_sample_SMA_quant.csv'),
+                    "rendered command: " + rendered[0] },
+                // The mask is staged and read ONCE, not once per marker.
+                { assert rendered[0].count('--mask_file') == 1,
+                    "rendered command: " + rendered[0] }
             )
         }
     }
@@ -175,8 +274,9 @@ nextflow_process {
             process {
                 """
                 input[0] = [
-                    [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA'], id: 'P001_DAPI', channel_name: 'DAPI'],
-                    file('$projectDir/tests/testdata/sample_DAPI.tif', checkIfExists: true),
+                    [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA'], id: 'P001', channel_name: 'DAPI'],
+                    [[name: 'DAPI', output: 'P001_sample_DAPI_quant.csv']],
+                    [file('$projectDir/tests/testdata/sample_DAPI.tif', checkIfExists: true)],
                     file('$projectDir/tests/testdata/P001_cell_mask.npy', checkIfExists: true),
                     file('$projectDir/tests/testdata/P001_cell_mask.tif', checkIfExists: true),
                     file('$projectDir/assets/NO_REDSEA', checkIfExists: true)
@@ -211,8 +311,9 @@ nextflow_process {
             process {
                 """
                 input[0] = [
-                    [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA'], id: 'P001_CD3', channel_name: 'CD3'],
-                    file('$projectDir/tests/testdata/sample_DAPI.tif', checkIfExists: true),
+                    [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA'], id: 'P001', channel_name: 'CD3'],
+                    [[name: 'CD3', output: 'P001_sample_DAPI_quant.csv']],
+                    [file('$projectDir/tests/testdata/sample_DAPI.tif', checkIfExists: true)],
                     file('$projectDir/tests/testdata/P001_cell_mask.npy', checkIfExists: true),
                     file('$projectDir/tests/testdata/P001_cell_mask.tif', checkIfExists: true),
                     file('$projectDir/tests/testdata/P001_redsea.npz', checkIfExists: true)
@@ -246,7 +347,7 @@ nextflow_process {
         // <Statistic>" key that qupath-extension-flowpath parses case-sensitively, so
         // what it renders IS the published contract. Two things are pinned:
         //
-        //  - the value is meta.channel_name verbatim (`HLA.DR`), not the sanitised
+        //  - the value is the DECLARED name verbatim (`HLA.DR`), not the sanitised
         //    stem the tiff on disk carries (`HLA_DR`);
         //  - it is POSIX-quoted. Until identity started riding in meta, the value had
         //    already been through a filename allowlist, so nothing unquotable could
@@ -257,9 +358,9 @@ nextflow_process {
             process {
                 """
                 input[0] = [
-                    [patient_id: 'P001', channels: ['DAPI', 'HLA.DR'],
-                     id: 'P001_HLA_DR', channel_stem: 'HLA_DR', channel_name: 'HLA.DR'],
-                    file('$projectDir/tests/testdata/HLA_DR.tiff', checkIfExists: true),
+                    [patient_id: 'P001', channels: ['DAPI', 'HLA.DR'], id: 'P001', channel_name: 'HLA.DR'],
+                    [[name: 'HLA.DR', output: 'P001_HLA_DR_quant.csv']],
+                    [file('$projectDir/tests/testdata/HLA_DR.tiff', checkIfExists: true)],
                     file('$projectDir/tests/testdata/P001_cell_mask.npy', checkIfExists: true),
                     file('$projectDir/tests/testdata/P001_cell_mask.tif', checkIfExists: true),
                     file('$projectDir/assets/NO_REDSEA', checkIfExists: true)
@@ -279,7 +380,11 @@ nextflow_process {
                     "rendered command: " + rendered.join(' --- ') },
                 { assert rendered.every { !it.contains("--channel-name 'HLA_DR'") },
                     "the sanitised stem is still being published as the marker name: " +
-                    rendered.join(' --- ') }
+                    rendered.join(' --- ') },
+                // ...while the STEM still names the file, so nothing on disk grows a
+                // character the filesystem has to think about.
+                { assert rendered.every { it.contains('--output_file P001_HLA_DR_quant.csv') },
+                    "rendered command: " + rendered.join(' --- ') }
             )
         }
     }
@@ -298,9 +403,9 @@ nextflow_process {
             process {
                 """
                 input[0] = [
-                    [patient_id: 'P001', channels: ["O'Brien"],
-                     id: 'P001_O_Brien', channel_stem: 'O_Brien', channel_name: "O'Brien"],
-                    file('$projectDir/tests/testdata/sample_DAPI.tif', checkIfExists: true),
+                    [patient_id: 'P001', channels: ["O'Brien"], id: 'P001', channel_name: "O'Brien"],
+                    [[name: "O'Brien", output: 'P001_O_Brien_quant.csv']],
+                    [file('$projectDir/tests/testdata/sample_DAPI.tif', checkIfExists: true)],
                     file('$projectDir/tests/testdata/P001_cell_mask.npy', checkIfExists: true),
                     file('$projectDir/tests/testdata/P001_cell_mask.tif', checkIfExists: true),
                     file('$projectDir/assets/NO_REDSEA', checkIfExists: true)
@@ -339,8 +444,9 @@ nextflow_process {
             process {
                 """
                 input[0] = [
-                    [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA'], id: 'P001_DAPI', channel_name: 'DAPI'],
-                    file('$projectDir/tests/testdata/sample_DAPI.tif', checkIfExists: true),
+                    [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA'], id: 'P001', channel_name: 'DAPI'],
+                    [[name: 'DAPI', output: 'P001_sample_DAPI_quant.csv']],
+                    [file('$projectDir/tests/testdata/sample_DAPI.tif', checkIfExists: true)],
                     file('$projectDir/tests/testdata/P001_cell_mask.npy', checkIfExists: true),
                     file('$projectDir/tests/testdata/P001_cell_mask.tif', checkIfExists: true),
                     file('$projectDir/assets/NO_REDSEA', checkIfExists: true)
@@ -379,8 +485,9 @@ nextflow_process {
             process {
                 """
                 input[0] = [
-                    [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA'], id: 'P001_CD3', channel_name: 'CD3'],
-                    file('$projectDir/tests/testdata/sample_DAPI.tif', checkIfExists: true),
+                    [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA'], id: 'P001', channel_name: 'CD3'],
+                    [[name: 'CD3', output: 'P001_sample_DAPI_quant.csv']],
+                    [file('$projectDir/tests/testdata/sample_DAPI.tif', checkIfExists: true)],
                     file('$projectDir/tests/testdata/P001_cell_mask.npy', checkIfExists: true),
                     file('$projectDir/tests/testdata/P001_cell_mask.tif', checkIfExists: true),
                     file('$projectDir/tests/testdata/P001_redsea.npz', checkIfExists: true)

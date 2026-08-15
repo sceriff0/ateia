@@ -75,6 +75,16 @@ nextflow_workflow {
                 { assert workflow.success },
                 // One grouped entry per patient, not per split image.
                 { assert workflow.out.grouped_csv.size() == 2 },
+                // ONE QUANTIFY TASK PER PATIENT. This used to be one task per
+                // (patient x marker) -- five tasks for this fixture (3 + 2), each
+                // re-staging and re-reading the same whole-cell mask and each asking
+                // for a flat 128 GB. The grouping now happens BEFORE QUANTIFY, so the
+                // patient's whole panel is one invocation; bin/quantify.py's
+                // load->compute->discard loop is what keeps that from multiplying
+                // peak memory by the marker count (tests/test_quantify_batch.py).
+                { assert workflow.trace.tasks().findAll {
+                    it.name =~ /(^|:)QUANTIFY\b/
+                }.size() == 2 },
                 { assert workflow.out.grouped_csv.collect { it[0].patient_id }.toSorted() ==
                          ['P001', 'P002'] },
                 // The grouped meta is re-keyed to the patient (id == patient_id), which is
@@ -242,8 +252,11 @@ nextflow_workflow {
             def out = workflow.stdout.join('\n') + workflow.stderr.join('\n')
             assertAll(
                 { assert workflow.failed },
-                // Names the grouping that refused...
-                { assert out.contains('QUANTIFY_MARKERS: the per-patient marker CSVs feeding MERGE_QUANT_CSVS') },
+                // Names the grouping that refused. The grouping moved from AFTER
+                // QUANTIFY (per-patient marker CSVs) to BEFORE it (per-patient marker
+                // tiffs) when QUANTIFY became one task per patient; it is the same
+                // gather, of the same items, one process earlier.
+                { assert out.contains('QUANTIFY_MARKERS: the per-patient marker tiffs feeding QUANTIFY') },
                 // ...the meta key to inject...
                 { assert out.contains('channels_count') },
                 // ...and the patient whose meta was short.
@@ -291,7 +304,14 @@ nextflow_workflow {
                 { assert workflow.success },
                 { assert workflow.out.grouped_csv.size() == 1 },
                 { assert workflow.out.grouped_csv[0][1].collect { file(it).name }.toSorted() ==
-                         ['P001_sample_DAPI_quant.csv', 'P001_sample_PANCK_quant.csv'] }
+                         ['P001_sample_DAPI_quant.csv', 'P001_sample_PANCK_quant.csv'] },
+                // The duplicate is now dropped BEFORE quantification, not after it.
+                // Under the per-marker fan-out the repeat was quantified anyway --
+                // three tasks, one of whose CSVs was then discarded by `.unique{}` --
+                // so the wasted task was invisible from the emitted values alone.
+                { assert workflow.trace.tasks().findAll {
+                    it.name =~ /(^|:)QUANTIFY\b/
+                }.size() == 1 }
             )
         }
     }
