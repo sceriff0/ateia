@@ -28,8 +28,7 @@ def test_stamped_id():
 
 DENSE_PHENO_KEYS = {
     "_pheno.free_mask", "_pheno.ambiguous", "_pheno.n_candidates", "_pheno.depth",
-    "_pheno.empty_type", "_pheno.violated_constraint_id", "_pheno.provenance",
-    "_pheno.density_bin",
+    "_pheno.violated_constraint_id", "_pheno.density_bin",
 }
 
 
@@ -45,7 +44,7 @@ def _prow(**over):
     return row
 
 
-def test_pheno_measurements_are_the_eight_dense_keys_plus_sparse_scores():
+def test_pheno_measurements_are_the_six_dense_keys_plus_sparse_scores():
     ms = eg.pheno_extra_measurements(_prow(), ["CD3"])
     names = {m["name"] for m in ms}
     assert DENSE_PHENO_KEYS <= names
@@ -224,3 +223,32 @@ def test_backward_compat_no_panel_supplied_is_unchanged(tmp_path):
     # tests/test_export_geojson.py::test_label_is_emitted_as_a_measurement now
     # asserts exactly that for this same no-panel case.
     assert "label" in names
+
+
+def test_constant_and_class_determined_fields_are_not_emitted():
+    """`provenance` is a CONSTANT on export -- only the consumer ever writes 1 -- and
+    `empty_type` is fully determined by classification.name. Neither is something a
+    human filters on, so both were ~80 bytes per cell of pure duplication."""
+    names = {m["name"] for m in eg.pheno_extra_measurements(_prow(), ["CD3"])}
+    assert "_pheno.provenance" not in names
+    assert "_pheno.empty_type" not in names
+
+
+def test_panel_model_does_not_carry_the_feasible_set(tmp_path):
+    """feasible_set is O(2**|lineage|) -- 72% of this file at 12 lineage markers and
+    unbounded as the panel grows -- and no consumer reads it. It stays in
+    model_config.json, which is where the classifier reads it from."""
+    cfg = json.loads((Path("tests/testdata/model_config_min.json")).read_text())
+    assert cfg["feasible_set"], "fixture must actually have one, or this proves nothing"
+    out = tmp_path / "panel_model.json"
+    eg.write_panel_model_sidecar(cfg, str(out))
+    side = json.loads(out.read_text())
+    assert "feasible_set" not in side
+    # the tree, palette and constraint table still carry what the consumer needs
+    assert side["phenotypes"] and side["palette"] and side["constraint_table"]
+    # Measure the saving directly rather than against a magic ratio: the field's own
+    # size IS the saving, and it grows as O(2**|lineage|) while the rest does not.
+    with_it = len(json.dumps({**side, "feasible_set": cfg["feasible_set"]}))
+    without = len(out.read_text())
+    assert without < with_it
+    assert (with_it - without) / with_it > 0.25, (with_it, without)

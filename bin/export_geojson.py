@@ -130,11 +130,20 @@ def pheno_extra_measurements(prow: Dict, lineage: List[str]) -> List[Dict]:
             free_mask |= 1 << i
     out.append({"name": pheno_key("free_mask"), "value": free_mask})
 
+    # `ambiguous` and `n_candidates` are derivable from the score block, but are
+    # materialized anyway: QuPath's measurement table and filter UI cannot count sparse
+    # keys, and these two are exactly what a human triages a slide on.
     n_candidates = int(_num(prow.get("n_candidates"), 0))
     out.append({"name": pheno_key("ambiguous"), "value": 1 if n_candidates > 1 else 0})
     out.append({"name": pheno_key("n_candidates"), "value": n_candidates})
     out.append({"name": pheno_key("depth"), "value": int(_num(prow.get("ancestor_depth"), -1))})
-    for field in ("empty_type", "violated_constraint_id", "provenance", "density_bin"):
+    # `empty_type` and `provenance` are deliberately NOT emitted. empty_type is fully
+    # determined by classification.name (Conflict -> 1, Artefact -> 2, else 0), and
+    # provenance is a CONSTANT here -- the exporter only ever writes 0, since "manual"
+    # is set by the consumer at reconciliation time. Neither is derivable-but-useful
+    # like the two above: no human filters on them, so shipping them was ~80 bytes per
+    # cell of pure duplication (~76 MiB at a million cells).
+    for field in ("violated_constraint_id", "density_bin"):
         out.append({"name": pheno_key(field), "value": int(_num(prow.get(field), 0))})
 
     # Sparse: a key is present only when its value is > 0, so the set of present keys IS
@@ -178,7 +187,12 @@ def write_panel_model_sidecar(cfg: Dict, out_path: str) -> None:
         "lineage_order": cfg.get("lineage_order", []),
         "outcome_names": cfg.get("outcome_names", []),
         "phenotypes": cfg.get("phenotypes", []),
-        "feasible_set": cfg.get("feasible_set", []),
+        # NOTE: `feasible_set` is deliberately NOT projected. It is the compiler's
+        # enumeration of every satisfiable lineage pattern -- O(2**|lineage|) entries,
+        # 72% of this file at 12 lineage markers and unbounded as the panel grows -- and
+        # the consumer never reads it: the phenotype tree, the palette and the flattened
+        # constraint table below carry everything it needs. It stays in
+        # model_config.json, which is where the classifier reads it from.
         "markers": {m: {"role": v.get("role"), "compartment": v.get("compartment")}
                     for m, v in cfg.get("markers", {}).items()},
         "palette": cfg.get("palette", {}),

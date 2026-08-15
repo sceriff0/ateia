@@ -292,7 +292,10 @@ nextflow_process {
                   assert pm.contract.measurement_prefix == '_pheno.'
                   assert pm.contract.calibration_sidecar == 'calibration_model.json'
                   assert pm.lineage_order instanceof List
-                  assert pm.outcome_names.contains('Ambiguous') },
+                  assert pm.outcome_names.contains('Ambiguous')
+                  // O(2**|lineage|) and unread by any consumer -- it stays in
+                  // model_config.json, which is where the classifier reads it.
+                  assert !pm.containsKey('feasible_set') },
                 // Per-marker collapsed/measurement survive the projection -- without
                 // them the sign reconstruction reads the wrong bin or the wrong column.
                 { def cm = new groovy.json.JsonSlurper().parseText(path(process.out.calibration_model.get(0).get(1)).text)
@@ -315,8 +318,12 @@ nextflow_process {
                   gj.features.each { f ->
                       def n = f.properties.measurements.collect { m -> m.name } as Set
                       assert n.containsAll(['_pheno.free_mask','_pheno.ambiguous','_pheno.n_candidates',
-                                            '_pheno.depth','_pheno.empty_type','_pheno.violated_constraint_id',
-                                            '_pheno.provenance','_pheno.density_bin'])
+                                            '_pheno.depth','_pheno.violated_constraint_id',
+                                            '_pheno.density_bin'])
+                      // empty_type is determined by classification.name and provenance is
+                      // a constant on export; neither is shipped per cell.
+                      assert !n.contains('_pheno.empty_type')
+                      assert !n.contains('_pheno.provenance')
                   } }
             )
         }
