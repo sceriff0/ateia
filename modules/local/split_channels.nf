@@ -27,9 +27,22 @@ process SPLIT_CHANNELS {
     script:
     def args = task.ext.args ?: ''
     def ref_flag = is_reference ? "--is-reference" : ""
-    // Pass channel names from metadata if available and valid
-    def channel_args = (meta.channels && meta.channels instanceof List && !meta.channels.isEmpty()) ?
-        "--channels ${meta.channels.join(' ')}" : ""
+    // Pass channel names from metadata if available and valid.
+    //
+    // QUOTED, one argument per channel. `--channels ${meta.channels.join(' ')}` was
+    // unquoted, so a marker named 'CD3 alpha' arrived as the two channels 'CD3' and
+    // 'alpha' -- which does not fail, it shifts every later channel's NAME onto the
+    // wrong pixels.
+    //
+    // --file-stems carries the FILENAMES for those channels, computed once here by
+    // ChannelName so the `stub:` block below can compute the identical list. The two
+    // paths used to disagree outright: the real split sanitised in Python and the stub
+    // sanitised not at all, so a declared 'HLA.DR' produced HLA_DR.tiff for real and
+    // HLA.DR.tiff under -stub -- and -stub is the only mode CI's blocking gate runs.
+    def have_channels = meta.channels && meta.channels instanceof List && !meta.channels.isEmpty()
+    def channel_args = have_channels ?
+        "--channels ${ChannelName.shellList(meta.channels)} " +
+        "--file-stems ${ChannelName.shellList(ChannelName.fileStems(meta.channels))}" : ""
     // The REAL drop-the-nuclear-channel decision is made in Python, so the marker list
     // has to travel there — a hardcoded 'DAPI' in split_multichannel.py would keep a
     // CELLTOX channel that CsvUtils.countChannelsPerPatient (same MarkerUtils rule) has
@@ -43,7 +56,7 @@ process SPLIT_CHANNELS {
     echo "${task.process},${meta.patient_id},${registered_image.name},\${input_bytes}" > ${meta.patient_id}_${registered_image.simpleName}.SPLIT_CHANNELS.size.csv
 
     echo "Sample: ${meta.patient_id}"
-    echo "Channels: ${(meta.channels && meta.channels instanceof List) ? meta.channels.join(', ') : 'Will read from OME metadata'}"
+    echo "Channels: "${ChannelName.shellQuote(have_channels ? meta.channels.join(', ') : 'Will read from OME metadata')}
 
     split_multichannel.py \\
         ${registered_image} \\
@@ -63,7 +76,10 @@ process SPLIT_CHANNELS {
     // params.nuclear_markers so this no longer hardcodes 'DAPI' — and, critically,
     // CsvUtils.countChannelsPerPatient derives the postprocessing groupKey sizes from
     // the SAME method, so the stub's output count matches the size the group expects.
-    def out_channels = MarkerUtils.splitOutputChannels(meta.channels, is_reference, params.nuclear_markers)
+    // ChannelName.outputStems is MarkerUtils.splitOutputChannels' answer expressed as
+    // FILENAMES -- the same nuclear rule, one owner, mapped through the same sanitiser
+    // the script: path hands to Python above.
+    def out_channels = ChannelName.outputStems(meta.channels, is_reference, params.nuclear_markers)
     // When meta.channels is empty (e.g. ADD_CYCLE's SPLIT_PRIOR_PYRAMID, which
     // reads channel names from OME-XML in REAL mode only), still emit a single
     // placeholder so the mandatory `*.tiff` output binds under -stub.

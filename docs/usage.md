@@ -148,6 +148,12 @@ independently and in parallel.
       `params.nuclear_markers`** (default `DAPI`, `CELLTOX`; matched
       case-insensitively as a substring — a DAPI-free CELLTOX row is valid;
       `CONVERT_IMAGE` moves the matched channel to channel 0).
+    - A channel name here is the marker's **identity**: it is the string that
+      reaches QuPath/FlowPath as `<marker>` in `"<marker>: <Compartment>:
+      <Statistic>"`, spelled exactly as written. Punctuation survives into the
+      key (`HLA.DR: Cell: Median`) even though the intermediate per-marker file
+      on disk is sanitised to `HLA_DR.tiff` — see
+      [the measurement-key contract](outputs.md#the-measurement-key-contract).
     - The image column depends on `--start`.
 
 The required columns change with the entry point, because each stage consumes a

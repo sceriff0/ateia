@@ -50,8 +50,11 @@ patient's cells.
 
 These flow through `merge_quant_csvs` → `export_geojson` / `export_spatialdata`
 unchanged, so they reach QuPath/FlowPath as ordinary measurements under the same
-`"<marker>: <Compartment>: <Statistic>"` grammar. A consumer that does not know
-the two new statistic names simply does not select them.
+`"<marker>: <Compartment>: <Statistic>"` grammar, with `<marker>` spelled exactly
+as the samplesheet declares it (see
+[the measurement-key contract](outputs.md#the-measurement-key-contract)). A
+consumer that does not know the two new statistic names simply does not select
+them.
 
 Three things it deliberately does **not** produce:
 

@@ -63,7 +63,17 @@ RAW_USE_RE = re.compile(r"(?:\w+\.)?params\.nuclear_markers\s*(?:\.\w|\[)")
 # whose stated reason nothing checks is how these guards go quiet, so
 # `test_checkpoint_read_really_routes_to_csvutils` below asserts that funnel exists
 # rather than taking this comment's word for it.
-ROUTERS = ("MarkerUtils.", "CsvUtils.", "Checkpoint.read")
+# `ChannelName.outputStems` is a router for the same reason: it takes nuclear_markers
+# only to ask `MarkerUtils.isNuclear` which channels a slide keeps, then maps that
+# answer through its own sanitiser. It is SPLIT_CHANNELS' stub's one read of the
+# parameter. `test_channelname_outputstems_really_routes_to_markerutils` pins the
+# delegation instead of trusting this comment.
+ROUTERS = (
+    "MarkerUtils.",
+    "CsvUtils.",
+    "Checkpoint.read",
+    "ChannelName.outputStems",
+)
 # Rule B fallback: a bare argument line inside a multi-line call.
 BARE_ARG_RE = re.compile(r"^\(?\s*(?:\w+\.)?params\.nuclear_markers\s*[,)]?\s*$")
 # How far back a bare argument line may look for its callee.
@@ -188,4 +198,32 @@ def test_checkpoint_read_really_routes_to_csvutils():
         f"{len(missing)} of those call(s) with the value bound from opts:\n"
         + "\n".join(missing)
         + "\nEither restore the routing or take Checkpoint.read out of ROUTERS."
+    )
+
+
+# The one MarkerUtils call ChannelName.outputStems must keep making. It exists so the
+# stub of SPLIT_CHANNELS drops exactly the channels the real split drops -- the same
+# rule CsvUtils.countChannelsPerPatient sizes the patient's groupTuple from.
+CHANNELNAME_FUNNEL = "MarkerUtils.isNuclear(ch, nuclearMarkers)"
+
+
+def test_channelname_outputstems_really_routes_to_markerutils():
+    """The reason `ChannelName.outputStems` is in ROUTERS, checked not asserted.
+
+    outputStems answers "which channels does this slide write, as filenames". The
+    filename half is ChannelName's own; the WHICH half must stay MarkerUtils'. If it
+    grew its own `'DAPI' in name` test, Rule B would keep passing on the strength of a
+    name while the stub and the real split disagreed about which channels exist -- and
+    an under-count on that grouping aborts the run (see quantify_markers.nf).
+
+    Watched fail: replacing the isNuclear call with a literal DAPI test fails here on
+    that exact string while every other test in this file stays green.
+    """
+    src = (ROOT / "lib" / "ChannelName.groovy").read_text()
+    at = src.index("static List<String> outputStems(")
+    body = src[at:]
+    assert CHANNELNAME_FUNNEL in body, (
+        "ChannelName.outputStems is in ROUTERS because it hands nuclear_markers to "
+        f"MarkerUtils.isNuclear. It no longer makes that call ({CHANNELNAME_FUNNEL}). "
+        "Either restore the routing or take ChannelName.outputStems out of ROUTERS."
     )

@@ -103,10 +103,26 @@ workflow QUANTIFY_MARKERS {
             // subworkflows/local/adapters/valis_adapter.nf:82-88 for why
             // that matters and why toSorted() (not sort()) is mandatory
             // wherever meta.channels is read.
+            //
+            // A marker has TWO names and only one of them is its identity.
+            // `channel_name` is the DECLARED name -- the samplesheet's spelling,
+            // recovered from meta.channels by lib/ChannelName.groovy -- because it
+            // fills the <marker> slot of the "<marker>: <Compartment>: <Statistic>"
+            // key that qupath-extension-flowpath parses case-sensitively (G5).
+            // `channel_stem` is the sanitised filename form and is used for `id`,
+            // i.e. for the per-marker CSV's name, and for nothing else.
+            //
+            // This used to be `channel_name: tiff.baseName`: identity read back OFF
+            // DISK, already mangled by the filename allowlist. A panel declaring
+            // 'HLA.DR' published 'HLA_DR: Cell: Median' -- a key its own consumer
+            // never looks for, since bin/phenotype_cells.py builds the lookup from
+            // the DECLARED name and, on a miss, degrades to an all-zero column in
+            // silence.
             tiff_list.collect { tiff ->
                 def channel_meta = meta + [
                     id: "${meta.patient_id}_${tiff.baseName}",
-                    channel_name: tiff.baseName
+                    channel_stem: tiff.baseName,
+                    channel_name: ChannelName.declaredFor(tiff.baseName, meta.channels)
                 ]
                 [channel_meta, tiff]
             }

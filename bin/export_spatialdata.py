@@ -46,6 +46,7 @@ from measurements import (  # noqa: E402
     MORPHOLOGY_COLS,
     STATISTICS,
     identify_marker_columns,
+    measurement_key,
 )
 from pixel_convention import corner_to_centre  # noqa: E402
 
@@ -69,7 +70,11 @@ def parse_measurement_key(key: str) -> Tuple[str, Optional[str], Optional[str]]:
     """
     for comp in COMPARTMENTS:
         for stat in STATISTICS:
-            suffix = f": {comp}: {stat}"
+            # The suffix comes from the PRODUCER's own builder, so the parser
+            # cannot drift from the grammar it is reading. A drift here does not
+            # raise -- it silently returns (key, None, None), i.e. "this marker
+            # has no compartment", which is why it must not be a second spelling.
+            suffix = measurement_key("", comp, stat)
             if key.endswith(suffix):
                 marker = key[: -len(suffix)].strip()
                 if marker:

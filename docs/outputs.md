@@ -173,7 +173,7 @@ results/                              # = --outdir
 │   │   ├── morphology.csv            # EXTRACT_CELL_PROPERTIES
 │   │   ├── contours.json
 │   │   └── nuclei/                   # morphology.csv, contours.json — EXTRACT_NUCLEI_PROPERTIES
-│   ├── split_channels/               # <MARKER>.tiff, one per marker — SPLIT_CHANNELS
+│   ├── split_channels/               # <marker-file-stem>.tiff, one per marker — SPLIT_CHANNELS
 │   │   └── prior/                    # add_cycle only: prior pyramid re-split
 │   ├── quantify/                     # <id>_quant.csv, per-marker, pre-merge — QUANTIFY
 │   ├── quantification/               # merged_quant.csv      — MERGE_QUANT_CSVS
@@ -353,6 +353,7 @@ Written to `--trace_dir` (default `.trace`, **independent of `--outdir`**) when
 
 | Vocabulary | Values | Governed by |
 |---|---|---|
+| `<marker>` | The marker name **exactly as the samplesheet's `channels` column declares it** | `lib/ChannelName.groovy` — the declared name is carried in `meta.channel_name`, never re-derived from a filename |
 | `<Compartment>` | `Nucleus`, `Cytoplasm`, `Cell` | `--quantify_compartments` — when `false`, only `Cell` is produced |
 | `<Statistic>` | `Median`, `Mean`, `Sum`, `REDSEA`, each optionally suffixed ` Z` or ` RobustZ` | Whichever `--quantify_statistics` names (default `Median`). `Median`/`Mean`/`Sum` appear per compartment; `REDSEA` is whole-cell only. The `Z` variants are standardised across one patient's cells. |
 
@@ -374,6 +375,40 @@ kept for backward compatibility with FlowPath's bare-key fast path.
     `bin/utils/measurements.py` is the single producer of the string; the
     `COMPARTMENTS` and `STATISTICS` tuples are the single vocabulary. Changing
     any of the three requires a coordinated change on the FlowPath side.
+
+### `<marker>` is the DECLARED name, not the filename
+
+The `<marker>` slot carries the samplesheet's spelling. A marker also has a
+**file stem** — the same name reduced to `[A-Za-z0-9-_]`, with `_` for anything
+else — and that form names files and nothing else:
+
+| Declared in `channels` | File written by `SPLIT_CHANNELS` | Published measurement key |
+|---|---|---|
+| `CD3` | `CD3.tiff` | `CD3: Cell: Median` |
+| `HLA.DR` | `HLA_DR.tiff` | `HLA.DR: Cell: Median` |
+| `pS6(240/244)` | `pS6_240_244_.tiff` | `pS6(240/244): Cell: Median` |
+
+Two declared names that reduce to one stem (`CD3.105` and `CD3_105`) are
+disambiguated **by position in the declared list** — `CD3_105`, then
+`CD3_105_2` — so the filename a marker gets does not depend on which slide is
+being split or on whether the run is a stub.
+
+!!! warning "Breaking change: keys for markers with punctuation"
+    Mirage used to rebuild the key from the **file stem**, so a panel declaring
+    `HLA.DR` published `HLA_DR: Cell: Median`. It now publishes
+    `HLA.DR: Cell: Median`.
+
+    **Only markers containing a character outside `[A-Za-z0-9-_]` are
+    affected** — `CD3`, `Ki-67` and `CD8_beta` are unchanged. The grammar itself
+    (one space after each colon, case-sensitive) has not changed; only which
+    marker string fills the first slot.
+
+    A FlowPath project, a gating panel, or a phenotyping model config that was
+    written against the old sanitised spelling must be re-pointed at the declared
+    one. In the other direction the change is a fix, not a break:
+    `bin/phenotype_cells.py` always built its lookup from the **declared** panel
+    name, so an affected marker previously missed the column and fell through to
+    its degraded all-zero path in silence.
 
 Cytoplasm is computed as `Cell − Nucleus` by subtraction, per cell. A cell with
 no nuclear overlap yields an empty Nucleus/Cytoplasm compartment, which is

@@ -3,6 +3,13 @@
 Split multichannel TIFF images into individual single-channel TIFF files.
 The nuclear/fiducial channel is only saved from the reference image.
 
+A marker has TWO names and they must not be confused: the DECLARED name (the
+samplesheet's spelling, e.g. ``HLA.DR``) is the marker's IDENTITY and is what fills the
+``<marker>`` slot of the downstream measurement key, while the FILE STEM (``HLA_DR``) is
+the sanitised form and names files only. This script writes stems and never reports one
+back as an identity; ``lib/ChannelName.groovy`` owns the mapping and passes it in with
+``--file-stems`` so the Nextflow ``stub:`` path cannot name a channel differently.
+
 Which channel counts as nuclear comes from ``--nuclear-markers`` (SPLIT_CHANNELS passes
 ``params.nuclear_markers``), resolved by the shared ``utils.metadata.is_nuclear`` rule --
 not by a hardcoded ``"DAPI"``. That matters beyond configurability: Nextflow pre-computes
@@ -31,6 +38,7 @@ import tifffile
 
 sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
+from channel_name import file_stems as compute_file_stems
 from image_utils import ensure_dir, normalize_image_dimensions
 from logger import configure_logging, get_logger
 from metadata import extract_channel_names_from_ome, is_nuclear
@@ -49,6 +57,7 @@ def split_multichannel_tiff(
     channel_names=None,
     nuclear_markers=None,
     pixel_size=0.325,
+    file_stems=None,
 ):
     """
     Split a multichannel TIFF into single-channel TIFFs.
@@ -67,6 +76,14 @@ def split_multichannel_tiff(
     nuclear_markers : sequence of str, optional
         Marker names that identify the nuclear/fiducial channel
         (``params.nuclear_markers``). Defaults to ``DEFAULT_NUCLEAR_MARKERS``.
+    file_stems : list of str, optional
+        Filesystem-safe stems, ONE PER ENTRY OF ``channel_names``, already
+        computed by ``lib/ChannelName.groovy`` (SPLIT_CHANNELS passes
+        ``--file-stems``). Supplying them is what makes that process's
+        ``script:`` and ``stub:`` paths write the same filename for a channel
+        whose declared name needs sanitising. When absent -- standalone use, or
+        names read from OME metadata -- the same rule is applied here via
+        ``bin/utils/channel_name.py``.
 
     Returns
     -------
@@ -110,6 +127,20 @@ def split_multichannel_tiff(
         else:
             channel_names = channel_names[:n_channels]
 
+    # The declared name is the marker's IDENTITY (it fills the <marker> slot of the
+    # FlowPath measurement key); the stem only names a file. Resolve the mapping ONCE,
+    # over the full declared list, so a collision's disambiguation suffix does not
+    # depend on which channels this particular slide happens to write.
+    if file_stems is not None and len(file_stems) == len(channel_names):
+        stems = list(file_stems)
+    else:
+        if file_stems is not None:
+            logger.warning(
+                f"  --file-stems has {len(file_stems)} entries for {len(channel_names)} "
+                "channels; recomputing locally rather than pairing them up wrong"
+            )
+        stems = compute_file_stems(channel_names)
+
     # Create output directory
     ensure_dir(output_dir)
 
@@ -130,7 +161,7 @@ def split_multichannel_tiff(
     saved_paths = []
     skipped_count = 0
 
-    for i, name in enumerate(channel_names):
+    for i, (name, clean_name) in enumerate(zip(channel_names, stems)):
         # The one nuclear-marker rule: case-insensitive SUBSTRING match against the
         # configured markers, shared with convert_image.py (which already moved this
         # channel to index 0) and mirrored by lib/MarkerUtils.groovy. An exact match
@@ -144,22 +175,12 @@ def split_multichannel_tiff(
             skipped_count += 1
             continue
 
-        # Clean the channel name for use as filename
-        clean_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in name)
-
-        # Detect filename collisions from sanitization (e.g. "CD3-105" and "CD3_105")
-        candidate_path = os.path.join(output_dir, f"{clean_name}.tiff")
-        if os.path.exists(candidate_path):
-            suffix = 2
-            while os.path.exists(
-                os.path.join(output_dir, f"{clean_name}_{suffix}.tiff")
-            ):
-                suffix += 1
-            logger.warning(
-                f"  Filename collision: '{name}' sanitized to '{clean_name}' which already exists, "
-                f"using '{clean_name}_{suffix}' instead"
-            )
-            clean_name = f"{clean_name}_{suffix}"
+        # `clean_name` is the FILE STEM for this channel, already disambiguated
+        # against every other declared channel by `compute_file_stems`. It is not
+        # re-derived here and it is never fed back into the marker's identity:
+        # the declared `name` is what reaches the measurement key.
+        if clean_name != name:
+            logger.info(f"  '{name}' -> {clean_name}.tiff (filename only)")
 
         output_path = os.path.join(output_dir, f"{clean_name}.tiff")
 
@@ -218,6 +239,16 @@ def main():
     )
 
     parser.add_argument(
+        "--file-stems",
+        nargs="+",
+        default=None,
+        help="Filesystem-safe stems, one per --channels entry, computed by "
+        "lib/ChannelName.groovy. SPLIT_CHANNELS always passes these so its script: "
+        "and stub: paths write identical filenames; omit them and the same rule is "
+        "applied locally.",
+    )
+
+    parser.add_argument(
         "--pixel-size",
         dest="pixel_size",
         type=float,
@@ -242,6 +273,7 @@ def main():
         args.channels,
         args.nuclear_markers,
         args.pixel_size,
+        args.file_stems,
     )
 
     logger.info("=" * 80)

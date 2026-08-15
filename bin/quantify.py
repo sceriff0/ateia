@@ -32,6 +32,7 @@ from measurements import (
     NORMALIZATIONS,
     REDSEA_STATISTIC,
     STATISTICS,
+    measurement_key,
     split_statistic,
     zscore,
 )
@@ -332,7 +333,12 @@ def compute_compartment_intensities(
                     # Standardised across THIS PATIENT's cells for this marker and
                     # compartment -- the population a QUANTIFY task already holds.
                     values = zscore(values, robust=(norm == " RobustZ"))
-                out[f"{channel_name}: {comp}: {name}"] = values
+                # measurements.measurement_key is the ONE producer of the
+                # "<marker>: <Compartment>: <Statistic>" grammar (G5, consumed
+                # case-sensitively by qupath-extension-flowpath). `channel_name`
+                # is the DECLARED marker name -- quantify_markers.nf reads it
+                # from meta, not from the tiff's sanitised filename stem.
+                out[measurement_key(channel_name, comp, name)] = values
 
 
     return pd.DataFrame(out)
@@ -575,7 +581,9 @@ def run_quantification(
             for norm in NORMALIZATIONS:
                 name = base + norm
                 if name in resolved_statistics:
-                    cols += [f"{channel_name}: {c}: {name}" for c in base_comps]
+                    cols += [
+                        measurement_key(channel_name, c, name) for c in base_comps
+                    ]
         empty_df = pd.DataFrame(columns=cols)
         empty_df.to_csv(output_path, index=False)
 
