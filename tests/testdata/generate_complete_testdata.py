@@ -692,6 +692,19 @@ for ch_name in ["DAPI", "PANCK", "SMA"]:
     tifffile.imwrite(OUT_DIR / f"sample_{ch_name}.tif", img, photometric="minisblack")
 print("  Created single-channel sample TIFs")
 
+# 6h-bis. The SANITISED-STEM fixture. Its name is deliberately the file stem
+# `ChannelName.fileStem` produces for the DECLARED marker `HLA.DR` -- a '.' is
+# outside the `[A-Za-z0-9-_]` filename allowlist. It exists so a test can hand
+# QUANTIFY_MARKERS a tiff whose stem is NOT the declared name and assert the
+# published measurement key still carries `HLA.DR`. Any fixture whose stem
+# equals its declared name cannot see that difference at all.
+tifffile.imwrite(
+    OUT_DIR / "HLA_DR.tiff",
+    np.random.randint(100, 10000, size=(128, 128), dtype=np.uint16),
+    photometric="minisblack",
+)
+print("  Created HLA_DR.tiff (sanitised stem of the declared marker 'HLA.DR')")
+
 # 6i. Channels text file
 with open(OUT_DIR / "sample_channels.txt", "w") as f:
     f.write("DAPI\n")

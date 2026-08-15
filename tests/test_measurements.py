@@ -110,20 +110,51 @@ def test_measurement_key_exact_literal_string():
     assert m.measurement_key("CD3", "Nucleus", "Median") == "CD3: Nucleus: Median"
 
 
-def test_measurement_key_matches_quantify_producer_output():
-    """The shared builder must reproduce quantify.py's own key exactly."""
+def test_quantify_calls_the_shared_builder_rather_than_agreeing_with_it(monkeypatch):
+    """SINGLE producer, not two implementations that happen to agree.
+
+    This replaced `test_measurement_key_matches_quantify_producer_output`, which
+    asserted that `measurement_key()` reproduced a key `quantify.py` built for
+    itself with an f-string. Two implementations agreeing today is exactly what a
+    contract with a sibling repo cannot rely on -- and that assertion was the
+    admission the extraction never landed: `measurement_key` had ZERO production
+    callers when it was written.
+
+    Redefining the builder must move the producer's output. If quantify.py goes
+    back to spelling the grammar itself, the substituted builder is ignored and
+    the columns come out in the real format -- which is the failure below.
+    """
     import numpy as np
 
     quantify = _load_bin_module("quantify")
+    monkeypatch.setattr(
+        quantify, "measurement_key", lambda mk, comp, stat: f"<{mk}|{comp}|{stat}>"
+    )
 
     cell_mask = np.array([[1, 1], [2, 2]], dtype=np.int32)
     channel = np.array([[10.0, 20.0], [30.0, 40.0]])
     df = quantify.compute_compartment_intensities(
         cell_mask, None, channel, "CD3", statistics=["Median"]
     )
-    expected_key = m.measurement_key("CD3", "Cell", "Median")
-    assert expected_key in df.columns
-    assert expected_key == "CD3: Cell: Median"
+    assert list(df.columns) == ["label", "CD3", "<CD3|Cell|Median>"]
+
+
+def test_export_spatialdata_parser_derives_its_suffix_from_the_builder(monkeypatch):
+    """The parser is the same grammar read backwards, so it gets it from one place.
+
+    `parse_measurement_key` used to rebuild `f": {comp}: {stat}"` itself -- a
+    fourth copy of the separators, on the CONSUMING side, where a divergence
+    reads as "this marker has no compartment" rather than as an error.
+    """
+    esd = _load_bin_module("export_spatialdata")
+    monkeypatch.setattr(
+        esd, "measurement_key", lambda mk, comp, stat: f"{mk}<|{comp}|{stat}"
+    )
+    assert esd.parse_measurement_key("PanCK<|Cytoplasm|Sum") == (
+        "PanCK",
+        "Cytoplasm",
+        "Sum",
+    )
 
 
 def test_measurement_key_matches_export_spatialdata_parser():

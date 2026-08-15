@@ -295,4 +295,51 @@ nextflow_workflow {
             )
         }
     }
+
+    test("the marker's DECLARED name reaches the key while the STEM names the file") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                outdir = "$outputDir"
+            }
+            workflow {
+                """
+                // The samplesheet declares `HLA.DR`. A '.' is outside the filename
+                // allowlist, so the tiff on disk is HLA_DR.tiff -- and identity used
+                // to be read back OFF THAT FILENAME (`channel_name: tiff.baseName`),
+                // so the published measurement key read `HLA_DR: Cell: Median` for a
+                // panel that declared `HLA.DR`. The declared name now rides in meta
+                // and the stem is used only for filenames.
+                input[0] = Channel.of(
+                    [[patient_id: 'P001', id: 'P001_mov1',
+                      channels: ['DAPI', 'HLA.DR'], channels_count: 1],
+                     [file('$projectDir/tests/testdata/HLA_DR.tiff', checkIfExists: true)]]
+                )
+                input[1] = Channel.of(
+                    ['P001', file('$projectDir/tests/testdata/P001_cell_mask.tif',   checkIfExists: true),
+                             file('$projectDir/tests/testdata/P001_nuclei_mask.tif', checkIfExists: true)]
+                )
+                input[2] = [compartments: true, statistics: ['Median'], embedMasks: false]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.out.grouped_csv.size() == 1 },
+                // THE assertion. meta.channel_name is what modules/local/quantify.nf
+                // renders into `--channel-name`, i.e. the <marker> slot of the
+                // FlowPath key.
+                { assert workflow.out.grouped_csv[0][0].channel_name == 'HLA.DR' },
+                // ...and the file stem still names the file, so nothing on disk grows
+                // a character the filesystem has to think about.
+                { assert workflow.out.grouped_csv[0][1].collect { file(it).name } ==
+                         ['P001_HLA_DR_quant.csv'] }
+            )
+        }
+    }
 }

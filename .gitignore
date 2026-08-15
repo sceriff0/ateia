@@ -155,6 +155,7 @@ tests/testdata/sample_reg_residuals.csv
 tests/testdata/sample_DAPI.tif
 tests/testdata/sample_PANCK.tif
 tests/testdata/sample_SMA.tif
+tests/testdata/HLA_DR.tiff
 tests/testdata/expected/channels_3ch.txt
 tests/testdata/expected/dims_128x128.txt
 tests/testdata/expected/max_dims_128.txt

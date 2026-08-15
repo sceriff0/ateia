@@ -743,5 +743,65 @@ workflow {
         assert omitted, "PatientGroup must require the '${opt}' option"
     }
 
+    // ------------------------------------------------------------------ //
+    // ChannelName — the declared name vs the file stem
+    // ------------------------------------------------------------------ //
+    // A marker has TWO forms and exactly one owner for the mapping between them:
+    // the DECLARED name (the samplesheet's spelling, which fills the <marker>
+    // slot of the FlowPath measurement key) and the FILE STEM (the sanitised,
+    // filesystem-safe form). Identity used to be recovered from the stem, so a
+    // declared `HLA.DR` published as `HLA_DR: Cell: Median`.
+    //
+    // THE TABLE BELOW IS SHARED WITH PYTHON. bin/utils/channel_name.py is the
+    // standalone/OME-metadata half of the same rule and tests/test_channel_identity.py
+    // holds it to `SANITISER_TABLE` — the same eight rows, same answers. Add a row
+    // here and there, or the two halves start drifting again.
+    assert ChannelName.fileStem('DAPI')          == 'DAPI'
+    assert ChannelName.fileStem('HLA.DR')        == 'HLA_DR'
+    assert ChannelName.fileStem('CD3-105')       == 'CD3-105'
+    assert ChannelName.fileStem('CD8_beta')      == 'CD8_beta'
+    assert ChannelName.fileStem('Ki-67')         == 'Ki-67'
+    assert ChannelName.fileStem('CD3 alpha')     == 'CD3_alpha'
+    assert ChannelName.fileStem('pS6(240/244)')  == 'pS6_240_244_'
+    assert ChannelName.fileStem('\u03b2-catenin')   == '_-catenin'
+
+    // Collisions are numbered by POSITION IN THE DECLARED LIST, not by what is
+    // already on disk. Disk-order numbering gave a different answer on a reference
+    // slide (nuclear channel kept) than on a moving slide (nuclear channel dropped),
+    // and a different answer again in the stub, which writes a different set of files.
+    assert ChannelName.fileStems(['CD3.105', 'CD3-105', 'CD3_105']) ==
+           ['CD3_105', 'CD3-105', 'CD3_105_2']
+    assert ChannelName.fileStems(['DAPI', 'CD3.105', 'CD3_105']) ==
+           ['DAPI', 'CD3_105', 'CD3_105_2']
+    assert ChannelName.fileStems([]) == []
+
+    // The reverse lookup quantify_markers.nf uses instead of `tiff.baseName`.
+    assert ChannelName.declaredFor('HLA_DR', ['DAPI', 'HLA.DR']) == 'HLA.DR'
+    assert ChannelName.declaredFor('DAPI',   ['DAPI', 'HLA.DR']) == 'DAPI'
+    // Disambiguated collisions resolve back to the RIGHT declared name, not the first.
+    assert ChannelName.declaredFor('CD3_105_2', ['CD3.105', 'CD3-105', 'CD3_105']) == 'CD3_105'
+    // No declared list (ADD_CYCLE's SPLIT_PRIOR_PYRAMID reads names from OME-XML in
+    // REAL mode only, so meta.channels is empty there): fall back to the stem rather
+    // than throwing. The stem is still the best name available, and it is what the
+    // old code used unconditionally.
+    assert ChannelName.declaredFor('HLA_DR', [])   == 'HLA_DR'
+    assert ChannelName.declaredFor('HLA_DR', null) == 'HLA_DR'
+    // A stem that matches nothing declared is likewise returned unchanged.
+    assert ChannelName.declaredFor('CD8', ['DAPI', 'HLA.DR']) == 'CD8'
+
+    // outputStems mirrors MarkerUtils.splitOutputChannels — same nuclear rule, one
+    // owner — but returns STEMS, which is what SPLIT_CHANNELS' stub must touch.
+    assert ChannelName.outputStems(['DAPI', 'HLA.DR'], true,  ['DAPI']) == ['DAPI', 'HLA_DR']
+    assert ChannelName.outputStems(['DAPI', 'HLA.DR'], false, ['DAPI']) == ['HLA_DR']
+    assert ChannelName.outputStems([], false, ['DAPI']) == []
+
+    // shellQuote is what stops `--channels ${meta.channels.join(' ')}` word-splitting a
+    // marker whose name contains a space. It must survive a single quote too, since a
+    // naive "'" + it + "'" would end the quoted string and hand bash the rest.
+    assert ChannelName.shellQuote('CD3 alpha') == "'CD3 alpha'"
+    assert ChannelName.shellQuote("O'Brien")   == "'O'\\''Brien'"
+    assert ChannelName.shellList(['DAPI', 'CD3 alpha']) == "'DAPI' 'CD3 alpha'"
+    assert ChannelName.shellList([]) == ''
+
     println "LIB PROBE: all assertions passed"
 }

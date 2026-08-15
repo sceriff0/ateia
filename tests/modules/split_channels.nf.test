@@ -233,6 +233,91 @@ nextflow_process {
         }
     }
 
+    test("Stub names a sanitised channel by its FILE STEM, not its declared name - stub") {
+
+        // RED before the fix: the stub applied NO sanitiser at all, so it touched
+        // `HLA.DR.tiff` while the real split wrote `HLA_DR.tiff`. Two paths, two
+        // filenames for one channel -- and `-stub` is the only mode CI's blocking
+        // gate ever runs, so the divergence was invisible there.
+        tag "stub"
+        options "-stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [
+                        patient_id: 'P001',
+                        channels: ['DAPI', 'HLA.DR'],
+                        is_reference: true
+                    ],
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    true
+                ]
+                """
+            }
+        }
+
+        then {
+            assert process.success
+            with(process.out.channels) {
+                def files = get(0).get(1)
+                def fileList = (files instanceof List) ? files : [files]
+                assert fileList.collect { file(it).name }.sort() == ['DAPI.tiff', 'HLA_DR.tiff']
+            }
+        }
+    }
+
+    test("Should pass declared channel names QUOTED, plus their file stems - rendered command") {
+
+        // Tagged `stub` so CI's blocking gate collects it, deliberately WITHOUT
+        // `options "-stub"`: a stub run never evaluates a `script:` block, so no
+        // stub assertion can see a rendered command.
+        //
+        // Two defects pinned here, both invisible to every other case in this file:
+        //
+        //  1. `--channels ${meta.channels.join(' ')}` was UNQUOTED, so a marker named
+        //     'CD3 alpha' reached argparse as the two channels 'CD3' and 'alpha' --
+        //     silently shifting every subsequent channel's NAME onto the wrong pixels.
+        //  2. The stems are now computed ONCE, in Groovy, and handed to the Python
+        //     split. That is what makes the `script:` and `stub:` paths agree by
+        //     construction rather than by two sanitisers happening to match.
+        tag "stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [
+                        patient_id: 'P001',
+                        channels: ['DAPI', 'HLA.DR', 'CD3 alpha']
+                    ],
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    true
+                ]
+                """
+            }
+        }
+
+        then {
+            def rendered = []
+            new File("$workDir").eachFileRecurse { f ->
+                if (f.name == '.command.sh' && f.text.contains('split_multichannel.py')) {
+                    rendered << f.text
+                }
+            }
+
+            assertAll(
+                { assert rendered.size() >= 1,
+                    "no rendered SPLIT_CHANNELS .command.sh found under the task work dir" },
+                { assert rendered.every { it.contains("--channels 'DAPI' 'HLA.DR' 'CD3 alpha'") },
+                    "rendered command: " + rendered.join(' --- ') },
+                { assert rendered.every { it.contains("--file-stems 'DAPI' 'HLA_DR' 'CD3_alpha'") },
+                    "rendered command: " + rendered.join(' --- ') }
+            )
+        }
+    }
+
     test("Should render --pixel-size from params - rendered command") {
 
         // Tagged `stub` so CI's blocking `nf-test test --tag stub` gate collects it, but
