@@ -34,8 +34,10 @@ include { PREPROCESSING            } from './preprocess'
 // used to call VALIS_ADAPTER directly and rebuild the surrounding wiring by hand.
 include { REGISTER_PATIENT         } from './register_patient'
 include { EXTRACT_MASK_SERIES      } from '../../modules/local/extract_mask_series'
-include { EXTRACT_CELL_PROPERTIES  } from '../../modules/local/extract_cell_properties'
-include { EXTRACT_NUCLEI_PROPERTIES } from '../../modules/local/extract_nuclei_properties'
+// ONE process, two aliases -- DSL2 refuses to invoke a process twice in one workflow.
+// See subworkflows/local/segmentation.nf for the same pair.
+include { EXTRACT_PROPERTIES as EXTRACT_CELL_PROPERTIES   } from '../../modules/local/extract_properties'
+include { EXTRACT_PROPERTIES as EXTRACT_NUCLEI_PROPERTIES } from '../../modules/local/extract_properties'
 include { SPLIT_CHANNELS           } from '../../modules/local/split_channels'
 include { SPLIT_CHANNELS as SPLIT_PRIOR_PYRAMID } from '../../modules/local/split_channels'
 include { MERGE_QUANT_CSVS         } from '../../modules/local/merge_quant_csvs'
@@ -257,7 +259,10 @@ workflow ADD_CYCLE {
     ch_prior_cell_mask = ch_prior_assets.map { _pid, prior ->
         [prior.post_meta + [is_reference: true], prior.cell_mask]
     }
-    EXTRACT_CELL_PROPERTIES(ch_prior_cell_mask)
+    // Sentinel in the reference_mask slot, '' output subdirectory -- identical to
+    // segmentation.nf's cell invocation. See modules/local/extract_properties.nf.
+    def no_reference = file("${projectDir}/assets/NO_REFERENCE_MASK", checkIfExists: true)
+    EXTRACT_CELL_PROPERTIES(ch_prior_cell_mask.map { meta, m -> [meta, m, no_reference] }, '')
     ch_contours = EXTRACT_CELL_PROPERTIES.out.contours.map { meta, j -> [meta.patient_id, j] }
 
     // Nucleus contours (re-keyed to cell labels) — only when compartments enabled.
@@ -266,7 +271,7 @@ workflow ADD_CYCLE {
         ch_nuclei_props_in = ch_prior_assets.map { _pid, prior ->
             [prior.post_meta, prior.nuclei_mask, prior.cell_mask]
         }
-        EXTRACT_NUCLEI_PROPERTIES(ch_nuclei_props_in)
+        EXTRACT_NUCLEI_PROPERTIES(ch_nuclei_props_in, Layout.NUCLEI_SUBDIR)
         ch_nucleus_contours = EXTRACT_NUCLEI_PROPERTIES.out.contours.map { meta, j -> [meta.patient_id, j] }
     }
 

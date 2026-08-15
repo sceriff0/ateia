@@ -131,10 +131,12 @@ ALLOWED_LINES = {
         # rewritten WARP_SEG_QC ext.args comment added 5 net lines above it;
         # 727 -> 786 when REDSEA added redseaMarkerList() near the top of the file
         # and a REDSEA_MATRIX withName: block above QUANTIFY's; -> 807 when the
-        # z-score work added a comment line to quantifyStatistics(). Re-pin,
-        # do not widen. (Re-pin from the file, not by guessing:
+        # z-score work added a comment line to quantifyStatistics(); 807 -> 803 when
+        # EXTRACT_CELL_PROPERTIES' and EXTRACT_NUCLEI_PROPERTIES' two withName: blocks
+        # collapsed into one. Re-pin, do not widen. (Re-pin from the file, not by
+        # guessing:
         # `grep -n "quantifyStatistics(params.quantify_statistics)" conf/modules.config`.)
-        807: (
+        803: (
             "ext.args = { ... quantifyStatistics(params.quantify_statistics) ... } "
             "-- conf/*.config closures cannot see lib/*.groovy classes, so "
             "ParamUtils.statisticsList is unreachable and ext.args must read the "

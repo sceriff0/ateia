@@ -171,11 +171,9 @@ nextflow_process {
                 // Published filename, not an internal detail: the size log is
                 // published next to morphology.csv.
                 { assert rendered.every { it.contains('P001.EXTRACT_PROPERTIES.size.csv') },
-                    "size-log filename is not derived from the invoking process name: "
-                    + rendered.join(' --- ') },
+                    "size-log filename is not derived from the invoking process name: " + rendered.join(' --- ') },
                 { assert rendered.every { !it.contains('/P001.EXTRACT_PROPERTIES.size.csv') },
-                    "cell invocation writes its size log into a subdirectory: "
-                    + rendered.join(' --- ') }
+                    "cell invocation writes its size log into a subdirectory: " + rendered.join(' --- ') }
             )
         }
     }
@@ -189,10 +187,16 @@ nextflow_process {
         when {
             process {
                 """
+                // tests/testdata/P001_nuclei_mask.tif is a 0-byte placeholder, so this
+                // case uses two REAL label masks instead: P002's stands in for the
+                // nuclear mask and P001's is the reference. The re-keying maths is not
+                // what is under assertion here (tests/unit/test_compartment_export.py
+                // owns that) -- the rendered command is -- but running for real keeps
+                // this case from depending on a failing task to produce a .command.sh.
                 input[0] = [
                     [patient_id: 'P001', channels: ['DAPI', 'PANCK', 'SMA']],
-                    file('$projectDir/tests/testdata/P001_nuclei_mask.tif', checkIfExists: true),
-                    file('$projectDir/tests/testdata/P001_cell_mask.tif', checkIfExists: true)
+                    file('$projectDir/tests/testdata/P002_cell_mask.npy', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_cell_mask.npy', checkIfExists: true)
                 ]
                 input[1] = 'nuclei'
                 """
@@ -213,21 +217,18 @@ nextflow_process {
                 // Without this flag the emitted contours.json is keyed by NUCLEUS
                 // label, and EXPORT_GEOJSON's identity lookup attaches every nucleus
                 // polygon to the wrong cell.
-                { assert rendered.every { it.contains('--reference_mask P001_cell_mask.tif') },
+                { assert rendered.every { it.contains('--reference_mask P001_cell_mask.npy') },
                     "nucleus invocation lost --reference_mask: " + rendered.join(' --- ') },
-                { assert rendered.every { it.contains('--mask_file P001_nuclei_mask.tif') },
+                { assert rendered.every { it.contains('--mask_file P002_cell_mask.npy') },
                     "nucleus invocation does not name the nuclear mask: " + rendered.join(' --- ') },
                 { assert rendered.every { it.contains('--outdir nuclei') },
-                    "nucleus invocation does not write into its subdirectory: "
-                    + rendered.join(' --- ') },
+                    "nucleus invocation does not write into its subdirectory: " + rendered.join(' --- ') },
                 { assert rendered.every { it.contains('mkdir -p nuclei') },
-                    "nucleus invocation does not create its subdirectory: "
-                    + rendered.join(' --- ') },
+                    "nucleus invocation does not create its subdirectory: " + rendered.join(' --- ') },
                 { assert rendered.every { it.contains('--simplify_tolerance 1.0') },
                     "merged withName block no longer supplies ext.args: " + rendered.join(' --- ') },
                 { assert rendered.every { it.contains('nuclei/P001.EXTRACT_PROPERTIES.size.csv') },
-                    "the size log is not written beside the outputs it describes: "
-                    + rendered.join(' --- ') }
+                    "the size log is not written beside the outputs it describes: " + rendered.join(' --- ') }
             )
         }
     }

@@ -1,0 +1,5 @@
+No reference mask. modules/local/extract_properties.nf tests for this filename to decide
+whether to pass --reference_mask to bin/extract_cell_properties.py. Staging a sentinel
+keeps the process at ONE input arity for both of its aliases -- the same idiom
+assets/NO_REDSEA serves for modules/local/quantify.nf. See
+subworkflows/local/segmentation.nf and subworkflows/local/add_cycle.nf.

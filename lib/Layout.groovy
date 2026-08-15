@@ -224,6 +224,25 @@ class Layout {
         'pyramid',
     ].asImmutable()
 
+    /**
+     * The producer subdirectory the NUCLEUS invocation of EXTRACT_PROPERTIES writes into,
+     * one level below the 'cell_properties' kind: `<pid>/cell_properties/nuclei/`.
+     *
+     * NOT a kind of its own (see PUBLISHED_KINDS above -- conf/modules.config's `path:`
+     * stops at 'cell_properties'; this segment arrives because publishDir preserves a
+     * task-relative subdirectory on copy). It lives here because it is a segment of a
+     * PUBLISHED PATH, and this class owns those -- the same reason no caller may
+     * hand-write `<outdir>/<pid>/<kind>`.
+     *
+     * It exists as a named constant so ONE value can be handed to BOTH sides at once:
+     * subworkflows/local/segmentation.nf passes it to the producer as its `outsubdir`
+     * input AND to the five-argument publishedPath below when it records the checkpoint
+     * row. Before, the producer wrote into a `nuclei/` directory it hardcoded, and the
+     * consumer read the name back off the task directory via producerSubdir -- a
+     * producer contorted to make a consumer-side string heuristic work.
+     */
+    static final String NUCLEI_SUBDIR = 'nuclei'
+
     /** Reject an unknown publish kind at the call site rather than at path-resolution time. */
     static String requireKind(String kind) {
         if (!PUBLISHED_KINDS.contains(kind))
@@ -273,10 +292,39 @@ class Layout {
      * subdirectory is the DEFAULT and the only behaviour; there is deliberately no
      * basename-only variant to pick by mistake. tests/checkpoint_manifest.nf.test
      * asserts the consequence: no checkpoint row ever names a missing file.
+     *
+     * This four-argument form INFERS the subdirectory. Prefer the five-argument form
+     * below wherever the caller already knows it -- inference is what forced
+     * EXTRACT_PROPERTIES's nucleus invocation to organise its task directory around a
+     * downstream string test in the first place.
      */
     static String publishedPath(def outdir, def patientId, String kind, def file) {
-        def sub = producerSubdir(file)
-        def rel = sub ? "${sub}/${basename(file)}" : basename(file)
+        return publishedPath(outdir, patientId, kind, producerSubdir(file), file)
+    }
+
+    /**
+     * Like {@link #publishedPath}, but TOLD the producer subdirectory instead of reading
+     * it back off the file's parent directory. Pass '' for a file emitted straight into
+     * the task directory.
+     *
+     * The four-argument form's `producerSubdir` is a consumer-side heuristic over task
+     * directory NAMES: it is right whenever the producer's task layout happens to encode
+     * the answer, which means a producer that wants its outputs one level down has to
+     * arrange its own working directory so that the heuristic can find out. That is the
+     * coupling backwards. When the caller already holds the fact -- as
+     * subworkflows/local/segmentation.nf does, since it passes the very same
+     * {@link #NUCLEI_SUBDIR} to the producer as an input -- stating it is strictly better
+     * than re-deriving it, and it stays right for a producer whose task layout does not
+     * happen to mirror its published layout.
+     *
+     * The inferring form remains for the callers that genuinely cannot be told: REGISTER's
+     * `registered_slides/`, TILED_STITCH's `registered/` and EXPORT_GEOJSON's `export/`
+     * are set by `pattern:`/`path()` declarations in conf/modules.config and the module,
+     * neither of which the workflow code recording the path can see, and
+     * {@link #publishedOrAsIs} is built on the same inference.
+     */
+    static String publishedPath(def outdir, def patientId, String kind, String subdir, def file) {
+        def rel = subdir ? "${subdir}/${basename(file)}" : basename(file)
         return "${patientDir(outdir, patientId, kind)}/${rel}"
     }
 

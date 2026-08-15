@@ -425,7 +425,16 @@ DOCS_RESOURCES = ROOT / "docs" / "resources.md"
 
 # Process names in docs/resources.md that are Nextflow ALIASES of another
 # process, so conf/modules.config configures them under the original name.
-ALIASES = {"SEG_QC_SEGMENT": "SEGMENT"}
+ALIASES = {
+    "SEG_QC_SEGMENT": "SEGMENT",
+    # EXTRACT_CELL_PROPERTIES / EXTRACT_NUCLEI_PROPERTIES are two aliases of the
+    # single modules/local/extract_properties.nf process. Both keep a doc-table
+    # row because both are what an operator sees in a trace, in the size-log
+    # rollup and in a `withName:` override; the row's numbers are checked against
+    # EXTRACT_PROPERTIES' real config block.
+    "EXTRACT_CELL_PROPERTIES": "EXTRACT_PROPERTIES",
+    "EXTRACT_NUCLEI_PROPERTIES": "EXTRACT_PROPERTIES",
+}
 
 # `withLabel: 'name' { ... }` -- the opening brace is needed to brace-match the
 # body, exactly as WITH_NAME_OPEN_RE does for withName blocks.

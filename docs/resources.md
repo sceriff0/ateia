@@ -20,7 +20,7 @@ A process's `cpus` / `memory` / `time` come from **either** a resource `label`
 inert and misleading; those have been removed. What remains is three cases:
 
 <div class="gate">
-  <div class="g"><div class="k">case 1</div><div class="v">withName owns all three</div><div class="d">No label. The block sets cpus, memory and time. 16 processes.</div></div>
+  <div class="g"><div class="k">case 1</div><div class="v">withName owns all three</div><div class="d">No label. The block sets cpus, memory and time. 15 processes.</div></div>
   <div class="g"><div class="k">case 2</div><div class="v">label owns all three</div><div class="d">The withName block, if any, sets only publishDir / ext.args. 6 processes.</div></div>
   <div class="g"><div class="k">case 3</div><div class="v">partial override</div><div class="d">withName sets one or two fields; a label supplies the rest. 6 processes.</div></div>
 </div>
@@ -162,6 +162,14 @@ constraint.
 | `EXTRACT_CELL_PROPERTIES` | `1` | `64 GB × attempt` | `12.h × attempt` | `withName` |
 | `EXTRACT_NUCLEI_PROPERTIES` | `1` | `64 GB × attempt` | `12.h × attempt` | `withName` |
 | `EXTRACT_MASK_SERIES` | `2` | `32 GB × attempt` | `2.h × attempt` | `process_low` |
+
+`EXTRACT_CELL_PROPERTIES` and `EXTRACT_NUCLEI_PROPERTIES` are **one process under two aliases** —
+`modules/local/extract_properties.nf`'s `EXTRACT_PROPERTIES`, which
+`subworkflows/local/segmentation.nf` includes twice. They share a single
+`withName: 'EXTRACT_PROPERTIES|EXTRACT_CELL_PROPERTIES|EXTRACT_NUCLEI_PROPERTIES'`
+block, so the two rows above cannot disagree with each other; both are listed
+because both names are what a trace, a size-log row and a `withName:` override
+see. They count as **one** process in the case-1 tally at the top of this page.
 
 `SEGMENT` asks for 8 CPUs so a CPU-only path — and the CPU-bound label expansion
 and Dask tiling either side of inference — stays tolerable. GPU inference is

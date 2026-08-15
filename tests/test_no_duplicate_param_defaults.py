@@ -229,9 +229,8 @@ ARGPARSE_DEFAULT_ALLOWLIST = {
     "extract_cell_properties.py:--outdir": {
         "reason": (
             "Not actually the same 'outdir' as nextflow.config's: "
-            "modules/local/extract_cell_properties.nf:43 and "
-            "modules/local/extract_nuclei_properties.nf:42 (which reuses this "
-            "same script) both hardcode `--outdir .` -- a literal, not "
+            "modules/local/extract_properties.nf renders `--outdir .` (or the "
+            "caller's own output subdirectory) -- a literal either way, never "
             "`${params.outdir}` -- because Nextflow already isolates each "
             "task in its own work dir; `publishDir` (driven by the real, "
             "pipeline-wide params.outdir) copies the results out afterward. "
