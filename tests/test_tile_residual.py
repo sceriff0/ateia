@@ -42,18 +42,23 @@ def test_recovers_a_known_subpixel_shift_as_the_control_displacement():
     row_s, col_s = 2.5, -3.0  # move ref content by (row=+2.5, col=-3.0) to make mov
     mov = ndi_shift(ref, shift=(row_s, col_s), order=1, mode="reflect")
 
-    dx, dy, tre = residual_displacement(ref, mov, upsample=20)
+    dx, dy, tre, error = residual_displacement(ref, mov, upsample=20)
 
     # (dx, dy) is the displacement that maps a moving coord back onto the reference:
     # ref = mov - (col_s, row_s)  ->  F = (-col_s, -row_s)
     assert dx == pytest.approx(-col_s, abs=0.15)
     assert dy == pytest.approx(-row_s, abs=0.15)
+    # a genuine match is confident; the gating this feeds lives in
+    # tests/test_tile_residual_confidence.py
+    assert error < 0.5, f"a real shift between two crops of one field scored error={error:.4f}"
 
 
 def test_local_tre_is_the_magnitude_of_the_residual_and_is_small_when_aligned():
     ref = _textured()
-    dx, dy, tre = residual_displacement(ref, ref.copy(), upsample=20)
+    dx, dy, tre, error = residual_displacement(ref, ref.copy(), upsample=20)
     # an already-aligned tile has ~zero residual displacement and ~zero local TRE
     assert abs(dx) < 0.1 and abs(dy) < 0.1
     assert tre == pytest.approx(np.hypot(dx, dy), abs=1e-6)
     assert tre < 0.1
+    # a tile correlated against itself is the most confident match there is
+    assert error == pytest.approx(0.0, abs=1e-6), f"self-correlation scored error={error!r}"

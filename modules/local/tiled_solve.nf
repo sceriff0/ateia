@@ -2,7 +2,9 @@
  * TILED_SOLVE - STARE fan-out step 3/4: assemble the manifest from per-tile control points.
  *
  * One cheap per-slide reduction (kilobytes): gathers every tile's control point and writes the
- * self-contained transform manifest (M0 + TRE-gated mesh) the stitch and reg_qc=2 warper consume.
+ * self-contained transform manifest (M0 + gated mesh) the stitch and reg_qc=2 warper consume.
+ * Control points are gated on correlation CONFIDENCE (--max-error) and range (--max-disp)
+ * before the TRE gate, so background and section-edge tiles never reach the deformation mesh.
  */
 process TILED_SOLVE {
     tag "${meta.patient_id}:${meta.channels.join('_')}"
@@ -25,11 +27,15 @@ process TILED_SOLVE {
     def prefix    = "${meta.patient_id}_${meta.channels.join('_')}"
     def slidename = meta.channels.join('_')
     def gate      = params.reg_tiled_gate_tre
+    // --max-error / --max-disp: the confidence and range gates on the control points, from
+    // conf/modules.config's ext.args for this process.
+    def args      = task.ext.args ?: ''
     """
     tiled_solve.py \\
         --m0 ${m0} \\
         --controls 'ctrl_*/*_ctrl.json' \\
         --gate-tre ${gate} \\
+        ${args} \\
         --moving-name '${slidename}' \\
         --out-manifest ${prefix}_manifest.json \\
         --out-tre ${prefix}_tre.json

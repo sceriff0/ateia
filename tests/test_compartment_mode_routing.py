@@ -130,10 +130,11 @@ ALLOWED_LINES = {
         # SEG_QC_GEOJSON's block shrank; 722 -> 727 when feat/lsa-cell-pairing's
         # rewritten WARP_SEG_QC ext.args comment added 5 net lines above it;
         # 727 -> 736 when the three top-level config helper functions were inlined
-        # for Nextflow 26's strict parser. Re-pin, do not widen. (Re-pin from the
-        # file, not by guessing:
+        # for Nextflow 26's strict parser; 736 -> 744 when TILED_SOLVE gained the
+        # ext.args block carrying its confidence/range gates. Re-pin, do not
+        # widen. (Re-pin from the file, not by guessing:
         # `grep -n "params.expanded_quantification ?" conf/modules.config`.)
-        736: (
+        744: (
             "ext.args = { params.expanded_quantification ? '--expanded' : "
             "'' } -- conf/*.config closures cannot see lib/*.groovy classes, "
             "so ext.args must read params raw here."

@@ -235,6 +235,22 @@
                     "default": 1.0,
                     "minimum": 0
                 },
+                "reg_tiled_max_error": {
+                    "type": "number",
+                    "description": "STARE only: confidence gate. Drop a mesh control point whose phase-correlation error exceeds this (0 = perfect match, ~1 = no shared structure). Keeps background and section-edge tiles out of the deformation mesh.",
+                    "default": 0.99,
+                    "minimum": 0,
+                    "maximum": 1
+                },
+                "reg_tiled_max_disp": {
+                    "type": [
+                        "number",
+                        "null"
+                    ],
+                    "description": "STARE only: range gate. Drop a mesh control point whose displacement magnitude (px) is at or beyond this. null = use reg_tiled_halo, the read-window bound.",
+                    "default": null,
+                    "minimum": 0
+                },
                 "reg_tiled_upsample": {
                     "type": "integer",
                     "description": "STARE only: phase-correlation sub-pixel upsample factor (per tile).",

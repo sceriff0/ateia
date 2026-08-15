@@ -1,9 +1,21 @@
 #!/usr/bin/env python3
 """STARE fan-out step 3/4: assemble the transform manifest from per-tile control points.
 
-Gathers the control points emitted by every tile task, lays them on the grid with TRE gating, and
-writes the self-contained manifest (reference identity + the moving slide's M0 + mesh) the warp and
-the reg_qc=2 scorer consume. One cheap per-slide reduction — kilobytes, no image data.
+Gathers the control points emitted by every tile task, lays them on the grid, and writes the
+self-contained manifest (reference identity + the moving slide's M0 + mesh) the warp and the
+reg_qc=2 scorer consume. One cheap per-slide reduction — kilobytes, no image data.
+
+Three gates, applied in this order, decide what reaches the mesh:
+
+1. **confidence** (``--max-error``) — reject a control point whose correlation found no real
+   match. Background and section-edge tiles are the majority of a whole-slide grid and produce
+   plausibly *small* displacements, so this, not magnitude, is what keeps them out.
+2. **range** (``--max-disp``, the read halo) — reject a match that was never inside the read
+   window. A cheap secondary net.
+3. **TRE** (``--gate-tre``) — of the trustworthy points, refine only those actually misaligned.
+
+The surviving grid is then median-filtered over the *accepted* points only, so smoothing can never
+resurrect a cell the confidence gate rejected.
 """
 
 from __future__ import annotations
@@ -14,6 +26,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from statistics import median
 
 os.environ.setdefault("NUMBA_CACHE_DIR", "/tmp/numba_cache")
 os.environ["NUMBA_DISABLE_CACHING"] = "1"
@@ -28,17 +41,106 @@ from tre_report import build_tre_report  # noqa: E402
 logger = get_logger(__name__)
 
 
-def _grid_from_controls(controls, gate_tre):
+def _accept(control, max_error, max_disp):
+    """Is this control point trustworthy enough to place in the mesh?
+
+    Two independent bounds, and the *confidence* one does the real work:
+
+    - ``error`` is scikit-image's normalised correlation error. Phase correlation always returns a
+      peak, so a background tile or a tile straddling the section edge produces a displacement
+      that a magnitude bound cannot tell from a small real residual -- measured, a
+      tissue-vs-background tile lands at |d| = 5.66 px, inside the halo and above the TRE gate,
+      and only its error of 0.999961 (against real tissue's 0.040956) exposes it. NaN, which
+      scikit-image returns when a crop is empty, is rejected by the same comparison.
+    - ``|d| >= max_disp`` means the true match was never inside the read window (``max_disp``
+      defaults to ``reg_tiled_halo``), so the peak is an artefact by construction. A cheap
+      secondary net, not the primary one.
+
+    A control point with no ``"error"`` key predates this gate. It is accepted -- unknown
+    confidence, and the caller warns -- so a run resumed across the change does not silently lose
+    every tile written before it.
+
+    Returns ``(accepted, reason)``; ``reason`` is None when accepted.
+    """
+    if max_disp is not None and float(np.hypot(control["dx"], control["dy"])) >= max_disp:
+        return False, "disp"
+    if "error" not in control:
+        return True, None
+    error = float(control["error"])
+    # written as `not (error <= max_error)` so NaN -- an empty crop, which tiled_reg_tile.py
+    # manufactures when the moving region falls outside the slide -- rejects rather than passes.
+    if max_error is not None and not (error <= max_error):
+        return False, "error"
+    return True, None
+
+
+def _median_filter_accepted(disp, accepted, radius=1):
+    """Median-smooth the displacement grid over ACCEPTED control points only.
+
+    Order matters and is deliberate: reject first, then smooth. A whole-grid median would refill a
+    cell the confidence gate just rejected from its agreeing neighbours, reintroducing the bug
+    through the back door. So a rejected cell is excluded from every median window and keeps the
+    mesh's null action, ``[0.0, 0.0]``.
+    """
+    ny = len(disp)
+    nx = len(disp[0]) if ny else 0
+    out = [[list(d) for d in row] for row in disp]
+    for iy in range(ny):
+        for ix in range(nx):
+            if not accepted[iy][ix]:
+                continue
+            xs, ys = [], []
+            for jy in range(max(0, iy - radius), min(ny, iy + radius + 1)):
+                for jx in range(max(0, ix - radius), min(nx, ix + radius + 1)):
+                    if accepted[jy][jx]:
+                        xs.append(disp[jy][jx][0])
+                        ys.append(disp[jy][jx][1])
+            out[iy][ix] = [float(median(xs)), float(median(ys))]
+    return out
+
+
+def _grid_from_controls(controls, gate_tre, max_error=None, max_disp=None, median_radius=1):
     nx = max(c["ix"] for c in controls) + 1
     ny = max(c["iy"] for c in controls) + 1
     grid_x = [0.0] * nx
     grid_y = [0.0] * ny
     disp = [[[0.0, 0.0] for _ in range(nx)] for _ in range(ny)]
+    # A cell is "accepted" if it passed the confidence and range gates -- i.e. its measurement is
+    # trustworthy. That is not the same as "refined": a tile below `gate_tre` is trustworthily
+    # already aligned, so it holds [0.0, 0.0] AND takes part in its neighbours' medians. A
+    # rejected cell holds [0.0, 0.0] too, but is excluded from every median window.
+    accepted = [[False] * nx for _ in range(ny)]
+    n_error, n_disp, n_legacy = 0, 0, 0
     for c in controls:
         grid_x[c["ix"]] = float(c["cx"])
         grid_y[c["iy"]] = float(c["cy"])
+        ok, reason = _accept(c, max_error, max_disp)
+        if not ok:
+            if reason == "error":
+                n_error += 1
+            else:
+                n_disp += 1
+            continue
+        if "error" not in c:
+            n_legacy += 1
+        accepted[c["iy"]][c["ix"]] = True
         if float(c["tre"]) >= gate_tre:
             disp[c["iy"]][c["ix"]] = [float(c["dx"]), float(c["dy"])]
+
+    if n_legacy:
+        logger.warning(
+            f"{n_legacy}/{len(controls)} control point(s) carry no 'error' key -- written before "
+            "confidence gating existed. Accepting them with unknown confidence; re-run "
+            "TILED_REG_TILE for those tiles to have them gated."
+        )
+    if n_error or n_disp:
+        logger.info(
+            f"rejected {n_error + n_disp}/{len(controls)} control point(s): "
+            f"{n_error} low-confidence (error > {max_error}), "
+            f"{n_disp} out of range (|d| >= {max_disp})"
+        )
+
+    disp = _median_filter_accepted(disp, accepted, radius=median_radius)
     return grid_x, grid_y, disp
 
 
@@ -52,6 +154,28 @@ def main(argv=None) -> int:
         "--controls", required=True, help="glob for the per-tile control JSONs"
     )
     ap.add_argument("--gate-tre", type=float, default=1.0)
+    ap.add_argument(
+        "--max-error",
+        type=float,
+        default=0.99,
+        help=(
+            "reject a control point whose phase-correlation error exceeds this (0 = perfect "
+            "match, ~1 = the two crops share no structure). This is the confidence gate that "
+            "keeps background and section-edge tiles out of the mesh; a magnitude bound alone "
+            "cannot, because those tiles produce plausibly small displacements. NaN (an empty "
+            "crop) is always rejected."
+        ),
+    )
+    ap.add_argument(
+        "--max-disp",
+        type=float,
+        default=None,
+        help=(
+            "reject a control point whose |displacement| is at or beyond this many pixels -- the "
+            "match was never inside the read window, so the peak is an artefact. The pipeline "
+            "passes reg_tiled_halo. Default None = no range bound."
+        ),
+    )
     ap.add_argument(
         "--reference-name",
         default=None,
@@ -75,7 +199,9 @@ def main(argv=None) -> int:
         raise FileNotFoundError(f"no control-point JSONs matched {a.controls!r}")
     controls = [json.loads(Path(f).read_text()) for f in files]
 
-    grid_x, grid_y, disp = _grid_from_controls(controls, a.gate_tre)
+    grid_x, grid_y, disp = _grid_from_controls(
+        controls, a.gate_tre, max_error=a.max_error, max_disp=a.max_disp
+    )
     entry = slide_entry(m0, grid_x, grid_y, disp)
     # carry the reference frame so the stitch knows the output size without re-reading the reference
     entry["out_shape"] = [int(m0_doc["ref_h"]), int(m0_doc["ref_w"])]

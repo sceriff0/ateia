@@ -105,7 +105,7 @@ def test_lazy_path_matches_old_full_decode_oracle(tmp_path):
     nuclear_index = 1
     rx0, ry0, rx1, ry1 = 192, 192, 320, 320  # interior tile, well clear of any edge
 
-    dx_old, dy_old, tre_old = _old_style_oracle(
+    dx_old, dy_old, tre_old, _err_old = _old_style_oracle(
         ref_f, mov_f, m0, nuclear_index, rx0, ry0, rx1, ry1
     )
 
@@ -143,7 +143,7 @@ def test_lazy_path_matches_old_full_decode_oracle(tmp_path):
     result = json.loads(out_f.read_text())
 
     # keys and shape must be unchanged
-    assert set(result.keys()) == {"ix", "iy", "cx", "cy", "dx", "dy", "tre"}
+    assert set(result.keys()) == {"ix", "iy", "cx", "cy", "dx", "dy", "tre", "error"}
     assert result["ix"] == 0 and result["iy"] == 0
     assert result["cx"] == 256.0 and result["cy"] == 256.0
 
@@ -251,7 +251,7 @@ def test_edge_tile_outside_moving_slide_yields_zero_tile(tmp_path, monkeypatch):
     def fake_residual_displacement(ref_tile, mov_tile, upsample=10):
         captured["ref_tile"] = ref_tile
         captured["mov_tile"] = mov_tile
-        return 0.0, 0.0, 0.0
+        return 0.0, 0.0, 0.0, 0.0
 
     monkeypatch.setattr(
         tiled_reg_tile, "residual_displacement", fake_residual_displacement
@@ -295,7 +295,7 @@ def test_edge_tile_outside_moving_slide_yields_zero_tile(tmp_path, monkeypatch):
     assert mov_tile.shape == (32, 32)
     assert np.array_equal(mov_tile, np.zeros((32, 32)))
     result = json.loads(out_f.read_text())
-    assert set(result.keys()) == {"ix", "iy", "cx", "cy", "dx", "dy", "tre"}
+    assert set(result.keys()) == {"ix", "iy", "cx", "cy", "dx", "dy", "tre", "error"}
 
 
 def test_nuclear_index_out_of_range_raises_same_message(tmp_path):

@@ -111,7 +111,11 @@ def main(argv=None) -> int:
     finally:
         ref_close()
 
-    dx, dy, tre = residual_displacement(ref_tile, mov_tile, upsample=a.upsample)
+    # `error` is the correlation's confidence, not decoration: the tile is emitted
+    # unconditionally (including the manufactured all-zeros mov_tile above, where the moving crop
+    # fell outside the slide), and tiled_solve.py's --max-error gate is what keeps a peak found in
+    # background or across the section edge out of the deformation mesh.
+    dx, dy, tre, error = residual_displacement(ref_tile, mov_tile, upsample=a.upsample)
 
     Path(a.out).write_text(
         json.dumps(
@@ -123,10 +127,13 @@ def main(argv=None) -> int:
                 "dx": dx,
                 "dy": dy,
                 "tre": tre,
+                "error": error,
             }
         )
     )
-    logger.info(f"tile ({a.ix},{a.iy}): dxy=({dx:.2f},{dy:.2f}) tre={tre:.2f}px")
+    logger.info(
+        f"tile ({a.ix},{a.iy}): dxy=({dx:.2f},{dy:.2f}) tre={tre:.2f}px error={error:.4f}"
+    )
     return 0
 
 
