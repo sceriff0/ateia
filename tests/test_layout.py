@@ -213,7 +213,8 @@ def test_the_registered_manifest_has_one_path_rule():
     whatever produced the slide and whichever backend ran.
 
     THE DEFECT THIS REPLACES. The writer used to branch:
-    `meta.is_passthrough ? Layout.passthroughPath(...) : Layout.publishedPath(...)`,
+    `meta.is_passthrough ? Layout.passthroughPath(...) : Layout.publishedPath(...)`
+    (passthroughPath is deleted — it had no other caller),
     recording an unwarped slide under <pid>/preprocessed/. Only the tiled adapter
     passes a multi-slide patient's reference through, so that branch made the tree a
     slide was recorded in a function of --registration_method — the same logical slide,
@@ -231,9 +232,10 @@ def test_the_registered_manifest_has_one_path_rule():
         "the registered-checkpoint writer no longer routes rows through "
         "Layout.registeredPath — see tests/registered_layout.nf.test"
     )
-    assert "Layout.passthroughPath(" not in writer, (
-        "the registered-checkpoint writer has grown a second path rule again; a "
-        "passthrough is published as a registered slide now"
+    assert "publishedOrAsIs(" not in writer and "publishedPath(" not in writer, (
+        "the registered-checkpoint writer has grown a second path rule again; every "
+        "row goes through Layout.registeredPath, which is publishedPath pinned to "
+        "REGISTERED and refuses anything emitted outside registered_slides/"
     )
 
     # Both producers of an unregistered slide must still mark it — that is the fact

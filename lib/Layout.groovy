@@ -357,28 +357,6 @@ class Layout {
             : path.toString()
     }
 
-    /**
-     * Where a slide that was NOT registered will be published. A single-slide patient
-     * has nothing to register, so registration.nf branches its reference straight
-     * through (`ch_passthrough`); the tiled backend does the same for every patient's
-     * reference, which defines the frame and is never warped. NOTHING publishes those
-     * into `<pid>/registered/` - no process emitted them - so recording them there
-     * names a file that does not exist. Verified against a stub run: a single-slide
-     * patient's output tree contains no `P001/registered/` directory at all.
-     *
-     * The slide is still published, just by whoever produced it:
-     *
-     *   produced by PREPROCESS this run  -> <outdir>/<pid>/preprocessed/<name>
-     *   supplied by a `--start registration` samplesheet -> already an absolute
-     *                                       path to an existing file; record it as is
-     *
-     * A thin, PREPROCESSED-pinned wrapper over {@link #publishedOrAsIs} -- this
-     * predates it and is kept as the named entry point every existing caller uses,
-     * not because the logic differs.
-     */
-    static String passthroughPath(def outdir, def patientId, def file) {
-        return publishedOrAsIs(outdir, patientId, PREPROCESSED, file)
-    }
 
     /**
      * Where a registered slide will be published: `<outdir>/<pid>/registered/registered_slides/<name>`.

@@ -385,12 +385,22 @@ workflow {
     assert Layout.publishedOrAsIs('/out', 'P001', 'cell_properties', freshNuclei) ==
         '/out/P001/cell_properties/nuclei/contours.json'
 
-    // passthroughPath now delegates to publishedOrAsIs pinned to PREPROCESSED --
-    // assert the delegation is behaviourally identical, not just present.
-    assert Layout.passthroughPath('/out', 'P001', freshFlat) ==
-        Layout.publishedOrAsIs('/out', 'P001', Layout.PREPROCESSED, freshFlat)
-    assert Layout.passthroughPath('/out', 'P002', publishedPassthrough) ==
-        Layout.publishedOrAsIs('/out', 'P002', Layout.PREPROCESSED, publishedPassthrough)
+    // registeredPath -- the ONE rule for every csv/registered.csv row. It is
+    // publishedPath pinned to REGISTERED, and it REFUSES a file emitted outside
+    // Layout.REGISTERED_SUBDIR rather than recording a path nothing publishes. Both
+    // halves asserted: the happy path, and the refusal (which is the half that used to
+    // be a silent wrong answer -- a passthrough recorded under <pid>/registered/, or
+    // under <pid>/preprocessed/ depending on which backend ran).
+    def freshRegistered = file("${workDirPre}/${Layout.REGISTERED_SUBDIR}/P001_x_registered.ome.tiff")
+    assert Layout.registeredPath('/out', 'P001', freshRegistered) ==
+        "/out/P001/registered/${Layout.REGISTERED_SUBDIR}/P001_x_registered.ome.tiff"
+    def refused = false
+    try {
+        Layout.registeredPath('/out', 'P001', freshFlat)
+    } catch (IllegalArgumentException e) {
+        refused = e.message.contains(Layout.REGISTERED_SUBDIR)
+    }
+    assert refused : 'Layout.registeredPath accepted a file emitted outside registered_slides/'
 
     // ------------------------------------------------------------------ //
     // ParamUtils.compartmentMode -- the

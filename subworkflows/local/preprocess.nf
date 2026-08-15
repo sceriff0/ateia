@@ -70,7 +70,7 @@ workflow PREPROCESSING {
     // directory the file was ACTUALLY published into. PREPROCESS publishes to
     // <pid>/preprocessed/, CONVERT_IMAGE to <pid>/converted/. Recording the
     // preprocessed path for a run that never ran PREPROCESS would name a directory
-    // that does not exist on disk -- the same defect Layout.passthroughPath documents
+    // that does not exist on disk -- the same defect Layout.publishedOrAsIs documents
     // for unregistered slides, and one tests/checkpoint_manifest.nf.test fails on.
     if (params.skip_preprocessing) {
         ch_preprocessed_with_meta = ch_for_preprocess
