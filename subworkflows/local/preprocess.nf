@@ -91,9 +91,18 @@ workflow PREPROCESSING {
     // meta.images_count is the right size hint HERE (unlike on the registration path):
     // this step emits exactly one row per input image, and input_check.nf injects that
     // count into every meta it produces — including the add_cycle path, whose
-    // PREPROCESSING sees only the new cycle's samplesheet. It is uniformly present or
-    // uniformly absent across a patient's rows, which is what CHECKPOINT_WRITER's size
-    // hint requires.
+    // PREPROCESSING sees only the new cycle's samplesheet.
+    //
+    // IT IS MANDATORY. An earlier version of this comment said the count was "uniformly
+    // present or uniformly absent across a patient's rows, which is what
+    // CHECKPOINT_WRITER's size hint requires" — that contract is gone. Uniform absence
+    // used to mean an unsized groupTuple, i.e. this patient's fragment waiting for the
+    // whole channel to close instead of being published the moment the patient finished,
+    // silently and on a run that still exited 0. CHECKPOINT_WRITER now ABORTS on an
+    // absent or non-positive count, naming the channel; see lib/PatientGroup.groovy.
+    // What remains true, and is what makes this safe, is UNIFORMITY: every row of one
+    // patient must carry the same count, or the patient opens two groups and the second
+    // fragment overwrites the first.
     ch_checkpoint_rows = ch_preprocessed_with_meta
         .map { meta, image_file ->
             [meta.patient_id, meta.images_count, Checkpoint.row(Layout.PREPROCESSED, [

@@ -369,6 +369,32 @@ workflow POSTPROCESSING {
                     },
                     name  : label,
                     sizeOf: { meta, _artifact ->
+                        // A SINGLE-SLIDE PATIENT WOULD DERIVE 0, AND PatientGroup REFUSES 0
+                        // (a groupKey sized 0 never fills, so the failure mode is a hang).
+                        // It cannot happen: seg_qc.nf branches on meta.is_reference and
+                        // builds WARP_SEG_QC's input from the `moving` branch ALONE, so a
+                        // patient with no moving slide produces no artifact to gather and
+                        // never reaches this closure. That is a PRODUCER invariant, and it
+                        // is pinned behaviourally rather than asserted here in prose --
+                        // tests/subworkflows/local/seg_qc.nf.test, "a patient whose only
+                        // slide is the reference produces NO QC artifact at all".
+                        //
+                        // If that invariant is ever broken, the run STOPS, so the
+                        // contradiction is named here instead of reaching the reader as
+                        // "its 'sizeOf' closure returned 0", which says nothing about what
+                        // to go and fix. Pinned by postprocessing.nf.test's companion case.
+                        if (meta.images_count != null && meta.images_count < 2)
+                            throw new IllegalStateException(
+                                "POSTPROCESSING: a registration QC artifact arrived for patient " +
+                                "'${meta.patient_id}', but its meta.images_count is " +
+                                "${meta.images_count} — a patient with no MOVING slide. This " +
+                                "group holds one artifact per moving slide (images_count counts " +
+                                "the reference too), so its size would be " +
+                                "${meta.images_count - 1}, and a group sized 0 never fills. " +
+                                "Exactly one of two things is wrong: the COUNT, whose producer " +
+                                "is subworkflows/local/input_check.nf, or the PRODUCER of this " +
+                                "artifact — subworkflows/local/seg_qc.nf must score moving " +
+                                "slides only, and it has started scoring the reference.")
                         meta.images_count == null ? null : meta.images_count - 1
                     },
                     sortBy: { _meta, artifact -> artifact.name },
