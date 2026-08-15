@@ -35,6 +35,7 @@ import basicpy
 BASICPY_VERSION = getattr(basicpy, "__version__", "unknown")
 
 from basicpy import BaSiC  # type: ignore  # noqa: E402
+from image_io import write_ome_tiff  # noqa: E402
 from image_utils import ensure_dir  # noqa: E402
 from metadata import is_nuclear  # noqa: E402
 from pixel_size import (  # noqa: E402
@@ -273,9 +274,15 @@ def preprocess_multichannel_image(
             logger.debug(
                 f"  First page: shape={first_page.shape}, dtype={first_page.dtype}"
             )
-
-    multichannel_stack = tifffile.imread(image_path)
-    logger.info(f"Loaded image shape: {multichannel_stack.shape}")
+        # Memory-mapped, not decoded whole. BaSiC runs one channel at a time
+        # (`multichannel_stack[i, ...]` per worker below), and the transpose /
+        # expand_dims fixups that follow are views, so nothing here needs the whole
+        # multichannel stack resident. This is the read `segment.py` already does
+        # (`tif.asarray(out="memmap")`) on the same kind of file. The corrected
+        # output is a separate in-RAM stack, so the source mapping is read-only
+        # throughout and never aliases what gets written.
+        multichannel_stack = tif.asarray(out="memmap")
+        logger.info(f"Loaded image shape: {multichannel_stack.shape}")
 
     # Checkpoint 1: Log input image statistics
     log_image_stats(multichannel_stack, "input", logger)
@@ -381,13 +388,11 @@ def preprocess_multichannel_image(
         f"  OME metadata: axes={metadata['axes']}, pixel_size={pixel_size_x}x{pixel_size_y}µm"
     )
 
-    tifffile.imwrite(
+    write_ome_tiff(
         output_path,
         preprocessed,
-        photometric="minisblack",
         metadata=metadata,
-        bigtiff=True,
-        ome=True,
+        photometric="minisblack",
         compression="zlib",
         tile=(2048, 2048),
     )

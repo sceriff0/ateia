@@ -21,7 +21,7 @@ os.environ["NUMBA_DISABLE_CACHING"] = "1"
 sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
 import numpy as np  # noqa: E402
-import tifffile  # noqa: E402
+from image_io import open_tiff_writer  # noqa: E402
 from logger import configure_logging, get_logger  # noqa: E402
 from mesh_field import MeshField  # noqa: E402
 from tiled_io import open_lazy  # noqa: E402
@@ -119,7 +119,16 @@ def main(argv=None) -> int:
         # uncompressed at full resolution, so classic TIFF's 32-bit offsets overflow
         # (struct.error: 'I' format requires 0 <= number <= 4294967295) the moment the
         # output crosses 4 GB -- C x H x W x itemsize, reached by any real WSI.
-        with tifffile.TiffWriter(str(a.out), bigtiff=True) as tw:
+        # That reasoning is now the rule for the whole pipeline: every TIFF write in
+        # bin/ goes through bin/utils/image_io.py, which sets bigtiff on all of them.
+        #
+        # ome=True is stated, not inferred. TILED_STITCH's output is named
+        # *_registered.ome.tiff, and tifffile writes OME-XML for any name ending
+        # .ome.tif/.ome.tiff -- so this file has ALWAYS carried an OME header,
+        # despite the note below about resolution tags. Passing the flag explicitly
+        # preserves the artifact byte-for-byte while making the fact visible; see
+        # docs/image_io.md for why flipping it is a separate decision.
+        with open_tiff_writer(a.out, ome=True) as tw:
             tw.write(
                 stream_tiles(src, m0, mesh, margin, out_h, out_w, a.out_tile, dtype),
                 shape=(c_n, out_h, out_w),
@@ -129,10 +138,19 @@ def main(argv=None) -> int:
                 # The stitched slide used to be written with no scale of any kind, so
                 # everything downstream of the STARE path -- SPLIT_CHANNELS, and through
                 # it the published pyramid -- had nothing but params.pixel_size to go on
-                # and no way to notice a disagreement. Standard resolution tags rather
-                # than an OME header: an OME header here would become a second,
-                # channel-less source of channel names for SPLIT_CHANNELS to find.
+                # and no way to notice a disagreement. The scale travels as standard
+                # TIFF resolution tags, which is what SPLIT_CHANNELS reads.
                 # CENTIMETER means pixels-per-cm, i.e. 1e4 µm/cm over µm/px.
+                #
+                # This comment used to claim the write deliberately omitted an OME
+                # header so it could not become a second, channel-less source of
+                # channel names. It never did: the .ome.tiff filename makes tifffile
+                # write OME-XML regardless, and extract_channel_names_from_ome reads
+                # back ['Channel:0:0', ...] from it. SPLIT_CHANNELS is passed
+                # --channels from meta.channels on every normal path, so the OME
+                # names are only a fallback that is not currently reached -- which is
+                # why the mismatch went unnoticed. Recorded here rather than fixed:
+                # removing the header changes a published artifact.
                 resolution=(1e4 / a.pixel_size, 1e4 / a.pixel_size),
                 resolutionunit="CENTIMETER",
             )

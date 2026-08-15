@@ -21,6 +21,7 @@ import numpy as np
 import tifffile
 
 sys.path.insert(0, str(Path(__file__).parent / "utils"))
+from image_io import write_ome_tiff
 from logger import configure_logging, get_logger
 from metadata import DEFAULT_NUCLEAR_MARKERS, pick_nuclear_index
 from pixel_size import warn_on_pixel_size_mismatch
@@ -567,13 +568,16 @@ def convert_to_ome_tiff(
     # Write OME-TIFF using tifffile
     logger.info(f"Writing: {output_filename.name}")
 
-    tifffile.imwrite(
+    # compression=None keeps this write byte-for-byte what CONVERT_IMAGE has always
+    # produced (uncompressed, untiled). It is not a recommendation -- every other
+    # OME write in the pipeline compresses -- but changing an existing artifact is
+    # not what giving image I/O one owner is for.
+    write_ome_tiff(
         output_filename,
         image_data,
         metadata=ome_metadata,
         photometric="minisblack",
-        ome=True,
-        bigtiff=True,
+        compression=None,
     )
 
     logger.info(f"Saved: {output_filename.name}")

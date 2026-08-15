@@ -31,8 +31,8 @@ Custom scale factor:
 Output Format
 -------------
 For each registered image, creates:
-- {basename}_QC_RGB_fullres.tif: Full resolution, compressed, ImageJ-compatible
-- {basename}_QC_RGB.tif: Downsampled TIFF for ImageJ viewing
+- {basename}_QC_RGB_fullres.tif: Full resolution, compressed OME-TIFF
+- {basename}_QC_RGB.tif: Downsampled OME-TIFF preview
 - {basename}_QC_RGB.png: Downsampled PNG for quick preview
 
 Channel assignment in composites:
@@ -107,7 +107,7 @@ Examples:
 Output:
   For each registered image, creates:
     - {basename}_QC_RGB_fullres.tif  (full resolution, compressed)
-    - {basename}_QC_RGB.tif          (downsampled for ImageJ)
+    - {basename}_QC_RGB.tif          (downsampled OME-TIFF preview)
     - {basename}_QC_RGB.png          (downsampled for quick view)
         """,
     )

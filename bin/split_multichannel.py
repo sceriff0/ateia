@@ -31,6 +31,7 @@ import tifffile
 
 sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
+from image_io import write_plain_tiff
 from image_utils import ensure_dir, normalize_image_dimensions
 from logger import configure_logging, get_logger
 from metadata import extract_channel_names_from_ome, is_nuclear
@@ -77,10 +78,20 @@ def split_multichannel_tiff(
     logger.info(f"Reading: {input_path}")
     logger.info(f"  Is reference: {is_reference}")
 
-    img = tifffile.imread(input_path)
+    # Memory-mapped, not decoded whole: this function writes ONE channel at a time
+    # (`data[i]` in the loop below), so the eager `tifffile.imread` held the entire
+    # C-channel registered slide in RAM to emit C single-channel files. Same read
+    # `segment.py` uses (`tif.asarray(out="memmap")`); the mapping is read-only and
+    # `normalize_image_dimensions`'s transpose is a view, so nothing is copied.
+    with tifffile.TiffFile(input_path) as tif:
+        img = tif.asarray(out="memmap")
     logger.info(f"  Image shape: {img.shape}, dtype: {img.dtype}")
 
-    # Clip negative values (VALIS warping artifact)
+    # Clip negative values (VALIS warping artifact). For the unsigned dtypes this
+    # pipeline actually produces this is a no-op that returns the mapping untouched;
+    # only a signed/float slide with real negatives materialises a full copy here,
+    # and that copy is genuinely required -- np.clip cannot write back into a
+    # read-only mapping of the input file.
     img = clip_negative_values(img, logger, stage_name="split_multichannel")
 
     # Normalize to (C, H, W) format
@@ -164,10 +175,15 @@ def split_multichannel_tiff(
         output_path = os.path.join(output_dir, f"{clean_name}.tiff")
 
         channel_data = data[i]
-        tifffile.imwrite(
+        write_plain_tiff(
             output_path,
             channel_data,
-            bigtiff=True,
+            why_not_ome=(
+                "an OME header on a single-channel file would be a second, "
+                "channel-less source of channel names for "
+                "extract_channel_names_from_ome to find; the scale travels as "
+                "standard TIFF resolution tags instead"
+            ),
             compression="zlib",
             resolution=resolution,
             resolutionunit="CENTIMETER",

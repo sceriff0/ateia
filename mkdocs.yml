@@ -102,6 +102,7 @@ nav:
   - Inputs & outputs: outputs.md
   - Resources: resources.md
   - Containers: containers.md
+  - Image I/O: image_io.md
   - Incremental cycles: add_cycle.md
   - Registration QC: registration_qc.md
   - REDSEA compensation: redsea.md

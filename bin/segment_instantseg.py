@@ -24,7 +24,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
 import numpy as np
-import tifffile
+from image_io import write_mask_tiff
 from image_utils import ensure_dir
 from logger import configure_logging, get_logger
 
@@ -249,11 +249,11 @@ def run_instanseg(
     logger.info("")
     logger.info("Saving segmentation masks...")
     logger.info(f"  Nuclei mask: {nuclei_mask_path.name}")
-    tifffile.imwrite(nuclei_mask_path, nuclei_mask, compression="zlib")
+    write_mask_tiff(nuclei_mask_path, nuclei_mask)
     del nuclei_mask
 
     logger.info(f"  Cell mask: {cell_mask_path.name}")
-    tifffile.imwrite(cell_mask_path, cell_mask, compression="zlib")
+    write_mask_tiff(cell_mask_path, cell_mask)
     del cell_mask
 
     logger.info("")

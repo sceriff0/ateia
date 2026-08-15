@@ -26,6 +26,7 @@ import dask.array as da
 import numpy as np
 import tifffile
 from csbdeep.utils import normalize
+from image_io import write_mask_tiff
 from image_utils import ensure_dir
 from logger import configure_logging, get_logger
 from numpy.typing import NDArray
@@ -473,11 +474,11 @@ def run_segmentation(
     logger.info("")
     logger.info("Saving segmentation masks...")
     logger.info(f"  Nuclei mask: {nuclei_mask_path.name}")
-    tifffile.imwrite(nuclei_mask_path, nuclei_mask, compression="zlib")
+    write_mask_tiff(nuclei_mask_path, nuclei_mask)
     del nuclei_mask  # Free before writing cell mask
 
     logger.info(f"  Cell mask: {cell_mask_path.name}")
-    tifffile.imwrite(cell_mask_path, cell_mask, compression="zlib")
+    write_mask_tiff(cell_mask_path, cell_mask)
     del cell_mask
 
     logger.info("")

@@ -1,6 +1,6 @@
 """Memory-shape + correctness tests for the thumbnail coarse anchor in tiled_coarse.py.
 
-TILED_COARSE was the last caller of the eager ``nuclear_channel(load_channels(path))`` whole-slide
+TILED_COARSE was the last caller of the eager ``nuclear_channel(load_channels(path))`` whole-slide (``load_channels`` has since been deleted -- Task 11 -- as it had no caller left)
 decode that test_tiled_reg_tile_lazy.py already retired from the per-tile step. On top of the
 full decode it ran ORB at *native* resolution, and ``_orb_features`` promotes its input to
 float64 -- measured at ~40 bytes per source pixel once the Gaussian pyramid and the FAST/Harris
@@ -141,7 +141,7 @@ def test_slides_are_read_lazily_in_bounded_bands(tmp_path, monkeypatch):
     """Both slides must be reached through open_lazy region reads, each within the band budget.
 
     Fails against the pre-change code in the most direct way available: that code called
-    ``tifffile.imread`` via ``load_channels`` and never touched ``open_lazy`` at all, so no
+    ``tifffile.imread`` via the since-deleted ``load_channels`` and never touched ``open_lazy`` at all, so no
     region read is recorded and ``reads`` is empty.
     """
     from tiled_io import DEFAULT_BAND_BYTES

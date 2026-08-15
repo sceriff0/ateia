@@ -29,9 +29,14 @@ from numpy.typing import NDArray
 __all__ = [
     "normalize_image_dimensions",
     "load_image",
-    "save_tiff",
     "ensure_dir",
 ]
+
+# There is deliberately no save_tiff here. TIFF *writes* have exactly one owner,
+# bin/utils/image_io.py, which sets bigtiff on every write it makes; this module's
+# old save_tiff() took bigtiff as a caller-overridable keyword (so the decision was
+# not the writer's) and had no importer anywhere in bin/. See image_io's module
+# docstring for the four write variants and which script uses which.
 
 
 def normalize_image_dimensions(img: NDArray) -> NDArray:
@@ -196,7 +201,8 @@ def load_image(
 
     See Also
     --------
-    save_tiff : Save image to TIFF format
+    image_io : the one owner of TIFF writes (write_ome_tiff, write_mask_tiff,
+        write_plain_tiff, open_tiff_writer)
     """
     image_path = Path(image_path)
 
@@ -224,59 +230,3 @@ def load_image(
 
     except Exception as e:
         raise ValueError(f"Failed to load image {image_path}: {e}") from e
-
-
-def save_tiff(
-    image: NDArray,
-    output_path: str | Path,
-    compression: str = "zlib",
-    bigtiff: bool = True,
-    **kwargs,
-) -> Path:
-    """Save image array to TIFF file with compression.
-
-    Parameters
-    ----------
-    image : NDArray
-        Image data to save. Can be 2D, 3D, or 4D.
-    output_path : str or Path
-        Path where TIFF file will be saved.
-    compression : str, default='zlib'
-        Compression algorithm: 'zlib', 'lzw', 'jpeg', or None.
-    bigtiff : bool, default=True
-        Use BigTIFF format for files >4GB.
-    **kwargs : dict
-        Additional arguments passed to tifffile.imwrite.
-        Common options: metadata, photometric, imagej.
-
-    Returns
-    -------
-    Path
-        Path object for the saved file.
-
-    Notes
-    -----
-    Automatically creates parent directories if needed.
-    Uses compression by default to save disk space.
-
-    Examples
-    --------
-    >>> mask = np.zeros((2048, 2048), dtype=np.uint16)
-    >>> save_tiff(mask, "output/mask.tif")
-    PosixPath('output/mask.tif')
-
-    >>> # Custom compression
-    >>> save_tiff(image, "output/results.tif", compression='lzw')
-
-    See Also
-    --------
-    load_image : Load TIFF image
-    """
-    output_path = Path(output_path)
-    ensure_dir(output_path.parent)
-
-    tifffile.imwrite(
-        str(output_path), image, compression=compression, bigtiff=bigtiff, **kwargs
-    )
-
-    return output_path
