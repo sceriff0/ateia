@@ -130,7 +130,8 @@ ALLOWED_LINES = {
         # SEG_QC_GEOJSON's block shrank; 722 -> 727 when feat/lsa-cell-pairing's
         # rewritten WARP_SEG_QC ext.args comment added 5 net lines above it;
         # 727 -> 786 when REDSEA added redseaMarkerList() near the top of the file
-        # and a REDSEA_MATRIX withName: block above QUANTIFY's; -> 807 when the
+        # and a REDSEA_MATRIX withName: block above QUANTIFY's; 786 -> 807 when the
+        # z-score work added a comment line to quantifyStatistics().
         # This pin has moved SIX times on one refactor branch, which is the finding:
         # an exact-LINE exemption conflicts with every change above it in the file.
         # 807 -> 827 (QUANTIFY's flat 128 GB became a size-derived tier ladder)
