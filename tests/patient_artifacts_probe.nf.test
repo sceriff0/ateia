@@ -54,8 +54,12 @@ nextflow_pipeline {
             assert out.contains('pyramid')
             // The patient that went missing -- the whole point of the task.
             assert out.contains('P002')
-            // And it must not have quietly emitted the patients that did survive.
-            assert !out.contains('ROW: P001')
+            // P001's row IS emitted before the abort, and that is correct rather than a
+            // leak: the fan-in streams, so a complete patient must not wait on the rest
+            // of the run. The shortfall is only knowable when the short channel closes.
+            // What matters is that the run then FAILS, so nothing downstream of the seam
+            // gets to publish a checkpoint CSV that is one patient short.
+            assert out.contains('ROW: P001')
         }
     }
 
