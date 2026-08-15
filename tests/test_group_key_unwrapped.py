@@ -169,7 +169,12 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 # tests/test_resume_determinism.py scans it: the per-patient grouping ritual moved into
 # lib/PatientGroup.groovy, so a scan restricted to *.nf would have quietly stopped
 # covering four of the seven groupKey sites it was written for -- a guard whose glob no
-# longer reaches the code is this file's own documented failure mode.
+# longer reaches the code is this file's own documented failure mode. That glob now
+# carries the WHOLE check: the last three hand-written gathers moved into PatientGroup
+# too, so the one surviving groupKey() in the repo is a `.groovy` one and dropping this
+# entry would leave the scan with nothing to look at. It would not pass quietly --
+# test_group_key_sites_are_found pins the inventory, so removing this line fails with
+# "scan found []" (watched). The inventory assert is what makes the glob self-checking.
 SCAN_DIRS = (
     ("subworkflows", "*.nf"),
     ("workflows", "*.nf"),
