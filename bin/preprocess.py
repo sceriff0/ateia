@@ -331,11 +331,30 @@ def _read_and_process_channel_lazy(
     that handle before doing anything else. tifffile's zarr view is not documented
     thread-safe for concurrent region reads through a SHARED store; giving every
     worker its own store sidesteps that question by construction, since no
-    mutable I/O state is ever shared across threads. This is exercised directly by
-    ``tests/test_preprocess_lazy_concurrency.py``: the real ``ThreadPoolExecutor``
-    path, at real concurrency, run many times against known per-channel ground
-    truth -- a proof of "this specific design didn't corrupt output over N runs",
-    not a proof that no race can ever occur.
+    mutable I/O state is ever shared across threads.
+
+    ``tests/test_preprocess_lazy_concurrency.py`` establishes two separate things,
+    and does not claim more than either shows:
+    (1) A REAL run of this exact ThreadPoolExecutor path (20 channels, 8 workers, 40
+    repeats, no fault injection) never produced a mismatch against known
+    per-channel ground truth on this machine. At that scale this pipeline's pinned
+    tifffile version turned out to ALREADY serialize a shared handle's reads
+    internally (``ZarrTiffStore`` enables its own ``RLock`` by default) -- so on its
+    own, that run does not discriminate this design from the forbidden
+    single-shared-handle one; it would have passed identically either way. It is
+    still useful as an ordinary regression/mixup guard, just not as thread-safety
+    evidence.
+    (2) A SEPARATE pair of tests deliberately defeats that internal lock and widens
+    the seek/read race window (holding the file position open after every
+    ``FileHandle.seek()``) to remove the "tifffile happens to protect us" confound,
+    then runs this exact code path once with every worker sharing ONE handle and
+    once with each worker opening its own. The shared-handle run reliably corrupts
+    or raises (``TiffFileError('corrupted strip ...')``); the per-thread-handle run
+    (this function's actual design) does not, even under the identical fault
+    injection -- because a per-thread handle shares no mutable state with any other
+    thread's handle to race on, independent of whether tifffile's own lock happens
+    to be enabled. That pair is the actual thread-safety evidence for this design;
+    (1) alone was not.
     """
     lazy_arr, _lazy_dtype, close_lazy = open_lazy(image_path)
     try:
