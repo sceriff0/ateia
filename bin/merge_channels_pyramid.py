@@ -272,6 +272,25 @@ def build_ome_xml(
     return ome_xml
 
 
+def to_uint16(data):
+    """The one float->uint16 rule for this pipeline: clip to range, ROUND, then cast.
+
+    `.astype()` truncates toward zero, so casting without rounding applies a systematic
+    downward bias of up to one count to every non-integral pixel -- mean -0.5 LSB, one-sided,
+    on intensity data that later becomes a measured per-cell statistic. It never averages out.
+
+    Rounding is `np.round` (half-to-even) to match the convention `bin/preprocess.py:354`
+    already states and explains; a different tie rule here would be a second convention, not a
+    fix. Integer input is returned untouched so this is safe to call unconditionally.
+
+    Clipping stays ahead of the round for a reason: 65535.6 rounds to 65536, which wraps to 0
+    in uint16. Guarded by tests/test_dtype_rounding_contract.py.
+    """
+    if not np.issubdtype(data.dtype, np.floating):
+        return data
+    return np.round(np.clip(data, 0, 65535)).astype(np.uint16)
+
+
 def write_pyramidal_ome_tiff(
     data: np.ndarray,  # Full CYX array
     output_path: str,
@@ -330,7 +349,7 @@ def write_pyramidal_ome_tiff(
         log("  Casting float data to uint16 for QuPath compatibility (per-channel)")
         out = np.empty(data.shape, dtype=np.uint16)
         for c in range(data.shape[0]):
-            out[c] = np.clip(data[c], 0, 65535).astype(np.uint16)
+            out[c] = to_uint16(data[c])
         data = out
         del out
         gc.collect()
@@ -584,7 +603,7 @@ def _load_channel_stack(channel_files, num_output_channels, height, width, dtype
 
         # Cast per-channel to avoid bulk float→uint16 copy on the full CYX array
         if need_float_cast:
-            channel_data = np.clip(channel_data, 0, 65535).astype(np.uint16)
+            channel_data = to_uint16(channel_data)
         output_data[output_idx] = channel_data
         output_idx += 1
         del channel_data

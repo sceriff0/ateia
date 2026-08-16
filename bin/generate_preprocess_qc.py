@@ -86,8 +86,12 @@ def normalize_image(
     img = (img - p_low) / (p_high - p_low)
     img = np.clip(img, 0, 1)
 
-    # Convert to 8-bit
-    return (img * 255).astype(np.uint8)
+    # Convert to 8-bit. ROUND before casting -- `.astype()` floors, which biases every pixel
+    # down by up to one level and, worse, starves the top bin: only an input of exactly 1.0
+    # would reach 255, so the brightest tissue reads one level dark on every QC render.
+    # Matches the half-to-even convention stated at bin/preprocess.py:354.
+    # Guarded by tests/test_dtype_rounding_contract.py.
+    return np.round(img * 255).astype(np.uint8)
 
 
 def downsample_image(image: np.ndarray, scale_factor: float) -> np.ndarray:
