@@ -53,9 +53,13 @@ process TILED_REG_TILE {
     """
 
     stub:
+    // "error" is not decoration: tiled_solve._accept treats a control point WITHOUT it as
+    // legacy and accepts it unconditionally, so a stub that omits it made every stub run
+    // exercise the legacy path instead of the confidence gate. 0.0 models a confident match.
+    // Guarded by tests/test_stub_control_json_contract.py.
     def prefix = "${meta.patient_id}_${meta.channels.join('_')}_${row.ix}_${row.iy}"
     """
-    echo '{"ix":${row.ix},"iy":${row.iy},"cx":${row.cx},"cy":${row.cy},"dx":0,"dy":0,"tre":0}' > ${prefix}_ctrl.json
+    echo '{"ix":${row.ix},"iy":${row.iy},"cx":${row.cx},"cy":${row.cy},"dx":0,"dy":0,"tre":0,"error":0.0}' > ${prefix}_ctrl.json
     ${ProcessEnvelope.versionsStub(task.process, [])}
     """
 }
