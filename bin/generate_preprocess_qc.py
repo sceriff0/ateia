@@ -49,6 +49,7 @@ from skimage.transform import resize
 sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
 from logger import configure_logging, get_logger
+from tiled_io import open_lazy, read_decimated
 
 __all__ = ["main", "generate_preprocess_qc"]
 
@@ -163,71 +164,101 @@ def generate_preprocess_qc(
     if logger is None:
         logger = get_logger(__name__)
 
-    # Load image
-    logger.info(f"Loading image: {image_path}")
-    img_stack = tifffile.imread(image_path)
-    logger.info(f"Image shape: {img_stack.shape}")
-
-    # Handle 2D images
-    if img_stack.ndim == 2:
-        img_stack = np.expand_dims(img_stack, axis=0)
-
-    # Handle (Y, X, C) format — only transpose if last dim matches channels AND first dim does not
-    if (
-        img_stack.ndim == 3
-        and img_stack.shape[2] == len(channel_names)
-        and img_stack.shape[0] != len(channel_names)
-    ):
-        logger.info("Transposing from (Y, X, C) to (C, Y, X)")
-        img_stack = np.transpose(img_stack, (2, 0, 1))
-
-    n_channels = img_stack.shape[0]
-    logger.info(f"Processing {n_channels} channels")
-
-    # Adjust channel names if needed
-    if len(channel_names) < n_channels:
-        channel_names = channel_names + [
-            f"Channel_{i}" for i in range(len(channel_names), n_channels)
-        ]
-    channel_names = channel_names[:n_channels]
-
-    # Determine output prefix
-    if prefix is None:
-        # Extract basename, removing common suffixes
-        prefix = image_path.stem
-        for suffix in [".ome", "_corrected", "_preprocessed"]:
-            if prefix.endswith(suffix):
-                prefix = prefix[: -len(suffix)]
-
-    # Create output directory
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    # Generate PNGs for each channel
-    output_files = []
-    for i, channel_name in enumerate(channel_names):
-        logger.info(f"Processing channel {i + 1}/{n_channels}: {channel_name}")
-
-        # Extract channel
-        channel_img = img_stack[i]
-
-        # Normalize for visualization
-        normalized = normalize_image(
-            channel_img, percentile_low=percentile_low, percentile_high=percentile_high
+    # Open the image lazily (zarr-backed view) and read/normalize/downsample one
+    # channel at a time below, instead of tifffile.imread'ing the whole (C, H, W)
+    # stack up front. This is a peak-MEMORY optimization only, not a read-size
+    # optimization: downsample_image's anti-aliased resize (skimage.transform.resize,
+    # order=1, anti_aliasing=True) needs every source pixel by definition, so there is
+    # no I/O to save here -- read_decimated is called with factor=1 below, meaning
+    # every pixel of every channel is still read, at full resolution, exactly as
+    # before. What changes is that peak memory becomes one full-resolution plane plus
+    # the downsampled outputs, never the whole multi-channel stack at once.
+    logger.info(f"Opening image lazily: {image_path}")
+    lazy_arr, _dtype, close = open_lazy(image_path)
+    closed = False
+    try:
+        # Handle (Y, X, C) format — only true if last dim matches channels AND first
+        # dim does not. open_lazy always presents the array channel-FIRST (a 2-D image
+        # is promoted to C=1, matching the old np.expand_dims(..., axis=0) handling),
+        # so it has no notion of a channel-LAST layout. That shape is never produced by
+        # this pipeline's own preprocess.py (always written with axes="CYX"), but the
+        # old whole-stack path is kept as an exact-behavior fallback for it.
+        channel_last = (
+            len(lazy_arr.shape) == 3
+            and lazy_arr.shape[2] == len(channel_names)
+            and lazy_arr.shape[0] != len(channel_names)
         )
 
-        # Downsample
-        downsampled = downsample_image(normalized, scale_factor)
+        if channel_last:
+            close()
+            closed = True
+            logger.info(f"Loading image (channel-last layout): {image_path}")
+            img_stack = tifffile.imread(image_path)
+            if img_stack.ndim == 2:
+                img_stack = np.expand_dims(img_stack, axis=0)
+            logger.info("Transposing from (Y, X, C) to (C, Y, X)")
+            img_stack = np.transpose(img_stack, (2, 0, 1))
+            logger.info(f"Image shape: {img_stack.shape}")
+            n_channels = img_stack.shape[0]
 
-        # Save PNG
-        output_path = output_dir / f"{prefix}_{channel_name}.png"
-        imsave(str(output_path), downsampled, check_contrast=False)
+            def read_channel(i: int) -> np.ndarray:
+                return img_stack[i]
+        else:
+            logger.info(f"Image shape: {lazy_arr.shape}")
+            n_channels = lazy_arr.shape[0]
 
-        logger.info(
-            f"  ✓ Saved: {output_path.name} ({downsampled.shape[1]}x{downsampled.shape[0]})"
-        )
-        output_files.append(output_path)
+            def read_channel(i: int) -> np.ndarray:
+                return read_decimated(lazy_arr, i, factor=1)
 
-    return output_files
+        logger.info(f"Processing {n_channels} channels")
+
+        # Adjust channel names if needed
+        if len(channel_names) < n_channels:
+            channel_names = channel_names + [
+                f"Channel_{i}" for i in range(len(channel_names), n_channels)
+            ]
+        channel_names = channel_names[:n_channels]
+
+        # Determine output prefix
+        if prefix is None:
+            # Extract basename, removing common suffixes
+            prefix = image_path.stem
+            for suffix in [".ome", "_corrected", "_preprocessed"]:
+                if prefix.endswith(suffix):
+                    prefix = prefix[: -len(suffix)]
+
+        # Create output directory
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Generate PNGs for each channel
+        output_files = []
+        for i, channel_name in enumerate(channel_names):
+            logger.info(f"Processing channel {i + 1}/{n_channels}: {channel_name}")
+
+            # Read one channel at a time (see above)
+            channel_img = read_channel(i)
+
+            # Normalize for visualization
+            normalized = normalize_image(
+                channel_img, percentile_low=percentile_low, percentile_high=percentile_high
+            )
+
+            # Downsample
+            downsampled = downsample_image(normalized, scale_factor)
+
+            # Save PNG
+            output_path = output_dir / f"{prefix}_{channel_name}.png"
+            imsave(str(output_path), downsampled, check_contrast=False)
+
+            logger.info(
+                f"  ✓ Saved: {output_path.name} ({downsampled.shape[1]}x{downsampled.shape[0]})"
+            )
+            output_files.append(output_path)
+
+        return output_files
+    finally:
+        if not closed:
+            close()
 
 
 def parse_args() -> argparse.Namespace:
