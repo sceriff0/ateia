@@ -206,7 +206,8 @@
                         "null"
                     ],
                     "description": "JVM heap (GiB) for VALIS/Bio-Formats in REGISTER. null = derive from task.memory at runtime.",
-                    "default": null
+                    "default": null,
+                    "minimum": 1
                 },
                 "reg_tiled_nuclear_index": {
                     "type": [

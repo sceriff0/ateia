@@ -131,10 +131,12 @@ ALLOWED_LINES = {
         # rewritten WARP_SEG_QC ext.args comment added 5 net lines above it;
         # 727 -> 736 when the three top-level config helper functions were inlined
         # for Nextflow 26's strict parser; 736 -> 744 when TILED_SOLVE gained the
-        # ext.args block carrying its confidence/range gates. Re-pin, do not
+        # ext.args block carrying its confidence/range gates; 744 -> 748 when that
+        # same block's `?:` was replaced by an explicit null test (Elvis treats a
+        # legal 0 as unset) and gained the comment explaining why. Re-pin, do not
         # widen. (Re-pin from the file, not by guessing:
         # `grep -n "params.expanded_quantification ?" conf/modules.config`.)
-        744: (
+        748: (
             "ext.args = { params.expanded_quantification ? '--expanded' : "
             "'' } -- conf/*.config closures cannot see lib/*.groovy classes, "
             "so ext.args must read params raw here."

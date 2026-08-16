@@ -57,8 +57,13 @@ process REGISTER {
     // registration.nf/add_cycle.nf so this process can't drift from the rest of the pipeline.
     def reg_qc_level = ParamUtils.regQcLevelOf(params.skip_registration_qc, params.reg_qc)
     def stage_ckpt = reg_qc_level >= 2 ? '--stage-checkpoint-dir reg_stage_checkpoint' : ''
-    // JVM heap scales with retry attempts: base 32GB + 16GB per attempt
-    def jvm_heap_gb = Math.min(params.reg_jvm_heap_gb ?: (32 + 16 * task.attempt), task.memory.toGiga() - 4)
+    // JVM heap scales with retry attempts: base 32GB + 16GB per attempt.
+    // Explicit null test, NOT `?:` -- Elvis treats 0 as unset, so an explicit
+    // `--reg_jvm_heap_gb 0` would silently become the derived ramp instead of being honoured
+    // or refused. The schema's `minimum: 1` refuses it up front; this keeps the code correct
+    // without depending on that. Guarded by tests/test_nullable_numeric_params_no_elvis.py.
+    def heap_request = params.reg_jvm_heap_gb != null ? params.reg_jvm_heap_gb : (32 + 16 * task.attempt)
+    def jvm_heap_gb = Math.min(heap_request, task.memory.toGiga() - 4)
 
     """
     # === LOG INPUT SIZES ===
