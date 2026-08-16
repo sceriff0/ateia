@@ -233,61 +233,79 @@ def export_geojson(
 
     color_int = rgb_to_qupath_color(*CELL_COLOR_RGB)
 
-    features = []
-    skipped = 0
+    # A generator, not a list: _stream_collection writes each feature as it is produced, so a
+    # slide's worth of features never coexists in memory. `skipped` is a one-element list
+    # because the count is read after the generator has been consumed.
+    skipped = [0]
 
-    for idx, row in df.iterrows():
-        x_px = row.get("x")
-        y_px = row.get("y")
-        if pd.isna(x_px) or pd.isna(y_px):
-            skipped += 1
-            continue
+    def _iter_features():
+        for idx, row in df.iterrows():
+            x_px = row.get("x")
+            y_px = row.get("y")
+            if pd.isna(x_px) or pd.isna(y_px):
+                skipped[0] += 1
+                continue
 
-        # Apply 0.5px offset to match corner-of-pixel convention used by polygon contours
-        # (regionprops centroids are center-of-pixel; contours in extract_cell_properties
-        # are shifted by +0.5 for QuPath/ImageJ compatibility)
-        x_px_corner = float(x_px) + 0.5
-        y_px_corner = float(y_px) + 0.5
+            # Apply 0.5px offset to match corner-of-pixel convention used by polygon contours
+            # (regionprops centroids are center-of-pixel; contours in extract_cell_properties
+            # are shifted by +0.5 for QuPath/ImageJ compatibility)
+            x_px_corner = float(x_px) + 0.5
+            y_px_corner = float(y_px) + 0.5
 
-        cell_id = row.get("label", idx)
-        cell_label_str = str(int(cell_id)) if pd.notna(cell_id) else str(idx)
+            cell_id = row.get("label", idx)
+            cell_label_str = str(int(cell_id)) if pd.notna(cell_id) else str(idx)
 
-        # Geometry: Polygon if contour available, else Point
-        geometry = _polygon_geometry(contours, cell_label_str) or {
-            "type": "Point",
-            "coordinates": [x_px_corner, y_px_corner],
-        }
+            # Geometry: Polygon if contour available, else Point
+            geometry = _polygon_geometry(contours, cell_label_str) or {
+                "type": "Point",
+                "coordinates": [x_px_corner, y_px_corner],
+            }
 
-        # Build measurements array (QuPath native format)
-        measurements = build_measurements(row, marker_cols, pixel_size)
-        # object_id=None: do not stamp every cell with the same constant id
-        # ("PathDetectionObject"), which QuPath treats as a per-object UUID — a
-        # shared id across all detections breaks re-import. (Matches the
-        # compartment export path, which already passes object_id=None.)
-        features.append(
-            build_feature(measurements, geometry, color_int, object_id=None)
-        )
+            # Build measurements array (QuPath native format)
+            measurements = build_measurements(row, marker_cols, pixel_size)
+            # object_id=None: do not stamp every cell with the same constant id
+            # ("PathDetectionObject"), which QuPath treats as a per-object UUID — a
+            # shared id across all detections breaks re-import. (Matches the
+            # compartment export path, which already passes object_id=None.)
+            yield build_feature(measurements, geometry, color_int, object_id=None)
 
-    logger.info(f"  Exported {len(features)} cells, skipped {skipped}")
-
-    geojson = {
-        "type": "FeatureCollection",
-        "features": features,
-    }
-
-    with open(output_path, "w") as f:
-        json.dump(geojson, f)
+    n_exported = _stream_collection(_iter_features(), output_path)
+    logger.info(f"  Exported {n_exported} cells, skipped {skipped[0]}")
 
     file_size_mb = Path(output_path).stat().st_size / (1024 * 1024)
     logger.info(f"  GeoJSON size: {file_size_mb:.1f} MB")
 
-    return len(features)
+    return n_exported
+
+
+def _stream_collection(features, output_path: str) -> int:
+    """Write an iterable of features as a GeoJSON FeatureCollection, one at a time.
+
+    Returns the number written. Nothing accumulates: the caller can hand this a generator and
+    the whole document never exists in memory. PERF-PLAN.md measures 1.94x and **-1004 MB**
+    (C11) for this on the pipeline's largest artifact.
+
+    The literals below reproduce `json.dump`'s default formatting exactly -- `", "` between
+    array items, `": "` after a key -- so the file is BYTE-IDENTICAL to the single-dump version
+    it replaces, including the empty collection. QuPath would not care about the whitespace, but
+    byte-identity means this change cannot be the cause of any downstream difference.
+    Guarded by tests/test_geojson_streaming_write.py.
+    """
+    n = 0
+    with open(output_path, "w") as f:
+        f.write('{"type": "FeatureCollection", "features": [')
+        for feature in features:
+            if n:
+                f.write(", ")
+            f.write(json.dumps(feature))
+            n += 1
+        f.write("]}")
+    return n
 
 
 def _write_collection(features: List[Dict], output_path: str) -> None:
     """Write a list of features as a GeoJSON FeatureCollection."""
-    with open(output_path, "w") as f:
-        json.dump({"type": "FeatureCollection", "features": features}, f)
+    _stream_collection(iter(features), output_path)
 
 
 def export_combined_geojson(
@@ -321,7 +339,7 @@ def export_combined_geojson(
         x_px = row.get("x")
         y_px = row.get("y")
         if pd.isna(x_px) or pd.isna(y_px):
-            skipped += 1
+            skipped[0] += 1
             continue
         x_corner = float(x_px) + 0.5
         y_corner = float(y_px) + 0.5

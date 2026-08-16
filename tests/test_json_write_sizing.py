@@ -25,11 +25,21 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 
-# Writers whose output is one entry PER CELL. These must keep streaming `json.dump`.
+# Writers whose output is one entry PER CELL. None may serialise the WHOLE document into a
+# string before writing it.
+#
+# Note the distinction the first version of this guard got wrong: `json.dumps` applied to ONE
+# FEATURE at a time is exactly right -- that is what `_stream_collection` does, and it is the
+# -1004 MB fix. What is forbidden is `dumps` on the whole collection. So each file below is
+# checked against the specific form it should be using, not against the token `json.dumps`.
 PER_CELL_WRITERS = {
-    "bin/export_geojson.py": "cells.geojson -- one feature per cell",
     "bin/mask_to_geojson.py": "one polygon per label",
     "bin/extract_cell_properties.py": "contours.json -- one ring per cell",
+}
+
+# Writers that stream through the incremental helper instead.
+STREAMING_WRITERS = {
+    "bin/export_geojson.py": "cells.geojson -- written one feature at a time",
 }
 
 # Writers whose output is bounded and small. These should use the fast form.
@@ -58,6 +68,22 @@ def test_per_cell_writers_still_stream():
     )
 
 
+def test_the_streaming_writers_do_not_build_the_document_first():
+    """export_geojson must go through _stream_collection, not dump a finished collection."""
+    offenders = []
+    for rel, why in STREAMING_WRITERS.items():
+        text = (REPO / rel).read_text()
+        if "_stream_collection" not in text:
+            offenders.append(f"{rel} ({why}): no _stream_collection")
+        if re.search(r'json\.dump\(\s*\{?\s*"type"', text) or "features\": features" in text:
+            offenders.append(f"{rel} ({why}): serialises the whole FeatureCollection")
+
+    assert not offenders, (
+        "the per-cell GeoJSON must be written one feature at a time; building the collection "
+        "first is the -1004 MB regression PERF-PLAN C11 removes:\n  " + "\n  ".join(offenders)
+    )
+
+
 def test_small_writers_use_the_fast_form():
     offenders = []
     for rel, why in SMALL_WRITERS.items():
@@ -73,7 +99,7 @@ def test_small_writers_use_the_fast_form():
 
 def test_every_listed_file_exists_and_writes_json():
     """A guard naming a file that moved or stopped writing JSON checks nothing."""
-    for rel in {**PER_CELL_WRITERS, **SMALL_WRITERS}:
+    for rel in {**PER_CELL_WRITERS, **SMALL_WRITERS, **STREAMING_WRITERS}:
         path = REPO / rel
         assert path.exists(), f"{rel} no longer exists -- re-point or remove this entry"
         text = path.read_text()
