@@ -86,6 +86,33 @@ def stream_tiles(src, m0, mesh, margin, out_h, out_w, tile, dtype):
                 yield out_tile
 
 
+def _ome_metadata(channel_names, n_channels, pixel_size):
+    """OME header content for the stitched slide: channel names and the physical pixel size.
+
+    tifffile writes an OME header for any ``.ome.tiff`` whether or not one is requested, so the
+    choice is not "header or no header" -- it is "populated or anonymous". Returns the axes plus
+    whatever is known; a caller that passes no names still gets the physical size.
+    """
+    md = {
+        "axes": "CYX",
+        "PhysicalSizeX": float(pixel_size),
+        "PhysicalSizeY": float(pixel_size),
+        "PhysicalSizeXUnit": "\u00b5m",
+        "PhysicalSizeYUnit": "\u00b5m",
+    }
+    if channel_names:
+        # A count mismatch means the caller and the slide disagree about the panel; naming the
+        # channels wrongly is worse than leaving them anonymous, so fall back rather than zip.
+        if len(channel_names) == n_channels:
+            md["Channel"] = {"Name": list(channel_names)}
+        else:
+            logger.warning(
+                f"--channel-names has {len(channel_names)} entries for {n_channels} channel(s); "
+                "writing the OME header without channel names rather than mislabelling them"
+            )
+    return md
+
+
 def main(argv=None) -> int:
     configure_logging()
     ap = argparse.ArgumentParser(description="STARE streaming stitch via the manifest.")
@@ -102,7 +129,14 @@ def main(argv=None) -> int:
         type=float,
         default=0.325,
         help="Configured scale in µm/px (TILED_STITCH passes params.pixel_size), "
-        "stamped on the stitched slide as resolution tags.",
+        "stamped on the stitched slide as resolution tags AND in the OME header.",
+    )
+    ap.add_argument(
+        "--channel-names",
+        nargs="*",
+        default=None,
+        help="Channel names in order (TILED_STITCH passes meta.channels), written into the OME "
+        "header. Omitted = anonymous channels, which is what a reader used to get.",
     )
     a = ap.parse_args(argv)
 
@@ -129,12 +163,26 @@ def main(argv=None) -> int:
                 # The stitched slide used to be written with no scale of any kind, so
                 # everything downstream of the STARE path -- SPLIT_CHANNELS, and through
                 # it the published pyramid -- had nothing but params.pixel_size to go on
-                # and no way to notice a disagreement. Standard resolution tags rather
-                # than an OME header: an OME header here would become a second,
-                # channel-less source of channel names for SPLIT_CHANNELS to find.
-                # CENTIMETER means pixels-per-cm, i.e. 1e4 µm/cm over µm/px.
+                # and no way to notice a disagreement. The resolution tags fix that for a
+                # plain-TIFF reader; CENTIMETER means pixels-per-cm, i.e. 1e4 µm/cm over µm/px.
                 resolution=(1e4 / a.pixel_size, 1e4 / a.pixel_size),
                 resolutionunit="CENTIMETER",
+                # ... and `metadata` fills in the OME header for an OME reader.
+                #
+                # This code used to carry a comment declining to write an OME header, on the
+                # grounds that it "would become a second, channel-less source of channel names
+                # for SPLIT_CHANNELS to find". That decision was never in effect: tifffile infers
+                # OME mode from the `.ome.tiff` suffix and wrote a header regardless -- one with
+                # no channel Names and no PhysicalSize, i.e. exactly the channel-less header the
+                # comment was arguing against. Measured on the working tree: is_ome True,
+                # `<Channel ID="Channel:0:0" SamplesPerPixel="1">` with no Name.
+                #
+                # Nor could it have misled SPLIT_CHANNELS: split_channels.nf passes
+                # `--channels ${meta.channels.join(' ')}` unconditionally, and
+                # split_multichannel.py only reads names out of OME metadata when none were
+                # passed. So the header is filled in rather than fought.
+                # Guarded by tests/test_stitch_ome_metadata.py.
+                metadata=_ome_metadata(a.channel_names, c_n, a.pixel_size),
             )
     finally:
         close()
