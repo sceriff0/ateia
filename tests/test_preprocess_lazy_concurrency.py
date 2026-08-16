@@ -107,13 +107,14 @@ nothing at all. Fixed by:
    ``threading.BrokenBarrierError`` from a stalled barrier, a plain bug -- now
    propagates OUT of the test uncaught, failing it visibly instead of reading as
    "corruption detected".
-``test_negative_control_is_not_self_certifying_when_lock_defeat_breaks`` proves
-this directly: it deliberately breaks ``_defeat_tifffile_internal_lock`` (simulating
-a future tifffile restructuring) and asserts the resulting ``AttributeError``
-propagates all the way out of ``preprocess_multichannel_image`` rather than being
-absorbed. See task-5-report.md's "Fix round 2" section for the verbatim RED/GREEN
-transcript proving the OLD (bare-except) code would have passed silently here,
-and the NEW (narrowed) code fails loudly.
+Fix round 2 ALSO added a test named ``test_negative_control_is_not_self_certifying_when_lock_defeat_breaks``,
+believing it proved the narrowing above. It did not, and was DELETED in fix round
+3 (see below) -- it called ``preprocess.preprocess_multichannel_image`` directly
+and asserted ``pytest.raises(AttributeError)`` around its OWN call, never actually
+routing through ``test_shared_handle_negative_control_is_actually_caught``'s
+try/except at all. Reverting that test's except clause back to bare ``Exception``
+left the "proof" test passing unchanged, because nothing in it depended on the
+except clause under test. See "FIX ROUND 3" below for the actual fix.
 
 Also recorded (not fixable here): the negative control's discriminating power
 depends entirely on ``_filecache.lock`` remaining tifffile's SOLE synchronization
@@ -123,6 +124,35 @@ SECOND, different synchronization mechanism alongside or instead of
 an incomplete lock), not red. This control demonstrates the shared-vs-per-thread
 DESIGN difference under today's tifffile internals; it is not a permanent
 guarantee against every future tifffile locking strategy.
+
+FIX ROUND 3 -- the round-2 "proof" test proved nothing; replaced with a real one
+---------------------------------------------------------------------------
+A re-review reverted ``test_shared_handle_negative_control_is_actually_caught``'s
+except clause back to bare ``except Exception:`` and re-ran
+``test_negative_control_is_not_self_certifying_when_lock_defeat_breaks``: it STILL
+PASSED. That test never exercised the try/except it claimed to be proving safe --
+it drove ``preprocess_multichannel_image`` directly and asserted on its own
+``pytest.raises``, and ``bin/preprocess.py`` has no try/except around
+``future.result()`` at all, so that ``AttributeError`` was always going to
+propagate regardless of anything fix round 2 changed. Same shape of defect as the
+two before it in this file's history: an artifact that reads as evidence and
+establishes nothing.
+
+Fixed by extracting the classification decision itself into a small,
+directly-testable function, ``_is_hazard_signal(exc) -> bool``, and having
+``test_shared_handle_negative_control_is_actually_caught`` call it (rather than a
+static ``except tifffile.TiffFileError:`` written once in the test and never
+exercised by anything else). ``test_is_hazard_signal_classifies_a_real_corruption_error_as_a_hazard``
+/ ``..._does_not_classify_a_broken_lock_defeat_as_a_hazard`` /
+``..._does_not_classify_a_bare_attribute_error_as_a_hazard`` unit-test the helper
+directly and exhaustively, with no threading, no tifffile internals, no fault
+injection at all -- just the three exception shapes that matter. Widening
+``_is_hazard_signal`` back to "everything is a hazard" (the round-2 regression,
+reintroduced) now fails those three assertions immediately and locally; see
+task-5-report.md's "Fix round 3" section for the verbatim RED (widened) and GREEN
+(restored) transcript. ``test_negative_control_is_not_self_certifying_when_lock_defeat_breaks``
+was DELETED rather than patched, per the instruction that a test whose name
+asserts something it does not check is worse than not having it.
 """
 
 from __future__ import annotations
@@ -316,8 +346,8 @@ def test_each_channel_opens_and_closes_its_own_lazy_handle(tmp_path, monkeypatch
 
 
 # ---------------------------------------------------------------------------
-# Fault-injected negative control (fix round 1; hardened in fix round 2 -- see the
-# module docstring's "FIX ROUND 1" / "FIX ROUND 2" sections).
+# Fault-injected negative control (fix round 1; hardened in fix rounds 2 and 3 --
+# see the module docstring's "FIX ROUND 1" / "FIX ROUND 2" / "FIX ROUND 3" sections).
 # ---------------------------------------------------------------------------
 
 
@@ -374,6 +404,33 @@ def _defeat_tifffile_internal_lock(arr):
             f"lock replacement did not take effect -- _filecache.lock is still "
             f"{new_lock!r}"
         )
+
+
+def _is_hazard_signal(exc: BaseException) -> bool:
+    """True iff ``exc`` represents a genuinely corrupted/erroring read from the
+    fault-injected negative control -- the thing
+    ``test_shared_handle_negative_control_is_actually_caught`` exists to detect.
+
+    Currently that is ``tifffile.TiffFileError`` ONLY -- the sole exception type
+    observed across every empirical corruption trial (e.g.
+    ``TiffFileError('corrupted strip cannot be reshaped from (...) to (...)')``,
+    see task-5-report.md's fix-round-1 raw numbers). Any other exception --
+    ``_LockDefeatFailed`` (the negative control's OWN harness breaking),
+    ``AttributeError`` (an unguarded private-attribute chain breaking),
+    ``threading.BrokenBarrierError``, a plain bug -- means the HARNESS broke, not
+    that a hazard was detected, and must classify as False here.
+
+    This is a free-standing, directly unit-tested function (see the
+    ``test_is_hazard_signal_*`` tests below) SPECIFICALLY so that widening it back
+    to "everything counts as a hazard" -- the exact regression fix round 2
+    introduced and fix round 3 removed (see the module docstring's "FIX ROUND 3"
+    section) -- breaks a fast, local, non-threaded assertion immediately, instead
+    of depending on an end-to-end concurrent run to happen to notice.
+    ``test_shared_handle_negative_control_is_actually_caught`` calls this function
+    directly (not a static ``except tifffile.TiffFileError:`` clause written twice)
+    so the two cannot silently drift apart.
+    """
+    return isinstance(exc, tifffile.TiffFileError)
 
 
 def _hold_after_seek(monkeypatch):
@@ -446,6 +503,35 @@ def _make_synced_open_lazy(real_open_lazy, barrier, share_handle):
     return synced_open_lazy
 
 
+# ---------------------------------------------------------------------------
+# Direct, exhaustive unit tests of the classification decision itself (fix round
+# 3). These are the actual proof that the negative control cannot silently
+# self-certify again: they exercise `_is_hazard_signal` with no threading, no
+# tifffile internals, no fault injection -- just the three exception shapes that
+# matter -- so a widened ("everything is a hazard") implementation fails one of
+# these immediately and locally, without requiring an end-to-end concurrent run to
+# happen to notice.
+# ---------------------------------------------------------------------------
+
+
+def test_is_hazard_signal_classifies_a_real_corruption_error_as_a_hazard():
+    assert _is_hazard_signal(tifffile.TiffFileError("corrupted strip")) is True
+
+
+def test_is_hazard_signal_does_not_classify_a_broken_lock_defeat_as_a_hazard():
+    """_LockDefeatFailed means the NEGATIVE CONTROL's own harness broke (see its
+    docstring) -- not that a hazard was detected."""
+    assert _is_hazard_signal(_LockDefeatFailed("could not locate the lock")) is False
+
+
+def test_is_hazard_signal_does_not_classify_a_bare_attribute_error_as_a_hazard():
+    """The exact scenario fix round 2 was opened to stop being swallowed: an
+    unguarded private-attribute chain breaking (e.g. a future tifffile
+    restructuring ``chunk_store._mutable_mapping._filecache``) raises
+    AttributeError, which must NOT read as 'corruption detected'."""
+    assert _is_hazard_signal(AttributeError("no such attribute")) is False
+
+
 def test_shared_handle_negative_control_is_actually_caught(tmp_path, monkeypatch):
     """THE control this file's other assertions must not be blind to.
 
@@ -463,17 +549,20 @@ def test_shared_handle_negative_control_is_actually_caught(tmp_path, monkeypatch
     observed error was ``tifffile.TiffFileError``. A single run here is expected to
     reproduce that reliably; see task-5-report.md for the raw numbers.
 
-    FIX ROUND 2: this used to catch a bare ``except Exception:``, which meant an
-    ``AttributeError`` from a broken ``_defeat_tifffile_internal_lock`` (see that
-    function's docstring) would have been swallowed and reported as "corruption
-    detected" -- the negative control would PASS while proving nothing, exactly the
-    defect this whole file exists to catch, reproduced in the harness itself. The
-    except clause below now catches ONLY ``tifffile.TiffFileError`` -- the single
-    exception type actually observed in every empirical trial. Any other exception
-    (``_LockDefeatFailed``, ``threading.BrokenBarrierError``, a plain bug) now
-    propagates OUT of this test uncaught, failing it visibly.
-    ``test_negative_control_is_not_self_certifying_when_lock_defeat_breaks`` proves
-    this directly.
+    FIX ROUND 2 narrowed this test's except clause from bare ``Exception`` to
+    ``tifffile.TiffFileError`` -- catching an ``AttributeError`` from a broken
+    ``_defeat_tifffile_internal_lock`` as "corruption detected" was exactly the
+    self-certification defect this whole file exists to catch, reproduced in the
+    fix meant to catch it. But narrowing the except clause IN THIS TEST is not, by
+    itself, something a future regression could be caught reintroducing: the
+    original round-2 "proof" test called this function directly and asserted on
+    its OWN ``pytest.raises``, never actually exercising the try/except below --
+    reverting the except clause back to bare ``Exception`` left that "proof" test
+    passing unchanged. FIX ROUND 3 fixes that by extracting the classification
+    decision into ``_is_hazard_signal`` (see its docstring) and calling it here,
+    with the ``test_is_hazard_signal_*`` tests directly, exhaustively unit-testing
+    the classification with no threading involved. Widening ``_is_hazard_signal``
+    back to "everything is a hazard" now fails those unit tests immediately.
     """
     _identity_basic(monkeypatch)
     _hold_after_seek(monkeypatch)
@@ -504,12 +593,15 @@ def test_shared_handle_negative_control_is_actually_caught(tmp_path, monkeypatch
         corrupted = got_stack.shape != expected_stack.shape or not np.array_equal(
             got_stack, expected_stack
         )
-    except tifffile.TiffFileError:
+    except Exception as exc:
+        if not _is_hazard_signal(exc):
+            # The HARNESS broke (e.g. _LockDefeatFailed, a plain bug) -- not a
+            # detected hazard. Must not be absorbed; let it fail this test loudly.
+            raise
         # A worker-thread TiffFileError (e.g. "corrupted strip cannot be reshaped
         # from (...) to (...)") surfaces here via future.result() inside
-        # preprocess_multichannel_image -- this IS the detected corruption. Every
-        # other exception type is deliberately left uncaught (see FIX ROUND 2
-        # above): it means the HARNESS broke, not that corruption was detected.
+        # preprocess_multichannel_image, and _is_hazard_signal confirms it IS the
+        # detected corruption.
         corrupted = True
 
     assert corrupted, (
@@ -557,63 +649,3 @@ def test_per_thread_handles_survive_the_identical_fault_injection(tmp_path, monk
         "per-thread-handle design produced corruption under the SAME fault "
         "injection the shared-handle negative control reliably fails under"
     )
-
-
-def test_negative_control_is_not_self_certifying_when_lock_defeat_breaks(
-    tmp_path, monkeypatch
-):
-    """FIX ROUND 2's actual proof: if ``_defeat_tifffile_internal_lock`` can no
-    longer locate/verify tifffile's internal lock (simulating a future tifffile
-    version restructuring the private ``chunk_store._mutable_mapping._filecache``
-    chain it walks), that must surface as a genuine failure -- never be
-    misread as "corruption detected, negative control PASSED".
-
-    Before fix round 2, ``test_shared_handle_negative_control_is_actually_caught``
-    caught this exact scenario with a bare ``except Exception: corrupted = True``,
-    which would have swallowed the resulting ``AttributeError``/
-    ``_LockDefeatFailed`` and reported PASS -- self-certifying, establishing
-    nothing. This test breaks ``_defeat_tifffile_internal_lock`` deliberately and
-    asserts the failure propagates all the way out of
-    ``preprocess_multichannel_image`` uncaught, exactly as
-    ``test_shared_handle_negative_control_is_actually_caught``'s narrowed
-    ``except tifffile.TiffFileError`` (fix round 2) now requires: anything other
-    than a real ``TiffFileError`` must NOT be absorbed.
-    """
-    _identity_basic(monkeypatch)
-    _hold_after_seek(monkeypatch)
-    channel_names = [f"CH{i}" for i in range(FAULT_N)]
-    image_path, _expected_stack = _write_stack(
-        tmp_path, seed=303, n_channels=FAULT_N, h=FAULT_H, w=FAULT_W
-    )
-
-    def broken_lock_defeat(arr):
-        raise AttributeError(
-            "simulated: a future tifffile restructured ZarrTiffStore's private "
-            "internals, so this helper can no longer find the lock to defeat"
-        )
-
-    # Patches the SAME module-level name `_make_synced_open_lazy` resolves at call
-    # time (it is a free variable, not captured early), so calls made later --
-    # inside the worker threads `preprocess_multichannel_image` spins up -- go
-    # through the broken version.
-    monkeypatch.setattr(
-        sys.modules[__name__], "_defeat_tifffile_internal_lock", broken_lock_defeat
-    )
-
-    barrier = threading.Barrier(FAULT_N, timeout=30)
-    real_open_lazy = preprocess.open_lazy
-    monkeypatch.setattr(
-        preprocess,
-        "open_lazy",
-        _make_synced_open_lazy(real_open_lazy, barrier, share_handle=True),
-    )
-
-    out_path = tmp_path / "out_broken_harness.ome.tiff"
-    with pytest.raises(AttributeError, match="simulated"):
-        preprocess.preprocess_multichannel_image(
-            image_path=str(image_path),
-            channel_names=list(channel_names),
-            output_path=str(out_path),
-            skip_nuclear=False,
-            n_workers=FAULT_N,
-        )
