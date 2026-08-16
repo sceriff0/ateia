@@ -301,11 +301,15 @@ def run_cellsam(
     logger.info("")
     logger.info("Saving segmentation masks...")
     logger.info(f"  Nuclei mask: {nuclei_mask_path.name}")
-    tifffile.imwrite(nuclei_mask_path, nuclei_mask, compression="zlib")
+    # bigtiff for the same reason tiled_stitch.py:118 and extract_mask_series.py give:
+    # a 40000x40000 uint32 label mask is 6.4 GB before compression, and classic TIFF's
+    # 32-bit offsets overflow past 4 GB. Compression usually keeps it under -- usually is
+    # not a contract. Guarded by tests/test_slide_io_seam.py.
+    tifffile.imwrite(nuclei_mask_path, nuclei_mask, compression="zlib", bigtiff=True)
     del nuclei_mask
 
     logger.info(f"  Cell mask: {cell_mask_path.name}")
-    tifffile.imwrite(cell_mask_path, cell_mask, compression="zlib")
+    tifffile.imwrite(cell_mask_path, cell_mask, compression="zlib", bigtiff=True)
     del cell_mask
 
     logger.info("")
