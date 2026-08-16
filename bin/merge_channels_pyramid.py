@@ -496,7 +496,7 @@ def _read_channel_file(path: str) -> np.ndarray:
         try:
             store = tifffile.imread(str(path), aszarr=True)
             z = zarr.open(store, mode="r")
-            arr = z[0] if isinstance(z, zarr.hierarchy.Group) else z
+            arr = z[0] if isinstance(z, zarr.Group) else z
             data = np.asarray(arr)
             if hasattr(store, "close"):
                 store.close()

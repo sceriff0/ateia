@@ -35,10 +35,13 @@ RUN python3 -m pip install --no-cache-dir --upgrade pip setuptools wheel
 
 # Install Python dependencies for preprocessing
 RUN pip install --no-cache-dir \
-    numpy==1.24.3 \
-    scipy==1.11.4 \
-    tifffile==2023.7.10 \
-    scikit-image==0.21.0 \
+    numpy==1.26.4 \
+    scipy==1.15.3 \
+    tifffile==2025.5.10 \
+    imagecodecs==2025.3.30 \
+    zarr==2.18.3 \
+    numcodecs==0.13.1 \
+    scikit-image==0.25.2 \
     jax[cpu]==0.4.20 \
     gradient-free-optimizers==1.6.0 \
     hyperactive==4.8.0 \

@@ -43,9 +43,9 @@ def open_lazy(path):
 
     store = tifffile.imread(str(path), aszarr=True)
     grp = zarr.open(store, mode="r")
-    arr = (
-        grp[0] if isinstance(grp, zarr.hierarchy.Group) else grp
-    )  # base level if pyramidal
+    # base level if pyramidal. `zarr.Group` -- not `zarr.hierarchy.Group`, which zarr 3 removed;
+    # the top-level name resolves under both majors, so this does not pin the container's zarr.
+    arr = grp[0] if isinstance(grp, zarr.Group) else grp
 
     class _CHW:
         """Adapt a 2-D or (C,H,W) zarr array to a uniform (C,H,W) region-readable view."""

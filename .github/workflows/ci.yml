@@ -75,7 +75,7 @@ jobs:
           # drops blosc.cbuffer_sizes that zarr 2.18 imports — so the test module fails
           # at COLLECTION with `from zarr.meta import Metadata2, Metadata3`, taking the
           # whole job down rather than failing one test.
-          pip install numpy==1.26.4 scipy==1.13.1 scikit-image==0.24.0 tifffile==2024.7.2 zarr==2.18.3 numcodecs==0.13.1
+          pip install numpy==1.26.4 scipy==1.15.3 scikit-image==0.25.2 tifffile==2025.5.10 zarr==2.18.3 numcodecs==0.13.1
           # anndata powers tests/test_join_flowpath.py. Tolerated as optional because
           # anndata has dropped Python 3.9, which this matrix still covers; the test
           # module pytest.importorskip's it, so an unavailable anndata skips those
@@ -164,7 +164,7 @@ jobs:
           # Pinned to containers/tiled/requirements.txt (the production tiled-path
           # image) — guarded by tests/test_ci_stack_pinned.py, which requires every
           # `pip install` of a guarded imaging package, in every job, to match.
-          pip install numpy==1.26.4 tifffile==2024.7.2
+          pip install numpy==1.26.4 tifffile==2025.5.10
           python tests/testdata/generate_complete_testdata.py
 
       - name: Check all profiles parse without the gitignored site config
@@ -267,7 +267,7 @@ jobs:
           # Pinned to containers/tiled/requirements.txt (the production tiled-path
           # image) — guarded by tests/test_ci_stack_pinned.py, which requires every
           # `pip install` of a guarded imaging package, in every job, to match.
-          pip install numpy==1.26.4 tifffile==2024.7.2
+          pip install numpy==1.26.4 tifffile==2025.5.10
           python tests/testdata/generate_complete_testdata.py
 
       - name: Install nf-test
@@ -361,7 +361,7 @@ jobs:
           # Pinned to containers/tiled/requirements.txt (the production tiled-path
           # image) — guarded by tests/test_ci_stack_pinned.py, which requires every
           # `pip install` of a guarded imaging package, in every job, to match.
-          pip install numpy==1.26.4 tifffile==2024.7.2
+          pip install numpy==1.26.4 tifffile==2025.5.10
           python tests/testdata/generate_complete_testdata.py
 
       - name: Install nf-test
@@ -435,7 +435,7 @@ jobs:
           # Pinned to containers/tiled/requirements.txt (the production tiled-path
           # image) — guarded by tests/test_ci_stack_pinned.py, which requires every
           # `pip install` of a guarded imaging package, in every job, to match.
-          pip install numpy==1.26.4 tifffile==2024.7.2
+          pip install numpy==1.26.4 tifffile==2025.5.10
           python tests/testdata/generate_complete_testdata.py
 
       - name: Install nf-test

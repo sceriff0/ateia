@@ -48,16 +48,15 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 # Core scientific + GPU packages
 RUN pip install --no-cache-dir \
     numpy==1.26.4 \
-    scipy \
-    pandas==2.2.3 \
+    pandas==2.3.3 \
     scikit-image==0.25.2 \
-    aicsimageio==4.14.0 \
+    scipy==1.15.3 \
     gputools \
     edt
 
 # TensorFlow GPU + Stardist ecosystem
 RUN pip install --no-cache-dir \
-    tensorflow==2.17.1 \ 
+    tensorflow==2.17.1 \
     stardist==0.9.1 \
     csbdeep
 
@@ -68,4 +67,3 @@ RUN pip install git+https://github.com/sceriff0/cudipy.git -v --no-deps
 COPY requirements.txt /app/requirements.txt
 RUN pip install -r /app/requirements.txt
 
-RUN pip install imagecodecs

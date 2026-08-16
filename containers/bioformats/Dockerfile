@@ -40,8 +40,17 @@ RUN wget -q "https://github.com/glencoesoftware/raw2ometiff/releases/download/v$
     && rm "raw2ometiff-${R2OT_VERSION}.zip"
 
 RUN pip3 install --no-cache-dir \
-        tifffile==2024.7.24 \
-	imagecodecs \
-        numpy==1.26.4
+        tifffile==2025.5.10 \
+        imagecodecs==2025.3.30 \
+        numpy==1.26.4 \
+        zarr==2.18.3 \
+        numcodecs==0.13.1 \
+        h5py==3.11.0 \
+        bioio==3.5.0 \
+        bioio-ome-tiff==1.4.0 \
+        bioio-tifffile==1.3.0 \
+        bioio-nd2==2.4.0 \
+        bioio-czi==2.9.0 \
+        bioio-lif==1.5.0
 
 

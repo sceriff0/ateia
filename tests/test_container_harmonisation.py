@@ -1,0 +1,311 @@
+"""The container images are one dependency surface, and this file is where it is declared.
+
+Ten images build the pipeline. Before harmonisation they disagreed with each other and, in three
+places, with themselves:
+
+  * ``containers/merge`` installed a bare ``zarr``. A rebuild picks up zarr 3, where the
+    ``zarr.hierarchy`` module is REMOVED (zarr's own 3.0 migration guide lists it). The one
+    consumer wraps the call in ``except Exception`` and falls back to a whole-array ``imread``,
+    so the failure is not a crash -- it is the lazy read silently turning into a full
+    materialisation of the largest artifact in the pipeline.
+  * ``containers/segmentation/requirements.txt`` was never ``COPY``d and never installed. It is
+    a byte-identical copy of ``containers/debug_diffeo/requirements.txt`` (md5 792dc481...), so
+    its ``tifffile==2023.4.12`` line read like a pin while pinning nothing.
+  * ``containers/quantification`` -- the image behind seven processes, more than any other --
+    pinned none of its nine packages.
+
+The rule that catches the worst class of these is ``test_container_installs_what_its_scripts_import``:
+``bin/convert_image.py`` has imported ``bioio`` since 2026-01-05, and no container in the repo has
+ever installed it, including after the bioformats image was edited five months later. A container
+that does not install what its own scripts import is broken at runtime, not at build time.
+
+Version ceilings are set by the base images' Python, not by what is newest on PyPI. Seven of the
+ten bases are Python 3.10 (``ubuntu:22.04``, ``*-jammy``, ``cuda-*-ubuntu22.04``), and zarr 3,
+tifffile 2026.x and scipy 1.18 all require >=3.12. ``containers/spatialdata`` is a deliberate
+exception: it is ``python:3.12-slim``, it is the only image whose dependency (spatialdata>=0.8.0)
+*requires* zarr>=3, and it shares no zarr-touching code with the rest.
+"""
+
+import ast
+import re
+import sys
+from pathlib import Path
+
+import pytest
+from packaging.requirements import InvalidRequirement, Requirement
+
+REPO = Path(__file__).resolve().parent.parent
+CONTAINERS = REPO / "containers"
+
+# Docker Hub tag -> containers/ directory. The tag is what modules/local/*.nf names.
+TAG_TO_DIR = {
+    "convert_bioformats_2": "bioformats",
+    "preprocess": "preprocess",
+    "merge": "merge",
+    "tiled": "tiled",
+    "quantification_gpu": "quantification",
+    "spatialdata": "spatialdata",
+    "debug_diffeo": "debug_diffeo",
+    "segmentation_gpu": "segmentation",
+    "cellsam": "cellsam",
+    "instant_seg": "istantseg",
+}
+
+# The one image allowed to diverge, and why. It is python:3.12-slim and spatialdata>=0.8.0
+# requires zarr>=3, which cannot be installed on the python:3.10 bases the others use.
+PY312_ISLAND = "spatialdata"
+
+# Packages installed by more than one image must agree on a version. Ceilings are the newest
+# release that still supports Python 3.10, except numpy, which is held at the last 1.x because
+# the segmentation image's TensorFlow 2.15 base requires numpy<2.
+HARMONISED = {
+    "numpy": "1.26.4",
+    "tifffile": "2025.5.10",
+    "imagecodecs": "2025.3.30",
+    "zarr": "2.18.3",
+    "numcodecs": "0.13.1",
+    "pandas": "2.3.3",
+    "scikit-image": "0.25.2",
+    "scipy": "1.15.3",
+}
+
+# Packages that are genuinely absent from a given image are fine; these are the ones that must
+# never appear again, having been removed as unimported.
+FORBIDDEN = ("cellpose", "cucim", "cupy", "aicsimageio")
+
+# Requirement tokens are parsed with ``packaging`` rather than a regex. A hand-rolled pattern
+# missed two real forms already present in this repo -- extras (``dask[array]>=2024.8.0``) and
+# multi-clause specifiers (``numpy>=1.26,<3``) -- and silently reported both as "not installed",
+# which reads as a missing dependency rather than as a parser gap. ``packaging`` ships with
+# pytest, so it is available wherever this suite runs.
+_NAME_ONLY = re.compile(r"^[A-Za-z0-9_.\-]+(\[[A-Za-z0-9_.,\-]+\])?$")
+
+
+def _parse_req(token):
+    """(name, [(op, version), ...]) or None if the token is not a requirement."""
+    try:
+        r = Requirement(token)
+    except InvalidRequirement:
+        return None
+    return r.name.lower(), [(s.operator, s.version) for s in r.specifier]
+
+
+def _is_exact(specs):
+    return len(specs) == 1 and specs[0][0] == "=="
+
+
+def _dockerfile(name):
+    return (CONTAINERS / name / "Dockerfile").read_text()
+
+
+def _container_dirs():
+    return sorted(p.name for p in CONTAINERS.iterdir() if (p / "Dockerfile").is_file())
+
+
+def _dockerfile_pip_tokens(text):
+    """Package tokens from a Dockerfile's pip-install commands only.
+
+    Scoped to ``pip install`` lines on purpose. An earlier version also treated any
+    non-directive line as a requirement, which harvested prose from RUN bodies and echo
+    strings ("can", "wrapper", "nextflow") as if they were installed packages -- noise that
+    could mask a genuinely missing dependency by matching its name.
+    """
+    joined = re.sub(r"\\\s*\n", " ", text)
+    tokens = []
+    for line in joined.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            continue
+        if not re.search(r"pip3?\s+install", stripped):
+            continue
+        body = re.split(r"pip3?\s+install", stripped, maxsplit=1)[1]
+        body = body.split("&&")[0]
+        for tok in body.split():
+            if tok.startswith(("-", "$")) or "/" in tok:
+                continue
+            tokens.append(tok.strip('"').strip("'"))
+    return tokens
+
+
+def _requirements_tokens(path):
+    tokens = []
+    for line in path.read_text().splitlines():
+        stripped = line.split("#")[0].split(";")[0].strip()
+        if stripped:
+            tokens.append(stripped)
+    return tokens
+
+
+def _installed(container):
+    """package -> specifier string including its operator, or None if installed bare."""
+    text = _dockerfile(container)
+    req = CONTAINERS / container / "requirements.txt"
+    tokens = _dockerfile_pip_tokens(text)
+    # Only count a requirements file the Dockerfile actually installs.
+    if req.is_file() and re.search(r"pip3?\s+install[^\n]*-r ", text):
+        tokens += _requirements_tokens(req)
+    found = {}
+    for tok in tokens:
+        parsed = _parse_req(tok)
+        if not parsed:
+            continue
+        name, specs = parsed
+        if name in ("pip", "setuptools", "wheel", "upgrade"):
+            continue
+        if name not in found or not found[name]:
+            found[name] = specs
+    return found
+
+
+@pytest.mark.parametrize("container", _container_dirs())
+def test_every_requirements_file_is_actually_installed(container):
+    """A requirements.txt nothing installs is a decoy that reads like a pin."""
+    req = CONTAINERS / container / "requirements.txt"
+    if not req.is_file():
+        pytest.skip(f"{container} has no requirements.txt")
+    text = _dockerfile(container)
+    assert re.search(r"COPY[^\n]*requirements", text), (
+        f"containers/{container}/requirements.txt is never COPYd into the image, so every "
+        f"version it lists is inert. Either install it or delete it."
+    )
+    assert re.search(r"pip3?\s+install[^\n]*-r ", text), (
+        f"containers/{container}/requirements.txt is COPYd but never pip-installed."
+    )
+
+
+@pytest.mark.parametrize("container", _container_dirs())
+def test_no_shared_package_is_installed_unpinned(container):
+    """An unpinned shared package makes the image non-reproducible and can change major version."""
+    installed = _installed(container)
+    # The island may use ">=" (it tracks spatialdata's own floor); everyone else needs "==".
+    ok = (lambda s: bool(s)) if container == PY312_ISLAND else _is_exact
+    unpinned = sorted(p for p, v in installed.items() if p in HARMONISED and not ok(v))
+    assert not unpinned, (
+        f"containers/{container} installs {unpinned} without an exact version. A rebuild can "
+        f"therefore produce a different image than the one that generated published results."
+    )
+
+
+@pytest.mark.parametrize("container", _container_dirs())
+def test_shared_packages_match_the_harmonised_version(container):
+    """One version per package across every image that is not the py3.12 island."""
+    if container == PY312_ISLAND:
+        pytest.skip(f"{container} is the documented python:3.12 / zarr>=3 exception")
+    installed = _installed(container)
+    wrong = {
+        p: (v[0][1], HARMONISED[p])
+        for p, v in installed.items()
+        if p in HARMONISED and _is_exact(v) and v[0][1] != HARMONISED[p]
+    }
+    assert not wrong, (
+        f"containers/{container} disagrees with the harmonised set "
+        f"(package: found -> expected): {wrong}"
+    )
+
+
+@pytest.mark.parametrize("container", _container_dirs())
+def test_no_forbidden_package_reappears(container):
+    """Frameworks removed for having zero importers must not drift back in."""
+    text = _dockerfile(container)
+    req = CONTAINERS / container / "requirements.txt"
+    if req.is_file():
+        text += "\n" + req.read_text()
+    back = sorted({f for f in FORBIDDEN if re.search(rf"(?m)^\s*{f}\b|[\s\\]{f}[=\s\\]", text)})
+    assert not back, (
+        f"containers/{container} reinstalls {back}, which was removed for having no importer "
+        f"anywhere in bin/. If it is genuinely needed now, add the import first."
+    )
+
+
+def _module_container_and_scripts():
+    """(container dir, {scripts}) for every modules/local/*.nf naming a first-party image."""
+    out = {}
+    for nf in sorted((REPO / "modules" / "local").glob("*.nf")):
+        text = nf.read_text()
+        tag = re.search(r"attend_image_analysis:([A-Za-z0-9_.\-]+)", text)
+        if not tag:
+            continue
+        cdir = TAG_TO_DIR.get(tag.group(1))
+        if not cdir:
+            continue
+        scripts = set(re.findall(r"([a-z0-9_]+\.py)\s*\\", text))
+        if scripts:
+            out.setdefault(cdir, set()).update(scripts)
+    return out
+
+
+# Taken from the interpreter rather than hand-listed: a hand-list silently reports stdlib
+# modules as missing dependencies (``__future__``, ``statistics``), which is a guard failing
+# for the wrong reason -- the exact failure mode this repo has been bitten by before.
+_STDLIB_OK = set(sys.stdlib_module_names)
+
+# Import name -> pip distribution name, where they differ.
+_IMPORT_TO_DIST = {
+    "skimage": "scikit-image",
+    "cv2": "opencv-python",
+    "PIL": "pillow",
+    "yaml": "pyyaml",
+    "sklearn": "scikit-learn",
+    "bioio": "bioio",
+}
+
+
+def _third_party_imports(script):
+    """Top-level distributions a script imports, parsed with ``ast``.
+
+    Deliberately not a regex: ``^\\s*(import|from)\\s+(\\w+)`` also matches prose inside
+    docstrings ("import the module first"), which reported a package named ``the`` as a
+    missing dependency. Only a real parse distinguishes an import statement from a sentence.
+    """
+    local_files = {p.stem: p for p in (REPO / "bin").rglob("*.py")}
+    third, seen, queue = set(), set(), [script]
+    while queue:
+        cur = queue.pop()
+        if cur in seen:
+            continue
+        seen.add(cur)
+        path = local_files.get(Path(cur).stem)
+        if path is None or not path.is_file():
+            continue
+        for node in ast.walk(ast.parse(path.read_text())):
+            if isinstance(node, ast.Import):
+                names = [a.name.split(".")[0] for a in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                head = node.module.split(".")[0] if (node.level == 0 and node.module) else None
+                names = [head] if head else []
+                # ``from utils.tiled_io import open_lazy`` -- follow into the submodule, but ONLY
+                # when the head is itself local. Taking the last component unconditionally turned
+                # ``from skimage.transform import warp`` into a package named "transform".
+                if head in local_files or head == "utils":
+                    if node.module and "." in node.module:
+                        names.append(node.module.split(".")[-1])
+                if node.level or head is None or head == "utils":
+                    names += [a.name for a in node.names]
+            else:
+                continue
+            for n in names:
+                if n in local_files or n == "utils":
+                    queue.append(n)
+                elif n not in _STDLIB_OK:
+                    third.add(n)
+    return third
+
+
+@pytest.mark.parametrize("container,scripts", sorted(_module_container_and_scripts().items()))
+def test_container_installs_what_its_scripts_import(container, scripts):
+    """The rule that catches bioio: an image must install what its own scripts import.
+
+    A missing dependency here is invisible at build time and fails at gigapixel scale, after the
+    scheduler has already granted the task its memory.
+    """
+    installed = set(_installed(container))
+    missing = {}
+    for script in sorted(scripts):
+        for name in sorted(_third_party_imports(script)):
+            dist = _IMPORT_TO_DIST.get(name, name).lower()
+            if dist not in installed and name.lower() not in installed:
+                missing.setdefault(script, []).append(name)
+    assert not missing, (
+        f"containers/{container} does not install everything its scripts import: {missing}. "
+        f"The script runs in this image, so the import fails at runtime."
+    )
