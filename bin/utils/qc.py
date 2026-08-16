@@ -32,6 +32,7 @@ from metadata import extract_channel_names_from_ome, pick_nuclear_index
 from numpy.typing import NDArray
 from registration_utils import autoscale
 from skimage.transform import rescale
+from tiled_io import decimation_factor, open_lazy, read_decimated
 
 __all__ = [
     "create_registration_qc",
@@ -275,24 +276,15 @@ def create_registration_qc(
     if not registered_path.exists():
         raise FileNotFoundError(f"Registered image not found: {registered_path}")
 
-    # Load images
-    ref_img = tifffile.imread(str(reference_path))
-    reg_img = tifffile.imread(str(registered_path))
-
-    # Ensure 3D shape (C, H, W)
-    if ref_img.ndim == 2:
-        ref_img = ref_img[np.newaxis, ...]
-    if reg_img.ndim == 2:
-        reg_img = reg_img[np.newaxis, ...]
-
     # Resolve the nuclear/fiducial channel from OME metadata (convert_image guarantees
-    # OME-XML is always present). This MUST go through pick_nuclear_index rather than
-    # testing for the literal "DAPI": nuclear_markers is configurable and a CELLTOX-only
-    # panel is a supported input. The old literal test worked only by accident -- it
-    # fell back to channel 0, which CONVERT_IMAGE happens to reserve for the nuclear
-    # channel -- so it produced a correct overlay and a spurious warning on every
-    # non-DAPI slide, and would have picked the wrong channel the moment that promotion
-    # invariant changed.
+    # OME-XML is always present) BEFORE touching pixel data, so a malformed/missing
+    # OME-XML fails fast without paying for opening either slide's pixel store. This MUST
+    # go through pick_nuclear_index rather than testing for the literal "DAPI":
+    # nuclear_markers is configurable and a CELLTOX-only panel is a supported input. The
+    # old literal test worked only by accident -- it fell back to channel 0, which
+    # CONVERT_IMAGE happens to reserve for the nuclear channel -- so it produced a correct
+    # overlay and a spurious warning on every non-DAPI slide, and would have picked the
+    # wrong channel the moment that promotion invariant changed.
     ref_channels = extract_channel_names_from_ome(reference_path)
     reg_channels = extract_channel_names_from_ome(registered_path)
 
@@ -325,8 +317,27 @@ def create_registration_qc(
             f"Registered nuclear channel: {reg_nuc_idx} ({reg_channels[reg_nuc_idx]})"
         )
 
-    ref_nuc = ref_img[ref_nuc_idx]
-    reg_nuc = reg_img[reg_nuc_idx]
+    # Read only the resolved nuclear/fiducial channel of each slide, through a lazy,
+    # region-readable zarr view (open_lazy) rather than tifffile.imread's whole-stack
+    # read of every marker channel at full resolution -- the multi-channel overread this
+    # step used to pay, twice, on the two largest inputs the QC step sees. `factor` is 1
+    # here: this function always needs true full-resolution pixels (the *_fullres.tif
+    # output is unconditional in production), so nothing is spatially decimated -- only
+    # the unused channels are no longer read. decimation_factor is still the source of
+    # truth for that (not a hardcoded 1), so a caller that passes a real max_dim gets
+    # true decimation; read_decimated then streams each channel in row bands, so peak
+    # memory is one band, never the whole plane.
+    ref_arr, _ref_dtype, ref_close = open_lazy(reference_path)
+    reg_arr, _reg_dtype, reg_close = open_lazy(registered_path)
+    try:
+        factor = decimation_factor(
+            [ref_arr.shape[1:], reg_arr.shape[1:]], max_dim=None
+        )
+        ref_nuc = read_decimated(ref_arr, ref_nuc_idx, factor)
+        reg_nuc = read_decimated(reg_arr, reg_nuc_idx, factor)
+    finally:
+        ref_close()
+        reg_close()
 
     # Save full-resolution QC (compressed)
     if save_fullres:
