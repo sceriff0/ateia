@@ -85,7 +85,7 @@ class WarpBackends {
         ],
         tiled: [
             // JVM-free slim image; no BioFormats.
-            container   : 'bolt3x/attend_image_analysis:tiled',
+            container   : 'bolt3x/mirage-tiled:1.0.0',
             stages      : ['native', 'rigid', 'refined'],
             versionTools: ['skimage', 'scipy'],
             flags       : { _ctx -> ['--method tiled'] },

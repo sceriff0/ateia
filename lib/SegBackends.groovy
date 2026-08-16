@@ -96,7 +96,7 @@ class SegBackends {
         // that it happened, and without it a mis-ordered slide is segmented on an
         // arbitrary marker and silently produces plausible-looking nonsense.
         stardist: [
-            container : 'bolt3x/attend_image_analysis:segmentation_gpu',
+            container : 'bolt3x/mirage-stardist:1.0.0',
             entrypoint: 'segment.py',
             flags     : { ctx -> '--dapi-channel 0' },
             guard     : { ctx ->
@@ -125,7 +125,7 @@ class SegBackends {
         // read-only under Singularity. Redirect it to the configured host path or, when
         // unconfigured, to the (writable) task work dir, re-downloading per task.
         instantseg: [
-            container : 'bolt3x/attend_image_analysis:instant_seg',
+            container : 'bolt3x/mirage-instanseg:1.0.0',
             entrypoint: 'segment_instantseg.py',
             flags     : { ctx -> "--prefix ${ctx.prefix}" },
             guard     : { ctx ->
@@ -153,7 +153,7 @@ class SegBackends {
         // when --model-path is unset, which needs DEEPCELL_ACCESS_TOKEN -- warn at the
         // start of the task rather than let a multi-hour job die on the download.
         cellsam: [
-            container : 'bolt3x/attend_image_analysis:cellsam',
+            container : 'bolt3x/mirage-cellsam:1.0.0',
             entrypoint: 'segment_cellsam.py',
             flags     : { ctx ->
                 "--prefix ${ctx.prefix} " +

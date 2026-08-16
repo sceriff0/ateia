@@ -481,7 +481,7 @@ key grammar is a cross-repository contract — see
 
 ??? failure "The run seems to hang at startup"
     Usually Nextflow pulling large container images on first run. Pre-pull once:
-    `docker pull cdgatenbee/valis-wsi:1.0.0` (and the `bolt3x/attend_image_analysis`
+    `docker pull cdgatenbee/valis-wsi:1.0.0` (and the `bolt3x/mirage-*`
     tag pinned in `conf/modules.config`), or the `singularity pull` equivalents.
 
 ??? failure "Singularity: `FATAL: ... permission denied`"

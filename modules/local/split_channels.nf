@@ -11,7 +11,7 @@
 process SPLIT_CHANNELS {
     tag "${meta.patient_id}"
 
-    container "bolt3x/attend_image_analysis:preprocess"
+    container "bolt3x/mirage-preprocess:1.0.0"
 
     input:
     tuple val(meta), path(registered_image), val(is_reference)

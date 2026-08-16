@@ -15,7 +15,7 @@
 process PREPROCESS {
     tag "${meta.patient_id}"
 
-    container "bolt3x/attend_image_analysis:preprocess"
+    container "bolt3x/mirage-preprocess:1.0.0"
 
     input:
     tuple val(meta), path(ome_tiff)

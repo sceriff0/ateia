@@ -5,7 +5,7 @@ process GENERATE_QC_REPORT {
     tag "qc_report"
     label 'process_low'
 
-    container "bolt3x/attend_image_analysis:preprocess"
+    container "bolt3x/mirage-preprocess:1.0.0"
 
     input:
     path(preprocess_qc_pngs, stageAs: 'preprocess_qc/*')

@@ -1,13 +1,17 @@
 # =============================================================================
 # Build & Push Container Images
 # =============================================================================
-# Builds every Docker image vendored under containers/<name>/ and pushes it to
-# Docker Hub as bolt3x/attend_image_analysis:<tag>.
+# Builds every Docker image vendored under containers/<name>/ and pushes it to its OWN
+# Docker Hub repository as bolt3x/mirage-<component>:<version>.
 #
-# NOTE: This repo uses a SINGLE Docker Hub repository (bolt3x/attend_image_analysis)
-# with one descriptive tag per image, matching how the modules pull them
-# (e.g. bolt3x/attend_image_analysis:preprocess). Docker Hub has no sub-path
-# namespace like GHCR, so the matrix maps each build context dir -> its tag.
+# ONE REPOSITORY PER IMAGE. The previous layout put all ten images in a single repository and
+# used the tag to say WHICH image it was, so the tag namespace did two jobs at once --
+# component names next to real versions (v2.3, v2.4) next to long-dead images -- and Docker
+# Hub's per-repository tag ordering and vulnerability scanning were meaningless.
+#
+# The version reaches the tag. It previously did not: `version` was a required
+# workflow_dispatch input, was resolved into an output, and was then never used, so every
+# publish overwrote one mutable name and there was no prior image to roll back to.
 #
 # Triggers:
 #   * release:published    -> build + push, using each image's descriptive tag
@@ -31,7 +35,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Image tag/version to publish (e.g. v1.0.0)'
+        description: 'Image version to publish, matching manifest.version (e.g. 1.0.0; a leading v is stripped)'
         required: true
         type: string
 
@@ -46,7 +50,7 @@ on:
   workflow_call:
     inputs:
       version:
-        description: 'Image tag/version to publish (e.g. v1.0.0)'
+        description: 'Image version to publish, matching manifest.version (e.g. 1.0.0; a leading v is stripped)'
         required: true
         type: string
 
@@ -61,8 +65,9 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # Single Docker Hub repository that holds every image (as descriptive tags).
-  IMAGE_REPO: docker.io/bolt3x/attend_image_analysis
+  # Docker Hub namespace. Each image gets its own repository beneath it, named
+  # docker.io/<NAMESPACE>/mirage-<component>.
+  IMAGE_NAMESPACE: docker.io/bolt3x
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -95,6 +100,11 @@ jobs:
             VERSION="ci-${GITHUB_SHA::7}"
             PUSH="false"
           fi
+          # Strip a leading "v". GitHub release tags are conventionally v1.0.0 while
+          # nextflow.config's manifest.version -- which is what modules/local/*.nf pin in the
+          # image reference -- is 1.0.0. Without this the release path publishes
+          # mirage-convert:v1.0.0 and every process then fails to pull mirage-convert:1.0.0.
+          VERSION="${VERSION#v}"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "push=$PUSH" >> "$GITHUB_OUTPUT"
           echo "Resolved version=$VERSION push=$PUSH (event=${{ github.event_name }})"
@@ -103,7 +113,7 @@ jobs:
   # Build (and conditionally push) each image in parallel via a matrix.
   # ---------------------------------------------------------------------------
   build:
-    name: Build ${{ matrix.dir }}
+    name: Build mirage-${{ matrix.dir }}
     needs: setup
     runs-on: ubuntu-latest
     # Per-matrix-entry image build + push. The GPU/segmentation contexts are large
@@ -115,22 +125,25 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # One entry per vendored build context under containers/, mapped to the
-        # Docker Hub tag the modules pull it as.
+        # One entry per vendored build context under containers/. The directory name IS the
+        # component name, so the build context, the Docker Hub repository and the reference in
+        # modules/local/*.nf all say the same word; tests/test_container_image_naming.py asserts
+        # that the matrix and the directories on disk agree, so an unlisted context cannot go
+        # silently unbuilt.
         # VALIS is intentionally excluded: it uses the maintained upstream image
         # cdgatenbee/valis-wsi:1.0.0 (its from-source libvips build is heavy and
         # not worth re-hosting).
         include:
-          - { dir: bioformats,     tag: convert_bioformats_2 }
-          - { dir: preprocess,     tag: preprocess }
-          - { dir: quantification, tag: quantification_gpu }
-          - { dir: segmentation,   tag: segmentation_gpu }
-          - { dir: cellsam,        tag: cellsam }
-          - { dir: istantseg,      tag: instant_seg }
-          - { dir: merge,          tag: merge }
-          - { dir: debug_diffeo,   tag: debug_diffeo }
-          - { dir: tiled,          tag: tiled }
-          - { dir: spatialdata,    tag: spatialdata }
+          - { dir: convert }
+          - { dir: preprocess }
+          - { dir: quantify }
+          - { dir: stardist }
+          - { dir: cellsam }
+          - { dir: instanseg }
+          - { dir: merge }
+          - { dir: regqc }
+          - { dir: tiled }
+          - { dir: spatialdata }
 
     steps:
       - name: Checkout repository
@@ -147,7 +160,7 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push ${{ matrix.dir }}
+      - name: Build and push mirage-${{ matrix.dir }}
         uses: docker/build-push-action@v6
         with:
           context: containers/${{ matrix.dir }}
@@ -155,8 +168,9 @@ jobs:
           # Pin to linux/amd64 — the pipeline runs on amd64 HPC nodes.
           platforms: linux/amd64
           push: ${{ needs.setup.outputs.push == 'true' }}
-          # Descriptive tag the modules pull (matches the single-repo convention).
-          tags: ${{ env.IMAGE_REPO }}:${{ matrix.tag }}
+          # The exact immutable tag the modules pull, plus a moving major-line tag for humans.
+          # `:latest` is deliberately absent -- the pipeline never pulls it.
+          tags: ${{ env.IMAGE_NAMESPACE }}/mirage-${{ matrix.dir }}:${{ needs.setup.outputs.version }}
           # Per-image GitHub Actions layer cache.
           cache-from: type=gha,scope=${{ matrix.dir }}
           cache-to: type=gha,scope=${{ matrix.dir }},mode=max

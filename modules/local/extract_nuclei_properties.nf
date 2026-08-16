@@ -12,7 +12,7 @@
 process EXTRACT_NUCLEI_PROPERTIES {
     tag "${meta.patient_id}"
 
-    container "bolt3x/attend_image_analysis:quantification_gpu"
+    container "bolt3x/mirage-quantify:1.0.0"
 
     input:
     tuple val(meta), path(nuclei_mask), path(cell_mask)

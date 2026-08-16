@@ -330,24 +330,24 @@ memory-heavy registration tasks can be in flight at once.
 
 ## Containers
 
-Every process pins a fixed image tag — never `:latest`. The `bolt3x/attend_image_analysis`
+Every process pins a fixed image tag — never `:latest`. The `bolt3x/mirage-*`
 tags are content-descriptive (e.g. `preprocess`, `tiled`), not immutable version
 tags — see [Installation → Pre-pulling container images](installation.md#pre-pulling-container-images-optional).
 
 | Image | Processes |
 |---|---|
-| `bolt3x/attend_image_analysis:convert_bioformats_2` | `CONVERT_IMAGE` |
-| `bolt3x/attend_image_analysis:preprocess` | `PREPROCESS`, `SPLIT_CHANNELS`, `GENERATE_PREPROCESS_QC`, `GENERATE_QC_REPORT` |
+| `bolt3x/mirage-convert:1.0.0` | `CONVERT_IMAGE` |
+| `bolt3x/mirage-preprocess:1.0.0` | `PREPROCESS`, `SPLIT_CHANNELS`, `GENERATE_PREPROCESS_QC`, `GENERATE_QC_REPORT` |
 | `cdgatenbee/valis-wsi:1.0.0` | `REGISTER` |
-| `bolt3x/attend_image_analysis:tiled` | `TILED_COARSE`, `TILED_REG_TILE`, `TILED_SOLVE`, `TILED_STITCH` |
-| `bolt3x/attend_image_analysis:debug_diffeo` | `GENERATE_REGISTRATION_QC` |
-| `bolt3x/attend_image_analysis:segmentation_gpu` | `SEGMENT` / `SEG_QC_SEGMENT` when `--seg_method stardist` |
-| `bolt3x/attend_image_analysis:instant_seg` | `SEGMENT` / `SEG_QC_SEGMENT` when `--seg_method instantseg` *(default)* |
-| `bolt3x/attend_image_analysis:cellsam` | `SEGMENT` / `SEG_QC_SEGMENT` when `--seg_method cellsam` |
+| `bolt3x/mirage-tiled:1.0.0` | `TILED_COARSE`, `TILED_REG_TILE`, `TILED_SOLVE`, `TILED_STITCH` |
+| `bolt3x/mirage-regqc:1.0.0` | `GENERATE_REGISTRATION_QC` |
+| `bolt3x/mirage-stardist:1.0.0` | `SEGMENT` / `SEG_QC_SEGMENT` when `--seg_method stardist` |
+| `bolt3x/mirage-instanseg:1.0.0` | `SEGMENT` / `SEG_QC_SEGMENT` when `--seg_method instantseg` *(default)* |
+| `bolt3x/mirage-cellsam:1.0.0` | `SEGMENT` / `SEG_QC_SEGMENT` when `--seg_method cellsam` |
 | *(per backend, `lib/WarpBackends.groovy`)* | `WARP_SEG_QC` |
-| `bolt3x/attend_image_analysis:quantification_gpu` | `SEG_QC_GEOJSON`, `QUANTIFY`, `MERGE_QUANT_CSVS`, `EXTRACT_CELL_PROPERTIES`, `EXTRACT_NUCLEI_PROPERTIES`, `EXPORT_GEOJSON`, `GENERATE_POSTPROCESSING_QC` |
-| `bolt3x/attend_image_analysis:merge` | `MERGE_AND_PYRAMID`, `EXTRACT_MASK_SERIES` |
-| `bolt3x/attend_image_analysis:spatialdata` | `EXPORT_SPATIALDATA` |
+| `bolt3x/mirage-quantify:1.0.0` | `SEG_QC_GEOJSON`, `QUANTIFY`, `MERGE_QUANT_CSVS`, `EXTRACT_CELL_PROPERTIES`, `EXTRACT_NUCLEI_PROPERTIES`, `EXPORT_GEOJSON`, `GENERATE_POSTPROCESSING_QC` |
+| `bolt3x/mirage-merge:1.0.0` | `MERGE_AND_PYRAMID`, `EXTRACT_MASK_SERIES` |
+| `bolt3x/mirage-spatialdata:1.0.0` | `EXPORT_SPATIALDATA` |
 | `ubuntu:22.04` | `AGGREGATE_SIZE_LOGS` |
 
 `SEGMENT` and `WARP_SEG_QC` resolve their image from a backend table

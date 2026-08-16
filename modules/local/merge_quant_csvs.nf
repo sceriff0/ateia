@@ -12,7 +12,7 @@ process MERGE_QUANT_CSVS {
     tag "${meta.patient_id}"
     label 'process_low'
 
-    container "bolt3x/attend_image_analysis:quantification_gpu"
+    container "bolt3x/mirage-quantify:1.0.0"
 
     input:
     tuple val(meta), path(individual_csvs), path(morphology_csv)

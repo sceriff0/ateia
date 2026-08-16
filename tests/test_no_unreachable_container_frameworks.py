@@ -7,10 +7,10 @@ carried on every pull, in every task, forever.
 
 Three were found this way:
 
-  * `cellpose==3.1.1.1` in `containers/segmentation` and `containers/debug_diffeo`. It is not
+  * `cellpose==3.1.1.1` in `containers/stardist` and `containers/regqc`. It is not
     merely unimported -- `seg_method`'s schema enum is `["stardist", "instantseg", "cellsam"]`,
     so the pipeline **cannot be asked** to run it. Validation refuses the value.
-  * `cupy-cuda12x` and `cucim` in `containers/quantification` and `containers/debug_diffeo`.
+  * `cupy-cuda12x` and `cucim` in `containers/quantify` and `containers/regqc`.
     Zero references anywhere outside `containers/`: no import, no optional import, no CLI use.
 
 **Scope is deliberately a named list, not "every installed package".** Most entries in a
@@ -110,9 +110,9 @@ def test_the_dockerfile_scan_covers_the_images_this_guard_exists_for():
     scanned = {f.relative_to(REPO).as_posix() for f in _dockerfiles()}
 
     for expected in (
-        "containers/segmentation/Dockerfile",
-        "containers/quantification/Dockerfile",
-        "containers/debug_diffeo/Dockerfile",
+        "containers/stardist/Dockerfile",
+        "containers/quantify/Dockerfile",
+        "containers/regqc/Dockerfile",
     ):
         assert expected in scanned
 

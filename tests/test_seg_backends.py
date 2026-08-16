@@ -37,17 +37,17 @@ SEGMENT_NF = ROOT / "modules" / "local" / "segment.nf"
 # into an unreproducible one) shows up as a test diff.
 EXPECTED = {
     "stardist": (
-        "bolt3x/attend_image_analysis:segmentation_gpu",
+        "bolt3x/mirage-stardist:1.0.0",
         "segment.py",
         ("deepcell", "tensorflow"),
     ),
     "instantseg": (
-        "bolt3x/attend_image_analysis:instant_seg",
+        "bolt3x/mirage-instanseg:1.0.0",
         "segment_instantseg.py",
         ("instanseg", "torch"),
     ),
     "cellsam": (
-        "bolt3x/attend_image_analysis:cellsam",
+        "bolt3x/mirage-cellsam:1.0.0",
         "segment_cellsam.py",
         ("cellSAM", "torch"),
     ),

@@ -4,12 +4,16 @@ This directory vendors the Docker build contexts for every image the Mirage
 pipeline runs. Each subdirectory is a self-contained build context
 (`containers/<name>/Dockerfile` plus any `requirements.txt` / helper files).
 
-Images are built and published to **Docker Hub**, in a single public repository
-using one descriptive tag per image:
+Images are built and published to **Docker Hub**, one public repository per image,
+tagged with the pipeline version:
 
 ```
-bolt3x/attend_image_analysis:<tag>
+bolt3x/mirage-<component>:<manifest.version>
 ```
+
+The build-context directory, the Docker Hub repository and the `container` directive in
+`modules/local/*.nf` all use the same component name, so there is nothing to translate
+between them. `tests/test_container_image_naming.py` asserts that.
 
 Publishing is automated by [`.github/workflows/build-images.yml`](../.github/workflows/build-images.yml)
 and the release flow in [`.github/workflows/release.yml`](../.github/workflows/release.yml).
@@ -18,30 +22,33 @@ secrets. Docker Hub images are **public**, so no pull credentials are needed on
 the HPC/cluster side (unlike GHCR, whose default-private packages caused
 `403 Forbidden` on `singularity pull`).
 
-> `<tag>` is a content-descriptive tag (e.g. `preprocess`,
-> `convert_bioformats_2`, `tiled`) — not a release version. The modules pin
-> these tags directly and never use `:latest`.
+> The tag is the pipeline version from `manifest.version`, and the modules pin it
+> directly. `:latest` is never used.
 >
-> **Reproducibility caveat:** these descriptive tags are **mutable** — rebuilding and
-> re-pushing `bolt3x/attend_image_analysis:preprocess` changes what a checkout runs, so
-> a tagged pipeline release is **not** byte-for-byte reproducible from the tag alone. For
-> a hard reproducibility guarantee, pin by immutable digest (`@sha256:…`) or cut
-> release-versioned image tags (e.g. `:v1.0.0`) at release time.
+> This replaces an earlier layout that used a single repository with one *content-descriptive*
+> tag per image (`:preprocess`, `:convert_bioformats_2`, …). That put component names and real
+> versions (`v2.3`, `v2.4`) in the same namespace, and — because `build-images.yml` resolved a
+> `version` input it then never applied to the tag — every publish overwrote one mutable name,
+> leaving no earlier image to roll back to.
+>
+> **Remaining reproducibility caveat:** a version tag is still mutable if it is re-pushed. For a
+> hard guarantee, pin by immutable digest (`@sha256:…`). The version tag makes rollback
+> *possible*; only a digest makes a checkout byte-for-byte reproducible.
 
 ## Image mapping
 
 | Build context (`containers/<name>/`) | Docker Hub image:tag | Pipeline process(es) that use it | Source / base image |
 | --- | --- | --- | --- |
-| `bioformats` | `bolt3x/attend_image_analysis:convert_bioformats_2` | `CONVERT_IMAGE` | `eclipse-temurin:21-jre-jammy` + Glencoe `bioformats2raw` 0.12.0 / `raw2ometiff` 0.10.0 + `tifffile`/`numpy` |
-| `preprocess` | `bolt3x/attend_image_analysis:preprocess` | `PREPROCESS`, `GENERATE_PREPROCESS_QC`, `GENERATE_QC_REPORT`, `SPLIT_CHANNELS` (4 modules) | `ubuntu:22.04` + Python 3.11 + BaSiCPy/JAX(cpu)/scikit-image illumination-correction stack |
-| `quantification` | `bolt3x/attend_image_analysis:quantification_gpu` | `QUANTIFY`, `EXTRACT_CELL_PROPERTIES`, `EXTRACT_NUCLEI_PROPERTIES`, `EXPORT_GEOJSON`, `GENERATE_POSTPROCESSING_QC` (+ `quantify.nf` second container directive) (6 modules) | `nvidia/cuda:12.2.2-devel-ubuntu22.04` + numpy/scipy/scikit-image quantification stack |
-| `segmentation` | `bolt3x/attend_image_analysis:segmentation_gpu` | `SEGMENT` (default backend, `params.seg_method` = stardist) | `tensorflow/tensorflow:2.15.0-gpu-jupyter` + StarDist 0.9.1 |
-| `cellsam` | `bolt3x/attend_image_analysis:cellsam` | `SEGMENT` (`params.seg_method` = `cellsam`) | `pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime` + `cellSAM` (git) |
-| `istantseg` | `bolt3x/attend_image_analysis:instant_seg` | `SEGMENT` (`params.seg_method` = `instantseg`) | `pytorch/pytorch:2.5.1-cuda11.8-cudnn9-runtime` + `instanseg-torch` |
-| `merge` | `bolt3x/attend_image_analysis:merge` | `MERGE_AND_PYRAMID` | `pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime` + tifffile/imagecodecs pyramid stack |
-| `debug_diffeo` | `bolt3x/attend_image_analysis:debug_diffeo` | `GENERATE_REGISTRATION_QC` | `nvidia/cuda:12.2.2-cudnn8-devel-ubuntu22.04` + Miniconda/bftools + StarDist/cudipy diffeo QC stack |
-| `tiled` | `bolt3x/attend_image_analysis:tiled` | `TILED_REGISTER`, `WARP_SEG_QC` (tiled backend, STARE `registration_method='tiled'`) | `python:3.11-slim` + numpy/scipy/scikit-image/tifffile — **no JVM/BioFormats/libvips/GPU** (~438 MB, vs the multi-GB VALIS image) |
-| `spatialdata` | `bolt3x/attend_image_analysis:spatialdata` | `EXPORT_SPATIALDATA` (+ the out-of-band `bin/join_flowpath.py` cohort join) | `python:3.12-slim` + spatialdata/anndata/geopandas/zarr 3 — CPU only, no JVM/GPU |
+| `convert` | `bolt3x/mirage-convert:1.0.0` | `CONVERT_IMAGE` | `eclipse-temurin:21-jre-jammy` + Glencoe `bioformats2raw` 0.12.0 / `raw2ometiff` 0.10.0 + `tifffile`/`numpy` |
+| `preprocess` | `bolt3x/mirage-preprocess:1.0.0` | `PREPROCESS`, `GENERATE_PREPROCESS_QC`, `GENERATE_QC_REPORT`, `SPLIT_CHANNELS` (4 modules) | `ubuntu:22.04` + Python 3.11 + BaSiCPy/JAX(cpu)/scikit-image illumination-correction stack |
+| `quantify` | `bolt3x/mirage-quantify:1.0.0` | `QUANTIFY`, `EXTRACT_CELL_PROPERTIES`, `EXTRACT_NUCLEI_PROPERTIES`, `EXPORT_GEOJSON`, `GENERATE_POSTPROCESSING_QC` (+ `quantify.nf` second container directive) (6 modules) | `nvidia/cuda:12.2.2-devel-ubuntu22.04` + numpy/scipy/scikit-image quantification stack |
+| `stardist` | `bolt3x/mirage-stardist:1.0.0` | `SEGMENT` (default backend, `params.seg_method` = stardist) | `tensorflow/tensorflow:2.15.0-gpu-jupyter` + StarDist 0.9.1 |
+| `cellsam` | `bolt3x/mirage-cellsam:1.0.0` | `SEGMENT` (`params.seg_method` = `cellsam`) | `pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime` + `cellSAM` (git) |
+| `instanseg` | `bolt3x/mirage-instanseg:1.0.0` | `SEGMENT` (`params.seg_method` = `instantseg`) | `pytorch/pytorch:2.5.1-cuda11.8-cudnn9-runtime` + `instanseg-torch` |
+| `merge` | `bolt3x/mirage-merge:1.0.0` | `MERGE_AND_PYRAMID` | `pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime` + tifffile/imagecodecs pyramid stack |
+| `regqc` | `bolt3x/mirage-regqc:1.0.0` | `GENERATE_REGISTRATION_QC` | `nvidia/cuda:12.2.2-cudnn8-devel-ubuntu22.04` + Miniconda/bftools + StarDist/cudipy diffeo QC stack |
+| `tiled` | `bolt3x/mirage-tiled:1.0.0` | `TILED_REGISTER`, `WARP_SEG_QC` (tiled backend, STARE `registration_method='tiled'`) | `python:3.11-slim` + numpy/scipy/scikit-image/tifffile — **no JVM/BioFormats/libvips/GPU** (~438 MB, vs the multi-GB VALIS image) |
+| `spatialdata` | `bolt3x/mirage-spatialdata:1.0.0` | `EXPORT_SPATIALDATA` (+ the out-of-band `bin/join_flowpath.py` cohort join) | `python:3.12-slim` + spatialdata/anndata/geopandas/zarr 3 — CPU only, no JVM/GPU |
 | VALIS (not vendored) | `cdgatenbee/valis-wsi:1.0.0` (upstream) | `REGISTER` | upstream maintained image — **not rebuilt or published by us** (see note below) |
 
 > **zarr major versions differ on purpose.** `spatialdata` pins `zarr>=3.0.0`
@@ -52,7 +59,7 @@ the HPC/cluster side (unlike GHCR, whose default-private packages caused
 
 > The context directory name `istantseg` (a historical typo) is preserved
 > verbatim so it matches the upstream build context and the legacy DockerHub tag
-> `bolt3x/attend_image_analysis:instant_seg`. The published GHCR image is
+> `bolt3x/mirage-instanseg:1.0.0`. The published GHCR image is
 > therefore `.../istantseg`, even though `params.seg_method` is `instantseg`.
 
 ### VALIS — uses the upstream image (not vendored)
@@ -118,15 +125,14 @@ They remain available in the author's working tree if ever needed again.
 ## `container` directives
 
 The pipeline modules (`.nf` files) reference the Docker Hub tags in the mapping
-table above directly (e.g. `container 'bolt3x/attend_image_analysis:preprocess'`).
+table above directly (e.g. `container 'bolt3x/mirage-preprocess:1.0.0'`).
 Tags are fixed and content-descriptive — pin them explicitly, never `:latest`,
 so runs stay reproducible.
 
-`modules/local/segment.nf` is the one dynamic case: `SEGMENT` picks its container
-at runtime from `params.seg_method` (`cellsam` → `:cellsam`, `instantseg` →
-`:instant_seg`, otherwise the StarDist default `:segmentation_gpu`).
+`modules/local/segment.nf` is the one dynamic case: `SEGMENT` picks its container at runtime
+from `params.seg_method`, via the table in `lib/SegBackends.groovy` (`cellsam` →
+`mirage-cellsam`, `instantseg` → `mirage-instanseg`, otherwise the StarDist default
+`mirage-stardist`).
 
-The distributed non-rigid tiling modules pull the patched VALIS image via
-`params.reg_dist_container` (default `bolt3x/attend_image_analysis:mirage_valis_1.0.0`),
-published by [`build-valis-image.yml`](../.github/workflows/build-valis-image.yml).
-`REGISTER` uses the upstream `cdgatenbee/valis-wsi:1.0.0`.
+`REGISTER` uses the upstream `cdgatenbee/valis-wsi:1.0.0` directly; VALIS is deliberately not
+re-hosted, because its from-source libvips build is heavy and upstream maintains it.

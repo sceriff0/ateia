@@ -4,7 +4,7 @@
 process CONVERT_IMAGE {
     tag "${meta.patient_id}"
 
-    container "bolt3x/attend_image_analysis:convert_bioformats_2"
+    container "bolt3x/mirage-convert:1.0.0"
 
     input:
     tuple val(meta), path(image_file)

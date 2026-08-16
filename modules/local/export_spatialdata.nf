@@ -21,7 +21,7 @@ process EXPORT_SPATIALDATA {
     tag "${meta.patient_id}"
     label params.spatialdata_include_image ? 'process_high' : 'process_medium'
 
-    container "bolt3x/attend_image_analysis:spatialdata"
+    container "bolt3x/mirage-spatialdata:1.0.0"
 
     input:
     tuple val(meta), path(quant_csv), path(contours_json), path(nucleus_contours_json, stageAs: 'nucleus_contours.json'), path(cell_mask), path(nuclei_mask), path(pyramid)

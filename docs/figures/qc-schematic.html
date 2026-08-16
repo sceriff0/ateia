@@ -430,7 +430,7 @@
         <p class="x">Reads one preprocessed slide and writes a downsampled PNG per channel, named from the
           slide's own channel list.</p>
         <dl>
-          <dt>container</dt><dd>…attend_image_analysis:preprocess</dd>
+          <dt>container</dt><dd>…mirage-preprocess:1.0.0</dd>
           <dt>resources</dt><dd>label process_medium — 4 cpu · 200 GB · 4 h × attempt</dd>
           <dt>publishes</dt><dd>&lt;pid&gt;/qc/preprocess/qc/*.png</dd>
           <dt>kind</dt><dd>preprocess_qc</dd>
@@ -444,7 +444,7 @@
           a full-resolution TIFF plus a scaled PNG. It is the one process whose memory tier is keyed on the
           <b>combined</b> size of two inputs, because it holds both.</p>
         <dl>
-          <dt>container</dt><dd>…attend_image_analysis:debug_diffeo</dd>
+          <dt>container</dt><dd>…mirage-regqc:1.0.0</dd>
           <dt>resources</dt><dd>1 cpu (withName) · 100 / 200 / 300 GB × attempt, tiered · 12 h × attempt (label process_high)</dd>
           <dt>publishes</dt><dd>&lt;pid&gt;/qc/registration/qc/*_QC_RGB.{png,tif} · *_QC_RGB_fullres.tif</dd>
           <dt>kind</dt><dd>registration_qc</dd>
@@ -457,7 +457,7 @@
         <p class="x">Reads the cell mask and the merged per-patient measurement CSV and renders segmentation and
           quantification overlays. Needing both is why this belongs to postprocessing and not to segmentation.</p>
         <dl>
-          <dt>container</dt><dd>…attend_image_analysis:quantification_gpu</dd>
+          <dt>container</dt><dd>…mirage-quantify:1.0.0</dd>
           <dt>resources</dt><dd>label process_medium — 4 cpu · 200 GB · 4 h × attempt</dd>
           <dt>publishes</dt><dd>&lt;pid&gt;/qc/postprocessing/qc/*.png</dd>
           <dt>kind</dt><dd>postprocess_qc</dd>
@@ -522,7 +522,7 @@
       <caption style="font-family:var(--mono);font-size:.63rem;text-transform:uppercase;letter-spacing:.07em;color:var(--ink-3);text-align:left;padding:0 0 7px;">one warp process, two backends — lib/WarpBackends.groovy, keyed on the <code>method</code> input</caption>
       <thead><tr><th>&nbsp;</th><th>valis <span class="tag-def">default</span></th><th>tiled <span class="tag-alt">method=tiled</span></th></tr></thead>
       <tbody>
-        <tr><td class="rk">container</td><td>cdgatenbee/valis-wsi:1.0.0</td><td>bolt3x/attend_image_analysis:tiled</td></tr>
+        <tr><td class="rk">container</td><td>cdgatenbee/valis-wsi:1.0.0</td><td>bolt3x/mirage-tiled:1.0.0</td></tr>
         <tr><td class="rk">stages</td><td>native · rigid · non_rigid · micro</td><td>native · rigid · refined</td></tr>
         <tr><td class="rk">versionTools</td><td>valis · skimage · scipy</td><td>skimage · scipy</td></tr>
         <tr><td class="rk">extra flags</td><td>moving/reference name · <code>--micro-reg</code> · optional
@@ -574,7 +574,7 @@
           <p class="x">One HTML report plus a data bundle, both timestamped. Its <code>versions.yml</code> is
             dropped at publish time by a <code>saveAs</code> that returns null for it.</p>
           <dl>
-            <dt>container</dt><dd>…attend_image_analysis:preprocess</dd>
+            <dt>container</dt><dd>…mirage-preprocess:1.0.0</dd>
             <dt>resources</dt><dd>label process_low — 2 cpu · 32 GB × attempt · 2 h × attempt</dd>
             <dt>publishes</dt><dd>&lt;outdir&gt;/qc/mirage_qc_report_&lt;ts&gt;.html · mirage_qc_data_&lt;ts&gt;/</dd>
           </dl>

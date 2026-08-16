@@ -7,7 +7,7 @@ process EXTRACT_MASK_SERIES {
     tag "${meta.patient_id}"
     label 'process_low'
 
-    container "bolt3x/attend_image_analysis:merge"
+    container "bolt3x/mirage-merge:1.0.0"
 
     input:
     tuple val(meta), path(pyramid)

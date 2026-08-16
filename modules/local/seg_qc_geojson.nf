@@ -42,7 +42,7 @@ process SEG_QC_GEOJSON {
     // approximate_polygon -- exactly what EXTRACT_CELL_PROPERTIES does, in the image
     // this repo already uses for that. Deliberately NOT a segmentation container: this
     // process must not depend on which backend produced the mask.
-    container "bolt3x/attend_image_analysis:quantification_gpu"
+    container "bolt3x/mirage-quantify:1.0.0"
 
     input:
     tuple val(meta), path(cell_mask)

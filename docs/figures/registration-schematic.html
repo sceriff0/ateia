@@ -631,7 +631,7 @@
 
     <div class="bkhead">
       <span class="name">TILED_ADAPTER → TILED_COARSE → TILED_REG_TILE (×N) → TILED_SOLVE → TILED_STITCH</span>
-      <span class="sub">star topology · ORB + RANSAC · phase-correlation mesh · bounded memory · bolt3x/attend_image_analysis:tiled</span>
+      <span class="sub">star topology · ORB + RANSAC · phase-correlation mesh · bounded memory · bolt3x/mirage-tiled:1.0.0</span>
       <span class="flag flag-alt">method = tiled</span>
     </div>
 
@@ -820,7 +820,7 @@
         <tr><td class="k">estimation channel</td><td class="v">channel 0 — the resolved nuclear marker</td><td class="v">resolved nuclear marker — <code>reg_tiled_nuclear_index</code></td></tr>
         <tr><td class="k">resampler</td><td class="v">VALIS / pyvips internals</td><td class="v">bilinear, non-negativity preserved by construction</td></tr>
         <tr><td class="k">JVM / Bio-Formats</td><td class="v">required (heap climbs with the retry ramp)</td><td class="v"><span class="em">none</span> — NumPy / scikit-image / tifffile</td></tr>
-        <tr><td class="k">container</td><td class="v"><code>cdgatenbee/valis-wsi:1.0.0</code></td><td class="v"><code>bolt3x/attend_image_analysis:tiled</code></td></tr>
+        <tr><td class="k">container</td><td class="v"><code>cdgatenbee/valis-wsi:1.0.0</code></td><td class="v"><code>bolt3x/mirage-tiled:1.0.0</code></td></tr>
         <tr><td class="k">memory request</td><td class="v"><span class="em">300 GB</span> × attempt, 8 CPU, 24 h</td><td class="v"><span class="em">8 / 4 / 1 / 4 GB</span> across the four processes</td></tr>
         <tr><td class="k">memory scales with</td><td class="v">the slides (heap sized from inputs / task memory)</td><td class="v"><span class="em">parameters only</span> — thumbnail, tile+halo, out_tile</td></tr>
         <tr><td class="k">parallelism grain</td><td class="v">one task per <span class="em">patient</span></td><td class="v">one task per <span class="em">tile</span> for step 2; per slide elsewhere</td></tr>

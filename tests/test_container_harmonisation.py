@@ -37,19 +37,10 @@ from packaging.requirements import InvalidRequirement, Requirement
 REPO = Path(__file__).resolve().parent.parent
 CONTAINERS = REPO / "containers"
 
-# Docker Hub tag -> containers/ directory. The tag is what modules/local/*.nf names.
-TAG_TO_DIR = {
-    "convert_bioformats_2": "bioformats",
-    "preprocess": "preprocess",
-    "merge": "merge",
-    "tiled": "tiled",
-    "quantification_gpu": "quantification",
-    "spatialdata": "spatialdata",
-    "debug_diffeo": "debug_diffeo",
-    "segmentation_gpu": "segmentation",
-    "cellsam": "cellsam",
-    "instant_seg": "istantseg",
-}
+# Since the one-repo-per-image rename, the component name in the image reference IS the
+# build-context directory name, so no translation table is needed. The previous table mapped
+# ten hand-written tags onto differently-spelled directories, which is precisely how
+# `instant_seg` and `istantseg` came to misspell InstanSeg two different ways.
 
 # The one image allowed to diverge, and why. It is python:3.12-slim and spatialdata>=0.8.0
 # requires zarr>=3, which cannot be installed on the python:3.10 bases the others use.
@@ -222,11 +213,11 @@ def _module_container_and_scripts():
     out = {}
     for nf in sorted((REPO / "modules" / "local").glob("*.nf")):
         text = nf.read_text()
-        tag = re.search(r"attend_image_analysis:([A-Za-z0-9_.\-]+)", text)
-        if not tag:
+        ref = re.search(r"bolt3x/mirage-([a-z0-9-]+):", text)
+        if not ref:
             continue
-        cdir = TAG_TO_DIR.get(tag.group(1))
-        if not cdir:
+        cdir = ref.group(1)
+        if not (CONTAINERS / cdir / "Dockerfile").is_file():
             continue
         scripts = set(re.findall(r"([a-z0-9_]+\.py)\s*\\", text))
         if scripts:

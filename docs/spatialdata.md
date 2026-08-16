@@ -101,7 +101,7 @@ Run it in the export image:
 
 ```bash
 docker run --rm -v "$PWD":/data -w /data \
-    bolt3x/attend_image_analysis:spatialdata \
+    bolt3x/mirage-spatialdata:1.0.0 \
     /data/bin/join_flowpath.py --zarr ... --flowpath ... --out-h5ad ...
 ```
 

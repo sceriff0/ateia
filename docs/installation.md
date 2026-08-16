@@ -111,7 +111,7 @@ The first real run downloads each tool's image, which can take several minutes. 
 
 | Image | Used for |
 |---|---|
-| `bolt3x/attend_image_analysis:*` | preprocessing, segmentation, quantification, export |
+| `bolt3x/mirage-*` | preprocessing, segmentation, quantification, export |
 | `cdgatenbee/valis-wsi:1.0.0` | VALIS registration |
 | `ubuntu:22.04` | size-log aggregation (`AGGREGATE_SIZE_LOGS`) |
 
@@ -119,19 +119,19 @@ The first real run downloads each tool's image, which can take several minutes. 
 
     ```bash
     docker pull cdgatenbee/valis-wsi:1.0.0
-    # pull the attend_image_analysis tag your config pins (check conf/modules.config)
-    docker pull bolt3x/attend_image_analysis:<tag>
+    # pull the mirage-<component> image your config pins (check conf/modules.config)
+    docker pull bolt3x/mirage-<component>:1.0.0
     ```
 
 === "Singularity / Apptainer"
 
     ```bash
     singularity pull docker://cdgatenbee/valis-wsi:1.0.0
-    singularity pull docker://bolt3x/attend_image_analysis:<tag>
+    singularity pull docker://bolt3x/mirage-<component>:1.0.0
     ```
 
 !!! note "Where tags live"
-    The exact `bolt3x/attend_image_analysis` tag is pinned per-process in `modules/local/*.nf` (and resource overrides in `conf/modules.config`). MIRAGE never uses `:latest`. Note that the current tags are content-descriptive (e.g. `preprocess`, `tiled`), not immutable version tags — see [`containers/README.md`](https://github.com/sceriff0/mirage/blob/main/containers/README.md).
+    The exact `bolt3x/mirage-<component>` image and version are pinned per-process in `modules/local/*.nf` (and resource overrides in `conf/modules.config`). MIRAGE never uses `:latest`. Each image has its own Docker Hub repository and an immutable version tag matching `manifest.version` (currently `1.0.0`) — see [`containers/README.md`](https://github.com/sceriff0/mirage/blob/main/containers/README.md).
 
 ## GPU notes
 
