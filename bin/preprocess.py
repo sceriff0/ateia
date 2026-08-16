@@ -20,6 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Tuple
 
@@ -27,6 +28,7 @@ import numpy as np
 import tifffile
 from logger import configure_logging, get_logger
 from numpy.typing import NDArray
+from tiled_io import open_lazy
 
 os.environ["JAX_PLATFORM_NAME"] = "cpu"  # Force CPU for JAX
 
@@ -230,6 +232,124 @@ def _process_single_channel_from_stack(
     return channel_index, corrected, True
 
 
+class _StreamingImageStats:
+    """Accumulates ``log_image_stats``' whole-array statistics (min, max, mean, and
+    the uint16 "suspicious high values" check -- ``bin/utils/validation.py:31-71``)
+    across per-channel reads, and emits the SAME log line(s) it would have emitted
+    from a single whole-array call -- once, after every channel has been folded in,
+    not once per channel and not silently dropped.
+
+    Task 5's lazy read moves the per-channel read into worker threads (see
+    ``_read_and_process_channel_lazy``), so no single call ever sees the whole
+    stack; ``add_channel`` is called once per channel, from whichever worker thread
+    read that channel, and folds its contribution into running totals under a lock.
+    ``finalize`` (called from the main thread, after every worker has returned) logs
+    the aggregate exactly once.
+
+    min/max/high-count/size are combined exactly -- the same numbers a whole-array
+    call would produce, since min/max/counting are associative over a partition of
+    the array into channels. mean is computed as
+    ``(sum of all channels' float64 sums) / (total element count)``, which is
+    numerically the same value NumPy's own ``.mean()`` computes for the same data
+    concatenated in any order, up to floating-point summation-order differences of
+    at most a few ULP -- invisible at the ``.2f`` precision the log line prints, and
+    the same class of approximation Task 3 accepted for the analogous
+    ``_StreamingNegativeClip`` in ``bin/split_multichannel.py``.
+    """
+
+    def __init__(self, dtype, shape, logger, stage_name):
+        self._dtype = dtype
+        self._shape = shape
+        self._logger = logger
+        self._stage = stage_name
+        self._lock = threading.Lock()
+        self._min = None
+        self._max = None
+        self._sum = 0.0
+        self._size = 0
+        self._high_count = 0
+
+    def add_channel(self, channel_data: NDArray) -> None:
+        """Fold one channel's statistics into the running totals. Thread-safe: each
+        caller passes an array only it has read (see ``_read_and_process_channel_lazy``),
+        and the shared totals are updated under a lock.
+        """
+        c_min = channel_data.min()
+        c_max = channel_data.max()
+        c_sum = float(np.sum(channel_data, dtype=np.float64))
+        c_size = int(channel_data.size)
+        c_high = (
+            int(np.sum(channel_data > 60000)) if self._dtype == np.uint16 else 0
+        )
+        with self._lock:
+            self._min = c_min if self._min is None else min(self._min, c_min)
+            self._max = c_max if self._max is None else max(self._max, c_max)
+            self._sum += c_sum
+            self._size += c_size
+            self._high_count += c_high
+
+    def finalize(self) -> None:
+        """Log the aggregate exactly once, matching ``log_image_stats``' whole-array
+        log lines (``validation.py:55-71``). No-op if no channel was ever added."""
+        if self._size == 0:
+            return
+
+        mean_val = self._sum / self._size
+        self._logger.info(
+            f"[{self._stage}] Image stats: dtype={self._dtype}, shape={self._shape}, "
+            f"min={self._min}, max={self._max}, mean={mean_val:.2f}"
+        )
+
+        if self._min < 0:
+            self._logger.warning(
+                f"[{self._stage}] Negative values detected: min={self._min}"
+            )
+
+        if self._dtype == np.uint16 and self._max > 60000:
+            high_pct = self._high_count / self._size * 100
+            if high_pct > 0.1:
+                self._logger.warning(
+                    f"[{self._stage}] Suspicious high values (potential wrapped "
+                    f"negatives): {self._high_count} pixels ({high_pct:.2f}%) > 60000"
+                )
+
+
+def _read_and_process_channel_lazy(
+    image_path: str,
+    channel_index: int,
+    channel_name: str,
+    fov_size: Tuple[int, int],
+    skip_nuclear: bool,
+    nuclear_markers: List[str] | None,
+    stats_agg: "_StreamingImageStats",
+) -> Tuple[int, NDArray, bool]:
+    """Thread-pool worker entry point for the lazy read path.
+
+    THREAD SAFETY: opens its OWN ``open_lazy`` handle on ``image_path`` -- a fresh
+    ``tifffile.imread(..., aszarr=True)`` store, never one shared with any other
+    thread or with the main thread -- reads exactly one channel plane, and closes
+    that handle before doing anything else. tifffile's zarr view is not documented
+    thread-safe for concurrent region reads through a SHARED store; giving every
+    worker its own store sidesteps that question by construction, since no
+    mutable I/O state is ever shared across threads. This is exercised directly by
+    ``tests/test_preprocess_lazy_concurrency.py``: the real ``ThreadPoolExecutor``
+    path, at real concurrency, run many times against known per-channel ground
+    truth -- a proof of "this specific design didn't corrupt output over N runs",
+    not a proof that no race can ever occur.
+    """
+    lazy_arr, _lazy_dtype, close_lazy = open_lazy(image_path)
+    try:
+        channel_image = np.asarray(lazy_arr[channel_index, :, :])
+    finally:
+        close_lazy()
+
+    stats_agg.add_channel(channel_image)
+
+    return _process_single_channel_from_stack(
+        channel_image, channel_index, channel_name, fov_size, skip_nuclear, nuclear_markers
+    )
+
+
 def preprocess_multichannel_image(
     image_path: str,
     channel_names: List[str],
@@ -273,25 +393,61 @@ def preprocess_multichannel_image(
             logger.debug(
                 f"  First page: shape={first_page.shape}, dtype={first_page.dtype}"
             )
+        # Series-level shape/ndim/dtype is metadata only -- it does not decode any
+        # pixel data (same guarantee tifffile.imread(..., aszarr=True) relies on) --
+        # so this probe replaces the old eager tifffile.imread(image_path) for
+        # everything that only needs the RAW on-disk shape (2-D vs 3-D, channel-last
+        # detection), before any 2-D-expand / channel-last-transpose logic runs.
+        series0 = tif.series[0]
+        raw_shape = tuple(series0.shape)
+        raw_ndim = series0.ndim
+        stack_dtype = series0.dtype
 
-    multichannel_stack = tifffile.imread(image_path)
-    logger.info(f"Loaded image shape: {multichannel_stack.shape}")
+    logger.info(f"Loaded image shape: {raw_shape}")
 
-    # Checkpoint 1: Log input image statistics
-    log_image_stats(multichannel_stack, "input", logger)
+    # (Y, X, C) on disk: needs two (or more) planes at once to decide whether the
+    # data is genuinely multichannel or greyscale stored as RGB -- not separable
+    # per-channel the way the rest of this function is, and never produced by this
+    # pipeline's own writers (CONVERT_IMAGE / this module always emit axes="CYX").
+    # Task 5 keeps this branch on the exact pre-change eager path -- same
+    # whole-stack tifffile.imread, same log_image_stats call on the pre-transpose
+    # array -- rather than force it through open_lazy (whose (C, H, W) contract
+    # assumes channel-FIRST). See generate_preprocess_qc.py / split_multichannel.py
+    # for the same fallback applied at Tasks 2/4's sites.
+    channel_last = (
+        raw_ndim == 3
+        and raw_shape[2] == len(channel_names)
+        and raw_shape[0] != len(channel_names)
+    )
 
-    if multichannel_stack.ndim == 2:
-        logger.debug("  Converting 2D to 3D (adding channel dimension)")
-        multichannel_stack = np.expand_dims(multichannel_stack, axis=0)
-    elif (
-        multichannel_stack.ndim == 3
-        and multichannel_stack.shape[2] == len(channel_names)
-        and multichannel_stack.shape[0] != len(channel_names)
-    ):
+    if channel_last:
+        logger.debug("  Loading whole stack eagerly (channel-last layout on disk)")
+        multichannel_stack = tifffile.imread(image_path)
+
+        # Checkpoint 1: Log input image statistics (whole-array, pre-transpose --
+        # matches the pre-change call exactly).
+        log_image_stats(multichannel_stack, "input", logger)
+
         logger.debug("  Transposing from (Y, X, C) to (C, Y, X)")
         multichannel_stack = np.transpose(multichannel_stack, (2, 0, 1))
+        n_channels, H, W = multichannel_stack.shape
+        stack_dtype = multichannel_stack.dtype
+    else:
+        # 2-D on disk is presented as C=1 (matching the old np.expand_dims(...,
+        # axis=0) branch); channel-first 3-D on disk needs no reshaping at all --
+        # either way nothing here has to touch pixel data.
+        if raw_ndim == 2:
+            n_channels, H, W = 1, raw_shape[0], raw_shape[1]
+        else:
+            n_channels, H, W = raw_shape
 
-    n_channels, H, W = multichannel_stack.shape
+        # Checkpoint 1: Log input image statistics -- streamed across the
+        # per-channel reads below (each happens inside its OWN worker thread, its
+        # OWN open_lazy handle: see _read_and_process_channel_lazy) and aggregated
+        # to the SAME numbers a single whole-array log_image_stats call would have
+        # produced. See _StreamingImageStats.
+        stats_agg = _StreamingImageStats(stack_dtype, raw_shape, logger, "input")
+
     logger.info(f"Processing {n_channels} channels ({H}x{W}) with {n_workers} workers")
 
     if n_channels != len(channel_names):
@@ -306,11 +462,12 @@ def preprocess_multichannel_image(
     results = {}
     correction_applied = {}
 
-    with ThreadPoolExecutor(max_workers=n_workers) as executor:
-        futures = []
-        for i in range(n_channels):
-            future = executor.submit(
-                _process_single_channel_from_stack,
+    if channel_last:
+        # Whole stack already resident in memory (see above) -- no benefit to a
+        # lazy per-thread read here, so each worker gets its pre-sliced channel
+        # exactly as the pre-change code did.
+        def _channel_worker(i: int):
+            return _process_single_channel_from_stack(
                 multichannel_stack[i, ...],
                 i,
                 channel_names[i],
@@ -318,12 +475,31 @@ def preprocess_multichannel_image(
                 skip_nuclear,
                 nuclear_markers,
             )
-            futures.append(future)
+    else:
+        # THREAD SAFETY: each call opens and closes its OWN open_lazy handle inside
+        # the worker thread that runs it -- see _read_and_process_channel_lazy's
+        # docstring and tests/test_preprocess_lazy_concurrency.py.
+        def _channel_worker(i: int):
+            return _read_and_process_channel_lazy(
+                str(image_path),
+                i,
+                channel_names[i],
+                fov_size,
+                skip_nuclear,
+                nuclear_markers,
+                stats_agg,
+            )
+
+    with ThreadPoolExecutor(max_workers=n_workers) as executor:
+        futures = [executor.submit(_channel_worker, i) for i in range(n_channels)]
 
         for future in as_completed(futures):
             channel_index, result_array, was_corrected = future.result()
             results[channel_index] = result_array
             correction_applied[channel_index] = was_corrected
+
+    if not channel_last:
+        stats_agg.finalize()
 
     preprocessed_channels = [results[i] for i in range(n_channels)]
 
@@ -337,24 +513,22 @@ def preprocess_multichannel_image(
     preprocessed = np.stack(preprocessed_channels, axis=0)
 
     # Cast back to original dtype (BaSiC outputs float32, but downstream expects uint16)
-    if preprocessed.dtype != multichannel_stack.dtype:
-        logger.info(
-            f"Casting from {preprocessed.dtype} back to {multichannel_stack.dtype}"
-        )
+    if preprocessed.dtype != stack_dtype:
+        logger.info(f"Casting from {preprocessed.dtype} back to {stack_dtype}")
         preprocessed = (
             np.clip(
                 preprocessed,
-                np.iinfo(multichannel_stack.dtype).min,
-                np.iinfo(multichannel_stack.dtype).max,
+                np.iinfo(stack_dtype).min,
+                np.iinfo(stack_dtype).max,
             )
-            if np.issubdtype(multichannel_stack.dtype, np.integer)
+            if np.issubdtype(stack_dtype, np.integer)
             else preprocessed
         )
-        if np.issubdtype(multichannel_stack.dtype, np.integer):
+        if np.issubdtype(stack_dtype, np.integer):
             # Round to nearest (half-to-even) before casting so fractional BaSiC
             # output doesn't get silently truncated toward zero (astype floors).
             preprocessed = np.round(preprocessed)
-        preprocessed = preprocessed.astype(multichannel_stack.dtype)
+        preprocessed = preprocessed.astype(stack_dtype)
 
     # Log output statistics after all processing
     log_image_stats(preprocessed, "after_basic_correction", logger)
