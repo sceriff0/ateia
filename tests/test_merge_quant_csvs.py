@@ -145,3 +145,112 @@ def test_configured_fiducial_is_protected_from_overwrite(tmp_path):
 
     assert list(out["CELLTOX"]) == [10.0, 20.0], "protected fiducial was overwritten"
     assert list(out["CD3"]) == [7.0, 8.0], "unprotected marker was not overwritten"
+
+
+# ---------------------------------------------------------------------------
+# Characterisation of merge_intensities, written before PERF-PLAN 1.4 replaces
+# the N sequential merges with one concat (measured 2.05x / -274 MB).
+#
+# These pin the behaviour the refactor must preserve. The subtle one is
+# FILE-vs-FILE collision: the loop mutates `merged` as it goes, so by the time
+# the second file is considered its marker is already in the base. A deferred
+# concat that only checks the ORIGINAL base columns would silently change both
+# the overwrite and the protection outcome, and no existing test covered it.
+# ---------------------------------------------------------------------------
+
+
+def test_a_later_file_overwrites_an_earlier_file_s_marker(tmp_path):
+    base = pd.DataFrame({"label": [1, 2], "area": [10.0, 20.0]})
+    first = _write_csv(tmp_path, "a.csv", pd.DataFrame({"label": [1, 2], "CD3": [100, 200]}))
+    second = _write_csv(tmp_path, "b.csv", pd.DataFrame({"label": [1, 2], "CD3": [999, 888]}))
+
+    out = mqc.merge_intensities(base, [first, second])
+
+    assert list(out["CD3"]) == [999, 888]
+    assert list(out.columns).count("CD3") == 1
+
+
+def test_protection_keeps_the_first_file_s_marker_against_a_later_file(tmp_path):
+    """Protection is evaluated against the running table, so file 1 wins, not the base."""
+    base = pd.DataFrame({"label": [1, 2], "area": [10.0, 20.0]})
+    first = _write_csv(tmp_path, "a.csv", pd.DataFrame({"label": [1, 2], "CD3": [100, 200]}))
+    second = _write_csv(tmp_path, "b.csv", pd.DataFrame({"label": [1, 2], "CD3": [999, 888]}))
+
+    out = mqc.merge_intensities(base, [first, second], protected_cols=("CD3",))
+
+    assert list(out["CD3"]) == [100, 200]
+
+
+def test_a_cell_absent_from_an_intensity_file_becomes_nan(tmp_path):
+    """`how="left"` semantics: the base keeps every cell, missing values are NaN."""
+    base = pd.DataFrame({"label": [1, 2, 3], "area": [10.0, 20.0, 30.0]})
+    partial = _write_csv(tmp_path, "a.csv", pd.DataFrame({"label": [1, 3], "CD3": [5.0, 7.0]}))
+
+    out = mqc.merge_intensities(base, [partial])
+
+    assert len(out) == 3
+    assert list(out["label"]) == [1, 2, 3]
+    assert out.loc[out["label"] == 2, "CD3"].isna().all()
+    assert out.loc[out["label"] == 3, "CD3"].iloc[0] == 7.0
+
+
+def test_extra_cells_in_an_intensity_file_are_dropped(tmp_path):
+    base = pd.DataFrame({"label": [1, 2], "area": [10.0, 20.0]})
+    extra = _write_csv(
+        tmp_path, "a.csv", pd.DataFrame({"label": [1, 2, 99], "CD3": [5.0, 6.0, 7.0]})
+    )
+
+    out = mqc.merge_intensities(base, [extra])
+
+    assert list(out["label"]) == [1, 2]
+    assert 99 not in set(out["label"])
+
+
+def test_column_order_follows_file_order(tmp_path):
+    base = pd.DataFrame({"label": [1], "area": [10.0]})
+    f1 = _write_csv(tmp_path, "a.csv", pd.DataFrame({"label": [1], "CD3": [1.0]}))
+    f2 = _write_csv(tmp_path, "b.csv", pd.DataFrame({"label": [1], "CD8": [2.0]}))
+
+    out = mqc.merge_intensities(base, [f1, f2])
+
+    assert list(out.columns) == ["label", "area", "CD3", "CD8"]
+
+
+def test_a_file_with_no_marker_columns_is_skipped(tmp_path):
+    base = pd.DataFrame({"label": [1], "area": [10.0]})
+    empty = _write_csv(tmp_path, "a.csv", pd.DataFrame({"label": [1]}))
+
+    out = mqc.merge_intensities(base, [empty])
+
+    assert list(out.columns) == ["label", "area"]
+
+
+def test_base_row_order_is_preserved_even_if_the_file_is_shuffled(tmp_path):
+    base = pd.DataFrame({"label": [3, 1, 2], "area": [30.0, 10.0, 20.0]})
+    shuffled = _write_csv(
+        tmp_path, "a.csv", pd.DataFrame({"label": [2, 3, 1], "CD3": [22.0, 33.0, 11.0]})
+    )
+
+    out = mqc.merge_intensities(base, [shuffled])
+
+    assert list(out["label"]) == [3, 1, 2]
+    assert list(out["CD3"]) == [33.0, 11.0, 22.0]
+
+
+def test_a_duplicate_label_is_refused_rather_than_silently_duplicating_cells(tmp_path):
+    """DELIBERATE DIVERGENCE from the old sequential merge.
+
+    `merged.merge(..., on="label", how="left")` with a duplicated label in the incoming file
+    duplicated every matching base row, silently inflating the cell count for everything
+    downstream. The reindex cannot reproduce that, and reproducing it would be wrong: one row
+    per cell is the contract for a per-cell quantification CSV.
+    """
+    import pytest
+
+    base = pd.DataFrame({"label": [1, 2], "area": [10.0, 20.0]})
+    dupes = _write_csv(
+        tmp_path, "a.csv", pd.DataFrame({"label": [1, 1, 2], "CD3": [5.0, 6.0, 7.0]})
+    )
+
+    with pytest.raises(ValueError, match="duplicate label"):
+        mqc.merge_intensities(base, [dupes])

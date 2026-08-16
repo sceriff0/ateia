@@ -123,12 +123,6 @@ def compute_compartment_intensities(
             f"mask/channel shape mismatch: {cell_mask.shape} vs {channel.shape}"
         )
 
-    valid_labels = np.unique(cell_mask)
-    valid_labels = valid_labels[valid_labels != 0]
-    if len(valid_labels) == 0:
-        logger.warning("[WARN] No cells found in cell mask")
-        return pd.DataFrame()
-
     n = int(cell_mask.max()) + 1
     flat_cell = cell_mask.ravel()
     flat_val = channel.ravel().astype(np.float64)
@@ -136,6 +130,19 @@ def compute_compartment_intensities(
     # Whole-cell sums/counts keyed by cell label.
     cell_sum = np.bincount(flat_cell, weights=flat_val, minlength=n)
     cell_count = np.bincount(flat_cell, minlength=n)
+
+    # The label set comes from the bincount that was needed anyway -- one linear pass whose
+    # non-zero bins ARE the labels present, ascending. This used to be `np.unique(cell_mask)`,
+    # a comparison sort over every pixel (1.6x10^9 on a 40k x 40k slide) computed immediately
+    # before this bincount. Identical output: np.unique returns ascending distinct values,
+    # np.nonzero(counts) returns ascending indices with at least one pixel. The dtype is kept
+    # as the mask's so the published `label` column is unchanged.
+    # Guarded by tests/test_no_full_mask_unique.py.
+    valid_labels = np.nonzero(cell_count)[0]
+    valid_labels = valid_labels[valid_labels != 0].astype(cell_mask.dtype, copy=False)
+    if len(valid_labels) == 0:
+        logger.warning("[WARN] No cells found in cell mask")
+        return pd.DataFrame()
     sums = {"Cell": cell_sum}
     counts = {"Cell": cell_count}
 

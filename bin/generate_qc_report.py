@@ -9,6 +9,7 @@ import argparse
 import base64
 import csv
 import html
+import itertools
 import json
 import logging
 import shutil
@@ -118,6 +119,29 @@ def parse_csv_table(csv_path):
         for row in reader:
             rows.append([row.get(h, "") for h in display_headers])
     return display_headers, rows
+
+
+def parse_csv_table_head(csv_path, limit):
+    """Parse only the first ``limit`` rows, and count the rest without building them.
+
+    Returns ``(headers, rows, total)``. The per-cell residual CSVs are one row per cell, and the
+    QC report shows 500 of them -- materialising the other few hundred thousand to compute a
+    length is the whole cost. Measured 2.53x / -248 MB (PERF-PLAN C16).
+
+    ``itertools.islice``, NOT ``zip(reader, range(limit))``: zip pulls one item from the reader
+    that it never yields, so the tail count comes out one short. Measured on a 400 000-row file,
+    the zip form reported 399 999. Pinned by the boundary case in
+    tests/test_no_full_mask_unique.py.
+    """
+    with open(csv_path, newline="") as fh:
+        reader = csv.DictReader(fh)
+        headers = reader.fieldnames or []
+        rows = [
+            [row.get(h, "") for h in headers]
+            for row in itertools.islice(reader, limit)
+        ]
+        total = len(rows) + sum(1 for _ in reader)
+    return headers, rows, total
 
 
 def parse_versions_yml(path):
@@ -867,15 +891,15 @@ def seg_residuals_section(seg_residuals_dir):
             f"{html.escape(Path(csv_path).name)}</p>"
         )
         try:
-            headers, rows = parse_csv_table(csv_path)
+            headers, shown, total = parse_csv_table_head(
+                csv_path, SEG_RESIDUALS_MAX_ROWS
+            )
         except Exception as exc:  # noqa: BLE001 - report, never crash
             parts.append(
                 '<p class="empty-notice">Could not parse '
                 f"{html.escape(Path(csv_path).name)}: {html.escape(str(exc))}</p>"
             )
             continue
-        total = len(rows)
-        shown = rows[:SEG_RESIDUALS_MAX_ROWS]
         if total > len(shown):
             parts.append(
                 "<p style='font-size:0.8rem;color:#888;margin:0 0 6px;'>"

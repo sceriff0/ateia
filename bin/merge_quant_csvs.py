@@ -15,6 +15,7 @@ import argparse
 import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 # Add parent directory to path to import lib modules
@@ -66,7 +67,19 @@ def merge_intensities(
     case the base is kept and the incoming column is dropped.
     """
     merged = morphology.copy()
-    morphology_cells = set(merged["label"])
+    base_labels = merged["label"].to_numpy()
+
+    # Marker columns are collected and concatenated ONCE at the end rather than merged in
+    # sequence. `merged.merge(..., how="left")` copies the whole growing table on every file, so
+    # N files cost N copies of an ever-wider frame; measured 2.05x / -274 MB (PERF-PLAN C12b).
+    # `how="left"` on a unique key IS a reindex, which is what makes the two equivalent.
+    #
+    # `pending` preserves the one subtlety this refactor could have broken: the old loop mutated
+    # `merged` as it went, so a marker arriving in file 2 collided with the copy file 1 had
+    # already added. Collision is therefore checked against the base table AND the not-yet-
+    # concatenated columns, so a later file still overwrites an earlier one, and `protected_cols`
+    # still keeps the EARLIER file's values. Pinned by tests/test_merge_quant_csvs.py.
+    pending: dict[str, object] = {}
 
     for csv_file in csv_files:
         df = pd.read_csv(csv_file)
@@ -76,9 +89,9 @@ def merge_intensities(
             logger.warning("%s: No marker columns found, skipping", csv_file.name)
             continue
 
-        # Collision handling: for any marker already present in the base table.
+        # Collision handling: for any marker already present in the base table or queued.
         for col in list(marker_cols):
-            if col in merged.columns:
+            if col in merged.columns or col in pending:
                 if col in protected_cols:
                     df = df.drop(columns=[col])
                     logger.info(
@@ -87,7 +100,10 @@ def merge_intensities(
                         col,
                     )
                 else:
-                    merged = merged.drop(columns=[col])
+                    if col in pending:
+                        del pending[col]
+                    else:
+                        merged = merged.drop(columns=[col])
                     logger.info(
                         "%s: column '%s' overwritten by new cycle (new wins)",
                         csv_file.name,
@@ -97,22 +113,37 @@ def merge_intensities(
         if not marker_cols:
             continue
 
-        # Validate cell labels
-        intensity_cells = set(df["label"])
-        missing = morphology_cells - intensity_cells
-        extra = intensity_cells - morphology_cells
-        if missing:
+        # Validate cell labels. np.isin over the label arrays, not two python sets: the sets
+        # were one python int object per cell, built per file.
+        file_labels = df["label"].to_numpy()
+        n_missing = int((~np.isin(base_labels, file_labels)).sum())
+        n_extra = int((~np.isin(file_labels, base_labels)).sum())
+        if n_missing:
+            logger.warning("%s: Missing %d cells from base", csv_file.name, n_missing)
+        if n_extra:
             logger.warning(
-                "%s: Missing %d cells from base", csv_file.name, len(missing)
-            )
-        if extra:
-            logger.warning(
-                "%s: Has %d extra cells (will be ignored)", csv_file.name, len(extra)
+                "%s: Has %d extra cells (will be ignored)", csv_file.name, n_extra
             )
 
-        merge_df = df[["label"] + marker_cols]
-        merged = merged.merge(merge_df, on="label", how="left")
+        # A duplicated label makes the reindex ambiguous. The old sequential merge did not
+        # error on it -- it DUPLICATED every matching base row, silently changing the cell
+        # count downstream. Refusing is the intended behaviour, not a regression.
+        if df["label"].duplicated().any():
+            dupes = df.loc[df["label"].duplicated(), "label"].unique()[:5]
+            raise ValueError(
+                f"{csv_file.name}: duplicate label(s) {list(dupes)} in a per-cell "
+                "quantification CSV; one row per cell is required"
+            )
+
+        aligned = df.set_index("label").reindex(base_labels)
+        for col in marker_cols:
+            pending[col] = aligned[col].to_numpy()
         logger.info("  + %s from %s", ", ".join(marker_cols), csv_file.name)
+
+    if pending:
+        merged = pd.concat(
+            [merged, pd.DataFrame(pending, index=merged.index)], axis=1
+        )
 
     return merged
 

@@ -61,14 +61,15 @@ def extract_morphology(
     """
     mask = np.ascontiguousarray(mask.squeeze())
 
-    labels, counts = np.unique(mask, return_counts=True)
-    valid_labels = labels[labels != 0]
-
-    if len(valid_labels) == 0:
+    # `mask.max()` is one linear pass; `np.unique(mask, return_counts=True)` was a comparison
+    # sort over every pixel -- 1.6x10^9 of them on a 40k x 40k slide -- and its `counts` was
+    # never read. regionprops_table below recomputes the label set anyway and returns it in
+    # ascending order, which is exactly what np.unique produced. Measured 3.13x / -80 MB
+    # (PERF-PLAN C3a). Guarded by tests/test_no_full_mask_unique.py.
+    if int(mask.max()) == 0:
         logger.warning("No cells found in mask")
         return None, None, None
 
-    logger.info(f"Computing morphology for {len(valid_labels)} cells...")
     props = regionprops_table(
         mask,
         properties=[
@@ -90,8 +91,26 @@ def extract_morphology(
         inplace=True,
     )
 
+    # The label set, taken from the pass that already computed it. Identical to the old
+    # `np.unique(mask)[!= 0]`: regionprops_table emits one row per non-zero label, ascending.
+    valid_labels = props_df.index.to_numpy()
+
     logger.info(f"Morphology computed for {len(props_df)} cells")
     return props_df, mask, valid_labels
+
+
+def _label_bboxes(props_df: pd.DataFrame):
+    """Yield ``(label, minr, minc, maxr, maxc)`` for each row, in row order.
+
+    Replaces ``props_df.iterrows()``, which materialises one pandas Series per row -- 60k Series
+    objects on a 60k-cell slide, each boxing the four integers this loop actually wants.
+    Measured 4.02x (PERF-PLAN C12a). Identity: same integers, same order; pinned against
+    ``iterrows`` directly in tests/test_no_full_mask_unique.py.
+    """
+    labels = props_df.index.to_numpy()
+    bboxes = props_df[["bbox-0", "bbox-1", "bbox-2", "bbox-3"]].to_numpy()
+    for label, (minr, minc, maxr, maxc) in zip(labels, bboxes):
+        yield label, int(minr), int(minc), int(maxr), int(maxc)
 
 
 def extract_contours(
@@ -135,14 +154,7 @@ def extract_contours(
     skipped_no_contour = 0
     skipped_too_simple = 0
 
-    for label, row in props_df.iterrows():
-        minr, minc, maxr, maxc = (
-            int(row["bbox-0"]),
-            int(row["bbox-1"]),
-            int(row["bbox-2"]),
-            int(row["bbox-3"]),
-        )
-
+    for label, minr, minc, maxr, maxc in _label_bboxes(props_df):
         # Crop binary mask for this cell, padded by 1px to ensure closed contours
         # for cells touching the image border (find_contours returns open contours
         # at array edges, which would produce incorrect polygon geometry)
