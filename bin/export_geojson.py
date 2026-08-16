@@ -494,8 +494,10 @@ def main() -> int:
     # Save CSV with both raw and z-score columns
     output_csv = str(Path(args.output_dir) / f"{args.output_prefix}_data.csv")
     logger.info(f"Saving CSV: {output_csv}")
-    csv_df = cell_df_with_z.copy()
-    csv_df.to_csv(output_csv, index=False)
+    # No defensive copy: to_csv only reads, and cell_df_with_z is the widest frame in the
+    # pipeline (every marker, raw AND z-scored, one row per cell), so copying it doubled the
+    # peak at the very end of the run for nothing.
+    cell_df_with_z.to_csv(output_csv, index=False)
 
     # Summary
     logger.info("=" * 80)
@@ -504,7 +506,8 @@ def main() -> int:
     logger.info("Output files:")
     logger.info(f"  GeoJSON: {output_geojson} ({num_exported} cells)")
     logger.info(
-        f"  CSV:     {output_csv} ({len(csv_df)} cells, {len(csv_df.columns)} columns)"
+        f"  CSV:     {output_csv} ({len(cell_df_with_z)} cells, "
+        f"{len(cell_df_with_z.columns)} columns)"
     )
     logger.info("")
     logger.info("To view in QuPath:")

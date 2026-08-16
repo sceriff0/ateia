@@ -81,7 +81,7 @@ def write_checkpoint(registrar, out_dir, micro_registration=True) -> dict:
         "errors": errors,
     }
     with open(os.path.join(out_dir, MANIFEST_NAME), "w") as f:
-        json.dump(manifest, f, indent=2)
+        f.write(json.dumps(manifest, indent=2))
     return manifest
 
 
@@ -100,7 +100,7 @@ def set_micro_registration(out_dir, ran: bool) -> bool:
             manifest = json.load(f)
         manifest["micro_registration"] = bool(ran)
         with open(manifest_f, "w") as f:
-            json.dump(manifest, f, indent=2)
+            f.write(json.dumps(manifest, indent=2))
         return True
     except Exception:  # noqa: BLE001 — QC input, must not fail registration
         return False
