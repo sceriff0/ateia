@@ -29,9 +29,9 @@ from csbdeep.utils import normalize
 from image_utils import ensure_dir
 from logger import configure_logging, get_logger
 from numpy.typing import NDArray
+from segment_io import extract_dapi_channel as _extract_dapi_channel_impl
 from skimage import segmentation
 from stardist.models import StarDist2D
-from validation import clip_negative_values
 
 logger = get_logger(__name__)
 
@@ -48,7 +48,17 @@ def extract_dapi_channel(
     multichannel_image_path: str, dapi_channel_index: int = 0
 ) -> Tuple[NDArray, dict]:
     """
-    Extract DAPI channel from multichannel OME-TIFF image using memory-mapped I/O.
+    Extract DAPI channel from multichannel OME-TIFF image using a lazy zarr read.
+
+    Delegates to ``segment_io.extract_dapi_channel`` (``bin/utils/segment_io.py``),
+    which reads through ``tiled_io.open_lazy`` -- a tifffile zarr view that decodes
+    only the tiles a slice actually touches. This is NOT the same as
+    ``tif.asarray(out="memmap")``: on compressed input that call does not map the
+    source file at all, it decodes the ENTIRE image into a new full-size
+    *uncompressed* temp file and memory-maps THAT, so "extracting only the DAPI
+    channel" from it happens only after every channel has already been decoded.
+    ``segment_io`` lives outside this module specifically so it stays importable
+    (and testable) without this module's ``stardist``/``csbdeep`` dependencies.
 
     Parameters
     ----------
@@ -69,89 +79,9 @@ def extract_dapi_channel(
     ValueError
         If image has wrong dimensions or DAPI channel doesn't exist.
     """
-    logger.info(f"Loading multichannel image: {multichannel_image_path}")
-
-    # Use memory-mapped I/O to avoid loading entire multichannel image
-    with tifffile.TiffFile(multichannel_image_path) as tif:
-        # Get shape and metadata WITHOUT loading data
-        # Use series if available (OME-TIFF), otherwise fall back to pages
-        if tif.series:
-            source = tif.series[0]
-        else:
-            # Non-OME TIFF or corrupted OME metadata - fall back to pages
-            logger.warning("No OME series found, falling back to raw pages")
-            if not tif.pages:
-                raise ValueError(
-                    f"TIFF file appears corrupted: {multichannel_image_path}"
-                )
-            source = tif.pages[0]
-
-        image_shape = source.shape
-        if len(image_shape) == 2:
-            # Single channel
-            n_channels = 1
-        elif len(image_shape) == 3:
-            # For OME series: shape is (C, Y, X); for raw pages fallback: use asarray
-            n_channels = image_shape[0]
-        else:
-            n_channels = 1
-
-        image_dtype = source.dtype
-
-        # Extract OME metadata if available
-        metadata = {}
-        if hasattr(tif, "ome_metadata") and tif.ome_metadata:
-            metadata["ome"] = tif.ome_metadata
-            logger.info("  ✓ OME metadata found")
-
-        logger.info(f"  Image shape: {image_shape}")
-        logger.info(f"  Image dtype: {image_dtype}")
-
-        # Memory-map the file (doesn't load into RAM)
-        image_memmap = tif.asarray(out="memmap")
-
-        # Handle different image formats
-        if image_memmap.ndim == 2:
-            # Single channel image, assume it's DAPI
-            logger.info("  - Single channel image (assuming DAPI)")
-            # Load single channel into RAM
-            dapi_image = np.array(image_memmap, copy=True)
-            # Clip negative values from interpolation artifacts (e.g., bicubic overshoot)
-            dapi_image = clip_negative_values(
-                dapi_image, logger, stage_name="extract_dapi"
-            )
-        elif image_memmap.ndim == 3:
-            # Multichannel image (C, Y, X) format
-            n_channels = image_memmap.shape[0]
-            logger.info(f"  - Multichannel image with {n_channels} channels")
-
-            if dapi_channel_index >= n_channels:
-                raise ValueError(
-                    f"DAPI channel index {dapi_channel_index} out of range "
-                    f"for image with {n_channels} channels"
-                )
-
-            # Extract ONLY the DAPI channel into RAM (not all channels)
-            logger.info(
-                f"  - Extracting DAPI channel (index {dapi_channel_index}) - memory efficient"
-            )
-            dapi_image = np.array(image_memmap[dapi_channel_index, :, :], copy=True)
-            # Clip negative values from interpolation artifacts (e.g., bicubic overshoot)
-            dapi_image = clip_negative_values(
-                dapi_image, logger, stage_name="extract_dapi"
-            )
-            logger.info(f"  - Extracted DAPI channel (index {dapi_channel_index})")
-        else:
-            raise ValueError(
-                f"Unexpected image dimensions: {image_shape}. "
-                f"Expected 2D (Y, X) or 3D (C, Y, X)"
-            )
-
-    logger.info(f"  DAPI channel shape: {dapi_image.shape}")
-    logger.info(f"  DAPI dtype: {dapi_image.dtype}")
-    logger.info(f"  DAPI value range: [{dapi_image.min()}, {dapi_image.max()}]")
-
-    return dapi_image, metadata
+    return _extract_dapi_channel_impl(
+        multichannel_image_path, dapi_channel_index, logger=logger
+    )
 
 
 def normalize_dapi(
