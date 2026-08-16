@@ -17,6 +17,20 @@ Notes
 -----
 This module consolidates QC generation code that was previously embedded
 in registration scripts (register_cpu.py, register_gpu.py).
+
+``create_registration_qc`` reads its nuclear/fiducial channel through
+``tiled_io.open_lazy`` + ``read_decimated`` rather than ``tifffile.imread``ing
+every marker channel of the whole slide. What that removes is the
+**N-channel overread**: only the ``pick_nuclear_index``-resolved channel is
+ever decoded, not every marker channel in the panel. It does **not** remove
+any spatial overread -- the read stays at full resolution
+(``decimation_factor(..., max_dim=None)`` always returns ``1`` here), because
+``GENERATE_REGISTRATION_QC`` runs with ``save_fullres=True`` unconditionally
+in production (see ``conf/modules.config``'s ``GENERATE_REGISTRATION_QC``
+block: no ``--no-fullres`` is ever passed), so the ``*_fullres.tif`` artifact
+this function publishes genuinely needs full-resolution pixels. Decimating
+the read would change that published artifact, not just the (already
+downsampled) preview.
 """
 
 from __future__ import annotations
@@ -319,12 +333,12 @@ def create_registration_qc(
 
     # Read only the resolved nuclear/fiducial channel of each slide, through a lazy,
     # region-readable zarr view (open_lazy) rather than tifffile.imread's whole-stack
-    # read of every marker channel at full resolution -- the multi-channel overread this
-    # step used to pay, twice, on the two largest inputs the QC step sees. `factor` is 1
-    # here: this function always needs true full-resolution pixels (the *_fullres.tif
-    # output is unconditional in production), so nothing is spatially decimated -- only
-    # the unused channels are no longer read. decimation_factor is still the source of
-    # truth for that (not a hardcoded 1), so a caller that passes a real max_dim gets
+    # read of every marker channel at full resolution -- the N-CHANNEL overread this step
+    # used to pay, twice, on the two largest inputs the QC step sees. This is NOT a
+    # spatial decimation: `factor` is 1 here, and stays 1, because this function always
+    # needs true full-resolution pixels (the *_fullres.tif output is unconditional in
+    # production -- see the module docstring). Only the unused channels are no longer
+    # read; every pixel of the used one still is. decimation_factor is still the source of
     # true decimation; read_decimated then streams each channel in row bands, so peak
     # memory is one band, never the whole plane.
     ref_arr, _ref_dtype, ref_close = open_lazy(reference_path)

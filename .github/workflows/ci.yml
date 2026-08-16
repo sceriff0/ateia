@@ -76,6 +76,13 @@ jobs:
           # at COLLECTION with `from zarr.meta import Metadata2, Metadata3`, taking the
           # whole job down rather than failing one test.
           pip install numpy==1.26.4 scipy==1.15.3 scikit-image==0.25.2 tifffile==2025.5.10 zarr==2.18.3 numcodecs==0.13.1
+          # bin/utils/qc.py imports cv2 at module scope (tests/test_registration_qc_lazy_read.py
+          # is the first test module to import qc.py at all), and this runner has no display
+          # libs, so -headless, not opencv-python (containers/regqc/requirements.txt's runtime
+          # pin). Pinned to the same 4.10.0.82 release that container installs, and to a build
+          # compatible with numpy==1.26.4 above -- opencv-python-headless>=5 requires numpy>=2
+          # and would break the pin this whole install line exists to protect.
+          pip install opencv-python-headless==4.10.0.82
           # anndata powers tests/test_join_flowpath.py. Tolerated as optional because
           # anndata has dropped Python 3.9, which this matrix still covers; the test
           # module pytest.importorskip's it, so an unavailable anndata skips those
