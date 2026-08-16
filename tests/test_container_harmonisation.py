@@ -60,6 +60,27 @@ HARMONISED = {
     "scipy": "1.15.3",
 }
 
+# Documented per-image exceptions to HARMONISED. Each names the UPSTREAM CONSTRAINT that forces
+# it, because an exception without one is just a silent escape hatch from the harmonised set.
+#
+# scipy is the case that proved the rule: harmonising it to 1.15.3 everywhere made the
+# preprocess image unbuildable, since basicpy 1.2.0 -- the illumination-correction dependency
+# the whole PREPROCESS step is built on -- caps scipy below 1.13. Bumping basicpy to 2.x is not
+# an escape: 2.0.0 pulls in torch, which is a multi-GB addition to a CPU-only image.
+PINNED_EXCEPTIONS = {
+    # basicpy caps scipy in BOTH its versions -- 1.2.0 and 2.0.0 alike require scipy<1.13 -- so
+    # this exception is not a "bump basicpy later" placeholder. Bumping to 2.x also swaps the
+    # backend from JAX to PyTorch and pulls torch into a CPU-only image.
+    ("preprocess", "scipy"): ("1.12.0", "basicpy 1.2.0 and 2.0.0 both require scipy<1.13"),
+    # bioio-ome-tiff 1.4.0 requires tifffile[zarr]<2025.1.10 on python_version < "3.11"; the
+    # convert base (eclipse-temurin:21-jre-jammy) is Python 3.10.
+    ("convert", "tifffile"): ("2024.12.12", "bioio-ome-tiff 1.4.0 caps tifffile<2025.1.10 on py<3.11"),
+    # The bioio 3.5.0 plugin set will not resolve against numpy 1.26.4 (bioio-lif's dask chain).
+    # Safe HERE only: this image carries no TensorFlow and no StarDist, which are the sole reason
+    # the harmonised numpy is held at the last 1.x.
+    ("convert", "numpy"): ("2.2.6", "bioio 3.5.0 plugin set cannot resolve with numpy 1.26.4"),
+}
+
 # Packages that are genuinely absent from a given image are fine; these are the ones that must
 # never appear again, having been removed as unimported.
 FORBIDDEN = ("cellpose", "cucim", "cupy", "aicsimageio")
@@ -186,7 +207,10 @@ def test_shared_packages_match_the_harmonised_version(container):
     wrong = {
         p: (v[0][1], HARMONISED[p])
         for p, v in installed.items()
-        if p in HARMONISED and _is_exact(v) and v[0][1] != HARMONISED[p]
+        if p in HARMONISED
+        and _is_exact(v)
+        and v[0][1] != HARMONISED[p]
+        and PINNED_EXCEPTIONS.get((container, p), (None, None))[0] != v[0][1]
     }
     assert not wrong, (
         f"containers/{container} disagrees with the harmonised set "
@@ -299,4 +323,26 @@ def test_container_installs_what_its_scripts_import(container, scripts):
     assert not missing, (
         f"containers/{container} does not install everything its scripts import: {missing}. "
         f"The script runs in this image, so the import fails at runtime."
+    )
+
+
+@pytest.mark.parametrize("key", sorted(PINNED_EXCEPTIONS))
+def test_every_pinned_exception_is_still_doing_something(key):
+    """An exception that matches the harmonised value is stale and should be deleted.
+
+    Without this, an exception silently outlives the upstream cap that justified it and becomes
+    a permanent hole in the harmonised set that nobody re-examines.
+    """
+    container, package = key
+    version, reason = PINNED_EXCEPTIONS[key]
+    assert package in HARMONISED, f"{package} is not in the harmonised set, so exempting it is meaningless"
+    assert version != HARMONISED[package], (
+        f"the {container}/{package} exception pins {version}, which is what HARMONISED already "
+        f"requires -- the exception is stale and should be removed."
+    )
+    assert reason.strip(), "every exception must name the upstream constraint that forces it"
+    actual = _installed(container).get(package)
+    assert _is_exact(actual) and actual[0][1] == version, (
+        f"containers/{container} pins {package}={actual}, but the exception documents {version}. "
+        f"The exception and the Dockerfile must agree, or the exception is describing fiction."
     )

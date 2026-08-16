@@ -39,10 +39,21 @@ RUN wget -q "https://github.com/glencoesoftware/raw2ometiff/releases/download/v$
     && ln -s "/opt/raw2ometiff-${R2OT_VERSION}/bin/raw2ometiff" /usr/local/bin/raw2ometiff \
     && rm "raw2ometiff-${R2OT_VERSION}.zip"
 
+# Upgrade pip first: jammy ships 22.0.2, whose resolver reports this package set's conflict as
+# an opaque "nd2[legacy]==0.11.2 and nd2[legacy]==0.11.3" rather than naming the real cap.
+RUN pip3 install --no-cache-dir --upgrade pip
+
+# numpy and tifffile diverge from the harmonised set here, and both are forced:
+#   * bioio-ome-tiff 1.4.0 requires tifffile[zarr]<2025.1.10 on python_version < "3.11", and this
+#     base (eclipse-temurin:21-jre-jammy) is Python 3.10. 2024.12.12 is the newest that satisfies it.
+#   * the bioio 3.5.0 plugin set cannot resolve against numpy 1.26.4 -- bioio-lif's dask chain is
+#     unsatisfiable there. numpy 2 is safe in THIS image specifically: it carries no TensorFlow or
+#     StarDist, which are the only reason the harmonised numpy is held at the last 1.x.
+# Verified by resolving the exact set with pip 26 on Python 3.10 before committing.
 RUN pip3 install --no-cache-dir \
-        tifffile==2025.5.10 \
+        tifffile==2024.12.12 \
         imagecodecs==2025.3.30 \
-        numpy==1.26.4 \
+        numpy==2.2.6 \
         zarr==2.18.3 \
         numcodecs==0.13.1 \
         h5py==3.11.0 \

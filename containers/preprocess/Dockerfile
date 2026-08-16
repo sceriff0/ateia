@@ -36,7 +36,7 @@ RUN python3 -m pip install --no-cache-dir --upgrade pip setuptools wheel
 # Install Python dependencies for preprocessing
 RUN pip install --no-cache-dir \
     numpy==1.26.4 \
-    scipy==1.15.3 \
+    scipy==1.12.0 \
     tifffile==2025.5.10 \
     imagecodecs==2025.3.30 \
     zarr==2.18.3 \
