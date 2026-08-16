@@ -109,6 +109,31 @@ jobs:
           echo "push=$PUSH" >> "$GITHUB_OUTPUT"
           echo "Resolved version=$VERSION push=$PUSH (event=${{ github.event_name }})"
 
+      # Fail once, here, rather than ten times in parallel with an error that names neither
+      # the missing secret nor the fix. This path went unexercised for months: the login step
+      # in `build` is guarded by `push == 'true'`, and every push-to-main run is build-only, so
+      # a green Build Images run never demonstrated that publishing could work at all.
+      - name: Preflight registry credentials
+        if: steps.resolve.outputs.push == 'true'
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          missing=""
+          [ -z "$DOCKERHUB_USERNAME" ] && missing="$missing DOCKERHUB_USERNAME"
+          [ -z "$DOCKERHUB_TOKEN" ] && missing="$missing DOCKERHUB_TOKEN"
+          if [ -n "$missing" ]; then
+            echo "::error::Cannot publish: missing repository secret(s):$missing"
+            echo "Set them with:"
+            echo "  gh secret set DOCKERHUB_USERNAME --repo ${{ github.repository }} --body <docker-hub-user>"
+            echo "  gh secret set DOCKERHUB_TOKEN    --repo ${{ github.repository }}"
+            echo "The token needs Read & Write scope (hub.docker.com -> Account Settings ->"
+            echo "Personal access tokens). Note that repositories created by a first push may"
+            echo "default to PRIVATE; the cluster pulls these anonymously, so they must be public."
+            exit 1
+          fi
+          echo "Registry credentials present for user: $DOCKERHUB_USERNAME"
+
   # ---------------------------------------------------------------------------
   # Build (and conditionally push) each image in parallel via a matrix.
   # ---------------------------------------------------------------------------

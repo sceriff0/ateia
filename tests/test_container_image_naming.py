@@ -178,3 +178,28 @@ def test_the_build_workflow_strips_a_leading_v_from_the_version():
         "build-images.yml does not strip a leading 'v' from the resolved version, so a GitHub "
         "release tagged v1.0.0 publishes images the pipeline cannot pull."
     )
+
+
+def test_the_build_workflow_preflights_the_registry_credentials():
+    """Missing credentials must fail once, in `setup`, with a message that says what is missing.
+
+    Without a preflight the run fans out to one job per image and each dies separately on
+    docker/login-action's "Username and password required", which names neither the secret nor
+    the fix. That is what happened the first time the publish path was ever exercised.
+
+    The publish path had been unexercised for months while the workflow reported success: the
+    login step is guarded by `if: needs.setup.outputs.push == 'true'`, and every prior run was a
+    push-to-main build-only event, so the credentials were never reached. A green Build Images
+    run therefore said nothing about whether publishing worked.
+    """
+    text = (REPO / ".github/workflows/build-images.yml").read_text()
+    assert "DOCKERHUB_USERNAME" in text and "DOCKERHUB_TOKEN" in text
+    preflight = re.search(r"name: Preflight.*?(?=\n      - name:|\n  [a-z])", text, re.S)
+    assert preflight, (
+        "build-images.yml has no preflight step, so a publish with missing secrets fans out "
+        "into one opaque failure per image instead of failing once with a readable reason."
+    )
+    body = preflight.group(0)
+    assert "secrets.DOCKERHUB_TOKEN" in body and "exit 1" in body, (
+        "the preflight step does not actually check the token and fail: " + body[:300]
+    )
