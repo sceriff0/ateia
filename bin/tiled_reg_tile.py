@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
 import numpy as np  # noqa: E402
 from logger import configure_logging, get_logger  # noqa: E402
-from tile_residual import residual_displacement  # noqa: E402
+from tile_residual import foreground_fraction, residual_displacement  # noqa: E402
 from tiled_io import open_lazy  # noqa: E402
 from tiled_warp import source_region, warp_image  # noqa: E402
 
@@ -137,6 +137,18 @@ def main(argv=None) -> int:
     # background or across the section edge out of the deformation mesh.
     dx, dy, tre, error = residual_displacement(ref_tile, mov_tile, upsample=a.upsample)
 
+    # PHASE 1 of the foreground work: EMIT, do not gate. Measured over the dense band sweep
+    # (21 blanking fractions x 4 geometries x 3 seeds; 200 accepted configs, 68 of them wrong),
+    # a threshold on mov_fg that loses no correct tile still rejects 41/68 of the wrong ones,
+    # and the mov_fg/ref_fg ratio 44/68 -- a real, partial separator. It does NOT close the
+    # band: the distributions overlap, so about a third survives any per-tile cut and
+    # neighbourhood consistency is still required. Nothing reads these keys yet, deliberately:
+    # gating changes registration output and needs the dense-sweep acceptance plus a real-slide
+    # before/after. Both crops are measured because the ratio separates better than the moving
+    # crop alone. Guarded by tests/test_foreground_fraction.py.
+    ref_fg = foreground_fraction(ref_tile)
+    mov_fg = foreground_fraction(mov_tile)
+
     Path(a.out).write_text(
         json.dumps(
             {
@@ -148,11 +160,14 @@ def main(argv=None) -> int:
                 "dy": dy,
                 "tre": tre,
                 "error": error,
+                "ref_fg": ref_fg,
+                "mov_fg": mov_fg,
             }
         )
     )
     logger.info(
-        f"tile ({a.ix},{a.iy}): dxy=({dx:.2f},{dy:.2f}) tre={tre:.2f}px error={error:.4f}"
+        f"tile ({a.ix},{a.iy}): dxy=({dx:.2f},{dy:.2f}) tre={tre:.2f}px error={error:.4f} "
+        f"ref_fg={ref_fg:.4f} mov_fg={mov_fg:.4f}"
     )
     return 0
 

@@ -143,7 +143,13 @@ def test_lazy_path_matches_old_full_decode_oracle(tmp_path):
     result = json.loads(out_f.read_text())
 
     # keys and shape must be unchanged
-    assert set(result.keys()) == {"ix", "iy", "cx", "cy", "dx", "dy", "tre", "error"}
+    # ref_fg / mov_fg were added by Phase 1 of the foreground work: EMITTED, gated on by
+    # nothing. The key set is pinned exactly (not with `>=`) on purpose -- a control point is a
+    # published artifact and a silent extra key is how two writers drift. Updated deliberately,
+    # with the new keys named. See tests/test_foreground_fraction.py.
+    assert set(result.keys()) == {
+        "ix", "iy", "cx", "cy", "dx", "dy", "tre", "error", "ref_fg", "mov_fg",
+    }
     assert result["ix"] == 0 and result["iy"] == 0
     assert result["cx"] == 256.0 and result["cy"] == 256.0
 
@@ -295,7 +301,13 @@ def test_edge_tile_outside_moving_slide_yields_zero_tile(tmp_path, monkeypatch):
     assert mov_tile.shape == (32, 32)
     assert np.array_equal(mov_tile, np.zeros((32, 32)))
     result = json.loads(out_f.read_text())
-    assert set(result.keys()) == {"ix", "iy", "cx", "cy", "dx", "dy", "tre", "error"}
+    # ref_fg / mov_fg were added by Phase 1 of the foreground work: EMITTED, gated on by
+    # nothing. The key set is pinned exactly (not with `>=`) on purpose -- a control point is a
+    # published artifact and a silent extra key is how two writers drift. Updated deliberately,
+    # with the new keys named. See tests/test_foreground_fraction.py.
+    assert set(result.keys()) == {
+        "ix", "iy", "cx", "cy", "dx", "dy", "tre", "error", "ref_fg", "mov_fg",
+    }
 
 
 def test_nuclear_index_out_of_range_raises_same_message(tmp_path):
