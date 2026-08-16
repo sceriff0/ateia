@@ -132,24 +132,31 @@ def test_even_count_label_averages_two_middles():
     assert df["CD8: Cell: Median"].values[0] == np.median([1.0, 2.0, 3.0, 4.0])
 
 
-def test_empty_compartment_defaults_to_zero():
-    # Cell 1 has NO nuclear-mask overlap at all -> Nucleus median must default to
-    # 0.0 (matching the old reindex(...).fillna(0.0) on a missing groupby key),
-    # and Cytoplasm must equal the Cell median exactly (all cell pixels are
-    # cytoplasm since none overlap the nucleus).
+def test_empty_compartment_is_nan_not_zero():
+    # CONTRACT CHANGED, deliberately. This test previously asserted 0.0, pinning the older
+    # `.reindex(valid_labels).fillna(0.0)` behaviour. 0.0 makes "this cell has no nucleus"
+    # indistinguishable from "this cell's nucleus was measured and is dark", and downstream
+    # gating reads the second; nothing can separate them afterwards. The consumer already
+    # documents the opposite policy -- bin/export_geojson.py:78 preserves NaN as "missing" and
+    # omits such measurements from the GeoJSON rather than writing an invalid bare NaN literal.
+    #
+    # The assertions that did NOT depend on the default are kept unchanged below, because they
+    # are what proves the compartments are still partitioned correctly.
+    # See tests/test_absent_compartment_is_nan.py for the full contract, including the case
+    # this change exists to separate: a measured-but-dark compartment still reports 0.0.
     cell_mask = np.array([[1, 1, 1], [1, 1, 1]])
     nuclei_mask = np.zeros_like(cell_mask)  # no nucleus anywhere
     channel = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
     df = compute_compartment_intensities(cell_mask, nuclei_mask, channel, "CD8")
-    assert df["CD8: Nucleus: Median"].values[0] == 0.0
+    assert np.isnan(df["CD8: Nucleus: Median"].values[0])
     assert df["CD8: Cytoplasm: Median"].values[0] == df["CD8: Cell: Median"].values[0]
 
-    # And the reverse: cell 2 is ENTIRELY nucleus -> Cytoplasm defaults to 0.0.
+    # And the reverse: cell 2 is ENTIRELY nucleus -> Cytoplasm was never measured.
     cell_mask2 = np.array([[2, 2], [2, 2]])
     nuclei_mask2 = np.array([[1, 1], [1, 1]])
     channel2 = np.array([[10.0, 20.0], [30.0, 40.0]])
     df2 = compute_compartment_intensities(cell_mask2, nuclei_mask2, channel2, "CD8")
-    assert df2["CD8: Cytoplasm: Median"].values[0] == 0.0
+    assert np.isnan(df2["CD8: Cytoplasm: Median"].values[0])
     assert df2["CD8: Nucleus: Median"].values[0] == df2["CD8: Cell: Median"].values[0]
 
 
