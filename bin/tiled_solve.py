@@ -248,6 +248,10 @@ def main(argv=None) -> int:
     # post-refinement residual is not measured here (no re-warp in this reduction); the default
     # monolithic path and the reg_benchmark harness provide the final-accuracy number.
     if a.out_tre:
+        # Re-ask `_accept` rather than thread the grid's decision out of _grid_from_controls:
+        # `_accept` is the single owner of the rule, it is pure and cheap, and re-asking keeps
+        # the mesh and the report provably in agreement. A record here that says accepted=False
+        # is exactly a control point the mesh did not use.
         records = [
             {
                 "ix": int(c["ix"]),
@@ -255,6 +259,7 @@ def main(argv=None) -> int:
                 "cx": float(c["cx"]),
                 "cy": float(c["cy"]),
                 "tre_rigid": float(c["tre"]),
+                "accepted": bool(_accept(c, a.max_error, a.max_disp)[0]),
             }
             for c in controls
         ]
