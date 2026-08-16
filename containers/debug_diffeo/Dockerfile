@@ -47,7 +47,6 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
 # Core scientific + GPU packages
 RUN pip install --no-cache-dir \
-    cupy-cuda12x \
     numpy==1.26.4 \
     scipy \
     pandas==2.2.3 \
@@ -60,8 +59,7 @@ RUN pip install --no-cache-dir \
 RUN pip install --no-cache-dir \
     tensorflow==2.17.1 \ 
     stardist==0.9.1 \
-    csbdeep \
-    cellpose==3.1.1.1
+    csbdeep
 
 # Optional GPU image segmentation tools
 RUN pip install git+https://github.com/sceriff0/cudipy.git -v --no-deps

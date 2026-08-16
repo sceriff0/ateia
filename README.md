@@ -87,7 +87,7 @@ nextflow run . \
 nextflow run . \
   --input samplesheet.csv \
   --start preprocessing \
-  --dry_run true
+  -params-file params/dry_run.json
 ```
 
 ## Documentation

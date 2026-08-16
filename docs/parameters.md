@@ -202,7 +202,7 @@ Per-cell marker intensity.
 | `expanded_quantification` | `true` | Also emit Mean and Sum per compartment (per-compartment Median is always emitted). **Requires** `quantify_compartments=true`. |
 
 !!! danger "Validation rule"
-    Setting `--expanded_quantification true` without `--quantify_compartments true`
+    Setting `expanded_quantification = true` without `quantify_compartments = true`
     fails at launch with a clear error.
 
 ## Visualization & export
@@ -299,13 +299,13 @@ Full walkthrough: [Incremental cycles](add_cycle.md).
 |---|---|---|
 | `mode` | `standard` | `standard` = normal `--start`/`--stop` pipeline; `add_cycle` = incremental cyclic-IF. |
 | `prior_outdir` | `null` | **Required for `add_cycle`.** The `--outdir` of the previously completed run (supplies the reusable reference, mask, and quantification via its checkpoint CSVs). |
-| `embed_masks` | `false` | Embed the segmentation masks as a second uint32 series in the pyramid OME-TIFF. Written only when `embed_masks && quantify_compartments && expanded_quantification`; `add_cycle` consumes this series, so a prior run must have it to be extendable. `--embed_masks true` REQUIRES both `--quantify_compartments` and `--expanded_quantification` also true — the launch validation rejects the combination otherwise (see warning below). |
+| `embed_masks` | `false` | Embed the segmentation masks as a second uint32 series in the pyramid OME-TIFF. Written only when `embed_masks && quantify_compartments && expanded_quantification`; `add_cycle` consumes this series, so a prior run must have it to be extendable. `embed_masks = true` REQUIRES both `quantify_compartments` and `expanded_quantification` also true — the launch validation rejects the combination otherwise (see warning below). |
 
 !!! warning "`add_cycle` prerequisites"
     `embed_masks` defaults to `false`, so a default run is **not** add_cycle-extendable.
-    Set `--embed_masks true` (together with `--quantify_compartments` and
+    Set `embed_masks = true` (together with `quantify_compartments` and
     `--expanded_quantification`, both on by default) to make a run extendable.
-    `--embed_masks true` with either sibling off is rejected **at launch**
+    `embed_masks = true` with either sibling off is rejected **at launch**
     (`ParamUtils.validateCompartmentQuant`) rather than silently producing a
     plain pyramid, so a prior run either failed to launch with `embed_masks=true`
     misconfigured, or has the mask series if `embed_masks=true` was accepted at

@@ -291,7 +291,7 @@ missed.
 
 ## GPU
 
-`SEGMENT` requests a GPU when `--seg_gpu true` (the default), and so does
+`SEGMENT` requests a GPU when `seg_gpu = true` (the default), and so does
 `SEG_QC_SEGMENT` — it is the same process under an alias, and Nextflow matches
 `withName: 'SEGMENT'` against an alias' original name. `SEG_QC_GEOJSON` does not:
 it only traces contours, which is pure CPU.
@@ -308,7 +308,7 @@ Match `--gpu_type` to your cluster's GRES string (`sinfo -o "%G"`). Without
 CellSAM then silently falls back to CPU, which turns a WSI run into a multi-day
 job.
 
-Set `--seg_gpu false` to force CPU; the `--gres` request and the container flags
+Set `seg_gpu = false` to force CPU; the `--gres` request and the container flags
 are both dropped.
 
 ---

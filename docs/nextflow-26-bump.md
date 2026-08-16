@@ -113,20 +113,25 @@ command line across `docs/`, `.github/workflows/`, `params/*.json`,
   carry one (see below).
 
 **CLI invocations of a boolean param as a literal string, found by the grep
-sweep.** Only the first row is executed; it is fixed, the rest are docs:
+sweep.** All are now **FIXED**. The executed one moved to `-params-file`; the
+documentation sites were rewritten to `name = value` (params-file / config
+syntax) or to `-params-file params/dry_run.json`, and
+`tests/test_no_cli_boolean_params_in_docs.py` now fails the build if the CLI
+form reappears in any of them. `CHANGELOG.md` is deliberately untouched: it is
+a historical record of what was run, not an instruction.
 
 | File | Line(s) | Flag | Executed by CI? |
 |---|---|---|---|
 | `tests/run_validation_tests.sh` | ~~63~~ **FIXED** | ~~`--dry_run true`~~ → `-params-file` | **Yes, and on Nextflow 26 today** — `.github/workflows/ci.yml:185` runs it in the `nextflow-stub` job, whose matrix includes `latest-everything`; `.github/workflows/release.yml`'s test gate is `latest-everything` only |
-| `README.md` | 90 | `--dry_run true` | copy-paste example only |
-| `docs/usage.md` | 82, 132 | `--dry_run true` | copy-paste examples only |
-| `tests/test_validation.md` | 365 | `--dry_run true` | doc mirror of the script above |
-| `docs/installation.md` | 140, 141, 144 | `--seg_gpu true` / `--seg_gpu false` | copy-paste examples only |
-| `docs/resources.md` | 294, 311 | `--seg_gpu true` / `--seg_gpu false` | prose examples only |
-| `docs/usage.md` | 266, 470 | `--seg_gpu false` | prose examples only |
-| `docs/add_cycle.md` | 13 | `--embed_masks true` | copy-paste example only |
-| `docs/parameters.md` | 205, 302, 306, 308 | `--expanded_quantification true`, `--embed_masks true` | prose examples only |
-| `docs/outputs.md` | 45, 94 | `--allow_auto_reference true`, `--quantify_compartments false` | prose examples only |
+| `README.md` | ~~90~~ **FIXED** | ~~`--dry_run true`~~ → `-params-file params/dry_run.json` | copy-paste example only |
+| `docs/usage.md` | ~~82, 132~~ **FIXED** | ~~`--dry_run true`~~ → `-params-file`; new "Boolean parameters" section explains the rule | copy-paste examples only |
+| `tests/test_validation.md` | ~~365~~ **FIXED** | ~~`--dry_run true`~~ → `-params-file` | doc mirror of the script above |
+| `docs/installation.md` | ~~140, 141, 144~~ **FIXED** | → `seg_gpu = true` / `seg_gpu = false` | copy-paste examples only |
+| `docs/resources.md` | ~~294, 311~~ **FIXED** | → `seg_gpu = true` / `seg_gpu = false` | prose examples only |
+| `docs/usage.md` | ~~266, 470~~ **FIXED** | → `seg_gpu = false` | prose examples only |
+| `docs/add_cycle.md` | ~~13~~ **FIXED** | → `embed_masks = true` | copy-paste example only |
+| `docs/parameters.md` | ~~205, 302, 306, 308~~ **FIXED** | → `expanded_quantification = true`, `embed_masks = true` | prose examples only |
+| `docs/outputs.md` | ~~45, 94~~ **FIXED** | → `allow_auto_reference = true`, `quantify_compartments = false` | prose examples only |
 | `CHANGELOG.md` | 175-177, 185, 536 | `--embed_masks true`, `--skip_final_qc_report=false`, `--enable_trace=true` | historical, not executed |
 
 #### This hazard is PRESENT TODAY — it does not wait for the bump

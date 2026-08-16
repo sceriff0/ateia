@@ -18,8 +18,6 @@ RUN pip install --no-cache-dir --upgrade pip
 
 # Install GPU packages
 RUN pip install --no-cache-dir \
-    cupy-cuda12x \
-    cucim \
     numpy \
     pandas \
     scikit-image \

@@ -79,13 +79,42 @@ profiles, comma-combined — e.g. `-profile slurm,singularity` on a cluster or
 | `--outdir` | param | yes | Output root directory. Checkpoints are written to `<outdir>/csv/`. |
 | `--start` | param | no | Entry stage: `preprocessing` (default), `registration`, `segmentation`, `postprocessing`. |
 | `--stop` | param | no | Last stage to run. Omitted = run to the end. |
-| `--dry_run true` | param | no | Validate inputs and the samplesheet, then exit without running tasks. |
+| `dry_run` | param | no | Validate inputs and the samplesheet, then exit without running tasks. Boolean — set it in a `-params-file` (`params/dry_run.json`), never on the CLI; see [Boolean parameters](#boolean-parameters). |
 | `-profile` | option | no | Execution/config profiles, comma-combined (e.g. `slurm,singularity`). |
 | `-params-file` | option | no | JSON preset of parameters, e.g. `params/full_pipeline.json`. |
 | `-resume` | option | no | Reuse cached results from a previous run's `work/`. |
 | `-c` | option | no | Layer an extra config file (e.g. site-specific SLURM settings). |
 
 For the complete parameter list see [Parameters](parameters.md).
+
+### Boolean parameters
+
+**A boolean parameter cannot be passed on the command line.** Set it in a
+`-params-file` or a profile instead:
+
+```bash
+# works
+nextflow run . --input samplesheet.csv -params-file params/dry_run.json
+
+nextflow run . --input samplesheet.csv --dry_run true   # x fails on Nextflow 26
+nextflow run . --input samplesheet.csv --dry_run        # x fails on Nextflow 26
+```
+
+Nextflow 26 hands every `--param` to the schema validator as a **string**, so a
+boolean arrives as `"true"` rather than `true` and validation rejects it:
+
+```
+* --dry_run (true): Value is [string] but should be [boolean]
+```
+
+Both CLI forms fail — `--flag true` and a bare valueless `--flag` alike. Probed
+directly, a bare `--dry_run` resolves to `java.lang.Boolean` on 25.04.7 and
+`java.lang.String` on 26.04.6. This applies to every boolean parameter in the
+schema, not just `dry_run`, and it is why the examples in these docs write
+booleans as `name = value` (params-file / config syntax) rather than as flags.
+
+A `-params-file` carries a real JSON boolean, which takes a different code path
+and works on both engines.
 
 ### Common invocations
 
@@ -129,7 +158,7 @@ For the complete parameter list see [Parameters](parameters.md).
 
     ```bash
     nextflow run . --input samplesheet.csv --outdir results \
-      --start preprocessing --dry_run true
+      --start preprocessing -params-file params/dry_run.json
     ```
 
 ## The samplesheet
@@ -263,7 +292,7 @@ nextflow run . -profile slurm,singularity \
   `--slurm_qos` (or use a site profile / a `-c site.config`).
 - **GPU jobs** — request a GPU with `--gpu_type` matching `sinfo -o "%G"`; the
   request is emitted as `--gres=gpu:<value>` and Singularity passes the device with
-  `--nv`. Set `--seg_gpu false` to force CPU.
+  `--nv`. Set `seg_gpu = false` to force CPU.
 - **Resource caps** — `--max_memory` (default `700.GB`), `--max_cpus` (`128`),
   `--max_time` (`240.h`) clamp every per-process request; memory/time scale with
   `task.attempt`, so retries automatically ask for more (up to the cap). See the
@@ -467,7 +496,7 @@ key grammar is a cross-repository contract — see
     or drop `--expanded_quantification` for a flat per-cell table.
 
 ??? question "Do I need a GPU?"
-    No — run CPU-only with `--seg_gpu false`. A GPU mainly accelerates `SEGMENT`.
+    No — run CPU-only with `seg_gpu = false`. A GPU mainly accelerates `SEGMENT`.
 
 ??? tip "Resetting a stuck task"
     If `-resume` keeps re-running the same failing task after you've fixed params,

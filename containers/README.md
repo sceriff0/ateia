@@ -34,8 +34,8 @@ the HPC/cluster side (unlike GHCR, whose default-private packages caused
 | --- | --- | --- | --- |
 | `bioformats` | `bolt3x/attend_image_analysis:convert_bioformats_2` | `CONVERT_IMAGE` | `eclipse-temurin:21-jre-jammy` + Glencoe `bioformats2raw` 0.12.0 / `raw2ometiff` 0.10.0 + `tifffile`/`numpy` |
 | `preprocess` | `bolt3x/attend_image_analysis:preprocess` | `PREPROCESS`, `GENERATE_PREPROCESS_QC`, `GENERATE_QC_REPORT`, `SPLIT_CHANNELS` (4 modules) | `ubuntu:22.04` + Python 3.11 + BaSiCPy/JAX(cpu)/scikit-image illumination-correction stack |
-| `quantification` | `bolt3x/attend_image_analysis:quantification_gpu` | `QUANTIFY`, `EXTRACT_CELL_PROPERTIES`, `EXTRACT_NUCLEI_PROPERTIES`, `EXPORT_GEOJSON`, `GENERATE_POSTPROCESSING_QC` (+ `quantify.nf` second container directive) (6 modules) | `nvidia/cuda:12.2.2-devel-ubuntu22.04` + cupy/cucim GPU quantification stack |
-| `segmentation` | `bolt3x/attend_image_analysis:segmentation_gpu` | `SEGMENT` (default backend, `params.seg_method` = stardist) | `tensorflow/tensorflow:2.15.0-gpu-jupyter` + StarDist 0.9.1 / Cellpose 3.1.1.1 |
+| `quantification` | `bolt3x/attend_image_analysis:quantification_gpu` | `QUANTIFY`, `EXTRACT_CELL_PROPERTIES`, `EXTRACT_NUCLEI_PROPERTIES`, `EXPORT_GEOJSON`, `GENERATE_POSTPROCESSING_QC` (+ `quantify.nf` second container directive) (6 modules) | `nvidia/cuda:12.2.2-devel-ubuntu22.04` + numpy/scipy/scikit-image quantification stack |
+| `segmentation` | `bolt3x/attend_image_analysis:segmentation_gpu` | `SEGMENT` (default backend, `params.seg_method` = stardist) | `tensorflow/tensorflow:2.15.0-gpu-jupyter` + StarDist 0.9.1 |
 | `cellsam` | `bolt3x/attend_image_analysis:cellsam` | `SEGMENT` (`params.seg_method` = `cellsam`) | `pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime` + `cellSAM` (git) |
 | `istantseg` | `bolt3x/attend_image_analysis:instant_seg` | `SEGMENT` (`params.seg_method` = `instantseg`) | `pytorch/pytorch:2.5.1-cuda11.8-cudnn9-runtime` + `instanseg-torch` |
 | `merge` | `bolt3x/attend_image_analysis:merge` | `MERGE_AND_PYRAMID` | `pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime` + tifffile/imagecodecs pyramid stack |
