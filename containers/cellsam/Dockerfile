@@ -18,7 +18,7 @@ RUN pip install \
     tifffile==2025.5.10 \
     zarr==2.18.3 \
     numcodecs==0.13.1 \
-    dask \
+    dask==2026.7.1 \
     scikit-image==0.25.2
 
 RUN python -m pip install "imagecodecs==2025.3.30"

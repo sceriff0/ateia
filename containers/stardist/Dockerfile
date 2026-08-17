@@ -24,8 +24,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # script actually needs.
 RUN pip install --no-cache-dir \
     stardist==0.9.1 \
-    csbdeep \
-    dask \
+    csbdeep==0.8.2 \
+    dask==2026.7.1 \
     pandas==2.3.3 \
     numpy==1.26.4 \
     scikit-image==0.25.2 \

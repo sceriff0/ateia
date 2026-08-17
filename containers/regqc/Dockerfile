@@ -58,7 +58,7 @@ RUN pip install --no-cache-dir \
 RUN pip install --no-cache-dir \
     tensorflow==2.17.1 \
     stardist==0.9.1 \
-    csbdeep
+    csbdeep==0.8.2
 
 # Optional GPU image segmentation tools
 RUN pip install git+https://github.com/sceriff0/cudipy.git -v --no-deps

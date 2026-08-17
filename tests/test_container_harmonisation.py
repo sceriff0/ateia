@@ -58,6 +58,13 @@ HARMONISED = {
     "pandas": "2.3.3",
     "scikit-image": "0.25.2",
     "scipy": "1.15.3",
+    # Added after the final review found csbdeep and dask installed UNPINNED by the fix wave,
+    # directly under a comment reading "Install Python packages with exact versions". They were
+    # invisible to test_no_shared_package_is_installed_unpinned purely because that test only
+    # checks packages listed here -- an unpinned package the table does not know about cannot be
+    # flagged. Listing them is what makes the guard able to see them at all.
+    "csbdeep": "0.8.2",
+    "dask": "2026.7.1",
 }
 
 # Documented per-image exceptions to HARMONISED. Each names the UPSTREAM CONSTRAINT that forces
