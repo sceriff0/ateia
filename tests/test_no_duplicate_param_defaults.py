@@ -276,7 +276,7 @@ ARGPARSE_DEFAULT_ALLOWLIST = {
     },
     "merge_quant_csvs.py:--nuclear-markers": {
         "reason": (
-            "Same contract as preprocess.py's and split_multichannel.py's "
+            "Same contract as tile_for_basic.py's and split_multichannel.py's "
             "--nuclear-markers: default=None is intentional per the script's own "
             "help text, 'MERGE_QUANT_CSVS passes params.nuclear_markers; the "
             "default is only for standalone use.' Confirmed true -- "
@@ -290,28 +290,15 @@ ARGPARSE_DEFAULT_ALLOWLIST = {
     },
     "tile_for_basic.py:--nuclear-markers": {
         "reason": (
-            "Same contract as preprocess.py's --nuclear-markers, and it replaced that "
-            "call site: default=None is intentional per the script's own help text, and "
+            "Same contract as the deleted preprocess.py's --nuclear-markers, whose "
+            "call site it replaced: default=None is intentional per the script's own "
+            "help text, and "
             "modules/local/tile_for_basic.nf builds `--nuclear-markers "
             "${MarkerUtils.markerList(params.nuclear_markers).join(' ')}` "
             "unconditionally, so the pipeline never reaches the default. Mirroring "
             "['DAPI','CELLTOX'] in Python would be a SECOND declaration of that "
             "default; utils/metadata.py's DEFAULT_NUCLEAR_MARKERS is the one permitted "
             "mirror, and passing None is how this script defers to it."
-        ),
-    },
-    "preprocess.py:--nuclear-markers": {
-        "reason": (
-            "Same contract as split_multichannel.py's --nuclear-markers below: "
-            "default=None is intentional per the script's own help text, "
-            "'PREPROCESS passes params.nuclear_markers; the default is only for "
-            "standalone use.' Confirmed true -- modules/local/preprocess.nf builds "
-            "`--nuclear-markers ${MarkerUtils.markerList(params.nuclear_markers)"
-            ".join(' ')}` unconditionally, so the pipeline never reaches the "
-            "default. Mirroring ['DAPI','CELLTOX'] here instead would be a SECOND "
-            "declaration of that default in Python; utils/metadata.py's "
-            "DEFAULT_NUCLEAR_MARKERS is the one permitted mirror, and passing "
-            "None is how this script defers to it."
         ),
     },
     "split_multichannel.py:--nuclear-markers": {
@@ -385,8 +372,8 @@ _DEF_ALIAS_RE = re.compile(
 # invoked bin/*.py script's name (Nextflow's `stripIndent()`'d triple-quoted
 # strings escape a trailing line-continuation as one or two literal `\`
 # characters, hence `\\*` rather than `\\?`). This is how this check learns
-# "which script is this text talking about" -- e.g. `preprocess.py \\` in
-# modules/local/preprocess.nf.
+# "which script is this text talking about" -- e.g. `tile_for_basic.py \\` in
+# modules/local/tile_for_basic.nf.
 _SCRIPT_LINE_RE = re.compile(r"^[ \t]*([A-Za-z_][A-Za-z0-9_]*\.py)[ \t]*\\*[ \t]*$", re.MULTILINE)
 # A backend-table entry in a `lib/*.groovy` file shaped like SegBackends.groovy's
 # `stardist: [container: '...', entrypoint: 'segment.py', ...]`: a bare

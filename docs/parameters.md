@@ -47,17 +47,17 @@ Bio-Formats conversion + BaSiC illumination correction.
 
 | Parameter | Default | Description |
 |---|---|---|
-| `pixel_size` | `0.325` | Physical pixel size in µm, and the **single owner** of every µm conversion in the pipeline: GeoJSON centroids and areas, the published pyramid's `PhysicalSize`, and InstantSeg's rescaling all use this value and nothing else. An input's own OME `PhysicalSizeX` is *not* preferred over it — it is compared against it, and `CONVERT_IMAGE`/`PREPROCESS` log a `[SCALE MISMATCH]` warning naming both numbers when the two disagree by more than 1%. If your slides are not 0.325 µm/px, set this; the warning will not do it for you. See `bin/utils/pixel_size.py`. |
+| `pixel_size` | `0.325` | Physical pixel size in µm, and the **single owner** of every µm conversion in the pipeline: GeoJSON centroids and areas, the published pyramid's `PhysicalSize`, and InstantSeg's rescaling all use this value and nothing else. An input's own OME `PhysicalSizeX` is *not* preferred over it — it is compared against it, and `CONVERT_IMAGE`/`APPLY_PROFILES` log a `[SCALE MISMATCH]` warning naming both numbers when the two disagree by more than 1%. If your slides are not 0.325 µm/px, set this; the warning will not do it for you. See `bin/utils/pixel_size.py`. |
 | `skip_preprocessing` | `false` | Skip BaSiC illumination correction entirely. Conversion still runs — everything downstream assumes the standardised OME-TIFF layout — so the step still emits one image per input and `csv/preprocessed.csv` still has a row per slide; the row points at `<pid>/converted/` instead of `<pid>/preprocessed/`. |
 | `preproc_skip_nuclear` | `true` | Leave the nuclear/fiducial channels named by [`nuclear_markers`](#common) uncorrected. Those channels drive both registration and segmentation, so correcting them changes what both consume. |
 | `preproc_tile_size` | `1950` | BaSiC FOV tile size (px). |
 
-BaSiC otherwise runs at its own defaults — darkfield estimation on, no autotune,
-non-overlapping FOVs — and uses the process CPU allocation. The knobs that exposed
-those (`preproc_autotune`, `preproc_n_iter`, `preproc_overlap`, `preproc_no_darkfield`,
-`preproc_pool_workers`) were removed: nothing tuned them, and `preproc_pool_workers`
-additionally set `PREPROCESS`'s `cpus`, which is now owned outright by
-`conf/modules.config`.
+BaSiC otherwise runs at nf-core BASICPY's upstream defaults — no darkfield estimation,
+no autotune, non-overlapping FOVs. The knobs that once exposed those
+(`preproc_autotune`, `preproc_n_iter`, `preproc_overlap`, `preproc_no_darkfield`,
+`preproc_pool_workers`) were removed with the in-process BaSiC path;
+`preproc_pool_workers` additionally set the correction process's `cpus`, which is now
+owned outright by `conf/modules.config`. See `docs/basic_illumination.md`.
 
 ## Registration
 

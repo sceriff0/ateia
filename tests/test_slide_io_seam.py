@@ -11,7 +11,6 @@ The measured inventory, at the time of writing:
 
     writer                          multi-ch  photometric  compression  tile      bigtiff
     convert_image.py                  yes     minisblack   none         none      yes
-    preprocess.py                     yes     minisblack   zlib         2048      yes
     tile_for_basic.py                 yes     minisblack   none         none      yes
     apply_basic_profiles.py           yes     minisblack   zlib         2048      yes
     merge_channels_pyramid.py         yes     minisblack   zstd(param)  tile_size yes
@@ -52,7 +51,6 @@ PIXEL_WRITERS = {
     "bin/convert_image.py": (1, "the converted multi-channel slide"),
     "bin/extract_mask_series.py": (1, "cell/nuclei masks recovered from a prior pyramid"),
     "bin/merge_channels_pyramid.py": (1, "the published QuPath pyramid"),
-    "bin/preprocess.py": (1, "the preprocessed multi-channel slide"),
     "bin/segment.py": (2, "StarDist cell + nuclei masks"),
     "bin/segment_cellsam.py": (2, "CellSAM cell + nuclei masks"),
     "bin/segment_instantseg.py": (2, "InstanSeg cell + nuclei masks"),
@@ -68,7 +66,6 @@ MULTI_CHANNEL_WRITERS = (
     "bin/apply_basic_profiles.py",
     "bin/convert_image.py",
     "bin/tile_for_basic.py",
-    "bin/preprocess.py",
     "bin/merge_channels_pyramid.py",
     "bin/tiled_stitch.py",
 )

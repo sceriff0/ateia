@@ -208,8 +208,8 @@ def _read_png(path):
 
 
 def test_preprocess_qc_channel_last_layout_still_matches_old_read(tmp_path):
-    """A hypothetical (Y, X, C) input (never produced by preprocess.py itself, but the
-    original defensive branch handled it) must still fall back to a whole-stack read
+    """A hypothetical (Y, X, C) input (never produced by this pipeline's own writers, but
+    the original defensive branch handled it) must still fall back to a whole-stack read
     and produce output identical to the pre-change code.
     """
     channel_names = ["DAPI", "CD4"]

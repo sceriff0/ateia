@@ -137,11 +137,12 @@ ALLOWED_LINES = {
         # in-process BaSiC path became the three-process nf-core BASICPY chain and
         # TILE_FOR_BASIC / BASICPY / APPLY_PROFILES gained withName blocks above it
         # (826 -> 834 once BASICPY's block gained the comment recording that running at
-        # upstream defaults is a decision).
+        # upstream defaults is a decision); 834 -> 821 when the dead PREPROCESS withName
+        # block was deleted with the in-process BaSiC path.
         # Re-pin, do not
         # widen. (Re-pin from the file, not by guessing:
         # `grep -n "params.expanded_quantification ?" conf/modules.config`.)
-        834: (
+        821: (
             "ext.args = { params.expanded_quantification ? '--expanded' : "
             "'' } -- conf/*.config closures cannot see lib/*.groovy classes, "
             "so ext.args must read params raw here."

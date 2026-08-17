@@ -1,14 +1,20 @@
 """Tests for bin/utils/tiled_io.py's own primitives, independent of any particular caller.
 
 ``open_lazy`` is the shared entry point every lazy-zarr-view reader in this repo goes through
-(preprocess.py's per-channel worker threads, the STARE tiled fan-out, the two QC sites). Its
-callers rely on different guarantees it makes -- ``tests/test_tiled_coarse_thumbnail.py`` and
-``tests/test_tiled_reg_tile_lazy.py`` already pin the region-read (bounded-memory) side. This
-file pins the OTHER guarantee: every call opens a genuinely fresh store, never one shared with
-a prior call on the same path. ``bin/preprocess.py``'s thread-safety design (each worker thread
-opens and closes its own handle -- see ``_read_and_process_channel_lazy`` and
-``tests/test_preprocess_lazy_concurrency.py``) rests entirely on that guarantee, but until now
-nothing pinned it at its actual source.
+(the STARE tiled fan-out, the illumination-correction tiling/apply pair, the two QC sites, the
+segmentation readers). Its callers rely on different guarantees it makes --
+``tests/test_tiled_coarse_thumbnail.py`` and ``tests/test_tiled_reg_tile_lazy.py`` already pin
+the region-read (bounded-memory) side. This file pins the OTHER guarantee: every call opens a
+genuinely fresh store, never one shared with a prior call on the same path -- so a caller that
+opens, reads and closes in a loop cannot be handed a handle a previous iteration already closed.
+
+That guarantee was originally pinned here because ``bin/preprocess.py`` read its channels from a
+``ThreadPoolExecutor`` and gave each worker its own handle. That module is deleted -- illumination
+correction now runs as three Nextflow processes around nf-core's BASICPY -- and NO script under
+``bin/`` uses a thread pool any more, so nothing in-process depends on it for thread safety
+today. It is kept because it is a real, stated property of ``open_lazy``'s contract that every
+remaining open/read/close caller depends on, and because the next threaded or forked caller would
+otherwise reintroduce the hazard with nothing pinning the property it needs.
 """
 
 from __future__ import annotations
@@ -46,10 +52,9 @@ def _write_small_ome_tiff(tmp_path, n_channels=2, h=32, w=32):
 
 def test_open_lazy_returns_a_fresh_store_per_call(tmp_path):
     """Two ``open_lazy`` calls on the SAME path must return distinct objects, never the same
-    underlying store -- the property ``open_lazy``'s docstring now states explicitly, and the
-    one preprocess.py's per-thread-handle design (see its ``_read_and_process_channel_lazy``)
-    depends on for thread safety: a shared store would mean two worker threads racing on the
-    same mutable I/O state.
+    underlying store -- the property ``open_lazy``'s docstring states explicitly. A shared store
+    would mean one caller's ``close`` invalidating another's array, and (for any future
+    concurrent caller) two workers racing on the same mutable I/O state.
     """
     path = _write_small_ome_tiff(tmp_path)
 

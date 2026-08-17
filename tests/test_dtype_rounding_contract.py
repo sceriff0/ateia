@@ -1,9 +1,10 @@
 """`.astype()` floors. Every float->integer cast in this repo must round first.
 
-`bin/preprocess.py:354` states the convention and explains it:
+`bin/apply_basic_profiles.py` states the convention and explains it (it inherited the
+rule from the deleted `bin/preprocess.py`, which stated it first):
 
-    # Round to nearest (half-to-even) before casting so fractional BaSiC
-    # output doesn't get silently truncated toward zero (astype floors).
+    * **The storage dtype rule.** Clip to the dtype's range, ROUND (half-to-even),
+      then cast. ... astype() alone floors, a systematic -0.5 LSB bias.
 
 Three sites did not follow it, and two of them write published artefacts:
 
@@ -59,7 +60,7 @@ def test_to_uint16_rounds_to_nearest_rather_than_truncating():
 
 
 def test_to_uint16_uses_half_to_even_like_the_documented_convention():
-    """preprocess.py:354 says half-to-even; a different tie rule here would be a second convention."""
+    """apply_basic_profiles.py says half-to-even; a different tie rule here would be a second convention."""
     data = np.array([[0.5, 1.5, 2.5, 3.5]], dtype=np.float64)
 
     out = mcp.to_uint16(data)

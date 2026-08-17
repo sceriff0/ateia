@@ -385,8 +385,8 @@ def test_exactly_one_resource_owner_per_process():
 #     is a (coefficient, addend) position pair. The pooled version let a doc cell
 #     hold every right number in the wrong place and pass: SPLIT_CHANNELS
 #     documented as `f<5 -> 64, f<15 -> 32` against a config saying the inverse,
-#     and PREPROCESS's `7`/`8` swapped between the per-GiB coefficient and the
-#     flat addend. Both now fail by name. See memory_cell_mismatch, which knows
+#     and the (since-removed) PREPROCESS's `7`/`8` swapped between the per-GiB
+#     coefficient and the flat addend. Both now fail by name. See memory_cell_mismatch, which knows
 #     exactly three shapes and refuses loudly on a fourth.
 #
 # What is deliberately NOT compared, and why:
@@ -512,8 +512,8 @@ CONFIG_TIER_RE = re.compile(r"<\s*(\d+(?:\.\d+)?)\s*\?\s*(\d+(?:\.\d+)?)\s*\.GB"
 # The ladder's final `else` branch: the first `: N.GB` after its last rung.
 CONFIG_ELSE_RE = re.compile(r":\s*(\d+(?:\.\d+)?)\s*\.GB")
 
-# The one non-ladder size-dependent shape in conf/modules.config: PREPROCESS's
-# `... * 7.GB * task.attempt + 8.GB`, linear in file size. The two numbers play
+# The one non-ladder size-dependent shape in conf/modules.config: TILE_FOR_BASIC's and
+# APPLY_PROFILES's `... * N.GB * task.attempt + 8.GB`, linear in file size. The two numbers play
 # DIFFERENT roles -- 7 is the per-GiB-of-input coefficient, 8 a flat addend --
 # so they are captured positionally rather than pooled.
 CONFIG_SIZE_LINEAR_RE = re.compile(
@@ -804,7 +804,7 @@ def memory_cell_mismatch(expr: str, cell: str) -> str | None:
       multisets: with the latter, a doc cell stating the right thresholds and
       the right magnitudes but pairing them backwards -- `f<5 -> 64,
       f<15 -> 32` against a config that says `f<5 -> 32, f<15 -> 64` -- passed.
-    * a **size-linear** request (PREPROCESS's `* 7.GB * task.attempt + 8.GB`)
+    * a **size-linear** request (APPLY_PROFILES's `* 7.GB * task.attempt + 8.GB`)
       has no `<` at all, so it is not a ladder; its two numbers are compared
       POSITIONALLY, coefficient against coefficient and addend against addend.
       Pooling them let `7` and `8` be swapped in the doc and still pass, even

@@ -96,13 +96,18 @@ Chips give real defaults. Every process runs in a pinned container and emits
         <div class="x">Standardize any vendor format to OME-TIFF. Resolves the nuclear marker by
           name from metadata and moves it to channel 0; fails fast if none present.</div>
         <div class="pp"><span>nuclear_markers <b>DAPI,CELLTOX</b></span></div></div>
-      <div class="mod"><div class="n">PREPROCESS <span class="tag">opt</span></div>
-        <div class="x">BaSiC illumination correction — flatfield/darkfield shading model, estimated
-          on an FOV stack, at BaSiC's own defaults. The nuclear/fiducial channels are left
-          uncorrected by default: they drive both registration and segmentation, so correcting
-          them changes what each consumes. <b>skip_preprocessing</b> turns the correction off
-          entirely — conversion still runs, so the step still emits one image per slide and the
-          checkpoint still has a row per slide, pointing at <code>converted/</code> instead.</div>
+      <div class="mod"><div class="n">TILE_FOR_BASIC → BASICPY → APPLY_PROFILES <span class="tag">opt</span></div>
+        <div class="x">BaSiC illumination correction, as three processes rather than one: nf-core's
+          <b>BASICPY</b> computes flatfield/darkfield <i>profiles only</i> (mcmicro applies them
+          downstream inside ASHLAR, which mirage does not have) and refuses a single-sited image,
+          which every stitched mirage slide is. <b>TILE_FOR_BASIC</b> writes the non-overlapping
+          pseudo-FOV grid onto the Z axis so the module sees one site per tile and decides the
+          fiducial skip once; <b>APPLY_PROFILES</b> does the division/subtraction and reassembles
+          the slide. The nuclear/fiducial channels are left uncorrected by default: they drive both
+          registration and segmentation, so correcting them changes what each consumes.
+          <b>skip_preprocessing</b> turns the correction off entirely — conversion still runs, so
+          the step still emits one image per slide and the checkpoint still has a row per slide,
+          pointing at <code>converted/</code> instead.</div>
         <div class="pp"><span>skip_preprocessing <b>false</b></span><span>skip_nuclear <b>true</b></span><span>tile <b>1950</b></span></div></div>
       <div class="mod"><div class="n">GENERATE_PREPROCESS_QC <span class="tag">opt</span></div>
         <div class="x">Per-channel downsampled PNG for visual inspection.</div>

@@ -122,7 +122,7 @@ because no checkpoint CSV names it — it is likewise absent from
 results/                              # = --outdir
 ├── <patient_id>/
 │   ├── converted/                    # <name>.ome.tif        — CONVERT_IMAGE (nuclear → ch0)
-│   ├── preprocessed/                 # *_corrected.ome.tif   — PREPROCESS (BaSiC)
+│   ├── preprocessed/                 # *_corrected.ome.tif   — APPLY_PROFILES (BaSiC)
 │   │                                 #   absent when --skip_preprocessing; csv/preprocessed.csv
 │   │                                 #   then points at converted/ instead
 │   ├── registered/
