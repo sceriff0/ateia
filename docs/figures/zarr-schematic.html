@@ -214,24 +214,33 @@
   <p class="standfirst">Lazy, region-readable zarr views of an OME-TIFF were never missing from this pipeline:
     <code>bin/utils/tiled_io.py</code> has carried <code>open_lazy</code>, <code>read_decimated</code> and
     <code>decimation_factor</code> since the STARE tiled backend was built, and three tiled scripts were their only
-    consumers. What changed is the blast radius — five further sites now read one channel where they used to read
-    the whole stack. The gain is <b>peak memory</b>, not bytes read: at four of the five, the number of source
-    pixels decoded is <i>unchanged</i>, because a published full-resolution artifact, an anti-aliased resize, or a
-    whole-image statistic still demands every one of them. Each claim below is stated at the confidence it earned;
-    every process where laziness buys nothing is named with the reason; and three places where the audit that
-    scoped this work was wrong are recorded, because the reason they were wrong generalises.</p>
+    consumers. What changed is the blast radius — four further sites now read one channel where they used to read
+    the whole stack, and a fifth eager read, owned by a different library, was later taken through <i>that</i>
+    library's own lazy API. The gain is <b>peak memory</b>, not bytes read: at three of the four, the number of
+    source pixels decoded is <i>unchanged</i>, because a published full-resolution artifact, an anti-aliased resize,
+    or a whole-image statistic still demands every one of them. Each claim below is stated at the confidence it
+    earned; every process where laziness buys nothing is named with the reason; and three places where the audit
+    that scoped this work was wrong are recorded, because the reason they were wrong generalises.</p>
   <div class="figset" style="margin-top:11px;text-transform:none;letter-spacing:0">
-    <span style="border:none;padding-left:0;color:var(--ink-3)">sites changed: <b>5</b> ·
-    pixel-reading processes where a lazy read cannot help: <b>10</b> · new pipeline parameters: <b>0</b> ·
-    resource requests changed: <b>0</b></span>
+    <span style="border:none;padding-left:0;color:var(--ink-3)">sites moved onto <code>tiled_io</code>'s lazy view:
+    <b>4</b> · eager reads taken in another library: <b>1</b> ·
+    pixel-reading processes where a lazy read cannot help: <b>11</b> · new pipeline parameters: <b>0</b> ·
+    resource requests changed by this work: <b>0</b></span>
   </div>
+  <div class="callout" style="margin-top:13px"><span class="wl">this figure was revised: five sites became four</span>
+    An earlier version of this figure described five changed sites and named one remaining opportunity. Both have
+    since moved: the fifth site's process was <b>deleted</b> when illumination correction was handed to nf-core's
+    <code>BASICPY</code>, and the remaining opportunity — the BioIO convert — was <b>taken</b>. Neither is quietly
+    edited out. The deleted site was the only card in the set carrying no measurement, so the surviving four are
+    stronger than the original five (panel <b>c</b>); the taken opportunity brought the figure's only measurement
+    of a real production function, and its own near miss (panels <b>d</b> and <b>g</b>).</div>
 
   <!-- a — WHAT ALREADY EXISTED -->
   <section class="panel">
     <span class="plabel">a</span>
     <div class="panel-head"><h2>What the pipeline already had, and what a reader assumes it gained</h2>
-      <p>The natural reading of "the pipeline now uses zarr" is that it reads fewer bytes off disk. At four of the
-        five sites it does not. Two independent axes of overread exist, and only one of them was ever available to
+      <p>The natural reading of "the pipeline now uses zarr" is that it reads fewer bytes off disk. At three of the
+        four sites it does not. Two independent axes of overread exist, and only one of them was ever available to
         remove.</p></div>
     <div class="two">
       <div class="bx">
@@ -239,17 +248,17 @@
         <div class="sub">C planes decoded to use 1</div>
         <p class="x">A slide is <code>(C, H, W)</code>. <code>tifffile.imread</code> decodes every marker channel;
           the consumer then indexes one out of it. A zarr view indexes first and decodes only the tiles that slice
-          touches. This is the axis all five changed sites moved on.</p>
+          touches. This is the axis all four changed sites moved on.</p>
         <div class="src">open_lazy — bin/utils/tiled_io.py:32</div>
       </div>
       <div class="bx mut">
         <h4>THE SPATIAL AXIS &mdash; not removable here</h4>
         <div class="sub">full resolution decoded to emit a thumbnail</div>
         <p class="x">Reading <code>[::f, ::f]</code> instead of the full plane would be the larger win — and it is
-          available at <b>none</b> of the five sites. <code>decimation_factor(..., max_dim=None)</code> returns
+          available at <b>none</b> of the four sites. <code>decimation_factor(..., max_dim=None)</code> returns
           <code>1</code> at each of them, deliberately; panels <b>f</b> and <b>g</b> give the three separate
           reasons.</p>
-        <div class="src">decimation_factor — bin/utils/tiled_io.py:70 (returns 1 when max_dim is None)</div>
+        <div class="src">decimation_factor — bin/utils/tiled_io.py:86 (returns 1 when max_dim is None)</div>
       </div>
     </div>
     <div class="callout"><span class="wl">the capability was never missing — only its reach</span>
@@ -285,21 +294,21 @@ DEFAULT_BAND_BYTES = 64 * 1024 * 1024    <span class="cm"># a BYTE budget, not a
         <p class="x"><code>open_lazy</code> presents channel-<b>first</b> only. It has no notion of a
           <code>(Y, X, C)</code> layout, which is why every new call site keeps an eager fallback for that case —
           see panel <b>g</b>, blocker 4.</p>
-        <div class="src">bin/utils/tiled_io.py:50-67</div>
+        <div class="src">bin/utils/tiled_io.py:66-84</div>
       </div>
       <div class="bx">
         <h4>why bytes, not rows</h4>
         <p class="x">A fixed row count is not a memory bound: a band of a 30k-wide slide is ~7&times; the same band
           of a 4k-wide one. <code>band_rows_for</code> divides the budget by the row width, then snaps down to a
           multiple of <code>factor</code> so the sampled rows stay globally aligned.</p>
-        <div class="src">bin/utils/tiled_io.py:87-97</div>
+        <div class="src">bin/utils/tiled_io.py:106-114</div>
       </div>
       <div class="bx">
         <h4>one factor, not one per slide</h4>
         <p class="x">The shared factor is a correctness requirement of the STARE coarse anchor, not a convenience:
           squeezing each slide under <code>max_dim</code> independently would introduce a scale change between the
           two thumbnails and bake a bogus scale term into <code>M0</code>.</p>
-        <div class="src">bin/utils/tiled_io.py:70-79</div>
+        <div class="src">bin/utils/tiled_io.py:86-102</div>
       </div>
     </div>
   </section>
@@ -307,13 +316,15 @@ DEFAULT_BAND_BYTES = 64 * 1024 * 1024    <span class="cm"># a BYTE budget, not a
   <!-- c — THE FIVE SITES -->
   <section class="panel">
     <span class="plabel">c</span>
-    <div class="panel-head"><h2>The five sites that changed, at the confidence each earned</h2>
+    <div class="panel-head"><h2>The four sites that changed, at the confidence each earned</h2>
       <p>Each card carries the strongest evidence that actually exists for it, and no more. Two were measured; two
-        rest on output equivalence plus a structural argument; one is unverified until it meets a real slide.</p></div>
+        rest on output equivalence plus a structural argument. Nothing here sits at <i>unverified</i> — the one card
+        that did is the one that is gone.</p></div>
     <div class="key">
       <span><span class="tag-m">measured</span> peak RSS or materialised bytes observed on this machine</span>
       <span><span class="tag-s">structural</span> follows from the code; output equivalence pinned by a test</span>
-      <span><span class="tag-u">unverified</span> no measurement; needs a production slide</span>
+      <span><span class="tag-u">unverified</span> no measurement; needs a production slide — <b>no surviving claim
+        is at this level</b></span>
     </div>
     <div class="sites" style="margin-top:13px">
 
@@ -339,7 +350,7 @@ DEFAULT_BAND_BYTES = 64 * 1024 * 1024    <span class="cm"># a BYTE budget, not a
           <code>read_decimated(..., factor=1)</code> still reads every pixel of every channel, because the
           anti-aliased resize downstream needs them (panel <b>g</b>, blocker 1).</p>
         <div class="res">evidence: <b>max RSS at two channel counts</b> (panel <b>d</b>), plus pixel-identical
-          PNGs (np.array_equal) · bin/generate_preprocess_qc.py:167-211 ·
+          PNGs (np.array_equal) · bin/generate_preprocess_qc.py:177-211 ·
           tests/test_preprocess_qc_lazy_read.py:178</div>
       </div>
 
@@ -369,28 +380,26 @@ DEFAULT_BAND_BYTES = 64 * 1024 * 1024    <span class="cm"># a BYTE budget, not a
           bin/utils/segment_io.py:16-29</div>
       </div>
 
-      <div class="site">
-        <span class="num">5</span>
-        <div class="nm">PREPROCESS <span class="tag-u">unverified</span></div>
-        <p class="x">Per-channel lazy reads with a <b>separate handle per worker thread</b>. The win is about
-          <b>2&times;</b>, not <i>C</i>&times;: <code>results[]</code> already accumulates <i>C</i> output planes,
-          so the resident set goes from <i>C</i> inputs + <i>C</i> outputs to at most <code>n_workers</code>
-          inputs + <i>C</i> outputs, and <code>n_workers = task.cpus = 4</code>.</p>
-        <div class="res">evidence: <b>none measured</b> — needs a real slide. Thread safety <i>is</i> evidenced,
-          separately: see below · bin/preprocess.py:317-360,512 · modules/local/preprocess.nf:54</div>
-      </div>
-
-      <div class="site">
+      <div class="site" style="grid-column:1/-1">
         <span class="num">&mdash;</span>
-        <div class="nm">a near miss worth recording</div>
-        <p class="x">The obvious concurrency test — 20 channels, 8 workers, 40 repeats, no mismatch — proves
-          <b>nothing</b> about thread safety here: this pipeline's pinned <code>tifffile</code> already serialises
-          a shared store's reads behind its own <code>RLock</code>, so that run would have passed identically with
-          the forbidden single shared handle. The actual evidence is a second pair of tests that defeats that lock
-          and widens the seek/read window: the shared-handle run reliably raises
-          <code>TiffFileError('corrupted strip ...')</code>, and the per-thread-handle run survives the identical
-          fault injection.</p>
-        <div class="res">tests/test_preprocess_lazy_concurrency.py:236,283,535,613</div>
+        <div class="nm">the fifth site, and why its loss makes this panel stronger</div>
+        <p class="x">Site 5 was <code>PREPROCESS</code>: per-channel lazy reads with a separate handle per worker
+          thread, claimed at about <b>2&times;</b> rather than <i>C</i>&times; because the output planes accumulated
+          regardless. It carried <b>no measurement</b> — the only <span class="tag-u">unverified</span> card in the
+          set — and it is now moot: mirage's in-process BaSiC correction was replaced by nf-core's
+          <code>BASICPY</code>, and <code>bin/preprocess.py</code> and <code>modules/local/preprocess.nf</code> were
+          deleted. The thread-safety evidence that card pointed at went with them, because nothing in
+          <code>bin/</code> is threaded any more.<br><br>
+          <b>The property outlived the process.</b> The two mirage-owned processes that replaced it —
+          <code>TILE_FOR_BASIC</code> and <code>APPLY_PROFILES</code> — read the slide through the same
+          <code>open_lazy</code>, one channel at a time, by construction rather than by conversion. That is now
+          asserted rather than asserted-about: a spy over the lazy view records the <i>bytes</i> each index
+          expression materialises, and fails if the largest single read grows with the channel count.</p>
+        <div class="res">evidence: <b>largest single materialisation is one plane at C=2 and at C=6</b>
+          (125&thinsp;000 bytes both times on the 250&sup2; uint16 fixture; a whole-stack revert makes it
+          250&thinsp;000 &rarr; 750&thinsp;000, which is the assertion firing) ·
+          bin/tile_for_basic.py:162-181 · bin/apply_basic_profiles.py:248-270 ·
+          tests/test_basic_illumination_lazy_read.py</div>
       </div>
 
     </div>
@@ -400,9 +409,12 @@ DEFAULT_BAND_BYTES = 64 * 1024 * 1024    <span class="cm"># a BYTE budget, not a
   <section class="panel">
     <span class="plabel">d</span>
     <div class="panel-head"><h2>The evidence, and how each number was obtained</h2>
-      <p>Two measurements exist. The first supports the headline; the second falsified a comment. Both were taken
-        on one laptop, on synthetic data, outside the production containers — and both harnesses were scratch
-        files, so <b>neither is reproducible from the repository</b>.</p></div>
+      <p>Three measurements exist. The first supports the headline; the second falsified a comment; the third
+        belongs to the BioIO convert of panel <b>g</b> and is the only one taken against a real production
+        function. All were taken on one laptop, on synthetic data, outside the production containers, with
+        harnesses that were scratch files — so <b>not one of the megabyte figures is reproducible from the
+        repository</b>. What <i>is</i> reproducible, and only for the third, is the <i>mechanism</i>: its
+        decode-count property is pinned by a committed test.</p></div>
     <div class="two">
       <div class="chart">
         <svg viewBox="0 0 520 200" role="img" aria-label="Maximum resident set size of the old whole-stack read versus the new per-channel read, at 8 and 16 channels">
@@ -456,10 +468,42 @@ DEFAULT_BAND_BYTES = 64 * 1024 * 1024    <span class="cm"># a BYTE budget, not a
           <div class="src">recorded in the task-4 implementation report; probe not committed</div>
         </div>
         <div class="warnbox"><span class="wl">what these numbers are not</span>
-          Neither measurement ran inside the production container, on a gigapixel slide, or with a full marker
+          No measurement ran inside the production container, on a gigapixel slide, or with a full marker
           panel. The scaling <i>argument</i> is structural and does not depend on any of that; the specific
           <b>percentages do</b>, and must not be quoted as production figures.</div>
       </div>
+    </div>
+
+    <div class="bx" style="margin-top:14px">
+      <h4>HOW &mdash; the BioIO convert, the third measurement</h4>
+      <p class="x">A 144 MB <code>8 &times; 3000 &times; 3000</code> uint16 OME-TIFF, opened as a lazy dask array
+        over a tifffile zarr store — the same <i>shape</i> of object <code>BioImage.dask_data</code> is — and written
+        through the <b>real</b> <code>convert_image.write_ome_tiff</code>. Peak is
+        <code>resource.getrusage(RUSAGE_SELF).ru_maxrss</code>, sampled in a <b>fresh subprocess per variant</b>
+        (not <code>tracemalloc</code>, which does not see NumPy's allocations); all outputs byte-identical with the
+        OME UUID masked.</p>
+      <div class="tbl-scroll" style="margin-top:9px">
+        <table class="pr">
+          <tr><td class="k">eager whole-array write</td><td class="v">435.2 MB</td>
+            <td class="d">baseline 81.8 MB &rarr; <b>353.4 MB</b> over baseline, on a 144 MB slide. This is what the
+              pipeline did before.</td></tr>
+          <tr><td class="k">streamed, per-plane chunks</td><td class="v">167.7 MB</td>
+            <td class="d">delta <b>85.6 MB</b>. The good case: the reader hands back one plane per chunk and the
+              write iterates them.</td></tr>
+          <tr><td class="k">streamed, one whole-stack chunk</td><td class="v">384.8 MB</td>
+            <td class="d">delta 301.8 MB. The <i>pathological</i> case, kept honest: below eager, never worse than
+              it, and warned about by name at runtime. See panel <b>g</b>.</td></tr>
+        </table>
+      </div>
+      <p class="x">An earlier run of the same method, before the chunk-slab fix, gave <b>422 &rarr; 152 MB</b>; a
+        second person reproduced the direction independently on their own 100 MB fixture at <b>333 &rarr; 134 MB</b>.
+        In that earlier measurement three runs of each variant agreed to within 0.5 MB. The <b>ratio is not claimed
+        to hold at 20 GB</b>, and the
+        residual ~69&ndash;86 MB is tifffile's own buffering plus the interpreter — it is not zero and is not
+        claimed to be.</p>
+      <div class="src">recorded in the task-1 implementation report; harness not committed. The decode-count
+        property IS committed: tests/test_convert_streaming_write.py — a chunk is decoded exactly once for
+        1/2/8-plane chunkings</div>
     </div>
   </section>
 
@@ -520,8 +564,8 @@ DEFAULT_BAND_BYTES = 64 * 1024 * 1024    <span class="cm"># a BYTE budget, not a
   <section class="panel">
     <span class="plabel">f</span>
     <div class="panel-head"><h2>Where lazy reads do not help, and why &mdash; three classes</h2>
-      <p>Ten processes read pixels or masks and are untouched. None of them is an oversight: each falls into one of
-        three classes, and in every class laziness is either impossible or buys nothing. This panel carries the
+      <p>Eleven processes read pixels or masks and are untouched. None of them is an oversight: each falls into one
+        of three classes, and in every class laziness is either impossible or buys nothing. This panel carries the
         same weight as panel <b>c</b>.</p></div>
     <div class="tbl-scroll">
       <table class="own">
@@ -564,6 +608,13 @@ DEFAULT_BAND_BYTES = 64 * 1024 * 1024    <span class="cm"># a BYTE budget, not a
           <tr><td class="st">WARP_SEG_QC</td>
               <td class="kd">warps GeoJSON polygons through the VALIS registrar, once per stage<br>bin/warp_seg_qc.py:4-12</td>
               <td>Operates on polygons and a registrar, not on pixel arrays it opens itself.</td></tr>
+          <tr><td class="st">BASICPY</td>
+              <td class="kd">fits one flatfield/darkfield pair per channel over the pseudo-FOV tile stack<br>modules/nf-core/basicpy/main.nf &mdash; <code>/opt/main.py</code></td>
+              <td>The newest member of this class, and the clearest. The read happens inside an upstream container
+                mirage <b>vendors unmodified</b>; mirage does not open the file, choose the reader, or own the
+                loop. Making that read lazy is an upstream change. The two halves either side of it —
+                <code>TILE_FOR_BASIC</code> and <code>APPLY_PROFILES</code> — are mirage's, and both <i>are</i> lazy
+                (panel <b>c</b>).</td></tr>
         </tbody>
       </table>
     </div>
@@ -579,8 +630,8 @@ DEFAULT_BAND_BYTES = 64 * 1024 * 1024    <span class="cm"># a BYTE budget, not a
   <!-- g — STRUCTURAL BLOCKERS -->
   <section class="panel">
     <span class="plabel">g</span>
-    <div class="panel-head"><h2>Four structural blockers, and the one opportunity that is left</h2>
-      <p>Beyond the ten processes of panel <b>f</b>, four specific mechanisms make a <i>spatial</i> saving
+    <div class="panel-head"><h2>Four structural blockers, and the one opportunity that was left &mdash; now taken</h2>
+      <p>Beyond the eleven processes of panel <b>f</b>, four specific mechanisms make a <i>spatial</i> saving
         unavailable even at sites that <i>are</i> now lazy. They are why <code>factor</code> is 1 everywhere
         outside STARE.</p></div>
     <div class="two">
@@ -606,24 +657,60 @@ DEFAULT_BAND_BYTES = 64 * 1024 * 1024    <span class="cm"># a BYTE budget, not a
         <p class="x"><code>read_single_ndpi</code> tests <code>image_data[...,0] == [...,1] == [...,2]</code> to
           decide whether an NDPI's RGB is really greyscale. That is samples-<i>last</i> and needs all three planes
           at once — incompatible with <code>tiled_io</code>'s channel-first <code>(C, H, W)</code> contract.</p>
-        <div class="src">bin/convert_image.py:167,193-210</div>
+        <div class="src">bin/convert_image.py:177,209-226</div>
       </div>
       <div class="bx">
         <h4>4 &mdash; the (Y, X, C) fallback, kept and never exercised</h4>
-        <p class="x">Three of the five changed sites keep the old eager whole-stack path for a channel-last on-disk
+        <p class="x">Two of the four changed sites keep the old eager whole-stack path for a channel-last on-disk
           layout, because <code>open_lazy</code> is channel-first only. This pipeline's own writers never produce
           that layout (always <code>axes="CYX"</code>), so the branch is defensive — and correspondingly
-          <b>unexercised in production</b>.</p>
-        <div class="src">bin/generate_preprocess_qc.py:186-205 · bin/split_multichannel.py:185-200 · bin/preprocess.py:436-453</div>
+          <b>unexercised in production</b>. The newer readers took the <i>other</i> answer to the same problem:
+          <code>tile_for_basic</code> <b>refuses</b> a channel-last slide by name rather than carrying a second
+          code path for an input its own upstream cannot emit.</p>
+        <div class="src">bin/generate_preprocess_qc.py:180-205 · bin/split_multichannel.py:175-200 ·
+          bin/tile_for_basic.py:80-86 (refuses instead)</div>
       </div>
     </div>
-    <div class="warnbox"><span class="wl">the one opportunity that is left</span>
-      <code>bin/convert_image.py:91-103</code> — <code>img.data</code>, the BioIO path. This is the site the
-      original performance plan actually <i>measured</i>, and it is still eager: it materialises the whole image in
-      order to convert it. Making it lazy is <b>not</b> a <code>tiled_io</code> change — <code>img</code> is a
-      <code>bioio.BioImage</code>, not a <code>tifffile</code>/<code>zarr</code> handle, so it needs BioIO's own
-      dask/xarray accessor plus a rewrite of the dimension-order and squeeze logic that immediately follows it. It
-      is the largest remaining win, and the one that was <i>not</i> taken.</div>
+
+    <div class="corr" style="margin-top:14px">
+      <div class="hd"><span class="wrong">WAS</span> &ldquo;the one opportunity that is left&rdquo; &mdash;
+        <code>convert_image.py</code>'s BioIO <code>img.data</code> &nbsp;&rarr;&nbsp; TAKEN</div>
+      <div class="bd">
+        <div><div class="lb">what it needed, and what it got</div>
+          <p class="tx">Not a <code>tiled_io</code> change: <code>img</code> is a <code>bioio.BioImage</code>, not a
+            <code>tifffile</code>/<code>zarr</code> handle, so the fix had to come from BioIO's own API. The read is
+            now <code>img.dask_data</code> at all three sites — the singleton-<code>C</code> squeeze, the
+            <code>S</code>-as-<code>C</code> branch and the fallthrough. Every operation that follows
+            (<code>np.squeeze</code>, <code>np.transpose</code>, <code>np.take</code>, plain indexing) dispatches
+            through dask's <code>__array_function__</code> and stays lazy, so <b>none</b> of the dimension-order
+            logic had to be rewritten.</p>
+          <div class="src">bin/convert_image.py:61 (read_image_bioio) · :466 (write_ome_tiff)</div></div>
+        <div><div class="lb">why the read alone would have saved nothing</div>
+          <p class="tx"><b>Both halves had to change.</b> A lazy handle passed to <code>tifffile.imwrite</code> is
+            simply <code>np.asarray</code>'d — the materialisation moves from the read to the write and the peak is
+            unchanged. The write now streams: <code>TiffWriter.write(iterator, shape=, dtype=)</code>, the same form
+            <code>bin/tiled_stitch.py</code> already used in production. Measured at
+            <b>435 &rarr; 168 MB</b> peak (panel <b>d</b>).</p>
+          <div class="src">bin/convert_image.py:397 (_iter_planes) · :389 (_axis0_slabs)</div></div>
+      </div>
+    </div>
+
+    <div class="warnbox"><span class="wl">the near miss, and the risk that is left</span>
+      The obvious streaming iterator — one <code>image_data[i]</code> per plane — is a <b>regression</b>, not a win,
+      when the reader hands back the whole stack as a single chunk: each plane's <code>compute()</code> re-decodes
+      that chunk, so 8 planes cost 8 whole-stack decodes. The natural defence does not defend:
+      <code>.rechunk((1, Y, X))</code> splits the graph <i>downstream</i> of the source read and dask does not cache
+      across independent computes, so it was measured at <b>9 decodes, unchanged</b>, and rejected on that evidence
+      rather than shipped because it looked right. What ships instead walks the array's own axis-0 chunk boundaries
+      and materialises one slab: exactly <b>one decode per chunk, for every chunking</b>.<br><br>
+      <b>The residual risk is not ours to remove.</b> Chunk granularity is the <i>reader's</i> decision — a
+      <code>bioio</code> plugin that returns the slide as one chunk collapses the saving back to roughly the eager
+      peak (384.8 MB against 167.7). That case is bounded, never worse than the write it replaced, and warned about
+      by name at runtime — &ldquo;the streamed write must decode them together … size this task from the
+      DECOMPRESSED slide&rdquo; — with a committed control test so the warning cannot decay into noise that always
+      fires. And it is <b>unobserved</b>: <code>bioio</code> is not installable on the machine that measured any of
+      this, so the real <code>BioImage.dask_data</code> was never called. That is the one claim in this figure
+      resting on another library's documented behaviour rather than on something run.</div>
   </section>
 
   <!-- h — THE DIALS -->
@@ -641,17 +728,19 @@ DEFAULT_BAND_BYTES = 64 * 1024 * 1024    <span class="cm"># a BYTE budget, not a
             <td class="d">Byte budget for one streamed row band — independent of slide width. Bounds peak
               memory to one band plus the accumulated decimated result when <code>factor &gt; 1</code>; at
               <code>factor == 1</code> (sites 1 and 2 below) striding is a no-op, so this bounds a per-band
-              read, not the read's overall peak. <code>bin/utils/tiled_io.py:87</code></td></tr>
-          <tr><td class="k">max_dim</td><td class="v"><span class="nul">None</span> at all five sites</td>
+              read, not the read's overall peak. <code>bin/utils/tiled_io.py:103</code></td></tr>
+          <tr><td class="k">max_dim</td><td class="v"><span class="nul">None</span> at all four sites</td>
             <td class="d">Passed to <code>decimation_factor</code>. <code>None</code> &rarr; factor 1 &rarr; no
               spatial decimation. STARE passes a real value; nothing else does.</td></tr>
           <tr><td class="k">factor</td><td class="v">1</td>
             <td class="d">A consequence of the above, not an independent setting. Written as
               <code>decimation_factor(...)</code> rather than a literal, so a caller that <i>does</i> pass
               <code>max_dim</code> still gets true decimation.</td></tr>
-          <tr><td class="k">n_workers</td><td class="v">task.cpus = 4</td>
-            <td class="d">PREPROCESS only. Bounds how many lazy handles — and input planes — are live at once.
-              <code>modules/local/preprocess.nf:54</code></td></tr>
+          <tr><td class="k">axis-0 chunk</td><td class="v"><span class="nul">the reader's</span></td>
+            <td class="d">The BioIO convert only. Peak of the streamed write is one chunk of whatever
+              <code>dask_data</code> hands back — one plane in the good case, the whole stack in the bad one. It is
+              <b>not a dial this pipeline owns</b>, which is why the bad case is warned about at runtime instead of
+              configured away. <code>bin/convert_image.py:397</code></td></tr>
         </table>
       </div>
       <div class="pcol">
@@ -665,13 +754,26 @@ DEFAULT_BAND_BYTES = 64 * 1024 * 1024    <span class="cm"># a BYTE budget, not a
             <td class="d">by input file size</td></tr>
           <tr><td class="k">SEGMENT</td><td class="v">32 / 64 / 128 GB</td>
             <td class="d">by merged-file size</td></tr>
-          <tr><td class="k">PREPROCESS</td><td class="v">7 GB per input GB, + 8 GB</td>
-            <td class="d">by input file size, scaled by attempt</td></tr>
+          <tr><td class="k">CONVERT_IMAGE</td><td class="v">24 GB &times; attempt, + 0/24/48/64 GB</td>
+            <td class="d">tiered on the <b>compressed</b> input</td></tr>
         </table>
         <p class="outnote"><b>Every one of these is a closure over file size, not over measured peak memory.</b>
           A lower peak therefore changes nothing the scheduler reserves — the cluster still holds the same nodes
           for the same time. What a lower peak buys is <i>headroom</i>: fewer OOM kills at the top of the size
           distribution, and room to lower these closures later, on evidence that does not yet exist.</p>
+        <p class="outnote"><code>CONVERT_IMAGE</code> is the sharpest case of that mismatch, and the reason the
+          streamed write matters more than its megabytes suggest: the tier is read off the <b>compressed</b> file,
+          while the peak was set by the <b>decompressed</b> one. A 6 GB CZI that decompresses to 20 GB is sized at
+          48 GB — and the eager write's own measurement put its peak at <b>2.4&times; the slide it was writing</b>.
+          The streamed write is what breaks that coupling —
+          and the runtime warning of panel <b>g</b> says the same sentence out loud when the reader's chunking
+          re-establishes it.</p>
+        <div class="callout" style="margin-top:11px"><span class="wl">one honest exception to &ldquo;nothing changed&rdquo;</span>
+          The preprocessing step's requests <i>did</i> change while this work was going on — <code>PREPROCESS</code>
+          (4 cpus, 7 GB/GB + 8) became <code>TILE_FOR_BASIC</code> (2, 3 GB/GB + 8), <code>BASICPY</code> (1, 32 GB)
+          and <code>APPLY_PROFILES</code> (2, 7 GB/GB + 8). <b>Not because anything got lazier.</b> One process
+          became three when the illumination backend was swapped for nf-core's, and each needed its own request.
+          No closure anywhere was lowered on the strength of a measured peak.</div>
       </div>
     </div>
   </section>
@@ -715,10 +817,11 @@ DEFAULT_BAND_BYTES = 64 * 1024 * 1024    <span class="cm"># a BYTE budget, not a
       <div class="hd"><span class="wrong">CLAIMED</span> the hot path is <code>convert_image.py:167</code></div>
       <div class="bd">
         <div><div class="lb">what is true</div>
-          <p class="tx">Wrong site. <code>:167</code> is <code>read_single_ndpi</code>, blocked for an unrelated
-            reason (panel <b>g</b>, blocker 3). The path the plan actually measured is <code>img.data</code> at
-            <code>:91-103</code> — and it belongs to <b>BioIO</b>, so <code>tiled_io</code> cannot fix it at
-            all.</p></div>
+          <p class="tx">Wrong site. That line is <code>read_single_ndpi</code>, blocked for an unrelated
+            reason (panel <b>g</b>, blocker 3). The path the plan actually measured is <code>img.data</code> in
+            <code>read_image_bioio</code> — and it belongs to <b>BioIO</b>, so <code>tiled_io</code> could never
+            have fixed it. It was fixed through BioIO's own API instead, later and separately (panel
+            <b>g</b>).</p></div>
         <div><div class="lb">what the read site could not tell you</div>
           <p class="tx"><b>Which library owns the read.</b> Two eager reads in one file, in different libraries,
             with different fixes and different feasibility.</p></div>
@@ -728,9 +831,12 @@ DEFAULT_BAND_BYTES = 64 * 1024 * 1024    <span class="cm"># a BYTE budget, not a
     <div class="callout"><span class="wl">the common cause</span>
       All three came from <b>scanning read sites</b>. A read site tells you that bytes are fetched. It cannot tell
       you what the pixels are <i>for</i> (a published artifact), what filter <i>consumes</i> them (anti-aliasing),
-      whether the loop is <i>threaded</i> (PREPROCESS's ~2&times;, not <i>C</i>&times;), or which library
-      <i>owns</i> the read (BioIO). In every one of these cases the decision that governs the optimisation was
-      made somewhere else — at a write site, inside a filter, in a logging side effect, or in another library.
+      which library <i>owns</i> the read (BioIO), or <i>how coarsely that library chunks</i> what it hands back —
+      the last of which is worth a number, because it was measured after the fact: the identical
+      <code>img.dask_data</code> expression peaks at <b>167.7 MB</b> when the reader chunks per plane and
+      <b>384.8 MB</b> when it returns one chunk, and nothing at the read site distinguishes the two. In every one of
+      these cases the decision that governs the optimisation was made somewhere else — at a write site, inside a
+      filter, in another library, or in that library's chunking policy.
       <b>An overread factor read off a read site is a hypothesis, not a measurement.</b></div>
   </section>
 
@@ -747,23 +853,25 @@ DEFAULT_BAND_BYTES = 64 * 1024 * 1024    <span class="cm"># a BYTE budget, not a
       </div>
       <div class="bx mut">
         <h4>the harnesses are not committed</h4>
-        <p class="x">Both measurement scripts were scratch files outside the repository. <b>The measured numbers
-          cannot be reproduced from a checkout.</b> Only the equivalence tests can.</p>
+        <p class="x">All three measurement scripts were scratch files outside the repository. <b>No megabyte figure
+          here can be reproduced from a checkout.</b> The equivalence tests can, and so — for the convert alone —
+          can the decode-count that the peak depends on.</p>
       </div>
       <div class="bx mut">
-        <h4>PREPROCESS is unverified</h4>
-        <p class="x">Site 5's ~2&times; is arithmetic over the code, not an observation. Its <i>thread safety</i>
-          is evidenced; its <i>benefit</i> is not.</p>
+        <h4>the BioIO peak used a stand-in</h4>
+        <p class="x"><code>bioio</code> is not installable on the machine that measured it, so the 435 &rarr; 168 MB
+          run used a tifffile-zarr-backed dask array, not the real <code>BioImage.dask_data</code>. The one thing
+          that governs the saving — <b>that reader's chunk granularity</b> — is therefore unobserved.</p>
       </div>
       <div class="bx mut">
         <h4>no bytes-read reduction is claimed</h4>
-        <p class="x">Four of the five sites read exactly as many source pixels as before. Only SEGMENT genuinely
-          decodes less, and only on the channel axis.</p>
+        <p class="x">Three of the four sites read exactly as many source pixels as before, and so does the convert.
+          Only SEGMENT genuinely decodes less, and only on the channel axis.</p>
       </div>
       <div class="bx mut">
         <h4>the scheduler sees nothing</h4>
-        <p class="x">All five processes still request memory as a function of input file size (panel <b>h</b>).
-          No run got cheaper in reserved GB&middot;h.</p>
+        <p class="x">Every affected process still requests memory as a function of input file size (panel
+          <b>h</b>). No run got cheaper in reserved GB&middot;h, and no closure was lowered.</p>
       </div>
       <div class="bx mut">
         <h4>the channel-last branches stay untested in production</h4>
@@ -772,11 +880,13 @@ DEFAULT_BAND_BYTES = 64 * 1024 * 1024    <span class="cm"># a BYTE budget, not a
       </div>
     </div>
     <div class="callout"><span class="wl">what a green suite does and does not prove here</span>
-      The Python suite went from 711 to <b>762 passed / 9 skipped</b>, and the stub run still publishes its
-      documented <b>62</b> files. That establishes the equivalence claims — byte-identical outputs, no whole-stack
-      decode, no channel mix-up under threads — SPLIT_CHANNELS on raw file bytes, registration QC and preprocess
-      QC on <code>np.array_equal</code>. It establishes <b>none</b> of the memory claims: no test in this
-      repository measures peak RSS.</div>
+      The Python suite went from 711 to <b>812 passed / 9 skipped</b>, and the stub run still publishes its
+      documented <b>62</b> files. That establishes the equivalence claims — byte-identical outputs and no
+      whole-stack decode — SPLIT_CHANNELS on raw file bytes, registration QC and preprocess QC on
+      <code>np.array_equal</code>, the convert on full file bytes with the OME UUID masked, and both BASICPY-path
+      readers on the <i>size</i> of every array their lazy view hands back. It establishes <b>none</b> of the
+      megabyte figures: no test in this repository measures peak RSS. A test can see that a whole stack was not
+      materialised; it cannot see what the process's resident set peaked at.</div>
   </section>
 
   <p class="caption">
@@ -785,36 +895,48 @@ DEFAULT_BAND_BYTES = 64 * 1024 * 1024    <span class="cm"># a BYTE budget, not a
     <code>bin/utils/tiled_io.py</code> and were consumed by three STARE tiled scripts; what changed is reach. Two
     axes of overread exist, and only the channel axis was ever removable here. <b>(b)</b> The primitive: a
     channel-first lazy view, a byte-budgeted band reader, and one shared decimation factor.
-    <b>(c)</b> Five sites changed, each stated at the confidence it earned — registration QC on pixel-identical
+    <b>(c)</b> Four sites changed, each stated at the confidence it earned — registration QC on pixel-identical
     output and SPLIT_CHANNELS on byte-identical files, both with a structural memory argument; preprocess QC and
-    both segmentation backends on direct measurement; PREPROCESS unverified. <b>(d)</b> The two measurements, with their method and the scratch-only
-    provenance that makes them irreproducible from the repository; the load-bearing result is the scaling shape —
-    doubling the channel count grew the old peak 31% and the new one 1.3%. <b>(e)</b> The comment both segmentation
+    both segmentation backends on direct measurement. A fifth site, <code>PREPROCESS</code>, no longer exists: the
+    in-process BaSiC correction was replaced by nf-core's <code>BASICPY</code>. It was the only card carrying no
+    measurement, and the property survived the process — the two mirage-owned steps that replaced it read one
+    channel at a time by construction, asserted on materialised bytes. <b>(d)</b> The three measurements, with their
+    method and the scratch-only provenance that makes every megabyte figure irreproducible from the repository; the
+    load-bearing results are the scaling shape — doubling the channel count grew the old peak 31% and the new one
+    1.3% — and the convert's 435 &rarr; 168 MB. <b>(e)</b> The comment both segmentation
     backends carried was false: <code>asarray(out="memmap")</code> decodes the entire compressed image into a new
-    full-size uncompressed temporary file and maps that instead of the source. <b>(f)</b> Ten processes are
+    full-size uncompressed temporary file and maps that instead of the source. <b>(f)</b> Eleven processes are
     untouched, in three classes — whole-array algorithms whose objects cross block boundaries, consumers whose
-    input is already one plane or is a table, and reads owned by VALIS — while the STARE tiled path shows the
+    input is already one plane or is a table, and reads owned by another library (VALIS, and now the vendored
+    nf-core BASICPY container) — while the STARE tiled path shows the
     ceiling a window-bounded <i>design</i> reaches, as opposed to a swapped read call. <b>(g)</b> Four mechanisms
-    block a spatial saving even where the read is now lazy, and the one remaining opportunity
-    (<code>convert_image.py</code>'s BioIO <code>img.data</code>) needs another library's API, not this one.
-    <b>(h)</b> No parameter was added and no resource request changed: every affected process still reserves memory
-    as a function of input file size, so a lower peak buys headroom, not cost. <b>(i)</b> Three claims in the audit
+    block a spatial saving even where the read is now lazy, and the opportunity this figure once listed as the only
+    one left (<code>convert_image.py</code>'s BioIO <code>img.data</code>) has been taken, through that library's
+    own API: lazy read plus streamed chunk-slab write, with the naive per-plane iterator measured to be a
+    regression and <code>.rechunk()</code> measured not to defend against it.
+    <b>(h)</b> No parameter was added and no resource closure was lowered: every affected process still reserves
+    memory as a function of input file size — the convert from the <i>compressed</i> input, while its peak was set
+    by the decompressed one — so a lower peak buys headroom, not cost. <b>(i)</b> Three claims in the audit
     that scoped this work were wrong, all for one reason — a read site cannot tell you what the pixels are for,
-    what filter consumes them, whether the loop is threaded, or which library owns the read. <b>(j)</b> The limits.
+    what filter consumes them, which library owns the read, or how coarsely that library chunks it. <b>(j)</b> The
+    limits.
     Supplementary Figure <b>S1</b> places these processes in the whole workflow; <b>S2</b> covers the registration
     backends whose tiled path already read lazily; <b>S3</b> covers the QC artifacts two of these sites produce.
     <span class="footnote">Function names, call sites, container pins, resource closures, published paths and
     parameter defaults are read verbatim from the pipeline source
     (<code>bin/utils/tiled_io.py</code>, <code>bin/utils/qc.py</code>, <code>bin/utils/segment_io.py</code>,
     <code>bin/generate_preprocess_qc.py</code>, <code>bin/generate_registration_qc.py</code>,
-    <code>bin/split_multichannel.py</code>, <code>bin/preprocess.py</code>, <code>bin/convert_image.py</code>,
+    <code>bin/split_multichannel.py</code>, <code>bin/convert_image.py</code>,
+    <code>bin/tile_for_basic.py</code>, <code>bin/apply_basic_profiles.py</code>,
     <code>bin/quantify.py</code>, <code>bin/mask_to_geojson.py</code>,
     <code>bin/extract_cell_properties.py</code>, <code>bin/generate_postprocessing_qc.py</code>,
     <code>bin/tiled_solve.py</code>, <code>bin/warp_seg_qc.py</code>, <code>bin/register.py</code>,
     <code>bin/utils/image_utils.py</code>, <code>conf/modules.config</code>, <code>modules/local/*.nf</code>,
-    <code>containers/*/</code>, <code>tests/test_*_lazy_*.py</code>). The two peak-memory measurements are
-    reproduced from the implementation reports that recorded them; both used ad-hoc, uncommitted harnesses and are
-    labelled as such throughout, and neither can be re-run from a checkout.</span>
+    <code>modules/nf-core/basicpy/</code>, <code>containers/*/</code>, <code>tests/test_*_lazy_*.py</code>,
+    <code>tests/test_convert_streaming_write.py</code>). The three peak-memory measurements are
+    reproduced from the implementation reports that recorded them; all used ad-hoc, uncommitted harnesses and are
+    labelled as such throughout, and none can be re-run from a checkout. The suite and published-file counts were
+    re-run for this revision, not copied forward.</span>
   </p>
 </div>
 </body>
