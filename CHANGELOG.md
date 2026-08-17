@@ -297,15 +297,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of the truth ("the real value is read from the input OME metadata and **preserved**
   through the pipeline"), which is corrected here.
   - The rule now lives in one place, `bin/utils/pixel_size.py`. `CONVERT_IMAGE` and
-    `PREPROCESS` log `[SCALE MISMATCH]` naming both numbers and the percentage apart
+    `PREPROCESS` logged `[SCALE MISMATCH]` naming both numbers and the percentage apart
     when an input's OME `PhysicalSize` differs from the configured value by more than
     1%. Ownership is unchanged by design: `warn_on_pixel_size_mismatch` returns a
     bool, never a scale, so no caller can start preferring the metadata and become a
-    second owner. **No published number changes.**
+    second owner. **No published number changes.** (`PREPROCESS` was later deleted and
+    its illumination-correction role replaced by nf-core's `BASICPY`, entry below;
+    `CONVERT_IMAGE` still logs this warning.)
   - `bin/preprocess.py` had its own OME-XML walk with its own hardcoded `0.325`
     fallback, so a run with `--pixel_size` set to anything else silently fell back to
-    a number nothing in the run had asked for. It now uses the shared reader and falls
-    back to the configured value.
+    a number nothing in the run had asked for. It was switched to the shared reader,
+    falling back to the configured value, before the file itself was deleted entirely
+    (entry below).
   - `bin/convert_image.py`'s readers returned `PIXEL_SIZE_UM` where a file said
     nothing, making "detected" and "absent" indistinguishable. They return `None`; the
     fallback is applied once, at the point the two values are compared.
@@ -640,6 +643,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   removed. Padding was default-off and unused: both registration backends align inputs of differing
   sizes natively (VALIS into a shared space; the tiled/STARE backend into the reference's shape).
   This also removed the pipeline's only filename-based channel-name inference.
+- **`PREPROCESS` and `bin/preprocess.py` — deleted.** In-process BaSiCPy illumination
+  correction (one process, one Python script, its own thread pool over per-channel BaSiC
+  fits) is replaced by three processes wrapping nf-core's vendored `BASICPY` module:
+  `TILE_FOR_BASIC` (writes the slide onto the pseudo-FOV grid the module requires — it
+  computes profiles only, refuses a single-sited image, and expects mcmicro/ASHLAR to
+  apply them, which mirage does not have) → `BASICPY` (fits flatfield/darkfield profiles)
+  → `APPLY_PROFILES` (the arithmetic the module leaves out, plus reassembly). See
+  `subworkflows/local/preprocess.nf` and `modules/nf-core/basicpy/MIRAGE-NOTES.md`.
+  - **Illumination-correction MODEL change, published-output change.** `BASICPY` runs at
+    its upstream defaults, which means `get_darkfield=False`: **no additive darkfield is
+    estimated or removed any more.** Mirage's deleted in-process path called
+    `BaSiC(get_darkfield=True, smoothness_flatfield=1)` explicitly. Every corrected pixel
+    downstream of preprocessing — registration, segmentation, quantification, exported
+    intensities — is therefore computed from a flatfield-only correction, not the
+    flatfield+darkfield correction the pipeline shipped until now. `bin/apply_basic_profiles.py`
+    still accepts an optional `--darkfield` and subtracts it when supplied (a fitted
+    darkfield remains all zeros at these defaults, so the subtraction is a no-op in
+    production); there is no pipeline knob that supplies one.
+  - **New third-party container the repo does not build.**
+    `docker.io/labsyspharm/basicpy-docker-mcmicro:1.2.0-patch5`
+    (`modules/nf-core/basicpy/main.nf:5`) is vendored unmodified from mcmicro, unlike
+    every other process image, which is `bolt3x/mirage-<component>` and built by
+    `containers/<component>/Dockerfile` + `.github/workflows/build-images.yml`. It is now
+    a listed exception in `tests/test_container_image_naming.py`'s `EXTERNAL_ALLOWED`,
+    whose scan was widened to cover `modules/nf-core/` (previously `modules/local/` +
+    `lib/` + `conf/` only, so this reference was never checked at all).
+- **`bin/convert_image.py`'s BioIO read is now lazy.** `img.data` (an eager, whole-array
+  materialisation) is replaced by `img.dask_data`, and the OME-TIFF write iterates its
+  chunks instead of holding the decoded array whole. Byte-identical output
+  (`tests/test_convert_lazy_read.py`, `tests/test_convert_streaming_write.py`); see
+  `docs/figures/zarr-schematic.html` panel **d** for the measured peak-RSS shape
+  (435.2 MB eager → 167.7 MB streamed per-plane, on a 144 MB fixture; ratio not claimed to
+  hold at production scale). `TILE_FOR_BASIC` and `APPLY_PROFILES` read through the same
+  lazy primitive by construction (`docs/figures/zarr-schematic.html` panel **c**, "the
+  fifth site").
 
 ## [1.0.0] - 2026-07-29
 

@@ -96,13 +96,15 @@ workflow PREPROCESSING {
             TILE_FOR_BASIC.out.tiles.map { meta, tiles -> [ meta + [id: tiles.simpleName], tiles ] }
         )
 
-        // Joined on a STRING key, deliberately, NOT on the meta map. Two slides of one
-        // patient can carry an IDENTICAL meta map -- patient_id, is_reference, channels and
-        // the injected counts are all equal for two moving slides of the same panel, which
-        // is the ordinary cyclic-IF case -- and join() on a duplicated key re-pairs the
-        // wrong tuples with no error. `<patient>/<tile basename>` is unique per slide,
-        // because TILE_FOR_BASIC names its outputs after the converted image and
-        // BASICPY names its profiles after the tile stack it was given.
+        // Joined on a STRING key, deliberately, NOT on the meta map. The left side carries
+        // TILE_FOR_BASIC's meta (no `id`); the right side carries BASICPY's meta, which
+        // gained an `id` two lines up (line 96) for that process alone. A join on the meta
+        // map itself would therefore never match -- the two maps differ by that one key --
+        // so the join has to go around it. `<patient>/<tile basename>` reconstructs the
+        // same string on both sides (`meta.patient_id` is common to both; `json.simpleName`
+        // on the left and `meta.id` on the right both resolve to the tile-stack basename),
+        // which is unique per slide because TILE_FOR_BASIC names its outputs after the
+        // converted image and BASICPY names its profiles after the tile stack it was given.
         ch_apply = TILE_FOR_BASIC.out.sidecar
             .map { meta, image, json -> [ "${meta.patient_id}/${json.simpleName}", meta, image, json ] }
             .join(
