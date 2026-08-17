@@ -90,6 +90,23 @@ def _write_stack(tmp_path, n_channels, h=48, w=40, seed=7, axes="CYX", dtype=np.
     return path, stack
 
 
+def _write_stack_from_array(tmp_path, stack):
+    """Write an explicit (C, H, W) array as a channel-first OME-TIFF, same encoding
+    ``_write_stack`` uses for its default axes="CYX" case -- but with full control over the
+    pixel values, for fixtures that need to land specific values (negatives, wrapped-negative
+    highs) rather than ``_write_stack``'s generic per-channel-offset noise.
+    """
+    path = tmp_path / "image.ome.tiff"
+    tifffile.imwrite(
+        str(path),
+        stack,
+        ome=True,
+        photometric="minisblack",
+        metadata={"axes": "CYX"},
+    )
+    return path
+
+
 def _channel_names(n):
     return [f"CH{i}" for i in range(n)]
 
@@ -293,3 +310,125 @@ def test_streaming_input_stats_log_matches_whole_array_log_image_stats(
     ]
     assert len(got_lines) == 1, f"expected exactly one aggregate stats line, got {got_lines}"
     assert got_lines[0] == expected_lines[0]
+
+
+def _captured_input_lines(tmp_path, image_path, channel_names, monkeypatch, caplog, n_workers=2):
+    """Run the lazy preprocess path and return every ``[input] ...`` line
+    (``_StreamingImageStats.finalize``) it logged, in emission order -- the stats line and any
+    of its two warning branches (negative-values / suspicious-high-uint16).
+    """
+    out_path = tmp_path / "out.ome.tiff"
+    with caplog.at_level(logging.INFO, logger=preprocess.logger.name):
+        preprocess.preprocess_multichannel_image(
+            image_path=str(image_path),
+            channel_names=list(channel_names),
+            output_path=str(out_path),
+            skip_nuclear=False,
+            n_workers=n_workers,
+        )
+    return [
+        r.message
+        for r in caplog.records
+        if r.name == preprocess.logger.name and r.message.startswith("[input]")
+    ]
+
+
+def test_streaming_input_stats_negative_value_warning_matches_whole_array_log_image_stats(
+    tmp_path, monkeypatch, caplog
+):
+    """``_StreamingImageStats.finalize``'s ``if self._min < 0`` branch (preprocess.py:303-306)
+    must fire, and must log the SAME "Negative values detected" line a whole-array
+    ``log_image_stats`` call would produce -- not just the plain "Image stats:" line.
+
+    Mutating ``self._min < 0`` to ``self._min < -1`` (or stubbing the branch out) turns this RED:
+    the streamed aggregate would silently drop the negative-values warning while
+    ``log_image_stats`` (the reference) still emits it, so ``got_lines != expected_lines``.
+    """
+    n_channels = 3
+    h, w = 20, 24
+    rng = np.random.default_rng(11)
+    stack = np.stack(
+        [rng.integers(-1000, 1000, size=(h, w)).astype(np.int16) for _ in range(n_channels)],
+        axis=0,
+    )
+    assert stack.min() < 0, "fixture must actually exercise the negative-values branch"
+    image_path = _write_stack_from_array(tmp_path, stack)
+    channel_names = _channel_names(n_channels)
+    _identity_basic(monkeypatch)
+
+    ref_logger = logging.getLogger("preprocess_lazy_read_reference_negative")
+    ref_logger.setLevel(logging.INFO)
+    ref_records = []
+
+    class _Collect(logging.Handler):
+        def emit(self, record):
+            ref_records.append(record.getMessage())
+
+    ref_logger.addHandler(_Collect())
+    from bin.utils.validation import log_image_stats
+
+    log_image_stats(stack, "input", ref_logger)
+    expected_lines = list(ref_records)
+    assert len(expected_lines) == 2, (
+        f"reference log_image_stats should emit exactly the stats line plus the negative-values "
+        f"warning, got {expected_lines}"
+    )
+    assert "Negative values detected" in expected_lines[1]
+
+    got_lines = _captured_input_lines(tmp_path, image_path, channel_names, monkeypatch, caplog)
+    assert got_lines == expected_lines
+
+
+def test_streaming_input_stats_high_uint16_warning_matches_whole_array_log_image_stats(
+    tmp_path, monkeypatch, caplog
+):
+    """``_StreamingImageStats.finalize``'s ``if self._dtype == np.uint16 and self._max > 60000``
+    branch (preprocess.py:308-314) must fire, and must log the SAME "Suspicious high values
+    (potential wrapped negatives)" line -- with the SAME aggregate pixel count and percentage --
+    a whole-array ``log_image_stats`` call would produce.
+
+    Mutating ``self._high_count += c_high`` to ``+= 0`` (as the reviewer's mutation did) turns
+    this RED: the streamed aggregate's high-pixel count collapses to 0, the percentage drops
+    below the 0.1% gate, and the warning line is silently dropped while the reference
+    ``log_image_stats`` (computed from the whole array) still emits it.
+    """
+    n_channels = 4
+    h, w = 40, 40
+    rng = np.random.default_rng(13)
+    stack = np.stack(
+        [rng.integers(0, 5000, size=(h, w)).astype(np.uint16) for _ in range(n_channels)],
+        axis=0,
+    )
+    # 20 / 6400 pixels = 0.3125% > the 0.1% warning gate, split across two channels so no
+    # single channel's own count alone would clear the gate -- exercising the AGGREGATE
+    # (cross-channel-summed) high-count, not a per-channel one.
+    stack[0, 0, :10] = 65000
+    stack[1, 0, :10] = 65000
+    high_frac = (stack > 60000).sum() / stack.size * 100
+    assert high_frac > 0.1, "fixture must actually clear the suspicious-high-values gate"
+
+    image_path = _write_stack_from_array(tmp_path, stack)
+    channel_names = _channel_names(n_channels)
+    _identity_basic(monkeypatch)
+
+    ref_logger = logging.getLogger("preprocess_lazy_read_reference_high_uint16")
+    ref_logger.setLevel(logging.INFO)
+    ref_records = []
+
+    class _Collect(logging.Handler):
+        def emit(self, record):
+            ref_records.append(record.getMessage())
+
+    ref_logger.addHandler(_Collect())
+    from bin.utils.validation import log_image_stats
+
+    log_image_stats(stack, "input", ref_logger)
+    expected_lines = list(ref_records)
+    assert len(expected_lines) == 2, (
+        f"reference log_image_stats should emit exactly the stats line plus the suspicious-high "
+        f"warning, got {expected_lines}"
+    )
+    assert "Suspicious high values" in expected_lines[1]
+
+    got_lines = _captured_input_lines(tmp_path, image_path, channel_names, monkeypatch, caplog)
+    assert got_lines == expected_lines
