@@ -327,7 +327,7 @@ DEFAULT_BAND_BYTES = 64 * 1024 * 1024    <span class="cm"># a BYTE budget, not a
           <code>save_fullres</code> is unconditional in production and the full-resolution overlay is a
           <i>published artifact</i>.</p>
         <div class="res">evidence: <b>pixel-identical output</b> — np.array_equal against the old whole-stack
-          path, for both the overlay and <code>*_QC_RGB_fullres.tif</code> · bin/utils/qc.py:317-340 ·
+          path, for both the overlay and <code>*_QC_RGB_fullres.tif</code> · bin/utils/qc.py:349-355 ·
           tests/test_registration_qc_lazy_read.py:139,185</div>
       </div>
 
@@ -638,8 +638,10 @@ DEFAULT_BAND_BYTES = 64 * 1024 * 1024    <span class="cm"># a BYTE budget, not a
         <h4>code constants</h4>
         <table class="pr">
           <tr><td class="k">DEFAULT_BAND_BYTES</td><td class="v">64 MiB</td>
-            <td class="d">Byte budget for one streamed row band, so peak is one band plus the thumbnail —
-              independent of slide width. <code>bin/utils/tiled_io.py:87</code></td></tr>
+            <td class="d">Byte budget for one streamed row band — independent of slide width. Bounds peak
+              memory to one band plus the accumulated decimated result when <code>factor &gt; 1</code>; at
+              <code>factor == 1</code> (sites 1 and 2 below) striding is a no-op, so this bounds a per-band
+              read, not the read's overall peak. <code>bin/utils/tiled_io.py:87</code></td></tr>
           <tr><td class="k">max_dim</td><td class="v"><span class="nul">None</span> at all five sites</td>
             <td class="d">Passed to <code>decimation_factor</code>. <code>None</code> &rarr; factor 1 &rarr; no
               spatial decimation. STARE passes a real value; nothing else does.</td></tr>

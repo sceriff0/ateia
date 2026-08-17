@@ -339,19 +339,29 @@ def create_registration_qc(
     # needs true full-resolution pixels (the *_fullres.tif output is unconditional in
     # production -- see the module docstring). Only the unused channels are no longer
     # read; every pixel of the used one still is. decimation_factor is still the source of
-    # true decimation; read_decimated then streams each channel in row bands, so peak
-    # memory is one band, never the whole plane.
-    ref_arr, _ref_dtype, ref_close = open_lazy(reference_path)
-    reg_arr, _reg_dtype, reg_close = open_lazy(registered_path)
+    # true decimation; read_decimated streams each channel in row bands, but AT FACTOR=1
+    # (this call's case) the striding is a no-op, so the bands it accumulates sum to the
+    # whole plane before the final concatenate -- peak memory here is close to two
+    # full-resolution planes, not one band. See read_decimated's own docstring
+    # (bin/utils/tiled_io.py) for the factor>1 case, where the one-band bound actually holds.
+    ref_close = reg_close = None
     try:
+        ref_arr, _ref_dtype, ref_close = open_lazy(reference_path)
+        reg_arr, _reg_dtype, reg_close = open_lazy(registered_path)
         factor = decimation_factor(
             [ref_arr.shape[1:], reg_arr.shape[1:]], max_dim=None
         )
         ref_nuc = read_decimated(ref_arr, ref_nuc_idx, factor)
         reg_nuc = read_decimated(reg_arr, reg_nuc_idx, factor)
     finally:
-        ref_close()
-        reg_close()
+        # Both opens now live inside this try, so a failure on the SECOND open_lazy call no
+        # longer leaks the first store's handle -- but it also means ref_close may never get
+        # bound (open_lazy(reference_path) itself can raise before returning). Guard each
+        # close individually rather than assuming both succeeded.
+        if ref_close is not None:
+            ref_close()
+        if reg_close is not None:
+            reg_close()
 
     # Save full-resolution QC (compressed)
     if save_fullres:
