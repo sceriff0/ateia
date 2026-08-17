@@ -38,7 +38,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.9', '3.10', '3.11']
+        # 3.9 was dropped 2026-08-17. Nothing that ships runs it: every container image
+        # is Python 3.10 or newer (containers/convert is 3.10, containers/spatialdata is
+        # 3.12). Carrying it cost real fidelity -- it was the sole reason CI's dask had to
+        # be pinned two years behind the version production runs, and the sole reason
+        # anndata was installed "optionally" with a `|| echo` fallback.
+        python-version: ['3.10', '3.11']
 
     steps:
       - name: Checkout repository
@@ -82,11 +87,13 @@ jobs:
           # `import dask.array` must succeed here. It is imported UNCONDITIONALLY in both
           # test modules (no importorskip) so dropping this line fails the gate rather
           # than silently deleting those tests from it.
-          # Pinned to 2024.8.0: it is the LAST dask release whose Requires-Python is
-          # >=3.9, and this matrix still covers 3.9 (2024.8.1 onward require >=3.10, which
-          # would make the install fail on one leg of the matrix). Compatible with the
-          # numpy==1.26.4 pinned above (dask[array] 2024.8.0 needs numpy>=1.21).
-          pip install 'dask[array]==2024.8.0'
+          #
+          # Pinned to the version production actually runs: containers/stardist and
+          # containers/cellsam both pin dask==2026.7.1, and containers/convert -- the image
+          # that runs convert_image.py -- now pins it too. It requires Python >=3.10, which
+          # is why the 3.9 matrix leg above had to go first; numpy==1.26.4 pinned above
+          # satisfies dask[array] 2026.7.1's numpy>=1.24.
+          pip install 'dask[array]==2026.7.1'
           # bin/utils/qc.py imports cv2 at module scope (tests/test_registration_qc_lazy_read.py
           # is the first test module to import qc.py at all), and this runner has no display
           # libs, so -headless, not opencv-python (containers/regqc/requirements.txt's runtime
@@ -94,16 +101,17 @@ jobs:
           # compatible with numpy==1.26.4 above -- opencv-python-headless>=5 requires numpy>=2
           # and would break the pin this whole install line exists to protect.
           pip install opencv-python-headless==4.10.0.82
-          # anndata powers tests/test_join_flowpath.py. Tolerated as optional because
-          # anndata has dropped Python 3.9, which this matrix still covers; the test
-          # module pytest.importorskip's it, so an unavailable anndata skips those
-          # tests instead of failing the job.
+          # anndata powers tests/test_join_flowpath.py. It used to be installed with a
+          # `|| echo` fallback because anndata had dropped Python 3.9 and this matrix
+          # covered it -- which meant those tests silently vanished from one leg of the
+          # gate. 3.9 is gone, anndata installs on every remaining leg, so the fallback
+          # is gone with it and a failed install now fails the job.
           #
           # Capped below 0.12: anndata >= 0.12 requires zarr >= 3, and zarr 3 removes the
           # store API tifffile's aszarr relies on (`Unsupported type for store_like:
           # 'ZarrTiffStore'`), which breaks the tiled streaming/fanout tests. 0.11.x works
           # with zarr 2 and is all these tests need — they only build in-memory AnnData.
-          pip install 'anndata<0.12' || echo "anndata unavailable on Python ${{ matrix.python-version }} — test_join_flowpath will skip"
+          pip install 'anndata<0.12'
 
       - name: Generate test data
         run: |

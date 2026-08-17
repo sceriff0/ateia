@@ -43,6 +43,17 @@ RUN wget -q "https://github.com/glencoesoftware/raw2ometiff/releases/download/v$
 # an opaque "nd2[legacy]==0.11.2 and nd2[legacy]==0.11.3" rather than naming the real cap.
 RUN pip3 install --no-cache-dir --upgrade pip
 
+# dask is pinned EXPLICITLY even though every bioio package already pulls it in: all six
+# ask only for `dask[array]>=2021.4.1`, with no upper bound, so an unpinned build silently
+# takes whatever the newest dask supporting this base's Python 3.10 happens to be on build
+# day. bin/convert_image.py's read is dask (BioImage.dask_data) and its write iterates that
+# array's CHUNKS, so dask's version is load-bearing for this image, not incidental.
+# 2026.7.1 is the version containers/stardist and containers/cellsam already pin, and the
+# one CI pins. Resolution verified against this image's own pins before committing --
+# `pip install --dry-run --python-version 3.10 --platform manylinux_2_17_x86_64` over
+# numpy==2.2.6 + bioio==3.5.0 + dask[array]==2026.7.1 resolves, picking dask 2026.7.1
+# (dask[array] 2026.7.1 needs numpy>=1.24 and Python>=3.10; both hold here).
+#
 # numpy and tifffile diverge from the harmonised set here, and both are forced:
 #   * bioio-ome-tiff 1.4.0 requires tifffile[zarr]<2025.1.10 on python_version < "3.11", and this
 #     base (eclipse-temurin:21-jre-jammy) is Python 3.10. 2024.12.12 is the newest that satisfies it.
@@ -62,6 +73,7 @@ RUN pip3 install --no-cache-dir \
         bioio-tifffile==1.3.0 \
         bioio-nd2==2.4.0 \
         bioio-czi==2.9.0 \
-        bioio-lif==1.5.0
+        bioio-lif==1.5.0 \
+        dask[array]==2026.7.1
 
 

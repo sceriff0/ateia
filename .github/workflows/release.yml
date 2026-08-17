@@ -132,15 +132,13 @@ jobs:
           pip install numpy==1.26.4 scipy==1.15.3 scikit-image==0.25.2 tifffile==2025.5.10 zarr==2.18.3 numcodecs==0.13.1
           # dask[array] powers bin/convert_image.py's lazy read: BioImage.dask_data is a
           # dask array, and tests/test_convert_lazy_read.py +
-          # tests/test_convert_streaming_write.py drive the real converter with one, so
-          # `import dask.array` must succeed here. It is imported UNCONDITIONALLY in both
-          # test modules (no importorskip) so dropping this line fails the gate rather
-          # than silently deleting those tests from it.
-          # Pinned to 2024.8.0: it is the LAST dask release whose Requires-Python is
-          # >=3.9, and this matrix still covers 3.9 (2024.8.1 onward require >=3.10, which
-          # would make the install fail on one leg of the matrix). Compatible with the
-          # numpy==1.26.4 pinned above (dask[array] 2024.8.0 needs numpy>=1.21).
-          pip install 'dask[array]==2024.8.0'
+          # tests/test_convert_streaming_write.py import dask.array UNCONDITIONALLY, so
+          # this gate needs it too. Same pin as ci.yml and as containers/stardist,
+          # containers/cellsam and containers/convert: 2026.7.1. (This job is
+          # single-version Python 3.10 -- see python-version above -- so no matrix
+          # consideration applies here; an earlier draft of this comment claimed a 3.9 leg
+          # that this job has never had.)
+          pip install 'dask[array]==2026.7.1'
           # Optional; see the same note in ci.yml. anndata >= 0.12 requires zarr >= 3,
           # which breaks tifffile's aszarr store used by the tiled tests.
           pip install 'anndata<0.12' || echo "anndata unavailable — test_join_flowpath will skip"
