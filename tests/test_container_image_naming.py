@@ -37,9 +37,13 @@ PREFIX = "mirage-"
 
 # Third-party images the pipeline pulls as-is. VALIS is upstream-maintained and deliberately not
 # re-hosted (its from-source libvips build is heavy); ubuntu is a plain base for a trivial task.
+# basicpy-docker-mcmicro is the vendored nf-core BASICPY module's own container (mcmicro-maintained);
+# BASICPY is a vendored module (modules/nf-core/basicpy/), not a bolt3x/mirage-<component> build, so
+# re-hosting it would mean maintaining a fork of the vendored image too.
 EXTERNAL_ALLOWED = {
     "cdgatenbee/valis-wsi:1.0.0",
     "ubuntu:22.04",
+    "docker.io/labsyspharm/basicpy-docker-mcmicro:1.2.0-patch5",
 }
 
 # The retired single-repository name. Nothing may reference it again.
@@ -58,6 +62,7 @@ def _manifest_version():
 def _searched_files():
     return (
         sorted((REPO / "modules" / "local").glob("*.nf"))
+        + sorted((REPO / "modules" / "nf-core").rglob("*.nf"))
         + sorted((REPO / "lib").glob("*.groovy"))
         + sorted((REPO / "conf").glob("*.config"))
     )
