@@ -6,16 +6,17 @@
 <title>MIRAGE Supplementary Figure S3 — Quality control</title>
 <style>
   /* ======================================================================
-     MIRAGE supplementary figures — shared design base (S1 · S2 · S3)
+     MIRAGE supplementary figures — shared design base (S1 · S2 · S3 · S4)
      ----------------------------------------------------------------------
      DUPLICATED ON PURPOSE, not extracted to a shared file. Each figure in
      this set has to survive being detached from the repository — attached to
      a submission, mailed, opened from file:// — so it may not reference an
      external stylesheet, not even a sibling one. This block is therefore
      repeated verbatim in docs/figures/pipeline-schematic.html,
-     docs/figures/registration-schematic.html and docs/figures/qc-schematic.html,
-     and is ported (with the slate counterpart the figures deliberately lack)
-     to docs/stylesheets/extra.css. Change one, change all four.
+     docs/figures/registration-schematic.html, docs/figures/qc-schematic.html
+     and docs/figures/zarr-schematic.html, and is ported (with the slate
+     counterpart the figures deliberately lack) to docs/stylesheets/extra.css.
+     Change one, change all five.
 
      SINGLE THEME BY DESIGN: white paper, black ink. A journal figure has a
      paper ground.
@@ -227,6 +228,7 @@
     <a href="pipeline-schematic.html">S1 · pipeline</a>
     <a href="registration-schematic.html">S2 · registration</a>
     <span class="self">S3 · quality control</span>
+    <a href="zarr-schematic.html">S4 · lazy reads</a>
   </nav>
   <p class="standfirst">Every step of the pipeline emits quality-control artifacts, and every one of them reaches
     the end-of-run report through the <i>same</i> one-channel interface: a stream of <code>[kind, file]</code>

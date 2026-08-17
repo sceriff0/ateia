@@ -18,6 +18,8 @@ process, default and path below is read from the pipeline source —
       the two backends, step by step
     - **S3 · quality control** — [figure](figures/qc-schematic.html){ target=_blank } ·
       the tagged artifact stream, the kind vocabulary, and the non-gating contract
+    - **S4 · lazy reads** — [figure](figures/zarr-schematic.html){ target=_blank } ·
+      where lazy zarr reads cut peak memory, and every place they cannot help
 
 ---
 

@@ -6,16 +6,17 @@
 <title>MIRAGE Supplementary Figure S1 — Pipeline</title>
 <style>
   /* ======================================================================
-     MIRAGE supplementary figures — shared design base (S1 · S2 · S3)
+     MIRAGE supplementary figures — shared design base (S1 · S2 · S3 · S4)
      ----------------------------------------------------------------------
      DUPLICATED ON PURPOSE, not extracted to a shared file. Each figure in
      this set has to survive being detached from the repository — attached to
      a submission, mailed, opened from file:// — so it may not reference an
      external stylesheet, not even a sibling one. This block is therefore
      repeated verbatim in docs/figures/pipeline-schematic.html,
-     docs/figures/registration-schematic.html and docs/figures/qc-schematic.html,
-     and is ported (with the slate counterpart the figures deliberately lack)
-     to docs/stylesheets/extra.css. Change one, change all four.
+     docs/figures/registration-schematic.html, docs/figures/qc-schematic.html
+     and docs/figures/zarr-schematic.html, and is ported (with the slate
+     counterpart the figures deliberately lack) to docs/stylesheets/extra.css.
+     Change one, change all five.
 
      SINGLE THEME BY DESIGN: white paper, black ink. A journal figure has a
      paper ground.
@@ -258,6 +259,7 @@
     <span class="self">S1 · pipeline</span>
     <a href="registration-schematic.html">S2 · registration</a>
     <a href="qc-schematic.html">S3 · quality control</a>
+    <a href="zarr-schematic.html">S4 · lazy reads</a>
   </nav>
   <p class="standfirst">A step-gated Nextflow DSL2 workflow that aligns multiplexed immunofluorescence slides,
     segments every cell, quantifies each marker per compartment, and exports QuPath-compatible GeoJSON, a
