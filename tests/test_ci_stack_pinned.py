@@ -58,15 +58,20 @@ def workflow_files() -> list[Path]:
 # future package (e.g. scikit-learn) added to a pip install line doesn't
 # silently need a containers/tiled pin it has no reason to have.
 GUARDED_PACKAGES = frozenset(
-    {"numpy", "scipy", "scikit-image", "tifffile", "zarr", "numcodecs"}
+    {"numpy", "scipy", "scikit-image", "tifffile", "zarr", "numcodecs", "dask"}
 )
 
 # `pip install <stuff>` lines are plain shell inside a YAML block scalar
 # (`run: |`), so a raw line scan is sufficient — this is what the repo's
 # other guard tests do (see test_layout.py's comment on the same approach).
 _PIP_INSTALL_LINE_RE = re.compile(r"pip install\b(.*)$")
+# The optional `[extras]` group (non-capturing) handles pip's extras syntax --
+# `dask[array]==2026.7.1` -- which none of the OTHER guarded packages use, but dask
+# always does in every pip install line in this repo. Without it the token fails the
+# full-string match entirely (the `[`/`]` are outside the character class) and is
+# silently dropped, not merely mis-parsed.
 _NAME_VERSION_RE = re.compile(
-    r"^([A-Za-z0-9][A-Za-z0-9_.-]*)(?:==([A-Za-z0-9_.-]+))?$"
+    r"^([A-Za-z0-9][A-Za-z0-9_.-]*)(?:\[[A-Za-z0-9_,.-]+\])?(?:==([A-Za-z0-9_.-]+))?$"
 )
 
 
@@ -166,14 +171,23 @@ def test_ci_guarded_packages_are_pinned_with_double_equals():
 def test_ci_guarded_pins_match_containers_tiled_requirements():
     """Every guarded package pinned in any workflow must match the version
     pinned for that package in containers/tiled/requirements.txt — the
-    production image that actually runs the tiled path."""
-    tiled_pins = parse_tiled_requirements(TILED_REQUIREMENTS.read_text())
+    production image that actually runs the tiled path.
 
-    assert tiled_pins.keys() >= GUARDED_PACKAGES, (
+    ``dask`` is exempt from this particular check: the tiled path never imports
+    dask (``containers/tiled/requirements.txt`` doesn't pin it and never should
+    — pinning it there would assert a dependency the tiled image doesn't have),
+    so it cannot use this file as its authority. Its own check is
+    ``test_dask_pin_is_harmonised_across_containers`` /
+    ``test_ci_dask_pin_matches_harmonised_container_pin`` below.
+    """
+    tiled_pins = parse_tiled_requirements(TILED_REQUIREMENTS.read_text())
+    tiled_scope = GUARDED_PACKAGES - {"dask"}
+
+    assert tiled_pins.keys() >= tiled_scope, (
         f"{TILED_REQUIREMENTS.relative_to(ROOT)} does not pin all of "
-        f"{sorted(GUARDED_PACKAGES)} — missing "
-        f"{sorted(GUARDED_PACKAGES - tiled_pins.keys())}. This test's "
-        "authority file must itself pin the full guarded set."
+        f"{sorted(tiled_scope)} — missing "
+        f"{sorted(tiled_scope - tiled_pins.keys())}. This test's "
+        "authority file must itself pin the full guarded set (dask excepted)."
     )
 
     mismatches = []
@@ -182,6 +196,9 @@ def test_ci_guarded_pins_match_containers_tiled_requirements():
             if version is None:
                 # Already reported by
                 # test_ci_guarded_packages_are_pinned_with_double_equals.
+                continue
+            if name == "dask":
+                # Covered by test_ci_dask_pin_matches_harmonised_container_pin.
                 continue
             expected = tiled_pins[name]
             if version != expected:
@@ -195,4 +212,68 @@ def test_ci_guarded_pins_match_containers_tiled_requirements():
         "workflow guarded-package pins disagree with containers/tiled/"
         "requirements.txt (the production image that runs the tiled "
         "path):\n" + "\n".join(sorted(set(mismatches)))
+    )
+
+
+# dask is pinned container-side in three Dockerfiles -- NOT in
+# containers/tiled/requirements.txt, since the tiled path never imports dask at
+# all (see the exemption above) -- so it needs its own authority.
+DASK_DOCKERFILES = [
+    ROOT / "containers" / "convert" / "Dockerfile",
+    ROOT / "containers" / "cellsam" / "Dockerfile",
+    ROOT / "containers" / "stardist" / "Dockerfile",
+]
+_DOCKERFILE_DASK_PIN_RE = re.compile(r"\bdask(?:\[[A-Za-z0-9_,.-]+\])?==([A-Za-z0-9_.-]+)")
+
+
+def parse_dockerfile_dask_pins() -> dict[str, str]:
+    """{Dockerfile relpath: pinned dask version}, one entry per file in
+    DASK_DOCKERFILES that pins dask at all."""
+    pins: dict[str, str] = {}
+    for path in DASK_DOCKERFILES:
+        m = _DOCKERFILE_DASK_PIN_RE.search(path.read_text())
+        if m:
+            pins[path.relative_to(ROOT).as_posix()] = m.group(1)
+    return pins
+
+
+def test_dask_pin_is_harmonised_across_containers():
+    """The three Dockerfiles that pin dask container-side must agree, or "the
+    harmonised pin" (the premise the CI-side check below relies on) is a
+    fiction."""
+    pins = parse_dockerfile_dask_pins()
+    assert set(pins) == {str(p.relative_to(ROOT)) for p in DASK_DOCKERFILES}, (
+        f"expected every one of {[str(p.relative_to(ROOT)) for p in DASK_DOCKERFILES]} "
+        f"to pin dask; found {pins}"
+    )
+    versions = set(pins.values())
+    assert len(versions) == 1, f"dask pin diverges across containers: {pins}"
+
+
+def test_ci_dask_pin_matches_harmonised_container_pin():
+    """CI's/release's dask pin must match the harmonised container-side pin.
+
+    Without this, dask can drift apart between the workflows and the
+    containers exactly as silently as the class of bug Task 1 fixed an
+    instance of for the other guarded packages — nothing else ties them
+    together.
+    """
+    pins = parse_dockerfile_dask_pins()
+    expected = next(iter(set(pins.values())))
+
+    mismatches = []
+    for wf in workflow_files():
+        for name, version in find_guarded_pins(wf.read_text()):
+            if name != "dask" or version is None:
+                continue
+            if version != expected:
+                mismatches.append(
+                    f"{wf.relative_to(ROOT)}: dask=={version} but the harmonised "
+                    f"container-side pin is dask=={expected}"
+                )
+
+    assert not mismatches, (
+        "workflow dask pin(s) disagree with the harmonised container-side pin "
+        "(containers/convert, containers/cellsam, containers/stardist):\n"
+        + "\n".join(sorted(set(mismatches)))
     )
