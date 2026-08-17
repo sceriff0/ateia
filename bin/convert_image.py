@@ -13,9 +13,10 @@ Supports:
 from __future__ import annotations
 
 import argparse
+import itertools
 import sys
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, Iterator, List, Optional, Tuple
 
 import numpy as np
 import tifffile
@@ -57,8 +58,20 @@ def get_file_format(file_path: Path) -> str:
     return "bioio"
 
 
-def read_image_bioio(file_path: Path) -> Tuple[np.ndarray, dict]:
-    """Read image using BioIO (ND2, CZI, LIF, TIFF)."""
+def read_image_bioio(file_path: Path) -> Tuple[Any, dict]:
+    """Open a slide with BioIO (ND2, CZI, LIF, TIFF) WITHOUT decoding it.
+
+    Returns ``img.dask_data``, not ``img.data``: a lazy dask array with the same shape
+    and dimension order, whose planes are decoded only when something asks for them.
+    ``convert_to_ome_tiff``'s ``write_ome_tiff`` is what finally does, one plane at a
+    time -- see that function for why both halves had to change together.
+
+    The returned object is therefore NOT an ``np.ndarray``. Everything applied to it
+    downstream (``np.squeeze`` here; ``np.transpose``/``np.take``/basic indexing in
+    ``convert_to_ome_tiff``) dispatches through dask's ``__array_function__`` and stays
+    lazy; ``tests/test_convert_lazy_read.py`` pins that the handle is still an
+    unmaterialised graph when it leaves this function.
+    """
     from bioio import BioImage
 
     logger.info(f"Reading with BioIO: {file_path.name}")
@@ -75,7 +88,7 @@ def read_image_bioio(file_path: Path) -> Tuple[np.ndarray, dict]:
 
     # Check if 'S' dimension should be treated as channels
     # This happens when image has 'S' but 'C' is 1 or not meaningful
-    image_data = None  # Will be set below
+    image_data = None  # Will be set below (always a lazy handle, never a decoded array)
     if "S" in dim_order and (num_channels == 1 or "C" not in dim_order):
         s_count = img.dims.S
         if s_count > 1:
@@ -88,19 +101,22 @@ def read_image_bioio(file_path: Path) -> Tuple[np.ndarray, dict]:
             # having two 'C' characters in the dimension order
             if "C" in dim_order and img.dims.C == 1:
                 c_pos = dim_order.index("C")
-                image_data = np.squeeze(img.data, axis=c_pos)
+                # np.squeeze on a dask array returns a dask array (dispatched via
+                # __array_function__), so this stays a view on the graph -- it does not
+                # allocate the second full-size copy the eager version did.
+                image_data = np.squeeze(img.dask_data, axis=c_pos)
                 dim_order = dim_order[:c_pos] + dim_order[c_pos + 1 :]
                 logger.info(f"Squeezed singleton C dimension at position {c_pos}")
             else:
-                image_data = img.data
+                image_data = img.dask_data
 
             # Remap dimension order for downstream processing (treat S as C)
             dim_order = dim_order.replace("S", "C")
             logger.info(f"Remapped dimension order: {dim_order}")
 
-    # Load data if not already loaded during S dimension handling
+    # Take the lazy handle if the S-as-C branch above did not already
     if image_data is None:
-        image_data = img.data
+        image_data = img.dask_data
 
     ps = img.physical_pixel_sizes
     # None means "the file did not say", not "0.325". The one fallback lives in
@@ -370,8 +386,57 @@ def read_image_h5(file_path: Path) -> Tuple[np.ndarray, dict]:
     return image_data, metadata
 
 
-def read_image(file_path: Path) -> Tuple[np.ndarray, dict]:
-    """Read image using appropriate reader."""
+def _iter_planes(image_data: Any, shape: Tuple[int, ...]) -> Iterator[np.ndarray]:
+    """Yield the stack's 2-D ``(Y, X)`` planes in write order, one at a time.
+
+    ``shape[:-2]`` are the non-spatial axes (``C``, and ``Z``/``T`` when they survive the
+    squeezes in ``convert_to_ome_tiff``); ``itertools.product`` walks them in C order,
+    which is the page order tifffile expects for ``shape=``. ``np.asarray`` is applied to
+    ONE plane, so a dask-backed handle computes only that plane's chunks.
+    """
+    for index in itertools.product(*(range(n) for n in shape[:-2])):
+        yield np.asarray(image_data[index])
+
+
+def write_ome_tiff(output_filename: Path, image_data: Any, ome_metadata: dict) -> None:
+    """Write the converted stack plane by plane, never holding the whole slide.
+
+    This is the second half of the lazy conversion, and it is not optional. Reading via
+    ``BioImage.dask_data`` alone saves nothing: the whole-array ``tifffile.imwrite`` call
+    this function replaces passes its argument through ``numpy.asarray``, so the slide
+    would simply be materialised at the write instead of at the read. (Spelled without
+    parentheses on purpose: ``tests/test_slide_io_seam.py`` counts pixel-writing call
+    sites by scanning this file's TEXT, and a prose example reads as a second writer.)
+
+    The streaming form is the one ``bin/tiled_stitch.py:156-170`` already uses: hand
+    ``TiffWriter.write`` an ITERATOR of pages together with an explicit ``shape=`` and
+    ``dtype=``, which it cannot infer from a generator.
+
+    Every other decision is carried over unchanged, because the output has to stay
+    byte-identical to the eager writer's (``tests/test_convert_streaming_write.py``
+    compares the two files directly): ``bigtiff=True``, ``ome=True``, no compression, no
+    tiling, and ``photometric="minisblack"`` -- the last being the precondition that
+    makes one page equal one channel, which every downstream per-page read depends on
+    (see ``tests/test_slide_io_seam.py``).
+    """
+    shape = tuple(image_data.shape)
+    with tifffile.TiffWriter(str(output_filename), bigtiff=True, ome=True) as writer:
+        writer.write(
+            _iter_planes(image_data, shape),
+            shape=shape,
+            dtype=np.dtype(image_data.dtype),
+            metadata=ome_metadata,
+            photometric="minisblack",
+        )
+
+
+def read_image(file_path: Path) -> Tuple[Any, dict]:
+    """Read image using appropriate reader.
+
+    The BioIO branch returns a LAZY dask array; the tifffile and HDF5 branches still
+    return a decoded ``np.ndarray``. Both are accepted by ``write_ome_tiff``, which only
+    needs ``.shape``, ``.dtype`` and per-plane indexing.
+    """
     format_type = get_file_format(file_path)
     logger.info(f"Detected format type: {format_type}")
 
@@ -564,17 +629,11 @@ def convert_to_ome_tiff(
         ome_metadata["PhysicalSizeZ"] = px_z
         ome_metadata["PhysicalSizeZUnit"] = "µm"
 
-    # Write OME-TIFF using tifffile
+    # Write OME-TIFF one plane at a time -- see write_ome_tiff for why this is not
+    # a bare tifffile.imwrite.
     logger.info(f"Writing: {output_filename.name}")
 
-    tifffile.imwrite(
-        output_filename,
-        image_data,
-        metadata=ome_metadata,
-        photometric="minisblack",
-        ome=True,
-        bigtiff=True,
-    )
+    write_ome_tiff(output_filename, image_data, ome_metadata)
 
     logger.info(f"Saved: {output_filename.name}")
 
