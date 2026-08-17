@@ -82,9 +82,20 @@ def _container_dirs():
 
 
 def test_no_source_references_the_legacy_single_repository():
-    """The one-repo-many-tags layout is retired; a stray reference would pull a stale image."""
+    """The one-repo-many-tags layout is retired; a stray reference would pull a stale image.
+
+    Scans ``containers/`` itself (every file, recursively) in addition to the pipeline sources
+    ``_searched_files()`` already covers: a Dockerfile's own build/push comments can reference
+    the legacy repository without the string ever appearing in a `container` directive that
+    ``_searched_files()``'s modules/local + lib + conf scan would catch -- exactly the bug this
+    guard missed in containers/convert/Dockerfile, which still named
+    ``bolt3x/attend_image_analysis:bioformats_v1`` in its build/push comments after the rename.
+    """
     offenders = []
-    for path in _searched_files() + [REPO / "CLAUDE.md", REPO / ".github/workflows/build-images.yml"]:
+    containers_files = sorted(p for p in (REPO / "containers").rglob("*") if p.is_file())
+    for path in _searched_files() + containers_files + [
+        REPO / "CLAUDE.md", REPO / ".github/workflows/build-images.yml"
+    ]:
         if not path.is_file():
             continue
         for i, line in enumerate(path.read_text().splitlines(), 1):

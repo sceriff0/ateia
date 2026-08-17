@@ -57,10 +57,11 @@ the HPC/cluster side (unlike GHCR, whose default-private packages caused
 > them in separate images is what lets both constraints hold without either being
 > downgraded.
 
-> The context directory name `istantseg` (a historical typo) is preserved
-> verbatim so it matches the upstream build context and the legacy DockerHub tag
-> `bolt3x/mirage-instanseg:1.0.0`. The published GHCR image is
-> therefore `.../istantseg`, even though `params.seg_method` is `instantseg`.
+> The historical typo'd context directory `istantseg` was renamed to `instanseg` as part
+> of the one-repo-per-image rename, so the build-context directory, the Docker Hub
+> repository and the `container` directive all now agree on the spelling. The published
+> image is `bolt3x/mirage-instanseg:1.0.0` on **Docker Hub** (not GHCR — see "Publishing"
+> above), even though `params.seg_method` is `instantseg`.
 
 ### VALIS — uses the upstream image (not vendored)
 
@@ -117,7 +118,7 @@ They remain available in the author's working tree if ever needed again.
 | `convert_to_tiff` | One-off TIFF conversion experiment; not wired into any module. |
 | `copy` | Trivial passthrough/utility image; not referenced. |
 | `deep_cell_types` | DeepCell cell-typing experiment; not part of the current workflow. |
-| `diffeo` | Predecessor of `debug_diffeo`; the pipeline uses `debug_diffeo` for `GENERATE_REGISTRATION_QC`. |
+| `diffeo` | Predecessor of `debug_diffeo`, itself superseded by the vendored `regqc` context (`bolt3x/mirage-regqc:1.0.0`), which the pipeline now uses for `GENERATE_REGISTRATION_QC`. |
 | `fastmorph` | Morphology experiment; no module references it. |
 | `jupyter` | Interactive notebook image for local exploration; not a pipeline runtime. |
 | `pixie` | Pixie clustering experiment; not part of the current pipeline (a stray `containers/pixie/Dockerfile` may exist locally but is not built or published by the release workflow). |
@@ -126,8 +127,9 @@ They remain available in the author's working tree if ever needed again.
 
 The pipeline modules (`.nf` files) reference the Docker Hub tags in the mapping
 table above directly (e.g. `container 'bolt3x/mirage-preprocess:1.0.0'`).
-Tags are fixed and content-descriptive — pin them explicitly, never `:latest`,
-so runs stay reproducible.
+The image NAME is content-descriptive (one repository per image); the TAG is a
+fixed, immutable SemVer version tied to `manifest.version` — pin it explicitly,
+never `:latest`, so runs stay reproducible.
 
 `modules/local/segment.nf` is the one dynamic case: `SEGMENT` picks its container at runtime
 from `params.seg_method`, via the table in `lib/SegBackends.groovy` (`cellsam` →

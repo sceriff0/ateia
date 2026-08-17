@@ -1,4 +1,4 @@
-# STARE tiled registration image — bolt3x/attend_image_analysis:tiled
+# STARE tiled registration image — bolt3x/mirage-tiled:1.0.0
 #
 # Runs the fully-parallel, JVM-free registration method (registration_method='tiled'):
 # TILED_REGISTER and WARP_SEG_QC's tiled backend (lib/WarpBackends.groovy). Pure CPU

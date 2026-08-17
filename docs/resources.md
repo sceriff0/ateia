@@ -330,9 +330,11 @@ memory-heavy registration tasks can be in flight at once.
 
 ## Containers
 
-Every process pins a fixed image tag — never `:latest`. The `bolt3x/mirage-*`
-tags are content-descriptive (e.g. `preprocess`, `tiled`), not immutable version
-tags — see [Installation → Pre-pulling container images](installation.md#pre-pulling-container-images-optional).
+Every process pins a fixed image tag — never `:latest`. The `bolt3x/mirage-*` image
+NAMES (one Docker Hub repository per image, e.g. `bolt3x/mirage-preprocess`,
+`bolt3x/mirage-tiled`) are content-descriptive; the TAG on each is an immutable
+SemVer version (`1.0.0`), tied to `manifest.version` — see
+[Installation → Pre-pulling container images](installation.md#pre-pulling-container-images-optional).
 
 | Image | Processes |
 |---|---|

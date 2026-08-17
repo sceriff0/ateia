@@ -1,4 +1,4 @@
-# SpatialData export image — bolt3x/attend_image_analysis:spatialdata
+# SpatialData export image — bolt3x/mirage-spatialdata:1.0.0
 #
 # Runs EXPORT_SPATIALDATA: serializes postprocessing output into a scverse-native
 # SpatialData .zarr (labels + shapes + AnnData table, optionally the pyramid), and

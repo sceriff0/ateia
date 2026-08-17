@@ -1,7 +1,7 @@
 # Bioformats-native CONVERT_IMAGE container for the mirage pipeline.
 #
-# Build: docker build -t bolt3x/attend_image_analysis:bioformats_v1 -f containers/convert_image/Dockerfile .
-# Push:  docker push bolt3x/attend_image_analysis:bioformats_v1
+# Build: docker build -t bolt3x/mirage-convert:1.0.0 -f containers/convert/Dockerfile .
+# Push:  docker push bolt3x/mirage-convert:1.0.0
 #
 # Image contents:
 #   - eclipse-temurin:21-jre-jammy  (LTS JRE)
