@@ -26,8 +26,10 @@ python-tests job does not install ``bioio`` (it is a ~5-plugin JVM-adjacent stac
 only ``containers/convert`` carries), and a test that ``importorskip``s it would be
 decorative -- it would never run in the gate. ``read_image_bioio`` imports ``BioImage``
 *inside the function*, so injecting ``sys.modules["bioio"]`` exercises the real
-production function against a controlled ``BioImage``. Same technique as
-``tests/test_preprocess_lazy_read.py``'s ``basicpy`` stub. ``dask`` *is* installed in
+production function against a controlled ``BioImage``. (The technique was borrowed from
+the ``basicpy`` stub in the since-deleted ``tests/test_preprocess_lazy_read.py``; nothing
+else in ``tests/`` injects a module this way today, so it is described here rather than
+cross-referenced.) ``dask`` *is* installed in
 CI (pinned in ci.yml next to the imaging stack) so the fake hands back a real dask
 array and the laziness assertions are real. It is imported here UNCONDITIONALLY, not
 via ``pytest.importorskip``: if that pin is ever dropped this file must fail the gate

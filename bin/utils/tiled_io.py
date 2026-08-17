@@ -38,14 +38,19 @@ def open_lazy(path):
 
     EVERY CALL BUILDS A FRESH STORE -- ``tifffile.imread(path, aszarr=True)`` is invoked here,
     unconditionally, on every invocation, so two calls on the same ``path`` never share any
-    mutable I/O state. This is a guarantee, not an implementation accident: callers that fan a
-    single file out across multiple threads (e.g. ``bin/preprocess.py``'s
-    ``_read_and_process_channel_lazy``, one worker per channel) rely on it for thread safety --
-    each worker opens and closes its OWN handle rather than one handle shared across threads,
-    which sidesteps whether tifffile's zarr view is safe for concurrent region reads through a
-    SHARED store (not documented either way) by construction. See
-    ``tests/test_tiled_io.py::test_open_lazy_returns_a_fresh_store_per_call`` and
-    ``tests/test_preprocess_lazy_concurrency.py`` for the two halves of that evidence.
+    mutable I/O state. This is a guarantee, not an implementation accident, and it is what
+    makes the function safe to call once per worker: a caller that fans a single file out
+    across threads gives each worker its OWN handle rather than sharing one, which sidesteps
+    whether tifffile's zarr view is safe for concurrent region reads through a SHARED store
+    (not documented either way) by construction. Pinned by
+    ``tests/test_tiled_io.py::test_open_lazy_returns_a_fresh_store_per_call``.
+
+    NO CALLER IN ``bin/`` IS CURRENTLY THREADED. The one that was -- the deleted in-process
+    ``bin/preprocess.py``, one worker per channel -- went with the nf-core BASICPY swap, and
+    the concurrency tests that evidenced its per-thread handles went with it. Every present
+    consumer reads sequentially, so the guarantee above is currently unexercised rather than
+    load-bearing. Do not remove it on that basis: it is a precondition for ever threading one
+    of these loops again, and it costs nothing.
 
     Returns ``(arr, dtype, close)`` where ``arr`` is a zarr array with a NumPy-like getitem.
     """

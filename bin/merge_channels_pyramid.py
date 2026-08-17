@@ -279,9 +279,11 @@ def to_uint16(data):
     downward bias of up to one count to every non-integral pixel -- mean -0.5 LSB, one-sided,
     on intensity data that later becomes a measured per-cell statistic. It never averages out.
 
-    Rounding is `np.round` (half-to-even) to match the convention `bin/preprocess.py:354`
-    already states and explains; a different tie rule here would be a second convention, not a
-    fix. Integer input is returned untouched so this is safe to call unconditionally.
+    Rounding is `np.round` (half-to-even) to match the convention
+    `bin/apply_basic_profiles.py`'s `_to_storage_dtype` states and explains (it inherited the
+    rule, verbatim, from the deleted `bin/preprocess.py`, which stated it first); a different
+    tie rule here would be a second convention, not a fix. Integer input is returned untouched
+    so this is safe to call unconditionally.
 
     Clipping stays ahead of the round for a reason: 65535.6 rounds to 65536, which wraps to 0
     in uint16. Guarded by tests/test_dtype_rounding_contract.py.
