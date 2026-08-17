@@ -70,15 +70,15 @@ HARMONISED = {
 # Documented per-image exceptions to HARMONISED. Each names the UPSTREAM CONSTRAINT that forces
 # it, because an exception without one is just a silent escape hatch from the harmonised set.
 #
-# scipy is the case that proved the rule: harmonising it to 1.15.3 everywhere made the
-# preprocess image unbuildable, since basicpy 1.2.0 -- the illumination-correction dependency
-# the whole PREPROCESS step is built on -- caps scipy below 1.13. Bumping basicpy to 2.x is not
-# an escape: 2.0.0 pulls in torch, which is a multi-GB addition to a CPU-only image.
+# scipy used to be the case that proved the rule: harmonising it to 1.15.3 everywhere made the
+# preprocess image unbuildable, since basicpy 1.2.0 -- the in-process illumination-correction
+# dependency -- caps scipy below 1.13. That entry is GONE, and its removal is what the exception
+# mechanism is for. Illumination correction now runs through nf-core's BASICPY module, in
+# labsyspharm's own container; `containers/preprocess` no longer installs basicpy at all, so
+# nothing caps its scipy and it is back on the harmonised 1.15.3.
+# test_every_pinned_exception_is_still_doing_something is what forced the issue: leaving the
+# entry behind would have failed, because the Dockerfile it named no longer diverges.
 PINNED_EXCEPTIONS = {
-    # basicpy caps scipy in BOTH its versions -- 1.2.0 and 2.0.0 alike require scipy<1.13 -- so
-    # this exception is not a "bump basicpy later" placeholder. Bumping to 2.x also swaps the
-    # backend from JAX to PyTorch and pulls torch into a CPU-only image.
-    ("preprocess", "scipy"): ("1.12.0", "basicpy 1.2.0 and 2.0.0 both require scipy<1.13"),
     # bioio-ome-tiff 1.4.0 requires tifffile[zarr]<2025.1.10 on python_version < "3.11"; the
     # convert base (eclipse-temurin:21-jre-jammy) is Python 3.10.
     ("convert", "tifffile"): ("2024.12.12", "bioio-ome-tiff 1.4.0 caps tifffile<2025.1.10 on py<3.11"),
