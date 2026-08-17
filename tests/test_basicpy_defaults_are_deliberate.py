@@ -18,7 +18,8 @@ by accident:
 
    * `--darkfield`. Adding it restores an additive darkfield model that the shipped
      configuration deliberately does not have. That is a change to the correction, not a
-     tuning knob.
+     tuning knob -- AND it disarms a safety check: see
+     `test_the_darkfield_flag_has_not_come_back` below.
    * `--no_autotune`. Its name is INVERTED. Upstream declares it
      `action="store_false"`, `default=True`, and gates autotune with
      `if not args.no_autotune:` -- so NOT passing it SKIPS autotune (the intended
@@ -100,6 +101,20 @@ def test_the_darkfield_flag_has_not_come_back():
     At upstream defaults `get_darkfield` is False: only the multiplicative flatfield is
     divided out and the additive offset stays in the data. Adding the flag changes what
     the pipeline computes, not how well it computes it.
+
+    IT ALSO DISARMS THE SWAP GUARD, which is the part a maintainer flipping this will not
+    expect. `bin/apply_basic_profiles.py:_read_profile_stack` refuses a non-positive
+    flatfield, and that single check is what catches a dfp/ffp pair passed the wrong way
+    round: at upstream defaults the darkfield is ALL ZEROS, so a swap presents an
+    all-zero flatfield and is rejected before any division
+    (`tests/test_apply_basic_profiles.py::test_swapping_the_two_profiles_is_caught_at_the_shipped_defaults`
+    is explicit that it holds "at the shipped defaults"). Enable darkfield and the
+    darkfield is no longer zero, so a swapped pair can present two plausible, strictly
+    positive profiles: the correction runs to completion on the wrong arithmetic and
+    writes silently wrong pixels instead of failing. Whoever enables `--darkfield` owes a
+    replacement guard that does not depend on one profile being zero. Recorded in the
+    same terms in `modules/nf-core/basicpy/MIRAGE-NOTES.md`,
+    `bin/apply_basic_profiles.py` and `docs/basic_illumination.md`.
     """
     assert "--darkfield" not in _basicpy_block()
     assert "-df" not in _ext_args_value()

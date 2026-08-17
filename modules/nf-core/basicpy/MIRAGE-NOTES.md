@@ -92,6 +92,19 @@ writes a `*-dfp.ome.tif`: **present, correctly shaped, and all zeros.**
 `bin/apply_basic_profiles.py` detects that and logs the correction as flatfield-only; it
 also accepts an absent darkfield file and treats it as zero. Neither case is assumed.
 
+**Turning `get_darkfield` on disarms a safety check, not just a model term.** The
+all-zero darkfield is what makes a SWAPPED profile pair detectable:
+`_read_profile_stack` refuses a non-positive flatfield, and at upstream defaults a
+dfp/ffp swap presents the all-zero darkfield AS the flatfield, so the swap is caught
+before any division. With `--darkfield` passed, the darkfield is no longer all zeros and
+a swapped pair can present two plausible-looking, strictly positive profiles — the
+correction then runs to completion on the wrong arithmetic and produces silently wrong
+pixels rather than an error. Anyone enabling darkfield must replace that guard with
+something that does not depend on one of the two profiles being zero. Same note in
+`bin/apply_basic_profiles.py`, `docs/basic_illumination.md`, and
+`tests/test_basicpy_defaults_are_deliberate.py`'s
+`test_the_darkfield_flag_has_not_come_back`.
+
 `--no_autotune` is the trap to know about. It is declared `action="store_false"` with
 `default=True` and gated by `if not args.no_autotune:`, so the flag's name is **inverted**:
 *not* passing it skips autotune (which is what we want), and passing it enables autotune.

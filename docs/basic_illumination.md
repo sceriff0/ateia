@@ -67,7 +67,7 @@ slide comes out unchanged. In every other case the two lists are identical.
 
 ### The nuclear/fiducial skip lives here, once
 
-`bin/preprocess.py` skipped correction for the nuclear/fiducial channel, and its comment
+The deleted `bin/preprocess.py` skipped correction for the nuclear/fiducial channel, and its comment
 records that an earlier version tested `"DAPI" in name.upper()` directly and so silently
 corrected a configured CELLTOX fiducial — the channel that drives both registration and
 segmentation, corrected on one panel and not another.
@@ -112,7 +112,7 @@ from the sidecar's positions. Three contracts carried over from the in-process p
 * **The negative clip.** `bin/utils/validation.py`'s `clip_negative_values`, called once
   on the assembled stack, so its percentage is a whole-image percentage and it emits
   exactly one aggregate line — not one per channel, and not a forked copy of the function.
-  Note the *rationale* has changed: `bin/preprocess.py` explained the clip by BaSiC's
+  Note the *rationale* has changed: the deleted `bin/preprocess.py` explained the clip by BaSiC's
   darkfield exceeding a pixel value, and with `get_darkfield=False` that mechanism is
   largely gone. It is kept because the contract is what downstream reads, and because the
   script still subtracts whatever darkfield it is handed.
@@ -123,12 +123,17 @@ from the sidecar's positions. Three contracts carried over from the in-process p
   either profile and a **non-positive flatfield**, on top of the channel-count and
   tile-shape checks. A zero flatfield is a real failure mode and dividing by it is silent.
   It also catches a **swapped pair**: at upstream defaults the darkfield is all zeros, so
-  a swap presents an all-zero flatfield.
+  a swap presents an all-zero flatfield. That catch **depends on** `get_darkfield` being
+  off. Turn it on (`ext.args = '--darkfield'`) and the darkfield is no longer zero, so a
+  swapped pair is two plausible strictly-positive profiles and the swap goes through
+  silently. Anyone enabling darkfield owes a replacement guard. Same note at the two
+  decision points: `modules/nf-core/basicpy/MIRAGE-NOTES.md` and
+  `tests/test_basicpy_defaults_are_deliberate.py::test_the_darkfield_flag_has_not_come_back`.
 * **The storage dtype rule**: clip to range, **round** (half-to-even), then cast.
   `.astype()` truncates toward zero, a one-sided −0.5 LSB bias that never averages out.
 
 The output is `<name>_corrected.ome.tif` published to `<outdir>/<pid>/preprocessed/` —
-byte-for-byte the same artifact *kind* `PREPROCESS` published, in the same place, so the
+byte-for-byte the same artifact *kind* the removed in-process `PREPROCESS` published, in the same place, so the
 `preprocessed` checkpoint row and every downstream consumer are unchanged by the swap.
 
 ## What is intentionally not published
