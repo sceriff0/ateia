@@ -23,6 +23,7 @@ byte-for-byte can be made for this format.
 
 from __future__ import annotations
 
+import logging
 import re
 import sys
 import types
@@ -364,3 +365,164 @@ def test_the_numpy_reader_branches_also_write_identical_bytes(monkeypatch, tmp_p
     np.testing.assert_array_equal(
         tifffile.imread(str(new_path)), np.take(array, [1, 0, 2], axis=0)
     )
+
+
+# ---------------------------------------------------------------------------
+# the pathological chunking: one whole-slide chunk
+# ---------------------------------------------------------------------------
+
+
+class _CountingSource:
+    """Counts how many times the underlying storage is asked to decode.
+
+    ``dask.array.from_array`` probes the source once while building the graph; tests
+    reset ``decodes`` after construction so only the write is counted.
+    """
+
+    def __init__(self, array):
+        self._array = array
+        self.shape = array.shape
+        self.dtype = array.dtype
+        self.ndim = array.ndim
+        self.decodes = 0
+
+    def __getitem__(self, key):
+        self.decodes += 1
+        return self._array[key]
+
+
+def _chunked_read(monkeypatch, array, chunks, channel_names):
+    """Point convert_to_ome_tiff at a dask array with a chosen chunking."""
+    source = _CountingSource(array)
+    lazy = da.from_array(source, chunks=chunks)
+    source.decodes = 0
+    monkeypatch.setattr(
+        convert_image,
+        "read_image",
+        lambda _p: (
+            lazy,
+            {
+                "num_channels": array.shape[0],
+                "physical_pixel_size_x": 0.325,
+                "physical_pixel_size_y": 0.325,
+                "physical_pixel_size_z": None,
+                "channel_names_from_file": list(channel_names),
+                "original_dims": "CYX",
+            },
+        ),
+    )
+    return source
+
+
+def test_a_whole_slide_chunk_is_decoded_once_not_once_per_plane(monkeypatch, tmp_path):
+    """The regression a naive per-plane loop introduces, pinned.
+
+    If the reader hands back the stack as ONE dask chunk, asking for plane ``i`` decodes
+    that whole chunk -- and dask does not cache across independent ``compute()`` calls, so
+    a per-plane loop pays a FULL-STACK decode PER PLANE. That is strictly worse than the
+    eager write it replaced: same peak memory, N times the work. Whether it happens is up
+    to the bioio plugin's chunking, and ``bioio-czi`` is exactly the format PERF-PLAN's
+    6 GB -> 20 GB example was about, so it cannot be assumed away.
+
+    Measured before the fix on this fixture: 8 planes produced 8 whole-stack decodes.
+    A plain ``.rechunk()`` does NOT fix it (measured: still 8) -- rechunking splits the
+    graph downstream of the source read, and each plane's ``compute()`` re-reads the
+    source chunk anyway. Only iterating in CHUNK-SIZED SLABS does.
+    """
+    rng = np.random.default_rng(31)
+    array = rng.integers(0, 4000, size=(8, 24, 20), dtype=np.uint16)
+    names = ["DAPI"] + [f"M{i}" for i in range(1, 8)]
+    source = _chunked_read(monkeypatch, array, array.shape, names)
+
+    out, _ = convert_image.convert_to_ome_tiff(
+        tmp_path / "in.czi", tmp_path, "P1", channel_names=list(names)
+    )
+
+    assert source.decodes == 1, (
+        f"the single whole-stack chunk was decoded {source.decodes} times for "
+        f"{array.shape[0]} planes; a chunk must be decoded once"
+    )
+    np.testing.assert_array_equal(tifffile.imread(str(out)), array)
+
+
+def test_a_chunk_is_decoded_once_whatever_the_chunking(monkeypatch, tmp_path):
+    """One decode per chunk -- not per plane, and not per chunk per plane."""
+    rng = np.random.default_rng(37)
+    array = rng.integers(0, 4000, size=(8, 24, 20), dtype=np.uint16)
+    names = ["DAPI"] + [f"M{i}" for i in range(1, 8)]
+
+    for chunk_planes, expected in ((1, 8), (2, 4), (8, 1)):
+        out_dir = tmp_path / f"c{chunk_planes}"
+        out_dir.mkdir()
+        with monkeypatch.context() as patched:
+            source = _chunked_read(
+                patched, array, (chunk_planes,) + array.shape[1:], names
+            )
+            out, _ = convert_image.convert_to_ome_tiff(
+                tmp_path / "in.czi", out_dir, "P1", channel_names=list(names)
+            )
+        assert source.decodes == expected, (
+            f"chunks of {chunk_planes} planes: {source.decodes} decodes, expected {expected}"
+        )
+        np.testing.assert_array_equal(tifffile.imread(str(out)), array)
+
+
+def test_a_whole_slide_chunk_still_writes_identical_bytes(monkeypatch, tmp_path):
+    """The slab path must not change the output, only the number of decodes."""
+    rng = np.random.default_rng(41)
+    array = rng.integers(0, 4000, size=(8, 24, 20), dtype=np.uint16)
+    names = ["DAPI"] + [f"M{i}" for i in range(1, 8)]
+
+    ref_dir = tmp_path / "ref"
+    ref_dir.mkdir()
+    new_dir = tmp_path / "new"
+    new_dir.mkdir()
+
+    with monkeypatch.context() as patched:
+        _chunked_read(patched, array, array.shape, names)
+        patched.setattr(convert_image, "write_ome_tiff", _legacy_write)
+        ref_path, _ = convert_image.convert_to_ome_tiff(
+            tmp_path / "in.czi", ref_dir, "P1", channel_names=list(names)
+        )
+    _chunked_read(monkeypatch, array, array.shape, names)
+    new_path, _ = convert_image.convert_to_ome_tiff(
+        tmp_path / "in.czi", new_dir, "P1", channel_names=list(names)
+    )
+
+    assert _mask_uuid(new_path.read_bytes()) == _mask_uuid(ref_path.read_bytes())
+
+
+def test_a_whole_slide_chunk_is_warned_about_by_name(monkeypatch, tmp_path, caplog):
+    """One decode is the floor, not a fix: that decode is still the WHOLE stack.
+
+    The slab loop makes the pathological chunking no worse than the eager write it
+    replaced, but it cannot make it better -- the memory saving is the reader's to give.
+    An operator who sized the task expecting per-plane peak has to be told.
+    """
+    rng = np.random.default_rng(43)
+    array = rng.integers(0, 4000, size=(8, 24, 20), dtype=np.uint16)
+    names = ["DAPI"] + [f"M{i}" for i in range(1, 8)]
+    _chunked_read(monkeypatch, array, array.shape, names)
+
+    with caplog.at_level(logging.WARNING):
+        convert_image.convert_to_ome_tiff(
+            tmp_path / "in.czi", tmp_path, "P1", channel_names=list(names)
+        )
+
+    assert "8 planes" in caplog.text and "one dask chunk" in caplog.text, caplog.text
+    assert "peak" in caplog.text.lower()
+
+
+def test_a_per_plane_chunked_read_is_not_warned_about(monkeypatch, tmp_path, caplog):
+    """The control: a warning that always fires is noise, not a signal."""
+    rng = np.random.default_rng(47)
+    array = rng.integers(0, 4000, size=(8, 24, 20), dtype=np.uint16)
+    names = ["DAPI"] + [f"M{i}" for i in range(1, 8)]
+    _chunked_read(monkeypatch, array, (1,) + array.shape[1:], names)
+
+    with caplog.at_level(logging.WARNING):
+        convert_image.convert_to_ome_tiff(
+            tmp_path / "in.czi", tmp_path, "P1", channel_names=list(names)
+        )
+
+    assert "one dask chunk" not in caplog.text

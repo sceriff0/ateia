@@ -386,16 +386,81 @@ def read_image_h5(file_path: Path) -> Tuple[np.ndarray, dict]:
     return image_data, metadata
 
 
+def _axis0_slabs(chunk_sizes: Tuple[int, ...]) -> Iterator[Tuple[int, int]]:
+    """Turn a dask axis-0 chunk-size tuple into ``(start, stop)`` half-open spans."""
+    start = 0
+    for size in chunk_sizes:
+        yield start, start + size
+        start += size
+
+
 def _iter_planes(image_data: Any, shape: Tuple[int, ...]) -> Iterator[np.ndarray]:
-    """Yield the stack's 2-D ``(Y, X)`` planes in write order, one at a time.
+    """Yield the stack's 2-D ``(Y, X)`` planes in write order, ONE SOURCE CHUNK AT A TIME.
 
     ``shape[:-2]`` are the non-spatial axes (``C``, and ``Z``/``T`` when they survive the
-    squeezes in ``convert_to_ome_tiff``); ``itertools.product`` walks them in C order,
-    which is the page order tifffile expects for ``shape=``. ``np.asarray`` is applied to
-    ONE plane, so a dask-backed handle computes only that plane's chunks.
+    squeezes in ``convert_to_ome_tiff``); they are walked in C order, which is the page
+    order tifffile expects for ``shape=``.
+
+    THE ASSUMPTION THIS FUNCTION MAKES EXPLICIT: how much memory the write costs is the
+    READER's decision, not this function's. It is bounded by ONE axis-0 chunk of whatever
+    the reader handed back -- one plane when the reader chunks per plane (the good case),
+    the whole stack when it returns a single chunk.
+
+    So the planes are NOT fetched one index at a time. Doing that is a REGRESSION, not
+    merely a missed optimisation: dask does not cache across independent ``compute()``
+    calls, so on a single-chunk array ``image_data[i]`` decodes the WHOLE stack, once per
+    plane -- same peak as the eager write it replaced, times N the work. Measured on an
+    8-plane single-chunk fixture: 8 whole-stack decodes.
+
+    A plain ``.rechunk()`` does not fix that either (measured: still 8 decodes). Rechunking
+    splits the graph DOWNSTREAM of the source read, and every plane's ``compute()`` still
+    re-reads the source chunk. Iterating in chunk-sized slabs is what actually bounds it,
+    and it bounds it at exactly one decode per chunk for every chunking --
+    ``tests/test_convert_streaming_write.py::test_a_chunk_is_decoded_once_whatever_the_chunking``
+    pins 1/2/8-plane chunks at 8/4/1 decodes.
+
+    Array-likes with no ``chunks`` (the ndarray the NDPI/HDF5 readers return) keep the
+    plain per-index walk: there is no decode to amortise, and the caller may only support
+    scalar-tuple indexing.
     """
-    for index in itertools.product(*(range(n) for n in shape[:-2])):
-        yield np.asarray(image_data[index])
+    lead = shape[:-2]
+    chunks = getattr(image_data, "chunks", None)
+
+    if not lead or not chunks:
+        for index in itertools.product(*(range(n) for n in lead)):
+            yield np.asarray(image_data[index])
+        return
+
+    trailing = tuple(range(n) for n in lead[1:])
+    for start, stop in _axis0_slabs(chunks[0]):
+        slab = np.asarray(image_data[start:stop])
+        for index in itertools.product(range(stop - start), *trailing):
+            yield slab[index]
+
+
+def _warn_if_the_reader_chunked_the_whole_stack_together(
+    image_data: Any, shape: Tuple[int, ...]
+) -> None:
+    """Say so, loudly, when the lazy read cannot actually save any memory.
+
+    ``_iter_planes`` bounds the write at one axis-0 chunk, so a single-chunk array is
+    never WORSE than the eager write. But it is not better either: that one decode is the
+    whole decompressed stack. The saving is the reader's to give, and whether a given
+    bioio plugin gives it is not something this pipeline controls -- so an operator who
+    sized CONVERT_IMAGE expecting a per-plane peak is told here rather than finding out
+    from an OOM.
+    """
+    chunks = getattr(image_data, "chunks", None)
+    if not chunks or len(shape) < 3 or shape[0] < 2 or len(chunks[0]) != 1:
+        return
+
+    itemsize = np.dtype(image_data.dtype).itemsize
+    total_gb = int(np.prod(shape)) * itemsize / 1e9
+    logger.warning(
+        f"The reader returned all {shape[0]} planes as one dask chunk, so the streamed "
+        f"write must decode them together: peak memory is the whole {total_gb:.2f} GB "
+        "decompressed stack, not one plane. Size this task from the DECOMPRESSED slide."
+    )
 
 
 def write_ome_tiff(output_filename: Path, image_data: Any, ome_metadata: dict) -> None:
@@ -418,8 +483,14 @@ def write_ome_tiff(output_filename: Path, image_data: Any, ome_metadata: dict) -
     tiling, and ``photometric="minisblack"`` -- the last being the precondition that
     makes one page equal one channel, which every downstream per-page read depends on
     (see ``tests/test_slide_io_seam.py``).
+
+    Peak memory is one axis-0 chunk of ``image_data``, not one plane -- see
+    ``_iter_planes``. When those are the same thing this is a per-plane write; when the
+    reader returns the stack as a single chunk it is not, and that is warned about rather
+    than silently claimed away.
     """
     shape = tuple(image_data.shape)
+    _warn_if_the_reader_chunked_the_whole_stack_together(image_data, shape)
     with tifffile.TiffWriter(str(output_filename), bigtiff=True, ome=True) as writer:
         writer.write(
             _iter_planes(image_data, shape),
