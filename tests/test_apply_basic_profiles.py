@@ -11,12 +11,12 @@ step wrote.
 Three contracts from the in-process BaSiC path have to survive the swap, and each has a
 test here that fails if it does not:
 
-  * the nuclear/fiducial channel is left alone (``bin/preprocess.py``'s skip, whose
+  * the nuclear/fiducial channel is left alone (the deleted ``bin/preprocess.py``'s skip, whose
     comment records that an earlier version silently corrected a configured CELLTOX
     fiducial);
   * negative pixels are clipped to zero and reported in ONE aggregate line, not one line
     per channel, via ``bin/utils/validation.py``'s ``clip_negative_values``. NOTE the
-    rationale has changed: ``bin/preprocess.py`` explained this by darkfield subtraction
+    rationale has changed: ``bin/preprocess.py`` had explained this by darkfield subtraction
     pushing a pixel below zero, and the pipeline now runs BASICPY at upstream defaults
     where ``get_darkfield`` is FALSE, so that mechanism is largely gone. The contract is
     kept because downstream expects it and because this script still subtracts whatever
@@ -30,29 +30,14 @@ from __future__ import annotations
 
 import json
 import logging
-import sys
-import types
 
 import pytest
 
 np = pytest.importorskip("numpy")
 tifffile = pytest.importorskip("tifffile")
 
-try:  # pragma: no cover - environment-dependent
-    import basicpy  # noqa: F401
-except ImportError:
-    # See tests/test_tile_for_basic.py -- bin/preprocess.py imports basicpy eagerly and
-    # the FOV-tiling helpers still live there until task 5 moves them.
-    stub = types.ModuleType("basicpy")
-
-    class _StubBaSiC:  # noqa: D401
-        def __init__(self, *args, **kwargs):
-            pass
-
-    stub.BaSiC = _StubBaSiC
-    stub.__version__ = "0.0.0-stub"
-    sys.modules["basicpy"] = stub
-
+# No basicpy stub any more -- see tests/test_tile_for_basic.py. Nothing on this path
+# imports basicpy since the in-process BaSiC module was deleted.
 import apply_basic_profiles  # noqa: E402
 import tile_for_basic  # noqa: E402
 
@@ -86,7 +71,7 @@ def _read(path):
     """Read a written slide as ``(C, Y, X)``.
 
     tifffile drops a singleton leading axis, so a one-channel corrected slide comes back
-    2-D. That is unchanged from the in-process path -- PREPROCESS wrote ``(1, H, W)``
+    2-D. That is unchanged from the in-process path -- it wrote ``(1, H, W)``
     with ``axes="CYX"`` too -- so it is normalised here rather than "fixed" in the writer.
     """
     data = tifffile.imread(str(path))
@@ -219,7 +204,7 @@ def test_a_spatially_varying_profile_is_applied_per_tile_pixel(tmp_path):
 
 
 def test_a_celltox_fiducial_is_passed_through_untouched(tmp_path):
-    """The exact regression bin/preprocess.py's comment records.
+    """The exact regression the deleted bin/preprocess.py's comment recorded.
 
     The skip decision is made once, at tiling time, and recorded in the sidecar; this
     asserts the applying half honours it for a panel whose fiducial is not DAPI.

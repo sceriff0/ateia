@@ -23,34 +23,19 @@ together without re-deriving the grid.
 from __future__ import annotations
 
 import json
-import sys
-import types
 
 import pytest
 
 np = pytest.importorskip("numpy")
 tifffile = pytest.importorskip("tifffile")
 
-try:  # pragma: no cover - exercised by whichever branch the environment takes
-    import basicpy  # noqa: F401
-except ImportError:
-    # Same stub, same reason, as tests/test_preprocess_channel_skip.py: bin/preprocess.py
-    # imports basicpy eagerly at module scope and tile_for_basic imports the FOV-tiling
-    # helpers FROM it (see the module docstring of bin/tile_for_basic.py -- the import is a
-    # single line precisely so the planned move to bin/utils/fov_tiling.py is a one-line
-    # change). Neither the tiling math nor the skip decision touches BaSiC.
-    stub = types.ModuleType("basicpy")
-
-    class _StubBaSiC:  # noqa: D401
-        def __init__(self, *args, **kwargs):
-            pass
-
-    stub.BaSiC = _StubBaSiC
-    stub.__version__ = "0.0.0-stub"
-    sys.modules["basicpy"] = stub
-
+# No basicpy stub any more. Earlier versions of this file installed one because
+# `tile_for_basic` reached its FOV-tiling helpers through `bin/preprocess.py`, which
+# imported basicpy eagerly at module scope. That module is deleted and the helpers now
+# live in `bin/utils/fov_tiling.py`, which imports nothing but numpy -- nothing on this
+# path touches basicpy, so a stub here would only be able to hide a real import.
 import tile_for_basic  # noqa: E402
-from preprocess import reconstruct_image_from_fovs  # noqa: E402
+from fov_tiling import reconstruct_image_from_fovs  # noqa: E402
 
 
 def _write_slide(path, stack, channel_names):
@@ -132,7 +117,7 @@ def test_a_grid_of_one_tile_is_refused_rather_than_silently_written(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# The nuclear/fiducial skip -- bin/preprocess.py's contract, moved not dropped
+# The nuclear/fiducial skip -- the deleted bin/preprocess.py's contract, moved not dropped
 # ---------------------------------------------------------------------------
 
 

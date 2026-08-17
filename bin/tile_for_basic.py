@@ -22,14 +22,13 @@ CHANNELS and fits one profile per channel; putting tiles on C would fit one prof
 tile and mix every marker together.
 
 TILING IS NOT REIMPLEMENTED. ``count_fovs`` / ``split_image_into_fovs`` come from
-``bin/preprocess.py`` -- the same non-overlapping, remainder-distributing grid the
-in-process path used, including its zero-padding of edge tiles to the grid's maximum
-tile size (BaSiC saw those padded tiles before this change too, so the fit input is
-unchanged). The import below is a SINGLE line so the planned move of those helpers to
-``bin/utils/fov_tiling.py`` is a one-line change here.
+``bin/utils/fov_tiling.py`` -- the same non-overlapping, remainder-distributing grid the
+deleted in-process path used, including its zero-padding of edge tiles to the grid's
+maximum tile size (BaSiC saw those padded tiles before the backend swap too, so the fit
+input is unchanged).
 
-THE FIDUCIAL SKIP IS MADE HERE, ONCE. ``bin/preprocess.py`` skipped BaSiC for the
-nuclear/fiducial channel, and its comment records that an earlier version tested
+THE FIDUCIAL SKIP IS MADE HERE, ONCE. The removed in-process path skipped BaSiC for the
+nuclear/fiducial channel, and its comment recorded that an earlier version tested
 ``"DAPI" in name.upper()`` directly and so silently corrected a configured CELLTOX
 fiducial. That decision now happens exactly once -- here, through
 ``utils.metadata.is_nuclear``, the shared rule -- and is RECORDED in the sidecar.
@@ -53,12 +52,9 @@ sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
 import numpy as np  # noqa: E402
 import tifffile  # noqa: E402
+from fov_tiling import count_fovs, split_image_into_fovs  # noqa: E402
 from logger import configure_logging, get_logger  # noqa: E402
 from metadata import is_nuclear  # noqa: E402
-
-# One line, deliberately: task 5 moves these three helpers to bin/utils/fov_tiling.py and
-# every importer changes by editing the module name on this line only.
-from preprocess import count_fovs, split_image_into_fovs  # noqa: E402
 from tiled_io import open_lazy  # noqa: E402
 
 logger = get_logger(__name__)
@@ -84,7 +80,7 @@ def _channel_axis_length(image_path, channel_names):
         if shape[2] == len(channel_names) and shape[0] != len(channel_names):
             raise ValueError(
                 f"{image_path}: channel-last (Y, X, C) layout is not supported here. "
-                "CONVERT_IMAGE and PREPROCESS both emit axes='CYX'; a channel-last "
+                "CONVERT_IMAGE and APPLY_PROFILES both emit axes='CYX'; a channel-last "
                 "slide has not been through them."
             )
         return shape[0], shape[1], shape[2], dtype

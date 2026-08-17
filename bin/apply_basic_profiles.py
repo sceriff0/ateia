@@ -75,12 +75,9 @@ sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
 import numpy as np  # noqa: E402
 import tifffile  # noqa: E402
+from fov_tiling import reconstruct_image_from_fovs, split_image_into_fovs  # noqa: E402
 from logger import configure_logging, get_logger  # noqa: E402
 from pixel_size import read_ome_pixel_size, warn_on_pixel_size_mismatch  # noqa: E402
-
-# One line, deliberately: task 5 moves these helpers to bin/utils/fov_tiling.py and every
-# importer changes by editing the module name on this line only.
-from preprocess import reconstruct_image_from_fovs, split_image_into_fovs  # noqa: E402
 from tiled_io import open_lazy  # noqa: E402
 from validation import clip_negative_values, log_image_stats  # noqa: E402
 
