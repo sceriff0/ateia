@@ -509,16 +509,22 @@ def preprocess_multichannel_image(
                 stats_agg,
             )
 
-    with ThreadPoolExecutor(max_workers=n_workers) as executor:
-        futures = [executor.submit(_channel_worker, i) for i in range(n_channels)]
+    try:
+        with ThreadPoolExecutor(max_workers=n_workers) as executor:
+            futures = [executor.submit(_channel_worker, i) for i in range(n_channels)]
 
-        for future in as_completed(futures):
-            channel_index, result_array, was_corrected = future.result()
-            results[channel_index] = result_array
-            correction_applied[channel_index] = was_corrected
-
-    if not channel_last:
-        stats_agg.finalize()
+            for future in as_completed(futures):
+                channel_index, result_array, was_corrected = future.result()
+                results[channel_index] = result_array
+                correction_applied[channel_index] = was_corrected
+    finally:
+        # In try/finally, not after the executor block, so a channel worker's exception
+        # (propagated by future.result() above) still gets this line logged before it
+        # propagates out -- previously (pre-lazy-read) this stats line logged BEFORE
+        # processing even started, so a mid-run failure never lost it. That's exactly the
+        # line worth having when diagnosing an OOM kill mid-run.
+        if not channel_last:
+            stats_agg.finalize()
 
     preprocessed_channels = [results[i] for i in range(n_channels)]
 
