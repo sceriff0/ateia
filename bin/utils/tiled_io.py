@@ -36,6 +36,17 @@ def open_lazy(path):
     touch — the property the streaming gigapixel stitch relies on. A 2-D image is presented as
     ``C=1``; a pyramidal OME-TIFF resolves to its base (full-resolution) level.
 
+    EVERY CALL BUILDS A FRESH STORE -- ``tifffile.imread(path, aszarr=True)`` is invoked here,
+    unconditionally, on every invocation, so two calls on the same ``path`` never share any
+    mutable I/O state. This is a guarantee, not an implementation accident: callers that fan a
+    single file out across multiple threads (e.g. ``bin/preprocess.py``'s
+    ``_read_and_process_channel_lazy``, one worker per channel) rely on it for thread safety --
+    each worker opens and closes its OWN handle rather than one handle shared across threads,
+    which sidesteps whether tifffile's zarr view is safe for concurrent region reads through a
+    SHARED store (not documented either way) by construction. See
+    ``tests/test_tiled_io.py::test_open_lazy_returns_a_fresh_store_per_call`` and
+    ``tests/test_preprocess_lazy_concurrency.py`` for the two halves of that evidence.
+
     Returns ``(arr, dtype, close)`` where ``arr`` is a zarr array with a NumPy-like getitem.
     """
     import tifffile
@@ -100,10 +111,15 @@ def band_rows_for(width, factor, band_bytes=DEFAULT_BAND_BYTES):
 def read_decimated(src, index, factor, band_bytes=DEFAULT_BAND_BYTES):
     """Read channel ``index`` of a lazy ``(C, H, W)`` view as a ``factor``-decimated float32 plane.
 
-    Streams the plane in row bands and strides each band, so peak memory is one band plus the
-    thumbnail -- never the full-resolution plane. Band height is snapped to a multiple of
-    ``factor`` so the rows sampled are globally ``0, factor, 2*factor, ...``; the bands therefore
-    concatenate into exactly ``src[index, ::factor, ::factor]``.
+    Streams the plane in row bands and strides each band as it's read. At ``factor > 1`` (the
+    tiled/STARE callers this was built for) each band's decoded full-resolution buffer is
+    discarded once it's been strided down, so peak memory is one band plus the small,
+    already-decimated accumulated result -- never the full-resolution plane. At ``factor == 1``
+    the stride is a no-op, so the accumulated bands sum to the full-resolution plane before the
+    final concatenate produces a second one -- there is no full-resolution plane the read
+    avoids materialising. Band height is snapped to a multiple of ``factor`` so the rows sampled
+    are globally ``0, factor, 2*factor, ...``; the bands therefore concatenate into exactly
+    ``src[index, ::factor, ::factor]`` at any factor.
     """
     import numpy as _np
 
