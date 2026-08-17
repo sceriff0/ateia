@@ -114,9 +114,16 @@ from the sidecar's positions. Three contracts carried over from the in-process p
   exactly one aggregate line — not one per channel, and not a forked copy of the function.
   Note the *rationale* has changed: `bin/preprocess.py` explained the clip by BaSiC's
   darkfield exceeding a pixel value, and with `get_darkfield=False` that mechanism is
-  largely gone. It is kept because the contract is what downstream reads, because the
-  script still subtracts whatever darkfield it is handed, and because a profile containing
-  a NaN or a negative value would otherwise pass silently.
+  largely gone. It is kept because the contract is what downstream reads, and because the
+  script still subtracts whatever darkfield it is handed.
+* **Profile validity, checked before any arithmetic.** The clip cannot catch a degenerate
+  profile — `detect_negative_values` tests `data < 0`, which is False for both `nan` and
+  `inf`, and `np.round(np.clip(nan)).astype(uint16)` is undefined behaviour that produces
+  a plausible-looking integer. So `_read_profile_stack` rejects non-finite entries in
+  either profile and a **non-positive flatfield**, on top of the channel-count and
+  tile-shape checks. A zero flatfield is a real failure mode and dividing by it is silent.
+  It also catches a **swapped pair**: at upstream defaults the darkfield is all zeros, so
+  a swap presents an all-zero flatfield.
 * **The storage dtype rule**: clip to range, **round** (half-to-even), then cast.
   `.astype()` truncates toward zero, a one-sided −0.5 LSB bias that never averages out.
 

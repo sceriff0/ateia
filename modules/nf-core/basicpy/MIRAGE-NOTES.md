@@ -1,8 +1,20 @@
 # `modules/nf-core/basicpy` — vendored, and the two things it does differently
 
 This directory is nf-core/modules' `basicpy` module, copied verbatim. `main.nf` and
-`meta.yml` are byte-for-byte upstream; nothing here is patched, and
-`tests/test_basicpy_module_is_vendored_unmodified.py` fails if that stops being true.
+`meta.yml` are byte-for-byte upstream; nothing here is patched.
+
+Two tests hold that, and it is worth knowing which does what:
+
+* `tests/test_basicpy_module_is_vendored_unmodified.py` pins the **sha256 of each file**,
+  so any edit at all fails — including one this document does not anticipate. It also
+  spells out the two lines mirage builds on (the `/opt/main.py` invocation, and the
+  `dfp`-before-`ffp` output tuple) so a digest mismatch can be triaged without refetching.
+  It pins *unchanged since vendoring*; it cannot pin *identical to upstream today*,
+  because that needs the network and a guard that skips when offline is worse than none.
+* `tests/test_basicpy_defaults_are_deliberate.py` pins the four properties discussed
+  below — container tag, conda refusal in both blocks, the version literal and its topic
+  emit — plus the decision to pass no arguments. Those fail with messages that explain
+  themselves; the digest does not.
 
 It is vendored rather than installed with `nf-core modules install` because mirage has no
 `modules.json` and installs nothing else from nf-core — one directory copied by hand is a

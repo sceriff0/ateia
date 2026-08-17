@@ -32,9 +32,12 @@ WHAT IS PRESERVED FROM THE IN-PROCESS BaSiC PATH, and where it comes from:
   subtracted and that specific mechanism is largely gone. What is true today: dividing by
   a fitted flatfield cannot make a non-negative pixel negative, so on the shipped
   configuration this clip is expected to find nothing -- it is kept because the contract
-  is what downstream reads, because this script still subtracts whatever darkfield it is
-  handed (a real one when run standalone, or if the defaults decision is revisited), and
-  because a profile containing a NaN or a negative value would otherwise pass silently.
+  is what downstream reads, and because this script still subtracts whatever darkfield it
+  is handed (a real one when run standalone, or if the defaults decision is revisited).
+
+  What it does NOT do is catch a degenerate profile. `nan < 0` is False, so
+  ``detect_negative_values`` never sees one; that is ``_read_profile_stack``'s job, and it
+  rejects non-finite entries and a non-positive flatfield BEFORE any arithmetic runs.
 
 * **The storage dtype rule.** Clip to the dtype's range, ROUND (half-to-even), then cast.
   ``.astype()`` truncates toward zero, which is a one-sided -0.5 LSB bias on every
@@ -92,8 +95,23 @@ SUPPORTED_SIDECAR_VERSIONS = (1,)
 STAGE = "apply_basic_profiles"
 
 
-def _read_profile_stack(path, n_expected, tile_shape, label):
-    """Read a ``/opt/main.py`` profile file as ``(n_expected, tile_h, tile_w)`` float64."""
+def _read_profile_stack(path, n_expected, tile_shape, label, require_positive=False):
+    """Read a ``/opt/main.py`` profile file as ``(n_expected, tile_h, tile_w)`` float64.
+
+    Validates the VALUES, not only the shape. A degenerate profile is silent all the way
+    to the published slide: ``x / 0`` is ``inf``, ``0 / 0`` and ``nan - nan`` are ``nan``,
+    and neither is caught downstream -- ``clip_negative_values`` -> ``detect_negative_values``
+    tests ``data < 0``, which is False for both, and ``np.round(np.clip(nan)).astype(uint16)``
+    is undefined behaviour that yields a plausible-looking integer. So the run stays green
+    and the pixels are garbage.
+
+    ``require_positive`` is for the flatfield: it is a normalised gain, strictly positive
+    by construction (basicpy divides ``S`` by its own mean and raises outright if
+    ``S.max() == 0``). A zero or negative entry means the fit failed, or that the
+    flatfield and darkfield arrived the wrong way round -- at upstream defaults the
+    darkfield is ALL ZEROS, so a swapped pair lands here as an all-zero flatfield and is
+    refused rather than dividing every pixel by zero.
+    """
     data = np.asarray(tifffile.imread(str(path)))
     if data.ndim == 2:
         # tifffile drops the singleton leading axis of a one-channel stack.
@@ -114,7 +132,27 @@ def _read_profile_stack(path, n_expected, tile_shape, label):
             f"the sidecar's tile shape {tuple(tile_shape)}. The profiles belong to a "
             "different tile grid; refusing to broadcast them onto this one."
         )
-    return data.astype(np.float64, copy=False)
+
+    data = data.astype(np.float64, copy=False)
+
+    if not np.all(np.isfinite(data)):
+        n_bad = int(np.count_nonzero(~np.isfinite(data)))
+        raise ValueError(
+            f"{path}: {n_bad} value(s) in the {label} profile are not finite (NaN or "
+            "inf). Applying them would produce NaN pixels that every downstream check "
+            "passes -- `nan < 0` is False, so the negative clip never sees them."
+        )
+
+    if require_positive and data.min() <= 0:
+        raise ValueError(
+            f"{path}: the {label} profile must be strictly positive (min is "
+            f"{data.min():.6g}); it is a normalised gain and dividing by a zero or "
+            "negative entry is silent. If this is BASICPY's *-dfp file, the flatfield "
+            "and darkfield have been swapped: at upstream defaults the darkfield is all "
+            "zeros."
+        )
+
+    return data
 
 
 def _to_storage_dtype(data, dtype):
@@ -161,7 +199,8 @@ def apply_basic_profiles(
     tile_shape = tuple(manifest["tile_shape"])
 
     flatfields = _read_profile_stack(
-        flatfield_path, len(profile_channels), tile_shape, "flatfield"
+        flatfield_path, len(profile_channels), tile_shape, "flatfield",
+        require_positive=True,
     )
     if darkfield_path is None or not Path(darkfield_path).exists():
         # Handled, not assumed. The vendored module always declares the file as an output,

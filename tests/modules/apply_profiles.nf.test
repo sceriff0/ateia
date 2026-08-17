@@ -89,12 +89,24 @@ nextflow_process {
             assertAll(
                 { assert rendered.size() >= 1,
                     "no rendered APPLY_PROFILES .command.sh found under the task work dir" },
-                { assert rendered.every { it.contains('--sidecar') },
-                    "rendered command missing --sidecar: " + rendered.join(' --- ') },
-                { assert rendered.every { it.contains('--flatfield') },
-                    "rendered command missing --flatfield: " + rendered.join(' --- ') },
-                { assert rendered.every { it.contains('--darkfield') },
-                    "rendered command missing --darkfield: " + rendered.join(' --- ') },
+                { assert rendered.every { it.contains('--sidecar model_config_min.json') },
+                    "rendered command does not bind --sidecar to the sidecar: " + rendered.join(' --- ') },
+                // BOUND TO, not merely PRESENT. Asserting only that `--flatfield` and
+                // `--darkfield` appear leaves the two paths free to swap -- in this
+                // module's script: block or in the .map that feeds it -- with the whole
+                // suite still green, because every Python-level test passes the profiles
+                // by keyword and never sees the CLI binding. That is exactly the error
+                // tests/modules/basicpy.nf.test warns about: divide by the darkfield and
+                // subtract the flatfield, silently, on every pixel.
+                //
+                // The input tuple is (meta, ome_tiff, sidecar, darkfield, flatfield), so
+                // sample_DAPI.tif is the DARKfield here and sample_DAPI_intensity.csv the
+                // FLATfield. The fixtures are deliberately two DIFFERENT files: with one
+                // file passed twice, a swap is unobservable.
+                { assert rendered.every { it.contains('--flatfield sample_DAPI_intensity.csv') },
+                    "--flatfield is not bound to the flatfield input: " + rendered.join(' --- ') },
+                { assert rendered.every { it.contains('--darkfield sample_DAPI.tif') },
+                    "--darkfield is not bound to the darkfield input: " + rendered.join(' --- ') },
                 { assert rendered.every { it.contains('--pixel-size 0.5') },
                     "rendered command missing --pixel-size: " + rendered.join(' --- ') }
             )

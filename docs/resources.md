@@ -25,6 +25,16 @@ inert and misleading; those have been removed. What remains is three cases:
   <div class="g"><div class="k">case 3</div><div class="v">partial override</div><div class="d">withName sets one or two fields; a label supplies the rest. 6 processes.</div></div>
 </div>
 
+**These three counts cover `modules/local/*.nf` only**, because that is what
+`tests/test_resource_label_coverage.py` scans and the counts are checked against
+that scan — raising one to include a process outside `modules/local/` makes the
+build fail (verified: bumping case 3 to `7` fails with `claims [14, 6, 7] … give
+[14, 6, 6]`). One process is therefore outside all three numbers: **`BASICPY`**,
+in `modules/nf-core/basicpy/`, which is a **case-3 partial override** — upstream's
+`label 'process_single'` with `memory` raised to `32 GB × attempt` by its
+`withName:` block. Nothing guards that sentence, so check it by hand if you edit
+either side.
+
 Case 3 is the one that surprises people: `TILED_SOLVE` carries
 `process_single` **and** a `withName:` block, but that block sets `memory`
 only — so the label still owns its `cpus` and `time`. All four tiled/STARE

@@ -487,3 +487,112 @@ def test_a_profile_whose_tile_shape_disagrees_with_the_sidecar_is_refused(tmp_pa
             str(dfp),
             str(tmp_path / "slide_corrected.ome.tif"),
         )
+
+
+# ---------------------------------------------------------------------------
+# The profile stack must be usable arithmetic, not just the right shape
+# ---------------------------------------------------------------------------
+
+
+def test_a_zero_flatfield_is_refused_rather_than_divided_by(tmp_path):
+    """Dividing by zero is silent: it yields inf, and nothing downstream notices.
+
+    ``clip_negative_values`` -> ``detect_negative_values`` tests ``data < 0``, which is
+    False for both ``inf`` and ``nan``, and ``np.round(np.clip(nan)).astype(uint16)`` is
+    undefined behaviour that produces a plausible-looking integer. So a degenerate
+    flatfield would reach the published slide as garbage pixels with a green run. A
+    fitted flatfield is a normalised gain and is strictly positive by construction; a
+    zero in it means the fit failed, not that the pixel should be amplified infinitely.
+    """
+    original = np.full((2, 250, 250), 1000, dtype=np.uint16)
+    slide, sidecar, manifest = _tile(tmp_path, original, ["DAPI", "PANCK"])
+    th, tw = manifest["tile_shape"]
+    flat = np.ones((th, tw), dtype=np.float32)
+    flat[0, 0] = 0.0
+    ffp = tmp_path / "slide_tiles-ffp.ome.tif"
+    dfp = tmp_path / "slide_tiles-dfp.ome.tif"
+    _write_profile(ffp, [flat])
+    _write_profile(dfp, [np.zeros((th, tw))])
+
+    with pytest.raises(ValueError, match="strictly positive"):
+        apply_basic_profiles.apply_basic_profiles(
+            str(slide),
+            str(sidecar),
+            str(ffp),
+            str(dfp),
+            str(tmp_path / "slide_corrected.ome.tif"),
+        )
+
+
+def test_a_negative_flatfield_is_refused(tmp_path):
+    """A negative gain inverts the image's sign; the clip would then zero the channel."""
+    original = np.full((2, 250, 250), 1000, dtype=np.uint16)
+    slide, sidecar, manifest = _tile(tmp_path, original, ["DAPI", "PANCK"])
+    th, tw = manifest["tile_shape"]
+    flat = np.ones((th, tw), dtype=np.float32)
+    flat[5, 5] = -1.0
+    ffp = tmp_path / "slide_tiles-ffp.ome.tif"
+    dfp = tmp_path / "slide_tiles-dfp.ome.tif"
+    _write_profile(ffp, [flat])
+    _write_profile(dfp, [np.zeros((th, tw))])
+
+    with pytest.raises(ValueError, match="strictly positive"):
+        apply_basic_profiles.apply_basic_profiles(
+            str(slide),
+            str(sidecar),
+            str(ffp),
+            str(dfp),
+            str(tmp_path / "slide_corrected.ome.tif"),
+        )
+
+
+@pytest.mark.parametrize("bad", [np.nan, np.inf])
+def test_a_non_finite_darkfield_is_refused(tmp_path, bad):
+    """NaN survives every downstream check: `nan < 0` is False, so the clip never sees it."""
+    original = np.full((2, 250, 250), 1000, dtype=np.uint16)
+    slide, sidecar, manifest = _tile(tmp_path, original, ["DAPI", "PANCK"])
+    th, tw = manifest["tile_shape"]
+    dark = np.zeros((th, tw), dtype=np.float32)
+    dark[1, 1] = bad
+    ffp = tmp_path / "slide_tiles-ffp.ome.tif"
+    dfp = tmp_path / "slide_tiles-dfp.ome.tif"
+    _write_profile(ffp, [np.ones((th, tw))])
+    _write_profile(dfp, [dark])
+
+    with pytest.raises(ValueError, match="not finite"):
+        apply_basic_profiles.apply_basic_profiles(
+            str(slide),
+            str(sidecar),
+            str(ffp),
+            str(dfp),
+            str(tmp_path / "slide_corrected.ome.tif"),
+        )
+
+
+def test_swapping_the_two_profiles_is_caught_at_the_shipped_defaults(tmp_path):
+    """The nf-test asserts the CLI BINDING; this asserts the arithmetic notices too.
+
+    At upstream defaults `get_darkfield` is False, so BASICPY's `*-dfp.ome.tif` is all
+    zeros while `*-ffp.ome.tif` is a gain around 1.0. Handing them over the wrong way
+    round therefore presents an ALL-ZERO flatfield, which the positivity check refuses.
+    That is a second, semantic net under the swap the rendered-command test pins
+    syntactically -- and it covers a swap introduced anywhere in the chain, including
+    subworkflows/local/preprocess.nf's `.map`, which no rendered-command test can see.
+    """
+    original = np.full((2, 250, 250), 1000, dtype=np.uint16)
+    slide, sidecar, manifest = _tile(tmp_path, original, ["DAPI", "PANCK"])
+    th, tw = manifest["tile_shape"]
+    real_ffp = tmp_path / "slide_tiles-ffp.ome.tif"
+    real_dfp = tmp_path / "slide_tiles-dfp.ome.tif"
+    _write_profile(real_ffp, [np.full((th, tw), 1.05)])
+    _write_profile(real_dfp, [np.zeros((th, tw))])
+
+    # Passed the wrong way round: darkfield where flatfield belongs and vice versa.
+    with pytest.raises(ValueError, match="strictly positive"):
+        apply_basic_profiles.apply_basic_profiles(
+            str(slide),
+            str(sidecar),
+            str(real_dfp),
+            str(real_ffp),
+            str(tmp_path / "slide_corrected.ome.tif"),
+        )
