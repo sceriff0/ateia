@@ -12,6 +12,8 @@ The measured inventory, at the time of writing:
     writer                          multi-ch  photometric  compression  tile      bigtiff
     convert_image.py                  yes     minisblack   none         none      yes
     preprocess.py                     yes     minisblack   zlib         2048      yes
+    tile_for_basic.py                 yes     minisblack   none         none      yes
+    apply_basic_profiles.py           yes     minisblack   zlib         2048      yes
     merge_channels_pyramid.py         yes     minisblack   zstd(param)  tile_size yes
     tiled_stitch.py                   yes     minisblack   none         out_tile  yes
     split_multichannel.py             no      -            zlib         none      yes
@@ -46,6 +48,7 @@ REPO = Path(__file__).resolve().parent.parent
 # (see tests/test_compartment_mode_routing.py's re-pinning history), while a count still fails
 # the moment a writer is added or removed.
 PIXEL_WRITERS = {
+    "bin/apply_basic_profiles.py": (1, "the illumination-corrected multi-channel slide"),
     "bin/convert_image.py": (1, "the converted multi-channel slide"),
     "bin/extract_mask_series.py": (1, "cell/nuclei masks recovered from a prior pyramid"),
     "bin/merge_channels_pyramid.py": (1, "the published QuPath pyramid"),
@@ -54,6 +57,7 @@ PIXEL_WRITERS = {
     "bin/segment_cellsam.py": (2, "CellSAM cell + nuclei masks"),
     "bin/segment_instantseg.py": (2, "InstanSeg cell + nuclei masks"),
     "bin/split_multichannel.py": (1, "one single-channel plane per marker"),
+    "bin/tile_for_basic.py": (1, "the multi-site CZYX pseudo-FOV stack BASICPY fits on"),
     "bin/tiled_stitch.py": (1, "the STARE registered slide"),
     "bin/utils/image_utils.py": (1, "generic helper; the caller supplies the decisions"),
     "bin/utils/qc.py": (2, "QC raster output, not a pipeline artifact"),
@@ -61,7 +65,9 @@ PIXEL_WRITERS = {
 
 # Writers that emit a (C, H, W) stack. These MUST set photometric="minisblack".
 MULTI_CHANNEL_WRITERS = (
+    "bin/apply_basic_profiles.py",
     "bin/convert_image.py",
+    "bin/tile_for_basic.py",
     "bin/preprocess.py",
     "bin/merge_channels_pyramid.py",
     "bin/tiled_stitch.py",

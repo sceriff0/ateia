@@ -20,7 +20,7 @@ A process's `cpus` / `memory` / `time` come from **either** a resource `label`
 inert and misleading; those have been removed. What remains is three cases:
 
 <div class="gate">
-  <div class="g"><div class="k">case 1</div><div class="v">withName owns all three</div><div class="d">No label. The block sets cpus, memory and time. 12 processes.</div></div>
+  <div class="g"><div class="k">case 1</div><div class="v">withName owns all three</div><div class="d">No label. The block sets cpus, memory and time. 14 processes.</div></div>
   <div class="g"><div class="k">case 2</div><div class="v">label owns all three</div><div class="d">The withName block, if any, sets only publishDir / ext.args. 6 processes.</div></div>
   <div class="g"><div class="k">case 3</div><div class="v">partial override</div><div class="d">withName sets one or two fields; a label supplies the rest. 6 processes.</div></div>
 </div>
@@ -87,7 +87,17 @@ Effective values on **attempt 1**. `f` denotes the relevant input size in GiB
 |---|---|---|---|---|
 | `CONVERT_IMAGE` | `1` | `24 GB` + tier: `f<4` → +0, `f<12` → +24, `f<24` → +48, else +64 GB | `2.h × attempt` | `withName` |
 | `PREPROCESS` | `4` | `f × 7 GB × attempt + 8 GB` | `3.h × attempt` | `withName` |
+| `TILE_FOR_BASIC` | `2` | `f × 3 GB × attempt + 8 GB` | `2.h × attempt` | `withName` |
+| `APPLY_PROFILES` | `2` | `f × 7 GB × attempt + 8 GB` | `3.h × attempt` | `withName` |
 | `GENERATE_PREPROCESS_QC` | `4` | `200 GB` | `4.h × attempt` | `process_medium` |
+
+`BASICPY` is **not** in the table above and cannot be: the guard behind these tables
+(`tests/test_resource_label_coverage.py`) reads `modules/local/*.nf`, and `BASICPY` lives in
+`modules/nf-core/basicpy/`, vendored unmodified. Its resources are its upstream
+`label 'process_single'` (1 cpu, `8.h × attempt`) with `memory` raised to `32 GB × attempt`
+by a partial `withName:` override in `conf/modules.config` — it runs Bio-Formats under a JVM
+and materialises one channel's tile stack, which does not fit the single tier's 12 GB on a
+real slide. Changing either number changes an unguarded figure, so change it here too.
 
 ### Registration — VALIS
 
@@ -339,7 +349,8 @@ SemVer version (`1.0.0`), tied to `manifest.version` — see
 | Image | Processes |
 |---|---|
 | `bolt3x/mirage-convert:1.0.0` | `CONVERT_IMAGE` |
-| `bolt3x/mirage-preprocess:1.0.0` | `PREPROCESS`, `SPLIT_CHANNELS`, `GENERATE_PREPROCESS_QC`, `GENERATE_QC_REPORT` |
+| `bolt3x/mirage-preprocess:1.0.0` | `PREPROCESS`, `TILE_FOR_BASIC`, `APPLY_PROFILES`, `SPLIT_CHANNELS`, `GENERATE_PREPROCESS_QC`, `GENERATE_QC_REPORT` |
+| `docker.io/labsyspharm/basicpy-docker-mcmicro:1.2.0-patch5` | `BASICPY` (vendored nf-core module; pulls its own image, and errors under `-profile conda`) |
 | `cdgatenbee/valis-wsi:1.0.0` | `REGISTER` |
 | `bolt3x/mirage-tiled:1.0.0` | `TILED_COARSE`, `TILED_REG_TILE`, `TILED_SOLVE`, `TILED_STITCH` |
 | `bolt3x/mirage-regqc:1.0.0` | `GENERATE_REGISTRATION_QC` |

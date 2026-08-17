@@ -133,10 +133,15 @@ ALLOWED_LINES = {
         # for Nextflow 26's strict parser; 736 -> 744 when TILED_SOLVE gained the
         # ext.args block carrying its confidence/range gates; 744 -> 748 when that
         # same block's `?:` was replaced by an explicit null test (Elvis treats a
-        # legal 0 as unset) and gained the comment explaining why. Re-pin, do not
+        # legal 0 as unset) and gained the comment explaining why; 748 -> 834 when the
+        # in-process BaSiC path became the three-process nf-core BASICPY chain and
+        # TILE_FOR_BASIC / BASICPY / APPLY_PROFILES gained withName blocks above it
+        # (826 -> 834 once BASICPY's block gained the comment recording that running at
+        # upstream defaults is a decision).
+        # Re-pin, do not
         # widen. (Re-pin from the file, not by guessing:
         # `grep -n "params.expanded_quantification ?" conf/modules.config`.)
-        748: (
+        834: (
             "ext.args = { params.expanded_quantification ? '--expanded' : "
             "'' } -- conf/*.config closures cannot see lib/*.groovy classes, "
             "so ext.args must read params raw here."

@@ -288,6 +288,18 @@ ARGPARSE_DEFAULT_ALLOWLIST = {
             "to it."
         ),
     },
+    "tile_for_basic.py:--nuclear-markers": {
+        "reason": (
+            "Same contract as preprocess.py's --nuclear-markers, and it replaced that "
+            "call site: default=None is intentional per the script's own help text, and "
+            "modules/local/tile_for_basic.nf builds `--nuclear-markers "
+            "${MarkerUtils.markerList(params.nuclear_markers).join(' ')}` "
+            "unconditionally, so the pipeline never reaches the default. Mirroring "
+            "['DAPI','CELLTOX'] in Python would be a SECOND declaration of that "
+            "default; utils/metadata.py's DEFAULT_NUCLEAR_MARKERS is the one permitted "
+            "mirror, and passing None is how this script defers to it."
+        ),
+    },
     "preprocess.py:--nuclear-markers": {
         "reason": (
             "Same contract as split_multichannel.py's --nuclear-markers below: "
