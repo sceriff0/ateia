@@ -81,6 +81,18 @@ PINNED_EXCEPTIONS = {
     ("convert", "numpy"): ("2.2.6", "bioio 3.5.0 plugin set cannot resolve with numpy 1.26.4"),
 }
 
+# Packages a container's FROM base image bakes in, so no `pip install` line for them ever
+# appears in the Dockerfile -- a script importing one is not missing a dependency, the
+# Dockerfile just never had to name it. Documented per-container, each naming the base image
+# that provides it, the same way PINNED_EXCEPTIONS documents its upstream constraint.
+BASE_IMAGE_PROVIDES = {
+    # pytorch/pytorch:*-cuda*-cudnn*-runtime bakes in a CUDA-matched torch build; pip
+    # installing a second, unpinned torch here would risk silently replacing that
+    # CUDA-matched wheel with a mismatched one.
+    "cellsam": {"torch"},
+    "instanseg": {"torch"},
+}
+
 # Packages that are genuinely absent from a given image are fine; these are the ones that must
 # never appear again, having been removed as unimported.
 FORBIDDEN = ("cellpose", "cucim", "cupy", "aicsimageio")
@@ -133,6 +145,16 @@ def _dockerfile_pip_tokens(text):
         body = re.split(r"pip3?\s+install", stripped, maxsplit=1)[1]
         body = body.split("&&")[0]
         for tok in body.split():
+            if tok.startswith("git+"):
+                # `pip install git+https://github.com/<owner>/<repo>.git@<rev>` names no
+                # requirement token at all -- the bare "/" skip below would otherwise drop
+                # it entirely, silently treating a real (pinned-by-commit) install as if the
+                # package were never installed. Recover the package name from the repo path
+                # segment: two containers do this (cellsam's cellSAM, regqc's cudipy).
+                m = re.search(r"/([A-Za-z0-9_.\-]+?)(?:\.git)?(?:@.*)?$", tok)
+                if m:
+                    tokens.append(m.group(1))
+                continue
             if tok.startswith(("-", "$")) or "/" in tok:
                 continue
             tokens.append(tok.strip('"').strip("'"))
@@ -232,8 +254,47 @@ def test_no_forbidden_package_reappears(container):
     )
 
 
+def _seg_backends_container_scripts():
+    """(container dir, {scripts}) for SEGMENT's three backends (modules/local/segment.nf).
+
+    SEGMENT resolves BOTH its container (``SegBackends.container(params.seg_method)``) and
+    its entrypoint script (``backend.entrypoint``) dynamically from ``lib/SegBackends.groovy``
+    -- never a literal ``bolt3x/mirage-<name>:`` tag or a literal ``<script>.py \\`` line in
+    segment.nf itself -- so the regex scan in ``_module_container_and_scripts`` cannot see
+    stardist/instanseg/cellsam at all. Parsed straight out of the same table segment.nf reads
+    at runtime, not hand-duplicated, so this stays in sync with the table by construction.
+    """
+    text = (REPO / "lib" / "SegBackends.groovy").read_text()
+    out = {}
+    for m in re.finditer(
+        r"container\s*:\s*'bolt3x/mirage-([a-z0-9-]+):[^']*'.*?entrypoint\s*:\s*'([a-z0-9_]+\.py)'",
+        text,
+        re.DOTALL,
+    ):
+        out.setdefault(m.group(1), set()).add(m.group(2))
+    return out
+
+
 def _module_container_and_scripts():
-    """(container dir, {scripts}) for every modules/local/*.nf naming a first-party image."""
+    """(container dir, {scripts}) for every modules/local/*.nf naming a first-party image,
+    plus SEGMENT's backend-dispatched images resolved through lib/SegBackends.groovy (see
+    ``_seg_backends_container_scripts``).
+
+    WARP_SEG_QC (modules/local/warp_seg_qc.nf) resolves its container the same
+    backend-dispatched way, via ``lib/WarpBackends.groovy``, but is deliberately NOT given
+    the same treatment here. Its VALIS backend's image (``cdgatenbee/valis-wsi``) is not a
+    first-party ``bolt3x/mirage-*`` image and has no ``containers/`` entry to check against;
+    its tiled backend's image (``bolt3x/mirage-tiled``) already gets script coverage from
+    tiled_coarse.nf / tiled_reg_tile.nf / etc above. Attributing ``warp_seg_qc.py`` itself to
+    'tiled' would be unsound the way SEGMENT's attribution is not: SEGMENT has three separate
+    per-backend entrypoint FILES (segment.py / segment_instantseg.py / segment_cellsam.py),
+    each installed and run only under its own container, so its whole static import graph is
+    a fair claim on that container. ``warp_seg_qc.py`` is ONE file dispatched by a `--method`
+    flag read at runtime (``_main_tiled`` vs. the VALIS path in ``main``/``write_report``), so
+    its static import graph includes VALIS-only deferred imports (``valis``, ``scyjava``) that
+    never execute under `--method tiled` -- attributing them to the tiled container would flag
+    a false missing dependency, not a real one.
+    """
     out = {}
     for nf in sorted((REPO / "modules" / "local").glob("*.nf")):
         text = nf.read_text()
@@ -245,6 +306,9 @@ def _module_container_and_scripts():
             continue
         scripts = set(re.findall(r"([a-z0-9_]+\.py)\s*\\", text))
         if scripts:
+            out.setdefault(cdir, set()).update(scripts)
+    for cdir, scripts in _seg_backends_container_scripts().items():
+        if (CONTAINERS / cdir / "Dockerfile").is_file():
             out.setdefault(cdir, set()).update(scripts)
     return out
 
@@ -262,6 +326,7 @@ _IMPORT_TO_DIST = {
     "yaml": "pyyaml",
     "sklearn": "scikit-learn",
     "bioio": "bioio",
+    "instanseg": "instanseg-torch",
 }
 
 
@@ -313,7 +378,7 @@ def test_container_installs_what_its_scripts_import(container, scripts):
     A missing dependency here is invisible at build time and fails at gigapixel scale, after the
     scheduler has already granted the task its memory.
     """
-    installed = set(_installed(container))
+    installed = set(_installed(container)) | BASE_IMAGE_PROVIDES.get(container, set())
     missing = {}
     for script in sorted(scripts):
         for name in sorted(_third_party_imports(script)):

@@ -15,8 +15,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python packages with exact versions
+#
+# csbdeep and dask are named explicitly even though stardist already pulls csbdeep in
+# transitively: segment.py imports both directly (`from csbdeep.utils import normalize`,
+# `import dask.array as da` for the map_overlap-based tiled read), and an install nothing
+# in this Dockerfile names is invisible to tests/test_container_harmonisation.py's
+# "installs what it imports" guard -- and to anyone reading this file to see what the
+# script actually needs.
 RUN pip install --no-cache-dir \
     stardist==0.9.1 \
+    csbdeep \
+    dask \
     pandas==2.3.3 \
     numpy==1.26.4 \
     scikit-image==0.25.2 \
