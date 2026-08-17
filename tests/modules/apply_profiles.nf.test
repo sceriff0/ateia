@@ -37,7 +37,7 @@ nextflow_process {
                 { assert process.out.preprocessed },
                 { assert process.out.versions },
                 { assert process.out.size_log },
-                // The same artifact PREPROCESS published, so the `preprocessed`
+                // The same artifact the removed in-process PREPROCESS published, so the `preprocessed`
                 // checkpoint row and every downstream consumer are unchanged by the
                 // backend swap.
                 { assert process.out.preprocessed.get(0).get(1).endsWith('_corrected.ome.tif') },
