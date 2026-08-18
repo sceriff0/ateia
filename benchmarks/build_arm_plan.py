@@ -114,6 +114,10 @@ def _apply_qc_segmenter_cross(arms: list[dict], cfg: dict) -> list[dict]:
     return arms + extra
 
 
+# The one shared preprocessing run every registration arm resumes from.
+PREPROCESS_ARM = "preprocess_shared"
+
+
 def _compute_arm_name(patient: str, rep: int) -> str:
     return f"compute_{patient or 'all'}" + (f"_rep{rep}" if rep else "")
 
@@ -145,13 +149,28 @@ def build_arm_plan(cfg: dict) -> list[dict]:
     n = 0
     _LABELS.clear()
 
+    # PREPROCESSING IS SHARED. Nothing in registration_arms or qc_segmenter_cross
+    # touches a preproc_* param, so all 9 registration arms would otherwise re-run
+    # an identical (and, on a real WSI, expensive) preprocessing step. Run it once
+    # and have every registration arm resume from its csv/preprocessed.csv -- the
+    # same factoring already applied to the segmentation arms.
+    rows.append({
+        "run_id": PREPROCESS_ARM, "arm_kind": "preprocess",
+        "start": "preprocessing", "stop": "preprocessing",
+        "from_arm": "", "from_csv": "", "rep": 0,
+        "arm": PREPROCESS_ARM, "backend": "", "memory_mode": "",
+        "reg_micro_reg": "", "seg_method": baseline.get("seg_method", ""),
+        "registration_method": "", "reg_qc": "",
+    })
+    n += 1
+
     arms = _apply_qc_segmenter_cross(_registration_arms(cfg), cfg)
     for a in arms:
         _LABELS[a["arm"]] = a["label"]
         rows.append({
             "run_id": a["arm"], "arm_kind": "registration",
-            "start": "preprocessing", "stop": "registration",
-            "from_arm": "", "rep": 0,
+            "start": "registration", "stop": "registration",
+            "from_arm": PREPROCESS_ARM, "from_csv": "preprocessed", "rep": 0,
             "registration_method": a["backend"],
             **{k: a[k] for k in ("arm", "backend", "memory_mode",
                                  "reg_micro_reg", "seg_method")},
@@ -171,7 +190,8 @@ def build_arm_plan(cfg: dict) -> list[dict]:
         for m in sa.get("seg_method", []):
             rows.append({
                 "run_id": f"seg_{m}", "arm_kind": "segmentation",
-                "start": "segmentation", "stop": "", "from_arm": frm, "rep": 0,
+                "start": "segmentation", "stop": "", "from_arm": frm,
+                "from_csv": "registered", "rep": 0,
                 "arm": f"seg_{m}", "backend": "", "memory_mode": "",
                 "reg_micro_reg": "", "seg_method": m,
                 "registration_method": "",
@@ -186,7 +206,8 @@ def build_arm_plan(cfg: dict) -> list[dict]:
             for rep in range(int(cp.get("repeats", 1) or 1)):
                 rows.append({
                     "run_id": _compute_arm_name(p, rep), "arm_kind": "compute",
-                    "start": "", "stop": "", "from_arm": "", "rep": rep,
+                    "start": "", "stop": "", "from_arm": "", "from_csv": "",
+                    "rep": rep,
                     "arm": _compute_arm_name(p, rep),
                     "backend": baseline.get("registration_method", "valis"),
                     "memory_mode": baseline.get("memory_mode", ""),

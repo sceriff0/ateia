@@ -28,10 +28,11 @@
 #
 # COST. Real WSI runs are not sweep cells: REGISTER has been observed at 483 GB
 # and MERGE_AND_PYRAMID at 6.5 h. Every arm count below is per patient, so read
-# them as multipliers on your cohort. The three arms are FACTORED, never crossed:
-# registration arms stop at registration, and the segmentation arms RESUME from
-# one registration rather than repeating it. Crossing them would repeat the
-# expensive half to vary the cheap one.
+# them as multipliers on your cohort. The arms are FACTORED, never crossed, and
+# each stage is paid for ONCE: preprocessing runs once and every registration arm
+# resumes from it; the registration arms stop at registration; the segmentation
+# arms resume from ONE registration. Crossing them would repeat the expensive half
+# to vary the cheap one.
 # =============================================================================
 
 # Which pipeline this plan targets. build_arm_plan.py checks these against
@@ -49,11 +50,14 @@ baseline:
 # -----------------------------------------------------------------------------
 # ARM 1 — REGISTRATION. Which configuration aligns real tissue best?
 #
-# Runs `--start preprocessing --stop registration`. Segmentation, quantification
-# and export are NOT run: nothing downstream of registration changes the staged
-# registration QC, so paying for them once per arm would buy nothing. reg_qc=2
-# still segments the native slides for scoring — that is inside the registration
-# step, not the segmentation step.
+# Runs `--start registration --stop registration`, resuming from ONE shared
+# preprocessing run (`preprocess_shared`, emitted automatically by
+# build_arm_plan.py). Nothing in this file touches a preproc_* param, so the 9
+# registration arms would otherwise re-run an identical preprocessing step — the
+# expensive half on a real WSI. Segmentation, quantification and export are not
+# run either: nothing downstream of registration changes the staged registration
+# QC. reg_qc=2 still segments the native slides for scoring, but that is inside
+# the registration step, not the segmentation step.
 #
 # THE TWO VALIS KNOBS ARE NOT A 2x2. reg_micro_reg is a DEPTH (0 none, 1
 # micro-rigid only, 2 + micro non-rigid), so preset x depth is 2 x 3 = 6 arms.

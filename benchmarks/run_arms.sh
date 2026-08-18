@@ -155,12 +155,13 @@ run_pass() {
     local kind; kind=$(col_val arm_kind "${vals[@]}")
     [[ "$kind" == "$want_kind" ]] || continue
 
-    local run_id arm start stop from_arm only_patient
+    local run_id arm start stop from_arm from_csv only_patient
     run_id=$(col_val run_id "${vals[@]}")
     arm=$(col_val arm "${vals[@]}")
     start=$(col_val start "${vals[@]}")
     stop=$(col_val stop "${vals[@]}")
     from_arm=$(col_val from_arm "${vals[@]}")
+    from_csv=$(col_val from_csv "${vals[@]}")
     only_patient=$(col_val only_patient "${vals[@]}")
 
     ARGS=()
@@ -174,9 +175,14 @@ run_pass() {
 
     local in_csv="$INPUT"
     if [[ -n "$from_arm" ]]; then
-      in_csv="$ROOT/$from_arm/csv/registered.csv"
+      # Which checkpoint depends on WHERE this arm resumes: a registration arm
+      # picks up csv/preprocessed.csv from the one shared preprocessing run, a
+      # segmentation arm picks up csv/registered.csv from the arm it was told to
+      # follow. Layout.checkpointCsvName() derives both names from the step
+      # vocabulary, which is why they are the step name minus the "-ing".
+      in_csv="$ROOT/$from_arm/csv/${from_csv}.csv"
       if [[ ! -f "$in_csv" ]]; then
-        echo "[$run_id] SKIP: $in_csv missing — registration arm '$from_arm' did not complete" >&2
+        echo "[$run_id] SKIP: $in_csv missing — arm '$from_arm' did not complete" >&2
         continue
       fi
     elif [[ -n "$only_patient" ]]; then
@@ -191,7 +197,8 @@ run_pass() {
   done < <(tail -n +2 "$PLAN" | tr -d '\r')
 }
 
-for kind in registration segmentation compute; do
+# preprocess FIRST: every registration arm resumes from its csv/preprocessed.csv.
+for kind in preprocess registration segmentation compute; do
   echo "=== pass: $kind ==="
   run_pass "$kind"
   # Barrier between passes: segmentation needs registration's checkpoint, and the

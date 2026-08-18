@@ -220,7 +220,58 @@ def test_registration_arms_stop_at_registration(plan):
     """Nothing downstream of registration changes the staged registration QC."""
     for r in plan:
         if r["arm_kind"] == "registration":
-            assert (r["start"], r["stop"]) == ("preprocessing", "registration")
+            assert (r["start"], r["stop"]) == ("registration", "registration")
+
+
+def test_preprocessing_runs_exactly_once_and_every_arm_resumes_from_it(plan):
+    """No arm axis touches a preproc_* param, so 9 registration arms re-running an
+    identical preprocessing step would be pure waste -- and on a real WSI it is the
+    expensive part. This is the same factoring as the segmentation arms."""
+    pre = [r for r in plan if r["arm_kind"] == "preprocess"]
+    assert len(pre) == 1, "preprocessing must be paid for exactly once"
+    assert (pre[0]["start"], pre[0]["stop"]) == ("preprocessing", "preprocessing")
+
+    reg = [r for r in plan if r["arm_kind"] == "registration"]
+    assert reg
+    for r in reg:
+        assert r["from_arm"] == pre[0]["arm"], r["arm"]
+        assert r["from_csv"] == "preprocessed", r["arm"]
+
+
+def test_every_resuming_arm_names_the_checkpoint_it_reads(plan):
+    """from_csv is the step name minus the "-ing" (Layout.checkpointCsvName()).
+    A blank or wrong value makes run_arms.sh look for csv/.csv and skip the arm
+    with a message that reads like the upstream run failed."""
+    valid = {"preprocessed", "registered", "segmented"}
+    for r in plan:
+        if r["from_arm"]:
+            assert r["from_csv"] in valid, f"{r['arm']} reads csv/{r['from_csv']}.csv"
+        else:
+            assert r["from_csv"] == "", f"{r['arm']} names a checkpoint but no arm"
+
+
+def test_run_arms_resolves_the_checkpoint_from_the_plan(plan):
+    """The launcher must build the path from from_csv, not hardcode one filename.
+    It used to hardcode csv/registered.csv, which silently could not serve the
+    registration arms once they began resuming from preprocessed.csv."""
+    script = (BENCH / "run_arms.sh").read_text()
+    assert "csv/${from_csv}.csv" in script
+    # Comments legitimately name the concrete checkpoints while explaining the
+    # dependency; only executable lines must not pin one.
+    code = "\n".join(ln for ln in script.splitlines()
+                     if not ln.lstrip().startswith("#"))
+    assert "csv/registered.csv" not in code, (
+        "run_arms.sh still hardcodes a checkpoint filename in executable code")
+
+
+def test_preprocess_arm_runs_before_the_arms_that_resume_from_it():
+    """Pass order in run_arms.sh is a dependency, not a preference."""
+    script = (BENCH / "run_arms.sh").read_text()
+    m = re.search(r"for kind in ([\w ]+); do", script)
+    assert m, "could not find the pass loop"
+    order = m.group(1).split()
+    assert order.index("preprocess") < order.index("registration")
+    assert order.index("registration") < order.index("segmentation")
 
 
 def test_compute_arm_runs_the_whole_pipeline(plan):

@@ -30,9 +30,12 @@ registration is the expensive half, so it is paid for once.
 
 ### 1. Registration arms — *which configuration aligns real tissue best?*
 
-`--start preprocessing --stop registration`, at `reg_qc = 2`. Nothing downstream
-of registration changes the staged registration QC, so segmentation and export
-are not run. **7 arms**:
+`--start registration --stop registration`, at `reg_qc = 2`, resuming from **one
+shared preprocessing run**. No arm axis touches a `preproc_*` param, so running
+preprocessing nine times would repeat the expensive half of a real-WSI run to
+vary something it does not affect — the same factoring the segmentation arms use.
+Segmentation and export are not run either: nothing downstream of registration
+changes the staged registration QC. **7 arms**:
 
 - **VALIS preset × micro-depth = 6.** `memory_mode` (`low` = BRISK/RANSAC,
   `high` = SuperPoint/SuperGlue — *different feature matchers*, not one matcher at
@@ -133,15 +136,33 @@ because that is where `registration_arms.R` looks.
 
 ### 2. Launch (cluster)
 
+On SLURM, use the submitter — it sets the profile, the JVM heap per head, the
+Singularity cache and the CellSAM token check for you:
+
 ```bash
-ARMS_PROFILE="singularity,ieo" ARMS_CONCURRENCY=3 \
-  benchmarks/run_arms.sh arm_plan.csv real_input.csv arm_results
+cd /beegfs/scratch/$USER/analysis_runs/method_paper/benchmark
+mkdir -p logs && sbatch mirage/benchmarks/submit_arms.sh
 ```
 
-Passes run in order — `registration`, then `segmentation`, then `compute` — with a
-barrier between them. That order is a **dependency**: the segmentation arms resume
-from a checkpoint the registration arms write. The compute arm runs last and alone
-so it is not timed under contention from the QC arms.
+Edit the `EDIT THESE FOR YOUR SITE` block at the top first. Keep everything on the
+large filesystem: `$HOME` is small, and read-only inside the containers.
+
+Or drive it directly:
+
+```bash
+ARMS_PROFILE="singularity,ieo" ARMS_CONCURRENCY=4 \
+  benchmarks/run_arms.sh arm_plan.csv real_input.csv arm_results -c conf/ieo.config
+```
+
+Passes run in order — `preprocess`, `registration`, `segmentation`, `compute` —
+with a barrier between them. That order is a **dependency**: each pass resumes
+from a checkpoint the previous one wrote. The compute arm runs last and alone so
+it is not timed under contention from the QC arms.
+
+!!! warning "`ARMS_CONCURRENCY` is heads, and heads share the head job's memory"
+    Each concurrent arm is one Nextflow JVM. The `-Xmx32g` that suits a
+    single-run launcher would blow a 32 GB head job at two arms; `submit_arms.sh`
+    sets `-Xmx3g` per head instead. Raise `--mem` before raising concurrency.
 
 `ARMS_CONCURRENCY` is how many Nextflow heads run at once; each still submits its
 own SLURM jobs, so measurements stay clean.
@@ -248,9 +269,13 @@ Per patient, at the shipped `arms.yaml`:
 
 | arm | runs | pipeline extent |
 |---|---|---|
-| registration (7 + 2 crossed) | 9 | preprocessing → registration |
+| shared preprocessing | 1 | preprocessing only |
+| registration (7 + 2 crossed) | 9 | registration only (resumed) |
 | segmentation | 3 | segmentation → export (resumed) |
 | compute profile | 1 | full pipeline |
+
+Preprocessing is paid for **once**, not ten times. The compute-profile arm still
+runs it, because it is the arm that prices every process.
 
 Real WSI runs are not sweep cells: `REGISTER` has been observed at **483 GB** and
 `MERGE_AND_PYRAMID` at **6.5 h**. Multiply by your cohort before submitting, and
