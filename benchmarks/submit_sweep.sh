@@ -19,24 +19,33 @@
 # this job small (2 cpus / 16 GB for the Nextflow JVM) but give it a LONG walltime:
 # run_sweep.sh launches the runs sequentially, so the head job lives for the whole sweep.
 #
-# Prereqs (run the two python steps yourself first, on a login node):
-#   python benchmarks/generate_matrix.py --source <img>.ome.tif --outdir bench_matrix \
-#       --sweep benchmarks/configs/sweep.yaml
-#   python benchmarks/build_run_plan.py  --sweep benchmarks/configs/sweep.yaml \
-#       --out bench_run_plan.csv --repeats 3
+# STORAGE FIRST. The shipped sweep.yaml scales to target_px=90000 x 4 channels and
+# needs up to 7 moving panels per cell, so the generated matrix is ~1.3 TB of
+# uncompressed uint16 BEFORE a single run starts, and the 135-run plan (405 at the
+# default --repeats 3) writes work dirs on top. Both live under BENCH_DIR on beegfs
+# for that reason. Trim sweep.yaml's scaling_grid/registration_grid target_px if
+# that does not fit -- the regression needs a size RANGE, not the largest cell.
 #
-# Submit:  mkdir -p logs && sbatch benchmarks/submit_sweep.sh
+# Prereqs (run the two python steps yourself first, on a login node):
+#   python $SRC_DIR/benchmarks/generate_matrix.py --source <one-real-slide>.ome.tif \
+#       --outdir $BENCH_DIR/bench_matrix --sweep $SRC_DIR/benchmarks/configs/sweep.yaml
+#   python $SRC_DIR/benchmarks/build_run_plan.py --sweep $SRC_DIR/benchmarks/configs/sweep.yaml \
+#       --out $BENCH_DIR/bench_run_plan.csv --repeats 3
+#
+# Submit:  cd /beegfs/scratch/ieo7660/analysis_runs/method_paper/benchmark
+#          mkdir -p logs && sbatch ~/pipelines/mirage/benchmarks/submit_sweep.sh
 # Watch:   squeue -u $USER        # 1 head job + N child jobs
 #          tail -f logs/bench_<jobid>.out
 # ============================================================================
 
 # ---- EDIT THESE FOR YOUR SITE --------------------------------------------------
-SRC_DIR="/beegfs/scratch/ieo7660/analysis_runs/method_paper/benchmark/mirage"
-MATRIX_DIR="bench_matrix"                 # from generate_matrix --outdir
-RUN_PLAN="bench_run_plan.csv"             # from build_run_plan --out
-RESULTS="bench_results"                   # per-run outputs land here
-PROFILES="singularity,ieo"               # OVERRIDES run_sweep.sh's default -profile docker
-SITE_CONFIG="conf/ieo.config"            # gitignored: executor=slurm + singularity cacheDir + paths
+BENCH_DIR="/beegfs/scratch/ieo7660/analysis_runs/method_paper/benchmark"
+SRC_DIR="$HOME/pipelines/mirage"          # the checkout. NOTE: unquoted $HOME, never "~/..."
+MATRIX_DIR="$BENCH_DIR/bench_matrix"      # from generate_matrix --outdir (BIG -- see the note below)
+RUN_PLAN="$BENCH_DIR/bench_run_plan.csv"  # from build_run_plan --out
+RESULTS="$BENCH_DIR/bench_results"        # per-run outputs + work dirs land here
+PROFILES="singularity,ieo"                # OVERRIDES run_sweep.sh's default -profile docker
+SITE_CONFIG="$SRC_DIR/conf/ieo.config"    # gitignored: executor=slurm + singularity cacheDir + paths
 CONDA_ENV="nf-env"                        # env that has nextflow + python
 CONCURRENCY="${SWEEP_CONCURRENCY:-16}"   # pipeline runs launched AT ONCE (each = 1 Nextflow head that
                                           # submits its OWN SLURM process jobs). 16 heads x ~3 GB heap
@@ -47,7 +56,7 @@ CONCURRENCY="${SWEEP_CONCURRENCY:-16}"   # pipeline runs launched AT ONCE (each 
                                           # per-user SLURM job cap (sacctmgr ... format=maxsubmit).
 # -------------------------------------------------------------------------------
 
-cd "$SRC_DIR"
+cd "$BENCH_DIR"
 mkdir -p logs
 
 # shellcheck disable=SC1090
@@ -71,7 +80,7 @@ echo "=================================================="
 # NB: pass the profile via SWEEP_PROFILE, NOT a trailing -profile — Nextflow allows -profile only once.
 export SWEEP_CONCURRENCY="$CONCURRENCY"
 export SWEEP_PROFILE="$PROFILES"
-benchmarks/run_sweep.sh \
+"$SRC_DIR/benchmarks/run_sweep.sh" \
     "$RUN_PLAN" \
     "$MATRIX_DIR/matrix_manifest.csv" \
     "$RESULTS" \
