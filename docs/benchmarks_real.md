@@ -82,7 +82,24 @@ synthetic scaling fits transfer to real tissue. Two points can.
 
 ---
 
-## Running it
+## Running it — the short version
+
+```bash
+make arm-plan   INPUT=real_input.csv ROOT=arm_results          # seconds, local
+make arm-run    INPUT=real_input.csv ROOT=arm_results          # hours-days, cluster
+make arm-tables ROOT=arm_results                               # minutes, local
+make arm-pull   ROOT=arm_results IHC=../ihc_method             # seconds
+```
+
+Then knit the four pages in `ihc_method` (step 5 below). The Make targets write
+the plan to `<ROOT>_plan.csv`; the long form below spells out the same four steps
+with explicit paths.
+
+`arm-run` is deliberately **not** a prerequisite of `arm-tables` — it is
+hours-to-days of cluster time, and the tables are meant to be regenerated
+repeatedly while it is still going.
+
+## Running it — the long version
 
 ### 0. Your samplesheet
 
@@ -169,16 +186,32 @@ It lands them where each page expects:
 | `data/benchmark/*.csv` | `benchmark_pipeline.Rmd`, `benchmark_registration.Rmd` |
 | `data/mirage/<patient>/…` | `registration_run_qc.Rmd` |
 
-Then, in `ihc_method`:
+### 5. Knit the pages — this is where the plots appear
 
 ```r
+# in ../ihc_method
+renv::restore()                       # first time only
 workflowr::wflow_build(c("analysis/registration_arms.Rmd",
                          "analysis/benchmark_pipeline.Rmd",
                          "analysis/benchmark_registration.Rmd",
                          "analysis/registration_run_qc.Rmd"))
 ```
 
+Each page renders its figures **inline from the CSVs** — there are no PNGs on
+disk to wire up — and writes PDFs to `output/figures/<page>/` via
+`export_pdf_figures()`. Open `docs/<page>.html` to read them.
+
+A page whose input is missing does not fail: it prints what it wanted and skips
+the figure. So a partial pull gives a partial page, never a broken build.
+
 `data/` is gitignored there — nothing copied is committed.
+
+| page | answers |
+|---|---|
+| `registration_arms` | which registration configuration to ship, ranked on real tissue |
+| `benchmark_registration` | cost-vs-accuracy across the sweep; the two independent accuracy signals agreeing |
+| `benchmark_pipeline` | resource scaling, cost, segmentation-method comparison |
+| `registration_run_qc` | was this cohort registered well enough to analyse? |
 
 ---
 
