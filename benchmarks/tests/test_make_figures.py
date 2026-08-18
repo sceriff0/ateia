@@ -57,14 +57,6 @@ def test_notebook_executes_on_fixture(tmp_path):
     assert (tmp_path / "modules.optimized.config").read_text().count("withName") >= 2
 
 
-def test_notebook_file_exists_and_is_valid():
-    import nbformat
-    from pathlib import Path
-    nb_path = Path(__file__).parents[1] / "analysis" / "benchmark_analysis.ipynb"
-    nb = nbformat.read(str(nb_path), as_version=4)
-    assert len(nb.cells) >= 8  # 5 sections + intro + setup
-
-
 def test_run_accepts_formats_and_writes_png(tmp_path):
     res = make_figures.run(
         results_root=FIX / "runs", run_plan_csv=FIX / "runs_run_plan.csv",
@@ -94,13 +86,3 @@ def test_size_varying_filters_confounding_axes():
     assert len(make_figures._size_varying(no_axis)) == len(no_axis)
 
 
-def test_export_docs_figures_writes_into_docs_dir(tmp_path):
-    from benchmarks.analysis import export_docs_figures
-    docs_img = tmp_path / "docs_imgs"
-    out = export_docs_figures.export(
-        results_root=FIX / "runs", run_plan_csv=FIX / "runs_run_plan.csv",
-        manifest_csv=FIX / "runs_matrix_manifest.csv", docs_image_dir=docs_img,
-    )
-    assert docs_img.exists()
-    assert list(docs_img.glob("scaling_*.png"))
-    assert out == docs_img

@@ -24,13 +24,24 @@ matrix generation and the DATA emit run **locally**.
     `archive/tiled-valis-2026-07-24`); registration is classic `REGISTER` only, so the
     old classic-vs-distributed benchmark was removed.
 
+!!! note "This is the SYNTHETIC sweep"
+    It measures how cost SCALES. To choose a configuration — an arm ranking on the
+    REAL study slides — see `docs/benchmarks_real.md` (`benchmarks/configs/arms.yaml`).
+
+**Where the plots come from.** This layer emits **data**, plus `scaling_*.pdf/svg`
+from `make_figures`. Every other figure is rendered by the consumer,
+`../ihc_method`, whose `code/benchmark_plots.R` + `code/registration_accuracy_plots.R`
+are the maintained descendants of a `plots.R` that used to live here. That copy was
+deleted rather than kept in sync: it was referenced by nothing, tested by nothing,
+and had drifted well behind the two files that actually render.
+
 Design record: `docs/superpowers/specs/2026-07-24-benchmark-paper-data-design.md`.
 Rendered overview: `docs/benchmarks.md`.
 
 ## Prerequisites
 
 - **Local (DATA emit + tests):** numpy, pandas, scikit-learn, tifffile, PyYAML.
-  (`matplotlib` + `nbformat` only for the optional figures/notebook.) No real data
+  (`matplotlib` only for the optional figures.) No real data
   needed for the test suite.
 - **Cluster (the sweeps):** Nextflow >= 25.04, Docker/Singularity, the pipeline
   containers (including the VALIS image), and `bash`. `run_sweep.sh` /
@@ -187,7 +198,7 @@ Verify the whole harness with no data at all:
   - `benchmarks/analysis/measurements.csv` — **the primary data artifact**: one tidy row per
     (run × process) with `peak_rss_gb`, `peak_vmem_gb`, `realtime_s`, `duration_s`, `cpus`,
     `input_gb`, and every swept param column joined in (`run_id`, `varied_axis`, `target_px`,
-    `n_channels`, …). Read straight into R (`read.csv`) — no notebook required.
+    `n_channels`, …). Read straight into R (`read.csv`); `../ihc_method` consumes exactly this file.
   - `benchmarks/analysis/resource_models.csv` — one row per process with the fitted
     `slope`, `intercept`, `r2`, `sigma`, `n` (empty `r2` ⇒ `n<3`, flat fallback). Fit uses
     only the size-varying runs (`scaling_grid` + `baseline`); OFAT-knob runs are excluded so
@@ -258,31 +269,7 @@ account. Then write a `pairs.csv`:
         --eval-dir reg_results --out reg_eval.csv --agg-out reg_eval_agg.csv
 
 - **Output:** `reg_eval.csv` (per pair/mode tidy rows) + `reg_eval_agg.csv` (per-mode
-  **MMrTRE / AMrTRE**). `reg_eval.csv` is what `make_figures --reg-eval` and the notebook consume.
-
----
-
-## C. The notebook (optional — interactive view of the same numbers)
-
-> Not required. `make_figures` (A4) already writes `measurements.csv` +
-> `resource_models.csv`, which are the canonical outputs to analyse yourself
-> (e.g. in R). The notebook is just an interactive rendering of those same data.
-
-    jupyter lab benchmarks/analysis/benchmark_analysis.ipynb
-
-Edit the paths in the **setup cell** (`RESULTS_ROOT`, `RUN_PLAN`, `MANIFEST`, `REG_EVAL`)
-to your outputs, then run top to bottom. Five sections: load -> regression -> optimal
-config -> tiled-vs-classic accuracy -> paired sampling. Produces inline plots, the same
-figures, and writes `conf/modules.optimized.config`.
-
-## D. Put figures in the docs (optional)
-
-    python -m benchmarks.analysis.export_docs_figures \
-        --results-root bench_results --run-plan bench_run_plan.csv \
-        --manifest bench_matrix/matrix_manifest.csv
-
-- **Output:** `docs/assets/images/benchmarks/scaling_*.png`. Then uncomment the matching
-  `<!-- ... -->` image slots in `docs/benchmarks.md` and run `mkdocs build`.
+  **MMrTRE / AMrTRE**). `reg_eval.csv` is what `make_figures --reg-eval` consumes.
 
 ---
 
@@ -298,7 +285,6 @@ figures, and writes `conf/modules.optimized.config`.
 | `prepare_pairs.py` (optional) | `pairs.csv` (+ downloaded data) | per-pair input dirs + `pairs_manifest.csv` |
 | `run_registration.sh` (optional) | pairs manifest | `eval_*.json` (landmark TRE) |
 | `aggregate_eval` (optional) | eval JSONs | `reg_eval.csv` + `reg_eval_agg.csv` |
-| notebook (optional) | all the above paths | inline figures + optimal config |
 
 The fastest way to see every component work end-to-end **without any real data** is
 `python -m pytest benchmarks/tests -q` — the suite drives the whole harness on tiny
