@@ -1,8 +1,27 @@
-numpy==1.26.4
+# SEG_QUALITY_EVAL / MERGE_SEG_EVAL — reference-free 2D segmentation quality (CSE).
+#
+# Hard pins, not lower bounds, and deliberately so: the vendored subset in
+# bin/utils/cse/ is a COPY of upstream CellSegmentationEvaluator 1.5.19, so it does
+# not move with its dependencies the way a pip-installed package would. The
+# composite QualityScore comes out of a fixed PCA model; a silent change in
+# skimage's region measurements or sklearn's KMeans would shift scores across a
+# cohort with no error and no version bump to point at.
+#
+# tests/test_cse_equivalence.py pins the numeric behaviour against
+# tests/data/cse/golden_metrics.json, which is what makes a dependency bump here
+# detectable rather than a slow drift.
+
+numpy==1.26.4          # <2.0: the vendored subset predates the numpy 2 API changes
 scipy==1.11.4
 pandas==2.2.3
-scikit-image==0.25.2
-scikit-learn==1.5.2
+scikit-image==0.25.2   # regionprops / find_boundaries — the geometry metrics
+scikit-learn==1.5.2    # KMeans over the channel matrix (functions.py) + the PCA model
+tifffile==2023.2.28    # the fallback reader when aicsimageio cannot open a file
+xmltodict==0.13.0      # OME-XML parsing for the pixel-size lookup
+
+# OPTIONAL AT RUNTIME, REQUIRED HERE. bin/seg_quality_eval.py imports AICSImage
+# inside a try/except and falls back to tifffile. That fallback is not equivalent:
+# it returns pixel_um = None, so every physical-unit metric silently changes
+# meaning. Installing it makes the good path the one that actually runs; the
+# Dockerfile's smoke test asserts it imports rather than leaving it to fail over.
 aicsimageio==4.14.0
-tifffile==2023.2.28
-xmltodict==0.13.0

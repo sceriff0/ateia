@@ -18,6 +18,20 @@ secrets. Docker Hub images are **public**, so no pull credentials are needed on
 the HPC/cluster side (unlike GHCR, whose default-private packages caused
 `403 Forbidden` on `singularity pull`).
 
+**`containers/images.json` is the build list.** The GitHub Actions matrix and the
+workflow's `only` filter both read it, so adding a directory here without adding a
+row there means the image is never built or pushed — the run goes green and the tag
+simply does not exist on Docker Hub. That is how `:tiled` shipped unpublished.
+`tests/test_container_build_matrix.py` fails on the mismatch in both directions,
+and additionally on any `attend_image_analysis:<tag>` a module pulls that the
+matrix does not publish.
+
+To rebuild ONE image without republishing the other ten (these tags are mutable):
+
+```sh
+gh workflow run build-images.yml --ref <branch> -f version=<tag> -f only=segeval
+```
+
 > `<tag>` is a content-descriptive tag (e.g. `preprocess`,
 > `convert_bioformats_2`, `tiled`) — not a release version. The modules pin
 > these tags directly and never use `:latest`.
