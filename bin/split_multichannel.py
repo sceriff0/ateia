@@ -43,6 +43,18 @@ logger = get_logger(__name__)
 
 __all__ = ["main"]
 
+#: TIFF tile size (px) for each single-channel output this script writes -- a TIFF LAYOUT
+#: choice, deliberately owned by THIS script rather than imported from
+#: ``convert_image.CONVERT_TIFF_TILE`` (a different constant for a different writer, in a
+#: different container image -- a cross-script import would couple their dependency sets).
+#: tifffile's zarr view of a STRIPED (untiled) TIFF reports ``chunks=(1, H, W)``, one chunk
+#: per whole plane, so every "read just this region" call downstream -- MERGE_AND_PYRAMID
+#: and quantification, both consumers of these single-channel files -- decodes the entire
+#: plane to slice it. Measured on a 6000x6000 uint16 plane: a single 2048^2 region read
+#: peaks at 76.7 MiB striped vs 16.0 MiB tiled. Pinned by
+#: ``tests/test_split_multichannel_lazy_read.py``.
+SPLIT_TIFF_TILE = 2048
+
 
 # The streaming negative-clip aggregator used to be defined here, privately. It now
 # lives in bin/utils/validation.py beside the whole-array clip_negative_values it
@@ -226,6 +238,7 @@ def split_multichannel_tiff(
                 compression="zlib",
                 resolution=resolution,
                 resolutionunit="CENTIMETER",
+                tile=(SPLIT_TIFF_TILE, SPLIT_TIFF_TILE),
             )
 
             saved_paths.append(output_path)

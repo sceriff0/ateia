@@ -15,7 +15,7 @@ The measured inventory, at the time of writing:
     apply_basic_profiles.py           yes     minisblack   zlib         2048      yes
     merge_channels_pyramid.py         yes     minisblack   zstd(param)  tile_size yes
     tiled_stitch.py                   yes     minisblack   none         out_tile  yes
-    split_multichannel.py             no      -            zlib         none      yes
+    split_multichannel.py             no      -            zlib         2048      yes
     segment.py / _cellsam / _instanseg no     -            zlib         none      NO
     extract_mask_series.py            no      -            zlib         none      yes
     utils/image_utils.py              generic passed through by the caller

@@ -13,9 +13,9 @@ This file pins three properties:
 1. The whole-stack eager read is gone: the image is opened through
    ``tiled_io.open_lazy`` and each channel is read on its own, one at a time
    (never all channels materialised together).
-2. Every output TIFF is byte-identical to what the old whole-stack-read path
-   produced -- same resolution/resolutionunit tags, same compression/bigtiff,
-   same pixels, same dtype.
+2. Every output TIFF has the same decoded pixels, dtype, and
+   resolution/resolutionunit tags as what the old whole-stack-read path
+   produced, with the same compression/bigtiff settings.
 3. ``clip_negative_values`` (``bin/utils/validation.py``) computes GLOBAL
    whole-image statistics (negative-pixel count, percentage of the WHOLE
    image, min before/after) and emits ONE log line. Reading one channel at a
@@ -26,13 +26,28 @@ This file pins three properties:
 
 Property 2 does not fail against the pre-change code by construction (old code
 already produces the correct pixels, so "old vs. new" is old-vs-old before the
-fix lands); it is included anyway as the byte-identity regression guard the
+fix lands); it is included anyway as the equivalence regression guard the
 task requires, and was falsified during development by deliberately reading
 the wrong channel index (see task-3-report.md). Property 3 similarly cannot RED
 against the pre-change code (which never loops per channel, so it trivially
 emits one line already); it was falsified by deliberately reverting to a naive
 per-channel ``clip_negative_values`` call and confirming this test then fails
 with C lines instead of one (see task-3-report.md).
+
+Property 2 used to be checked byte-for-byte. It no longer is, because of a *later*
+change layered on top of the read-path change this docstring otherwise describes:
+``split_multichannel_tiff`` now writes each single-channel output TILED
+(``tile=(SPLIT_TIFF_TILE, SPLIT_TIFF_TILE)``) instead of the striped layout
+``tifffile.imwrite`` defaults to -- see ``split_multichannel.SPLIT_TIFF_TILE`` for why
+(striped output makes every downstream region read -- MERGE_AND_PYRAMID,
+quantification -- decode a whole plane). ``_old_split_multichannel_tiff`` below is a
+frozen copy of the writer as it stood *before that tiling change too* (it never passes
+``tile=``), so it stays a genuinely striped reference. Tiling changes which TIFF tags
+get written and therefore the raw bytes, so the equivalence tests below decode both
+files and compare pixels/dtype/resolution tags instead of comparing bytes;
+``test_the_write_is_tiled`` is the one that positively pins the new layout, so a revert
+of the ``tile=`` argument fails a test rather than silently passing this weakened
+equivalence check.
 """
 
 from __future__ import annotations
@@ -182,6 +197,27 @@ def _old_split_multichannel_tiff(
     return saved_paths
 
 
+def _assert_pixels_and_tags_equivalent(old_path, new_path):
+    """Decoded-pixel equivalence, used in place of a byte comparison.
+
+    The new writer tiles its output (``split_multichannel.SPLIT_TIFF_TILE``) while
+    ``_old_split_multichannel_tiff`` above deliberately does not, so the two files'
+    raw bytes differ on purpose (different TIFF tags, different tile/strip layout).
+    What must still match is the published PIXELS, dtype, and the resolution tags
+    ``split_multichannel_tiff`` stamps on for MERGE_AND_PYRAMID to read.
+    """
+    old_arr = tifffile.imread(str(old_path))
+    new_arr = tifffile.imread(str(new_path))
+    np.testing.assert_array_equal(old_arr, new_arr)
+    assert old_arr.dtype == new_arr.dtype
+
+    with tifffile.TiffFile(str(old_path)) as old_tif, tifffile.TiffFile(str(new_path)) as new_tif:
+        old_tags, new_tags = old_tif.pages[0].tags, new_tif.pages[0].tags
+        assert new_tags["XResolution"].value == old_tags["XResolution"].value
+        assert new_tags["YResolution"].value == old_tags["YResolution"].value
+        assert new_tags["ResolutionUnit"].value == old_tags["ResolutionUnit"].value
+
+
 def test_split_multichannel_reads_one_channel_at_a_time(tmp_path, monkeypatch):
     """The slide must be reached through ``open_lazy`` and read one channel at a
     time, never via a whole-array ``tifffile.imread``.
@@ -244,12 +280,17 @@ def test_split_multichannel_reads_one_channel_at_a_time(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("is_reference", [True, False])
 @pytest.mark.parametrize("dtype", [np.uint16, np.int16])
-def test_split_multichannel_outputs_byte_identical_to_old_whole_stack_read(
+def test_split_multichannel_outputs_pixel_identical_to_old_whole_stack_read(
     tmp_path, is_reference, dtype
 ):
-    """Every output TIFF from the new per-channel-read path must be byte-for-byte
-    identical to what the old whole-stack-read path wrote, including a case with
-    real negative pixels (int16) that exercises clip_negative_values.
+    """Every output TIFF from the new per-channel-read path must have the same
+    decoded pixels, dtype, and resolution tags as what the old whole-stack-read
+    path wrote, including a case with real negative pixels (int16) that exercises
+    clip_negative_values.
+
+    Not a byte comparison: the new writer tiles its output (see the module
+    docstring), so its bytes differ from the striped reference on purpose --
+    ``_assert_pixels_and_tags_equivalent`` is the equivalence that must hold.
     """
     channel_names = ["DAPI", "CD4", "CD8"]
     neg = {1: 25, 2: 5} if dtype == np.int16 else None
@@ -283,21 +324,15 @@ def test_split_multichannel_outputs_byte_identical_to_old_whole_stack_read(
     assert len(new_paths) > 0
 
     for old_path, new_path in zip(old_paths, new_paths):
-        with open(old_path, "rb") as f:
-            old_bytes = f.read()
-        with open(new_path, "rb") as f:
-            new_bytes = f.read()
-        assert old_bytes == new_bytes, (
-            f"{os.path.basename(old_path)}: new output is not byte-identical "
-            "to the old whole-stack-read output"
-        )
+        _assert_pixels_and_tags_equivalent(old_path, new_path)
 
 
 def test_split_multichannel_channel_last_layout_still_matches_old_read(tmp_path):
     """A hypothetical (Y, X, C) input (never produced by this pipeline's own
     producers, but the original defensive branch handled it) must still fall
-    back to a whole-stack read and produce output identical to the pre-change
-    code.
+    back to a whole-stack read and produce output equivalent to the pre-change
+    code (pixels/dtype/resolution tags -- see ``_assert_pixels_and_tags_equivalent``
+    for why not raw bytes).
     """
     channel_names = ["DAPI", "CD4"]
     image_path = _write_stack(tmp_path, channel_names, axes="YXC")
@@ -319,11 +354,7 @@ def test_split_multichannel_channel_last_layout_still_matches_old_read(tmp_path)
 
     assert len(new_paths) == len(old_paths) == len(channel_names)
     for old_path, new_path in zip(old_paths, new_paths):
-        with open(old_path, "rb") as f:
-            old_bytes = f.read()
-        with open(new_path, "rb") as f:
-            new_bytes = f.read()
-        assert old_bytes == new_bytes
+        _assert_pixels_and_tags_equivalent(old_path, new_path)
 
 
 def test_split_multichannel_negative_clip_stats_logged_once_for_whole_image(
@@ -388,3 +419,86 @@ def test_split_multichannel_negative_clip_stats_logged_once_for_whole_image(
     detected_msg = detected_lines[0].message
     assert f"Detected {expected_count} negative pixels" in detected_msg
     assert f"({expected_pct:.4f}%)" in detected_msg
+
+
+# ---------------------------------------------------------------------------
+# the tiled layout -- what Task 2 exists to change
+# ---------------------------------------------------------------------------
+
+
+def test_the_write_is_tiled(tmp_path):
+    """Pin the layout change this task exists to make, and state why.
+
+    ``split_multichannel_tiff`` used to write each single-channel TIFF STRIPED
+    (tifffile's default): a plain ``tifffile.imread(path, aszarr=True)`` view of
+    that reports ``chunks=(1, H, W)``, one chunk for the whole plane, so a single
+    "read just this region" call downstream (MERGE_AND_PYRAMID, quantification)
+    has to decode the ENTIRE plane to slice it out. Measured on a 6000x6000
+    uint16 plane: a single 2048^2 region read peaks at 76.7 MiB striped vs
+    16.0 MiB tiled.
+
+    Checked two ways, so a revert of the ``tile=`` argument in
+    ``split_multichannel_tiff`` fails here rather than silently reintroducing
+    that cost:
+
+    1. the TIFF tags tifffile itself writes (``TileWidth``/``TileLength``),
+       against ``sm.SPLIT_TIFF_TILE`` rather than a bare ``2048``, so the two
+       stay in sync if the constant ever changes;
+    2. the zarr chunk shape the pipeline's own region reader actually sees
+       (``bin/utils/tiled_io.py:open_lazy`` uses exactly this ``aszarr=True`` +
+       ``zarr.open`` pattern), which is the property the whole task is about --
+       the TIFF tags could in principle be present without the zarr view
+       honouring them, and this check is the one that would catch that.
+
+    The un-tiled reference writer (``_old_split_multichannel_tiff``, i.e. the
+    writer this task's write replaced) is asserted to be striped, as the
+    contrast: this is not merely "some file happens to be tiled", it is "the
+    write changed layout and the old one did not".
+    """
+    import zarr
+
+    channel_names = ["DAPI", "CD4"]
+    image_path = _write_stack(tmp_path, channel_names)
+
+    old_dir = tmp_path / "old_out"
+    old_paths = _old_split_multichannel_tiff(
+        str(image_path), str(old_dir), True, list(channel_names), ["DAPI"], 0.325
+    )
+
+    new_dir = tmp_path / "new_out"
+    new_paths = sm.split_multichannel_tiff(
+        str(image_path),
+        str(new_dir),
+        is_reference=True,
+        channel_names=list(channel_names),
+        nuclear_markers=["DAPI"],
+        pixel_size=0.325,
+    )
+
+    new_path = new_paths[0]
+    old_path = old_paths[0]
+
+    with tifffile.TiffFile(str(new_path)) as new_tif:
+        new_tags = new_tif.pages[0].tags
+        assert new_tags["TileWidth"].value == sm.SPLIT_TIFF_TILE
+        assert new_tags["TileLength"].value == sm.SPLIT_TIFF_TILE
+
+    with tifffile.TiffFile(str(old_path)) as old_tif:
+        old_tag_names = {t.name for t in old_tif.pages[0].tags}
+        assert "TileWidth" not in old_tag_names, (
+            "the reference writer is supposed to be striped, not tiled -- if this fires, "
+            "tifffile's default changed and the contrast this test relies on is gone"
+        )
+
+    def _chunks(path):
+        store = tifffile.imread(str(path), aszarr=True)
+        try:
+            grp = zarr.open(store, mode="r")
+            arr = grp[0] if isinstance(grp, zarr.Group) else grp
+            return arr.chunks
+        finally:
+            store.close()
+
+    new_shape = tifffile.imread(str(new_path)).shape
+    assert _chunks(new_path) == (sm.SPLIT_TIFF_TILE, sm.SPLIT_TIFF_TILE)
+    assert _chunks(old_path) == new_shape
