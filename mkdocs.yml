@@ -105,6 +105,7 @@ nav:
   - Registration QC: registration_qc.md
   - SpatialData & FlowPath: spatialdata.md
   - Benchmarks: benchmarks.md
+  - Benchmarks (real samples): benchmarks_real.md
   - Citation: citation.md
 
 # ---------------------------------------------------------------------------

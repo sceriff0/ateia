@@ -1,0 +1,225 @@
+# Real-sample benchmark — the arm sweep
+
+The synthetic sweep ([Benchmarks](benchmarks.md)) answers **"how does cost
+scale?"**. It cannot answer **"which configuration do we ship?"**, because its
+registration offset is injected rather than biological — a known shift on a
+duplicated channel is not tissue difficulty.
+
+This page is the other half: **the real study slides, registered once per
+configuration**, plus a per-process cost profile on the same slides. It produces
+the arm ranking the manuscript's registration figure needs, and it feeds
+`ihc_method` directly.
+
+| | synthetic sweep | **this** |
+|---|---|---|
+| input | one image rescaled across a size × channel matrix | your real `input.csv` |
+| question | how does cost scale with input? | which configuration, and what does a real slide cost? |
+| accuracy | a known injected offset | tissue, scored by `reg_qc=2` |
+| consumer page | `benchmark_pipeline`, `benchmark_registration` | `registration_arms` |
+
+Neither replaces the other. The scaling regression needs a controlled size axis
+that real slides do not provide; the arm ranking needs tissue that synthetic
+images cannot imitate.
+
+---
+
+## The three arms
+
+Defined in `benchmarks/configs/arms.yaml`. They are **factored, not crossed** —
+registration is the expensive half, so it is paid for once.
+
+### 1. Registration arms — *which configuration aligns real tissue best?*
+
+`--start preprocessing --stop registration`, at `reg_qc = 2`. Nothing downstream
+of registration changes the staged registration QC, so segmentation and export
+are not run. **7 arms**:
+
+- **VALIS preset × micro-depth = 6.** `memory_mode` (`low` = BRISK/RANSAC,
+  `high` = SuperPoint/SuperGlue — *different feature matchers*, not one matcher at
+  two resolutions) crossed with `reg_micro_reg` (a **depth**: 0 none, 1
+  micro-rigid, 2 + micro non-rigid). A depth is why this is 2 × 3, not 2 × 2.
+- **STARE (`registration_method = tiled`) at defaults = 1.** A different
+  *backend*, not a seventh cell: `memory_mode` and `reg_micro_reg` do not exist
+  there, so that arm carries neither.
+
+### 2. QC-segmenter cross — *does the verdict depend on who found the nuclei?*
+
+`subworkflows/local/seg_qc.nf` segments the native slides with **the run's own
+segmenter**, so `params.seg_method` selects which nuclei registration accuracy is
+measured on. Varying it leaves the registration byte-identical, which makes this a
+**robustness** axis on the headline number — never a quality claim about
+registration. The same category `seg_qc_pairing` occupies in the synthetic sweep.
+
+`cross: reference` (the default) runs the extra segmenters against one arm:
+**9 registration runs**. `cross: all` crosses all seven and costs **21**. Start at
+`reference` — if the number is stable there, crossing everything buys a denser
+null result.
+
+### 3. Segmentation arms — *which backend segments real tissue best?*
+
+`--start segmentation`, resuming from `<root>/<from_arm>/csv/registered.csv`. So
+registration happens once, and the comparison is not confounded by arms that
+registered differently. **3 runs** (instanseg / stardist / cellsam).
+
+Scored two ways, neither needing ground truth:
+
+- **Cross-method agreement** — `segmentation_agreement.csv` from `make_tables.py`
+  (cell-count ratio, instance F1). Already built; answers *do the backends agree,
+  and where not?*
+- **CSE** — the reference-free `QualityScore`, which can **rank** rather than only
+  compare. Opt-in; see [Parameters](parameters.md#reference-free-segmentation-quality-cse--opt-in).
+
+### 4. Compute profile — *what does a real slide actually cost?*
+
+The **full** pipeline, no step gate, under tracing — the only arm that prices
+`SEGMENT`, quantification, export and `MERGE_AND_PYRAMID`. Feeds the same
+`make_figures` path as the synthetic sweep, so `measurements.csv` gains
+real-tissue rows tagged `varied_axis=real_compute`.
+
+Prefer **two patients bracketing the cohort's size range** over one: a single
+patient gives a per-process breakdown but no slope, so it cannot say whether the
+synthetic scaling fits transfer to real tissue. Two points can.
+
+---
+
+## Running it
+
+### 0. Your samplesheet
+
+The ordinary mirage samplesheet — nothing benchmark-specific:
+
+```csv
+patient_id,path_to_file,is_reference,channels
+046,/hpcnfs/.../046_cycle1.ome.tif,true,DAPI|PANCK|CD8
+046,/hpcnfs/.../046_cycle2.ome.tif,false,DAPI|CD68|FOXP3
+24086,/hpcnfs/.../24086_cycle1.ome.tif,true,DAPI|PANCK|CD8
+24086,/hpcnfs/.../24086_cycle2.ome.tif,false,DAPI|CD68|FOXP3
+```
+
+### 1. Expand the arms into a run plan
+
+```bash
+python benchmarks/build_arm_plan.py \
+    --arms         benchmarks/configs/arms.yaml \
+    --input        real_input.csv \
+    --out          arm_plan.csv \
+    --results-root arm_results
+```
+
+Writes `arm_plan.csv` (one row per launch) and `arm_results/arms.csv` (the label
+manifest the consumer reads). It prints the multiplier out loud — every
+registration and segmentation arm runs the **whole cohort**, so 12 launches over 2
+patients is 24 patient-runs.
+
+`--results-root` matters: `arms.csv` must sit at the root the runs publish into,
+because that is where `registration_arms.R` looks.
+
+### 2. Launch (cluster)
+
+```bash
+ARMS_PROFILE="singularity,ieo" ARMS_CONCURRENCY=3 \
+  benchmarks/run_arms.sh arm_plan.csv real_input.csv arm_results
+```
+
+Passes run in order — `registration`, then `segmentation`, then `compute` — with a
+barrier between them. That order is a **dependency**: the segmentation arms resume
+from a checkpoint the registration arms write. The compute arm runs last and alone
+so it is not timed under contention from the QC arms.
+
+`ARMS_CONCURRENCY` is how many Nextflow heads run at once; each still submits its
+own SLURM jobs, so measurements stay clean.
+
+To enable CSE on the segmentation arms, publish the `segeval` image once
+(Actions → *Build & Push Container Images* → Run workflow) and append:
+
+```bash
+  ... arm_results --skip_seg_quality_eval false
+```
+
+### 3. Emit the paper tables
+
+Unchanged from the synthetic sweep — the same readers, pointed at the arm results:
+
+```bash
+python -m benchmarks.analysis.make_tables \
+    --results-root arm_results --run-plan arm_plan.csv --outdir benchmarks/paper_data
+
+python -m benchmarks.analysis.make_figures \
+    --results-root arm_results --run-plan arm_plan.csv --outdir benchmarks/analysis
+```
+
+Both read whatever has finished; re-run them as arms land.
+
+### 4. Hand off to `ihc_method`
+
+```bash
+benchmarks/pull_to_ihc_method.sh arm_results ../ihc_method
+```
+
+Copies **only the small artifacts** — QC JSON/CSV, VALIS summaries, traces, the
+paper tables — into `ihc_method/data/`. The registered OME-TIFFs and masks stay
+where they are: no analysis page reads them, and they are multi-GB per patient.
+
+It lands them where each page expects:
+
+| destination | read by |
+|---|---|
+| `data/registration_arms/<arm>/<patient>/…` | `registration_arms.Rmd` |
+| `data/registration_arms/arms.csv` | ditto — the arm labels |
+| `data/benchmark/*.csv` | `benchmark_pipeline.Rmd`, `benchmark_registration.Rmd` |
+| `data/mirage/<patient>/…` | `registration_run_qc.Rmd` |
+
+Then, in `ihc_method`:
+
+```r
+workflowr::wflow_build(c("analysis/registration_arms.Rmd",
+                         "analysis/benchmark_pipeline.Rmd",
+                         "analysis/benchmark_registration.Rmd",
+                         "analysis/registration_run_qc.Rmd"))
+```
+
+`data/` is gitignored there — nothing copied is committed.
+
+---
+
+## Three traps the consumer already guards, and why the producer respects them
+
+These are properties of the *measurement*, not of the plumbing. They are restated
+here because a producer that ignores them emits data that plots cleanly with the
+conclusion inverted.
+
+1. **`rigid` is not comparable across micro-depths.** mirage defines the QC
+   `rigid` stage as the rigid transform *after* `MicroRigidRegistrar` refined it.
+   At depth 0 that is affine alone; at depth ≥ 1 it is affine ∘ micro-rigid.
+   Putting `rigid` on one axis across a depth-crossed sweep plots two different
+   transforms and reads as a micro-registration effect that is really a definition
+   change. **A true rigid-only baseline exists only in the depth-0 arms.**
+
+2. **The backends do not share a stage vocabulary.** `lib/WarpBackends.groovy`:
+   VALIS is `native → rigid → non_rigid → micro`; STARE is `native → rigid →
+   refined`. Only `native` is shared as both a spelling and a meaning. Each arm is
+   therefore ranked on **its own final stage** — which is also why depths 0 and 1,
+   emitting no `micro` stage at all, are not silently dropped.
+
+3. **Label the arms explicitly.** `arms.csv` is always written, because the
+   consumer's fallback parses directory names for `high`/`low` and a depth. A
+   mislabelled arm does not fail — it renders a clean figure with the conclusion
+   inverted. The QC-segmenter-crossed names (`valis_high_micro2_segstardist`) are
+   exactly what that fallback reads wrong.
+
+---
+
+## Cost, before you launch
+
+Per patient, at the shipped `arms.yaml`:
+
+| arm | runs | pipeline extent |
+|---|---|---|
+| registration (7 + 2 crossed) | 9 | preprocessing → registration |
+| segmentation | 3 | segmentation → export (resumed) |
+| compute profile | 1 | full pipeline |
+
+Real WSI runs are not sweep cells: `REGISTER` has been observed at **483 GB** and
+`MERGE_AND_PYRAMID` at **6.5 h**. Multiply by your cohort before submitting, and
+prefer `qc_segmenter_cross.cross: reference` until the headline number proves
+unstable.

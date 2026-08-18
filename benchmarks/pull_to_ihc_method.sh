@@ -48,14 +48,28 @@ echo "=== 1/4  registration arms -> data/registration_arms/ ==="
 # directory with no seg_qc.json is an arm that failed, and arm_manifest() counts
 # any directory holding QC as an arm. Copying empty ones would put an empty box
 # in every panel rather than an honest absence.
+# The '**/' prefixes are load-bearing. An rsync include pattern containing a '/'
+# is anchored to the TRANSFER ROOT, so `--include='qc/**'` matches only a
+# top-level qc/ and never <arm>/<patient>/qc/ — which is where every artifact
+# this script exists to copy actually lives. The first version of this filter
+# silently transferred almost nothing and still exited 0.
 rsync -a --prune-empty-dirs \
   --include='*/' \
-  --include='qc/**' \
-  --include='registered/summary/**' \
-  --include='csv/*.csv' \
-  --include='trace/trace.txt' \
+  --include='**/qc/**' \
+  --include='**/registered/summary/**' \
+  --include='**/csv/*.csv' \
+  --include='**/trace/trace.txt' \
   --exclude='*' \
   "$ARM_ROOT"/ "$DEST_ARMS"/
+
+# Say what was actually transferred. A filter that matches nothing is invisible
+# otherwise: rsync exits 0 on an empty transfer.
+n_qc=$(find "$DEST_ARMS" -name '*_seg_qc.json' 2>/dev/null | wc -l | tr -d ' ')
+echo "  $n_qc seg_qc JSON(s) across $(find "$DEST_ARMS" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ') arm dir(s)"
+if [[ "$n_qc" -eq 0 ]]; then
+  echo "  WARNING: no *_seg_qc.json copied. Either no arm has finished, or the" >&2
+  echo "           runs were launched without reg_qc=2 (which is what emits them)." >&2
+fi
 
 if [[ -f "$ARM_ROOT/arms.csv" ]]; then
   cp "$ARM_ROOT/arms.csv" "$DEST_ARMS/arms.csv"
@@ -101,7 +115,7 @@ done
 if [[ -n "$SRC_RUN" ]]; then
   mkdir -p "$IHC/data/mirage"
   rsync -a --prune-empty-dirs \
-    --include='*/' --include='qc/**' --include='csv/*.csv' --exclude='*' \
+    --include='*/' --include='**/qc/**' --include='**/csv/*.csv' --exclude='*' \
     "$SRC_RUN"/ "$IHC/data/mirage"/
   echo "  from $(basename "$SRC_RUN")"
 else

@@ -12,6 +12,7 @@ import csv
 import importlib.util
 import io
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -354,3 +355,64 @@ def test_shell_scripts_are_tracked_executable(script):
     r = subprocess.run(["git", "ls-files", "-s", f"benchmarks/{script}"],
                        cwd=REPO_ROOT, capture_output=True, text=True)
     assert r.stdout.startswith("100755"), r.stdout or "file not tracked"
+
+
+# ---------------------------------------------------------------------------
+# The pull script's rsync filters
+# ---------------------------------------------------------------------------
+
+def _fake_arm_tree(root: Path) -> None:
+    """A minimal results tree with the shape run_arms.sh really produces."""
+    for arm in ("valis_high_micro2", "tiled_defaults", "compute_all"):
+        for pat in ("046", "24086"):
+            base = root / arm / pat
+            (base / "qc" / "registration").mkdir(parents=True, exist_ok=True)
+            (base / "qc" / "registration" / f"{pat}_seg_qc.json").write_text("{}")
+            (base / "registered" / "summary").mkdir(parents=True, exist_ok=True)
+            (base / "registered" / "summary" / f"{pat}_summary.csv").write_text("slide\n")
+            slides = base / "registered" / "registered_slides"
+            slides.mkdir(parents=True, exist_ok=True)
+            (slides / "big.ome.tiff").write_bytes(b"\0" * 4096)
+        (root / arm / "csv").mkdir(parents=True, exist_ok=True)
+        (root / arm / "csv" / "registered.csv").write_text("patient_id\n")
+    (root / "arms.csv").write_text("arm_dir,backend,memory_mode,micro_reg,label\n")
+
+
+@pytest.mark.skipif(not shutil.which("rsync"), reason="rsync not available")
+def test_pull_script_copies_the_nested_qc_artifacts(tmp_path):
+    """The regression this test exists for: an rsync include containing a '/' is
+    anchored to the TRANSFER ROOT, so `--include='qc/**'` matched only a
+    top-level qc/ and never <arm>/<patient>/qc/. The script copied almost
+    nothing and still exited 0 — invisible without checking the destination."""
+    src, ihc = tmp_path / "arm_results", tmp_path / "ihc"
+    _fake_arm_tree(src)
+    (ihc).mkdir()
+    (ihc / "_workflowr.yml").touch()
+    r = subprocess.run([str(BENCH / "pull_to_ihc_method.sh"), str(src), str(ihc)],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    dest = ihc / "data" / "registration_arms"
+    got = sorted(p.relative_to(dest).as_posix() for p in dest.rglob("*_seg_qc.json"))
+    assert got == [
+        "compute_all/046/qc/registration/046_seg_qc.json",
+        "compute_all/24086/qc/registration/24086_seg_qc.json",
+        "tiled_defaults/046/qc/registration/046_seg_qc.json",
+        "tiled_defaults/24086/qc/registration/24086_seg_qc.json",
+        "valis_high_micro2/046/qc/registration/046_seg_qc.json",
+        "valis_high_micro2/24086/qc/registration/24086_seg_qc.json",
+    ], got
+    assert list(dest.rglob("*_summary.csv")), "VALIS summaries were not copied"
+    assert (dest / "arms.csv").exists(), "the label manifest was not copied"
+
+
+@pytest.mark.skipif(not shutil.which("rsync"), reason="rsync not available")
+def test_pull_script_never_copies_the_images(tmp_path):
+    """The registered OME-TIFFs are multi-GB per patient and no ihc_method page
+    reads them. The include list is an allowlist for exactly this reason."""
+    src, ihc = tmp_path / "arm_results", tmp_path / "ihc"
+    _fake_arm_tree(src)
+    ihc.mkdir()
+    (ihc / "_workflowr.yml").touch()
+    subprocess.run([str(BENCH / "pull_to_ihc_method.sh"), str(src), str(ihc)],
+                   capture_output=True, text=True, check=True)
+    assert not list((ihc / "data").rglob("*.ome.tiff"))

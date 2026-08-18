@@ -11,7 +11,8 @@
 #   nf-test installed (https://www.nf-test.com/)
 #   Docker running (for real/integration tests)
 
-.PHONY: testdata test test-stub test-real test-integration test-python test-validation test-lint test-all clean-test help
+.PHONY: testdata test test-stub test-real test-integration test-python test-validation test-lint test-all clean-test help \
+        arm-plan arm-run arm-tables arm-pull
 
 # Default target
 test: test-stub test-python
@@ -28,6 +29,13 @@ help:
 	@echo "  make test-all          Run everything"
 	@echo "  make testdata          Generate test data"
 	@echo "  make clean-test        Remove test artifacts"
+	@echo ""
+	@echo "MIRAGE Real-Sample Benchmark (docs/benchmarks_real.md):"
+	@echo "  make arm-plan          Expand arms.yaml -> arm_plan.csv + arms.csv"
+	@echo "  make arm-run           Launch every arm (cluster)"
+	@echo "  make arm-tables        Emit paper_data/ + measurements.csv"
+	@echo "  make arm-pull          Copy the artifacts into ihc_method/data/"
+	@echo "    Variables: INPUT=real_input.csv ROOT=arm_results IHC=../ihc_method"
 
 # Generate test data (prerequisite for all test targets)
 testdata:
@@ -80,3 +88,33 @@ clean-test:
 	rm -rf .nf-test test_results test_results_stub test_results_full
 	rm -rf work/ .nextflow.log* .nextflow/
 	@echo "Test artifacts cleaned"
+
+# =============================================================================
+# Real-sample arm benchmark  (docs/benchmarks_real.md)
+# =============================================================================
+# The four steps are separate targets on purpose: `arm-run` is hours-to-days of
+# cluster time, so it must never be a transparent dependency of a target you
+# reach for to regenerate a table. `arm-tables` and `arm-pull` re-read whatever
+# has finished and are safe to repeat while the sweep is still going.
+
+INPUT ?= real_input.csv
+ROOT  ?= arm_results
+IHC   ?= ../ihc_method
+ARMS  ?= benchmarks/configs/arms.yaml
+
+arm-plan:
+	python benchmarks/build_arm_plan.py \
+	    --arms $(ARMS) --input $(INPUT) \
+	    --out $(ROOT)_plan.csv --results-root $(ROOT)
+
+arm-run: arm-plan
+	benchmarks/run_arms.sh $(ROOT)_plan.csv $(INPUT) $(ROOT)
+
+arm-tables:
+	python -m benchmarks.analysis.make_tables \
+	    --results-root $(ROOT) --run-plan $(ROOT)_plan.csv --outdir benchmarks/paper_data
+	python -m benchmarks.analysis.make_figures \
+	    --results-root $(ROOT) --run-plan $(ROOT)_plan.csv --outdir benchmarks/analysis
+
+arm-pull:
+	benchmarks/pull_to_ihc_method.sh $(ROOT) $(IHC)

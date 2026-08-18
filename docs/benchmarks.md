@@ -8,6 +8,16 @@ questions about the *shipped* pipeline (classic VALIS registration):
 2. **How accurate is registration?** (landmark-free, from the pipeline's own DAPI-nuclei QC)
 3. **How stable is segmentation across backends?** (reference-free cross-method agreement)
 
+!!! tip "This page is the SYNTHETIC sweep. The real slides are elsewhere."
+    Everything below runs on one source image rescaled across a size × channel
+    matrix, with a **known injected** registration offset. That is what makes the
+    scaling regression possible, and what makes its accuracy numbers a statement
+    about a synthetic difficulty rather than about tissue.
+
+    To choose a configuration — an arm ranking measured on the real study slides,
+    plus a per-process cost profile on them — see
+    [Benchmarks (real samples)](benchmarks_real.md). Neither replaces the other.
+
 !!! info "Where this lives"
     Everything is under `benchmarks/`, isolated from the production pipeline (it
     *runs* the pipeline; it is not part of its DAG). The design record is
