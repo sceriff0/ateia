@@ -7,6 +7,7 @@ target-version = "py39"
 line-length = 88
 
 extend-exclude = [
+    "bin/utils/cse", # vendored: CellSegmentationEvaluator subset
     "valis_lib",     # vendored VALIS library
     "pixie-main",    # vendored third-party
     "legacy",        # deprecated, gitignored

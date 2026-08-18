@@ -345,6 +345,14 @@ def _third_party_imports(script):
     missing dependency. Only a real parse distinguishes an import statement from a sentence.
     """
     local_files = {p.stem: p for p in (REPO / "bin").rglob("*.py")}
+    # A package DIRECTORY under bin/ is local too. rglob("*.py") keys its
+    # __init__.py under the stem "__init__", so the package's own name -- `cse`,
+    # for the vendored CellSegmentationEvaluator subset in bin/utils/cse/ -- was
+    # absent, and `from utils.cse import single_method_eval` reported `cse` as a
+    # missing third-party distribution.
+    local_files.update({d.name: d / "__init__.py"
+                        for d in (REPO / "bin").rglob("*")
+                        if d.is_dir() and (d / "__init__.py").is_file()})
     third, seen, queue = set(), set(), [script]
     while queue:
         cur = queue.pop()
@@ -366,8 +374,18 @@ def _third_party_imports(script):
                 if head in local_files or head == "utils":
                     if node.module and "." in node.module:
                         names.append(node.module.split(".")[-1])
+                # When the module being imported FROM is LOCAL -- a relative import,
+                # or a `utils.*` package -- an imported name that does not itself
+                # resolve to a local module is a FUNCTION or CLASS, not a
+                # distribution. Adding those unconditionally reported all thirteen
+                # symbols bin/utils/cse/__init__.py re-exports (`get_quality_score`,
+                # `thresholding`, ...) as missing pip packages. Names that DO resolve
+                # locally are still followed, which is what makes
+                # `from utils import stage_checkpoint` work.
                 if node.level or head is None or head == "utils":
-                    names += [a.name for a in node.names]
+                    from_local = bool(node.level) or head == "utils" or head in local_files
+                    names += [a.name for a in node.names
+                              if (a.name in local_files) or not from_local]
             else:
                 continue
             for n in names:

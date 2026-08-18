@@ -139,10 +139,13 @@ ALLOWED_LINES = {
         # (826 -> 834 once BASICPY's block gained the comment recording that running at
         # upstream defaults is a decision); 834 -> 821 when the dead PREPROCESS withName
         # block was deleted with the in-process BaSiC path.
-        # Re-pin, do not
-        # widen. (Re-pin from the file, not by guessing:
+        #
+        # 821 on feat/containers-and-zarr-transition, 909 on this benchmark branch:
+        # it additionally carries the benchmarking-only process blocks (+15) and the
+        # restored SEG_QUALITY_EVAL / MERGE_SEG_EVAL blocks (+73). All the offsets
+        # compose. Re-pin, do not widen. (Re-pin from the file, not by guessing:
         # `grep -n "params.expanded_quantification ?" conf/modules.config`.)
-        821: (
+        909: (
             "ext.args = { params.expanded_quantification ? '--expanded' : "
             "'' } -- conf/*.config closures cannot see lib/*.groovy classes, "
             "so ext.args must read params raw here."

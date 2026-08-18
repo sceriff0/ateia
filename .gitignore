@@ -52,9 +52,14 @@ mirage_app/*
 # Notebooks (analysis, not pipeline)
 notebooks/*
 
-# Benchmarking scratch (analysis venv + local eval outputs)
+# Benchmarking scratch (analysis venv + local eval outputs).
+# NB: the benchmark HARNESS (benchmarks/**.py, configs, tests, docs) is tracked;
+# only the locally-generated artifacts below are ignored.
 .venv-bench/
-benchmarks/
+bench_matrix/
+bench_runs/
+benchmarks/paper_data/
+benchmarks/analysis/figures/
 illum_bench/
 
 # macOS

@@ -1,0 +1,30 @@
+/*
+ * MERGE_SEG_EVAL - concatenate per-patient CSE metric JSONs into one CSV.
+ */
+process MERGE_SEG_EVAL {
+    tag "seg_eval_merge"
+
+    container "bolt3x/mirage-segeval:1.0.0"
+
+    input:
+    path(seg_eval_jsons)
+
+    output:
+    path "segmentation_metrics.csv", emit: csv
+    path "versions.yml"            , emit: versions
+
+    when:
+    task.ext.when == null || task.ext.when
+
+    script:
+    """
+    merge_seg_eval.py --inputs ${seg_eval_jsons} --out segmentation_metrics.csv
+    ${ProcessEnvelope.versions(task.process, ['python', 'pandas'])}
+    """
+
+    stub:
+    """
+    printf 'id,QualityScore\\np1,0.0\\n' > segmentation_metrics.csv
+    ${ProcessEnvelope.versionsStub(task.process, ['python', 'pandas'])}
+    """
+}

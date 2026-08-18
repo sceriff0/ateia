@@ -1,0 +1,156 @@
+# =============================================================================
+# arms.yaml — the REAL-SAMPLE benchmark. Three arms, one input.csv.
+#
+# This file is NOT sweep.yaml. They answer different questions and neither
+# replaces the other:
+#
+#   sweep.yaml  SYNTHETIC images rescaled across a size x channel matrix.
+#               "How does cost SCALE?" — the regression that sizes the resource
+#               directives. Its registration offset is injected and known, so its
+#               accuracy numbers describe a synthetic difficulty, not tissue.
+#
+#   arms.yaml   THE REAL STUDY SLIDES, registered once per CONFIGURATION.
+#               "Which configuration do we ship, what does it buy, and what does
+#               a real slide actually cost?" This is the arm ranking the
+#               manuscript's registration figure needs.
+#
+# CONSUMER CONTRACT. The `registration` arms below write exactly the tree
+# ihc_method's registration_arms.Rmd already reads (code/registration_arms.R):
+#
+#     <root>/<arm>/<patient>/qc/registration/*_seg_qc.json
+#     <root>/<arm>/<patient>/registered/summary/*.csv     (VALIS arms only)
+#     <root>/arms.csv                                     (written by build_arm_plan.py)
+#
+# That is a plain mirage --outdir per arm; Layout.patientDir() is already
+# `<outdir>/<patient_id>/<kind>`, so no repackaging happens anywhere. Do not
+# invent a flatter layout — the consumer reads run_qc.R's readers unchanged, and
+# a second layout would be a second place for the schema to drift.
+#
+# COST. Real WSI runs are not sweep cells: REGISTER has been observed at 483 GB
+# and MERGE_AND_PYRAMID at 6.5 h. Every arm count below is per patient, so read
+# them as multipliers on your cohort. The arms are FACTORED, never crossed, and
+# each stage is paid for ONCE: preprocessing runs once and every registration arm
+# resumes from it; the registration arms stop at registration; the segmentation
+# arms resume from ONE registration. Crossing them would repeat the expensive half
+# to vary the cheap one.
+# =============================================================================
+
+# Which pipeline this plan targets. build_arm_plan.py checks these against
+# nextflow.config exactly as the sweep's baseline guard does, so an arm can never
+# quietly pin a param the pipeline no longer has.
+baseline:
+  reg_qc: 2                    # REQUIRED for every registration arm: reg_qc=2 is what
+                               # emits the staged seg-overlap QC the arm ranking reads.
+                               # An arm at reg_qc<2 produces no accuracy row at all.
+  seg_method: instantseg       # pipeline default; the QC segmenter unless crossed below
+  memory_mode: high
+  reg_micro_reg: 2
+  registration_method: valis
+
+# -----------------------------------------------------------------------------
+# ARM 1 — REGISTRATION. Which configuration aligns real tissue best?
+#
+# Runs `--start registration --stop registration`, resuming from ONE shared
+# preprocessing run (`preprocess_shared`, emitted automatically by
+# build_arm_plan.py). Nothing in this file touches a preproc_* param, so the 9
+# registration arms would otherwise re-run an identical preprocessing step — the
+# expensive half on a real WSI. Segmentation, quantification and export are not
+# run either: nothing downstream of registration changes the staged registration
+# QC. reg_qc=2 still segments the native slides for scoring, but that is inside
+# the registration step, not the segmentation step.
+#
+# THE TWO VALIS KNOBS ARE NOT A 2x2. reg_micro_reg is a DEPTH (0 none, 1
+# micro-rigid only, 2 + micro non-rigid), so preset x depth is 2 x 3 = 6 arms.
+# memory_mode low/high are DIFFERENT FEATURE MATCHERS (BRISK/RANSAC vs
+# SuperPoint/SuperGlue), not one matcher at two resolutions.
+# -----------------------------------------------------------------------------
+registration_arms:
+  valis:
+    memory_mode:   [low, high]
+    reg_micro_reg: [0, 1, 2]              # 6 arms
+  # STARE — the other BACKEND, at its defaults. Not a seventh cell of the grid
+  # above: memory_mode and reg_micro_reg are VALIS-only params, so a tiled arm
+  # has neither and carries NA for both in arms.csv. It is one point of
+  # comparison against the whole grid.
+  #
+  # The seg-overlap scorer is method-agnostic (bin/warp_seg_qc.py takes --method
+  # and builds its warper from a VALIS pickle OR a STARE manifest), which is the
+  # only reason a cross-backend ranking is answerable at all. What is NOT
+  # comparable is the stage axis — lib/WarpBackends.groovy gives the backends
+  # different stage vocabularies (valis: native/rigid/non_rigid/micro; tiled:
+  # native/rigid/refined). The consumer ranks each arm on ITS OWN final stage.
+  tiled:
+    enabled: true                          # 1 arm
+
+# -----------------------------------------------------------------------------
+# QC-SEGMENTER CROSS — does the registration verdict depend on WHO found the nuclei?
+#
+# subworkflows/local/seg_qc.nf: "THE QC SEGMENTS WITH THE RUN'S OWN SEGMENTER."
+# SEG_QC_SEGMENT is SEGMENT under an alias, so params.seg_method selects the
+# backend that produces the nuclei the registration accuracy is scored on. Vary
+# it and the registration is IDENTICAL while the measuring instrument changes —
+# which makes this a ROBUSTNESS axis on the headline number, never a quality
+# claim about registration. Exactly the category seg_qc_pairing occupies in
+# sweep.yaml.
+#
+# COST GATE. `cross: reference` runs the extra segmenters against ONE arm
+# (`reference_arm` below): 7 + 2 = 9 registration runs per patient. `cross: all`
+# crosses every arm and costs 7 x 3 = 21. Start at `reference` — if the headline
+# number is stable there, crossing all 7 buys a denser version of a null result.
+qc_segmenter_cross:
+  cross: reference                         # reference | all | none
+  reference_arm: valis_high_micro2         # must name an arm the grid above produces
+  seg_method: [instantseg, stardist, cellsam]
+  # stardist needs segmentation_model_dir and cellsam needs its weights (or a
+  # valid DEEPCELL_ACCESS_TOKEN) on the cluster — see conf/ieo.config. Drop a
+  # method here if it cannot run at your site; instantseg is the one that runs on
+  # a fresh clone, and it is the pipeline default.
+
+# -----------------------------------------------------------------------------
+# ARM 2 — SEGMENTATION. Which backend segments real tissue best?
+#
+# Runs `--start segmentation`, resuming from the registered checkpoint ONE
+# registration arm already wrote:
+#
+#     <root>/<from_arm>/csv/registered.csv
+#
+# So registration is paid for ONCE, and the comparison is not confounded by
+# arms that registered differently. `from_arm` is the configuration you intend
+# to ship — change it if the arm ranking picks a different winner, and re-run
+# only this arm.
+segmentation_arms:
+  from_arm:   valis_high_micro2
+  seg_method: [instantseg, stardist, cellsam]   # 3 runs/patient
+
+  # SCORING, on tissue with no ground truth. Two reference-free signals:
+  #
+  #   agreement  cross-method agreement (cell-count ratio, instance F1) — already
+  #              emitted by make_tables.py as segmentation_agreement.csv. Needs no
+  #              new code and no GT: "do the backends agree, and where not?"
+  #   cse        CellSegmentationEvaluator — a reference-free QUALITY score, so it
+  #              can rank methods rather than only compare them. OPTIONAL and
+  #              off by default: it needs the `segeval` container published and
+  #              params.skip_seg_quality_eval=false. See docs/benchmarks_real.md.
+  score_with: [agreement, cse]
+
+# -----------------------------------------------------------------------------
+# ARM 3 — COMPUTE PROFILE. What does a real slide actually cost, per process?
+#
+# The FULL pipeline (no --start/--stop gate) under Nextflow tracing, so every
+# process contributes a trace row — this is the only arm that measures the
+# processes the two arms above skip (SEGMENT, quantification, export,
+# MERGE_AND_PYRAMID). Its output feeds the same make_figures/make_tables path the
+# synthetic sweep uses, so measurements.csv gains real-tissue rows alongside the
+# synthetic ones, distinguished by `varied_axis=real_compute`.
+#
+# WHY MORE THAN ONE PATIENT. With one patient you get a per-process cost
+# breakdown but no slope, so it cannot say whether the synthetic scaling fits
+# transfer to real tissue. Two patients bracketing the cohort's size range give a
+# 2-point anchor against those fits, which is what makes the synthetic regression
+# defensible in the paper. `patients: []` means every patient in the input.csv.
+compute_profile:
+  patients: []                 # e.g. [P046, P24086] — empty = all. Prefer the
+                               # smallest and largest slide if you are picking.
+  repeats: 1                   # >1 buys per-process variance (cache state, node
+                               # contention) at full real-slide cost. Leave at 1
+                               # unless a specific number looks unstable.

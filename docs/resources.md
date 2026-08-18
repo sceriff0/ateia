@@ -20,7 +20,7 @@ A process's `cpus` / `memory` / `time` come from **either** a resource `label`
 inert and misleading; those have been removed. What remains is three cases:
 
 <div class="gate">
-  <div class="g"><div class="k">case 1</div><div class="v">withName owns all three</div><div class="d">No label. The block sets cpus, memory and time. 13 processes.</div></div>
+  <div class="g"><div class="k">case 1</div><div class="v">withName owns all three</div><div class="d">No label. The block sets cpus, memory and time. 15 processes.</div></div>
   <div class="g"><div class="k">case 2</div><div class="v">label owns all three</div><div class="d">The withName block, if any, sets only publishDir / ext.args. 6 processes.</div></div>
   <div class="g"><div class="k">case 3</div><div class="v">partial override</div><div class="d">withName sets one or two fields; a label supplies the rest. 6 processes.</div></div>
 </div>
@@ -185,10 +185,18 @@ constraint.
 | `EXTRACT_CELL_PROPERTIES` | `1` | `64 GB × attempt` | `12.h × attempt` | `withName` |
 | `EXTRACT_NUCLEI_PROPERTIES` | `1` | `64 GB × attempt` | `12.h × attempt` | `withName` |
 | `EXTRACT_MASK_SERIES` | `2` | `32 GB × attempt` | `2.h × attempt` | `process_low` |
+| `SEG_QUALITY_EVAL` | `8` | tier on image: `f<10` → 128, `f<30` → 256, else 448 GB, `× attempt` | `4.h × attempt` | `withName` |
 
 `SEGMENT` asks for 8 CPUs so a CPU-only path — and the CPU-bound label expansion
 and Dask tiling either side of inference — stays tolerable. GPU inference is
 unaffected by that number.
+
+`SEG_QUALITY_EVAL` is opt-in (add the `seg_quality` profile) and sized off the
+image rather than the mask: CSE's cost is driven by per-pixel index structures on
+the DECOMPRESSED masks, so a well-compressed WSI needs far more RAM than its file
+size suggests. `--cse_max_pixels` bins the input to cap that; both it and
+`SEG_QUALITY_EVAL` retry three times before dropping, and the drop is logged
+rather than silent — see [Retry policy](#retry-policy).
 
 ### Postprocessing
 
@@ -213,6 +221,7 @@ it asks for `8` cpus and `300 GB` instead.
 |---|---|---|---|---|
 | `GENERATE_QC_REPORT` | `2` | `32 GB × attempt` | `2.h × attempt` | `process_low` |
 | `AGGREGATE_SIZE_LOGS` | `1` | `12 GB × attempt` | `8.h × attempt` | `process_single` |
+| `MERGE_SEG_EVAL` | `1` | `4 GB × attempt` | `1.h × attempt` | `withName` |
 
 ---
 

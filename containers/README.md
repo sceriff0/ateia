@@ -24,6 +24,17 @@ the HPC/cluster side (unlike GHCR, whose default-private packages caused
 
 > The tag is the pipeline version from `manifest.version`, and the modules pin it
 > directly. `:latest` is never used.
+
+**Rebuilding one image.** A `workflow_dispatch` builds every context by default.
+Narrow it with `only` when you changed one:
+
+```sh
+gh workflow run build-images.yml --ref <branch> -f version=1.0.0 -f only=segeval
+```
+
+The `include:` list in `.github/workflows/build-images.yml` stays the single source
+of truth — `only` filters it, and `tests/test_container_image_naming.py` checks it
+against the directories actually present under `containers/`.
 >
 > This replaces an earlier layout that used a single repository with one *content-descriptive*
 > tag per image (`:preprocess`, `:convert_bioformats_2`, …). That put component names and real
@@ -46,6 +57,7 @@ the HPC/cluster side (unlike GHCR, whose default-private packages caused
 | `cellsam` | `bolt3x/mirage-cellsam:1.0.0` | `SEGMENT` (`params.seg_method` = `cellsam`) | `pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime` + `cellSAM` (git) |
 | `instanseg` | `bolt3x/mirage-instanseg:1.0.0` | `SEGMENT` (`params.seg_method` = `instantseg`) | `pytorch/pytorch:2.5.1-cuda11.8-cudnn9-runtime` + `instanseg-torch` |
 | `merge` | `bolt3x/mirage-merge:1.0.0` | `MERGE_AND_PYRAMID` | `pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime` + tifffile/imagecodecs pyramid stack |
+| `segeval` | `bolt3x/mirage-segeval:1.0.0` | `SEG_QUALITY_EVAL`, `MERGE_SEG_EVAL` (opt-in, `--skip_seg_quality_eval false`) | `python:3.11-slim` + numpy/scipy/pandas/scikit-image/scikit-learn/aicsimageio/tifffile/xmltodict (vendored CellSegmentationEvaluator 1.5.19 subset under `bin/utils/cse/`) |
 | `regqc` | `bolt3x/mirage-regqc:1.0.0` | `GENERATE_REGISTRATION_QC` | `nvidia/cuda:12.2.2-cudnn8-devel-ubuntu22.04` + Miniconda/bftools + StarDist/cudipy diffeo QC stack |
 | `tiled` | `bolt3x/mirage-tiled:1.0.0` | `TILED_REGISTER`, `WARP_SEG_QC` (tiled backend, STARE `registration_method='tiled'`) | `python:3.11-slim` + numpy/scipy/scikit-image/tifffile — **no JVM/BioFormats/libvips/GPU** (~438 MB, vs the multi-GB VALIS image) |
 | `spatialdata` | `bolt3x/mirage-spatialdata:1.0.0` | `EXPORT_SPATIALDATA` (+ the out-of-band `bin/join_flowpath.py` cohort join) | `python:3.12-slim` + spatialdata/anndata/geopandas/zarr 3 — CPU only, no JVM/GPU |

@@ -5,7 +5,6 @@
 #
 # Based on test cases documented in tests/test_validation.md
 
-set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TESTDATA_DIR="$SCRIPT_DIR/testdata"
@@ -73,8 +72,8 @@ run_test() {
     # Run pipeline with dry_run for fast validation. `dry_run` comes from
     # $PARAMS_FILE, never the command line — see the comment where it is
     # written; a CLI boolean is rejected on Nextflow 26.
-    # ${arr[@]+"${arr[@]}"} safely expands a possibly-empty array under `set -u`
-    # (bash 3.2 on macOS errors on a bare "${arr[@]}" when empty).
+    # ${arr[@]+"${arr[@]}"} safely expands a possibly-empty array: bash 3.2 on
+    # macOS errors on a bare "${arr[@]}" when the array is empty.
     cd "$PROJECT_ROOT"
     nextflow run main.nf \
         -params-file "$PARAMS_FILE" \
