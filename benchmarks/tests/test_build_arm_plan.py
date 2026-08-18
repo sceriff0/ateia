@@ -559,3 +559,56 @@ def test_a_failed_run_reports_stdout_not_only_stderr():
     code = (BENCH / "run_arms.sh").read_text()
     assert "nextflow.stdout.log" in code and "tail -n" in code
     assert ".nextflow.log" in code, "the full log path should be named too"
+
+
+# ---------------------------------------------------------------------------
+# Portability: bash 3.2 (the /bin/bash on macOS, and on some older nodes)
+# ---------------------------------------------------------------------------
+
+BASH4_ONLY = {
+    r"\$\{[A-Za-z_][A-Za-z_0-9]*,,\}": "${VAR,,} lowercase expansion",
+    r"\$\{[A-Za-z_][A-Za-z_0-9]*\^\^\}": "${VAR^^} uppercase expansion",
+    r"\bdeclare\s+-A\b": "associative arrays",
+    r"\bmapfile\b": "mapfile",
+    r"\breadarray\b": "readarray",
+    r"\bwait\s+-n\b": "wait -n",
+}
+
+
+@pytest.mark.parametrize("script", [
+    "run_arms.sh", "run_sweep.sh", "pull_to_ihc_method.sh",
+    "submit_arms.sh", "submit_sweep.sh", "submit_matrix.sh",
+])
+def test_scripts_avoid_bash4_only_constructs(script):
+    """`bash -n` does NOT catch these -- it parses them and they fail at RUNTIME
+    with "bad substitution". submit_matrix.sh shipped with ${SOURCE,,} and passed
+    a syntax check on bash 3.2 before failing the moment it ran.
+
+    run_sweep.sh already documents this constraint (it uses indexed arrays and
+    FIFO waits rather than declare -A and wait -n); this enforces it.
+    """
+    code = "\n".join(ln for ln in (BENCH / script).read_text().splitlines()
+                     if not ln.lstrip().startswith("#"))
+    found = [why for pat, why in BASH4_ONLY.items() if re.search(pat, code)]
+    assert not found, f"{script} uses bash 4+ only: {found}"
+
+
+@pytest.mark.parametrize("script", [
+    "submit_arms.sh", "submit_sweep.sh", "submit_matrix.sh",
+])
+def test_submitters_parse_and_are_tracked_executable(script):
+    r = subprocess.run(["bash", "-n", str(BENCH / script)],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    r = subprocess.run(["git", "ls-files", "-s", f"benchmarks/{script}"],
+                       cwd=REPO_ROOT, capture_output=True, text=True)
+    assert r.stdout.startswith("100755"), r.stdout or "not tracked"
+
+
+def test_submit_matrix_resolves_python_and_preflights_deps():
+    """The matrix job is hours long; a missing numpy must cost seconds, not the
+    whole walltime. And `python` may not exist even with a conda env active."""
+    code = (BENCH / "submit_matrix.sh").read_text()
+    assert 'PYTHON="${PYTHON:-$(command -v python3' in code
+    assert "python deps OK" in code and "numpy" in code
+    assert "from bioio import BioImage" in code, "ND2 sources need a bioio check"
