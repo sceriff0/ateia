@@ -19,17 +19,23 @@
 # conf/base.config + modules.config, NOT here. Keep this job small; give it a LONG
 # walltime, because it lives for the whole benchmark.
 #
-# EVERYTHING LIVES ON BEEGFS. $HOME is small and read-only inside the containers;
-# the work dirs and published outputs of a real-WSI benchmark are large. BENCH_DIR
-# below is the beegfs storage root, and the checkout, the plan, the work dirs and
-# the results all sit under it.
+# THE CODE may live in $HOME (it is small). THE DATA MUST NOT. BENCH_DIR below is
+# the beegfs storage root and holds the run plan, every arm's --outdir and every
+# Nextflow work dir -- run_arms.sh puts each run's work under
+# <RESULTS>/.launch/<run_id>/work, so nothing large is ever written to $HOME,
+# which is small and read-only inside the containers.
 #
-# Prereq (login node, once):
-#   cd /beegfs/scratch/$USER/analysis_runs/method_paper/benchmark
-#   git clone -b benchmarking <repo> mirage       # if not already there
-#   # write real_input.csv: patient_id,path_to_file,is_reference,channels
+# The only thing written back into the checkout is benchmarks/paper_data/*.csv in
+# step 3 (a few hundred KB of tables); pull_to_ihc_method.sh reads them from there.
 #
-# Submit:  cd $BENCH_DIR && mkdir -p logs && sbatch mirage/benchmarks/submit_arms.sh
+# Prereq (login node, once): the benchmark lives on the `benchmarking` branch, so
+# the checkout must be on it --
+#   git -C ~/pipelines/mirage fetch origin
+#   git -C ~/pipelines/mirage checkout benchmarking
+#   git -C ~/pipelines/mirage pull
+#
+# Submit:  cd /beegfs/scratch/ieo7660/analysis_runs/method_paper/benchmark
+#          mkdir -p logs && sbatch ~/pipelines/mirage/benchmarks/submit_arms.sh
 # Watch:   squeue -u $USER                 # 1 head job + N child jobs
 #          tail -f logs/arms_<jobid>.out
 # ============================================================================
@@ -37,9 +43,9 @@ set -euo pipefail
 
 # ---- EDIT THESE FOR YOUR SITE --------------------------------------------------
 BENCH_DIR="/beegfs/scratch/ieo7660/analysis_runs/method_paper/benchmark"
-SRC_DIR="$BENCH_DIR/mirage"               # the checkout (NOT the one in $HOME)
-INPUT="$BENCH_DIR/real_input.csv"         # your real slides
-RESULTS="$BENCH_DIR/arm_results"          # every arm's outdir lands under here
+SRC_DIR="$HOME/pipelines/mirage"          # the checkout. NOTE: unquoted $HOME, never "~/..."
+INPUT="/beegfs/scratch/ieo7660/analysis_runs/method_paper/new_samples/input.csv"
+RESULTS="$BENCH_DIR/arm_results"          # every arm's outdir + work dir lands under here
 ARMS_YAML="$SRC_DIR/benchmarks/configs/arms.yaml"
 PROFILES="singularity,ieo"                # OVERRIDES run_arms.sh's default -profile docker
 SITE_CONFIG="$SRC_DIR/conf/ieo.config"    # gitignored: executor=slurm + cacheDir + paths
