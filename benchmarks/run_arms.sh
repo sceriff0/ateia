@@ -21,7 +21,6 @@
 # That is just `--outdir <results_root>/<arm>`; Layout.patientDir() is already
 # `<outdir>/<patient_id>/<kind>`. Nothing is repackaged, so the consumer reads
 # run_qc.R's readers unchanged.
-set -euo pipefail
 
 PLAN="${1:?arm_plan.csv}"
 INPUT="${2:?real input.csv}"

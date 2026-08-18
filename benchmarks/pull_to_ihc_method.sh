@@ -25,7 +25,6 @@
 # multi-GB per patient and no ihc_method page reads them — every figure reads
 # JSON/CSV QC. Copying the images would move terabytes to answer nothing, so the
 # include filters below are an allowlist, not an optimisation.
-set -euo pipefail
 
 ARM_ROOT="${1:?arm results root - the results_root given to run_arms.sh}"
 IHC="${2:?path to the ihc_method repo}"

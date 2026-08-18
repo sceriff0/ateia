@@ -3,7 +3,6 @@
 # Usage: benchmarks/run_sweep.sh <run_plan.csv> <matrix_manifest.csv> <results_root> [extra nextflow args...]
 # Requires bash 4+ (associative arrays). On macOS the system /bin/bash is 3.x;
 # install a modern bash (brew install bash) and invoke explicitly if needed.
-set -euo pipefail
 
 RUN_PLAN="${1:?run_plan.csv}"
 MANIFEST="${2:?matrix_manifest.csv}"
@@ -181,8 +180,8 @@ while IFS=',' read -r -a vals; do
   pids+=("$!")
   # Throttle to CONCURRENCY in-flight runs. Wait on the OLDEST pid (FIFO) rather than `wait -n`
   # (bash 4.3+ only) so this works on the older bash found on many clusters. This never exceeds
-  # CONCURRENCY runs at once (the property that matters); `|| true` so a failed run — already logged
-  # RUN FAILED — doesn't abort the whole sweep under `set -e`.
+  # CONCURRENCY runs at once (the property that matters); `|| true` so `wait` on a run that exited
+  # non-zero — already logged RUN FAILED — is not itself treated as an error here.
   if (( ${#pids[@]} >= CONCURRENCY )); then
     wait "${pids[0]}" || true
     pids=("${pids[@]:1}")

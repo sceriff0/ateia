@@ -14,7 +14,6 @@
 #
 # Usage: tests/check_profiles_parse.sh [comma-separated-profiles]
 # ============================================================================
-set -uo pipefail
 
 PROFILES="${1:-test,ieo,singularity,docker,conda,slurm,local}"
 

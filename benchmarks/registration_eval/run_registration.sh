@@ -12,7 +12,6 @@
 # QC per run (segment both slides to GeoJSON, then score dice/displacement through the
 # transform), giving the landmark-free accuracy signal alongside the ground truth. Omit it to
 # skip that leg — the landmark TRE and the method-native numbers do not depend on it.
-set -euo pipefail
 
 MANIFEST="${1:?pairs_manifest.csv}"
 PREPARED="${2:?prepared root (from prepare_pairs.py)}"

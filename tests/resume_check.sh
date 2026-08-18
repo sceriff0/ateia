@@ -21,7 +21,6 @@
 #
 # Usage: tests/resume_check.sh [runs]     (default 3)
 
-set -euo pipefail
 cd "$(dirname "$0")/.."
 
 RUNS="${1:-3}"

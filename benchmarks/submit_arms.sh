@@ -39,7 +39,6 @@
 # Watch:   squeue -u $USER                 # 1 head job + N child jobs
 #          tail -f logs/arms_<jobid>.out
 # ============================================================================
-set -euo pipefail
 
 # ---- EDIT THESE FOR YOUR SITE --------------------------------------------------
 BENCH_DIR="/beegfs/scratch/ieo7660/analysis_runs/method_paper/benchmark"
@@ -66,13 +65,9 @@ ENABLE_CSE="${ENABLE_CSE:-false}"         # true => score the segmentation arms 
 cd "$BENCH_DIR"
 mkdir -p logs
 
-# ~/.bashrc, /etc/bashrc and `conda activate` reference unset vars that trip `set -u`.
-# Relax nounset for the environment init only, then restore it.
-set +u
 # shellcheck disable=SC1090
 source ~/.bashrc
 conda activate "$CONDA_ENV"
-set -u
 command -v nextflow >/dev/null || { echo "nextflow not on PATH (check CONDA_ENV)"; exit 1; }
 
 # Pin Nextflow: NF 26.x dropped the automatic lib/*.groovy class loading this
@@ -119,6 +114,14 @@ python "$SRC_DIR/benchmarks/build_arm_plan.py" \
     --input        "$INPUT" \
     --out          "$BENCH_DIR/arm_plan.csv" \
     --results-root "$RESULTS"
+
+# Checked explicitly because there is no `set -e` here: without this, a failed or
+# skipped plan step falls straight through to run_arms.sh, which would launch days
+# of cluster work against a STALE plan from a previous submission.
+if [ ! -s "$BENCH_DIR/arm_plan.csv" ]; then
+    echo "ERROR: $BENCH_DIR/arm_plan.csv was not written; not launching." >&2
+    exit 1
+fi
 
 # 2. Launch. run_arms.sh runs the passes in order — preprocess, registration,
 #    segmentation, compute — with a barrier between: each pass resumes from a

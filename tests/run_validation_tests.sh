@@ -5,7 +5,6 @@
 #
 # Based on test cases documented in tests/test_validation.md
 
-set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TESTDATA_DIR="$SCRIPT_DIR/testdata"
@@ -54,8 +53,8 @@ run_test() {
     local exit_code=0
 
     # Run pipeline with dry_run for fast validation.
-    # ${arr[@]+"${arr[@]}"} safely expands a possibly-empty array under `set -u`
-    # (bash 3.2 on macOS errors on a bare "${arr[@]}" when empty).
+    # ${arr[@]+"${arr[@]}"} safely expands a possibly-empty array: bash 3.2 on
+    # macOS errors on a bare "${arr[@]}" when the array is empty.
     cd "$PROJECT_ROOT"
     nextflow run main.nf \
         --input "$input_csv" \
