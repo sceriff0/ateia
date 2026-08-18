@@ -87,6 +87,13 @@ baseline:
                                       # fixes correspondence at the rigid stage, re-measures dice_matched +
                                       # centroid displacement (um) per stage. Harvested into
                                       # registration_accuracy.csv (bin/warp_seg_qc.py; docs/registration_qc.md).
+  seg_qc_pairing: lsa                 # pipeline default: how reg_qc=2 pairs reference/moving nuclei before
+                                      # scoring. 'lsa' = optimal one-to-one assignment (Hungarian) within
+                                      # the match radius; 'mutual_nn' = mutual nearest neighbour. Live at
+                                      # this baseline because reg_qc=2 is.
+  seg_qc_match_radius_factor: 1.5     # pipeline default: match radius as a multiple of the median nuclear
+                                      # radius. Sets which pairings are admissible at all, so it bounds
+                                      # both dice_matched and the displacement distribution.
   reg_jvm_heap_gb: null               # auto-size; the reg_jvm_heap_gb axis varies it (RAM elasticity)
   reg_max_image_dim: 4000             # pipeline default: VALIS's max processing dimension (px). THE
                                       # VALIS accuracy/cost tradeoff — every image is downscaled to fit
@@ -208,6 +215,17 @@ axes:
   reg_qc:                     [0, 1, 2]           # CAVEAT: reg_qc<2 emits NO staged accuracy metric, so
                                                   # those runs are absent from registration_accuracy.csv.
                                                   # Cost characterisation of the QC stage only.
+  # seg_qc_pairing and seg_qc_match_radius_factor are the reg_qc=2 SCORER's own knobs. They are live
+  # OFAT axes (not a pinned grid) precisely because reg_qc=2 IS the baseline, so varying them off the
+  # baseline reaches a param the pipeline really reads — the dead-axis rule does not bite here.
+  # They differ from reg_qc above: reg_qc<2 DELETES the metric, whereas these two RE-COMPUTE it. So
+  # their runs are comparable to the baseline, and the comparison is a ROBUSTNESS check on the headline
+  # accuracy number ("does dice_matched depend on how we paired?"), never a quality claim about the
+  # pipeline: the registration being scored is identical across these values.
+  seg_qc_pairing:             [mutual_nn, lsa]    # pairing backend (bin/utils/cell_pairs.py)
+  seg_qc_match_radius_factor: [1.0, 1.5, 2.0]     # match radius x median nuclear radius. Brackets the
+                                                  # default in both directions, as the STARE/VALIS
+                                                  # resolution axes do.
   # NOTE — the VALIS registration knobs (memory_mode, reg_micro_reg) are NOT OFAT axes: they are
   # crossed at the baseline cell by registration_param_grid below.
   # NOTE — registration_method is NOT an OFAT axis: it is a method grid (registration_method_grid), each

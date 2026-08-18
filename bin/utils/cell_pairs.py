@@ -42,6 +42,14 @@ import numpy as np
 # exists to remove. Such pairs are counted and reported, never silently dropped.
 DEFAULT_MAX_PAIR_WINDOW_PX = 4_000_000
 
+# A connected component of the candidate graph larger than this is not solved exactly — it
+# falls back to mutual-NN inside that component. Percolation is the only way to get one:
+# after a 1.5-radius gate on rigid-aligned tissue a component is normally 1-4 cells, but a
+# badly-registered region can chain them. 5000 members is a <=2500x2500 dense sub-matrix
+# (~50 MB), which is the same "bounded, counted, never silently dropped" posture as
+# DEFAULT_MAX_PAIR_WINDOW_PX above.
+DEFAULT_MAX_COMPONENT_CELLS = 5_000
+
 
 # ── flat polygon representation ────────────────────────────────────────────────
 @dataclass(frozen=True)
@@ -218,6 +226,18 @@ def median_equivalent_radius(area: np.ndarray) -> float:
 
 
 # ── correspondence ─────────────────────────────────────────────────────────────
+def _finite_rows(cent):
+    """``(rows, index)``: the rows of ``cent`` whose coordinates are all finite, and where
+    they came from. This is :func:`match_lsa`'s NaN filter; :func:`match_mutual_nn` keeps
+    its own inline equivalent (``np.flatnonzero(np.isfinite(...).all(axis=1))``) rather than
+    calling this helper, and is left that way deliberately."""
+    cent = np.asarray(cent, dtype=float)
+    if cent.size == 0:
+        return cent.reshape(0, 2), np.empty(0, dtype=np.int64)
+    ok = np.flatnonzero(np.isfinite(cent).all(axis=1))
+    return cent[ok], ok
+
+
 def match_mutual_nn(cent_a, cent_b, radius):
     """Pair cells that are each other's nearest centroid and within ``radius``.
 
@@ -255,6 +275,140 @@ def match_mutual_nn(cent_a, cent_b, radius):
     mutual = (nn_ba[tgt] < ok_a.size) & (nn_ba[tgt] == src)
     src, tgt = src[mutual], tgt[mutual]
     return ok_a[src], ok_b[tgt], d_ab[src]
+
+
+def match_lsa(cent_a, cent_b, radius, max_component_cells=DEFAULT_MAX_COMPONENT_CELLS):
+    """Minimum-total-distance one-to-one pairing within ``radius``.
+
+    Returns ``(idx_a, idx_b, dist, stats)``.
+
+    This is the **exact** optimum, not an approximation, and it is computed without ever
+    materializing the n x m cost matrix that would make it unrunnable on a real slide (two
+    10^5-nucleus slides is 80 GB). The radius is a hard gate, so a forbidden pair can never be
+    chosen, so no assignment edge crosses a connected component of the candidate graph -- and
+    therefore the global minimum-cost assignment is exactly the concatenation of the
+    per-component minima. Components are 1-4 cells on rigid-aligned tissue.
+
+    Inside a component, entries outside the radius get a finite ``big_m`` rather than ``inf``:
+    ``linear_sum_assignment`` raises ValueError on an infeasible matrix, and a component need
+    not be a complete bipartite subgraph. ``big_m`` exceeds the sum of every real cost the
+    component could contain (at most ``n_members`` of them, each <= ``radius``), so an
+    assignment using k forbidden entries always costs more than one using k-1. That yields
+    maximum cardinality first, then minimum distance -- from a bound, not a tuned constant.
+
+    ``stats["n_components"]`` counts only components with candidates on **both** sides -- the
+    ones the assignment loop actually solves. Singleton nodes (a cell with no candidate partner
+    within ``radius``) are their own connected component in the underlying graph but are
+    skipped before counting, so they are not included.
+    """
+    from scipy.optimize import linear_sum_assignment
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import connected_components
+    from scipy.spatial import cKDTree
+
+    stats = {
+        "n_components": 0,
+        "largest_component_cells": 0,
+        "n_fallback_components": 0,
+        "n_fallback_cells": 0,
+    }
+    empty = (
+        np.empty(0, dtype=np.int64),
+        np.empty(0, dtype=np.int64),
+        np.empty(0, dtype=float),
+        stats,
+    )
+    a, ok_a = _finite_rows(cent_a)
+    b, ok_b = _finite_rows(cent_b)
+    if ok_a.size == 0 or ok_b.size == 0 or not (radius > 0):
+        return empty
+
+    na = ok_a.size
+    neigh = cKDTree(a).query_ball_tree(cKDTree(b), radius)
+    cols = np.fromiter((j for js in neigh for j in js), dtype=np.int64)
+    if cols.size == 0:
+        return empty
+    rows = np.repeat(np.arange(na, dtype=np.int64), [len(js) for js in neigh])
+
+    # One undirected graph over na + nb nodes: a-cell i is node i, b-cell j is node na + j.
+    n_nodes = na + ok_b.size
+    adj = coo_matrix(
+        (np.ones(cols.size), (rows, na + cols)), shape=(n_nodes, n_nodes)
+    )
+    _, labels = connected_components(adj, directed=False)
+
+    order = np.argsort(labels, kind="stable")
+    bounds = np.flatnonzero(np.diff(labels[order])) + 1
+    out_a, out_b = [], []
+    for members in np.split(order, bounds):
+        ai = members[members < na]
+        bi = members[members >= na] - na
+        if ai.size == 0 or bi.size == 0:
+            continue  # an isolated cell: no candidate on the other slide
+        stats["n_components"] += 1
+        n_members = int(ai.size + bi.size)
+        stats["largest_component_cells"] = max(
+            stats["largest_component_cells"], n_members
+        )
+        if n_members > max_component_cells:
+            fa, fb, _ = match_mutual_nn(a[ai], b[bi], radius)
+            out_a.append(ai[fa])
+            out_b.append(bi[fb])
+            stats["n_fallback_components"] += 1
+            stats["n_fallback_cells"] += n_members
+            continue
+        sub_a, sub_b = a[ai], b[bi]
+        d = np.hypot(
+            sub_a[:, None, 0] - sub_b[None, :, 0],
+            sub_a[:, None, 1] - sub_b[None, :, 1],
+        )
+        big_m = n_members * float(radius) + 1.0
+        cost = np.where(d <= radius, d, big_m)
+        ri, ci = linear_sum_assignment(cost)
+        keep = cost[ri, ci] < big_m
+        out_a.append(ai[ri[keep]])
+        out_b.append(bi[ci[keep]])
+
+    if not out_a:
+        return empty
+    ia = np.concatenate(out_a)
+    ib = np.concatenate(out_b)
+    # Sort by the reference index so the pair order -- and the per-cell residual CSV built
+    # from it -- is reproducible run to run.
+    s = np.argsort(ia, kind="stable")
+    ia, ib = ia[s], ib[s]
+    dist = np.hypot(a[ia][:, 0] - b[ib][:, 0], a[ia][:, 1] - b[ib][:, 1])
+    return ok_a[ia], ok_b[ib], dist, stats
+
+
+PAIRING_METHODS = ("lsa", "mutual_nn")
+DEFAULT_PAIRING = "lsa"
+
+
+def match_cells(
+    cent_a,
+    cent_b,
+    radius,
+    method=DEFAULT_PAIRING,
+    max_component_cells=DEFAULT_MAX_COMPONENT_CELLS,
+):
+    """Pair cells within ``radius`` using the named backend.
+
+    Returns ``(idx_a, idx_b, dist, stats)``. ``stats`` is merged wholesale into the QC JSON's
+    ``matching`` block by bin/warp_seg_qc.py, which is how a backend reports its own
+    diagnostics without a second plumbing path.
+    """
+    if method == "mutual_nn":
+        idx_a, idx_b, dist = match_mutual_nn(cent_a, cent_b, radius)
+        return idx_a, idx_b, dist, {"method": "mutual_nn_centroid"}
+    if method == "lsa":
+        idx_a, idx_b, dist, stats = match_lsa(
+            cent_a, cent_b, radius, max_component_cells=max_component_cells
+        )
+        return idx_a, idx_b, dist, {"method": "lsa_centroid", **stats}
+    raise ValueError(
+        f"unknown pairing method {method!r}; expected one of {PAIRING_METHODS}"
+    )
 
 
 def centroid_distance(cent_a, cent_b, idx_a, idx_b) -> np.ndarray:

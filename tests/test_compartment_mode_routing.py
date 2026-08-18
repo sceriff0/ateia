@@ -127,11 +127,13 @@ ALLOWED_LINES = {
         # exemption keyed to a file rather than a line would cover the next raw read
         # added anywhere in it. The cost is that unrelated edits above this line move
         # it -- 718 -> 722 when the reg_qc=2 QC stopped segmenting for itself and
-        # SEG_QC_GEOJSON's block shrank. Re-pin, do not widen. (Re-pin from the file,
-        # not by guessing: `grep -n "params.expanded_quantification ?" conf/modules.config`.)
-        # 722 on main, 737 here: this branch's conf/modules.config carries the
-        # benchmarking-only process blocks, so the same line sits lower.
-        737: (
+        # SEG_QC_GEOJSON's block shrank, then 722 -> 727 when feat/lsa-cell-pairing's
+        # rewritten WARP_SEG_QC ext.args comment added 5 net lines above it.
+        # 727 on main, 742 here: this branch's conf/modules.config carries the
+        # benchmarking-only process blocks, so the same line sits 15 lower; the
+        # two offsets compose. Re-pin, do not widen. (Re-pin from the file, not by
+        # guessing: `grep -n "params.expanded_quantification ?" conf/modules.config`.)
+        742: (
             "ext.args = { params.expanded_quantification ? '--expanded' : "
             "'' } -- conf/*.config closures cannot see lib/*.groovy classes, "
             "so ext.args must read params raw here."
