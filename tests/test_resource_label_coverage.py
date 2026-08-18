@@ -484,11 +484,25 @@ HOURS_RE = re.compile(r"(\d+(?:\.\d+)?)\s*\.\s*h\b")
 # is not a magnitude a doc row could state either: it bounds ONE DECODED SOURCE
 # PLANE, whose size depends on the channel count, which is not visible in a
 # config closure. The doc rows name every term instead.
+#
+# `pyramid_resolutions` and `pyramid_scale` were added when MERGE_AND_PYRAMID
+# stopped holding the slide. Its request used to be a `f<20 ? 200.GB : 300.GB`
+# ladder, which the pairing comparison could check; it is now built from ONE
+# decoded plane (estimated from the largest single channel file) plus the pyramid
+# levels that have to stay resident while tifffile fills the SubIFDs level by
+# level. That second term is a geometric series in the SCALE FACTOR and vanishes
+# below three levels, so both parameters genuinely change the magnitude -- at
+# `--pyramid-resolutions 2` the term is zero, and at scale 4 it is a sixteenth of
+# its value at scale 2. Neither is computable here: the first term depends on the
+# input file's compression ratio and the second on the channel count, and a doc
+# row could state neither. The row names every term instead.
 DERIVED_MEMORY_PARAMS = (
     "reg_tiled_tile",
     "reg_tiled_halo",
     "reg_tiled_out_tile",
     "preproc_tile_size",
+    "pyramid_resolutions",
+    "pyramid_scale",
 )
 
 # A memory request derived from params at submission time rather than being a

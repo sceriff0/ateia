@@ -141,11 +141,13 @@ ALLOWED_LINES = {
         # block was deleted with the in-process BaSiC path; 821 -> 856 when
         # TILE_FOR_BASIC's and APPLY_PROFILES' memory closures stopped being one-line
         # multiples of the input file's size and became multi-line, tile-derived
-        # arithmetic (the two processes now stream rather than holding the slide).
+        # arithmetic (the two processes now stream rather than holding the slide);
+        # 856 -> 891 when MERGE_AND_PYRAMID's 200/300 GB tier ladder became the
+        # plane-derived closure that followed it into streaming.
         # Re-pin, do not
         # widen. (Re-pin from the file, not by guessing:
         # `grep -n "params.expanded_quantification ?" conf/modules.config`.)
-        856: (
+        891: (
             "ext.args = { params.expanded_quantification ? '--expanded' : "
             "'' } -- conf/*.config closures cannot see lib/*.groovy classes, "
             "so ext.args must read params raw here."

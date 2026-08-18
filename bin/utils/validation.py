@@ -27,6 +27,7 @@ __all__ = [
     "detect_wrapped_values",
     "StreamingNegativeClip",
     "StreamingImageStats",
+    "StreamingWrappedValues",
 ]
 
 
@@ -391,3 +392,76 @@ class StreamingImageStats:
                     f"[{self._stage}] Suspicious high values (potential wrapped "
                     f"negatives): {self._high_count} pixels ({high_pct:.2f}%) > 60000"
                 )
+
+
+class StreamingWrappedValues:
+    """The chunked counterpart of :func:`detect_wrapped_values`.
+
+    ``detect_wrapped_values`` counts pixels above ``dtype_max * min_value_threshold`` in ONE
+    array, turns that count into a percentage of the WHOLE image, and decides
+    ``has_wrapped`` from that percentage. A caller that never holds the whole image cannot
+    call it without recomputing the percentage against a chunk -- which changes both the
+    number it reports and, because the decision threshold is 0.01%, whether it reports at
+    all. A chunk that is entirely inside a bright region trips a 0.01% test that the whole
+    image does not.
+
+    So the count and the size are summed across chunks and the percentage is computed once,
+    at the end, from those sums. ``max value`` is the running maximum over suspicious pixels
+    only, which is what ``data[suspicious_mask].max()`` returns from a single call.
+
+    ``finalize`` returns the SAME ``(has_wrapped, count, percentage)`` triple the whole-array
+    function returns and logs the same warning line, so a caller that formats its own message
+    from the triple -- ``bin/merge_channels_pyramid.py`` does -- keeps printing the same
+    message with the same numbers.
+
+    PASS ONLY REAL PIXELS, for the same reason :class:`StreamingNegativeClip` requires it:
+    padded chunk edges would enter ``size`` and move the percentage.
+    """
+
+    def __init__(self, dtype, min_value_threshold: float = 0.9, logger=None):
+        self._logger = logger or logging.getLogger(__name__)
+        dt = np.dtype(dtype)
+        # Same dtype table as detect_wrapped_values: anything else is not an unsigned
+        # integer type and the function returns "no" without looking at the pixels.
+        if dt == np.uint16:
+            dtype_max = 65535
+        elif dt == np.uint8:
+            dtype_max = 255
+        else:
+            dtype_max = None
+        self._threshold = None if dtype_max is None else dtype_max * min_value_threshold
+        self._count = 0
+        self._size = 0
+        self._max = 0
+
+    def process(self, data):
+        """Fold one chunk in. Returns the chunk untouched."""
+        if self._threshold is None or data.size == 0:
+            return data
+        suspicious_mask = data > self._threshold
+        count = int(np.sum(suspicious_mask))
+        self._count += count
+        self._size += data.size
+        if count:
+            chunk_max = data[suspicious_mask].max()
+            if chunk_max > self._max:
+                self._max = chunk_max
+        return data
+
+    def finalize(self):
+        """Return ``(has_wrapped, count, percentage)`` and log detect_wrapped_values' warning."""
+        if self._threshold is None or self._size == 0:
+            return False, 0, 0.0
+
+        percentage = self._count / self._size * 100
+        has_wrapped = (
+            self._count > 0 and percentage > 0.01
+        )  # More than 0.01% suspicious
+
+        if has_wrapped:
+            self._logger.warning(
+                f"Detected {self._count} potentially wrapped pixels ({percentage:.4f}%), "
+                f"max value: {self._max}"
+            )
+
+        return has_wrapped, self._count, percentage

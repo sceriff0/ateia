@@ -1,0 +1,765 @@
+"""MERGE_AND_PYRAMID must build the published pyramid without ever holding the slide.
+
+``bin/merge_channels_pyramid.py`` used to run three passes: scan metadata, allocate the
+whole ``(C, H, W)`` output stack and fill it channel by channel, then hand that array to
+``tifffile`` and derive each pyramid level from the previous one -- holding both, plus
+``downsample_image``'s per-channel float32 temporary, plus the slide-sized uint32 mask
+stack. ``conf/modules.config`` asked for 200-300 GB and the process still hit a node-memory
+cliff in production.
+
+It now streams: the base resolution is written from a generator of tiles fed by
+``open_lazy`` row-band reads, each pyramid level is derived one channel at a time and tiled
+only on the way out, and the mask series streams the same way.
+
+WHAT THIS FILE PINS, AND WHY EACH ASSERTION IS THE ONE THAT CATCHES THE MISTAKE:
+
+1. **Every level is pixel-identical to the whole-array derivation.** The reference below is
+   the pre-streaming writer reproduced verbatim, INCLUDING its own inline
+   ``cv2.resize(plane.astype(float32), INTER_AREA)`` rather than a call into the module
+   under test -- so a bug inside the factored-out ``_downsample_plane_f32`` cannot be
+   reproduced identically on both sides and cancel out. The comparison is
+   ``np.array_equal`` per level, and the files are additionally compared BYTE FOR BYTE with
+   only tifffile's random per-file UUID masked out, which catches metadata and IFD-layout
+   drift that a pixel comparison would not.
+
+2. **An ODD-DIMENSIONED fixture.** This is the case that separates a correct implementation
+   from a plausible one, and an even-only fixture set proves nothing about it --
+   see ``test_band_wise_downsampling_is_not_whole_plane_downsampling`` for the measured
+   trap, and ``_downsample_plane_f32``'s docstring for why it forecloses the obvious
+   "derive the levels as the base streams" design.
+
+3. **Bands are forced small** (``READ_BAND_BYTES`` monkeypatched) in the equality tests.
+   At the shipped 256 MB budget every test-sized image is a single band, so an
+   implementation that silently leaked a band boundary into the output would pass a test
+   that did not force more than one band.
+
+4. **The peak does not grow with the channel count**, measured with ``tracemalloc``
+   -- the property ``conf/modules.config``'s memory closure is derived from.
+
+5. **The per-channel validation log is unchanged**: same lines, same numbers, and in
+   particular the wrapped-value percentage computed against the WHOLE channel rather than
+   against whichever band it was folded from.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import logging
+import re
+import tracemalloc
+from pathlib import Path
+
+import pytest
+
+np = pytest.importorskip("numpy")
+tifffile = pytest.importorskip("tifffile")
+pytest.importorskip("zarr")
+cv2 = pytest.importorskip("cv2")
+
+_SPEC = importlib.util.spec_from_file_location(
+    "merge_channels_pyramid",
+    Path(__file__).resolve().parent.parent / "bin" / "merge_channels_pyramid.py",
+)
+mcp = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(mcp)
+
+
+# ---------------------------------------------------------------------------
+# the reference: the pre-streaming writer, reproduced
+# ---------------------------------------------------------------------------
+
+
+def _reference_downsample(stack, factor):
+    """``downsample_image``'s 3-D integer branch as it stood before the rewrite.
+
+    Written out here rather than imported so the two sides of the equality test do not
+    share an implementation. If this and the module drift, that is the test doing its job.
+    """
+    c, h, w = stack.shape
+    new_h, new_w = h // factor, w // factor
+    result = np.zeros((c, new_h, new_w), dtype=stack.dtype)
+    for i in range(c):
+        resized = cv2.resize(
+            stack[i].astype(np.float32),
+            (new_w, new_h),
+            interpolation=cv2.INTER_AREA,
+        )
+        result[i] = np.round(resized).astype(stack.dtype)
+    return result
+
+
+def _reference_stack(channel_files, dtype):
+    """``_load_channel_stack``'s arithmetic: read whole, clip negatives, cast float->uint16."""
+    planes = []
+    for path in channel_files:
+        plane = np.asarray(tifffile.imread(str(path)))
+        if plane.ndim > 2:
+            plane = plane.squeeze()
+        if plane.min() < 0:
+            plane = np.clip(plane, 0, None)
+        if dtype in (np.dtype(np.float32), np.dtype(np.float64)):
+            plane = mcp.to_uint16(plane)
+        planes.append(plane)
+    return np.stack(planes)
+
+
+def _reference_write(
+    stack,
+    path,
+    channel_names,
+    *,
+    pyramid_resolutions,
+    pyramid_scale=2,
+    tile_size=512,
+    compression="zstd",
+    compressionargs=None,
+    mask_stack=None,
+    mask_names=None,
+    physical_size_x=0.325,
+    physical_size_y=0.325,
+):
+    """The pre-streaming ``write_pyramidal_ome_tiff``: one whole-array write per level."""
+    levels = mcp.calculate_pyramid_levels(
+        stack.shape[1],
+        stack.shape[2],
+        min_size=64,
+        max_levels=pyramid_resolutions,
+        scale_factor=pyramid_scale,
+    )
+    metadata = {
+        "axes": "CYX",
+        "Channel": {"Name": list(channel_names)},
+        "PhysicalSizeX": physical_size_x,
+        "PhysicalSizeXUnit": "µm",
+        "PhysicalSizeY": physical_size_y,
+        "PhysicalSizeYUnit": "µm",
+    }
+    options = dict(
+        tile=(tile_size, tile_size),
+        compression=compression,
+        photometric="minisblack",
+        resolutionunit="CENTIMETER",
+    )
+    if compressionargs:
+        options["compressionargs"] = compressionargs
+
+    expected = [stack]
+    with tifffile.TiffWriter(str(path), bigtiff=True, ome=True) as tif:
+        tif.write(
+            stack,
+            subifds=len(levels) - 1,
+            resolution=(1e4 / physical_size_x, 1e4 / physical_size_y),
+            metadata=metadata,
+            **options,
+        )
+        current = stack
+        for level_idx in range(1, len(levels)):
+            current = _reference_downsample(current, pyramid_scale)
+            expected.append(current)
+            tif.write(
+                current,
+                subfiletype=1,
+                resolution=(
+                    1e4 / (physical_size_x * (pyramid_scale**level_idx)),
+                    1e4 / (physical_size_y * (pyramid_scale**level_idx)),
+                ),
+                **options,
+            )
+        if mask_stack is not None:
+            if mask_stack.dtype != np.uint32:
+                mask_stack = mask_stack.astype(np.uint32)
+            tif.write(
+                mask_stack,
+                metadata={
+                    "axes": "CYX",
+                    "Channel": {"Name": mask_names or ["cell_mask", "nuclei_mask"]},
+                },
+                tile=(tile_size, tile_size),
+                compression=compression,
+                photometric="minisblack",
+                resolutionunit="CENTIMETER",
+            )
+    return expected
+
+
+# ---------------------------------------------------------------------------
+# fixtures
+# ---------------------------------------------------------------------------
+
+# (id, channel names, height, width, dtype, with_masks)
+#
+# `odd_both_axes` is the fixture that matters: 1023 and 777 are both indivisible by 2, so
+# INTER_AREA's effective ratio is 2.00196 rather than 2, and any band- or tile-wise level
+# derivation de-aligns progressively down the plane (measured max difference 29642 counts
+# on uint16). `odd_height_only` covers the one-axis case, which is just as ordinary.
+SHAPES = [
+    ("even", ["DAPI", "CD8"], 512, 512, np.uint16, False),
+    ("odd_both_axes", ["DAPI", "CD8", "PANCK"], 1023, 777, np.uint16, True),
+    ("odd_height_only", ["DAPI", "SMA"], 513, 640, np.uint16, False),
+    ("odd_float_input", ["DAPI", "CD3"], 385, 259, np.float32, False),
+]
+
+
+def _make_inputs(tmp_path, names, h, w, dtype, with_masks, seed=20260819):
+    """Write the per-channel TIFFs SPLIT_CHANNELS would have written, plus masks."""
+    rng = np.random.default_rng(seed)
+    channels_dir = tmp_path / "channels"
+    channels_dir.mkdir(parents=True, exist_ok=True)
+    for i, name in enumerate(names):
+        if dtype == np.float32:
+            # A float input exercises the clip-then-round-then-cast path, negatives and all.
+            plane = rng.uniform(-50.0, 4000.0, size=(h, w)).astype(np.float32)
+        else:
+            plane = rng.integers(0, 65000, size=(h, w), dtype=np.uint16)
+        # Tiled, as SPLIT_CHANNELS now writes them, so the region reads are real.
+        tifffile.imwrite(
+            str(channels_dir / f"{name}.tif"),
+            plane,
+            tile=(256, 256),
+            compression="zlib",
+        )
+        del plane
+
+    masks_dir = None
+    if with_masks:
+        masks_dir = tmp_path / "masks"
+        masks_dir.mkdir(parents=True, exist_ok=True)
+        for suffix in ("cell_mask", "nuclei_mask"):
+            tifffile.imwrite(
+                str(masks_dir / f"P001_{suffix}.tif"),
+                rng.integers(0, 200000, size=(h, w), dtype=np.uint32),
+                compression="zlib",
+            )
+    # sorted() is what _scan_channel_metadata uses to fix channel order.
+    channel_files = sorted(
+        list(channels_dir.glob("*.tif")) + list(channels_dir.glob("*.tiff"))
+    )
+    return channels_dir, channel_files, masks_dir
+
+
+_UUID_RE = re.compile(rb"urn:uuid:[0-9a-fA-F-]{36}")
+
+
+def _mask_uuid(path):
+    """File bytes with tifffile's random per-file OME UUID neutralised.
+
+    The UUID is a fixed-length field inside the ImageDescription, so replacing it changes
+    no offset and the rest of the comparison stays meaningful.
+    """
+    return _UUID_RE.sub(b"urn:uuid:" + b"0" * 36, Path(path).read_bytes())
+
+
+def _levels_from_file(path):
+    with tifffile.TiffFile(str(path)) as tif:
+        return [np.asarray(level.asarray()) for level in tif.series[0].levels]
+
+
+# ---------------------------------------------------------------------------
+# 1. exactness
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "shape_id,names,h,w,dtype,with_masks", SHAPES, ids=[s[0] for s in SHAPES]
+)
+def test_every_pyramid_level_is_pixel_identical_to_the_whole_array_derivation(
+    tmp_path, monkeypatch, shape_id, names, h, w, dtype, with_masks
+):
+    """Build the pyramid both ways and compare every level with ``np.array_equal``.
+
+    Bands are forced down to one tile row so the streamed base genuinely crosses band
+    boundaries; at the shipped 256 MB budget these fixtures would be a single band and the
+    test would not exercise the seam it exists to check.
+    """
+    monkeypatch.setattr(mcp, "READ_BAND_BYTES", 1)
+
+    channels_dir, channel_files, masks_dir = _make_inputs(
+        tmp_path, names, h, w, dtype, with_masks
+    )
+    mask_stack = None
+    if masks_dir is not None:
+        mask_stack = np.stack(
+            [
+                np.asarray(tifffile.imread(str(sorted(masks_dir.glob(f"*{s}.tif"))[0])))
+                for s in ("cell_mask", "nuclei_mask")
+            ]
+        ).astype(np.uint32)
+
+    stack = _reference_stack(channel_files, np.dtype(dtype))
+    # `_scan_channel_metadata` fixes channel order by SORTING the directory, so the OME
+    # header's channel names follow the filenames, not the order they were created in.
+    ordered_names = [f.stem for f in channel_files]
+    expected_levels = _reference_write(
+        stack,
+        tmp_path / "reference.ome.tiff",
+        ordered_names,
+        pyramid_resolutions=4,
+        tile_size=128,
+        compressionargs={"level": 2},
+        mask_stack=mask_stack,
+    )
+
+    mcp.merge_channels(
+        input_dir=str(channels_dir),
+        output_path=str(tmp_path / "streamed.ome.tiff"),
+        pyramid_resolutions=4,
+        tile_size=128,
+        compressionargs={"level": 2},
+        masks_dir=None if masks_dir is None else str(masks_dir),
+    )
+
+    written = _levels_from_file(tmp_path / "streamed.ome.tiff")
+    assert len(written) == len(expected_levels), (
+        f"{shape_id}: wrote {len(written)} levels, the whole-array writer wrote "
+        f"{len(expected_levels)}"
+    )
+    for i, (got, want) in enumerate(zip(written, expected_levels)):
+        assert got.shape == want.shape, (
+            f"{shape_id}: level {i} shape {got.shape} != {want.shape}"
+        )
+        if not np.array_equal(got, want):
+            diff = np.abs(got.astype(np.int64) - want.astype(np.int64))
+            pytest.fail(
+                f"{shape_id}: pyramid level {i} differs from the whole-array derivation: "
+                f"{int(np.count_nonzero(diff))} of {diff.size} pixels, max difference "
+                f"{int(diff.max())} counts. A band- or tile-wise INTER_AREA is not a "
+                f"whole-plane INTER_AREA whenever the factor does not divide the dimension."
+            )
+
+    if mask_stack is not None:
+        with tifffile.TiffFile(str(tmp_path / "streamed.ome.tiff")) as tif:
+            assert len(tif.series) == 2
+            assert np.array_equal(np.asarray(tif.series[1].asarray()), mask_stack), (
+                f"{shape_id}: the streamed mask series is not the labels that went in"
+            )
+
+
+@pytest.mark.parametrize(
+    "shape_id,names,h,w,dtype,with_masks", SHAPES, ids=[s[0] for s in SHAPES]
+)
+def test_the_streamed_file_matches_the_whole_array_writer_byte_for_byte(
+    tmp_path, monkeypatch, shape_id, names, h, w, dtype, with_masks
+):
+    """Stronger than the pixel comparison: same tags, same IFD layout, same OME-XML.
+
+    Only tifffile's random per-file UUID is masked. A pixel-equal file with a different tile
+    size, a lost PhysicalSize or a missing SubIFD chain would pass the level comparison
+    above and fail here, and it is the OME-XML and the SubIFD chain that decide whether
+    QuPath sees a pyramid at all.
+    """
+    monkeypatch.setattr(mcp, "READ_BAND_BYTES", 1)
+
+    channels_dir, channel_files, masks_dir = _make_inputs(
+        tmp_path, names, h, w, dtype, with_masks
+    )
+    mask_stack = None
+    if masks_dir is not None:
+        mask_stack = np.stack(
+            [
+                np.asarray(tifffile.imread(str(sorted(masks_dir.glob(f"*{s}.tif"))[0])))
+                for s in ("cell_mask", "nuclei_mask")
+            ]
+        ).astype(np.uint32)
+
+    stack = _reference_stack(channel_files, np.dtype(dtype))
+    _reference_write(
+        stack,
+        tmp_path / "reference.ome.tiff",
+        [f.stem for f in channel_files],
+        pyramid_resolutions=4,
+        tile_size=128,
+        compressionargs={"level": 2},
+        mask_stack=mask_stack,
+    )
+    mcp.merge_channels(
+        input_dir=str(channels_dir),
+        output_path=str(tmp_path / "streamed.ome.tiff"),
+        pyramid_resolutions=4,
+        tile_size=128,
+        compressionargs={"level": 2},
+        masks_dir=None if masks_dir is None else str(masks_dir),
+    )
+
+    assert _mask_uuid(tmp_path / "streamed.ome.tiff") == _mask_uuid(
+        tmp_path / "reference.ome.tiff"
+    ), (
+        f"{shape_id}: the streamed file is not byte-identical to the whole-array writer's"
+    )
+
+
+def test_band_wise_downsampling_is_not_whole_plane_downsampling():
+    """The trap, pinned as a measurement so nobody "optimises" the levels into the tile loop.
+
+    ``cv2.INTER_AREA``'s effective vertical ratio is ``h / (h // factor)``, which is the
+    requested factor only when the factor DIVIDES the dimension. This test asserts the
+    positive result on a dimension that divides and the negative one on a dimension that
+    does not -- both, because a test that only showed the exact case would license exactly
+    the band-wise derivation this design rejects.
+    """
+    rng = np.random.default_rng(7)
+
+    def banded(plane, factor, band):
+        assert band % factor == 0
+        parts = [
+            np.round(
+                cv2.resize(
+                    plane[y : y + band].astype(np.float32),
+                    (plane.shape[1] // factor, min(band, plane.shape[0] - y) // factor),
+                    interpolation=cv2.INTER_AREA,
+                )
+            ).astype(plane.dtype)
+            for y in range(0, plane.shape[0] - plane.shape[0] % band, band)
+        ]
+        return np.concatenate(parts, axis=0)
+
+    def whole(plane, factor):
+        return np.round(
+            cv2.resize(
+                plane.astype(np.float32),
+                (plane.shape[1] // factor, plane.shape[0] // factor),
+                interpolation=cv2.INTER_AREA,
+            )
+        ).astype(plane.dtype)
+
+    divides = rng.integers(0, 65000, size=(1024, 512), dtype=np.uint16)
+    assert np.array_equal(banded(divides, 2, 256), whole(divides, 2)), (
+        "at h=1024 the factor divides the height, so banding IS exact -- if this fails the "
+        "measurement instrument itself is wrong"
+    )
+
+    does_not = rng.integers(0, 65000, size=(1023, 512), dtype=np.uint16)
+    banded_1023 = banded(does_not, 2, 256)
+    whole_1023 = whole(does_not, 2)
+    diff = np.abs(
+        banded_1023[: whole_1023.shape[0]].astype(np.int64)
+        - whole_1023[: banded_1023.shape[0]].astype(np.int64)
+    )
+    assert diff.max() > 1000, (
+        f"at h=1023 band-wise INTER_AREA came within {diff.max()} counts of the whole-plane "
+        "result on this OpenCV. The design's premise -- that bands are catastrophically, "
+        "not marginally, wrong on an indivisible dimension -- no longer holds; re-derive it "
+        "before relying on the whole-plane level derivation for anything but exactness."
+    )
+
+
+# ---------------------------------------------------------------------------
+# 2. the peak
+# ---------------------------------------------------------------------------
+
+
+def _peak_bytes(fn):
+    tracemalloc.start()
+    try:
+        tracemalloc.reset_peak()
+        fn()
+        return tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+
+
+def _run_merge(tmp_path, n_channels, h=1024, w=1024):
+    names = [f"CH{i:02d}" for i in range(n_channels)]
+    channels_dir, _files, _masks = _make_inputs(
+        tmp_path, names, h, w, np.uint16, False, seed=11 + n_channels
+    )
+    out = tmp_path / "pyr.ome.tiff"
+    return lambda: mcp.merge_channels(
+        input_dir=str(channels_dir),
+        output_path=str(out),
+        pyramid_resolutions=4,
+        tile_size=256,
+    )
+
+
+def test_peak_memory_does_not_grow_with_the_channel_count(tmp_path):
+    """The O(C) -> O(1) claim the memory closure in conf/modules.config is derived from.
+
+    The old implementation allocated ``(C, H, W)`` up front, so its peak was linear in C by
+    construction: at these sizes 2 channels cost 2 MiB of stack and 12 cost 12 MiB, and the
+    ratio below would be about 6. Nothing in the streaming path scales with C -- a level is
+    derived one channel at a time and dropped -- so the ratio must stay near 1.
+    """
+    peak_2 = _peak_bytes(_run_merge(tmp_path / "c2", 2))
+    peak_12 = _peak_bytes(_run_merge(tmp_path / "c12", 12))
+
+    plane_bytes = 1024 * 1024 * 2
+    assert peak_12 <= peak_2 + plane_bytes, (
+        f"peak grew from {peak_2 / 1e6:.1f} MB at 2 channels to {peak_12 / 1e6:.1f} MB at "
+        f"12 -- more than one plane ({plane_bytes / 1e6:.1f} MB) of growth for ten extra "
+        "channels means something is being accumulated per channel"
+    )
+
+
+def test_peak_memory_is_a_small_multiple_of_one_plane(tmp_path):
+    """No ``(C, H, W)`` array is resident at any point.
+
+    The bound is stated in planes rather than in bytes because that is what the memory
+    closure derives from: one float32 plane for the level derivation (4 bytes/px), its
+    resize output and level chain (about 1.5 more), one read band and one write tile. Six
+    planes is generous for that and still far below the twelve-plane stack the old code
+    allocated before it wrote anything.
+    """
+    plane_bytes = 1024 * 1024 * 2
+    peak = _peak_bytes(_run_merge(tmp_path / "bound", 12))
+
+    assert peak < 6 * plane_bytes, (
+        f"peak was {peak / 1e6:.1f} MB, above {6 * plane_bytes / 1e6:.1f} MB "
+        f"(6 x one {plane_bytes / 1e6:.1f} MB plane) on a 12-channel slide"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 3. the shape of the reads and the writes
+# ---------------------------------------------------------------------------
+
+
+def test_every_write_is_fed_from_an_iterator(tmp_path, monkeypatch):
+    """The write side, which no read-side spy can see.
+
+    Handing ``tifffile`` an ndarray is the single observable signature of the regression --
+    it means the base, or a whole level, was assembled first. ``shape=`` and ``dtype=`` must
+    accompany the iterator or tifffile cannot size the output and would have to buffer.
+    """
+    # The fixtures are written FIRST: `_make_inputs` goes through `tifffile.imwrite`, which
+    # is itself a TiffWriter.write of an ndarray, and would trip the assertion below.
+    channels_dir, _files, masks_dir = _make_inputs(
+        tmp_path, ["DAPI", "CD8"], 512, 512, np.uint16, True
+    )
+
+    seen = []
+    original_write = tifffile.TiffWriter.write
+
+    def spying_write(self, data=None, **kwargs):
+        seen.append((type(data).__name__, isinstance(data, np.ndarray), set(kwargs)))
+        return original_write(self, data, **kwargs)
+
+    monkeypatch.setattr(tifffile.TiffWriter, "write", spying_write)
+    mcp.merge_channels(
+        input_dir=str(channels_dir),
+        output_path=str(tmp_path / "pyr.ome.tiff"),
+        pyramid_resolutions=3,
+        tile_size=128,
+        masks_dir=str(masks_dir),
+    )
+
+    assert seen, (
+        "TiffWriter.write was never called -- the output was written some other way"
+    )
+    for type_name, is_ndarray, kwargs in seen:
+        assert not is_ndarray, (
+            f"a whole array ({type_name}) was handed to tifffile; the base, every pyramid "
+            "level and the mask series must each be fed by an iterator of tiles"
+        )
+        assert {"shape", "dtype", "tile"} <= kwargs, (
+            f"an iterator-fed write needs an explicit shape/dtype/tile; got {kwargs}"
+        )
+    # base + 2 sublevels + mask series
+    assert len(seen) == 4, f"expected 4 iterator-fed writes, got {len(seen)}"
+
+
+def test_no_channel_file_is_read_whole_through_imread(tmp_path, monkeypatch):
+    """``_read_channel_file`` is gone, not merely renamed.
+
+    It opened a zarr store and then immediately called ``np.asarray`` on all of it, so the
+    open bought nothing; the docstring's "via zarr when available" described a laziness that
+    was not there. The only remaining whole-file reads must be the metadata scan's
+    ``TiffFile`` header reads, which decode no pixels.
+    """
+    eager = []
+    original_imread = tifffile.imread
+
+    def spying_imread(path, *args, **kwargs):
+        if not kwargs.get("aszarr", False):
+            eager.append(str(path))
+        return original_imread(path, *args, **kwargs)
+
+    monkeypatch.setattr(mcp.tifffile, "imread", spying_imread)
+
+    channels_dir, _files, masks_dir = _make_inputs(
+        tmp_path, ["DAPI", "CD8"], 512, 512, np.uint16, True
+    )
+    mcp.merge_channels(
+        input_dir=str(channels_dir),
+        output_path=str(tmp_path / "pyr.ome.tiff"),
+        pyramid_resolutions=3,
+        tile_size=128,
+        masks_dir=str(masks_dir),
+    )
+
+    assert not eager, (
+        f"these files were read whole with tifffile.imread: {eager}. Channels and masks "
+        "must be reached through open_lazy region reads."
+    )
+
+
+def test_the_base_pass_reads_bands_not_planes(tmp_path, monkeypatch):
+    """Every base-pass read is a single-channel Y/X REGION bounded by the band budget.
+
+    The level pass legitimately reads a whole plane -- INTER_AREA leaves no choice -- so the
+    bound asserted here is per read and sized from ``READ_BAND_BYTES``, not "smaller than a
+    plane" unconditionally.
+    """
+    monkeypatch.setattr(mcp, "READ_BAND_BYTES", 64 * 1024)  # 64 KiB budget
+
+    reads = []
+    original_open_lazy = mcp.open_lazy
+
+    class _Spy:
+        def __init__(self, arr):
+            self._arr = arr
+            self.shape = arr.shape
+            self.dtype = arr.dtype
+
+        def __getitem__(self, key):
+            out = np.asarray(self._arr[key])
+            reads.append((key, int(out.nbytes)))
+            return out
+
+    def spying_open_lazy(path):
+        arr, dtype, close = original_open_lazy(path)
+        return _Spy(arr), dtype, close
+
+    monkeypatch.setattr(mcp, "open_lazy", spying_open_lazy)
+
+    channels_dir, _files, _masks = _make_inputs(
+        tmp_path, ["DAPI", "CD8"], 512, 512, np.uint16, False
+    )
+    mcp.merge_channels(
+        input_dir=str(channels_dir),
+        output_path=str(tmp_path / "pyr.ome.tiff"),
+        pyramid_resolutions=3,
+        tile_size=128,
+    )
+
+    assert reads, "the lazy view was opened but never read from"
+    plane_bytes = 512 * 512 * 2
+    for key, nbytes in reads:
+        assert isinstance(key, tuple) and isinstance(key[0], (int, np.integer)), (
+            f"read {key!r} is not a single-channel index -- a channel slab was materialised"
+        )
+        assert isinstance(key[1], slice) and isinstance(key[2], slice), (
+            f"read {key!r} does not index a Y/X REGION"
+        )
+        assert nbytes < plane_bytes, (
+            f"read {key!r} materialised {nbytes} bytes, a whole {plane_bytes}-byte plane, "
+            f"with the band budget set to {mcp.READ_BAND_BYTES} bytes"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 4. the per-channel validation log
+# ---------------------------------------------------------------------------
+
+
+class _Capture(logging.Handler):
+    def __init__(self):
+        super().__init__(level=logging.DEBUG)
+        self.lines = []
+
+    def emit(self, record):
+        self.lines.append(record.getMessage())
+
+
+@pytest.fixture
+def captured_log():
+    handler = _Capture()
+    for name in ("merge_channels_pyramid", "validation"):
+        logging.getLogger(name).addHandler(handler)
+        logging.getLogger(name).setLevel(logging.DEBUG)
+    mcp.logger.addHandler(handler)
+    mcp.logger.setLevel(logging.DEBUG)
+    yield handler
+    mcp.logger.removeHandler(handler)
+    for name in ("merge_channels_pyramid", "validation"):
+        logging.getLogger(name).removeHandler(handler)
+
+
+def test_the_negative_clip_still_logs_one_line_per_channel_with_the_whole_channel_min(
+    tmp_path, monkeypatch, captured_log
+):
+    """Same two lines, same numbers -- and the min is the CHANNEL's, not a band's.
+
+    ``_load_channel_stack`` read the whole plane, took ``channel_data.min()`` and logged
+    once. Streaming sees the plane in pieces, so the decision to log and the number logged
+    both have to be deferred to the last band. A per-band implementation would print one
+    pair of lines per band, each with that band's min.
+    """
+    monkeypatch.setattr(mcp, "READ_BAND_BYTES", 1)  # one tile row per band
+
+    rng = np.random.default_rng(3)
+    channels_dir = tmp_path / "channels"
+    channels_dir.mkdir()
+    plane = rng.uniform(5.0, 4000.0, size=(384, 256)).astype(np.float32)
+    # A single, deep negative deliberately parked in the LAST band.
+    plane[380, 7] = -1234.5
+    tifffile.imwrite(str(channels_dir / "DAPI.tif"), plane)
+    tifffile.imwrite(
+        str(channels_dir / "CD8.tif"),
+        rng.uniform(5.0, 4000.0, size=(384, 256)).astype(np.float32),
+    )
+
+    mcp.merge_channels(
+        input_dir=str(channels_dir),
+        output_path=str(tmp_path / "pyr.ome.tiff"),
+        pyramid_resolutions=2,
+        tile_size=128,
+    )
+
+    negatives = [
+        line for line in captured_log.lines if "Negative values detected in" in line
+    ]
+    clipped = [line for line in captured_log.lines if "Clipped to 0. New min=" in line]
+    assert negatives == [
+        f"    WARNING: Negative values detected in DAPI: min={np.float32(-1234.5)}"
+    ], f"got {negatives}"
+    assert clipped == ["    Clipped to 0. New min=0.0"], f"got {clipped}"
+
+
+def test_the_wrapped_value_percentage_is_against_the_whole_channel(
+    tmp_path, monkeypatch, captured_log
+):
+    """The denominator, which is the number a chunked rewrite gets wrong for free.
+
+    The suspicious pixels are all parked in one band. Reported against the whole channel
+    they are a small fraction; reported against the band that holds them they are ~24x that,
+    and the 0.01%% decision threshold makes the difference visible rather than cosmetic.
+    ``detect_wrapped_values`` on the whole plane is the oracle.
+    """
+    monkeypatch.setattr(mcp, "READ_BAND_BYTES", 1)
+
+    validation = importlib.import_module("validation")
+
+    rng = np.random.default_rng(5)
+    h, w = 384, 256
+    channels_dir = tmp_path / "channels"
+    channels_dir.mkdir()
+    plane = rng.integers(0, 50000, size=(h, w), dtype=np.uint16)
+    plane[3:9, :] = 65000  # 6 rows of "wrapped" pixels, all inside one 16-row band
+    tifffile.imwrite(str(channels_dir / "DAPI.tif"), plane)
+
+    # A logger of its own: the oracle call must not emit into the capture it is the
+    # oracle FOR, or the streamed run's single line looks like two.
+    has_wrapped, count, pct = validation.detect_wrapped_values(
+        plane, logger=logging.getLogger("merge-streaming-test-oracle")
+    )
+    assert has_wrapped, "fixture does not trip the whole-array detector"
+
+    mcp.merge_channels(
+        input_dir=str(channels_dir),
+        output_path=str(tmp_path / "pyr.ome.tiff"),
+        pyramid_resolutions=2,
+        tile_size=128,
+    )
+
+    wrapped = [line for line in captured_log.lines if "potential wrapped" in line]
+    assert wrapped == [
+        f"    WARNING: {count} potential wrapped negative pixels ({pct:.4f}%) in DAPI"
+    ], f"got {wrapped}; the whole-array call reports {count} pixels ({pct:.4f}%)"
+
+    # validation.py's own line, emitted once, with the same aggregates.
+    shared = [
+        line for line in captured_log.lines if "potentially wrapped pixels" in line
+    ]
+    assert shared == [
+        f"Detected {count} potentially wrapped pixels ({pct:.4f}%), max value: 65000"
+    ], f"got {shared}"

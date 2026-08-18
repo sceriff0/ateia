@@ -133,7 +133,8 @@ laptop-viable.
 `TILED_COARSE` / `TILED_REG_TILE` / `TILED_SOLVE` / `TILED_STITCH` are the STARE method —
 the only shape it has.
 
-`TILED_REG_TILE`, `TILED_STITCH`, `TILE_FOR_BASIC` and `APPLY_PROFILES` are the
+`TILED_REG_TILE`, `TILED_STITCH`, `TILE_FOR_BASIC`, `APPLY_PROFILES` and
+`MERGE_AND_PYRAMID` are the
 processes whose memory
 request is **derived from a parameter** instead of being a constant: the first
 scales with `reg_tiled_tile + 2 × reg_tiled_halo`, the second with
@@ -144,7 +145,17 @@ SIGKILL. The arithmetic is written out inside each process' own
 comment that derives it; the two closures are near-identical and that duplication
 is forced — Nextflow 26's strict config parser rejects a function declaration in
 a config file, so there is no legal way to share a helper between them. The
-"4 GB at defaults" figures above are the shipped-default evaluation of those
+`MERGE_AND_PYRAMID` joined that list when it stopped holding the slide. It used
+to ask for a flat 200 or 300 GB on a tier over the summed channel files, because
+it allocated the whole `(C, H, W)` stack before writing anything. It now streams
+the base resolution from a generator of tiles, so its request is built from **one
+decoded plane** — estimated as 4× the largest single channel file, since a
+config closure cannot know the compression ratio — plus the pyramid levels that
+must stay resident while `tifffile` fills the SubIFDs one level at a time. That
+second term is a geometric series in `pyramid_scale` and disappears below three
+`pyramid_resolutions`, which is why both parameters appear in the row. Floor 8 GB.
+
+The "4 GB at defaults" figures above are the shipped-default evaluation of those
 formulas, not independent constants — the **parameter names**, not the numbers,
 are what `tests/test_resource_label_coverage.py` checks for these two rows.
 
@@ -199,7 +210,7 @@ unaffected by that number.
 | `QUANTIFY` | `1` | `128 GB × attempt` | `12.h × attempt` | `withName` |
 | `MERGE_QUANT_CSVS` | `2` | `32 GB × attempt` | `2.h × attempt` | `process_low` |
 | `EXPORT_GEOJSON` | `1` | `32 GB × attempt` | `2.h × attempt` | `withName` |
-| `MERGE_AND_PYRAMID` | `2` | tier on channels + masks: `f<20` → 200, else 300 GB, `× attempt` | `8.h × attempt` | `withName` |
+| `MERGE_AND_PYRAMID` | `2` | derived from the largest single channel file + `pyramid_resolutions` and `pyramid_scale`, `× attempt` *(withName)* — floor 8 GB | `8.h × attempt` | `withName` |
 | `EXPORT_SPATIALDATA` | `4` *(label)* | `200 GB` *(label)* | `4.h × attempt` *(withName)* | partial |
 | `GENERATE_POSTPROCESSING_QC` | `4` | `200 GB` | `4.h × attempt` | `process_medium` |
 
