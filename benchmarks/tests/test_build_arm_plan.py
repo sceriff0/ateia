@@ -518,3 +518,44 @@ def test_validate_against_schema_is_what_the_cli_enforces(plan):
     validator (not just the test's own reading of the schema) accepts the shipped
     arms.yaml."""
     assert validate_against_schema(plan, REPO_ROOT / "nextflow_schema.json") == []
+
+
+# ---------------------------------------------------------------------------
+# Tracing is owned by the pipeline, not by the launcher's CLI flags
+# ---------------------------------------------------------------------------
+
+def test_run_arms_does_not_pass_with_trace_or_with_report():
+    """nextflow.config declares trace/report/timeline observers driven by
+    params.trace_dir, and benchmark.config enables them. Passing -with-trace on
+    the CLI as well declares a SECOND observer for the same file and points it at
+    a directory nothing created -- which is how preprocess_shared failed with a
+    stderr log containing only the version banner. run_sweep.sh had it right:
+    pass --trace_dir and let the pipeline own it."""
+    script = (BENCH / "run_arms.sh").read_text()
+    code = "\n".join(ln for ln in script.splitlines()
+                     if not ln.lstrip().startswith("#"))
+    assert "-with-trace" not in code
+    assert "-with-report" not in code
+    assert "--trace_dir" in code, "run_arms.sh must set --trace_dir instead"
+
+
+def test_run_arms_creates_the_trace_dir_it_names():
+    """Nextflow does not create the trace file's parent directory."""
+    code = (BENCH / "run_arms.sh").read_text()
+    assert '"$outdir/trace"' in code and "mkdir -p" in code
+
+
+def test_trace_lands_where_the_loader_reads_it():
+    """load_runs() reads <root>/<run_id>/trace/trace.txt, and run_id IS the arm
+    name, so --trace_dir must be <outdir>/trace with outdir=<root>/<arm>."""
+    code = (BENCH / "run_arms.sh").read_text()
+    assert '--trace_dir "$outdir/trace"' in code
+    assert '--outdir "$outdir"' in code
+
+
+def test_a_failed_run_reports_stdout_not_only_stderr():
+    """Nextflow writes run-level errors to stdout; a message naming only the
+    stderr log sends you to a file holding just the version banner."""
+    code = (BENCH / "run_arms.sh").read_text()
+    assert "nextflow.stdout.log" in code and "tail -n" in code
+    assert ".nextflow.log" in code, "the full log path should be named too"

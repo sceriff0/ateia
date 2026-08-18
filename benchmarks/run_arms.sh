@@ -100,7 +100,7 @@ launch() {                       # launch <run_id> <arm> <input> <outdir> <args.
   local run_id="$1" arm="$2" in_csv="$3" outdir="$4"; shift 4
   local run_args=("$@")
   local rundir="$ROOT/.launch/$run_id"
-  mkdir -p "$rundir" "$outdir"
+  mkdir -p "$rundir" "$outdir" "$outdir/trace"
   echo "[$run_id] arm=$arm -> $outdir"
   (
     cd "$rundir"
@@ -108,15 +108,25 @@ launch() {                       # launch <run_id> <arm> <input> <outdir> <args.
       -profile "$PROFILE" \
       -c "$BENCH_CONF" \
       -work-dir "$rundir/work" \
-      -with-trace "$outdir/trace/trace.txt" \
-      -with-report "$outdir/trace/report.html" \
       -name "arms-$run_id" \
       --input "$in_csv" \
       --outdir "$outdir" \
+      --trace_dir "$outdir/trace" \
       "${run_args[@]}" \
       "${EXTRA_ABS[@]+"${EXTRA_ABS[@]}"}" \
       > "$outdir/nextflow.stdout.log" 2> "$outdir/nextflow.stderr.log" \
-      || echo "[$run_id] FAILED — see $outdir/nextflow.stderr.log" >&2
+      || {
+        # Nextflow writes most run-level errors (validation, missing input, a failed
+        # task's .command.err excerpt) to STDOUT, not stderr -- a message naming only
+        # the stderr log sends you to a file containing just the version banner.
+        # Show both, and name the .nextflow.log, which has the rest.
+        echo "[$run_id] FAILED" >&2
+        echo "----- last 25 lines of stdout ($outdir/nextflow.stdout.log) -----" >&2
+        tail -n 25 "$outdir/nextflow.stdout.log" >&2 2>/dev/null
+        echo "----- last 15 lines of stderr ($outdir/nextflow.stderr.log) -----" >&2
+        tail -n 15 "$outdir/nextflow.stderr.log" >&2 2>/dev/null
+        echo "----- full log: $rundir/.nextflow.log -----" >&2
+      }
   )
 }
 
