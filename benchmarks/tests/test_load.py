@@ -70,7 +70,6 @@ def test_load_runs_joins_trace_sizes_and_params():
     df = load.load_runs(
         FIX / "runs",
         run_plan_csv=FIX / "runs_run_plan.csv",
-        manifest_csv=FIX / "runs_matrix_manifest.csv",
     )
     # 2 runs x 2 processes = 4 rows
     assert len(df) == 4
@@ -96,3 +95,34 @@ def test_only_successful_drops_failed_and_aborted():
     # exit-only signal (no status column) also works
     df2 = pd.DataFrame({"process": ["A", "B"], "exit": [0, 1], "peak_rss_gb": [10, 999]})
     assert list(only_successful(df2)["process"]) == ["A"]
+
+
+def test_load_runs_reads_the_ARM_layout_too(tmp_path):
+    """run_arms.sh publishes --outdir straight to <root>/<arm>, so its size logs
+    land at <root>/<arm>/size_logs/ — not the sweep's <root>/<run_id>/out/size_logs/.
+
+    This is the bug this test exists for: load_runs hardcoded the `out/` segment,
+    so every arm run loaded with input_gb = NaN. Nothing raised — the trace still
+    parsed, so the frame looked complete and only the regression (which needs
+    input_gb) came out empty. The arm layout is not free to change: <arm>/<patient>
+    IS ihc_method's consumer contract.
+    """
+    import shutil
+    root = tmp_path / "arm_results"
+    for arm in ("valis_high_micro2", "tiled_defaults"):
+        (root / arm).mkdir(parents=True)
+        shutil.copytree(FIX / "runs" / "run0000" / "trace", root / arm / "trace")
+        # arm layout: NO intervening out/
+        shutil.copytree(FIX / "runs" / "run0000" / "out" / "size_logs",
+                        root / arm / "size_logs")
+    plan = tmp_path / "arm_plan.csv"
+    plan.write_text("run_id,arm_kind,arm\n"
+                    "valis_high_micro2,registration,valis_high_micro2\n"
+                    "tiled_defaults,registration,tiled_defaults\n")
+
+    df = load.load_runs(root, plan)
+    assert len(df) == 4, "2 arms x 2 processes"
+    assert df["input_gb"].notna().all(), (
+        "input_gb is NaN — the size logs were not found, so the resource "
+        "regression would silently fit on nothing")
+    assert set(df["run_id"]) == {"valis_high_micro2", "tiled_defaults"}

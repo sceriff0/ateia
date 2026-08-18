@@ -106,7 +106,6 @@ benchmarks/run_sweep.sh bench_run_plan.csv bench_matrix/matrix_manifest.csv benc
 python -m benchmarks.analysis.make_tables \
     --results-root bench_runs \
     --run-plan bench_run_plan.csv \
-    --manifest bench_matrix/matrix_manifest.csv \
     --outdir benchmarks/paper_data
 ```
 
@@ -128,7 +127,7 @@ run the figure path on the same results:
 ```bash
 python -m benchmarks.analysis.make_figures \
     --results-root bench_runs --run-plan bench_run_plan.csv \
-    --manifest bench_matrix/matrix_manifest.csv --outdir benchmarks/analysis
+    --outdir benchmarks/analysis
 ```
 
 The derived config is written separately and never overwrites the live one —

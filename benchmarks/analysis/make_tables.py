@@ -19,7 +19,7 @@ Each CSV is written with a sibling ``<name>.dict.md`` data dictionary. Run:
 
     python benchmarks/analysis/make_tables.py \
         --results-root bench_runs --run-plan bench_run_plan.csv \
-        --manifest bench_matrix/matrix_manifest.csv --outdir benchmarks/paper_data
+        --outdir benchmarks/paper_data
 """
 from __future__ import annotations
 
@@ -109,11 +109,11 @@ def build_scaling_fits(runs_ok: pd.DataFrame) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)
 
 
-def build_paper_data(results_root, run_plan_csv, manifest_csv, outdir) -> dict:
+def build_paper_data(results_root, run_plan_csv, outdir) -> dict:
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
-    runs_all = load.load_runs(results_root, run_plan_csv, manifest_csv)
+    runs_all = load.load_runs(results_root, run_plan_csv)
     runs_ok = load.only_successful(runs_all)
 
     master = build_runs_master(runs_ok)
@@ -278,10 +278,9 @@ def main():
     ap = argparse.ArgumentParser(description="Emit method-paper DATA tables from a completed sweep.")
     ap.add_argument("--results-root", required=True)
     ap.add_argument("--run-plan", required=True)
-    ap.add_argument("--manifest", required=True)
     ap.add_argument("--outdir", default="benchmarks/paper_data")
     a = ap.parse_args()
-    res = build_paper_data(a.results_root, a.run_plan, a.manifest, a.outdir)
+    res = build_paper_data(a.results_root, a.run_plan, a.outdir)
     print(f"Wrote paper DATA to {res['outdir']}/:")
     for name, n in res["tables"].items():
         print(f"  {name}.csv  ({n} rows)  + {name}.dict.md")

@@ -2,7 +2,7 @@
 
 This is the reproducible artifact the notebook mirrors. Run:
   python -m benchmarks.analysis.make_figures --results-root <dir> \
-      --run-plan run_plan.csv --manifest matrix_manifest.csv \
+      --run-plan run_plan.csv \
       --reg-eval reg_eval.csv --outdir benchmarks/analysis/figures
 """
 from __future__ import annotations
@@ -37,13 +37,13 @@ def _size_varying(runs_df):
     return runs_df[runs_df["varied_axis"].isin(SIZE_VARYING_AXES)]
 
 
-def run(results_root, run_plan_csv, manifest_csv, reg_eval_csv, outdir, formats=("pdf", "svg")) -> dict:
+def run(results_root, run_plan_csv, reg_eval_csv, outdir, formats=("pdf", "svg")) -> dict:
     outdir = Path(outdir)
     figdir = outdir / "figures"
     figdir.mkdir(parents=True, exist_ok=True)
     plotting.set_paper_theme()
 
-    runs_all = load.load_runs(results_root, run_plan_csv, manifest_csv)
+    runs_all = load.load_runs(results_root, run_plan_csv)
     # measurements.csv keeps EVERY row (incl. failed processes, with status/exit) — lossless. But the
     # fits/aggregates/comparisons use only SUCCESSFUL processes: a failed CellSAM/timeout has bogus
     # peak_rss + realtime that would corrupt the means and the scaling model.
@@ -124,11 +124,10 @@ def main():
     ap = argparse.ArgumentParser(description="Benchmark analysis: figures + optimal config.")
     ap.add_argument("--results-root", required=True)
     ap.add_argument("--run-plan", required=True)
-    ap.add_argument("--manifest", required=True)
     ap.add_argument("--reg-eval", default=None)
     ap.add_argument("--outdir", default="benchmarks/analysis")
     a = ap.parse_args()
-    res = run(a.results_root, a.run_plan, a.manifest, a.reg_eval, a.outdir)
+    res = run(a.results_root, a.run_plan, a.reg_eval, a.outdir)
     print(f"Wrote {res['measurements_csv']} ({len(res['runs_df'])} rows), "
           f"{res['models_csv']} ({len(res['models'])} processes), "
           f"{res['stats_csv']} (per-config variance), "

@@ -114,6 +114,10 @@ def _apply_qc_segmenter_cross(arms: list[dict], cfg: dict) -> list[dict]:
     return arms + extra
 
 
+def _compute_arm_name(patient: str, rep: int) -> str:
+    return f"compute_{patient or 'all'}" + (f"_rep{rep}" if rep else "")
+
+
 _LABELS: dict[str, str] = {}
 
 
@@ -145,7 +149,7 @@ def build_arm_plan(cfg: dict) -> list[dict]:
     for a in arms:
         _LABELS[a["arm"]] = a["label"]
         rows.append({
-            "run_id": f"arm{n:03d}", "arm_kind": "registration",
+            "run_id": a["arm"], "arm_kind": "registration",
             "start": "preprocessing", "stop": "registration",
             "from_arm": "", "rep": 0,
             "registration_method": a["backend"],
@@ -166,7 +170,7 @@ def build_arm_plan(cfg: dict) -> list[dict]:
                 f"{sorted({a['arm'] for a in arms})}")
         for m in sa.get("seg_method", []):
             rows.append({
-                "run_id": f"arm{n:03d}", "arm_kind": "segmentation",
+                "run_id": f"seg_{m}", "arm_kind": "segmentation",
                 "start": "segmentation", "stop": "", "from_arm": frm, "rep": 0,
                 "arm": f"seg_{m}", "backend": "", "memory_mode": "",
                 "reg_micro_reg": "", "seg_method": m,
@@ -181,9 +185,9 @@ def build_arm_plan(cfg: dict) -> list[dict]:
         for p in pats:
             for rep in range(int(cp.get("repeats", 1) or 1)):
                 rows.append({
-                    "run_id": f"arm{n:03d}", "arm_kind": "compute",
+                    "run_id": _compute_arm_name(p, rep), "arm_kind": "compute",
                     "start": "", "stop": "", "from_arm": "", "rep": rep,
-                    "arm": f"compute_{p or 'all'}" + (f"_rep{rep}" if rep else ""),
+                    "arm": _compute_arm_name(p, rep),
                     "backend": baseline.get("registration_method", "valis"),
                     "memory_mode": baseline.get("memory_mode", ""),
                     "reg_micro_reg": baseline.get("reg_micro_reg", ""),

@@ -9,7 +9,6 @@ def test_run_produces_config_and_figures(tmp_path):
     result = make_figures.run(
         results_root=FIX / "runs",
         run_plan_csv=FIX / "runs_run_plan.csv",
-        manifest_csv=FIX / "runs_matrix_manifest.csv",
         reg_eval_csv=None,
         outdir=tmp_path,
     )
@@ -28,7 +27,7 @@ def test_run_writes_tidy_csvs(tmp_path):
 
     res = make_figures.run(
         results_root=FIX / "runs", run_plan_csv=FIX / "runs_run_plan.csv",
-        manifest_csv=FIX / "runs_matrix_manifest.csv", reg_eval_csv=None, outdir=tmp_path,
+        reg_eval_csv=None, outdir=tmp_path,
     )
 
     meas = pd.read_csv(res["measurements_csv"])
@@ -44,15 +43,16 @@ def test_run_writes_tidy_csvs(tmp_path):
     assert set(models["process"]) == {"CONVERT_IMAGE", "SEGMENT"}
 
 
-def test_notebook_executes_on_fixture(tmp_path):
-    """Smoke: the notebook's lib calls run headless against the fixture.
+def test_run_emits_an_optimized_config_with_live_blocks(tmp_path):
+    """make_figures also derives resource directives from the fitted models.
 
-    We execute the analysis path (not nbconvert, to stay dependency-light) by
-    re-running make_figures, which mirrors notebook sections 1-3.
+    Was named test_notebook_executes_on_fixture and justified as a stand-in for
+    the notebook's sections 1-3; the notebook is gone, but the assertion is about
+    emit_config and is worth keeping on its own terms.
     """
-    res = make_figures.run(
+    make_figures.run(
         results_root=FIX / "runs", run_plan_csv=FIX / "runs_run_plan.csv",
-        manifest_csv=FIX / "runs_matrix_manifest.csv", reg_eval_csv=None, outdir=tmp_path,
+        reg_eval_csv=None, outdir=tmp_path,
     )
     assert (tmp_path / "modules.optimized.config").read_text().count("withName") >= 2
 
@@ -60,7 +60,7 @@ def test_notebook_executes_on_fixture(tmp_path):
 def test_run_accepts_formats_and_writes_png(tmp_path):
     res = make_figures.run(
         results_root=FIX / "runs", run_plan_csv=FIX / "runs_run_plan.csv",
-        manifest_csv=FIX / "runs_matrix_manifest.csv", reg_eval_csv=None,
+        reg_eval_csv=None,
         outdir=tmp_path, formats=("png",),
     )
     pngs = list((tmp_path / "figures").glob("scaling_*.png"))

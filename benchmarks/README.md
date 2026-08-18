@@ -166,7 +166,6 @@ Verify the whole harness with no data at all:
     python -m benchmarks.analysis.make_tables \
         --results-root bench_results \
         --run-plan     bench_run_plan.csv \
-        --manifest     bench_matrix/matrix_manifest.csv \
         --outdir       benchmarks/paper_data
 
 - **Output:** `benchmarks/paper_data/{runs_master,scaling_fits,registration_accuracy,
@@ -183,7 +182,6 @@ Verify the whole harness with no data at all:
     python -m benchmarks.analysis.make_figures \
         --results-root bench_results \
         --run-plan     bench_run_plan.csv \
-        --manifest     bench_matrix/matrix_manifest.csv \
         --outdir       benchmarks/analysis
 
 > **Run it any time — the sweep does not have to be finished.** Both `make_tables` and
@@ -280,8 +278,8 @@ account. Then write a `pairs.csv`:
 | `generate_matrix.py` | 1 source image | matrix of OME-TIFFs + `matrix_manifest.csv` |
 | `build_run_plan.py` | `sweep.yaml` | `run_plan.csv` |
 | `run_sweep.sh` | manifest + run plan | per-run `trace.txt` + `input_sizes.csv` + QC JSONs (`*_seg_qc.json`) |
-| **`make_tables`** | results + run plan + manifest | **`paper_data/{runs_master,scaling_fits,registration_accuracy,registration_valis_rtre,segmentation_agreement,param_matrix}.csv` (+ `.dict.md`)** — the paper DATA |
-| `make_figures` (optional) | results + run plan + manifest | `measurements.csv` + `resource_models.csv` + `resource_stats.csv` + `scaling_*.pdf/svg` + `modules.optimized.config` |
+| **`make_tables`** | results + run plan | **`paper_data/{runs_master,scaling_fits,registration_accuracy,registration_valis_rtre,segmentation_agreement,param_matrix}.csv` (+ `.dict.md`)** — the paper DATA |
+| `make_figures` (optional) | results + run plan | `measurements.csv` + `resource_models.csv` + `resource_stats.csv` + `scaling_*.pdf/svg` + `modules.optimized.config` |
 | `prepare_pairs.py` (optional) | `pairs.csv` (+ downloaded data) | per-pair input dirs + `pairs_manifest.csv` |
 | `run_registration.sh` (optional) | pairs manifest | `eval_*.json` (landmark TRE) |
 | `aggregate_eval` (optional) | eval JSONs | `reg_eval.csv` + `reg_eval_agg.csv` |

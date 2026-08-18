@@ -15,7 +15,6 @@ def test_build_paper_data_emits_all_tables_and_dicts(tmp_path):
     res = make_tables.build_paper_data(
         results_root=FIX / "runs",
         run_plan_csv=FIX / "runs_run_plan.csv",
-        manifest_csv=FIX / "runs_matrix_manifest.csv",
         outdir=tmp_path,
     )
     # every table + its data dictionary is written
@@ -70,7 +69,7 @@ def test_param_matrix_joins_both_registration_accuracy_headlines(tmp_path):
 
     out = tmp_path / "paper_data"
     make_tables.build_paper_data(runs, FIX / "runs_run_plan.csv",
-                                 FIX / "runs_matrix_manifest.csv", out)
+                                 out)
 
     reg = pd.read_csv(out / "registration_accuracy.csv")
     assert set(reg["stage"]) == {"rigid", "non_rigid"}
@@ -88,7 +87,7 @@ def test_param_matrix_joins_both_registration_accuracy_headlines(tmp_path):
 def test_dict_flags_undocumented_columns(tmp_path):
     make_tables.build_paper_data(
         results_root=FIX / "runs", run_plan_csv=FIX / "runs_run_plan.csv",
-        manifest_csv=FIX / "runs_matrix_manifest.csv", outdir=tmp_path,
+        outdir=tmp_path,
     )
     # the runs_master dictionary documents the per-stage pattern, so real stage columns
     # (e.g. SEGMENT_peak_ram_gb) must NOT be reported as undocumented

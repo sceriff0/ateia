@@ -1,4 +1,4 @@
-"""Load + join Nextflow trace, size logs, run plan and matrix manifest into a tidy frame.
+"""Load + join Nextflow trace, size logs and the run plan into a tidy frame.
 
 Generalises notebooks/resource_regression.ipynb:load_resource_data over a results
 tree laid out by benchmarks/run_sweep.sh: <root>/<run_id>/trace/trace.txt and
@@ -111,7 +111,24 @@ def aggregate_repeats(runs_df: pd.DataFrame,
     return pd.DataFrame(out_rows, columns=cols)
 
 
-def load_runs(results_root, run_plan_csv, manifest_csv) -> pd.DataFrame:
+def load_runs(results_root, run_plan_csv) -> pd.DataFrame:
+    """Tidy (run x process) frame from each run's trace + size logs.
+
+    TWO RESULT LAYOUTS ARE SUPPORTED, because the two benchmarks publish
+    differently and neither is free to change:
+
+      sweep  <root>/<run_id>/out/size_logs/...   run_sweep.sh isolates each run's
+                                                 pipeline outputs under out/
+      arms   <root>/<arm>/size_logs/...          run_arms.sh publishes --outdir
+                                                 straight to <root>/<arm>, because
+                                                 that IS ihc_method's consumer
+                                                 contract (<arm>/<patient>/qc/...)
+
+    The arm plan sets run_id to the arm name so both resolve through the same
+    <root>/<run_id> lookup. There is deliberately no `manifest` argument: the
+    matrix manifest was accepted here for a long time and never read — every
+    number comes from the trace and the size logs.
+    """
     root = Path(results_root)
     plan = pd.read_csv(run_plan_csv)
     rows = []
@@ -119,6 +136,8 @@ def load_runs(results_root, run_plan_csv, manifest_csv) -> pd.DataFrame:
         run_id = prow["run_id"]
         trace = root / run_id / "trace" / "trace.txt"
         sizes = root / run_id / "out" / "size_logs" / "input_sizes.csv"
+        if not sizes.exists():
+            sizes = root / run_id / "size_logs" / "input_sizes.csv"
         if not trace.exists():
             continue
         t = parse_trace(trace)
