@@ -138,11 +138,14 @@ ALLOWED_LINES = {
         # TILE_FOR_BASIC / BASICPY / APPLY_PROFILES gained withName blocks above it
         # (826 -> 834 once BASICPY's block gained the comment recording that running at
         # upstream defaults is a decision); 834 -> 821 when the dead PREPROCESS withName
-        # block was deleted with the in-process BaSiC path.
+        # block was deleted with the in-process BaSiC path; 821 -> 856 when
+        # TILE_FOR_BASIC's and APPLY_PROFILES' memory closures stopped being one-line
+        # multiples of the input file's size and became multi-line, tile-derived
+        # arithmetic (the two processes now stream rather than holding the slide).
         # Re-pin, do not
         # widen. (Re-pin from the file, not by guessing:
         # `grep -n "params.expanded_quantification ?" conf/modules.config`.)
-        821: (
+        856: (
             "ext.args = { params.expanded_quantification ? '--expanded' : "
             "'' } -- conf/*.config closures cannot see lib/*.groovy classes, "
             "so ext.args must read params raw here."

@@ -18,13 +18,16 @@ WHAT IS PRESERVED FROM THE IN-PROCESS BaSiC PATH, and where it comes from:
   ``bin/preprocess.py``'s comment records (an earlier version tested ``"DAPI" in
   name.upper()`` and silently corrected a configured CELLTOX fiducial).
 
-* **The negative clip.** ``bin/utils/validation.py``'s ``clip_negative_values``, called
-  ONCE on the assembled stack, so its percentage is computed against the whole image and
-  it emits exactly one aggregate line. Not forked, not re-implemented, and deliberately
-  not called per channel: ``bin/split_multichannel.py``'s ``_StreamingNegativeClip``
-  exists only because that script never holds the whole array at once. This one does --
-  the same ``np.stack`` the in-process path built before casting -- so it can just call
-  the real function.
+* **The negative clip.** One aggregate line, with its percentage computed against the
+  WHOLE image, from ``bin/utils/validation.py``'s ``StreamingNegativeClip``. Not forked
+  and not re-implemented: that class is the chunked counterpart of ``clip_negative_values``
+  and folds per-tile counts into exactly the numbers, and the exact log lines, a single
+  whole-array call would have produced. ``bin/split_multichannel.py`` uses the same class
+  for the same reason. This script used to call the whole-array function directly, on the
+  ``np.stack`` the in-process path built before casting; it no longer holds a whole array
+  to call it on. Only real pixels are folded in -- a partial write-tile at the slide edge
+  is passed as its valid sub-array, never as the padded buffer, or the padding would enter
+  the reported percentage.
 
   Its RATIONALE has changed and the old one is not carried over. ``bin/preprocess.py``
   explained the clip by BaSiC's darkfield exceeding a pixel value; the pipeline now runs
@@ -44,6 +47,28 @@ WHAT IS PRESERVED FROM THE IN-PROCESS BaSiC PATH, and where it comes from:
   non-integral pixel and never averages out. Same rule, same words, as
   ``merge_channels_pyramid.to_uint16``; written out here rather than imported because
   that module lives in a different container image and pulls a different dependency set.
+
+NOTHING SLIDE-SIZED IS EVER RESIDENT, and this is the half of the path where that used
+to be false. The correction is applied one OUTPUT WRITE-TILE at a time: read that tile's
+region through the lazy zarr view, correct it, clip it, cast it, hand it to ``tifffile``'s
+iterator-fed writer, drop it. Peak is one tile plus the profile planes -- constant in both
+slide size and channel count, the same property ``bin/tiled_stitch.py`` has on the STARE
+path and the reason ``conf/modules.config`` sizes this process from the tile size rather
+than from the input file's size.
+
+An earlier version accumulated every corrected channel into a list, ``np.stack``-ed it,
+clipped the stack, and cast the stack -- with the list still referenced, so the stack copy
+and the cast's temporaries were live at the same time. That is ~8 x C x H x W bytes, about
+115 GB on an 8-channel 40000x30000 uint16 slide, and it is why the memory ask here was
+size-linear.
+
+THE WRITE-TILE GRID AND THE FOV GRID DO NOT ALIGN, and must not be made to. Write tiles are
+``WRITE_TILE`` px (a TIFF layout choice); pseudo-FOVs are ``params.preproc_tile_size`` px (a
+BaSiC sampling choice). Any output tile can therefore straddle up to four FOVs, and an
+illumination profile is indexed in FOV-LOCAL coordinates -- so each tile is corrected
+PIECEWISE, over the sub-windows ``fov_tiling.fov_overlaps`` reports. Those sub-windows
+partition the tile exactly, so every pixel is corrected once: not twice at a seam, and not
+zero times in a gap.
 
 THE PROFILE STACK'S SHAPE. ``/opt/main.py`` builds ``np.array(flatfields)`` -- one 2-D
 plane per FITTED channel, in tile-stack order -- and writes it with ``ome=True``. So its
@@ -75,11 +100,11 @@ sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
 import numpy as np  # noqa: E402
 import tifffile  # noqa: E402
-from fov_tiling import reconstruct_image_from_fovs, split_image_into_fovs  # noqa: E402
+from fov_tiling import fov_overlaps  # noqa: E402
 from logger import configure_logging, get_logger  # noqa: E402
 from pixel_size import read_ome_pixel_size, warn_on_pixel_size_mismatch  # noqa: E402
 from tiled_io import open_lazy  # noqa: E402
-from validation import clip_negative_values, log_image_stats  # noqa: E402
+from validation import StreamingImageStats, StreamingNegativeClip  # noqa: E402
 
 logger = get_logger(__name__)
 
@@ -90,6 +115,14 @@ __all__ = ["apply_basic_profiles", "main"]
 SUPPORTED_SIDECAR_VERSIONS = (1,)
 
 STAGE = "apply_basic_profiles"
+
+#: Output write-tile size, in pixels -- both the TIFF's tile layout and the streaming
+#: unit, deliberately the same number so the correction is computed exactly once per
+#: tile written. It is a TIFF layout choice and is INDEPENDENT of
+#: params.preproc_tile_size, the pseudo-FOV size BaSiC fits on; see the module
+#: docstring on why the two grids must not be conflated. conf/modules.config's memory
+#: formula for APPLY_PROFILES is derived from this value.
+WRITE_TILE = 2048
 
 
 def _read_profile_stack(path, n_expected, tile_shape, label, require_positive=False):
@@ -242,65 +275,110 @@ def apply_basic_profiles(
 
     logger.info(
         f"Applying profiles to {len(corrected_channels)}/{len(channel_names)} channel(s) "
-        f"over {n_fovs_y}x{n_fovs_x} pseudo-FOVs"
+        f"over {n_fovs_y}x{n_fovs_x} pseudo-FOVs, streaming in {WRITE_TILE}px write-tiles"
     )
 
-    arr, _dtype, close = open_lazy(image_path)
-    channels = []
-    try:
-        for index, name in enumerate(channel_names):
-            channel = np.asarray(arr[index, :, :])
-            if index not in corrected_channels:
-                logger.debug(f"  [SKIP] {name!r} (nuclear/fiducial, or nothing fitted)")
-                channels.append(channel)
-                continue
+    n_channels = len(channel_names)
+    # float32 is what the whole-array path produced: np.stack over a mix of corrected
+    # float32 planes and untouched integer planes promoted everything to float32, and the
+    # clip then ran on that. Keeping the per-tile working dtype identical is what makes
+    # the streamed output bit-identical to the assembled one.
+    clip_stats = StreamingNegativeClip(np.dtype(np.float32), logger, stage_name=STAGE)
+    out_stats = StreamingImageStats(
+        storage_dtype, (n_channels, height, width), "after_basic_correction", logger
+    )
 
-            k = profile_index[index]
-            fov_stack, _pos, _shape = split_image_into_fovs(channel, n_fovs_x, n_fovs_y)
-            corrected_fovs = (
-                fov_stack.astype(np.float32) - darkfields[k]
-            ) / flatfields[k]
-            channels.append(
-                reconstruct_image_from_fovs(
-                    corrected_fovs.astype(np.float32), positions, (height, width)
+    def _correct_tile(crop, index, y0, x0):
+        """One write-tile's pixels, corrected, as float32.
+
+        The arithmetic is elementwise-identical to the whole-array path's
+        ``(fov_stack.astype(float32) - darkfield) / flatfield`` then ``.astype(float32)``:
+        the uint16 crop is cast to float32, the float64 profiles promote the subtraction
+        and the division to float64, and the result is cast back down. Only the ORDER the
+        pixels are visited in has changed.
+        """
+        if index not in corrected_channels:
+            # Copied through, but still cast: np.stack promoted the skipped integer
+            # channels to float32 alongside the corrected ones, so the clip saw float32
+            # for every channel and the storage cast ran from float32 for every channel.
+            return crop.astype(np.float32)
+
+        k = profile_index[index]
+        out = np.empty(crop.shape, dtype=np.float32)
+        for fov_index, window, profile in fov_overlaps(
+            positions, y0, x0, crop.shape[0], crop.shape[1]
+        ):
+            out[window] = (
+                (crop[window].astype(np.float32) - darkfields[k][profile])
+                / flatfields[k][profile]
+            ).astype(np.float32)
+        return out
+
+    def _tiles():
+        """Yield the output in tifffile's tile order (channel, row, col)."""
+        for index in range(n_channels):
+            if index not in corrected_channels:
+                logger.debug(
+                    f"  [SKIP] {channel_names[index]!r} (nuclear/fiducial, or nothing fitted)"
                 )
+            else:
+                logger.debug(f"  [OK] {channel_names[index]!r} corrected")
+            for y0 in range(0, height, WRITE_TILE):
+                for x0 in range(0, width, WRITE_TILE):
+                    th = min(WRITE_TILE, height - y0)
+                    tw = min(WRITE_TILE, width - x0)
+                    crop = np.asarray(
+                        arr[index, slice(y0, y0 + th), slice(x0, x0 + tw)]
+                    )
+                    valid = _correct_tile(crop, index, y0, x0)
+                    # Only the VALID sub-array is folded into the aggregates; the pad
+                    # below is a TIFF layout artefact and is not part of the image.
+                    valid = clip_stats.process(valid)
+                    valid = _to_storage_dtype(valid, storage_dtype)
+                    out_stats.process(valid)
+
+                    # A fresh full-size buffer per tile, as bin/tiled_stitch.py does: the
+                    # writer consumes lazily, so a reused buffer would be overwritten
+                    # before it was encoded.
+                    tile = np.zeros((WRITE_TILE, WRITE_TILE), dtype=storage_dtype)
+                    tile[:th, :tw] = valid
+                    yield tile
+
+    arr, _dtype, close = open_lazy(image_path)
+    try:
+        metadata = {
+            "axes": "CYX",
+            "Channel": {"Name": list(channel_names)},
+            "PhysicalSizeX": pixel_size_x,
+            "PhysicalSizeXUnit": "\u00b5m",
+            "PhysicalSizeY": pixel_size_y,
+            "PhysicalSizeYUnit": "\u00b5m",
+        }
+        with tifffile.TiffWriter(str(output_path), bigtiff=True, ome=True) as tw:
+            tw.write(
+                _tiles(),
+                shape=(n_channels, height, width),
+                dtype=storage_dtype,
+                photometric="minisblack",
+                metadata=metadata,
+                compression="zlib",
+                tile=(WRITE_TILE, WRITE_TILE),
             )
-            logger.debug(f"  [OK] {name!r} corrected")
     finally:
         close()
 
-    # np.stack promotes the mix of corrected float32 and untouched integer channels to
-    # float32 -- exactly what the in-process path's `np.stack(preprocessed_channels)` did
-    # with BaSiC's float32 output beside its skipped uint16 channels.
-    corrected = np.stack(channels, axis=0)
+    # After the last tile, so both aggregates cover the whole image -- one line each, with
+    # the same numbers the whole-array calls printed.
+    clip_stats.finalize()
+    out_stats.finalize()
 
-    # ONE aggregate line, over the whole image, from the shared function. See the module
-    # docstring for why this is not the per-channel streaming aggregator.
-    corrected = clip_negative_values(corrected, logger, stage_name=STAGE)
-
-    corrected = _to_storage_dtype(corrected, storage_dtype)
-    log_image_stats(corrected, "after_basic_correction", logger)
-
-    metadata = {
-        "axes": "CYX",
-        "Channel": {"Name": channel_names[: corrected.shape[0]]},
-        "PhysicalSizeX": pixel_size_x,
-        "PhysicalSizeXUnit": "µm",
-        "PhysicalSizeY": pixel_size_y,
-        "PhysicalSizeYUnit": "µm",
-    }
-    tifffile.imwrite(
-        str(output_path),
-        corrected,
-        photometric="minisblack",
-        metadata=metadata,
-        bigtiff=True,
-        ome=True,
-        compression="zlib",
-        tile=(2048, 2048),
+    logger.info(
+        f"[OK] Saved OME-TIFF with {n_channels} channels to {output_path}"
     )
-    logger.info(f"[OK] Saved OME-TIFF with {corrected.shape[0]} channels to {output_path}")
-    return corrected
+    # Returns the output PATH, not the pixels. The whole-array version returned the
+    # assembled slide, which is precisely the object this function now exists not to
+    # build; handing one back would reintroduce the peak at every call site.
+    return Path(output_path)
 
 
 def parse_args(argv=None):

@@ -37,91 +37,17 @@ from logger import configure_logging, get_logger
 from metadata import extract_channel_names_from_ome, is_nuclear
 from pixel_size import read_ome_pixel_size, warn_on_pixel_size_mismatch
 from tiled_io import open_lazy
-from validation import clip_negative_values
+from validation import StreamingNegativeClip, clip_negative_values
 
 logger = get_logger(__name__)
 
 __all__ = ["main"]
 
 
-class _StreamingNegativeClip:
-    """Accumulates ``clip_negative_values``' whole-image statistics across
-    per-channel reads, and emits the SAME log line(s) it would have emitted from
-    a single whole-array call -- once, after the last channel, not once per
-    channel.
-
-    ``clip_negative_values`` (``bin/utils/validation.py``) computes GLOBAL
-    negative-pixel stats (count, percentage of the WHOLE image, min before/after)
-    from one array and logs one line. Reading channels one at a time means no
-    single call ever sees the whole array, so calling it per-channel would
-    fragment that into C lines, each with a percentage computed against a single
-    channel's size instead of the whole image's -- same pixels, different
-    (wrong) observable log output. This class keeps the numbers identical to a
-    real whole-array call: ``count``/``size`` are summed across channels and the
-    percentage is computed once, at the end, from those sums (never averaged or
-    summed per-channel), and ``min_before``/``min_after`` are the true min across
-    all channels, computed the same way a single ``data.min()`` over the whole
-    array would.
-
-    Clipping is applied to every channel unconditionally (when the dtype is
-    signed/float): ``np.clip(x, 0, None)`` is a no-op on already-nonnegative
-    data, so this is pixel-identical to the original's whole-array
-    ``if has_neg: data = np.clip(...)`` regardless of whether the specific
-    channel -- or even the whole image -- had any negative values.
-    """
-
-    def __init__(self, dtype, logger, stage_name):
-        self._logger = logger
-        self._stage = stage_name
-        self._active = not np.issubdtype(dtype, np.unsignedinteger)
-        self._count = 0
-        self._size = 0
-        self._min_before = None
-        self._min_after = None
-        if not self._active:
-            logger.debug(f"[{stage_name}] Unsigned dtype, no negative clipping needed")
-
-    def process(self, channel_data):
-        """Clip one channel in place-equivalent fashion and fold its stats in."""
-        if not self._active:
-            return channel_data
-
-        min_before = channel_data.min()
-        count = int(np.sum(channel_data < 0))
-
-        self._count += count
-        self._size += channel_data.size
-        if self._min_before is None or min_before < self._min_before:
-            self._min_before = min_before
-
-        clipped = np.clip(channel_data, 0, None)
-        min_after = clipped.min()
-        if self._min_after is None or min_after < self._min_after:
-            self._min_after = min_after
-
-        return clipped
-
-    def finalize(self):
-        """Log the aggregate, exactly once, matching detect_negative_values' and
-        clip_negative_values' original whole-array log lines."""
-        if not self._active:
-            return
-
-        if self._count == 0:
-            self._logger.debug(f"[{self._stage}] No negative values to clip")
-            return
-
-        pct = self._count / self._size * 100
-        # Matches detect_negative_values' warning (validation.py:115-118).
-        self._logger.warning(
-            f"Detected {self._count} negative pixels ({pct:.4f}%), "
-            f"min value: {self._min_before}"
-        )
-        # Matches clip_negative_values' info line (validation.py:219-222).
-        self._logger.info(
-            f"[{self._stage}] Clipped {self._count} negative pixels ({pct:.4f}%) to 0. "
-            f"Min before: {self._min_before}, after: {self._min_after}"
-        )
+# The streaming negative-clip aggregator used to be defined here, privately. It now
+# lives in bin/utils/validation.py beside the whole-array clip_negative_values it
+# mirrors, because bin/apply_basic_profiles.py needs the same thing for the same
+# reason -- and two copies of a log-contract shim is exactly how the two copies drift.
 
 
 def split_multichannel_tiff(
@@ -203,7 +129,7 @@ def split_multichannel_tiff(
             n_channels = raw_shape[0]
             logger.info(f"  Normalized to (C, H, W) with {n_channels} channels")
 
-            clip_stats = _StreamingNegativeClip(
+            clip_stats = StreamingNegativeClip(
                 lazy_dtype, logger, stage_name="split_multichannel"
             )
 

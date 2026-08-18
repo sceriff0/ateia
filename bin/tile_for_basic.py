@@ -21,11 +21,24 @@ come from Z. Axis order is ``CZYX`` and not ``ZCYX`` because the module iterates
 CHANNELS and fits one profile per channel; putting tiles on C would fit one profile per
 tile and mix every marker together.
 
-TILING IS NOT REIMPLEMENTED. ``count_fovs`` / ``split_image_into_fovs`` come from
-``bin/utils/fov_tiling.py`` -- the same non-overlapping, remainder-distributing grid the
-deleted in-process path used, including its zero-padding of edge tiles to the grid's
-maximum tile size (BaSiC saw those padded tiles before the backend swap too, so the fit
-input is unchanged).
+TILING IS NOT REIMPLEMENTED. ``count_fovs`` / ``fov_positions`` / ``iter_padded_fovs``
+come from ``bin/utils/fov_tiling.py`` -- the same non-overlapping, remainder-distributing
+grid the deleted in-process path used, including its zero-padding of edge tiles to the
+grid's maximum tile size. That padding is not a leftover: BaSiCPy's ``fit()`` takes one
+``(N, Y, X)`` ndarray and has no ragged-input path, so tiles that differ by a pixel MUST
+be padded to a common shape or they cannot be passed at all. The fit input is byte-for-byte
+what the in-process path produced.
+
+NOTHING SLIDE-SIZED IS EVER RESIDENT. The grid is laid out by ``fov_positions``, which is
+pure arithmetic on ``(H, W, n_fovs_y, n_fovs_x)`` and reads no pixels; each tile is then
+read as its own region through the lazy zarr view and written straight out. Peak is ONE
+padded tile, independent of both slide size and channel count. This is the same discipline
+as ``bin/tiled_stitch.py`` on the STARE path, and ``conf/modules.config``'s memory formula
+for this process is derived from the tile size accordingly.
+
+An earlier version read and split a whole channel purely to learn ``positions`` and
+``tile_shape``, discarding the pixels -- geometry that ``fov_positions`` now returns for
+free. That is why ``fov_tiling`` separates the grid from the array at all.
 
 THE FIDUCIAL SKIP IS MADE HERE, ONCE. The removed in-process path skipped BaSiC for the
 nuclear/fiducial channel, and its comment recorded that an earlier version tested
@@ -52,7 +65,7 @@ sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
 import numpy as np  # noqa: E402
 import tifffile  # noqa: E402
-from fov_tiling import count_fovs, split_image_into_fovs  # noqa: E402
+from fov_tiling import count_fovs, fov_positions, iter_padded_fovs  # noqa: E402
 from logger import configure_logging, get_logger  # noqa: E402
 from metadata import is_nuclear  # noqa: E402
 from tiled_io import open_lazy  # noqa: E402
@@ -159,24 +172,37 @@ def tile_for_basic(
         f"(fitting {len(profile_channels)}, skipping {len(skipped)})"
     )
 
+    # Pure geometry: no pixels read, nothing image-sized allocated. Identical to what
+    # split_image_into_fovs would have returned for this grid
+    # (tests/test_fov_tiling.py::test_pure_geometry_matches_the_materialising_split).
+    positions, tile_shape = fov_positions((height, width), n_fovs_y, n_fovs_x)
+
     arr, _dtype, close = open_lazy(image_path)
-    positions = None
-    tile_shape = None
     try:
-        # tifffile writes plane-by-plane from an iterator given an explicit shape, so the
-        # padded tile stack of ONE channel is the largest thing resident at a time -- the
-        # same working set the in-process path had. Same pattern as bin/tiled_stitch.py.
-        first = np.asarray(arr[profile_channels[0], :, :])
-        _stack, positions, tile_shape = split_image_into_fovs(first, n_fovs_x, n_fovs_y)
+        def _read_region(source_index):
+            """Lazy region reader bound to one source channel.
+
+            Bound through a factory rather than closing over the loop variable: a bare
+            closure would capture the NAME, so every tile of every channel would read
+            whichever channel the loop had reached by the time the writer pulled it --
+            and because the writer pulls lazily, that is exactly what would happen.
+            """
+
+            def read(y0, x0, h, w):
+                return np.asarray(
+                    arr[source_index, slice(y0, y0 + h), slice(x0, x0 + w)]
+                )
+
+            return read
 
         def _planes():
+            # tifffile writes plane-by-plane from an iterator given an explicit shape, so
+            # ONE padded tile is the largest thing resident at a time -- not a channel,
+            # and not the stack. Same pattern as bin/tiled_stitch.py:stream_tiles.
             for source_index in profile_channels:
-                channel = np.asarray(arr[source_index, :, :])
-                fov_stack, _pos, _shape = split_image_into_fovs(
-                    channel, n_fovs_x, n_fovs_y
+                yield from iter_padded_fovs(
+                    _read_region(source_index), positions, tile_shape, dtype
                 )
-                for tile_index in range(n_tiles):
-                    yield fov_stack[tile_index]
 
         tifffile.imwrite(
             str(output_path),

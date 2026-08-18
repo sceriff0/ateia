@@ -473,7 +473,23 @@ HOURS_RE = re.compile(r"(\d+(?:\.\d+)?)\s*\.\s*h\b")
 # Widening this list is a deliberate act: it means asserting that the new
 # closure's value genuinely cannot be computed from pytest, the way these two
 # cannot.
-DERIVED_MEMORY_PARAMS = ("reg_tiled_tile", "reg_tiled_halo", "reg_tiled_out_tile")
+#
+# `preproc_tile_size` was added when TILE_FOR_BASIC and APPLY_PROFILES stopped
+# holding the slide. Both used to ask for a flat multiple of the INPUT FILE's
+# size (`f x 3 GB` and `f x 7 GB`), which the numeric comparison could check.
+# Both now stream a tile at a time, so their requests are built from the
+# pseudo-FOV size the same way the two STARE rows are built from the tile and
+# halo -- a profile-plane term of `2 x C x preproc_tile_size^2 x 8` bytes plus
+# write buffers, none of it computable here. The residual `ome_tiff.size()` term
+# is not a magnitude a doc row could state either: it bounds ONE DECODED SOURCE
+# PLANE, whose size depends on the channel count, which is not visible in a
+# config closure. The doc rows name every term instead.
+DERIVED_MEMORY_PARAMS = (
+    "reg_tiled_tile",
+    "reg_tiled_halo",
+    "reg_tiled_out_tile",
+    "preproc_tile_size",
+)
 
 # A memory request derived from params at submission time rather than being a
 # literal -- either an allowlisted `params.reg_tiled_tile` read (the inlined form
