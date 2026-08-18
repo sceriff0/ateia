@@ -237,6 +237,51 @@ def arms_manifest_rows(plan: list[dict]) -> list[dict]:
     } for r in plan if r["arm_kind"] == "registration"]
 
 
+def schema_enums(schema_path: Path) -> dict:
+    """param -> allowed values, from nextflow_schema.json.
+
+    The same enum plugin/nf-schema's validateParameters() enforces at run time.
+    """
+    import json
+
+    out: dict[str, list] = {}
+
+    def walk(node):
+        if isinstance(node, dict):
+            for k, v in node.items():
+                if isinstance(v, dict) and "enum" in v:
+                    out[k] = v["enum"]
+                walk(v)
+        elif isinstance(node, list):
+            for i in node:
+                walk(i)
+
+    walk(json.loads(schema_path.read_text()))
+    return out
+
+
+def validate_against_schema(plan: list[dict], schema_path: Path) -> list[str]:
+    """Every enum-valued param an arm pins must be a value the pipeline accepts.
+
+    This exists because a one-character typo cost a whole submission: arms.yaml
+    pinned `seg_method: instanseg` (one 't'), which is NOT the pipeline's
+    `instantseg`, and nothing caught it until all 14 runs had been queued,
+    scheduled, and died inside validateParameters(). The name-level checks all
+    passed -- and the typo is easy, because `instanseg_model_dir` really is
+    spelled with one 't'.
+
+    Checked HERE, in the plan builder, so it fails in the seconds-long local step
+    rather than after the cluster has accepted the work.
+    """
+    enums = schema_enums(schema_path)
+    bad = []
+    for r in plan:
+        for k, v in r.items():
+            if k in enums and v not in ("", None) and v not in enums[k]:
+                bad.append(f"  {r['arm']}: {k}={v!r} -- allowed: {enums[k]}")
+    return bad
+
+
 def _write_csv(path: Path, rows: list[dict], lead: list[str]) -> None:
     fields = list(lead)
     for r in rows:
@@ -283,6 +328,19 @@ def main():
 
     cfg = yaml.safe_load(a.arms.read_text())
     plan = build_arm_plan(cfg)
+
+    # Fail before anything is written, so a stale plan is never left behind for
+    # the launcher's non-empty check to accept.
+    schema = Path(__file__).resolve().parents[1] / "nextflow_schema.json"
+    if schema.exists():
+        bad = validate_against_schema(plan, schema)
+        if bad:
+            raise SystemExit(
+                "arms.yaml pins values the pipeline will reject:\n"
+                + "\n".join(bad)
+                + "\n\nThese are checked against nextflow_schema.json here because "
+                  "validateParameters() would otherwise only reject them once every "
+                  "run had been queued and scheduled.")
 
     patients = read_input_patients(a.input)
     cp = cfg.get("compute_profile") or {}

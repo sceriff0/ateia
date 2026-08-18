@@ -62,7 +62,7 @@ null result.
 
 `--start segmentation`, resuming from `<root>/<from_arm>/csv/registered.csv`. So
 registration happens once, and the comparison is not confounded by arms that
-registered differently. **3 runs** (instanseg / stardist / cellsam).
+registered differently. **3 runs** (instantseg / stardist / cellsam).
 
 Scored two ways, neither needing ground truth:
 

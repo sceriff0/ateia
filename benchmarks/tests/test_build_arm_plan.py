@@ -28,6 +28,8 @@ from benchmarks.build_arm_plan import (
     arms_manifest_rows,
     build_arm_plan,
     read_input_patients,
+    schema_enums,
+    validate_against_schema,
 )
 
 
@@ -101,6 +103,48 @@ def test_every_flag_run_arms_passes_is_carried_by_the_plan(plan):
     missing = sorted(flags - columns)
     assert not missing, (
         f"run_arms.sh reads plan columns that build_arm_plan never writes: {missing}")
+
+
+def _schema_enums() -> dict:
+    """Delegates to the shipped implementation -- a second copy here could agree
+    with itself while disagreeing with what build_arm_plan actually enforces."""
+    return schema_enums(REPO_ROOT / "nextflow_schema.json")
+
+
+def test_every_arm_value_satisfies_the_schema_enum(plan):
+    """Checking param NAMES is not enough -- this is the bug that shipped.
+
+    arms.yaml pinned seg_method: instanseg (one 't'). The name check passed, the
+    plan built, the launcher ran, and every one of the 14 runs died at
+    validateParameters() with "Expected any of [[stardist, instantseg, cellsam]]"
+    -- after the job had been queued and scheduled. The typo is especially easy
+    here because `instanseg_model_dir` IS spelled with one 't'.
+
+    An enum is exactly the kind of thing a plan can get wrong statically, so it is
+    checked statically.
+    """
+    enums = _schema_enums()
+    bad = []
+    for r in plan:
+        for k, v in r.items():
+            if k in enums and v not in ("", None) and v not in enums[k]:
+                bad.append(f"{r['arm']}: {k}={v!r} not in {enums[k]}")
+    assert not bad, "arm values rejected by nextflow_schema.json:\n  " + "\n  ".join(bad)
+
+
+def test_qc_segmenter_cross_values_are_real_backends(cfg):
+    """Same check at the source, so the message points at arms.yaml rather than a
+    generated row."""
+    enums = _schema_enums()
+    allowed = enums["seg_method"]
+    for key, path in (("qc_segmenter_cross", ("qc_segmenter_cross", "seg_method")),
+                      ("segmentation_arms", ("segmentation_arms", "seg_method"))):
+        node = cfg
+        for step in path:
+            node = node.get(step, {}) if isinstance(node, dict) else {}
+        for m in (node or []):
+            assert m in allowed, f"arms.yaml {key}.seg_method has {m!r}; allowed: {allowed}"
+    assert cfg["baseline"]["seg_method"] in allowed
 
 
 def test_registration_arms_all_pin_reg_qc_2(plan):
@@ -467,3 +511,10 @@ def test_pull_script_never_copies_the_images(tmp_path):
     subprocess.run([str(BENCH / "pull_to_ihc_method.sh"), str(src), str(ihc)],
                    capture_output=True, text=True, check=True)
     assert not list((ihc / "data").rglob("*.ome.tiff"))
+
+
+def test_validate_against_schema_is_what_the_cli_enforces(plan):
+    """The CLI raises SystemExit on a non-empty result; this pins that the shipped
+    validator (not just the test's own reading of the schema) accepts the shipped
+    arms.yaml."""
+    assert validate_against_schema(plan, REPO_ROOT / "nextflow_schema.json") == []

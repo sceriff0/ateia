@@ -42,7 +42,7 @@ baseline:
   reg_qc: 2                    # REQUIRED for every registration arm: reg_qc=2 is what
                                # emits the staged seg-overlap QC the arm ranking reads.
                                # An arm at reg_qc<2 produces no accuracy row at all.
-  seg_method: instanseg        # pipeline default; the QC segmenter unless crossed below
+  seg_method: instantseg       # pipeline default; the QC segmenter unless crossed below
   memory_mode: high
   reg_micro_reg: 2
   registration_method: valis
@@ -100,10 +100,10 @@ registration_arms:
 qc_segmenter_cross:
   cross: reference                         # reference | all | none
   reference_arm: valis_high_micro2         # must name an arm the grid above produces
-  seg_method: [instanseg, stardist, cellsam]
+  seg_method: [instantseg, stardist, cellsam]
   # stardist needs segmentation_model_dir and cellsam needs its weights (or a
   # valid DEEPCELL_ACCESS_TOKEN) on the cluster — see conf/ieo.config. Drop a
-  # method here if it cannot run at your site; instanseg is the one that runs on
+  # method here if it cannot run at your site; instantseg is the one that runs on
   # a fresh clone, and it is the pipeline default.
 
 # -----------------------------------------------------------------------------
@@ -120,7 +120,7 @@ qc_segmenter_cross:
 # only this arm.
 segmentation_arms:
   from_arm:   valis_high_micro2
-  seg_method: [instanseg, stardist, cellsam]   # 3 runs/patient
+  seg_method: [instantseg, stardist, cellsam]   # 3 runs/patient
 
   # SCORING, on tissue with no ground truth. Two reference-free signals:
   #
