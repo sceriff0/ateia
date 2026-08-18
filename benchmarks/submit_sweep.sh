@@ -26,11 +26,13 @@
 # for that reason. Trim sweep.yaml's scaling_grid/registration_grid target_px if
 # that does not fit -- the regression needs a size RANGE, not the largest cell.
 #
-# Prereqs (run the two python steps yourself first, on a login node):
+# ONE PREREQ, run yourself on a login node: the image matrix. It is the TB-scale,
+# hours-long step, so it stays outside this job -- a resubmission must not
+# regenerate it. The run plan is NOT a prereq: this script builds it below, the
+# way submit_arms.sh does, so it can never drift from sweep.yaml.
+#
 #   python $SRC_DIR/benchmarks/generate_matrix.py --source <one-real-slide>.ome.tif \
 #       --outdir $BENCH_DIR/bench_matrix --sweep $SRC_DIR/benchmarks/configs/sweep.yaml
-#   python $SRC_DIR/benchmarks/build_run_plan.py --sweep $SRC_DIR/benchmarks/configs/sweep.yaml \
-#       --out $BENCH_DIR/bench_run_plan.csv --repeats 3
 #
 # Submit:  cd /beegfs/scratch/ieo7660/analysis_runs/method_paper/benchmark
 #          mkdir -p logs && sbatch ~/pipelines/mirage/benchmarks/submit_sweep.sh
@@ -42,11 +44,14 @@
 BENCH_DIR="/beegfs/scratch/ieo7660/analysis_runs/method_paper/benchmark"
 SRC_DIR="$HOME/pipelines/mirage"          # the checkout. NOTE: unquoted $HOME, never "~/..."
 MATRIX_DIR="$BENCH_DIR/bench_matrix"      # from generate_matrix --outdir (BIG -- see the note below)
-RUN_PLAN="$BENCH_DIR/bench_run_plan.csv"  # from build_run_plan --out
+RUN_PLAN="$BENCH_DIR/bench_run_plan.csv"  # written by this script (step 1 below)
 RESULTS="$BENCH_DIR/bench_results"        # per-run outputs + work dirs land here
 PROFILES="singularity,ieo"                # OVERRIDES run_sweep.sh's default -profile docker
 SITE_CONFIG="$SRC_DIR/conf/ieo.config"    # gitignored: executor=slurm + singularity cacheDir + paths
 CONDA_ENV="nf-env"                        # env that has nextflow + python
+REPEATS="${SWEEP_REPEATS:-3}"             # replicate runs per config. 135 configs -> 405 runs at 3,
+                                          # 135 at 1. Timing at n=1 is noisy (cache state, node
+                                          # contention), so 3 is the default; drop to 1 for a first pass.
 CONCURRENCY="${SWEEP_CONCURRENCY:-16}"   # pipeline runs launched AT ONCE (each = 1 Nextflow head that
                                           # submits its OWN SLURM process jobs). 16 heads x ~3 GB heap
                                           # (NXF_OPTS below) fit in --mem=64G; each head runs up to
@@ -63,6 +68,24 @@ mkdir -p logs
 source ~/.bashrc
 conda activate "$CONDA_ENV"
 command -v nextflow >/dev/null || { echo "nextflow not on PATH (check CONDA_ENV / module load)"; exit 1; }
+# Resolve the interpreter rather than assuming `python` exists. A conda env can
+# provide nextflow while exposing python only as `python3` (or leaving python in
+# `base`), and with no `set -e` here a bare `python ...` would fail, the plan
+# would not be written, and the launch would proceed against a stale one. Observed
+# on this cluster: "line 112: python: command not found".
+PYTHON="${PYTHON:-$(command -v python3 || command -v python || true)}"
+[ -n "$PYTHON" ] || { echo "no python3/python on PATH (check CONDA_ENV)"; exit 1; }
+echo "Using python: $PYTHON ($("$PYTHON" --version 2>&1))"
+# The plan builder needs PyYAML. If PYTHON resolved to a system interpreter rather
+# than the conda env's, the import fails INSIDE the plan step, which without
+# `set -e` just leaves the plan unwritten. Check it here so the message names the
+# real problem.
+"$PYTHON" -c "import yaml" 2>/dev/null || {
+    echo "ERROR: $PYTHON cannot import yaml (PyYAML)." >&2
+    echo "       conda activate $CONDA_ENV && conda install pyyaml   (or pip install pyyaml)" >&2
+    echo "       or set PYTHON=/path/to/the/right/python before sbatch." >&2
+    exit 1
+}
 # Keep Singularity image cache off read-only $HOME (matches conf/ieo.config's cacheDir).
 export NXF_SINGULARITY_CACHEDIR="${NXF_SINGULARITY_CACHEDIR:-/hpcnfs/scratch/P_DIMA_ATTEND/users/vfassi/docker_images}"
 # Cap EACH concurrent Nextflow head's JVM heap so CONCURRENCY x heap stays under --mem
@@ -74,7 +97,29 @@ echo "Head job ${SLURM_JOB_ID:-local} on ${SLURM_NODELIST:-$(hostname)}"
 echo "Start: $(date)   Profiles: $PROFILES   Results: $RESULTS"
 echo "=================================================="
 
-# run_sweep.sh: one `nextflow run` per run_plan row; each submits its process jobs to SLURM.
+# 1. Expand sweep.yaml -> bench_run_plan.csv (seconds). Built here rather than by
+#    hand so the plan and sweep.yaml cannot drift apart between submissions.
+"$PYTHON" "$SRC_DIR/benchmarks/build_run_plan.py" \
+    --sweep   "$SRC_DIR/benchmarks/configs/sweep.yaml" \
+    --out     "$RUN_PLAN" \
+    --repeats "$REPEATS"
+
+# Checked explicitly because there is no `set -e` here: without this, a failed plan
+# step falls through to run_sweep.sh, which would launch against a STALE plan.
+if [ ! -s "$RUN_PLAN" ]; then
+    echo "ERROR: $RUN_PLAN was not written; not launching." >&2
+    exit 1
+fi
+
+# The matrix IS a prereq, and a missing one produces "no matrix cell" warnings for
+# every row rather than an error, so say so here instead.
+if [ ! -s "$MATRIX_DIR/matrix_manifest.csv" ]; then
+    echo "ERROR: $MATRIX_DIR/matrix_manifest.csv not found." >&2
+    echo "       Run generate_matrix.py first (see the header of this file)." >&2
+    exit 1
+fi
+
+# 2. run_sweep.sh: one `nextflow run` per run_plan row; each submits its process jobs to SLURM.
 # SWEEP_CONCURRENCY launches several of those runs at once (parallelising the sweep across the cluster).
 # SWEEP_PROFILE sets the (single) Nextflow -profile; the site config is added as a trailing -c.
 # NB: pass the profile via SWEEP_PROFILE, NOT a trailing -profile — Nextflow allows -profile only once.

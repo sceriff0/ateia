@@ -69,6 +69,24 @@ mkdir -p logs
 source ~/.bashrc
 conda activate "$CONDA_ENV"
 command -v nextflow >/dev/null || { echo "nextflow not on PATH (check CONDA_ENV)"; exit 1; }
+# Resolve the interpreter rather than assuming `python` exists. A conda env can
+# provide nextflow while exposing python only as `python3` (or leaving python in
+# `base`), and with no `set -e` here a bare `python ...` would fail, the plan
+# would not be written, and the launch would proceed against a stale one. Observed
+# on this cluster: "line 112: python: command not found".
+PYTHON="${PYTHON:-$(command -v python3 || command -v python || true)}"
+[ -n "$PYTHON" ] || { echo "no python3/python on PATH (check CONDA_ENV)"; exit 1; }
+echo "Using python: $PYTHON ($("$PYTHON" --version 2>&1))"
+# The plan builder needs PyYAML. If PYTHON resolved to a system interpreter rather
+# than the conda env's, the import fails INSIDE the plan step, which without
+# `set -e` just leaves the plan unwritten. Check it here so the message names the
+# real problem.
+"$PYTHON" -c "import yaml" 2>/dev/null || {
+    echo "ERROR: $PYTHON cannot import yaml (PyYAML)." >&2
+    echo "       conda activate $CONDA_ENV && conda install pyyaml   (or pip install pyyaml)" >&2
+    echo "       or set PYTHON=/path/to/the/right/python before sbatch." >&2
+    exit 1
+}
 
 # Pin Nextflow: NF 26.x dropped the automatic lib/*.groovy class loading this
 # pipeline relies on (ParamUtils/CsvUtils) and rejects the CLI boolean forms below.
@@ -109,7 +127,7 @@ echo "=================================================="
 
 # 1. Expand arms.yaml -> arm_plan.csv + the consumer's arms.csv (seconds, local).
 #    --results-root puts arms.csv where registration_arms.R looks for it.
-python "$SRC_DIR/benchmarks/build_arm_plan.py" \
+"$PYTHON" "$SRC_DIR/benchmarks/build_arm_plan.py" \
     --arms         "$ARMS_YAML" \
     --input        "$INPUT" \
     --out          "$BENCH_DIR/arm_plan.csv" \

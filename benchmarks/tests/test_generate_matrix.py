@@ -257,3 +257,52 @@ def test_run_matrix_default_unpaired_manifest_columns_unchanged(tmp_path):
     manifest = run_matrix(source=src, outdir=tmp_path / "m", target_px=[40], n_channels=[2], seed=0)
     rows = list(csv.DictReader(open(manifest)))
     assert set(rows[0].keys()) == {"cell_id", "target_px", "width", "height", "n_channels", "bytes", "path"}
+
+
+# ---------------------------------------------------------------------------
+# Source formats — the matrix generator must accept what the PIPELINE accepts
+# ---------------------------------------------------------------------------
+
+def test_bioio_only_suffixes_are_a_subset_of_the_pipeline_format_table():
+    """bin/convert_image.py is the authority on what the pipeline can read.
+
+    If it grows a vendor format, the benchmark's matrix generator must not be the
+    thing that rejects it — a source you can run the pipeline on should not be one
+    you cannot benchmark against.
+    """
+    import re
+    from pathlib import Path
+    from benchmarks.generate_matrix import _BIOIO_ONLY_SUFFIXES
+
+    repo = Path(__file__).resolve().parents[2]
+    txt = (repo / "bin" / "convert_image.py").read_text()
+    m = re.search(r"BIOIO_NATIVE_FORMATS\s*=\s*\{([^}]*)\}", txt)
+    assert m, "BIOIO_NATIVE_FORMATS not found in bin/convert_image.py"
+    pipeline = set(re.findall(r'"([^"]+)"', m.group(1)))
+    missing = sorted(_BIOIO_ONLY_SUFFIXES - pipeline)
+    assert not missing, (
+        f"generate_matrix routes {missing} to bioio but the pipeline does not list "
+        f"them in BIOIO_NATIVE_FORMATS: {sorted(pipeline)}")
+
+
+def test_nd2_without_bioio_fails_with_an_actionable_message(tmp_path, monkeypatch):
+    """tifffile.imread on an ND2 raises a bare 'cannot determine format', which
+    reads like a corrupt file rather than a missing dependency."""
+    import builtins
+    import pytest
+    from benchmarks.generate_matrix import _read_source_2d
+
+    real_import = builtins.__import__
+
+    def no_bioio(name, *a, **kw):
+        if name == "bioio":
+            raise ImportError("no bioio")
+        return real_import(name, *a, **kw)
+
+    monkeypatch.setattr(builtins, "__import__", no_bioio)
+    src = tmp_path / "slide.nd2"
+    src.write_bytes(b"not really an nd2")
+    with pytest.raises(SystemExit) as ei:
+        _read_source_2d(src)
+    msg = str(ei.value)
+    assert "bioio" in msg and "convert one slide" in msg

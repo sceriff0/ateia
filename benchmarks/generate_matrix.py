@@ -102,10 +102,36 @@ def _resize(src_2d: np.ndarray, target_hw: tuple[int, int]) -> np.ndarray:
     return np.frombuffer(buf, dtype=src_2d.dtype).reshape(vi.height, vi.width)
 
 
+# Formats tifffile cannot open, which the PIPELINE reads through bioio
+# (bin/convert_image.py's BIOIO_NATIVE_FORMATS). Kept in step with that list: a
+# source the pipeline accepts should not be one the benchmark's matrix generator
+# rejects, and .nd2 is the common case here -- tifffile.imread on an ND2 fails
+# with a bare "cannot determine format", which reads like a corrupt file.
+_BIOIO_ONLY_SUFFIXES = {".nd2", ".czi", ".lif"}
+
+
 def _read_source_2d(path: Path) -> np.ndarray:
-    """Read an image via tifffile and reduce it to a single 2-D channel."""
-    import tifffile
-    arr = np.squeeze(tifffile.imread(path))
+    """Read an image and reduce it to a single 2-D channel.
+
+    tifffile for TIFF-family sources; bioio for the vendor formats it cannot open
+    (ND2/CZI/LIF), which is the same reader bin/convert_image.py uses.
+    """
+    if path.suffix.lower() in _BIOIO_ONLY_SUFFIXES:
+        try:
+            from bioio import BioImage
+        except ImportError as exc:
+            raise SystemExit(
+                f"{path.name} is a {path.suffix} file, which tifffile cannot read, "
+                f"and bioio is not installed in this environment.\n"
+                f"Either:  pip install bioio bioio-nd2   (bioio-czi / bioio-lif as needed)\n"
+                f"or convert one slide to OME-TIFF first and point --source at that."
+            ) from exc
+        # Squeeze to the same shape contract the tifffile branch produces, then let
+        # the reduction loop below pick a single channel.
+        arr = np.squeeze(np.asarray(BioImage(path).get_image_data("CYX")))
+    else:
+        import tifffile
+        arr = np.squeeze(tifffile.imread(path))
     while arr.ndim > 2:
         # Collapse the smallest leading axis (assumed channel/Z/T) by taking index 0.
         axis = 0 if arr.shape[0] <= arr.shape[-1] else arr.ndim - 1
