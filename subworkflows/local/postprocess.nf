@@ -9,6 +9,8 @@ include { SPLIT_CHANNELS           } from '../../modules/local/split_channels'
 include { MERGE_QUANT_CSVS         } from '../../modules/local/merge_quant_csvs'
 include { GENERATE_POSTPROCESSING_QC    } from '../../modules/local/generate_postprocessing_qc'
 include { EXPORT_SPATIALDATA } from '../../modules/local/export_spatialdata'
+include { SEG_QUALITY_EVAL         } from '../../modules/local/seg_quality_eval'
+include { MERGE_SEG_EVAL           } from '../../modules/local/merge_seg_eval'
 // Shared with subworkflows/local/add_cycle.nf — see those files for why the shaping
 // lives there rather than being copied into each caller. groupTiffsByPatient is a
 // plain function, not a process/workflow, but Nextflow's `include` pulls in either.
@@ -73,6 +75,35 @@ workflow POSTPROCESSING {
     SPLIT_CHANNELS(
         ch_registered.map { meta, file -> [meta, file, meta.is_reference] }
     )
+
+    // ========================================================================
+    // SEGMENTATION QUALITY EVAL (CSE) - reference-free, informational, OPT-IN
+    // ========================================================================
+    // Scores the SHIPPED masks against the reference image. Gated by ext.when on
+    // params.skip_seg_quality_eval (default true), so on a normal run neither
+    // process is instantiated at all.
+    //
+    // Scored against the REFERENCE slide, not every registered slide: CSE's
+    // metrics compare a mask to the multichannel image the mask was derived
+    // from, and SEGMENT only ever runs on the reference (segmentation.nf filters
+    // is_reference). Joining on patient_id keeps the three inputs together
+    // without assuming channel emission order.
+    ch_seg_eval_in = ch_cell_mask
+        .map { meta, cmask -> [meta.patient_id, meta, cmask] }
+        .join(ch_nuclei_mask.map { meta, nmask -> [meta.patient_id, nmask] }, by: 0)
+        .join(ch_registered.filter { meta, _img -> meta.is_reference }
+                           .map { meta, img -> [meta.patient_id, img] }, by: 0)
+        .map { _pid, meta, cmask, nmask, img -> [meta, cmask, nmask, img] }
+
+    SEG_QUALITY_EVAL(ch_seg_eval_in)
+
+    // .ifEmpty([]) so the collect() still emits when every patient's score was
+    // dropped (retried out, see conf/modules.config) — otherwise MERGE_SEG_EVAL
+    // never runs and the absence is invisible rather than an empty summary.
+    MERGE_SEG_EVAL(
+        SEG_QUALITY_EVAL.out.metrics.map { _meta, json -> json }.collect().ifEmpty([])
+    )
+    ch_seg_eval_metrics = MERGE_SEG_EVAL.out.csv
 
     // ========================================================================
     // QUANTIFICATION - Join channels with their patient's mask
@@ -290,6 +321,7 @@ workflow POSTPROCESSING {
     // other step's aggregate output (this file's checkpoint_csv/postprocess_qc
     // pattern), so nothing from that step is double-counted or dropped here.
     ch_size_logs = Channel.empty()
+        .mix(SEG_QUALITY_EVAL.out.size_log)
         .mix(SPLIT_CHANNELS.out.size_log)
         .mix(QUANTIFY_MARKERS.out.size_logs)
         .mix(MERGE_QUANT_CSVS.out.size_log)
@@ -305,6 +337,7 @@ workflow POSTPROCESSING {
     // QUANTIFY_MARKERS / ASSEMBLE_EXPORT already applied `.first()` internally
     // (see the comments on their `versions` emits) — do not re-apply it here.
     ch_versions = Channel.empty()
+        .mix(SEG_QUALITY_EVAL.out.versions)
         .mix(SPLIT_CHANNELS.out.versions.first())
         .mix(QUANTIFY_MARKERS.out.versions)
         .mix(MERGE_QUANT_CSVS.out.versions.first())
@@ -317,6 +350,7 @@ workflow POSTPROCESSING {
 
     emit:
     checkpoint_csv    = ch_checkpoint_csv
+    seg_eval_metrics  = ch_seg_eval_metrics
     postprocess_qc    = ch_postprocess_qc
     size_logs         = ch_size_logs
     versions          = ch_versions

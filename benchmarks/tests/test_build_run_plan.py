@@ -410,6 +410,21 @@ NOT_SWEPT = {
     "nuclear_markers": "channel naming contract — the matrix generator fixes the panel",
     "allow_auto_reference": "samplesheet semantics — the generated sheet always names a reference",
 
+    # --- the CSE segmentation-quality scorer (restored on this branch, opt-in). ---
+    # Not a cost knob of the PIPELINE: SEG_QUALITY_EVAL is a scorer bolted onto the
+    # end, and the synthetic sweep cannot exercise it meaningfully anyway — CSE's
+    # metrics assume multiple cell types differing in channel expression, and the
+    # matrix's extra channels are channel 0 duplicated with jitter. It is measured
+    # on REAL slides by the segmentation arm in benchmarks/configs/arms.yaml
+    # (score_with: cse), which is where a segmentation-quality number is defensible.
+    "skip_seg_quality_eval": "opt-in scorer; exercised by arms.yaml's segmentation arm, not the synthetic sweep",
+    "cse_pixel_size_um": "an image property, not a knob — inferred from metadata when null",
+    "cse_max_pixels": (
+        "a MEASUREMENT setting, and not a comparable one: the composite QualityScore "
+        "shifts with the binning factor, so sweeping it would produce scores that "
+        "cannot be read against each other. Held fixed across a cohort by design."),
+    "segeval_tag": "container tag — an asset selector, not a cost knob",
+
     # --- developer / trace plumbing. ---
     "debug_channels": "debug output only",
     "dry_run": "dry_run does not execute the pipeline",

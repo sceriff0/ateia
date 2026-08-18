@@ -240,6 +240,10 @@ the same masks, polygons, measurements and QC. Full store layout:
 | `skip_registration_qc` | `false` | Skip registration QC overlays. |
 | `qc_scale_factor` | `0.25` | Downsample factor for registration QC images. |
 | `skip_postprocessing_qc` | `false` | Skip segmentation/intensity QC plots. |
+| `skip_seg_quality_eval` | `true` | Skip reference-free cell-segmentation quality scoring (CSE). **Opt-in:** set `false` to enable. |
+| `cse_pixel_size_um` | `null` | Pixel size (µm) passed to CSE. `null` = infer from image metadata. |
+| `cse_max_pixels` | `50000000` | Bin image+masks so CSE scores at most this many pixels. `null` = full resolution. |
+| `segeval_tag` | `segeval` | Container tag for the CSE image on `bolt3x/attend_image_analysis`. |
 | `skip_final_qc_report` | `false` | Skip the aggregated HTML QC report. |
 | `seg_qc_pairing` | `lsa` | Cell correspondence backend for `reg_qc=2`'s fixed anchor pairing: `lsa` = optimal one-to-one assignment (exact, per connected component), `mutual_nn` = the older mutual-nearest-centroid rule. See [Staged registration QC](registration_qc.md). |
 | `seg_qc_match_radius_factor` | `1.5` | Match radius for `reg_qc=2` pairing, in median nuclear radii. |
@@ -251,6 +255,39 @@ the same masks, polygons, measurements and QC. Full store layout:
   VALIS rTRE, STARE tiled TRE, warp-seg QC) / segmentation overlays /
   postprocessing QC, and software versions.
   Controlled by `skip_final_qc_report`.
+
+### Reference-free segmentation quality (CSE) — opt-in
+
+`SEG_QUALITY_EVAL` scores the shipped cell+nucleus masks against the reference
+image with the [CellSegmentationEvaluator][cse] (vendored 1.5.19 subset), giving a
+composite `QualityScore` with **no ground-truth annotation**. It is the signal the
+segmentation arm of `benchmarks/configs/arms.yaml` uses to rank backends on real
+tissue.
+
+It is **off by default** (`skip_seg_quality_eval = true`) for one operational
+reason: it needs the `segeval` image on Docker Hub, and `.github/workflows/build-images.yml`
+only *pushes* on a release or a manual `workflow_dispatch` — a push to `main`
+builds without publishing. A default-on stage whose container may not exist yet
+would fail every run of a fresh clone.
+
+```bash
+# publish the image once (Actions -> Build & Push Container Images -> Run workflow),
+# then:
+nextflow run . --skip_seg_quality_eval false --cse_max_pixels 50000000 ...
+```
+
+Two things to know before reading the numbers:
+
+- **`cse_max_pixels` is not comparable across values.** Binning preserves the
+  geometry and area metrics, but the composite `QualityScore` shifts with the
+  factor. Keep it fixed across a cohort.
+- **A dropped score is announced, not silent.** CSE's usual failure is resource
+  exhaustion on full-WSI masks. Both processes retry three times (climbing the
+  memory ramp) and then `ignore`, logging a warning naming the patient. Previously
+  the ignore was silent, which is how the scorer came to be described as "always
+  ignored" while runs stayed green.
+
+[cse]: https://doi.org/10.1091/mbc.E22-08-0364
 - **`qc/mirage_resource_report.html`** — computational-resource report built from
   the per-task size logs and Nextflow `trace.txt`: run totals, per-process
   rollup, resource-vs-input-size, top-N heaviest/slowest tasks, and

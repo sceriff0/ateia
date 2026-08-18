@@ -226,6 +226,19 @@ def test_no_duplicate_param_defaults():
 # (see bin/segment_cellsam.py's --block-size, which the derived map caught
 # and was fixed rather than exempted).
 ARGPARSE_DEFAULT_ALLOWLIST = {
+    "seg_quality_eval.py:--max-pixels": {
+        "reason": (
+            "Matching the config default here would INVERT the meaning of "
+            "cse_max_pixels = null. null means 'score at full resolution', and "
+            "conf/modules.config expresses that by passing no --max-pixels flag "
+            "at all (`params.cse_max_pixels ? \"--max-pixels ...\" : ''`). The "
+            "script's own default must therefore be None = no cap; giving it "
+            "50000000 would silently downsample exactly the runs that asked not "
+            "to be downsampled, and the composite QualityScore shifts with the "
+            "binning factor, so the corruption would be a plausible number "
+            "rather than an error."
+        ),
+    },
     "extract_cell_properties.py:--outdir": {
         "reason": (
             "Not actually the same 'outdir' as nextflow.config's: "
