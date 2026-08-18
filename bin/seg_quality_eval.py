@@ -71,29 +71,28 @@ def _downsample(channels, cell, nuc, factor):
 
 
 def _read_image_cyx(path):
-    """Return (channels (C,Y,X), pixel_um_or_None).
+    """Return (channels (C,Y,X), pixel_um_or_None) via tifffile.
 
-    Reads through bioio -- the same reader bin/convert_image.py uses -- for robust
-    OME axis handling and physical pixel size, falling back to tifffile. This was
-    aicsimageio; that package was retired from the repo for having no importer, and
-    reinstating it just to read one pixel size would resurrect a dependency the
-    rest of the pipeline deliberately dropped.
+    NO bioio/aicsimageio here, deliberately. The only thing a richer reader added
+    was the physical pixel size -- and the pixel size is supplied by the caller:
+    conf/modules.config always passes --pixel-size-um (from cse_pixel_size_um, else
+    params.pixel_size), and main() prefers that over anything read from metadata.
+    So the dependency bought a value that is always overridden.
+
+    It also could not be installed: bioio-ome-tiff caps tifffile below the version
+    tests/test_container_harmonisation.py harmonises on, so pinning both made
+    containers/segeval unbuildable (ResolutionImpossible). Reading the array with
+    tifffile and taking the pixel size from the CLI removes the conflict rather
+    than adding a documented exception for a value nothing reads.
+
+    Standalone invocation therefore requires --pixel-size-um; main() says so.
     """
-    try:
-        from bioio import BioImage
-
-        a = BioImage(path)
-        data = np.asarray(a.get_image_data("CYX"))  # T,Z are 1 for 2D WSI
-        ps = a.physical_pixel_sizes
-        px = float(ps.X) if (ps.X and ps.Y) else None
-        return data, px
-    except Exception:
-        arr = np.asarray(tifffile.imread(path))
-        if arr.ndim == 2:
-            arr = arr[np.newaxis, :, :]
-        elif arr.ndim == 3 and arr.shape[-1] <= 5 and arr.shape[0] > 5:
-            arr = np.moveaxis(arr, -1, 0)  # YXC -> CYX heuristic
-        return arr, None
+    arr = np.asarray(tifffile.imread(path))
+    if arr.ndim == 2:
+        arr = arr[np.newaxis, :, :]
+    elif arr.ndim == 3 and arr.shape[-1] <= 5 and arr.shape[0] > 5:
+        arr = np.moveaxis(arr, -1, 0)  # YXC -> CYX heuristic
+    return arr, None
 
 
 def main():
@@ -135,7 +134,10 @@ def main():
     elif px_meta:
         px = py = px_meta
     else:
-        raise SystemExit("Pixel size missing from image metadata; pass --pixel-size-um")
+        raise SystemExit(
+            "Pixel size is required: pass --pixel-size-um. This script does not read "
+            "it from image metadata (see _read_image_cyx); the pipeline supplies it "
+            "from params.cse_pixel_size_um or params.pixel_size.")
 
     # Downsample before scoring: full-WSI label masks otherwise blow CSE's
     # memory/time budget. Binning by `factor` means each pixel now spans

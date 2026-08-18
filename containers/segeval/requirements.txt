@@ -17,10 +17,9 @@ scikit-learn==1.5.2    # KMeans over the channel matrix (functions.py) + the PCA
 tifffile==2025.5.10    # harmonised
 xmltodict==0.13.0      # OME-XML parsing for the pixel-size lookup
 
-# Image reading goes through bioio, the reader containers/convert standardises on.
-# The retired single-repo reader this image used to install was dropped from the
-# repo for having no importer; reinstating it here just to read one pixel size
-# would resurrect a dependency the pipeline deliberately removed.
-# bin/seg_quality_eval.py reads through bioio and falls back to tifffile.
-bioio==3.5.0
-bioio-ome-tiff==1.4.0
+# NO image-reader package beyond tifffile. bin/seg_quality_eval.py reads the array
+# with tifffile and takes the pixel size from --pixel-size-um, which the pipeline
+# always passes. The richer readers this image used to carry only supplied a pixel
+# size that main() overrides anyway -- and the OME-TIFF reader plugin caps tifffile
+# below the harmonised 2025.5.10, which made this image unbuildable outright
+# (pip ResolutionImpossible). See _read_image_cyx for the full reasoning.

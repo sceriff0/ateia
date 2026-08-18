@@ -38,9 +38,8 @@ RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r /tmp/requirements.txt
 
 # Fail the BUILD rather than a cluster run. This stack is exactly the kind that
-# resolves in pip and then explodes on first import: bioio pulls its own
-# xarray/dask constraint set, and scikit-image 0.25 against numpy 1.26 is a pairing
-# pip will happily accept and then break on.
+# resolves in pip and then explodes on first import: scikit-image 0.25 against
+# numpy 1.26 is a pairing pip will happily accept and then break on.
 RUN python -c "\
 import numpy, scipy, skimage, sklearn, pandas, tifffile, xmltodict; \
 from sklearn.cluster import KMeans; \
@@ -51,9 +50,6 @@ print('segeval image OK:', \
       '| skimage', skimage.__version__, \
       '| sklearn', sklearn.__version__, \
       '| tifffile', tifffile.__version__)" \
-    && python -c "\
-from bioio import BioImage; \
-print('bioio OK -- physical pixel size can be read from OME metadata')" \
     && ps -e -o pid= -o ppid= > /dev/null && echo "procps OK: nextflow task-metrics wrapper can run"
 
 # Read-only $HOME safety. Several of these libraries default their caches to
