@@ -363,6 +363,27 @@ def apply_basic_profiles(
                 metadata=metadata,
                 compression="zlib",
                 tile=(WRITE_TILE, WRITE_TILE),
+                # ONE COMPRESSOR THREAD, PINNED -- same defect and same fix as
+                # bin/merge_channels_pyramid.py:826-847 (read that comment for the full
+                # mechanism). This write is channel-major and tile-major out of `_tiles()`
+                # above, so it is exactly as generator-fed as that one; tifffile's default
+                # `maxworkers=os.cpu_count()` queues encoded tiles ahead of the writer for
+                # a COMPRESSED tiled write, and the queue is an unbounded, CHANNEL-COUNT
+                # -scaled term in the peak. Measured with the same harness shape as that
+                # file's (4096^2 uint16, tile=2048, zlib), peak in units of one plane:
+                #
+                #                       C=2   C=4   C=8   C=12   C=16
+                #   tifffile 2023.4.12  2.24  2.23  2.23  2.23   2.23  (default maxworkers)
+                #   tifffile 2025.5.10  3.76  5.75  9.18  12.37  15.55 (default maxworkers)
+                #
+                # containers/preprocess/Dockerfile pins 2025.5.10 -- the same version
+                # `conf/modules.config`'s APPLY_PROFILES memory closure was NOT re-derived
+                # against, because it was written on this file's 2023.4.12 development
+                # host. `maxworkers=1` removes the slope at both versions: 2023.4.12 goes
+                # to a flat 1.11 planes, 2025.5.10 to a flat 0.86 planes, regardless of C.
+                # Written bytes are unaffected -- tests/test_apply_basic_profiles.py's
+                # pixel- and byte-level assertions pass at both versions.
+                maxworkers=1,
             )
     finally:
         close()

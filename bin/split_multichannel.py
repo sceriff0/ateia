@@ -231,6 +231,25 @@ def split_multichannel_tiff(
 
             output_path = os.path.join(output_dir, f"{clean_name}.tiff")
 
+            # `maxworkers` is deliberately left at tifffile's default here, unlike the
+            # generator-fed writes in bin/apply_basic_profiles.py and
+            # bin/merge_channels_pyramid.py:826-847. Those pin it because a single write
+            # spans EVERY channel through one generator, so the encode pool's queued
+            # tiles are a term that grows with the channel count -- the exact thing
+            # those rewrites exist to remove. This call is neither: `channel_data` is one
+            # already-resident PLANE, and this `imwrite` -- ONE whole-array call, opening
+            # and closing its own TiffWriter -- runs once per channel with nothing carried
+            # over to the next iteration, so there is no cross-channel accumulation to pin
+            # against. Measured (tracemalloc, isolated from the resident plane) on a
+            # zlib-tiled whole-array write of this shape: the encode-queue overhead is
+            # roughly one plane's worth at 4096^2 and falls to a fraction of a plane at
+            # 8192^2 (bounded by cpu_count() tiles in flight, not by plane size), at both
+            # tifffile 2023.4.12 and 2025.5.10. SPLIT_CHANNELS' memory closure reserves
+            # 32-128 GB from the whole REGISTERED slide's size, not from one channel's
+            # plane, so that bounded overhead sits well inside the existing floor even on
+            # the largest real slide. Pinning would only cost wall clock (serialising the
+            # per-tile compression this call would otherwise parallelise) for no memory
+            # benefit, so it is left unpinned.
             tifffile.imwrite(
                 output_path,
                 channel_data,

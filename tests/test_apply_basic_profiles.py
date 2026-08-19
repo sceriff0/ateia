@@ -581,3 +581,59 @@ def test_swapping_the_two_profiles_is_caught_at_the_shipped_defaults(tmp_path):
             str(real_ffp),
             str(tmp_path / "slide_corrected.ome.tif"),
         )
+
+
+# ---------------------------------------------------------------------------
+# The compressor pool
+# ---------------------------------------------------------------------------
+
+
+def test_the_write_pins_one_compressor_thread(tmp_path, monkeypatch):
+    """`maxworkers=1` on the write, and it is a memory bound, not a tuning preference.
+
+    Same defect and same fix as `bin/merge_channels_pyramid.py`'s
+    `test_every_write_pins_one_compressor_thread` in
+    tests/test_merge_pyramid_streaming.py: this write is fed by `_tiles()`, a
+    channel-major generator, and tifffile defaults `maxworkers` to the machine's CPU
+    count for a compressed (`zlib`) tiled write, dispatching encoded tiles through a
+    thread pool that runs ahead of the writer. Measured on a 4096^2 slide with the same
+    tile size this write uses (2048), peak in units of one plane:
+
+        C=                    2      4      8     12     16
+        tifffile 2023.4.12  2.24   2.23   2.23   2.23   2.23
+        tifffile 2025.5.10  3.76   5.75   9.18  12.37  15.55
+
+    containers/preprocess/Dockerfile pins 2025.5.10, where the slope is about one plane
+    per channel -- the exact channel-count-scaled term the streaming rewrite in this
+    file exists not to reintroduce. With `maxworkers=1` both versions are flat: 1.11
+    planes at 2023.4.12, 0.86 at 2025.5.10, independent of C.
+
+    Asserted on the ARGUMENT rather than measured, deliberately: a peak-memory
+    assertion would pass on this host's 2023.4.12, where the default pool is shallow
+    enough not to catch its removal, and prove nothing about 2025.5.10. See
+    bin/apply_basic_profiles.py's write call and bin/merge_channels_pyramid.py:826-847
+    for the full mechanism.
+    """
+    original = np.full((2, 250, 250), 1000, dtype=np.uint16)
+    slide, sidecar, manifest = _tile(tmp_path, original, ["DAPI", "PANCK"])
+    ffp, dfp = _flat_profiles(tmp_path, manifest, flat_value=2.0, dark_value=100.0)
+
+    seen = []
+    original_write = tifffile.TiffWriter.write
+
+    def spying_write(self, data=None, **kwargs):
+        seen.append(kwargs.get("maxworkers", "<default>"))
+        return original_write(self, data, **kwargs)
+
+    monkeypatch.setattr(tifffile.TiffWriter, "write", spying_write)
+
+    apply_basic_profiles.apply_basic_profiles(
+        str(slide), str(sidecar), str(ffp), str(dfp),
+        str(tmp_path / "slide_corrected.ome.tif"),
+    )
+
+    assert seen == [1], (
+        f"maxworkers per write was {seen}, not 1. tifffile's default is the machine's "
+        "CPU count, and its encode queue is an unbounded, channel-count-scaled term in "
+        "the peak at the container's pinned version."
+    )

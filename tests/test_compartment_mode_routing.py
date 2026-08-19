@@ -145,11 +145,16 @@ ALLOWED_LINES = {
         # 856 -> 891 when MERGE_AND_PYRAMID's 200/300 GB tier ladder became the
         # plane-derived closure that followed it into streaming; 891 -> 920 when that
         # closure's comment stopped asserting a 4:1 compression ratio as fact and
-        # recorded the measured counterexamples and the retry backstop instead.
+        # recorded the measured counterexamples and the retry backstop instead;
+        # 920 -> 934 when APPLY_PROFILES' and MERGE_AND_PYRAMID's memory comments
+        # each named their `maxworkers=1` dependency on bin/apply_basic_profiles.py
+        # and bin/merge_channels_pyramid.py (+5 and +9 net lines respectively) and
+        # MERGE_AND_PYRAMID's plane coefficient comment was corrected from 3.11 to
+        # 3.25 to agree with its own measured intercept and mechanism sum.
         # Re-pin, do not
         # widen. (Re-pin from the file, not by guessing:
         # `grep -n "params.expanded_quantification ?" conf/modules.config`.)
-        920: (
+        934: (
             "ext.args = { params.expanded_quantification ? '--expanded' : "
             "'' } -- conf/*.config closures cannot see lib/*.groovy classes, "
             "so ext.args must read params raw here."
