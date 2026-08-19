@@ -152,3 +152,30 @@ def test_the_counterexample_marker_must_be_on_the_same_line():
     # the same command one line below a marker is NOT excused
     detached = "# x fails on Nextflow 26\nnextflow run . --dry_run true\n"
     assert list(_offending_lines(detached, params))
+
+
+def test_no_shell_script_passes_a_boolean_param_on_the_command_line():
+    """The docs check above is advisory; a script is EXECUTED, so the same mistake
+    there is live rather than misleading.
+
+    benchmarks/submit_arms.sh shipped `--skip_seg_quality_eval false`, which on
+    Nextflow 26 sets the param to the STRING "false" -- truthy -- and so disabled
+    the scorer while reading like it enabled it. Use a profile (`seg_quality`) or
+    -params-file with a real JSON boolean.
+    """
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    bools = _boolean_params()  # noqa: F821 - defined above in this module
+    offenders = []
+    for sh in sorted((root / "benchmarks").rglob("*.sh")):
+        for i, line in enumerate(sh.read_text().splitlines(), 1):
+            if line.lstrip().startswith("#"):
+                continue
+            for m in re.finditer(r"--(\w+)\s+(true|false)\b", line):
+                if m.group(1) in bools:
+                    offenders.append(f"{sh.relative_to(root)}:{i}: {line.strip()}")
+    assert not offenders, (
+        "shell scripts pass a boolean param on the command line:\n  "
+        + "\n  ".join(offenders))

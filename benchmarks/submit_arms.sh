@@ -99,9 +99,21 @@ export NXF_SINGULARITY_CACHEDIR="${NXF_SINGULARITY_CACHEDIR:-$SINGULARITY_CACHED
 # there are CONCURRENCY of them sharing one allocation.
 export NXF_OPTS="${NXF_OPTS:--Xms512m -Xmx3g}"
 
-EXTRA_ARGS=()
+# Concurrency is passed on the COMMAND LINE, not via benchmark.config. Every
+# per-process cap in conf/modules.config is Math.min(own, params.max_forks), evaluated
+# EAGERLY when that file is parsed -- which happens before a -c file is merged, so a -c
+# cannot reach the clamps. The two must be raised TOGETHER: the lower of the pair binds,
+# and at the shipped defaults queue_size (20) is far below max_forks (100), so raising
+# max_forks alone does nothing. See docs/resources.md.
+MAX_FORKS="${MAX_FORKS:-200}"
+QUEUE_SIZE="${QUEUE_SIZE:-100}"
+
+EXTRA_ARGS=(--max_forks "$MAX_FORKS" --queue_size "$QUEUE_SIZE")
+# CSE is enabled by a PROFILE, never `--skip_seg_quality_eval false`: Nextflow 26
+# delivers every --param as a String, so that flag sets the param to the truthy
+# string "false" and disables the scorer while reading like it enables it.
 if [[ "$ENABLE_CSE" == "true" ]]; then
-    EXTRA_ARGS+=(--skip_seg_quality_eval false)
+    PROFILES="$PROFILES,seg_quality"
 fi
 
 # CellSAM weights are gated. singularity.envWhitelist forwards DEEPCELL_ACCESS_TOKEN

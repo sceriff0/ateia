@@ -387,6 +387,15 @@ NOT_SWEPT = {
     "max_cpus": "resourceLimits clamp — a site ceiling; varying it benchmarks the machine",
     "max_memory": "resourceLimits clamp — see max_cpus",
     "max_time": "resourceLimits clamp — see max_cpus",
+    "max_forks": (
+        "cluster concurrency, not pipeline cost. It caps how many tasks of one process run "
+        "at once, so varying it changes how fast the SWEEP drains, never what a task costs. "
+        "Same category as max_cpus/max_memory/max_time: it benchmarks the machine. It is also "
+        "read EAGERLY at conf/modules.config parse time (Math.min(own, params.max_forks)), so "
+        "run_sweep.sh must pass it on the CLI -- a -c file sets it too late to reach the clamps."),
+    "queue_size": (
+        "cluster concurrency, not pipeline cost -- see max_forks. The two are a pair and the "
+        "lower binds, so benchmark.config raises both together on the CLI."),
     "slurm_account": "scheduler identity",
     "slurm_partition": "scheduler identity",
     "slurm_qos": "scheduler identity",

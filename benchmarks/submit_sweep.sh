@@ -123,13 +123,23 @@ fi
 # SWEEP_CONCURRENCY launches several of those runs at once (parallelising the sweep across the cluster).
 # SWEEP_PROFILE sets the (single) Nextflow -profile; the site config is added as a trailing -c.
 # NB: pass the profile via SWEEP_PROFILE, NOT a trailing -profile — Nextflow allows -profile only once.
+# Concurrency is passed on the COMMAND LINE, not via benchmark.config. Every
+# per-process cap in conf/modules.config is Math.min(own, params.max_forks), evaluated
+# EAGERLY when that file is parsed -- which happens before a -c file is merged, so a -c
+# cannot reach the clamps. The two must be raised TOGETHER: the lower of the pair binds,
+# and at the shipped defaults queue_size (20) is far below max_forks (100), so raising
+# max_forks alone does nothing. See docs/resources.md.
+MAX_FORKS="${MAX_FORKS:-200}"
+QUEUE_SIZE="${QUEUE_SIZE:-100}"
+
 export SWEEP_CONCURRENCY="$CONCURRENCY"
 export SWEEP_PROFILE="$PROFILES"
 "$SRC_DIR/benchmarks/run_sweep.sh" \
     "$RUN_PLAN" \
     "$MATRIX_DIR/matrix_manifest.csv" \
     "$RESULTS" \
-    -c "$SITE_CONFIG"
+    -c "$SITE_CONFIG" \
+    --max_forks "$MAX_FORKS" --queue_size "$QUEUE_SIZE"
 
 echo "=================================================="
 echo "Sweep finished: $(date)"

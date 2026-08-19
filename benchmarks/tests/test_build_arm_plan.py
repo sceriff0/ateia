@@ -612,3 +612,36 @@ def test_submit_matrix_resolves_python_and_preflights_deps():
     assert 'PYTHON="${PYTHON:-$(command -v python3' in code
     assert "python deps OK" in code and "numpy" in code
     assert "from bioio import BioImage" in code, "ND2 sources need a bioio check"
+
+
+# ---------------------------------------------------------------------------
+# Concurrency must be raised on the CLI, not in benchmark.config
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("script", ["submit_arms.sh", "submit_sweep.sh"])
+def test_submitters_raise_concurrency_on_the_command_line(script):
+    """conf/modules.config caps every process at Math.min(own, params.max_forks),
+    and maxForks is NOT a dynamic directive -- Nextflow compares it against 0 in
+    TaskProcessor's constructor, so it cannot be deferred into a closure and is
+    evaluated EAGERLY when that file is parsed. That parse happens inside
+    nextflow.config, BEFORE a -c file is merged, so benchmark.config cannot reach a
+    single clamp. Only a CLI --max_forks is in scope in time.
+    """
+    code = "\n".join(ln for ln in (BENCH / script).read_text().splitlines()
+                     if not ln.lstrip().startswith("#"))
+    assert "--max_forks" in code, f"{script} does not pass --max_forks"
+    assert "--queue_size" in code, (
+        f"{script} passes --max_forks without --queue_size; the LOWER of the pair "
+        "binds, and queue_size defaults far below max_forks, so max_forks alone is "
+        "a no-op")
+
+
+def test_benchmark_config_does_not_set_concurrency_directives():
+    """Setting them there is worse than useless: process.maxForks cannot lift a
+    per-process withName value that already resolved to min(own, 100), so the file
+    reads as if it raises concurrency while doing nothing."""
+    code = "\n".join(ln for ln in
+                     (BENCH / "configs" / "benchmark.config").read_text().splitlines()
+                     if not ln.lstrip().startswith(("//", "*", "/*")))
+    assert "queueSize" not in code, "benchmark.config still sets executor.queueSize"
+    assert "maxForks = 200" not in code, "benchmark.config still sets a global maxForks"
