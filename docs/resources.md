@@ -114,8 +114,9 @@ real slide. Changing either number changes an unguarded figure, so change it her
 |---|---|---|---|---|
 | `REGISTER` | `8` | `300 GB × attempt` | `24.h × attempt` | `withName` |
 
-`REGISTER` also carries `maxForks = 10` and its own error strategy — see
-[Retry policy](#retry-policy).
+`REGISTER` also carries `maxForks = Math.min(10, params.max_forks)` and its own error
+strategy — see [Retry policy](#retry-policy) and
+[Execution & concurrency](#execution--concurrency).
 
 ### Registration — tiled / STARE
 
@@ -369,14 +370,55 @@ are both dropped.
 
 | Setting | Value | Where |
 |---|---|---|
-| `process.maxForks` | `100` | `nextflow.config` |
+| `process.maxForks` | `params.max_forks` (`100`) | `nextflow.config` |
 | `process.stageInMode` | `symlink` | `nextflow.config` — zero-overhead, works cross-filesystem |
-| `executor.queueSize` | `20` | `conf/base.config` — max concurrent scheduler submissions |
+| `executor.queueSize` | `params.queue_size` (`20`) | `nextflow.config` — max concurrent scheduler submissions |
 | `executor.exitReadTimeout` | `1 day` | `conf/base.config` — SLURM status-poll timeout |
 
-Per-process `maxForks` overrides: `REGISTER`, `TILED_STITCH`
-at `10`; `TILED_COARSE` / `TILED_REG_TILE` at `20`. These bound how many
-memory-heavy registration tasks can be in flight at once.
+Both are tunable from the command line: `--max_forks` and `--queue_size`.
+
+**They are a pair, and tuning one alone is usually a no-op.** `max_forks` caps how many
+tasks of any ONE process run at once; `queue_size` caps how many run at once across the
+WHOLE pipeline. The lower binds, and at the shipped defaults `queue_size` (20) is far below
+`max_forks` (100) — so raising `max_forks` on its own changes nothing. Raise both, or raise
+`queue_size` alone if you simply want more total concurrency.
+
+Per-process `maxForks` overrides: `REGISTER`, `TILED_STITCH` at `10`; `TILED_COARSE` /
+`TILED_REG_TILE` at `20`. These bound how many memory-heavy registration tasks can be in
+flight at once. Each is written `Math.min(<its own limit>, params.max_forks)`, so
+**lowering** `--max_forks` really does throttle every module, while **raising** it never
+lifts one of these past the limit its own block sets for its own reasons. Measured on the
+test profile: at the default, `REGISTER` runs at 10 and everything else at 100; at
+`--max_forks 4` every process runs at 4; at `--max_forks 50`, `REGISTER` stays at 10.
+
+`executor.queueSize` is assigned in `nextflow.config`, not in `conf/base.config` where the
+rest of the executor scope lives. That is deliberate and load-bearing — see
+[Why the includes sit after the params block](#why-the-includes-sit-after-the-params-block).
+
+### Why the includes sit after the params block
+
+`conf/base.config` and `conf/modules.config` are included **after** `nextflow.config`'s
+`params` block, not at the top of the file. Anything in those files that reads `params.*`
+depends on it:
+
+* A `params.x` reference evaluated **before** the params block exists does not read `null`.
+  Nextflow resolves it to an empty `ConfigObject` — a Map. Inside a closure that is
+  harmless, because closures run at task-submission time, which is why every
+  `memory = { ... }` closure worked even when the includes sat at the top. Evaluated
+  eagerly it is not: `params.x as int` on a Map throws *"Cannot coerce a map to class
+  java.lang.Integer"* and the entire config fails to parse.
+* Inside an `executor { }` scope it is worse than an error. `queueSize = params.queue_size`
+  parsed from an early-included file is read as the opening of a **nested scope named
+  `params`**, and the `queueSize` setting vanishes from the resolved config with no error
+  at all — silently falling back to Nextflow's own default.
+* `maxForks` cannot dodge this the way `memory` does, because it is **not a dynamic
+  directive**: Nextflow compares it against `0` in `TaskProcessor`'s constructor, so a
+  closure throws *"Cannot compare ... Closure ... and java.lang.Integer with value '0'"*.
+
+Relative order is otherwise unchanged — both files are still included before the `executor`
+and `process` blocks, so those still take precedence. Verified by diffing `nextflow config`
+for the `test`, `test_full` and `local` profiles across the move: the only content
+difference is the two new parameters. Guarded by `tests/test_concurrency_params.py`.
 
 ---
 
