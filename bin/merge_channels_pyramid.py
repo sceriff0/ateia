@@ -429,6 +429,14 @@ class _BandSource:
     shape: Tuple[int, int, int] = (0, 0, 0)
     #: dtype the pyramid is written in -- what `read_band` returns.
     dtype = np.dtype(np.uint16)
+    #: itemsize of the SOURCE pixels, which is what a band read actually materialises.
+    #: Distinct from `dtype.itemsize` because a float32 source is stored as uint16: budgeting
+    #: the band by the output's 2 bytes/px would let a float channel's read be twice the
+    #: intended size before the cast even happens. (The float path is still under-counted --
+    #: `read_band` transiently holds the raw float32, a clipped float32 copy and the uint16
+    #: result, ~10 bytes/px against a 4 byte/px budget -- but under-counting by 2.5x beats
+    #: under-counting by 5x, and the band is a constant in the memory formula either way.)
+    src_itemsize = 2
 
     def read_band(self, c: int, y0: int, y1: int, validator=None) -> np.ndarray:
         raise NotImplementedError
@@ -445,7 +453,7 @@ class _BandSource:
         """
         _, h, w = self.shape
         buf = np.empty((h, w), dtype=np.float32)
-        band = _band_rows(w, self.dtype.itemsize)
+        band = _band_rows(w, self.src_itemsize)
         for y0 in range(0, h, band):
             y1 = min(y0 + band, h)
             buf[y0:y1] = self.read_band(c, y0, y1)
@@ -479,23 +487,31 @@ class _ArraySource(_BandSource):
     The defensive float->uint16 cast the whole-array writer used to do up front, over the
     entire stack, now happens one band at a time. `to_uint16` is elementwise, so the pixels
     are identical.
+
+    IT DOES NOT CLIP NEGATIVES, and that asymmetry with `_ChannelFileSource` is deliberate.
+    The negative clip belongs to `_load_channel_stack` -- the PIPELINE's read of the channel
+    files -- and never ran in `write_pyramidal_ome_tiff`, which only ever cast float input.
+    Clipping here would silently change what this entry point does with signed-integer data:
+    an int16 stack with a -100 pixel used to round-trip -100, and a clip turns it into 0. A
+    first draft of this class did exactly that, uncovered.
+    `tests/test_merge_pyramid_streaming.py::test_the_array_entry_point_does_not_clip_signed_input`
+    pins the round-trip. Float input is still clipped, by `to_uint16`, exactly as before.
     """
 
     def __init__(self, data: np.ndarray):
         self._data = data
         src_dtype = np.dtype(data.dtype)
         self._need_cast = src_dtype in (np.dtype(np.float32), np.dtype(np.float64))
-        self._signed = not np.issubdtype(src_dtype, np.unsignedinteger)
         self.dtype = np.dtype(np.uint16) if self._need_cast else src_dtype
+        self.src_itemsize = src_dtype.itemsize
         self.shape = tuple(int(n) for n in data.shape)
         if self._need_cast:
             log("  Casting float data to uint16 for QuPath compatibility (per-band)")
 
     def read_band(self, c: int, y0: int, y1: int, validator=None) -> np.ndarray:
-        raw = self._data[c, y0:y1]
-        band = np.clip(raw, 0, None) if self._signed else raw
+        band = self._data[c, y0:y1]
         if validator is not None:
-            validator.observe(raw, band)
+            validator.observe(band, band)
         return to_uint16(band) if self._need_cast else band
 
 
@@ -523,6 +539,7 @@ class _ChannelFileSource(_BandSource):
         self._need_cast = src_dtype in (np.dtype(np.float32), np.dtype(np.float64))
         self._signed = not np.issubdtype(src_dtype, np.unsignedinteger)
         self.dtype = np.dtype(np.uint16) if self._need_cast else src_dtype
+        self.src_itemsize = src_dtype.itemsize
         self._open_index = None
         self._arr = None
         self._close = None
@@ -561,6 +578,7 @@ class _ArrayMaskSource(_BandSource):
     """A resident (2, H, W) mask stack behind the band interface."""
 
     dtype = np.dtype(np.uint32)
+    src_itemsize = 4
 
     def __init__(self, mask_stack: np.ndarray):
         self._data = mask_stack
@@ -583,6 +601,7 @@ class _MaskFileSource(_BandSource):
     """
 
     dtype = np.dtype(np.uint32)
+    src_itemsize = 4
 
     def __init__(self, cell_path: str, nuclei_path: str, height: int, width: int):
         self._paths = [str(cell_path), str(nuclei_path)]
@@ -637,7 +656,7 @@ def _plane_tiles(source: _BandSource, tile: int, validators=None):
     plus one tile, independent of the channel count and of the slide's height.
     """
     c_n, h, w = source.shape
-    band_rows = _band_rows(w, source.dtype.itemsize, tile)
+    band_rows = _band_rows(w, source.src_itemsize, tile)
     for c in range(c_n):
         validator = validators[c] if validators else None
         if validator is not None:
@@ -804,6 +823,28 @@ def write_pyramidal_ome_tiff_from_source(
         compression=compression,
         photometric="minisblack",
         resolutionunit="CENTIMETER",
+        # ONE COMPRESSOR THREAD, PINNED. tifffile defaults `maxworkers` to the machine's
+        # CPU count for a compressed tiled write and dispatches encoded tiles through a
+        # thread pool, so the pool runs ahead of the writer and the queued tiles become an
+        # unbounded term in the peak -- one that scales with the CHANNEL COUNT, which is
+        # exactly the property this rewrite exists to remove. Measured end to end on a
+        # 1024^2 slide with 4 pyramid levels, peak in units of one plane:
+        #
+        #                       C=2    C=8    C=12   C=16
+        #   tifffile 2023.4.12  8.24   4.78   5.10   5.41   (default maxworkers)
+        #   tifffile 2025.5.10  7.44   9.41  13.54  17.54   (default maxworkers)
+        #
+        # The container pins 2025.5.10 (containers/merge/Dockerfile), where the slope is
+        # about ONE PLANE PER CHANNEL. `maxworkers=1` removes it at both versions.
+        #
+        # It costs nothing worth having. This process reserves `cpus = 2`, and tifffile
+        # reads `os.cpu_count()` rather than the cgroup, so on a 64-core node it was
+        # spinning up 64 compressor threads against a 2-CPU reservation. Measured on a
+        # 4-channel 8193^2 slide at 2025.5.10: default 661.5 MB / 5.9 s, maxworkers=2
+        # 641.6 MB / 5.6 s, maxworkers=1 477.1 MB / 6.3 s -- the wall clock is within noise
+        # and only 1 is deterministic. Written bytes are unaffected; the byte-for-byte
+        # identity test in tests/test_merge_pyramid_streaming.py passes at both versions.
+        maxworkers=1,
     )
     if compressionargs:
         options["compressionargs"] = compressionargs
@@ -871,6 +912,7 @@ def write_pyramidal_ome_tiff_from_source(
                 compression=compression,
                 photometric="minisblack",
                 resolutionunit="CENTIMETER",
+                maxworkers=1,  # see `options` above
             )
 
     log(f"Pyramidal OME-TIFF complete: {output_path}")

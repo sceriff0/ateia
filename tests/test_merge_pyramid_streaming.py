@@ -28,10 +28,13 @@ WHAT THIS FILE PINS, AND WHY EACH ASSERTION IS THE ONE THAT CATCHES THE MISTAKE:
    trap, and ``_downsample_plane_f32``'s docstring for why it forecloses the obvious
    "derive the levels as the base streams" design.
 
-3. **Bands are forced small** (``READ_BAND_BYTES`` monkeypatched) in the equality tests.
-   At the shipped 256 MB budget every test-sized image is a single band, so an
-   implementation that silently leaked a band boundary into the output would pass a test
-   that did not force more than one band.
+3. **Bands are forced small** (``READ_BAND_BYTES`` monkeypatched) in the equality tests,
+   and at more than one size. At the shipped 64 MiB budget every test-sized image is a
+   single band, so an implementation that silently leaked a band boundary into the output
+   would pass a test that did not force more than one band. One tile row is the extreme;
+   production sits in between (about two tile rows on a 30000px-wide slide), so the level
+   comparison is additionally parametrised over a THREE-tile-row band, where a partial
+   final band and a band boundary that is not a plane boundary coexist.
 
 4. **The peak does not grow with the channel count**, measured with ``tracemalloc``
    -- the property ``conf/modules.config``'s memory closure is derived from.
@@ -259,19 +262,34 @@ def _levels_from_file(path):
 # ---------------------------------------------------------------------------
 
 
+#: Band budgets the level-identity test runs at, in bytes, against the tile size those
+#: fixtures write at (128). ``1`` floors to one tile row. The second budget resolves to two
+#: or three tile rows depending on the fixture's width, and leaves a PARTIAL final band on
+#: every one of the four -- see the test's docstring for why that is not redundant.
+IDENTITY_BAND_BYTES = [
+    pytest.param(1, id="band1tile"),
+    pytest.param(3 * 128 * 640 * 2, id="band3tiles"),
+]
+
+
+@pytest.mark.parametrize("band_bytes", IDENTITY_BAND_BYTES)
 @pytest.mark.parametrize(
     "shape_id,names,h,w,dtype,with_masks", SHAPES, ids=[s[0] for s in SHAPES]
 )
 def test_every_pyramid_level_is_pixel_identical_to_the_whole_array_derivation(
-    tmp_path, monkeypatch, shape_id, names, h, w, dtype, with_masks
+    tmp_path, monkeypatch, shape_id, names, h, w, dtype, with_masks, band_bytes
 ):
     """Build the pyramid both ways and compare every level with ``np.array_equal``.
 
-    Bands are forced down to one tile row so the streamed base genuinely crosses band
-    boundaries; at the shipped 256 MB budget these fixtures would be a single band and the
-    test would not exercise the seam it exists to check.
+    Bands are forced small so the streamed base genuinely crosses band boundaries; at the
+    shipped 64 MiB budget these fixtures would be a single band and the test would not
+    exercise the seam it exists to check. Two band sizes, because they fail differently:
+    ``1`` collapses to exactly one tile row (every band boundary is a tile boundary), while
+    a three-tile-row budget leaves a partial final band on fixtures whose height is not a
+    multiple of it -- the shape production actually runs, and the one where an off-by-one
+    in the band-to-tile arithmetic survives the single-tile-row case.
     """
-    monkeypatch.setattr(mcp, "READ_BAND_BYTES", 1)
+    monkeypatch.setattr(mcp, "READ_BAND_BYTES", band_bytes)
 
     channels_dir, channel_files, masks_dir = _make_inputs(
         tmp_path, names, h, w, dtype, with_masks
@@ -557,6 +575,54 @@ def test_every_write_is_fed_from_an_iterator(tmp_path, monkeypatch):
     assert len(seen) == 4, f"expected 4 iterator-fed writes, got {len(seen)}"
 
 
+def test_every_write_pins_one_compressor_thread(tmp_path, monkeypatch):
+    """`maxworkers=1` on every write, and it is a memory bound, not a tuning preference.
+
+    tifffile defaults `maxworkers` to the machine's CPU count for a compressed tiled write
+    and dispatches encoded tiles through a thread pool that runs ahead of the writer. The
+    queued tiles are then an unbounded term in the peak that scales with the CHANNEL COUNT
+    -- the one property this rewrite exists to remove. Measured end to end on a 1024^2
+    slide with four pyramid levels, peak in units of one plane:
+
+        C=                    2      8     12     16
+        tifffile 2023.4.12  8.24   4.78   5.10   5.41
+        tifffile 2025.5.10  7.44   9.41  13.54  17.54
+
+    containers/merge/Dockerfile pins 2025.5.10, where the slope is about one plane per
+    channel. With `maxworkers=1` both versions give 4.46 / 4.77 / 5.09 / 5.41.
+
+    This is asserted on the ARGUMENT rather than measured, deliberately: the peak tests
+    below run at 2023.4.12 on this host, where the default pool is shallow enough that they
+    would NOT catch its removal. A version-independent assertion is the only one that holds.
+    """
+    channels_dir, _files, masks_dir = _make_inputs(
+        tmp_path, ["DAPI", "CD8"], 512, 512, np.uint16, True
+    )
+
+    seen = []
+    original_write = tifffile.TiffWriter.write
+
+    def spying_write(self, data=None, **kwargs):
+        seen.append(kwargs.get("maxworkers", "<default>"))
+        return original_write(self, data, **kwargs)
+
+    monkeypatch.setattr(tifffile.TiffWriter, "write", spying_write)
+
+    mcp.merge_channels(
+        input_dir=str(channels_dir),
+        output_path=str(tmp_path / "pyr.ome.tiff"),
+        pyramid_resolutions=3,
+        tile_size=128,
+        masks_dir=str(masks_dir),
+    )
+
+    assert seen == [1, 1, 1, 1], (
+        f"maxworkers per write was {seen}, not 1 on all four (base, two levels, masks). "
+        "tifffile's default is the machine's CPU count, and its encode queue is an "
+        "unbounded, channel-count-scaled term in the peak at the container's pinned version."
+    )
+
+
 def test_no_channel_file_is_read_whole_through_imread(tmp_path, monkeypatch):
     """``_read_channel_file`` is gone, not merely renamed.
 
@@ -592,14 +658,25 @@ def test_no_channel_file_is_read_whole_through_imread(tmp_path, monkeypatch):
     )
 
 
-def test_the_base_pass_reads_bands_not_planes(tmp_path, monkeypatch):
+@pytest.mark.parametrize("dtype", [np.uint16, np.float32], ids=["uint16", "float32"])
+def test_the_base_pass_reads_bands_not_planes(tmp_path, monkeypatch, dtype):
     """Every base-pass read is a single-channel Y/X REGION bounded by the band budget.
 
     The level pass legitimately reads a whole plane -- INTER_AREA leaves no choice -- so the
     bound asserted here is per read and sized from ``READ_BAND_BYTES``, not "smaller than a
     plane" unconditionally.
+
+    THE float32 CASE IS THE ONE WITH TEETH. The band is budgeted from the SOURCE itemsize,
+    not the output's, and for a float32 channel those differ: the pyramid is written as
+    uint16, so budgeting by the output would size the band from 2 bytes/px while the read
+    materialises 4. On a uint16 fixture the two are the same number and the distinction is
+    invisible -- which is how the first version of this test passed against the wrong one.
     """
-    monkeypatch.setattr(mcp, "READ_BAND_BYTES", 64 * 1024)  # 64 KiB budget
+    # Three tile rows of a 512px-wide UINT16 plane. Chosen so the budget, not
+    # `_band_rows`' one-tile-row floor, is what binds -- at a smaller budget every band
+    # collapses to the floor and the itemsize the budget was computed from stops mattering,
+    # which is exactly how a wrong itemsize hides.
+    monkeypatch.setattr(mcp, "READ_BAND_BYTES", 3 * 128 * 512 * 2)
 
     reads = []
     original_open_lazy = mcp.open_lazy
@@ -622,7 +699,7 @@ def test_the_base_pass_reads_bands_not_planes(tmp_path, monkeypatch):
     monkeypatch.setattr(mcp, "open_lazy", spying_open_lazy)
 
     channels_dir, _files, _masks = _make_inputs(
-        tmp_path, ["DAPI", "CD8"], 512, 512, np.uint16, False
+        tmp_path, ["DAPI", "CD8"], 512, 512, dtype, False
     )
     mcp.merge_channels(
         input_dir=str(channels_dir),
@@ -632,7 +709,9 @@ def test_the_base_pass_reads_bands_not_planes(tmp_path, monkeypatch):
     )
 
     assert reads, "the lazy view was opened but never read from"
-    plane_bytes = 512 * 512 * 2
+    itemsize = np.dtype(dtype).itemsize
+    plane_bytes = 512 * 512 * itemsize
+    budget_bytes = mcp.READ_BAND_BYTES
     for key, nbytes in reads:
         assert isinstance(key, tuple) and isinstance(key[0], (int, np.integer)), (
             f"read {key!r} is not a single-channel index -- a channel slab was materialised"
@@ -642,8 +721,23 @@ def test_the_base_pass_reads_bands_not_planes(tmp_path, monkeypatch):
         )
         assert nbytes < plane_bytes, (
             f"read {key!r} materialised {nbytes} bytes, a whole {plane_bytes}-byte plane, "
-            f"with the band budget set to {mcp.READ_BAND_BYTES} bytes"
+            f"with the band budget set to {budget_bytes} bytes"
         )
+
+    # Every base-pass read (i.e. every read except the one whole plane per channel the
+    # level pass takes) sits inside the budget, or inside `_band_rows`' one-tile-row floor
+    # where that is larger. Sized from the SOURCE itemsize: budgeting a float32 channel by
+    # the uint16 OUTPUT would give it three tile rows where the budget allows one, and the
+    # read would be 786432 bytes against a 393216-byte budget.
+    one_tile_row = 128 * 512 * itemsize
+    ceiling = max(budget_bytes, one_tile_row)
+    band_reads = [n for _key, n in reads if n < plane_bytes]
+    assert max(band_reads) <= ceiling, (
+        f"the largest base-pass read was {max(band_reads)} bytes against a ceiling of "
+        f"{ceiling} (budget {budget_bytes}, one tile row {one_tile_row}). The band is "
+        f"budgeted from the SOURCE itemsize ({itemsize} here); using the output dtype's "
+        "oversizes a float32 channel's band by the ratio between them."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -763,3 +857,65 @@ def test_the_wrapped_value_percentage_is_against_the_whole_channel(
     assert shared == [
         f"Detected {count} potentially wrapped pixels ({pct:.4f}%), max value: 65000"
     ], f"got {shared}"
+
+
+# ---------------------------------------------------------------------------
+# 5. the retained whole-array entry point
+# ---------------------------------------------------------------------------
+
+
+def test_the_array_entry_point_does_not_clip_signed_input(tmp_path):
+    """`write_pyramidal_ome_tiff` must round-trip a signed-integer stack unchanged.
+
+    The negative clip belongs to the PIPELINE's read of the channel files -- it is what
+    `_load_channel_stack` did, and `_ChannelFileSource` still does it there. It never ran in
+    `write_pyramidal_ome_tiff`, which only cast float input. The first draft of `_ArraySource`
+    clipped anyway, on the grounds that "signed means clip", and silently turned an int16
+    stack's -100 pixels into 0 at a retained public entry point that nothing covered.
+
+    int16 is what makes the difference observable: for uint16 the clip is a no-op, and for
+    float `to_uint16` clips regardless (and is asserted to, below), so a test on either of
+    those dtypes would pass against the broken version.
+    """
+    data = np.full((2, 64, 64), -100, dtype=np.int16)
+    data[:, 32:, :] = 500
+    out = tmp_path / "signed.ome.tiff"
+
+    mcp.write_pyramidal_ome_tiff(
+        data,
+        str(out),
+        channel_names=["DAPI", "CD8"],
+        channel_colors=[(0, 0, 255), (255, 0, 0)],
+        pyramid_resolutions=1,
+    )
+
+    written = np.asarray(tifffile.imread(str(out)))
+    assert written.dtype == np.int16, f"dtype changed to {written.dtype}"
+    assert int(written.min()) == -100, (
+        f"the array entry point clipped signed input: min is {int(written.min())}, not -100. "
+        "The negative clip belongs to _ChannelFileSource (the pipeline's read), not here."
+    )
+    assert np.array_equal(written, data)
+
+
+def test_the_array_entry_point_still_clips_and_rounds_float_input(tmp_path):
+    """The other half of the same rule: float input IS clipped, by `to_uint16`.
+
+    Without this the test above could be satisfied by removing the cast altogether, which
+    would change what the QuPath-facing pyramid does with the float stacks it is documented
+    to accept. -5.0 must become 0 and 100.7 must become 101, not 100.
+    """
+    data = np.array([[[-5.0, 100.7], [70000.0, 3.0]]], dtype=np.float32)
+    out = tmp_path / "floaty.ome.tiff"
+
+    mcp.write_pyramidal_ome_tiff(
+        data,
+        str(out),
+        channel_names=["DAPI"],
+        channel_colors=[(0, 0, 255)],
+        pyramid_resolutions=1,
+    )
+
+    written = np.asarray(tifffile.imread(str(out)))
+    assert written.dtype == np.uint16
+    assert written.tolist() == [[0, 101], [65535, 3]]

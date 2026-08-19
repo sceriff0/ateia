@@ -143,11 +143,13 @@ ALLOWED_LINES = {
         # multiples of the input file's size and became multi-line, tile-derived
         # arithmetic (the two processes now stream rather than holding the slide);
         # 856 -> 891 when MERGE_AND_PYRAMID's 200/300 GB tier ladder became the
-        # plane-derived closure that followed it into streaming.
+        # plane-derived closure that followed it into streaming; 891 -> 920 when that
+        # closure's comment stopped asserting a 4:1 compression ratio as fact and
+        # recorded the measured counterexamples and the retry backstop instead.
         # Re-pin, do not
         # widen. (Re-pin from the file, not by guessing:
         # `grep -n "params.expanded_quantification ?" conf/modules.config`.)
-        891: (
+        920: (
             "ext.args = { params.expanded_quantification ? '--expanded' : "
             "'' } -- conf/*.config closures cannot see lib/*.groovy classes, "
             "so ext.args must read params raw here."

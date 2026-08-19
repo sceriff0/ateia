@@ -144,7 +144,8 @@ SIGKILL. The arithmetic is written out inside each process' own
 `memory = { … }` closure in `conf/modules.config`, immediately under the block
 comment that derives it; the two closures are near-identical and that duplication
 is forced — Nextflow 26's strict config parser rejects a function declaration in
-a config file, so there is no legal way to share a helper between them. The
+a config file, so there is no legal way to share a helper between them.
+
 `MERGE_AND_PYRAMID` joined that list when it stopped holding the slide. It used
 to ask for a flat 200 or 300 GB on a tier over the summed channel files, because
 it allocated the whole `(C, H, W)` stack before writing anything. It now streams
@@ -155,9 +156,21 @@ must stay resident while `tifffile` fills the SubIFDs one level at a time. That
 second term is a geometric series in `pyramid_scale` and disappears below three
 `pyramid_resolutions`, which is why both parameters appear in the row. Floor 8 GB.
 
+The 4× is a **floor estimate, not a bound**, and the block comment in
+`conf/modules.config` records the measured counterexamples: zlib at
+SPLIT_CHANNELS' settings reaches 4.2× on a plane that is 75 % true-black
+background, and 796× on a near-empty channel. A WSI is mostly empty glass and
+every channel shares that background, so taking the largest file does not rescue
+the estimate. What backstops it is `conf/base.config`'s exit-137 retry with
+`maxRetries = 3` against a request that is multiplied by `task.attempt` — four
+attempts cover a shortfall of up to 4×, and beyond that the task fails loudly.
+Measure the real ratio against a production `channels/` directory and raise the
+coefficient if one becomes available.
+
 The "4 GB at defaults" figures above are the shipped-default evaluation of those
 formulas, not independent constants — the **parameter names**, not the numbers,
-are what `tests/test_resource_label_coverage.py` checks for these two rows.
+are what `tests/test_resource_label_coverage.py` checks for all five of these
+param-derived rows.
 
 The STARE method's memory is bounded. Measured peak RSS on a 16384² 2-channel
 tiled OME-TIFF:
