@@ -37,6 +37,17 @@ BIOIO_NATIVE_FORMATS = {".nd2", ".czi", ".lif", ".tif", ".tiff"}
 TIFFFILE_FORMATS = {".ndpi", ".ndpis"}  # Hamamatsu formats readable by tifffile
 HDF5_FORMATS = {".h5", ".hdf5"}
 
+#: TIFF tile size (px) for ``write_ome_tiff``'s output -- a TIFF LAYOUT choice, not a
+#: processing tile size (contrast ``params.preproc_tile_size``, BaSiC's pseudo-FOV grid).
+#: tifffile's zarr view of a STRIPED (untiled) TIFF reports ``chunks=(1, H, W)``, one chunk
+#: per whole plane, so every "read just this region" call downstream -- the BaSiC path, the
+#: STARE registration path, SPLIT_CHANNELS, the QC processes -- decodes the entire plane to
+#: slice it. Measured on a 6000x6000 uint16 plane: a single 2048^2 region read peaks at
+#: 76.7 MiB striped vs 16.0 MiB tiled. CONVERT_IMAGE writes the pipeline's canonical
+#: intermediate, so an untiled write here is the origin of that cost for every reader below
+#: it. Pinned by ``tests/test_convert_streaming_write.py``.
+CONVERT_TIFF_TILE = 2048
+
 
 def get_file_format(file_path: Path) -> str:
     """Determine file format and appropriate reader."""
@@ -477,12 +488,19 @@ def write_ome_tiff(output_filename: Path, image_data: Any, ome_metadata: dict) -
     ``TiffWriter.write`` an ITERATOR of pages together with an explicit ``shape=`` and
     ``dtype=``, which it cannot infer from a generator.
 
-    Every other decision is carried over unchanged, because the output has to stay
-    byte-identical to the eager writer's (``tests/test_convert_streaming_write.py``
-    compares the two files directly): ``bigtiff=True``, ``ome=True``, no compression, no
-    tiling, and ``photometric="minisblack"`` -- the last being the precondition that
-    makes one page equal one channel, which every downstream per-page read depends on
-    (see ``tests/test_slide_io_seam.py``).
+    Most other decisions are carried over unchanged from the eager writer this replaces:
+    ``bigtiff=True``, ``ome=True``, no compression, and ``photometric="minisblack"`` -- the
+    last being the precondition that makes one page equal one channel, which every
+    downstream per-page read depends on (see ``tests/test_slide_io_seam.py``). Because of
+    those, the PIXELS and the OME-XML header stay identical to the eager writer's --
+    ``tests/test_convert_streaming_write.py`` decodes both and compares.
+
+    The one deliberate change is ``tile=(CONVERT_TIFF_TILE, CONVERT_TIFF_TILE)``: the file
+    is now TILED rather than striped. See ``CONVERT_TIFF_TILE`` for why -- in short, a
+    striped TIFF makes every region read downstream decode a whole plane. Tiling changes
+    the on-disk layout (and therefore the raw bytes -- this file is no longer byte-identical
+    to the old writer's output, only pixel-and-metadata-identical), not the pixels, which is
+    what ``tests/test_convert_streaming_write.py::test_the_write_is_tiled`` pins.
 
     Peak memory is one axis-0 chunk of ``image_data``, not one plane -- see
     ``_iter_planes``. When those are the same thing this is a per-plane write; when the
@@ -498,6 +516,7 @@ def write_ome_tiff(output_filename: Path, image_data: Any, ome_metadata: dict) -
             dtype=np.dtype(image_data.dtype),
             metadata=ome_metadata,
             photometric="minisblack",
+            tile=(CONVERT_TIFF_TILE, CONVERT_TIFF_TILE),
         )
 
 

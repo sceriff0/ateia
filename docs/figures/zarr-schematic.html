@@ -392,13 +392,15 @@ DEFAULT_BAND_BYTES = 64 * 1024 * 1024    <span class="cm"># a BYTE budget, not a
           <code>bin/</code> is threaded any more.<br><br>
           <b>The property outlived the process.</b> The two mirage-owned processes that replaced it —
           <code>TILE_FOR_BASIC</code> and <code>APPLY_PROFILES</code> — read the slide through the same
-          <code>open_lazy</code>, one channel at a time, by construction rather than by conversion. That is now
-          asserted rather than asserted-about: a spy over the lazy view records the <i>bytes</i> each index
-          expression materialises, and fails if the largest single read grows with the channel count.</p>
-        <div class="res">evidence: <b>largest single materialisation is one plane at C=2 and at C=6</b>
-          (125&thinsp;000 bytes both times on the 250&sup2; uint16 fixture; a whole-stack revert makes it
-          250&thinsp;000 &rarr; 750&thinsp;000, which is the assertion firing) ·
-          bin/tile_for_basic.py:162-181 · bin/apply_basic_profiles.py:248-270 ·
+          <code>open_lazy</code>, one <i>tile</i> at a time (one pseudo-FOV, or one output write-tile), by
+          construction rather than by conversion — tighter than the deleted process's per-channel claim, since
+          a tile is smaller than a plane. That is now asserted rather than asserted-about: a spy over the lazy
+          view records the <i>bytes</i> each index expression materialises, and fails if the largest single
+          read grows with the channel count.</p>
+        <div class="res">evidence: <b>largest single materialisation is one FOV at C=2 and at C=6</b>
+          (20&thinsp;000 bytes both times — a 100&sup2; FOV on the 300&sup2; uint16 fixture, well below the
+          shipped 1950px/2048px tile sizes so the fixture actually exercises a tile smaller than the slide) ·
+          bin/tile_for_basic.py:182-205 · bin/apply_basic_profiles.py:295-336 ·
           tests/test_basic_illumination_lazy_read.py</div>
       </div>
 

@@ -473,7 +473,40 @@ HOURS_RE = re.compile(r"(\d+(?:\.\d+)?)\s*\.\s*h\b")
 # Widening this list is a deliberate act: it means asserting that the new
 # closure's value genuinely cannot be computed from pytest, the way these two
 # cannot.
-DERIVED_MEMORY_PARAMS = ("reg_tiled_tile", "reg_tiled_halo", "reg_tiled_out_tile")
+#
+# `preproc_tile_size` was added when TILE_FOR_BASIC and APPLY_PROFILES stopped
+# holding the slide. Both used to ask for a flat multiple of the INPUT FILE's
+# size (`f x 3 GB` and `f x 7 GB`), which the numeric comparison could check.
+# Both now stream a tile at a time, so their requests are built from the
+# pseudo-FOV size the same way the two STARE rows are built from the tile and
+# halo -- a profile-plane term of `2 x C x preproc_tile_size^2 x 8` bytes plus
+# write buffers, none of it computable here. Neither closure carries a file-size
+# term any more: CONVERT_IMAGE and SPLIT_CHANNELS now write tiled
+# (tests/test_convert_streaming_write.py::test_the_write_is_tiled,
+# tests/test_split_multichannel_lazy_read.py::test_the_write_is_tiled), so a
+# region read decodes a tile rather than the whole plane the old
+# `ome_tiff.size()` term used to bound. The doc rows name every remaining term
+# instead.
+#
+# `pyramid_resolutions` and `pyramid_scale` were added when MERGE_AND_PYRAMID
+# stopped holding the slide. Its request used to be a `f<20 ? 200.GB : 300.GB`
+# ladder, which the pairing comparison could check; it is now built from ONE
+# decoded plane (estimated from the largest single channel file) plus the pyramid
+# levels that have to stay resident while tifffile fills the SubIFDs level by
+# level. That second term is a geometric series in the SCALE FACTOR and vanishes
+# below three levels, so both parameters genuinely change the magnitude -- at
+# `--pyramid-resolutions 2` the term is zero, and at scale 4 it is a sixteenth of
+# its value at scale 2. Neither is computable here: the first term depends on the
+# input file's compression ratio and the second on the channel count, and a doc
+# row could state neither. The row names every term instead.
+DERIVED_MEMORY_PARAMS = (
+    "reg_tiled_tile",
+    "reg_tiled_halo",
+    "reg_tiled_out_tile",
+    "preproc_tile_size",
+    "pyramid_resolutions",
+    "pyramid_scale",
+)
 
 # A memory request derived from params at submission time rather than being a
 # literal -- either an allowlisted `params.reg_tiled_tile` read (the inlined form
@@ -512,10 +545,21 @@ CONFIG_TIER_RE = re.compile(r"<\s*(\d+(?:\.\d+)?)\s*\?\s*(\d+(?:\.\d+)?)\s*\.GB"
 # The ladder's final `else` branch: the first `: N.GB` after its last rung.
 CONFIG_ELSE_RE = re.compile(r":\s*(\d+(?:\.\d+)?)\s*\.GB")
 
-# The one non-ladder size-dependent shape in conf/modules.config: TILE_FOR_BASIC's and
-# APPLY_PROFILES's `... * N.GB * task.attempt + 8.GB`, linear in file size. The two numbers play
-# DIFFERENT roles -- 7 is the per-GiB-of-input coefficient, 8 a flat addend --
-# so they are captured positionally rather than pooled.
+# A non-ladder size-dependent shape, `... * N.GB * task.attempt + M.GB`, linear in file
+# size: coefficient and flat addend captured positionally (not pooled), so a doc cell
+# cannot state the right pair of numbers in the wrong roles and pass -- the same
+# mispairing CONFIG_TIER_RE's comment above describes for the ladder rungs.
+#
+# CURRENTLY UNUSED in conf/modules.config: TILE_FOR_BASIC and APPLY_PROFILES were this
+# regex's only two matches, and f154792 rewrote both off a file-size term entirely (they
+# now derive from preproc_tile_size, not from the staged input's size). That is not a
+# broken guard -- memory_cell_mismatch still refuses loudly on any shape it does not
+# recognise, so a size-linear closure landing anywhere in the config is still caught, not
+# silently waved through -- and the mechanism itself is unit-tested against a synthetic
+# literal in test_memory_cell_mismatch_compares_pairs_not_pooled_numbers, independent of
+# whether any real closure currently matches it. Kept
+# so a reintroduced size-linear closure (this shape or another process's) is still
+# checked, not because anything live matches it today.
 CONFIG_SIZE_LINEAR_RE = re.compile(
     r"\*\s*(\d+(?:\.\d+)?)\s*\.GB\s*\*\s*task\.attempt\s*\+\s*(\d+(?:\.\d+)?)\s*\.GB"
 )

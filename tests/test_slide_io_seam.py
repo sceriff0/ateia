@@ -10,12 +10,12 @@ and a changed one shows up as a failing test rather than as a surprise at gigapi
 The measured inventory, at the time of writing:
 
     writer                          multi-ch  photometric  compression  tile      bigtiff
-    convert_image.py                  yes     minisblack   none         none      yes
+    convert_image.py                  yes     minisblack   none         2048      yes
     tile_for_basic.py                 yes     minisblack   none         none      yes
     apply_basic_profiles.py           yes     minisblack   zlib         2048      yes
     merge_channels_pyramid.py         yes     minisblack   zstd(param)  tile_size yes
     tiled_stitch.py                   yes     minisblack   none         out_tile  yes
-    split_multichannel.py             no      -            zlib         none      yes
+    split_multichannel.py             no      -            zlib         2048      yes
     segment.py / _cellsam / _instanseg no     -            zlib         none      NO
     extract_mask_series.py            no      -            zlib         none      yes
     utils/image_utils.py              generic passed through by the caller
@@ -26,9 +26,11 @@ change published bytes:
   * the six segmentation mask writers omit ``bigtiff`` while ``extract_mask_series`` -- writing
     THE SAME masks, read back out of the pyramid -- now sets it;
   * the two largest intermediates, ``convert_image`` and ``tiled_stitch``, are written
-    uncompressed, and ``convert_image`` untiled. PERF-PLAN.md measures tiling + zstd on
-    convert_image at 2% wall-clock, and notes that untiled output forecloses every windowed
-    read downstream.
+    uncompressed -- compression stays out of scope for both. ``convert_image`` USED to be
+    untiled too; PERF-PLAN.md measured that an untiled canonical intermediate forecloses
+    every windowed read downstream (BaSiC, STARE registration, SPLIT_CHANNELS, QC) at 2%
+    wall-clock cost to fix, so it is now tiled at ``CONVERT_TIFF_TILE`` (2048px) -- see
+    ``tests/test_convert_streaming_write.py::test_the_write_is_tiled``.
 
 The one rule asserted as a rule, rather than merely recorded, is the multi-channel
 ``photometric="minisblack"`` precondition -- see below.

@@ -273,6 +273,12 @@ Per-process requests, resource labels, retry policy and containers:
 | `max_memory` | `700.GB` | Global memory ceiling. Clamps every process's request via `process.resourceLimits`. |
 | `max_cpus` | `128` | Global CPU ceiling. |
 | `max_time` | `240.h` | Global walltime ceiling. |
+| `max_forks` | `100` | Max concurrent tasks **per process**. Also an upper bound on every per-process `maxForks`, so lowering it throttles every module. |
+| `queue_size` | `20` | Max concurrent tasks across the **whole pipeline** (`executor.queueSize`). Normally the binding constraint. |
+
+`max_forks` and `queue_size` are a pair: the lower of the two binds. At the defaults
+`queue_size` is far lower, so raising `max_forks` alone has no effect — raise both, or
+raise `queue_size`. See [Resources → Execution & concurrency](resources.md#execution--concurrency).
 
 !!! info "How resources scale"
     Per-process memory and time scale with `task.attempt`, bounded by the

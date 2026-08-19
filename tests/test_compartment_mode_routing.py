@@ -138,11 +138,34 @@ ALLOWED_LINES = {
         # TILE_FOR_BASIC / BASICPY / APPLY_PROFILES gained withName blocks above it
         # (826 -> 834 once BASICPY's block gained the comment recording that running at
         # upstream defaults is a decision); 834 -> 821 when the dead PREPROCESS withName
-        # block was deleted with the in-process BaSiC path.
+        # block was deleted with the in-process BaSiC path; 821 -> 856 when
+        # TILE_FOR_BASIC's and APPLY_PROFILES' memory closures stopped being one-line
+        # multiples of the input file's size and became multi-line, tile-derived
+        # arithmetic (the two processes now stream rather than holding the slide);
+        # 856 -> 891 when MERGE_AND_PYRAMID's 200/300 GB tier ladder became the
+        # plane-derived closure that followed it into streaming; 891 -> 920 when that
+        # closure's comment stopped asserting a 4:1 compression ratio as fact and
+        # recorded the measured counterexamples and the retry backstop instead;
+        # 920 -> 934 when APPLY_PROFILES' and MERGE_AND_PYRAMID's memory comments
+        # each named their `maxworkers=1` dependency on bin/apply_basic_profiles.py
+        # and bin/merge_channels_pyramid.py (+5 and +9 net lines respectively) and
+        # MERGE_AND_PYRAMID's plane coefficient comment was corrected from 3.11 to
+        # 3.25 to agree with its own measured intercept and mechanism sum; 934 -> 936
+        # when a review round reworded that same comment (+2 net lines) to stop
+        # calling 3.25 a "bound" on every measured point -- C=1 sits 0.18 planes
+        # above the C=4/8/16 fit, a finite-C edge effect the +1d adder absorbs;
+        # 936 -> 946 when TILE_FOR_BASIC's and APPLY_PROFILES' memory comments lost
+        # the "one decoded source plane" file-size term now that CONVERT_IMAGE and
+        # SPLIT_CHANNELS write tiled (net +10 lines: the mechanism explanation grew
+        # to point at the two tiling tests and record the --prior_outdir / add_cycle
+        # legacy-untiled degradation instead of shrinking to nothing), and the C=1
+        # gap above was corrected from 0.18 (measured against the 3.25 CODE
+        # coefficient plus the per-channel stash term) to 0.21 (measured against the
+        # 3.21 FIT the sentence actually names).
         # Re-pin, do not
         # widen. (Re-pin from the file, not by guessing:
         # `grep -n "params.expanded_quantification ?" conf/modules.config`.)
-        821: (
+        946: (
             "ext.args = { params.expanded_quantification ? '--expanded' : "
             "'' } -- conf/*.config closures cannot see lib/*.groovy classes, "
             "so ext.args must read params raw here."

@@ -125,7 +125,10 @@
                     ]
                 },
                 "nuclear_markers": {
-                    "type": ["array", "string"],
+                    "type": [
+                        "array",
+                        "string"
+                    ],
                     "description": "Ordered preference of nuclear/fiducial marker names; the first present (resolved from channel metadata, never the filename) is moved to channel 0 and drives both cell segmentation and the registration fiducial. Accepts a list (config/params file) or a comma- or space-separated string, which is the only shape Nextflow can produce for `--nuclear_markers CELLTOX` on the command line; MarkerUtils.markerList normalises both.",
                     "default": [
                         "DAPI",
@@ -156,7 +159,10 @@
                     "type": "string",
                     "description": "reg_qc=2 cell correspondence: 'lsa' (optimal one-to-one assignment within the match radius) or 'mutual_nn' (greedy mutual nearest neighbour).",
                     "default": "lsa",
-                    "enum": ["lsa", "mutual_nn"]
+                    "enum": [
+                        "lsa",
+                        "mutual_nn"
+                    ]
                 },
                 "seg_qc_match_radius_factor": {
                     "type": "number",
@@ -472,8 +478,9 @@
                 },
                 "pyramid_scale": {
                     "type": "integer",
-                    "description": "Scale factor between pyramid levels.",
-                    "default": 2
+                    "description": "Scale factor between pyramid levels. Must be at least 2: a factor of 1 is not a pyramid (every level would be the base), and MERGE_AND_PYRAMID's memory closure divides by 1 - 1/scale^2, which is 0 at scale 1 (Infinity -> a ~2 EB request) and NaN at scale 0 (a 0 GB request).",
+                    "default": 2,
+                    "minimum": 2
                 },
                 "compression": {
                     "type": "string",
@@ -573,6 +580,20 @@
                     "type": "string",
                     "description": "Maximum time limit.",
                     "default": "240.h"
+                },
+                "max_forks": {
+                    "type": "integer",
+                    "description": "Maximum concurrent tasks per process. Also an upper bound on every per-process maxForks in conf/modules.config, so lowering it throttles every module.",
+                    "help_text": "Paired with queue_size, which caps concurrency across the WHOLE pipeline. The lower of the two binds: at the defaults queue_size (20) is far below max_forks (100), so raising max_forks alone has no effect. Raise both, or raise queue_size.",
+                    "minimum": 1,
+                    "default": 100
+                },
+                "queue_size": {
+                    "type": "integer",
+                    "description": "Maximum concurrent tasks across the whole pipeline (executor.queueSize).",
+                    "help_text": "This is normally the binding constraint on concurrency, not max_forks. The shipped default of 20 is deliberately conservative for a shared scheduler.",
+                    "minimum": 1,
+                    "default": 20
                 }
             }
         }

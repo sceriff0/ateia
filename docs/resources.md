@@ -96,8 +96,8 @@ Effective values on **attempt 1**. `f` denotes the relevant input size in GiB
 | Process | `cpus` | `memory` (attempt 1) | `time` | Owner |
 |---|---|---|---|---|
 | `CONVERT_IMAGE` | `1` | `24 GB` + tier: `f<4` → +0, `f<12` → +24, `f<24` → +48, else +64 GB | `2.h × attempt` | `withName` |
-| `TILE_FOR_BASIC` | `2` | `f × 3 GB × attempt + 8 GB` | `2.h × attempt` | `withName` |
-| `APPLY_PROFILES` | `2` | `f × 7 GB × attempt + 8 GB` | `3.h × attempt` | `withName` |
+| `TILE_FOR_BASIC` | `2` | derived from `preproc_tile_size`, `× attempt` *(withName)* — floor 6 GB | `2.h × attempt` | `withName` |
+| `APPLY_PROFILES` | `2` | derived from `preproc_tile_size`, `× attempt` *(withName)* — floor 8 GB | `3.h × attempt` | `withName` |
 | `GENERATE_PREPROCESS_QC` | `4` | `200 GB` | `4.h × attempt` | `process_medium` |
 
 `BASICPY` is **not** in the table above and cannot be: the guard behind these tables
@@ -114,8 +114,9 @@ real slide. Changing either number changes an unguarded figure, so change it her
 |---|---|---|---|---|
 | `REGISTER` | `8` | `300 GB × attempt` | `24.h × attempt` | `withName` |
 
-`REGISTER` also carries `maxForks = 10` and its own error strategy — see
-[Retry policy](#retry-policy).
+`REGISTER` also carries `maxForks = Math.min(10, params.max_forks)` and its own error
+strategy — see [Retry policy](#retry-policy) and
+[Execution & concurrency](#execution--concurrency).
 
 ### Registration — tiled / STARE
 
@@ -133,7 +134,9 @@ laptop-viable.
 `TILED_COARSE` / `TILED_REG_TILE` / `TILED_SOLVE` / `TILED_STITCH` are the STARE method —
 the only shape it has.
 
-`TILED_REG_TILE` and `TILED_STITCH` are the only two processes whose memory
+`TILED_REG_TILE`, `TILED_STITCH`, `TILE_FOR_BASIC`, `APPLY_PROFILES` and
+`MERGE_AND_PYRAMID` are the
+processes whose memory
 request is **derived from a parameter** instead of being a constant: the first
 scales with `reg_tiled_tile + 2 × reg_tiled_halo`, the second with
 `reg_tiled_out_tile`, each the measured linear fit doubled and floored at 4 GB.
@@ -142,10 +145,41 @@ SIGKILL. The arithmetic is written out inside each process' own
 `memory = { … }` closure in `conf/modules.config`, immediately under the block
 comment that derives it; the two closures are near-identical and that duplication
 is forced — Nextflow 26's strict config parser rejects a function declaration in
-a config file, so there is no legal way to share a helper between them. The
-"4 GB at defaults" figures above are the shipped-default evaluation of those
+a config file, so there is no legal way to share a helper between them.
+
+`MERGE_AND_PYRAMID` joined that list when it stopped holding the slide. It used
+to ask for a flat 200 or 300 GB on a tier over the summed channel files, because
+it allocated the whole `(C, H, W)` stack before writing anything. It now streams
+the base resolution from a generator of tiles, so its request is built from **one
+decoded plane** — estimated as 4× the largest single channel file, since a
+config closure cannot know the compression ratio — plus the pyramid levels that
+must stay resident while `tifffile` fills the SubIFDs one level at a time. That
+second term is a geometric series in `pyramid_scale` and disappears below three
+`pyramid_resolutions`, which is why both parameters appear in the row. Floor 8 GB.
+
+Both `APPLY_PROFILES`' write-tile-buffer term and `MERGE_AND_PYRAMID`'s
+decoded-plane term assume tifffile's compressor pool is pinned to `maxworkers=1`
+on the write itself (`bin/apply_basic_profiles.py`,
+`bin/merge_channels_pyramid.py:826-847`) — without that pin, the container's
+tifffile version reintroduces a term that scales with the channel count, which
+these figures do not budget for. See the `maxworkers=1` comment in each
+process' `conf/modules.config` block for the measured numbers.
+
+The 4× is a **floor estimate, not a bound**, and the block comment in
+`conf/modules.config` records the measured counterexamples: zlib at
+SPLIT_CHANNELS' settings reaches 4.2× on a plane that is 75 % true-black
+background, and 796× on a near-empty channel. A WSI is mostly empty glass and
+every channel shares that background, so taking the largest file does not rescue
+the estimate. What backstops it is `conf/base.config`'s exit-137 retry with
+`maxRetries = 3` against a request that is multiplied by `task.attempt` — four
+attempts cover a shortfall of up to 4×, and beyond that the task fails loudly.
+Measure the real ratio against a production `channels/` directory and raise the
+coefficient if one becomes available.
+
+The "4 GB at defaults" figures above are the shipped-default evaluation of those
 formulas, not independent constants — the **parameter names**, not the numbers,
-are what `tests/test_resource_label_coverage.py` checks for these two rows.
+are what `tests/test_resource_label_coverage.py` checks for all five of these
+param-derived rows.
 
 The STARE method's memory is bounded. Measured peak RSS on a 16384² 2-channel
 tiled OME-TIFF:
@@ -198,7 +232,7 @@ unaffected by that number.
 | `QUANTIFY` | `1` | `128 GB × attempt` | `12.h × attempt` | `withName` |
 | `MERGE_QUANT_CSVS` | `2` | `32 GB × attempt` | `2.h × attempt` | `process_low` |
 | `EXPORT_GEOJSON` | `1` | `32 GB × attempt` | `2.h × attempt` | `withName` |
-| `MERGE_AND_PYRAMID` | `2` | tier on channels + masks: `f<20` → 200, else 300 GB, `× attempt` | `8.h × attempt` | `withName` |
+| `MERGE_AND_PYRAMID` | `2` | derived from the largest single channel file + `pyramid_resolutions` and `pyramid_scale`, `× attempt` *(withName)* — floor 8 GB | `8.h × attempt` | `withName` |
 | `EXPORT_SPATIALDATA` | `4` *(label)* | `200 GB` *(label)* | `4.h × attempt` *(withName)* | partial |
 | `GENERATE_POSTPROCESSING_QC` | `4` | `200 GB` | `4.h × attempt` | `process_medium` |
 
@@ -336,14 +370,55 @@ are both dropped.
 
 | Setting | Value | Where |
 |---|---|---|
-| `process.maxForks` | `100` | `nextflow.config` |
+| `process.maxForks` | `params.max_forks` (`100`) | `nextflow.config` |
 | `process.stageInMode` | `symlink` | `nextflow.config` — zero-overhead, works cross-filesystem |
-| `executor.queueSize` | `20` | `conf/base.config` — max concurrent scheduler submissions |
+| `executor.queueSize` | `params.queue_size` (`20`) | `nextflow.config` — max concurrent scheduler submissions |
 | `executor.exitReadTimeout` | `1 day` | `conf/base.config` — SLURM status-poll timeout |
 
-Per-process `maxForks` overrides: `REGISTER`, `TILED_STITCH`
-at `10`; `TILED_COARSE` / `TILED_REG_TILE` at `20`. These bound how many
-memory-heavy registration tasks can be in flight at once.
+Both are tunable from the command line: `--max_forks` and `--queue_size`.
+
+**They are a pair, and tuning one alone is usually a no-op.** `max_forks` caps how many
+tasks of any ONE process run at once; `queue_size` caps how many run at once across the
+WHOLE pipeline. The lower binds, and at the shipped defaults `queue_size` (20) is far below
+`max_forks` (100) — so raising `max_forks` on its own changes nothing. Raise both, or raise
+`queue_size` alone if you simply want more total concurrency.
+
+Per-process `maxForks` overrides: `REGISTER`, `TILED_STITCH` at `10`; `TILED_COARSE` /
+`TILED_REG_TILE` at `20`. These bound how many memory-heavy registration tasks can be in
+flight at once. Each is written `Math.min(<its own limit>, params.max_forks)`, so
+**lowering** `--max_forks` really does throttle every module, while **raising** it never
+lifts one of these past the limit its own block sets for its own reasons. Measured on the
+test profile: at the default, `REGISTER` runs at 10 and everything else at 100; at
+`--max_forks 4` every process runs at 4; at `--max_forks 50`, `REGISTER` stays at 10.
+
+`executor.queueSize` is assigned in `nextflow.config`, not in `conf/base.config` where the
+rest of the executor scope lives. That is deliberate and load-bearing — see
+[Why the includes sit after the params block](#why-the-includes-sit-after-the-params-block).
+
+### Why the includes sit after the params block
+
+`conf/base.config` and `conf/modules.config` are included **after** `nextflow.config`'s
+`params` block, not at the top of the file. Anything in those files that reads `params.*`
+depends on it:
+
+* A `params.x` reference evaluated **before** the params block exists does not read `null`.
+  Nextflow resolves it to an empty `ConfigObject` — a Map. Inside a closure that is
+  harmless, because closures run at task-submission time, which is why every
+  `memory = { ... }` closure worked even when the includes sat at the top. Evaluated
+  eagerly it is not: `params.x as int` on a Map throws *"Cannot coerce a map to class
+  java.lang.Integer"* and the entire config fails to parse.
+* Inside an `executor { }` scope it is worse than an error. `queueSize = params.queue_size`
+  parsed from an early-included file is read as the opening of a **nested scope named
+  `params`**, and the `queueSize` setting vanishes from the resolved config with no error
+  at all — silently falling back to Nextflow's own default.
+* `maxForks` cannot dodge this the way `memory` does, because it is **not a dynamic
+  directive**: Nextflow compares it against `0` in `TaskProcessor`'s constructor, so a
+  closure throws *"Cannot compare ... Closure ... and java.lang.Integer with value '0'"*.
+
+Relative order is otherwise unchanged — both files are still included before the `executor`
+and `process` blocks, so those still take precedence. Verified by diffing `nextflow config`
+for the `test`, `test_full` and `local` profiles across the move: the only content
+difference is the two new parameters. Guarded by `tests/test_concurrency_params.py`.
 
 ---
 

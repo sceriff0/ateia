@@ -24,20 +24,84 @@ BaSiC call did not:
 
 Takes the converted slide and writes mirage's existing non-overlapping FOV grid — the
 same `params.preproc_tile_size` grid the in-process path fitted on, via the same
-`count_fovs` / `split_image_into_fovs` helpers — as an OME-TIFF whose **tiles occupy the
-`Z` axis**.
+`bin/utils/fov_tiling.py` helpers — as an OME-TIFF whose **tiles occupy the `Z` axis**.
 
 * Axes are **`CZYX`**, not `ZCYX`. The module iterates channels
   (`for c, channel_stack in enumerate(istack, 1)`) and fits one profile per channel;
   putting tiles on `C` would fit one profile per tile and mix every marker together.
 * `len(I) = SizeM × SizeT × SizeZ`, and mirage writes no M and no T, so every site has to
   come from `Z`.
-* Edge tiles are zero-padded to the grid's maximum tile size. This is not new — the
-  in-process path handed BaSiC the same padded stack — so the fit input is unchanged.
+* Edge tiles are zero-padded to the grid's maximum tile size. This is **required**, not
+  incidental: BaSiCPy's `fit()` takes one `(N, Y, X)` ndarray and has no ragged-input
+  path, so fields differing by a pixel cannot be passed at all. It is also unchanged —
+  the in-process path handed BaSiC the same padded stack — so the fit input is the same
+  bytes. The cost is worth knowing: BaSiCPy normalises the fitted flatfield by its own
+  mean (`S = S / torch.mean(S)`), so padded zeros pull that mean down slightly. With the
+  remainder distributed across tiles the padding is at most a one-pixel border, so on a
+  ~1950 px tile the effect is ~0.1% at the profile's very edge. Do not "fix" the padding
+  away: removing it does not produce a smaller input, it produces one `fit()` rejects.
 * **A grid of fewer than two tiles is refused**, with a message naming
   `--preproc_tile_size` and the largest value that would work. BaSiC estimates shading
   across a *population* of fields; one field is not an estimate, and failing here beats
   failing inside a vendored container.
+
+### Neither half ever holds the slide
+
+Both `bin/tile_for_basic.py` and `bin/apply_basic_profiles.py` follow the discipline the
+STARE registration path uses in `bin/tiled_stitch.py`, and for the same reason — a WSI
+does not fit in a sensible memory request:
+
+* **Geometry is separated from pixels.** `fov_tiling.fov_positions` is pure arithmetic on
+  `(H, W, n_fovs_y, n_fovs_x)`; it allocates nothing and reads nothing, exactly as
+  `tile_grid.tile_grid` does for STARE. That is what makes streaming possible at all —
+  you can know where every tile goes before decoding a byte.
+* **Reads are lazy region reads** through `tiled_io.open_lazy`'s zarr view.
+* **Writes are generator-fed**: `TiffWriter.write(iterator, shape=…, tile=…)`, one tile
+  resident at a time.
+
+`TILE_FOR_BASIC` streams one pseudo-FOV at a time. `APPLY_PROFILES` streams one 2048 px
+output write-tile at a time; because that grid does not align with the FOV grid, each
+write-tile is corrected **piecewise** over the sub-windows `fov_tiling.fov_overlaps`
+reports, which partition it exactly. Peak memory for both is independent of slide size.
+`TILE_FOR_BASIC`'s is independent of channel count too — one padded tile, regardless of
+how many channels are tiled. `APPLY_PROFILES`' is **not**: the fitted flatfield and
+darkfield planes are held for the whole run, one pair per fitted channel at full
+pseudo-FOV resolution as float64 — `2 × C × preproc_tile_size² × 8` bytes — a small,
+deliberate, channel-linear term rather than a constant one. `conf/modules.config` sizes
+both processes from `params.preproc_tile_size` rather than from the input file's size,
+and states this term explicitly for `APPLY_PROFILES` (allowing up to 16 channels; a wider
+panel is absorbed by the retry ramp) rather than pretending it is not there. It is the
+same kind of accepted, small, channel-linear trade `bin/merge_channels_pyramid.py`'s
+pyramid-level stash makes (measured at 0.69 MB/channel there, against a 3.4× wall-clock
+cost to remove it entirely) — a different formula, but the same reasoning: a small
+per-channel term is cheaper than the I/O needed to eliminate it.
+
+`APPLY_PROFILES` used to assemble the whole corrected slide — every channel accumulated
+into a list, `np.stack`ed, then clipped and cast with the list still referenced. That is
+roughly `8 × C × H × W` bytes, about **115 GB** on an 8-channel 40000×30000 uint16 slide,
+against a request that was computed from the *compressed* file size and so under-shot it.
+The streamed rewrite is bit-identical: same grid, same padding, same arithmetic, same
+rounding, same log lines — only the order the pixels are visited in changed.
+
+> **Why neither memory formula carries a file-size term any more.** `CONVERT_IMAGE` and
+> `SPLIT_CHANNELS` now write their outputs **tiled** — guarded by
+> `tests/test_convert_streaming_write.py::test_the_write_is_tiled` and
+> `tests/test_split_multichannel_lazy_read.py::test_the_write_is_tiled` — so a region read
+> decodes a TILE. Before that, a striped producer's `write_ome_tiff` ("no compression, no
+> tile") made tifffile's zarr view report `chunks=(1, H, W)` — one chunk per whole plane —
+> so a region read decoded the ENTIRE PLANE and sliced it: measured, a 2048² region of a
+> 6000² striped plane peaked at 76.7 MiB against 16.0 MiB for the same read on a tiled one.
+> That is why an untiled producer ahead of any lazy reader in the repository (this path,
+> `bin/tiled_stitch.py` included) is a bug and not a style choice, and it is what those two
+> tests now hold the line on — not a historical footnote.
+>
+> **One known degradation this does not size for.** A run resumed from a `--prior_outdir`
+> published before the producers were tiled, or an `add_cycle` run reading an older
+> published tree, can still hand these processes an untiled slide, and the plane-decode
+> cost above returns for that input. That is covered by the exit-137 retry ramp
+> (`conf/base.config`), not by a term in either formula — sizing the steady state for an
+> input the pipeline will stop producing would keep every normal run's request permanently
+> inflated.
 
 ### The tile-position sidecar
 
@@ -105,13 +169,18 @@ drift. `params.preproc_skip_nuclear` still switches it off.
 
 ## APPLY_PROFILES
 
-`corrected = (image - darkfield) / flatfield`, per channel, per pseudo-FOV, reassembled
-from the sidecar's positions. Three contracts carried over from the in-process path:
+`corrected = (image - darkfield) / flatfield`, per channel, per pseudo-FOV, streamed
+straight to disk one write-tile at a time using the sidecar's positions (see "Neither half
+ever holds the slide" above). Three contracts carried over from the in-process path:
 
 * **The fiducial skip**, read from `corrected_channels` (see above).
-* **The negative clip.** `bin/utils/validation.py`'s `clip_negative_values`, called once
-  on the assembled stack, so its percentage is a whole-image percentage and it emits
-  exactly one aggregate line — not one per channel, and not a forked copy of the function.
+* **The negative clip.** `bin/utils/validation.py`'s `StreamingNegativeClip` — the chunked
+  counterpart of `clip_negative_values`, which folds per-tile counts into the same
+  aggregates so the percentage stays a whole-image percentage and exactly one aggregate
+  line is emitted. Not one line per tile, and not a forked copy of the function;
+  `bin/split_multichannel.py` uses the same class for the same reason. Only real pixels are
+  folded in — a partial write-tile at the slide edge is passed as its valid sub-array, or
+  the padding would enter the reported percentage.
   Note the *rationale* has changed: the deleted `bin/preprocess.py` explained the clip by BaSiC's
   darkfield exceeding a pixel value, and with `get_darkfield=False` that mechanism is
   largely gone. It is kept because the contract is what downstream reads, and because the

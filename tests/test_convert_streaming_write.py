@@ -8,17 +8,33 @@ stream -- ``tifffile.TiffWriter(...).write(<iterator of planes>, shape=..., dtyp
 the pattern ``bin/tiled_stitch.py:156-170`` already uses for the gigapixel stitch.
 
 This file pins the write half and, crucially, the OUTPUT EQUIVALENCE: the streamed file
-must be byte-identical to what the previous ``tifffile.imwrite(path, whole_array, ...)``
-call produced from the same pixels and the same OME metadata.
+must have the same decoded PIXELS and the same OME-XML header as what the previous
+``tifffile.imwrite(path, whole_array, ...)`` call produced from the same pixels and the
+same OME metadata.
 
-The one byte-level caveat, measured rather than assumed: tifffile stamps a fresh
-time-based UUID into the OME-XML header (``UUID="urn:uuid:..."``) on every write, so no
-two OME-TIFFs tifffile ever writes are byte-identical, including two runs of the *old*
-code. ``test_the_only_nondeterminism_is_the_ome_uuid`` is the control that establishes
-that -- it writes the same array twice through the OLD writer and asserts the ONLY
-differing bytes fall inside that UUID field. Every equivalence assertion below therefore
-compares bytes with that one 36-character field masked, which is exactly as strict as
-byte-for-byte can be made for this format.
+That equivalence used to be checked byte-for-byte (masking only the UUID field below).
+It no longer is, because of a *second*, later change layered on top of the streaming
+write this docstring otherwise describes: ``write_ome_tiff`` now writes a TILED TIFF
+(``tile=(convert_image.CONVERT_TIFF_TILE,) * 2``) instead of the striped layout
+``tifffile.imwrite`` defaults to -- see ``convert_image.CONVERT_TIFF_TILE`` for why
+(striped output makes every downstream region read decode a whole plane). Tiling changes
+which TIFF tags get written (``TileWidth``/``TileLength``/``TileOffsets`` replace
+``RowsPerStrip``/``StripOffsets``/``StripByteCounts``) and therefore the raw bytes, on
+top of the UUID -- so a masked byte comparison would now fail for a reason that is
+CORRECT, not a regression. The equivalence tests below therefore decode both files and
+compare pixels (``tifffile.imread``) and compare the OME-XML text (masking the UUID as
+before); ``test_the_write_is_tiled`` is the one that positively pins the new layout, so
+that reverting the ``tile=`` argument still fails a test rather than silently passing
+this weakened equivalence check.
+
+The one byte-level caveat that DOES remain relevant, measured rather than assumed:
+tifffile stamps a fresh time-based UUID into the OME-XML header
+(``UUID="urn:uuid:..."``) on every write, so no two OME-TIFFs tifffile ever writes are
+byte-identical, including two runs of the same writer.
+``test_the_only_nondeterminism_is_the_ome_uuid`` is the control that establishes that --
+it writes the same array twice through the OLD writer and asserts the ONLY differing
+bytes fall inside that UUID field. The OME-XML comparison below masks that one
+36-character field, which is exactly as strict as an XML-text comparison can be made.
 """
 
 from __future__ import annotations
@@ -222,7 +238,7 @@ def test_the_write_never_materialises_the_whole_stack(monkeypatch, tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_streamed_bytes_match_the_eager_writer_for_a_multichannel_stack(
+def test_streamed_pixels_match_the_eager_writer_for_a_multichannel_stack(
     monkeypatch, tmp_path
 ):
     array, img = _planar_bioimage()
@@ -240,14 +256,18 @@ def test_streamed_bytes_match_the_eager_writer_for_a_multichannel_stack(
 
     assert ref_channels == new_channels == ["DAPI", "CD3", "CD8"]
     assert ref_path.name == new_path.name
-    assert _mask_uuid(new_path.read_bytes()) == _mask_uuid(ref_path.read_bytes())
+    # Not a byte comparison: the streamed writer now tiles its output (see the module
+    # docstring), so ``ref_path`` (striped) and ``new_path`` (tiled) legitimately differ
+    # at the byte level even with the UUID masked. Decoded pixels are the equivalence
+    # that must hold.
+    np.testing.assert_array_equal(tifffile.imread(str(new_path)), tifffile.imread(str(ref_path)))
 
     # ... and the pixels really are the reordered source, not merely equal to each other.
     expected = np.take(array[0, :, 0], [1, 0, 2], axis=0)
     np.testing.assert_array_equal(tifffile.imread(str(new_path)), expected)
 
 
-def test_streamed_bytes_match_the_eager_writer_for_the_s_as_c_case(monkeypatch, tmp_path):
+def test_streamed_pixels_match_the_eager_writer_for_the_s_as_c_case(monkeypatch, tmp_path):
     array, img = _s_as_c_bioimage()
     channels = ["CD3", "DAPI", "CD8"]
 
@@ -259,7 +279,10 @@ def test_streamed_bytes_match_the_eager_writer_for_the_s_as_c_case(monkeypatch, 
     ref_path, _ = _convert(monkeypatch, img, ref_dir, channels, writer=_legacy_write)
     new_path, _ = _convert(monkeypatch, img, new_dir, channels)
 
-    assert _mask_uuid(new_path.read_bytes()) == _mask_uuid(ref_path.read_bytes())
+    # See test_streamed_pixels_match_the_eager_writer_for_a_multichannel_stack: the tiled
+    # layout means the raw bytes differ from the striped reference on purpose, so this
+    # compares decoded pixels rather than masked bytes.
+    np.testing.assert_array_equal(tifffile.imread(str(new_path)), tifffile.imread(str(ref_path)))
 
     # TCZYXS -> squeeze C -> TZYXC -> transpose C in front of Y -> TCZYX -> squeeze T, Z
     expected = np.take(array[0, 0, 0].transpose(2, 0, 1), [1, 0, 2], axis=0)
@@ -329,11 +352,13 @@ def test_the_only_nondeterminism_is_the_ome_uuid(tmp_path):
     assert _mask_uuid(raw_a) == _mask_uuid(raw_b)
 
 
-def test_the_numpy_reader_branches_also_write_identical_bytes(monkeypatch, tmp_path):
+def test_the_numpy_reader_branches_also_write_identical_pixels(monkeypatch, tmp_path):
     """The NDPI/HDF5 readers still hand over a decoded ``np.ndarray``.
 
-    They go through the same streamed writer now, so their published bytes are in scope
-    too -- a change confined to the BioIO branch would still have moved them.
+    They go through the same streamed writer now, so their published pixels are in scope
+    too -- a change confined to the BioIO branch would still have moved them. (Not a byte
+    comparison -- see the module docstring: the streamed writer tiles, the reference
+    writer does not, so the raw bytes differ on purpose.)
     """
     rng = np.random.default_rng(29)
     array = rng.integers(0, 4000, size=(3, 24, 20), dtype=np.uint16)
@@ -361,10 +386,80 @@ def test_the_numpy_reader_branches_also_write_identical_bytes(monkeypatch, tmp_p
         tmp_path / "in.ndpi", new_dir, "P1", channel_names=["CD3", "DAPI", "CD8"]
     )
 
-    assert _mask_uuid(new_path.read_bytes()) == _mask_uuid(ref_path.read_bytes())
+    np.testing.assert_array_equal(tifffile.imread(str(new_path)), tifffile.imread(str(ref_path)))
     np.testing.assert_array_equal(
         tifffile.imread(str(new_path)), np.take(array, [1, 0, 2], axis=0)
     )
+
+
+# ---------------------------------------------------------------------------
+# the tiled layout -- what this task exists to change
+# ---------------------------------------------------------------------------
+
+
+def test_the_write_is_tiled(monkeypatch, tmp_path):
+    """Pin the layout change this task exists to make, and state why.
+
+    ``write_ome_tiff`` used to write a STRIPED TIFF (tifffile's default): a plain
+    ``tifffile.imread(path, aszarr=True)`` view of that reports ``chunks=(1, H, W)``, one
+    chunk per whole plane, so a single "read just this 2048x2048 region" call downstream
+    (the BaSiC path, the STARE registration path, SPLIT_CHANNELS, the QC processes) has to
+    decode the ENTIRE plane to slice it out. Measured on a 6000x6000 uint16 plane: a single
+    2048^2 region read peaks at 76.7 MiB striped vs 16.0 MiB tiled.
+
+    Checked two ways, so a revert of the ``tile=`` argument in ``write_ome_tiff`` fails
+    here rather than silently reintroducing that cost:
+
+    1. the TIFF tags tifffile itself writes (``TileWidth``/``TileLength``), against
+       ``convert_image.CONVERT_TIFF_TILE`` rather than a bare ``2048``, so the two stay in
+       sync if the constant ever changes;
+    2. the zarr chunk shape the pipeline's own region reader actually sees
+       (``bin/utils/tiled_io.py:open_lazy`` uses exactly this ``aszarr=True`` + ``zarr.open``
+       pattern), which is the property the whole task is about -- the TIFF tags could in
+       principle be present without the zarr view honouring them, and this check is the one
+       that would catch that.
+
+    The un-tiled reference writer (``_legacy_write``, i.e. the writer this task's write
+    replaced) is asserted to be striped, as the contrast: this is not merely "some file
+    happens to be tiled", it is "the streamed writer changed layout and the old one did
+    not".
+    """
+    import zarr
+
+    array, img = _planar_bioimage()
+    channels = ["CD3", "DAPI", "CD8"]
+
+    ref_dir = tmp_path / "ref"
+    ref_dir.mkdir()
+    new_dir = tmp_path / "new"
+    new_dir.mkdir()
+
+    ref_path, _ = _convert(monkeypatch, img, ref_dir, channels, writer=_legacy_write)
+    new_path, _ = _convert(monkeypatch, img, new_dir, channels)
+
+    with tifffile.TiffFile(str(new_path)) as new_tif:
+        new_tags = new_tif.pages[0].tags
+        assert new_tags["TileWidth"].value == convert_image.CONVERT_TIFF_TILE
+        assert new_tags["TileLength"].value == convert_image.CONVERT_TIFF_TILE
+
+    with tifffile.TiffFile(str(ref_path)) as ref_tif:
+        ref_tag_names = {t.name for t in ref_tif.pages[0].tags}
+        assert "TileWidth" not in ref_tag_names, (
+            "the reference writer is supposed to be striped, not tiled -- if this fires, "
+            "tifffile's default changed and the contrast this test relies on is gone"
+        )
+
+    def _chunks(path):
+        store = tifffile.imread(str(path), aszarr=True)
+        try:
+            grp = zarr.open(store, mode="r")
+            arr = grp[0] if isinstance(grp, zarr.Group) else grp
+            return arr.chunks
+        finally:
+            store.close()
+
+    assert _chunks(new_path) == (1, convert_image.CONVERT_TIFF_TILE, convert_image.CONVERT_TIFF_TILE)
+    assert _chunks(ref_path) == (1,) + array.shape[-2:]
 
 
 # ---------------------------------------------------------------------------
@@ -467,8 +562,12 @@ def test_a_chunk_is_decoded_once_whatever_the_chunking(monkeypatch, tmp_path):
         np.testing.assert_array_equal(tifffile.imread(str(out)), array)
 
 
-def test_a_whole_slide_chunk_still_writes_identical_bytes(monkeypatch, tmp_path):
-    """The slab path must not change the output, only the number of decodes."""
+def test_a_whole_slide_chunk_still_writes_identical_pixels(monkeypatch, tmp_path):
+    """The slab path must not change the output, only the number of decodes.
+
+    Compares decoded pixels, not raw bytes: the streamed writer tiles its output (see the
+    module docstring), so its bytes differ from the striped reference writer on purpose.
+    """
     rng = np.random.default_rng(41)
     array = rng.integers(0, 4000, size=(8, 24, 20), dtype=np.uint16)
     names = ["DAPI"] + [f"M{i}" for i in range(1, 8)]
@@ -489,7 +588,8 @@ def test_a_whole_slide_chunk_still_writes_identical_bytes(monkeypatch, tmp_path)
         tmp_path / "in.czi", new_dir, "P1", channel_names=list(names)
     )
 
-    assert _mask_uuid(new_path.read_bytes()) == _mask_uuid(ref_path.read_bytes())
+    np.testing.assert_array_equal(tifffile.imread(str(new_path)), tifffile.imread(str(ref_path)))
+    np.testing.assert_array_equal(tifffile.imread(str(new_path)), array)
 
 
 def test_a_whole_slide_chunk_is_warned_about_by_name(monkeypatch, tmp_path, caplog):
