@@ -253,7 +253,8 @@ def test_read_pyramid_lazy_matches_the_base_level(tmp_path, monkeypatch):
 def test_read_mask_rechunks_away_from_the_file_s_strip_layout(tmp_path):
     """Guards the chunk-grid regression: at slide widths, `bin/segment.py`'s
     un-tiled `tifffile.imwrite` collapses to ~1-row TIFF strips (measured here at
-    width 20000 -> a raw chunksize of one row), and `spatialdata`'s `sdata.write()`
+    width 40000 -- Task 4's finding's own cited width -- RowsPerStrip=1 at both
+    tifffile 2023.4.12 and 2025.5.10), and `spatialdata`'s `sdata.write()`
     passes no `storage_options`, so `ome_zarr.writer` defaults the exported zarr's
     chunk grid to the dask array's chunksize (`chunks_opt = level.chunksize`).
     Left uncorrected, that turns one mask into tens of thousands of tiny zarr chunk
@@ -263,17 +264,23 @@ def test_read_mask_rechunks_away_from_the_file_s_strip_layout(tmp_path):
     coarser one.
     """
     path = tmp_path / "wide_mask.tif"
-    h, w = 64, 20000
+    h, w = 64, 40000
     arr = np.random.default_rng(7).integers(0, 500, size=(h, w)).astype(np.uint32)
     tifffile.imwrite(str(path), arr, compression="zlib", bigtiff=True)
 
-    # Sanity check on the FIXTURE itself: confirm it really lands in the
-    # collapsed-strip regime this test exists to guard, so a future tifffile
-    # version that stops collapsing doesn't leave this test silently vacuous.
+    # Sanity check on the FIXTURE itself: confirm the raw layout is strictly finer
+    # than what `read_mask` returns, so the final assertion below is not vacuous.
+    # NOT a fixed row count: tifffile's default strip byte target moved between
+    # 2023.4.12 and 2025.5.10 (RowsPerStrip went 1 -> 3 at this file's OLD w=20000,
+    # which is why this check is now written against the invariant it actually
+    # needs rather than a magic number -- see git history for the failure that
+    # caught it). 2048 rows x 40000 x 4 bytes/px is 327 MB per strip, not a layout
+    # any plausible strip-byte target will emit, so this still fails loudly if the
+    # collapsed-strip regime genuinely disappears.
     raw_store = tifffile.imread(str(path), aszarr=True, level=0)
     raw_chunksize = da.from_zarr(raw_store).chunksize
     raw_store.close()
-    assert raw_chunksize[0] <= 2, (
+    assert raw_chunksize[0] < 2048 and raw_chunksize != (min(2048, h), min(2048, w)), (
         f"fixture no longer exercises the strip-collapse regime (raw chunksize "
         f"{raw_chunksize}); widen it until RowsPerStrip collapses again"
     )

@@ -150,11 +150,14 @@ ALLOWED_LINES = {
         # each named their `maxworkers=1` dependency on bin/apply_basic_profiles.py
         # and bin/merge_channels_pyramid.py (+5 and +9 net lines respectively) and
         # MERGE_AND_PYRAMID's plane coefficient comment was corrected from 3.11 to
-        # 3.25 to agree with its own measured intercept and mechanism sum.
+        # 3.25 to agree with its own measured intercept and mechanism sum; 934 -> 936
+        # when a review round reworded that same comment (+2 net lines) to stop
+        # calling 3.25 a "bound" on every measured point -- C=1 sits 0.18 planes
+        # above the C=4/8/16 fit, a finite-C edge effect the +1d adder absorbs.
         # Re-pin, do not
         # widen. (Re-pin from the file, not by guessing:
         # `grep -n "params.expanded_quantification ?" conf/modules.config`.)
-        934: (
+        936: (
             "ext.args = { params.expanded_quantification ? '--expanded' : "
             "'' } -- conf/*.config closures cannot see lib/*.groovy classes, "
             "so ext.args must read params raw here."

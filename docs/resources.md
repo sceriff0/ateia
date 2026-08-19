@@ -156,6 +156,13 @@ must stay resident while `tifffile` fills the SubIFDs one level at a time. That
 second term is a geometric series in `pyramid_scale` and disappears below three
 `pyramid_resolutions`, which is why both parameters appear in the row. Floor 8 GB.
 
+Both `APPLY_PROFILES`' and `MERGE_AND_PYRAMID`'s decoded-plane terms assume
+tifffile's compressor pool is pinned to `maxworkers=1` on the write itself
+(`bin/apply_basic_profiles.py`, `bin/merge_channels_pyramid.py:826-847`) — without
+that pin, the container's tifffile version reintroduces a term that scales with
+the channel count, which these figures do not budget for. See the `maxworkers=1`
+comment in each process' `conf/modules.config` block for the measured numbers.
+
 The 4× is a **floor estimate, not a bound**, and the block comment in
 `conf/modules.config` records the measured counterexamples: zlib at
 SPLIT_CHANNELS' settings reaches 4.2× on a plane that is 75 % true-black
