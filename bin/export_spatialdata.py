@@ -230,12 +230,27 @@ def build_shapes(contours_path: str, labels: np.ndarray, name: str):
     return gpd.GeoDataFrame({"geometry": geoms}, index=pd.Index(idx, name=INSTANCE_KEY))
 
 
-def read_mask(path: str) -> np.ndarray:
-    """Read a label mask as 2-D integers, squeezing any singleton leading axis."""
+def read_mask(path: str):
+    """Lazily read a label mask as a 2-D dask array, squeezing any singleton axis.
+
+    Same read strategy as ``read_pyramid_lazy``, and for the same reason: the only
+    consumer is ``Labels2DModel.parse``, which wraps the array structurally (dims +
+    transformation) and never computes across labels. That is unlike
+    ``quantify.py``/``mask_to_geojson.py``, which DO force a whole-array read because
+    region properties and contour tracing are global — a cell label can straddle any
+    tile boundary those pick. No such constraint applies here, so the read stays
+    lazy rather than loading the whole mask up front.
+
+    Not routed through ``tiled_io.open_lazy``: that helper hands back a custom
+    ``(c, y, x)``-indexed view, not a real dask array, and ``Labels2DModel.parse``
+    needs the latter (same as ``Image2DModel.parse`` below) to wrap losslessly into
+    an xarray-backed element without forcing a compute.
+    """
+    import dask.array as da
     import tifffile
 
-    arr = tifffile.imread(path)
-    arr = np.squeeze(arr)
+    store = tifffile.imread(path, aszarr=True, level=0)
+    arr = da.from_zarr(store).squeeze()
     if arr.ndim != 2:
         raise ValueError(f"expected a 2-D label mask in {path}, got shape {arr.shape}")
     return arr
@@ -247,6 +262,11 @@ def read_pyramid_lazy(path: str):
     Dask-backed so peak memory is one chunk rather than the whole slide — the
     pyramid is the largest artifact the pipeline produces, and materializing it
     here would defeat the point of an out-of-core format.
+
+    Not routed through ``tiled_io.open_lazy`` for the same reason ``read_mask``
+    isn't: ``Image2DModel.parse`` below builds a multiscale pyramid over this array
+    via ``scale_factors``, which needs a genuine dask array (rechunk-able, numpy-
+    slicable) rather than open_lazy's restricted ``(c, y, x)``-tuple getitem.
     """
     import dask.array as da
     import tifffile

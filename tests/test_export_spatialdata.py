@@ -13,9 +13,11 @@ import json
 import sys
 from pathlib import Path
 
+import dask.array as da
 import numpy as np
 import pandas as pd
 import pytest
+import tifffile
 
 BIN = Path(__file__).resolve().parents[1] / "bin"
 sys.path.insert(0, str(BIN))
@@ -114,6 +116,143 @@ def test_load_qc_keeps_verbatim_json_and_survives_bad_files(tmp_path):
         ]
         is None
     )
+
+
+# ── mask & pyramid reads (Task 4: one read strategy) ────────────────────────────
+# `read_mask` and `read_pyramid_lazy` both need to be dask-backed, aszarr-opened
+# region reads -- NOT a whole-array `tifffile.imread` -- because their only
+# consumers (`Labels2DModel.parse` / `Image2DModel.parse`) wrap the array
+# structurally and never compute across it. These tests exercise both call sites
+# for real, against fixtures written the same way the pipeline's own writers
+# (`bin/segment.py`, `bin/merge_channels_pyramid.py`) produce them, and assert:
+# (1) the pixels read back are identical to a naive whole-array read (exported
+# output is unchanged), and (2) the read never eagerly decoded the whole file
+# (the strategy itself, not just its output, is pinned).
+#
+# `spatialdata`/`geopandas` aren't needed for any of this -- only `tifffile` and
+# `dask`, which are real dependencies of this script and importable here.
+
+
+def _write_mask(path, h=48, w=64, seed=0):
+    """A label mask exactly as `bin/segment.py`/`bin/segment_cellsam.py` write one:
+    single-page uint32, zlib, bigtiff. No `tile=` -- these are written as strips."""
+    rng = np.random.default_rng(seed)
+    arr = rng.integers(0, 500, size=(h, w), dtype=np.uint32)
+    tifffile.imwrite(str(path), arr, compression="zlib", bigtiff=True)
+    return arr
+
+
+def _write_pyramid(path, c=3, h=64, w=96, seed=1):
+    """A minimal real pyramidal OME-TIFF (base level + one half-scale level), built
+    the same way `bin/merge_channels_pyramid.py` does: `TiffWriter` + `subifds`.
+    Only level 0 needs to be correct for these tests; the second level exists so
+    the file is genuinely pyramidal (subifds present), matching production shape.
+    """
+    rng = np.random.default_rng(seed)
+    stack = rng.integers(0, 65000, size=(c, h, w), dtype=np.uint16)
+    half = stack[:, ::2, ::2]
+    metadata = {"axes": "CYX", "Channel": {"Name": [f"c{i}" for i in range(c)]}}
+    options = dict(tile=(32, 32), compression="zlib", photometric="minisblack")
+    with tifffile.TiffWriter(str(path), bigtiff=True, ome=True) as tif:
+        tif.write(stack, subifds=1, metadata=metadata, **options)
+        tif.write(half, subfiletype=1, **options)
+    return stack
+
+
+def _spy_on_imread(monkeypatch):
+    """Record the kwargs of every `tifffile.imread` call made through the module
+    attribute (which is how `read_mask`/`read_pyramid_lazy` call it), while still
+    performing the real read."""
+    calls = []
+    real_imread = tifffile.imread
+
+    def spying(p, *a, **kw):
+        calls.append(kw)
+        return real_imread(p, *a, **kw)
+
+    monkeypatch.setattr(tifffile, "imread", spying)
+    return calls
+
+
+def test_read_mask_matches_a_whole_array_read(tmp_path, monkeypatch):
+    path = tmp_path / "P001_cell_mask.tif"
+    expected = _write_mask(path)
+    calls = _spy_on_imread(monkeypatch)
+
+    result = esd.read_mask(str(path))
+
+    assert np.array_equal(np.asarray(result), expected)
+    # A slice of the lazy result must match the same slice of the reference --
+    # this is what "the consumer can work region-wise" means, exercised for real.
+    assert np.array_equal(np.asarray(result[10:20, 5:15]), expected[10:20, 5:15])
+    assert calls and calls[0].get("aszarr") is True, (
+        "read_mask must open the file through tifffile's zarr view (aszarr=True), "
+        "not decode the whole array up front"
+    )
+
+
+def test_read_mask_stays_a_dask_array_until_computed(tmp_path):
+    """The strategy itself, not just the pixels: read_mask must return something
+    still lazy (a dask array) rather than a materialized numpy array -- otherwise
+    it is a whole-array read wearing a zarr costume."""
+    path = tmp_path / "mask.tif"
+    _write_mask(path)
+
+    result = esd.read_mask(str(path))
+
+    assert isinstance(result, da.Array)
+
+
+def test_read_mask_squeezes_a_singleton_leading_axis(tmp_path):
+    """Some writers add a leading (1, H, W); read_mask must squeeze it away exactly
+    like the eager `np.squeeze(tifffile.imread(path))` it replaced did."""
+    path = tmp_path / "leading_axis_mask.tif"
+    arr = np.random.default_rng(2).integers(0, 50, size=(1, 20, 30)).astype(np.uint32)
+    tifffile.imwrite(str(path), arr, compression="zlib", bigtiff=True)
+
+    result = esd.read_mask(str(path))
+
+    assert result.ndim == 2
+    assert np.array_equal(np.asarray(result), np.squeeze(arr))
+
+
+def test_read_mask_rejects_a_non_2d_mask(tmp_path):
+    path = tmp_path / "multi_channel_mask.tif"
+    arr = np.random.default_rng(3).integers(0, 50, size=(2, 20, 30)).astype(np.uint32)
+    tifffile.imwrite(str(path), arr, compression="zlib", bigtiff=True)
+
+    with pytest.raises(ValueError, match="2-D label mask"):
+        esd.read_mask(str(path))
+
+
+def test_read_pyramid_lazy_matches_the_base_level(tmp_path, monkeypatch):
+    path = tmp_path / "pyramid.ome.tif"
+    expected = _write_pyramid(path)
+    calls = _spy_on_imread(monkeypatch)
+
+    result = esd.read_pyramid_lazy(str(path))
+
+    assert isinstance(result, da.Array)
+    assert np.array_equal(np.asarray(result), expected)
+    assert np.array_equal(
+        np.asarray(result[:, 10:20, 5:15]), expected[:, 10:20, 5:15]
+    )
+    assert calls and calls[0].get("aszarr") is True and calls[0].get("level") == 0
+
+
+def test_read_mask_and_read_pyramid_lazy_agree_on_one_strategy(tmp_path):
+    """Task 4's exit condition: both call sites use the SAME read strategy
+    (dask-backed, aszarr-opened) rather than one eager and one lazy."""
+    mask_path = tmp_path / "mask.tif"
+    _write_mask(mask_path)
+    pyramid_path = tmp_path / "pyramid.ome.tif"
+    _write_pyramid(pyramid_path)
+
+    mask_result = esd.read_mask(str(mask_path))
+    pyramid_result = esd.read_pyramid_lazy(str(pyramid_path))
+
+    assert isinstance(mask_result, da.Array)
+    assert isinstance(pyramid_result, da.Array)
 
 
 # ── spatial join of registration residuals ─────────────────────────────────────
