@@ -480,10 +480,13 @@ HOURS_RE = re.compile(r"(\d+(?:\.\d+)?)\s*\.\s*h\b")
 # Both now stream a tile at a time, so their requests are built from the
 # pseudo-FOV size the same way the two STARE rows are built from the tile and
 # halo -- a profile-plane term of `2 x C x preproc_tile_size^2 x 8` bytes plus
-# write buffers, none of it computable here. The residual `ome_tiff.size()` term
-# is not a magnitude a doc row could state either: it bounds ONE DECODED SOURCE
-# PLANE, whose size depends on the channel count, which is not visible in a
-# config closure. The doc rows name every term instead.
+# write buffers, none of it computable here. Neither closure carries a file-size
+# term any more: CONVERT_IMAGE and SPLIT_CHANNELS now write tiled
+# (tests/test_convert_streaming_write.py::test_the_write_is_tiled,
+# tests/test_split_multichannel_lazy_read.py::test_the_write_is_tiled), so a
+# region read decodes a tile rather than the whole plane the old
+# `ome_tiff.size()` term used to bound. The doc rows name every remaining term
+# instead.
 #
 # `pyramid_resolutions` and `pyramid_scale` were added when MERGE_AND_PYRAMID
 # stopped holding the slide. Its request used to be a `f<20 ? 200.GB : 300.GB`

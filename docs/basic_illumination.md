@@ -73,14 +73,25 @@ against a request that was computed from the *compressed* file size and so under
 The streamed rewrite is bit-identical: same grid, same padding, same arithmetic, same
 rounding, same log lines — only the order the pixels are visited in changed.
 
-> **One caveat, and it is not this path's doing.** `CONVERT_IMAGE` writes its OME-TIFF
-> **untiled** (`write_ome_tiff`: "no compression, no tile"), and tifffile's zarr view of a
-> striped TIFF reports `chunks=(1, H, W)` — one chunk per whole plane. A region read
-> therefore decodes the entire plane and slices it: measured, a 2048² region of a 6000²
-> striped plane peaks at 76.7 MiB against 16.0 MiB for the same read on a tiled one. Every
-> lazy reader in the repository inherits this, `bin/tiled_stitch.py` included. Tiling
-> `CONVERT_IMAGE`'s output would remove the last slide-dependent term from both memory
-> formulas.
+> **Why neither memory formula carries a file-size term any more.** `CONVERT_IMAGE` and
+> `SPLIT_CHANNELS` now write their outputs **tiled** — guarded by
+> `tests/test_convert_streaming_write.py::test_the_write_is_tiled` and
+> `tests/test_split_multichannel_lazy_read.py::test_the_write_is_tiled` — so a region read
+> decodes a TILE. Before that, a striped producer's `write_ome_tiff` ("no compression, no
+> tile") made tifffile's zarr view report `chunks=(1, H, W)` — one chunk per whole plane —
+> so a region read decoded the ENTIRE PLANE and sliced it: measured, a 2048² region of a
+> 6000² striped plane peaked at 76.7 MiB against 16.0 MiB for the same read on a tiled one.
+> That is why an untiled producer ahead of any lazy reader in the repository (this path,
+> `bin/tiled_stitch.py` included) is a bug and not a style choice, and it is what those two
+> tests now hold the line on — not a historical footnote.
+>
+> **One known degradation this does not size for.** A run resumed from a `--prior_outdir`
+> published before the producers were tiled, or an `add_cycle` run reading an older
+> published tree, can still hand these processes an untiled slide, and the plane-decode
+> cost above returns for that input. That is covered by the exit-137 retry ramp
+> (`conf/base.config`), not by a term in either formula — sizing the steady state for an
+> input the pipeline will stop producing would keep every normal run's request permanently
+> inflated.
 
 ### The tile-position sidecar
 

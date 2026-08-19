@@ -96,8 +96,8 @@ Effective values on **attempt 1**. `f` denotes the relevant input size in GiB
 | Process | `cpus` | `memory` (attempt 1) | `time` | Owner |
 |---|---|---|---|---|
 | `CONVERT_IMAGE` | `1` | `24 GB` + tier: `f<4` → +0, `f<12` → +24, `f<24` → +48, else +64 GB | `2.h × attempt` | `withName` |
-| `TILE_FOR_BASIC` | `2` | derived from `preproc_tile_size` + one decoded source plane, `× attempt` *(withName)* — floor 6 GB | `2.h × attempt` | `withName` |
-| `APPLY_PROFILES` | `2` | derived from `preproc_tile_size` + one decoded source plane, `× attempt` *(withName)* — floor 8 GB | `3.h × attempt` | `withName` |
+| `TILE_FOR_BASIC` | `2` | derived from `preproc_tile_size`, `× attempt` *(withName)* — floor 6 GB | `2.h × attempt` | `withName` |
+| `APPLY_PROFILES` | `2` | derived from `preproc_tile_size`, `× attempt` *(withName)* — floor 8 GB | `3.h × attempt` | `withName` |
 | `GENERATE_PREPROCESS_QC` | `4` | `200 GB` | `4.h × attempt` | `process_medium` |
 
 `BASICPY` is **not** in the table above and cannot be: the guard behind these tables

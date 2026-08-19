@@ -153,11 +153,19 @@ ALLOWED_LINES = {
         # 3.25 to agree with its own measured intercept and mechanism sum; 934 -> 936
         # when a review round reworded that same comment (+2 net lines) to stop
         # calling 3.25 a "bound" on every measured point -- C=1 sits 0.18 planes
-        # above the C=4/8/16 fit, a finite-C edge effect the +1d adder absorbs.
+        # above the C=4/8/16 fit, a finite-C edge effect the +1d adder absorbs;
+        # 936 -> 946 when TILE_FOR_BASIC's and APPLY_PROFILES' memory comments lost
+        # the "one decoded source plane" file-size term now that CONVERT_IMAGE and
+        # SPLIT_CHANNELS write tiled (net +10 lines: the mechanism explanation grew
+        # to point at the two tiling tests and record the --prior_outdir / add_cycle
+        # legacy-untiled degradation instead of shrinking to nothing), and the C=1
+        # gap above was corrected from 0.18 (measured against the 3.25 CODE
+        # coefficient plus the per-channel stash term) to 0.21 (measured against the
+        # 3.21 FIT the sentence actually names).
         # Re-pin, do not
         # widen. (Re-pin from the file, not by guessing:
         # `grep -n "params.expanded_quantification ?" conf/modules.config`.)
-        936: (
+        946: (
             "ext.args = { params.expanded_quantification ? '--expanded' : "
             "'' } -- conf/*.config closures cannot see lib/*.groovy classes, "
             "so ext.args must read params raw here."
