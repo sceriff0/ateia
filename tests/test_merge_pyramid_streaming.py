@@ -36,8 +36,14 @@ WHAT THIS FILE PINS, AND WHY EACH ASSERTION IS THE ONE THAT CATCHES THE MISTAKE:
    comparison is additionally parametrised over a THREE-tile-row band, where a partial
    final band and a band boundary that is not a plane boundary coexist.
 
-4. **The peak does not grow with the channel count**, measured with ``tracemalloc``
-   -- the property ``conf/modules.config``'s memory closure is derived from.
+4. **The peak grows only at the documented stash slope**, measured with ``tracemalloc``.
+   It is NOT independent of the channel count -- ``_PyramidLevels`` stashes levels 2..K
+   of every channel's chain until the writer has consumed them, ``H*W/6`` bytes
+   (one twelfth of a base plane) per channel, a deliberate trade against re-reading every
+   source plane once per pyramid level (see ``write_pyramidal_ome_tiff_from_source`` and
+   ``_PyramidLevels``'s docstrings). ``conf/modules.config``'s memory closure states this
+   term explicitly; the property checked here is that the slope stays near that model,
+   not that it is zero.
 
 5. **The per-channel validation log is unchanged**: same lines, same numbers, and in
    particular the wrapped-value percentage computed against the WHOLE channel rather than
@@ -489,22 +495,41 @@ def _run_merge(tmp_path, n_channels, h=1024, w=1024):
     )
 
 
-def test_peak_memory_does_not_grow_with_the_channel_count(tmp_path):
-    """The O(C) -> O(1) claim the memory closure in conf/modules.config is derived from.
+def test_peak_memory_grows_only_at_the_documented_stash_slope(tmp_path):
+    """The real O(C) claim the memory closure in conf/modules.config is derived from --
+    NOT the O(1) claim this test used to assert.
 
     The old implementation allocated ``(C, H, W)`` up front, so its peak was linear in C by
     construction: at these sizes 2 channels cost 2 MiB of stack and 12 cost 12 MiB, and the
-    ratio below would be about 6. Nothing in the streaming path scales with C -- a level is
-    derived one channel at a time and dropped -- so the ratio must stay near 1.
-    """
-    peak_2 = _peak_bytes(_run_merge(tmp_path / "c2", 2))
-    peak_12 = _peak_bytes(_run_merge(tmp_path / "c12", 12))
+    ratio would be about 6. The streaming path is not flat either, though: ``_PyramidLevels``
+    stashes levels 2..K of every channel's chain, ``H*W/6`` bytes per channel -- one twelfth
+    of a base plane, twelve times shallower than the old slope, but not zero.
 
+    This USED TO assert a flat ``peak_12 <= peak_2 + plane_bytes`` -- one whole plane of
+    slack for a ten-channel delta. That happens to pass at ``C=12``, where the modelled
+    growth (``10 * plane/12`` ~= 0.83 plane) is still under the one-plane budget, but the
+    SAME unmodified implementation fails that flat cap by ``C=16`` (modelled growth
+    ``14 * plane/12`` ~= 1.17 planes; measured ~2.3 MB against a 2.1 MB budget on this
+    fixture) with nothing having regressed -- a guard whose name promised O(1) was really
+    only checking one point on an O(C) line. Asserting the SLOPE instead of a fixed
+    constant stays correct at any channel count tested.
+    """
     plane_bytes = 1024 * 1024 * 2
-    assert peak_12 <= peak_2 + plane_bytes, (
-        f"peak grew from {peak_2 / 1e6:.1f} MB at 2 channels to {peak_12 / 1e6:.1f} MB at "
-        f"12 -- more than one plane ({plane_bytes / 1e6:.1f} MB) of growth for ten extra "
-        "channels means something is being accumulated per channel"
+    peak_2 = _peak_bytes(_run_merge(tmp_path / "c2", 2))
+    peak_16 = _peak_bytes(_run_merge(tmp_path / "c16", 16))
+
+    delta_c = 16 - 2
+    growth = peak_16 - peak_2
+    # The model term is plane_bytes/12 per channel (H*W/6 bytes). 3x slack is generous
+    # against read-band/write-tile measurement noise, but a regression to the OLD
+    # ~1-plane-per-channel slope -- twelve times steeper -- still fails this by a wide
+    # margin, which a flat "one plane total" cap could not promise at every C.
+    budget = delta_c * (plane_bytes / 12) * 3
+    assert growth <= budget, (
+        f"peak grew {growth / 1e6:.2f} MB over {delta_c} extra channels "
+        f"({growth / delta_c / 1e6:.4f} MB/channel) -- more than 3x the documented "
+        f"H*W/6-bytes-per-channel stash slope ({budget / 1e6:.2f} MB budget for this "
+        "fixture)"
     )
 
 

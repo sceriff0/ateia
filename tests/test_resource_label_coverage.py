@@ -545,10 +545,21 @@ CONFIG_TIER_RE = re.compile(r"<\s*(\d+(?:\.\d+)?)\s*\?\s*(\d+(?:\.\d+)?)\s*\.GB"
 # The ladder's final `else` branch: the first `: N.GB` after its last rung.
 CONFIG_ELSE_RE = re.compile(r":\s*(\d+(?:\.\d+)?)\s*\.GB")
 
-# The one non-ladder size-dependent shape in conf/modules.config: TILE_FOR_BASIC's and
-# APPLY_PROFILES's `... * N.GB * task.attempt + 8.GB`, linear in file size. The two numbers play
-# DIFFERENT roles -- 7 is the per-GiB-of-input coefficient, 8 a flat addend --
-# so they are captured positionally rather than pooled.
+# A non-ladder size-dependent shape, `... * N.GB * task.attempt + M.GB`, linear in file
+# size: coefficient and flat addend captured positionally (not pooled), so a doc cell
+# cannot state the right pair of numbers in the wrong roles and pass -- the same
+# mispairing CONFIG_TIER_RE's comment above describes for the ladder rungs.
+#
+# CURRENTLY UNUSED in conf/modules.config: TILE_FOR_BASIC and APPLY_PROFILES were this
+# regex's only two matches, and f154792 rewrote both off a file-size term entirely (they
+# now derive from preproc_tile_size, not from the staged input's size). That is not a
+# broken guard -- memory_cell_mismatch still refuses loudly on any shape it does not
+# recognise, so a size-linear closure landing anywhere in the config is still caught, not
+# silently waved through -- and the mechanism itself is unit-tested against a synthetic
+# literal in test_memory_cell_mismatch_compares_pairs_not_pooled_numbers, independent of
+# whether any real closure currently matches it. Kept
+# so a reintroduced size-linear closure (this shape or another process's) is still
+# checked, not because anything live matches it today.
 CONFIG_SIZE_LINEAR_RE = re.compile(
     r"\*\s*(\d+(?:\.\d+)?)\s*\.GB\s*\*\s*task\.attempt\s*\+\s*(\d+(?:\.\d+)?)\s*\.GB"
 )

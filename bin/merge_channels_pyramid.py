@@ -783,9 +783,15 @@ def write_pyramidal_ome_tiff_from_source(
         `_downsample_plane_f32`) and tiled only on the way out;
       * the MASK series streams the two mask files the same way.
 
-    Peak is therefore one float32 plane plus that plane's level chain, and it does not grow
-    with the channel count. Verified byte-for-byte against the whole-array writer: same
-    file size, same tags, same OME-XML but for tifffile's random per-file UUID.
+    Peak is therefore one float32 plane plus that plane's level chain -- constant in slide
+    size, but NOT constant in channel count: levels 2..K of each channel's chain are
+    stashed until they are written (`_PyramidLevels`, below), which sums to `H*W/6` bytes
+    per channel, one twelfth of a base plane. Measured slope: 0.69 MB/channel, down from
+    10.1 MB/channel before this rewrite -- a deliberate trade against the 3.4x wall-clock
+    cost of re-deriving every level from a fresh read instead (see `_PyramidLevels`' own
+    docstring for the two rejected alternatives and their numbers). Verified byte-for-byte
+    against the whole-array writer: same file size, same tags, same OME-XML but for
+    tifffile's random per-file UUID.
 
     Parameters are the same as `write_pyramidal_ome_tiff`, except that `source` and
     `mask_source` replace the `data` and `mask_stack` arrays, and `validators` carries the

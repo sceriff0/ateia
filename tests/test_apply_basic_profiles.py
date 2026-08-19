@@ -40,6 +40,7 @@ tifffile = pytest.importorskip("tifffile")
 # imports basicpy since the in-process BaSiC module was deleted.
 import apply_basic_profiles  # noqa: E402
 import tile_for_basic  # noqa: E402
+from fov_tiling import reconstruct_image_from_fovs, split_image_into_fovs  # noqa: E402
 
 
 def _write_slide(path, stack, channel_names):
@@ -196,6 +197,98 @@ def test_a_spatially_varying_profile_is_applied_per_tile_pixel(tmp_path):
     assert np.all(result[:, 50:100] == 1000)
     assert np.all(result[:, 100:150] == 500)
     assert np.all(result[:, 150:200] == 1000)
+
+
+def test_write_tiles_straddling_fov_boundaries_are_corrected_exactly(tmp_path, monkeypatch):
+    """The regression this whole file's review wave exists for.
+
+    ``apply_basic_profiles._correct_tile`` calls ``fov_overlaps(positions, y0, x0, ...)``
+    to map a WRITE-TILE-local window back onto FOV-local profile coordinates. Mutating
+    that call to ``fov_overlaps(positions, 0, 0, ...)`` is a no-op for every test that
+    came before this one: ``test_a_spatially_varying_profile_is_applied_per_tile_pixel``
+    (above) varies the profile spatially but runs at the shipped ``WRITE_TILE = 2048`` on
+    a 200px slide, so there is exactly one write tile and it starts at ``(0, 0)`` --
+    the mutation is invisible there. ``tests/test_basic_illumination_lazy_read.py``
+    patches ``WRITE_TILE`` down to genuinely straddle FOV boundaries, but every profile
+    it uses is a flat scalar (``flat_value=2.0``), so the origin used to look the profile
+    up is irrelevant to the result. Neither condition alone catches the bug; this test
+    is the one place both are true at once, on a slide whose dimensions are a multiple
+    of neither grid.
+
+    The independent oracle is ``fov_tiling.reconstruct_image_from_fovs`` applied to the
+    whole-array correction -- computed directly on the FOV grid via
+    ``split_image_into_fovs``, so it never needs to know the write-tile grid exists at
+    all. That is the same round-trip oracle ``tests/test_fov_tiling.py`` and
+    ``tests/test_tile_for_basic.py`` already check the streaming path against.
+    """
+    monkeypatch.setattr(apply_basic_profiles, "WRITE_TILE", 64)
+
+    rng = np.random.default_rng(42)
+    h, w = 317, 283  # a multiple of neither fov=100 nor WRITE_TILE=64
+    names = ["DAPI", "PANCK", "SMA", "CD3"]
+    original = rng.integers(500, 5000, size=(len(names), h, w), dtype=np.uint16)
+    slide, sidecar, manifest = _tile(
+        tmp_path, original, names, fov=100, skip_nuclear=True, markers=("DAPI",)
+    )
+
+    th, tw = manifest["tile_shape"]
+    n_fitted = len(manifest["profile_channels"])
+    yy, xx = np.meshgrid(np.arange(th), np.arange(tw), indexing="ij")
+
+    # A distinct, spatially varying flatfield AND darkfield per fitted channel -- not a
+    # scalar, and not shared across channels, so a wrong-channel or wrong-window lookup
+    # both show up as a mismatch.
+    flat_planes = [
+        (1.0 + 0.5 * (k + 1) * (yy + xx) / (th + tw)).astype(np.float32)
+        for k in range(n_fitted)
+    ]
+    dark_planes = [
+        (5.0 * (k + 1) * np.sin(yy / 17.0) * np.cos(xx / 23.0) + 50.0).astype(np.float32)
+        for k in range(n_fitted)
+    ]
+    ffp = tmp_path / "slide_tiles-ffp.ome.tif"
+    dfp = tmp_path / "slide_tiles-dfp.ome.tif"
+    _write_profile(ffp, flat_planes)
+    _write_profile(dfp, dark_planes)
+
+    out = tmp_path / "slide_corrected.ome.tif"
+    apply_basic_profiles.apply_basic_profiles(
+        str(slide), str(sidecar), str(ffp), str(dfp), str(out)
+    )
+    result = _read(out)
+
+    positions = [tuple(p) for p in manifest["positions"]]
+    n_fovs_y, n_fovs_x = manifest["n_fovs_y"], manifest["n_fovs_x"]
+    corrected_channels = set(manifest["corrected_channels"])
+    profile_index = {
+        source: k for k, source in enumerate(manifest["profile_channels"])
+    }
+    storage_dtype = np.dtype(manifest["source_dtype"])
+
+    expected = np.empty_like(original)
+    for c in range(len(names)):
+        if c not in corrected_channels:
+            expected[c] = original[c]
+            continue
+        k = profile_index[c]
+        fov_stack, _, _ = split_image_into_fovs(original[c], n_fovs_x, n_fovs_y)
+        # apply_basic_profiles._read_profile_stack upcasts the on-disk float32 profile
+        # to float64 before the arithmetic runs, so the subtraction and division happen
+        # at float64 precision even though both operands started out float32. Matching
+        # that promotion here (rather than staying in float32 throughout) is what makes
+        # this bit-exact against the streamed output instead of merely close.
+        corrected_stack = (
+            (fov_stack.astype(np.float32) - dark_planes[k].astype(np.float64))
+            / flat_planes[k].astype(np.float64)
+        ).astype(np.float32)
+        reconstructed = reconstruct_image_from_fovs(corrected_stack, positions, (h, w))
+        expected[c] = apply_basic_profiles._to_storage_dtype(reconstructed, storage_dtype)
+
+    n_diff = int(np.count_nonzero(result != expected))
+    assert np.array_equal(result, expected), (
+        f"{n_diff}/{result.size} pixels differ from the independent per-FOV oracle -- "
+        "the write-tile grid was corrected against the wrong FOV origin"
+    )
 
 
 # ---------------------------------------------------------------------------

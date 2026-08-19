@@ -182,10 +182,16 @@ def tile_for_basic(
         def _read_region(source_index):
             """Lazy region reader bound to one source channel.
 
-            Bound through a factory rather than closing over the loop variable: a bare
-            closure would capture the NAME, so every tile of every channel would read
-            whichever channel the loop had reached by the time the writer pulled it --
-            and because the writer pulls lazily, that is exactly what would happen.
+            Bound through a factory rather than closing over the loop variable. This is
+            NOT currently load-bearing: ``_planes`` below drives each channel's FOVs to
+            exhaustion with ``yield from`` before ``source_index`` advances to the next
+            channel, so a bare in-loop closure over the same late-binding name would read
+            the correct channel too -- verified by swapping the factory for one and
+            running the BaSiC-path suite unchanged. The factory is kept anyway: it is a
+            correct, harmless habit that stops the read from becoming dependent on
+            ``_planes``'s specific "one channel fully exhausted before the next starts"
+            order, which is exactly the kind of implicit invariant a later change to
+            interleave channels could break silently.
             """
 
             def read(y0, x0, h, w):
@@ -204,6 +210,14 @@ def tile_for_basic(
                     _read_region(source_index), positions, tile_shape, dtype
                 )
 
+        # WRITTEN UNTILED -- generator-fed, but no `tile=` argument, a deliberate departure
+        # from "every producer ahead of a lazy reader writes tiled" (see
+        # tests/test_slide_io_seam.py's inventory, which records it). Not a gap: every
+        # plane on this stack IS already a pseudo-FOV, at most preproc_tile_size px per
+        # side, so there is no larger window a downstream reader would need to avoid
+        # decoding. Its only reader is BASICPY's /opt/main.py, which loads the whole
+        # (C, I, Y, X) stack into one ndarray regardless of tiling -- so a tile layout here
+        # would add TIFF overhead for a windowed read that never happens.
         tifffile.imwrite(
             str(output_path),
             _planes(),

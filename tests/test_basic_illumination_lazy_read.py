@@ -37,9 +37,16 @@ Four properties, per script:
 
 A caveat these tests deliberately do NOT cover: peak PROCESS memory also depends on how
 much the TIFF reader decodes to satisfy a region read, which is a property of the input
-file's layout rather than of this code. ``CONVERT_IMAGE`` writes untiled, so tifffile's
-zarr view reports ``chunks=(1, H, W)`` and decodes a whole plane per region read. The spy
-measures what the code ASKED FOR and received, which is what the code controls.
+file's layout rather than of this code. That is exactly why every producer ahead of a
+lazy reader in this repo has to write TILED: an untiled producer makes tifffile's zarr
+view report ``chunks=(1, H, W)``, so a region read decodes a WHOLE PLANE and slices it --
+measured, a 2048px region of a 6000px striped plane peaked at 76.7 MiB against 16.0 MiB
+for the same read on a tiled one. ``CONVERT_IMAGE`` used to write untiled and no longer
+does (``bab9507``, ``bin/convert_image.py``'s ``CONVERT_TIFF_TILE``); the guard that now
+holds that line is ``tests/test_convert_streaming_write.py::test_the_write_is_tiled``, and
+``conf/modules.config:209-218`` records the mechanism and the measurement. The spy here
+measures what the code ASKED FOR and received, which is what the code controls -- not
+what the reader decodes to satisfy it.
 
 The spy calls ``np.asarray`` on what it passes through. That is not an extra
 materialisation the production code would not have done: both scripts call

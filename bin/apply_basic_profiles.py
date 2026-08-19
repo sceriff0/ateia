@@ -51,10 +51,14 @@ WHAT IS PRESERVED FROM THE IN-PROCESS BaSiC PATH, and where it comes from:
 NOTHING SLIDE-SIZED IS EVER RESIDENT, and this is the half of the path where that used
 to be false. The correction is applied one OUTPUT WRITE-TILE at a time: read that tile's
 region through the lazy zarr view, correct it, clip it, cast it, hand it to ``tifffile``'s
-iterator-fed writer, drop it. Peak is one tile plus the profile planes -- constant in both
-slide size and channel count, the same property ``bin/tiled_stitch.py`` has on the STARE
-path and the reason ``conf/modules.config`` sizes this process from the tile size rather
-than from the input file's size.
+iterator-fed writer, drop it. Peak is one write-tile buffer -- constant in slide size,
+the same property ``bin/tiled_stitch.py`` has on the STARE path -- PLUS the profile
+planes, which are held for the whole run and are NOT constant in channel count: BASICPY
+returns one flatfield and one darkfield plane per fitted channel, at full pseudo-FOV
+resolution, held as float64, i.e. ``2 x C x preproc_tile_size^2 x 8`` bytes. That is a
+deliberate, small, accepted term -- ``conf/modules.config``'s APPLY_PROFILES memory
+closure states it and sizes for it (allowing up to 16 channels explicitly; a wider panel
+is absorbed by the retry ramp) rather than pretending it is not there.
 
 An earlier version accumulated every corrected channel into a list, ``np.stack``-ed it,
 clipped the stack, and cast the stack -- with the list still referenced, so the stack copy

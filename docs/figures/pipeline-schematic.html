@@ -626,9 +626,9 @@
           <thead><tr><th>process</th><th class="n">cpus</th><th>memory</th><th>time</th><th>owner</th></tr></thead>
           <tbody>
             <tr><td>CONVERT_IMAGE</td><td class="n">1</td><td>24–88 GB †</td><td>2 h</td><td><span class="own own-w">name</span></td></tr>
-            <tr><td>TILE_FOR_BASIC</td><td class="n">2</td><td>3 GB/GiB + 8</td><td>2 h</td><td><span class="own own-w">name</span></td></tr>
+            <tr><td>TILE_FOR_BASIC</td><td class="n">2</td><td>6 GB §</td><td>2 h</td><td><span class="own own-w">name</span></td></tr>
             <tr><td>BASICPY ¶</td><td class="n">1</td><td>32 GB ×n</td><td>8 h</td><td><span class="own">both</span></td></tr>
-            <tr><td>APPLY_PROFILES</td><td class="n">2</td><td>7 GB/GiB + 8</td><td>3 h</td><td><span class="own own-w">name</span></td></tr>
+            <tr><td>APPLY_PROFILES</td><td class="n">2</td><td>8 GB §</td><td>3 h</td><td><span class="own own-w">name</span></td></tr>
             <tr><td>REGISTER</td><td class="n">8</td><td>300 GB</td><td>24 h</td><td><span class="own own-w">name</span></td></tr>
             <tr><td>TILED_COARSE</td><td class="n">2</td><td>8 GB ×2ⁿ</td><td>2 h</td><td><span class="own">both</span></td></tr>
             <tr><td>TILED_REG_TILE</td><td class="n">2</td><td>4 GB §</td><td>2 h</td><td><span class="own">both</span></td></tr>
@@ -643,7 +643,7 @@
             <tr><td>SPLIT_CHANNELS</td><td class="n">1</td><td>32–128 GB †</td><td>2 h</td><td><span class="own own-w">name</span></td></tr>
             <tr><td>QUANTIFY</td><td class="n">1</td><td>128 GB</td><td>12 h</td><td><span class="own own-w">name</span></td></tr>
             <tr><td>EXPORT_GEOJSON</td><td class="n">1</td><td>32 GB</td><td>2 h</td><td><span class="own own-w">name</span></td></tr>
-            <tr><td>MERGE_AND_PYRAMID</td><td class="n">2</td><td>200–300 GB †</td><td>8 h</td><td><span class="own own-w">name</span></td></tr>
+            <tr><td>MERGE_AND_PYRAMID</td><td class="n">2</td><td>8 GB §</td><td>8 h</td><td><span class="own own-w">name</span></td></tr>
             <tr><td>EXPORT_SPATIALDATA</td><td class="n">4</td><td>200 GB</td><td>4 h</td><td><span class="own">both</span></td></tr>
           </tbody></table></div>
         <p class="resnote">† tiered on input size, read from the staged file at submission time.
@@ -654,7 +654,12 @@
           under a JVM and does not fit the single tier's 12 GB on a real slide.
           ‡ doubling ramp (32/64/128/256) rather than linear. § derived from a parameter, not a constant:
           <code>reg_tiled_tile</code>&nbsp;+&nbsp;2·<code>reg_tiled_halo</code> for REG_TILE and
-          <code>reg_tiled_out_tile</code> for STITCH, each the measured linear fit doubled and floored at 4 GB.
+          <code>reg_tiled_out_tile</code> for STITCH, each the measured linear fit doubled and floored at 4 GB;
+          <code>preproc_tile_size</code> for TILE_FOR_BASIC (floor 6 GB) and APPLY_PROFILES (floor 8 GB, plus
+          a small term linear in channel count — the fitted flatfield/darkfield planes, held for the whole
+          run); one decoded plane (4× the largest single channel file) plus a <code>pyramid_scale</code> /
+          <code>pyramid_resolutions</code> term for MERGE_AND_PYRAMID (floor 8 GB) — all three replaced a flat
+          file-size tier once their processes stopped holding the whole slide.
           GPU is requested by <code>SEGMENT</code> — and therefore by its alias
           <code>SEG_QC_SEGMENT</code> — when <code>seg_gpu=true</code>, via <code>--gres=gpu:$gpu_type</code>
           plus <code>--gpus all</code> (Docker) or <code>--nv</code> (Singularity);

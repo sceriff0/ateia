@@ -62,9 +62,19 @@ does not fit in a sensible memory request:
 `TILE_FOR_BASIC` streams one pseudo-FOV at a time. `APPLY_PROFILES` streams one 2048 px
 output write-tile at a time; because that grid does not align with the FOV grid, each
 write-tile is corrected **piecewise** over the sub-windows `fov_tiling.fov_overlaps`
-reports, which partition it exactly. Peak memory for both is independent of slide size and
-of channel count, which is why `conf/modules.config` sizes them from
-`params.preproc_tile_size` rather than from the input file's size.
+reports, which partition it exactly. Peak memory for both is independent of slide size.
+`TILE_FOR_BASIC`'s is independent of channel count too — one padded tile, regardless of
+how many channels are tiled. `APPLY_PROFILES`' is **not**: the fitted flatfield and
+darkfield planes are held for the whole run, one pair per fitted channel at full
+pseudo-FOV resolution as float64 — `2 × C × preproc_tile_size² × 8` bytes — a small,
+deliberate, channel-linear term rather than a constant one. `conf/modules.config` sizes
+both processes from `params.preproc_tile_size` rather than from the input file's size,
+and states this term explicitly for `APPLY_PROFILES` (allowing up to 16 channels; a wider
+panel is absorbed by the retry ramp) rather than pretending it is not there. It is the
+same kind of accepted, small, channel-linear trade `bin/merge_channels_pyramid.py`'s
+pyramid-level stash makes (measured at 0.69 MB/channel there, against a 3.4× wall-clock
+cost to remove it entirely) — a different formula, but the same reasoning: a small
+per-channel term is cheaper than the I/O needed to eliminate it.
 
 `APPLY_PROFILES` used to assemble the whole corrected slide — every channel accumulated
 into a list, `np.stack`ed, then clipped and cast with the list still referenced. That is
