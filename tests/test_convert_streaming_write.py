@@ -626,3 +626,38 @@ def test_a_per_plane_chunked_read_is_not_warned_about(monkeypatch, tmp_path, cap
         )
 
     assert "one dask chunk" not in caplog.text
+
+
+def test_a_plane_larger_than_one_tile_still_writes(monkeypatch, tmp_path):
+    """The case every other test in this file was too small to reach.
+
+    tifffile's iterator mode is TILE-wise, not plane-wise, whenever ``tile=`` is set:
+    it walks ``numtiles`` items per page and raises ``ValueError('tile is too large')``
+    the moment one exceeds a single tile. Every fixture here is 24x20 -- smaller than
+    one 2048x2048 tile -- so tifffile PADDED the plane without complaint and
+    ``test_the_write_is_tiled`` above passed while the writer was feeding it whole
+    planes. The first real slide (30552 x 32072) failed at CONVERT_IMAGE with
+    "tile is too large", after the scheduler had granted the task its memory.
+
+    Shrinking the tile rather than growing the image keeps this fast and additionally
+    exercises PARTIAL EDGE TILES: 24x20 over a 16px tile is 2x2 tiles of which three
+    are short, which is the other thing a plane-fed writer never reached.
+    """
+    import numpy as np
+    import tifffile
+
+    monkeypatch.setattr(convert_image, "CONVERT_TIFF_TILE", 16)
+
+    shape = (2, 24, 20)
+    data = (np.arange(int(np.prod(shape)), dtype=np.uint16) % 4096).reshape(shape)
+    out = tmp_path / "big_plane.ome.tif"
+    convert_image.write_ome_tiff(out, data, {"axes": "CYX"})
+
+    back = tifffile.imread(out)
+    assert back.shape == shape
+    assert np.array_equal(back, data), "pixels must survive the tile walk exactly"
+
+    with tifffile.TiffFile(out) as tf:
+        page = tf.pages[0]
+        assert page.is_tiled
+        assert (page.tilelength, page.tilewidth) == (16, 16)

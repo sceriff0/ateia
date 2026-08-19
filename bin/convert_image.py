@@ -449,6 +449,35 @@ def _iter_planes(image_data: Any, shape: Tuple[int, ...]) -> Iterator[np.ndarray
             yield slab[index]
 
 
+def _iter_tiles(
+    image_data: Any, shape: Tuple[int, ...], tile: Tuple[int, int]
+) -> Iterator[np.ndarray]:
+    """Yield TILES, row-major within each plane -- what tifffile's tiled writer wants.
+
+    tifffile's iterator mode is tile-wise, not plane-wise, whenever ``tile=`` is set:
+    it walks ``numtiles`` items per page and raises ``ValueError('tile is too large')``
+    the moment one is bigger than a single tile. Feeding it ``_iter_planes`` therefore
+    only works while a whole plane happens to FIT IN ONE TILE, which is exactly the
+    case a small fixture creates -- tifffile pads an undersized item without complaint.
+    So the striped-vs-tiled write was covered by a test that could not fail, and the
+    first real slide (30552 x 32072) failed at CONVERT_IMAGE with "tile is too large".
+    ``tests/test_convert_streaming_write.py`` now writes a plane LARGER than one tile.
+
+    Partial edge tiles are yielded short and tifffile pads them, so the output is
+    identical for shapes that are not tile multiples.
+
+    Peak memory is unchanged: this only re-slices what ``_iter_planes`` already
+    decoded, so the bound is still ONE SOURCE CHUNK, and all of that function's
+    chunk reasoning applies here untouched.
+    """
+    th, tw = tile
+    for plane in _iter_planes(image_data, shape):
+        h, w = plane.shape[-2:]
+        for y in range(0, h, th):
+            for x in range(0, w, tw):
+                yield plane[..., y : y + th, x : x + tw]
+
+
 def _warn_if_the_reader_chunked_the_whole_stack_together(
     image_data: Any, shape: Tuple[int, ...]
 ) -> None:
@@ -511,7 +540,7 @@ def write_ome_tiff(output_filename: Path, image_data: Any, ome_metadata: dict) -
     _warn_if_the_reader_chunked_the_whole_stack_together(image_data, shape)
     with tifffile.TiffWriter(str(output_filename), bigtiff=True, ome=True) as writer:
         writer.write(
-            _iter_planes(image_data, shape),
+            _iter_tiles(image_data, shape, (CONVERT_TIFF_TILE, CONVERT_TIFF_TILE)),
             shape=shape,
             dtype=np.dtype(image_data.dtype),
             metadata=ome_metadata,

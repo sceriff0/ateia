@@ -204,3 +204,78 @@ def test_every_mask_writer_sets_bigtiff(rel):
         f"{rel} writes a full-resolution label mask without bigtiff, while its sibling "
         "extract_mask_series.py -- writing the same masks back out of the pyramid -- sets it"
     )
+
+
+# ---------------------------------------------------------------------------
+# The tile/iterator contract — the one this seam did not know about
+# ---------------------------------------------------------------------------
+#
+# tifffile's iterator mode is TILE-wise, not plane-wise, whenever `tile=` is set: it
+# walks `numtiles` items per page and raises ValueError('tile is too large') the moment
+# one exceeds a single tile. So a writer that passes BOTH `tile=` AND a generator must
+# feed that generator TILES.
+#
+# convert_image.py fed it whole planes. Nothing caught it, in three separate places:
+# this seam checks photometric/compression/bigtiff but not the data argument;
+# test_convert_streaming_write.py's fixtures are 24x20, smaller than one 2048 tile, so
+# tifffile PADDED them and the tiled-write test passed; and `-stub` never runs the
+# script at all. It failed on the first real slide (30552 x 32072), at CONVERT_IMAGE,
+# after the scheduler had granted the task its memory.
+#
+# Every generator fed to a tiled write is declared here with what it yields. A new one
+# has to be added deliberately, which is the moment to ask whether it yields tiles.
+TILE_FED_GENERATORS = {
+    "_iter_tiles": "bin/convert_image.py -- wraps _iter_planes and re-slices each plane",
+    "_tiles": "bin/apply_basic_profiles.py -- channel-major, tile-major",
+    "_plane_tiles": "bin/merge_channels_pyramid.py -- per-plane tile walk",
+    "stream_tiles": "bin/tiled_stitch.py -- warps and emits one out_tile at a time",
+}
+
+
+def _tiled_writes_with_a_generator():
+    """(file, lineno, callee) for every write that sets tile= and is fed a call."""
+    import ast
+
+    out = []
+    for rel in sorted(set(PIXEL_WRITERS)):
+        path = REPO / rel
+        if not path.is_file():
+            continue
+        for node in ast.walk(ast.parse(path.read_text())):
+            if not isinstance(node, ast.Call):
+                continue
+            fn = node.func
+            name = fn.attr if isinstance(fn, ast.Attribute) else getattr(fn, "id", "")
+            if name not in ("write", "imwrite"):
+                continue
+            if not any(k.arg == "tile" for k in node.keywords):
+                continue
+            if not node.args:
+                continue
+            first = node.args[0]
+            if isinstance(first, ast.Call):
+                callee = first.func
+                out.append((rel, node.lineno,
+                            callee.attr if isinstance(callee, ast.Attribute)
+                            else getattr(callee, "id", "<expr>")))
+    return out
+
+
+def test_every_generator_fed_to_a_tiled_write_yields_tiles():
+    """A tiled write fed a PLANE generator fails only on an image bigger than one
+    tile -- i.e. never in this suite, and always in production."""
+    undeclared = [(f, ln, c) for f, ln, c in _tiled_writes_with_a_generator()
+                  if c not in TILE_FED_GENERATORS]
+    assert not undeclared, (
+        "tiled write fed an undeclared generator: "
+        + ", ".join(f"{f}:{ln} -> {c}()" for f, ln, c in undeclared)
+        + ". tifffile requires TILES here, not planes; a plane generator raises "
+          "'tile is too large' on any image larger than one tile. Declare it in "
+          "TILE_FED_GENERATORS once you have checked what it yields.")
+
+
+def test_the_declaration_is_not_carrying_dead_entries():
+    """A name here that no tiled write uses is an excuse for a call that is gone."""
+    live = {c for _, _, c in _tiled_writes_with_a_generator()}
+    stale = sorted(set(TILE_FED_GENERATORS) - live)
+    assert not stale, f"TILE_FED_GENERATORS names generators no tiled write feeds: {stale}"
