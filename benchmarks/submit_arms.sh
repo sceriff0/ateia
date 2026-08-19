@@ -105,8 +105,8 @@ export NXF_OPTS="${NXF_OPTS:--Xms512m -Xmx3g}"
 # cannot reach the clamps. The two must be raised TOGETHER: the lower of the pair binds,
 # and at the shipped defaults queue_size (20) is far below max_forks (100), so raising
 # max_forks alone does nothing. See docs/resources.md.
-MAX_FORKS="${MAX_FORKS:-200}"
-QUEUE_SIZE="${QUEUE_SIZE:-100}"
+MAX_FORKS="${MAX_FORKS:-5}"
+QUEUE_SIZE="${QUEUE_SIZE:-20}"
 
 EXTRA_ARGS=(--max_forks "$MAX_FORKS" --queue_size "$QUEUE_SIZE")
 # CSE is enabled by a PROFILE, never `--skip_seg_quality_eval false`: Nextflow 26

@@ -29,7 +29,8 @@ whose breakage is silent or misleading; the parse-error case pins itself.
 
 Static tests: they read the config files rather than running Nextflow, so they hold in CI
 without a scheduler. The behavioural counterpart is a stub run -- at the default
-`REGISTER` runs at 10 and everything else at 100; at `--max_forks 4` every process runs at
+`REGISTER` would run at 10 and everything else at its own cap, but the shipped
+`max_forks` of 5 binds below all of them; at `--max_forks 4` every process runs at
 4; at `--max_forks 50` `REGISTER` stays at 10; `--queue_size 3` yields `capacity=3` in the
 local executor's monitor line.
 """
@@ -68,7 +69,7 @@ def modules() -> str:
 
 
 @pytest.mark.parametrize(
-    ("param", "default"), [("max_forks", "100"), ("queue_size", "20")]
+    ("param", "default"), [("max_forks", "5"), ("queue_size", "20")]
 )
 def test_the_parameter_is_declared_once_in_nextflow_config(nf, param, default):
     """Declared in nextflow.config and nowhere else -- the repo's one-owner rule for

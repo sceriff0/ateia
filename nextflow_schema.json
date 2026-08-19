@@ -610,9 +610,9 @@
                 "max_forks": {
                     "type": "integer",
                     "description": "Maximum concurrent tasks per process. Also an upper bound on every per-process maxForks in conf/modules.config, so lowering it throttles every module.",
-                    "help_text": "Paired with queue_size, which caps concurrency across the WHOLE pipeline. The lower of the two binds: at the defaults queue_size (20) is far below max_forks (100), so raising max_forks alone has no effect. Raise both, or raise queue_size.",
+                    "help_text": "Paired with queue_size, which caps concurrency across the WHOLE pipeline. The lower of the two binds: at the defaults max_forks (5) is far below queue_size (20), so raising queue_size alone has no effect. Raise max_forks, or both.",
                     "minimum": 1,
-                    "default": 100
+                    "default": 5
                 },
                 "queue_size": {
                     "type": "integer",

@@ -129,8 +129,8 @@ fi
 # cannot reach the clamps. The two must be raised TOGETHER: the lower of the pair binds,
 # and at the shipped defaults queue_size (20) is far below max_forks (100), so raising
 # max_forks alone does nothing. See docs/resources.md.
-MAX_FORKS="${MAX_FORKS:-200}"
-QUEUE_SIZE="${QUEUE_SIZE:-100}"
+MAX_FORKS="${MAX_FORKS:-5}"
+QUEUE_SIZE="${QUEUE_SIZE:-20}"
 
 export SWEEP_CONCURRENCY="$CONCURRENCY"
 export SWEEP_PROFILE="$PROFILES"

@@ -379,18 +379,24 @@ are both dropped.
 
 | Setting | Value | Where |
 |---|---|---|
-| `process.maxForks` | `params.max_forks` (`100`) | `nextflow.config` |
+| `process.maxForks` | `params.max_forks` (`5`) | `nextflow.config` |
 | `process.stageInMode` | `symlink` | `nextflow.config` — zero-overhead, works cross-filesystem |
 | `executor.queueSize` | `params.queue_size` (`20`) | `nextflow.config` — max concurrent scheduler submissions |
 | `executor.exitReadTimeout` | `1 day` | `conf/base.config` — SLURM status-poll timeout |
 
 Both are tunable from the command line: `--max_forks` and `--queue_size`.
 
-**They are a pair, and tuning one alone is usually a no-op.** `max_forks` caps how many
-tasks of any ONE process run at once; `queue_size` caps how many run at once across the
-WHOLE pipeline. The lower binds, and at the shipped defaults `queue_size` (20) is far below
-`max_forks` (100) — so raising `max_forks` on its own changes nothing. Raise both, or raise
-`queue_size` alone if you simply want more total concurrency.
+**They are a pair, and the LOWER one binds.** `max_forks` caps how many tasks of any ONE
+process run at once; `queue_size` caps how many run at once across the WHOLE pipeline.
+At the shipped defaults `max_forks` (5) is far below `queue_size` (20), so **`max_forks`
+is what binds** and raising `queue_size` alone changes nothing — raise `max_forks`, or
+raise both. (This is the opposite way round from the earlier 100/20 defaults, where
+`queue_size` was the binding one.)
+
+Because every per-process override is `Math.min(its own cap, params.max_forks)`, a
+`max_forks` of 5 clamps ALL of them: the `REGISTER` / `TILED_STITCH` 10 and the
+`TILED_COARSE` / `TILED_REG_TILE` 20 below all run at 5. That is a deliberately
+conservative default — raise it with `--max_forks` when the cluster can take it.
 
 Per-process `maxForks` overrides: `REGISTER`, `TILED_STITCH` at `10`; `TILED_COARSE` /
 `TILED_REG_TILE` at `20`. These bound how many memory-heavy registration tasks can be in
