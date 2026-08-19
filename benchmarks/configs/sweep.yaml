@@ -105,12 +105,19 @@ baseline:
                                       # reg_max_image_dim. Crossed by registration_method_grid.tiled's
                                       # coarse_res sub-grid; declared here for column uniformity, and
                                       # inert at this baseline cell (registration_method=valis).
-  reg_tiled_max_error: 0.99           # STARE control-point CONFIDENCE gate, pipeline default.
-                                      # Crossed by registration_method_grid.tiled; declared here
-                                      # for column uniformity and inert at this baseline cell
-                                      # (registration_method=valis).
-  reg_tiled_max_disp: null            # STARE control-point RANGE gate, pipeline default
-                                      # (null = fall back to reg_tiled_halo). Same reason.
+  # The two STARE control-point gates. PINNED AT THE DEFAULT, DELIBERATELY NOT SWEPT.
+  # They are ACCURACY knobs with no cost signature -- the phase correlation they gate on
+  # has already been computed by the time either applies, so neither moves memory or
+  # runtime. Crossing them into registration_method_grid.tiled made them 60% of this
+  # sweep (162 of 270 runs) to measure something a RESOURCE sweep does not report.
+  # Their behaviour is characterised where ground truth exists instead:
+  # tests/test_tile_residual_confidence.py measures real tissue 0.041 vs background
+  # 0.9995 vs section edge 0.99996 on synthetic tiles. Declared here so every run
+  # RECORDS the value it used, which the accuracy tables need.
+  # Add them to registration_method_grid.tiled if you want the tissue-side curve --
+  # it costs 6x the tiled grid.
+  reg_tiled_max_error: 0.99           # CONFIDENCE gate (phase-correlation error), pipeline default
+  reg_tiled_max_disp: null            # RANGE gate; null = fall back to reg_tiled_halo
   # --- preprocessing (BaSiC illumination correction) ---
   # The pipeline exposes exactly THREE preprocessing knobs. BaSiC's own defaults stand in for
   # everything else (darkfield estimation on, no autotune, non-overlapping FOVs) and PREPROCESS's
@@ -300,20 +307,3 @@ registration_method_grid:
     # process_low). Drop the 8192 point if these runs start hitting the wall; memory is NOT the
     # concern — peak is flat across this axis (~0.9 GB) by construction.
     reg_tiled_coarse_max_dim: [2048, 4096, 8192]   # M0 anchor thumbnail, longest side (px)
-    # The two CONTROL-POINT GATES that decide which per-tile matches enter the mesh.
-    # ACCURACY knobs with almost no cost signature (the phase correlation is already
-    # computed by the time either applies), so read them in registration_accuracy.csv,
-    # not in the resource fits.
-    #
-    # reg_tiled_max_error is the load-bearing one: it gates on the phase-correlation
-    # ERROR, which is what separates real tissue (~0.04) from background (~0.9995) and
-    # section edges (~0.99996) — those produce plausibly SMALL displacements, so a
-    # displacement gate does not catch them. Brackets the 0.99 default both ways.
-    # NOTE the NaN case: a blank tile scores NaN and `error > max` is False for NaN, so
-    # a fully-blank tile is ACCEPTED at any threshold on this axis.
-    reg_tiled_max_error: [0.5, 0.99, 0.999]
-    # reg_tiled_max_disp is the secondary RANGE gate (null = use reg_tiled_halo, the
-    # physically-motivated bound). Two points only: on the tiles measured so far it
-    # rejected nothing the error gate had not already rejected, so a wide sweep here
-    # buys resolution on a null result.
-    reg_tiled_max_disp: [null, 128]
