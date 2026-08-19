@@ -125,9 +125,19 @@ def test_load_qc_keeps_verbatim_json_and_survives_bad_files(tmp_path):
 # structurally and never compute across it. These tests exercise both call sites
 # for real, against fixtures written the same way the pipeline's own writers
 # (`bin/segment.py`, `bin/merge_channels_pyramid.py`) produce them, and assert:
-# (1) the pixels read back are identical to a naive whole-array read (exported
-# output is unchanged), and (2) the read never eagerly decoded the whole file
-# (the strategy itself, not just its output, is pinned).
+# (1) the pixels read back are identical to a naive whole-array read, and (2) the
+# read never eagerly decoded the whole file (the strategy itself, not just its
+# output, is pinned).
+#
+# Pixel equality is NOT the same as "exported output is unchanged", though: the
+# mask's source file is written in un-tiled strips (`bin/segment.py`, plain
+# `tifffile.imwrite`, no `tile=`), which collapse to ~1-row TIFF strips at slide
+# widths -- and `spatialdata`'s writer defaults the *exported* zarr's chunk grid
+# to the dask array's chunksize. A per-row chunk grid is still pixel-identical,
+# so a pixel-only check would not catch it; `test_read_mask_rechunks_away_from_...`
+# below exercises that specifically, with a fixture wide enough to actually enter
+# the collapsed-strip regime (the other fixtures here are a single strip and
+# can't see it).
 #
 # `spatialdata`/`geopandas` aren't needed for any of this -- only `tifffile` and
 # `dask`, which are real dependencies of this script and importable here.
@@ -240,19 +250,41 @@ def test_read_pyramid_lazy_matches_the_base_level(tmp_path, monkeypatch):
     assert calls and calls[0].get("aszarr") is True and calls[0].get("level") == 0
 
 
-def test_read_mask_and_read_pyramid_lazy_agree_on_one_strategy(tmp_path):
-    """Task 4's exit condition: both call sites use the SAME read strategy
-    (dask-backed, aszarr-opened) rather than one eager and one lazy."""
-    mask_path = tmp_path / "mask.tif"
-    _write_mask(mask_path)
-    pyramid_path = tmp_path / "pyramid.ome.tif"
-    _write_pyramid(pyramid_path)
+def test_read_mask_rechunks_away_from_the_file_s_strip_layout(tmp_path):
+    """Guards the chunk-grid regression: at slide widths, `bin/segment.py`'s
+    un-tiled `tifffile.imwrite` collapses to ~1-row TIFF strips (measured here at
+    width 20000 -> a raw chunksize of one row), and `spatialdata`'s `sdata.write()`
+    passes no `storage_options`, so `ome_zarr.writer` defaults the exported zarr's
+    chunk grid to the dask array's chunksize (`chunks_opt = level.chunksize`).
+    Left uncorrected, that turns one mask into tens of thousands of tiny zarr chunk
+    objects. `read_mask` must rechunk before returning, so this checks the
+    RETURNED array's chunksize, not just its pixels -- pixel equality alone is
+    blind to this, since a per-row chunk grid is still bit-identical to a
+    coarser one.
+    """
+    path = tmp_path / "wide_mask.tif"
+    h, w = 64, 20000
+    arr = np.random.default_rng(7).integers(0, 500, size=(h, w)).astype(np.uint32)
+    tifffile.imwrite(str(path), arr, compression="zlib", bigtiff=True)
 
-    mask_result = esd.read_mask(str(mask_path))
-    pyramid_result = esd.read_pyramid_lazy(str(pyramid_path))
+    # Sanity check on the FIXTURE itself: confirm it really lands in the
+    # collapsed-strip regime this test exists to guard, so a future tifffile
+    # version that stops collapsing doesn't leave this test silently vacuous.
+    raw_store = tifffile.imread(str(path), aszarr=True, level=0)
+    raw_chunksize = da.from_zarr(raw_store).chunksize
+    raw_store.close()
+    assert raw_chunksize[0] <= 2, (
+        f"fixture no longer exercises the strip-collapse regime (raw chunksize "
+        f"{raw_chunksize}); widen it until RowsPerStrip collapses again"
+    )
 
-    assert isinstance(mask_result, da.Array)
-    assert isinstance(pyramid_result, da.Array)
+    result = esd.read_mask(str(path))
+
+    assert np.array_equal(np.asarray(result), arr)
+    assert result.chunksize == (min(2048, h), min(2048, w)), (
+        f"read_mask's output chunksize is {result.chunksize} -- the raw file's "
+        "collapsed strip layout leaked into the exported array uncorrected"
+    )
 
 
 # ── spatial join of registration residuals ─────────────────────────────────────

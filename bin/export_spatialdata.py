@@ -233,18 +233,34 @@ def build_shapes(contours_path: str, labels: np.ndarray, name: str):
 def read_mask(path: str):
     """Lazily read a label mask as a 2-D dask array, squeezing any singleton axis.
 
-    Same read strategy as ``read_pyramid_lazy``, and for the same reason: the only
-    consumer is ``Labels2DModel.parse``, which wraps the array structurally (dims +
-    transformation) and never computes across labels. That is unlike
-    ``quantify.py``/``mask_to_geojson.py``, which DO force a whole-array read because
-    region properties and contour tracing are global — a cell label can straddle any
-    tile boundary those pick. No such constraint applies here, so the read stays
-    lazy rather than loading the whole mask up front.
+    Same read strategy as ``read_pyramid_lazy`` (dask-backed, aszarr-opened), and
+    for the same reason on the *consumer* side: ``Labels2DModel.parse`` wraps the
+    array structurally (dims + transformation) and never computes across labels.
+    That is unlike ``quantify.py``/``mask_to_geojson.py``, which DO force a
+    whole-array read because region properties and contour tracing are global — a
+    cell label can straddle any tile boundary those pick. No such constraint
+    applies here, so the read stays lazy rather than loading the whole mask up
+    front.
 
-    Not routed through ``tiled_io.open_lazy``: that helper hands back a custom
-    ``(c, y, x)``-indexed view, not a real dask array, and ``Labels2DModel.parse``
-    needs the latter (same as ``Image2DModel.parse`` below) to wrap losslessly into
-    an xarray-backed element without forcing a compute.
+    The two sites are NOT symmetric on the *file* side, though, and that is what
+    the explicit ``rechunk`` below is for. ``bin/merge_channels_pyramid.py``
+    writes the pyramid tiled (``tile=(tile_size, tile_size)``); ``bin/segment.py``
+    /``bin/segment_cellsam.py`` write the mask with plain ``tifffile.imwrite`` and
+    no ``tile=``, so tifffile falls back to strips sized ~64 KB, which collapses
+    to ``RowsPerStrip=1`` at slide widths. Left alone, that makes the dask array's
+    chunks single image rows — and ``spatialdata``'s ``sdata.write()`` passes no
+    ``storage_options``, so ``ome_zarr.writer`` defaults the *output* zarr's chunk
+    grid to the dask chunksize (``chunks_opt = level.chunksize``). An unrechunked
+    read would therefore change the exported store's chunk grid from ~dozens of
+    large chunks to one chunk per row — tens of thousands of small zarr objects on
+    a shared filesystem. Not routed through ``tiled_io.open_lazy``: it opens this
+    same underlying zarr array internally, but never returns it — only its own
+    ``(c, y, x)``-tuple-indexed ``_CHW`` wrapper, paired with a ``close`` callable
+    whose lifetime would then have to be threaded through this lazy dask graph
+    instead of closed immediately. For a 2-D mask it would also force a leading
+    ``C=1`` axis right back off. Reading the zarr store directly with
+    ``da.from_zarr`` sidesteps all three and hands ``Labels2DModel.parse`` a real,
+    unwrapped dask array to rechunk.
     """
     import dask.array as da
     import tifffile
@@ -253,7 +269,10 @@ def read_mask(path: str):
     arr = da.from_zarr(store).squeeze()
     if arr.ndim != 2:
         raise ValueError(f"expected a 2-D label mask in {path}, got shape {arr.shape}")
-    return arr
+    # Re-chunk away from the file's strip layout (see docstring) before this array
+    # ever reaches Labels2DModel.parse / sdata.write(), so the exported store's
+    # chunk grid stays sane regardless of how the source TIFF happened to strip.
+    return arr.rechunk({0: 2048, 1: 2048})
 
 
 def read_pyramid_lazy(path: str):
@@ -264,9 +283,12 @@ def read_pyramid_lazy(path: str):
     here would defeat the point of an out-of-core format.
 
     Not routed through ``tiled_io.open_lazy`` for the same reason ``read_mask``
-    isn't: ``Image2DModel.parse`` below builds a multiscale pyramid over this array
-    via ``scale_factors``, which needs a genuine dask array (rechunk-able, numpy-
-    slicable) rather than open_lazy's restricted ``(c, y, x)``-tuple getitem.
+    isn't: it opens the identical underlying zarr array internally but exposes
+    only its own ``(c, y, x)``-tuple-indexed wrapper plus a ``close`` callable, not
+    the array itself. ``Image2DModel.parse`` below builds a multiscale pyramid over
+    this array via ``scale_factors``, which needs a genuine, unwrapped dask array
+    (rechunk-able, numpy-slicable) — exactly what reading the zarr store directly
+    with ``da.from_zarr`` gives it.
     """
     import dask.array as da
     import tifffile
