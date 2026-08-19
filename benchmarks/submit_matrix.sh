@@ -28,9 +28,16 @@
 #                                              the channel loop)
 #
 # evaluated at the LARGEST cell in sweep.yaml. For the shipped grid that cell is
-# 90000 px x 4 ch = 64.8 GB + 16.2 GB ~= 81 GB, so --mem=128G above is the floor
-# for it -- raise to 200G if you see an OOM. For the trimmed grid most people
-# actually want (max 32768 px x 4 ch) the peak is ~11 GB and 32G is plenty.
+# 90000 px x 4 ch = 64.8 GB + 16.2 GB ~= 81 GB, so --mem=128G above clears it. For
+# the trimmed grid most people actually want (max 32768 px x 4 ch) the peak is
+# ~11 GB and 32G is plenty.
+#
+# THAT FORMULA ONLY BECAME TRUE ON 2026-08-19. Before it, run_matrix held the
+# reference stack bound while it built each moving panel's stack, so the peak was
+# TWO stacks -- 145.8 GB at the 90000x4 cell -- and job 6511490 was SIGKILLed
+# (exit 137) at --mem=128G after 77 minutes. Each stack is now released before the
+# next is allocated, and benchmarks/tests/test_generate_matrix.py counts live
+# stacks by weakref so the peak cannot quietly become N+1 again.
 #
 # DISK is the other axis, and the bigger surprise:
 #     shipped grid (to 90000 px)   ~1.33 TB

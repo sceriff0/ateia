@@ -306,3 +306,46 @@ def test_nd2_without_bioio_fails_with_an_actionable_message(tmp_path, monkeypatc
         _read_source_2d(src)
     msg = str(ei.value)
     assert "bioio" in msg and "convert one slide" in msg
+
+
+def test_only_one_synthesized_stack_is_alive_at_a_time(tmp_path, monkeypatch):
+    """The peak this job is sized from is resized + ONE stack, not two.
+
+    run_matrix built the reference stack, wrote it, and then allocated each moving
+    panel's stack while the reference was STILL BOUND. For a 90000px x 4ch cell that
+    is 64.8 GB each: 16.2 (resized) + 64.8 + 64.8 = 145.8 GB, which SIGKILLed a
+    128 GB matrix job 77 minutes in. Nothing caught it because every fixture here is
+    small enough that two live stacks fit anyway.
+
+    Measured by weakref rather than by memory: on entry to each synthesize_channels
+    call, count how many previously-returned stacks are still alive. Correct is zero
+    -- the previous one must have been released before the next is allocated.
+    """
+    import weakref
+    import numpy as np
+    from benchmarks import generate_matrix as gm
+
+    alive, seen_max = [], []
+    real = gm.synthesize_channels
+
+    def counting(src_2d, n_channels, seed=0, **kw):
+        live = sum(1 for r in alive if r() is not None)
+        seen_max.append(live)
+        out = real(src_2d, n_channels, seed=seed, **kw)
+        alive.append(weakref.ref(out))
+        return out
+
+    monkeypatch.setattr(gm, "synthesize_channels", counting)
+
+    src = tmp_path / "src.tif"
+    import tifffile
+    tifffile.imwrite(src, np.full((64, 64), 700, dtype=np.uint16))
+
+    gm.run_matrix(src, tmp_path / "m", target_px=[32, 48], n_channels=[2],
+                  paired=True, n_moving=3)
+
+    assert seen_max, "synthesize_channels was never called"
+    assert max(seen_max) == 0, (
+        f"up to {max(seen_max)} previously-built stack(s) were still alive when the "
+        "next was allocated; the peak is then N+1 stacks, not one. Release each "
+        "stack (del) before building the next.")

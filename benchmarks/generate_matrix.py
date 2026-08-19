@@ -173,6 +173,12 @@ def run_matrix(source, outdir, target_px, n_channels, seed=0, paired: bool = Fal
                 if nch > 1:
                     metadata["Channel"] = {"Name": ["DAPI"] + [f"ch{i}" for i in range(1, nch)]}
                 tifffile.imwrite(out_path, data, photometric="minisblack", metadata=metadata)
+                # RELEASE THE REFERENCE STACK BEFORE BUILDING ANY MOVING PANEL.
+                # Without this both are live at once and the peak is TWO full stacks:
+                # a 90000px x 4ch cell is 64.8 GB each, so 16.2 (resized) + 64.8 + 64.8
+                # = 145.8 GB, which SIGKILLed a 128 GB job after 77 minutes. Dropping
+                # them here caps the peak at resized + ONE stack.
+                del data, stack
                 row = {
                     "cell_id": cell_id, "target_px": tpx, "width": rw, "height": rh,
                     "n_channels": nch, "bytes": out_path.stat().st_size, "path": str(out_path),
@@ -197,6 +203,9 @@ def run_matrix(source, outdir, target_px, n_channels, seed=0, paired: bool = Fal
                                 mov_out, mov_stack, photometric="minisblack",
                                 metadata={"axes": "CYX",
                                           "Channel": {"Name": ["DAPI"] + [f"m{j}_{i}" for i in range(1, nch)]}})
+                            # Same reason: the next iteration allocates another full
+                            # stack before this one would otherwise be rebound.
+                            del mov_stack
                             moving_paths.append(str(mov_out))
                     row["moving_paths"] = ";".join(moving_paths)
                 writer.writerow(row)
