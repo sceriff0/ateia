@@ -1,0 +1,945 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MIRAGE Supplementary Figure S4 — Lazy reads</title>
+<style>
+  /* ======================================================================
+     MIRAGE supplementary figures — shared design base (S1 · S2 · S3 · S4)
+     ----------------------------------------------------------------------
+     DUPLICATED ON PURPOSE, not extracted to a shared file. Each figure in
+     this set has to survive being detached from the repository — attached to
+     a submission, mailed, opened from file:// — so it may not reference an
+     external stylesheet, not even a sibling one. This block is therefore
+     repeated verbatim in docs/figures/pipeline-schematic.html,
+     docs/figures/registration-schematic.html, docs/figures/qc-schematic.html
+     and docs/figures/zarr-schematic.html, and is ported (with the slate
+     counterpart the figures deliberately lack) to docs/stylesheets/extra.css.
+     Change one, change all five.
+
+     SINGLE THEME BY DESIGN: white paper, black ink. A journal figure has a
+     paper ground.
+
+     ONE FONT STACK, shared with docs/stylesheets/extra.css so the site and
+     the figures really do read as one artefact (that file's header claimed
+     they did while leading with a different family).
+
+     ONE BREAKPOINT LADDER for the whole set: 1040 · 880 · 760 · 640 · 520.
+     No figure introduces a sixth rung.
+
+     ONE SIZING SCALE: .tag/.tag-def/.tag-alt .53rem / 1px 4px · .pp span
+     .62rem / 1px 5px · table.pr td.k .7rem, td.v/td.val .68rem ·
+     .masthead h1 max-width 72ch.
+
+     OVERFLOW DISCIPLINE: every grid track is minmax(0,…) and every grid or
+     flex item carries min-width:0. Without it a track's automatic minimum is
+     min-content, so one long identifier (GENERATE_POSTPROCESSING_QC) widens
+     its column and pushes the whole grid outside the panel border instead of
+     wrapping.
+     ====================================================================== */
+  :root{
+    --paper:#ffffff; --panel:#ffffff; --sub:#f6f7f8; --sub-2:#eef0f2;
+    --ink:#0f1113; --ink-2:#3c4147; --ink-3:#767c83;
+    --rule:#c3c8cd; --rule-2:#e5e8ea; --bar:#1b1e22;
+    --serif:Georgia,"Times New Roman",Cambria,"Noto Serif",serif;
+    --sans:"Inter","Helvetica Neue",Helvetica,Arial,"Segoe UI",system-ui,sans-serif;
+    --mono:"JetBrains Mono","SF Mono",ui-monospace,Menlo,Consolas,monospace;
+    color-scheme:light;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);
+    font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased;overflow-x:hidden;}
+  .sheet{max-width:1060px;margin:0 auto;padding:40px 26px 72px;}
+
+  .masthead{border-bottom:2px solid var(--ink);padding-bottom:12px;}
+  .masthead .kick{font-size:.71rem;letter-spacing:.15em;text-transform:uppercase;color:var(--ink-3);font-weight:700;}
+  .masthead h1{font-weight:700;font-size:1.32rem;letter-spacing:-.01em;margin:.3em 0 0;max-width:72ch;line-height:1.26;text-wrap:balance;}
+  .standfirst{font-family:var(--serif);font-size:.95rem;color:var(--ink-2);margin:12px 0 30px;max-width:82ch;}
+
+  /* Figure-set navigation. Relative filenames, so the strip works both from
+     file:// on a detached copy sitting beside its siblings and from the built
+     MkDocs site, which copies docs/figures/ through verbatim. */
+  .figset{display:flex;gap:0;flex-wrap:wrap;align-items:center;margin:12px 0 0;
+    font-family:var(--mono);font-size:.63rem;letter-spacing:.05em;text-transform:uppercase;}
+  .figset a,.figset span{border:1px solid var(--rule);padding:4px 9px;margin:0 -1px 0 0;
+    color:var(--ink-2);text-decoration:none;white-space:nowrap;}
+  .figset a:hover{border-color:var(--ink);color:var(--ink);}
+  .figset .self{background:var(--ink);border-color:var(--ink);color:#fff;font-weight:700;}
+
+  .panel{position:relative;background:var(--panel);border:1px solid var(--rule);padding:20px 20px 18px;margin:0 0 20px;}
+  .panel > .plabel{position:absolute;top:-1px;left:-1px;background:var(--ink);color:#fff;font-weight:700;
+    font-size:.85rem;line-height:1;padding:6px 9px;}
+  .panel-head{margin:2px 0 16px 26px;}
+  .panel-head h2{font-size:1.02rem;font-weight:700;letter-spacing:-.01em;margin:0;}
+  .panel-head p{font-size:.85rem;color:var(--ink-2);margin:3px 0 0;max-width:84ch;}
+
+  code{font-family:var(--mono);font-size:.82em;background:var(--sub);border:1px solid var(--rule-2);border-radius:2px;padding:.5px 4px;}
+  .tbl-scroll{overflow-x:auto;}
+
+  /* parameter chips */
+  .pp{display:flex;flex-wrap:wrap;gap:4px;margin-top:7px;min-width:0;}
+  .pp span{font-family:var(--mono);font-size:.62rem;background:var(--sub);border:1px solid var(--rule-2);padding:1px 5px;
+    color:var(--ink-2);max-width:100%;min-width:0;overflow-wrap:anywhere;}
+  .pp b{color:var(--ink);font-weight:700;}
+  .tag{font-family:var(--mono);font-size:.53rem;text-transform:uppercase;letter-spacing:.04em;padding:1px 4px;
+    font-weight:700;border:1px solid var(--rule);color:var(--ink-2);background:var(--sub-2);white-space:nowrap;}
+  .tag-on{border-color:var(--ink);color:var(--ink);background:#fff;}
+  .tag-def{font-family:var(--mono);font-size:.53rem;background:var(--ink);color:#fff;padding:1px 4px;font-weight:700;white-space:nowrap;}
+  .tag-alt{font-family:var(--mono);font-size:.53rem;background:var(--sub);color:var(--ink-2);border:1px solid var(--rule);padding:1px 4px;white-space:nowrap;}
+
+  /* parameter tables (td.v in S1/S3, td.val in S2 — same scale) */
+  table.pr{border-collapse:collapse;width:100%;font-size:.78rem;}
+  table.pr td{padding:3.5px 4px;border-bottom:1px solid var(--rule-2);vertical-align:top;}
+  table.pr tr:last-child td{border-bottom:none;}
+  table.pr td.k{font-family:var(--mono);font-size:.7rem;font-weight:700;white-space:nowrap;}
+  table.pr td.v,table.pr td.val{font-family:var(--mono);font-size:.68rem;color:var(--ink-2);white-space:nowrap;
+    padding-right:8px;font-variant-numeric:tabular-nums;}
+  table.pr td.v.w{white-space:normal;overflow-wrap:anywhere;}
+  table.pr td.d{color:var(--ink-2);}
+  .nul{color:var(--ink-3);font-style:italic;}
+
+  .caption{font-family:var(--serif);font-size:.83rem;color:var(--ink-2);line-height:1.62;border-top:1px solid var(--rule);padding-top:16px;margin-top:8px;}
+  .caption b{color:var(--ink);}
+  .footnote{font-family:var(--sans);font-size:.72rem;color:var(--ink-3);margin-top:14px;display:block;}
+
+
+  /* a — what already existed vs what a reader assumes */
+  .two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;align-items:start;}
+  @media(max-width:880px){.two{grid-template-columns:minmax(0,1fr);}}
+  .two > div{min-width:0;}
+  .three{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;}
+  @media(max-width:880px){.three{grid-template-columns:repeat(2,minmax(0,1fr));}}
+  @media(max-width:520px){.three{grid-template-columns:minmax(0,1fr);}}
+  .bx{border:1px solid var(--rule);border-top:2.5px solid var(--ink);background:var(--panel);padding:11px 12px;min-width:0;}
+  .bx.mut{border-top-style:dashed;border-top-color:var(--ink-3);background:var(--sub);}
+  .bx h4{margin:0;font-family:var(--mono);font-size:.7rem;font-weight:700;overflow-wrap:anywhere;}
+  .bx .sub{font-family:var(--mono);font-size:.58rem;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-3);margin-top:3px;}
+  .bx .x{font-size:.76rem;color:var(--ink-2);margin:7px 0 0;}
+  .bx .x b{color:var(--ink);}
+  .src{font-family:var(--mono);font-size:.58rem;color:var(--ink-3);margin-top:6px;overflow-wrap:anywhere;}
+  .callout{border-left:3px solid var(--ink);background:var(--sub);padding:9px 12px;font-size:.8rem;color:var(--ink-2);margin:13px 0 0;}
+  .callout b{color:var(--ink);}
+  .callout .wl{font-family:var(--mono);font-size:.57rem;text-transform:uppercase;letter-spacing:.07em;
+    color:var(--ink);font-weight:700;display:block;margin-bottom:3px;}
+  .sig{border:1px solid var(--rule);background:var(--sub);padding:10px 12px;font-family:var(--mono);
+    font-size:.72rem;color:var(--ink);overflow-x:auto;}
+  .sig .cm{color:var(--ink-3);}
+
+  /* confidence tags — the whole figure hangs on these */
+  .tag-m{font-family:var(--mono);font-size:.53rem;text-transform:uppercase;letter-spacing:.04em;padding:1px 4px;
+    font-weight:700;background:var(--ink);color:#fff;white-space:nowrap;}
+  .tag-s{font-family:var(--mono);font-size:.53rem;text-transform:uppercase;letter-spacing:.04em;padding:1px 4px;
+    font-weight:700;border:1px solid var(--ink);color:var(--ink);background:#fff;white-space:nowrap;}
+  .tag-u{font-family:var(--mono);font-size:.53rem;text-transform:uppercase;letter-spacing:.04em;padding:1px 4px;
+    font-weight:700;border:1px dashed var(--ink-3);color:var(--ink-3);background:var(--sub);white-space:nowrap;}
+  .key{display:flex;flex-wrap:wrap;gap:12px;margin-top:11px;font-size:.72rem;color:var(--ink-2);}
+  .key > span{display:flex;gap:5px;align-items:center;min-width:0;}
+
+  /* c — site cards */
+  .sites{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;}
+  @media(max-width:880px){.sites{grid-template-columns:minmax(0,1fr);}}
+  .site{border:1px solid var(--rule);background:var(--panel);padding:11px 12px;min-width:0;position:relative;}
+  .site .num{font-family:var(--mono);font-size:.58rem;background:var(--ink);color:#fff;padding:1px 5px;}
+  .site .nm{font-family:var(--mono);font-weight:700;font-size:.71rem;margin-top:5px;display:flex;flex-wrap:wrap;
+    gap:5px;align-items:center;min-width:0;overflow-wrap:anywhere;}
+  .site .x{font-size:.76rem;color:var(--ink-2);margin-top:6px;}
+  .site .x b{color:var(--ink);}
+  .site .res{font-family:var(--mono);font-size:.6rem;color:var(--ink-2);margin-top:7px;border-top:1px solid var(--rule-2);
+    padding-top:5px;overflow-wrap:anywhere;}
+  .site .res b{color:var(--ink);}
+
+  /* d/e — drawn figures */
+  .chart{border:1px solid var(--rule);background:var(--panel);padding:12px;min-width:0;}
+  .chart svg{display:block;width:100%;height:auto;}
+  .chart .cap{font-size:.72rem;color:var(--ink-3);margin-top:8px;}
+  .chart .cap b{color:var(--ink-2);}
+  svg text{font-family:var(--sans);}
+  svg .mn{font-family:var(--mono);}
+
+  /* f — the no-help table */
+  table.own{border-collapse:collapse;width:100%;font-size:.76rem;}
+  table.own th{text-align:left;font-weight:700;font-size:.78rem;color:var(--ink);border-bottom:1.5px solid var(--ink);
+    padding:6px 9px;vertical-align:bottom;}
+  table.own td{padding:6px 9px;border-bottom:1px solid var(--rule-2);vertical-align:top;color:var(--ink-2);}
+  table.own tr:last-child td{border-bottom:none;}
+  table.own td.st{font-family:var(--mono);font-size:.66rem;font-weight:700;color:var(--ink);overflow-wrap:anywhere;}
+  table.own td.kd{font-family:var(--mono);font-size:.63rem;color:var(--ink-2);overflow-wrap:anywhere;}
+  table.own tr.grp td{background:var(--sub);font-family:var(--mono);font-size:.62rem;text-transform:uppercase;
+    letter-spacing:.05em;color:var(--ink);font-weight:700;}
+
+  /* i — corrections */
+  .corr{border:1px solid var(--rule);background:var(--panel);padding:0;min-width:0;margin-bottom:10px;}
+  .corr .hd{background:var(--bar);color:#fff;font-family:var(--mono);font-size:.66rem;font-weight:700;
+    padding:7px 10px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;min-width:0;overflow-wrap:anywhere;}
+  .corr .hd .wrong{background:#fff;color:var(--ink);padding:0 4px;}
+  .corr .hd code{background:none;border:none;color:#fff;padding:0;}
+  .corr .bd{padding:10px 12px;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;}
+  @media(max-width:760px){.corr .bd{grid-template-columns:minmax(0,1fr);}}
+  .corr .bd > div{min-width:0;}
+  .corr .lb{font-family:var(--mono);font-size:.57rem;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-3);}
+  .corr .tx{font-size:.77rem;color:var(--ink-2);margin-top:3px;}
+  .corr .tx b{color:var(--ink);}
+
+  /* h — dials */
+  .pgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 26px;}
+  @media(max-width:760px){.pgrid{grid-template-columns:minmax(0,1fr);}}
+  .pcol{min-width:0;}
+  @media(max-width:880px){table.pr td.k,table.pr td.v{white-space:normal;overflow-wrap:anywhere;}}
+  .pcol h4{font-family:var(--mono);font-size:.66rem;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-2);
+    margin:14px 0 4px;padding-bottom:3px;border-bottom:1px solid var(--ink);}
+  .pcol h4:first-child{margin-top:0;}
+  .outnote{font-family:var(--serif);font-size:.78rem;color:var(--ink-2);margin-top:12px;}
+  .outnote b{color:var(--ink);}
+  .warnbox{border:1px solid var(--ink);background:#fff;padding:9px 12px;font-size:.79rem;color:var(--ink-2);margin:12px 0 0;}
+  .warnbox b{color:var(--ink);}
+  .warnbox .wl{font-family:var(--mono);font-size:.57rem;text-transform:uppercase;letter-spacing:.07em;
+    color:var(--ink);font-weight:700;display:block;margin-bottom:3px;}
+</style>
+</head>
+<body>
+
+<div class="sheet">
+
+  <div class="masthead">
+    <div class="kick">Supplementary Figure S4 · lazy reads</div>
+    <h1>A peak-memory transition, not an I/O one: where a lazy zarr view turns O(channels) into O(1), where the pipeline genuinely needs every pixel, and three audit claims that reading the read sites got wrong</h1>
+  </div>
+  <nav class="figset" aria-label="Supplementary figure set">
+    <a href="pipeline-schematic.html">S1 · pipeline</a>
+    <a href="registration-schematic.html">S2 · registration</a>
+    <a href="qc-schematic.html">S3 · quality control</a>
+    <span class="self">S4 · lazy reads</span>
+  </nav>
+  <p class="standfirst">Lazy, region-readable zarr views of an OME-TIFF were never missing from this pipeline:
+    <code>bin/utils/tiled_io.py</code> has carried <code>open_lazy</code>, <code>read_decimated</code> and
+    <code>decimation_factor</code> since the STARE tiled backend was built, and three tiled scripts were their only
+    consumers. What changed is the blast radius — four further sites now read one channel where they used to read
+    the whole stack, and a fifth eager read, owned by a different library, was later taken through <i>that</i>
+    library's own lazy API. The gain is <b>peak memory</b>, not bytes read: at three of the four, the number of
+    source pixels decoded is <i>unchanged</i>, because a published full-resolution artifact, an anti-aliased resize,
+    or a whole-image statistic still demands every one of them. Each claim below is stated at the confidence it
+    earned; every process where laziness buys nothing is named with the reason; and three places where the audit
+    that scoped this work was wrong are recorded, because the reason they were wrong generalises.</p>
+  <div class="figset" style="margin-top:11px;text-transform:none;letter-spacing:0">
+    <span style="border:none;padding-left:0;color:var(--ink-3)">sites moved onto <code>tiled_io</code>'s lazy view:
+    <b>4</b> · eager reads taken in another library: <b>1</b> ·
+    pixel-reading processes where a lazy read cannot help: <b>12</b> · new pipeline parameters: <b>0</b> ·
+    resource requests changed by this work: <b>0</b></span>
+  </div>
+  <div class="callout" style="margin-top:13px"><span class="wl">this figure was revised: five sites became four</span>
+    An earlier version of this figure described five changed sites and named one remaining opportunity. Both have
+    since moved: the fifth site's process was <b>deleted</b> when illumination correction was handed to nf-core's
+    <code>BASICPY</code>, and the remaining opportunity — the BioIO convert — was <b>taken</b>. Neither is quietly
+    edited out. The deleted site was the only card in the set carrying no measurement, so the surviving four are
+    stronger than the original five (panel <b>c</b>); the taken opportunity brought the figure's only measurement
+    of a real production function, and its own near miss (panels <b>d</b> and <b>g</b>).</div>
+
+  <!-- a — WHAT ALREADY EXISTED -->
+  <section class="panel">
+    <span class="plabel">a</span>
+    <div class="panel-head"><h2>What the pipeline already had, and what a reader assumes it gained</h2>
+      <p>The natural reading of "the pipeline now uses zarr" is that it reads fewer bytes off disk. At three of the
+        four sites it does not. Two independent axes of overread exist, and only one of them was ever available to
+        remove.</p></div>
+    <div class="two">
+      <div class="bx">
+        <h4>THE CHANNEL AXIS &mdash; removable</h4>
+        <div class="sub">C planes decoded to use 1</div>
+        <p class="x">A slide is <code>(C, H, W)</code>. <code>tifffile.imread</code> decodes every marker channel;
+          the consumer then indexes one out of it. A zarr view indexes first and decodes only the tiles that slice
+          touches. This is the axis all four changed sites moved on.</p>
+        <div class="src">open_lazy — bin/utils/tiled_io.py:32</div>
+      </div>
+      <div class="bx mut">
+        <h4>THE SPATIAL AXIS &mdash; not removable here</h4>
+        <div class="sub">full resolution decoded to emit a thumbnail</div>
+        <p class="x">Reading <code>[::f, ::f]</code> instead of the full plane would be the larger win — and it is
+          available at <b>none</b> of the four sites. <code>decimation_factor(..., max_dim=None)</code> returns
+          <code>1</code> at each of them, deliberately; panels <b>f</b> and <b>g</b> give the three separate
+          reasons.</p>
+        <div class="src">decimation_factor — bin/utils/tiled_io.py:86 (returns 1 when max_dim is None)</div>
+      </div>
+    </div>
+    <div class="callout"><span class="wl">the capability was never missing — only its reach</span>
+      <code>open_lazy</code> / <code>read_decimated</code> / <code>decimation_factor</code> predate this work and
+      were consumed by exactly three scripts — <code>tiled_coarse.py</code> (through
+      <code>bin/utils/coarse_align.py</code>), <code>tiled_reg_tile.py</code> and <code>tiled_stitch.py</code>,
+      all on the STARE tiled registration path. Everything else in <code>bin/</code> read eagerly. No dependency
+      was added either: every affected container already pinned <code>zarr==2.18.3</code>
+      (<code>containers/preprocess</code>, <code>regqc</code>, <code>stardist</code>, <code>cellsam</code>,
+      <code>tiled</code>).</div>
+  </section>
+
+  <!-- b — THE PRIMITIVE -->
+  <section class="panel">
+    <span class="plabel">b</span>
+    <div class="panel-head"><h2>The primitive: one lazy view, one banded reader, one decimation rule</h2>
+      <p>Three functions in one file, unchanged by this work. Every new call site goes through them rather than
+        opening its own zarr store, so the <code>(C, H, W)</code> contract and the banding behaviour keep a single
+        owner.</p></div>
+    <div class="sig">
+<span class="cm"># bin/utils/tiled_io.py</span>
+open_lazy(path)          <span class="cm">-&gt; (arr, dtype, close)   tifffile.imread(..., aszarr=True) + zarr.open;</span>
+                         <span class="cm">   base level if pyramidal; 2-D promoted to C=1; arr[c, y0:y1, x0:x1]</span>
+decimation_factor(shapes, max_dim)
+                         <span class="cm">-&gt; int   ONE shared factor for every shape; 1 when max_dim is None</span>
+read_decimated(src, index, factor, band_bytes=DEFAULT_BAND_BYTES)
+                         <span class="cm">-&gt; float32 plane, streamed in row bands, strided [::f, ::f] per band</span>
+DEFAULT_BAND_BYTES = 64 * 1024 * 1024    <span class="cm"># a BYTE budget, not a row count</span>
+    </div>
+    <div class="three" style="margin-top:13px">
+      <div class="bx">
+        <h4>the (C,H,W) contract</h4>
+        <p class="x"><code>open_lazy</code> presents channel-<b>first</b> only. It has no notion of a
+          <code>(Y, X, C)</code> layout, which is why every new call site keeps an eager fallback for that case —
+          see panel <b>g</b>, blocker 4.</p>
+        <div class="src">bin/utils/tiled_io.py:66-84</div>
+      </div>
+      <div class="bx">
+        <h4>why bytes, not rows</h4>
+        <p class="x">A fixed row count is not a memory bound: a band of a 30k-wide slide is ~7&times; the same band
+          of a 4k-wide one. <code>band_rows_for</code> divides the budget by the row width, then snaps down to a
+          multiple of <code>factor</code> so the sampled rows stay globally aligned.</p>
+        <div class="src">bin/utils/tiled_io.py:106-114</div>
+      </div>
+      <div class="bx">
+        <h4>one factor, not one per slide</h4>
+        <p class="x">The shared factor is a correctness requirement of the STARE coarse anchor, not a convenience:
+          squeezing each slide under <code>max_dim</code> independently would introduce a scale change between the
+          two thumbnails and bake a bogus scale term into <code>M0</code>.</p>
+        <div class="src">bin/utils/tiled_io.py:86-102</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- c — THE FIVE SITES -->
+  <section class="panel">
+    <span class="plabel">c</span>
+    <div class="panel-head"><h2>The four sites that changed, at the confidence each earned</h2>
+      <p>Each card carries the strongest evidence that actually exists for it, and no more. Two were measured; two
+        rest on output equivalence plus a structural argument. Nothing here sits at <i>unverified</i> — the one card
+        that did is the one that is gone.</p></div>
+    <div class="key">
+      <span><span class="tag-m">measured</span> peak RSS or materialised bytes observed on this machine</span>
+      <span><span class="tag-s">structural</span> follows from the code; output equivalence pinned by a test</span>
+      <span><span class="tag-u">unverified</span> no measurement; needs a production slide — <b>no surviving claim
+        is at this level</b></span>
+    </div>
+    <div class="sites" style="margin-top:13px">
+
+      <div class="site">
+        <span class="num">1</span>
+        <div class="nm">GENERATE_REGISTRATION_QC <span class="tag-s">structural</span></div>
+        <p class="x">Read both the reference and the registered slide in full — every marker channel, full
+          resolution — to slice out the one <code>pick_nuclear_index</code>-resolved channel: an overread paid
+          <b>twice</b>, on the two largest inputs the QC step sees. Now one channel per slide, streamed in bands.
+          <b>No spatial saving</b>: <code>decimation_factor(..., max_dim=None)</code> returns 1 by design, because
+          <code>save_fullres</code> is unconditional in production and the full-resolution overlay is a
+          <i>published artifact</i>.</p>
+        <div class="res">evidence: <b>pixel-identical output</b> — np.array_equal against the old whole-stack
+          path, for both the overlay and <code>*_QC_RGB_fullres.tif</code> · bin/utils/qc.py:349-355 ·
+          tests/test_registration_qc_lazy_read.py:139,185</div>
+      </div>
+
+      <div class="site">
+        <span class="num">2</span>
+        <div class="nm">GENERATE_PREPROCESS_QC <span class="tag-m">measured</span></div>
+        <p class="x">Peak memory O(channels) &rarr; O(1): the whole <code>(C, H, W)</code> stack sat resident while
+          PNGs were written one channel at a time. Now one plane at a time. <b>Zero I/O saved</b> —
+          <code>read_decimated(..., factor=1)</code> still reads every pixel of every channel, because the
+          anti-aliased resize downstream needs them (panel <b>g</b>, blocker 1).</p>
+        <div class="res">evidence: <b>max RSS at two channel counts</b> (panel <b>d</b>), plus pixel-identical
+          PNGs (np.array_equal) · bin/generate_preprocess_qc.py:177-211 ·
+          tests/test_preprocess_qc_lazy_read.py:178</div>
+      </div>
+
+      <div class="site">
+        <span class="num">3</span>
+        <div class="nm">SPLIT_CHANNELS <span class="tag-s">structural</span></div>
+        <p class="x">One plane resident instead of the whole slide: the write loop always operated on a single
+          plane, so a written channel's array can now be freed instead of sitting alongside every other for the
+          rest of the run. Still not a read reduction — the negative-clip statistic needs every channel's pixels,
+          including a nuclear channel that is skipped from the output, so a streaming aggregator replaced the
+          whole-array one to keep the logged numbers identical.</p>
+        <div class="res">evidence: <b>byte-identical outputs</b>, asserted on raw file bytes rather than array
+          equality; the memory claim is structural, not benchmarked ·
+          bin/split_multichannel.py:158-210 · tests/test_split_multichannel_lazy_read.py:247,329</div>
+      </div>
+
+      <div class="site">
+        <span class="num">4</span>
+        <div class="nm">SEGMENT &mdash; stardist <i>and</i> cellsam <span class="tag-m">measured</span></div>
+        <p class="x">Both backends called <code>asarray(out="memmap")</code> and then sliced one channel, with
+          comments asserting it memory-mapped the source. It does not (panel <b>e</b>). A new seam,
+          <code>bin/utils/segment_io.py</code>, now holds the read for both — extracted because
+          <code>stardist</code>/<code>csbdeep</code> and <code>cellSAM</code>/<code>torch</code> are not importable
+          in CI, so without it the tests could only have skipped.</p>
+        <div class="res">evidence: <b>48.0 MB materialised to use 8.0 MB</b> on a 6-channel probe, and the
+          memmap's backing file observed to be a <code>tmp*.memmap</code>, not the source <code>.tif</code> ·
+          bin/utils/segment_io.py:16-29</div>
+      </div>
+
+      <div class="site" style="grid-column:1/-1">
+        <span class="num">&mdash;</span>
+        <div class="nm">the fifth site, and why its loss makes this panel stronger</div>
+        <p class="x">Site 5 was <code>PREPROCESS</code>: per-channel lazy reads with a separate handle per worker
+          thread, claimed at about <b>2&times;</b> rather than <i>C</i>&times; because the output planes accumulated
+          regardless. It carried <b>no measurement</b> — the only <span class="tag-u">unverified</span> card in the
+          set — and it is now moot: mirage's in-process BaSiC correction was replaced by nf-core's
+          <code>BASICPY</code>, and <code>bin/preprocess.py</code> and <code>modules/local/preprocess.nf</code> were
+          deleted. The thread-safety evidence that card pointed at went with them, because nothing in
+          <code>bin/</code> is threaded any more.<br><br>
+          <b>The property outlived the process.</b> The two mirage-owned processes that replaced it —
+          <code>TILE_FOR_BASIC</code> and <code>APPLY_PROFILES</code> — read the slide through the same
+          <code>open_lazy</code>, one <i>tile</i> at a time (one pseudo-FOV, or one output write-tile), by
+          construction rather than by conversion — tighter than the deleted process's per-channel claim, since
+          a tile is smaller than a plane. That is now asserted rather than asserted-about: a spy over the lazy
+          view records the <i>bytes</i> each index expression materialises, and fails if the largest single
+          read grows with the channel count.</p>
+        <div class="res">evidence: <b>largest single materialisation is one FOV at C=2 and at C=6</b>
+          (20&thinsp;000 bytes both times — a 100&sup2; FOV on the 300&sup2; uint16 fixture, well below the
+          shipped 1950px/2048px tile sizes so the fixture actually exercises a tile smaller than the slide) ·
+          bin/tile_for_basic.py:182-205 · bin/apply_basic_profiles.py:295-336 ·
+          tests/test_basic_illumination_lazy_read.py</div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- d — THE EVIDENCE -->
+  <section class="panel">
+    <span class="plabel">d</span>
+    <div class="panel-head"><h2>The evidence, and how each number was obtained</h2>
+      <p>Three measurements exist. The first supports the headline; the second falsified a comment; the third
+        belongs to the BioIO convert of panel <b>g</b> and is the only one taken against a real production
+        function. All were taken on one laptop, on synthetic data, outside the production containers, with
+        harnesses that were scratch files — so <b>not one of the megabyte figures is reproducible from the
+        repository</b>. What <i>is</i> reproducible, and only for the third, is the <i>mechanism</i>: its
+        decode-count property is pinned by a committed test.</p></div>
+    <div class="two">
+      <div class="chart">
+        <svg viewBox="0 0 520 200" role="img" aria-label="Maximum resident set size of the old whole-stack read versus the new per-channel read, at 8 and 16 channels">
+          <line x1="60" y1="160" x2="500" y2="160" stroke="var(--ink)" stroke-width="1"/>
+          <line x1="60" y1="20" x2="60" y2="160" stroke="var(--rule)" stroke-width="1"/>
+          <line x1="60" y1="78.3" x2="500" y2="78.3" stroke="var(--ink-3)" stroke-width="1" stroke-dasharray="3 3"/>
+          <text class="mn" x="500" y="74" font-size="8.5" fill="var(--ink-3)" text-anchor="end">shared import floor ~650&ndash;750 MB</text>
+
+          <rect x="90" y="62.9" width="46" height="97.1" fill="var(--ink)"/>
+          <rect x="146" y="71.9" width="46" height="88.1" fill="#ffffff" stroke="var(--ink)" stroke-width="1"/>
+          <text class="mn" x="113" y="57" font-size="9" fill="var(--ink)" text-anchor="middle">831.9</text>
+          <text class="mn" x="169" y="66" font-size="9" fill="var(--ink)" text-anchor="middle">755.3</text>
+
+          <rect x="300" y="32.7" width="46" height="127.3" fill="var(--ink)"/>
+          <rect x="356" y="70.7" width="46" height="89.3" fill="#ffffff" stroke="var(--ink)" stroke-width="1"/>
+          <text class="mn" x="323" y="27" font-size="9" fill="var(--ink)" text-anchor="middle">1091.4</text>
+          <text class="mn" x="379" y="65" font-size="9" fill="var(--ink)" text-anchor="middle">765.3</text>
+
+          <text class="mn" x="141" y="175" font-size="9.5" fill="var(--ink-2)" text-anchor="middle">8 channels</text>
+          <text class="mn" x="351" y="175" font-size="9.5" fill="var(--ink-2)" text-anchor="middle">16 channels</text>
+          <text class="mn" x="55" y="163" font-size="8.5" fill="var(--ink-3)" text-anchor="end">0</text>
+          <text class="mn" x="55" y="23" font-size="8.5" fill="var(--ink-3)" text-anchor="end">1200 MB</text>
+
+          <rect x="90" y="187" width="10" height="8" fill="var(--ink)"/>
+          <text x="105" y="194" font-size="9" fill="var(--ink-2)">old: whole-stack read</text>
+          <rect x="252" y="187" width="10" height="8" fill="#ffffff" stroke="var(--ink)"/>
+          <text x="267" y="194" font-size="9" fill="var(--ink-2)">new: one channel at a time</text>
+        </svg>
+        <p class="cap"><b>GENERATE_PREPROCESS_QC, maximum resident set size.</b> The percentages (9.2% and 29.9%)
+          are the least interesting numbers here — both runs carry a shared ~650&ndash;750 MB
+          interpreter/NumPy/scikit-image/zarr import floor that dilutes them. The <b>shape</b> is the result:
+          doubling the channel count grew the old peak by <b>+259.5 MB (+31%)</b> and the new peak by <b>+10 MB
+          (+1.3%)</b> — O(channels) becoming O(1).</p>
+      </div>
+      <div>
+        <div class="bx">
+          <h4>HOW &mdash; the RSS measurement</h4>
+          <p class="x"><code>/usr/bin/time -l</code> on macOS (OS-level maximum RSS, not Python-tracked
+            allocations), synthetic <code>uint16 (C, 4000, 4000)</code> OME-TIFFs at 250 MB per channel, each run
+            in a fresh subprocess, comparing a same-process reimplementation of the old loop against the real
+            patched function. A separate <code>tracemalloc</code> run on the 8-channel case gave 536.2 MB against
+            351.6 MB — the same direction, by a different instrument.</p>
+          <div class="src">recorded in the task-2 implementation report; harness not committed</div>
+        </div>
+        <div class="bx" style="margin-top:12px">
+          <h4>HOW &mdash; the memmap probe</h4>
+          <p class="x">A 6-channel 2000&times;2000 <code>uint16</code> OME-TIFF (48.0 MB on disk; one plane =
+            8.0 MB). The old path's returned array spans <b>48.0 MB — all six channels</b>, though only channel 0
+            is ever read; the new path materialises <b>8.0 MB</b>. The returned <code>numpy.memmap</code>'s backing
+            file was inspected directly and is a <code>tmp*.memmap</code>, not the source <code>.tif</code>.</p>
+          <div class="src">recorded in the task-4 implementation report; probe not committed</div>
+        </div>
+        <div class="warnbox"><span class="wl">what these numbers are not</span>
+          No measurement ran inside the production container, on a gigapixel slide, or with a full marker
+          panel. The scaling <i>argument</i> is structural and does not depend on any of that; the specific
+          <b>percentages do</b>, and must not be quoted as production figures.</div>
+      </div>
+    </div>
+
+    <div class="bx" style="margin-top:14px">
+      <h4>HOW &mdash; the BioIO convert, the third measurement</h4>
+      <p class="x">A 144 MB <code>8 &times; 3000 &times; 3000</code> uint16 OME-TIFF, opened as a lazy dask array
+        over a tifffile zarr store — the same <i>shape</i> of object <code>BioImage.dask_data</code> is — and written
+        through the <b>real</b> <code>convert_image.write_ome_tiff</code>. Peak is
+        <code>resource.getrusage(RUSAGE_SELF).ru_maxrss</code>, sampled in a <b>fresh subprocess per variant</b>
+        (not <code>tracemalloc</code>, which does not see NumPy's allocations); all outputs byte-identical with the
+        OME UUID masked.</p>
+      <div class="tbl-scroll" style="margin-top:9px">
+        <table class="pr">
+          <tr><td class="k">eager whole-array write</td><td class="v">435.2 MB</td>
+            <td class="d">baseline 81.8 MB &rarr; <b>353.4 MB</b> over baseline, on a 144 MB slide. This is what the
+              pipeline did before.</td></tr>
+          <tr><td class="k">streamed, per-plane chunks</td><td class="v">167.7 MB</td>
+            <td class="d">delta <b>85.9 MB</b>. The good case: the reader hands back one plane per chunk and the
+              write iterates them.</td></tr>
+          <tr><td class="k">streamed, one whole-stack chunk</td><td class="v">384.8 MB</td>
+            <td class="d">delta 303.0 MB. The <i>pathological</i> case, kept honest: below eager, never worse than
+              it, and warned about by name at runtime. See panel <b>g</b>.</td></tr>
+        </table>
+      </div>
+      <p class="x">An earlier run of the same method, before the chunk-slab fix, gave <b>422 &rarr; 152 MB</b>; a
+        second person reproduced the direction independently on their own 100 MB fixture at <b>333 &rarr; 134 MB</b>.
+        In that earlier measurement three runs of each variant agreed to within 0.5 MB. The <b>ratio is not claimed
+        to hold at 20 GB</b>, and the
+        residual ~69&ndash;86 MB is tifffile's own buffering plus the interpreter — it is not zero and is not
+        claimed to be.</p>
+      <div class="src">recorded in the task-1 implementation report; harness not committed. The decode-count
+        property IS committed: tests/test_convert_streaming_write.py — a chunk is decoded exactly once for
+        1/2/8-plane chunkings</div>
+    </div>
+  </section>
+
+  <!-- e — THE MEMMAP TRAP -->
+  <section class="panel">
+    <span class="plabel">e</span>
+    <div class="panel-head"><h2>The trap this replaced: <code>asarray(out="memmap")</code> does not map the source</h2>
+      <p>Both segmentation backends carried a comment saying they used memory-mapped I/O "to avoid loading the
+        entire multichannel image". On compressed input the call does the opposite, and does it to scratch disk as
+        well as to RAM. Those comments now describe what the code does.</p></div>
+    <div class="chart">
+      <svg viewBox="0 0 720 212" role="img" aria-label="The old memmap path decodes every channel into a full-size uncompressed temporary file; the lazy zarr path decodes only the requested channel's tiles">
+        <text class="mn" x="0" y="12" font-size="10" font-weight="700" fill="var(--ink)">OLD &#160; tif.asarray(out="memmap")[dapi_index]</text>
+        <rect x="0" y="24" width="120" height="52" fill="#ffffff" stroke="var(--ink)" stroke-width="1"/>
+        <text class="mn" x="60" y="45" font-size="9" fill="var(--ink)" text-anchor="middle">source .tif</text>
+        <text class="mn" x="60" y="58" font-size="8" fill="var(--ink-3)" text-anchor="middle">compressed, C planes</text>
+        <line x1="120" y1="50" x2="196" y2="50" stroke="var(--ink)" stroke-width="1"/>
+        <polygon points="204,50 194,46 194,54" fill="var(--ink)"/>
+        <text x="158" y="42" font-size="8.5" fill="var(--ink-2)" text-anchor="middle">full decode</text>
+        <rect x="206" y="24" width="180" height="52" fill="var(--sub-2)" stroke="var(--ink)" stroke-width="1"/>
+        <text class="mn" x="296" y="41" font-size="9" fill="var(--ink)" text-anchor="middle">tmp*.memmap</text>
+        <text class="mn" x="296" y="53" font-size="8" fill="var(--ink-3)" text-anchor="middle">a NEW file, uncompressed</text>
+        <text class="mn" x="296" y="65" font-size="8" fill="var(--ink-3)" text-anchor="middle">full size, all C planes</text>
+        <line x1="386" y1="50" x2="462" y2="50" stroke="var(--ink)" stroke-width="1"/>
+        <polygon points="470,50 460,46 460,54" fill="var(--ink)"/>
+        <text x="424" y="42" font-size="8.5" fill="var(--ink-2)" text-anchor="middle">[index]</text>
+        <rect x="472" y="24" width="72" height="52" fill="var(--ink)"/>
+        <text class="mn" x="508" y="47" font-size="9" fill="#ffffff" text-anchor="middle">1 plane</text>
+        <text class="mn" x="508" y="59" font-size="8" fill="#c7cacd" text-anchor="middle">used</text>
+        <text x="558" y="45" font-size="9" fill="var(--ink-2)">on a 20 GB slide:</text>
+        <text x="558" y="59" font-size="9" fill="var(--ink)" font-weight="700">~20 GB of scratch</text>
+
+        <line x1="0" y1="100" x2="720" y2="100" stroke="var(--rule-2)" stroke-width="1"/>
+
+        <text class="mn" x="0" y="126" font-size="10" font-weight="700" fill="var(--ink)">NEW &#160; tiled_io.open_lazy(path)[index]</text>
+        <rect x="0" y="138" width="120" height="52" fill="#ffffff" stroke="var(--ink)" stroke-width="1"/>
+        <text class="mn" x="60" y="159" font-size="9" fill="var(--ink)" text-anchor="middle">source .tif</text>
+        <text class="mn" x="60" y="172" font-size="8" fill="var(--ink-3)" text-anchor="middle">compressed, C planes</text>
+        <line x1="120" y1="164" x2="462" y2="164" stroke="var(--ink)" stroke-width="1"/>
+        <polygon points="470,164 460,160 460,168" fill="var(--ink)"/>
+        <text x="291" y="156" font-size="8.5" fill="var(--ink-2)" text-anchor="middle">zarr region read &mdash; only this channel's tiles are decoded</text>
+        <text class="mn" x="291" y="181" font-size="8" fill="var(--ink-3)" text-anchor="middle">no temp file, no full decode</text>
+        <rect x="472" y="138" width="72" height="52" fill="var(--ink)"/>
+        <text class="mn" x="508" y="161" font-size="9" fill="#ffffff" text-anchor="middle">1 plane</text>
+        <text class="mn" x="508" y="173" font-size="8" fill="#c7cacd" text-anchor="middle">used</text>
+        <text x="558" y="159" font-size="9" fill="var(--ink-2)">scratch used:</text>
+        <text x="558" y="173" font-size="9" fill="var(--ink)" font-weight="700">none</text>
+      </svg>
+      <p class="cap">Verified directly on the 6-channel probe of panel <b>d</b>. The same
+        <code>out="memmap"</code> pattern survives at <code>bin/utils/image_utils.py:209</code>, behind
+        <code>load_image(..., memmap=True)</code>, and was deliberately left alone: <b>no caller in
+        <code>bin/</code> ever passes <code>memmap=True</code></b>, so it is reported dead code rather than a
+        fixed site.</p>
+    </div>
+  </section>
+
+  <!-- f — WHERE IT DOES NOT HELP -->
+  <section class="panel">
+    <span class="plabel">f</span>
+    <div class="panel-head"><h2>Where lazy reads do not help, and why &mdash; three classes</h2>
+      <p>Twelve processes read pixels or masks and are untouched. None of them is an oversight: each falls into one
+        of three classes, and in every class laziness is either impossible or buys nothing. This panel carries the
+        same weight as panel <b>c</b>.</p></div>
+    <div class="tbl-scroll">
+      <table class="own">
+        <thead><tr><th style="width:22%">process</th><th style="width:31%">what it actually does</th><th>why a lazy region read cannot help</th></tr></thead>
+        <tbody>
+          <tr class="grp"><td colspan="3">class 1 &mdash; whole-array algorithms: the objects cross block boundaries</td></tr>
+          <tr><td class="st">SEG_QC_GEOJSON</td>
+              <td class="kd">find_contours over the whole cell-mask label image<br>bin/mask_to_geojson.py:31,61</td>
+              <td>A contour is a global object. Tracing it inside a block yields a boundary artifact where the
+                block ends, not a cell. No partition of the mask preserves the answer.</td></tr>
+          <tr><td class="st">GENERATE_POSTPROCESSING_QC</td>
+              <td class="kd">loads the mask whole, then connected-component and morphology statistics<br>bin/generate_postprocessing_qc.py:70,74</td>
+              <td>Same reason. Label connectivity is not block-local: a cell straddling two blocks is two objects
+                to a block-wise reader.</td></tr>
+          <tr><td class="st">EXTRACT_CELL_PROPERTIES<br>EXTRACT_NUCLEI_PROPERTIES</td>
+              <td class="kd">regionprops_table, then per-cell bbox-crop find_contours<br>bin/extract_cell_properties.py:73,167</td>
+              <td>Already reads the minimum — one label mask, then crops per cell out of it. The mask is the small
+                input, and every label must be visited.</td></tr>
+
+          <tr class="grp"><td colspan="3">class 2 &mdash; the input is already one plane, or is not pixels at all</td></tr>
+          <tr><td class="st">QUANTIFY</td>
+              <td class="kd">ndimage.labeled_comprehension over one single-channel TIFF and the mask<br>bin/quantify.py:192; modules/local/quantify.nf</td>
+              <td><b>C is already 1</b> — SPLIT_CHANNELS fans the slide out per marker upstream — and the statistic
+                needs every pixel under every label. There is nothing left to defer.</td></tr>
+          <tr><td class="st">MERGE_QUANT_CSVS<br>EXPORT_GEOJSON</td>
+              <td class="kd">pandas.read_csv over per-cell tables<br>bin/merge_quant_csvs.py:85; bin/export_geojson.py:458</td>
+              <td>Tables, not gigapixel arrays. A lazy zarr view of a CSV is not a thing.</td></tr>
+          <tr><td class="st">GENERATE_QC_REPORT</td>
+              <td class="kd">assembles already-rendered QC artifacts into one HTML report</td>
+              <td>Consumes PNGs and CSVs other steps produced. It never opens a slide.</td></tr>
+          <tr><td class="st">TILED_SOLVE</td>
+              <td class="kd">gathers per-tile control points into the transform manifest<br>bin/tiled_solve.py:5, "kilobytes, no image data"</td>
+              <td>The one STARE step that is a pure reduction. It opens no image at all.</td></tr>
+
+          <tr class="grp"><td colspan="3">class 3 &mdash; the read belongs to another library</td></tr>
+          <tr><td class="st">REGISTER</td>
+              <td class="kd">delegates to VALIS<br>bin/register.py:70</td>
+              <td>VALIS owns its own I/O and its own JVM-backed readers. Changing how it reads is a VALIS change,
+                not a <code>tiled_io</code> one.</td></tr>
+          <tr><td class="st">WARP_SEG_QC</td>
+              <td class="kd">warps GeoJSON polygons through the VALIS registrar, once per stage<br>bin/warp_seg_qc.py:4-12</td>
+              <td>Operates on polygons and a registrar, not on pixel arrays it opens itself.</td></tr>
+          <tr><td class="st">BASICPY</td>
+              <td class="kd">fits one flatfield/darkfield pair per channel over the pseudo-FOV tile stack<br>modules/nf-core/basicpy/main.nf &mdash; <code>/opt/main.py</code></td>
+              <td>The newest member of this class, and the clearest. The read happens inside an upstream container
+                mirage <b>vendors unmodified</b>; mirage does not open the file, choose the reader, or own the
+                loop. Making that read lazy is an upstream change. The two halves either side of it —
+                <code>TILE_FOR_BASIC</code> and <code>APPLY_PROFILES</code> — are mirage's, and both <i>are</i> lazy
+                (panel <b>c</b>, "the fifth site").</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout"><span class="wl">the tiled path is the counter-example that shows the ceiling</span>
+      Where the design was built around bounded windows from the start, the property holds and has been measured:
+      every STARE tiled task's peak RSS is <b>1.3&ndash;2.0 GB on an 8192&sup2; slide, and the same on a larger
+      one</b>, because each task reads a bounded window through lazy zarr regions. That is what a genuinely
+      memory-bounded step looks like — and it required designing the <i>algorithm</i> around windows, not swapping
+      a read call.
+      <span class="src" style="display:block">conf/modules.config, "STARE (tiled) per-task memory" header</span></div>
+  </section>
+
+  <!-- g — STRUCTURAL BLOCKERS -->
+  <section class="panel">
+    <span class="plabel">g</span>
+    <div class="panel-head"><h2>Four structural blockers, and the one opportunity that was left &mdash; now taken</h2>
+      <p>Beyond the twelve processes of panel <b>f</b>, four specific mechanisms make a <i>spatial</i> saving
+        unavailable even at sites that <i>are</i> now lazy. They are why <code>factor</code> is 1 everywhere
+        outside STARE.</p></div>
+    <div class="two">
+      <div class="bx">
+        <h4>1 &mdash; anti-aliased downsampling needs every source pixel</h4>
+        <p class="x"><code>downsample_image</code> calls <code>skimage.transform.resize(order=1,
+          anti_aliasing=True)</code>. <code>read_decimated</code> does <code>[::f, ::f]</code> — <b>naive
+          subsampling</b>. Substituting one for the other changes the published image and injects aliasing. So at
+          a downsampling site <b>no I/O saving is available, ever</b>: the place the win looks largest is exactly
+          the place it is forbidden.</p>
+        <div class="src">bin/generate_preprocess_qc.py:98-126</div>
+      </div>
+      <div class="bx">
+        <h4>2 &mdash; the full-resolution read feeds a published artifact</h4>
+        <p class="x">Registration QC's <code>*_QC_RGB_fullres.tif</code> is published under
+          <code>&lt;patient&gt;/qc/registration/</code>. A <code>--no-fullres</code> flag exists in the CLI, but the
+          process' config block passes no <code>ext.args</code>, so it is never used in production. Decimating this
+          read would silently degrade a deliverable rather than save anything.</p>
+        <div class="src">bin/generate_registration_qc.py:142 · conf/modules.config, GENERATE_REGISTRATION_QC publishDir</div>
+      </div>
+      <div class="bx">
+        <h4>3 &mdash; a cross-plane comparison in a samples-last layout</h4>
+        <p class="x"><code>read_single_ndpi</code> tests <code>image_data[...,0] == [...,1] == [...,2]</code> to
+          decide whether an NDPI's RGB is really greyscale. That is samples-<i>last</i> and needs all three planes
+          at once — incompatible with <code>tiled_io</code>'s channel-first <code>(C, H, W)</code> contract.</p>
+        <div class="src">bin/convert_image.py:177,209-226</div>
+      </div>
+      <div class="bx">
+        <h4>4 &mdash; the (Y, X, C) fallback, kept and never exercised</h4>
+        <p class="x">Two of the four changed sites keep the old eager whole-stack path for a channel-last on-disk
+          layout, because <code>open_lazy</code> is channel-first only. This pipeline's own writers never produce
+          that layout (always <code>axes="CYX"</code>), so the branch is defensive — and correspondingly
+          <b>unexercised in production</b>. The newer readers took the <i>other</i> answer to the same problem:
+          <code>tile_for_basic</code> <b>refuses</b> a channel-last slide by name rather than carrying a second
+          code path for an input its own upstream cannot emit.</p>
+        <div class="src">bin/generate_preprocess_qc.py:180-205 · bin/split_multichannel.py:175-200 ·
+          bin/tile_for_basic.py:80-86 (refuses instead)</div>
+      </div>
+    </div>
+
+    <div class="corr" style="margin-top:14px">
+      <div class="hd"><span class="wrong">WAS</span> &ldquo;the one opportunity that is left&rdquo; &mdash;
+        <code>convert_image.py</code>'s BioIO <code>img.data</code> &nbsp;&rarr;&nbsp; TAKEN</div>
+      <div class="bd">
+        <div><div class="lb">what it needed, and what it got</div>
+          <p class="tx">Not a <code>tiled_io</code> change: <code>img</code> is a <code>bioio.BioImage</code>, not a
+            <code>tifffile</code>/<code>zarr</code> handle, so the fix had to come from BioIO's own API. The read is
+            now <code>img.dask_data</code> at all three sites — the singleton-<code>C</code> squeeze, the
+            <code>S</code>-as-<code>C</code> branch and the fallthrough. Every operation that follows
+            (<code>np.squeeze</code>, <code>np.transpose</code>, <code>np.take</code>, plain indexing) dispatches
+            through dask's <code>__array_function__</code> and stays lazy, so <b>none</b> of the dimension-order
+            logic had to be rewritten.</p>
+          <div class="src">bin/convert_image.py:61 (read_image_bioio) · :466 (write_ome_tiff)</div></div>
+        <div><div class="lb">why the read alone would have saved nothing</div>
+          <p class="tx"><b>Both halves had to change.</b> A lazy handle passed to <code>tifffile.imwrite</code> is
+            simply <code>np.asarray</code>'d — the materialisation moves from the read to the write and the peak is
+            unchanged. The write now streams: <code>TiffWriter.write(iterator, shape=, dtype=)</code>, the same form
+            <code>bin/tiled_stitch.py</code> already used in production. Measured at
+            <b>435 &rarr; 168 MB</b> peak (panel <b>d</b>).</p>
+          <div class="src">bin/convert_image.py:397 (_iter_planes) · :389 (_axis0_slabs)</div></div>
+      </div>
+    </div>
+
+    <div class="warnbox"><span class="wl">the near miss, and the risk that is left</span>
+      The obvious streaming iterator — one <code>image_data[i]</code> per plane — is a <b>regression</b>, not a win,
+      when the reader hands back the whole stack as a single chunk: each plane's <code>compute()</code> re-decodes
+      that chunk, so 8 planes cost 8 whole-stack decodes. The natural defence does not defend:
+      <code>.rechunk((1, Y, X))</code> splits the graph <i>downstream</i> of the source read and dask does not cache
+      across independent computes, so it was measured at <b>9 decodes, unchanged</b>, and rejected on that evidence
+      rather than shipped because it looked right. What ships instead walks the array's own axis-0 chunk boundaries
+      and materialises one slab: exactly <b>one decode per chunk, for every chunking</b>.<br><br>
+      <b>The residual risk is not ours to remove.</b> Chunk granularity is the <i>reader's</i> decision — a
+      <code>bioio</code> plugin that returns the slide as one chunk collapses the saving back to roughly the eager
+      peak (384.8 MB against 167.7). That case is bounded, never worse than the write it replaced, and warned about
+      by name at runtime — &ldquo;the streamed write must decode them together … size this task from the
+      DECOMPRESSED slide&rdquo; — with a committed control test so the warning cannot decay into noise that always
+      fires. And it is <b>unobserved</b>: <code>bioio</code> is not installable on the machine that measured any of
+      this, so the real <code>BioImage.dask_data</code> was never called. That is the one claim in this figure
+      resting on another library's documented behaviour rather than on something run.</div>
+  </section>
+
+  <!-- h — THE DIALS -->
+  <section class="panel">
+    <span class="plabel">h</span>
+    <div class="panel-head"><h2>The dials that govern this &mdash; and the ones that did not move</h2>
+      <p>This work introduced <b>no pipeline parameter</b>; its only tunables are code constants. Its footprint on
+        the scheduler is unchanged, which is the single most consequential fact for anyone hoping this made runs
+        cheaper.</p></div>
+    <div class="pgrid">
+      <div class="pcol">
+        <h4>code constants</h4>
+        <table class="pr">
+          <tr><td class="k">DEFAULT_BAND_BYTES</td><td class="v">64 MiB</td>
+            <td class="d">Byte budget for one streamed row band — independent of slide width. Bounds peak
+              memory to one band plus the accumulated decimated result when <code>factor &gt; 1</code>; at
+              <code>factor == 1</code> (sites 1 and 2 below) striding is a no-op, so this bounds a per-band
+              read, not the read's overall peak. <code>bin/utils/tiled_io.py:103</code></td></tr>
+          <tr><td class="k">max_dim</td><td class="v"><span class="nul">None</span> at all four sites</td>
+            <td class="d">Passed to <code>decimation_factor</code>. <code>None</code> &rarr; factor 1 &rarr; no
+              spatial decimation. STARE passes a real value; nothing else does.</td></tr>
+          <tr><td class="k">factor</td><td class="v">1</td>
+            <td class="d">A consequence of the above, not an independent setting. Written as
+              <code>decimation_factor(...)</code> rather than a literal, so a caller that <i>does</i> pass
+              <code>max_dim</code> still gets true decimation.</td></tr>
+          <tr><td class="k">axis-0 chunk</td><td class="v"><span class="nul">the reader's</span></td>
+            <td class="d">The BioIO convert only. Peak of the streamed write is one chunk of whatever
+              <code>dask_data</code> hands back — one plane in the good case, the whole stack in the bad one. It is
+              <b>not a dial this pipeline owns</b>, which is why the bad case is warned about at runtime instead of
+              configured away. <code>bin/convert_image.py:397</code></td></tr>
+        </table>
+      </div>
+      <div class="pcol">
+        <h4>resource requests: all unchanged</h4>
+        <table class="pr">
+          <tr><td class="k">GENERATE_REGISTRATION_QC</td><td class="v">100 / 200 / 300 GB</td>
+            <td class="d">by <code>(registered + reference).size()</code></td></tr>
+          <tr><td class="k">GENERATE_PREPROCESS_QC</td><td class="v">100 GB + 100 GB &times; attempt</td>
+            <td class="d">via <code>label 'process_medium'</code></td></tr>
+          <tr><td class="k">SPLIT_CHANNELS</td><td class="v">32 / 64 / 128 GB</td>
+            <td class="d">by input file size</td></tr>
+          <tr><td class="k">SEGMENT</td><td class="v">32 / 64 / 128 GB</td>
+            <td class="d">by merged-file size</td></tr>
+          <tr><td class="k">CONVERT_IMAGE</td><td class="v">24 GB &times; attempt, + 0/24/48/64 GB</td>
+            <td class="d">tiered on the <b>compressed</b> input</td></tr>
+        </table>
+        <p class="outnote"><b>Every one of these is a closure over file size, not over measured peak memory.</b>
+          A lower peak therefore changes nothing the scheduler reserves — the cluster still holds the same nodes
+          for the same time. What a lower peak buys is <i>headroom</i>: fewer OOM kills at the top of the size
+          distribution, and room to lower these closures later, on evidence that does not yet exist.</p>
+        <p class="outnote"><code>CONVERT_IMAGE</code> is the sharpest case of that mismatch, and the reason the
+          streamed write matters more than its megabytes suggest: the tier is read off the <b>compressed</b> file,
+          while the peak was set by the <b>decompressed</b> one. A 6 GB CZI that decompresses to 20 GB is sized at
+          48 GB — and the eager write's own measurement put its peak at <b>2.4&times; the slide it was writing</b>.
+          The streamed write is what breaks that coupling —
+          and the runtime warning of panel <b>g</b> says the same sentence out loud when the reader's chunking
+          re-establishes it.</p>
+        <div class="callout" style="margin-top:11px"><span class="wl">one honest exception to &ldquo;nothing changed&rdquo;</span>
+          The preprocessing step's requests <i>did</i> change while this work was going on — <code>PREPROCESS</code>
+          (4 cpus, 7 GB/GB + 8) became <code>TILE_FOR_BASIC</code> (2, 3 GB/GB + 8), <code>BASICPY</code> (1, 32 GB)
+          and <code>APPLY_PROFILES</code> (2, 7 GB/GB + 8). <b>Not because anything got lazier.</b> One process
+          became three when the illumination backend was swapped for nf-core's, and each needed its own request.
+          No closure anywhere was lowered on the strength of a measured peak.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- i — THE CORRECTIONS -->
+  <section class="panel">
+    <span class="plabel">i</span>
+    <div class="panel-head"><h2>Three claims the original audit got wrong, and the one cause behind all three</h2>
+      <p>The audit that scoped this work named three overread factors. All three were wrong, and wrong in the same
+        way. This is the most transferable content in the figure: they are not arithmetic slips, they are a method
+        failure.</p></div>
+
+    <div class="corr">
+      <div class="hd"><span class="wrong">CLAIMED</span> &ldquo;16&times; overread, twice&rdquo; at registration QC</div>
+      <div class="bd">
+        <div><div class="lb">what is true</div>
+          <p class="tx">The channel overread was real, and is removed. The <b>spatial</b> overread was never
+            overread: those full-resolution pixels are written to <code>*_QC_RGB_fullres.tif</code>, a
+            <b>published artifact</b>. A &ldquo;16&times; saving&rdquo; would have been a silent downgrade of a
+            deliverable.</p></div>
+        <div><div class="lb">what the read site could not tell you</div>
+          <p class="tx"><b>What the pixels are for.</b> That is decided at a <i>write</i> site tens of lines
+            further down, and in <code>conf/modules.config</code>'s <code>publishDir</code>.</p></div>
+      </div>
+    </div>
+
+    <div class="corr">
+      <div class="hd"><span class="wrong">CLAIMED</span> &ldquo;up to 100&times; overread&rdquo; at preprocess QC</div>
+      <div class="bd">
+        <div><div class="lb">what is true</div>
+          <p class="tx">No I/O saving is available at all. The consumer is an <b>anti-aliased</b> resize, which
+            needs every source pixel by definition. The real — and measured — win at this site is peak memory, a
+            different quantity that the audit did not name.</p></div>
+        <div><div class="lb">what the read site could not tell you</div>
+          <p class="tx"><b>Which filter consumes them.</b> The disqualifying property lives inside
+            <code>skimage.transform.resize</code>'s <code>anti_aliasing=True</code>, one call further on.</p></div>
+      </div>
+    </div>
+
+    <div class="corr">
+      <div class="hd"><span class="wrong">CLAIMED</span> the hot path is <code>convert_image.py:167</code></div>
+      <div class="bd">
+        <div><div class="lb">what is true</div>
+          <p class="tx">Wrong site. That line is <code>read_single_ndpi</code>, blocked for an unrelated
+            reason (panel <b>g</b>, blocker 3). The path the plan actually measured is <code>img.data</code> in
+            <code>read_image_bioio</code> — and it belongs to <b>BioIO</b>, so <code>tiled_io</code> could never
+            have fixed it. It was fixed through BioIO's own API instead, later and separately (panel
+            <b>g</b>).</p></div>
+        <div><div class="lb">what the read site could not tell you</div>
+          <p class="tx"><b>Which library owns the read.</b> Two eager reads in one file, in different libraries,
+            with different fixes and different feasibility.</p></div>
+      </div>
+    </div>
+
+    <div class="callout"><span class="wl">the common cause</span>
+      All three came from <b>scanning read sites</b>. A read site tells you that bytes are fetched. It cannot tell
+      you what the pixels are <i>for</i> (a published artifact), what filter <i>consumes</i> them (anti-aliasing),
+      which library <i>owns</i> the read (BioIO), or <i>how coarsely that library chunks</i> what it hands back —
+      the last of which is worth a number, because it was measured after the fact: the identical
+      <code>img.dask_data</code> expression peaks at <b>167.7 MB</b> when the reader chunks per plane and
+      <b>384.8 MB</b> when it returns one chunk, and nothing at the read site distinguishes the two. In every one of
+      these cases the decision that governs the optimisation was made somewhere else — at a write site, inside a
+      filter, in another library, or in that library's chunking policy.
+      <b>An overread factor read off a read site is a hypothesis, not a measurement.</b></div>
+  </section>
+
+  <!-- j — LIMITS -->
+  <section class="panel">
+    <span class="plabel">j</span>
+    <div class="panel-head"><h2>Honest limits: what this figure does not claim</h2>
+      <p>Everything a reader is entitled to hold against the work.</p></div>
+    <div class="three">
+      <div class="bx mut">
+        <h4>no production measurement</h4>
+        <p class="x">Nothing here was measured on a gigapixel slide, with a full marker panel, or inside a
+          production container. Every number came from synthetic data on one laptop.</p>
+      </div>
+      <div class="bx mut">
+        <h4>the harnesses are not committed</h4>
+        <p class="x">All three measurement scripts were scratch files outside the repository. <b>No megabyte figure
+          here can be reproduced from a checkout.</b> The equivalence tests can, and so — for the convert alone —
+          can the decode-count that the peak depends on.</p>
+      </div>
+      <div class="bx mut">
+        <h4>the BioIO peak used a stand-in</h4>
+        <p class="x"><code>bioio</code> is not installable on the machine that measured it, so the 435 &rarr; 168 MB
+          run used a tifffile-zarr-backed dask array, not the real <code>BioImage.dask_data</code>. The one thing
+          that governs the saving — <b>that reader's chunk granularity</b> — is therefore unobserved.</p>
+      </div>
+      <div class="bx mut">
+        <h4>no bytes-read reduction is claimed</h4>
+        <p class="x">Three of the four sites read exactly as many source pixels as before, and so does the convert.
+          Only SEGMENT genuinely decodes less, and only on the channel axis.</p>
+      </div>
+      <div class="bx mut">
+        <h4>the scheduler sees nothing</h4>
+        <p class="x">Every affected process still requests memory as a function of input file size (panel
+          <b>h</b>). No run got cheaper in reserved GB&middot;h, and no closure was lowered.</p>
+      </div>
+      <div class="bx mut">
+        <h4>the channel-last branches stay untested in production</h4>
+        <p class="x">Every eager fallback is covered by unit tests on synthetic channel-last inputs, and by
+          nothing else, because this pipeline never writes that layout.</p>
+      </div>
+    </div>
+    <div class="callout"><span class="wl">what a green suite does and does not prove here</span>
+      The Python suite went from 711 to <b>812 passed / 9 skipped</b>, and the stub run still publishes its
+      documented <b>62</b> files. That establishes the equivalence claims — byte-identical outputs and no
+      whole-stack decode — SPLIT_CHANNELS on raw file bytes, registration QC and preprocess QC on
+      <code>np.array_equal</code>, the convert on full file bytes with the OME UUID masked, and both BASICPY-path
+      readers on the <i>size</i> of every array their lazy view hands back. It establishes <b>none</b> of the
+      megabyte figures: no test in this repository measures peak RSS. A test can see that a whole stack was not
+      materialised; it cannot see what the process's resident set peaked at.</div>
+  </section>
+
+  <p class="caption">
+    <b>Supplementary Figure S4. Lazy reads: a peak-memory transition and its boundaries.</b>
+    <b>(a)</b> Lazy zarr-backed region reads were not added by this work — they had existed in
+    <code>bin/utils/tiled_io.py</code> and were consumed by three STARE tiled scripts; what changed is reach. Two
+    axes of overread exist, and only the channel axis was ever removable here. <b>(b)</b> The primitive: a
+    channel-first lazy view, a byte-budgeted band reader, and one shared decimation factor.
+    <b>(c)</b> Four sites changed, each stated at the confidence it earned — registration QC on pixel-identical
+    output and SPLIT_CHANNELS on byte-identical files, both with a structural memory argument; preprocess QC and
+    both segmentation backends on direct measurement. A fifth site, <code>PREPROCESS</code>, no longer exists: the
+    in-process BaSiC correction was replaced by nf-core's <code>BASICPY</code>. It was the only card carrying no
+    measurement, and the property survived the process — the two mirage-owned steps that replaced it read one
+    channel at a time by construction, asserted on materialised bytes. <b>(d)</b> The three measurements, with their
+    method and the scratch-only provenance that makes every megabyte figure irreproducible from the repository; the
+    load-bearing results are the scaling shape — doubling the channel count grew the old peak 31% and the new one
+    1.3% — and the convert's 435 &rarr; 168 MB. <b>(e)</b> The comment both segmentation
+    backends carried was false: <code>asarray(out="memmap")</code> decodes the entire compressed image into a new
+    full-size uncompressed temporary file and maps that instead of the source. <b>(f)</b> Twelve processes are
+    untouched, in three classes — whole-array algorithms whose objects cross block boundaries, consumers whose
+    input is already one plane or is a table, and reads owned by another library (VALIS, and now the vendored
+    nf-core BASICPY container) — while the STARE tiled path shows the
+    ceiling a window-bounded <i>design</i> reaches, as opposed to a swapped read call. <b>(g)</b> Four mechanisms
+    block a spatial saving even where the read is now lazy, and the opportunity this figure once listed as the only
+    one left (<code>convert_image.py</code>'s BioIO <code>img.data</code>) has been taken, through that library's
+    own API: lazy read plus streamed chunk-slab write, with the naive per-plane iterator measured to be a
+    regression and <code>.rechunk()</code> measured not to defend against it.
+    <b>(h)</b> No parameter was added and no resource closure was lowered: every affected process still reserves
+    memory as a function of input file size — the convert from the <i>compressed</i> input, while its peak was set
+    by the decompressed one — so a lower peak buys headroom, not cost. <b>(i)</b> Three claims in the audit
+    that scoped this work were wrong, all for one reason — a read site cannot tell you what the pixels are for,
+    what filter consumes them, which library owns the read, or how coarsely that library chunks it. <b>(j)</b> The
+    limits.
+    Supplementary Figure <b>S1</b> places these processes in the whole workflow; <b>S2</b> covers the registration
+    backends whose tiled path already read lazily; <b>S3</b> covers the QC artifacts two of these sites produce.
+    <span class="footnote">Function names, call sites, container pins, resource closures, published paths and
+    parameter defaults are read verbatim from the pipeline source
+    (<code>bin/utils/tiled_io.py</code>, <code>bin/utils/qc.py</code>, <code>bin/utils/segment_io.py</code>,
+    <code>bin/generate_preprocess_qc.py</code>, <code>bin/generate_registration_qc.py</code>,
+    <code>bin/split_multichannel.py</code>, <code>bin/convert_image.py</code>,
+    <code>bin/tile_for_basic.py</code>, <code>bin/apply_basic_profiles.py</code>,
+    <code>bin/quantify.py</code>, <code>bin/mask_to_geojson.py</code>,
+    <code>bin/extract_cell_properties.py</code>, <code>bin/generate_postprocessing_qc.py</code>,
+    <code>bin/tiled_solve.py</code>, <code>bin/warp_seg_qc.py</code>, <code>bin/register.py</code>,
+    <code>bin/utils/image_utils.py</code>, <code>conf/modules.config</code>, <code>modules/local/*.nf</code>,
+    <code>modules/nf-core/basicpy/</code>, <code>containers/*/</code>, <code>tests/test_*_lazy_*.py</code>,
+    <code>tests/test_convert_streaming_write.py</code>). The three peak-memory measurements are
+    reproduced from the implementation reports that recorded them; all used ad-hoc, uncommitted harnesses and are
+    labelled as such throughout, and none can be re-run from a checkout. The suite and published-file counts were
+    re-run for this revision, not copied forward.</span>
+  </p>
+</div>
+</body>
+</html>

@@ -1,0 +1,258 @@
+nextflow_process {
+
+    name "Test TILED_SOLVE process"
+    script "modules/local/tiled_solve.nf"
+    process "TILED_SOLVE"
+
+    tag "modules"
+    tag "modules_local"
+    tag "tiled_solve"
+
+    test("Should emit a manifest and a TRE summary - stub") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [ patient_id: 'P001', channels: ['DAPI', 'CD3'], is_reference: false ],
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    [ file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true) ]
+                ]
+                """
+            }
+        }
+
+        then {
+            assert process.success
+            assert process.out.manifest
+            assert process.out.tre
+            assert process.out.versions
+            with(process.out.manifest) {
+                assert size() == 1
+                assert get(0).get(1).toString().endsWith('_manifest.json')
+            }
+        }
+    }
+
+    test("Should render the confidence and range gates on the control points - rendered command") {
+
+        // Tagged `stub` so CI's blocking `nf-test test --tag stub` gate collects it, but
+        // deliberately WITHOUT `options "-stub"` -- `-stub` never evaluates a `script:` block,
+        // so no stub run can observe a rendered command. Same shape as
+        // tests/modules/tiled_coarse.nf.test's "rendered command" cases.
+        //
+        // These are the teeth for the bad-mesh fix. `_grid_from_controls` used to gate purely on
+        // displacement magnitude, so a control point measured on background or across the section
+        // edge went straight into the deformation mesh, which MeshField then spread bilinearly
+        // +-reg_tiled_tile px into neighbouring tissue. `--max-error` is the confidence gate that
+        // stops it, and `--max-disp` is the secondary range net. If either flag stops being
+        // rendered, tiled_solve.py falls back to its own argparse defaults (--max-disp defaults to
+        // None -- NO range bound at all) and the pipeline silently loses a gate.
+        //
+        // The assertions read the rendered .command.sh rather than the process outcome, so the
+        // case holds whether tiled_solve.py itself succeeds; under `-profile test` no container
+        // engine is active and the staged inputs here are not real control-point JSONs.
+        tag "stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [ patient_id: 'P001', channels: ['DAPI', 'CD3'], is_reference: false ],
+                    file('${projectDir}/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    [ file('${projectDir}/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true) ]
+                ]
+                """
+            }
+        }
+
+        then {
+            def rendered = []
+            new File("$workDir").eachFileRecurse { f ->
+                if (f.name == '.command.sh' && f.text.contains('tiled_solve.py')) {
+                    rendered << f.text
+                }
+            }
+            // Extract each flag's COMPLETE value as a token. A substring match on the flag
+            // and value together is also satisfied by a LONGER value -- an assertion written
+            // for 0.99 is silently satisfied by 0.9999, which re-admits background (measured
+            // error 0.99947) into the mesh. That one-character config edit is exactly what
+            // these cases exist to catch, so the value is compared as a whole token.
+            def flagValue = { txt, flag ->
+                def m = (txt =~ (java.util.regex.Pattern.quote(flag) + /\s+(\S+)/))
+                m.find() ? m.group(1) : null
+            }
+
+            assertAll(
+                { assert rendered.size() >= 1,
+                    "no rendered TILED_SOLVE .command.sh found under the task work dir" },
+                { assert rendered.every { flagValue(it, '--max-error') == '0.99' },
+                    "--max-error is not exactly 0.99 (params.reg_tiled_max_error default). A looser " +
+                    "value such as 0.9999 re-admits background into the mesh; got: " +
+                    rendered.collect { flagValue(it, '--max-error') }.join(', ') },
+                // reg_tiled_max_disp is declared null in nextflow.config so it DERIVES from the
+                // read halo: a match further than the halo was never inside the read window.
+                { assert rendered.every { flagValue(it, '--max-disp') == '256' },
+                    "--max-disp is not exactly 256 (derived from params.reg_tiled_halo); got: " +
+                    rendered.collect { flagValue(it, '--max-disp') }.join(', ') },
+                // the pre-existing gate must survive the change
+                { assert rendered.every { flagValue(it, '--gate-tre') == '1.0' },
+                    "--gate-tre is not exactly 1.0; got: " +
+                    rendered.collect { flagValue(it, '--gate-tre') }.join(', ') }
+            )
+        }
+    }
+
+    test("Should derive --max-disp from reg_tiled_halo when reg_tiled_max_disp is null - rendered command") {
+
+        // Proves the null-means-derive contract is live rather than coincidentally agreeing with
+        // the shipped halo: move the halo and --max-disp must move with it.
+        tag "stub"
+
+        when {
+            params {
+                reg_tiled_halo = 512
+            }
+            process {
+                """
+                input[0] = [
+                    [ patient_id: 'P001', channels: ['DAPI', 'CD3'], is_reference: false ],
+                    file('${projectDir}/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    [ file('${projectDir}/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true) ]
+                ]
+                """
+            }
+        }
+
+        then {
+            def rendered = []
+            new File("$workDir").eachFileRecurse { f ->
+                if (f.name == '.command.sh' && f.text.contains('tiled_solve.py')) {
+                    rendered << f.text
+                }
+            }
+            // Extract each flag's COMPLETE value as a token. A substring match on the flag
+            // and value together is also satisfied by a LONGER value -- an assertion written
+            // for 0.99 is silently satisfied by 0.9999, which re-admits background (measured
+            // error 0.99947) into the mesh. That one-character config edit is exactly what
+            // these cases exist to catch, so the value is compared as a whole token.
+            def flagValue = { txt, flag ->
+                def m = (txt =~ (java.util.regex.Pattern.quote(flag) + /\s+(\S+)/))
+                m.find() ? m.group(1) : null
+            }
+
+            assertAll(
+                { assert rendered.size() >= 1,
+                    "no rendered TILED_SOLVE .command.sh found under the task work dir" },
+                { assert rendered.every { flagValue(it, '--max-disp') == '512' },
+                    "--max-disp did not follow reg_tiled_halo; got: " +
+                    rendered.collect { flagValue(it, '--max-disp') }.join(', ') }
+            )
+        }
+    }
+
+    test("Should let an explicit reg_tiled_max_disp override the derived halo - rendered command") {
+
+        tag "stub"
+
+        when {
+            params {
+                reg_tiled_max_disp  = 100
+                reg_tiled_max_error = 0.8
+            }
+            process {
+                """
+                input[0] = [
+                    [ patient_id: 'P001', channels: ['DAPI', 'CD3'], is_reference: false ],
+                    file('${projectDir}/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    [ file('${projectDir}/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true) ]
+                ]
+                """
+            }
+        }
+
+        then {
+            def rendered = []
+            new File("$workDir").eachFileRecurse { f ->
+                if (f.name == '.command.sh' && f.text.contains('tiled_solve.py')) {
+                    rendered << f.text
+                }
+            }
+            // Extract each flag's COMPLETE value as a token. A substring match on the flag
+            // and value together is also satisfied by a LONGER value -- an assertion written
+            // for 0.99 is silently satisfied by 0.9999, which re-admits background (measured
+            // error 0.99947) into the mesh. That one-character config edit is exactly what
+            // these cases exist to catch, so the value is compared as a whole token.
+            def flagValue = { txt, flag ->
+                def m = (txt =~ (java.util.regex.Pattern.quote(flag) + /\s+(\S+)/))
+                m.find() ? m.group(1) : null
+            }
+
+            assertAll(
+                { assert rendered.size() >= 1,
+                    "no rendered TILED_SOLVE .command.sh found under the task work dir" },
+                // 100 is not the halo (256), so this proves the override is honoured rather
+                // than coincidentally agreeing with the derived value.
+                { assert rendered.every { flagValue(it, '--max-disp') == '100' },
+                    "explicit params.reg_tiled_max_disp was not honoured; got: " +
+                    rendered.collect { flagValue(it, '--max-disp') }.join(', ') },
+                { assert rendered.every { flagValue(it, '--max-error') == '0.8' },
+                    "explicit params.reg_tiled_max_error was not honoured; got: " +
+                    rendered.collect { flagValue(it, '--max-error') }.join(', ') }
+            )
+        }
+    }
+
+    test("Should honour an explicit reg_tiled_max_disp of 0 - rendered command") {
+
+        // The Elvis bug. `params.reg_tiled_max_disp ?: params.reg_tiled_halo` substituted the
+        // halo whenever the value was FALSY, and 0 is falsy in Groovy -- so asking for the
+        // tightest possible range gate silently produced the loosest one shipped (256), which
+        // rejects almost nothing on a realistic grid. The schema declares this parameter
+        // ["number","null"] with `minimum: 0`, so 0 is a legal request, not a typo.
+        //
+        // This case cannot be written as a stub run: `-stub` never evaluates a `script:` block,
+        // so it can never observe an `ext.args` closure. Tagged `stub` for CI collection only.
+        tag "stub"
+
+        when {
+            params {
+                reg_tiled_max_disp = 0
+            }
+            process {
+                """
+                input[0] = [
+                    [ patient_id: 'P001', channels: ['DAPI', 'CD3'], is_reference: false ],
+                    file('${projectDir}/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    [ file('${projectDir}/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true) ]
+                ]
+                """
+            }
+        }
+
+        then {
+            def rendered = []
+            new File("$workDir").eachFileRecurse { f ->
+                if (f.name == '.command.sh' && f.text.contains('tiled_solve.py')) {
+                    rendered << f.text
+                }
+            }
+            def flagValue = { txt, flag ->
+                def m = (txt =~ (java.util.regex.Pattern.quote(flag) + /\s+(\S+)/))
+                m.find() ? m.group(1) : null
+            }
+
+            assertAll(
+                { assert rendered.size() >= 1,
+                    "no rendered TILED_SOLVE .command.sh found under the task work dir" },
+                { assert rendered.every { flagValue(it, '--max-disp') == '0' },
+                    "--max-disp is not exactly 0 -- an explicit 0 was swallowed and replaced by " +
+                    "the derived halo; got: " +
+                    rendered.collect { flagValue(it, '--max-disp') }.join(', ') }
+            )
+        }
+    }
+}

@@ -9,6 +9,7 @@ import argparse
 import base64
 import csv
 import html
+import itertools
 import json
 import logging
 import shutil
@@ -118,6 +119,29 @@ def parse_csv_table(csv_path):
         for row in reader:
             rows.append([row.get(h, "") for h in display_headers])
     return display_headers, rows
+
+
+def parse_csv_table_head(csv_path, limit):
+    """Parse only the first ``limit`` rows, and count the rest without building them.
+
+    Returns ``(headers, rows, total)``. The per-cell residual CSVs are one row per cell, and the
+    QC report shows 500 of them -- materialising the other few hundred thousand to compute a
+    length is the whole cost. Measured 2.53x / -248 MB (PERF-PLAN C16).
+
+    ``itertools.islice``, NOT ``zip(reader, range(limit))``: zip pulls one item from the reader
+    that it never yields, so the tail count comes out one short. Measured on a 400 000-row file,
+    the zip form reported 399 999. Pinned by the boundary case in
+    tests/test_no_full_mask_unique.py.
+    """
+    with open(csv_path, newline="") as fh:
+        reader = csv.DictReader(fh)
+        headers = reader.fieldnames or []
+        rows = [
+            [row.get(h, "") for h in headers]
+            for row in itertools.islice(reader, limit)
+        ]
+        total = len(rows) + sum(1 for _ in reader)
+    return headers, rows, total
 
 
 def parse_versions_yml(path):
@@ -536,17 +560,29 @@ def parse_tiled_tre_json(path):
         b = data.get(block)
         return b.get(key) if isinstance(b, dict) else None
 
+    tiles = data.get("tiles", []) or []
+    # Prefer the counts the solver wrote; fall back to counting the heatmap so a _tre.json
+    # from before those keys existed still reports sensibly (missing `accepted` = accepted).
+    n_rejected = data.get("n_rejected")
+    if n_rejected is None:
+        n_rejected = sum(1 for t in tiles if not t.get("accepted", True))
+    n_accepted = data.get("n_accepted")
+    if n_accepted is None:
+        n_accepted = len(tiles) - n_rejected
+
     return {
         "file": Path(path).name,
         "moving": data.get("moving") or Path(path).name,
         "coarse_tre_px": data.get("coarse_tre_px"),
         "n_tiles": data.get("n_tiles"),
+        "n_accepted": n_accepted,
+        "n_rejected": n_rejected,
         "mesh_refined": bool(data.get("mesh_refined")),
         "rigid_p50": pct("rigid_tre_px", "p50"),
         "rigid_p90": pct("rigid_tre_px", "p90"),
         "final_p50": pct("residual_after_px", "p50"),
         "final_p90": pct("residual_after_px", "p90"),
-        "tiles": data.get("tiles", []) or [],
+        "tiles": tiles,
     }
 
 
@@ -560,24 +596,38 @@ def _tiled_tre_heatmap_svg(info, cell=14):
     def val(t):
         return t["tre_after"] if have_final else t.get("tre_rigid", 0.0)
 
-    vmax = max((val(t) for t in tiles), default=0.0) or 1.0
+    def kept(t):
+        return bool(t.get("accepted", True))
+
+    # Scale over ACCEPTED tiles only. A rejected tile's value is an artefact of correlating
+    # against background — one of them at 131.5px would otherwise set vmax and squash every
+    # real tile into the green end, hiding the misalignment the heatmap exists to show.
+    vmax = max((val(t) for t in tiles if kept(t)), default=0.0) or 1.0
     nx = max(t["ix"] for t in tiles) + 1
     ny = max(t["iy"] for t in tiles) + 1
     rects = []
     for t in tiles:
-        frac = min(val(t) / vmax, 1.0)
-        r, g = int(60 + 195 * frac), int(180 * (1 - frac))
+        if kept(t):
+            frac = min(val(t) / vmax, 1.0)
+            r, g, b = int(60 + 195 * frac), int(180 * (1 - frac)), 70
+            title = f"tile ({t['ix']},{t['iy']}): {val(t):.2f}px"
+        else:
+            # Neutral grey, never on the green–red scale: this tile carries no measurement.
+            r, g, b = 200, 200, 200
+            title = f"tile ({t['ix']},{t['iy']}): rejected — not in the mesh"
         rects.append(
             f'<rect x="{t["ix"] * cell}" y="{t["iy"] * cell}" width="{cell - 1}" '
-            f'height="{cell - 1}" fill="rgb({r},{g},70)">'
-            f"<title>tile ({t['ix']},{t['iy']}): {val(t):.2f}px</title></rect>"
+            f'height="{cell - 1}" fill="rgb({r},{g},{b})">'
+            f"<title>{title}</title></rect>"
         )
     label = "post-refinement residual" if have_final else "rigid-stage TRE"
+    n_rejected = sum(1 for t in tiles if not kept(t))
+    dropped = f"; {n_rejected} rejected (grey)" if n_rejected else ""
     return (
         '<div style="margin:8px 0 4px;">'
         f'<p style="font-size:0.8rem;color:#666;margin:0 0 2px;">'
         f"{html.escape(info['moving'])} — per-tile {label} "
-        f"(green=low, red=high; max {vmax:.2f}px)</p>"
+        f"(green=low, red=high; max {vmax:.2f}px{dropped})</p>"
         f'<svg width="{nx * cell}" height="{ny * cell}" '
         f'style="border:1px solid #eee;">{"".join(rects)}</svg></div>'
     )
@@ -615,7 +665,11 @@ def _tiled_tre_tables(tre_jsons):
                 f"{_fmt_px(info['rigid_p50'])} / {_fmt_px(info['rigid_p90'])}",
                 final,
                 "yes" if info["mesh_refined"] else "no",
-                str(info["n_tiles"]),
+                # "400" hides that 60 of them never reached the mesh; show the ratio only
+                # when there is something to show.
+                f"{info['n_accepted']} / {info['n_tiles']}"
+                if info["n_rejected"]
+                else str(info["n_tiles"]),
             ]
         )
         hm = _tiled_tre_heatmap_svg(info)
@@ -837,15 +891,15 @@ def seg_residuals_section(seg_residuals_dir):
             f"{html.escape(Path(csv_path).name)}</p>"
         )
         try:
-            headers, rows = parse_csv_table(csv_path)
+            headers, shown, total = parse_csv_table_head(
+                csv_path, SEG_RESIDUALS_MAX_ROWS
+            )
         except Exception as exc:  # noqa: BLE001 - report, never crash
             parts.append(
                 '<p class="empty-notice">Could not parse '
                 f"{html.escape(Path(csv_path).name)}: {html.escape(str(exc))}</p>"
             )
             continue
-        total = len(rows)
-        shown = rows[:SEG_RESIDUALS_MAX_ROWS]
         if total > len(shown):
             parts.append(
                 "<p style='font-size:0.8rem;color:#888;margin:0 0 6px;'>"

@@ -36,6 +36,22 @@ def open_lazy(path):
     touch — the property the streaming gigapixel stitch relies on. A 2-D image is presented as
     ``C=1``; a pyramidal OME-TIFF resolves to its base (full-resolution) level.
 
+    EVERY CALL BUILDS A FRESH STORE -- ``tifffile.imread(path, aszarr=True)`` is invoked here,
+    unconditionally, on every invocation, so two calls on the same ``path`` never share any
+    mutable I/O state. This is a guarantee, not an implementation accident, and it is what
+    makes the function safe to call once per worker: a caller that fans a single file out
+    across threads gives each worker its OWN handle rather than sharing one, which sidesteps
+    whether tifffile's zarr view is safe for concurrent region reads through a SHARED store
+    (not documented either way) by construction. Pinned by
+    ``tests/test_tiled_io.py::test_open_lazy_returns_a_fresh_store_per_call``.
+
+    NO CALLER IN ``bin/`` IS CURRENTLY THREADED. The one that was -- the deleted in-process
+    ``bin/preprocess.py``, one worker per channel -- went with the nf-core BASICPY swap, and
+    the concurrency tests that evidenced its per-thread handles went with it. Every present
+    consumer reads sequentially, so the guarantee above is currently unexercised rather than
+    load-bearing. Do not remove it on that basis: it is a precondition for ever threading one
+    of these loops again, and it costs nothing.
+
     Returns ``(arr, dtype, close)`` where ``arr`` is a zarr array with a NumPy-like getitem.
     """
     import tifffile
@@ -43,9 +59,9 @@ def open_lazy(path):
 
     store = tifffile.imread(str(path), aszarr=True)
     grp = zarr.open(store, mode="r")
-    arr = (
-        grp[0] if isinstance(grp, zarr.hierarchy.Group) else grp
-    )  # base level if pyramidal
+    # base level if pyramidal. `zarr.Group` -- not `zarr.hierarchy.Group`, which zarr 3 removed;
+    # the top-level name resolves under both majors, so this does not pin the container's zarr.
+    arr = grp[0] if isinstance(grp, zarr.Group) else grp
 
     class _CHW:
         """Adapt a 2-D or (C,H,W) zarr array to a uniform (C,H,W) region-readable view."""
@@ -100,10 +116,15 @@ def band_rows_for(width, factor, band_bytes=DEFAULT_BAND_BYTES):
 def read_decimated(src, index, factor, band_bytes=DEFAULT_BAND_BYTES):
     """Read channel ``index`` of a lazy ``(C, H, W)`` view as a ``factor``-decimated float32 plane.
 
-    Streams the plane in row bands and strides each band, so peak memory is one band plus the
-    thumbnail -- never the full-resolution plane. Band height is snapped to a multiple of
-    ``factor`` so the rows sampled are globally ``0, factor, 2*factor, ...``; the bands therefore
-    concatenate into exactly ``src[index, ::factor, ::factor]``.
+    Streams the plane in row bands and strides each band as it's read. At ``factor > 1`` (the
+    tiled/STARE callers this was built for) each band's decoded full-resolution buffer is
+    discarded once it's been strided down, so peak memory is one band plus the small,
+    already-decimated accumulated result -- never the full-resolution plane. At ``factor == 1``
+    the stride is a no-op, so the accumulated bands sum to the full-resolution plane before the
+    final concatenate produces a second one -- there is no full-resolution plane the read
+    avoids materialising. Band height is snapped to a multiple of ``factor`` so the rows sampled
+    are globally ``0, factor, 2*factor, ...``; the bands therefore concatenate into exactly
+    ``src[index, ::factor, ::factor]`` at any factor.
     """
     import numpy as _np
 

@@ -51,9 +51,14 @@ workflow SEGMENTATION {
     ch_references = ch_registered
         .filter { meta, file -> meta.is_reference }
 
-    ch_references.ifEmpty {
-        error "No reference images found (is_reference=true). Cannot run segmentation."
-    }
+    // NO `ifEmpty { error ... }` HERE, deliberately. The condition it would check --
+    // a samplesheet with no `is_reference=true` row -- is already rejected up front by
+    // CsvUtils.validateInputSemantics (called from workflows/mirage.nf before any process
+    // is instantiated), so a runtime check cannot fire for its stated reason. What it CAN
+    // do is fire on abort: `ifEmpty` cannot distinguish "genuinely empty" from "upstream
+    // failed", and under conf/modules.config's errorStrategy 'ignore' the real failure is
+    // dropped, leaving the false diagnosis as the ONLY thing on the console. Measured on
+    // 26.04.6; guarded by tests/test_no_shadowing_empty_guards.py.
 
     // The parameter slice the backends read, resolved ONCE here. Workflow code is not
     // hashed by Nextflow's free-variable rule, so reading `params` at this level is free;
@@ -136,8 +141,10 @@ workflow SEGMENTATION {
     // gutting the ENTIRE postprocessing output tree while the run exits 0. That was
     // caught in review; nucleus_contours alone carries the empty-column convention.
     //
-    // All three match ch_references' patient set 1:1 (enforced by the ifEmpty check
-    // above), so a plain combine() below cannot drop a row for any of them.
+    // All three match ch_references' patient set 1:1 because SEGMENT emits exactly one
+    // output tuple per input tuple, so a plain combine() below cannot drop a row for any
+    // of them. (This used to credit the `ifEmpty` check above, which never enforced 1:1 --
+    // it only fired when the channel was entirely empty.)
     ch_cell_mask_path = ch_cell_mask.map { meta, m ->
         [meta.patient_id, Layout.publishedPath(params.outdir, meta.patient_id, 'segmentation', m)]
     }
@@ -289,9 +296,11 @@ workflow READ_SEGMENTED_CHECKPOINT {
     // Fail loudly here if the writer's schema drifts from what this reader indexes.
     ['patient_id', 'registered_image', 'is_reference', 'channels',
      'cell_mask', 'nuclei_mask'].each { col ->
-        assert col in Checkpoint.columns(Layout.SEGMENTED),
-            "READ_SEGMENTED_CHECKPOINT reads '${col}' from a 'segmented' checkpoint, " +
-            "which Checkpoint no longer declares"
+        if (!(col in Checkpoint.columns(Layout.SEGMENTED))) {
+            throw new IllegalStateException(
+                "READ_SEGMENTED_CHECKPOINT reads '${col}' from a 'segmented' checkpoint, " +
+                "which Checkpoint no longer declares")
+        }
     }
 
     ch_rows = Channel

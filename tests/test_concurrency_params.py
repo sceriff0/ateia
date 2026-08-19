@@ -1,0 +1,172 @@
+"""`params.max_forks` and `params.queue_size`, and the config load order they depend on.
+
+Concurrency is tunable from the command line: `--max_forks` caps how many tasks of any ONE
+process run at once, `--queue_size` caps how many run at once across the WHOLE pipeline.
+The lower of the two binds.
+
+WHY THIS FILE EXISTS RATHER THAN A COMMENT. Wiring a parameter into `maxForks` fails in
+three different ways depending on where you write it, and **two of the three fail silently
+or at a distance from the cause**:
+
+1. `params.x` read EAGERLY from a file included before `nextflow.config`'s params block does
+   not evaluate to `null` -- Nextflow resolves it to an empty `ConfigObject`, i.e. a Map. So
+   `params.max_forks as int` throws "Cannot coerce a map to class java.lang.Integer" and the
+   whole config fails to parse. Loud, but the message names neither the parameter nor the
+   include order.
+2. The same reference inside an `executor { }` scope is read as the opening of a NESTED
+   SCOPE NAMED `params`, and the setting it was attached to disappears from the resolved
+   config **with no error at all**. Measured: the executor scope came back as
+   `executor { params { } exitReadTimeout = '1 day' }` -- `queueSize` simply gone, silently
+   falling back to Nextflow's own default. This is the dangerous one.
+3. `maxForks` cannot be deferred into a closure the way `memory` can, because it is not a
+   dynamic directive: Nextflow compares it against 0 in `TaskProcessor`'s constructor and
+   throws "Cannot compare ... Closure ... and java.lang.Integer with value '0'".
+
+The surviving arrangement -- includes after the params block, `queueSize` assigned in
+`nextflow.config`, per-process `maxForks` written `Math.min(n, params.max_forks as int)` --
+is the only one that works, and every part of it is load-bearing. These tests pin the parts
+whose breakage is silent or misleading; the parse-error case pins itself.
+
+Static tests: they read the config files rather than running Nextflow, so they hold in CI
+without a scheduler. The behavioural counterpart is a stub run -- at the default
+`REGISTER` runs at 10 and everything else at 100; at `--max_forks 4` every process runs at
+4; at `--max_forks 50` `REGISTER` stays at 10; `--queue_size 3` yields `capacity=3` in the
+local executor's monitor line.
+"""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parent.parent
+NEXTFLOW_CONFIG = ROOT / "nextflow.config"
+BASE_CONFIG = ROOT / "conf" / "base.config"
+MODULES_CONFIG = ROOT / "conf" / "modules.config"
+
+
+@pytest.fixture(scope="module")
+def nf() -> str:
+    return NEXTFLOW_CONFIG.read_text()
+
+
+@pytest.fixture(scope="module")
+def base() -> str:
+    return BASE_CONFIG.read_text()
+
+
+@pytest.fixture(scope="module")
+def modules() -> str:
+    return MODULES_CONFIG.read_text()
+
+
+# ---------------------------------------------------------------------------
+# the parameters exist, exactly once, with the documented defaults
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("param", "default"), [("max_forks", "100"), ("queue_size", "20")]
+)
+def test_the_parameter_is_declared_once_in_nextflow_config(nf, param, default):
+    """Declared in nextflow.config and nowhere else -- the repo's one-owner rule for
+    defaults (tests/test_no_duplicate_param_defaults.py enforces the other direction)."""
+    declarations = re.findall(rf"^\s*{param}\s*=\s*(\S+)", nf, flags=re.M)
+    assert declarations == [default], (
+        f"expected exactly one `{param} = {default}` in nextflow.config, found "
+        f"{declarations!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# the wiring
+# ---------------------------------------------------------------------------
+
+
+def test_process_max_forks_reads_the_parameter(nf):
+    """`process.maxForks` is the parameter, not a literal."""
+    assert re.search(r"^\s*maxForks\s*=\s*params\.max_forks\s*$", nf, flags=re.M), (
+        "nextflow.config's `process` scope must set `maxForks = params.max_forks`; a "
+        "literal there makes --max_forks a no-op for every process without its own override"
+    )
+
+
+def test_queue_size_is_assigned_in_nextflow_config_not_base_config(nf, base):
+    """The silent one (failure mode 2 in this module's docstring).
+
+    `queueSize = params.queue_size` written into `conf/base.config`'s `executor { }` scope
+    parses as a nested scope named `params` and the setting VANISHES -- no error, and the
+    executor quietly falls back to Nextflow's default. So the assignment must live in
+    `nextflow.config`, after the params block, and must NOT reappear in `conf/base.config`.
+    """
+    assert re.search(r"queueSize\s*=\s*params\.queue_size", nf), (
+        "nextflow.config must assign `queueSize = params.queue_size` (in its own "
+        "`executor { }` block, after the params block)"
+    )
+    assert not re.search(r"^\s*queueSize\s*=", base, flags=re.M), (
+        "conf/base.config must NOT assign queueSize: it is included before the params "
+        "block, where a `params.queue_size` reference is parsed as a nested scope and the "
+        "setting disappears silently. Assign it in nextflow.config instead."
+    )
+
+
+def test_every_per_process_max_forks_is_bounded_by_the_parameter(modules):
+    """Lowering --max_forks must throttle EVERY module, not just those without an override.
+
+    Each per-process value is `Math.min(<its own limit>, params.max_forks as int)`: the
+    process keeps its own ceiling (set for its own memory reasons) while the parameter can
+    always pull it down. A bare literal here would silently ignore --max_forks.
+    """
+    assignments = re.findall(r"^\s*maxForks\s*=\s*(.+)$", modules, flags=re.M)
+    assert assignments, "expected per-process maxForks overrides in conf/modules.config"
+    unbounded = [a.strip() for a in assignments if "params.max_forks" not in a]
+    assert not unbounded, (
+        f"{len(unbounded)} per-process maxForks value(s) ignore params.max_forks: "
+        f"{unbounded!r}. Write them `Math.min(<limit>, params.max_forks as int)` so "
+        "--max_forks throttles every module."
+    )
+
+
+# ---------------------------------------------------------------------------
+# the load order those two depend on
+# ---------------------------------------------------------------------------
+
+
+def test_the_modular_includes_come_after_the_params_block(nf):
+    """The load-bearing order (failure modes 1 and 3).
+
+    `conf/modules.config` reads `params.max_forks` EAGERLY -- it has to, because `maxForks`
+    is not a dynamic directive and cannot be deferred into a closure. So the params block
+    must already have been parsed when that file is included. With the includes at the top
+    of nextflow.config (where they used to be), `params.max_forks` is an empty ConfigObject
+    and `as int` fails the whole config parse.
+    """
+    params_at = nf.index("\nparams {")
+    includes = [m.start() for m in re.finditer(r"^includeConfig ", nf, flags=re.M)]
+    assert includes, "expected top-level includeConfig statements in nextflow.config"
+    early = [i for i in includes if i < params_at]
+    assert not early, (
+        f"{len(early)} includeConfig statement(s) appear before the params block. "
+        "conf/modules.config reads params.max_forks eagerly (maxForks is not a dynamic "
+        "directive), and before the params block a `params.*` reference is an empty "
+        "ConfigObject -- `as int` on it fails the entire config parse."
+    )
+
+
+def test_the_includes_still_precede_the_process_and_executor_scopes(nf):
+    """Moving the includes must not have changed PRECEDENCE, only timing.
+
+    nextflow.config's own `process { }` and `executor { }` blocks must still be parsed
+    after the includes, or conf/base.config's process defaults would start winning over
+    them. Pinned because the fix for the params-timing problem was to move the includes,
+    and moving them one line too far would silently invert this.
+    """
+    last_include = max(m.start() for m in re.finditer(r"^includeConfig ", nf, flags=re.M))
+    for scope in ("\nprocess {", "\nexecutor {"):
+        assert nf.index(scope) > last_include, (
+            f"nextflow.config's `{scope.strip()}` scope must come after the includeConfig "
+            "statements, or conf/base.config's settings would override it instead of the "
+            "other way round"
+        )

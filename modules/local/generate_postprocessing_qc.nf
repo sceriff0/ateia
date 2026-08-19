@@ -5,7 +5,7 @@ process GENERATE_POSTPROCESSING_QC {
     tag "${meta.patient_id}"
     label 'process_medium'
 
-    container "bolt3x/attend_image_analysis:quantification_gpu"
+    container "bolt3x/mirage-quantify:1.0.0"
 
     input:
     tuple val(meta), path(cell_mask), path(merged_csv)

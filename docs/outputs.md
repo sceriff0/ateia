@@ -42,7 +42,7 @@ checkpoint — see [Checkpoints](#checkpoints).
 |---|---|---|
 | `patient_id` | string | Grouping key. All rows sharing it are registered into one coordinate space and produce one output tree. |
 | `path_to_file` | path | The image. Any Bio-Formats-readable format (ND2, CZI, LIF, NDPI, TIFF, HDF5, OME-TIFF). |
-| `is_reference` | `true` / `false` | Exactly **one** `true` per patient — the registration reference and the slide that gets segmented. With `--allow_auto_reference true`, a patient with no `true` promotes its first image instead of failing. |
+| `is_reference` | `true` / `false` | Exactly **one** `true` per patient — the registration reference and the slide that gets segmented. With `allow_auto_reference = true`, a patient with no `true` promotes its first image instead of failing. |
 | `channels` | `\|`-separated | Marker names in channel order, e.g. `DAPI\|PanCK\|CD45`. **Declared metadata, never parsed from the filename.** The count must match the image's channel count. |
 
 !!! warning "The nuclear channel is resolved by name, not position"
@@ -91,7 +91,7 @@ nextflow run . --input results/csv/preprocessed.csv --outdir results --start reg
 ```
 
 !!! note "The schema is fixed across parameter settings"
-    `nucleus_contours` is empty when `--quantify_compartments false` (the
+    `nucleus_contours` is empty when `quantify_compartments = false` (the
     extractor does not run), but the **column is still present**. Readers test
     for an empty value, never for a missing column — one header serves every
     run.
@@ -122,7 +122,7 @@ because no checkpoint CSV names it — it is likewise absent from
 results/                              # = --outdir
 ├── <patient_id>/
 │   ├── converted/                    # <name>.ome.tif        — CONVERT_IMAGE (nuclear → ch0)
-│   ├── preprocessed/                 # *_corrected.ome.tif   — PREPROCESS (BaSiC)
+│   ├── preprocessed/                 # *_corrected.ome.tif   — APPLY_PROFILES (BaSiC)
 │   │                                 #   absent when --skip_preprocessing; csv/preprocessed.csv
 │   │                                 #   then points at converted/ instead
 │   ├── registered/

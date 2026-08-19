@@ -221,8 +221,9 @@ nextflow_workflow {
 
         // The gate has to preserve two properties that are easy to break together:
         //
-        //  1. Every input slide still reaches the checkpoint. PREPROCESS is what
-        //     normally produces the rows, so switching it off must not drop them --
+        //  1. Every input slide still reaches the checkpoint. APPLY_PROFILES is what
+        //     normally produces the rows, so switching the correction off must not drop
+        //     them --
         //     a `--start registration` run reads this CSV and would silently see
         //     fewer slides.
         //  2. The recorded path names the directory the file was ACTUALLY published
@@ -270,9 +271,9 @@ nextflow_workflow {
                 { assert paths.every { it.contains('/converted/') },
                     "checkpoint rows do not point at converted/: " + paths.join(' | ') },
                 { assert paths.every { !it.contains('/preprocessed/') },
-                    "checkpoint names <pid>/preprocessed/ on a run that never ran PREPROCESS: " + paths.join(' | ') },
+                    "checkpoint names <pid>/preprocessed/ on a run that never corrected: " + paths.join(' | ') },
                 // The images handed downstream are the CONVERTED ones, so they must not
-                // carry PREPROCESS's _corrected suffix.
+                // carry APPLY_PROFILES's _corrected suffix.
                 { assert workflow.out.preprocessed.every { !it[1].toString().contains('_corrected') },
                     "skipped run emitted a _corrected image: " + workflow.out.preprocessed }
             )

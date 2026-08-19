@@ -21,6 +21,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
+from scipy import sparse
 from skimage.measure import (
     approximate_polygon,
     find_contours,
@@ -60,14 +61,15 @@ def extract_morphology(
     """
     mask = np.ascontiguousarray(mask.squeeze())
 
-    labels, counts = np.unique(mask, return_counts=True)
-    valid_labels = labels[labels != 0]
-
-    if len(valid_labels) == 0:
+    # `mask.max()` is one linear pass; `np.unique(mask, return_counts=True)` was a comparison
+    # sort over every pixel -- 1.6x10^9 of them on a 40k x 40k slide -- and its `counts` was
+    # never read. regionprops_table below recomputes the label set anyway and returns it in
+    # ascending order, which is exactly what np.unique produced. Measured 3.13x / -80 MB
+    # (PERF-PLAN C3a). Guarded by tests/test_no_full_mask_unique.py.
+    if int(mask.max()) == 0:
         logger.warning("No cells found in mask")
         return None, None, None
 
-    logger.info(f"Computing morphology for {len(valid_labels)} cells...")
     props = regionprops_table(
         mask,
         properties=[
@@ -89,8 +91,26 @@ def extract_morphology(
         inplace=True,
     )
 
+    # The label set, taken from the pass that already computed it. Identical to the old
+    # `np.unique(mask)[!= 0]`: regionprops_table emits one row per non-zero label, ascending.
+    valid_labels = props_df.index.to_numpy()
+
     logger.info(f"Morphology computed for {len(props_df)} cells")
     return props_df, mask, valid_labels
+
+
+def _label_bboxes(props_df: pd.DataFrame):
+    """Yield ``(label, minr, minc, maxr, maxc)`` for each row, in row order.
+
+    Replaces ``props_df.iterrows()``, which materialises one pandas Series per row -- 60k Series
+    objects on a 60k-cell slide, each boxing the four integers this loop actually wants.
+    Measured 4.02x (PERF-PLAN C12a). Identity: same integers, same order; pinned against
+    ``iterrows`` directly in tests/test_no_full_mask_unique.py.
+    """
+    labels = props_df.index.to_numpy()
+    bboxes = props_df[["bbox-0", "bbox-1", "bbox-2", "bbox-3"]].to_numpy()
+    for label, (minr, minc, maxr, maxc) in zip(labels, bboxes):
+        yield label, int(minr), int(minc), int(maxr), int(maxc)
 
 
 def extract_contours(
@@ -134,14 +154,7 @@ def extract_contours(
     skipped_no_contour = 0
     skipped_too_simple = 0
 
-    for label, row in props_df.iterrows():
-        minr, minc, maxr, maxc = (
-            int(row["bbox-0"]),
-            int(row["bbox-1"]),
-            int(row["bbox-2"]),
-            int(row["bbox-3"]),
-        )
-
+    for label, minr, minc, maxr, maxc in _label_bboxes(props_df):
         # Crop binary mask for this cell, padded by 1px to ensure closed contours
         # for cells touching the image border (find_contours returns open contours
         # at array edges, which would produce incorrect polygon geometry)
@@ -219,11 +232,43 @@ def pair_labels_to_reference(
     fg = (flat != 0) & (ref != 0)
     if not np.any(fg):
         return {}
-    pairs = pd.DataFrame({"lbl": flat[fg], "ref": ref[fg]})
-    counts = pairs.groupby(["lbl", "ref"]).size().reset_index(name="n")
-    best_idx = counts.groupby("lbl")["n"].idxmax()
-    best = counts.loc[best_idx]
-    return {int(lab): int(r) for lab, r in zip(best["lbl"], best["ref"])}
+
+    # The overlap counts are a sparse matrix: rows = label, cols = reference, value = pixels
+    # shared. coo -> csr sums the duplicates for us in one linear pass.
+    #
+    # This used to build `pd.DataFrame({"lbl": flat[fg], "ref": ref[fg]})` -- ONE ROW PER
+    # FOREGROUND PIXEL, ~5x10^8 at 40k x 40k with 30% tissue -- the construct quantify.py:158
+    # records as the cause of the WSI-scale memory regression. Quantification was fixed; this
+    # path was not, and it is live on the default InstanSeg dual-mask backend, where the two
+    # masks carry independent label spaces and so must actually be paired.
+    #
+    # Measured, 4096^2 with 60k labels (a 40k^2 slide is ~95x the pixels):
+    #   pandas per-pixel frame   4.24 s   +1630 MB
+    #   packed key + np.unique   6.19 s   +1274 MB   (a comparison sort, and still materialises)
+    #   coo -> csr (this)        0.80 s      +9 MB
+    # so this is 5.3x faster and ~180x less memory than what it replaces, not a memory-for-time
+    # trade. Identity checked against the old implementation over 200 seeded random mask pairs.
+    lbl = flat[fg].astype(np.int64, copy=False)
+    rf = ref[fg].astype(np.int64, copy=False)
+    overlaps = sparse.coo_matrix(
+        (np.ones(lbl.size, dtype=np.int32), (lbl, rf)),
+        shape=(int(lbl.max()) + 1, int(rf.max()) + 1),
+    ).tocsr()
+
+    # Tie-breaking is part of the contract, not an implementation detail: the old
+    # groupby(...).idxmax() took the FIRST row of the maximum over a frame ordered by
+    # (lbl, ref), so a tie went to the SMALLEST reference label. csr indices are sorted
+    # ascending within a row, so `.min()` over the tied columns reproduces that exactly.
+    # Pinned by tests/test_pair_labels_memory.py.
+    indptr, indices, data = overlaps.indptr, overlaps.indices, overlaps.data
+    mapping: Dict[int, int] = {}
+    for label in range(1, overlaps.shape[0]):  # label 0 is background
+        start, end = indptr[label], indptr[label + 1]
+        if start == end:
+            continue
+        row = data[start:end]
+        mapping[label] = int(indices[start:end][row == row.max()].min())
+    return mapping
 
 
 def rekey_contours_to_reference(

@@ -47,8 +47,16 @@ def main() -> None:
         masks = masks.astype(np.uint32)  # lossless upcast from uint8/uint16
 
     args.outdir.mkdir(parents=True, exist_ok=True)
-    tifffile.imwrite(args.outdir / "cell_mask.tif", masks[0])
-    tifffile.imwrite(args.outdir / "nuclei_mask.tif", masks[1])
+    # zlib matches every other mask writer here (segment.py, segment_cellsam.py,
+    # segment_instantseg.py) and is close to free on label masks -- long runs of identical
+    # integers. bigtiff is not an optimisation: a 40000x40000 uint32 mask is 6.4 GB, and classic
+    # TIFF's 32-bit offsets overflow past 4 GB (struct.error: 'I' format requires
+    # 0 <= number <= 4294967295), which is the same reason tiled_stitch.py:118 sets it.
+    # Guarded by tests/test_mask_series_write_contract.py.
+    for name, plane in (("cell_mask.tif", masks[0]), ("nuclei_mask.tif", masks[1])):
+        tifffile.imwrite(
+            args.outdir / name, plane, compression="zlib", bigtiff=True
+        )
     print(
         f"Extracted cell_mask + nuclei_mask from {args.pyramid} (series 1, {masks.shape[1]}x{masks.shape[2]})"
     )

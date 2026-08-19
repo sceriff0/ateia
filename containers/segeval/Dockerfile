@@ -1,4 +1,4 @@
-# Segmentation-quality evaluation image — bolt3x/attend_image_analysis:segeval
+# Segmentation-quality evaluation image — bolt3x/mirage-segeval:1.0.0
 #
 # Runs SEG_QUALITY_EVAL and MERGE_SEG_EVAL: reference-free 2D cell-segmentation
 # quality scoring with the vendored CellSegmentationEvaluator subset under

@@ -137,9 +137,10 @@ tours every file it produces.
 
     ---
 
-    Three self-contained figures — S1 the whole pipeline,
+    Four self-contained figures — S1 the whole pipeline,
     [S2 registration](figures/registration-schematic.html){ target=_blank },
-    [S3 quality control](figures/qc-schematic.html){ target=_blank }.
+    [S3 quality control](figures/qc-schematic.html){ target=_blank },
+    [S4 lazy reads](figures/zarr-schematic.html){ target=_blank }.
 
     [:octicons-arrow-right-24: S1 · pipeline](figures/pipeline-schematic.html){ target=_blank }
 

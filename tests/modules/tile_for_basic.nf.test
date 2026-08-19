@@ -1,0 +1,108 @@
+nextflow_process {
+
+    name "Test TILE_FOR_BASIC process"
+    script "modules/local/tile_for_basic.nf"
+    process "TILE_FOR_BASIC"
+
+    tag "modules"
+    tag "modules_local"
+    tag "tile_for_basic"
+
+    test("Should emit a tile stack, a sidecar and the passthrough slide - stub") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [
+                        patient_id: 'P001',
+                        is_reference: true,
+                        channels: ['DAPI', 'PANCK', 'SMA']
+                    ],
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.tiles },
+                { assert process.out.sidecar },
+                { assert process.out.versions },
+                // The `sidecar` emit deliberately carries THREE elements: meta, the input
+                // slide passed through, and the positions JSON. APPLY_PROFILES needs the
+                // slide and the sidecar together, and joining them back on the meta map
+                // would mis-pair two slides of one patient whose meta maps are identical.
+                { assert process.out.sidecar.get(0).size() == 3 },
+                { assert process.out.tiles.get(0).get(1).endsWith('_tiles.ome.tif') },
+                { assert process.out.sidecar.get(0).get(2).endsWith('_tiles.json') }
+            )
+        }
+    }
+
+    test("Should render the nuclear-marker flags and the FOV size - rendered command") {
+
+        // Tagged `stub` so CI's blocking `nf-test test --tag stub` gate runs it, but
+        // deliberately WITHOUT `options "-stub"`: `-stub` never evaluates a `script:`
+        // block, so no stub run can observe a rendered command, and the point of this
+        // case is WHAT tile_for_basic.py is invoked with. Same shape as
+        // tests/modules/preprocess.nf.test's rendered-command case.
+        //
+        // The nuclear/fiducial skip is decided HERE, once, and recorded in the sidecar
+        // for APPLY_PROFILES to read. If the marker list stops travelling with this call
+        // the skip silently falls back to the script's default and a CELLTOX panel has
+        // its fiducial corrected -- the exact regression bin/preprocess.py's comment
+        // records.
+        //
+        // No container engine is active under `-profile test`, so this runs the script
+        // directly and it may fail; the assertions read the rendered .command.sh rather
+        // than the process outcome.
+        tag "stub"
+
+        when {
+            params {
+                preproc_tile_size = 256
+                nuclear_markers = ['DAPI', 'CELLTOX']
+            }
+            process {
+                """
+                input[0] = [
+                    [
+                        patient_id: 'P001',
+                        is_reference: true,
+                        channels: ['DAPI', 'PANCK', 'SMA']
+                    ],
+                    file('${projectDir}/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            def rendered = []
+            new File("$workDir").eachFileRecurse { f ->
+                if (f.name == '.command.sh' && f.text.contains('tile_for_basic.py')) {
+                    rendered << f.text
+                }
+            }
+
+            assertAll(
+                { assert rendered.size() >= 1,
+                    "no rendered TILE_FOR_BASIC .command.sh found under the task work dir" },
+                { assert rendered.every { it.contains('--nuclear-markers DAPI CELLTOX') },
+                    "rendered command missing --nuclear-markers: " + rendered.join(' --- ') },
+                { assert rendered.every { it.contains('--skip_nuclear') },
+                    "rendered command missing --skip_nuclear: " + rendered.join(' --- ') },
+                { assert rendered.every { it.contains('--fov_size 256') },
+                    "rendered command missing --fov_size: " + rendered.join(' --- ') },
+                { assert rendered.every { it.contains('--sidecar') },
+                    "rendered command writes no positions sidecar: " + rendered.join(' --- ') }
+            )
+        }
+    }
+}

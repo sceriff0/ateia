@@ -10,7 +10,7 @@ A previous run completed through postprocessing, producing under its `--outdir`:
 
 **To be extendable incrementally, the prior run must have embedded its
 segmentation masks in the pyramid** — i.e. it must have been run with
-`--embed_masks true --quantify_compartments --expanded_quantification` (see
+`embed_masks = true` with `quantify_compartments` and `expanded_quantification` (see
 [Mask pyramid (`embed_masks`)](#mask-pyramid-embed_masks) below). If the prior
 pyramid has no embedded mask series, `mode=add_cycle` **fast-fails** before
 doing any work — see [Fast-fail behavior](#fast-fail-behavior).

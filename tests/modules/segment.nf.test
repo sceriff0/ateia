@@ -524,4 +524,129 @@ nextflow_process {
             )
         }
     }
+
+    test("Should render the inlined StarDist flag string, in order - rendered command") {
+
+        // Tagged `stub` so CI's blocking `nf-test test --tag stub` gate runs it, but
+        // deliberately WITHOUT `options "-stub"` -- `-stub` never evaluates a `script:`
+        // block, and ext.args is only interpolated there, so no stub run can observe
+        // these flags at all. Same shape and same reason as the versions.yml case above.
+        //
+        // THIS IS THE CASE THAT PINS THE INLINING. The StarDist flag list used to be a
+        // `def starDistCommonFlags(params)` at the top of conf/modules.config; Nextflow
+        // 26's strict (v2) parser rejects a function declaration in a config file, so the
+        // list was inlined into the `withName: 'SEGMENT'` ext.args closure. Nothing about
+        // that move is observable from a stub run, from `nextflow config` (which prints a
+        // closure's SOURCE, not its evaluation), or from the process outputs -- only from
+        // the rendered command. The assertion is the whole string, contiguous, so a
+        // dropped flag AND a reordered one both fail.
+        //
+        // Values are the `test` profile's (conf/test.config): seg_method='stardist',
+        // segmentation_model='2D_versatile_fluo', seg_n_tiles_y/x=2, seg_prob_thresh=0.3,
+        // seg_gpu=false, segmentation_model_dir=null; seg_expand_distance=10,
+        // seg_pmin=1.0, seg_pmax=99.8 from nextflow.config. A profile change is a test diff.
+        tag "stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [
+                        patient_id: 'P001',
+                        channels: ['DAPI', 'PANCK', 'SMA']
+                    ],
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    SegBackends.ctxParams(params)
+                ]
+                """
+            }
+        }
+
+        then {
+            def rendered = []
+            new File("$workDir").eachFileRecurse { f ->
+                if (f.name == '.command.sh' && f.text.contains('.SEGMENT.size.csv')) {
+                    rendered << f.text
+                }
+            }
+
+            assertAll(
+                { assert rendered.size() >= 1,
+                    "no rendered SEGMENT .command.sh found under the task work dir" },
+
+                // The flag string, whole and contiguous. Order is part of the contract
+                // only because preserving it byte-for-byte is what makes the inlining a
+                // no-op; segment.py itself does not care.
+                { assert rendered.every { it.contains(
+                    '--model-name 2D_versatile_fluo --n-tiles 2 2 --expand-distance 10 ' +
+                    '--pmin 1.0 --pmax 99.8 --prob-thresh 0.3') },
+                    "rendered StarDist flags changed: " + rendered.join(' --- ') },
+
+                // The two conditional branches, in their false state under this profile.
+                { assert rendered.every { !it.contains('--model-dir') },
+                    "segmentation_model_dir is null but --model-dir was rendered: " + rendered.join(' --- ') },
+                { assert rendered.every { !it.contains('--use-gpu') },
+                    "seg_gpu is false but --use-gpu was rendered: " + rendered.join(' --- ') },
+
+                // Another backend's vocabulary in a stardist run means the ext.args map
+                // lost its keying on params.seg_method.
+                { assert rendered.every { !it.contains('--pixel-size') && !it.contains('--bbox-threshold') },
+                    "rendered command carries a non-StarDist backend's flags: " + rendered.join(' --- ') }
+            )
+        }
+    }
+
+    test("Should render --model-dir and drop --prob-thresh when configured so - rendered command") {
+
+        // The other state of both conditionals, which the case above cannot reach: the
+        // inlined list keeps `params.segmentation_model_dir ? ... : ''` and
+        // `params.seg_prob_thresh != null ? ... : ''`, and a rewrite that flattened either
+        // into an unconditional flag would still pass the case above.
+        //
+        // Same tagging rationale: `stub` for CI's gate, no `options "-stub"`.
+        tag "stub"
+
+        when {
+            params {
+                segmentation_model_dir = '/opt/models/stardist'
+                seg_prob_thresh        = null
+                seg_gpu                = true
+            }
+            process {
+                """
+                input[0] = [
+                    [
+                        patient_id: 'P001',
+                        channels: ['DAPI', 'PANCK', 'SMA']
+                    ],
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    SegBackends.ctxParams(params)
+                ]
+                """
+            }
+        }
+
+        then {
+            def rendered = []
+            new File("$workDir").eachFileRecurse { f ->
+                if (f.name == '.command.sh' && f.text.contains('.SEGMENT.size.csv')) {
+                    rendered << f.text
+                }
+            }
+
+            assertAll(
+                { assert rendered.size() >= 1,
+                    "no rendered SEGMENT .command.sh found under the task work dir" },
+                // --model-dir leads the list, and --use-gpu is appended once AFTER the
+                // backend's own flags -- it is shared by all three backends, so it is not
+                // part of the StarDist list itself.
+                { assert rendered.every { it.contains(
+                    '--model-dir /opt/models/stardist --model-name 2D_versatile_fluo ' +
+                    '--n-tiles 2 2 --expand-distance 10 --pmin 1.0 --pmax 99.8 --use-gpu') },
+                    "rendered StarDist flags changed: " + rendered.join(' --- ') },
+                { assert rendered.every { !it.contains('--prob-thresh') },
+                    "seg_prob_thresh is null but --prob-thresh was rendered: " + rendered.join(' --- ') }
+            )
+        }
+    }
 }

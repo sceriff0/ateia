@@ -31,7 +31,7 @@
       versions   -> deduplicated and collated into collated_versions.yml
       size_log   -> merged into raw_input_sizes.csv for AGGREGATE_SIZE_LOGS
 
-    An unrecognised kind is a hard ERROR (see KNOWN_ARTIFACT_KINDS below). Every
+    An unrecognised kind is a hard ERROR (see ParamUtils.knownArtifactKinds()). Every
     consumer here is an `artifactsOf(...)` filter, so an unknown tag would match no
     filter and that whole QC category would vanish from the report while the run
     stayed green — under the previous positional signature the same typo was a
@@ -55,38 +55,28 @@
 ================================================================================
 */
 
-import groovy.json.JsonOutput
+// No `import groovy.json.JsonOutput` here: Nextflow 26's strict parser has no
+// Groovy import declaration at all (`include` is the only import form it knows),
+// so JsonOutput is spelled out in full at its single use site in `main:` below.
 
 include { AGGREGATE_SIZE_LOGS } from '../../modules/local/aggregate_size_logs'
 include { GENERATE_QC_REPORT  } from '../../modules/local/generate_qc_report'
 
-// The complete artifact vocabulary. Both call sites hand-write these tags (21
-// literals across workflows/mirage.nf's two FINAL_QC calls -- 5 in add_cycle
-// (mirage.nf:135-139) and 16 in the standard path (mirage.nf:317-347, four `if`
-// blocks in which 'versions' and 'size_log' each appear five times)) and nothing
-// else checks that the two vocabularies agree — so this list is the check.
-//
-// Counted, not estimated: `grep -oE "\['[a-z_]+'," workflows/mirage.nf` returns
-// 21 matches on 21 distinct lines. The previous count here read "16 -- 4 in
-// add_cycle, 12 in the standard path", which was wrong in both terms and was
-// copied verbatim into a supplementary figure before anyone re-counted.
-//
-// Derived from ParamUtils.STEPS (lib/ParamUtils.groovy), the single table
-// answering "what is a step?": each step's own `qcKinds` (preprocess_qc /
-// registration_qc+registration_tre+seg_qc / postprocess_qc) plus the two kinds
-// every step emits and which therefore belong to no single step,
-// UNIVERSAL_QC_KINDS ('versions', 'size_log' -- see the header comment there).
+// The artifact vocabulary lives in ParamUtils.knownArtifactKinds()
+// (lib/ParamUtils.groovy), derived from the STEPS table's per-step `qcKinds` plus
+// UNIVERSAL_QC_KINDS. It used to be a bare top-level `KNOWN_ARTIFACT_KINDS = ...`
+// here, with a comment explaining that it could not be a `def` because a
+// script-level `def` is scoped to this file's implicit run() method and would be
+// invisible to the functions below. Both halves of that bind are real, and
+// Nextflow 26's strict parser rejects the bare assignment outright -- so the fix
+// is to stop needing file-level state: a static accessor on ParamUtils is visible
+// from the functions here, from FINAL_QC's `main:`, and from an nf-test
+// `nextflow_function` test, with no script binding involved.
 //
 // The registration_tre entry is the registration method's OWN target-registration-error
 // estimate. NOT named after a method: both backends produce one (VALIS a feature-distance
 // CSV, STARE a *_tre.json) and a backend that produced none would contribute nothing, which
 // the .collect().ifEmpty([]) below already tolerates.
-//
-// Deliberately a bare top-level assignment, not `def`: a script-level `def` in
-// Groovy is scoped to this file's implicit `run()` method and would be
-// invisible to artifactsOf()/buildManifest() below even though they live in
-// the same file. This looks like a missing `def` but is not one.
-KNOWN_ARTIFACT_KINDS = ParamUtils.STEPS.collectMany { it.qcKinds } + ParamUtils.UNIVERSAL_QC_KINDS
 
 // Pull one kind out of the tagged artifact stream. Nextflow channels are
 // broadcast, so applying this repeatedly to the same source is fine.
@@ -97,27 +87,27 @@ KNOWN_ARTIFACT_KINDS = ParamUtils.STEPS.collectMany { it.qcKinds } + ParamUtils.
 // and a typo there (e.g. 'seg_qcc') would match nothing and silently empty
 // that report slot while every test stayed green -- the same failure class
 // the subscribe guard exists to catch, from the other side.
-
-// Kinds that some artifactsOf() call in this file actually consumes. Populated as a
-// side effect of the calls in `main:` below, and checked against KNOWN_ARTIFACT_KINDS
-// at the end of the workflow.
 //
-// WHY. The two existing guards cover two of the three ways this seam breaks: the
-// subscribe below rejects an unknown TAG at the producer, and artifactsOf() rejects
-// an unknown FILTER literal here. Neither catches the third: a kind that is declared
-// in ParamUtils.STEPS.qcKinds, correctly tagged at the call site, and read by NO
-// artifactsOf() call. That artifact is silently dropped from the report and the run
-// exits 0 — the exact failure the other two guards exist to prevent, arriving from
-// the one direction they do not watch.
+// `consumed` is the third, mandatory argument rather than file-level state, and
+// it is mandatory on purpose. It records which kinds some artifactsOf() call in
+// this file actually reads, and FINAL_QC's `main:` checks it against the full
+// vocabulary at the end (see the "Every declared kind must have a consumer"
+// block). That guard closes the third way this seam breaks: a kind that IS
+// declared in ParamUtils.STEPS' qcKinds, IS correctly tagged at the call site,
+// and is read by NO artifactsOf() call -- silently dropped from the report while
+// the run exits 0. The subscribe guard below catches an unknown TAG at the
+// producer and the check here catches an unknown FILTER literal; neither watches
+// that direction.
 //
-// Bare top-level assignment for the same reason as KNOWN_ARTIFACT_KINDS above: a
-// script-level `def` would be invisible to the functions in this file.
-CONSUMED_ARTIFACT_KINDS = [] as Set
-
-def artifactsOf(ch_artifacts, String kind) {
-    if (!(kind in KNOWN_ARTIFACT_KINDS))
-        throw new IllegalArgumentException("FINAL_QC: artifactsOf('${kind}') is not a known artifact kind: ${KNOWN_ARTIFACT_KINDS.join(', ')}")
-    CONSUMED_ARTIFACT_KINDS << kind
+// A default value for `consumed` would make the guard opt-in and therefore
+// forgettable, and a static mutable Set in lib/ would be shared across every
+// run in the JVM. Threading it explicitly is what keeps "add an artifactsOf()
+// call" and "that kind counts as consumed" the same edit.
+def artifactsOf(ch_artifacts, String kind, Set consumed) {
+    def known = ParamUtils.knownArtifactKinds()
+    if (!(kind in known))
+        throw new IllegalArgumentException("FINAL_QC: artifactsOf('${kind}') is not a known artifact kind: ${known.join(', ')}")
+    consumed << kind
     return ch_artifacts.filter { it[0] == kind }.map { it[1] }
 }
 
@@ -185,12 +175,23 @@ workflow FINAL_QC {
 
     main:
 
+    // The run's artifact vocabulary, read once. A local, not file-level state:
+    // ParamUtils.knownArtifactKinds() returns a fresh list each call, so this
+    // binding cannot be mutated for any other run sharing the JVM.
+    def known_kinds = ParamUtils.knownArtifactKinds()
+
+    // Kinds that some artifactsOf() call below actually consumes. Threaded into
+    // every artifactsOf() call and checked against `known_kinds` at the end of
+    // this workflow — see the comment on artifactsOf() above for what that
+    // catches and why the Set is passed rather than held at file level.
+    def consumed_kinds = [] as Set
+
     // Fail-fast vocabulary guard. Registered unconditionally (not inside either
     // param gate) so a typo is caught even on a run that asks for neither output.
     ch_artifacts.subscribe { item ->
-        if (!(item[0] in KNOWN_ARTIFACT_KINDS)) {
+        if (!(item[0] in known_kinds)) {
             error "FINAL_QC: unknown artifact kind '${item[0]}' for ${item[1]}. " +
-                  "Known kinds: ${KNOWN_ARTIFACT_KINDS.join(', ')}. An unknown tag matches no " +
+                  "Known kinds: ${known_kinds.join(', ')}. An unknown tag matches no " +
                   "artifactsOf() filter, so that whole QC category would be dropped from the " +
                   "report without failing the run — fix the tag at the FINAL_QC call site in " +
                   "workflows/mirage.nf, or add the kind here and wire it to a report slot."
@@ -211,7 +212,8 @@ workflow FINAL_QC {
                     [name: workflow.manifest.name, version: workflow.manifest.version],
                     timestamp
                 )
-                return JsonOutput.prettyPrint(JsonOutput.toJson(summary))
+                return groovy.json.JsonOutput.prettyPrint(
+                    groovy.json.JsonOutput.toJson(summary))
             }
             .collectFile(name: 'run_summary.json')
 
@@ -228,14 +230,14 @@ workflow FINAL_QC {
         // the same reason at the level of file CONTENT: without it the collected yaml's
         // line order varied by completion order.
         GENERATE_QC_REPORT(
-            artifactsOf(ch_artifacts, 'preprocess_qc').collect(sort: true).ifEmpty([]),
-            artifactsOf(ch_artifacts, 'registration_qc').collect(sort: true).ifEmpty([]),
-            artifactsOf(ch_artifacts, 'registration_tre').collect(sort: true).ifEmpty([]),
-            artifactsOf(ch_artifacts, 'postprocess_qc').collect(sort: true).ifEmpty([]),
-            artifactsOf(ch_artifacts, 'versions').unique().collectFile(name: 'collated_versions.yml', sort: true),
+            artifactsOf(ch_artifacts, 'preprocess_qc', consumed_kinds).collect(sort: true).ifEmpty([]),
+            artifactsOf(ch_artifacts, 'registration_qc', consumed_kinds).collect(sort: true).ifEmpty([]),
+            artifactsOf(ch_artifacts, 'registration_tre', consumed_kinds).collect(sort: true).ifEmpty([]),
+            artifactsOf(ch_artifacts, 'postprocess_qc', consumed_kinds).collect(sort: true).ifEmpty([]),
+            artifactsOf(ch_artifacts, 'versions', consumed_kinds).unique().collectFile(name: 'collated_versions.yml', sort: true),
             ch_run_summary,
-            artifactsOf(ch_artifacts, 'seg_qc').collect(sort: true).ifEmpty([]),
-            artifactsOf(ch_artifacts, 'seg_residuals').collect(sort: true).ifEmpty([]),
+            artifactsOf(ch_artifacts, 'seg_qc', consumed_kinds).collect(sort: true).ifEmpty([]),
+            artifactsOf(ch_artifacts, 'seg_residuals', consumed_kinds).collect(sort: true).ifEmpty([]),
         )
     }
 
@@ -244,18 +246,18 @@ workflow FINAL_QC {
         // receives a single file and cannot hit a work-dir name collision —
         // several processes emit identically-named *.size.csv logs.
         AGGREGATE_SIZE_LOGS(
-            artifactsOf(ch_artifacts, 'size_log').collectFile(name: 'raw_input_sizes.csv', sort: true)
+            artifactsOf(ch_artifacts, 'size_log', consumed_kinds).collectFile(name: 'raw_input_sizes.csv', sort: true)
         )
     }
 
-    // Every declared kind must have a consumer. See CONSUMED_ARTIFACT_KINDS above.
+    // Every declared kind must have a consumer. See artifactsOf() above.
     //
     // Registered only when both outputs are enabled: --skip_final_qc_report or
     // --enable_trace=false legitimately leaves that half of the vocabulary
     // unconsumed, and failing then would break a supported run mode. The guard is
     // therefore about WIRING, checked on the default path, not about run policy.
     if (!params.skip_final_qc_report && params.enable_trace) {
-        def unconsumed = KNOWN_ARTIFACT_KINDS.toSet() - CONSUMED_ARTIFACT_KINDS
+        def unconsumed = known_kinds.toSet() - consumed_kinds
         if (unconsumed) {
             error "FINAL_QC: artifact kind(s) ${unconsumed as List} are declared but no " +
                   "artifactsOf() call consumes them, so anything tagged with them is dropped " +

@@ -15,8 +15,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install Python dependencies directly
 RUN pip install --no-cache-dir \
-        numpy \
+        numpy==1.26.4 \
         numba \
-        tifffile \
-        imagecodecs \
-	zarr
+        tifffile==2025.5.10 \
+        imagecodecs==2025.3.30 \
+        opencv-python==4.10.0.82 \
+        zarr==2.18.3 \
+        numcodecs==0.13.1

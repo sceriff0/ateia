@@ -17,6 +17,20 @@ Notes
 -----
 This module consolidates QC generation code that was previously embedded
 in registration scripts (register_cpu.py, register_gpu.py).
+
+``create_registration_qc`` reads its nuclear/fiducial channel through
+``tiled_io.open_lazy`` + ``read_decimated`` rather than ``tifffile.imread``ing
+every marker channel of the whole slide. What that removes is the
+**N-channel overread**: only the ``pick_nuclear_index``-resolved channel is
+ever decoded, not every marker channel in the panel. It does **not** remove
+any spatial overread -- the read stays at full resolution
+(``decimation_factor(..., max_dim=None)`` always returns ``1`` here), because
+``GENERATE_REGISTRATION_QC`` runs with ``save_fullres=True`` unconditionally
+in production (see ``conf/modules.config``'s ``GENERATE_REGISTRATION_QC``
+block: no ``--no-fullres`` is ever passed), so the ``*_fullres.tif`` artifact
+this function publishes genuinely needs full-resolution pixels. Decimating
+the read would change that published artifact, not just the (already
+downsampled) preview.
 """
 
 from __future__ import annotations
@@ -32,6 +46,7 @@ from metadata import extract_channel_names_from_ome, pick_nuclear_index
 from numpy.typing import NDArray
 from registration_utils import autoscale
 from skimage.transform import rescale
+from tiled_io import decimation_factor, open_lazy, read_decimated
 
 __all__ = [
     "create_registration_qc",
@@ -275,24 +290,15 @@ def create_registration_qc(
     if not registered_path.exists():
         raise FileNotFoundError(f"Registered image not found: {registered_path}")
 
-    # Load images
-    ref_img = tifffile.imread(str(reference_path))
-    reg_img = tifffile.imread(str(registered_path))
-
-    # Ensure 3D shape (C, H, W)
-    if ref_img.ndim == 2:
-        ref_img = ref_img[np.newaxis, ...]
-    if reg_img.ndim == 2:
-        reg_img = reg_img[np.newaxis, ...]
-
     # Resolve the nuclear/fiducial channel from OME metadata (convert_image guarantees
-    # OME-XML is always present). This MUST go through pick_nuclear_index rather than
-    # testing for the literal "DAPI": nuclear_markers is configurable and a CELLTOX-only
-    # panel is a supported input. The old literal test worked only by accident -- it
-    # fell back to channel 0, which CONVERT_IMAGE happens to reserve for the nuclear
-    # channel -- so it produced a correct overlay and a spurious warning on every
-    # non-DAPI slide, and would have picked the wrong channel the moment that promotion
-    # invariant changed.
+    # OME-XML is always present) BEFORE touching pixel data, so a malformed/missing
+    # OME-XML fails fast without paying for opening either slide's pixel store. This MUST
+    # go through pick_nuclear_index rather than testing for the literal "DAPI":
+    # nuclear_markers is configurable and a CELLTOX-only panel is a supported input. The
+    # old literal test worked only by accident -- it fell back to channel 0, which
+    # CONVERT_IMAGE happens to reserve for the nuclear channel -- so it produced a correct
+    # overlay and a spurious warning on every non-DAPI slide, and would have picked the
+    # wrong channel the moment that promotion invariant changed.
     ref_channels = extract_channel_names_from_ome(reference_path)
     reg_channels = extract_channel_names_from_ome(registered_path)
 
@@ -325,8 +331,37 @@ def create_registration_qc(
             f"Registered nuclear channel: {reg_nuc_idx} ({reg_channels[reg_nuc_idx]})"
         )
 
-    ref_nuc = ref_img[ref_nuc_idx]
-    reg_nuc = reg_img[reg_nuc_idx]
+    # Read only the resolved nuclear/fiducial channel of each slide, through a lazy,
+    # region-readable zarr view (open_lazy) rather than tifffile.imread's whole-stack
+    # read of every marker channel at full resolution -- the N-CHANNEL overread this step
+    # used to pay, twice, on the two largest inputs the QC step sees. This is NOT a
+    # spatial decimation: `factor` is 1 here, and stays 1, because this function always
+    # needs true full-resolution pixels (the *_fullres.tif output is unconditional in
+    # production -- see the module docstring). Only the unused channels are no longer
+    # read; every pixel of the used one still is. decimation_factor is still the source of
+    # true decimation; read_decimated streams each channel in row bands, but AT FACTOR=1
+    # (this call's case) the striding is a no-op, so the bands it accumulates sum to the
+    # whole plane before the final concatenate -- peak memory here is close to two
+    # full-resolution planes, not one band. See read_decimated's own docstring
+    # (bin/utils/tiled_io.py) for the factor>1 case, where the one-band bound actually holds.
+    ref_close = reg_close = None
+    try:
+        ref_arr, _ref_dtype, ref_close = open_lazy(reference_path)
+        reg_arr, _reg_dtype, reg_close = open_lazy(registered_path)
+        factor = decimation_factor(
+            [ref_arr.shape[1:], reg_arr.shape[1:]], max_dim=None
+        )
+        ref_nuc = read_decimated(ref_arr, ref_nuc_idx, factor)
+        reg_nuc = read_decimated(reg_arr, reg_nuc_idx, factor)
+    finally:
+        # Both opens now live inside this try, so a failure on the SECOND open_lazy call no
+        # longer leaks the first store's handle -- but it also means ref_close may never get
+        # bound (open_lazy(reference_path) itself can raise before returning). Guard each
+        # close individually rather than assuming both succeeded.
+        if ref_close is not None:
+            ref_close()
+        if reg_close is not None:
+            reg_close()
 
     # Save full-resolution QC (compressed)
     if save_fullres:

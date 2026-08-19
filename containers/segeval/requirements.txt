@@ -25,3 +25,11 @@ xmltodict==0.13.0      # OME-XML parsing for the pixel-size lookup
 # meaning. Installing it makes the good path the one that actually runs; the
 # Dockerfile's smoke test asserts it imports rather than leaving it to fail over.
 aicsimageio==4.14.0
+
+# Imported by the vendored CSE source: bin/utils/cse/functions.py's
+# foreground_separation() runs `import matplotlib.pyplot as plt` at call time. `plt` is
+# then never used -- it is dead in upstream 1.5.19 -- but the import still EXECUTES, so
+# without matplotlib that function raises ImportError the first time CSE evaluates a
+# mask. Pinned and installed rather than deleted from the vendored copy, which is kept
+# byte-identical to upstream on purpose.
+matplotlib==3.8.4

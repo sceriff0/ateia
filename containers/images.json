@@ -1,13 +1,13 @@
 [
-  { "dir": "bioformats",     "tag": "convert_bioformats_2" },
-  { "dir": "preprocess",     "tag": "preprocess" },
-  { "dir": "quantification", "tag": "quantification_gpu" },
-  { "dir": "segmentation",   "tag": "segmentation_gpu" },
-  { "dir": "cellsam",        "tag": "cellsam" },
-  { "dir": "istantseg",      "tag": "instant_seg" },
-  { "dir": "merge",          "tag": "merge" },
-  { "dir": "debug_diffeo",   "tag": "debug_diffeo" },
-  { "dir": "segeval",        "tag": "segeval" },
-  { "dir": "tiled",          "tag": "tiled" },
-  { "dir": "spatialdata",    "tag": "spatialdata" }
+  { "dir": "cellsam",     "tag": "cellsam" },
+  { "dir": "convert",     "tag": "convert" },
+  { "dir": "instanseg",   "tag": "instanseg" },
+  { "dir": "merge",       "tag": "merge" },
+  { "dir": "preprocess",  "tag": "preprocess" },
+  { "dir": "quantify",    "tag": "quantify" },
+  { "dir": "regqc",       "tag": "regqc" },
+  { "dir": "segeval",     "tag": "segeval" },
+  { "dir": "spatialdata", "tag": "spatialdata" },
+  { "dir": "stardist",    "tag": "stardist" },
+  { "dir": "tiled",       "tag": "tiled" }
 ]

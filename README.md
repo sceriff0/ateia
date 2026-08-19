@@ -11,7 +11,7 @@ MIRAGE is a Nextflow DSL2 pipeline for whole slide image (WSI) processing. It su
 ## Pipeline Summary
 
 1. **Image format conversion** — Input images are read from any Bio-Formats-compatible format and staged as OME-TIFF for downstream processing
-2. **Illumination correction** (`PREPROCESS`) — Per-channel flatfield/darkfield correction via the BaSiC algorithm ([BaSiCPy](https://github.com/peng-lab/BaSiCPy)); produces corrected OME-TIFF per image
+2. **Illumination correction** (`TILE_FOR_BASIC` → `BASICPY` → `APPLY_PROFILES`) — Per-channel flatfield correction via the BaSiC algorithm, through nf-core's [BASICPY](https://github.com/peng-lab/BaSiCPy) module at upstream defaults (no darkfield is estimated or removed); produces corrected OME-TIFF per image
 3. **Multi-modal image registration** (`REGISTER`) — Aligns all panels for a patient to a shared coordinate space using `valis` (graph-based whole-stack registration via [VALIS](https://github.com/MathOnco/valis))
 4. **Cell segmentation** (`SEGMENT`) — Nuclear and cell segmentation via [StarDist](https://github.com/stardist/stardist); outputs nuclear and cell instance masks per patient
 5. **Single-cell marker quantification** (`QUANTIFY`) — Extracts per-cell intensity statistics across all registered channels; outputs CSV tables
@@ -87,7 +87,7 @@ nextflow run . \
 nextflow run . \
   --input samplesheet.csv \
   --start preprocessing \
-  --dry_run true
+  -params-file params/dry_run.json
 ```
 
 ## Documentation

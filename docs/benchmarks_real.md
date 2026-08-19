@@ -171,7 +171,7 @@ To enable CSE on the segmentation arms, publish the `segeval` image once
 (Actions → *Build & Push Container Images* → Run workflow) and append:
 
 ```bash
-  ... arm_results --skip_seg_quality_eval false
+  ... arm_results -params-file params/seg_quality_eval.json
 ```
 
 ### 3. Emit the paper tables

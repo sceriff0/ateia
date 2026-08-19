@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
 import numpy as np  # noqa: E402
 from logger import configure_logging, get_logger  # noqa: E402
-from tile_residual import residual_displacement  # noqa: E402
+from tile_residual import foreground_fraction, residual_displacement  # noqa: E402
 from tiled_io import open_lazy  # noqa: E402
 from tiled_warp import source_region, warp_image  # noqa: E402
 
@@ -38,6 +38,19 @@ def _check_nuclear_index(index, c_n):
     """Same out-of-range check + message ``tiled_io.nuclear_channel`` raised, for a lazy source."""
     if not 0 <= index < c_n:
         raise ValueError(f"--nuclear-index {index} out of range for C={c_n}")
+
+
+# Both halves of the phase correlation are read at THIS precision. They used to differ -- the
+# reference tile float32, the moving crop `dtype=float` (= float64), twelve lines apart -- so one
+# measurement was assembled from two precisions and scikit-image promoted the pair internally.
+#
+# float32, not float64: the source data is uint16 and float32 carries 24 mantissa bits, so the
+# extra precision bought nothing while doubling the bytes of the two largest arrays in the task
+# (the moving crop and the warped tile). Measured over 6 seeded tiles with a known shift, the
+# recovered displacement is identical to every printed digit and the correlation error moves by
+# 7e-11 to 1.3e-09 -- against a gate threshold of 0.99. Guarded by
+# tests/test_dtype_rounding_contract.py.
+TILE_DTYPE = np.float32
 
 
 def main(argv=None) -> int:
@@ -85,7 +98,7 @@ def main(argv=None) -> int:
             out_h, out_w = a.ry1 - a.ry0, a.rx1 - a.rx0
             ref_tile = np.asarray(
                 ref_src[a.nuclear_index, slice(a.ry0, a.ry1), slice(a.rx0, a.rx1)],
-                dtype=np.float32,
+                dtype=TILE_DTYPE,
             )
             _c, mh, mw = mov_src.shape
             sx0, sy0, sx1, sy1 = source_region(
@@ -94,8 +107,15 @@ def main(argv=None) -> int:
             if sx1 > sx0 and sy1 > sy0:
                 crop = np.asarray(
                     mov_src[a.nuclear_index, slice(sy0, sy1), slice(sx0, sx1)],
-                    dtype=float,
+                    dtype=TILE_DTYPE,
                 )
+                # warp_image -> resample_bilinear force intensities to float64 internally
+                # (mesh_field.py:112), so the warped tile comes back float64 whatever went in.
+                # Cast it back so BOTH halves of the correlation below are at TILE_DTYPE.
+                # Pushing float32 intensities all the way through the resampler is the right
+                # end state -- coordinates want float64, intensities do not -- but that changes
+                # the stitch's output path too, so it belongs with the slide_io/stitch seam
+                # work rather than here.
                 mov_tile = warp_image(
                     crop,
                     m0,
@@ -103,15 +123,31 @@ def main(argv=None) -> int:
                     (out_h, out_w),
                     out_origin=(a.rx0, a.ry0),
                     src_origin=(sx0, sy0),
-                )
+                ).astype(TILE_DTYPE, copy=False)
             else:
-                mov_tile = np.zeros((out_h, out_w), dtype=float)
+                mov_tile = np.zeros((out_h, out_w), dtype=TILE_DTYPE)
         finally:
             mov_close()
     finally:
         ref_close()
 
-    dx, dy, tre = residual_displacement(ref_tile, mov_tile, upsample=a.upsample)
+    # `error` is the correlation's confidence, not decoration: the tile is emitted
+    # unconditionally (including the manufactured all-zeros mov_tile above, where the moving crop
+    # fell outside the slide), and tiled_solve.py's --max-error gate is what keeps a peak found in
+    # background or across the section edge out of the deformation mesh.
+    dx, dy, tre, error = residual_displacement(ref_tile, mov_tile, upsample=a.upsample)
+
+    # PHASE 1 of the foreground work: EMIT, do not gate. Measured over the dense band sweep
+    # (21 blanking fractions x 4 geometries x 3 seeds; 200 accepted configs, 68 of them wrong),
+    # a threshold on mov_fg that loses no correct tile still rejects 41/68 of the wrong ones,
+    # and the mov_fg/ref_fg ratio 44/68 -- a real, partial separator. It does NOT close the
+    # band: the distributions overlap, so about a third survives any per-tile cut and
+    # neighbourhood consistency is still required. Nothing reads these keys yet, deliberately:
+    # gating changes registration output and needs the dense-sweep acceptance plus a real-slide
+    # before/after. Both crops are measured because the ratio separates better than the moving
+    # crop alone. Guarded by tests/test_foreground_fraction.py.
+    ref_fg = foreground_fraction(ref_tile)
+    mov_fg = foreground_fraction(mov_tile)
 
     Path(a.out).write_text(
         json.dumps(
@@ -123,10 +159,16 @@ def main(argv=None) -> int:
                 "dx": dx,
                 "dy": dy,
                 "tre": tre,
+                "error": error,
+                "ref_fg": ref_fg,
+                "mov_fg": mov_fg,
             }
         )
     )
-    logger.info(f"tile ({a.ix},{a.iy}): dxy=({dx:.2f},{dy:.2f}) tre={tre:.2f}px")
+    logger.info(
+        f"tile ({a.ix},{a.iy}): dxy=({dx:.2f},{dy:.2f}) tre={tre:.2f}px error={error:.4f} "
+        f"ref_fg={ref_fg:.4f} mov_fg={mov_fg:.4f}"
+    )
     return 0
 
 

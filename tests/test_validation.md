@@ -362,7 +362,7 @@ nextflow run main.nf \
   --input "$FIXTURES/valid_input.csv" \
   --start preprocessing \
   --outdir "$OUTPUT/test_1_1" \
-  --dry_run true
+  -params-file params/dry_run.json
 if [ $? -eq 0 ]; then
   echo "✅ PASS"
 else

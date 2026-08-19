@@ -20,10 +20,20 @@ A process's `cpus` / `memory` / `time` come from **either** a resource `label`
 inert and misleading; those have been removed. What remains is three cases:
 
 <div class="gate">
-  <div class="g"><div class="k">case 1</div><div class="v">withName owns all three</div><div class="d">No label. The block sets cpus, memory and time. 14 processes.</div></div>
+  <div class="g"><div class="k">case 1</div><div class="v">withName owns all three</div><div class="d">No label. The block sets cpus, memory and time. 15 processes.</div></div>
   <div class="g"><div class="k">case 2</div><div class="v">label owns all three</div><div class="d">The withName block, if any, sets only publishDir / ext.args. 6 processes.</div></div>
   <div class="g"><div class="k">case 3</div><div class="v">partial override</div><div class="d">withName sets one or two fields; a label supplies the rest. 6 processes.</div></div>
 </div>
+
+**These three counts cover `modules/local/*.nf` only**, because that is what
+`tests/test_resource_label_coverage.py` scans and the counts are checked against
+that scan — raising one to include a process outside `modules/local/` makes the
+build fail (verified: bumping case 3 to `7` fails with `claims [14, 6, 7] … give
+[14, 6, 6]`). One process is therefore outside all three numbers: **`BASICPY`**,
+in `modules/nf-core/basicpy/`, which is a **case-3 partial override** — upstream's
+`label 'process_single'` with `memory` raised to `32 GB × attempt` by its
+`withName:` block. Nothing guards that sentence, so check it by hand if you edit
+either side.
 
 Case 3 is the one that surprises people: `TILED_SOLVE` carries
 `process_single` **and** a `withName:` block, but that block sets `memory`
@@ -86,8 +96,17 @@ Effective values on **attempt 1**. `f` denotes the relevant input size in GiB
 | Process | `cpus` | `memory` (attempt 1) | `time` | Owner |
 |---|---|---|---|---|
 | `CONVERT_IMAGE` | `1` | `24 GB` + tier: `f<4` → +0, `f<12` → +24, `f<24` → +48, else +64 GB | `2.h × attempt` | `withName` |
-| `PREPROCESS` | `4` | `f × 7 GB × attempt + 8 GB` | `3.h × attempt` | `withName` |
+| `TILE_FOR_BASIC` | `2` | derived from `preproc_tile_size`, `× attempt` *(withName)* — floor 6 GB | `2.h × attempt` | `withName` |
+| `APPLY_PROFILES` | `2` | derived from `preproc_tile_size`, `× attempt` *(withName)* — floor 8 GB | `3.h × attempt` | `withName` |
 | `GENERATE_PREPROCESS_QC` | `4` | `200 GB` | `4.h × attempt` | `process_medium` |
+
+`BASICPY` is **not** in the table above and cannot be: the guard behind these tables
+(`tests/test_resource_label_coverage.py`) reads `modules/local/*.nf`, and `BASICPY` lives in
+`modules/nf-core/basicpy/`, vendored unmodified. Its resources are its upstream
+`label 'process_single'` (1 cpu, `8.h × attempt`) with `memory` raised to `32 GB × attempt`
+by a partial `withName:` override in `conf/modules.config` — it runs Bio-Formats under a JVM
+and materialises one channel's tile stack, which does not fit the single tier's 12 GB on a
+real slide. Changing either number changes an unguarded figure, so change it here too.
 
 ### Registration — VALIS
 
@@ -95,8 +114,9 @@ Effective values on **attempt 1**. `f` denotes the relevant input size in GiB
 |---|---|---|---|---|
 | `REGISTER` | `8` | `300 GB × attempt` | `24.h × attempt` | `withName` |
 
-`REGISTER` also carries `maxForks = 10` and its own error strategy — see
-[Retry policy](#retry-policy).
+`REGISTER` also carries `maxForks = Math.min(10, params.max_forks)` and its own error
+strategy — see [Retry policy](#retry-policy) and
+[Execution & concurrency](#execution--concurrency).
 
 ### Registration — tiled / STARE
 
@@ -107,22 +127,59 @@ laptop-viable.
 | Process | `cpus` | `memory` (attempt 1) | `time` | Owner | `maxForks` |
 |---|---|---|---|---|---|
 | `TILED_COARSE` | `2` *(label)* | `8 GB × 2^(attempt−1)` *(withName)* | `2.h × attempt` *(label)* | partial | `20` |
-| `TILED_REG_TILE` | `2` *(label)* | `tiledRegTileGb(params) × attempt` *(withName)* — 4 GB at defaults | `2.h × attempt` *(label)* | partial | `20` |
+| `TILED_REG_TILE` | `2` *(label)* | derived from `reg_tiled_tile` + 2×`reg_tiled_halo`, `× attempt` *(withName)* — 4 GB at defaults | `2.h × attempt` *(label)* | partial | `20` |
 | `TILED_SOLVE` | `1` *(label)* | `1 GB × attempt` *(withName)* | `8.h × attempt` *(label)* | partial | — |
-| `TILED_STITCH` | `4` *(label)* | `tiledStitchGb(params) × attempt` *(withName)* — 4 GB at defaults | `4.h × attempt` *(label)* | partial | `10` |
+| `TILED_STITCH` | `4` *(label)* | derived from `reg_tiled_out_tile`, `× attempt` *(withName)* — 4 GB at defaults | `4.h × attempt` *(label)* | partial | `10` |
 
 `TILED_COARSE` / `TILED_REG_TILE` / `TILED_SOLVE` / `TILED_STITCH` are the STARE method —
 the only shape it has.
 
-`TILED_REG_TILE` and `TILED_STITCH` are the only two processes whose memory
-request is **derived from a parameter** instead of being a constant:
-`tiledRegTileGb(params)` scales with `reg_tiled_tile + 2 × reg_tiled_halo` and
-`tiledStitchGb(params)` with `reg_tiled_out_tile`, each the measured linear fit
-doubled and floored at 4 GB (`conf/modules.config:103-113`). Raising a tile size
-therefore raises the reservation rather than producing a SIGKILL. The "4 GB at
-defaults" figures above are the shipped-default evaluation of those helpers, not
-independent constants — the helper names, not the numbers, are what
-`tests/test_resource_label_coverage.py` checks for these two rows.
+`TILED_REG_TILE`, `TILED_STITCH`, `TILE_FOR_BASIC`, `APPLY_PROFILES` and
+`MERGE_AND_PYRAMID` are the
+processes whose memory
+request is **derived from a parameter** instead of being a constant: the first
+scales with `reg_tiled_tile + 2 × reg_tiled_halo`, the second with
+`reg_tiled_out_tile`, each the measured linear fit doubled and floored at 4 GB.
+Raising a tile size therefore raises the reservation rather than producing a
+SIGKILL. The arithmetic is written out inside each process' own
+`memory = { … }` closure in `conf/modules.config`, immediately under the block
+comment that derives it; the two closures are near-identical and that duplication
+is forced — Nextflow 26's strict config parser rejects a function declaration in
+a config file, so there is no legal way to share a helper between them.
+
+`MERGE_AND_PYRAMID` joined that list when it stopped holding the slide. It used
+to ask for a flat 200 or 300 GB on a tier over the summed channel files, because
+it allocated the whole `(C, H, W)` stack before writing anything. It now streams
+the base resolution from a generator of tiles, so its request is built from **one
+decoded plane** — estimated as 4× the largest single channel file, since a
+config closure cannot know the compression ratio — plus the pyramid levels that
+must stay resident while `tifffile` fills the SubIFDs one level at a time. That
+second term is a geometric series in `pyramid_scale` and disappears below three
+`pyramid_resolutions`, which is why both parameters appear in the row. Floor 8 GB.
+
+Both `APPLY_PROFILES`' write-tile-buffer term and `MERGE_AND_PYRAMID`'s
+decoded-plane term assume tifffile's compressor pool is pinned to `maxworkers=1`
+on the write itself (`bin/apply_basic_profiles.py`,
+`bin/merge_channels_pyramid.py:826-847`) — without that pin, the container's
+tifffile version reintroduces a term that scales with the channel count, which
+these figures do not budget for. See the `maxworkers=1` comment in each
+process' `conf/modules.config` block for the measured numbers.
+
+The 4× is a **floor estimate, not a bound**, and the block comment in
+`conf/modules.config` records the measured counterexamples: zlib at
+SPLIT_CHANNELS' settings reaches 4.2× on a plane that is 75 % true-black
+background, and 796× on a near-empty channel. A WSI is mostly empty glass and
+every channel shares that background, so taking the largest file does not rescue
+the estimate. What backstops it is `conf/base.config`'s exit-137 retry with
+`maxRetries = 3` against a request that is multiplied by `task.attempt` — four
+attempts cover a shortfall of up to 4×, and beyond that the task fails loudly.
+Measure the real ratio against a production `channels/` directory and raise the
+coefficient if one becomes available.
+
+The "4 GB at defaults" figures above are the shipped-default evaluation of those
+formulas, not independent constants — the **parameter names**, not the numbers,
+are what `tests/test_resource_label_coverage.py` checks for all five of these
+param-derived rows.
 
 The STARE method's memory is bounded. Measured peak RSS on a 16384² 2-channel
 tiled OME-TIFF:
@@ -168,7 +225,7 @@ constraint.
 and Dask tiling either side of inference — stays tolerable. GPU inference is
 unaffected by that number.
 
-`SEG_QUALITY_EVAL` is opt-in (`--skip_seg_quality_eval false`) and sized off the
+`SEG_QUALITY_EVAL` is opt-in (`-params-file params/seg_quality_eval.json`) and sized off the
 image rather than the mask: CSE's cost is driven by per-pixel index structures on
 the DECOMPRESSED masks, so a well-compressed WSI needs far more RAM than its file
 size suggests. `--cse_max_pixels` bins the input to cap that; both it and
@@ -183,7 +240,7 @@ rather than silent — see [Retry policy](#retry-policy).
 | `QUANTIFY` | `1` | `128 GB × attempt` | `12.h × attempt` | `withName` |
 | `MERGE_QUANT_CSVS` | `2` | `32 GB × attempt` | `2.h × attempt` | `process_low` |
 | `EXPORT_GEOJSON` | `1` | `32 GB × attempt` | `2.h × attempt` | `withName` |
-| `MERGE_AND_PYRAMID` | `2` | tier on channels + masks: `f<20` → 200, else 300 GB, `× attempt` | `8.h × attempt` | `withName` |
+| `MERGE_AND_PYRAMID` | `2` | derived from the largest single channel file + `pyramid_resolutions` and `pyramid_scale`, `× attempt` *(withName)* — floor 8 GB | `8.h × attempt` | `withName` |
 | `EXPORT_SPATIALDATA` | `4` *(label)* | `200 GB` *(label)* | `4.h × attempt` *(withName)* | partial |
 | `GENERATE_POSTPROCESSING_QC` | `4` | `200 GB` | `4.h × attempt` | `process_medium` |
 
@@ -296,7 +353,7 @@ missed.
 
 ## GPU
 
-`SEGMENT` requests a GPU when `--seg_gpu true` (the default), and so does
+`SEGMENT` requests a GPU when `seg_gpu = true` (the default), and so does
 `SEG_QC_SEGMENT` — it is the same process under an alias, and Nextflow matches
 `withName: 'SEGMENT'` against an alias' original name. `SEG_QC_GEOJSON` does not:
 it only traces contours, which is pure CPU.
@@ -313,7 +370,7 @@ Match `--gpu_type` to your cluster's GRES string (`sinfo -o "%G"`). Without
 CellSAM then silently falls back to CPU, which turns a WSI run into a multi-day
 job.
 
-Set `--seg_gpu false` to force CPU; the `--gres` request and the container flags
+Set `seg_gpu = false` to force CPU; the `--gres` request and the container flags
 are both dropped.
 
 ---
@@ -322,37 +379,81 @@ are both dropped.
 
 | Setting | Value | Where |
 |---|---|---|
-| `process.maxForks` | `100` | `nextflow.config` |
+| `process.maxForks` | `params.max_forks` (`100`) | `nextflow.config` |
 | `process.stageInMode` | `symlink` | `nextflow.config` — zero-overhead, works cross-filesystem |
-| `executor.queueSize` | `20` | `conf/base.config` — max concurrent scheduler submissions |
+| `executor.queueSize` | `params.queue_size` (`20`) | `nextflow.config` — max concurrent scheduler submissions |
 | `executor.exitReadTimeout` | `1 day` | `conf/base.config` — SLURM status-poll timeout |
 
-Per-process `maxForks` overrides: `REGISTER`, `TILED_STITCH`
-at `10`; `TILED_COARSE` / `TILED_REG_TILE` at `20`. These bound how many
-memory-heavy registration tasks can be in flight at once.
+Both are tunable from the command line: `--max_forks` and `--queue_size`.
+
+**They are a pair, and tuning one alone is usually a no-op.** `max_forks` caps how many
+tasks of any ONE process run at once; `queue_size` caps how many run at once across the
+WHOLE pipeline. The lower binds, and at the shipped defaults `queue_size` (20) is far below
+`max_forks` (100) — so raising `max_forks` on its own changes nothing. Raise both, or raise
+`queue_size` alone if you simply want more total concurrency.
+
+Per-process `maxForks` overrides: `REGISTER`, `TILED_STITCH` at `10`; `TILED_COARSE` /
+`TILED_REG_TILE` at `20`. These bound how many memory-heavy registration tasks can be in
+flight at once. Each is written `Math.min(<its own limit>, params.max_forks)`, so
+**lowering** `--max_forks` really does throttle every module, while **raising** it never
+lifts one of these past the limit its own block sets for its own reasons. Measured on the
+test profile: at the default, `REGISTER` runs at 10 and everything else at 100; at
+`--max_forks 4` every process runs at 4; at `--max_forks 50`, `REGISTER` stays at 10.
+
+`executor.queueSize` is assigned in `nextflow.config`, not in `conf/base.config` where the
+rest of the executor scope lives. That is deliberate and load-bearing — see
+[Why the includes sit after the params block](#why-the-includes-sit-after-the-params-block).
+
+### Why the includes sit after the params block
+
+`conf/base.config` and `conf/modules.config` are included **after** `nextflow.config`'s
+`params` block, not at the top of the file. Anything in those files that reads `params.*`
+depends on it:
+
+* A `params.x` reference evaluated **before** the params block exists does not read `null`.
+  Nextflow resolves it to an empty `ConfigObject` — a Map. Inside a closure that is
+  harmless, because closures run at task-submission time, which is why every
+  `memory = { ... }` closure worked even when the includes sat at the top. Evaluated
+  eagerly it is not: `params.x as int` on a Map throws *"Cannot coerce a map to class
+  java.lang.Integer"* and the entire config fails to parse.
+* Inside an `executor { }` scope it is worse than an error. `queueSize = params.queue_size`
+  parsed from an early-included file is read as the opening of a **nested scope named
+  `params`**, and the `queueSize` setting vanishes from the resolved config with no error
+  at all — silently falling back to Nextflow's own default.
+* `maxForks` cannot dodge this the way `memory` does, because it is **not a dynamic
+  directive**: Nextflow compares it against `0` in `TaskProcessor`'s constructor, so a
+  closure throws *"Cannot compare ... Closure ... and java.lang.Integer with value '0'"*.
+
+Relative order is otherwise unchanged — both files are still included before the `executor`
+and `process` blocks, so those still take precedence. Verified by diffing `nextflow config`
+for the `test`, `test_full` and `local` profiles across the move: the only content
+difference is the two new parameters. Guarded by `tests/test_concurrency_params.py`.
 
 ---
 
 ## Containers
 
-Every process pins a fixed image tag — never `:latest`. The `bolt3x/attend_image_analysis`
-tags are content-descriptive (e.g. `preprocess`, `tiled`), not immutable version
-tags — see [Installation → Pre-pulling container images](installation.md#pre-pulling-container-images-optional).
+Every process pins a fixed image tag — never `:latest`. The `bolt3x/mirage-*` image
+NAMES (one Docker Hub repository per image, e.g. `bolt3x/mirage-preprocess`,
+`bolt3x/mirage-tiled`) are content-descriptive; the TAG on each is an immutable
+SemVer version (`1.0.0`), tied to `manifest.version` — see
+[Installation → Pre-pulling container images](installation.md#pre-pulling-container-images-optional).
 
 | Image | Processes |
 |---|---|
-| `bolt3x/attend_image_analysis:convert_bioformats_2` | `CONVERT_IMAGE` |
-| `bolt3x/attend_image_analysis:preprocess` | `PREPROCESS`, `SPLIT_CHANNELS`, `GENERATE_PREPROCESS_QC`, `GENERATE_QC_REPORT` |
+| `bolt3x/mirage-convert:1.0.0` | `CONVERT_IMAGE` |
+| `bolt3x/mirage-preprocess:1.0.0` | `TILE_FOR_BASIC`, `APPLY_PROFILES`, `SPLIT_CHANNELS`, `GENERATE_PREPROCESS_QC`, `GENERATE_QC_REPORT` |
+| `docker.io/labsyspharm/basicpy-docker-mcmicro:1.2.0-patch5` | `BASICPY` (vendored nf-core module; pulls its own image, and errors under `-profile conda`) |
 | `cdgatenbee/valis-wsi:1.0.0` | `REGISTER` |
-| `bolt3x/attend_image_analysis:tiled` | `TILED_COARSE`, `TILED_REG_TILE`, `TILED_SOLVE`, `TILED_STITCH` |
-| `bolt3x/attend_image_analysis:debug_diffeo` | `GENERATE_REGISTRATION_QC` |
-| `bolt3x/attend_image_analysis:segmentation_gpu` | `SEGMENT` / `SEG_QC_SEGMENT` when `--seg_method stardist` |
-| `bolt3x/attend_image_analysis:instant_seg` | `SEGMENT` / `SEG_QC_SEGMENT` when `--seg_method instantseg` *(default)* |
-| `bolt3x/attend_image_analysis:cellsam` | `SEGMENT` / `SEG_QC_SEGMENT` when `--seg_method cellsam` |
+| `bolt3x/mirage-tiled:1.0.0` | `TILED_COARSE`, `TILED_REG_TILE`, `TILED_SOLVE`, `TILED_STITCH` |
+| `bolt3x/mirage-regqc:1.0.0` | `GENERATE_REGISTRATION_QC` |
+| `bolt3x/mirage-stardist:1.0.0` | `SEGMENT` / `SEG_QC_SEGMENT` when `--seg_method stardist` |
+| `bolt3x/mirage-instanseg:1.0.0` | `SEGMENT` / `SEG_QC_SEGMENT` when `--seg_method instantseg` *(default)* |
+| `bolt3x/mirage-cellsam:1.0.0` | `SEGMENT` / `SEG_QC_SEGMENT` when `--seg_method cellsam` |
 | *(per backend, `lib/WarpBackends.groovy`)* | `WARP_SEG_QC` |
-| `bolt3x/attend_image_analysis:quantification_gpu` | `SEG_QC_GEOJSON`, `QUANTIFY`, `MERGE_QUANT_CSVS`, `EXTRACT_CELL_PROPERTIES`, `EXTRACT_NUCLEI_PROPERTIES`, `EXPORT_GEOJSON`, `GENERATE_POSTPROCESSING_QC` |
-| `bolt3x/attend_image_analysis:merge` | `MERGE_AND_PYRAMID`, `EXTRACT_MASK_SERIES` |
-| `bolt3x/attend_image_analysis:spatialdata` | `EXPORT_SPATIALDATA` |
+| `bolt3x/mirage-quantify:1.0.0` | `SEG_QC_GEOJSON`, `QUANTIFY`, `MERGE_QUANT_CSVS`, `EXTRACT_CELL_PROPERTIES`, `EXTRACT_NUCLEI_PROPERTIES`, `EXPORT_GEOJSON`, `GENERATE_POSTPROCESSING_QC` |
+| `bolt3x/mirage-merge:1.0.0` | `MERGE_AND_PYRAMID`, `EXTRACT_MASK_SERIES` |
+| `bolt3x/mirage-spatialdata:1.0.0` | `EXPORT_SPATIALDATA` |
 | `ubuntu:22.04` | `AGGREGATE_SIZE_LOGS` |
 
 `SEGMENT` and `WARP_SEG_QC` resolve their image from a backend table

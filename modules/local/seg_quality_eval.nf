@@ -6,7 +6,7 @@
 process SEG_QUALITY_EVAL {
     tag "${meta.patient_id}"
 
-    container "bolt3x/attend_image_analysis:${params.segeval_tag}"
+    container "bolt3x/mirage-segeval:${params.segeval_tag}"
 
     input:
     tuple val(meta), path(cell_mask), path(nuclei_mask), path(image)
@@ -22,7 +22,7 @@ process SEG_QUALITY_EVAL {
     script:
     def args = task.ext.args ?: ''
     def prefix = "${meta.patient_id}"
-    def px = params.cse_pixel_size_um ?: params.pixel_size
+    def px = params.cse_pixel_size_um != null ? params.cse_pixel_size_um : params.pixel_size
     def px_arg = px ? "--pixel-size-um ${px}" : ''
     """
     bytes=\$(stat -L --printf="%s" ${image} 2>/dev/null || echo 0)

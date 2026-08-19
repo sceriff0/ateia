@@ -4,7 +4,7 @@
 process MERGE_SEG_EVAL {
     tag "seg_eval_merge"
 
-    container "bolt3x/attend_image_analysis:${params.segeval_tag}"
+    container "bolt3x/mirage-segeval:${params.segeval_tag}"
 
     input:
     path(seg_eval_jsons)

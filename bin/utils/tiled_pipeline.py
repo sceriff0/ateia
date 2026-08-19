@@ -75,7 +75,13 @@ def register_slide(
     residuals = []
     for t in tiles:
         rx0, ry0, rx1, ry1 = t.read
-        dx, dy, tre = residual_displacement(
+        # NOTE: `_error` (the correlation confidence) is deliberately unused here. The confidence
+        # and range gates live in the FAN-OUT reduction, tiled_solve._grid_from_controls, which is
+        # what the Nextflow DAG actually runs; this in-process composition is a reference/test
+        # harness with no CLI or module caller, and `assemble_control_grid` still gates on TRE
+        # alone. Consequence: on background-heavy input this path is no longer bit-identical to
+        # the fan-out — it keeps control points the fan-out now rejects.
+        dx, dy, tre, _error = residual_displacement(
             ref_dapi[ry0:ry1, rx0:rx1],
             mov_rigid[ry0:ry1, rx0:rx1],
             upsample=upsample,
@@ -100,7 +106,7 @@ def register_slide(
         tre_after = []
         for t in tiles:
             rx0, ry0, rx1, ry1 = t.read
-            _dx, _dy, tre = residual_displacement(
+            _dx, _dy, tre, _error = residual_displacement(
                 ref_dapi[ry0:ry1, rx0:rx1],
                 mov_refined[ry0:ry1, rx0:rx1],
                 upsample=upsample,

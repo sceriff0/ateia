@@ -1,0 +1,92 @@
+nextflow_process {
+
+    name "Test TILED_STITCH process"
+    script "modules/local/tiled_stitch.nf"
+    process "TILED_STITCH"
+
+    tag "modules"
+    tag "modules_local"
+    tag "tiled_stitch"
+
+    test("Should emit a registered slide - stub") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [ patient_id: 'P001', channels: ['DAPI', 'CD3', 'CD8'], is_reference: false ],
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            assert process.success
+            assert process.out.registered
+            assert process.out.versions
+            with(process.out.registered) {
+                assert size() == 1
+                assert get(0).get(1).toString().endsWith('_registered.ome.tiff')
+            }
+        }
+    }
+
+    test("Should pass the panel's channel names to the stitch - rendered command") {
+
+        // Tagged `stub` so CI's blocking `nf-test test --tag stub` gate collects it, but
+        // deliberately WITHOUT `options "-stub"` -- `-stub` never evaluates a `script:` block,
+        // so no stub run can observe a rendered command. Same shape as
+        // tests/modules/tiled_solve.nf.test's "rendered command" cases.
+        //
+        // The stitched slide is written as `*_registered.ome.tiff`, and tifffile writes an OME
+        // header for that suffix whether or not one is asked for. Without `--channel-names` the
+        // header it writes is anonymous -- `<Channel ID="Channel:0:0" SamplesPerPixel="1">`, no
+        // Name -- so a consumer opening the deliverable cannot tell which plane is CD3. The
+        // names exist in meta.channels; this asserts they actually reach the command.
+        //
+        // The assertions read the rendered .command.sh rather than the process outcome, so the
+        // case holds whether tiled_stitch.py itself succeeds; under `-profile test` no container
+        // engine is active and the staged manifest here is not a real manifest.
+        tag "stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [ patient_id: 'P001', channels: ['DAPI', 'CD3', 'CD8'], is_reference: false ],
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            def rendered = []
+            new File("$workDir").eachFileRecurse { f ->
+                if (f.name == '.command.sh' && f.text.contains('tiled_stitch.py')) {
+                    rendered << f.text
+                }
+            }
+
+            assertAll(
+                { assert rendered.size() >= 1,
+                    "no rendered TILED_STITCH .command.sh found under the task work dir" },
+                // The whole panel, in order. A partial match would also be satisfied by a
+                // truncated list, which is exactly the failure that leaves a channel anonymous.
+                { assert rendered.every { it.contains('--channel-names DAPI CD3 CD8') },
+                    "--channel-names does not carry the full panel in order; got: " +
+                    rendered.collect { (it =~ /--channel-names[^\\\\\n]*/)[0] }.join(' | ') },
+                // pixel size still reaches the stitch: it is stamped both as TIFF resolution
+                // tags and, now, as OME PhysicalSize
+                { assert rendered.every { it.contains('--pixel-size') },
+                    "--pixel-size is no longer rendered" }
+            )
+        }
+    }
+}

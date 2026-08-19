@@ -125,7 +125,10 @@
                     ]
                 },
                 "nuclear_markers": {
-                    "type": ["array", "string"],
+                    "type": [
+                        "array",
+                        "string"
+                    ],
                     "description": "Ordered preference of nuclear/fiducial marker names; the first present (resolved from channel metadata, never the filename) is moved to channel 0 and drives both cell segmentation and the registration fiducial. Accepts a list (config/params file) or a comma- or space-separated string, which is the only shape Nextflow can produce for `--nuclear_markers CELLTOX` on the command line; MarkerUtils.markerList normalises both.",
                     "default": [
                         "DAPI",
@@ -156,7 +159,10 @@
                     "type": "string",
                     "description": "reg_qc=2 cell correspondence: 'lsa' (optimal one-to-one assignment within the match radius) or 'mutual_nn' (greedy mutual nearest neighbour).",
                     "default": "lsa",
-                    "enum": ["lsa", "mutual_nn"]
+                    "enum": [
+                        "lsa",
+                        "mutual_nn"
+                    ]
                 },
                 "seg_qc_match_radius_factor": {
                     "type": "number",
@@ -206,7 +212,8 @@
                         "null"
                     ],
                     "description": "JVM heap (GiB) for VALIS/Bio-Formats in REGISTER. null = derive from task.memory at runtime.",
-                    "default": null
+                    "default": null,
+                    "minimum": 1
                 },
                 "reg_tiled_nuclear_index": {
                     "type": [
@@ -233,6 +240,22 @@
                     "type": "number",
                     "description": "STARE only: refine only tiles whose rigid-stage TRE (px) exceeds this.",
                     "default": 1.0,
+                    "minimum": 0
+                },
+                "reg_tiled_max_error": {
+                    "type": "number",
+                    "description": "STARE only: confidence gate. Drop a mesh control point whose phase-correlation error exceeds this (0 = perfect match, ~1 = no shared structure). Keeps background and section-edge tiles out of the deformation mesh.",
+                    "default": 0.99,
+                    "minimum": 0,
+                    "maximum": 1
+                },
+                "reg_tiled_max_disp": {
+                    "type": [
+                        "number",
+                        "null"
+                    ],
+                    "description": "STARE only: range gate. Drop a mesh control point whose displacement magnitude (px) is at or beyond this. null = use reg_tiled_halo, the read-window bound.",
+                    "default": null,
                     "minimum": 0
                 },
                 "reg_tiled_upsample": {
@@ -419,19 +442,25 @@
                     "default": true
                 },
                 "cse_pixel_size_um": {
-                    "type": ["number", "null"],
+                    "type": [
+                        "number",
+                        "null"
+                    ],
                     "description": "Pixel size in micrometers passed to the CellSegmentationEvaluator. null = infer from image metadata.",
                     "default": null
                 },
                 "cse_max_pixels": {
-                    "type": ["integer", "null"],
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
                     "description": "Bin image+masks so CSE scores at most this many pixels, capping its memory/time on full-WSI masks (the pixel size is scaled to match, preserving geometry/area metrics). null = score at full resolution. Keep fixed across a cohort: the composite QualityScore shifts with the binning factor.",
                     "default": 50000000
                 },
                 "segeval_tag": {
                     "type": "string",
-                    "description": "Container tag for the segmentation quality evaluator (segeval) image on bolt3x/attend_image_analysis (Docker Hub).",
-                    "default": "segeval"
+                    "description": "Container tag for the CSE image, bolt3x/mirage-segeval.",
+                    "default": "1.0.0"
                 },
                 "skip_final_qc_report": {
                     "type": "boolean",
@@ -475,8 +504,9 @@
                 },
                 "pyramid_scale": {
                     "type": "integer",
-                    "description": "Scale factor between pyramid levels.",
-                    "default": 2
+                    "description": "Scale factor between pyramid levels. Must be at least 2: a factor of 1 is not a pyramid (every level would be the base), and MERGE_AND_PYRAMID's memory closure divides by 1 - 1/scale^2, which is 0 at scale 1 (Infinity -> a ~2 EB request) and NaN at scale 0 (a 0 GB request).",
+                    "default": 2,
+                    "minimum": 2
                 },
                 "compression": {
                     "type": "string",
@@ -576,6 +606,20 @@
                     "type": "string",
                     "description": "Maximum time limit.",
                     "default": "240.h"
+                },
+                "max_forks": {
+                    "type": "integer",
+                    "description": "Maximum concurrent tasks per process. Also an upper bound on every per-process maxForks in conf/modules.config, so lowering it throttles every module.",
+                    "help_text": "Paired with queue_size, which caps concurrency across the WHOLE pipeline. The lower of the two binds: at the defaults queue_size (20) is far below max_forks (100), so raising max_forks alone has no effect. Raise both, or raise queue_size.",
+                    "minimum": 1,
+                    "default": 100
+                },
+                "queue_size": {
+                    "type": "integer",
+                    "description": "Maximum concurrent tasks across the whole pipeline (executor.queueSize).",
+                    "help_text": "This is normally the binding constraint on concurrency, not max_forks. The shipped default of 20 is deliberately conservative for a shared scheduler.",
+                    "minimum": 1,
+                    "default": 20
                 }
             }
         }

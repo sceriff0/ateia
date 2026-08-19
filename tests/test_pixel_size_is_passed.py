@@ -7,7 +7,7 @@ second, silent owner — exactly the failure this file exists to prevent.
 
 Static rather than behavioural on purpose. `-stub` never evaluates a `script:` block, so
 a stub run cannot see a rendered command at all, and a real nf-test per process would
-need that process's whole dependency stack (BaSiCPy for PREPROCESS, a STARE manifest for
+need that process's whole dependency stack (a STARE manifest for
 TILED_STITCH) to be installed just to read a string.
 `tests/modules/split_channels.nf.test`'s rendered-command case is the behavioural
 counterpart for the one process that can be rendered cheaply.
@@ -95,8 +95,8 @@ SCRIPTS = _scripts_accepting_a_scale()
 def test_the_scan_found_the_scripts_it_is_meant_to_cover():
     """A scope glob that matches nothing passes vacuously; this is the tripwire."""
     assert {
+        "apply_basic_profiles.py",
         "convert_image.py",
-        "preprocess.py",
         "split_multichannel.py",
         "tiled_stitch.py",
         "export_geojson.py",

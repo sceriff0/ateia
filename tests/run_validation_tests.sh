@@ -31,6 +31,23 @@ echo ""
 rm -rf "$OUTPUT_DIR"
 mkdir -p "$OUTPUT_DIR"
 
+# `dry_run` is a `type: boolean` parameter in nextflow_schema.json and MUST NOT
+# be passed on the command line.
+#
+#   * Nextflow 25.04.x turned `--dry_run true` (and a bare `--dry_run`) into a
+#     real Boolean, so nf-schema accepted it.
+#   * Nextflow 26.04.x hands EVERY `--param` through to nf-schema as a String —
+#     `--dry_run true` AND a valueless `--dry_run` both arrive as the string
+#     "true" — and validateParameters() rejects the run with
+#         * --dry_run (true): Value is [string] but should be [boolean]
+#     (measured on NXF_VER=26.04.6; a valueless flag is NOT a workaround).
+#
+# A `-params-file` carries a real JSON boolean, which is a different code path
+# and is accepted unchanged by both engines. Any future boolean parameter this
+# script needs must go in this file, never on the command line.
+PARAMS_FILE="$OUTPUT_DIR/dry_run_params.json"
+printf '{ "dry_run": true }\n' > "$PARAMS_FILE"
+
 # Helper function to run a test.
 #
 # Usage: run_test <name> <pass|fail> <input_csv> <expected_error> [extra nextflow args...]
@@ -52,14 +69,16 @@ run_test() {
     local output_file="$OUTPUT_DIR/test_${TESTS_TOTAL}.log"
     local exit_code=0
 
-    # Run pipeline with dry_run for fast validation.
-    # ${arr[@]+"${arr[@]}"} safely expands a possibly-empty array: bash 3.2 on
-    # macOS errors on a bare "${arr[@]}" when the array is empty.
+    # Run pipeline with dry_run for fast validation. `dry_run` comes from
+    # $PARAMS_FILE, never the command line — see the comment where it is
+    # written; a CLI boolean is rejected on Nextflow 26.
+    # ${arr[@]+"${arr[@]}"} safely expands a possibly-empty array under `set -u`
+    # (bash 3.2 on macOS errors on a bare "${arr[@]}" when empty).
     cd "$PROJECT_ROOT"
     nextflow run main.nf \
+        -params-file "$PARAMS_FILE" \
         --input "$input_csv" \
         --outdir "$OUTPUT_DIR/test_${TESTS_TOTAL}" \
-        --dry_run true \
         ${extra_args[@]+"${extra_args[@]}"} \
         > "$output_file" 2>&1 || exit_code=$?
 
@@ -146,12 +165,20 @@ run_test \
     "" \
     --start preprocessing
 
-# Test 2.3: Invalid - missing DAPI channel
+# Test 2.3: Invalid - no nuclear channel at all.
+#
+# The rejection used to read "DAPI channel not found"; d5bcc06 deliberately
+# generalised it when the nuclear-marker rule moved into lib/MarkerUtils.groovy
+# and stopped hardcoding the literal 'DAPI' (a CELLTOX-only samplesheet is
+# valid). The expectation below is a BRE, so the marker list inside the
+# parentheses can change without this test drifting again — but it still
+# asserts the nuclear-channel reason and the offending patient, not merely
+# "the run failed".
 run_test \
-    "Invalid - missing DAPI channel" \
+    "Invalid - no nuclear channel" \
     "fail" \
     "$TESTDATA_DIR/invalid_no_dapi.csv" \
-    "DAPI channel not found" \
+    "No nuclear channel (.*) found for patient P001" \
     --start preprocessing
 
 # Test 2.4: Invalid - input file does not exist

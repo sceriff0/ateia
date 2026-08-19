@@ -43,10 +43,17 @@ COMPARTMENT_NAMES = COMPARTMENTS
 
 
 def _safe_mean(sums: NDArray, counts: NDArray) -> NDArray:
-    """Element-wise sums / counts with 0.0 where counts is 0."""
+    """Element-wise sums / counts, NaN where counts is 0.
+
+    NaN, not 0.0: a compartment with no pixels was not measured, and the mean of nothing is not
+    a number. 0.0 here would be indistinguishable from a compartment that WAS measured and was
+    dark, which downstream reads as a negative call. bin/export_geojson.py already treats NaN as
+    "missing" and omits the measurement rather than writing a bare NaN literal (which is not
+    valid JSON); this makes the producer agree with that policy.
+    Guarded by tests/test_absent_compartment_is_nan.py.
+    """
     with np.errstate(divide="ignore", invalid="ignore"):
-        means = np.divide(sums, counts)
-    return np.nan_to_num(means, nan=0.0)
+        return np.divide(sums, counts)
 
 
 def compute_compartment_intensities(
@@ -116,12 +123,6 @@ def compute_compartment_intensities(
             f"mask/channel shape mismatch: {cell_mask.shape} vs {channel.shape}"
         )
 
-    valid_labels = np.unique(cell_mask)
-    valid_labels = valid_labels[valid_labels != 0]
-    if len(valid_labels) == 0:
-        logger.warning("[WARN] No cells found in cell mask")
-        return pd.DataFrame()
-
     n = int(cell_mask.max()) + 1
     flat_cell = cell_mask.ravel()
     flat_val = channel.ravel().astype(np.float64)
@@ -129,6 +130,19 @@ def compute_compartment_intensities(
     # Whole-cell sums/counts keyed by cell label.
     cell_sum = np.bincount(flat_cell, weights=flat_val, minlength=n)
     cell_count = np.bincount(flat_cell, minlength=n)
+
+    # The label set comes from the bincount that was needed anyway -- one linear pass whose
+    # non-zero bins ARE the labels present, ascending. This used to be `np.unique(cell_mask)`,
+    # a comparison sort over every pixel (1.6x10^9 on a 40k x 40k slide) computed immediately
+    # before this bincount. Identical output: np.unique returns ascending distinct values,
+    # np.nonzero(counts) returns ascending indices with at least one pixel. The dtype is kept
+    # as the mask's so the published `label` column is unchanged.
+    # Guarded by tests/test_no_full_mask_unique.py.
+    valid_labels = np.nonzero(cell_count)[0]
+    valid_labels = valid_labels[valid_labels != 0].astype(cell_mask.dtype, copy=False)
+    if len(valid_labels) == 0:
+        logger.warning("[WARN] No cells found in cell mask")
+        return pd.DataFrame()
     sums = {"Cell": cell_sum}
     counts = {"Cell": cell_count}
 
@@ -161,22 +175,31 @@ def compute_compartment_intensities(
     # pixel, rebuilt on every channel) is what caused the WSI-scale memory regression;
     # labeled_comprehension computes the same per-label median in bounded memory. A
     # label absent from the underlying label array (e.g. a cell with no nuclear
-    # overlap, so an empty Nucleus/Cytoplasm compartment) yields `default` below,
-    # which reproduces the old code's `.reindex(valid_labels).fillna(0.0)` behavior
-    # exactly (verified against the old groupby-median path in
-    # tests/test_quantify_median.py).
+    # overlap, so an empty Nucleus/Cytoplasm compartment) yields `default` below.
+    #
+    # That default is NaN, deliberately. It used to be 0.0, reproducing the older
+    # `.reindex(valid_labels).fillna(0.0)` path -- but 0.0 makes "this cell has no nucleus"
+    # indistinguishable from "this cell's nucleus was measured and is dark", and downstream
+    # gating reads the second. Nothing can separate them after the fact.
+    # bin/export_geojson.py:78 already states the opposite policy for its own data
+    # ("preserve NaN for cells that had missing raw data") and omits NaN measurements from the
+    # GeoJSON rather than emitting a bare NaN literal, which is not valid JSON. This makes the
+    # producer agree with its consumer.
+    #
+    # `Sum` stays 0.0 further down: the sum over an empty set is zero, which is a real answer.
+    # Guarded by tests/test_absent_compartment_is_nan.py.
     medians = {
         "Cell": ndimage.labeled_comprehension(
-            flat_val, flat_cell, valid_labels, np.median, np.float64, 0.0
+            flat_val, flat_cell, valid_labels, np.median, np.float64, np.nan
         )
     }
     if has_nuclei:
         cyto_cell_labels = np.where(nuc_fg, 0, flat_cell)
         medians["Nucleus"] = ndimage.labeled_comprehension(
-            flat_val, nuc_cell_labels, valid_labels, np.median, np.float64, 0.0
+            flat_val, nuc_cell_labels, valid_labels, np.median, np.float64, np.nan
         )
         medians["Cytoplasm"] = ndimage.labeled_comprehension(
-            flat_val, cyto_cell_labels, valid_labels, np.median, np.float64, 0.0
+            flat_val, cyto_cell_labels, valid_labels, np.median, np.float64, np.nan
         )
     for comp in compartments:
         out[f"{channel_name}: {comp}: Median"] = medians[comp]

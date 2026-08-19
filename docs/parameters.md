@@ -47,17 +47,17 @@ Bio-Formats conversion + BaSiC illumination correction.
 
 | Parameter | Default | Description |
 |---|---|---|
-| `pixel_size` | `0.325` | Physical pixel size in µm, and the **single owner** of every µm conversion in the pipeline: GeoJSON centroids and areas, the published pyramid's `PhysicalSize`, and InstantSeg's rescaling all use this value and nothing else. An input's own OME `PhysicalSizeX` is *not* preferred over it — it is compared against it, and `CONVERT_IMAGE`/`PREPROCESS` log a `[SCALE MISMATCH]` warning naming both numbers when the two disagree by more than 1%. If your slides are not 0.325 µm/px, set this; the warning will not do it for you. See `bin/utils/pixel_size.py`. |
+| `pixel_size` | `0.325` | Physical pixel size in µm, and the **single owner** of every µm conversion in the pipeline: GeoJSON centroids and areas, the published pyramid's `PhysicalSize`, and InstantSeg's rescaling all use this value and nothing else. An input's own OME `PhysicalSizeX` is *not* preferred over it — it is compared against it, and `CONVERT_IMAGE`/`APPLY_PROFILES` log a `[SCALE MISMATCH]` warning naming both numbers when the two disagree by more than 1%. If your slides are not 0.325 µm/px, set this; the warning will not do it for you. See `bin/utils/pixel_size.py`. |
 | `skip_preprocessing` | `false` | Skip BaSiC illumination correction entirely. Conversion still runs — everything downstream assumes the standardised OME-TIFF layout — so the step still emits one image per input and `csv/preprocessed.csv` still has a row per slide; the row points at `<pid>/converted/` instead of `<pid>/preprocessed/`. |
 | `preproc_skip_nuclear` | `true` | Leave the nuclear/fiducial channels named by [`nuclear_markers`](#common) uncorrected. Those channels drive both registration and segmentation, so correcting them changes what both consume. |
 | `preproc_tile_size` | `1950` | BaSiC FOV tile size (px). |
 
-BaSiC otherwise runs at its own defaults — darkfield estimation on, no autotune,
-non-overlapping FOVs — and uses the process CPU allocation. The knobs that exposed
-those (`preproc_autotune`, `preproc_n_iter`, `preproc_overlap`, `preproc_no_darkfield`,
-`preproc_pool_workers`) were removed: nothing tuned them, and `preproc_pool_workers`
-additionally set `PREPROCESS`'s `cpus`, which is now owned outright by
-`conf/modules.config`.
+BaSiC otherwise runs at nf-core BASICPY's upstream defaults — no darkfield estimation,
+no autotune, non-overlapping FOVs. The knobs that once exposed those
+(`preproc_autotune`, `preproc_n_iter`, `preproc_overlap`, `preproc_no_darkfield`,
+`preproc_pool_workers`) were removed with the in-process BaSiC path;
+`preproc_pool_workers` additionally set the correction process's `cpus`, which is now
+owned outright by `conf/modules.config`. See `docs/basic_illumination.md`.
 
 ## Registration
 
@@ -202,7 +202,7 @@ Per-cell marker intensity.
 | `expanded_quantification` | `true` | Also emit Mean and Sum per compartment (per-compartment Median is always emitted). **Requires** `quantify_compartments=true`. |
 
 !!! danger "Validation rule"
-    Setting `--expanded_quantification true` without `--quantify_compartments true`
+    Setting `expanded_quantification = true` without `quantify_compartments = true`
     fails at launch with a clear error.
 
 ## Visualization & export
@@ -243,7 +243,7 @@ the same masks, polygons, measurements and QC. Full store layout:
 | `skip_seg_quality_eval` | `true` | Skip reference-free cell-segmentation quality scoring (CSE). **Opt-in:** set `false` to enable. |
 | `cse_pixel_size_um` | `null` | Pixel size (µm) passed to CSE. `null` = infer from image metadata. |
 | `cse_max_pixels` | `50000000` | Bin image+masks so CSE scores at most this many pixels. `null` = full resolution. |
-| `segeval_tag` | `segeval` | Container tag for the CSE image on `bolt3x/attend_image_analysis`. |
+| `segeval_tag` | `1.0.0` | Container tag for the CSE image, `bolt3x/mirage-segeval`. |
 | `skip_final_qc_report` | `false` | Skip the aggregated HTML QC report. |
 | `seg_qc_pairing` | `lsa` | Cell correspondence backend for `reg_qc=2`'s fixed anchor pairing: `lsa` = optimal one-to-one assignment (exact, per connected component), `mutual_nn` = the older mutual-nearest-centroid rule. See [Staged registration QC](registration_qc.md). |
 | `seg_qc_match_radius_factor` | `1.5` | Match radius for `reg_qc=2` pairing, in median nuclear radii. |
@@ -273,7 +273,7 @@ would fail every run of a fresh clone.
 ```bash
 # publish the image once (Actions -> Build & Push Container Images -> Run workflow),
 # then:
-nextflow run . --skip_seg_quality_eval false --cse_max_pixels 50000000 ...
+nextflow run . -params-file params/seg_quality_eval.json --cse_max_pixels 50000000 ...
 ```
 
 Two things to know before reading the numbers:
@@ -310,6 +310,12 @@ Per-process requests, resource labels, retry policy and containers:
 | `max_memory` | `700.GB` | Global memory ceiling. Clamps every process's request via `process.resourceLimits`. |
 | `max_cpus` | `128` | Global CPU ceiling. |
 | `max_time` | `240.h` | Global walltime ceiling. |
+| `max_forks` | `100` | Max concurrent tasks **per process**. Also an upper bound on every per-process `maxForks`, so lowering it throttles every module. |
+| `queue_size` | `20` | Max concurrent tasks across the **whole pipeline** (`executor.queueSize`). Normally the binding constraint. |
+
+`max_forks` and `queue_size` are a pair: the lower of the two binds. At the defaults
+`queue_size` is far lower, so raising `max_forks` alone has no effect — raise both, or
+raise `queue_size`. See [Resources → Execution & concurrency](resources.md#execution--concurrency).
 
 !!! info "How resources scale"
     Per-process memory and time scale with `task.attempt`, bounded by the
@@ -336,13 +342,13 @@ Full walkthrough: [Incremental cycles](add_cycle.md).
 |---|---|---|
 | `mode` | `standard` | `standard` = normal `--start`/`--stop` pipeline; `add_cycle` = incremental cyclic-IF. |
 | `prior_outdir` | `null` | **Required for `add_cycle`.** The `--outdir` of the previously completed run (supplies the reusable reference, mask, and quantification via its checkpoint CSVs). |
-| `embed_masks` | `false` | Embed the segmentation masks as a second uint32 series in the pyramid OME-TIFF. Written only when `embed_masks && quantify_compartments && expanded_quantification`; `add_cycle` consumes this series, so a prior run must have it to be extendable. `--embed_masks true` REQUIRES both `--quantify_compartments` and `--expanded_quantification` also true — the launch validation rejects the combination otherwise (see warning below). |
+| `embed_masks` | `false` | Embed the segmentation masks as a second uint32 series in the pyramid OME-TIFF. Written only when `embed_masks && quantify_compartments && expanded_quantification`; `add_cycle` consumes this series, so a prior run must have it to be extendable. `embed_masks = true` REQUIRES both `quantify_compartments` and `expanded_quantification` also true — the launch validation rejects the combination otherwise (see warning below). |
 
 !!! warning "`add_cycle` prerequisites"
     `embed_masks` defaults to `false`, so a default run is **not** add_cycle-extendable.
-    Set `--embed_masks true` (together with `--quantify_compartments` and
+    Set `embed_masks = true` (together with `quantify_compartments` and
     `--expanded_quantification`, both on by default) to make a run extendable.
-    `--embed_masks true` with either sibling off is rejected **at launch**
+    `embed_masks = true` with either sibling off is rejected **at launch**
     (`ParamUtils.validateCompartmentQuant`) rather than silently producing a
     plain pyramid, so a prior run either failed to launch with `embed_masks=true`
     misconfigured, or has the mask series if `embed_masks=true` was accepted at

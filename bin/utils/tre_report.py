@@ -39,15 +39,28 @@ def build_tre_report(coarse_tre_px, n_inliers, tile_records, mesh_refined):
 
     ``tile_records`` is a list of per-tile dicts carrying at least ``ix, iy, cx, cy, tre_rigid``;
     if every record also has ``tre_after`` the post-refinement residual is summarised too.
+
+    **The percentile summaries cover ACCEPTED records only.** A control point rejected by the
+    confidence or range gate never reaches the mesh, and its ``tre_rigid`` is not a conservative
+    over-estimate of a real misalignment -- phase correlation always returns a peak, so the
+    number is an artefact of correlating against the wrong thing. Averaging it in describes a
+    registration that was never performed. ``tiles`` still carries every record, accepted or
+    not, because *where* points were dropped is exactly what the spatial heatmap is for.
+
+    A record with no ``accepted`` key counts as accepted -- the same legacy contract
+    ``tiled_solve._accept`` applies to a control point written before confidence gating existed.
     """
+    kept = [t for t in tile_records if bool(t.get("accepted", True))]
     report = {
         "coarse_tre_px": float(coarse_tre_px),
         "n_inliers": int(n_inliers),
         "n_tiles": len(tile_records),
+        "n_accepted": len(kept),
+        "n_rejected": len(tile_records) - len(kept),
         "mesh_refined": bool(mesh_refined),
-        "rigid_tre_px": _pct(t["tre_rigid"] for t in tile_records),
-        "tiles": tile_records,  # spatial heatmap: one entry per tile
+        "rigid_tre_px": _pct(t["tre_rigid"] for t in kept),
+        "tiles": tile_records,  # spatial heatmap: one entry per tile, rejected ones included
     }
-    if tile_records and all("tre_after" in t for t in tile_records):
-        report["residual_after_px"] = _pct(t["tre_after"] for t in tile_records)
+    if kept and all("tre_after" in t for t in kept):
+        report["residual_after_px"] = _pct(t["tre_after"] for t in kept)
     return report

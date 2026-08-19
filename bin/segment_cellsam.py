@@ -21,10 +21,12 @@ Drop-in I/O contract with ``segment.py`` and ``segment_instantseg.py``:
 - emits ``{prefix}.SEGMENT.size.csv`` (input-size trace row) -- written by
   the module
 
-The StarDist helpers (DAPI extraction, tiled label expansion) are *replicated*
-here rather than imported from ``segment.py`` because that module imports
-``stardist``/``tensorflow`` at top level, which are absent in the CellSAM
-container. Replication keeps each backend's dependencies isolated.
+DAPI extraction is shared with the StarDist backend via ``bin/utils/segment_io.py``,
+a module with no ML dependencies of its own -- importing it here does NOT pull in
+``segment.py``'s ``stardist``/``tensorflow``, which stay absent from the CellSAM
+container. Tiled label expansion (``expand_labels_tiled``) is still *replicated*
+below rather than imported from ``segment.py``, for the same isolation reason:
+``segment.py`` itself imports ``stardist``/``tensorflow`` at top level.
 """
 
 from __future__ import annotations
@@ -45,8 +47,8 @@ import tifffile
 from image_utils import ensure_dir
 from logger import configure_logging, get_logger
 from numpy.typing import NDArray
+from segment_io import extract_dapi_channel as _extract_dapi_channel_impl
 from skimage import segmentation
-from validation import clip_negative_values
 
 logger = get_logger(__name__)
 
@@ -57,9 +59,16 @@ def extract_dapi_channel(
 ) -> NDArray:
     """Extract a single (DAPI/nuclear) channel from a multichannel OME-TIFF.
 
-    Memory-mapped read so only the requested channel is pulled into RAM, then
-    negative interpolation artefacts (e.g. bicubic overshoot from registration)
-    are clipped to zero. Mirrors ``segment.py:extract_dapi_channel``.
+    Delegates to ``segment_io.extract_dapi_channel`` (``bin/utils/segment_io.py``),
+    which reads through ``tiled_io.open_lazy`` -- a tifffile zarr view that decodes
+    only the tiles a slice actually touches, so only the requested channel is ever
+    decoded. This is a lazy zarr read, NOT a memory-map of the source file: unlike
+    what ``tif.asarray(out="memmap")`` implies, that call decodes the ENTIRE image
+    into a new full-size *uncompressed* temp file on compressed input before any
+    slicing happens. Negative interpolation artefacts (e.g. bicubic overshoot from
+    registration) are clipped to zero by ``segment_io``. Shares its implementation
+    with ``segment.py:extract_dapi_channel`` -- ``segment_io`` has no stardist/
+    tensorflow or cellSAM/torch imports, so it stays lightweight for both backends.
 
     Parameters
     ----------
@@ -73,39 +82,9 @@ def extract_dapi_channel(
     NDArray, shape (Y, X)
         The extracted nuclear channel.
     """
-    logger.info(f"Loading multichannel image: {multichannel_image_path}")
-
-    with tifffile.TiffFile(multichannel_image_path) as tif:
-        image_memmap = tif.asarray(out="memmap")
-
-        if image_memmap.ndim == 2:
-            logger.info("  - Single channel image (assuming DAPI/nuclear)")
-            dapi_image = np.array(image_memmap, copy=True)
-        elif image_memmap.ndim == 3:
-            n_channels = image_memmap.shape[0]
-            logger.info(f"  - Multichannel image with {n_channels} channels")
-            if dapi_channel_index >= n_channels:
-                raise ValueError(
-                    f"DAPI channel index {dapi_channel_index} out of range "
-                    f"for image with {n_channels} channels"
-                )
-            logger.info(
-                f"  - Extracting nuclear channel (index {dapi_channel_index}) "
-                f"- memory efficient"
-            )
-            dapi_image = np.array(image_memmap[dapi_channel_index, :, :], copy=True)
-        else:
-            raise ValueError(
-                f"Unexpected image dimensions: {image_memmap.shape}. "
-                f"Expected 2D (Y, X) or 3D (C, Y, X)"
-            )
-
-    dapi_image = clip_negative_values(dapi_image, logger, stage_name="extract_dapi")
-
-    logger.info(f"  DAPI channel shape: {dapi_image.shape}")
-    logger.info(f"  DAPI dtype: {dapi_image.dtype}")
-    logger.info(f"  DAPI value range: [{dapi_image.min()}, {dapi_image.max()}]")
-
+    dapi_image, _metadata = _extract_dapi_channel_impl(
+        multichannel_image_path, dapi_channel_index, logger=logger
+    )
     return dapi_image
 
 
@@ -301,11 +280,15 @@ def run_cellsam(
     logger.info("")
     logger.info("Saving segmentation masks...")
     logger.info(f"  Nuclei mask: {nuclei_mask_path.name}")
-    tifffile.imwrite(nuclei_mask_path, nuclei_mask, compression="zlib")
+    # bigtiff for the same reason tiled_stitch.py:118 and extract_mask_series.py give:
+    # a 40000x40000 uint32 label mask is 6.4 GB before compression, and classic TIFF's
+    # 32-bit offsets overflow past 4 GB. Compression usually keeps it under -- usually is
+    # not a contract. Guarded by tests/test_slide_io_seam.py.
+    tifffile.imwrite(nuclei_mask_path, nuclei_mask, compression="zlib", bigtiff=True)
     del nuclei_mask
 
     logger.info(f"  Cell mask: {cell_mask_path.name}")
-    tifffile.imwrite(cell_mask_path, cell_mask, compression="zlib")
+    tifffile.imwrite(cell_mask_path, cell_mask, compression="zlib", bigtiff=True)
     del cell_mask
 
     logger.info("")

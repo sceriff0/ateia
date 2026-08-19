@@ -5,7 +5,9 @@
 */
 
 include { CONVERT_IMAGE           } from '../../modules/local/convert_image'
-include { PREPROCESS              } from '../../modules/local/preprocess'
+include { TILE_FOR_BASIC          } from '../../modules/local/tile_for_basic'
+include { BASICPY                 } from '../../modules/nf-core/basicpy/main'
+include { APPLY_PROFILES          } from '../../modules/local/apply_profiles'
 include { GENERATE_PREPROCESS_QC  } from '../../modules/local/generate_preprocess_qc'
 
 /*
@@ -14,9 +16,12 @@ include { GENERATE_PREPROCESS_QC  } from '../../modules/local/generate_preproces
 ========================================================================================
     Description:
         Converts images to standardized OME-TIFF (with the nuclear/fiducial channel
-        in channel 0) and applies BaSiC illumination correction. The correction is
-        skipped entirely when params.skip_preprocessing is set; conversion is not,
-        because everything downstream assumes the standardised layout.
+        in channel 0) and applies BaSiC illumination correction through nf-core's
+        BASICPY module -- three processes, not one: TILE_FOR_BASIC (slide -> multi-site
+        tile stack), BASICPY (profiles only), APPLY_PROFILES (the arithmetic the module
+        leaves to ASHLAR upstream, plus reassembly). The correction is skipped entirely
+        when params.skip_preprocessing is set; conversion is not, because everything
+        downstream assumes the standardised layout.
 
     Input:
         ch_input: Channel of [meta, file] tuples where meta contains:
@@ -66,16 +71,49 @@ workflow PREPROCESSING {
     // the row just points at the converted image instead of a corrected one.
     //
     // This is a branch and not an `ext.when` because the checkpoint must name the
-    // directory the file was ACTUALLY published into. PREPROCESS publishes to
+    // directory the file was ACTUALLY published into. APPLY_PROFILES publishes to
     // <pid>/preprocessed/, CONVERT_IMAGE to <pid>/converted/. Recording the
-    // preprocessed path for a run that never ran PREPROCESS would name a directory
+    // preprocessed path for a run that never ran the correction would name a directory
     // that does not exist on disk -- the same defect Layout.passthroughPath documents
     // for unregistered slides, and one tests/checkpoint_manifest.nf.test fails on.
     if (params.skip_preprocessing) {
         ch_preprocessed_with_meta = ch_for_preprocess
     } else {
-        PREPROCESS ( ch_for_preprocess )
-        ch_preprocessed_with_meta = PREPROCESS.out.preprocessed
+        // Illumination correction is three processes, not one, because nf-core's BASICPY
+        // computes PROFILES ONLY (mcmicro applies them downstream inside ASHLAR, which
+        // mirage does not have) and refuses a single-sited image -- which every stitched
+        // mirage slide is. TILE_FOR_BASIC writes the pseudo-FOV grid onto the Z axis so
+        // the module sees one site per tile; APPLY_PROFILES does the arithmetic the
+        // module leaves out and reassembles the slide.
+        TILE_FOR_BASIC ( ch_for_preprocess )
+
+        // `meta.id` is added HERE and nowhere else. The vendored module tags its task with
+        // it and names its outputs from it (`ext.prefix ?: "${meta.id}"`), and mirage's
+        // meta map has no `id`. It lives only for the duration of BASICPY -- the map that
+        // continues downstream is TILE_FOR_BASIC's, untouched -- so no downstream consumer
+        // sees a key the rest of the linear path does not have.
+        BASICPY (
+            TILE_FOR_BASIC.out.tiles.map { meta, tiles -> [ meta + [id: tiles.simpleName], tiles ] }
+        )
+
+        // Joined on a STRING key, deliberately, NOT on the meta map. The left side carries
+        // TILE_FOR_BASIC's meta (no `id`); the right side carries BASICPY's meta, which
+        // gained an `id` two lines up (line 96) for that process alone. A join on the meta
+        // map itself would therefore never match -- the two maps differ by that one key --
+        // so the join has to go around it. `<patient>/<tile basename>` reconstructs the
+        // same string on both sides (`meta.patient_id` is common to both; `json.simpleName`
+        // on the left and `meta.id` on the right both resolve to the tile-stack basename),
+        // which is unique per slide because TILE_FOR_BASIC names its outputs after the
+        // converted image and BASICPY names its profiles after the tile stack it was given.
+        ch_apply = TILE_FOR_BASIC.out.sidecar
+            .map { meta, image, json -> [ "${meta.patient_id}/${json.simpleName}", meta, image, json ] }
+            .join(
+                BASICPY.out.profiles.map { meta, dfp, ffp -> [ "${meta.patient_id}/${meta.id}", dfp, ffp ] }
+            )
+            .map { key, meta, image, json, dfp, ffp -> [ meta, image, json, dfp, ffp ] }
+
+        APPLY_PROFILES ( ch_apply )
+        ch_preprocessed_with_meta = APPLY_PROFILES.out.preprocessed
     }
 
     // Generate QC images (PNG per channel) for visual inspection
@@ -126,8 +164,17 @@ workflow PREPROCESSING {
         .mix(CONVERT_IMAGE.out.versions.first())
 
     if (!params.skip_preprocessing) {
-        ch_size_logs = ch_size_logs.mix(PREPROCESS.out.size_log)
-        ch_versions  = ch_versions.mix(PREPROCESS.out.versions.first())
+        // BASICPY is absent from both mixes on purpose. It emits no size log (it is
+        // vendored unmodified and upstream writes none) and its version emit is a
+        // hardcoded `val("1.2.0")` on a versions TOPIC channel, not a versions.yml file,
+        // so mirage's file-based aggregation cannot collect it. See
+        // modules/nf-core/basicpy/MIRAGE-NOTES.md.
+        ch_size_logs = ch_size_logs
+            .mix(TILE_FOR_BASIC.out.size_log)
+            .mix(APPLY_PROFILES.out.size_log)
+        ch_versions  = ch_versions
+            .mix(TILE_FOR_BASIC.out.versions.first())
+            .mix(APPLY_PROFILES.out.versions.first())
     }
 
     // Collect QC outputs (if enabled)

@@ -34,10 +34,16 @@ jobs:
   python-tests:
     name: Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.9', '3.10', '3.11']
+        # 3.9 was dropped 2026-08-17. Nothing that ships runs it: every container image
+        # is Python 3.10 or newer (containers/convert is 3.10, containers/spatialdata is
+        # 3.12). Carrying it cost real fidelity -- it was the sole reason CI's dask had to
+        # be pinned two years behind the version production runs, and the sole reason
+        # anndata was installed "optionally" with a `|| echo` fallback.
+        python-version: ['3.10', '3.11']
 
     steps:
       - name: Checkout repository
@@ -55,30 +61,57 @@ jobs:
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt || true
           fi
-          pip install pytest pytest-cov tifffile numpy pandas scikit-image scipy scikit-learn xmltodict
-          # zarr/numcodecs must be pinned together, and pinned HERE rather than left to
-          # transitive resolution: tests/test_tiled_stitch_streaming.py imports
-          # bin/utils/tiled_io.py, which imports zarr, and a newer numcodecs drops
-          # blosc.cbuffer_sizes that zarr 2.18 imports — so the test module fails at
-          # COLLECTION with `from zarr.meta import Metadata2, Metadata3`, taking the whole
-          # job down rather than failing one test. Same pair as containers/tiled/requirements.txt.
-          # anndata powers tests/test_join_flowpath.py. Tolerated as optional because
-          # anndata has dropped Python 3.9, which this matrix still covers; the test
-          # module pytest.importorskip's it, so an unavailable anndata skips those
-          # tests instead of failing the job.
+          pip install pytest pytest-cov pandas scikit-learn xmltodict
+          # The imaging stack (numpy/scipy/scikit-image/tifffile/zarr/numcodecs) is
+          # pinned to containers/tiled/requirements.txt — the production image that
+          # actually runs the tiled path — and installed together in one command so
+          # there is no resolver window where an unpinned package can drag in a
+          # version incompatible with the others. This used to be two separate `pip
+          # install`s (an unpinned tifffile/numpy/scikit-image/scipy first, then
+          # zarr/numcodecs pinned "LAST so it wins"), which let CI resolve a tifffile
+          # requiring zarr>=3.2 and then force-downgrade zarr back to 2.18.3 afterward
+          # — an inconsistent install that read a blank thumbnail (intensity
+          # p1/p50/p99.9 = 0.0/0.0/0.0) and failed unrelated tiled tests with
+          # `RuntimeError: ORB found no features.` tests/test_ci_stack_pinned.py
+          # guards this pin against re-diverging from containers/tiled/requirements.txt.
+          #
+          # zarr/numcodecs must be pinned together: tests/test_tiled_stitch_streaming.py
+          # imports bin/utils/tiled_io.py, which imports zarr, and a newer numcodecs
+          # drops blosc.cbuffer_sizes that zarr 2.18 imports — so the test module fails
+          # at COLLECTION with `from zarr.meta import Metadata2, Metadata3`, taking the
+          # whole job down rather than failing one test.
+          pip install numpy==1.26.4 scipy==1.15.3 scikit-image==0.25.2 tifffile==2025.5.10 zarr==2.18.3 numcodecs==0.13.1
+          # dask[array] powers bin/convert_image.py's lazy read: BioImage.dask_data is a
+          # dask array, and tests/test_convert_lazy_read.py +
+          # tests/test_convert_streaming_write.py drive the real converter with one, so
+          # `import dask.array` must succeed here. It is imported UNCONDITIONALLY in both
+          # test modules (no importorskip) so dropping this line fails the gate rather
+          # than silently deleting those tests from it.
+          #
+          # Pinned to the version production actually runs: containers/stardist and
+          # containers/cellsam both pin dask==2026.7.1, and containers/convert -- the image
+          # that runs convert_image.py -- now pins it too. It requires Python >=3.10, which
+          # is why the 3.9 matrix leg above had to go first; numpy==1.26.4 pinned above
+          # satisfies dask[array] 2026.7.1's numpy>=1.24.
+          pip install 'dask[array]==2026.7.1'
+          # bin/utils/qc.py imports cv2 at module scope (tests/test_registration_qc_lazy_read.py
+          # is the first test module to import qc.py at all), and this runner has no display
+          # libs, so -headless, not opencv-python (containers/regqc/requirements.txt's runtime
+          # pin). Pinned to the same 4.10.0.82 release that container installs, and to a build
+          # compatible with numpy==1.26.4 above -- opencv-python-headless>=5 requires numpy>=2
+          # and would break the pin this whole install line exists to protect.
+          pip install opencv-python-headless==4.10.0.82
+          # anndata powers tests/test_join_flowpath.py. It used to be installed with a
+          # `|| echo` fallback because anndata had dropped Python 3.9 and this matrix
+          # covered it -- which meant those tests silently vanished from one leg of the
+          # gate. 3.9 is gone, anndata installs on every remaining leg, so the fallback
+          # is gone with it and a failed install now fails the job.
           #
           # Capped below 0.12: anndata >= 0.12 requires zarr >= 3, and zarr 3 removes the
           # store API tifffile's aszarr relies on (`Unsupported type for store_like:
           # 'ZarrTiffStore'`), which breaks the tiled streaming/fanout tests. 0.11.x works
           # with zarr 2 and is all these tests need — they only build in-memory AnnData.
-          pip install 'anndata<0.12' || echo "anndata unavailable on Python ${{ matrix.python-version }} — test_join_flowpath will skip"
-          # ORDERING IS LOAD-BEARING: this pin goes LAST so it wins over anything the
-          # installs above dragged in transitively. zarr/numcodecs must move together —
-          # newer numcodecs drops blosc.cbuffer_sizes that zarr 2.18 imports, and
-          # tests/test_tiled_stitch_streaming.py imports bin/utils/tiled_io.py -> zarr, so
-          # a bad pair fails at COLLECTION and takes the whole job down rather than one
-          # test. Same pair as containers/tiled/requirements.txt.
-          pip install 'zarr==2.18.3' 'numcodecs==0.13.1'
+          pip install 'anndata<0.12'
 
       - name: Generate test data
         run: |
@@ -103,6 +136,7 @@ jobs:
   nextflow-stub:
     name: NF ${{ matrix.nextflow-version }} stub
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -145,9 +179,6 @@ jobs:
         run: |
           nextflow plugin install "$(sed -n "s/.*id '\(nf-schema@[0-9.]*\)'.*/\1/p" nextflow.config)"
 
-      - name: Set up Docker
-        uses: docker/setup-buildx-action@v3
-
       - name: Install Python for test data generation
         uses: actions/setup-python@v5
         with:
@@ -156,7 +187,10 @@ jobs:
 
       - name: Generate test data
         run: |
-          pip install numpy tifffile
+          # Pinned to containers/tiled/requirements.txt (the production tiled-path
+          # image) — guarded by tests/test_ci_stack_pinned.py, which requires every
+          # `pip install` of a guarded imaging package, in every job, to match.
+          pip install numpy==1.26.4 tifffile==2025.5.10
           python tests/testdata/generate_complete_testdata.py
 
       - name: Check all profiles parse without the gitignored site config
@@ -208,6 +242,7 @@ jobs:
   nf-test-stub:
     name: nf-test (stub)
     runs-on: ubuntu-latest
+    timeout-minutes: 45
 
     steps:
       - name: Checkout repository
@@ -247,9 +282,6 @@ jobs:
         run: |
           nextflow plugin install "$(sed -n "s/.*id '\(nf-schema@[0-9.]*\)'.*/\1/p" nextflow.config)"
 
-      - name: Set up Docker
-        uses: docker/setup-buildx-action@v3
-
       - name: Install Python for test data generation
         uses: actions/setup-python@v5
         with:
@@ -258,7 +290,10 @@ jobs:
 
       - name: Generate test data
         run: |
-          pip install numpy tifffile
+          # Pinned to containers/tiled/requirements.txt (the production tiled-path
+          # image) — guarded by tests/test_ci_stack_pinned.py, which requires every
+          # `pip install` of a guarded imaging package, in every job, to match.
+          pip install numpy==1.26.4 tifffile==2025.5.10
           python tests/testdata/generate_complete_testdata.py
 
       - name: Install nf-test
@@ -289,6 +324,7 @@ jobs:
   nf-test-real:
     name: nf-test (real)
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
     # ADVISORY. Registration, segmentation model-loading, and most test-staging
     # bugs are fixed (suite went 26 -> ~20 failing); the remaining failures are
@@ -348,7 +384,10 @@ jobs:
 
       - name: Generate test data
         run: |
-          pip install numpy tifffile
+          # Pinned to containers/tiled/requirements.txt (the production tiled-path
+          # image) — guarded by tests/test_ci_stack_pinned.py, which requires every
+          # `pip install` of a guarded imaging package, in every job, to match.
+          pip install numpy==1.26.4 tifffile==2025.5.10
           python tests/testdata/generate_complete_testdata.py
 
       - name: Install nf-test
@@ -375,6 +414,7 @@ jobs:
   nf-test-integration:
     name: nf-test (integration)
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     if: github.event_name == 'workflow_dispatch'
 
     steps:
@@ -418,7 +458,10 @@ jobs:
 
       - name: Generate test data
         run: |
-          pip install numpy tifffile
+          # Pinned to containers/tiled/requirements.txt (the production tiled-path
+          # image) — guarded by tests/test_ci_stack_pinned.py, which requires every
+          # `pip install` of a guarded imaging package, in every job, to match.
+          pip install numpy==1.26.4 tifffile==2025.5.10
           python tests/testdata/generate_complete_testdata.py
 
       - name: Install nf-test
@@ -448,6 +491,7 @@ jobs:
   ruff:
     name: Ruff lint
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Checkout repository
@@ -475,6 +519,7 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: Checkout repository
@@ -506,6 +551,7 @@ jobs:
     # `ruff` is the real, blocking Python lint gate.
     needs: [python-tests, nextflow-stub, nf-test-stub, ruff]
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     if: always()
     steps:
       - name: Check all jobs passed

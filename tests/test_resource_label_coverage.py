@@ -385,22 +385,31 @@ def test_exactly_one_resource_owner_per_process():
 #     is a (coefficient, addend) position pair. The pooled version let a doc cell
 #     hold every right number in the wrong place and pass: SPLIT_CHANNELS
 #     documented as `f<5 -> 64, f<15 -> 32` against a config saying the inverse,
-#     and PREPROCESS's `7`/`8` swapped between the per-GiB coefficient and the
-#     flat addend. Both now fail by name. See memory_cell_mismatch, which knows
+#     and the (since-removed) PREPROCESS's `7`/`8` swapped between the per-GiB
+#     coefficient and the flat addend. Both now fail by name. See memory_cell_mismatch, which knows
 #     exactly three shapes and refuses loudly on a fourth.
 #
 # What is deliberately NOT compared, and why:
-#   * `TILED_REG_TILE` / `TILED_STITCH` memory is `tiledRegTileGb(params)` /
-#     `tiledStitchGb(params)` -- derived from `reg_tiled_tile`/`reg_tiled_halo`
-#     and `reg_tiled_out_tile` at task submission, not a literal. Re-deriving it
-#     here would duplicate the very
+#   * `TILED_REG_TILE` / `TILED_STITCH` memory is derived from
+#     `reg_tiled_tile`/`reg_tiled_halo` and `reg_tiled_out_tile` at task
+#     submission, not a literal. Re-deriving it here would duplicate the very
 #     formula this guard exists to stop duplicating, and evaluating Groovy from
-#     pytest is not on the table. So for these two rows the guard asserts the
-#     HELPER NAME appears in both the config expression and the doc cell, and
-#     leaves the illustrative "4 GB at defaults" figure unchecked. Renaming or
-#     replacing a helper therefore still fails the build; re-tuning the formula
-#     without touching its name does not. docs/resources.md says so in the same
+#     pytest is not on the table. So for these two rows the guard asserts every
+#     DERIVATION SOURCE named in the config expression is named in the doc cell
+#     too, and leaves the illustrative "4 GB at defaults" figure unchecked.
+#     Changing which parameter the formula reads therefore still fails the build;
+#     re-tuning its constants does not. docs/resources.md says so in the same
 #     words, so the unchecked figure is labelled as such where a reader sees it.
+#     The two closures used to call a `tiledRegTileGb(params)` helper and the
+#     source asserted on was the HELPER name; Nextflow 26's strict config parser
+#     forbids declaring a function in a config file, so the arithmetic is now
+#     inlined and the sources asserted on are the `params.*` reads themselves.
+#     For these two rows that is a tighter assertion -- the parameters, not a
+#     name that said nothing about which parameters were read. It is NOT a
+#     blanket improvement, which is why the reads are allowlisted by name in
+#     DERIVED_MEMORY_PARAMS: recognising any `params.` mention would hand the
+#     exemption to expressions that used to be checked or loudly refused, and
+#     the exemption's whole content is "nobody checks the magnitudes here".
 #   * `SPLIT_PRIOR_PYRAMID` and `SEG_QC_SEGMENT` are ALIASES, not modules. Their
 #     `withName:` blocks set no resource field (they override publishDir /
 #     ext.prefix only), so neither is required to have a row. SEG_QC_SEGMENT has
@@ -444,10 +453,85 @@ NUMBER_RE = re.compile(r"\d+(?:\.\d+)?")
 # the tier thresholds in neighbouring cells from being read as hours.
 HOURS_RE = re.compile(r"(\d+(?:\.\d+)?)\s*\.\s*h\b")
 
-# `tiledRegTileGb(params)` -- a per-task value derived from params at submission
-# time rather than a literal. See the header above for why these are exempt from
-# the numeric comparison and what is asserted instead.
-DERIVED_HELPER_RE = re.compile(r"\b(\w+)\(\s*params\s*\)")
+# The parameters a memory closure is allowed to be DERIVED FROM -- the reads in
+# TILED_REG_TILE's and TILED_STITCH's inlined `memory = { ... }` arithmetic, which
+# no longer goes through a helper because the strict config parser forbids
+# declaring one in a config file.
+#
+# Enumerated rather than written `params\.(\w+)`. The broad form looks like the
+# same rule and is not: the exemption SKIPS the numeric comparison entirely and
+# asks only that the doc cell contain the name, so a broad pattern silently
+# swallows any future memory closure that merely mentions a parameter --
+# `params.big_run ? 128.GB : 32.GB * task.attempt` reserves one of two literal
+# amounts, both of which a doc row should have to state, and under the broad form
+# no row would state either. Those expressions get memory_cell_mismatch's loud
+# "fourth shape" refusal instead, which is the outcome that puts a human in
+# front of the decision. test_derived_memory_exemption_does_not_swallow_a_param_
+# dependent_choice pins exactly that, and
+# test_derived_memory_param_allowlist_is_not_stale keeps this list honest.
+#
+# Widening this list is a deliberate act: it means asserting that the new
+# closure's value genuinely cannot be computed from pytest, the way these two
+# cannot.
+#
+# `preproc_tile_size` was added when TILE_FOR_BASIC and APPLY_PROFILES stopped
+# holding the slide. Both used to ask for a flat multiple of the INPUT FILE's
+# size (`f x 3 GB` and `f x 7 GB`), which the numeric comparison could check.
+# Both now stream a tile at a time, so their requests are built from the
+# pseudo-FOV size the same way the two STARE rows are built from the tile and
+# halo -- a profile-plane term of `2 x C x preproc_tile_size^2 x 8` bytes plus
+# write buffers, none of it computable here. Neither closure carries a file-size
+# term any more: CONVERT_IMAGE and SPLIT_CHANNELS now write tiled
+# (tests/test_convert_streaming_write.py::test_the_write_is_tiled,
+# tests/test_split_multichannel_lazy_read.py::test_the_write_is_tiled), so a
+# region read decodes a tile rather than the whole plane the old
+# `ome_tiff.size()` term used to bound. The doc rows name every remaining term
+# instead.
+#
+# `pyramid_resolutions` and `pyramid_scale` were added when MERGE_AND_PYRAMID
+# stopped holding the slide. Its request used to be a `f<20 ? 200.GB : 300.GB`
+# ladder, which the pairing comparison could check; it is now built from ONE
+# decoded plane (estimated from the largest single channel file) plus the pyramid
+# levels that have to stay resident while tifffile fills the SubIFDs level by
+# level. That second term is a geometric series in the SCALE FACTOR and vanishes
+# below three levels, so both parameters genuinely change the magnitude -- at
+# `--pyramid-resolutions 2` the term is zero, and at scale 4 it is a sixteenth of
+# its value at scale 2. Neither is computable here: the first term depends on the
+# input file's compression ratio and the second on the channel count, and a doc
+# row could state neither. The row names every term instead.
+DERIVED_MEMORY_PARAMS = (
+    "reg_tiled_tile",
+    "reg_tiled_halo",
+    "reg_tiled_out_tile",
+    "preproc_tile_size",
+    "pyramid_resolutions",
+    "pyramid_scale",
+)
+
+# A memory request derived from params at submission time rather than being a
+# literal -- either an allowlisted `params.reg_tiled_tile` read (the inlined form
+# the strict config parser forces) or a legacy `tiledRegTileGb(params)` helper
+# call. The capture is the DERIVATION SOURCE: the parameter name, or the helper
+# name. See the header above for why these rows are exempt from the numeric
+# comparison and what is asserted in its place.
+#
+# Both alternatives are kept because both must keep returning None from
+# expr_values_per_attempt: a helper call is not arithmetic pytest can evaluate,
+# and neither is a param read. Only the second form occurs in conf/modules.config
+# today; test_derived_memory_detects_both_forms covers the first.
+DERIVED_HELPER_RE = re.compile(
+    r"\b(\w+)\(\s*params\s*\)|\bparams\.(" + "|".join(DERIVED_MEMORY_PARAMS) + r")\b"
+)
+
+
+def derived_memory_sources(expr: str) -> set[str]:
+    """Return the derivation sources `expr` reads, or an empty set if it is not
+    param-derived at all. A non-empty result grants the exemption: the numeric
+    comparison is skipped and the doc cell is required to name every source
+    instead."""
+    return {
+        m.group(1) or m.group(2) for m in DERIVED_HELPER_RE.finditer(expr)
+    }
 
 # One rung of a size-tier ladder, CONFIG side: `file_gb < 10 ? 32.GB`. Threshold
 # and magnitude are captured TOGETHER, in one match, so the pair cannot come
@@ -461,10 +545,21 @@ CONFIG_TIER_RE = re.compile(r"<\s*(\d+(?:\.\d+)?)\s*\?\s*(\d+(?:\.\d+)?)\s*\.GB"
 # The ladder's final `else` branch: the first `: N.GB` after its last rung.
 CONFIG_ELSE_RE = re.compile(r":\s*(\d+(?:\.\d+)?)\s*\.GB")
 
-# The one non-ladder size-dependent shape in conf/modules.config: PREPROCESS's
-# `... * 7.GB * task.attempt + 8.GB`, linear in file size. The two numbers play
-# DIFFERENT roles -- 7 is the per-GiB-of-input coefficient, 8 a flat addend --
-# so they are captured positionally rather than pooled.
+# A non-ladder size-dependent shape, `... * N.GB * task.attempt + M.GB`, linear in file
+# size: coefficient and flat addend captured positionally (not pooled), so a doc cell
+# cannot state the right pair of numbers in the wrong roles and pass -- the same
+# mispairing CONFIG_TIER_RE's comment above describes for the ladder rungs.
+#
+# CURRENTLY UNUSED in conf/modules.config: TILE_FOR_BASIC and APPLY_PROFILES were this
+# regex's only two matches, and f154792 rewrote both off a file-size term entirely (they
+# now derive from preproc_tile_size, not from the staged input's size). That is not a
+# broken guard -- memory_cell_mismatch still refuses loudly on any shape it does not
+# recognise, so a size-linear closure landing anywhere in the config is still caught, not
+# silently waved through -- and the mechanism itself is unit-tested against a synthetic
+# literal in test_memory_cell_mismatch_compares_pairs_not_pooled_numbers, independent of
+# whether any real closure currently matches it. Kept
+# so a reintroduced size-linear closure (this shape or another process's) is still
+# checked, not because anything live matches it today.
 CONFIG_SIZE_LINEAR_RE = re.compile(
     r"\*\s*(\d+(?:\.\d+)?)\s*\.GB\s*\*\s*task\.attempt\s*\+\s*(\d+(?:\.\d+)?)\s*\.GB"
 )
@@ -635,7 +730,7 @@ def expr_values_per_attempt(expr: str) -> list[float] | None:
     [32, 64, 128, 256]. A tiered closure (`(f < 10 ? 32.GB : ...)`) or a
     param-derived one returns None -- those are compared differently.
     """
-    if DERIVED_HELPER_RE.search(expr):
+    if derived_memory_sources(expr):
         return None
     values = []
     for attempt in ATTEMPTS:
@@ -753,7 +848,7 @@ def memory_cell_mismatch(expr: str, cell: str) -> str | None:
       multisets: with the latter, a doc cell stating the right thresholds and
       the right magnitudes but pairing them backwards -- `f<5 -> 64,
       f<15 -> 32` against a config that says `f<5 -> 32, f<15 -> 64` -- passed.
-    * a **size-linear** request (PREPROCESS's `* 7.GB * task.attempt + 8.GB`)
+    * a **size-linear** request (APPLY_PROFILES's `* 7.GB * task.attempt + 8.GB`)
       has no `<` at all, so it is not a ladder; its two numbers are compared
       POSITIONALLY, coefficient against coefficient and addend against addend.
       Pooling them let `7` and `8` be swapped in the doc and still pass, even
@@ -951,6 +1046,97 @@ def test_expr_values_per_attempt_handles_the_shapes_in_modules_config():
     assert expr_values_per_attempt("8") == [8, 8, 8, 8]
     assert expr_values_per_attempt("(Math.ceil(tiledRegTileGb(params)) as int).GB * task.attempt") is None
     assert expr_values_per_attempt("(file_gb < 10 ? 32.GB : 64.GB) * task.attempt") is None
+    assert expr_values_per_attempt(
+        "def win = ((params.reg_tiled_out_tile as int) as long)\n"
+        "(Math.ceil(Math.max(4d, (0.6d + 0.17d * mpx) * 2d)) as int).GB * task.attempt"
+    ) is None
+
+
+def test_derived_memory_detects_both_forms():
+    """DERIVED_HELPER_RE must capture the derivation SOURCE in either form.
+
+    The inlined form is the one conf/modules.config uses -- the strict config
+    parser forbids the helper -- and it is the one that matters: it is what makes
+    the doc cell name `reg_tiled_tile` rather than a helper name that pinned
+    nothing about which parameter the formula actually read. The helper form is
+    kept alive only so a config that reintroduces one (in a file the strict
+    parser does not govern) is still routed to the exemption rather than being
+    numerically compared against a number it does not have.
+    """
+
+    sources = derived_memory_sources
+
+    assert sources("(Math.ceil(tiledRegTileGb(params)) as int).GB * task.attempt") == {
+        "tiledRegTileGb"
+    }
+    assert sources(
+        "def win = (((params.reg_tiled_tile as int) + 2 * (params.reg_tiled_halo as int)) as long)"
+    ) == {"reg_tiled_tile", "reg_tiled_halo"}
+    # A constant request is NOT derived -- otherwise every row would take the
+    # exemption path and the numeric comparison would check nothing.
+    assert sources("32.GB * task.attempt") == set()
+    assert sources("(file_gb < 10 ? 32.GB : 64.GB) * task.attempt") == set()
+
+
+def test_derived_memory_exemption_does_not_swallow_a_param_dependent_choice():
+    """A memory closure that merely MENTIONS a param must not be exempted.
+
+    The exemption skips the numeric comparison outright and asks only that the
+    doc cell contain the source's name, so every expression it swallows is an
+    expression nothing checks the magnitudes of. That is the right trade for the
+    two STARE closures -- their value genuinely cannot be computed from pytest --
+    and the wrong trade for a param-dependent CHOICE between literal
+    reservations, where the magnitudes are right there in the config and a doc
+    cell stating neither of them should fail.
+
+    Both expressions below get a loud "fourth shape" refusal from
+    memory_cell_mismatch when they are NOT exempted, which is the outcome this
+    pins: `params.`-mentioning is not the rule, and a future closure of this
+    shape must land in front of a human rather than be waved through.
+    """
+    counterexamples = [
+        "params.big_run ? 128.GB : 32.GB * task.attempt",
+        "(params.seg_gpu ? 64 : 32).GB * task.attempt",
+    ]
+    for expr in counterexamples:
+        assert derived_memory_sources(expr) == set(), (
+            f"`{expr}` was granted the derived-memory exemption. It is a choice "
+            "between literal reservations, not a value derived from a parameter "
+            "-- exempting it means no doc row states either magnitude and "
+            "nothing notices"
+        )
+        # Not evaluable, not a ladder, not size-linear: so with the exemption
+        # correctly withheld it reaches the refusal branch. If it did NOT, the
+        # assertion above would be cosmetic -- the row would go unchecked by a
+        # different route.
+        assert "cannot be checked" in (
+            memory_cell_mismatch(expr, "`32 GB \u00d7 attempt`") or ""
+        ), f"`{expr}` is silently accepted by memory_cell_mismatch"
+
+
+def test_derived_memory_param_allowlist_is_not_stale():
+    """Every name in the allowlist must really be read by a memory expression.
+
+    An allowlist entry whose justification has evaporated is the failure mode
+    this repo keeps rediscovering: it looks like coverage and checks nothing.
+    If a STARE closure stops reading one of these, drop it here too -- the row
+    then goes back through the numeric comparison, which is the safe direction.
+    """
+    memory_exprs = [
+        expr
+        for name in parse_doc_process_table()
+        for expr in effective_exprs(name, "memory")
+    ]
+    unread = [
+        param
+        for param in DERIVED_MEMORY_PARAMS
+        if not any(f"params.{param}" in expr for expr in memory_exprs)
+    ]
+    assert not unread, (
+        f"{unread} are allowlisted as derived-memory sources but no `memory` "
+        "expression in conf/modules.config reads them. Remove the stale "
+        "entries rather than leaving an exemption that covers nothing."
+    )
 
 
 def test_memory_cell_mismatch_compares_pairs_not_pooled_numbers():
@@ -1064,14 +1250,15 @@ def test_every_documented_process_matches_conf_modules_config():
         # --- memory --------------------------------------------------------
         exprs = effective_exprs(name, "memory")
         cell = row.get("memory", "")
-        helpers = {m.group(1) for expr in exprs for m in DERIVED_HELPER_RE.finditer(expr)}
+        helpers = {src for expr in exprs for src in derived_memory_sources(expr)}
         if helpers:
             missing = sorted(h for h in helpers if h not in cell)
             if missing:
                 problems.append(
                     f"{name}: memory is derived from {missing} in conf/modules.config, "
-                    "but the doc cell does not name the helper -- a doc row stating a "
-                    f"flat number here would be wrong the moment a parameter changes: {cell!r}"
+                    "but the doc cell does not name the derivation source -- a doc row "
+                    "stating a flat number here would be wrong the moment a parameter "
+                    f"changes: {cell!r}"
                 )
         elif not exprs:
             problems.append(

@@ -278,7 +278,7 @@ class Layout {
      *
      * The slide is still published, just by whoever produced it:
      *
-     *   produced by PREPROCESS this run  -> <outdir>/<pid>/preprocessed/<name>
+     *   produced by APPLY_PROFILES this run -> <outdir>/<pid>/preprocessed/<name>
      *   supplied by a `--start registration` samplesheet -> already an absolute
      *                                       path to an existing file; record it as is
      *

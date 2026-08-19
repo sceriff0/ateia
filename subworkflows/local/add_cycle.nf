@@ -89,9 +89,11 @@ workflow ADD_CYCLE {
     //
     // Fail loudly here if the writer's schema drifts from what this reader indexes.
     ['patient_id', 'registered_image', 'is_reference', 'channels'].each { col ->
-        assert col in Checkpoint.columns(Layout.REGISTERED),
-            "add_cycle reads '${col}' from ${Layout.checkpointCsvRelative(Layout.REGISTERED)}, " +
-            "which Checkpoint no longer declares"
+        if (!(col in Checkpoint.columns(Layout.REGISTERED))) {
+            throw new IllegalStateException(
+                "add_cycle reads '${col}' from ${Layout.checkpointCsvRelative(Layout.REGISTERED)}, " +
+                "which Checkpoint no longer declares")
+        }
     }
     ch_prior_ref = Channel
         .fromPath(Layout.checkpointCsv(params.prior_outdir, Layout.REGISTERED), checkIfExists: true)
@@ -109,9 +111,11 @@ workflow ADD_CYCLE {
     //
     // Fail loudly here if the writer's schema drifts from what this reader indexes.
     ['patient_id', 'merged_csv', 'cell_mask', 'pyramid'].each { col ->
-        assert col in Checkpoint.columns(Layout.POSTPROCESSED),
-            "add_cycle reads '${col}' from ${Layout.checkpointCsvRelative(Layout.POSTPROCESSED)}, " +
-            "which Checkpoint no longer declares"
+        if (!(col in Checkpoint.columns(Layout.POSTPROCESSED))) {
+            throw new IllegalStateException(
+                "add_cycle reads '${col}' from ${Layout.checkpointCsvRelative(Layout.POSTPROCESSED)}, " +
+                "which Checkpoint no longer declares")
+        }
     }
     ch_prior_rows = Channel
         .fromPath(Layout.checkpointCsv(params.prior_outdir, Layout.POSTPROCESSED), checkIfExists: true)

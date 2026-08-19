@@ -6,16 +6,17 @@
 <title>MIRAGE Supplementary Figure S3 — Quality control</title>
 <style>
   /* ======================================================================
-     MIRAGE supplementary figures — shared design base (S1 · S2 · S3)
+     MIRAGE supplementary figures — shared design base (S1 · S2 · S3 · S4)
      ----------------------------------------------------------------------
      DUPLICATED ON PURPOSE, not extracted to a shared file. Each figure in
      this set has to survive being detached from the repository — attached to
      a submission, mailed, opened from file:// — so it may not reference an
      external stylesheet, not even a sibling one. This block is therefore
      repeated verbatim in docs/figures/pipeline-schematic.html,
-     docs/figures/registration-schematic.html and docs/figures/qc-schematic.html,
-     and is ported (with the slate counterpart the figures deliberately lack)
-     to docs/stylesheets/extra.css. Change one, change all four.
+     docs/figures/registration-schematic.html, docs/figures/qc-schematic.html
+     and docs/figures/zarr-schematic.html, and is ported (with the slate
+     counterpart the figures deliberately lack) to docs/stylesheets/extra.css.
+     Change one, change all five.
 
      SINGLE THEME BY DESIGN: white paper, black ink. A journal figure has a
      paper ground.
@@ -227,6 +228,7 @@
     <a href="pipeline-schematic.html">S1 · pipeline</a>
     <a href="registration-schematic.html">S2 · registration</a>
     <span class="self">S3 · quality control</span>
+    <a href="zarr-schematic.html">S4 · lazy reads</a>
   </nav>
   <p class="standfirst">Every step of the pipeline emits quality-control artifacts, and every one of them reaches
     the end-of-run report through the <i>same</i> one-channel interface: a stream of <code>[kind, file]</code>
@@ -337,16 +339,18 @@
       <div>
         <div class="sig">FINAL_QC( ch_artifacts, ch_run_facts )<br>
           &nbsp;&nbsp;<span class="cm">ch_artifacts : Channel&lt;[String kind, Path file]&gt;</span></div>
-        <div class="sig" style="margin-top:11px">KNOWN_ARTIFACT_KINDS<br>
-          &nbsp;&nbsp;= ParamUtils.STEPS.collectMany { it.qcKinds }<br>
-          &nbsp;&nbsp;+ ParamUtils.UNIVERSAL_QC_KINDS<br>
-          <span class="cm">&nbsp;&nbsp;→ 8 kinds; see panel c for the split</span></div>
+        <div class="sig" style="margin-top:11px">ParamUtils.knownArtifactKinds()<br>
+          &nbsp;&nbsp;= STEPS.collectMany { it.qcKinds }<br>
+          &nbsp;&nbsp;+ UNIVERSAL_QC_KINDS<br>
+          <span class="cm">&nbsp;&nbsp;→ 8 kinds, a fresh List every call; see panel c for the split</span></div>
         <div class="callout"><b>The vocabulary is derived, not restated.</b> The two <code>FINAL_QC</code> call
           sites hand-write <b>21</b> tag literals between them — <b>16</b> on the standard path (across four
           <code>if</code> blocks, in which <code>versions</code> and <code>size_log</code> each appear five
-          times) and <b>5</b> in add_cycle — and nothing else checks that the two agree. <code>KNOWN_ARTIFACT_KINDS</code> is that check, and it is
+          times) and <b>5</b> in add_cycle — and nothing else checks that the two agree. <code>ParamUtils.knownArtifactKinds()</code> is that check, and it is
           computed from the same step table that fixes each step's required samplesheet columns and the values
-          <code>--start</code>/<code>--stop</code> accept.</div>
+          <code>--start</code>/<code>--stop</code> accept. It is a pure static accessor rather than file-level
+          state on purpose — Nextflow 26's strict parser rejects a bare top-level <code>KNOWN_ARTIFACT_KINDS = ...</code>
+          assignment in a subworkflow file outright.</div>
       </div>
       <div>
         <div class="guards" style="margin-top:0;grid-template-columns:minmax(0,1fr)">
@@ -362,10 +366,13 @@
               vocabulary. The helper validates its own <code>kind</code> argument, so
               <code>artifactsOf(ch, 'seg_qcc')</code> throws instead of quietly emptying a report slot.</div></div>
           <div class="gd"><div class="h">3 · declared but never consumed</div>
-            <div class="src">CONSUMED_ARTIFACT_KINDS</div>
+            <div class="src">consumed_kinds — 3rd arg to artifactsOf()</div>
             <div class="x">The third failure the first two cannot see: a kind correctly declared, correctly tagged,
               and read by <b>no</b> <code>artifactsOf()</code> call — dropped from every report, exit&nbsp;0.
-              Checked at the end of the workflow, and only when both outputs are enabled, because
+              <code>consumed_kinds</code> is a local <code>Set</code> declared in <code>main:</code>, not file-level
+              state (a static mutable Set in <code>lib/</code> would be shared across every run in the JVM), so it is
+              threaded as a mandatory third argument into all eight <code>artifactsOf()</code> call sites and checked
+              against the full vocabulary at the end of the workflow, and only when both outputs are enabled, because
               <code>--skip_final_qc_report</code> or <code>--enable_trace false</code> legitimately leaves half
               the vocabulary unconsumed.</div></div>
         </div>
@@ -406,7 +413,7 @@
     </table></div>
     <p class="outnote">Because the schema's <code>--start</code>/<code>--stop</code> enums cannot be generated at
       build time, a test asserts they still agree with this table — the same discipline applied to the QC
-      vocabulary by <code>KNOWN_ARTIFACT_KINDS</code>.</p>
+      vocabulary by <code>ParamUtils.knownArtifactKinds()</code>.</p>
   </section>
 
   <!-- d — THE RENDERERS -->
@@ -425,7 +432,7 @@
         <p class="x">Reads one preprocessed slide and writes a downsampled PNG per channel, named from the
           slide's own channel list.</p>
         <dl>
-          <dt>container</dt><dd>…attend_image_analysis:preprocess</dd>
+          <dt>container</dt><dd>…mirage-preprocess:1.0.0</dd>
           <dt>resources</dt><dd>label process_medium — 4 cpu · 200 GB · 4 h × attempt</dd>
           <dt>publishes</dt><dd>&lt;pid&gt;/qc/preprocess/qc/*.png</dd>
           <dt>kind</dt><dd>preprocess_qc</dd>
@@ -439,7 +446,7 @@
           a full-resolution TIFF plus a scaled PNG. It is the one process whose memory tier is keyed on the
           <b>combined</b> size of two inputs, because it holds both.</p>
         <dl>
-          <dt>container</dt><dd>…attend_image_analysis:debug_diffeo</dd>
+          <dt>container</dt><dd>…mirage-regqc:1.0.0</dd>
           <dt>resources</dt><dd>1 cpu (withName) · 100 / 200 / 300 GB × attempt, tiered · 12 h × attempt (label process_high)</dd>
           <dt>publishes</dt><dd>&lt;pid&gt;/qc/registration/qc/*_QC_RGB.{png,tif} · *_QC_RGB_fullres.tif</dd>
           <dt>kind</dt><dd>registration_qc</dd>
@@ -452,7 +459,7 @@
         <p class="x">Reads the cell mask and the merged per-patient measurement CSV and renders segmentation and
           quantification overlays. Needing both is why this belongs to postprocessing and not to segmentation.</p>
         <dl>
-          <dt>container</dt><dd>…attend_image_analysis:quantification_gpu</dd>
+          <dt>container</dt><dd>…mirage-quantify:1.0.0</dd>
           <dt>resources</dt><dd>label process_medium — 4 cpu · 200 GB · 4 h × attempt</dd>
           <dt>publishes</dt><dd>&lt;pid&gt;/qc/postprocessing/qc/*.png</dd>
           <dt>kind</dt><dd>postprocess_qc</dd>
@@ -517,7 +524,7 @@
       <caption style="font-family:var(--mono);font-size:.63rem;text-transform:uppercase;letter-spacing:.07em;color:var(--ink-3);text-align:left;padding:0 0 7px;">one warp process, two backends — lib/WarpBackends.groovy, keyed on the <code>method</code> input</caption>
       <thead><tr><th>&nbsp;</th><th>valis <span class="tag-def">default</span></th><th>tiled <span class="tag-alt">method=tiled</span></th></tr></thead>
       <tbody>
-        <tr><td class="rk">container</td><td>cdgatenbee/valis-wsi:1.0.0</td><td>bolt3x/attend_image_analysis:tiled</td></tr>
+        <tr><td class="rk">container</td><td>cdgatenbee/valis-wsi:1.0.0</td><td>bolt3x/mirage-tiled:1.0.0</td></tr>
         <tr><td class="rk">stages</td><td>native · rigid · non_rigid · micro</td><td>native · rigid · refined</td></tr>
         <tr><td class="rk">versionTools</td><td>valis · skimage · scipy</td><td>skimage · scipy</td></tr>
         <tr><td class="rk">extra flags</td><td>moving/reference name · <code>--micro-reg</code> · optional
@@ -569,7 +576,7 @@
           <p class="x">One HTML report plus a data bundle, both timestamped. Its <code>versions.yml</code> is
             dropped at publish time by a <code>saveAs</code> that returns null for it.</p>
           <dl>
-            <dt>container</dt><dd>…attend_image_analysis:preprocess</dd>
+            <dt>container</dt><dd>…mirage-preprocess:1.0.0</dd>
             <dt>resources</dt><dd>label process_low — 2 cpu · 32 GB × attempt · 2 h × attempt</dd>
             <dt>publishes</dt><dd>&lt;outdir&gt;/qc/mirage_qc_report_&lt;ts&gt;.html · mirage_qc_data_&lt;ts&gt;/</dd>
           </dl>

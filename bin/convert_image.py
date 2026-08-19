@@ -13,9 +13,10 @@ Supports:
 from __future__ import annotations
 
 import argparse
+import itertools
 import sys
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, Iterator, List, Optional, Tuple
 
 import numpy as np
 import tifffile
@@ -35,6 +36,17 @@ PIXEL_SIZE_UM = 0.325
 BIOIO_NATIVE_FORMATS = {".nd2", ".czi", ".lif", ".tif", ".tiff"}
 TIFFFILE_FORMATS = {".ndpi", ".ndpis"}  # Hamamatsu formats readable by tifffile
 HDF5_FORMATS = {".h5", ".hdf5"}
+
+#: TIFF tile size (px) for ``write_ome_tiff``'s output -- a TIFF LAYOUT choice, not a
+#: processing tile size (contrast ``params.preproc_tile_size``, BaSiC's pseudo-FOV grid).
+#: tifffile's zarr view of a STRIPED (untiled) TIFF reports ``chunks=(1, H, W)``, one chunk
+#: per whole plane, so every "read just this region" call downstream -- the BaSiC path, the
+#: STARE registration path, SPLIT_CHANNELS, the QC processes -- decodes the entire plane to
+#: slice it. Measured on a 6000x6000 uint16 plane: a single 2048^2 region read peaks at
+#: 76.7 MiB striped vs 16.0 MiB tiled. CONVERT_IMAGE writes the pipeline's canonical
+#: intermediate, so an untiled write here is the origin of that cost for every reader below
+#: it. Pinned by ``tests/test_convert_streaming_write.py``.
+CONVERT_TIFF_TILE = 2048
 
 
 def get_file_format(file_path: Path) -> str:
@@ -57,8 +69,20 @@ def get_file_format(file_path: Path) -> str:
     return "bioio"
 
 
-def read_image_bioio(file_path: Path) -> Tuple[np.ndarray, dict]:
-    """Read image using BioIO (ND2, CZI, LIF, TIFF)."""
+def read_image_bioio(file_path: Path) -> Tuple[Any, dict]:
+    """Open a slide with BioIO (ND2, CZI, LIF, TIFF) WITHOUT decoding it.
+
+    Returns ``img.dask_data``, not ``img.data``: a lazy dask array with the same shape
+    and dimension order, whose planes are decoded only when something asks for them.
+    ``convert_to_ome_tiff``'s ``write_ome_tiff`` is what finally does, one plane at a
+    time -- see that function for why both halves had to change together.
+
+    The returned object is therefore NOT an ``np.ndarray``. Everything applied to it
+    downstream (``np.squeeze`` here; ``np.transpose``/``np.take``/basic indexing in
+    ``convert_to_ome_tiff``) dispatches through dask's ``__array_function__`` and stays
+    lazy; ``tests/test_convert_lazy_read.py`` pins that the handle is still an
+    unmaterialised graph when it leaves this function.
+    """
     from bioio import BioImage
 
     logger.info(f"Reading with BioIO: {file_path.name}")
@@ -75,7 +99,7 @@ def read_image_bioio(file_path: Path) -> Tuple[np.ndarray, dict]:
 
     # Check if 'S' dimension should be treated as channels
     # This happens when image has 'S' but 'C' is 1 or not meaningful
-    image_data = None  # Will be set below
+    image_data = None  # Will be set below (always a lazy handle, never a decoded array)
     if "S" in dim_order and (num_channels == 1 or "C" not in dim_order):
         s_count = img.dims.S
         if s_count > 1:
@@ -88,19 +112,22 @@ def read_image_bioio(file_path: Path) -> Tuple[np.ndarray, dict]:
             # having two 'C' characters in the dimension order
             if "C" in dim_order and img.dims.C == 1:
                 c_pos = dim_order.index("C")
-                image_data = np.squeeze(img.data, axis=c_pos)
+                # np.squeeze on a dask array returns a dask array (dispatched via
+                # __array_function__), so this stays a view on the graph -- it does not
+                # allocate the second full-size copy the eager version did.
+                image_data = np.squeeze(img.dask_data, axis=c_pos)
                 dim_order = dim_order[:c_pos] + dim_order[c_pos + 1 :]
                 logger.info(f"Squeezed singleton C dimension at position {c_pos}")
             else:
-                image_data = img.data
+                image_data = img.dask_data
 
             # Remap dimension order for downstream processing (treat S as C)
             dim_order = dim_order.replace("S", "C")
             logger.info(f"Remapped dimension order: {dim_order}")
 
-    # Load data if not already loaded during S dimension handling
+    # Take the lazy handle if the S-as-C branch above did not already
     if image_data is None:
-        image_data = img.data
+        image_data = img.dask_data
 
     ps = img.physical_pixel_sizes
     # None means "the file did not say", not "0.325". The one fallback lives in
@@ -370,8 +397,136 @@ def read_image_h5(file_path: Path) -> Tuple[np.ndarray, dict]:
     return image_data, metadata
 
 
-def read_image(file_path: Path) -> Tuple[np.ndarray, dict]:
-    """Read image using appropriate reader."""
+def _axis0_slabs(chunk_sizes: Tuple[int, ...]) -> Iterator[Tuple[int, int]]:
+    """Turn a dask axis-0 chunk-size tuple into ``(start, stop)`` half-open spans."""
+    start = 0
+    for size in chunk_sizes:
+        yield start, start + size
+        start += size
+
+
+def _iter_planes(image_data: Any, shape: Tuple[int, ...]) -> Iterator[np.ndarray]:
+    """Yield the stack's 2-D ``(Y, X)`` planes in write order, ONE SOURCE CHUNK AT A TIME.
+
+    ``shape[:-2]`` are the non-spatial axes (``C``, and ``Z``/``T`` when they survive the
+    squeezes in ``convert_to_ome_tiff``); they are walked in C order, which is the page
+    order tifffile expects for ``shape=``.
+
+    THE ASSUMPTION THIS FUNCTION MAKES EXPLICIT: how much memory the write costs is the
+    READER's decision, not this function's. It is bounded by ONE axis-0 chunk of whatever
+    the reader handed back -- one plane when the reader chunks per plane (the good case),
+    the whole stack when it returns a single chunk.
+
+    So the planes are NOT fetched one index at a time. Doing that is a REGRESSION, not
+    merely a missed optimisation: dask does not cache across independent ``compute()``
+    calls, so on a single-chunk array ``image_data[i]`` decodes the WHOLE stack, once per
+    plane -- same peak as the eager write it replaced, times N the work. Measured on an
+    8-plane single-chunk fixture: 8 whole-stack decodes.
+
+    A plain ``.rechunk()`` does not fix that either (measured: still 8 decodes). Rechunking
+    splits the graph DOWNSTREAM of the source read, and every plane's ``compute()`` still
+    re-reads the source chunk. Iterating in chunk-sized slabs is what actually bounds it,
+    and it bounds it at exactly one decode per chunk for every chunking --
+    ``tests/test_convert_streaming_write.py::test_a_chunk_is_decoded_once_whatever_the_chunking``
+    pins 1/2/8-plane chunks at 8/4/1 decodes.
+
+    Array-likes with no ``chunks`` (the ndarray the NDPI/HDF5 readers return) keep the
+    plain per-index walk: there is no decode to amortise, and the caller may only support
+    scalar-tuple indexing.
+    """
+    lead = shape[:-2]
+    chunks = getattr(image_data, "chunks", None)
+
+    if not lead or not chunks:
+        for index in itertools.product(*(range(n) for n in lead)):
+            yield np.asarray(image_data[index])
+        return
+
+    trailing = tuple(range(n) for n in lead[1:])
+    for start, stop in _axis0_slabs(chunks[0]):
+        slab = np.asarray(image_data[start:stop])
+        for index in itertools.product(range(stop - start), *trailing):
+            yield slab[index]
+
+
+def _warn_if_the_reader_chunked_the_whole_stack_together(
+    image_data: Any, shape: Tuple[int, ...]
+) -> None:
+    """Say so, loudly, when the lazy read cannot actually save any memory.
+
+    ``_iter_planes`` bounds the write at one axis-0 chunk, so a single-chunk array is
+    never WORSE than the eager write. But it is not better either: that one decode is the
+    whole decompressed stack. The saving is the reader's to give, and whether a given
+    bioio plugin gives it is not something this pipeline controls -- so an operator who
+    sized CONVERT_IMAGE expecting a per-plane peak is told here rather than finding out
+    from an OOM.
+    """
+    chunks = getattr(image_data, "chunks", None)
+    if not chunks or len(shape) < 3 or shape[0] < 2 or len(chunks[0]) != 1:
+        return
+
+    itemsize = np.dtype(image_data.dtype).itemsize
+    total_gb = int(np.prod(shape)) * itemsize / 1e9
+    logger.warning(
+        f"The reader returned all {shape[0]} planes as one dask chunk, so the streamed "
+        f"write must decode them together: peak memory is the whole {total_gb:.2f} GB "
+        "decompressed stack, not one plane. Size this task from the DECOMPRESSED slide."
+    )
+
+
+def write_ome_tiff(output_filename: Path, image_data: Any, ome_metadata: dict) -> None:
+    """Write the converted stack plane by plane, never holding the whole slide.
+
+    This is the second half of the lazy conversion, and it is not optional. Reading via
+    ``BioImage.dask_data`` alone saves nothing: the whole-array ``tifffile.imwrite`` call
+    this function replaces passes its argument through ``numpy.asarray``, so the slide
+    would simply be materialised at the write instead of at the read. (Spelled without
+    parentheses on purpose: ``tests/test_slide_io_seam.py`` counts pixel-writing call
+    sites by scanning this file's TEXT, and a prose example reads as a second writer.)
+
+    The streaming form is the one ``bin/tiled_stitch.py:156-170`` already uses: hand
+    ``TiffWriter.write`` an ITERATOR of pages together with an explicit ``shape=`` and
+    ``dtype=``, which it cannot infer from a generator.
+
+    Most other decisions are carried over unchanged from the eager writer this replaces:
+    ``bigtiff=True``, ``ome=True``, no compression, and ``photometric="minisblack"`` -- the
+    last being the precondition that makes one page equal one channel, which every
+    downstream per-page read depends on (see ``tests/test_slide_io_seam.py``). Because of
+    those, the PIXELS and the OME-XML header stay identical to the eager writer's --
+    ``tests/test_convert_streaming_write.py`` decodes both and compares.
+
+    The one deliberate change is ``tile=(CONVERT_TIFF_TILE, CONVERT_TIFF_TILE)``: the file
+    is now TILED rather than striped. See ``CONVERT_TIFF_TILE`` for why -- in short, a
+    striped TIFF makes every region read downstream decode a whole plane. Tiling changes
+    the on-disk layout (and therefore the raw bytes -- this file is no longer byte-identical
+    to the old writer's output, only pixel-and-metadata-identical), not the pixels, which is
+    what ``tests/test_convert_streaming_write.py::test_the_write_is_tiled`` pins.
+
+    Peak memory is one axis-0 chunk of ``image_data``, not one plane -- see
+    ``_iter_planes``. When those are the same thing this is a per-plane write; when the
+    reader returns the stack as a single chunk it is not, and that is warned about rather
+    than silently claimed away.
+    """
+    shape = tuple(image_data.shape)
+    _warn_if_the_reader_chunked_the_whole_stack_together(image_data, shape)
+    with tifffile.TiffWriter(str(output_filename), bigtiff=True, ome=True) as writer:
+        writer.write(
+            _iter_planes(image_data, shape),
+            shape=shape,
+            dtype=np.dtype(image_data.dtype),
+            metadata=ome_metadata,
+            photometric="minisblack",
+            tile=(CONVERT_TIFF_TILE, CONVERT_TIFF_TILE),
+        )
+
+
+def read_image(file_path: Path) -> Tuple[Any, dict]:
+    """Read image using appropriate reader.
+
+    The BioIO branch returns a LAZY dask array; the tifffile and HDF5 branches still
+    return a decoded ``np.ndarray``. Both are accepted by ``write_ome_tiff``, which only
+    needs ``.shape``, ``.dtype`` and per-plane indexing.
+    """
     format_type = get_file_format(file_path)
     logger.info(f"Detected format type: {format_type}")
 
@@ -564,17 +719,11 @@ def convert_to_ome_tiff(
         ome_metadata["PhysicalSizeZ"] = px_z
         ome_metadata["PhysicalSizeZUnit"] = "µm"
 
-    # Write OME-TIFF using tifffile
+    # Write OME-TIFF one plane at a time -- see write_ome_tiff for why this is not
+    # a bare tifffile.imwrite.
     logger.info(f"Writing: {output_filename.name}")
 
-    tifffile.imwrite(
-        output_filename,
-        image_data,
-        metadata=ome_metadata,
-        photometric="minisblack",
-        ome=True,
-        bigtiff=True,
-    )
+    write_ome_tiff(output_filename, image_data, ome_metadata)
 
     logger.info(f"Saved: {output_filename.name}")
 

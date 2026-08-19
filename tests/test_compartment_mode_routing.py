@@ -127,14 +127,51 @@ ALLOWED_LINES = {
         # exemption keyed to a file rather than a line would cover the next raw read
         # added anywhere in it. The cost is that unrelated edits above this line move
         # it -- 718 -> 722 when the reg_qc=2 QC stopped segmenting for itself and
-        # SEG_QC_GEOJSON's block shrank, then 722 -> 727 when feat/lsa-cell-pairing's
-        # rewritten WARP_SEG_QC ext.args comment added 5 net lines above it.
-        # 727 on main, 815 here: this branch's conf/modules.config carries the
+        # SEG_QC_GEOJSON's block shrank; 722 -> 727 when feat/lsa-cell-pairing's
+        # rewritten WARP_SEG_QC ext.args comment added 5 net lines above it;
+        # 727 -> 736 when the three top-level config helper functions were inlined
+        # for Nextflow 26's strict parser; 736 -> 744 when TILED_SOLVE gained the
+        # ext.args block carrying its confidence/range gates; 744 -> 748 when that
+        # same block's `?:` was replaced by an explicit null test (Elvis treats a
+        # legal 0 as unset) and gained the comment explaining why; 748 -> 834 when the
+        # in-process BaSiC path became the three-process nf-core BASICPY chain and
+        # TILE_FOR_BASIC / BASICPY / APPLY_PROFILES gained withName blocks above it
+        # (826 -> 834 once BASICPY's block gained the comment recording that running at
+        # upstream defaults is a decision); 834 -> 821 when the dead PREPROCESS withName
+        # block was deleted with the in-process BaSiC path; 821 -> 856 when
+        # TILE_FOR_BASIC's and APPLY_PROFILES' memory closures stopped being one-line
+        # multiples of the input file's size and became multi-line, tile-derived
+        # arithmetic (the two processes now stream rather than holding the slide);
+        # 856 -> 891 when MERGE_AND_PYRAMID's 200/300 GB tier ladder became the
+        # plane-derived closure that followed it into streaming; 891 -> 920 when that
+        # closure's comment stopped asserting a 4:1 compression ratio as fact and
+        # recorded the measured counterexamples and the retry backstop instead;
+        # 920 -> 934 when APPLY_PROFILES' and MERGE_AND_PYRAMID's memory comments
+        # each named their `maxworkers=1` dependency on bin/apply_basic_profiles.py
+        # and bin/merge_channels_pyramid.py (+5 and +9 net lines respectively) and
+        # MERGE_AND_PYRAMID's plane coefficient comment was corrected from 3.11 to
+        # 3.25 to agree with its own measured intercept and mechanism sum; 934 -> 936
+        # when a review round reworded that same comment (+2 net lines) to stop
+        # calling 3.25 a "bound" on every measured point -- C=1 sits 0.18 planes
+        # above the C=4/8/16 fit, a finite-C edge effect the +1d adder absorbs;
+        # 936 -> 946 when TILE_FOR_BASIC's and APPLY_PROFILES' memory comments lost
+        # the "one decoded source plane" file-size term now that CONVERT_IMAGE and
+        # SPLIT_CHANNELS write tiled (net +10 lines: the mechanism explanation grew
+        # to point at the two tiling tests and record the --prior_outdir / add_cycle
+        # legacy-untiled degradation instead of shrinking to nothing), and the C=1
+        # gap above was corrected from 0.18 (measured against the 3.25 CODE
+        # coefficient plus the per-channel stash term) to 0.21 (measured against the
+        # 3.21 FIT the sentence actually names).
+        # 946 -> 1034 on THIS branch when the zarr/streaming line was merged into
+        # benchmarking: this branch's conf/modules.config carries the
         # benchmarking-only process blocks (+15) AND the restored SEG_QUALITY_EVAL /
-        # MERGE_SEG_EVAL blocks (+73), so the same line sits 88 lower. The offsets
-        # compose. Re-pin, do not widen. (Re-pin from the file, not by guessing:
+        # MERGE_SEG_EVAL blocks (+73), so every line above sits 88 lower. The two
+        # offsets COMPOSE exactly -- 946 + 88 = 1034 -- which is the arithmetic check
+        # that this re-pin is the merge of both histories rather than a guess at one.
+        # Re-pin, do not
+        # widen. (Re-pin from the file, not by guessing:
         # `grep -n "params.expanded_quantification ?" conf/modules.config`.)
-        815: (
+        1034: (
             "ext.args = { params.expanded_quantification ? '--expanded' : "
             "'' } -- conf/*.config closures cannot see lib/*.groovy classes, "
             "so ext.args must read params raw here."

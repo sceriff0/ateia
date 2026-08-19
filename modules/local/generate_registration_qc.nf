@@ -12,7 +12,7 @@ process GENERATE_REGISTRATION_QC {
     tag "${meta.patient_id}"
     label 'process_high'
 
-    container "bolt3x/attend_image_analysis:debug_diffeo"
+    container "bolt3x/mirage-regqc:1.0.0"
 
     input:
     tuple val(meta), path(registered), path(reference)

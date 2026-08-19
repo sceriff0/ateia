@@ -9,7 +9,7 @@
 process MERGE_AND_PYRAMID {
     tag "${meta.patient_id}"
 
-    container "bolt3x/attend_image_analysis:merge"
+    container "bolt3x/mirage-merge:1.0.0"
 
     input:
     tuple val(meta), path(split_channels, stageAs: 'channels/*'), path(mask_files, stageAs: 'masks/*')

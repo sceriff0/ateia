@@ -15,9 +15,10 @@ import numpy as np
 import pandas as pd
 import pytest
 
-# anndata is not in the base CI dependency set, and it dropped Python 3.9 (which the
-# CI matrix still covers). Skip the module rather than error at collection — an
-# ImportError here takes the whole pytest run down, not just these tests.
+# anndata is not in the base CI dependency set. CI now installs it unconditionally (the
+# `|| echo` fallback went away with the Python 3.9 matrix leg that justified it), so this
+# does not skip there; it is kept for dev environments without anndata, because an
+# ImportError here takes the whole pytest run down rather than just these tests.
 ad = pytest.importorskip("anndata")
 
 BIN = Path(__file__).resolve().parents[1] / "bin"
