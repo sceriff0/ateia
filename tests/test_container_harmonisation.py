@@ -86,19 +86,6 @@ PINNED_EXCEPTIONS = {
     # Safe HERE only: this image carries no TensorFlow and no StarDist, which are the sole reason
     # the harmonised numpy is held at the last 1.x.
     ("convert", "numpy"): ("2.2.6", "bioio 3.5.0 plugin set cannot resolve with numpy 1.26.4"),
-    # containers/segeval is the CSE image, and its pins are SCIENTIFIC, not packaging trivia.
-    # bin/utils/cse/ is a verbatim copy of upstream CellSegmentationEvaluator 1.5.19, so unlike
-    # a pip-installed package it does not move with its dependencies. Its composite QualityScore
-    # comes out of a fixed PCA model, and containers/segeval/requirements.txt states the
-    # consequence: "a silent change in skimage's region measurements or sklearn's KMeans would
-    # shift scores across a cohort with no error and no version bump to point at". Harmonising
-    # these three would do exactly that to every already-published benchmark number.
-    # tests/test_cse_equivalence.py pins the numeric behaviour against
-    # tests/data/cse/golden_metrics.json, so a deliberate bump here is detectable -- which is
-    # the precondition for ever removing these entries.
-    ("segeval", "scipy"): ("1.11.4", "vendored CSE 1.5.19 QualityScore is calibrated against this scipy"),
-    ("segeval", "pandas"): ("2.2.3", "vendored CSE 1.5.19 QualityScore is calibrated against this pandas"),
-    ("segeval", "tifffile"): ("2023.2.28", "vendored CSE 1.5.19 QualityScore is calibrated against this tifffile"),
 }
 
 # Packages a container's FROM base image bakes in, so no `pip install` line for them ever
@@ -116,12 +103,15 @@ BASE_IMAGE_PROVIDES = {
 # Packages that are genuinely absent from a given image are fine; these are the ones that must
 # never appear again, having been removed as unimported.
 #
-# aicsimageio came OFF this list when the CSE seg-quality path arrived. The list's precondition
-# is "removed for having no importer anywhere in bin/", and that stopped being true:
-# bin/seg_quality_eval.py:75 and bin/utils/cse/functions.py:522 both import it to read the
-# physical pixel size out of OME metadata. This test's own failure message says "If it is
-# genuinely needed now, add the import first" -- the imports are there, so the entry goes.
-FORBIDDEN = ("cellpose", "cucim", "cupy")
+# aicsimageio went OFF this list when the CSE seg-quality path arrived, then back ON when
+# containers/segeval was harmonised. Both moves were right at the time. It is back because the
+# only thing it supplied -- a physical pixel size from OME metadata -- is always overridden by
+# --pixel-size-um (modules/local/seg_quality_eval.nf always renders it), and because the OME-TIFF
+# reader plugin caps tifffile below the harmonised 2025.5.10, making the pair unresolvable.
+# bin/utils/cse/functions.py's get_voxel_volume/get_pixel_area still carry a lazy
+# `from aicsimageio import AICSImage`, but nothing in bin/ calls either function -- they are dead
+# in upstream 1.5.19 and the vendored copy is kept byte-identical -- so that import never runs.
+FORBIDDEN = ("cellpose", "cucim", "cupy", "aicsimageio")
 
 # Requirement tokens are parsed with ``packaging`` rather than a regex. A hand-rolled pattern
 # missed two real forms already present in this repo -- extras (``dask[array]>=2024.8.0``) and
@@ -273,6 +263,11 @@ def test_no_forbidden_package_reappears(container):
     req = CONTAINERS / container / "requirements.txt"
     if req.is_file():
         text += "\n" + req.read_text()
+    # Strip `#` comments first. This scan is a regex over raw text, so without this a comment
+    # EXPLAINING why a package was removed -- quoting the import line it used to have -- reads as
+    # a reinstall and fails the guard. That is backwards: it pressures the next person to delete
+    # the rationale rather than keep it. Both Dockerfiles and requirements files comment with `#`.
+    text = "\n".join(line.split("#", 1)[0] for line in text.splitlines())
     back = sorted({f for f in FORBIDDEN if re.search(rf"(?m)^\s*{f}\b|[\s\\]{f}[=\s\\]", text)})
     assert not back, (
         f"containers/{container} reinstalls {back}, which was removed for having no importer "
@@ -417,6 +412,43 @@ def _third_party_imports(script):
     return third
 
 
+# Imports the static graph reaches but that can never EXECUTE. Narrow on purpose: keyed by
+# (container, imported name), each with the reason, and each reason guarded by its own test below
+# so an exemption cannot outlive the fact that justified it.
+UNREACHABLE_IMPORTS = {
+    ("segeval", "aicsimageio"): (
+        "bin/utils/cse/functions.py's get_voxel_volume/get_pixel_area open with a lazy "
+        "`from aicsimageio import AICSImage` and then never use the name -- it is dead in "
+        "upstream CellSegmentationEvaluator 1.5.19, and bin/utils/cse/ is kept byte-identical to "
+        "upstream on purpose. Nothing in bin/ calls either function, so the import never runs. "
+        "Guarded by test_unreachable_import_exemptions_are_still_unreachable."
+    ),
+}
+
+
+def test_unreachable_import_exemptions_are_still_unreachable():
+    """The premise of every UNREACHABLE_IMPORTS entry, checked rather than trusted.
+
+    An exemption that outlives its reason is worse than no exemption: it silently permits the
+    exact runtime ImportError the guard exists to catch. containers/segeval has already shipped
+    one of those -- matplotlib is imported on the live path by the same vendored file.
+    """
+    dead = ("get_voxel_volume", "get_pixel_area")
+    callers = []
+    for path in (REPO / "bin").rglob("*.py"):
+        for lineno, line in enumerate(path.read_text().splitlines(), 1):
+            code = line.split("#", 1)[0]
+            for fn in dead:
+                if f"{fn}(" in code and not code.lstrip().startswith("def "):
+                    callers.append(f"{path.relative_to(REPO)}:{lineno}")
+    assert not callers, (
+        "UNREACHABLE_IMPORTS exempts containers/segeval from installing aicsimageio because "
+        f"{' / '.join(dead)} are never called -- but they are, at {callers}. The lazy "
+        "`from aicsimageio import AICSImage` inside them now executes, so segeval must install "
+        "aicsimageio (or the call must go)."
+    )
+
+
 @pytest.mark.parametrize("container,scripts", sorted(_module_container_and_scripts().items()))
 def test_container_installs_what_its_scripts_import(container, scripts):
     """The rule that catches bioio: an image must install what its own scripts import.
@@ -428,6 +460,8 @@ def test_container_installs_what_its_scripts_import(container, scripts):
     missing = {}
     for script in sorted(scripts):
         for name in sorted(_third_party_imports(script)):
+            if (container, name) in UNREACHABLE_IMPORTS:
+                continue
             dist = _IMPORT_TO_DIST.get(name, name).lower()
             if dist not in installed and name.lower() not in installed:
                 missing.setdefault(script, []).append(name)

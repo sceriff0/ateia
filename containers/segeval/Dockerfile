@@ -38,10 +38,9 @@ RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r /tmp/requirements.txt
 
 # Fail the BUILD rather than a cluster run. This stack is exactly the kind that
-# resolves in pip and then explodes on first import: aicsimageio pulls its own
-# xarray/dask constraint set, and scikit-image 0.25 against numpy 1.26 is a pairing
-# pip will happily accept and then break on. The previous version of this file had
-# no smoke test and a stray `pip install "numpy<2.0"` AFTER the pinned requirements,
+# resolves in pip and then explodes on first import: scikit-image 0.25 against numpy 1.26
+# is a pairing pip will happily accept and then break on. The previous version of this file
+# had no smoke test and a stray `pip install "numpy<2.0"` AFTER the pinned requirements,
 # which could silently re-resolve numpy behind the pin.
 RUN python -c "\
 import numpy, scipy, skimage, sklearn, pandas, tifffile, xmltodict; \
@@ -54,8 +53,9 @@ print('segeval image OK:', \
       '| sklearn', sklearn.__version__, \
       '| tifffile', tifffile.__version__)" \
     && python -c "\
-from aicsimageio import AICSImage; \
-print('aicsimageio OK -- physical pixel size can be read from OME metadata')" \
+import matplotlib; matplotlib.use('Agg'); \
+import matplotlib.pyplot; \
+print('matplotlib OK -- functions.py foreground_separation() can import pyplot')" \
     && ps -e -o pid= -o ppid= > /dev/null && echo "procps OK: nextflow task-metrics wrapper can run"
 
 # Read-only $HOME safety. Several of these libraries default their caches to

@@ -69,23 +69,29 @@ def _downsample(channels, cell, nuc, factor):
 
 
 def _read_image_cyx(path):
-    """Return (channels (C,Y,X), pixel_um_or_None). Prefer aicsimageio for
-    robust OME axis handling (present in the container); fall back to tifffile."""
-    try:
-        from aicsimageio import AICSImage
+    """Return (channels (C,Y,X), pixel_um) via tifffile. ``pixel_um`` is always None.
 
-        a = AICSImage(path)
-        data = np.asarray(a.get_image_data("CYX"))  # T,Z are 1 for 2D WSI
-        ps = a.physical_pixel_sizes
-        px = float(ps.X) if (ps.X and ps.Y) else None
-        return data, px
-    except Exception:
-        arr = np.asarray(tifffile.imread(path))
-        if arr.ndim == 2:
-            arr = arr[np.newaxis, :, :]
-        elif arr.ndim == 3 and arr.shape[-1] <= 5 and arr.shape[0] > 5:
-            arr = np.moveaxis(arr, -1, 0)  # YXC -> CYX heuristic
-        return arr, None
+    tifffile ONLY -- deliberately no aicsimageio/bioio. The single thing a richer reader
+    added here was the physical pixel size read from OME metadata, and that value is always
+    overridden: modules/local/seg_quality_eval.nf always renders ``--pixel-size-um`` (from
+    ``cse_pixel_size_um``, else ``params.pixel_size``, which ships as 0.325), and main()
+    prefers the CLI value over anything read from the file. So the dependency supplied a
+    number nothing consumes.
+
+    It also could not be installed alongside the harmonised tifffile: the OME-TIFF reader
+    plugin caps tifffile below 2025.5.10, which is what
+    tests/test_container_harmonisation.py harmonises on, so pinning both is a pip
+    ResolutionImpossible and containers/segeval would not build.
+
+    Returning None rather than a guess is the honest answer, and main() turns it into an
+    error naming the missing flag -- see the caller.
+    """
+    arr = np.asarray(tifffile.imread(path))
+    if arr.ndim == 2:
+        arr = arr[np.newaxis, :, :]
+    elif arr.ndim == 3 and arr.shape[-1] <= 5 and arr.shape[0] > 5:
+        arr = np.moveaxis(arr, -1, 0)  # YXC -> CYX heuristic
+    return arr, None
 
 
 def main():
@@ -127,7 +133,14 @@ def main():
     elif px_meta:
         px = py = px_meta
     else:
-        raise SystemExit("Pixel size missing from image metadata; pass --pixel-size-um")
+        # NOT "missing from image metadata": _read_image_cyx no longer reads metadata at all,
+        # so blaming the file would send a standalone caller looking for a problem in their
+        # image. The flag is the only source now.
+        raise SystemExit(
+            "No pixel size: pass --pixel-size-um. This tool does not read pixel size from "
+            "image metadata (the pipeline always supplies it from cse_pixel_size_um / "
+            "params.pixel_size)."
+        )
 
     # Downsample before scoring: full-WSI label masks otherwise blow CSE's
     # memory/time budget. Binning by `factor` means each pixel now spans
