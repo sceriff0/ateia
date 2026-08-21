@@ -183,13 +183,30 @@
                 },
                 "memory_mode": {
                     "type": "string",
-                    "description": "Memory mode for registration.",
+                    "description": "VALIS cost/accuracy tier. Table: bin/utils/valis_config.py MEMORY_PRESETS. 'custom' starts from 'high' and applies the reg_valis_* overrides you set.",
                     "default": "high",
                     "enum": [
-                        "low",
+                        "high",
                         "medium",
-                        "high"
+                        "low",
+                        "custom"
                     ]
+                },
+                "reg_valis_max_processed_dim": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "minimum": 1,
+                    "description": "VALIS feature detection/matching working size (px). null = from memory_mode. Only legal with memory_mode=custom."
+                },
+                "reg_valis_max_non_rigid_dim": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "minimum": 1,
+                    "description": "VALIS non-rigid registration size (px). null = from memory_mode. Only legal with memory_mode=custom. Requesting more than the smallest slide's full resolution makes VALIS clamp it to that slide's largest dimension."
                 },
                 "reg_micro_reg": {
                     "type": "integer",
@@ -215,6 +232,17 @@
                     "default": null,
                     "minimum": 1
                 },
+                "reg_tiled_mode": {
+                    "type": "string",
+                    "default": "high",
+                    "description": "STARE/tiled cost/accuracy tier. Table: lib/RegPresets.groovy RegPresets.STARE. 'custom' starts from 'high' and applies the reg_tiled_* overrides you set.",
+                    "enum": [
+                        "high",
+                        "medium",
+                        "low",
+                        "custom"
+                    ]
+                },
                 "reg_tiled_nuclear_index": {
                     "type": [
                         "integer",
@@ -225,15 +253,19 @@
                     "minimum": 0
                 },
                 "reg_tiled_tile": {
-                    "type": "integer",
-                    "description": "STARE only: tile core size (px); also the mesh-grid resolution.",
-                    "default": 2048,
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "description": "tile core size (px); also the mesh grid resolution. null = from reg_tiled_mode.",
                     "minimum": 16
                 },
                 "reg_tiled_halo": {
-                    "type": "integer",
-                    "description": "STARE only: per-tile read halo (px) for registration context.",
-                    "default": 256,
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "description": "tile read halo (px). null = from reg_tiled_mode.",
                     "minimum": 0
                 },
                 "reg_tiled_gate_tre": {
@@ -259,23 +291,29 @@
                     "minimum": 0
                 },
                 "reg_tiled_upsample": {
-                    "type": "integer",
-                    "description": "STARE only: phase-correlation sub-pixel upsample factor (per tile).",
-                    "default": 10,
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "description": "phase-correlation sub-pixel upsample factor. null = from reg_tiled_mode.",
                     "minimum": 1
                 },
                 "reg_tiled_out_tile": {
-                    "type": "integer",
-                    "description": "STARE only: streaming stitch write-tile size (px), gigapixel-safe.",
-                    "default": 1024,
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "description": "streaming stitch write-tile size (px). null = from reg_tiled_mode.",
                     "minimum": 16,
                     "multipleOf": 16
                 },
                 "reg_tiled_coarse_max_dim": {
-                    "type": "integer",
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
                     "minimum": 0,
-                    "description": "STARE only: longest side (px) of the thumbnail the coarse anchor (M0) is estimated on. Bounds COARSE memory independently of slide size; 0 disables decimation.",
-                    "default": 4096
+                    "description": "COARSE anchor thumbnail longest side (px). null = from reg_tiled_mode."
                 }
             }
         },

@@ -216,6 +216,126 @@ nextflow_process {
         }
     }
 
+    test("Should omit the VALIS override flags when none are set - rendered command") {
+
+        // `stub` tag but NO `options "-stub"`: -stub never evaluates a script: block.
+        //
+        // The assertion with teeth is the LAST one. The override flags interpolate at column 0
+        // between two backslash-continued lines, so with no overrides an empty interpolation
+        // leaves a BLANK line mid-command -- which ends the shell command there and runs
+        // everything after it (--micro-reg, --jvm-heap-gb, the stage checkpoint) as separate
+        // commands. register.nf guards that with `?: ['']`, rendering a whitespace-only
+        // continuation instead. Nothing else in the suite would notice: the truncated command is
+        // still valid shell, and REGISTER would simply run at the wrong settings.
+        tag "stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [patient_id: 'P001'],
+                    'P001',
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    [
+                        file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)
+                    ],
+                    [
+                        [patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK', 'SMA']],
+                        [patient_id: 'P001', is_reference: false, channels: ['DAPI', 'PANCK', 'SMA']]
+                    ]
+                ]
+                """
+            }
+        }
+
+        then {
+            def rendered = []
+            new File("$workDir").eachFileRecurse { f ->
+                if (f.name == '.command.sh' && f.text.contains('register.py')) {
+                    rendered << f.text
+                }
+            }
+
+            assertAll(
+                { assert rendered.size() >= 1,
+                    "no rendered REGISTER .command.sh found under the task work dir" },
+                { assert rendered.every { !it.contains('--max-processed-dim') },
+                    "an override flag rendered with no override set: " + rendered.join(' --- ') },
+                { assert rendered.every { !it.contains('--max-non-rigid-dim') },
+                    "an override flag rendered with no override set: " + rendered.join(' --- ') },
+                // Truncation guard. Asserting that '--micro-reg' is PRESENT does not work and
+                // was tried: a blank line breaks the shell continuation but leaves every word in
+                // the file, so the text-presence check passes against the broken render. What
+                // actually distinguishes them is the blank line itself -- a backslash-newline
+                // followed by an empty line. With the guard, that slot holds a whitespace-only
+                // continuation ('         \') instead.
+                { assert rendered.every { !it.substring(it.indexOf('register.py')).contains('\\\n\n') },
+                    "register.py invocation is truncated by a blank line at the override " +
+                    "interpolation point -- the `?: ['']` guard in register.nf is gone. Everything " +
+                    "after it runs as a SEPARATE command: " + rendered.join(' --- ') }
+            )
+        }
+    }
+
+    test("Should render a VALIS override under memory_mode=custom - rendered command") {
+
+        tag "stub"
+
+        when {
+            params {
+                memory_mode = 'custom'
+                reg_valis_max_non_rigid_dim = 2048
+            }
+            process {
+                """
+                input[0] = [
+                    [patient_id: 'P001'],
+                    'P001',
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    [
+                        file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)
+                    ],
+                    [
+                        [patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK', 'SMA']],
+                        [patient_id: 'P001', is_reference: false, channels: ['DAPI', 'PANCK', 'SMA']]
+                    ]
+                ]
+                """
+            }
+        }
+
+        then {
+            def rendered = []
+            new File("$workDir").eachFileRecurse { f ->
+                if (f.name == '.command.sh' && f.text.contains('register.py')) {
+                    rendered << f.text
+                }
+            }
+
+            assertAll(
+                { assert rendered.size() >= 1, "no rendered REGISTER .command.sh found" },
+                { assert rendered.every { it.contains('--max-non-rigid-dim 2048') },
+                    "the custom override did not reach register.py: " + rendered.join(' --- ') },
+                // An unset knob must NOT render, so register.py takes it from the preset row
+                // rather than being handed a literal 'null'.
+                { assert rendered.every { !it.contains('--max-processed-dim') },
+                    "an unset knob rendered anyway: " + rendered.join(' --- ') },
+                { assert rendered.every { it.contains('--memory-mode custom') },
+                    "the tier itself did not reach register.py: " + rendered.join(' --- ') },
+                // Truncation guard. Asserting that '--micro-reg' is PRESENT does not work and
+                // was tried: a blank line breaks the shell continuation but leaves every word in
+                // the file, so the text-presence check passes against the broken render. What
+                // actually distinguishes them is the blank line itself -- a backslash-newline
+                // followed by an empty line. With the guard, that slot holds a whitespace-only
+                // continuation ('         \') instead.
+                { assert rendered.every { !it.substring(it.indexOf('register.py')).contains('\\\n\n') },
+                    "register.py invocation is truncated by a blank line at the override " +
+                    "interpolation point -- the `?: ['']` guard in register.nf is gone. Everything " +
+                    "after it runs as a SEPARATE command: " + rendered.join(' --- ') }
+            )
+        }
+    }
+
     test("Should run VALIS batch registration - real") {
 
         tag "real"

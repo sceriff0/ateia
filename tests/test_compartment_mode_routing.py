@@ -168,10 +168,15 @@ ALLOWED_LINES = {
         # MERGE_SEG_EVAL blocks (+73), so every line above sits 88 lower. The two
         # offsets COMPOSE exactly -- 946 + 88 = 1034 -- which is the arithmetic check
         # that this re-pin is the merge of both histories rather than a guess at one.
-        # Re-pin, do not
+        # 1034 -> 1064 when the registration cost/accuracy presets landed: the three
+        # TILED_* closures in conf/modules.config each gained an INLINED copy of the
+        # RegPresets.STARE table (+30 lines total), because conf/*.config cannot see
+        # lib/*.groovy and the tier params are null-declared. Same composition check as
+        # above -- 1034 + 30 = 1064 -- and re-pinned from the file with the grep below,
+        # not guessed. Re-pin, do not
         # widen. (Re-pin from the file, not by guessing:
         # `grep -n "params.expanded_quantification ?" conf/modules.config`.)
-        1034: (
+        1064: (
             "ext.args = { params.expanded_quantification ? '--expanded' : "
             "'' } -- conf/*.config closures cannot see lib/*.groovy classes, "
             "so ext.args must read params raw here."

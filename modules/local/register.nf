@@ -48,6 +48,19 @@ process REGISTER {
     def memory_mode = params.memory_mode
     def micro_reg_fraction = params.reg_micro_reg_fraction
     def max_image_dim = params.reg_max_image_dim
+    // Tier-owned VALIS knobs. Rendered ONLY when set, so an unset knob leaves register.py to take
+    // it from --memory-mode's preset row -- passing an explicit 'null' would override the preset
+    // with nothing. ParamUtils has already rejected these under any tier other than 'custom'.
+    def valis_override_flags = [
+        (params.reg_valis_max_processed_dim != null ? "--max-processed-dim ${params.reg_valis_max_processed_dim}" : null),
+        (params.reg_valis_max_non_rigid_dim != null ? "--max-non-rigid-dim ${params.reg_valis_max_non_rigid_dim}" : null),
+    ].findAll { it != null }
+    // `?: ['']` is load-bearing, not defensive: with no overrides the interpolation below sits at
+    // column 0 between two backslash-continued lines, and an EMPTY line there ends the shell
+    // command early -- everything after it would run as separate commands. A single empty-string
+    // entry renders a harmless whitespace-only continuation instead. Same guard, same reason, as
+    // modules/local/warp_seg_qc.nf's backend_flags.
+    def valis_overrides = (valis_override_flags ?: ['']).collect { "        ${it} \\" }.join('\n')
     // Micro-registration depth (0/1/2), resolved via the single-source ParamUtils helper.
     def micro_reg = ParamUtils.microRegLevelOf(params.reg_micro_reg)
     // reg_qc >= 2 scores each registration stage separately, which needs the post-non-rigid,
@@ -79,6 +92,7 @@ process REGISTER {
     echo "========================================================================"
     echo "Settings:"
     echo "  - memory_mode: ${memory_mode}"
+    echo "  - valis overrides: ${valis_override_flags ? valis_override_flags.join(' ') : '(none - every knob from the preset)'}"
     echo "  - max_image_dim: ${max_image_dim}"
     echo "  - micro_reg: ${micro_reg} (0=none, 1=micro-rigid, 2=+micro non-rigid)"
     echo "========================================================================"
@@ -125,6 +139,7 @@ process REGISTER {
         --memory-mode ${memory_mode} \\
         --micro-reg-fraction ${micro_reg_fraction} \\
         --max-image-dim ${max_image_dim} \\
+${valis_overrides}
         --micro-reg ${micro_reg} \\
         --jvm-heap-gb ${jvm_heap_gb} \\
         ${stage_ckpt} \\

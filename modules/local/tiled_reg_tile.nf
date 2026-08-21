@@ -37,7 +37,12 @@ process TILED_REG_TILE {
             "patient ${meta.patient_id}. Configured nuclear_markers: " +
             "${MarkerUtils.markerList(params.nuclear_markers).join(', ')}. " +
             "Set params.reg_tiled_nuclear_index to override.")
-    def upsample   = params.reg_tiled_upsample
+    // Tier-owned knobs: null means take the value from reg_tiled_mode's row in
+    // lib/RegPresets.groovy. Resolved via RegPresets so the tier table has one home;
+    // the mode and the override are passed as SCALARS, never the params map, because a
+    // script: block that hands `params` to a helper makes Nextflow hash the whole map
+    // and re-run the task on any unrelated parameter change (see CLAUDE.md).
+    def upsample   = RegPresets.stare(params.reg_tiled_mode, 'upsample', params.reg_tiled_upsample)
     """
     tiled_reg_tile.py \\
         --reference ${reference} \\

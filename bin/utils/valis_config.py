@@ -14,6 +14,13 @@ from valis.non_rigid_registrars import OpticalFlowWarper
 
 # Memory mode presets — bundle feature detector, matcher, and dimension settings.
 # (Kept identical to the historical register.py MEMORY_PRESETS.)
+#
+# NOT ALL KEYS ARE LIVE. build_registrar_kwargs() below passes `feature_detector_cls`, `matcher`,
+# `max_processed_image_dim_px` and `max_non_rigid_registration_dim_px` to Valis(...). It does NOT
+# pass `num_features`, nor the 'low' row's `tile_wh` / `tile_buffer` — those are dead keys that
+# reach nothing. They are left in place rather than deleted because removing them is a behavioural
+# question (num_features would have to be threaded through the detector constructor), but there is
+# deliberately no pipeline param for them: a knob that changes nothing is worse than no knob.
 MEMORY_PRESETS = {
     "high": {
         "feature_detector_cls": feature_detectors.SuperPointFD,
@@ -41,11 +48,40 @@ MEMORY_PRESETS = {
 }
 
 
+# The tier vocabulary, shared with the STARE backend and with nextflow_schema.json's
+# `memory_mode` enum. 'custom' is not a row in MEMORY_PRESETS: it means "start from 'high' and
+# apply whichever per-knob overrides the caller passed", which is what resolve_memory_mode encodes.
+# Mirrored by lib/RegPresets.groovy (MODES / DEFAULT_MODE) for the tiled backend; the two are
+# pinned together by tests/test_reg_presets_inlined_in_config.py.
+MEMORY_MODES = ["high", "medium", "low", "custom"]
+DEFAULT_MEMORY_MODE = "high"
+
+
+def resolve_memory_mode(memory_mode):
+    """Map a tier name onto the MEMORY_PRESETS row it draws its base values from.
+
+    'custom' resolves to 'high' so that any knob the user did NOT override keeps its high value.
+    An unknown mode raises: this is called before the JVM starts and long before any expensive
+    work, so failing loudly here is strictly better than silently registering at a tier the user
+    did not ask for.
+    """
+    mode = memory_mode or DEFAULT_MEMORY_MODE
+    if mode == "custom":
+        return DEFAULT_MEMORY_MODE
+    if mode not in MEMORY_PRESETS:
+        raise ValueError(
+            f"Unknown memory_mode {memory_mode!r}. Expected one of {MEMORY_MODES}."
+        )
+    return mode
+
+
 def build_registrar_kwargs(
     reference_img_f,
     memory_mode="high",
     micro_reg=2,
     max_image_dim_px=4000,
+    max_processed_dim=None,
+    max_non_rigid_dim=None,
 ):
     """Return the exact kwargs dict passed to `registration.Valis(...)` by classic register.py.
 
@@ -59,15 +95,28 @@ def build_registrar_kwargs(
     instantiates the matcher from the preset). The matcher carries no cross-run RNG state that
     affects determinism for our purposes (SuperPoint/SuperGlue inference is deterministic).
     """
-    preset = MEMORY_PRESETS[memory_mode]
+    preset = MEMORY_PRESETS[resolve_memory_mode(memory_mode)]
+
+    # Explicit `is not None`, never `or` / `?:`: those are falsy-coalescing, so a deliberate 0
+    # would be silently rewritten to the preset value. Same rule the Nextflow side follows
+    # (tests/test_nullable_numeric_params_no_elvis.py).
+    processed_dim = (
+        max_processed_dim
+        if max_processed_dim is not None
+        else preset["max_processed_image_dim_px"]
+    )
+    non_rigid_dim = (
+        max_non_rigid_dim
+        if max_non_rigid_dim is not None
+        else preset["max_non_rigid_registration_dim_px"]
+    )
+
     return {
         "reference_img_f": reference_img_f,
         "align_to_reference": True,
         "crop": "reference",
-        "max_processed_image_dim_px": preset["max_processed_image_dim_px"],
-        "max_non_rigid_registration_dim_px": preset[
-            "max_non_rigid_registration_dim_px"
-        ],
+        "max_processed_image_dim_px": processed_dim,
+        "max_non_rigid_registration_dim_px": non_rigid_dim,
         "max_image_dim_px": preset.get("max_image_dim_px", max_image_dim_px),
         "feature_detector_cls": preset["feature_detector_cls"],
         "matcher": preset["matcher"],

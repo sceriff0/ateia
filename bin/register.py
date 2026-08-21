@@ -75,7 +75,12 @@ from valis import warp_tools as valis_warp_tools  # noqa: E402
 # matching without the affine optimizer refinement.
 # Memory mode presets + registrar-kwargs builder, and the JVM-heap sizer, live in the shared
 # single-source-of-truth module so there is one heap formula. See bin/utils/valis_config.py.
-from valis_config import MEMORY_PRESETS, build_registrar_kwargs, init_jvm  # noqa: E402
+from valis_config import (  # noqa: E402
+    MEMORY_PRESETS,
+    build_registrar_kwargs,
+    init_jvm,
+    resolve_memory_mode,
+)
 
 
 def validate_input_slides(input_dir: str) -> Tuple[List[str], List[str]]:
@@ -195,6 +200,8 @@ def valis_registration(
     reference: Optional[str] = None,
     reference_markers: Optional[List[str]] = None,
     memory_mode: str = "high",
+    max_processed_dim: Optional[int] = None,
+    max_non_rigid_dim: Optional[int] = None,
     micro_reg_fraction: float = 0.125,
     max_image_dim_px: int = 4000,
     micro_reg: int = 2,
@@ -245,10 +252,20 @@ def valis_registration(
     int
         Exit code (0 for success)
     """
-    # Unpack memory preset
-    preset = MEMORY_PRESETS[memory_mode]
-    max_processed_image_dim_px = preset["max_processed_image_dim_px"]
-    max_non_rigid_dim_px = preset["max_non_rigid_registration_dim_px"]
+    # Unpack memory preset. 'custom' draws its base values from 'high' and then takes whichever
+    # per-knob overrides were passed; resolve_memory_mode encodes that and rejects unknown tiers.
+    # Explicit `is not None`, never `or`: a deliberate 0 must not be coalesced away.
+    preset = MEMORY_PRESETS[resolve_memory_mode(memory_mode)]
+    max_processed_image_dim_px = (
+        max_processed_dim
+        if max_processed_dim is not None
+        else preset["max_processed_image_dim_px"]
+    )
+    max_non_rigid_dim_px = (
+        max_non_rigid_dim
+        if max_non_rigid_dim is not None
+        else preset["max_non_rigid_registration_dim_px"]
+    )
     num_features = preset["num_features"]
     feature_detector_cls = preset["feature_detector_cls"]
     matcher = preset["matcher"]
@@ -288,6 +305,11 @@ def valis_registration(
     logger.info("VALIS Registration Configuration")
     logger.info("=" * 70)
     logger.info(f"Memory mode: {memory_mode}")
+    if max_processed_dim is not None or max_non_rigid_dim is not None:
+        logger.info(
+            "  Custom overrides: "
+            f"max_processed_dim={max_processed_dim}, max_non_rigid_dim={max_non_rigid_dim}"
+        )
     logger.info(f"  Feature detector: {feature_detector_cls.__name__}")
     logger.info(f"  Matcher: {type(matcher).__name__}")
     logger.info(f"  Rigid resolution: {max_processed_image_dim_px}px")
@@ -382,6 +404,8 @@ def valis_registration(
         memory_mode=memory_mode,
         micro_reg=micro_reg,
         max_image_dim_px=max_image_dim_px,
+        max_processed_dim=max_processed_dim,
+        max_non_rigid_dim=max_non_rigid_dim,
     )
 
     registrar = registration.Valis(input_dir, results_dir, **registrar_kwargs)
@@ -966,13 +990,34 @@ def parse_args() -> argparse.Namespace:
         "--memory-mode",
         type=str,
         default="high",
-        choices=["high", "medium", "low"],
+        choices=["high", "medium", "low", "custom"],
         help=(
             "Memory preset, from MEMORY_PRESETS in bin/utils/valis_config.py. All three "
             "use SuperPoint + SuperGlue with 5000 features and differ only in the "
             "processed / non-rigid registration dimensions: "
-            '"high" 2048/4096 px, "medium" 1024/4096 px, "low" 256/1024 px '
-            "(low additionally warps in 512 px tiles)."
+            '"high" 2048/4096 px, "medium" 1024/4096 px, "low" 256/1024 px. '
+            '"custom" starts from "high" and applies whichever of --max-processed-dim / '
+            "--max-non-rigid-dim are given, leaving the rest at the high values."
+        ),
+    )
+    parser.add_argument(
+        "--max-processed-dim",
+        type=int,
+        default=None,
+        help=(
+            "Override the preset's feature detection/matching working size (px). "
+            "Unset = take it from --memory-mode."
+        ),
+    )
+    parser.add_argument(
+        "--max-non-rigid-dim",
+        type=int,
+        default=None,
+        help=(
+            "Override the preset's non-rigid registration size (px). Unset = take it from "
+            "--memory-mode. Requesting more than the smallest slide's full resolution makes "
+            "VALIS clamp this to that slide's largest dimension; lower it below that on "
+            "small-format input such as TMA cores."
         ),
     )
     parser.add_argument(
@@ -1038,6 +1083,8 @@ def main() -> int:
             reference=args.reference,
             reference_markers=args.reference_markers,
             memory_mode=args.memory_mode,
+            max_processed_dim=args.max_processed_dim,
+            max_non_rigid_dim=args.max_non_rigid_dim,
             micro_reg_fraction=args.micro_reg_fraction,
             max_image_dim_px=args.max_image_dim,
             micro_reg=args.micro_reg,

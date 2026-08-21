@@ -37,6 +37,9 @@ workflow MIRAGE {
     validateParameters()
 
     ParamUtils.validateOutdir(params.outdir)
+    // Tier vs per-knob-override consistency for BOTH registration backends. Cross-parameter,
+    // so it belongs here rather than in the schema; runs before any process is instantiated.
+    ParamUtils.validateRegPresets(params)
 
     /* -------------------- STEP GATE -------------------- */
 

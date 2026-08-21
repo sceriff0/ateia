@@ -253,6 +253,58 @@ class ParamUtils {
     }
 
     /**
+     * Reject per-knob overrides that contradict the cost/accuracy tier they are used with.
+     *
+     * Both registration backends expose `high | medium | low | custom`. Individual knob overrides
+     * are meaningful ONLY under `custom`, which is defined as "start from `high`, apply what the
+     * user set". Allowing `--memory_mode low --reg_valis_max_non_rigid_dim 4096` would produce a
+     * run that reports a tier it is not actually using, and nothing downstream could tell: the
+     * tier name reaches the QC report and the benchmark tables, the resolved numbers do not.
+     *
+     * Runs before any process is instantiated (workflows/mirage.nf), so a contradictory
+     * invocation costs nothing. This is the cross-parameter layer -- the per-value enums and
+     * types are the schema's job (nextflow_schema.json), per the two-layer rule in CLAUDE.md.
+     */
+    static void validateRegPresets(Map params) {
+        def offenders = { String modeName, Object mode, Map knobs ->
+            if (mode == 'custom') return []
+            return knobs.findAll { name, value -> value != null }
+                        .collect { name, value -> "--${name} ${value}" }
+        }
+
+        def valisBad = offenders('memory_mode', params.memory_mode, [
+            reg_valis_max_processed_dim: params.reg_valis_max_processed_dim,
+            reg_valis_max_non_rigid_dim: params.reg_valis_max_non_rigid_dim,
+        ])
+        if (valisBad) {
+            throw new IllegalArgumentException(
+                "VALIS knob override(s) ${valisBad.join(', ')} were given, but " +
+                "--memory_mode is '${params.memory_mode}'. Per-knob overrides only apply under " +
+                "--memory_mode custom, which starts from the 'high' preset and keeps every knob " +
+                "you do not set. Either pass --memory_mode custom, or drop the override(s) and " +
+                "let the '${params.memory_mode}' preset supply them " +
+                "(table: bin/utils/valis_config.py, MEMORY_PRESETS).")
+        }
+
+        def stareBad = offenders('reg_tiled_mode', params.reg_tiled_mode, [
+            reg_tiled_tile          : params.reg_tiled_tile,
+            reg_tiled_halo          : params.reg_tiled_halo,
+            reg_tiled_upsample      : params.reg_tiled_upsample,
+            reg_tiled_out_tile      : params.reg_tiled_out_tile,
+            reg_tiled_coarse_max_dim: params.reg_tiled_coarse_max_dim,
+        ])
+        if (stareBad) {
+            throw new IllegalArgumentException(
+                "STARE knob override(s) ${stareBad.join(', ')} were given, but " +
+                "--reg_tiled_mode is '${params.reg_tiled_mode}'. Per-knob overrides only apply " +
+                "under --reg_tiled_mode custom, which starts from the 'high' preset and keeps " +
+                "every knob you do not set. Either pass --reg_tiled_mode custom, or drop the " +
+                "override(s) and let the '${params.reg_tiled_mode}' preset supply them " +
+                "(table: lib/RegPresets.groovy, RegPresets.STARE).")
+        }
+    }
+
+    /**
      * Resolve --quantify_compartments / --expanded_quantification / --embed_masks
      * into ONE immutable snapshot, the same seam --registration_method has
      * (subworkflows/local/registration.nf: read once, threaded down as an

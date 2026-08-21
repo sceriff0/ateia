@@ -1,5 +1,6 @@
 import importlib.util
 import sys
+import re
 from pathlib import Path
 
 import pytest
@@ -207,6 +208,39 @@ def test_project_sweep_covers_every_shipped_segmentation_backend():
     assert {r["seg_method"] for r in plan} == {"stardist", "instantseg", "cellsam"}
 
 
+def stare_preset_row(mode):
+    """Parse one row of RegPresets.STARE out of lib/RegPresets.groovy.
+
+    The STARE tier knobs are null-declared in nextflow.config -- their shipped default now lives
+    in that table, not in the config -- so a test that wants "the value a default run actually
+    uses" has to read it from there. Parsed rather than mirrored as literals here for the same
+    reason test_project_sweep_baseline_matches_pipeline_defaults reads nextflow.config: a mirrored
+    copy is a second home that silently goes stale.
+
+    test_stare_preset_parser_actually_parses below fails if this ever returns nothing, so a
+    regex that stops matching cannot quietly turn every caller into a no-op assertion.
+    """
+    text = (Path(__file__).parents[2] / "lib" / "RegPresets.groovy").read_text()
+    body = re.search(r"STARE\s*=\s*\[(.*?)\n    \]", text, re.S)
+    assert body, "could not locate the STARE table in lib/RegPresets.groovy"
+    row = re.search(rf"^\s*{mode}\s*:\s*\[([^\]]*)\]", body.group(1), re.M)
+    assert row, f"could not locate the '{mode}' row in RegPresets.STARE"
+    return {
+        k.strip(): int(v)
+        for k, v in re.findall(r"(\w+)\s*:\s*(\d+)", row.group(1))
+    }
+
+
+def test_stare_preset_parser_actually_parses():
+    """The parser above must find a complete table, or every test using it silently passes."""
+    rows = {m: stare_preset_row(m) for m in ("high", "medium", "low")}
+    for mode, row in rows.items():
+        assert set(row) == {"tile", "halo", "out_tile", "coarse_max_dim", "upsample"}, (
+            f"RegPresets.STARE['{mode}'] parsed as {row} -- the table shape changed"
+        )
+    assert rows["high"]["tile"] > rows["low"]["tile"], "tiers are not ordered by cost"
+
+
 def test_project_stare_resolution_axis_mirrors_the_valis_one():
     """Both methods' transform-resolution knob must be swept, or the head-to-head is biased.
 
@@ -226,7 +260,13 @@ def test_project_stare_resolution_axis_mirrors_the_valis_one():
         "reg_max_image_dim is swept but reg_tiled_coarse_max_dim is not (or has <3 points): "
         f"{sorted(stare_values)}"
     )
-    base = sweep["baseline"]["reg_tiled_coarse_max_dim"]
+    # The baseline leaves this null: reg_tiled_mode='high' supplies it. Compare the axis against
+    # the value a default run ACTUALLY uses -- the 'high' row -- not against the literal null.
+    assert sweep["baseline"]["reg_tiled_coarse_max_dim"] is None, (
+        "baseline now pins reg_tiled_coarse_max_dim directly; if that is deliberate it must also "
+        "pin reg_tiled_mode='custom', or ParamUtils.validateRegPresets rejects every baseline run"
+    )
+    base = stare_preset_row("high")["coarse_max_dim"]
     assert min(stare_values) < base < max(stare_values), (
         f"the STARE resolution axis must bracket its default {base} in both directions, "
         f"as reg_max_image_dim does: {sorted(stare_values)}"

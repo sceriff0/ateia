@@ -35,9 +35,14 @@ process TILED_COARSE {
             "patient ${meta.patient_id}. Configured nuclear_markers: " +
             "${MarkerUtils.markerList(params.nuclear_markers).join(', ')}. " +
             "Set params.reg_tiled_nuclear_index to override.")
-    def tile       = params.reg_tiled_tile
-    def halo       = params.reg_tiled_halo
-    def max_dim    = params.reg_tiled_coarse_max_dim
+    // Tier-owned knobs: null means take the value from reg_tiled_mode's row in
+    // lib/RegPresets.groovy. Resolved via RegPresets so the tier table has one home;
+    // the mode and the override are passed as SCALARS, never the params map, because a
+    // script: block that hands `params` to a helper makes Nextflow hash the whole map
+    // and re-run the task on any unrelated parameter change (see CLAUDE.md).
+    def tile       = RegPresets.stare(params.reg_tiled_mode, 'tile', params.reg_tiled_tile)
+    def halo       = RegPresets.stare(params.reg_tiled_mode, 'halo', params.reg_tiled_halo)
+    def max_dim    = RegPresets.stare(params.reg_tiled_mode, 'coarse_max_dim', params.reg_tiled_coarse_max_dim)
     """
     tiled_coarse.py \\
         --reference ${reference} \\

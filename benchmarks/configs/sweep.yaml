@@ -70,16 +70,29 @@ baseline:
   # shipped config. memory_mode=high and reg_qc=2 are the pipeline defaults as of 2026-07-27.
   registration_method: valis          # pipeline default: 'valis' | 'tiled' (STARE). This baseline is the
                                       # VALIS anchor; registration_method_grid below adds tiled/STARE runs.
-  memory_mode: high                   # pipeline default (registration memory profile)
+  memory_mode: high                   # VALIS cost/accuracy tier (high|medium|low|custom), pipeline default.
+                                      # The tier-owned knobs below are null in nextflow.config and take their
+                                      # values from this tier's row in bin/utils/valis_config.py.
+  reg_valis_max_processed_dim: null   # VALIS detection/matching size (px). null = from memory_mode (high -> 2048).
+                                      # Declared so every run RECORDS what it used; only settable under
+                                      # memory_mode=custom, which registration_param_grid pins where it varies it.
+  reg_valis_max_non_rigid_dim: null   # VALIS non-rigid registration size (px). null = from memory_mode
+                                      # (high -> 4096). Same custom-only rule as above.
   reg_micro_reg: 2                    # pipeline default: micro-registration DEPTH (0=none | 1=micro-rigid |
                                       # 2=+micro non-rigid). nextflow.config ships 2 ("default MAX"); this
                                       # baseline previously claimed 0 was the default, which made the
                                       # 'baseline' run cheaper AND less accurate than the shipped config.
                                       # Replaces the old boolean skip_micro_registration (removed on main);
                                       # crossed with memory_mode by registration_param_grid.
-  reg_tiled_tile: 2048                # STARE tile core / mesh resolution (px), pipeline default. Only live when
-                                      # registration_method=tiled; declared here (like the seg_* backend params)
-                                      # so EVERY config shares columns — registration_method_grid crosses it.
+  reg_tiled_mode: high                # STARE cost/accuracy tier (high|medium|low|custom), pipeline default.
+                                      # This is now the SHIPPED default for the tier-owned knobs below —
+                                      # they are null in nextflow.config and take their values from this
+                                      # tier's row in lib/RegPresets.groovy. See registration_method_grid,
+                                      # which pins 'custom' where it varies them.
+  reg_tiled_tile: null                # STARE tile core / mesh resolution (px). null = from reg_tiled_mode,
+                                      # which is the pipeline default (high -> 2048). Declared here (like the
+                                      # seg_* backend params) so EVERY config shares columns —
+                                      # registration_method_grid crosses it, pinning reg_tiled_mode=custom.
   reg_tiled_gate_tre: 1.0             # STARE per-tile non-rigid refine gate (px), pipeline default. Only live for
                                       # tiled runs; declared for column uniformity (crossed by registration_method_grid).
   n_register_images: 2                # 1 reference + 1 moving (the classic pair)
@@ -100,7 +113,8 @@ baseline:
                                       # this before feature detection, so it sets both registration
                                       # runtime and the resolution the transform is solved at.
                                       # Live at this baseline (registration_method=valis).
-  reg_tiled_coarse_max_dim: 4096      # STARE coarse-anchor thumbnail, longest side (px), pipeline
+  reg_tiled_coarse_max_dim: null      # STARE coarse-anchor thumbnail, longest side (px). null = from
+                                      # reg_tiled_mode (high -> 4096), which is the pipeline
                                       # default. The resolution M0 is solved at — STARE's counterpart to
                                       # reg_max_image_dim. Crossed by registration_method_grid.tiled's
                                       # coarse_res sub-grid; declared here for column uniformity, and
@@ -294,6 +308,12 @@ segmentation_grid:
 # reg_tiled_out_tile (write-side I/O) — add them here if a curve for them is ever needed.
 registration_method_grid:
   tiled:
+    # reg_tiled_tile and reg_tiled_coarse_max_dim are TIER-OWNED: ParamUtils.validateRegPresets
+    # rejects a per-knob override under any tier other than 'custom', so this grid must pin it or
+    # every run here fails validation before the first process starts. 'custom' means "start from
+    # the high row and apply what is set", so the 2048 / 4096 cells below remain exactly the
+    # shipped values — pinning custom changes which runs are LEGAL, not what they measure.
+    reg_tiled_mode:     [custom]
     reg_tiled_tile:     [1024, 2048, 4096]         # grid granularity / mesh resolution (px) — the fairness knob
     reg_tiled_gate_tre: [0.5, 1.0, 2.0]            # per-tile non-rigid refine gate (rigid-stage TRE, px)
     # STARE's counterpart to VALIS's reg_max_image_dim: the resolution the GLOBAL M0 transform is
