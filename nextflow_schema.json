@@ -498,7 +498,7 @@
                 "segeval_tag": {
                     "type": "string",
                     "description": "Container tag for the CSE image, bolt3x/mirage-segeval.",
-                    "default": "1.0.0"
+                    "default": "1.0.1"
                 },
                 "skip_final_qc_report": {
                     "type": "boolean",
