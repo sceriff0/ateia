@@ -105,8 +105,22 @@ export NXF_OPTS="${NXF_OPTS:--Xms512m -Xmx3g}"
 # cannot reach the clamps. The two must be raised TOGETHER: the lower of the pair binds,
 # and at the shipped defaults queue_size (20) is far below max_forks (100), so raising
 # max_forks alone does nothing. See docs/resources.md.
-MAX_FORKS="${MAX_FORKS:-5}"
-QUEUE_SIZE="${QUEUE_SIZE:-20}"
+# 20 is the ceiling: conf/modules.config caps every heavy process at
+# Math.min(10 or 20, params.max_forks), so anything above 20 is inert. At the old 5,
+# max_forks -- not queue_size -- was the binding constraint and the cluster sat idle.
+MAX_FORKS="${MAX_FORKS:-20}"
+# Lower than the synthetic sweep's 100 ON PURPOSE. These are REAL whole slides: REGISTER has
+# been observed at 483 GB and MERGE_AND_PYRAMID at 6.5 h (docs/benchmarks_real.md), so the
+# binding resource is node memory, not the SLURM job count. Peak in-flight is
+# CONCURRENCY x QUEUE_SIZE = 4 x 50 = 200; SLURM will queue what does not fit, but a much
+# larger number just buries your own queue behind jobs that cannot start.
+QUEUE_SIZE="${QUEUE_SIZE:-50}"
+
+PEAK_JOBS=$(( CONCURRENCY * QUEUE_SIZE ))
+MAXSUBMIT=$(sacctmgr -n show assoc user="$USER" format=maxsubmit 2>/dev/null | tr -d ' \n' | head -c 16)
+echo "Concurrency: ${CONCURRENCY} arms x queue_size ${QUEUE_SIZE} = ~${PEAK_JOBS} in-flight SLURM jobs"
+echo "             max_forks=${MAX_FORKS} (ceiling: conf/modules.config clamps at 20)"
+echo "             SLURM per-user maxsubmit: ${MAXSUBMIT:-<not reported>}"
 
 EXTRA_ARGS=(--max_forks "$MAX_FORKS" --queue_size "$QUEUE_SIZE")
 # CSE is enabled by a PROFILE, never `--skip_seg_quality_eval false`: Nextflow 26

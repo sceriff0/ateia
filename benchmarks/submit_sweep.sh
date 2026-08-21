@@ -129,8 +129,29 @@ fi
 # cannot reach the clamps. The two must be raised TOGETHER: the lower of the pair binds,
 # and at the shipped defaults queue_size (20) is far below max_forks (100), so raising
 # max_forks alone does nothing. See docs/resources.md.
-MAX_FORKS="${MAX_FORKS:-5}"
-QUEUE_SIZE="${QUEUE_SIZE:-20}"
+# MAX_FORKS=20 is the CEILING, not a preference. Every heavy process in
+# conf/modules.config caps itself at Math.min(10 or 20, params.max_forks) -- the largest
+# such clamp is 20 -- so any value above 20 is inert and only makes the number misleading.
+# 20 unlocks every clamp fully.
+MAX_FORKS="${MAX_FORKS:-20}"
+# QUEUE_SIZE is the real throttle: in-flight SLURM jobs PER Nextflow head. Peak cluster load
+# is roughly CONCURRENCY x QUEUE_SIZE (16 x 100 = 1600 here). The lower of
+# (max_forks, queue_size) binds per process, so these must be raised together -- at the old
+# 5/20 pair, max_forks was the binding constraint and the cluster sat idle.
+QUEUE_SIZE="${QUEUE_SIZE:-100}"
+
+# Pre-flight: print the SLURM per-user submit cap next to what this run will actually ask for,
+# so a mismatch shows up in the log BEFORE 1600 submissions start failing. Not a hard gate --
+# not every site exposes maxsubmit, and an unset cap prints blank rather than a number.
+PEAK_JOBS=$(( CONCURRENCY * QUEUE_SIZE ))
+MAXSUBMIT=$(sacctmgr -n show assoc user="$USER" format=maxsubmit 2>/dev/null | tr -d ' \n' | head -c 16)
+echo "Concurrency: ${CONCURRENCY} heads x queue_size ${QUEUE_SIZE} = ~${PEAK_JOBS} in-flight SLURM jobs"
+echo "             max_forks=${MAX_FORKS} (ceiling: conf/modules.config clamps at 20)"
+echo "             SLURM per-user maxsubmit: ${MAXSUBMIT:-<not reported>}"
+if [[ -n "$MAXSUBMIT" && "$MAXSUBMIT" =~ ^[0-9]+$ && "$PEAK_JOBS" -gt "$MAXSUBMIT" ]]; then
+  echo "WARNING: peak in-flight (${PEAK_JOBS}) exceeds your maxsubmit (${MAXSUBMIT})."
+  echo "         Lower QUEUE_SIZE or SWEEP_CONCURRENCY, or submissions will be rejected."
+fi
 
 export SWEEP_CONCURRENCY="$CONCURRENCY"
 export SWEEP_PROFILE="$PROFILES"

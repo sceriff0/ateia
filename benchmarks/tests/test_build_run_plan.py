@@ -396,11 +396,11 @@ def test_project_sweep_caps_and_grids():
     sweep = yaml.safe_load(
         (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text())
     sg = sweep["scaling_grid"]
-    assert max(sg["target_px"]) == 90000        # largest benchmarked size (see sweep.yaml scaling_grid)
+    assert max(sg["target_px"]) == 65536        # largest benchmarked size (see sweep.yaml scaling_grid)
     assert sg["n_channels"] == [2, 4]           # 1 not benchmarked, max 4
     # registration is measured ACROSS sizes, not only at baseline
     rg = sweep["registration_grid"]
-    assert max(rg["target_px"]) == 90000
+    assert max(rg["target_px"]) == 65536
     assert rg["n_register_images"] == [4, 8]
     # input-scaling dimensions are owned by the grids, not double-covered as OFAT axes
     for k in ("target_px", "n_channels", "n_register_images"):

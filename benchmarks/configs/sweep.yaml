@@ -43,7 +43,7 @@ strategy: ofat
 # generate_matrix.py --sweep builds exactly these cells; build_run_plan.py expands
 # them into runs (labelled varied_axis=scaling_grid, plus the baseline cell).
 scaling_grid:
-  target_px:  [2048, 4096, 8192, 16384, 32768, 65536, 90000]  
+  target_px:  [2048, 4096, 8192, 16384, 32768, 65536]  
   n_channels: [2, 4]                                     # 1 channel not benchmarked
 
 # Registration-scaling grid: size x number-of-registered-rounds, at a FIXED channel
@@ -55,7 +55,7 @@ scaling_grid:
 # These runs are labelled varied_axis=registration_grid and DO feed the memory
 # regression (input genuinely varies with round count).
 registration_grid:
-  target_px:         [2048, 4096, 8192, 16384, 32768, 65536, 90000]
+  target_px:         [2048, 4096, 8192, 16384, 32768, 65536]
   n_register_images: [4, 8]
   n_channels:        [2, 4]     # benchmark N-image registration at BOTH 2 and 4 channels
 

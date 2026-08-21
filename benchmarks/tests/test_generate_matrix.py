@@ -216,7 +216,7 @@ def test_derive_from_sweep_matches_repo_sweep():
     assert d["n_moving"] == 7 and d["paired"] is True
     # input-scale cells come from the scaling_grid; 90000 is the largest benchmarked size.
     # channels {2, 4} (1 not benchmarked). 131072 is not benchmarked (~69 GB/cell).
-    assert max(d["target_px"]) == 90000
+    assert max(d["target_px"]) == 65536
     assert 131072 not in d["target_px"]
     assert d["n_channels"] == [2, 4]
 
