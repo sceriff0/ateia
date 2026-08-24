@@ -55,7 +55,8 @@ CONCURRENCY="${ARMS_CONCURRENCY:-4}"      # arms launched AT ONCE. Each is one N
                                           # default NXF_JVM_ARGS people copy from the normal
                                           # launcher (-Xmx32g) would blow a 32 GB job at N=2.
 ENABLE_CSE="${ENABLE_CSE:-false}"         # true => score the segmentation arms with CSE.
-                                          # Needs bolt3x/attend_image_analysis:segeval published.
+                                          # Needs bolt3x/mirage-segeval:${segeval_tag} published
+                                          # (1.0.1 is live as of 2026-08-21).
 # -------------------------------------------------------------------------------
 
 # NOTE: do NOT write SRC_DIR="~/..." — bash does tilde expansion BEFORE parameter
@@ -140,6 +141,20 @@ if grep -q "cellsam" "$ARMS_YAML" && [[ -z "${DEEPCELL_ACCESS_TOKEN:-}" ]]; then
     echo "         Get a token at https://users.deepcell.org, then either"
     echo "           export DEEPCELL_ACCESS_TOKEN=... in ~/.bashrc (sourced above), or"
     echo "           set params.cellsam_model_path to pre-downloaded weights."
+fi
+
+# StarDist weights are the OTHER gated backend, and it had no check here while cellsam did
+# -- the same failure class, one guarded and one not. nextflow.config ships
+# segmentation_model_dir = null and a segmentation_model name that is NOT a StarDist built-in,
+# so segment.py raises FileNotFoundError. That surfaces AFTER preprocessing and registration
+# have already been paid for, on every patient in the cohort.
+if grep -q "stardist" "$ARMS_YAML" \
+   && ! grep -qE "^[^/]*segmentation_model_dir" "$SITE_CONFIG" 2>/dev/null; then
+    echo "WARNING: arms.yaml uses the stardist backend but segmentation_model_dir is not set"
+    echo "         in $SITE_CONFIG. The shipped segmentation_model name is not a StarDist"
+    echo "         built-in, so that arm will fail with FileNotFoundError after preprocessing"
+    echo "         and registration have already run. Set params.segmentation_model_dir to the"
+    echo "         trained model directory, or drop 'stardist' from arms.yaml."
 fi
 
 echo "=================================================="
