@@ -80,6 +80,7 @@ profiles, comma-combined — e.g. `-profile slurm,singularity` on a cluster or
 | `--start` | param | no | Entry stage: `preprocessing` (default), `registration`, `segmentation`, `postprocessing`. |
 | `--stop` | param | no | Last stage to run. Omitted = run to the end. |
 | `dry_run` | param | no | Validate inputs and the samplesheet, then exit without running tasks. Boolean — set it in a `-params-file` (`params/dry_run.json`), never on the CLI; see [Boolean parameters](#boolean-parameters). |
+| `cleanup_work` | param | no | Delete `work/` after a successful run. Off by default; incompatible with `-resume`. Boolean — set it in a `-params-file`, never on the CLI; see [Boolean parameters](#boolean-parameters). |
 | `-profile` | option | no | Execution/config profiles, comma-combined (e.g. `slurm,singularity`). |
 | `-params-file` | option | no | JSON preset of parameters, e.g. `params/full_pipeline.json`. |
 | `-resume` | option | no | Reuse cached results from a previous run's `work/`. |
@@ -241,6 +242,19 @@ samplesheet — feed it back in with a matching `--start`.
     different files from the `work/` originals as far as the cache is concerned, so
     the combination reuses **nothing** from a prior run's work directory. `-resume`
     there only helps across successive `--start postprocessing` runs.
+
+!!! warning "`--cleanup_work` removes the thing `-resume` needs"
+    `--cleanup_work` deletes the work directory after a successful run, so a later
+    `-resume` has no cache to reuse. It does **not** error — the run exits 0 and
+    silently re-runs every task. On the stub dataset, `-resume` against an intact
+    `work/` produced 57 cache hits; against a cleaned one, 0. Both green.
+
+    Use `--cleanup_work` for a final, known-good run whose outputs you intend to
+    keep and whose `work/` you will never revisit. While you are still iterating —
+    or still might need to diagnose a task that `errorStrategy 'ignore'` dropped
+    without failing the run — leave it off. `--start` restarts are unaffected
+    either way: they read published paths under `--outdir`, never `work/`.
+    Details: [`cleanup_work`](parameters.md#work-directory-cleanup).
 
 !!! warning "Two tasks always re-run"
     `GENERATE_QC_REPORT` and `AGGREGATE_SIZE_LOGS` are declared `cache = false`. Their

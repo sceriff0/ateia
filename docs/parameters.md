@@ -358,6 +358,43 @@ raise `queue_size`. See [Resources → Execution & concurrency](resources.md#exe
 | `enable_trace` | `true` | Write Nextflow `trace.txt`, `report.html`, `timeline.html`, and per-task size logs. |
 | `trace_dir` | `.trace` | Directory for trace outputs (independent of `--outdir`). |
 
+## Work-directory cleanup
+
+| Parameter | Default | Description |
+|---|---|---|
+| `cleanup_work` | `false` | Delete the Nextflow work directory after a **successful** run. |
+
+Off by default. When enabled, Nextflow removes the work directory during session
+teardown once the run completes successfully.
+
+**Safe to enable:** published outputs are unaffected. Every `publishDir` in
+`conf/modules.config` uses `mode: 'copy'`, so nothing under `--outdir` is a symlink
+into `work/`, and no checkpoint CSV records a path inside the work directory
+(asserted by `tests/checkpoint_manifest.nf.test`). Restarting a later stage with
+`--start` therefore still works after cleanup, because `--start` reads published
+paths under `--outdir`.
+
+**What it does not remove.** Nextflow's cleanup reclaims *task* directories. The
+`collectFile()` scratch under `work/tmp/` and `work/collect-file/`, plus the empty
+two-character task-directory shells, survive. On the stub dataset that is 40 KB out
+of 1.0 MB — the task outputs, which are the part that actually grows with real
+slides, are all gone. Use `nextflow clean` or remove `work/` yourself if you need
+the directory to disappear entirely.
+
+!!! warning "Mutually exclusive with `-resume`"
+    A cleaned run leaves no cache to resume from, and **this does not fail loudly**:
+    re-running with `-resume` against a cleaned work directory exits 0 and silently
+    re-runs every task. Verified on the stub dataset — 57 cache hits against an
+    intact `work/`, 0 against a cleaned one, both green. If you iterate with
+    `-resume`, leave `cleanup_work` off. See
+    [Checkpoints & resuming](usage.md#checkpoints-resuming).
+
+!!! warning "Erases evidence of silently-dropped tasks"
+    `conf/modules.config`'s `errorStrategy` has an `'ignore'` branch, so a run can
+    exit 0 with a QC task having failed. Cleanup deletes that task's work
+    directory, which is the only place its logs and partial outputs live. Keep
+    `cleanup_work` off while you still care about diagnosing a run.
+
 ## Incremental cyclic-IF mode (`add_cycle`)
 
 Fold a **new imaging cycle** into an already-completed patient run, reusing the prior
