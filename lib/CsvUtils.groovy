@@ -225,15 +225,17 @@ class CsvUtils {
         return result
     }
 
-    /** Filename component of a samplesheet path cell -- how meta/file names key. */
-    static String baseName(String pathCell) {
-        if (!pathCell) return ''
-        def idx = pathCell.lastIndexOf('/')
-        return idx >= 0 ? pathCell.substring(idx + 1) : pathCell
-    }
-
     /**
-     * Each slide's exact emit-set: patient_id -> (image basename -> channels).
+     * Each slide's exact emit-set: patient_id -> (RAW image cell -> channels).
+     *
+     * THE INNER KEY IS THE RAW `<imageColumn>` CELL, verbatim (trimmed), NOT its
+     * basename. resolveReferenceRows returns that same raw cell and input_check.nf's
+     * meta.is_reference already compares against it, so both lookups provably use one
+     * key. A basename key silently weakened resolveReferenceRows' "the raw cell is
+     * unique per patient" assumption to "the FILENAME is unique per patient": two rows
+     * of one patient under different directories (a cyclic-IF cohort with one directory
+     * per cycle) then overwrote each other, leaving one entry that both rows read --
+     * the reference got the other slide's keep-set and emitted zero channels.
      *
      * THE keep-set rule, and the only place it exists. SPLIT_CHANNELS emits exactly what
      * this returns (via meta.keep_channels); countChannelsPerPatient sizes the
@@ -304,14 +306,13 @@ class CsvUtils {
             def rawImage = cols[imageIdx].trim()
             rowsByPatient[patientId] << [
                 raw     : rawImage,
-                image   : baseName(rawImage),
                 channels: cols[channelsIdx].split('\\|')*.trim().findAll { it },
             ]
         }
 
         def result = [:]
         rowsByPatient.each { patientId, rows ->
-            // resolveReferenceRows returns the RAW cell, so compare on raw, not basename.
+            // resolveReferenceRows returns the RAW cell, which is also this map's key.
             def refCell = referenceImage[patientId]
             // Stable partition: reference row(s) first, everything else in declared
             // order. A patient with no reference at all (add_cycle's by-design
@@ -332,7 +333,7 @@ class CsvUtils {
                     claimed << name
                     keep << ch
                 }
-                perSlide[row.image] = keep
+                perSlide[row.raw] = keep
             }
             result[patientId] = perSlide
         }

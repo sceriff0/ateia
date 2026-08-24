@@ -66,8 +66,17 @@ workflow INPUT_CHECK {
             // that must not be left to a downstream guess. A patient with no resolvable
             // reference (add_cycle's by-design zero-reference sheet) matches nothing and
             // keeps every row false.
+            def raw_image = row[image_column]?.toString()?.trim()
             meta.is_reference = reference_image[meta.patient_id] != null &&
-                                reference_image[meta.patient_id] == row[image_column]?.toString()?.trim()
+                                reference_image[meta.patient_id] == raw_image
+            // The slide's exact emit-set, looked up HERE and nowhere else, because THIS
+            // is where the raw `<image_column>` cell is in scope. resolveKeptChannelsPerSlide
+            // keys its inner map on that same raw cell, and meta.is_reference two lines up
+            // compares against it too, so the three cannot key differently. It used to be
+            // injected by a separate .map further down, keyed on `f.name` -- the staged
+            // FILE's basename, which is not the samplesheet cell.
+            def per_slide = keep_channels_by_slide[meta.patient_id]
+            meta.keep_channels = per_slide?.get(raw_image) ?: meta.channels
             // Per-image unique id (patient_id + source-image stem). Drives output
             // file naming so a patient's multiple images do not produce identically
             // named files that collide when collected downstream (QC, registration).
@@ -105,23 +114,6 @@ workflow INPUT_CHECK {
                 [meta + [channels_count: count], f]
             }
     }
-
-    // Add keep_channels to meta: the exact channels THIS SLIDE emits.
-    //
-    // Deliberately a plain .map over a captured lookup, NOT the `.combine(ch, by: 0)`
-    // pattern the two injections above use. Those key on patient_id; this is per-slide.
-    // They are also INNER joins, and the guard below records that a key mismatch
-    // silently DROPS the row -- the exact mechanism of the samplesheet-row-drop bug
-    // already fixed once in this file. A .map cannot drop a row.
-    ch_samples = ch_samples
-        .map { meta, f ->
-            // Fall back to the slide's full declared channel list, never to an empty
-            // list: an empty keep-set would silently emit nothing, whereas over-emitting
-            // is the recoverable direction (subworkflows/local/quantify_markers.nf).
-            def keep = keep_channels_by_slide[meta.patient_id]?.get(f.name) ?: meta.channels
-            // See the Map.plus() note above.
-            [meta + [keep_channels: keep], f]
-        }
 
     // Fail-fast guard: `.combine(by: 0)` above is an INNER join keyed on
     // patient_id. If a row's patient_id does not exactly match a key in the

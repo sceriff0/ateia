@@ -123,6 +123,26 @@ P3,cyc4.tiff,DAPI|CELLTOX|CD8,false
     assert seeded['P3']['cyc4.tiff'] == ['CELLTOX', 'CD8']  // DAPI pre-claimed; CELLTOX new
     keepPrior.delete()
 
+    // BASENAME IS NOT A KEY. Two rows of one patient can share an image BASENAME while
+    // living in different directories -- a cyclic-IF cohort with one directory per cycle
+    // is the ordinary case, not a pathological one. The inner map is therefore keyed on
+    // the RAW image cell, exactly what resolveReferenceRows returns and exactly what
+    // input_check.nf's meta.is_reference already compares against. Keyed on the basename
+    // the two rows overwrote each other: the map held ONE entry, both rows looked it up,
+    // and the reference was handed the other slide's keep-set -- in a real run it emitted
+    // ZERO channels, DAPI included, while the count read 1 instead of 3.
+    def dupCsv = File.createTempFile('keepdup', '.csv')
+    dupCsv.text = '''patient_id,image,channels,is_reference
+P4,/data/c1/slide.tiff,DAPI|CD3,true
+P4,/data/c2/slide.tiff,DAPI|CD8,false
+'''
+    def dup = CsvUtils.resolveKeptChannelsPerSlide(dupCsv.path, 'image', ['DAPI','CELLTOX'], false)
+    assert dup['P4'].size() == 2                              // two rows, two entries
+    assert dup['P4']['/data/c1/slide.tiff'] == ['DAPI', 'CD3']  // the reference claims DAPI
+    assert dup['P4']['/data/c2/slide.tiff'] == ['CD8']          // DAPI already claimed
+    assert CsvUtils.countChannelsPerPatient(dupCsv.path, 'image', ['DAPI','CELLTOX'], false)['P4'] == 3
+    dupCsv.delete()
+
     // THE invariant countChannelsPerPatient exists to satisfy: the count equals BOTH
     // the number of TIFFs emitted (pyramid path, groupTiffsByPatient, no .unique) AND
     // the number of distinct marker names (quant path, which .unique()s first). If
