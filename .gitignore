@@ -136,6 +136,11 @@ tests/testdata/single_sample.csv
 tests/testdata/whitespace_patient_id.csv
 tests/testdata/celltox_nonreference.csv
 tests/testdata/celltox_only.csv
+tests/testdata/keepset_exhausted.csv
+tests/testdata/duplicate_basename.csv
+tests/testdata/P001_mov_dapi_only.ome.tiff
+tests/testdata/cycle1/
+tests/testdata/cycle2/
 tests/testdata/sample_DAPI_intensity.csv
 tests/testdata/sample_PANCK_intensity.csv
 tests/testdata/sample_SMA_intensity.csv

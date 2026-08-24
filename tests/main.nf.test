@@ -515,6 +515,113 @@ nextflow_pipeline {
         }
     }
 
+    test("a slide whose every channel is already claimed splits nothing") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                // P001_ref carries DAPI|PANCK|SMA and is the reference; the moving slide
+                // carries ONLY DAPI. CsvUtils.resolveKeptChannelsPerSlide therefore
+                // resolves that slide's keep-set to the EMPTY list -- a legitimate answer
+                // ("contributes no new markers"), which countChannelsPerPatient counts as
+                // ZERO, giving the patient a channels_count of 3.
+                input  = "$projectDir/tests/testdata/keepset_exhausted.csv"
+                outdir = "$outputDir"
+                start  = "preprocessing"
+                max_cpus = 2
+                max_memory = '6.GB'
+                seg_gpu = false
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                // THE regression. While the lookup used `?:` (Groovy treats [] as falsy)
+                // the empty keep-set was indistinguishable from an absent one, so the
+                // slide was injected with its FULL declared list and DAPI was split and
+                // quantified a SECOND time -- 4 QUANTIFY tasks against a channels_count of
+                // 3, exit 0, and which slide's DAPI reached merged_quant.csv and the
+                // pyramid decided by arrival order at the `.unique()` calls in
+                // quantify_markers.nf / postprocess.nf. Watched failing at exactly 4
+                // before the fix.
+                { assert workflow.trace.tasks().findAll {
+                    it.name.startsWith('MIRAGE:POSTPROCESSING:QUANTIFY_MARKERS:QUANTIFY') }.size() == 3 },
+                // And the empty-keep-set slide is not split at all: ONE SPLIT_CHANNELS
+                // task, not two. SPLIT_CHANNELS declares `path("*.tiff")` as a MANDATORY
+                // output -- kept mandatory deliberately, since it is a real guard that a
+                // genuinely failed split still trips -- so the slide is filtered out of
+                // the process's input by postprocess.nf instead.
+                { assert workflow.trace.tasks().findAll {
+                    it.name.startsWith('MIRAGE:POSTPROCESSING:SPLIT_CHANNELS') }.size() == 1 },
+                // Exactly one DAPI, and the three names are the reference's panel.
+                { assert workflow.trace.tasks().findAll {
+                    it.name.startsWith('MIRAGE:POSTPROCESSING:QUANTIFY_MARKERS:QUANTIFY') }
+                        .collect { it.name.replaceAll(/^.*\(P001 - (.*)\)$/, '$1') }.toSorted() ==
+                        ['DAPI', 'PANCK', 'SMA'] },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.startsWith('MIRAGE:POSTPROCESSING:ASSEMBLE_EXPORT:MERGE_AND_PYRAMID') }.size() == 1 }
+            )
+        }
+    }
+
+    test("two slides sharing an image basename keep distinct keep-sets") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                // cycle1/slide.ome.tiff (DAPI|CD3, reference) + cycle2/slide.ome.tiff
+                // (DAPI|CD8). One directory per cycle is the ordinary cyclic-IF layout, so
+                // a shared BASENAME across a patient's rows is not a pathological input.
+                //
+                // reg_qc=0 and skip_preprocess_qc are set because this sheet also trips a
+                // SEPARATE, PRE-EXISTING defect that this branch does not fix: meta.id is
+                // built from the image's simpleName, so both rows are `P001_slide` and the
+                // per-slide QC artifacts collide by filename (WARP_SEG_QC at reg_qc=2,
+                // else GENERATE_QC_REPORT's preprocess_qc PNGs). That late guard is NOT a
+                // defence against the keep-set defect below -- it fires only after
+                // postprocessing has already published a wrong pyramid and quant table --
+                // which is exactly why this test disables the paths that carry it and
+                // asserts on the keep-set directly.
+                input  = "$projectDir/tests/testdata/duplicate_basename.csv"
+                outdir = "$outputDir"
+                start  = "preprocessing"
+                reg_qc = 0
+                skip_preprocess_qc = true
+                max_cpus = 2
+                max_memory = '6.GB'
+                seg_gpu = false
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                // Patient total is 3: the reference claims DAPI+CD3, cycle2 keeps CD8.
+                // While resolveKeptChannelsPerSlide keyed its inner map on the BASENAME the
+                // two rows overwrote each other, both looked up the single surviving entry,
+                // and the run ABORTED with "No such file or directory: channels" after
+                // publishing CD8.tiff alone and running ZERO QUANTIFY tasks. Watched
+                // failing in exactly that way before the fix.
+                { assert workflow.trace.tasks().findAll {
+                    it.name.startsWith('MIRAGE:POSTPROCESSING:QUANTIFY_MARKERS:QUANTIFY') }.size() == 3 },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.startsWith('MIRAGE:POSTPROCESSING:QUANTIFY_MARKERS:QUANTIFY') }
+                        .collect { it.name.replaceAll(/^.*\(P001 - (.*)\)$/, '$1') }.toSorted() ==
+                        ['CD3', 'CD8', 'DAPI'] },
+                // Both slides still split -- neither keep-set is empty here.
+                { assert workflow.trace.tasks().findAll {
+                    it.name.startsWith('MIRAGE:POSTPROCESSING:SPLIT_CHANNELS') }.size() == 2 },
+                { assert workflow.trace.tasks().findAll {
+                    it.name.startsWith('MIRAGE:POSTPROCESSING:ASSEMBLE_EXPORT:MERGE_AND_PYRAMID') }.size() == 1 }
+            )
+        }
+    }
+
     test("a CELLTOX-only samplesheet runs end to end under --nuclear_markers CELLTOX") {
 
         tag "stub"

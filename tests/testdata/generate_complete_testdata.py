@@ -157,6 +157,36 @@ create_multichannel_image(
     rng=_img_rng,
 )
 
+# Keep-set regression images. Both groups use a DEDICATED rng so they can be added
+# without shifting the _img_rng stream that renders the fixtures above (their content
+# is asserted elsewhere).
+_keepset_rng = np.random.default_rng(43)
+
+# (a) A single-channel DAPI-only moving slide. Paired with P001_ref (DAPI|PANCK|SMA)
+#     in keepset_exhausted.csv, its ONE channel is already claimed by the reference, so
+#     CsvUtils.resolveKeptChannelsPerSlide resolves its keep-set to the EMPTY list.
+create_multichannel_image(
+    OUT_DIR / "P001_mov_dapi_only.ome.tiff",
+    p001_anatomy,
+    channel_names=["DAPI"],
+    shift=(5, 5),
+    rng=_keepset_rng,
+)
+
+# (b) Two slides of ONE patient sharing a basename under different directories -- the
+#     ordinary cyclic-IF layout of one directory per cycle. resolveKeptChannelsPerSlide
+#     keys its per-slide map on the RAW samplesheet cell for exactly this shape; keyed on
+#     the basename these two rows overwrote each other.
+for _cycle_dir, _channels in (("cycle1", ["DAPI", "CD3"]), ("cycle2", ["DAPI", "CD8"])):
+    (OUT_DIR / _cycle_dir).mkdir(exist_ok=True)
+    create_multichannel_image(
+        OUT_DIR / _cycle_dir / "slide.ome.tiff",
+        p001_anatomy,
+        channel_names=_channels,
+        shift=(0, 0) if _cycle_dir == "cycle1" else (5, 5),
+        rng=_keepset_rng,
+    )
+
 # =============================================================================
 # 2. Generate segmentation masks
 # =============================================================================
@@ -621,6 +651,34 @@ with open(OUT_DIR / "celltox_only.csv", "w") as f:
     f.write(f"P001,{TESTDATA_ABS}/P001_ref.ome.tiff,true,CELLTOX|PANCK|SMA\n")
     f.write(f"P001,{TESTDATA_ABS}/P001_mov1.ome.tiff,false,CELLTOX|CD3|CD8\n")
 print("  Created celltox_only.csv")
+
+# 7g-ter. Keep-set regression sheets. Both target the ONE invariant the keep-set design
+# rests on: EVERY MARKER NAME IS EMITTED EXACTLY ONCE PER PATIENT, which is what makes
+# meta.channels_count (CsvUtils.countChannelsPerPatient) exact against the TIFFs that
+# actually arrive.
+#
+# keepset_exhausted.csv: the moving slide carries ONLY DAPI, which the reference has
+# already claimed, so its keep-set resolves to the EMPTY list -- the slide contributes no
+# new markers and countChannelsPerPatient counts it as zero (patient total 3). The empty
+# list used to be indistinguishable from "no entry" at the lookup site, whose `?:` fell
+# back to the slide's FULL declared list (Groovy treats [] as falsy): DAPI was emitted a
+# SECOND time, giving 4 QUANTIFY tasks against a channels_count of 3, and which slide's
+# DAPI reached merged_quant.csv and the pyramid came down to arrival order.
+with open(OUT_DIR / "keepset_exhausted.csv", "w") as f:
+    f.write("patient_id,path_to_file,is_reference,channels\n")
+    f.write(f"P001,{TESTDATA_ABS}/P001_ref.ome.tiff,true,DAPI|PANCK|SMA\n")
+    f.write(f"P001,{TESTDATA_ABS}/P001_mov_dapi_only.ome.tiff,false,DAPI\n")
+print("  Created keepset_exhausted.csv")
+
+# duplicate_basename.csv: two slides of one patient sharing the basename slide.ome.tiff
+# under cycle1/ and cycle2/. Patient total is 3 (DAPI+CD3 from the reference, CD8 from
+# cycle2). While the per-slide map was keyed on the BASENAME the two rows collapsed onto
+# one entry, so the reference was handed cycle2's keep-set and emitted zero channels.
+with open(OUT_DIR / "duplicate_basename.csv", "w") as f:
+    f.write("patient_id,path_to_file,is_reference,channels\n")
+    f.write(f"P001,{TESTDATA_ABS}/cycle1/slide.ome.tiff,true,DAPI|CD3\n")
+    f.write(f"P001,{TESTDATA_ABS}/cycle2/slide.ome.tiff,false,DAPI|CD8\n")
+print("  Created duplicate_basename.csv")
 
 # 7g. Registration QC fixtures matching WARP_SEG_QC.out.metrics / .out.per_cell,
 # so tests/subworkflows/local/postprocessing.nf.test can pass non-empty
