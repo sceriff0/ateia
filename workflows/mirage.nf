@@ -86,11 +86,15 @@ workflow MIRAGE {
         ParamUtils.validateAddCycleStepFlags(params)
         ParamUtils.validateAddCycle(params.outdir, params.prior_outdir)
         ParamUtils.validateCompartmentQuant(compartment_mode)
-        // add_cycle re-registers the new cycle via the classic VALIS_ADAPTER only; the
-        // STARE 'tiled' backend is not wired into the incremental path — reject it loudly
-        // rather than silently registering with VALIS.
-        if (params.registration_method == 'tiled') {
-            error "mode='add_cycle' does not support --registration_method tiled (STARE) yet; use valis."
+        // add_cycle re-registers the new cycle via the classic VALIS_ADAPTER only —
+        // add_cycle.nf hands REGISTER_PATIENT the literal 'valis'. Reject anything else
+        // loudly rather than registering with VALIS under another method's name.
+        //
+        // ALLOWLIST, NOT DENYLIST. This used to name 'tiled' explicitly, so any method the
+        // schema enum gained afterwards passed the check and was then silently registered
+        // with VALIS. 'ashlar' would have been the first to hit that.
+        if (params.registration_method != 'valis') {
+            error "mode='add_cycle' does not support --registration_method ${params.registration_method} yet; use valis."
         }
 
         if (!params.input) error "mode='add_cycle' requires --input (the new cycle samplesheet)"

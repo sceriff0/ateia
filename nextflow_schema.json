@@ -117,11 +117,12 @@
             "properties": {
                 "registration_method": {
                     "type": "string",
-                    "description": "Registration backend: 'valis' (VALIS graph-based whole-slide) or 'tiled' (STARE: JVM-free, internally tiled, fully parallel). See lib/ParamUtils.groovy.",
+                    "description": "Registration backend: 'valis' (VALIS graph-based whole-slide), 'tiled' (STARE: JVM-free, internally tiled, fully parallel), or 'ashlar' (labsyspharm ASHLAR \u2014 a BENCHMARK BASELINE for the real-sample arm comparison, translation-only, not a production backend). See lib/ParamUtils.groovy.",
                     "default": "valis",
                     "enum": [
                         "valis",
-                        "tiled"
+                        "tiled",
+                        "ashlar"
                     ]
                 },
                 "nuclear_markers": {
@@ -314,6 +315,25 @@
                     ],
                     "minimum": 0,
                     "description": "COARSE anchor thumbnail longest side (px). null = from reg_tiled_mode."
+                },
+                "reg_ashlar_tile": {
+                    "type": "integer",
+                    "default": 1024,
+                    "description": "ASHLAR (registration_method=ashlar) only: tile core size (px) the stitched slide is cut into for ASHLAR to read. The fairness knob against reg_tiled_tile \u2014 ASHLAR computes one independent shift per tile, so a finer grid buys it more local freedom.",
+                    "minimum": 16
+                },
+                "reg_ashlar_overlap": {
+                    "type": "number",
+                    "default": 0.1,
+                    "description": "ASHLAR only: fractional overlap between synthesized tiles. Feeds ASHLAR's within-cycle stitching, which is trivial here (positions are fabricated exactly); this arm measures the cross-cycle engine.",
+                    "minimum": 0.0,
+                    "exclusiveMaximum": 1.0
+                },
+                "reg_ashlar_max_shift_um": {
+                    "type": "number",
+                    "default": 30,
+                    "description": "ASHLAR only: maximum per-tile corrective shift in MICRONS. Must exceed the true cross-cycle drift \u2014 ASHLAR replaces an out-of-range tile with a model prediction instead of erroring, so too small a value degrades registration silently.",
+                    "minimum": 0.0
                 }
             }
         },

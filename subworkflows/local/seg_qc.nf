@@ -129,9 +129,14 @@ workflow SEG_QC {
     // Both arms shape the same 8-element tuple WARP_SEG_QC takes —
     // [meta, method, transform, ref_slide, moving_slide, ref_geojson, moving_geojson,
     // stage_checkpoint] — and differ only in how `transform` and `stage_checkpoint` are
-    // joined, because the two methods' transforms are keyed differently (per-slide vs
+    // joined, because the methods' transforms are keyed differently (per-slide vs
     // per-patient) and only VALIS has a stage checkpoint at all.
-    if (method == 'tiled') {
+    //
+    // ashlar joins with tiled, not with VALIS: bin/ashlar_solve.py emits the SAME M0 + mesh
+    // manifest TILED_SOLVE does, keyed per moving slide, and carries no stage checkpoint.
+    // Membership rather than `!= 'valis'` so a fourth backend must declare which shape it
+    // has instead of inheriting the tiled join by default.
+    if (method in ['tiled', 'ashlar']) {
         // Tiled: one transform per moving slide (meta-keyed). Join it to the moving GeoJSON by
         // (patient, sorted-channels) so each slide is scored against its own transform. No
         // stage checkpoint (stages are separable by construction) and no JVM — `[]` is the

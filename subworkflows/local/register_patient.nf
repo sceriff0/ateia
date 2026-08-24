@@ -59,6 +59,7 @@
 
 include { VALIS_ADAPTER         } from './adapters/valis_adapter'
 include { TILED_ADAPTER         } from './adapters/tiled_adapter'
+include { ASHLAR_ADAPTER        } from './adapters/ashlar_adapter'
 include { REGISTERED_CHECKPOINT } from './registered_checkpoint'
 
 workflow REGISTER_PATIENT {
@@ -104,12 +105,17 @@ workflow REGISTER_PATIENT {
     // ========================================================================
     // RUN REGISTRATION VIA METHOD-SPECIFIC ADAPTER
     // ========================================================================
-    // The ENTIRE method dispatch. Both adapters emit the identical vocabulary
+    // The ENTIRE method dispatch. Every adapter emits the identical vocabulary
     // (registered / transform / transform_by_slide / stage_checkpoint / intrinsic_tre /
     // size_logs / versions), with Channel.empty() in any slot a method cannot fill — see
-    // either adapter's header for the contract. So this binds ONE name, `ch_adapter`,
+    // any adapter's header for the contract. So this binds ONE name, `ch_adapter`,
     // instead of a per-emit translation table plus the pre-declared empty channels that
-    // used to exist only so the union of the two vocabularies could be assembled here.
+    // used to exist only so the union of the vocabularies could be assembled here.
+    //
+    // EVERY BACKEND IS NAMED EXPLICITLY, AND THE FALLBACK IS AN ERROR. This used to read
+    // `if (tiled) ... else VALIS`, which meant any method name the schema enum gained but
+    // this file did not know about registered with VALIS and reported success — the whole
+    // arm would have measured VALIS twice under two labels. An unknown method is now loud.
     //
     // NOTE: the *old distributed-VALIS* low-memory path was archived 2026-07-24
     // (git tag archive/tiled-valis-2026-07-24). `method == 'tiled'` is a SEPARATE,
@@ -117,9 +123,16 @@ workflow REGISTER_PATIENT {
     if (method == 'tiled') {
         TILED_ADAPTER(ch_grouped_multi)
         ch_adapter = TILED_ADAPTER.out
-    } else {
+    } else if (method == 'ashlar') {
+        ASHLAR_ADAPTER(ch_grouped_multi)
+        ch_adapter = ASHLAR_ADAPTER.out
+    } else if (method == 'valis') {
         VALIS_ADAPTER(ch_grouped_multi)
         ch_adapter = VALIS_ADAPTER.out
+    } else {
+        error "REGISTER_PATIENT: unknown registration method '${method}'. " +
+              "Valid: valis, tiled, ashlar. (nextflow_schema.json's registration_method " +
+              "enum and this dispatch must be widened together.)"
     }
 
     // Re-introduce single-slide patients (reference passed through unregistered)
