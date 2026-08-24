@@ -150,11 +150,20 @@ workflow QUANTIFY_MARKERS {
     // CsvUtils.resolveKeptChannelsPerSlide, the SAME resolver whose answer travels to
     // SPLIT_CHANNELS as meta.keep_channels, so it counts the markers that actually
     // reach QUANTIFY rather than the channels the samplesheet declares. That resolver
-    // claims each marker name exactly once per patient, which is what makes the count
-    // equal BOTH the distinct-name total this grouping needs (it .unique()s below) and
-    // the file total groupTiffsByPatient needs (it does not). (It used to union declared
-    // channels with no reference awareness, which over-counted a reference-less
-    // add_cycle sheet — the group could then never fill.)
+    // claims each marker name exactly once per patient, so the distinct-name total this
+    // grouping needs (it .unique()s below) and the emitted-file total are the SAME
+    // number — one count is correct for every consumer, whichever of the two it is
+    // effectively asking for. (It used to union declared channels with no reference
+    // awareness, which over-counted a reference-less add_cycle sheet — the group could
+    // then never fill.)
+    //
+    // Do not restate the old justification that groupTiffsByPatient "needs the file
+    // count because it has no .unique". The FUNCTION has none, but BOTH of its callers
+    // dedup on [patient_id, marker] immediately upstream — postprocess.nf's `.unique`
+    // and add_cycle.nf's priority groupTuple on [pid, marker] — so no live consumer
+    // needs the file count today. The one-name-per-patient rule earns its keep by making
+    // the winner DETERMINISTIC (reference first, then samplesheet order) instead of
+    // arrival-ordered, and by making channels_count exact against what actually arrives.
     //
     // `remainder: true` is kept anyway, as a safety net against a future miscount. An
     // OVER-count is safe either way, and strictly better than before this branch: the

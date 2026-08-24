@@ -249,19 +249,27 @@ class CsvUtils {
      * Ordering the reference first is what makes "the reference wins" fall out of the
      * walk instead of needing a special case.
      *
-     * NUCLEAR-NESS PLAYS NO PART IN THE DROP DECISION, deliberately. channels_count feeds
-     * two consumers that disagree unless every marker name is emitted exactly once per
-     * patient: quantify_markers.nf's grouping applies `.unique()` on [patient_id, marker]
-     * BEFORE groupTuple, so it needs the DISTINCT-NAME count, while groupTiffsByPatient
-     * has no `.unique` and needs the FILE count. Claiming every kept name, nuclear or
-     * not, is what makes those the same number. Claiming only nuclear names would emit
-     * two CELLTOX files while the quant path counted one -- an UNDER-count, which
-     * quantify_markers.nf documents as the case that ABORTS the run.
+     * NUCLEAR-NESS PLAYS NO PART IN THE DROP DECISION, deliberately, and the reason is
+     * DETERMINISM, not a consumer that needs a file count.
      *
-     * It also removes a latent nondeterminism: two slides sharing a NON-nuclear marker
-     * used to be deduplicated by ARRIVAL ORDER at that `.unique()`, the exact
-     * scheduling-nondeterminism add_cycle.nf warns about in its own dedup. The winner is
-     * now the samplesheet-order-first slide.
+     * Claiming every kept name -- nuclear or not -- makes each marker name reach
+     * SPLIT_CHANNELS exactly once per patient, and the winner is the reference, else the
+     * samplesheet-order-first slide. Two slides sharing a marker used to be deduplicated
+     * by ARRIVAL ORDER at a downstream `.unique()`, the exact scheduling-nondeterminism
+     * add_cycle.nf warns about in its own dedup: which slide's copy reached
+     * merged_quant.csv and the pyramid varied run to run. It also makes channels_count
+     * (countChannelsPerPatient, below) EXACT against what actually arrives, because the
+     * emitted-FILE count and the DISTINCT-NAME count are then the same number and the
+     * sized groupKey is right for either consumer without knowing which it is.
+     *
+     * BE ACCURATE ABOUT WHY, because an earlier version of this comment was not: it said
+     * groupTiffsByPatient "has no `.unique` and needs the FILE count". The FUNCTION has
+     * no `.unique`, but BOTH of its callers dedup on [patient_id, marker] immediately
+     * upstream of it -- subworkflows/local/postprocess.nf's `.unique { ... [patient_id,
+     * marker] }` and subworkflows/local/add_cycle.nf's priority groupTuple on
+     * [pid, marker]. So no live consumer needs the file count today, and the
+     * under-count/ABORT scenario that claim cited is unreachable. The decision stands on
+     * determinism and on one clean invariant; do not restate the unreachable one.
      *
      * `preClaimed` seeds the claimed set per patient. add_cycle passes the prior run's
      * reference channels, so a re-stained DAPI is dropped as redundant while a genuinely
@@ -350,12 +358,21 @@ class CsvUtils {
         // Derived from resolveKeptChannelsPerSlide, which IS the rule SPLIT_CHANNELS
         // applies (it emits exactly meta.keep_channels). Summing the per-slide list
         // sizes is safe precisely because that resolver claims each marker name once
-        // per patient: the sum therefore equals BOTH the number of TIFFs emitted (what
-        // groupTiffsByPatient's groupKey needs, since it has no .unique) and the number
-        // of distinct names (what quantify_markers.nf's grouping needs, since it
-        // .unique()s on [patient_id, marker] first). This used to union upper-cased
-        // names into a HashSet, which gave the distinct-name count but NOT the file
-        // count -- correct only while no two slides could emit the same marker.
+        // per patient: the sum therefore equals BOTH the number of TIFFs emitted and the
+        // number of distinct names, because those are the same number. Every
+        // channels_count-sized groupKey downstream is then correct without its consumer
+        // having to know which of the two it is being handed.
+        //
+        // NOT because some consumer needs the file count: both groupTiffsByPatient
+        // callers dedup on [patient_id, marker] immediately upstream of it
+        // (subworkflows/local/postprocess.nf's `.unique`, subworkflows/local/add_cycle.nf's
+        // priority groupTuple), so the distinct-name count would in fact serve them
+        // today. An earlier version of this comment claimed otherwise -- see
+        // resolveKeptChannelsPerSlide's doc.
+        //
+        // This used to union upper-cased names into a HashSet, which gave the
+        // distinct-name count but NOT the file count -- correct only while no two slides
+        // could emit the same marker.
         def kept = resolveKeptChannelsPerSlide(csvPath, imageColumn, nuclearMarkers, autoReference)
         return kept.collectEntries { patientId, perSlide ->
             [patientId, (perSlide.values().sum { it.size() } ?: 0)]

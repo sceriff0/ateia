@@ -79,12 +79,17 @@ workflow {
     // CsvUtils.resolveKeptChannelsPerSlide — THE keep-set rule
     // ------------------------------------------------------------------ //
     // Each marker name is claimed exactly once per patient, reference first then
-    // samplesheet order. That single invariant is what keeps channels_count equal to
-    // BOTH the distinct-name count (quantify_markers.nf's grouping .unique()s on
-    // [patient_id, marker] before grouping) AND the emitted-file count
-    // (groupTiffsByPatient has no .unique). Claiming only NUCLEAR names would emit two
-    // CELLTOX files while the quant path counted one -- an under-count, which
-    // quantify_markers.nf:156-179 documents as the case that ABORTS the run.
+    // samplesheet order. That single invariant does two things. It makes the winner of a
+    // shared marker DETERMINISTIC -- two slides carrying the same name used to be
+    // deduplicated by ARRIVAL ORDER at a downstream .unique(), so which copy reached
+    // merged_quant.csv and the pyramid varied run to run. And it collapses the
+    // distinct-name count and the emitted-file count into ONE number, which is what lets
+    // a single channels_count size every downstream groupKey correctly.
+    //
+    // It is NOT that some consumer needs the file count: both groupTiffsByPatient callers
+    // dedup on [patient_id, marker] immediately upstream (postprocess.nf's `.unique`,
+    // add_cycle.nf's priority groupTuple), so the distinct-name count would serve them
+    // today. An earlier version of this comment said otherwise.
     def keepCsv = File.createTempFile('keepset', '.csv')
     keepCsv.text = '''patient_id,image,channels,is_reference
 P1,ref.tiff,DAPI|KI67|CD20,true
@@ -165,11 +170,11 @@ P5,mov1.tiff,DAPI,false
     assert CsvUtils.countChannelsPerPatient(emptyCsv.path, 'image', ['DAPI','CELLTOX'], false)['P5'] == 3
     emptyCsv.delete()
 
-    // THE invariant countChannelsPerPatient exists to satisfy: the count equals BOTH
-    // the number of TIFFs emitted (pyramid path, groupTiffsByPatient, no .unique) AND
-    // the number of distinct marker names (quant path, which .unique()s first). If
-    // these three ever diverge, one consumer silently loses markers and the other
-    // aborts the run.
+    // THE invariant countChannelsPerPatient exists to satisfy: the count equals BOTH the
+    // number of TIFFs emitted AND the number of distinct marker names, because the
+    // one-name-per-patient rule makes those the same number. Pinning both equalities here
+    // is what stops a future change to the resolver from quietly making channels_count
+    // right for one downstream grouping and wrong for the other.
     def invCsv = File.createTempFile('keepcount', '.csv')
     invCsv.text = '''patient_id,image,channels,is_reference
 P1,ref.tiff,DAPI|KI67|CD20,true

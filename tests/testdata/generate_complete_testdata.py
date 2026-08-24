@@ -629,14 +629,13 @@ print("  Created whitespace_patient_id.csv")
 # default was unreachable. These two sheets exercise it.
 #
 # celltox_nonreference.csv is the dangerous shape: the ONLY CELLTOX-bearing slide is a
-# NON-reference one, on the SHIPPED DEFAULT marker list. SPLIT_CHANNELS drops the nuclear
-# channel from non-reference slides, so the patient's channel count is
-# {DAPI,PANCK,SMA} + {CD3,CD8} = 5, and bin/split_multichannel.py must emit exactly those
-# five. While that script tested `"DAPI" in name.upper()` it kept CELLTOX on the
-# non-reference slide and emitted SIX, over-filling a groupTuple sized for five --
-# on the linear path postprocess.nf's join() then silently DROPS the surplus markers,
-# and on the add_cycle path its combine(by:0) runs MERGE_QUANT_CSVS twice against one
-# published merged_quant.csv.
+# NON-reference one, on the SHIPPED DEFAULT marker list. Under the keep-set rule
+# (CsvUtils.resolveKeptChannelsPerSlide) nuclear-ness plays no part in the drop decision,
+# so the reference claims {DAPI,PANCK,SMA} and the moving slide keeps {CELLTOX,CD3,CD8}
+# -- SIX markers, and bin/split_multichannel.py must emit exactly those six. (This
+# comment used to say five, describing the rule that PRECEDED the keep-set: it dropped
+# every nuclear-matching channel from every non-reference slide, silently discarding a
+# cohort's second nuclear stain. tests/main.nf.test asserts six.)
 with open(OUT_DIR / "celltox_nonreference.csv", "w") as f:
     f.write("patient_id,path_to_file,is_reference,channels\n")
     f.write(f"P001,{TESTDATA_ABS}/P001_ref.ome.tiff,true,DAPI|PANCK|SMA\n")
