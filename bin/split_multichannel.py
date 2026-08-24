@@ -69,10 +69,14 @@ def split_multichannel_tiff(
     channel_names=None,
     nuclear_markers=None,
     pixel_size=0.325,
+    keep_channels=None,
 ):
     """
     Split a multichannel TIFF into single-channel TIFFs.
-    The nuclear channel is only saved if is_reference=True.
+
+    Which channels are written is decided by ``keep_channels`` when it is supplied,
+    and otherwise by the legacy rule: the nuclear channel is saved only if
+    ``is_reference=True``.
 
     Parameters
     ----------
@@ -84,6 +88,12 @@ def split_multichannel_tiff(
         If True, saves the nuclear channel. If False, skips it.
     channel_names : list of str, optional
         Names for each channel. If None, tries to read from OME metadata.
+    keep_channels : sequence of str, optional
+        Exact channel names this slide should emit, resolved once per slide by
+        ``CsvUtils.resolveKeptChannelsPerSlide`` and delivered as ``--keep-channels``.
+        When non-empty it fully replaces the ``is_reference`` nuclear drop, so a
+        non-reference slide can keep a nuclear-list marker the reference never carried.
+        Matched case-insensitively against the channel names.
     nuclear_markers : sequence of str, optional
         Marker names that identify the nuclear/fiducial channel
         (``params.nuclear_markers``). Defaults to ``DEFAULT_NUCLEAR_MARKERS``.
@@ -206,8 +216,30 @@ def split_multichannel_tiff(
             # CELLTOX-configured run and keep a channel Groovy already counted as dropped.
             is_nuclear_channel = is_nuclear(name, nuclear_markers)
 
-            # Skip the nuclear channel if this is not the reference image
-            if is_nuclear_channel and not is_reference:
+            # The keep-set, when supplied, IS the decision -- is_reference and
+            # nuclear_markers are not consulted. CsvUtils.resolveKeptChannelsPerSlide
+            # resolves it once per slide at samplesheet read so that each marker name is
+            # emitted exactly once per patient, which is what keeps Nextflow's
+            # pre-computed channels_count equal to BOTH the number of files that arrive
+            # and the number of distinct markers. Deciding here instead would mean a
+            # per-slide process guessing what a sibling slide emitted.
+            #
+            # The fallback below is not dead: SPLIT_PRIOR_PYRAMID reads channel names
+            # from OME-XML at runtime and so cannot be handed a precomputed list, and
+            # this script stays runnable by hand.
+            #
+            # NOTE the position: this sits AFTER read_channel(i), exactly where the
+            # nuclear skip already sat, and must stay there. Every channel is read even
+            # when it is dropped, so a skipped channel's pixels still count toward the
+            # streaming negative-clip statistics -- matching the original whole-image
+            # clip_negative_values call. Hoisting the skip above the read to "save work"
+            # would silently change those stats.
+            if keep_channels:
+                if name.upper() not in {k.upper() for k in keep_channels}:
+                    logger.info(f"  Skipping: {name} (not in keep-set)")
+                    skipped_count += 1
+                    continue
+            elif is_nuclear_channel and not is_reference:
                 logger.info(f"  Skipping: {name} (nuclear channel from non-reference)")
                 skipped_count += 1
                 continue
@@ -311,6 +343,17 @@ def main():
     )
 
     parser.add_argument(
+        "--keep-channels",
+        nargs="+",
+        default=None,
+        help="Exact channel names this slide should emit, resolved once from the "
+        "samplesheet by CsvUtils.resolveKeptChannelsPerSlide and carried on the meta "
+        "map as keep_channels. When given it fully replaces the is-reference nuclear "
+        "drop. Omitted only by callers that read channel names from OME-XML at "
+        "runtime (SPLIT_PRIOR_PYRAMID).",
+    )
+
+    parser.add_argument(
         "--pixel-size",
         dest="pixel_size",
         type=float,
@@ -335,6 +378,7 @@ def main():
         args.channels,
         args.nuclear_markers,
         args.pixel_size,
+        args.keep_channels,
     )
 
     logger.info("=" * 80)

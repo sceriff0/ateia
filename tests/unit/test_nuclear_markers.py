@@ -256,3 +256,77 @@ class TestConvertImageNuclearResolution:
             Path("in.ome.tif"), tmp_path, "P001", ["CD8", "SMA"], nuclear_markers=["SMA"]
         )
         assert output_channels[0] == "SMA"
+
+
+class TestKeepChannels:
+    """The explicit keep-set, which supersedes the is_reference nuclear drop.
+
+    ``CsvUtils.resolveKeptChannelsPerSlide`` decides once per slide, at samplesheet
+    read, which channels that slide emits, and the list travels to this script as
+    ``--keep-channels``. When it is supplied it IS the decision: ``is_reference`` and
+    ``nuclear_markers`` are not consulted. That is what lets a patient whose reference
+    stains DAPI and whose later cycle stains CELLTOX keep BOTH markers, instead of
+    losing CELLTOX merely for matching the configured nuclear list.
+
+    The fallback (no keep-set) must stay intact: ``SPLIT_PRIOR_PYRAMID`` reads channel
+    names from OME-XML at runtime and so cannot be handed a precomputed list.
+    """
+
+    @staticmethod
+    def _write(tmp_path, n_channels):
+        img = np.zeros((n_channels, 8, 8), dtype=np.uint16)
+        src = tmp_path / "slide.ome.tiff"
+        tifffile.imwrite(str(src), img)
+        out = tmp_path / "out"
+        out.mkdir()
+        return src, out
+
+    def test_keep_set_wins_over_the_nuclear_drop(self, tmp_path):
+        """The reported bug: a non-reference CELLTOX slide keeps CELLTOX."""
+        src, out = self._write(tmp_path, 2)
+        split_multichannel_tiff(
+            str(src),
+            str(out),
+            is_reference=False,
+            channel_names=["CELLTOX", "CD8"],
+            nuclear_markers=["DAPI", "CELLTOX"],
+            keep_channels=["CELLTOX", "CD8"],
+        )
+        assert sorted(p.stem for p in out.glob("*.tiff")) == ["CD8", "CELLTOX"]
+
+    def test_keep_set_can_drop_a_non_nuclear_marker(self, tmp_path):
+        """A marker already claimed by an earlier slide is dropped, nuclear or not."""
+        src, out = self._write(tmp_path, 2)
+        split_multichannel_tiff(
+            str(src),
+            str(out),
+            is_reference=False,
+            channel_names=["KI67", "FOXP3"],
+            nuclear_markers=["DAPI", "CELLTOX"],
+            keep_channels=["FOXP3"],
+        )
+        assert sorted(p.stem for p in out.glob("*.tiff")) == ["FOXP3"]
+
+    def test_keep_set_matching_is_case_insensitive(self, tmp_path):
+        src, out = self._write(tmp_path, 1)
+        split_multichannel_tiff(
+            str(src),
+            str(out),
+            is_reference=False,
+            channel_names=["CellTox"],
+            nuclear_markers=["DAPI", "CELLTOX"],
+            keep_channels=["celltox"],
+        )
+        assert [p.stem for p in out.glob("*.tiff")] == ["CellTox"]
+
+    def test_no_keep_set_falls_back_to_the_nuclear_rule(self, tmp_path):
+        """SPLIT_PRIOR_PYRAMID's path: no list, so is_reference decides as before."""
+        src, out = self._write(tmp_path, 2)
+        split_multichannel_tiff(
+            str(src),
+            str(out),
+            is_reference=False,
+            channel_names=["CELLTOX", "CD8"],
+            nuclear_markers=["DAPI", "CELLTOX"],
+        )
+        assert sorted(p.stem for p in out.glob("*.tiff")) == ["CD8"]
