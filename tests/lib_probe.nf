@@ -74,10 +74,6 @@ workflow {
     assert MarkerUtils.hasNuclear(['CD3', 'DAPI'], ['DAPI'])
     assert !MarkerUtils.hasNuclear(['CD3', 'CD8'], ['DAPI'])
 
-    // splitOutputChannels: a reference keeps every channel; a non-reference drops the
-    // nuclear one. This must stay identical to bin/split_multichannel.py's runtime rule.
-    assert MarkerUtils.splitOutputChannels(['DAPI', 'CD3'], true,  ['DAPI']) == ['DAPI', 'CD3']
-    assert MarkerUtils.splitOutputChannels(['DAPI', 'CD3'], false, ['DAPI']) == ['CD3']
 
     // ------------------------------------------------------------------ //
     // CsvUtils.resolveKeptChannelsPerSlide — THE keep-set rule

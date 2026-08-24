@@ -7,8 +7,13 @@
  * Python layer honoured it while three Groovy/NF sites hardcoded the literal 'DAPI':
  * SPLIT_CHANNELS' stub, CsvUtils.validateMetadata, and (implicitly, by unioning every
  * declared channel with no reference awareness) CsvUtils.countChannelsPerPatient.
- * Those three now come through here, and so do SEGMENT's backend guards and the
- * `--nuclear-markers` list SPLIT_CHANNELS hands to bin/split_multichannel.py.
+ * Those three now come through here, and so do SEGMENT's backend guards.
+ *
+ * This class answers "is this channel nuclear?" and nothing more. It does NOT decide
+ * which channels a slide emits -- that is CsvUtils.resolveKeptChannelsPerSlide, which
+ * needs patient-wide context (what a sibling slide already claimed) that a
+ * marker-identity helper cannot have. splitOutputChannels used to live here and was
+ * retired for exactly that reason.
  *
  * THE MARKER LIST IS ALWAYS AN ARGUMENT. This class must never define a default for
  * it: `nextflow.config` is the only place a parameter default may live
@@ -97,19 +102,4 @@ class MarkerUtils {
         return -1
     }
 
-    /**
-     * The channels SPLIT_CHANNELS emits for ONE slide.
-     *
-     * The nuclear channel is identical across cycles, so it is kept only on the
-     * reference slide; keeping it on every moving slide would quantify and merge the
-     * same marker once per slide. bin/split_multichannel.py applies the same rule at
-     * runtime (`--is-reference`), and SPLIT_CHANNELS' stub and
-     * CsvUtils.countChannelsPerPatient now derive theirs from this method, so the
-     * group sizes the workflow computes ahead of time match what actually arrives.
-     */
-    static List splitOutputChannels(List channels, boolean isReference, def nuclearMarkers) {
-        if (!channels) return []
-        if (isReference) return channels.collect { it }
-        return channels.findAll { !isNuclear(it, nuclearMarkers) }
-    }
 }

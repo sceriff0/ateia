@@ -146,12 +146,15 @@ workflow QUANTIFY_MARKERS {
     // Deduplicate by patient_id + marker (take first occurrence if same marker appears multiple times)
     // Use groupKey for streaming - emits as soon as channels_count items collected
     //
-    // channels_count is EXACT for both callers: CsvUtils.countChannelsPerPatient applies
-    // MarkerUtils.splitOutputChannels, the same rule SPLIT_CHANNELS applies, so it counts
-    // the markers that actually reach QUANTIFY rather than the channels the samplesheet
-    // declares. (It used to union declared channels with no reference awareness, which
-    // over-counted a reference-less add_cycle sheet by exactly its dropped nuclear
-    // channel — the group could then never fill.)
+    // channels_count is EXACT for both callers: CsvUtils.countChannelsPerPatient sums
+    // CsvUtils.resolveKeptChannelsPerSlide, the SAME resolver whose answer travels to
+    // SPLIT_CHANNELS as meta.keep_channels, so it counts the markers that actually
+    // reach QUANTIFY rather than the channels the samplesheet declares. That resolver
+    // claims each marker name exactly once per patient, which is what makes the count
+    // equal BOTH the distinct-name total this grouping needs (it .unique()s below) and
+    // the file total groupTiffsByPatient needs (it does not). (It used to union declared
+    // channels with no reference awareness, which over-counted a reference-less
+    // add_cycle sheet — the group could then never fill.)
     //
     // `remainder: true` is kept anyway, as a safety net against a future miscount. An
     // OVER-count is safe either way, and strictly better than before this branch: the

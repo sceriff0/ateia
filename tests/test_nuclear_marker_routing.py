@@ -99,9 +99,14 @@ def test_scan_actually_finds_the_consumers():
     # SegBackends.groovy, still on this list, where the stardist guard and the cellsam
     # index both route through MarkerUtils. Removed rather than replaced: nothing new
     # reads the parameter, one duplicate reader stopped.
+    # split_channels.nf was on this list until the keep-set moved onto the meta map. It
+    # read params.nuclear_markers only to decide which channel to drop; that decision is
+    # now made once at samplesheet read by CsvUtils.resolveKeptChannelsPerSlide -- still
+    # on this list, via input_check.nf -- and travels as meta.keep_channels, so the
+    # process applies no marker rule of its own. Removed rather than replaced: nothing
+    # new reads the parameter, one duplicate reader stopped.
     for expected in (
         "convert_image.nf",
-        "split_channels.nf",
         "SegBackends.groovy",
         "input_check.nf",
     ):

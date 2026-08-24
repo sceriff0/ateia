@@ -105,8 +105,8 @@ class TestSplitCountMatchesPrecomputedCount:
     """The invariant the whole nuclear-marker rule rests on.
 
     Nextflow sizes each patient's postprocessing ``groupTuple`` AHEAD of the run, from
-    ``CsvUtils.countChannelsPerPatient`` -> ``MarkerUtils.splitOutputChannels``. The
-    files that actually arrive come from ``bin/split_multichannel.py``. If the two
+    ``CsvUtils.countChannelsPerPatient`` -> ``CsvUtils.resolveKeptChannelsPerSlide``.
+    The files that actually arrive come from ``bin/split_multichannel.py``. If the two
     disagree the failure is silent, not loud:
 
       * Python emits MORE than Groovy counted -> the group over-fills, ``remainder:
@@ -117,14 +117,19 @@ class TestSplitCountMatchesPrecomputedCount:
         surplus, so ``merged_quant.csv`` quietly loses markers.
       * Python emits FEWER -> the group never fills.
 
-    Each case below states the channel table and the count Groovy computes for it. The
-    Groovy half of the same expectation is asserted in ``tests/main.nf.test``
-    ("a non-reference CELLTOX slide is counted as one dropped nuclear channel" and
-    "a CELLTOX-only samplesheet runs end to end"), which runs the stub pipeline over
-    ``tests/testdata/celltox_nonreference.csv`` / ``celltox_only.csv`` -- the SAME
-    channel tables -- and asserts 5 QUANTIFY tasks and ONE ``MERGE_QUANT_CSVS``.
-    pytest cannot execute Groovy, so the two halves are pinned against a shared
-    literal rather than against each other; change one and you must change the other.
+    The cases below exercise the FALLBACK path -- ``split_multichannel_tiff`` with no
+    ``keep_channels`` -- which is what ``SPLIT_PRIOR_PYRAMID`` uses, since it reads
+    channel names from OME-XML at runtime and cannot be handed a precomputed list.
+    The primary path is covered by ``TestKeepChannels`` below.
+
+    The Groovy half of the same expectation is asserted in ``tests/main.nf.test``,
+    which runs the stub pipeline over ``tests/testdata/celltox_nonreference.csv`` /
+    ``celltox_only.csv``. Note the two sheets now diverge: ``celltox_nonreference``
+    yields SIX markers (the reference never carried CELLTOX, so the moving slide keeps
+    it), while ``celltox_only`` still yields five (the reference DOES carry CELLTOX, so
+    the moving slide's copy is redundant and is claimed away). pytest cannot execute
+    Groovy, so the two halves are pinned against a shared literal rather than against
+    each other; change one and you must change the other.
     """
 
     @pytest.mark.parametrize(

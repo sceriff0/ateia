@@ -481,18 +481,25 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // Reference keeps {DAPI,PANCK,SMA}; the non-reference slide's nuclear
-                // channel (CELLTOX) is dropped, leaving {CD3,CD8}. Five markers, so five
-                // QUANTIFY tasks and ONE per-patient consumer of the group.
+                // Reference keeps {DAPI,PANCK,SMA}. The non-reference slide keeps
+                // {CELLTOX,CD3,CD8}: CELLTOX matches params.nuclear_markers but the
+                // REFERENCE never carried it, so nothing has claimed that name and it
+                // survives. Six markers, six QUANTIFY tasks, ONE per-patient consumer.
+                //
+                // This assertion read 5 until the keep-set moved to
+                // CsvUtils.resolveKeptChannelsPerSlide. The old rule dropped every
+                // channel matching the configured nuclear list from every non-reference
+                // slide, which silently discarded a cohort's second nuclear stain --
+                // DAPI and CellTox Green measure different things, so they are not the
+                // redundant copies that rule assumed.
                 //
                 // This is the count HALF of the invariant. The other half --
-                // bin/split_multichannel.py emitting exactly these five in a real run --
-                // is pinned by tests/unit/test_nuclear_markers.py against the same
-                // channel table, because the stub block resolves the drop in Groovy
-                // (MarkerUtils) and so cannot see a Python-side disagreement. Keep the
-                // two expectations in step.
+                // bin/split_multichannel.py emitting exactly these six in a real run --
+                // is pinned by tests/unit/test_nuclear_markers.py, because the stub
+                // block reads meta.keep_channels and so cannot see a Python-side
+                // disagreement. Keep the two expectations in step.
                 { assert workflow.trace.tasks().findAll {
-                    it.name.startsWith('MIRAGE:POSTPROCESSING:QUANTIFY_MARKERS:QUANTIFY') }.size() == 5 },
+                    it.name.startsWith('MIRAGE:POSTPROCESSING:QUANTIFY_MARKERS:QUANTIFY') }.size() == 6 },
                 // This assertion would NOT catch an under-count by going to 2: this
                 // MERGE_QUANT_CSVS is fed via postprocess.nf's `.join(ch_morphology, by: 0)`,
                 // a keyed inner join, so an under-count's surplus groupTuple emission would

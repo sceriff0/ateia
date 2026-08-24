@@ -39,8 +39,7 @@ workflow INPUT_CHECK {
     def channel_counts = CsvUtils.countChannelsPerPatient(samplesheet, image_column, params.nuclear_markers, auto_reference)
     // The per-SLIDE emit-set. channel_counts above is derived from this same resolver,
     // so the group size and the files that arrive cannot disagree.
-    def keep_channels_by_slide = CsvUtils.resolveKeptChannelsPerSlide(
-        samplesheet, image_column, params.nuclear_markers, auto_reference)
+    def keep_channels_by_slide = CsvUtils.resolveKeptChannelsPerSlide(samplesheet, image_column, params.nuclear_markers, auto_reference)
 
     // THE reference decision, made once, here, from the samplesheet -- before any
     // channel exists and therefore before anything can depend on task timing.
