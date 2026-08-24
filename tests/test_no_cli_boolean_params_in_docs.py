@@ -162,14 +162,28 @@ def test_no_shell_script_passes_a_boolean_param_on_the_command_line():
     Nextflow 26 sets the param to the STRING "false" -- truthy -- and so disabled
     the scorer while reading like it enabled it. Use a profile (`seg_quality`) or
     -params-file with a real JSON boolean.
+
+    SCOPE IS EVERY TRACKED .sh, not one directory. The original version globbed
+    benchmarks/ only; that directory lives on the `benchmarking` branch alone, so
+    on `dev` the glob matched nothing and the assertion passed vacuously -- a
+    guard that cannot fail is not a guard. `git ls-files` is the enumerator
+    because it follows the branch: whatever shell scripts a branch actually
+    ships are the ones checked.
     """
     import re
+    import subprocess
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[1]
     bools = _boolean_params()  # noqa: F821 - defined above in this module
+
+    listed = subprocess.run(["git", "ls-files", "*.sh"], cwd=root,
+                            capture_output=True, text=True, check=True).stdout.split()
+    scripts = sorted(root / rel for rel in listed)
+    assert scripts, "found no tracked .sh files -- the enumerator is wrong, not the repo"
+
     offenders = []
-    for sh in sorted((root / "benchmarks").rglob("*.sh")):
+    for sh in scripts:
         for i, line in enumerate(sh.read_text().splitlines(), 1):
             if line.lstrip().startswith("#"):
                 continue
