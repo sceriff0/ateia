@@ -528,6 +528,14 @@ def _fake_arm_tree(root: Path) -> None:
             (slides / "big.ome.tiff").write_bytes(b"\0" * 4096)
         (root / arm / "csv").mkdir(parents=True, exist_ok=True)
         (root / arm / "csv" / "registered.csv").write_text("patient_id\n")
+    # Only the compute arm runs the FULL pipeline, so only it carries the
+    # postprocessing tables the mirage cell pages read. Step 4 auto-detects it.
+    for pat in ("046", "24086"):
+        base = root / "compute_all" / pat
+        (base / "quantification").mkdir(parents=True, exist_ok=True)
+        (base / "quantification" / "merged_quant.csv").write_text("label\n1\n")
+        (base / "cell_properties").mkdir(parents=True, exist_ok=True)
+        (base / "cell_properties" / "morphology.csv").write_text("label,x,y\n1,0,0\n")
     (root / "arms.csv").write_text("arm_dir,backend,memory_mode,micro_reg,label\n")
 
 
@@ -569,6 +577,72 @@ def test_pull_script_never_copies_the_images(tmp_path):
     subprocess.run([str(BENCH / "pull_to_ihc_method.sh"), str(src), str(ihc)],
                    capture_output=True, text=True, check=True)
     assert not list((ihc / "data").rglob("*.ome.tiff"))
+
+
+@pytest.mark.skipif(not shutil.which("rsync"), reason="rsync not available")
+def test_pull_script_copies_the_cell_tables_into_data_mirage(tmp_path):
+    """data/mirage/ has TWO consumers with different needs. run_qc.R reads qc/**
+    and csv/*.csv; mirage_cells.R reads quantification/merged_quant.csv and
+    cell_properties/morphology.csv. The filter used to carry only the first pair,
+    so load_mirage_cells() found no patient directories at all -- and said so with
+    a single cohort-level warning that reads like an empty dataset rather than a
+    truncated copy."""
+    src, ihc = tmp_path / "arm_results", tmp_path / "ihc"
+    _fake_arm_tree(src)
+    ihc.mkdir()
+    (ihc / "_workflowr.yml").touch()
+    r = subprocess.run([str(BENCH / "pull_to_ihc_method.sh"), str(src), str(ihc)],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    mirage = ihc / "data" / "mirage"
+    quant = sorted(p.relative_to(mirage).as_posix() for p in mirage.rglob("merged_quant.csv"))
+    morph = sorted(p.relative_to(mirage).as_posix() for p in mirage.rglob("morphology.csv"))
+    assert quant == ["046/quantification/merged_quant.csv",
+                     "24086/quantification/merged_quant.csv"], quant
+    assert morph == ["046/cell_properties/morphology.csv",
+                     "24086/cell_properties/morphology.csv"], morph
+    # and the qc tree the other consumer needs is still there
+    assert list(mirage.rglob("*_seg_qc.json")), "run_qc.R's artifacts were dropped"
+
+
+@pytest.mark.skipif(not shutil.which("rsync"), reason="rsync not available")
+def test_arm_tables_never_land_in_data_benchmark(tmp_path):
+    """The arms and the sweep are different experiments that both produce a
+    measurements.csv. benchmark_plots.R keys on the SWEEP's axes, so an
+    arm-derived measurements.csv in data/benchmark/ renders the scaling pages
+    with data answering a different question -- silently, because the file
+    exists and carries the right columns.
+
+    They are kept apart by DESTINATION, not by run order: sweep tables go to
+    data/benchmark/, arm tables to data/registration_arms/."""
+    src, ihc = tmp_path / "arm_results", tmp_path / "ihc"
+    _fake_arm_tree(src)
+    ihc.mkdir()
+    (ihc / "_workflowr.yml").touch()
+
+    handoff = tmp_path / "handoff"
+    (handoff / "arms").mkdir(parents=True)
+    (handoff / "sweep").mkdir(parents=True)
+    (handoff / "arms" / "measurements.csv").write_text("process\nARM\n")
+    (handoff / "sweep" / "measurements.csv").write_text("process\nSWEEP\n")
+
+    r = subprocess.run([str(BENCH / "pull_to_ihc_method.sh"), str(src), str(ihc),
+                        "--handoff", str(handoff)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    bench = (ihc / "data" / "benchmark" / "measurements.csv").read_text()
+    assert "SWEEP" in bench and "ARM" not in bench, (
+        "data/benchmark/measurements.csv must come from the sweep, got:\n" + bench)
+    arm_side = (ihc / "data" / "registration_arms" / "measurements.csv").read_text()
+    assert "ARM" in arm_side, arm_side
+
+
+def test_pull_script_rejects_an_unknown_option():
+    """The script grew options; a typo must not be swallowed as a positional and
+    silently become the ihc_method path."""
+    r = subprocess.run([str(BENCH / "pull_to_ihc_method.sh"), "--sweeep", "x"],
+                       capture_output=True, text=True)
+    assert r.returncode != 0
+    assert "unknown option" in r.stderr
 
 
 def test_validate_against_schema_is_what_the_cli_enforces(plan):

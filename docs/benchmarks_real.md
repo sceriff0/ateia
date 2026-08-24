@@ -206,12 +206,21 @@ Both read whatever has finished; re-run them as arms land.
 ### 4. Hand off to `ihc_method`
 
 ```bash
+# arms only
 benchmarks/pull_to_ihc_method.sh arm_results ../ihc_method
+
+# arms + the resource sweep, regenerating both sets of tables first
+benchmarks/pull_to_ihc_method.sh arm_results ../ihc_method \
+    --sweep sweep_results --build
+
+# or, via make
+make arm-pull ROOT=arm_results IHC=../ihc_method SWEEP=sweep_results
 ```
 
 Copies **only the small artifacts** — QC JSON/CSV, VALIS summaries, traces, the
-paper tables — into `ihc_method/data/`. The registered OME-TIFFs and masks stay
-where they are: no analysis page reads them, and they are multi-GB per patient.
+cell tables, the paper tables — into `ihc_method/data/`. The registered
+OME-TIFFs and masks stay where they are: no analysis page reads them, and they
+are multi-GB per patient.
 
 It lands them where each page expects:
 
@@ -219,8 +228,34 @@ It lands them where each page expects:
 |---|---|
 | `data/registration_arms/<arm>/<patient>/…` | `registration_arms.Rmd` |
 | `data/registration_arms/arms.csv` | ditto — the arm labels |
+| `data/registration_arms/*.csv` | the arm tables, if `--build` made them |
 | `data/benchmark/*.csv` | `benchmark_pipeline.Rmd`, `benchmark_registration.Rmd` |
-| `data/mirage/<patient>/…` | `registration_run_qc.Rmd` |
+| `data/mirage/<patient>/qc,csv` | `registration_run_qc.Rmd` |
+| `data/mirage/<patient>/quantification,cell_properties` | the mirage cell pages |
+
+#### The arms and the sweep must not share an outdir
+
+`make_tables.py` and `make_figures.py` both default to one outdir pair. Run them
+for the arms and then for the sweep and the second silently overwrites the
+first — `measurements.csv` becomes whichever ran last. Nothing errors: the file
+exists and carries the right columns, so the scaling pages render normally with
+data that answers a different question.
+
+`benchmark_plots.R` keys on the **sweep's** axes (`scaling_grid`, `target_px`,
+`n_channels`), so `data/benchmark/` must hold the sweep's tables. The script
+therefore stages each experiment separately under `benchmarks/_handoff/`
+(`--handoff` to relocate, e.g. a read-only cluster checkout) and copies the arm
+tables **beside the arms** instead. Order of operations can no longer decide
+what a page reads.
+
+| option | meaning |
+|---|---|
+| `--sweep <dir>` | the sweep results root (`run_sweep.sh`'s third argument) |
+| `--sweep-plan <csv>` | its run plan; defaults to `<sweep>_plan.csv` |
+| `--arm-plan <csv>` | the arm plan; defaults to `<arm_root>_plan.csv` |
+| `--run <dir>` | which run becomes `data/mirage/`; defaults to the `compute_*` arm |
+| `--handoff <dir>` | where built tables are staged |
+| `--build` | regenerate the tables before copying (minutes on a full sweep) |
 
 ### 5. Knit the pages — this is where the plots appear
 

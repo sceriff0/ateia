@@ -12,7 +12,7 @@
 #   Docker running (for real/integration tests)
 
 .PHONY: testdata test test-stub test-real test-integration test-python test-validation test-lint test-all clean-test help \
-        arm-plan arm-run arm-tables arm-pull
+        arm-plan arm-run arm-tables sweep-tables arm-pull
 
 # Default target
 test: test-stub test-python
@@ -33,9 +33,11 @@ help:
 	@echo "MIRAGE Real-Sample Benchmark (docs/benchmarks_real.md):"
 	@echo "  make arm-plan          Expand arms.yaml -> arm_plan.csv + arms.csv"
 	@echo "  make arm-run           Launch every arm (cluster)"
-	@echo "  make arm-tables        Emit paper_data/ + measurements.csv"
+	@echo "  make arm-tables        Emit the ARM tables into _handoff/arms/"
+	@echo "  make sweep-tables      Emit the SWEEP tables (needs SWEEP=<root>)"
 	@echo "  make arm-pull          Copy the artifacts into ihc_method/data/"
 	@echo "    Variables: INPUT=real_input.csv ROOT=arm_results IHC=../ihc_method"
+	@echo "               SWEEP=sweep_results (adds the resource sweep to the pull)"
 
 # Generate test data (prerequisite for all test targets)
 testdata:
@@ -101,6 +103,9 @@ INPUT ?= real_input.csv
 ROOT  ?= arm_results
 IHC   ?= ../ihc_method
 ARMS  ?= benchmarks/configs/arms.yaml
+SWEEP ?=
+SWEEP_PLAN ?= $(SWEEP)_plan.csv
+HANDOFF ?= benchmarks/_handoff
 
 arm-plan:
 	python benchmarks/build_arm_plan.py \
@@ -112,9 +117,20 @@ arm-run: arm-plan
 
 arm-tables:
 	python -m benchmarks.analysis.make_tables \
-	    --results-root $(ROOT) --run-plan $(ROOT)_plan.csv --outdir benchmarks/paper_data
+	    --results-root $(ROOT) --run-plan $(ROOT)_plan.csv --outdir $(HANDOFF)/arms
 	python -m benchmarks.analysis.make_figures \
-	    --results-root $(ROOT) --run-plan $(ROOT)_plan.csv --outdir benchmarks/analysis
+	    --results-root $(ROOT) --run-plan $(ROOT)_plan.csv --outdir $(HANDOFF)/arms
+
+# The sweep is a DIFFERENT experiment that writes the same filenames. Its tables
+# are what data/benchmark/ must hold, so they get their own staging dir and their
+# own target -- sequencing must never decide which one a page reads.
+sweep-tables:
+	@[ -n "$(SWEEP)" ] || { echo "set SWEEP=<sweep results root>"; exit 1; }
+	python -m benchmarks.analysis.make_tables \
+	    --results-root $(SWEEP) --run-plan $(SWEEP_PLAN) --outdir $(HANDOFF)/sweep
+	python -m benchmarks.analysis.make_figures \
+	    --results-root $(SWEEP) --run-plan $(SWEEP_PLAN) --outdir $(HANDOFF)/sweep
 
 arm-pull:
-	benchmarks/pull_to_ihc_method.sh $(ROOT) $(IHC)
+	benchmarks/pull_to_ihc_method.sh $(ROOT) $(IHC) --handoff $(HANDOFF) \
+	    $(if $(SWEEP),--sweep $(SWEEP) --sweep-plan $(SWEEP_PLAN),)

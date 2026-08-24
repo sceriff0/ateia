@@ -422,6 +422,13 @@ NOT_SWEPT = {
     "mode": "'standard' vs 'add_cycle' — a different PIPELINE, not a knob (see docs/add_cycle.md)",
     "start": "step gate — every sweep run is a full pipeline; a partial run is not comparable",
     "stop": "step gate — see start",
+    "cleanup_work": (
+        "post-run disk hygiene, and ACTIVELY HOSTILE to benchmarking. It sets Nextflow's "
+        "`cleanup`, which deletes the work directory once a run succeeds -- and the work "
+        "directory is where the trace lives. Every number the analysis layer computes is "
+        "parsed out of <run>/trace/trace.txt, so a swept-on arm would report nothing at "
+        "all while exiting 0. It also cannot change what a task costs: it runs after the "
+        "last task has finished."),
 
     # --- site / scheduler. Properties of the cluster, not of the pipeline. ---
     "max_cpus": "resourceLimits clamp — a site ceiling; varying it benchmarks the machine",
