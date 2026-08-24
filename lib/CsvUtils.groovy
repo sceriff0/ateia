@@ -191,6 +191,40 @@ class CsvUtils {
         return resolved
     }
 
+    /**
+     * patient_id -> channels of the REFERENCE row, from a checkpoint CSV.
+     *
+     * add_cycle's seed for resolveKeptChannelsPerSlide's `preClaimed`: the prior run's
+     * pyramid already contains these markers, so a new cycle re-staining one adds
+     * nothing. Read synchronously rather than from ch_prior_ref, because the keep-set
+     * has to be known while the workflow is being constructed, not when a channel
+     * happens to emit.
+     */
+    static Map<String, List<String>> referenceChannelsPerPatient(String csvPath) {
+        def file = new File(csvPath)
+        if (!file.exists()) return [:]
+
+        def lines = readCsvLines(file.path)
+        if (lines.size() < 2) return [:]
+
+        def header      = parseCsvLine(lines[0])
+        def patientIdx  = header.findIndexOf { it == 'patient_id' }
+        def channelsIdx = header.findIndexOf { it == 'channels' }
+        def refIdx      = header.findIndexOf { it == 'is_reference' }
+        if (patientIdx == -1 || channelsIdx == -1 || refIdx == -1) return [:]
+
+        def result = [:]
+        lines.drop(1).each { line ->
+            def cols = parseCsvLine(line)
+            if (cols.size() <= Math.max(patientIdx, Math.max(channelsIdx, refIdx))) return
+            if (cols[refIdx]?.trim()?.toLowerCase() != 'true') return
+            def patientId = cols[patientIdx].trim()
+            if (!patientId) return
+            result[patientId] = cols[channelsIdx].split('\\|')*.trim().findAll { it }
+        }
+        return result
+    }
+
     /** Filename component of a samplesheet path cell -- how meta/file names key. */
     static String baseName(String pathCell) {
         if (!pathCell) return ''

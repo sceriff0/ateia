@@ -260,9 +260,35 @@ workflow ADD_CYCLE {
 
     // ------------------------------------------------------------------ //
     // 5. SPLIT new registered cycle -> per-marker single-channel TIFFs
-    //    (SPLIT_CHANNELS drops the new cycle's DAPI: non-reference input.)
     // ------------------------------------------------------------------ //
-    SPLIT_CHANNELS(ch_new_registered.map { meta, f -> [meta, f, false] })
+    // INPUT_CHECK already resolved meta.keep_channels, but only ACROSS THIS SHEET.
+    // The new-cycle sheet declares no reference (the reference is the prior run's and
+    // is never a row here), so the first slide claims every name it carries --
+    // including the nuclear channel. Left alone that would be a regression: the
+    // priority dedup below is new-wins, so the new cycle's DAPI would REPLACE the
+    // frozen reference's DAPI in the rebuilt pyramid.
+    //
+    // Subtract whatever the prior run's reference already contributes. A re-stained
+    // DAPI is therefore dropped as redundant (the behaviour step 9's comment relies
+    // on), while a marker the prior run never had -- a cohort that switched nuclear
+    // stain mid-study -- now survives instead of being discarded for merely matching
+    // params.nuclear_markers.
+    //
+    // meta.channels_count is NOT adjusted to match: it feeds the deliberate
+    // new_count + prior_count over-count at step 9, and over-counting is the safe
+    // direction there (the group closes late via remainder:true rather than aborting).
+    def prior_ref_channels = CsvUtils.referenceChannelsPerPatient(
+        Layout.checkpointCsv(params.prior_outdir, Layout.REGISTERED))
+
+    ch_new_for_split = ch_new_registered.map { meta, f ->
+        def alreadyInPrior = ((prior_ref_channels[meta.patient_id] ?: [])
+            .collect { it.toString().toUpperCase() }) as Set
+        def keep = (meta.keep_channels ?: meta.channels ?: [])
+            .findAll { !alreadyInPrior.contains(it.toString().toUpperCase()) }
+        // See the Map.plus() note in input_check.nf.
+        [meta + [keep_channels: keep], f, false]
+    }
+    SPLIT_CHANNELS(ch_new_for_split)
 
     // ------------------------------------------------------------------ //
     // 6. QUANTIFY new markers against the REUSED masks. QUANTIFY reads
@@ -317,8 +343,10 @@ workflow ADD_CYCLE {
     // lowest priority. An async .mix + first-occurrence .unique would be
     // scheduling-nondeterministic, and could make the pyramid show the OLD image
     // of a re-imaged marker while the quant CSV correctly shows the new one.
-    // (New cycle excludes DAPI via SPLIT_CHANNELS, so DAPI only ever comes from
-    // the prior pyramid at priority 1 — the reference DAPI is preserved.)
+    // (Step 5 subtracts the prior reference's channels from the new cycle's keep-set,
+    // so any marker the prior pyramid already carries -- DAPI included -- only ever
+    // arrives at priority 1 and the frozen reference's copy is preserved. A marker the
+    // prior run never had arrives at priority 0 and is unopposed.)
     ch_new_tagged = SPLIT_CHANNELS.out.channels.flatMap { meta, tiffs ->
         (tiffs instanceof List ? tiffs : [tiffs]).collect { tiff -> [[meta.patient_id, tiff.baseName], 0, tiff] }
     }
