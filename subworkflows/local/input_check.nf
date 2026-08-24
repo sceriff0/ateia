@@ -37,6 +37,10 @@ workflow INPUT_CHECK {
     // here, so the sheet is known parseable at this point.
     def patient_counts = CsvUtils.countImagesPerPatient(samplesheet)
     def channel_counts = CsvUtils.countChannelsPerPatient(samplesheet, image_column, params.nuclear_markers, auto_reference)
+    // The per-SLIDE emit-set. channel_counts above is derived from this same resolver,
+    // so the group size and the files that arrive cannot disagree.
+    def keep_channels_by_slide = CsvUtils.resolveKeptChannelsPerSlide(
+        samplesheet, image_column, params.nuclear_markers, auto_reference)
 
     // THE reference decision, made once, here, from the samplesheet -- before any
     // channel exists and therefore before anything can depend on task timing.
@@ -102,6 +106,23 @@ workflow INPUT_CHECK {
                 [meta + [channels_count: count], f]
             }
     }
+
+    // Add keep_channels to meta: the exact channels THIS SLIDE emits.
+    //
+    // Deliberately a plain .map over a captured lookup, NOT the `.combine(ch, by: 0)`
+    // pattern the two injections above use. Those key on patient_id; this is per-slide.
+    // They are also INNER joins, and the guard below records that a key mismatch
+    // silently DROPS the row -- the exact mechanism of the samplesheet-row-drop bug
+    // already fixed once in this file. A .map cannot drop a row.
+    ch_samples = ch_samples
+        .map { meta, f ->
+            // Fall back to the slide's full declared channel list, never to an empty
+            // list: an empty keep-set would silently emit nothing, whereas over-emitting
+            // is the recoverable direction (subworkflows/local/quantify_markers.nf).
+            def keep = keep_channels_by_slide[meta.patient_id]?.get(f.name) ?: meta.channels
+            // See the Map.plus() note above.
+            [meta + [keep_channels: keep], f]
+        }
 
     // Fail-fast guard: `.combine(by: 0)` above is an INNER join keyed on
     // patient_id. If a row's patient_id does not exactly match a key in the

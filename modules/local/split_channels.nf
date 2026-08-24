@@ -2,8 +2,9 @@
  * SPLIT_CHANNELS - Split multi-channel TIFF into individual channels
  *
  * Extracts individual channel images from multi-channel OME-TIFFs for
- * per-channel processing. The nuclear/fiducial channel (params.nuclear_markers,
- * via MarkerUtils) is kept from the reference image only.
+ * per-channel processing. WHICH channels are emitted is decided once per slide at
+ * samplesheet read by CsvUtils.resolveKeptChannelsPerSlide and carried here as
+ * meta.keep_channels; this process applies no nuclear-marker rule of its own.
  *
  * Input: Registered multi-channel OME-TIFF and reference flag
  * Output: Individual single-channel TIFF files per marker
@@ -30,13 +31,17 @@ process SPLIT_CHANNELS {
     // Pass channel names from metadata if available and valid
     def channel_args = (meta.channels && meta.channels instanceof List && !meta.channels.isEmpty()) ?
         "--channels ${meta.channels.join(' ')}" : ""
-    // The REAL drop-the-nuclear-channel decision is made in Python, so the marker list
-    // has to travel there — a hardcoded 'DAPI' in split_multichannel.py would keep a
-    // CELLTOX channel that CsvUtils.countChannelsPerPatient (same MarkerUtils rule) has
-    // already counted as dropped, over-filling the patient's groupTuple.
-    // MarkerUtils.markerList also normalises the bare-String form Nextflow produces for
-    // `--nuclear_markers CELLTOX`, so CLI and config spellings agree.
-    def nuclear_args = "--nuclear-markers ${MarkerUtils.markerList(params.nuclear_markers).join(' ')}"
+    // This process performs NO nuclear reasoning. The keep-set was resolved once per
+    // slide at samplesheet read (CsvUtils.resolveKeptChannelsPerSlide) and travels on
+    // the meta map, so the process just emits what it was handed. That is what makes
+    // CsvUtils.countChannelsPerPatient's groupKey size exact by construction, rather
+    // than by three copies of one rule continuing to agree by hand.
+    //
+    // Empty only for SPLIT_PRIOR_PYRAMID, which reads channel names from OME-XML at
+    // runtime; omitting the flag makes split_multichannel.py fall back to its
+    // is_reference rule, and that caller is is_reference=true, i.e. keep everything.
+    def keep_args = (meta.keep_channels && !meta.keep_channels.isEmpty()) ?
+        "--keep-channels ${meta.keep_channels.join(' ')}" : ""
     """
     # Log input size for tracing (-L follows symlinks)
     input_bytes=\$(stat -L --printf="%s" ${registered_image} 2>/dev/null || echo 0)
@@ -50,7 +55,7 @@ process SPLIT_CHANNELS {
         . \\
         ${ref_flag} \\
         ${channel_args} \\
-        ${nuclear_args} \\
+        ${keep_args} \\
         --pixel-size ${params.pixel_size} \\
         ${args}
 
@@ -58,19 +63,17 @@ process SPLIT_CHANNELS {
     """
 
     stub:
-    // Same rule as the real split, via the one shared implementation: the nuclear
-    // channel survives only on the reference slide. MarkerUtils reads
-    // params.nuclear_markers so this no longer hardcodes 'DAPI' — and, critically,
-    // CsvUtils.countChannelsPerPatient derives the postprocessing groupKey sizes from
-    // the SAME method, so the stub's output count matches the size the group expects.
-    def out_channels = MarkerUtils.splitOutputChannels(meta.channels, is_reference, params.nuclear_markers)
+    // Exactly what the real split emits, from the same source of truth: the keep-set
+    // resolved at samplesheet read. CsvUtils.countChannelsPerPatient sizes the
+    // postprocessing groupKeys from that SAME resolver, so the stub's output count
+    // matches the size the group expects.
+    def out_channels = meta.keep_channels ?: meta.channels
     // When meta.channels is empty (e.g. ADD_CYCLE's SPLIT_PRIOR_PYRAMID, which
     // reads channel names from OME-XML in REAL mode only), still emit a single
     // placeholder so the mandatory `*.tiff` output binds under -stub.
     def touch_cmds = out_channels ? out_channels.collect { "touch ${it}.tiff" }.join('\n    ') : "touch prior_pyramid_channel.tiff"
     """
-    # One stub file per output channel (the nuclear channel is dropped for
-    # non-references, matching the real split which keeps it only on the reference).
+    # One stub file per channel in the keep-set, which is what the real split emits.
     ${touch_cmds}
 
     echo "STUB,${meta.patient_id},stub,0" > ${meta.patient_id}_${registered_image.simpleName}.SPLIT_CHANNELS.size.csv
