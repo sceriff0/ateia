@@ -72,8 +72,31 @@ workflow POSTPROCESSING {
     // ========================================================================
     // CHANNEL SPLITTING - Split all multichannel images (runs in PARALLEL with EXTRACT_CELL_PROPERTIES)
     // ========================================================================
+    // A slide whose keep-set resolved EMPTY contributes NO new markers: every channel it
+    // declares was already claimed by an earlier slide of the same patient
+    // (CsvUtils.resolveKeptChannelsPerSlide walks reference first, then samplesheet
+    // order). It is filtered out here rather than split.
+    //
+    // WHY FILTER RATHER THAN `optional: true`. SPLIT_CHANNELS declares `path("*.tiff")`
+    // as a MANDATORY output, and that is a real guard -- a genuinely failed split still
+    // trips it. Relaxing it to accommodate a slide that has no work to do would blind the
+    // guard for every slide. Dropping the slide is safe for every consumer: the same
+    // resolver sizes meta.channels_count (CsvUtils.countChannelsPerPatient sums the
+    // per-slide lists), so this slide already contributes ZERO to both channels_count-sized
+    // groupKeys below -- the groups still close on exactly the files that arrive.
     SPLIT_CHANNELS(
-        ch_registered.map { meta, file -> [meta, file, meta.is_reference] }
+        ch_registered
+            .filter { meta, _f ->
+                if (meta.keep_channels != null && meta.keep_channels.isEmpty()) {
+                    log.warn "POSTPROCESSING(${meta.patient_id}): slide ${meta.id} contributes no new " +
+                             "markers -- every channel it declares was already claimed by an earlier " +
+                             "slide of this patient. Not splitting it; channels_count already counts " +
+                             "it as zero."
+                    return false
+                }
+                return true
+            }
+            .map { meta, file -> [meta, file, meta.is_reference] }
     )
 
     // ========================================================================

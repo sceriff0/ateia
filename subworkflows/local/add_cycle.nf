@@ -283,12 +283,36 @@ workflow ADD_CYCLE {
     ch_new_for_split = ch_new_registered.map { meta, f ->
         def alreadyInPrior = ((prior_ref_channels[meta.patient_id] ?: [])
             .collect { it.toString().toUpperCase() }) as Set
-        def keep = (meta.keep_channels ?: meta.channels ?: [])
-            .findAll { !alreadyInPrior.contains(it.toString().toUpperCase()) }
+        // ABSENT vs EMPTY on the way IN, and never `?:`: INPUT_CHECK always sets
+        // meta.keep_channels, and an EMPTY value there is an answer ("this slide's every
+        // channel was already claimed within this sheet"), not a missing one. `?:` would
+        // treat it as missing and resurrect the slide's whole declared panel.
+        def declared = meta.keep_channels != null ? meta.keep_channels : (meta.channels ?: [])
+        def keep = declared.findAll { !alreadyInPrior.contains(it.toString().toUpperCase()) }
         // See the Map.plus() note in input_check.nf.
         [meta + [keep_channels: keep], f, false]
     }
-    SPLIT_CHANNELS(ch_new_for_split)
+    // ... and EMPTY on the way OUT is equally an answer: the subtraction above can empty
+    // the keep-set outright (a re-stain that adds nothing the prior run's reference does
+    // not already carry). Filter such a slide out for the same reason postprocess.nf does
+    // -- `path("*.tiff")` is a mandatory output and a slide with nothing to emit has no
+    // work to do. Left in, split_channels.nf rendered NO --keep-channels flag, and the
+    // REAL script then fell back to its is_reference=false nuclear rule and re-emitted the
+    // prior reference's non-nuclear markers at priority 0, where step 9's new-wins dedup
+    // replaced the frozen reference's copies; the stub block's own `?:` diverged further
+    // still and emitted meta.channels INCLUDING the nuclear channel. Stub and real
+    // disagreed, so no -stub test could have caught it.
+    SPLIT_CHANNELS(
+        ch_new_for_split.filter { meta, _f, _is_ref ->
+            if (meta.keep_channels.isEmpty()) {
+                log.warn "ADD_CYCLE(${meta.patient_id}): new-cycle slide ${meta.id} adds no markers the " +
+                         "prior run's reference does not already carry. Not splitting it; the prior " +
+                         "pyramid's copies are kept."
+                return false
+            }
+            return true
+        }
+    )
 
     // ------------------------------------------------------------------ //
     // 6. QUANTIFY new markers against the REUSED masks. QUANTIFY reads

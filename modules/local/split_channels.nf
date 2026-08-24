@@ -37,11 +37,25 @@ process SPLIT_CHANNELS {
     // CsvUtils.countChannelsPerPatient's groupKey size exact by construction, rather
     // than by three copies of one rule continuing to agree by hand.
     //
-    // Empty only for SPLIT_PRIOR_PYRAMID, which reads channel names from OME-XML at
-    // runtime; omitting the flag makes split_multichannel.py fall back to its
-    // is_reference rule, and that caller is is_reference=true, i.e. keep everything.
-    def keep_args = (meta.keep_channels && !meta.keep_channels.isEmpty()) ?
-        "--keep-channels ${meta.keep_channels.join(' ')}" : ""
+    // ABSENT vs EMPTY. An ABSENT keep-set (SPLIT_PRIOR_PYRAMID, which reads channel names
+    // from OME-XML at runtime) means "no keep-set was resolved" and correctly renders no
+    // flag, so split_multichannel.py falls back to its is_reference rule -- that caller is
+    // is_reference=true, i.e. keep everything. An EMPTY keep-set means "this slide
+    // contributes no new markers", and BOTH callers filter such slides out of this
+    // process's input (subworkflows/local/postprocess.nf, subworkflows/local/add_cycle.nf)
+    // because `path("*.tiff")` is a mandatory output. Reaching here with an empty list
+    // therefore means a caller lost that filter. Fail loudly: rendering no flag would
+    // silently re-enable the legacy nuclear rule and emit the slide's whole declared
+    // panel, duplicating marker NAMES already claimed by another slide of this patient --
+    // the one thing CsvUtils.resolveKeptChannelsPerSlide's invariant forbids, and the
+    // reason meta.channels_count would then be an under-count.
+    if (meta.keep_channels != null && meta.keep_channels.isEmpty())
+        throw new IllegalArgumentException(
+            "SPLIT_CHANNELS(${meta.id ?: meta.patient_id}): meta.keep_channels is an EMPTY list. " +
+            "A slide that contributes no new markers must be filtered out of this process's input " +
+            "by its caller (see subworkflows/local/postprocess.nf and " +
+            "subworkflows/local/add_cycle.nf), not handed here.")
+    def keep_args = meta.keep_channels ? "--keep-channels ${meta.keep_channels.join(' ')}" : ""
     """
     # Log input size for tracing (-L follows symlinks)
     input_bytes=\$(stat -L --printf="%s" ${registered_image} 2>/dev/null || echo 0)
@@ -67,7 +81,19 @@ process SPLIT_CHANNELS {
     // resolved at samplesheet read. CsvUtils.countChannelsPerPatient sizes the
     // postprocessing groupKeys from that SAME resolver, so the stub's output count
     // matches the size the group expects.
-    def out_channels = meta.keep_channels ?: meta.channels
+    // ABSENT vs EMPTY, the SAME distinction as the script: block above (see it for the
+    // full account) -- and it must be made HERE too, identically. The stub's own `?:`
+    // used to resolve an empty keep-set to meta.channels, i.e. the slide's whole declared
+    // panel INCLUDING the nuclear channel, while the real script fell back to the legacy
+    // nuclear rule and emitted the non-nuclear ones. Stub and real disagreed, so no -stub
+    // test could see the divergence.
+    if (meta.keep_channels != null && meta.keep_channels.isEmpty())
+        throw new IllegalArgumentException(
+            "SPLIT_CHANNELS(${meta.id ?: meta.patient_id}): meta.keep_channels is an EMPTY list. " +
+            "A slide that contributes no new markers must be filtered out of this process's input " +
+            "by its caller (see subworkflows/local/postprocess.nf and " +
+            "subworkflows/local/add_cycle.nf), not handed here.")
+    def out_channels = meta.keep_channels != null ? meta.keep_channels : meta.channels
     // When meta.channels is empty (e.g. ADD_CYCLE's SPLIT_PRIOR_PYRAMID, which
     // reads channel names from OME-XML in REAL mode only), still emit a single
     // placeholder so the mandatory `*.tiff` output binds under -stub.

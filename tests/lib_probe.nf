@@ -143,6 +143,28 @@ P4,/data/c2/slide.tiff,DAPI|CD8,false
     assert CsvUtils.countChannelsPerPatient(dupCsv.path, 'image', ['DAPI','CELLTOX'], false)['P4'] == 3
     dupCsv.delete()
 
+    // AN EMPTY KEEP-SET IS AN ANSWER, NOT AN ABSENCE. A slide whose every declared
+    // channel was already claimed contributes NO new markers, and countChannelsPerPatient
+    // counts it as contributing ZERO. Its entry must therefore be PRESENT and EMPTY:
+    // consumers have to be able to tell "this slide emits nothing" (emit nothing) from
+    // "this slide has no entry" (fall back to its declared list). Groovy's `?:` cannot --
+    // it treats [] as falsy -- so every lookup of this map uses containsKey/an explicit
+    // null test, and input_check.nf does the lookup where the raw cell is in scope.
+    // Resolving the empty entry to the FULL declared list emitted a duplicate marker NAME
+    // across two slides of one patient, which is exactly what the one-name-per-patient
+    // invariant exists to forbid.
+    def emptyCsv = File.createTempFile('keepempty', '.csv')
+    emptyCsv.text = '''patient_id,image,channels,is_reference
+P5,ref.tiff,DAPI|PANCK|SMA,true
+P5,mov1.tiff,DAPI,false
+'''
+    def emptyKeep = CsvUtils.resolveKeptChannelsPerSlide(emptyCsv.path, 'image', ['DAPI','CELLTOX'], false)
+    assert emptyKeep['P5'].containsKey('mov1.tiff')   // present ...
+    assert emptyKeep['P5']['mov1.tiff'] == []         // ... and EMPTY, not the declared list
+    assert emptyKeep['P5']['ref.tiff'] == ['DAPI', 'PANCK', 'SMA']
+    assert CsvUtils.countChannelsPerPatient(emptyCsv.path, 'image', ['DAPI','CELLTOX'], false)['P5'] == 3
+    emptyCsv.delete()
+
     // THE invariant countChannelsPerPatient exists to satisfy: the count equals BOTH
     // the number of TIFFs emitted (pyramid path, groupTiffsByPatient, no .unique) AND
     // the number of distinct marker names (quant path, which .unique()s first). If

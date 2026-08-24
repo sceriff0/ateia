@@ -75,8 +75,18 @@ workflow INPUT_CHECK {
             // compares against it too, so the three cannot key differently. It used to be
             // injected by a separate .map further down, keyed on `f.name` -- the staged
             // FILE's basename, which is not the samplesheet cell.
+            //
+            // ABSENT vs EMPTY, and never `?:`. Groovy treats [] as falsy, so `?:` cannot
+            // tell "this slide emits nothing" (a legitimate answer -- every channel it
+            // declares was already claimed by an earlier slide of this patient) from "no
+            // entry for this slide" (fall back to the declared list). It resolved the
+            // first to the slide's ENTIRE declared list while countChannelsPerPatient had
+            // counted it as contributing ZERO, so a marker NAME was emitted twice for one
+            // patient -- the one thing the keep-set invariant forbids -- and the
+            // `.unique()` calls downstream then kept whichever copy ARRIVED first.
             def per_slide = keep_channels_by_slide[meta.patient_id]
-            meta.keep_channels = per_slide?.get(raw_image) ?: meta.channels
+            meta.keep_channels = per_slide?.containsKey(raw_image) ? per_slide[raw_image]
+                                                                  : meta.channels
             // Per-image unique id (patient_id + source-image stem). Drives output
             // file naming so a patient's multiple images do not produce identically
             // named files that collide when collected downstream (QC, registration).
