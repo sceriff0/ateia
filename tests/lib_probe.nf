@@ -452,14 +452,29 @@ workflow {
     // ------------------------------------------------------------------ //
     // WarpBackends — one seam for the reg_qc=2 warp
     // ------------------------------------------------------------------ //
-    assert WarpBackends.methods().toSorted() == ['tiled', 'valis']
+    assert WarpBackends.methods().toSorted() == ['ashlar', 'tiled', 'valis']
     assert WarpBackends.container('valis') == 'cdgatenbee/valis-wsi:1.0.0'
     assert WarpBackends.container('tiled') == 'bolt3x/mirage-tiled:1.0.0'
     assert WarpBackends.of('valis').stages == ['native', 'rigid', 'non_rigid', 'micro']
     assert WarpBackends.of('tiled').stages == ['native', 'rigid', 'refined']
 
+    // ashlar shares the tiled container AND the tiled stage vocabulary, because
+    // bin/ashlar_solve.py emits the identical M0 + mesh manifest: the scorer reads it
+    // through the same JVM-free warper, so it needs neither the ashlar image nor VALIS.
+    assert WarpBackends.container('ashlar') == 'bolt3x/mirage-tiled:1.0.0'
+    assert WarpBackends.of('ashlar').stages == ['native', 'rigid', 'refined']
+    assert WarpBackends.of('ashlar').versionTools == WarpBackends.of('tiled').versionTools
+
     // The tiled backend must pass --method tiled; VALIS must not.
     assert WarpBackends.of('tiled').flags([:]).any { it.contains('--method tiled') }
+    // ashlar passes its OWN method name, not 'tiled'. Both route to the same warper, but
+    // the report records what it was given -- an ashlar arm labelled 'tiled' in the QC
+    // JSON is indistinguishable from a STARE arm in the table the arm ranking is built
+    // from, which is precisely the comparison the backend exists to make.
+    assert WarpBackends.of('ashlar').flags([:]).any { it.contains('--method ashlar') }
+    assert !WarpBackends.of('ashlar').flags([:]).any { it.contains('--method tiled') }
+    // No JVM heap flag may leak onto a JVM-free backend (see the WarpBackends header).
+    assert !WarpBackends.of('ashlar').flags([:]).any { it.contains('--jvm-heap-gb') }
     def valisFlags = WarpBackends.of('valis').flags(
         [ref_slide: 'R', moving_slide: 'M', stage_checkpoint: null, micro_reg: 2])
     assert !valisFlags.any { it.contains('--method') }
