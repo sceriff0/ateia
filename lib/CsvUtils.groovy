@@ -189,6 +189,120 @@ class CsvUtils {
         return resolved
     }
 
+    /** Filename component of a samplesheet path cell -- how meta/file names key. */
+    static String baseName(String pathCell) {
+        if (!pathCell) return ''
+        def idx = pathCell.lastIndexOf('/')
+        return idx >= 0 ? pathCell.substring(idx + 1) : pathCell
+    }
+
+    /**
+     * Each slide's exact emit-set: patient_id -> (image basename -> channels).
+     *
+     * THE keep-set rule, and the only place it exists. SPLIT_CHANNELS emits exactly what
+     * this returns (via meta.keep_channels); countChannelsPerPatient sizes the
+     * postprocessing groupKeys from it. Before this method the same rule lived in THREE
+     * places -- MarkerUtils.splitOutputChannels, bin/split_multichannel.py, and
+     * SPLIT_CHANNELS' stub block -- and a disagreement between them was a silent
+     * groupTuple miscount rather than a crash.
+     *
+     * A channel is kept iff its upper-cased name has not already been claimed by an
+     * earlier slide of the same patient, walking REFERENCE FIRST then samplesheet order.
+     * Ordering the reference first is what makes "the reference wins" fall out of the
+     * walk instead of needing a special case.
+     *
+     * NUCLEAR-NESS PLAYS NO PART IN THE DROP DECISION, deliberately. channels_count feeds
+     * two consumers that disagree unless every marker name is emitted exactly once per
+     * patient: quantify_markers.nf's grouping applies `.unique()` on [patient_id, marker]
+     * BEFORE groupTuple, so it needs the DISTINCT-NAME count, while groupTiffsByPatient
+     * has no `.unique` and needs the FILE count. Claiming every kept name, nuclear or
+     * not, is what makes those the same number. Claiming only nuclear names would emit
+     * two CELLTOX files while the quant path counted one -- an UNDER-count, which
+     * quantify_markers.nf documents as the case that ABORTS the run.
+     *
+     * It also removes a latent nondeterminism: two slides sharing a NON-nuclear marker
+     * used to be deduplicated by ARRIVAL ORDER at that `.unique()`, the exact
+     * scheduling-nondeterminism add_cycle.nf warns about in its own dedup. The winner is
+     * now the samplesheet-order-first slide.
+     *
+     * `preClaimed` seeds the claimed set per patient. add_cycle passes the prior run's
+     * reference channels, so a re-stained DAPI is dropped as redundant while a genuinely
+     * new nuclear marker survives.
+     *
+     * @param nuclearMarkers validated via MarkerUtils.markerList so a malformed
+     *        params.nuclear_markers still fails loudly here, even though the keep
+     *        decision itself no longer branches on it.
+     */
+    static Map<String, Map<String, List<String>>> resolveKeptChannelsPerSlide(
+            String csvPath, String imageColumn, def nuclearMarkers, boolean autoReference,
+            Map<String, List<String>> preClaimed = [:]) {
+
+        // Validate the parameter shape even though the keep rule does not branch on it: a
+        // malformed params.nuclear_markers must not become silently harmless here.
+        MarkerUtils.markerList(nuclearMarkers)
+
+        def file = new File(csvPath)
+        if (!file.exists()) return [:]
+
+        def lines = readCsvLines(file.path)
+        if (lines.size() < 2) return [:]
+
+        def header      = parseCsvLine(lines[0])
+        def patientIdx  = header.findIndexOf { it == 'patient_id' }
+        def channelsIdx = header.findIndexOf { it == 'channels' }
+        def imageIdx    = header.findIndexOf { it == imageColumn }
+        if (patientIdx == -1 || channelsIdx == -1 || imageIdx == -1) return [:]
+
+        // WHICH slide is the reference is resolved by resolveReferenceRows, not decided
+        // here -- the same reason countChannelsPerPatient asks it rather than promoting
+        // rows[0] itself.
+        def referenceImage = resolveReferenceRows(csvPath, imageColumn, autoReference)
+
+        // Rows per patient, IN SAMPLESHEET ORDER. The walk order below depends on it.
+        def rowsByPatient = [:].withDefault { [] }
+        lines.drop(1).each { line ->
+            def cols = parseCsvLine(line)
+            if (cols.size() <= Math.max(patientIdx, Math.max(channelsIdx, imageIdx))) return
+            def patientId = cols[patientIdx].trim()
+            if (!patientId) return  // ignore blank patient_id cells
+            def rawImage = cols[imageIdx].trim()
+            rowsByPatient[patientId] << [
+                raw     : rawImage,
+                image   : baseName(rawImage),
+                channels: cols[channelsIdx].split('\\|')*.trim().findAll { it },
+            ]
+        }
+
+        def result = [:]
+        rowsByPatient.each { patientId, rows ->
+            // resolveReferenceRows returns the RAW cell, so compare on raw, not basename.
+            def refCell = referenceImage[patientId]
+            // Stable partition: reference row(s) first, everything else in declared
+            // order. A patient with no reference at all (add_cycle's by-design
+            // zero-reference sheet) simply walks in samplesheet order, since nothing
+            // matches null.
+            def ordered = rows.findAll { it.raw == refCell } +
+                          rows.findAll { it.raw != refCell }
+
+            def claimed = new HashSet<String>()
+            (preClaimed[patientId] ?: []).each { claimed << it.toString().trim().toUpperCase() }
+
+            def perSlide = [:]
+            ordered.each { row ->
+                def keep = []
+                row.channels.each { ch ->
+                    def name = ch.toUpperCase()
+                    if (claimed.contains(name)) return
+                    claimed << name
+                    keep << ch
+                }
+                perSlide[row.image] = keep
+            }
+            result[patientId] = perSlide
+        }
+        return result
+    }
+
     static Map<String, Integer> countChannelsPerPatient(String csvPath, String imageColumn, def nuclearMarkers, boolean autoReference) {
         def file = new File(csvPath)
         if (!file.exists()) return [:]

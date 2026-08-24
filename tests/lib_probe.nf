@@ -80,6 +80,54 @@ workflow {
     assert MarkerUtils.splitOutputChannels(['DAPI', 'CD3'], false, ['DAPI']) == ['CD3']
 
     // ------------------------------------------------------------------ //
+    // CsvUtils.resolveKeptChannelsPerSlide — THE keep-set rule
+    // ------------------------------------------------------------------ //
+    // Each marker name is claimed exactly once per patient, reference first then
+    // samplesheet order. That single invariant is what keeps channels_count equal to
+    // BOTH the distinct-name count (quantify_markers.nf's grouping .unique()s on
+    // [patient_id, marker] before grouping) AND the emitted-file count
+    // (groupTiffsByPatient has no .unique). Claiming only NUCLEAR names would emit two
+    // CELLTOX files while the quant path counted one -- an under-count, which
+    // quantify_markers.nf:156-179 documents as the case that ABORTS the run.
+    def keepCsv = File.createTempFile('keepset', '.csv')
+    keepCsv.text = '''patient_id,image,channels,is_reference
+P1,ref.tiff,DAPI|KI67|CD20,true
+P1,cyc2.tiff,CELLTOX|CD8,false
+P1,cyc3.tiff,CELLTOX|FOXP3,false
+'''
+    def keep = CsvUtils.resolveKeptChannelsPerSlide(keepCsv.path, 'image', ['DAPI','CELLTOX'], false)
+    assert keep['P1']['ref.tiff']  == ['DAPI', 'KI67', 'CD20']
+    assert keep['P1']['cyc2.tiff'] == ['CELLTOX', 'CD8']  // CELLTOX unclaimed -> KEPT
+    assert keep['P1']['cyc3.tiff'] == ['FOXP3']           // CELLTOX claimed by cyc2
+    def keepFlat = keep['P1'].values().flatten()
+    assert keepFlat.size() == keepFlat.toSet().size()
+    assert keepFlat.size() == 6
+    keepCsv.delete()
+
+    // The reference wins wherever it sits in the sheet: ordering is reference-first,
+    // not row-order, so a reference declared LAST still claims its markers first.
+    def keepLateRef = File.createTempFile('keeplate', '.csv')
+    keepLateRef.text = '''patient_id,image,channels,is_reference
+P2,cyc2.tiff,DAPI|CD8,false
+P2,ref.tiff,DAPI|KI67,true
+'''
+    def lateRef = CsvUtils.resolveKeptChannelsPerSlide(keepLateRef.path, 'image', ['DAPI','CELLTOX'], false)
+    assert lateRef['P2']['ref.tiff']  == ['DAPI', 'KI67']
+    assert lateRef['P2']['cyc2.tiff'] == ['CD8']   // DAPI already claimed by the reference
+    keepLateRef.delete()
+
+    // preClaimed seeds the claimed set — add_cycle passes the prior run's reference
+    // channels, so a re-stained DAPI is redundant but a NEW nuclear marker survives.
+    def keepPrior = File.createTempFile('keepprior', '.csv')
+    keepPrior.text = '''patient_id,image,channels,is_reference
+P3,cyc4.tiff,DAPI|CELLTOX|CD8,false
+'''
+    def seeded = CsvUtils.resolveKeptChannelsPerSlide(
+        keepPrior.path, 'image', ['DAPI','CELLTOX'], false, ['P3': ['DAPI', 'KI67']])
+    assert seeded['P3']['cyc4.tiff'] == ['CELLTOX', 'CD8']  // DAPI pre-claimed; CELLTOX new
+    keepPrior.delete()
+
+    // ------------------------------------------------------------------ //
     // ParamUtils — the step vocabulary
     // ------------------------------------------------------------------ //
     assert ParamUtils.STEP_ORDER == ['preprocessing', 'registration', 'segmentation', 'postprocessing']
