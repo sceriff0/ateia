@@ -35,7 +35,7 @@ shared preprocessing run**. No arm axis touches a `preproc_*` param, so running
 preprocessing nine times would repeat the expensive half of a real-WSI run to
 vary something it does not affect — the same factoring the segmentation arms use.
 Segmentation and export are not run either: nothing downstream of registration
-changes the staged registration QC. **7 arms**:
+changes the staged registration QC. **9 arms**:
 
 - **VALIS preset × micro-depth = 6.** `memory_mode` (`low` = BRISK/RANSAC,
   `high` = SuperPoint/SuperGlue — *different feature matchers*, not one matcher at
@@ -44,6 +44,21 @@ changes the staged registration QC. **7 arms**:
 - **STARE (`registration_method = tiled`) at defaults = 1.** A different
   *backend*, not a seventh cell: `memory_mode` and `reg_micro_reg` do not exist
   there, so that arm carries neither.
+- **ASHLAR (`registration_method = ashlar`) × tile size = 2.** The external
+  baseline (labsyspharm), a third *backend*, so it carries neither VALIS-only
+  param either. It fans out over `reg_ashlar_tile` because grid granularity is a
+  **fairness** knob, not a cost one: ASHLAR takes one independent shift per tile,
+  so a finer grid buys it more local freedom — the direct analogue of STARE's
+  `reg_tiled_tile`, which the synthetic sweep varies over `[1024, 2048, 4096]`.
+  `[1024, 4096]` brackets that range at both ends.
+
+  ASHLAR is in this ranking at all only because `bin/ashlar_solve.py` rewrites
+  its per-tile placements into the same `M0` + mesh manifest STARE emits, so the
+  method-agnostic seg-overlap scorer reads it unchanged. Scored any other way it
+  would land in a different metric family that shares no column with this table.
+  **Read it against VALIS's `rigid` stage** for the like-for-like number and
+  against `micro` to quantify what non-rigid buys: ASHLAR attempts no non-rigid
+  warp at all, so reporting only the second overstates VALIS's advantage.
 
 ### 2. QC-segmenter cross — *does the verdict depend on who found the nuclei?*
 
@@ -54,7 +69,7 @@ measured on. Varying it leaves the registration byte-identical, which makes this
 registration. The same category `seg_qc_pairing` occupies in the synthetic sweep.
 
 `cross: reference` (the default) runs the extra segmenters against one arm:
-**9 registration runs**. `cross: all` crosses all seven and costs **21**. Start at
+**11 registration runs**. `cross: all` crosses all nine and costs **27**. Start at
 `reference` — if the number is stable there, crossing everything buys a denser
 null result.
 
@@ -250,10 +265,21 @@ conclusion inverted.
    change. **A true rigid-only baseline exists only in the depth-0 arms.**
 
 2. **The backends do not share a stage vocabulary.** `lib/WarpBackends.groovy`:
-   VALIS is `native → rigid → non_rigid → micro`; STARE is `native → rigid →
-   refined`. Only `native` is shared as both a spelling and a meaning. Each arm is
-   therefore ranked on **its own final stage** — which is also why depths 0 and 1,
-   emitting no `micro` stage at all, are not silently dropped.
+   VALIS is `native → rigid → non_rigid → micro`; STARE and ASHLAR are both
+   `native → rigid → refined` (they serialize the same `M0` + mesh manifest, so
+   they read through the same warper). Only `native` and `rigid` are shared as
+   both a spelling and a meaning across all three. Each arm is therefore ranked on
+   **its own final stage** — which is also why depths 0 and 1, emitting no `micro`
+   stage at all, are not silently dropped.
+
+   `benchmarks/analysis/lib/quality.py`'s `_STAGE_RANK` is what performs that
+   reduction, and it is guarded by
+   `benchmarks/tests/test_stage_rank_covers_every_backend.py`, which reads the
+   vocabularies out of `WarpBackends` rather than restating them. It was added
+   after `refined` was found MISSING from that table: an unranked stage maps to
+   `-1`, ties with `native`, and the "final stage" pick then rests on a stable-sort
+   accident — so every STARE run was one upstream reordering away from reporting
+   its *unregistered* accuracy as its headline number.
 
 3. **Label the arms explicitly.** `arms.csv` is always written, because the
    consumer's fallback parses directory names for `high`/`low` and a depth. A
@@ -270,7 +296,7 @@ Per patient, at the shipped `arms.yaml`:
 | arm | runs | pipeline extent |
 |---|---|---|
 | shared preprocessing | 1 | preprocessing only |
-| registration (7 + 2 crossed) | 9 | registration only (resumed) |
+| registration (9 + 2 crossed) | 11 | registration only (resumed) |
 | segmentation | 3 | segmentation → export (resumed) |
 | compute profile | 1 | full pipeline |
 

@@ -174,16 +174,18 @@ ALLOWED_LINES = {
         # lib/*.groovy and the tier params are null-declared. Same composition check as
         # above -- 1034 + 30 = 1064 -- and re-pinned from the file with the grep below,
         # not guessed.
-        # 1064 -> 1118 when the ASHLAR benchmark backend landed: conf/modules.config
-        # gained three withName blocks above this line -- ASHLAR_RETILE, ASHLAR_SOLVE
-        # (which restates TILED_SOLVE's two publish destinations) and ASHLAR_STITCH
-        # (which must restate TILED_STITCH's publishDir, because Nextflow matches a
-        # withName selector on the ORIGINAL name and an alias would otherwise inherit it
-        # silently) -- +54 lines total. Same composition check as above --
-        # 1064 + 54 = 1118. Re-pin, do not
+        # 1064 -> 1103 when the ASHLAR benchmark backend landed. TWO offsets compose here:
+        # +54 for the three new withName blocks above this line -- ASHLAR_RETILE,
+        # ASHLAR_SOLVE (which restates TILED_SOLVE's two publish destinations) and
+        # ASHLAR_STITCH (which must restate TILED_STITCH's publishDir, because Nextflow
+        # matches a withName selector on the ORIGINAL name and an alias would otherwise
+        # inherit it silently) -- and -15 for deleting the byte-identical SECOND copy of
+        # the TILED_COARSE block and its comment, which had sat above this line unnoticed
+        # (harmless under config merge, last-one-wins). Same composition check as above --
+        # 1064 + 54 - 15 = 1103. Re-pin, do not
         # widen. (Re-pin from the file, not by guessing:
         # `grep -n "params.expanded_quantification ?" conf/modules.config`.)
-        1118: (
+        1103: (
             "ext.args = { params.expanded_quantification ? '--expanded' : "
             "'' } -- conf/*.config closures cannot see lib/*.groovy classes, "
             "so ext.args must read params raw here."

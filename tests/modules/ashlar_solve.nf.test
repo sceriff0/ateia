@@ -1,0 +1,139 @@
+nextflow_process {
+
+    name "Test ASHLAR_SOLVE process"
+    script "modules/local/ashlar_solve.nf"
+    process "ASHLAR_SOLVE"
+
+    tag "modules"
+    tag "modules_local"
+    tag "ashlar_solve"
+
+    test("Should emit a manifest and a diagnostics summary - stub") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [ patient_id: 'P001', channels: ['DAPI', 'CD3'], is_reference: false ],
+                    file('$projectDir/tests/testdata', checkIfExists: true),
+                    file('$projectDir/tests/testdata', checkIfExists: true),
+                    'P001_ref'
+                ]
+                """
+            }
+        }
+
+        then {
+            assert process.success
+            assert process.out.manifest
+            assert process.out.tre
+            assert process.out.versions
+            with(process.out.manifest) {
+                assert size() == 1
+                assert get(0).get(1).toString().endsWith('_manifest.json')
+            }
+        }
+    }
+
+    test("Should render the shift budget and the fiducial channel - rendered command") {
+
+        // Tagged `stub` so CI's blocking gate collects it, deliberately WITHOUT
+        // `options "-stub"` -- `-stub` never evaluates a `script:` block.
+        //
+        // --maximum-shift is the flag that corrupts results SILENTLY. It is in MICRONS, and
+        // LayerAligner.constrain_positions() replaces every tile whose correction exceeds it
+        // with a linear-model prediction rather than raising -- so a value below the true
+        // cross-cycle drift degrades the registration while the run stays green. Nothing
+        // downstream can distinguish that from a genuinely well-aligned slide, which is
+        // exactly why it is asserted on the rendered command rather than on an output.
+        tag "stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [ patient_id: 'P001', channels: ['DAPI', 'CD3'], is_reference: false ],
+                    file('${projectDir}/tests/testdata', checkIfExists: true),
+                    file('${projectDir}/tests/testdata', checkIfExists: true),
+                    'P001_ref'
+                ]
+                """
+            }
+        }
+
+        then {
+            def rendered = []
+            new File("$workDir").eachFileRecurse { f ->
+                if (f.name == '.command.sh' && f.text.contains('ashlar_solve.py')) {
+                    rendered << f.text
+                }
+            }
+            // Whole-token comparison: an assertion written for `30` is also satisfied by
+            // `300`, which would silently widen the budget by 10x and accept shifts that
+            // should have been rejected.
+            def flagValue = { txt, flag ->
+                def m = (txt =~ (java.util.regex.Pattern.quote(flag) + /\s+(\S+)/))
+                m.find() ? m.group(1) : null
+            }
+
+            assertAll(
+                { assert rendered.size() >= 1,
+                    "no rendered ASHLAR_SOLVE .command.sh found under the task work dir" },
+                { assert rendered.every { flagValue(it, '--maximum-shift') == '30' },
+                    "--maximum-shift is not exactly 30 (params.reg_ashlar_max_shift_um " +
+                    "default, in MICRONS); got: " +
+                    rendered.collect { flagValue(it, '--maximum-shift') }.join(', ') },
+                // DAPI is at index 0 of ['DAPI', 'CD3'] -- resolved from THIS slide's channel
+                // metadata via MarkerUtils, the same way TILED_COARSE does it, not fixed.
+                { assert rendered.every { flagValue(it, '--nuclear-index') == '0' },
+                    "--nuclear-index is not 0 for channels ['DAPI', 'CD3']; got: " +
+                    rendered.collect { flagValue(it, '--nuclear-index') }.join(', ') }
+            )
+        }
+    }
+
+    test("Should resolve the fiducial channel from the slide's own channel list - rendered command") {
+
+        // The nuclear channel is NOT position 0 by definition. Put DAPI second and the flag
+        // must follow, or ashlar would align on a marker channel and every downstream number
+        // would describe a registration nobody asked for.
+        tag "stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [ patient_id: 'P001', channels: ['CD3', 'DAPI', 'CD8'], is_reference: false ],
+                    file('${projectDir}/tests/testdata', checkIfExists: true),
+                    file('${projectDir}/tests/testdata', checkIfExists: true),
+                    'P001_ref'
+                ]
+                """
+            }
+        }
+
+        then {
+            def rendered = []
+            new File("$workDir").eachFileRecurse { f ->
+                if (f.name == '.command.sh' && f.text.contains('ashlar_solve.py')) {
+                    rendered << f.text
+                }
+            }
+            def flagValue = { txt, flag ->
+                def m = (txt =~ (java.util.regex.Pattern.quote(flag) + /\s+(\S+)/))
+                m.find() ? m.group(1) : null
+            }
+            assertAll(
+                { assert rendered.size() >= 1,
+                    "no rendered ASHLAR_SOLVE .command.sh found under the task work dir" },
+                { assert rendered.every { flagValue(it, '--nuclear-index') == '1' },
+                    "--nuclear-index did not follow DAPI to position 1 in " +
+                    "['CD3', 'DAPI', 'CD8']; got: " +
+                    rendered.collect { flagValue(it, '--nuclear-index') }.join(', ') }
+            )
+        }
+    }
+}

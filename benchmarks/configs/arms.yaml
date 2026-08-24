@@ -82,6 +82,36 @@ registration_arms:
   tiled:
     enabled: true                          # 1 arm
 
+  # ASHLAR — the EXTERNAL baseline (labsyspharm), the field-standard cyclic-IF
+  # registrar. A third BACKEND again, so like `tiled` it carries neither
+  # memory_mode nor reg_micro_reg and shows NA for both in arms.csv.
+  #
+  # It is in this ranking at all only because bin/ashlar_solve.py rewrites
+  # ashlar's per-tile placements into the same M0 + mesh manifest STARE emits,
+  # so the method-agnostic seg-overlap scorer reads it unchanged. Scored any
+  # other way — e.g. through the ORB CLI — it would produce numbers in a
+  # different metric family that share no column with this table, which is
+  # exactly what the earlier out-of-band harness did.
+  #
+  # TILE SIZE IS A FAIRNESS KNOB, NOT A COST KNOB, which is why it is a LIST.
+  # ashlar computes one independent shift per tile, so a finer grid buys it more
+  # local (still piecewise-translational) freedom — the direct analogue of
+  # STARE's reg_tiled_tile, swept at [1024, 2048, 4096] in sweep.yaml. Comparing
+  # ashlar at a fine grid against STARE at a coarse one silently biases the
+  # result, so these two values bracket STARE's swept range at both ends.
+  #
+  # READ THE ARM AGAINST VALIS'S *RIGID* STAGE for the like-for-like number, and
+  # against *micro* to quantify what non-rigid buys: ashlar attempts no non-rigid
+  # warp at all, so reporting only the second overstates VALIS's advantage.
+  ashlar:
+    enabled: true
+    tile_size: [1024, 4096]                # 2 arms
+    overlap_fraction: 0.1
+    maximum_shift_um: 30                   # MICRONS, and it fails SILENTLY when too small:
+                                           # LayerAligner replaces an out-of-range tile with a
+                                           # model prediction instead of erroring. Must exceed
+                                           # the real cross-cycle drift for your cohort.
+
 # -----------------------------------------------------------------------------
 # QC-SEGMENTER CROSS — does the registration verdict depend on WHO found the nuclei?
 #

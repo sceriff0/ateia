@@ -88,7 +88,21 @@ def harvest_registration_qc(results_root, run_plan_csv) -> pd.DataFrame:
 
 
 # Stage ordering so a per-run reduction can pick the final (most-registered) stage.
-_STAGE_RANK = {"native": 0, "rigid": 1, "non_rigid": 2, "micro": 3}
+#
+# THE BACKENDS DO NOT SHARE A STAGE VOCABULARY -- lib/WarpBackends.groovy gives VALIS
+# native/rigid/non_rigid/micro and the manifest backends (tiled/STARE, ashlar)
+# native/rigid/refined. Only `native` and `rigid` are shared as both a spelling and a meaning.
+#
+# `refined` was MISSING here, which was a live bug for STARE and not merely a gap waiting for
+# ashlar: `.map(...).fillna(-1)` sent it to -1, the same rank as the equally-unranked `native`,
+# so `sort_values("_rank").groupby(...).tail(1)` picked STARE's terminal stage only by the
+# stable-sort tie-break happening to put it after `native`. Any reordering upstream -- a
+# different glob order, a pandas version whose sort is not stable here -- would silently have
+# reported STARE's UNREGISTERED stage as its headline accuracy.
+#
+# Ranked, not derived: the ranks encode "how much registration has been applied", which is a
+# fact about the backends, not about the data in any one table.
+_STAGE_RANK = {"native": 0, "rigid": 1, "non_rigid": 2, "refined": 2, "micro": 3}
 
 
 def registration_accuracy_per_run(reg_qc_long: pd.DataFrame) -> pd.DataFrame:
@@ -278,7 +292,11 @@ def run_cost_summary(runs_df: pd.DataFrame) -> pd.DataFrame:
     key = "run_id" if "run_id" in df.columns else "config_id"
     carry = [c for c in ("varied_axis", "target_px", "n_channels", "n_register_images",
                          "registration_method", "memory_mode", "reg_micro_reg",
-                         "reg_tiled_tile", "reg_tiled_gate_tre", "reg_tiled_coarse_max_dim", "seg_method",
+                         "reg_tiled_tile", "reg_tiled_gate_tre", "reg_tiled_coarse_max_dim",
+                         # ashlar's grid granularity is its fairness knob against
+                         # reg_tiled_tile; without it here two ashlar arms that differ only by
+                         # tile size collapse into indistinguishable rows.
+                         "reg_ashlar_tile", "seg_method",
                          "config_id", "rep") if c in df.columns]
     out = []
     for run, g in df.groupby(key):

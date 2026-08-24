@@ -47,6 +47,7 @@ CONFIG_COLS = (
     # registration
     "registration_method", "memory_mode", "reg_micro_reg", "reg_jvm_heap_gb",
     "reg_tiled_tile", "reg_tiled_gate_tre", "reg_tiled_coarse_max_dim",
+    "reg_ashlar_tile",
     # preprocessing — the pipeline exposes exactly these three (see sweep.yaml)
     "skip_preprocessing", "preproc_skip_nuclear", "preproc_tile_size",
     # segmentation (per-backend knobs, crossed by segmentation_grid)
@@ -198,7 +199,10 @@ _DICTS = {
         [("run_id", "-", "Run identifier."),
          ("patient_id", "-", "Patient."),
          ("moving", "-", "Moving slide (cycle) registered to the reference."),
-         ("stage", "-", "Transform stage: native / rigid / non_rigid / micro."),
+         ("stage", "-", "Transform stage. The backends do NOT share a vocabulary: VALIS emits "
+          "native / rigid / non_rigid / micro, the manifest backends (tiled/STARE, ashlar) emit "
+          "native / rigid / refined. Only native and rigid are shared as both a spelling and a "
+          "meaning, so each arm is ranked on ITS OWN final stage."),
          ("n_pairs", "-", "Matched nucleus pairs at this stage."),
          ("pair_fraction", "-", "Fraction of cells that paired (sanity: <~0.5 means a thin, biased match)."),
          ("iou_mean", "-", "Mean per-pair nucleus IoU."),

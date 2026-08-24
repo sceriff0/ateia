@@ -183,6 +183,59 @@ def test_tiled_arm_carries_no_valis_only_params(plan):
         assert r["reg_micro_reg"] == ""
 
 
+def test_ashlar_arm_carries_no_valis_only_params(plan):
+    """memory_mode / reg_micro_reg do not exist on the ashlar backend.
+
+    The sibling of test_tiled_arm_carries_no_valis_only_params. The consumer needs blank,
+    not a plausible default: writing memory_mode=high on an ashlar arm would invent a value
+    the run never had, and registration_arms.R would render it as a VALIS preset.
+    """
+    ashlar = [r for r in plan if r.get("backend") == "ashlar"]
+    assert ashlar, "the ashlar comparator arms are missing from the plan"
+    for r in ashlar:
+        assert r["memory_mode"] == ""
+        assert r["reg_micro_reg"] == ""
+
+
+def test_non_ashlar_arms_carry_no_ashlar_params(plan):
+    """The mirror direction, and the one with teeth for the LAUNCHER.
+
+    run_arms.sh maps every non-empty cell to `--<param> <value>`. A VALIS arm carrying
+    reg_ashlar_tile=1024 would be launched with --reg_ashlar_tile, which is legal for
+    validateParameters() and therefore would NOT fail -- it would just record a knob the run
+    never used, in the very table the arm ranking reads.
+    """
+    for r in plan:
+        if r.get("backend") == "ashlar":
+            continue
+        for k in ("reg_ashlar_tile", "reg_ashlar_overlap", "reg_ashlar_max_shift_um"):
+            assert r.get(k, "") == "", f"{r['arm']} carries {k}={r.get(k)!r}"
+
+
+def test_ashlar_arms_differ_only_by_tile_size(plan):
+    """tile_size is the fairness knob against STARE's reg_tiled_tile, so it must be what
+    separates the arms -- and it must actually reach the plan, or both arms register at the
+    same granularity and publish two differently-named identical result trees."""
+    ashlar = [r for r in plan
+              if r.get("backend") == "ashlar" and "_seg" not in r["arm"]]
+    assert len(ashlar) == 2, [r["arm"] for r in ashlar]
+    assert {r["reg_ashlar_tile"] for r in ashlar} == {1024, 4096}
+    assert len({r["reg_ashlar_max_shift_um"] for r in ashlar}) == 1
+
+
+def test_ashlar_arm_name_survives_the_consumer_fallback(plan):
+    """registration_arms.R parses the directory name when arms.csv is absent or renamed.
+
+    The sibling of test_tiled_arm_name_survives_the_consumer_fallback. A mislabelled arm does
+    not fail there -- it renders a clean figure with the conclusion attached to the wrong
+    backend.
+    """
+    ashlar = [r["arm_dir"] for r in arms_manifest_rows(plan) if r["backend"] == "ashlar"]
+    assert ashlar
+    for d in ashlar:
+        assert "ashlar" in d
+
+
 def test_valis_arms_are_preset_x_depth_not_a_2x2(plan):
     """reg_micro_reg is a DEPTH (0/1/2), so 2 presets x 3 depths = 6 arms."""
     valis = [r for r in plan
@@ -233,8 +286,13 @@ def test_cross_all_crosses_every_arm(cfg):
         cfg["qc_segmenter_cross"], cross="all")))
     reg = [r for r in full if r["arm_kind"] == "registration"]
     n_methods = len(cfg["qc_segmenter_cross"]["seg_method"])
-    assert len(reg) == 7 * n_methods, (
-        "cross: all should be 7 arms x every segmenter; the README quotes 21 "
+    # 9 = 6 VALIS (preset x micro-depth) + 1 STARE + 2 ASHLAR (tile_size). Bumped from 7
+    # when the ashlar backend landed. This number is quoted in docs/benchmarks_real.md and
+    # in arms.yaml's cost gate, which is why it is asserted rather than derived: the point
+    # is that the prose and the code agree, and deriving it from the plan would make the
+    # assertion vacuous.
+    assert len(reg) == 9 * n_methods, (
+        "cross: all should be 9 arms x every segmenter; docs/benchmarks_real.md quotes 27 "
         "and the cost gate in arms.yaml depends on that number being right")
 
 

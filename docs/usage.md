@@ -461,7 +461,7 @@ key grammar is a cross-repository contract — see
 
 ??? failure "Launch fails on an invalid value"
     `--start`/`--stop` must be `preprocessing|registration|segmentation|postprocessing`;
-    `--registration_method` must be `valis|tiled`; `--seg_method` must be
+    `--registration_method` must be `valis|tiled|ashlar`; `--seg_method` must be
     `stardist|instantseg|cellsam`. Typos exit before any process is submitted.
 
 ??? failure "`--input` validation error / wrong columns"
