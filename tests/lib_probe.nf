@@ -127,6 +127,25 @@ P3,cyc4.tiff,DAPI|CELLTOX|CD8,false
     assert seeded['P3']['cyc4.tiff'] == ['CELLTOX', 'CD8']  // DAPI pre-claimed; CELLTOX new
     keepPrior.delete()
 
+    // THE invariant countChannelsPerPatient exists to satisfy: the count equals BOTH
+    // the number of TIFFs emitted (pyramid path, groupTiffsByPatient, no .unique) AND
+    // the number of distinct marker names (quant path, which .unique()s first). If
+    // these three ever diverge, one consumer silently loses markers and the other
+    // aborts the run.
+    def invCsv = File.createTempFile('keepcount', '.csv')
+    invCsv.text = '''patient_id,image,channels,is_reference
+P1,ref.tiff,DAPI|KI67|CD20,true
+P1,cyc2.tiff,CELLTOX|CD8,false
+P1,cyc3.tiff,CELLTOX|FOXP3,false
+'''
+    def invCounts = CsvUtils.countChannelsPerPatient(invCsv.path, 'image', ['DAPI','CELLTOX'], false)
+    def invKept   = CsvUtils.resolveKeptChannelsPerSlide(invCsv.path, 'image', ['DAPI','CELLTOX'], false)
+    def invFlat   = invKept['P1'].values().flatten()
+    assert invCounts['P1'] == 6
+    assert invCounts['P1'] == invFlat.size()          // == emitted TIFF count (pyramid)
+    assert invCounts['P1'] == invFlat.toSet().size()  // == distinct names     (quant)
+    invCsv.delete()
+
     // ------------------------------------------------------------------ //
     // ParamUtils — the step vocabulary
     // ------------------------------------------------------------------ //

@@ -80,10 +80,12 @@ class CsvUtils {
      * meta.channels_count via input_check.nf), so it must equal the number of
      * single-channel TIFFs SPLIT_CHANNELS produces for the patient -- not the number
      * of channels the samplesheet declares. The two differ because the
-     * nuclear/fiducial channel is kept only on the reference slide (see
-     * MarkerUtils.splitOutputChannels): a reference-less sheet declaring
-     * `DAPI|KI67|CD20` yields TWO markers, not three. Unioning declared channels with
-     * no reference awareness (what this did before) over-counted exactly that case,
+     * emit-set is resolved per slide by resolveKeptChannelsPerSlide, which claims each
+     * marker name exactly once per patient: the reference is walked first, then the
+     * remaining slides in samplesheet order, and a slide keeps only names nothing has
+     * claimed yet. A reference-less sheet declaring `DAPI|KI67|CD20` on one slide still
+     * yields THREE markers; a second slide re-declaring `DAPI` adds nothing. Unioning
+     * declared channels with no reference awareness (what this did before) over-counted,
      * and an over-counted groupKey never fills.
      *
      * Do NOT point run_summary.json's input manifest at this. The manifest should
@@ -304,42 +306,25 @@ class CsvUtils {
     }
 
     static Map<String, Integer> countChannelsPerPatient(String csvPath, String imageColumn, def nuclearMarkers, boolean autoReference) {
-        def file = new File(csvPath)
-        if (!file.exists()) return [:]
-
-        def lines = readCsvLines(file.path)
-        if (lines.size() < 2) return [:]  // Header only or empty
-
-        def header = parseCsvLine(lines[0])
-        def patientIdx = header.findIndexOf { it == 'patient_id' }
-        def channelsIdx = header.findIndexOf { it == 'channels' }
-        def imageIdx = header.findIndexOf { it == imageColumn }
-        if (patientIdx == -1 || channelsIdx == -1 || imageIdx == -1) return [:]
-
-        // WHICH slide is the reference is resolved by resolveReferenceRows, not decided
-        // here. This method used to promote rows[0] itself, which is how it came to
-        // disagree with registration.nf's arrival-order pick -- see that method's
-        // docblock. Asking the one resolver makes agreement structural rather than a
-        // convention two files had to keep by eye.
-        def referenceImage = resolveReferenceRows(csvPath, imageColumn, autoReference)
-
-        def kept = [:].withDefault { new HashSet<String>() }
-        lines.drop(1).each { line ->
-            def cols = parseCsvLine(line)
-            if (cols.size() <= Math.max(patientIdx, Math.max(channelsIdx, imageIdx))) return
-            def patientId = cols[patientIdx].trim()
-            if (!patientId) return  // ignore blank patient_id cells
-            // The reference keeps its nuclear channel in the split output; every other
-            // slide drops it. A patient absent from referenceImage (add_cycle's
-            // by-design zero-reference sheet) has no row matching null, so every row
-            // is treated as non-reference -- the pre-existing behaviour.
-            def isRef = referenceImage[patientId] != null &&
-                        referenceImage[patientId] == cols[imageIdx].trim()
-            def channels = cols[channelsIdx].split('\\|')*.trim().findAll { it }
-            kept[patientId].addAll(MarkerUtils.splitOutputChannels(channels, isRef, nuclearMarkers)*.toUpperCase())
+        // Every guard the old body carried inline -- missing file, header-only sheet,
+        // absent patient_id/channels/<imageColumn> column -- now lives in the resolver,
+        // which returns an empty map in each case. Reference resolution likewise: it
+        // asks resolveReferenceRows, so this method and SPLIT_CHANNELS cannot disagree
+        // about which slide is the reference.
+        //
+        // Derived from resolveKeptChannelsPerSlide, which IS the rule SPLIT_CHANNELS
+        // applies (it emits exactly meta.keep_channels). Summing the per-slide list
+        // sizes is safe precisely because that resolver claims each marker name once
+        // per patient: the sum therefore equals BOTH the number of TIFFs emitted (what
+        // groupTiffsByPatient's groupKey needs, since it has no .unique) and the number
+        // of distinct names (what quantify_markers.nf's grouping needs, since it
+        // .unique()s on [patient_id, marker] first). This used to union upper-cased
+        // names into a HashSet, which gave the distinct-name count but NOT the file
+        // count -- correct only while no two slides could emit the same marker.
+        def kept = resolveKeptChannelsPerSlide(csvPath, imageColumn, nuclearMarkers, autoReference)
+        return kept.collectEntries { patientId, perSlide ->
+            [patientId, (perSlide.values().sum { it.size() } ?: 0)]
         }
-
-        return kept.collectEntries { patientId, markers -> [patientId, markers.size()] }
     }
 
     /**
