@@ -424,6 +424,103 @@ class CsvUtils {
         return channelSets.collectEntries { k, v -> [k, v.size()] }
     }
 
+    /**
+     * How many rows in each patient share a source-image stem. Meta.identityFor
+     * consults this to decide whether a stem needs disambiguating -- so an id
+     * only changes shape where it would otherwise collide, and every existing
+     * non-colliding output filename is preserved byte-for-byte.
+     *
+     * The stem rule here MUST match Meta.identityFor's exactly -- both key on
+     * "patientId::stem" -- or this map's counts land on a different stem than
+     * identityFor is asking about and every lookup silently misses (n treated
+     * as 1, no disambiguation, the exact collision this exists to catch).
+     * identityFor strips EVERY extension (RULING R2, verified against this
+     * repo's pinned Nextflow: `file('slide.ome.tiff').simpleName == 'slide'`,
+     * not 'slide.ome') -- i.e. from the FIRST '.', not the last -- so this
+     * strips the same way rather than a single-extension `.replaceFirst`.
+     *
+     * @param csvPath     path to the samplesheet
+     * @param imageColumn the column holding this step's entry image
+     */
+    static Map<String, Integer> stemCountsPerPatient(String csvPath, String imageColumn) {
+        def file = new File(csvPath)
+        if (!file.exists()) return [:]
+
+        def lines = readCsvLines(file.path)
+        if (lines.size() < 2) return [:]
+
+        def header = parseCsvLine(lines[0])
+        def patientIdx = header.findIndexOf { it == 'patient_id' }
+        def imageIdx   = header.findIndexOf { it == imageColumn }
+        if (patientIdx == -1 || imageIdx == -1) return [:]
+
+        def counts = [:].withDefault { 0 }
+        lines.drop(1).each { line ->
+            def cols = parseCsvLine(line)
+            if (cols.size() <= Math.max(patientIdx, imageIdx)) return
+            def patientId = cols[patientIdx].trim()
+            if (!patientId) return  // ignore blank patient_id cells
+            def rawImage = cols[imageIdx].trim()
+            if (!rawImage) return
+            counts["${patientId}::${stemOf(rawImage)}".toString()]++
+        }
+        return counts
+    }
+
+    /**
+     * 0-based index of each row within its patient's rows, IN SAMPLESHEET
+     * ORDER -- keyed on "patientId::rawImageCell" (the same raw `<imageColumn>`
+     * cell resolveReferenceRows/resolveKeptChannelsPerSlide key on), so a
+     * caller building meta from a `splitCsv` row can look its own index up by
+     * value rather than counting channel arrivals. Row order in a `.splitCsv()`
+     * channel is not guaranteed to survive every future operator inserted
+     * upstream of the `.map` that builds meta, so identity must not depend on
+     * it -- resume caching requires the index to be a pure function of the
+     * samplesheet's own row order, never of arrival order.
+     *
+     * @param csvPath     path to the samplesheet
+     * @param imageColumn the column holding this step's entry image
+     */
+    static Map<String, Integer> rowIndexPerPatient(String csvPath, String imageColumn) {
+        def file = new File(csvPath)
+        if (!file.exists()) return [:]
+
+        def lines = readCsvLines(file.path)
+        if (lines.size() < 2) return [:]
+
+        def header = parseCsvLine(lines[0])
+        def patientIdx = header.findIndexOf { it == 'patient_id' }
+        def imageIdx   = header.findIndexOf { it == imageColumn }
+        if (patientIdx == -1 || imageIdx == -1) return [:]
+
+        def nextIndex = [:].withDefault { 0 }
+        def result = [:]
+        lines.drop(1).each { line ->
+            def cols = parseCsvLine(line)
+            if (cols.size() <= Math.max(patientIdx, imageIdx)) return
+            def patientId = cols[patientIdx].trim()
+            if (!patientId) return  // ignore blank patient_id cells
+            def rawImage = cols[imageIdx].trim()
+            def key = "${patientId}::${rawImage}".toString()
+            result[key] = nextIndex[patientId]
+            nextIndex[patientId] = nextIndex[patientId] + 1
+        }
+        return result
+    }
+
+    /**
+     * The stem lib/Meta.groovy's identityFor derives an id from: everything
+     * before the FIRST '.' in the filename. Kept as one private helper so
+     * stemCountsPerPatient can never drift from identityFor's own inline copy
+     * of this rule (Meta stays parameterless-static and cannot call back into
+     * CsvUtils without inverting the module's dependency direction).
+     */
+    private static String stemOf(String rawImage) {
+        def name = new File(rawImage.toString()).name
+        def dot  = name.indexOf('.')
+        return dot >= 0 ? name.substring(0, dot) : name
+    }
+
     static Map validateMetadata(Map meta, def nuclearMarkers, String context = 'unknown') {
 
         if (!meta.patient_id)

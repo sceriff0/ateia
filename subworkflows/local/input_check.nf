@@ -54,93 +54,71 @@ workflow INPUT_CHECK {
     // channel_counts' source.
     def declared_channel_counts = CsvUtils.countDeclaredChannelsPerPatient(samplesheet)
 
+    // Meta.identityFor's collision inputs. stem_counts is how it learns that two rows
+    // of one patient would otherwise be assigned the SAME id -- the ordinary cyclic-IF
+    // layout, cycle1/slide.ome.tiff + cycle2/slide.ome.tiff, both give the stem "slide".
+    // row_index_by_key is what disambiguates them, and is computed from the SAMPLESHEET
+    // itself, in samplesheet order -- never from channel arrival order below, which
+    // `groupTuple` downstream is free to reorder and which resume caching cannot depend
+    // on. Both are keyed the same way resolveKeptChannelsPerSlide already keys its map:
+    // "patientId::rawImageCell" / row-scoped on that same raw cell -- never a basename.
+    def stem_counts       = CsvUtils.stemCountsPerPatient(samplesheet, image_column)
+    def row_index_by_key  = CsvUtils.rowIndexPerPatient(samplesheet, image_column)
+
+    // Everything Meta.fromSamplesheetRow needs, pre-computed ONCE for the whole sheet
+    // before any row is built -- ctx.channelsCount/imagesCount/stemCounts all throw on
+    // a missing patient (see lib/Meta.groovy), so a partial ctx fails loudly here rather
+    // than defaulting silently downstream.
+    def meta_ctx = [
+        keepChannelsBySlide: keep_channels_by_slide,
+        imagesCount        : patient_counts,
+        channelsCount      : channel_counts,
+        stemCounts         : stem_counts,
+    ]
+
     ch_samples = Channel
         .fromPath(samplesheet, checkIfExists: true)
         .splitCsv(header: true)
         .map { row ->
-            def meta = CsvUtils.parseMetadata(row, params.nuclear_markers, "CSV ${samplesheet}")
+            def raw_image  = row[image_column]?.toString()?.trim()
+            def patient_id = row.patient_id?.toString()?.trim()
+            def row_index  = row_index_by_key["${patient_id}::${raw_image}".toString()] ?: 0
+
+            def meta = Meta.fromSamplesheetRow(row, image_column, row_index, meta_ctx)
+
             // Overwrite the row's declared is_reference with the RESOLVED one. For a
             // sheet that declares a reference these agree by construction (rule 1 of
             // resolveReferenceRows returns that very row); they differ only where the
             // sheet declares none and auto-promotion applies, which is exactly the case
             // that must not be left to a downstream guess. A patient with no resolvable
             // reference (add_cycle's by-design zero-reference sheet) matches nothing and
-            // keeps every row false.
-            def raw_image = row[image_column]?.toString()?.trim()
-            meta.is_reference = reference_image[meta.patient_id] != null &&
-                                reference_image[meta.patient_id] == raw_image
-            // The slide's exact emit-set, looked up HERE and nowhere else, because THIS
-            // is where the raw `<image_column>` cell is in scope. resolveKeptChannelsPerSlide
-            // keys its inner map on that same raw cell, and meta.is_reference two lines up
-            // compares against it too, so the three cannot key differently. It used to be
-            // injected by a separate .map further down, keyed on `f.name` -- the staged
-            // FILE's basename, which is not the samplesheet cell.
-            //
-            // ABSENT vs EMPTY, and never `?:`. Groovy treats [] as falsy, so `?:` cannot
-            // tell "this slide emits nothing" (a legitimate answer -- every channel it
-            // declares was already claimed by an earlier slide of this patient) from "no
-            // entry for this slide" (fall back to the declared list). It resolved the
-            // first to the slide's ENTIRE declared list while countChannelsPerPatient had
-            // counted it as contributing ZERO, so a marker NAME was emitted twice for one
-            // patient -- the one thing the keep-set invariant forbids -- and the
-            // `.unique()` calls downstream then kept whichever copy ARRIVED first.
-            def per_slide = keep_channels_by_slide[meta.patient_id]
-            meta.keep_channels = per_slide?.containsKey(raw_image) ? per_slide[raw_image]
-                                                                  : meta.channels
-            // Per-image unique id (patient_id + source-image stem). Drives output
-            // file naming so a patient's multiple images do not produce identically
-            // named files that collide when collected downstream (QC, registration).
-            def stem = file(row[image_column]).simpleName
-            meta.id = stem.startsWith(meta.patient_id) ? stem : "${meta.patient_id}_${stem}"
+            // keeps every row false. `+`, never direct mutation of a field Meta already
+            // set -- see subworkflows/local/adapters/valis_adapter.nf's toSorted() note
+            // for why meta.channels stays a shared List reference across derived metas.
+            meta = meta + [is_reference: reference_image[meta.patient_id] != null &&
+                                          reference_image[meta.patient_id] == raw_image]
+
             return tuple(meta, file(row[image_column]))
         }
 
-    // Add images_count to meta for streaming groupTuple
-    if (patient_counts) {
-        ch_image_counts = Channel.fromList(patient_counts.collect { k, v -> [k, v] })
-        ch_samples = ch_samples
-            .map { meta, f -> [meta.patient_id, meta, f] }
-            .combine(ch_image_counts, by: 0)
-            .map { _patient_id, meta, f, count ->
-                // `+` creates a new top-level map, but Groovy's Map.plus() is
-                // cloneSimilarMap(left).putAll(right) -- clone-then-putAll,
-                // operationally identical to clone(). meta.channels is still
-                // the same List reference as in the original meta. See
-                // subworkflows/local/adapters/valis_adapter.nf:82-88 for why
-                // that matters and why toSorted() (not sort()) is mandatory
-                // wherever meta.channels is read.
-                [meta + [images_count: count], f]
-            }
-    }
-
-    // Add channels_count to meta for streaming groupTuple in postprocessing
-    if (channel_counts) {
-        ch_marker_counts = Channel.fromList(channel_counts.collect { k, v -> [k, v] })
-        ch_samples = ch_samples
-            .map { meta, f -> [meta.patient_id, meta, f] }
-            .combine(ch_marker_counts, by: 0)
-            .map { _patient_id, meta, f, count ->
-                // See the Map.plus() note above.
-                [meta + [channels_count: count], f]
-            }
-    }
-
-    // Fail-fast guard: `.combine(by: 0)` above is an INNER join keyed on
-    // patient_id. If a row's patient_id does not exactly match a key in the
-    // pre-computed counts map (e.g. stray whitespace CsvUtils.parseMetadata
-    // failed to trim), the row is silently dropped with no warning or error —
-    // that is the exact mechanism of the samplesheet-row-drop bug this guard
-    // closes. Compare what actually reaches the channel against the
-    // independently-computed per-patient image total and error loudly (not
-    // log.warn) on any shortfall, naming the totals so the cause is obvious.
+    // Fail-fast guard: independently compare what actually reached the channel against
+    // the per-patient image total CsvUtils.countImagesPerPatient computed from the same
+    // sheet, and error loudly (not log.warn) on any shortfall, naming the totals so the
+    // cause is obvious. This used to be the only defense against a row silently vanishing
+    // through a `.combine(by: 0)` inner join keyed on patient_id (removed above: every
+    // row's id/counts now come from ONE Meta.fromSamplesheetRow call per row, with no
+    // join to mis-key). Meta.fromSamplesheetRow's own ctx checks (lib/Meta.groovy) throw
+    // synchronously on a patient absent from channelsCount/imagesCount, so that specific
+    // failure mode is now unreachable too -- this guard is kept as a second, independent
+    // check against any other cause of row loss (e.g. a malformed CSV line `splitCsv`
+    // silently skips).
     if (patient_counts) {
         def expected_count = patient_counts.values().sum() ?: 0
         ch_samples.count().subscribe { emitted ->
             if (emitted < expected_count) {
-                error "INPUT_CHECK(${samplesheet}): ${expected_count - emitted} row(s) were silently dropped " +
-                      "joining on patient_id (expected ${expected_count} row(s), got ${emitted}). This means a " +
-                      "row's patient_id does not exactly match the value used to pre-compute per-patient counts " +
-                      "(e.g. leading/trailing whitespace) so the inner-join combine(by: 0) discarded it."
+                error "INPUT_CHECK(${samplesheet}): ${expected_count - emitted} row(s) did not reach the " +
+                      "sample channel (expected ${expected_count} row(s), got ${emitted}). Check the sheet " +
+                      "for malformed or unparseable rows."
             }
         }
     }

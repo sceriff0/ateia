@@ -138,6 +138,39 @@ nextflow_workflow {
         }
     }
 
+    test("cycle1/slide.ome.tiff and cycle2/slide.ome.tiff get distinct meta.id") {
+        tag "stub"
+
+        // duplicate_basename.csv: the ORDINARY cyclic-IF layout -- one directory per
+        // cycle, both cycles sharing the basename "slide.ome.tiff". file(...).simpleName
+        // ("slide") collided for both rows, so both recorded the same path in
+        // preprocessed.csv and the run aborted AFTER the corrupt manifest was written.
+        when {
+            workflow {
+                """
+                input[0] = "$projectDir/tests/testdata/duplicate_basename.csv"
+                input[1] = 'path_to_file'
+                input[2] = false
+                """
+            }
+            params {
+                outdir = "$outputDir"
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.out.samples.size() == 2 },
+                { assert workflow.out.samples.collect { it[0].id }.unique().size() == 2 },
+                // Disambiguated with the row's samplesheet-order index, not left as the
+                // bare colliding stem.
+                { assert workflow.out.samples.collect { it[0].id }.toSorted() ==
+                        ['P001_slide_000', 'P001_slide_001'] }
+            )
+        }
+    }
+
     test("auto_reference widens the channel count when no row is the reference") {
         tag "stub"
 
