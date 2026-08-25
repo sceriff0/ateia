@@ -14,10 +14,13 @@ import json
 import re
 from pathlib import Path
 
+from tests.nfmodel import processes, strip_comments
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 IMAGES_JSON = REPO_ROOT / "containers" / "images.json"
 CONTAINERS = REPO_ROOT / "containers"
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "build-images.yml"
+LIB_DIR = REPO_ROOT / "lib"
 
 # VALIS is deliberately not built here: the pipeline pulls the maintained upstream
 # image cdgatenbee/valis-wsi:1.0.0 rather than re-hosting its from-source libvips
@@ -75,27 +78,91 @@ def test_workflow_reads_the_json_rather_than_repeating_it():
         "single source and a second copy will drift")
 
 
+# A `container` directive, in either of the two forms this repo actually uses:
+# the Nextflow process directive (`container 'x'`, no colon) and a Groovy map
+# entry (`container : 'x'`, as in lib/SegBackends.groovy and lib/WarpBackends.groovy
+# -- see _referenced_tags()). `\s*:?\s*` covers both without a separate branch.
+# "containerOptions" is not matched: the character right after "container" must be
+# whitespace, ':', or a quote, and 'O' is none of those.
+_CONTAINER_DIRECTIVE_RE = re.compile(r"container\s*:?\s*[\"']([^\"']+)[\"']")
+
+# First-party images are one Docker Hub repository per component --
+# bolt3x/mirage-<component>:<version> -- since the containers/ rename
+# (see tests/test_container_image_naming.py's header). Only the component name
+# is captured; the version segment is deliberately ignored here, because it is
+# sometimes a literal (1.0.0) and sometimes a params interpolation
+# (${params.segeval_tag}, modules/local/merge_seg_eval.nf), and either way the
+# component is the only part that must agree with containers/images.json.
+_MIRAGE_COMPONENT_RE = re.compile(r"^bolt3x/mirage-([a-z0-9]+(?:-[a-z0-9]+)*):")
+
+
+def _referenced_tags() -> set:
+    """First-party mirage component names every process actually pulls.
+
+    Registry-agnostic on purpose: the previous version of this scan hardcoded
+    the string `attend_image_analysis:`, and when the images were renamed to
+    bolt3x/mirage-* it silently matched nothing (referenced == set(), every
+    assertion over it vacuously true). This one recognizes bolt3x/mirage-*
+    by the naming convention the rename actually produced, not by grepping a
+    string that happened to be true on one day.
+
+    Two sources are scanned, not one. `modules/local/*.nf`'s literal
+    `container "..."` directives cover most processes, but SEGMENT and
+    WARP_SEG_QC resolve their container through a closure --
+    `container { SegBackends.container(params.seg_method) }` and
+    `container { WarpBackends.container(method) }` -- so the image name never
+    appears as a literal string in modules/local/ at all; it lives in
+    lib/SegBackends.groovy's and lib/WarpBackends.groovy's per-backend maps.
+    Scanning modules/local/ alone would silently miss stardist/instanseg/cellsam
+    entirely, and would find `tiled` only by accident (five other, unrelated
+    modules happen to reference it directly too).
+
+    Both sources run through `strip_comments` (nfmodel's view that blanks
+    comments but keeps string literals intact) rather than
+    `strip_comments_and_strings`: a container reference lives INSIDE a string
+    literal, and the "and_strings" view blanks exactly that.
+    """
+    referenced: set = set()
+
+    def _scan(text: str) -> None:
+        for m in _CONTAINER_DIRECTIVE_RE.finditer(strip_comments(text)):
+            cm = _MIRAGE_COMPONENT_RE.match(m.group(1))
+            if cm:
+                referenced.add(cm.group(1))
+
+    for proc in processes().values():
+        _scan(proc.raw_body)
+    for groovy in sorted(LIB_DIR.glob("*.groovy")):
+        _scan(groovy.read_text())
+    return referenced
+
+
+def test_the_reference_scan_is_not_vacuous():
+    """This guard once grepped for `attend_image_analysis:`, a string the
+    container rename removed. `referenced` became the empty set and every
+    assertion over it passed while checking nothing. A guard that cannot fail
+    is not a guard."""
+    referenced = _referenced_tags()
+    assert referenced, (
+        "no container tags were extracted from modules/local/ or lib/ -- the "
+        "extractor is stale, not the repo"
+    )
+
+
 def test_modules_pull_only_tags_the_matrix_publishes():
-    """Every bolt3x/attend_image_analysis:<tag> a module pulls must be a tag this
-    workflow actually builds -- otherwise the pipeline references an image nothing
-    publishes, which is exactly how :tiled shipped broken."""
-    published = {e["tag"] for e in _entries()}
-    # Tags supplied by a param default rather than a literal are resolved from
-    # nextflow.config, which is where the pipeline's own default lives.
-    cfg = (REPO_ROOT / "nextflow.config").read_text()
-    referenced: set[str] = set()
-    for nf in (REPO_ROOT / "modules" / "local").glob("*.nf"):
-        for m in re.finditer(r"attend_image_analysis:\$\{params\.(\w+)\}|"
-                             r"attend_image_analysis:([\w.\-]+)", nf.read_text()):
-            param, literal = m.group(1), m.group(2)
-            if literal:
-                referenced.add(literal)
-            else:
-                dm = re.search(rf"^\s*{param}\s*=\s*'([^']+)'", cfg, re.M)
-                if dm:
-                    referenced.add(dm.group(1))
+    """Every bolt3x/mirage-<component> a module pulls must be a component this
+    workflow actually builds -- otherwise the pipeline references an image
+    nothing publishes, which is exactly how :tiled shipped broken."""
+    # `dir` is the field that actually appears in the image name
+    # (bolt3x/mirage-<dir>); images.json's `tag` field happens to equal it for
+    # every current entry but is a separate, vestigial field checked for its
+    # own uniqueness by test_tags_are_unique_and_descriptive -- see that test's
+    # docstring. Comparing against `dir` is correct even if the two ever
+    # diverge.
+    published = {e["dir"] for e in _entries()}
+    referenced = _referenced_tags()
     unknown = sorted(referenced - published)
     assert not unknown, (
-        f"modules pull tag(s) this workflow never builds: {unknown}. Either add a "
-        f"build context + images.json entry, or fix the tag. Published: "
-        f"{sorted(published)}")
+        f"modules/lib pull component(s) this workflow never builds: {unknown}. "
+        f"Either add a build context + images.json entry, or fix the reference. "
+        f"Published: {sorted(published)}")
