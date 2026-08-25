@@ -82,19 +82,62 @@ class Meta {
      *
      * @param row  the checkpoint CSV row, already split on the checkpoint's
      *             column list (see lib/Checkpoint.groovy, which owns that list)
-     * @param step which checkpoint this row came from. Not yet load-bearing: no
-     *             checkpoint schema today carries an `id` column (see
-     *             Checkpoint.STEPS), so callers currently supply `row.id`
-     *             however Tasks 4.2-4.5 choose to carry it forward. Kept as a
-     *             required, non-blank argument so a caller cannot silently omit
-     *             it, and so a future step-conditional rule has somewhere to
-     *             live without changing this method's signature.
+     * @param step which checkpoint this row came from, e.g. `'preprocessed'` --
+     *             one of lib/Checkpoint.groovy's STEPS names. Validated against
+     *             THAT schema (read from Checkpoint, never restated here): a row
+     *             claiming to be from a step whose schema doesn't carry
+     *             `is_reference`/`channels` must not silently produce a
+     *             plausible-looking `is_reference=false` / `channels=[]` instead
+     *             of an error.
      * @param ctx  same shape as fromSamplesheetRow's ctx.
      */
     static Map fromCheckpointRow(Map row, String step, Map ctx) {
         if (!step?.toString()?.trim())
             throw new IllegalArgumentException("Meta.fromCheckpointRow: 'step' must not be blank")
+
+        // The single owner of "what is in a checkpoint CSV?" is lib/Checkpoint.groovy
+        // (Checkpoint.STEPS). Reading the column list from there -- rather than a
+        // second hardcoded list here -- is what stops this method's idea of the
+        // schema from drifting away from Checkpoint's. An unknown step name throws
+        // Checkpoint.UnknownStepException, which extends IllegalArgumentException.
+        def schemaColumns = Checkpoint.columns(step)
+
         requirePresentInRow(row, 'patient_id')
+
+        // Validate against the SCHEMA THIS STEP ACTUALLY DECLARES TODAY (3 of the 4
+        // Checkpoint.STEPS carry is_reference/channels; 'postprocessed' carries
+        // neither). Checked BEFORE the id gate below on purpose: these two are
+        // per-row problems with the caller's data (fixable by the caller, on this
+        // row), whereas the id gate is a systemic schema gap no caller can fix by
+        // editing a row -- surfacing the specific, actionable error first is more
+        // useful than burying it behind the universal one.
+        if (schemaColumns.contains('is_reference'))
+            requirePresentInRow(row, 'is_reference')
+        if (schemaColumns.contains('channels'))
+            requirePresentInRow(row, 'channels')
+
+        // RULING R17 (schema change lands in Task 4.3): every checkpoint schema
+        // will gain an `id` column, because identity assigned at samplesheet-read
+        // time cannot be re-derived from a checkpoint file -- the file a checkpoint
+        // names is a DERIVED artifact with a different basename than the
+        // samplesheet input that produced it (`preprocessed_image` is e.g.
+        // `P001_slide_corrected.ome.tiff`; a `postprocessed` row names a pyramid).
+        // Until the column exists, NO checkpoint of any step can carry identity
+        // forward correctly, so this throws unconditionally -- it must NOT trust
+        // whatever a caller happened to stuff into row.id in the meantime, because
+        // that is exactly the re-derive-and-diverge failure this class exists to
+        // prevent. Once Task 4.3 adds the column, schemaColumns.contains('id')
+        // becomes true and this branch stops firing; requirePresentInRow(row, 'id')
+        // below then does the real per-row check. Today, every call that clears the
+        // per-row checks above still stops here -- that is intentional (R17):
+        // fromCheckpointRow cannot correctly finish a meta for ANY step until 4.3.
+        if (!schemaColumns.contains('id'))
+            throw new IllegalStateException(
+                "Meta.fromCheckpointRow('${step}'): the '${step}' checkpoint schema does not " +
+                "carry an id column yet (see lib/Checkpoint.groovy STEPS). This checkpoint " +
+                "predates identity tracking -- re-run the step that WROTE this checkpoint once " +
+                "the id column has been added there, so the regenerated file records identity " +
+                "instead of forcing it to be re-derived from a filename.")
         requirePresentInRow(row, 'id')
 
         def meta = [
@@ -166,15 +209,46 @@ class Meta {
         // distinct channel names AND the number of emitted files. One consumer
         // .unique()s the list and one does not, so any divergence desynchronises
         // a streaming groupTuple(size:) and the run hangs or mis-groups.
-        def declaredChannelsCount = (ctx?.channelsCount ?: [:] as Map)[meta.patient_id]
-        meta.channels_count = declaredChannelsCount != null
-            ? declaredChannelsCount as int
-            : meta.keep_channels.size()
+        //
+        // This is a per-PATIENT total (CsvUtils.countChannelsPerPatient sums
+        // keep_channels sizes ACROSS a patient's slides), so it cannot be derived
+        // from this one row/slide alone -- it can only come from ctx.channelsCount,
+        // which every caller is required to pre-compute up front for the WHOLE
+        // sheet/checkpoint before calling Meta (exactly as it already must for
+        // ctx.imagesCount). There is deliberately NO fallback to
+        // meta.keep_channels.size() (a per-SLIDE count) and no opt-out for a
+        // caller with "nothing to give": channels_count feeds groupKey(patient_id,
+        // channels_count) (subworkflows/local/quantify_markers.nf), and a count
+        // that is too low does not raise there -- it makes the group emit early
+        // with missing members, or never emit and hang, far from this call site.
+        // A caller that cannot supply a real per-patient count has a bug to fix
+        // (compute one), not a case this method should paper over.
+        meta.channels_count = requireChannelsCountFor(ctx, meta.patient_id)
 
         meta.images_count = ((ctx?.imagesCount ?: [:] as Map)[meta.patient_id] ?: 1) as int
 
         requireComplete(meta)
         return meta
+    }
+
+    /**
+     * ctx.channelsCount must carry a per-patient entry -- see finish()'s comment
+     * for why there is no fallback. Uses containsKey, not a truthy/`?:` check, so
+     * a patient that GENUINELY has channels_count == 0 (an explicit zero, e.g.
+     * every declared channel already claimed elsewhere) is distinguished from a
+     * patient with no entry at all -- the same ABSENT-vs-EMPTY distinction
+     * keep_channels above already has to make.
+     */
+    private static int requireChannelsCountFor(Map ctx, String patientId) {
+        def channelsCount = ctx?.channelsCount
+        if (!(channelsCount instanceof Map) || !channelsCount.containsKey(patientId))
+            throw new IllegalArgumentException(
+                "Meta: ctx.channelsCount has no entry for patient '${patientId}'. Every caller " +
+                "must pre-compute a per-patient channels_count (CsvUtils.countChannelsPerPatient " +
+                "is the samplesheet-path example) covering every patient before calling Meta. " +
+                "There is no fallback: a silently-too-low count desynchronises a streaming " +
+                "groupTuple(size:)/groupKey downstream, which hangs or mis-groups far from here.")
+        return channelsCount[patientId] as int
     }
 
     private static List<String> splitChannels(def raw) {

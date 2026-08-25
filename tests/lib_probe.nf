@@ -653,29 +653,107 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
     // falls back to its declared channels; a slide with an EXPLICIT empty list
     // (every marker already claimed by an earlier slide) keeps [], not the
     // declared list -- `?:` cannot tell these apart because [] is falsy in Groovy.
-    def emptyKeepCtx = [keepChannelsBySlide: [P1: ['img2.ome.tiff': []]]]
+    // Both ctx maps below must also carry channelsCount now (fix round 1: there is
+    // no more per-slide fallback -- see the channels_count-missing block further
+    // down).
+    def emptyKeepCtx = [keepChannelsBySlide: [P1: ['img2.ome.tiff': []]], channelsCount: [P1: 0]]
     def emptyKeepRow = [patient_id: 'P1', image: 'img2.ome.tiff', channels: 'DAPI|CD3', is_reference: 'false']
     def emptyKeepMeta = Meta.fromSamplesheetRow(emptyKeepRow, 'image', 0, emptyKeepCtx)
     assert emptyKeepMeta.keep_channels == []
     assert emptyKeepMeta.channels_count == 0
-    def absentKeepCtx = [keepChannelsBySlide: [P1: [:]]]
+    def absentKeepCtx = [keepChannelsBySlide: [P1: [:]], channelsCount: [P1: 2]]
     def absentKeepMeta = Meta.fromSamplesheetRow(emptyKeepRow, 'image', 0, absentKeepCtx)
     assert absentKeepMeta.keep_channels == ['DAPI', 'CD3']
 
-    // fromCheckpointRow: SAME key set as fromSamplesheetRow, id taken verbatim
-    // from the checkpoint row rather than re-derived from a filename.
-    def ckCtx = [
-        keepChannelsBySlide: [P1: [P1_slide: ['CD3']]],
-        imagesCount        : [P1: 1],
-        channelsCount      : [P1: 3],
-    ]
-    def ckRow  = [patient_id: 'P1', id: 'P1_slide', is_reference: 'false', channels: 'DAPI|CD3|CELLTOX']
-    def ckMeta = Meta.fromCheckpointRow(ckRow, 'preprocessed', ckCtx)
-    assert ckMeta.keySet() == ssMeta.keySet()
-    assert ckMeta.id             == 'P1_slide'
-    assert ckMeta.is_reference   == false
-    assert ckMeta.keep_channels  == ['CD3']
-    assert ckMeta.channels_count == 3
+    // ---- Fix round 1, item 1: channels_count has NO fallback -----------------
+    //
+    // finish() used to fall back to meta.keep_channels.size() (a per-SLIDE count)
+    // when ctx.channelsCount had no entry for the patient. That silently produced
+    // a too-low count for any multi-slide patient, and a too-low channels_count
+    // feeds groupKey(patient_id, channels_count) -- the group then emits early
+    // with missing members, or never emits, far from this call site. There is now
+    // no fallback and no opt-out: every caller must pre-compute a real per-patient
+    // total (see finish()'s comment for why no legitimate caller lacks one).
+    def noCountRow = [patient_id: 'P1', image: 'img3.ome.tiff', channels: 'DAPI|CD3', is_reference: 'false']
+
+    // Trigger: ctx carries no channelsCount key at all.
+    def missingChannelsCountKey = false
+    try { Meta.fromSamplesheetRow(noCountRow, 'image', 0, [:]) }
+    catch (IllegalArgumentException ignored) { missingChannelsCountKey = true }
+    assert missingChannelsCountKey, 'Meta.fromSamplesheetRow must reject ctx with no channelsCount map at all'
+
+    // Trigger: ctx.channelsCount is populated, but not for THIS patient (the
+    // "computed the map, forgot one patient" case -- the one the review named).
+    def missingChannelsCountForPatient = false
+    try { Meta.fromSamplesheetRow(noCountRow, 'image', 0, [channelsCount: [P2: 9]]) }
+    catch (IllegalArgumentException ignored) { missingChannelsCountForPatient = true }
+    assert missingChannelsCountForPatient, 'Meta.fromSamplesheetRow must reject ctx.channelsCount missing THIS patient'
+
+    // Satisfy: supply the entry, watch it pass.
+    def satisfiedMeta = Meta.fromSamplesheetRow(noCountRow, 'image', 0, [channelsCount: [P1: 2]])
+    assert satisfiedMeta.channels_count == 2
+
+    // A GENUINE zero is not "missing": containsKey, not a truthy/`?:` check, is
+    // what tells these apart -- the same distinction keep_channels' ABSENT-vs-EMPTY
+    // rule already has to make.
+    def zeroCountMeta = Meta.fromSamplesheetRow(noCountRow, 'image', 0, [channelsCount: [P1: 0]])
+    assert zeroCountMeta.channels_count == 0
+
+    // ---- Fix round 1, item 2: fromCheckpointRow validates against the SCHEMA --
+    //
+    // lib/Checkpoint.groovy owns the column list per step; fromCheckpointRow now
+    // reads it from there instead of trusting whatever the row happens to carry.
+    // RULING R17 (lands in Task 4.3) also means EVERY step throws today, because
+    // no Checkpoint.STEPS schema carries `id` yet -- so none of these calls can
+    // reach a successful return right now. That is intentional (see Meta.groovy's
+    // comment on the id gate), so "trigger it, satisfy it, watch it pass" is only
+    // fully exercisable for the per-row is_reference/channels checks below: fixing
+    // one of those moves the failure on to the NEXT declared check (ultimately the
+    // id gate), never all the way through to a returned meta, until 4.3 lands.
+
+    // 'preprocessed' declares is_reference AND channels (Checkpoint.columns).
+    // Missing is_reference is caught BEFORE channels is even inspected.
+    def missingIsReference = false
+    try { Meta.fromCheckpointRow([patient_id: 'P1', channels: 'DAPI'], 'preprocessed', [:]) }
+    catch (IllegalArgumentException ignored) { missingIsReference = true }
+    assert missingIsReference, "Meta.fromCheckpointRow must reject a 'preprocessed' row with no is_reference"
+
+    // Satisfy is_reference -- the failure moves to the id gate (IllegalStateException),
+    // NOT a success, because 'preprocessed' still has no id column today.
+    def afterIsReferenceFixed = null
+    try { Meta.fromCheckpointRow([patient_id: 'P1', is_reference: 'true', channels: 'DAPI'], 'preprocessed', [:]) }
+    catch (IllegalStateException e) { afterIsReferenceFixed = e.message }
+    assert afterIsReferenceFixed?.contains('does not carry an id column'),
+        'fixing is_reference on a preprocessed row must move the failure on to the id gate'
+
+    // Missing channels specifically (is_reference present) on the same schema.
+    def missingChannelsCol = false
+    try { Meta.fromCheckpointRow([patient_id: 'P1', is_reference: 'true'], 'preprocessed', [:]) }
+    catch (IllegalArgumentException ignored) { missingChannelsCol = true }
+    assert missingChannelsCol, "Meta.fromCheckpointRow must reject a 'preprocessed' row with no channels"
+
+    // 'postprocessed' declares NEITHER is_reference NOR channels (Checkpoint.columns).
+    // A row missing both must NOT be rejected for those -- it must fall straight
+    // through to the (also-today-universal) id gate, proving the schema-conditional
+    // checks are actually schema-conditional and not just always-on.
+    def postprocessedFailure = null
+    try { Meta.fromCheckpointRow([patient_id: 'P1'], 'postprocessed', [:]) }
+    catch (IllegalStateException e) { postprocessedFailure = e.message }
+    assert postprocessedFailure?.contains('does not carry an id column'),
+        "a 'postprocessed' row with no is_reference/channels must fail on the id gate, not on those fields"
+
+    // The id gate itself, on a fully per-row-valid 'preprocessed' row: trigger only
+    // (cannot be satisfied until Task 4.3 adds the column).
+    def idGateFailure = null
+    try { Meta.fromCheckpointRow([patient_id: 'P1', is_reference: 'true', channels: 'DAPI'], 'preprocessed', [channelsCount: [P1: 1]]) }
+    catch (IllegalStateException e) { idGateFailure = e.message }
+    assert idGateFailure?.contains("'preprocessed' checkpoint schema does not carry an id column")
+
+    // An unknown step name is rejected via Checkpoint.columns, not silently accepted.
+    def unknownStep = false
+    try { Meta.fromCheckpointRow([patient_id: 'P1'], 'not_a_real_step', [:]) }
+    catch (IllegalArgumentException ignored) { unknownStep = true }
+    assert unknownStep, 'Meta.fromCheckpointRow must reject an unknown step name'
 
     // Fail loudly, naming the missing key, rather than defaulting.
     def missingPatientId = false
@@ -692,11 +770,6 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
     try { Meta.fromCheckpointRow([patient_id: 'P1', id: 'x'], '  ', [:]) }
     catch (IllegalArgumentException ignored) { blankStep = true }
     assert blankStep, 'Meta.fromCheckpointRow must reject a blank step'
-
-    def missingId = false
-    try { Meta.fromCheckpointRow([patient_id: 'P1'], 'preprocessed', [:]) }
-    catch (IllegalArgumentException ignored) { missingId = true }
-    assert missingId, 'Meta.fromCheckpointRow must reject a checkpoint row with no id'
 
     // println, NOT log.info: nf-test's underlying `nextflow ... -quiet` run
     // suppresses log.info from stdout entirely (observed directly: a log.info
