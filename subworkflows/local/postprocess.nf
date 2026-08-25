@@ -314,6 +314,12 @@ workflow POSTPROCESSING {
         .map { patient_id, cell_csv, cell_geojson, merged_csv, cell_mask, pyramid ->
             Checkpoint.row(Layout.POSTPROCESSED, [
                 patient_id  : patient_id,
+                // RULING R17: 'postprocessed' rows are per-PATIENT, not per-slide --
+                // there is no single slide a pyramid/merged table belongs to -- so id
+                // is the patient id itself, the same synthetic-id convention
+                // add_cycle.nf already uses for its own patient-scoped metas
+                // ([patient_id: pid, id: pid, ...]). See lib/Checkpoint.groovy.
+                id          : patient_id,
                 cell_csv    : cell_csv,
                 cell_geojson: cell_geojson,
                 merged_csv  : merged_csv,

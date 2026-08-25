@@ -47,6 +47,8 @@ import json
 import re
 from pathlib import Path
 
+from tests.nfmodel import strip_comments as _strip_comments
+
 ROOT = Path(__file__).resolve().parent.parent
 PARAM_UTILS_PATH = ROOT / "lib" / "ParamUtils.groovy"
 SCHEMA_PATH = ROOT / "nextflow_schema.json"
@@ -99,7 +101,15 @@ SCANNED_GLOBS = ["lib/**/*.groovy", "workflows/**/*.nf", "subworkflows/**/*.nf"]
 
 
 def _steps_block_text() -> str:
-    text = PARAM_UTILS_PATH.read_text()
+    """The `STEPS = [ ... ]` block's raw text, comments blanked.
+
+    Matched against `tests.nfmodel.strip_comments` (view B), which keeps
+    every quoted `name:`/`entryColumn:` string literal intact -- the whole
+    point of reading this block -- while blanking `//` explanations like the
+    one on the `segmentation` row, so a comment cannot be misread as another
+    row's `name: '...'`/`entryColumn: '...'`.
+    """
+    text = _strip_comments(PARAM_UTILS_PATH.read_text())
     m = STEPS_BLOCK_RE.search(text)
     if m is None:
         raise ValueError(
@@ -235,7 +245,13 @@ def test_no_parallel_entry_column_mapping_outside_param_utils() -> None:
             allowed = ENTRY_COLUMN_EXEMPT.get(path, set())
             if allowed is None:
                 continue
-            text = path.read_text()
+            # tests.nfmodel.strip_comments (view B): a parallel step->column
+            # table is a QUOTED-string signature, so comments must be out of
+            # scope -- a `//` aside that happens to mention two entryColumn
+            # names in prose is not a restated mapping, and view B still
+            # keeps the quoted literals this scan is actually looking for
+            # (unlike view A, which would blank them too).
+            text = _strip_comments(path.read_text())
             found = {col for col in entry_columns if f"'{col}'" in text}
             if len(found) >= 2 and not found <= allowed:
                 offenders.append(f"  {path.relative_to(ROOT)}: {sorted(found)}")

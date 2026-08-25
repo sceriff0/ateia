@@ -289,30 +289,14 @@ nextflow_pipeline {
         }
     }
 
-    // Legacy registration methods (gpu, cpu, valis_pairs, cpu_tiled) moved to legacy/
-
-    test("Should run registration with padding - stub") {
-
-        tag "stub"
-        options "-stub"
-
-        when {
-            params {
-                input = "$projectDir/tests/testdata/valid_checkpoint_registration.csv"
-                outdir = "$outputDir"
-                start = "registration"
-                padding = true
-
-                max_cpus = 2
-                max_memory = '6.GB'
-                skip_registration_qc = true
-            }
-        }
-
-        then {
-            assert workflow.success
-        }
-    }
+    // Legacy registration methods (gpu, cpu, valis_pairs, cpu_tiled) moved to legacy/.
+    // A "Should run registration with padding - stub" test used to live here; `padding`
+    // was dropped along with PAD_IMAGES (e8c10b4) and nothing in the pipeline has read
+    // `params.padding` since, so the test had become a byte-for-byte duplicate of
+    // "Should run registration with VALIS method - stub" above, plus one dead param.
+    // `validation.logging.unrecognisedParams = 'error'` in nextflow.config (task 1.5)
+    // turned that dead param from silently-ignored into a launch failure, which is what
+    // surfaced it -- removed rather than kept, since VALIS coverage above is identical.
 
     //==========================================================================
     // POSTPROCESSING STEP TESTS

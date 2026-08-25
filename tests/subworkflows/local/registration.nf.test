@@ -20,9 +20,9 @@ nextflow_workflow {
             workflow {
                 """
                 input[0] = Channel.fromList([
-                    [[patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK']],
+                    [[patient_id: 'P001', id: 'P001_ref', is_reference: true, channels: ['DAPI', 'PANCK']],
                      file('$projectDir/tests/testdata/P001_ref.ome.tiff')],
-                    [[patient_id: 'P001', is_reference: false, channels: ['DAPI', 'CD3']],
+                    [[patient_id: 'P001', id: 'P001_mov1', is_reference: false, channels: ['DAPI', 'CD3']],
                      file('$projectDir/tests/testdata/P001_mov1.ome.tiff')]
                 ])
                 // REGISTRATION now takes only ch_preprocessed (VALIS-only)
@@ -54,11 +54,11 @@ nextflow_workflow {
             workflow {
                 """
                 input[0] = Channel.fromList([
-                    [[patient_id: 'P001', is_reference: true, channels: ['DAPI']],
+                    [[patient_id: 'P001', id: 'P001_ref', is_reference: true, channels: ['DAPI']],
                      file('$projectDir/tests/testdata/P001_ref.ome.tiff')],
-                    [[patient_id: 'P001', is_reference: false, channels: ['DAPI', 'CD3']],
+                    [[patient_id: 'P001', id: 'P001_mov1', is_reference: false, channels: ['DAPI', 'CD3']],
                      file('$projectDir/tests/testdata/P001_mov1.ome.tiff')],
-                    [[patient_id: 'P002', is_reference: true, channels: ['DAPI']],
+                    [[patient_id: 'P002', id: 'P002_ref', is_reference: true, channels: ['DAPI']],
                      file('$projectDir/tests/testdata/P002_ref.ome.tiff')]
                 ])
                 // REGISTRATION now takes only ch_preprocessed (VALIS-only)
@@ -94,9 +94,9 @@ nextflow_workflow {
             workflow {
                 """
                 input[0] = Channel.fromList([
-                    [[patient_id: 'P001', is_reference: true, channels: ['DAPI']],
+                    [[patient_id: 'P001', id: 'P001_ref', is_reference: true, channels: ['DAPI']],
                      file('$projectDir/tests/testdata/P001_ref.ome.tiff')],
-                    [[patient_id: 'P001', is_reference: false, channels: ['DAPI', 'CD3']],
+                    [[patient_id: 'P001', id: 'P001_mov1', is_reference: false, channels: ['DAPI', 'CD3']],
                      file('$projectDir/tests/testdata/P001_mov1.ome.tiff')]
                 ])
                 // REGISTRATION now takes only ch_preprocessed (VALIS-only)
@@ -125,9 +125,9 @@ nextflow_workflow {
             workflow {
                 """
                 input[0] = Channel.fromList([
-                    [[patient_id: 'P001', is_reference: true, channels: ['DAPI']],
+                    [[patient_id: 'P001', id: 'P001_ref', is_reference: true, channels: ['DAPI']],
                      file('$projectDir/tests/testdata/P001_ref.ome.tiff')],
-                    [[patient_id: 'P001', is_reference: false, channels: ['DAPI', 'CD3']],
+                    [[patient_id: 'P001', id: 'P001_mov1', is_reference: false, channels: ['DAPI', 'CD3']],
                      file('$projectDir/tests/testdata/P001_mov1.ome.tiff')]
                 ])
                 // REGISTRATION now takes only ch_preprocessed (VALIS-only)
@@ -177,9 +177,9 @@ nextflow_workflow {
                 // before this point on a real run; reaching REGISTRATION without one
                 // means the samplesheet or checkpoint never named a reference.
                 input[0] = Channel.fromList([
-                    [[patient_id: 'P001', is_reference: false, channels: ['DAPI']],
+                    [[patient_id: 'P001', id: 'P001_ref', is_reference: false, channels: ['DAPI']],
                      file('$projectDir/tests/testdata/P001_ref.ome.tiff')],
-                    [[patient_id: 'P001', is_reference: false, channels: ['DAPI', 'CD3']],
+                    [[patient_id: 'P001', id: 'P001_mov1', is_reference: false, channels: ['DAPI', 'CD3']],
                      file('$projectDir/tests/testdata/P001_mov1.ome.tiff')]
                 ])
                 """
@@ -202,7 +202,7 @@ nextflow_workflow {
             workflow {
                 """
                 input[0] = Channel.fromList([
-                    [[patient_id: 'P001', is_reference: false, channels: ['DAPI']],
+                    [[patient_id: 'P001', id: 'P001_ref', is_reference: false, channels: ['DAPI']],
                      file('$projectDir/tests/testdata/P001_ref.ome.tiff')]
                 ])
                 // REGISTRATION now takes only ch_preprocessed (VALIS-only)
@@ -235,7 +235,7 @@ nextflow_workflow {
             workflow {
                 """
                 input[0] = Channel.fromList([
-                    [[patient_id: 'P001', is_reference: true, channels: ['DAPI']],
+                    [[patient_id: 'P001', id: 'P001_ref', is_reference: true, channels: ['DAPI']],
                      file('$projectDir/tests/testdata/P001_ref.ome.tiff')]
                 ])
                 """
@@ -265,9 +265,9 @@ nextflow_workflow {
             workflow {
                 """
                 input[0] = Channel.fromList([
-                    [[patient_id: 'P002', is_reference: true, channels: ['DAPI']],
+                    [[patient_id: 'P002', id: 'P002_ref', is_reference: true, channels: ['DAPI']],
                      file('$projectDir/tests/testdata/P002_ref.ome.tiff')],
-                    [[patient_id: 'P002', is_reference: false, channels: ['DAPI', 'CD3']],
+                    [[patient_id: 'P002', id: 'P002_P001_mov1', is_reference: false, channels: ['DAPI', 'CD3']],
                      file('$projectDir/tests/testdata/P001_mov1.ome.tiff')]
                 ])
                 """
@@ -319,9 +319,9 @@ nextflow_workflow {
                 // one and stamped is_reference: true, which is the shape REGISTRATION
                 // now receives.
                 input[0] = Channel.fromList([
-                    [[patient_id: 'P003', is_reference: true, channels: ['DAPI']],
+                    [[patient_id: 'P003', id: 'P003_P002_ref', is_reference: true, channels: ['DAPI']],
                      file('$projectDir/tests/testdata/P002_ref.ome.tiff')],
-                    [[patient_id: 'P003', is_reference: false, channels: ['DAPI', 'CD3']],
+                    [[patient_id: 'P003', id: 'P003_P001_mov1', is_reference: false, channels: ['DAPI', 'CD3']],
                      file('$projectDir/tests/testdata/P001_mov1.ome.tiff')]
                 ])
                 """
@@ -358,9 +358,9 @@ nextflow_workflow {
             workflow {
                 """
                 input[0] = Channel.fromList([
-                    [[patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK', 'SMA']],
+                    [[patient_id: 'P001', id: 'P001_ref', is_reference: true, channels: ['DAPI', 'PANCK', 'SMA']],
                      file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)],
-                    [[patient_id: 'P001', is_reference: false, channels: ['DAPI', 'CD3', 'CD8']],
+                    [[patient_id: 'P001', id: 'P001_mov1', is_reference: false, channels: ['DAPI', 'CD3', 'CD8']],
                      file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)]
                 ])
                 // REGISTRATION now takes only ch_preprocessed (VALIS-only)

@@ -107,11 +107,20 @@ class RetryContext:
         Raises
         ------
         StopIteration
-            When max attempts reached
+            When max attempts are reached, or after succeeded().
+
+        Notes
+        -----
+        Exhaustion raises StopIteration and NOTHING ELSE. This used to raise
+        `self.last_exception`, which escaped the `for attempt in ctx:` loop
+        entirely: the caller's post-loop partial-failure handling was
+        unreachable, `all_attempts_failed` was dead code, and a single bad
+        slide killed a 400+ GB REGISTER task. The exception is preserved on
+        `self.last_exception` for the caller to inspect or re-raise --
+        whether exhaustion is fatal is the CALLER's decision, not the
+        iterator's.
         """
         if not self._should_retry or self.attempt >= self.max_attempts:
-            if self.last_exception:
-                raise self.last_exception
             raise StopIteration
 
         self.attempt += 1

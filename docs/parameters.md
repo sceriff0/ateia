@@ -336,12 +336,16 @@ Per-process requests, resource labels, retry policy and containers:
 | `max_memory` | `700.GB` | Global memory ceiling. Clamps every process's request via `process.resourceLimits`. |
 | `max_cpus` | `128` | Global CPU ceiling. |
 | `max_time` | `240.h` | Global walltime ceiling. |
-| `max_forks` | `5` | Max concurrent tasks **per process**. Also an upper bound on every per-process `maxForks`, so lowering it throttles every module. |
-| `queue_size` | `20` | Max concurrent tasks across the **whole pipeline** (`executor.queueSize`). Normally the binding constraint. |
+| `concurrency` | `5` | The one knob to tune: drives both `max_forks` and `queue_size` together, preserving the shipped 5:20 ratio. |
+| `max_forks` | `null` | Max concurrent tasks **per process**. `null` = derive from `concurrency`; also an upper bound on every per-process `maxForks`, so lowering it throttles every module. |
+| `queue_size` | `null` | Max concurrent tasks across the **whole pipeline** (`executor.queueSize`). `null` = derive from `concurrency` (`concurrency * 4`). Normally the binding constraint. |
 
-`max_forks` and `queue_size` are a pair: the lower of the two binds. At the defaults
-`max_forks` (5) is far lower, so raising `queue_size` alone has no effect — raise both, or
-raise `queue_size`. See [Resources → Execution & concurrency](resources.md#execution--concurrency).
+`max_forks` and `queue_size` are a pair: the lower of the two binds, and they are only
+meaningful together. `--concurrency` moves both at once; `--max_forks` / `--queue_size`
+override it individually for the asymmetric case. At the shipped defaults `max_forks` (5)
+is far lower, so raising `queue_size` alone has no effect — raise `max_forks` (or
+`concurrency`), or raise both. See
+[Resources → Execution & concurrency](resources.md#execution--concurrency).
 
 !!! info "How resources scale"
     Per-process memory and time scale with `task.attempt`, bounded by the

@@ -69,7 +69,18 @@ class ParamUtils {
             // READ_SEGMENTED_CHECKPOINT -- which dereferences BOTH file(row.cell_mask) and
             // file(row.nuclei_mask) unconditionally -- with "Argument of 'file' function cannot be
             // null" -- a two-layer validation contract that silently skipped its job.
-            requiredColumns: ['patient_id', 'registered_image', 'is_reference', 'channels', 'cell_mask', 'nuclei_mask'],
+            //
+            // 'id' (RULING R17, lib/Checkpoint.groovy) is here for the identical reason:
+            // READ_SEGMENTED_CHECKPOINT builds its meta through Meta.fromCheckpointRow,
+            // which throws on a row with no 'id' column -- but only once channel
+            // construction actually runs, well past --dry_run. Requiring it here instead
+            // makes a checkpoint written before this column existed fail at validation
+            // time, with "Missing required column 'id'", visible under --dry_run like
+            // every other required column -- not a confusing failure deep inside the
+            // reader. (Meta.fromCheckpointRow's own row.containsKey('id') check stays as
+            // defense in depth for any future caller that reaches it without going
+            // through CsvUtils.validateInputCSV first.)
+            requiredColumns: ['patient_id', 'id', 'registered_image', 'is_reference', 'channels', 'cell_mask', 'nuclei_mask'],
             entryColumn    : 'registered_image',
             qcKinds        : ['postprocess_qc'],
         ],
