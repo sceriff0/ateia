@@ -303,6 +303,20 @@ kept for backward compatibility with FlowPath's bare-key fast path.
     `COMPARTMENTS` and `STATISTICS` tuples are the single vocabulary. Changing
     any of the three requires a coordinated change on the FlowPath side.
 
+!!! warning "A missing key is a real state, not a zero"
+    `export_geojson.py` writes a measurement only when its value is present
+    (`if pd.notna(val)`), so **a cell with no nuclear overlap carries fewer keys
+    than its neighbours** rather than carrying them as `0.0`. That is correct — a
+    cell with no nucleus has no nuclear median, and `0.0` is a measurement, not an
+    absence — but any consumer indexing a key directly (`measurements[...]`)
+    raises on those cells. Use `.get()` and treat `None` as "no nucleus".
+
+    The same applies to the morphology keys (`Eccentricity`, `Perimeter µm`,
+    `Solidity`, `Convex Area µm²`, `Major/Minor Axis Length µm`, `Area µm²`).
+
+    This changed with the 2026-08-24 merge; see the
+    [migration note](migration-2026-08-24.md#2-nan-measurements-are-omitted-not-written-as-00).
+
 Cytoplasm is computed as `Cell − Nucleus` by subtraction, per cell. A cell with
 no nuclear overlap yields an empty Nucleus/Cytoplasm compartment, which is
 emitted as `0.0` rather than dropped — so the row count is identical across
