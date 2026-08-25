@@ -71,6 +71,17 @@ existence.
 
 ## Checkpoints
 
+!!! warning "Checkpoints are written only at `--cleanup_level=none`"
+    The default is `--cleanup_level=final`, which does not publish the artifacts a
+    checkpoint names — so no checkpoint CSV is written at all, and `<outdir>/csv/`
+    holds a `README.txt` saying so. A manifest whose rows pointed at files that
+    were never published would be worse than no manifest: `--start` opens exactly
+    what it names.
+
+    Run with `--cleanup_level none` the moment you intend to resume from a run's
+    output, or use it as a `--prior_outdir`. See
+    [Output cleanup](parameters.md#output-cleanup).
+
 Each step ends by writing one CSV under `<outdir>/csv/`. These are the
 resume points, and their headers are a published contract
 (`lib/Checkpoint.groovy`).
@@ -107,7 +118,37 @@ the merged quantification table).
 Two locations: per-patient results under `<outdir>/<patient_id>/`, and run-level
 aggregates at the `<outdir>` root.
 
-### The published tree
+### What a default run publishes
+
+`--cleanup_level` decides how much of the tree below is written. The default,
+`final`, publishes only what the run was asked to produce:
+
+```text
+results/                              # = --outdir, at --cleanup_level=final
+├── <patient_id>/
+│   ├── quantification/               # merged_quant.csv
+│   ├── geojson/export/               # cells.geojson, cells_wholecell.geojson, cells_data.csv
+│   ├── pyramid/                      # pyramid.ome.tiff
+│   ├── spatialdata/                  # <patient_id>.zarr
+│   └── qc/                           # the full per-patient QC tree
+├── qc/                               # run-level report + resource report
+├── csv/README.txt                    # why there is no checkpoint manifest
+└── size_logs/
+```
+
+Everything else in the full tree below — `converted/`, `preprocessed/`,
+`registered/`, `segmentation/`, `cell_properties/`, `split_channels/`,
+`quantify/`, and every `csv/*.csv` manifest — is an **intermediate**, and at
+`final` it is never published rather than published and then deleted. Every
+`publishDir` is `mode: 'copy'`, so publish-then-delete would pay a full copy out
+of `work/` for a file nobody reads.
+
+`--cleanup_level none` publishes the complete tree below, byte-for-byte as the
+pipeline always did. Use it whenever the output will be re-entered: `--start
+<step>`, or as the `--prior_outdir` of a `--mode add_cycle` run (which is refused
+at launch at any other level). Details: [Output cleanup](parameters.md#output-cleanup).
+
+### The published tree (`--cleanup_level none`)
 
 The per-patient leaf directories are the closed vocabulary declared by
 `Layout.PUBLISHED_KINDS` — a process publishing anywhere else under

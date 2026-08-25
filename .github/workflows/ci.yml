@@ -227,6 +227,19 @@ jobs:
             -stub \
             --outdir test_results_stub
 
+      - name: Verify work-directory cleanup and final-outputs-only publishing
+        # A shell script, not a pytest and not an nf-test, and it needs its own
+        # step or it runs nowhere -- the same gap the security-tests job exists to
+        # close for the DEEPCELL guard.
+        #
+        # It cannot be either of those: `cleanup` is a Nextflow session-teardown
+        # behaviour, invisible to a static guard over the sources and gone by the
+        # time nf-test's assertion context runs. The script's fourth case is the
+        # load-bearing one -- cleanup must never fire on a FAILED run, or a real
+        # failure becomes undiagnosable.
+        run: |
+          bash tests/cleanup_work.sh
+
       - name: Upload stub test results
         if: always()
         uses: actions/upload-artifact@v4

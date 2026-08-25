@@ -108,6 +108,37 @@ class Checkpoint {
         ],
     ].asImmutable()
 
+    /**
+     * Whether a checkpoint CSV is written for `step` at `level`.
+     *
+     * A checkpoint's whole purpose is to name WHERE a step's artifacts landed, so a
+     * later run can re-enter there. When --cleanup_level stops publishing those
+     * artifacts, the honest thing is to write no manifest at all rather than one
+     * whose rows name files that were never created.
+     * tests/checkpoint_manifest.nf.test asserts that every recorded path resolves,
+     * and that assertion is load-bearing: a manifest whose paths dangle is worse
+     * than no manifest, because `--start` and add_cycle both open what it names.
+     *
+     * NO step qualifies at a cleaning level, INCLUDING 'postprocessed' -- which is
+     * not obvious, and is the reason this returns a flat `level == 'none'` rather
+     * than a per-step table. 'postprocessed' looks safe: cell_csv, cell_geojson,
+     * merged_csv and pyramid are all in Layout.FINAL_KINDS. But its `cell_mask`
+     * column names the segmentation mask, and 'segmentation' is an intermediate,
+     * so that one column dangles. Confirmed by running the manifest test against
+     * the gated config, which reported exactly:
+     *
+     *     postprocessed.csv: does not exist -> .../P001/segmentation/P001_cell_mask.tif
+     *
+     * Adding 'segmentation' to Layout.FINAL_KINDS would make the postprocessed
+     * manifest writable again. That is a deliberate NON-choice: the surviving set
+     * is the user's, and masks are reconstructible from the pyramid when
+     * embed_masks is on. Revisit here, not by special-casing a column.
+     */
+    static boolean writesAtLevel(String step, String level) {
+        requireStep(step)
+        return level == 'none'
+    }
+
     private static Map requireStep(String step) {
         def entry = STEPS.find { it.name == step }
         if (!entry)

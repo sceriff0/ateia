@@ -107,6 +107,12 @@ workflow POSTPROCESSED_CHECKPOINT {
         })
 
     ch_checkpoint_csv = ch_base_checkpoint
+        // Not written at a cleaning level either, which is the non-obvious one:
+        // cell_csv, cell_geojson, merged_csv and pyramid are all final artifacts,
+        // but `cell_mask` names the segmentation mask, and segmentation is an
+        // intermediate. One dangling column is enough. Checkpoint.writesAtLevel
+        // carries the full reasoning and the observed failure.
+        .filter { Checkpoint.writesAtLevel(Layout.POSTPROCESSED, params.cleanup_level) }
         .map { patient_id, cell_csv, cell_geojson, merged_csv, cell_mask, pyramid ->
             Checkpoint.row(Layout.POSTPROCESSED, [
                 patient_id  : patient_id,

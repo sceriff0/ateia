@@ -74,6 +74,47 @@ def generateResourceReport(Map cfg) {
 
 /*
 ================================================================================
+    POST-RUN: EXPLAIN AN EMPTY CHECKPOINT DIRECTORY
+================================================================================
+    At a cleaning --cleanup_level no checkpoint manifest is written, because the
+    artifacts every manifest names were not published (Checkpoint.writesAtLevel).
+    An empty csv/ is then indistinguishable from a run that crashed before its
+    first checkpoint, so the directory says which it is.
+
+    Written from a handler rather than a process for the same reason the resource
+    report is: it is provenance about the run as a whole, it must not appear in
+    the DAG, and it must not change the task graph or the stub manifest's task
+    count. `cfg` carries raw params for the reason generateResourceReport's
+    comment gives -- the handler closure cannot see `params`.
+*/
+def writeCheckpointReadme(Map cfg) {
+    if (cfg.cleanup_level == 'none') {
+        return
+    }
+    try {
+        def dir = Layout.checkpointDir(cfg.outdir)
+        new File(dir).mkdirs()
+        new File(dir, 'README.txt').text = """\
+No checkpoint manifest is written at --cleanup_level=${cfg.cleanup_level}.
+
+A manifest names WHERE a step's artifacts landed so a later run can re-enter
+there. At this level those artifacts are not published at all, so every manifest
+would record paths that do not exist -- including postprocessed.csv, whose
+cell_mask column names a segmentation mask that was not published even though
+its other columns are final artifacts.
+
+Re-run with --cleanup_level none if you need to re-enter this output with
+--start <step>, or use it as the --prior_outdir of a --mode add_cycle run.
+add_cycle is refused at any other level, at launch.
+"""
+        log.info "Checkpoint directory note: ${dir}/README.txt"
+    } catch (Exception e) {
+        log.warn "Could not write the checkpoint README (non-fatal): ${e.message}"
+    }
+}
+
+/*
+================================================================================
     POST-RUN: ANNOUNCE DROPPED TASKS
 ================================================================================
     A `retry-then-drop` errorStrategy lets the run report success with an
@@ -124,13 +165,15 @@ workflow {
     // top-level registration took effect, and onComplete fires on failed runs
     // too.
     def report_cfg = [
-        enable_trace: params.enable_trace,
-        outdir      : params.outdir,
-        trace_dir   : params.trace_dir,
-        project_dir : "${projectDir}",
+        enable_trace : params.enable_trace,
+        outdir       : params.outdir,
+        trace_dir    : params.trace_dir,
+        project_dir  : "${projectDir}",
+        cleanup_level: params.cleanup_level,
     ]
     workflow.onComplete {
         announceDroppedTasks()
+        writeCheckpointReadme(report_cfg)
         generateResourceReport(report_cfg)
     }
 

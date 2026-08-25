@@ -80,7 +80,8 @@ profiles, comma-combined — e.g. `-profile slurm,singularity` on a cluster or
 | `--start` | param | no | Entry stage: `preprocessing` (default), `registration`, `segmentation`, `postprocessing`. |
 | `--stop` | param | no | Last stage to run. Omitted = run to the end. |
 | `dry_run` | param | no | Validate inputs and the samplesheet, then exit without running tasks. Boolean — set it in a `-params-file` (`params/dry_run.json`), never on the CLI; see [Boolean parameters](#boolean-parameters). |
-| `cleanup_work` | param | no | Delete `work/` after a successful run. Off by default; incompatible with `-resume`. Boolean — set it in a `-params-file`, never on the CLI; see [Boolean parameters](#boolean-parameters). |
+| `--cleanup_level` | param | no | Which published outputs to keep: `final` (default — final artifacts only) or `none` (everything). Pass `none` when this run's output will be re-entered by `--start` or `add_cycle`. |
+| `cleanup_work` | param | no | Delete `work/` after a successful run. **On by default**; incompatible with `-resume`. Boolean — set it in a `-params-file`, never on the CLI; see [Boolean parameters](#boolean-parameters). |
 | `-profile` | option | no | Execution/config profiles, comma-combined (e.g. `slurm,singularity`). |
 | `-params-file` | option | no | JSON preset of parameters, e.g. `params/full_pipeline.json`. |
 | `-resume` | option | no | Reuse cached results from a previous run's `work/`. |
@@ -243,18 +244,31 @@ samplesheet — feed it back in with a matching `--start`.
     the combination reuses **nothing** from a prior run's work directory. `-resume`
     there only helps across successive `--start postprocessing` runs.
 
-!!! warning "`--cleanup_work` removes the thing `-resume` needs"
-    `--cleanup_work` deletes the work directory after a successful run, so a later
-    `-resume` has no cache to reuse. It does **not** error — the run exits 0 and
-    silently re-runs every task. On the stub dataset, `-resume` against an intact
-    `work/` produced 57 cache hits; against a cleaned one, 0. Both green.
+!!! warning "`cleanup_work` is ON by default, and it removes the thing `-resume` needs"
+    A successful run deletes its work directory, so a later `-resume` has no cache
+    to reuse. It does **not** error — the run exits 0 and silently re-runs every
+    task. On the stub dataset, `-resume` against an intact `work/` produced 57 cache
+    hits; against a cleaned one, 0. Both green. The pipeline now **warns at launch**
+    when `cleanup_work` and `-resume` are both in play; it does not refuse, because
+    which one you meant is genuinely ambiguous.
 
-    Use `--cleanup_work` for a final, known-good run whose outputs you intend to
-    keep and whose `work/` you will never revisit. While you are still iterating —
-    or still might need to diagnose a task that `errorStrategy 'ignore'` dropped
-    without failing the run — leave it off. `--start` restarts are unaffected
-    either way: they read published paths under `--outdir`, never `work/`.
-    Details: [`cleanup_work`](parameters.md#work-directory-cleanup).
+    While you are iterating with `-resume`, put `{"cleanup_work": false}` in a
+    `-params-file`. `--start` restarts are unaffected either way: they read
+    published paths under `--outdir`, never `work/` — but see `--cleanup_level`
+    below, because at the default level those published paths are not written.
+    Details: [Output cleanup](parameters.md#output-cleanup).
+
+!!! warning "`--cleanup_level=final` is the default, and it does not publish intermediates"
+    A default run keeps `pyramid/`, `geojson/`, `quantification/`, `spatialdata/`
+    and the QC tree, and publishes nothing else — no `registered/`, no
+    `segmentation/`, no checkpoint manifests under `csv/`.
+
+    That means a default run's output **cannot be re-entered**: `--start
+    registration` opens the paths `csv/registered.csv` names, and neither the
+    manifest nor the images are there. Pass `--cleanup_level none` on the run whose
+    output you intend to restart from, or to use as a `--prior_outdir`.
+    `--mode add_cycle` is refused at launch at any other level.
+    Details: [Output cleanup](parameters.md#output-cleanup).
 
 !!! warning "Two tasks always re-run"
     `GENERATE_QC_REPORT` and `AGGREGATE_SIZE_LOGS` are declared `cache = false`. Their

@@ -34,6 +34,12 @@ workflow REGISTERED_CHECKPOINT {
     main:
     // Use collectFile() for non-blocking aggregation (enables patient-level parallelism)
     ch_checkpoint_csv = ch_registered
+        // Not written at a cleaning level: the registered slides are not published
+        // there, so every row would name a file that does not exist. Gated HERE,
+        // once, rather than at each call site -- which is the reason this writer is
+        // its own file. See Checkpoint.writesAtLevel, and preprocess.nf for why a
+        // filter is safe in front of a seeded collectFile.
+        .filter { Checkpoint.writesAtLevel(Layout.REGISTERED, params.cleanup_level) }
         .map { meta, file ->
             // Where the file WILL be published. This must agree with REGISTER's /
             // TILED_*'s publishDir in conf/modules.config, including the producer

@@ -4,9 +4,23 @@ Fold a NEW imaging cycle into an already-completed patient run, reusing the prio
 reference, segmentation mask, and old-marker quantification.
 
 ## Prerequisites
-A previous run completed through postprocessing, producing under its `--outdir`:
-`csv/registered.csv`, `csv/postprocessed.csv`, and per-patient
-`segmentation/`, `quantification/`, `pyramid/` outputs.
+
+!!! danger "Every cycle must run at `--cleanup_level none`, including the first"
+    `add_cycle` re-enters the prior run's output tree: it reads `csv/registered.csv`,
+    `csv/postprocessed.csv` and the per-patient `registered/` and `segmentation/`
+    artifacts. The **default** `--cleanup_level=final` publishes none of those, so a
+    cycle-1 run left at the default cannot be extended at all — and the only remedy
+    is to re-run cycle 1.
+
+    This applies to the add_cycle runs themselves too, because each one is the next
+    one's `--prior_outdir`. The pipeline **refuses `--mode add_cycle` at launch** at
+    any other level (`ParamUtils.validateCleanup`), so the mistake cannot be made
+    silently on the incremental runs; it can only be made on the first, ordinary
+    run. Decide up front whether a cohort is going to be extended.
+
+A previous run completed through postprocessing **at `--cleanup_level none`**,
+producing under its `--outdir`: `csv/registered.csv`, `csv/postprocessed.csv`, and
+per-patient `segmentation/`, `quantification/`, `pyramid/` outputs.
 
 **To be extendable incrementally, the prior run must have embedded its
 segmentation masks in the pyramid** — i.e. it must have been run with
@@ -19,6 +33,7 @@ doing any work — see [Fast-fail behavior](#fast-fail-behavior).
 ```bash
 nextflow run . -profile <profile> \
   --mode add_cycle \
+  --cleanup_level none \
   --prior_outdir results_cycle1 \
   --input new_cycle.csv \
   --outdir results_cycle2
@@ -77,14 +92,20 @@ cycle, so cycles chain without limit. Point each run at the previous run's
 `--outdir` and give it a fresh one of its own:
 
 ```bash
+# cycle 1 — an ORDINARY run, but it must publish its intermediates or nothing
+# downstream can read them. This is the one place the mistake can be made
+# silently; the add_cycle runs below refuse the wrong level at launch.
+nextflow run . -profile <site> \
+    --input cycle1.csv --cleanup_level none --outdir results/cycle1
+
 # cycle 2 — prior is the full linear run
 nextflow run . -profile <site> \
-    --input cycle2.csv --mode add_cycle \
+    --input cycle2.csv --mode add_cycle --cleanup_level none \
     --prior_outdir results/cycle1 --outdir results/cycle2
 
 # cycle 3 — prior is cycle 2
 nextflow run . -profile <site> \
-    --input cycle3.csv --mode add_cycle \
+    --input cycle3.csv --mode add_cycle --cleanup_level none \
     --prior_outdir results/cycle2 --outdir results/cycle3
 ```
 
