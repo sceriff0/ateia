@@ -29,20 +29,42 @@ the behavioural counterpart; see its header for why it is not in the gate.
 """
 
 import re
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-NF_DIRS = ["subworkflows", "workflows", "modules"]
-
-
-def _nf_files():
-    for d in NF_DIRS:
-        yield from sorted((ROOT / d).rglob("*.nf"))
+from tests.nfmodel import REPO_ROOT as ROOT
+from tests.nfmodel import nf_files as _nf_files
+from tests.nfmodel import skip_non_code
+from tests.nfmodel import strip_comments_and_strings as _strip_comments
 
 
-def _strip_comments(text: str) -> str:
-    text = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
-    return "\n".join(line for line in text.splitlines() if not line.strip().startswith("//"))
+def _strip_comments_only(text: str) -> str:
+    """Like `_strip_comments`, but keeps string-literal contents verbatim.
+
+    `_strip_comments` (nfmodel's `strip_comments_and_strings`) blanks quoted
+    strings too, by design -- that is what stops a comment or GString from
+    faking a process/selector match elsewhere. Two checks below need the
+    opposite: they match a quoted argument or filename (`'collated_versions
+    .yml'`, `'versions'`) that only exists inside a string literal, so
+    blanking it makes the pattern unmatchable and the check either vacuously
+    passes (blind) or permanently fails (false red) regardless of the code.
+    Reuses `skip_non_code` for boundary detection -- the same string-aware
+    walk that keeps a `stageAs: 'ref/*'` glob from being misread as an open
+    block comment -- so only real `//`/`/* */` comments are blanked.
+    """
+    out = []
+    i, n = 0, len(text)
+    while i < n:
+        if text[i : i + 2] in ("//", "/*"):
+            skip_to = skip_non_code(text, i)
+            out.append(re.sub(r"[^\n]", " ", text[i:skip_to]))
+            i = skip_to
+        elif text[i] in ("'", '"'):
+            skip_to = skip_non_code(text, i)
+            out.append(text[i:skip_to])
+            i = skip_to
+        else:
+            out.append(text[i])
+            i += 1
+    return "".join(out)
 
 
 # --------------------------------------------------------------------------- #
@@ -113,7 +135,7 @@ def test_every_fan_in_orders_by_data():
 # --------------------------------------------------------------------------- #
 
 def test_final_qc_collects_are_sorted():
-    body = _strip_comments((ROOT / "subworkflows/local/final_qc.nf").read_text())
+    body = _strip_comments_only((ROOT / "subworkflows/local/final_qc.nf").read_text())
     unsorted = re.findall(r"artifactsOf\(ch_artifacts, '([a-z_]+)'\)\.collect\(\)", body)
     assert not unsorted, (
         f"GENERATE_QC_REPORT slot(s) {sorted(unsorted)} use a bare .collect(). Its inputs are "
