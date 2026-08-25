@@ -687,19 +687,26 @@
                     "description": "Maximum time limit.",
                     "default": "240.h"
                 },
-                "max_forks": {
+                "concurrency": {
                     "type": "integer",
-                    "description": "Maximum concurrent tasks per process. Also an upper bound on every per-process maxForks in conf/modules.config, so lowering it throttles every module.",
-                    "help_text": "Paired with queue_size, which caps concurrency across the WHOLE pipeline. The lower of the two binds: at the defaults max_forks (5) is far below queue_size (20), so raising queue_size alone has no effect. Raise max_forks, or both.",
+                    "description": "Drives both max_forks and queue_size together, preserving the shipped 5:20 ratio (queue_size = concurrency * 4). The single knob to tune for overall cluster throughput.",
+                    "help_text": "max_forks and queue_size are only meaningful together -- the lower of the two binds, so raising one alone changes nothing. Set max_forks and/or queue_size individually to override this ratio for the asymmetric case.",
                     "minimum": 1,
                     "default": 5
                 },
-                "queue_size": {
-                    "type": "integer",
-                    "description": "Maximum concurrent tasks across the whole pipeline (executor.queueSize).",
-                    "help_text": "This is normally the binding constraint on concurrency, not max_forks. The shipped default of 20 is deliberately conservative for a shared scheduler.",
+                "max_forks": {
+                    "type": ["integer", "null"],
+                    "description": "Maximum concurrent tasks per process. Also an upper bound on every per-process maxForks in conf/modules.config, so lowering it throttles every module. null = derive from concurrency.",
+                    "help_text": "Paired with queue_size, which caps concurrency across the WHOLE pipeline. The lower of the two binds: at the defaults max_forks (5, from concurrency) is far below queue_size (20), so raising queue_size alone has no effect. Raise max_forks (or concurrency), or both.",
                     "minimum": 1,
-                    "default": 20
+                    "default": null
+                },
+                "queue_size": {
+                    "type": ["integer", "null"],
+                    "description": "Maximum concurrent tasks across the whole pipeline (executor.queueSize). null = derive from concurrency (concurrency * 4).",
+                    "help_text": "This is normally the binding constraint on concurrency, not max_forks -- except at the shipped defaults, where max_forks (5) is the smaller of the two and binds instead. The shipped default of 20 is deliberately conservative for a shared scheduler.",
+                    "minimum": 1,
+                    "default": null
                 }
             }
         }

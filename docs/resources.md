@@ -417,32 +417,44 @@ are both dropped.
 
 | Setting | Value | Where |
 |---|---|---|
-| `process.maxForks` | `params.max_forks` (`5`) | `nextflow.config` |
+| `process.maxForks` | `params.max_forks` if set, else `params.concurrency` (`5`) | `nextflow.config` |
 | `process.stageInMode` | `symlink` | `nextflow.config` — zero-overhead, works cross-filesystem |
-| `executor.queueSize` | `params.queue_size` (`20`) | `nextflow.config` — max concurrent scheduler submissions |
+| `executor.queueSize` | `params.queue_size` if set, else `params.concurrency * 4` (`20`) | `nextflow.config` — max concurrent scheduler submissions |
 | `executor.exitReadTimeout` | `1 day` | `conf/base.config` — SLURM status-poll timeout |
 
-Both are tunable from the command line: `--max_forks` and `--queue_size`.
+**`--concurrency` is the one knob to tune.** It drives `max_forks` and `queue_size`
+together, preserving the shipped 5:20 ratio (`--concurrency 20` → `max_forks 20,
+queue_size 80`). `--max_forks` and `--queue_size` remain available and **override**
+`--concurrency` individually — for the asymmetric case, e.g. a wide queue with a tight
+per-process cap. `max_forks`/`queue_size` are declared `null` in `nextflow.config`, not a
+numeric default: the params block is evaluated *before* the CLI is applied, so a default
+computed there would use `concurrency`'s own default and silently ignore `--concurrency`.
+The derivation instead lives in the `executor`/`process` scopes below the includes (and in
+`conf/modules.config`'s seven per-process caps), which are evaluated/included after CLI
+resolution.
 
-**They are a pair, and the LOWER one binds.** `max_forks` caps how many tasks of any ONE
-process run at once; `queue_size` caps how many run at once across the WHOLE pipeline.
-At the shipped defaults `max_forks` (5) is far below `queue_size` (20), so **`max_forks`
-is what binds** and raising `queue_size` alone changes nothing — raise `max_forks`, or
-raise both. (This is the opposite way round from the earlier 100/20 defaults, where
-`queue_size` was the binding one.)
+**`max_forks` and `queue_size` are a pair, and the LOWER one binds.** `max_forks` caps how
+many tasks of any ONE process run at once; `queue_size` caps how many run at once across
+the WHOLE pipeline. At the shipped defaults `max_forks` (5) is far below `queue_size`
+(20), so **`max_forks` is what binds** and raising `queue_size` alone changes nothing —
+raise `max_forks` (or `concurrency`), or raise both. (This is the opposite way round from
+the earlier 100/20 defaults, where `queue_size` was the binding one — corrected together
+with the two in-tree comments that had claimed `max_forks` still defaulted to 100.)
 
-Because every per-process override is `Math.min(its own cap, params.max_forks)`, a
-`max_forks` of 5 clamps ALL of them: the `REGISTER` / `TILED_STITCH` 10 and the
+Because every per-process override is `Math.min(its own cap, the resolved max_forks)`, a
+resolved `max_forks` of 5 clamps ALL of them: the `REGISTER` / `TILED_STITCH` 10 and the
 `TILED_COARSE` / `TILED_REG_TILE` 20 below all run at 5. That is a deliberately
-conservative default — raise it with `--max_forks` when the cluster can take it.
+conservative default — raise it with `--concurrency` or `--max_forks` when the cluster
+can take it.
 
 Per-process `maxForks` overrides: `REGISTER`, `TILED_STITCH` at `10`; `TILED_COARSE` /
 `TILED_REG_TILE` at `20`. These bound how many memory-heavy registration tasks can be in
-flight at once. Each is written `Math.min(<its own limit>, params.max_forks)`, so
-**lowering** `--max_forks` really does throttle every module, while **raising** it never
-lifts one of these past the limit its own block sets for its own reasons. Measured on the
-test profile: at the default, `REGISTER` runs at 10 and everything else at 100; at
-`--max_forks 4` every process runs at 4; at `--max_forks 50`, `REGISTER` stays at 10.
+flight at once. Each is written `Math.min(<its own limit>, the resolved max_forks)`, so
+**lowering** `--max_forks` (or `--concurrency`) really does throttle every module, while
+**raising** it never lifts one of these past the limit its own block sets for its own
+reasons. Measured on the test profile: at the default, `REGISTER` runs at 10 and
+everything else at 5; at `--max_forks 4` every process runs at 4; at `--max_forks 50`,
+`REGISTER` stays at 10.
 
 `executor.queueSize` is assigned in `nextflow.config`, not in `conf/base.config` where the
 rest of the executor scope lives. That is deliberate and load-bearing — see
