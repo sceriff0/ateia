@@ -226,16 +226,26 @@ class CsvUtils {
     }
 
     /**
-     * Each slide's exact emit-set: patient_id -> (RAW image cell -> channels).
+     * Each slide's exact emit-set: patient_id -> (ASSIGNED IDENTITY -> channels).
      *
-     * THE INNER KEY IS THE RAW `<imageColumn>` CELL, verbatim (trimmed), NOT its
-     * basename. resolveReferenceRows returns that same raw cell and input_check.nf's
-     * meta.is_reference already compares against it, so both lookups provably use one
-     * key. A basename key silently weakened resolveReferenceRows' "the raw cell is
-     * unique per patient" assumption to "the FILENAME is unique per patient": two rows
-     * of one patient under different directories (a cyclic-IF cohort with one directory
-     * per cycle) then overwrote each other, leaving one entry that both rows read --
-     * the reference got the other slide's keep-set and emitted zero channels.
+     * THE INNER KEY IS Meta.identityFor's OUTPUT for that row -- the SAME identity
+     * Meta.fromSamplesheetRow assigns as meta.id -- not the raw `<imageColumn>` cell.
+     * A basename key (file(...).simpleName) silently weakened "the raw cell is unique
+     * per patient" to "the FILENAME is unique per patient": two rows of one patient
+     * under different directories (a cyclic-IF cohort with one directory per cycle)
+     * then overwrote each other. Keying on the raw cell instead (an earlier fix)
+     * closed that specific collision, but the raw cell is not guaranteed unique
+     * either -- two rows can share an identical cell (a duplicate row) or both leave
+     * it blank -- and either case collided the exact same way: the second pass
+     * silently overwrote the first, sometimes with `[]`, and channels_count summed to
+     * a number smaller than what SPLIT_CHANNELS actually emits. Keying on the
+     * ASSIGNED identity instead inherits identityFor's own collision handling
+     * (disambiguated by rowIndex whenever the stem would otherwise collide), so two
+     * rows can never collapse into one entry regardless of what their raw cells look
+     * like. `stemCounts` is computed once here, from this same samplesheet, via
+     * stemCountsPerPatient -- the identical map Meta.fromSamplesheetRow's caller
+     * (input_check.nf) computes and passes through ctx -- so the key written here and
+     * the key `finish()` looks up by are provably the same function of the same row.
      *
      * THE keep-set rule, and the only place it exists. SPLIT_CHANNELS emits exactly what
      * this returns (via meta.keep_channels); countChannelsPerPatient sizes the
@@ -304,7 +314,20 @@ class CsvUtils {
         // rows[0] itself.
         def referenceImage = resolveReferenceRows(csvPath, imageColumn, autoReference)
 
-        // Rows per patient, IN SAMPLESHEET ORDER. The walk order below depends on it.
+        // Meta.identityFor's collision input, computed once from THIS SAME sheet --
+        // the identical map input_check.nf computes independently and threads through
+        // ctx.stemCounts for Meta.fromSamplesheetRow. Reading it here (rather than
+        // accepting it as a parameter) is what makes the key written below and the
+        // key `finish()` looks up by provably the same function of the same row,
+        // without widening this method's signature or asking every caller to thread
+        // it through.
+        def stemCounts = stemCountsPerPatient(csvPath, imageColumn)
+
+        // Rows per patient, IN SAMPLESHEET ORDER. The walk order below depends on it,
+        // and `idx` (the row's 0-based position within ITS PATIENT, in that same
+        // order) is Meta.identityFor's rowIndex argument -- captured here rather than
+        // via a second pass/rowIndexPerPatient call, so it is trivially the same
+        // order stemCounts was computed against.
         def rowsByPatient = [:].withDefault { [] }
         lines.drop(1).each { line ->
             def cols = parseCsvLine(line)
@@ -315,12 +338,16 @@ class CsvUtils {
             rowsByPatient[patientId] << [
                 raw     : rawImage,
                 channels: cols[channelsIdx].split('\\|')*.trim().findAll { it },
+                idx     : rowsByPatient[patientId].size(),
             ]
         }
 
         def result = [:]
         rowsByPatient.each { patientId, rows ->
-            // resolveReferenceRows returns the RAW cell, which is also this map's key.
+            // resolveReferenceRows returns the RAW cell; partitioning below still
+            // compares raw cells (that is what resolveReferenceRows returns and what
+            // is_reference is decided from), even though the OUTPUT map is no longer
+            // keyed on one.
             def refCell = referenceImage[patientId]
             // Stable partition: reference row(s) first, everything else in declared
             // order. A patient with no reference at all (add_cycle's by-design
@@ -341,7 +368,13 @@ class CsvUtils {
                     claimed << name
                     keep << ch
                 }
-                perSlide[row.raw] = keep
+                // Keyed on the ASSIGNED identity, not on the raw cell. Two rows for one
+                // patient can share a raw cell (a duplicate row) or both leave it blank,
+                // and keying on it meant the second pass overwrote the first -- sometimes
+                // with [] -- so channels_count summed to less than what SPLIT_CHANNELS
+                // actually emits and the streaming groupTuple(size:) it sizes either
+                // emitted early with missing members or hung.
+                perSlide[Meta.identityFor(patientId, row.raw, row.idx, [stemCounts: stemCounts])] = keep
             }
             result[patientId] = perSlide
         }

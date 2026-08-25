@@ -90,6 +90,11 @@ workflow {
     // dedup on [patient_id, marker] immediately upstream (postprocess.nf's `.unique`,
     // add_cycle.nf's priority groupTuple), so the distinct-name count would serve them
     // today. An earlier version of this comment said otherwise.
+    // The inner map is keyed on Meta.identityFor's output (meta.id), not the raw
+    // image cell -- see resolveKeptChannelsPerSlide's doc. For a non-colliding stem,
+    // identityFor ignores its rowIndex argument entirely (n<=1 short-circuits before
+    // rowIndex is ever consulted), so `0` is a safe stand-in below wherever a row's
+    // actual samplesheet-order index isn't the point of the assertion.
     def keepCsv = File.createTempFile('keepset', '.csv')
     keepCsv.text = '''patient_id,image,channels,is_reference
 P1,ref.tiff,DAPI|KI67|CD20,true
@@ -97,9 +102,9 @@ P1,cyc2.tiff,CELLTOX|CD8,false
 P1,cyc3.tiff,CELLTOX|FOXP3,false
 '''
     def keep = CsvUtils.resolveKeptChannelsPerSlide(keepCsv.path, 'image', ['DAPI','CELLTOX'], false)
-    assert keep['P1']['ref.tiff']  == ['DAPI', 'KI67', 'CD20']
-    assert keep['P1']['cyc2.tiff'] == ['CELLTOX', 'CD8']  // CELLTOX unclaimed -> KEPT
-    assert keep['P1']['cyc3.tiff'] == ['FOXP3']           // CELLTOX claimed by cyc2
+    assert keep['P1'][Meta.identityFor('P1', 'ref.tiff', 0, [:])]  == ['DAPI', 'KI67', 'CD20']
+    assert keep['P1'][Meta.identityFor('P1', 'cyc2.tiff', 0, [:])] == ['CELLTOX', 'CD8']  // CELLTOX unclaimed -> KEPT
+    assert keep['P1'][Meta.identityFor('P1', 'cyc3.tiff', 0, [:])] == ['FOXP3']           // CELLTOX claimed by cyc2
     def keepFlat = keep['P1'].values().flatten()
     assert keepFlat.size() == keepFlat.toSet().size()
     assert keepFlat.size() == 6
@@ -113,8 +118,8 @@ P2,cyc2.tiff,DAPI|CD8,false
 P2,ref.tiff,DAPI|KI67,true
 '''
     def lateRef = CsvUtils.resolveKeptChannelsPerSlide(keepLateRef.path, 'image', ['DAPI','CELLTOX'], false)
-    assert lateRef['P2']['ref.tiff']  == ['DAPI', 'KI67']
-    assert lateRef['P2']['cyc2.tiff'] == ['CD8']   // DAPI already claimed by the reference
+    assert lateRef['P2'][Meta.identityFor('P2', 'ref.tiff', 0, [:])]  == ['DAPI', 'KI67']
+    assert lateRef['P2'][Meta.identityFor('P2', 'cyc2.tiff', 0, [:])] == ['CD8']   // DAPI already claimed by the reference
     keepLateRef.delete()
 
     // preClaimed seeds the claimed set — add_cycle passes the prior run's reference
@@ -125,28 +130,58 @@ P3,cyc4.tiff,DAPI|CELLTOX|CD8,false
 '''
     def seeded = CsvUtils.resolveKeptChannelsPerSlide(
         keepPrior.path, 'image', ['DAPI','CELLTOX'], false, ['P3': ['DAPI', 'KI67']])
-    assert seeded['P3']['cyc4.tiff'] == ['CELLTOX', 'CD8']  // DAPI pre-claimed; CELLTOX new
+    assert seeded['P3'][Meta.identityFor('P3', 'cyc4.tiff', 0, [:])] == ['CELLTOX', 'CD8']  // DAPI pre-claimed; CELLTOX new
     keepPrior.delete()
 
-    // BASENAME IS NOT A KEY. Two rows of one patient can share an image BASENAME while
+    // BASENAME COLLISION: two rows of one patient can share an image BASENAME while
     // living in different directories -- a cyclic-IF cohort with one directory per cycle
-    // is the ordinary case, not a pathological one. The inner map is therefore keyed on
-    // the RAW image cell, exactly what resolveReferenceRows returns and exactly what
-    // input_check.nf's meta.is_reference already compares against. Keyed on the basename
-    // the two rows overwrote each other: the map held ONE entry, both rows looked it up,
-    // and the reference was handed the other slide's keep-set -- in a real run it emitted
-    // ZERO channels, DAPI included, while the count read 1 instead of 3.
+    // is the ordinary case, not a pathological one. identityFor disambiguates via each
+    // row's samplesheet-order index (0, 1) whenever the stem would otherwise collide,
+    // and resolveKeptChannelsPerSlide keys its map on exactly that -- so both rows land
+    // as distinct entries even though their basenames, and therefore their un-disambiguated
+    // stems, are identical.
     def dupCsv = File.createTempFile('keepdup', '.csv')
     dupCsv.text = '''patient_id,image,channels,is_reference
 P4,/data/c1/slide.tiff,DAPI|CD3,true
 P4,/data/c2/slide.tiff,DAPI|CD8,false
 '''
+    def dupStemCounts = CsvUtils.stemCountsPerPatient(dupCsv.path, 'image')
     def dup = CsvUtils.resolveKeptChannelsPerSlide(dupCsv.path, 'image', ['DAPI','CELLTOX'], false)
     assert dup['P4'].size() == 2                              // two rows, two entries
-    assert dup['P4']['/data/c1/slide.tiff'] == ['DAPI', 'CD3']  // the reference claims DAPI
-    assert dup['P4']['/data/c2/slide.tiff'] == ['CD8']          // DAPI already claimed
+    assert dup['P4'][Meta.identityFor('P4', '/data/c1/slide.tiff', 0, [stemCounts: dupStemCounts])] == ['DAPI', 'CD3']  // the reference claims DAPI
+    assert dup['P4'][Meta.identityFor('P4', '/data/c2/slide.tiff', 1, [stemCounts: dupStemCounts])] == ['CD8']          // DAPI already claimed
     assert CsvUtils.countChannelsPerPatient(dupCsv.path, 'image', ['DAPI','CELLTOX'], false)['P4'] == 3
     dupCsv.delete()
+
+    // RAW-CELL COLLISION -- THE BUG THIS TASK FIXES. Two rows of one patient can share
+    // the exact same raw `<imageColumn>` cell (a duplicate row) or both leave it blank,
+    // which used to collide the map when it was keyed on `row.raw`: the second pass
+    // silently overwrote the first -- here, with []. P6's reference row keeps
+    // DAPI+CD3; the second row declares only DAPI, already claimed, so its OWN keep-set
+    // is legitimately []. Under the old row.raw keying, perSlide['same.tiff'] would be
+    // ['DAPI','CD3'] and then get overwritten by []. Keying on the ASSIGNED identity
+    // instead means the two rows can never collapse into one entry, because identityFor
+    // disambiguates them by rowIndex the moment stemCounts says their stem collides --
+    // exactly as it does for a basename collision above, even though here the raw cells
+    // are not just same-stem but IDENTICAL strings.
+    def rawDupCsv = File.createTempFile('rawdup', '.csv')
+    rawDupCsv.text = '''patient_id,image,channels,is_reference
+P6,same.tiff,DAPI|CD3,true
+P6,same.tiff,DAPI,false
+'''
+    def rawDupStemCounts = CsvUtils.stemCountsPerPatient(rawDupCsv.path, 'image')
+    def rawDupId0 = Meta.identityFor('P6', 'same.tiff', 0, [stemCounts: rawDupStemCounts])
+    def rawDupId1 = Meta.identityFor('P6', 'same.tiff', 1, [stemCounts: rawDupStemCounts])
+    assert rawDupId0 != rawDupId1, 'two rows sharing a raw cell must still get distinct identities'
+    def rawDupKept = CsvUtils.resolveKeptChannelsPerSlide(rawDupCsv.path, 'image', ['DAPI','CELLTOX'], false)
+    assert rawDupKept['P6'].size() == 2, 'both rows must produce their own entry, not one overwriting the other'
+    assert rawDupKept['P6'].values().every { it != null }, 'the collapse bug left a slide with no entry at all'
+    assert rawDupKept['P6'][rawDupId0] == ['DAPI', 'CD3']
+    assert rawDupKept['P6'][rawDupId1] == []  // legitimately empty: DAPI already claimed by the reference
+    def rawDupFlat = rawDupKept['P6'].values().flatten()
+    assert rawDupFlat.size() == 2, 'the collapse bug summed this to 0 (second row overwrote the first with [])'
+    assert CsvUtils.countChannelsPerPatient(rawDupCsv.path, 'image', ['DAPI','CELLTOX'], false)['P6'] == 2
+    rawDupCsv.delete()
 
     // AN EMPTY KEEP-SET IS AN ANSWER, NOT AN ABSENCE. A slide whose every declared
     // channel was already claimed contributes NO new markers, and countChannelsPerPatient
@@ -154,7 +189,7 @@ P4,/data/c2/slide.tiff,DAPI|CD8,false
     // consumers have to be able to tell "this slide emits nothing" (emit nothing) from
     // "this slide has no entry" (fall back to its declared list). Groovy's `?:` cannot --
     // it treats [] as falsy -- so every lookup of this map uses containsKey/an explicit
-    // null test, and input_check.nf does the lookup where the raw cell is in scope.
+    // null test, and input_check.nf does the lookup where meta.id is in scope.
     // Resolving the empty entry to the FULL declared list emitted a duplicate marker NAME
     // across two slides of one patient, which is exactly what the one-name-per-patient
     // invariant exists to forbid.
@@ -164,9 +199,10 @@ P5,ref.tiff,DAPI|PANCK|SMA,true
 P5,mov1.tiff,DAPI,false
 '''
     def emptyKeep = CsvUtils.resolveKeptChannelsPerSlide(emptyCsv.path, 'image', ['DAPI','CELLTOX'], false)
-    assert emptyKeep['P5'].containsKey('mov1.tiff')   // present ...
-    assert emptyKeep['P5']['mov1.tiff'] == []         // ... and EMPTY, not the declared list
-    assert emptyKeep['P5']['ref.tiff'] == ['DAPI', 'PANCK', 'SMA']
+    def emptyMov1Id = Meta.identityFor('P5', 'mov1.tiff', 0, [:])
+    assert emptyKeep['P5'].containsKey(emptyMov1Id)   // present ...
+    assert emptyKeep['P5'][emptyMov1Id] == []         // ... and EMPTY, not the declared list
+    assert emptyKeep['P5'][Meta.identityFor('P5', 'ref.tiff', 0, [:])] == ['DAPI', 'PANCK', 'SMA']
     assert CsvUtils.countChannelsPerPatient(emptyCsv.path, 'image', ['DAPI','CELLTOX'], false)['P5'] == 3
     emptyCsv.delete()
 
@@ -639,8 +675,11 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
     // sums per-slide keep-set sizes ACROSS a patient's slides, so a single slide's
     // keep_channels.size() under-reports it whenever a patient has more than one
     // slide).
+    // keepChannelsBySlide is keyed on the ASSIGNED identity (meta.id), matching what
+    // CsvUtils.resolveKeptChannelsPerSlide now produces and what finish() looks up by
+    // -- 'P1_img1' is identityFor('P1', 'img1.ome.tiff', 0, [:]), asserted below.
     def ssCtx = [
-        keepChannelsBySlide: [P1: ['img1.ome.tiff': ['DAPI', 'CD3']]],
+        keepChannelsBySlide: [P1: ['P1_img1': ['DAPI', 'CD3']]],
         imagesCount        : [P1: 2],
         channelsCount      : [P1: 5],  // e.g. this slide's 2 + a second slide's 3
     ]
@@ -662,7 +701,8 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
     // Both ctx maps below must also carry channelsCount AND imagesCount now (fix
     // rounds 1 and 2: there is no more per-slide/default fallback for either --
     // see the channels_count-missing and images_count-missing blocks further down).
-    def emptyKeepCtx = [keepChannelsBySlide: [P1: ['img2.ome.tiff': []]], channelsCount: [P1: 0], imagesCount: [P1: 1]]
+    // 'P1_img2' is identityFor('P1', 'img2.ome.tiff', 0, [:]) -- same reasoning as ssCtx.
+    def emptyKeepCtx = [keepChannelsBySlide: [P1: ['P1_img2': []]], channelsCount: [P1: 0], imagesCount: [P1: 1]]
     def emptyKeepRow = [patient_id: 'P1', image: 'img2.ome.tiff', channels: 'DAPI|CD3', is_reference: 'false']
     def emptyKeepMeta = Meta.fromSamplesheetRow(emptyKeepRow, 'image', 0, emptyKeepCtx)
     assert emptyKeepMeta.keep_channels == []

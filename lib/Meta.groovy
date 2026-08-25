@@ -78,7 +78,15 @@ class Meta {
             is_reference: row.is_reference?.toString()?.toLowerCase() == 'true',
             channels    : splitChannels(row.channels),
         ]
-        return finish(meta, rawImage, ctx)
+        // slideKey is meta.id, not the raw image cell: ctx.keepChannelsBySlide is now
+        // CsvUtils.resolveKeptChannelsPerSlide's map, which keys its inner map on the
+        // SAME identityFor output (see that method's doc for why) -- so this must look
+        // up by the identity it just assigned, exactly as fromCheckpointRow below
+        // already does with meta.id. Looking up by rawImage instead would silently
+        // miss every entry and fall through to meta.channels (the ABSENT-vs-EMPTY
+        // fallback in finish()), which is the same class of inert fix a stale key
+        // would be.
+        return finish(meta, meta.id, ctx)
     }
 
     /**
