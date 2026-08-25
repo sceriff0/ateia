@@ -418,8 +418,9 @@ nextflow_pipeline {
             // <outputDir>/P001/registered/<name>, which nothing ever publishes.
             def segLines = manifests.find { it.name == 'segmented.csv' }.readLines()
             def segRow = segLines[1].split(',')
-            assert segRow[1] == "$projectDir/tests/testdata/P001_ref.ome.tiff".toString() :
-                "segmented.csv rewrote registered_image against the wrong outdir: ${segRow[1]}"
+            // index 2, not 1: 'id' (RULING R17, Task 4.3) is now column 1.
+            assert segRow[2] == "$projectDir/tests/testdata/P001_ref.ome.tiff".toString() :
+                "segmented.csv rewrote registered_image against the wrong outdir: ${segRow[2]}"
 
             def work = new File("${workDir}".toString()).absolutePath
             def problems = []
@@ -496,7 +497,8 @@ nextflow_pipeline {
             // writer produced it — pinned here so a divergence fails rather than
             // quietly producing a manifest add_cycle's own reader cannot consume.
             def regLines = manifests.find { it.name == 'registered.csv' }.readLines()
-            assert regLines[0] == 'patient_id,registered_image,is_reference,channels' :
+            // 'id' (RULING R17, Task 4.3) is column 1 now.
+            assert regLines[0] == 'patient_id,id,registered_image,is_reference,channels' :
                 "registered.csv header drifted: ${regLines[0]}"
 
             def rows = regLines.drop(1).findAll { it.trim() }.collect { it.split(',') }
@@ -504,7 +506,8 @@ nextflow_pipeline {
             // cycle. The reference row is not optional — it is the row a follow-on
             // add_cycle filters on to recover its registration target.
             assert rows.size() == 2 : "expected 2 registered rows, got ${rows.size()}"
-            assert rows.count { it[2] == 'true' } == 1 :
+            // index 3, not 2: is_reference shifted one column right by 'id'.
+            assert rows.count { it[3] == 'true' } == 1 :
                 "registered.csv must carry exactly one is_reference=true row"
             assert rows.every { it[0] == 'P001' }
 

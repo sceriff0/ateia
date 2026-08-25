@@ -60,6 +60,18 @@ workflow VALIS_ADAPTER {
             def all_files = all_items.collect { item -> item[1] }
             def all_metas = all_items.collect { item -> item[0] }
 
+            // NOT a sample meta, and deliberately not built through Meta (lib/Meta.groovy):
+            // this is REGISTER's process-input control tuple (modules/local/register.nf
+            // -- "meta carries patient_id for publishDir consistency across all
+            // processes"), consumed only as tuple(meta, ...)'s first field for a
+            // FAN-IN process call. It carries none of Meta.REQUIRED_KEYS and never
+            // reaches an `emit:` or a [meta, file] sample stream -- the real per-slide
+            // metas are `all_metas`, already built (via Meta.fromSamplesheetRow /
+            // Meta.fromCheckpointRow) by whichever upstream reader produced them.
+            // Documented, permanent exemption in tests/test_meta_module.py's ALLOWED
+            // set: forcing this through Meta.fromSamplesheetRow/fromCheckpointRow would
+            // mean inventing values for five keys this call site has no data to supply
+            // truthfully.
             def meta = [patient_id: patient_id]
             tuple(meta, patient_id, ref_file, all_files, all_metas)
         }

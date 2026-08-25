@@ -521,6 +521,106 @@ class CsvUtils {
         return dot >= 0 ? name.substring(0, dot) : name
     }
 
+    /**
+     * The ctx {@link Meta#fromCheckpointRow} needs (`keepChannelsBySlide` /
+     * `imagesCount` / `channelsCount`), computed ONCE from a checkpoint CSV's OWN
+     * rows -- never from a samplesheet. Every checkpoint reader needs the identical
+     * shape (mirroring INPUT_CHECK's samplesheet-side ctx assembly:
+     * countImagesPerPatient / resolveKeptChannelsPerSlide / countChannelsPerPatient),
+     * so it is written once here rather than re-derived independently by each one.
+     *
+     * WHY THIS ISN'T resolveKeptChannelsPerSlide AGAIN. That resolver keys its
+     * per-slide map on the RAW image cell, because a samplesheet row has no assigned
+     * `id` yet at the point it runs. A checkpoint row already has one -- a real,
+     * assigned identity (RULING R17, lib/Checkpoint.groovy) -- so THIS resolver keys
+     * `keepChannelsBySlide` on `id` directly, matching how `Meta.fromCheckpointRow`
+     * looks its own row up (`finish()`'s `slideKey` argument is `meta.id`). Same
+     * "claim each marker name once per patient, reference row(s) first" algorithm as
+     * resolveKeptChannelsPerSlide, restated against a checkpoint's own columns
+     * instead of a samplesheet's -- the two are independent implementations of one
+     * rule, not one calling the other, because a checkpoint row's `channels` column
+     * is the FULL declared list a writer recorded (`meta.channels.join('|')`), never
+     * a samplesheet cell resolveKeptChannelsPerSlide could re-parse directly.
+     *
+     * A step whose schema does not carry `channels`/`is_reference` (currently only
+     * 'postprocessed') yields an empty keepChannelsBySlide/channelsCount for every
+     * patient rather than throwing: `Meta.fromCheckpointRow` already tolerates that
+     * schema shape (it only requires `is_reference`/`channels` on a row when the
+     * step's OWN schema declares them), so this helper must not be stricter than the
+     * constructor it feeds.
+     *
+     * @param csvPath path to a checkpoint CSV (e.g. csv/segmented.csv)
+     * @param step    the checkpoint step name (lib/Checkpoint.groovy STEPS) -- used
+     *                only to know whether this schema carries channels/is_reference
+     *                at all; the column POSITIONS are still read from the file's own
+     *                header, never assumed from Checkpoint.columns(step)'s order.
+     */
+    static Map metaContextFromCheckpoint(String csvPath, String step) {
+        def empty = [keepChannelsBySlide: [:], imagesCount: [:], channelsCount: [:]]
+
+        def file = new File(csvPath)
+        if (!file.exists()) return empty
+
+        def lines = readCsvLines(file.path)
+        if (lines.size() < 2) return empty  // Header only or empty
+
+        def schemaColumns = Checkpoint.columns(step)
+        def header     = parseCsvLine(lines[0])
+        def patientIdx = header.findIndexOf { it == 'patient_id' }
+        def idIdx      = header.findIndexOf { it == 'id' }
+        if (patientIdx == -1 || idIdx == -1) return empty
+
+        def hasChannels  = schemaColumns.contains('channels')     && header.contains('channels')
+        def hasReference = schemaColumns.contains('is_reference') && header.contains('is_reference')
+        def channelsIdx  = hasChannels  ? header.findIndexOf { it == 'channels' }     : -1
+        def refIdx       = hasReference ? header.findIndexOf { it == 'is_reference' } : -1
+
+        def rowsByPatient = [:].withDefault { [] }
+        lines.drop(1).each { line ->
+            def cols = parseCsvLine(line)
+            def neededIdx = [patientIdx, idIdx, channelsIdx, refIdx].findAll { it >= 0 }
+            if (cols.size() <= (neededIdx ? neededIdx.max() : 0)) return
+            def patientId = cols[patientIdx].trim()
+            if (!patientId) return  // ignore blank patient_id cells
+            def id = cols[idIdx].trim()
+            if (!id) return  // an id-less row can't key keepChannelsBySlide; Meta itself rejects it
+            def channels = hasChannels ? cols[channelsIdx].split('\\|')*.trim().findAll { it } : []
+            def isRef    = hasReference && cols[refIdx].trim().toLowerCase() == 'true'
+            rowsByPatient[patientId] << [id: id, channels: channels, isRef: isRef]
+        }
+
+        def imagesCount = rowsByPatient.collectEntries { patientId, rows -> [patientId, rows.size()] }
+
+        def keepChannelsBySlide = [:]
+        def channelsCount       = [:]
+        rowsByPatient.each { patientId, rows ->
+            // Stable partition: reference row(s) first, everything else in checkpoint
+            // order -- the same rule resolveKeptChannelsPerSlide applies to a
+            // samplesheet's rows.
+            def ordered = rows.findAll { it.isRef } + rows.findAll { !it.isRef }
+            def claimed = new HashSet<String>()
+            def perSlide = [:]
+            ordered.each { row ->
+                def keep = []
+                row.channels.each { ch ->
+                    def name = ch.toUpperCase()
+                    if (claimed.contains(name)) return
+                    claimed << name
+                    keep << ch
+                }
+                perSlide[row.id] = keep
+            }
+            keepChannelsBySlide[patientId] = perSlide
+            channelsCount[patientId] = perSlide.values().sum { it.size() } ?: 0
+        }
+
+        return [
+            keepChannelsBySlide: keepChannelsBySlide,
+            imagesCount        : imagesCount,
+            channelsCount      : channelsCount,
+        ]
+    }
+
     static Map validateMetadata(Map meta, def nuclearMarkers, String context = 'unknown') {
 
         if (!meta.patient_id)

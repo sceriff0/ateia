@@ -249,14 +249,22 @@ with open(OUT_DIR / "valid_preprocessing.csv", "w") as f:
     f.write(f"P002,{TESTDATA_ABS}/P002_ref.ome.tiff,true,DAPI|PANCK|SMA\n")
 print("  Created valid_preprocessing.csv")
 
-# 3b. Valid checkpoint CSV for registration step
+# 3b. Valid checkpoint CSV for registration step. Deliberately WITHOUT an 'id'
+#     column (RULING R17, lib/Checkpoint.groovy -- a real registered.csv now
+#     carries one): --start registration/segmentation both read a checkpoint
+#     through INPUT_CHECK's samplesheet-shaped reader (Meta.fromSamplesheetRow),
+#     which derives id itself from the entry image column and never reads a
+#     persisted 'id' value. Keeping this fixture id-less is what proves that
+#     path stays backward-compatible with an OLDER checkpoint file.
 with open(OUT_DIR / "valid_checkpoint_registration.csv", "w") as f:
     f.write("patient_id,preprocessed_image,is_reference,channels\n")
     f.write(f"P001,{TESTDATA_ABS}/P001_ref.ome.tiff,true,DAPI|PANCK|SMA\n")
     f.write(f"P001,{TESTDATA_ABS}/P001_mov1.ome.tiff,false,DAPI|CD3|CD8\n")
 print("  Created valid_checkpoint_registration.csv")
 
-# 3c. Valid checkpoint CSV for postprocessing step
+# 3c. Valid checkpoint CSV for postprocessing step (used as a --start segmentation
+#     input in tests/checkpoint_manifest.nf.test, also via INPUT_CHECK -- same
+#     id-less-is-fine reasoning as 3b above).
 with open(OUT_DIR / "valid_checkpoint_postprocessing.csv", "w") as f:
     f.write("patient_id,registered_image,is_reference,channels\n")
     f.write(f"P001,{TESTDATA_ABS}/P001_ref.ome.tiff,true,DAPI|PANCK|SMA\n")
@@ -270,15 +278,17 @@ print("  Created valid_checkpoint_postprocessing.csv")
 #         hand-authored fixture the generator does not write (see .gitignore's
 #         comment on this file); P001_cell_mask.tif and sample_contours.json are
 #         both written elsewhere in this script.
+# id (RULING R17, lib/Checkpoint.groovy) IS required here: READ_SEGMENTED_CHECKPOINT
+# builds meta through Meta.fromCheckpointRow, which throws on a row with no id.
 with open(OUT_DIR / "valid_checkpoint_segmented.csv", "w") as f:
-    f.write("patient_id,registered_image,is_reference,channels,cell_mask,nuclei_mask,contours,nucleus_contours\n")
+    f.write("patient_id,id,registered_image,is_reference,channels,cell_mask,nuclei_mask,contours,nucleus_contours\n")
     f.write(
-        f"P001,{TESTDATA_ABS}/P001_ref.ome.tiff,true,DAPI|PANCK|SMA,"
+        f"P001,P001_ref,{TESTDATA_ABS}/P001_ref.ome.tiff,true,DAPI|PANCK|SMA,"
         f"{TESTDATA_ABS}/P001_cell_mask.tif,{TESTDATA_ABS}/P001_nuclei_mask.tif,"
         f"{TESTDATA_ABS}/sample_contours.json,{TESTDATA_ABS}/sample_contours.json\n"
     )
     f.write(
-        f"P001,{TESTDATA_ABS}/P001_mov1.ome.tiff,false,DAPI|CD3|CD8,"
+        f"P001,P001_mov1,{TESTDATA_ABS}/P001_mov1.ome.tiff,false,DAPI|CD3|CD8,"
         f"{TESTDATA_ABS}/P001_cell_mask.tif,{TESTDATA_ABS}/P001_nuclei_mask.tif,"
         f"{TESTDATA_ABS}/sample_contours.json,{TESTDATA_ABS}/sample_contours.json\n"
     )
@@ -288,9 +298,9 @@ print("  Created valid_checkpoint_segmented.csv")
 # under --quantify_compartments false actually has (EXTRACT_NUCLEI_PROPERTIES never
 # ran, but SEGMENT always produces nuclei_mask regardless of that flag).
 with open(OUT_DIR / "valid_checkpoint_segmented_no_compartments.csv", "w") as f:
-    f.write("patient_id,registered_image,is_reference,channels,cell_mask,nuclei_mask,contours,nucleus_contours\n")
+    f.write("patient_id,id,registered_image,is_reference,channels,cell_mask,nuclei_mask,contours,nucleus_contours\n")
     f.write(
-        f"P001,{TESTDATA_ABS}/P001_ref.ome.tiff,true,DAPI|PANCK|SMA,"
+        f"P001,P001_ref,{TESTDATA_ABS}/P001_ref.ome.tiff,true,DAPI|PANCK|SMA,"
         f"{TESTDATA_ABS}/P001_cell_mask.tif,{TESTDATA_ABS}/P001_nuclei_mask.tif,"
         f"{TESTDATA_ABS}/sample_contours.json,\n"
     )
@@ -301,15 +311,19 @@ print("  Created valid_checkpoint_segmented_no_compartments.csv")
 #     <prior_outdir>/csv/, so tests/subworkflows/add_cycle.nf.test only has to
 #     point --prior_outdir at this directory. Every referenced file must really
 #     exist: Nextflow stages merged_csv and pyramid into the processes.
+#     add_cycle.nf's own readers don't dereference the 'id' column (they extract
+#     specific named columns into synthetic per-patient assets, never a per-image
+#     meta), but it's included anyway to match what a REAL registered.csv/
+#     postprocessed.csv now always carries (RULING R17).
 PRIOR_DIR = OUT_DIR / "prior_run" / "csv"
 PRIOR_DIR.mkdir(parents=True, exist_ok=True)
 with open(PRIOR_DIR / "registered.csv", "w") as f:
-    f.write("patient_id,registered_image,is_reference,channels\n")
-    f.write(f"P001,{TESTDATA_ABS}/P001_image.tiff,true,DAPI|PANCK\n")
+    f.write("patient_id,id,registered_image,is_reference,channels\n")
+    f.write(f"P001,P001_image,{TESTDATA_ABS}/P001_image.tiff,true,DAPI|PANCK\n")
 with open(PRIOR_DIR / "postprocessed.csv", "w") as f:
-    f.write("patient_id,cell_csv,cell_geojson,merged_csv,cell_mask,pyramid\n")
+    f.write("patient_id,id,cell_csv,cell_geojson,merged_csv,cell_mask,pyramid\n")
     f.write(
-        f"P001,{TESTDATA_ABS}/P001_merged_quant.csv,{TESTDATA_ABS}/sample_contours.json,"
+        f"P001,P001,{TESTDATA_ABS}/P001_merged_quant.csv,{TESTDATA_ABS}/sample_contours.json,"
         f"{TESTDATA_ABS}/P001_merged_quant.csv,{TESTDATA_ABS}/P001_cell_mask.tif,"
         f"{TESTDATA_ABS}/P001_pyramid.ome.tiff\n"
     )
@@ -812,12 +826,12 @@ print("  Created expected/intensity_csv_columns.txt")
 
 # 8g. Expected preprocessing checkpoint columns
 with open(EXPECTED_DIR / "preproc_checkpoint_columns.txt", "w") as f:
-    f.write("patient_id,preprocessed_image,is_reference,channels\n")
+    f.write("patient_id,id,preprocessed_image,is_reference,channels\n")
 print("  Created expected/preproc_checkpoint_columns.txt")
 
 # 8h. Expected registration checkpoint columns
 with open(EXPECTED_DIR / "reg_checkpoint_columns.txt", "w") as f:
-    f.write("patient_id,registered_image,is_reference,channels\n")
+    f.write("patient_id,id,registered_image,is_reference,channels\n")
 print("  Created expected/reg_checkpoint_columns.txt")
 
 print("\n" + "=" * 70)

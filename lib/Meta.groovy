@@ -19,12 +19,18 @@
     method takes what it needs as an argument. All methods are static (project
     convention for lib/ -- see CLAUDE.md).
 
-    WHAT THIS TASK BUILDS AND WHAT IT DOES NOT. This class exists and is correct
-    in isolation, but nothing calls it yet -- INPUT_CHECK and the checkpoint
-    readers still build meta maps by hand. Converting them (and thereby fixing the
-    four defects above) is Tasks 4.2-4.5. tests/test_meta_module.py's
-    `test_only_meta_groovy_constructs_a_meta_map` guard is xfail'd here for exactly
-    that reason; it starts asserting once the producers are converted.
+    STATUS (as of Task 4.3). Both producers named above are converted:
+    subworkflows/local/input_check.nf (Task 4.2) and
+    subworkflows/local/segmentation.nf's READ_SEGMENTED_CHECKPOINT (Task 4.3, which
+    also added the `id` column every Checkpoint.STEPS schema needed for
+    `fromCheckpointRow` to be callable at all -- see RULING R17 in
+    lib/Checkpoint.groovy). tests/test_meta_module.py's
+    `test_only_meta_groovy_constructs_a_meta_map` guard is no longer xfail'd; it
+    passes for real. The one deliberate, documented exception is
+    subworkflows/local/adapters/valis_adapter.nf's `[patient_id: patient_id]` --
+    not a per-image sample meta at all (it carries none of REQUIRED_KEYS and never
+    reaches an `emit:`), but a REGISTER-process control tuple; see that guard's
+    `ALLOWED` comment for the full reasoning.
 ========================================================================================
 */
 
@@ -116,28 +122,31 @@ class Meta {
         if (schemaColumns.contains('channels'))
             requirePresentInRow(row, 'channels')
 
-        // RULING R17 (schema change lands in Task 4.3): every checkpoint schema
-        // will gain an `id` column, because identity assigned at samplesheet-read
-        // time cannot be re-derived from a checkpoint file -- the file a checkpoint
-        // names is a DERIVED artifact with a different basename than the
-        // samplesheet input that produced it (`preprocessed_image` is e.g.
-        // `P001_slide_corrected.ome.tiff`; a `postprocessed` row names a pyramid).
-        // Until the column exists, NO checkpoint of any step can carry identity
-        // forward correctly, so this throws unconditionally -- it must NOT trust
-        // whatever a caller happened to stuff into row.id in the meantime, because
-        // that is exactly the re-derive-and-diverge failure this class exists to
-        // prevent. Once Task 4.3 adds the column, schemaColumns.contains('id')
-        // becomes true and this branch stops firing; requirePresentInRow(row, 'id')
-        // below then does the real per-row check. Today, every call that clears the
-        // per-row checks above still stops here -- that is intentional (R17):
-        // fromCheckpointRow cannot correctly finish a meta for ANY step until 4.3.
+        // RULING R17, landed: every Checkpoint.STEPS schema now DECLARES an `id`
+        // column (schemaColumns.contains('id') is therefore always true from here
+        // on -- checked against Checkpoint's own table, never restated, in case a
+        // future step is ever added without one). What still needs catching is a
+        // REAL checkpoint FILE written before this column existed: `splitCsv(header:
+        // true)` only creates a Map key for a column the file's own header line
+        // actually declares, so an old file's row simply has no 'id' key at all --
+        // `row.containsKey('id')` is what tells that apart from "the column exists
+        // but this one row's value is blank" (a malformed/hand-edited file, which
+        // requirePresentInRow below catches with its own, more generic message).
+        // This is a per-FILE check (the row shape), not a per-STEP check (the code's
+        // current schema) -- schemaColumns.contains('id') can never again be false,
+        // so testing that here would never fire for the real migration case this
+        // exists to catch.
         if (!schemaColumns.contains('id'))
             throw new IllegalStateException(
-                "Meta.fromCheckpointRow('${step}'): the '${step}' checkpoint schema does not " +
-                "carry an id column yet (see lib/Checkpoint.groovy STEPS). This checkpoint " +
-                "predates identity tracking -- re-run the step that WROTE this checkpoint once " +
-                "the id column has been added there, so the regenerated file records identity " +
-                "instead of forcing it to be re-derived from a filename.")
+                "Meta.fromCheckpointRow('${step}'): lib/Checkpoint.groovy's '${step}' schema " +
+                "does not declare an 'id' column. Every STEPS entry must carry one (RULING R17) " +
+                "-- this is a Checkpoint.groovy bug, not a bad checkpoint file.")
+        if (!row.containsKey('id'))
+            throw new IllegalStateException(
+                "Meta.fromCheckpointRow('${step}'): this '${step}' checkpoint row has no 'id' " +
+                "column. This checkpoint predates identity tracking (RULING R17) -- re-run the " +
+                "step that WROTE this checkpoint so the regenerated file records identity, " +
+                "rather than forcing it to be re-derived from a filename.")
         requirePresentInRow(row, 'id')
 
         def meta = [
