@@ -600,6 +600,104 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
     catch (IllegalArgumentException ignored) { badMethod = true }
     assert badMethod, 'WarpBackends.of must reject an unknown method'
 
+    // ------------------------------------------------------------------ //
+    // Meta — the one constructor for every meta map (Task 4.1)
+    // ------------------------------------------------------------------ //
+    assert Meta.REQUIRED_KEYS.containsAll([
+        'patient_id', 'id', 'is_reference', 'channels',
+        'keep_channels', 'channels_count', 'images_count',
+    ])
+
+    // identityFor: RULING R2, verified directly against Nextflow's own
+    // file(...).simpleName earlier in this task -- it strips EVERY extension
+    // (file('slide.ome.tiff').simpleName == 'slide'), not just the last one.
+    // identityFor must reproduce that for a non-colliding row.
+    assert Meta.identityFor('P1', 'slide.ome.tiff', 0, [:]) == 'P1_slide'
+    assert Meta.identityFor('P1', 'slide.tiff', 0, [:])     == 'P1_slide'
+    assert Meta.identityFor('P1', 'slide.tif', 0, [:])      == 'P1_slide'
+    assert Meta.identityFor('P1', 'noext', 0, [:])          == 'P1_noext'
+    // Already patient-prefixed: not re-prefixed.
+    assert Meta.identityFor('P1', 'P1_slide.ome.tiff', 0, [:]) == 'P1_slide'
+    // A collision (stemCounts says two rows of P1 share the 'slide' stem) is
+    // disambiguated by rowIndex; a non-colliding stem for a different patient
+    // sharing the same stem text is NOT (the counts map is keyed per-patient).
+    def collideCtx = [stemCounts: ['P1::slide': 2]]
+    assert Meta.identityFor('P1', 'cycle1/slide.ome.tiff', 0, collideCtx) == 'P1_slide_000'
+    assert Meta.identityFor('P1', 'cycle2/slide.ome.tiff', 1, collideCtx) == 'P1_slide_001'
+    assert Meta.identityFor('P2', 'slide.ome.tiff', 0, collideCtx)        == 'P2_slide'
+
+    // fromSamplesheetRow: full construction, REQUIRED_KEYS present, dual invariant
+    // upheld (channels_count comes from ctx.channelsCount, the per-PATIENT total --
+    // NOT meta.keep_channels.size(), which is only a per-SLIDE count. Conflating
+    // the two was a bug in this task's own brief: CsvUtils.countChannelsPerPatient
+    // sums per-slide keep-set sizes ACROSS a patient's slides, so a single slide's
+    // keep_channels.size() under-reports it whenever a patient has more than one
+    // slide).
+    def ssCtx = [
+        keepChannelsBySlide: [P1: ['img1.ome.tiff': ['DAPI', 'CD3']]],
+        imagesCount        : [P1: 2],
+        channelsCount      : [P1: 5],  // e.g. this slide's 2 + a second slide's 3
+    ]
+    def ssRow  = [patient_id: 'P1', image: 'img1.ome.tiff', channels: 'DAPI|CD3', is_reference: 'true']
+    def ssMeta = Meta.fromSamplesheetRow(ssRow, 'image', 0, ssCtx)
+    assert Meta.REQUIRED_KEYS.every { ssMeta.containsKey(it) }
+    assert ssMeta.patient_id     == 'P1'
+    assert ssMeta.id             == 'P1_img1'
+    assert ssMeta.is_reference   == true
+    assert ssMeta.channels       == ['DAPI', 'CD3']
+    assert ssMeta.keep_channels  == ['DAPI', 'CD3']
+    assert ssMeta.channels_count == 5
+    assert ssMeta.images_count   == 2
+
+    // keep_channels ABSENT vs EMPTY: a slide with no entry in keepChannelsBySlide
+    // falls back to its declared channels; a slide with an EXPLICIT empty list
+    // (every marker already claimed by an earlier slide) keeps [], not the
+    // declared list -- `?:` cannot tell these apart because [] is falsy in Groovy.
+    def emptyKeepCtx = [keepChannelsBySlide: [P1: ['img2.ome.tiff': []]]]
+    def emptyKeepRow = [patient_id: 'P1', image: 'img2.ome.tiff', channels: 'DAPI|CD3', is_reference: 'false']
+    def emptyKeepMeta = Meta.fromSamplesheetRow(emptyKeepRow, 'image', 0, emptyKeepCtx)
+    assert emptyKeepMeta.keep_channels == []
+    assert emptyKeepMeta.channels_count == 0
+    def absentKeepCtx = [keepChannelsBySlide: [P1: [:]]]
+    def absentKeepMeta = Meta.fromSamplesheetRow(emptyKeepRow, 'image', 0, absentKeepCtx)
+    assert absentKeepMeta.keep_channels == ['DAPI', 'CD3']
+
+    // fromCheckpointRow: SAME key set as fromSamplesheetRow, id taken verbatim
+    // from the checkpoint row rather than re-derived from a filename.
+    def ckCtx = [
+        keepChannelsBySlide: [P1: [P1_slide: ['CD3']]],
+        imagesCount        : [P1: 1],
+        channelsCount      : [P1: 3],
+    ]
+    def ckRow  = [patient_id: 'P1', id: 'P1_slide', is_reference: 'false', channels: 'DAPI|CD3|CELLTOX']
+    def ckMeta = Meta.fromCheckpointRow(ckRow, 'preprocessed', ckCtx)
+    assert ckMeta.keySet() == ssMeta.keySet()
+    assert ckMeta.id             == 'P1_slide'
+    assert ckMeta.is_reference   == false
+    assert ckMeta.keep_channels  == ['CD3']
+    assert ckMeta.channels_count == 3
+
+    // Fail loudly, naming the missing key, rather than defaulting.
+    def missingPatientId = false
+    try { Meta.fromSamplesheetRow([image: 'x.tiff', channels: 'DAPI'], 'image', 0, [:]) }
+    catch (IllegalArgumentException ignored) { missingPatientId = true }
+    assert missingPatientId, 'Meta.fromSamplesheetRow must reject a row with no patient_id'
+
+    def missingImageCol = false
+    try { Meta.fromSamplesheetRow([patient_id: 'P1', channels: 'DAPI'], 'image', 0, [:]) }
+    catch (IllegalArgumentException ignored) { missingImageCol = true }
+    assert missingImageCol, 'Meta.fromSamplesheetRow must reject a row missing the image column'
+
+    def blankStep = false
+    try { Meta.fromCheckpointRow([patient_id: 'P1', id: 'x'], '  ', [:]) }
+    catch (IllegalArgumentException ignored) { blankStep = true }
+    assert blankStep, 'Meta.fromCheckpointRow must reject a blank step'
+
+    def missingId = false
+    try { Meta.fromCheckpointRow([patient_id: 'P1'], 'preprocessed', [:]) }
+    catch (IllegalArgumentException ignored) { missingId = true }
+    assert missingId, 'Meta.fromCheckpointRow must reject a checkpoint row with no id'
+
     // println, NOT log.info: nf-test's underlying `nextflow ... -quiet` run
     // suppresses log.info from stdout entirely (observed directly: a log.info
     // line here never appears in workflow.stdout under nf-test, even though the
