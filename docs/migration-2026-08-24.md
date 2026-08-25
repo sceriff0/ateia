@@ -45,18 +45,40 @@ This is correct — a cell with no nucleus has no nuclear median, and `0.0` is a
 measurement, not an absence — but it changes the shape of every feature vector a
 consumer builds.
 
-**Who breaks.** Any code indexing a measurement directly rather than through
-`.get()`:
+**Who breaks — and it is not who you would guess.** The obvious answer is "any
+consumer that indexes a measurement directly", and for the consumer that
+matters, `qupath-extension-flowpath`, that answer is **wrong**. It is Java;
+there is no throwing subscript, and its one lookup site already null-checks:
 
-```python
-# breaks: KeyError on a cell with no nuclear overlap
-v = measurements["CD3: Nucleus: Median"]
-
-# correct: absence is a real, expected state
-v = measurements.get("CD3: Nucleus: Median")
-if v is None:
-    ...          # this cell has no nucleus; it is not a zero
+```java
+// CellIndex.java — absence has always produced NaN, not an exception
+Number val = getMeasurements(objects[i]).get(resolved);
+col[i] = val != null ? val.doubleValue() : Double.NaN;
 ```
+
+Per-cell gate classification does not change either. `isAtOrAbove` is
+`value >= threshold`, and in Java `NaN >= t` is `false` — the same branch a
+`0.0` took for any positive threshold. **The same cells are called positive.**
+
+What changes is the DISTRIBUTION. FlowPath deliberately excludes NaN from
+percentiles, clip bounds and z-scores (`GateEditorPane`: *"excluding NaN channel
+values so downstream percentile/clip logic cannot produce NaN bounds"*), whereas
+the artificial `0.0`s were included. Removing a block of zeros from the low tail
+moves every percentile-derived threshold upward, so:
+
+* a gate saved as a **percentile** selects a different set of cells on the same
+  slide before and after this change;
+* a gate saved as an **absolute** threshold is unaffected;
+* any "% positive" denominator computed over a nuclear channel changes, because
+  cells with no nucleus have left the denominator instead of sitting at zero.
+
+The second, quieter risk is capability detection.
+`CompartmentCapability.scan()` unions measurement keys over the **first 100
+detections**. Every cell used to carry every key, so one cell sufficed. Now, if
+those first 100 all lack nuclear overlap, the `Nucleus` compartment is never
+offered in the UI at all and the marker silently downgrades to whole-cell. That
+class already carries a comment about this exact failure mode from a previous
+bug, where gating sampled 100 cells and the UMAP 20.
 
 **The key grammar is unchanged and case-sensitive.** Keys are built by
 `bin/utils/measurements.py::measurement_key` as:
@@ -173,14 +195,27 @@ only be made on the first, ordinary run of a cyclic-IF series. See
 ## Notifying the consumer
 
 `qupath-extension-flowpath` consumes `cells.geojson` and is affected by item 2.
-The change it needs is one line per read site:
+Checked against the extension's source rather than assumed, so the ask is
+specific — and **smaller than it first looked**.
 
-```diff
-- val = measurements["CD3: Nucleus: Median"]
-+ val = measurements.get("CD3: Nucleus: Median")
-```
+**Do not send a `.get()` diff.** An earlier draft of this note asked for one.
+FlowPath is Java, its lookup already null-checks, and NaN is handled throughout;
+there is no crash to fix.
 
-with the `None` case handled as "this cell has no nucleus", never as zero.
+What is worth raising, in order of value:
+
+1. **Re-derive percentile-based gates** against a post-change export, and treat
+   pre/post percentile thresholds as incomparable. Absolute thresholds carry
+   over unchanged. This is a data question, not a code change, and it is the one
+   that can quietly alter a published result.
+2. **Harden `CompartmentCapability.scan()`** so it does not depend on the first
+   N detections happening to carry nuclear keys — scan until the key set
+   stabilises, or prefer cells that have them, rather than taking a flat prefix.
+   This is the only code change worth proposing, and the class's own comment
+   already documents a near-miss of the same shape.
+3. **Optionally, distinguish "no nucleus" from "measured zero" in the UI.** They
+   are now genuinely different states and the export can express the difference;
+   today both read as "not positive".
 
 **This has not been filed.** Opening the issue is a push to a sibling repository
-and needs the maintainer's go-ahead; it is listed here so it is not forgotten.
+and needs the maintainer's go-ahead; it is written down here so it is not lost.
