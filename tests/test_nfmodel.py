@@ -131,6 +131,58 @@ def test_block_extent_ignores_braces_inside_strings():
     assert "TAIL" not in text[start:end]
 
 
+def test_block_extent_handles_a_publishdir_list_containing_a_closure():
+    """`publishDir` is routinely a LIST of maps, each holding its own closure
+    -- `publishDir = [[path: {...}], [path: {...}]]` -- and a maintainer's
+    inline comment near one of those closures can itself carry a stray,
+    unbalanced `}` (explaining why the value looks the way it does). A brace
+    count that is not comment-aware reads that stray `}` as closing real
+    nesting one level early and truncates the block well before its actual
+    close -- unlike the interpolated `${...}` inside the path strings here,
+    whose brace IS balanced and so does not, by itself, distinguish a naive
+    walk from a correct one; the comment's unmatched `}` is what does."""
+    text = (
+        "withName: 'A' {\n"
+        "    publishDir = [\n"
+        "        [ path: { \"a/${meta.id}\" }, mode: 'copy' ],\n"
+        "        // stray } inside this comment must not count\n"
+        "        [ path: { \"b/${meta.id}\" }, mode: 'copy', pattern: '*.png' ],\n"
+        "    ]\n"
+        "    cpus = 1\n"
+        "}\n"
+        "TAIL"
+    )
+    start = text.index("{") + 1
+    end = block_extent(text, start)
+    assert "cpus = 1" in text[start:end]
+    assert "TAIL" not in text[start:end]
+
+
+def test_block_extent_does_not_bleed_into_the_next_selector_block():
+    """Two adjacent `withName:` selector blocks, back to back -- the first
+    one's `ext.args` value is a string containing an unmatched `{` (a
+    legitimate flag value, e.g. a glob-ish pattern, not real nesting). A
+    brace count that is not string-aware reads that `{` as opening real
+    nesting with nothing left to close it, so it never reaches depth zero at
+    the block's real closing `}` and keeps counting straight through it and
+    into the next selector's own body -- bleeding block A's extent into
+    block B."""
+    text = (
+        "withName: 'A' {\n"
+        "    ext.args = '--pattern {unmatched'\n"
+        "    cpus = 1\n"
+        "}\n"
+        "withName: 'B' {\n"
+        "    cpus = 99\n"
+        "}\n"
+    )
+    start = text.index("{") + 1
+    end = block_extent(text, start)
+    assert "cpus = 1" in text[start:end]
+    assert "cpus = 99" not in text[start:end]
+    assert "'B'" not in text[start:end]
+
+
 def test_nf_files_is_recursive():
     """A non-recursive glob('*.nf') misses modules/local/sub/*.nf. One guard
     used exactly that and could not see files it claimed to cover."""
@@ -223,43 +275,130 @@ def test_param_refs_excludes_map_method_calls():
     assert param_refs("// params.commented") == {"commented"}  # caller strips first
 
 
-GUARDS = [
-    "tests/test_resume_determinism.py",
-    "tests/test_resource_label_coverage.py",
-    "tests/test_no_duplicate_param_defaults.py",
-    "tests/test_step_vocabulary_consistency.py",
-    "tests/test_container_build_matrix.py",
-    "tests/test_container_image_naming.py",
-    "tests/test_layout.py",
-]
+# --------------------------------------------------------------------------
+# Anti-vacuity: no test file may privately re-implement a Nextflow/Groovy
+# source parse tests.nfmodel already provides.
+#
+# This USED to be a hardcoded GUARDS list of seven files. That list was
+# itself an instance of this phase's own recurring defect shape: correct the
+# day it was written, silently stale the moment an eighth guard was added
+# elsewhere and nobody remembered to list it. A repo-wide count taken while
+# fixing that list found >=24 additional tests/test_*.py files privately
+# parsing Nextflow/Groovy source, unlisted and unchecked -- the exact decay
+# this file exists to prevent, discovered inside its own capstone.
+#
+# So the targets are DISCOVERED, not enumerated: any tests/test_*.py that
+# reads a file (`.read_text()`/`.glob()`/`.rglob()`) while mentioning `.nf`,
+# `.groovy` or `modules.config` anywhere in its own source. A ninth guard
+# added tomorrow is covered the moment it exists, not only once someone
+# remembers to add it to a list.
+#
+# As of 2026-08-25: 32 files discovered. 8 already import tests.nfmodel (the
+# 7 guards Task 1.6 repointed, plus this file). The other 24 are pre-existing
+# private parses not yet repointed -- tracked honestly below as debt, not
+# silently passed.
+# --------------------------------------------------------------------------
 
 
-def test_guard_list_is_not_vacuous():
-    """GUARDS must name files that really exist.
+def _discover_nf_source_readers() -> list:
+    """Every tests/test_*.py file that reads Nextflow/Groovy source at all."""
+    found = []
+    for path in sorted((REPO_ROOT / "tests").glob("test_*.py")):
+        text = path.read_text()
+        mentions_source = ".nf" in text or ".groovy" in text or "modules.config" in text
+        reads_files = bool(re.search(r"\.(read_text|glob|rglob)\(", text))
+        if mentions_source and reads_files:
+            found.append(path)
+    return found
 
-    The loop in test_no_guard_parses_nextflow_source_privately silently skips
-    a path that does not resolve -- a typo'd or deleted entry would make that
-    test pass while checking nothing for it, exactly the failure mode this
-    whole phase exists to close."""
-    missing = [rel for rel in GUARDS if not (REPO_ROOT / rel).is_file()]
-    assert not missing, f"GUARDS names file(s) that do not exist: {missing}"
+
+# Every entry here carries the SAME reason, deliberately -- this repo has
+# been bitten before by an allowlist entry with a bespoke, invented
+# justification that turned out to have counterexamples elsewhere (see
+# lib/ParamUtils.groovy's `process_high_memory` prose-only label, or the
+# per-file excuses `ENTRY_COLUMN_EXEMPT` in test_step_vocabulary_consistency.py
+# explicitly warns against reproducing here). A uniform, literally-true
+# reason -- "this file has not been repointed yet" -- cannot drift out of
+# sync with itself the way a bespoke one can.
+_UNREPOINTED_REASON = "pre-existing private parse, not yet repointed (2026-08-25)"
+
+UNREPOINTED_NF_SOURCE_READERS = {
+    "tests/test_apply_basic_profiles.py": _UNREPOINTED_REASON,
+    "tests/test_basic_illumination_lazy_read.py": _UNREPOINTED_REASON,
+    "tests/test_basicpy_defaults_are_deliberate.py": _UNREPOINTED_REASON,
+    "tests/test_basicpy_module_is_vendored_unmodified.py": _UNREPOINTED_REASON,
+    "tests/test_compartment_mode_routing.py": _UNREPOINTED_REASON,
+    "tests/test_concurrency_params.py": _UNREPOINTED_REASON,
+    "tests/test_container_harmonisation.py": _UNREPOINTED_REASON,
+    "tests/test_group_key_unwrapped.py": _UNREPOINTED_REASON,
+    "tests/test_merge_pyramid_streaming.py": _UNREPOINTED_REASON,
+    "tests/test_module_conventions.py": _UNREPOINTED_REASON,
+    "tests/test_nextflow_strict_syntax.py": _UNREPOINTED_REASON,
+    "tests/test_no_secret_interpolation.py": _UNREPOINTED_REASON,
+    "tests/test_no_shadowing_empty_guards.py": _UNREPOINTED_REASON,
+    "tests/test_nuclear_marker_routing.py": _UNREPOINTED_REASON,
+    "tests/test_nullable_numeric_params_no_elvis.py": _UNREPOINTED_REASON,
+    "tests/test_pixel_size_is_passed.py": _UNREPOINTED_REASON,
+    "tests/test_process_alias_config.py": _UNREPOINTED_REASON,
+    "tests/test_reg_presets_inlined_in_config.py": _UNREPOINTED_REASON,
+    "tests/test_seg_backends.py": _UNREPOINTED_REASON,
+    "tests/test_seg_backends_ctx_params.py": _UNREPOINTED_REASON,
+    "tests/test_seg_qc_geojson_equivalence.py": _UNREPOINTED_REASON,
+    "tests/test_stub_control_json_contract.py": _UNREPOINTED_REASON,
+    "tests/test_versions_envelope.py": _UNREPOINTED_REASON,
+    "tests/test_warp_seg_qc.py": _UNREPOINTED_REASON,
+}
+
+
+def test_allowlist_only_shrinks():
+    """Every UNREPOINTED_NF_SOURCE_READERS entry must still be real, undischarged
+    debt: the file must still exist, must still be discovered by
+    _discover_nf_source_readers(), and must still lack the tests.nfmodel
+    import. An entry that no longer applies -- the file was deleted, or was
+    repointed by a later task without being removed here -- is a hard
+    failure. The list may only ever be edited to shrink it; it cannot be left
+    to rot in place the way GUARDS did."""
+    discovered = {p.relative_to(REPO_ROOT).as_posix() for p in _discover_nf_source_readers()}
+    stale = []
+    for rel in UNREPOINTED_NF_SOURCE_READERS:
+        path = REPO_ROOT / rel
+        if not path.is_file():
+            stale.append(f"{rel}: no longer exists -- remove it from the allowlist")
+            continue
+        if "from tests.nfmodel import" in path.read_text():
+            stale.append(f"{rel}: already imports tests.nfmodel -- remove it from the allowlist")
+            continue
+        if rel not in discovered:
+            stale.append(
+                f"{rel}: no longer reads Nextflow/Groovy source -- remove it from the allowlist"
+            )
+    assert not stale, "\n".join(stale)
 
 
 def test_no_guard_parses_nextflow_source_privately():
-    """Every guard over .nf/.config source queries tests.nfmodel. A private
-    regex parse is how four guards came to pass while checking nothing --
-    each had a different blind spot, and none was visible from the interface.
+    """Every tests/test_*.py file that reads Nextflow/Groovy source either
+    queries tests.nfmodel, or is honestly tracked as not-yet-repointed debt in
+    UNREPOINTED_NF_SOURCE_READERS. A private regex parse is how four guards
+    came to pass while checking nothing -- each had a different blind spot,
+    and none was visible from the interface -- and a hardcoded list of which
+    files to check is the same failure shape one level up (see the discovery
+    rationale above). This scans every DISCOVERED file, not a named list, so
+    a new private parse is caught the moment it is written, not only once
+    someone remembers to name it here.
 
     If you genuinely need a parse the model does not expose, ADD IT TO THE
     MODEL (with a case in this file), do not re-implement it here."""
     private = re.compile(r"re\.(sub|search|finditer|findall)\([^)]*/\\\*")
     offenders = []
-    for rel in GUARDS:
-        text = (REPO_ROOT / rel).read_text()
-        if "from tests.nfmodel import" not in text and (
-            ".nf" in text or "modules.config" in text
-        ):
-            offenders.append(f"{rel}: parses Nextflow source without the model")
+    for path in _discover_nf_source_readers():
+        rel = path.relative_to(REPO_ROOT).as_posix()
+        text = path.read_text()
+        has_import = "from tests.nfmodel import" in text
+        if not has_import and rel not in UNREPOINTED_NF_SOURCE_READERS:
+            offenders.append(
+                f"{rel}: parses Nextflow source without the model, and is not on "
+                "the UNREPOINTED_NF_SOURCE_READERS debt allowlist"
+            )
         if private.search(text):
             offenders.append(f"{rel}: hand-rolled block-comment regex")
     assert not offenders, "\n".join(offenders)
