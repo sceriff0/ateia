@@ -82,10 +82,24 @@ class Meta {
         // CsvUtils.resolveKeptChannelsPerSlide's map, which keys its inner map on the
         // SAME identityFor output (see that method's doc for why) -- so this must look
         // up by the identity it just assigned, exactly as fromCheckpointRow below
-        // already does with meta.id. Looking up by rawImage instead would silently
-        // miss every entry and fall through to meta.channels (the ABSENT-vs-EMPTY
-        // fallback in finish()), which is the same class of inert fix a stale key
-        // would be.
+        // already does with meta.id. Looking up by the raw rawImage cell instead (a
+        // key that plainly isn't in an identity-keyed map at all) would miss cleanly
+        // and fall through to meta.channels via finish()'s ABSENT-vs-EMPTY branch --
+        // wrong, but loud in principle, since every row would get the full declared
+        // list rather than a real per-slide answer.
+        //
+        // THE WORSE FAILURE IS NOT THAT ONE. It is `rowIndex` itself being wrong for a
+        // colliding row (this task's Critical fix round: CsvUtils.rowIndexPerPatient
+        // used to collapse two rows sharing a raw cell to the SAME index, so
+        // identityFor assigned them the SAME meta.id). That does not miss the lookup
+        // at all -- the map DOES contain an entry under that id, just the WRONG row's.
+        // A row can therefore silently inherit another row's keep_channels (verified:
+        // the reference row read back the second row's [], not its own [DAPI, CD3]),
+        // which finish()'s containsKey-based ABSENT-vs-EMPTY check cannot catch, because
+        // the entry is genuinely present -- just for the wrong slide. Correctness here
+        // depends on identityFor's inputs (patientId, rawImage, rowIndex, stemCounts)
+        // being the SAME values resolveKeptChannelsPerSlide computed its key from, not
+        // merely on which field name finish() is called with.
         return finish(meta, meta.id, ctx)
     }
 

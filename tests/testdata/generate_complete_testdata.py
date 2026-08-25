@@ -729,6 +729,23 @@ with open(OUT_DIR / "duplicate_basename.csv", "w") as f:
     f.write(f"P001,{TESTDATA_ABS}/cycle2/slide.ome.tiff,false,DAPI|CD8\n")
 print("  Created duplicate_basename.csv")
 
+# duplicate_raw_path.csv: two rows of one patient sharing the EXACT SAME raw
+# path_to_file cell (not just the same basename -- the literal identical string),
+# an ordinary copy-paste data-entry error that validateInputSemantics does not
+# reject. This is the fix-round-1 regression for Task 4.4: CsvUtils.rowIndexPerPatient
+# used to key a SCALAR by "patientId::rawImageCell", so the second row's index
+# silently overwrote the first's (last write wins) and BOTH rows read back the SAME
+# index -- Meta.fromSamplesheetRow then assigned them the SAME meta.id, and the
+# reference row's real keep-set ([DAPI, CD3]) was silently displaced by the second
+# row's ([], since its only channel DAPI is already claimed) under that shared id.
+# Patient total is 2 (DAPI+CD3 from the reference; the duplicate row contributes
+# nothing new).
+with open(OUT_DIR / "duplicate_raw_path.csv", "w") as f:
+    f.write("patient_id,path_to_file,is_reference,channels\n")
+    f.write(f"P001,{TESTDATA_ABS}/P001_ref.ome.tiff,true,DAPI|CD3\n")
+    f.write(f"P001,{TESTDATA_ABS}/P001_ref.ome.tiff,false,DAPI\n")
+print("  Created duplicate_raw_path.csv")
+
 # 7g. Registration QC fixtures matching WARP_SEG_QC.out.metrics / .out.per_cell,
 # so tests/subworkflows/local/postprocessing.nf.test can pass non-empty
 # ch_reg_qc / ch_reg_residuals into POSTPROCESSING and exercise the

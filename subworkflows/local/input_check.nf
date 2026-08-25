@@ -62,6 +62,13 @@ workflow INPUT_CHECK {
     // `groupTuple` downstream is free to reorder and which resume caching cannot depend
     // on. Both are keyed the same way resolveKeptChannelsPerSlide already keys its map:
     // "patientId::rawImageCell" / row-scoped on that same raw cell -- never a basename.
+    //
+    // row_index_by_key's VALUE is a LIST per key, not a scalar -- see
+    // CsvUtils.rowIndexPerPatient's doc. "patientId::rawImageCell" is not unique when
+    // two rows share a raw cell (a duplicate row, or both blank), so the `.map` below
+    // MUST consume by popping the front of the matching list on every row it processes
+    // -- never by re-reading the same list entry -- which is what correctly reunites
+    // each row with its own index despite the shared key.
     def stem_counts       = CsvUtils.stemCountsPerPatient(samplesheet, image_column)
     def row_index_by_key  = CsvUtils.rowIndexPerPatient(samplesheet, image_column)
 
@@ -82,7 +89,15 @@ workflow INPUT_CHECK {
         .map { row ->
             def raw_image  = row[image_column]?.toString()?.trim()
             def patient_id = row.patient_id?.toString()?.trim()
-            def row_index  = row_index_by_key["${patient_id}::${raw_image}".toString()] ?: 0
+            // Pop the FRONT of this key's index list, not a plain lookup: two rows can
+            // share "patientId::rawImage" (see CsvUtils.rowIndexPerPatient's doc), and
+            // popping is what reunites each row with its own file-order-derived index
+            // instead of both rows reading back the same one. Safe here specifically
+            // because splitCsv (above) reading a single file emits in file order,
+            // deterministically -- this `.map` is chained directly off it with nothing
+            // in between that could reorder rows.
+            def row_indices = row_index_by_key["${patient_id}::${raw_image}".toString()]
+            def row_index   = (row_indices && !row_indices.isEmpty()) ? row_indices.remove(0) : 0
 
             def meta = Meta.fromSamplesheetRow(row, image_column, row_index, meta_ctx)
 

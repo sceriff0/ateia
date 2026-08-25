@@ -183,6 +183,33 @@ P6,same.tiff,DAPI,false
     assert CsvUtils.countChannelsPerPatient(rawDupCsv.path, 'image', ['DAPI','CELLTOX'], false)['P6'] == 2
     rawDupCsv.delete()
 
+    // NOTE: the block above only proves resolveKeptChannelsPerSlide's OWN internal
+    // row index (rowsByPatient[patientId].size(), captured while it builds its rows)
+    // is collision-safe -- it never goes through CsvUtils.rowIndexPerPatient. THAT
+    // function is the SEPARATE, real production call site input_check.nf's `.map`
+    // closure actually uses to get rowIndex for Meta.fromSamplesheetRow, and it had
+    // its OWN, independent collision: it used to key a SCALAR by
+    // "patientId::rawImageCell", so two rows sharing a raw cell (or both blank) had
+    // the SECOND row's index silently overwrite the first's, and BOTH rows read back
+    // the SAME index -- Meta.fromSamplesheetRow then assigned them the SAME meta.id,
+    // and one row's real keep-set silently displaced the other's under that shared id
+    // (a wrong-but-PRESENT entry, not a clean miss -- see lib/Meta.groovy's
+    // fromSamplesheetRow doc). Pinned directly, against the real function, below.
+    // Pinned END TO END -- through Nextflow's own splitCsv and input_check.nf's real
+    // `.map` closure, not a hand-rebuilt copy of it -- by
+    // tests/subworkflows/local/input_check.nf.test's "two rows sharing the identical
+    // raw path cell get distinct id and keep-set" case.
+    def rowIdxCsv = File.createTempFile('rowindexdup', '.csv')
+    rowIdxCsv.text = '''patient_id,image,channels,is_reference
+P8,same.tiff,DAPI|CD3,true
+P8,same.tiff,DAPI,false
+P8,other.tiff,CD20,false
+'''
+    def rowIdx = CsvUtils.rowIndexPerPatient(rowIdxCsv.path, 'image')
+    assert rowIdx['P8::same.tiff']  == [0, 1], 'two rows sharing a raw cell must each keep their OWN index, in file order, not one overwriting the other'
+    assert rowIdx['P8::other.tiff'] == [2]
+    rowIdxCsv.delete()
+
     // AN EMPTY KEEP-SET IS AN ANSWER, NOT AN ABSENCE. A slide whose every declared
     // channel was already claimed contributes NO new markers, and countChannelsPerPatient
     // counts it as contributing ZERO. Its entry must therefore be PRESENT and EMPTY:

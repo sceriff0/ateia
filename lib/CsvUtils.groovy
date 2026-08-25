@@ -501,20 +501,45 @@ class CsvUtils {
     }
 
     /**
-     * 0-based index of each row within its patient's rows, IN SAMPLESHEET
-     * ORDER -- keyed on "patientId::rawImageCell" (the same raw `<imageColumn>`
-     * cell resolveReferenceRows/resolveKeptChannelsPerSlide key on), so a
-     * caller building meta from a `splitCsv` row can look its own index up by
-     * value rather than counting channel arrivals. Row order in a `.splitCsv()`
-     * channel is not guaranteed to survive every future operator inserted
-     * upstream of the `.map` that builds meta, so identity must not depend on
-     * it -- resume caching requires the index to be a pure function of the
-     * samplesheet's own row order, never of arrival order.
+     * Each patient's rows' 0-based positions, IN SAMPLESHEET ORDER, grouped by
+     * "patientId::rawImageCell" (the same raw `<imageColumn>` cell
+     * resolveReferenceRows/resolveKeptChannelsPerSlide key on), so a caller
+     * building meta from a `splitCsv` row can look its own index up by content
+     * instead of counting channel arrivals itself.
+     *
+     * RETURNS A LIST PER KEY, NOT A SCALAR -- "patientId::rawImageCell" is NOT
+     * guaranteed unique. Two rows of one patient can share an identical raw
+     * cell (a duplicate row) or both leave it blank; `validateInputSemantics`
+     * does not reject either. A single scalar per key used to collapse under
+     * that collision (last write wins), so BOTH rows read back the SAME index,
+     * Meta.fromSamplesheetRow assigned them the SAME id, and one of the two
+     * then silently displaced the other in ctx.keepChannelsBySlide (looked up
+     * by that shared id) -- reproducing, one call site up, exactly the
+     * row.raw-keying collapse this same task closes in
+     * resolveKeptChannelsPerSlide.
+     *
+     * THE CALLER MUST CONSUME BY POSITION, NOT BY RE-READING THE VALUE: pop
+     * (remove) the FIRST element of the matching key's list on every row it
+     * processes, never just peek it. input_check.nf does exactly that. This is
+     * safe -- and remains a pure function of the FILE's own row order rather
+     * than of channel/task arrival order, which resume caching cannot depend
+     * on -- PRECISELY BECAUSE `splitCsv()` reading a single path is a
+     * synchronous, single-producer parse that emits in file order
+     * deterministically. It is not the multi-producer, completion-order
+     * dependent case `groupTuple()` is (see this class's callers for why THAT
+     * ordering can't be trusted). Two rows sharing a key are visited in the
+     * same relative order both when this method builds their list here and
+     * when the caller's `.map` consumes it there -- both walks are driven by
+     * the identical, single underlying file read -- so popping front-to-back
+     * reunites each row with its own, file-order-derived index. This still
+     * depends on nothing being inserted between `splitCsv` and that `.map`
+     * that could reorder items (a pre-existing caveat, unchanged by this
+     * method's contract).
      *
      * @param csvPath     path to the samplesheet
      * @param imageColumn the column holding this step's entry image
      */
-    static Map<String, Integer> rowIndexPerPatient(String csvPath, String imageColumn) {
+    static Map<String, List<Integer>> rowIndexPerPatient(String csvPath, String imageColumn) {
         def file = new File(csvPath)
         if (!file.exists()) return [:]
 
@@ -527,7 +552,7 @@ class CsvUtils {
         if (patientIdx == -1 || imageIdx == -1) return [:]
 
         def nextIndex = [:].withDefault { 0 }
-        def result = [:]
+        def result = [:].withDefault { [] }
         lines.drop(1).each { line ->
             def cols = parseCsvLine(line)
             if (cols.size() <= Math.max(patientIdx, imageIdx)) return
@@ -535,7 +560,7 @@ class CsvUtils {
             if (!patientId) return  // ignore blank patient_id cells
             def rawImage = cols[imageIdx].trim()
             def key = "${patientId}::${rawImage}".toString()
-            result[key] = nextIndex[patientId]
+            result[key] << nextIndex[patientId]
             nextIndex[patientId] = nextIndex[patientId] + 1
         }
         return result

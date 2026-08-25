@@ -139,6 +139,7 @@ tests/testdata/celltox_nonreference.csv
 tests/testdata/celltox_only.csv
 tests/testdata/keepset_exhausted.csv
 tests/testdata/duplicate_basename.csv
+tests/testdata/duplicate_raw_path.csv
 tests/testdata/P001_mov_dapi_only.ome.tiff
 tests/testdata/cycle1/
 tests/testdata/cycle2/
