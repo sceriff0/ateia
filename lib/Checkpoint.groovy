@@ -21,19 +21,28 @@
     key is absent from the map would emit an empty field, and an empty field in a
     checkpoint row is a path that does not exist — the failure mode the
     postprocessing checkpoint manifest shipped with for two releases. This checks key
-    presence only: a key present with a `null` (or empty-string) VALUE is not caught
-    here and is written through as-is (e.g. the literal text `null`) — unchanged from
-    the hand-written GStrings this class replaced.
+    presence only, not value shape: a key present with an empty-string VALUE passes
+    through unexamined (that is the deliberate "not produced" signal, see EMPTY
+    VALUES below), and a key present with a `null` VALUE is written as an empty
+    field too (see `row()`'s own doc — it used to be joined as the literal four-
+    character text `null`, which read back as a bogus non-empty path/id).
 
     SCOPE. Like Layout, this class never reads `params`: every method takes what it
     needs as an argument, so it is callable from an onComplete handler and from
     tests/lib_probe.nf. All methods are static.
 
-    NOT AN ESCAPE HATCH FOR CSV QUOTING. Values are joined with a bare comma, exactly
-    as the three writers did before. No published value contains a comma today
-    (`channels` uses `|` as its separator precisely for this reason). If that ever
-    changes, quoting belongs here — in one place — which is the other reason this
-    class exists.
+    RFC 4180 QUOTING, IN ONE PLACE. `row()` quotes a value that contains a comma, a
+    double quote, or a newline (doubling any embedded `"`, per RFC 4180) and leaves
+    every other value bare. This is not defensive for its own sake: `--outdir` is an
+    arbitrary filesystem path and every published path is built from it, so a comma
+    anywhere in `--outdir` used to shift every later column of every row that
+    embedded it -- silently, since a bare `.join(',')` cannot tell "a value with a
+    comma in it" from "a column boundary". `channels` still uses `|` as its own
+    internal separator (so a channel *name* containing a comma does not itself force
+    quoting of that field), but the field-level join below no longer assumes nothing
+    else ever will. Every reader parses with Nextflow's `splitCsv(header: true)`,
+    which understands RFC 4180 quoting natively -- writing it here needed no reader
+    change.
 
     EMPTY VALUES. A column whose artifact a run did not produce carries the empty
     string, not a missing key: `nucleus_contours` is empty when --quantify_compartments
@@ -137,9 +146,22 @@ class Checkpoint {
      *
      * Throws on a missing key (an empty field is a path that does not resolve) and
      * on an unknown key (the caller's idea of the schema disagrees with this one).
-     * Does NOT validate the VALUES: a key present with a `null` value passes through
-     * and is joined as the literal text `null`, exactly as the hand-written GStrings
-     * this class replaced did. Only key presence is a contract here.
+     * Does NOT validate the VALUES for key presence beyond that -- but a `null`
+     * value is now written as an empty field, exactly like the empty string a
+     * "this artifact was not produced" caller already passes (see the EMPTY VALUES
+     * note above): both mean "nothing here", and readers already treat an empty
+     * field as absence (e.g. `Meta.fromCheckpointRow`'s `requirePresentInRow`
+     * rejects a blank value for a column it requires). Writing `null` through as
+     * the four-character text `null` -- the previous behaviour -- made that text
+     * indistinguishable from a real four-character path/id on read-back; nothing
+     * upstream is known to pass `null` today (every writer already uses `''` for
+     * "not produced"), but a caller that changes should get an absent field, not a
+     * corrupt one.
+     *
+     * A value is RFC 4180-quoted (wrapped in `"..."`, with any embedded `"`
+     * doubled) when it contains a comma, a double quote, or a newline. This is
+     * what stops a comma inside `--outdir` -- present in every published path --
+     * from silently shifting every later column.
      */
     static String row(String step, Map values) {
         def cols    = columns(step)
@@ -155,6 +177,19 @@ class Checkpoint {
                 "Checkpoint.row('${step}'): unknown column(s) ${unknown as List}. " +
                 "Valid columns: ${cols}")
 
-        return cols.collect { values[it] }.join(',')
+        return cols.collect { col -> quoteField(values[col]) }.join(',')
+    }
+
+    /**
+     * One field, RFC 4180-encoded. `null` becomes the empty field (see `row()`'s
+     * doc); any other value is quoted only when it needs to be, so an ordinary
+     * path/id/boolean is unchanged from the bare-join output this replaces.
+     */
+    private static String quoteField(def value) {
+        if (value == null) return ''
+        def s = value.toString()
+        return (s.contains(',') || s.contains('"') || s.contains('\n'))
+            ? '"' + s.replace('"', '""') + '"'
+            : s
     }
 }

@@ -303,6 +303,37 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
         registered_image: '/out/P001/registered/x.ome.tiff', is_reference: false
     ]) == 'P001,P001_x,/out/P001/registered/x.ome.tiff,false,DAPI|CD3'
 
+    // RFC 4180 QUOTING (Task 4.5). `--outdir` is an arbitrary filesystem path and
+    // every published path is built from it -- a comma anywhere in it used to shift
+    // every later column of a bare `.join(',')` row. A value containing a comma is
+    // now wrapped in double quotes, so the field count is preserved on read-back
+    // (Nextflow's `splitCsv(header: true)` parses RFC 4180 quoting natively).
+    assert Checkpoint.row(Layout.REGISTERED, [
+        patient_id: 'P001', id: 'P001_x',
+        registered_image: '/out,dir/P001/registered/x,y.ome.tiff',
+        is_reference: false, channels: 'DAPI|CD3',
+    ]) == 'P001,P001_x,"/out,dir/P001/registered/x,y.ome.tiff",false,DAPI|CD3'
+
+    // A value containing a double quote is wrapped AND its embedded quotes are
+    // doubled -- the RFC 4180 escape -- so a naive strip-the-outer-quotes reader
+    // (as opposed to splitCsv) would still see the original text back.
+    assert Checkpoint.row(Layout.REGISTERED, [
+        patient_id: 'P001', id: 'P001_x',
+        registered_image: '/out/say "hi"/x.ome.tiff',
+        is_reference: false, channels: 'DAPI|CD3',
+    ]) == 'P001,P001_x,"/out/say ""hi""/x.ome.tiff",false,DAPI|CD3'
+
+    // A `null` VALUE (as opposed to a missing KEY, rejected above) now writes as an
+    // EMPTY field, not the literal four-character text `null`. Before this task a
+    // null-valued column read back as a bogus four-character path/id indistinguishable
+    // from a real one; an empty field is what every "artifact not produced" caller
+    // already writes (see the class doc's EMPTY VALUES note), and is what
+    // Meta.fromCheckpointRow's requirePresentInRow already treats as absent.
+    assert Checkpoint.row(Layout.REGISTERED, [
+        patient_id: 'P001', id: 'P001_x', registered_image: null,
+        is_reference: false, channels: 'DAPI|CD3',
+    ]) == 'P001,P001_x,,false,DAPI|CD3'
+
     // A missing column must throw, not silently emit an empty field — an empty field
     // is a checkpoint row naming a path that does not exist, which is exactly the
     // failure csv/postprocessed.csv shipped with for two releases.

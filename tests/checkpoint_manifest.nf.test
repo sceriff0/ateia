@@ -42,6 +42,29 @@ nextflow_pipeline {
     tag "pipeline"
     tag "checkpoint_manifest"
 
+    // RFC 4180 field split (Task 4.5). lib/Checkpoint.groovy's row() now quotes a
+    // value containing a comma (an --outdir with a comma in it, embedded in every
+    // published path, used to shift every later column of a bare `.join(',')` row).
+    // Every REAL reader in the pipeline parses with Nextflow's own
+    // `splitCsv(header: true)`, which already understands RFC 4180 quoting — but
+    // this test's `then:` blocks read the published CSV text by hand, AFTER the
+    // pipeline session has already exited, so `Channel`/`splitCsv` are not
+    // available here. A naive `line.split(',')` in THIS file would be exactly the
+    // "quoting writer, naive reader" trap Task 4.5 warns about: it would itself
+    // mis-split a quoted field and corrupt the very invariant this test protects
+    // (silently under-counting `checked`, or reporting a quoted path with its
+    // wrapping `"` as a spurious "does not exist"). This closure splits on a comma
+    // only when it is outside a quoted span, then strips a field's own surrounding
+    // quotes and un-doubles any embedded `""` — the RFC 4180 decode paired with
+    // Checkpoint.groovy's encode.
+    def csvFields = { String line ->
+        line.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/, -1).collect { raw ->
+            (raw.startsWith('"') && raw.endsWith('"') && raw.length() >= 2)
+                ? raw[1..-2].replace('""', '"')
+                : raw
+        }
+    }
+
     test("every path in every checkpoint CSV exists — two-slide patient (VALIS)") {
         tag "stub"
         options "-stub"
@@ -97,7 +120,7 @@ nextflow_pipeline {
             def checked  = 0
             manifests.each { csv ->
                 csv.readLines().drop(1).findAll { it.trim() }.each { line ->
-                    line.split(',').each { field ->
+                    csvFields(line).each { field ->
                         // Absolute fields only: the rest are ids, booleans and
                         // pipe-joined channel names.
                         if (field.startsWith('/')) {
@@ -179,7 +202,7 @@ nextflow_pipeline {
             def checked  = 0
             manifests.each { csv ->
                 csv.readLines().drop(1).findAll { it.trim() }.each { line ->
-                    line.split(',').each { field ->
+                    csvFields(line).each { field ->
                         // Absolute fields only: the rest are ids, booleans and
                         // pipe-joined channel names.
                         if (field.startsWith('/')) {
@@ -263,7 +286,7 @@ nextflow_pipeline {
             def checked  = 0
             manifests.each { csv ->
                 csv.readLines().drop(1).findAll { it.trim() }.each { line ->
-                    line.split(',').each { field ->
+                    csvFields(line).each { field ->
                         // Absolute fields only: the rest are ids, booleans and
                         // pipe-joined channel names.
                         if (field.startsWith('/')) {
@@ -346,7 +369,7 @@ nextflow_pipeline {
             def checked  = 0
             manifests.each { csv ->
                 csv.readLines().drop(1).findAll { it.trim() }.each { line ->
-                    line.split(',').each { field ->
+                    csvFields(line).each { field ->
                         // Absolute fields only: the rest are ids, booleans and
                         // pipe-joined channel names.
                         if (field.startsWith('/')) {
@@ -417,7 +440,7 @@ nextflow_pipeline {
             // broke: publishedPath applied unconditionally reconstructed it as
             // <outputDir>/P001/registered/<name>, which nothing ever publishes.
             def segLines = manifests.find { it.name == 'segmented.csv' }.readLines()
-            def segRow = segLines[1].split(',')
+            def segRow = csvFields(segLines[1])
             // index 2, not 1: 'id' (RULING R17, Task 4.3) is now column 1.
             assert segRow[2] == "$projectDir/tests/testdata/P001_ref.ome.tiff".toString() :
                 "segmented.csv rewrote registered_image against the wrong outdir: ${segRow[2]}"
@@ -427,7 +450,7 @@ nextflow_pipeline {
             def checked  = 0
             manifests.each { csv ->
                 csv.readLines().drop(1).findAll { it.trim() }.each { line ->
-                    line.split(',').each { field ->
+                    csvFields(line).each { field ->
                         if (field.startsWith('/')) {
                             checked++
                             if (new File(field).absolutePath.startsWith(work + File.separator))
@@ -501,7 +524,7 @@ nextflow_pipeline {
             assert regLines[0] == 'patient_id,id,registered_image,is_reference,channels' :
                 "registered.csv header drifted: ${regLines[0]}"
 
-            def rows = regLines.drop(1).findAll { it.trim() }.collect { it.split(',') }
+            def rows = regLines.drop(1).findAll { it.trim() }.collect { csvFields(it) }
             // Two rows: the frozen prior reference (re-emitted by VALIS) and the new
             // cycle. The reference row is not optional — it is the row a follow-on
             // add_cycle filters on to recover its registration target.
@@ -519,7 +542,7 @@ nextflow_pipeline {
             def checked  = 0
             manifests.each { csv ->
                 csv.readLines().drop(1).findAll { it.trim() }.each { line ->
-                    line.split(',').each { field ->
+                    csvFields(line).each { field ->
                         if (field.startsWith('/')) {
                             checked++
                             if (new File(field).absolutePath.startsWith(work + File.separator))
@@ -533,6 +556,87 @@ nextflow_pipeline {
             // 1 preprocessed row + 2 registered rows, one path each.
             assert checked == 3 :
                 "expected 3 recorded paths, examined ${checked} — did the CSV columns change?"
+            assert problems.isEmpty() :
+                "checkpoint manifest has ${problems.size()} bad path(s):\n  " +
+                problems.join("\n  ")
+        }
+    }
+
+    test("every path in every checkpoint CSV exists — --outdir contains a comma (Task 4.5 direct proof)") {
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                // THE DIRECT PROOF (Task 4.5, lib/Checkpoint.groovy:140-ish). Every
+                // published path is built from --outdir, so a comma in --outdir is
+                // the realistic way a checkpoint field ends up carrying a comma — no
+                // synthetic filename needed. Before Checkpoint.row() quoted fields, a
+                // bare `.join(',')` could not tell "a value with a comma in it" from
+                // "a column boundary", so this comma would have shifted every LATER
+                // column of every row whose path embedded it. Same fixture as the
+                // first test above (two-slide VALIS) so the "checked" count below is
+                // directly comparable.
+                input  = "$projectDir/tests/testdata/test_input.csv"
+                outdir = "${outputDir}/has,a,comma"
+            }
+        }
+
+        then {
+            assert workflow.success
+
+            def csvDir = new File("${outputDir}/has,a,comma/csv".toString())
+            assert csvDir.isDirectory() : "no csv/ directory was published"
+
+            def manifests = (csvDir.listFiles() ?: [])
+                .findAll { it.name.endsWith('.csv') }
+                .sort { it.name }
+            assert manifests.size() == 4 :
+                "expected 4 checkpoint manifests, found ${manifests.size()}: " +
+                manifests*.name
+
+            // Sanity guard against a vacuous pass: at least one published field must
+            // actually have been wrapped in RFC 4180 quotes, or this test would not
+            // be exercising the fix at all (e.g. if --outdir were silently sanitized
+            // upstream before reaching Checkpoint.row()).
+            def sawQuotedField = manifests.any { csv -> csv.readLines().drop(1).any { it.contains('"') } }
+            assert sawQuotedField :
+                "no field in any manifest was quoted — this test did not exercise the " +
+                "comma-in---outdir fix at all"
+
+            def work = new File("${workDir}".toString()).absolutePath
+            def problems  = []
+            def checked   = 0
+            manifests.each { csv ->
+                def lines      = csv.readLines()
+                def headerCols = csvFields(lines[0]).size()
+                lines.drop(1).findAll { it.trim() }.each { line ->
+                    def fields = csvFields(line)
+                    // THE PROPERTY A BARE JOIN CANNOT GUARANTEE: every data row
+                    // parses to the SAME field count as its own header. A shifted
+                    // column (the pre-fix failure mode) fails here directly, instead
+                    // of surfacing later as a wrong-looking path.
+                    assert fields.size() == headerCols :
+                        "${csv.name}: row has ${fields.size()} field(s), header declares " +
+                        "${headerCols} (comma in --outdir shifted a column): ${line}"
+                    fields.each { field ->
+                        // No field is the bare four-character literal "null" — the
+                        // failure mode an unquoted `null` VALUE used to produce.
+                        assert field != 'null' :
+                            "${csv.name}: field literally reads the text 'null': ${line}"
+                        if (field.startsWith('/')) {
+                            checked++
+                            if (new File(field).absolutePath.startsWith(work + File.separator))
+                                problems << "${csv.name}: inside the work directory (scratch, unpublished) -> ${field}"
+                            else if (!new File(field).exists())
+                                problems << "${csv.name}: does not exist -> ${field}"
+                        }
+                    }
+                }
+            }
+            // Same fixture as the first test in this file: same 19 recorded paths.
+            assert checked == 19 :
+                "expected 19 recorded paths, examined ${checked} — did the CSV columns change?"
             assert problems.isEmpty() :
                 "checkpoint manifest has ${problems.size()} bad path(s):\n  " +
                 problems.join("\n  ")
