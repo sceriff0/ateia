@@ -168,7 +168,9 @@ class ParamUtils {
             if (!f.exists()) {
                 throw new FileNotFoundException(
                     "mode='add_cycle': required checkpoint '${rel}' not found under --prior_outdir '${priorOutdir}'. " +
-                    "Was the prior run completed through postprocessing?")
+                    "Either the prior run was not completed through postprocessing, or it ran at the " +
+                    "default --cleanup_level=final, which does not publish the intermediates add_cycle " +
+                    "re-enters from. Re-run the prior cycle with --cleanup_level none.")
             }
         }
     }
@@ -261,6 +263,42 @@ class ParamUtils {
                 "export (preprocess -> register against the frozen prior reference -> " +
                 "quantify -> export) — --start/--stop do not apply in this mode and must be omitted.")
         }
+    }
+
+    /**
+     * Cross-parameter rules for --cleanup_level.
+     *
+     * The per-value enum is the schema's job (nextflow_schema.json); this is the
+     * layer that knows a level can be individually valid and still contradict
+     * --mode. Runs before any process is instantiated, like every other rule in
+     * this file, so a contradictory invocation costs nothing.
+     *
+     * The level is re-checked here rather than trusted from the schema because
+     * validateCleanup is also reachable from a caller that never went through
+     * nf-schema (a test, or a future entry point), and a silently-unknown level
+     * would then read as 'publish nothing'.
+     */
+    static void validateCleanup(Map params) {
+        def level = params.cleanup_level?.toString()
+        if (!Layout.CLEANUP_LEVELS.contains(level))
+            throw new IllegalArgumentException(
+                "--cleanup_level '${level}' is not valid. Valid: " +
+                "${Layout.CLEANUP_LEVELS}. 'final' (the default) publishes only " +
+                "${Layout.FINAL_KINDS} plus run-level ${Layout.SURVIVING_RUN_LEVEL}; " +
+                "'none' publishes everything.")
+
+        // add_cycle must PRODUCE a re-enterable output tree, not merely consume one.
+        // The next cycle reads THIS run's registered/ images and segmentation/ masks,
+        // so at any cleaning level cycle N+1 would fail its own launch validation on
+        // a checkpoint this run silently declined to publish -- discovering the
+        // mistake one whole cycle, and one whole registration, too late.
+        if (params.mode == 'add_cycle' && level != 'none')
+            throw new IllegalArgumentException(
+                "mode='add_cycle' requires --cleanup_level none. add_cycle reuses the " +
+                "prior run's registered/ images and segmentation/ masks, and the NEXT " +
+                "cycle will read this run's. At --cleanup_level=${level} they are not " +
+                "published at all, so cycle N+1 could not launch. Re-run with " +
+                "--cleanup_level none.")
     }
 
     /**

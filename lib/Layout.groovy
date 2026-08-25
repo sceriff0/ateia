@@ -157,6 +157,68 @@ class Layout {
         'pyramid',
     ].asImmutable()
 
+    /**
+     * The publish leaves that survive a cleaned run.
+     *
+     * At --cleanup_level=final (the DEFAULT) only these are published AT ALL — not
+     * published-then-deleted. publishDir uses mode: 'copy', so publishing an
+     * intermediate copies it out of work/ and deleting it afterwards pays that
+     * I/O in full for a file nobody ever reads. Gating the publishDir itself
+     * costs nothing.
+     *
+     * 'spatialdata' is deliberately absent for exactly the reason it is absent
+     * from PUBLISHED_KINDS above: EXPORT_SPATIALDATA publishes to the bare patient
+     * root, so there is no `kind` segment for a caller to ask Layout about. It
+     * survives a cleaned run — its publishDir block carries no cleanup gate, which
+     * tests/test_cleanup_publish_gates.py asserts directly.
+     */
+    static final List<String> FINAL_KINDS = [
+        'quantification',
+        'geojson',
+        'pyramid',
+    ].asImmutable()
+
+    /**
+     * DERIVED, never restated. A second hand-written list is exactly how the
+     * keep-set map and the analysis identity set both drifted out of agreement
+     * with their sources.
+     */
+    static final List<String> INTERMEDIATE_KINDS =
+        (PUBLISHED_KINDS - FINAL_KINDS).asImmutable()
+
+    /**
+     * Run-level directories that survive every level. These are provenance and
+     * reporting rather than image payload: qc/ is the report the run is judged
+     * by, csv/ carries the checkpoint manifests every --start and add_cycle
+     * reads, and size_logs/ feeds the trace aggregation. They sit beside the
+     * per-patient tree rather than under a `kind`, so they are gated
+     * independently of FINAL_KINDS.
+     */
+    static final List<String> SURVIVING_RUN_LEVEL = [
+        'qc', CSV_DIR, 'size_logs',
+    ].asImmutable()
+
+    /**
+     * Valid --cleanup_level values, in increasing aggressiveness.
+     *
+     * 'none' is an escape hatch, not a convenience. mode='add_cycle' re-enters a
+     * prior run's output tree — it reads the registered slides AND the
+     * segmentation masks — and `--start <step>` does the same for its own step.
+     * Both are structurally impossible at any level that stops publishing
+     * intermediates, which is why ParamUtils refuses the combination at LAUNCH
+     * rather than letting a run discover it halfway through.
+     */
+    static final List<String> CLEANUP_LEVELS = ['none', 'final'].asImmutable()
+
+    /** Whether `kind` is published at `level`. */
+    static boolean publishesAtLevel(String kind, String level) {
+        if (!CLEANUP_LEVELS.contains(level))
+            throw new IllegalArgumentException(
+                "Unknown cleanup level: '${level}'. Valid: ${CLEANUP_LEVELS}")
+        requireKind(kind)
+        return level == 'none' ? true : FINAL_KINDS.contains(kind)
+    }
+
     /** Reject an unknown publish kind at the call site rather than at path-resolution time. */
     static String requireKind(String kind) {
         if (!PUBLISHED_KINDS.contains(kind))

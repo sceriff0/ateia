@@ -40,6 +40,37 @@ workflow MIRAGE {
     // Tier vs per-knob-override consistency for BOTH registration backends. Cross-parameter,
     // so it belongs here rather than in the schema; runs before any process is instantiated.
     ParamUtils.validateRegPresets(params)
+    // --cleanup_level against --mode. add_cycle must PRODUCE a re-enterable tree, so a
+    // cleaning level is refused outright rather than discovered by the next cycle.
+    ParamUtils.validateCleanup(params)
+
+    // cleanup_work is mutually exclusive with -resume: the work directory's task files
+    // are removed at teardown of a SUCCESSFUL run, so the NEXT -resume finds nothing
+    // cached and re-runs everything. It defaults to true now, so this warns rather than
+    // refuses -- which of the two the user meant is genuinely ambiguous, the cost is a
+    // re-run rather than lost data, and refusing would break every documented
+    // `--start <step> ... -resume` invocation in docs/usage.md.
+    //
+    // `log` IS bound here. It is NOT bound in conf/*.config, where the same call aborts
+    // the run under the v1 config parser -- see conf/modules.config's errorStrategy
+    // comments and tests/test_error_strategy_policy.py.
+    if (params.cleanup_work && workflow.resume) {
+        log.warn "--cleanup_work is true (the default) AND -resume was passed. The work " +
+                 "directory is emptied after a successful run, so the NEXT -resume will " +
+                 "find nothing cached and re-run every task. Pass --cleanup_work false " +
+                 "for the iterate-with--resume loop docs/usage.md describes."
+    }
+
+    // --start past preprocessing re-enters from artifacts a cleaning level does not
+    // publish. THIS run reads the prior output fine -- it is a different run's tree --
+    // so it is a warning rather than a refusal; what it cannot do is be re-entered the
+    // same way itself.
+    if (params.cleanup_level != 'none' && !ParamUtils.isEntryPoint(params, 'preprocessing')) {
+        log.warn "--start ${params.start} re-enters from intermediates that " +
+                 "--cleanup_level=${params.cleanup_level} does not publish. This run reads " +
+                 "the prior output fine, but its OWN output cannot be re-entered the same " +
+                 "way. Pass --cleanup_level none to keep that open."
+    }
 
     /* -------------------- STEP GATE -------------------- */
 
