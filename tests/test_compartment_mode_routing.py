@@ -203,7 +203,11 @@ ALLOWED_LINES = {
         # profile's --account/--qos: +25, the inlined account/qos derivation plus
         # the comment recording why composition is unavailable (task.clusterOptions
         # inside a clusterOptions closure recurses to a StackOverflowError).
-        1181: (
+        # 1181 -> 1226 when --cleanup_level gained its publishDir gates: +45, being
+        # 11 two-line gates above this point (a comment pointer plus one `enabled:`
+        # line each) and one 23-line block at the first site recording why the
+        # literal is inlined and why it must not be written as a closure.
+        1226: (
             "ext.args = { params.expanded_quantification ? '--expanded' : "
             "'' } -- conf/*.config closures cannot see lib/*.groovy classes, "
             "so ext.args must read params raw here."
