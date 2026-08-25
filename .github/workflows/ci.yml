@@ -483,6 +483,93 @@ jobs:
             tests/output/
 
   # ============================================================================
+  # Security tests (blocking)
+  # ============================================================================
+  # tests/modules/segment_deepcell_token.nf.test is deliberately NOT tagged
+  # "stub" — it needs `-profile test,singularity` and Nextflow rejects a
+  # duplicate `-profile` flag, so the nf-test-stub job's
+  # `--tag stub --profile test` sweep can never collect it. That was correct and
+  # documented; what was missing is that NOTHING ELSE collected it either.
+  # Verified 2026-08-25: `nf-test test --tag stub --profile test --dry-run`
+  # matched 0 deepcell tests. The guard existed and ran nowhere.
+  #
+  # It needs no Singularity binary. segment_deepcell_token_singularity.config
+  # points SEGMENT's container at a local placeholder .sif (tracked in git, not
+  # generated), which skips the `singularity pull`, and the test only inspects
+  # the `.command.run` Nextflow writes before exec. Confirmed locally on a host
+  # with neither `singularity` nor `apptainer` on PATH.
+  security-tests:
+    name: Security tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Nextflow
+        # Same pin as nf-test-stub: nf-test's generated wrappers do not compile
+        # under edge Nextflow's strict parser.
+        uses: nf-core/setup-nextflow@v2
+        with:
+          version: '25.04.0'
+
+      - name: Cache Nextflow plugins
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.nextflow-plugins
+          key: ${{ runner.os }}-nf-plugins-${{ hashFiles('nextflow.config') }}
+          restore-keys: |
+            ${{ runner.os }}-nf-plugins-
+
+      - name: Provision Nextflow plugins
+        run: |
+          nextflow plugin install "$(sed -n "s/.*id '\(nf-schema@[0-9.]*\)'.*/\1/p" nextflow.config)"
+
+      - name: Install Python for test data generation
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Generate test data
+        run: |
+          # Same pin as every other job — guarded by tests/test_ci_stack_pinned.py.
+          pip install numpy==1.26.4 tifffile==2025.5.10
+          python tests/testdata/generate_complete_testdata.py
+
+      - name: Install nf-test
+        uses: nf-core/setup-nf-test@v1
+        with:
+          version: ${{ env.NFTEST_VERSION }}
+
+      - name: Token-leak guard
+        # Asserts DEEPCELL_ACCESS_TOKEN is forwarded BY NAME and its VALUE never
+        # reaches .command.run, which is group-readable on a typical shared HPC
+        # filesystem and is retained across -resume. The variable must be set in
+        # the environment invoking nf-test: the test asserts on its presence
+        # first, because without it SEGMENT never reaches the guarded branch and
+        # the whole case would pass while checking nothing.
+        env:
+          DEEPCELL_ACCESS_TOKEN: dummy-token-value
+        run: |
+          nf-test test tests/modules/segment_deepcell_token.nf.test \
+            --profile test,singularity --verbose
+
+      - name: Assert the guard actually executed
+        # A tag typo, a renamed file, or a --profile change would make nf-test
+        # exit 0 having run nothing — which is the exact failure this job was
+        # added to close, so it must not be able to recur here.
+        env:
+          DEEPCELL_ACCESS_TOKEN: dummy-token-value
+        run: |
+          n=$(nf-test test tests/modules/segment_deepcell_token.nf.test \
+                --profile test,singularity --dry-run 2>&1 \
+              | grep -ci "DEEPCELL_ACCESS_TOKEN" || true)
+          echo "collected $n case(s)"
+          test "$n" -ge 1
+
+  # ============================================================================
   # Python lint (blocking) — ruff check only, not ruff format. The repo is not
   # format-normalized yet, so format enforcement is deliberately out of scope;
   # this job only fails the build on actual lint errors (pyflakes/pycodestyle/
@@ -549,7 +636,7 @@ jobs:
     # always exits 0 (`|| true`, kept advisory on purpose — see the lint job
     # above), so including it here would be a fake gate that can never fail.
     # `ruff` is the real, blocking Python lint gate.
-    needs: [python-tests, nextflow-stub, nf-test-stub, ruff]
+    needs: [python-tests, nextflow-stub, nf-test-stub, security-tests, ruff]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
@@ -566,6 +653,10 @@ jobs:
           fi
           if [ "${{ needs.nf-test-stub.result }}" != "success" ] && [ "${{ needs.nf-test-stub.result }}" != "skipped" ]; then
             echo "nf-test stub failed"
+            exit 1
+          fi
+          if [ "${{ needs.security-tests.result }}" != "success" ] && [ "${{ needs.security-tests.result }}" != "skipped" ]; then
+            echo "Security tests failed"
             exit 1
           fi
           if [ "${{ needs.ruff.result }}" != "success" ] && [ "${{ needs.ruff.result }}" != "skipped" ]; then
