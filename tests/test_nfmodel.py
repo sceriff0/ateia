@@ -4,7 +4,16 @@ Each test here plants a construct that historically defeated a private
 regex parse, and asserts the model still sees the code that follows it.
 A guard built on this model is only as trustworthy as this file.
 """
-from tests.nfmodel import block_extent, strip_comments_and_strings
+from tests.nfmodel import (
+    REPO_ROOT,
+    block_extent,
+    nf_files,
+    param_refs,
+    processes,
+    script_bodies,
+    strip_comments_and_strings,
+    with_name_blocks,
+)
 
 
 def test_stage_as_glob_does_not_open_a_block_comment():
@@ -117,3 +126,64 @@ def test_block_extent_ignores_braces_inside_strings():
     end = block_extent(text, start)
     assert "cpus = 1" in text[start:end]
     assert "TAIL" not in text[start:end]
+
+
+def test_nf_files_is_recursive():
+    """A non-recursive glob('*.nf') misses modules/local/sub/*.nf. One guard
+    used exactly that and could not see files it claimed to cover."""
+    files = nf_files()
+    assert files, "no .nf files found -- the enumerator is wrong, not the repo"
+    rels = {f.relative_to(REPO_ROOT).as_posix() for f in files}
+    assert "modules/local/register.nf" in rels
+    assert "subworkflows/local/input_check.nf" in rels
+    assert "workflows/mirage.nf" in rels
+
+
+def test_register_script_body_is_visible():
+    """The load-bearing case: REGISTER's script: block was invisible to
+    test_resume_determinism because of stageAs: 'ref/*'."""
+    body = script_bodies()["REGISTER"]
+    assert body.strip(), "REGISTER's script: body came back empty"
+    assert len(body.splitlines()) > 10
+
+
+def test_every_module_local_process_is_modelled():
+    """One process per file in modules/local/ is a project convention. If the
+    model finds fewer processes than files, it is silently skipping some."""
+    files = [p for p in (REPO_ROOT / "modules" / "local").rglob("*.nf")]
+    assert len(processes()) >= len(files)
+
+
+def test_with_name_blocks_finds_the_qc_selector():
+    blocks = with_name_blocks()
+    assert blocks, "no withName: blocks found"
+    qc = [b for b in blocks if "WARP_SEG_QC" in b.names]
+    assert qc, "the QC selector block was not found"
+    assert "errorStrategy" in qc[0].body
+
+
+def test_with_name_blocks_ignores_a_selector_mentioned_only_in_a_comment(tmp_path):
+    """`strip_comments_and_strings` blanks a string literal's delimiting
+    quotes along with its contents, not just comments -- so the selector
+    regex needs real quotes to match and has to run against the RAW text.
+    That means a comment that merely *mentions* `withName: 'FAKE' {` (this
+    repo's conf/modules.config has several, e.g. "the `withName: 'SEGMENT'`
+    ext.args closure below") must be filtered back out afterwards, or every
+    such comment would be counted as a real selector block."""
+    conf_dir = tmp_path / "conf"
+    conf_dir.mkdir()
+    (conf_dir / "modules.config").write_text(
+        "// see the `withName: 'FAKE' {` block below\n"
+        "withName: 'REAL' {\n"
+        "    cpus = 1\n"
+        "}\n"
+    )
+    blocks = with_name_blocks(root=tmp_path)
+    names = {n for b in blocks for n in b.names}
+    assert names == {"REAL"}
+
+
+def test_param_refs_excludes_map_method_calls():
+    assert param_refs("params.foo + params.bar") == {"foo", "bar"}
+    assert param_refs("params.subMap(['a'])") == set()
+    assert param_refs("// params.commented") == {"commented"}  # caller strips first
