@@ -840,6 +840,42 @@ with open(OUT_DIR / "sample_reg_qc.json", "w") as f:
     json.dump(seg_qc_record, f, indent=2)
 print("  Created sample_reg_qc.json")
 
+# Per-patient CSE seg-eval JSONs, the input MERGE_SEG_EVAL merges.
+#
+# Referenced by tests/modules/merge_seg_eval.nf.test with checkIfExists: true and
+# produced by nothing -- stranded when the CSE removal in cea0b47 took the writer
+# away and left the reader. That was 2 of the 3 nf-test failures on this branch.
+#
+# Generated, never committed: tests/testdata/ is gitignored (.gitignore:140,142),
+# so a hand-written fixture exists on one machine and is absent in CI -- which is
+# a guard that cannot run, the same failure this file exists to prevent.
+#
+# The shape is bin/seg_quality_eval.py's `doc`, and it must survive
+# bin/merge_seg_eval.py's flatten(): `id` is read directly and would KeyError if
+# renamed, `metrics` is flattened one level into `metrics::<key>` columns, and
+# QualityScore/downsample_factor/effective_pixel_size_um each become a column.
+# The two patients deliberately carry DIFFERENT downsample factors, because
+# carrying the factor per patient is the whole reason those columns exist -- a
+# fixture where both agree would not notice the column being dropped.
+for _pid, _qs, _factor in (("P001", 0.7421, 1), ("P002", 0.6183, 4)):
+    _seg_eval = {
+        "id": _pid,
+        "metrics": {
+            "QualityScore": _qs,
+            "NumberOfCellsPer100SquareMicrons": 0.9312,
+            "FractionOfForegroundOccupiedByCells": 0.6428,
+            "1minusFractionOfBackgroundOccupiedByCells": 0.8871,
+            "FractionOfCellMaskInForeground": 0.9604,
+            "1minusFractionOfCellsWithoutNucleus": 0.9750,
+        },
+        "QualityScore": _qs,
+        "downsample_factor": _factor,
+        "effective_pixel_size_um": round(0.325 * _factor, 6),
+    }
+    with open(OUT_DIR / f"seg_eval_{_pid}.json", "w") as f:
+        json.dump(_seg_eval, f, indent=2)
+    print(f"  Created seg_eval_{_pid}.json")
+
 with open(OUT_DIR / "sample_reg_residuals.csv", "w") as f:
     f.write("moving,ref_x,ref_y,residual_px,stage\n")
     rng_res = np.random.default_rng(7)
