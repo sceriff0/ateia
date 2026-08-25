@@ -102,7 +102,7 @@ nextflow_workflow {
         }
     }
 
-    test("declared_channels (manifest) and channels_count (groupKey) provably differ") {
+    test("declared_channels (manifest) and channels_count (groupKey) agree under the claim-once rule") {
         tag "stub"
 
         when {
@@ -124,16 +124,39 @@ nextflow_workflow {
         }
 
         then {
+            // CORRECTED (Task 4.4, fix round 1): this test's title and expectation used
+            // to pin a nuclear-marker-drop rule ("DAPI is dropped from BOTH rows, neither
+            // is a reference" -> 4) that commit 571976e (":recycle: Derive
+            // countChannelsPerPatient from the keep-set resolver") deliberately removed.
+            // Evidence:
+            //   - 571976e's diff deletes the `MarkerUtils.splitOutputChannels(...)` call
+            //     from countChannelsPerPatient, and its own commit message states the
+            //     intended new behaviour verbatim: "A patient with reference
+            //     DAPI|KI67|CD20 and cycles CELLTOX|CD8 and CELLTOX|FOXP3 now counts 6,
+            //     not 5: the old rule dropped CELLTOX from both non-reference slides...
+            //     even though the reference never carried it."
+            //   - lib/MarkerUtils.groovy's header confirms it "does NOT decide which
+            //     channels a slide emits -- that is CsvUtils.resolveKeptChannelsPerSlide."
+            //   - lib/CsvUtils.groovy's resolveKeptChannelsPerSlide docstring: "NUCLEAR-
+            //     NESS PLAYS NO PART IN THE DROP DECISION, deliberately."
+            // Under that rule, EVERY marker name is claimed exactly once per patient
+            // regardless of which row declares it or whether any row is a reference --
+            // which makes channels_count (the sum of claim-once per-slide keeps) and
+            // declared_channels (the plain per-patient union of declared names) the SAME
+            // number for any samplesheet: both equal the patient's total distinct
+            // upper-cased channel-name count. They can no longer "provably differ"; this
+            // test now pins that they agree, using the same fixture that used to show
+            // them apart.
             assertAll(
                 { assert workflow.success },
-                // Declared union for the manifest: DAPI+CD3+CD8+VIMENTIN+CD45 = 5,
-                // with no reference/nuclear awareness at all.
+                // Declared union for the manifest: DAPI+CD3+CD8+VIMENTIN+CD45 = 5.
                 { assert workflow.out.counts[0].declared_channels.P001 == 5 },
-                // Exact count for channels_count/the groupKey: DAPI is dropped from
-                // BOTH rows (neither is a reference) = CD3+CD8+VIMENTIN+CD45 = 4.
-                // This is the one place the two must provably differ.
-                { assert workflow.out.counts[0].channels.P001 == 4 },
-                { assert workflow.out.samples.every { it[0].channels_count == 4 } }
+                // channels_count/the groupKey: under claim-once, the first row's DAPI is
+                // claimed (nothing has claimed it yet -- no row is a reference here), the
+                // second row's DAPI is already claimed and contributes nothing new.
+                // CD3+CD8 (row 1) + VIMENTIN+CD45 (row 2) + DAPI (claimed once) = 5.
+                { assert workflow.out.counts[0].channels.P001 == 5 },
+                { assert workflow.out.samples.every { it[0].channels_count == 5 } }
             )
         }
     }
