@@ -62,6 +62,41 @@ def test_triple_quoted_script_body_is_blanked():
     assert "script:" in clean
 
 
+def test_triple_quote_is_matched_as_a_unit_not_three_single_quotes():
+    """A `\"\"\"` delimiter must be matched to its own kind -- the next `\"\"\"`
+    -- not discovered by pairing off single `"` characters one at a time.
+
+    A parser whose single-/double-quote branch runs before its triple-quote
+    special case treats the opening `\"\"\"` as a zero-width empty string (the
+    first two `"` chars) immediately followed by a lone `"` that opens a
+    *new* single-quoted string extending to the next literal `"` in the body.
+    From there it keeps alternately pairing off whichever `"` characters
+    happen to appear inside the body, blanking one span and leaking the next.
+
+    That mispairing can happen to land back in sync by the time it reaches
+    the real closing `\"\"\"` -- which is exactly what made the previous
+    version of this test blind: its body (`foo // not a comment`) contains
+    *zero* embedded `"` characters, an even count, so the mis-ordered walk
+    re-synchronises at the close and both of that test's assertions pass by
+    coincidence, indistinguishable from a correct parser (or even a
+    context-free `//`-to-EOL stripper that never looks at quotes at all).
+
+    An ODD number of embedded `"` characters removes that coincidence: the
+    mis-ordered walk is still out of sync when it reaches the close, so it
+    either swallows the trailing marker as part of a still-open "string" or
+    leaks unblanked body words into the output. Either failure is directly
+    observable, which is what makes this test an actual guard rather than a
+    property that merely happens to hold today.
+    """
+    src = 'script:\n"""\necho "one" "two" "three\n"""\nMARKER_AFTER\n'
+    clean = strip_comments_and_strings(src)
+    assert "script:" in clean
+    assert "MARKER_AFTER" in clean  # correct pairing closes the body here
+    assert "one" not in clean  # body contents really were blanked
+    assert "two" not in clean
+    assert "three" not in clean
+
+
 def test_escaped_quote_does_not_end_a_string():
     src = "def s = 'it\\'s fine'\nMARKER\n"
     clean = strip_comments_and_strings(src)
