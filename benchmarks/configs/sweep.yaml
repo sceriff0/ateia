@@ -133,22 +133,30 @@ baseline:
   reg_tiled_max_error: 0.99           # CONFIDENCE gate (phase-correlation error), pipeline default
   reg_tiled_max_disp: null            # RANGE gate; null = fall back to reg_tiled_halo
   # --- registration (ASHLAR) ---
-  # DECLARED ONLY. There is deliberately NO registration_method_grid.ashlar: the ASHLAR
-  # backend is a comparison baseline for the REAL slides (benchmarks/configs/arms.yaml),
-  # not a configuration this project ships or needs a cost model for. Sweeping it would
-  # buy scaling curves for a backend nobody will run in production, at the cost of a
-  # whole extra method grid.
+  # These are the baseline pins; ASHLAR IS SWEPT, by registration_method_grid.ashlar
+  # at the bottom of this file.
   #
-  # They are declared here anyway for the reason reg_tiled_max_error is: every run must
-  # RECORD the value it used, and test_project_sweep_all_configs_share_columns requires
-  # every config to carry the same columns. Values must equal the nextflow.config defaults
-  # exactly -- test_project_sweep_baseline_matches_pipeline_defaults checks that.
+  # This block used to say the opposite -- "DECLARED ONLY. There is deliberately NO
+  # registration_method_grid.ashlar: the ASHLAR backend is ... not a configuration
+  # this project ships or needs a cost model for." That premise is false as stated:
+  # nextflow_schema.json lists `ashlar` in registration_method's enum, so a user CAN
+  # select it, which makes it shipped. A backend the pipeline offers and the paper
+  # never measures is the gap; "declared and never varied" was passing the coverage
+  # guard as though it were covered, because appearing in `baseline` counted.
   #
-  # If you ever DO want the ashlar granularity curve, the fair form is a
-  # registration_method_grid.ashlar with reg_ashlar_tile mirroring
-  # registration_method_grid.tiled's reg_tiled_tile [1024, 2048, 4096] -- comparing a swept
-  # ashlar against a fixed STARE would be the same unfairness the STARE-vs-VALIS resolution
-  # axis already guards against.
+  # The fair grid shape that comment went on to describe -- reg_ashlar_tile mirroring
+  # registration_method_grid.tiled's reg_tiled_tile [1024, 2048, 4096] -- is exactly
+  # what was added, so the design was already agreed; only the grid was missing.
+  #
+  # If the cost of those runs is not worth paying, the honest alternative is to
+  # REMOVE ashlar from the schema enum so the pipeline stops offering it. Leaving it
+  # selectable and unmeasured is the one option that is not honest, and
+  # test_every_shipped_registration_method_is_actually_swept now fails on it.
+  #
+  # The values below must equal the nextflow.config defaults exactly
+  # (test_project_sweep_baseline_matches_pipeline_defaults), and every config must
+  # carry the same columns (test_project_sweep_all_configs_share_columns), which is
+  # why reg_ashlar_overlap is pinned here even though nothing varies it.
   reg_ashlar_tile: 1024               # grid granularity (px); ashlar's fairness knob vs reg_tiled_tile
   reg_ashlar_overlap: 0.1             # synthesized tile overlap fraction
   reg_ashlar_max_shift_um: 30         # per-tile shift budget in MICRONS; too small degrades SILENTLY
@@ -365,3 +373,43 @@ registration_method_grid:
     # process_low). Drop the 8192 point if these runs start hitting the wall; memory is NOT the
     # concern — peak is flat across this axis (~0.9 GB) by construction.
     reg_tiled_coarse_max_dim: [2048, 4096, 8192]   # M0 anchor thumbnail, longest side (px)
+
+  # ASHLAR — the third SHIPPED registration_method, and until now the one the
+  # paper never measured. It is a schema-valid registration_method with its own
+  # adapter and three params, and this grid contained only `tiled`; the coverage
+  # guard passed because a param appearing in `baseline` counted as covered, so
+  # "declared and never varied" was indistinguishable from "swept". Guarded now
+  # by test_every_shipped_registration_method_is_actually_swept, which reads the
+  # enum out of nextflow_schema.json rather than restating it.
+  #
+  # ASHLAR needs no tier pin: unlike VALIS's memory_mode and STARE's
+  # reg_tiled_mode, its three params are concrete defaults in nextflow.config
+  # with no tier table above them (see the comment there), so
+  # ParamUtils.validateRegPresets has nothing to reject.
+  ashlar:
+    # THE FAIRNESS KNOB, and the reason this is a list rather than a pin. ASHLAR
+    # computes one independent shift per tile, so a finer grid buys it more local
+    # (still piecewise-translational) freedom — the direct analogue of STARE's
+    # reg_tiled_tile, swept above at [1024, 2048, 4096]. The SAME three values,
+    # deliberately: comparing ASHLAR at a fine grid against STARE at a coarse one
+    # biases the result, and matching the ranges is what makes the two columns
+    # readable side by side. arms.yaml brackets the same range at [1024, 4096].
+    reg_ashlar_tile:         [1024, 2048, 4096]
+    # Per-tile corrective shift budget, in MICRONS. Swept because too LOW degrades
+    # registration SILENTLY: LayerAligner.constrain_positions() replaces an
+    # out-of-range tile with a linear-model prediction rather than erroring, so a
+    # budget below the real cross-cycle drift produces a plausible, wrong result
+    # with nothing in the output saying so. Brackets the 30 default in both
+    # directions so the sweep can show where that cliff is rather than assuming it.
+    reg_ashlar_max_shift_um: [15, 30, 60]
+    # NOT swept: reg_ashlar_overlap only feeds ASHLAR's WITHIN-cycle stitching,
+    # which is trivial here — the tiles come from one coherent image with exact
+    # fabricated positions. This arm measures the CROSS-cycle engine
+    # (LayerAligner), so varying the overlap would spend runs on a no-op.
+    #
+    # RUN COUNT: 3 tile sizes x 3 shift budgets = 9 configs. The tiled block above
+    # is 1 x 3 x 3 x 3 = 27, so registration_method_grid goes 27 -> 36 and the whole
+    # sweep goes 129 -> 138 configs (414 runs at repeats=3). Measured from the plan
+    # builder, not counted by hand:
+    #     python3 -c "import yaml; from benchmarks.build_run_plan import build_run_plan; \
+    #       print(len(build_run_plan(yaml.safe_load(open('benchmarks/configs/sweep.yaml')), repeats=3)))"

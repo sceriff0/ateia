@@ -123,3 +123,50 @@ def test_the_makefile_and_the_submit_scripts_name_the_same_roots():
                for o in _outdirs("benchmarks/submit_sweep.sh")), (
         f"submit_sweep.sh does not name {handoff}/sweep"
     )
+
+
+def test_no_synthetic_run_sits_where_real_results_land():
+    """An unrun benchmark must not look run.
+
+    run0000/ and run0001/ are hand-written -- `-` timestamps, input sizes at
+    exact powers of two, round-number durations -- and they used to sit at
+    benchmarks/runs/, the directory the cluster writes real results into, as the
+    ONLY thing there. A fresh checkout therefore read as a completed benchmark.
+    Nothing has ever been run: no paper_data/, and analysis/figures/ holds only
+    its own .gitignore.
+
+    They belong under tests/fixtures/, where they are unmistakably test input.
+    """
+    import subprocess
+
+    tracked = subprocess.run(
+        ["git", "ls-files", "benchmarks"],
+        cwd=ROOT, capture_output=True, text=True, check=True,
+    ).stdout.split()
+    misplaced = [
+        p for p in tracked
+        if p.startswith("benchmarks/runs/")
+        or p.startswith("benchmarks/paper_data/")
+        or p.startswith("benchmarks/_handoff/")
+    ]
+    assert not misplaced, (
+        "these are committed under a RESULTS root, so a fresh checkout looks "
+        f"like a benchmark that has been run: {misplaced}"
+    )
+
+
+def test_the_synthetic_fixtures_say_what_they_are():
+    """The fixtures are still synthetic and still labelled. Without the label,
+    the next person to open trace.txt has to infer it from the `-` timestamps."""
+    fixtures = ROOT / "benchmarks" / "tests" / "fixtures" / "runs"
+    assert fixtures.is_dir(), "the synthetic run fixtures are gone"
+    readme = fixtures / "README.md"
+    assert readme.exists(), "benchmarks/tests/fixtures/runs/README.md is missing"
+    assert "NOT DATA" in readme.read_text()
+    # And they are still recognisably synthetic, so the README is not describing
+    # something that has quietly been replaced with real output.
+    trace = (fixtures / "run0000" / "trace" / "trace.txt").read_text()
+    assert "\t-\t" in trace, (
+        "run0000's trace no longer carries the placeholder `-` timestamps that "
+        "make it obviously hand-written"
+    )

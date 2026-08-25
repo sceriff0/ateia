@@ -653,3 +653,89 @@ def test_every_not_swept_entry_states_a_reason():
     for name, reason in NOT_SWEPT.items():
         assert isinstance(reason, str) and len(reason) > 15, (
             f"NOT_SWEPT['{name}'] must state a real reason, got {reason!r}")
+
+
+def _schema_enum(name):
+    """The enum nextflow_schema.json declares for a param."""
+    import json
+
+    doc = json.loads((REPO_ROOT / "nextflow_schema.json").read_text())
+
+    def walk(node):
+        if isinstance(node, dict):
+            entry = (node.get("properties") or {}).get(name)
+            if isinstance(entry, dict) and "enum" in entry:
+                return entry["enum"]
+            for value in node.values():
+                hit = walk(value)
+                if hit:
+                    return hit
+        elif isinstance(node, list):
+            for value in node:
+                hit = walk(value)
+                if hit:
+                    return hit
+        return None
+
+    return walk(doc)
+
+
+def test_every_shipped_registration_method_is_actually_swept():
+    """`ashlar` is a schema-valid registration_method with three params and its
+    own adapter, and registration_method_grid contained only `tiled`.
+
+    The existing coverage guard passed anyway, because it counts a param as
+    covered when it merely appears in `baseline` -- so "declared and never
+    varied" was indistinguishable from "swept". Appearing in baseline is a
+    DEFAULT, not coverage: every run shares it, so nothing is being measured
+    against anything.
+
+    The enum is read from the schema rather than restated, so a fourth backend
+    is covered the day it is added.
+    """
+    import yaml
+
+    shipped = set(_schema_enum("registration_method") or [])
+    assert shipped, "registration_method has no enum in nextflow_schema.json"
+    sweep = yaml.safe_load(
+        (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text())
+    grid = sweep.get("registration_method_grid") or {}
+    swept = set(grid) if isinstance(grid, dict) else {
+        e.get("registration_method") for e in grid
+    }
+    # The baseline method is the anchor every OFAT run uses, so it IS measured
+    # even though it has no grid block of its own.
+    swept.add(sweep["baseline"].get("registration_method"))
+    missing = shipped - swept
+    assert not missing, (
+        f"shipped but never benchmarked: {sorted(missing)} -- a backend the "
+        f"pipeline offers and the paper never measures. Add a "
+        f"registration_method_grid block for it, or remove it from the schema "
+        f"enum; a third option is not honest."
+    )
+
+
+def test_baseline_membership_does_not_count_as_coverage():
+    """The specific weakness the check above closes, asserted on the mechanism.
+
+    A param that appears ONLY in `baseline` must not show up in the swept-axis
+    set. If it did, `identity_columns` would claim it identifies a run while
+    every run shares its value -- and the coverage guard would count it as
+    benchmarked.
+    """
+    import yaml
+
+    from benchmarks.analysis.lib import contract
+
+    sweep = yaml.safe_load(
+        (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text())
+    axes = contract.axes(sweep)
+    baseline_only = set(sweep.get("baseline") or {}) - axes
+    assert baseline_only, (
+        "every baseline entry is also swept, so this guard is checking an empty "
+        "set -- cleanup_level and the tier-owned nulls should be in here"
+    )
+    assert not (baseline_only & axes), (
+        f"declared-only params leaked into the axis set: "
+        f"{sorted(baseline_only & axes)}"
+    )
