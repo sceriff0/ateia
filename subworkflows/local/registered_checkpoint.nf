@@ -48,6 +48,9 @@ workflow REGISTERED_CHECKPOINT {
                 : Layout.publishedPath(params.outdir, meta.patient_id, Layout.REGISTERED, file)
             Checkpoint.row(Layout.REGISTERED, [
                 patient_id      : meta.patient_id,
+                // RULING R17: carried forward from meta, never re-derived from
+                // registered_image's basename below -- see lib/Checkpoint.groovy.
+                id              : meta.id,
                 registered_image: published_path,
                 is_reference    : meta.is_reference,
                 channels        : meta.channels.join('|'),

@@ -46,6 +46,20 @@
     but accepts an EMPTY VALUE (the caller means "not produced"), and readers test for
     emptiness rather than for the column's absence. Keeping the schema fixed across
     param settings is what lets one header serve every run.
+
+    RULING R17 (identity is carried, never re-derived). Every STEPS entry carries an
+    `id` column, right after `patient_id`. The file a checkpoint names is a DERIVED
+    artifact whose basename differs from whatever produced it (`preprocessed_image`
+    is e.g. `P001_slide_corrected.ome.tiff`; a `postprocessed` row names a pyramid) --
+    deriving a stem from that basename cannot reproduce the identity a samplesheet row
+    was originally assigned, and would manufacture a DIFFERENT identity depending on
+    which checkpoint happened to be the entry point. `id` closes that: a checkpoint
+    reader (lib/Meta.groovy's `fromCheckpointRow`) reads the value back rather than
+    re-deriving it. A checkpoint written before this column existed has no `id` field
+    in its row Map at all (`splitCsv(header:true)` only creates keys for columns the
+    FILE's own header declares) -- `fromCheckpointRow` detects exactly that shape and
+    fails with a message naming the fix (re-run the step that wrote the file), rather
+    than silently falling back to a re-derived, possibly-different id.
 ========================================================================================
 */
 
@@ -64,20 +78,24 @@ class Checkpoint {
     static final List<Map> STEPS = [
         [
             name   : 'preprocessed',
-            columns: ['patient_id', 'preprocessed_image', 'is_reference', 'channels'].asImmutable(),
+            columns: ['patient_id', 'id', 'preprocessed_image', 'is_reference', 'channels'].asImmutable(),
         ],
         [
             name   : 'registered',
-            columns: ['patient_id', 'registered_image', 'is_reference', 'channels'].asImmutable(),
+            columns: ['patient_id', 'id', 'registered_image', 'is_reference', 'channels'].asImmutable(),
         ],
         [
             name   : 'segmented',
-            columns: ['patient_id', 'registered_image', 'is_reference', 'channels',
+            columns: ['patient_id', 'id', 'registered_image', 'is_reference', 'channels',
                       'cell_mask', 'nuclei_mask', 'contours', 'nucleus_contours'].asImmutable(),
         ],
         [
+            // 'postprocessed' rows are per-PATIENT, not per-slide (there is no single
+            // "the" slide a pyramid/merged table belongs to) -- its writer records `id:
+            // patient_id`, the same synthetic patient-level id add_cycle.nf already uses
+            // for its own patient-scoped metas ([patient_id: pid, id: pid, ...]).
             name   : 'postprocessed',
-            columns: ['patient_id', 'cell_csv', 'cell_geojson', 'merged_csv', 'cell_mask', 'pyramid'].asImmutable(),
+            columns: ['patient_id', 'id', 'cell_csv', 'cell_geojson', 'merged_csv', 'cell_mask', 'pyramid'].asImmutable(),
         ],
     ].asImmutable()
 
