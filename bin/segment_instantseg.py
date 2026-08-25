@@ -59,6 +59,13 @@ def _extract_2d_masks(labeled_output, target: str):
 
     This routine is defensive: it strips leading singleton dims, then dispatches
     by remaining ndim.
+
+    A single label map is REFUSED, not replicated into both outputs. See the
+    comment on that branch: replication preserves the file contract and voids
+    the data contract, because Cytoplasm = Cell - Nucleus is then empty for
+    every cell and every cytoplasmic measurement is silently zero. So of the
+    three targets above, only 'all_outputs' can satisfy this reader -- which is
+    what nextflow.config already ships as the default.
     """
     arr = _to_numpy(labeled_output)
     logger.info(f"  InstanSeg raw output shape: {arr.shape}, dtype: {arr.dtype}")
@@ -67,36 +74,39 @@ def _extract_2d_masks(labeled_output, target: str):
     while arr.ndim > 3 and arr.shape[0] == 1:
         arr = arr[0]
 
-    if arr.ndim == 2:
-        # Single (Y, X) — only one target was requested
-        single = arr
-        if target == "nuclei":
-            return single, single  # replicate to satisfy downstream cell-mask consumer
-        elif target == "cells":
-            return single, single
-        else:
-            # Unexpected: all_outputs returned 2D. Treat as nuclei + replicate.
-            logger.warning(
-                "  target='all_outputs' but InstanSeg returned a 2D array; "
-                "replicating to both nuclei and cell masks."
+    # ONE LABEL MAP IS NOT TWO MASKS.
+    #
+    # This branch used to `return single, single` -- replicating the one map
+    # into both outputs and calling it "contract-preserving". It preserves the
+    # FILE contract (both _nuclei_mask.tif and _cell_mask.tif get written) and
+    # destroys the DATA contract: downstream computes
+    # Cytoplasm = Cell - Nucleus, so an identical pair makes the cytoplasm
+    # EMPTY FOR EVERY CELL. Every cytoplasmic column in measurements.csv comes
+    # out zero and no output anywhere looks wrong.
+    #
+    # `--target nuclei` and `--target cells` produce a single map by
+    # construction, so they can never satisfy this reader. nextflow.config
+    # defaults seg_instantseg_target to 'all_outputs', so no shipped path
+    # relied on the replication -- which is what makes refusing safe.
+    if arr.ndim == 2 or (arr.ndim == 3 and arr.shape[0] == 1):
+        raise ValueError(
+            f"InstanSeg returned a SINGLE label map (shape {arr.shape}) for "
+            f"target={target!r}, but this pipeline needs two distinct masks: "
+            f"it derives Cytoplasm = Cell - Nucleus, which would be empty for "
+            f"every cell if the nuclei and cell masks were the same array, and "
+            f"every cytoplasmic measurement would silently be zero. "
+            + (
+                "Use --target all_outputs, which returns both."
+                if target in ("nuclei", "cells")
+                else "This target is supposed to return both, so the selected "
+                "--model cannot produce cell masks. Choose one that can, such "
+                "as fluorescence_nuclei_and_cells."
             )
-            return single, single
+        )
 
     if arr.ndim == 3:
         n = arr.shape[0]
-        if n == 1:
-            single = arr[0]
-            if target == "nuclei":
-                return single, single
-            elif target == "cells":
-                return single, single
-            else:
-                logger.warning(
-                    "  target='all_outputs' but InstanSeg returned 1 channel; "
-                    "replicating to both nuclei and cell masks."
-                )
-                return single, single
-        elif n >= 2:
+        if n >= 2:
             # InstanSeg eval_small_image with target='all_outputs' returns a
             # tensor of shape (2, Y, X): index 0 = nuclei labels, index 1 =
             # cell labels.
@@ -108,7 +118,9 @@ def _extract_2d_masks(labeled_output, target: str):
 
     raise ValueError(
         f"Unexpected InstanSeg output shape {arr.shape}; "
-        f"expected 2D (Y, X) or 3D (N, Y, X) with N in {{1, 2}}."
+        f"expected 3D (N, Y, X) with N >= 2 -- N < 2 is reported above as the "
+        f"single-label-map case, which is a different problem with a different "
+        f"remedy."
     )
 
 
@@ -140,10 +152,13 @@ def run_instanseg(
         Name of the pretrained InstanSeg model. Default is
         ``'fluorescence_nuclei_and_cells'``.
     target
-        InstanSeg ``eval`` target: ``'all_outputs'``, ``'cells'``, or
-        ``'nuclei'``. When only one target is produced, that label map is
-        written to both ``_nuclei_mask.tif`` and ``_cell_mask.tif`` so that
-        downstream is contract-preserving.
+        InstanSeg ``eval`` target. In practice only ``'all_outputs'`` works
+        here: ``'cells'`` and ``'nuclei'`` produce a single label map, and a
+        single map is REFUSED rather than written to both
+        ``_nuclei_mask.tif`` and ``_cell_mask.tif``. Replicating it used to be
+        described as contract-preserving; it preserves the file contract and
+        voids the data contract, since Cytoplasm = Cell - Nucleus is then
+        empty for every cell.
     pixel_size
         Override pixel size in µm/px. If None, InstanSeg's auto-detected value
         from the OME metadata is used.

@@ -409,12 +409,10 @@
                 },
                 "seg_instantseg_target": {
                     "type": "string",
-                    "description": "InstanSeg output target.",
+                    "description": "InstanSeg output target. Only 'all_outputs' is accepted: 'cells' and 'nuclei' each return a SINGLE label map, and this pipeline derives Cytoplasm = Cell - Nucleus, which would be empty for every cell if the nuclei and cell masks were the same array. bin/segment_instantseg.py refuses a single map; the enum is narrowed so the refusal happens at launch instead of inside a segmentation task.",
                     "default": "all_outputs",
                     "enum": [
-                        "all_outputs",
-                        "cells",
-                        "nuclei"
+                        "all_outputs"
                     ]
                 },
                 "seg_instantseg_tile_size": {
