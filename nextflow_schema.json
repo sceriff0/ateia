@@ -614,6 +614,22 @@
                     "description": "Delete the Nextflow work directory after a successful run. Mutually exclusive with -resume.",
                     "help_text": "Off by default. When true, Nextflow removes the work directory once the run completes successfully. Published outputs are unaffected (every publishDir uses mode: 'copy'), and step restarts via --start still work because checkpoint CSVs never record paths inside the work directory. Do not combine with -resume: a cleaned run has no cache to resume from. Leaving it off also preserves the on-disk evidence for any task dropped by the errorStrategy 'ignore' branch, which can let a run exit 0 with a task silently failed.",
                     "default": false
+                },
+                "config_profile_name": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "description": "Human-readable name for the active config profile (e.g. set by conf/test.config). Not read by pipeline code.",
+                    "default": null
+                },
+                "config_profile_description": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "description": "Human-readable description for the active config profile (e.g. set by conf/test.config). Not read by pipeline code.",
+                    "default": null
                 }
             }
         },
@@ -716,6 +732,5 @@
         {
             "$ref": "#/$defs/resource_limits"
         }
-    ],
-    "additionalProperties": true
+    ]
 }
