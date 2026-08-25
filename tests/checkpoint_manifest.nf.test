@@ -507,13 +507,28 @@ nextflow_pipeline {
             def manifests = (csvDir.listFiles() ?: [])
                 .findAll { it.name.endsWith('.csv') }
                 .sort { it.name }
-            // TWO, not three: add_cycle preprocesses and registers the new cycle but
-            // has no POSTPROCESSING step (masks and the base quantification table are
-            // reused, not re-derived), so it writes no postprocessed.csv. That gap is
-            // why an add_cycle --outdir is still not a usable --prior_outdir for a
-            // second add_cycle; registered.csv was the half that was missing entirely.
-            assert manifests*.name == ['preprocessed.csv', 'registered.csv'] :
-                "expected preprocessed.csv + registered.csv, found ${manifests*.name}"
+            // THREE. add_cycle has no POSTPROCESSING step -- the masks and the base
+            // quantification table are reused rather than re-derived -- but it does
+            // produce every artifact a postprocessed row names (it rebuilds the
+            // combined geojson, csv and pyramid wholesale over the merged channel
+            // set), so subworkflows/local/postprocessed_checkpoint.nf writes the
+            // manifest from this path too. Nothing is recomputed to get it.
+            //
+            // Both halves of Layout.ADD_CYCLE_CHECKPOINTS are therefore present, which
+            // is the whole point: until they were, cycle 3 refused at LAUNCH with
+            // "required checkpoint 'csv/postprocessed.csv' not found under
+            // --prior_outdir" and cyclic-IF stopped at two cycles. See the chained
+            // case below, which runs cycle 3 against a cycle-2 outdir for real.
+            assert manifests*.name == ['postprocessed.csv', 'preprocessed.csv', 'registered.csv'] :
+                "expected preprocessed.csv + registered.csv + postprocessed.csv, found ${manifests*.name}"
+
+            // Same column contract as the linear path's postprocessed.csv, because
+            // the same writer produced it.
+            def postLines = manifests.find { it.name == 'postprocessed.csv' }.readLines()
+            assert postLines[0] == 'patient_id,id,cell_csv,cell_geojson,merged_csv,cell_mask,pyramid' :
+                "postprocessed.csv header drifted: ${postLines[0]}"
+            def postRows = postLines.drop(1).findAll { it.trim() }
+            assert postRows.size() == 1 : "expected 1 postprocessed row, got ${postRows.size()}"
 
             // --- the manifest the linear path already had, now on this path -------
             // Same column contract as the linear registered.csv, because the same
@@ -553,9 +568,11 @@ nextflow_pipeline {
                     }
                 }
             }
-            // 1 preprocessed row + 2 registered rows, one path each.
-            assert checked == 3 :
-                "expected 3 recorded paths, examined ${checked} — did the CSV columns change?"
+            // 1 preprocessed row + 2 registered rows, one path each, + 5 paths in
+            // the single postprocessed row (cell_csv, cell_geojson, merged_csv,
+            // cell_mask, pyramid).
+            assert checked == 8 :
+                "expected 8 recorded paths, examined ${checked} — did the CSV columns change?"
             assert problems.isEmpty() :
                 "checkpoint manifest has ${problems.size()} bad path(s):\n  " +
                 problems.join("\n  ")

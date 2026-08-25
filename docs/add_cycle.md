@@ -72,12 +72,41 @@ collide when the report stages them. `--reg_qc 0` avoids it; a single slide
 per patient per cycle is otherwise unaffected.
 
 ## Chaining cycles
-**Not yet supported.** `--prior_outdir` must contain BOTH `csv/registered.csv` and
-`csv/postprocessed.csv` (`ParamUtils.validateAddCycle`). An add_cycle run now writes
-the first, but it has no postprocessing step -- masks and the base quantification
-table are reused rather than re-derived -- so it writes no `csv/postprocessed.csv`
-and cycle N+1 fails its launch validation. Each add_cycle run must currently take
-its `--prior_outdir` from a full linear run.
+**Supported.** An add_cycle `--outdir` is a valid `--prior_outdir` for the next
+cycle, so cycles chain without limit. Point each run at the previous run's
+`--outdir` and give it a fresh one of its own:
+
+```bash
+# cycle 2 — prior is the full linear run
+nextflow run . -profile <site> \
+    --input cycle2.csv --mode add_cycle \
+    --prior_outdir results/cycle1 --outdir results/cycle2
+
+# cycle 3 — prior is cycle 2
+nextflow run . -profile <site> \
+    --input cycle3.csv --mode add_cycle \
+    --prior_outdir results/cycle2 --outdir results/cycle3
+```
+
+`--outdir` must not be the same directory as `--prior_outdir`
+(`ParamUtils.validateAddCycle` refuses it; the checkpoint writes overwrite in
+place). Each run's outputs are cumulative -- the geojson, merged quantification
+table and pyramid are rebuilt over ALL cycles seen so far -- so the newest
+`--outdir` is the complete result and the older ones are only needed as history.
+
+`--prior_outdir` must contain both `csv/registered.csv` and
+`csv/postprocessed.csv` (`Layout.ADD_CYCLE_CHECKPOINTS`). add_cycle writes both:
+the first via `REGISTERED_CHECKPOINT`, the second via `POSTPROCESSED_CHECKPOINT`.
+Neither costs a recomputation -- add_cycle already produces every artifact those
+manifests name, and until 2026-08-25 it simply had no writer for the second, so
+cycle 3 failed launch validation with *"required checkpoint
+'csv/postprocessed.csv' not found under --prior_outdir"*.
+
+One column is worth knowing about: `postprocessed.csv`'s `cell_mask` names the
+masks `EXTRACT_MASK_SERIES` re-read out of the prior pyramid's `Image:1` series
+and published under this run's `<pid>/segmentation/`. So each cycle's manifest
+points inside its own `--outdir`, and an older cycle's directory can be archived
+without breaking the next run's launch validation.
 
 ## Mask pyramid (`embed_masks`)
 `params.embed_masks` (default `false`) controls whether `MERGE_AND_PYRAMID`

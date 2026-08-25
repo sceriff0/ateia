@@ -48,6 +48,13 @@ include { SEG_QC                   } from './seg_qc'
 // grouping, which had drifted the same way (see its call site below).
 include { QUANTIFY_MARKERS; groupTiffsByPatient } from './quantify_markers'
 include { ASSEMBLE_EXPORT          } from './assemble_export'
+// The postprocessing checkpoint writer, shared with postprocess.nf. Writing it from
+// here is what makes an add_cycle --outdir usable as the NEXT cycle's --prior_outdir:
+// ParamUtils.validateAddCycle requires both of Layout.ADD_CYCLE_CHECKPOINTS, and
+// without this call cycle 3 refused at launch with "required checkpoint
+// 'csv/postprocessed.csv' not found". Same repair, one step later, as
+// registered_checkpoint.nf.
+include { POSTPROCESSED_CHECKPOINT } from './postprocessed_checkpoint'
 
 workflow ADD_CYCLE {
     take:
@@ -460,6 +467,29 @@ workflow ADD_CYCLE {
     )
 
     // ------------------------------------------------------------------ //
+    // 11. POSTPROCESSING CHECKPOINT — what makes this outdir chainable
+    // ------------------------------------------------------------------ //
+    // Same writer postprocess.nf uses. Without this call an add_cycle run left
+    // only preprocessed.csv + registered.csv behind, so
+    // ParamUtils.validateAddCycle refused the NEXT cycle at launch:
+    //   "required checkpoint 'csv/postprocessed.csv' not found under
+    //    --prior_outdir". Cyclic-IF stopped at two cycles.
+    //
+    // Nothing is recomputed to satisfy it: every column is an artifact this run
+    // already produced. The cell_mask is EXTRACT_MASK_SERIES' output -- the masks
+    // re-read out of the prior pyramid's Image:1 series and PUBLISHED to this
+    // run's <pid>/segmentation/ (conf/modules.config) -- so the row names a file
+    // inside THIS outdir and the next cycle is self-contained rather than
+    // transitively depending on cycle 1's directory still existing.
+    POSTPROCESSED_CHECKPOINT(
+        ASSEMBLE_EXPORT.out.csv,
+        ASSEMBLE_EXPORT.out.geojson,
+        MERGE_QUANT_CSVS.out.merged_csv,
+        ch_prior_cell_mask,
+        ASSEMBLE_EXPORT.out.pyramid
+    )
+
+    // ------------------------------------------------------------------ //
     // Versions + size logs
     // ------------------------------------------------------------------ //
     // QUANTIFY_MARKERS / ASSEMBLE_EXPORT already applied `.first()` internally
@@ -509,6 +539,10 @@ workflow ADD_CYCLE {
     // storeDir writes the file regardless), but it is emitted so a test can assert on
     // it and so the add_cycle path advertises the same artifact REGISTRATION does.
     checkpoint_csv = REGISTER_PATIENT.out.checkpoint_csv
+    // csv/postprocessed.csv, on the same terms. This is the manifest a FOLLOW-ON
+    // add_cycle reads out of --prior_outdir, so add_cycle now advertises both
+    // halves of Layout.ADD_CYCLE_CHECKPOINTS and its outdir can be chained.
+    postprocessed_checkpoint_csv = POSTPROCESSED_CHECKPOINT.out.csv
     pyramid     = ASSEMBLE_EXPORT.out.pyramid
     qc          = ch_qc
     seg_qc      = ch_seg_qc
