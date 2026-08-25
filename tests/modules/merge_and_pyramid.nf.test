@@ -232,6 +232,66 @@ nextflow_process {
         }
     }
 
+    test("Should accept a ONE-channel group - stub") {
+
+        // conf/modules.config's memory closure calls
+        // `split_channels.collect { it.size() }`. With one file in the group,
+        // Nextflow binds `split_channels` to a bare Path rather than a List --
+        // and `.collect{}` on a Path iterates its NAME ELEMENTS, so `it.size()`
+        // went looking for a file literally called "channels" and the run
+        // ABORTED with "No such file or directory: channels".
+        //
+        // A one-channel patient is an ordinary input, not a pathological one:
+        // subworkflows/local/quantify_markers.nf groups one-tiff-per-marker
+        // entries per patient, and a panel with a single marker produces a
+        // group of one. Every other test in this file passes 2 or 3 files,
+        // which is why the whole suite was green.
+        //
+        // This test only reaches the defect because nf-test.config sets
+        // configFile = "nextflow.config", so conf/modules.config's withName
+        // block -- and therefore the closure -- is actually evaluated here.
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                outdir = "$outputDir"
+                pixel_size = 0.325
+                pyramid_resolutions = 8
+                pyramid_scale = 2
+                tilex = 512
+                compression = 'zstd'
+            }
+            process {
+                """
+                input[0] = [
+                    [
+                        patient_id: 'P001',
+                        is_reference: true,
+                        channels: ['DAPI']
+                    ],
+                    [
+                        file('$projectDir/tests/testdata/sample_DAPI.tif', checkIfExists: true)
+                    ],
+                    []
+                ]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.pyramid },
+                { with(process.out.pyramid) {
+                    assert size() == 1
+                    assert get(0).get(0).channels == ['DAPI']
+                }}
+            )
+        }
+    }
+
     test("Should produce pyramid file significantly larger than sum of inputs - regression") {
 
         tag "real"

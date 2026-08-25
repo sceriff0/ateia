@@ -195,7 +195,11 @@ ALLOWED_LINES = {
         # comment recording why a config closure must not log. Composition check:
         # 1103 + 37 = 1140, and `git diff -U0 conf/modules.config` shows every
         # hunk above this line summing to +37.
-        1140: (
+        # 1140 -> 1156 when MERGE_AND_PYRAMID's memory closure learned that a
+        # `path` input is a bare Path for a one-file group: +16, all of it the
+        # `instanceof Collection` normalisation and the comment recording the
+        # abort it fixes ("No such file or directory: channels").
+        1156: (
             "ext.args = { params.expanded_quantification ? '--expanded' : "
             "'' } -- conf/*.config closures cannot see lib/*.groovy classes, "
             "so ext.args must read params raw here."
