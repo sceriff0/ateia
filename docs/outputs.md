@@ -308,8 +308,12 @@ kept for backward compatibility with FlowPath's bare-key fast path.
     (`if pd.notna(val)`), so **a cell with no nuclear overlap carries fewer keys
     than its neighbours** rather than carrying them as `0.0`. That is correct — a
     cell with no nucleus has no nuclear median, and `0.0` is a measurement, not an
-    absence — but any consumer indexing a key directly (`measurements[...]`)
-    raises on those cells. Use `.get()` and treat `None` as "no nucleus".
+    absence — but it means a consumer must treat "absent" as a state rather than
+    reading a number. A language whose subscript raises (Python) needs `.get()`;
+    one that returns null (Java, as `qupath-extension-flowpath` does) already
+    handles it, and the effect there is on DISTRIBUTIONS instead — percentiles
+    and z-scores exclude the missing cells, where the artificial `0.0`s used to
+    sit in the low tail.
 
     The same applies to the morphology keys (`Eccentricity`, `Perimeter µm`,
     `Solidity`, `Convex Area µm²`, `Major/Minor Axis Length µm`, `Area µm²`).

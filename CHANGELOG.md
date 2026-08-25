@@ -18,8 +18,10 @@ changed and what to do about it, in
    `get_darkfield=False`; the deleted in-house path used `True`. Corrected pixel
    values are not comparable across this release.
 2. **NaN measurements are omitted, not written as `0.0`** — a cell with no
-   nuclear overlap carries fewer keys than its neighbours. FlowPath code using
-   `measurements[...]` rather than `.get()` raises on those cells.
+   nuclear overlap carries fewer keys than its neighbours. This does NOT crash
+   `qupath-extension-flowpath` (its lookup null-checks) and does not change which
+   cells a gate calls positive; what moves is every percentile-derived threshold,
+   because the artificial zeros have left the distribution.
 3. **STARE meshes differ, by design** — two new control-point gates reject points
    the previous code accepted. Registration output is not bit-comparable.
 4. **Checkpoint CSVs carry an `id` column** — an existing `--prior_outdir`, or an
