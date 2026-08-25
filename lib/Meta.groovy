@@ -215,7 +215,7 @@ class Meta {
         // from this one row/slide alone -- it can only come from ctx.channelsCount,
         // which every caller is required to pre-compute up front for the WHOLE
         // sheet/checkpoint before calling Meta (exactly as it already must for
-        // ctx.imagesCount). There is deliberately NO fallback to
+        // ctx.imagesCount, below). There is deliberately NO fallback to
         // meta.keep_channels.size() (a per-SLIDE count) and no opt-out for a
         // caller with "nothing to give": channels_count feeds groupKey(patient_id,
         // channels_count) (subworkflows/local/quantify_markers.nf), and a count
@@ -223,32 +223,51 @@ class Meta {
         // with missing members, or never emit and hang, far from this call site.
         // A caller that cannot supply a real per-patient count has a bug to fix
         // (compute one), not a case this method should paper over.
-        meta.channels_count = requireChannelsCountFor(ctx, meta.patient_id)
+        meta.channels_count = requirePerPatientCount(ctx, 'channelsCount', meta.patient_id,
+            'CsvUtils.countChannelsPerPatient is the samplesheet-path example')
 
-        meta.images_count = ((ctx?.imagesCount ?: [:] as Map)[meta.patient_id] ?: 1) as int
+        // images_count is the SAME shape of obligation as channels_count just
+        // above, and it is equally load-bearing: it feeds
+        // groupKey(meta.patient_id, meta.images_count) in
+        // subworkflows/local/registration.nf. This used to be
+        // `(ctx?.imagesCount ?: [:])[patientId] ?: 1` -- worse than
+        // channels_count's old bug, because Groovy's `?:` treats an explicit `0`
+        // as falsy too, so a genuine `images_count: 0` would have been silently
+        // coerced to `1` instead of merely falling back to a differently-wrong
+        // number. Same fix, same reasoning, same helper.
+        meta.images_count = requirePerPatientCount(ctx, 'imagesCount', meta.patient_id,
+            'CsvUtils.countImagesPerPatient')
 
         requireComplete(meta)
         return meta
     }
 
     /**
-     * ctx.channelsCount must carry a per-patient entry -- see finish()'s comment
-     * for why there is no fallback. Uses containsKey, not a truthy/`?:` check, so
-     * a patient that GENUINELY has channels_count == 0 (an explicit zero, e.g.
-     * every declared channel already claimed elsewhere) is distinguished from a
-     * patient with no entry at all -- the same ABSENT-vs-EMPTY distinction
-     * keep_channels above already has to make.
+     * ctx[ctxKey] must carry a per-patient entry -- see finish()'s comments on
+     * channels_count/images_count for why there is no fallback for either. Uses
+     * containsKey, not a truthy/`?:` check, so a patient that GENUINELY has a
+     * count of 0 (e.g. every declared channel already claimed elsewhere) is
+     * distinguished from a patient with no entry at all -- the same ABSENT-vs-EMPTY
+     * distinction keep_channels above already has to make. One helper, not one
+     * per field, so channels_count and images_count cannot drift into two
+     * different idioms for the identical rule.
+     *
+     * @param ctx           the caller's context map
+     * @param ctxKey        which per-patient map to read, e.g. 'channelsCount'
+     * @param patientId     the patient this meta is being built for
+     * @param resolverHint  named in the exception message: where a caller should
+     *                      get this count from
      */
-    private static int requireChannelsCountFor(Map ctx, String patientId) {
-        def channelsCount = ctx?.channelsCount
-        if (!(channelsCount instanceof Map) || !channelsCount.containsKey(patientId))
+    private static int requirePerPatientCount(Map ctx, String ctxKey, String patientId, String resolverHint) {
+        def counts = ctx?.get(ctxKey)
+        if (!(counts instanceof Map) || !counts.containsKey(patientId))
             throw new IllegalArgumentException(
-                "Meta: ctx.channelsCount has no entry for patient '${patientId}'. Every caller " +
-                "must pre-compute a per-patient channels_count (CsvUtils.countChannelsPerPatient " +
-                "is the samplesheet-path example) covering every patient before calling Meta. " +
-                "There is no fallback: a silently-too-low count desynchronises a streaming " +
-                "groupTuple(size:)/groupKey downstream, which hangs or mis-groups far from here.")
-        return channelsCount[patientId] as int
+                "Meta: ctx.${ctxKey} has no entry for patient '${patientId}'. Every caller must " +
+                "pre-compute a per-patient ${ctxKey} (${resolverHint}) covering every patient " +
+                "before calling Meta. There is no fallback: a silently-wrong count desynchronises " +
+                "a streaming groupTuple(size:)/groupKey downstream, which hangs or mis-groups far " +
+                "from here.")
+        return counts[patientId] as int
     }
 
     private static List<String> splitChannels(def raw) {

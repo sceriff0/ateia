@@ -653,15 +653,15 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
     // falls back to its declared channels; a slide with an EXPLICIT empty list
     // (every marker already claimed by an earlier slide) keeps [], not the
     // declared list -- `?:` cannot tell these apart because [] is falsy in Groovy.
-    // Both ctx maps below must also carry channelsCount now (fix round 1: there is
-    // no more per-slide fallback -- see the channels_count-missing block further
-    // down).
-    def emptyKeepCtx = [keepChannelsBySlide: [P1: ['img2.ome.tiff': []]], channelsCount: [P1: 0]]
+    // Both ctx maps below must also carry channelsCount AND imagesCount now (fix
+    // rounds 1 and 2: there is no more per-slide/default fallback for either --
+    // see the channels_count-missing and images_count-missing blocks further down).
+    def emptyKeepCtx = [keepChannelsBySlide: [P1: ['img2.ome.tiff': []]], channelsCount: [P1: 0], imagesCount: [P1: 1]]
     def emptyKeepRow = [patient_id: 'P1', image: 'img2.ome.tiff', channels: 'DAPI|CD3', is_reference: 'false']
     def emptyKeepMeta = Meta.fromSamplesheetRow(emptyKeepRow, 'image', 0, emptyKeepCtx)
     assert emptyKeepMeta.keep_channels == []
     assert emptyKeepMeta.channels_count == 0
-    def absentKeepCtx = [keepChannelsBySlide: [P1: [:]], channelsCount: [P1: 2]]
+    def absentKeepCtx = [keepChannelsBySlide: [P1: [:]], channelsCount: [P1: 2], imagesCount: [P1: 1]]
     def absentKeepMeta = Meta.fromSamplesheetRow(emptyKeepRow, 'image', 0, absentKeepCtx)
     assert absentKeepMeta.keep_channels == ['DAPI', 'CD3']
 
@@ -689,15 +689,51 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
     catch (IllegalArgumentException ignored) { missingChannelsCountForPatient = true }
     assert missingChannelsCountForPatient, 'Meta.fromSamplesheetRow must reject ctx.channelsCount missing THIS patient'
 
-    // Satisfy: supply the entry, watch it pass.
-    def satisfiedMeta = Meta.fromSamplesheetRow(noCountRow, 'image', 0, [channelsCount: [P1: 2]])
+    // Satisfy: supply BOTH required per-patient counts, watch it pass.
+    def satisfiedMeta = Meta.fromSamplesheetRow(noCountRow, 'image', 0, [channelsCount: [P1: 2], imagesCount: [P1: 1]])
     assert satisfiedMeta.channels_count == 2
 
     // A GENUINE zero is not "missing": containsKey, not a truthy/`?:` check, is
     // what tells these apart -- the same distinction keep_channels' ABSENT-vs-EMPTY
     // rule already has to make.
-    def zeroCountMeta = Meta.fromSamplesheetRow(noCountRow, 'image', 0, [channelsCount: [P1: 0]])
+    def zeroCountMeta = Meta.fromSamplesheetRow(noCountRow, 'image', 0, [channelsCount: [P1: 0], imagesCount: [P1: 1]])
     assert zeroCountMeta.channels_count == 0
+
+    // ---- Fix round 2: images_count has NO fallback either --------------------
+    //
+    // Same defect, one field over, and WORSE while it lasted: the old expression
+    // was `(ctx?.imagesCount ?: [:])[patientId] ?: 1` -- a bare `?:` on the looked-up
+    // value, which in Groovy treats an explicit `0` as falsy too. So a genuine
+    // `images_count: 0` would have been silently COERCED to `1`, not merely
+    // defaulted to a differently-wrong number the way the old channels_count bug
+    // was. images_count is equally load-bearing: it feeds
+    // groupKey(meta.patient_id, meta.images_count) in
+    // subworkflows/local/registration.nf:77. Same fix, same helper
+    // (requirePerPatientCount), same reasoning: no opt-out, because every caller
+    // already computes a full per-patient imagesCount map up front
+    // (CsvUtils.countImagesPerPatient).
+
+    // Trigger: ctx carries no imagesCount key at all (channelsCount present, so
+    // this isolates the images_count check specifically).
+    def missingImagesCountKey = false
+    try { Meta.fromSamplesheetRow(noCountRow, 'image', 0, [channelsCount: [P1: 2]]) }
+    catch (IllegalArgumentException ignored) { missingImagesCountKey = true }
+    assert missingImagesCountKey, 'Meta.fromSamplesheetRow must reject ctx with no imagesCount map at all'
+
+    // Trigger: ctx.imagesCount is populated, but not for THIS patient.
+    def missingImagesCountForPatient = false
+    try { Meta.fromSamplesheetRow(noCountRow, 'image', 0, [channelsCount: [P1: 2], imagesCount: [P2: 9]]) }
+    catch (IllegalArgumentException ignored) { missingImagesCountForPatient = true }
+    assert missingImagesCountForPatient, 'Meta.fromSamplesheetRow must reject ctx.imagesCount missing THIS patient'
+
+    // Satisfy: supply the entry, watch it pass.
+    def satisfiedImagesMeta = Meta.fromSamplesheetRow(noCountRow, 'image', 0, [channelsCount: [P1: 2], imagesCount: [P1: 3]])
+    assert satisfiedImagesMeta.images_count == 3
+
+    // THE bug this round exists to kill: ctx.imagesCount = [P1: 0] must yield
+    // images_count == 0, NOT 1. The old bare `?:` would have coerced this.
+    def zeroImagesMeta = Meta.fromSamplesheetRow(noCountRow, 'image', 0, [channelsCount: [P1: 2], imagesCount: [P1: 0]])
+    assert zeroImagesMeta.images_count == 0, 'a genuine images_count of 0 must NOT be coerced to 1'
 
     // ---- Fix round 1, item 2: fromCheckpointRow validates against the SCHEMA --
     //
