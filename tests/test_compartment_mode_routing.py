@@ -185,7 +185,17 @@ ALLOWED_LINES = {
         # 1064 + 54 - 15 = 1103. Re-pin, do not
         # widen. (Re-pin from the file, not by guessing:
         # `grep -n "params.expanded_quantification ?" conf/modules.config`.)
-        1103: (
+        # 1103 -> 1140 when failure policy was reduced to a named set
+        # (tests/test_error_strategy_policy.py). All +37 lines are comment and
+        # closure text above this line: -1/+10/+5 rewriting the QC selector's
+        # header and its 'ignore' -> 'finish' rationale, +5 naming REGISTER's
+        # retry-exit1-then-fail policy, +2/+3 correcting the CSE header comment
+        # that claimed the closure logs, and +10/+3 replacing the two multi-line
+        # log.warn closures with the one-line retry-then-drop policy plus the
+        # comment recording why a config closure must not log. Composition check:
+        # 1103 + 37 = 1140, and `git diff -U0 conf/modules.config` shows every
+        # hunk above this line summing to +37.
+        1140: (
             "ext.args = { params.expanded_quantification ? '--expanded' : "
             "'' } -- conf/*.config closures cannot see lib/*.groovy classes, "
             "so ext.args must read params raw here."

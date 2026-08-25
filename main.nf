@@ -74,6 +74,44 @@ def generateResourceReport(Map cfg) {
 
 /*
 ================================================================================
+    POST-RUN: ANNOUNCE DROPPED TASKS
+================================================================================
+    A `retry-then-drop` errorStrategy lets the run report success with an
+    artifact missing. That is a deliberate policy (conf/modules.config names it,
+    tests/test_error_strategy_policy.py pins it), but it must not be SILENT —
+    "it OOMed, the strategy swallowed it, and the run went green" is the exact
+    history that made the CSE scorer look permanently broken.
+
+    The announcement lives here rather than in the errorStrategy closure that
+    knows the most about it, for the reason the closure's own comment gives:
+    `log` is unbound in conf/*.config under the v1 config parser, so logging
+    from a closure there resolves against ConfigObject and ABORTS the run past
+    the retry budget — the opposite of 'ignore'. Reproduced 2026-08-25 on
+    NXF_VER=25.04.7, which manifest.nextflowVersion still accepts.
+
+    Same script-level-function shape as generateResourceReport above, and for
+    the same reason: `log` and `workflow` resolve in a script-level function but
+    are null inside the handler closure. `workflow.stats` is final by the time
+    onComplete fires, so reading the count here is safe.
+*/
+def announceDroppedTasks() {
+    try {
+        def dropped = workflow.stats.ignoredCount
+        if (dropped) {
+            log.warn "${dropped} task(s) failed and were DROPPED by a retry-then-drop " +
+                     "policy. This run is reported as SUCCESSFUL and its output tree is " +
+                     "INCOMPLETE — one optional artifact is missing per dropped task. " +
+                     "Grep the log above for [ERROR] to see which. Only SEG_QUALITY_EVAL " +
+                     "and MERGE_SEG_EVAL carry that policy; if a CSE QualityScore is the " +
+                     "artifact that went missing, lower --cse_max_pixels and re-run."
+        }
+    } catch (Exception e) {
+        log.warn "Could not report the dropped-task count (non-fatal): ${e.message}"
+    }
+}
+
+/*
+================================================================================
     RUN MAIN WORKFLOW
 ================================================================================
 */
@@ -92,6 +130,7 @@ workflow {
         project_dir : "${projectDir}",
     ]
     workflow.onComplete {
+        announceDroppedTasks()
         generateResourceReport(report_cfg)
     }
 
