@@ -25,7 +25,6 @@ produce two masks, the run should say so at the point it finds out.
 """
 import numpy as np
 import pytest
-
 from segment_instantseg import _extract_2d_masks
 
 SINGLE_MASK_TARGETS = ["nuclei", "cells"]
