@@ -136,7 +136,12 @@ def test_every_fan_in_orders_by_data():
 
 def test_final_qc_collects_are_sorted():
     body = _strip_comments_only((ROOT / "subworkflows/local/final_qc.nf").read_text())
-    unsorted = re.findall(r"artifactsOf\(ch_artifacts, '([a-z_]+)'\)\.collect\(\)", body)
+    # Real calls are 3-arg -- artifactsOf(ch_artifacts, 'kind', consumed_kinds) -- since
+    # f892012 added consumed_kinds. A 2-arg-only pattern here matches zero real call
+    # sites regardless of whether sort: true is present, so it can never fail: verified
+    # by planting a bare .collect() on a real 3-arg call and confirming the 2-arg
+    # version stayed green while this one catches it.
+    unsorted = re.findall(r"artifactsOf\(ch_artifacts, '([a-z_]+)'(?:,\s*\w+)?\)\.collect\(\)", body)
     assert not unsorted, (
         f"GENERATE_QC_REPORT slot(s) {sorted(unsorted)} use a bare .collect(). Its inputs are "
         "path collections hashed POSITIONALLY, and collect() emits in arrival order, so the "
