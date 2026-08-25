@@ -11,6 +11,7 @@ from tests.nfmodel import (
     param_refs,
     processes,
     script_bodies,
+    strip_comments,
     strip_comments_and_strings,
     with_name_blocks,
 )
@@ -181,6 +182,37 @@ def test_with_name_blocks_ignores_a_selector_mentioned_only_in_a_comment(tmp_pat
     blocks = with_name_blocks(root=tmp_path)
     names = {n for b in blocks for n in b.names}
     assert names == {"REAL"}
+
+
+def test_strip_comments_keeps_string_contents_but_blanks_comments():
+    """View B (`strip_comments`) is for guards that must read text living
+    INSIDE a quoted string literal -- e.g. `collectFile(name: 'foo.yml', sort:
+    true)` or `artifactsOf(ch_artifacts, 'real_kind')`. Unlike
+    `strip_comments_and_strings` (view A), it must NOT blank string contents,
+    or the exact text those guards search for vanishes along with any comment
+    that merely mentions it -- see
+    tests/test_resume_determinism.py::test_final_qc_collects_are_sorted, whose
+    two assertions need this."""
+    src = (
+        "// artifactsOf(ch_artifacts, 'fake_kind').collect() -- just a comment\n"
+        "artifactsOf(ch_artifacts, 'real_kind').collect(sort: true)\n"
+    )
+    clean = strip_comments(src)
+    assert "fake_kind" not in clean  # comment content is gone
+    assert "real_kind" in clean  # string literal content SURVIVES
+    assert "artifactsOf(ch_artifacts, 'real_kind').collect(sort: true)" in clean
+
+
+def test_strip_comments_does_not_open_a_fake_block_comment_on_a_glob():
+    """View B must not re-derive a naive comment parse: it has to share the
+    exact same `skip_non_code` boundary walk as view A, so a `stageAs:
+    'ref/*'` glob's `/*` cannot be misread as an opening block comment here
+    either -- the one and only place that decision is allowed to live."""
+    src = "path(reference, stageAs: 'ref/*'), path(pre)\nscript:\nMARKER_MUST_SURVIVE\n"
+    clean = strip_comments(src)
+    assert "stageAs: 'ref/*'" in clean
+    assert "script:" in clean
+    assert "MARKER_MUST_SURVIVE" in clean
 
 
 def test_param_refs_excludes_map_method_calls():

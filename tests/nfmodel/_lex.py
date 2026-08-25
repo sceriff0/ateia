@@ -9,7 +9,7 @@ naive brace count -- that defeated the private regex parses this replaces.
 """
 import re
 
-__all__ = ["block_extent", "skip_non_code", "strip_comments_and_strings"]
+__all__ = ["block_extent", "skip_non_code", "strip_comments", "strip_comments_and_strings"]
 
 
 def skip_non_code(text: str, i: int) -> int:
@@ -69,6 +69,35 @@ def block_extent(text: str, start: int) -> int:
     return i
 
 
+def _strip(text: str, *, blank_strings: bool) -> str:
+    """The one walk both stripping views project from. Both need the exact
+    same answer to "where does a comment start" and "where does a string
+    start" -- that shared answer is `skip_non_code`. The only thing that
+    differs between the two public views is what happens to a string
+    literal's span once `skip_non_code` has located it: view A
+    (`strip_comments_and_strings`) blanks it like a comment; view B
+    (`strip_comments`) keeps it verbatim. Neither view re-derives the
+    comment/string boundary logic -- that would be exactly the private,
+    forkable Nextflow-source parse this module exists to replace.
+    """
+    out = []
+    i, n = 0, len(text)
+    while i < n:
+        skip_to = skip_non_code(text, i)
+        if skip_to == i:
+            out.append(text[i])
+            i += 1
+            continue
+        span = text[i:skip_to]
+        is_string = text[i] in ("'", '"')
+        if is_string and not blank_strings:
+            out.append(span)
+        else:
+            out.append(re.sub(r"[^\n]", " ", span))
+        i = skip_to
+    return "".join(out)
+
+
 def strip_comments_and_strings(text: str) -> str:
     """Blank `//`/`/* */` comments and quoted-string contents to spaces
     (preserving newlines), so a `re.M`-anchored search over the result cannot
@@ -80,14 +109,23 @@ def strip_comments_and_strings(text: str) -> str:
     substring check with no idea what a comment is -- and was silently
     counted as routed.
     """
-    out = []
-    i, n = 0, len(text)
-    while i < n:
-        skip_to = skip_non_code(text, i)
-        if skip_to != i:
-            out.append(re.sub(r"[^\n]", " ", text[i:skip_to]))
-            i = skip_to
-        else:
-            out.append(text[i])
-            i += 1
-    return "".join(out)
+    return _strip(text, blank_strings=True)
+
+
+def strip_comments(text: str) -> str:
+    """Blank `//`/`/* */` comments only, keeping every string literal's
+    contents -- quotes included -- verbatim.
+
+    A guard that needs to see what is *inside* a string literal (a quoted
+    filename or a quoted argument, e.g. `collectFile(name:
+    'collated_versions.yml', sort: true)`) cannot use
+    `strip_comments_and_strings`: that view blanks string contents on
+    purpose, so the guard's own target text would vanish along with any
+    comment mention of it, and the check would either match nothing forever
+    (a permanent false failure) or, if it captures a group from inside the
+    quotes, match nothing and go silently blind. This view still needs to be
+    string-*aware* -- a `stageAs: 'ref/*'` glob's `/*` must not be misread as
+    an opening block comment -- it just does not blank what it finds inside
+    the quotes.
+    """
+    return _strip(text, blank_strings=False)

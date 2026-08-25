@@ -7,7 +7,12 @@ constructs that defeated the old parses.
 
 Guards assert against this model, never against raw text.
 """
-from ._lex import block_extent, skip_non_code, strip_comments_and_strings
+from ._lex import (
+    block_extent,
+    skip_non_code,
+    strip_comments,
+    strip_comments_and_strings,
+)
 from ._model import (
     REPO_ROOT,
     Process,
@@ -29,6 +34,7 @@ __all__ = [
     "processes",
     "script_bodies",
     "skip_non_code",
+    "strip_comments",
     "strip_comments_and_strings",
     "with_name_blocks",
 ]
