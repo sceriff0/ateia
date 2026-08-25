@@ -38,6 +38,67 @@ def _size_varying(runs_df):
     return runs_df[runs_df["varied_axis"].isin(SIZE_VARYING_AXES)]
 
 
+NO_GROUND_TRUTH = "none"
+
+_NO_GT_NOTE = """\
+NO GROUND-TRUTH REGISTRATION ACCURACY IN THIS ANALYSIS.
+
+It was run with --reg-eval {marker}, which is the explicit opt-out. Every
+accuracy number in this directory is either a COST measure or a method scoring
+its own transform (valis_rtre, the STARE intrinsic TRE, the reg_qc=2
+segmentation overlap). None of them is independent.
+
+The independent measure is the landmark TRE from benchmarks/registration_eval/:
+ANHIR/ACROBAT expert landmarks warped through each method's transform. Produce
+it with benchmarks/registration_eval/run_registration.sh and aggregate_eval.py,
+then re-run this analysis with --reg-eval <that csv>.
+
+This file exists because the alternative -- a cost-only result that reads like a
+complete one -- is how the number came to be missing for so long: it sat unread
+in make_figures.run()'s signature.
+"""
+
+
+def _join_ground_truth(runs_df, reg_eval_csv, outdir):
+    """Merge per-method landmark TRE onto the run table, or record its absence.
+
+    Returns runs_df unchanged when the opt-out was taken; the marker file is the
+    record. Raises when the argument is missing entirely, because "nobody passed
+    it" and "we decided not to" must not look the same.
+    """
+    if reg_eval_csv is None:
+        raise ValueError(
+            "reg_eval_csv is required. It carries the landmark TRE that is this "
+            "benchmark's only ground-truth accuracy measure; running the analysis "
+            "without it produces a cost-only result that reads like a complete "
+            f"one. Pass --reg-eval <path>, or --reg-eval {NO_GROUND_TRUTH} to "
+            "record deliberately running without it."
+        )
+    if str(reg_eval_csv).strip().lower() == NO_GROUND_TRUTH:
+        (Path(outdir) / "NO_GROUND_TRUTH.txt").write_text(
+            _NO_GT_NOTE.format(marker=NO_GROUND_TRUTH)
+        )
+        print("[analysis] WARNING: no ground-truth registration accuracy; see "
+              f"{outdir}/NO_GROUND_TRUTH.txt")
+        return runs_df
+
+    tre = load.load_reg_eval(reg_eval_csv)
+    if "registration_method" not in runs_df.columns:
+        raise ValueError(
+            "the run table has no registration_method column, so the per-method "
+            "landmark TRE cannot be joined onto it. Was this run plan built from "
+            "a sweep that varies the registration method?"
+        )
+    merged = runs_df.merge(tre, on="registration_method", how="left")
+    matched = merged["gt_n_pairs"].notna().sum() if "gt_n_pairs" in merged else 0
+    if not matched:
+        print("[analysis] WARNING: reg_eval carries methods "
+              f"{sorted(tre['registration_method'])} but the runs use "
+              f"{sorted(runs_df['registration_method'].dropna().unique())} -- "
+              "no ground-truth row matched any run")
+    return merged
+
+
 def run(results_root, run_plan_csv, reg_eval_csv, outdir, formats=("pdf", "svg")) -> dict:
     outdir = Path(outdir)
     figdir = outdir / "figures"
@@ -53,6 +114,23 @@ def run(results_root, run_plan_csv, reg_eval_csv, outdir, formats=("pdf", "svg")
     if n_dropped:
         print(f"[analysis] excluded {n_dropped} failed/incomplete process rows from the aggregates "
               f"(measurements.csv keeps them)")
+
+    # ── GROUND TRUTH ──────────────────────────────────────────────────────────
+    # reg_eval_csv carries the landmark TRE from benchmarks/registration_eval/ --
+    # ANHIR/ACROBAT expert landmarks warped through each method's transform, and
+    # the ONLY ground-truth accuracy number in the whole benchmark. Everything
+    # else here is cost, or a method scoring its own transform.
+    #
+    # It used to sit UNREAD in this signature, its docstring and its call site,
+    # with every test passing None -- so the number reached no table and no
+    # figure, and a cost-only result read like a complete one. A parameter that
+    # looks like a data dependency and is not is worse than an absent one.
+    #
+    # Required, with an EXPLICIT opt-out ("none"), for the same reason the QC
+    # errorStrategy stopped defaulting to 'ignore': running without ground truth
+    # has to be a decision somebody wrote down, and it has to be visible in the
+    # OUTPUT, not only in an argument nobody passed.
+    runs_df = _join_ground_truth(runs_df, reg_eval_csv, outdir)
     # Fit the memory model on the size-varying runs only (avoids the confound).
     scaling_df = _size_varying(runs_df)
     models = regress.fit_per_process(scaling_df, predictor="input_gb", target="peak_rss_gb")
@@ -108,6 +186,29 @@ def run(results_root, run_plan_csv, reg_eval_csv, outdir, formats=("pdf", "svg")
     for extra in (reg_run, seg_cnt):
         if not extra.empty:
             quality_df = quality_df.merge(extra, on="run_id", how="left")
+    # Ground-truth accuracy against cost, per method. The point of having the
+    # landmark TRE at all: a method that is 3x cheaper and 3x less accurate is a
+    # different answer from one that is 3x cheaper for free, and neither the cost
+    # tables nor the method-native self-reports can tell them apart.
+    gt_cols = [c for c in runs_df.columns if c.startswith("gt_true_")]
+    if gt_cols and "registration_method" in runs_df.columns:
+        cost = quality.run_cost_summary(runs_df)
+        if not cost.empty and "cpu_hours" in cost.columns:
+            gt = runs_df.drop_duplicates("run_id")[["run_id", "registration_method"] + gt_cols]
+            acc = cost.merge(gt, on="run_id", how="left", suffixes=("", "_gt"))
+            acc.to_csv(outdir / "accuracy_vs_cost.csv", index=False)
+            metric = "gt_true_median_um" if "gt_true_median_um" in gt_cols else gt_cols[0]
+            sub = acc[["cpu_hours", metric, "registration_method"]].dropna(
+                subset=["cpu_hours", metric])
+            if not sub.empty:
+                fig = plotting.scatter(
+                    sub["cpu_hours"], sub[metric],
+                    xlabel="CPU-hours per run",
+                    ylabel=f"landmark TRE ({metric.replace('gt_true_', '')})",
+                    title="Ground-truth accuracy vs cost",
+                    labels=sub["registration_method"])
+                plotting.save_fig(fig, figdir / "accuracy_vs_cost", formats=formats)
+
     quality_df.to_csv(outdir / "quality.csv", index=False)
     # Segmentation cross-method agreement (pairwise mask IoU + cell-count ratio) — best-effort.
     try:
@@ -125,7 +226,16 @@ def main():
     ap = argparse.ArgumentParser(description="Benchmark analysis: figures + optimal config.")
     ap.add_argument("--results-root", required=True)
     ap.add_argument("--run-plan", required=True)
-    ap.add_argument("--reg-eval", default=None)
+    ap.add_argument(
+        "--reg-eval", required=True,
+        help=(
+            "aggregate_eval.py's per-(pair, mode) CSV — the landmark TRE that is "
+            f"this benchmark's only GROUND-TRUTH accuracy measure. Pass "
+            f"'{NO_GROUND_TRUTH}' to run deliberately without it; that writes a "
+            "NO_GROUND_TRUTH.txt into the output so the omission is visible in "
+            "the deliverable rather than only in the command line."
+        ),
+    )
     ap.add_argument("--outdir", default="benchmarks/analysis")
     a = ap.parse_args()
     res = run(a.results_root, a.run_plan, a.reg_eval, a.outdir)

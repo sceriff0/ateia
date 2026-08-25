@@ -147,3 +147,109 @@ def test_the_identity_is_wider_than_the_list_it_replaced():
     the parser is finding almost nothing and the guards above pass vacuously."""
     cols = contract.identity_columns(contract.load_sweep(SWEEP))
     assert len(cols) > 20, f"derived identity is only {len(cols)} columns: {cols}"
+
+
+# ─────────────────────── an unread parameter is a defect, not a decoration ──
+def _unread_params(path: Path, func: str) -> list:
+    """Parameters a function declares and never mentions in its own body."""
+    import ast
+
+    tree = ast.parse(path.read_text())
+    fn = next(
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.FunctionDef) and n.name == func
+    )
+    names = {a.arg for a in fn.args.args} | {a.arg for a in fn.args.kwonlyargs}
+    used = {n.id for n in ast.walk(fn) if isinstance(n, ast.Name)}
+    return sorted(names - used - {"self"})
+
+
+def test_no_analysis_entry_point_takes_a_parameter_it_never_reads():
+    """reg_eval_csv sat in make_figures.run()'s signature, its docstring and its
+    call site and was never read in the body. It carries the ANHIR/ACROBAT
+    landmark TRE -- the ONLY ground-truth registration accuracy number in the
+    whole benchmark -- so that number reached no table and no figure. Every test
+    passed None for it, so nothing could detect it.
+
+    A signature decoration that reads as a data dependency is worse than an
+    absent one: it makes the analysis look complete.
+    """
+    root = BENCH / "analysis"
+    offenders = []
+    for rel, func in (("make_figures.py", "run"),
+                      ("make_tables.py", "build_paper_data")):
+        unread = _unread_params(root / rel, func)
+        if unread:
+            offenders.append(f"{rel}::{func} never reads {unread}")
+    assert not offenders, "\n".join(offenders)
+
+
+def test_the_unread_scan_can_actually_fail(tmp_path):
+    """The check above is an AST walk over two named functions. A walk that
+    found no parameters at all would pass silently, so plant one and watch it
+    report."""
+    src = tmp_path / "m.py"
+    src.write_text("def run(used, ignored):\n    return used\n")
+    assert _unread_params(src, "run") == ["ignored"]
+
+
+def test_the_ground_truth_reaches_a_table_and_a_figure(tmp_path):
+    """Not just "the parameter is read" -- the number has to arrive somewhere a
+    person looks. The review's finding was that it reached NEITHER."""
+    import pandas as pd
+
+    from benchmarks.analysis import make_figures
+
+    fix = BENCH / "tests" / "fixtures"
+    make_figures.run(
+        results_root=fix / "runs",
+        run_plan_csv=fix / "runs_run_plan.csv",
+        reg_eval_csv=fix / "reg_eval_min.csv",
+        outdir=tmp_path,
+        formats=("png",),
+    )
+    table = tmp_path / "accuracy_vs_cost.csv"
+    assert table.exists(), "no accuracy-vs-cost table was written"
+    df = pd.read_csv(table)
+    gt = [c for c in df.columns if c.startswith("gt_true_")]
+    assert gt, f"the accuracy table carries no ground-truth column: {list(df.columns)}"
+    assert df[gt[0]].notna().any(), (
+        "every ground-truth value is NaN -- the join matched no run, so the "
+        "number is present as a column and absent as data"
+    )
+    assert (tmp_path / "figures" / "accuracy_vs_cost.png").exists(), (
+        "no accuracy-vs-cost figure was written"
+    )
+
+
+def test_running_without_ground_truth_has_to_be_explicit(tmp_path):
+    """Omitting it raises; opting out is accepted and RECORDED in the output.
+
+    "Nobody passed it" and "we decided not to" must not look the same -- that
+    equivalence is exactly how the number went missing.
+    """
+    import pytest
+
+    from benchmarks.analysis import make_figures
+
+    fix = BENCH / "tests" / "fixtures"
+    with pytest.raises(ValueError, match="reg_eval_csv is required"):
+        make_figures.run(
+            results_root=fix / "runs",
+            run_plan_csv=fix / "runs_run_plan.csv",
+            reg_eval_csv=None,
+            outdir=tmp_path,
+            formats=("png",),
+        )
+
+    out = tmp_path / "optout"
+    make_figures.run(
+        results_root=fix / "runs",
+        run_plan_csv=fix / "runs_run_plan.csv",
+        reg_eval_csv=make_figures.NO_GROUND_TRUTH,
+        outdir=out,
+        formats=("png",),
+    )
+    note = out / "NO_GROUND_TRUTH.txt"
+    assert note.exists(), "the opt-out left no record in the output"
+    assert "landmark TRE" in note.read_text()

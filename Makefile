@@ -107,6 +107,17 @@ SWEEP ?=
 SWEEP_PLAN ?= $(SWEEP)_plan.csv
 HANDOFF ?= benchmarks/_handoff
 
+# The landmark-TRE CSV from benchmarks/registration_eval/aggregate_eval.py -- the
+# benchmark's only GROUND-TRUTH registration accuracy number. make_figures now
+# requires it: it used to sit unread in that function's signature, so the number
+# reached no table and no figure at all.
+#
+# The default is the explicit opt-out. That is not the same as omitting it: it
+# writes NO_GROUND_TRUTH.txt into the output directory, so a cost-only result
+# says so in the deliverable rather than reading like a complete one. Set
+# REG_EVAL=<path> once the evaluation has been run.
+REG_EVAL ?= none
+
 arm-plan:
 	python benchmarks/build_arm_plan.py \
 	    --arms $(ARMS) --input $(INPUT) \
@@ -119,7 +130,8 @@ arm-tables:
 	python -m benchmarks.analysis.make_tables \
 	    --results-root $(ROOT) --run-plan $(ROOT)_plan.csv --outdir $(HANDOFF)/arms
 	python -m benchmarks.analysis.make_figures \
-	    --results-root $(ROOT) --run-plan $(ROOT)_plan.csv --outdir $(HANDOFF)/arms
+	    --results-root $(ROOT) --run-plan $(ROOT)_plan.csv --reg-eval $(REG_EVAL) \
+	    --outdir $(HANDOFF)/arms
 
 # The sweep is a DIFFERENT experiment that writes the same filenames. Its tables
 # are what data/benchmark/ must hold, so they get their own staging dir and their
@@ -129,7 +141,8 @@ sweep-tables:
 	python -m benchmarks.analysis.make_tables \
 	    --results-root $(SWEEP) --run-plan $(SWEEP_PLAN) --outdir $(HANDOFF)/sweep
 	python -m benchmarks.analysis.make_figures \
-	    --results-root $(SWEEP) --run-plan $(SWEEP_PLAN) --outdir $(HANDOFF)/sweep
+	    --results-root $(SWEEP) --run-plan $(SWEEP_PLAN) --reg-eval $(REG_EVAL) \
+	    --outdir $(HANDOFF)/sweep
 
 arm-pull:
 	benchmarks/pull_to_ihc_method.sh $(ROOT) $(IHC) --handoff $(HANDOFF) \

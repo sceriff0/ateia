@@ -56,6 +56,26 @@ def scatter_with_fit(x, y, slope, intercept, xlabel, ylabel, title):
     return fig
 
 
+def scatter(x, y, xlabel, ylabel, title, labels=None):
+    """A scatter with NO fitted line.
+
+    Deliberately separate from scatter_with_fit above rather than passing it a
+    None slope: the resource figures fit peak_rss ~ input_gb because there is a
+    model behind it (a marginal cost per input GiB plus a fixed overhead).
+    Accuracy against cost has no such model, and drawing a line through it would
+    assert one. `labels` annotates each point with the method it belongs to,
+    which is the comparison the figure is for.
+    """
+    fig, ax = plt.subplots()
+    ax.scatter(x, y, s=24, alpha=0.85)
+    if labels is not None:
+        for xi, yi, li in zip(x, y, labels):
+            ax.annotate(str(li), (xi, yi), fontsize=7,
+                        xytext=(3, 3), textcoords="offset points")
+    ax.set(xlabel=xlabel, ylabel=ylabel, title=title)
+    return fig
+
+
 def before_after_box(df, cols, ylabel, title, log_scale=True):
     fig, ax = plt.subplots()
     ax.boxplot([df[c].dropna().to_numpy() for c in cols])

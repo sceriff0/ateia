@@ -173,7 +173,15 @@ echo "Sweep finished: $(date)"
 echo "Next (login node) — emit the paper DATA tables:"
 echo "    python -m benchmarks.analysis.make_tables \\"
 echo "        --results-root $RESULTS --run-plan $RUN_PLAN --outdir benchmarks/_handoff/sweep"
-echo "Optional figures + derived config:"
+# --reg-eval is REQUIRED by make_figures: it carries the landmark TRE from
+# benchmarks/registration_eval/, the benchmark's only GROUND-TRUTH registration
+# accuracy number, and it used to sit unread in that function's signature so the
+# number reached no table and no figure. Pass `none` to run deliberately without
+# it -- that writes NO_GROUND_TRUTH.txt into the output, so a cost-only result
+# says so in the deliverable instead of reading like a complete one.
+echo "Figures + derived config (make_figures also emits the accuracy-vs-cost table):"
 echo "    python -m benchmarks.analysis.make_figures \\"
-echo "        --results-root $RESULTS --run-plan $RUN_PLAN --outdir benchmarks/_handoff/sweep"
+echo "        --results-root $RESULTS --run-plan $RUN_PLAN \\"
+echo "        --reg-eval <aggregate_eval.csv | none> \\"
+echo "        --outdir benchmarks/_handoff/sweep"
 echo "=================================================="
