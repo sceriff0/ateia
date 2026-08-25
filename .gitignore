@@ -117,6 +117,7 @@ tests/testdata/valid_preprocessing.csv
 tests/testdata/valid_checkpoint_registration.csv
 tests/testdata/valid_checkpoint_segmented.csv
 tests/testdata/valid_checkpoint_segmented_no_compartments.csv
+tests/testdata/segmented.csv
 tests/testdata/valid_checkpoint_postprocessing.csv
 tests/testdata/invalid_multi_ref.csv
 tests/testdata/invalid_no_ref.csv

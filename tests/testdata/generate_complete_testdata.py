@@ -306,6 +306,40 @@ with open(OUT_DIR / "valid_checkpoint_segmented_no_compartments.csv", "w") as f:
     )
 print("  Created valid_checkpoint_segmented_no_compartments.csv")
 
+# 3c-ter. tests/subworkflows/entry_point_equivalence.nf.test's fixture -- the ONE
+#         permanent, CI-collected guard that a checkpoint-entered meta
+#         (READ_SEGMENTED_CHECKPOINT -> Meta.fromCheckpointRow) carries
+#         keep_channels/channels_count, not just patient_id/id/is_reference/channels.
+#         Column list from lib/Checkpoint.groovy's 'segmented' entry (authoritative;
+#         read it, never restate it by hand) -- it now includes 'id' (RULING R17).
+#
+#         Channel declarations are DELIBERATELY IDENTICAL to test_input.csv's two
+#         rows (P001 ref DAPI|PANCK|SMA, P001 mov1 DAPI|CD3|CD8) so the expected
+#         channels_count (5) is the SAME value INPUT_CHECK's
+#         CsvUtils.countChannelsPerPatient already computes for that exact
+#         declared-channel structure on the samplesheet path -- see
+#         tests/subworkflows/local/input_check.nf.test's
+#         `workflow.out.counts[0].channels.P001 == 5` assertion against
+#         test_input.csv. That is the cross-check the new nf-test's comment points
+#         at: the checkpoint path's channels_count must equal the samplesheet
+#         path's for the same declared channels, and this fixture makes that
+#         equality checkable without needing CsvUtils on the nf-test assertion
+#         classpath (which does not have lib/ available -- see tests/layout.nf.test's
+#         header comment).
+with open(OUT_DIR / "segmented.csv", "w") as f:
+    f.write("patient_id,id,registered_image,is_reference,channels,cell_mask,nuclei_mask,contours,nucleus_contours\n")
+    f.write(
+        f"P001,P001_ref,{TESTDATA_ABS}/P001_ref.ome.tiff,true,DAPI|PANCK|SMA,"
+        f"{TESTDATA_ABS}/P001_cell_mask.tif,{TESTDATA_ABS}/P001_nuclei_mask.tif,"
+        f"{TESTDATA_ABS}/sample_contours.json,{TESTDATA_ABS}/sample_contours.json\n"
+    )
+    f.write(
+        f"P001,P001_mov1,{TESTDATA_ABS}/P001_mov1.ome.tiff,false,DAPI|CD3|CD8,"
+        f"{TESTDATA_ABS}/P001_cell_mask.tif,{TESTDATA_ABS}/P001_nuclei_mask.tif,"
+        f"{TESTDATA_ABS}/sample_contours.json,{TESTDATA_ABS}/sample_contours.json\n"
+    )
+print("  Created segmented.csv (entry_point_equivalence.nf.test fixture)")
+
 # 3d. A minimal "prior completed run" for the add_cycle path. ADD_CYCLE rebuilds
 #     the assets it reuses from these two checkpoint CSVs under
 #     <prior_outdir>/csv/, so tests/subworkflows/add_cycle.nf.test only has to
@@ -467,6 +501,7 @@ print("  - valid_preprocessing.csv")
 print("  - valid_checkpoint_registration.csv")
 print("  - valid_checkpoint_segmented.csv")
 print("  - valid_checkpoint_segmented_no_compartments.csv")
+print("  - segmented.csv")
 print("  - valid_checkpoint_postprocessing.csv")
 print("  - test_input.csv")
 print("\nInvalid data (for validation testing):")
@@ -533,6 +568,7 @@ print("  - valid_preprocessing.csv")
 print("  - valid_checkpoint_registration.csv")
 print("  - valid_checkpoint_segmented.csv")
 print("  - valid_checkpoint_segmented_no_compartments.csv")
+print("  - segmented.csv")
 print("  - valid_checkpoint_postprocessing.csv")
 print("  - test_input.csv")
 print("\nInvalid data (for validation testing):")
