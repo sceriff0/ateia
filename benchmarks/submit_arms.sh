@@ -25,8 +25,10 @@
 # <RESULTS>/.launch/<run_id>/work, so nothing large is ever written to $HOME,
 # which is small and read-only inside the containers.
 #
-# The only thing written back into the checkout is benchmarks/paper_data/*.csv in
-# step 3 (a few hundred KB of tables); pull_to_ihc_method.sh reads them from there.
+# The only thing written back into the checkout is benchmarks/_handoff/arms/*.csv
+# in step 3 (a few hundred KB of tables and figures); pull_to_ihc_method.sh reads
+# them from there. The SWEEP's equivalents land in benchmarks/_handoff/sweep --
+# separate roots, because the two experiments write the same filenames.
 #
 # Prereq (login node, once): the benchmark lives on the `benchmarking` branch, so
 # the checkout must be on it --
@@ -200,14 +202,21 @@ export ARMS_PROFILE="$PROFILES"
 echo "=================================================="
 echo "Arms finished: $(date)"
 echo
+# The arms and sweep experiments write to SEPARATE roots, and BOTH halves matter:
+# make_tables and make_figures each write nine filenames the other experiment also
+# writes. They shared benchmarks/paper_data (tables) and benchmarks/analysis
+# (figures) until 2026-08-25, so whichever analysis ran second silently overwrote
+# the first's, and pull_to_ihc_method.sh copied whatever was left into the
+# consumer. These are the same roots the Makefile's `arm-tables` target uses.
+# Guarded by benchmarks/tests/test_handoff_paths_are_disjoint.py.
 echo "Next, on a login node — emit the tables:"
 echo "    cd $SRC_DIR"
 echo "    python -m benchmarks.analysis.make_tables \\"
 echo "        --results-root $RESULTS --run-plan $BENCH_DIR/arm_plan.csv \\"
-echo "        --outdir benchmarks/paper_data"
+echo "        --outdir benchmarks/_handoff/arms"
 echo "    python -m benchmarks.analysis.make_figures \\"
 echo "        --results-root $RESULTS --run-plan $BENCH_DIR/arm_plan.csv \\"
-echo "        --outdir benchmarks/analysis"
+echo "        --outdir benchmarks/_handoff/arms"
 echo
 echo "Then hand off to ihc_method (small QC artifacts only — the images stay here):"
 echo "    benchmarks/pull_to_ihc_method.sh $RESULTS <path-to>/ihc_method"

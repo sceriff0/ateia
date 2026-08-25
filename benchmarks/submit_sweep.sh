@@ -164,10 +164,16 @@ export SWEEP_PROFILE="$PROFILES"
 
 echo "=================================================="
 echo "Sweep finished: $(date)"
+# The arms and sweep experiments write to SEPARATE roots, and BOTH halves matter:
+# make_tables and make_figures each write nine filenames the other experiment also
+# writes. They shared benchmarks/paper_data (tables) and benchmarks/analysis
+# (figures) until 2026-08-25, so whichever analysis ran second silently overwrote
+# the first's. These are the same roots the Makefile's `sweep-tables` target uses.
+# Guarded by benchmarks/tests/test_handoff_paths_are_disjoint.py.
 echo "Next (login node) — emit the paper DATA tables:"
 echo "    python -m benchmarks.analysis.make_tables \\"
-echo "        --results-root $RESULTS --run-plan $RUN_PLAN --outdir benchmarks/paper_data"
+echo "        --results-root $RESULTS --run-plan $RUN_PLAN --outdir benchmarks/_handoff/sweep"
 echo "Optional figures + derived config:"
 echo "    python -m benchmarks.analysis.make_figures \\"
-echo "        --results-root $RESULTS --run-plan $RUN_PLAN --outdir benchmarks/analysis"
+echo "        --results-root $RESULTS --run-plan $RUN_PLAN --outdir benchmarks/_handoff/sweep"
 echo "=================================================="
