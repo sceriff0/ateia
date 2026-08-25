@@ -67,6 +67,20 @@ workflow MIRAGE {
     boolean run_segmentation   = ParamUtils.shouldRun('segmentation', params.start, effective_stop)
     boolean run_postprocessing = ParamUtils.shouldRun('postprocessing', params.start, effective_stop)
 
+    // MERGE_AND_PYRAMID's memory model uses an UNMEASURED bytes-per-file-byte
+    // ratio (conf/modules.config, the `plane * 3.25d` term). On real slides it
+    // has been observed to under-reserve into a hard node-memory cliff. The
+    // retry ramp is the only safety net, and it is x4 at most. Gated on
+    // run_postprocessing -- the real "does this run reach MERGE_AND_PYRAMID"
+    // condition (ParamUtils.shouldRun against the STEPS table above), not a
+    // dedicated skip param, because add_cycle mode reaches the same process via
+    // ASSEMBLE_EXPORT without ever setting --start/--stop.
+    if (run_postprocessing) {
+        log.warn "MERGE_AND_PYRAMID memory is estimated from an unmeasured ratio. " +
+                 "On slides larger than ~40 GB, measure r = (H*W*2)/file_size on your " +
+                 "own data and set --max_memory accordingly (see docs/resources.md)."
+    }
+
     // --quantify_compartments / --expanded_quantification / --embed_masks, resolved
     // ONCE here (the single decision site on every path, standard and add_cycle
     // alike) and threaded down as an argument -- the same seam

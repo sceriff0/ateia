@@ -259,6 +259,34 @@ rather than silent — see [Retry policy](#retry-policy).
 above is the default (`false` → `process_medium`); with `--spatialdata_include_image`
 it asks for `8` cpus and `300 GB` instead.
 
+#### `MERGE_AND_PYRAMID`'s memory coefficient is unmeasured
+
+The `memory` closure's `plane * 3.25d` term (`conf/modules.config`, the
+`MERGE_AND_PYRAMID` block) was calibrated once, on one host, and the closure's own
+comment calls part of it "a guess made without one". This is a **node-memory cliff, not
+cgroup pressure** — a large-slide run that under-reserves gets SIGKILLed at roughly the
+observed ~450 GB ceiling, and the retry ramp (`× task.attempt`, capped at 4 attempts by
+`conf/base.config`'s `maxRetries`) is the only safety net.
+
+`workflows/mirage.nf` logs a `log.warn` at launch whenever the run reaches
+`MERGE_AND_PYRAMID` — gated on the same `run_postprocessing` boolean
+(`ParamUtils.shouldRun('postprocessing', ...)`, against the `ParamUtils.STEPS` table) that
+routes the standard start/stop path, so it also fires under `mode=add_cycle`, which
+reaches the same process through `ASSEMBLE_EXPORT` without ever setting `--start`/`--stop`.
+
+**To measure the real coefficient on your own data**, run one representative real slide
+through `SPLIT_CHANNELS` (or use an existing run's per-channel TIFFs) and, per channel:
+
+1. Read `H` and `W` (pixel height/width) from the channel TIFF.
+2. Read the on-disk `file_size` (bytes) of that channel's compressed TIFF from the
+   Nextflow trace (`rchar`/`wchar`, or just `stat` the published file).
+3. Compute `r = (H * W * 2) / file_size` — the ratio of one uncompressed uint16 plane to
+   the compressed file size.
+4. Report the **observed maximum** `r` across channels and across slides in the cohort;
+   that maximum, not the mean, is what should replace the `3.25d` guess once there is
+   real data behind it. Until then, set `--max_memory` generously above the current
+   estimate for any slide over ~40 GB.
+
 ### Run-level
 
 | Process | `cpus` | `memory` (attempt 1) | `time` | Owner |
