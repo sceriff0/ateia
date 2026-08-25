@@ -199,7 +199,11 @@ ALLOWED_LINES = {
         # `path` input is a bare Path for a one-file group: +16, all of it the
         # `instanceof Collection` normalisation and the comment recording the
         # abort it fixes ("No such file or directory: channels").
-        1156: (
+        # 1156 -> 1181 when SEGMENT's clusterOptions stopped REPLACING the slurm
+        # profile's --account/--qos: +25, the inlined account/qos derivation plus
+        # the comment recording why composition is unavailable (task.clusterOptions
+        # inside a clusterOptions closure recurses to a StackOverflowError).
+        1181: (
             "ext.args = { params.expanded_quantification ? '--expanded' : "
             "'' } -- conf/*.config closures cannot see lib/*.groovy classes, "
             "so ext.args must read params raw here."
