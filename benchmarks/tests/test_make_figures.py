@@ -58,7 +58,9 @@ def test_run_emits_an_optimized_config_with_live_blocks(tmp_path):
 
 
 def test_run_accepts_formats_and_writes_png(tmp_path):
-    res = make_figures.run(
+    # Return value deliberately unused: what `formats=` controls is which FILES land
+    # on disk, which is what the globs below assert.
+    make_figures.run(
         results_root=FIX / "runs", run_plan_csv=FIX / "runs_run_plan.csv",
         reg_eval_csv=None,
         outdir=tmp_path, formats=("png",),

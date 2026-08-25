@@ -1,7 +1,11 @@
 import numpy as np
 import pytest
+
 from benchmarks.registration_eval.landmarks import (
-    LandmarkPair, per_landmark_tre, image_diagonal, summarize,
+    LandmarkPair,
+    image_diagonal,
+    per_landmark_tre,
+    summarize,
 )
 
 

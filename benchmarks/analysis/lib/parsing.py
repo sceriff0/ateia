@@ -8,8 +8,6 @@ from __future__ import annotations
 
 import re
 
-import numpy as np
-
 _MEM_UNITS = {"B": 1 / 2**30, "KB": 1 / 2**20, "MB": 1 / 2**10, "GB": 1.0, "TB": 2**10}
 
 

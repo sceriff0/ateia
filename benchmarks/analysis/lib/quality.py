@@ -229,7 +229,9 @@ def instance_f1(ma, mb, iou_thresh=0.5) -> dict:
             break
         if al[k] in used_a or bl[k] in used_b:
             continue
-        used_a.add(int(al[k])); used_b.add(int(bl[k])); matched += 1
+        used_a.add(int(al[k]))
+        used_b.add(int(bl[k]))
+        matched += 1
     precision = matched / nb
     recall = matched / na
     f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) else 0.0

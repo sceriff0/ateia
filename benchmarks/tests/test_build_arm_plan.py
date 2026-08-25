@@ -20,10 +20,6 @@ from pathlib import Path
 import pytest
 import yaml
 
-BENCH = Path(__file__).parents[1]
-REPO_ROOT = BENCH.parent
-ARMS_YAML = BENCH / "configs" / "arms.yaml"
-
 from benchmarks.build_arm_plan import (
     arms_manifest_rows,
     build_arm_plan,
@@ -31,6 +27,10 @@ from benchmarks.build_arm_plan import (
     schema_enums,
     validate_against_schema,
 )
+
+BENCH = Path(__file__).parents[1]
+REPO_ROOT = BENCH.parent
+ARMS_YAML = BENCH / "configs" / "arms.yaml"
 
 
 def _param_checker():

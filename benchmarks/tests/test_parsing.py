@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
-from benchmarks.analysis.lib.parsing import parse_to_gb, parse_duration
+
+from benchmarks.analysis.lib.parsing import parse_duration, parse_to_gb
 
 
 @pytest.mark.parametrize("val,expected", [

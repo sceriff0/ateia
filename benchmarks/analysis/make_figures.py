@@ -11,6 +11,7 @@ import argparse
 from pathlib import Path
 
 import matplotlib
+
 matplotlib.use("Agg")
 
 import pandas as pd

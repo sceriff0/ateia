@@ -10,7 +10,6 @@ one-line tweak to match your downloaded CSV (see COLS). pair grouping is by
 """
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
 
 from ..landmarks import LandmarkPair

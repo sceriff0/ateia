@@ -2,7 +2,7 @@ from pathlib import Path
 
 import numpy as np
 
-from benchmarks.registration_eval.adapters import anhir, acrobat
+from benchmarks.registration_eval.adapters import acrobat, anhir
 
 FIX = Path(__file__).parent / "fixtures"
 
@@ -16,9 +16,10 @@ def test_anhir_load_pair_reads_xy_and_aligns():
 
 def test_anhir_mismatched_lengths_raise():
     import pytest
-    short = FIX / "anhir_source.csv"
-    # target with extra row simulated by reusing source twice is same length; instead
-    # assert the guard exists by calling with a deliberately bad pair via monkeypatch-free check:
+    # The fixture pair has EQUAL lengths, so it cannot exercise the mismatch guard;
+    # the guard is called directly with a deliberately bad pair instead. (A `short =
+    # FIX / "anhir_source.csv"` binding used to sit here, unused, implying a fixture
+    # that does not exist.)
     with pytest.raises(ValueError):
         anhir._validate_aligned(np.zeros((3, 2)), np.zeros((2, 2)))
 

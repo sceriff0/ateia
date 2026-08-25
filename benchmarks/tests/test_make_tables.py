@@ -12,7 +12,9 @@ TABLES = ("runs_master", "scaling_fits", "registration_accuracy", "registration_
 
 
 def test_build_paper_data_emits_all_tables_and_dicts(tmp_path):
-    res = make_tables.build_paper_data(
+    # Return value deliberately unused -- the contract under test is the set of
+    # files written under outdir, asserted below.
+    make_tables.build_paper_data(
         results_root=FIX / "runs",
         run_plan_csv=FIX / "runs_run_plan.csv",
         outdir=tmp_path,
