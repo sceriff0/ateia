@@ -36,18 +36,39 @@ def test_concurrency_drives_both_scopes():
     assert re.search(r"maxForks\s*=.*concurrency", CFG), "maxForks is not derived"
 
 
+# The exact shape every per-process maxForks override must take. Only the integer
+# cap may vary -- everything else, including whitespace collapsed to single spaces,
+# is fixed. Pinning the SHAPE, not merely which substrings appear in the assignment,
+# is the point: `Math.min(10, params.max_forks as int)` -- the bare pre-concurrency
+# form -- contains the substring "params.max_forks" and no "?:", so a substring-only
+# check cannot tell it apart from the null-tested form. Once params.max_forks is
+# null-declared, that bare form throws inside Math.min ONLY when the closure
+# actually runs (Nextflow's per-process maxForks is not a dynamic directive) --
+# invisible to -stub, invisible to this whole pytest suite, surfacing only against
+# a real cluster run on a real slide.
+_CANONICAL_MAX_FORKS_RE = re.compile(
+    r"^Math\.min\(\s*\d+\s*,\s*"
+    r"\(\s*params\.max_forks\s*!=\s*null\s*\?\s*params\.max_forks\s*:\s*params\.concurrency\s*\)"
+    r"\s*as\s*int\s*\)$"
+)
+
+
 def test_no_per_process_cap_reads_the_bare_param():
     # params.max_forks is null unless explicitly set, so a bare read yields null
     # and Math.min throws at closure-run time -- the silent-resolution failure
     # mode this repo keeps rediscovering.
-    assignments = []
+    offenders = []
+    found_any = False
     for block in with_name_blocks():
-        assignments.extend(re.findall(r"^\s*maxForks\s*=\s*(.+)$", block.body, re.M))
-    assert assignments, "expected per-process maxForks overrides in conf/modules.config"
-    unbounded = [a for a in assignments if "params.max_forks" not in a]
-    assert not unbounded, f"per-process maxForks ignoring params.max_forks: {unbounded}"
-    elvis = [a for a in assignments if "?:" in a]
-    assert not elvis, (
-        f"elvis in a numeric-param fallback: {elvis}. Groovy's 0 is falsy, so `?:` "
-        f"cannot express 'unset'. Use (params.max_forks != null ? ... : ...)."
+        for expr in re.findall(r"^\s*maxForks\s*=\s*(.+)$", block.body, re.M):
+            found_any = True
+            normalised = re.sub(r"\s+", " ", expr.strip())
+            if not _CANONICAL_MAX_FORKS_RE.match(normalised):
+                offenders.append(f"{block.selector}: {normalised!r}")
+    assert found_any, "expected per-process maxForks overrides in conf/modules.config"
+    assert not offenders, (
+        "per-process maxForks must be exactly `Math.min(<cap>, (params.max_forks != "
+        "null ? params.max_forks : params.concurrency) as int)` (only <cap> may vary "
+        "-- a bare `params.max_forks as int` or an `?:` fallback both silently break "
+        "once max_forks is null). Offenders:\n  " + "\n  ".join(offenders)
     )

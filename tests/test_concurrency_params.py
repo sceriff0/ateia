@@ -143,20 +143,47 @@ def test_queue_size_is_assigned_in_nextflow_config_not_base_config(nf, base):
     )
 
 
-def test_every_per_process_max_forks_is_bounded_by_the_parameter(modules):
-    """Lowering --max_forks must throttle EVERY module, not just those without an override.
+# The exact shape every per-process maxForks override must take. Only the integer
+# cap may vary -- pinning the SHAPE, not merely whether "params.max_forks" appears
+# as a substring, is the point. `Math.min(10, params.max_forks as int)` -- the bare
+# pre-concurrency form -- contains that substring and no "?:", so a substring-only
+# check (this test's own earlier version) cannot distinguish it from the null-tested
+# form. Once params.max_forks is null-declared, the bare form yields
+# `Math.min(10, null)`, which throws inside Nextflow's TaskProcessor constructor
+# ONLY when the closure actually runs (maxForks is not a dynamic directive) --
+# invisible to -stub, invisible to this whole pytest suite, surfacing only against
+# a real cluster run on a real slide. An `?:` fallback fails the same way it always
+# does for a numeric nullable param (Groovy's 0 is falsy).
+_CANONICAL_MAX_FORKS_RE = re.compile(
+    r"^Math\.min\(\s*\d+\s*,\s*"
+    r"\(\s*params\.max_forks\s*!=\s*null\s*\?\s*params\.max_forks\s*:\s*params\.concurrency\s*\)"
+    r"\s*as\s*int\s*\)$"
+)
 
-    Each per-process value is `Math.min(<its own limit>, params.max_forks as int)`: the
-    process keeps its own ceiling (set for its own memory reasons) while the parameter can
-    always pull it down. A bare literal here would silently ignore --max_forks.
+
+def test_every_per_process_max_forks_is_bounded_by_the_parameter(modules):
+    """Lowering --max_forks (or --concurrency) must throttle EVERY module, not just
+    those without an override.
+
+    Each per-process value must be EXACTLY
+    `Math.min(<its own limit>, (params.max_forks != null ? params.max_forks : params.concurrency) as int)`:
+    the process keeps its own ceiling (set for its own memory reasons) while the
+    parameter can always pull it down. A bare literal, a bare `params.max_forks`
+    (null once unset), or an `?:` fallback would all silently ignore --max_forks/
+    --concurrency, or worse, throw only when the closure runs -- see the module-level
+    comment above for why a substring check cannot tell these apart.
     """
     assignments = re.findall(r"^\s*maxForks\s*=\s*(.+)$", modules, flags=re.M)
     assert assignments, "expected per-process maxForks overrides in conf/modules.config"
-    unbounded = [a.strip() for a in assignments if "params.max_forks" not in a]
-    assert not unbounded, (
-        f"{len(unbounded)} per-process maxForks value(s) ignore params.max_forks: "
-        f"{unbounded!r}. Write them `Math.min(<limit>, params.max_forks as int)` so "
-        "--max_forks throttles every module."
+    offenders = []
+    for raw in assignments:
+        normalised = re.sub(r"\s+", " ", raw.strip())
+        if not _CANONICAL_MAX_FORKS_RE.match(normalised):
+            offenders.append(normalised)
+    assert not offenders, (
+        f"{len(offenders)} per-process maxForks value(s) are not the exact "
+        "`Math.min(<cap>, (params.max_forks != null ? params.max_forks : "
+        f"params.concurrency) as int)` shape (only <cap> may vary): {offenders!r}"
     )
 
 
