@@ -132,7 +132,11 @@ def _referenced_tags() -> set:
 
     for proc in processes().values():
         _scan(proc.raw_body)
-    for groovy in sorted(LIB_DIR.glob("*.groovy")):
+    # rglob, not glob: lib/ is flat today, but a non-recursive glob is the same
+    # nested-directory trap tests.nfmodel.nf_files()'s own docstring warns
+    # about -- a backend table added later under e.g. lib/backends/ would be
+    # silently unscanned rather than failing loudly.
+    for groovy in sorted(LIB_DIR.rglob("*.groovy")):
         _scan(groovy.read_text())
     return referenced
 

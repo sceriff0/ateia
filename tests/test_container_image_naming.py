@@ -31,6 +31,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.nfmodel import strip_comments as _strip_comments
+
 REPO = Path(__file__).resolve().parent.parent
 
 NAMESPACE = "bolt3x"
@@ -78,10 +80,18 @@ def _searched_files():
 
 
 def _image_refs():
-    """(file, ref) for every quoted image reference in the pipeline's own sources."""
+    """(file, ref) for every quoted image reference in the pipeline's own sources.
+
+    Scanned against `tests.nfmodel.strip_comments` (view B), which blanks
+    comments but keeps string contents verbatim -- the image ref this test
+    exists to check IS a string literal, so view A (which blanks string
+    contents too) would destroy exactly the text being searched for. View B
+    stops a commented-out `// container = 'bolt3x/mirage-old:1.0.0'` line
+    from being read as a live reference, without touching a real one.
+    """
     out = []
     for path in _searched_files():
-        for line in path.read_text().splitlines():
+        for line in _strip_comments(path.read_text()).splitlines():
             if "container" not in line and "Image" not in line:
                 continue
             for ref in _IMAGE_REF.findall(line):

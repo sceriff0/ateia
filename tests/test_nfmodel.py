@@ -4,6 +4,8 @@ Each test here plants a construct that historically defeated a private
 regex parse, and asserts the model still sees the code that follows it.
 A guard built on this model is only as trustworthy as this file.
 """
+import re
+
 from tests.nfmodel import (
     REPO_ROOT,
     block_extent,
@@ -219,3 +221,45 @@ def test_param_refs_excludes_map_method_calls():
     assert param_refs("params.foo + params.bar") == {"foo", "bar"}
     assert param_refs("params.subMap(['a'])") == set()
     assert param_refs("// params.commented") == {"commented"}  # caller strips first
+
+
+GUARDS = [
+    "tests/test_resume_determinism.py",
+    "tests/test_resource_label_coverage.py",
+    "tests/test_no_duplicate_param_defaults.py",
+    "tests/test_step_vocabulary_consistency.py",
+    "tests/test_container_build_matrix.py",
+    "tests/test_container_image_naming.py",
+    "tests/test_layout.py",
+]
+
+
+def test_guard_list_is_not_vacuous():
+    """GUARDS must name files that really exist.
+
+    The loop in test_no_guard_parses_nextflow_source_privately silently skips
+    a path that does not resolve -- a typo'd or deleted entry would make that
+    test pass while checking nothing for it, exactly the failure mode this
+    whole phase exists to close."""
+    missing = [rel for rel in GUARDS if not (REPO_ROOT / rel).is_file()]
+    assert not missing, f"GUARDS names file(s) that do not exist: {missing}"
+
+
+def test_no_guard_parses_nextflow_source_privately():
+    """Every guard over .nf/.config source queries tests.nfmodel. A private
+    regex parse is how four guards came to pass while checking nothing --
+    each had a different blind spot, and none was visible from the interface.
+
+    If you genuinely need a parse the model does not expose, ADD IT TO THE
+    MODEL (with a case in this file), do not re-implement it here."""
+    private = re.compile(r"re\.(sub|search|finditer|findall)\([^)]*/\\\*")
+    offenders = []
+    for rel in GUARDS:
+        text = (REPO_ROOT / rel).read_text()
+        if "from tests.nfmodel import" not in text and (
+            ".nf" in text or "modules.config" in text
+        ):
+            offenders.append(f"{rel}: parses Nextflow source without the model")
+        if private.search(text):
+            offenders.append(f"{rel}: hand-rolled block-comment regex")
+    assert not offenders, "\n".join(offenders)
