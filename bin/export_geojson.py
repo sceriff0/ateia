@@ -339,7 +339,7 @@ def export_combined_geojson(
         x_px = row.get("x")
         y_px = row.get("y")
         if pd.isna(x_px) or pd.isna(y_px):
-            skipped[0] += 1
+            skipped += 1
             continue
         x_corner = float(x_px) + 0.5
         y_corner = float(y_px) + 0.5
