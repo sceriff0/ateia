@@ -129,15 +129,18 @@ def test_load_qc_keeps_verbatim_json_and_survives_bad_files(tmp_path):
 # read never eagerly decoded the whole file (the strategy itself, not just its
 # output, is pinned).
 #
-# Pixel equality is NOT the same as "exported output is unchanged", though: the
-# mask's source file is written in un-tiled strips (`bin/segment.py`, plain
-# `tifffile.imwrite`, no `tile=`), which collapse to ~1-row TIFF strips at slide
-# widths -- and `spatialdata`'s writer defaults the *exported* zarr's chunk grid
-# to the dask array's chunksize. A per-row chunk grid is still pixel-identical,
-# so a pixel-only check would not catch it; `test_read_mask_rechunks_away_from_...`
-# below exercises that specifically, with a fixture wide enough to actually enter
-# the collapsed-strip regime (the other fixtures here are a single strip and
-# can't see it).
+# Pixel equality is NOT the same as "exported output is unchanged", though:
+# `spatialdata`'s writer defaults the *exported* zarr's chunk grid to the dask
+# array's own chunksize, so whatever native chunk grid the source file happens to
+# read back with would otherwise propagate straight into the export. A per-row
+# (or per-tile) chunk grid is still pixel-identical, so a pixel-only check would
+# not catch that leak; `test_read_mask_rechunks_away_from_...` below exercises
+# `read_mask`'s explicit rechunk-to-2048 specifically, using a fixture written
+# WITHOUT `tile=` (see `_write_mask`) so it reads back on the un-tiled strip grid
+# `bin/segment.py`/`bin/segment_cellsam.py` produced before `bd5861c` tiled those
+# writers -- i.e. it deliberately exercises the worst case the rechunk guards
+# against, not what those writers emit today (they now write `MASK_TIFF_TILE =
+# 1024` tiles; the rechunk still runs, onto the pipeline's common 2048 grid).
 #
 # `spatialdata`/`geopandas` aren't needed for any of this -- only `tifffile` and
 # `dask`, which are real dependencies of this script and importable here.

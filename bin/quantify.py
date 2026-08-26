@@ -56,6 +56,32 @@ def _safe_mean(sums: NDArray, counts: NDArray) -> NDArray:
         return np.divide(sums, counts)
 
 
+def _median_per_label_from_sorted(vals_sorted, labs_sorted, valid_labels):
+    """Median per label from arrays already sorted by (label, value).
+
+    ``vals_sorted`` and ``labs_sorted`` must be co-ordered by a single sort whose primary
+    key is the label and whose secondary key is the value. The median of a label is then a
+    positional lookup into its contiguous run: the middle element for an odd count, the mean
+    of the two middle elements for an even one -- which is exactly ``np.median``'s definition.
+    A label with no pixels in this compartment yields NaN, matching the ``default=np.nan``
+    the labeled_comprehension calls this replaces passed (see the NaN-vs-0.0 rationale in
+    compute_compartment_intensities, guarded by tests/test_absent_compartment_is_nan.py).
+    """
+    start = np.searchsorted(labs_sorted, valid_labels, side="left")
+    stop = np.searchsorted(labs_sorted, valid_labels, side="right")
+    count = stop - start
+    out = np.full(valid_labels.size, np.nan, dtype=np.float64)
+    present = count > 0
+    if not present.any():
+        return out
+    s = start[present]
+    c = count[present]
+    lo = s + (c - 1) // 2
+    hi = s + c // 2                      # == lo when c is odd
+    out[present] = 0.5 * (vals_sorted[lo] + vals_sorted[hi])
+    return out
+
+
 def compute_compartment_intensities(
     cell_mask: NDArray,
     nuclei_mask: Optional[NDArray],
@@ -124,8 +150,16 @@ def compute_compartment_intensities(
         )
 
     n = int(cell_mask.max()) + 1
-    flat_cell = cell_mask.ravel()
-    flat_val = channel.ravel().astype(np.float64)
+    flat_cell_all = cell_mask.ravel()
+    # Restrict every per-pixel array to cell foreground up front: background pixels are never
+    # read downstream (bin 0 of every bincount below is discarded via `valid_labels != 0`), so
+    # widening the WHOLE plane to float64 and later sorting it was pure waste. `flat_raw` keeps
+    # the source dtype (uint16, written by SPLIT_CHANNELS) -- it feeds the composite-key sort
+    # below, which needs the raw integer values, not the float64 weights.
+    fg = flat_cell_all != 0
+    flat_cell = flat_cell_all[fg]
+    flat_raw = channel.ravel()[fg]
+    flat_val = flat_raw.astype(np.float64)
 
     # Whole-cell sums/counts keyed by cell label.
     cell_sum = np.bincount(flat_cell, weights=flat_val, minlength=n)
@@ -137,6 +171,11 @@ def compute_compartment_intensities(
     # before this bincount. Identical output: np.unique returns ascending distinct values,
     # np.nonzero(counts) returns ascending indices with at least one pixel. The dtype is kept
     # as the mask's so the published `label` column is unchanged.
+    #
+    # NOTE: since flat_cell/flat_val are now foreground-only, bin 0 of cell_count/cell_sum (and
+    # of the Nucleus/Cytoplasm bincounts below) no longer accumulates background pixels the way
+    # it did before this foreground restriction -- only bin 0 differs, and bin 0 is discarded by
+    # `valid_labels != 0` right below and never read by anything else.
     # Guarded by tests/test_no_full_mask_unique.py.
     valid_labels = np.nonzero(cell_count)[0]
     valid_labels = valid_labels[valid_labels != 0].astype(cell_mask.dtype, copy=False)
@@ -149,7 +188,7 @@ def compute_compartment_intensities(
     nuc_fg = None
     if has_nuclei:
         # Nuclear region (cell ∩ nucleus) keyed by *cell* label — label-pairing free.
-        nuc_fg = nuclei_mask.ravel() > 0
+        nuc_fg = nuclei_mask.ravel()[fg] > 0
         nuc_cell_labels = np.where(nuc_fg, flat_cell, 0)
         nuc_sum = np.bincount(nuc_cell_labels, weights=flat_val, minlength=n)
         nuc_count = np.bincount(nuc_cell_labels, minlength=n)
@@ -169,18 +208,25 @@ def compute_compartment_intensities(
     # key below plus FlowPath defaulting its statistic selector to Median.
     out[channel_name] = _safe_mean(cell_sum, cell_count)[valid_labels]
 
-    # Default statistic: MEDIAN (always). Computed with scipy.ndimage.labeled_comprehension
-    # directly on the label/value arrays already built above for the bincount sums —
-    # NOT a per-pixel DataFrame. A per-pixel pandas DataFrame (one row per foreground
-    # pixel, rebuilt on every channel) is what caused the WSI-scale memory regression;
-    # labeled_comprehension computes the same per-label median in bounded memory. A
-    # label absent from the underlying label array (e.g. a cell with no nuclear
-    # overlap, so an empty Nucleus/Cytoplasm compartment) yields `default` below.
+    # Default statistic: MEDIAN (always). One composite-key sort replaces three
+    # scipy.ndimage.labeled_comprehension calls, each of which was a Python-level callback
+    # invoked once per label per compartment — 180,000 interpreter round-trips for a 60k-cell
+    # slide, repeated per marker. Sorting `label << 16 | value` yields label-major, value-minor
+    # order: each label's pixels land in one contiguous, already-value-sorted run, so its
+    # median is a positional lookup (`_median_per_label_from_sorted`) rather than a callback.
+    # Filtering the sorted arrays by the `nuc_fg` boolean mask preserves the ordering of the
+    # survivors, so Nucleus and Cytoplasm come off the SAME sort instead of needing one each.
     #
-    # That default is NaN, deliberately. It used to be 0.0, reproducing the older
-    # `.reindex(valid_labels).fillna(0.0)` path -- but 0.0 makes "this cell has no nucleus"
-    # indistinguishable from "this cell's nucleus was measured and is dark", and downstream
-    # gating reads the second. Nothing can separate them after the fact.
+    # This composite key is lexicographic ONLY while pixel values fit its low 16 bits, so it
+    # requires a uint16 source (what SPLIT_CHANNELS writes). Any other dtype falls back to the
+    # labeled_comprehension path, kept reachable and tested rather than left as dead code --
+    # see tests/test_quantify_median.py::test_non_uint16_fallback_matches_fast_path.
+    #
+    # A label absent from a compartment (e.g. a cell with no nuclear overlap, so an empty
+    # Nucleus/Cytoplasm compartment) yields NaN, deliberately. It used to be 0.0, reproducing
+    # the older `.reindex(valid_labels).fillna(0.0)` path -- but 0.0 makes "this cell has no
+    # nucleus" indistinguishable from "this cell's nucleus was measured and is dark", and
+    # downstream gating reads the second. Nothing can separate them after the fact.
     # bin/export_geojson.py:78 already states the opposite policy for its own data
     # ("preserve NaN for cells that had missing raw data") and omits NaN measurements from the
     # GeoJSON rather than emitting a bare NaN literal, which is not valid JSON. This makes the
@@ -188,19 +234,48 @@ def compute_compartment_intensities(
     #
     # `Sum` stays 0.0 further down: the sum over an empty set is zero, which is a real answer.
     # Guarded by tests/test_absent_compartment_is_nan.py.
-    medians = {
-        "Cell": ndimage.labeled_comprehension(
-            flat_val, flat_cell, valid_labels, np.median, np.float64, np.nan
-        )
-    }
-    if has_nuclei:
-        cyto_cell_labels = np.where(nuc_fg, 0, flat_cell)
-        medians["Nucleus"] = ndimage.labeled_comprehension(
-            flat_val, nuc_cell_labels, valid_labels, np.median, np.float64, np.nan
-        )
-        medians["Cytoplasm"] = ndimage.labeled_comprehension(
-            flat_val, cyto_cell_labels, valid_labels, np.median, np.float64, np.nan
-        )
+    if flat_raw.dtype == np.uint16:
+        # In-place composition: Build `key` from a single astype and mutate in place
+        # (`<<=`, `|=`) rather than composing naively as `flat_cell.astype(int64) << 16 |
+        # flat_raw.astype(int64)`. The naive form allocates four int64 arrays in sequence,
+        # but numpy's ufunc temporary elision (since 1.13) collapses the two astype calls
+        # onto refcount-1 temporaries, leaving two live arrays at peak — 2.00× of one
+        # int64 array. In-place composition halves that to 1.00× (610.4 MB → 305.2 MB at
+        # 40M foreground pixels). `flat_raw` is uint16, so `key |= flat_raw` promotes
+        # the operand for the operation without materializing a persistent int64 copy;
+        # numpy casts through a small internal buffer instead. See
+        # docs/perf/2026-08-26-rss.md.
+        key = flat_cell.astype(np.int64)
+        key <<= 16
+        key |= flat_raw
+        order = np.argsort(key)
+        labs_sorted = flat_cell[order]
+        vals_sorted = flat_val[order]
+        medians = {
+            "Cell": _median_per_label_from_sorted(vals_sorted, labs_sorted, valid_labels)
+        }
+        if has_nuclei:
+            nuc_fg_sorted = nuc_fg[order]
+            medians["Nucleus"] = _median_per_label_from_sorted(
+                vals_sorted[nuc_fg_sorted], labs_sorted[nuc_fg_sorted], valid_labels
+            )
+            medians["Cytoplasm"] = _median_per_label_from_sorted(
+                vals_sorted[~nuc_fg_sorted], labs_sorted[~nuc_fg_sorted], valid_labels
+            )
+    else:
+        medians = {
+            "Cell": ndimage.labeled_comprehension(
+                flat_val, flat_cell, valid_labels, np.median, np.float64, np.nan
+            )
+        }
+        if has_nuclei:
+            cyto_cell_labels = np.where(nuc_fg, 0, flat_cell)
+            medians["Nucleus"] = ndimage.labeled_comprehension(
+                flat_val, nuc_cell_labels, valid_labels, np.median, np.float64, np.nan
+            )
+            medians["Cytoplasm"] = ndimage.labeled_comprehension(
+                flat_val, cyto_cell_labels, valid_labels, np.median, np.float64, np.nan
+            )
     for comp in compartments:
         out[f"{channel_name}: {comp}: Median"] = medians[comp]
 

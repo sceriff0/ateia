@@ -156,6 +156,7 @@ def extract_param_references() -> set[str]:
     refs: set[str] = set()
     patterns = [
         "main.nf",
+        "workflows/**/*.nf",   # a typo'd params.foo here read null and no guard saw it
         "subworkflows/**/*.nf",
         "modules/**/*.nf",
         "lib/**/*.groovy",
@@ -163,12 +164,27 @@ def extract_param_references() -> set[str]:
     ]
     for pattern in patterns:
         for path in ROOT.glob(pattern):
-            text = code_view(path)
-            for m in PARAM_REF_RE.finditer(text):
-                tail = text[m.end() :].lstrip()
-                if tail.startswith("("):
-                    continue  # a Map method call (params.subMap(...)), not a param read
-                refs.add(m.group(1))
+            refs |= _refs_from_text(code_view(path))
+    return refs
+
+
+def _refs_from_text(text: str) -> set[str]:
+    """The `params.<name>` READ rule, applied to already-masked text.
+
+    Shared with `tests/nfmodel.param_refs`, which implements the identical
+    "followed by `(` is a Map method call" rule independently (see the
+    "meta-tested, string-aware" model in tests/nfmodel). Both live because
+    they scan different inputs -- this one needs the multi-directory glob and
+    default-drift plumbing above, `nfmodel.param_refs` is a bare function over
+    caller-supplied text -- but the RULE itself must not fork.
+    `tests/test_param_consistency_rule.py` pins that the two never diverge.
+    """
+    refs: set[str] = set()
+    for m in PARAM_REF_RE.finditer(text):
+        tail = text[m.end() :].lstrip()
+        if tail.startswith("("):
+            continue  # a Map method call (params.subMap(...)), not a param read
+        refs.add(m.group(1))
     return refs
 
 

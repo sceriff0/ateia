@@ -31,8 +31,20 @@ from measurements import MORPHOLOGY_COLS, identify_marker_columns
 logger = get_logger(__name__)
 
 # Columns that are morphological / metadata, not marker intensities
-# (single source of truth: bin/utils/measurements.py). Wrapped in a set here
-# since this module does membership tests in a loop.
+# (single source of truth: bin/utils/measurements.py). Two derived names from
+# the SAME import, for two different uses:
+#   - _MORPHOLOGY_COL_ORDER keeps the tuple's producer order, captured before the
+#     rebind below. build_measurements() below spreads it into field_cols, and
+#     Python randomises string-hash order per process -- iterating a *set* there
+#     would make field_cols order, dict insertion order, and (if anything ever
+#     iterates a row instead of using row.get()) key order all vary run to run.
+#     Nothing currently reads that order except positionally-fixed row.get()
+#     calls, so this is inert today, but a GeoJSON export is a byte-exact
+#     external contract (qupath-extension-flowpath) and should not depend on
+#     hash-order luck.
+#   - MORPHOLOGY_COLS is then rebound to a set, unchanged from before, for the
+#     O(1) membership tests this module does in a loop.
+_MORPHOLOGY_COL_ORDER = tuple(MORPHOLOGY_COLS)
 MORPHOLOGY_COLS = set(MORPHOLOGY_COLS)
 
 # Default classification color for "Cell" (cyan)
@@ -89,8 +101,45 @@ def compute_zscores(df: pd.DataFrame, marker_cols: List[str]) -> pd.DataFrame:
     return df
 
 
+def _iter_rows_positional(df: pd.DataFrame, marker_cols: List[str]):
+    """Yield ``(idx, x_px, y_px, row)`` for every row of ``df``, without ``iterrows()``.
+
+    ``iterrows()`` materialises one pandas Series per row -- 500k of them on a
+    whole-slide image, on the process with a 32 GB reservation. The columns
+    ``build_measurements`` can read -- ``MORPHOLOGY_COLS`` plus ``marker_cols`` -- are
+    instead pulled to a numpy array **once**, up front, and indexed positionally per row
+    (the same seam ``extract_cell_properties._label_bboxes`` established for bboxes; see
+    ``tests/test_no_full_mask_unique.py``). Deriving the column set from
+    ``MORPHOLOGY_COLS`` rather than restating it here keeps this in sync with
+    ``build_measurements`` automatically -- a second hand-copied list is exactly the
+    kind of drift ``bin/utils/measurements.py`` was written to prevent.
+
+    ``row`` is a plain ``dict`` of ``{column: value}`` for whichever columns are
+    actually present in ``df`` -- a column absent from ``df`` is simply absent from
+    every ``row``, so ``row.get(col)`` still returns ``None`` exactly as
+    ``Series.get(col)`` did. That is a deliberate difference from a positional numpy
+    lookup, which would raise ``KeyError``/``IndexError`` on a missing column instead.
+
+    ``idx`` is ``df``'s own index value for that row (``df.index.to_numpy()``), not a
+    freshly-counted position -- callers fall back to it (``row.get("label", idx)``) and
+    a caller upstream may have already dropped rows (e.g. ``drop_duplicates``), leaving
+    a non-contiguous index that a plain position counter would not reproduce.
+    """
+    field_cols = [*_MORPHOLOGY_COL_ORDER, *marker_cols]
+    idx_arr = df.index.to_numpy()
+    col_arrays = {c: df[c].to_numpy() for c in field_cols if c in df.columns}
+    x_arr = col_arrays.get("x")
+    y_arr = col_arrays.get("y")
+
+    for i in range(len(df)):
+        row = {c: arr[i] for c, arr in col_arrays.items()}
+        x_px = x_arr[i] if x_arr is not None else None
+        y_px = y_arr[i] if y_arr is not None else None
+        yield idx_arr[i], x_px, y_px, row
+
+
 def build_measurements(
-    row: pd.Series,
+    row: pd.Series | Dict,
     marker_cols: List[str],
     pixel_size: float,
 ) -> List[Dict]:
@@ -98,6 +147,12 @@ def build_measurements(
 
     Returns a list of {"name": ..., "value": ...} dicts matching QuPath's
     native GeoJSON serialization format.
+
+    ``row`` only needs ``.get(key)`` / ``.get(key, default)`` -- a ``pd.Series`` (the
+    original per-row shape from ``iterrows()``) and a plain ``dict`` (what
+    ``_iter_rows_positional`` now hands in) are both accepted with identical
+    behaviour, including that a key absent from either returns ``None``/the given
+    default rather than raising.
     """
     measurements = []
 
@@ -239,9 +294,7 @@ def export_geojson(
     skipped = [0]
 
     def _iter_features():
-        for idx, row in df.iterrows():
-            x_px = row.get("x")
-            y_px = row.get("y")
+        for idx, x_px, y_px, row in _iter_rows_positional(df, marker_cols):
             if pd.isna(x_px) or pd.isna(y_px):
                 skipped[0] += 1
                 continue
@@ -282,8 +335,10 @@ def _stream_collection(features, output_path: str) -> int:
     """Write an iterable of features as a GeoJSON FeatureCollection, one at a time.
 
     Returns the number written. Nothing accumulates: the caller can hand this a generator and
-    the whole document never exists in memory. PERF-PLAN.md measures 1.94x and **-1004 MB**
-    (C11) for this on the pipeline's largest artifact.
+    the whole document never exists in memory. Measured at 1.94x faster and -1004 MB peak RSS
+    on the pipeline's largest artifact, vs. building the full feature list and a single
+    `json.dump` (pre-dates this branch; not part of the 2026-08-26 measurement pass in
+    `docs/perf/2026-08-26-rss.md`).
 
     The literals below reproduce `json.dump`'s default formatting exactly -- `", "` between
     array items, `": "` after a key -- so the file is BYTE-IDENTICAL to the single-dump version
@@ -333,13 +388,15 @@ def export_combined_geojson(
 
     cells_combined: List[Dict] = []
     n_with_nucleus = 0
+    # This counter used to be incremented as `skipped[0] += 1` against a plain `int`
+    # (`skipped = 0`), which raised `TypeError: 'int' object is not subscriptable` on
+    # the first row with a NaN x/y centroid -- an expected input this function is meant
+    # to handle (see compute_zscores' NaN-preservation comment above), not an edge case.
     skipped = 0
 
-    for idx, row in df.iterrows():
-        x_px = row.get("x")
-        y_px = row.get("y")
+    for idx, x_px, y_px, row in _iter_rows_positional(df, marker_cols):
         if pd.isna(x_px) or pd.isna(y_px):
-            skipped[0] += 1
+            skipped += 1
             continue
         x_corner = float(x_px) + 0.5
         y_corner = float(y_px) + 0.5

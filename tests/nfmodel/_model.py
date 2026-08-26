@@ -1,0 +1,163 @@
+"""Query interface over the repo's Nextflow source.
+
+Guards assert against this model, never against raw text. `processes()` and
+`with_name_blocks()` both drive their pattern matches off the
+comment/string-stripped text produced by `strip_comments_and_strings` --
+never off the raw source -- so a comment that merely *mentions* a process
+name or a `withName: 'X' {` selector cannot be counted as the real thing.
+`script:`/`stub:` bodies are the one deliberate exception: they are sliced
+from the RAW text, because the reason to read them is usually to inspect the
+rendered command, and the stripped view has blanked every string in it.
+"""
+import re
+from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
+from typing import Dict, List, Sequence
+
+from ._lex import block_extent, strip_comments_and_strings
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+_DEFAULT_DIRS = ("modules", "subworkflows", "workflows")
+_PROCESS_RE = re.compile(r"^\s*process\s+([A-Z][A-Z0-9_]*)\s*\{", re.M)
+_WITHNAME_RE = re.compile(r"withName:\s*'([^']+)'\s*\{")
+_PARAM_RE = re.compile(r"\bparams\.([A-Za-z_]\w*)")
+
+
+@dataclass(frozen=True)
+class Process:
+    name: str
+    path: Path
+    body: str
+    raw_body: str
+    script_body: str
+    stub_body: str
+    inputs: str
+    outputs: str
+
+
+@dataclass(frozen=True)
+class WithNameBlock:
+    selector: str
+    names: List[str]
+    body: str
+    raw_body: str
+    start_line: int
+
+
+def nf_files(dirs: Sequence[str] = _DEFAULT_DIRS, root: Path = REPO_ROOT) -> List[Path]:
+    """Every .nf file under `dirs`, recursively (`rglob`) and sorted for a
+    deterministic order. A non-recursive `glob('*.nf')` misses e.g. a nested
+    `modules/local/sub/*.nf` -- this is the enumerator that used to be wrong."""
+    out: List[Path] = []
+    for d in dirs:
+        out.extend(sorted((root / d).rglob("*.nf")))
+    return out
+
+
+def _section(body: str, name: str) -> str:
+    """Text of a `name:` section, up to the next top-level section keyword
+    (`input`/`output`/`when`/`script`/`shell`/`exec`/`stub`), or to the end
+    of `body` if `name` is the last section present."""
+    keys = ("input", "output", "when", "script", "shell", "exec", "stub")
+    m = re.search(rf"^\s*{name}\s*:", body, re.M)
+    if not m:
+        return ""
+    rest = body[m.end():]
+    nxt = [
+        n.start()
+        for k in keys
+        for n in [re.search(rf"^\s*{k}\s*:", rest, re.M)]
+        if n
+    ]
+    return rest[: min(nxt)] if nxt else rest
+
+
+@lru_cache(maxsize=None)
+def processes(root: Path = REPO_ROOT) -> Dict[str, Process]:
+    """Every Nextflow process under `modules/`, keyed by process name.
+
+    Matches are found on the comment/string-stripped text so a comment that
+    only mentions `process FOO {` cannot be counted. `strip_comments_and_strings`
+    preserves length and line count exactly, so the match offsets found on
+    the stripped text are valid offsets into the raw text too -- that is what
+    lets `raw_body` come back with its strings and comments intact even
+    though the match that located it could not have been fooled by one.
+    """
+    out: Dict[str, Process] = {}
+    for f in nf_files(("modules",), root):
+        raw = f.read_text()
+        clean = strip_comments_and_strings(raw)
+        for m in _PROCESS_RE.finditer(clean):
+            start = m.end()
+            end = block_extent(clean, start)
+            raw_body, body = raw[start:end], clean[start:end]
+            out[m.group(1)] = Process(
+                name=m.group(1),
+                path=f,
+                raw_body=raw_body,
+                body=body,
+                # script:/stub: bodies come from the RAW text -- the point of
+                # reading them is usually to inspect the rendered command, and
+                # the stripped view has blanked every string in it.
+                script_body=_section(raw_body, "script"),
+                stub_body=_section(raw_body, "stub"),
+                inputs=_section(body, "input"),
+                outputs=_section(body, "output"),
+            )
+    return out
+
+
+@lru_cache(maxsize=None)
+def with_name_blocks(root: Path = REPO_ROOT) -> List[WithNameBlock]:
+    """Every `withName: '...' {` block in `conf/modules.config`.
+
+    The selector regex needs its literal quotes, but `strip_comments_and_strings`
+    blanks a string literal's delimiting quotes along with its contents (not
+    just comments) -- so matching it against the stripped text directly finds
+    nothing at all. Instead, match against the RAW text (which has real
+    quotes to match), then keep only matches whose start position is
+    unchanged between raw and stripped text: a real selector's `withName:`
+    text survives stripping untouched, while one that only appears inside a
+    `//` or `/* */` comment -- e.g. "the `withName: 'SEGMENT'` ext.args
+    closure below" -- is blanked to spaces there and gets filtered out.
+    """
+    path = root / "conf" / "modules.config"
+    raw = path.read_text()
+    clean = strip_comments_and_strings(raw)
+    out: List[WithNameBlock] = []
+    for m in _WITHNAME_RE.finditer(raw):
+        if clean[m.start()] != raw[m.start()]:
+            continue
+        start = m.end()
+        end = block_extent(clean, start)
+        out.append(
+            WithNameBlock(
+                selector=m.group(1),
+                names=m.group(1).split("|"),
+                raw_body=raw[start:end],
+                body=clean[start:end],
+                start_line=raw.count("\n", 0, m.start()) + 1,
+            )
+        )
+    return out
+
+
+def script_bodies(root: Path = REPO_ROOT) -> Dict[str, str]:
+    """process name -> its script: body (comments/strings intact, see
+    `processes()`)."""
+    return {n: p.script_body for n, p in processes(root).items()}
+
+
+def param_refs(text: str) -> set:
+    """`params.<name>` reads found in `text`. A match immediately followed by
+    `(` is a `Map` method call (e.g. `params.subMap(...)`), not a parameter
+    read, and is excluded. Callers that want comments excluded too must strip
+    them first -- this function does not know about comments."""
+    found = set()
+    for m in _PARAM_RE.finditer(text):
+        if text[m.end():].lstrip().startswith("("):
+            continue
+        found.add(m.group(1))
+    return found
