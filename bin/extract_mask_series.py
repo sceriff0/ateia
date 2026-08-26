@@ -17,7 +17,10 @@ import tifffile
 
 #: TIFF tile size (px) for the cell/nuclei mask writes below -- a TIFF LAYOUT choice, not a
 #: processing tile size. See ``bin/convert_image.py:35-49`` for why an untiled write forces
-#: every downstream region read to decode the whole plane.
+#: every downstream region read to decode the whole plane. Deliberately half of
+#: CONVERT_TIFF_TILE/WRITE_TILE's 2048, not copied from it: measured directly on the mask's
+#: own read pattern (many small windowed per-cell/per-region reads, not whole-plane decodes)
+#: -- see docs/perf/2026-08-26-rss.md's tiled-vs-striped table.
 MASK_TIFF_TILE = 1024
 
 

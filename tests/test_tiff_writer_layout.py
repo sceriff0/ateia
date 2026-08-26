@@ -44,7 +44,7 @@ reconstructing an independent ``imwrite`` call proves the CONSTANT is well-forme
 proves nothing about whether the real ``imwrite`` calls inside ``run_cellsam()`` /
 ``run_instanseg()`` actually pass it -- a constant defined and never used at its call site
 is the mirror image of this task's own free deletion (an unused ``_image_tensor`` binding
-in ``segment_instantseg.py``, PERF-PLAN 3.7). ``test_the_real_call_sites_pass_the_tile_constant``
+in ``segment_instantseg.py``). ``test_the_real_call_sites_pass_the_tile_constant``
 below is the AST call-site check that closes that gap, applied uniformly to all three
 ML-backend writers (``bin/segment_cellsam.py`` and ``bin/segment_instantseg.py`` don't need
 the AST workaround to be importable, but the SAME check is still the only thing that
@@ -201,9 +201,11 @@ _ALL_WRITER_TILES = [*_TILE_BY_WRITER.items(), ("extract_mask_series", ems.MASK_
 
 
 @pytest.mark.parametrize("writer, tile", _ALL_WRITER_TILES)
-def test_the_tile_constant_is_1024_and_a_valid_tifffile_tile_size(writer, tile):
-    assert tile == 1024
-    # tifffile requires each tile dimension to be a multiple of 16.
+def test_the_tile_constant_is_a_valid_tifffile_tile_size(writer, tile):
+    # tifffile requires each tile dimension to be a multiple of 16. 1024 is a tuning
+    # choice (see MASK_TIFF_TILE's own comment for the measurement behind it), not an
+    # invariant -- this asserts the real constraint against the imported constant, not
+    # a specific value that would break this test on a legitimate retune.
     assert tile % 16 == 0
 
 
@@ -219,7 +221,7 @@ def test_the_real_call_sites_pass_the_tile_constant(writer, path):
     call site would be invisible to every other test in this file (``_write_like``
     reconstructs an independent call from the constant, it never touches the real one) --
     and is the mirror image of this task's own free deletion (an unused ``_image_tensor``
-    binding in ``segment_instantseg.py``, PERF-PLAN 3.7). This is the check that closes
+    binding in ``segment_instantseg.py``). This is the check that closes
     that gap, reusing the same AST walk ``bin/segment.py`` needed anyway because it can't
     be imported here at all.
     """
