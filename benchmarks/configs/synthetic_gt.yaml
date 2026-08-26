@@ -8,7 +8,10 @@
 # STARE win for a reason unrelated to being better.
 seeds: [1, 2, 3]
 field_families: [random_fourier]
-methods: [tiled, valis, ashlar]
+# "identity" is the do-nothing baseline (zero displacement everywhere), not a
+# registration method -- it exists so every method's absolute EPE has
+# something to be compared against. See plan.py / cli.py's score_pair.
+methods: [tiled, valis, ashlar, identity]
 correlation_px: [333.0, 777.0]
 
 # Two amplitudes, deliberately spanning STARE's own gate. A unit-rung

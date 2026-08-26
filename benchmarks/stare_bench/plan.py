@@ -27,21 +27,51 @@ import csv
 import json
 from pathlib import Path
 
-__all__ = ["BLANK_FRACTIONS", "REG_TILED_TILE", "build_plan", "write_plan"]
+from .fields import make_field
+
+__all__ = ["BLANK_FRACTIONS", "build_plan", "write_plan"]
 
 BLANK_FRACTIONS = tuple(round(i / 10.0, 2) for i in range(11))
-REG_TILED_TILE = 2048
+
+
+def _validate_fields_are_independent(config):
+    """Dry-run ``make_field`` for every committed (family, correlation_px) at
+    the committed ``size``, so a rigged sweep fails at plan-build time rather
+    than reading as validated.
+
+    This replaces the former ``corr % REG_TILED_TILE == 0 or REG_TILED_TILE %
+    corr == 0`` rule. The design spec
+    (``docs/superpowers/specs/2026-08-26-stare-synthetic-benchmark-design.md``,
+    "Knot-spacing independence") shows that rule is neither necessary nor
+    sufficient: ``correlation_px=16000`` at 51200px passes it while yielding a
+    pitch of 2047.96 (colliding with STARE's grid), and ``correlation_px=2048``
+    at 4096px fails it while yielding a perfectly safe pitch of 273. The
+    quantity that actually matters is the DERIVED coarse-grid pitch, and
+    ``fields.make_field`` already raises ``ValueError`` when that pitch is not
+    safely below STARE's control-grid spacing (``MAX_COARSE_PITCH_PX``) --
+    this just calls the real check here instead of duplicating (and
+    drifting from) its rule.
+
+    Only ``"random_fourier"`` accepts a ``correlation_px``/``amplitude_px``
+    pair -- the other field families (``affine``, ``adversarial``) have no
+    coarse grid and are not part of this firewall, so they are skipped here
+    exactly as they are in the real ``generate_pair`` call.
+    """
+    size = tuple(config["size"])
+    for family in config["field_families"]:
+        if family != "random_fourier":
+            continue
+        for corr in config["correlation_px"]:
+            # amplitude_px does not affect the derived pitch (see
+            # fields._random_fourier); any fixed value dry-runs the same check
+            # real generation performs.
+            make_field(family, size, seed=0, correlation_px=corr, amplitude_px=1.0)
 
 
 def build_plan(config):
     """Full cross-product of seeds x families x correlations x amplitudes x
     blanking x methods."""
-    for corr in config["correlation_px"]:
-        if corr % REG_TILED_TILE == 0 or REG_TILED_TILE % corr == 0:
-            raise ValueError(
-                f"correlation_px={corr} aligns with STARE's control grid "
-                f"({REG_TILED_TILE}px); that would rig the benchmark in its favour"
-            )
+    _validate_fields_are_independent(config)
 
     records = []
     for seed in config["seeds"]:
