@@ -55,12 +55,24 @@ def test_zero_field_is_trivially_convergent():
 def test_folding_rate_and_det_min_are_exact_regardless_of_max_points():
     # folding_rate/det_min/n are running scalar accumulators over the FULL
     # field -- they must not depend on how aggressively the (separate)
-    # percentile subsample is capped.
+    # percentile subsample is capped. A field with a spatially CONSTANT
+    # determinant (e.g. any linear map) cannot pin this: every point, kept
+    # or discarded, carries the identical value, so a buggy implementation
+    # that derived these from the retained subsample would pass identically.
+    # ux = -k*x**2 makes d(ux)/dx = -2*k*x vary linearly with position, so
+    # det = 1 - x/128 sweeps from +1 at x=0 to about -0.99 at x=255 -- half
+    # the raster folds, half doesn't, and det_min sits at the domain edge
+    # that a small strided subsample is likely to miss.
     def field(xy):
-        return 0.1 * xy
+        x = xy[:, 0]
+        k = 1.0 / 256.0
+        out = np.zeros_like(xy)
+        out[:, 0] = -k * x**2
+        return out
 
     a = jacobian_stats(field, SHAPE, tile=64, max_points=10)
     b = jacobian_stats(field, SHAPE, tile=64, max_points=1_000_000)
+    assert 0.0 < a["folding_rate"] < 1.0
     assert a["folding_rate"] == b["folding_rate"]
     assert a["det_min"] == b["det_min"]
     assert a["n"] == b["n"]
