@@ -113,30 +113,52 @@ def band_rows_for(width, factor, band_bytes=DEFAULT_BAND_BYTES):
     return max(factor, (rows // factor) * factor)
 
 
-def read_decimated(src, index, factor, band_bytes=DEFAULT_BAND_BYTES):
-    """Read channel ``index`` of a lazy ``(C, H, W)`` view as a ``factor``-decimated float32 plane.
+def read_decimated(src, index, factor, band_bytes=DEFAULT_BAND_BYTES, dtype=None):
+    """Read channel ``index`` of a lazy ``(C, H, W)`` view as a ``factor``-decimated plane.
 
-    Streams the plane in row bands and strides each band as it's read. At ``factor > 1`` (the
-    tiled/STARE callers this was built for) each band's decoded full-resolution buffer is
-    discarded once it's been strided down, so peak memory is one band plus the small,
-    already-decimated accumulated result -- never the full-resolution plane. At ``factor == 1``
-    the stride is a no-op, so the accumulated bands sum to the full-resolution plane before the
-    final concatenate produces a second one -- there is no full-resolution plane the read
-    avoids materialising. Band height is snapped to a multiple of ``factor`` so the rows sampled
-    are globally ``0, factor, 2*factor, ...``; the bands therefore concatenate into exactly
-    ``src[index, ::factor, ::factor]`` at any factor.
+    ``dtype`` defaults to ``np.float32`` -- the historical, still-correct behaviour for
+    ``bin/tiled_coarse.py``'s ORB path (see ``bin/utils/coarse_align.py:132``: FAST's
+    absolute intensity threshold is only meaningful once the plane is normalised to
+    ``[0, 1]``, which needs a float buffer). Callers that only ever push the result through
+    ``autoscale_for_display`` on the way to uint8 -- ``bin/utils/qc.py``'s two call sites --
+    can pass the source's own dtype instead and skip the widen: ``autoscale_for_display``'s
+    ``np.round(normalized * 255)`` output is proven identical for a uint8 or uint16 source
+    read at its native dtype versus widened to float32 (see
+    ``tests/test_tiled_io.py::test_autoscale_uint16_vs_float32_identical_full_domain`` for
+    the exhaustive sweep). Pass ``dtype=np.uint8`` / ``np.uint16`` only for those two source
+    dtypes; leave the default for anything else.
+
+    Streams the plane in row bands and strides each band as it's read. Bands are written
+    directly into a pre-allocated ``dtype``-typed destination array (never accumulated as a
+    list and ``concatenate``d), so peak memory is one band's full-resolution buffer plus the
+    single decimated destination -- at every factor, including ``factor == 1``, where a
+    band-list-plus-concatenate would otherwise hold two full-resolution-sized planes at once.
+    Band height is snapped to a multiple of ``factor`` so the rows sampled are globally
+    ``0, factor, 2*factor, ...``; the destination is therefore filled with exactly
+    ``src[index, ::factor, ::factor]`` at any factor, including a ragged final band (a height
+    not a multiple of the band size).
     """
     import numpy as _np
+
+    if dtype is None:
+        dtype = _np.float32
 
     c_n, h, w = src.shape
     if not 0 <= index < c_n:
         raise ValueError(f"--nuclear-index {index} out of range for C={c_n}")
     factor = max(1, int(factor))
     band = band_rows_for(w, factor, band_bytes)
-    rows = [
-        _np.asarray(
-            src[index, slice(y0, min(y0 + band, h)), slice(0, w)], dtype=_np.float32
-        )[::factor, ::factor]
-        for y0 in range(0, h, band)
-    ]
-    return rows[0] if len(rows) == 1 else _np.concatenate(rows, axis=0)
+
+    out_h = -(-h // factor)  # ceil division: number of sampled rows 0, factor, 2*factor, ...
+    out_w = -(-w // factor)
+    dest = _np.empty((out_h, out_w), dtype=dtype)
+
+    out_row = 0
+    for y0 in range(0, h, band):
+        y1 = min(y0 + band, h)
+        band_arr = _np.asarray(src[index, slice(y0, y1), slice(0, w)])[::factor, ::factor]
+        n_rows = band_arr.shape[0]
+        dest[out_row : out_row + n_rows] = band_arr
+        out_row += n_rows
+
+    return dest

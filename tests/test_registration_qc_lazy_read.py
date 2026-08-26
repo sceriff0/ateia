@@ -217,3 +217,76 @@ def test_qc_fullres_output_matches_old_whole_stack_read(tmp_path):
     assert got_fullres.dtype == expected_fullres.dtype
     assert got_fullres.shape == expected_fullres.shape
     assert np.array_equal(got_fullres, expected_fullres)
+
+
+def test_qc_png_and_fullres_tiff_are_byte_identical_to_the_old_float32_widened_read(
+    tmp_path,
+):
+    """Task 3 evidence (G1): narrowing ``read_decimated``'s dtype to the source's own uint16,
+    and pre-allocating its destination instead of concatenating streamed bands, must not move
+    a single byte of the published QC PNG or full-resolution TIFF.
+
+    Builds the "before" expectation independently, by calling ``read_decimated`` directly with
+    the dtype ``create_registration_qc`` used to get implicitly (float32, the pre-task-3
+    default for every caller) and pushing it through the SAME untouched
+    ``create_nuclear_overlay`` / ``autoscale_for_display`` pipeline the real function uses.
+    Compares that against what the real (post-task-3, uint16-narrowed) ``create_registration_qc``
+    actually writes to disk. A regression here is exactly the failure mode the task brief
+    calls out: a more precise float32 intermediate rounding ``np.round(normalized * 255)``
+    differently than the narrower uint16-driven one would have.
+    """
+    from tiled_io import open_lazy, read_decimated
+
+    ref_path, reg_path = _write_pair(tmp_path)
+
+    ref_channels = extract_channel_names_from_ome(ref_path)
+    reg_channels = extract_channel_names_from_ome(reg_path)
+    ref_idx = pick_nuclear_index(ref_channels, None)
+    reg_idx = pick_nuclear_index(reg_channels, None)
+
+    ref_src, ref_dtype, ref_close = open_lazy(ref_path)
+    reg_src, reg_dtype, reg_close = open_lazy(reg_path)
+    try:
+        assert ref_dtype == np.uint16 and reg_dtype == np.uint16, (
+            "fixture must be uint16 -- the dtype this task narrows the read for"
+        )
+        # Force the OLD default: every caller got float32 before this task, regardless of
+        # the source's own dtype.
+        old_ref_nuc = read_decimated(ref_src, ref_idx, factor=1, dtype=np.float32)
+        old_reg_nuc = read_decimated(reg_src, reg_idx, factor=1, dtype=np.float32)
+    finally:
+        ref_close()
+        reg_close()
+
+    expected_bgr, expected_cyx = qc.create_nuclear_overlay(
+        old_ref_nuc, old_reg_nuc, scale_factor=0.25
+    )
+    ref_scaled = qc.autoscale_for_display(old_ref_nuc, method="minmax")
+    reg_scaled = qc.autoscale_for_display(old_reg_nuc, method="minmax")
+    expected_fullres = np.stack(
+        [reg_scaled, ref_scaled, np.zeros_like(ref_scaled)], axis=0
+    )
+
+    out_path = tmp_path / "out" / "qc.tif"
+    out_path.parent.mkdir()
+    qc.create_registration_qc(
+        reference_path=ref_path,
+        registered_path=reg_path,
+        output_path=out_path,
+        scale_factor=0.25,
+        save_fullres=True,
+        save_png=True,
+        save_tiff=False,
+    )
+
+    got_bgr = cv2.imread(str(out_path.with_suffix(".png")), cv2.IMREAD_UNCHANGED)
+    fullres_path = out_path.with_name(out_path.stem + "_fullres.tif")
+    got_fullres = tifffile.imread(str(fullres_path))
+
+    assert got_bgr.dtype == expected_bgr.dtype
+    assert got_bgr.shape == expected_bgr.shape
+    assert np.array_equal(got_bgr, expected_bgr)
+
+    assert got_fullres.dtype == expected_fullres.dtype
+    assert got_fullres.shape == expected_fullres.shape
+    assert np.array_equal(got_fullres, expected_fullres)
