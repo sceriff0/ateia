@@ -1,0 +1,119 @@
+"""Turn metric dicts into the registration_synthetic_gt.csv contract.
+
+WHY A SEPARATE TABLE from registration_accuracy.csv: that one is the
+landmark-free seg-overlap signal at grain (run, moving slide, stage), and it is
+bounded by nucleus diameter (~5-15 um). This table carries EPE, gate ROC and
+Jacobian columns that have no meaning there. Merging them would put a bounded
+metric and an exact sub-pixel one in the same column space. It also cannot
+aggregate across `stage`: the backends do not share a stage vocabulary (VALIS
+native/rigid/non_rigid/micro vs. the manifest backends' native/rigid/refined).
+
+THE HARD RULE THIS MODULE ENFORCES: no metric STARE optimises may appear as
+STARE's accuracy. `bin/tiled_solve.py`'s "intrinsic TRE" is built from the
+same per-tile phase correlations the registration itself optimises, so it is
+evidence of convergence, never of accuracy. It is admitted only under a
+`diag_` prefix, and accuracy_row REFUSES a metric dict that smuggles it in
+elsewhere.
+"""
+
+from __future__ import annotations
+
+import csv
+from pathlib import Path
+
+__all__ = [
+    "ACCURACY_COLUMNS",
+    "accuracy_row",
+    "write_accuracy_csv",
+    "FORBIDDEN_IN_ACCURACY",
+]
+
+# Keys that name a self-reported (circular) quantity. They may only reach the
+# table through the explicit `intrinsic_tre` argument, which lands under diag_.
+FORBIDDEN_IN_ACCURACY = {
+    "intrinsic_tre",
+    "stare_tre",
+    "coarse_tre_px",
+    "rigid_p50_px",
+    "residual_after_px",
+}
+
+ACCURACY_COLUMNS = [
+    "run_id", "method", "pair_id",
+    "generator_version", "seed", "param_hash", "field_family",
+    "field_correlation_px", "field_amplitude_px",
+    "epe_mean_px", "epe_median_px", "epe_p95_px", "epe_max_px", "epe_n",
+    "epe_subsample_effective",
+    "gate_precision", "gate_recall", "gate_f1", "gate_auc",
+    "gate_tp", "gate_fp", "gate_tn", "gate_fn",
+    "folding_rate", "det_min", "det_p05", "det_median",
+    "lipschitz", "lipschitz_converges",
+    "tre_median_px", "tre_mean_px", "tre_p90_px", "tre_median_rtre", "tre_n",
+    "diag_intrinsic_tre_px",
+]
+
+
+def _check_clean(*dicts):
+    for d in dicts:
+        bad = FORBIDDEN_IN_ACCURACY & set(d or {})
+        if bad:
+            raise ValueError(
+                f"{sorted(bad)} is a self-reported (diagnostic) quantity and "
+                "cannot enter an accuracy column; pass it as intrinsic_tre"
+            )
+
+
+def accuracy_row(*, run_id, method, pair_id, truth, epe_stats, gate_stats,
+                  gate_auc_value, jac_stats, lip_stats, tre_summary,
+                  intrinsic_tre=None):
+    """One row of registration_synthetic_gt.csv."""
+    _check_clean(epe_stats, gate_stats, jac_stats, lip_stats, tre_summary)
+    fp = truth.get("field_params", {})
+    return {
+        "run_id": run_id,
+        "method": method,
+        "pair_id": pair_id,
+        "generator_version": truth.get("generator_version"),
+        "seed": truth.get("seed"),
+        "param_hash": truth.get("param_hash"),
+        "field_family": truth.get("field_family"),
+        "field_correlation_px": fp.get("correlation_px"),
+        "field_amplitude_px": fp.get("amplitude_px"),
+        "epe_mean_px": epe_stats.get("mean_px"),
+        "epe_median_px": epe_stats.get("median_px"),
+        "epe_p95_px": epe_stats.get("p95_px"),
+        "epe_max_px": epe_stats.get("max_px"),
+        "epe_n": epe_stats.get("n"),
+        "epe_subsample_effective": epe_stats.get("subsample_effective"),
+        "gate_precision": gate_stats.get("precision"),
+        "gate_recall": gate_stats.get("recall"),
+        "gate_f1": gate_stats.get("f1"),
+        "gate_auc": gate_auc_value,
+        "gate_tp": gate_stats.get("tp"),
+        "gate_fp": gate_stats.get("fp"),
+        "gate_tn": gate_stats.get("tn"),
+        "gate_fn": gate_stats.get("fn"),
+        "folding_rate": jac_stats.get("folding_rate"),
+        "det_min": jac_stats.get("det_min"),
+        "det_p05": jac_stats.get("det_p05"),
+        "det_median": jac_stats.get("det_median"),
+        "lipschitz": lip_stats.get("lipschitz"),
+        "lipschitz_converges": lip_stats.get("converges"),
+        "tre_median_px": tre_summary.get("median_px"),
+        "tre_mean_px": tre_summary.get("mean_px"),
+        "tre_p90_px": tre_summary.get("p90_px"),
+        "tre_median_rtre": tre_summary.get("median_rtre"),
+        "tre_n": tre_summary.get("n"),
+        "diag_intrinsic_tre_px": intrinsic_tre,
+    }
+
+
+def write_accuracy_csv(rows, path):
+    """Write rows in ACCURACY_COLUMNS order, always including the header."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=ACCURACY_COLUMNS)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({k: row.get(k) for k in ACCURACY_COLUMNS})
