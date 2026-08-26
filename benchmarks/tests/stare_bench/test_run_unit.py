@@ -32,9 +32,30 @@ def test_predictor_recovers_the_injected_displacement(pair, tmp_path):
     got = run_stare(pair_dir, tmp_path, tile=256, halo=64, upsample=10,
                     max_error=0.99)
     predict = predict_from_manifest(got["manifest"], "mov")
-    xy = np.array([[512.0, 512.0], [300.0, 700.0]])
-    err = np.linalg.norm(predict(xy) - _truth_disp(truth, xy), axis=1)
-    assert err.max() < 25.0, f"STARE did not recover the warp: {err}"
+
+    # A dense grid over the image, not two hand-picked points: the amplitude
+    # of the injected field bounds the true displacement magnitude at roughly
+    # sqrt(2) * amplitude_px, so an absolute-error assertion alone cannot tell
+    # "STARE recovered the warp" from "STARE did nothing" -- the identity
+    # (zero-displacement) baseline scores inside a loose absolute bound too.
+    # The comparative assertion below is the one that carries meaning.
+    h, w = truth["size"]
+    gx, gy = np.meshgrid(np.linspace(32, w - 32, 16), np.linspace(32, h - 32, 16))
+    xy = np.column_stack([gx.ravel(), gy.ravel()])
+
+    truth_disp = _truth_disp(truth, xy)
+    err_stare = np.linalg.norm(predict(xy) - truth_disp, axis=1)
+    err_identity = np.linalg.norm(truth_disp, axis=1)
+
+    ratio = err_stare.max() / err_identity.max()
+    assert ratio <= 0.5, (
+        f"STARE did not halve the identity baseline's worst-case error: "
+        f"stare max={err_stare.max():.3f} identity max={err_identity.max():.3f} "
+        f"ratio={ratio:.3f}"
+    )
+    # Generous absolute sanity bound retained alongside the ratio, which is
+    # the assertion that actually carries meaning.
+    assert err_stare.max() < 25.0
 
 
 def _truth_disp(truth, xy):

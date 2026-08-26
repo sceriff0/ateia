@@ -51,7 +51,17 @@ def _read_tile_plan(csv_path):
 def run_stare(
     pair_dir, work_dir, *, tile, halo, upsample, max_error, extra_args=None
 ):
-    """COARSE -> REG_TILE (per tile) -> SOLVE, returning the manifest + controls."""
+    """COARSE -> REG_TILE (per tile) -> SOLVE, returning the manifest + controls.
+
+    ``extra_args`` is forwarded to ``tiled_coarse.py`` ONLY -- it never reaches
+    ``tiled_reg_tile.py``. This matters for ``--nuclear-index``/``--dapi-index``
+    in particular: passing it through ``extra_args`` would move which channel
+    COARSE estimates the anchor from, while every per-tile REG_TILE call would
+    silently keep reading channel 0 (its own default). That produces a
+    channel-mismatched registration with no error raised anywhere. Nothing in
+    this driver does this today, but a future caller adding a nuclear-index
+    override here needs to also thread it through the REG_TILE loop below.
+    """
     pair_dir, work_dir = Path(pair_dir), Path(work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
     ref = pair_dir / "ref.ome.tiff"
@@ -123,7 +133,9 @@ def predict_from_manifest(manifest_path, moving_name):
     pipeline's own reg_qc=2 uses -- so the metrics score exactly the transform
     that would ship.
     """
-    sys.path.insert(0, str(BIN / "utils"))
+    utils_dir = str(BIN / "utils")
+    if utils_dir not in sys.path:
+        sys.path.insert(0, utils_dir)
     from tiled_stage_warp import make_warper
 
     warp = make_warper(json.loads(Path(manifest_path).read_text()))
