@@ -189,7 +189,16 @@ ALLOWED_LINES = {
         # withName block gained a 4-line comment plus
         # `ext.args = { "--frontend ${params.reg_tiled_frontend}" }` (+5 lines total)
         # above this line. 1103 + 5 = 1108.
-        1108: (
+        # 1108 -> 1136 when Task 5.4 published the two STARE/VALIS benchmark-scoring
+        # artifacts: REGISTER's publishDir gained a third array entry for the VALIS
+        # registrar pickle (+11), TILED_REG_TILE's shared block comment was rewritten
+        # to explain why its control-point JSON is now published while TILED_COARSE's
+        # stays intermediate (+8) and its `publishDir = [ enabled: false ]` became a
+        # real publishDir block (+5), and TILED_COARSE gained its own short comment
+        # explaining the asymmetry (+4). Four hunks above this line, none of them
+        # touching this one: 1108 + 11 + 8 + 5 + 4 = 1136. Re-pin from the file, not by
+        # guessing: `grep -n "params.expanded_quantification ?" conf/modules.config`.
+        1136: (
             "ext.args = { params.expanded_quantification ? '--expanded' : "
             "'' } -- conf/*.config closures cannot see lib/*.groovy classes, "
             "so ext.args must read params raw here."
