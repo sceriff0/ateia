@@ -93,6 +93,16 @@ def test_write_accuracy_csv_round_trips(tmp_path):
     assert list(rows[0]) == ACCURACY_COLUMNS
 
 
+def test_write_accuracy_csv_accepts_a_generator_not_just_a_list(tmp_path):
+    out = tmp_path / "registration_synthetic_gt.csv"
+    rows = (_row(pair_id=f"p{i}") for i in range(2))
+    write_accuracy_csv(rows, out)
+    with out.open() as fh:
+        written = list(csv.DictReader(fh))
+    assert len(written) == 2
+    assert {r["pair_id"] for r in written} == {"p0", "p1"}
+
+
 def test_write_accuracy_csv_rejects_a_row_with_an_extra_key(tmp_path):
     row = {**_row(), "unexpected_extra_column": 1.0}
     with pytest.raises(ValueError, match="unexpected_extra_column"):

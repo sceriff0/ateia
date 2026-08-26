@@ -138,7 +138,14 @@ def write_accuracy_csv(rows, path):
     handing a row to `csv.DictWriter` would silently drop an unexpected extra
     key and silently blank a missing one, defeating DictWriter's own
     `extrasaction='raise'` default. Validate explicitly instead.
+
+    `rows` is materialised into a list FIRST: the validation pass and the
+    write pass below both walk it, so a one-shot iterable (a generator
+    expression is the natural way to call this) would be exhausted by
+    validation alone, leaving the write pass nothing to see and producing a
+    silently header-only CSV.
     """
+    rows = list(rows)
     columns = set(ACCURACY_COLUMNS)
     for row in rows:
         keys = set(row)
