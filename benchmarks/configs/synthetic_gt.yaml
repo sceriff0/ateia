@@ -1,0 +1,38 @@
+# The COMMITTED experiment plan for the synthetic ground-truth benchmark.
+#
+# These values are fixed before any method runs. Changing them after seeing
+# results invalidates the comparison -- see plan.py's "test-set discipline".
+#
+# correlation_px values are deliberately NOT multiples of reg_tiled_tile (2048).
+# A field whose characteristic scale aligned with STARE's control grid would let
+# STARE win for a reason unrelated to being better.
+seeds: [1, 2, 3]
+field_families: [random_fourier]
+methods: [tiled, valis, ashlar]
+correlation_px: [333.0, 777.0]
+
+# Two amplitudes, deliberately spanning STARE's own gate. A unit-rung
+# measurement found STARE scoring at essentially the identity baseline
+# because its COARSE stage absorbs the field's lowest frequency into a global
+# affine, and bin/tiled_solve.py only refines control points whose
+# rigid-stage TRE exceeds reg_tiled_gate_tre (default 1.0px) -- at low total
+# displacement the post-affine residual is sub-pixel, the gate zeroes it, and
+# the mesh collapses to identity. 12.0 sits near that gate; 48.0 sits well
+# above it. Both are reported, not tuned away.
+amplitude_px: [12.0, 48.0]
+
+size: [20480, 20480]
+
+# Physics held fixed across the blanking sweep so blanking is the only variable.
+physics:
+  photobleach:
+    factor: 0.75
+  noise_and_psf:
+    psf_sigma_px: 1.5
+    photons: 300.0
+    read_sigma: 0.01
+  background:
+    af_amplitude: 0.12
+    seam_px: 1024
+    seam_amplitude: 0.03
+    focus_sigma_px: 0.4
