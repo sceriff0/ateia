@@ -71,6 +71,17 @@ existence.
 
 ## Checkpoints
 
+!!! warning "Checkpoints are written only at `--cleanup_level=none`"
+    The default is `--cleanup_level=final`, which does not publish the artifacts a
+    checkpoint names — so no checkpoint CSV is written at all, and `<outdir>/csv/`
+    holds a `README.txt` saying so. A manifest whose rows pointed at files that
+    were never published would be worse than no manifest: `--start` opens exactly
+    what it names.
+
+    Run with `--cleanup_level none` the moment you intend to resume from a run's
+    output, or use it as a `--prior_outdir`. See
+    [Output cleanup](parameters.md#output-cleanup).
+
 Each step ends by writing one CSV under `<outdir>/csv/`. These are the
 resume points, and their headers are a published contract
 (`lib/Checkpoint.groovy`).
@@ -107,7 +118,37 @@ the merged quantification table).
 Two locations: per-patient results under `<outdir>/<patient_id>/`, and run-level
 aggregates at the `<outdir>` root.
 
-### The published tree
+### What a default run publishes
+
+`--cleanup_level` decides how much of the tree below is written. The default,
+`final`, publishes only what the run was asked to produce:
+
+```text
+results/                              # = --outdir, at --cleanup_level=final
+├── <patient_id>/
+│   ├── quantification/               # merged_quant.csv
+│   ├── geojson/export/               # cells.geojson, cells_wholecell.geojson, cells_data.csv
+│   ├── pyramid/                      # pyramid.ome.tiff
+│   ├── spatialdata/                  # <patient_id>.zarr
+│   └── qc/                           # the full per-patient QC tree
+├── qc/                               # run-level report + resource report
+├── csv/README.txt                    # why there is no checkpoint manifest
+└── size_logs/
+```
+
+Everything else in the full tree below — `converted/`, `preprocessed/`,
+`registered/`, `segmentation/`, `cell_properties/`, `split_channels/`,
+`quantify/`, and every `csv/*.csv` manifest — is an **intermediate**, and at
+`final` it is never published rather than published and then deleted. Every
+`publishDir` is `mode: 'copy'`, so publish-then-delete would pay a full copy out
+of `work/` for a file nobody reads.
+
+`--cleanup_level none` publishes the complete tree below, byte-for-byte as the
+pipeline always did. Use it whenever the output will be re-entered: `--start
+<step>`, or as the `--prior_outdir` of a `--mode add_cycle` run (which is refused
+at launch at any other level). Details: [Output cleanup](parameters.md#output-cleanup).
+
+### The published tree (`--cleanup_level none`)
 
 The per-patient leaf directories are the closed vocabulary declared by
 `Layout.PUBLISHED_KINDS` — a process publishing anywhere else under
@@ -129,7 +170,9 @@ results/                              # = --outdir
 │   │   ├── registered_slides/        # *_registered.ome.tiff — REGISTER (VALIS)
 │   │   ├── registered/               # *_registered.ome.tiff — TILED_STITCH
 │   │   ├── manifest/                 # *_manifest.json       — tiled backend
-│   │   └── summary/                  # *.csv                 — VALIS error summary
+│   │   ├── summary/                  # *.csv                 — VALIS error summary
+│   │   ├── transform/                # *_registrar.pickle    — REGISTER (VALIS); see caveat below
+│   │   └── controls/                 # *_ctrl.json, per tile — TILED_REG_TILE (tiled backend)
 │   ├── segmentation/                 # *_cell_mask.tif, *_nuclei_mask.tif  — SEGMENT
 │   ├── cell_properties/
 │   │   ├── morphology.csv            # EXTRACT_CELL_PROPERTIES
@@ -174,6 +217,12 @@ results/                              # = --outdir
     so the real path is `<pid>/qc/preprocess/qc/*.png`, not
     `<pid>/qc/preprocess/*.png`. The tree above used to show the flattened form.
     `WARP_SEG_QC` and `SEG_QC_GEOJSON` declare flat patterns and are unaffected.
+
+!!! warning "`registered/transform/*_registrar.pickle` is a Python pickle"
+    It is the pipeline's own output — this is a caveat, not a blocker — but a
+    pickle's `load()` executes arbitrary code as a side effect of deserializing,
+    and this one embeds absolute host paths and slide filenames from the run
+    that produced it. Only load a registrar pickle from an `--outdir` you trust.
 
 ### Trace outputs
 
@@ -261,6 +310,24 @@ kept for backward compatibility with FlowPath's bare-key fast path.
     `bin/utils/measurements.py` is the single producer of the string; the
     `COMPARTMENTS` and `STATISTICS` tuples are the single vocabulary. Changing
     any of the three requires a coordinated change on the FlowPath side.
+
+!!! warning "A missing key is a real state, not a zero"
+    `export_geojson.py` writes a measurement only when its value is present
+    (`if pd.notna(val)`), so **a cell with no nuclear overlap carries fewer keys
+    than its neighbours** rather than carrying them as `0.0`. That is correct — a
+    cell with no nucleus has no nuclear median, and `0.0` is a measurement, not an
+    absence — but it means a consumer must treat "absent" as a state rather than
+    reading a number. A language whose subscript raises (Python) needs `.get()`;
+    one that returns null (Java, as `qupath-extension-flowpath` does) already
+    handles it, and the effect there is on DISTRIBUTIONS instead — percentiles
+    and z-scores exclude the missing cells, where the artificial `0.0`s used to
+    sit in the low tail.
+
+    The same applies to the morphology keys (`Eccentricity`, `Perimeter µm`,
+    `Solidity`, `Convex Area µm²`, `Major/Minor Axis Length µm`, `Area µm²`).
+
+    This changed with the 2026-08-24 merge; see the
+    [migration note](migration-2026-08-24.md#2-nan-measurements-are-omitted-not-written-as-00).
 
 Cytoplasm is computed as `Cell − Nucleus` by subtraction, per cell. A cell with
 no nuclear overlap yields an empty Nucleus/Cytoplasm compartment, which is

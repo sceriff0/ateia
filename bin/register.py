@@ -883,6 +883,19 @@ def valis_registration(
         if warp_succeeded:
             tracker.step_complete(slide_name, f"Saved: {out_path}")
         elif retry_ctx.all_attempts_failed:
+            # Per-slide loop inside a multi-slide warp pass (`for slide_name,
+            # slide_obj in registrar.slide_dict.items():` above): log and
+            # continue to the next slide rather than raising. This branch was
+            # ALREADY written this way -- it is the partial-failure design --
+            # but bin/utils/retry.py's __next__ used to raise last_exception
+            # on exhaustion instead of StopIteration, so the `for attempt in
+            # retry_ctx:` loop above never completed normally and this elif
+            # was unreachable dead code. The whole-task decision still
+            # happens after the outer loop: `warped_count == 0` returns 1
+            # (total failure), and a non-empty `failed_slides` with at least
+            # one success only warns. Do NOT re-raise here -- that would
+            # regress a 400+ GB REGISTER task to dying on one bad slide,
+            # which is exactly the defect this fix closes.
             failed_slides.append((slide_name, str(retry_ctx.last_exception)))
             tracker.step_complete(
                 slide_name, f"FAILED after retries: {retry_ctx.last_exception}"

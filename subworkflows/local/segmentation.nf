@@ -173,6 +173,10 @@ workflow SEGMENTATION {
         .map { pid, placeholder, real -> tuple(pid, real ?: placeholder) }
 
     ch_checkpoint_csv = ch_registered_for_ckpt
+        // Not written at a cleaning level: neither the registered slides nor the
+        // masks nor the contours are published there, so every one of this row's
+        // four path columns would dangle. See Checkpoint.writesAtLevel.
+        .filter { Checkpoint.writesAtLevel(Layout.SEGMENTED, params.cleanup_level) }
         .combine(ch_cell_mask_path, by: 0)
         .combine(ch_nuclei_mask_path, by: 0)
         .combine(ch_contours_path, by: 0)
@@ -180,6 +184,9 @@ workflow SEGMENTATION {
         .map { pid, meta, reg_path, cell_mask, nuclei_mask, contours, nucleus_contours ->
             Checkpoint.row(Layout.SEGMENTED, [
                 patient_id      : pid,
+                // RULING R17: carried forward from meta, never re-derived from
+                // registered_image's basename below -- see lib/Checkpoint.groovy.
+                id              : meta.id,
                 registered_image: reg_path,
                 is_reference    : meta.is_reference,
                 channels        : meta.channels.join('|'),
@@ -239,6 +246,15 @@ workflow SEGMENTATION {
     with splitCsv(header: true), fail loudly if the columns this reader indexes have
     drifted from what Checkpoint declares, and never restate the schema by hand.
 
+    META IS BUILT THROUGH Meta.fromCheckpointRow (Task 4.3), not a hand-rolled
+    literal. This used to build `[patient_id, id: patient_id, is_reference,
+    channels]` by hand -- omitting keep_channels/channels_count entirely and
+    hard-coding id to the PATIENT id rather than the SLIDE's real one -- which is
+    exactly what made `--start postprocessing` diverge from a full run (see
+    lib/Meta.groovy's header comment). CsvUtils.metaContextFromCheckpoint builds
+    the ctx (keepChannelsBySlide/imagesCount/channelsCount) from this checkpoint's
+    OWN rows, mirroring INPUT_CHECK's samplesheet-side ctx assembly.
+
     INPUT_CHECK's `[meta, one_file]` shape is enough for every other step's entry
     point (each earlier checkpoint names exactly one path column per row). This one
     is not: postprocessing's entry additionally needs the four segmentation
@@ -294,7 +310,7 @@ workflow READ_SEGMENTED_CHECKPOINT {
     // never restates the schema.
     //
     // Fail loudly here if the writer's schema drifts from what this reader indexes.
-    ['patient_id', 'registered_image', 'is_reference', 'channels',
+    ['patient_id', 'id', 'registered_image', 'is_reference', 'channels',
      'cell_mask', 'nuclei_mask'].each { col ->
         if (!(col in Checkpoint.columns(Layout.SEGMENTED))) {
             throw new IllegalStateException(
@@ -303,18 +319,24 @@ workflow READ_SEGMENTED_CHECKPOINT {
         }
     }
 
+    // Everything Meta.fromCheckpointRow needs, pre-computed ONCE for the whole
+    // checkpoint before any row is built -- the checkpoint-side twin of
+    // INPUT_CHECK's meta_ctx (subworkflows/local/input_check.nf), but derived from
+    // THIS checkpoint's own rows via CsvUtils.metaContextFromCheckpoint, never from
+    // a samplesheet: a checkpoint row names a DERIVED artifact whose basename
+    // cannot reproduce the samplesheet-assigned identity (RULING R17,
+    // lib/Checkpoint.groovy).
+    def meta_ctx = CsvUtils.metaContextFromCheckpoint(csv_path, Layout.SEGMENTED)
+
     ch_rows = Channel
         .fromPath(csv_path, checkIfExists: true)
         .splitCsv(header: true)
         .map { row ->
-            def chans = (row.channels ?: '').split('\\|').collect { it.trim() }.findAll { it }
-            def meta = [
-                patient_id  : row.patient_id,
-                id          : row.patient_id,
-                is_reference: row.is_reference?.toLowerCase() == 'true',
-                channels    : chans,
-            ]
-            [meta, row]
+            // One constructor, one key set. Building the map inline here (as this
+            // reader used to) is how it came to omit keep_channels/channels_count and
+            // hard-code id=patient_id -- see lib/Meta.groovy's header comment for the
+            // whole story and RULING R17 for why identity is read back, not re-derived.
+            [Meta.fromCheckpointRow(row, Layout.SEGMENTED, meta_ctx), row]
         }
 
     ch_samples = ch_rows.map { meta, row -> [meta, file(row.registered_image)] }

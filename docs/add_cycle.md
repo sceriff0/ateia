@@ -4,9 +4,23 @@ Fold a NEW imaging cycle into an already-completed patient run, reusing the prio
 reference, segmentation mask, and old-marker quantification.
 
 ## Prerequisites
-A previous run completed through postprocessing, producing under its `--outdir`:
-`csv/registered.csv`, `csv/postprocessed.csv`, and per-patient
-`segmentation/`, `quantification/`, `pyramid/` outputs.
+
+!!! danger "Every cycle must run at `--cleanup_level none`, including the first"
+    `add_cycle` re-enters the prior run's output tree: it reads `csv/registered.csv`,
+    `csv/postprocessed.csv` and the per-patient `registered/` and `segmentation/`
+    artifacts. The **default** `--cleanup_level=final` publishes none of those, so a
+    cycle-1 run left at the default cannot be extended at all — and the only remedy
+    is to re-run cycle 1.
+
+    This applies to the add_cycle runs themselves too, because each one is the next
+    one's `--prior_outdir`. The pipeline **refuses `--mode add_cycle` at launch** at
+    any other level (`ParamUtils.validateCleanup`), so the mistake cannot be made
+    silently on the incremental runs; it can only be made on the first, ordinary
+    run. Decide up front whether a cohort is going to be extended.
+
+A previous run completed through postprocessing **at `--cleanup_level none`**,
+producing under its `--outdir`: `csv/registered.csv`, `csv/postprocessed.csv`, and
+per-patient `segmentation/`, `quantification/`, `pyramid/` outputs.
 
 **To be extendable incrementally, the prior run must have embedded its
 segmentation masks in the pyramid** — i.e. it must have been run with
@@ -19,6 +33,7 @@ doing any work — see [Fast-fail behavior](#fast-fail-behavior).
 ```bash
 nextflow run . -profile <profile> \
   --mode add_cycle \
+  --cleanup_level none \
   --prior_outdir results_cycle1 \
   --input new_cycle.csv \
   --outdir results_cycle2
@@ -72,12 +87,47 @@ collide when the report stages them. `--reg_qc 0` avoids it; a single slide
 per patient per cycle is otherwise unaffected.
 
 ## Chaining cycles
-**Not yet supported.** `--prior_outdir` must contain BOTH `csv/registered.csv` and
-`csv/postprocessed.csv` (`ParamUtils.validateAddCycle`). An add_cycle run now writes
-the first, but it has no postprocessing step -- masks and the base quantification
-table are reused rather than re-derived -- so it writes no `csv/postprocessed.csv`
-and cycle N+1 fails its launch validation. Each add_cycle run must currently take
-its `--prior_outdir` from a full linear run.
+**Supported.** An add_cycle `--outdir` is a valid `--prior_outdir` for the next
+cycle, so cycles chain without limit. Point each run at the previous run's
+`--outdir` and give it a fresh one of its own:
+
+```bash
+# cycle 1 — an ORDINARY run, but it must publish its intermediates or nothing
+# downstream can read them. This is the one place the mistake can be made
+# silently; the add_cycle runs below refuse the wrong level at launch.
+nextflow run . -profile <site> \
+    --input cycle1.csv --cleanup_level none --outdir results/cycle1
+
+# cycle 2 — prior is the full linear run
+nextflow run . -profile <site> \
+    --input cycle2.csv --mode add_cycle --cleanup_level none \
+    --prior_outdir results/cycle1 --outdir results/cycle2
+
+# cycle 3 — prior is cycle 2
+nextflow run . -profile <site> \
+    --input cycle3.csv --mode add_cycle --cleanup_level none \
+    --prior_outdir results/cycle2 --outdir results/cycle3
+```
+
+`--outdir` must not be the same directory as `--prior_outdir`
+(`ParamUtils.validateAddCycle` refuses it; the checkpoint writes overwrite in
+place). Each run's outputs are cumulative -- the geojson, merged quantification
+table and pyramid are rebuilt over ALL cycles seen so far -- so the newest
+`--outdir` is the complete result and the older ones are only needed as history.
+
+`--prior_outdir` must contain both `csv/registered.csv` and
+`csv/postprocessed.csv` (`Layout.ADD_CYCLE_CHECKPOINTS`). add_cycle writes both:
+the first via `REGISTERED_CHECKPOINT`, the second via `POSTPROCESSED_CHECKPOINT`.
+Neither costs a recomputation -- add_cycle already produces every artifact those
+manifests name, and until 2026-08-25 it simply had no writer for the second, so
+cycle 3 failed launch validation with *"required checkpoint
+'csv/postprocessed.csv' not found under --prior_outdir"*.
+
+One column is worth knowing about: `postprocessed.csv`'s `cell_mask` names the
+masks `EXTRACT_MASK_SERIES` re-read out of the prior pyramid's `Image:1` series
+and published under this run's `<pid>/segmentation/`. So each cycle's manifest
+points inside its own `--outdir`, and an older cycle's directory can be archived
+without breaking the next run's launch validation.
 
 ## Mask pyramid (`embed_masks`)
 `params.embed_masks` (default `false`) controls whether `MERGE_AND_PYRAMID`

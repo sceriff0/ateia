@@ -420,8 +420,23 @@ NOT_SWEPT = {
     "outdir": "output path — supplied per run by run_sweep.sh",
     "prior_outdir": "add_cycle input; the sweep benchmarks standard mode only",
     "mode": "'standard' vs 'add_cycle' — a different PIPELINE, not a knob (see docs/add_cycle.md)",
+    "config_profile_name": (
+        "nf-core boilerplate: a display string echoed into the run summary. It reaches no "
+        "process and has no cost curve."),
+    "config_profile_description": "nf-core boilerplate display string — see config_profile_name",
     "start": "step gate — every sweep run is a full pipeline; a partial run is not comparable",
     "stop": "step gate — see start",
+    "cleanup_level": (
+        "which publish kinds survive a run -- and the benchmark must PIN it, not sweep it. "
+        "The shipped default 'final' publishes only Layout.FINAL_KINDS (quantification/, "
+        "geojson/, pyramid/) plus the run-level qc/csv/size_logs; `registered/` is an "
+        "INTERMEDIATE_KIND, so <patient>/registered/summary/*.csv -- which "
+        "benchmarks/analysis/lib/quality.py:142 globs to build the registration-quality "
+        "table -- is not published at all. A swept arm at 'final' would report an empty "
+        "table while exiting 0, exactly like cleanup_work below. benchmark.config pins it "
+        "to 'none' for that reason; sweeping it would un-pin the thing the analysis depends "
+        "on. It is also not a cost knob worth an axis: publishing is a copy that happens "
+        "after each task's work is done."),
     "cleanup_work": (
         "post-run disk hygiene, and ACTIVELY HOSTILE to benchmarking. It sets Nextflow's "
         "`cleanup`, which deletes the work directory once a run succeeds -- and the work "
@@ -443,6 +458,14 @@ NOT_SWEPT = {
     "queue_size": (
         "cluster concurrency, not pipeline cost -- see max_forks. The two are a pair and the "
         "lower binds, so benchmark.config raises both together on the CLI."),
+    "concurrency": (
+        "cluster concurrency, not pipeline cost -- the COUPLED knob that sets the max_forks/"
+        "queue_size pair above (nextflow.config derives maxForks from it, and queueSize from "
+        "it x4, unless either is set explicitly). Excused for exactly the reason its two "
+        "derivatives are: it changes how fast the SWEEP drains, never what a task costs. "
+        "benchmark.config keeps setting max_forks/queue_size directly on the CLI rather than "
+        "going through this knob, because the clamps in conf/modules.config read max_forks "
+        "EAGERLY at parse time -- see max_forks."),
     "slurm_account": "scheduler identity",
     "slurm_partition": "scheduler identity",
     "slurm_qos": "scheduler identity",

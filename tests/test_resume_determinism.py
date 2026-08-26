@@ -29,21 +29,11 @@ the behavioural counterpart; see its header for why it is not in the gate.
 """
 
 import re
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-NF_DIRS = ["subworkflows", "workflows", "modules"]
-
-
-def _nf_files():
-    for d in NF_DIRS:
-        yield from sorted((ROOT / d).rglob("*.nf"))
-
-
-def _strip_comments(text: str) -> str:
-    text = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
-    return "\n".join(line for line in text.splitlines() if not line.strip().startswith("//"))
-
+from tests.nfmodel import REPO_ROOT as ROOT
+from tests.nfmodel import nf_files as _nf_files
+from tests.nfmodel import strip_comments as _strip_comments_only
+from tests.nfmodel import strip_comments_and_strings as _strip_comments
 
 # --------------------------------------------------------------------------- #
 # 1. The pairing trap
@@ -113,8 +103,13 @@ def test_every_fan_in_orders_by_data():
 # --------------------------------------------------------------------------- #
 
 def test_final_qc_collects_are_sorted():
-    body = _strip_comments((ROOT / "subworkflows/local/final_qc.nf").read_text())
-    unsorted = re.findall(r"artifactsOf\(ch_artifacts, '([a-z_]+)'\)\.collect\(\)", body)
+    body = _strip_comments_only((ROOT / "subworkflows/local/final_qc.nf").read_text())
+    # Real calls are 3-arg -- artifactsOf(ch_artifacts, 'kind', consumed_kinds) -- since
+    # f892012 added consumed_kinds. A 2-arg-only pattern here matches zero real call
+    # sites regardless of whether sort: true is present, so it can never fail: verified
+    # by planting a bare .collect() on a real 3-arg call and confirming the 2-arg
+    # version stayed green while this one catches it.
+    unsorted = re.findall(r"artifactsOf\(ch_artifacts, '([a-z_]+)'(?:,\s*\w+)?\)\.collect\(\)", body)
     assert not unsorted, (
         f"GENERATE_QC_REPORT slot(s) {sorted(unsorted)} use a bare .collect(). Its inputs are "
         "path collections hashed POSITIONALLY, and collect() emits in arrival order, so the "

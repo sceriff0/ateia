@@ -242,18 +242,19 @@ def read_mask(path: str):
     applies here, so the read stays lazy rather than loading the whole mask up
     front.
 
-    The two sites are NOT symmetric on the *file* side, though, and that is what
+    The two sites are not necessarily on the same grid, though, and that is what
     the explicit ``rechunk`` below is for. ``bin/merge_channels_pyramid.py``
-    writes the pyramid tiled (``tile=(tile_size, tile_size)``); ``bin/segment.py``
-    /``bin/segment_cellsam.py`` write the mask with plain ``tifffile.imwrite`` and
-    no ``tile=``, so tifffile falls back to strips sized ~64 KB, which collapses
-    to ``RowsPerStrip=1`` at slide widths. Left alone, that makes the dask array's
-    chunks single image rows — and ``spatialdata``'s ``sdata.write()`` passes no
-    ``storage_options``, so ``ome_zarr.writer`` defaults the *output* zarr's chunk
-    grid to the dask chunksize (``chunks_opt = level.chunksize``). An unrechunked
-    read would therefore change the exported store's chunk grid from ~dozens of
-    large chunks to one chunk per row — tens of thousands of small zarr objects on
-    a shared filesystem. Not routed through ``tiled_io.open_lazy``: it opens this
+    writes the pyramid tiled at ``tile_size`` (512 by default); ``bin/segment.py``
+    /``bin/segment_cellsam.py`` now also write the mask tiled (``MASK_TIFF_TILE =
+    1024``, see those files), so the dask array's native chunks are 1024×1024, not
+    the single-row strips an untiled write used to produce. This ``rechunk`` is
+    therefore a cheap 2×2-chunk merge to a common 2048 grid today, not the
+    row-to-block rebuild it used to be — but it is still needed: ``spatialdata``'s
+    ``sdata.write()`` passes no ``storage_options``, so ``ome_zarr.writer``
+    defaults the *output* zarr's chunk grid to whatever the dask chunksize
+    happens to be (``chunks_opt = level.chunksize``), and an unpinned 1024 grid
+    here would otherwise propagate into the exported store instead of the 2048
+    the rest of the pipeline uses. Not routed through ``tiled_io.open_lazy``: it opens this
     same underlying zarr array internally, but never returns it — only its own
     ``(c, y, x)``-tuple-indexed ``_CHW`` wrapper, paired with a ``close`` callable
     whose lifetime would then have to be threaded through this lazy dask graph
@@ -269,9 +270,10 @@ def read_mask(path: str):
     arr = da.from_zarr(store).squeeze()
     if arr.ndim != 2:
         raise ValueError(f"expected a 2-D label mask in {path}, got shape {arr.shape}")
-    # Re-chunk away from the file's strip layout (see docstring) before this array
+    # Re-chunk onto the pipeline's common 2048 grid (see docstring) before this array
     # ever reaches Labels2DModel.parse / sdata.write(), so the exported store's
-    # chunk grid stays sane regardless of how the source TIFF happened to strip.
+    # chunk grid stays sane and matches the pyramid's regardless of the source
+    # mask TIFF's own tile size.
     return arr.rechunk({0: 2048, 1: 2048})
 
 

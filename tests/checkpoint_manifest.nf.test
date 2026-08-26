@@ -42,6 +42,29 @@ nextflow_pipeline {
     tag "pipeline"
     tag "checkpoint_manifest"
 
+    // RFC 4180 field split (Task 4.5). lib/Checkpoint.groovy's row() now quotes a
+    // value containing a comma (an --outdir with a comma in it, embedded in every
+    // published path, used to shift every later column of a bare `.join(',')` row).
+    // Every REAL reader in the pipeline parses with Nextflow's own
+    // `splitCsv(header: true)`, which already understands RFC 4180 quoting — but
+    // this test's `then:` blocks read the published CSV text by hand, AFTER the
+    // pipeline session has already exited, so `Channel`/`splitCsv` are not
+    // available here. A naive `line.split(',')` in THIS file would be exactly the
+    // "quoting writer, naive reader" trap Task 4.5 warns about: it would itself
+    // mis-split a quoted field and corrupt the very invariant this test protects
+    // (silently under-counting `checked`, or reporting a quoted path with its
+    // wrapping `"` as a spurious "does not exist"). This closure splits on a comma
+    // only when it is outside a quoted span, then strips a field's own surrounding
+    // quotes and un-doubles any embedded `""` — the RFC 4180 decode paired with
+    // Checkpoint.groovy's encode.
+    def csvFields = { String line ->
+        line.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/, -1).collect { raw ->
+            (raw.startsWith('"') && raw.endsWith('"') && raw.length() >= 2)
+                ? raw[1..-2].replace('""', '"')
+                : raw
+        }
+    }
+
     test("every path in every checkpoint CSV exists — two-slide patient (VALIS)") {
         tag "stub"
         options "-stub"
@@ -53,6 +76,12 @@ nextflow_pipeline {
                 // output subdirectory into the published path.
                 input  = "$projectDir/tests/testdata/test_input.csv"
                 outdir = "$outputDir"
+                // Every case in this file asserts on a checkpoint MANIFEST, and no
+                // manifest is written at the default --cleanup_level=final: the
+                // artifacts its rows name are not published there, so every path
+                // would dangle (Checkpoint.writesAtLevel). The 'final' behaviour has
+                // its own case at the end of this file.
+                cleanup_level = 'none'
             }
         }
 
@@ -97,7 +126,7 @@ nextflow_pipeline {
             def checked  = 0
             manifests.each { csv ->
                 csv.readLines().drop(1).findAll { it.trim() }.each { line ->
-                    line.split(',').each { field ->
+                    csvFields(line).each { field ->
                         // Absolute fields only: the rest are ids, booleans and
                         // pipe-joined channel names.
                         if (field.startsWith('/')) {
@@ -135,6 +164,12 @@ nextflow_pipeline {
                 // <pid>/registered/ — that directory is not created at all.
                 input  = "$projectDir/tests/testdata/single_sample.csv"
                 outdir = "$outputDir"
+                // Every case in this file asserts on a checkpoint MANIFEST, and no
+                // manifest is written at the default --cleanup_level=final: the
+                // artifacts its rows name are not published there, so every path
+                // would dangle (Checkpoint.writesAtLevel). The 'final' behaviour has
+                // its own case at the end of this file.
+                cleanup_level = 'none'
             }
         }
 
@@ -179,7 +214,7 @@ nextflow_pipeline {
             def checked  = 0
             manifests.each { csv ->
                 csv.readLines().drop(1).findAll { it.trim() }.each { line ->
-                    line.split(',').each { field ->
+                    csvFields(line).each { field ->
                         // Absolute fields only: the rest are ids, booleans and
                         // pipe-joined channel names.
                         if (field.startsWith('/')) {
@@ -218,6 +253,12 @@ nextflow_pipeline {
                 // moving slide.
                 input               = "$projectDir/tests/testdata/test_input.csv"
                 outdir              = "$outputDir"
+                // Every case in this file asserts on a checkpoint MANIFEST, and no
+                // manifest is written at the default --cleanup_level=final: the
+                // artifacts its rows name are not published there, so every path
+                // would dangle (Checkpoint.writesAtLevel). The 'final' behaviour has
+                // its own case at the end of this file.
+                cleanup_level = 'none'
                 registration_method = 'tiled'
             }
         }
@@ -263,7 +304,7 @@ nextflow_pipeline {
             def checked  = 0
             manifests.each { csv ->
                 csv.readLines().drop(1).findAll { it.trim() }.each { line ->
-                    line.split(',').each { field ->
+                    csvFields(line).each { field ->
                         // Absolute fields only: the rest are ids, booleans and
                         // pipe-joined channel names.
                         if (field.startsWith('/')) {
@@ -301,6 +342,12 @@ nextflow_pipeline {
                 // to either producer's output layout fails here.
                 input               = "$projectDir/tests/testdata/test_input.csv"
                 outdir              = "$outputDir"
+                // Every case in this file asserts on a checkpoint MANIFEST, and no
+                // manifest is written at the default --cleanup_level=final: the
+                // artifacts its rows name are not published there, so every path
+                // would dangle (Checkpoint.writesAtLevel). The 'final' behaviour has
+                // its own case at the end of this file.
+                cleanup_level = 'none'
                 registration_method = 'tiled'
             }
         }
@@ -346,7 +393,7 @@ nextflow_pipeline {
             def checked  = 0
             manifests.each { csv ->
                 csv.readLines().drop(1).findAll { it.trim() }.each { line ->
-                    line.split(',').each { field ->
+                    csvFields(line).each { field ->
                         // Absolute fields only: the rest are ids, booleans and
                         // pipe-joined channel names.
                         if (field.startsWith('/')) {
@@ -393,6 +440,12 @@ nextflow_pipeline {
                 // found ("--start postprocessing against that file fails").
                 input  = "$projectDir/tests/testdata/valid_checkpoint_postprocessing.csv"
                 outdir = "$outputDir"
+                // Every case in this file asserts on a checkpoint MANIFEST, and no
+                // manifest is written at the default --cleanup_level=final: the
+                // artifacts its rows name are not published there, so every path
+                // would dangle (Checkpoint.writesAtLevel). The 'final' behaviour has
+                // its own case at the end of this file.
+                cleanup_level = 'none'
                 start  = 'segmentation'
             }
         }
@@ -417,16 +470,17 @@ nextflow_pipeline {
             // broke: publishedPath applied unconditionally reconstructed it as
             // <outputDir>/P001/registered/<name>, which nothing ever publishes.
             def segLines = manifests.find { it.name == 'segmented.csv' }.readLines()
-            def segRow = segLines[1].split(',')
-            assert segRow[1] == "$projectDir/tests/testdata/P001_ref.ome.tiff".toString() :
-                "segmented.csv rewrote registered_image against the wrong outdir: ${segRow[1]}"
+            def segRow = csvFields(segLines[1])
+            // index 2, not 1: 'id' (RULING R17, Task 4.3) is now column 1.
+            assert segRow[2] == "$projectDir/tests/testdata/P001_ref.ome.tiff".toString() :
+                "segmented.csv rewrote registered_image against the wrong outdir: ${segRow[2]}"
 
             def work = new File("${workDir}".toString()).absolutePath
             def problems = []
             def checked  = 0
             manifests.each { csv ->
                 csv.readLines().drop(1).findAll { it.trim() }.each { line ->
-                    line.split(',').each { field ->
+                    csvFields(line).each { field ->
                         if (field.startsWith('/')) {
                             checked++
                             if (new File(field).absolutePath.startsWith(work + File.separator))
@@ -469,6 +523,12 @@ nextflow_pipeline {
                 // pinning unrelated knobs only makes it drift from a real run.
                 input        = "$projectDir/tests/testdata/new_cycle.csv"
                 outdir       = "$outputDir"
+                // Every case in this file asserts on a checkpoint MANIFEST, and no
+                // manifest is written at the default --cleanup_level=final: the
+                // artifacts its rows name are not published there, so every path
+                // would dangle (Checkpoint.writesAtLevel). The 'final' behaviour has
+                // its own case at the end of this file.
+                cleanup_level = 'none'
                 mode         = 'add_cycle'
                 prior_outdir = "$projectDir/tests/testdata/prior_run"
             }
@@ -483,28 +543,45 @@ nextflow_pipeline {
             def manifests = (csvDir.listFiles() ?: [])
                 .findAll { it.name.endsWith('.csv') }
                 .sort { it.name }
-            // TWO, not three: add_cycle preprocesses and registers the new cycle but
-            // has no POSTPROCESSING step (masks and the base quantification table are
-            // reused, not re-derived), so it writes no postprocessed.csv. That gap is
-            // why an add_cycle --outdir is still not a usable --prior_outdir for a
-            // second add_cycle; registered.csv was the half that was missing entirely.
-            assert manifests*.name == ['preprocessed.csv', 'registered.csv'] :
-                "expected preprocessed.csv + registered.csv, found ${manifests*.name}"
+            // THREE. add_cycle has no POSTPROCESSING step -- the masks and the base
+            // quantification table are reused rather than re-derived -- but it does
+            // produce every artifact a postprocessed row names (it rebuilds the
+            // combined geojson, csv and pyramid wholesale over the merged channel
+            // set), so subworkflows/local/postprocessed_checkpoint.nf writes the
+            // manifest from this path too. Nothing is recomputed to get it.
+            //
+            // Both halves of Layout.ADD_CYCLE_CHECKPOINTS are therefore present, which
+            // is the whole point: until they were, cycle 3 refused at LAUNCH with
+            // "required checkpoint 'csv/postprocessed.csv' not found under
+            // --prior_outdir" and cyclic-IF stopped at two cycles. See the chained
+            // case below, which runs cycle 3 against a cycle-2 outdir for real.
+            assert manifests*.name == ['postprocessed.csv', 'preprocessed.csv', 'registered.csv'] :
+                "expected preprocessed.csv + registered.csv + postprocessed.csv, found ${manifests*.name}"
+
+            // Same column contract as the linear path's postprocessed.csv, because
+            // the same writer produced it.
+            def postLines = manifests.find { it.name == 'postprocessed.csv' }.readLines()
+            assert postLines[0] == 'patient_id,id,cell_csv,cell_geojson,merged_csv,cell_mask,pyramid' :
+                "postprocessed.csv header drifted: ${postLines[0]}"
+            def postRows = postLines.drop(1).findAll { it.trim() }
+            assert postRows.size() == 1 : "expected 1 postprocessed row, got ${postRows.size()}"
 
             // --- the manifest the linear path already had, now on this path -------
             // Same column contract as the linear registered.csv, because the same
             // writer produced it — pinned here so a divergence fails rather than
             // quietly producing a manifest add_cycle's own reader cannot consume.
             def regLines = manifests.find { it.name == 'registered.csv' }.readLines()
-            assert regLines[0] == 'patient_id,registered_image,is_reference,channels' :
+            // 'id' (RULING R17, Task 4.3) is column 1 now.
+            assert regLines[0] == 'patient_id,id,registered_image,is_reference,channels' :
                 "registered.csv header drifted: ${regLines[0]}"
 
-            def rows = regLines.drop(1).findAll { it.trim() }.collect { it.split(',') }
+            def rows = regLines.drop(1).findAll { it.trim() }.collect { csvFields(it) }
             // Two rows: the frozen prior reference (re-emitted by VALIS) and the new
             // cycle. The reference row is not optional — it is the row a follow-on
             // add_cycle filters on to recover its registration target.
             assert rows.size() == 2 : "expected 2 registered rows, got ${rows.size()}"
-            assert rows.count { it[2] == 'true' } == 1 :
+            // index 3, not 2: is_reference shifted one column right by 'id'.
+            assert rows.count { it[3] == 'true' } == 1 :
                 "registered.csv must carry exactly one is_reference=true row"
             assert rows.every { it[0] == 'P001' }
 
@@ -516,7 +593,7 @@ nextflow_pipeline {
             def checked  = 0
             manifests.each { csv ->
                 csv.readLines().drop(1).findAll { it.trim() }.each { line ->
-                    line.split(',').each { field ->
+                    csvFields(line).each { field ->
                         if (field.startsWith('/')) {
                             checked++
                             if (new File(field).absolutePath.startsWith(work + File.separator))
@@ -527,12 +604,164 @@ nextflow_pipeline {
                     }
                 }
             }
-            // 1 preprocessed row + 2 registered rows, one path each.
-            assert checked == 3 :
-                "expected 3 recorded paths, examined ${checked} — did the CSV columns change?"
+            // 1 preprocessed row + 2 registered rows, one path each, + 5 paths in
+            // the single postprocessed row (cell_csv, cell_geojson, merged_csv,
+            // cell_mask, pyramid).
+            assert checked == 8 :
+                "expected 8 recorded paths, examined ${checked} — did the CSV columns change?"
             assert problems.isEmpty() :
                 "checkpoint manifest has ${problems.size()} bad path(s):\n  " +
                 problems.join("\n  ")
+        }
+    }
+
+    test("every path in every checkpoint CSV exists — --outdir contains a comma (Task 4.5 direct proof)") {
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                // THE DIRECT PROOF (Task 4.5, lib/Checkpoint.groovy:140-ish). Every
+                // published path is built from --outdir, so a comma in --outdir is
+                // the realistic way a checkpoint field ends up carrying a comma — no
+                // synthetic filename needed. Before Checkpoint.row() quoted fields, a
+                // bare `.join(',')` could not tell "a value with a comma in it" from
+                // "a column boundary", so this comma would have shifted every LATER
+                // column of every row whose path embedded it. Same fixture as the
+                // first test above (two-slide VALIS) so the "checked" count below is
+                // directly comparable.
+                input  = "$projectDir/tests/testdata/test_input.csv"
+                outdir = "${outputDir}/has,a,comma"
+                // See the note on the first case: no manifest is written at the
+                // default --cleanup_level=final, and a manifest is what this
+                // asserts on.
+                cleanup_level = 'none'
+            }
+        }
+
+        then {
+            assert workflow.success
+
+            def csvDir = new File("${outputDir}/has,a,comma/csv".toString())
+            assert csvDir.isDirectory() : "no csv/ directory was published"
+
+            def manifests = (csvDir.listFiles() ?: [])
+                .findAll { it.name.endsWith('.csv') }
+                .sort { it.name }
+            assert manifests.size() == 4 :
+                "expected 4 checkpoint manifests, found ${manifests.size()}: " +
+                manifests*.name
+
+            // Sanity guard against a vacuous pass: at least one published field must
+            // actually have been wrapped in RFC 4180 quotes, or this test would not
+            // be exercising the fix at all (e.g. if --outdir were silently sanitized
+            // upstream before reaching Checkpoint.row()).
+            def sawQuotedField = manifests.any { csv -> csv.readLines().drop(1).any { it.contains('"') } }
+            assert sawQuotedField :
+                "no field in any manifest was quoted — this test did not exercise the " +
+                "comma-in---outdir fix at all"
+
+            def work = new File("${workDir}".toString()).absolutePath
+            def problems  = []
+            def checked   = 0
+            manifests.each { csv ->
+                def lines      = csv.readLines()
+                def headerCols = csvFields(lines[0]).size()
+                lines.drop(1).findAll { it.trim() }.each { line ->
+                    def fields = csvFields(line)
+                    // THE PROPERTY A BARE JOIN CANNOT GUARANTEE: every data row
+                    // parses to the SAME field count as its own header. A shifted
+                    // column (the pre-fix failure mode) fails here directly, instead
+                    // of surfacing later as a wrong-looking path.
+                    assert fields.size() == headerCols :
+                        "${csv.name}: row has ${fields.size()} field(s), header declares " +
+                        "${headerCols} (comma in --outdir shifted a column): ${line}"
+                    fields.each { field ->
+                        // No field is the bare four-character literal "null" — the
+                        // failure mode an unquoted `null` VALUE used to produce.
+                        assert field != 'null' :
+                            "${csv.name}: field literally reads the text 'null': ${line}"
+                        if (field.startsWith('/')) {
+                            checked++
+                            if (new File(field).absolutePath.startsWith(work + File.separator))
+                                problems << "${csv.name}: inside the work directory (scratch, unpublished) -> ${field}"
+                            else if (!new File(field).exists())
+                                problems << "${csv.name}: does not exist -> ${field}"
+                        }
+                    }
+                }
+            }
+            // Same fixture as the first test in this file: same 19 recorded paths.
+            assert checked == 19 :
+                "expected 19 recorded paths, examined ${checked} — did the CSV columns change?"
+            assert problems.isEmpty() :
+                "checkpoint manifest has ${problems.size()} bad path(s):\n  " +
+                problems.join("\n  ")
+        }
+    }
+
+    test("no checkpoint manifest at the DEFAULT --cleanup_level=final") {
+        tag "stub"
+        options "-stub"
+
+        // The other side of the invariant, and the reason every case above had to
+        // name --cleanup_level=none explicitly.
+        //
+        // At the default level the intermediates are not published, so a manifest
+        // written anyway would record paths that do not exist -- turning the
+        // invariant above red for a DESIGNED reason, which is the worst possible
+        // outcome for a guard. Checkpoint.writesAtLevel makes the writers
+        // level-aware instead, and this asserts the result rather than trusting it.
+        //
+        // Note the postprocessed manifest is absent TOO, which does not follow from
+        // "final artifacts are published": its cell_csv, cell_geojson, merged_csv
+        // and pyramid columns are all final, but its cell_mask column names a
+        // segmentation mask, and segmentation is an intermediate. One dangling
+        // column is enough to make the whole manifest a lie.
+
+        when {
+            params {
+                input  = "$projectDir/tests/testdata/test_input.csv"
+                outdir = "$outputDir"
+                // The shipped default, written out rather than relied on, so this
+                // case still means what it says if the default ever moves.
+                cleanup_level = 'final'
+            }
+        }
+
+        then {
+            assert workflow.success
+
+            def csvDir = new File("${outputDir}/csv".toString())
+            def manifests = csvDir.isDirectory()
+                ? (csvDir.listFiles() ?: []).findAll { it.name.endsWith('.csv') }.sort { it.name }
+                : []
+            assert manifests.isEmpty() :
+                "expected NO checkpoint manifest at --cleanup_level=final, found " +
+                manifests*.name
+
+            // An empty csv/ is indistinguishable from a run that died before its
+            // first checkpoint, so the directory has to say which it is.
+            def readme = new File(csvDir, 'README.txt')
+            assert readme.exists() : "csv/README.txt was not written"
+            assert readme.text.contains('--cleanup_level none') :
+                "csv/README.txt does not name the flag that restores the manifests"
+
+            // And the run is still USEFUL: the final artifacts are all there. If
+            // this ever passed with an empty output tree, the assertions above
+            // would be satisfied by a pipeline that published nothing at all.
+            ['geojson', 'pyramid', 'quantification'].each { kind ->
+                def dir = new File("${outputDir}/P001/${kind}".toString())
+                assert dir.isDirectory() && (dir.listFiles() ?: []).size() > 0 :
+                    "final artifact directory ${kind}/ is missing or empty"
+            }
+            // ...and the intermediates are genuinely gone, or the case above proves
+            // nothing about the gate.
+            ['converted', 'preprocessed', 'split_channels', 'quantify'].each { kind ->
+                def dir = new File("${outputDir}/P001/${kind}".toString())
+                assert !dir.isDirectory() || (dir.listFiles() ?: []).size() == 0 :
+                    "intermediate ${kind}/ was published at --cleanup_level=final"
+            }
         }
     }
 }

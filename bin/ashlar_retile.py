@@ -98,14 +98,29 @@ def tile_grid(width, height, tile_size, overlap_fraction):
 
 
 def _pixel_size_um(image_path: Path) -> float:
-    """Read ``PhysicalSizeX`` from OME-XML; fall back to ``DEFAULT_PIXEL_SIZE_UM``.
+    """Read ``PhysicalSizeX`` from OME-XML **in µm**; fall back to ``DEFAULT_PIXEL_SIZE_UM``.
 
     Only genuine absence falls back silently: no OME-XML block, or no ``PhysicalSizeX``
     attribute. A malformed-XML parse failure or an unparseable value is logged naming the
     file and the fallback used, so a corrupted calibration cannot masquerade as "no
     metadata" -- which would silently rescale ASHLAR's ``--maximum-shift``.
+
+    ``PhysicalSizeXUnit`` is applied, via the one conversion table in
+    ``bin/utils/pixel_size.py``. This used to return ``float(PhysicalSizeX)``
+    raw: a scanner writing ``PhysicalSizeX="325" PhysicalSizeXUnit="nm"`` --
+    legal, and common -- was read as 325 µm/px rather than 0.325, a 1000x scale
+    error going straight into ASHLAR's ``--maximum-shift``, which is expressed
+    in µm and converted to pixels using exactly this number.
+
+    An unrecognised unit RAISES rather than falling back, which is the one place
+    this reader's policy differs from ``read_ome_pixel_size``'s (see
+    ``unit_to_um``'s docstring). An unknown unit means the file HAS a
+    calibration that we failed to interpret, not that it has none; substituting
+    ``DEFAULT_PIXEL_SIZE_UM`` for it would discard real information silently,
+    and this number has no more-authoritative counterpart to be checked against.
     """
     import tifffile
+    from pixel_size import unit_to_um
 
     with tifffile.TiffFile(str(image_path)) as tif:
         ome_metadata = getattr(tif, "ome_metadata", None)
@@ -129,11 +144,25 @@ def _pixel_size_um(image_path: Path) -> float:
     if not val:
         return DEFAULT_PIXEL_SIZE_UM
     try:
-        return float(val)
+        value = float(val)
     except ValueError:
         logger.warning("%s: PhysicalSizeX=%r is not a number; falling back to %s um/px",
                        image_path, val, DEFAULT_PIXEL_SIZE_UM)
         return DEFAULT_PIXEL_SIZE_UM
+
+    raw_unit = pixels.get("PhysicalSizeXUnit")
+    factor = unit_to_um(raw_unit)
+    if factor is None:
+        raise ValueError(
+            f"{image_path}: PhysicalSizeXUnit={raw_unit!r} is not a length unit "
+            f"this reader knows, so PhysicalSizeX={val!r} cannot be converted to "
+            f"um/px. Refusing to guess: this scale is what ASHLAR's "
+            f"--maximum-shift is converted by, so a wrong factor is a silent "
+            f"registration failure, and falling back to "
+            f"{DEFAULT_PIXEL_SIZE_UM} um/px would throw away a calibration the "
+            f"file actually has. Add the unit to bin/utils/pixel_size.py's table."
+        )
+    return value * factor
 
 
 def _region(arr, n_channels, t, tile_size, dtype):

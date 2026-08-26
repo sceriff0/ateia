@@ -40,13 +40,13 @@ workflow {
     def badStep = false
     try { Layout.checkpointCsvName('nonsense') }
     catch (IllegalArgumentException ignored) { badStep = true }
-    assert badStep, 'Layout.checkpointCsvName must reject an unknown step'
+    assert badStep : 'Layout.checkpointCsvName must reject an unknown step'
 
     // A blank outdir must throw rather than produce a literal 'null/csv'.
     def badOutdir = false
     try { Layout.checkpointDir('  ') }
     catch (IllegalArgumentException ignored) { badOutdir = true }
-    assert badOutdir, 'Layout.checkpointDir must reject a blank outdir'
+    assert badOutdir : 'Layout.checkpointDir must reject a blank outdir'
 
     // ------------------------------------------------------------------ //
     // MarkerUtils — the nuclear-marker rule
@@ -90,6 +90,11 @@ workflow {
     // dedup on [patient_id, marker] immediately upstream (postprocess.nf's `.unique`,
     // add_cycle.nf's priority groupTuple), so the distinct-name count would serve them
     // today. An earlier version of this comment said otherwise.
+    // The inner map is keyed on Meta.identityFor's output (meta.id), not the raw
+    // image cell -- see resolveKeptChannelsPerSlide's doc. For a non-colliding stem,
+    // identityFor ignores its rowIndex argument entirely (n<=1 short-circuits before
+    // rowIndex is ever consulted), so `0` is a safe stand-in below wherever a row's
+    // actual samplesheet-order index isn't the point of the assertion.
     def keepCsv = File.createTempFile('keepset', '.csv')
     keepCsv.text = '''patient_id,image,channels,is_reference
 P1,ref.tiff,DAPI|KI67|CD20,true
@@ -97,9 +102,9 @@ P1,cyc2.tiff,CELLTOX|CD8,false
 P1,cyc3.tiff,CELLTOX|FOXP3,false
 '''
     def keep = CsvUtils.resolveKeptChannelsPerSlide(keepCsv.path, 'image', ['DAPI','CELLTOX'], false)
-    assert keep['P1']['ref.tiff']  == ['DAPI', 'KI67', 'CD20']
-    assert keep['P1']['cyc2.tiff'] == ['CELLTOX', 'CD8']  // CELLTOX unclaimed -> KEPT
-    assert keep['P1']['cyc3.tiff'] == ['FOXP3']           // CELLTOX claimed by cyc2
+    assert keep['P1'][Meta.identityFor('P1', 'ref.tiff', 0, [:])]  == ['DAPI', 'KI67', 'CD20']
+    assert keep['P1'][Meta.identityFor('P1', 'cyc2.tiff', 0, [:])] == ['CELLTOX', 'CD8']  // CELLTOX unclaimed -> KEPT
+    assert keep['P1'][Meta.identityFor('P1', 'cyc3.tiff', 0, [:])] == ['FOXP3']           // CELLTOX claimed by cyc2
     def keepFlat = keep['P1'].values().flatten()
     assert keepFlat.size() == keepFlat.toSet().size()
     assert keepFlat.size() == 6
@@ -113,8 +118,8 @@ P2,cyc2.tiff,DAPI|CD8,false
 P2,ref.tiff,DAPI|KI67,true
 '''
     def lateRef = CsvUtils.resolveKeptChannelsPerSlide(keepLateRef.path, 'image', ['DAPI','CELLTOX'], false)
-    assert lateRef['P2']['ref.tiff']  == ['DAPI', 'KI67']
-    assert lateRef['P2']['cyc2.tiff'] == ['CD8']   // DAPI already claimed by the reference
+    assert lateRef['P2'][Meta.identityFor('P2', 'ref.tiff', 0, [:])]  == ['DAPI', 'KI67']
+    assert lateRef['P2'][Meta.identityFor('P2', 'cyc2.tiff', 0, [:])] == ['CD8']   // DAPI already claimed by the reference
     keepLateRef.delete()
 
     // preClaimed seeds the claimed set — add_cycle passes the prior run's reference
@@ -125,28 +130,85 @@ P3,cyc4.tiff,DAPI|CELLTOX|CD8,false
 '''
     def seeded = CsvUtils.resolveKeptChannelsPerSlide(
         keepPrior.path, 'image', ['DAPI','CELLTOX'], false, ['P3': ['DAPI', 'KI67']])
-    assert seeded['P3']['cyc4.tiff'] == ['CELLTOX', 'CD8']  // DAPI pre-claimed; CELLTOX new
+    assert seeded['P3'][Meta.identityFor('P3', 'cyc4.tiff', 0, [:])] == ['CELLTOX', 'CD8']  // DAPI pre-claimed; CELLTOX new
     keepPrior.delete()
 
-    // BASENAME IS NOT A KEY. Two rows of one patient can share an image BASENAME while
+    // BASENAME COLLISION: two rows of one patient can share an image BASENAME while
     // living in different directories -- a cyclic-IF cohort with one directory per cycle
-    // is the ordinary case, not a pathological one. The inner map is therefore keyed on
-    // the RAW image cell, exactly what resolveReferenceRows returns and exactly what
-    // input_check.nf's meta.is_reference already compares against. Keyed on the basename
-    // the two rows overwrote each other: the map held ONE entry, both rows looked it up,
-    // and the reference was handed the other slide's keep-set -- in a real run it emitted
-    // ZERO channels, DAPI included, while the count read 1 instead of 3.
+    // is the ordinary case, not a pathological one. identityFor disambiguates via each
+    // row's samplesheet-order index (0, 1) whenever the stem would otherwise collide,
+    // and resolveKeptChannelsPerSlide keys its map on exactly that -- so both rows land
+    // as distinct entries even though their basenames, and therefore their un-disambiguated
+    // stems, are identical.
     def dupCsv = File.createTempFile('keepdup', '.csv')
     dupCsv.text = '''patient_id,image,channels,is_reference
 P4,/data/c1/slide.tiff,DAPI|CD3,true
 P4,/data/c2/slide.tiff,DAPI|CD8,false
 '''
+    def dupStemCounts = CsvUtils.stemCountsPerPatient(dupCsv.path, 'image')
     def dup = CsvUtils.resolveKeptChannelsPerSlide(dupCsv.path, 'image', ['DAPI','CELLTOX'], false)
     assert dup['P4'].size() == 2                              // two rows, two entries
-    assert dup['P4']['/data/c1/slide.tiff'] == ['DAPI', 'CD3']  // the reference claims DAPI
-    assert dup['P4']['/data/c2/slide.tiff'] == ['CD8']          // DAPI already claimed
+    assert dup['P4'][Meta.identityFor('P4', '/data/c1/slide.tiff', 0, [stemCounts: dupStemCounts])] == ['DAPI', 'CD3']  // the reference claims DAPI
+    assert dup['P4'][Meta.identityFor('P4', '/data/c2/slide.tiff', 1, [stemCounts: dupStemCounts])] == ['CD8']          // DAPI already claimed
     assert CsvUtils.countChannelsPerPatient(dupCsv.path, 'image', ['DAPI','CELLTOX'], false)['P4'] == 3
     dupCsv.delete()
+
+    // RAW-CELL COLLISION -- THE BUG THIS TASK FIXES. Two rows of one patient can share
+    // the exact same raw `<imageColumn>` cell (a duplicate row) or both leave it blank,
+    // which used to collide the map when it was keyed on `row.raw`: the second pass
+    // silently overwrote the first -- here, with []. P6's reference row keeps
+    // DAPI+CD3; the second row declares only DAPI, already claimed, so its OWN keep-set
+    // is legitimately []. Under the old row.raw keying, perSlide['same.tiff'] would be
+    // ['DAPI','CD3'] and then get overwritten by []. Keying on the ASSIGNED identity
+    // instead means the two rows can never collapse into one entry, because identityFor
+    // disambiguates them by rowIndex the moment stemCounts says their stem collides --
+    // exactly as it does for a basename collision above, even though here the raw cells
+    // are not just same-stem but IDENTICAL strings.
+    def rawDupCsv = File.createTempFile('rawdup', '.csv')
+    rawDupCsv.text = '''patient_id,image,channels,is_reference
+P6,same.tiff,DAPI|CD3,true
+P6,same.tiff,DAPI,false
+'''
+    def rawDupStemCounts = CsvUtils.stemCountsPerPatient(rawDupCsv.path, 'image')
+    def rawDupId0 = Meta.identityFor('P6', 'same.tiff', 0, [stemCounts: rawDupStemCounts])
+    def rawDupId1 = Meta.identityFor('P6', 'same.tiff', 1, [stemCounts: rawDupStemCounts])
+    assert rawDupId0 != rawDupId1 : 'two rows sharing a raw cell must still get distinct identities'
+    def rawDupKept = CsvUtils.resolveKeptChannelsPerSlide(rawDupCsv.path, 'image', ['DAPI','CELLTOX'], false)
+    assert rawDupKept['P6'].size() == 2 : 'both rows must produce their own entry, not one overwriting the other'
+    assert rawDupKept['P6'].values().every { it != null } : 'the collapse bug left a slide with no entry at all'
+    assert rawDupKept['P6'][rawDupId0] == ['DAPI', 'CD3']
+    assert rawDupKept['P6'][rawDupId1] == []  // legitimately empty: DAPI already claimed by the reference
+    def rawDupFlat = rawDupKept['P6'].values().flatten()
+    assert rawDupFlat.size() == 2 : 'the collapse bug summed this to 0 (second row overwrote the first with [])'
+    assert CsvUtils.countChannelsPerPatient(rawDupCsv.path, 'image', ['DAPI','CELLTOX'], false)['P6'] == 2
+    rawDupCsv.delete()
+
+    // NOTE: the block above only proves resolveKeptChannelsPerSlide's OWN internal
+    // row index (rowsByPatient[patientId].size(), captured while it builds its rows)
+    // is collision-safe -- it never goes through CsvUtils.rowIndexPerPatient. THAT
+    // function is the SEPARATE, real production call site input_check.nf's `.map`
+    // closure actually uses to get rowIndex for Meta.fromSamplesheetRow, and it had
+    // its OWN, independent collision: it used to key a SCALAR by
+    // "patientId::rawImageCell", so two rows sharing a raw cell (or both blank) had
+    // the SECOND row's index silently overwrite the first's, and BOTH rows read back
+    // the SAME index -- Meta.fromSamplesheetRow then assigned them the SAME meta.id,
+    // and one row's real keep-set silently displaced the other's under that shared id
+    // (a wrong-but-PRESENT entry, not a clean miss -- see lib/Meta.groovy's
+    // fromSamplesheetRow doc). Pinned directly, against the real function, below.
+    // Pinned END TO END -- through Nextflow's own splitCsv and input_check.nf's real
+    // `.map` closure, not a hand-rebuilt copy of it -- by
+    // tests/subworkflows/local/input_check.nf.test's "two rows sharing the identical
+    // raw path cell get distinct id and keep-set" case.
+    def rowIdxCsv = File.createTempFile('rowindexdup', '.csv')
+    rowIdxCsv.text = '''patient_id,image,channels,is_reference
+P8,same.tiff,DAPI|CD3,true
+P8,same.tiff,DAPI,false
+P8,other.tiff,CD20,false
+'''
+    def rowIdx = CsvUtils.rowIndexPerPatient(rowIdxCsv.path, 'image')
+    assert rowIdx['P8::same.tiff']  == [0, 1] : 'two rows sharing a raw cell must each keep their OWN index, in file order, not one overwriting the other'
+    assert rowIdx['P8::other.tiff'] == [2]
+    rowIdxCsv.delete()
 
     // AN EMPTY KEEP-SET IS AN ANSWER, NOT AN ABSENCE. A slide whose every declared
     // channel was already claimed contributes NO new markers, and countChannelsPerPatient
@@ -154,7 +216,7 @@ P4,/data/c2/slide.tiff,DAPI|CD8,false
     // consumers have to be able to tell "this slide emits nothing" (emit nothing) from
     // "this slide has no entry" (fall back to its declared list). Groovy's `?:` cannot --
     // it treats [] as falsy -- so every lookup of this map uses containsKey/an explicit
-    // null test, and input_check.nf does the lookup where the raw cell is in scope.
+    // null test, and input_check.nf does the lookup where meta.id is in scope.
     // Resolving the empty entry to the FULL declared list emitted a duplicate marker NAME
     // across two slides of one patient, which is exactly what the one-name-per-patient
     // invariant exists to forbid.
@@ -164,9 +226,10 @@ P5,ref.tiff,DAPI|PANCK|SMA,true
 P5,mov1.tiff,DAPI,false
 '''
     def emptyKeep = CsvUtils.resolveKeptChannelsPerSlide(emptyCsv.path, 'image', ['DAPI','CELLTOX'], false)
-    assert emptyKeep['P5'].containsKey('mov1.tiff')   // present ...
-    assert emptyKeep['P5']['mov1.tiff'] == []         // ... and EMPTY, not the declared list
-    assert emptyKeep['P5']['ref.tiff'] == ['DAPI', 'PANCK', 'SMA']
+    def emptyMov1Id = Meta.identityFor('P5', 'mov1.tiff', 0, [:])
+    assert emptyKeep['P5'].containsKey(emptyMov1Id)   // present ...
+    assert emptyKeep['P5'][emptyMov1Id] == []         // ... and EMPTY, not the declared list
+    assert emptyKeep['P5'][Meta.identityFor('P5', 'ref.tiff', 0, [:])] == ['DAPI', 'PANCK', 'SMA']
     assert CsvUtils.countChannelsPerPatient(emptyCsv.path, 'image', ['DAPI','CELLTOX'], false)['P5'] == 3
     emptyCsv.delete()
 
@@ -207,12 +270,12 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
     def badTarget = false
     try { ParamUtils.shouldRun('quantification', 'preprocessing', 'postprocessing') }
     catch (IllegalArgumentException ignored) { badTarget = true }
-    assert badTarget, 'ParamUtils.shouldRun must reject an unknown step'
+    assert badTarget : 'ParamUtils.shouldRun must reject an unknown step'
 
     // Every step's entryColumn must be one of its own requiredColumns, or the
     // samplesheet parser reads a column validation never demanded.
     ParamUtils.STEPS.each { step ->
-        assert step.entryColumn in step.requiredColumns,
+        assert step.entryColumn in step.requiredColumns :
             "step '${step.name}': entryColumn '${step.entryColumn}' not in requiredColumns"
     }
 
@@ -220,24 +283,56 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
     // Checkpoint — filename AND columns, one owner
     // ------------------------------------------------------------------ //
     assert Checkpoint.columns(Layout.PREPROCESSED) ==
-        ['patient_id', 'preprocessed_image', 'is_reference', 'channels']
+        ['patient_id', 'id', 'preprocessed_image', 'is_reference', 'channels']
     assert Checkpoint.columns(Layout.REGISTERED) ==
-        ['patient_id', 'registered_image', 'is_reference', 'channels']
+        ['patient_id', 'id', 'registered_image', 'is_reference', 'channels']
     assert Checkpoint.columns(Layout.POSTPROCESSED) ==
-        ['patient_id', 'cell_csv', 'cell_geojson', 'merged_csv', 'cell_mask', 'pyramid']
+        ['patient_id', 'id', 'cell_csv', 'cell_geojson', 'merged_csv', 'cell_mask', 'pyramid']
 
     // The header IS the seed: string the three writers pass to collectFile. These
     // three literals are the published contract — Group A must not change them.
-    assert Checkpoint.header(Layout.PREPROCESSED)  == 'patient_id,preprocessed_image,is_reference,channels'
-    assert Checkpoint.header(Layout.REGISTERED)    == 'patient_id,registered_image,is_reference,channels'
-    assert Checkpoint.header(Layout.POSTPROCESSED) == 'patient_id,cell_csv,cell_geojson,merged_csv,cell_mask,pyramid'
+    // RULING R17 (Task 4.3) added 'id' right after 'patient_id' to all four.
+    assert Checkpoint.header(Layout.PREPROCESSED)  == 'patient_id,id,preprocessed_image,is_reference,channels'
+    assert Checkpoint.header(Layout.REGISTERED)    == 'patient_id,id,registered_image,is_reference,channels'
+    assert Checkpoint.header(Layout.POSTPROCESSED) == 'patient_id,id,cell_csv,cell_geojson,merged_csv,cell_mask,pyramid'
 
     // row() emits values in DECLARED COLUMN ORDER regardless of map insertion order.
     // This is the whole point: a writer can no longer transpose two columns.
     assert Checkpoint.row(Layout.REGISTERED, [
-        channels: 'DAPI|CD3', patient_id: 'P001',
+        channels: 'DAPI|CD3', patient_id: 'P001', id: 'P001_x',
         registered_image: '/out/P001/registered/x.ome.tiff', is_reference: false
-    ]) == 'P001,/out/P001/registered/x.ome.tiff,false,DAPI|CD3'
+    ]) == 'P001,P001_x,/out/P001/registered/x.ome.tiff,false,DAPI|CD3'
+
+    // RFC 4180 QUOTING (Task 4.5). `--outdir` is an arbitrary filesystem path and
+    // every published path is built from it -- a comma anywhere in it used to shift
+    // every later column of a bare `.join(',')` row. A value containing a comma is
+    // now wrapped in double quotes, so the field count is preserved on read-back
+    // (Nextflow's `splitCsv(header: true)` parses RFC 4180 quoting natively).
+    assert Checkpoint.row(Layout.REGISTERED, [
+        patient_id: 'P001', id: 'P001_x',
+        registered_image: '/out,dir/P001/registered/x,y.ome.tiff',
+        is_reference: false, channels: 'DAPI|CD3',
+    ]) == 'P001,P001_x,"/out,dir/P001/registered/x,y.ome.tiff",false,DAPI|CD3'
+
+    // A value containing a double quote is wrapped AND its embedded quotes are
+    // doubled -- the RFC 4180 escape -- so a naive strip-the-outer-quotes reader
+    // (as opposed to splitCsv) would still see the original text back.
+    assert Checkpoint.row(Layout.REGISTERED, [
+        patient_id: 'P001', id: 'P001_x',
+        registered_image: '/out/say "hi"/x.ome.tiff',
+        is_reference: false, channels: 'DAPI|CD3',
+    ]) == 'P001,P001_x,"/out/say ""hi""/x.ome.tiff",false,DAPI|CD3'
+
+    // A `null` VALUE (as opposed to a missing KEY, rejected above) now writes as an
+    // EMPTY field, not the literal four-character text `null`. Before this task a
+    // null-valued column read back as a bogus four-character path/id indistinguishable
+    // from a real one; an empty field is what every "artifact not produced" caller
+    // already writes (see the class doc's EMPTY VALUES note), and is what
+    // Meta.fromCheckpointRow's requirePresentInRow already treats as absent.
+    assert Checkpoint.row(Layout.REGISTERED, [
+        patient_id: 'P001', id: 'P001_x', registered_image: null,
+        is_reference: false, channels: 'DAPI|CD3',
+    ]) == 'P001,P001_x,,false,DAPI|CD3'
 
     // A missing column must throw, not silently emit an empty field — an empty field
     // is a checkpoint row naming a path that does not exist, which is exactly the
@@ -245,38 +340,43 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
     def missingCol = false
     try { Checkpoint.row(Layout.REGISTERED, [patient_id: 'P001']) }
     catch (IllegalArgumentException ignored) { missingCol = true }
-    assert missingCol, 'Checkpoint.row must reject a missing column'
+    assert missingCol : 'Checkpoint.row must reject a missing column'
 
     // An unknown key must throw too — it means the caller thinks the schema is
     // something it is not.
     def unknownCol = false
     try {
         Checkpoint.row(Layout.REGISTERED, [
-            patient_id: 'P001', registered_image: '/x', is_reference: false,
+            patient_id: 'P001', id: 'P001_x', registered_image: '/x', is_reference: false,
             channels: 'DAPI', typo_column: 'oops'
         ])
     }
     catch (IllegalArgumentException ignored) { unknownCol = true }
-    assert unknownCol, 'Checkpoint.row must reject an unknown column'
+    assert unknownCol : 'Checkpoint.row must reject an unknown column'
 
     // Checkpoint and Layout must agree on the step vocabulary. Two tables that drift
     // is the exact failure this extraction exists to prevent.
     assert Checkpoint.STEPS*.name == Layout.CHECKPOINT_STEPS
 
-    // A step's requiredColumns ARE the previous step's checkpoint columns — that is what
-    // makes --start <step> able to read the checkpoint the previous step wrote. The two
-    // tables state it independently, so assert they agree rather than trusting them to.
-    // segmentation keeps the exact invariant (its requiredColumns == registered.csv's
-    // full column list). postprocessing no longer can: segmented.csv gained four
-    // columns beyond the base four, and postprocessing only requires the two it
-    // dereferences unconditionally inside READ_SEGMENTED_CHECKPOINT (cell_mask,
-    // nuclei_mask) -- so assert its exact (smaller) list, plus that every column it
-    // names is still a real column of the checkpoint it reads (a subset check, not
-    // an equality).
-    assert ParamUtils.STEPS.find { it.name == 'registration'   }.requiredColumns == Checkpoint.columns(Layout.PREPROCESSED)
-    assert ParamUtils.STEPS.find { it.name == 'segmentation'   }.requiredColumns == Checkpoint.columns(Layout.REGISTERED)
+    // A step's requiredColumns used to EQUAL the previous step's full checkpoint
+    // column list -- that was true before RULING R17. It no longer is, by design:
+    // 'id' was added to every Checkpoint.STEPS schema (every checkpoint FILE now
+    // carries identity), but 'registration'/'segmentation' still enter through
+    // INPUT_CHECK (Meta.fromSamplesheetRow), which derives id itself from the entry
+    // image column and never reads a persisted 'id' value -- so requiring it in
+    // CsvUtils.validateInputCSV there would rightly reject an OLDER checkpoint
+    // (preprocessed.csv/registered.csv written before this task) that INPUT_CHECK
+    // could actually still read correctly. Only 'postprocessing' actually
+    // dereferences 'id' (via READ_SEGMENTED_CHECKPOINT's Meta.fromCheckpointRow),
+    // so only IT gained 'id' in requiredColumns (see lib/ParamUtils.groovy's
+    // comment on that entry). The invariant is now "every OTHER column" equality,
+    // not full-list equality.
+    assert ParamUtils.STEPS.find { it.name == 'registration' }.requiredColumns ==
+        Checkpoint.columns(Layout.PREPROCESSED) - ['id']
+    assert ParamUtils.STEPS.find { it.name == 'segmentation' }.requiredColumns ==
+        Checkpoint.columns(Layout.REGISTERED) - ['id']
     assert ParamUtils.STEPS.find { it.name == 'postprocessing' }.requiredColumns ==
-        ['patient_id', 'registered_image', 'is_reference', 'channels', 'cell_mask', 'nuclei_mask']
+        ['patient_id', 'id', 'registered_image', 'is_reference', 'channels', 'cell_mask', 'nuclei_mask']
     assert ParamUtils.STEPS.find { it.name == 'postprocessing' }.requiredColumns
         .every { it in Checkpoint.columns(Layout.SEGMENTED) }
 
@@ -286,13 +386,13 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
     // the schema every later header()/row() call in the run sees. Demonstrated before
     // the fix: `Checkpoint.columns(Layout.PREPROCESSED) << 'injected'` succeeded
     // silently and mutated the live table in place, so a subsequent header() call
-    // returned 'patient_id,preprocessed_image,is_reference,channels,injected'.
+    // returned 'patient_id,id,preprocessed_image,is_reference,channels,injected'.
     def columnsThrew = false
     try { Checkpoint.columns(Layout.PREPROCESSED) << 'injected' }
     catch (UnsupportedOperationException ignored) { columnsThrew = true }
-    assert columnsThrew, 'Checkpoint.columns() must return an immutable list; mutating it must throw'
+    assert columnsThrew : 'Checkpoint.columns() must return an immutable list; mutating it must throw'
     assert Checkpoint.columns(Layout.PREPROCESSED) ==
-        ['patient_id', 'preprocessed_image', 'is_reference', 'channels'],
+        ['patient_id', 'id', 'preprocessed_image', 'is_reference', 'channels'] :
         'Checkpoint.columns() schema must be unaffected by the mutation attempt above'
 
     // ------------------------------------------------------------------ //
@@ -315,11 +415,11 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
     assert Layout.SEGMENTED == 'segmented'
     assert Layout.CHECKPOINT_STEPS == ['preprocessed', 'registered', 'segmented', 'postprocessed']
     assert Checkpoint.columns(Layout.SEGMENTED) == [
-        'patient_id', 'registered_image', 'is_reference', 'channels',
+        'patient_id', 'id', 'registered_image', 'is_reference', 'channels',
         'cell_mask', 'nuclei_mask', 'contours', 'nucleus_contours',
     ]
     assert Checkpoint.header(Layout.SEGMENTED) ==
-        'patient_id,registered_image,is_reference,channels,cell_mask,nuclei_mask,contours,nucleus_contours'
+        'patient_id,id,registered_image,is_reference,channels,cell_mask,nuclei_mask,contours,nucleus_contours'
 
     // Empty string means "artifact not produced" — nucleus_contours is empty when
     // --quantify_compartments is false (nuclei_mask is NOT similarly gated: SEGMENT
@@ -327,13 +427,13 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
     // (it is a value, not a missing key) and emit it as an empty field regardless of
     // which column carries it.
     assert Checkpoint.row(Layout.SEGMENTED, [
-        patient_id: 'P001', registered_image: '/o/P001/registered/a.tif',
+        patient_id: 'P001', id: 'P001_a', registered_image: '/o/P001/registered/a.tif',
         is_reference: true, channels: 'DAPI|CD3',
         cell_mask: '/o/P001/segmentation/P001_cell_mask.tif',
         nuclei_mask: '/o/P001/segmentation/P001_nuclei_mask.tif',
         contours: '/o/P001/cell_properties/contours.json',
         nucleus_contours: '',
-    ]) == 'P001,/o/P001/registered/a.tif,true,DAPI|CD3,/o/P001/segmentation/P001_cell_mask.tif,/o/P001/segmentation/P001_nuclei_mask.tif,/o/P001/cell_properties/contours.json,'
+    ]) == 'P001,P001_a,/o/P001/registered/a.tif,true,DAPI|CD3,/o/P001/segmentation/P001_cell_mask.tif,/o/P001/segmentation/P001_nuclei_mask.tif,/o/P001/cell_properties/contours.json,'
 
     // The step vocabulary gains one entry.
     assert ParamUtils.entryColumnForStep('segmentation') == 'registered_image'
@@ -476,13 +576,13 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
     def badKind = false
     try { Layout.requireKind('segmentaton') }   // typo, deliberately
     catch (IllegalArgumentException ignored) { badKind = true }
-    assert badKind, 'Layout.requireKind must reject an unknown kind'
+    assert badKind : 'Layout.requireKind must reject an unknown kind'
 
     // patientDir must reject it too — that is the call site the typo reaches from.
     def badPatientKind = false
     try { Layout.patientDir('/out', 'P001', 'segmentaton') }
     catch (IllegalArgumentException ignored) { badPatientKind = true }
-    assert badPatientKind, 'Layout.patientDir must reject an unknown kind'
+    assert badPatientKind : 'Layout.patientDir must reject an unknown kind'
 
     // ------------------------------------------------------------------ //
     // ProcessEnvelope — the versions.yml envelope
@@ -517,8 +617,8 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
             .collect { it.trim().split(':')[0].trim() }
             .toSet()
     }
-    assert keysOf(envVersions) == keysOf(envVersionsStub)
-    assert keysOf(envVersions) == ['python', 'numpy', 'scikit-image'].toSet()
+    assert keysOf.call(envVersions) == keysOf.call(envVersionsStub)
+    assert keysOf.call(envVersions) == ['python', 'numpy', 'scikit-image'].toSet()
 
     // ------------------------------------------------------------------ //
     // SegBackends — the segmentation seam's versions.yml tool lists
@@ -551,10 +651,10 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
     }
     SegBackends.methods().each { m ->
         def tools = SegBackends.of(m).versionTools
-        def real  = yamlKeysOf(ProcessEnvelope.versions('SEGMENT', tools))
-        def stub  = yamlKeysOf(ProcessEnvelope.versionsStub('SEGMENT', tools))
-        assert real == stub, "SEGMENT/${m}: script: and stub: versions.yml keys differ"
-        assert real == ['python'] + tools, "SEGMENT/${m}: unexpected versions.yml keys ${real}"
+        def real  = yamlKeysOf.call(ProcessEnvelope.versions('SEGMENT', tools))
+        def stub  = yamlKeysOf.call(ProcessEnvelope.versionsStub('SEGMENT', tools))
+        assert real == stub : "SEGMENT/${m}: script: and stub: versions.yml keys differ"
+        assert real == ['python'] + tools : "SEGMENT/${m}: unexpected versions.yml keys ${real}"
         // The old stub key must not come back under any backend.
         assert !real.contains('seg_method')
     }
@@ -598,7 +698,284 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
     def badMethod = false
     try { WarpBackends.of('stare') }
     catch (IllegalArgumentException ignored) { badMethod = true }
-    assert badMethod, 'WarpBackends.of must reject an unknown method'
+    assert badMethod : 'WarpBackends.of must reject an unknown method'
+
+    // ------------------------------------------------------------------ //
+    // Meta — the one constructor for every meta map (Task 4.1)
+    // ------------------------------------------------------------------ //
+    assert Meta.REQUIRED_KEYS.containsAll([
+        'patient_id', 'id', 'is_reference', 'channels',
+        'keep_channels', 'channels_count', 'images_count',
+    ])
+
+    // identityFor: RULING R2, verified directly against Nextflow's own
+    // file(...).simpleName earlier in this task -- it strips EVERY extension
+    // (file('slide.ome.tiff').simpleName == 'slide'), not just the last one.
+    // identityFor must reproduce that for a non-colliding row.
+    assert Meta.identityFor('P1', 'slide.ome.tiff', 0, [:]) == 'P1_slide'
+    assert Meta.identityFor('P1', 'slide.tiff', 0, [:])     == 'P1_slide'
+    assert Meta.identityFor('P1', 'slide.tif', 0, [:])      == 'P1_slide'
+    assert Meta.identityFor('P1', 'noext', 0, [:])          == 'P1_noext'
+    // Already patient-prefixed: not re-prefixed.
+    assert Meta.identityFor('P1', 'P1_slide.ome.tiff', 0, [:]) == 'P1_slide'
+    // A collision (stemCounts says two rows of P1 share the 'slide' stem) is
+    // disambiguated by rowIndex; a non-colliding stem for a different patient
+    // sharing the same stem text is NOT (the counts map is keyed per-patient).
+    def collideCtx = [stemCounts: ['P1::slide': 2]]
+    assert Meta.identityFor('P1', 'cycle1/slide.ome.tiff', 0, collideCtx) == 'P1_slide_000'
+    assert Meta.identityFor('P1', 'cycle2/slide.ome.tiff', 1, collideCtx) == 'P1_slide_001'
+    assert Meta.identityFor('P2', 'slide.ome.tiff', 0, collideCtx)        == 'P2_slide'
+
+    // fromSamplesheetRow: full construction, REQUIRED_KEYS present, dual invariant
+    // upheld (channels_count comes from ctx.channelsCount, the per-PATIENT total --
+    // NOT meta.keep_channels.size(), which is only a per-SLIDE count. Conflating
+    // the two was a bug in this task's own brief: CsvUtils.countChannelsPerPatient
+    // sums per-slide keep-set sizes ACROSS a patient's slides, so a single slide's
+    // keep_channels.size() under-reports it whenever a patient has more than one
+    // slide).
+    // keepChannelsBySlide is keyed on the ASSIGNED identity (meta.id), matching what
+    // CsvUtils.resolveKeptChannelsPerSlide now produces and what finish() looks up by
+    // -- 'P1_img1' is identityFor('P1', 'img1.ome.tiff', 0, [:]), asserted below.
+    def ssCtx = [
+        keepChannelsBySlide: [P1: ['P1_img1': ['DAPI', 'CD3']]],
+        imagesCount        : [P1: 2],
+        channelsCount      : [P1: 5],  // e.g. this slide's 2 + a second slide's 3
+    ]
+    def ssRow  = [patient_id: 'P1', image: 'img1.ome.tiff', channels: 'DAPI|CD3', is_reference: 'true']
+    def ssMeta = Meta.fromSamplesheetRow(ssRow, 'image', 0, ssCtx)
+    assert Meta.REQUIRED_KEYS.every { ssMeta.containsKey(it) }
+    assert ssMeta.patient_id     == 'P1'
+    assert ssMeta.id             == 'P1_img1'
+    assert ssMeta.is_reference   == true
+    assert ssMeta.channels       == ['DAPI', 'CD3']
+    assert ssMeta.keep_channels  == ['DAPI', 'CD3']
+    assert ssMeta.channels_count == 5
+    assert ssMeta.images_count   == 2
+
+    // keep_channels ABSENT vs EMPTY: a slide with no entry in keepChannelsBySlide
+    // falls back to its declared channels; a slide with an EXPLICIT empty list
+    // (every marker already claimed by an earlier slide) keeps [], not the
+    // declared list -- `?:` cannot tell these apart because [] is falsy in Groovy.
+    // Both ctx maps below must also carry channelsCount AND imagesCount now (fix
+    // rounds 1 and 2: there is no more per-slide/default fallback for either --
+    // see the channels_count-missing and images_count-missing blocks further down).
+    // 'P1_img2' is identityFor('P1', 'img2.ome.tiff', 0, [:]) -- same reasoning as ssCtx.
+    def emptyKeepCtx = [keepChannelsBySlide: [P1: ['P1_img2': []]], channelsCount: [P1: 0], imagesCount: [P1: 1]]
+    def emptyKeepRow = [patient_id: 'P1', image: 'img2.ome.tiff', channels: 'DAPI|CD3', is_reference: 'false']
+    def emptyKeepMeta = Meta.fromSamplesheetRow(emptyKeepRow, 'image', 0, emptyKeepCtx)
+    assert emptyKeepMeta.keep_channels == []
+    assert emptyKeepMeta.channels_count == 0
+    def absentKeepCtx = [keepChannelsBySlide: [P1: [:]], channelsCount: [P1: 2], imagesCount: [P1: 1]]
+    def absentKeepMeta = Meta.fromSamplesheetRow(emptyKeepRow, 'image', 0, absentKeepCtx)
+    assert absentKeepMeta.keep_channels == ['DAPI', 'CD3']
+
+    // ---- Fix round 1, item 1: channels_count has NO fallback -----------------
+    //
+    // finish() used to fall back to meta.keep_channels.size() (a per-SLIDE count)
+    // when ctx.channelsCount had no entry for the patient. That silently produced
+    // a too-low count for any multi-slide patient, and a too-low channels_count
+    // feeds groupKey(patient_id, channels_count) -- the group then emits early
+    // with missing members, or never emits, far from this call site. There is now
+    // no fallback and no opt-out: every caller must pre-compute a real per-patient
+    // total (see finish()'s comment for why no legitimate caller lacks one).
+    def noCountRow = [patient_id: 'P1', image: 'img3.ome.tiff', channels: 'DAPI|CD3', is_reference: 'false']
+
+    // Trigger: ctx carries no channelsCount key at all.
+    def missingChannelsCountKey = false
+    try { Meta.fromSamplesheetRow(noCountRow, 'image', 0, [:]) }
+    catch (IllegalArgumentException ignored) { missingChannelsCountKey = true }
+    assert missingChannelsCountKey : 'Meta.fromSamplesheetRow must reject ctx with no channelsCount map at all'
+
+    // Trigger: ctx.channelsCount is populated, but not for THIS patient (the
+    // "computed the map, forgot one patient" case -- the one the review named).
+    def missingChannelsCountForPatient = false
+    try { Meta.fromSamplesheetRow(noCountRow, 'image', 0, [channelsCount: [P2: 9]]) }
+    catch (IllegalArgumentException ignored) { missingChannelsCountForPatient = true }
+    assert missingChannelsCountForPatient : 'Meta.fromSamplesheetRow must reject ctx.channelsCount missing THIS patient'
+
+    // Satisfy: supply BOTH required per-patient counts, watch it pass.
+    def satisfiedMeta = Meta.fromSamplesheetRow(noCountRow, 'image', 0, [channelsCount: [P1: 2], imagesCount: [P1: 1]])
+    assert satisfiedMeta.channels_count == 2
+
+    // A GENUINE zero is not "missing": containsKey, not a truthy/`?:` check, is
+    // what tells these apart -- the same distinction keep_channels' ABSENT-vs-EMPTY
+    // rule already has to make.
+    def zeroCountMeta = Meta.fromSamplesheetRow(noCountRow, 'image', 0, [channelsCount: [P1: 0], imagesCount: [P1: 1]])
+    assert zeroCountMeta.channels_count == 0
+
+    // ---- Fix round 2: images_count has NO fallback either --------------------
+    //
+    // Same defect, one field over, and WORSE while it lasted: the old expression
+    // was `(ctx?.imagesCount ?: [:])[patientId] ?: 1` -- a bare `?:` on the looked-up
+    // value, which in Groovy treats an explicit `0` as falsy too. So a genuine
+    // `images_count: 0` would have been silently COERCED to `1`, not merely
+    // defaulted to a differently-wrong number the way the old channels_count bug
+    // was. images_count is equally load-bearing: it feeds
+    // groupKey(meta.patient_id, meta.images_count) in
+    // subworkflows/local/registration.nf:77. Same fix, same helper
+    // (requirePerPatientCount), same reasoning: no opt-out, because every caller
+    // already computes a full per-patient imagesCount map up front
+    // (CsvUtils.countImagesPerPatient).
+
+    // Trigger: ctx carries no imagesCount key at all (channelsCount present, so
+    // this isolates the images_count check specifically).
+    def missingImagesCountKey = false
+    try { Meta.fromSamplesheetRow(noCountRow, 'image', 0, [channelsCount: [P1: 2]]) }
+    catch (IllegalArgumentException ignored) { missingImagesCountKey = true }
+    assert missingImagesCountKey : 'Meta.fromSamplesheetRow must reject ctx with no imagesCount map at all'
+
+    // Trigger: ctx.imagesCount is populated, but not for THIS patient.
+    def missingImagesCountForPatient = false
+    try { Meta.fromSamplesheetRow(noCountRow, 'image', 0, [channelsCount: [P1: 2], imagesCount: [P2: 9]]) }
+    catch (IllegalArgumentException ignored) { missingImagesCountForPatient = true }
+    assert missingImagesCountForPatient : 'Meta.fromSamplesheetRow must reject ctx.imagesCount missing THIS patient'
+
+    // Satisfy: supply the entry, watch it pass.
+    def satisfiedImagesMeta = Meta.fromSamplesheetRow(noCountRow, 'image', 0, [channelsCount: [P1: 2], imagesCount: [P1: 3]])
+    assert satisfiedImagesMeta.images_count == 3
+
+    // THE bug this round exists to kill: ctx.imagesCount = [P1: 0] must yield
+    // images_count == 0, NOT 1. The old bare `?:` would have coerced this.
+    def zeroImagesMeta = Meta.fromSamplesheetRow(noCountRow, 'image', 0, [channelsCount: [P1: 2], imagesCount: [P1: 0]])
+    assert zeroImagesMeta.images_count == 0 : 'a genuine images_count of 0 must NOT be coerced to 1'
+
+    // ---- Fix round 1, item 2: fromCheckpointRow validates against the SCHEMA --
+    //
+    // lib/Checkpoint.groovy owns the column list per step; fromCheckpointRow now
+    // reads it from there instead of trusting whatever the row happens to carry.
+    // RULING R17 landed in Task 4.3: every Checkpoint.STEPS schema now carries an
+    // 'id' column, so these calls can finally reach a successful return (see the
+    // full-construction case near the end of this block) -- the schema-level "this
+    // step doesn't declare id yet" throw is no longer reachable for a REAL step
+    // name (only Checkpoint.UnknownStepException remains reachable that way, via
+    // the 'not_a_real_step' case below). What replaces it as the load-bearing
+    // migration check is row.containsKey('id') -- a REAL old checkpoint FILE has no
+    // 'id' column in its header, so splitCsv(header:true) never puts an 'id' key in
+    // the row Map at all, distinct from "the column exists but this row's value is
+    // blank" (a separate, more mundane problem covered further down).
+
+    // 'preprocessed' declares is_reference AND channels (Checkpoint.columns).
+    // Missing is_reference is caught BEFORE channels is even inspected.
+    def missingIsReference = false
+    try { Meta.fromCheckpointRow([patient_id: 'P1', channels: 'DAPI'], 'preprocessed', [:]) }
+    catch (IllegalArgumentException ignored) { missingIsReference = true }
+    assert missingIsReference : "Meta.fromCheckpointRow must reject a 'preprocessed' row with no is_reference"
+
+    // Satisfy is_reference -- the failure moves to the id gate (IllegalStateException),
+    // because this row (an id-less-file shape) still carries no 'id' key at all. The
+    // message must be something a user can act on: name the fix, not just the symptom.
+    def afterIsReferenceFixed = null
+    try { Meta.fromCheckpointRow([patient_id: 'P1', is_reference: 'true', channels: 'DAPI'], 'preprocessed', [:]) }
+    catch (IllegalStateException e) { afterIsReferenceFixed = e.message }
+    assert afterIsReferenceFixed?.contains('predates identity tracking') &&
+           afterIsReferenceFixed?.contains('re-run the step') :
+        'fixing is_reference on an id-less preprocessed row must move the failure on to the id gate, with an actionable message'
+
+    // Missing channels specifically (is_reference present) on the same schema.
+    def missingChannelsCol = false
+    try { Meta.fromCheckpointRow([patient_id: 'P1', is_reference: 'true'], 'preprocessed', [:]) }
+    catch (IllegalArgumentException ignored) { missingChannelsCol = true }
+    assert missingChannelsCol : "Meta.fromCheckpointRow must reject a 'preprocessed' row with no channels"
+
+    // 'postprocessed' declares NEITHER is_reference NOR channels (Checkpoint.columns).
+    // A row missing both must NOT be rejected for those -- it must fall straight
+    // through to the id gate, proving the schema-conditional checks are actually
+    // schema-conditional and not just always-on.
+    def postprocessedFailure = null
+    try { Meta.fromCheckpointRow([patient_id: 'P1'], 'postprocessed', [:]) }
+    catch (IllegalStateException e) { postprocessedFailure = e.message }
+    assert postprocessedFailure?.contains('predates identity tracking') :
+        "a 'postprocessed' row with no is_reference/channels must fail on the id gate, not on those fields"
+
+    // The column EXISTS (the row Map has an 'id' key) but this one row's VALUE is
+    // blank -- a different, more mundane problem (a malformed/hand-edited file),
+    // correctly caught by requirePresentInRow's generic message instead of the
+    // richer "predates identity tracking" one.
+    def blankIdValue = false
+    try {
+        Meta.fromCheckpointRow(
+            [patient_id: 'P1', id: '', is_reference: 'true', channels: 'DAPI'],
+            'preprocessed', [channelsCount: [P1: 1], imagesCount: [P1: 1]])
+    }
+    catch (IllegalArgumentException ignored) { blankIdValue = true }
+    assert blankIdValue : 'a row with a blank id VALUE (column present) must fail requirePresentInRow, not the id-gate message'
+
+    // Fully satisfied: fromCheckpointRow can now actually return a complete meta --
+    // unreachable before Task 4.3 added the id column to every schema.
+    def ckCtx = [
+        keepChannelsBySlide: [P1: [P1_slide: ['DAPI', 'CD3']]],
+        imagesCount        : [P1: 1],
+        channelsCount      : [P1: 2],
+    ]
+    def ckRow  = [patient_id: 'P1', id: 'P1_slide', is_reference: 'true', channels: 'DAPI|CD3']
+    def ckMeta = Meta.fromCheckpointRow(ckRow, 'preprocessed', ckCtx)
+    assert Meta.REQUIRED_KEYS.every { ckMeta.containsKey(it) }
+    assert ckMeta.patient_id     == 'P1'
+    assert ckMeta.id             == 'P1_slide'
+    assert ckMeta.is_reference   == true
+    assert ckMeta.channels       == ['DAPI', 'CD3']
+    assert ckMeta.keep_channels  == ['DAPI', 'CD3']
+    assert ckMeta.channels_count == 2
+    assert ckMeta.images_count   == 1
+
+    // An unknown step name is rejected via Checkpoint.columns, not silently accepted.
+    def unknownStep = false
+    try { Meta.fromCheckpointRow([patient_id: 'P1'], 'not_a_real_step', [:]) }
+    catch (IllegalArgumentException ignored) { unknownStep = true }
+    assert unknownStep : 'Meta.fromCheckpointRow must reject an unknown step name'
+
+    // ------------------------------------------------------------------ //
+    // CsvUtils.metaContextFromCheckpoint (Task 4.3) -- the checkpoint-side
+    // twin of the samplesheet-side ctx assembly INPUT_CHECK does by hand
+    // (countImagesPerPatient / resolveKeptChannelsPerSlide / countChannelsPerPatient).
+    // ------------------------------------------------------------------ //
+    def ckpTmp = File.createTempFile('meta_ctx_checkpoint', '.csv')
+    ckpTmp.deleteOnExit()
+    ckpTmp.text =
+        'patient_id,id,registered_image,is_reference,channels\n' +
+        'P1,P1_ref,/x/ref.tiff,true,DAPI|PANCK|SMA\n' +
+        // The moving slide re-declares DAPI (a re-stain) -- claim-once must drop it,
+        // exactly as resolveKeptChannelsPerSlide does for a samplesheet's rows.
+        'P1,P1_mov,/x/mov.tiff,false,DAPI|CD3\n'
+    def checkpointCtx = CsvUtils.metaContextFromCheckpoint(ckpTmp.path, 'registered')
+    assert checkpointCtx.imagesCount == [P1: 2]
+    assert checkpointCtx.channelsCount == [P1: 4]  // 3 (ref) + 1 (mov's CD3; DAPI already claimed)
+    assert checkpointCtx.keepChannelsBySlide.P1.P1_ref == ['DAPI', 'PANCK', 'SMA']
+    assert checkpointCtx.keepChannelsBySlide.P1.P1_mov == ['CD3']
+
+    // A nonexistent file must degrade to the same empty shape every other CsvUtils
+    // reader uses for "file not found" -- never throw, since a caller learns that
+    // from Meta.fromCheckpointRow's own per-patient-count checks instead.
+    def missingCtx = CsvUtils.metaContextFromCheckpoint('/no/such/checkpoint.csv', 'registered')
+    assert missingCtx == [keepChannelsBySlide: [:], imagesCount: [:], channelsCount: [:]]
+
+    // A schema with no channels/is_reference ('postprocessed') must not throw --
+    // it degrades to empty keep-sets/zero counts rather than being stricter than
+    // the Meta.fromCheckpointRow it feeds.
+    def ppTmp = File.createTempFile('meta_ctx_postprocessed', '.csv')
+    ppTmp.deleteOnExit()
+    ppTmp.text = 'patient_id,id,cell_csv,cell_geojson,merged_csv,cell_mask,pyramid\n' +
+        'P1,P1,/x/a.csv,/x/b.geojson,/x/c.csv,/x/d.tif,/x/e.tiff\n'
+    def ppCtx = CsvUtils.metaContextFromCheckpoint(ppTmp.path, 'postprocessed')
+    assert ppCtx.imagesCount == [P1: 1]
+    assert ppCtx.channelsCount == [P1: 0]
+    assert ppCtx.keepChannelsBySlide == [P1: [P1: []]]
+
+    // Fail loudly, naming the missing key, rather than defaulting.
+    def missingPatientId = false
+    try { Meta.fromSamplesheetRow([image: 'x.tiff', channels: 'DAPI'], 'image', 0, [:]) }
+    catch (IllegalArgumentException ignored) { missingPatientId = true }
+    assert missingPatientId : 'Meta.fromSamplesheetRow must reject a row with no patient_id'
+
+    def missingImageCol = false
+    try { Meta.fromSamplesheetRow([patient_id: 'P1', channels: 'DAPI'], 'image', 0, [:]) }
+    catch (IllegalArgumentException ignored) { missingImageCol = true }
+    assert missingImageCol : 'Meta.fromSamplesheetRow must reject a row missing the image column'
+
+    def blankStep = false
+    try { Meta.fromCheckpointRow([patient_id: 'P1', id: 'x'], '  ', [:]) }
+    catch (IllegalArgumentException ignored) { blankStep = true }
+    assert blankStep : 'Meta.fromCheckpointRow must reject a blank step'
 
     // println, NOT log.info: nf-test's underlying `nextflow ... -quiet` run
     // suppresses log.info from stdout entirely (observed directly: a log.info

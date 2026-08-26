@@ -16,6 +16,11 @@ include { MERGE_SEG_EVAL           } from '../../modules/local/merge_seg_eval'
 // plain function, not a process/workflow, but Nextflow's `include` pulls in either.
 include { QUANTIFY_MARKERS; groupTiffsByPatient } from './quantify_markers'
 include { ASSEMBLE_EXPORT          } from './assemble_export'
+// The checkpoint writer is shared with add_cycle.nf, the same way
+// registered_checkpoint.nf is shared with it. This file used to own the only copy,
+// so an add_cycle run wrote no csv/postprocessed.csv and could never be the
+// --prior_outdir of a second cycle.
+include { POSTPROCESSED_CHECKPOINT } from './postprocessed_checkpoint'
 
 /*
 ========================================================================================
@@ -238,51 +243,6 @@ workflow POSTPROCESSING {
     }
 
     // ========================================================================
-    // CHECKPOINT - Collect all outputs by patient
-    // ========================================================================
-    // Use collectFile() for non-blocking aggregation (enables patient-level parallelism)
-    // The join chain is kept (it's per-patient and doesn't block other patients)
-
-    // Base checkpoint data (always present)
-    ch_base_checkpoint = ASSEMBLE_EXPORT.out.csv
-        .map { meta, csv ->
-            def published_path = Layout.publishedPath(params.outdir, meta.patient_id, 'geojson', csv)
-            [meta.patient_id, published_path]
-        }
-        .join(ASSEMBLE_EXPORT.out.geojson.map { meta, geojson ->
-            def published_path = Layout.publishedPath(params.outdir, meta.patient_id, 'geojson', geojson)
-            [meta.patient_id, published_path]
-        })
-        .join(MERGE_QUANT_CSVS.out.merged_csv.map { meta, csv ->
-            def published_path = Layout.publishedPath(params.outdir, meta.patient_id, 'quantification', csv)
-            [meta.patient_id, published_path]
-        })
-        .join(ch_cell_mask.map { meta, mask ->
-            // publishedOrAsIs, not publishedPath: with --start postprocessing,
-            // ch_cell_mask is READ_SEGMENTED_CHECKPOINT's file(row.cell_mask) --
-            // ALREADY an absolute published path from segmentation.nf's run, not a
-            // task-dir output of this run. Calling publishedPath unconditionally
-            // would double-nest it (producerSubdir sees a parent literally named
-            // 'segmentation' and treats it as a producer subdirectory to preserve),
-            // e.g. <outdir>/<pid>/segmentation/segmentation/<name>. See
-            // Layout.publishedOrAsIs for the full explanation.
-            //
-            // NEW CROSS-OUTDIR DEPENDENCY: at --start postprocessing this correctly
-            // records the PRIOR run's path (wherever segmentation.nf actually
-            // published it), not this run's --outdir -- unlike every other column in
-            // this checkpoint, which all name files this run itself just wrote. That
-            // is correct (the mask genuinely was not recomputed), but it means
-            // csv/postprocessed.csv can point outside its own --outdir when written
-            // this way, which no prior checkpoint in this pipeline ever did.
-            def published_path = Layout.publishedOrAsIs(params.outdir, meta.patient_id, 'segmentation', mask)
-            [meta.patient_id, published_path]
-        })
-        .join(ASSEMBLE_EXPORT.out.pyramid.map { meta, pyramid ->
-            def published_path = Layout.publishedPath(params.outdir, meta.patient_id, 'pyramid', pyramid)
-            [meta.patient_id, published_path]
-        })
-
-    // ========================================================================
     // SPATIALDATA EXPORT - scverse-native .zarr (additive; OME-TIFF + GeoJSON stay primary)
     // ========================================================================
     if (!params.skip_spatialdata_export) {
@@ -310,31 +270,21 @@ workflow POSTPROCESSING {
         )
     }
 
-    ch_checkpoint_csv = ch_base_checkpoint
-        .map { patient_id, cell_csv, cell_geojson, merged_csv, cell_mask, pyramid ->
-            Checkpoint.row(Layout.POSTPROCESSED, [
-                patient_id  : patient_id,
-                cell_csv    : cell_csv,
-                cell_geojson: cell_geojson,
-                merged_csv  : merged_csv,
-                cell_mask   : cell_mask,
-                pyramid     : pyramid,
-            ])
-        }
-        .collectFile(
-            name: Layout.checkpointCsvName(Layout.POSTPROCESSED),
-            newLine: true,
-            sort: true,
-            // sort: true makes the manifest REPRODUCIBLE. Without it collectFile
-            // writes rows in completion order, so two runs of the same commit
-            // produced different files (found while capturing this branch's golden
-            // baseline; a rerun of the UNMODIFIED branch differed from itself). The
-            // rows begin with patient_id followed by the published path, so natural
-            // string order IS "patient id, then file" — and the `seed:` header is
-            // written first regardless of sorting.
-            storeDir: Layout.checkpointDir(params.outdir),
-            seed: Checkpoint.header(Layout.POSTPROCESSED)
-        )
+    // ========================================================================
+    // CHECKPOINT - Collect all outputs by patient
+    // ========================================================================
+    // The join, the publishedPath rules and the collectFile all live in
+    // POSTPROCESSED_CHECKPOINT, which add_cycle.nf calls with its own five
+    // streams. This file used to own the only copy, which is why an add_cycle
+    // run wrote no csv/postprocessed.csv and could not be chained.
+    POSTPROCESSED_CHECKPOINT(
+        ASSEMBLE_EXPORT.out.csv,
+        ASSEMBLE_EXPORT.out.geojson,
+        MERGE_QUANT_CSVS.out.merged_csv,
+        ch_cell_mask,
+        ASSEMBLE_EXPORT.out.pyramid
+    )
+    ch_checkpoint_csv = POSTPROCESSED_CHECKPOINT.out.csv
 
     // Collect size logs from all postprocessing processes. SEGMENT /
     // EXTRACT_CELL_PROPERTIES / EXTRACT_NUCLEI_PROPERTIES moved to

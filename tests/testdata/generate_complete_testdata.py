@@ -249,14 +249,22 @@ with open(OUT_DIR / "valid_preprocessing.csv", "w") as f:
     f.write(f"P002,{TESTDATA_ABS}/P002_ref.ome.tiff,true,DAPI|PANCK|SMA\n")
 print("  Created valid_preprocessing.csv")
 
-# 3b. Valid checkpoint CSV for registration step
+# 3b. Valid checkpoint CSV for registration step. Deliberately WITHOUT an 'id'
+#     column (RULING R17, lib/Checkpoint.groovy -- a real registered.csv now
+#     carries one): --start registration/segmentation both read a checkpoint
+#     through INPUT_CHECK's samplesheet-shaped reader (Meta.fromSamplesheetRow),
+#     which derives id itself from the entry image column and never reads a
+#     persisted 'id' value. Keeping this fixture id-less is what proves that
+#     path stays backward-compatible with an OLDER checkpoint file.
 with open(OUT_DIR / "valid_checkpoint_registration.csv", "w") as f:
     f.write("patient_id,preprocessed_image,is_reference,channels\n")
     f.write(f"P001,{TESTDATA_ABS}/P001_ref.ome.tiff,true,DAPI|PANCK|SMA\n")
     f.write(f"P001,{TESTDATA_ABS}/P001_mov1.ome.tiff,false,DAPI|CD3|CD8\n")
 print("  Created valid_checkpoint_registration.csv")
 
-# 3c. Valid checkpoint CSV for postprocessing step
+# 3c. Valid checkpoint CSV for postprocessing step (used as a --start segmentation
+#     input in tests/checkpoint_manifest.nf.test, also via INPUT_CHECK -- same
+#     id-less-is-fine reasoning as 3b above).
 with open(OUT_DIR / "valid_checkpoint_postprocessing.csv", "w") as f:
     f.write("patient_id,registered_image,is_reference,channels\n")
     f.write(f"P001,{TESTDATA_ABS}/P001_ref.ome.tiff,true,DAPI|PANCK|SMA\n")
@@ -270,15 +278,17 @@ print("  Created valid_checkpoint_postprocessing.csv")
 #         hand-authored fixture the generator does not write (see .gitignore's
 #         comment on this file); P001_cell_mask.tif and sample_contours.json are
 #         both written elsewhere in this script.
+# id (RULING R17, lib/Checkpoint.groovy) IS required here: READ_SEGMENTED_CHECKPOINT
+# builds meta through Meta.fromCheckpointRow, which throws on a row with no id.
 with open(OUT_DIR / "valid_checkpoint_segmented.csv", "w") as f:
-    f.write("patient_id,registered_image,is_reference,channels,cell_mask,nuclei_mask,contours,nucleus_contours\n")
+    f.write("patient_id,id,registered_image,is_reference,channels,cell_mask,nuclei_mask,contours,nucleus_contours\n")
     f.write(
-        f"P001,{TESTDATA_ABS}/P001_ref.ome.tiff,true,DAPI|PANCK|SMA,"
+        f"P001,P001_ref,{TESTDATA_ABS}/P001_ref.ome.tiff,true,DAPI|PANCK|SMA,"
         f"{TESTDATA_ABS}/P001_cell_mask.tif,{TESTDATA_ABS}/P001_nuclei_mask.tif,"
         f"{TESTDATA_ABS}/sample_contours.json,{TESTDATA_ABS}/sample_contours.json\n"
     )
     f.write(
-        f"P001,{TESTDATA_ABS}/P001_mov1.ome.tiff,false,DAPI|CD3|CD8,"
+        f"P001,P001_mov1,{TESTDATA_ABS}/P001_mov1.ome.tiff,false,DAPI|CD3|CD8,"
         f"{TESTDATA_ABS}/P001_cell_mask.tif,{TESTDATA_ABS}/P001_nuclei_mask.tif,"
         f"{TESTDATA_ABS}/sample_contours.json,{TESTDATA_ABS}/sample_contours.json\n"
     )
@@ -288,28 +298,66 @@ print("  Created valid_checkpoint_segmented.csv")
 # under --quantify_compartments false actually has (EXTRACT_NUCLEI_PROPERTIES never
 # ran, but SEGMENT always produces nuclei_mask regardless of that flag).
 with open(OUT_DIR / "valid_checkpoint_segmented_no_compartments.csv", "w") as f:
-    f.write("patient_id,registered_image,is_reference,channels,cell_mask,nuclei_mask,contours,nucleus_contours\n")
+    f.write("patient_id,id,registered_image,is_reference,channels,cell_mask,nuclei_mask,contours,nucleus_contours\n")
     f.write(
-        f"P001,{TESTDATA_ABS}/P001_ref.ome.tiff,true,DAPI|PANCK|SMA,"
+        f"P001,P001_ref,{TESTDATA_ABS}/P001_ref.ome.tiff,true,DAPI|PANCK|SMA,"
         f"{TESTDATA_ABS}/P001_cell_mask.tif,{TESTDATA_ABS}/P001_nuclei_mask.tif,"
         f"{TESTDATA_ABS}/sample_contours.json,\n"
     )
 print("  Created valid_checkpoint_segmented_no_compartments.csv")
+
+# 3c-ter. tests/subworkflows/entry_point_equivalence.nf.test's fixture -- the ONE
+#         permanent, CI-collected guard that a checkpoint-entered meta
+#         (READ_SEGMENTED_CHECKPOINT -> Meta.fromCheckpointRow) carries
+#         keep_channels/channels_count, not just patient_id/id/is_reference/channels.
+#         Column list from lib/Checkpoint.groovy's 'segmented' entry (authoritative;
+#         read it, never restate it by hand) -- it now includes 'id' (RULING R17).
+#
+#         Channel declarations are DELIBERATELY IDENTICAL to test_input.csv's two
+#         rows (P001 ref DAPI|PANCK|SMA, P001 mov1 DAPI|CD3|CD8) so the expected
+#         channels_count (5) is the SAME value INPUT_CHECK's
+#         CsvUtils.countChannelsPerPatient already computes for that exact
+#         declared-channel structure on the samplesheet path -- see
+#         tests/subworkflows/local/input_check.nf.test's
+#         `workflow.out.counts[0].channels.P001 == 5` assertion against
+#         test_input.csv. That is the cross-check the new nf-test's comment points
+#         at: the checkpoint path's channels_count must equal the samplesheet
+#         path's for the same declared channels, and this fixture makes that
+#         equality checkable without needing CsvUtils on the nf-test assertion
+#         classpath (which does not have lib/ available -- see tests/layout.nf.test's
+#         header comment).
+with open(OUT_DIR / "segmented.csv", "w") as f:
+    f.write("patient_id,id,registered_image,is_reference,channels,cell_mask,nuclei_mask,contours,nucleus_contours\n")
+    f.write(
+        f"P001,P001_ref,{TESTDATA_ABS}/P001_ref.ome.tiff,true,DAPI|PANCK|SMA,"
+        f"{TESTDATA_ABS}/P001_cell_mask.tif,{TESTDATA_ABS}/P001_nuclei_mask.tif,"
+        f"{TESTDATA_ABS}/sample_contours.json,{TESTDATA_ABS}/sample_contours.json\n"
+    )
+    f.write(
+        f"P001,P001_mov1,{TESTDATA_ABS}/P001_mov1.ome.tiff,false,DAPI|CD3|CD8,"
+        f"{TESTDATA_ABS}/P001_cell_mask.tif,{TESTDATA_ABS}/P001_nuclei_mask.tif,"
+        f"{TESTDATA_ABS}/sample_contours.json,{TESTDATA_ABS}/sample_contours.json\n"
+    )
+print("  Created segmented.csv (entry_point_equivalence.nf.test fixture)")
 
 # 3d. A minimal "prior completed run" for the add_cycle path. ADD_CYCLE rebuilds
 #     the assets it reuses from these two checkpoint CSVs under
 #     <prior_outdir>/csv/, so tests/subworkflows/add_cycle.nf.test only has to
 #     point --prior_outdir at this directory. Every referenced file must really
 #     exist: Nextflow stages merged_csv and pyramid into the processes.
+#     add_cycle.nf's own readers don't dereference the 'id' column (they extract
+#     specific named columns into synthetic per-patient assets, never a per-image
+#     meta), but it's included anyway to match what a REAL registered.csv/
+#     postprocessed.csv now always carries (RULING R17).
 PRIOR_DIR = OUT_DIR / "prior_run" / "csv"
 PRIOR_DIR.mkdir(parents=True, exist_ok=True)
 with open(PRIOR_DIR / "registered.csv", "w") as f:
-    f.write("patient_id,registered_image,is_reference,channels\n")
-    f.write(f"P001,{TESTDATA_ABS}/P001_image.tiff,true,DAPI|PANCK\n")
+    f.write("patient_id,id,registered_image,is_reference,channels\n")
+    f.write(f"P001,P001_image,{TESTDATA_ABS}/P001_image.tiff,true,DAPI|PANCK\n")
 with open(PRIOR_DIR / "postprocessed.csv", "w") as f:
-    f.write("patient_id,cell_csv,cell_geojson,merged_csv,cell_mask,pyramid\n")
+    f.write("patient_id,id,cell_csv,cell_geojson,merged_csv,cell_mask,pyramid\n")
     f.write(
-        f"P001,{TESTDATA_ABS}/P001_merged_quant.csv,{TESTDATA_ABS}/sample_contours.json,"
+        f"P001,P001,{TESTDATA_ABS}/P001_merged_quant.csv,{TESTDATA_ABS}/sample_contours.json,"
         f"{TESTDATA_ABS}/P001_merged_quant.csv,{TESTDATA_ABS}/P001_cell_mask.tif,"
         f"{TESTDATA_ABS}/P001_pyramid.ome.tiff\n"
     )
@@ -453,6 +501,7 @@ print("  - valid_preprocessing.csv")
 print("  - valid_checkpoint_registration.csv")
 print("  - valid_checkpoint_segmented.csv")
 print("  - valid_checkpoint_segmented_no_compartments.csv")
+print("  - segmented.csv")
 print("  - valid_checkpoint_postprocessing.csv")
 print("  - test_input.csv")
 print("\nInvalid data (for validation testing):")
@@ -519,6 +568,7 @@ print("  - valid_preprocessing.csv")
 print("  - valid_checkpoint_registration.csv")
 print("  - valid_checkpoint_segmented.csv")
 print("  - valid_checkpoint_segmented_no_compartments.csv")
+print("  - segmented.csv")
 print("  - valid_checkpoint_postprocessing.csv")
 print("  - test_input.csv")
 print("\nInvalid data (for validation testing):")
@@ -679,6 +729,23 @@ with open(OUT_DIR / "duplicate_basename.csv", "w") as f:
     f.write(f"P001,{TESTDATA_ABS}/cycle2/slide.ome.tiff,false,DAPI|CD8\n")
 print("  Created duplicate_basename.csv")
 
+# duplicate_raw_path.csv: two rows of one patient sharing the EXACT SAME raw
+# path_to_file cell (not just the same basename -- the literal identical string),
+# an ordinary copy-paste data-entry error that validateInputSemantics does not
+# reject. This is the fix-round-1 regression for Task 4.4: CsvUtils.rowIndexPerPatient
+# used to key a SCALAR by "patientId::rawImageCell", so the second row's index
+# silently overwrote the first's (last write wins) and BOTH rows read back the SAME
+# index -- Meta.fromSamplesheetRow then assigned them the SAME meta.id, and the
+# reference row's real keep-set ([DAPI, CD3]) was silently displaced by the second
+# row's ([], since its only channel DAPI is already claimed) under that shared id.
+# Patient total is 2 (DAPI+CD3 from the reference; the duplicate row contributes
+# nothing new).
+with open(OUT_DIR / "duplicate_raw_path.csv", "w") as f:
+    f.write("patient_id,path_to_file,is_reference,channels\n")
+    f.write(f"P001,{TESTDATA_ABS}/P001_ref.ome.tiff,true,DAPI|CD3\n")
+    f.write(f"P001,{TESTDATA_ABS}/P001_ref.ome.tiff,false,DAPI\n")
+print("  Created duplicate_raw_path.csv")
+
 # 7g. Registration QC fixtures matching WARP_SEG_QC.out.metrics / .out.per_cell,
 # so tests/subworkflows/local/postprocessing.nf.test can pass non-empty
 # ch_reg_qc / ch_reg_residuals into POSTPROCESSING and exercise the
@@ -773,6 +840,42 @@ with open(OUT_DIR / "sample_reg_qc.json", "w") as f:
     json.dump(seg_qc_record, f, indent=2)
 print("  Created sample_reg_qc.json")
 
+# Per-patient CSE seg-eval JSONs, the input MERGE_SEG_EVAL merges.
+#
+# Referenced by tests/modules/merge_seg_eval.nf.test with checkIfExists: true and
+# produced by nothing -- stranded when the CSE removal in cea0b47 took the writer
+# away and left the reader. That was 2 of the 3 nf-test failures on this branch.
+#
+# Generated, never committed: tests/testdata/ is gitignored (.gitignore:140,142),
+# so a hand-written fixture exists on one machine and is absent in CI -- which is
+# a guard that cannot run, the same failure this file exists to prevent.
+#
+# The shape is bin/seg_quality_eval.py's `doc`, and it must survive
+# bin/merge_seg_eval.py's flatten(): `id` is read directly and would KeyError if
+# renamed, `metrics` is flattened one level into `metrics::<key>` columns, and
+# QualityScore/downsample_factor/effective_pixel_size_um each become a column.
+# The two patients deliberately carry DIFFERENT downsample factors, because
+# carrying the factor per patient is the whole reason those columns exist -- a
+# fixture where both agree would not notice the column being dropped.
+for _pid, _qs, _factor in (("P001", 0.7421, 1), ("P002", 0.6183, 4)):
+    _seg_eval = {
+        "id": _pid,
+        "metrics": {
+            "QualityScore": _qs,
+            "NumberOfCellsPer100SquareMicrons": 0.9312,
+            "FractionOfForegroundOccupiedByCells": 0.6428,
+            "1minusFractionOfBackgroundOccupiedByCells": 0.8871,
+            "FractionOfCellMaskInForeground": 0.9604,
+            "1minusFractionOfCellsWithoutNucleus": 0.9750,
+        },
+        "QualityScore": _qs,
+        "downsample_factor": _factor,
+        "effective_pixel_size_um": round(0.325 * _factor, 6),
+    }
+    with open(OUT_DIR / f"seg_eval_{_pid}.json", "w") as f:
+        json.dump(_seg_eval, f, indent=2)
+    print(f"  Created seg_eval_{_pid}.json")
+
 with open(OUT_DIR / "sample_reg_residuals.csv", "w") as f:
     f.write("moving,ref_x,ref_y,residual_px,stage\n")
     rng_res = np.random.default_rng(7)
@@ -812,12 +915,12 @@ print("  Created expected/intensity_csv_columns.txt")
 
 # 8g. Expected preprocessing checkpoint columns
 with open(EXPECTED_DIR / "preproc_checkpoint_columns.txt", "w") as f:
-    f.write("patient_id,preprocessed_image,is_reference,channels\n")
+    f.write("patient_id,id,preprocessed_image,is_reference,channels\n")
 print("  Created expected/preproc_checkpoint_columns.txt")
 
 # 8h. Expected registration checkpoint columns
 with open(EXPECTED_DIR / "reg_checkpoint_columns.txt", "w") as f:
-    f.write("patient_id,registered_image,is_reference,channels\n")
+    f.write("patient_id,id,registered_image,is_reference,channels\n")
 print("  Created expected/reg_checkpoint_columns.txt")
 
 print("\n" + "=" * 70)

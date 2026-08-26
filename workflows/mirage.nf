@@ -40,6 +40,37 @@ workflow MIRAGE {
     // Tier vs per-knob-override consistency for BOTH registration backends. Cross-parameter,
     // so it belongs here rather than in the schema; runs before any process is instantiated.
     ParamUtils.validateRegPresets(params)
+    // --cleanup_level against --mode. add_cycle must PRODUCE a re-enterable tree, so a
+    // cleaning level is refused outright rather than discovered by the next cycle.
+    ParamUtils.validateCleanup(params)
+
+    // cleanup_work is mutually exclusive with -resume: the work directory's task files
+    // are removed at teardown of a SUCCESSFUL run, so the NEXT -resume finds nothing
+    // cached and re-runs everything. It defaults to true now, so this warns rather than
+    // refuses -- which of the two the user meant is genuinely ambiguous, the cost is a
+    // re-run rather than lost data, and refusing would break every documented
+    // `--start <step> ... -resume` invocation in docs/usage.md.
+    //
+    // `log` IS bound here. It is NOT bound in conf/*.config, where the same call aborts
+    // the run under the v1 config parser -- see conf/modules.config's errorStrategy
+    // comments and tests/test_error_strategy_policy.py.
+    if (params.cleanup_work && workflow.resume) {
+        log.warn "--cleanup_work is true (the default) AND -resume was passed. The work " +
+                 "directory is emptied after a successful run, so the NEXT -resume will " +
+                 "find nothing cached and re-run every task. Pass --cleanup_work false " +
+                 "for the iterate-with--resume loop docs/usage.md describes."
+    }
+
+    // --start past preprocessing re-enters from artifacts a cleaning level does not
+    // publish. THIS run reads the prior output fine -- it is a different run's tree --
+    // so it is a warning rather than a refusal; what it cannot do is be re-entered the
+    // same way itself.
+    if (params.cleanup_level != 'none' && !ParamUtils.isEntryPoint(params, 'preprocessing')) {
+        log.warn "--start ${params.start} re-enters from intermediates that " +
+                 "--cleanup_level=${params.cleanup_level} does not publish. This run reads " +
+                 "the prior output fine, but its OWN output cannot be re-entered the same " +
+                 "way. Pass --cleanup_level none to keep that open."
+    }
 
     /* -------------------- STEP GATE -------------------- */
 
@@ -66,6 +97,20 @@ workflow MIRAGE {
     boolean run_registration   = ParamUtils.shouldRun('registration', params.start, effective_stop)
     boolean run_segmentation   = ParamUtils.shouldRun('segmentation', params.start, effective_stop)
     boolean run_postprocessing = ParamUtils.shouldRun('postprocessing', params.start, effective_stop)
+
+    // MERGE_AND_PYRAMID's memory model uses an UNMEASURED bytes-per-file-byte
+    // ratio (conf/modules.config, the `plane * 3.25d` term). On real slides it
+    // has been observed to under-reserve into a hard node-memory cliff. The
+    // retry ramp is the only safety net, and it is x4 at most. Gated on
+    // run_postprocessing -- the real "does this run reach MERGE_AND_PYRAMID"
+    // condition (ParamUtils.shouldRun against the STEPS table above), not a
+    // dedicated skip param, because add_cycle mode reaches the same process via
+    // ASSEMBLE_EXPORT without ever setting --start/--stop.
+    if (run_postprocessing) {
+        log.warn "MERGE_AND_PYRAMID memory is estimated from an unmeasured ratio. " +
+                 "On slides larger than ~40 GB, measure r = (H*W*2)/file_size on your " +
+                 "own data and set --max_memory accordingly (see docs/resources.md)."
+    }
 
     // --quantify_compartments / --expanded_quantification / --embed_masks, resolved
     // ONCE here (the single decision site on every path, standard and add_cycle
