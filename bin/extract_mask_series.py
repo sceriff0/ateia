@@ -15,6 +15,11 @@ from pathlib import Path
 import numpy as np
 import tifffile
 
+#: TIFF tile size (px) for the cell/nuclei mask writes below -- a TIFF LAYOUT choice, not a
+#: processing tile size. See ``bin/convert_image.py:35-49`` for why an untiled write forces
+#: every downstream region read to decode the whole plane.
+MASK_TIFF_TILE = 1024
+
 
 def main() -> None:
     """CLI entry point: extract the mask series from a pyramid OME-TIFF into cell/nuclei mask TIFFs."""
@@ -55,7 +60,11 @@ def main() -> None:
     # Guarded by tests/test_mask_series_write_contract.py.
     for name, plane in (("cell_mask.tif", masks[0]), ("nuclei_mask.tif", masks[1])):
         tifffile.imwrite(
-            args.outdir / name, plane, compression="zlib", bigtiff=True
+            args.outdir / name,
+            plane,
+            compression="zlib",
+            bigtiff=True,
+            tile=(MASK_TIFF_TILE, MASK_TIFF_TILE),
         )
     print(
         f"Extracted cell_mask + nuclei_mask from {args.pyramid} (series 1, {masks.shape[1]}x{masks.shape[2]})"

@@ -30,6 +30,11 @@ from logger import configure_logging, get_logger
 
 logger = get_logger(__name__)
 
+#: TIFF tile size (px) for the nuclei/cell mask writes below -- a TIFF LAYOUT choice, not a
+#: processing tile size. See ``bin/convert_image.py:35-49`` for why an untiled write forces
+#: every downstream region read to decode the whole plane.
+MASK_TIFF_TILE = 1024
+
 
 def _to_numpy(arr):
     """Convert torch tensor or numpy-like object to numpy ndarray.
@@ -216,14 +221,14 @@ def run_instanseg(
         f"(target={target}, tile_size={tile_size}, batch_size={batch_size})..."
     )
     seg_start = time.time()
-    labeled_output, _image_tensor = model.eval_medium_image(
+    labeled_output = model.eval_medium_image(
         image_array,
         effective_pixel_size,
         tile_size=tile_size,
         batch_size=batch_size,
         target=target,
         normalise=True,
-        return_image_tensor=True,
+        return_image_tensor=False,
         rescale_output=True,
     )
     logger.info(f"  Segmentation time: {time.time() - seg_start:.2f}s")
@@ -253,11 +258,23 @@ def run_instanseg(
     # a 40000x40000 uint32 label mask is 6.4 GB before compression, and classic TIFF's
     # 32-bit offsets overflow past 4 GB. Compression usually keeps it under -- usually is
     # not a contract. Guarded by tests/test_slide_io_seam.py.
-    tifffile.imwrite(nuclei_mask_path, nuclei_mask, compression="zlib", bigtiff=True)
+    tifffile.imwrite(
+        nuclei_mask_path,
+        nuclei_mask,
+        compression="zlib",
+        bigtiff=True,
+        tile=(MASK_TIFF_TILE, MASK_TIFF_TILE),
+    )
     del nuclei_mask
 
     logger.info(f"  Cell mask: {cell_mask_path.name}")
-    tifffile.imwrite(cell_mask_path, cell_mask, compression="zlib", bigtiff=True)
+    tifffile.imwrite(
+        cell_mask_path,
+        cell_mask,
+        compression="zlib",
+        bigtiff=True,
+        tile=(MASK_TIFF_TILE, MASK_TIFF_TILE),
+    )
     del cell_mask
 
     logger.info("")
