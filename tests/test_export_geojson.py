@@ -97,7 +97,7 @@ def test_label_survives_a_skipped_row(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# PERF-PLAN task 4 -- both feature loops taken off df.iterrows()
+# Both feature loops taken off df.iterrows()
 # ---------------------------------------------------------------------------
 #
 # `_iter_features` (inside export_geojson()) and export_combined_geojson() each drove a
@@ -106,13 +106,11 @@ def test_label_survives_a_skipped_row(tmp_path):
 # (`_iter_rows_positional`) and index positionally, following the precedent
 # `extract_cell_properties._label_bboxes` set for bboxes (tests/test_no_full_mask_unique.py).
 #
-# This block also covers the crash fix: export_combined_geojson() incremented `skipped[0]`
+# This block also covers a crash fix: export_combined_geojson() incremented `skipped[0]`
 # on a plain int (`skipped = 0`), which raised `TypeError: 'int' object is not
-# subscriptable` on the very first NaN-centroid row -- reproduced against this branch by
-# .superpowers/sdd/perf-rss-2026-08-26/repro_skipped.py before any of this file changed:
-#
-#   RESULT: TypeError: 'int' object is not subscriptable      # frame with one NaN centroid
-#   CONTROL (no NaN): no error raised                         # same frame, no NaN
+# subscriptable` on the first row with a NaN x/y centroid -- an input the function is
+# meant to handle (a cell with missing raw data keeps a NaN centroid rather than being
+# dropped upstream), not an edge case.
 
 
 def _nan_safe_eq(a, b) -> bool:
@@ -266,7 +264,12 @@ def _reference_export_combined_geojson(
 
 def _nan_free_df():
     """A frame with NaN in a marker value (a legitimate, exercised path) but never in a
-    centroid -- centroid NaN is the one case old and new code disagree on (see above)."""
+    centroid -- centroid NaN is the one case old and new code disagree on (see above).
+
+    Carries all seven morphology columns build_measurements() reads (not just three),
+    so a byte-identity failure here would actually catch a column dropped from -- or
+    added to -- the set _iter_rows_positional derives from MORPHOLOGY_COLS.
+    """
     return pd.DataFrame(
         {
             "label": [7, 9, 3, 12],
@@ -275,6 +278,10 @@ def _nan_free_df():
             "area": [100.0, 250.5, 12.0, 88.0],
             "eccentricity": [0.1, 0.9, 0.5, float("nan")],
             "perimeter": [40.0, 60.5, 20.0, 33.3],
+            "solidity": [0.95, 0.80, 1.0, 0.6],
+            "convex_area": [105.0, 260.0, 12.0, 90.5],
+            "axis_major_length": [12.5, 18.0, 4.0, 10.75],
+            "axis_minor_length": [8.5, 9.0, 3.5, float("nan")],
             "CD3: Cell: Mean": [1.234567, float("nan"), 0.0, 9.99995],
             "CD8: Nucleus: Median": [5.5, 6.6, float("nan"), 3.14159],
         }
@@ -341,11 +348,9 @@ def test_export_combined_geojson_survives_a_nan_centroid(tmp_path, caplog):
     """Regression test for the `skipped[0] += 1` crash on a plain `skipped = 0` int.
 
     Pre-fix, this call raised `TypeError: 'int' object is not subscriptable` on the
-    first NaN-centroid row -- reproduced by
-    .superpowers/sdd/perf-rss-2026-08-26/repro_skipped.py before this task's changes.
-    There is no "before" output to byte-compare against for this input (the old code
-    never produced any -- see the byte-identity tests' module note); this test instead
-    pins the fixed behaviour directly.
+    first row with a NaN x/y centroid. There is no "before" output to byte-compare
+    against for this input (the old code never produced any -- see the byte-identity
+    tests' module note); this test instead pins the fixed behaviour directly.
     """
     df = pd.DataFrame(
         {
