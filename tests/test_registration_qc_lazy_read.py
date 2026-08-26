@@ -290,3 +290,123 @@ def test_qc_png_and_fullres_tiff_are_byte_identical_to_the_old_float32_widened_r
     assert got_fullres.dtype == expected_fullres.dtype
     assert got_fullres.shape == expected_fullres.shape
     assert np.array_equal(got_fullres, expected_fullres)
+
+
+def test_qc_output_is_exact_at_the_known_adversarial_pixel_triple(tmp_path):
+    """Integration-level pin for the counter-example in
+    ``tests/test_tiled_io.py::test_autoscale_uint16_vs_float32_disagree_at_a_real_triple``.
+
+    G1's baseline is "what did this function already produce", NOT "which of the two
+    dtype-arithmetic paths is more mathematically precise" -- and what it already produced,
+    for every slide, is the FLOAT32 path (204 at this triple; every caller got float32 before
+    this task, unconditionally). The float64/uint16-native path (203) is more precise but is
+    NOT the baseline: it is a value this function has never emitted, because
+    ``read_decimated`` never returned a native uint16 array to ``qc.py`` before this task
+    either. So the correctness bar here is "the real, current ``create_registration_qc`` must
+    still emit 204 at this pixel, exactly as it always has" -- reproducing 203 would be the
+    regression, even though 203 is the "better" number in isolation.
+
+    The reference slide's nuclear channel is engineered so its min, max, and one interior
+    pixel are EXACTLY the adversarial triple (13286, 62449, 52520) that makes a naive
+    (un-widened) narrow read diverge from the historical float32 path by one uint8 level. The
+    real ``create_registration_qc`` -- which widens the narrow uint16 read back to float32
+    before either consumer sees it -- must match the old, always-float32 read bit-for-bit,
+    landing on 204, not the naive narrow-read value of 203.
+
+    This is the test that would have caught the original mistake: it fails if the widen-back
+    cast in ``bin/utils/qc.py`` is ever removed or narrowed to skip this pixel, because THIS
+    fixture is built to land exactly on the tie the float32 arithmetic mishandles.
+    """
+    from tiled_io import open_lazy, read_decimated
+
+    h, w = 64, 64
+    rng = np.random.default_rng(7)
+    lo, hi, adversarial_value = 13286, 62449, 52520
+
+    dapi = rng.integers(lo + 1, hi, size=(h, w), dtype=np.uint32).astype(np.uint16)
+    dapi[0, 0] = lo
+    dapi[0, 1] = hi
+    dapi[1, 0] = adversarial_value
+    assert dapi.min() == lo and dapi.max() == hi
+    assert dapi[1, 0] == adversarial_value
+
+    marker = rng.integers(0, 4000, size=(h, w), dtype=np.uint16)
+    ref = np.stack([marker, dapi]).astype(np.uint16)
+    # registered image: independent content, same shape
+    reg = np.stack(
+        [
+            rng.integers(0, 4000, size=(h, w), dtype=np.uint16),
+            rng.integers(0, 65536, size=(h, w), dtype=np.uint16),
+        ]
+    ).astype(np.uint16)
+
+    ref_path = tmp_path / "reference.ome.tiff"
+    reg_path = tmp_path / "registered.ome.tiff"
+    tifffile.imwrite(
+        str(ref_path),
+        ref,
+        ome=True,
+        photometric="minisblack",
+        metadata={"axes": "CYX", "Channel": {"Name": ["SMA", "DAPI"]}},
+    )
+    tifffile.imwrite(
+        str(reg_path),
+        reg,
+        ome=True,
+        photometric="minisblack",
+        metadata={"axes": "CYX", "Channel": {"Name": ["SMA", "DAPI"]}},
+    )
+
+    ref_channels = extract_channel_names_from_ome(ref_path)
+    reg_channels = extract_channel_names_from_ome(reg_path)
+    ref_idx = pick_nuclear_index(ref_channels, None)
+    reg_idx = pick_nuclear_index(reg_channels, None)
+    assert ref_idx == 1
+
+    # Sanity: confirm this fixture actually reproduces the known divergence, and pin which
+    # value is the historical/G1 baseline (float32 -> 204) versus which would be a silent
+    # regression if the widen-back cast were ever dropped (naive narrow-dtype read -> 203).
+    naive_narrow = qc.autoscale_for_display(dapi, method="minmax")
+    historical_float32 = qc.autoscale_for_display(dapi.astype(np.float32), method="minmax")
+    assert naive_narrow[1, 0] == 203, "a bare uint16 read would land on the lower value"
+    assert historical_float32[1, 0] == 204, "the float32 path is what qc.py has always emitted"
+    assert naive_narrow[1, 0] != historical_float32[1, 0], (
+        "fixture must reproduce the known uint16-vs-float32 divergence to be meaningful"
+    )
+
+    # G1 baseline: force the pre-task-3 default (float32 for every caller, unconditionally).
+    ref_src, ref_dtype, ref_close = open_lazy(ref_path)
+    reg_src, reg_dtype, reg_close = open_lazy(reg_path)
+    try:
+        assert ref_dtype == np.uint16 and reg_dtype == np.uint16
+        old_ref_nuc = read_decimated(ref_src, ref_idx, factor=1, dtype=np.float32)
+        old_reg_nuc = read_decimated(reg_src, reg_idx, factor=1, dtype=np.float32)
+    finally:
+        ref_close()
+        reg_close()
+
+    expected_bgr, _expected_cyx = qc.create_nuclear_overlay(
+        old_ref_nuc, old_reg_nuc, scale_factor=1.0
+    )
+    ref_scaled = qc.autoscale_for_display(old_ref_nuc, method="minmax")
+    assert ref_scaled[1, 0] == 204, "the G1 baseline itself must be the historical float32 value"
+
+    out_path = tmp_path / "out" / "qc.tif"
+    out_path.parent.mkdir()
+    qc.create_registration_qc(
+        reference_path=ref_path,
+        registered_path=reg_path,
+        output_path=out_path,
+        scale_factor=1.0,
+        save_fullres=False,
+        save_png=True,
+        save_tiff=False,
+    )
+
+    got_bgr = cv2.imread(str(out_path.with_suffix(".png")), cv2.IMREAD_UNCHANGED)
+    assert np.array_equal(got_bgr, expected_bgr)
+    # The adversarial pixel specifically, in the green (reference) channel.
+    assert got_bgr[1, 0, 1] == 204, (
+        "the real pipeline must reproduce the historical float32 value (204), not the naive "
+        "narrow-read value (203), at the known adversarial pixel"
+    )

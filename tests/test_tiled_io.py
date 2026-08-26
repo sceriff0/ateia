@@ -136,33 +136,30 @@ def test_read_decimated_default_dtype_is_still_float32(tmp_path):
     assert got.dtype == np.float32
 
 
-def test_autoscale_uint16_vs_float32_identical_full_domain():
-    """G1 evidence for the dtype change: ``autoscale_for_display`` must return byte-identical
-    uint8 output whether it is fed the native uint16 plane or the same values widened to
-    float32 -- exhaustively over the ENTIRE uint16 domain at the widest range (min=0,
-    max=65535), per the task brief: "Sweep the full uint16 domain -- it is one cheap array
-    and it is exhaustive, so it beats any sampled version."
+def test_autoscale_uint16_vs_float32_disagree_at_a_real_triple():
+    """Regression pin for the counter-example that overturned this task's original precision
+    assumption: ``autoscale_for_display`` does NOT always return the same uint8 output for a
+    uint16 input as for the same values widened to float32.
 
-    With a uint16 input, ``(img - img_min) / range_val`` promotes to float64 under numpy's
-    true-divide; with a float32 input it stays float32. A more precise float32 intermediate
-    could in principle round differently at ``np.round(normalized * 255)``. At THIS range it
-    does not.
+    An earlier version of this test asserted the two were identical over the full uint16
+    domain at ``min=0, max=65535`` and concluded (wrongly) that this generalised to every
+    ``(min, max)`` pair -- it does not, because the divergence depends on the ``(min, max,
+    value)`` triple jointly, and ``min=0, max=65535`` happens to be a clean case. At
+    ``min=13286, max=62449, value=52520`` (all reachable real uint16 pixel data) the two
+    dtypes disagree by 1:
 
-    NOTE for reviewers: this single range does not generalise to every (min, max) pair. An
-    exploratory sweep (not committed, since the brief specifies exactly the array above) over
-    400 random (min, max) sub-ranges, each built as ``np.arange(lo, hi + 1)`` rather than a
-    coarser sample, found 2 mismatching pixel values out of ~8.87M checked (max |diff| = 1,
-    e.g. min=13286, max=62449, value=52520: uint16-path -> 203, float32-path -> 204). The
-    mechanism: for some (min, max), float32's coarser spacing rounds a true value just under
-    x.5 UP to an exact x.5 float32 tie that it does not have the precision to resolve, and
-    ``np.round``'s round-half-to-even then breaks that spurious tie differently than the
-    float64 path, which keeps enough precision to see the value is not actually a tie. This
-    is real and reproducible against the actual ``autoscale_for_display``, not an artifact of
-    a reimplementation -- see task-3-report.md for the full writeup. It is flagged here as a
-    known, extremely rare (~2 in 8.87M spot-checked values) residual risk to G1, not silently
-    accepted; it does not block this task per the brief's explicit resolution of the question,
-    but a slide whose nuclear channel happens to contain the right (min, max, value) triple
-    could, in principle, get a single differing pixel in its QC overlay.
+    - float64 path (uint16 input, numpy true-divide promotes ``(img - img_min) / range_val``
+      to float64): quotient is ``39234 / 49163 = 0.7980391758029413``, scaled by 255 gives
+      ``203.49998982975`` -- clearly below the ``.5`` boundary, rounds DOWN to 203.
+    - float32 path (float32 input, the arithmetic stays float32 throughout): the same
+      division rounds, in float32's coarser representable-value spacing, to an EXACT tie at
+      ``203.5``. ``np.round``'s round-half-to-even then resolves that spurious tie UP, to 204.
+
+    This is why ``bin/utils/qc.py`` must never feed a narrow-dtype (uint8/uint16) plane
+    straight to ``autoscale_for_display`` -- it widens back to float32 immediately after the
+    (narrow, memory-saving) read and before either consumer sees the array, so
+    ``autoscale_for_display`` always gets exactly the float32 array it always has. This test
+    is what fails the moment someone "simplifies" that cast away.
     """
     import os
     import sys
@@ -181,12 +178,32 @@ def test_autoscale_uint16_vs_float32_identical_full_domain():
     )
     from qc import autoscale_for_display
 
-    full_uint16 = np.arange(0, 65536, dtype=np.uint16)
-    full_float32 = full_uint16.astype(np.float32)
+    lo, hi, value = 13286, 62449, 52520
+    sub_uint16 = np.arange(lo, hi + 1, dtype=np.uint16)
+    sub_float32 = sub_uint16.astype(np.float32)
+    idx = value - lo
+    assert sub_uint16[idx] == value
 
-    got_uint16 = autoscale_for_display(full_uint16, method="minmax")
-    got_float32 = autoscale_for_display(full_float32, method="minmax")
+    # Pin the exact quotient this hinges on, independent of autoscale_for_display, so a
+    # future numpy/platform change that happens to close the gap is caught precisely.
+    exact_quotient = (value - lo) / (hi - lo)  # python float division == float64
+    float32_quotient = (
+        np.float32(sub_float32[idx] - sub_float32.min())
+        / np.float32(sub_float32.max() - sub_float32.min())
+    )
+    assert exact_quotient == pytest.approx(203.49998982975 / 255, abs=1e-12)
+    assert float32_quotient * np.float32(255) == np.float32(203.5), (
+        "the float32 path must land on an exact .5 tie for this test to mean anything"
+    )
+
+    got_uint16 = autoscale_for_display(sub_uint16, method="minmax")
+    got_float32 = autoscale_for_display(sub_float32, method="minmax")
     assert got_uint16.dtype == np.uint8
     assert got_float32.dtype == np.uint8
-    diff = np.abs(got_uint16.astype(np.int16) - got_float32.astype(np.int16))
-    assert diff.max() == 0, f"max |diff| = {diff.max()} over the full uint16 domain"
+    assert got_uint16[idx] == 203, "float64 (uint16-input) path must round down, away from the tie"
+    assert got_float32[idx] == 204, (
+        "float32-input path must round the spurious tie up (round-half-to-even, 204 is even)"
+    )
+    assert got_uint16[idx] != got_float32[idx], (
+        "the whole point of this test: uint16 vs float32 input disagree at this real triple"
+    )
