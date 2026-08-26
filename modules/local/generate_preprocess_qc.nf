@@ -11,7 +11,7 @@ process GENERATE_PREPROCESS_QC {
     tuple val(meta), path(preprocessed)
 
     output:
-    tuple val(meta), path("qc/*.png", optional: true), emit: qc
+    tuple val(meta), path("qc/*.png"), emit: qc, optional: true
     path "versions.yml"              , emit: versions
     path("*.size.csv")               , emit: size_log
 

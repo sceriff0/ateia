@@ -35,6 +35,14 @@ from stardist.models import StarDist2D
 
 logger = get_logger(__name__)
 
+#: TIFF tile size (px) for the nuclei/cell mask writes below -- a TIFF LAYOUT choice, not a
+#: processing tile size. See ``bin/convert_image.py:35-49`` for why an untiled write forces
+#: every downstream region read to decode the whole plane. Deliberately half of
+#: CONVERT_TIFF_TILE/WRITE_TILE's 2048, not copied from it: measured directly on the mask's
+#: own read pattern (many small windowed per-cell/per-region reads, not whole-plane decodes)
+#: -- see docs/perf/2026-08-26-rss.md's tiled-vs-striped table.
+MASK_TIFF_TILE = 1024
+
 __all__ = [
     "extract_dapi_channel",
     "normalize_dapi",
@@ -407,11 +415,23 @@ def run_segmentation(
     # a 40000x40000 uint32 label mask is 6.4 GB before compression, and classic TIFF's
     # 32-bit offsets overflow past 4 GB. Compression usually keeps it under -- usually is
     # not a contract. Guarded by tests/test_slide_io_seam.py.
-    tifffile.imwrite(nuclei_mask_path, nuclei_mask, compression="zlib", bigtiff=True)
+    tifffile.imwrite(
+        nuclei_mask_path,
+        nuclei_mask,
+        compression="zlib",
+        bigtiff=True,
+        tile=(MASK_TIFF_TILE, MASK_TIFF_TILE),
+    )
     del nuclei_mask  # Free before writing cell mask
 
     logger.info(f"  Cell mask: {cell_mask_path.name}")
-    tifffile.imwrite(cell_mask_path, cell_mask, compression="zlib", bigtiff=True)
+    tifffile.imwrite(
+        cell_mask_path,
+        cell_mask,
+        compression="zlib",
+        bigtiff=True,
+        tile=(MASK_TIFF_TILE, MASK_TIFF_TILE),
+    )
     del cell_mask
 
     logger.info("")

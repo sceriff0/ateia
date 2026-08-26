@@ -124,9 +124,22 @@ workflow PREPROCESSING {
     // Generate checkpoint CSV for restart from preprocessing step
     // Use collectFile() for non-blocking aggregation (enables patient-level parallelism)
     ch_checkpoint_csv = ch_preprocessed_with_meta
+        // A manifest for a step whose artifacts were not published would record
+        // paths that do not exist, and tests/checkpoint_manifest.nf.test asserts
+        // that every recorded path resolves. See Checkpoint.writesAtLevel.
+        //
+        // Filtering the SOURCE rather than wrapping the chain in an `if`: an empty
+        // channel into collectFile(seed:, storeDir:) writes no file and emits
+        // nothing at all -- verified on NXF_VER=26.04.6 rather than assumed, since
+        // a seeded collectFile writing a header-only manifest would have been
+        // exactly the dangling-manifest outcome this gate exists to prevent.
+        .filter { Checkpoint.writesAtLevel(Layout.PREPROCESSED, params.cleanup_level) }
         .map { meta, image_file ->
             Checkpoint.row(Layout.PREPROCESSED, [
                 patient_id        : meta.patient_id,
+                // RULING R17: carried forward from meta, never re-derived from
+                // preprocessed_image's basename below -- see lib/Checkpoint.groovy.
+                id                : meta.id,
                 // Both kinds are spelled out as LITERAL arguments rather than resolved
                 // through a variable: tests/test_layout.py statically scans for
                 // `Layout.publishedPath(params.*, <pid>, <kind>)` and pins that

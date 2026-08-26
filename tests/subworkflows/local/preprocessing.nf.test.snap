@@ -4,6 +4,7 @@
             [
                 {
                     "patient_id": "P001",
+                    "id": "P001_mov1",
                     "is_reference": false,
                     "channels": [
                         "DAPI",
@@ -13,6 +14,7 @@
                 },
                 {
                     "patient_id": "P001",
+                    "id": "P001_ref",
                     "is_reference": true,
                     "channels": [
                         "DAPI",
@@ -22,13 +24,13 @@
                 }
             ],
             [
-                "preprocessed.csv:md5,d51faae2097490b6f510c7a5c3a01f93"
+                "preprocessed.csv:md5,4a8dbe69c420318b6239dcd1a9914b57"
             ]
         ],
+        "timestamp": "2026-08-25T15:17:44.294353",
         "meta": {
-            "nf-test": "0.9.0",
+            "nf-test": "0.9.5",
             "nextflow": "25.04.7"
-        },
-        "timestamp": "2026-06-13T22:00:51.676137"
+        }
     }
 }

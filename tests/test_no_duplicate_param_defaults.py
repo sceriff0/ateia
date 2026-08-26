@@ -36,6 +36,10 @@ import re
 import warnings
 from pathlib import Path
 
+from tests.nfmodel import block_extent as _block_extent
+from tests.nfmodel import strip_comments as _strip_comments
+from tests.nfmodel import strip_comments_and_strings as _strip_comments_and_strings
+
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = ROOT / "nextflow.config"
 BIN_DIR = ROOT / "bin"
@@ -61,57 +65,39 @@ SCANNED_GLOBS = [
 
 
 def _extract_params_block(config_text: str) -> str:
-    """Return the raw text inside the top-level `params { ... }` block."""
+    """Return the raw text inside the top-level `params { ... }` block.
+
+    The block's extent is found by `tests.nfmodel.block_extent`'s comment/
+    string-aware walk rather than a naive brace count, so a `{`/`}` mentioned
+    inside a comment or a quoted default value inside the block cannot
+    mis-balance it and silently truncate (or overrun) what gets parsed below.
+    """
     start = config_text.find("params {")
     if start == -1:
         raise ValueError("Could not locate `params { ... }` block in nextflow.config")
 
     brace_start = config_text.find("{", start)
-    depth = 0
-    end = None
-    for i in range(brace_start, len(config_text)):
-        ch = config_text[i]
-        if ch == "{":
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0:
-                end = i
-                break
-
-    if end is None:
-        raise ValueError("Unclosed `params { ... }` block in nextflow.config")
-
-    return config_text[brace_start + 1 : end]
-
-
-def _strip_line_comment(line: str) -> str:
-    """Strip a trailing `// ...` comment, ignoring `//` inside string literals."""
-    in_single = False
-    in_double = False
-    i = 0
-    while i < len(line) - 1:
-        ch = line[i]
-        if ch == "'" and not in_double:
-            in_single = not in_single
-        elif ch == '"' and not in_single:
-            in_double = not in_double
-        elif ch == "/" and line[i + 1] == "/" and not in_single and not in_double:
-            return line[:i]
-        i += 1
-    return line
+    end = _block_extent(config_text, brace_start + 1)
+    return config_text[brace_start + 1 : end - 1]
 
 
 def parse_declared_params(config_text: str) -> dict[str, str]:
     """Parse the `params {}` block into {name: declared_value_text}.
 
     `declared_value_text` is the trimmed right-hand side of the assignment
-    (comments stripped), so callers can test `value == "null"`.
+    (comments stripped), so callers can test `value == "null"`. Comments are
+    stripped via `tests.nfmodel.strip_comments` (view B), which keeps string
+    contents verbatim -- some declared defaults are themselves quoted strings
+    that may contain `//`, e.g. a URL -- and shares the same comment/string
+    boundary walk as `_extract_params_block`'s `block_extent` above rather
+    than re-deriving it with a private per-line quote-toggle that (unlike the
+    shared walk) does not understand an escaped quote inside a string.
     """
     block = _extract_params_block(config_text)
+    clean_block = _strip_comments(block)
     declared: dict[str, str] = {}
-    for raw_line in block.splitlines():
-        line = _strip_line_comment(raw_line).strip()
+    for raw_line in clean_block.splitlines():
+        line = raw_line.strip()
         if not line:
             continue
         m = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+?)\s*$", line)
@@ -121,14 +107,24 @@ def parse_declared_params(config_text: str) -> dict[str, str]:
 
 
 def find_fallback_sites() -> list[tuple[Path, int, str, str]]:
-    """Return (file, line_no, param_name, line_text) for every `params.x ?:` site."""
+    """Return (file, line_no, param_name, line_text) for every `params.x ?:` site.
+
+    Scanned against `tests.nfmodel.strip_comments_and_strings` (view A), which
+    blanks both comments and string contents while preserving every line
+    number and character offset -- so a `params.x ?:` mention inside a `//`
+    explanation or a quoted error message cannot be counted as a real
+    fallback site. `line_text` in the returned tuple is still the ORIGINAL
+    raw line, for a readable error message.
+    """
     sites: list[tuple[Path, int, str, str]] = []
     for pattern in SCANNED_GLOBS:
         for path in sorted(ROOT.glob(pattern)):
             text = path.read_text()
-            for line_no, line in enumerate(text.splitlines(), start=1):
-                for m in FALLBACK_RE.finditer(line):
-                    sites.append((path, line_no, m.group(1), line.strip()))
+            raw_lines = text.splitlines()
+            clean_lines = _strip_comments_and_strings(text).splitlines()
+            for line_no, clean_line in enumerate(clean_lines, start=1):
+                for m in FALLBACK_RE.finditer(clean_line):
+                    sites.append((path, line_no, m.group(1), raw_lines[line_no - 1].strip()))
     return sites
 
 
@@ -507,7 +503,14 @@ def build_flag_param_maps() -> tuple[dict[tuple[str, str], str], dict[str, str]]
         flag_only_raw.setdefault(flag, set()).add(key)
 
     for path in sorted(ROOT.glob("modules/local/*.nf")):
-        text = path.read_text()
+        # `tests.nfmodel.strip_comments` (view B) blanks comments only, so a
+        # `--flag ${params.x}` or `def var = params.x` mention inside a `//`
+        # explanation cannot be picked up here -- while a triple-quoted
+        # script: body's own invocation lines (the actual match target for
+        # _FLAG_INTERP_RE/_SCRIPT_LINE_RE) survive untouched, unlike view A
+        # (strip_comments_and_strings), which would blank that string's
+        # contents along with the flags this function exists to find.
+        text = _strip_comments(path.read_text())
         aliases = dict(_DEF_ALIAS_RE.findall(text))
         script_matches = list(_SCRIPT_LINE_RE.finditer(text))
         # Text before the first script-name line (rare, but flags here can't
@@ -524,10 +527,10 @@ def build_flag_param_maps() -> tuple[dict[tuple[str, str], str], dict[str, str]]
             for flag, key in resolved:
                 record(script, flag, key)
 
-    config_text = MODULES_CONFIG_PATH.read_text()
+    config_text = _strip_comments(MODULES_CONFIG_PATH.read_text())
     backend_script: dict[str, str] = {}
     for lib_path in sorted(ROOT.glob("lib/*.groovy")):
-        for m in _ENTRYPOINT_RE.finditer(lib_path.read_text()):
+        for m in _ENTRYPOINT_RE.finditer(_strip_comments(lib_path.read_text())):
             backend_script[m.group(1)] = m.group(2)
 
     backend_spans: list[tuple[int, int]] = []

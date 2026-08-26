@@ -117,6 +117,7 @@ tests/testdata/valid_preprocessing.csv
 tests/testdata/valid_checkpoint_registration.csv
 tests/testdata/valid_checkpoint_segmented.csv
 tests/testdata/valid_checkpoint_segmented_no_compartments.csv
+tests/testdata/segmented.csv
 tests/testdata/valid_checkpoint_postprocessing.csv
 tests/testdata/invalid_multi_ref.csv
 tests/testdata/invalid_no_ref.csv
@@ -138,6 +139,7 @@ tests/testdata/celltox_nonreference.csv
 tests/testdata/celltox_only.csv
 tests/testdata/keepset_exhausted.csv
 tests/testdata/duplicate_basename.csv
+tests/testdata/duplicate_raw_path.csv
 tests/testdata/P001_mov_dapi_only.ome.tiff
 tests/testdata/cycle1/
 tests/testdata/cycle2/
@@ -151,6 +153,8 @@ tests/testdata/sample_contours.json
 tests/testdata/sample_morphology.csv
 tests/testdata/sample_reg_qc.json
 tests/testdata/sample_reg_residuals.csv
+tests/testdata/seg_eval_P001.json
+tests/testdata/seg_eval_P002.json
 tests/testdata/sample_DAPI.tif
 tests/testdata/sample_PANCK.tif
 tests/testdata/sample_SMA.tif

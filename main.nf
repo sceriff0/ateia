@@ -74,6 +74,85 @@ def generateResourceReport(Map cfg) {
 
 /*
 ================================================================================
+    POST-RUN: EXPLAIN AN EMPTY CHECKPOINT DIRECTORY
+================================================================================
+    At a cleaning --cleanup_level no checkpoint manifest is written, because the
+    artifacts every manifest names were not published (Checkpoint.writesAtLevel).
+    An empty csv/ is then indistinguishable from a run that crashed before its
+    first checkpoint, so the directory says which it is.
+
+    Written from a handler rather than a process for the same reason the resource
+    report is: it is provenance about the run as a whole, it must not appear in
+    the DAG, and it must not change the task graph or the stub manifest's task
+    count. `cfg` carries raw params for the reason generateResourceReport's
+    comment gives -- the handler closure cannot see `params`.
+*/
+def writeCheckpointReadme(Map cfg) {
+    if (cfg.cleanup_level == 'none') {
+        return
+    }
+    try {
+        def dir = Layout.checkpointDir(cfg.outdir)
+        new File(dir).mkdirs()
+        new File(dir, 'README.txt').text = """\
+No checkpoint manifest is written at --cleanup_level=${cfg.cleanup_level}.
+
+A manifest names WHERE a step's artifacts landed so a later run can re-enter
+there. At this level those artifacts are not published at all, so every manifest
+would record paths that do not exist -- including postprocessed.csv, whose
+cell_mask column names a segmentation mask that was not published even though
+its other columns are final artifacts.
+
+Re-run with --cleanup_level none if you need to re-enter this output with
+--start <step>, or use it as the --prior_outdir of a --mode add_cycle run.
+add_cycle is refused at any other level, at launch.
+"""
+        log.info "Checkpoint directory note: ${dir}/README.txt"
+    } catch (Exception e) {
+        log.warn "Could not write the checkpoint README (non-fatal): ${e.message}"
+    }
+}
+
+/*
+================================================================================
+    POST-RUN: ANNOUNCE DROPPED TASKS
+================================================================================
+    A `retry-then-drop` errorStrategy lets the run report success with an
+    artifact missing. That is a deliberate policy (conf/modules.config names it,
+    tests/test_error_strategy_policy.py pins it), but it must not be SILENT —
+    "it OOMed, the strategy swallowed it, and the run went green" is the exact
+    history that made the CSE scorer look permanently broken.
+
+    The announcement lives here rather than in the errorStrategy closure that
+    knows the most about it, for the reason the closure's own comment gives:
+    `log` is unbound in conf/*.config under the v1 config parser, so logging
+    from a closure there resolves against ConfigObject and ABORTS the run past
+    the retry budget — the opposite of 'ignore'. Reproduced 2026-08-25 on
+    NXF_VER=25.04.7, which manifest.nextflowVersion still accepts.
+
+    Same script-level-function shape as generateResourceReport above, and for
+    the same reason: `log` and `workflow` resolve in a script-level function but
+    are null inside the handler closure. `workflow.stats` is final by the time
+    onComplete fires, so reading the count here is safe.
+*/
+def announceDroppedTasks() {
+    try {
+        def dropped = workflow.stats.ignoredCount
+        if (dropped) {
+            log.warn "${dropped} task(s) failed and were DROPPED by a retry-then-drop " +
+                     "policy. This run is reported as SUCCESSFUL and its output tree is " +
+                     "INCOMPLETE — one optional artifact is missing per dropped task. " +
+                     "Grep the log above for [ERROR] to see which. Only SEG_QUALITY_EVAL " +
+                     "and MERGE_SEG_EVAL carry that policy; if a CSE QualityScore is the " +
+                     "artifact that went missing, lower --cse_max_pixels and re-run."
+        }
+    } catch (Exception e) {
+        log.warn "Could not report the dropped-task count (non-fatal): ${e.message}"
+    }
+}
+
+/*
+================================================================================
     RUN MAIN WORKFLOW
 ================================================================================
 */
@@ -86,12 +165,15 @@ workflow {
     // top-level registration took effect, and onComplete fires on failed runs
     // too.
     def report_cfg = [
-        enable_trace: params.enable_trace,
-        outdir      : params.outdir,
-        trace_dir   : params.trace_dir,
-        project_dir : "${projectDir}",
+        enable_trace : params.enable_trace,
+        outdir       : params.outdir,
+        trace_dir    : params.trace_dir,
+        project_dir  : "${projectDir}",
+        cleanup_level: params.cleanup_level,
     ]
     workflow.onComplete {
+        announceDroppedTasks()
+        writeCheckpointReadme(report_cfg)
         generateResourceReport(report_cfg)
     }
 

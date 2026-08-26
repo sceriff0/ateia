@@ -226,16 +226,26 @@ class CsvUtils {
     }
 
     /**
-     * Each slide's exact emit-set: patient_id -> (RAW image cell -> channels).
+     * Each slide's exact emit-set: patient_id -> (ASSIGNED IDENTITY -> channels).
      *
-     * THE INNER KEY IS THE RAW `<imageColumn>` CELL, verbatim (trimmed), NOT its
-     * basename. resolveReferenceRows returns that same raw cell and input_check.nf's
-     * meta.is_reference already compares against it, so both lookups provably use one
-     * key. A basename key silently weakened resolveReferenceRows' "the raw cell is
-     * unique per patient" assumption to "the FILENAME is unique per patient": two rows
-     * of one patient under different directories (a cyclic-IF cohort with one directory
-     * per cycle) then overwrote each other, leaving one entry that both rows read --
-     * the reference got the other slide's keep-set and emitted zero channels.
+     * THE INNER KEY IS Meta.identityFor's OUTPUT for that row -- the SAME identity
+     * Meta.fromSamplesheetRow assigns as meta.id -- not the raw `<imageColumn>` cell.
+     * A basename key (file(...).simpleName) silently weakened "the raw cell is unique
+     * per patient" to "the FILENAME is unique per patient": two rows of one patient
+     * under different directories (a cyclic-IF cohort with one directory per cycle)
+     * then overwrote each other. Keying on the raw cell instead (an earlier fix)
+     * closed that specific collision, but the raw cell is not guaranteed unique
+     * either -- two rows can share an identical cell (a duplicate row) or both leave
+     * it blank -- and either case collided the exact same way: the second pass
+     * silently overwrote the first, sometimes with `[]`, and channels_count summed to
+     * a number smaller than what SPLIT_CHANNELS actually emits. Keying on the
+     * ASSIGNED identity instead inherits identityFor's own collision handling
+     * (disambiguated by rowIndex whenever the stem would otherwise collide), so two
+     * rows can never collapse into one entry regardless of what their raw cells look
+     * like. `stemCounts` is computed once here, from this same samplesheet, via
+     * stemCountsPerPatient -- the identical map Meta.fromSamplesheetRow's caller
+     * (input_check.nf) computes and passes through ctx -- so the key written here and
+     * the key `finish()` looks up by are provably the same function of the same row.
      *
      * THE keep-set rule, and the only place it exists. SPLIT_CHANNELS emits exactly what
      * this returns (via meta.keep_channels); countChannelsPerPatient sizes the
@@ -304,7 +314,20 @@ class CsvUtils {
         // rows[0] itself.
         def referenceImage = resolveReferenceRows(csvPath, imageColumn, autoReference)
 
-        // Rows per patient, IN SAMPLESHEET ORDER. The walk order below depends on it.
+        // Meta.identityFor's collision input, computed once from THIS SAME sheet --
+        // the identical map input_check.nf computes independently and threads through
+        // ctx.stemCounts for Meta.fromSamplesheetRow. Reading it here (rather than
+        // accepting it as a parameter) is what makes the key written below and the
+        // key `finish()` looks up by provably the same function of the same row,
+        // without widening this method's signature or asking every caller to thread
+        // it through.
+        def stemCounts = stemCountsPerPatient(csvPath, imageColumn)
+
+        // Rows per patient, IN SAMPLESHEET ORDER. The walk order below depends on it,
+        // and `idx` (the row's 0-based position within ITS PATIENT, in that same
+        // order) is Meta.identityFor's rowIndex argument -- captured here rather than
+        // via a second pass/rowIndexPerPatient call, so it is trivially the same
+        // order stemCounts was computed against.
         def rowsByPatient = [:].withDefault { [] }
         lines.drop(1).each { line ->
             def cols = parseCsvLine(line)
@@ -315,12 +338,16 @@ class CsvUtils {
             rowsByPatient[patientId] << [
                 raw     : rawImage,
                 channels: cols[channelsIdx].split('\\|')*.trim().findAll { it },
+                idx     : rowsByPatient[patientId].size(),
             ]
         }
 
         def result = [:]
         rowsByPatient.each { patientId, rows ->
-            // resolveReferenceRows returns the RAW cell, which is also this map's key.
+            // resolveReferenceRows returns the RAW cell; partitioning below still
+            // compares raw cells (that is what resolveReferenceRows returns and what
+            // is_reference is decided from), even though the OUTPUT map is no longer
+            // keyed on one.
             def refCell = referenceImage[patientId]
             // Stable partition: reference row(s) first, everything else in declared
             // order. A patient with no reference at all (add_cycle's by-design
@@ -341,7 +368,13 @@ class CsvUtils {
                     claimed << name
                     keep << ch
                 }
-                perSlide[row.raw] = keep
+                // Keyed on the ASSIGNED identity, not on the raw cell. Two rows for one
+                // patient can share a raw cell (a duplicate row) or both leave it blank,
+                // and keying on it meant the second pass overwrote the first -- sometimes
+                // with [] -- so channels_count summed to less than what SPLIT_CHANNELS
+                // actually emits and the streaming groupTuple(size:) it sizes either
+                // emitted early with missing members or hung.
+                perSlide[Meta.identityFor(patientId, row.raw, row.idx, [stemCounts: stemCounts])] = keep
             }
             result[patientId] = perSlide
         }
@@ -422,6 +455,228 @@ class CsvUtils {
         }
 
         return channelSets.collectEntries { k, v -> [k, v.size()] }
+    }
+
+    /**
+     * How many rows in each patient share a source-image stem. Meta.identityFor
+     * consults this to decide whether a stem needs disambiguating -- so an id
+     * only changes shape where it would otherwise collide, and every existing
+     * non-colliding output filename is preserved byte-for-byte.
+     *
+     * The stem rule here MUST match Meta.identityFor's exactly -- both key on
+     * "patientId::stem" -- or this map's counts land on a different stem than
+     * identityFor is asking about and every lookup silently misses (n treated
+     * as 1, no disambiguation, the exact collision this exists to catch).
+     * identityFor strips EVERY extension (RULING R2, verified against this
+     * repo's pinned Nextflow: `file('slide.ome.tiff').simpleName == 'slide'`,
+     * not 'slide.ome') -- i.e. from the FIRST '.', not the last -- so this
+     * strips the same way rather than a single-extension `.replaceFirst`.
+     *
+     * @param csvPath     path to the samplesheet
+     * @param imageColumn the column holding this step's entry image
+     */
+    static Map<String, Integer> stemCountsPerPatient(String csvPath, String imageColumn) {
+        def file = new File(csvPath)
+        if (!file.exists()) return [:]
+
+        def lines = readCsvLines(file.path)
+        if (lines.size() < 2) return [:]
+
+        def header = parseCsvLine(lines[0])
+        def patientIdx = header.findIndexOf { it == 'patient_id' }
+        def imageIdx   = header.findIndexOf { it == imageColumn }
+        if (patientIdx == -1 || imageIdx == -1) return [:]
+
+        def counts = [:].withDefault { 0 }
+        lines.drop(1).each { line ->
+            def cols = parseCsvLine(line)
+            if (cols.size() <= Math.max(patientIdx, imageIdx)) return
+            def patientId = cols[patientIdx].trim()
+            if (!patientId) return  // ignore blank patient_id cells
+            def rawImage = cols[imageIdx].trim()
+            if (!rawImage) return
+            counts["${patientId}::${stemOf(rawImage)}".toString()]++
+        }
+        return counts
+    }
+
+    /**
+     * Each patient's rows' 0-based positions, IN SAMPLESHEET ORDER, grouped by
+     * "patientId::rawImageCell" (the same raw `<imageColumn>` cell
+     * resolveReferenceRows/resolveKeptChannelsPerSlide key on), so a caller
+     * building meta from a `splitCsv` row can look its own index up by content
+     * instead of counting channel arrivals itself.
+     *
+     * RETURNS A LIST PER KEY, NOT A SCALAR -- "patientId::rawImageCell" is NOT
+     * guaranteed unique. Two rows of one patient can share an identical raw
+     * cell (a duplicate row) or both leave it blank; `validateInputSemantics`
+     * does not reject either. A single scalar per key used to collapse under
+     * that collision (last write wins), so BOTH rows read back the SAME index,
+     * Meta.fromSamplesheetRow assigned them the SAME id, and one of the two
+     * then silently displaced the other in ctx.keepChannelsBySlide (looked up
+     * by that shared id) -- reproducing, one call site up, exactly the
+     * row.raw-keying collapse this same task closes in
+     * resolveKeptChannelsPerSlide.
+     *
+     * THE CALLER MUST CONSUME BY POSITION, NOT BY RE-READING THE VALUE: pop
+     * (remove) the FIRST element of the matching key's list on every row it
+     * processes, never just peek it. input_check.nf does exactly that. This is
+     * safe -- and remains a pure function of the FILE's own row order rather
+     * than of channel/task arrival order, which resume caching cannot depend
+     * on -- PRECISELY BECAUSE `splitCsv()` reading a single path is a
+     * synchronous, single-producer parse that emits in file order
+     * deterministically. It is not the multi-producer, completion-order
+     * dependent case `groupTuple()` is (see this class's callers for why THAT
+     * ordering can't be trusted). Two rows sharing a key are visited in the
+     * same relative order both when this method builds their list here and
+     * when the caller's `.map` consumes it there -- both walks are driven by
+     * the identical, single underlying file read -- so popping front-to-back
+     * reunites each row with its own, file-order-derived index. This still
+     * depends on nothing being inserted between `splitCsv` and that `.map`
+     * that could reorder items (a pre-existing caveat, unchanged by this
+     * method's contract).
+     *
+     * @param csvPath     path to the samplesheet
+     * @param imageColumn the column holding this step's entry image
+     */
+    static Map<String, List<Integer>> rowIndexPerPatient(String csvPath, String imageColumn) {
+        def file = new File(csvPath)
+        if (!file.exists()) return [:]
+
+        def lines = readCsvLines(file.path)
+        if (lines.size() < 2) return [:]
+
+        def header = parseCsvLine(lines[0])
+        def patientIdx = header.findIndexOf { it == 'patient_id' }
+        def imageIdx   = header.findIndexOf { it == imageColumn }
+        if (patientIdx == -1 || imageIdx == -1) return [:]
+
+        def nextIndex = [:].withDefault { 0 }
+        def result = [:].withDefault { [] }
+        lines.drop(1).each { line ->
+            def cols = parseCsvLine(line)
+            if (cols.size() <= Math.max(patientIdx, imageIdx)) return
+            def patientId = cols[patientIdx].trim()
+            if (!patientId) return  // ignore blank patient_id cells
+            def rawImage = cols[imageIdx].trim()
+            def key = "${patientId}::${rawImage}".toString()
+            result[key] << nextIndex[patientId]
+            nextIndex[patientId] = nextIndex[patientId] + 1
+        }
+        return result
+    }
+
+    /**
+     * The stem lib/Meta.groovy's identityFor derives an id from: everything
+     * before the FIRST '.' in the filename. Kept as one private helper so
+     * stemCountsPerPatient can never drift from identityFor's own inline copy
+     * of this rule (Meta stays parameterless-static and cannot call back into
+     * CsvUtils without inverting the module's dependency direction).
+     */
+    private static String stemOf(String rawImage) {
+        def name = new File(rawImage.toString()).name
+        def dot  = name.indexOf('.')
+        return dot >= 0 ? name.substring(0, dot) : name
+    }
+
+    /**
+     * The ctx {@link Meta#fromCheckpointRow} needs (`keepChannelsBySlide` /
+     * `imagesCount` / `channelsCount`), computed ONCE from a checkpoint CSV's OWN
+     * rows -- never from a samplesheet. Every checkpoint reader needs the identical
+     * shape (mirroring INPUT_CHECK's samplesheet-side ctx assembly:
+     * countImagesPerPatient / resolveKeptChannelsPerSlide / countChannelsPerPatient),
+     * so it is written once here rather than re-derived independently by each one.
+     *
+     * WHY THIS ISN'T resolveKeptChannelsPerSlide AGAIN. That resolver keys its
+     * per-slide map on the RAW image cell, because a samplesheet row has no assigned
+     * `id` yet at the point it runs. A checkpoint row already has one -- a real,
+     * assigned identity (RULING R17, lib/Checkpoint.groovy) -- so THIS resolver keys
+     * `keepChannelsBySlide` on `id` directly, matching how `Meta.fromCheckpointRow`
+     * looks its own row up (`finish()`'s `slideKey` argument is `meta.id`). Same
+     * "claim each marker name once per patient, reference row(s) first" algorithm as
+     * resolveKeptChannelsPerSlide, restated against a checkpoint's own columns
+     * instead of a samplesheet's -- the two are independent implementations of one
+     * rule, not one calling the other, because a checkpoint row's `channels` column
+     * is the FULL declared list a writer recorded (`meta.channels.join('|')`), never
+     * a samplesheet cell resolveKeptChannelsPerSlide could re-parse directly.
+     *
+     * A step whose schema does not carry `channels`/`is_reference` (currently only
+     * 'postprocessed') yields an empty keepChannelsBySlide/channelsCount for every
+     * patient rather than throwing: `Meta.fromCheckpointRow` already tolerates that
+     * schema shape (it only requires `is_reference`/`channels` on a row when the
+     * step's OWN schema declares them), so this helper must not be stricter than the
+     * constructor it feeds.
+     *
+     * @param csvPath path to a checkpoint CSV (e.g. csv/segmented.csv)
+     * @param step    the checkpoint step name (lib/Checkpoint.groovy STEPS) -- used
+     *                only to know whether this schema carries channels/is_reference
+     *                at all; the column POSITIONS are still read from the file's own
+     *                header, never assumed from Checkpoint.columns(step)'s order.
+     */
+    static Map metaContextFromCheckpoint(String csvPath, String step) {
+        def empty = [keepChannelsBySlide: [:], imagesCount: [:], channelsCount: [:]]
+
+        def file = new File(csvPath)
+        if (!file.exists()) return empty
+
+        def lines = readCsvLines(file.path)
+        if (lines.size() < 2) return empty  // Header only or empty
+
+        def schemaColumns = Checkpoint.columns(step)
+        def header     = parseCsvLine(lines[0])
+        def patientIdx = header.findIndexOf { it == 'patient_id' }
+        def idIdx      = header.findIndexOf { it == 'id' }
+        if (patientIdx == -1 || idIdx == -1) return empty
+
+        def hasChannels  = schemaColumns.contains('channels')     && header.contains('channels')
+        def hasReference = schemaColumns.contains('is_reference') && header.contains('is_reference')
+        def channelsIdx  = hasChannels  ? header.findIndexOf { it == 'channels' }     : -1
+        def refIdx       = hasReference ? header.findIndexOf { it == 'is_reference' } : -1
+
+        def rowsByPatient = [:].withDefault { [] }
+        lines.drop(1).each { line ->
+            def cols = parseCsvLine(line)
+            def neededIdx = [patientIdx, idIdx, channelsIdx, refIdx].findAll { it >= 0 }
+            if (cols.size() <= (neededIdx ? neededIdx.max() : 0)) return
+            def patientId = cols[patientIdx].trim()
+            if (!patientId) return  // ignore blank patient_id cells
+            def id = cols[idIdx].trim()
+            if (!id) return  // an id-less row can't key keepChannelsBySlide; Meta itself rejects it
+            def channels = hasChannels ? cols[channelsIdx].split('\\|')*.trim().findAll { it } : []
+            def isRef    = hasReference && cols[refIdx].trim().toLowerCase() == 'true'
+            rowsByPatient[patientId] << [id: id, channels: channels, isRef: isRef]
+        }
+
+        def imagesCount = rowsByPatient.collectEntries { patientId, rows -> [patientId, rows.size()] }
+
+        def keepChannelsBySlide = [:]
+        def channelsCount       = [:]
+        rowsByPatient.each { patientId, rows ->
+            // Stable partition: reference row(s) first, everything else in checkpoint
+            // order -- the same rule resolveKeptChannelsPerSlide applies to a
+            // samplesheet's rows.
+            def ordered = rows.findAll { it.isRef } + rows.findAll { !it.isRef }
+            def claimed = new HashSet<String>()
+            def perSlide = [:]
+            ordered.each { row ->
+                def keep = []
+                row.channels.each { ch ->
+                    def name = ch.toUpperCase()
+                    if (claimed.contains(name)) return
+                    claimed << name
+                    keep << ch
+                }
+                perSlide[row.id] = keep
+            }
+            keepChannelsBySlide[patientId] = perSlide
+            channelsCount[patientId] = perSlide.values().sum { it.size() } ?: 0
+        }
+
+        return [
+            keepChannelsBySlide: keepChannelsBySlide,
+            imagesCount        : imagesCount,
+            channelsCount      : channelsCount,
+        ]
     }
 
     static Map validateMetadata(Map meta, def nuclearMarkers, String context = 'unknown') {

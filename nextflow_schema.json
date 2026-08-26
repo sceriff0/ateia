@@ -420,12 +420,10 @@
                 },
                 "seg_instantseg_target": {
                     "type": "string",
-                    "description": "InstanSeg output target.",
+                    "description": "InstanSeg output target. Only 'all_outputs' is accepted: 'cells' and 'nuclei' each return a SINGLE label map, and this pipeline derives Cytoplasm = Cell - Nucleus, which would be empty for every cell if the nuclei and cell masks were the same array. bin/segment_instantseg.py refuses a single map; the enum is narrowed so the refusal happens at launch instead of inside a segmentation task.",
                     "default": "all_outputs",
                     "enum": [
-                        "all_outputs",
-                        "cells",
-                        "nuclei"
+                        "all_outputs"
                     ]
                 },
                 "seg_instantseg_tile_size": {
@@ -620,11 +618,37 @@
                     "description": "Directory for trace outputs.",
                     "default": ".trace"
                 },
+                "cleanup_level": {
+                    "type": "string",
+                    "description": "Which published outputs a run keeps. 'final' (default) publishes only the final artifacts; 'none' publishes everything.",
+                    "help_text": "'final' publishes pyramid/, geojson/, quantification/ and the SpatialData .zarr per patient, plus run-level qc/, csv/ and size_logs/. Intermediates are never published rather than published-then-deleted: publishDir uses mode: 'copy', so the delete variant pays a full copy out of the work directory for a file nobody reads. Pass 'none' when the run's output will be RE-ENTERED -- '--start segmentation' reads registered/, and '--mode add_cycle' reads registered/ and the segmentation masks. Those combinations are refused at launch at any other level. The surviving/dropped split is owned by Layout.FINAL_KINDS.",
+                    "default": "final",
+                    "enum": [
+                        "none",
+                        "final"
+                    ]
+                },
                 "cleanup_work": {
                     "type": "boolean",
                     "description": "Delete the Nextflow work directory after a successful run. Mutually exclusive with -resume.",
-                    "help_text": "Off by default. When true, Nextflow removes the work directory once the run completes successfully. Published outputs are unaffected (every publishDir uses mode: 'copy'), and step restarts via --start still work because checkpoint CSVs never record paths inside the work directory. Do not combine with -resume: a cleaned run has no cache to resume from. Leaving it off also preserves the on-disk evidence for any task dropped by the errorStrategy 'ignore' branch, which can let a run exit 0 with a task silently failed.",
-                    "default": false
+                    "help_text": "On by default. Nextflow removes the work directory once the run completes SUCCESSFULLY; a failed run keeps it, so failure evidence always survives. Published outputs are unaffected (every publishDir uses mode: 'copy'), and step restarts via --start still work because checkpoint CSVs never record paths inside the work directory. Do not combine with -resume: a cleaned run has no cache to resume from, and the pipeline warns at launch when both are in play. This shipped off while the QC errorStrategy could drop a failed task silently -- a run could exit 0 with a task failed and nothing left to look at. That branch is gone: a broken QC task now fails the run.",
+                    "default": true
+                },
+                "config_profile_name": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "description": "Human-readable name for the active config profile (e.g. set by conf/test.config). Not read by pipeline code.",
+                    "default": null
+                },
+                "config_profile_description": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "description": "Human-readable description for the active config profile (e.g. set by conf/test.config). Not read by pipeline code.",
+                    "default": null
                 }
             }
         },
@@ -682,19 +706,26 @@
                     "description": "Maximum time limit.",
                     "default": "240.h"
                 },
-                "max_forks": {
+                "concurrency": {
                     "type": "integer",
-                    "description": "Maximum concurrent tasks per process. Also an upper bound on every per-process maxForks in conf/modules.config, so lowering it throttles every module.",
-                    "help_text": "Paired with queue_size, which caps concurrency across the WHOLE pipeline. The lower of the two binds: at the defaults max_forks (5) is far below queue_size (20), so raising queue_size alone has no effect. Raise max_forks, or both.",
+                    "description": "Drives both max_forks and queue_size together, preserving the shipped 5:20 ratio (queue_size = concurrency * 4). The single knob to tune for overall cluster throughput.",
+                    "help_text": "max_forks and queue_size are only meaningful together -- the lower of the two binds, so raising one alone changes nothing. Set max_forks and/or queue_size individually to override this ratio for the asymmetric case.",
                     "minimum": 1,
                     "default": 5
                 },
-                "queue_size": {
-                    "type": "integer",
-                    "description": "Maximum concurrent tasks across the whole pipeline (executor.queueSize).",
-                    "help_text": "This is normally the binding constraint on concurrency, not max_forks. The shipped default of 20 is deliberately conservative for a shared scheduler.",
+                "max_forks": {
+                    "type": ["integer", "null"],
+                    "description": "Maximum concurrent tasks per process. Also an upper bound on every per-process maxForks in conf/modules.config, so lowering it throttles every module. null = derive from concurrency.",
+                    "help_text": "Paired with queue_size, which caps concurrency across the WHOLE pipeline. The lower of the two binds: at the defaults max_forks (5, from concurrency) is far below queue_size (20), so raising queue_size alone has no effect. Raise max_forks (or concurrency), or both.",
                     "minimum": 1,
-                    "default": 20
+                    "default": null
+                },
+                "queue_size": {
+                    "type": ["integer", "null"],
+                    "description": "Maximum concurrent tasks across the whole pipeline (executor.queueSize). null = derive from concurrency (concurrency * 4).",
+                    "help_text": "This is normally the binding constraint on concurrency, not max_forks -- except at the shipped defaults, where max_forks (5) is the smaller of the two and binds instead. The shipped default of 20 is deliberately conservative for a shared scheduler.",
+                    "minimum": 1,
+                    "default": null
                 }
             }
         }
@@ -727,6 +758,5 @@
         {
             "$ref": "#/$defs/resource_limits"
         }
-    ],
-    "additionalProperties": true
+    ]
 }

@@ -339,11 +339,42 @@ def create_registration_qc(
     # needs true full-resolution pixels (the *_fullres.tif output is unconditional in
     # production -- see the module docstring). Only the unused channels are no longer
     # read; every pixel of the used one still is. decimation_factor is still the source of
-    # true decimation; read_decimated streams each channel in row bands, but AT FACTOR=1
-    # (this call's case) the striding is a no-op, so the bands it accumulates sum to the
-    # whole plane before the final concatenate -- peak memory here is close to two
-    # full-resolution planes, not one band. See read_decimated's own docstring
-    # (bin/utils/tiled_io.py) for the factor>1 case, where the one-band bound actually holds.
+    # true decimation.
+    #
+    # read_decimated always returns float32 here -- do NOT pass a narrower dtype
+    # (uint8/uint16) even though the only consumer of ref_nuc/reg_nuc is
+    # autoscale_for_display on the way to uint8 (below, and inside create_nuclear_overlay).
+    # This was tried (task 3, first pass) and reverted. Two things are both true and worth
+    # keeping straight:
+    #   1. Narrowing the read is NOT safe on its own: a uint16 array divided by a uint16
+    #      range_val promotes to float64 under numpy's true-divide, where the float32
+    #      arithmetic autoscale_for_display has always run stays float32 -- different
+    #      intermediate precision that demonstrably rounds np.round(normalized * 255)
+    #      differently for real (min, max, value) triples (e.g. min=13286, max=62449,
+    #      value=52520: uint16-input -> 203, float32-input -> 204 -- float32's coarser
+    #      spacing manufactures a spurious .5 tie that round-half-to-even then resolves the
+    #      other way). See
+    #      tests/test_tiled_io.py::test_autoscale_uint16_vs_float32_disagree_at_a_real_triple
+    #      and tests/test_registration_qc_lazy_read.py's adversarial-pixel test for the
+    #      reproduced counter-example. Fixing that requires widening back to float32 right
+    #      before autoscale_for_display sees the array.
+    #   2. That widen-back is exactly what erases the memory saving the narrow read
+    #      appeared to offer. Measured (docs/perf/2026-08-26-rss.md, isolated processes,
+    #      7000x6000 fixture): a narrow read that is NEVER widened back does measure ~48%
+    #      lower peak RSS than this always-float32 read -- but once the mandatory widen-back
+    #      cast runs, the measured peak RSS is statistically indistinguishable from never
+    #      narrowing at all (670.8 MB either way). So narrowing here buys nothing once it is
+    #      made correct, and only adds a cast plus branching. Left at float32, unconditionally.
+    #
+    # The real, measured win at this call site is read_decimated's pre-allocated
+    # destination (no band-list-plus-concatenate doubling, at any factor): measured ~24%
+    # lower peak RSS than the prior list+concatenate implementation, at this exact
+    # (default-dtype, no narrowing) call shape -- but that number is a READ-PHASE-ONLY
+    # figure (isolated open_lazy + read_decimated, no render). The measured full
+    # create_registration_qc peak (read + autoscale/stack/rescale/PNG-TIFF write) showed no
+    # equivalent improvement -- statistically within noise of the pre-branch baseline. See
+    # docs/perf/2026-08-26-rss.md for both sets of numbers; do not extend the read-phase
+    # figure into an end-to-end claim it doesn't support.
     ref_close = reg_close = None
     try:
         ref_arr, _ref_dtype, ref_close = open_lazy(reference_path)

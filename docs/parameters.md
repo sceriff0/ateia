@@ -337,12 +337,16 @@ Per-process requests, resource labels, retry policy and containers:
 | `max_memory` | `700.GB` | Global memory ceiling. Clamps every process's request via `process.resourceLimits`. |
 | `max_cpus` | `128` | Global CPU ceiling. |
 | `max_time` | `240.h` | Global walltime ceiling. |
-| `max_forks` | `5` | Max concurrent tasks **per process**. Also an upper bound on every per-process `maxForks`, so lowering it throttles every module. |
-| `queue_size` | `20` | Max concurrent tasks across the **whole pipeline** (`executor.queueSize`). Normally the binding constraint. |
+| `concurrency` | `5` | The one knob to tune: drives both `max_forks` and `queue_size` together, preserving the shipped 5:20 ratio. |
+| `max_forks` | `null` | Max concurrent tasks **per process**. `null` = derive from `concurrency`; also an upper bound on every per-process `maxForks`, so lowering it throttles every module. |
+| `queue_size` | `null` | Max concurrent tasks across the **whole pipeline** (`executor.queueSize`). `null` = derive from `concurrency` (`concurrency * 4`). Normally the binding constraint. |
 
-`max_forks` and `queue_size` are a pair: the lower of the two binds. At the defaults
-`max_forks` (5) is far lower, so raising `queue_size` alone has no effect — raise both, or
-raise `queue_size`. See [Resources → Execution & concurrency](resources.md#execution--concurrency).
+`max_forks` and `queue_size` are a pair: the lower of the two binds, and they are only
+meaningful together. `--concurrency` moves both at once; `--max_forks` / `--queue_size`
+override it individually for the asymmetric case. At the shipped defaults `max_forks` (5)
+is far lower, so raising `queue_size` alone has no effect — raise `max_forks` (or
+`concurrency`), or raise both. See
+[Resources → Execution & concurrency](resources.md#execution--concurrency).
 
 !!! info "How resources scale"
     Per-process memory and time scale with `task.attempt`, bounded by the
@@ -359,14 +363,55 @@ raise `queue_size`. See [Resources → Execution & concurrency](resources.md#exe
 | `enable_trace` | `true` | Write Nextflow `trace.txt`, `report.html`, `timeline.html`, and per-task size logs. |
 | `trace_dir` | `.trace` | Directory for trace outputs (independent of `--outdir`). |
 
-## Work-directory cleanup
+## Output cleanup
 
 | Parameter | Default | Description |
 |---|---|---|
-| `cleanup_work` | `false` | Delete the Nextflow work directory after a **successful** run. |
+| `cleanup_level` | `'final'` | Which published outputs a run keeps: `final` or `none`. |
+| `cleanup_work` | `true` | Delete the Nextflow work directory after a **successful** run. |
 
-Off by default. When enabled, Nextflow removes the work directory during session
-teardown once the run completes successfully.
+### `cleanup_level`
+
+At `final` — the default — a run publishes only what it was run to produce:
+
+| Kept | Dropped |
+|---|---|
+| `<pid>/pyramid/`, `<pid>/geojson/`, `<pid>/quantification/`, `<pid>/spatialdata/` | `<pid>/converted/`, `<pid>/preprocessed/`, `<pid>/registered/`, `<pid>/segmentation/`, `<pid>/split_channels/`, `<pid>/quantify/`, `<pid>/cell_properties/` |
+| `<pid>/qc/`, run-level `qc/`, `size_logs/` | — |
+| `csv/README.txt` | every `csv/*.csv` checkpoint manifest |
+
+The intermediates are **never published**, not published and then deleted. Every
+`publishDir` uses `mode: 'copy'`, so publish-then-delete would pay a full copy out
+of `work/` for a file nobody reads.
+
+The surviving set has one owner, `Layout.FINAL_KINDS`; the gate at each
+`publishDir` is an inlined copy of one predicate, held to it by
+`tests/test_cleanup_publish_gates.py`.
+
+**No checkpoint manifest is written at `final`.** A manifest names *where* a step's
+artifacts landed, and at this level they landed nowhere — so every row would record
+a path that does not exist. That includes `postprocessed.csv`, which is not obvious:
+its `cell_csv`/`cell_geojson`/`merged_csv`/`pyramid` columns are all final artifacts,
+but its `cell_mask` column names a segmentation mask, which is an intermediate.
+`csv/README.txt` is written instead so an empty `csv/` is not a mystery.
+
+Pass `--cleanup_level none` when this run's output will be **re-entered**:
+
+* `--start <step>` reads the published intermediates of a previous run.
+* `--mode add_cycle` reads the prior run's `registered/` images **and** its
+  segmentation masks — and the *next* cycle will read this run's. `add_cycle` is
+  therefore **refused at launch** at any level other than `none`
+  (`ParamUtils.validateCleanup`), rather than letting cycle N+1 discover it after a
+  whole registration.
+
+`--start` past `preprocessing` only warns: this run reads a *prior* tree fine; what
+it cannot do is be re-entered the same way itself.
+
+### `cleanup_work`
+
+On by default. Nextflow removes the work directory during session teardown once the
+run completes successfully. A **failed** run keeps it, so failure evidence always
+survives.
 
 **Safe to enable:** published outputs are unaffected. Every `publishDir` in
 `conf/modules.config` uses `mode: 'copy'`, so nothing under `--outdir` is a symlink
@@ -390,11 +435,15 @@ the directory to disappear entirely.
     `-resume`, leave `cleanup_work` off. See
     [Checkpoints & resuming](usage.md#checkpoints-resuming).
 
-!!! warning "Erases evidence of silently-dropped tasks"
-    `conf/modules.config`'s `errorStrategy` has an `'ignore'` branch, so a run can
-    exit 0 with a QC task having failed. Cleanup deletes that task's work
-    directory, which is the only place its logs and partial outputs live. Keep
-    `cleanup_work` off while you still care about diagnosing a run.
+!!! note "Why this used to default to off"
+    `conf/modules.config`'s QC `errorStrategy` used to end in `'ignore'`, so a run
+    could exit 0 with a QC task having failed — and cleanup deleted that task's work
+    directory, the only place its logs and partial outputs lived. That branch is
+    gone: the QC selector is `retry-then-fail`, so a broken QC task fails the run
+    and a green run implies a complete output tree. Two processes still carry a
+    deliberate `retry-then-drop` policy (`SEG_QUALITY_EVAL`, `MERGE_SEG_EVAL`, both
+    opt-in); when either is dropped, `main.nf`'s `onComplete` says so by name in the
+    run log rather than leaving it to be inferred from an absent column.
 
 ## Incremental cyclic-IF mode (`add_cycle`)
 
