@@ -113,25 +113,32 @@ def band_rows_for(width, factor, band_bytes=DEFAULT_BAND_BYTES):
     return max(factor, (rows // factor) * factor)
 
 
-def read_decimated(src, index, factor, band_bytes=DEFAULT_BAND_BYTES, dtype=None):
-    """Read channel ``index`` of a lazy ``(C, H, W)`` view as a ``factor``-decimated plane.
+def read_decimated(src, index, factor, band_bytes=DEFAULT_BAND_BYTES):
+    """Read channel ``index`` of a lazy ``(C, H, W)`` view as a ``factor``-decimated float32
+    plane.
 
-    ``dtype`` defaults to ``np.float32`` -- the historical, still-correct behaviour for
+    Always returns float32, unconditionally, for both of this function's callers:
     ``bin/tiled_coarse.py``'s ORB path (see ``bin/utils/coarse_align.py:132``: FAST's
     absolute intensity threshold is only meaningful once the plane is normalised to
-    ``[0, 1]``, which needs a float buffer). Callers that only ever push the result through
-    ``autoscale_for_display`` on the way to uint8 -- ``bin/utils/qc.py``'s two call sites --
-    can pass the source's own dtype instead and skip the widen: ``autoscale_for_display``'s
-    ``np.round(normalized * 255)`` output is proven identical for a uint8 or uint16 source
-    read at its native dtype versus widened to float32 (see
-    ``tests/test_tiled_io.py::test_autoscale_uint16_vs_float32_identical_full_domain`` for
-    the exhaustive sweep). Pass ``dtype=np.uint8`` / ``np.uint16`` only for those two source
-    dtypes; leave the default for anything else.
+    ``[0, 1]``, which needs a float buffer) and ``bin/utils/qc.py``, whose only consumer of
+    the result is ``autoscale_for_display`` on the way to uint8. qc.py deliberately does NOT
+    ask for a narrower dtype here: reading at the source's own uint8/uint16 dtype instead of
+    float32 changes ``autoscale_for_display``'s internal arithmetic (a uint16 true-divide
+    promotes to float64; a float32 one stays float32) and that demonstrably rounds
+    ``np.round(normalized * 255)`` differently for real data -- see
+    ``tests/test_tiled_io.py::test_autoscale_uint16_vs_float32_disagree_at_a_real_triple``
+    for a reproduced counter-example. A prior version of this function took an optional
+    ``dtype=`` for exactly that narrow read; it was reverted (task 3, second pass) once
+    measurement showed the memory it appeared to save at the read step does not survive the
+    widen-back-to-float32 that correctness requires downstream -- see task-3-report.md for
+    the measured numbers. Do not reintroduce a narrow-dtype parameter without a widen-back
+    at every consumer that needs float32-equivalent arithmetic, and without re-measuring
+    whether it is worth the complexity.
 
     Streams the plane in row bands and strides each band as it's read. Bands are written
-    directly into a pre-allocated ``dtype``-typed destination array (never accumulated as a
-    list and ``concatenate``d), so peak memory is one band's full-resolution buffer plus the
-    single decimated destination -- at every factor, including ``factor == 1``, where a
+    directly into a pre-allocated float32 destination array (never accumulated as a list and
+    ``concatenate``d), so peak memory is one band's full-resolution buffer plus the single
+    decimated destination -- at every factor, including ``factor == 1``, where a
     band-list-plus-concatenate would otherwise hold two full-resolution-sized planes at once.
     Band height is snapped to a multiple of ``factor`` so the rows sampled are globally
     ``0, factor, 2*factor, ...``; the destination is therefore filled with exactly
@@ -140,8 +147,7 @@ def read_decimated(src, index, factor, band_bytes=DEFAULT_BAND_BYTES, dtype=None
     """
     import numpy as _np
 
-    if dtype is None:
-        dtype = _np.float32
+    dtype = _np.float32
 
     c_n, h, w = src.shape
     if not 0 <= index < c_n:

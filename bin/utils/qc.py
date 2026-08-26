@@ -341,49 +341,44 @@ def create_registration_qc(
     # read; every pixel of the used one still is. decimation_factor is still the source of
     # true decimation.
     #
-    # The narrow dtype only ever touches the READ side: read_decimated's streamed row bands
-    # and its pre-allocated destination hold half the bytes for a uint16 source than the old,
-    # always-float32 read did. Measured (task-3-report.md): in isolation that is real -- a
-    # narrow read that is never widened back measures ~48% lower peak RSS than the old
-    # always-float32 read on a 7000x6000 fixture. But THIS call site immediately widens back
-    # to float32 (below), and once it does, the measured peak RSS of the read step here is
-    # statistically indistinguishable from the old always-float32 read -- the transient
-    # savings do not survive materialising the same float32 array G1 requires downstream. The
-    # measured, surviving win for THIS call site is the pre-allocated destination alone (no
-    # band-list-plus-concatenate doubling, at any factor) -- read_decimated's OTHER caller,
-    # bin/tiled_coarse.py, which never narrows the dtype at all, is where that win is
-    # actually realised (measured ~24% lower peak RSS on the same fixture).
+    # read_decimated always returns float32 here -- do NOT pass a narrower dtype
+    # (uint8/uint16) even though the only consumer of ref_nuc/reg_nuc is
+    # autoscale_for_display on the way to uint8 (below, and inside create_nuclear_overlay).
+    # This was tried (task 3, first pass) and reverted. Two things are both true and worth
+    # keeping straight:
+    #   1. Narrowing the read is NOT safe on its own: a uint16 array divided by a uint16
+    #      range_val promotes to float64 under numpy's true-divide, where the float32
+    #      arithmetic autoscale_for_display has always run stays float32 -- different
+    #      intermediate precision that demonstrably rounds np.round(normalized * 255)
+    #      differently for real (min, max, value) triples (e.g. min=13286, max=62449,
+    #      value=52520: uint16-input -> 203, float32-input -> 204 -- float32's coarser
+    #      spacing manufactures a spurious .5 tie that round-half-to-even then resolves the
+    #      other way). See
+    #      tests/test_tiled_io.py::test_autoscale_uint16_vs_float32_disagree_at_a_real_triple
+    #      and tests/test_registration_qc_lazy_read.py's adversarial-pixel test for the
+    #      reproduced counter-example. Fixing that requires widening back to float32 right
+    #      before autoscale_for_display sees the array.
+    #   2. That widen-back is exactly what erases the memory saving the narrow read
+    #      appeared to offer. Measured (task-3-report.md, isolated processes, 7000x6000
+    #      fixture): a narrow read that is NEVER widened back does measure ~48% lower peak
+    #      RSS than this always-float32 read -- but once the mandatory widen-back cast runs,
+    #      the measured peak RSS is statistically indistinguishable from never narrowing at
+    #      all (670.8 MB either way). So narrowing here buys nothing once it is made
+    #      correct, and only adds a cast plus branching. Left at float32, unconditionally.
     #
-    # The narrow dtype must NOT reach autoscale_for_display (below, and inside
-    # create_nuclear_overlay): a uint16 array divided by a uint16 range_val promotes to
-    # float64 under numpy's true-divide, where the float32-driven arithmetic
-    # autoscale_for_display has always run stays float32 --
-    # DIFFERENT intermediate precision, and it is not merely "different", it demonstrably
-    # rounds differently at np.round(normalized * 255) for real (min, max, value) triples.
-    # See tests/test_tiled_io.py::test_autoscale_uint16_vs_float32_disagree_at_a_real_triple
-    # for a reproduced counter-example (min=13286, max=62449, value=52520: uint16-path -> 203,
-    # float32-path -> 204; exact float64 quotient 203.49998982975 vs. an exactly-tied float32
-    # quotient of 203.5, which np.round's round-half-to-even then resolves the other way).
-    # G1 (this task's binding constraint) forbids that: the QC PNG/TIFF must be byte-identical
-    # to what this function produced before the narrow read existed. So every uint8/uint16
-    # plane is widened straight back to float32 immediately after the read, before either
-    # consumer ever sees it -- every uint8/uint16 value is exactly representable in float32,
-    # so `read_decimated(dtype=uint16).astype(np.float32)` equals
-    # `read_decimated(dtype=np.float32)` element-for-element: PROVABLY identical, not merely
-    # untested-to-differ. Scoped to uint8/uint16 sources only; anything else already comes
-    # back from read_decimated as float32 (its default) and needs no cast.
-    _NARROW_READ_DTYPES = (np.uint8, np.uint16)
+    # The real, measured win at this call site is read_decimated's pre-allocated
+    # destination (no band-list-plus-concatenate doubling, at any factor): measured ~24%
+    # lower peak RSS than the pre-task-3 list+concatenate implementation, at this exact
+    # (default-dtype, no narrowing) call shape.
     ref_close = reg_close = None
     try:
-        ref_arr, ref_dtype, ref_close = open_lazy(reference_path)
-        reg_arr, reg_dtype, reg_close = open_lazy(registered_path)
+        ref_arr, _ref_dtype, ref_close = open_lazy(reference_path)
+        reg_arr, _reg_dtype, reg_close = open_lazy(registered_path)
         factor = decimation_factor(
             [ref_arr.shape[1:], reg_arr.shape[1:]], max_dim=None
         )
-        ref_read_dtype = ref_dtype if ref_dtype in _NARROW_READ_DTYPES else None
-        reg_read_dtype = reg_dtype if reg_dtype in _NARROW_READ_DTYPES else None
-        ref_nuc = read_decimated(ref_arr, ref_nuc_idx, factor, dtype=ref_read_dtype)
-        reg_nuc = read_decimated(reg_arr, reg_nuc_idx, factor, dtype=reg_read_dtype)
+        ref_nuc = read_decimated(ref_arr, ref_nuc_idx, factor)
+        reg_nuc = read_decimated(reg_arr, reg_nuc_idx, factor)
     finally:
         # Both opens now live inside this try, so a failure on the SECOND open_lazy call no
         # longer leaks the first store's handle -- but it also means ref_close may never get
@@ -393,16 +388,6 @@ def create_registration_qc(
             ref_close()
         if reg_close is not None:
             reg_close()
-
-    # Widen back to float32 (rebinding, not aliasing) the instant the narrow read is done,
-    # so the narrow uint8/uint16 array is freed at the cast rather than kept alive alongside
-    # its float32 copy. Both downstream consumers (the fullres autoscale below, and
-    # create_nuclear_overlay's autoscale) get exactly what they got before this task's read
-    # narrowed the source dtype.
-    if ref_read_dtype is not None:
-        ref_nuc = ref_nuc.astype(np.float32)
-    if reg_read_dtype is not None:
-        reg_nuc = reg_nuc.astype(np.float32)
 
     # Save full-resolution QC (compressed)
     if save_fullres:

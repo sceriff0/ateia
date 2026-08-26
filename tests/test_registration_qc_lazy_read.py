@@ -222,18 +222,21 @@ def test_qc_fullres_output_matches_old_whole_stack_read(tmp_path):
 def test_qc_png_and_fullres_tiff_are_byte_identical_to_the_old_float32_widened_read(
     tmp_path,
 ):
-    """Task 3 evidence (G1): narrowing ``read_decimated``'s dtype to the source's own uint16,
-    and pre-allocating its destination instead of concatenating streamed bands, must not move
-    a single byte of the published QC PNG or full-resolution TIFF.
+    """Task 3 evidence (G1): pre-allocating ``read_decimated``'s destination instead of
+    concatenating streamed bands must not move a single byte of the published QC PNG or
+    full-resolution TIFF. (A narrower uint8/uint16 read was also tried at this call site and
+    reverted -- see ``bin/utils/qc.py``'s comment above the read and
+    ``test_autoscale_uint16_vs_float32_disagree_at_a_real_triple`` in test_tiled_io.py for
+    why -- so the only thing this test needs to prove now is that the pre-allocation refactor
+    of ``read_decimated`` itself is value-preserving.)
 
-    Builds the "before" expectation independently, by calling ``read_decimated`` directly with
-    the dtype ``create_registration_qc`` used to get implicitly (float32, the pre-task-3
-    default for every caller) and pushing it through the SAME untouched
-    ``create_nuclear_overlay`` / ``autoscale_for_display`` pipeline the real function uses.
-    Compares that against what the real (post-task-3, uint16-narrowed) ``create_registration_qc``
-    actually writes to disk. A regression here is exactly the failure mode the task brief
-    calls out: a more precise float32 intermediate rounding ``np.round(normalized * 255)``
-    differently than the narrower uint16-driven one would have.
+    Builds the "before" expectation independently, by calling ``read_decimated`` directly
+    (its only supported dtype, float32, matching exactly what ``create_registration_qc``
+    gets) and pushing it through the SAME untouched ``create_nuclear_overlay`` /
+    ``autoscale_for_display`` pipeline the real function uses. Compares that against what the
+    real ``create_registration_qc`` actually writes to disk. A regression here would mean the
+    pre-allocated-destination streaming loop in ``read_decimated`` computed something
+    different from a plain call -- i.e. a bug in the band/ragged-band bookkeeping itself.
     """
     from tiled_io import open_lazy, read_decimated
 
@@ -248,12 +251,10 @@ def test_qc_png_and_fullres_tiff_are_byte_identical_to_the_old_float32_widened_r
     reg_src, reg_dtype, reg_close = open_lazy(reg_path)
     try:
         assert ref_dtype == np.uint16 and reg_dtype == np.uint16, (
-            "fixture must be uint16 -- the dtype this task narrows the read for"
+            "fixture must be uint16 -- the source dtype create_registration_qc actually reads"
         )
-        # Force the OLD default: every caller got float32 before this task, regardless of
-        # the source's own dtype.
-        old_ref_nuc = read_decimated(ref_src, ref_idx, factor=1, dtype=np.float32)
-        old_reg_nuc = read_decimated(reg_src, reg_idx, factor=1, dtype=np.float32)
+        old_ref_nuc = read_decimated(ref_src, ref_idx, factor=1)
+        old_reg_nuc = read_decimated(reg_src, reg_idx, factor=1)
     finally:
         ref_close()
         reg_close()
@@ -293,29 +294,25 @@ def test_qc_png_and_fullres_tiff_are_byte_identical_to_the_old_float32_widened_r
 
 
 def test_qc_output_is_exact_at_the_known_adversarial_pixel_triple(tmp_path):
-    """Integration-level pin for the counter-example in
-    ``tests/test_tiled_io.py::test_autoscale_uint16_vs_float32_disagree_at_a_real_triple``.
+    """Regression guard against reintroducing a narrow (uint8/uint16) read in
+    ``create_registration_qc``. See
+    ``tests/test_tiled_io.py::test_autoscale_uint16_vs_float32_disagree_at_a_real_triple``
+    for the underlying counter-example this fixture is built on.
 
-    G1's baseline is "what did this function already produce", NOT "which of the two
-    dtype-arithmetic paths is more mathematically precise" -- and what it already produced,
-    for every slide, is the FLOAT32 path (204 at this triple; every caller got float32 before
-    this task, unconditionally). The float64/uint16-native path (203) is more precise but is
-    NOT the baseline: it is a value this function has never emitted, because
-    ``read_decimated`` never returned a native uint16 array to ``qc.py`` before this task
-    either. So the correctness bar here is "the real, current ``create_registration_qc`` must
-    still emit 204 at this pixel, exactly as it always has" -- reproducing 203 would be the
-    regression, even though 203 is the "better" number in isolation.
+    ``create_registration_qc`` reads its nuclear channel through ``read_decimated``, which
+    always returns float32 (it has no ``dtype=`` parameter -- a narrow-read variant was
+    tried and reverted; see ``bin/utils/qc.py``'s comment above the read for why). What this
+    function has therefore ALWAYS emitted, for every slide, is the float32-arithmetic path
+    (204 at this triple). The float64/uint16-native path (203) is more precise in isolation
+    but is NOT what this function has ever produced, and is not the correctness bar here.
 
     The reference slide's nuclear channel is engineered so its min, max, and one interior
     pixel are EXACTLY the adversarial triple (13286, 62449, 52520) that makes a naive
-    (un-widened) narrow read diverge from the historical float32 path by one uint8 level. The
-    real ``create_registration_qc`` -- which widens the narrow uint16 read back to float32
-    before either consumer sees it -- must match the old, always-float32 read bit-for-bit,
-    landing on 204, not the naive narrow-read value of 203.
-
-    This is the test that would have caught the original mistake: it fails if the widen-back
-    cast in ``bin/utils/qc.py`` is ever removed or narrowed to skip this pixel, because THIS
-    fixture is built to land exactly on the tie the float32 arithmetic mishandles.
+    uint16-input read diverge from the real float32-input read by one uint8 level. This test
+    is what would fail the moment someone "optimises" ``create_registration_qc`` back into
+    reading a narrow dtype without an accompanying widen-back: the real pipeline's output
+    would silently drop from 204 to 203 at this pixel while the independently-built
+    (always-float32) expectation stayed at 204.
     """
     from tiled_io import open_lazy, read_decimated
 
@@ -365,7 +362,7 @@ def test_qc_output_is_exact_at_the_known_adversarial_pixel_triple(tmp_path):
 
     # Sanity: confirm this fixture actually reproduces the known divergence, and pin which
     # value is the historical/G1 baseline (float32 -> 204) versus which would be a silent
-    # regression if the widen-back cast were ever dropped (naive narrow-dtype read -> 203).
+    # regression if a narrow read were ever reintroduced without a widen-back).
     naive_narrow = qc.autoscale_for_display(dapi, method="minmax")
     historical_float32 = qc.autoscale_for_display(dapi.astype(np.float32), method="minmax")
     assert naive_narrow[1, 0] == 203, "a bare uint16 read would land on the lower value"
@@ -374,13 +371,14 @@ def test_qc_output_is_exact_at_the_known_adversarial_pixel_triple(tmp_path):
         "fixture must reproduce the known uint16-vs-float32 divergence to be meaningful"
     )
 
-    # G1 baseline: force the pre-task-3 default (float32 for every caller, unconditionally).
+    # Independently-built expectation: read_decimated's only supported dtype is float32,
+    # exactly what create_registration_qc actually gets.
     ref_src, ref_dtype, ref_close = open_lazy(ref_path)
     reg_src, reg_dtype, reg_close = open_lazy(reg_path)
     try:
         assert ref_dtype == np.uint16 and reg_dtype == np.uint16
-        old_ref_nuc = read_decimated(ref_src, ref_idx, factor=1, dtype=np.float32)
-        old_reg_nuc = read_decimated(reg_src, reg_idx, factor=1, dtype=np.float32)
+        old_ref_nuc = read_decimated(ref_src, ref_idx, factor=1)
+        old_reg_nuc = read_decimated(reg_src, reg_idx, factor=1)
     finally:
         ref_close()
         reg_close()

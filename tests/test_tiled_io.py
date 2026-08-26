@@ -86,8 +86,8 @@ def _write_single_channel(tmp_path, dtype, h, w, seed=0, name="plane"):
 
 
 @pytest.mark.parametrize("factor", [1, 2, 3, 5])
-@pytest.mark.parametrize("dtype", [np.uint8, np.uint16, np.float32])
-def test_read_decimated_matches_independent_direct_slice(tmp_path, factor, dtype):
+@pytest.mark.parametrize("source_dtype", [np.uint8, np.uint16, np.float32])
+def test_read_decimated_matches_independent_direct_slice(tmp_path, factor, source_dtype):
     """``read_decimated`` must equal ``src[index, ::factor, ::factor]`` computed a DIFFERENT way
     than the function under test: via a direct step-sliced getitem on the lazy view (which goes
     through zarr's own indexing engine), not by re-running read_decimated's own banded loop. A
@@ -95,45 +95,32 @@ def test_read_decimated_matches_independent_direct_slice(tmp_path, factor, dtype
     case the function's own docstring flags as the easiest to get wrong for a pre-allocated
     destination.
 
-    ``dtype`` is passed to ``read_decimated`` only for uint8/uint16 (the narrow-read path this
-    task adds); float32 exercises the pre-existing default-widening path unchanged.
+    ``read_decimated`` always returns float32, unconditionally (it takes no ``dtype=``
+    argument -- see its docstring for why a narrow-dtype variant was tried and reverted).
+    ``source_dtype`` here varies only the SOURCE file's on-disk dtype, to prove the pre-
+    allocated streaming/striding logic is correct regardless of what native dtype it is
+    reading from, not to exercise any caller-selectable output dtype.
     """
     h, w = 37, 21  # h % (any band size forced below) != 0 -> ragged final band
-    path = _write_single_channel(tmp_path, dtype, h, w)
+    path = _write_single_channel(tmp_path, source_dtype, h, w)
 
-    tiny_budget = 8 * w * np.dtype(dtype).itemsize
+    tiny_budget = 8 * w * np.dtype(source_dtype).itemsize
     band = band_rows_for(w, factor, tiny_budget)
     assert band < h, "budget must force more than one band so the final band is ragged"
     assert h % band != 0, "fixture must actually exercise a ragged final band"
 
     src, src_dtype, close = open_lazy(path)
     try:
-        assert src_dtype == dtype
-        kwargs = {"dtype": dtype} if dtype in (np.uint8, np.uint16) else {}
-        got = read_decimated(src, 0, factor, band_bytes=tiny_budget, **kwargs)
-        expected = np.asarray(src[0, ::factor, ::factor])
-        expected = expected.astype(dtype)
-    finally:
-        close()
-
-    assert got.dtype == expected.dtype
-    assert got.shape == expected.shape
-    assert np.array_equal(got, expected)
-
-
-def test_read_decimated_default_dtype_is_still_float32(tmp_path):
-    """No ``dtype=`` argument must still yield float32 -- the contract
-    ``bin/tiled_coarse.py`` relies on without needing any edit of its own."""
-    h, w = 40, 24
-    path = _write_single_channel(tmp_path, np.uint16, h, w)
-
-    src, _dtype, close = open_lazy(path)
-    try:
-        got = read_decimated(src, 0, factor=2)
+        assert src_dtype == source_dtype
+        got = read_decimated(src, 0, factor, band_bytes=tiny_budget)
+        expected = np.asarray(src[0, ::factor, ::factor]).astype(np.float32)
     finally:
         close()
 
     assert got.dtype == np.float32
+    assert expected.dtype == np.float32
+    assert got.shape == expected.shape
+    assert np.array_equal(got, expected)
 
 
 def test_autoscale_uint16_vs_float32_disagree_at_a_real_triple():
@@ -155,11 +142,18 @@ def test_autoscale_uint16_vs_float32_disagree_at_a_real_triple():
       division rounds, in float32's coarser representable-value spacing, to an EXACT tie at
       ``203.5``. ``np.round``'s round-half-to-even then resolves that spurious tie UP, to 204.
 
-    This is why ``bin/utils/qc.py`` must never feed a narrow-dtype (uint8/uint16) plane
-    straight to ``autoscale_for_display`` -- it widens back to float32 immediately after the
-    (narrow, memory-saving) read and before either consumer sees the array, so
-    ``autoscale_for_display`` always gets exactly the float32 array it always has. This test
-    is what fails the moment someone "simplifies" that cast away.
+    This is why ``bin/utils/qc.py``'s ``create_registration_qc`` reads its nuclear channel at
+    ``read_decimated``'s float32 default and does NOT ask for a narrower uint8/uint16 dtype,
+    even though the only consumer of that plane is ``autoscale_for_display`` on the way to
+    uint8: a narrow read changes the arithmetic autoscale_for_display runs internally, and
+    this pixel is proof it is not merely "different precision" but a real, reachable
+    disagreement. This was tried (narrow read + a widen-back cast to correct it) and
+    reverted: the memory saving the narrow read appeared to offer does not survive the
+    widen-back that correctness requires -- measured (task-3-report.md) at statistically
+    indistinguishable peak RSS from never narrowing at all, on top of the added complexity of
+    the cast and its branching. So `qc.py` simply never narrows the read; this test's job is
+    to keep it that way by documenting exactly what breaks if someone "optimises" it back in
+    without re-deriving (or re-measuring) why it doesn't help.
     """
     import os
     import sys
