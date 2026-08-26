@@ -152,6 +152,10 @@ def test_qc_overlay_pixels_match_the_old_whole_stack_read(tmp_path):
     reg_idx = pick_nuclear_index(reg_channels, None)
     assert ref_idx == 1 and reg_idx == 1, "fixture must exercise a non-zero nuclear index"
 
+    # HAZARD: raw-uint16 (float64 path) vs. production's float32 path -- green here only
+    # because _write_pair avoids the adversarial triple; see
+    # test_tiled_io.py::test_autoscale_uint16_vs_float32_disagree_at_a_real_triple before
+    # blaming a real change if this ever goes red.
     old_ref_nuc = tifffile.imread(str(ref_path))[ref_idx]
     old_reg_nuc = tifffile.imread(str(reg_path))[reg_idx]
     expected_bgr, expected_cyx = qc.create_nuclear_overlay(
@@ -191,6 +195,10 @@ def test_qc_fullres_output_matches_old_whole_stack_read(tmp_path):
     ref_idx = pick_nuclear_index(ref_channels, None)
     reg_idx = pick_nuclear_index(reg_channels, None)
 
+    # HAZARD: raw-uint16 (float64 path) vs. production's float32 path -- green here only
+    # because _write_pair avoids the adversarial triple; see
+    # test_tiled_io.py::test_autoscale_uint16_vs_float32_disagree_at_a_real_triple before
+    # blaming a real change if this ever goes red.
     old_ref_nuc = tifffile.imread(str(ref_path))[ref_idx]
     old_reg_nuc = tifffile.imread(str(reg_path))[reg_idx]
     ref_scaled = qc.autoscale_for_display(old_ref_nuc, method="minmax")
@@ -222,21 +230,33 @@ def test_qc_fullres_output_matches_old_whole_stack_read(tmp_path):
 def test_qc_png_and_fullres_tiff_are_byte_identical_to_the_old_float32_widened_read(
     tmp_path,
 ):
-    """Task 3 evidence (G1): pre-allocating ``read_decimated``'s destination instead of
-    concatenating streamed bands must not move a single byte of the published QC PNG or
-    full-resolution TIFF. (A narrower uint8/uint16 read was also tried at this call site and
-    reverted -- see ``bin/utils/qc.py``'s comment above the read and
+    """``create_registration_qc``'s own read+render plumbing must match a direct call to the
+    same functions -- byte-for-byte, for both the published QC PNG and the full-resolution
+    TIFF. (A narrower uint8/uint16 read was also tried at this call site and reverted -- see
+    ``bin/utils/qc.py``'s comment above the read and
     ``test_autoscale_uint16_vs_float32_disagree_at_a_real_triple`` in test_tiled_io.py for
-    why -- so the only thing this test needs to prove now is that the pre-allocation refactor
-    of ``read_decimated`` itself is value-preserving.)
+    why.)
+
+    NOTE on what this test does and does NOT prove: it builds its "expectation" by calling
+    ``read_decimated`` itself (same function under test), so it cannot catch a bug INSIDE
+    ``read_decimated``'s pre-allocated-destination streaming loop -- a wrong banded/ragged-band
+    computation would corrupt both sides identically and this test would still pass. That
+    proof lives elsewhere, built against a genuinely independent code path:
+    ``tests/test_tiled_io.py::test_read_decimated_matches_independent_direct_slice`` (expected
+    built via a direct step-sliced ``src[...]`` getitem, through zarr's own indexing engine)
+    and
+    ``tests/test_tiled_coarse_thumbnail.py::test_banded_read_is_numerically_identical_to_full_decimation``
+    (expected built via a plain ``tifffile.imread``). What THIS test covers, and is worth
+    having independently, is that ``create_registration_qc``'s own orchestration --
+    channel-index resolution, ``open_lazy``/``read_decimated`` wiring, and the
+    ``create_nuclear_overlay``/``autoscale_for_display``/PNG-TIFF-write chain -- matches
+    calling those same pieces directly, with nothing lost or reordered in between.
 
     Builds the "before" expectation independently, by calling ``read_decimated`` directly
     (its only supported dtype, float32, matching exactly what ``create_registration_qc``
     gets) and pushing it through the SAME untouched ``create_nuclear_overlay`` /
     ``autoscale_for_display`` pipeline the real function uses. Compares that against what the
-    real ``create_registration_qc`` actually writes to disk. A regression here would mean the
-    pre-allocated-destination streaming loop in ``read_decimated`` computed something
-    different from a plain call -- i.e. a bug in the band/ragged-band bookkeeping itself.
+    real ``create_registration_qc`` actually writes to disk.
     """
     from tiled_io import open_lazy, read_decimated
 

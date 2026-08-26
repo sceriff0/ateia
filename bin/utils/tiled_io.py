@@ -99,16 +99,24 @@ def decimation_factor(shapes, max_dim):
 
 # Byte budget for one streamed row band. Peak memory of a decimated read is this plus the
 # (small) thumbnail, independent of slide width -- a fixed *row* count would not be, since a
-# band of a 30k-wide slide is ~7x the same band of a 4k-wide one.
+# band of a 30k-wide slide is ~7x the same band of a 4k-wide one. ``band_rows_for`` sizes the
+# band as if every source were float32 (4 bytes/px); the actual streamed band in
+# ``read_decimated`` is read at the SOURCE's own dtype, so for a uint8/uint16 source this
+# budget is conservative (bands come out smaller than it could afford -- free headroom, not a
+# bug) and for a float64 source it would under-reserve by 2x (not exercised by any caller
+# today, but worth knowing if one is ever added).
 DEFAULT_BAND_BYTES = 64 * 1024 * 1024
 
 
 def band_rows_for(width, factor, band_bytes=DEFAULT_BAND_BYTES):
-    """Rows per streamed band: the most that fit in ``band_bytes`` as float32, snapped down to a
-    multiple of ``factor`` (so the sampled rows stay globally aligned) and never below ``factor``.
+    """Rows per streamed band: the most that fit in ``band_bytes`` AS IF THE SOURCE WERE
+    FLOAT32 (this is a budget, not a measurement of what ``read_decimated`` actually streams
+    -- it reads each band at the source's own dtype, so a narrower source uses less than this
+    per band), snapped down to a multiple of ``factor`` (so the sampled rows stay globally
+    aligned) and never below ``factor``.
     """
     factor = max(1, int(factor))
-    per_row = max(1, int(width)) * 4  # float32
+    per_row = max(1, int(width)) * 4  # budgeted as float32; see DEFAULT_BAND_BYTES's comment
     rows = max(factor, int(band_bytes) // per_row)
     return max(factor, (rows // factor) * factor)
 
@@ -117,23 +125,38 @@ def read_decimated(src, index, factor, band_bytes=DEFAULT_BAND_BYTES):
     """Read channel ``index`` of a lazy ``(C, H, W)`` view as a ``factor``-decimated float32
     plane.
 
-    Always returns float32, unconditionally, for both of this function's callers:
-    ``bin/tiled_coarse.py``'s ORB path (see ``bin/utils/coarse_align.py:132``: FAST's
-    absolute intensity threshold is only meaningful once the plane is normalised to
-    ``[0, 1]``, which needs a float buffer) and ``bin/utils/qc.py``, whose only consumer of
-    the result is ``autoscale_for_display`` on the way to uint8. qc.py deliberately does NOT
-    ask for a narrower dtype here: reading at the source's own uint8/uint16 dtype instead of
-    float32 changes ``autoscale_for_display``'s internal arithmetic (a uint16 true-divide
-    promotes to float64; a float32 one stays float32) and that demonstrably rounds
-    ``np.round(normalized * 255)`` differently for real data -- see
-    ``tests/test_tiled_io.py::test_autoscale_uint16_vs_float32_disagree_at_a_real_triple``
-    for a reproduced counter-example. A prior version of this function took an optional
-    ``dtype=`` for exactly that narrow read; it was reverted (task 3, second pass) once
-    measurement showed the memory it appeared to save at the read step does not survive the
-    widen-back-to-float32 that correctness requires downstream -- see task-3-report.md for
-    the measured numbers. Do not reintroduce a narrow-dtype parameter without a widen-back
-    at every consumer that needs float32-equivalent arithmetic, and without re-measuring
-    whether it is worth the complexity.
+    Always returns float32, unconditionally, for all three of this function's callers, which
+    need it for three different reasons:
+
+    - ``bin/tiled_coarse.py``'s ORB path (see ``bin/utils/coarse_align.py:132``): FAST's
+      absolute intensity threshold is only meaningful once the plane is normalised to
+      ``[0, 1]``, which needs a float buffer.
+    - ``bin/utils/qc.py``'s ``create_registration_qc``: its only consumer of the result is
+      ``autoscale_for_display`` on the way to uint8, and that function's min-max arithmetic
+      runs directly on whatever dtype it is handed -- no upfront cast of its own. A narrower
+      uint8/uint16 read changes that arithmetic (a uint16 true-divide promotes to float64; a
+      float32 one stays float32) and demonstrably rounds ``np.round(normalized * 255)``
+      differently for real data -- see
+      ``tests/test_tiled_io.py::test_autoscale_uint16_vs_float32_disagree_at_a_real_triple``
+      for a reproduced counter-example. A prior version of this function took an optional
+      ``dtype=`` for exactly that narrow read; it was reverted (task 3, second pass) once
+      measurement showed the memory it appeared to save at the read step does not survive the
+      widen-back-to-float32 that correctness requires downstream -- see task-3-report.md for
+      the measured numbers.
+    - ``bin/generate_preprocess_qc.py:211`` (``read_decimated(lazy_arr, i, factor=1)``, one
+      call per channel) feeds the result to ``normalize_image`` -> ``downsample_image`` ->
+      ``imsave`` -- a display-only-to-PNG chain that LOOKS like the same trap as qc.py's, and
+      is worth naming here for exactly that resemblance. It is actually different:
+      ``normalize_image`` (percentile-based contrast, not min-max) does
+      ``image.astype(np.float32)`` as its OWN first line, unconditionally, before touching the
+      input at all. So this caller does not depend on ``read_decimated`` handing it float32
+      already -- it would re-derive an equivalent float32 array safely even from a narrower
+      read, the same way qc.py's reverted widen-back did. Its safety is real but incidental:
+      it depends on ``normalize_image`` keeping that upfront cast, not on any contract
+      ``read_decimated`` makes. Do not use this caller as precedent that narrowing is free
+      elsewhere, and do not reintroduce a narrow-dtype parameter here without checking all
+      three callers' actual arithmetic (not just their apparent shape) and re-measuring
+      whether it is worth the complexity.
 
     Streams the plane in row bands and strides each band as it's read. Bands are written
     directly into a pre-allocated float32 destination array (never accumulated as a list and
@@ -147,8 +170,6 @@ def read_decimated(src, index, factor, band_bytes=DEFAULT_BAND_BYTES):
     """
     import numpy as _np
 
-    dtype = _np.float32
-
     c_n, h, w = src.shape
     if not 0 <= index < c_n:
         raise ValueError(f"--nuclear-index {index} out of range for C={c_n}")
@@ -157,7 +178,7 @@ def read_decimated(src, index, factor, band_bytes=DEFAULT_BAND_BYTES):
 
     out_h = -(-h // factor)  # ceil division: number of sampled rows 0, factor, 2*factor, ...
     out_w = -(-w // factor)
-    dest = _np.empty((out_h, out_w), dtype=dtype)
+    dest = _np.empty((out_h, out_w), dtype=_np.float32)
 
     out_row = 0
     for y0 in range(0, h, band):
