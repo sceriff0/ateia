@@ -35,12 +35,24 @@ source inspection, extracting the real ``MASK_TIFF_TILE`` value and confirming b
 importing the module.
 
 None of the three ML-backend writers is cheaply callable end-to-end (each needs a real
-model), so each is exercised the way the task brief allows: an ``imwrite`` call carrying
-the SAME keyword arguments as the writer's real call (``compression="zlib"``, ``bigtiff=True``,
-plus the writer's own tile size), rather than a bare literal, so a change to the constant
-is picked up here too. ``extract_mask_series.py`` IS cheaply callable (no heavy deps at
-all), so its test drives the real ``main()`` end to end, the way
-``tests/test_mask_series_write_contract.py`` does.
+model), so each writer's *pixel* round-trip and chunk-geometry properties are exercised
+the way the task brief allows: an ``imwrite`` call carrying the SAME keyword arguments as
+the writer's real call (``compression="zlib"``, ``bigtiff=True``, plus the writer's own
+tile size), rather than a bare literal, so a change to the constant is picked up here too.
+That alone is not enough, though: reading ``MASK_TIFF_TILE`` off an imported module and
+reconstructing an independent ``imwrite`` call proves the CONSTANT is well-formed, but
+proves nothing about whether the real ``imwrite`` calls inside ``run_cellsam()`` /
+``run_instanseg()`` actually pass it -- a constant defined and never used at its call site
+is the mirror image of this task's own free deletion (an unused ``_image_tensor`` binding
+in ``segment_instantseg.py``, PERF-PLAN 3.7). ``test_the_real_call_sites_pass_the_tile_constant``
+below is the AST call-site check that closes that gap, applied uniformly to all three
+ML-backend writers (``bin/segment_cellsam.py`` and ``bin/segment_instantseg.py`` don't need
+the AST workaround to be importable, but the SAME check is still the only thing that
+verifies their real call sites, so it is applied to all three rather than segment.py alone).
+``extract_mask_series.py`` IS cheaply callable (no heavy deps at all), so its test drives
+the real ``main()`` end to end, the way ``tests/test_mask_series_write_contract.py`` does --
+which already exercises its one real call site directly, so no separate AST check is
+needed for it.
 
 Two properties are pinned for every writer, per the task brief:
 
@@ -80,6 +92,8 @@ import segment_cellsam  # noqa: E402
 import segment_instantseg  # noqa: E402
 
 SEGMENT_PY = REPO_ROOT / "bin" / "segment.py"
+SEGMENT_CELLSAM_PY = REPO_ROOT / "bin" / "segment_cellsam.py"
+SEGMENT_INSTANTSEG_PY = REPO_ROOT / "bin" / "segment_instantseg.py"
 
 
 # ---------------------------------------------------------------------------
@@ -140,6 +154,15 @@ _TILE_BY_WRITER = {
     "segment_instantseg": segment_instantseg.MASK_TIFF_TILE,
 }
 
+# writer name -> source path, for the AST call-site check: proves the real imwrite calls
+# inside each backend's run function pass tile=(MASK_TIFF_TILE, MASK_TIFF_TILE), not just
+# that the constant exists.
+_SOURCE_PATH_BY_WRITER = {
+    "segment": SEGMENT_PY,
+    "segment_cellsam": SEGMENT_CELLSAM_PY,
+    "segment_instantseg": SEGMENT_INSTANTSEG_PY,
+}
+
 
 def _chunks(path):
     """The zarr chunk shape a real reader (``bin/utils/tiled_io.py:open_lazy``) sees."""
@@ -170,28 +193,40 @@ def _write_like(path, array, tile):
 
 
 # ---------------------------------------------------------------------------
-# the constant itself, and (for segment.py only) that both call sites use it
+# the constant itself, and that both real call sites in each ML backend use it
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("writer, tile", [*_TILE_BY_WRITER.items(), ("extract_mask_series", ems.MASK_TIFF_TILE)])
+_ALL_WRITER_TILES = [*_TILE_BY_WRITER.items(), ("extract_mask_series", ems.MASK_TIFF_TILE)]
+
+
+@pytest.mark.parametrize("writer, tile", _ALL_WRITER_TILES)
 def test_the_tile_constant_is_1024_and_a_valid_tifffile_tile_size(writer, tile):
     assert tile == 1024
     # tifffile requires each tile dimension to be a multiple of 16.
     assert tile % 16 == 0
 
 
-def test_segment_py_passes_the_tile_constant_at_both_mask_write_sites():
-    """The AST-inspection counterpart of the parametrized round-trip tests below.
+@pytest.mark.parametrize("writer, path", _SOURCE_PATH_BY_WRITER.items())
+def test_the_real_call_sites_pass_the_tile_constant(writer, path):
+    """The AST call-site check, applied uniformly to all three ML-backend writers.
 
-    ``bin/segment.py`` is never imported in this file (see module docstring), so nothing
-    else here would notice if its two ``tifffile.imwrite`` calls (nuclei mask, cell mask)
-    stopped passing ``tile=(MASK_TIFF_TILE, MASK_TIFF_TILE)``.
+    ``bin/segment_cellsam.py`` and ``bin/segment_instantseg.py`` ARE importable here, and
+    the round-trip/chunk-geometry tests above already read their real ``MASK_TIFF_TILE``
+    off the imported module -- but that only proves the constant is well-formed, not that
+    either module's real ``run_cellsam()`` / ``run_instanseg()`` nuclei/cell-mask
+    ``tifffile.imwrite`` calls actually pass it. A constant defined and never used at its
+    call site would be invisible to every other test in this file (``_write_like``
+    reconstructs an independent call from the constant, it never touches the real one) --
+    and is the mirror image of this task's own free deletion (an unused ``_image_tensor``
+    binding in ``segment_instantseg.py``, PERF-PLAN 3.7). This is the check that closes
+    that gap, reusing the same AST walk ``bin/segment.py`` needed anyway because it can't
+    be imported here at all.
     """
-    n = _count_imwrite_tile_kwarg_call_sites(SEGMENT_PY, "MASK_TIFF_TILE")
+    n = _count_imwrite_tile_kwarg_call_sites(path, "MASK_TIFF_TILE")
     assert n == 2, (
         f"expected both the nuclei-mask and cell-mask tifffile.imwrite calls in "
-        f"segment.py to pass tile=(MASK_TIFF_TILE, MASK_TIFF_TILE), found {n} that do"
+        f"{path.name} to pass tile=(MASK_TIFF_TILE, MASK_TIFF_TILE), found {n} that do"
     )
 
 
