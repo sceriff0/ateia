@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Mid-rung runner: generate each synthetic pair once, then register it with
-# every method through the REAL Nextflow pipeline.
+# every method through the REAL Nextflow pipeline -- except "identity", the
+# do-nothing baseline, which is scored directly against ground truth with no
+# pipeline run at all (see Step 2 below).
 #
 # WHY THE REAL PIPELINE HERE and not the in-process unit driver
 # (benchmarks/stare_bench/run_unit.py): the <=8 GB-per-process and fan-out
@@ -171,6 +173,23 @@ while IFS=, read -r run_id pair_id method rest; do
   mkdir -p "$outdir"
   echo ">>> $run_id (pair=$pair_id method=$method)"
 
+  # "identity" is the do-nothing baseline (zero displacement everywhere),
+  # not a registration method -- there is no pipeline to run and no
+  # transform to find. Score it directly against the pair's ground truth.
+  if [[ "$method" == "identity" ]]; then
+    python3 -m benchmarks.stare_bench.cli \
+      --pair-dir "$PAIRS_ROOT/$pair_id" \
+      --work-dir "$outdir/cli_work" \
+      --run-id "$run_id" \
+      --method identity \
+      --tile 2048 \
+      --halo 256 \
+      --out "$scored"
+    continue
+  fi
+
+  mkdir -p "$outdir/trace"
+
   # Pin the work directory PER RUN. All 396 invocations sharing the default
   # ./work would let conf/modules.config's errorStrategy 'ignore' branch (a
   # dropped task that never fails the run) plus the tiled fan-out's memory
@@ -182,9 +201,10 @@ while IFS=, read -r run_id pair_id method rest; do
     --input "$PAIRS_ROOT/$pair_id/samplesheet.csv" \
     --outdir "$outdir" \
     --registration_method "$method" \
+    --reg_tiled_mode high \
     --start registration --stop registration \
     --reg_qc 2 \
-    -with-trace "$outdir/trace.txt"
+    -with-trace "$outdir/trace/trace.txt"
 
   transform="$(find_transform "$outdir" "$pair_id" "$method")"
   if [[ -z "$transform" ]]; then
