@@ -35,9 +35,9 @@ COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt \
     && pip install --no-cache-dir torch==2.3.1 --index-url https://download.pytorch.org/whl/cpu \
     && pip install --no-cache-dir kornia==0.7.3 \
-    && python -c "import numpy, scipy, skimage, tifffile, torch, kornia; \
+    && python -c "import numpy, scipy, skimage, tifffile, zarr, torch, kornia; \
 print('stare-ml image OK:', numpy.__version__, scipy.__version__, skimage.__version__, \
-tifffile.__version__, torch.__version__, kornia.__version__, 'cuda_available=', torch.cuda.is_available())" \
+tifffile.__version__, zarr.__version__, torch.__version__, kornia.__version__, 'cuda_available=', torch.cuda.is_available())" \
     && ps -e -o pid= -o ppid= > /dev/null && echo "procps OK: nextflow task-metrics wrapper can run"
 
 ENV PYTHONUNBUFFERED=1

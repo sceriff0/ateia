@@ -7,3 +7,10 @@ numpy==1.26.4
 scipy==1.15.3
 scikit-image==0.25.2
 tifffile==2025.5.10
+# tiled_coarse.py's first real action is open_lazy() (bin/utils/tiled_io.py), which
+# unconditionally `import zarr`; tifffile also needs imagecodecs to decode LZW/zstd OME-TIFFs.
+# Pinned identically to containers/tiled/requirements.txt -- these three MUST NOT drift from
+# that file, since both images run the same entrypoint.
+zarr==2.18.3          # lazy region reads for the streaming gigapixel stitch (tifffile aszarr)
+numcodecs==0.13.1     # pinned: newer numcodecs drops blosc.cbuffer_sizes that zarr 2.18 imports
+imagecodecs==2025.3.30 # zstd/LZW codecs for the stitched OME-TIFF
