@@ -9,16 +9,49 @@ The companion test builds a field deliberately ON such a grid and asserts the
 guard catches it -- without that, a guard that always passes looks identical to
 a guard that works.
 """
+import re
+from pathlib import Path
+
 import numpy as np
 import pytest
 from scipy.interpolate import RegularGridInterpolator
 
+from benchmarks.stare_bench import fields as fields_mod
 from benchmarks.stare_bench.fields import Field, make_field
 
 REG_TILED_TILE = 2048  # nextflow.config, reg_tiled_mode=high
 SHAPE = (4096, 4096)
 # Below this, the control grid has reproduced the field and the firewall is gone.
 MIN_RESIDUAL_FRACTION = 0.25
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+REG_PRESETS_GROOVY = REPO_ROOT / "lib" / "RegPresets.groovy"
+_HIGH_ROW_RE = re.compile(r"high\s*:\s*\[([^\]]*)\]")
+_TILE_KEY_RE = re.compile(r"tile\s*:\s*(\d+)")
+
+
+def _high_tile_from_reg_presets():
+    """Parse the ACTUAL `tile` value out of `RegPresets.STARE`'s `high` row.
+
+    `lib/RegPresets.groovy` is the one real source of STARE's control-grid
+    spacing at `reg_tiled_mode=high` (nextflow.config's shipped default).
+    `fields.py`, `plan.py` and this module each hardcode a copy
+    (`REG_TILED_TILE = 2048`) that is correct today but tied to nothing: a
+    mid-rung run at a different `reg_tiled_mode` (e.g. `medium`, tile 1024)
+    would leave the firewall's `MAX_COARSE_PITCH_PX` exactly twice as lax as
+    it needs to be, and nothing would notice. This reads the same discipline
+    `tests/test_resource_label_coverage.py` uses for its resource numbers:
+    parse the doc/source that is supposed to be authoritative, don't trust
+    the copy from memory.
+    """
+    text = REG_PRESETS_GROOVY.read_text()
+    high_row = _HIGH_ROW_RE.search(text)
+    assert high_row, (
+        f"could not find RegPresets.STARE's 'high' row in {REG_PRESETS_GROOVY}"
+    )
+    tile = _TILE_KEY_RE.search(high_row.group(1))
+    assert tile, f"could not find a 'tile' key in the 'high' row: {high_row.group(1)!r}"
+    return int(tile.group(1))
 
 
 def _fit_control_grid_residual(field, shape, tile):
@@ -104,6 +137,23 @@ def test_correlation_length_is_never_a_multiple_of_the_tile():
     for corr in (777.0, 333.0, 1111.0):
         assert corr % REG_TILED_TILE != 0
         assert REG_TILED_TILE % corr != 0
+
+
+def test_reg_tiled_tile_matches_the_high_preset_in_reg_presets_groovy():
+    """Pin the hardcoded copy to the real source.
+
+    `fields.REG_TILED_TILE` (and this module's own `REG_TILED_TILE`) are
+    correct today only because `reg_tiled_mode=high`'s tile happens to still
+    be 2048 in `lib/RegPresets.groovy`. Nothing ties them together, so a
+    preset change would silently desynchronise the firewall from what the
+    pipeline actually runs. (`plan.py` no longer keeps its own copy: its
+    validation now calls `fields.make_field` directly -- see
+    `plan._validate_fields_are_independent`.) See this test's own module
+    docstring / `_high_tile_from_reg_presets` for why that matters.
+    """
+    high_tile = _high_tile_from_reg_presets()
+    assert fields_mod.REG_TILED_TILE == high_tile
+    assert REG_TILED_TILE == high_tile
 
 
 def test_the_guard_catches_it_on_a_non_square_shape_too():
