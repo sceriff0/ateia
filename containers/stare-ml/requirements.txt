@@ -1,0 +1,9 @@
+# STARE learned global-alignment front-end (registration_method='tiled', -profile stare_ml)
+# Same CPU scientific-Python floor as containers/tiled -- this image runs the SAME
+# TILED_COARSE entrypoint (bin/tiled_coarse.py / bin/utils/coarse_align.py), just with
+# torch + kornia added underneath for frontend='disk_lightglue'. Pinned to the repo's
+# harmonised versions (tests/test_container_harmonisation.py::HARMONISED).
+numpy==1.26.4
+scipy==1.15.3
+scikit-image==0.25.2
+tifffile==2025.5.10
