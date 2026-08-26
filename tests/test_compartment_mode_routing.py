@@ -182,10 +182,16 @@ ALLOWED_LINES = {
         # inherit it silently) -- and -15 for deleting the byte-identical SECOND copy of
         # the TILED_COARSE block and its comment, which had sat above this line unnoticed
         # (harmless under config merge, last-one-wins). Same composition check as above --
-        # 1064 + 54 - 15 = 1103. Re-pin, do not
+        # 1064 + 54 - 15 = 1103.
+        # 1103 -> 1119 when SEGMENT's `clusterOptions` closure (above this line) was fixed
+        # to compose --account/--qos instead of replacing them outright (PERF-PLAN 5.1): a
+        # `withName:` assignment REPLACES process.clusterOptions rather than adding to it,
+        # so SEGMENT's GPU-only closure was silently dropping the `slurm` profile's
+        # --account/--qos composition. The one-line closure became a 10-line explanatory
+        # comment plus a 7-line inlined closure (net +16): 1103 + 16 = 1119. Re-pin, do not
         # widen. (Re-pin from the file, not by guessing:
         # `grep -n "params.expanded_quantification ?" conf/modules.config`.)
-        1103: (
+        1119: (
             "ext.args = { params.expanded_quantification ? '--expanded' : "
             "'' } -- conf/*.config closures cannot see lib/*.groovy classes, "
             "so ext.args must read params raw here."
