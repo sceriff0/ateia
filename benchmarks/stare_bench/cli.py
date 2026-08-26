@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -13,7 +14,7 @@ from .fields import make_field
 from .metrics.epe import epe
 from .metrics.field_quality import jacobian_stats, lipschitz
 from .metrics.gate_roc import gate_auc, gate_roc
-from .run_unit import predict_from_manifest, run_stare
+from .run_unit import BIN, predict_from_manifest, run_stare
 
 __all__ = ["score_pair", "main"]
 
@@ -56,29 +57,33 @@ def _tre_summary(truth, predict):
     return summarize(per_landmark_tre(warped, target), image_diagonal(w, h))
 
 
-def _reconstruct_accept(control, max_error, max_disp):
-    """Mirror ``bin/tiled_solve.py:_accept`` exactly, including NaN handling.
+def _accept_impl():
+    """Import ``bin/tiled_solve.py``'s real ``_accept``, lazily.
 
-    This is a RECONSTRUCTION from the control-point JSON, not a call into
-    ``_accept`` itself, so it must match that function's rule precisely or the
-    gate ROC measures a decision STARE never actually made. In particular:
-    the range gate (``|d| >= max_disp``) is checked first and independently,
-    a missing ``"error"`` key accepts unconditionally (legacy contract), and
-    the confidence gate is written as ``not (error <= max_error)`` -- NOT
-    ``error > max_error`` -- specifically so a NaN error (scikit-image's
-    return for an empty crop, upstream issue #7078) REJECTS rather than
-    silently passes a comparison against NaN.
+    The gate ROC's validity rests on reconstructing exactly what the pipeline
+    does, so this calls the pipeline's own rule rather than a local copy of
+    it -- a copy could silently drift from ``_accept`` and the benchmark
+    would then measure a decision STARE no longer makes. Mirrors
+    ``run_unit.py:predict_from_manifest``'s own pattern for reaching into
+    ``bin/`` at call time rather than at import time.
     """
-    if max_disp is not None:
-        d = float(np.hypot(control["dx"], control["dy"]))
-        if d >= max_disp:
-            return False
-    if "error" not in control:
-        return True
-    error = float(control["error"])
-    if max_error is not None and not (error <= max_error):
-        return False
-    return True
+    bin_dir = str(BIN)
+    if bin_dir not in sys.path:
+        sys.path.insert(0, bin_dir)
+    from tiled_solve import _accept
+
+    return _accept
+
+
+def _reconstruct_accept(control, max_error, max_disp):
+    """Whether ``bin/tiled_solve.py``'s gate would keep this control point.
+
+    A thin wrapper around the real ``_accept`` (imported via ``_accept_impl``)
+    so ``score_pair`` doesn't need to know ``_accept`` returns
+    ``(accepted, reason)``.
+    """
+    accept = _accept_impl()
+    return accept(control, max_error, max_disp)[0]
 
 
 def score_pair(pair_dir, work_dir, *, method, run_id, tile, halo, upsample,
@@ -86,6 +91,14 @@ def score_pair(pair_dir, work_dir, *, method, run_id, tile, halo, upsample,
     """Register one pair and reduce it to a single accuracy row."""
     pair_dir = Path(pair_dir)
     truth = json.loads((pair_dir / "truth.json").read_text())
+    if int(tile) != int(truth["tile"]):
+        raise ValueError(
+            f"tile={tile} does not match this pair's generation tile "
+            f"truth['tile']={truth['tile']}: truth['tile_labels'] is keyed to "
+            "the GENERATION grid's (ix, iy), so scoring with a different "
+            "registration tile would silently pair the gate-ROC decisions "
+            "with unrelated tile-label cells."
+        )
     shape = tuple(truth["size"])
     field = make_field(truth["field_family"], shape, **truth["field_params_call"])
 

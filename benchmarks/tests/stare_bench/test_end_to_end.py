@@ -3,7 +3,7 @@ import csv
 import numpy as np
 import pytest
 
-from benchmarks.stare_bench.cli import _tre_summary, main, score_pair
+from benchmarks.stare_bench.cli import _accept_impl, _tre_summary, main, score_pair
 from benchmarks.stare_bench.emit import ACCURACY_COLUMNS
 from benchmarks.stare_bench.fields import make_field
 from benchmarks.stare_bench.generate import generate_pair
@@ -84,6 +84,34 @@ def test_ground_truth_predictor_scores_near_zero_landmark_tre(tmp_path):
     summary = _tre_summary(truth, perfect_predict)
     assert summary["mean_px"] < 1.0
     assert summary["median_px"] < 1.0
+
+
+def test_gate_reconstruction_uses_the_real_accept():
+    """The gate-ROC reconstruction must call bin/tiled_solve.py's OWN
+    ``_accept``, not a local copy of its rule.
+
+    A copy can silently drift from the pipeline it is supposed to describe,
+    which would make the gate ROC measure a decision STARE no longer makes.
+    Asserting ``__module__`` fails loudly if a later "simplification" swaps
+    the import back for an inline reimplementation.
+    """
+    accept = _accept_impl()
+    assert accept.__module__ == "tiled_solve"
+
+
+def test_score_pair_raises_on_tile_mismatch(tmp_path):
+    """``truth["tile_labels"]`` is keyed to the pair's GENERATION tile grid,
+    not whatever tile ``score_pair`` is asked to register with. Scoring with
+    a mismatched tile would silently pair STARE's per-tile accept decisions
+    with unrelated tile-label cells and report a plausible-looking but
+    meaningless confusion matrix.
+    """
+    pair = tmp_path / "pair"
+    generate_pair(pair, (1024, 1024), seed=51, tile=256,
+                  crop_source=SyntheticCropSource(), physics_params={})
+    with pytest.raises(ValueError, match="tile"):
+        score_pair(pair, tmp_path / "work", method="tiled", run_id="unit",
+                   tile=128, halo=64, upsample=10, max_error=0.99)
 
 
 def _tre_summary_wrong(truth, predict):
