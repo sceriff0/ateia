@@ -30,12 +30,27 @@ __all__ = [
 
 # Keys that name a self-reported (circular) quantity. They may only reach the
 # table through the explicit `intrinsic_tre` argument, which lands under diag_.
+# final_p50_px/final_p90_px/rigid_p90_px are the spellings
+# benchmarks/registration_eval/eval_tre.py:read_stare_tre re-flattens the SAME
+# circular STARE post-mesh residual under -- same quantity, different label.
 FORBIDDEN_IN_ACCURACY = {
     "intrinsic_tre",
     "stare_tre",
     "coarse_tre_px",
     "rigid_p50_px",
     "residual_after_px",
+    "final_p50_px",
+    "final_p90_px",
+    "rigid_p90_px",
+}
+
+# epe_stats keys accuracy_row's own output depends on -- unlike the "genuinely
+# optional" .get()-based fields elsewhere in this module (intrinsic_tre; the
+# field_params sub-keys some field families don't define), a missing one of
+# these must fail loudly rather than write a silent None into an audit column
+# whose entire purpose is telling a reader whether percentiles are exact.
+_REQUIRED_EPE_KEYS = {
+    "mean_px", "median_px", "p95_px", "max_px", "n", "subsample_effective",
 }
 
 ACCURACY_COLUMNS = [
@@ -63,11 +78,18 @@ def _check_clean(*dicts):
             )
 
 
+def _check_required(d, required, label):
+    missing = sorted(required - set(d or {}))
+    if missing:
+        raise ValueError(f"{label} is missing required keys: {missing}")
+
+
 def accuracy_row(*, run_id, method, pair_id, truth, epe_stats, gate_stats,
                   gate_auc_value, jac_stats, lip_stats, tre_summary,
                   intrinsic_tre=None):
     """One row of registration_synthetic_gt.csv."""
     _check_clean(epe_stats, gate_stats, jac_stats, lip_stats, tre_summary)
+    _check_required(epe_stats, _REQUIRED_EPE_KEYS, "epe_stats")
     fp = truth.get("field_params", {})
     return {
         "run_id": run_id,
@@ -109,11 +131,28 @@ def accuracy_row(*, run_id, method, pair_id, truth, epe_stats, gate_stats,
 
 
 def write_accuracy_csv(rows, path):
-    """Write rows in ACCURACY_COLUMNS order, always including the header."""
+    """Write rows in ACCURACY_COLUMNS order, always including the header.
+
+    Every row must carry EXACTLY the ACCURACY_COLUMNS keys -- no more, no
+    fewer. Building `{k: row.get(k) for k in ACCURACY_COLUMNS}` before
+    handing a row to `csv.DictWriter` would silently drop an unexpected extra
+    key and silently blank a missing one, defeating DictWriter's own
+    `extrasaction='raise'` default. Validate explicitly instead.
+    """
+    columns = set(ACCURACY_COLUMNS)
+    for row in rows:
+        keys = set(row)
+        extra = sorted(keys - columns)
+        missing = sorted(columns - keys)
+        if extra or missing:
+            raise ValueError(
+                f"row does not match ACCURACY_COLUMNS: extra={extra} "
+                f"missing={missing}"
+            )
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=ACCURACY_COLUMNS)
         writer.writeheader()
         for row in rows:
-            writer.writerow({k: row.get(k) for k in ACCURACY_COLUMNS})
+            writer.writerow(row)

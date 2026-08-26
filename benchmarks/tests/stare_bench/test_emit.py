@@ -65,6 +65,24 @@ def test_a_self_reported_metric_cannot_be_smuggled_into_an_accuracy_column():
                      tre_summary=TRE)
 
 
+def test_a_read_stare_tre_spelling_of_the_same_residual_is_also_forbidden():
+    # benchmarks/registration_eval/eval_tre.py:read_stare_tre re-flattens the SAME
+    # circular STARE post-mesh residual under this name; it must be caught too.
+    with pytest.raises(ValueError, match="diagnostic"):
+        accuracy_row(run_id="r1", method="tiled", pair_id="p1", truth=TRUTH,
+                     epe_stats=EPE, gate_stats=GATE, gate_auc_value=0.9,
+                     jac_stats=JAC, lip_stats=LIP,
+                     tre_summary={**TRE, "final_p50_px": 0.3})
+
+
+def test_accuracy_row_requires_all_epe_stats_keys():
+    incomplete = {k: v for k, v in EPE.items() if k != "subsample_effective"}
+    with pytest.raises(ValueError, match="subsample_effective"):
+        accuracy_row(run_id="r1", method="tiled", pair_id="p1", truth=TRUTH,
+                     epe_stats=incomplete, gate_stats=GATE, gate_auc_value=0.9,
+                     jac_stats=JAC, lip_stats=LIP, tre_summary=TRE)
+
+
 def test_write_accuracy_csv_round_trips(tmp_path):
     out = tmp_path / "registration_synthetic_gt.csv"
     write_accuracy_csv([_row()], out)
@@ -73,3 +91,16 @@ def test_write_accuracy_csv_round_trips(tmp_path):
     assert len(rows) == 1
     assert rows[0]["method"] == "tiled"
     assert list(rows[0]) == ACCURACY_COLUMNS
+
+
+def test_write_accuracy_csv_rejects_a_row_with_an_extra_key(tmp_path):
+    row = {**_row(), "unexpected_extra_column": 1.0}
+    with pytest.raises(ValueError, match="unexpected_extra_column"):
+        write_accuracy_csv([row], tmp_path / "out.csv")
+
+
+def test_write_accuracy_csv_rejects_a_row_missing_a_key(tmp_path):
+    row = _row()
+    del row["method"]
+    with pytest.raises(ValueError, match="method"):
+        write_accuracy_csv([row], tmp_path / "out.csv")
