@@ -370,7 +370,7 @@ it only traces contours, which is pure CPU.
 
 | Engine | What is added |
 |---|---|
-| SLURM | `clusterOptions = --gres=gpu:${params.gpu_type}` — default `nvidia_h200:1` |
+| SLURM | `clusterOptions` composes `--gres=gpu:${params.gpu_type}` (default `nvidia_h200:1`) with the `slurm` profile's `--account`/`--qos`, inlined per-block since a `withName:` assignment replaces rather than merges with the profile's own `clusterOptions` — see `conf/modules.config`'s `SEGMENT` block |
 | Docker | `containerOptions = --gpus all` |
 | Singularity | `containerOptions = --nv` |
 

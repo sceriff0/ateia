@@ -1,18 +1,26 @@
-"""Equivalence tests for the memory-bounded median in compute_compartment_intensities.
+"""Equivalence tests for the per-label median in compute_compartment_intensities.
 
-The median computation was rewritten from a per-pixel pandas DataFrame + groupby
-(one row per foreground pixel — O(image size), a WSI-scale memory blowup) to
-scipy.ndimage.labeled_comprehension operating directly on the existing label/value
-arrays (bounded memory). This test asserts the new path is numerically IDENTICAL
-to the old one:
+The median computation has gone through two rewrites. First, from a per-pixel
+pandas DataFrame + groupby (one row per foreground pixel — O(image size), a
+WSI-scale memory blowup) to scipy.ndimage.labeled_comprehension operating
+directly on the existing label/value arrays (bounded memory, but still one
+Python callback per label). Second — the fast path this branch adds — to
+`_median_per_label_from_sorted`: a composite-key sort of (label, value) pairs
+that reads each compartment's median directly off contiguous sorted runs, no
+per-label callback at all. That fast path only handles the uint16 dtype the
+pipeline actually produces (it composes a `(label << 16) | value` sort key that
+needs 16 spare bits); any other dtype falls back to
+`scipy.ndimage.labeled_comprehension`, which stays in the module for exactly
+that case. This test asserts the fast path is numerically IDENTICAL to both
+prior implementations:
 
   1. against an independent per-label np.median reference, and
   2. against a verbatim copy of the OLD per-pixel-DataFrame groupby-median logic,
      on randomized synthetic images (seeded with np.random.default_rng(0)).
 
 Empty-label and even-count (median-of-two-middles) semantics are covered
-explicitly, since those are exactly the cases where a naive scipy/pandas swap
-could silently diverge.
+explicitly, since those are exactly the cases where a naive rewrite could
+silently diverge.
 """
 
 import importlib.util
