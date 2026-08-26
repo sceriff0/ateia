@@ -125,6 +125,21 @@ def test_from_trace_flags_a_breach_of_the_eight_gb_claim():
     assert from_trace(df)["exceeds_8gb"] is True
 
 
+def test_from_trace_reports_exceeds_8gb_as_unmeasured_on_an_empty_trace():
+    # On an empty frame, peak.max() is NaN and bool(nan > 8.0) is False --
+    # a compliance claim ("did not exceed 8 GB") derived from zero measured
+    # tasks. exceeds_8gb must come back None (unmeasured), not a fabricated
+    # False.
+    df = pd.DataFrame({
+        "process": pd.Series([], dtype=str),
+        "peak_rss_gb": pd.Series([], dtype=float),
+        "realtime_s": pd.Series([], dtype=float),
+        "cpus": pd.Series([], dtype=float),
+    })
+    got = from_trace(df)
+    assert got["exceeds_8gb"] is None
+
+
 def test_determinism_detects_a_changed_value():
     a = {"mean_px": 1.0, "median_px": 2.0}
     b = {"mean_px": 1.0, "median_px": 2.5}

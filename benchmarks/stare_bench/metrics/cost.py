@@ -110,7 +110,11 @@ def from_trace(trace_df):
         "peak_rss_gb": max_peak,
         "cpu_hours": float((realtime * cpus).sum() / 3600.0),
         "n_tasks": int(len(trace_df)),
-        "exceeds_8gb": bool(max_peak > MEMORY_CLAIM_GB),
+        # On an empty (or otherwise NaN-producing) trace, `peak.max()` is NaN
+        # and `bool(nan > MEMORY_CLAIM_GB)` is `False` -- a compliance claim
+        # derived from zero measured tasks. Report UNMEASURED (None) instead
+        # of a fabricated "did not exceed 8 GB".
+        "exceeds_8gb": None if pd.isna(max_peak) else bool(max_peak > MEMORY_CLAIM_GB),
     }
 
 

@@ -52,6 +52,16 @@ def test_zero_field_is_trivially_convergent():
     assert got["converges"] is True
 
 
+def test_lipschitz_reports_unmeasured_not_convergent_on_a_zero_size_raster():
+    # A zero-size raster measures nothing. Before this fix, "converges: True"
+    # read as a convergence claim from no data -- jacobian_stats' own empty
+    # branch already returns NaN for exactly this case.
+    got = lipschitz(lambda xy: np.zeros_like(xy), (0, 256), tile=64)
+    assert got["n"] == 0
+    assert np.isnan(got["lipschitz"])
+    assert np.isnan(got["converges"])
+
+
 def test_folding_rate_and_det_min_are_exact_regardless_of_max_points():
     # folding_rate/det_min/n are running scalar accumulators over the FULL
     # field -- they must not depend on how aggressively the (separate)

@@ -9,8 +9,6 @@ run_mid.sh's own header for what a real invocation needs.
 import subprocess
 from pathlib import Path
 
-import pytest
-
 SCRIPT = Path("benchmarks/stare_bench/run_mid.sh")
 
 
@@ -59,8 +57,14 @@ def test_script_does_not_pass_lazy_images():
     assert "lazy_images = True" not in SCRIPT.read_text()
 
 
-@pytest.mark.parametrize("method", ["tiled", "valis", "ashlar"])
-def test_score_pair_accepts_every_method(method):
+def test_score_pair_accepts_a_method_argument():
+    # Real per-method coverage (that a transform for "tiled"/"ashlar" is read
+    # through the manifest schema, that "valis" reads a registrar pickle, and
+    # that both derive the moving-slide name rather than assuming "mov")
+    # lives in test_end_to_end.py, which can actually exercise score_pair
+    # end to end. This check only guards the static signature this runner
+    # depends on -- it was previously parametrized over methods it never
+    # used, asserting the identical thing three times.
     import inspect
 
     from benchmarks.stare_bench.cli import score_pair

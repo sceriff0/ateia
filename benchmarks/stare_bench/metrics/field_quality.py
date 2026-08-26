@@ -165,4 +165,10 @@ def lipschitz(predict, shape, tile=512, step=1.0):
             best = max(best, float(sigma.max()))
             n += int(sigma.size)
 
+    if n == 0:
+        # A zero-size raster measured nothing -- "converges: True" would be a
+        # convergence claim from no data. Mirror jacobian_stats' own empty
+        # branch (NaN, not a fabricated default) rather than a bare True.
+        return {"lipschitz": float("nan"), "converges": float("nan"), "n": 0}
+
     return {"lipschitz": best, "converges": bool(best < 1.0), "n": n}

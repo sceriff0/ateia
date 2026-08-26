@@ -128,6 +128,17 @@ def generate_pair(out_dir, size, seed, *, field_family="random_fourier",
 
     field = make_field(field_family, (h, w), seed=seed, **field_params)
 
+    # Resolved ONCE, here, before the hash: both `n_landmarks` and the
+    # resolved `write_dense_field` are real generator inputs -- they change
+    # what gets written to disk -- so they belong in the hashed payload, not
+    # only in the post-hash `truth` dict. Resolving the None-means-derive
+    # default up front (rather than separately in the lazy and real-image
+    # branches below) also means the SAME value that gets hashed is the one
+    # that decides whether `field.npy` is written.
+    resolved_write_dense_field = (
+        (h * w <= DENSE_MAX_PIXELS) if write_dense_field is None else bool(write_dense_field)
+    )
+
     payload = {
         "generator_version": __version__,
         "seed": int(seed),
@@ -137,6 +148,8 @@ def generate_pair(out_dir, size, seed, *, field_family="random_fourier",
         "physics_params": physics_params,
         "crop_source": describe(crop_source),
         "tile": int(tile),
+        "n_landmarks": int(n_landmarks),
+        "write_dense_field": resolved_write_dense_field,
     }
     truth = dict(payload)
     truth["param_hash"] = param_hash(payload)
@@ -150,9 +163,7 @@ def generate_pair(out_dir, size, seed, *, field_family="random_fourier",
         # decoy that would pass for any size.
         truth["landmarks"] = []
         truth["tile_labels"] = []
-        if write_dense_field is None:
-            write_dense_field = h * w <= DENSE_MAX_PIXELS
-        truth["dense_field_written"] = bool(write_dense_field)
+        truth["dense_field_written"] = resolved_write_dense_field
         (out_dir / "truth.json").write_text(json.dumps(truth, indent=2))
         return truth
 
@@ -176,11 +187,9 @@ def generate_pair(out_dir, size, seed, *, field_family="random_fourier",
     truth["landmarks"] = lm.tolist()
     truth["tile_labels"] = tile_labels(retained, (h, w), tile, field)
 
-    if write_dense_field is None:
-        write_dense_field = h * w <= DENSE_MAX_PIXELS
-    if write_dense_field:
+    if resolved_write_dense_field:
         np.save(out_dir / "field.npy", field.dense().astype(np.float32))
-    truth["dense_field_written"] = bool(write_dense_field)
+    truth["dense_field_written"] = resolved_write_dense_field
 
     (out_dir / "truth.json").write_text(json.dumps(truth, indent=2))
     return truth

@@ -42,7 +42,7 @@ def gate_roc(labels, accepted):
 
     precision = tp / (tp + fp) if (tp + fp) else float("nan")
     recall = tp / (tp + fn) if (tp + fn) else float("nan")
-    if precision + recall > 0 and not np.isnan(precision + recall):
+    if precision + recall > 0:
         f1 = 2 * precision * recall / (precision + recall)
     else:
         f1 = float("nan")

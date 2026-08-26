@@ -110,9 +110,17 @@ class TiffCropSource(CropSource):
 
 
 def describe(source):
-    """Provenance dict for truth.json."""
+    """Provenance dict for truth.json.
+
+    For a ``TiffCropSource`` this includes the actual slide ``paths``, not
+    just their count: ``generate.param_hash`` hashes this dict, and two
+    different institutional crop sets with the same slide COUNT and channel
+    would otherwise hash identically, silently claiming to be the same
+    generator input.
+    """
     meta = {"kind": source.kind, "releasable": source.kind == "synthetic"}
     if isinstance(source, TiffCropSource):
         meta["n_slides"] = len(source.paths)
         meta["channel"] = source.channel
+        meta["paths"] = list(source.paths)
     return meta
