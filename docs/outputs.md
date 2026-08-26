@@ -129,7 +129,9 @@ results/                              # = --outdir
 │   │   ├── registered_slides/        # *_registered.ome.tiff — REGISTER (VALIS)
 │   │   ├── registered/               # *_registered.ome.tiff — TILED_STITCH
 │   │   ├── manifest/                 # *_manifest.json       — tiled backend
-│   │   └── summary/                  # *.csv                 — VALIS error summary
+│   │   ├── summary/                  # *.csv                 — VALIS error summary
+│   │   ├── transform/                # *_registrar.pickle    — REGISTER (VALIS); see caveat below
+│   │   └── controls/                 # *_ctrl.json, per tile — TILED_REG_TILE (tiled backend)
 │   ├── segmentation/                 # *_cell_mask.tif, *_nuclei_mask.tif  — SEGMENT
 │   ├── cell_properties/
 │   │   ├── morphology.csv            # EXTRACT_CELL_PROPERTIES
@@ -174,6 +176,12 @@ results/                              # = --outdir
     so the real path is `<pid>/qc/preprocess/qc/*.png`, not
     `<pid>/qc/preprocess/*.png`. The tree above used to show the flattened form.
     `WARP_SEG_QC` and `SEG_QC_GEOJSON` declare flat patterns and are unaffected.
+
+!!! warning "`registered/transform/*_registrar.pickle` is a Python pickle"
+    It is the pipeline's own output — this is a caveat, not a blocker — but a
+    pickle's `load()` executes arbitrary code as a side effect of deserializing,
+    and this one embeds absolute host paths and slide filenames from the run
+    that produced it. Only load a registrar pickle from an `--outdir` you trust.
 
 ### Trace outputs
 
