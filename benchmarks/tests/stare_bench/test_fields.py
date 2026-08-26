@@ -4,6 +4,7 @@ import pytest
 from benchmarks.stare_bench.fields import (
     DENSE_MAX_PIXELS,
     FAMILIES,
+    MAX_COARSE_PITCH_PX,
     make_field,
 )
 
@@ -55,3 +56,26 @@ def test_dense_refuses_to_materialise_a_gigapixel_field():
 def test_random_fourier_correlation_length_is_recorded():
     f = make_field("random_fourier", (256, 256), seed=1, correlation_px=333.0)
     assert f.params["correlation_px"] == 333.0
+
+
+def test_random_fourier_rejects_pitch_colliding_with_stare_grid():
+    # correlation_px=16000 is not a multiple of 2048, but at this shape it
+    # derives a coarse-grid pitch of ~2048 px -- an almost-exact collision
+    # with STARE's control-grid spacing, which is the real invariant to guard.
+    with pytest.raises(ValueError, match="pitch"):
+        make_field(
+            "random_fourier", (51200, 51200), seed=1, correlation_px=16000.0
+        )
+
+
+@pytest.mark.parametrize("shape", [(4096, 4096), (51200, 51200)])
+@pytest.mark.parametrize("correlation_px", [333.0, 777.0, 1111.0])
+def test_random_fourier_accepts_committed_correlation_lengths(shape, correlation_px):
+    make_field("random_fourier", shape, seed=1, correlation_px=correlation_px)
+
+
+def test_random_fourier_derived_pitch_is_below_max_at_777():
+    f = make_field("random_fourier", (4096, 4096), seed=1, correlation_px=777.0)
+    _, gw = f.params["coarse_shape"]
+    pitch = (4096 - 1) / (gw - 1)
+    assert pitch < MAX_COARSE_PITCH_PX

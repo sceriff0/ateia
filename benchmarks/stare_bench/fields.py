@@ -17,12 +17,28 @@ from __future__ import annotations
 
 import numpy as np
 
-__all__ = ["Field", "make_field", "FAMILIES", "DENSE_MAX_PIXELS"]
+__all__ = [
+    "Field",
+    "make_field",
+    "FAMILIES",
+    "DENSE_MAX_PIXELS",
+    "REG_TILED_TILE",
+    "MAX_COARSE_PITCH_PX",
+]
 
 FAMILIES = ("random_fourier", "affine", "adversarial")
 
-# 64 Mpx * 2 components * 4 bytes = 512 MB, the largest dense field we will hold.
+# 64 Mpx * 2 components * 8 bytes (dtype=float, i.e. float64) = ~1 GB, the
+# largest dense field we will hold.
 DENSE_MAX_PIXELS = 64_000_000
+
+# STARE's reg_tiled_tile at its default reg_tiled_mode=high.
+REG_TILED_TILE = 2048
+
+# The random_fourier coarse-grid pitch must stay well below STARE's own
+# control-grid spacing, or STARE's grid could represent the "ground truth"
+# almost exactly -- the circularity this module exists to forbid.
+MAX_COARSE_PITCH_PX = REG_TILED_TILE / 4
 
 
 class Field:
@@ -60,9 +76,14 @@ def _random_fourier(shape, seed, correlation_px=512.0, amplitude_px=12.0,
                     rolloff=3.0):
     """Band-limited random field: power-law spectrum, inverse FFT, interpolated.
 
-    ``correlation_px`` sets the characteristic scale. It must never be a
-    multiple of ``reg_tiled_tile`` -- a field whose scale aligned with STARE's
-    control grid would let STARE win for a reason unrelated to being better.
+    ``correlation_px`` sets the characteristic scale (coarse-grid pitch is
+    approximately ``correlation_px / 8``). The number that actually matters
+    for the circularity firewall is the DERIVED coarse-grid pitch, not
+    ``correlation_px`` itself: this field is structurally a bilinear
+    interpolant over a control grid, the same model class STARE fits, so the
+    pitch is bounded to ``MAX_COARSE_PITCH_PX`` (a quarter of STARE's
+    ``reg_tiled_tile``) to keep it far finer than anything STARE's grid could
+    represent.
     """
     h, w = int(shape[0]), int(shape[1])
     rng = np.random.default_rng(seed)
@@ -70,6 +91,18 @@ def _random_fourier(shape, seed, correlation_px=512.0, amplitude_px=12.0,
     # resolving it at full slide resolution buys nothing and costs everything.
     gh = max(8, min(256, int(np.ceil(h / max(1.0, correlation_px / 8)))))
     gw = max(8, min(256, int(np.ceil(w / max(1.0, correlation_px / 8)))))
+
+    pitch_h = (h - 1) / (gh - 1) if gh > 1 else float(h)
+    pitch_w = (w - 1) / (gw - 1) if gw > 1 else float(w)
+    if pitch_h > MAX_COARSE_PITCH_PX or pitch_w > MAX_COARSE_PITCH_PX:
+        raise ValueError(
+            f"random_fourier derived coarse-grid pitch ({pitch_h:.1f} x "
+            f"{pitch_w:.1f} px) for shape={shape!r} at "
+            f"correlation_px={correlation_px} exceeds MAX_COARSE_PITCH_PX "
+            f"({MAX_COARSE_PITCH_PX} px): a pitch at or above STARE's own "
+            f"control-grid spacing would make the ground-truth field "
+            f"representable by the model under test."
+        )
 
     fy = np.fft.fftfreq(gh)[:, None]
     fx = np.fft.fftfreq(gw)[None, :]
