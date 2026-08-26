@@ -127,6 +127,9 @@ workflow PREPROCESSING {
         .map { meta, image_file ->
             Checkpoint.row(Layout.PREPROCESSED, [
                 patient_id        : meta.patient_id,
+                // RULING R17: carried forward from meta, never re-derived from
+                // preprocessed_image's basename below -- see lib/Checkpoint.groovy.
+                id                : meta.id,
                 // Both kinds are spelled out as LITERAL arguments rather than resolved
                 // through a variable: tests/test_layout.py statically scans for
                 // `Layout.publishedPath(params.*, <pid>, <kind>)` and pins that

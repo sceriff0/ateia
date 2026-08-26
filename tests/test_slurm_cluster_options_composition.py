@@ -28,21 +28,28 @@ evaluated).
 
 This guard asserts every `withName:` block that sets `clusterOptions` also references BOTH
 `params.slurm_account` and `params.slurm_qos` in that block's text -- i.e. it composes the
-account/QoS options rather than replacing them wholesale. It scans the comment-and-string-
-blanked view (`tests/_code_view.py`'s `code_view()`), not the raw block body: `code_view()`
-deliberately does NOT mask GString interpolation, so `params.slurm_account` inside
-`"--account=${params.slurm_account}"` survives blanking and is still visible in the blanked
-view. Scanning raw text instead would let a `withName:` block satisfy this guard with a mere
-COMMENT mentioning `params.slurm_account` while its `clusterOptions` closure composes nothing
--- exactly the gap the blanked view closes, matching the recursion guard directly below, which
-already scans `blanked_body` for the same reason.
+account/QoS options rather than replacing them wholesale.
 
-Shape follows `tests/test_resource_label_coverage.py`'s `find_withname_resource_fields()`:
-same `WITH_NAME_OPEN_RE` selector match, same brace-matching walk to find the block body
-(a regex cannot balance the nested `{ }` a `clusterOptions` closure or a `publishDir` list
-commonly contains), and the same kind of matcher self-test
-(`test_withname_brace_matcher_handles_nested_closures` there) reproduced here as
-`test_brace_matcher_handles_nested_closures_around_clusteroptions`.
+Repointed at `tests.nfmodel` (2026-08-26) rather than carrying its own brace-matching parse
+of `conf/modules.config` -- `tests/test_nfmodel.py::test_no_guard_parses_nextflow_source_privately`
+is a discovery-based meta-test that forbids new private parses of Nextflow source, and its
+`UNREPOINTED_NF_SOURCE_READERS` allowlist is shrink-only debt for *pre-existing* guards, not
+somewhere a new file gets to join.
+
+Deliberately reads TWO DIFFERENT views per assertion, and getting this backwards silently
+makes the content check compare equal for every block:
+  * The account/qos COMPOSITION check needs to see what is *inside* the closure's quoted
+    literal (`"--account=${params.slurm_account}"`), so it scans `strip_comments(block.raw_body)`
+    -- comments blanked, string contents (GString interpolation included) kept verbatim. Using
+    `block.body` (comments AND strings blanked) here would blank away the very
+    `params.slurm_account` text this check is looking for, inside every block, making the
+    check vacuously pass or fail uniformly regardless of what any block actually composes.
+  * The `task.clusterOptions` RECURSION check must not be fooled by a comment merely naming
+    it -- conf/modules.config's own fixed `SEGMENT` block carries an explanatory comment that
+    literally contains the string `task.clusterOptions`, documenting the trap this check
+    exists to catch. So this check scans `block.body`, `with_name_blocks()`'s
+    comment-and-string-blanked view, where that comment (and any string literal) is blanked to
+    spaces but a real code reference survives.
 """
 
 from __future__ import annotations
@@ -50,143 +57,26 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from _code_view import code_view as _code_view
+from tests.nfmodel import strip_comments as _strip_comments
+from tests.nfmodel import strip_comments_and_strings as _strip_comments_and_strings
+from tests.nfmodel import with_name_blocks as _with_name_blocks
 
 ROOT = Path(__file__).resolve().parent.parent
-MODULES_CONFIG = ROOT / "conf" / "modules.config"
 NEXTFLOW_CONFIG = ROOT / "nextflow.config"
-
-# `withName: 'A|B|C' {` -- opens a withName block. The name group can hold a `|`-separated
-# alternation naming several processes at once. The block BODY is found separately by
-# brace-matching from this match's end, because the body can contain nested `{ }` (closures,
-# lists) a regex cannot balance.
-WITH_NAME_OPEN_RE = re.compile(r"withName:\s*(?:'([^']+)'|\"([^\"]+)\")\s*\{")
 
 # A top-level `clusterOptions =` assignment line inside a withName block body. Anchored to
 # line-start (after indentation) so it only matches a real assignment, not a comment
-# mentioning the word or an unrelated identifier.
+# mentioning the word or an unrelated identifier. Run against `block.body` (the
+# comment-and-string-blanked view): a real assignment's identifier is unaffected by
+# blanking, while a `// clusterOptions = ...` mention in a comment is blanked away and
+# correctly does not match.
 CLUSTER_OPTIONS_FIELD_RE = re.compile(r"^\s*clusterOptions\s*=", re.MULTILINE)
 
 
-def _brace_match(text: str, open_brace_index: int) -> str:
-    """Return the body between `text[open_brace_index] == '{'` and its balanced partner."""
-    assert text[open_brace_index] == "{"
-    depth = 1
-    pos = open_brace_index + 1
-    while depth > 0 and pos < len(text):
-        if text[pos] == "{":
-            depth += 1
-        elif text[pos] == "}":
-            depth -= 1
-        pos += 1
-    return text[open_brace_index + 1 : pos - 1]
-
-
-def _brace_span(text: str, open_brace_index: int) -> tuple[int, int]:
-    """Return the (start, end) body span for `text[open_brace_index] == '{'`, exclusive of
-    the braces themselves -- same walk as `_brace_match`, but returning offsets rather than
-    a slice, so the identical span can be sliced out of a SECOND text of the same length
-    (namely `code_view()`'s output, which blanks in place and preserves offsets)."""
-    assert text[open_brace_index] == "{"
-    depth = 1
-    pos = open_brace_index + 1
-    while depth > 0 and pos < len(text):
-        if text[pos] == "{":
-            depth += 1
-        elif text[pos] == "}":
-            depth -= 1
-        pos += 1
-    return open_brace_index + 1, pos - 1
-
-
-def find_withname_cluster_options_blocks() -> list[tuple[str, int, str, str]]:
-    """Return (selector, line_no, raw_body, blanked_body) for every `withName:` block that
-    sets `clusterOptions`.
-
-    Two views of the SAME span:
-      * `raw_body` is the file's own text, comments and strings intact. It is used to locate
-        the `clusterOptions =` field assignment itself (`CLUSTER_OPTIONS_FIELD_RE`, anchored to
-        line-start so a prose mention doesn't match it) and is kept in the return tuple for
-        tests that want the literal text.
-      * `blanked_body` is `code_view()`'s comment-and-string-content-blanked view of the same
-        span (same offsets, since `code_view()` blanks in place) -- this is what every
-        assertion in this file scans, for an IDENTIFIER check: a comment merely mentioning
-        `params.slurm_account` or `task.clusterOptions` in prose must not read as a live code
-        reference. `code_view()` deliberately does NOT mask GString interpolation, so a real
-        `${params.slurm_account}` read inside a quoted literal (e.g.
-        `"--account=${params.slurm_account}"`) stays visible in `blanked_body` too -- only
-        prose commentary gets blanked away. This guard's own conf/modules.config edit
-        demonstrates why the blanked view matters: the explanatory comment above the fixed
-        `clusterOptions` closure literally contains the string `task.clusterOptions`, which
-        made a raw-text-only recursion scan fail on the FIXED config -- a false positive from
-        exactly the trap `code_view()` exists to avoid. The same trap applies in the other
-        direction to the account/qos composition check: a `raw_body` scan would let a block
-        satisfy it with a comment alone.
-
-    `line_no` is the 1-based line of the `withName:` opener, for readable failure messages.
-    """
-    raw = MODULES_CONFIG.read_text()
-    blanked = _code_view(MODULES_CONFIG)
-    assert len(raw) == len(blanked), "code_view() must preserve offsets 1:1 with the raw text"
-
-    blocks: list[tuple[str, int, str, str]] = []
-    for match in WITH_NAME_OPEN_RE.finditer(raw):
-        selector = match.group(1) if match.group(1) is not None else match.group(2)
-        start, end = _brace_span(raw, match.end() - 1)
-        raw_body = raw[start:end]
-        if CLUSTER_OPTIONS_FIELD_RE.search(raw_body):
-            line_no = raw.count("\n", 0, match.start()) + 1
-            blocks.append((selector, line_no, raw_body, blanked[start:end]))
-    return blocks
-
-
-def test_brace_matcher_handles_nested_closures_around_clusteroptions():
-    """Regression guard on the brace-matcher itself.
-
-    A `clusterOptions = { ... }` closure can sit among other fields that themselves nest
-    `{ }` (a `memory` closure, a `publishDir` list) -- a naive "first `}` closes the block"
-    scan would truncate the body early and miss the `clusterOptions` field entirely, or a
-    "last `}` in the file" scan would swallow an unrelated later block. Mirrors
-    `tests/test_resource_label_coverage.py::test_withname_brace_matcher_handles_nested_closures`.
-    """
-    text = (
-        "withName: 'FOO' {\n"
-        "    memory = { 8.GB * task.attempt }\n"
-        "    clusterOptions = { params.seg_gpu ? \"--gres=gpu:${params.gpu_type}\" : '' }\n"
-        "    publishDir = [ path: { \"x\" }, mode: 'copy' ]\n"
-        "}\n"
-        "withName: 'BAR' {\n"
-        "    cpus = 1\n"
-        "}\n"
-    )
-    match = WITH_NAME_OPEN_RE.search(text)
-    body = _brace_match(text, match.end() - 1)
-    assert "BAR" not in body
-    assert CLUSTER_OPTIONS_FIELD_RE.search(body) is not None
-
-
-def test_brace_matcher_preserves_gstring_interpolation_braces():
-    """Regression guard on the brace matcher: a `${...}` interpolation inside a quoted
-    GString contributes its own `{`/`}` pair, and the naive depth-counting walk in
-    `_brace_match` must still land on the closure's real closing brace rather than being
-    thrown off by the nested pair -- while also not truncating the interpolated text itself.
-
-    This does NOT demonstrate that `raw_body` sees something `blanked_body` would miss:
-    `code_view()` deliberately does not mask GString interpolation (see `tests/_code_view.py`),
-    so `params.slurm_account` inside `"--account=${params.slurm_account}"` is visible in
-    BOTH views -- which is exactly why `test_every_clusteroptions_override_composes_account_and_qos`
-    can safely scan `blanked_body`. An earlier version of this test claimed the opposite; that
-    claim was false and is corrected here rather than repeated.
-    """
-    text = (
-        "withName: 'FOO' {\n"
-        "    clusterOptions = { \"--account=${params.slurm_account}\" }\n"
-        "}\n"
-    )
-    match = WITH_NAME_OPEN_RE.search(text)
-    body = _brace_match(text, match.end() - 1)
-    assert "params.slurm_account" in body
-    assert "clusterOptions" in body
+def find_withname_cluster_options_blocks():
+    """Every `tests.nfmodel.WithNameBlock` from `conf/modules.config` whose body sets
+    `clusterOptions`."""
+    return [block for block in _with_name_blocks() if CLUSTER_OPTIONS_FIELD_RE.search(block.body)]
 
 
 def test_nextflow_config_slurm_profile_composes_account_and_qos():
@@ -211,6 +101,10 @@ def test_every_clusteroptions_override_composes_account_and_qos():
     the same `withName: 'SEGMENT'` selector, `SEG_QC_SEGMENT`): its `clusterOptions` closure
     emitted `--gres=gpu:...` only.
 
+    Scans `strip_comments(block.raw_body)` -- comments blanked, string contents kept -- since
+    the composed `params.slurm_account`/`params.slurm_qos` text this check looks for lives
+    inside a quoted GString literal, which the fully-blanked `block.body` view would erase.
+
     This does not evaluate the closures (that needs a live Nextflow run) -- it is a static
     check that the composition logic is PRESENT in the block's own text, inlined per the
     no-shared-helper constraint conf/modules.config documents.
@@ -223,15 +117,16 @@ def test_every_clusteroptions_override_composes_account_and_qos():
     )
 
     offending = []
-    for selector, line_no, _raw_body, blanked_body in blocks:
+    for block in blocks:
+        content = _strip_comments(block.raw_body)
         missing = [
             param
             for param in ("params.slurm_account", "params.slurm_qos")
-            if param not in blanked_body
+            if param not in content
         ]
         if missing:
             offending.append(
-                f"conf/modules.config:{line_no}: withName: '{selector}' sets "
+                f"conf/modules.config:{block.start_line}: withName: '{block.selector}' sets "
                 f"`clusterOptions` but its body does not reference {missing} -- it "
                 "REPLACES process.clusterOptions (nextflow.config's slurm profile), so "
                 "the account/QoS submission arguments are silently dropped for this "
@@ -252,47 +147,39 @@ def test_clusteroptions_override_does_not_read_task_clusteroptions():
     nextflow.config's own account/qos logic verbatim at each override site), not built by
     reading back the value this same closure is in the middle of producing.
 
-    Scanned on the BLANKED (comment-and-string-blanked) view deliberately, not the raw one:
-    the fixed `SEGMENT` block's own explanatory comment names `task.clusterOptions` in prose
-    (documenting exactly this trap), and a raw-text scan for the identifier would trip on its
-    own documentation. `code_view()` blanks that comment out while leaving a genuine code
-    reference intact, which is exactly the distinction this check needs.
+    Scanned on `block.body`, `with_name_blocks()`'s comment-and-string-blanked view,
+    deliberately -- not `strip_comments(block.raw_body)`: the fixed `SEGMENT` block's own
+    explanatory comment names `task.clusterOptions` in prose (documenting exactly this trap),
+    and a view that keeps comments intact would trip on its own documentation. The fully
+    blanked view erases that comment while leaving a genuine code reference intact, which is
+    exactly the distinction this check needs.
     """
     blocks = find_withname_cluster_options_blocks()
     offending = [
-        f"conf/modules.config:{line_no}: withName: '{selector}' reads `task.clusterOptions` "
-        "inside its own clusterOptions closure -- this recurses."
-        for selector, line_no, _raw_body, blanked_body in blocks
-        if "task.clusterOptions" in blanked_body
+        f"conf/modules.config:{block.start_line}: withName: '{block.selector}' reads "
+        "`task.clusterOptions` inside its own clusterOptions closure -- this recurses."
+        for block in blocks
+        if "task.clusterOptions" in block.body
     ]
     assert not offending, "\n".join(offending)
 
 
-def test_recursion_scan_ignores_a_comment_but_catches_real_code(tmp_path):
-    """Regression guard on the choice to scan `blanked_body`, not `raw_body`, for the
-    recursion trap.
+def test_recursion_scan_ignores_a_comment_but_catches_real_code():
+    """Regression guard on the choice to scan the comment-and-string-blanked view, not the
+    string-preserving one, for the recursion trap.
 
-    Demonstrates both directions on a synthetic block: a comment merely naming
-    `task.clusterOptions` must not trip the check, and an actual code reference must.
+    Demonstrates both directions on synthetic text: a comment merely naming
+    `task.clusterOptions` must not trip the check once blanked, and an actual code reference
+    must survive blanking and still trip it.
     """
-    from _code_view import code_view as code_view_fn
-
     commented = (
         "withName: 'FOO' {\n"
         "    // reading task.clusterOptions here would recurse\n"
         "    clusterOptions = { \"--account=${params.slurm_account}\" }\n"
         "}\n"
     )
-    live = (
-        "withName: 'FOO' {\n"
-        "    clusterOptions = { task.clusterOptions + ' --extra' }\n"
-        "}\n"
-    )
-    commented_path = tmp_path / "commented.config"
-    commented_path.write_text(commented)
-    live_path = tmp_path / "live.config"
-    live_path.write_text(live)
+    live = "withName: 'FOO' {\n    clusterOptions = { task.clusterOptions + ' --extra' }\n}\n"
 
     assert "task.clusterOptions" in commented  # present in raw text...
-    assert "task.clusterOptions" not in code_view_fn(commented_path)  # ...but not blanked
-    assert "task.clusterOptions" in code_view_fn(live_path)  # real code survives blanking
+    assert "task.clusterOptions" not in _strip_comments_and_strings(commented)  # ...but blanked
+    assert "task.clusterOptions" in _strip_comments_and_strings(live)  # real code survives

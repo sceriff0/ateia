@@ -259,6 +259,34 @@ rather than silent — see [Retry policy](#retry-policy).
 above is the default (`false` → `process_medium`); with `--spatialdata_include_image`
 it asks for `8` cpus and `300 GB` instead.
 
+#### `MERGE_AND_PYRAMID`'s memory coefficient is unmeasured
+
+The `memory` closure's `plane * 3.25d` term (`conf/modules.config`, the
+`MERGE_AND_PYRAMID` block) was calibrated once, on one host, and the closure's own
+comment calls part of it "a guess made without one". This is a **node-memory cliff, not
+cgroup pressure** — a large-slide run that under-reserves gets SIGKILLed at roughly the
+observed ~450 GB ceiling, and the retry ramp (`× task.attempt`, capped at 4 attempts by
+`conf/base.config`'s `maxRetries`) is the only safety net.
+
+`workflows/mirage.nf` logs a `log.warn` at launch whenever the run reaches
+`MERGE_AND_PYRAMID` — gated on the same `run_postprocessing` boolean
+(`ParamUtils.shouldRun('postprocessing', ...)`, against the `ParamUtils.STEPS` table) that
+routes the standard start/stop path, so it also fires under `mode=add_cycle`, which
+reaches the same process through `ASSEMBLE_EXPORT` without ever setting `--start`/`--stop`.
+
+**To measure the real coefficient on your own data**, run one representative real slide
+through `SPLIT_CHANNELS` (or use an existing run's per-channel TIFFs) and, per channel:
+
+1. Read `H` and `W` (pixel height/width) from the channel TIFF.
+2. Read the on-disk `file_size` (bytes) of that channel's compressed TIFF from the
+   Nextflow trace (`rchar`/`wchar`, or just `stat` the published file).
+3. Compute `r = (H * W * 2) / file_size` — the ratio of one uncompressed uint16 plane to
+   the compressed file size.
+4. Report the **observed maximum** `r` across channels and across slides in the cohort;
+   that maximum, not the mean, is what should replace the `3.25d` guess once there is
+   real data behind it. Until then, set `--max_memory` generously above the current
+   estimate for any slide over ~40 GB.
+
 ### Run-level
 
 | Process | `cpus` | `memory` (attempt 1) | `time` | Owner |
@@ -389,32 +417,44 @@ are both dropped.
 
 | Setting | Value | Where |
 |---|---|---|
-| `process.maxForks` | `params.max_forks` (`5`) | `nextflow.config` |
+| `process.maxForks` | `params.max_forks` if set, else `params.concurrency` (`5`) | `nextflow.config` |
 | `process.stageInMode` | `symlink` | `nextflow.config` — zero-overhead, works cross-filesystem |
-| `executor.queueSize` | `params.queue_size` (`20`) | `nextflow.config` — max concurrent scheduler submissions |
+| `executor.queueSize` | `params.queue_size` if set, else `params.concurrency * 4` (`20`) | `nextflow.config` — max concurrent scheduler submissions |
 | `executor.exitReadTimeout` | `1 day` | `conf/base.config` — SLURM status-poll timeout |
 
-Both are tunable from the command line: `--max_forks` and `--queue_size`.
+**`--concurrency` is the one knob to tune.** It drives `max_forks` and `queue_size`
+together, preserving the shipped 5:20 ratio (`--concurrency 20` → `max_forks 20,
+queue_size 80`). `--max_forks` and `--queue_size` remain available and **override**
+`--concurrency` individually — for the asymmetric case, e.g. a wide queue with a tight
+per-process cap. `max_forks`/`queue_size` are declared `null` in `nextflow.config`, not a
+numeric default: the params block is evaluated *before* the CLI is applied, so a default
+computed there would use `concurrency`'s own default and silently ignore `--concurrency`.
+The derivation instead lives in the `executor`/`process` scopes below the includes (and in
+`conf/modules.config`'s seven per-process caps), which are evaluated/included after CLI
+resolution.
 
-**They are a pair, and the LOWER one binds.** `max_forks` caps how many tasks of any ONE
-process run at once; `queue_size` caps how many run at once across the WHOLE pipeline.
-At the shipped defaults `max_forks` (5) is far below `queue_size` (20), so **`max_forks`
-is what binds** and raising `queue_size` alone changes nothing — raise `max_forks`, or
-raise both. (This is the opposite way round from the earlier 100/20 defaults, where
-`queue_size` was the binding one.)
+**`max_forks` and `queue_size` are a pair, and the LOWER one binds.** `max_forks` caps how
+many tasks of any ONE process run at once; `queue_size` caps how many run at once across
+the WHOLE pipeline. At the shipped defaults `max_forks` (5) is far below `queue_size`
+(20), so **`max_forks` is what binds** and raising `queue_size` alone changes nothing —
+raise `max_forks` (or `concurrency`), or raise both. (This is the opposite way round from
+the earlier 100/20 defaults, where `queue_size` was the binding one — corrected together
+with the two in-tree comments that had claimed `max_forks` still defaulted to 100.)
 
-Because every per-process override is `Math.min(its own cap, params.max_forks)`, a
-`max_forks` of 5 clamps ALL of them: the `REGISTER` / `TILED_STITCH` 10 and the
+Because every per-process override is `Math.min(its own cap, the resolved max_forks)`, a
+resolved `max_forks` of 5 clamps ALL of them: the `REGISTER` / `TILED_STITCH` 10 and the
 `TILED_COARSE` / `TILED_REG_TILE` 20 below all run at 5. That is a deliberately
-conservative default — raise it with `--max_forks` when the cluster can take it.
+conservative default — raise it with `--concurrency` or `--max_forks` when the cluster
+can take it.
 
 Per-process `maxForks` overrides: `REGISTER`, `TILED_STITCH` at `10`; `TILED_COARSE` /
 `TILED_REG_TILE` at `20`. These bound how many memory-heavy registration tasks can be in
-flight at once. Each is written `Math.min(<its own limit>, params.max_forks)`, so
-**lowering** `--max_forks` really does throttle every module, while **raising** it never
-lifts one of these past the limit its own block sets for its own reasons. Measured on the
-test profile: at the default, `REGISTER` runs at 10 and everything else at 100; at
-`--max_forks 4` every process runs at 4; at `--max_forks 50`, `REGISTER` stays at 10.
+flight at once. Each is written `Math.min(<its own limit>, the resolved max_forks)`, so
+**lowering** `--max_forks` (or `--concurrency`) really does throttle every module, while
+**raising** it never lifts one of these past the limit its own block sets for its own
+reasons. Measured on the test profile: at the default, `REGISTER` runs at 10 and
+everything else at 5; at `--max_forks 4` every process runs at 4; at `--max_forks 50`,
+`REGISTER` stays at 10.
 
 `executor.queueSize` is assigned in `nextflow.config`, not in `conf/base.config` where the
 rest of the executor scope lives. That is deliberate and load-bearing — see

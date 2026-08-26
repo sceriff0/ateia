@@ -63,7 +63,8 @@ nextflow_workflow {
                 { with(workflow.out.checkpoint_csv) {
                     def csv = get(0)
                     def lines = file(csv).readLines()
-                    assert lines[0] == 'patient_id,registered_image,is_reference,channels,cell_mask,nuclei_mask,contours,nucleus_contours'
+                    // 'id' (RULING R17, Task 4.3) is column 1.
+                    assert lines[0] == 'patient_id,id,registered_image,is_reference,channels,cell_mask,nuclei_mask,contours,nucleus_contours'
                     assert lines.drop(1).findAll { it.trim() }.size() == 3
                 }}
             )
@@ -114,12 +115,12 @@ nextflow_workflow {
                 { with(workflow.out.checkpoint_csv) {
                     def csv = get(0)
                     def row = file(csv).readLines()[1].split(',')
-                    // patient_id, registered_image, is_reference, channels, cell_mask,
+                    // patient_id, id, registered_image, is_reference, channels, cell_mask,
                     // nuclei_mask, contours, nucleus_contours
-                    assert row[4] : "cell_mask must never be empty"
-                    assert row[5] : "nuclei_mask must be populated even with --quantify_compartments false -- SEGMENT always produces it, and postprocess.nf's mask join depends on that"
-                    assert row[6] : "contours must never be empty"
-                    assert row.size() == 7 || row[7] == '' : "nucleus_contours is the one column allowed to be empty here"
+                    assert row[5] : "cell_mask must never be empty"
+                    assert row[6] : "nuclei_mask must be populated even with --quantify_compartments false -- SEGMENT always produces it, and postprocess.nf's mask join depends on that"
+                    assert row[7] : "contours must never be empty"
+                    assert row.size() == 8 || row[8] == '' : "nucleus_contours is the one column allowed to be empty here"
                 }}
             )
         }

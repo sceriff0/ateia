@@ -28,6 +28,11 @@ import re
 from collections import Counter
 from pathlib import Path
 
+from tests.nfmodel import block_extent as _block_extent
+from tests.nfmodel import processes as _nfmodel_processes
+from tests.nfmodel import strip_comments as _strip_comments
+from tests.nfmodel import with_name_blocks as _with_name_blocks
+
 ROOT = Path(__file__).resolve().parent.parent
 MODULES_DIR = ROOT / "modules" / "local"
 MODULES_CONFIG = ROOT / "conf" / "modules.config"
@@ -52,16 +57,6 @@ COMMENT_RE = re.compile(r"//.*$|/\*.*?\*/")
 
 # `withLabel: 'name' { ... }` selectors in conf/modules.config.
 WITH_LABEL_RE = re.compile(r"withLabel:\s*(?:'([^']+)'|\"([^\"]+)\")")
-
-# `process NAME {` -- the process name declared by a modules/local/*.nf file.
-PROCESS_NAME_RE = re.compile(r"^process\s+(\w+)\s*\{", re.MULTILINE)
-
-# `withName: 'A|B|C' {` -- opens a withName block. The name group can hold a
-# `|`-separated alternation naming several processes at once (see
-# conf/modules.config:140 and :270); the block body is found separately by
-# brace-matching from this match's end, because the body can itself contain
-# nested `{ }` (closures, lists) that a regex cannot balance.
-WITH_NAME_OPEN_RE = re.compile(r"withName:\s*(?:'([^']+)'|\"([^\"]+)\")\s*\{")
 
 # A top-level `cpus =`, `memory =`, or `time =` assignment line inside a
 # withName block body. Anchored to line-start (after indentation) so it
@@ -197,13 +192,22 @@ def test_every_module_label_resolves_to_a_conf_modules_config_selector():
 
 
 def find_module_processes() -> dict[str, Path]:
-    """Return {PROCESS_NAME: module_file_path} for every modules/local/*.nf file."""
-    processes: dict[str, Path] = {}
-    for path in sorted(MODULES_DIR.glob("*.nf")):
-        match = PROCESS_NAME_RE.search(path.read_text())
-        if match:
-            processes[match.group(1)] = path
-    return processes
+    """Return {PROCESS_NAME: module_file_path} for every modules/local/*.nf file.
+
+    Sourced from `tests.nfmodel.processes()`, which finds `process NAME {` on
+    the comment/string-stripped text of every `.nf` file under `modules/`
+    (recursively) -- then filtered down to `modules/local/` here, deliberately.
+    `modules/nf-core/basicpy/` also declares a process (`BASICPY`), but it is a
+    vendored, unmodified nf-core module outside the one-owner rule this file
+    enforces; docs/resources.md's "Per-process requests" section explains why
+    it is excluded from every count below by name. Widening this filter would
+    silently pull it back in and desync those counts from the doc.
+    """
+    return {
+        name: p.path
+        for name, p in _nfmodel_processes().items()
+        if p.path.parent == MODULES_DIR
+    }
 
 
 def find_labelled_processes() -> set[str]:
@@ -234,61 +238,23 @@ def find_withname_resource_fields() -> dict[str, set[str]]:
     at :140 and its own dedicated block at :185) has its fields unioned
     across all matching blocks.
     """
-    text = MODULES_CONFIG.read_text()
     fields_by_process: dict[str, set[str]] = {}
-    for match in WITH_NAME_OPEN_RE.finditer(text):
-        selector = match.group(1) if match.group(1) is not None else match.group(2)
-        names = selector.split("|")
-
-        # Brace-match from the opening `{` (match.end() - 1) to find the
-        # block body -- a regex cannot balance the nested `{ }` closures and
-        # lists a withName block commonly contains.
-        depth = 1
-        pos = match.end()
-        while depth > 0 and pos < len(text):
-            if text[pos] == "{":
-                depth += 1
-            elif text[pos] == "}":
-                depth -= 1
-            pos += 1
-        body = text[match.end() : pos - 1]
-
-        fields = {m.group(1) for m in RESOURCE_FIELD_RE.finditer(body)}
-        for name in names:
+    for block in _with_name_blocks():
+        # `block.body` is comment/string-stripped (tests.nfmodel's view A), so
+        # a `cpus =`/`memory =`/`time =` mention inside a comment or a string
+        # cannot be counted as a real assignment.
+        fields = {m.group(1) for m in RESOURCE_FIELD_RE.finditer(block.body)}
+        for name in block.names:
             fields_by_process.setdefault(name, set()).update(fields)
     return fields_by_process
 
 
-def test_withname_brace_matcher_handles_nested_closures():
-    """Regression guard on the brace-matcher itself.
-
-    conf/modules.config's withName blocks routinely nest `{ }` inside
-    `memory = { ... }` closures and `publishDir = [[...],[...]]` lists. A
-    naive "first `}` closes the block" scan would truncate the body at the
-    closure's own closing brace and silently under-read (or over-read, if it
-    instead scanned to the last `}` in the file) the fields a block sets.
-    """
-    text = (
-        "withName: 'FOO' {\n"
-        "    memory = { 8.GB * task.attempt }\n"
-        "    publishDir = [ path: { \"x\" }, mode: 'copy' ]\n"
-        "}\n"
-        "withName: 'BAR' {\n"
-        "    cpus = 1\n"
-        "}\n"
-    )
-    match = WITH_NAME_OPEN_RE.search(text)
-    depth = 1
-    pos = match.end()
-    while depth > 0 and pos < len(text):
-        if text[pos] == "{":
-            depth += 1
-        elif text[pos] == "}":
-            depth -= 1
-        pos += 1
-    body = text[match.end() : pos - 1]
-    assert "BAR" not in body
-    assert {m.group(1) for m in RESOURCE_FIELD_RE.finditer(body)} == {"memory"}
+# Nested-brace and comment-mentioned-selector regression coverage for the
+# walk this function is built on now lives in tests/test_nfmodel.py
+# (test_block_extent_walks_nested_braces,
+# test_with_name_blocks_ignores_a_selector_mentioned_only_in_a_comment) --
+# this file no longer has a private brace-matcher of its own to regression-
+# test.
 
 
 def test_exactly_one_resource_owner_per_process():
@@ -437,7 +403,10 @@ DOCS_RESOURCES = ROOT / "docs" / "resources.md"
 ALIASES = {"SEG_QC_SEGMENT": "SEGMENT"}
 
 # `withLabel: 'name' { ... }` -- the opening brace is needed to brace-match the
-# body, exactly as WITH_NAME_OPEN_RE does for withName blocks.
+# body via `_closure_body` below. `tests.nfmodel` has no `with_label_blocks()`
+# equivalent of `with_name_blocks()` (only withName selectors were a repeated
+# private parse across guards), so this scan and its comment/string-aware
+# body extent (via `block_extent`) stay local to this file.
 WITH_LABEL_OPEN_RE = re.compile(r"withLabel:\s*(?:'([^']+)'|\"([^\"]+)\")\s*\{")
 
 # The start of a `cpus = ` / `memory = ` / `time = ` assignment. Same anchoring
@@ -588,39 +557,21 @@ DOC_RAMP_RE = re.compile(r"\d+\s*\^\s*\(\s*attempt\s*[\u2212-]\s*\d+\s*\)")
 ATTEMPTS = (1, 2, 3, 4)
 
 
-def _brace_match(text: str, open_brace_index: int) -> str:
-    """Return the body between `text[open_brace_index] == '{'` and its partner."""
-    assert text[open_brace_index] == "{"
-    depth = 1
-    pos = open_brace_index + 1
-    while depth > 0 and pos < len(text):
-        if text[pos] == "{":
-            depth += 1
-        elif text[pos] == "}":
-            depth -= 1
-        pos += 1
-    return text[open_brace_index + 1 : pos - 1]
+def _closure_body(text: str, open_brace_index: int) -> str:
+    """Return the body between `text[open_brace_index] == '{'` and its partner.
 
-
-def _strip_comments(text: str) -> str:
-    """Drop `/* */` and `//` comments from an extracted expression.
-
-    Load-bearing, and demonstrated in situ rather than asserted. An earlier
-    revision of this docstring called it a no-op on the grounds that no
-    expression in conf/modules.config contains a comment today -- true of the
-    annotations that look like they would (WARP_SEG_QC's `// 32 / 64 / 128 / 256`
-    at conf/modules.config:456, TILED_SOLVE's note at :337-340), which sit
-    OUTSIDE the closure braces the extractor reads. But CONVERT_IMAGE, SEGMENT,
-    SPLIT_CHANNELS, MERGE_AND_PYRAMID and GENERATE_REGISTRATION_QC all have
-    MULTI-LINE memory closures whose interior is fair game for a comment.
-    Verified: adding `// was 999.GB before the rewrite` inside CONVERT_IMAGE's
-    closure, with `999 GB` in the doc cell, FAILS the doc/config comparison with
-    this helper active and PASSES with it neutered to `return text` -- i.e.
-    without it, a stale number parked in a config comment silently licenses the
-    same stale number in the documentation.
+    A thin adapter over `tests.nfmodel.block_extent`, which wants `start` just
+    PAST the opening `{` and returns the index just past the matching `}` (so
+    its slice includes the closing brace) -- this keeps the `_brace_match`-era
+    call convention (index OF the opening brace in, body EXCLUDING both braces
+    out) at the two call sites below without duplicating the walk itself.
+    block_extent's own walk is comment/string-aware (`skip_non_code`), which
+    the naive character count this replaces was not: a `{` inside a `//` or
+    `/* */` comment inside a memory/cpus/time closure could mis-balance it.
     """
-    text = re.sub(r"/\*.*?\*/", " ", text, flags=re.DOTALL)
-    return re.sub(r"//[^\n]*", " ", text)
+    assert text[open_brace_index] == "{"
+    end = _block_extent(text, open_brace_index + 1)
+    return text[open_brace_index + 1 : end - 1]
 
 
 def parse_resource_exprs(body: str) -> dict[str, str]:
@@ -628,13 +579,20 @@ def parse_resource_exprs(body: str) -> dict[str, str]:
 
     The right-hand side is either a closure (`memory = { ... }`, read by
     brace-matching, since it nests) or a bare literal to end of line
-    (`cpus = 8`).
+    (`cpus = 8`). `tests.nfmodel.strip_comments` (view B) then drops any
+    `/* */` or `//` comment INSIDE the expression while keeping string
+    contents verbatim -- load-bearing, and demonstrated in situ rather than
+    asserted: CONVERT_IMAGE, SEGMENT, SPLIT_CHANNELS, MERGE_AND_PYRAMID and
+    GENERATE_REGISTRATION_QC all have multi-line memory closures whose
+    interior is fair game for a comment, and a stale number parked in one
+    (`// was 999.GB before the rewrite`) must not silently license the same
+    stale number in docs/resources.md.
     """
     exprs: dict[str, str] = {}
     for match in FIELD_ASSIGN_RE.finditer(body):
         pos = match.end()
         if pos < len(body) and body[pos] == "{":
-            expr = _brace_match(body, pos)
+            expr = _closure_body(body, pos)
         else:
             end = body.find("\n", pos)
             expr = body[pos:] if end == -1 else body[pos:end]
@@ -647,21 +605,25 @@ def find_label_resource_exprs() -> dict[str, dict[str, str]]:
     text = MODULES_CONFIG.read_text()
     return {
         (m.group(1) if m.group(1) is not None else m.group(2)): parse_resource_exprs(
-            _brace_match(text, m.end() - 1)
+            _closure_body(text, m.end() - 1)
         )
         for m in WITH_LABEL_OPEN_RE.finditer(text)
     }
 
 
 def find_withname_resource_exprs() -> dict[str, dict[str, str]]:
-    """Return {PROCESS: {field: expression}} unioned over matching withName blocks."""
-    text = MODULES_CONFIG.read_text()
+    """Return {PROCESS: {field: expression}} unioned over matching withName blocks.
+
+    Sourced from `tests.nfmodel.with_name_blocks()` -- which finds each real
+    `withName: '...' {` selector on the RAW text (real quotes to match) and
+    then filters out any match whose start position moved once comments and
+    strings are blanked, i.e. one that only appears inside a comment -- rather
+    than this file's own raw-text `finditer` over `conf/modules.config`.
+    """
     exprs: dict[str, dict[str, str]] = {}
-    for match in WITH_NAME_OPEN_RE.finditer(text):
-        selector = match.group(1) if match.group(1) is not None else match.group(2)
-        body = _brace_match(text, match.end() - 1)
-        found = parse_resource_exprs(body)
-        for name in selector.split("|"):
+    for block in _with_name_blocks():
+        found = parse_resource_exprs(block.raw_body[:-1])
+        for name in block.names:
             exprs.setdefault(name, {}).update(found)
     return exprs
 
@@ -998,8 +960,9 @@ def test_strip_comments_removes_numbers_a_maintainer_would_annotate_with():
 
     conf/modules.config has no such comment today, so this is the only place the
     branch is exercised in the checked-in tree -- but it is not hypothetical:
-    see _strip_comments for the in-situ demonstration that adding one to
-    CONVERT_IMAGE's closure lets a stale doc number pass without this helper.
+    see parse_resource_exprs's docstring for the in-situ demonstration that
+    adding one to CONVERT_IMAGE's closure lets a stale doc number pass without
+    `tests.nfmodel.strip_comments` (imported here as `_strip_comments`).
     """
     annotated = "32.GB * task.attempt   // was 64.GB before the bounding-box rewrite"
     assert _strip_comments(annotated).strip() == "32.GB * task.attempt"

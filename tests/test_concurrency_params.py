@@ -4,6 +4,15 @@ Concurrency is tunable from the command line: `--max_forks` caps how many tasks 
 process run at once, `--queue_size` caps how many run at once across the WHOLE pipeline.
 The lower of the two binds.
 
+Both are now null-declared and derive from a single `--concurrency` knob (default 5,
+preserving the shipped 5:20 ratio: `queue_size = concurrency * 4`) unless explicitly
+overridden. They are declared `null` rather than a numeric default computed from
+`concurrency` because `nextflow.config`'s params block is evaluated BEFORE the CLI is
+applied -- a default computed there would use `concurrency`'s own default and silently
+ignore `--concurrency`. The derivation therefore lives in the `executor`/`process` scopes
+below the includes (and in conf/modules.config's seven per-process caps), which are
+evaluated/included after CLI resolution.
+
 WHY THIS FILE EXISTS RATHER THAN A COMMENT. Wiring a parameter into `maxForks` fails in
 three different ways depending on where you write it, and **two of the three fail silently
 or at a distance from the cause**:
@@ -69,11 +78,18 @@ def modules() -> str:
 
 
 @pytest.mark.parametrize(
-    ("param", "default"), [("max_forks", "5"), ("queue_size", "20")]
+    ("param", "default"),
+    [("concurrency", "5"), ("max_forks", "null"), ("queue_size", "null")],
 )
 def test_the_parameter_is_declared_once_in_nextflow_config(nf, param, default):
     """Declared in nextflow.config and nowhere else -- the repo's one-owner rule for
-    defaults (tests/test_no_duplicate_param_defaults.py enforces the other direction)."""
+    defaults (tests/test_no_duplicate_param_defaults.py enforces the other direction).
+
+    `max_forks` and `queue_size` are declared `null`, not a numeric literal: they derive
+    from `concurrency` unless explicitly overridden, and that derivation must happen AFTER
+    the CLI is applied (see this module's docstring), which rules out a computed default
+    inside the params block itself.
+    """
     declarations = re.findall(rf"^\s*{param}\s*=\s*(\S+)", nf, flags=re.M)
     assert declarations == [default], (
         f"expected exactly one `{param} = {default}` in nextflow.config, found "
@@ -87,10 +103,23 @@ def test_the_parameter_is_declared_once_in_nextflow_config(nf, param, default):
 
 
 def test_process_max_forks_reads_the_parameter(nf):
-    """`process.maxForks` is the parameter, not a literal."""
-    assert re.search(r"^\s*maxForks\s*=\s*params\.max_forks\s*$", nf, flags=re.M), (
-        "nextflow.config's `process` scope must set `maxForks = params.max_forks`; a "
-        "literal there makes --max_forks a no-op for every process without its own override"
+    """`process.maxForks` is derived from BOTH params.max_forks and params.concurrency,
+    not a literal and not params.max_forks alone.
+
+    params.max_forks is null unless the caller explicitly overrides it, so a bare
+    `maxForks = params.max_forks` (the pre-`--concurrency` wiring) would set every
+    process's fork cap to null once max_forks is unset -- Nextflow throws comparing that
+    against `0` in TaskProcessor's constructor. The assignment must fall back to
+    params.concurrency instead.
+    """
+    match = re.search(r"^\s*maxForks\s*=\s*(.+)$", nf, flags=re.M)
+    assert match, "nextflow.config's `process` scope must assign maxForks"
+    expr = match.group(1).strip()
+    assert not re.fullmatch(r"\d+", expr), "process.maxForks must not be a bare integer literal"
+    assert "params.max_forks" in expr and "params.concurrency" in expr, (
+        "nextflow.config's `process` scope must derive `maxForks` from BOTH "
+        f"params.max_forks and params.concurrency (found: {expr!r}); a literal, or "
+        "params.max_forks alone, makes --concurrency a no-op once max_forks is null"
     )
 
 
@@ -102,9 +131,10 @@ def test_queue_size_is_assigned_in_nextflow_config_not_base_config(nf, base):
     executor quietly falls back to Nextflow's default. So the assignment must live in
     `nextflow.config`, after the params block, and must NOT reappear in `conf/base.config`.
     """
-    assert re.search(r"queueSize\s*=\s*params\.queue_size", nf), (
-        "nextflow.config must assign `queueSize = params.queue_size` (in its own "
-        "`executor { }` block, after the params block)"
+    assert re.search(r"queueSize\s*=.*params\.queue_size", nf), (
+        "nextflow.config must derive `queueSize` from `params.queue_size` (in its own "
+        "`executor { }` block, after the params block) -- a null-test fallback to "
+        "params.concurrency is fine; a bare literal or a missing reference is not"
     )
     assert not re.search(r"^\s*queueSize\s*=", base, flags=re.M), (
         "conf/base.config must NOT assign queueSize: it is included before the params "
@@ -113,20 +143,47 @@ def test_queue_size_is_assigned_in_nextflow_config_not_base_config(nf, base):
     )
 
 
-def test_every_per_process_max_forks_is_bounded_by_the_parameter(modules):
-    """Lowering --max_forks must throttle EVERY module, not just those without an override.
+# The exact shape every per-process maxForks override must take. Only the integer
+# cap may vary -- pinning the SHAPE, not merely whether "params.max_forks" appears
+# as a substring, is the point. `Math.min(10, params.max_forks as int)` -- the bare
+# pre-concurrency form -- contains that substring and no "?:", so a substring-only
+# check (this test's own earlier version) cannot distinguish it from the null-tested
+# form. Once params.max_forks is null-declared, the bare form yields
+# `Math.min(10, null)`, which throws inside Nextflow's TaskProcessor constructor
+# ONLY when the closure actually runs (maxForks is not a dynamic directive) --
+# invisible to -stub, invisible to this whole pytest suite, surfacing only against
+# a real cluster run on a real slide. An `?:` fallback fails the same way it always
+# does for a numeric nullable param (Groovy's 0 is falsy).
+_CANONICAL_MAX_FORKS_RE = re.compile(
+    r"^Math\.min\(\s*\d+\s*,\s*"
+    r"\(\s*params\.max_forks\s*!=\s*null\s*\?\s*params\.max_forks\s*:\s*params\.concurrency\s*\)"
+    r"\s*as\s*int\s*\)$"
+)
 
-    Each per-process value is `Math.min(<its own limit>, params.max_forks as int)`: the
-    process keeps its own ceiling (set for its own memory reasons) while the parameter can
-    always pull it down. A bare literal here would silently ignore --max_forks.
+
+def test_every_per_process_max_forks_is_bounded_by_the_parameter(modules):
+    """Lowering --max_forks (or --concurrency) must throttle EVERY module, not just
+    those without an override.
+
+    Each per-process value must be EXACTLY
+    `Math.min(<its own limit>, (params.max_forks != null ? params.max_forks : params.concurrency) as int)`:
+    the process keeps its own ceiling (set for its own memory reasons) while the
+    parameter can always pull it down. A bare literal, a bare `params.max_forks`
+    (null once unset), or an `?:` fallback would all silently ignore --max_forks/
+    --concurrency, or worse, throw only when the closure runs -- see the module-level
+    comment above for why a substring check cannot tell these apart.
     """
     assignments = re.findall(r"^\s*maxForks\s*=\s*(.+)$", modules, flags=re.M)
     assert assignments, "expected per-process maxForks overrides in conf/modules.config"
-    unbounded = [a.strip() for a in assignments if "params.max_forks" not in a]
-    assert not unbounded, (
-        f"{len(unbounded)} per-process maxForks value(s) ignore params.max_forks: "
-        f"{unbounded!r}. Write them `Math.min(<limit>, params.max_forks as int)` so "
-        "--max_forks throttles every module."
+    offenders = []
+    for raw in assignments:
+        normalised = re.sub(r"\s+", " ", raw.strip())
+        if not _CANONICAL_MAX_FORKS_RE.match(normalised):
+            offenders.append(normalised)
+    assert not offenders, (
+        f"{len(offenders)} per-process maxForks value(s) are not the exact "
+        "`Math.min(<cap>, (params.max_forks != null ? params.max_forks : "
+        f"params.concurrency) as int)` shape (only <cap> may vary): {offenders!r}"
     )
 
 
