@@ -235,15 +235,16 @@ def compute_compartment_intensities(
     # `Sum` stays 0.0 further down: the sum over an empty set is zero, which is a real answer.
     # Guarded by tests/test_absent_compartment_is_nan.py.
     if flat_raw.dtype == np.uint16:
-        # In-place composition: `flat_cell.astype(int64) << 16 | flat_raw.astype(int64)`
-        # evaluates as four separate int64 allocations (astype, <<, astype, |) alive at
-        # once at 8 bytes/fg-px each -- peak 24 bytes/fg-px. Building `key` from a single
-        # astype and mutating it in place (`<<=`, `|=`) peaks at 8 bytes/fg-px instead --
-        # 1/3 the transient memory for the same result. `flat_raw` is uint16, so `key |=
-        # flat_raw` promotes it to int64 for the operation without allocating a persistent
-        # int64 copy of `flat_raw` (numpy computes the ufunc's int64-typed operand into a
-        # temporary sized like `key`, i.e. no bigger than the buffer already needed for the
-        # `|=` itself -- not an extra full-size allocation on top of it).
+        # In-place composition: Build `key` from a single astype and mutate in place
+        # (`<<=`, `|=`) rather than composing naively as `flat_cell.astype(int64) << 16 |
+        # flat_raw.astype(int64)`. The naive form allocates four int64 arrays in sequence,
+        # but numpy's ufunc temporary elision (since 1.13) collapses the two astype calls
+        # onto refcount-1 temporaries, leaving two live arrays at peak — 2.00× of one
+        # int64 array. In-place composition halves that to 1.00× (610.4 MB → 305.2 MB at
+        # 40M foreground pixels). `flat_raw` is uint16, so `key |= flat_raw` promotes
+        # the operand for the operation without materializing a persistent int64 copy;
+        # numpy casts through a small internal buffer instead. See
+        # docs/perf/2026-08-26-rss.md.
         key = flat_cell.astype(np.int64)
         key <<= 16
         key |= flat_raw
