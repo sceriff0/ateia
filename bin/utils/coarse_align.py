@@ -23,11 +23,20 @@ logger = get_logger(__name__)
 __all__ = [
     "estimate_transform_from_matches",
     "estimate_rigid",
+    "estimate_affine",
+    "FRONTENDS",
     "normalize_for_orb",
     "scale_transform_to_full_res",
 ]
 
 _MIN_SAMPLES = {"euclidean": 2, "similarity": 2, "affine": 3}
+
+# The four selectable COARSE global-alignment front-ends. "orb" is the default and must stay
+# behaviour-preserving with every run before this change. "sift" and "fourier_mellin" are
+# zero-new-dependency CPU alternatives (skimage ships both already); "disk_lightglue" is the
+# learned matcher VALIS/ACROBAT winners use and needs torch+kornia from the stare-ml container,
+# so it raises a clear, actionable error rather than silently degrading in the lean default image.
+FRONTENDS = ("orb", "sift", "fourier_mellin", "disk_lightglue")
 
 
 def _model_class(model):
@@ -167,7 +176,7 @@ def _orb_features(img, n_keypoints, fast_threshold):
     return orb.keypoints[:, ::-1], orb.descriptors
 
 
-def estimate_rigid(
+def _frontend_orb(
     ref,
     mov,
     model="euclidean",
@@ -175,9 +184,11 @@ def estimate_rigid(
     fast_threshold=0.05,
     **kwargs,
 ):
-    """Estimate ``M0`` mapping ``mov`` image coordinates onto ``ref`` via ORB feature matching.
+    """ORB + RANSAC feature matching -- today's default COARSE front-end, extracted unchanged.
 
-    Returns ``(M0, residual_px, n_inliers)`` from :func:`estimate_transform_from_matches`.
+    Returns ``(M0, info)`` where ``info`` carries ``residual_px`` and ``n_inliers`` from
+    :func:`estimate_transform_from_matches`. :func:`estimate_rigid` is the pre-existing,
+    still-supported entry point and is now a thin reshape over this function.
 
     Logs each stage as it completes. ORB dominates this step's runtime and its cost is highly
     non-linear in thumbnail size, so a silent multi-hour stage here is indistinguishable from a
@@ -217,4 +228,182 @@ def estimate_rigid(
 
     src = kp_mov[matches[:, 0]]
     dst = kp_ref[matches[:, 1]]
-    return estimate_transform_from_matches(src, dst, model=model, **kwargs)
+    m, residual, n_inliers = estimate_transform_from_matches(src, dst, model=model, **kwargs)
+    return m, {"residual_px": residual, "n_inliers": n_inliers}
+
+
+def estimate_rigid(
+    ref,
+    mov,
+    model="euclidean",
+    n_keypoints=800,
+    fast_threshold=0.05,
+    **kwargs,
+):
+    """Estimate ``M0`` mapping ``mov`` image coordinates onto ``ref`` via ORB feature matching.
+
+    Returns ``(M0, residual_px, n_inliers)``. Pre-existing entry point, kept for backward
+    compatibility with callers that predate the multi-front-end dispatch (:func:`estimate_affine`)
+    -- it is a thin reshape over :func:`_frontend_orb`, which now holds the real implementation.
+    """
+    m, info = _frontend_orb(
+        ref, mov, model=model, n_keypoints=n_keypoints, fast_threshold=fast_threshold, **kwargs
+    )
+    return m, info["residual_px"], info["n_inliers"]
+
+
+def _frontend_sift(ref, mov, model="euclidean", **kwargs):
+    """SIFT + RANSAC. Zero new dependency: skimage.feature.SIFT ships already.
+
+    SIFT beats ORB on histology; ORB wins only on speed, and COARSE runs ONCE per slide, so
+    speed is worth least exactly here.
+    """
+    from skimage.feature import SIFT, match_descriptors
+
+    def _sift_features(img):
+        sift = SIFT()
+        sift.detect_and_extract(normalize_for_orb(img))
+        # SIFT keypoints are (row, col), like ORB; the rest of the pipeline is (x, y)
+        return sift.keypoints[:, ::-1], sift.descriptors
+
+    t0 = time.perf_counter()
+    kp_ref, d_ref = _sift_features(ref)
+    t_ref = time.perf_counter() - t0
+    logger.info(
+        f"coarse: SIFT reference -> {len(kp_ref)} keypoints in {t_ref:.1f}s "
+        f"({ref.shape[1]}x{ref.shape[0]})"
+    )
+
+    t1 = time.perf_counter()
+    kp_mov, d_mov = _sift_features(mov)
+    t_mov = time.perf_counter() - t1
+    logger.info(
+        f"coarse: SIFT moving    -> {len(kp_mov)} keypoints in {t_mov:.1f}s "
+        f"({mov.shape[1]}x{mov.shape[0]})"
+    )
+
+    matches = match_descriptors(d_mov, d_ref, cross_check=True)
+    logger.info(
+        f"coarse: {len(matches)} cross-checked matches -> {model} fit "
+        f"(SIFT total {t_ref + t_mov:.1f}s)"
+    )
+    if len(matches) < _MIN_SAMPLES[model]:
+        logger.warning(
+            f"coarse: only {len(matches)} matches for a {model} fit "
+            f"(needs >= {_MIN_SAMPLES[model]}) -- M0 will be unreliable"
+        )
+
+    src = kp_mov[matches[:, 0]]
+    dst = kp_ref[matches[:, 1]]
+    m, residual, n_inliers = estimate_transform_from_matches(src, dst, model=model, **kwargs)
+    return m, {"residual_px": residual, "n_inliers": n_inliers}
+
+
+def _frontend_fourier_mellin(ref, mov, model="euclidean", **kwargs):
+    """Log-polar Fourier-Mellin: keypoint-free rotation+scale+translation recovery.
+
+    Uses skimage.transform.warp_polar plus the already-imported phase_cross_correlation. Zero
+    new dependency, and it does not degrade on tissue too sparse to yield keypoints at all.
+
+    Rotation/scale are recovered from the log-polar transform of each image's FFT magnitude
+    spectrum -- the magnitude of a translated image's FFT is unchanged (the Fourier shift
+    theorem), so that stage is translation-invariant and isolates rotation+scale. The residual
+    translation is then recovered directly via phase cross-correlation between the images.
+
+    NOTE: unlike the keypoint front-ends, there is no correspondence set here, so ``n_inliers``
+    is reported as 0 and ``residual_px`` is phase_cross_correlation's normalised RMS error, not
+    a pixel-distance RMS -- the two are not on the same scale as the orb/sift residual.
+    """
+    from skimage.registration import phase_cross_correlation
+    from skimage.transform import warp_polar
+
+    r = normalize_for_orb(ref)
+    m = normalize_for_orb(mov)
+    if r.shape != m.shape:
+        # log-polar rotation/scale recovery needs a common frame; crop to the shared extent
+        h = min(r.shape[0], m.shape[0])
+        w = min(r.shape[1], m.shape[1])
+        r = r[:h, :w]
+        m = m[:h, :w]
+
+    r_fft_mag = np.abs(np.fft.fftshift(np.fft.fft2(r)))
+    m_fft_mag = np.abs(np.fft.fftshift(np.fft.fft2(m)))
+    radius = max(min(r_fft_mag.shape) // 2, 2)
+    r_polar = warp_polar(r_fft_mag, radius=radius, scaling="log")
+    m_polar = warp_polar(m_fft_mag, radius=radius, scaling="log")
+
+    rs_shift, _rs_error, _ = phase_cross_correlation(r_polar, m_polar, upsample_factor=10)
+    angle_bin, radius_bin = rs_shift
+    n_angle = r_polar.shape[0]
+    rotation_deg = (angle_bin / n_angle) * 360.0
+    klog = radius / np.log(radius)
+    scale = float(np.exp(radius_bin / klog))
+
+    t_shift, t_error, _ = phase_cross_correlation(r, m, upsample_factor=10)
+    dy, dx = (float(v) for v in t_shift)
+    logger.info(
+        f"coarse: Fourier-Mellin rotation={rotation_deg:+.2f}deg scale={scale:.4f} "
+        f"dx={dx:+.1f}px dy={dy:+.1f}px (log-polar {ref.shape[1]}x{ref.shape[0]})"
+    )
+
+    tform_kwargs = {"rotation": np.deg2rad(-rotation_deg), "translation": (dx, dy)}
+    if model in ("similarity", "affine"):
+        tform_kwargs["scale"] = 1.0 / scale if scale else 1.0
+    tform = _model_class(model)(**tform_kwargs)
+    m0 = np.asarray(tform.params, dtype=float)
+
+    residual = float(t_error) if np.isfinite(t_error) else float("nan")
+    return m0, {"residual_px": residual, "n_inliers": 0}
+
+
+def _frontend_disk_lightglue(ref, mov, model="euclidean", **kwargs):
+    """DISK + LightGlue -- the learned matcher VALIS and the ACROBAT winners use.
+
+    Requires torch + kornia, which live ONLY in the stare-ml container. The default :tiled
+    image stays lean deliberately, so this raises rather than silently degrading.
+    """
+    try:
+        import kornia  # noqa: F401
+        import torch  # noqa: F401
+    except ImportError as exc:
+        raise RuntimeError(
+            "frontend='disk_lightglue' needs torch + kornia, which ship only in "
+            "the stare-ml container. Run with -profile stare_ml, or choose "
+            "frontend=sift for a comparable CPU-only front-end."
+        ) from exc
+
+    # TODO(stare-ml container): torch/kornia are not installed in the default :tiled image (nor
+    # in this dev environment), so the actual DISK+LightGlue matching body cannot be written and
+    # verified here -- only the import guard above is implemented and tested
+    # (test_disk_lightglue_raises_a_clear_error_without_torch). When the stare-ml container
+    # lands, implement here: (1) run kornia.feature.DISK on both `ref`/`mov` to get keypoints +
+    # descriptors, (2) match them with kornia.feature.LightGlue, (3) feed the resulting
+    # correspondences to estimate_transform_from_matches(src, dst, model=model, **kwargs), same
+    # as _frontend_orb/_frontend_sift.
+    raise NotImplementedError(
+        "frontend='disk_lightglue' matching is not implemented outside the stare-ml container "
+        "-- see the TODO in bin/utils/coarse_align.py:_frontend_disk_lightglue"
+    )
+
+
+_FRONTENDS = {
+    "orb": _frontend_orb,
+    "sift": _frontend_sift,
+    "fourier_mellin": _frontend_fourier_mellin,
+    "disk_lightglue": _frontend_disk_lightglue,
+}
+
+
+def estimate_affine(ref, mov, frontend="orb", **kw):
+    """Estimate ``M0`` mapping ``mov`` image coordinates onto ``ref`` via a selectable front-end.
+
+    Returns ``(M0, info)`` where ``info`` is a dict that always carries ``frontend`` plus
+    whatever the chosen front-end reports (``residual_px``, ``n_inliers``). ``frontend`` selects
+    among :data:`FRONTENDS`; ``orb`` is the default and preserves this module's pre-existing
+    behaviour.
+    """
+    if frontend not in _FRONTENDS:
+        raise ValueError(f"unknown frontend {frontend!r}; expected one of {FRONTENDS}")
+    m0, info = _FRONTENDS[frontend](ref, mov, **kw)
+    info["frontend"] = frontend
+    return m0, info

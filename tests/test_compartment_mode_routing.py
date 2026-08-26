@@ -185,7 +185,11 @@ ALLOWED_LINES = {
         # 1064 + 54 - 15 = 1103. Re-pin, do not
         # widen. (Re-pin from the file, not by guessing:
         # `grep -n "params.expanded_quantification ?" conf/modules.config`.)
-        1103: (
+        # 1103 -> 1108 when Task 5.1's COARSE front-end selector landed: TILED_COARSE's
+        # withName block gained a 4-line comment plus
+        # `ext.args = { "--frontend ${params.reg_tiled_frontend}" }` (+5 lines total)
+        # above this line. 1103 + 5 = 1108.
+        1108: (
             "ext.args = { params.expanded_quantification ? '--expanded' : "
             "'' } -- conf/*.config closures cannot see lib/*.groovy classes, "
             "so ext.args must read params raw here."

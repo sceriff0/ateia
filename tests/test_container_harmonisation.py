@@ -423,6 +423,29 @@ UNREACHABLE_IMPORTS = {
         "upstream on purpose. Nothing in bin/ calls either function, so the import never runs. "
         "Guarded by test_unreachable_import_exemptions_are_still_unreachable."
     ),
+    # Task 5.1: bin/utils/coarse_align.py's _frontend_disk_lightglue -- reached from
+    # bin/tiled_coarse.py, a containers/tiled script -- opens with
+    # `try: import kornia; import torch except ImportError: raise RuntimeError(...)`. Unlike the
+    # segeval entry above this path IS reachable code (selecting --frontend disk_lightglue runs
+    # it), but the default :tiled image deliberately does not install torch/kornia -- they ship
+    # ONLY in the separate stare-ml container/profile, precisely so the lean default image stays
+    # lean (see the brief for Task 5.1). So inside :tiled this import is meant to fail, and does
+    # so with a clear, actionable RuntimeError naming -profile stare_ml, not a bare ImportError
+    # traceback. Guarded by
+    # tests/test_coarse_frontend.py::test_disk_lightglue_raises_a_clear_error_without_torch.
+    ("tiled", "torch"): (
+        "bin/utils/coarse_align.py's _frontend_disk_lightglue front-end needs torch, installed "
+        "only in the stare-ml container -- see the kornia entry immediately below for the full "
+        "reason."
+    ),
+    ("tiled", "kornia"): (
+        "bin/utils/coarse_align.py's _frontend_disk_lightglue guards `import kornia; import "
+        "torch` in a try/except ImportError and raises RuntimeError('...stare-ml container...') "
+        "on failure. --frontend defaults to 'orb' and disk_lightglue is documented as requiring "
+        "-profile stare_ml, so the default :tiled image is never expected to satisfy this "
+        "import; it exists to fail with a clear message, not to run. Guarded by "
+        "tests/test_coarse_frontend.py::test_disk_lightglue_raises_a_clear_error_without_torch."
+    ),
 }
 
 

@@ -43,6 +43,9 @@ process TILED_COARSE {
     def tile       = RegPresets.stare(params.reg_tiled_mode, 'tile', params.reg_tiled_tile)
     def halo       = RegPresets.stare(params.reg_tiled_mode, 'halo', params.reg_tiled_halo)
     def max_dim    = RegPresets.stare(params.reg_tiled_mode, 'coarse_max_dim', params.reg_tiled_coarse_max_dim)
+    // task.ext.args carries --frontend, set from conf/modules.config's TILED_COARSE block --
+    // a resolved scalar string, never a bare `params` reference inside script:.
+    def args       = task.ext.args ?: ''
     """
     tiled_coarse.py \\
         --reference ${reference} \\
@@ -52,7 +55,8 @@ process TILED_COARSE {
         --halo ${halo} \\
         --max-dim ${max_dim} \\
         --out-m0 ${prefix}_m0.json \\
-        --out-tiles ${prefix}_tiles.csv
+        --out-tiles ${prefix}_tiles.csv \\
+        ${args}
 
     ${ProcessEnvelope.versions(task.process, ['skimage'])}
     """
