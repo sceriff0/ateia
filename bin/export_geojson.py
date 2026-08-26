@@ -31,8 +31,20 @@ from measurements import MORPHOLOGY_COLS, identify_marker_columns
 logger = get_logger(__name__)
 
 # Columns that are morphological / metadata, not marker intensities
-# (single source of truth: bin/utils/measurements.py). Wrapped in a set here
-# since this module does membership tests in a loop.
+# (single source of truth: bin/utils/measurements.py). Two derived names from
+# the SAME import, for two different uses:
+#   - _MORPHOLOGY_COL_ORDER keeps the tuple's producer order, captured before the
+#     rebind below. build_measurements() below spreads it into field_cols, and
+#     Python randomises string-hash order per process -- iterating a *set* there
+#     would make field_cols order, dict insertion order, and (if anything ever
+#     iterates a row instead of using row.get()) key order all vary run to run.
+#     Nothing currently reads that order except positionally-fixed row.get()
+#     calls, so this is inert today, but a GeoJSON export is a byte-exact
+#     external contract (qupath-extension-flowpath) and should not depend on
+#     hash-order luck.
+#   - MORPHOLOGY_COLS is then rebound to a set, unchanged from before, for the
+#     O(1) membership tests this module does in a loop.
+_MORPHOLOGY_COL_ORDER = tuple(MORPHOLOGY_COLS)
 MORPHOLOGY_COLS = set(MORPHOLOGY_COLS)
 
 # Default classification color for "Cell" (cyan)
@@ -113,7 +125,7 @@ def _iter_rows_positional(df: pd.DataFrame, marker_cols: List[str]):
     a caller upstream may have already dropped rows (e.g. ``drop_duplicates``), leaving
     a non-contiguous index that a plain position counter would not reproduce.
     """
-    field_cols = [*MORPHOLOGY_COLS, *marker_cols]
+    field_cols = [*_MORPHOLOGY_COL_ORDER, *marker_cols]
     idx_arr = df.index.to_numpy()
     col_arrays = {c: df[c].to_numpy() for c in field_cols if c in df.columns}
     x_arr = col_arrays.get("x")
@@ -323,8 +335,10 @@ def _stream_collection(features, output_path: str) -> int:
     """Write an iterable of features as a GeoJSON FeatureCollection, one at a time.
 
     Returns the number written. Nothing accumulates: the caller can hand this a generator and
-    the whole document never exists in memory. PERF-PLAN.md measures 1.94x and **-1004 MB**
-    (C11) for this on the pipeline's largest artifact.
+    the whole document never exists in memory. Measured at 1.94x faster and -1004 MB peak RSS
+    on the pipeline's largest artifact, vs. building the full feature list and a single
+    `json.dump` (pre-dates this branch; not part of the 2026-08-26 measurement pass in
+    `docs/perf/2026-08-26-rss.md`).
 
     The literals below reproduce `json.dump`'s default formatting exactly -- `", "` between
     array items, `": "` after a key -- so the file is BYTE-IDENTICAL to the single-dump version
