@@ -95,6 +95,11 @@ baseline:
                                       # registration_method_grid crosses it, pinning reg_tiled_mode=custom.
   reg_tiled_gate_tre: 1.0             # STARE per-tile non-rigid refine gate (px), pipeline default. Only live for
                                       # tiled runs; declared for column uniformity (crossed by registration_method_grid).
+  reg_tiled_frontend: orb             # STARE COARSE global-alignment front-end, pipeline default. orb | sift |
+                                      # fourier_mellin | disk_lightglue. Only live for tiled runs; declared here
+                                      # (like reg_tiled_tile above) for column uniformity — inert at this baseline
+                                      # cell (registration_method=valis). Swept by registration_method_grid.tiled
+                                      # below, which pins registration_method=tiled and so makes it live.
   n_register_images: 2                # 1 reference + 1 moving (the classic pair)
   reg_qc: 2                           # pipeline default: staged registration QC ON — segments DAPI nuclei,
                                       # fixes correspondence at the rigid stage, re-measures dice_matched +
@@ -347,3 +352,20 @@ registration_method_grid:
     # process_low). Drop the 8192 point if these runs start hitting the wall; memory is NOT the
     # concern — peak is flat across this axis (~0.9 GB) by construction.
     reg_tiled_coarse_max_dim: [2048, 4096, 8192]   # M0 anchor thumbnail, longest side (px)
+    # COARSE global-alignment front-end (bin/utils/coarse_align.py). orb is today's default; sift and
+    # fourier_mellin cost NO new dependency — both already ship in scikit-image — so they bracket
+    # disk_lightglue, the learned DISK+LightGlue matcher, and keep the comparison honest about what
+    # torch actually buys. This belongs in this per-method grid, not a flat OFAT axis: frontend is
+    # read only when registration_method=tiled, and a flat run off the VALIS baseline would silently
+    # measure nothing at full run cost (the dead-axis trap test_project_sweep_has_no_dead_axes guards
+    # against for reg_tiled_tile/reg_tiled_gate_tre/reg_tiled_coarse_max_dim above).
+    #
+    # disk_lightglue is DELIBERATELY EXCLUDED from this list. It needs the separate stare-ml container
+    # (torch + kornia), so it cannot share this sweep's single execution profile, and its matching body
+    # still raises NotImplementedError (coarse_align.py::_frontend_disk_lightglue) — a sweep cell that
+    # cannot run is worse than an absent one, since conf/modules.config's errorStrategy 'ignore' branch
+    # can drop the resulting failure without failing the run, leaving a gap that looks like data. Add it
+    # here (with -profile stare_ml) once the matching body lands.
+    #
+    # COST NOTE: crosses with the three axes above, TRIPLING this grid from 27 to 81 runs.
+    reg_tiled_frontend: [orb, sift, fourier_mellin]

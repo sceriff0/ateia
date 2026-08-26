@@ -12,6 +12,9 @@ It reads the pipeline's own trace + QC outputs and writes ``<outdir>/`` (default
                              from the summary CSVs it writes during register() — the independent, second
                              accuracy signal (also rendered in the pipeline's final QC report)
   segmentation_agreement.csv per method-pair on a shared cell: instance-F1 + foreground IoU (stability)
+  registration_synthetic_gt.csv per (run, method, pair): EPE/gate-ROC/Jacobian accuracy against a
+                             SYNTHETIC ground-truth deformation field (benchmarks/stare_bench) — exact
+                             sub-pixel accuracy, a different grain than registration_accuracy.csv
   param_matrix.csv           runs_master joined with the registration + segmentation-quality headlines —
                              every knob's cost AND quality in one wide table (for parameter tuning)
 
@@ -125,6 +128,12 @@ def build_paper_data(results_root, run_plan_csv, outdir) -> dict:
         seg_agree = quality.segmentation_agreement(results_root, run_plan_csv)
     except Exception:
         seg_agree = pd.DataFrame()
+    try:
+        synth_csvs = sorted(Path(results_root).glob("*/registration_synthetic_gt.csv"))
+        synth_gt = (pd.concat([pd.read_csv(c) for c in synth_csvs], ignore_index=True)
+                    if synth_csvs else pd.DataFrame())
+    except Exception:
+        synth_gt = pd.DataFrame()
 
     # param_matrix: master + BOTH registration-accuracy headlines (seg-based + VALIS rTRE) +
     # cell count.
@@ -145,6 +154,7 @@ def build_paper_data(results_root, run_plan_csv, outdir) -> dict:
         "registration_accuracy": reg_acc,
         "registration_valis_rtre": valis_rtre,
         "segmentation_agreement": seg_agree,
+        "registration_synthetic_gt": synth_gt,
         "param_matrix": param_matrix,
     }
     for name, df in tables.items():
@@ -243,6 +253,50 @@ _DICTS = {
          ("n_cells_a", "-", "Cell count, method_a."),
          ("n_cells_b", "-", "Cell count, method_b."),
          ("cell_count_ratio", "-", "n_cells_a / n_cells_b (over/under-segmentation).")]),
+    "registration_synthetic_gt": (
+        "Registration accuracy against SYNTHETIC ground truth: the deformation is known exactly at "
+        "every pixel, so endpoint error is measured everywhere rather than at landmarks. One row per "
+        "(run, method, pair). `diag_intrinsic_tre_px` is STARE's own self-reported residual and is a "
+        "DIAGNOSTIC — never quote it as accuracy, it is the quantity the method optimises.",
+        [("run_id", "-", "Run identifier."),
+         ("method", "-", "Registration method under test."),
+         ("pair_id", "-", "Synthetic reference/moving pair identifier."),
+         ("generator_version", "-", "Version of the synthetic ground-truth generator."),
+         ("seed", "-", "RNG seed used to generate the deformation field."),
+         ("param_hash", "-", "Hash of the generator parameters (provenance / reproducibility)."),
+         ("field_family", "-", "Deformation field family (e.g. random_fourier)."),
+         ("field_correlation_px", "px", "Field spatial correlation length."),
+         ("field_amplitude_px", "px", "Field displacement amplitude."),
+         ("epe_mean_px", "px", "Mean endpoint error, exact over every sampled point."),
+         ("epe_median_px", "px", "Median endpoint error (estimated from a deterministic subsample at scale)."),
+         ("epe_p95_px", "px", "95th-percentile endpoint error (estimated from a deterministic subsample at scale)."),
+         ("epe_max_px", "px", "Maximum endpoint error, exact over every sampled point."),
+         ("epe_n", "-", "Number of points the exact EPE accumulators (mean/max) summed over."),
+         ("epe_subsample_effective", "-", "Combined stride behind epe_median_px/epe_p95_px: 1 means the "
+          "percentiles are exact over every point, >1 means they are estimated from a deterministic "
+          "strided subsample."),
+         ("gate_precision", "-", "Precision of the registration-acceptance gate against ground truth."),
+         ("gate_recall", "-", "Recall of the registration-acceptance gate against ground truth."),
+         ("gate_f1", "-", "F1 of the registration-acceptance gate against ground truth."),
+         ("gate_auc", "-", "ROC AUC of the registration-acceptance gate against ground truth."),
+         ("gate_tp", "-", "Gate true positives."),
+         ("gate_fp", "-", "Gate false positives."),
+         ("gate_tn", "-", "Gate true negatives."),
+         ("gate_fn", "-", "Gate false negatives."),
+         ("folding_rate", "-", "Fraction of the estimated deformation field with a non-positive Jacobian determinant (folding)."),
+         ("det_min", "-", "Minimum Jacobian determinant."),
+         ("det_p05", "-", "5th-percentile Jacobian determinant."),
+         ("det_median", "-", "Median Jacobian determinant."),
+         ("lipschitz", "-", "Estimated Lipschitz constant of the recovered deformation."),
+         ("lipschitz_converges", "-", "Whether the Lipschitz estimate converged."),
+         ("tre_median_px", "px", "Median target registration error against synthetic ground-truth landmarks."),
+         ("tre_mean_px", "px", "Mean target registration error against synthetic ground-truth landmarks."),
+         ("tre_p90_px", "px", "90th-percentile target registration error against synthetic ground-truth landmarks."),
+         ("tre_median_rtre", "-", "Median relative TRE (normalized by image diagonal)."),
+         ("tre_n", "-", "Number of ground-truth landmark points used for TRE."),
+         ("diag_intrinsic_tre_px", "px", "DIAGNOSTIC ONLY: STARE's self-reported intrinsic TRE from "
+          "bin/tiled_solve.py's per-tile phase correlations — the residual the method itself "
+          "optimises. Never report this as accuracy.")]),
     "param_matrix": (
         "runs_master joined with the registration-accuracy and segmentation-quality headlines: every "
         "swept knob's cost AND quality in one wide table, for parameter tuning. Slice by varied_axis.",
