@@ -149,7 +149,7 @@ def test_autoscale_uint16_vs_float32_disagree_at_a_real_triple():
     this pixel is proof it is not merely "different precision" but a real, reachable
     disagreement. This was tried (narrow read + a widen-back cast to correct it) and
     reverted: the memory saving the narrow read appeared to offer does not survive the
-    widen-back that correctness requires -- measured (task-3-report.md) at statistically
+    widen-back that correctness requires -- measured (docs/perf/2026-08-26-rss.md) at statistically
     indistinguishable peak RSS from never narrowing at all, on top of the added complexity of
     the cast and its branching. So `qc.py` simply never narrows the read; this test's job is
     to keep it that way by documenting exactly what breaks if someone "optimises" it back in

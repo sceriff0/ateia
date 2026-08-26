@@ -141,8 +141,8 @@ def read_decimated(src, index, factor, band_bytes=DEFAULT_BAND_BYTES):
       for a reproduced counter-example. A prior version of this function took an optional
       ``dtype=`` for exactly that narrow read; it was reverted (task 3, second pass) once
       measurement showed the memory it appeared to save at the read step does not survive the
-      widen-back-to-float32 that correctness requires downstream -- see task-3-report.md for
-      the measured numbers.
+      widen-back-to-float32 that correctness requires downstream -- see
+      ``docs/perf/2026-08-26-rss.md`` for the measured numbers.
     - ``bin/generate_preprocess_qc.py:211`` (``read_decimated(lazy_arr, i, factor=1)``, one
       call per channel) feeds the result to ``normalize_image`` -> ``downsample_image`` ->
       ``imsave`` -- a display-only-to-PNG chain that LOOKS like the same trap as qc.py's, and

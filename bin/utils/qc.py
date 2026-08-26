@@ -359,22 +359,22 @@ def create_registration_qc(
     #      reproduced counter-example. Fixing that requires widening back to float32 right
     #      before autoscale_for_display sees the array.
     #   2. That widen-back is exactly what erases the memory saving the narrow read
-    #      appeared to offer. Measured (task-3-report.md, isolated processes, 7000x6000
-    #      fixture): a narrow read that is NEVER widened back does measure ~48% lower peak
-    #      RSS than this always-float32 read -- but once the mandatory widen-back cast runs,
-    #      the measured peak RSS is statistically indistinguishable from never narrowing at
-    #      all (670.8 MB either way). So narrowing here buys nothing once it is made
-    #      correct, and only adds a cast plus branching. Left at float32, unconditionally.
+    #      appeared to offer. Measured (docs/perf/2026-08-26-rss.md, isolated processes,
+    #      7000x6000 fixture): a narrow read that is NEVER widened back does measure ~48%
+    #      lower peak RSS than this always-float32 read -- but once the mandatory widen-back
+    #      cast runs, the measured peak RSS is statistically indistinguishable from never
+    #      narrowing at all (670.8 MB either way). So narrowing here buys nothing once it is
+    #      made correct, and only adds a cast plus branching. Left at float32, unconditionally.
     #
     # The real, measured win at this call site is read_decimated's pre-allocated
     # destination (no band-list-plus-concatenate doubling, at any factor): measured ~24%
-    # lower peak RSS than the pre-task-3 list+concatenate implementation, at this exact
+    # lower peak RSS than the prior list+concatenate implementation, at this exact
     # (default-dtype, no narrowing) call shape -- but that number is a READ-PHASE-ONLY
     # figure (isolated open_lazy + read_decimated, no render). The measured full
     # create_registration_qc peak (read + autoscale/stack/rescale/PNG-TIFF write) showed no
-    # equivalent improvement -- statistically within noise of the pre-task-3 baseline. See
-    # task-3-report.md for both sets of numbers; do not extend the read-phase figure into an
-    # end-to-end claim it doesn't support.
+    # equivalent improvement -- statistically within noise of the pre-branch baseline. See
+    # docs/perf/2026-08-26-rss.md for both sets of numbers; do not extend the read-phase
+    # figure into an end-to-end claim it doesn't support.
     ref_close = reg_close = None
     try:
         ref_arr, _ref_dtype, ref_close = open_lazy(reference_path)

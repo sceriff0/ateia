@@ -184,7 +184,7 @@ ALLOWED_LINES = {
         # (harmless under config merge, last-one-wins). Same composition check as above --
         # 1064 + 54 - 15 = 1103.
         # 1103 -> 1119 when SEGMENT's `clusterOptions` closure (above this line) was fixed
-        # to compose --account/--qos instead of replacing them outright (PERF-PLAN 5.1): a
+        # to compose --account/--qos instead of replacing them outright: a
         # `withName:` assignment REPLACES process.clusterOptions rather than adding to it,
         # so SEGMENT's GPU-only closure was silently dropping the `slurm` profile's
         # --account/--qos composition. The one-line closure became a 10-line explanatory
