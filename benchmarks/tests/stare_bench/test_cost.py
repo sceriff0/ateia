@@ -1,10 +1,15 @@
+import json
 import subprocess
 import sys
+import textwrap
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
 from benchmarks.stare_bench.metrics.cost import determinism, from_trace, measure
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def test_measure_reports_wall_time_and_memory():
@@ -24,21 +29,53 @@ def test_measure_reports_subprocess_children_not_just_self():
     # process that does nothing but spawn children -- wrong in the most
     # convincing direction: too small. A modest (~300 MB) child allocation
     # must move peak_rss_gb materially above a no-child baseline.
-    baseline = measure(lambda: None)[1]["peak_rss_gb"]
+    #
+    # ru_maxrss (RUSAGE_SELF and RUSAGE_CHILDREN alike) is a LIFETIME
+    # high-water mark that never resets within a process. Comparing a
+    # "no-child" baseline against a "spawned a child" measurement is only
+    # meaningful in a FRESH interpreter: inside the shared pytest process,
+    # whichever heavy test ran earlier (test_generate.py rendering images,
+    # test_field_quality.py/test_epe.py building rasters) permanently raises
+    # the high-water mark, so a 300 MB child can no longer move it and the
+    # delta collapses to zero -- a failure that is a function of suite
+    # execution order, not of the code. Spawning a throwaway interpreter
+    # makes the assertion a property of measure() itself.
+    script = textwrap.dedent(
+        """
+        import json
+        import subprocess
+        import sys
 
-    def spawn_child():
-        subprocess.run(
-            [
-                sys.executable,
-                "-c",
-                "import numpy as np; a = np.ones(300_000_000 // 8); print(a.sum())",
-            ],
-            check=True,
-            capture_output=True,
-        )
+        from benchmarks.stare_bench.metrics.cost import measure
 
-    _, stats = measure(spawn_child)
-    assert stats["peak_rss_gb"] > baseline + 0.2
+        baseline = measure(lambda: None)[1]["peak_rss_gb"]
+
+        def spawn_child():
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    "import numpy as np; a = np.ones(300_000_000 // 8); "
+                    "print(a.sum())",
+                ],
+                check=True,
+                capture_output=True,
+            )
+
+        _, stats = measure(spawn_child)
+        print(json.dumps({"baseline": baseline, "peak": stats["peak_rss_gb"]}))
+        """
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=60,
+    )
+    result = json.loads(proc.stdout.strip().splitlines()[-1])
+    assert result["peak"] > result["baseline"] + 0.2
 
 
 def test_from_trace_aggregates_the_nextflow_columns():
