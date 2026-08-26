@@ -89,8 +89,54 @@ def compute_zscores(df: pd.DataFrame, marker_cols: List[str]) -> pd.DataFrame:
     return df
 
 
+# Non-marker columns build_measurements() reads via row.get(...), beyond "label"/"x"/"y"
+# (already pulled for the caller's own centroid/skip logic). Kept as one list so both
+# loops below ask for exactly what build_measurements can use -- see _iter_rows_positional.
+_MORPHOLOGY_ROW_COLS = (
+    "area",
+    "eccentricity",
+    "perimeter",
+    "solidity",
+    "convex_area",
+    "axis_major_length",
+    "axis_minor_length",
+)
+
+
+def _iter_rows_positional(df: pd.DataFrame, field_cols: List[str]):
+    """Yield ``(idx, x_px, y_px, row)`` for every row of ``df``, without ``iterrows()``.
+
+    ``iterrows()`` materialises one pandas Series per row -- 500k of them on a
+    whole-slide image, on the process with a 32 GB reservation. Each column in
+    ``field_cols`` is instead pulled to a numpy array **once**, up front, and indexed
+    positionally per row (the same seam ``extract_cell_properties._label_bboxes``
+    established for bboxes; see ``tests/test_no_full_mask_unique.py``).
+
+    ``row`` is a plain ``dict`` of ``{column: value}`` for whichever of ``field_cols``
+    are actually present in ``df`` -- a column absent from ``df`` is simply absent from
+    every ``row``, so ``row.get(col)`` still returns ``None`` exactly as
+    ``Series.get(col)`` did. That is a deliberate difference from a positional numpy
+    lookup, which would raise ``KeyError``/``IndexError`` on a missing column instead.
+
+    ``idx`` is ``df``'s own index value for that row (``df.index.to_numpy()``), not a
+    freshly-counted position -- callers fall back to it (``row.get("label", idx)``) and
+    a caller upstream may have already dropped rows (e.g. ``drop_duplicates``), leaving
+    a non-contiguous index that a plain position counter would not reproduce.
+    """
+    idx_arr = df.index.to_numpy()
+    col_arrays = {c: df[c].to_numpy() for c in field_cols if c in df.columns}
+    x_arr = col_arrays.get("x")
+    y_arr = col_arrays.get("y")
+
+    for i in range(len(df)):
+        row = {c: arr[i] for c, arr in col_arrays.items()}
+        x_px = x_arr[i] if x_arr is not None else None
+        y_px = y_arr[i] if y_arr is not None else None
+        yield idx_arr[i], x_px, y_px, row
+
+
 def build_measurements(
-    row: pd.Series,
+    row: pd.Series | Dict,
     marker_cols: List[str],
     pixel_size: float,
 ) -> List[Dict]:
@@ -98,6 +144,12 @@ def build_measurements(
 
     Returns a list of {"name": ..., "value": ...} dicts matching QuPath's
     native GeoJSON serialization format.
+
+    ``row`` only needs ``.get(key)`` / ``.get(key, default)`` -- a ``pd.Series`` (the
+    original per-row shape from ``iterrows()``) and a plain ``dict`` (what
+    ``_iter_rows_positional`` now hands in) are both accepted with identical
+    behaviour, including that a key absent from either returns ``None``/the given
+    default rather than raising.
     """
     measurements = []
 
@@ -237,11 +289,10 @@ def export_geojson(
     # slide's worth of features never coexists in memory. `skipped` is a one-element list
     # because the count is read after the generator has been consumed.
     skipped = [0]
+    field_cols = ["label", "x", "y", *_MORPHOLOGY_ROW_COLS, *marker_cols]
 
     def _iter_features():
-        for idx, row in df.iterrows():
-            x_px = row.get("x")
-            y_px = row.get("y")
+        for idx, x_px, y_px, row in _iter_rows_positional(df, field_cols):
             if pd.isna(x_px) or pd.isna(y_px):
                 skipped[0] += 1
                 continue
@@ -333,13 +384,18 @@ def export_combined_geojson(
 
     cells_combined: List[Dict] = []
     n_with_nucleus = 0
+    # Plain int, not the [0]-list trick _iter_features uses: that trick exists only
+    # because that counter is read after a *generator* has been consumed. This loop
+    # runs to completion inline, so a local int is read after the `for` below in the
+    # ordinary way. (This int is the crash this task fixes: it used to be incremented
+    # as `skipped[0] += 1`, which raised `TypeError: 'int' object is not subscriptable`
+    # on the very first NaN centroid -- see PERF-PLAN task 4 / the repro script.)
     skipped = 0
+    field_cols = ["label", "x", "y", *_MORPHOLOGY_ROW_COLS, *marker_cols]
 
-    for idx, row in df.iterrows():
-        x_px = row.get("x")
-        y_px = row.get("y")
+    for idx, x_px, y_px, row in _iter_rows_positional(df, field_cols):
         if pd.isna(x_px) or pd.isna(y_px):
-            skipped[0] += 1
+            skipped += 1
             continue
         x_corner = float(x_px) + 0.5
         y_corner = float(y_px) + 0.5
