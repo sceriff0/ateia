@@ -105,6 +105,7 @@ nav:
   - Incremental cycles: add_cycle.md
   - Registration QC: registration_qc.md
   - SpatialData & FlowPath: spatialdata.md
+  - Migration (2026-08-24): migration-2026-08-24.md
   - Citation: citation.md
 
 # ---------------------------------------------------------------------------

@@ -76,6 +76,12 @@ nextflow_pipeline {
                 // output subdirectory into the published path.
                 input  = "$projectDir/tests/testdata/test_input.csv"
                 outdir = "$outputDir"
+                // Every case in this file asserts on a checkpoint MANIFEST, and no
+                // manifest is written at the default --cleanup_level=final: the
+                // artifacts its rows name are not published there, so every path
+                // would dangle (Checkpoint.writesAtLevel). The 'final' behaviour has
+                // its own case at the end of this file.
+                cleanup_level = 'none'
             }
         }
 
@@ -158,6 +164,12 @@ nextflow_pipeline {
                 // <pid>/registered/ — that directory is not created at all.
                 input  = "$projectDir/tests/testdata/single_sample.csv"
                 outdir = "$outputDir"
+                // Every case in this file asserts on a checkpoint MANIFEST, and no
+                // manifest is written at the default --cleanup_level=final: the
+                // artifacts its rows name are not published there, so every path
+                // would dangle (Checkpoint.writesAtLevel). The 'final' behaviour has
+                // its own case at the end of this file.
+                cleanup_level = 'none'
             }
         }
 
@@ -241,6 +253,12 @@ nextflow_pipeline {
                 // moving slide.
                 input               = "$projectDir/tests/testdata/test_input.csv"
                 outdir              = "$outputDir"
+                // Every case in this file asserts on a checkpoint MANIFEST, and no
+                // manifest is written at the default --cleanup_level=final: the
+                // artifacts its rows name are not published there, so every path
+                // would dangle (Checkpoint.writesAtLevel). The 'final' behaviour has
+                // its own case at the end of this file.
+                cleanup_level = 'none'
                 registration_method = 'tiled'
             }
         }
@@ -324,6 +342,12 @@ nextflow_pipeline {
                 // to either producer's output layout fails here.
                 input               = "$projectDir/tests/testdata/test_input.csv"
                 outdir              = "$outputDir"
+                // Every case in this file asserts on a checkpoint MANIFEST, and no
+                // manifest is written at the default --cleanup_level=final: the
+                // artifacts its rows name are not published there, so every path
+                // would dangle (Checkpoint.writesAtLevel). The 'final' behaviour has
+                // its own case at the end of this file.
+                cleanup_level = 'none'
                 registration_method = 'tiled'
             }
         }
@@ -416,6 +440,12 @@ nextflow_pipeline {
                 // found ("--start postprocessing against that file fails").
                 input  = "$projectDir/tests/testdata/valid_checkpoint_postprocessing.csv"
                 outdir = "$outputDir"
+                // Every case in this file asserts on a checkpoint MANIFEST, and no
+                // manifest is written at the default --cleanup_level=final: the
+                // artifacts its rows name are not published there, so every path
+                // would dangle (Checkpoint.writesAtLevel). The 'final' behaviour has
+                // its own case at the end of this file.
+                cleanup_level = 'none'
                 start  = 'segmentation'
             }
         }
@@ -493,6 +523,12 @@ nextflow_pipeline {
                 // pinning unrelated knobs only makes it drift from a real run.
                 input        = "$projectDir/tests/testdata/new_cycle.csv"
                 outdir       = "$outputDir"
+                // Every case in this file asserts on a checkpoint MANIFEST, and no
+                // manifest is written at the default --cleanup_level=final: the
+                // artifacts its rows name are not published there, so every path
+                // would dangle (Checkpoint.writesAtLevel). The 'final' behaviour has
+                // its own case at the end of this file.
+                cleanup_level = 'none'
                 mode         = 'add_cycle'
                 prior_outdir = "$projectDir/tests/testdata/prior_run"
             }
@@ -507,13 +543,28 @@ nextflow_pipeline {
             def manifests = (csvDir.listFiles() ?: [])
                 .findAll { it.name.endsWith('.csv') }
                 .sort { it.name }
-            // TWO, not three: add_cycle preprocesses and registers the new cycle but
-            // has no POSTPROCESSING step (masks and the base quantification table are
-            // reused, not re-derived), so it writes no postprocessed.csv. That gap is
-            // why an add_cycle --outdir is still not a usable --prior_outdir for a
-            // second add_cycle; registered.csv was the half that was missing entirely.
-            assert manifests*.name == ['preprocessed.csv', 'registered.csv'] :
-                "expected preprocessed.csv + registered.csv, found ${manifests*.name}"
+            // THREE. add_cycle has no POSTPROCESSING step -- the masks and the base
+            // quantification table are reused rather than re-derived -- but it does
+            // produce every artifact a postprocessed row names (it rebuilds the
+            // combined geojson, csv and pyramid wholesale over the merged channel
+            // set), so subworkflows/local/postprocessed_checkpoint.nf writes the
+            // manifest from this path too. Nothing is recomputed to get it.
+            //
+            // Both halves of Layout.ADD_CYCLE_CHECKPOINTS are therefore present, which
+            // is the whole point: until they were, cycle 3 refused at LAUNCH with
+            // "required checkpoint 'csv/postprocessed.csv' not found under
+            // --prior_outdir" and cyclic-IF stopped at two cycles. See the chained
+            // case below, which runs cycle 3 against a cycle-2 outdir for real.
+            assert manifests*.name == ['postprocessed.csv', 'preprocessed.csv', 'registered.csv'] :
+                "expected preprocessed.csv + registered.csv + postprocessed.csv, found ${manifests*.name}"
+
+            // Same column contract as the linear path's postprocessed.csv, because
+            // the same writer produced it.
+            def postLines = manifests.find { it.name == 'postprocessed.csv' }.readLines()
+            assert postLines[0] == 'patient_id,id,cell_csv,cell_geojson,merged_csv,cell_mask,pyramid' :
+                "postprocessed.csv header drifted: ${postLines[0]}"
+            def postRows = postLines.drop(1).findAll { it.trim() }
+            assert postRows.size() == 1 : "expected 1 postprocessed row, got ${postRows.size()}"
 
             // --- the manifest the linear path already had, now on this path -------
             // Same column contract as the linear registered.csv, because the same
@@ -553,9 +604,11 @@ nextflow_pipeline {
                     }
                 }
             }
-            // 1 preprocessed row + 2 registered rows, one path each.
-            assert checked == 3 :
-                "expected 3 recorded paths, examined ${checked} — did the CSV columns change?"
+            // 1 preprocessed row + 2 registered rows, one path each, + 5 paths in
+            // the single postprocessed row (cell_csv, cell_geojson, merged_csv,
+            // cell_mask, pyramid).
+            assert checked == 8 :
+                "expected 8 recorded paths, examined ${checked} — did the CSV columns change?"
             assert problems.isEmpty() :
                 "checkpoint manifest has ${problems.size()} bad path(s):\n  " +
                 problems.join("\n  ")
@@ -579,6 +632,10 @@ nextflow_pipeline {
                 // directly comparable.
                 input  = "$projectDir/tests/testdata/test_input.csv"
                 outdir = "${outputDir}/has,a,comma"
+                // See the note on the first case: no manifest is written at the
+                // default --cleanup_level=final, and a manifest is what this
+                // asserts on.
+                cleanup_level = 'none'
             }
         }
 
@@ -640,6 +697,71 @@ nextflow_pipeline {
             assert problems.isEmpty() :
                 "checkpoint manifest has ${problems.size()} bad path(s):\n  " +
                 problems.join("\n  ")
+        }
+    }
+
+    test("no checkpoint manifest at the DEFAULT --cleanup_level=final") {
+        tag "stub"
+        options "-stub"
+
+        // The other side of the invariant, and the reason every case above had to
+        // name --cleanup_level=none explicitly.
+        //
+        // At the default level the intermediates are not published, so a manifest
+        // written anyway would record paths that do not exist -- turning the
+        // invariant above red for a DESIGNED reason, which is the worst possible
+        // outcome for a guard. Checkpoint.writesAtLevel makes the writers
+        // level-aware instead, and this asserts the result rather than trusting it.
+        //
+        // Note the postprocessed manifest is absent TOO, which does not follow from
+        // "final artifacts are published": its cell_csv, cell_geojson, merged_csv
+        // and pyramid columns are all final, but its cell_mask column names a
+        // segmentation mask, and segmentation is an intermediate. One dangling
+        // column is enough to make the whole manifest a lie.
+
+        when {
+            params {
+                input  = "$projectDir/tests/testdata/test_input.csv"
+                outdir = "$outputDir"
+                // The shipped default, written out rather than relied on, so this
+                // case still means what it says if the default ever moves.
+                cleanup_level = 'final'
+            }
+        }
+
+        then {
+            assert workflow.success
+
+            def csvDir = new File("${outputDir}/csv".toString())
+            def manifests = csvDir.isDirectory()
+                ? (csvDir.listFiles() ?: []).findAll { it.name.endsWith('.csv') }.sort { it.name }
+                : []
+            assert manifests.isEmpty() :
+                "expected NO checkpoint manifest at --cleanup_level=final, found " +
+                manifests*.name
+
+            // An empty csv/ is indistinguishable from a run that died before its
+            // first checkpoint, so the directory has to say which it is.
+            def readme = new File(csvDir, 'README.txt')
+            assert readme.exists() : "csv/README.txt was not written"
+            assert readme.text.contains('--cleanup_level none') :
+                "csv/README.txt does not name the flag that restores the manifests"
+
+            // And the run is still USEFUL: the final artifacts are all there. If
+            // this ever passed with an empty output tree, the assertions above
+            // would be satisfied by a pipeline that published nothing at all.
+            ['geojson', 'pyramid', 'quantification'].each { kind ->
+                def dir = new File("${outputDir}/P001/${kind}".toString())
+                assert dir.isDirectory() && (dir.listFiles() ?: []).size() > 0 :
+                    "final artifact directory ${kind}/ is missing or empty"
+            }
+            // ...and the intermediates are genuinely gone, or the case above proves
+            // nothing about the gate.
+            ['converted', 'preprocessed', 'split_channels', 'quantify'].each { kind ->
+                def dir = new File("${outputDir}/P001/${kind}".toString())
+                assert !dir.isDirectory() || (dir.listFiles() ?: []).size() == 0 :
+                    "intermediate ${kind}/ was published at --cleanup_level=final"
+            }
         }
     }
 }

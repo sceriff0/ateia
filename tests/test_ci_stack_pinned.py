@@ -58,8 +58,39 @@ def workflow_files() -> list[Path]:
 # future package (e.g. scikit-learn) added to a pip install line doesn't
 # silently need a containers/tiled pin it has no reason to have.
 GUARDED_PACKAGES = frozenset(
-    {"numpy", "scipy", "scikit-image", "tifffile", "zarr", "numcodecs", "dask"}
+    {
+        "numpy", "scipy", "scikit-image", "tifffile", "zarr", "numcodecs", "dask",
+        # Added 2026-08-26, both after CI failed on their ABSENCE while this file
+        # stayed green -- the guarded set excluded them, so a workflow that
+        # installed neither satisfied every check here.
+        #
+        # imagecodecs: the zstd/LZW codec backend tifffile calls through. Missing
+        # it is not an import error; it surfaces only on a WRITE, as
+        # `ModuleNotFoundError: No module named 'compression'` raised from inside
+        # tifffile. 34 tests in tests/test_merge_pyramid_streaming.py failed that
+        # way -- every case writing with compression='zstd'/'zlib' -- and they
+        # passed on any machine that happened to carry imagecodecs.
+        "imagecodecs",
+        # matplotlib: a hard dependency of the CSE evaluation path (see
+        # NON_TILED_AUTHORITY below for why its version authority is not the
+        # tiled image). bin/seg_quality_eval.py exits 1 without it.
+        "matplotlib",
+    }
 )
+
+# Guarded packages whose version authority is NOT containers/tiled/requirements.txt.
+# Each has its own check below; membership here only exempts it from the
+# tiled-authority comparison, never from the "must be ==-pinned" rule.
+#
+# The tiled image is the right authority for the packages the tiled PATH runs on.
+# For a package that path never imports, pinning it in containers/tiled/
+# requirements.txt to satisfy this file would assert a dependency the image does
+# not have -- so the package gets an authority that reflects where it actually
+# runs instead.
+NON_TILED_AUTHORITY = frozenset({
+    "dask",        # authority: the three Dockerfiles that pin it, harmonised.
+    "matplotlib",  # authority: containers/segeval, the image that runs CSE.
+})
 
 # `pip install <stuff>` lines are plain shell inside a YAML block scalar
 # (`run: |`), so a raw line scan is sufficient — this is what the repo's
@@ -181,7 +212,7 @@ def test_ci_guarded_pins_match_containers_tiled_requirements():
     ``test_ci_dask_pin_matches_harmonised_container_pin`` below.
     """
     tiled_pins = parse_tiled_requirements(TILED_REQUIREMENTS.read_text())
-    tiled_scope = GUARDED_PACKAGES - {"dask"}
+    tiled_scope = GUARDED_PACKAGES - NON_TILED_AUTHORITY
 
     assert tiled_pins.keys() >= tiled_scope, (
         f"{TILED_REQUIREMENTS.relative_to(ROOT)} does not pin all of "
@@ -197,8 +228,10 @@ def test_ci_guarded_pins_match_containers_tiled_requirements():
                 # Already reported by
                 # test_ci_guarded_packages_are_pinned_with_double_equals.
                 continue
-            if name == "dask":
-                # Covered by test_ci_dask_pin_matches_harmonised_container_pin.
+            if name in NON_TILED_AUTHORITY:
+                # Covered by that package's own authority check below --
+                # test_ci_dask_pin_matches_harmonised_container_pin,
+                # test_ci_matplotlib_pin_matches_the_segeval_image.
                 continue
             expected = tiled_pins[name]
             if version != expected:
@@ -277,3 +310,69 @@ def test_ci_dask_pin_matches_harmonised_container_pin():
         "(containers/convert, containers/cellsam, containers/stardist):\n"
         + "\n".join(sorted(set(mismatches)))
     )
+
+
+# matplotlib's authority is containers/segeval/requirements.txt, NOT
+# containers/tiled/requirements.txt: the tiled path never imports matplotlib, and
+# segeval is the image that runs bin/seg_quality_eval.py -- the script
+# tests/test_seg_quality_eval_cli.py drives, and the one that exits 1 without it.
+#
+# Unlike dask, matplotlib is deliberately NOT asserted to be harmonised across
+# containers. regqc and quantify pin 3.9.2 for their own plotting; segeval pins
+# 3.8.4 for the vendored CSE import. That divergence is real and pre-dates this
+# guard, and flattening it would be a container change disguised as a test.
+SEGEVAL_REQUIREMENTS = ROOT / "containers" / "segeval" / "requirements.txt"
+
+
+def test_ci_matplotlib_pin_matches_the_segeval_image():
+    """CI's matplotlib pin must match the image whose code path needs it.
+
+    matplotlib is not a plotting nicety here. The vendored CSE source runs
+    `import matplotlib.pyplot` at the top of functions.py's
+    foreground_separation(), which single_method_eval.py calls on the main
+    evaluation path -- so its absence is a hard failure of the scorer, which is
+    exactly how it presented: bin/seg_quality_eval.py exiting 1 under CI while
+    every developer machine that carried matplotlib passed.
+    """
+    pins = parse_tiled_requirements(SEGEVAL_REQUIREMENTS.read_text())
+    expected = pins.get("matplotlib")
+    assert expected, (
+        f"{SEGEVAL_REQUIREMENTS.relative_to(ROOT)} no longer pins matplotlib, so "
+        "this file has no authority to compare CI against. Either restore the pin "
+        "or move matplotlib out of GUARDED_PACKAGES -- do not leave the authority "
+        "dangling."
+    )
+
+    mismatches = []
+    for wf in workflow_files():
+        for name, version in find_guarded_pins(wf.read_text()):
+            if name != "matplotlib" or version is None:
+                continue
+            if version != expected:
+                mismatches.append(
+                    f"{wf.relative_to(ROOT)}: matplotlib=={version} but "
+                    f"{SEGEVAL_REQUIREMENTS.relative_to(ROOT)} pins "
+                    f"matplotlib=={expected}"
+                )
+    assert not mismatches, "\n".join(sorted(set(mismatches)))
+
+
+def test_every_non_tiled_authority_package_has_its_own_check():
+    """NON_TILED_AUTHORITY exempts a package from the tiled comparison. An entry
+    with no replacement check exempts it from EVERY version comparison, which is
+    strictly worse than not guarding it at all -- it would look covered.
+    """
+    src = Path(__file__).read_text()
+    checks = {
+        "dask": "test_ci_dask_pin_matches_harmonised_container_pin",
+        "matplotlib": "test_ci_matplotlib_pin_matches_the_segeval_image",
+    }
+    assert set(checks) == set(NON_TILED_AUTHORITY), (
+        f"NON_TILED_AUTHORITY is {sorted(NON_TILED_AUTHORITY)} but this file maps "
+        f"authority checks for {sorted(checks)}. Every exempted package needs one."
+    )
+    for pkg, fn in checks.items():
+        assert f"def {fn}(" in src, (
+            f"{pkg} is exempt from the tiled-authority check but its replacement "
+            f"check {fn} does not exist"
+        )

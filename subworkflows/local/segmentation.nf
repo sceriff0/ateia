@@ -173,6 +173,10 @@ workflow SEGMENTATION {
         .map { pid, placeholder, real -> tuple(pid, real ?: placeholder) }
 
     ch_checkpoint_csv = ch_registered_for_ckpt
+        // Not written at a cleaning level: neither the registered slides nor the
+        // masks nor the contours are published there, so every one of this row's
+        // four path columns would dangle. See Checkpoint.writesAtLevel.
+        .filter { Checkpoint.writesAtLevel(Layout.SEGMENTED, params.cleanup_level) }
         .combine(ch_cell_mask_path, by: 0)
         .combine(ch_nuclei_mask_path, by: 0)
         .combine(ch_contours_path, by: 0)

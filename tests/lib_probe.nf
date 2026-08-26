@@ -40,13 +40,13 @@ workflow {
     def badStep = false
     try { Layout.checkpointCsvName('nonsense') }
     catch (IllegalArgumentException ignored) { badStep = true }
-    assert badStep, 'Layout.checkpointCsvName must reject an unknown step'
+    assert badStep : 'Layout.checkpointCsvName must reject an unknown step'
 
     // A blank outdir must throw rather than produce a literal 'null/csv'.
     def badOutdir = false
     try { Layout.checkpointDir('  ') }
     catch (IllegalArgumentException ignored) { badOutdir = true }
-    assert badOutdir, 'Layout.checkpointDir must reject a blank outdir'
+    assert badOutdir : 'Layout.checkpointDir must reject a blank outdir'
 
     // ------------------------------------------------------------------ //
     // MarkerUtils — the nuclear-marker rule
@@ -172,14 +172,14 @@ P6,same.tiff,DAPI,false
     def rawDupStemCounts = CsvUtils.stemCountsPerPatient(rawDupCsv.path, 'image')
     def rawDupId0 = Meta.identityFor('P6', 'same.tiff', 0, [stemCounts: rawDupStemCounts])
     def rawDupId1 = Meta.identityFor('P6', 'same.tiff', 1, [stemCounts: rawDupStemCounts])
-    assert rawDupId0 != rawDupId1, 'two rows sharing a raw cell must still get distinct identities'
+    assert rawDupId0 != rawDupId1 : 'two rows sharing a raw cell must still get distinct identities'
     def rawDupKept = CsvUtils.resolveKeptChannelsPerSlide(rawDupCsv.path, 'image', ['DAPI','CELLTOX'], false)
-    assert rawDupKept['P6'].size() == 2, 'both rows must produce their own entry, not one overwriting the other'
-    assert rawDupKept['P6'].values().every { it != null }, 'the collapse bug left a slide with no entry at all'
+    assert rawDupKept['P6'].size() == 2 : 'both rows must produce their own entry, not one overwriting the other'
+    assert rawDupKept['P6'].values().every { it != null } : 'the collapse bug left a slide with no entry at all'
     assert rawDupKept['P6'][rawDupId0] == ['DAPI', 'CD3']
     assert rawDupKept['P6'][rawDupId1] == []  // legitimately empty: DAPI already claimed by the reference
     def rawDupFlat = rawDupKept['P6'].values().flatten()
-    assert rawDupFlat.size() == 2, 'the collapse bug summed this to 0 (second row overwrote the first with [])'
+    assert rawDupFlat.size() == 2 : 'the collapse bug summed this to 0 (second row overwrote the first with [])'
     assert CsvUtils.countChannelsPerPatient(rawDupCsv.path, 'image', ['DAPI','CELLTOX'], false)['P6'] == 2
     rawDupCsv.delete()
 
@@ -206,7 +206,7 @@ P8,same.tiff,DAPI,false
 P8,other.tiff,CD20,false
 '''
     def rowIdx = CsvUtils.rowIndexPerPatient(rowIdxCsv.path, 'image')
-    assert rowIdx['P8::same.tiff']  == [0, 1], 'two rows sharing a raw cell must each keep their OWN index, in file order, not one overwriting the other'
+    assert rowIdx['P8::same.tiff']  == [0, 1] : 'two rows sharing a raw cell must each keep their OWN index, in file order, not one overwriting the other'
     assert rowIdx['P8::other.tiff'] == [2]
     rowIdxCsv.delete()
 
@@ -270,12 +270,12 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
     def badTarget = false
     try { ParamUtils.shouldRun('quantification', 'preprocessing', 'postprocessing') }
     catch (IllegalArgumentException ignored) { badTarget = true }
-    assert badTarget, 'ParamUtils.shouldRun must reject an unknown step'
+    assert badTarget : 'ParamUtils.shouldRun must reject an unknown step'
 
     // Every step's entryColumn must be one of its own requiredColumns, or the
     // samplesheet parser reads a column validation never demanded.
     ParamUtils.STEPS.each { step ->
-        assert step.entryColumn in step.requiredColumns,
+        assert step.entryColumn in step.requiredColumns :
             "step '${step.name}': entryColumn '${step.entryColumn}' not in requiredColumns"
     }
 
@@ -340,7 +340,7 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
     def missingCol = false
     try { Checkpoint.row(Layout.REGISTERED, [patient_id: 'P001']) }
     catch (IllegalArgumentException ignored) { missingCol = true }
-    assert missingCol, 'Checkpoint.row must reject a missing column'
+    assert missingCol : 'Checkpoint.row must reject a missing column'
 
     // An unknown key must throw too — it means the caller thinks the schema is
     // something it is not.
@@ -352,7 +352,7 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
         ])
     }
     catch (IllegalArgumentException ignored) { unknownCol = true }
-    assert unknownCol, 'Checkpoint.row must reject an unknown column'
+    assert unknownCol : 'Checkpoint.row must reject an unknown column'
 
     // Checkpoint and Layout must agree on the step vocabulary. Two tables that drift
     // is the exact failure this extraction exists to prevent.
@@ -390,9 +390,9 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
     def columnsThrew = false
     try { Checkpoint.columns(Layout.PREPROCESSED) << 'injected' }
     catch (UnsupportedOperationException ignored) { columnsThrew = true }
-    assert columnsThrew, 'Checkpoint.columns() must return an immutable list; mutating it must throw'
+    assert columnsThrew : 'Checkpoint.columns() must return an immutable list; mutating it must throw'
     assert Checkpoint.columns(Layout.PREPROCESSED) ==
-        ['patient_id', 'id', 'preprocessed_image', 'is_reference', 'channels'],
+        ['patient_id', 'id', 'preprocessed_image', 'is_reference', 'channels'] :
         'Checkpoint.columns() schema must be unaffected by the mutation attempt above'
 
     // ------------------------------------------------------------------ //
@@ -576,13 +576,13 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
     def badKind = false
     try { Layout.requireKind('segmentaton') }   // typo, deliberately
     catch (IllegalArgumentException ignored) { badKind = true }
-    assert badKind, 'Layout.requireKind must reject an unknown kind'
+    assert badKind : 'Layout.requireKind must reject an unknown kind'
 
     // patientDir must reject it too — that is the call site the typo reaches from.
     def badPatientKind = false
     try { Layout.patientDir('/out', 'P001', 'segmentaton') }
     catch (IllegalArgumentException ignored) { badPatientKind = true }
-    assert badPatientKind, 'Layout.patientDir must reject an unknown kind'
+    assert badPatientKind : 'Layout.patientDir must reject an unknown kind'
 
     // ------------------------------------------------------------------ //
     // ProcessEnvelope — the versions.yml envelope
@@ -617,8 +617,8 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
             .collect { it.trim().split(':')[0].trim() }
             .toSet()
     }
-    assert keysOf(envVersions) == keysOf(envVersionsStub)
-    assert keysOf(envVersions) == ['python', 'numpy', 'scikit-image'].toSet()
+    assert keysOf.call(envVersions) == keysOf.call(envVersionsStub)
+    assert keysOf.call(envVersions) == ['python', 'numpy', 'scikit-image'].toSet()
 
     // ------------------------------------------------------------------ //
     // SegBackends — the segmentation seam's versions.yml tool lists
@@ -651,10 +651,10 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
     }
     SegBackends.methods().each { m ->
         def tools = SegBackends.of(m).versionTools
-        def real  = yamlKeysOf(ProcessEnvelope.versions('SEGMENT', tools))
-        def stub  = yamlKeysOf(ProcessEnvelope.versionsStub('SEGMENT', tools))
-        assert real == stub, "SEGMENT/${m}: script: and stub: versions.yml keys differ"
-        assert real == ['python'] + tools, "SEGMENT/${m}: unexpected versions.yml keys ${real}"
+        def real  = yamlKeysOf.call(ProcessEnvelope.versions('SEGMENT', tools))
+        def stub  = yamlKeysOf.call(ProcessEnvelope.versionsStub('SEGMENT', tools))
+        assert real == stub : "SEGMENT/${m}: script: and stub: versions.yml keys differ"
+        assert real == ['python'] + tools : "SEGMENT/${m}: unexpected versions.yml keys ${real}"
         // The old stub key must not come back under any backend.
         assert !real.contains('seg_method')
     }
@@ -698,7 +698,7 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
     def badMethod = false
     try { WarpBackends.of('stare') }
     catch (IllegalArgumentException ignored) { badMethod = true }
-    assert badMethod, 'WarpBackends.of must reject an unknown method'
+    assert badMethod : 'WarpBackends.of must reject an unknown method'
 
     // ------------------------------------------------------------------ //
     // Meta — the one constructor for every meta map (Task 4.1)
@@ -784,14 +784,14 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
     def missingChannelsCountKey = false
     try { Meta.fromSamplesheetRow(noCountRow, 'image', 0, [:]) }
     catch (IllegalArgumentException ignored) { missingChannelsCountKey = true }
-    assert missingChannelsCountKey, 'Meta.fromSamplesheetRow must reject ctx with no channelsCount map at all'
+    assert missingChannelsCountKey : 'Meta.fromSamplesheetRow must reject ctx with no channelsCount map at all'
 
     // Trigger: ctx.channelsCount is populated, but not for THIS patient (the
     // "computed the map, forgot one patient" case -- the one the review named).
     def missingChannelsCountForPatient = false
     try { Meta.fromSamplesheetRow(noCountRow, 'image', 0, [channelsCount: [P2: 9]]) }
     catch (IllegalArgumentException ignored) { missingChannelsCountForPatient = true }
-    assert missingChannelsCountForPatient, 'Meta.fromSamplesheetRow must reject ctx.channelsCount missing THIS patient'
+    assert missingChannelsCountForPatient : 'Meta.fromSamplesheetRow must reject ctx.channelsCount missing THIS patient'
 
     // Satisfy: supply BOTH required per-patient counts, watch it pass.
     def satisfiedMeta = Meta.fromSamplesheetRow(noCountRow, 'image', 0, [channelsCount: [P1: 2], imagesCount: [P1: 1]])
@@ -822,13 +822,13 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
     def missingImagesCountKey = false
     try { Meta.fromSamplesheetRow(noCountRow, 'image', 0, [channelsCount: [P1: 2]]) }
     catch (IllegalArgumentException ignored) { missingImagesCountKey = true }
-    assert missingImagesCountKey, 'Meta.fromSamplesheetRow must reject ctx with no imagesCount map at all'
+    assert missingImagesCountKey : 'Meta.fromSamplesheetRow must reject ctx with no imagesCount map at all'
 
     // Trigger: ctx.imagesCount is populated, but not for THIS patient.
     def missingImagesCountForPatient = false
     try { Meta.fromSamplesheetRow(noCountRow, 'image', 0, [channelsCount: [P1: 2], imagesCount: [P2: 9]]) }
     catch (IllegalArgumentException ignored) { missingImagesCountForPatient = true }
-    assert missingImagesCountForPatient, 'Meta.fromSamplesheetRow must reject ctx.imagesCount missing THIS patient'
+    assert missingImagesCountForPatient : 'Meta.fromSamplesheetRow must reject ctx.imagesCount missing THIS patient'
 
     // Satisfy: supply the entry, watch it pass.
     def satisfiedImagesMeta = Meta.fromSamplesheetRow(noCountRow, 'image', 0, [channelsCount: [P1: 2], imagesCount: [P1: 3]])
@@ -837,7 +837,7 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
     // THE bug this round exists to kill: ctx.imagesCount = [P1: 0] must yield
     // images_count == 0, NOT 1. The old bare `?:` would have coerced this.
     def zeroImagesMeta = Meta.fromSamplesheetRow(noCountRow, 'image', 0, [channelsCount: [P1: 2], imagesCount: [P1: 0]])
-    assert zeroImagesMeta.images_count == 0, 'a genuine images_count of 0 must NOT be coerced to 1'
+    assert zeroImagesMeta.images_count == 0 : 'a genuine images_count of 0 must NOT be coerced to 1'
 
     // ---- Fix round 1, item 2: fromCheckpointRow validates against the SCHEMA --
     //
@@ -859,7 +859,7 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
     def missingIsReference = false
     try { Meta.fromCheckpointRow([patient_id: 'P1', channels: 'DAPI'], 'preprocessed', [:]) }
     catch (IllegalArgumentException ignored) { missingIsReference = true }
-    assert missingIsReference, "Meta.fromCheckpointRow must reject a 'preprocessed' row with no is_reference"
+    assert missingIsReference : "Meta.fromCheckpointRow must reject a 'preprocessed' row with no is_reference"
 
     // Satisfy is_reference -- the failure moves to the id gate (IllegalStateException),
     // because this row (an id-less-file shape) still carries no 'id' key at all. The
@@ -868,14 +868,14 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
     try { Meta.fromCheckpointRow([patient_id: 'P1', is_reference: 'true', channels: 'DAPI'], 'preprocessed', [:]) }
     catch (IllegalStateException e) { afterIsReferenceFixed = e.message }
     assert afterIsReferenceFixed?.contains('predates identity tracking') &&
-           afterIsReferenceFixed?.contains('re-run the step'),
+           afterIsReferenceFixed?.contains('re-run the step') :
         'fixing is_reference on an id-less preprocessed row must move the failure on to the id gate, with an actionable message'
 
     // Missing channels specifically (is_reference present) on the same schema.
     def missingChannelsCol = false
     try { Meta.fromCheckpointRow([patient_id: 'P1', is_reference: 'true'], 'preprocessed', [:]) }
     catch (IllegalArgumentException ignored) { missingChannelsCol = true }
-    assert missingChannelsCol, "Meta.fromCheckpointRow must reject a 'preprocessed' row with no channels"
+    assert missingChannelsCol : "Meta.fromCheckpointRow must reject a 'preprocessed' row with no channels"
 
     // 'postprocessed' declares NEITHER is_reference NOR channels (Checkpoint.columns).
     // A row missing both must NOT be rejected for those -- it must fall straight
@@ -884,7 +884,7 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
     def postprocessedFailure = null
     try { Meta.fromCheckpointRow([patient_id: 'P1'], 'postprocessed', [:]) }
     catch (IllegalStateException e) { postprocessedFailure = e.message }
-    assert postprocessedFailure?.contains('predates identity tracking'),
+    assert postprocessedFailure?.contains('predates identity tracking') :
         "a 'postprocessed' row with no is_reference/channels must fail on the id gate, not on those fields"
 
     // The column EXISTS (the row Map has an 'id' key) but this one row's VALUE is
@@ -898,7 +898,7 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
             'preprocessed', [channelsCount: [P1: 1], imagesCount: [P1: 1]])
     }
     catch (IllegalArgumentException ignored) { blankIdValue = true }
-    assert blankIdValue, 'a row with a blank id VALUE (column present) must fail requirePresentInRow, not the id-gate message'
+    assert blankIdValue : 'a row with a blank id VALUE (column present) must fail requirePresentInRow, not the id-gate message'
 
     // Fully satisfied: fromCheckpointRow can now actually return a complete meta --
     // unreachable before Task 4.3 added the id column to every schema.
@@ -922,7 +922,7 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
     def unknownStep = false
     try { Meta.fromCheckpointRow([patient_id: 'P1'], 'not_a_real_step', [:]) }
     catch (IllegalArgumentException ignored) { unknownStep = true }
-    assert unknownStep, 'Meta.fromCheckpointRow must reject an unknown step name'
+    assert unknownStep : 'Meta.fromCheckpointRow must reject an unknown step name'
 
     // ------------------------------------------------------------------ //
     // CsvUtils.metaContextFromCheckpoint (Task 4.3) -- the checkpoint-side
@@ -965,17 +965,17 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
     def missingPatientId = false
     try { Meta.fromSamplesheetRow([image: 'x.tiff', channels: 'DAPI'], 'image', 0, [:]) }
     catch (IllegalArgumentException ignored) { missingPatientId = true }
-    assert missingPatientId, 'Meta.fromSamplesheetRow must reject a row with no patient_id'
+    assert missingPatientId : 'Meta.fromSamplesheetRow must reject a row with no patient_id'
 
     def missingImageCol = false
     try { Meta.fromSamplesheetRow([patient_id: 'P1', channels: 'DAPI'], 'image', 0, [:]) }
     catch (IllegalArgumentException ignored) { missingImageCol = true }
-    assert missingImageCol, 'Meta.fromSamplesheetRow must reject a row missing the image column'
+    assert missingImageCol : 'Meta.fromSamplesheetRow must reject a row missing the image column'
 
     def blankStep = false
     try { Meta.fromCheckpointRow([patient_id: 'P1', id: 'x'], '  ', [:]) }
     catch (IllegalArgumentException ignored) { blankStep = true }
-    assert blankStep, 'Meta.fromCheckpointRow must reject a blank step'
+    assert blankStep : 'Meta.fromCheckpointRow must reject a blank step'
 
     // println, NOT log.info: nf-test's underlying `nextflow ... -quiet` run
     // suppresses log.info from stdout entirely (observed directly: a log.info

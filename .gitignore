@@ -153,6 +153,8 @@ tests/testdata/sample_contours.json
 tests/testdata/sample_morphology.csv
 tests/testdata/sample_reg_qc.json
 tests/testdata/sample_reg_residuals.csv
+tests/testdata/seg_eval_P001.json
+tests/testdata/seg_eval_P002.json
 tests/testdata/sample_DAPI.tif
 tests/testdata/sample_PANCK.tif
 tests/testdata/sample_SMA.tif

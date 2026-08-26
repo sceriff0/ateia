@@ -35,7 +35,12 @@ from typing import Optional, Tuple
 
 import tifffile
 
-__all__ = ["read_ome_pixel_size", "warn_on_pixel_size_mismatch", "PIXEL_SIZE_RTOL"]
+__all__ = [
+    "read_ome_pixel_size",
+    "warn_on_pixel_size_mismatch",
+    "unit_to_um",
+    "PIXEL_SIZE_RTOL",
+]
 
 # Relative tolerance for calling two pixel sizes "the same". 1% is well below any real
 # objective/scanner difference (the smallest step between adjacent magnifications is
@@ -62,6 +67,28 @@ _UNIT_TO_UM = {
 }
 
 
+def unit_to_um(unit: Optional[str]) -> Optional[float]:
+    """Multiplier taking a length in ``unit`` to micrometres, or None if the
+    unit is one this module does not recognise.
+
+    Exported because it has a second caller with a different policy for the
+    None case. ``read_ome_pixel_size`` below reports None and lets the caller
+    carry on -- its result is only ever used to WARN, while ``params.pixel_size``
+    stays authoritative -- whereas ``bin/ashlar_retile.py`` raises, because the
+    number it derives IS the authoritative scale and there is nothing to fall
+    back to that would be any more right.
+
+    Those two policies are the reason this is one function and not one shared
+    reader: the conversion table must not fork (a second private table would
+    drift, and the drift would be a silent scale error in whichever copy fell
+    behind), but what "unknown" means depends on what the number is for.
+
+    ``None`` means the attribute was absent, which OME's 2016-06 schema defines
+    as micrometres -- so it maps to 1.0, not to "unrecognised".
+    """
+    return _UNIT_TO_UM.get((unit or "µm").strip())
+
+
 def _to_um(raw: Optional[str], unit: Optional[str]) -> Optional[float]:
     """Convert one OME PhysicalSize attribute to µm, or None if it cannot be trusted."""
     if not raw:
@@ -73,7 +100,7 @@ def _to_um(raw: Optional[str], unit: Optional[str]) -> Optional[float]:
     if value <= 0:
         return None
     # OME's default unit when the attribute is absent is µm, per the 2016-06 schema.
-    factor = _UNIT_TO_UM.get((unit or "µm").strip())
+    factor = unit_to_um(unit)
     if factor is None:
         return None
     return value * factor
