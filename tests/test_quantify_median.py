@@ -219,7 +219,23 @@ def test_golden_old_vs_new_random_images_with_nuclei():
 
 
 def test_no_per_pixel_dataframe_in_source():
-    """Sanity: the median branch must no longer construct a per-pixel DataFrame."""
+    """Sanity: the median branch builds no per-pixel DataFrame, and its hot (uint16) path
+    invokes no per-label Python callback.
+
+    This test used to assert `"labeled_comprehension" in median_block` -- true under the
+    labeled_comprehension-only implementation this file's other tests were written against.
+    That assertion is now the WRONG invariant to pin: `labeled_comprehension` deliberately
+    still appears in this function, as the non-uint16 fallback required because the
+    composite-key sort is only lexicographic while values fit 16 bits (see
+    test_non_uint16_fallback_matches_fast_path). Asserting its absence would be false, and
+    asserting its presence would no longer prove anything about the hot path -- it would pass
+    even if the fast path silently kept calling it too.
+
+    So this rewrite isolates the fast (uint16) branch specifically -- from its `if` guard to
+    the `else:` that introduces the fallback -- and asserts THAT slice uses the new vectorised
+    helper and contains no labeled_comprehension call, which is the actual invariant this
+    test was always meant to protect: the hot path does no per-label Python-level work.
+    """
     import inspect
 
     src = inspect.getsource(compute_compartment_intensities)
@@ -230,4 +246,114 @@ def test_no_per_pixel_dataframe_in_source():
     median_block = src[start:end]
     assert "pd.DataFrame" not in median_block
     assert ".groupby(" not in median_block
-    assert "labeled_comprehension" in median_block
+
+    # Isolate just the uint16 fast (hot) path from its `if` guard to the fallback `else:`.
+    hot_start = median_block.index("if flat_raw.dtype == np.uint16:")
+    hot_end = median_block.index("\n    else:", hot_start)
+    hot_path = median_block[hot_start:hot_end]
+    assert "_median_per_label_from_sorted" in hot_path
+    assert "labeled_comprehension" not in hot_path
+
+    # The fallback is still present -- just outside the hot path -- and is exercised by
+    # test_non_uint16_fallback_matches_fast_path, so it is not dead code.
+    assert "labeled_comprehension" in median_block[hot_end:]
+
+
+def test_golden_old_vs_new_random_uint16_full_range():
+    """Fast-path (uint16) equivalence, 40 trials: irregular label sets, cells with no nuclear
+    overlap (forcing the NaN branch), the full uint16 intensity range, and both odd and even
+    per-label pixel counts (median tie-break vs. a single middle element). Assert at
+    rtol=0, atol=0, NaN-aware. This is the equivalence check run during the audit (40/40 pass)
+    that the task brief requires stay passing.
+
+    Unlike the two golden tests above (float64 channels, which never take the composite-key
+    sort), this one uses a genuine uint16 channel so it actually exercises the fast path being
+    added -- and cross-checks every value against BOTH the old per-pixel-DataFrame golden and
+    an independent boolean-mask + np.median reference computed fresh per label, so a bug that
+    happened to agree with one reference cannot hide from the other.
+    """
+    rng = np.random.default_rng(7)
+    n_trials = 40
+    saw_no_overlap = False
+    saw_odd = False
+    saw_even = False
+
+    for _trial in range(n_trials):
+        h, w = rng.integers(4, 40), rng.integers(4, 40)
+        n_labels = rng.integers(1, 12)
+        cell_mask = rng.integers(0, n_labels + 1, size=(h, w))
+        # Full uint16 range, including the 0 and 65535 extremes.
+        channel = rng.integers(0, 65536, size=(h, w), dtype=np.uint16)
+        # Independent per-pixel nuclear overlay: with small cells this reliably produces some
+        # cells with zero nuclear overlap and some that are entirely nucleus, across trials.
+        nuclei_mask = (rng.random((h, w)) > 0.5).astype(np.int32)
+
+        new_df = compute_compartment_intensities(cell_mask, nuclei_mask, channel, "CD8")
+        old = _old_compute_compartment_intensities(cell_mask, nuclei_mask, channel, "CD8")
+
+        if len(old) == 0:
+            assert new_df.empty
+            continue
+
+        labels = new_df["label"].values
+        np.testing.assert_array_equal(labels, old["label"])
+
+        flat_cell = cell_mask.ravel()
+        flat_val = channel.ravel().astype(np.float64)
+        nuc_fg_full = nuclei_mask.ravel() > 0
+
+        for comp in ("Cell", "Nucleus", "Cytoplasm"):
+            key = f"CD8: {comp}: Median"
+            new_vals = new_df[key].values
+            old_vals = np.asarray(old[key], dtype=np.float64)
+            for i, lab in enumerate(labels):
+                sel = flat_cell == lab
+                if comp == "Nucleus":
+                    sel = sel & nuc_fg_full
+                elif comp == "Cytoplasm":
+                    sel = sel & ~nuc_fg_full
+                count = int(sel.sum())
+                if count == 0:
+                    assert np.isnan(new_vals[i])
+                    saw_no_overlap = True
+                    continue
+                saw_even = saw_even or count % 2 == 0
+                saw_odd = saw_odd or count % 2 == 1
+                # rtol=0, atol=0: bit-identical to the old per-pixel-DataFrame algorithm...
+                assert new_vals[i] == old_vals[i], (comp, lab, new_vals[i], old_vals[i])
+                # ...and to an independent reference computed fresh from the raw pixels.
+                assert new_vals[i] == np.median(flat_val[sel])
+
+    assert saw_no_overlap, "no trial produced an empty compartment (NaN branch unexercised)"
+    assert saw_odd, "no trial produced an odd-count label (single middle element)"
+    assert saw_even, "no trial produced an even-count label (tie-break averaging)"
+
+
+def test_non_uint16_fallback_matches_fast_path():
+    """The required guard: only a uint16 channel takes the composite-key fast path; anything
+    else must fall back to labeled_comprehension. That fallback must produce IDENTICAL values
+    to the fast path on the same underlying data -- otherwise it is silently wrong rather than
+    merely slower. This keeps the fallback branch reachable AND numerically pinned, so it
+    cannot bit-rot into dead code (see "Required guard" in the task brief).
+    """
+    rng = np.random.default_rng(11)
+    cell_mask = rng.integers(0, 6, size=(20, 25))
+    nuclei_mask = (rng.random((20, 25)) > 0.5).astype(np.int32)
+    channel_uint16 = rng.integers(0, 65536, size=(20, 25), dtype=np.uint16)
+
+    fast_df = compute_compartment_intensities(cell_mask, nuclei_mask, channel_uint16, "CD8")
+
+    # Every dtype below carries the exact same integer values as channel_uint16, just
+    # widened/retyped, so `compute_compartment_intensities` routes to the labeled_comprehension
+    # fallback (dtype != uint16) but must still return numbers identical to the fast path.
+    for dtype in (np.float64, np.int32, np.uint32, np.int64):
+        channel_other = channel_uint16.astype(dtype)
+        fallback_df = compute_compartment_intensities(
+            cell_mask, nuclei_mask, channel_other, "CD8"
+        )
+        np.testing.assert_array_equal(fallback_df["label"].values, fast_df["label"].values)
+        for comp in ("Cell", "Nucleus", "Cytoplasm"):
+            key = f"CD8: {comp}: Median"
+            np.testing.assert_allclose(
+                fallback_df[key].values, fast_df[key].values, rtol=0, atol=0, equal_nan=True
+            )
