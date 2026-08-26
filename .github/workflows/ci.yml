@@ -80,7 +80,27 @@ jobs:
           # drops blosc.cbuffer_sizes that zarr 2.18 imports — so the test module fails
           # at COLLECTION with `from zarr.meta import Metadata2, Metadata3`, taking the
           # whole job down rather than failing one test.
-          pip install numpy==1.26.4 scipy==1.15.3 scikit-image==0.25.2 tifffile==2025.5.10 zarr==2.18.3 numcodecs==0.13.1
+          # imagecodecs supplies the zstd/LZW codecs tifffile calls through. Its
+          # absence is not an ImportError at import time — it surfaces only when
+          # something WRITES with a codec, as `ModuleNotFoundError: No module named
+          # 'compression'` from inside tifffile. That failed 34 tests in
+          # tests/test_merge_pyramid_streaming.py (every case that writes with
+          # compression='zstd'/'zlib') while the whole imaging stack imported fine,
+          # and it passed on developer machines that happen to carry imagecodecs.
+          pip install numpy==1.26.4 scipy==1.15.3 scikit-image==0.25.2 tifffile==2025.5.10 zarr==2.18.3 numcodecs==0.13.1 imagecodecs==2025.3.30
+          # matplotlib is a hard dependency of the CSE evaluation path, not a
+          # plotting nicety: the vendored CSE source runs `import matplotlib.pyplot`
+          # at the top of functions.py's foreground_separation(), which
+          # single_method_eval.py calls on the main path. Without it
+          # bin/seg_quality_eval.py exits 1 and tests/test_seg_quality_eval_cli.py
+          # fails. See containers/segeval/requirements.txt, which is the authority
+          # for this pin and explains it at length.
+          #
+          # Pinned to segeval's version, NOT to containers/tiled's — the tiled image
+          # neither pins nor imports matplotlib, and pinning it there would assert a
+          # dependency it does not have. tests/test_ci_stack_pinned.py encodes that
+          # split.
+          pip install matplotlib==3.8.4
           # dask[array] powers bin/convert_image.py's lazy read: BioImage.dask_data is a
           # dask array, and tests/test_convert_lazy_read.py +
           # tests/test_convert_streaming_write.py drive the real converter with one, so
