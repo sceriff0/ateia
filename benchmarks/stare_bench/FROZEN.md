@@ -123,12 +123,25 @@ The defect: `_warp` pull-samples as `mov(p) = ref(p + disp(p))`, so the field
 is a function of moving-frame coordinates; landmark generation originally
 sampled the wrong endpoint.
 
-- Reviewer's independent pre-fix verification (Ruling 14): mean absolute
-  error **0.0275** on a ~1.0 unit range under the wrong derivation, versus
-  **0.00011** under the corrected one.
+- An independent pre-fix check (Ruling 14): sampling `ref` at the landmark's
+  `target` coordinates against `mov` at its `moving` coordinates on a
+  physics-free pair (no blur/noise/blanking, so any mismatch is purely the
+  landmark derivation) gave mean absolute error **0.0275** on a ~1.0 unit
+  range under the wrong derivation, versus **0.00011** under the corrected
+  one.[^landmark-mae] The comparison method matches the corrected image-content
+  test the fix ultimately shipped with, but was run as a standalone check
+  during review rather than committed as a test in its own right.
 - The committed regression test, reproduced against the reverted buggy code
   as part of the actual fix: MAE **0.0596** (wrong direction) →
   **0.000164** (fixed; residual is interpolation noise).
+
+[^landmark-mae]: Only the `0.0596 → 0.000164` figure is machine-reproducible
+today, via `benchmarks/tests/stare_bench/test_generate.py`. The `0.0275 →
+0.00011` figure was a one-off check recorded in this project's engineering
+ledger (a scratch file under `.superpowers/`, not tracked in this
+repository) and cannot be re-run or verified from the current tree — it is
+reported here as a second, differently-sourced data point corroborating the
+same direction of the fix, not as a claim a reader can check.
 - Ground-truth-predictor landmark TRE (`_tre_summary`, Task 2.3, Ruling 26):
   feeding the ground-truth field itself as the predictor —
   - wrong line (`warped = moving - predict(target)`): `mean_px = 4.6407`
@@ -187,17 +200,40 @@ not tuned out of the fixture.
    `TILED_REG_TILE`'s `publishDir` is `[enabled: false]`. Those JSONs
    (`error`/`ref_fg`/`mov_fg`) are the only record of STARE's per-tile
    accept/reject decision, so the gate-ROC / gate-AUC columns — this
-   benchmark's one metric no competitor reports — would be **empty**, not
-   wrong, for the `tiled` arm at the mid rung.
+   benchmark's one metric no competitor reports — are **unavailable** for
+   any method scored via the external-transform path at the mid rung: the
+   published manifest carries no per-tile accept/reject data for the scorer
+   to reconstruct against, because that data lives only in
+   `TILED_REG_TILE`'s (unpublished) output.
 
-A fix (publishing both under sub-paths of the existing `registered`
-`PUBLISHED_KIND`, following `TILED_SOLVE`'s existing `manifest/` sub-path
-precedent) is **in flight on `feat/stare-ultimate`, not yet merged into this
-branch or into `dev`**. Until it lands, mid-rung `gate_*`/`intrinsic_tre`
-columns are honestly empty for all three methods when scoring against an
-externally supplied transform, and the VALIS row cannot be produced at all —
-`benchmarks/stare_bench/cli.py`'s `score_pair` raises rather than
-fabricating a score when no transform is discoverable (Ruling 40).
+**This gap is not merely "the columns come out blank."** When the metric
+functions in `gate_roc.py` are fed the empty `accepted`/`scores` that the
+external-transform path produces, the arithmetic does not degrade to
+missing values — it produces numbers that read as a real result:
+`gate_recall = 0 / (0 + fn)` evaluates to a literal **`0.0`** for any pair
+with at least one truly-registrable tile (every real pair), and `gate_auc`
+evaluates to the documented tie-broken **`0.5`** for an uninformative
+constant score. Only `gate_precision` (`0/0`) comes out genuinely `NaN`,
+and `intrinsic_tre` genuinely `None`. Written into a paper-facing table
+captioned "recall of the registration-acceptance gate against ground
+truth," `0.0` recall and `0.5` AUC for every method is a fabricated finding
+— it says "every method's gate has zero recall and no discriminating
+power," which was never measured. A fix in `cli.py` to make these columns
+genuinely `None` (rather than arithmetically-derived zeros) when no
+per-tile data is available was in flight in this worktree as this document
+was written.
+
+A pipeline fix publishing the missing control-point JSONs (under
+`<outdir>/<pid>/registered/controls/*_ctrl.json`, a sub-path of the
+existing `registered` `PUBLISHED_KIND`, following `TILED_SOLVE`'s existing
+`manifest/` sub-path precedent) has landed on `feat/stare-ultimate`
+(commit `6823d4b`), but **not yet merged into this branch (`bench/
+stare-synthetic`) or into `dev`**. Until that merge happens, the gate-ROC
+family is unavailable — not zero, not blank, genuinely absent — for every
+method scored via an externally supplied transform, and the VALIS row
+cannot be produced at all: `benchmarks/stare_bench/cli.py`'s `score_pair`
+raises rather than fabricating a score when no transform is discoverable
+(Ruling 40).
 
 ---
 
@@ -238,10 +274,15 @@ with this document.
 ## 4. Test count and lint at freeze
 
 At the time this record was written: `python -m pytest
-benchmarks/tests/stare_bench -v` — **135 tests total**. On the full-suite run
-used for this freeze, 134 passed and 1 failed
-(`test_cost.py::test_measure_reports_subprocess_children_not_just_self`), a
-system-load-sensitive memory threshold previously flagged in this project's
-ledger as intermittently red under load; re-run alone immediately afterward,
-it passed. `ruff check --no-force-exclude benchmarks/stare_bench
-benchmarks/tests/stare_bench` reports no violations.
+benchmarks/tests/stare_bench -v` — **135 tests total, 135 passing, no known
+failures.** An earlier full-suite run surfaced one intermittent failure in
+`test_cost.py::test_measure_reports_subprocess_children_not_just_self`; the
+root cause was not system load but a structural defect in the test itself —
+`ru_maxrss` is a lifetime high-water mark that never resets within a
+process, so once the pytest process had already peaked above the spawned
+child's allocation, the asserted delta collapsed to zero. The test now runs
+its comparison in a fresh interpreter and was verified passing under three
+conditions: isolated (7/7), natural full-suite order (135/135), and a forced
+adversarial ordering with the memory-heavy tests first (32/32). `ruff check
+--no-force-exclude benchmarks/stare_bench benchmarks/tests/stare_bench`
+reports no violations.
