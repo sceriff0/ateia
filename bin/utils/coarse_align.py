@@ -36,6 +36,13 @@ _MIN_SAMPLES = {"euclidean": 2, "similarity": 2, "affine": 3}
 # zero-new-dependency CPU alternatives (skimage ships both already); "disk_lightglue" is the
 # learned matcher VALIS/ACROBAT winners use and needs torch+kornia from the stare-ml container,
 # so it raises a clear, actionable error rather than silently degrading in the lean default image.
+#
+# NOT YET IMPLEMENTED: "disk_lightglue"'s matching body (_frontend_disk_lightglue below) is a
+# TODO. The import guard + a clear RuntimeError/NotImplementedError exist and are tested, but
+# no DISK keypoints / LightGlue matching runs yet -- torch+kornia have never been available in
+# any environment this was built in. Selecting `--reg_tiled_frontend disk_lightglue` (with or
+# without `-profile stare_ml`) always raises. The option is kept declared here deliberately --
+# it names a real, intended axis -- rather than removed, so do not delete it to "fix" the crash.
 FRONTENDS = ("orb", "sift", "fourier_mellin", "disk_lightglue")
 
 
@@ -310,9 +317,24 @@ def _frontend_fourier_mellin(ref, mov, model="euclidean", **kwargs):
     theorem), so that stage is translation-invariant and isolates rotation+scale. The residual
     translation is then recovered directly via phase cross-correlation between the images.
 
-    NOTE: unlike the keypoint front-ends, there is no correspondence set here, so ``n_inliers``
-    is reported as 0 and ``residual_px`` is phase_cross_correlation's normalised RMS error, not
-    a pixel-distance RMS -- the two are not on the same scale as the orb/sift residual.
+    NOTE: unlike the keypoint front-ends, there is no correspondence set here, so
+    ``n_inliers`` is reported as the sentinel ``-1`` ("not applicable" -- there is no inlier
+    count to report, and the sentinel is negative on purpose so it reads correctly against
+    ``bin/tiled_coarse.py``'s ``n_inliers < 10`` low-inlier warning without tripping it on
+    every run the way a hardcoded ``0`` used to). ``residual_px`` is unconditionally
+    ``float("nan")``: phase_cross_correlation's normalised RMS error (~0-1) is not a
+    pixel-distance RMS, so it is not comparable to the orb/sift residual or to
+    ``reg_tiled_halo`` (a pixel threshold) -- reporting it as a pixel value silently inverted
+    the halo-overrun warning in ``bin/tiled_coarse.py`` (a mis-registered slide could report a
+    "residual" far below the halo and exit 0). NaN is honest and is already handled correctly
+    by that warning's ``not np.isfinite`` branch.
+
+    CAVEAT (unvalidated): the only test exercising this front-end
+    (``tests/test_coarse_frontend.py::test_cpu_frontends_recover_a_pure_shift``) is a pure
+    translation with zero rotation and unit scale, so the log-polar rotation/scale recovery
+    code below executes but its correctness on an actual rotated/scaled pair is unverified.
+    It also applies no window or bandpass filter before the FFT, so on real tissue (not this
+    module's synthetic point fixture) edge leakage will likely dominate the rotation estimate.
     """
     from skimage.registration import phase_cross_correlation
     from skimage.transform import warp_polar
@@ -339,7 +361,7 @@ def _frontend_fourier_mellin(ref, mov, model="euclidean", **kwargs):
     klog = radius / np.log(radius)
     scale = float(np.exp(radius_bin / klog))
 
-    t_shift, t_error, _ = phase_cross_correlation(r, m, upsample_factor=10)
+    t_shift, _t_error, _ = phase_cross_correlation(r, m, upsample_factor=10)
     dy, dx = (float(v) for v in t_shift)
     logger.info(
         f"coarse: Fourier-Mellin rotation={rotation_deg:+.2f}deg scale={scale:.4f} "
@@ -352,8 +374,7 @@ def _frontend_fourier_mellin(ref, mov, model="euclidean", **kwargs):
     tform = _model_class(model)(**tform_kwargs)
     m0 = np.asarray(tform.params, dtype=float)
 
-    residual = float(t_error) if np.isfinite(t_error) else float("nan")
-    return m0, {"residual_px": residual, "n_inliers": 0}
+    return m0, {"residual_px": float("nan"), "n_inliers": -1}
 
 
 def _frontend_disk_lightglue(ref, mov, model="euclidean", **kwargs):

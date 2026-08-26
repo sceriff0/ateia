@@ -221,7 +221,11 @@ def main(argv=None) -> int:
             f"not recover this. Raise --halo (reg_tiled_halo) or --max-dim "
             f"(reg_tiled_coarse_max_dim, currently decimating 1/{factor})"
         )
-    if n_inliers < 10:
+    # n_inliers == -1 is the keypoint-free front-ends' (e.g. fourier_mellin) sentinel for "not
+    # applicable" -- there is no correspondence set to count inliers from. Guarding with
+    # `0 <=` keeps this warning meaningful only for front-ends that actually report a count;
+    # a hardcoded 0 here used to fire this warning on every fourier_mellin run.
+    if 0 <= n_inliers < 10:
         logger.warning(
             f"coarse: only {n_inliers} inliers support M0 -- treat this slide's anchor as "
             f"unverified (low tissue texture, wrong --nuclear-index, or a failed match)"
