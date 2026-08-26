@@ -253,6 +253,17 @@
                     "default": null,
                     "minimum": 0
                 },
+                "reg_tiled_frontend": {
+                    "type": "string",
+                    "default": "orb",
+                    "description": "STARE (registration_method=tiled) only: COARSE global-alignment front-end. orb is today's default behaviour; sift and fourier_mellin are CPU alternatives; disk_lightglue needs torch+kornia and runs only under -profile stare_ml.",
+                    "enum": [
+                        "orb",
+                        "sift",
+                        "fourier_mellin",
+                        "disk_lightglue"
+                    ]
+                },
                 "reg_tiled_tile": {
                     "type": [
                         "integer",

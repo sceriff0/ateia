@@ -149,6 +149,14 @@ def _dockerfile_pip_tokens(text):
     non-directive line as a requirement, which harvested prose from RUN bodies and echo
     strings ("can", "wrapper", "nextflow") as if they were installed packages -- noise that
     could mask a genuinely missing dependency by matching its name.
+
+    Split on ``&&`` BEFORE searching for ``pip install``, and search every resulting segment,
+    not just the first. containers/stare-ml chains three commands on one continuation-joined
+    line (``pip install -r requirements.txt && pip install torch==... && pip install
+    kornia==...``); taking only the text up to the first ``&&`` silently dropped torch and
+    kornia, which would have made this guard pass while torch/kornia were still missing from
+    the counted set -- reporting a container "installs everything its scripts import" when the
+    packages the DISK+LightGlue front-end actually needs were invisible to it.
     """
     joined = re.sub(r"\\\s*\n", " ", text)
     tokens = []
@@ -156,24 +164,25 @@ def _dockerfile_pip_tokens(text):
         stripped = line.strip()
         if stripped.startswith("#"):
             continue
-        if not re.search(r"pip3?\s+install", stripped):
-            continue
-        body = re.split(r"pip3?\s+install", stripped, maxsplit=1)[1]
-        body = body.split("&&")[0]
-        for tok in body.split():
-            if tok.startswith("git+"):
-                # `pip install git+https://github.com/<owner>/<repo>.git@<rev>` names no
-                # requirement token at all -- the bare "/" skip below would otherwise drop
-                # it entirely, silently treating a real (pinned-by-commit) install as if the
-                # package were never installed. Recover the package name from the repo path
-                # segment: two containers do this (cellsam's cellSAM, regqc's cudipy).
-                m = re.search(r"/([A-Za-z0-9_.\-]+?)(?:\.git)?(?:@.*)?$", tok)
-                if m:
-                    tokens.append(m.group(1))
+        for segment in stripped.split("&&"):
+            segment = segment.strip()
+            if not re.search(r"pip3?\s+install", segment):
                 continue
-            if tok.startswith(("-", "$")) or "/" in tok:
-                continue
-            tokens.append(tok.strip('"').strip("'"))
+            body = re.split(r"pip3?\s+install", segment, maxsplit=1)[1]
+            for tok in body.split():
+                if tok.startswith("git+"):
+                    # `pip install git+https://github.com/<owner>/<repo>.git@<rev>` names no
+                    # requirement token at all -- the bare "/" skip below would otherwise drop
+                    # it entirely, silently treating a real (pinned-by-commit) install as if the
+                    # package were never installed. Recover the package name from the repo path
+                    # segment: two containers do this (cellsam's cellSAM, regqc's cudipy).
+                    m = re.search(r"/([A-Za-z0-9_.\-]+?)(?:\.git)?(?:@.*)?$", tok)
+                    if m:
+                        tokens.append(m.group(1))
+                    continue
+                if tok.startswith(("-", "$")) or "/" in tok:
+                    continue
+                tokens.append(tok.strip('"').strip("'"))
     return tokens
 
 
@@ -296,10 +305,55 @@ def _seg_backends_container_scripts():
     return out
 
 
+def _profile_container_overrides():
+    """(process name, container dir) for every ``withName:`` container override bound inside a
+    ``nextflow.config`` profile block, e.g. ``-profile stare_ml``'s
+    ``withName: 'TILED_COARSE' { container = 'bolt3x/mirage-stare-ml:...' }``.
+
+    A profile-bound container never appears in any ``modules/local/*.nf`` file -- the module's
+    own ``container`` directive still names the DEFAULT image, and the profile overrides it only
+    at config-evaluation time -- so ``_module_container_and_scripts``'s regex over
+    ``modules/local/*.nf`` can never see it. Without this, an image reachable only through a
+    profile (stare-ml today, potentially others later) stays permanently outside
+    ``test_container_installs_what_its_scripts_import``'s coverage: exactly the gap that let
+    stare-ml ship without zarr/numcodecs/imagecodecs even though its one process
+    (``TILED_COARSE``) transitively imports zarr via ``bin/utils/tiled_io.py::open_lazy``.
+
+    This is a plain text scan, not a Groovy parse (matching the rest of this file's approach to
+    ``modules/local/*.nf``): it looks for ``withName: '<PROC>'`` immediately followed, within a
+    bounded window, by a `container = 'bolt3x/mirage-<dir>:` line. That is enough to find every
+    profile override as of this writing; a profile that restructures the block very differently
+    would need this regex revisited, the same maintenance burden the rest of the file already
+    accepts for its own regexes.
+    """
+    text = (REPO / "nextflow.config").read_text()
+    out = {}
+    for m in re.finditer(
+        r"withName:\s*'([A-Z_]+)'\s*\{\s*container\s*=\s*'bolt3x/mirage-([a-z0-9-]+):",
+        text,
+    ):
+        out[m.group(1)] = m.group(2)
+    return out
+
+
+def _scripts_for_process(process_name):
+    """Scripts a ``process <process_name> { ... }`` block in ``modules/local/*.nf`` invokes by
+    name, used to attribute a profile-bound container override (see
+    ``_profile_container_overrides``) to the same scripts its DEFAULT container is already
+    charged with -- the override only swaps the image, not what the process runs.
+    """
+    for nf in sorted((REPO / "modules" / "local").glob("*.nf")):
+        text = nf.read_text()
+        if re.search(rf"\bprocess\s+{re.escape(process_name)}\s*\{{", text):
+            return set(re.findall(r"([a-z0-9_]+\.py)\s*\\", text))
+    return set()
+
+
 def _module_container_and_scripts():
     """(container dir, {scripts}) for every modules/local/*.nf naming a first-party image,
     plus SEGMENT's backend-dispatched images resolved through lib/SegBackends.groovy (see
-    ``_seg_backends_container_scripts``).
+    ``_seg_backends_container_scripts``), plus any container bound only inside a
+    ``nextflow.config`` profile (see ``_profile_container_overrides``).
 
     WARP_SEG_QC (modules/local/warp_seg_qc.nf) resolves its container the same
     backend-dispatched way, via ``lib/WarpBackends.groovy``, but is deliberately NOT given
@@ -330,6 +384,12 @@ def _module_container_and_scripts():
             out.setdefault(cdir, set()).update(scripts)
     for cdir, scripts in _seg_backends_container_scripts().items():
         if (CONTAINERS / cdir / "Dockerfile").is_file():
+            out.setdefault(cdir, set()).update(scripts)
+    for process_name, cdir in _profile_container_overrides().items():
+        if not (CONTAINERS / cdir / "Dockerfile").is_file():
+            continue
+        scripts = _scripts_for_process(process_name)
+        if scripts:
             out.setdefault(cdir, set()).update(scripts)
     return out
 
@@ -423,6 +483,33 @@ UNREACHABLE_IMPORTS = {
         "upstream on purpose. Nothing in bin/ calls either function, so the import never runs. "
         "Guarded by test_unreachable_import_exemptions_are_still_unreachable."
     ),
+    # Task 5.1: bin/utils/coarse_align.py's _frontend_disk_lightglue -- reached from
+    # bin/tiled_coarse.py, a containers/tiled script -- opens with
+    # `try: import kornia; import torch except ImportError: raise RuntimeError(...)`. Unlike the
+    # segeval entry above this path IS reachable code (selecting --frontend disk_lightglue runs
+    # it), but the default :tiled image deliberately does not install torch/kornia -- they ship
+    # ONLY in the separate stare-ml container/profile, precisely so the lean default image stays
+    # lean (see the brief for Task 5.1). So inside :tiled this import is meant to fail, and does
+    # so with a clear, actionable RuntimeError naming -profile stare_ml, not a bare ImportError
+    # traceback. Guarded by
+    # tests/test_coarse_frontend.py::test_disk_lightglue_raises_a_clear_error_without_torch AND
+    # test_tiled_container_torch_kornia_imports_are_confined_to_disk_lightglue below (the latter
+    # checks the premise that torch/kornia are imported NOWHERE ELSE in a script this container
+    # runs -- the former only checks the guarded import site behaves correctly).
+    ("tiled", "torch"): (
+        "bin/utils/coarse_align.py's _frontend_disk_lightglue front-end needs torch, installed "
+        "only in the stare-ml container -- see the kornia entry immediately below for the full "
+        "reason."
+    ),
+    ("tiled", "kornia"): (
+        "bin/utils/coarse_align.py's _frontend_disk_lightglue guards `import kornia; import "
+        "torch` in a try/except ImportError and raises RuntimeError('...stare-ml container...') "
+        "on failure. --frontend defaults to 'orb' and disk_lightglue is documented as requiring "
+        "-profile stare_ml, so the default :tiled image is never expected to satisfy this "
+        "import; it exists to fail with a clear message, not to run. Guarded by "
+        "tests/test_coarse_frontend.py::test_disk_lightglue_raises_a_clear_error_without_torch "
+        "and test_tiled_container_torch_kornia_imports_are_confined_to_disk_lightglue below."
+    ),
 }
 
 
@@ -446,6 +533,63 @@ def test_unreachable_import_exemptions_are_still_unreachable():
         f"{' / '.join(dead)} are never called -- but they are, at {callers}. The lazy "
         "`from aicsimageio import AICSImage` inside them now executes, so segeval must install "
         "aicsimageio (or the call must go)."
+    )
+
+
+def _torch_kornia_import_sites(path):
+    """[(enclosing function name or None, lineno), ...] for every ``import torch``/``import
+    kornia`` (or ``from torch``/``from kornia`` ...) anywhere in ``path``, tagged with the
+    innermost enclosing function -- ``None`` means module scope.
+    """
+    tree = ast.parse(path.read_text())
+    sites = []
+
+    class _Visitor(ast.NodeVisitor):
+        def __init__(self):
+            self.stack = []
+
+        def visit_FunctionDef(self, node):
+            self.stack.append(node.name)
+            self.generic_visit(node)
+            self.stack.pop()
+
+        visit_AsyncFunctionDef = visit_FunctionDef
+
+        def visit_Import(self, node):
+            for alias in node.names:
+                if alias.name.split(".")[0] in ("torch", "kornia"):
+                    sites.append((self.stack[-1] if self.stack else None, node.lineno))
+            self.generic_visit(node)
+
+        def visit_ImportFrom(self, node):
+            if node.module and node.module.split(".")[0] in ("torch", "kornia"):
+                sites.append((self.stack[-1] if self.stack else None, node.lineno))
+            self.generic_visit(node)
+
+    _Visitor().visit(tree)
+    return sites
+
+
+def test_tiled_container_torch_kornia_imports_are_confined_to_disk_lightglue():
+    """The premise behind the ``("tiled", "torch")``/``("tiled", "kornia")`` UNREACHABLE_IMPORTS
+    entries above, checked rather than trusted -- the same principle
+    ``test_unreachable_import_exemptions_are_still_unreachable`` applies to the segeval entry,
+    extended to these two. Both reasons say the import is confined inside
+    ``_frontend_disk_lightglue``'s ``try/except ImportError`` guard. If torch or kornia were
+    ever imported anywhere ELSE in a script the tiled container runs, that second import site
+    would be silently covered by the same blanket exemption without ever having been reasoned
+    about -- an annotation, not a guard.
+    """
+    offenders = []
+    for rel in ("bin/utils/coarse_align.py", "bin/tiled_coarse.py"):
+        for fn, lineno in _torch_kornia_import_sites(REPO / rel):
+            if fn != "_frontend_disk_lightglue":
+                offenders.append(f"{rel}:{lineno} (in {fn or 'module scope'})")
+    assert not offenders, (
+        "torch/kornia is imported outside _frontend_disk_lightglue in a script the tiled "
+        f"container runs: {offenders}. The (\"tiled\", \"torch\")/(\"tiled\", \"kornia\") "
+        "UNREACHABLE_IMPORTS exemptions assume the import is confined there; a second import "
+        "site needs its own justification, not a free ride on this one."
     )
 
 

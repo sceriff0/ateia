@@ -191,6 +191,19 @@ ALLOWED_LINES = {
         # comment plus a 7-line inlined closure (net +16): 1103 + 16 = 1119. Re-pin, do not
         # widen. (Re-pin from the file, not by guessing:
         # `grep -n "params.expanded_quantification ?" conf/modules.config`.)
+        # 1103 -> 1108 when Task 5.1's COARSE front-end selector landed: TILED_COARSE's
+        # withName block gained a 4-line comment plus
+        # `ext.args = { "--frontend ${params.reg_tiled_frontend}" }` (+5 lines total)
+        # above this line. 1103 + 5 = 1108.
+        # 1108 -> 1136 when Task 5.4 published the two STARE/VALIS benchmark-scoring
+        # artifacts: REGISTER's publishDir gained a third array entry for the VALIS
+        # registrar pickle (+11), TILED_REG_TILE's shared block comment was rewritten
+        # to explain why its control-point JSON is now published while TILED_COARSE's
+        # stays intermediate (+8) and its `publishDir = [ enabled: false ]` became a
+        # real publishDir block (+5), and TILED_COARSE gained its own short comment
+        # explaining the asymmetry (+4). Four hunks above this line, none of them
+        # touching this one: 1108 + 11 + 8 + 5 + 4 = 1136. Re-pin from the file, not by
+        # guessing: `grep -n "params.expanded_quantification ?" conf/modules.config`.
         # 1103 -> 1119 on dev when SEGMENT's clusterOptions stopped REPLACING the
         # slurm profile's --account/--qos: +16, the inlined account/qos derivation
         # plus the comment recording why composition is unavailable
@@ -229,7 +242,20 @@ ALLOWED_LINES = {
         # are not independent hunks stacked on the same base the way the earlier
         # entries were. Re-pinned directly from the merged file with the grep
         # below, not guessed or computed from the two counts above.
-        1226: (
+        # 1136 (feat/stare-ultimate) and 1226 (dev) -> 1259 when the two were merged.
+        # NOT the sum, and not either input: the branches changed DIFFERENT regions of
+        # conf/modules.config above this line, and the merge also collapsed TILED_REG_TILE's
+        # and TILED_COARSE's maxForks conflicts into one copy each. Composing the two
+        # counts arithmetically would give a number that matches neither file. Re-pinned
+        # directly from the merged file, exactly as the dev-side entry above insists:
+        #   grep -n "params.expanded_quantification ?" conf/modules.config  ->  1259
+        #
+        # NINE re-pins now sit above this line. That is a standing signal, not a chore:
+        # this allowlist keys on POSITION, which every unrelated edit above invalidates,
+        # while the thing it means to pin is the line's CONTENT. Keying on the normalised
+        # text plus an assertion that it occurs exactly once would be stable under edits
+        # above it and would need no re-pin at all.
+        1259: (
             "ext.args = { params.expanded_quantification ? '--expanded' : "
             "'' } -- conf/*.config closures cannot see lib/*.groovy classes, "
             "so ext.args must read params raw here."

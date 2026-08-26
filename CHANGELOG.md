@@ -39,6 +39,41 @@ changed and what to do about it, in
    as µm — an `nm` header was a 1000× scale error).
 
 ### Added
+- **`reg_tiled_frontend` parameter** (default `'orb'`, STARE/`registration_method=tiled` only) —
+  selects COARSE's global-alignment front-end: `orb` (default, today's behaviour, unchanged),
+  `sift` and `fourier_mellin` (zero-new-dependency CPU alternatives), or `disk_lightglue` (the
+  learned DISK+LightGlue matcher, gated behind `-profile stare_ml` — see below). Wired through
+  `bin/utils/coarse_align.py::estimate_affine` and rendered into `TILED_COARSE`'s command by
+  `conf/modules.config`. **Resume note:** adding `--frontend` to `TILED_COARSE`'s rendered
+  command changes that task's hash, so the *first* `-resume` after upgrading past this change
+  re-runs STARE's whole COARSE-and-downstream registration chain even for runs that never touch
+  `--reg_tiled_frontend` — a one-time cost, not a per-run one.
+- **`stare_ml` profile and the `bolt3x/mirage-stare-ml` container.** `-profile stare_ml`
+  re-points `TILED_COARSE`'s container at a second, optional image (`python:3.11-slim` + the
+  same CPU stack as `:tiled` + `torch`(CPU wheel)/`kornia`) so `--reg_tiled_frontend
+  disk_lightglue` can import torch+kornia; the default `:tiled` image stays JVM/GPU/torch-free
+  on purpose. The profile does NOT set `--reg_tiled_frontend` itself — selecting
+  `disk_lightglue` stays an explicit user choice. **NOT YET IMPLEMENTED:** the DISK+LightGlue
+  matching body is a TODO (`bin/utils/coarse_align.py::_frontend_disk_lightglue`) — selecting
+  it always raises `NotImplementedError` today, with or without this profile. **Publish
+  required before first use:** like `:tiled` before it, a plain push to `main` builds this
+  image but does not push it (`.github/workflows/build-images.yml` only pushes on
+  `release:published` / `workflow_dispatch`) — run
+  `gh workflow run build-images.yml -f version=1.0.0 -f only=stare-ml` before the first
+  `-profile stare_ml` run, or the image pull fails.
+- **Published-output change:** two new registration artifacts are now published under
+  `<outdir>/<patient_id>/registered/`, for external benchmarks that need them:
+  `registered/transform/preprocessed/data/<patient_id>_registrar.pickle` (the VALIS registrar,
+  REGISTER's own `registrar` emit — previously produced but never written to the published
+  tree) and `registered/controls/<patient_id>_<channels>_<ix>_<iy>_ctrl.json` (STARE's
+  per-tile control-point JSON: the only on-disk record of the per-tile `error`/`ref_fg`/
+  `mov_fg` values behind the tiled path's accept/reject gate). **Metadata-pressure note:** the
+  control-JSON file COUNT scales as (slide/tile)², not linearly — `--reg_tiled_mode low` (a
+  larger tile size) is not simply "fewer, bigger files" the way it is for other STARE
+  intermediates; on a 20480² slide it is on the order of ~100 files at the shipped `high` tier
+  vs. an estimated ~1600 at `low`. Each file is still only a few hundred bytes, so total bytes
+  stay negligible (tens of KB per slide), but the file *count* is what pressures a networked
+  filesystem's metadata server (Lustre/GPFS), not disk usage.
 - **A new `segmentation` step, carved out of `postprocessing`.** `SEGMENT`,
   `EXTRACT_CELL_PROPERTIES` and `EXTRACT_NUCLEI_PROPERTIES` (the latter under
   `--quantify_compartments`) moved from `subworkflows/local/postprocess.nf` into their
