@@ -11,6 +11,7 @@ a guard that works.
 """
 import numpy as np
 import pytest
+from scipy.interpolate import RegularGridInterpolator
 
 from benchmarks.stare_bench.fields import Field, make_field
 
@@ -44,16 +45,27 @@ def _fit_control_grid_residual(field, shape, tile):
 
 
 def _bilinear(grid, gxs, gys, xy):
+    """Bilinear lookup of ``grid`` at ``xy``, via scipy -- deliberately NOT
+    ``fields.py``'s hand-rolled ``_bilinear_on_grid``. If this fitter shared
+    that implementation, a latent bug in its boundary-clamping logic would
+    corrupt the ground-truth field and the fit in the same direction and this
+    guard could never see it.
+
+    Query coordinates are clamped to the node hull ``[gxs[0], gxs[-1]] x
+    [gys[0], gys[-1]]`` BEFORE interpolation. This mirrors
+    ``bin/utils/mesh_field.py``'s ``_bilinear_weights``, which edge-clamps so
+    STARE's real mesh extrapolates as a constant past its outermost control
+    points. ``RegularGridInterpolator`` does not do this on its own --
+    unclamped, it either extrapolates linearly (``fill_value=None``) or
+    substitutes a constant everywhere outside the hull (a numeric
+    ``fill_value``), either of which models a different transform from the
+    one STARE actually applies and would silently change what
+    ``MIN_RESIDUAL_FRACTION`` means. Do not "simplify" the clamp away.
+    """
     x = np.clip(xy[:, 0], gxs[0], gxs[-1])
     y = np.clip(xy[:, 1], gys[0], gys[-1])
-    ix1 = np.clip(np.searchsorted(gxs, x, side="right"), 1, gxs.size - 1)
-    iy1 = np.clip(np.searchsorted(gys, y, side="right"), 1, gys.size - 1)
-    ix0, iy0 = ix1 - 1, iy1 - 1
-    tx = (x - gxs[ix0]) / (gxs[ix1] - gxs[ix0])
-    ty = (y - gys[iy0]) / (gys[iy1] - gys[iy0])
-    top = grid[iy0, ix0] * (1 - tx) + grid[iy0, ix1] * tx
-    bot = grid[iy1, ix0] * (1 - tx) + grid[iy1, ix1] * tx
-    return top * (1 - ty) + bot * ty
+    interp = RegularGridInterpolator((gys, gxs), grid, method="linear")
+    return interp(np.stack([y, x], axis=1))
 
 
 @pytest.mark.parametrize("seed", [1, 2, 3])
@@ -92,3 +104,29 @@ def test_correlation_length_is_never_a_multiple_of_the_tile():
     for corr in (777.0, 333.0, 1111.0):
         assert corr % REG_TILED_TILE != 0
         assert REG_TILED_TILE % corr != 0
+
+
+def test_the_guard_catches_it_on_a_non_square_shape_too():
+    """A square SHAPE gives a 2x2 node grid, so an x/y axis swap in
+    ``_fit_control_grid_residual``'s ``.reshape(gys.size, gxs.size, 2)`` would
+    be invisible there. Re-run the cheating-grid construction on a
+    non-square raster, where a transposed axis would misalign nodes with
+    displacements and stop reproducing the field.
+    """
+    shape = (4096, 6144)
+    rng = np.random.default_rng(0)
+    h, w = shape
+    gxs = np.arange(REG_TILED_TILE / 2, w, REG_TILED_TILE, dtype=float)
+    gys = np.arange(REG_TILED_TILE / 2, h, REG_TILED_TILE, dtype=float)
+    nodes = rng.normal(scale=12.0, size=(gys.size, gxs.size, 2))
+
+    def sampler(xy):
+        return np.stack([_bilinear(nodes[:, :, k], gxs, gys, xy) for k in range(2)],
+                        axis=1)
+
+    cheating = Field(shape, {"family": "control_grid"}, sampler)
+    frac = _fit_control_grid_residual(cheating, shape, REG_TILED_TILE)
+    assert frac < MIN_RESIDUAL_FRACTION, (
+        "the guard failed to detect a field built exactly on STARE's control "
+        "grid on a non-square raster -- an axis swap could be hiding here"
+    )
