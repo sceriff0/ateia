@@ -50,3 +50,34 @@ def test_zero_field_is_trivially_convergent():
     got = lipschitz(lambda xy: np.zeros_like(xy), SHAPE, tile=64)
     assert got["lipschitz"] == pytest.approx(0.0, abs=1e-9)
     assert got["converges"] is True
+
+
+def test_folding_rate_and_det_min_are_exact_regardless_of_max_points():
+    # folding_rate/det_min/n are running scalar accumulators over the FULL
+    # field -- they must not depend on how aggressively the (separate)
+    # percentile subsample is capped.
+    def field(xy):
+        return 0.1 * xy
+
+    a = jacobian_stats(field, SHAPE, tile=64, max_points=10)
+    b = jacobian_stats(field, SHAPE, tile=64, max_points=1_000_000)
+    assert a["folding_rate"] == b["folding_rate"]
+    assert a["det_min"] == b["det_min"]
+    assert a["n"] == b["n"]
+
+
+def test_lipschitz_matches_true_spectral_norm_for_an_asymmetric_matrix():
+    # Every other field here has a Jacobian that is a scalar multiple of the
+    # identity, for which the spectral norm, the Frobenius norm and the
+    # largest eigenvalue magnitude all coincide -- none of them can tell the
+    # closed-form spectral-norm formula apart from those alternatives. This
+    # asymmetric A does: its largest singular value (~5.4650) is distinct
+    # from its Frobenius norm (~5.477) and its largest eigenvalue magnitude
+    # (~5.372).
+    a_matrix = np.array([[1.0, 2.0], [3.0, 4.0]])
+
+    def field(xy):
+        return xy @ a_matrix.T
+
+    got = lipschitz(field, SHAPE, tile=64)
+    np.testing.assert_allclose(got["lipschitz"], 5.4650, atol=1e-3)
