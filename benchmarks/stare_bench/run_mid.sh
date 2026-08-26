@@ -107,17 +107,78 @@ with open(plan_csv, newline="") as fh:
         print(f"generated {pid}")
 PY
 
+# Locate the transform a completed run actually published, per backend.
+# NEVER hardcoded to a guessed literal -- discovered from the SAME layout
+# lib/Layout.groovy owns (patientDir(outdir, patient, kind) ->
+# <outdir>/<patient>/<kind>) and conf/modules.config's publishDir rules.
+#
+#   tiled / ashlar: TILED_SOLVE and ASHLAR_SOLVE both publish the M0 + mesh
+#     manifest to <outdir>/<patient>/registered/manifest/*_manifest.json
+#     (conf/modules.config's withName: 'TILED_SOLVE' / 'ASHLAR_SOLVE' blocks;
+#     bin/ashlar_solve.py deliberately rewrites ashlar's placements into the
+#     same manifest shape STARE emits, so one glob covers both backends).
+#
+#   valis: REGISTER emits a registrar pickle
+#     (preprocessed/data/*_registrar.pickle) as a process OUTPUT, but no
+#     withName: 'REGISTER' publishDir pattern in conf/modules.config matches
+#     *.pickle -- its "summary" publishDir is restricted to
+#     "preprocessed/data/*.csv", landing at
+#     <outdir>/<patient>/registered/summary/*.csv, which is also the ONLY
+#     VALIS artifact benchmarks/configs/arms.yaml documents as this
+#     pipeline's consumer contract. So today, under this pipeline's own
+#     publishDir configuration, a VALIS run's registrar pickle is NEVER
+#     written to the published output tree -- it exists only inside
+#     Nextflow's work directory, passed channel-to-channel to WARP_SEG_QC
+#     in-process. The globs below are best-effort (a future publishDir rule
+#     may add it) but are EXPECTED to find nothing today; that is the
+#     correct outcome per find_transform's contract below, not a bug in it.
+find_transform() {
+  local outdir="$1" pair_id="$2" method="$3" hit
+  case "$method" in
+    tiled|ashlar)
+      hit="$(find "$outdir/$pair_id/registered/manifest" -maxdepth 1 \
+             -name '*_manifest.json' 2>/dev/null | sort | head -n1)"
+      ;;
+    valis)
+      hit="$(find "$outdir/$pair_id" \
+             \( -path '*/preprocessed/data/*_registrar.pickle' \
+                -o -path '*/registered/*_registrar.pickle' \) \
+             2>/dev/null | sort | head -n1)"
+      ;;
+    *)
+      hit=""
+      ;;
+  esac
+  printf '%s' "$hit"
+}
+
 # --- Step 2: register + score each (pair, method) through the real pipeline -
 # Pipeline defaults, not the unit rung's small ones: tile 2048, halo 256
 # (benchmarks/stare_bench/cli.py's own argparse defaults already match).
 while IFS=, read -r run_id pair_id method rest; do
   [[ "$run_id" == "run_id" ]] && continue
   outdir="$RESULTS_ROOT/$run_id"
+  scored="$outdir/registration_synthetic_gt.csv"
+
+  # Idempotent like generation: a crash partway through the plan must resume
+  # from the next unscored row, not re-run every already-scored nextflow
+  # invocation.
+  if [[ -f "$scored" ]]; then
+    echo "skip $run_id (already scored)"
+    continue
+  fi
+
   mkdir -p "$outdir"
   echo ">>> $run_id (pair=$pair_id method=$method)"
 
+  # Pin the work directory PER RUN. All 396 invocations sharing the default
+  # ./work would let conf/modules.config's errorStrategy 'ignore' branch (a
+  # dropped task that never fails the run) plus the tiled fan-out's memory
+  # profile at 20480^2 leave a degraded run's stale/partial task outputs
+  # indistinguishable from a clean one's.
   nextflow -q run "$REPO_ROOT" \
     -profile singularity \
+    -w "$outdir/work" \
     --input "$PAIRS_ROOT/$pair_id/samplesheet.csv" \
     --outdir "$outdir" \
     --registration_method "$method" \
@@ -125,12 +186,19 @@ while IFS=, read -r run_id pair_id method rest; do
     --reg_qc 2 \
     -with-trace "$outdir/trace.txt"
 
+  transform="$(find_transform "$outdir" "$pair_id" "$method")"
+  if [[ -z "$transform" ]]; then
+    echo "ERROR: no $method transform found under $outdir/$pair_id -- refusing to score $run_id (a missing transform must never fall back to a STARE re-run)" >&2
+    exit 1
+  fi
+
   python3 -m benchmarks.stare_bench.cli \
     --pair-dir "$PAIRS_ROOT/$pair_id" \
-    --work-dir "$outdir/work" \
+    --work-dir "$outdir/cli_work" \
     --run-id "$run_id" \
     --method "$method" \
+    --transform "$transform" \
     --tile 2048 \
     --halo 256 \
-    --out "$outdir/registration_synthetic_gt.csv"
+    --out "$scored"
 done < "$PLAN"

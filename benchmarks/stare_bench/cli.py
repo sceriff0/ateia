@@ -86,9 +86,60 @@ def _reconstruct_accept(control, max_error, max_disp):
     return accept(control, max_error, max_disp)[0]
 
 
+def _predict_from_valis_pickle(transform_path, moving_name):
+    """A ``(N, 2) -> (N, 2)`` displacement predictor from a VALIS registrar.
+
+    Mirrors ``run_unit.predict_from_manifest``'s contract exactly (input a
+    MOVING-frame point, return a displacement, not a position) so the SAME
+    ``_tre_summary``/``epe``/``jacobian_stats``/``lipschitz`` calls in
+    ``score_pair`` work unchanged regardless of which method produced the
+    transform. ``registrar_slide.warp_xy`` returns a POSITION in the
+    reference frame, so the displacement is that position minus the input --
+    exactly what ``eval_tre.py``'s own landmark scoring does with the same
+    call. Import is lazy: VALIS must not be needed to score a STARE run.
+    """
+    from benchmarks.registration_eval.eval_tre import default_loader
+
+    registrar = default_loader(transform_path)
+    slide = registrar.slide_dict[moving_name]
+
+    def predict(xy):
+        xy = np.asarray(xy, dtype=float)
+        warped = np.asarray(slide.warp_xy(xy, non_rigid=True), dtype=float)
+        return warped - xy
+
+    return predict
+
+
 def score_pair(pair_dir, work_dir, *, method, run_id, tile, halo, upsample,
-               max_error):
-    """Register one pair and reduce it to a single accuracy row."""
+               max_error, transform_path=None):
+    """Register one pair and reduce it to a single accuracy row.
+
+    ``transform_path`` is the ALREADY-PRODUCED transform from a real pipeline
+    run -- a STARE/ASHLAR manifest JSON for ``method in ("tiled", "ashlar")``
+    (``bin/ashlar_solve.py`` deliberately rewrites ashlar's per-tile
+    placements into STARE's own manifest format so one loader reads both), or
+    a VALIS registrar pickle for ``method == "valis"``.
+
+    When ``transform_path`` is omitted, the ONLY method that may still be
+    scored is ``"tiled"`` -- via the in-process ``run_stare`` driver the unit
+    rung uses. Any other method with no transform raises: there is no
+    in-process re-registration for a competitor backend, and silently
+    falling back to STARE's own recomputation would score every method as
+    STARE wearing another method's label -- the exact fabrication this
+    parameter exists to make structurally impossible.
+
+    Gate-ROC and STARE's own intrinsic TRE (``accepted``/``scores``/
+    ``intrinsic``) come from ``run_stare``'s per-tile control-point JSONs,
+    which are intermediate-only in the real pipeline (never published --
+    ``TILED_REG_TILE``'s ``publishDir`` is explicitly disabled, and the
+    published manifest carries only the solved M0 + mesh, not per-tile
+    accept/reject decisions). So when a ``transform_path`` is given, gate and
+    intrinsic-TRE stay at their empty/``None`` defaults rather than being
+    reconstructed from data that was never written to disk -- reporting
+    nothing is honest; inventing a confusion matrix from an unrelated
+    driver's own run would not be.
+    """
     pair_dir = Path(pair_dir)
     truth = json.loads((pair_dir / "truth.json").read_text())
     if int(tile) != int(truth["tile"]):
@@ -102,22 +153,36 @@ def score_pair(pair_dir, work_dir, *, method, run_id, tile, halo, upsample,
     shape = tuple(truth["size"])
     field = make_field(truth["field_family"], shape, **truth["field_params_call"])
 
-    result = run_stare(pair_dir, work_dir, tile=tile, halo=halo,
-                       upsample=upsample, max_error=max_error)
-    predict = predict_from_manifest(result["manifest"], "mov")
-
     accepted = {}
     scores = {}
-    for c in result["controls"]:
-        key = (int(c["ix"]), int(c["iy"]))
-        scores[key] = float(c.get("error", float("nan")))
-        accepted[key] = _reconstruct_accept(c, max_error, halo)
-
     intrinsic = None
-    if result["tre_json"] is not None:
-        doc = json.loads(Path(result["tre_json"]).read_text())
-        block = doc.get("rigid_tre_px")
-        intrinsic = block.get("p50") if isinstance(block, dict) else None
+
+    if transform_path is None:
+        if method != "tiled":
+            raise ValueError(
+                f"score_pair(method={method!r}) has no transform_path: "
+                "there is no in-process re-registration for a competitor "
+                "method, so this would silently score STARE's own "
+                "run_stare() re-registration under another method's label. "
+                "Pass the real pipeline's transform via transform_path."
+            )
+        result = run_stare(pair_dir, work_dir, tile=tile, halo=halo,
+                           upsample=upsample, max_error=max_error)
+        predict = predict_from_manifest(result["manifest"], "mov")
+        for c in result["controls"]:
+            key = (int(c["ix"]), int(c["iy"]))
+            scores[key] = float(c.get("error", float("nan")))
+            accepted[key] = _reconstruct_accept(c, max_error, halo)
+        if result["tre_json"] is not None:
+            doc = json.loads(Path(result["tre_json"]).read_text())
+            block = doc.get("rigid_tre_px")
+            intrinsic = block.get("p50") if isinstance(block, dict) else None
+    elif method in ("tiled", "ashlar"):
+        predict = predict_from_manifest(transform_path, "mov")
+    elif method == "valis":
+        predict = _predict_from_valis_pickle(transform_path, "mov")
+    else:
+        raise ValueError(f"score_pair: unknown method {method!r}")
 
     return accuracy_row(
         run_id=run_id, method=method, pair_id=pair_dir.name, truth=truth,
@@ -141,12 +206,18 @@ def main(argv=None):
     ap.add_argument("--halo", type=int, default=256)
     ap.add_argument("--upsample", type=int, default=10)
     ap.add_argument("--max-error", type=float, default=0.99)
+    ap.add_argument("--transform", default=None,
+                    help="already-produced transform from a real pipeline run: a "
+                         "STARE/ASHLAR manifest JSON (--method tiled|ashlar) or a "
+                         "VALIS registrar pickle (--method valis). Omit only for "
+                         "--method tiled, which then falls back to the in-process "
+                         "run_stare driver the unit rung uses.")
     ap.add_argument("--out", required=True)
     a = ap.parse_args(argv)
 
     row = score_pair(a.pair_dir, a.work_dir, method=a.method, run_id=a.run_id,
                      tile=a.tile, halo=a.halo, upsample=a.upsample,
-                     max_error=a.max_error)
+                     max_error=a.max_error, transform_path=a.transform)
     write_accuracy_csv([row], a.out)
     print(f"Wrote {a.out}")
     return 0

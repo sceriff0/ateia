@@ -1,4 +1,5 @@
 import csv
+import json
 
 import numpy as np
 import pytest
@@ -112,6 +113,85 @@ def test_score_pair_raises_on_tile_mismatch(tmp_path):
     with pytest.raises(ValueError, match="tile"):
         score_pair(pair, tmp_path / "work", method="tiled", run_id="unit",
                    tile=128, halo=64, upsample=10, max_error=0.99)
+
+
+def _write_stub_manifest(path, dx, dy):
+    """A minimal STARE/ASHLAR manifest: identity M0 plus a constant translation,
+    no mesh. Matches bin/utils/tiled_manifest.build_manifest's schema.
+    """
+    manifest = {
+        "ref_slide": "ref",
+        "slides": {
+            "mov": {
+                "M0": [[1.0, 0.0, dx], [0.0, 1.0, dy], [0.0, 0.0, 1.0]],
+                "mesh": None,
+            }
+        },
+    }
+    path.write_text(json.dumps(manifest))
+    return path
+
+
+@pytest.mark.parametrize("method", ["valis", "ashlar"])
+def test_score_pair_without_transform_raises_for_non_tiled_methods(tmp_path, method):
+    """The fabrication this task exists to prevent: scoring a competitor
+    method by silently re-running STARE's own in-process driver and
+    reporting the result under the competitor's name. Only ``method ==
+    "tiled"`` may fall back to ``run_stare`` when no transform is supplied.
+    """
+    pair = tmp_path / "pair"
+    generate_pair(pair, (1024, 1024), seed=61, tile=256,
+                  crop_source=SyntheticCropSource(), physics_params={})
+    with pytest.raises(ValueError, match="transform_path"):
+        score_pair(pair, tmp_path / "work", method=method, run_id="unit",
+                   tile=256, halo=64, upsample=10, max_error=0.99)
+
+
+def test_score_pair_tiled_without_transform_still_uses_run_stare(tmp_path):
+    """Backward compatibility for the unit rung: ``method="tiled"`` with no
+    ``transform_path`` keeps today's in-process ``run_stare`` behaviour.
+    """
+    pair = tmp_path / "pair"
+    generate_pair(pair, (1024, 1024), seed=62, tile=256,
+                  crop_source=SyntheticCropSource(), physics_params={})
+    row = score_pair(pair, tmp_path / "work", method="tiled", run_id="unit",
+                     tile=256, halo=64, upsample=10, max_error=0.99)
+    assert row["epe_mean_px"] is not None
+    # run_stare's per-control JSONs are available, so the gate ROC is real,
+    # not the empty-default a transform_path-based score gets.
+    assert row["gate_tp"] is not None
+
+
+@pytest.mark.parametrize("method", ["tiled", "ashlar"])
+def test_score_pair_uses_the_manifest_predictor_when_a_transform_is_given(
+    tmp_path, monkeypatch, method
+):
+    """When ``transform_path`` is supplied, ``score_pair`` must build its
+    predictor from THAT transform and must never call ``run_stare`` --
+    including for ``method == "tiled"``, whose real-pipeline manifest must
+    be scored exactly like ashlar's rather than silently re-registered.
+    """
+    import benchmarks.stare_bench.cli as cli_mod
+
+    def _boom(*a, **k):
+        raise AssertionError("run_stare must not be called when transform_path is given")
+
+    monkeypatch.setattr(cli_mod, "run_stare", _boom)
+
+    pair = tmp_path / "pair"
+    generate_pair(pair, (1024, 1024), seed=63, tile=256,
+                  crop_source=SyntheticCropSource(), physics_params={})
+    manifest = _write_stub_manifest(tmp_path / "manifest.json", dx=5.0, dy=3.0)
+
+    row = score_pair(pair, tmp_path / "work", method=method, run_id="unit",
+                     tile=256, halo=64, upsample=10, max_error=0.99,
+                     transform_path=str(manifest))
+    assert row["method"] == method
+    assert row["epe_mean_px"] is not None
+    # No per-control JSONs exist for an externally-supplied transform, so the
+    # gate ROC stays at its honest empty default rather than a fabricated one.
+    assert row["gate_tp"] == 0
+    assert row["gate_fp"] == 0
 
 
 def _tre_summary_wrong(truth, predict):
