@@ -84,13 +84,28 @@ def _check_required(d, required, label):
         raise ValueError(f"{label} is missing required keys: {missing}")
 
 
-def accuracy_row(*, run_id, method, pair_id, truth, epe_stats, gate_stats,
-                  gate_auc_value, jac_stats, lip_stats, tre_summary,
+def accuracy_row(*, run_id, method, pair_id, truth, epe_stats, jac_stats,
+                  lip_stats, tre_summary, gate_stats=None, gate_auc_value=None,
                   intrinsic_tre=None):
-    """One row of registration_synthetic_gt.csv."""
+    """One row of registration_synthetic_gt.csv.
+
+    ``gate_stats``/``gate_auc_value`` are explicitly ``None``-able: an
+    UNMEASURED gate (no per-tile accept/reject data available -- e.g. a
+    caller scoring an externally-supplied transform that carries no control
+    points) must write ``None`` into every ``gate_*`` column, not a value
+    computed from an empty accept/score mapping. ``gate_roc({}, {})`` on real
+    labels does not error and does not come back empty -- ``gate_recall``
+    lands on a literal ``0.0`` (every truly-registrable tile counts as a
+    false negative) and ``gate_auc`` on a literal ``0.5`` (its own
+    documented tie-broken value for a constant, uninformative score) -- two
+    entirely fabricated, plausible-looking numbers. A caller with no gate
+    data must pass ``gate_stats=None, gate_auc_value=None`` here rather than
+    routing empty dicts through ``gate_roc``/``gate_auc`` itself.
+    """
     _check_clean(epe_stats, gate_stats, jac_stats, lip_stats, tre_summary)
     _check_required(epe_stats, _REQUIRED_EPE_KEYS, "epe_stats")
     fp = truth.get("field_params", {})
+    gs = gate_stats or {}
     return {
         "run_id": run_id,
         "method": method,
@@ -107,14 +122,14 @@ def accuracy_row(*, run_id, method, pair_id, truth, epe_stats, gate_stats,
         "epe_max_px": epe_stats.get("max_px"),
         "epe_n": epe_stats.get("n"),
         "epe_subsample_effective": epe_stats.get("subsample_effective"),
-        "gate_precision": gate_stats.get("precision"),
-        "gate_recall": gate_stats.get("recall"),
-        "gate_f1": gate_stats.get("f1"),
+        "gate_precision": gs.get("precision"),
+        "gate_recall": gs.get("recall"),
+        "gate_f1": gs.get("f1"),
         "gate_auc": gate_auc_value,
-        "gate_tp": gate_stats.get("tp"),
-        "gate_fp": gate_stats.get("fp"),
-        "gate_tn": gate_stats.get("tn"),
-        "gate_fn": gate_stats.get("fn"),
+        "gate_tp": gs.get("tp"),
+        "gate_fp": gs.get("fp"),
+        "gate_tn": gs.get("tn"),
+        "gate_fn": gs.get("fn"),
         "folding_rate": jac_stats.get("folding_rate"),
         "det_min": jac_stats.get("det_min"),
         "det_p05": jac_stats.get("det_p05"),

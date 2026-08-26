@@ -134,11 +134,24 @@ def score_pair(pair_dir, work_dir, *, method, run_id, tile, halo, upsample,
     which are intermediate-only in the real pipeline (never published --
     ``TILED_REG_TILE``'s ``publishDir`` is explicitly disabled, and the
     published manifest carries only the solved M0 + mesh, not per-tile
-    accept/reject decisions). So when a ``transform_path`` is given, gate and
-    intrinsic-TRE stay at their empty/``None`` defaults rather than being
-    reconstructed from data that was never written to disk -- reporting
-    nothing is honest; inventing a confusion matrix from an unrelated
-    driver's own run would not be.
+    accept/reject decisions). So when a ``transform_path`` is given, this
+    passes ``gate_stats=None``/``gate_auc_value=None`` to ``accuracy_row``
+    rather than calling ``gate_roc``/``gate_auc`` on the empty ``accepted``/
+    ``scores`` mappings -- those functions do not error and do not come back
+    empty on real labels: ``gate_recall`` lands on a literal ``0.0`` (every
+    truly-registrable tile scores as a false negative) and ``gate_auc`` on a
+    literal ``0.5`` (its own documented tie-broken value for an
+    uninformative constant score), two fabricated, plausible-looking
+    numbers for a metric that was never actually measured. ``accuracy_row``
+    writes ``None`` into every ``gate_*`` column for exactly this case.
+    Likewise ``intrinsic`` stays ``None`` -- there is no ``*_tre.json`` to
+    read outside the ``run_stare`` branch either.
+
+    A pipeline change publishing the per-tile control-point JSONs (the data
+    this gap is missing) has landed on ``feat/stare-ultimate`` (commit
+    ``6823d4b``, at ``<outdir>/<pid>/registered/controls/*_ctrl.json``); once
+    that reaches ``benchmarking``, this path can read them and stop passing
+    ``None`` for the gate columns. Tracked here so the gap isn't forgotten.
     """
     pair_dir = Path(pair_dir)
     truth = json.loads((pair_dir / "truth.json").read_text())
@@ -156,6 +169,11 @@ def score_pair(pair_dir, work_dir, *, method, run_id, tile, halo, upsample,
     accepted = {}
     scores = {}
     intrinsic = None
+    # Only run_stare's own per-tile control-point JSONs carry real gate data
+    # (see the docstring above). A transform_path-based score has none, and
+    # must say so with None rather than routing empty accepted/scores
+    # mappings through gate_roc/gate_auc, which do not come back empty.
+    have_gate_data = False
 
     if transform_path is None:
         if method != "tiled":
@@ -173,6 +191,7 @@ def score_pair(pair_dir, work_dir, *, method, run_id, tile, halo, upsample,
             key = (int(c["ix"]), int(c["iy"]))
             scores[key] = float(c.get("error", float("nan")))
             accepted[key] = _reconstruct_accept(c, max_error, halo)
+        have_gate_data = True
         if result["tre_json"] is not None:
             doc = json.loads(Path(result["tre_json"]).read_text())
             block = doc.get("rigid_tre_px")
@@ -184,11 +203,14 @@ def score_pair(pair_dir, work_dir, *, method, run_id, tile, halo, upsample,
     else:
         raise ValueError(f"score_pair: unknown method {method!r}")
 
+    gate_stats = gate_roc(truth["tile_labels"], accepted) if have_gate_data else None
+    gate_auc_value = gate_auc(truth["tile_labels"], scores) if have_gate_data else None
+
     return accuracy_row(
         run_id=run_id, method=method, pair_id=pair_dir.name, truth=truth,
         epe_stats=epe(field, predict, shape, tile=min(tile, 512)),
-        gate_stats=gate_roc(truth["tile_labels"], accepted),
-        gate_auc_value=gate_auc(truth["tile_labels"], scores),
+        gate_stats=gate_stats,
+        gate_auc_value=gate_auc_value,
         jac_stats=jacobian_stats(predict, shape, tile=min(tile, 512)),
         lip_stats=lipschitz(predict, shape, tile=min(tile, 512)),
         tre_summary=_tre_summary(truth, predict),

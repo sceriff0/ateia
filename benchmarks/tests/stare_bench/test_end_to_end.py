@@ -188,10 +188,49 @@ def test_score_pair_uses_the_manifest_predictor_when_a_transform_is_given(
                      transform_path=str(manifest))
     assert row["method"] == method
     assert row["epe_mean_px"] is not None
-    # No per-control JSONs exist for an externally-supplied transform, so the
-    # gate ROC stays at its honest empty default rather than a fabricated one.
-    assert row["gate_tp"] == 0
-    assert row["gate_fp"] == 0
+    # No per-control JSONs exist for an externally-supplied transform, so
+    # EVERY gate column must be None -- not a value computed from an empty
+    # accepted/scores mapping. See
+    # test_score_pair_with_transform_reports_gate_as_unmeasured_not_zero
+    # for why this used to be wrong (0 and 0.5, not None).
+    assert row["gate_tp"] is None
+    assert row["gate_fp"] is None
+    assert row["gate_recall"] is None
+    assert row["gate_auc"] is None
+
+
+def test_score_pair_with_transform_reports_gate_as_unmeasured_not_zero(tmp_path):
+    """The milder sibling of the fabrication this task exists to prevent.
+
+    A ``transform_path``-scored row has no per-tile accept/reject data (see
+    ``score_pair``'s docstring), so its gate columns must be ``None`` --
+    UNMEASURED. Before this fix, ``score_pair`` routed the empty
+    ``accepted``/``scores`` mappings through ``gate_roc``/``gate_auc``
+    anyway, and neither function errors or comes back empty on real labels:
+    ``gate_recall`` landed on a literal ``0.0`` (every truly-registrable
+    tile counted as a false negative) and ``gate_auc`` on a literal ``0.5``
+    (the documented tie-broken value for an uninformative constant score).
+    Both are confident, plausible-looking, entirely fabricated numbers for a
+    metric that was never measured -- exactly the disease this round fixes,
+    just on the gate metric instead of EPE.
+    """
+    pair = tmp_path / "pair"
+    generate_pair(pair, (1024, 1024), seed=64, tile=256,
+                  crop_source=SyntheticCropSource(),
+                  physics_params={"blank_regions": {"fraction": 0.5}})
+    manifest = _write_stub_manifest(tmp_path / "manifest.json", dx=5.0, dy=3.0)
+
+    row = score_pair(pair, tmp_path / "work", method="ashlar", run_id="unit",
+                     tile=256, halo=64, upsample=10, max_error=0.99,
+                     transform_path=str(manifest))
+    assert row["gate_recall"] is None
+    assert row["gate_auc"] is None
+    assert row["gate_precision"] is None
+    assert row["gate_f1"] is None
+    assert row["gate_tp"] is None
+    assert row["gate_fp"] is None
+    assert row["gate_tn"] is None
+    assert row["gate_fn"] is None
 
 
 def _tre_summary_wrong(truth, predict):
