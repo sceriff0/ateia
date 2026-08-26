@@ -1,0 +1,25 @@
+name: stare-bench
+
+on:
+  push:
+    branches: [benchmarking, 'bench/**']
+  pull_request:
+    branches: [benchmarking]
+
+jobs:
+  stare-bench:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install
+        run: pip install numpy scipy scikit-image tifffile pandas pytest ruff
+      - name: Test
+        run: python -m pytest benchmarks/tests/stare_bench -v
+      # benchmarks/ is excluded in ruff.toml as "benchmarking scratch";
+      # --no-force-exclude lints the explicitly-named path anyway. The
+      # deliberate-violation step in this task's plan verifies that it really does.
+      - name: Lint
+        run: ruff check --no-force-exclude benchmarks/stare_bench benchmarks/tests/stare_bench
