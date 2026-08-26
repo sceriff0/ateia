@@ -15,11 +15,11 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install
-        run: pip install numpy scipy scikit-image tifffile pandas pytest ruff
+        run: pip install numpy scipy scikit-image tifffile pandas pyyaml pytest ruff
       - name: Test
-        run: python -m pytest benchmarks/tests/stare_bench -v
+        run: python -m pytest benchmarks/tests -v
       # benchmarks/ is excluded in ruff.toml as "benchmarking scratch";
-      # --no-force-exclude lints the explicitly-named path anyway. The
+      # --no-force-exclude lints the explicitly-named paths anyway. The
       # deliberate-violation step in this task's plan verifies that it really does.
       - name: Lint
-        run: ruff check --no-force-exclude benchmarks/stare_bench benchmarks/tests/stare_bench
+        run: ruff check --no-force-exclude benchmarks/stare_bench benchmarks/tests/stare_bench benchmarks/analysis/make_tables.py
