@@ -82,6 +82,31 @@ registration_arms:
   tiled:
     enabled: true                          # 1 arm
 
+    # COARSE front-end (reg_tiled_frontend, bin/utils/coarse_align.py). orb is today's
+    # default; sift and fourier_mellin cost NO new dependency -- both already ship in
+    # scikit-image -- so they bracket the learned matcher and keep the comparison honest
+    # about what torch actually buys.
+    #
+    # disk_lightglue is the fourth front-end and belongs in this ranking, but not yet:
+    #   - it needs the separate stare-ml container (torch + kornia) and must be run with
+    #     `-profile stare_ml`, so it cannot share this arm's plain execution profile;
+    #   - that image is not published -- containers/build-images.yml only pushes on
+    #     release:published / workflow_dispatch, so until someone runs
+    #     `gh workflow run build-images.yml -f version=1.0.0 -f only=stare-ml`, `-profile
+    #     stare_ml` fails on image pull (the same trap :tiled shipped into once already);
+    #   - its matching body still raises NotImplementedError
+    #     (bin/utils/coarse_align.py::_frontend_disk_lightglue), so even with the image
+    #     pulled it cannot succeed today.
+    # Listing it here would produce a failed cell that conf/modules.config's
+    # errorStrategy 'ignore' branch can drop without failing the run -- a gap that looks
+    # like data. Add it as a fourth value once the matching body lands and the stare-ml
+    # image is published; until then this stays real WSI compute nobody should spend on a
+    # guaranteed failure.
+    frontend: [orb, sift, fourier_mellin]  # declared axis; not yet expanded into
+                                           # per-frontend arms by build_arm_plan.py
+                                           # (still emits one tiled_defaults arm) --
+                                           # wiring the fan-out is follow-on work.
+
   # ASHLAR — the EXTERNAL baseline (labsyspharm), the field-standard cyclic-IF
   # registrar. A third BACKEND again, so like `tiled` it carries neither
   # memory_mode nor reg_micro_reg and shows NA for both in arms.csv.
