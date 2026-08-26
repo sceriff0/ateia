@@ -9,4 +9,4 @@ MINOR component when generated data changes in a way that invalidates
 comparison with older runs; bump PATCH for changes that cannot.
 """
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"
