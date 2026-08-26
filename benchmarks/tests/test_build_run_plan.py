@@ -426,6 +426,17 @@ NOT_SWEPT = {
     "config_profile_description": "nf-core boilerplate display string — see config_profile_name",
     "start": "step gate — every sweep run is a full pipeline; a partial run is not comparable",
     "stop": "step gate — see start",
+    "cleanup_level": (
+        "which publish kinds survive a run -- and the benchmark must PIN it, not sweep it. "
+        "The shipped default 'final' publishes only Layout.FINAL_KINDS (quantification/, "
+        "geojson/, pyramid/) plus the run-level qc/csv/size_logs; `registered/` is an "
+        "INTERMEDIATE_KIND, so <patient>/registered/summary/*.csv -- which "
+        "benchmarks/analysis/lib/quality.py:142 globs to build the registration-quality "
+        "table -- is not published at all. A swept arm at 'final' would report an empty "
+        "table while exiting 0, exactly like cleanup_work below. benchmark.config pins it "
+        "to 'none' for that reason; sweeping it would un-pin the thing the analysis depends "
+        "on. It is also not a cost knob worth an axis: publishing is a copy that happens "
+        "after each task's work is done."),
     "cleanup_work": (
         "post-run disk hygiene, and ACTIVELY HOSTILE to benchmarking. It sets Nextflow's "
         "`cleanup`, which deletes the work directory once a run succeeds -- and the work "

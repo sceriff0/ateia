@@ -107,6 +107,7 @@ nav:
   - SpatialData & FlowPath: spatialdata.md
   - Benchmarks: benchmarks.md
   - Benchmarks (real samples): benchmarks_real.md
+  - Migration (2026-08-24): migration-2026-08-24.md
   - Citation: citation.md
 
 # ---------------------------------------------------------------------------

@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Migration — read before comparing any output across this release
+
+Six changes alter what a run produces or what its outputs MEAN, and every one of
+them is silent from the consumer's side. They are collected, each with what
+changed and what to do about it, in
+[`docs/migration-2026-08-24.md`](docs/migration-2026-08-24.md):
+
+1. **Darkfield correction is gone** — nf-core `BASICPY` runs at
+   `get_darkfield=False`; the deleted in-house path used `True`. Corrected pixel
+   values are not comparable across this release.
+2. **NaN measurements are omitted, not written as `0.0`** — a cell with no
+   nuclear overlap carries fewer keys than its neighbours. This does NOT crash
+   `qupath-extension-flowpath` (its lookup null-checks) and does not change which
+   cells a gate calls positive; what moves is every percentile-derived threshold,
+   because the artificial zeros have left the distribution.
+3. **STARE meshes differ, by design** — two new control-point gates reject points
+   the previous code accepted. Registration output is not bit-comparable.
+4. **Checkpoint CSVs carry an `id` column** — an existing `--prior_outdir`, or an
+   existing tree used with `--start`, now fails loudly at launch instead of
+   silently re-deriving an identity that may differ.
+5. **A run publishes final outputs only and deletes its work directory** —
+   `cleanup_level` defaults to `'final'` and `cleanup_work` to `true`. No
+   checkpoint manifest is written at a cleaning level. Pass
+   `--cleanup_level none` on any run whose output will be re-entered.
+6. **Two invocations that used to be accepted now fail at launch** —
+   `--seg_instantseg_target cells|nuclei` (they produce one mask, which was
+   silently replicated into both outputs and zeroed every cytoplasmic
+   measurement), and an OME header whose `PhysicalSizeXUnit` the ASHLAR retiler
+   does not recognise (a recognised non-µm unit is now converted rather than read
+   as µm — an `nm` header was a 1000× scale error).
+
 ### Added
 - **A new `segmentation` step, carved out of `postprocessing`.** `SEGMENT`,
   `EXTRACT_CELL_PROPERTIES` and `EXTRACT_NUCLEI_PROPERTIES` (the latter under
