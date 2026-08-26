@@ -86,7 +86,27 @@ def _reconstruct_accept(control, max_error, max_disp):
     return accept(control, max_error, max_disp)[0]
 
 
-def _predict_from_valis_pickle(transform_path, moving_name):
+def _valis_moving_slide_name(registrar):
+    """The registrar's single non-reference slide key.
+
+    VALIS names each slide after its source filename (``valtils.get_name``),
+    not any fixed literal -- so, like the manifest schema
+    ``run_unit.moving_slide_name`` reads, there is no constant "mov" to rely
+    on. ``registrar.get_ref_slide()`` gives the reference slide object
+    directly; the moving slide is whatever else is in ``slide_dict``.
+    """
+    ref_name = registrar.get_ref_slide().name
+    candidates = [k for k in registrar.slide_dict if k != ref_name]
+    if len(candidates) != 1:
+        raise ValueError(
+            "expected exactly one non-reference slide in VALIS registrar, "
+            f"found {candidates!r} (ref={ref_name!r}, "
+            f"slides={list(registrar.slide_dict)!r})"
+        )
+    return candidates[0]
+
+
+def _predict_from_valis_pickle(transform_path):
     """A ``(N, 2) -> (N, 2)`` displacement predictor from a VALIS registrar.
 
     Mirrors ``run_unit.predict_from_manifest``'s contract exactly (input a
@@ -101,6 +121,7 @@ def _predict_from_valis_pickle(transform_path, moving_name):
     from benchmarks.registration_eval.eval_tre import default_loader
 
     registrar = default_loader(transform_path)
+    moving_name = _valis_moving_slide_name(registrar)
     slide = registrar.slide_dict[moving_name]
 
     def predict(xy):
@@ -119,12 +140,16 @@ def score_pair(pair_dir, work_dir, *, method, run_id, tile, halo, upsample,
     run -- a STARE/ASHLAR manifest JSON for ``method in ("tiled", "ashlar")``
     (``bin/ashlar_solve.py`` deliberately rewrites ashlar's per-tile
     placements into STARE's own manifest format so one loader reads both), or
-    a VALIS registrar pickle for ``method == "valis"``.
+    a VALIS registrar pickle for ``method == "valis"``. ``method ==
+    "identity"`` needs no ``transform_path`` at all: it is the do-nothing
+    baseline (zero displacement everywhere), scored so every other method's
+    absolute EPE has something to be compared against -- see the branch at
+    the top of this function's body.
 
-    When ``transform_path`` is omitted, the ONLY method that may still be
-    scored is ``"tiled"`` -- via the in-process ``run_stare`` driver the unit
-    rung uses. Any other method with no transform raises: there is no
-    in-process re-registration for a competitor backend, and silently
+    When ``transform_path`` is omitted, the only OTHER method that may still
+    be scored is ``"tiled"`` -- via the in-process ``run_stare`` driver the
+    unit rung uses. Any competitor method with no transform raises: there is
+    no in-process re-registration for a competitor backend, and silently
     falling back to STARE's own recomputation would score every method as
     STARE wearing another method's label -- the exact fabrication this
     parameter exists to make structurally impossible.
@@ -175,7 +200,16 @@ def score_pair(pair_dir, work_dir, *, method, run_id, tile, halo, upsample,
     # mappings through gate_roc/gate_auc, which do not come back empty.
     have_gate_data = False
 
-    if transform_path is None:
+    if method == "identity":
+        # The do-nothing baseline: zero displacement everywhere. No transform,
+        # no run_stare -- this needs neither. It exists because an absolute
+        # EPE number is uninterpretable on its own: FROZEN.md records STARE
+        # scoring ratio(max) = 0.998 against this exact predictor at the unit
+        # rung, so every other method's EPE must sit beside this row or a
+        # true number reads as a false claim of accuracy.
+        def predict(xy):
+            return np.zeros_like(np.asarray(xy, dtype=float))
+    elif transform_path is None:
         if method != "tiled":
             raise ValueError(
                 f"score_pair(method={method!r}) has no transform_path: "
@@ -186,7 +220,7 @@ def score_pair(pair_dir, work_dir, *, method, run_id, tile, halo, upsample,
             )
         result = run_stare(pair_dir, work_dir, tile=tile, halo=halo,
                            upsample=upsample, max_error=max_error)
-        predict = predict_from_manifest(result["manifest"], "mov")
+        predict = predict_from_manifest(result["manifest"])
         for c in result["controls"]:
             key = (int(c["ix"]), int(c["iy"]))
             scores[key] = float(c.get("error", float("nan")))
@@ -197,9 +231,9 @@ def score_pair(pair_dir, work_dir, *, method, run_id, tile, halo, upsample,
             block = doc.get("rigid_tre_px")
             intrinsic = block.get("p50") if isinstance(block, dict) else None
     elif method in ("tiled", "ashlar"):
-        predict = predict_from_manifest(transform_path, "mov")
+        predict = predict_from_manifest(transform_path)
     elif method == "valis":
-        predict = _predict_from_valis_pickle(transform_path, "mov")
+        predict = _predict_from_valis_pickle(transform_path)
     else:
         raise ValueError(f"score_pair: unknown method {method!r}")
 

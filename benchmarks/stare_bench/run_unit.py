@@ -29,7 +29,7 @@ from pathlib import Path
 
 from .metrics.cost import measure
 
-__all__ = ["run_stare", "predict_from_manifest", "REPO_ROOT"]
+__all__ = ["run_stare", "predict_from_manifest", "moving_slide_name", "REPO_ROOT"]
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BIN = REPO_ROOT / "bin"
@@ -126,19 +126,45 @@ def run_stare(
     }
 
 
-def predict_from_manifest(manifest_path, moving_name):
+def moving_slide_name(manifest):
+    """The manifest's single non-reference slide key.
+
+    Real STARE/ASHLAR manifests name the moving slide after
+    ``meta.channels.join('_')`` (``tiled_solve.nf:29``, ``ashlar_solve.nf:51``),
+    NOT the literal ``"mov"`` this benchmark's own in-process ``run_stare``
+    driver happens to pass to ``tiled_solve.py --moving-name``. Deriving the
+    name from the manifest itself (rather than hardcoding ``"mov"``) keeps
+    scoring correct regardless of what channel name a real samplesheet uses --
+    a real mid-rung manifest built from a ``channels = DAPI`` samplesheet is
+    keyed ``"DAPI"``, and ``bin/utils/tiled_stage_warp.py``'s ``affines[slide_name]``
+    raises ``KeyError`` on any other guess.
+    """
+    ref = manifest["ref_slide"]
+    candidates = [k for k in manifest["slides"] if k != ref]
+    if len(candidates) != 1:
+        raise ValueError(
+            "expected exactly one non-reference slide in manifest, found "
+            f"{candidates!r} (ref_slide={ref!r}, slides={list(manifest['slides'])!r})"
+        )
+    return candidates[0]
+
+
+def predict_from_manifest(manifest_path):
     """A ``(N, 2) -> (N, 2)`` displacement predictor for the FINAL stage.
 
     Built through bin/utils/tiled_stage_warp.make_warper -- the same builder the
     pipeline's own reg_qc=2 uses -- so the metrics score exactly the transform
-    that would ship.
+    that would ship. The moving slide name is derived from the manifest itself
+    (see ``moving_slide_name``), never hardcoded.
     """
     utils_dir = str(BIN / "utils")
     if utils_dir not in sys.path:
         sys.path.insert(0, utils_dir)
     from tiled_stage_warp import make_warper
 
-    warp = make_warper(json.loads(Path(manifest_path).read_text()))
+    manifest = json.loads(Path(manifest_path).read_text())
+    warp = make_warper(manifest)
+    moving_name = moving_slide_name(manifest)
 
     def predict(xy):
         import numpy as np

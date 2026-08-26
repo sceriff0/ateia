@@ -62,7 +62,7 @@ def test_predictor_recovers_the_injected_displacement(affine_pair, tmp_path):
     pair_dir, truth = affine_pair
     got = run_stare(pair_dir, tmp_path, tile=256, halo=64, upsample=10,
                     max_error=0.99)
-    predict = predict_from_manifest(got["manifest"], "mov")
+    predict = predict_from_manifest(got["manifest"])
 
     # A dense grid over the image, not two hand-picked points: the amplitude
     # of the injected field bounds the true displacement magnitude, so an
@@ -106,7 +106,7 @@ def test_random_fourier_case_runs_and_records_its_ratio(pair, tmp_path, capsys):
                     max_error=0.99)
     assert len(got["controls"]) == 16
 
-    predict = predict_from_manifest(got["manifest"], "mov")
+    predict = predict_from_manifest(got["manifest"])
     h, w = truth["size"]
     gx, gy = np.meshgrid(np.linspace(32, w - 32, 16), np.linspace(32, h - 32, 16))
     xy = np.column_stack([gx.ravel(), gy.ravel()])

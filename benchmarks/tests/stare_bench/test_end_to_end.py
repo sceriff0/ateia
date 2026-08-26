@@ -4,7 +4,14 @@ import json
 import numpy as np
 import pytest
 
-from benchmarks.stare_bench.cli import _accept_impl, _tre_summary, main, score_pair
+from benchmarks.stare_bench.cli import (
+    _accept_impl,
+    _predict_from_valis_pickle,
+    _tre_summary,
+    _valis_moving_slide_name,
+    main,
+    score_pair,
+)
 from benchmarks.stare_bench.emit import ACCURACY_COLUMNS
 from benchmarks.stare_bench.fields import make_field
 from benchmarks.stare_bench.generate import generate_pair
@@ -115,14 +122,95 @@ def test_score_pair_raises_on_tile_mismatch(tmp_path):
                    tile=128, halo=64, upsample=10, max_error=0.99)
 
 
+class _FakeSlide:
+    """Stand-in for a VALIS ``Slide``: only ``.name`` and ``.warp_xy`` matter
+    to ``_predict_from_valis_pickle``/``_valis_moving_slide_name``.
+    """
+
+    def __init__(self, name, offset=(0.0, 0.0)):
+        self.name = name
+        self._offset = np.asarray(offset, dtype=float)
+
+    def warp_xy(self, xy, non_rigid=True):
+        return np.asarray(xy, dtype=float) + self._offset
+
+
+class _FakeRegistrar:
+    """Stand-in for a VALIS ``Valis`` registrar: only ``slide_dict`` and
+    ``get_ref_slide()`` matter here -- real VALIS is not importable in this
+    test environment (``valis_lib`` is vendored, not pip-installed), so this
+    is the only way to exercise ``_valis_moving_slide_name``'s real logic
+    (as opposed to the manifest-schema logic ``moving_slide_name`` covers via
+    ``_write_stub_manifest``, keyed the same non-generic way).
+    """
+
+    def __init__(self, slide_dict, ref_name):
+        self.slide_dict = slide_dict
+        self._ref_name = ref_name
+
+    def get_ref_slide(self):
+        return self.slide_dict[self._ref_name]
+
+
+def test_valis_moving_slide_name_derives_the_non_reference_slide():
+    # VALIS names slides after their source filename, not a fixed literal --
+    # "DAPI" here specifically, not "mov", for the same reason
+    # _write_stub_manifest below is keyed "DAPI": a fixture keyed "mov" would
+    # bake in the exact hardcoded-literal bug this guards against.
+    registrar = _FakeRegistrar(
+        {"ref": _FakeSlide("ref"), "DAPI": _FakeSlide("DAPI")}, ref_name="ref"
+    )
+    assert _valis_moving_slide_name(registrar) == "DAPI"
+
+
+def test_valis_moving_slide_name_raises_when_not_exactly_one_candidate():
+    registrar = _FakeRegistrar({"ref": _FakeSlide("ref")}, ref_name="ref")
+    with pytest.raises(ValueError, match="exactly one"):
+        _valis_moving_slide_name(registrar)
+
+    registrar = _FakeRegistrar(
+        {"ref": _FakeSlide("ref"), "DAPI": _FakeSlide("DAPI"),
+         "GFP": _FakeSlide("GFP")},
+        ref_name="ref",
+    )
+    with pytest.raises(ValueError, match="exactly one"):
+        _valis_moving_slide_name(registrar)
+
+
+def test_predict_from_valis_pickle_uses_the_derived_slide_name(monkeypatch):
+    """The Critical-1 regression for the VALIS leg specifically: before the
+    fix, ``score_pair``'s valis branch hardcoded ``"mov"`` and would
+    ``KeyError`` on a registrar keyed like a real pipeline run.
+    """
+    registrar = _FakeRegistrar(
+        {"ref": _FakeSlide("ref"), "DAPI": _FakeSlide("DAPI", offset=(5.0, 3.0))},
+        ref_name="ref",
+    )
+    monkeypatch.setattr(
+        "benchmarks.registration_eval.eval_tre.default_loader",
+        lambda transform_path: registrar,
+    )
+    predict = _predict_from_valis_pickle("unused-path")
+    xy = np.array([[10.0, 20.0], [0.0, 0.0]])
+    np.testing.assert_allclose(predict(xy), [[5.0, 3.0], [5.0, 3.0]])
+
+
 def _write_stub_manifest(path, dx, dy):
     """A minimal STARE/ASHLAR manifest: identity M0 plus a constant translation,
     no mesh. Matches bin/utils/tiled_manifest.build_manifest's schema.
+
+    Keyed ``"DAPI"``, not ``"mov"``: ``tiled_solve.nf:29`` and
+    ``ashlar_solve.nf:51`` set ``slidename = meta.channels.join('_')``, so a
+    real mid-rung manifest (built from a ``channels = DAPI`` samplesheet) is
+    keyed ``"DAPI"``. Using that same non-generic key here is what makes this
+    fixture able to catch a hardcoded ``"mov"`` in the scoring code -- a
+    fixture keyed "mov" bakes in the exact assumption the bug makes and can
+    never expose it.
     """
     manifest = {
         "ref_slide": "ref",
         "slides": {
-            "mov": {
+            "DAPI": {
                 "M0": [[1.0, 0.0, dx], [0.0, 1.0, dy], [0.0, 0.0, 1.0]],
                 "mesh": None,
             }
