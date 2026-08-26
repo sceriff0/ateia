@@ -9,7 +9,7 @@ report benchmark results — see the PENDING section, which is not a formality.
 | | |
 |---|---|
 | **FROZEN** (built, reviewed, tests green) | generator (`fields.py`, `physics.py`, `texture.py`, `generate.py`, `labels.py`), metrics (`epe`, `gate_roc`/`gate_auc`, `field_quality`, `cost`), the unit-rung driver (`run_unit.py`), the committed experiment plan (`plan.py` + `benchmarks/configs/synthetic_gt.yaml`), the mid-rung runner (`run_mid.sh`) |
-| **PENDING** (NOT run — no cluster, no pulled images in this environment) | the mid rung (20480² x 396 rows), the gigapixel rung, ANY competitor score (VALIS, ASHLAR), the ≤8 GB peak-RSS claim |
+| **PENDING** (NOT run — no cluster, no pulled images in this environment) | the mid rung (20480² x 528 rows), the gigapixel rung, ANY competitor score (VALIS, ASHLAR), the ≤8 GB peak-RSS claim |
 
 **The single most important fact in this document: no sweep has executed.**
 Every number in Section 1 comes from unit-scale pins, deliberate-failure
@@ -48,22 +48,45 @@ and `benchmarks/configs/synthetic_gt.yaml`.
 | amplitudes (px) | `[12.0, 48.0]` |
 | blank fractions | `0.00, 0.10, 0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80, 0.90, 1.00` (11 points) |
 | size (mid rung) | `[20480, 20480]` |
-| methods | `[tiled, valis, ashlar]` |
+| methods | `[tiled, valis, ashlar, identity]` |
 
-- **Total records:** 396 = 3 seeds x 1 family x 2 correlation x 2 amplitude x
-  11 blank fractions x 3 methods.
+- **Total records:** 528 = 3 seeds x 1 family x 2 correlation x 2 amplitude x
+  11 blank fractions x 4 methods. `identity` is the do-nothing baseline (zero
+  displacement everywhere), not a registration method — see the identity
+  baseline note below and Finding 1. Only `tiled`/`valis`/`ashlar` (396 of the
+  528 rows) actually invoke the real Nextflow pipeline; `run_mid.sh` scores
+  `identity` directly against ground truth, with no pipeline run and no
+  transform to find.
 - **Unique `pair_id`s:** 132 (each generated image pair is shared across all
-  3 methods, so only method varies within a `pair_id`).
+  4 methods, so only method varies within a `pair_id`).
 - Blank-fraction density is deliberate: 11 points is a subset of the
   21-point grid `tests/test_tile_residual_confidence.py` already uses, chosen
   so 4 of the 11 land inside the 40-70% band where a tile is accepted with a
   wrong displacement — the earlier `[0, .25, .5, .75, 1.0]` sweep placed zero
   samples there.
 - `correlation_px` is enforced, not just documented, to avoid rigging the
-  benchmark: `build_plan` raises `ValueError` if a committed correlation
-  length is a multiple of, or divides evenly into, `REG_TILED_TILE = 2048`
-  (STARE's control-grid spacing).
+  benchmark — but NOT by a divisibility rule against `REG_TILED_TILE = 2048`.
+  An earlier version of this document (and of `build_plan`) enforced `corr %
+  REG_TILED_TILE == 0 or REG_TILED_TILE % corr == 0`, which the design spec
+  showed is neither necessary nor sufficient: `correlation_px = 16000` at a
+  51200px slide passes that rule while yielding a coarse-grid pitch of
+  2047.96px (colliding with STARE's own control-grid spacing), and
+  `correlation_px = 2048` at 4096px fails that rule while yielding a
+  perfectly safe pitch of 273px. `build_plan` now dry-runs
+  `fields.make_field` for every committed `(family, correlation_px)` pair at
+  the committed `size` and lets ITS `ValueError` (raised when the *derived*
+  coarse-grid pitch is not safely below `MAX_COARSE_PITCH_PX`, a quarter of
+  STARE's control-grid tile) be the enforcement — the same check
+  `generate_pair` performs at run time, just called earlier so a rigged
+  sweep fails at plan-build time. See `plan._validate_fields_are_independent`.
 - `amplitude_px` spans STARE's own acceptance gate on purpose — see Finding 1.
+- **Identity baseline.** `method = "identity"` scores a predictor that
+  returns zero displacement everywhere (`cli.py`'s `score_pair`, before any
+  transform or `run_stare` logic). It exists because an absolute EPE number
+  is uninterpretable alone: Section 1.6 records STARE scoring
+  `ratio(max) = 0.998` against exactly this predictor at the unit rung —
+  almost no improvement over doing nothing. Every method's EPE is reported
+  alongside this row rather than left to be read as accurate on its own.
 - Physics is held fixed across the entire blanking sweep so blank fraction is
   the only variable: `photobleach.factor=0.75`; `noise_and_psf.psf_sigma_px=1.5`,
   `photons=300.0`, `read_sigma=0.01`; `background.af_amplitude=0.12`,
@@ -243,11 +266,11 @@ raises rather than fabricating a score when no transform is discoverable
 numbers that were "basically" measured — no run has been attempted, because
 this environment has no cluster and no pulled container images.**
 
-- **Mid rung (396-row sweep, 20480² images, `run_mid.sh`).** The runner is
+- **Mid rung (528-row sweep, 20480² images, `run_mid.sh`).** The runner is
   built and reviewed (`benchmarks/tests/stare_bench/test_run_mid.py`), and a
   512x512 stand-in generation smoke-test confirmed correct `truth.json` and
   `samplesheet.csv` output, but Nextflow itself has **never been executed**
-  against the real sweep. Zero of the 396 rows have been scored.
+  against the real sweep. Zero of the 528 rows have been scored.
 - **Gigapixel rung.** Not attempted at any scale. No timing, no memory
   measurement, no output exists.
 - **The ≤8 GB peak-RSS claim.** `metrics/cost.py`'s `measure()` (self +
