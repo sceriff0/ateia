@@ -56,3 +56,28 @@ def test_subsample_reduces_the_point_count():
     f = _affine_field()
     got = epe(f, f.sample, (512, 512), tile=128, subsample=4)
     assert got["n"] == (512 // 4) ** 2
+
+
+def test_percentile_subsample_is_capped_at_large_shape():
+    """The retained subset for median/p95 must never exceed max_points,
+    even when the full raster has far more sampled points than that."""
+    f = _affine_field()
+    shape = (2048, 2048)
+    got = epe(f, f.sample, shape, tile=256, max_points=100)
+    assert got["n_percentile"] <= 100
+    assert got["n"] == 2048 * 2048
+
+
+def test_mean_and_max_are_exact_regardless_of_max_points():
+    """mean_px/max_px are streamed over EVERY sampled point, never just the
+    retained percentile subset -- they must be identical no matter how
+    aggressively the percentile retention is capped."""
+    f = make_field("random_fourier", (1024, 1024), seed=3)
+
+    def wrong(xy):
+        return np.zeros_like(xy)
+
+    small = epe(f, wrong, (1024, 1024), tile=128, max_points=100)
+    large = epe(f, wrong, (1024, 1024), tile=128, max_points=10_000_000)
+    assert small["mean_px"] == large["mean_px"]
+    assert small["max_px"] == large["max_px"]
