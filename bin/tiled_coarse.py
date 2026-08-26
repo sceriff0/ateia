@@ -42,7 +42,12 @@ os.environ.setdefault("XDG_CACHE_HOME", "/tmp/xdg_cache")
 sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
 import numpy as np  # noqa: E402
-from coarse_align import estimate_rigid, scale_transform_to_full_res  # noqa: E402
+from coarse_align import (  # noqa: E402
+    FRONTENDS,
+    estimate_affine,
+    estimate_rigid,
+    scale_transform_to_full_res,
+)
 from logger import configure_logging, get_logger  # noqa: E402
 from tile_grid import tile_grid  # noqa: E402
 from tiled_io import (  # noqa: E402
@@ -111,6 +116,15 @@ def main(argv=None) -> int:
     ap.add_argument(
         "--model", default="euclidean", choices=["euclidean", "similarity", "affine"]
     )
+    ap.add_argument(
+        "--frontend",
+        default="orb",
+        choices=list(FRONTENDS),
+        help=(
+            "COARSE global-alignment front-end (default: orb, today's behaviour). "
+            "disk_lightglue needs torch+kornia and runs only in the stare-ml container."
+        ),
+    )
     ap.add_argument("--out-m0", required=True, help="output M0 JSON (+ reference dims)")
     ap.add_argument("--out-tiles", required=True, help="output tile-plan CSV")
     a = ap.parse_args(argv)
@@ -120,7 +134,7 @@ def main(argv=None) -> int:
         f"coarse: start | reference={Path(a.reference).name} "
         f"({_size_gb(a.reference):.2f} GB) moving={Path(a.moving).name} "
         f"({_size_gb(a.moving):.2f} GB) | nuclear_index={a.nuclear_index} model={a.model} "
-        f"max_dim={a.max_dim} tile={a.tile} halo={a.halo}"
+        f"frontend={a.frontend} max_dim={a.max_dim} tile={a.tile} halo={a.halo}"
     )
 
     # Nested acquisition (not two opens then one try/finally) so a failure opening the moving
@@ -157,7 +171,17 @@ def main(argv=None) -> int:
         ref_close()
 
     t0 = time.perf_counter()
-    m0_ds, coarse_tre_ds, n_inliers = estimate_rigid(ref_nuc, mov_nuc, model=a.model)
+    # frontend="orb" (the default) goes through estimate_rigid directly rather than through
+    # estimate_affine's dispatch -- this is the exact pre-existing call, unchanged, so it stays
+    # behaviour-preserving for every run that doesn't opt into a different --frontend.
+    if a.frontend == "orb":
+        m0_ds, coarse_tre_ds, n_inliers = estimate_rigid(ref_nuc, mov_nuc, model=a.model)
+    else:
+        m0_ds, info = estimate_affine(
+            ref_nuc, mov_nuc, frontend=a.frontend, model=a.model
+        )
+        coarse_tre_ds = info["residual_px"]
+        n_inliers = info["n_inliers"]
     logger.info(f"coarse: anchor estimated in {time.perf_counter() - t0:.1f}s")
     # The fit lives in thumbnail pixels; everything downstream (tile plan, per-tile source
     # regions, the stitch) is full-resolution, so lift both the map and its residual here.
@@ -197,7 +221,11 @@ def main(argv=None) -> int:
             f"not recover this. Raise --halo (reg_tiled_halo) or --max-dim "
             f"(reg_tiled_coarse_max_dim, currently decimating 1/{factor})"
         )
-    if n_inliers < 10:
+    # n_inliers == -1 is the keypoint-free front-ends' (e.g. fourier_mellin) sentinel for "not
+    # applicable" -- there is no correspondence set to count inliers from. Guarding with
+    # `0 <=` keeps this warning meaningful only for front-ends that actually report a count;
+    # a hardcoded 0 here used to fire this warning on every fourier_mellin run.
+    if 0 <= n_inliers < 10:
         logger.warning(
             f"coarse: only {n_inliers} inliers support M0 -- treat this slide's anchor as "
             f"unverified (low tissue texture, wrong --nuclear-index, or a failed match)"

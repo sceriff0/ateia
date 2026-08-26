@@ -9,5 +9,6 @@
   { "dir": "segeval",     "tag": "segeval" },
   { "dir": "spatialdata", "tag": "spatialdata" },
   { "dir": "stardist",    "tag": "stardist" },
+  { "dir": "stare-ml",    "tag": "stare-ml" },
   { "dir": "tiled",       "tag": "tiled" }
 ]
