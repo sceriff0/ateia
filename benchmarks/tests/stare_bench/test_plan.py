@@ -85,3 +85,23 @@ def test_rejects_a_correlation_length_on_the_control_grid():
     bad = dict(CONFIG, correlation_px=[float(REG_TILED_TILE)])
     with pytest.raises(ValueError, match="control grid"):
         build_plan(bad)
+
+
+def test_amplitudes_sharing_an_integer_floor_get_distinct_pair_ids():
+    # A bare int() truncation would collapse 12.0 and 12.5 to the same "012"
+    # tag, silently pairing two different conditions to one generated image.
+    cfg = dict(CONFIG, seeds=[1], correlation_px=[333.0],
+               amplitude_px=[12.0, 12.5])
+    plan = build_plan(cfg)
+    ids = {r["pair_id"] for r in plan}
+    assert len(ids) == len(BLANK_FRACTIONS) * 2
+
+
+def test_correlations_sharing_an_integer_floor_get_distinct_pair_ids():
+    # Same truncation hazard on the correlation_px segment, inherited from
+    # the original brief: 333.0 and 333.5 must not collapse to "c333".
+    cfg = dict(CONFIG, seeds=[1], correlation_px=[333.0, 333.5],
+               amplitude_px=[12.0])
+    plan = build_plan(cfg)
+    ids = {r["pair_id"] for r in plan}
+    assert len(ids) == len(BLANK_FRACTIONS) * 2

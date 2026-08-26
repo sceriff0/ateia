@@ -49,8 +49,19 @@ def build_plan(config):
             for corr in config["correlation_px"]:
                 for amplitude in config["amplitude_px"]:
                     for blank in BLANK_FRACTIONS:
+                        # Scale-then-round-then-truncate (mirroring
+                        # blank_fraction's `int(blank * 100)`), NOT a bare
+                        # `int(...)` truncation: a bare int() collapses
+                        # amplitude/correlation values that share an integer
+                        # floor (e.g. 12.0 and 12.5 both -> "012") into one
+                        # pair_id, silently pairing two different conditions
+                        # to the same generated image. x10 preserves one
+                        # decimal place, which is finer than any committed
+                        # value needs.
+                        corr_tag = int(round(corr * 10))
+                        amp_tag = int(round(amplitude * 10))
                         pair_id = (
-                            f"s{seed}_{family}_c{int(corr)}_a{int(amplitude):03d}"
+                            f"s{seed}_{family}_c{corr_tag:05d}_a{amp_tag:04d}"
                             f"_b{int(blank * 100):03d}"
                         )
                         for method in config["methods"]:
