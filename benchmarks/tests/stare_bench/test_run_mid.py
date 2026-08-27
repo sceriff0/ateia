@@ -71,3 +71,72 @@ def test_score_pair_accepts_a_method_argument():
 
     sig = inspect.signature(score_pair)
     assert "method" in sig.parameters
+
+
+def test_the_crop_source_is_read_from_the_config_not_hardcoded():
+    """The runner hardcoded the generated-nuclei source, so the headline
+    numbers -- whose whole justification is that reviewers discount synthetic
+    texture -- would have been measured on generated nuclei.
+
+    Asserts the CALL SITE is gone, not the identifier: the prose above it
+    deliberately still names what it used to do.
+    """
+    text = SCRIPT.read_text()
+    assert "SyntheticCropSource()" not in text
+    assert "from_config" in text
+    assert "crop_source=crop_source" in text
+
+
+def test_the_crop_source_is_validated_once_before_generation():
+    # A seed-selected slide list fails a SCATTERED SUBSET of the plan, not the
+    # run -- so an undersized slide surfaces hundreds of rows deep unless the
+    # whole set is checked upfront.
+    text = SCRIPT.read_text()
+    assert "crop_source.validate(" in text
+    assert text.index("crop_source.validate(") < text.index("generate_pair(\n")
+
+
+def test_the_pipeline_is_invoked_with_an_execution_profile():
+    """`-profile singularity` alone sends every task to the LOCAL executor of
+    whatever node the script runs on -- no SLURM submission, no cluster
+    ceiling -- while still looking like a normal run.
+    """
+    text = SCRIPT.read_text()
+    assert "-profile singularity \\" not in text, "bare singularity profile is back"
+    assert 'NF_PROFILE="${NF_PROFILE:-singularity,slurm,ieo}"' in text
+    assert '-profile "$NF_PROFILE"' in text
+
+
+def test_gate_and_tre_artifacts_are_discovered_and_passed():
+    # Without these the gate ROC -- the benchmark's one genuinely novel metric
+    # -- is None for every row of a mid-rung run, wasting the compute.
+    text = SCRIPT.read_text()
+    assert "find_controls()" in text
+    assert "find_tre()" in text
+    assert "--controls" in text
+    assert "--intrinsic-tre" in text
+    assert "registered/controls" in text
+    assert "qc/registration" in text
+
+
+def test_gate_artifacts_are_looked_up_for_stare_only():
+    """`_accept` is STARE's gate. Handing ASHLAR's row a controls directory
+    would publish STARE's confusion matrix under ashlar's label -- score_pair
+    refuses it, but the runner must not ask in the first place.
+    """
+    text = SCRIPT.read_text()
+    for fn in ("find_controls()", "find_tre()"):
+        body = text.split(fn, 1)[1].split("\n}", 1)[0]
+        assert '"$method" != "tiled"' in body, f"{fn} is not gated on method"
+
+
+def test_the_stale_never_published_claim_is_gone():
+    """The VALIS registrar pickle IS published now (conf/modules.config's
+    third REGISTER publishDir block). The comment claiming otherwise would
+    send the next reader to "fix" a glob that already works -- and the
+    obvious fix, anchoring on registered/, is NARROWER than the real
+    two-level-deeper published path.
+    """
+    text = SCRIPT.read_text()
+    assert "EXPECTED to find nothing today" not in text
+    assert "registered/transform/preprocessed/data" in text

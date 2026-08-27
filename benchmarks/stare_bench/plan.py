@@ -29,7 +29,7 @@ from pathlib import Path
 
 from .fields import make_field
 
-__all__ = ["BLANK_FRACTIONS", "build_plan", "write_plan"]
+__all__ = ["BLANK_FRACTIONS", "build_plan", "write_plan", "main"]
 
 BLANK_FRACTIONS = tuple(round(i / 10.0, 2) for i in range(11))
 
@@ -120,3 +120,47 @@ def write_plan(records, path):
         for r in records:
             writer.writerow({k: json.dumps(v) if isinstance(v, list) else v
                              for k, v in r.items()})
+
+
+def main(argv=None):
+    """Write the committed plan CSV that ``run_mid.sh`` takes as argument 1.
+
+    Deliberately thin: it reads the committed YAML, calls ``build_plan``, and
+    writes. Every decision that could bias the experiment already lives in
+    ``benchmarks/configs/synthetic_gt.yaml`` and in ``build_plan`` -- this
+    exposes no flag that could change the sweep, because a plan you can retune
+    from the command line is a plan whose test-set discipline is decorative.
+    (``_validate_fields_are_independent`` still runs inside ``build_plan``, so
+    a rigged sweep fails here rather than reading as validated.)
+    """
+    import argparse
+
+    import yaml
+
+    ap = argparse.ArgumentParser(
+        description="Write the synthetic ground-truth benchmark plan CSV.",
+    )
+    ap.add_argument("--config", required=True,
+                    help="the committed plan, e.g. benchmarks/configs/synthetic_gt.yaml")
+    ap.add_argument("--out", required=True, help="destination plan CSV")
+    a = ap.parse_args(argv)
+
+    config = yaml.safe_load(Path(a.config).read_text())
+    records = build_plan(config)
+    write_plan(records, a.out)
+
+    # Report the shape, not just the count: the count alone cannot tell a
+    # 528-row full plan from a 528-row plan that lost an axis and gained a
+    # seed. Both numbers are checked against the config by run_mid.sh's
+    # operator, not by this script.
+    pairs = len({r["pair_id"] for r in records})
+    methods = sorted({r["method"] for r in records})
+    print(
+        f"wrote {len(records)} records to {a.out} "
+        f"({pairs} unique pairs x {len(methods)} methods: {', '.join(methods)})"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

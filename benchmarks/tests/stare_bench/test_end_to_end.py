@@ -360,3 +360,102 @@ def test_the_brief_s_original_line_fails_the_ground_truth_check(tmp_path):
     # is exactly the garbage-but-plausible-looking column this task exists to
     # prevent from shipping.
     assert summary["mean_px"] > 1.0
+
+
+def _publish_controls(work_dir, dest):
+    """Re-stage run_stare's control JSONs under the PIPELINE's own filenames.
+
+    ``run_unit.run_stare`` writes ``c_{ix}_{iy}.json``; the real pipeline's
+    ``TILED_REG_TILE`` writes ``{patient}_{channels}_{ix}_{iy}_ctrl.json`` and
+    publishes it to ``<outdir>/<pid>/registered/controls``. The CONTENTS are
+    identical -- both are ``bin/tiled_reg_tile.py --out`` -- so renaming is a
+    faithful stand-in for a published tree, and using the pipeline's naming
+    (not run_stare's) is what makes this fixture able to catch a glob written
+    against the wrong pattern.
+    """
+    dest.mkdir(parents=True, exist_ok=True)
+    for src in sorted((work_dir / "controls").glob("c_*.json")):
+        _, ix, iy = src.stem.split("_")
+        (dest / f"pair_DAPI_{ix}_{iy}_ctrl.json").write_text(src.read_text())
+    return dest
+
+
+def test_published_controls_reproduce_the_in_process_gate_exactly(tmp_path):
+    """The gap this closes: a mid-rung run scored from a published transform
+    had NO gate ROC, and the gate ROC is the benchmark's one novel metric.
+
+    Scoring the same pair twice -- once through the in-process ``run_stare``
+    driver, once from that run's manifest PLUS its control JSONs re-staged
+    under the pipeline's published filenames -- must give the identical
+    confusion matrix. Anything else means the readback reconstructs a
+    different decision than the one the pipeline made.
+
+    Both halves are asserted non-None first. Without that, the equality is
+    vacuously satisfied by ``None == None`` -- which is exactly the state
+    this test exists to prove we left.
+    """
+    pair = tmp_path / "pair"
+    generate_pair(pair, (1024, 1024), seed=71, tile=256,
+                  crop_source=SyntheticCropSource(),
+                  field_params={"correlation_px": 333.0, "amplitude_px": 6.0},
+                  physics_params={"blank_regions": {"fraction": 0.4}})
+
+    work = tmp_path / "work"
+    in_process = score_pair(pair, work, method="tiled", run_id="unit",
+                            tile=256, halo=64, upsample=10, max_error=0.99)
+
+    published = _publish_controls(work, tmp_path / "controls")
+    from_published = score_pair(
+        pair, tmp_path / "work2", method="tiled", run_id="unit",
+        tile=256, halo=64, upsample=10, max_error=0.99,
+        transform_path=str(work / "manifest.json"),
+        controls_path=str(published),
+    )
+
+    gate_cols = ["gate_tp", "gate_fp", "gate_tn", "gate_fn",
+                 "gate_precision", "gate_recall", "gate_f1", "gate_auc"]
+    for col in gate_cols:
+        assert in_process[col] is not None, f"{col} unmeasured in-process"
+        assert from_published[col] is not None, f"{col} unmeasured from disk"
+    for col in gate_cols:
+        assert from_published[col] == in_process[col], col
+
+
+def test_controls_are_refused_for_a_non_stare_backend(tmp_path):
+    """``_accept`` is STARE's gate. Reporting it on an ASHLAR row would put
+    STARE's confusion matrix under ashlar's label -- the same class of
+    fabrication as re-running STARE and calling the result VALIS.
+    """
+    pair = tmp_path / "pair"
+    generate_pair(pair, (1024, 1024), seed=72, tile=256,
+                  crop_source=SyntheticCropSource(), physics_params={})
+    manifest = _write_stub_manifest(tmp_path / "manifest.json", dx=1.0, dy=1.0)
+    controls = tmp_path / "controls"
+    controls.mkdir()
+    (controls / "pair_DAPI_0_0_ctrl.json").write_text(
+        json.dumps({"ix": 0, "iy": 0, "dx": 0, "dy": 0, "error": 0.01}))
+
+    with pytest.raises(ValueError, match="STARE"):
+        score_pair(pair, tmp_path / "work", method="ashlar", run_id="unit",
+                   tile=256, halo=64, upsample=10, max_error=0.99,
+                   transform_path=str(manifest), controls_path=str(controls))
+
+
+def test_an_empty_controls_directory_raises_rather_than_scoring_zero(tmp_path):
+    """An empty control set must be an error, not a confusion matrix of
+    zeros. ``gate_roc``/``gate_auc`` accept empty mappings happily and return
+    ``gate_recall = 0.0`` / ``gate_auc = 0.5``: confident, plausible, and
+    measured on nothing. A controls directory that globs to nothing is how a
+    wrong published path would otherwise become data.
+    """
+    pair = tmp_path / "pair"
+    generate_pair(pair, (1024, 1024), seed=73, tile=256,
+                  crop_source=SyntheticCropSource(), physics_params={})
+    manifest = _write_stub_manifest(tmp_path / "manifest.json", dx=1.0, dy=1.0)
+    empty = tmp_path / "controls"
+    empty.mkdir()
+
+    with pytest.raises(ValueError, match="no \\*_ctrl.json"):
+        score_pair(pair, tmp_path / "work", method="tiled", run_id="unit",
+                   tile=256, halo=64, upsample=10, max_error=0.99,
+                   transform_path=str(manifest), controls_path=str(empty))

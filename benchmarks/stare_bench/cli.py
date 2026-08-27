@@ -132,8 +132,74 @@ def _predict_from_valis_pickle(transform_path):
     return predict
 
 
+def _gate_data_from_controls(controls_path, max_error, max_disp):
+    """Rebuild ``(accepted, scores)`` from the pipeline's published control JSONs.
+
+    ``TILED_REG_TILE`` publishes its per-tile ``*_ctrl.json`` to
+    ``<outdir>/<pid>/registered/controls`` (``conf/modules.config``). Those are
+    byte-for-byte the same documents ``run_unit.run_stare`` writes -- both are
+    ``bin/tiled_reg_tile.py --out`` -- so the gate decision is reconstructed
+    through the pipeline's OWN ``_accept`` via ``_reconstruct_accept``, never a
+    local re-implementation that could drift from it.
+
+    WHY THIS IS SOUND, and the one way it could stop being. ``_accept`` reads
+    exactly two thresholds, and both must equal what the run used:
+
+    * ``max_error`` <- ``params.reg_tiled_max_error`` (0.99), matching this
+      module's ``--max-error`` default;
+    * ``max_disp``  <- ``params.reg_tiled_max_disp`` or, when null (the
+      default), ``reg_tiled_halo`` -- 256 at ``--reg_tiled_mode high``,
+      matching this module's ``--halo`` default.
+
+    ``--gate-tre`` is NOT one of them: it gates mesh REFINEMENT inside
+    ``tiled_solve``, not control-point admission, so it has no bearing here.
+    The manifest records none of these, so nothing downstream can cross-check
+    them -- a caller that registers at one ``--reg_tiled_mode`` and scores at a
+    different ``--halo`` would silently measure a gate decision the pipeline
+    never made. ``run_mid.sh`` therefore sets the pipeline mode and these two
+    values from one place.
+
+    An empty directory RAISES rather than returning empty mappings: empty
+    mappings are what ``score_pair`` refuses to route through ``gate_roc``,
+    because they come back as a fabricated ``gate_recall = 0.0`` and
+    ``gate_auc = 0.5``.
+    """
+    controls_path = Path(controls_path)
+    paths = (sorted(controls_path.glob("*_ctrl.json"))
+             if controls_path.is_dir() else [controls_path])
+    if not paths:
+        raise ValueError(
+            f"--controls {controls_path} contains no *_ctrl.json. Gate ROC "
+            "cannot be measured from an empty control set, and must be absent "
+            "rather than computed from nothing."
+        )
+
+    accepted, scores = {}, {}
+    for q in paths:
+        c = json.loads(q.read_text())
+        key = (int(c["ix"]), int(c["iy"]))
+        scores[key] = float(c.get("error", float("nan")))
+        accepted[key] = _reconstruct_accept(c, max_error, max_disp)
+    return accepted, scores
+
+
+def _read_intrinsic(tre_json_path):
+    """STARE's self-reported rigid TRE median, from a published ``*_tre.json``.
+
+    Circular by construction -- built from the same phase correlations the
+    registration optimises -- which is why ``emit.accuracy_row`` admits it only
+    under the ``diag_`` prefix and ``FORBIDDEN_IN_ACCURACY`` refuses every other
+    spelling of it. Read here purely so the column carries the value the run
+    actually produced instead of ``None``.
+    """
+    doc = json.loads(Path(tre_json_path).read_text())
+    block = doc.get("rigid_tre_px")
+    return block.get("p50") if isinstance(block, dict) else None
+
+
 def score_pair(pair_dir, work_dir, *, method, run_id, tile, halo, upsample,
-               max_error, transform_path=None):
+               max_error, transform_path=None, controls_path=None,
+               intrinsic_tre_path=None):
     """Register one pair and reduce it to a single accuracy row.
 
     ``transform_path`` is the ALREADY-PRODUCED transform from a real pipeline
@@ -154,29 +220,26 @@ def score_pair(pair_dir, work_dir, *, method, run_id, tile, halo, upsample,
     STARE wearing another method's label -- the exact fabrication this
     parameter exists to make structurally impossible.
 
-    Gate-ROC and STARE's own intrinsic TRE (``accepted``/``scores``/
-    ``intrinsic``) come from ``run_stare``'s per-tile control-point JSONs,
-    which are intermediate-only in the real pipeline (never published --
-    ``TILED_REG_TILE``'s ``publishDir`` is explicitly disabled, and the
-    published manifest carries only the solved M0 + mesh, not per-tile
-    accept/reject decisions). So when a ``transform_path`` is given, this
-    passes ``gate_stats=None``/``gate_auc_value=None`` to ``accuracy_row``
-    rather than calling ``gate_roc``/``gate_auc`` on the empty ``accepted``/
-    ``scores`` mappings -- those functions do not error and do not come back
-    empty on real labels: ``gate_recall`` lands on a literal ``0.0`` (every
-    truly-registrable tile scores as a false negative) and ``gate_auc`` on a
-    literal ``0.5`` (its own documented tie-broken value for an
-    uninformative constant score), two fabricated, plausible-looking
-    numbers for a metric that was never actually measured. ``accuracy_row``
-    writes ``None`` into every ``gate_*`` column for exactly this case.
-    Likewise ``intrinsic`` stays ``None`` -- there is no ``*_tre.json`` to
-    read outside the ``run_stare`` branch either.
+    ``controls_path`` and ``intrinsic_tre_path`` are the pipeline's published
+    per-tile control JSONs (``<outdir>/<pid>/registered/controls``) and STARE's
+    ``*_tre.json`` (``<outdir>/<pid>/qc/registration``). Both were once
+    unavailable on this branch -- ``TILED_REG_TILE`` published nothing and the
+    manifest carries only the solved M0 + mesh, not per-tile accept/reject
+    decisions -- so a ``transform_path`` score had no gate data at all. Both
+    are published as of ``benchmarking``'s merge of ``feat/stare-ultimate``,
+    and reading them is what lets the gate ROC, the benchmark's one genuinely
+    novel metric, be measured on a real pipeline run rather than only under
+    the in-process ``run_stare`` driver.
 
-    A pipeline change publishing the per-tile control-point JSONs (the data
-    this gap is missing) has landed on ``feat/stare-ultimate`` (commit
-    ``6823d4b``, at ``<outdir>/<pid>/registered/controls/*_ctrl.json``); once
-    that reaches ``benchmarking``, this path can read them and stop passing
-    ``None`` for the gate columns. Tracked here so the gap isn't forgotten.
+    They stay OPTIONAL, and omitting them still yields ``None`` columns rather
+    than zeros. That asymmetry is the point: ``gate_roc``/``gate_auc`` do not
+    error and do not come back empty when handed empty ``accepted``/``scores``
+    mappings -- ``gate_recall`` lands on a literal ``0.0`` (every
+    truly-registrable tile scored as a false negative) and ``gate_auc`` on a
+    literal ``0.5`` (its documented tie-broken value for an uninformative
+    constant score). Two fabricated, plausible-looking numbers for a metric
+    nobody measured. So the mappings are populated or the columns are absent;
+    there is no path between the two.
     """
     pair_dir = Path(pair_dir)
     truth = json.loads((pair_dir / "truth.json").read_text())
@@ -232,6 +295,20 @@ def score_pair(pair_dir, work_dir, *, method, run_id, tile, halo, upsample,
             intrinsic = block.get("p50") if isinstance(block, dict) else None
     elif method in ("tiled", "ashlar"):
         predict = predict_from_manifest(transform_path)
+        if controls_path is not None:
+            if method != "tiled":
+                raise ValueError(
+                    f"score_pair(method={method!r}) was given controls_path: "
+                    "the accept/reject gate reconstructed from *_ctrl.json is "
+                    "bin/tiled_solve.py's, i.e. STARE's own. Scoring it under "
+                    "another backend's label would report STARE's gate ROC as "
+                    f"{method}'s. Only method='tiled' has this data."
+                )
+            accepted, scores = _gate_data_from_controls(
+                controls_path, max_error, halo)
+            have_gate_data = True
+        if intrinsic_tre_path is not None:
+            intrinsic = _read_intrinsic(intrinsic_tre_path)
     elif method == "valis":
         predict = _predict_from_valis_pickle(transform_path)
     else:
@@ -268,12 +345,22 @@ def main(argv=None):
                          "VALIS registrar pickle (--method valis). Omit only for "
                          "--method tiled, which then falls back to the in-process "
                          "run_stare driver the unit rung uses.")
+    ap.add_argument("--controls", default=None,
+                    help="directory of the pipeline's published per-tile "
+                         "*_ctrl.json (--method tiled only). Supplies the "
+                         "gate-ROC columns; without it they are None, never 0.")
+    ap.add_argument("--intrinsic-tre", default=None,
+                    help="the run's published *_tre.json. Supplies the "
+                         "diag_ intrinsic-TRE column -- a self-reported, "
+                         "circular convergence signal, never accuracy.")
     ap.add_argument("--out", required=True)
     a = ap.parse_args(argv)
 
     row = score_pair(a.pair_dir, a.work_dir, method=a.method, run_id=a.run_id,
                      tile=a.tile, halo=a.halo, upsample=a.upsample,
-                     max_error=a.max_error, transform_path=a.transform)
+                     max_error=a.max_error, transform_path=a.transform,
+                     controls_path=a.controls,
+                     intrinsic_tre_path=a.intrinsic_tre)
     write_accuracy_csv([row], a.out)
     print(f"Wrote {a.out}")
     return 0

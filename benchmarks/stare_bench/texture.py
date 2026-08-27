@@ -12,10 +12,12 @@ Every source is deterministic under its seed; nothing here reads the clock.
 from __future__ import annotations
 
 import abc
+from pathlib import Path
 
 import numpy as np
 
-__all__ = ["CropSource", "TiffCropSource", "SyntheticCropSource", "describe"]
+__all__ = ["CropSource", "TiffCropSource", "SyntheticCropSource", "describe",
+           "from_config"]
 
 
 class CropSource(abc.ABC):
@@ -29,6 +31,21 @@ class CropSource(abc.ABC):
     @abc.abstractmethod
     def kind(self):
         """Short provenance label written into truth.json."""
+
+    def validate(self, size):
+        """Raise if any crop this source can produce at ``size`` would fail.
+
+        Called ONCE, before the first pair is generated, so a source that
+        cannot serve the committed ``size`` fails in seconds rather than
+        partway through a multi-day sweep. This matters more than it looks:
+        ``TiffCropSource`` picks its slide FROM THE SEED, so one undersized or
+        missing slide in a list of five does not fail every pair -- it fails
+        roughly one in five, scattered through the plan, hundreds of rows
+        after the run started. Cheap upfront, unrecoverable late.
+
+        The default is a no-op: a generated source has nothing to check.
+        """
+        return None
 
 
 class SyntheticCropSource(CropSource):
@@ -89,6 +106,46 @@ class TiffCropSource(CropSource):
         self.paths = [str(p) for p in paths]
         self.channel = int(channel)
 
+        # Existence is checked HERE, not at first crop, for the reason
+        # `validate` documents: the seed selects the slide, so a missing path
+        # fails a seed-dependent SUBSET of the plan rather than the whole run.
+        missing = [q for q in self.paths if not Path(q).is_file()]
+        if missing:
+            raise FileNotFoundError(
+                "TiffCropSource: slide path(s) do not exist: "
+                + ", ".join(missing)
+            )
+
+    def validate(self, size):
+        """Confirm every slide can serve a ``size`` crop, reading only headers.
+
+        ``tifffile``'s series shape comes from the IFDs, so this never decodes
+        pixels -- checking five gigapixel slides costs milliseconds, while
+        ``crop`` itself calls ``asarray()`` and materialises a whole slide.
+        """
+        import tifffile
+
+        h, w = int(size[0]), int(size[1])
+        problems = []
+        for q in self.paths:
+            with tifffile.TiffFile(q) as tf:
+                shape = tf.series[0].shape
+            spatial = shape[-2:]
+            if len(shape) >= 3 and self.channel >= shape[0]:
+                problems.append(
+                    f"{q}: channel {self.channel} out of range for shape {shape}"
+                )
+            elif spatial[0] < h or spatial[1] < w:
+                problems.append(
+                    f"{q}: {spatial[0]}x{spatial[1]} is smaller than the "
+                    f"requested {h}x{w}"
+                )
+        if problems:
+            raise ValueError(
+                "TiffCropSource cannot serve the committed size:\n  "
+                + "\n  ".join(problems)
+            )
+
     def crop(self, size, seed):
         import tifffile  # lazy: the synthetic path must not require tifffile
 
@@ -124,3 +181,74 @@ def describe(source):
         meta["channel"] = source.channel
         meta["paths"] = list(source.paths)
     return meta
+
+
+def from_config(config):
+    """Build the ``CropSource`` the committed config names.
+
+    THE ONE RULE HERE: an ``institutional`` request that cannot be satisfied
+    RAISES. It never degrades to ``SyntheticCropSource``. A silent fallback
+    would publish headline numbers measured on generated nuclei under a label
+    claiming real tissue -- the exact "runs, passes, reports a plausible value
+    that is not true" shape FROZEN.md's closing rule is about. The fallback
+    direction that IS safe is the absent block: no ``crop_source:`` at all
+    means synthetic, so the unit rung and CI stay hermetic without naming it.
+
+    ``paths`` entries may be glob patterns. They are expanded and sorted, and
+    the RESOLVED list is what ``TiffCropSource`` stores -- so ``describe()``
+    writes the actual slides into ``truth.json`` and ``generate.param_hash``
+    hashes them. Adding a slide to a globbed directory therefore changes the
+    hash rather than silently changing the experiment. A pattern matching
+    nothing raises: an empty expansion is how a typo'd cluster path turns into
+    "no slides", and ``TiffCropSource`` would report that as the wrong error.
+    """
+    block = (config or {}).get("crop_source") or {}
+    kind = str(block.get("kind", "synthetic")).strip().lower()
+
+    if kind == "synthetic":
+        kwargs = {k: float(block[k]) for k in ("nuclei_per_mm2", "pixel_size_um")
+                  if k in block}
+        return SyntheticCropSource(**kwargs)
+
+    if kind == "institutional":
+        patterns = block.get("paths") or []
+        if isinstance(patterns, str):
+            patterns = [patterns]
+        if not patterns:
+            raise ValueError(
+                "crop_source.kind is 'institutional' but no paths are listed. "
+                "Refusing to fall back to synthetic texture: the headline "
+                "result would then be measured on generated nuclei while "
+                "claiming to be institutional."
+            )
+
+        # glob.glob, not Path.glob: cluster slide paths are absolute
+        # (/hpcnfs/...), and Path().glob() rejects an absolute pattern outright
+        # rather than expanding it.
+        import glob as _glob
+
+        resolved, empty = [], []
+        for pattern in patterns:
+            pattern = str(pattern)
+            if any(ch in pattern for ch in "*?["):
+                hits = sorted(_glob.glob(pattern))
+                if not hits:
+                    empty.append(pattern)
+                resolved.extend(hits)
+            else:
+                resolved.append(pattern)
+        if empty:
+            raise ValueError(
+                "crop_source.paths pattern(s) matched no files: "
+                + ", ".join(empty)
+            )
+
+        # Sorted + de-duplicated so two configs listing the same slides in a
+        # different order hash identically -- the crop set is a SET, and
+        # param_hash must not depend on how it was typed.
+        resolved = sorted(dict.fromkeys(resolved))
+        return TiffCropSource(resolved, channel=int(block.get("channel", 0)))
+
+    raise ValueError(
+        f"crop_source.kind={kind!r} is not one of 'synthetic', 'institutional'"
+    )

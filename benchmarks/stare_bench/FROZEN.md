@@ -4,12 +4,70 @@ This is the freeze record: it fixes what the measuring instrument **IS**, so
 results measured with it later can be compared to each other. It does not
 report benchmark results — see the PENDING section, which is not a formality.
 
+## Amendment, 2026-08-27 — before the first run
+
+Four changes were made to take this from "built" to "runnable". All four are
+recorded here because this document is the tracked, self-contained summary, and
+a frozen record that quietly stops matching the code is worse than no record.
+
+1. **`size` trimmed, `[20480, 20480]` → `[10240, 10240]`.** A deliberate cost
+   trim, taken BEFORE any result was seen — which is the only time
+   `plan.py`'s test-set discipline permits it. A quarter of the pixels: ~111 GB
+   of pair images across the 132 pairs instead of ~443 GB, and ~4x less
+   registration compute. **No experimental axis was touched** — seeds,
+   families, correlation lengths, amplitudes, blank fractions and methods are
+   all exactly as committed, so the record count is still 528 over 132 pairs.
+   Size is a scale parameter, not something the methods are compared across.
+
+   It does **not** weaken the ≤8 GB claim: STARE's peak RSS is bounded by the
+   per-tile read window (2560² at `reg_tiled_mode=high`), not by the slide.
+   Fewer tasks, not smaller ones. It does mean 25 STARE tiles per pair instead
+   of 100, so the gate ROC is built from ~3,300 per-tile decisions rather than
+   ~13,200. Both committed correlation lengths still clear
+   `fields.make_field`'s derived-pitch firewall at this size — verified by
+   running it, not assumed.
+
+2. **`plan.py` gained a `__main__`.** `run_mid.sh` takes a plan CSV as its
+   first argument and nothing could write one; the first step of the documented
+   workflow had no way to be performed. The entry point is deliberately thin
+   and exposes no flag that could reshape the sweep.
+
+3. **The crop source is now selectable** (`crop_source:` in
+   `synthetic_gt.yaml`), and the committed value is `institutional`.
+   `run_mid.sh` previously hardcoded the generated-nuclei source, so the
+   headline numbers — whose entire justification is that reviewers discount
+   synthetic texture — would have been measured on synthetic texture.
+   `texture.from_config` REFUSES an institutional block it cannot satisfy
+   rather than degrading to synthetic; the releasable result is produced by
+   re-running with `kind: synthetic`, which is what keeps this document's
+   two-result promise honest.
+
+4. **Gate ROC is measured on real pipeline runs.** `TILED_REG_TILE`'s per-tile
+   `*_ctrl.json` and `TILED_SOLVE`'s `*_tre.json` are both published on this
+   branch; `score_pair` now reads them back through `--controls` /
+   `--intrinsic-tre`. Before this, every mid-rung row's gate columns were
+   `None` — the benchmark's one genuinely novel metric, absent from the run
+   that was supposed to produce it. Both arguments stay optional and still
+   yield `None`, never `0.0`/`0.5`, when the data is absent.
+
+Also corrected: `run_mid.sh`'s comment asserting the VALIS registrar pickle is
+never published. It IS published (`conf/modules.config`'s third `REGISTER`
+publishDir block), two directory levels deeper than a naive glob would look.
+The discovery globs were always broad enough and were verified against the real
+published layout; only the prose was wrong.
+
+Additionally, `run_mid.sh` now passes an execution profile
+(`NF_PROFILE`, default `singularity,slurm,ieo`). It previously ran
+`-profile singularity` alone, which on a cluster sends every task to the local
+executor of the submitting node — no SLURM, no resource ceiling — while looking
+like a normal run.
+
 ## Status at a glance
 
 | | |
 |---|---|
 | **FROZEN** (built, reviewed, tests green) | generator (`fields.py`, `physics.py`, `texture.py`, `generate.py`, `labels.py`), metrics (`epe`, `gate_roc`/`gate_auc`, `field_quality`, `cost`), the unit-rung driver (`run_unit.py`), the committed experiment plan (`plan.py` + `benchmarks/configs/synthetic_gt.yaml`), the mid-rung runner (`run_mid.sh`) |
-| **PENDING** (NOT run — no cluster, no pulled images in this environment) | the mid rung (20480² x 528 rows), the gigapixel rung, ANY competitor score (VALIS, ASHLAR), the ≤8 GB peak-RSS claim |
+| **PENDING** (NOT run — no cluster, no pulled images in this environment) | the mid rung (10240² x 528 rows), the gigapixel rung, ANY competitor score (VALIS, ASHLAR), the ≤8 GB peak-RSS claim |
 
 **The single most important fact in this document: no sweep has executed.**
 Every number in Section 1 comes from unit-scale pins, deliberate-failure
@@ -47,7 +105,7 @@ and `benchmarks/configs/synthetic_gt.yaml`.
 | correlation lengths (px) | `[333.0, 777.0]` |
 | amplitudes (px) | `[12.0, 48.0]` |
 | blank fractions | `0.00, 0.10, 0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80, 0.90, 1.00` (11 points) |
-| size (mid rung) | `[20480, 20480]` |
+| size (mid rung) | `[10240, 10240]` — **amended 2026-08-27**, see below |
 | methods | `[tiled, valis, ashlar, identity]` |
 
 - **Total records:** 528 = 3 seeds x 1 family x 2 correlation x 2 amplitude x

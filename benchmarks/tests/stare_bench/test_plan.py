@@ -125,3 +125,49 @@ def test_correlations_sharing_an_integer_floor_get_distinct_pair_ids():
     plan = build_plan(cfg)
     ids = {r["pair_id"] for r in plan}
     assert len(ids) == len(BLANK_FRACTIONS) * 2
+
+
+def test_the_plan_cli_writes_the_committed_csv(tmp_path):
+    """run_mid.sh takes a plan CSV as argument 1, and until this entry point
+    existed there was NO command that produced one -- the first step of the
+    documented workflow could not be performed.
+    """
+    import csv
+
+    import yaml
+
+    from benchmarks.stare_bench.plan import main
+
+    cfg = tmp_path / "cfg.yaml"
+    cfg.write_text(yaml.safe_dump(CONFIG))
+    out = tmp_path / "plan.csv"
+
+    assert main(["--config", str(cfg), "--out", str(out)]) == 0
+    with out.open() as fh:
+        rows = list(csv.DictReader(fh))
+
+    assert len(rows) == len(build_plan(CONFIG))
+    assert len({r["pair_id"] for r in rows}) == len(rows) // len(CONFIG["methods"])
+    # `size` must survive the CSV round-trip as JSON, not as Python repr --
+    # run_mid.sh reads it back with json.loads.
+    import json
+    assert json.loads(rows[0]["size"]) == CONFIG["size"]
+
+
+def test_the_committed_config_yields_the_frozen_plan_shape():
+    """528 records over 132 unique pairs, the number FROZEN.md commits to.
+
+    Reads the REAL committed config, so an edit to synthetic_gt.yaml that
+    changes the sweep has to change this number too -- deliberately, not by
+    noticing later that a run cost twice what was budgeted.
+    """
+    from pathlib import Path
+
+    import yaml
+
+    config = yaml.safe_load(
+        (Path(__file__).resolve().parents[2] / "configs" / "synthetic_gt.yaml").read_text()
+    )
+    plan = build_plan(config)
+    assert len(plan) == 528
+    assert len({r["pair_id"] for r in plan}) == 132

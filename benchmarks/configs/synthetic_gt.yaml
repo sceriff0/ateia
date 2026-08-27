@@ -24,7 +24,55 @@ correlation_px: [333.0, 777.0]
 # above it. Both are reported, not tuned away.
 amplitude_px: [12.0, 48.0]
 
-size: [20480, 20480]
+# SIZE -- trimmed from 20480 before the first run, deliberately and on the
+# record (plan.py's test-set discipline: trim BEFORE seeing results, never
+# after). 10240^2 is a quarter of the pixels: ~111 GB of pair images across the
+# 132 pairs instead of ~443 GB, and ~4x less registration compute, at NO cost
+# to any experimental axis -- size is a scale parameter, not something the
+# methods are compared across, and every method still sees identical pixels.
+#
+# What it does NOT weaken: the <=8 GB-per-process claim. STARE's peak RSS is
+# bounded by the per-tile READ WINDOW (tile + 2*halo = 2560^2 at
+# reg_tiled_mode=high), not by the slide -- that is the entire point of the
+# fan-out, and conf/modules.config's TILED_REG_TILE memory closure derives its
+# request from the window for exactly this reason. A smaller slide means fewer
+# tasks, not smaller ones.
+#
+# What it does cost: 25 STARE tiles per pair instead of 100, so the gate ROC is
+# built from 3,300 per-tile decisions across the sweep rather than 13,200.
+# Still ample for the 11-point blanking sweep this axis exists to resolve.
+#
+# Both committed correlation lengths (333, 777) still pass fields.make_field's
+# derived-pitch firewall at this size -- verified, not assumed. FROZEN.md
+# records 20480^2; this is a documented deviation from it, not a silent one.
+size: [10240, 10240]
+
+# WHERE THE REFERENCE TEXTURE COMES FROM -- see benchmarks/stare_bench/texture.py.
+#
+# `institutional` is the HEADLINE source: real DAPI crops, which is the whole
+# reason the design interview chose them (reviewers discount synthetic texture).
+# `synthetic` is the RELEASABLE seed set -- generated nuclei, reproducible from a
+# committed command by anyone. FROZEN.md promises BOTH results, so this benchmark
+# is run twice: once as committed here, once with `kind: synthetic`.
+#
+# There is no silent fallback between them. texture.from_config REFUSES an
+# `institutional` block it cannot satisfy rather than degrading to synthetic,
+# because a headline number measured on generated nuclei under a real-tissue
+# label is precisely the "runs, passes, reports a plausible value that is not
+# true" failure this instrument was built to make impossible.
+#
+# Provenance is automatic: texture.describe() writes the RESOLVED slide list
+# into truth.json, and generate.param_hash hashes it -- so changing the slide
+# set changes the hash rather than quietly changing the experiment.
+#
+# paths: absolute paths and/or globs. Each slide must be at least `size` in its
+# own frame; run_mid.sh calls crop_source.validate(size) once, before the first
+# pair, reading only TIFF headers -- one undersized slide otherwise fails a
+# seed-dependent SUBSET of the plan, scattered hundreds of rows in.
+crop_source:
+  kind: institutional
+  channel: 0
+  paths: []
 
 # Physics held fixed across the blanking sweep so blanking is the only variable.
 physics:
