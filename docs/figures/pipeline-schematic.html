@@ -336,8 +336,9 @@
           <div class="mod"><div class="n">TILE_FOR_BASIC → BASICPY → APPLY_PROFILES <span class="tag">opt</span></div>
             <div class="x">BaSiC illumination correction, as <b>three</b> processes rather than one, because nf-core's
               <b>BASICPY</b> computes flatfield/darkfield <i>profiles only</i> — mcmicro applies them downstream inside
-              ASHLAR, which mirage does not have — and refuses a single-sited image, which every stitched mirage slide
-              is. <b>TILE_FOR_BASIC</b> writes the non-overlapping pseudo-FOV grid onto the Z axis so the module sees one
+              ASHLAR's mosaic step, which mirage has no counterpart for even on its ashlar backend, since that drives
+              ashlar's aligners directly for the transform and writes no mosaic — and refuses a single-sited image,
+              which every stitched mirage slide is. <b>TILE_FOR_BASIC</b> writes the non-overlapping pseudo-FOV grid onto the Z axis so the module sees one
               site per tile, and decides the fiducial skip once; <b>APPLY_PROFILES</b> does the division/subtraction and
               reassembles the slide. It runs at nf-core's <i>upstream</i> defaults, so no darkfield is estimated. The
               nuclear/fiducial channels are left uncorrected by default: they drive both
@@ -360,18 +361,37 @@
         <div class="body">
           <div class="mod"><div class="n">group by patient</div>
             <div class="x">Patients whose only slide is the reference bypass the backend entirely (a lone image
-              has no transform to solve) and pass through unregistered.</div>
-            <div class="pp"><span>allow_auto_reference <b>false</b></span></div></div>
+              has no transform to solve) and pass through unregistered. The reference is resolved ONCE, at
+              samplesheet read, and must be <b>declared</b>: a patient with no <code>is_reference=true</code> row
+              is an error. Nothing is promoted in its place — the reference is the slide every other slide is
+              warped onto, so row order may not decide it.</div></div>
           <div class="grp">
             <div class="bh">fork — registration_method</div>
             <div class="opt"><div class="oh"><span>valis → REGISTER</span><span class="tag-def">default</span></div>
               <div class="ox">Feature-based rigid + non-rigid warp (JVM/Bio-Formats), resolving all slides into a
-                shared space. Micro-registration at maximum depth by default.</div>
-              <div class="pp" style="margin-top:6px"><span>memory_mode <b>high</b></span><span>micro_reg <b>2</b></span><span>max_dim <b>4000</b></span></div></div>
+                shared space. Micro-registration at maximum depth by default. <b>Tiered</b> like STARE and with the
+                same four-word vocabulary — <code>high | medium | low | custom</code> — where <code>custom</code>
+                means "start from high, apply whichever knobs you overrode"; a per-knob override under any other
+                tier is refused, so a run cannot report a tier it is not using. VALIS's table lives in
+                <code>bin/utils/valis_config.py</code> rather than <code>lib/RegPresets.groovy</code> because its
+                rows hold Python objects (feature detector, matcher), not integers.</div>
+              <div class="pp" style="margin-top:6px"><span>memory_mode <b>high</b></span><span>proc_dim <b>2048</b></span><span>nonrigid_dim <b>4096</b></span><span>micro_reg <b>2</b></span><span>max_dim <b>4000</b></span></div></div>
             <div class="opt"><div class="oh"><span>tiled → STARE</span><span class="tag-alt">method=tiled</span></div>
               <div class="ox">JVM-free tiled rigid + mesh warp into the reference's shape; fiducial = channel 0.
-                Laptop-viable. Step 2 fans out to one task per tile — the only shape it has.</div>
-              <div class="pp" style="margin-top:6px"><span>tile <b>2048</b></span><span>halo <b>256</b></span><span>gate_tre <b>1.0</b></span><span>coarse_max_dim <b>4096</b></span></div></div>
+                Laptop-viable. Step 2 fans out to one task per tile — the only shape it has. Its geometry knobs are
+                <b>tier-owned</b>: each is declared <code>null</code> and resolved at runtime from
+                <code>reg_tiled_mode</code>'s row, because Nextflow evaluates the <code>params{}</code> block
+                <i>before</i> merging CLI arguments, so a preset lookup written there could never see
+                <code>--reg_tiled_mode low</code>.</div>
+              <div class="pp" style="margin-top:6px"><span>mode <b>high</b></span><span>tile <b>2048</b></span><span>halo <b>256</b></span><span>coarse_max_dim <b>4096</b></span><span>gate_tre <b>1.0</b></span></div></div>
+            <div class="opt"><div class="oh"><span>ashlar → ASHLAR</span><span class="tag-alt">baseline only</span></div>
+              <div class="ox"><b>A benchmark baseline, not a production backend.</b> The field-standard cyclic-IF
+                registrar (labsyspharm), wired in as a third backend so it can be ranked against VALIS and STARE on
+                the <i>same</i> reg_qc=2 metric rather than in a parallel table. <code>ASHLAR_RETILE</code>
+                synthesizes the raw tile grid mirage's pre-stitched inputs lack; <code>ASHLAR_SOLVE</code> rewrites
+                ashlar's per-tile placements into the same M0 + mesh manifest STARE emits, so the warp is
+                <code>TILED_STITCH</code> aliased. Piecewise <b>translation only</b> — no non-rigid warp. See S2.</div>
+              <div class="pp" style="margin-top:6px"><span>tile <b>1024</b></span><span>overlap <b>0.1</b></span><span>max_shift_um <b>30</b></span></div></div>
           </div>
           <div class="mod"><div class="n">GENERATE_REGISTRATION_QC <span class="tag tag-on">reg_qc≥1</span></div>
             <div class="x">Nuclear-channel overlay, registered vs reference.</div></div>
@@ -409,6 +429,15 @@
             <div class="pp"><span>simplify <b>1.0</b></span><span>precision <b>2</b></span></div></div>
           <div class="mod"><div class="n">EXTRACT_NUCLEI_PROPERTIES <span class="tag tag-on">compartments</span></div>
             <div class="x">Re-keys nucleus contours to cell labels, so one detection can carry both geometries.</div></div>
+          <div class="mod"><div class="n">SEG_QUALITY_EVAL → MERGE_SEG_EVAL <span class="tag">opt-in</span></div>
+            <div class="x">Reference-free segmentation scoring (CSE) — grades the mask with no ground truth.
+              <b>Off by default</b>, and the reason is supply chain, not science: it is the one QC stage needing
+              the <code>segeval</code> image, and <code>build-images.yml</code> pushes only on a release or a
+              manual dispatch, never on a push to main — so a default-on stage would fail every run of a fresh
+              clone against a container that does not exist yet. Enable with the <code>seg_quality</code>
+              profile. One of only two processes keeping a <i>retry-then-drop</i> policy: losing the score
+              degrades QC and nothing else.</div>
+            <div class="pp"><span>skip_seg_quality_eval <b>true</b></span><span>cse_pixel_size_um <b>null</b></span></div></div>
           <div class="ckpt">→ csv/segmented.csv</div>
         </div>
       </div>
@@ -420,12 +449,15 @@
         <div class="body">
           <div class="mod"><div class="n">SPLIT_CHANNELS → QUANTIFY</div>
             <div class="x">Per-cell marker intensity against the mask, one task per channel, merged per patient.
-              Median always; Mean/Sum added by <code>expanded_quantification</code>.</div>
-            <div class="pp"><span>compartments <b>true</b></span><span>expanded <b>true</b></span></div></div>
+              Median always; Mean/Sum are opt-in via <code>expanded_quantification</code>, which otherwise
+              triples the per-compartment measurement columns for consumers that never read them.</div>
+            <div class="pp"><span>compartments <b>true</b></span><span>expanded <b>false</b></span></div></div>
           <div class="mod"><div class="n">EXPORT_GEOJSON</div>
             <div class="x">QuPath/FlowPath <code>cells.geojson</code> with raw per-marker measurements, plus a
-              lighter whole-cell-only variant.</div>
-            <div class="pp"><span>pixel_size <b>0.325</b></span></div></div>
+              lighter whole-cell-only variant. Its µm measurements — centroids, areas, perimeters, axis lengths —
+              are the FlowPath contract, and it is the one consumer that stages no image, so it needs an explicit
+              number and rejects <code>auto</code>.</div>
+            <div class="pp"><span>pixel_size <b>required</b></span></div></div>
           <div class="mod"><div class="n">MERGE_AND_PYRAMID</div>
             <div class="x">Pyramidal OME-TIFF preserving channel metadata; masks optionally embedded as a second series.</div>
             <div class="pp"><span>tilex <b>512</b></span><span>levels <b>8</b></span><span>zstd</span></div></div>
@@ -509,7 +541,7 @@
           <tr><td class="k">seg_instantseg_tile_size</td><td class="v">512</td><td class="d">tiled inference (px)</td></tr>
           <tr><td class="k">seg_instantseg_batch_size</td><td class="v">16</td><td class="d">tiles per forward pass</td></tr>
           <tr><td class="k">instanseg_model_dir</td><td class="v nul">null</td><td class="d">writable model cache</td></tr>
-          <tr><td class="k">pixel_size</td><td class="v">0.325</td><td class="d">µm/px, sets working scale</td></tr>
+          <tr><td class="k">pixel_size</td><td class="v nul">null</td><td class="d">REQUIRED: a number, or 'auto' from OME metadata</td></tr>
         </table>
       </div>
       <div class="bkc">
@@ -552,7 +584,13 @@
     <div class="panel-head"><h2>What a completed run leaves on disk</h2>
       <p>Per patient, under <code>--outdir</code>. The GeoJSON and the OME-TIFF are the primary artifacts — they
         are what QuPath and FlowPath open. The SpatialData store is additive: the same run, readable by
-        <code>scanpy</code>, <code>squidpy</code>, <code>napari-spatialdata</code> and Vitessce without conversion.</p></div>
+        <code>scanpy</code>, <code>squidpy</code>, <code>napari-spatialdata</code> and Vitessce without conversion.
+        <b>What survives is itself a parameter.</b> At <code>--cleanup_level final</code> (the default) the
+        intermediates are never published at all rather than published-then-deleted, since <code>publishDir</code>
+        copies and a delete would pay for a copy nobody reads. That makes <code>none</code> load-bearing rather
+        than a convenience: <code>--start</code> and <code>mode=add_cycle</code> both RE-ENTER a prior run's
+        published tree, so add_cycle is refused at launch at any other level. No checkpoint manifest is written at
+        a cleaning level either — a manifest whose paths dangle is worse than no manifest.</p></div>
     <div class="outs">
       <div class="out">
         <div class="p">geojson/export/cells.geojson</div><div class="role">primary · QuPath / FlowPath</div>
@@ -606,8 +644,8 @@
         <div class="tbl-scroll"><table class="rs">
           <thead><tr><th>setting</th><th>default</th><th>local</th></tr></thead>
           <tbody>
-            <tr><td>max_cpus</td><td>128</td><td>4</td></tr>
-            <tr><td>max_memory</td><td>700 GB</td><td>16 GB</td></tr>
+            <tr><td>max_cpus</td><td class="nul">required</td><td>4</td></tr>
+            <tr><td>max_memory</td><td class="nul">required</td><td>16 GB</td></tr>
             <tr><td>max_time</td><td>240 h</td><td>72 h</td></tr>
             <tr><td>maxRetries</td><td>3</td><td>3</td></tr>
             <tr><td>queueSize</td><td>20</td><td>20</td></tr>
@@ -681,7 +719,7 @@
       <div class="steps">
         <div class="st"><div class="h">reuse reference</div><div class="d">Register the new cycle to the frozen prior reference.</div><span class="r">registered.csv</span></div>
         <div class="st"><div class="h">EXTRACT_MASK_SERIES</div><div class="d">Read existing cell + nuclei masks from the prior pyramid.</div><span class="r">no re-segmentation</span></div>
-        <div class="st"><div class="h">register new cycle</div><div class="d">Only the new slides go through VALIS.</div><span class="r">valis only</span></div>
+        <div class="st"><div class="h">register new cycle</div><div class="d">Only the new slides go through VALIS. The guard is an <b>allowlist</b> — any method but <code>valis</code> is rejected at launch, so a backend added to the enum later cannot be silently registered with VALIS under its own name.</div><span class="r">valis only</span></div>
         <div class="st"><div class="h">quantify new markers</div><div class="d">Measure new markers on the reused mask; old markers carried over.</div><span class="r">prior columns</span></div>
       </div>
     </div>
@@ -735,7 +773,6 @@
           <tr><td class="k">stop</td><td class="v nul">null</td><td class="d">run to end</td></tr>
           <tr><td class="k">mode</td><td class="v">standard</td><td class="d">standard | add_cycle</td></tr>
           <tr><td class="k">nuclear_markers</td><td class="v">[DAPI, CELLTOX]</td><td class="d">nuclear/fiducial marker, by name</td></tr>
-          <tr><td class="k">allow_auto_reference</td><td class="v">false</td><td class="d">error if no reference marked</td></tr>
           <tr><td class="k">dry_run</td><td class="v">false</td><td class="d">validate and exit</td></tr>
         </table>
         <h4>Preprocessing</h4>
@@ -746,18 +783,26 @@
         </table>
         <h4>Registration</h4>
         <table class="pr">
-          <tr><td class="k">registration_method</td><td class="v">valis</td><td class="d">valis | tiled (STARE)</td></tr>
+          <tr><td class="k">registration_method</td><td class="v">valis</td><td class="d">valis | tiled (STARE) | ashlar (baseline)</td></tr>
           <tr><td class="k">reg_qc</td><td class="v">2</td><td class="d">0 none · 1 overlay · 2 +seg</td></tr>
           <tr><td class="k">reg_micro_reg</td><td class="v">2</td><td class="d">micro-reg depth (MAX default)</td></tr>
-          <tr><td class="k">memory_mode</td><td class="v">high</td><td class="d">VALIS profile</td></tr>
+          <tr><td class="k">memory_mode</td><td class="v">high</td><td class="d">VALIS tier: high | medium | low | custom</td></tr>
           <tr><td class="k">reg_max_image_dim</td><td class="v">4000</td><td class="d">VALIS working max dim</td></tr>
           <tr><td class="k">reg_jvm_heap_gb</td><td class="v nul">null</td><td class="d">null → derive from task.memory</td></tr>
         </table>
         <h4>Registration — tiled / STARE</h4>
         <table class="pr">
-          <tr><td class="k">reg_tiled_tile</td><td class="v">2048</td><td class="d">tile core + mesh (px)</td></tr>
-          <tr><td class="k">reg_tiled_halo</td><td class="v">256</td><td class="d">per-tile read halo (px)</td></tr>
+          <tr><td class="k">reg_tiled_mode</td><td class="v">high</td><td class="d">tier: high | medium | low | custom</td></tr>
+          <tr><td class="k">reg_tiled_tile</td><td class="v nul">null</td><td class="d">tile core + mesh (px) — tier: 2048/1024/512</td></tr>
+          <tr><td class="k">reg_tiled_halo</td><td class="v nul">null</td><td class="d">per-tile read halo (px) — tier: 256/192/128</td></tr>
+          <tr><td class="k">reg_tiled_coarse_max_dim</td><td class="v nul">null</td><td class="d">anchor thumbnail (px) — tier: 4096/2048/1024</td></tr>
           <tr><td class="k">reg_tiled_gate_tre</td><td class="v">1.0</td><td class="d">refine above this TRE</td></tr>
+        </table>
+        <h4>Registration — ashlar (baseline)</h4>
+        <table class="pr">
+          <tr><td class="k">reg_ashlar_tile</td><td class="v">1024</td><td class="d">grid granularity — the fairness knob</td></tr>
+          <tr><td class="k">reg_ashlar_overlap</td><td class="v">0.1</td><td class="d">synthesized tile overlap fraction</td></tr>
+          <tr><td class="k">reg_ashlar_max_shift_um</td><td class="v">30</td><td class="d">per-tile shift budget (MICRONS)</td></tr>
         </table>
       </div>
       <div class="pcol">
@@ -772,10 +817,10 @@
         <h4>Quantify &amp; export</h4>
         <table class="pr">
           <tr><td class="k">quantify_compartments</td><td class="v">true</td><td class="d">Nucleus/Cyto/Cell</td></tr>
-          <tr><td class="k">expanded_quantification</td><td class="v">true</td><td class="d">+Mean/Sum on top of Median</td></tr>
+          <tr><td class="k">expanded_quantification</td><td class="v">false</td><td class="d">opt in to +Mean/Sum on top of Median</td></tr>
           <tr><td class="k">simplify_tolerance</td><td class="v">1.0</td><td class="d">contour simplification (px)</td></tr>
           <tr><td class="k">geojson_coord_precision</td><td class="v">2</td><td class="d">coordinate decimals</td></tr>
-          <tr><td class="k">pixel_size</td><td class="v">0.325</td><td class="d">µm/px fallback</td></tr>
+          <tr><td class="k">pixel_size</td><td class="v nul">null</td><td class="d">µm/px — REQUIRED, or 'auto'</td></tr>
         </table>
         <h4>SpatialData</h4>
         <table class="pr">
@@ -788,7 +833,10 @@
           <tr><td class="k">pyramid_resolutions</td><td class="v">8</td><td class="d">pyramid levels, zstd</td></tr>
           <tr><td class="k">embed_masks</td><td class="v">false</td><td class="d">masks as 2nd OME series</td></tr>
           <tr><td class="k">enable_trace</td><td class="v">true</td><td class="d">per-process trace + size logs</td></tr>
-          <tr><td class="k">max_memory / max_cpus</td><td class="v">700GB / 128</td><td class="d">ceilings</td></tr>
+          <tr><td class="k">cleanup_level</td><td class="v">final</td><td class="d">final | none — 'none' required by add_cycle</td></tr>
+          <tr><td class="k">cleanup_work</td><td class="v">true</td><td class="d">empty work/ at teardown; a FAILED run keeps it</td></tr>
+          <tr><td class="k">skip_seg_quality_eval</td><td class="v">true</td><td class="d">CSE scoring OFF; -profile seg_quality</td></tr>
+          <tr><td class="k">max_memory / max_cpus</td><td class="v nul">required</td><td class="d">ceilings — no default; a profile must set them</td></tr>
         </table>
       </div>
     </div>
@@ -802,8 +850,9 @@
     DAPI then CELLTOX) and moved to channel 0 — DAPI is used where present, otherwise CELLTOX.
     <b>(b)</b> Execution is gated by <code>--start</code>/<code>--stop</code> across four ordered steps, each
     writing a resumable checkpoint. <b>(c)</b> Preprocessing standardizes and illumination-corrects images;
-    registration aligns each moving slide to the reference through either the VALIS or the JVM-free tiled/STARE
-    backend, with staged registration QC on by default and micro-registration at maximum depth; segmentation
+    registration aligns each moving slide to the reference through one of three interchangeable backends behind a
+    single adapter seam — VALIS, the JVM-free tiled/STARE backend, or ASHLAR as an external benchmark baseline —
+    with staged registration QC on by default and micro-registration at maximum depth; segmentation
     detects every cell on the reference and extracts morphology and contours once per mask; postprocessing
     quantifies each marker per compartment and exports. <b>(d)</b> The three
     segmentation backends compared on what they read, how the whole-cell mask is produced, what each requires
