@@ -42,6 +42,12 @@ process EXPORT_GEOJSON {
     // Per-compartment quantification: pass the nucleus contours (re-keyed to cell
     // labels) so each cell gets a nucleusGeometry in the single combined cells.geojson.
     def nucleus_arg = params.quantify_compartments ? "--nucleus_contours_json ${nucleus_contours_json}" : ''
+    // --pixel_size is NOT optional here even though the script has a parameter for it.
+    // It was omitted, and export_geojson.py's own argparse default silently supplied
+    // 0.325 -- so every "Centroid X µm", "Area µm²", "Perimeter µm" and axis length in
+    // cells.geojson ignored params.pixel_size entirely. Those measurements are the
+    // contract with qupath-extension-flowpath, so the run advertised a scale it was not
+    // using. Pass it explicitly; the script now has no default to fall back to.
     """
     # Log input size for tracing (-L follows symlinks)
     input_bytes=\$(stat -L --printf="%s" ${quant_csv} 2>/dev/null || echo 0)
@@ -53,6 +59,7 @@ process EXPORT_GEOJSON {
     export_geojson.py \\
         --cell_data ${quant_csv} \\
         -o export \\
+        --pixel_size ${params.pixel_size} \\
         --contours_json ${contours_json} \\
         ${nucleus_arg} \\
         ${args}

@@ -20,7 +20,6 @@ nextflow_workflow {
                 """
                 input[0] = "$projectDir/tests/testdata/test_input.csv"
                 input[1] = 'path_to_file'
-                input[2] = false
                 """
             }
             params {
@@ -54,7 +53,6 @@ nextflow_workflow {
                 """
                 input[0] = "$projectDir/tests/testdata/test_input.csv"
                 input[1] = 'path_to_file'
-                input[2] = false
                 """
             }
             params {
@@ -84,7 +82,6 @@ nextflow_workflow {
                 // preprocessed_image, not path_to_file.
                 input[0] = "$projectDir/tests/testdata/valid_checkpoint_registration.csv"
                 input[1] = 'preprocessed_image'
-                input[2] = false
                 """
             }
             params {
@@ -115,7 +112,6 @@ nextflow_workflow {
                 // prior run's and never a row in this sheet.
                 input[0] = "$projectDir/tests/testdata/invalid_no_ref.csv"
                 input[1] = 'path_to_file'
-                input[2] = false
                 """
             }
             params {
@@ -173,7 +169,6 @@ nextflow_workflow {
                 """
                 input[0] = "$projectDir/tests/testdata/duplicate_basename.csv"
                 input[1] = 'path_to_file'
-                input[2] = false
                 """
             }
             params {
@@ -194,17 +189,30 @@ nextflow_workflow {
         }
     }
 
-    test("auto_reference widens the channel count when no row is the reference") {
+    test("a sheet marking NO reference gets nothing promoted in its place") {
         tag "stub"
 
+        // Replaces a case that asserted the opposite. `--allow_auto_reference` used to
+        // promote a patient's FIRST samplesheet row when no row declared itself. That rule
+        // is gone: the reference is the slide every other slide is warped onto, and picking
+        // it from row order made two sheets differing only in row order produce two
+        // different alignments, with nothing recording that a choice had been made.
+        //
+        // THE COUNT IS THE WRONG THING TO ASSERT, which is worth stating because the test
+        // this replaces asserted exactly that. channels_count is still 5, unchanged by the
+        // removal, because the KEEP-SET rule is independent of the reference rule: DAPI
+        // goes to the first slide that claims it (claim-once), reference or not, so mov1
+        // keeps [DAPI, CD3, CD8] either way. The observable that actually moved is
+        // meta.is_reference -- with promotion gone, NO row carries it.
+        //
+        // INPUT_CHECK does not raise here; refusing a referenceless sheet is
+        // CsvUtils.validateInputSemantics' job, upstream in workflows/mirage.nf, which has
+        // the better message. Registration would then fail on the missing reference.
         when {
             workflow {
                 """
-                // invalid_no_ref.csv marks no reference; with allow_auto_reference the
-                // first image is promoted, keeping its nuclear channel in the count.
                 input[0] = "$projectDir/tests/testdata/invalid_no_ref.csv"
                 input[1] = 'path_to_file'
-                input[2] = true
                 """
             }
             params {
@@ -216,8 +224,9 @@ nextflow_workflow {
             assertAll(
                 { assert workflow.success },
                 { assert workflow.out.samples.size() == 2 },
-                // 2 slides x (DAPI + 2 markers): the promoted reference keeps DAPI
-                // (3 channels), the other contributes its 2 non-nuclear markers.
+                // NOTHING was promoted: neither row became the reference.
+                { assert workflow.out.samples.every { !it[0].is_reference } },
+                // Unchanged by the removal -- see the note above.
                 { assert workflow.out.counts[0].channels.P001 == 5 }
             )
         }
@@ -245,7 +254,6 @@ nextflow_workflow {
                 """
                 input[0] = "$projectDir/tests/testdata/duplicate_raw_path.csv"
                 input[1] = 'path_to_file'
-                input[2] = false
                 """
             }
             params {

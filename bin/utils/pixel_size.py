@@ -36,11 +36,16 @@ from typing import Optional, Tuple
 import tifffile
 
 __all__ = [
+    "AUTO",
     "read_ome_pixel_size",
+    "resolve_pixel_size",
     "warn_on_pixel_size_mismatch",
     "unit_to_um",
     "PIXEL_SIZE_RTOL",
 ]
+
+# The literal `--pixel_size` value meaning "take the scale from the image itself".
+AUTO = "auto"
 
 # Relative tolerance for calling two pixel sizes "the same". 1% is well below any real
 # objective/scanner difference (the smallest step between adjacent magnifications is
@@ -192,3 +197,92 @@ def warn_on_pixel_size_mismatch(
             configured,
         )
     return reported
+
+
+class PixelSizeError(ValueError):
+    """`--pixel_size auto` was asked for and the image carries no usable scale.
+
+    A distinct type so a caller can tell "this image has no scale" apart from "this
+    number is malformed", and so the message reaches the operator intact rather than as
+    a bare traceback.
+    """
+
+
+def resolve_pixel_size(
+    configured: str | float | None,
+    image_path: str | Path | None = None,
+    *,
+    detected: Tuple[Optional[float], Optional[float]] | Optional[float] = None,
+    source: str | None = None,
+    logger: Optional[logging.Logger] = None,
+) -> float:
+    """Turn the configured ``--pixel_size`` into the µm/px this run will actually use.
+
+    THREE CASES, AND ONLY THREE. There is deliberately no fallback constant here: a
+    repo-wide default pixel size is one scanner's value wearing everyone else's label,
+    and applying it silently is how a run produces µm measurements that are uniformly
+    wrong by the ratio of two objectives. Every path below either returns a number that
+    came from the operator or from the image, or raises.
+
+    * a positive number -- returned as given. The operator is asserting the scale and
+      it wins over anything the file claims; ``warn_on_pixel_size_mismatch`` is what
+      tells them when the file disagrees.
+    * ``"auto"`` -- read ``PhysicalSizeX`` from ``image_path``'s OME header. This is
+      safe at every stage of the pipeline because ``CONVERT_IMAGE`` stamps the scale it
+      resolved onto its output and each rewriting step (``apply_basic_profiles``,
+      ``tiled_stitch``) re-stamps it, so an image reaching any consumer carries one.
+      Absent or uninterpretable metadata RAISES -- that is the "otherwise error" half of
+      the contract, and it is the whole point: ``auto`` promises to read the real scale,
+      so it must fail loudly rather than substitute a guess.
+    * ``None`` -- raises. ``params.pixel_size`` is null-by-default precisely so a run
+      cannot start without someone having chosen; reaching a script with null means the
+      launch-time guard in ``ParamUtils.validatePixelSize`` was bypassed.
+    """
+    label = source or (str(image_path) if image_path is not None else "<no image>")
+
+    if configured is None or (isinstance(configured, str) and not configured.strip()):
+        raise PixelSizeError(
+            "--pixel_size is unset. Pass a positive number of micrometres per pixel, "
+            f"or '{AUTO}' to read it from the image's own OME metadata."
+        )
+
+    if isinstance(configured, str) and configured.strip().lower() == AUTO:
+        # `detected` lets a caller that has ALREADY read the scale hand it over rather
+        # than have this function re-open the file. convert_image.py is the reason: its
+        # input is a vendor format (.czi, .ndpi, .svs) that read_ome_pixel_size's
+        # tifffile/OME-XML path cannot speak, but aicsimageio has already given it
+        # physical_pixel_sizes. One rule, two ways to feed it -- not two rules.
+        if detected is None:
+            if image_path is None:
+                raise PixelSizeError(
+                    f"--pixel_size {AUTO} needs an image to read the scale from, "
+                    "but this step was given none."
+                )
+            detected = read_ome_pixel_size(image_path)
+        if not isinstance(detected, tuple):
+            detected = (detected, detected)
+        det_x, det_y = detected
+        detected = det_x if det_x is not None else det_y
+        if detected is None:
+            raise PixelSizeError(
+                f"--pixel_size {AUTO} was requested but {label} carries no usable OME "
+                "PhysicalSizeX/Y (absent header, absent attribute, non-positive value, "
+                "or an unrecognised unit). Pass an explicit --pixel_size instead of "
+                f"'{AUTO}' for this input."
+            )
+        if logger is not None:
+            logger.info("  %s: resolved --pixel_size %s to %g µm/px from OME metadata.",
+                        label, AUTO, detected)
+        return float(detected)
+
+    try:
+        value = float(configured)
+    except (TypeError, ValueError):
+        raise PixelSizeError(
+            f"--pixel_size {configured!r} is neither a number nor '{AUTO}'."
+        ) from None
+    if value <= 0:
+        raise PixelSizeError(
+            f"--pixel_size must be a positive number of micrometres per pixel, got {value}."
+        )
+    return value

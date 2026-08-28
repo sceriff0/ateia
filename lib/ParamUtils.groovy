@@ -302,6 +302,42 @@ class ParamUtils {
     }
 
     /**
+     * Refuse a run that has not chosen a pixel size.
+     *
+     * `params.pixel_size` owns every micrometre in the pipeline -- GeoJSON centroids and areas,
+     * the published pyramid's PhysicalSize, InstantSeg's rescaling target. It carried a literal
+     * 0.325 default, which is one scanner's value standing in for everyone's: a run on any other
+     * objective produced measurements uniformly wrong by the ratio of the two, with nothing said,
+     * and the symptom surfaced in QuPath several steps and one repository away from the cause.
+     *
+     * So the default is null and this refuses it, at launch, before a single process is
+     * instantiated. The operator must either assert a number or ask for 'auto' -- and 'auto'
+     * itself errors, per-image in bin/utils/pixel_size.py, when the file carries no usable scale.
+     * There is no path left on which a scale is guessed.
+     *
+     * Cross-parameter/"must be set" layer, not the schema's: nf-schema's `required` fires on an
+     * ABSENT key, and this key is present-and-null. See the two-layer rule in CLAUDE.md.
+     */
+    static void validatePixelSize(Map params) {
+        def raw = params.pixel_size
+        if (raw == null || raw.toString().trim().isEmpty())
+            throw new IllegalArgumentException(
+                "--pixel_size is not set, and it has no default. It is the micrometres-per-pixel " +
+                "every measurement in this run is derived from. Pass a positive number, or " +
+                "'auto' to read PhysicalSizeX from each image's own OME metadata (which errors " +
+                "if an image carries no usable scale).")
+
+        def text = raw.toString().trim()
+        if (text.equalsIgnoreCase('auto')) return
+
+        def value = text.isNumber() ? text.toBigDecimal() : null
+        if (value == null || value <= 0)
+            throw new IllegalArgumentException(
+                "--pixel_size '${text}' is neither a positive number of micrometres per pixel " +
+                "nor 'auto'.")
+    }
+
+    /**
      * Reject per-knob overrides that contradict the cost/accuracy tier they are used with.
      *
      * Both registration backends expose `high | medium | low | custom`. Individual knob overrides
@@ -445,29 +481,4 @@ class ParamUtils {
         return params.start == step
     }
 
-    /**
-     * Whether a patient with no `is_reference=true` row may have one auto-promoted.
-     *
-     * TRUE ONLY AT `--start preprocessing`. At every later entry point the samplesheet
-     * IS a checkpoint CSV this pipeline wrote, and a checkpoint always records exactly
-     * one reference per patient (INPUT_CHECK resolves it before the first checkpoint is
-     * written, so the decision is made once and then carried). A later entry point
-     * therefore never NEEDS to infer -- and must not: a checkpoint arriving without its
-     * reference is corrupt or hand-edited, and quietly promoting some row would register
-     * against a different slide than the run that produced the checkpoint, with nothing
-     * in the output saying so.
-     *
-     * This was real behaviour, not a hypothetical: feeding an all-false
-     * `csv/preprocessed.csv` to `--start registration --allow_auto_reference true` used
-     * to promote whichever slide arrived first.
-     *
-     * The ONE site that computes this. `params.allow_auto_reference` is the user's
-     * request; this is whether the request applies. Three callers ask (mirage.nf's two
-     * CsvUtils validations and its INPUT_CHECK call) and none re-derives it.
-     * mode='add_cycle' passes `false` directly and never comes through here -- its
-     * reference is the prior run's and is never a row in its sheet.
-     */
-    static boolean autoReferenceAllowed(Map params) {
-        return params.allow_auto_reference && isEntryPoint(params, 'preprocessing')
-    }
 }

@@ -24,6 +24,7 @@ import numpy as np  # noqa: E402
 import tifffile  # noqa: E402
 from logger import configure_logging, get_logger  # noqa: E402
 from mesh_field import MeshField  # noqa: E402
+from pixel_size import resolve_pixel_size
 from tiled_io import open_lazy  # noqa: E402
 from tiled_warp import source_region, warp_image  # noqa: E402
 
@@ -126,8 +127,10 @@ def main(argv=None) -> int:
     ap.add_argument(
         "--pixel-size",
         dest="pixel_size",
-        type=float,
-        default=0.325,
+        # str, not float: the value may be the literal 'auto'. Resolved to a number by
+        # resolve_pixel_size below. No default -- see nextflow.config's pixel_size note.
+        type=str,
+        default=None,
         help="Configured scale in µm/px (TILED_STITCH passes params.pixel_size), "
         "stamped on the stitched slide as resolution tags AND in the OME header.",
     )
@@ -139,6 +142,11 @@ def main(argv=None) -> int:
         "header. Omitted = anonymous channels, which is what a reader used to get.",
     )
     a = ap.parse_args(argv)
+
+    # 'auto' reads the scale off the moving slide's own OME header, which CONVERT_IMAGE
+    # stamped. This is the number written into the stitched output's PhysicalSize, so
+    # the published slide carries the scale it was actually warped at.
+    a.pixel_size = resolve_pixel_size(a.pixel_size, a.moving, source=str(a.moving))
 
     manifest = json.loads(Path(a.manifest).read_text())
     name, entry = _entry_for(manifest, a.moving_name)

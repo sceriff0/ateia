@@ -47,6 +47,7 @@ from measurements import (  # noqa: E402
     STATISTICS,
     identify_marker_columns,
 )
+from pixel_size import resolve_pixel_size  # noqa: E402
 
 logger = get_logger(__name__)
 
@@ -425,7 +426,9 @@ def build_spatialdata(args) -> "object":
     from spatialdata.models import Image2DModel, Labels2DModel, ShapesModel
     from spatialdata.transformations import Identity, Scale
 
-    px = float(args.pixel_size)
+    px = resolve_pixel_size(
+        args.pixel_size, args.pyramid, source="the merged pyramid", logger=logger
+    )
 
     # Two coordinate systems: 'global' is intrinsic pixels (what every element is
     # stored in), 'um' scales it to micrometres. Every element carries both, so
@@ -587,7 +590,7 @@ def parse_args(argv=None):
     ap.add_argument("--reg-residuals", nargs="*", help="per-cell residual CSVs")
     ap.add_argument("--versions", nargs="*", help="versions.yml files")
     ap.add_argument("--patient-id", default="unknown")
-    ap.add_argument("--pixel-size", type=float, default=0.325)
+    ap.add_argument("--pixel-size", type=str, default=None)
     ap.add_argument(
         "--include-image",
         action="store_true",
