@@ -446,13 +446,19 @@ NOT_SWEPT = {
         "last task has finished."),
 
     # --- site / scheduler. Properties of the cluster, not of the pipeline. ---
-    "max_cpus": "resourceLimits clamp — a site ceiling; varying it benchmarks the machine",
-    "max_memory": "resourceLimits clamp — see max_cpus",
-    "max_time": "resourceLimits clamp — see max_cpus",
+    # max_cpus and max_memory USED to be excused here. They are no longer params at all:
+    # nextflow.config declares neither, and nf-schema's `required` list refuses a run that
+    # supplies neither, because a resource ceiling is a claim about someone else's hardware
+    # and guessing high fails as an OOM-kill hours in. The SWEEP_PROFILE carries them --
+    # `docker,local` by default, `singularity,ieo` on the cluster -- and NOT benchmark.config,
+    # because a `-c` file overrides a profile's params and would clobber the site ceiling. An
+    # excuse for a param that no longer exists is indistinguishable from a deliberate coverage
+    # gap, so these two go.
+    "max_time": "resourceLimits clamp — a site ceiling; varying it benchmarks the machine",
     "max_forks": (
         "cluster concurrency, not pipeline cost. It caps how many tasks of one process run "
         "at once, so varying it changes how fast the SWEEP drains, never what a task costs. "
-        "Same category as max_cpus/max_memory/max_time: it benchmarks the machine. It is also "
+        "Same category as max_time: it benchmarks the machine. It is also "
         "read EAGERLY at conf/modules.config parse time (Math.min(own, params.max_forks)), so "
         "run_sweep.sh must pass it on the CLI -- a -c file sets it too late to reach the clamps."),
     "queue_size": (
@@ -485,9 +491,15 @@ NOT_SWEPT = {
     # other direction of this guard will demand they be re-added.
 
     # --- properties of the INPUT DATA, fixed by generate_matrix.py. ---
-    "pixel_size": "a property of the synthetic images, set by the matrix generator",
+    "pixel_size": (
+        "a property of the synthetic images, not a cost knob. It no longer has a pipeline "
+        "default (it was 0.325, one scanner's value standing in for everyone's), so it is "
+        "REQUIRED and benchmarks/configs/benchmark.config pins it to the scale "
+        "generate_matrix.py actually draws at."),
     "nuclear_markers": "channel naming contract — the matrix generator fixes the panel",
-    "allow_auto_reference": "samplesheet semantics — the generated sheet always names a reference",
+    # allow_auto_reference was excused here as "samplesheet semantics — the generated sheet
+    # always names a reference". The param is gone, and so is the promotion it enabled: a
+    # patient with no declared reference is now an error everywhere but add_cycle.
 
     # --- the CSE segmentation-quality scorer (restored on this branch, opt-in). ---
     # Not a cost knob of the PIPELINE: SEG_QUALITY_EVAL is a scorer bolted onto the

@@ -85,7 +85,10 @@ pids=()
 # SWEEP_PROFILE="singularity,ieo". It is passed as a SINGLE -profile — Nextflow rejects a second
 # -profile ("Can only specify option -profile once"), so do NOT also put -profile in the trailing
 # args. Extra `-c <config>` in the trailing args IS fine (Nextflow merges multiple -c).
-PROFILE="${SWEEP_PROFILE:-docker}"
+# `docker,local` not `docker`: max_cpus/max_memory have no pipeline default and nf-schema
+# refuses a run supplying neither, so an engine profile alone no longer launches. `local`
+# is the sizing profile (4 CPU / 16 GB); the cluster sets SWEEP_PROFILE="singularity,ieo".
+PROFILE="${SWEEP_PROFILE:-docker,local}"
 
 while IFS=',' read -r -a vals; do
   run_id=$(col_val run_id "${vals[@]}")

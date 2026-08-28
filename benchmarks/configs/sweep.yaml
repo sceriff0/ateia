@@ -193,7 +193,7 @@ baseline:
   # compartments ON at baseline so the expanded_quantification axis is valid:
   # expanded_quantification requires quantify_compartments (ParamUtils.validateCompartmentQuant).
   quantify_compartments: true         # pipeline default
-  expanded_quantification: true       # pipeline default (Mean/Sum on top of the always-computed Median)
+  expanded_quantification: false      # pipeline default (Median only; Mean/Sum are opt-in)
   # --- SpatialData (.zarr) export ---
   # EXPORT_SPATIALDATA is ON by default on main, so it already costs wall-clock in every run; it is
   # declared here so that cost is attributable instead of anonymous.
