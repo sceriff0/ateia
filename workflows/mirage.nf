@@ -39,6 +39,7 @@ workflow MIRAGE {
     ParamUtils.validateOutdir(params.outdir)
     // Tier vs per-knob-override consistency for BOTH registration backends. Cross-parameter,
     // so it belongs here rather than in the schema; runs before any process is instantiated.
+    ParamUtils.validatePixelSize(params)
     ParamUtils.validateRegPresets(params)
     // --cleanup_level against --mode. add_cycle must PRODUCE a re-enterable tree, so a
     // cleaning level is refused outright rather than discovered by the next cycle.
@@ -168,10 +169,11 @@ workflow MIRAGE {
             return
         }
 
-        // autoReference = false: add_cycle registers against the PRIOR run's reference,
-        // which is never a row in this sheet, so no row here keeps its nuclear channel
-        // and the new cycle's markers are the declared channels minus the nuclear one.
-        INPUT_CHECK(params.input, 'path_to_file', false)
+        // add_cycle registers against the PRIOR run's reference, which is never a row
+        // in this sheet, so no row here keeps its nuclear channel and the new cycle's
+        // markers are the declared channels minus the nuclear one. INPUT_CHECK no
+        // longer takes a flag for this: it never promotes a reference on any path.
+        INPUT_CHECK(params.input, 'path_to_file')
 
         // ADD_CYCLE rebuilds the prior run's reusable assets itself, from
         // --prior_outdir's checkpoint CSVs.
@@ -218,19 +220,16 @@ workflow MIRAGE {
 
     // Fail-fast semantic validation (per-row format + per-patient reference
     // counts + file existence). Runs here so it is also exercised by --dry_run.
-    // ParamUtils.autoReferenceAllowed, NOT params.allow_auto_reference: auto-promotion
-    // applies at --start preprocessing ONLY. At every later entry point the sheet IS a
-    // checkpoint this pipeline wrote, which always records exactly one reference per
-    // patient, so a missing one means a corrupt or hand-edited checkpoint and must be an
-    // error rather than a silent re-pick against a different slide. Passing the raw
-    // param here is how `--start registration --allow_auto_reference true` used to
-    // accept an all-false csv/preprocessed.csv and promote whichever row it liked.
-    def auto_reference = ParamUtils.autoReferenceAllowed(params)
-
+    // false: on the linear path a patient MUST declare its reference. There is no
+    // auto-promotion any more -- `--allow_auto_reference` and the rule that promoted a
+    // patient's first samplesheet row are both gone. Which slide the others are warped
+    // onto is not something the pipeline may choose on the operator's behalf, and at
+    // every entry point after preprocessing the sheet is a checkpoint this pipeline
+    // wrote, so a missing reference there means a corrupt or hand-edited file.
     CsvUtils.validateInputSemantics(
         params.input,
         params.start,
-        auto_reference,
+        false,
         params.nuclear_markers
     )
 
@@ -255,7 +254,7 @@ workflow MIRAGE {
     // and stamps it into meta.is_reference, so the decision is made once, here, and every
     // step downstream -- including the checkpoint writers -- carries it rather than
     // re-deriving it. registration.nf used to derive it instead, from arrival order.
-    INPUT_CHECK(params.input, entry_column, auto_reference)
+    INPUT_CHECK(params.input, entry_column)
 
     /* -------------------- PREPROCESSING -------------------- */
 

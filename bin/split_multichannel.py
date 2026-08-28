@@ -35,7 +35,11 @@ sys.path.insert(0, str(Path(__file__).parent / "utils"))
 from image_utils import ensure_dir, normalize_image_dimensions
 from logger import configure_logging, get_logger
 from metadata import extract_channel_names_from_ome, is_nuclear
-from pixel_size import read_ome_pixel_size, warn_on_pixel_size_mismatch
+from pixel_size import (
+    read_ome_pixel_size,
+    resolve_pixel_size,
+    warn_on_pixel_size_mismatch,
+)
 from tiled_io import open_lazy
 from validation import StreamingNegativeClip, clip_negative_values
 
@@ -68,7 +72,7 @@ def split_multichannel_tiff(
     is_reference=False,
     channel_names=None,
     nuclear_markers=None,
-    pixel_size=0.325,
+    pixel_size=None,
     keep_channels=None,
 ):
     """
@@ -356,14 +360,20 @@ def main():
     parser.add_argument(
         "--pixel-size",
         dest="pixel_size",
-        type=float,
-        default=0.325,
+        type=str,
+        default=None,
         help="Configured scale in µm/px (SPLIT_CHANNELS passes params.pixel_size). "
         "Stamped on each single-channel TIFF as resolution tags, and the value the "
         "input's own scale is checked against.",
     )
 
     args = parser.parse_args()
+
+    # 'auto' resolves off this slide's own OME header. Safe at this stage: CONVERT_IMAGE
+    # stamps the scale it resolved onto its output, so the file reaching us carries one.
+    args.pixel_size = resolve_pixel_size(
+        args.pixel_size, args.input, source=Path(args.input).name
+    )
 
     configure_logging(level=logging.INFO)
 

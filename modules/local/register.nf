@@ -39,7 +39,7 @@ process REGISTER {
     script:
     def args = task.ext.args ?: ''
     // Extract reference filename from the staged path (ref/filename.tif). The pipeline
-    // always identifies the reference slide (is_reference / allow_auto_reference) and
+    // always identifies the reference slide (meta.is_reference) and
     // stages it here, so --reference is always passed; register.py's standalone
     // marker-based fallback is not used from the pipeline.
     def ref_filename = reference ? reference.name : ''

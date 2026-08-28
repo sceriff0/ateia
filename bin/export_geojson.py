@@ -27,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).parent / "utils"))
 from image_utils import ensure_dir
 from logger import configure_logging, get_logger
 from measurements import MORPHOLOGY_COLS, identify_marker_columns
+from pixel_size import resolve_pixel_size  # noqa: E402
 
 logger = get_logger(__name__)
 
@@ -487,9 +488,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--pixel_size",
-        type=float,
-        default=0.325,
-        help="Pixel size in micrometers",
+        # str, not float: the run-level value may be the literal 'auto'. Unlike every
+        # other consumer, EXPORT_GEOJSON stages no image -- it works from a
+        # quantification CSV and contour JSON -- so there is nothing here to read a
+        # scale off, and 'auto' is refused rather than silently substituted.
+        type=str,
+        default=None,
+        help="Pixel size in micrometres (a number; 'auto' is not supported here)",
     )
     parser.add_argument(
         "--output_prefix",
@@ -503,6 +508,12 @@ def main() -> int:
     """Main entry point."""
     configure_logging(level=logging.INFO)
     args = parse_args()
+
+    # No image is staged for this process, so there is nothing to read a scale off:
+    # resolve_pixel_size raises on 'auto' here rather than substituting a guess. A
+    # number is required. Until this call existed, the argparse default silently made
+    # every µm measurement below 0.325 regardless of what the run configured.
+    args.pixel_size = resolve_pixel_size(args.pixel_size, None, source="EXPORT_GEOJSON")
 
     ensure_dir(args.output_dir)
 

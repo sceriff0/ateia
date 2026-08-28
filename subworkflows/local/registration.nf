@@ -126,20 +126,17 @@ workflow REGISTRATION {
             // CsvUtils.resolveReferenceRows) and travels in meta.is_reference. This is
             // a guard on that invariant, not a fallback: it used to promote items[0]
             // here, which meant the reference was whichever slide arrived first AND was
-            // decided downstream of the preprocessing checkpoint writer, so an
-            // --allow_auto_reference run wrote csv/preprocessed.csv with is_reference
-            // false on every row and its own `--start registration` then refused to
-            // read it. Reaching this error now means the samplesheet had no reference
-            // and auto-promotion did not apply -- at any entry point after
-            // preprocessing that is deliberate (ParamUtils.autoReferenceAllowed): a
-            // checkpoint missing its reference is corrupt, and inferring one would
-            // register against a different slide than the run that produced it.
+            // decided downstream of the preprocessing checkpoint writer. Reaching this
+            // error now means the samplesheet named no reference for this patient.
+            // NOTHING infers one -- not here, not at samplesheet-read time. The
+            // reference is the slide every other slide is warped onto; a pipeline that
+            // picks it silently produces a run nobody can reproduce from the sheet.
             def ref = items.find { item -> item[0].is_reference }
             if (!ref) {
                 throw new Exception("""
                 No reference image found for patient ${patient_id}
-                Fix: Set is_reference=true for one image in your input CSV
-                OR, at --start preprocessing only, set allow_auto_reference=true
+                Fix: set is_reference=true on exactly one of that patient's images
+                in your input CSV. There is no auto-promotion.
                 """.stripIndent())
             }
 
@@ -153,9 +150,8 @@ workflow REGISTRATION {
     // the checkpoint manifest all live in REGISTER_PATIENT, which add_cycle.nf also
     // calls — it used to reimplement them, and had lost two of the three.
     //
-    // The GROUPING above stays here: the linear path's sized groupKey and its
-    // allow_auto_reference resolution have no counterpart on the add_cycle path,
-    // whose reference is the frozen prior one.
+    // The GROUPING above stays here: the linear path's sized groupKey has no
+    // counterpart on the add_cycle path, whose reference is the frozen prior one.
     // The ONE read of params.registration_method on this path. Bound once and passed as an
     // argument to both consumers, so there is a single decision site instead of two reads
     // that could drift apart.

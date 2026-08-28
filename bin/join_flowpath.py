@@ -405,7 +405,7 @@ def parse_args(argv=None):
         action="store_true",
         help="also write phenotype/positivity back into each source store",
     )
-    ap.add_argument("--pixel-size", type=float, default=0.325, help="µm per pixel")
+    ap.add_argument("--pixel-size", type=str, default=None, help="µm per pixel, or 'auto'")
     ap.add_argument(
         "--centroid-join-max-px",
         type=float,

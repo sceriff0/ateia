@@ -187,13 +187,17 @@ def _convert(monkeypatch, img, out_dir, channels, writer=None):
     _install_fake_bioio(monkeypatch, img)
     args = (out_dir / "input.czi", out_dir, "P1")
     if writer is None:
-        return convert_image.convert_to_ome_tiff(*args, channel_names=list(channels))
+        return convert_image.convert_to_ome_tiff(
+            *args, channel_names=list(channels), pixel_size_um=0.325
+        )
     # A context, not a bare setattr: monkeypatch.setattr lasts the whole test, so a
     # patched reference write followed by an "unpatched" one would silently compare the
     # legacy writer against itself and pass vacuously.
     with monkeypatch.context() as patched:
         patched.setattr(convert_image, "write_ome_tiff", writer)
-        return convert_image.convert_to_ome_tiff(*args, channel_names=list(channels))
+        return convert_image.convert_to_ome_tiff(
+            *args, channel_names=list(channels), pixel_size_um=0.325
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -223,7 +227,7 @@ def test_the_write_never_materialises_the_whole_stack(monkeypatch, tmp_path):
     )
 
     out, channels = convert_image.convert_to_ome_tiff(
-        tmp_path / "input.czi", tmp_path, "P1", channel_names=["DAPI", "CD3", "CD8"]
+        tmp_path / "input.czi", tmp_path, "P1", channel_names=["DAPI", "CD3", "CD8"], pixel_size_um=0.325
     )
 
     assert channels == ["DAPI", "CD3", "CD8"]
@@ -380,10 +384,10 @@ def test_the_numpy_reader_branches_also_write_identical_pixels(monkeypatch, tmp_
     with monkeypatch.context() as patched:
         patched.setattr(convert_image, "write_ome_tiff", _legacy_write)
         ref_path, _ = convert_image.convert_to_ome_tiff(
-            tmp_path / "in.ndpi", ref_dir, "P1", channel_names=["CD3", "DAPI", "CD8"]
+            tmp_path / "in.ndpi", ref_dir, "P1", channel_names=["CD3", "DAPI", "CD8"], pixel_size_um=0.325
         )
     new_path, _ = convert_image.convert_to_ome_tiff(
-        tmp_path / "in.ndpi", new_dir, "P1", channel_names=["CD3", "DAPI", "CD8"]
+        tmp_path / "in.ndpi", new_dir, "P1", channel_names=["CD3", "DAPI", "CD8"], pixel_size_um=0.325
     )
 
     np.testing.assert_array_equal(tifffile.imread(str(new_path)), tifffile.imread(str(ref_path)))
@@ -530,7 +534,7 @@ def test_a_whole_slide_chunk_is_decoded_once_not_once_per_plane(monkeypatch, tmp
     source = _chunked_read(monkeypatch, array, array.shape, names)
 
     out, _ = convert_image.convert_to_ome_tiff(
-        tmp_path / "in.czi", tmp_path, "P1", channel_names=list(names)
+        tmp_path / "in.czi", tmp_path, "P1", channel_names=list(names), pixel_size_um=0.325
     )
 
     assert source.decodes == 1, (
@@ -554,7 +558,7 @@ def test_a_chunk_is_decoded_once_whatever_the_chunking(monkeypatch, tmp_path):
                 patched, array, (chunk_planes,) + array.shape[1:], names
             )
             out, _ = convert_image.convert_to_ome_tiff(
-                tmp_path / "in.czi", out_dir, "P1", channel_names=list(names)
+                tmp_path / "in.czi", out_dir, "P1", channel_names=list(names), pixel_size_um=0.325
             )
         assert source.decodes == expected, (
             f"chunks of {chunk_planes} planes: {source.decodes} decodes, expected {expected}"
@@ -581,11 +585,11 @@ def test_a_whole_slide_chunk_still_writes_identical_pixels(monkeypatch, tmp_path
         _chunked_read(patched, array, array.shape, names)
         patched.setattr(convert_image, "write_ome_tiff", _legacy_write)
         ref_path, _ = convert_image.convert_to_ome_tiff(
-            tmp_path / "in.czi", ref_dir, "P1", channel_names=list(names)
+            tmp_path / "in.czi", ref_dir, "P1", channel_names=list(names), pixel_size_um=0.325
         )
     _chunked_read(monkeypatch, array, array.shape, names)
     new_path, _ = convert_image.convert_to_ome_tiff(
-        tmp_path / "in.czi", new_dir, "P1", channel_names=list(names)
+        tmp_path / "in.czi", new_dir, "P1", channel_names=list(names), pixel_size_um=0.325
     )
 
     np.testing.assert_array_equal(tifffile.imread(str(new_path)), tifffile.imread(str(ref_path)))
@@ -606,7 +610,7 @@ def test_a_whole_slide_chunk_is_warned_about_by_name(monkeypatch, tmp_path, capl
 
     with caplog.at_level(logging.WARNING):
         convert_image.convert_to_ome_tiff(
-            tmp_path / "in.czi", tmp_path, "P1", channel_names=list(names)
+            tmp_path / "in.czi", tmp_path, "P1", channel_names=list(names), pixel_size_um=0.325
         )
 
     assert "8 planes" in caplog.text and "one dask chunk" in caplog.text, caplog.text
@@ -622,7 +626,7 @@ def test_a_per_plane_chunked_read_is_not_warned_about(monkeypatch, tmp_path, cap
 
     with caplog.at_level(logging.WARNING):
         convert_image.convert_to_ome_tiff(
-            tmp_path / "in.czi", tmp_path, "P1", channel_names=list(names)
+            tmp_path / "in.czi", tmp_path, "P1", channel_names=list(names), pixel_size_um=0.325
         )
 
     assert "one dask chunk" not in caplog.text

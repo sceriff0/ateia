@@ -17,9 +17,9 @@
 
     This file is now the only place that answers "how does a patient group become a
     registered stream?". Both callers assemble the group their own way — the linear
-    path groups a preprocessed stream with a sized groupKey and resolves
-    allow_auto_reference; add_cycle pairs each new slide with the FROZEN prior
-    reference read out of --prior_outdir — and that difference is real, so grouping
+    path groups a preprocessed stream with a sized groupKey; add_cycle pairs each
+    new slide with the FROZEN prior reference read out of --prior_outdir — and
+    that difference is real, so grouping
     deliberately stays with the callers.
 
     Input:
@@ -30,8 +30,8 @@
                     anything else the classic VALIS_ADAPTER.
 
                     A plain String, not a channel: Nextflow binds workflow `take:`
-                    values verbatim (same pattern as INPUT_CHECK's image_column /
-                    auto_reference). It is an ARGUMENT rather than a read of
+                    values verbatim (same pattern as INPUT_CHECK's image_column).
+                    It is an ARGUMENT rather than a read of
                     params.registration_method so that add_cycle keeps its current,
                     hard-wired VALIS behaviour exactly — workflows/mirage.nf rejects
                     --registration_method tiled in add_cycle mode, and until that
@@ -94,9 +94,10 @@ workflow REGISTER_PATIENT {
     // full GPU StarDist WSI segmentation and discard it.
     //
     // NOTE: unlike the raw ch_preprocessed stream, `items` here comes out of the caller's
-    // grouping closure, so under allow_auto_reference=true it carries that closure's
-    // is_reference: true fill-in (registration.nf) for patients whose CSV marked no
-    // reference. seg_qc.nf's reference/moving branch reads meta.is_reference, so this
+    // grouping closure. Every meta reaching it carries the is_reference the SAMPLESHEET
+    // declared -- nothing is filled in, since auto-promotion was removed and a patient
+    // with no declared reference is now rejected upstream. seg_qc.nf's reference/moving
+    // branch reads meta.is_reference, so this
     // channel is what lets an auto-reference multi-slide patient be scored at all — sourced
     // from the raw stream, that patient's reference branch was empty and it silently
     // produced zero seg-QC output.

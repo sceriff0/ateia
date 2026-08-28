@@ -154,7 +154,7 @@ class TestSplitCountMatchesPrecomputedCount:
         src = _write_multichannel_tiff(tmp_path / "in.tiff", len(channels))
         out = tmp_path / f"out_{'ref' if is_reference else 'mov'}_{len(markers)}"
         saved = split_multichannel_tiff(
-            str(src), str(out), is_reference, list(channels), markers
+            str(src), str(out), is_reference, list(channels), markers, pixel_size=0.325
         )
         assert len(saved) == expected
 
@@ -165,7 +165,7 @@ class TestSplitCountMatchesPrecomputedCount:
             str(tmp_path / "out"),
             False,
             ["CELLTOX", "CD3", "CD8"],
-            ["DAPI", "CELLTOX"],
+            ["DAPI", "CELLTOX"], pixel_size=0.325
         )
         assert sorted(Path(p).name for p in saved) == ["CD3.tiff", "CD8.tiff"]
 
@@ -178,7 +178,7 @@ class TestSplitCountMatchesPrecomputedCount:
             str(tmp_path / "out"),
             False,
             ["CELLTOX_fiducial", "CD3"],
-            ["DAPI", "CELLTOX"],
+            ["DAPI", "CELLTOX"], pixel_size=0.325
         )
         assert [Path(p).name for p in saved] == ["CD3.tiff"]
 
@@ -189,7 +189,7 @@ class TestSplitCountMatchesPrecomputedCount:
             str(tmp_path / "out"),
             True,
             ["CELLTOX", "CD3", "CD8"],
-            ["CELLTOX"],
+            ["CELLTOX"], pixel_size=0.325
         )
         assert sorted(Path(p).name for p in saved) == [
             "CD3.tiff",
@@ -221,7 +221,7 @@ class TestConvertImageNuclearResolution:
 
         monkeypatch.setattr(convert_image, "read_image", _fake_read_image(3))
         _out, output_channels = convert_image.convert_to_ome_tiff(
-            Path("in.ome.tif"), tmp_path, "P001", ["CD8", "DAPI", "CD68"]
+            Path("in.ome.tif"), tmp_path, "P001", ["CD8", "DAPI", "CD68"], pixel_size_um=0.325
         )
         assert output_channels[0] == "DAPI"
         assert set(output_channels) == {"CD8", "DAPI", "CD68"}
@@ -231,7 +231,7 @@ class TestConvertImageNuclearResolution:
 
         monkeypatch.setattr(convert_image, "read_image", _fake_read_image(3))
         _out, output_channels = convert_image.convert_to_ome_tiff(
-            Path("in.ome.tif"), tmp_path, "P001", ["CD8", "CELLTOX", "CD68"]
+            Path("in.ome.tif"), tmp_path, "P001", ["CD8", "CELLTOX", "CD68"], pixel_size_um=0.325
         )
         assert output_channels[0] == "CELLTOX"
 
@@ -241,7 +241,7 @@ class TestConvertImageNuclearResolution:
         monkeypatch.setattr(convert_image, "read_image", _fake_read_image(2))
         with pytest.raises(ValueError, match="nuclear_markers"):
             convert_image.convert_to_ome_tiff(
-                Path("in.ome.tif"), tmp_path, "P001", ["CD8", "CD68"]
+                Path("in.ome.tif"), tmp_path, "P001", ["CD8", "CD68"], pixel_size_um=0.325
             )
 
     def test_single_channel_assumed_nuclear(self, tmp_path, monkeypatch):
@@ -249,7 +249,7 @@ class TestConvertImageNuclearResolution:
 
         monkeypatch.setattr(convert_image, "read_image", _fake_read_image(1))
         _out, output_channels = convert_image.convert_to_ome_tiff(
-            Path("in.ome.tif"), tmp_path, "P001", ["CD8"]
+            Path("in.ome.tif"), tmp_path, "P001", ["CD8"], pixel_size_um=0.325
         )
         assert output_channels == ["CD8"]
 
@@ -258,7 +258,7 @@ class TestConvertImageNuclearResolution:
 
         monkeypatch.setattr(convert_image, "read_image", _fake_read_image(2))
         _out, output_channels = convert_image.convert_to_ome_tiff(
-            Path("in.ome.tif"), tmp_path, "P001", ["CD8", "SMA"], nuclear_markers=["SMA"]
+            Path("in.ome.tif"), tmp_path, "P001", ["CD8", "SMA"], nuclear_markers=["SMA"], pixel_size_um=0.325
         )
         assert output_channels[0] == "SMA"
 
@@ -295,7 +295,7 @@ class TestKeepChannels:
             is_reference=False,
             channel_names=["CELLTOX", "CD8"],
             nuclear_markers=["DAPI", "CELLTOX"],
-            keep_channels=["CELLTOX", "CD8"],
+            keep_channels=["CELLTOX", "CD8"], pixel_size=0.325
         )
         assert sorted(p.stem for p in out.glob("*.tiff")) == ["CD8", "CELLTOX"]
 
@@ -308,7 +308,7 @@ class TestKeepChannels:
             is_reference=False,
             channel_names=["KI67", "FOXP3"],
             nuclear_markers=["DAPI", "CELLTOX"],
-            keep_channels=["FOXP3"],
+            keep_channels=["FOXP3"], pixel_size=0.325
         )
         assert sorted(p.stem for p in out.glob("*.tiff")) == ["FOXP3"]
 
@@ -320,7 +320,7 @@ class TestKeepChannels:
             is_reference=False,
             channel_names=["CellTox"],
             nuclear_markers=["DAPI", "CELLTOX"],
-            keep_channels=["celltox"],
+            keep_channels=["celltox"], pixel_size=0.325
         )
         assert [p.stem for p in out.glob("*.tiff")] == ["CellTox"]
 
@@ -332,6 +332,6 @@ class TestKeepChannels:
             str(out),
             is_reference=False,
             channel_names=["CELLTOX", "CD8"],
-            nuclear_markers=["DAPI", "CELLTOX"],
+            nuclear_markers=["DAPI", "CELLTOX"], pixel_size=0.325
         )
         assert sorted(p.stem for p in out.glob("*.tiff")) == ["CD8"]

@@ -105,9 +105,13 @@
                     "default": false
                 },
                 "pixel_size": {
-                    "type": "number",
-                    "description": "Pixel size in micrometers.",
-                    "default": 0.325
+                    "type": [
+                        "number",
+                        "string"
+                    ],
+                    "description": "Micrometres per pixel. NO DEFAULT: pass a positive number, or 'auto' to read PhysicalSizeX from each image's own OME metadata (which errors if the image carries no usable scale). Owns every micrometre conversion in the pipeline.",
+                    "pattern": "^(auto|[0-9]*\\.?[0-9]+([eE][-+]?[0-9]+)?)$",
+                    "exclusiveMinimum": 0
                 }
             }
         },
@@ -218,11 +222,6 @@
                         1,
                         2
                     ]
-                },
-                "allow_auto_reference": {
-                    "type": "boolean",
-                    "description": "Allow automatic reference selection: when a patient has no is_reference=true row, promote its FIRST samplesheet row. Applies at --start preprocessing ONLY -- at a later entry point the samplesheet is a checkpoint CSV this pipeline wrote, which already names the reference, and inferring one there would silently register against a different slide than the run that produced the checkpoint.",
-                    "default": false
                 },
                 "reg_jvm_heap_gb": {
                     "type": [
@@ -486,7 +485,7 @@
                 "expanded_quantification": {
                     "type": "boolean",
                     "description": "With quantify_compartments, also emit Mean and Sum (integrated density) per compartment; per-compartment Median is always emitted. Requires quantify_compartments.",
-                    "default": true
+                    "default": false
                 },
                 "simplify_tolerance": {
                     "type": "number",
@@ -693,13 +692,11 @@
             "properties": {
                 "max_memory": {
                     "type": "string",
-                    "description": "Maximum memory limit.",
-                    "default": "700.GB"
+                    "description": "Maximum memory limit."
                 },
                 "max_cpus": {
                     "type": "integer",
-                    "description": "Maximum CPU limit.",
-                    "default": 128
+                    "description": "Maximum CPU limit."
                 },
                 "max_time": {
                     "type": "string",
@@ -714,20 +711,30 @@
                     "default": 5
                 },
                 "max_forks": {
-                    "type": ["integer", "null"],
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
                     "description": "Maximum concurrent tasks per process. Also an upper bound on every per-process maxForks in conf/modules.config, so lowering it throttles every module. null = derive from concurrency.",
                     "help_text": "Paired with queue_size, which caps concurrency across the WHOLE pipeline. The lower of the two binds: at the defaults max_forks (5, from concurrency) is far below queue_size (20), so raising queue_size alone has no effect. Raise max_forks (or concurrency), or both.",
                     "minimum": 1,
                     "default": null
                 },
                 "queue_size": {
-                    "type": ["integer", "null"],
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
                     "description": "Maximum concurrent tasks across the whole pipeline (executor.queueSize). null = derive from concurrency (concurrency * 4).",
                     "help_text": "This is normally the binding constraint on concurrency, not max_forks -- except at the shipped defaults, where max_forks (5) is the smaller of the two and binds instead. The shipped default of 20 is deliberately conservative for a shared scheduler.",
                     "minimum": 1,
                     "default": null
                 }
-            }
+            },
+            "required": [
+                "max_cpus",
+                "max_memory"
+            ]
         }
     },
     "allOf": [

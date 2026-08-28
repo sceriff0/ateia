@@ -266,7 +266,7 @@ def test_split_multichannel_reads_one_channel_at_a_time(tmp_path, monkeypatch):
         str(out_dir),
         is_reference=True,
         channel_names=list(channel_names),
-        nuclear_markers=["DAPI"],
+        nuclear_markers=["DAPI"], pixel_size=0.325
     )
 
     assert str(image_path) in seen_open_paths, "image never went through open_lazy"
@@ -392,7 +392,7 @@ def test_split_multichannel_negative_clip_stats_logged_once_for_whole_image(
             str(out_dir),
             is_reference=False,
             channel_names=list(channel_names),
-            nuclear_markers=["DAPI"],
+            nuclear_markers=["DAPI"], pixel_size=0.325
         )
 
     clipped_lines = [
