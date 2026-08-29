@@ -18,7 +18,9 @@ import tifffile
 
 # Add path for utils
 sys.path.insert(0, str(Path(__file__).parent / "utils"))
+
 from logger import configure_logging, get_logger
+from pixel_size import resolve_pixel_size
 from tiled_io import open_lazy
 from validation import StreamingWrappedValues
 
@@ -1375,15 +1377,19 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--physical-size-x",
-        type=float,
-        default=0.325,
-        help="Pixel size in X (micrometers, default: 0.325)",
+        # str, not float: may be the literal 'auto', resolved against the first channel
+        # TIFF in --input-dir. No default -- see nextflow.config's pixel_size note.
+        type=str,
+        default=None,
+        help="Pixel size in X (micrometres), or 'auto' to read it from the input",
     )
     parser.add_argument(
         "--physical-size-y",
-        type=float,
-        default=0.325,
-        help="Pixel size in Y (micrometers, default: 0.325)",
+        # str, not float: may be the literal 'auto', resolved against the first channel
+        # TIFF in --input-dir. No default -- see nextflow.config's pixel_size note.
+        type=str,
+        default=None,
+        help="Pixel size in Y (micrometres), or 'auto' to read it from the input",
     )
     parser.add_argument(
         "--pyramid-resolutions",
@@ -1417,6 +1423,13 @@ def main() -> int:
     # reported whether an OPTIONAL fast path was open; the lazy read is mandatory now, so
     # a missing zarr is an ImportError at the first read rather than a line in the log.
     args = parse_args()
+
+    # 'auto' reads the scale off the first single-channel TIFF SPLIT_CHANNELS wrote;
+    # they all came from one slide, so any of them carries the same header.
+    _tiles = sorted(Path(args.input_dir).glob("*.tif")) + sorted(Path(args.input_dir).glob("*.tiff"))
+    _probe = str(_tiles[0]) if _tiles else None
+    args.physical_size_x = resolve_pixel_size(args.physical_size_x, _probe, source=args.input_dir)
+    args.physical_size_y = resolve_pixel_size(args.physical_size_y, _probe, source=args.input_dir)
     compression = None if args.compression == "none" else args.compression
 
     # Set compression-specific arguments

@@ -14,12 +14,12 @@
 
     All three linear entry points (`--start preprocessing|registration|
     postprocessing`) and the add_cycle path use this, differing only in which
-    column holds the image to carry forward and in the `auto_reference` flag.
+    column holds the image to carry forward.
 
     NOTE on the `take:` values: Nextflow binds workflow inputs verbatim, so
-    `samplesheet`, `image_column` and `auto_reference` arrive as the plain
-    String/boolean the caller passed — not as channels. Only `emit:` values must
-    be channels, which is why the counts leave here as a value channel.
+    `samplesheet` and `image_column` arrive as the plain String the caller
+    passed — not as channels. Only `emit:` values must be channels, which is why
+    the counts leave here as a value channel.
 ================================================================================
 */
 
@@ -27,8 +27,6 @@ workflow INPUT_CHECK {
     take:
     samplesheet     // String  : path to the samplesheet CSV (already validated by CsvUtils)
     image_column    // String  : column holding the image this step consumes
-    auto_reference  // boolean : params.allow_auto_reference on the linear path; false for add_cycle,
-                    //           whose reference is the prior run's and never a row in this sheet
 
     main:
 
@@ -36,10 +34,10 @@ workflow INPUT_CHECK {
     // Callers run CsvUtils.validateInputCSV / validateInputSemantics before getting
     // here, so the sheet is known parseable at this point.
     def patient_counts = CsvUtils.countImagesPerPatient(samplesheet)
-    def channel_counts = CsvUtils.countChannelsPerPatient(samplesheet, image_column, params.nuclear_markers, auto_reference)
+    def channel_counts = CsvUtils.countChannelsPerPatient(samplesheet, image_column, params.nuclear_markers)
     // The per-SLIDE emit-set. channel_counts above is derived from this same resolver,
     // so the group size and the files that arrive cannot disagree.
-    def keep_channels_by_slide = CsvUtils.resolveKeptChannelsPerSlide(samplesheet, image_column, params.nuclear_markers, auto_reference)
+    def keep_channels_by_slide = CsvUtils.resolveKeptChannelsPerSlide(samplesheet, image_column, params.nuclear_markers)
 
     // THE reference decision, made once, here, from the samplesheet -- before any
     // channel exists and therefore before anything can depend on task timing.
@@ -48,7 +46,7 @@ workflow INPUT_CHECK {
     // see CsvUtils.resolveReferenceRows for what that cost. Resolving here also puts
     // it upstream of the first checkpoint writer, which is what lets the resolved
     // `is_reference=true` reach csv/preprocessed.csv instead of being lost.
-    def reference_image = CsvUtils.resolveReferenceRows(samplesheet, image_column, auto_reference)
+    def reference_image = CsvUtils.resolveReferenceRows(samplesheet, image_column)
     // Declared union -- FINAL_QC's run_summary.json manifest only, NEVER meta.channels_count.
     // See CsvUtils.countDeclaredChannelsPerPatient's doc for why the manifest cannot share
     // channel_counts' source.

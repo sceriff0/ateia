@@ -101,7 +101,7 @@ P1,ref.tiff,DAPI|KI67|CD20,true
 P1,cyc2.tiff,CELLTOX|CD8,false
 P1,cyc3.tiff,CELLTOX|FOXP3,false
 '''
-    def keep = CsvUtils.resolveKeptChannelsPerSlide(keepCsv.path, 'image', ['DAPI','CELLTOX'], false)
+    def keep = CsvUtils.resolveKeptChannelsPerSlide(keepCsv.path, 'image', ['DAPI','CELLTOX'])
     assert keep['P1'][Meta.identityFor('P1', 'ref.tiff', 0, [:])]  == ['DAPI', 'KI67', 'CD20']
     assert keep['P1'][Meta.identityFor('P1', 'cyc2.tiff', 0, [:])] == ['CELLTOX', 'CD8']  // CELLTOX unclaimed -> KEPT
     assert keep['P1'][Meta.identityFor('P1', 'cyc3.tiff', 0, [:])] == ['FOXP3']           // CELLTOX claimed by cyc2
@@ -117,7 +117,7 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
 P2,cyc2.tiff,DAPI|CD8,false
 P2,ref.tiff,DAPI|KI67,true
 '''
-    def lateRef = CsvUtils.resolveKeptChannelsPerSlide(keepLateRef.path, 'image', ['DAPI','CELLTOX'], false)
+    def lateRef = CsvUtils.resolveKeptChannelsPerSlide(keepLateRef.path, 'image', ['DAPI','CELLTOX'])
     assert lateRef['P2'][Meta.identityFor('P2', 'ref.tiff', 0, [:])]  == ['DAPI', 'KI67']
     assert lateRef['P2'][Meta.identityFor('P2', 'cyc2.tiff', 0, [:])] == ['CD8']   // DAPI already claimed by the reference
     keepLateRef.delete()
@@ -129,7 +129,7 @@ P2,ref.tiff,DAPI|KI67,true
 P3,cyc4.tiff,DAPI|CELLTOX|CD8,false
 '''
     def seeded = CsvUtils.resolveKeptChannelsPerSlide(
-        keepPrior.path, 'image', ['DAPI','CELLTOX'], false, ['P3': ['DAPI', 'KI67']])
+        keepPrior.path, 'image', ['DAPI','CELLTOX'], ['P3': ['DAPI', 'KI67']])
     assert seeded['P3'][Meta.identityFor('P3', 'cyc4.tiff', 0, [:])] == ['CELLTOX', 'CD8']  // DAPI pre-claimed; CELLTOX new
     keepPrior.delete()
 
@@ -146,11 +146,11 @@ P4,/data/c1/slide.tiff,DAPI|CD3,true
 P4,/data/c2/slide.tiff,DAPI|CD8,false
 '''
     def dupStemCounts = CsvUtils.stemCountsPerPatient(dupCsv.path, 'image')
-    def dup = CsvUtils.resolveKeptChannelsPerSlide(dupCsv.path, 'image', ['DAPI','CELLTOX'], false)
+    def dup = CsvUtils.resolveKeptChannelsPerSlide(dupCsv.path, 'image', ['DAPI','CELLTOX'])
     assert dup['P4'].size() == 2                              // two rows, two entries
     assert dup['P4'][Meta.identityFor('P4', '/data/c1/slide.tiff', 0, [stemCounts: dupStemCounts])] == ['DAPI', 'CD3']  // the reference claims DAPI
     assert dup['P4'][Meta.identityFor('P4', '/data/c2/slide.tiff', 1, [stemCounts: dupStemCounts])] == ['CD8']          // DAPI already claimed
-    assert CsvUtils.countChannelsPerPatient(dupCsv.path, 'image', ['DAPI','CELLTOX'], false)['P4'] == 3
+    assert CsvUtils.countChannelsPerPatient(dupCsv.path, 'image', ['DAPI','CELLTOX'])['P4'] == 3
     dupCsv.delete()
 
     // RAW-CELL COLLISION -- THE BUG THIS TASK FIXES. Two rows of one patient can share
@@ -173,14 +173,14 @@ P6,same.tiff,DAPI,false
     def rawDupId0 = Meta.identityFor('P6', 'same.tiff', 0, [stemCounts: rawDupStemCounts])
     def rawDupId1 = Meta.identityFor('P6', 'same.tiff', 1, [stemCounts: rawDupStemCounts])
     assert rawDupId0 != rawDupId1 : 'two rows sharing a raw cell must still get distinct identities'
-    def rawDupKept = CsvUtils.resolveKeptChannelsPerSlide(rawDupCsv.path, 'image', ['DAPI','CELLTOX'], false)
+    def rawDupKept = CsvUtils.resolveKeptChannelsPerSlide(rawDupCsv.path, 'image', ['DAPI','CELLTOX'])
     assert rawDupKept['P6'].size() == 2 : 'both rows must produce their own entry, not one overwriting the other'
     assert rawDupKept['P6'].values().every { it != null } : 'the collapse bug left a slide with no entry at all'
     assert rawDupKept['P6'][rawDupId0] == ['DAPI', 'CD3']
     assert rawDupKept['P6'][rawDupId1] == []  // legitimately empty: DAPI already claimed by the reference
     def rawDupFlat = rawDupKept['P6'].values().flatten()
     assert rawDupFlat.size() == 2 : 'the collapse bug summed this to 0 (second row overwrote the first with [])'
-    assert CsvUtils.countChannelsPerPatient(rawDupCsv.path, 'image', ['DAPI','CELLTOX'], false)['P6'] == 2
+    assert CsvUtils.countChannelsPerPatient(rawDupCsv.path, 'image', ['DAPI','CELLTOX'])['P6'] == 2
     rawDupCsv.delete()
 
     // NOTE: the block above only proves resolveKeptChannelsPerSlide's OWN internal
@@ -225,12 +225,12 @@ P8,other.tiff,CD20,false
 P5,ref.tiff,DAPI|PANCK|SMA,true
 P5,mov1.tiff,DAPI,false
 '''
-    def emptyKeep = CsvUtils.resolveKeptChannelsPerSlide(emptyCsv.path, 'image', ['DAPI','CELLTOX'], false)
+    def emptyKeep = CsvUtils.resolveKeptChannelsPerSlide(emptyCsv.path, 'image', ['DAPI','CELLTOX'])
     def emptyMov1Id = Meta.identityFor('P5', 'mov1.tiff', 0, [:])
     assert emptyKeep['P5'].containsKey(emptyMov1Id)   // present ...
     assert emptyKeep['P5'][emptyMov1Id] == []         // ... and EMPTY, not the declared list
     assert emptyKeep['P5'][Meta.identityFor('P5', 'ref.tiff', 0, [:])] == ['DAPI', 'PANCK', 'SMA']
-    assert CsvUtils.countChannelsPerPatient(emptyCsv.path, 'image', ['DAPI','CELLTOX'], false)['P5'] == 3
+    assert CsvUtils.countChannelsPerPatient(emptyCsv.path, 'image', ['DAPI','CELLTOX'])['P5'] == 3
     emptyCsv.delete()
 
     // THE invariant countChannelsPerPatient exists to satisfy: the count equals BOTH the
@@ -244,8 +244,8 @@ P1,ref.tiff,DAPI|KI67|CD20,true
 P1,cyc2.tiff,CELLTOX|CD8,false
 P1,cyc3.tiff,CELLTOX|FOXP3,false
 '''
-    def invCounts = CsvUtils.countChannelsPerPatient(invCsv.path, 'image', ['DAPI','CELLTOX'], false)
-    def invKept   = CsvUtils.resolveKeptChannelsPerSlide(invCsv.path, 'image', ['DAPI','CELLTOX'], false)
+    def invCounts = CsvUtils.countChannelsPerPatient(invCsv.path, 'image', ['DAPI','CELLTOX'])
+    def invKept   = CsvUtils.resolveKeptChannelsPerSlide(invCsv.path, 'image', ['DAPI','CELLTOX'])
     def invFlat   = invKept['P1'].values().flatten()
     assert invCounts['P1'] == 6
     assert invCounts['P1'] == invFlat.size()          // == emitted TIFF count (pyramid)

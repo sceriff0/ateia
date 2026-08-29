@@ -46,7 +46,22 @@ mkdir -p "$OUTPUT_DIR"
 # and is accepted unchanged by both engines. Any future boolean parameter this
 # script needs must go in this file, never on the command line.
 PARAMS_FILE="$OUTPUT_DIR/dry_run_params.json"
-printf '{ "dry_run": true }\n' > "$PARAMS_FILE"
+# dry_run exercises the whole validation surface without instantiating a process.
+#
+# pixel_size and the resource ceilings are here because the pipeline now REQUIRES them:
+# pixel_size has no shipped default (a run must assert a scale or ask for 'auto', and these
+# synthetic fixtures carry no OME PhysicalSize), and nf-schema's `required` list for
+# resource_limits rejects a run that sets neither ceiling. Without them every case below
+# dies at launch on the WRONG error -- "pass" cases look like failures, and "fail" cases
+# fail on the missing ceilings instead of the samplesheet problem they are asserting on.
+# The values are arbitrary but legal; nothing here is resource-bound, since dry_run means
+# no process is ever instantiated.
+#
+# Written to a file rather than passed as --params: Nextflow 26 delivers every CLI --param
+# as a String, so the CLI boolean form is rejected by the schema as "[string] but should be
+# [boolean]".
+printf '{ "dry_run": true, "pixel_size": 0.325, "max_cpus": 2, "max_memory": "6.GB" }\n' \
+    > "$PARAMS_FILE"
 
 # Helper function to run a test.
 #

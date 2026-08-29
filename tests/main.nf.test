@@ -202,7 +202,7 @@ nextflow_pipeline {
                 max_memory = '6.GB'
                 seg_gpu = false
 
-                preproc_tile_size = 256
+                preproc_tile_size = 64
             }
         }
 
@@ -378,15 +378,19 @@ nextflow_pipeline {
         }
     }
 
-    test("Should reject no reference when allow_auto_reference=false") {
+    test("Should reject a samplesheet that marks no reference") {
         tag "stub"
 
+        // Unconditional now. This used to be half of a pair -- the other half asserted
+        // that `allow_auto_reference = true` made the same sheet ACCEPTABLE by promoting
+        // the patient's first row. That flag and that promotion are gone, so a sheet
+        // naming no reference is refused on every path but add_cycle's, whose reference
+        // is the prior run's and never a row in its own sheet.
         when {
             params {
                 input = "$projectDir/tests/testdata/invalid_no_ref.csv"
                 outdir = "$outputDir"
                 start = "preprocessing"
-                allow_auto_reference = false
             }
         }
 
@@ -395,17 +399,16 @@ nextflow_pipeline {
         }
     }
 
-    test("Should accept no reference when allow_auto_reference=true") {
+    test("per-patient group sizes are not miscounted when the reference keeps its nuclear channel") {
 
         tag "stub"
         options "-stub"
 
         when {
             params {
-                input = "$projectDir/tests/testdata/invalid_no_ref.csv"
+                input = "$projectDir/tests/testdata/test_input.csv"
                 outdir = "$outputDir"
                 start = "preprocessing"
-                allow_auto_reference = true
 
                 max_cpus = 2
                 max_memory = '6.GB'
@@ -418,10 +421,11 @@ nextflow_pipeline {
                 { assert workflow.success },
                 // The per-patient groupKey sizes come from
                 // CsvUtils.countChannelsPerPatient, which drops the nuclear channel for
-                // NON-reference rows. Under allow_auto_reference no row is marked
-                // reference in the CSV, but registration.nf promotes the patient's first
-                // image, so that slide's nuclear channel IS kept and the count must
-                // include it (5 markers here, not 4). Counting 4 instead would make
+                // NON-reference rows. The REFERENCE keeps its own, so P001 counts
+                // {DAPI,PANCK,SMA} + {CD3,CD8} = 5, not 4. (This case used to reach the
+                // same 5 through --allow_auto_reference promoting an unmarked row; that
+                // flag is gone, so it now runs the shipped path -- a declared reference --
+                // and pins the same arithmetic.) Counting 4 instead would make
                 // groupTuple emit at size and then emit the surplus as a SECOND group —
                 // and the two per-patient consumers do NOT fail the same way:
                 // MERGE_QUANT_CSVS's `.join(ch_morphology, by: 0)` (postprocess.nf) is a

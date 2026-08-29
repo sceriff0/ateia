@@ -106,7 +106,11 @@ import numpy as np  # noqa: E402
 import tifffile  # noqa: E402
 from fov_tiling import fov_overlaps  # noqa: E402
 from logger import configure_logging, get_logger  # noqa: E402
-from pixel_size import read_ome_pixel_size, warn_on_pixel_size_mismatch  # noqa: E402
+from pixel_size import (  # noqa: E402
+    read_ome_pixel_size,
+    resolve_pixel_size,
+    warn_on_pixel_size_mismatch,
+)
 from tiled_io import open_lazy  # noqa: E402
 from validation import StreamingImageStats, StreamingNegativeClip  # noqa: E402
 
@@ -211,7 +215,7 @@ def apply_basic_profiles(
     flatfield_path,
     darkfield_path,
     output_path,
-    pixel_size=0.325,
+    pixel_size=None,
 ):
     """Correct ``image_path`` with the fitted profiles and write the reassembled slide."""
     manifest = json.loads(Path(sidecar_path).read_text())
@@ -419,7 +423,7 @@ def parse_args(argv=None):
         "--darkfield", default=None, help="*-dfp.ome.tif from BASICPY (optional)."
     )
     parser.add_argument("--output", required=True, help="Corrected OME-TIFF to write.")
-    parser.add_argument("--pixel-size", dest="pixel_size", type=float, default=0.325)
+    parser.add_argument("--pixel-size", dest="pixel_size", type=str, default=None)
     parser.add_argument("--log-level", default="INFO")
     return parser.parse_args(argv)
 
@@ -433,7 +437,7 @@ def main(argv=None):
         args.flatfield,
         args.darkfield,
         args.output,
-        pixel_size=args.pixel_size,
+        pixel_size=resolve_pixel_size(args.pixel_size, args.image, source=args.image),
     )
     return 0
 

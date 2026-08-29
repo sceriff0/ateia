@@ -117,7 +117,13 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip setuptools wheel
-          pip install pytest pytest-cov pandas scikit-learn xmltodict
+          # Pinned for the reason .github/workflows/ci.yml gives at its own scikit-learn
+          # pin: bin/utils/cse/functions.py:650 builds its PCA model by assigning fitted
+          # attributes by hand, so it is valid only against the sklearn internals it was
+          # written for. Unpinned, pip resolved 1.7.2 on a 3.10 leg and 1.9.0 on a 3.11 leg
+          # and 1.9.0 made QualityScore come out `nan`. Tracks
+          # containers/segeval/requirements.txt.
+          pip install pytest pytest-cov pandas scikit-learn==1.5.2 xmltodict
           # The imaging stack is pinned to containers/tiled/requirements.txt — the
           # production image that actually runs the tiled path — and installed in one
           # command, exactly as ci.yml's python-tests job does. This gate claims to run

@@ -76,8 +76,7 @@ def test_streaming_stitch_equals_the_whole_image_warp(tmp_path):
             "--out",
             str(out_f),
             "--out-tile",
-            "48",
-        ]
+            "48", "--pixel-size", "0.325"]
     )
 
     streamed = tifffile.imread(str(out_f))

@@ -14,7 +14,7 @@ nextflow_workflow {
 
         when {
             params {
-                preproc_tile_size = 256
+                preproc_tile_size = 64
             }
             workflow {
                 """
@@ -169,7 +169,7 @@ nextflow_workflow {
         when {
             params {
                 outdir = "$outputDir"
-                preproc_tile_size = 256
+                preproc_tile_size = 64
             }
             workflow {
                 """

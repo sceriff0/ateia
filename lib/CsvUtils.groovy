@@ -100,12 +100,6 @@ class CsvUtils {
      *                       straight through to resolveReferenceRows so the reference
      *                       used for counting is the same row registration will use
      * @param nuclearMarkers params.nuclear_markers -- required, never defaulted here
-     * @param autoReference  whether a patient with NO is_reference=true row will have
-     *                       one auto-promoted from its own rows. True mirrors
-     *                       params.allow_auto_reference on the linear path, where
-     *                       registration.nf promotes the patient's first image and so
-     *                       keeps its nuclear channel. FALSE for mode=add_cycle, whose
-     *                       reference is the prior run's and never a row in this sheet.
      *
      * Returns a Map of patient_id -> channel count.
      */
@@ -115,14 +109,21 @@ class CsvUtils {
      *
      * Rules, in order:
      *   1. the row declaring `is_reference=true` wins;
-     *   2. otherwise, when `autoReference`, the patient's FIRST row IN SAMPLESHEET
-     *      ORDER;
-     *   3. otherwise the patient is absent from the returned map -- it has no
+     *   2. otherwise the patient is absent from the returned map -- it has no
      *      reference, which is legitimate for mode='add_cycle' (whose reference is
-     *      the prior run's and never a row in its sheet).
+     *      the prior run's and never a row in its sheet) and an ERROR anywhere else,
+     *      raised by validateInputSemantics with a better message than this could give.
      *
-     * WHY SAMPLESHEET ORDER, AND WHY HERE. This rule used to exist TWICE, resolved
-     * from two different orderings of the same data:
+     * THERE IS NO LONGER A RULE THAT INVENTS A REFERENCE. `--allow_auto_reference` used
+     * to promote a patient's first samplesheet row when no row declared itself, and it
+     * is gone: which slide every other slide is warped onto is the single most
+     * consequential choice in a run, and picking it from row order is a guess wearing a
+     * decision's clothes. Two sheets differing only in row order produced two different
+     * alignments, and nothing downstream recorded that the pipeline had chosen. A
+     * missing reference is now an error, always, on every path but add_cycle's.
+     *
+     * WHY THE DECISION STILL LIVES HERE. The promotion rule this method used to own
+     * existed TWICE, resolved from two different orderings of the same data:
      *
      *   countChannelsPerPatient (below)  promoted rows[0]  -- samplesheet order
      *   subworkflows/local/registration.nf  promoted items[0] -- ARRIVAL order
@@ -137,12 +138,10 @@ class CsvUtils {
      *
      * Resolving at samplesheet-read time also puts the decision UPSTREAM of the first
      * checkpoint writer, which is what lets `is_reference=true` reach
-     * `csv/preprocessed.csv`. It previously did not: registration.nf promoted after
-     * that file was written, so an --allow_auto_reference run emitted an all-false
-     * checkpoint that its own `--start registration` then refused to read.
+     * `csv/preprocessed.csv`.
      *
      * THIS METHOD RESOLVES; IT DOES NOT VALIDATE. "Exactly one reference per patient"
-     * and "no reference is an error unless allowed" stay in validateInputSemantics,
+     * and "no reference is an error unless this is add_cycle" stay in validateInputSemantics,
      * which runs first and has the better messages. Throwing here would break
      * add_cycle, whose zero-reference sheet is by design.
      *
@@ -153,7 +152,7 @@ class CsvUtils {
      *                    (paths are distinct) and for any sheet not listing one image
      *                    twice.
      */
-    static Map<String, String> resolveReferenceRows(String csvPath, String imageColumn, boolean autoReference) {
+    static Map<String, String> resolveReferenceRows(String csvPath, String imageColumn) {
         def file = new File(csvPath)
         if (!file.exists()) return [:]
 
@@ -185,8 +184,8 @@ class CsvUtils {
         rowsByPatient.each { patientId, rows ->
             def declared = rows.find { it[0] }
             if (declared) { resolved[patientId] = declared[1]; return }
-            if (autoReference && rows) resolved[patientId] = rows[0][1]
-            // else: no reference for this patient -- omitted deliberately (rule 3).
+            // else: no reference for this patient -- omitted deliberately (rule 2).
+            // Nothing is promoted in its place; see the note above.
         }
         return resolved
     }
@@ -290,7 +289,7 @@ class CsvUtils {
      *        decision itself no longer branches on it.
      */
     static Map<String, Map<String, List<String>>> resolveKeptChannelsPerSlide(
-            String csvPath, String imageColumn, def nuclearMarkers, boolean autoReference,
+            String csvPath, String imageColumn, def nuclearMarkers,
             Map<String, List<String>> preClaimed = [:]) {
 
         // Validate the parameter shape even though the keep rule does not branch on it: a
@@ -312,7 +311,7 @@ class CsvUtils {
         // WHICH slide is the reference is resolved by resolveReferenceRows, not decided
         // here -- the same reason countChannelsPerPatient asks it rather than promoting
         // rows[0] itself.
-        def referenceImage = resolveReferenceRows(csvPath, imageColumn, autoReference)
+        def referenceImage = resolveReferenceRows(csvPath, imageColumn)
 
         // Meta.identityFor's collision input, computed once from THIS SAME sheet --
         // the identical map input_check.nf computes independently and threads through
@@ -381,7 +380,7 @@ class CsvUtils {
         return result
     }
 
-    static Map<String, Integer> countChannelsPerPatient(String csvPath, String imageColumn, def nuclearMarkers, boolean autoReference) {
+    static Map<String, Integer> countChannelsPerPatient(String csvPath, String imageColumn, def nuclearMarkers) {
         // Every guard the old body carried inline -- missing file, header-only sheet,
         // absent patient_id/channels/<imageColumn> column -- now lives in the resolver,
         // which returns an empty map in each case. Reference resolution likewise: it
@@ -406,7 +405,7 @@ class CsvUtils {
         // This used to union upper-cased names into a HashSet, which gave the
         // distinct-name count but NOT the file count -- correct only while no two slides
         // could emit the same marker.
-        def kept = resolveKeptChannelsPerSlide(csvPath, imageColumn, nuclearMarkers, autoReference)
+        def kept = resolveKeptChannelsPerSlide(csvPath, imageColumn, nuclearMarkers)
         return kept.collectEntries { patientId, perSlide ->
             [patientId, (perSlide.values().sum { it.size() } ?: 0)]
         }
@@ -757,15 +756,18 @@ class CsvUtils {
      *
      * Validates, for every data row: is_reference format, channel list /
      * nuclear-marker presence, and existence of the step's image file. Validates, per
-     * patient: exactly one reference image (zero allowed only when
-     * allow_auto_reference is set; more than one is always ambiguous).
+     * patient: exactly one reference image (zero allowed only for mode=add_cycle,
+     * whose reference is the prior run's; more than one is always ambiguous).
      *
      * @param csv                  path to the input samplesheet
      * @param step                 pipeline start step (selects the path column)
-     * @param allowAutoReference   whether a patient may omit an explicit reference
+     * @param allowNoReference     whether a patient may legitimately declare NO
+     *                             reference. TRUE only for mode=add_cycle. This no
+     *                             longer causes anything to be promoted in its place --
+     *                             it only suppresses the error.
      * @param nuclearMarkers       params.nuclear_markers — required, never defaulted here
      */
-    static void validateInputSemantics(def csv, String step, boolean allowAutoReference, def nuclearMarkers) {
+    static void validateInputSemantics(def csv, String step, boolean allowNoReference, def nuclearMarkers) {
 
         // ParamUtils.STEPS is the single source of truth for "what is a step?"
         // (name / requiredColumns / entryColumn / qcKinds) -- see its header
@@ -822,8 +824,8 @@ class CsvUtils {
             def refs = refCounts[patientId]
             if (refs > 1)
                 throw new IllegalStateException("Multiple reference images found for patient ${patientId} (${refs} found). Exactly one image per patient may set is_reference=true.")
-            if (refs == 0 && !allowAutoReference)
-                throw new IllegalStateException("No reference image found for patient ${patientId}. Set is_reference=true for one image, or run with --allow_auto_reference true (which applies at --start preprocessing ONLY -- at a later entry point the samplesheet is a checkpoint this pipeline wrote and must already name its reference; see ParamUtils.autoReferenceAllowed).")
+            if (refs == 0 && !allowNoReference)
+                throw new IllegalStateException("No reference image found for patient ${patientId}. Set is_reference=true on exactly one of that patient's images. There is no auto-promotion: the reference is the slide every other slide is warped onto, so the pipeline will not choose one for you.")
         }
     }
 }

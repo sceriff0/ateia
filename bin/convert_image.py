@@ -24,13 +24,12 @@ import tifffile
 sys.path.insert(0, str(Path(__file__).parent / "utils"))
 from logger import configure_logging, get_logger
 from metadata import DEFAULT_NUCLEAR_MARKERS, pick_nuclear_index
-from pixel_size import warn_on_pixel_size_mismatch
+from pixel_size import resolve_pixel_size, warn_on_pixel_size_mismatch
 
 logger = get_logger(__name__)
 
 __all__ = ["main"]
 
-PIXEL_SIZE_UM = 0.325
 
 # Format detection
 BIOIO_NATIVE_FORMATS = {".nd2", ".czi", ".lif", ".tif", ".tiff"}
@@ -572,7 +571,7 @@ def convert_to_ome_tiff(
     output_dir: Path,
     patient_id: str,
     channel_names: Optional[List[str]] = None,
-    pixel_size_um: float = PIXEL_SIZE_UM,
+    pixel_size_um: str | float | None = None,
     nuclear_markers: Optional[List[str]] = None,
 ) -> Tuple[Path, List[str]]:
     """Convert image to OME-TIFF with the nuclear/fiducial channel in channel 0.
@@ -651,11 +650,19 @@ def convert_to_ome_tiff(
     # a scale-disagreement warning in QuPath several steps later.
     det_x = metadata.get("physical_pixel_size_x")
     det_y = metadata.get("physical_pixel_size_y")
-    warn_on_pixel_size_mismatch(
-        (det_x, det_y), pixel_size_um, source=input_path.name, logger=logger
+    # 'auto' is resolved from what aicsimageio read off the VENDOR file -- the only
+    # place in the pipeline where the original scanner scale is still available.
+    # read_ome_pixel_size's tifffile path cannot open .czi/.ndpi/.svs, so the numbers
+    # are handed over directly rather than re-read. Absent metadata raises here, which
+    # is the point of 'auto': it promises the real scale or nothing.
+    configured = resolve_pixel_size(
+        pixel_size_um, detected=(det_x, det_y), source=input_path.name, logger=logger
     )
-    px_x = det_x if det_x is not None else pixel_size_um
-    px_y = det_y if det_y is not None else pixel_size_um
+    warn_on_pixel_size_mismatch(
+        (det_x, det_y), configured, source=input_path.name, logger=logger
+    )
+    px_x = det_x if det_x is not None else configured
+    px_y = det_y if det_y is not None else configured
     px_z = metadata.get("physical_pixel_size_z")
 
     # Normalize dimensions to standard OME-TIFF order (C before spatial dims)
@@ -780,7 +787,10 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Comma-separated channel names (optional, reads metadata when omitted)",
     )
-    parser.add_argument("--pixel_size", type=float, default=PIXEL_SIZE_UM)
+    # str, not float: may be the literal 'auto'. Resolved against the metadata
+    # aicsimageio already read off the vendor file -- read_ome_pixel_size's tifffile
+    # path cannot speak .czi/.ndpi/.svs. No default: see nextflow.config's pixel_size.
+    parser.add_argument("--pixel_size", type=str, default=None)
     parser.add_argument(
         "--nuclear-markers",
         nargs="+",
