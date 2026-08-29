@@ -68,8 +68,10 @@ jobs:
           # and 1.9.0 on the 3.11 leg (1.9.0 dropped 3.10), and 1.9.0 made QualityScore come
           # out `nan` while every other metric still matched the golden file to ~1e-8 --
           # so the same unpinned spec passed one matrix leg and failed the other.
-          # This value tracks containers/segeval/requirements.txt, the production image;
-          # tests/test_container_harmonisation.py is what keeps the two from re-diverging.
+          # This value tracks containers/segeval/requirements.txt, the production image.
+          # NOTE: nothing currently ENFORCES that they stay equal --
+          # tests/test_container_harmonisation.py reads only containers/*/requirements.txt
+          # and does not parse this workflow. Keep them in step by hand until it does.
           pip install pytest pytest-cov pandas scikit-learn==1.5.2 xmltodict
           # The imaging stack (numpy/scipy/scikit-image/tifffile/zarr/numcodecs) is
           # pinned to containers/tiled/requirements.txt — the production image that
