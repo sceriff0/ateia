@@ -20,8 +20,19 @@
     `samplesheet` and `image_column` arrive as the plain String the caller
     passed — not as channels. Only `emit:` values must be channels, which is why
     the counts leave here as a value channel.
+
+    PRE-FLIGHT SCALE SCAN. Before `samples` is emitted, every image collected above is
+    handed to PREFLIGHT_SCALE, which reads ONLY OME metadata (never pixel data) to
+    resolve/verify params.pixel_size for the whole batch in one cheap pass -- see
+    bin/preflight_scale.py. `--pixel_size auto` with any slide carrying no usable OME
+    scale fails that task, and `.combine()` below is what turns its single `report`
+    output into a real data dependency on every row of `samples` — so a scale failure
+    blocks before CONVERT_IMAGE (or any other consumer) stages a single byte, rather
+    than surfacing after gigabytes of the run have already been staged.
 ================================================================================
 */
+
+include { PREFLIGHT_SCALE } from '../../modules/local/preflight_scale'
 
 workflow INPUT_CHECK {
     take:
@@ -136,6 +147,20 @@ workflow INPUT_CHECK {
         }
     }
 
+    // Pre-flight scale scan over EVERY image this call collected, before anything
+    // heavier runs. Metadata-only (see PREFLIGHT_SCALE / bin/preflight_scale.py), so
+    // this costs nothing worth gating behind a param.
+    PREFLIGHT_SCALE(ch_samples.map { meta, image -> image }.collect())
+
+    // `combine()` against a single-value channel broadcasts PREFLIGHT_SCALE's one
+    // `report` onto every row -- a real dependency edge, not merely a `.subscribe`
+    // side effect, so Nextflow will not START a downstream consumer of `samples`
+    // (CONVERT_IMAGE included) until PREFLIGHT_SCALE has actually succeeded. The
+    // report value itself is discarded; only the shape `[meta, file]` survives.
+    ch_samples = ch_samples
+        .combine(PREFLIGHT_SCALE.out.report)
+        .map { meta, image, _report -> tuple(meta, image) }
+
     emit:
     // [meta, file] — meta carries images_count and channels_count.
     samples = ch_samples
@@ -156,4 +181,8 @@ workflow INPUT_CHECK {
         channels: channel_counts,
         declared_channels: declared_channel_counts,
     ])
+    // UNIVERSAL_QC_KINDS ('versions', 'size_log') — PREFLIGHT_SCALE now runs a real
+    // process here, so it contributes to FINAL_QC exactly like every other step does.
+    versions  = PREFLIGHT_SCALE.out.versions
+    size_logs = PREFLIGHT_SCALE.out.size_log
 }
