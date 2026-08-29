@@ -19,19 +19,25 @@ channel's tiles are decoded.
 
 ``segment_io.py`` is deliberately its own module, importable without either
 backend's heavy ML stack (stardist/csbdeep for segment.py, cellSAM for
-segment_cellsam.py -- neither installed in CI's python-tests job, confirmed
-by ``python3 -c "import stardist"`` / ``"import csbdeep"`` both raising
-``ModuleNotFoundError`` locally under the same pins CI uses). That is what
-makes the behavioral and equivalence tests below runnable in CI at all
-without decorative skips: they exercise the REAL production read path
-(``segment_io.extract_dapi_channel``) directly.
+segment_cellsam.py). That is what makes the behavioral and equivalence tests
+below runnable in CI at all without decorative skips: they exercise the REAL
+production read path (``segment_io.extract_dapi_channel``) directly.
 
 ``bin/segment_cellsam.py`` itself has no heavy top-level imports (cellSAM is
 imported lazily inside ``run_cellsam``), so it IS importable here, and is
-exercised directly too. ``bin/segment.py`` is not importable in this
-environment (module-level ``from stardist.models import StarDist2D`` /
-``from csbdeep.utils import normalize``); its delegation to ``segment_io`` is
-instead verified by source inspection (``test_segment_py_delegates_to_segment_io_and_drops_memmap``).
+exercised directly too. ``bin/segment.py`` carries module-level
+``from stardist.models import StarDist2D`` / ``from csbdeep.utils import
+normalize``, so whether IT is importable is a property of the ambient
+environment, not of the repo -- measured 2026-08-29: ``import stardist``
+raises ``ModuleNotFoundError`` on CI's Python 3.10 leg, succeeds on the 3.11
+leg (both legs have stardist/csbdeep pip-installed), and raises locally
+(neither package installed at all). Because that answer varies per
+environment, its delegation to ``segment_io`` is verified two ways:
+structurally by source inspection, which runs unconditionally in every
+environment (``test_segment_py_delegates_to_segment_io_and_drops_memmap``),
+plus a stronger behavioral identity check that additionally runs wherever
+the import happens to succeed
+(``test_segment_py_delegation_is_live_when_importable``, skipped otherwise).
 """
 
 from __future__ import annotations
@@ -370,19 +376,32 @@ def test_segment_cellsam_extract_dapi_channel_uses_lazy_path(tmp_path, monkeypat
 # ---------------------------------------------------------------------------
 
 
-def test_segment_py_delegates_to_segment_io_and_drops_memmap():
+def _segment_py_is_importable():
+    """Whether ``bin/segment.py`` can actually be imported in THIS environment.
+
+    It carries module-level `from stardist.models import StarDist2D` and
+    `from csbdeep.utils import normalize`, so this is a property of the ambient
+    install, not of the repo. Measured 2026-08-29: stardist and csbdeep are
+    pip-installed on BOTH of CI's matrix legs, yet `import stardist` raises on
+    the 3.10 leg and succeeds on the 3.11 leg; locally neither is installed at
+    all. Three environments, three answers -- which is exactly why no assertion
+    below is allowed to depend on the outcome.
+    """
     for pkg in ("stardist", "csbdeep"):
         try:
             __import__(pkg)
-        except ImportError:
-            pass
-        else:
-            pytest.fail(
-                f"{pkg} is importable in this environment -- the premise that "
-                "segment.py can't be imported here (and must instead be checked "
-                "structurally) no longer holds; re-evaluate this test."
-            )
+        except Exception:
+            return False
+    return True
 
+
+def test_segment_py_delegates_to_segment_io_and_drops_memmap():
+    """bin/segment.py must delegate its channel read and not decode eagerly.
+
+    Checked STRUCTURALLY (source text) always, because that works in every
+    environment. See _segment_py_is_importable for why an import-dependent
+    premise is not something this test may rest on.
+    """
     src = (REPO_ROOT / "bin" / "segment.py").read_text()
     # The eager whole-image decode ASSIGNMENT itself, not just the substring
     # 'out="memmap"' -- the fix's own explanatory docstring legitimately names
@@ -393,4 +412,27 @@ def test_segment_py_delegates_to_segment_io_and_drops_memmap():
     )
     assert "from segment_io import extract_dapi_channel" in src, (
         "bin/segment.py no longer delegates to segment_io.extract_dapi_channel"
+    )
+
+
+@pytest.mark.skipif(
+    not _segment_py_is_importable(),
+    reason="stardist/csbdeep not importable here; the structural test above is the "
+           "environment-independent check and always runs",
+)
+def test_segment_py_delegation_is_live_when_importable():
+    """The stronger form of the check above, where the environment permits it.
+
+    Deliberately additive: this NEVER replaces the structural assertions, so a
+    change in what pip happens to resolve can only ever ADD coverage here, never
+    remove it. bin/segment.py:32 binds the delegate as
+    `from segment_io import extract_dapi_channel as _extract_dapi_channel_impl`
+    and its wrapper calls that name, so identity against segment_io's function is
+    the real delegation.
+    """
+    import segment  # noqa: PLC0415
+
+    assert segment._extract_dapi_channel_impl is segment_io.extract_dapi_channel, (
+        "bin/segment.py no longer delegates its channel read to "
+        "segment_io.extract_dapi_channel"
     )
