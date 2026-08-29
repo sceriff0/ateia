@@ -61,7 +61,16 @@ jobs:
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt || true
           fi
-          pip install pytest pytest-cov pandas scikit-learn xmltodict
+          # scikit-learn is PINNED, not floating. The vendored CSE subset in bin/utils/cse/
+          # builds its PCA model by ASSIGNING fitted attributes by hand
+          # (functions.py:650 getPCAmodel), so it is only valid against the sklearn internal
+          # contract it was written for. Left unpinned, pip resolved 1.7.2 on the 3.10 leg
+          # and 1.9.0 on the 3.11 leg (1.9.0 dropped 3.10), and 1.9.0 made QualityScore come
+          # out `nan` while every other metric still matched the golden file to ~1e-8 --
+          # so the same unpinned spec passed one matrix leg and failed the other.
+          # This value tracks containers/segeval/requirements.txt, the production image;
+          # tests/test_container_harmonisation.py is what keeps the two from re-diverging.
+          pip install pytest pytest-cov pandas scikit-learn==1.5.2 xmltodict
           # The imaging stack (numpy/scipy/scikit-image/tifffile/zarr/numcodecs) is
           # pinned to containers/tiled/requirements.txt — the production image that
           # actually runs the tiled path — and installed together in one command so
