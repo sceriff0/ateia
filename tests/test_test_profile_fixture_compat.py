@@ -47,3 +47,29 @@ def test_test_profile_tiling_yields_enough_basic_fovs():
         f"BaSiC needs at least {MIN_FOVS_FOR_BASIC} (bin/tile_for_basic.py). Lower "
         f"preproc_tile_size to at most {max(1, FIXTURE_EDGE_PX // 2)}."
     )
+
+
+def test_no_nf_test_overrides_the_tile_size_below_the_basic_minimum():
+    """An nf-test `params {}` block overrides conf/test.config, so it can undo the pin.
+
+    conf/test.config pinning a safe value is not sufficient: six nf-tests set
+    preproc_tile_size in their own params block, three of them `tag "real"`, and those
+    win. That is how the single-FOV failure survived the conf/test.config fix.
+    """
+    offenders = []
+    for path in sorted(REPO.glob("tests/**/*.nf.test")):
+        for lineno, line in enumerate(path.read_text().splitlines(), 1):
+            m = re.match(r"\s*preproc_tile_size\s*=\s*(\d+)", line)
+            if not m:
+                continue
+            tile = int(m.group(1))
+            n_y, n_x = count_fovs((FIXTURE_EDGE_PX, FIXTURE_EDGE_PX), (tile, tile))
+            if n_y * n_x < MIN_FOVS_FOR_BASIC:
+                offenders.append(
+                    f"{path.relative_to(REPO)}:{lineno} sets preproc_tile_size={tile} "
+                    f"-> {n_y * n_x} BaSiC FOV(s) on a {FIXTURE_EDGE_PX}px fixture"
+                )
+    assert not offenders, (
+        "nf-test params blocks override conf/test.config, and these leave BaSiC with "
+        f"fewer than {MIN_FOVS_FOR_BASIC} fields:\n  " + "\n  ".join(offenders)
+    )
