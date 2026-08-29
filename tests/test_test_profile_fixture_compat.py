@@ -17,6 +17,8 @@ TEST_CONFIG = REPO / "conf" / "test.config"
 sys.path.insert(0, str(REPO / "bin"))
 from utils.fov_tiling import count_fovs  # noqa: E402
 
+from tests.nfmodel import nf_test_files  # noqa: E402
+
 # The synthetic fixtures written by tests/testdata/generate_complete_testdata.py.
 FIXTURE_EDGE_PX = 128
 # bin/tile_for_basic.py raises when n_tiles < 2.
@@ -57,7 +59,7 @@ def test_no_nf_test_overrides_the_tile_size_below_the_basic_minimum():
     win. That is how the single-FOV failure survived the conf/test.config fix.
     """
     offenders = []
-    for path in sorted(REPO.glob("tests/**/*.nf.test")):
+    for path in nf_test_files():
         for lineno, line in enumerate(path.read_text().splitlines(), 1):
             m = re.match(r"\s*preproc_tile_size\s*=\s*(\d+)", line)
             if not m:
