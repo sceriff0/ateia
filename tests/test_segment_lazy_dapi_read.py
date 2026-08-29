@@ -379,19 +379,24 @@ def test_segment_cellsam_extract_dapi_channel_uses_lazy_path(tmp_path, monkeypat
 def _segment_py_is_importable():
     """Whether ``bin/segment.py`` can actually be imported in THIS environment.
 
-    It carries module-level `from stardist.models import StarDist2D` and
-    `from csbdeep.utils import normalize`, so this is a property of the ambient
-    install, not of the repo. Measured 2026-08-29: stardist and csbdeep are
-    pip-installed on BOTH of CI's matrix legs, yet `import stardist` raises on
-    the 3.10 leg and succeeds on the 3.11 leg; locally neither is installed at
-    all. Three environments, three answers -- which is exactly why no assertion
-    below is allowed to depend on the outcome.
+    Asks the question LITERALLY -- by importing the module -- rather than probing a
+    hand-listed set of packages. An enumerated list answers a narrower question and
+    drifts: probing top-level ``stardist``/``csbdeep`` returned True on CI's 3.11 leg,
+    where ``import stardist`` succeeds but ``stardist.models`` (bin/segment.py:34)
+    raises ``RuntimeError: Please install TensorFlow``. segment.py also imports
+    dask.array, skimage and tifffile at module level, so any enumeration is a guess
+    about which one fails next.
+
+    Measured 2026-08-29: raises on CI's 3.10 leg, raises on the 3.11 leg (TensorFlow),
+    and the packages are absent entirely on a dev machine -- three environments, three
+    reasons. `except Exception` is deliberate and broader than ImportError: the 3.11
+    failure is a RuntimeError, and a collection-time probe must degrade to skip rather
+    than crash collection of the whole module.
     """
-    for pkg in ("stardist", "csbdeep"):
-        try:
-            __import__(pkg)
-        except Exception:
-            return False
+    try:
+        import segment  # noqa: F401, PLC0415
+    except Exception:
+        return False
     return True
 
 
