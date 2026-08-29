@@ -171,3 +171,30 @@ tests/testdata/expected/reg_checkpoint_columns.txt
 tests/testdata/prior_run/
 tests/testdata/new_cycle.csv
 .superpowers/
+
+# Internal architecture/audit reviews published as Claude Artifacts, not repo docs.
+# Enumerated rather than a `*.html` glob so a future INTENDED root-level HTML is not
+# swallowed silently.
+/architecture-review-2026-08-24.html
+/artifact-imageio-review.html
+/artifact-pipeline-review.html
+/dataflow-architecture-review.html
+/handover-after-completion.html
+/handover-remaining-work.html
+/imageio-architecture-review.html
+/memory-and-format-audit-dev.html
+/memory-architecture-review.html
+/pipeline-performance-audit.html
+/registration-qc-audit.html
+/stare-accuracy-roadmap.html
+/PERF-PLAN.md
+
+# Draft figure, not part of the published supplementary set (docs/figures/*.html).
+docs/figures/failure-schematic.html
+
+# Research notes and literature reviews (analysis inputs, not pipeline docs).
+research/
+
+# Git worktrees. Was ignored only via .git/info/exclude, which is LOCAL and never
+# committed -- so on a fresh clone the whole tree showed up untracked.
+.worktrees/
