@@ -252,6 +252,44 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
     assert invCounts['P1'] == invFlat.toSet().size()  // == distinct names     (quant)
     invCsv.delete()
 
+    // THE SAME INVARIANT, but forced through the ONE case invCsv above never
+    // exercises: a duplicate marker name declared TWICE ON THE SAME ROW (not
+    // across two slides). invCsv's only duplicate, CELLTOX, is claimed by
+    // cyc2 and re-declared by cyc3 -- a CROSS-slide collision. A samplesheet
+    // row's own `channels` cell is free-text and nothing upstream forbids
+    // `DAPI|DAPI|KI67`, so the within-row path through the SAME claimed-set
+    // loop needs its own pin: if a future change replaced the live,
+    // incrementally-updated `claimed` set with one only updated AFTER each
+    // row finishes (e.g. to "parallelise" the per-row scan), cross-slide
+    // dedup would still hold but a same-row repeat would stop being caught,
+    // desynchronising the emitted-file count from the distinct-name count
+    // for exactly the reason this dual invariant exists.
+    //
+    // P9's reference row declares DAPI twice and P9's second row declares
+    // CELLTOX twice -- two independent within-row repeats, one per slide, so
+    // this cannot pass by accident of only one slide being exercised.
+    def dupWithinRowCsv = File.createTempFile('keepdupwithinrow', '.csv')
+    dupWithinRowCsv.text = '''patient_id,image,channels,is_reference
+P9,ref.tiff,DAPI|DAPI|KI67|CD20,true
+P9,cyc2.tiff,CELLTOX|CELLTOX,false
+'''
+    def dupWithinRowKept = CsvUtils.resolveKeptChannelsPerSlide(dupWithinRowCsv.path, 'image', ['DAPI','CELLTOX'])
+    // The repeat is dropped WITHIN the row itself -- not merely deduplicated
+    // later -- so each per-slide keep-list is already free of it.
+    assert dupWithinRowKept['P9'][Meta.identityFor('P9', 'ref.tiff', 0, [:])]  == ['DAPI', 'KI67', 'CD20']
+    assert dupWithinRowKept['P9'][Meta.identityFor('P9', 'cyc2.tiff', 0, [:])] == ['CELLTOX']
+    def dupWithinRowCounts = CsvUtils.countChannelsPerPatient(dupWithinRowCsv.path, 'image', ['DAPI','CELLTOX'])
+    def dupWithinRowFlat   = dupWithinRowKept['P9'].values().flatten()
+    // Naively summing the DECLARED cells (4 + 2 = 6) is exactly the over-count
+    // a within-row repeat would produce if it leaked through -- the four
+    // distinct names below are the number every one of these must agree on.
+    assert dupWithinRowFlat.size() == 4          : 'a same-row repeat leaked through as an extra emitted file'
+    assert dupWithinRowFlat.toSet().size() == 4  : 'a same-row repeat leaked through as an extra distinct name'
+    assert dupWithinRowCounts['P9'] == 4
+    assert dupWithinRowCounts['P9'] == dupWithinRowFlat.size()          // == emitted TIFF count (pyramid)
+    assert dupWithinRowCounts['P9'] == dupWithinRowFlat.toSet().size()  // == distinct names     (quant)
+    dupWithinRowCsv.delete()
+
     // ------------------------------------------------------------------ //
     // ParamUtils — the step vocabulary
     // ------------------------------------------------------------------ //
