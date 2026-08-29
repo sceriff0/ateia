@@ -74,12 +74,22 @@ echo "ok: pyramid/ geojson/ quantification/ qc/ all present"
 # --------------------------------------------------------------------------
 # 3. Intermediates were never written.
 # --------------------------------------------------------------------------
+# A published intermediate lives at exactly <outdir>/<patient>/<kind> -- the same
+# position tests/checkpoint_manifest.nf.test asserts on. The scan is pinned to that
+# depth deliberately: an unbounded `-name` match also hits
+# <patient>/registered/transform/preprocessed/data/, which is VALIS's OWN internal
+# directory layout inside the registrar-pickle transform artifact
+# (conf/modules.config:450-455). That artifact is published UNGATED on purpose -- it
+# is the whole transform for the VALIS backend, the analogue of TILED_SOLVE's
+# manifest.json -- so matching it here reported a leak that does not exist, on every
+# Nextflow version (verified 25.04.7 and 26.04.6, 2026-08-29).
 for kind in converted preprocessed split_channels quantify cell_properties segmentation; do
-    if find "$O" -type d -name "$kind" -mindepth 2 | grep -q .; then
-        if [ -n "$(find "$O" -type d -name "$kind" -mindepth 2 -exec find {} -type f \; 2>/dev/null)" ]; then
-            fail "intermediate '$kind' was published at --cleanup_level=final"
+    while read -r d; do
+        [ -z "$d" ] && continue
+        if [ -n "$(find "$d" -type f 2>/dev/null | head -1)" ]; then
+            fail "intermediate '$kind' was published at --cleanup_level=final ($d)"
         fi
-    fi
+    done < <(find "$O" -mindepth 2 -maxdepth 2 -type d -name "$kind" 2>/dev/null)
 done
 echo "ok: no intermediate was published"
 
