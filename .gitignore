@@ -193,7 +193,13 @@ tests/testdata/new_cycle.csv
 docs/figures/failure-schematic.html
 
 # Research notes and literature reviews (analysis inputs, not pipeline docs).
-research/
+# ENUMERATED, not a bare `research/` directory rule: research/tma-support-2026-07-01.md
+# is TRACKED, and a directory rule shadows it -- ignore-aware tooling (git clean, editors,
+# doc indexers) would then treat a real report as garbage. Same reason the root HTML files
+# are listed one by one.
+/research/implementation-section-revised.md
+/research/pipeline-memory-performance-and-algorithms-2026-08-07.md
+/research/sota-memory-efficient-packages-2026-08-06.md
 
 # Git worktrees. Was ignored only via .git/info/exclude, which is LOCAL and never
 # committed -- so on a fresh clone the whole tree showed up untracked.
