@@ -126,7 +126,7 @@ laptop-viable.
 
 | Process | `cpus` | `memory` (attempt 1) | `time` | Owner | `maxForks` |
 |---|---|---|---|---|---|
-| `TILED_COARSE` | `2` *(label)* | `8 GB × 2^(attempt−1)` *(withName)* | `2.h × attempt` *(label)* | partial | `20` |
+| `TILED_COARSE` | `2` *(label)* | derived from `reg_tiled_coarse_max_dim`, `× attempt` *(withName)* — 48 GB at defaults | `2.h × attempt` *(label)* | partial | `20` |
 | `TILED_REG_TILE` | `2` *(label)* | derived from `reg_tiled_tile` + 2×`reg_tiled_halo`, `× attempt` *(withName)* — 4 GB at defaults | `2.h × attempt` *(label)* | partial | `20` |
 | `TILED_SOLVE` | `1` *(label)* | `1 GB × attempt` *(withName)* | `8.h × attempt` *(label)* | partial | — |
 | `TILED_STITCH` | `4` *(label)* | derived from `reg_tiled_out_tile`, `× attempt` *(withName)* — 4 GB at defaults | `4.h × attempt` *(label)* | partial | `10` |
@@ -192,11 +192,16 @@ are what `tests/test_resource_label_coverage.py` checks for all five of these
 param-derived rows.
 
 The STARE method's memory is bounded. Measured peak RSS on a 16384² 2-channel
-tiled OME-TIFF:
-`TILED_COARSE` 0.91 GB, `TILED_REG_TILE` 1.31 GB, `TILED_SOLVE` < 1.31 GB,
-`TILED_STITCH` 1.35 GB — each set by a parameter (`reg_tiled_coarse_max_dim`,
-`reg_tiled_tile` + `reg_tiled_halo`, `reg_tiled_out_tile`) rather than by slide
-dimensions. A single-task `TILED_REGISTER` alternative used to exist behind a flag; it had
+tiled OME-TIFF: `TILED_REG_TILE` 1.31 GB, `TILED_SOLVE` < 1.31 GB,
+`TILED_STITCH` 1.35 GB — each set by a parameter (`reg_tiled_tile` +
+`reg_tiled_halo`, `reg_tiled_out_tile`) rather than by slide dimensions.
+`TILED_COARSE` is bounded the same way, by `reg_tiled_coarse_max_dim`, but its
+magnitude is no longer small: the 0.91 GB figure measured above was the old
+classical feature detector, and the DISK matcher that replaced it is a U-Net
+whose activation memory is linear in thumbnail AREA — `GB ≈ 1.1 + 7.3 × Mpx`,
+i.e. 3.03 GB at 512 px and 8.78 GB at 1024 px, ~32 GB at the shipped 2048 px
+`high` tier. It stays bounded by a parameter; it is simply a much larger
+coefficient, which is why the tier column moved down (`lib/RegPresets.groovy`). A single-task `TILED_REGISTER` alternative used to exist behind a flag; it had
 no such bound (both whole slides, an all-channel float32 copy and the full warped output
 live at once, budgeted from file size), so it was removed rather than kept as an unbounded
 opt-out.

@@ -87,8 +87,8 @@ def decimation_factor(shapes, max_dim):
     """Return the single integer decimation factor that puts every shape under ``max_dim``.
 
     ``shapes`` is an iterable of ``(H, W)``. One *shared* factor is deliberate: the coarse anchor
-    matches ORB descriptors between the reference and moving thumbnails, so both must sit at a
-    common scale. Squeezing each slide independently under ``max_dim`` would introduce a scale
+    matches learned descriptors between the reference and moving thumbnails, so both must sit at
+    a common scale. Squeezing each slide independently under ``max_dim`` would introduce a scale
     change between the two thumbnails and bake a bogus scale term into M0.
     """
     if max_dim is None or max_dim <= 0:
@@ -128,9 +128,9 @@ def read_decimated(src, index, factor, band_bytes=DEFAULT_BAND_BYTES):
     Always returns float32, unconditionally, for all three of this function's callers, which
     need it for three different reasons:
 
-    - ``bin/tiled_coarse.py``'s ORB path (see ``bin/utils/coarse_align.py:132``): FAST's
-      absolute intensity threshold is only meaningful once the plane is normalised to
-      ``[0, 1]``, which needs a float buffer.
+    - ``bin/tiled_coarse.py``'s anchor path (see ``normalize_intensity`` in
+      ``bin/utils/coarse_align.py``): the learned matcher was trained on images in ``[0, 1]``,
+      and the percentile rescale that puts them there needs a float buffer.
     - ``bin/utils/qc.py``'s ``create_registration_qc``: its only consumer of the result is
       ``autoscale_for_display`` on the way to uint8, and that function's min-max arithmetic
       runs directly on whatever dtype it is handed -- no upfront cast of its own. A narrower

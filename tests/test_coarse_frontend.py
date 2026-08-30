@@ -1,8 +1,14 @@
-"""Tests for the COARSE global-alignment front-end dispatch in bin/utils/coarse_align.py.
+"""Tests for the COARSE global-alignment front-end in bin/utils/coarse_align.py.
 
-Task 5.1: ``estimate_affine`` selects among ``FRONTENDS`` ("orb", "sift", "fourier_mellin",
-"disk_lightglue"). The three CPU front-ends must recover a pure shift; the learned matcher must
-raise a clear, actionable error when torch/kornia are unavailable rather than silently degrading.
+There is exactly ONE front-end now: DISK + LightGlue, reached through
+``estimate_rigid``. The three classical CPU alternatives and the ``estimate_affine``
+dispatch table that selected among them were deleted for v1.0.0 -- a dispatch table with
+one value is dead config, and the deleted three were never the method the paper describes.
+``test_the_deleted_frontends_are_really_gone`` below is what stops one coming back
+without a decision.
+
+The learned matcher must raise a clear, actionable error when torch/kornia are
+unavailable rather than silently degrading.
 
 Import note: coarse_align.py does ``from logger import get_logger`` at module scope (an
 unqualified import resolved against ``bin/utils`` on sys.path directly, the same convention
@@ -11,13 +17,13 @@ module is imported the same way those sibling test files do, rather than via
 ``bin.utils.coarse_align``, which would fail that inner import when this file is run alone.
 
 Fixture note: the roll signs below are ``(-7, +5)``, not the brief's literal ``(+7, -5)``.
-Verified against the untouched, pre-Task-5.1 ``estimate_rigid`` (git HEAD of this branch): with
-``(+7, -5)`` the existing, must-stay-behaviour-preserving ORB implementation recovers
-``(m0[0, 2], m0[1, 2]) == (+4.9, -7.05)`` -- the *opposite* sign of this file's assertions. Doc
-string of ``estimate_rigid``/``_frontend_orb`` is unambiguous ("M0 mapping mov onto ref"), so the
-implementation is correct and the brief's fixture had an inverted sign. Flipping the roll signs
-here (keeping the assertion values exactly as specified) reproduces the intended pure-shift
-recovery check without altering ORB's real, production transform convention.
+Verified against the untouched, pre-Task-5.1 ``estimate_rigid`` (git HEAD of that branch):
+with ``(+7, -5)`` the implementation recovers ``(m0[0, 2], m0[1, 2]) == (+4.9, -7.05)`` --
+the *opposite* sign of this file's assertions. The docstring of ``estimate_rigid`` is
+unambiguous ("M0 mapping mov onto ref"), so the implementation is correct and the brief's
+fixture had an inverted sign. Flipping the roll signs here (keeping the assertion values
+exactly as specified) reproduces the intended pure-shift recovery check without altering
+the real, production transform convention.
 """
 
 from __future__ import annotations
@@ -36,7 +42,7 @@ sys.path.insert(
 )
 pytest.importorskip("skimage")
 
-from coarse_align import FRONTENDS, estimate_affine
+from coarse_align import estimate_rigid
 
 
 @pytest.fixture
@@ -68,26 +74,25 @@ def rect_pair():
     return ref, mov
 
 
-@pytest.mark.parametrize("frontend", ["orb", "sift", "fourier_mellin"])
-def test_cpu_frontends_recover_a_pure_shift(pair, frontend):
-    ref, mov = pair
-    m0, info = estimate_affine(ref, mov, frontend=frontend)
-    np.testing.assert_allclose(m0[0, 2], -5, atol=1.5)
-    np.testing.assert_allclose(m0[1, 2], 7, atol=1.5)
-    assert info["frontend"] == frontend
+def test_the_deleted_frontends_are_really_gone():
+    """A one-value dispatch table is dead config. These three were deleted for v1.0.0;
+    this fails if one is reintroduced without a decision."""
+    import coarse_align
+
+    for gone in (
+        "FRONTENDS",
+        "_FRONTENDS",
+        "estimate_affine",
+        "normalize_for_orb",
+        "_orb_features",
+        "_frontend_orb",
+        "_frontend_sift",
+        "_frontend_fourier_mellin",
+    ):
+        assert not hasattr(coarse_align, gone), f"coarse_align.{gone} still exists"
 
 
-def test_unknown_frontend_is_rejected(pair):
-    ref, mov = pair
-    with pytest.raises(ValueError, match="unknown frontend"):
-        estimate_affine(ref, mov, frontend="magic")
-
-
-def test_disk_lightglue_is_declared_but_optional():
-    assert "disk_lightglue" in FRONTENDS
-
-
-def test_disk_lightglue_raises_a_clear_error_without_torch(pair, monkeypatch):
+def test_the_front_end_raises_a_clear_error_without_torch(pair, monkeypatch):
     import builtins
 
     real = builtins.__import__
@@ -100,11 +105,11 @@ def test_disk_lightglue_raises_a_clear_error_without_torch(pair, monkeypatch):
     monkeypatch.setattr(builtins, "__import__", no_torch)
     ref, mov = pair
     with pytest.raises(RuntimeError, match="torch"):
-        estimate_affine(ref, mov, frontend="disk_lightglue")
+        estimate_rigid(ref, mov)
 
 
 def test_disk_lightglue_recovers_a_pure_shift(pair):
-    """DISK+LightGlue must recover the same shift the CPU front-ends do.
+    """DISK+LightGlue must recover a pure shift.
 
     Skipped when torch/kornia are absent. Task 2 adds them to CI's install, and
     tests/test_disk_test_actually_runs.py then asserts this test is NOT skipped --
@@ -113,12 +118,11 @@ def test_disk_lightglue_recovers_a_pure_shift(pair):
     pytest.importorskip("torch")
     pytest.importorskip("kornia")
     ref, mov = pair
-    m0, info = estimate_affine(ref, mov, frontend="disk_lightglue")
+    m0, residual_px, n_inliers = estimate_rigid(ref, mov)
     np.testing.assert_allclose(m0[0, 2], -5, atol=1.5)
     np.testing.assert_allclose(m0[1, 2], 7, atol=1.5)
-    assert info["frontend"] == "disk_lightglue"
-    assert info["n_inliers"] > 50, f"only {info['n_inliers']} inliers"
-    assert np.isfinite(info["residual_px"]) and info["residual_px"] < 2.0
+    assert n_inliers > 50, f"only {n_inliers} inliers"
+    assert np.isfinite(residual_px) and residual_px < 2.0
 
 
 def test_disk_lightglue_recovers_a_pure_shift_on_a_rectangular_thumbnail(rect_pair):
@@ -133,9 +137,8 @@ def test_disk_lightglue_recovers_a_pure_shift_on_a_rectangular_thumbnail(rect_pa
     pytest.importorskip("torch")
     pytest.importorskip("kornia")
     ref, mov = rect_pair
-    m0, info = estimate_affine(ref, mov, frontend="disk_lightglue")
+    m0, residual_px, n_inliers = estimate_rigid(ref, mov)
     np.testing.assert_allclose(m0[0, 2], -5, atol=1.5)
     np.testing.assert_allclose(m0[1, 2], 7, atol=1.5)
-    assert info["frontend"] == "disk_lightglue"
-    assert info["n_inliers"] > 50, f"only {info['n_inliers']} inliers"
-    assert np.isfinite(info["residual_px"]) and info["residual_px"] < 2.0
+    assert n_inliers > 50, f"only {n_inliers} inliers"
+    assert np.isfinite(residual_px) and residual_px < 2.0

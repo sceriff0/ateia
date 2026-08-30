@@ -4,8 +4,8 @@ The `high | medium | low | custom` vocabulary and the STARE tier values exist in
 place, and not by choice:
 
 * `lib/RegPresets.groovy` -- the single source for the pipeline and the tiled modules.
-* `conf/modules.config` -- TILED_REG_TILE's and TILED_STITCH's `memory = {}` closures and
-  TILED_SOLVE's `ext.args = {}` closure INLINE the table. They have to: `conf/*.config` cannot see
+* `conf/modules.config` -- TILED_COARSE's, TILED_REG_TILE's and TILED_STITCH's `memory = {}`
+  closures and TILED_SOLVE's `ext.args = {}` closure INLINE the table. They have to: `conf/*.config` cannot see
   `lib/*.groovy` at all (the class name resolves silently against ConfigObject and fails only when
   the closure runs), and a shared helper is not expressible in a config file under Nextflow 26's
   strict parser. See the long comment at the top of conf/modules.config.
@@ -120,9 +120,10 @@ def test_parsers_actually_parse():
         assert row, f"RegPresets.STARE['{mode}'] parsed empty"
 
     tables = inlined_tables()
-    assert len(tables) == 3, (
-        f"expected 3 inlined tier tables in conf/modules.config, parsed {len(tables)}. "
-        "TILED_REG_TILE (memory), TILED_STITCH (memory) and TILED_SOLVE (ext.args) each carry one."
+    assert len(tables) == 4, (
+        f"expected 4 inlined tier tables in conf/modules.config, parsed {len(tables)}. "
+        "TILED_COARSE (memory), TILED_REG_TILE (memory), TILED_STITCH (memory) and "
+        "TILED_SOLVE (ext.args) each carry one."
     )
     assert groovy_modes(), "RegPresets.MODES parsed empty"
 

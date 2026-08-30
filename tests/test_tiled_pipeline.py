@@ -23,6 +23,12 @@ sys.path.insert(
 )
 pytest.importorskip("skimage")
 pytest.importorskip("scipy")
+# The COARSE anchor is the learned DISK+LightGlue matcher, so anything reaching
+# ``estimate_rigid`` needs torch + kornia. Without this it RuntimeErrors rather than skipping.
+# CI installs both (tests/test_disk_test_actually_runs.py pins that), so this is a
+# plain-checkout guard, not an escape hatch for CI.
+pytest.importorskip("torch")
+pytest.importorskip("kornia")
 
 from tiled_pipeline import register_slide
 
@@ -58,7 +64,7 @@ def test_register_slide_realigns_a_synthetically_warped_moving_image():
     assert after > before  # registration improved alignment
     assert after > 0.9  # ...to near-perfect correlation
     assert registered.min() >= 0.0  # non-negativity preserved end-to-end
-    assert result["n_inliers"] >= 8  # the coarse ORB anchor found a real consensus
+    assert result["n_inliers"] >= 8  # the coarse anchor found a real consensus
 
 
 def test_a_pure_rigid_shift_needs_no_mesh_the_coarse_anchor_absorbs_it():

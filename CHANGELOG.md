@@ -67,17 +67,26 @@ after that doc and is detailed inline below:
   warns, naming every distinct value and the slides carrying it, when slides in
   one run resolve to genuinely different scales — a legitimate mixed-magnification
   cohort is never refused, only surfaced. See the migration note above.
-- **`reg_tiled_frontend` parameter** (default `'orb'`, STARE/`registration_method=tiled` only) —
-  selects COARSE's global-alignment front-end: `orb` (default, today's behaviour, unchanged),
-  `sift` and `fourier_mellin` (zero-new-dependency CPU alternatives), or `disk_lightglue` (the
-  learned DISK+LightGlue matcher — see below). Wired through
-  `bin/utils/coarse_align.py::estimate_affine` and rendered into `TILED_COARSE`'s command by
-  `conf/modules.config`. **Resume note:** adding `--frontend` to `TILED_COARSE`'s rendered
-  command changes that task's hash, so the *first* `-resume` after upgrading past this change
-  re-runs STARE's whole COARSE-and-downstream registration chain even for runs that never touch
-  `--reg_tiled_frontend` — a one-time cost, not a per-run one.
+- **STARE's COARSE anchor is DISK + LightGlue**, the learned matcher VALIS and the ACROBAT
+  winners use, and it is the only front-end. An interim development iteration of this same
+  Unreleased cycle added a `reg_tiled_frontend` parameter selecting among four front-ends
+  (a classical corner detector, SIFT, Fourier-Mellin and DISK+LightGlue); that parameter is
+  **removed** and never shipped. A dispatch table with one live value is dead config, and the
+  three classical alternatives were not the method the paper describes. There is nothing to
+  migrate — the parameter does not exist in any release — but if you scripted it against a
+  development checkout, drop it: the schema now refuses it.
+  **Consequence, and it is not cosmetic:** DISK is a U-Net, so COARSE's peak memory is now
+  linear in thumbnail AREA (`GB ≈ 1.1 + 7.3 × Mpx`; 3.03 GB at 512 px, 8.78 GB at 1024 px,
+  measured on the pinned stack) rather than nearly flat. Two things follow, both landed here:
+  the `reg_tiled_coarse_max_dim` tier column moves down one step to **2048 / 1024 / 512**
+  (4096 px would need ~123 GB, above `TILED_COARSE`'s whole retry ceiling), and
+  `TILED_COARSE`'s memory request is now DERIVED from the resolved bound instead of a flat
+  8 GB ramp — ~48 GB at the shipped `high` tier, ~5 GB at `low`. **Resume note:**
+  `TILED_COARSE`'s rendered command and its `--max-dim` value both change, so the first
+  `-resume` after upgrading past this change re-runs STARE's whole COARSE-and-downstream
+  registration chain. A one-time cost, not a per-run one.
 - **`torch` + `kornia` and the DISK/LightGlue weights ship inside `bolt3x/mirage-tiled`.**
-  `--reg_tiled_frontend disk_lightglue` needs no profile, no second image and no download at
+  COARSE's learned matcher needs no profile, no second image and no download at
   first use: `containers/tiled` installs `torch==2.3.1` (CPU wheel, from
   `download.pytorch.org/whl/cpu`) and `kornia==0.7.3`, and BAKES both pretrained checkpoints
   (`depth-save.pth`, `disk_lightglue_v0-1_arxiv-pth`) into `TORCH_HOME=/opt/torch` at build

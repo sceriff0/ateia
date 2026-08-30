@@ -296,7 +296,8 @@ def test_param_refs_excludes_map_method_calls():
 # As of 2026-08-25: 32 files discovered. 8 already import tests.nfmodel (the
 # 7 guards Task 1.6 repointed, plus this file). The other 24 are pre-existing
 # private parses not yet repointed -- tracked honestly below as debt, not
-# silently passed.
+# silently passed. 2026-08-30 adds a 33rd, tests/test_no_legacy_frontends.py,
+# which is neither: see FLAT_TREE_SCANNERS immediately below.
 # --------------------------------------------------------------------------
 
 
@@ -310,6 +311,67 @@ def _discover_nf_source_readers() -> list:
         if mentions_source and reads_files:
             found.append(path)
     return found
+
+
+# A DIFFERENT kind of exemption, kept in its own list rather than smuggled into
+# the debt allowlist below, because it is not debt and will never be discharged.
+#
+# A guard that scans the WHOLE TRACKED TREE as flat text for a forbidden token is
+# discovered by the heuristic above (it names a `.nf` path and calls
+# `.read_text()`), but it is not a Nextflow PARSE: it strips no comments, matches
+# no blocks, and asserts the token appears NOWHERE -- in code, strings and
+# comments alike. Every blind spot the model exists to close makes such a guard
+# MISS a hit, never accept one, so repointing it at the model would strictly
+# weaken it. There is also nothing in the model for it to call: it needs every
+# tracked file, not the structure of one.
+#
+# Uniform, mechanically-checked reason, in the same spirit as the debt list
+# below: an entry must actually INVOKE `git ls-files` -- the argv literal, not a
+# mention of it in prose. That distinction is not pedantry: the first draft of
+# test_flat_tree_scanners_are_really_flat searched for the bare string, was fed a
+# file whose subprocess call had been swapped for `git diff --name-only HEAD~1`,
+# and PASSED on the docstring alone. The argv form is the property that makes an
+# entry a whole-tree token scan rather than a parse of a named construct.
+_FLAT_REASON = "whole-tree flat token scan over `git ls-files`, not a Nextflow parse"
+
+FLAT_TREE_SCANNERS = {
+    "tests/test_no_legacy_frontends.py": _FLAT_REASON,
+}
+
+
+def test_flat_tree_scanners_are_really_flat():
+    """Each FLAT_TREE_SCANNERS entry must exist, still be discovered (otherwise the
+    exemption is dead weight and must be removed), enumerate the tracked tree via
+    `git ls-files`, and carry no Nextflow-parsing machinery of its own."""
+    discovered = {p.relative_to(REPO_ROOT).as_posix() for p in _discover_nf_source_readers()}
+    problems = []
+    for rel in FLAT_TREE_SCANNERS:
+        path = REPO_ROOT / rel
+        if not path.is_file():
+            problems.append(f"{rel}: no longer exists -- remove it from FLAT_TREE_SCANNERS")
+            continue
+        if rel not in discovered:
+            problems.append(
+                f"{rel}: no longer reads Nextflow/Groovy source -- remove it from "
+                "FLAT_TREE_SCANNERS"
+            )
+        text = path.read_text()
+        # The argv literal, NOT the bare phrase: a docstring that merely NAMES git
+        # ls-files satisfied an earlier version of this check while the actual call had
+        # been swapped for a diff against HEAD~1. Watched failing before being trusted.
+        if '["git", "ls-files"]' not in text:
+            problems.append(
+                f"{rel}: does not invoke `[\"git\", \"ls-files\"]` to enumerate the tracked "
+                "tree, so it is not a whole-tree flat scan -- it does not qualify for this "
+                "exemption"
+            )
+        for marker in ("withName", "strip_comments", "raw_body"):
+            if marker in text:
+                problems.append(
+                    f"{rel}: mentions {marker!r} -- that is Nextflow parsing, so this file "
+                    "belongs in the model, not in FLAT_TREE_SCANNERS"
+                )
+    assert not problems, "\n".join(problems)
 
 
 # Every entry here carries the SAME reason, deliberately -- this repo has
@@ -394,10 +456,14 @@ def test_no_guard_parses_nextflow_source_privately():
         rel = path.relative_to(REPO_ROOT).as_posix()
         text = path.read_text()
         has_import = "from tests.nfmodel import" in text
-        if not has_import and rel not in UNREPOINTED_NF_SOURCE_READERS:
+        if (
+            not has_import
+            and rel not in UNREPOINTED_NF_SOURCE_READERS
+            and rel not in FLAT_TREE_SCANNERS
+        ):
             offenders.append(
-                f"{rel}: parses Nextflow source without the model, and is not on "
-                "the UNREPOINTED_NF_SOURCE_READERS debt allowlist"
+                f"{rel}: parses Nextflow source without the model, and is on neither the "
+                "UNREPOINTED_NF_SOURCE_READERS debt allowlist nor FLAT_TREE_SCANNERS"
             )
         if private.search(text):
             offenders.append(f"{rel}: hand-rolled block-comment regex")

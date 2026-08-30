@@ -1,14 +1,15 @@
 """Global rigid anchor (M0) estimation for the STARE registration method.
 
 The COARSE step aligns a whole moving slide to the reference with a single affine ``M0``, cheaply,
-on downsampled images. Feature matching (ORB) handles the inter-cycle rotation/translation that a
-translation-only phase correlation could not; the per-tile step later refines the small residual.
+on downsampled images. Learned feature matching (DISK + LightGlue) handles the inter-cycle
+rotation/translation that a translation-only phase correlation could not; the per-tile step later
+refines the small residual.
 
 The numerically load-bearing piece is :func:`estimate_transform_from_matches` — given point
 correspondences it solves for the transform and reports a residual Target Registration Error. It
-is deterministic and unit-tested. :func:`estimate_rigid` wraps it with the ORB feature front-end.
+is deterministic and unit-tested. :func:`estimate_rigid` wraps it with the learned front-end.
 
-Pure NumPy + scikit-image (no VALIS, no JVM).
+NumPy + scikit-image for the geometry, torch + kornia for the matcher. Still no VALIS and no JVM.
 """
 
 from __future__ import annotations
@@ -23,20 +24,11 @@ logger = get_logger(__name__)
 __all__ = [
     "estimate_transform_from_matches",
     "estimate_rigid",
-    "estimate_affine",
-    "FRONTENDS",
-    "normalize_for_orb",
+    "normalize_intensity",
     "scale_transform_to_full_res",
 ]
 
 _MIN_SAMPLES = {"euclidean": 2, "similarity": 2, "affine": 3}
-
-# The four selectable COARSE global-alignment front-ends. "orb" is the default and must stay
-# behaviour-preserving with every run before this change. "sift" and "fourier_mellin" are
-# zero-new-dependency CPU alternatives (skimage ships both already); "disk_lightglue" is the
-# learned matcher VALIS/ACROBAT winners use and needs torch+kornia, which the `:tiled` image
-# now carries.
-FRONTENDS = ("orb", "sift", "fourier_mellin", "disk_lightglue")
 
 
 def _model_class(model):
@@ -135,239 +127,32 @@ def scale_transform_to_full_res(m, factor):
     return m
 
 
-# ORB's `fast_threshold` is an ABSOLUTE intensity difference, and skimage's `img_as_float`
-# rescales only INTEGER inputs -- a float array passes through with its scale untouched. So the
-# threshold is only meaningful on data already in [0, 1]. The planes reaching this module are raw
-# microscopy counts (uint16, 0..65535) widened to float32 by `tiled_io.read_decimated`, where 0.05
-# sits ~6 orders of magnitude below the data range: FAST then fires on ~38% of ALL pixels instead
-# of ~3%, and `corner_peaks`' spacing pass -- quadratic in the candidate count -- turns a ~1 min
-# anchor into a ~5 h one, past TILED_COARSE's 2 h walltime. Measured on a 2048^2 thumbnail:
-# 1.1 s normalised vs 319 s raw; the gap widens with area (~x15.7 per x4 px).
+# The planes reaching this module are raw microscopy counts (uint16, 0..65535) widened to
+# float32 by `tiled_io.read_decimated`. Every consumer here wants them in [0, 1] first, and for
+# a LEARNED matcher that is not a nicety: DISK was trained on images in [0, 1], so raw counts
+# are ~4 orders of magnitude outside its trained input range.
 #
-# Normalising is also a CORRECTNESS fix, not only a speed one: reference and moving come from
-# different imaging cycles with different exposures, so one absolute threshold applied to two
-# different dynamic ranges can yield hundreds of keypoints on one slide and almost none on the
-# other -- a starved or bogus M0, with no error raised.
+# Normalising is also a CORRECTNESS fix, not only a domain-range one: reference and moving come
+# from different imaging cycles with different exposures, so two planes of the same tissue can
+# arrive at wildly different dynamic ranges and match each other far worse than they should --
+# a starved or bogus M0, with no error raised.
 #
 # A percentile window, not `img / img.max()`: one hot pixel (routine in fluorescence) would
-# otherwise compress the whole tissue into the bottom of the range and starve ORB of corners.
-# p99.9 rather than p99 because DAPI nuclei ARE the bright minority -- clipping at p99 saturates
-# the very structure the anchor matches on.
-_ORB_PCT = (1.0, 99.9)
+# otherwise compress the whole tissue into the bottom of the range and leave the matcher almost
+# nothing to work with. p99.9 rather than p99 because DAPI nuclei ARE the bright minority --
+# clipping at p99 saturates the very structure the anchor matches on.
+_NORM_PCT = (1.0, 99.9)
 
 
-def normalize_for_orb(img):
+def normalize_intensity(img):
     """Rescale ``img`` to [0, 1] over a robust percentile window (see the note above)."""
     a = np.asarray(img, dtype=float)
-    lo, hi = (float(v) for v in np.percentile(a, _ORB_PCT))
+    lo, hi = (float(v) for v in np.percentile(a, _NORM_PCT))
     if not (np.isfinite(lo) and np.isfinite(hi)) or hi <= lo:
         lo, hi = float(np.nanmin(a)), float(np.nanmax(a))
     if not (np.isfinite(lo) and np.isfinite(hi)) or hi <= lo:
-        return np.zeros_like(a)  # constant/all-NaN plane: no corners to find
+        return np.zeros_like(a)  # constant/all-NaN plane: nothing to match on
     return np.clip((a - lo) / (hi - lo), 0.0, 1.0)
-
-
-def _orb_features(img, n_keypoints, fast_threshold):
-    from skimage.feature import ORB
-
-    orb = ORB(n_keypoints=n_keypoints, fast_threshold=fast_threshold)
-    orb.detect_and_extract(normalize_for_orb(img))
-    # ORB keypoints are (row, col); the rest of the pipeline is (x, y)
-    return orb.keypoints[:, ::-1], orb.descriptors
-
-
-def _frontend_orb(
-    ref,
-    mov,
-    model="euclidean",
-    n_keypoints=800,
-    fast_threshold=0.05,
-    **kwargs,
-):
-    """ORB + RANSAC feature matching -- today's default COARSE front-end, extracted unchanged.
-
-    Returns ``(M0, info)`` where ``info`` carries ``residual_px`` and ``n_inliers`` from
-    :func:`estimate_transform_from_matches`. :func:`estimate_rigid` is the pre-existing,
-    still-supported entry point and is now a thin reshape over this function.
-
-    Logs each stage as it completes. ORB dominates this step's runtime and its cost is highly
-    non-linear in thumbnail size, so a silent multi-hour stage here is indistinguishable from a
-    hang -- which is exactly how the un-normalised-input regression above presented.
-    """
-    from skimage.feature import match_descriptors
-
-    t0 = time.perf_counter()
-    kp_ref, d_ref = _orb_features(ref, n_keypoints, fast_threshold)
-    t_ref = time.perf_counter() - t0
-    logger.info(
-        f"coarse: ORB reference -> {len(kp_ref)} keypoints in {t_ref:.1f}s "
-        f"({ref.shape[1]}x{ref.shape[0]})"
-    )
-
-    t1 = time.perf_counter()
-    kp_mov, d_mov = _orb_features(mov, n_keypoints, fast_threshold)
-    t_mov = time.perf_counter() - t1
-    logger.info(
-        f"coarse: ORB moving    -> {len(kp_mov)} keypoints in {t_mov:.1f}s "
-        f"({mov.shape[1]}x{mov.shape[0]})"
-    )
-
-    matches = match_descriptors(d_mov, d_ref, cross_check=True)
-    logger.info(
-        f"coarse: {len(matches)} cross-checked matches -> {model} fit "
-        f"(ORB total {t_ref + t_mov:.1f}s)"
-    )
-    if len(matches) < _MIN_SAMPLES[model]:
-        # estimate_transform_from_matches would fall through to an unconstrained .estimate()
-        # and hand back a silently meaningless M0; say so while the slide names are still in
-        # the surrounding log context.
-        logger.warning(
-            f"coarse: only {len(matches)} matches for a {model} fit "
-            f"(needs >= {_MIN_SAMPLES[model]}) -- M0 will be unreliable"
-        )
-
-    src = kp_mov[matches[:, 0]]
-    dst = kp_ref[matches[:, 1]]
-    m, residual, n_inliers = estimate_transform_from_matches(src, dst, model=model, **kwargs)
-    return m, {"residual_px": residual, "n_inliers": n_inliers}
-
-
-def estimate_rigid(
-    ref,
-    mov,
-    model="euclidean",
-    n_keypoints=800,
-    fast_threshold=0.05,
-    **kwargs,
-):
-    """Estimate ``M0`` mapping ``mov`` image coordinates onto ``ref`` via ORB feature matching.
-
-    Returns ``(M0, residual_px, n_inliers)``. Pre-existing entry point, kept for backward
-    compatibility with callers that predate the multi-front-end dispatch (:func:`estimate_affine`)
-    -- it is a thin reshape over :func:`_frontend_orb`, which now holds the real implementation.
-    """
-    m, info = _frontend_orb(
-        ref, mov, model=model, n_keypoints=n_keypoints, fast_threshold=fast_threshold, **kwargs
-    )
-    return m, info["residual_px"], info["n_inliers"]
-
-
-def _frontend_sift(ref, mov, model="euclidean", **kwargs):
-    """SIFT + RANSAC. Zero new dependency: skimage.feature.SIFT ships already.
-
-    SIFT beats ORB on histology; ORB wins only on speed, and COARSE runs ONCE per slide, so
-    speed is worth least exactly here.
-    """
-    from skimage.feature import SIFT, match_descriptors
-
-    def _sift_features(img):
-        sift = SIFT()
-        sift.detect_and_extract(normalize_for_orb(img))
-        # SIFT keypoints are (row, col), like ORB; the rest of the pipeline is (x, y)
-        return sift.keypoints[:, ::-1], sift.descriptors
-
-    t0 = time.perf_counter()
-    kp_ref, d_ref = _sift_features(ref)
-    t_ref = time.perf_counter() - t0
-    logger.info(
-        f"coarse: SIFT reference -> {len(kp_ref)} keypoints in {t_ref:.1f}s "
-        f"({ref.shape[1]}x{ref.shape[0]})"
-    )
-
-    t1 = time.perf_counter()
-    kp_mov, d_mov = _sift_features(mov)
-    t_mov = time.perf_counter() - t1
-    logger.info(
-        f"coarse: SIFT moving    -> {len(kp_mov)} keypoints in {t_mov:.1f}s "
-        f"({mov.shape[1]}x{mov.shape[0]})"
-    )
-
-    matches = match_descriptors(d_mov, d_ref, cross_check=True)
-    logger.info(
-        f"coarse: {len(matches)} cross-checked matches -> {model} fit "
-        f"(SIFT total {t_ref + t_mov:.1f}s)"
-    )
-    if len(matches) < _MIN_SAMPLES[model]:
-        logger.warning(
-            f"coarse: only {len(matches)} matches for a {model} fit "
-            f"(needs >= {_MIN_SAMPLES[model]}) -- M0 will be unreliable"
-        )
-
-    src = kp_mov[matches[:, 0]]
-    dst = kp_ref[matches[:, 1]]
-    m, residual, n_inliers = estimate_transform_from_matches(src, dst, model=model, **kwargs)
-    return m, {"residual_px": residual, "n_inliers": n_inliers}
-
-
-def _frontend_fourier_mellin(ref, mov, model="euclidean", **kwargs):
-    """Log-polar Fourier-Mellin: keypoint-free rotation+scale+translation recovery.
-
-    Uses skimage.transform.warp_polar plus the already-imported phase_cross_correlation. Zero
-    new dependency, and it does not degrade on tissue too sparse to yield keypoints at all.
-
-    Rotation/scale are recovered from the log-polar transform of each image's FFT magnitude
-    spectrum -- the magnitude of a translated image's FFT is unchanged (the Fourier shift
-    theorem), so that stage is translation-invariant and isolates rotation+scale. The residual
-    translation is then recovered directly via phase cross-correlation between the images.
-
-    NOTE: unlike the keypoint front-ends, there is no correspondence set here, so
-    ``n_inliers`` is reported as the sentinel ``-1`` ("not applicable" -- there is no inlier
-    count to report, and the sentinel is negative on purpose so it reads correctly against
-    ``bin/tiled_coarse.py``'s ``n_inliers < 10`` low-inlier warning without tripping it on
-    every run the way a hardcoded ``0`` used to). ``residual_px`` is unconditionally
-    ``float("nan")``: phase_cross_correlation's normalised RMS error (~0-1) is not a
-    pixel-distance RMS, so it is not comparable to the orb/sift residual or to
-    ``reg_tiled_halo`` (a pixel threshold) -- reporting it as a pixel value silently inverted
-    the halo-overrun warning in ``bin/tiled_coarse.py`` (a mis-registered slide could report a
-    "residual" far below the halo and exit 0). NaN is honest and is already handled correctly
-    by that warning's ``not np.isfinite`` branch.
-
-    CAVEAT (unvalidated): the only test exercising this front-end
-    (``tests/test_coarse_frontend.py::test_cpu_frontends_recover_a_pure_shift``) is a pure
-    translation with zero rotation and unit scale, so the log-polar rotation/scale recovery
-    code below executes but its correctness on an actual rotated/scaled pair is unverified.
-    It also applies no window or bandpass filter before the FFT, so on real tissue (not this
-    module's synthetic point fixture) edge leakage will likely dominate the rotation estimate.
-    """
-    from skimage.registration import phase_cross_correlation
-    from skimage.transform import warp_polar
-
-    r = normalize_for_orb(ref)
-    m = normalize_for_orb(mov)
-    if r.shape != m.shape:
-        # log-polar rotation/scale recovery needs a common frame; crop to the shared extent
-        h = min(r.shape[0], m.shape[0])
-        w = min(r.shape[1], m.shape[1])
-        r = r[:h, :w]
-        m = m[:h, :w]
-
-    r_fft_mag = np.abs(np.fft.fftshift(np.fft.fft2(r)))
-    m_fft_mag = np.abs(np.fft.fftshift(np.fft.fft2(m)))
-    radius = max(min(r_fft_mag.shape) // 2, 2)
-    r_polar = warp_polar(r_fft_mag, radius=radius, scaling="log")
-    m_polar = warp_polar(m_fft_mag, radius=radius, scaling="log")
-
-    rs_shift, _rs_error, _ = phase_cross_correlation(r_polar, m_polar, upsample_factor=10)
-    angle_bin, radius_bin = rs_shift
-    n_angle = r_polar.shape[0]
-    rotation_deg = (angle_bin / n_angle) * 360.0
-    klog = radius / np.log(radius)
-    scale = float(np.exp(radius_bin / klog))
-
-    t_shift, _t_error, _ = phase_cross_correlation(r, m, upsample_factor=10)
-    dy, dx = (float(v) for v in t_shift)
-    logger.info(
-        f"coarse: Fourier-Mellin rotation={rotation_deg:+.2f}deg scale={scale:.4f} "
-        f"dx={dx:+.1f}px dy={dy:+.1f}px (log-polar {ref.shape[1]}x{ref.shape[0]})"
-    )
-
-    tform_kwargs = {"rotation": np.deg2rad(-rotation_deg), "translation": (dx, dy)}
-    if model in ("similarity", "affine"):
-        tform_kwargs["scale"] = 1.0 / scale if scale else 1.0
-    tform = _model_class(model)(**tform_kwargs)
-    m0 = np.asarray(tform.params, dtype=float)
-
-    return m0, {"residual_px": float("nan"), "n_inliers": -1}
 
 
 # DISK + LightGlue weights are ~52 MB and building both models dominates a single call.
@@ -400,7 +185,7 @@ def _to_disk_tensor(img, torch):
     [0, 1], and the planes reaching this module are raw microscopy counts widened to
     float32 (0..65535). Feeding those in raw is far outside the trained input range.
     """
-    a = normalize_for_orb(img).astype(np.float32)
+    a = normalize_intensity(img).astype(np.float32)
     return torch.from_numpy(a)[None, None].repeat(1, 3, 1, 1)
 
 
@@ -408,17 +193,17 @@ def _frontend_disk_lightglue(ref, mov, model="euclidean", n_keypoints=2048, **kw
     """DISK + LightGlue -- the learned matcher VALIS and the ACROBAT winners use.
 
     Returns ``(M0, info)`` with ``residual_px`` and ``n_inliers`` from
-    :func:`estimate_transform_from_matches`, exactly like the feature front-ends it
-    replaces, so the reporting contract downstream is unchanged.
+    :func:`estimate_transform_from_matches`, exactly like the classical feature front-ends
+    it replaced, so the reporting contract downstream is unchanged.
 
     MEMORY. DISK is a U-Net: its activation memory scales with image AREA, not with
-    keypoint count, and it is ~20x ORB's peak at equal size (measured on the pinned stack:
-    3.03 GB at 512 px, 8.78 GB at 1024 px -> GB ~= 1.1 + 7.3*Mpx). The thumbnail size this
-    runs on is governed by the STARE `coarse_max_dim` tier (see lib/RegPresets.groovy) --
-    a future task is expected to size TILED_COARSE's memory request off that same bound,
-    but as of this commit the tier and the process memory request are independent and
-    neither has been changed here. Raising the thumbnail bound is a memory decision, not
-    a free accuracy knob.
+    keypoint count (measured on the pinned stack: 3.03 GB at 512 px, 8.78 GB at 1024 px ->
+    GB ~= 1.1 + 7.3*Mpx). The thumbnail size this runs on is governed by the STARE
+    `coarse_max_dim` tier (see lib/RegPresets.groovy), and TILED_COARSE's memory request is
+    now sized off that SAME bound with that same formula -- the tier table is inlined into
+    the `memory` closure in conf/modules.config because conf/*.config cannot see
+    lib/*.groovy. So raising the thumbnail bound raises the reservation too; it is still a
+    memory decision, not a free accuracy knob, but it is no longer a silent one.
     """
     # BOTH imports live here, inside this function, for two reasons: a torch-present /
     # kornia-absent environment must still get the actionable RuntimeError rather than a
@@ -490,32 +275,20 @@ def _frontend_disk_lightglue(ref, mov, model="euclidean", n_keypoints=2048, **kw
         )
 
     # LightGlue's `matches` column 0 indexes image0 (reference), column 1 indexes image1
-    # (moving). DISK keypoints are ALREADY (x, y) -- unlike skimage's ORB/SIFT, which are
-    # (row, col) and needed a [:, ::-1] reversal. Reversing these silently transposes M0.
+    # (moving). DISK keypoints are ALREADY (x, y) -- unlike skimage's classical detectors,
+    # whose keypoints are (row, col) and needed a [:, ::-1] reversal. This module used to
+    # carry that reversal for its old front-ends; applying it here silently transposes M0.
     src = kp_mov[matches[:, 1]]
     dst = kp_ref[matches[:, 0]]
     m, residual, n_inliers = estimate_transform_from_matches(src, dst, model=model, **kwargs)
     return m, {"residual_px": residual, "n_inliers": n_inliers}
 
 
-_FRONTENDS = {
-    "orb": _frontend_orb,
-    "sift": _frontend_sift,
-    "fourier_mellin": _frontend_fourier_mellin,
-    "disk_lightglue": _frontend_disk_lightglue,
-}
+def estimate_rigid(ref, mov, model="euclidean", **kwargs):
+    """Estimate ``M0`` mapping ``mov`` image coordinates onto ``ref``.
 
-
-def estimate_affine(ref, mov, frontend="orb", **kw):
-    """Estimate ``M0`` mapping ``mov`` image coordinates onto ``ref`` via a selectable front-end.
-
-    Returns ``(M0, info)`` where ``info`` is a dict that always carries ``frontend`` plus
-    whatever the chosen front-end reports (``residual_px``, ``n_inliers``). ``frontend`` selects
-    among :data:`FRONTENDS`; ``orb`` is the default and preserves this module's pre-existing
-    behaviour.
+    Returns ``(M0, residual_px, n_inliers)``. The module's single entry point: a thin
+    reshape over :func:`_frontend_disk_lightglue`, which holds the real implementation.
     """
-    if frontend not in _FRONTENDS:
-        raise ValueError(f"unknown frontend {frontend!r}; expected one of {FRONTENDS}")
-    m0, info = _FRONTENDS[frontend](ref, mov, **kw)
-    info["frontend"] = frontend
-    return m0, info
+    m, info = _frontend_disk_lightglue(ref, mov, model=model, **kwargs)
+    return m, info["residual_px"], info["n_inliers"]

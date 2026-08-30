@@ -4,7 +4,7 @@ Built from the same features/correlations the registration itself uses, so it ne
 ground truth (exactly what makes VALIS's ``error_df`` intrinsic). Two entry points share this
 builder so the ``_tre.json`` has one shape:
 
-  * ``coarse_tre_px``     — RMS residual of the ORB matches after the global rigid M0 (rigid-stage
+  * ``coarse_tre_px``     — RMS residual of the DISK matches after the global rigid M0 (rigid-stage
                             TRE; directly comparable to VALIS's rigid error).
   * ``rigid_tre_px``      — percentiles of the per-tile rigid-stage misalignment, plus the full
                             per-tile ``tiles`` list = a *spatial* TRE heatmap VALIS does not give.

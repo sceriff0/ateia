@@ -192,9 +192,11 @@ ALLOWED_LINES = {
         # widen. (Re-pin from the file, not by guessing:
         # `grep -n "params.expanded_quantification ?" conf/modules.config`.)
         # 1103 -> 1108 when Task 5.1's COARSE front-end selector landed: TILED_COARSE's
-        # withName block gained a 4-line comment plus
-        # `ext.args = { "--frontend ${params.reg_tiled_frontend}" }` (+5 lines total)
-        # above this line. 1103 + 5 = 1108.
+        # withName block gained a 4-line comment plus a one-line `ext.args` closure
+        # (+5 lines total) above this line. 1103 + 5 = 1108. (That selector, and the
+        # parameter it read, were deleted again for v1.0.0 -- see the 1277 -> 1298 entry
+        # below. The line names are not quoted here any more because
+        # tests/test_no_legacy_frontends.py forbids naming them outside its allow-list.)
         # 1108 -> 1136 when Task 5.4 published the two STARE/VALIS benchmark-scoring
         # artifacts: REGISTER's publishDir gained a third array entry for the VALIS
         # registrar pickle (+11), TILED_REG_TILE's shared block comment was rewritten
@@ -265,7 +267,14 @@ ALLOWED_LINES = {
         # why `--pixel-size ${meta.pixel_size}` replaced `${params.pixel_size}` there.
         # Re-pinned directly from the file:
         #   grep -n "params.expanded_quantification ?" conf/modules.config  ->  1277
-        1277: (
+        # 1277 -> 1298 when the legacy COARSE front-ends were deleted and TILED_COARSE's
+        # memory request stopped being a flat ramp: net +21 above this line, being +5 in
+        # the block comment (rewritten for the U-Net cost curve), +21 replacing the
+        # one-line `memory = { 8.GB * ... }` with the derived closure and its inlined
+        # tier table, and -5 deleting the front-end selector comment and its `ext.args`.
+        # 1277 + 5 + 21 - 5 = 1298. Re-pinned directly from the file:
+        #   grep -n "params.expanded_quantification ?" conf/modules.config  ->  1298
+        1298: (
             "ext.args = { params.expanded_quantification ? '--expanded' : "
             "'' } -- conf/*.config closures cannot see lib/*.groovy classes, "
             "so ext.args must read params raw here."

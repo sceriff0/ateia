@@ -472,6 +472,7 @@ DERIVED_MEMORY_PARAMS = (
     "reg_tiled_tile",
     "reg_tiled_halo",
     "reg_tiled_out_tile",
+    "reg_tiled_coarse_max_dim",
     "preproc_tile_size",
     "pyramid_resolutions",
     "pyramid_scale",

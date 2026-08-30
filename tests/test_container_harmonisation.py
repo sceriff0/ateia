@@ -521,8 +521,10 @@ def test_tiled_container_torch_kornia_imports_are_confined_to_disk_lightglue():
     ``bin/tiled_coarse.py`` -- UNIMPORTABLE anywhere torch is absent. That is not hypothetical.
     ``coarse_align.py`` is imported by the tiled oracle (``bin/utils/tiled_pipeline.py``) and by
     this test suite, and it must keep importing on a plain checkout with no ML stack, so that
-    the three CPU front-ends and every test that does not touch DISK keep working. Confining
-    the import also keeps the ~1 GB of torch off the critical path of every ORB run.
+    ``estimate_transform_from_matches``, ``normalize_intensity``,
+    ``scale_transform_to_full_res`` and every test that does not touch DISK keep working. It is
+    also what turns a torch-less environment into an actionable RuntimeError at CALL time
+    instead of an ImportError at import time.
 
     The confinement is what lets ``_disk_models`` take the model classes as ARGUMENTS instead
     of importing them; see the comment above it in coarse_align.py.

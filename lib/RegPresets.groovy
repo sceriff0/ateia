@@ -64,11 +64,21 @@ class RegPresets {
      * acceptable control point, which is a correctness question, not a cost/accuracy trade. Tying
      * them to a cost tier would silently change which control points are accepted when a user
      * asked only to use less memory.
+     *
+     * `coarse_max_dim` was 4096/2048/1024 when COARSE ran a classical corner detector (~2 GB at
+     * 4096, and that cost is nearly flat in thumbnail size). DISK+LightGlue is a U-Net: its
+     * activation memory is linear in image AREA and ~20x that peak at equal size, and it is what
+     * TILED_COARSE's memory request is now derived from. Measured on the pinned stack: 3.03 GB at
+     * 512 px, 8.78 GB at 1024 px, which fits `GB ~= 1.1 + 7.3 * Mpx` and puts 4096 px at ~123 GB
+     * -- above TILED_COARSE's entire 64 GB retry ceiling. The column moves down one tier.
+     * Accuracy is bought back by DISK's sub-pixel fit: a 0.99 px thumbnail residual at a 1/13
+     * decimation on a 26k slide is ~13 px full-res, well inside the 256 px `halo` the anchor
+     * only has to land within.
      */
     static final Map<String, Map<String, Integer>> STARE = [
-        high  : [tile: 2048, halo: 256, out_tile: 1024, coarse_max_dim: 4096, upsample: 10],
-        medium: [tile: 1024, halo: 192, out_tile:  768, coarse_max_dim: 2048, upsample: 10],
-        low   : [tile:  512, halo: 128, out_tile:  512, coarse_max_dim: 1024, upsample:  5],
+        high  : [tile: 2048, halo: 256, out_tile: 1024, coarse_max_dim: 2048, upsample: 10],
+        medium: [tile: 1024, halo: 192, out_tile:  768, coarse_max_dim: 1024, upsample: 10],
+        low   : [tile:  512, halo: 128, out_tile:  512, coarse_max_dim:  512, upsample:  5],
     ]
 
     /** The STARE knobs that a tier owns, i.e. the ones `--reg_tiled_mode` moves. */
