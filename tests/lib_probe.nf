@@ -321,25 +321,26 @@ P9,cyc2.tiff,CELLTOX|CELLTOX,false
     // Checkpoint — filename AND columns, one owner
     // ------------------------------------------------------------------ //
     assert Checkpoint.columns(Layout.PREPROCESSED) ==
-        ['patient_id', 'id', 'preprocessed_image', 'is_reference', 'channels']
+        ['patient_id', 'id', 'preprocessed_image', 'is_reference', 'channels', 'pixel_size']
     assert Checkpoint.columns(Layout.REGISTERED) ==
-        ['patient_id', 'id', 'registered_image', 'is_reference', 'channels']
+        ['patient_id', 'id', 'registered_image', 'is_reference', 'channels', 'pixel_size']
     assert Checkpoint.columns(Layout.POSTPROCESSED) ==
-        ['patient_id', 'id', 'cell_csv', 'cell_geojson', 'merged_csv', 'cell_mask', 'pyramid']
+        ['patient_id', 'id', 'cell_csv', 'cell_geojson', 'merged_csv', 'cell_mask', 'pyramid', 'pixel_size']
 
     // The header IS the seed: string the three writers pass to collectFile. These
     // three literals are the published contract — Group A must not change them.
-    // RULING R17 (Task 4.3) added 'id' right after 'patient_id' to all four.
-    assert Checkpoint.header(Layout.PREPROCESSED)  == 'patient_id,id,preprocessed_image,is_reference,channels'
-    assert Checkpoint.header(Layout.REGISTERED)    == 'patient_id,id,registered_image,is_reference,channels'
-    assert Checkpoint.header(Layout.POSTPROCESSED) == 'patient_id,id,cell_csv,cell_geojson,merged_csv,cell_mask,pyramid'
+    // RULING R17 (Task 4.3) added 'id'; this task appended 'pixel_size' LAST.
+    assert Checkpoint.header(Layout.PREPROCESSED)  == 'patient_id,id,preprocessed_image,is_reference,channels,pixel_size'
+    assert Checkpoint.header(Layout.REGISTERED)    == 'patient_id,id,registered_image,is_reference,channels,pixel_size'
+    assert Checkpoint.header(Layout.POSTPROCESSED) == 'patient_id,id,cell_csv,cell_geojson,merged_csv,cell_mask,pyramid,pixel_size'
 
     // row() emits values in DECLARED COLUMN ORDER regardless of map insertion order.
     // This is the whole point: a writer can no longer transpose two columns.
     assert Checkpoint.row(Layout.REGISTERED, [
         channels: 'DAPI|CD3', patient_id: 'P001', id: 'P001_x',
-        registered_image: '/out/P001/registered/x.ome.tiff', is_reference: false
-    ]) == 'P001,P001_x,/out/P001/registered/x.ome.tiff,false,DAPI|CD3'
+        registered_image: '/out/P001/registered/x.ome.tiff', is_reference: false,
+        pixel_size: 0.325,
+    ]) == 'P001,P001_x,/out/P001/registered/x.ome.tiff,false,DAPI|CD3,0.325'
 
     // RFC 4180 QUOTING (Task 4.5). `--outdir` is an arbitrary filesystem path and
     // every published path is built from it -- a comma anywhere in it used to shift
@@ -349,8 +350,8 @@ P9,cyc2.tiff,CELLTOX|CELLTOX,false
     assert Checkpoint.row(Layout.REGISTERED, [
         patient_id: 'P001', id: 'P001_x',
         registered_image: '/out,dir/P001/registered/x,y.ome.tiff',
-        is_reference: false, channels: 'DAPI|CD3',
-    ]) == 'P001,P001_x,"/out,dir/P001/registered/x,y.ome.tiff",false,DAPI|CD3'
+        is_reference: false, channels: 'DAPI|CD3', pixel_size: 0.325,
+    ]) == 'P001,P001_x,"/out,dir/P001/registered/x,y.ome.tiff",false,DAPI|CD3,0.325'
 
     // A value containing a double quote is wrapped AND its embedded quotes are
     // doubled -- the RFC 4180 escape -- so a naive strip-the-outer-quotes reader
@@ -358,8 +359,8 @@ P9,cyc2.tiff,CELLTOX|CELLTOX,false
     assert Checkpoint.row(Layout.REGISTERED, [
         patient_id: 'P001', id: 'P001_x',
         registered_image: '/out/say "hi"/x.ome.tiff',
-        is_reference: false, channels: 'DAPI|CD3',
-    ]) == 'P001,P001_x,"/out/say ""hi""/x.ome.tiff",false,DAPI|CD3'
+        is_reference: false, channels: 'DAPI|CD3', pixel_size: 0.325,
+    ]) == 'P001,P001_x,"/out/say ""hi""/x.ome.tiff",false,DAPI|CD3,0.325'
 
     // A `null` VALUE (as opposed to a missing KEY, rejected above) now writes as an
     // EMPTY field, not the literal four-character text `null`. Before this task a
@@ -369,8 +370,8 @@ P9,cyc2.tiff,CELLTOX|CELLTOX,false
     // Meta.fromCheckpointRow's requirePresentInRow already treats as absent.
     assert Checkpoint.row(Layout.REGISTERED, [
         patient_id: 'P001', id: 'P001_x', registered_image: null,
-        is_reference: false, channels: 'DAPI|CD3',
-    ]) == 'P001,P001_x,,false,DAPI|CD3'
+        is_reference: false, channels: 'DAPI|CD3', pixel_size: 0.325,
+    ]) == 'P001,P001_x,,false,DAPI|CD3,0.325'
 
     // A missing column must throw, not silently emit an empty field — an empty field
     // is a checkpoint row naming a path that does not exist, which is exactly the
@@ -380,13 +381,12 @@ P9,cyc2.tiff,CELLTOX|CELLTOX,false
     catch (IllegalArgumentException ignored) { missingCol = true }
     assert missingCol : 'Checkpoint.row must reject a missing column'
 
-    // An unknown key must throw too — it means the caller thinks the schema is
-    // something it is not.
+    // An unknown key must throw too (pixel_size supplied, so this is the real check).
     def unknownCol = false
     try {
         Checkpoint.row(Layout.REGISTERED, [
             patient_id: 'P001', id: 'P001_x', registered_image: '/x', is_reference: false,
-            channels: 'DAPI', typo_column: 'oops'
+            channels: 'DAPI', pixel_size: 0.325, typo_column: 'oops'
         ])
     }
     catch (IllegalArgumentException ignored) { unknownCol = true }
@@ -408,11 +408,12 @@ P9,cyc2.tiff,CELLTOX|CELLTOX,false
     // dereferences 'id' (via READ_SEGMENTED_CHECKPOINT's Meta.fromCheckpointRow),
     // so only IT gained 'id' in requiredColumns (see lib/ParamUtils.groovy's
     // comment on that entry). The invariant is now "every OTHER column" equality,
-    // not full-list equality.
+    // not full-list equality. 'pixel_size' joins 'id' in the exclusion set: those
+    // two steps re-resolve scale via PREFLIGHT_SCALE, not a persisted value.
     assert ParamUtils.STEPS.find { it.name == 'registration' }.requiredColumns ==
-        Checkpoint.columns(Layout.PREPROCESSED) - ['id']
+        Checkpoint.columns(Layout.PREPROCESSED) - ['id', 'pixel_size']
     assert ParamUtils.STEPS.find { it.name == 'segmentation' }.requiredColumns ==
-        Checkpoint.columns(Layout.REGISTERED) - ['id']
+        Checkpoint.columns(Layout.REGISTERED) - ['id', 'pixel_size']
     assert ParamUtils.STEPS.find { it.name == 'postprocessing' }.requiredColumns ==
         ['patient_id', 'id', 'registered_image', 'is_reference', 'channels', 'cell_mask', 'nuclei_mask']
     assert ParamUtils.STEPS.find { it.name == 'postprocessing' }.requiredColumns
@@ -430,7 +431,7 @@ P9,cyc2.tiff,CELLTOX|CELLTOX,false
     catch (UnsupportedOperationException ignored) { columnsThrew = true }
     assert columnsThrew : 'Checkpoint.columns() must return an immutable list; mutating it must throw'
     assert Checkpoint.columns(Layout.PREPROCESSED) ==
-        ['patient_id', 'id', 'preprocessed_image', 'is_reference', 'channels'] :
+        ['patient_id', 'id', 'preprocessed_image', 'is_reference', 'channels', 'pixel_size'] :
         'Checkpoint.columns() schema must be unaffected by the mutation attempt above'
 
     // ------------------------------------------------------------------ //
@@ -454,10 +455,10 @@ P9,cyc2.tiff,CELLTOX|CELLTOX,false
     assert Layout.CHECKPOINT_STEPS == ['preprocessed', 'registered', 'segmented', 'postprocessed']
     assert Checkpoint.columns(Layout.SEGMENTED) == [
         'patient_id', 'id', 'registered_image', 'is_reference', 'channels',
-        'cell_mask', 'nuclei_mask', 'contours', 'nucleus_contours',
+        'cell_mask', 'nuclei_mask', 'contours', 'nucleus_contours', 'pixel_size',
     ]
     assert Checkpoint.header(Layout.SEGMENTED) ==
-        'patient_id,id,registered_image,is_reference,channels,cell_mask,nuclei_mask,contours,nucleus_contours'
+        'patient_id,id,registered_image,is_reference,channels,cell_mask,nuclei_mask,contours,nucleus_contours,pixel_size'
 
     // Empty string means "artifact not produced" — nucleus_contours is empty when
     // --quantify_compartments is false (nuclei_mask is NOT similarly gated: SEGMENT
@@ -471,7 +472,8 @@ P9,cyc2.tiff,CELLTOX|CELLTOX,false
         nuclei_mask: '/o/P001/segmentation/P001_nuclei_mask.tif',
         contours: '/o/P001/cell_properties/contours.json',
         nucleus_contours: '',
-    ]) == 'P001,P001_a,/o/P001/registered/a.tif,true,DAPI|CD3,/o/P001/segmentation/P001_cell_mask.tif,/o/P001/segmentation/P001_nuclei_mask.tif,/o/P001/cell_properties/contours.json,'
+        pixel_size: 0.325,
+    ]) == 'P001,P001_a,/o/P001/registered/a.tif,true,DAPI|CD3,/o/P001/segmentation/P001_cell_mask.tif,/o/P001/segmentation/P001_nuclei_mask.tif,/o/P001/cell_properties/contours.json,,0.325'
 
     // The step vocabulary gains one entry.
     assert ParamUtils.entryColumnForStep('segmentation') == 'registered_image'
@@ -945,7 +947,7 @@ P9,cyc2.tiff,CELLTOX|CELLTOX,false
         imagesCount        : [P1: 1],
         channelsCount      : [P1: 2],
     ]
-    def ckRow  = [patient_id: 'P1', id: 'P1_slide', is_reference: 'true', channels: 'DAPI|CD3']
+    def ckRow  = [patient_id: 'P1', id: 'P1_slide', is_reference: 'true', channels: 'DAPI|CD3', pixel_size: '0.325']
     def ckMeta = Meta.fromCheckpointRow(ckRow, 'preprocessed', ckCtx)
     assert Meta.REQUIRED_KEYS.every { ckMeta.containsKey(it) }
     assert ckMeta.patient_id     == 'P1'
@@ -955,6 +957,15 @@ P9,cyc2.tiff,CELLTOX|CELLTOX,false
     assert ckMeta.keep_channels  == ['DAPI', 'CD3']
     assert ckMeta.channels_count == 2
     assert ckMeta.images_count   == 1
+    // A real number, not the raw CSV string.
+    assert ckMeta.pixel_size == 0.325d
+
+    // Old checkpoint, no 'pixel_size' key: throw, never fall back to params.pixel_size.
+    def noPxRow = [patient_id: 'P1', id: 'P1_slide', is_reference: 'true', channels: 'DAPI|CD3']
+    def missingPixelSize = false
+    try { Meta.fromCheckpointRow(noPxRow, 'preprocessed', ckCtx) }
+    catch (IllegalStateException e) { missingPixelSize = e.message.contains('predates scale tracking') }
+    assert missingPixelSize
 
     // An unknown step name is rejected via Checkpoint.columns, not silently accepted.
     def unknownStep = false

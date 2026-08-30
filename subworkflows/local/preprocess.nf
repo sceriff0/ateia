@@ -151,6 +151,7 @@ workflow PREPROCESSING {
                     : Layout.publishedPath(params.outdir, meta.patient_id, Layout.PREPROCESSED, image_file),
                 is_reference      : meta.is_reference,
                 channels          : meta.channels.join('|'),
+                pixel_size        : meta.pixel_size,
             ])
         }
         .collectFile(

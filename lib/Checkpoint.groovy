@@ -69,6 +69,16 @@
     FILE's own header declares) -- `fromCheckpointRow` detects exactly that shape and
     fails with a message naming the fix (re-run the step that wrote the file), rather
     than silently falling back to a re-derived, possibly-different id.
+
+    SCALE IS CARRIED THE SAME WAY. Every STEPS entry now also ends in a `pixel_size`
+    column: the micrometres-per-pixel `params.pixel_size == 'auto'` resolves to for
+    that run (subworkflows/local/input_check.nf's PREFLIGHT_SCALE), threaded into
+    meta and recorded here so a completed run's checkpoint says what scale it was
+    processed at, rather than making `--start segmentation`/`--start postprocessing`
+    -- which build meta ENTIRELY from this CSV -- re-derive or re-guess it. Same
+    "throw on an old file, never fall back to params.pixel_size" contract as `id`:
+    see lib/Meta.groovy's `fromCheckpointRow`. Appended last on every schema, not
+    inserted, so this column's addition does not renumber any existing one.
 ========================================================================================
 */
 
@@ -87,16 +97,16 @@ class Checkpoint {
     static final List<Map> STEPS = [
         [
             name   : 'preprocessed',
-            columns: ['patient_id', 'id', 'preprocessed_image', 'is_reference', 'channels'].asImmutable(),
+            columns: ['patient_id', 'id', 'preprocessed_image', 'is_reference', 'channels', 'pixel_size'].asImmutable(),
         ],
         [
             name   : 'registered',
-            columns: ['patient_id', 'id', 'registered_image', 'is_reference', 'channels'].asImmutable(),
+            columns: ['patient_id', 'id', 'registered_image', 'is_reference', 'channels', 'pixel_size'].asImmutable(),
         ],
         [
             name   : 'segmented',
             columns: ['patient_id', 'id', 'registered_image', 'is_reference', 'channels',
-                      'cell_mask', 'nuclei_mask', 'contours', 'nucleus_contours'].asImmutable(),
+                      'cell_mask', 'nuclei_mask', 'contours', 'nucleus_contours', 'pixel_size'].asImmutable(),
         ],
         [
             // 'postprocessed' rows are per-PATIENT, not per-slide (there is no single
@@ -104,7 +114,7 @@ class Checkpoint {
             // patient_id`, the same synthetic patient-level id add_cycle.nf already uses
             // for its own patient-scoped metas ([patient_id: pid, id: pid, ...]).
             name   : 'postprocessed',
-            columns: ['patient_id', 'id', 'cell_csv', 'cell_geojson', 'merged_csv', 'cell_mask', 'pyramid'].asImmutable(),
+            columns: ['patient_id', 'id', 'cell_csv', 'cell_geojson', 'merged_csv', 'cell_mask', 'pyramid', 'pixel_size'].asImmutable(),
         ],
     ].asImmutable()
 

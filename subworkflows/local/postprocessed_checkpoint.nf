@@ -70,7 +70,11 @@ workflow POSTPROCESSED_CHECKPOINT {
     ch_base_checkpoint = ch_cell_csv
         .map { meta, csv ->
             def published_path = Layout.publishedPath(params.outdir, meta.patient_id, 'geojson', csv)
-            [meta.patient_id, published_path]
+            // pixel_size rides along on this first stream's meta -- every stream
+            // reaching this subworkflow is keyed by patient_id and (see the callers)
+            // carries the SAME resolved scale, so there is exactly one number per
+            // patient regardless of which stream it is read off.
+            [meta.patient_id, published_path, meta.pixel_size]
         }
         .join(ch_cell_geojson.map { meta, geojson ->
             def published_path = Layout.publishedPath(params.outdir, meta.patient_id, 'geojson', geojson)
@@ -113,7 +117,7 @@ workflow POSTPROCESSED_CHECKPOINT {
         // intermediate. One dangling column is enough. Checkpoint.writesAtLevel
         // carries the full reasoning and the observed failure.
         .filter { Checkpoint.writesAtLevel(Layout.POSTPROCESSED, params.cleanup_level) }
-        .map { patient_id, cell_csv, cell_geojson, merged_csv, cell_mask, pyramid ->
+        .map { patient_id, cell_csv, pixel_size, cell_geojson, merged_csv, cell_mask, pyramid ->
             Checkpoint.row(Layout.POSTPROCESSED, [
                 patient_id  : patient_id,
                 // RULING R17: 'postprocessed' rows are per-PATIENT, not per-slide --
@@ -127,6 +131,7 @@ workflow POSTPROCESSED_CHECKPOINT {
                 merged_csv  : merged_csv,
                 cell_mask   : cell_mask,
                 pyramid     : pyramid,
+                pixel_size  : pixel_size,
             ])
         }
         .collectFile(
