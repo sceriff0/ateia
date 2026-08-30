@@ -232,24 +232,29 @@ def resolve_pixel_size(
       resolved onto its output and each rewriting step (``apply_basic_profiles``,
       ``tiled_stitch``) re-stamps it, so an image reaching any consumer carries one --
       with one exception worth naming. ``bin/register.py`` itself writes no
-      ``PhysicalSize``; the registered output IS re-stamped, but one layer down, inside
-      the vendored VALIS library it calls (``Slide.warp_and_save_slide`` ->
-      ``slide_io.save_ome_tiff`` in ``valis_lib/``), which copies the *source* slide's
+      ``PhysicalSize``; the registered output is believed to be re-stamped, but one
+      layer down, inside VALIS itself (``Slide.warp_and_save_slide`` ->
+      ``slide_io.save_ome_tiff``), which is believed to copy the *source* slide's
       physical size -- scaled to the output pyramid level -- into the new OME-XML,
-      provided the source carried one. That is an external, unpinned dependency's
-      behaviour (see the VALIS version note in the docs), not something this repo's own
-      tests exercise: if a future VALIS version stopped doing it, or the source image
-      had no physical size to begin with (OME unit literally ``"px"``), the registered
-      output would carry no scale, and a re-entry over it via ``--start segmentation`` /
-      ``--start postprocessing`` would hard-fail at ``PREFLIGHT_SCALE`` under ``auto`` --
-      loudly, which is correct, but is worth an operator knowing the cause is upstream of
-      this pipeline's own code. Absent or uninterpretable metadata RAISES -- that is the
-      "otherwise error" half of the contract, and it is the whole point: ``auto``
-      promises to read the real scale, so it must fail loudly rather than substitute a
-      guess.
-    * ``None`` -- raises. ``params.pixel_size`` is null-by-default precisely so a run
-      cannot start without someone having chosen; reaching a script with null means the
-      launch-time guard in ``ParamUtils.validatePixelSize`` was bypassed.
+      provided the source carried one. That belief was traced from VALIS's vendored
+      source, not observed at runtime -- no test in this repo exercises the
+      registered-output-carries-scale path end to end, so treat it as unconfirmed. VALIS
+      is pinned (``modules/local/register.nf`` builds ``cdgatenbee/valis-wsi:1.0.0``),
+      so this is not a silent-drift hazard -- a version bump is a deliberate act, and is
+      the moment to re-verify this behaviour still holds. If it ever stopped holding, or
+      the source image had no physical size to begin with (OME unit literally
+      ``"px"``), the registered output would carry no scale, and a re-entry over it via
+      ``--start segmentation`` / ``--start postprocessing`` would hard-fail at
+      ``PREFLIGHT_SCALE`` under ``auto`` -- loudly, which is correct, but is worth an
+      operator knowing the cause is upstream of this pipeline's own code. Absent or
+      uninterpretable metadata RAISES -- that is the "otherwise error" half of the
+      contract, and it is the whole point: ``auto`` promises to read the real scale, so
+      it must fail loudly rather than substitute a guess.
+    * ``None`` -- raises. ``params.pixel_size`` defaults to ``'auto'``, not null, so
+      reaching this function with ``None`` means something explicitly overrode the
+      default back to null/empty; the launch-time guard in
+      ``ParamUtils.validatePixelSize`` rejects exactly that before any process runs, so
+      getting here means that guard was bypassed.
     """
     label = source or (str(image_path) if image_path is not None else "<no image>")
 
