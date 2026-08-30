@@ -31,7 +31,21 @@ process SEG_QUALITY_EVAL {
     // PREFLIGHT_SCALE already resolved per-slide. cse_pixel_size_um still takes
     // precedence when the operator explicitly sets it.
     def px = params.cse_pixel_size_um != null ? params.cse_pixel_size_um : meta.pixel_size
-    def px_arg = px ? "--pixel-size-um ${px}" : ''
+    // THROW, do not silently omit. `px ? "--pixel-size-um ${px}" : ''` used to render
+    // an absent flag when px was null -- Groovy null is FALSY, so the ternary's ''
+    // branch fired instead of the script ever seeing `null` -- and this process's
+    // retry-then-drop errorStrategy (conf/modules.config) retried three times against
+    // an input that could never change, then silently dropped the artifact: a green
+    // run missing a QC file with no error anywhere. Every checkpoint now records a
+    // real pixel_size (lib/Checkpoint.groovy), so a null one here means a genuine bug
+    // upstream, not a value this process should quietly work around.
+    if (px == null)
+        throw new IllegalStateException(
+            "SEG_QUALITY_EVAL(${meta.patient_id}): no pixel size available -- meta.pixel_size is " +
+            "null and --cse_pixel_size_um was not set. Every meta reaching this process should " +
+            "carry a resolved scale by now; a null value here is an upstream bug to fix, not a " +
+            "flag to omit.")
+    def px_arg = "--pixel-size-um ${px}"
     """
     bytes=\$(stat -L --printf="%s" ${image} 2>/dev/null || echo 0)
     echo "${task.process},${meta.patient_id},${image.name},\${bytes}" > ${prefix}.SEG_QUALITY_EVAL.size.csv
