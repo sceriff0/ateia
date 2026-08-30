@@ -131,6 +131,15 @@ def test_postprocess_reg_qc_collects_are_sorted():
     )
 
 
+def test_input_check_preflight_scale_collect_is_sorted():
+    body = _strip_comments((ROOT / "subworkflows/local/input_check.nf").read_text())
+    assert re.search(r"PREFLIGHT_SCALE\([^)]*\.collect\(sort:\s*true\)\)", body), (
+        "PREFLIGHT_SCALE's image list uses a bare .collect(). It becomes a `path` input "
+        "hashed positionally, so an identical rerun can miss and cascade. Use "
+        ".collect(sort: true)."
+    )
+
+
 # --------------------------------------------------------------------------- #
 # 4. No process script may hash the whole params map
 # --------------------------------------------------------------------------- #

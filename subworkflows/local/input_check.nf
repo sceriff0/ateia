@@ -150,7 +150,7 @@ workflow INPUT_CHECK {
     // Pre-flight scale scan over EVERY image this call collected, before anything
     // heavier runs. Metadata-only (see PREFLIGHT_SCALE / bin/preflight_scale.py), so
     // this costs nothing worth gating behind a param.
-    PREFLIGHT_SCALE(ch_samples.map { meta, image -> image }.collect())
+    PREFLIGHT_SCALE(ch_samples.map { meta, image -> image }.collect(sort: true))
 
     // `combine()` against a single-value channel broadcasts PREFLIGHT_SCALE's one
     // `report` onto every row -- a real dependency edge, not merely a `.subscribe`

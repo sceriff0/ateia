@@ -184,7 +184,7 @@ Chips give real defaults. Every process runs in a pinned container and emits
       <div class="mod"><div class="n">EXPORT_GEOJSON</div>
         <div class="x">QuPath / FlowPath <code>cells.geojson</code> with raw per-marker
           measurements, plus a lighter whole-cell-only variant.</div>
-        <div class="pp"><span>pixel_size <b>0.325</b></span></div></div>
+        <div class="pp"><span>pixel_size <b>auto</b></span></div></div>
       <div class="mod"><div class="n">MERGE_AND_PYRAMID</div>
         <div class="x">Pyramidal OME-TIFF preserving channel metadata; masks optionally embedded
           as a second series.</div>
