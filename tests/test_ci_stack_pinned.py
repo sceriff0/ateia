@@ -385,12 +385,37 @@ def test_ci_matplotlib_pin_matches_the_segeval_image():
 _DOCKERFILE_PIN_RE = r"(?<![\w.-]){}==([A-Za-z0-9_.-]+)"
 
 
+def parse_tiled_dockerfile_code() -> str:
+    """containers/tiled/Dockerfile with `#` comments stripped, via this module's own
+    `_strip_comment` -- the same stripper `parse_tiled_requirements` already applies to
+    the tiled and segeval requirements files.
+
+    Not a nicety. Demonstrated green-while-broken before this was added: with
+
+        # historical note: this image used to pin torch==2.3.1
+        RUN ... pip install --no-cache-dir torch==2.4.0 ...
+
+    the raw-text `re.search` below returned the FIRST match -- 2.3.1, out of the COMMENT --
+    so the check agreed with CI's 2.3.1 and passed while the image would install 2.4.0.
+    That is exactly the drift this check exists to catch. A guard a comment can satisfy is
+    an annotation.
+    """
+    code = "\n".join(_strip_comment(line) for line in TILED_DOCKERFILE.read_text().splitlines())
+    # A check whose "good" answer is an absence must prove it looked at something.
+    assert "FROM python:" in code and "pip install" in code, (
+        f"stripping comments from {TILED_DOCKERFILE.relative_to(ROOT)} left something "
+        "that is not a Dockerfile any more; every pin lookup below would be searching an "
+        "empty string and this check would pass vacuously"
+    )
+    return code
+
+
 def test_ci_torch_and_kornia_pins_match_the_tiled_dockerfile():
     """torch/kornia are pinned in containers/tiled/Dockerfile rather than its
     requirements.txt -- torch needs a CPU --index-url and kornia must follow it -- so the
     Dockerfile is their authority. Without this check they could drift from the image CI
     claims to mirror, which is the exact class of bug this file exists to prevent."""
-    docker_text = TILED_DOCKERFILE.read_text()
+    docker_text = parse_tiled_dockerfile_code()
     expected = {}
     for pkg in ("torch", "kornia"):
         m = re.search(_DOCKERFILE_PIN_RE.format(pkg), docker_text)
@@ -401,17 +426,32 @@ def test_ci_torch_and_kornia_pins_match_the_tiled_dockerfile():
         )
         expected[pkg] = m.group(1)
 
+    compared = set()
     mismatches = []
     for wf in workflow_files():
         for name, version in find_guarded_pins(wf.read_text()):
             if name not in expected or version is None:
                 continue
+            compared.add(name)
             if version != expected[name]:
                 mismatches.append(
                     f"{wf.relative_to(ROOT)}: {name}=={version} but "
                     f"{TILED_DOCKERFILE.relative_to(ROOT)} pins "
                     f"{name}=={expected[name]}"
                 )
+
+    # Non-vacuity: `mismatches` is empty both when the pins AGREE and when no workflow
+    # pins either package at all. Only the first is a pass. `find_guarded_pins` is a
+    # tokeniser over `pip install` lines, so a reworded install line (or one moved into a
+    # requirements file) silently empties the comparison set and this assertion would
+    # otherwise report success having compared nothing.
+    assert compared == set(expected), (
+        f"this check compared {sorted(compared)} against "
+        f"{TILED_DOCKERFILE.relative_to(ROOT)}, but its authority covers "
+        f"{sorted(expected)}. No workflow under "
+        f"{WORKFLOWS_DIR.relative_to(ROOT)} pins {sorted(set(expected) - compared)} on a "
+        "`pip install` line, so the comparison below is vacuous for it."
+    )
     assert not mismatches, "\n".join(sorted(set(mismatches)))
 
 
