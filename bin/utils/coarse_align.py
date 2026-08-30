@@ -34,15 +34,8 @@ _MIN_SAMPLES = {"euclidean": 2, "similarity": 2, "affine": 3}
 # The four selectable COARSE global-alignment front-ends. "orb" is the default and must stay
 # behaviour-preserving with every run before this change. "sift" and "fourier_mellin" are
 # zero-new-dependency CPU alternatives (skimage ships both already); "disk_lightglue" is the
-# learned matcher VALIS/ACROBAT winners use and needs torch+kornia from the stare-ml container,
-# so it raises a clear, actionable error rather than silently degrading in the lean default image.
-#
-# NOT YET IMPLEMENTED: "disk_lightglue"'s matching body (_frontend_disk_lightglue below) is a
-# TODO. The import guard + a clear RuntimeError/NotImplementedError exist and are tested, but
-# no DISK keypoints / LightGlue matching runs yet -- torch+kornia have never been available in
-# any environment this was built in. Selecting `--reg_tiled_frontend disk_lightglue` (with or
-# without `-profile stare_ml`) always raises. The option is kept declared here deliberately --
-# it names a real, intended axis -- rather than removed, so do not delete it to "fix" the crash.
+# learned matcher VALIS/ACROBAT winners use and needs torch+kornia, which the `:tiled` image
+# now carries.
 FRONTENDS = ("orb", "sift", "fourier_mellin", "disk_lightglue")
 
 
@@ -377,34 +370,122 @@ def _frontend_fourier_mellin(ref, mov, model="euclidean", **kwargs):
     return m0, {"residual_px": float("nan"), "n_inliers": -1}
 
 
-def _frontend_disk_lightglue(ref, mov, model="euclidean", **kwargs):
+# DISK + LightGlue weights are ~52 MB and building both models dominates a single call.
+# COARSE runs once per slide per task, so this cache only matters for the in-process
+# oracle (bin/utils/tiled_pipeline.py) and the test suite -- but it is free there.
+#
+# The MODEL CLASSES are passed IN rather than imported here, and that is load-bearing:
+# tests/test_container_harmonisation.py::
+# test_tiled_container_torch_kornia_imports_are_confined_to_disk_lightglue asserts that
+# every `import torch` / `from kornia...` in this module and in bin/tiled_coarse.py sits
+# inside a function named literally `_frontend_disk_lightglue`. A `from kornia.feature
+# import ...` in this helper is an offender and turns that guard RED.
+_DISK_MODELS = {}
+
+
+def _disk_models(device, disk_cls, lightglue_cls):
+    key = str(device)
+    if key not in _DISK_MODELS:
+        _DISK_MODELS[key] = (
+            disk_cls.from_pretrained("depth").to(device).eval(),
+            lightglue_cls("disk").to(device).eval(),
+        )
+    return _DISK_MODELS[key]
+
+
+def _to_disk_tensor(img, torch):
+    """One plane -> the 1x3xHxW float32 batch DISK expects.
+
+    Normalising is not optional for a LEARNED matcher: DISK was trained on images in
+    [0, 1], and the planes reaching this module are raw microscopy counts widened to
+    float32 (0..65535). Feeding those in raw is far outside the trained input range.
+    """
+    a = normalize_for_orb(img).astype(np.float32)
+    return torch.from_numpy(a)[None, None].repeat(1, 3, 1, 1)
+
+
+def _frontend_disk_lightglue(ref, mov, model="euclidean", n_keypoints=2048, **kwargs):
     """DISK + LightGlue -- the learned matcher VALIS and the ACROBAT winners use.
 
-    Requires torch + kornia, which live ONLY in the stare-ml container. The default :tiled
-    image stays lean deliberately, so this raises rather than silently degrading.
+    Returns ``(M0, info)`` with ``residual_px`` and ``n_inliers`` from
+    :func:`estimate_transform_from_matches`, exactly like the feature front-ends it
+    replaces, so the reporting contract downstream is unchanged.
+
+    MEMORY. DISK is a U-Net: its activation memory scales with image AREA, not with
+    keypoint count, and it is ~20x ORB's peak at equal size (measured on the pinned stack:
+    3.03 GB at 512 px, 8.78 GB at 1024 px -> GB ~= 1.1 + 7.3/Mpx). That is why the STARE
+    `coarse_max_dim` tier column tops out at 2048 and TILED_COARSE's memory request is
+    DERIVED from it -- see lib/RegPresets.groovy and conf/modules.config. Raising the
+    thumbnail bound is a memory decision, not a free accuracy knob.
     """
+    # BOTH imports live here, inside this function, for two reasons: a torch-present /
+    # kornia-absent environment must still get the actionable RuntimeError rather than a
+    # bare ImportError, and the confinement guard named above scans for exactly this
+    # function. Do not hoist either import to module scope or into a helper.
     try:
-        import kornia  # noqa: F401
-        import torch  # noqa: F401
+        import torch
+        from kornia.feature import DISK, LightGlue
     except ImportError as exc:
         raise RuntimeError(
-            "frontend='disk_lightglue' needs torch + kornia, which ship only in "
-            "the stare-ml container. Run with -profile stare_ml, or choose "
-            "frontend=sift for a comparable CPU-only front-end."
+            "frontend='disk_lightglue' needs torch + kornia. They ship in the "
+            "bolt3x/mirage-tiled image; install torch==2.3.1 (CPU wheel) + "
+            "kornia==0.7.3 to run this outside a container."
         ) from exc
 
-    # TODO(stare-ml container): torch/kornia are not installed in the default :tiled image (nor
-    # in this dev environment), so the actual DISK+LightGlue matching body cannot be written and
-    # verified here -- only the import guard above is implemented and tested
-    # (test_disk_lightglue_raises_a_clear_error_without_torch). When the stare-ml container
-    # lands, implement here: (1) run kornia.feature.DISK on both `ref`/`mov` to get keypoints +
-    # descriptors, (2) match them with kornia.feature.LightGlue, (3) feed the resulting
-    # correspondences to estimate_transform_from_matches(src, dst, model=model, **kwargs), same
-    # as _frontend_orb/_frontend_sift.
-    raise NotImplementedError(
-        "frontend='disk_lightglue' matching is not implemented outside the stare-ml container "
-        "-- see the TODO in bin/utils/coarse_align.py:_frontend_disk_lightglue"
+    device = torch.device("cpu")
+    disk, matcher = _disk_models(device, DISK, LightGlue)
+
+    t0 = time.perf_counter()
+    with torch.inference_mode():
+        t_ref = _to_disk_tensor(ref, torch).to(device)
+        t_mov = _to_disk_tensor(mov, torch).to(device)
+        # pad_if_not_divisible: DISK's U-Net downsamples by 16 and raises on a thumbnail
+        # whose dimensions are not multiples of 16. Thumbnail sizes come from
+        # decimation_factor(), which produces arbitrary sizes -- so this is not optional.
+        feat_kw = dict(
+            n=n_keypoints, window_size=5, score_threshold=0.0, pad_if_not_divisible=True
+        )
+        f_ref = disk(t_ref, **feat_kw)[0]
+        f_mov = disk(t_mov, **feat_kw)[0]
+        t_feat = time.perf_counter() - t0
+        logger.info(
+            f"coarse: DISK reference -> {len(f_ref.keypoints)} keypoints | "
+            f"moving -> {len(f_mov.keypoints)} keypoints in {t_feat:.1f}s "
+            f"({ref.shape[1]}x{ref.shape[0]} / {mov.shape[1]}x{mov.shape[0]})"
+        )
+
+        def _side(f, t):
+            return {
+                "keypoints": f.keypoints[None],
+                "descriptors": f.descriptors[None],
+                "image_size": torch.tensor(t.shape[-2:], device=device)[None],
+            }
+
+        out = matcher({"image0": _side(f_ref, t_ref), "image1": _side(f_mov, t_mov)})
+        matches = out["matches"][0].cpu().numpy()
+
+    kp_ref = f_ref.keypoints.cpu().numpy()
+    kp_mov = f_mov.keypoints.cpu().numpy()
+    logger.info(
+        f"coarse: {len(matches)} LightGlue matches -> {model} fit "
+        f"(DISK+LightGlue total {time.perf_counter() - t0:.1f}s)"
     )
+    if len(matches) < _MIN_SAMPLES[model]:
+        # estimate_transform_from_matches would fall through to an unconstrained
+        # .estimate() and hand back a silently meaningless M0; say so while the slide
+        # names are still in the surrounding log context.
+        logger.warning(
+            f"coarse: only {len(matches)} matches for a {model} fit "
+            f"(needs >= {_MIN_SAMPLES[model]}) -- M0 will be unreliable"
+        )
+
+    # LightGlue's `matches` column 0 indexes image0 (reference), column 1 indexes image1
+    # (moving). DISK keypoints are ALREADY (x, y) -- unlike skimage's ORB/SIFT, which are
+    # (row, col) and needed a [:, ::-1] reversal. Reversing these silently transposes M0.
+    src = kp_mov[matches[:, 1]]
+    dst = kp_ref[matches[:, 0]]
+    m, residual, n_inliers = estimate_transform_from_matches(src, dst, model=model, **kwargs)
+    return m, {"residual_px": residual, "n_inliers": n_inliers}
 
 
 _FRONTENDS = {

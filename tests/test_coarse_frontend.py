@@ -81,5 +81,23 @@ def test_disk_lightglue_raises_a_clear_error_without_torch(pair, monkeypatch):
 
     monkeypatch.setattr(builtins, "__import__", no_torch)
     ref, mov = pair
-    with pytest.raises(RuntimeError, match="stare-ml"):
+    with pytest.raises(RuntimeError, match="torch"):
         estimate_affine(ref, mov, frontend="disk_lightglue")
+
+
+def test_disk_lightglue_recovers_a_pure_shift(pair):
+    """DISK+LightGlue must recover the same shift the CPU front-ends do.
+
+    Skipped when torch/kornia are absent. Task 2 adds them to CI's install, and
+    tests/test_disk_test_actually_runs.py then asserts this test is NOT skipped --
+    a skip that nobody notices is how an unimplemented front-end shipped once already.
+    """
+    pytest.importorskip("torch")
+    pytest.importorskip("kornia")
+    ref, mov = pair
+    m0, info = estimate_affine(ref, mov, frontend="disk_lightglue")
+    np.testing.assert_allclose(m0[0, 2], -5, atol=1.5)
+    np.testing.assert_allclose(m0[1, 2], 7, atol=1.5)
+    assert info["frontend"] == "disk_lightglue"
+    assert info["n_inliers"] > 50, f"only {info['n_inliers']} inliers"
+    assert np.isfinite(info["residual_px"]) and info["residual_px"] < 2.0
