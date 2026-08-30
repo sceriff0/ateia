@@ -170,6 +170,11 @@ tests/testdata/expected/reg_checkpoint_columns.txt
 # and the new-cycle samplesheet that pairs with it.
 tests/testdata/prior_run/
 tests/testdata/new_cycle.csv
+# Shipped-defaults smoke fixture -- the one image pair with a real OME
+# PhysicalSizeX/Y, and the samplesheet naming it (see generate_complete_testdata.py).
+tests/testdata/P900_ref_scaled.ome.tiff
+tests/testdata/P900_mov_scaled.ome.tiff
+tests/testdata/shipped_defaults_input.csv
 .superpowers/
 
 # Internal architecture/audit reviews published as Claude Artifacts, not repo docs.

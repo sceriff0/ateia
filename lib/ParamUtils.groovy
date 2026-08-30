@@ -302,7 +302,7 @@ class ParamUtils {
     }
 
     /**
-     * Refuse a run that has not chosen a pixel size.
+     * Refuse a run whose pixel size cannot possibly be legal.
      *
      * `params.pixel_size` owns every micrometre in the pipeline -- GeoJSON centroids and areas,
      * the published pyramid's PhysicalSize, InstantSeg's rescaling target. It carried a literal
@@ -310,22 +310,28 @@ class ParamUtils {
      * objective produced measurements uniformly wrong by the ratio of the two, with nothing said,
      * and the symptom surfaced in QuPath several steps and one repository away from the cause.
      *
-     * So the default is null and this refuses it, at launch, before a single process is
-     * instantiated. The operator must either assert a number or ask for 'auto' -- and 'auto'
-     * itself errors, per-image in bin/utils/pixel_size.py, when the file carries no usable scale.
-     * There is no path left on which a scale is guessed.
+     * The invariant that incident demands -- no scale is ever guessed -- still holds; only WHERE
+     * it is enforced has moved. `nextflow.config` now defaults `pixel_size` to 'auto', which reads
+     * the image's own OME metadata rather than inventing a number, and `PREFLIGHT_SCALE` resolves
+     * that value for every slide before any heavy work and hard-fails the run the moment a slide
+     * carries no usable scale (see bin/utils/pixel_size.py). So this method no longer needs to
+     * refuse an unset value on the operator's behalf -- there is no unset value to reach it,
+     * because the config supplies one. What it still refuses is null: null can only arrive if
+     * someone explicitly passed one on the command line, which can only be a mistake, since it
+     * overrides a working default with an unusable one.
      *
      * Cross-parameter/"must be set" layer, not the schema's: nf-schema's `required` fires on an
-     * ABSENT key, and this key is present-and-null. See the two-layer rule in CLAUDE.md.
+     * ABSENT key, and a null here is present-but-null. See the two-layer rule in CLAUDE.md.
      */
     static void validatePixelSize(Map params) {
         def raw = params.pixel_size
         if (raw == null || raw.toString().trim().isEmpty())
             throw new IllegalArgumentException(
-                "--pixel_size is not set, and it has no default. It is the micrometres-per-pixel " +
-                "every measurement in this run is derived from. Pass a positive number, or " +
-                "'auto' to read PhysicalSizeX from each image's own OME metadata (which errors " +
-                "if an image carries no usable scale).")
+                "--pixel_size was passed as null or empty. It is the micrometres-per-pixel " +
+                "every measurement in this run is derived from, and defaults to 'auto'. Pass a " +
+                "positive number, or 'auto' to read PhysicalSizeX from each image's own OME " +
+                "metadata (which errors if an image carries no usable scale) -- or omit the " +
+                "flag entirely to get 'auto'.")
 
         def text = raw.toString().trim()
         if (text.equalsIgnoreCase('auto')) return

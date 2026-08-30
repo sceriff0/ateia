@@ -63,8 +63,9 @@ nextflow_workflow {
                 { with(workflow.out.checkpoint_csv) {
                     def csv = get(0)
                     def lines = file(csv).readLines()
-                    // 'id' (RULING R17, Task 4.3) is column 1.
-                    assert lines[0] == 'patient_id,id,registered_image,is_reference,channels,cell_mask,nuclei_mask,contours,nucleus_contours'
+                    // 'id' (RULING R17, Task 4.3) is column 1; 'pixel_size' (this
+                    // task) is appended last.
+                    assert lines[0] == 'patient_id,id,registered_image,is_reference,channels,cell_mask,nuclei_mask,contours,nucleus_contours,pixel_size'
                     assert lines.drop(1).findAll { it.trim() }.size() == 3
                 }}
             )

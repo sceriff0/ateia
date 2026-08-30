@@ -255,7 +255,17 @@ ALLOWED_LINES = {
         # while the thing it means to pin is the line's CONTENT. Keying on the normalised
         # text plus an assertion that it occurs exactly once would be stable under edits
         # above it and would need no re-pin at all.
-        1259: (
+        # 1259 -> 1270 when the PREFLIGHT_SCALE process (task-2 of the scale-correctness
+        # work) gained its own `withName:` block above CONVERT_IMAGE: +11, a publishDir-
+        # only block (its resources come from a `label`, not this block -- see the
+        # one-owner rule) plus its explanatory comment. Re-pinned directly from the file:
+        #   grep -n "params.expanded_quantification ?" conf/modules.config  ->  1270
+        # 1270 -> 1277 when the pixel_size CRITICAL fix (scale-correctness-and-robustness)
+        # added a 7-line comment above SEGMENT's `instantseg` ext.args flags, explaining
+        # why `--pixel-size ${meta.pixel_size}` replaced `${params.pixel_size}` there.
+        # Re-pinned directly from the file:
+        #   grep -n "params.expanded_quantification ?" conf/modules.config  ->  1277
+        1277: (
             "ext.args = { params.expanded_quantification ? '--expanded' : "
             "'' } -- conf/*.config closures cannot see lib/*.groovy classes, "
             "so ext.args must read params raw here."

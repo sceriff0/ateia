@@ -561,7 +561,10 @@ nextflow_pipeline {
             // Same column contract as the linear path's postprocessed.csv, because
             // the same writer produced it.
             def postLines = manifests.find { it.name == 'postprocessed.csv' }.readLines()
-            assert postLines[0] == 'patient_id,id,cell_csv,cell_geojson,merged_csv,cell_mask,pyramid' :
+            // 'pixel_size' (this task) is appended LAST -- add_cycle.nf now threads
+            // the new cycle's resolved scale through its own hand-built metas so this
+            // writer, shared with the linear path, can supply it too.
+            assert postLines[0] == 'patient_id,id,cell_csv,cell_geojson,merged_csv,cell_mask,pyramid,pixel_size' :
                 "postprocessed.csv header drifted: ${postLines[0]}"
             def postRows = postLines.drop(1).findAll { it.trim() }
             assert postRows.size() == 1 : "expected 1 postprocessed row, got ${postRows.size()}"
@@ -571,8 +574,9 @@ nextflow_pipeline {
             // writer produced it — pinned here so a divergence fails rather than
             // quietly producing a manifest add_cycle's own reader cannot consume.
             def regLines = manifests.find { it.name == 'registered.csv' }.readLines()
-            // 'id' (RULING R17, Task 4.3) is column 1 now.
-            assert regLines[0] == 'patient_id,id,registered_image,is_reference,channels' :
+            // 'id' (RULING R17, Task 4.3) is column 1 now; 'pixel_size' (this task) is
+            // appended last.
+            assert regLines[0] == 'patient_id,id,registered_image,is_reference,channels,pixel_size' :
                 "registered.csv header drifted: ${regLines[0]}"
 
             def rows = regLines.drop(1).findAll { it.trim() }.collect { csvFields(it) }

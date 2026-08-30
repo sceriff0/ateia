@@ -171,6 +171,31 @@ class Meta {
                 "rather than forcing it to be re-derived from a filename.")
         requirePresentInRow(row, 'id')
 
+        // Same shape of gap as `id` above, one column later: every Checkpoint.STEPS
+        // schema now declares a `pixel_size` column, so schemaColumns.contains(...)
+        // can never again be false from here on -- checked against Checkpoint's own
+        // table anyway, in case a future step is ever added without one. What still
+        // needs catching is a REAL checkpoint FILE written before this column
+        // existed: `splitCsv(header: true)` only creates a Map key for a column the
+        // file's own header line actually declares, so an old file's row simply has
+        // no 'pixel_size' key at all. Do NOT fall back to params.pixel_size here: on
+        // a --start path that value may still be the literal 'auto' and no image is
+        // being read, so a fallback would reinstate the exact null-scale failure
+        // this column exists to close.
+        if (!schemaColumns.contains('pixel_size'))
+            throw new IllegalStateException(
+                "Meta.fromCheckpointRow('${step}'): lib/Checkpoint.groovy's '${step}' schema does " +
+                "not declare a 'pixel_size' column. Every STEPS entry must carry one -- this is a " +
+                "Checkpoint.groovy bug, not a bad checkpoint file.")
+        if (!row.containsKey('pixel_size'))
+            throw new IllegalStateException(
+                "Meta.fromCheckpointRow('${step}'): this '${step}' checkpoint row has no " +
+                "'pixel_size' column. This checkpoint predates scale tracking -- re-run the step " +
+                "that WROTE it so the regenerated manifest records the resolved micrometres-per-" +
+                "pixel, rather than leaving every downstream measurement to be scaled by a value " +
+                "nothing recorded.")
+        requirePresentInRow(row, 'pixel_size')
+
         def meta = [
             patient_id  : row.patient_id.toString().trim(),
             // A checkpoint row carries the id ASSIGNED at samplesheet-read time.
@@ -179,6 +204,7 @@ class Meta {
             id          : row.id.toString().trim(),
             is_reference: row.is_reference?.toString()?.toLowerCase() == 'true',
             channels    : splitChannels(row.channels),
+            pixel_size  : row.pixel_size as Double,
         ]
         return finish(meta, meta.id, ctx)
     }

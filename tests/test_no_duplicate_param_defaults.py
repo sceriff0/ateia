@@ -270,6 +270,96 @@ ARGPARSE_DEFAULT_ALLOWLIST = {
             "is the more useful behavior than silently assuming 0.325."
         ),
     },
+    "apply_basic_profiles.py:--pixel-size": {
+        "reason": (
+            "nextflow.config's pixel_size default changed null -> 'auto' so an "
+            "unresolvable default cannot reach a process (PREFLIGHT_SCALE catches it "
+            "first). This script's own default=None is unaffected by that: "
+            "modules/local/apply_profiles.nf:50 always passes `--pixel-size "
+            "${params.pixel_size}` explicitly, so the argparse default only matters "
+            "for standalone invocation, where resolve_pixel_size(None, ...) raising "
+            "a clear 'you must pass a value' error is more useful than silently "
+            "defaulting to metadata auto-detection."
+        ),
+    },
+    "convert_image.py:--pixel_size": {
+        "reason": (
+            "Same contract as apply_basic_profiles.py's --pixel-size: "
+            "modules/local/convert_image.nf:23,42 always builds `--pixel_size "
+            "${pixel_size}` from params.pixel_size and passes it explicitly, so "
+            "this script's own default=None -- unchanged by the config's null -> "
+            "'auto' move -- only matters for standalone invocation."
+        ),
+    },
+    "export_geojson.py:--pixel_size": {
+        "reason": (
+            "Not just unaffected by the config default but actively incompatible "
+            "with it: EXPORT_GEOJSON works from a quantification CSV and contour "
+            "JSON, not an image (see the script's own comment at its --pixel_size "
+            "add_argument), so 'auto' has nothing to read a scale from and "
+            "resolve_pixel_size() raises immediately if it is passed. "
+            "modules/local/export_geojson.nf:45-48,62 documents that "
+            "--pixel_size is 'NOT optional here' and always passes "
+            "${params.pixel_size} explicitly (already resolved to a number by "
+            "this point in the pipeline), so default=None -- 'you forgot to pass "
+            "a number' -- is the only correct standalone default."
+        ),
+    },
+    "export_spatialdata.py:--pixel-size": {
+        "reason": (
+            "Same contract as apply_basic_profiles.py's --pixel-size: "
+            "modules/local/export_spatialdata.nf:61 always passes `--pixel-size "
+            "${params.pixel_size}` explicitly, so this script's own default=None "
+            "only matters for standalone invocation and is unaffected by the "
+            "config's null -> 'auto' move."
+        ),
+    },
+    "join_flowpath.py:--pixel-size": {
+        "reason": (
+            "No module invokes this script at all -- it is the standalone "
+            "MIRAGE<->FlowPath join tool, run by hand outside the pipeline (see "
+            "its module docstring). Its --pixel-size default therefore has no "
+            "real correspondence to nextflow.config's pixel_size; the match is "
+            "flag-name coincidence, same class of exemption as "
+            "extract_cell_properties.py's --outdir above."
+        ),
+    },
+    "merge_channels_pyramid.py:--physical-size-x": {
+        "reason": (
+            "Same contract as apply_basic_profiles.py's --pixel-size: "
+            "modules/local/merge_and_pyramid.nf:29,57 always builds "
+            "`--physical-size-x ${pixel_size_x}` from params.pixel_size and "
+            "passes it explicitly, so this script's own default=None only "
+            "matters for standalone invocation and is unaffected by the config's "
+            "null -> 'auto' move."
+        ),
+    },
+    "merge_channels_pyramid.py:--physical-size-y": {
+        "reason": (
+            "Same contract as --physical-size-x directly above: "
+            "modules/local/merge_and_pyramid.nf:30,58 always builds "
+            "`--physical-size-y ${pixel_size_y}` from params.pixel_size and "
+            "passes it explicitly."
+        ),
+    },
+    "split_multichannel.py:--pixel-size": {
+        "reason": (
+            "Same contract as apply_basic_profiles.py's --pixel-size: "
+            "modules/local/split_channels.nf:73 always passes `--pixel-size "
+            "${params.pixel_size}` explicitly, so this script's own default=None "
+            "only matters for standalone invocation and is unaffected by the "
+            "config's null -> 'auto' move."
+        ),
+    },
+    "tiled_stitch.py:--pixel-size": {
+        "reason": (
+            "Same contract as apply_basic_profiles.py's --pixel-size: "
+            "modules/local/tiled_stitch.nf:43 always passes `--pixel-size "
+            "${params.pixel_size}` explicitly, so this script's own default=None "
+            "only matters for standalone invocation and is unaffected by the "
+            "config's null -> 'auto' move."
+        ),
+    },
     "generate_registration_qc.py:--nuclear-markers": {
         "reason": (
             "Same contract as merge_quant_csvs.py's and split_multichannel.py's "
