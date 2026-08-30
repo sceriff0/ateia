@@ -135,6 +135,28 @@ def test_number_agreeing_with_metadata_is_silent(tmp_path):
     assert report[str(a)] == {"pixel_size": 0.325, "source": "operator"}
 
 
+# ── auto + two slides resolving to genuinely different scales: warn, exit 0 ────
+def test_auto_heterogeneous_scales_warns_but_succeeds(tmp_path):
+    a = _write_with_scale(tmp_path, "a.ome.tiff", 0.325)
+    b = _write_with_scale(tmp_path, "b.ome.tiff", 0.65)
+    rc, out, output = _run(["--images", str(a), str(b), "--pixel-size", "auto"], tmp_path)
+    assert rc == 0, out
+    assert "SCALE HETEROGENEITY" in out
+    assert "0.325" in out and "0.65" in out
+    assert "a.ome.tiff" in out and "b.ome.tiff" in out
+    report = json.loads(output.read_text())
+    assert report[str(a)]["pixel_size"] == pytest.approx(0.325, rel=1e-6)
+    assert report[str(b)]["pixel_size"] == pytest.approx(0.65, rel=1e-6)
+
+
+def test_auto_matching_scales_does_not_warn(tmp_path):
+    a = _write_with_scale(tmp_path, "a.ome.tiff", 0.325)
+    b = _write_with_scale(tmp_path, "b.ome.tiff", 0.325)
+    rc, out, _output = _run(["--images", str(a), str(b), "--pixel-size", "auto"], tmp_path)
+    assert rc == 0, out
+    assert "SCALE HETEROGENEITY" not in out
+
+
 def test_invalid_pixel_size_is_rejected(tmp_path):
     a = _write_no_scale(tmp_path, "a.ome.tiff")
     rc, out, output = _run(["--images", str(a), "--pixel-size", "not-a-number"], tmp_path)

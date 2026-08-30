@@ -230,10 +230,23 @@ def resolve_pixel_size(
     * ``"auto"`` -- read ``PhysicalSizeX`` from ``image_path``'s OME header. This is
       safe at every stage of the pipeline because ``CONVERT_IMAGE`` stamps the scale it
       resolved onto its output and each rewriting step (``apply_basic_profiles``,
-      ``tiled_stitch``) re-stamps it, so an image reaching any consumer carries one.
-      Absent or uninterpretable metadata RAISES -- that is the "otherwise error" half of
-      the contract, and it is the whole point: ``auto`` promises to read the real scale,
-      so it must fail loudly rather than substitute a guess.
+      ``tiled_stitch``) re-stamps it, so an image reaching any consumer carries one --
+      with one exception worth naming. ``bin/register.py`` itself writes no
+      ``PhysicalSize``; the registered output IS re-stamped, but one layer down, inside
+      the vendored VALIS library it calls (``Slide.warp_and_save_slide`` ->
+      ``slide_io.save_ome_tiff`` in ``valis_lib/``), which copies the *source* slide's
+      physical size -- scaled to the output pyramid level -- into the new OME-XML,
+      provided the source carried one. That is an external, unpinned dependency's
+      behaviour (see the VALIS version note in the docs), not something this repo's own
+      tests exercise: if a future VALIS version stopped doing it, or the source image
+      had no physical size to begin with (OME unit literally ``"px"``), the registered
+      output would carry no scale, and a re-entry over it via ``--start segmentation`` /
+      ``--start postprocessing`` would hard-fail at ``PREFLIGHT_SCALE`` under ``auto`` --
+      loudly, which is correct, but is worth an operator knowing the cause is upstream of
+      this pipeline's own code. Absent or uninterpretable metadata RAISES -- that is the
+      "otherwise error" half of the contract, and it is the whole point: ``auto``
+      promises to read the real scale, so it must fail loudly rather than substitute a
+      guess.
     * ``None`` -- raises. ``params.pixel_size`` is null-by-default precisely so a run
       cannot start without someone having chosen; reaching a script with null means the
       launch-time guard in ``ParamUtils.validatePixelSize`` was bypassed.

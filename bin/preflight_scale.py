@@ -41,6 +41,7 @@ sys.path.insert(0, str(Path(__file__).parent / "utils"))
 from logger import configure_logging, get_logger  # noqa: E402
 from pixel_size import (  # noqa: E402
     AUTO,
+    PIXEL_SIZE_RTOL,
     read_ome_pixel_size,
     warn_on_pixel_size_mismatch,
 )
@@ -87,6 +88,52 @@ def _parse_args(argv: Optional[List[str]]) -> argparse.Namespace:
     return ap.parse_args(argv)
 
 
+def _warn_on_heterogeneous_scales(report: dict, logger) -> None:
+    """Warn -- never fail -- when this run's slides resolved to distinguishable scales.
+
+    Under `auto`, each slide's scale comes from its own OME header, so two slides of one
+    patient can legitimately resolve to different values -- and they are registered
+    together and merged into one pyramid regardless. This branch's whole policy is that
+    a resolved or supplied scale is surfaced, never refused: a real mixed-magnification
+    cohort exists, so this only warns, naming every distinct value and the slides
+    carrying it.
+
+    Reuses `PIXEL_SIZE_RTOL`, the same relative tolerance `warn_on_pixel_size_mismatch`
+    uses, so "different" means the same thing everywhere in this module -- a value
+    serialised as 0.32499998807907104 does not count as a second scale.
+    """
+    values = sorted({info["pixel_size"] for info in report.values()})
+    if len(values) < 2:
+        return
+
+    clusters: List[List[float]] = []
+    for value in values:
+        if clusters and abs(value - clusters[-1][-1]) <= PIXEL_SIZE_RTOL * abs(clusters[-1][-1]):
+            clusters[-1].append(value)
+        else:
+            clusters.append([value])
+    if len(clusters) < 2:
+        return
+
+    groups = []
+    for cluster in clusters:
+        representative = cluster[0]
+        slides = sorted(
+            Path(path).name
+            for path, info in report.items()
+            if abs(info["pixel_size"] - representative) <= PIXEL_SIZE_RTOL * abs(representative)
+        )
+        groups.append(f"{representative:g} µm/px: {', '.join(slides)}")
+
+    logger.warning(
+        "  [SCALE HETEROGENEITY] this run's slides resolved to %d distinct pixel sizes, "
+        "but are registered together and merged into one pyramid -- %s. This is expected "
+        "for a legitimate mixed-magnification cohort and is not an error; each slide "
+        "keeps its own resolved scale.",
+        len(clusters), "; ".join(groups),
+    )
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     configure_logging()
     args = _parse_args(argv)
@@ -125,6 +172,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             if not mismatched and detected is None:
                 unconfirmed.append(path.name)
             report[str(path)] = {"pixel_size": configured, "source": "operator"}
+
+    _warn_on_heterogeneous_scales(report, logger)
 
     if is_auto and unresolvable:
         logger.error(
