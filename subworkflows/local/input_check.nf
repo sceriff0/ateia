@@ -155,11 +155,52 @@ workflow INPUT_CHECK {
     // `combine()` against a single-value channel broadcasts PREFLIGHT_SCALE's one
     // `report` onto every row -- a real dependency edge, not merely a `.subscribe`
     // side effect, so Nextflow will not START a downstream consumer of `samples`
-    // (CONVERT_IMAGE included) until PREFLIGHT_SCALE has actually succeeded. The
-    // report value itself is discarded; only the shape `[meta, file]` survives.
+    // (CONVERT_IMAGE included) until PREFLIGHT_SCALE has actually succeeded.
+    //
+    // The report's numeric verdict is injected into meta as `pixel_size`, so it
+    // reaches consumers that have no image of their own to read a scale from
+    // (EXPORT_GEOJSON, EXPORT_SPATIALDATA, SEG_QUALITY_EVAL, SEGMENT's instantseg
+    // backend) -- see the meta-map pattern this repo documents: mutate with
+    // `meta + [k: v]`, never `meta.clone()`. Those consumers used to render
+    // `params.pixel_size` directly, which is the literal string 'auto' at the
+    // shipped default and reaches them unresolved.
+    //
+    // The report is keyed by the STAGED path PREFLIGHT_SCALE actually scanned
+    // (`input_N/<basename>` -- see modules/local/preflight_scale.nf's
+    // `stageAs: 'input_?/*'`), not by the original samplesheet path `image` carries
+    // here, so the match is on basename, not on `image.toString()`. Throwing on a
+    // missing entry is deliberate: silently falling back to `params.pixel_size`
+    // would reintroduce the literal `'auto'` on exactly the path this fix exists to
+    // close.
+    //
+    // Basename is not guaranteed unique: the ordinary cyclic-IF layout puts
+    // cycle1/slide.ome.tiff and cycle2/slide.ome.tiff through here with the SAME
+    // basename (see the pre-existing meta.id-from-simpleName collision this repo
+    // already documents). `.findAll` collects every report entry with that basename;
+    // if they disagree on pixel_size, that is a real ambiguity this code cannot
+    // silently resolve by picking whichever sorts first, so it throws instead of
+    // guessing which cycle's number belongs to which file.
     ch_samples = ch_samples
         .combine(PREFLIGHT_SCALE.out.report)
-        .map { meta, image, _report -> tuple(meta, image) }
+        .map { meta, image, report ->
+            def resolved = new groovy.json.JsonSlurper().parseText(report.text)
+            def basename = image.getName()
+            def matches = resolved.findAll { path, entry -> new File(path).name == basename }
+            if (matches.isEmpty())
+                throw new IllegalStateException(
+                    "PREFLIGHT_SCALE resolved no scale for ${image} (looked for basename " +
+                    "'${basename}' among ${resolved.keySet()}). Every staged image must " +
+                    "appear in its report; a missing entry means the pre-flight and the " +
+                    "sample channel disagree about what is being processed.")
+            def scales = matches.values()*.pixel_size.unique()
+            if (scales.size() > 1)
+                throw new IllegalStateException(
+                    "PREFLIGHT_SCALE reported ${scales.size()} different pixel sizes " +
+                    "(${scales}) for basename '${basename}', shared by ${matches.keySet()}. " +
+                    "Two same-named slides (e.g. two cyclic-IF cycles) resolved to different " +
+                    "scales, and basename alone cannot say which belongs to ${image}.")
+            tuple(meta + [pixel_size: scales[0]], image)
+        }
 
     emit:
     // [meta, file] — meta carries images_count and channels_count.

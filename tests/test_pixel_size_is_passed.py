@@ -80,9 +80,17 @@ def _haystack(nf: Path) -> str:
 
 
 def _resolves_to_the_param(expr: str, nf_text: str) -> bool:
-    """True if the rendered value is params.pixel_size, directly or via a local def."""
+    """True if the rendered value is params.pixel_size, directly or via a local def.
+
+    `meta.pixel_size` is also accepted: it is INPUT_CHECK's per-slide value, already
+    resolved from params.pixel_size by PREFLIGHT_SCALE (subworkflows/local/input_check.nf),
+    and it is the only correct choice for a process with no image of its own to read a
+    scale from -- passing params.pixel_size there would hand the tool the literal string
+    'auto'. That is not a second owner of the scale: PREFLIGHT_SCALE is still the one
+    place params.pixel_size gets resolved to a number.
+    """
     expr = expr.strip()
-    if expr == "params.pixel_size":
+    if expr in ("params.pixel_size", "meta.pixel_size"):
         return True
     return bool(
         re.search(rf"def\s+{re.escape(expr)}\s*=\s*params\.pixel_size\b", nf_text)
