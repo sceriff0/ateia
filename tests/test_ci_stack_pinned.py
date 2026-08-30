@@ -18,6 +18,13 @@ production container that actually runs the tiled path installs. This test
 asserts that `pip install` lines pin the same guarded packages to the same
 versions, in *every* job that installs them, not only the python-tests job.
 
+Two guarded packages have a different authority *within the same image*:
+`torch` and `kornia` are pinned in `containers/tiled/Dockerfile`, not in its
+requirements.txt, because torch needs a CPU `--index-url` and kornia must be
+installed after it — neither is expressible in a flat requirements file. See
+`NON_TILED_AUTHORITY` and
+`test_ci_torch_and_kornia_pins_match_the_tiled_dockerfile`.
+
 SCOPE: every workflow under `.github/workflows/`, discovered by glob — NOT a
 hardcoded `ci.yml`. The hardcoded version of this guard passed green while
 `.github/workflows/release.yml` ran the identical unpinned
@@ -37,6 +44,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 WORKFLOWS_DIR = ROOT / ".github" / "workflows"
 TILED_REQUIREMENTS = ROOT / "containers" / "tiled" / "requirements.txt"
+TILED_DOCKERFILE = ROOT / "containers" / "tiled" / "Dockerfile"
 
 
 def workflow_files() -> list[Path]:
@@ -75,6 +83,15 @@ GUARDED_PACKAGES = frozenset(
         # NON_TILED_AUTHORITY below for why its version authority is not the
         # tiled image). bin/seg_quality_eval.py exits 1 without it.
         "matplotlib",
+        # torch/kornia: STARE's DISK+LightGlue COARSE front-end
+        # (bin/utils/coarse_align.py::_frontend_disk_lightglue). Guarded because
+        # tests/test_coarse_frontend.py's DISK cases `importorskip` them -- an
+        # unpinned or absent install turns those cases into silent skips, which is
+        # exactly how an unimplemented front-end shipped once already. Their
+        # authority is the tiled DOCKERFILE, not its requirements.txt; see
+        # NON_TILED_AUTHORITY.
+        "torch",
+        "kornia",
     }
 )
 
@@ -90,6 +107,14 @@ GUARDED_PACKAGES = frozenset(
 NON_TILED_AUTHORITY = frozenset({
     "dask",        # authority: the three Dockerfiles that pin it, harmonised.
     "matplotlib",  # authority: containers/segeval, the image that runs CSE.
+    # torch/kornia ARE tiled-image packages, but they are pinned in
+    # containers/tiled/Dockerfile rather than its requirements.txt: torch needs
+    # `--index-url https://download.pytorch.org/whl/cpu` (a requirements-file index
+    # directive would repoint EVERY package) and kornia must be installed AFTER torch
+    # or it drags the ~2.5 GB CUDA wheel from PyPI. Neither constraint is expressible
+    # in a flat requirements file, so the Dockerfile is their authority.
+    "torch",
+    "kornia",
 })
 
 # `pip install <stuff>` lines are plain shell inside a YAML block scalar
@@ -357,6 +382,39 @@ def test_ci_matplotlib_pin_matches_the_segeval_image():
     assert not mismatches, "\n".join(sorted(set(mismatches)))
 
 
+_DOCKERFILE_PIN_RE = r"(?<![\w.-]){}==([A-Za-z0-9_.-]+)"
+
+
+def test_ci_torch_and_kornia_pins_match_the_tiled_dockerfile():
+    """torch/kornia are pinned in containers/tiled/Dockerfile rather than its
+    requirements.txt -- torch needs a CPU --index-url and kornia must follow it -- so the
+    Dockerfile is their authority. Without this check they could drift from the image CI
+    claims to mirror, which is the exact class of bug this file exists to prevent."""
+    docker_text = TILED_DOCKERFILE.read_text()
+    expected = {}
+    for pkg in ("torch", "kornia"):
+        m = re.search(_DOCKERFILE_PIN_RE.format(pkg), docker_text)
+        assert m, (
+            f"{TILED_DOCKERFILE.relative_to(ROOT)} no longer pins {pkg}, so this check "
+            "has no authority to compare CI against. Restore the pin rather than "
+            "leaving the authority dangling."
+        )
+        expected[pkg] = m.group(1)
+
+    mismatches = []
+    for wf in workflow_files():
+        for name, version in find_guarded_pins(wf.read_text()):
+            if name not in expected or version is None:
+                continue
+            if version != expected[name]:
+                mismatches.append(
+                    f"{wf.relative_to(ROOT)}: {name}=={version} but "
+                    f"{TILED_DOCKERFILE.relative_to(ROOT)} pins "
+                    f"{name}=={expected[name]}"
+                )
+    assert not mismatches, "\n".join(sorted(set(mismatches)))
+
+
 def test_every_non_tiled_authority_package_has_its_own_check():
     """NON_TILED_AUTHORITY exempts a package from the tiled comparison. An entry
     with no replacement check exempts it from EVERY version comparison, which is
@@ -366,6 +424,8 @@ def test_every_non_tiled_authority_package_has_its_own_check():
     checks = {
         "dask": "test_ci_dask_pin_matches_harmonised_container_pin",
         "matplotlib": "test_ci_matplotlib_pin_matches_the_segeval_image",
+        "torch": "test_ci_torch_and_kornia_pins_match_the_tiled_dockerfile",
+        "kornia": "test_ci_torch_and_kornia_pins_match_the_tiled_dockerfile",
     }
     assert set(checks) == set(NON_TILED_AUTHORITY), (
         f"NON_TILED_AUTHORITY is {sorted(NON_TILED_AUTHORITY)} but this file maps "

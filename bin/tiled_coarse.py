@@ -122,7 +122,7 @@ def main(argv=None) -> int:
         choices=list(FRONTENDS),
         help=(
             "COARSE global-alignment front-end (default: orb, today's behaviour). "
-            "disk_lightglue needs torch+kornia and runs only in the stare-ml container."
+            "disk_lightglue needs torch+kornia, which ship in the bolt3x/mirage-tiled image."
         ),
     )
     ap.add_argument("--out-m0", required=True, help="output M0 JSON (+ reference dims)")

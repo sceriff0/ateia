@@ -151,12 +151,15 @@ def _dockerfile_pip_tokens(text):
     could mask a genuinely missing dependency by matching its name.
 
     Split on ``&&`` BEFORE searching for ``pip install``, and search every resulting segment,
-    not just the first. containers/stare-ml chains three commands on one continuation-joined
-    line (``pip install -r requirements.txt && pip install torch==... && pip install
-    kornia==...``); taking only the text up to the first ``&&`` silently dropped torch and
-    kornia, which would have made this guard pass while torch/kornia were still missing from
-    the counted set -- reporting a container "installs everything its scripts import" when the
-    packages the DISK+LightGlue front-end actually needs were invisible to it.
+    not just the first. This is load-bearing for containers/tiled, which chains three commands
+    on one continuation-joined line (``pip install -r requirements.txt && pip install
+    torch==... && pip install kornia==...`` -- the order is required, since kornia drags the
+    CUDA torch wheel from PyPI if torch is not already satisfied). Taking only the text up to
+    the first ``&&`` silently dropped torch and kornia, which would have made this guard pass
+    while torch/kornia were missing from the counted set -- reporting a container "installs
+    everything its scripts import" when the packages the DISK+LightGlue front-end actually
+    needs were invisible to it. The defect was first found in the now-deleted containers/
+    stare-ml image; the same chained form is what containers/tiled uses today.
     """
     joined = re.sub(r"\\\s*\n", " ", text)
     tokens = []
@@ -305,55 +308,19 @@ def _seg_backends_container_scripts():
     return out
 
 
-def _profile_container_overrides():
-    """(process name, container dir) for every ``withName:`` container override bound inside a
-    ``nextflow.config`` profile block, e.g. ``-profile stare_ml``'s
-    ``withName: 'TILED_COARSE' { container = 'bolt3x/mirage-stare-ml:...' }``.
-
-    A profile-bound container never appears in any ``modules/local/*.nf`` file -- the module's
-    own ``container`` directive still names the DEFAULT image, and the profile overrides it only
-    at config-evaluation time -- so ``_module_container_and_scripts``'s regex over
-    ``modules/local/*.nf`` can never see it. Without this, an image reachable only through a
-    profile (stare-ml today, potentially others later) stays permanently outside
-    ``test_container_installs_what_its_scripts_import``'s coverage: exactly the gap that let
-    stare-ml ship without zarr/numcodecs/imagecodecs even though its one process
-    (``TILED_COARSE``) transitively imports zarr via ``bin/utils/tiled_io.py::open_lazy``.
-
-    This is a plain text scan, not a Groovy parse (matching the rest of this file's approach to
-    ``modules/local/*.nf``): it looks for ``withName: '<PROC>'`` immediately followed, within a
-    bounded window, by a `container = 'bolt3x/mirage-<dir>:` line. That is enough to find every
-    profile override as of this writing; a profile that restructures the block very differently
-    would need this regex revisited, the same maintenance burden the rest of the file already
-    accepts for its own regexes.
-    """
-    text = (REPO / "nextflow.config").read_text()
-    out = {}
-    for m in re.finditer(
-        r"withName:\s*'([A-Z_]+)'\s*\{\s*container\s*=\s*'bolt3x/mirage-([a-z0-9-]+):",
-        text,
-    ):
-        out[m.group(1)] = m.group(2)
-    return out
-
-
-def _scripts_for_process(process_name):
-    """Scripts a ``process <process_name> { ... }`` block in ``modules/local/*.nf`` invokes by
-    name, used to attribute a profile-bound container override (see
-    ``_profile_container_overrides``) to the same scripts its DEFAULT container is already
-    charged with -- the override only swaps the image, not what the process runs.
-    """
-    for nf in sorted((REPO / "modules" / "local").glob("*.nf")):
-        text = nf.read_text()
-        if re.search(rf"\bprocess\s+{re.escape(process_name)}\s*\{{", text):
-            return set(re.findall(r"([a-z0-9_]+\.py)\s*\\", text))
-    return set()
-
-
 def _module_container_and_scripts():
     """(container dir, {scripts}) for every modules/local/*.nf naming a first-party image,
     plus SEGMENT's backend-dispatched images resolved through lib/SegBackends.groovy (see
-    ``_seg_backends_container_scripts``), plus any container bound only inside a
-    ``nextflow.config`` profile (see ``_profile_container_overrides``).
+    ``_seg_backends_container_scripts``).
+
+    There is deliberately no third source for profile-bound container overrides. There used to
+    be: ``-profile stare_ml`` re-pointed TILED_COARSE at a second image, and a container
+    reachable only through a profile never appears in any ``modules/local/*.nf``, so it needed
+    its own scan. That profile is gone -- torch/kornia moved into :tiled itself -- and
+    ``nextflow.config`` now contains no ``withName: '...' { container = ... }`` override at
+    all, so the scan returned ``{}`` and both it and its helper were dead code that nothing
+    would have flagged. If a profile-bound override is ever reintroduced, restore that scan
+    WITH a non-vacuity assertion; without one it silently covers nothing.
 
     WARP_SEG_QC (modules/local/warp_seg_qc.nf) resolves its container the same
     backend-dispatched way, via ``lib/WarpBackends.groovy``, but is deliberately NOT given
@@ -384,12 +351,6 @@ def _module_container_and_scripts():
             out.setdefault(cdir, set()).update(scripts)
     for cdir, scripts in _seg_backends_container_scripts().items():
         if (CONTAINERS / cdir / "Dockerfile").is_file():
-            out.setdefault(cdir, set()).update(scripts)
-    for process_name, cdir in _profile_container_overrides().items():
-        if not (CONTAINERS / cdir / "Dockerfile").is_file():
-            continue
-        scripts = _scripts_for_process(process_name)
-        if scripts:
             out.setdefault(cdir, set()).update(scripts)
     return out
 
@@ -483,33 +444,12 @@ UNREACHABLE_IMPORTS = {
         "upstream on purpose. Nothing in bin/ calls either function, so the import never runs. "
         "Guarded by test_unreachable_import_exemptions_are_still_unreachable."
     ),
-    # Task 5.1: bin/utils/coarse_align.py's _frontend_disk_lightglue -- reached from
-    # bin/tiled_coarse.py, a containers/tiled script -- opens with
-    # `try: import kornia; import torch except ImportError: raise RuntimeError(...)`. Unlike the
-    # segeval entry above this path IS reachable code (selecting --frontend disk_lightglue runs
-    # it), but the default :tiled image deliberately does not install torch/kornia -- they ship
-    # ONLY in the separate stare-ml container/profile, precisely so the lean default image stays
-    # lean (see the brief for Task 5.1). So inside :tiled this import is meant to fail, and does
-    # so with a clear, actionable RuntimeError naming -profile stare_ml, not a bare ImportError
-    # traceback. Guarded by
-    # tests/test_coarse_frontend.py::test_disk_lightglue_raises_a_clear_error_without_torch AND
-    # test_tiled_container_torch_kornia_imports_are_confined_to_disk_lightglue below (the latter
-    # checks the premise that torch/kornia are imported NOWHERE ELSE in a script this container
-    # runs -- the former only checks the guarded import site behaves correctly).
-    ("tiled", "torch"): (
-        "bin/utils/coarse_align.py's _frontend_disk_lightglue front-end needs torch, installed "
-        "only in the stare-ml container -- see the kornia entry immediately below for the full "
-        "reason."
-    ),
-    ("tiled", "kornia"): (
-        "bin/utils/coarse_align.py's _frontend_disk_lightglue guards `import kornia; import "
-        "torch` in a try/except ImportError and raises RuntimeError('...stare-ml container...') "
-        "on failure. --frontend defaults to 'orb' and disk_lightglue is documented as requiring "
-        "-profile stare_ml, so the default :tiled image is never expected to satisfy this "
-        "import; it exists to fail with a clear message, not to run. Guarded by "
-        "tests/test_coarse_frontend.py::test_disk_lightglue_raises_a_clear_error_without_torch "
-        "and test_tiled_container_torch_kornia_imports_are_confined_to_disk_lightglue below."
-    ),
+    # There is deliberately NO ("tiled", "torch")/("tiled", "kornia") entry. Both used to be
+    # exempted here on the grounds that torch/kornia shipped "only in the stare-ml container",
+    # so :tiled was never expected to satisfy the import. containers/tiled now installs both,
+    # which makes that reason false -- and a false exemption is worse than none, because
+    # test_container_installs_what_its_scripts_import `continue`s past an exempted (container,
+    # import) pair and would stop checking a dependency that genuinely has to be there.
 }
 
 
@@ -571,14 +511,21 @@ def _torch_kornia_import_sites(path):
 
 
 def test_tiled_container_torch_kornia_imports_are_confined_to_disk_lightglue():
-    """The premise behind the ``("tiled", "torch")``/``("tiled", "kornia")`` UNREACHABLE_IMPORTS
-    entries above, checked rather than trusted -- the same principle
-    ``test_unreachable_import_exemptions_are_still_unreachable`` applies to the segeval entry,
-    extended to these two. Both reasons say the import is confined inside
-    ``_frontend_disk_lightglue``'s ``try/except ImportError`` guard. If torch or kornia were
-    ever imported anywhere ELSE in a script the tiled container runs, that second import site
-    would be silently covered by the same blanket exemption without ever having been reasoned
-    about -- an annotation, not a guard.
+    """torch/kornia must be imported ONLY inside ``_frontend_disk_lightglue``, never at module
+    scope.
+
+    This began as the premise behind two now-deleted UNREACHABLE_IMPORTS entries (torch/kornia
+    used to ship in a separate image, so inside :tiled the import was meant to fail). :tiled
+    now installs both, and the rule survives that change on its own reasoning: ``import torch``
+    at module scope in ``coarse_align.py`` would make the module -- and therefore
+    ``bin/tiled_coarse.py`` -- UNIMPORTABLE anywhere torch is absent. That is not hypothetical.
+    ``coarse_align.py`` is imported by the tiled oracle (``bin/utils/tiled_pipeline.py``) and by
+    this test suite, and it must keep importing on a plain checkout with no ML stack, so that
+    the three CPU front-ends and every test that does not touch DISK keep working. Confining
+    the import also keeps the ~1 GB of torch off the critical path of every ORB run.
+
+    The confinement is what lets ``_disk_models`` take the model classes as ARGUMENTS instead
+    of importing them; see the comment above it in coarse_align.py.
     """
     offenders = []
     for rel in ("bin/utils/coarse_align.py", "bin/tiled_coarse.py"):

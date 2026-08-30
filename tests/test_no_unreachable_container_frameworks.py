@@ -33,11 +33,14 @@ FRAMEWORKS = {
     "cucim": "cucim",
     "mesmer": "mesmer",
     "deepcell": "deepcell",
-    # Task 5.1/5.2: containers/stare-ml installs these for
-    # bin/utils/coarse_align.py::_frontend_disk_lightglue. Both are reachable (imported inside
-    # that function, guarded by try/except ImportError), so listing them here does not flag an
-    # offender -- it just keeps this guard honest about every heavyweight, selectable framework
-    # a container carries, per this file's own instruction to extend the list on a new one.
+    # containers/tiled installs these for STARE's DISK+LightGlue COARSE front-end
+    # (bin/utils/coarse_align.py::_frontend_disk_lightglue). They used to live in a separate
+    # containers/stare-ml image behind `-profile stare_ml`; that image was never published, so
+    # both it and the profile are gone and :tiled carries torch+kornia itself. Both are
+    # reachable (imported inside that function, guarded by try/except ImportError), so listing
+    # them here does not flag an offender -- it just keeps this guard honest about every
+    # heavyweight, selectable framework a container carries, per this file's own instruction to
+    # extend the list on a new one.
     "torch": "torch",
     "kornia": "kornia",
 }

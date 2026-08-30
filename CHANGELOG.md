@@ -70,25 +70,31 @@ after that doc and is detailed inline below:
 - **`reg_tiled_frontend` parameter** (default `'orb'`, STARE/`registration_method=tiled` only) —
   selects COARSE's global-alignment front-end: `orb` (default, today's behaviour, unchanged),
   `sift` and `fourier_mellin` (zero-new-dependency CPU alternatives), or `disk_lightglue` (the
-  learned DISK+LightGlue matcher, gated behind `-profile stare_ml` — see below). Wired through
+  learned DISK+LightGlue matcher — see below). Wired through
   `bin/utils/coarse_align.py::estimate_affine` and rendered into `TILED_COARSE`'s command by
   `conf/modules.config`. **Resume note:** adding `--frontend` to `TILED_COARSE`'s rendered
   command changes that task's hash, so the *first* `-resume` after upgrading past this change
   re-runs STARE's whole COARSE-and-downstream registration chain even for runs that never touch
   `--reg_tiled_frontend` — a one-time cost, not a per-run one.
-- **`stare_ml` profile and the `bolt3x/mirage-stare-ml` container.** `-profile stare_ml`
-  re-points `TILED_COARSE`'s container at a second, optional image (`python:3.11-slim` + the
-  same CPU stack as `:tiled` + `torch`(CPU wheel)/`kornia`) so `--reg_tiled_frontend
-  disk_lightglue` can import torch+kornia; the default `:tiled` image stays JVM/GPU/torch-free
-  on purpose. The profile does NOT set `--reg_tiled_frontend` itself — selecting
-  `disk_lightglue` stays an explicit user choice. **NOT YET IMPLEMENTED:** the DISK+LightGlue
-  matching body is a TODO (`bin/utils/coarse_align.py::_frontend_disk_lightglue`) — selecting
-  it always raises `NotImplementedError` today, with or without this profile. **Publish
-  required before first use:** like `:tiled` before it, a plain push to `main` builds this
-  image but does not push it (`.github/workflows/build-images.yml` only pushes on
-  `release:published` / `workflow_dispatch`) — run
-  `gh workflow run build-images.yml -f version=1.0.0 -f only=stare-ml` before the first
-  `-profile stare_ml` run, or the image pull fails.
+- **`torch` + `kornia` and the DISK/LightGlue weights ship inside `bolt3x/mirage-tiled`.**
+  `--reg_tiled_frontend disk_lightglue` needs no profile, no second image and no download at
+  first use: `containers/tiled` installs `torch==2.3.1` (CPU wheel, from
+  `download.pytorch.org/whl/cpu`) and `kornia==0.7.3`, and BAKES both pretrained checkpoints
+  (`depth-save.pth`, `disk_lightglue_v0-1_arxiv-pth`) into `TORCH_HOME=/opt/torch` at build
+  time, world-readable. That matters because kornia otherwise fetches them from the network on
+  FIRST USE into `$HOME/.cache/torch` — and the target cluster has a read-only `$HOME` and is
+  documented as air-gapped (`docs/usage.md`), so the first real run would have failed the same
+  way the VALIS JVM cache did. This is a container-only fix; a `git pull` cannot repair a
+  missing checkpoint. The image keeps its JVM-free/libvips-free/CUDA-free property; it is no
+  longer torch-free, and that earlier leanness claim is deliberately retired.
+  An interim development iteration put torch+kornia in a SEPARATE optional
+  `bolt3x/mirage-stare-ml` image selected by a `stare_ml` profile. Both are **removed**, and
+  neither ever shipped: `.github/workflows/build-images.yml` pushes only on
+  `release:published`/`workflow_dispatch`, so that image was built by every push to `main` and
+  published by none — `-profile stare_ml` failed on image pull for anyone who had not manually
+  dispatched its build. One image that always works beats two where the second does not exist.
+  **If you scripted `-profile stare_ml`, drop it**: it is no longer a valid profile name and
+  Nextflow will refuse the run.
 - **Published-output change:** two new registration artifacts are now published under
   `<outdir>/<patient_id>/registered/`, for external benchmarks that need them:
   `registered/transform/preprocessed/data/<patient_id>_registrar.pickle` (the VALIS registrar,

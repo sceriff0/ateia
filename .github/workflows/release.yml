@@ -108,6 +108,14 @@ jobs:
       # nothing but runtime, and the image build that genuinely needs it happens in
       # the `publish-images` job (build-images.yml). Guarded by
       # tests/test_ci_job_hygiene.py::test_buildx_job_must_actually_use_buildx.
+      # `cache: 'pip'` keys on the hash of **/requirements.txt -- which includes
+      # containers/tiled/requirements.txt, the file that DOCUMENTS the torch/kornia split
+      # (they are installed by an inline `pip install` below, not from any requirements
+      # file, because torch needs a CPU --index-url and kornia must follow it). So the
+      # ~190 MB torch wheel is cached, but the key rotates only when some requirements.txt
+      # changes -- NOT when the inline pins below change. If you bump torch or kornia here,
+      # touch containers/tiled/requirements.txt's comment in the same commit or the first
+      # run after the bump restores a cache built for the old wheel.
       - name: Install Python
         uses: actions/setup-python@v5
         with:
@@ -136,6 +144,16 @@ jobs:
           # and guards this pin; it used to look only at ci.yml, which is how this line
           # stayed unpinned.
           pip install numpy==1.26.4 scipy==1.15.3 scikit-image==0.25.2 tifffile==2025.5.10 zarr==2.18.3 numcodecs==0.13.1
+          # torch + kornia power STARE's DISK+LightGlue COARSE front-end
+          # (bin/utils/coarse_align.py). Without them tests/test_coarse_frontend.py's DISK
+          # case importorskips and proves nothing -- which is how an unimplemented
+          # front-end shipped once already. tests/test_disk_test_actually_runs.py asserts
+          # these two lines exist.
+          #
+          # CPU wheel and torch-before-kornia, matching containers/tiled/Dockerfile: kornia
+          # pulls the ~2.5 GB CUDA wheel from PyPI if torch is not already satisfied.
+          pip install torch==2.3.1 --index-url https://download.pytorch.org/whl/cpu
+          pip install kornia==0.7.3
           # dask[array] powers bin/convert_image.py's lazy read: BioImage.dask_data is a
           # dask array, and tests/test_convert_lazy_read.py +
           # tests/test_convert_streaming_write.py import dask.array UNCONDITIONALLY, so

@@ -49,6 +49,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # `cache: 'pip'` keys on the hash of **/requirements.txt -- which includes
+      # containers/tiled/requirements.txt, the file that DOCUMENTS the torch/kornia split
+      # (they are installed by an inline `pip install` below, not from any requirements
+      # file, because torch needs a CPU --index-url and kornia must follow it). So the
+      # ~190 MB torch wheel is cached, but the key rotates only when some requirements.txt
+      # changes -- NOT when the inline pins below change. If you bump torch or kornia here,
+      # touch containers/tiled/requirements.txt's comment in the same commit or the first
+      # run after the bump restores a cache built for the old wheel.
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
@@ -99,6 +107,16 @@ jobs:
           # compression='zstd'/'zlib') while the whole imaging stack imported fine,
           # and it passed on developer machines that happen to carry imagecodecs.
           pip install numpy==1.26.4 scipy==1.15.3 scikit-image==0.25.2 tifffile==2025.5.10 zarr==2.18.3 numcodecs==0.13.1 imagecodecs==2025.3.30
+          # torch + kornia power STARE's DISK+LightGlue COARSE front-end
+          # (bin/utils/coarse_align.py). Without them tests/test_coarse_frontend.py's DISK
+          # case importorskips and proves nothing -- which is how an unimplemented
+          # front-end shipped once already. tests/test_disk_test_actually_runs.py asserts
+          # these two lines exist.
+          #
+          # CPU wheel and torch-before-kornia, matching containers/tiled/Dockerfile: kornia
+          # pulls the ~2.5 GB CUDA wheel from PyPI if torch is not already satisfied.
+          pip install torch==2.3.1 --index-url https://download.pytorch.org/whl/cpu
+          pip install kornia==0.7.3
           # matplotlib is a hard dependency of the CSE evaluation path, not a
           # plotting nicety: the vendored CSE source runs `import matplotlib.pyplot`
           # at the top of functions.py's foreground_separation(), which
