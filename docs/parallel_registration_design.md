@@ -1,4 +1,13 @@
-# STARE — a fully-parallel, tiled, laptop-friendly registration method for mirage
+# STARE — a fully-parallel, tiled registration method for mirage
+
+> **Superseded in part.** This document records the design as it was implemented on
+> `feat/tiled-registration`, when COARSE's anchor was a classical corner detector. For
+> v1.0.0 that front-end was replaced by the learned DISK + LightGlue matcher and the three
+> classical alternatives were deleted outright, which changes COARSE's memory model from
+> nearly-flat to linear in thumbnail AREA. §"Memory, per step" below has been corrected;
+> the rest of the design — the M0 → per-tile → solve → stitch decomposition, the halo
+> contract, the streaming reads — is unchanged and still authoritative. `bin/tiled_coarse.py`
+> cites this file for the thumbnail rationale, which still holds.
 
 **Status:** implemented on branch `feat/tiled-registration` (Phases 1–2 + Nextflow wiring, 56
 Python tests, JVM-free stub run green). Remaining: reg_qc=2 seg-QC Nextflow dispatch, the slim
@@ -149,16 +158,22 @@ implemented with a full-resolution ORB over an eagerly decoded slide, and OOM-ki
 
 | step | peak driver | ~peak | knob | what you pay for cheapening it |
 |---|---|---|---|---|
-| COARSE | ORB over the anchor thumbnail | ~2 GB | `--reg_tiled_coarse_max_dim` (4096) | M0 residual scales with the decimation factor; it must stay well inside `--reg_tiled_halo` |
+| COARSE | DISK + LightGlue over the anchor thumbnail | ~48 GB at the shipped tier | `--reg_tiled_coarse_max_dim` (2048) | M0 residual scales with the decimation factor; it must stay well inside `--reg_tiled_halo` |
 | REG_TILE | one DAPI tile + halo, both slides | ~50 MB | `--reg_tiled_tile` (2048), `--reg_tiled_halo` (256) | smaller tiles → finer mesh but more tasks; smaller halo → less tolerance for M0 error |
 | SOLVE | control points only (kB) | ~10 MB | — | — |
 | STITCH | one output write-tile, all channels | ~100 MB | `--reg_tiled_out_tile` (1024) | smaller tiles → more write calls, no accuracy cost |
 
-ORB is the term worth internalising: scikit-image promotes its input to float64 and stacks a
-Gaussian pyramid plus FAST/Harris response arrays on it, which measures at **~40 bytes per source
-pixel**. Handed a native-resolution gigapixel plane that is tens of GB, which is why the anchor is
-estimated on a thumbnail and `reg_tiled_coarse_max_dim` — not tile size — is the knob that bounds
-COARSE. Everything else is genuinely region-streamed: `tiled_io.open_lazy` region reads for
+COARSE's memory is the term worth internalising, and it changed for v1.0.0. The anchor's matcher
+is now DISK, a U-Net, which allocates activations over the WHOLE plane it is handed: measured on
+the pinned stack (torch 2.3.1 / kornia 0.7.3, CPU) at **3.03 GB for a 512 px thumbnail and 8.78 GB
+for 1024 px**, a clean linear-in-megapixels fit of **`GB ≈ 1.1 + 7.3 · Mpx`**. That is ~20x the
+classical detector this design was written against, and *linear in area* rather than nearly flat —
+so `reg_tiled_coarse_max_dim` is no longer a mild accuracy/cost dial but the thing that decides
+whether the step runs at all. 4096 px extrapolates to ~123 GB, which is why the tier column tops
+out at 2048, and why `TILED_COARSE`'s memory request is derived from this same bound rather than
+being a flat constant. A native-resolution gigapixel plane is thousands of GB, which is why the
+anchor is estimated on a thumbnail and `reg_tiled_coarse_max_dim` — not tile size — is the knob
+that bounds COARSE. Everything else is genuinely region-streamed: `tiled_io.open_lazy` region reads for
 REG_TILE and STITCH, byte-budgeted row bands for COARSE's decimated read.
 
 Tile size *is* the mesh-grid resolution knob: smaller tiles → finer non-rigid but more tasks;

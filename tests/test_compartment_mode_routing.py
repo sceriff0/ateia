@@ -274,7 +274,13 @@ ALLOWED_LINES = {
         # tier table, and -5 deleting the front-end selector comment and its `ext.args`.
         # 1277 + 5 + 21 - 5 = 1298. Re-pinned directly from the file:
         #   grep -n "params.expanded_quantification ?" conf/modules.config  ->  1298
-        1298: (
+        # 1298 -> 1307 in the same change's review round: +9 lines in TILED_COARSE's block
+        # comment, recording why the retry ramp reverted from doubling to linear (the
+        # doubling was for a SLIDE-driven peak; the peak is now BOUND-driven, so a retry
+        # corrects for host variance rather than searching for an unknown magnitude).
+        # 1298 + 9 = 1307. Re-pinned directly from the file:
+        #   grep -n "params.expanded_quantification ?" conf/modules.config  ->  1307
+        1307: (
             "ext.args = { params.expanded_quantification ? '--expanded' : "
             "'' } -- conf/*.config closures cannot see lib/*.groovy classes, "
             "so ext.args must read params raw here."

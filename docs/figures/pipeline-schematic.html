@@ -383,7 +383,7 @@
                 <code>reg_tiled_mode</code>'s row, because Nextflow evaluates the <code>params{}</code> block
                 <i>before</i> merging CLI arguments, so a preset lookup written there could never see
                 <code>--reg_tiled_mode low</code>.</div>
-              <div class="pp" style="margin-top:6px"><span>mode <b>high</b></span><span>tile <b>2048</b></span><span>halo <b>256</b></span><span>coarse_max_dim <b>4096</b></span><span>gate_tre <b>1.0</b></span></div></div>
+              <div class="pp" style="margin-top:6px"><span>mode <b>high</b></span><span>tile <b>2048</b></span><span>halo <b>256</b></span><span>coarse_max_dim <b>2048</b></span><span>gate_tre <b>1.0</b></span></div></div>
             <div class="opt"><div class="oh"><span>ashlar → ASHLAR</span><span class="tag-alt">baseline only</span></div>
               <div class="ox"><b>A benchmark baseline, not a production backend.</b> The field-standard cyclic-IF
                 registrar (labsyspharm), wired in as a third backend so it can be ranked against VALIS and STARE on
@@ -668,7 +668,7 @@
             <tr><td>BASICPY ¶</td><td class="n">1</td><td>32 GB ×n</td><td>8 h</td><td><span class="own">both</span></td></tr>
             <tr><td>APPLY_PROFILES</td><td class="n">2</td><td>8 GB §</td><td>3 h</td><td><span class="own own-w">name</span></td></tr>
             <tr><td>REGISTER</td><td class="n">8</td><td>300 GB</td><td>24 h</td><td><span class="own own-w">name</span></td></tr>
-            <tr><td>TILED_COARSE</td><td class="n">2</td><td>8 GB ×2ⁿ</td><td>2 h</td><td><span class="own">both</span></td></tr>
+            <tr><td>TILED_COARSE</td><td class="n">2</td><td>48 GB §</td><td>2 h</td><td><span class="own">both</span></td></tr>
             <tr><td>TILED_REG_TILE</td><td class="n">2</td><td>4 GB §</td><td>2 h</td><td><span class="own">both</span></td></tr>
             <tr><td>TILED_SOLVE</td><td class="n">1</td><td>1 GB</td><td>8 h</td><td><span class="own">both</span></td></tr>
             <tr><td>TILED_STITCH</td><td class="n">4</td><td>4 GB §</td><td>4 h</td><td><span class="own">both</span></td></tr>
@@ -693,6 +693,9 @@
           ‡ doubling ramp (32/64/128/256) rather than linear. § derived from a parameter, not a constant:
           <code>reg_tiled_tile</code>&nbsp;+&nbsp;2·<code>reg_tiled_halo</code> for REG_TILE and
           <code>reg_tiled_out_tile</code> for STITCH, each the measured linear fit doubled and floored at 4 GB;
+          <code>reg_tiled_coarse_max_dim</code> for COARSE, whose matcher is a U-Net and therefore
+          linear in thumbnail AREA (<code>GB ≈ 1.1 + 7.3·Mpx</code>, ×1.5, floored at 4 GB) — 48 GB at the
+          shipped <b>high</b> tier, 5 GB at <b>low</b>;
           <code>preproc_tile_size</code> for TILE_FOR_BASIC (floor 6 GB) and APPLY_PROFILES (floor 8 GB, plus
           a small term linear in channel count — the fitted flatfield/darkfield planes, held for the whole
           run); one decoded plane (4× the largest single channel file) plus a <code>pyramid_scale</code> /

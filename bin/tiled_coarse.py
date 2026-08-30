@@ -20,9 +20,14 @@ there. A coarse fit residual of ``r`` thumbnail px becomes ``r * factor`` full-r
 Raising it costs MEMORY, linearly in area, and that is the thing to know before tuning: DISK's
 activation memory measures at ``GB ~= 1.1 + 7.3 * Mpx`` on the pinned stack (3.03 GB at 512 px,
 8.78 GB at 1024 px), and TILED_COARSE's `memory` request in conf/modules.config is derived from
-this same bound. So ``--max-dim`` is not free: 4096 px would ask for ~123 GB, above the process's
-entire retry ceiling. Lower ``--max-dim`` when the step OOMs; raise it only if the logged residual
-approaches ``--halo``.
+this same bound. So ``--max-dim`` is not free: 4096 px would ask for ~123 GB, which is why the
+STARE tier column tops out at 2048. Lower ``--max-dim`` when the step OOMs; raise it only if the
+logged residual approaches ``--halo``.
+
+``--max-dim`` is REQUIRED and has no default. The pipeline always passes it explicitly, resolved
+from ``RegPresets.STARE``; a default here would be a fourth, unpinned copy of that tier value,
+and ``tests/test_reg_presets_inlined_in_config.py`` pins only the three Groovy/config copies. It
+also has a floor -- see the argument's own help.
 """
 
 from __future__ import annotations
@@ -109,11 +114,14 @@ def main(argv=None) -> int:
     ap.add_argument(
         "--max-dim",
         type=int,
-        # 2048 = RegPresets.STARE.high.coarse_max_dim, i.e. what the pipeline always passes
-        # explicitly. This default only ever applies to a hand-run of the script, and it moved
-        # down from 4096 with the tier column: at 4096 px DISK would ask for ~123 GB.
-        default=2048,
-        help="longest thumbnail side (px) the anchor is estimated on; <=0 disables decimation",
+        # REQUIRED, no default: the pipeline resolves this from RegPresets.STARE and always
+        # passes it. A default here would be a fourth copy of the tier value that nothing pins.
+        required=True,
+        help=(
+            "longest thumbnail side (px) the anchor is estimated on. Must be >= 16. There is "
+            "deliberately NO 'disable decimation' value: the matcher is a U-Net whose memory "
+            "is linear in thumbnail area, so a full-resolution plane needs thousands of GB."
+        ),
     )
     ap.add_argument(
         "--model", default="euclidean", choices=["euclidean", "similarity", "affine"]
@@ -121,6 +129,19 @@ def main(argv=None) -> int:
     ap.add_argument("--out-m0", required=True, help="output M0 JSON (+ reference dims)")
     ap.add_argument("--out-tiles", required=True, help="output tile-plan CSV")
     a = ap.parse_args(argv)
+
+    # The hazard gate for a HAND-RUN. On the pipeline path ParamUtils.validateRegPresets
+    # enforces a 256 px floor before any task is instantiated; nothing guards this script when
+    # it is invoked directly. tiled_io.decimation_factor() reads `max_dim <= 0` as "no
+    # decimation" and returns factor 1, handing DISK the full-resolution plane -- thousands of
+    # GB on a whole slide. 16 rather than 256 because DISK's U-Net downsamples by 16, and a
+    # small thumbnail is a legitimate thing for a test or a probe to ask for.
+    if a.max_dim < 16:
+        ap.error(
+            f"--max-dim {a.max_dim} is below the 16 px floor. There is no value that disables "
+            "decimation: the anchor's matcher is a U-Net whose activation memory is linear in "
+            "thumbnail area, so the full-resolution plane is not a slow run, it is an OOM."
+        )
 
     t_start = time.perf_counter()
     logger.info(

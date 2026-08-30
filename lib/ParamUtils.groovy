@@ -393,6 +393,36 @@ class ParamUtils {
                 "override(s) and let the '${params.reg_tiled_mode}' preset supply them " +
                 "(table: lib/RegPresets.groovy, RegPresets.STARE).")
         }
+
+        // COARSE's thumbnail bound has a FLOOR, and it is not cosmetic. bin/utils/tiled_io.py's
+        // decimation_factor() treats `max_dim <= 0` as "no decimation" and returns factor 1, so
+        // the matcher is handed the FULL-RESOLUTION plane -- and the matcher is DISK, a U-Net
+        // that allocates activations over the whole plane at ~1.1 + 7.3*Mpx GB. A 26k x 26k
+        // slide would need thousands of GB. That escape hatch was survivable when COARSE ran a
+        // classical corner detector; it is now a guaranteed OOM.
+        //
+        // Worse, TILED_COARSE's memory closure DERIVES its request from this same value, so 0
+        // computes 0 Mpx and asks for the 4 GB floor -- the smallest request in the table for
+        // the largest possible job. A negative value is arithmetically even more perverse: the
+        // closure squares it, so -1 yields a positive 0.000001 Mpx and again the floor.
+        //
+        // The schema's `minimum: 0` blocks negatives on the pipeline path; this is the
+        // cross-parameter half that blocks the rest, with a message that says why. 256 px is
+        // the floor because it is half of the 'low' tier (512) -- below that the anchor cannot
+        // land inside any realistic halo anyway, so there is no legitimate value down there.
+        if (params.reg_tiled_coarse_max_dim != null &&
+            (params.reg_tiled_coarse_max_dim as int) < 256) {
+            throw new IllegalArgumentException(
+                "--reg_tiled_coarse_max_dim ${params.reg_tiled_coarse_max_dim} is below the " +
+                "256 px floor. COARSE's matcher is DISK, a U-Net whose activation memory is " +
+                "linear in thumbnail AREA (~1.1 + 7.3*Mpx GB), and a value of 0 or less " +
+                "disables decimation entirely -- handing it the full-resolution plane, which " +
+                "needs thousands of GB on a whole slide. TILED_COARSE's memory request is " +
+                "derived from this same value, so a too-small bound also under-reserves the " +
+                "task rather than merely slowing it. Use 512 (the 'low' tier) or higher, or " +
+                "drop the override and let --reg_tiled_mode pick the tier " +
+                "(table: lib/RegPresets.groovy, RegPresets.STARE).")
+        }
     }
 
     /**

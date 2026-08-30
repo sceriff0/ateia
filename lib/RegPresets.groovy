@@ -70,7 +70,10 @@ class RegPresets {
      * activation memory is linear in image AREA and ~20x that peak at equal size, and it is what
      * TILED_COARSE's memory request is now derived from. Measured on the pinned stack: 3.03 GB at
      * 512 px, 8.78 GB at 1024 px, which fits `GB ~= 1.1 + 7.3 * Mpx` and puts 4096 px at ~123 GB
-     * -- above TILED_COARSE's entire 64 GB retry ceiling. The column moves down one tier.
+     * -- above the 64 GB ceiling the flat `8.GB * 2**(attempt-1)` ramp used to top out at, which
+     * is what made the re-base necessary. (That ramp is now itself gone: the request derives from
+     * this column, so 4096 would simply ask for ~185 GB and be clamped by params.max_memory.)
+     * The column moves down one tier.
      * Accuracy is bought back by DISK's sub-pixel fit: a 0.99 px thumbnail residual at a 1/13
      * decimation on a 26k slide is ~13 px full-res, well inside the 256 px `halo` the anchor
      * only has to land within.
