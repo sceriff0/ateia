@@ -258,6 +258,22 @@ jobs:
             -stub \
             --outdir test_results_stub
 
+      - name: Run pipeline with SHIPPED defaults (stub mode)
+        # `-profile test` pins BOTH pixel_size (-> 0.325) and seg_method
+        # (-> 'stardist') away from what actually ships ('auto' / 'instantseg'),
+        # each for its own documented reason (conf/test.config) -- which means
+        # the exact combination that ships was never executed by CI, stub or
+        # real. `shipped_defaults_test` overrides both back and repoints `input`
+        # at the one fixture pair this repo generates with a real OME
+        # PhysicalSizeX/Y (tests/testdata/shipped_defaults_input.csv), because
+        # every other fixture is scale-less on purpose and `auto` would
+        # (correctly) hard-fail at PREFLIGHT_SCALE against it.
+        run: |
+          nextflow run . \
+            -profile shipped_defaults_test \
+            -stub \
+            --outdir test_results_shipped_defaults
+
       - name: Verify work-directory cleanup and final-outputs-only publishing
         # A shell script, not a pytest and not an nf-test, and it needs its own
         # step or it runs nowhere -- the same gap the security-tests job exists to
@@ -278,6 +294,7 @@ jobs:
           name: stub-results-nf-${{ matrix.nextflow-version }}
           path: |
             test_results_stub/
+            test_results_shipped_defaults/
             .nextflow.log
 
   # ============================================================================

@@ -85,6 +85,7 @@ def create_multichannel_image(
     add_noise=True,
     shift=(0, 0),
     rng=None,
+    pixel_size_um=None,
 ):
     """Create a multi-channel OME-TIFF from a SHARED anatomy translated by ``shift``.
 
@@ -93,6 +94,12 @@ def create_multichannel_image(
     patient's images up to the known ``shift`` (+ light noise), so VALIS can
     recover the transform. Marker channels reuse the same geometry at lower,
     channel-specific intensities (co-registered marker panels).
+
+    ``pixel_size_um``, if given, stamps a real OME ``PhysicalSizeX``/``PhysicalSizeY``
+    (in micrometres) onto the file. Every other fixture this generator writes omits
+    it on purpose (see the `auto`-hard-fails-on-the-test-fixtures note in
+    conf/test.config) -- this is the one knob that turns that on, for the shipped-
+    defaults smoke fixture that needs `--pixel_size auto` to actually resolve.
     """
     if channel_names is None:
         channel_names = ["DAPI", "PANCK", "SMA"]
@@ -106,12 +113,19 @@ def create_multichannel_image(
     # Stack channels (C, Y, X)
     multichannel = np.stack(channels, axis=0)
 
+    metadata = {"axes": "CYX", "Channel": {"Name": channel_names}}
+    if pixel_size_um is not None:
+        metadata["PhysicalSizeX"] = pixel_size_um
+        metadata["PhysicalSizeXUnit"] = "µm"
+        metadata["PhysicalSizeY"] = pixel_size_um
+        metadata["PhysicalSizeYUnit"] = "µm"
+
     # Save as OME-TIFF with proper metadata
     tifffile.imwrite(
         filename,
         multichannel,
         photometric="minisblack",
-        metadata={"axes": "CYX", "Channel": {"Name": channel_names}},
+        metadata=metadata,
     )
     print(
         f"  Created {filename} - shape: {multichannel.shape}, channels: {channel_names}"
@@ -924,6 +938,41 @@ print("  Created expected/preproc_checkpoint_columns.txt")
 with open(EXPECTED_DIR / "reg_checkpoint_columns.txt", "w") as f:
     f.write("patient_id,id,registered_image,is_reference,channels\n")
 print("  Created expected/reg_checkpoint_columns.txt")
+
+# =============================================================================
+# 9. Shipped-defaults smoke fixture -- the ONE pair of images in this whole
+#    generator that carries a real OME PhysicalSizeX/Y.
+# =============================================================================
+# Every other fixture above is deliberately scale-less (`auto` would correctly
+# hard-fail at PREFLIGHT_SCALE on any of them -- see conf/test.config). CI's own
+# `-profile test` therefore never exercises the shipped defaults (`pixel_size =
+# 'auto'`, `seg_method = 'instantseg'`) together, because it pins both away from
+# them. This pair -- and the samplesheet naming it -- exists so a dedicated CI
+# job can run the stub pipeline with NEITHER pin, giving `auto`'s happy path its
+# first real (if stub-mode) end-to-end coverage.
+print("\n9. Creating shipped-defaults smoke fixture (real OME PhysicalSizeX/Y)...")
+p900_anatomy = make_anatomy((128, 128), n_cells=40, rng=_img_rng)
+create_multichannel_image(
+    OUT_DIR / "P900_ref_scaled.ome.tiff",
+    p900_anatomy,
+    channel_names=["DAPI", "PANCK", "SMA"],
+    shift=(0, 0),
+    rng=_img_rng,
+    pixel_size_um=0.325,
+)
+create_multichannel_image(
+    OUT_DIR / "P900_mov_scaled.ome.tiff",
+    p900_anatomy,
+    channel_names=["DAPI", "CD3", "CD8"],
+    shift=(5, 5),
+    rng=_img_rng,
+    pixel_size_um=0.325,
+)
+with open(OUT_DIR / "shipped_defaults_input.csv", "w") as f:
+    f.write("patient_id,path_to_file,is_reference,channels\n")
+    f.write(f"P900,{TESTDATA_ABS}/P900_ref_scaled.ome.tiff,true,DAPI|PANCK|SMA\n")
+    f.write(f"P900,{TESTDATA_ABS}/P900_mov_scaled.ome.tiff,false,DAPI|CD3|CD8\n")
+print("  Created shipped_defaults_input.csv (pixel_size='auto' happy path)")
 
 print("\n" + "=" * 70)
 print("All test data generation complete!")
