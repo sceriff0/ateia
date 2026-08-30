@@ -9,10 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Migration — read before comparing any output across this release
 
-Six changes alter what a run produces or what its outputs MEAN, and every one of
-them is silent from the consumer's side. They are collected, each with what
+Seven changes alter what a run produces or what its outputs MEAN, and every one of
+them is silent from the consumer's side. The first six are collected, each with what
 changed and what to do about it, in
-[`docs/migration-2026-08-24.md`](docs/migration-2026-08-24.md):
+[`docs/migration-2026-08-24.md`](docs/migration-2026-08-24.md); the seventh landed
+after that doc and is detailed inline below:
 
 1. **Darkfield correction is gone** — nf-core `BASICPY` runs at
    `get_darkfield=False`; the deleted in-house path used `True`. Corrected pixel
@@ -37,8 +38,35 @@ changed and what to do about it, in
    measurement), and an OME header whose `PhysicalSizeXUnit` the ASHLAR retiler
    does not recognise (a recognised non-µm unit is now converted rather than read
    as µm — an `nm` header was a 1000× scale error).
+7. **`pixel_size` now defaults to `'auto'`** — it was `null`, and `ParamUtils`
+   forced the operator to assert a scale before a run could start at all. `'auto'`
+   reads each image's own OME `PhysicalSizeX`, so a run that previously refused to
+   start at launch may now proceed — and will use the FILE's scale, which may
+   differ from whatever the operator would have typed. A new `PREFLIGHT_SCALE`
+   step resolves (and, for `auto`, verifies) every input slide's scale before any
+   heavy work starts: it hard-fails when `auto` cannot resolve a slide (absent or
+   uninterpretable OME metadata), and warns — never fails — when a supplied number
+   disagrees with the file, cannot be confirmed against it, or when slides in one
+   run resolve to genuinely different scales. Every checkpoint manifest now also
+   carries a `pixel_size` column; a checkpoint written by an earlier version is
+   REFUSED on re-entry with a "this checkpoint predates scale tracking" error — the
+   remedy is to re-run the step that wrote it. Measurements are unchanged for any
+   run that already passed an explicit `--pixel_size`.
 
 ### Added
+- **`PREFLIGHT_SCALE` process** (`modules/local/preflight_scale.nf` /
+  `bin/preflight_scale.py`), run once over every input slide before any heavy work
+  is staged (`subworkflows/local/input_check.nf`). It reads only OME metadata —
+  never pixel data — resolves what `--pixel_size` will actually use for each
+  slide, and records the result into `meta.pixel_size` so downstream consumers
+  that have no image of their own to read a scale from (`EXPORT_GEOJSON`,
+  `EXPORT_SPATIALDATA`, `SEG_QUALITY_EVAL`, InstantSeg) no longer see the literal
+  unresolved string `'auto'`. Fails loudly, naming every offending slide, when
+  `auto` cannot resolve one; warns, naming both numbers, when a supplied number
+  disagrees with a file's own metadata or cannot be confirmed against it; and
+  warns, naming every distinct value and the slides carrying it, when slides in
+  one run resolve to genuinely different scales — a legitimate mixed-magnification
+  cohort is never refused, only surfaced. See the migration note above.
 - **`reg_tiled_frontend` parameter** (default `'orb'`, STARE/`registration_method=tiled` only) —
   selects COARSE's global-alignment front-end: `orb` (default, today's behaviour, unchanged),
   `sift` and `fourier_mellin` (zero-new-dependency CPU alternatives), or `disk_lightglue` (the
@@ -128,6 +156,19 @@ changed and what to do about it, in
   checkpoints to be present.
 
 ### Changed
+- **`pixel_size` default: `null` → `'auto'`.** It used to have no shipped default —
+  `ParamUtils.validatePixelSize` forced an operator to assert a positive number of
+  micrometres per pixel, or pass `'auto'` explicitly, before a run could start.
+  `'auto'` is now the default: it reads `PhysicalSizeX` from each image's own OME
+  header via the new `PREFLIGHT_SCALE` process (entry above). `conf/test.config` and
+  `conf/test_full.config` still pin an explicit number, because the synthetic test
+  fixtures carry no OME `PhysicalSize` and `'auto'` would (correctly) refuse them.
+  Every checkpoint manifest (`lib/Checkpoint.groovy`'s per-step schema) now also
+  carries a `pixel_size` column recording the resolved value; a checkpoint CSV
+  written before this change has no such column and is REFUSED on re-entry
+  (`--start`, `--prior_outdir`) with a "this checkpoint predates scale tracking"
+  error rather than silently falling back to `params.pixel_size` — the remedy is to
+  re-run the step that wrote the checkpoint.
 - **`reg_tiled_dapi_index` → `reg_tiled_nuclear_index`, default `0` → `null`.** `null`
   resolves the index from the slide's own channel metadata via
   `MarkerUtils.nuclearIndex`, matching how `SEGMENT`'s CellSAM backend already resolves
