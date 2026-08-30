@@ -413,10 +413,12 @@ def _frontend_disk_lightglue(ref, mov, model="euclidean", n_keypoints=2048, **kw
 
     MEMORY. DISK is a U-Net: its activation memory scales with image AREA, not with
     keypoint count, and it is ~20x ORB's peak at equal size (measured on the pinned stack:
-    3.03 GB at 512 px, 8.78 GB at 1024 px -> GB ~= 1.1 + 7.3/Mpx). That is why the STARE
-    `coarse_max_dim` tier column tops out at 2048 and TILED_COARSE's memory request is
-    DERIVED from it -- see lib/RegPresets.groovy and conf/modules.config. Raising the
-    thumbnail bound is a memory decision, not a free accuracy knob.
+    3.03 GB at 512 px, 8.78 GB at 1024 px -> GB ~= 1.1 + 7.3*Mpx). The thumbnail size this
+    runs on is governed by the STARE `coarse_max_dim` tier (see lib/RegPresets.groovy) --
+    a future task is expected to size TILED_COARSE's memory request off that same bound,
+    but as of this commit the tier and the process memory request are independent and
+    neither has been changed here. Raising the thumbnail bound is a memory decision, not
+    a free accuracy knob.
     """
     # BOTH imports live here, inside this function, for two reasons: a torch-present /
     # kornia-absent environment must still get the actionable RuntimeError rather than a
@@ -458,7 +460,15 @@ def _frontend_disk_lightglue(ref, mov, model="euclidean", n_keypoints=2048, **kw
             return {
                 "keypoints": f.keypoints[None],
                 "descriptors": f.descriptors[None],
-                "image_size": torch.tensor(t.shape[-2:], device=device)[None],
+                # kornia's own LightGlue fallback for this key is
+                # ``data0["image"].shape[-2:][::-1]`` -- i.e. (W, H), NOT (H, W).
+                # normalize_keypoints() divides (x, y) keypoints by this size, so a
+                # reversed size puts H on the x axis and silently sends every
+                # normalised keypoint out of [-1, 1], which _forward()'s internal
+                # KORNIA_CHECK then rejects. A SQUARE fixture cannot catch this --
+                # (H, W) and (W, H) are the same tuple when H == W -- which is why
+                # this shipped broken once already. Do not "tidy" the [::-1] away.
+                "image_size": torch.tensor(t.shape[-2:][::-1], device=device)[None],
             }
 
         out = matcher({"image0": _side(f_ref, t_ref), "image1": _side(f_mov, t_mov)})

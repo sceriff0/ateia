@@ -50,6 +50,24 @@ def pair():
     return ref, mov
 
 
+@pytest.fixture
+def rect_pair():
+    """Non-square 256x512 fixture (rows x cols), same blob-fixture style as ``pair``.
+
+    A SQUARE fixture cannot catch a (H, W) vs (W, H) ``image_size`` ordering bug: the two
+    orderings are the same tuple when H == W. This one is 256 rows x 512 cols, and stays
+    at or below 512 px in the larger dimension.
+    """
+    rng = np.random.default_rng(1)
+    ref = np.zeros((256, 512), dtype=np.float32)
+    for _ in range(120):
+        y = rng.integers(20, 236)
+        x = rng.integers(20, 492)
+        ref[y - 4:y + 4, x - 4:x + 4] = rng.uniform(0.5, 1.0)
+    mov = np.roll(np.roll(ref, -7, axis=0), 5, axis=1)
+    return ref, mov
+
+
 @pytest.mark.parametrize("frontend", ["orb", "sift", "fourier_mellin"])
 def test_cpu_frontends_recover_a_pure_shift(pair, frontend):
     ref, mov = pair
@@ -95,6 +113,26 @@ def test_disk_lightglue_recovers_a_pure_shift(pair):
     pytest.importorskip("torch")
     pytest.importorskip("kornia")
     ref, mov = pair
+    m0, info = estimate_affine(ref, mov, frontend="disk_lightglue")
+    np.testing.assert_allclose(m0[0, 2], -5, atol=1.5)
+    np.testing.assert_allclose(m0[1, 2], 7, atol=1.5)
+    assert info["frontend"] == "disk_lightglue"
+    assert info["n_inliers"] > 50, f"only {info['n_inliers']} inliers"
+    assert np.isfinite(info["residual_px"]) and info["residual_px"] < 2.0
+
+
+def test_disk_lightglue_recovers_a_pure_shift_on_a_rectangular_thumbnail(rect_pair):
+    """Regression test for the ``image_size`` (H, W) vs (W, H) ordering bug.
+
+    Every production thumbnail is non-square (``decimation_factor`` in
+    bin/utils/tiled_io.py applies one shared integer factor and preserves aspect
+    ratio), so the square ``pair`` fixture above cannot exercise this path -- it
+    passed even when ``image_size`` was fed to LightGlue as ``t.shape[-2:]`` (H, W)
+    instead of the (W, H) kornia's own fallback uses, which aborts on any real slide.
+    """
+    pytest.importorskip("torch")
+    pytest.importorskip("kornia")
+    ref, mov = rect_pair
     m0, info = estimate_affine(ref, mov, frontend="disk_lightglue")
     np.testing.assert_allclose(m0[0, 2], -5, atol=1.5)
     np.testing.assert_allclose(m0[1, 2], 7, atol=1.5)
