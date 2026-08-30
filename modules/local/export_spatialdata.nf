@@ -43,6 +43,14 @@ process EXPORT_SPATIALDATA {
     def image_arg     = (params.spatialdata_include_image && pyramid) ? "--include-image --pyramid ${pyramid}" : ''
     def qc_arg        = qc_json       ? "--qc-json ${qc_json}"             : ''
     def resid_arg     = reg_residuals ? "--reg-residuals ${reg_residuals}" : ''
+    // meta.pixel_size, not params.pixel_size: --pyramid (the only image this process
+    // ever sees) is rendered only under --spatialdata_include_image, which defaults to
+    // false, so bin/export_spatialdata.py's
+    // resolve_pixel_size(args.pixel_size, args.pyramid, ...) is called with image=None
+    // on the shipped default path and cannot resolve 'auto' itself. meta.pixel_size is
+    // the number INPUT_CHECK's PREFLIGHT_SCALE already resolved per-slide. A fourth
+    // consumer of the same defect, found auditing this fix -- not one of the three the
+    // originating review named.
     """
     input_bytes=\$(stat -L --printf="%s" ${quant_csv} 2>/dev/null || echo 0)
     echo "${task.process},${meta.patient_id},${quant_csv.name},\${input_bytes}" > ${meta.patient_id}.EXPORT_SPATIALDATA.size.csv
@@ -58,7 +66,7 @@ process EXPORT_SPATIALDATA {
         ${qc_arg} \\
         ${resid_arg} \\
         --patient-id ${meta.patient_id} \\
-        --pixel-size ${params.pixel_size} \\
+        --pixel-size ${meta.pixel_size} \\
         --residual-join-max-px ${params.spatialdata_residual_join_max_px} \\
         -o spatialdata/${meta.patient_id}.zarr \\
         ${args}

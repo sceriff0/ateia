@@ -109,9 +109,10 @@
                         "number",
                         "string"
                     ],
-                    "description": "Micrometres per pixel. NO DEFAULT: pass a positive number, or 'auto' to read PhysicalSizeX from each image's own OME metadata (which errors if the image carries no usable scale). Owns every micrometre conversion in the pipeline.",
+                    "description": "Micrometres per pixel. Defaults to 'auto', which reads PhysicalSizeX from each image's own OME metadata (a preflight step fails the run if that metadata is absent or unusable); pass a positive number to override the metadata for every slide. Owns every micrometre conversion in the pipeline.",
                     "pattern": "^(auto|[0-9]*\\.?[0-9]+([eE][-+]?[0-9]+)?)$",
-                    "exclusiveMinimum": 0
+                    "exclusiveMinimum": 0,
+                    "default": "auto"
                 }
             }
         },

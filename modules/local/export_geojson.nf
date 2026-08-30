@@ -45,9 +45,17 @@ process EXPORT_GEOJSON {
     // --pixel_size is NOT optional here even though the script has a parameter for it.
     // It was omitted, and export_geojson.py's own argparse default silently supplied
     // 0.325 -- so every "Centroid X µm", "Area µm²", "Perimeter µm" and axis length in
-    // cells.geojson ignored params.pixel_size entirely. Those measurements are the
+    // cells.geojson ignored the configured scale entirely. Those measurements are the
     // contract with qupath-extension-flowpath, so the run advertised a scale it was not
     // using. Pass it explicitly; the script now has no default to fall back to.
+    //
+    // `meta.pixel_size`, NOT `params.pixel_size`: this process is handed a CSV, not an
+    // image, so it cannot resolve `params.pixel_size == 'auto'` itself. INPUT_CHECK
+    // (subworkflows/local/input_check.nf) already resolved it per-slide via
+    // PREFLIGHT_SCALE and carries the number in meta -- see that file's comment. The
+    // same substitution is made in conf/modules.config's `withName: 'EXPORT_GEOJSON'`
+    // ext.args, which renders a SECOND `--pixel_size` that argparse's last-wins
+    // semantics lets override this one; both must stay in sync.
     """
     # Log input size for tracing (-L follows symlinks)
     input_bytes=\$(stat -L --printf="%s" ${quant_csv} 2>/dev/null || echo 0)
@@ -59,7 +67,7 @@ process EXPORT_GEOJSON {
     export_geojson.py \\
         --cell_data ${quant_csv} \\
         -o export \\
-        --pixel_size ${params.pixel_size} \\
+        --pixel_size ${meta.pixel_size} \\
         --contours_json ${contours_json} \\
         ${nucleus_arg} \\
         ${args}

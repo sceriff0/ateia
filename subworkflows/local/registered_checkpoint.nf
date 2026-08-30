@@ -60,6 +60,7 @@ workflow REGISTERED_CHECKPOINT {
                 registered_image: published_path,
                 is_reference    : meta.is_reference,
                 channels        : meta.channels.join('|'),
+                pixel_size      : meta.pixel_size,
             ])
         }
         .collectFile(
