@@ -35,15 +35,22 @@ shared preprocessing run**. No arm axis touches a `preproc_*` param, so running
 preprocessing nine times would repeat the expensive half of a real-WSI run to
 vary something it does not affect — the same factoring the segmentation arms use.
 Segmentation and export are not run either: nothing downstream of registration
-changes the staged registration QC. **7 arms**:
+changes the staged registration QC. **9 arms**:
 
 - **VALIS preset × micro-depth = 6.** `memory_mode` (`low` = BRISK/RANSAC,
   `high` = SuperPoint/SuperGlue — *different feature matchers*, not one matcher at
   two resolutions) crossed with `reg_micro_reg` (a **depth**: 0 none, 1
   micro-rigid, 2 + micro non-rigid). A depth is why this is 2 × 3, not 2 × 2.
-- **STARE (`registration_method = tiled`) at defaults = 1.** A different
-  *backend*, not a seventh cell: `memory_mode` and `reg_micro_reg` do not exist
-  there, so that arm carries neither.
+- **STARE (`registration_method = tiled`) × tier = 3.** A different *backend*, not
+  three more cells of the grid: `memory_mode` and `reg_micro_reg` do not exist
+  there, so these arms carry neither. It fans out over `reg_tiled_mode`
+  (`low|medium|high`) because a single defaults arm left the ranking tuning VALIS
+  across six configurations and STARE across none — the tuned-vs-untuned bias the
+  synthetic sweep has an explicit guard against, and which was unguarded here.
+  The **tier** is the right granularity rather than the individual knobs: it is what
+  an operator picks, and each row of `RegPresets.STARE` moves all five tier-owned
+  values coherently. The sweep already crosses those knobs singly over 27 cells on
+  synthetic images, where a cell is cheap; here a cell is a real WSI.
 ASHLAR is no longer one of these arms, and that is not a downgrade of its role.
 It was **× tile size = 2** here while it was a third `registration_method`;
 `v1.0.0` removed that backend (`registration_method` is now `valis | tiled`), so
@@ -75,9 +82,8 @@ measured on. Varying it leaves the registration byte-identical, which makes this
 registration. The same category `seg_qc_pairing` occupies in the synthetic sweep.
 
 `cross: reference` (the default) runs the extra segmenters against one arm:
-**9 registration runs** (7 arms + 2 extra segmenters on the reference arm).
-`cross: all` crosses all seven and costs **21**. These were 11 and 27 while
-ASHLAR was a backend arm; `arms.yaml`'s cost gate and
+**11 registration runs** (9 arms + 2 extra segmenters on the reference arm).
+`cross: all` crosses all nine and costs **27**. `arms.yaml`'s cost gate and
 `test_cross_all_crosses_every_arm` carry the same two numbers. Start at
 `reference` — if the number is stable there, crossing everything buys a denser
 null result.

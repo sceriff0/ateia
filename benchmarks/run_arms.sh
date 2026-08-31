@@ -181,6 +181,9 @@ run_pass() {
     add_param registration_method  "$(col_val registration_method "${vals[@]}")"
     add_param memory_mode          "$(col_val memory_mode "${vals[@]}")"
     add_param reg_micro_reg        "$(col_val reg_micro_reg "${vals[@]}")"
+    # tiled-only, blank on every other arm -- the add_param blank-guard is what keeps a
+    # VALIS arm from ever receiving --reg_tiled_mode "", which the schema enum rejects.
+    add_param reg_tiled_mode       "$(col_val reg_tiled_mode "${vals[@]}")"
     # THE THREE reg_ashlar_* FLAGS ARE GONE. ashlar stopped being a pipeline backend at
     # :fire: 6a54479, so nextflow.config declares none of them and the schema would reject
     # all three. The external ashlar baseline is now driven by benchmarks/ashlar/ instead of

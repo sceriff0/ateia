@@ -231,6 +231,28 @@ def stare_preset_row(mode):
     }
 
 
+def stare_preset_modes():
+    """The tier NAMES in RegPresets.STARE -- the owner of which tiers exist.
+
+    Shares stare_preset_row's parse deliberately. A second private regex over the same
+    Groovy file is the pattern tests/test_nfmodel.py exists to stop: seven guards each
+    carried their own parse and each had a different blind spot. 'custom' is absent from
+    the table by construction -- it is not a row, it is "start from high and apply
+    overrides" -- so callers get exactly the tiers that have values.
+    """
+    text = (Path(__file__).parents[2] / "lib" / "RegPresets.groovy").read_text()
+    body = re.search(r"STARE\s*=\s*\[(.*?)\n    \]", text, re.S)
+    assert body, "could not locate the STARE table in lib/RegPresets.groovy"
+    modes = re.findall(r"^\s*(\w+)\s*:\s*\[", body.group(1), re.M)
+    assert modes, "parsed no tier names out of RegPresets.STARE"
+    return modes
+
+
+def test_stare_preset_modes_are_the_documented_three():
+    """Watched failing: the parser must find the real tiers, not an empty list."""
+    assert set(stare_preset_modes()) == {"high", "medium", "low"}
+
+
 def test_stare_preset_parser_actually_parses():
     """The parser above must find a complete table, or every test using it silently passes."""
     rows = {m: stare_preset_row(m) for m in ("high", "medium", "low")}

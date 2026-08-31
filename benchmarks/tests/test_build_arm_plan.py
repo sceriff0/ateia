@@ -75,6 +75,9 @@ def test_arms_baseline_params_all_exist_in_the_pipeline(cfg):
         f"arms.yaml baseline pins params absent from nextflow.config: {unknown}")
 
 
+from benchmarks.tests.test_build_run_plan import stare_preset_modes  # noqa: E402
+
+
 def test_arms_baseline_values_match_the_pipeline_defaults(cfg):
     """The baseline must BE the shipped config, not merely name real params.
 
@@ -267,6 +270,44 @@ def test_valis_arms_are_preset_x_depth_not_a_2x2(plan):
 # The QC-segmenter cross
 # ---------------------------------------------------------------------------
 
+def test_tiled_arms_are_the_three_shipped_tiers(plan):
+    """STARE must fan out over reg_tiled_mode, or the ranking is tuned-vs-untuned.
+
+    The sibling of test_valis_arms_are_preset_x_depth_not_a_2x2. With ONE tiled arm the
+    ranking tuned VALIS across six configurations and STARE across none -- exactly the bias
+    test_project_stare_resolution_axis_mirrors_the_valis_one refuses to allow in the sweep,
+    and this is the block that produces the manuscript's registration figure.
+
+    Pinned to the tier table rather than to a literal list: RegPresets.STARE is the owner of
+    which tiers exist, so adding a fourth there and forgetting it here should fail. 'custom'
+    is excluded deliberately -- it is not a tier, it is "start from high and apply overrides",
+    and arms.yaml sets no per-knob overrides for it to apply.
+    """
+    tiled = [r for r in plan
+             if r.get("backend") == "tiled" and "_seg" not in r["arm"]]
+    shipped = set(stare_preset_modes())
+    assert {r["reg_tiled_mode"] for r in tiled} == shipped, (
+        f"tiled arms {sorted(r['reg_tiled_mode'] for r in tiled)} do not cover the shipped "
+        f"tiers {sorted(shipped)} in RegPresets.STARE")
+    assert len(tiled) == len(shipped)
+
+
+def test_non_tiled_arms_carry_no_tiled_params(plan):
+    """The mirror direction, and the one with teeth for the LAUNCHER.
+
+    run_arms.sh maps every non-empty cell to `--<param> <value>`. A VALIS arm carrying
+    reg_tiled_mode would be launched with --reg_tiled_mode, which is a real param and a legal
+    enum value, so validateParameters() would NOT reject it -- it would just record a knob
+    the run never used, in the very table the arm ranking reads. The same failure
+    test_non_ashlar_arms_carry_no_ashlar_params was written for.
+    """
+    for r in plan:
+        if r.get("backend") == "tiled":
+            continue
+        assert r.get("reg_tiled_mode", "") == "", (
+            f"{r['arm']} carries reg_tiled_mode={r.get('reg_tiled_mode')!r}")
+
+
 def test_qc_segmenter_cross_varies_seg_method_only(cfg, plan):
     """A cross arm must differ from its base arm in seg_method and NOTHING else.
 
@@ -304,14 +345,14 @@ def test_cross_all_crosses_every_arm(cfg):
         cfg["qc_segmenter_cross"], cross="all")))
     reg = [r for r in full if r["arm_kind"] == "registration"]
     n_methods = len(cfg["qc_segmenter_cross"]["seg_method"])
-    # 7 = 6 VALIS (preset x micro-depth) + 1 STARE. It was 7, went to 9 when ashlar became
-    # a third backend, and is BACK TO 7 now that :fire: 6a54479 removed that backend and the
-    # comparator moved to benchmarks/ashlar/. This number is quoted in docs/benchmarks_real.md
-    # and in arms.yaml's cost gate, which is why it is asserted rather than derived: the point
-    # is that the prose and the code agree, and deriving it from the plan would make the
-    # assertion vacuous.
-    assert len(reg) == 7 * n_methods, (
-        "cross: all should be 7 arms x every segmenter; docs/benchmarks_real.md quotes 21 "
+    # 9 = 6 VALIS (preset x micro-depth) + 3 STARE (tier). History: 7 originally, 9 when
+    # ashlar was a third backend, back to 7 when :fire: 6a54479 removed it, and 9 again now
+    # that STARE fans out over its three shipped tiers instead of running as one arm at
+    # defaults. This number is quoted in docs/benchmarks_real.md and in arms.yaml's cost
+    # gate, which is why it is asserted rather than derived: the point is that the prose and
+    # the code agree, and deriving it from the plan would make the assertion vacuous.
+    assert len(reg) == 9 * n_methods, (
+        "cross: all should be 9 arms x every segmenter; docs/benchmarks_real.md quotes 27 "
         "and the cost gate in arms.yaml depends on that number being right")
 
 

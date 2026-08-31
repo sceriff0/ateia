@@ -29,6 +29,12 @@ from pathlib import Path
 # Writing memory_mode=high on a STARE arm would invent a value the run never had.
 VALIS_ONLY = ("memory_mode", "reg_micro_reg")
 
+# The mirror of VALIS_ONLY for the tiled/STARE backend. reg_tiled_mode selects a row of
+# RegPresets.STARE and means nothing on a VALIS arm, so a VALIS arm must carry it BLANK --
+# both so the consumer can tell "not applicable" from "at default", and so run_arms.sh's
+# add_param blank-guard never emits `--reg_tiled_mode ""`, which schema validation rejects.
+TILED_ONLY = ("reg_tiled_mode",)
+
 # ASHLAR_ONLY = ("reg_ashlar_tile", "reg_ashlar_overlap", "reg_ashlar_max_shift_um") is GONE
 # with the arm. Those three are not pipeline params any more -- nextflow.config declares none
 # of them -- so emitting the columns at all, even blank, would put three names in arms.csv
@@ -37,6 +43,14 @@ VALIS_ONLY = ("memory_mode", "reg_micro_reg")
 
 def valis_arm_name(memory_mode: str, micro: int) -> str:
     return f"valis_{memory_mode}_micro{micro}"
+
+
+def tiled_arm_name(mode: str) -> str:
+    # The tier is IN the name, not only in arms.csv. registration_arms.R falls back to
+    # parsing the directory name when the manifest is missing, and three STARE arms that
+    # differed only by a column it failed to read would render as one triplicated box.
+    # Keeps the `tiled` substring the consumer's backend fallback keys on.
+    return f"tiled_{mode}"
 
 
 def _registration_arms(cfg: dict) -> list[dict]:
@@ -73,17 +87,30 @@ def _registration_arms(cfg: dict) -> list[dict]:
 
     tiled = ra.get("tiled") or {}
     if tiled.get("enabled"):
-        # No memory_mode, no reg_micro_reg — see VALIS_ONLY. The consumer keys
-        # "is this the tiled backend" off the `backend` column when arms.csv is
-        # present, and off the substring `tiled`/`stare` when it is not; the name
-        # satisfies both so the fallback path stays correct too.
-        arms.append({
-            "arm": "tiled_defaults",
-            "backend": "tiled",
-            "memory_mode": "",
-            "reg_micro_reg": "",
-            "label": "tiled (STARE, defaults)",
-        })
+        # STARE fans out over its TIER, not over individual knobs. reg_tiled_mode is the
+        # knob an operator actually picks, and each tier moves all five tier-owned values
+        # (tile / halo / out_tile / coarse_max_dim / upsample) coherently -- see
+        # RegPresets.STARE. Varying them singly is sweep.yaml's job, on synthetic images
+        # where a cell is cheap; here a cell is a real WSI at up to 483 GB, so arms carries
+        # the three shipped tiers and nothing finer.
+        #
+        # WHY IT IS NOT ONE ARM ANY MORE: at one tiled arm the ranking tuned VALIS across
+        # six configurations and STARE across none, which is the same tuned-vs-untuned bias
+        # test_project_stare_resolution_axis_mirrors_the_valis_one guards in the sweep --
+        # and it was unguarded here, in the block that produces the manuscript figure.
+        for mode in tiled.get("reg_tiled_mode", []):
+            arms.append({
+                "arm": tiled_arm_name(mode),
+                "backend": "tiled",
+                # No memory_mode, no reg_micro_reg -- see VALIS_ONLY. The consumer keys
+                # "is this the tiled backend" off the `backend` column when arms.csv is
+                # present, and off the substring `tiled`/`stare` when it is not; the name
+                # satisfies both so the fallback path stays correct too.
+                "memory_mode": "",
+                "reg_micro_reg": "",
+                "reg_tiled_mode": mode,
+                "label": f"tiled (STARE, {mode})",
+            })
     return arms
 
 
@@ -182,6 +209,7 @@ def build_arm_plan(cfg: dict) -> list[dict]:
         "arm": PREPROCESS_ARM, "backend": "", "memory_mode": "",
         "reg_micro_reg": "", "seg_method": baseline.get("seg_method", ""),
         "registration_method": "", "reg_qc": "",
+        **{k: "" for k in TILED_ONLY},
     })
     n += 1
 
@@ -195,6 +223,9 @@ def build_arm_plan(cfg: dict) -> list[dict]:
             "registration_method": a["backend"],
             **{k: a[k] for k in ("arm", "backend", "memory_mode",
                                  "reg_micro_reg", "seg_method")},
+            # Blank on every non-tiled arm, exactly as memory_mode/reg_micro_reg are
+            # blank on non-VALIS arms.
+            **{k: a.get(k, "") for k in TILED_ONLY},
             "reg_qc": 2,
         })
         n += 1

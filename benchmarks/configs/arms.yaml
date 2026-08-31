@@ -85,7 +85,21 @@ registration_arms:
   # different stage vocabularies (valis: native/rigid/non_rigid/micro; tiled:
   # native/rigid/refined). The consumer ranks each arm on ITS OWN final stage.
   tiled:
-    enabled: true                          # 1 arm
+    enabled: true
+    # THREE ARMS, one per shipped tier. Was a single `tiled_defaults` arm, which left the
+    # ranking tuning VALIS across six configurations and STARE across none -- the same
+    # tuned-vs-untuned bias sweep.yaml guards with
+    # test_project_stare_resolution_axis_mirrors_the_valis_one, and unguarded here, in the
+    # block that produces the manuscript's registration figure.
+    #
+    # THE TIER IS THE RIGHT GRANULARITY, not the individual knobs. reg_tiled_mode is what an
+    # operator actually picks, and each row of RegPresets.STARE moves all five tier-owned
+    # values (tile / halo / out_tile / coarse_max_dim / upsample) coherently. Varying them
+    # singly is sweep.yaml's job: it already crosses tile x gate_tre x coarse_max_dim = 27
+    # cells, on SYNTHETIC images where a cell is cheap. Here a cell is a real WSI -- REGISTER
+    # has been observed at 483 GB -- so porting that grid would pay WSI prices for a search
+    # already done. Sweep selects; arms validates the finalists.
+    reg_tiled_mode: [low, medium, high]    # 3 arms
 
     # THE COARSE FRONT-END AXIS IS GONE. It declared the three classical front-ends and
     # deferred the learned matcher on three grounds -- a separate unpublished stare-ml image,
@@ -109,9 +123,14 @@ registration_arms:
 # sweep.yaml.
 #
 # COST GATE. `cross: reference` runs the extra segmenters against ONE arm
-# (`reference_arm` below): 7 + 2 = 9 registration runs per patient. `cross: all`
-# crosses every arm and costs 7 x 3 = 21. Start at `reference` — if the headline
-# number is stable there, crossing all 7 buys a denser version of a null result.
+# (`reference_arm` below): 9 + 2 = 11 registration runs per patient. `cross: all`
+# crosses every arm and costs 9 x 3 = 27. Start at `reference` — if the headline
+# number is stable there, crossing all 9 buys a denser version of a null result.
+#
+# The 9 is 6 VALIS + 3 STARE. It was 7 while STARE ran as a single defaults arm;
+# giving STARE its three tiers costs +2 real runs per patient and is what stops the
+# ranking comparing a tuned VALIS against an untuned STARE. Guarded by
+# test_cross_all_crosses_every_arm and test_tiled_arms_are_the_three_shipped_tiers.
 qc_segmenter_cross:
   cross: reference                         # reference | all | none
   reference_arm: valis_high_micro2         # must name an arm the grid above produces
@@ -209,7 +228,25 @@ external_baseline:
     enabled: true
     tile_size: [1024, 4096]                # the fairness knob against reg_tiled_tile
     overlap_fraction: 0.1
-    maximum_shift_um: 30                   # MICRONS, and it fails SILENTLY when too small:
-                                           # LayerAligner replaces an out-of-range tile with a
-                                           # model prediction instead of erroring. Must exceed
-                                           # the real cross-cycle drift for your cohort.
+
+    # MAXIMUM_SHIFT IS A LIST, and this is the most important knob in the block.
+    #
+    # It is in MICRONS and it fails SILENTLY when too small: LayerAligner replaces an
+    # out-of-range tile with a MODEL PREDICTION instead of erroring. A shift-starved
+    # ASHLAR run therefore does not crash -- it quietly degrades, and lands in the table
+    # as a genuine loss for ASHLAR. That is the exact shape of a strawman baseline, and
+    # it is undetectable from the score alone.
+    #
+    # Two budgets, one doubling apart, convert that silent failure into a VISIBLE one: if
+    # 30 and 60 agree, the budget was not binding and the number is defensible; if they
+    # disagree, 30 was starving it and the 30 row must not be reported as ASHLAR's
+    # accuracy. This is cheap insurance -- ASHLAR is the only external comparator, so
+    # every claim of "we beat the field standard" rests on it not having been crippled.
+    maximum_shift_um: [30, 60]
+
+    # The quality gate: the fraction of tiles ASHLAR may discard before its own solve is
+    # considered unreliable. Held at the driver default (benchmarks/ashlar/solve.py's
+    # DEFAULT_MAX_DISCARD_FRACTION) rather than varied -- it decides which tiles COUNT,
+    # which is a correctness question, not a cost/accuracy trade. Tying it to a comparison
+    # axis would silently change what is being measured, the same reason STARE's gating
+    # knobs are deliberately NOT tiered in RegPresets.
