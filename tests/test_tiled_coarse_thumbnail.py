@@ -2,18 +2,19 @@
 
 TILED_COARSE was the last caller of the eager ``nuclear_channel(load_channels(path))`` whole-slide
 decode that test_tiled_reg_tile_lazy.py already retired from the per-tile step. On top of the
-full decode it ran ORB at *native* resolution, and ``_orb_features`` promotes its input to
-float64 -- measured at ~40 bytes per source pixel once the Gaussian pyramid and the FAST/Harris
-response arrays at level 0 are counted. On a 26k x 26k slide that is ~35 GB against a budget of
-``8.GB * task.attempt``, which is how patient 052 exhausted all four attempts with exit 137.
+full decode it matched at *native* resolution, which is how patient 052 exhausted all four
+attempts with exit 137. The design always specified this step as a THUMBNAIL feature-align to a
+global rigid M0, and the thumbnail is what these tests pin.
 
-docs/parallel_registration_design.md:117 always specified this step as
-``COARSE  thumbnail feature-align (ORB + RANSAC) -> global rigid M0   ~1-2 GB``.
-The thumbnail is what these tests pin.
+The bound matters more now, not less: the matcher is DISK, a U-Net whose activation memory is
+linear in thumbnail AREA (``GB ~= 1.1 + 7.3 * Mpx``), and TILED_COARSE's memory request is
+derived from ``--max-dim`` for exactly that reason. An unbounded plane is not a slow run, it is
+an unschedulable one.
 
 Properties pinned here:
-  1. ORB never sees a full-resolution plane: the arrays handed to estimate_rigid have their
-     longest side bounded by --max-dim. This is the test that fails against the pre-change code.
+  1. The matcher never sees a full-resolution plane: the arrays handed to estimate_rigid have
+     their longest side bounded by --max-dim. This is the test that fails against the
+     pre-change code.
   2. No whole-slide array is ever materialised: every region read off either slide is a bounded
      row band, not the whole plane.
   3. M0 is written in FULL-RESOLUTION coordinates -- estimating on a decimated pair and
@@ -45,13 +46,18 @@ sys.path.insert(
 pytest.importorskip("skimage")
 pytest.importorskip("scipy")
 pytest.importorskip("zarr")
+# torch + kornia are NOT optional decoration here. Six cases below reach the real
+# estimate_rigid -- including the three that monkeypatch it, because each spy wraps `orig`
+# and CALLS THROUGH -- so without the learned matcher they would RuntimeError, not skip.
+pytest.importorskip("torch")
+pytest.importorskip("kornia")
 tifffile = pytest.importorskip("tifffile")
 
 import tiled_coarse  # noqa: E402
 
 
 def _textured(seed, h, w, sigma=2.0):
-    """Blurred noise: structure that survives decimation, so ORB still finds corners."""
+    """Blurred noise: structure that survives decimation, so the matcher still finds keypoints."""
     from scipy.ndimage import gaussian_filter
 
     rng = np.random.default_rng(seed)
@@ -102,11 +108,11 @@ def _run(tmp_path, ref_f, mov_f, max_dim, nuclear_index=1, tile=256, halo=32):
     return json.loads(m0_f.read_text()), tiles_f
 
 
-def test_orb_never_sees_a_full_resolution_plane(tmp_path, monkeypatch):
+def test_the_matcher_never_sees_a_full_resolution_plane(tmp_path, monkeypatch):
     """The arrays handed to estimate_rigid must be bounded by --max-dim.
 
     Fails against the pre-change code, which passed the native-resolution DAPI plane straight
-    into ORB (1024 px here, 8x over the 128 px bound).
+    into the matcher (1024 px here, 8x over the 128 px bound).
     """
     n, max_dim = 1024, 128
     ref_f, mov_f = _write_pair(tmp_path, n=n, shift=(16, -8))
@@ -124,12 +130,14 @@ def test_orb_never_sees_a_full_resolution_plane(tmp_path, monkeypatch):
     assert seen, "estimate_rigid was never called"
     for ref_shape, mov_shape in seen:
         assert max(ref_shape) <= max_dim, (
-            f"ORB got a {ref_shape} reference plane, over the {max_dim}px thumbnail bound"
+            f"the matcher got a {ref_shape} reference plane, over the {max_dim}px "
+            f"thumbnail bound"
         )
         assert max(mov_shape) <= max_dim, (
-            f"ORB got a {mov_shape} moving plane, over the {max_dim}px thumbnail bound"
+            f"the matcher got a {mov_shape} moving plane, over the {max_dim}px "
+            f"thumbnail bound"
         )
-        assert ref_shape == mov_shape, "thumbnails must share one scale for ORB matching"
+        assert ref_shape == mov_shape, "thumbnails must share one scale for matching"
 
 
 def test_slides_are_read_lazily_in_bounded_bands(tmp_path, monkeypatch):
@@ -258,8 +266,8 @@ def test_reference_and_moving_share_one_decimation_factor(tmp_path, monkeypatch)
     """Differently-sized slides must be decimated by the SAME factor.
 
     A per-image factor (each independently squeezed under --max-dim) puts the two thumbnails at
-    different scales; ORB would then match across a scale change and M0 would carry a bogus
-    scale term that no per-tile refinement can undo.
+    different scales; the matcher would then match across a scale change and M0 would carry a
+    bogus scale term that no per-tile refinement can undo.
     """
     ref_f, mov_f = _write_pair(tmp_path, n=512, ref_n=1024, shift=(0, 0))
 

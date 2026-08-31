@@ -47,7 +47,7 @@ Bio-Formats conversion + BaSiC illumination correction.
 
 | Parameter | Default | Description |
 |---|---|---|
-| `pixel_size` | `0.325` | Physical pixel size in µm, and the **single owner** of every µm conversion in the pipeline: GeoJSON centroids and areas, the published pyramid's `PhysicalSize`, and InstantSeg's rescaling all use this value and nothing else. An input's own OME `PhysicalSizeX` is *not* preferred over it — it is compared against it, and `CONVERT_IMAGE`/`APPLY_PROFILES` log a `[SCALE MISMATCH]` warning naming both numbers when the two disagree by more than 1%. If your slides are not 0.325 µm/px, set this; the warning will not do it for you. See `bin/utils/pixel_size.py`. |
+| `pixel_size` | `'auto'` | Micrometres per pixel, and the **single owner** of every µm conversion in the pipeline: GeoJSON centroids and areas, the published pyramid's `PhysicalSize`, and InstantSeg's rescaling all use this value and nothing else. `'auto'` (the default) reads `PhysicalSizeX` from each image's own OME metadata; a positive number overrides it for every slide instead, and `CONVERT_IMAGE`/`APPLY_PROFILES` then log a `[SCALE MISMATCH]` warning naming both numbers if the override disagrees with the file's own metadata by more than 1%. See `bin/utils/pixel_size.py`. |
 | `skip_preprocessing` | `false` | Skip BaSiC illumination correction entirely. Conversion still runs — everything downstream assumes the standardised OME-TIFF layout — so the step still emits one image per input and `csv/preprocessed.csv` still has a row per slide; the row points at `<pid>/converted/` instead of `<pid>/preprocessed/`. |
 | `preproc_skip_nuclear` | `true` | Leave the nuclear/fiducial channels named by [`nuclear_markers`](#common) uncorrected. Those channels drive both registration and segmentation, so correcting them changes what both consume. |
 | `preproc_tile_size` | `1950` | BaSiC FOV tile size (px). |
@@ -62,7 +62,8 @@ owned outright by `conf/modules.config`. See `docs/basic_illumination.md`.
 ## Registration
 
 Two backends, selected by `--registration_method`: **VALIS** (default, graph-based
-whole-slide alignment) and **STARE tiled** (JVM-free, fully parallel, laptop-friendly).
+whole-slide alignment) and **STARE tiled** (JVM-free, fully parallel). STARE is **not**
+laptop-sized at its shipped tier — see the memory note under [Tiled / STARE](#tiled--stare-registration_methodtiled).
 
 ### Common
 
@@ -81,7 +82,7 @@ whole-slide alignment) and **STARE tiled** (JVM-free, fully parallel, laptop-fri
 | `reg_valis_max_non_rigid_dim` | tier (`high`: 4096) | Non-rigid registration size (px). **Tier-owned.** Requesting more than the smallest slide's full resolution makes VALIS clamp it to that slide's largest dimension; lower it below that on small-format input such as TMA cores. |
 | `reg_micro_reg_fraction` | `0.125` | Image fraction used for micro-registration. |
 | `reg_max_image_dim` | `4000` | Max cached image dimension during registration. |
-| `reg_micro_reg` | `2` | Micro-registration depth (nested, default MAX): `0` = none, `1` = micro-rigid only (refines `slide.M`), `2` = + micro non-rigid (`register_micro`). At `>=1` the QC `rigid` stage means affine ∘ micro-rigid. |
+| `reg_micro_reg` | `1` | Micro-registration depth (nested, default `1`): `0` = none, `1` = micro-rigid only (refines `slide.M`) — default, `2` = + micro non-rigid (`register_micro`). At `>=1` the QC `rigid` stage means affine ∘ micro-rigid. |
 | `reg_jvm_heap_gb` | `null` | Explicit JVM heap (GB) for VALIS. `null` auto-estimates from input size. |
 | `reg_qc` | `2` | Registration QC depth: `0` = none, `1` = DAPI overlay only, `2` = DAPI overlay + [staged segmentation-overlap metrics](registration_qc.md). |
 
@@ -94,26 +95,37 @@ and how to read it.
 ### Tiled / STARE (`registration_method=tiled`)
 
 STARE is an alternative registration backend that is **JVM-free** (no Bio-Formats/Java
-heap), tiles the slide internally, and runs fully in parallel — usable on a laptop. These
-params apply only when `--registration_method tiled`.
+heap), tiles the slide internally, and runs fully in parallel. These params apply only when
+`--registration_method tiled`.
+
+**Sizing warning.** STARE is *not* a laptop backend at the shipped `high` tier. Every step
+except the coarse anchor is region-streamed and stays under a few GB, but `TILED_COARSE`
+matches with DISK — a U-Net whose peak is linear in thumbnail **area** — and asks **~48 GB**
+at `reg_tiled_coarse_max_dim` 2048. `--reg_tiled_mode low` (512 px, ~5 GB) is the
+workstation-viable tier. Because `max_memory` is a required parameter, a site sized from the
+older "≤8 GB / laptop-friendly" wording gets a clamp and then a deterministic OOM on
+`TILED_COARSE`, not a slow run.
 
 | Parameter | Default | Description |
 |---|---|---|
 | `reg_tiled_mode` | `high` | Cost/accuracy tier: `high` \| `medium` \| `low` \| `custom`. Supplies every tier-owned knob below. `custom` starts from `high` and applies only the knobs you set. Table: `RegPresets.STARE` in `lib/RegPresets.groovy`. |
 | `reg_tiled_nuclear_index` | `null` | Nuclear/fiducial channel index used to estimate the transform. `null` resolves it from the slide's channel metadata against `nuclear_markers`; set an integer only to override. |
-| `reg_tiled_frontend` | `orb` | COARSE global-alignment front-end: `orb` (default, today's behaviour) \| `sift` \| `fourier_mellin` \| `disk_lightglue`. Not tier-owned. `disk_lightglue` needs torch+kornia, which ship only in the `stare-ml` container (`-profile stare_ml`, `nextflow.config`) — selecting it without that profile fails fast with a clear error. **NOT YET IMPLEMENTED**: even under `-profile stare_ml`, the DISK+LightGlue matching body itself is a TODO (`bin/utils/coarse_align.py::_frontend_disk_lightglue`), so selecting it always raises `NotImplementedError` today. |
 | `reg_tiled_tile` | tier (`high`: 2048) | Tile core size (px); also the mesh-grid resolution. **Tier-owned** — only settable under `--reg_tiled_mode custom`. |
 | `reg_tiled_halo` | tier (`high`: 256) | Per-tile read halo (px) for registration context. **Tier-owned.** |
 | `reg_tiled_gate_tre` | `1.0` | Refine only tiles whose rigid-stage TRE (px) exceeds this. Not tier-owned: it decides which control points are acceptable, which is a correctness question rather than a cost trade. |
 | `reg_tiled_upsample` | tier (`high`: 10) | Phase-correlation sub-pixel upsample factor (per tile). **Tier-owned.** |
 | `reg_tiled_out_tile` | tier (`high`: 1024) | Streaming stitch write-tile size (px) — gigapixel-safe. **Tier-owned.** |
-| `reg_tiled_coarse_max_dim` | tier (`high`: 4096) | Longest side (px) of the thumbnail the coarse anchor (M0) is estimated on. **This is what bounds COARSE memory**, not tile size: ORB costs ~40 bytes per source pixel, so a native-resolution anchor on a gigapixel slide needs tens of GB. Lower = cheaper and coarser; the M0 residual grows with the decimation factor and must stay well inside `reg_tiled_halo`. `0` disables decimation. **Tier-owned.** |
+| `reg_tiled_coarse_max_dim` | tier (`high`: 2048) | Longest side (px) of the thumbnail the coarse anchor (M0) is estimated on. **This is what bounds COARSE memory**, not tile size: the anchor's matcher is DISK, a U-Net, so its peak is linear in thumbnail AREA — `GB ~= 1.1 + 7.3 * Mpx` (3.03 GB at 512 px, 8.78 GB at 1024 px, measured on the pinned stack). `TILED_COARSE`'s memory request in `conf/modules.config` is derived from this value, so raising it raises the reservation too. Lower = cheaper and coarser; the M0 residual grows with the decimation factor and must stay well inside `reg_tiled_halo`. **A 256 px floor is enforced at launch** by `ParamUtils.validateRegPresets` — anything below it (including `0`, which used to disable decimation and would now hand a full-resolution plane to a U-Net) aborts before any process is instantiated. Use 512 (the `low` tier) or higher. **Tier-owned.** |
 
 ### Tiers
 
-Both registration backends take the same four values. `high` is the shipped default and is
-byte-for-byte the behaviour that shipped before tiers existed; `medium` and `low` trade accuracy
-for memory and wall-clock; `custom` starts from `high` and applies only the knobs you set.
+Both registration backends take the same four values. `high` is the shipped default and, with
+**one exception**, is the behaviour that shipped before tiers existed; `medium` and `low` trade
+accuracy for memory and wall-clock; `custom` starts from `high` and applies only the knobs you
+set. The exception is `reg_tiled_coarse_max_dim`, which the whole column moved down one tier for
+v1.0.0 — `high` is **2048**, not the 4096 that used to ship — because COARSE's matcher became a
+U-Net and 4096 px extrapolates to ~123 GB of need (~185 GB of request). See
+`lib/RegPresets.groovy`.
 
 ```bash
 --reg_tiled_mode low                                   # every STARE knob from the low row

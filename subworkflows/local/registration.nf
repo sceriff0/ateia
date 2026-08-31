@@ -20,7 +20,7 @@ include { REGISTER_PATIENT                  } from './register_patient'
     Configuration:
         - params.skip_registration_qc: true | false (skip QC generation)
         - params.qc_scale_factor: float (QC downsampling factor, default 0.25)
-        - params.registration_method: 'valis' | 'tiled' | 'ashlar' -- read ONCE here, the single
+        - params.registration_method: 'valis' | 'tiled' -- read ONCE here, the single
           decision site on this path, and handed as an ARGUMENT to both REGISTER_PATIENT
           (which owns the adapter dispatch) and SEG_QC (which owns the warp dispatch).
           Neither reads the global, so neither can be what lifts add_cycle's VALIS-only

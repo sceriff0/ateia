@@ -21,7 +21,7 @@ inert and misleading; those have been removed. What remains is three cases:
 
 <div class="gate">
   <div class="g"><div class="k">case 1</div><div class="v">withName owns all three</div><div class="d">No label. The block sets cpus, memory and time. 15 processes.</div></div>
-  <div class="g"><div class="k">case 2</div><div class="v">label owns all three</div><div class="d">The withName block, if any, sets only publishDir / ext.args. 8 processes.</div></div>
+  <div class="g"><div class="k">case 2</div><div class="v">label owns all three</div><div class="d">The withName block, if any, sets only publishDir / ext.args. 7 processes.</div></div>
   <div class="g"><div class="k">case 3</div><div class="v">partial override</div><div class="d">withName sets one or two fields; a label supplies the rest. 6 processes.</div></div>
 </div>
 
@@ -120,29 +120,23 @@ strategy — see [Retry policy](#retry-policy) and
 
 ### Registration — tiled / STARE
 
-Deliberately small: the tiled backend is JVM-free and tile-streamed, so a few GB
-suffices even for large slides. This is what makes `--registration_method tiled`
-laptop-viable.
+Small everywhere **except the coarse anchor**: the tiled backend is JVM-free and
+tile-streamed, so `TILED_REG_TILE`, `TILED_SOLVE` and `TILED_STITCH` need a few GB even for
+large slides. `TILED_COARSE` does not — its DISK matcher is a U-Net whose peak is linear in
+thumbnail **area**, so the row below asks **48 GB at the shipped `high` tier**
+(`reg_tiled_coarse_max_dim` 2048) and ~5 GB at `low` (512). Size `--max_memory` for that
+number, or the clamp turns it into an OOM; `--reg_tiled_mode low` is what makes
+`--registration_method tiled` workstation-viable.
 
 | Process | `cpus` | `memory` (attempt 1) | `time` | Owner | `maxForks` |
 |---|---|---|---|---|---|
-| `TILED_COARSE` | `2` *(label)* | `8 GB × 2^(attempt−1)` *(withName)* | `2.h × attempt` *(label)* | partial | `20` |
+| `TILED_COARSE` | `2` *(label)* | derived from `reg_tiled_coarse_max_dim`, `× attempt` *(withName)* — 48 GB at defaults | `2.h × attempt` *(label)* | partial | `20` |
 | `TILED_REG_TILE` | `2` *(label)* | derived from `reg_tiled_tile` + 2×`reg_tiled_halo`, `× attempt` *(withName)* — 4 GB at defaults | `2.h × attempt` *(label)* | partial | `20` |
 | `TILED_SOLVE` | `1` *(label)* | `1 GB × attempt` *(withName)* | `8.h × attempt` *(label)* | partial | — |
 | `TILED_STITCH` | `4` *(label)* | derived from `reg_tiled_out_tile`, `× attempt` *(withName)* — 4 GB at defaults | `4.h × attempt` *(label)* | partial | `10` |
-| `ASHLAR_RETILE` | `2` *(label)* | `32 GB × attempt` *(label)* | `2.h × attempt` *(label)* | process_low | `20` |
-| `ASHLAR_SOLVE` | `2` *(label)* | `32 GB × attempt` *(label)* | `2.h × attempt` *(label)* | process_low | `20` |
 
 `TILED_COARSE` / `TILED_REG_TILE` / `TILED_SOLVE` / `TILED_STITCH` are the STARE method —
 the only shape it has.
-
-`ASHLAR_RETILE` / `ASHLAR_SOLVE` are the ASHLAR benchmark baseline
-(`--registration_method ashlar`); its third step is `TILED_STITCH` under the alias
-`ASHLAR_STITCH`, which inherits that row's resources, because ASHLAR's transform is
-serialized as the same M0 + mesh manifest STARE emits. Both keep their label and set no
-resource fields in `conf/modules.config`, so the label owns all three — `ASHLAR_RETILE`
-streams one tile at a time through `tiled_io.open_lazy` rather than loading the slide, and
-`ASHLAR_SOLVE` works on tile positions, not pixels, so neither needs a derived request.
 
 `TILED_REG_TILE`, `TILED_STITCH`, `TILE_FOR_BASIC`, `APPLY_PROFILES` and
 `MERGE_AND_PYRAMID` are the
@@ -192,11 +186,16 @@ are what `tests/test_resource_label_coverage.py` checks for all five of these
 param-derived rows.
 
 The STARE method's memory is bounded. Measured peak RSS on a 16384² 2-channel
-tiled OME-TIFF:
-`TILED_COARSE` 0.91 GB, `TILED_REG_TILE` 1.31 GB, `TILED_SOLVE` < 1.31 GB,
-`TILED_STITCH` 1.35 GB — each set by a parameter (`reg_tiled_coarse_max_dim`,
-`reg_tiled_tile` + `reg_tiled_halo`, `reg_tiled_out_tile`) rather than by slide
-dimensions. A single-task `TILED_REGISTER` alternative used to exist behind a flag; it had
+tiled OME-TIFF: `TILED_REG_TILE` 1.31 GB, `TILED_SOLVE` < 1.31 GB,
+`TILED_STITCH` 1.35 GB — each set by a parameter (`reg_tiled_tile` +
+`reg_tiled_halo`, `reg_tiled_out_tile`) rather than by slide dimensions.
+`TILED_COARSE` is bounded the same way, by `reg_tiled_coarse_max_dim`, but its
+magnitude is no longer small: the 0.91 GB figure measured above was the old
+classical feature detector, and the DISK matcher that replaced it is a U-Net
+whose activation memory is linear in thumbnail AREA — `GB ≈ 1.1 + 7.3 × Mpx`,
+i.e. 3.03 GB at 512 px and 8.78 GB at 1024 px, ~32 GB at the shipped 2048 px
+`high` tier. It stays bounded by a parameter; it is simply a much larger
+coefficient, which is why the tier column moved down (`lib/RegPresets.groovy`). A single-task `TILED_REGISTER` alternative used to exist behind a flag; it had
 no such bound (both whole slides, an all-channel float32 copy and the full warped output
 live at once, budgeted from file size), so it was removed rather than kept as an unbounded
 opt-out.
@@ -291,6 +290,7 @@ through `SPLIT_CHANNELS` (or use an existing run's per-channel TIFFs) and, per c
 
 | Process | `cpus` | `memory` (attempt 1) | `time` | Owner |
 |---|---|---|---|---|
+| `PREFLIGHT_SCALE` | `1` | `12 GB × attempt` | `8.h × attempt` | `process_single` |
 | `GENERATE_QC_REPORT` | `2` | `32 GB × attempt` | `2.h × attempt` | `process_low` |
 | `AGGREGATE_SIZE_LOGS` | `1` | `12 GB × attempt` | `8.h × attempt` | `process_single` |
 | `MERGE_SEG_EVAL` | `1` | `4 GB × attempt` | `1.h × attempt` | `withName` |

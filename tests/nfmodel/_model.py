@@ -56,6 +56,15 @@ def nf_files(dirs: Sequence[str] = _DEFAULT_DIRS, root: Path = REPO_ROOT) -> Lis
     return out
 
 
+def nf_test_files(root: Path = REPO_ROOT) -> List[Path]:
+    """Every nf-test file under `tests/`, recursively and sorted for a
+    deterministic order. A guard scanning `tests/**/*.nf.test` on its own
+    (a raw `Path.glob`) is itself an undiscoverable private parse of Nextflow
+    source by `test_nfmodel.py`'s own `_discover_nf_source_readers` rule --
+    this is the one place that enumeration happens."""
+    return sorted((root / "tests").rglob("*.nf.test"))
+
+
 def _section(body: str, name: str) -> str:
     """Text of a `name:` section, up to the next top-level section keyword
     (`input`/`output`/`when`/`script`/`shell`/`exec`/`stub`), or to the end

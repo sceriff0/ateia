@@ -7,21 +7,28 @@ tile grid the downstream per-tile registration fans out over. One cheap task per
 The estimate runs on a **thumbnail**, as docs/parallel_registration_design.md always specified.
 Both slides are read lazily (zarr region reads, in row bands) and decimated by one shared integer
 factor, so peak memory is a band plus the thumbnail rather than the full-resolution plane. This
-matters more than it looks: scikit-image's ORB promotes its input to float64 and builds a
-Gaussian pyramid plus FAST/Harris response arrays on top, which measures at roughly 40 bytes per
-source pixel -- around 35 GB on a 26k x 26k slide if handed the native-resolution plane.
+matters more than it looks: the anchor's matcher (DISK, a U-Net) allocates activations over the
+WHOLE plane it is handed, at roughly ``GB ~= 1.1 + 7.3 * Mpx`` -- a 26k x 26k slide at native
+resolution would need thousands of GB, so the thumbnail bound is not a tuning knob but the thing
+that makes this step runnable at all.
 
 ``--max-dim`` is the accuracy/cost knob. The anchor only has to land the moving slide inside the
 per-tile read halo (``--halo``, reference-frame px); the per-tile step refines the residual from
 there. A coarse fit residual of ``r`` thumbnail px becomes ``r * factor`` full-res px, so keep
 ``max_dim`` large enough that ``factor`` stays comfortably under ``halo``.
 
-Raising it is not linear, though, and that asymmetry is the thing to know before tuning: ORB's
-cost is dominated by ``corner_peaks``, which is quadratic in the number of candidate corners, so
-cost grows roughly with the SQUARE of the pixel count. Measured on a realistic DAPI phantom,
-per slide: 2048 -> ~13 s, 4096 -> ~154 s. 8192 would be tens of minutes per slide, and two
-slides run per task. Lower ``--max-dim`` when the step is slow; raise it only if the logged
-residual approaches ``--halo``.
+Raising it costs MEMORY, linearly in area, and that is the thing to know before tuning: DISK's
+activation memory measures at ``GB ~= 1.1 + 7.3 * Mpx`` on the pinned stack (3.03 GB at 512 px,
+8.78 GB at 1024 px), and TILED_COARSE's `memory` request in conf/modules.config is derived from
+this same bound. So ``--max-dim`` is not free: 4096 px NEEDS ~123 GB by that fit, and the
+request conf/modules.config derives carries a 1.5x headroom factor, so it would ASK for ~185 GB
+-- which is why the STARE tier column tops out at 2048. Lower ``--max-dim`` when the step OOMs; raise it only if the
+logged residual approaches ``--halo``.
+
+``--max-dim`` is REQUIRED and has no default. The pipeline always passes it explicitly, resolved
+from ``RegPresets.STARE``; a default here would be a fourth, unpinned copy of that tier value,
+and ``tests/test_reg_presets_inlined_in_config.py`` pins only the three Groovy/config copies. It
+also has a floor -- see the argument's own help.
 """
 
 from __future__ import annotations
@@ -43,8 +50,6 @@ sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
 import numpy as np  # noqa: E402
 from coarse_align import (  # noqa: E402
-    FRONTENDS,
-    estimate_affine,
     estimate_rigid,
     scale_transform_to_full_res,
 )
@@ -70,11 +75,11 @@ def _size_gb(path) -> float:
 def _timed_read(src, index, factor, which):
     """Read one decimated DAPI plane, logging how long it took and what came back.
 
-    The intensity summary is not decoration. ORB's `fast_threshold` is an ABSOLUTE intensity
-    difference, so a plane arriving in raw uint16 counts rather than [0, 1] silently costs
-    ~100x in the anchor step (see the note in bin/utils/coarse_align.py). Printing the observed
-    range here is what makes that class of regression visible in `.command.out` instead of
-    presenting as a walltime kill with no output at all.
+    The intensity summary is not decoration. DISK is a learned matcher trained on images in
+    [0, 1], so a plane arriving in raw uint16 counts is ~4 orders of magnitude outside its
+    trained input range and matches far worse than it should, with no error raised (see the
+    note in bin/utils/coarse_align.py). Printing the observed range here is what makes that
+    class of regression visible in `.command.out` instead of presenting as a silently bad M0.
     """
     t0 = time.perf_counter()
     plane = read_decimated(src, index, factor)
@@ -110,31 +115,41 @@ def main(argv=None) -> int:
     ap.add_argument(
         "--max-dim",
         type=int,
-        default=4096,
-        help="longest thumbnail side (px) the anchor is estimated on; <=0 disables decimation",
+        # REQUIRED, no default: the pipeline resolves this from RegPresets.STARE and always
+        # passes it. A default here would be a fourth copy of the tier value that nothing pins.
+        required=True,
+        help=(
+            "longest thumbnail side (px) the anchor is estimated on. Must be >= 16. There is "
+            "deliberately NO 'disable decimation' value: the matcher is a U-Net whose memory "
+            "is linear in thumbnail area, so a full-resolution plane needs thousands of GB."
+        ),
     )
     ap.add_argument(
         "--model", default="euclidean", choices=["euclidean", "similarity", "affine"]
     )
-    ap.add_argument(
-        "--frontend",
-        default="orb",
-        choices=list(FRONTENDS),
-        help=(
-            "COARSE global-alignment front-end (default: orb, today's behaviour). "
-            "disk_lightglue needs torch+kornia and runs only in the stare-ml container."
-        ),
-    )
     ap.add_argument("--out-m0", required=True, help="output M0 JSON (+ reference dims)")
     ap.add_argument("--out-tiles", required=True, help="output tile-plan CSV")
     a = ap.parse_args(argv)
+
+    # The hazard gate for a HAND-RUN. On the pipeline path ParamUtils.validateRegPresets
+    # enforces a 256 px floor before any task is instantiated; nothing guards this script when
+    # it is invoked directly. tiled_io.decimation_factor() reads `max_dim <= 0` as "no
+    # decimation" and returns factor 1, handing DISK the full-resolution plane -- thousands of
+    # GB on a whole slide. 16 rather than 256 because DISK's U-Net downsamples by 16, and a
+    # small thumbnail is a legitimate thing for a test or a probe to ask for.
+    if a.max_dim < 16:
+        ap.error(
+            f"--max-dim {a.max_dim} is below the 16 px floor. There is no value that disables "
+            "decimation: the anchor's matcher is a U-Net whose activation memory is linear in "
+            "thumbnail area, so the full-resolution plane is not a slow run, it is an OOM."
+        )
 
     t_start = time.perf_counter()
     logger.info(
         f"coarse: start | reference={Path(a.reference).name} "
         f"({_size_gb(a.reference):.2f} GB) moving={Path(a.moving).name} "
         f"({_size_gb(a.moving):.2f} GB) | nuclear_index={a.nuclear_index} model={a.model} "
-        f"frontend={a.frontend} max_dim={a.max_dim} tile={a.tile} halo={a.halo}"
+        f"max_dim={a.max_dim} tile={a.tile} halo={a.halo}"
     )
 
     # Nested acquisition (not two opens then one try/finally) so a failure opening the moving
@@ -145,8 +160,9 @@ def main(argv=None) -> int:
         try:
             _c, h, w = ref_src.shape  # FULL-resolution reference dims: the tile plan's frame
             _mc, mh, mw = mov_src.shape
-            # ONE factor for both slides: ORB matches descriptors across the two thumbnails, so
-            # a per-slide factor would introduce a scale change M0 cannot represent honestly.
+            # ONE factor for both slides: the matcher matches descriptors across the two
+            # thumbnails, so a per-slide factor would introduce a scale change M0 cannot
+            # represent honestly.
             factor = decimation_factor([(h, w), (mh, mw)], a.max_dim)
             logger.info(
                 f"coarse: reference {w}x{h} C={_c} {_ref_dtype} | "
@@ -171,17 +187,7 @@ def main(argv=None) -> int:
         ref_close()
 
     t0 = time.perf_counter()
-    # frontend="orb" (the default) goes through estimate_rigid directly rather than through
-    # estimate_affine's dispatch -- this is the exact pre-existing call, unchanged, so it stays
-    # behaviour-preserving for every run that doesn't opt into a different --frontend.
-    if a.frontend == "orb":
-        m0_ds, coarse_tre_ds, n_inliers = estimate_rigid(ref_nuc, mov_nuc, model=a.model)
-    else:
-        m0_ds, info = estimate_affine(
-            ref_nuc, mov_nuc, frontend=a.frontend, model=a.model
-        )
-        coarse_tre_ds = info["residual_px"]
-        n_inliers = info["n_inliers"]
+    m0_ds, coarse_tre_ds, n_inliers = estimate_rigid(ref_nuc, mov_nuc, model=a.model)
     logger.info(f"coarse: anchor estimated in {time.perf_counter() - t0:.1f}s")
     # The fit lives in thumbnail pixels; everything downstream (tile plan, per-tile source
     # regions, the stitch) is full-resolution, so lift both the map and its residual here.
@@ -221,11 +227,7 @@ def main(argv=None) -> int:
             f"not recover this. Raise --halo (reg_tiled_halo) or --max-dim "
             f"(reg_tiled_coarse_max_dim, currently decimating 1/{factor})"
         )
-    # n_inliers == -1 is the keypoint-free front-ends' (e.g. fourier_mellin) sentinel for "not
-    # applicable" -- there is no correspondence set to count inliers from. Guarding with
-    # `0 <=` keeps this warning meaningful only for front-ends that actually report a count;
-    # a hardcoded 0 here used to fire this warning on every fourier_mellin run.
-    if 0 <= n_inliers < 10:
+    if n_inliers < 10:
         logger.warning(
             f"coarse: only {n_inliers} inliers support M0 -- treat this slide's anchor as "
             f"unverified (low tissue texture, wrong --nuclear-index, or a failed match)"

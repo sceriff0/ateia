@@ -85,6 +85,7 @@ def create_multichannel_image(
     add_noise=True,
     shift=(0, 0),
     rng=None,
+    pixel_size_um=None,
 ):
     """Create a multi-channel OME-TIFF from a SHARED anatomy translated by ``shift``.
 
@@ -93,6 +94,12 @@ def create_multichannel_image(
     patient's images up to the known ``shift`` (+ light noise), so VALIS can
     recover the transform. Marker channels reuse the same geometry at lower,
     channel-specific intensities (co-registered marker panels).
+
+    ``pixel_size_um``, if given, stamps a real OME ``PhysicalSizeX``/``PhysicalSizeY``
+    (in micrometres) onto the file. Every other fixture this generator writes omits
+    it on purpose (see the `auto`-hard-fails-on-the-test-fixtures note in
+    conf/test.config) -- this is the one knob that turns that on, for the shipped-
+    defaults smoke fixture that needs `--pixel_size auto` to actually resolve.
     """
     if channel_names is None:
         channel_names = ["DAPI", "PANCK", "SMA"]
@@ -106,12 +113,19 @@ def create_multichannel_image(
     # Stack channels (C, Y, X)
     multichannel = np.stack(channels, axis=0)
 
+    metadata = {"axes": "CYX", "Channel": {"Name": channel_names}}
+    if pixel_size_um is not None:
+        metadata["PhysicalSizeX"] = pixel_size_um
+        metadata["PhysicalSizeXUnit"] = "µm"
+        metadata["PhysicalSizeY"] = pixel_size_um
+        metadata["PhysicalSizeYUnit"] = "µm"
+
     # Save as OME-TIFF with proper metadata
     tifffile.imwrite(
         filename,
         multichannel,
         photometric="minisblack",
-        metadata={"axes": "CYX", "Channel": {"Name": channel_names}},
+        metadata=metadata,
     )
     print(
         f"  Created {filename} - shape: {multichannel.shape}, channels: {channel_names}"
@@ -280,17 +294,19 @@ print("  Created valid_checkpoint_postprocessing.csv")
 #         both written elsewhere in this script.
 # id (RULING R17, lib/Checkpoint.groovy) IS required here: READ_SEGMENTED_CHECKPOINT
 # builds meta through Meta.fromCheckpointRow, which throws on a row with no id.
+# pixel_size (this task) is required the same way -- appended last, 0.325 to match
+# conf/test.config's pin.
 with open(OUT_DIR / "valid_checkpoint_segmented.csv", "w") as f:
-    f.write("patient_id,id,registered_image,is_reference,channels,cell_mask,nuclei_mask,contours,nucleus_contours\n")
+    f.write("patient_id,id,registered_image,is_reference,channels,cell_mask,nuclei_mask,contours,nucleus_contours,pixel_size\n")
     f.write(
         f"P001,P001_ref,{TESTDATA_ABS}/P001_ref.ome.tiff,true,DAPI|PANCK|SMA,"
         f"{TESTDATA_ABS}/P001_cell_mask.tif,{TESTDATA_ABS}/P001_nuclei_mask.tif,"
-        f"{TESTDATA_ABS}/sample_contours.json,{TESTDATA_ABS}/sample_contours.json\n"
+        f"{TESTDATA_ABS}/sample_contours.json,{TESTDATA_ABS}/sample_contours.json,0.325\n"
     )
     f.write(
         f"P001,P001_mov1,{TESTDATA_ABS}/P001_mov1.ome.tiff,false,DAPI|CD3|CD8,"
         f"{TESTDATA_ABS}/P001_cell_mask.tif,{TESTDATA_ABS}/P001_nuclei_mask.tif,"
-        f"{TESTDATA_ABS}/sample_contours.json,{TESTDATA_ABS}/sample_contours.json\n"
+        f"{TESTDATA_ABS}/sample_contours.json,{TESTDATA_ABS}/sample_contours.json,0.325\n"
     )
 print("  Created valid_checkpoint_segmented.csv")
 
@@ -298,11 +314,11 @@ print("  Created valid_checkpoint_segmented.csv")
 # under --quantify_compartments false actually has (EXTRACT_NUCLEI_PROPERTIES never
 # ran, but SEGMENT always produces nuclei_mask regardless of that flag).
 with open(OUT_DIR / "valid_checkpoint_segmented_no_compartments.csv", "w") as f:
-    f.write("patient_id,id,registered_image,is_reference,channels,cell_mask,nuclei_mask,contours,nucleus_contours\n")
+    f.write("patient_id,id,registered_image,is_reference,channels,cell_mask,nuclei_mask,contours,nucleus_contours,pixel_size\n")
     f.write(
         f"P001,P001_ref,{TESTDATA_ABS}/P001_ref.ome.tiff,true,DAPI|PANCK|SMA,"
         f"{TESTDATA_ABS}/P001_cell_mask.tif,{TESTDATA_ABS}/P001_nuclei_mask.tif,"
-        f"{TESTDATA_ABS}/sample_contours.json,\n"
+        f"{TESTDATA_ABS}/sample_contours.json,,0.325\n"
     )
 print("  Created valid_checkpoint_segmented_no_compartments.csv")
 
@@ -327,16 +343,16 @@ print("  Created valid_checkpoint_segmented_no_compartments.csv")
 #         classpath (which does not have lib/ available -- see tests/layout.nf.test's
 #         header comment).
 with open(OUT_DIR / "segmented.csv", "w") as f:
-    f.write("patient_id,id,registered_image,is_reference,channels,cell_mask,nuclei_mask,contours,nucleus_contours\n")
+    f.write("patient_id,id,registered_image,is_reference,channels,cell_mask,nuclei_mask,contours,nucleus_contours,pixel_size\n")
     f.write(
         f"P001,P001_ref,{TESTDATA_ABS}/P001_ref.ome.tiff,true,DAPI|PANCK|SMA,"
         f"{TESTDATA_ABS}/P001_cell_mask.tif,{TESTDATA_ABS}/P001_nuclei_mask.tif,"
-        f"{TESTDATA_ABS}/sample_contours.json,{TESTDATA_ABS}/sample_contours.json\n"
+        f"{TESTDATA_ABS}/sample_contours.json,{TESTDATA_ABS}/sample_contours.json,0.325\n"
     )
     f.write(
         f"P001,P001_mov1,{TESTDATA_ABS}/P001_mov1.ome.tiff,false,DAPI|CD3|CD8,"
         f"{TESTDATA_ABS}/P001_cell_mask.tif,{TESTDATA_ABS}/P001_nuclei_mask.tif,"
-        f"{TESTDATA_ABS}/sample_contours.json,{TESTDATA_ABS}/sample_contours.json\n"
+        f"{TESTDATA_ABS}/sample_contours.json,{TESTDATA_ABS}/sample_contours.json,0.325\n"
     )
 print("  Created segmented.csv (entry_point_equivalence.nf.test fixture)")
 
@@ -922,6 +938,41 @@ print("  Created expected/preproc_checkpoint_columns.txt")
 with open(EXPECTED_DIR / "reg_checkpoint_columns.txt", "w") as f:
     f.write("patient_id,id,registered_image,is_reference,channels\n")
 print("  Created expected/reg_checkpoint_columns.txt")
+
+# =============================================================================
+# 9. Shipped-defaults smoke fixture -- the ONE pair of images in this whole
+#    generator that carries a real OME PhysicalSizeX/Y.
+# =============================================================================
+# Every other fixture above is deliberately scale-less (`auto` would correctly
+# hard-fail at PREFLIGHT_SCALE on any of them -- see conf/test.config). CI's own
+# `-profile test` therefore never exercises the shipped defaults (`pixel_size =
+# 'auto'`, `seg_method = 'instantseg'`) together, because it pins both away from
+# them. This pair -- and the samplesheet naming it -- exists so a dedicated CI
+# job can run the stub pipeline with NEITHER pin, giving `auto`'s happy path its
+# first real (if stub-mode) end-to-end coverage.
+print("\n9. Creating shipped-defaults smoke fixture (real OME PhysicalSizeX/Y)...")
+p900_anatomy = make_anatomy((128, 128), n_cells=40, rng=_img_rng)
+create_multichannel_image(
+    OUT_DIR / "P900_ref_scaled.ome.tiff",
+    p900_anatomy,
+    channel_names=["DAPI", "PANCK", "SMA"],
+    shift=(0, 0),
+    rng=_img_rng,
+    pixel_size_um=0.325,
+)
+create_multichannel_image(
+    OUT_DIR / "P900_mov_scaled.ome.tiff",
+    p900_anatomy,
+    channel_names=["DAPI", "CD3", "CD8"],
+    shift=(5, 5),
+    rng=_img_rng,
+    pixel_size_um=0.325,
+)
+with open(OUT_DIR / "shipped_defaults_input.csv", "w") as f:
+    f.write("patient_id,path_to_file,is_reference,channels\n")
+    f.write(f"P900,{TESTDATA_ABS}/P900_ref_scaled.ome.tiff,true,DAPI|PANCK|SMA\n")
+    f.write(f"P900,{TESTDATA_ABS}/P900_mov_scaled.ome.tiff,false,DAPI|CD3|CD8\n")
+print("  Created shipped_defaults_input.csv (pixel_size='auto' happy path)")
 
 print("\n" + "=" * 70)
 print("All test data generation complete!")

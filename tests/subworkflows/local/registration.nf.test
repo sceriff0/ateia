@@ -144,30 +144,37 @@ nextflow_workflow {
     }
 
     /*
-     * REGISTRATION does NOT auto-promote a reference, EVEN WITH allow_auto_reference=true.
-     * It used to: the grouping closure promoted items[0], i.e. whichever slide arrived
-     * first, and it did so DOWNSTREAM of the preprocessing checkpoint writer -- so an
-     * --allow_auto_reference run wrote csv/preprocessed.csv with is_reference=false on
-     * every row and its own `--start registration` then refused to read it. The decision
-     * now happens once, at samplesheet-read time, in INPUT_CHECK via
-     * CsvUtils.resolveReferenceRows; what survives here is a guard.
+     * NOTHING INFERS A REFERENCE. registration.nf's grouping closure used to promote
+     * items[0] -- whichever slide arrived first -- and it did so DOWNSTREAM of the
+     * preprocessing checkpoint writer, so a run that auto-promoted wrote
+     * csv/preprocessed.csv with is_reference=false on every row and its own
+     * `--start registration` then refused to read it. Auto-promotion, and the
+     * parameter that enabled it, are gone (commit b63b986); the reference is resolved
+     * once at samplesheet-read time in INPUT_CHECK (CsvUtils.resolveReferenceRows) and
+     * arrives in meta.is_reference. What survives in registration.nf is a GUARD on that
+     * invariant, and these two cases are what pin it.
      *
-     * So this test asserts the guard fires regardless of the flag. The FALLBACK ITSELF is
-     * covered end to end, at the level that now owns it, by main.nf.test's "Should accept
-     * no reference when allow_auto_reference=true".
+     * These cases used to set `allow_auto_reference` (true here, false below) to assert
+     * that the flag changed nothing. The flag no longer EXISTS -- it is absent from
+     * nextflow.config, nextflow_schema.json, lib/, subworkflows/ and workflows/ -- and
+     * nextflow.config sets validation.logging.unrecognisedParams = 'error', so a run
+     * that set it would ABORT. These cases survived only because nf-test drives the
+     * SUBWORKFLOW directly and never reaches workflows/mirage.nf's validateParameters()
+     * -- they were green for a reason unrelated to their premise. The premise that
+     * remains -- a reference-less
+     * patient is refused -- is still true and still worth testing, so it is what they
+     * now say.
      *
-     * Together with "Should fail when no reference and allow_auto_reference=false" below,
-     * this pins BOTH settings to the same outcome at this level -- which is the point:
-     * the flag no longer changes anything here.
+     * The refusal on a full run, from the samplesheet, is main.nf.test's "Should reject
+     * a samplesheet that marks no reference".
      */
-    test("Should reject a reference-less patient even with allow_auto_reference - stub") {
+    test("Should reject a multi-slide patient that names no reference - stub") {
 
         tag "stub"
         options "-stub"
 
         when {
             params {
-                allow_auto_reference = true
                 skip_registration_qc = true
                 padding = false
             }
@@ -192,12 +199,27 @@ nextflow_workflow {
         }
     }
 
-    test("Should fail when no reference and allow_auto_reference=false") {
+    /*
+     * The SINGLE-SLIDE case, which is not a duplicate of the one above: a lone slide has
+     * nothing to register against and REGISTER_PATIENT branches it straight through to
+     * ch_registered. The guard must still fire, because the grouping closure runs BEFORE
+     * that branch -- otherwise a reference-less patient would be silently passed through
+     * as if it were registered, which is worse than the multi-slide failure since there
+     * is no downstream step left to notice.
+     *
+     * TAGGED `stub`. It carried no tag at all, so no job on any trigger collected it:
+     * CI's blocking gate is `nf-test test --tag stub`, the real leg is `--tag real`, and
+     * 243 collected cases were 213 stub + 28 real + 1 security + this orphan.
+     */
+    test("Should reject a single-slide patient that names no reference - stub") {
+
+        tag "stub"
+        options "-stub"
 
         when {
             params {
-                allow_auto_reference = false
                 skip_registration_qc = true
+                padding = false
             }
             workflow {
                 """
@@ -211,7 +233,8 @@ nextflow_workflow {
         }
 
         then {
-            assert workflow.failed
+            assert !workflow.success
+            assert workflow.stdout.any { it.contains('No reference image found for patient P001') }
         }
     }
 
@@ -284,21 +307,25 @@ nextflow_workflow {
         }
     }
 
-    test("Should seg-QC score a multi-slide patient auto-picked as reference - stub") {
+    test("Should seg-QC score a multi-slide patient whose reference is not the first slide by id - stub") {
 
-        // A multi-slide patient whose reference was AUTO-PICKED must still be seg-QC
-        // scored. seg_qc.nf's reference/moving branch (seg_qc.nf:52-55) reads
+        // A multi-slide patient must be seg-QC scored regardless of WHERE its reference
+        // sits in the group. seg_qc.nf's reference/moving branch (seg_qc.nf:52-55) reads
         // meta.is_reference, and such a patient once produced ZERO seg-QC output: the
         // reference branch was empty, so the combine-by-patient join matched nothing.
         //
         // The MECHANISM that used to break it is gone. registration.nf's grouping closure
-        // mutated the auto-picked item's meta to is_reference: true *inside the grouped
-        // list*, so whether a consumer saw the mutation depended on which channel it read
-        // from. The reference is now resolved once in INPUT_CHECK
-        // (CsvUtils.resolveReferenceRows) and arrives already stamped, so no consumer can
-        // disagree about it -- which is why the input below carries is_reference: true on
-        // the first slide: that is exactly what INPUT_CHECK now hands REGISTRATION for a
-        // sheet marking no reference under --allow_auto_reference.
+        // used to pick a reference itself and mutate that item's meta to
+        // is_reference: true *inside the grouped list*, so whether a consumer saw the
+        // mutation depended on which channel it read from. The reference is now resolved
+        // once in INPUT_CHECK (CsvUtils.resolveReferenceRows) and arrives already
+        // stamped, so no consumer can disagree about it -- which is why the input below
+        // carries is_reference: true on one slide: that is exactly the shape INPUT_CHECK
+        // hands REGISTRATION.
+        //
+        // This case used to set `allow_auto_reference = true`, a parameter deleted in
+        // b63b986; it changed nothing here even when it existed, since the input below
+        // already names its reference. Removed rather than replaced.
         //
         // The assertion still earns its place: it pins the OUTCOME (this patient gets
         // scored) rather than the mechanism, so it survives the next reshuffle of where
@@ -309,15 +336,12 @@ nextflow_workflow {
 
         when {
             params {
-                allow_auto_reference = true
                 reg_qc = 2
                 padding = false
             }
             workflow {
                 """
-                // Two slides. The sheet marked neither; INPUT_CHECK resolved the first
-                // one and stamped is_reference: true, which is the shape REGISTRATION
-                // now receives.
+                // Two slides, one of them marked -- the shape INPUT_CHECK produces.
                 input[0] = Channel.fromList([
                     [[patient_id: 'P003', id: 'P003_P002_ref', is_reference: true, channels: ['DAPI']],
                      file('$projectDir/tests/testdata/P002_ref.ome.tiff')],

@@ -66,7 +66,7 @@ nextflow_process {
 
         when {
             params {
-                preproc_tile_size = 256
+                preproc_tile_size = 64
                 nuclear_markers = ['DAPI', 'CELLTOX']
             }
             process {
@@ -98,7 +98,7 @@ nextflow_process {
                     "rendered command missing --nuclear-markers: " + rendered.join(' --- ') },
                 { assert rendered.every { it.contains('--skip_nuclear') },
                     "rendered command missing --skip_nuclear: " + rendered.join(' --- ') },
-                { assert rendered.every { it.contains('--fov_size 256') },
+                { assert rendered.every { it.contains('--fov_size 64') },
                     "rendered command missing --fov_size: " + rendered.join(' --- ') },
                 { assert rendered.every { it.contains('--sidecar') },
                     "rendered command writes no positions sidecar: " + rendered.join(' --- ') }

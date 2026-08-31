@@ -202,7 +202,7 @@ nextflow_pipeline {
                 max_memory = '6.GB'
                 seg_gpu = false
 
-                preproc_tile_size = 256
+                preproc_tile_size = 64
             }
         }
 

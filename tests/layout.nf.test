@@ -65,10 +65,12 @@ nextflow_pipeline {
                 // path_to_file column ('P001_ref.ome.tiff' -> 'P001_ref',
                 // 'P001_mov1.ome.tiff' -> 'P001_mov1'; see tests/testdata/test_input.csv),
                 // carried forward unchanged through preprocessing and registration.
+                // 'pixel_size' (this task) is appended last -- 0.325, the number
+                // PREFLIGHT_SCALE resolves under conf/test.config's pin.
                 { assert path("$outputDir/csv/preprocessed.csv").readLines().contains(
-                    "P001,P001_ref,$outputDir/P001/preprocessed/P001_ref_corrected.ome.tif,true,DAPI|PANCK|SMA".toString()) },
+                    "P001,P001_ref,$outputDir/P001/preprocessed/P001_ref_corrected.ome.tif,true,DAPI|PANCK|SMA,0.325".toString()) },
                 { assert path("$outputDir/csv/preprocessed.csv").readLines().contains(
-                    "P001,P001_mov1,$outputDir/P001/preprocessed/P001_mov1_corrected.ome.tif,false,DAPI|CD3|CD8".toString()) },
+                    "P001,P001_mov1,$outputDir/P001/preprocessed/P001_mov1_corrected.ome.tif,false,DAPI|CD3|CD8,0.325".toString()) },
 
                 // --- Layout.publishedPath: the producer subdirectory survives ----
                 // 'registered_slides/' is REGISTER's own output subdirectory and
@@ -76,9 +78,9 @@ nextflow_pipeline {
                 // this ever collapses to <pid>/registered/<name>, every
                 // `--start registration` run breaks on a missing file.
                 { assert path("$outputDir/csv/registered.csv").readLines().contains(
-                    "P001,P001_ref,$outputDir/P001/registered/registered_slides/P001_DAPI_PANCK_SMA_registered.ome.tiff,true,DAPI|PANCK|SMA".toString()) },
+                    "P001,P001_ref,$outputDir/P001/registered/registered_slides/P001_DAPI_PANCK_SMA_registered.ome.tiff,true,DAPI|PANCK|SMA,0.325".toString()) },
                 { assert path("$outputDir/csv/registered.csv").readLines().contains(
-                    "P001,P001_mov1,$outputDir/P001/registered/registered_slides/P001_DAPI_CD3_CD8_registered.ome.tiff,false,DAPI|CD3|CD8".toString()) },
+                    "P001,P001_mov1,$outputDir/P001/registered/registered_slides/P001_DAPI_CD3_CD8_registered.ome.tiff,false,DAPI|CD3|CD8,0.325".toString()) },
 
                 // --- Layout.publishedPath across five different `kind`s ----------
                 // The two geojson columns carry EXPORT_GEOJSON's own `export/`
@@ -93,15 +95,17 @@ nextflow_pipeline {
                     "$outputDir/P001/geojson/export/cells.geojson," +
                     "$outputDir/P001/quantification/merged_quant.csv," +
                     "$outputDir/P001/segmentation/P001_cell_mask.tif," +
-                    "$outputDir/P001/pyramid/pyramid.ome.tiff".toString()) },
+                    "$outputDir/P001/pyramid/pyramid.ome.tiff," +
+                    "0.325".toString()) },
 
                 // --- column order is part of the contract ------------------------
+                // 'pixel_size' (this task) is appended LAST on every schema.
                 { assert path("$outputDir/csv/preprocessed.csv").readLines()[0] ==
-                    "patient_id,id,preprocessed_image,is_reference,channels" },
+                    "patient_id,id,preprocessed_image,is_reference,channels,pixel_size" },
                 { assert path("$outputDir/csv/registered.csv").readLines()[0] ==
-                    "patient_id,id,registered_image,is_reference,channels" },
+                    "patient_id,id,registered_image,is_reference,channels,pixel_size" },
                 { assert path("$outputDir/csv/postprocessed.csv").readLines()[0] ==
-                    "patient_id,id,cell_csv,cell_geojson,merged_csv,cell_mask,pyramid" }
+                    "patient_id,id,cell_csv,cell_geojson,merged_csv,cell_mask,pyramid,pixel_size" }
             )
         }
     }

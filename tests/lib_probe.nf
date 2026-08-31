@@ -252,6 +252,44 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
     assert invCounts['P1'] == invFlat.toSet().size()  // == distinct names     (quant)
     invCsv.delete()
 
+    // THE SAME INVARIANT, but forced through the ONE case invCsv above never
+    // exercises: a duplicate marker name declared TWICE ON THE SAME ROW (not
+    // across two slides). invCsv's only duplicate, CELLTOX, is claimed by
+    // cyc2 and re-declared by cyc3 -- a CROSS-slide collision. A samplesheet
+    // row's own `channels` cell is free-text and nothing upstream forbids
+    // `DAPI|DAPI|KI67`, so the within-row path through the SAME claimed-set
+    // loop needs its own pin: if a future change replaced the live,
+    // incrementally-updated `claimed` set with one only updated AFTER each
+    // row finishes (e.g. to "parallelise" the per-row scan), cross-slide
+    // dedup would still hold but a same-row repeat would stop being caught,
+    // desynchronising the emitted-file count from the distinct-name count
+    // for exactly the reason this dual invariant exists.
+    //
+    // P9's reference row declares DAPI twice and P9's second row declares
+    // CELLTOX twice -- two independent within-row repeats, one per slide, so
+    // this cannot pass by accident of only one slide being exercised.
+    def dupWithinRowCsv = File.createTempFile('keepdupwithinrow', '.csv')
+    dupWithinRowCsv.text = '''patient_id,image,channels,is_reference
+P9,ref.tiff,DAPI|DAPI|KI67|CD20,true
+P9,cyc2.tiff,CELLTOX|CELLTOX,false
+'''
+    def dupWithinRowKept = CsvUtils.resolveKeptChannelsPerSlide(dupWithinRowCsv.path, 'image', ['DAPI','CELLTOX'])
+    // The repeat is dropped WITHIN the row itself -- not merely deduplicated
+    // later -- so each per-slide keep-list is already free of it.
+    assert dupWithinRowKept['P9'][Meta.identityFor('P9', 'ref.tiff', 0, [:])]  == ['DAPI', 'KI67', 'CD20']
+    assert dupWithinRowKept['P9'][Meta.identityFor('P9', 'cyc2.tiff', 0, [:])] == ['CELLTOX']
+    def dupWithinRowCounts = CsvUtils.countChannelsPerPatient(dupWithinRowCsv.path, 'image', ['DAPI','CELLTOX'])
+    def dupWithinRowFlat   = dupWithinRowKept['P9'].values().flatten()
+    // Naively summing the DECLARED cells (4 + 2 = 6) is exactly the over-count
+    // a within-row repeat would produce if it leaked through -- the four
+    // distinct names below are the number every one of these must agree on.
+    assert dupWithinRowFlat.size() == 4          : 'a same-row repeat leaked through as an extra emitted file'
+    assert dupWithinRowFlat.toSet().size() == 4  : 'a same-row repeat leaked through as an extra distinct name'
+    assert dupWithinRowCounts['P9'] == 4
+    assert dupWithinRowCounts['P9'] == dupWithinRowFlat.size()          // == emitted TIFF count (pyramid)
+    assert dupWithinRowCounts['P9'] == dupWithinRowFlat.toSet().size()  // == distinct names     (quant)
+    dupWithinRowCsv.delete()
+
     // ------------------------------------------------------------------ //
     // ParamUtils — the step vocabulary
     // ------------------------------------------------------------------ //
@@ -283,25 +321,26 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
     // Checkpoint — filename AND columns, one owner
     // ------------------------------------------------------------------ //
     assert Checkpoint.columns(Layout.PREPROCESSED) ==
-        ['patient_id', 'id', 'preprocessed_image', 'is_reference', 'channels']
+        ['patient_id', 'id', 'preprocessed_image', 'is_reference', 'channels', 'pixel_size']
     assert Checkpoint.columns(Layout.REGISTERED) ==
-        ['patient_id', 'id', 'registered_image', 'is_reference', 'channels']
+        ['patient_id', 'id', 'registered_image', 'is_reference', 'channels', 'pixel_size']
     assert Checkpoint.columns(Layout.POSTPROCESSED) ==
-        ['patient_id', 'id', 'cell_csv', 'cell_geojson', 'merged_csv', 'cell_mask', 'pyramid']
+        ['patient_id', 'id', 'cell_csv', 'cell_geojson', 'merged_csv', 'cell_mask', 'pyramid', 'pixel_size']
 
     // The header IS the seed: string the three writers pass to collectFile. These
     // three literals are the published contract — Group A must not change them.
-    // RULING R17 (Task 4.3) added 'id' right after 'patient_id' to all four.
-    assert Checkpoint.header(Layout.PREPROCESSED)  == 'patient_id,id,preprocessed_image,is_reference,channels'
-    assert Checkpoint.header(Layout.REGISTERED)    == 'patient_id,id,registered_image,is_reference,channels'
-    assert Checkpoint.header(Layout.POSTPROCESSED) == 'patient_id,id,cell_csv,cell_geojson,merged_csv,cell_mask,pyramid'
+    // RULING R17 (Task 4.3) added 'id'; this task appended 'pixel_size' LAST.
+    assert Checkpoint.header(Layout.PREPROCESSED)  == 'patient_id,id,preprocessed_image,is_reference,channels,pixel_size'
+    assert Checkpoint.header(Layout.REGISTERED)    == 'patient_id,id,registered_image,is_reference,channels,pixel_size'
+    assert Checkpoint.header(Layout.POSTPROCESSED) == 'patient_id,id,cell_csv,cell_geojson,merged_csv,cell_mask,pyramid,pixel_size'
 
     // row() emits values in DECLARED COLUMN ORDER regardless of map insertion order.
     // This is the whole point: a writer can no longer transpose two columns.
     assert Checkpoint.row(Layout.REGISTERED, [
         channels: 'DAPI|CD3', patient_id: 'P001', id: 'P001_x',
-        registered_image: '/out/P001/registered/x.ome.tiff', is_reference: false
-    ]) == 'P001,P001_x,/out/P001/registered/x.ome.tiff,false,DAPI|CD3'
+        registered_image: '/out/P001/registered/x.ome.tiff', is_reference: false,
+        pixel_size: 0.325,
+    ]) == 'P001,P001_x,/out/P001/registered/x.ome.tiff,false,DAPI|CD3,0.325'
 
     // RFC 4180 QUOTING (Task 4.5). `--outdir` is an arbitrary filesystem path and
     // every published path is built from it -- a comma anywhere in it used to shift
@@ -311,8 +350,8 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
     assert Checkpoint.row(Layout.REGISTERED, [
         patient_id: 'P001', id: 'P001_x',
         registered_image: '/out,dir/P001/registered/x,y.ome.tiff',
-        is_reference: false, channels: 'DAPI|CD3',
-    ]) == 'P001,P001_x,"/out,dir/P001/registered/x,y.ome.tiff",false,DAPI|CD3'
+        is_reference: false, channels: 'DAPI|CD3', pixel_size: 0.325,
+    ]) == 'P001,P001_x,"/out,dir/P001/registered/x,y.ome.tiff",false,DAPI|CD3,0.325'
 
     // A value containing a double quote is wrapped AND its embedded quotes are
     // doubled -- the RFC 4180 escape -- so a naive strip-the-outer-quotes reader
@@ -320,8 +359,8 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
     assert Checkpoint.row(Layout.REGISTERED, [
         patient_id: 'P001', id: 'P001_x',
         registered_image: '/out/say "hi"/x.ome.tiff',
-        is_reference: false, channels: 'DAPI|CD3',
-    ]) == 'P001,P001_x,"/out/say ""hi""/x.ome.tiff",false,DAPI|CD3'
+        is_reference: false, channels: 'DAPI|CD3', pixel_size: 0.325,
+    ]) == 'P001,P001_x,"/out/say ""hi""/x.ome.tiff",false,DAPI|CD3,0.325'
 
     // A `null` VALUE (as opposed to a missing KEY, rejected above) now writes as an
     // EMPTY field, not the literal four-character text `null`. Before this task a
@@ -331,8 +370,8 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
     // Meta.fromCheckpointRow's requirePresentInRow already treats as absent.
     assert Checkpoint.row(Layout.REGISTERED, [
         patient_id: 'P001', id: 'P001_x', registered_image: null,
-        is_reference: false, channels: 'DAPI|CD3',
-    ]) == 'P001,P001_x,,false,DAPI|CD3'
+        is_reference: false, channels: 'DAPI|CD3', pixel_size: 0.325,
+    ]) == 'P001,P001_x,,false,DAPI|CD3,0.325'
 
     // A missing column must throw, not silently emit an empty field — an empty field
     // is a checkpoint row naming a path that does not exist, which is exactly the
@@ -342,13 +381,12 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
     catch (IllegalArgumentException ignored) { missingCol = true }
     assert missingCol : 'Checkpoint.row must reject a missing column'
 
-    // An unknown key must throw too — it means the caller thinks the schema is
-    // something it is not.
+    // An unknown key must throw too (pixel_size supplied, so this is the real check).
     def unknownCol = false
     try {
         Checkpoint.row(Layout.REGISTERED, [
             patient_id: 'P001', id: 'P001_x', registered_image: '/x', is_reference: false,
-            channels: 'DAPI', typo_column: 'oops'
+            channels: 'DAPI', pixel_size: 0.325, typo_column: 'oops'
         ])
     }
     catch (IllegalArgumentException ignored) { unknownCol = true }
@@ -370,11 +408,12 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
     // dereferences 'id' (via READ_SEGMENTED_CHECKPOINT's Meta.fromCheckpointRow),
     // so only IT gained 'id' in requiredColumns (see lib/ParamUtils.groovy's
     // comment on that entry). The invariant is now "every OTHER column" equality,
-    // not full-list equality.
+    // not full-list equality. 'pixel_size' joins 'id' in the exclusion set: those
+    // two steps re-resolve scale via PREFLIGHT_SCALE, not a persisted value.
     assert ParamUtils.STEPS.find { it.name == 'registration' }.requiredColumns ==
-        Checkpoint.columns(Layout.PREPROCESSED) - ['id']
+        Checkpoint.columns(Layout.PREPROCESSED) - ['id', 'pixel_size']
     assert ParamUtils.STEPS.find { it.name == 'segmentation' }.requiredColumns ==
-        Checkpoint.columns(Layout.REGISTERED) - ['id']
+        Checkpoint.columns(Layout.REGISTERED) - ['id', 'pixel_size']
     assert ParamUtils.STEPS.find { it.name == 'postprocessing' }.requiredColumns ==
         ['patient_id', 'id', 'registered_image', 'is_reference', 'channels', 'cell_mask', 'nuclei_mask']
     assert ParamUtils.STEPS.find { it.name == 'postprocessing' }.requiredColumns
@@ -392,7 +431,7 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
     catch (UnsupportedOperationException ignored) { columnsThrew = true }
     assert columnsThrew : 'Checkpoint.columns() must return an immutable list; mutating it must throw'
     assert Checkpoint.columns(Layout.PREPROCESSED) ==
-        ['patient_id', 'id', 'preprocessed_image', 'is_reference', 'channels'] :
+        ['patient_id', 'id', 'preprocessed_image', 'is_reference', 'channels', 'pixel_size'] :
         'Checkpoint.columns() schema must be unaffected by the mutation attempt above'
 
     // ------------------------------------------------------------------ //
@@ -416,10 +455,10 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
     assert Layout.CHECKPOINT_STEPS == ['preprocessed', 'registered', 'segmented', 'postprocessed']
     assert Checkpoint.columns(Layout.SEGMENTED) == [
         'patient_id', 'id', 'registered_image', 'is_reference', 'channels',
-        'cell_mask', 'nuclei_mask', 'contours', 'nucleus_contours',
+        'cell_mask', 'nuclei_mask', 'contours', 'nucleus_contours', 'pixel_size',
     ]
     assert Checkpoint.header(Layout.SEGMENTED) ==
-        'patient_id,id,registered_image,is_reference,channels,cell_mask,nuclei_mask,contours,nucleus_contours'
+        'patient_id,id,registered_image,is_reference,channels,cell_mask,nuclei_mask,contours,nucleus_contours,pixel_size'
 
     // Empty string means "artifact not produced" — nucleus_contours is empty when
     // --quantify_compartments is false (nuclei_mask is NOT similarly gated: SEGMENT
@@ -433,7 +472,8 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
         nuclei_mask: '/o/P001/segmentation/P001_nuclei_mask.tif',
         contours: '/o/P001/cell_properties/contours.json',
         nucleus_contours: '',
-    ]) == 'P001,P001_a,/o/P001/registered/a.tif,true,DAPI|CD3,/o/P001/segmentation/P001_cell_mask.tif,/o/P001/segmentation/P001_nuclei_mask.tif,/o/P001/cell_properties/contours.json,'
+        pixel_size: 0.325,
+    ]) == 'P001,P001_a,/o/P001/registered/a.tif,true,DAPI|CD3,/o/P001/segmentation/P001_cell_mask.tif,/o/P001/segmentation/P001_nuclei_mask.tif,/o/P001/cell_properties/contours.json,,0.325'
 
     // The step vocabulary gains one entry.
     assert ParamUtils.entryColumnForStep('segmentation') == 'registered_image'
@@ -566,6 +606,22 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
         // expected
     }
 
+    // validateRegPresets — COARSE's 256 px floor. 0/negatives are DANGEROUS, not
+    // merely invalid: decimation_factor reads <=0 as "no decimation" (full-res
+    // plane into a U-Net) and the memory closure squares the value, so both ask
+    // for the 4 GB floor for the largest possible job. Rationale: ParamUtils.
+    def sb = [memory_mode: 'high', reg_tiled_mode: 'custom',
+              reg_valis_max_processed_dim: null, reg_valis_max_non_rigid_dim: null,
+              reg_tiled_tile: null, reg_tiled_halo: null,
+              reg_tiled_upsample: null, reg_tiled_out_tile: null]
+    [null, 512, 256].each { ParamUtils.validateRegPresets(sb + [reg_tiled_coarse_max_dim: it]) }
+    [0, -1, 255, 16].each { bad ->
+        def no = false
+        try { ParamUtils.validateRegPresets(sb + [reg_tiled_coarse_max_dim: bad]) }
+        catch (IllegalArgumentException ignored) { no = true }
+        assert no : "validateRegPresets must reject reg_tiled_coarse_max_dim=${bad}"
+    }
+
     // ------------------------------------------------------------------ //
     // Layout — the published-kind vocabulary
     // ------------------------------------------------------------------ //
@@ -662,29 +718,16 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
     // ------------------------------------------------------------------ //
     // WarpBackends — one seam for the reg_qc=2 warp
     // ------------------------------------------------------------------ //
-    assert WarpBackends.methods().toSorted() == ['ashlar', 'tiled', 'valis']
+    assert WarpBackends.methods().toSorted() == ['tiled', 'valis']
     assert WarpBackends.container('valis') == 'cdgatenbee/valis-wsi:1.0.0'
     assert WarpBackends.container('tiled') == 'bolt3x/mirage-tiled:1.0.0'
     assert WarpBackends.of('valis').stages == ['native', 'rigid', 'non_rigid', 'micro']
     assert WarpBackends.of('tiled').stages == ['native', 'rigid', 'refined']
 
-    // ashlar shares the tiled container AND the tiled stage vocabulary, because
-    // bin/ashlar_solve.py emits the identical M0 + mesh manifest: the scorer reads it
-    // through the same JVM-free warper, so it needs neither the ashlar image nor VALIS.
-    assert WarpBackends.container('ashlar') == 'bolt3x/mirage-tiled:1.0.0'
-    assert WarpBackends.of('ashlar').stages == ['native', 'rigid', 'refined']
-    assert WarpBackends.of('ashlar').versionTools == WarpBackends.of('tiled').versionTools
-
     // The tiled backend must pass --method tiled; VALIS must not.
     assert WarpBackends.of('tiled').flags([:]).any { it.contains('--method tiled') }
-    // ashlar passes its OWN method name, not 'tiled'. Both route to the same warper, but
-    // the report records what it was given -- an ashlar arm labelled 'tiled' in the QC
-    // JSON is indistinguishable from a STARE arm in the table the arm ranking is built
-    // from, which is precisely the comparison the backend exists to make.
-    assert WarpBackends.of('ashlar').flags([:]).any { it.contains('--method ashlar') }
-    assert !WarpBackends.of('ashlar').flags([:]).any { it.contains('--method tiled') }
     // No JVM heap flag may leak onto a JVM-free backend (see the WarpBackends header).
-    assert !WarpBackends.of('ashlar').flags([:]).any { it.contains('--jvm-heap-gb') }
+    assert !WarpBackends.of('tiled').flags([:]).any { it.contains('--jvm-heap-gb') }
     def valisFlags = WarpBackends.of('valis').flags(
         [ref_slide: 'R', moving_slide: 'M', stage_checkpoint: null, micro_reg: 2])
     assert !valisFlags.any { it.contains('--method') }
@@ -907,7 +950,7 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
         imagesCount        : [P1: 1],
         channelsCount      : [P1: 2],
     ]
-    def ckRow  = [patient_id: 'P1', id: 'P1_slide', is_reference: 'true', channels: 'DAPI|CD3']
+    def ckRow  = [patient_id: 'P1', id: 'P1_slide', is_reference: 'true', channels: 'DAPI|CD3', pixel_size: '0.325']
     def ckMeta = Meta.fromCheckpointRow(ckRow, 'preprocessed', ckCtx)
     assert Meta.REQUIRED_KEYS.every { ckMeta.containsKey(it) }
     assert ckMeta.patient_id     == 'P1'
@@ -917,6 +960,15 @@ P1,cyc3.tiff,CELLTOX|FOXP3,false
     assert ckMeta.keep_channels  == ['DAPI', 'CD3']
     assert ckMeta.channels_count == 2
     assert ckMeta.images_count   == 1
+    // A real number, not the raw CSV string.
+    assert ckMeta.pixel_size == 0.325d
+
+    // Old checkpoint, no 'pixel_size' key: throw, never fall back to params.pixel_size.
+    def noPxRow = [patient_id: 'P1', id: 'P1_slide', is_reference: 'true', channels: 'DAPI|CD3']
+    def missingPixelSize = false
+    try { Meta.fromCheckpointRow(noPxRow, 'preprocessed', ckCtx) }
+    catch (IllegalStateException e) { missingPixelSize = e.message.contains('predates scale tracking') }
+    assert missingPixelSize
 
     // An unknown step name is rejected via Checkpoint.columns, not silently accepted.
     def unknownStep = false

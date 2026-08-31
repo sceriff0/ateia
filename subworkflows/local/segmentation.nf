@@ -194,6 +194,7 @@ workflow SEGMENTATION {
                 nuclei_mask     : nuclei_mask,
                 contours        : contours,
                 nucleus_contours: nucleus_contours,
+                pixel_size      : meta.pixel_size,
             ])
         }
         .collectFile(

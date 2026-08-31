@@ -111,52 +111,6 @@ nextflow_process {
         }
     }
 
-    test("Should dispatch the ashlar backend and stage it like tiled - stub") {
-
-        // ASHLAR reaches WARP_SEG_QC through the SAME 8-element tuple as tiled -- a per-slide
-        // M0 + mesh manifest in the transform slot and `[]` for the stage checkpoint -- because
-        // bin/ashlar_solve.py rewrites ashlar's per-tile placements into the identical manifest.
-        // Without an `ashlar` row in lib/WarpBackends.groovy this does not merely mis-score, it
-        // throws in the CONTAINER directive (WarpBackends.of() rejects an unknown method), and
-        // reg_qc=2 is the shipped default -- so every ashlar run would die before producing a
-        // single QC record.
-        tag "stub"
-        options "-stub"
-
-        when {
-            process {
-                """
-                input[0] = [
-                    [ patient_id: 'P001' ],
-                    'ashlar',
-                    file('$projectDir/tests/testdata/single_sample.csv', checkIfExists: true),
-                    'P001_ref_corrected',
-                    'P001_mov1_corrected',
-                    file('$projectDir/tests/testdata/sample_contours.json', checkIfExists: true),
-                    file('$projectDir/tests/testdata/sample_merged_quant.csv', checkIfExists: true),
-                    []
-                ]
-                """
-            }
-        }
-
-        then {
-            assert process.success
-            assert process.out.metrics
-            with(process.out.metrics) {
-                assert size() == 1
-                assert get(0).get(1).toString().endsWith('_seg_qc.json')
-            }
-            // The stub renders WarpBackends' stage list, so this is the one thing a stub run
-            // CAN observe about the backend table: ashlar must carry the manifest vocabulary
-            // (native/rigid/refined), never VALIS's native/rigid/non_rigid/micro.
-            def report = new groovy.json.JsonSlurper().parse(
-                new File(process.out.metrics.get(0).get(1).toString()))
-            assert report.stage_order == ['native', 'rigid', 'refined'],
-                "ashlar must report the manifest stage vocabulary; got " + report.stage_order
-        }
-    }
-
     test("Should render backend-specific flags in the real command, not the stub - rendered command") {
 
         // Tagged `stub` so CI's blocking `nf-test test --tag stub` gate runs it, but

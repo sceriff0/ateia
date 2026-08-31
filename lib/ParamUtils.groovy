@@ -230,9 +230,15 @@ class ParamUtils {
      * 2 = micro-rigid + micro non-rigid (register_micro). VALIS controls the two passes
      * independently — micro_rigid_registrar_cls for the rigid refinement, the register_micro()
      * call for the non-rigid one — and this ordinal nests them (0 ⊂ 1 ⊂ 2), which forbids the
-     * odd "micro non-rigid without micro-rigid" combination. Default 2 (max: micro-rigid +
-     * micro non-rigid), matching nextflow.config. Single source of truth for register.nf /
-     * warp_seg_qc.nf so the QC can honestly say what the 'rigid' stage means for a given run.
+     * odd "micro non-rigid without micro-rigid" combination. The shipped default is 1
+     * (micro-rigid only), declared in nextflow.config -- the single source of truth for it --
+     * and restated in nextflow_schema.json; tests/test_micro_reg_default_is_one.py holds every
+     * home to that number, this comment included. The `null` fallback below returns 2 and is
+     * UNREACHABLE on the pipeline path: the schema declares reg_micro_reg non-nullable with its
+     * own default, so validateParameters() has filled it in before any caller reaches here. It
+     * is kept as the pre-v1.0.0 behaviour a direct Groovy caller used to get, not as a claim
+     * about what ships. Single source of truth for register.nf / warp_seg_qc.nf so the QC can
+     * honestly say what the 'rigid' stage means for a given run.
      */
     static int microRegLevelOf(def regMicroReg) {
         return regMicroReg == null ? 2 : (regMicroReg as int)
@@ -302,7 +308,7 @@ class ParamUtils {
     }
 
     /**
-     * Refuse a run that has not chosen a pixel size.
+     * Refuse a run whose pixel size cannot possibly be legal.
      *
      * `params.pixel_size` owns every micrometre in the pipeline -- GeoJSON centroids and areas,
      * the published pyramid's PhysicalSize, InstantSeg's rescaling target. It carried a literal
@@ -310,22 +316,28 @@ class ParamUtils {
      * objective produced measurements uniformly wrong by the ratio of the two, with nothing said,
      * and the symptom surfaced in QuPath several steps and one repository away from the cause.
      *
-     * So the default is null and this refuses it, at launch, before a single process is
-     * instantiated. The operator must either assert a number or ask for 'auto' -- and 'auto'
-     * itself errors, per-image in bin/utils/pixel_size.py, when the file carries no usable scale.
-     * There is no path left on which a scale is guessed.
+     * The invariant that incident demands -- no scale is ever guessed -- still holds; only WHERE
+     * it is enforced has moved. `nextflow.config` now defaults `pixel_size` to 'auto', which reads
+     * the image's own OME metadata rather than inventing a number, and `PREFLIGHT_SCALE` resolves
+     * that value for every slide before any heavy work and hard-fails the run the moment a slide
+     * carries no usable scale (see bin/utils/pixel_size.py). So this method no longer needs to
+     * refuse an unset value on the operator's behalf -- there is no unset value to reach it,
+     * because the config supplies one. What it still refuses is null: null can only arrive if
+     * someone explicitly passed one on the command line, which can only be a mistake, since it
+     * overrides a working default with an unusable one.
      *
      * Cross-parameter/"must be set" layer, not the schema's: nf-schema's `required` fires on an
-     * ABSENT key, and this key is present-and-null. See the two-layer rule in CLAUDE.md.
+     * ABSENT key, and a null here is present-but-null. See the two-layer rule in CLAUDE.md.
      */
     static void validatePixelSize(Map params) {
         def raw = params.pixel_size
         if (raw == null || raw.toString().trim().isEmpty())
             throw new IllegalArgumentException(
-                "--pixel_size is not set, and it has no default. It is the micrometres-per-pixel " +
-                "every measurement in this run is derived from. Pass a positive number, or " +
-                "'auto' to read PhysicalSizeX from each image's own OME metadata (which errors " +
-                "if an image carries no usable scale).")
+                "--pixel_size was passed as null or empty. It is the micrometres-per-pixel " +
+                "every measurement in this run is derived from, and defaults to 'auto'. Pass a " +
+                "positive number, or 'auto' to read PhysicalSizeX from each image's own OME " +
+                "metadata (which errors if an image carries no usable scale) -- or omit the " +
+                "flag entirely to get 'auto'.")
 
         def text = raw.toString().trim()
         if (text.equalsIgnoreCase('auto')) return
@@ -385,6 +397,36 @@ class ParamUtils {
                 "under --reg_tiled_mode custom, which starts from the 'high' preset and keeps " +
                 "every knob you do not set. Either pass --reg_tiled_mode custom, or drop the " +
                 "override(s) and let the '${params.reg_tiled_mode}' preset supply them " +
+                "(table: lib/RegPresets.groovy, RegPresets.STARE).")
+        }
+
+        // COARSE's thumbnail bound has a FLOOR, and it is not cosmetic. bin/utils/tiled_io.py's
+        // decimation_factor() treats `max_dim <= 0` as "no decimation" and returns factor 1, so
+        // the matcher is handed the FULL-RESOLUTION plane -- and the matcher is DISK, a U-Net
+        // that allocates activations over the whole plane at ~1.1 + 7.3*Mpx GB. A 26k x 26k
+        // slide would need thousands of GB. That escape hatch was survivable when COARSE ran a
+        // classical corner detector; it is now a guaranteed OOM.
+        //
+        // Worse, TILED_COARSE's memory closure DERIVES its request from this same value, so 0
+        // computes 0 Mpx and asks for the 4 GB floor -- the smallest request in the table for
+        // the largest possible job. A negative value is arithmetically even more perverse: the
+        // closure squares it, so -1 yields a positive 0.000001 Mpx and again the floor.
+        //
+        // The schema's `minimum: 0` blocks negatives on the pipeline path; this is the
+        // cross-parameter half that blocks the rest, with a message that says why. 256 px is
+        // the floor because it is half of the 'low' tier (512) -- below that the anchor cannot
+        // land inside any realistic halo anyway, so there is no legitimate value down there.
+        if (params.reg_tiled_coarse_max_dim != null &&
+            (params.reg_tiled_coarse_max_dim as int) < 256) {
+            throw new IllegalArgumentException(
+                "--reg_tiled_coarse_max_dim ${params.reg_tiled_coarse_max_dim} is below the " +
+                "256 px floor. COARSE's matcher is DISK, a U-Net whose activation memory is " +
+                "linear in thumbnail AREA (~1.1 + 7.3*Mpx GB), and a value of 0 or less " +
+                "disables decimation entirely -- handing it the full-resolution plane, which " +
+                "needs thousands of GB on a whole slide. TILED_COARSE's memory request is " +
+                "derived from this same value, so a too-small bound also under-reserves the " +
+                "task rather than merely slowing it. Use 512 (the 'low' tier) or higher, or " +
+                "drop the override and let --reg_tiled_mode pick the tier " +
                 "(table: lib/RegPresets.groovy, RegPresets.STARE).")
         }
     }

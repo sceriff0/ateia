@@ -59,7 +59,6 @@
 
 include { VALIS_ADAPTER         } from './adapters/valis_adapter'
 include { TILED_ADAPTER         } from './adapters/tiled_adapter'
-include { ASHLAR_ADAPTER        } from './adapters/ashlar_adapter'
 include { REGISTERED_CHECKPOINT } from './registered_checkpoint'
 
 workflow REGISTER_PATIENT {
@@ -124,15 +123,12 @@ workflow REGISTER_PATIENT {
     if (method == 'tiled') {
         TILED_ADAPTER(ch_grouped_multi)
         ch_adapter = TILED_ADAPTER.out
-    } else if (method == 'ashlar') {
-        ASHLAR_ADAPTER(ch_grouped_multi)
-        ch_adapter = ASHLAR_ADAPTER.out
     } else if (method == 'valis') {
         VALIS_ADAPTER(ch_grouped_multi)
         ch_adapter = VALIS_ADAPTER.out
     } else {
         error "REGISTER_PATIENT: unknown registration method '${method}'. " +
-              "Valid: valis, tiled, ashlar. (nextflow_schema.json's registration_method " +
+              "Valid: valis, tiled. (nextflow_schema.json's registration_method " +
               "enum and this dispatch must be widened together.)"
     }
 

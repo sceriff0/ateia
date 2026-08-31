@@ -9,10 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Migration — read before comparing any output across this release
 
-Six changes alter what a run produces or what its outputs MEAN, and every one of
-them is silent from the consumer's side. They are collected, each with what
+Seven changes alter what a run produces or what its outputs MEAN, and every one of
+them is silent from the consumer's side. The first six are collected, each with what
 changed and what to do about it, in
-[`docs/migration-2026-08-24.md`](docs/migration-2026-08-24.md):
+[`docs/migration-2026-08-24.md`](docs/migration-2026-08-24.md); the seventh landed
+after that doc and is detailed inline below:
 
 1. **Darkfield correction is gone** — nf-core `BASICPY` runs at
    `get_darkfield=False`; the deleted in-house path used `True`. Corrected pixel
@@ -34,33 +35,76 @@ changed and what to do about it, in
 6. **Two invocations that used to be accepted now fail at launch** —
    `--seg_instantseg_target cells|nuclei` (they produce one mask, which was
    silently replicated into both outputs and zeroed every cytoplasmic
-   measurement), and an OME header whose `PhysicalSizeXUnit` the ASHLAR retiler
-   does not recognise (a recognised non-µm unit is now converted rather than read
-   as µm — an `nm` header was a 1000× scale error).
+   measurement), and an OME header whose `PhysicalSizeXUnit` `PREFLIGHT_SCALE`
+   does not recognise, which under the `'auto'` default (item 7) hard-fails before
+   any heavy work is staged (a recognised non-µm unit is now converted rather than
+   read as µm — an `nm` header was a 1000× scale error).
+7. **`pixel_size` now defaults to `'auto'`** — it was `null`, and `ParamUtils`
+   forced the operator to assert a scale before a run could start at all. `'auto'`
+   reads each image's own OME `PhysicalSizeX`, so a run that previously refused to
+   start at launch may now proceed — and will use the FILE's scale, which may
+   differ from whatever the operator would have typed. A new `PREFLIGHT_SCALE`
+   step resolves (and, for `auto`, verifies) every input slide's scale before any
+   heavy work starts: it hard-fails when `auto` cannot resolve a slide (absent or
+   uninterpretable OME metadata), and warns — never fails — when a supplied number
+   disagrees with the file, cannot be confirmed against it, or when slides in one
+   run resolve to genuinely different scales. Every checkpoint manifest now also
+   carries a `pixel_size` column; a checkpoint written by an earlier version is
+   REFUSED on re-entry with a "this checkpoint predates scale tracking" error — the
+   remedy is to re-run the step that wrote it. Measurements are unchanged for any
+   run that already passed an explicit `--pixel_size`.
 
 ### Added
-- **`reg_tiled_frontend` parameter** (default `'orb'`, STARE/`registration_method=tiled` only) —
-  selects COARSE's global-alignment front-end: `orb` (default, today's behaviour, unchanged),
-  `sift` and `fourier_mellin` (zero-new-dependency CPU alternatives), or `disk_lightglue` (the
-  learned DISK+LightGlue matcher, gated behind `-profile stare_ml` — see below). Wired through
-  `bin/utils/coarse_align.py::estimate_affine` and rendered into `TILED_COARSE`'s command by
-  `conf/modules.config`. **Resume note:** adding `--frontend` to `TILED_COARSE`'s rendered
-  command changes that task's hash, so the *first* `-resume` after upgrading past this change
-  re-runs STARE's whole COARSE-and-downstream registration chain even for runs that never touch
-  `--reg_tiled_frontend` — a one-time cost, not a per-run one.
-- **`stare_ml` profile and the `bolt3x/mirage-stare-ml` container.** `-profile stare_ml`
-  re-points `TILED_COARSE`'s container at a second, optional image (`python:3.11-slim` + the
-  same CPU stack as `:tiled` + `torch`(CPU wheel)/`kornia`) so `--reg_tiled_frontend
-  disk_lightglue` can import torch+kornia; the default `:tiled` image stays JVM/GPU/torch-free
-  on purpose. The profile does NOT set `--reg_tiled_frontend` itself — selecting
-  `disk_lightglue` stays an explicit user choice. **NOT YET IMPLEMENTED:** the DISK+LightGlue
-  matching body is a TODO (`bin/utils/coarse_align.py::_frontend_disk_lightglue`) — selecting
-  it always raises `NotImplementedError` today, with or without this profile. **Publish
-  required before first use:** like `:tiled` before it, a plain push to `main` builds this
-  image but does not push it (`.github/workflows/build-images.yml` only pushes on
-  `release:published` / `workflow_dispatch`) — run
-  `gh workflow run build-images.yml -f version=1.0.0 -f only=stare-ml` before the first
-  `-profile stare_ml` run, or the image pull fails.
+- **`PREFLIGHT_SCALE` process** (`modules/local/preflight_scale.nf` /
+  `bin/preflight_scale.py`), run once over every input slide before any heavy work
+  is staged (`subworkflows/local/input_check.nf`). It reads only OME metadata —
+  never pixel data — resolves what `--pixel_size` will actually use for each
+  slide, and records the result into `meta.pixel_size` so downstream consumers
+  that have no image of their own to read a scale from (`EXPORT_GEOJSON`,
+  `EXPORT_SPATIALDATA`, `SEG_QUALITY_EVAL`, InstantSeg) no longer see the literal
+  unresolved string `'auto'`. Fails loudly, naming every offending slide, when
+  `auto` cannot resolve one; warns, naming both numbers, when a supplied number
+  disagrees with a file's own metadata or cannot be confirmed against it; and
+  warns, naming every distinct value and the slides carrying it, when slides in
+  one run resolve to genuinely different scales — a legitimate mixed-magnification
+  cohort is never refused, only surfaced. See the migration note above.
+- **STARE's COARSE anchor is DISK + LightGlue**, the learned matcher VALIS and the ACROBAT
+  winners use, and it is the only front-end. An interim development iteration of this same
+  Unreleased cycle added a `reg_tiled_frontend` parameter selecting among four front-ends
+  (a classical corner detector, SIFT, Fourier-Mellin and DISK+LightGlue); that parameter is
+  **removed** and never shipped. A dispatch table with one live value is dead config, and the
+  three classical alternatives were not the method the paper describes. There is nothing to
+  migrate — the parameter does not exist in any release — but if you scripted it against a
+  development checkout, drop it: the schema now refuses it.
+  **Consequence, and it is not cosmetic:** DISK is a U-Net, so COARSE's peak memory is now
+  linear in thumbnail AREA (`GB ≈ 1.1 + 7.3 × Mpx`; 3.03 GB at 512 px, 8.78 GB at 1024 px,
+  measured on the pinned stack) rather than nearly flat. Two things follow, both landed here:
+  the `reg_tiled_coarse_max_dim` tier column moves down one step to **2048 / 1024 / 512**
+  (4096 px would need ~123 GB, above `TILED_COARSE`'s whole retry ceiling), and
+  `TILED_COARSE`'s memory request is now DERIVED from the resolved bound instead of a flat
+  8 GB ramp — ~48 GB at the shipped `high` tier, ~5 GB at `low`. **Resume note:**
+  `TILED_COARSE`'s rendered command and its `--max-dim` value both change, so the first
+  `-resume` after upgrading past this change re-runs STARE's whole COARSE-and-downstream
+  registration chain. A one-time cost, not a per-run one.
+- **`torch` + `kornia` and the DISK/LightGlue weights ship inside `bolt3x/mirage-tiled`.**
+  COARSE's learned matcher needs no profile, no second image and no download at
+  first use: `containers/tiled` installs `torch==2.3.1` (CPU wheel, from
+  `download.pytorch.org/whl/cpu`) and `kornia==0.7.3`, and BAKES both pretrained checkpoints
+  (`depth-save.pth`, `disk_lightglue_v0-1_arxiv-pth`) into `TORCH_HOME=/opt/torch` at build
+  time, world-readable. That matters because kornia otherwise fetches them from the network on
+  FIRST USE into `$HOME/.cache/torch` — and the target cluster has a read-only `$HOME` and is
+  documented as air-gapped (`docs/usage.md`), so the first real run would have failed the same
+  way the VALIS JVM cache did. This is a container-only fix; a `git pull` cannot repair a
+  missing checkpoint. The image keeps its JVM-free/libvips-free/CUDA-free property; it is no
+  longer torch-free, and that earlier leanness claim is deliberately retired.
+  An interim development iteration put torch+kornia in a SEPARATE optional
+  `bolt3x/mirage-stare-ml` image selected by a `stare_ml` profile. Both are **removed**, and
+  neither ever shipped: `.github/workflows/build-images.yml` pushes only on
+  `release:published`/`workflow_dispatch`, so that image was built by every push to `main` and
+  published by none — `-profile stare_ml` failed on image pull for anyone who had not manually
+  dispatched its build. One image that always works beats two where the second does not exist.
+  **If you scripted `-profile stare_ml`, drop it**: it is no longer a valid profile name and
+  Nextflow will refuse the run.
 - **Published-output change:** two new registration artifacts are now published under
   `<outdir>/<patient_id>/registered/`, for external benchmarks that need them:
   `registered/transform/preprocessed/data/<patient_id>_registrar.pickle` (the VALIS registrar,
@@ -128,6 +172,19 @@ changed and what to do about it, in
   checkpoints to be present.
 
 ### Changed
+- **`pixel_size` default: `null` → `'auto'`.** It used to have no shipped default —
+  `ParamUtils.validatePixelSize` forced an operator to assert a positive number of
+  micrometres per pixel, or pass `'auto'` explicitly, before a run could start.
+  `'auto'` is now the default: it reads `PhysicalSizeX` from each image's own OME
+  header via the new `PREFLIGHT_SCALE` process (entry above). `conf/test.config` and
+  `conf/test_full.config` still pin an explicit number, because the synthetic test
+  fixtures carry no OME `PhysicalSize` and `'auto'` would (correctly) refuse them.
+  Every checkpoint manifest (`lib/Checkpoint.groovy`'s per-step schema) now also
+  carries a `pixel_size` column recording the resolved value; a checkpoint CSV
+  written before this change has no such column and is REFUSED on re-entry
+  (`--start`, `--prior_outdir`) with a "this checkpoint predates scale tracking"
+  error rather than silently falling back to `params.pixel_size` — the remedy is to
+  re-run the step that wrote the checkpoint.
 - **`reg_tiled_dapi_index` → `reg_tiled_nuclear_index`, default `0` → `null`.** `null`
   resolves the index from the slide's own channel metadata via
   `MarkerUtils.nuclearIndex`, matching how `SEGMENT`'s CellSAM backend already resolves
@@ -329,6 +386,46 @@ changed and what to do about it, in
   `lib/WarpBackends.groovy`, not from the param, so the two can never disagree.
 
 ### Fixed
+- **The release workflow built a release from three different commits.**
+  `.github/workflows/release.yml` gated on a bare `actions/checkout` (`github.ref`),
+  tagged `ref: main` regardless, and gave `artifacts`, `publish-images` and
+  `verify-config` `needs: [validate, test]` rather than `needs: bump-and-tag` — so on a
+  `workflow_dispatch` the tarball and the ten container images were built **in parallel
+  with** the version bump, from the un-bumped tree. `mirage-v1.0.0.tar.gz` would have
+  shipped a `nextflow.config` still reading the previous version. `validate` now
+  resolves the ref that will be tagged and pins it to a SHA, every gate job checks out
+  that SHA, `bump-and-tag` refuses to tag if `main` moved underneath the gate, and the
+  archive and images are built from the created tag (`build-images.yml` gained a `ref`
+  input, because a reusable workflow checks out the *caller's* ref).
+  `tests/test_release_workflow_graph.py` asserts the graph.
+- **The release gate claimed parity with CI and ran 5 of its 13 blocking checks.**
+  Absent were the whole nf-test stub suite, `ruff check .`, the DEEPCELL token-leak
+  guard *and* its collection assertion, `tests/lib_probe.nf` (the only unit-test
+  surface `lib/*.groovy` has), `tests/check_profiles_parse.sh`,
+  `tests/check_param_consistency.py`, `tests/cleanup_work.sh` and the shipped-defaults
+  stub run — so a release could ship a broken `lib/` class, a leaking token, a profile
+  that will not parse or a param/schema mismatch, and be green. The gate is now five
+  jobs mirroring ci.yml's blocking `all-tests` set, its Nextflow leg carries the same
+  `['25.04.0', 'latest-everything']` matrix (it was `latest-everything` only, so the job
+  blocking a version tag never exercised the `>=25.04.0` minimum the manifest promises),
+  and it provisions the nf-schema plugin explicitly like every Nextflow job in ci.yml.
+- **`pip install -r requirements.txt || true` removed from CI's blocking gate.**
+  Unpinned, swallowing total failure, and resolving numpy 2.x ahead of the line that
+  pins it back. It never worked on the 3.10 leg at all — `deepcell-types` declares
+  `requires-python >=3.11`, so pip resolved nothing and installed nothing. `pyyaml` was
+  declared **only** there while `tests/test_ci_job_hygiene.py` `importorskip`s it at
+  module scope, so it is now installed explicitly; it had survived transitively via
+  dask. `.github/workflows/ci.yml` and `release.yml` now install identical
+  environments.
+- **`tests/test_ci_stack_pinned.py` had two scope holes.** Its presence check was
+  per-FILE, so deleting `numpy` and `tifffile` from ci.yml's *blocking* imaging line
+  left it green — five sibling jobs in the same file carry those pins to generate test
+  data. It is now per-JOB, via a structural `yaml.safe_load` of the `jobs:` block. It
+  was also blind to `-r`: `pip install -r <file>` yields no package tokens, so the
+  "==-pinned" rule passed while a file installed guarded packages unpinned.
+- **`all-tests` treated `skipped` as a pass**, and `nf-test-real` carried
+  `continue-on-error: true` on top of already being absent from `needs:` — 129 real
+  cases showed a green tick whatever they did. Both removed.
 - **Three `DAPI` hardcodes removed; the nuclear/fiducial channel is now resolved the
   same way everywhere.** `params.nuclear_markers` was already the declared source of
   truth (`lib/MarkerUtils.groovy`, `bin/utils/metadata.py`), but three sites still
@@ -658,6 +755,19 @@ changed and what to do about it, in
   authorised):** row order in the three manifests changes; contents and column order do not.
 
 ### Removed
+- **The `ashlar` registration backend is removed; v1.0.0 ships exactly two, `valis` and
+  `tiled`.** ASHLAR was wired in as a *benchmark baseline* so it could be ranked against
+  VALIS and STARE on the same `reg_qc=2` metric — never as a production backend — and it
+  survives in that role on the **`benchmarking`** branch, which is the only place it was
+  ever used. Gone from here: `bin/ashlar_retile.py`, `bin/ashlar_solve.py`,
+  `modules/local/ashlar_{retile,solve}.nf`,
+  `subworkflows/local/adapters/ashlar_adapter.nf` (with it, the `ASHLAR_STITCH` alias of
+  `TILED_STITCH`), the three parameters `reg_ashlar_tile` / `reg_ashlar_overlap` /
+  `reg_ashlar_max_shift_um`, the `ashlar` member of the `registration_method` enum, the
+  `ashlar` row of `lib/WarpBackends.groovy` and the `ashlar` choice of
+  `bin/warp_seg_qc.py --method`, plus 6 test files. `--registration_method ashlar` is now
+  refused by the schema at launch. There is nothing to migrate for a `valis` or `tiled`
+  run; a script pinning `ashlar` must move to the `benchmarking` branch.
 - **Automated panel-agnostic phenotyping is extracted off this branch, and preserved
   intact on `feat/automated-phenotyping` (at `56a3a46`).** It is work in progress and
   is parked there rather than deleted. Gone from here: `COMPILE_PANEL` and `PHENOTYPE`

@@ -14,11 +14,23 @@
 # publish overwrote one mutable name and there was no prior image to roll back to.
 #
 # Triggers:
-#   * release:published    -> build + push, using each image's descriptive tag
-#   * workflow_dispatch     -> build + push
+#   * workflow_dispatch     -> build + push, version supplied by the operator. The
+#                              manual path, and the one that validates an image
+#                              (e.g. :tiled) BEFORE a version is tagged.
 #   * push to main (when    -> build ONLY (no push) so PRs/merges validate the
 #     containers/** change)     Dockerfiles without publishing
 #   * workflow_call         -> reusable; release.yml calls this with a version
+#
+# THERE IS DELIBERATELY NO `release: [published]` TRIGGER. This workflow used to carry
+# one, so a published release started TWO publishing runs: this one directly, and
+# release.yml's `publish-images` job via workflow_call. Only the second is gated --
+# `publish-images` has `needs: [validate, test]` -- so the direct run pushed ten images
+# to Docker Hub even when the release test gate was RED, contradicting release.yml's own
+# header claim that nothing downstream happens unless `test` passes. Publishing on a
+# release now flows through release.yml alone, behind that gate. If you re-add the
+# trigger, give the version resolver below an explicit `release` branch with it (a
+# `release` trigger carries no inputs, so it would otherwise resolve to a build-only
+# ci-<sha>), and understand that you are restoring the ungated push along with it.
 #
 # Auth: docker/login-action -> Docker Hub using DOCKERHUB_USERNAME / DOCKERHUB_TOKEN
 #       repository secrets (Settings -> Secrets and variables -> Actions).
@@ -27,10 +39,6 @@
 name: Build Images
 
 on:
-  # Published GitHub release -> build & push, version taken from the tag.
-  release:
-    types: [published]
-
   # Manual trigger -> build & push, version supplied by the operator.
   workflow_dispatch:
     inputs:
@@ -61,6 +69,19 @@ on:
       version:
         description: 'Image version to publish, matching manifest.version (e.g. 1.0.0; a leading v is stripped)'
         required: true
+        type: string
+      ref:
+        # A reusable workflow does its own checkout and sees the CALLER's
+        # github.ref, NOT whatever the caller checked out. release.yml passes the
+        # release TAG here so the images are built from the tagged, version-bumped
+        # tree. Without it, a workflow_dispatch release built ten images from the
+        # dispatch branch's un-bumped tree while `bump-and-tag` was still running --
+        # so mirage-<component>:1.0.0 was built from a tree still saying the previous
+        # version. Empty (the default, and every non-workflow_call trigger) means
+        # actions/checkout's own default ref, i.e. unchanged behaviour.
+        description: 'Git ref (tag/branch/SHA) to build the images from. Empty = the default ref.'
+        required: false
+        default: ''
         type: string
 
 # Docker Hub push needs no special GITHUB_TOKEN scope; contents:read for checkout.
@@ -95,14 +116,27 @@ jobs:
       - name: Resolve version and push flag
         id: resolve
         run: |
-          # Determine the version string from whichever trigger fired.
-          if [ "${{ github.event_name }}" == "release" ]; then
-            VERSION="${{ github.event.release.tag_name }}"
-            PUSH="true"
-          elif [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            VERSION="${{ github.event.inputs.version }}"
-            PUSH="true"
-          elif [ "${{ github.event_name }}" == "workflow_call" ]; then
+          # Determine the version string from whichever trigger fired -- WITHOUT
+          # looking at github.event_name, which cannot tell them apart here.
+          #
+          # Inside a called workflow the event payload is the CALLER's ("the event
+          # payload in the called workflow is the same event payload from the calling
+          # workflow" -- GitHub's own docs), so github.event_name is NEVER
+          # "workflow_call": when release.yml's `publish-images` calls this on a
+          # published release it is "release". This resolver used to branch on
+          # event_name == "workflow_call", so on the one path that matters the elif
+          # could not match, execution fell through to the push-trigger default, and a
+          # release produced a fully green "Publish Images" job with PUSH="false" and
+          # ZERO images on Docker Hub -- while modules/local/*.nf pull
+          # bolt3x/mirage-<component>:<manifest.version> by name and every process then
+          # failed to pull. Guarded by tests/test_release_workflow_graph.py.
+          #
+          # `inputs` separates all three triggers on its own, and needs no event name:
+          # workflow_dispatch and workflow_call BOTH declare a required `version` input
+          # (the inputs context is populated for a manually triggered workflow as well
+          # as a reusable one), and the `push` trigger declares none -- so an empty
+          # inputs.version is exactly the build-only case.
+          if [ -n "${{ inputs.version }}" ]; then
             VERSION="${{ inputs.version }}"
             PUSH="true"
           else
@@ -146,6 +180,9 @@ jobs:
 
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          # Empty on every trigger but workflow_call -> actions/checkout's default.
+          ref: ${{ inputs.ref }}
 
       # The image list lives in ONE place (containers/images.json) so the matrix
       # and the `only` filter cannot disagree. Selecting a subset is filtering
@@ -205,6 +242,10 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          # Same ref the setup job resolved the matrix from, so the build context
+          # and the image list can never come from two different commits.
+          ref: ${{ inputs.ref }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3

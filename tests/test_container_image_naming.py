@@ -43,18 +43,10 @@ PREFIX = "mirage-"
 # basicpy-docker-mcmicro is the vendored nf-core BASICPY module's own container (mcmicro-maintained);
 # BASICPY is a vendored module (modules/nf-core/basicpy/), not a bolt3x/mirage-<component> build, so
 # re-hosting it would mean maintaining a fork of the vendored image too.
-# labsyspharm/ashlar is the upstream ASHLAR image, used by ASHLAR_SOLVE alone. It is NOT
-# re-hosted as bolt3x/mirage-ashlar deliberately: .github/workflows/build-images.yml publishes
-# only on release / workflow_dispatch / workflow_call, never on a push to main, so a new
-# containers/ashlar/ build context would go green and unpublished and every ashlar arm would
-# fail pulling a tag that does not exist. Pulling upstream also keeps the comparison honest --
-# the baseline is the image the ASHLAR authors ship, not a mirage rebuild of it. Note it is
-# amd64-only: fine on the cluster, qemu-slow on arm64.
 EXTERNAL_ALLOWED = {
     "cdgatenbee/valis-wsi:1.0.0",
     "ubuntu:22.04",
     "docker.io/labsyspharm/basicpy-docker-mcmicro:1.2.0-patch5",
-    "labsyspharm/ashlar:1.20.0",
 }
 
 # The retired single-repository name. Nothing may reference it again.

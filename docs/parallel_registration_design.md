@@ -1,4 +1,23 @@
-# STARE — a fully-parallel, tiled, laptop-friendly registration method for mirage
+# STARE — a fully-parallel, tiled registration method for mirage
+
+> **Superseded in part.** This document records the design as it was implemented on
+> `feat/tiled-registration`, when COARSE's anchor was a classical corner detector. For
+> v1.0.0 that front-end was replaced by the learned DISK + LightGlue matcher and the three
+> classical alternatives were deleted outright, which changes COARSE's memory model from
+> nearly-flat to linear in thumbnail AREA.
+>
+> **What that invalidated, and has been corrected in place:** §5's memory table and
+> paragraph, §5's COARSE row and primitive-split sentence, §1's constraint 2, and every
+> "≤8 GB / laptop" claim that rested on the old front-end. STARE is **not** laptop-sized at
+> the shipped `high` tier — COARSE alone asks ~48 GB. Anything in this file still phrased in
+> the past tense about a corner detector (§5's OOM anecdote, the §"Implementation status"
+> phase list, §11's sparse-tissue note) is a record of what the method USED to be and is
+> left as written.
+>
+> **What is unchanged and still authoritative:** the M0 → per-tile → solve → stitch
+> decomposition, the halo contract, the streaming reads, and everything downstream of
+> COARSE. `bin/tiled_coarse.py` cites this file for the thumbnail rationale, which still
+> holds — and holds harder now that the thumbnail bound is the memory knob.
 
 **Status:** implemented on branch `feat/tiled-registration` (Phases 1–2 + Nextflow wiring, 56
 Python tests, JVM-free stub run green). Remaining: reg_qc=2 seg-QC Nextflow dispatch, the slim
@@ -20,17 +39,23 @@ status box after §10.
 A second `registration_method` alongside `valis` that is:
 
 1. **Fully parallel at the Nextflow level** — every expensive unit is an independent process
-   (per slide *and per tile*), so a cluster runs them all at once and a laptop runs a few at a
-   time. No monolithic per-patient task.
-2. **The default choice for laptops / low-end machines** — **every process fits in ≤8 GB.**
-   The per-tile fan-out is the *only* STARE shape, and it holds this property unconditionally:
-   measured peaks on a 16384² 2-channel slide are COARSE 0.91 GB, REG_TILE 1.31 GB,
-   SOLVE <1.31 GB, STITCH 1.35 GB. (A single-task `TILED_REGISTER` alternative existed behind a
-   flag; it could not hold the bound — both whole slides plus an all-channel float32 copy and the
-   full warped output live at once — so the flag and the process were removed rather than left as
-   an unbounded opt-out.) No
-   JVM, no BioFormats, no whole-slide-in-RAM step. The tiling and stitching processes are
-   themselves low-memory and stream.
+   (per slide *and per tile*), so a cluster runs them all at once and a smaller machine runs a
+   few at a time. No monolithic per-patient task. (This is a statement about task GRANULARITY,
+   not about fitting on a laptop — see constraint 2, corrected.)
+2. **Bounded per-process memory, with one costly step.** *(Corrected for v1.0.0 — this
+   constraint originally read "the default choice for laptops / low-end machines — every
+   process fits in ≤8 GB", on measured peaks of COARSE 0.91 GB, REG_TILE 1.31 GB,
+   SOLVE <1.31 GB, STITCH 1.35 GB on a 16384² 2-channel slide.)* Everything downstream of the
+   anchor still holds that bound and is region-streamed: REG_TILE, SOLVE and STITCH are all
+   well under 8 GB regardless of slide size. **COARSE is not**: its matcher is now DISK, a
+   U-Net whose activations scale with thumbnail area, so it asks **~48 GB at the shipped
+   `high` tier** (`reg_tiled_coarse_max_dim` 2048) and ~5 GB at `low` (512). STARE is
+   therefore a *cluster* backend at its default tier; `--reg_tiled_mode low` is what makes it
+   workstation-viable. (A single-task `TILED_REGISTER` alternative existed behind a flag; it
+   could not hold even the old bound — both whole slides plus an all-channel float32 copy and
+   the full warped output live at once — so the flag and the process were removed rather than
+   left as an unbounded opt-out.) No JVM, no BioFormats, no whole-slide-in-RAM step. The
+   tiling and stitching processes are themselves low-memory and stream.
 3. **Native TRE** — emits a VALIS-style Target Registration Error per slide *and* a spatial TRE
    heatmap, as a free byproduct of registration.
 4. **reg_qc=2 compatible** — same staged segmentation-overlap QC (`native → rigid → refined`),
@@ -116,13 +141,14 @@ shape for free.
 
 ---
 
-## 5. Architecture — all processes ≤8 GB, all Nextflow-parallel
+## 5. Architecture — Nextflow-parallel throughout, ≤8 GB everywhere but COARSE
 
 ```
 per patient  (patients already parallel)
  └─ per moving slide  (STAR: each slide → the fixed reference, independent)
-     COARSE    thumbnail feature-align (ORB + RANSAC) → global rigid M₀      ~1–2 GB
-               # features absorb inter-cycle ROTATION/scale; cheap, per slide
+     COARSE    thumbnail match (DISK + LightGlue) → global rigid M₀    ~48 GB @ high
+               # learned features absorb inter-cycle ROTATION/scale; per slide.
+               # NOT cheap: peak is linear in thumbnail AREA -- see the table below
      TILE      stream tiles from the tiled OME-TIFF (region reads, halo)      ~1 GB
                # low-mem split; no whole-slide load
      REG_TILE  per tile ∥: moving DAPI tile + reference region (placed by M₀) ≤8 GB
@@ -136,12 +162,14 @@ per patient  (patients already parallel)
  └─ emit: registered slide + intrinsic TRE (per-slide table + spatial heatmap)
 ```
 
-**Primitive split (falls out of the architecture):** COARSE uses feature matching (ORB/RANSAC)
-because inter-cycle repositioning can carry rotation and small scale; after M₀ the per-tile
-residual is near-pure-translation, so REG_TILE uses **phase-correlation** (ASHLAR's whitened,
-Hann-windowed `phase_cross_correlation`) — cheapest possible, no keypoints needed.
+**Primitive split (falls out of the architecture):** COARSE uses feature matching — learned
+keypoints and a learned matcher (DISK + LightGlue) as of v1.0.0 — because inter-cycle
+repositioning can carry rotation and small scale; after M₀ the per-tile residual is
+near-pure-translation, so REG_TILE uses **phase-correlation** (ASHLAR's whitened, Hann-windowed
+`phase_cross_correlation`) — cheapest possible, no keypoints needed.
 
-**Memory sanity-check (8 GB is generous) — and the knob that controls each step.** This table
+**Memory, per step — and the knob that controls each.** *(This heading used to read "memory
+sanity-check (8 GB is generous)"; COARSE broke that premise, see below.)* This table
 covers *every* step, which the original version of this paragraph did not: it analysed REG_TILE,
 WARP_TILE and STITCH and took COARSE on trust from the word "thumbnail" above. COARSE was in fact
 implemented with a full-resolution ORB over an eagerly decoded slide, and OOM-killed at 32 GB on a
@@ -149,16 +177,22 @@ implemented with a full-resolution ORB over an eagerly decoded slide, and OOM-ki
 
 | step | peak driver | ~peak | knob | what you pay for cheapening it |
 |---|---|---|---|---|
-| COARSE | ORB over the anchor thumbnail | ~2 GB | `--reg_tiled_coarse_max_dim` (4096) | M0 residual scales with the decimation factor; it must stay well inside `--reg_tiled_halo` |
+| COARSE | DISK + LightGlue over the anchor thumbnail | ~48 GB at the shipped tier | `--reg_tiled_coarse_max_dim` (2048) | M0 residual scales with the decimation factor; it must stay well inside `--reg_tiled_halo` |
 | REG_TILE | one DAPI tile + halo, both slides | ~50 MB | `--reg_tiled_tile` (2048), `--reg_tiled_halo` (256) | smaller tiles → finer mesh but more tasks; smaller halo → less tolerance for M0 error |
 | SOLVE | control points only (kB) | ~10 MB | — | — |
 | STITCH | one output write-tile, all channels | ~100 MB | `--reg_tiled_out_tile` (1024) | smaller tiles → more write calls, no accuracy cost |
 
-ORB is the term worth internalising: scikit-image promotes its input to float64 and stacks a
-Gaussian pyramid plus FAST/Harris response arrays on it, which measures at **~40 bytes per source
-pixel**. Handed a native-resolution gigapixel plane that is tens of GB, which is why the anchor is
-estimated on a thumbnail and `reg_tiled_coarse_max_dim` — not tile size — is the knob that bounds
-COARSE. Everything else is genuinely region-streamed: `tiled_io.open_lazy` region reads for
+COARSE's memory is the term worth internalising, and it changed for v1.0.0. The anchor's matcher
+is now DISK, a U-Net, which allocates activations over the WHOLE plane it is handed: measured on
+the pinned stack (torch 2.3.1 / kornia 0.7.3, CPU) at **3.03 GB for a 512 px thumbnail and 8.78 GB
+for 1024 px**, a clean linear-in-megapixels fit of **`GB ≈ 1.1 + 7.3 · Mpx`**. That is ~20x the
+classical detector this design was written against, and *linear in area* rather than nearly flat —
+so `reg_tiled_coarse_max_dim` is no longer a mild accuracy/cost dial but the thing that decides
+whether the step runs at all. 4096 px extrapolates to ~123 GB, which is why the tier column tops
+out at 2048, and why `TILED_COARSE`'s memory request is derived from this same bound rather than
+being a flat constant. A native-resolution gigapixel plane is thousands of GB, which is why the
+anchor is estimated on a thumbnail and `reg_tiled_coarse_max_dim` — not tile size — is the knob
+that bounds COARSE. Everything else is genuinely region-streamed: `tiled_io.open_lazy` region reads for
 REG_TILE and STITCH, byte-budgeted row bands for COARSE's decimated read.
 
 Tile size *is* the mesh-grid resolution knob: smaller tiles → finer non-rigid but more tasks;
@@ -293,8 +327,10 @@ dedicated lean `withName:'TILED_*'` overrides (2–8 GB) or pair with a memory-c
   patched VALIS container) was removed 2026-07-24 — appears to be scope/publication cleanup, not a
   viability failure. STARE differs fundamentally (JVM-free, per-*tile registration*, mesh-warp
   continuity). Confirm with the author whether any removal reason must be designed around.
-- **Sparse-fluorescence COARSE.** ORB on DAPI needs enough keypoints; phase-correlation on the
-  thumbnail is the M₀ fallback for very sparse tissue.
+- **Sparse-fluorescence COARSE.** *(Written against the classical detector: ORB on DAPI needed
+  enough keypoints.)* DISK is a learned detector and finds keypoints on far sparser tissue, but
+  the concern is not retired — phase-correlation on the thumbnail remains the M₀ fallback if a
+  slide is sparse enough that even DISK under-matches.
 - **Output frame.** Anchor to the reference slide's native grid (identity for the reference), so
   registered pixel coordinates match what postprocessing/segmentation expects.
 - **OME channel manifest.** STITCH must still emit `channels_manifest.json` (filename → OME

@@ -341,13 +341,18 @@ workflow ADD_CYCLE {
     // ------------------------------------------------------------------ //
     // QUANTIFY_MARKERS emits [meta, csvs]; add_cycle keys the merge by patient
     // and builds its own patient-level meta (no morphology join here — the third
-    // MERGE_QUANT_CSVS slot carries the prior base table instead).
+    // MERGE_QUANT_CSVS slot carries the prior base table instead). pixel_size is
+    // carried along explicitly: the rebuilt meta below is a fresh literal, not
+    // `meta + [...]`, so it would otherwise drop the resolved scale
+    // QUANTIFY_MARKERS' input inherited from INPUT_CHECK/PREFLIGHT_SCALE --
+    // exactly the cross-cycle scale mismatch POSTPROCESSED_CHECKPOINT (downstream,
+    // via ASSEMBLE_EXPORT -> EXPORT_GEOJSON's meta) now requires a real value for.
     ch_new_quant_grouped = QUANTIFY_MARKERS.out.grouped_csv
-        .map { meta, csvs -> [meta.patient_id, csvs] }
+        .map { meta, csvs -> [meta.patient_id, meta.pixel_size, csvs] }
     ch_base = ch_prior_assets.map { pid, prior -> [pid, prior.base_csv] }
     ch_for_merge = ch_new_quant_grouped
         .combine(ch_base, by: 0)
-        .map { pid, csvs, base_csv -> [[patient_id: pid, id: pid], csvs, base_csv] }
+        .map { pid, pixel_size, csvs, base_csv -> [[patient_id: pid, id: pid, pixel_size: pixel_size], csvs, base_csv] }
     MERGE_QUANT_CSVS(ch_for_merge)
 
     // ------------------------------------------------------------------ //

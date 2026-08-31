@@ -43,9 +43,6 @@ process TILED_COARSE {
     def tile       = RegPresets.stare(params.reg_tiled_mode, 'tile', params.reg_tiled_tile)
     def halo       = RegPresets.stare(params.reg_tiled_mode, 'halo', params.reg_tiled_halo)
     def max_dim    = RegPresets.stare(params.reg_tiled_mode, 'coarse_max_dim', params.reg_tiled_coarse_max_dim)
-    // task.ext.args carries --frontend, set from conf/modules.config's TILED_COARSE block --
-    // a resolved scalar string, never a bare `params` reference inside script:.
-    def args       = task.ext.args ?: ''
     """
     tiled_coarse.py \\
         --reference ${reference} \\
@@ -55,10 +52,9 @@ process TILED_COARSE {
         --halo ${halo} \\
         --max-dim ${max_dim} \\
         --out-m0 ${prefix}_m0.json \\
-        --out-tiles ${prefix}_tiles.csv \\
-        ${args}
+        --out-tiles ${prefix}_tiles.csv
 
-    ${ProcessEnvelope.versions(task.process, ['skimage'])}
+    ${ProcessEnvelope.versions(task.process, ['skimage', 'torch', 'kornia'])}
     """
 
     stub:
@@ -66,6 +62,6 @@ process TILED_COARSE {
     """
     echo '{"M0":[[1,0,0],[0,1,0],[0,0,1]],"ref_h":16,"ref_w":16,"ref_name":"ref","coarse_tre":0,"n_inliers":0}' > ${prefix}_m0.json
     printf 'ix,iy,cx,cy,x0,y0,x1,y1,rx0,ry0,rx1,ry1\\n0,0,8,8,0,0,16,16,0,0,16,16\\n' > ${prefix}_tiles.csv
-    ${ProcessEnvelope.versionsStub(task.process, ['skimage'])}
+    ${ProcessEnvelope.versionsStub(task.process, ['skimage', 'torch', 'kornia'])}
     """
 }

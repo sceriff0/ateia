@@ -127,11 +127,14 @@ Chips give real defaults. Every process runs in a pinned container and emits
         <div class="bh">◇ registration_method</div>
         <div class="opt"><div class="oh"><span>valis → REGISTER</span><span class="tag-def">default</span></div>
           <div class="ox">Feature-based rigid + non-rigid warp (JVM / Bio-Formats), resolving all
-            slides into a shared space. Micro-registration at maximum depth by default.</div>
-          <div class="pp"><span>memory_mode <b>high</b></span><span>micro_reg <b>2</b></span><span>max_dim <b>4000</b></span></div></div>
+            slides into a shared space. Micro-registration at micro-rigid depth by default
+            (<code>reg_micro_reg=1</code>); <code>2</code> adds the non-rigid pass.</div>
+          <div class="pp"><span>memory_mode <b>high</b></span><span>micro_reg <b>1</b></span><span>max_dim <b>4000</b></span></div></div>
         <div class="opt"><div class="oh"><span>tiled → STARE</span><span class="tag-alt">method=tiled</span></div>
           <div class="ox">JVM-free tiled rigid + mesh warp into the reference's shape; fiducial is
-            channel 0. Laptop-viable. The per-tile fan-out is the only shape.</div>
+            channel 0. <b>Not</b> laptop-sized at the shipped tier — COARSE asks 48 GB at
+            <code>reg_tiled_mode=high</code>, ~5 GB at <code>low</code>. The per-tile fan-out
+            is the only shape.</div>
           <div class="pp"><span>tile <b>2048</b></span><span>halo <b>256</b></span><span>gate_tre <b>1.0</b></span></div></div>
       </div>
       <div class="mod"><div class="n">GENERATE_REGISTRATION_QC <span class="tag tag-on">reg_qc≥1</span></div>
@@ -184,7 +187,7 @@ Chips give real defaults. Every process runs in a pinned container and emits
       <div class="mod"><div class="n">EXPORT_GEOJSON</div>
         <div class="x">QuPath / FlowPath <code>cells.geojson</code> with raw per-marker
           measurements, plus a lighter whole-cell-only variant.</div>
-        <div class="pp"><span>pixel_size <b>0.325</b></span></div></div>
+        <div class="pp"><span>pixel_size <b>auto</b></span></div></div>
       <div class="mod"><div class="n">MERGE_AND_PYRAMID</div>
         <div class="x">Pyramidal OME-TIFF preserving channel metadata; masks optionally embedded
           as a second series.</div>

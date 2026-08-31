@@ -76,17 +76,13 @@ def unit_to_um(unit: Optional[str]) -> Optional[float]:
     """Multiplier taking a length in ``unit`` to micrometres, or None if the
     unit is one this module does not recognise.
 
-    Exported because it has a second caller with a different policy for the
-    None case. ``read_ome_pixel_size`` below reports None and lets the caller
-    carry on -- its result is only ever used to WARN, while ``params.pixel_size``
-    stays authoritative -- whereas ``bin/ashlar_retile.py`` raises, because the
-    number it derives IS the authoritative scale and there is nothing to fall
-    back to that would be any more right.
-
-    Those two policies are the reason this is one function and not one shared
-    reader: the conversion table must not fork (a second private table would
-    drift, and the drift would be a silent scale error in whichever copy fell
-    behind), but what "unknown" means depends on what the number is for.
+    Exported rather than kept private because the conversion table must not
+    fork: a second copy in another script would drift, and the drift would be a
+    silent scale error in whichever copy fell behind. What "unrecognised" MEANS
+    is deliberately left to the caller -- ``read_ome_pixel_size`` below reports
+    None and lets the caller carry on, because its result is only ever used to
+    WARN while ``params.pixel_size`` stays authoritative; a caller deriving an
+    authoritative scale would have to raise on the same None instead.
 
     ``None`` means the attribute was absent, which OME's 2016-06 schema defines
     as micrometres -- so it maps to 1.0, not to "unrecognised".
@@ -230,13 +226,31 @@ def resolve_pixel_size(
     * ``"auto"`` -- read ``PhysicalSizeX`` from ``image_path``'s OME header. This is
       safe at every stage of the pipeline because ``CONVERT_IMAGE`` stamps the scale it
       resolved onto its output and each rewriting step (``apply_basic_profiles``,
-      ``tiled_stitch``) re-stamps it, so an image reaching any consumer carries one.
-      Absent or uninterpretable metadata RAISES -- that is the "otherwise error" half of
-      the contract, and it is the whole point: ``auto`` promises to read the real scale,
-      so it must fail loudly rather than substitute a guess.
-    * ``None`` -- raises. ``params.pixel_size`` is null-by-default precisely so a run
-      cannot start without someone having chosen; reaching a script with null means the
-      launch-time guard in ``ParamUtils.validatePixelSize`` was bypassed.
+      ``tiled_stitch``) re-stamps it, so an image reaching any consumer carries one --
+      with one exception worth naming. ``bin/register.py`` itself writes no
+      ``PhysicalSize``; the registered output is believed to be re-stamped, but one
+      layer down, inside VALIS itself (``Slide.warp_and_save_slide`` ->
+      ``slide_io.save_ome_tiff``), which is believed to copy the *source* slide's
+      physical size -- scaled to the output pyramid level -- into the new OME-XML,
+      provided the source carried one. That belief was traced from VALIS's vendored
+      source, not observed at runtime -- no test in this repo exercises the
+      registered-output-carries-scale path end to end, so treat it as unconfirmed. VALIS
+      is pinned (``modules/local/register.nf`` builds ``cdgatenbee/valis-wsi:1.0.0``),
+      so this is not a silent-drift hazard -- a version bump is a deliberate act, and is
+      the moment to re-verify this behaviour still holds. If it ever stopped holding, or
+      the source image had no physical size to begin with (OME unit literally
+      ``"px"``), the registered output would carry no scale, and a re-entry over it via
+      ``--start segmentation`` / ``--start postprocessing`` would hard-fail at
+      ``PREFLIGHT_SCALE`` under ``auto`` -- loudly, which is correct, but is worth an
+      operator knowing the cause is upstream of this pipeline's own code. Absent or
+      uninterpretable metadata RAISES -- that is the "otherwise error" half of the
+      contract, and it is the whole point: ``auto`` promises to read the real scale, so
+      it must fail loudly rather than substitute a guess.
+    * ``None`` -- raises. ``params.pixel_size`` defaults to ``'auto'``, not null, so
+      reaching this function with ``None`` means something explicitly overrode the
+      default back to null/empty; the launch-time guard in
+      ``ParamUtils.validatePixelSize`` rejects exactly that before any process runs, so
+      getting here means that guard was bypassed.
     """
     label = source or (str(image_path) if image_path is not None else "<no image>")
 

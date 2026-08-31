@@ -641,13 +641,10 @@ def parse_args(argv=None):
     ap.add_argument(
         "--method",
         default="valis",
-        choices=["valis", "tiled", "ashlar"],
+        choices=["valis", "tiled"],
         help="registration method that produced the transform. 'valis' (default) loads a registrar "
         "pickle behind a BioFormats JVM; 'tiled' loads a STARE manifest (M0 + mesh) via "
-        "tiled_stage_warp and needs no JVM — the reg_qc=2 scorer is otherwise identical. "
-        "'ashlar' reads the SAME manifest through the same warper (bin/ashlar_solve.py rewrites "
-        "ASHLAR's per-tile placements into it) and is named separately only so the report records "
-        "which registrar actually produced the transform.",
+        "tiled_stage_warp and needs no JVM — the reg_qc=2 scorer is otherwise identical.",
     )
     return ap.parse_args(argv)
 
@@ -722,10 +719,10 @@ def main(argv=None):
     configure_logging(level=logging.INFO)
     a = parse_args(argv)
 
-    # The manifest-based methods carry no VALIS registrar and need no JVM — score through the
-    # manifest. ashlar joins tiled here because bin/ashlar_solve.py emits the identical M0 + mesh
-    # schema; the two differ in who measured the transform, not in how it is read.
-    if a.method in ("tiled", "ashlar"):
+    # The manifest-based method carries no VALIS registrar and needs no JVM — score through
+    # the STARE manifest (M0 + mesh) instead. Equality rather than `!= "valis"` so a THIRD
+    # method has to declare which of the two readers it wants.
+    if a.method == "tiled":
         return _main_tiled(a)
 
     # Start the BioFormats JVM BEFORE any slide I/O. registration.load_registrar() unpickles VALIS

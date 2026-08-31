@@ -192,9 +192,11 @@ ALLOWED_LINES = {
         # widen. (Re-pin from the file, not by guessing:
         # `grep -n "params.expanded_quantification ?" conf/modules.config`.)
         # 1103 -> 1108 when Task 5.1's COARSE front-end selector landed: TILED_COARSE's
-        # withName block gained a 4-line comment plus
-        # `ext.args = { "--frontend ${params.reg_tiled_frontend}" }` (+5 lines total)
-        # above this line. 1103 + 5 = 1108.
+        # withName block gained a 4-line comment plus a one-line `ext.args` closure
+        # (+5 lines total) above this line. 1103 + 5 = 1108. (That selector, and the
+        # parameter it read, were deleted again for v1.0.0 -- see the 1277 -> 1298 entry
+        # below. The line names are not quoted here any more because
+        # tests/test_no_legacy_frontends.py forbids naming them outside its allow-list.)
         # 1108 -> 1136 when Task 5.4 published the two STARE/VALIS benchmark-scoring
         # artifacts: REGISTER's publishDir gained a third array entry for the VALIS
         # registrar pickle (+11), TILED_REG_TILE's shared block comment was rewritten
@@ -255,7 +257,49 @@ ALLOWED_LINES = {
         # while the thing it means to pin is the line's CONTENT. Keying on the normalised
         # text plus an assertion that it occurs exactly once would be stable under edits
         # above it and would need no re-pin at all.
-        1259: (
+        # 1259 -> 1270 when the PREFLIGHT_SCALE process (task-2 of the scale-correctness
+        # work) gained its own `withName:` block above CONVERT_IMAGE: +11, a publishDir-
+        # only block (its resources come from a `label`, not this block -- see the
+        # one-owner rule) plus its explanatory comment. Re-pinned directly from the file:
+        #   grep -n "params.expanded_quantification ?" conf/modules.config  ->  1270
+        # 1270 -> 1277 when the pixel_size CRITICAL fix (scale-correctness-and-robustness)
+        # added a 7-line comment above SEGMENT's `instantseg` ext.args flags, explaining
+        # why `--pixel-size ${meta.pixel_size}` replaced `${params.pixel_size}` there.
+        # Re-pinned directly from the file:
+        #   grep -n "params.expanded_quantification ?" conf/modules.config  ->  1277
+        # 1277 -> 1298 when the legacy COARSE front-ends were deleted and TILED_COARSE's
+        # memory request stopped being a flat ramp: net +21 above this line, being +5 in
+        # the block comment (rewritten for the U-Net cost curve), +21 replacing the
+        # one-line `memory = { 8.GB * ... }` with the derived closure and its inlined
+        # tier table, and -5 deleting the front-end selector comment and its `ext.args`.
+        # 1277 + 5 + 21 - 5 = 1298. Re-pinned directly from the file:
+        #   grep -n "params.expanded_quantification ?" conf/modules.config  ->  1298
+        # 1298 -> 1307 in the same change's review round: +9 lines in TILED_COARSE's block
+        # comment, recording why the retry ramp reverted from doubling to linear (the
+        # doubling was for a SLIDE-driven peak; the peak is now BOUND-driven, so a retry
+        # corrects for host variance rather than searching for an unknown magnitude).
+        # 1298 + 9 = 1307. Re-pinned directly from the file:
+        #   grep -n "params.expanded_quantification ?" conf/modules.config  ->  1307
+        # 1307 -> 1251 when the ashlar registration backend was removed for v1.0.0, leaving
+        # exactly two production backends (valis, tiled). -56 above this line: the whole
+        # ASHLAR section of conf/modules.config -- its banner comment plus the
+        # ASHLAR_RETILE, ASHLAR_SOLVE and ASHLAR_STITCH withName blocks and the blank line
+        # closing the section. This reverses the +54 half of the 1064 -> 1103 entry above
+        # (the section had since grown to 56 lines); the -15 half -- deleting the duplicate
+        # TILED_COARSE block -- stands, so this is NOT that entry's inverse and chaining
+        # off one would give 1305. Composition check: 1307 - 56 = 1251, and
+        # `wc -l conf/modules.config` fell 1394 -> 1338, the same 56. Re-pinned directly
+        # from the file, not computed:
+        #   grep -n "params.expanded_quantification ?" conf/modules.config  ->  1251
+        # 1251 -> 1253 in the final whole-branch review: +2 lines in TILED_COARSE's memory
+        # closure comment. The old text was a CAUTION telling the operator not to pass
+        # `reg_tiled_coarse_max_dim` 0; commit 9073f14 had already made anything below 256
+        # a hard launch abort in ParamUtils.validateRegPresets, so the caution described a
+        # state the operator can no longer reach and was rewritten to say the floor is
+        # enforced. Composition check: 1251 + 2 = 1253, and `wc -l conf/modules.config`
+        # rose 1338 -> 1340, the same 2. Re-pinned directly from the file, not computed:
+        #   grep -n "params.expanded_quantification ?" conf/modules.config  ->  1253
+        1253: (
             "ext.args = { params.expanded_quantification ? '--expanded' : "
             "'' } -- conf/*.config closures cannot see lib/*.groovy classes, "
             "so ext.args must read params raw here."

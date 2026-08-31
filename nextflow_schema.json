@@ -109,9 +109,10 @@
                         "number",
                         "string"
                     ],
-                    "description": "Micrometres per pixel. NO DEFAULT: pass a positive number, or 'auto' to read PhysicalSizeX from each image's own OME metadata (which errors if the image carries no usable scale). Owns every micrometre conversion in the pipeline.",
+                    "description": "Micrometres per pixel. Defaults to 'auto', which reads PhysicalSizeX from each image's own OME metadata (a preflight step fails the run if that metadata is absent or unusable); pass a positive number to override the metadata for every slide. Owns every micrometre conversion in the pipeline.",
                     "pattern": "^(auto|[0-9]*\\.?[0-9]+([eE][-+]?[0-9]+)?)$",
-                    "exclusiveMinimum": 0
+                    "exclusiveMinimum": 0,
+                    "default": "auto"
                 }
             }
         },
@@ -121,12 +122,11 @@
             "properties": {
                 "registration_method": {
                     "type": "string",
-                    "description": "Registration backend: 'valis' (VALIS graph-based whole-slide), 'tiled' (STARE: JVM-free, internally tiled, fully parallel), or 'ashlar' (labsyspharm ASHLAR \u2014 a BENCHMARK BASELINE for the real-sample arm comparison, translation-only, not a production backend). See lib/ParamUtils.groovy.",
+                    "description": "Registration backend: 'valis' (VALIS graph-based whole-slide) or 'tiled' (STARE: JVM-free, internally tiled, fully parallel). See lib/ParamUtils.groovy.",
                     "default": "valis",
                     "enum": [
                         "valis",
-                        "tiled",
-                        "ashlar"
+                        "tiled"
                     ]
                 },
                 "nuclear_markers": {
@@ -215,8 +215,8 @@
                 },
                 "reg_micro_reg": {
                     "type": "integer",
-                    "description": "Micro-registration depth (nested, default MAX): 0=none, 1=micro-rigid only (refines slide.M), 2=+micro non-rigid (register_micro).",
-                    "default": 2,
+                    "description": "Micro-registration depth (nested, default 1): 0=none, 1=micro-rigid only (refines slide.M) [default], 2=+micro non-rigid (register_micro).",
+                    "default": 1,
                     "enum": [
                         0,
                         1,
@@ -251,17 +251,6 @@
                     "description": "STARE (registration_method=tiled) only: nuclear/fiducial channel index used to estimate the transform. null = resolve from channel metadata against nuclear_markers.",
                     "default": null,
                     "minimum": 0
-                },
-                "reg_tiled_frontend": {
-                    "type": "string",
-                    "default": "orb",
-                    "description": "STARE (registration_method=tiled) only: COARSE global-alignment front-end. orb is today's default behaviour; sift and fourier_mellin are CPU alternatives; disk_lightglue needs torch+kornia and runs only under -profile stare_ml.",
-                    "enum": [
-                        "orb",
-                        "sift",
-                        "fourier_mellin",
-                        "disk_lightglue"
-                    ]
                 },
                 "reg_tiled_tile": {
                     "type": [
@@ -325,25 +314,6 @@
                     ],
                     "minimum": 0,
                     "description": "COARSE anchor thumbnail longest side (px). null = from reg_tiled_mode."
-                },
-                "reg_ashlar_tile": {
-                    "type": "integer",
-                    "default": 1024,
-                    "description": "ASHLAR (registration_method=ashlar) only: tile core size (px) the stitched slide is cut into for ASHLAR to read. The fairness knob against reg_tiled_tile \u2014 ASHLAR computes one independent shift per tile, so a finer grid buys it more local freedom.",
-                    "minimum": 16
-                },
-                "reg_ashlar_overlap": {
-                    "type": "number",
-                    "default": 0.1,
-                    "description": "ASHLAR only: fractional overlap between synthesized tiles. Feeds ASHLAR's within-cycle stitching, which is trivial here (positions are fabricated exactly); this arm measures the cross-cycle engine.",
-                    "minimum": 0.0,
-                    "exclusiveMaximum": 1.0
-                },
-                "reg_ashlar_max_shift_um": {
-                    "type": "number",
-                    "default": 30,
-                    "description": "ASHLAR only: maximum per-tile corrective shift in MICRONS. Must exceed the true cross-cycle drift \u2014 ASHLAR replaces an out-of-range tile with a model prediction instead of erroring, so too small a value degrades registration silently.",
-                    "minimum": 0.0
                 }
             }
         },

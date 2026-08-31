@@ -5,8 +5,11 @@
  *
  *     high | medium | low | custom
  *
- * `high` is the shipped default and the historical behaviour: every value in the `high` row
- * below is exactly what `nextflow.config` used to declare as that param's literal default.
+ * `high` is the shipped default and, with one exception, the historical behaviour: every value
+ * in the `high` row below is what `nextflow.config` used to declare as that param's literal
+ * default -- EXCEPT `coarse_max_dim`, whose whole column moved down one tier for v1.0.0 (`high`
+ * is 2048, not the 4096 that used to ship). The long note on STARE below gives the measurement
+ * that forced it. Do not restate this row as "unchanged".
  * `medium` and `low` trade accuracy for memory and wall-clock. `custom` starts from `high` and
  * applies whichever individual knobs the user set; anything left unset stays at the `high` value.
  *
@@ -64,11 +67,24 @@ class RegPresets {
      * acceptable control point, which is a correctness question, not a cost/accuracy trade. Tying
      * them to a cost tier would silently change which control points are accepted when a user
      * asked only to use less memory.
+     *
+     * `coarse_max_dim` was 4096/2048/1024 when COARSE ran a classical corner detector (~2 GB at
+     * 4096, and that cost is nearly flat in thumbnail size). DISK+LightGlue is a U-Net: its
+     * activation memory is linear in image AREA and ~20x that peak at equal size, and it is what
+     * TILED_COARSE's memory request is now derived from. Measured on the pinned stack: 3.03 GB at
+     * 512 px, 8.78 GB at 1024 px, which fits `GB ~= 1.1 + 7.3 * Mpx` and puts 4096 px at ~123 GB
+     * -- above the 64 GB ceiling the flat `8.GB * 2**(attempt-1)` ramp used to top out at, which
+     * is what made the re-base necessary. (That ramp is now itself gone: the request derives from
+     * this column, so 4096 would simply ask for ~185 GB and be clamped by params.max_memory.)
+     * The column moves down one tier.
+     * Accuracy is bought back by DISK's sub-pixel fit: a 0.99 px thumbnail residual at a 1/13
+     * decimation on a 26k slide is ~13 px full-res, well inside the 256 px `halo` the anchor
+     * only has to land within.
      */
     static final Map<String, Map<String, Integer>> STARE = [
-        high  : [tile: 2048, halo: 256, out_tile: 1024, coarse_max_dim: 4096, upsample: 10],
-        medium: [tile: 1024, halo: 192, out_tile:  768, coarse_max_dim: 2048, upsample: 10],
-        low   : [tile:  512, halo: 128, out_tile:  512, coarse_max_dim: 1024, upsample:  5],
+        high  : [tile: 2048, halo: 256, out_tile: 1024, coarse_max_dim: 2048, upsample: 10],
+        medium: [tile: 1024, halo: 192, out_tile:  768, coarse_max_dim: 1024, upsample: 10],
+        low   : [tile:  512, halo: 128, out_tile:  512, coarse_max_dim:  512, upsample:  5],
     ]
 
     /** The STARE knobs that a tier owns, i.e. the ones `--reg_tiled_mode` moves. */

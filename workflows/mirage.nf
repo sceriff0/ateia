@@ -138,7 +138,7 @@ workflow MIRAGE {
         //
         // ALLOWLIST, NOT DENYLIST. This used to name 'tiled' explicitly, so any method the
         // schema enum gained afterwards passed the check and was then silently registered
-        // with VALIS. 'ashlar' would have been the first to hit that.
+        // with VALIS -- the next method added to the enum would have been the first to hit it.
         if (params.registration_method != 'valis') {
             error "mode='add_cycle' does not support --registration_method ${params.registration_method} yet; use valis."
         }
@@ -186,6 +186,8 @@ workflow MIRAGE {
         // now contributed: ADD_CYCLE captures SEG_QC.out.per_cell (previously dropped).
         FINAL_QC(
             Channel.empty()
+                .mix(INPUT_CHECK.out.versions.map    { f -> ['versions', f] })
+                .mix(INPUT_CHECK.out.size_logs.map   { f -> ['size_log', f] })
                 .mix(ADD_CYCLE.out.qc.map            { _meta, files -> ['registration_qc', files] })
                 .mix(ADD_CYCLE.out.seg_qc.map        { _meta, files -> ['seg_qc', files] })
                 .mix(ADD_CYCLE.out.seg_residuals.map { _meta, files -> ['seg_residuals', files] })
@@ -361,7 +363,13 @@ workflow MIRAGE {
     // owns both end-of-run aggregations and both of their param gates
     // (--skip_final_qc_report, --enable_trace), so there is nothing to branch on
     // here — steps that did not run simply contribute nothing.
+    //
+    // INPUT_CHECK runs unconditionally above (every entry point reads the samplesheet
+    // through it), and now runs a real process -- PREFLIGHT_SCALE -- so its versions/
+    // size_log are contributed here unconditionally too, same as every linear step.
     def ch_qc_artifacts = Channel.empty()
+        .mix(INPUT_CHECK.out.versions.map  { f -> ['versions', f] })
+        .mix(INPUT_CHECK.out.size_logs.map { f -> ['size_log', f] })
 
     if (run_preprocessing) {
         ch_qc_artifacts = ch_qc_artifacts
