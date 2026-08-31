@@ -260,10 +260,16 @@
         <h4>THE SPATIAL AXIS &mdash; not removable here</h4>
         <div class="sub">full resolution decoded to emit a thumbnail</div>
         <p class="x">Reading <code>[::f, ::f]</code> instead of the full plane would be the larger win — and it is
-          available at <b>none</b> of the five sites. <code>decimation_factor(..., max_dim=None)</code> returns
-          <code>1</code> at each of them, deliberately; panels <b>f</b> and <b>g</b> give the three separate
-          reasons.</p>
-        <div class="src">decimation_factor — bin/utils/tiled_io.py:86 (returns 1 when max_dim is None)</div>
+          available at <b>none</b> of the five sites. The conclusion is uniform; the <i>mechanism</i> is not, and
+          this box used to claim it was. Only <b>site 1</b> reaches it through
+          <code>decimation_factor(..., max_dim=None) → 1</code>. <b>Site 2</b> hard-codes
+          <code>read_decimated(..., factor=1)</code> and never calls the resolver. <b>Sites 3, 4 and 5</b>
+          (<code>SPLIT_CHANNELS</code>, <code>SEGMENT</code>, <code>MERGE_AND_PYRAMID</code>) slice regions off the
+          lazy view directly and call neither — they have no decimation path to disable. Panels <b>f</b> and
+          <b>g</b> give the three separate reasons the win is unavailable in each case.</p>
+        <div class="src">bin/utils/qc.py:382 (the one decimation_factor call) ·
+          bin/generate_preprocess_qc.py:211 (factor=1, hard-coded) ·
+          decimation_factor — bin/utils/tiled_io.py:86 (returns 1 when max_dim is None)</div>
       </div>
     </div>
     <div class="callout"><span class="wl">the capability was never missing — only its reach</span>
@@ -938,9 +944,15 @@ DEFAULT_BAND_BYTES = 64 * 1024 * 1024    <span class="cm"># a BYTE budget, not a
           Only SEGMENT genuinely decodes less, and only on the channel axis.</p>
       </div>
       <div class="bx mut">
-        <h4>the scheduler sees nothing</h4>
-        <p class="x">Every affected process still requests memory as a function of input file size (panel
-          <b>h</b>). No run got cheaper in reserved GB&middot;h, and no closure was lowered.</p>
+        <h4>the scheduler sees less, but only at three processes</h4>
+        <p class="x">This box used to read &ldquo;the scheduler sees nothing &mdash; no run got cheaper in reserved
+          GB&middot;h, and no closure was lowered&rdquo;. Panel <b>h</b> now quotes that sentence by name as false.
+          <b>Three closures were lowered</b>: <code>MERGE_AND_PYRAMID</code> off a flat 300&nbsp;GB reservation,
+          <code>APPLY_PROFILES</code> minus its <code>&times; 7.GB</code> term, <code>TILE_FOR_BASIC</code> onto an
+          explicit &ldquo;NO FILE-SIZE TERM&rdquo;. The two latter now request <i>no</i> function of input file size
+          at all, so the first half of the old sentence was independently false as well. The limit that survives is
+          narrower: at the five processes listed in panel <b>h</b> the request is still a closure over file size, so
+          a lower peak there buys headroom rather than cost.</p>
       </div>
       <div class="bx mut">
         <h4>the channel-last branches stay untested in production</h4>
