@@ -12,9 +12,8 @@
 #
 # It deliberately does NOT invoke the old single-task registration entry
 # point removed from bin/ when STARE became a four-stage fan-out. That script
-# exists on no branch; benchmarks/registration_eval/run_registration.sh still
-# calls it, which is why that harness's STARE leg has been broken since the
-# split.
+# exists on no branch. Its last caller was the ANHIR/ACROBAT landmark harness,
+# whose STARE leg had been broken since the split; that harness is now deleted.
 #
 # CORRECTIONS applied against the original brief (controller rulings, see
 # task-3.2-brief.md history):

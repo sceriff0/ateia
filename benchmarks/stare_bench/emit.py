@@ -31,7 +31,7 @@ __all__ = [
 # Keys that name a self-reported (circular) quantity. They may only reach the
 # table through the explicit `intrinsic_tre` argument, which lands under diag_.
 # final_p50_px/final_p90_px/rigid_p90_px are the spellings
-# benchmarks/registration_eval/eval_tre.py:read_stare_tre re-flattens the SAME
+# benchmarks/stare_bench/tre.py:read_stare_tre re-flattens the SAME
 # circular STARE post-mesh residual under -- same quantity, different label.
 FORBIDDEN_IN_ACCURACY = {
     "intrinsic_tre",

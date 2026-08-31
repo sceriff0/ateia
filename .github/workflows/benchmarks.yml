@@ -9,6 +9,11 @@ on:
 jobs:
   stare-bench:
     runs-on: ubuntu-latest
+    # The DISK+LightGlue COARSE front-end runs on CPU here, and it is slow: the
+    # stare_bench suite measured 23m33s locally on the pinned stack, against ~20s
+    # when COARSE was still a classical corner detector. 60 leaves headroom on a
+    # slower runner while still failing far short of GitHub's 360-minute default.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -17,8 +22,8 @@ jobs:
       - name: Install
         # torch + kornia power the DISK+LightGlue COARSE front-end that
         # bin/utils/coarse_align.py::estimate_rigid now calls unconditionally --
-        # the ORB/SIFT/Fourier-Mellin front-ends it used to fall back to were
-        # deleted from the pipeline. stare_bench's unit rung drives the real
+        # the classical front-ends it used to fall back to were deleted from the
+        # pipeline. stare_bench's unit rung drives the real
         # bin/tiled_*.py entry points IN-PROCESS (benchmarks/stare_bench/run_unit.py),
         # outside any container, so without these the whole unit rung errors out.
         #
@@ -26,7 +31,11 @@ jobs:
         # first and from the CPU index, because kornia pulls torch from PyPI --
         # the CUDA wheel, ~2.5 GB -- if torch is not already satisfied.
         run: |
-          pip install numpy scipy scikit-image tifffile pandas pyyaml pytest ruff
+          # Pinned to the SAME versions ci.yml pins (tests/test_ci_stack_pinned.py
+          # enforces the `==` form): an unpinned imaging stack lets this job resolve
+          # different numerics than the production containers.
+          pip install numpy==1.26.4 scipy==1.15.3 scikit-image==0.25.2 \
+                      tifffile==2025.5.10 pandas pyyaml pytest ruff
           pip install torch==2.3.1 --index-url https://download.pytorch.org/whl/cpu
           pip install kornia==0.7.3
       - name: Test

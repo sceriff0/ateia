@@ -20,7 +20,7 @@ __all__ = ["score_pair", "main"]
 
 
 def _tre_summary(truth, predict):
-    """Landmark TRE through the SAME evaluator registration_eval already uses.
+    """Landmark TRE through the SAME evaluator the landmark primitives provide.
 
     Convention, derived (not guessed) from how the pair was generated:
 
@@ -42,7 +42,7 @@ def _tre_summary(truth, predict):
     gotten wrong in this codebase; see ``generate.py:_landmarks`` for the
     matching correction on the ground-truth-generation side.)
     """
-    from benchmarks.registration_eval.landmarks import (
+    from benchmarks.stare_bench.landmarks import (
         image_diagonal,
         per_landmark_tre,
         summarize,
@@ -118,7 +118,7 @@ def _predict_from_valis_pickle(transform_path):
     exactly what ``eval_tre.py``'s own landmark scoring does with the same
     call. Import is lazy: VALIS must not be needed to score a STARE run.
     """
-    from benchmarks.registration_eval.eval_tre import default_loader
+    from benchmarks.stare_bench.tre import default_loader
 
     registrar = default_loader(transform_path)
     moving_name = _valis_moving_slide_name(registrar)

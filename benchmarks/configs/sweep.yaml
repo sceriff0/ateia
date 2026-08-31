@@ -97,8 +97,8 @@ baseline:
                                       # registration_method_grid crosses it, pinning reg_tiled_mode=custom.
   reg_tiled_gate_tre: 1.0             # STARE per-tile non-rigid refine gate (px), pipeline default. Only live for
                                       # tiled runs; declared for column uniformity (crossed by registration_method_grid).
-  # reg_tiled_frontend is GONE, not merely unswept. :fire: 5f7f986 deleted the
-  # ORB/SIFT/Fourier-Mellin front-ends and the param that selected them; COARSE is now
+  # The COARSE front-end param is GONE, not merely unswept. :fire: 5f7f986 deleted the
+  # three classical front-ends and the param that selected them; COARSE is now
   # unconditionally DISK+LightGlue (bin/utils/coarse_align.py::estimate_rigid is a thin
   # reshape over _frontend_disk_lightglue). A baseline entry here would name nothing in
   # nextflow.config, which is what test_project_sweep_baseline_matches_pipeline_defaults
@@ -343,7 +343,7 @@ registration_method_grid:
     # test_project_stare_resolution_axis_mirrors_the_valis_one failed on exactly that.
     #
     # COST NOTE — THE BINDING CONSTRAINT IS NOW MEMORY, NOT WALLTIME, and this replaces the old
-    # ORB note (48 s @ 1024 px, 255 s @ 2048 px, peak flat at ~0.9 GB). COARSE is DISK now: a U-Net
+    # classical-detector note (48 s @ 1024 px, 255 s @ 2048 px, peak flat at ~0.9 GB). COARSE is a U-Net now
     # whose activation memory is linear in thumbnail AREA. Measured on the pinned stack, 3.03 GB at
     # 512 px and 8.78 GB at 1024 px, i.e. GB ~= 1.1 + 7.3*Mpx -- which puts 4096 px at ~123 GB and
     # is precisely why the shipped tier dropped to 2048. TILED_COARSE's memory request derives from
@@ -354,13 +354,13 @@ registration_method_grid:
     reg_tiled_coarse_max_dim: [1024, 2048, 4096]   # M0 anchor thumbnail, longest side (px)
     # THE COARSE FRONT-END AXIS IS GONE, and cannot come back in this form.
     #
-    # It read: reg_tiled_frontend: [orb, sift, fourier_mellin], crossing the three axes above and
-    # tripling this grid from 27 to 81 runs. Its stated purpose was to bracket disk_lightglue --
-    # then excluded, because it needed a separate stare-ml container and its matching body still
+    # It listed the three classical front-ends, crossing the three axes above and tripling this
+    # grid from 27 to 81 runs. Its stated purpose was to bracket the learned matcher -- then
+    # excluded, because it needed a separate stare-ml container and its matching body still
     # raised NotImplementedError -- against two front-ends that "cost NO new dependency".
     #
-    # Every premise of that has inverted. :fire: 5f7f986 deleted the ORB/SIFT/Fourier-Mellin
-    # front-ends AND the reg_tiled_frontend param; :package: 0f4c649 folded torch+kornia and the
+    # Every premise of that has inverted. :fire: 5f7f986 deleted those three front-ends
+    # AND the param that selected them; :package: 0f4c649 folded torch+kornia and the
     # DISK/LightGlue weights into the :tiled image, so there is no stare-ml container to be outside
     # of (containers/stare-ml/ is deleted) and no NotImplementedError to wait on. COARSE is now
     # unconditionally DISK+LightGlue. The axis has ONE value, which is not an axis.

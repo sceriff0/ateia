@@ -66,7 +66,7 @@ def test_a_self_reported_metric_cannot_be_smuggled_into_an_accuracy_column():
 
 
 def test_a_read_stare_tre_spelling_of_the_same_residual_is_also_forbidden():
-    # benchmarks/registration_eval/eval_tre.py:read_stare_tre re-flattens the SAME
+    # benchmarks/stare_bench/tre.py:read_stare_tre re-flattens the SAME
     # circular STARE post-mesh residual under this name; it must be caught too.
     with pytest.raises(ValueError, match="diagnostic"):
         accuracy_row(run_id="r1", method="tiled", pair_id="p1", truth=TRUTH,

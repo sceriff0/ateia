@@ -93,7 +93,7 @@ def _landmarks(shape, field, n, seed):
     """``(N, 4)`` array of ``[target_x, target_y, moving_x, moving_y]``.
 
     Emitted in the ANHIR ``,X,Y`` convention so
-    ``registration_eval.eval_tre.evaluate_pair`` scores them unchanged.
+    ``stare_bench.tre.evaluate_pair`` scores them unchanged.
 
     ``_warp`` builds ``mov`` by PULL-sampling: ``mov(p) = ref(p + disp(p))``
     for every moving-space pixel ``p``. So the content at a moving-space point

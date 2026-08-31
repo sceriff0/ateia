@@ -2,8 +2,8 @@ import json
 
 import numpy as np
 
-from benchmarks.registration_eval import eval_tre
-from benchmarks.registration_eval.landmarks import LandmarkPair
+from benchmarks.stare_bench import tre as eval_tre
+from benchmarks.stare_bench.landmarks import LandmarkPair
 
 
 class _FakeSlide:

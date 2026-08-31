@@ -1,11 +1,14 @@
 """Unit-rung STARE driver: the four stages, in sequence, in one process.
 
-WHY NOT RESTORE bin/tiled_register.py: registration_eval/run_registration.sh
-still invokes it, but it exists on no branch -- it was the single-task entry
-point removed when STARE was split into the four-stage fan-out. Restoring it
-would create a SECOND code path that can silently drift from the pipeline. This
-driver instead calls the same bin/tiled_*.py entry points the Nextflow modules
-call, so there is nothing to drift.
+WHY NOT RESTORE bin/tiled_register.py: it exists on no branch -- it was the
+single-task entry point removed when STARE was split into the four-stage
+fan-out. Restoring it would create a SECOND code path that can silently drift
+from the pipeline. This driver instead calls the same bin/tiled_*.py entry
+points the Nextflow modules call, so there is nothing to drift.
+
+(The one caller that still invoked it was the ANHIR/ACROBAT landmark harness,
+benchmarks/registration_eval/. Its STARE leg had been broken since the split,
+and the harness has now been deleted for that reason among others.)
 
 The mid and gigapixel rungs do NOT use this driver -- they run the real
 pipeline through the arm plan, because the <=8 GB and fan-out claims only mean

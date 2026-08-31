@@ -187,7 +187,7 @@ def test_predict_from_valis_pickle_uses_the_derived_slide_name(monkeypatch):
         ref_name="ref",
     )
     monkeypatch.setattr(
-        "benchmarks.registration_eval.eval_tre.default_loader",
+        "benchmarks.stare_bench.tre.default_loader",
         lambda transform_path: registrar,
     )
     predict = _predict_from_valis_pickle("unused-path")
@@ -325,7 +325,7 @@ def _tre_summary_wrong(truth, predict):
     """The brief's original (incorrect) line, kept only to demonstrate the
     failure this task exists to fix. Not used by score_pair.
     """
-    from benchmarks.registration_eval.landmarks import (
+    from benchmarks.stare_bench.landmarks import (
         image_diagonal,
         per_landmark_tre,
         summarize,

@@ -82,11 +82,11 @@ registration_arms:
   tiled:
     enabled: true                          # 1 arm
 
-    # THE COARSE FRONT-END AXIS IS GONE. It declared [orb, sift, fourier_mellin] and
-    # deferred disk_lightglue on three grounds -- a separate unpublished stare-ml image, a
-    # plain-profile mismatch, and a matching body that still raised NotImplementedError.
-    # Every one of those has inverted: :fire: 5f7f986 deleted the three classical front-ends
-    # and the reg_tiled_frontend param, and :package: 0f4c649 folded torch+kornia and the
+    # THE COARSE FRONT-END AXIS IS GONE. It declared the three classical front-ends and
+    # deferred the learned matcher on three grounds -- a separate unpublished stare-ml image,
+    # a plain-profile mismatch, and a matching body that still raised NotImplementedError.
+    # Every one of those has inverted: :fire: 5f7f986 deleted those three front-ends
+    # and the param that selected them, and :package: 0f4c649 folded torch+kornia and the
     # DISK/LightGlue weights into the :tiled image (containers/stare-ml/ is deleted). COARSE
     # is unconditionally DISK+LightGlue now, so the axis has one value, which is not an axis.
     # It was never expanded into per-arm fan-out, so this removes no arm: tiled is still 1.

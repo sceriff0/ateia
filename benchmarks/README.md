@@ -217,57 +217,34 @@ Verify the whole harness with no data at all:
 
 ---
 
-## B. Optional: external landmark validation (ANHIR / ACROBAT)
+## B. External landmark validation — REMOVED
 
-> **Not the paper's accuracy signal.** Registration accuracy for the paper comes from the
-> pipeline's own `reg_qc=2` staged QC, harvested into `paper_data/registration_accuracy.csv`
-> (Section A) — no challenge data required. This section is a separate, optional cross-check
-> against public landmark ground truth, and the only place a *ground-truth* number exists at
-> all. It now registers each pair with BOTH shipped methods (`valis`, `tiled`/STARE), so the
-> landmark TRE can be read against each method's own self-reported accuracy.
+The optional ANHIR/ACROBAT landmark harness (`benchmarks/registration_eval/`) was deleted.
+It drove `bin/register.py` and `bin/tiled_register.py` directly on public challenge pairs
+and scored true landmark TRE/rTRE/um against each method's self-reported accuracy.
 
-Full detail (data access, limitations) in `benchmarks/registration_eval/README.md`.
+**Why it went.** It had stopped being runnable: `bin/tiled_register.py` was the single-task
+STARE entry point, removed when STARE became the four-stage fan-out, and it exists on no
+branch — so the STARE half of every pair errored, and a two-method comparison with one
+method missing is not a cross-check. Its data was also doubly account-gated (ANHIR needs a
+grand-challenge account; ACROBAT's landmarks are behind the challenge), so it never ran in
+CI and could not run here.
 
-### B0 — Get data + describe pairs
+**What survived, and why.** The landmark-TRE PRIMITIVES moved into `stare_bench`, because
+that block genuinely depends on them:
 
-ANHIR is account-gated; ACROBAT landmarks are challenge-gated — download with your own
-account. Then write a `pairs.csv`:
+  benchmarks/stare_bench/landmarks.py   LandmarkPair, per-landmark TRE, rTRE, um summary
+  benchmarks/stare_bench/tre.py         transform loaders + evaluate_pair + the
+                                        valis-rTRE / STARE-_tre.json readers
 
-    pair_id,ref_image,moving_image,source_landmarks,target_landmarks,width,height,pixel_size_um
-    P001,/data/P001_HE.tif,/data/P001_IHC.tif,/data/P001_mov.csv,/data/P001_ref.csv,40000,30000,0.25
+`stare_bench/cli.py` imports `default_loader` from the second, and `generate.py`'s synthetic
+pairs are built specifically so `tre.evaluate_pair` scores them unchanged. The deleted
+module's `main()` did NOT survive — it was the harness's per-pair CLI and imported the
+ANHIR adapter.
 
-### B1 — Prepare per-pair input dirs
-
-    python -m benchmarks.registration_eval.prepare_pairs --pairs-csv pairs.csv --out reg_prepared
-
-- **Output:** `reg_prepared/<pair_id>/input/` (symlinked images) + `reg_prepared/pairs_manifest.csv`.
-
-### B2 — Register (valis & STARE) + score (cluster, VALIS env)
-
-    # 4th arg is optional: a StarDist model dir enables the reg_qc=2 seg-overlap leg
-    benchmarks/registration_eval/run_registration.sh \
-        reg_prepared/pairs_manifest.csv  reg_prepared  reg_results  [stardist_model_dir]
-
-- **What it does:** per pair x method, registers with `bin/register.py` (`valis`) and
-  `bin/tiled_register.py` (`tiled`/STARE), then `eval_tre` warps the moving ground-truth
-  landmarks through that method's transform. With a model dir it also segments both native
-  slides and runs `bin/warp_seg_qc.py` — the pipeline's own reg_qc=2 scorer — per method.
-- **Output:** `reg_results/eval_<pair>_<method>.json` — ground truth plus every
-  method-native signal available for that run:
-  | field | source | available for |
-  |---|---|---|
-  | `true_tre` | landmark TRE/rTRE/um | both (the only ground truth) |
-  | `valis_rtre` | VALIS `error_df` | `valis` |
-  | `stare_tre` | STARE intrinsic `_tre.json` (coarse / rigid / post-mesh residual) | `tiled` |
-  | `seg_qc` | reg_qc=2 dice + centroid displacement (`bin/warp_seg_qc.py`) | both, if a model dir was given |
-
-### B3 — Aggregate
-
-    python -m benchmarks.registration_eval.aggregate_eval \
-        --eval-dir reg_results --out reg_eval.csv --agg-out reg_eval_agg.csv
-
-- **Output:** `reg_eval.csv` (per pair/mode tidy rows) + `reg_eval_agg.csv` (per-mode
-  **MMrTRE / AMrTRE**). `reg_eval.csv` is what `make_figures --reg-eval` consumes.
+**What was lost.** The only PUBLIC-landmark ground truth. `stare_bench` (Section C) still
+has exact ground truth, but it is SYNTHETIC — a reviewer who discounts synthetic deformation
+no longer has a public-benchmark number to fall back on.
 
 ---
 

@@ -14,10 +14,17 @@ record and can be compared directly:
 
 Both warpers are lazy + injectable so the pure logic is testable without VALIS
 and without the STARE runtime.
+
+RELOCATED from benchmarks/registration_eval/eval_tre.py when the ANHIR/ACROBAT landmark
+harness was deleted. These are the landmark-TRE PRIMITIVES, and they survived that
+deletion because stare_bench depends on them: cli.py imports ``default_loader``, and
+generate.py's synthetic pairs are built so ``evaluate_pair`` scores them unchanged.
+
+The module's ``main()`` did NOT survive -- it was the deleted harness's per-pair CLI and
+imported ``.adapters.anhir``, which no longer exists. Nothing in this package invoked it.
 """
 from __future__ import annotations
 
-import argparse
 import json
 from pathlib import Path
 
@@ -151,44 +158,3 @@ def build_eval_record(pair_id, mode, tre_summary, valis_rtre=None, stare_tre=Non
         "stare_tre": stare_tre,
         "seg_qc": seg_qc,
     }
-
-
-def main():
-    ap = argparse.ArgumentParser(description="Evaluate registration TRE for one pair/method.")
-    ap.add_argument("--pickle", required=True,
-                    help="VALIS registrar pickle (--method valis) or STARE transform manifest "
-                         "JSON (--method tiled)")
-    ap.add_argument("--slide-name", required=True, help="moving slide name in the transform")
-    ap.add_argument("--source-landmarks", required=True)
-    ap.add_argument("--target-landmarks", required=True)
-    ap.add_argument("--adapter", choices=["anhir"], default="anhir",
-                    help="landmark loader (acrobat pairs are pre-split by prepare_pairs)")
-    ap.add_argument("--width", type=int, required=True)
-    ap.add_argument("--height", type=int, required=True)
-    ap.add_argument("--pixel-size-um", type=float, default=None)
-    ap.add_argument("--method", choices=list(METHODS), default="valis",
-                    help="registration method that produced the transform")
-    ap.add_argument("--valis-summary", default=None, help="VALIS *_summary.csv (method=valis)")
-    ap.add_argument("--stare-tre", default=None, help="STARE *_tre.json (method=tiled)")
-    ap.add_argument("--seg-qc", default=None, help="reg_qc=2 *_seg_qc.json for this run")
-    ap.add_argument("--mode", required=True, help="run label (e.g. the method name)")
-    ap.add_argument("--pair-id", required=True)
-    ap.add_argument("--out", required=True)
-    a = ap.parse_args()
-
-    from .adapters import anhir
-    pair = anhir.load_pair(a.source_landmarks, a.target_landmarks, pair_id=a.pair_id)
-    tre_summary, _ = evaluate_pair(pair, a.pickle, a.slide_name, a.width, a.height,
-                                   a.pixel_size_um, method=a.method)
-    record = build_eval_record(
-        a.pair_id, a.mode, tre_summary,
-        valis_rtre=read_valis_rtre(a.valis_summary) if a.valis_summary else None,
-        stare_tre=read_stare_tre(a.stare_tre) if a.stare_tre else None,
-        seg_qc=read_seg_qc(a.seg_qc) if a.seg_qc else None,
-    )
-    Path(a.out).write_text(json.dumps(record, indent=2))
-    print(f"Wrote {a.out}")
-
-
-if __name__ == "__main__":
-    main()

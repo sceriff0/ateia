@@ -2,6 +2,9 @@
 
 Pure and dependency-free (numpy only) so it is fully unit-testable.
 TRE conventions follow ANHIR (rTRE = TRE / image diagonal) and ACROBAT (µm).
+
+Relocated from benchmarks/registration_eval/ when the ANHIR/ACROBAT landmark harness
+was deleted; these primitives survived because stare_bench scores against them.
 """
 from __future__ import annotations
 
