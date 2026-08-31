@@ -299,7 +299,16 @@ ALLOWED_LINES = {
         # enforced. Composition check: 1251 + 2 = 1253, and `wc -l conf/modules.config`
         # rose 1338 -> 1340, the same 2. Re-pinned directly from the file, not computed:
         #   grep -n "params.expanded_quantification ?" conf/modules.config  ->  1253
-        1253: (
+        # 1253 -> 1265 on 2026-08-30 (fix/docs-truthfulness): +12 lines in the "STARE
+        # (tiled) per-task memory" header at the TOP of the file. That header asserted
+        # "measured peak RSS is 1.3-2.0 GB per task" for EVERY tiled process; the band is
+        # the per-tile tasks only and has not covered TILED_COARSE since its coarse anchor
+        # became a U-Net (~31.7 GB peak against a 48 GB request at the shipped tier). The
+        # replacement paragraph names the exception and the formula it comes from.
+        # Composition check: 1253 + 12 = 1265, and `wc -l conf/modules.config` rose
+        # 1340 -> 1352, the same 12. Re-pinned directly from the file, not computed:
+        #   grep -n "params.expanded_quantification ?" conf/modules.config  ->  1265
+        1265: (
             "ext.args = { params.expanded_quantification ? '--expanded' : "
             "'' } -- conf/*.config closures cannot see lib/*.groovy classes, "
             "so ext.args must read params raw here."

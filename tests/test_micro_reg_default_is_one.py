@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Guard that the shipped `reg_micro_reg` default is `1`, everywhere it lives.
+r"""Guard that the shipped `reg_micro_reg` default is `1`, everywhere it lives.
 
 `reg_micro_reg` has TEN homes. NINE were enumerated by the 2026-08-30 spec
 (Task 5 of the registration-backend-surface plan); the tenth --
@@ -37,6 +37,33 @@ elsewhere) -- a grep for the literal brief phrase would not have found it.
 Once `reg_micro_reg`'s default is `1` (not `2`, the max of `{0, 1, 2}`),
 every one of those four sentences is false, so this test asserts none of
 them survive, in either word order, case-insensitively.
+
+`MAX_DEFAULT_PATTERN` WAS TOO NARROW AND LET TWO LIVE SENTENCES THROUGH.
+It required the two words to be ADJACENT (`default\s+max|max\s+default`),
+so it matched neither of the two sentences that were actually shipping in
+`docs/figures/pipeline-schematic.html` on 2026-08-30:
+
+    :371  "Micro-registration at maximum depth by default."
+    :849  "...QC on by default and micro-registration at maximum depth..."
+
+Both are the same false claim; neither puts the words side by side. That is
+also the reason the tenth home (`ParamUtils.microRegLevelOf`'s "Default 2
+(max: ...", see `PARAM_UTILS` above) had to be caught by a hand-written
+second check rather than by this one. The pattern now allows up to 60
+non-sentence-ending characters between the two words in either order, which
+matches all three phrasings. `\bmax(?:imum|imal)?\b` keeps the word
+boundary deliberately: `max_memory`, `max_cpus` and `maxRetries` all fail
+it, so the many "`max_*` ... default" co-occurrences in `nextflow.config`
+and the schema do not become false positives. Measured against the five
+`PROSE_HOMES` before the prose was fixed: two hits, both the sentences
+above, zero elsewhere.
+
+`docs/figures/registration-schematic.html:559` carries a THIRD instance
+("the shipped default (depth 2 = maximum)"). It is NOT added to
+`PROSE_HOMES`, for the same reason its `register_micro()` restatement is
+excluded above: spec Phase 6 owns rewriting that figure wholesale. Adding
+the file here would make this test fail on prose this branch is not allowed
+to touch.
 """
 
 from __future__ import annotations
@@ -87,7 +114,15 @@ TEST_CONFIG = ROOT / "conf" / "test.config"
 # The four prose homes making the now-false "default is the max" claim, and
 # both spellings it can take.
 PROSE_HOMES = [NEXTFLOW_CONFIG, SCHEMA, PARAMETERS_MD, PIPELINE_SCHEMATIC, PARAM_UTILS]
-MAX_DEFAULT_PATTERN = re.compile(r"default\s+max|max\s+default", re.IGNORECASE)
+# Not `default\s+max` -- see the module docstring: requiring adjacency let two live
+# sentences through. Up to 60 non-"." characters may sit between the two words, in
+# either order. The `\b` after `max(?:imum|imal)?` is load-bearing: it is what keeps
+# `max_memory` / `max_cpus` / `maxRetries` out of the match.
+MAX_DEFAULT_PATTERN = re.compile(
+    r"\bdefaults?\b[^.]{0,60}?\bmax(?:imum|imal)?\b"
+    r"|\bmax(?:imum|imal)?\b[^.]{0,60}?\bdefaults?\b",
+    re.IGNORECASE,
+)
 
 
 def _read(path: Path) -> str:
@@ -413,8 +448,13 @@ def test_no_prose_home_still_claims_the_default_is_the_maximum():
     offenders = []
     for path in PROSE_HOMES:
         text = _read(path)
-        if MAX_DEFAULT_PATTERN.search(text):
-            offenders.append(str(path.relative_to(ROOT)))
+        for match in MAX_DEFAULT_PATTERN.finditer(text):
+            # Report the matched text, not just the filename: the two words are not
+            # adjacent, so a bare path sends the reader hunting for a phrase that
+            # does not exist as written.
+            quoted = re.sub(r"\s+", " ", match.group(0))
+            offenders.append(f"{path.relative_to(ROOT)}: {quoted!r}")
     assert not offenders, (
-        f"these files still claim the default is the maximum value: {offenders}"
+        "these still claim the reg_micro_reg default is the maximum value "
+        f"(it is 1, the minimum non-zero value of {{0, 1, 2}}): {offenders}"
     )

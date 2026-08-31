@@ -368,7 +368,9 @@
             <div class="bh">fork — registration_method</div>
             <div class="opt"><div class="oh"><span>valis → REGISTER</span><span class="tag-def">default</span></div>
               <div class="ox">Feature-based rigid + non-rigid warp (JVM/Bio-Formats), resolving all slides into a
-                shared space. Micro-registration at maximum depth by default. <b>Tiered</b> like STARE and with the
+                shared space. Micro-registration at <b>micro-rigid depth</b> by default
+                (<code>reg_micro_reg=1</code> of a legal <code>0 | 1 | 2</code> — the shallowest non-zero setting;
+                <code>2</code> adds the micro non-rigid pass). <b>Tiered</b> like STARE and with the
                 same four-word vocabulary — <code>high | medium | low | custom</code> — where <code>custom</code>
                 means "start from high, apply whichever knobs you overrode"; a per-knob override under any other
                 tier is refused, so a run cannot report a tier it is not using. VALIS's table lives in
@@ -510,10 +512,10 @@
           <td class="hi">segment_instantseg.py</td>
           <td>segment.py</td>
           <td>segment_cellsam.py</td></tr>
-        <tr><td class="rk">container tag</td>
-          <td class="hi">…:instant_seg</td>
-          <td>…:segmentation_gpu</td>
-          <td>…:cellsam</td></tr>
+        <tr><td class="rk">container image</td>
+          <td class="hi">bolt3x/mirage-instanseg:1.0.0</td>
+          <td>bolt3x/mirage-stardist:1.0.0</td>
+          <td>bolt3x/mirage-cellsam:1.0.0</td></tr>
       </tbody>
     </table></div>
 
@@ -534,7 +536,7 @@
           <tr><td class="k">seg_instantseg_tile_size</td><td class="v">512</td><td class="d">tiled inference (px)</td></tr>
           <tr><td class="k">seg_instantseg_batch_size</td><td class="v">16</td><td class="d">tiles per forward pass</td></tr>
           <tr><td class="k">instanseg_model_dir</td><td class="v nul">null</td><td class="d">writable model cache</td></tr>
-          <tr><td class="k">pixel_size</td><td class="v nul">null</td><td class="d">REQUIRED: a number, or 'auto' from OME metadata</td></tr>
+          <tr><td class="k">pixel_size</td><td class="v">'auto'</td><td class="d">µm/px: a positive number, or 'auto' from OME metadata — null is REJECTED at launch</td></tr>
         </table>
       </div>
       <div class="bkc">
@@ -660,7 +662,7 @@
           <tbody>
             <tr><td>CONVERT_IMAGE</td><td class="n">1</td><td>24–88 GB †</td><td>2 h</td><td><span class="own own-w">name</span></td></tr>
             <tr><td>TILE_FOR_BASIC</td><td class="n">2</td><td>6 GB §</td><td>2 h</td><td><span class="own own-w">name</span></td></tr>
-            <tr><td>BASICPY ¶</td><td class="n">1</td><td>32 GB ×n</td><td>8 h</td><td><span class="own">both</span></td></tr>
+            <tr><td>BASICPY ¶</td><td class="n">1</td><td>32 GB × a</td><td>8 h</td><td><span class="own">both</span></td></tr>
             <tr><td>APPLY_PROFILES</td><td class="n">2</td><td>8 GB §</td><td>3 h</td><td><span class="own own-w">name</span></td></tr>
             <tr><td>REGISTER</td><td class="n">8</td><td>300 GB</td><td>24 h</td><td><span class="own own-w">name</span></td></tr>
             <tr><td>TILED_COARSE</td><td class="n">2</td><td>48 GB §</td><td>2 h</td><td><span class="own">both</span></td></tr>
@@ -764,7 +766,7 @@
     <div class="panel-head"><h2>Default parameters</h2>
       <p>Values taken verbatim from the <code>params{}</code> block of <code>nextflow.config</code>, which is the
         only place a default may be declared — a test forbids a second declaration anywhere else. Selected from
-        the <b>75</b> parameters that block declares; the full surface is in the documentation.</p></div>
+        the <b>92</b> parameters that block declares; the full surface is in the documentation.</p></div>
     <div class="pgrid">
       <div class="pcol">
         <h4>Workflow &amp; channels</h4>
@@ -814,7 +816,7 @@
           <tr><td class="k">expanded_quantification</td><td class="v">false</td><td class="d">opt in to +Mean/Sum on top of Median</td></tr>
           <tr><td class="k">simplify_tolerance</td><td class="v">1.0</td><td class="d">contour simplification (px)</td></tr>
           <tr><td class="k">geojson_coord_precision</td><td class="v">2</td><td class="d">coordinate decimals</td></tr>
-          <tr><td class="k">pixel_size</td><td class="v nul">null</td><td class="d">µm/px — REQUIRED, or 'auto'</td></tr>
+          <tr><td class="k">pixel_size</td><td class="v">'auto'</td><td class="d">µm/px — a positive number, or 'auto'; null is rejected</td></tr>
         </table>
         <h4>SpatialData</h4>
         <table class="pr">
@@ -846,7 +848,8 @@
     writing a resumable checkpoint. <b>(c)</b> Preprocessing standardizes and illumination-corrects images;
     registration aligns each moving slide to the reference through one of two interchangeable backends behind a
     single adapter seam — VALIS or the JVM-free tiled/STARE backend —
-    with staged registration QC on by default and micro-registration at maximum depth; segmentation
+    with staged registration QC on by default and micro-registration at micro-rigid depth
+    (<code>reg_micro_reg=1</code> of <code>0 | 1 | 2</code>); segmentation
     detects every cell on the reference and extracts morphology and contours once per mask; postprocessing
     quantifies each marker per compartment and exports. <b>(d)</b> The three
     segmentation backends compared on what they read, how the whole-cell mask is produced, what each requires
