@@ -35,7 +35,7 @@ shared preprocessing run**. No arm axis touches a `preproc_*` param, so running
 preprocessing nine times would repeat the expensive half of a real-WSI run to
 vary something it does not affect — the same factoring the segmentation arms use.
 Segmentation and export are not run either: nothing downstream of registration
-changes the staged registration QC. **9 arms**:
+changes the staged registration QC. **7 arms**:
 
 - **VALIS preset × micro-depth = 6.** `memory_mode` (`low` = BRISK/RANSAC,
   `high` = SuperPoint/SuperGlue — *different feature matchers*, not one matcher at
@@ -44,21 +44,27 @@ changes the staged registration QC. **9 arms**:
 - **STARE (`registration_method = tiled`) at defaults = 1.** A different
   *backend*, not a seventh cell: `memory_mode` and `reg_micro_reg` do not exist
   there, so that arm carries neither.
-- **ASHLAR (`registration_method = ashlar`) × tile size = 2.** The external
-  baseline (labsyspharm), a third *backend*, so it carries neither VALIS-only
-  param either. It fans out over `reg_ashlar_tile` because grid granularity is a
-  **fairness** knob, not a cost one: ASHLAR takes one independent shift per tile,
-  so a finer grid buys it more local freedom — the direct analogue of STARE's
-  `reg_tiled_tile`, which the synthetic sweep varies over `[1024, 2048, 4096]`.
-  `[1024, 4096]` brackets that range at both ends.
+ASHLAR is no longer one of these arms, and that is not a downgrade of its role.
+It was **× tile size = 2** here while it was a third `registration_method`;
+`v1.0.0` removed that backend (`registration_method` is now `valis | tiled`), so
+an arm here would be rejected at launch. It remains the ranking's **external
+baseline** — driven directly by `benchmarks/ashlar/` and scored by
+`benchmarks/stare_bench/cli.py` with `method="ashlar"`, configured under
+`external_baseline:` in `arms.yaml`. Comparing against an external tool should
+not require the pipeline to adopt it as a backend, so this split is the right
+one independently of why it happened.
 
-  ASHLAR is in this ranking at all only because `bin/ashlar_solve.py` rewrites
-  its per-tile placements into the same `M0` + mesh manifest STARE emits, so the
-  method-agnostic seg-overlap scorer reads it unchanged. Scored any other way it
-  would land in a different metric family that shares no column with this table.
-  **Read it against VALIS's `rigid` stage** for the like-for-like number and
-  against `micro` to quantify what non-rigid buys: ASHLAR attempts no non-rigid
-  warp at all, so reporting only the second overstates VALIS's advantage.
+ASHLAR is comparable at all only because `benchmarks/ashlar/solve.py` rewrites
+its per-tile placements into the same `M0` + mesh manifest STARE emits, so the
+method-agnostic seg-overlap scorer reads it unchanged. Scored any other way it
+would land in a different metric family that shares no column with this table.
+Its `tile_size` stays a **fairness** knob, not a cost one — ASHLAR takes one
+independent shift per tile, so a finer grid buys it more local freedom, the
+direct analogue of STARE's `reg_tiled_tile`, which the synthetic sweep varies
+over `[1024, 2048, 4096]`; `[1024, 4096]` brackets that range at both ends.
+**Read it against VALIS's `rigid` stage** for the like-for-like number and
+against `micro` to quantify what non-rigid buys: ASHLAR attempts no non-rigid
+warp at all, so reporting only the second overstates VALIS's advantage.
 
 ### 2. QC-segmenter cross — *does the verdict depend on who found the nuclei?*
 
@@ -69,7 +75,10 @@ measured on. Varying it leaves the registration byte-identical, which makes this
 registration. The same category `seg_qc_pairing` occupies in the synthetic sweep.
 
 `cross: reference` (the default) runs the extra segmenters against one arm:
-**11 registration runs**. `cross: all` crosses all nine and costs **27**. Start at
+**9 registration runs** (7 arms + 2 extra segmenters on the reference arm).
+`cross: all` crosses all seven and costs **21**. These were 11 and 27 while
+ASHLAR was a backend arm; `arms.yaml`'s cost gate and
+`test_cross_all_crosses_every_arm` carry the same two numbers. Start at
 `reference` — if the number is stable there, crossing everything buys a denser
 null result.
 

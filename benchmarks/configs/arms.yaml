@@ -82,69 +82,15 @@ registration_arms:
   tiled:
     enabled: true                          # 1 arm
 
-    # COARSE front-end (reg_tiled_frontend, bin/utils/coarse_align.py). orb is today's
-    # default; sift and fourier_mellin cost NO new dependency -- both already ship in
-    # scikit-image -- so they bracket the learned matcher and keep the comparison honest
-    # about what torch actually buys.
-    #
-    # disk_lightglue is the fourth front-end and belongs in this ranking, but not yet:
-    #   - it needs the separate stare-ml container (torch + kornia) and must be run with
-    #     `-profile stare_ml`, so it cannot share this arm's plain execution profile;
-    #   - that image is not published -- containers/build-images.yml only pushes on
-    #     release:published / workflow_dispatch, so until someone runs
-    #     `gh workflow run build-images.yml -f version=1.0.0 -f only=stare-ml`, `-profile
-    #     stare_ml` fails on image pull (the same trap :tiled shipped into once already);
-    #   - its matching body still raises NotImplementedError
-    #     (bin/utils/coarse_align.py::_frontend_disk_lightglue), so even with the image
-    #     pulled it cannot succeed today.
-    # Listing it here would produce a failed cell that conf/modules.config's
-    # errorStrategy 'ignore' branch can drop without failing the run -- a gap that looks
-    # like data. Add it as a fourth value once the matching body lands and the stare-ml
-    # image is published; until then this stays real WSI compute nobody should spend on a
-    # guaranteed failure.
-    frontend: [orb, sift, fourier_mellin]  # declared axis; not yet expanded into
-                                           # per-frontend arms by build_arm_plan.py
-                                           # (still emits one tiled_defaults arm) --
-                                           # wiring the fan-out is follow-on work.
+    # THE COARSE FRONT-END AXIS IS GONE. It declared [orb, sift, fourier_mellin] and
+    # deferred disk_lightglue on three grounds -- a separate unpublished stare-ml image, a
+    # plain-profile mismatch, and a matching body that still raised NotImplementedError.
+    # Every one of those has inverted: :fire: 5f7f986 deleted the three classical front-ends
+    # and the reg_tiled_frontend param, and :package: 0f4c649 folded torch+kornia and the
+    # DISK/LightGlue weights into the :tiled image (containers/stare-ml/ is deleted). COARSE
+    # is unconditionally DISK+LightGlue now, so the axis has one value, which is not an axis.
+    # It was never expanded into per-arm fan-out, so this removes no arm: tiled is still 1.
 
-  # ASHLAR — the EXTERNAL baseline (labsyspharm), the field-standard cyclic-IF
-  # registrar. A third BACKEND again, so like `tiled` it carries neither
-  # memory_mode nor reg_micro_reg and shows NA for both in arms.csv.
-  #
-  # It is in this ranking at all only because bin/ashlar_solve.py rewrites
-  # ashlar's per-tile placements into the same M0 + mesh manifest STARE emits,
-  # so the method-agnostic seg-overlap scorer reads it unchanged. Scored any
-  # other way — e.g. through the ORB CLI — it would produce numbers in a
-  # different metric family that share no column with this table, which is
-  # exactly what the earlier out-of-band harness did.
-  #
-  # TILE SIZE IS A FAIRNESS KNOB, NOT A COST KNOB, which is why it is a LIST.
-  # ashlar computes one independent shift per tile, so a finer grid buys it more
-  # local (still piecewise-translational) freedom — the direct analogue of
-  # STARE's reg_tiled_tile, swept at [1024, 2048, 4096] in sweep.yaml. Comparing
-  # ashlar at a fine grid against STARE at a coarse one silently biases the
-  # result, so these two values bracket STARE's swept range at both ends.
-  #
-  # READ THE ARM AGAINST VALIS'S *RIGID* STAGE for the like-for-like number, and
-  # against *micro* to quantify what non-rigid buys: ashlar attempts no non-rigid
-  # warp at all, so reporting only the second overstates VALIS's advantage.
-  # DISABLED 2026-08-31: dev removed the ashlar backend outright
-  # (:fire: 6a54479 "Remove the ashlar registration backend; v1.0.0 ships valis
-  # and tiled"). registration_method's schema enum is now ['valis', 'tiled'],
-  # bin/ashlar_{retile,solve}.py and modules/local/ashlar_*.nf are gone, and the
-  # reg_ashlar_* params below name nothing in nextflow.config. Left DISABLED
-  # rather than deleted because the rationale above is the expensive part and the
-  # backend still lives on feat/ashlar-arm: if it returns to the pipeline, flip
-  # this back to true and the arm is whole. While it is false, build_arm_plan.py
-  # emits no ashlar arms, so nothing below reaches the schema.
-  ashlar:
-    enabled: false
-    tile_size: [1024, 4096]                # 2 arms
-    overlap_fraction: 0.1
-    maximum_shift_um: 30                   # MICRONS, and it fails SILENTLY when too small:
-                                           # LayerAligner replaces an out-of-range tile with a
-                                           # model prediction instead of erroring. Must exceed
-                                           # the real cross-cycle drift for your cohort.
 
 # -----------------------------------------------------------------------------
 # QC-SEGMENTER CROSS — does the registration verdict depend on WHO found the nuclei?
@@ -218,3 +164,47 @@ compute_profile:
   repeats: 1                   # >1 buys per-process variance (cache state, node
                                # contention) at full real-slide cost. Leave at 1
                                # unless a specific number looks unstable.
+
+# -----------------------------------------------------------------------------
+# ASHLAR — THE EXTERNAL BASELINE. Deliberately NOT under registration_arms.
+#
+# ashlar (labsyspharm) is the field-standard cyclic-IF registrar and this ranking's only
+# EXTERNAL comparator. It is NOT a Mirage registration backend: :fire: 6a54479 removed that
+# for v1.0.0 ("ships valis and tiled"), the schema enum is ['valis', 'tiled'], and
+# tests/test_ashlar_backend_removed.py keeps it out. So it cannot be an arm in
+# registration_arms above -- run_arms.sh would emit --registration_method ashlar and the
+# pipeline would reject it at launch.
+#
+# It is instead driven directly by benchmarks/ashlar/ (retile.py + solve.py, relocated from
+# bin/ when the backend was removed) and scored by benchmarks/stare_bench/cli.py with
+# method="ashlar". That split is the right one on its own merits: comparing against an
+# external tool should not require the pipeline to ADOPT the external tool.
+#
+# WHY IT IS COMPARABLE AT ALL: solve.py rewrites ashlar's per-tile placements into the same
+# M0 + mesh manifest STARE emits, so the method-agnostic scorer reads it unchanged. Scored
+# any other way it would produce numbers in a different metric family that share no column
+# with this table -- which is exactly what the earlier out-of-band ashlar harness did, and
+# why that harness was deleted rather than maintained.
+#
+# TILE SIZE IS A FAIRNESS KNOB, NOT A COST KNOB, which is why it is a LIST. ashlar computes
+# one independent shift per tile, so a finer grid buys it more local (still piecewise-
+# translational) freedom -- the direct analogue of STARE's reg_tiled_tile, swept at
+# [1024, 2048, 4096] in sweep.yaml. Comparing ashlar at a fine grid against STARE at a coarse
+# one silently biases the result, so these two values bracket STARE's swept range at both ends.
+#
+# READ IT AGAINST VALIS'S *RIGID* STAGE for the like-for-like number, and against *micro* to
+# quantify what non-rigid buys: ashlar attempts no non-rigid warp at all, so reporting only
+# the second overstates VALIS's advantage.
+#
+# It has no *_ctrl.json and no STARE gate, so it carries no gate-ROC columns; score_pair
+# REFUSES controls passed with method != "tiled" rather than reporting STARE's confusion
+# matrix under another backend's label.
+external_baseline:
+  ashlar:
+    enabled: true
+    tile_size: [1024, 4096]                # the fairness knob against reg_tiled_tile
+    overlap_fraction: 0.1
+    maximum_shift_um: 30                   # MICRONS, and it fails SILENTLY when too small:
+                                           # LayerAligner replaces an out-of-range tile with a
+                                           # model prediction instead of erroring. Must exceed
+                                           # the real cross-cycle drift for your cohort.

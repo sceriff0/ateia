@@ -166,11 +166,17 @@ PY
 # lib/Layout.groovy owns (patientDir(outdir, patient, kind) ->
 # <outdir>/<patient>/<kind>) and conf/modules.config's publishDir rules.
 #
-#   tiled / ashlar: TILED_SOLVE and ASHLAR_SOLVE both publish the M0 + mesh
-#     manifest to <outdir>/<patient>/registered/manifest/*_manifest.json
-#     (conf/modules.config's withName: 'TILED_SOLVE' / 'ASHLAR_SOLVE' blocks;
-#     bin/ashlar_solve.py deliberately rewrites ashlar's placements into the
-#     same manifest shape STARE emits, so one glob covers both backends).
+#   tiled: TILED_SOLVE publishes the M0 + mesh manifest to
+#     <outdir>/<patient>/registered/manifest/*_manifest.json (conf/modules.config's
+#     withName: 'TILED_SOLVE' block).
+#
+#   ashlar: NOT FROM A PIPELINE RUN. ashlar stopped being a registration backend at
+#     :fire: 6a54479, so there is no ASHLAR_SOLVE process and no published tree to
+#     glob. benchmarks/ashlar/solve.py drives it directly and writes the SAME manifest
+#     shape STARE emits -- which is why the glob below still covers both, and why the
+#     single predict_from_manifest reads both. The ashlar leg of this script must
+#     therefore point find_transform at that driver's output directory, NOT at an
+#     <outdir> the pipeline never wrote. See external_baseline: in arms.yaml.
 #
 #   valis: REGISTER's registrar pickle IS published, as of the third
 #     publishDir block in conf/modules.config's withName: 'REGISTER' -- it

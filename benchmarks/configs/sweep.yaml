@@ -141,25 +141,13 @@ baseline:
   reg_tiled_max_error: 0.99           # CONFIDENCE gate (phase-correlation error), pipeline default
   reg_tiled_max_disp: null            # RANGE gate; null = fall back to reg_tiled_halo
   # --- registration (ASHLAR) ---
-  # DECLARED ONLY. There is deliberately NO registration_method_grid.ashlar: the ASHLAR
-  # backend is a comparison baseline for the REAL slides (benchmarks/configs/arms.yaml),
-  # not a configuration this project ships or needs a cost model for. Sweeping it would
-  # buy scaling curves for a backend nobody will run in production, at the cost of a
-  # whole extra method grid.
-  #
-  # They are declared here anyway for the reason reg_tiled_max_error is: every run must
-  # RECORD the value it used, and test_project_sweep_all_configs_share_columns requires
-  # every config to carry the same columns. Values must equal the nextflow.config defaults
-  # exactly -- test_project_sweep_baseline_matches_pipeline_defaults checks that.
-  #
-  # If you ever DO want the ashlar granularity curve, the fair form is a
-  # registration_method_grid.ashlar with reg_ashlar_tile mirroring
-  # registration_method_grid.tiled's reg_tiled_tile [1024, 2048, 4096] -- comparing a swept
-  # ashlar against a fixed STARE would be the same unfairness the STARE-vs-VALIS resolution
-  # axis already guards against.
-  reg_ashlar_tile: 1024               # grid granularity (px); ashlar's fairness knob vs reg_tiled_tile
-  reg_ashlar_overlap: 0.1             # synthesized tile overlap fraction
-  reg_ashlar_max_shift_um: 30         # per-tile shift budget in MICRONS; too small degrades SILENTLY
+  # THE reg_ashlar_* BASELINE ENTRIES ARE GONE, with the backend. :fire: 6a54479 removed
+  # ashlar from the pipeline for v1.0.0, so reg_ashlar_tile / _overlap / _max_shift_um name
+  # nothing in nextflow.config and test_project_sweep_baseline_matches_pipeline_defaults
+  # rejects them. The long fairness argument that lived here -- that ashlar's per-tile
+  # granularity has to bracket STARE's reg_tiled_tile or the comparison is silently biased --
+  # was never about this sweep, which declared no registration_method_grid.ashlar anyway.
+  # It now lives where the comparator does: benchmarks/ashlar/ and arms.yaml's ashlar block.
   # --- preprocessing (BaSiC illumination correction) ---
   # The pipeline exposes exactly THREE preprocessing knobs. BaSiC's own defaults stand in for
   # everything else (darkfield estimation on, no autotune, non-overlapping FOVs) and PREPROCESS's

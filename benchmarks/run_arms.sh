@@ -181,12 +181,10 @@ run_pass() {
     add_param registration_method  "$(col_val registration_method "${vals[@]}")"
     add_param memory_mode          "$(col_val memory_mode "${vals[@]}")"
     add_param reg_micro_reg        "$(col_val reg_micro_reg "${vals[@]}")"
-    # ashlar-only, blank on every other arm — the same add_param blank-guard that keeps a
-    # STARE arm from receiving --memory_mode "" keeps a VALIS arm from receiving
-    # --reg_ashlar_tile "".
-    add_param reg_ashlar_tile         "$(col_val reg_ashlar_tile "${vals[@]}")"
-    add_param reg_ashlar_overlap      "$(col_val reg_ashlar_overlap "${vals[@]}")"
-    add_param reg_ashlar_max_shift_um "$(col_val reg_ashlar_max_shift_um "${vals[@]}")"
+    # THE THREE reg_ashlar_* FLAGS ARE GONE. ashlar stopped being a pipeline backend at
+    # :fire: 6a54479, so nextflow.config declares none of them and the schema would reject
+    # all three. The external ashlar baseline is now driven by benchmarks/ashlar/ instead of
+    # through this launcher; see the long note in build_arm_plan.py::_registration_arms.
 
     local in_csv="$INPUT"
     if [[ -n "$from_arm" ]]; then

@@ -204,7 +204,7 @@ def score_pair(pair_dir, work_dir, *, method, run_id, tile, halo, upsample,
 
     ``transform_path`` is the ALREADY-PRODUCED transform from a real pipeline
     run -- a STARE/ASHLAR manifest JSON for ``method in ("tiled", "ashlar")``
-    (``bin/ashlar_solve.py`` deliberately rewrites ashlar's per-tile
+    (``benchmarks/ashlar/solve.py`` deliberately rewrites ashlar's per-tile
     placements into STARE's own manifest format so one loader reads both), or
     a VALIS registrar pickle for ``method == "valis"``. ``method ==
     "identity"`` needs no ``transform_path`` at all: it is the do-nothing

@@ -29,21 +29,14 @@ from pathlib import Path
 # Writing memory_mode=high on a STARE arm would invent a value the run never had.
 VALIS_ONLY = ("memory_mode", "reg_micro_reg")
 
-# The mirror of VALIS_ONLY for the ashlar backend. Same rule, same reason: a non-ashlar arm
-# must carry these BLANK so the consumer can tell "not applicable" from "at default", and so
-# the launcher never passes a param the run has no use for.
-ASHLAR_ONLY = ("reg_ashlar_tile", "reg_ashlar_overlap", "reg_ashlar_max_shift_um")
+# ASHLAR_ONLY = ("reg_ashlar_tile", "reg_ashlar_overlap", "reg_ashlar_max_shift_um") is GONE
+# with the arm. Those three are not pipeline params any more -- nextflow.config declares none
+# of them -- so emitting the columns at all, even blank, would put three names in arms.csv
+# that the schema rejects the moment run_arms.sh stopped skipping empties.
 
 
 def valis_arm_name(memory_mode: str, micro: int) -> str:
     return f"valis_{memory_mode}_micro{micro}"
-
-
-def ashlar_arm_name(tile: int) -> str:
-    # The tile size is IN the name, not only in arms.csv. registration_arms.R falls back to
-    # parsing the directory name when the manifest is missing, and two ashlar arms that
-    # differed only by a column it failed to read would render as one duplicated box.
-    return f"ashlar_tile{tile}"
 
 
 def _registration_arms(cfg: dict) -> list[dict]:
@@ -62,23 +55,21 @@ def _registration_arms(cfg: dict) -> list[dict]:
                 "label": f"{mm} / micro {micro}",
             })
 
-    # ASHLAR: a third backend, so like tiled it carries neither VALIS-only param. It fans out
-    # over tile_size because that is ashlar's fairness knob against STARE's reg_tiled_tile --
-    # ashlar takes one independent shift per tile, so grid granularity changes how much local
-    # freedom it has, not just what it costs.
-    ashlar = ra.get("ashlar") or {}
-    if ashlar.get("enabled"):
-        for tile in ashlar.get("tile_size", []):
-            arms.append({
-                "arm": ashlar_arm_name(tile),
-                "backend": "ashlar",
-                "memory_mode": "",
-                "reg_micro_reg": "",
-                "reg_ashlar_tile": tile,
-                "reg_ashlar_overlap": ashlar.get("overlap_fraction", ""),
-                "reg_ashlar_max_shift_um": ashlar.get("maximum_shift_um", ""),
-                "label": f"ashlar (tile {tile})",
-            })
+    # ASHLAR IS NOT AN ARM HERE, AND CANNOT BE. This plan drives the real pipeline
+    # (run_arms.sh passes each row's columns as --flags), and ashlar is no longer a
+    # pipeline backend: :fire: 6a54479 removed it for v1.0.0, registration_method's
+    # schema enum is ['valis', 'tiled'], and tests/test_ashlar_backend_removed.py keeps
+    # it out. An arm here would emit --registration_method ashlar and be rejected at
+    # launch, plus three reg_ashlar_* flags that name nothing in nextflow.config.
+    #
+    # ASHLAR REMAINS THE BENCHMARK'S EXTERNAL BASELINE -- it just isn't reached through
+    # the pipeline any more. benchmarks/ashlar/ drives it directly and rewrites its
+    # per-tile placements into the same M0 + mesh manifest STARE emits, so the
+    # method-agnostic scorer (stare_bench/cli.py, method="ashlar") ranks it against
+    # VALIS and STARE unchanged. The tile_size fairness argument that used to justify
+    # the fan-out here still holds; it now applies to that driver's own --tile-size.
+    #
+    # Guarded by test_no_ashlar_arms_reach_the_pipeline_plan below.
 
     tiled = ra.get("tiled") or {}
     if tiled.get("enabled"):
@@ -204,10 +195,6 @@ def build_arm_plan(cfg: dict) -> list[dict]:
             "registration_method": a["backend"],
             **{k: a[k] for k in ("arm", "backend", "memory_mode",
                                  "reg_micro_reg", "seg_method")},
-            # Blank on every non-ashlar arm, exactly as memory_mode/reg_micro_reg are blank
-            # on non-VALIS arms: run_arms.sh's add_param skips an empty value, so a VALIS arm
-            # never receives --reg_ashlar_tile "" (which schema validation would reject).
-            **{k: a.get(k, "") for k in ASHLAR_ONLY},
             "reg_qc": 2,
         })
         n += 1
