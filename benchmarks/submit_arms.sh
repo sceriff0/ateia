@@ -41,12 +41,12 @@
 # ============================================================================
 
 # ---- EDIT THESE FOR YOUR SITE --------------------------------------------------
-BENCH_DIR="/beegfs/scratch/ieo7660/analysis_runs/method_paper/benchmark"
-SRC_DIR="$HOME/pipelines/mirage"          # the checkout. NOTE: unquoted $HOME, never "~/..."
-INPUT="/beegfs/scratch/ieo7660/analysis_runs/method_paper/new_samples/input.csv"
-RESULTS="$BENCH_DIR/arm_results"          # every arm's outdir + work dir lands under here
+BENCH_DIR="${BENCH_DIR:-/beegfs/scratch/ieo7660/analysis_runs/method_paper/benchmark}"
+SRC_DIR="${SRC_DIR:-$HOME/pipelines/mirage}"   # the checkout. NOTE: unquoted $HOME, never "~/..."
+INPUT="${INPUT:-/beegfs/scratch/ieo7660/analysis_runs/method_paper/new_samples/input.csv}"
+RESULTS="${RESULTS:-$BENCH_DIR/arm_results}"   # every arm's outdir + work dir lands under here
 ARMS_YAML="$SRC_DIR/benchmarks/configs/arms.yaml"
-PROFILES="singularity,ieo"                # OVERRIDES run_arms.sh's default -profile docker
+PROFILES="${PROFILES:-singularity,ieo}"        # OVERRIDES run_arms.sh's default -profile docker
 SITE_CONFIG="$SRC_DIR/conf/ieo.config"    # gitignored: executor=slurm + cacheDir + paths
 CONDA_ENV="nf-env"
 CONCURRENCY="${ARMS_CONCURRENCY:-4}"      # arms launched AT ONCE. Each is one Nextflow head.

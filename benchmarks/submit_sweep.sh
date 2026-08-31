@@ -41,12 +41,12 @@
 # ============================================================================
 
 # ---- EDIT THESE FOR YOUR SITE --------------------------------------------------
-BENCH_DIR="/beegfs/scratch/ieo7660/analysis_runs/method_paper/benchmark"
-SRC_DIR="$HOME/pipelines/mirage"          # the checkout. NOTE: unquoted $HOME, never "~/..."
-MATRIX_DIR="$BENCH_DIR/bench_matrix"      # from generate_matrix --outdir (BIG -- see the note below)
+BENCH_DIR="${BENCH_DIR:-/beegfs/scratch/ieo7660/analysis_runs/method_paper/benchmark}"
+SRC_DIR="${SRC_DIR:-$HOME/pipelines/mirage}"   # the checkout. NOTE: unquoted $HOME, never "~/..."
+MATRIX_DIR="${MATRIX_DIR:-$BENCH_DIR/bench_matrix}"  # from generate_matrix --outdir (BIG -- see below)
 RUN_PLAN="$BENCH_DIR/bench_run_plan.csv"  # written by this script (step 1 below)
-RESULTS="$BENCH_DIR/bench_results"        # per-run outputs + work dirs land here
-PROFILES="singularity,ieo"                # OVERRIDES run_sweep.sh's default -profile docker
+RESULTS="${RESULTS:-$BENCH_DIR/bench_results}"  # per-run outputs + work dirs land here
+PROFILES="${PROFILES:-singularity,ieo}"        # OVERRIDES run_sweep.sh's default -profile docker
 SITE_CONFIG="$SRC_DIR/conf/ieo.config"    # gitignored: executor=slurm + singularity cacheDir + paths
 CONDA_ENV="nf-env"                        # env that has nextflow + python
 REPEATS="${SWEEP_REPEATS:-3}"             # replicate runs per config. 135 configs -> 405 runs at 3,
