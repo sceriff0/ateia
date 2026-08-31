@@ -284,8 +284,10 @@ ALLOWED_LINES = {
         # exactly two production backends (valis, tiled). -56 above this line: the whole
         # ASHLAR section of conf/modules.config -- its banner comment plus the
         # ASHLAR_RETILE, ASHLAR_SOLVE and ASHLAR_STITCH withName blocks and the blank line
-        # closing the section. That is the exact inverse of the 1064 -> 1103 entry above,
-        # whose +54/-15 it now unwinds. Composition check: 1307 - 56 = 1251, and
+        # closing the section. This reverses the +54 half of the 1064 -> 1103 entry above
+        # (the section had since grown to 56 lines); the -15 half -- deleting the duplicate
+        # TILED_COARSE block -- stands, so this is NOT that entry's inverse and chaining
+        # off one would give 1305. Composition check: 1307 - 56 = 1251, and
         # `wc -l conf/modules.config` fell 1394 -> 1338, the same 56. Re-pinned directly
         # from the file, not computed:
         #   grep -n "params.expanded_quantification ?" conf/modules.config  ->  1251

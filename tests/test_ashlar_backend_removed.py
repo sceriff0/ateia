@@ -17,12 +17,18 @@ its own defect -- but only the first is a broken pipeline.
 Every check below whose passing answer is "zero" is paired with a positive assertion
 on the same input, so an empty or mis-rooted scan fails loudly instead of passing
 vacuously.
+
+NARROW IS NOT THE SAME AS BLIND. The file/enum/params checks alone all stayed green
+against a MEASURED break -- restoring both `choices=[..., "ashlar"]` and
+`if a.method in ("tiled", "ashlar")` in bin/warp_seg_qc.py -- so the two live surfaces
+that break reaches, the warp CLI and conf/modules.config's withName selectors, get
+their own assertions below.
 """
 
 import json
 from pathlib import Path
 
-from tests.nfmodel import strip_comments
+from tests.nfmodel import strip_comments, with_name_blocks
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -100,3 +106,48 @@ def test_no_reg_ashlar_params_remain():
     schema_text = (REPO / "nextflow_schema.json").read_text()
     assert "reg_tiled_tile" in schema_text, "nextflow_schema.json read back empty or wrong"
     assert "reg_ashlar_" not in schema_text, "reg_ashlar_* still in the schema"
+
+
+def test_the_warp_dispatch_surface_names_only_two_backends():
+    """`bin/warp_seg_qc.py --method` is the backend's other live entry point.
+
+    The three checks above all stay GREEN if someone restores
+    `choices=["valis", "tiled", "ashlar"]` together with
+    `if a.method in ("tiled", "ashlar")`. That is measured, not assumed: the pair was
+    re-applied to this tree and this module reported `3 passed` before this test
+    existed. A partial re-introduction of the CLI surface is the most plausible way the
+    backend creeps back, so it gets an assertion of its own.
+
+    Flat rather than model-based, deliberately: this is a Python script, not Nextflow
+    source, and the name must be gone from the argparse choices, the help text and the
+    dispatch comment alike. Every blind spot a smarter parse could have would make this
+    MISS a hit, never accept one.
+    """
+    text = (REPO / "bin" / "warp_seg_qc.py").read_text()
+    assert '"--method"' in text and '"tiled"' in text, (
+        "bin/warp_seg_qc.py no longer carries a --method dispatch surface -- this test "
+        "is reading the wrong file, so its 'no ashlar' answer proves nothing"
+    )
+    assert "ashlar" not in text.lower(), (
+        "bin/warp_seg_qc.py still names the ashlar backend on its --method surface "
+        "(argparse choices, help text or the tiled/valis dispatch)"
+    )
+
+
+def test_no_ashlar_withname_selector_survives_in_conf_modules_config():
+    """No `withName:` block may select a process the ashlar backend owned.
+
+    Queried through `tests.nfmodel.with_name_blocks`, which filters out a `withName:`
+    that appears only inside a comment -- so this asserts on LIVE selectors, not on the
+    word. ASHLAR_STITCH was an include ALIAS of TILED_STITCH declared once, in the
+    deleted adapter; a surviving selector for it would configure a process no include
+    creates, which Nextflow accepts silently.
+    """
+    names = sorted({n.strip() for b in with_name_blocks() for n in b.names})
+    assert "TILED_STITCH" in names, (
+        f"with_name_blocks() did not find TILED_STITCH -- it returned {len(names)} "
+        "selectors, so the scan is empty or pointed at the wrong file and the absence "
+        "check below proves nothing"
+    )
+    offenders = [n for n in names if n.upper().startswith("ASHLAR")]
+    assert not offenders, f"ashlar withName: selector(s) still in conf/modules.config: {offenders}"

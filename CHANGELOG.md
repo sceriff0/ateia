@@ -35,9 +35,10 @@ after that doc and is detailed inline below:
 6. **Two invocations that used to be accepted now fail at launch** —
    `--seg_instantseg_target cells|nuclei` (they produce one mask, which was
    silently replicated into both outputs and zeroed every cytoplasmic
-   measurement), and an OME header whose `PhysicalSizeXUnit` the ASHLAR retiler
-   does not recognise (a recognised non-µm unit is now converted rather than read
-   as µm — an `nm` header was a 1000× scale error).
+   measurement), and an OME header whose `PhysicalSizeXUnit` `PREFLIGHT_SCALE`
+   does not recognise, which under the `'auto'` default (item 7) hard-fails before
+   any heavy work is staged (a recognised non-µm unit is now converted rather than
+   read as µm — an `nm` header was a 1000× scale error).
 7. **`pixel_size` now defaults to `'auto'`** — it was `null`, and `ParamUtils`
    forced the operator to assert a scale before a run could start at all. `'auto'`
    reads each image's own OME `PhysicalSizeX`, so a run that previously refused to
@@ -727,11 +728,6 @@ after that doc and is detailed inline below:
   `bin/warp_seg_qc.py --method`, plus 6 test files. `--registration_method ashlar` is now
   refused by the schema at launch. There is nothing to migrate for a `valis` or `tiled`
   run; a script pinning `ashlar` must move to the `benchmarking` branch.
-
-  One knock-on worth naming: the migration note above attributes the unrecognised-unit
-  launch failure to "the ASHLAR retiler". That component is gone, but the behaviour is
-  not — `PREFLIGHT_SCALE` now owns it and hard-fails on OME metadata `--pixel_size auto`
-  cannot interpret, so the operator-visible outcome is unchanged.
 - **Automated panel-agnostic phenotyping is extracted off this branch, and preserved
   intact on `feat/automated-phenotyping` (at `56a3a46`).** It is work in progress and
   is parked there rather than deleted. Gone from here: `COMPILE_PANEL` and `PHENOTYPE`
