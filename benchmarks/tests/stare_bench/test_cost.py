@@ -27,8 +27,25 @@ def test_measure_reports_subprocess_children_not_just_self():
     # registration work in subprocesses via subprocess.run. RUSAGE_SELF alone
     # sees only the calling orchestrator and would report the footprint of a
     # process that does nothing but spawn children -- wrong in the most
-    # convincing direction: too small. A modest (~300 MB) child allocation
-    # must move peak_rss_gb materially above a no-child baseline.
+    # convincing direction: too small. A child allocation must move
+    # peak_rss_gb materially above a no-child baseline.
+    #
+    # THE CHILD ALLOCATES 1 GB, not the ~300 MB it used to. That margin was too
+    # thin to survive a different platform, and this test had never actually run
+    # in CI to prove otherwise -- the job died during collection from 2026-08-26
+    # until the dependency fix, so its first real execution FAILED at
+    # peak=0.3117 vs baseline=0.1748, a 0.137 delta against a 0.2 threshold.
+    #
+    # Nothing was wrong with measure(): the child WAS counted (0.31 > 0.17). The
+    # arithmetic was just marginal. The parent's own baseline is ~179 MB because
+    # cost.py imports pandas, while a 300 MB child totals only ~319 MB -- so the
+    # delta is the difference of two similar numbers, and which one wins depends
+    # on interpreter and library footprints that differ per platform.
+    #
+    # Raising the allocation makes the signal dominate that noise instead of
+    # competing with it, and STRENGTHENS the assertion: a 1 GB child that failed
+    # to register would now show a delta near zero rather than merely a small
+    # one. The threshold goes up with it, so this is not a loosened test.
     #
     # ru_maxrss (RUSAGE_SELF and RUSAGE_CHILDREN alike) is a LIFETIME
     # high-water mark that never resets within a process. Comparing a
@@ -55,7 +72,7 @@ def test_measure_reports_subprocess_children_not_just_self():
                 [
                     sys.executable,
                     "-c",
-                    "import numpy as np; a = np.ones(300_000_000 // 8); "
+                    "import numpy as np; a = np.ones(1_000_000_000 // 8); "
                     "print(a.sum())",
                 ],
                 check=True,
@@ -75,7 +92,7 @@ def test_measure_reports_subprocess_children_not_just_self():
         timeout=60,
     )
     result = json.loads(proc.stdout.strip().splitlines()[-1])
-    assert result["peak"] > result["baseline"] + 0.2
+    assert result["peak"] > result["baseline"] + 0.5, result
 
 
 def test_from_trace_aggregates_the_nextflow_columns():

@@ -10,10 +10,19 @@ never started. It stayed that way for five days.
 This is the CI-side twin of tests/test_fixtures_have_a_producer.py: a test can only run
 where the thing it needs exists. That guard covers fixtures; this one covers imports.
 
-SCOPE. Only TOP-LEVEL imports are checked -- an import inside a function is a deliberate
-optional dependency (bin/utils/coarse_align.py's torch/kornia block is the pattern), and
-those are allowed to be absent. Only benchmarks/ is scanned: the pipeline's own deps are
-ci.yml's problem and tests/test_ci_stack_pinned.py's.
+TWO LEGS, scanned differently, because they fail differently.
+
+  benchmarks/ itself -- TOP-LEVEL imports only. An import inside a function is a
+  deliberate optional dependency (bin/utils/coarse_align.py's torch/kornia block is the
+  pattern) and is allowed to be absent; a top-level one kills collection.
+
+  The SUBPROCESS leg -- bin/tiled_{coarse,reg_tile,solve}.py, which run_unit.py shells out
+  to, plus everything they import transitively inside bin/. Here EVERY import level counts,
+  because those scripts are EXECUTED: bin/utils/tiled_io.py imports zarr inside a function,
+  which no top-level scan can see, and it surfaced only as `tiled_coarse.py failed (1): No
+  module named 'zarr'` at runtime -- after collection succeeded, so the previous version of
+  this guard passed while CI still failed. The pipeline's own dependencies are part of this
+  job's contract precisely because the unit rung runs the pipeline's real entry points.
 """
 from __future__ import annotations
 
@@ -100,6 +109,84 @@ def _top_level_imports() -> dict[str, set[Path]]:
                 if m and not _is_first_party(m) and m not in sys.stdlib_module_names:
                     found.setdefault(m, set()).add(py.relative_to(REPO))
     return found
+
+
+def _bin_module_path(name: str) -> Path | None:
+    for d in (REPO / "bin", REPO / "bin" / "utils"):
+        cand = d / f"{name}.py"
+        if cand.exists():
+            return cand
+    return None
+
+
+def _subprocess_leg_imports() -> dict[str, set[str]]:
+    """Third-party modules reachable from the bin/ scripts the harness executes.
+
+    Transitive over bin/ first-party modules, and at EVERY import level -- see the module
+    docstring for why a top-level-only scan is not enough here.
+    """
+    entry = sorted(
+        set(re.findall(r'"(tiled_\w+\.py)"', (PKG / "stare_bench" / "run_unit.py").read_text()))
+    )
+    assert entry, "found no bin/*.py subprocess entry points in run_unit.py"
+    found: dict[str, set[str]] = {}
+    seen: set[str] = set()
+
+    def walk(mod: str) -> None:
+        if mod in seen:
+            return
+        seen.add(mod)
+        path = _bin_module_path(mod)
+        if path is None:
+            return
+        for node in ast.walk(ast.parse(path.read_text())):
+            if isinstance(node, ast.Import):
+                mods = [a.name.split(".")[0] for a in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                if node.level:
+                    continue
+                mods = [(node.module or "").split(".")[0]]
+            else:
+                continue
+            for m in mods:
+                if not m or m in sys.stdlib_module_names:
+                    continue
+                if _is_first_party(m):
+                    walk(m)
+                else:
+                    found.setdefault(m, set()).add(path.name)
+
+    for e in entry:
+        walk(e[:-3])
+    return found
+
+
+def test_benchmarks_yml_installs_what_the_subprocess_leg_needs():
+    """run_unit.py executes the pipeline's real bin/tiled_*.py, so their deps are ours."""
+    installed = _installed_distributions()
+    missing = []
+    for mod, files in sorted(_subprocess_leg_imports().items()):
+        dist = DIST_OF.get(mod, mod).lower()
+        if dist not in installed:
+            missing.append(f"{mod} (dist {dist}) -- imported by {', '.join(sorted(files))}")
+    assert not missing, (
+        "benchmarks.yml does not install module(s) the subprocess leg needs:\n  "
+        + "\n  ".join(missing)
+        + "\nThese surface at RUNTIME as `<script>.py failed (1): No module named ...`, "
+          "AFTER collection succeeds, so the collection-time guard above cannot catch them."
+    )
+
+
+def test_the_subprocess_scanner_reaches_through_bin_utils():
+    """Vacuity check: the walk must actually leave the entry scripts.
+
+    zarr is the canary -- it lives in bin/utils/tiled_io.py, two hops from tiled_coarse.py
+    and inside a function. If the scanner ever stops finding it, the guard above has
+    silently narrowed to the entry scripts' own top-level imports.
+    """
+    found = _subprocess_leg_imports()
+    assert "zarr" in found, sorted(found)
+    assert "torch" in found, sorted(found)
 
 
 def test_benchmarks_yml_installs_every_module_benchmarks_imports():

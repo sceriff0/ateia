@@ -37,13 +37,21 @@ jobs:
         # COLLECTION with exit 2 -- four ImportErrors, zero tests run -- which is
         # how this job failed on 2026-08-26 and 2026-08-27 while looking like an
         # ordinary red build. Versions match ci.yml's pins.
+        #
+        # zarr / numcodecs / imagecodecs are for the SUBPROCESS leg. run_unit.py shells
+        # out to bin/tiled_{coarse,reg_tile,solve}.py, and bin/utils/tiled_io.py imports
+        # zarr -- inside a function, so it is invisible to any top-level import scan, and
+        # it surfaced only as `tiled_coarse.py failed (1): No module named 'zarr'` at
+        # runtime. The pipeline's own deps are part of this job's contract precisely
+        # because the unit rung runs the pipeline's real entry points.
         run: |
           # Pinned to the SAME versions ci.yml pins (tests/test_ci_stack_pinned.py
           # enforces the `==` form): an unpinned imaging stack lets this job resolve
           # different numerics than the production containers.
           pip install numpy==1.26.4 scipy==1.15.3 scikit-image==0.25.2 \
                       tifffile==2025.5.10 pandas pyyaml pytest ruff \
-                      scikit-learn==1.5.2 matplotlib==3.8.4
+                      scikit-learn==1.5.2 matplotlib==3.8.4 \
+                      zarr==2.18.3 numcodecs==0.13.1 imagecodecs==2025.3.30
           pip install torch==2.3.1 --index-url https://download.pytorch.org/whl/cpu
           pip install kornia==0.7.3
       - name: Test
