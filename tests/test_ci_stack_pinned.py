@@ -31,16 +31,29 @@ hardcoded `ci.yml`. The hardcoded version of this guard passed green while
 `pip install pytest pytest-cov tifffile numpy pandas scikit-image` in its
 release gate. Do not reintroduce a filename list here.
 
-But glob scope is not the same as per-file scope, and the *presence* check
-below (`test_guarded_packages_appear_in_ci_workflow`) asks only whether a
-package appears SOMEWHERE across that glob — a union, which one workflow can
-satisfy on another's behalf. That masked a measured break: deleting both torch
-and kornia from `ci.yml` alone left `release.yml`'s copies standing and this
-whole file passed. `test_every_pytest_workflow_installs_the_importorskip_
-guarded_packages` closes it PER FILE, for the packages whose absence produces a
-silent skip rather than a loud ImportError. The workflow set it iterates is
-still discovered — by looking for a `pytest ... tests/` invocation — never
-named.
+But glob scope is not the same as per-file scope. The *presence* check used to
+be `test_guarded_packages_appear_in_ci_workflow`, which asked only whether a
+package appeared SOMEWHERE across that glob — a union, which one workflow can
+satisfy on another's behalf. That masked two measured breaks:
+
+  * deleting both torch and kornia from `ci.yml` alone left `release.yml`'s
+    copies standing and this whole file passed; and
+  * `.github/workflows/release.yml` ran the same `pytest -v tests/` gate while
+    installing neither `imagecodecs` nor `matplotlib`, because `ci.yml`
+    installed both and the union was satisfied. Measured in a venv built from
+    release.yml's exact install list: 13 failed / 1072 passed / 13 skipped,
+    against ci.yml's 1115 passed / 10 skipped.
+
+`test_every_pytest_workflow_installs_every_guarded_package` replaces it PER
+FILE, over the workflows that actually run the suite. Those are DISCOVERED —
+by looking for a `pytest ... tests/` invocation — never named, following
+`tests/test_disk_test_actually_runs.py`, which had the identical union defect
+fixed the same way.
+
+It subsumes the older, narrower `test_every_pytest_workflow_installs_the_
+importorskip_guarded_packages`, which checked only `IMPORTORSKIP_GUARDED` per
+file; that set survives as the annotation that tells a reader WHICH missing
+package fails loudly and which one silently deletes tests from the gate.
 
 Plain pytest, no pipeline-runtime imports, all paths derived from
 `__file__` per this repo's other guard tests (see test_layout.py,
@@ -103,6 +116,23 @@ GUARDED_PACKAGES = frozenset(
         # NON_TILED_AUTHORITY.
         "torch",
         "kornia",
+        # opencv, as the DISTRIBUTION name the workflows install -- the import name
+        # is `cv2`, which appears in no `pip install` line and so cannot be the key
+        # here. Headless deliberately: the runners have no display libs. Its
+        # authority is containers/regqc, which pins the non-headless build at the
+        # same version; see NON_TILED_AUTHORITY and
+        # test_ci_opencv_pin_matches_the_regqc_image.
+        #
+        # Added 2026-08-30. cv2 was the one silent-skip vector this file did not
+        # cover at all: tests/test_merge_pyramid_streaming.py:66 and
+        # tests/test_registration_qc_lazy_read.py:47 both call
+        # pytest.importorskip("cv2") at MODULE scope, so its absence deselects 24 + 5
+        # tests with nothing to show for it. Measured against release.yml's install
+        # list, which omitted it: 29 tests never collected, and adding opencv ALONE
+        # (without imagecodecs and matplotlib) converted 24 of those silent skips into
+        # 23 failures -- i.e. the omission was hiding real breakage, not merely
+        # trimming coverage.
+        "opencv-python-headless",
     }
 )
 
@@ -126,6 +156,10 @@ NON_TILED_AUTHORITY = frozenset({
     # in a flat requirements file, so the Dockerfile is their authority.
     "torch",
     "kornia",
+    # opencv: authority is containers/regqc, the image whose bin/utils/qc.py imports
+    # cv2. The tiled path does not, so pinning it in containers/tiled/requirements.txt
+    # to satisfy this file would assert a dependency that image does not have.
+    "opencv-python-headless",
 })
 
 # `pip install <stuff>` lines are plain shell inside a YAML block scalar
@@ -197,29 +231,20 @@ def parse_tiled_requirements(text: str) -> dict[str, str]:
     return pins
 
 
-def test_guarded_packages_appear_in_ci_workflow():
-    """The guarded set must not be silently narrowed by deleting a line from a
-    workflow — every guarded package name must appear at least once somewhere
-    under `.github/workflows/`."""
-    found_names: set[str] = set()
-    for wf in workflow_files():
-        found_names |= {name for name, _ in find_guarded_pins(wf.read_text())}
-    missing = GUARDED_PACKAGES - found_names
-    assert not missing, (
-        f"Guarded package(s) {sorted(missing)} do not appear in any `pip "
-        f"install` line in any workflow under "
-        f"{WORKFLOWS_DIR.relative_to(ROOT)} at all. This test's guarded set "
-        "must track packages CI actually installs — either CI stopped "
-        "installing one of them (update GUARDED_PACKAGES) or a pip install "
-        "line was deleted/reworded and needs restoring."
-    )
-
-
-# The packages whose absence turns a test into a SILENT SKIP rather than a failure.
-# tests/test_coarse_frontend.py's DISK+LightGlue cases call
-# pytest.importorskip("torch")/importorskip("kornia"); every other guarded package is
-# imported unconditionally somewhere, so its absence fails the job loudly.
-IMPORTORSKIP_GUARDED = frozenset({"torch", "kornia"})
+# The packages whose absence turns a test into a SILENT SKIP rather than a failure --
+# an absence with nothing in the run output to show for it.
+#
+#   torch / kornia -- tests/test_coarse_frontend.py's DISK+LightGlue cases and
+#     tests/test_coarse_align.py call pytest.importorskip on them per case.
+#   opencv-python-headless -- tests/test_merge_pyramid_streaming.py:66 and
+#     tests/test_registration_qc_lazy_read.py:47 call pytest.importorskip("cv2") at
+#     MODULE scope, which deselects 24 + 5 tests apiece rather than one case.
+#
+# Every other guarded package is imported unconditionally somewhere, so its absence
+# fails the job loudly. This set is an ANNOTATION on the presence check below, not a
+# separate scope: the check covers the whole guarded set per file, and uses this to say
+# which kind of failure the omission would have produced.
+IMPORTORSKIP_GUARDED = frozenset({"torch", "kornia", "opencv-python-headless"})
 
 # `pytest ... tests/` -- the DIRECTORY form, i.e. a job that runs the whole suite.
 # Discovered, never a filename list (see workflow_files()'s docstring for why).
@@ -236,31 +261,64 @@ def workflows_running_the_pytest_suite() -> list[Path]:
     return hits
 
 
-def test_every_pytest_workflow_installs_the_importorskip_guarded_packages():
-    """PER-FILE, because a union presence check is a mask for these two.
+def test_importorskip_set_is_a_subset_of_the_guarded_set():
+    """IMPORTORSKIP_GUARDED only annotates the check below; a name in it that is not
+    in GUARDED_PACKAGES would be annotating a package nothing checks, and would read as
+    covered while being checked nowhere."""
+    stray = IMPORTORSKIP_GUARDED - GUARDED_PACKAGES
+    assert not stray, (
+        f"IMPORTORSKIP_GUARDED names {sorted(stray)}, which GUARDED_PACKAGES does not "
+        "cover, so the presence check below never looks for it. Add it to "
+        "GUARDED_PACKAGES (with an authority) or drop it from here."
+    )
 
-    `test_guarded_packages_appear_in_ci_workflow` above asks only whether a guarded
-    package appears SOMEWHERE under `.github/workflows/`. Measured blind spot: deleting
-    both `pip install torch==2.3.1 --index-url ...` and `pip install kornia==0.7.3` from
-    `.github/workflows/ci.yml` -- the workflow whose `python-tests` job is CI's blocking
-    gate -- left `release.yml`'s copies standing, and this whole file passed. In that
-    state ci.yml still runs the suite, tests/test_coarse_frontend.py's DISK cases
-    importorskip away, and the gate is green having exercised no front-end at all.
 
-    That mask matters for exactly the importorskip-guarded packages: for every other
-    guarded package, a workflow that fails to install it fails loudly on an ImportError
-    and needs no static guard to notice. See tests/test_disk_test_actually_runs.py for
-    the companion check that the DISK case is not merely installable but actually runs.
+def test_every_pytest_workflow_installs_every_guarded_package():
+    """PER-FILE, because a union presence check is a mask.
+
+    This replaces `test_guarded_packages_appear_in_ci_workflow`, which asked only
+    whether a guarded package appeared SOMEWHERE under `.github/workflows/`. Two
+    measured blind spots in that union:
+
+      * deleting both `pip install torch==2.3.1 --index-url ...` and `pip install
+        kornia==0.7.3` from `.github/workflows/ci.yml` -- the workflow whose
+        `python-tests` job is CI's blocking gate -- left `release.yml`'s copies
+        standing and this whole file passed. In that state ci.yml still runs the
+        suite, tests/test_coarse_frontend.py's DISK cases importorskip away, and the
+        gate is green having exercised no front-end at all.
+      * `.github/workflows/release.yml` ran the same `pytest -v tests/` gate while
+        installing neither `imagecodecs` nor `matplotlib` -- ci.yml installed both,
+        so the union was satisfied and this file was green while the release gate,
+        which blocks the version tag, was red. Reproduced in a venv built from
+        release.yml's exact install list: 13 failed / 1072 passed / 13 skipped,
+        against ci.yml's 1115 passed / 10 skipped.
+
+    Scope is every workflow that runs the suite, DISCOVERED by looking for a
+    `pytest ... tests/` invocation rather than named -- the same approach
+    tests/test_disk_test_actually_runs.py takes, for the same reason: a filename list
+    would miss a new workflow that runs the suite without the stack.
+
+    Nothing here says a workflow that does NOT run the suite must install anything;
+    build-images.yml installs no Python at all and is correctly out of scope.
     """
     missing: list[str] = []
     for wf in workflows_running_the_pytest_suite():
         installed = {name for name, _ in find_guarded_pins(wf.read_text())}
-        for pkg in sorted(IMPORTORSKIP_GUARDED - installed):
-            missing.append(f"{wf.relative_to(ROOT)}: no `pip install` of {pkg}")
+        for pkg in sorted(GUARDED_PACKAGES - installed):
+            how = (
+                "SILENTLY -- the suite guards it with pytest.importorskip, so the tests "
+                "needing it are deselected with nothing in the output to show for it"
+                if pkg in IMPORTORSKIP_GUARDED
+                else "loudly, on an ImportError"
+            )
+            missing.append(
+                f"{wf.relative_to(ROOT)}: no `pip install` of {pkg} -- absent, it fails {how}"
+            )
     assert not missing, (
-        "workflow(s) run the pytest suite without installing a package that the suite "
-        "guards with pytest.importorskip, so the tests needing it SKIP there instead of "
-        "failing:\n" + "\n".join(missing)
+        "workflow(s) run the pytest suite without installing a guarded package. A union "
+        "across workflows is not enough here: each of these files runs the suite on its "
+        "own runner, so a sibling workflow's install line does nothing for it.\n"
+        + "\n".join(missing)
     )
 
 def test_ci_guarded_packages_are_pinned_with_double_equals():
@@ -441,6 +499,57 @@ def test_ci_matplotlib_pin_matches_the_segeval_image():
     assert not mismatches, "\n".join(sorted(set(mismatches)))
 
 
+# opencv's authority is containers/regqc/requirements.txt: bin/utils/qc.py imports cv2 at
+# module scope and regqc is the image that runs it. The tiled path never imports cv2.
+#
+# The DISTRIBUTION differs on purpose and only the VERSION is compared. The container
+# pins `opencv-python`; the runners have no display libs, so the workflows install
+# `opencv-python-headless` -- the same source at the same release, built without the GUI
+# backends. Asserting the same distribution name would force a container change (giving
+# regqc a headless build it does not want) disguised as a test, so this check pins the
+# thing that can actually drift: the version. Both must also stay below 5.x, which
+# requires numpy>=2 and would break the numpy==1.26.4 pin the imaging-stack line exists
+# to protect -- an `==` pin on both sides is what holds that.
+REGQC_REQUIREMENTS = ROOT / "containers" / "regqc" / "requirements.txt"
+
+
+def test_ci_opencv_pin_matches_the_regqc_image():
+    """CI's headless opencv pin must match the version containers/regqc installs."""
+    pins = parse_tiled_requirements(REGQC_REQUIREMENTS.read_text())
+    expected = pins.get("opencv-python")
+    assert expected, (
+        f"{REGQC_REQUIREMENTS.relative_to(ROOT)} no longer pins opencv-python, so this "
+        "file has no authority to compare the workflows against. Either restore the pin "
+        "or move opencv-python-headless out of GUARDED_PACKAGES -- do not leave the "
+        "authority dangling."
+    )
+
+    compared = set()
+    mismatches = []
+    for wf in workflow_files():
+        for name, version in find_guarded_pins(wf.read_text()):
+            if name != "opencv-python-headless" or version is None:
+                continue
+            compared.add(str(wf.relative_to(ROOT)))
+            if version != expected:
+                mismatches.append(
+                    f"{wf.relative_to(ROOT)}: opencv-python-headless=={version} but "
+                    f"{REGQC_REQUIREMENTS.relative_to(ROOT)} pins "
+                    f"opencv-python=={expected}"
+                )
+
+    # Non-vacuity: `mismatches` is empty both when the pins agree and when no workflow
+    # pins opencv at all. Only the first is a pass.
+    assert compared, (
+        f"no workflow under {WORKFLOWS_DIR.relative_to(ROOT)} pins "
+        "opencv-python-headless on a `pip install` line, so this comparison is vacuous. "
+        "test_every_pytest_workflow_installs_every_guarded_package should have caught "
+        "that first -- if it did not, the install line was reworded past "
+        "find_guarded_pins()."
+    )
+    assert not mismatches, "\n".join(sorted(set(mismatches)))
+
+
 _DOCKERFILE_PIN_RE = r"(?<![\w.-]){}==([A-Za-z0-9_.-]+)"
 
 
@@ -525,6 +634,7 @@ def test_every_non_tiled_authority_package_has_its_own_check():
         "matplotlib": "test_ci_matplotlib_pin_matches_the_segeval_image",
         "torch": "test_ci_torch_and_kornia_pins_match_the_tiled_dockerfile",
         "kornia": "test_ci_torch_and_kornia_pins_match_the_tiled_dockerfile",
+        "opencv-python-headless": "test_ci_opencv_pin_matches_the_regqc_image",
     }
     assert set(checks) == set(NON_TILED_AUTHORITY), (
         f"NON_TILED_AUTHORITY is {sorted(NON_TILED_AUTHORITY)} but this file maps "
