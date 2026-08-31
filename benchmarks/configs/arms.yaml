@@ -128,8 +128,17 @@ registration_arms:
   # READ THE ARM AGAINST VALIS'S *RIGID* STAGE for the like-for-like number, and
   # against *micro* to quantify what non-rigid buys: ashlar attempts no non-rigid
   # warp at all, so reporting only the second overstates VALIS's advantage.
+  # DISABLED 2026-08-31: dev removed the ashlar backend outright
+  # (:fire: 6a54479 "Remove the ashlar registration backend; v1.0.0 ships valis
+  # and tiled"). registration_method's schema enum is now ['valis', 'tiled'],
+  # bin/ashlar_{retile,solve}.py and modules/local/ashlar_*.nf are gone, and the
+  # reg_ashlar_* params below name nothing in nextflow.config. Left DISABLED
+  # rather than deleted because the rationale above is the expensive part and the
+  # backend still lives on feat/ashlar-arm: if it returns to the pipeline, flip
+  # this back to true and the arm is whole. While it is false, build_arm_plan.py
+  # emits no ashlar arms, so nothing below reaches the schema.
   ashlar:
-    enabled: true
+    enabled: false
     tile_size: [1024, 4096]                # 2 arms
     overlap_fraction: 0.1
     maximum_shift_um: 30                   # MICRONS, and it fails SILENTLY when too small:

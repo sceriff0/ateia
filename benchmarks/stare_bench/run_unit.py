@@ -49,7 +49,8 @@ def _read_tile_plan(csv_path):
 
 
 def run_stare(
-    pair_dir, work_dir, *, tile, halo, upsample, max_error, extra_args=None
+    pair_dir, work_dir, *, tile, halo, upsample, max_error, max_dim,
+    extra_args=None,
 ):
     """COARSE -> REG_TILE (per tile) -> SOLVE, returning the manifest + controls.
 
@@ -61,6 +62,14 @@ def run_stare(
     channel-mismatched registration with no error raised anywhere. Nothing in
     this driver does this today, but a future caller adding a nuclear-index
     override here needs to also thread it through the REG_TILE loop below.
+
+    ``max_dim`` is REQUIRED and has deliberately no default here, mirroring
+    ``bin/tiled_coarse.py --max-dim``: it is the resolution COARSE solves the
+    global transform at, the dominant runtime-and-accuracy knob, and it is
+    owned by ``RegPresets.STARE[<mode>].coarse_max_dim``. A default in this
+    driver would be a second home for that value that nothing pins, and a
+    stale one would silently score STARE at a resolution the pipeline never
+    uses.
     """
     pair_dir, work_dir = Path(pair_dir), Path(work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -76,6 +85,7 @@ def run_stare(
             [
                 "--reference", ref, "--moving", mov,
                 "--tile", tile, "--halo", halo,
+                "--max-dim", max_dim,
                 "--out-m0", m0, "--out-tiles", tiles_csv,
                 *extra,
             ],

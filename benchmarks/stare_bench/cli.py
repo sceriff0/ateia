@@ -198,7 +198,7 @@ def _read_intrinsic(tre_json_path):
 
 
 def score_pair(pair_dir, work_dir, *, method, run_id, tile, halo, upsample,
-               max_error, transform_path=None, controls_path=None,
+               max_error, max_dim, transform_path=None, controls_path=None,
                intrinsic_tre_path=None):
     """Register one pair and reduce it to a single accuracy row.
 
@@ -282,7 +282,8 @@ def score_pair(pair_dir, work_dir, *, method, run_id, tile, halo, upsample,
                 "Pass the real pipeline's transform via transform_path."
             )
         result = run_stare(pair_dir, work_dir, tile=tile, halo=halo,
-                           upsample=upsample, max_error=max_error)
+                           upsample=upsample, max_error=max_error,
+                           max_dim=max_dim)
         predict = predict_from_manifest(result["manifest"])
         for c in result["controls"]:
             key = (int(c["ix"]), int(c["iy"]))
@@ -338,6 +339,11 @@ def main(argv=None):
     ap.add_argument("--tile", type=int, default=2048)
     ap.add_argument("--halo", type=int, default=256)
     ap.add_argument("--upsample", type=int, default=10)
+    # Mirrors RegPresets.STARE.high.coarse_max_dim, as --tile/--halo/--upsample
+    # above mirror that row's tile/halo/upsample. It was re-based 4096 -> 2048
+    # when COARSE became DISK+LightGlue, whose activation memory is linear in
+    # thumbnail AREA; see the long note on the STARE table in lib/RegPresets.groovy.
+    ap.add_argument("--max-dim", type=int, default=2048)
     ap.add_argument("--max-error", type=float, default=0.99)
     ap.add_argument("--transform", default=None,
                     help="already-produced transform from a real pipeline run: a "
@@ -358,7 +364,8 @@ def main(argv=None):
 
     row = score_pair(a.pair_dir, a.work_dir, method=a.method, run_id=a.run_id,
                      tile=a.tile, halo=a.halo, upsample=a.upsample,
-                     max_error=a.max_error, transform_path=a.transform,
+                     max_error=a.max_error, max_dim=a.max_dim,
+                     transform_path=a.transform,
                      controls_path=a.controls,
                      intrinsic_tre_path=a.intrinsic_tre)
     write_accuracy_csv([row], a.out)

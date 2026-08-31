@@ -15,7 +15,20 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install
-        run: pip install numpy scipy scikit-image tifffile pandas pyyaml pytest ruff
+        # torch + kornia power the DISK+LightGlue COARSE front-end that
+        # bin/utils/coarse_align.py::estimate_rigid now calls unconditionally --
+        # the ORB/SIFT/Fourier-Mellin front-ends it used to fall back to were
+        # deleted from the pipeline. stare_bench's unit rung drives the real
+        # bin/tiled_*.py entry points IN-PROCESS (benchmarks/stare_bench/run_unit.py),
+        # outside any container, so without these the whole unit rung errors out.
+        #
+        # ORDER IS LOAD-BEARING, and mirrors containers/tiled/Dockerfile: torch
+        # first and from the CPU index, because kornia pulls torch from PyPI --
+        # the CUDA wheel, ~2.5 GB -- if torch is not already satisfied.
+        run: |
+          pip install numpy scipy scikit-image tifffile pandas pyyaml pytest ruff
+          pip install torch==2.3.1 --index-url https://download.pytorch.org/whl/cpu
+          pip install kornia==0.7.3
       - name: Test
         run: python -m pytest benchmarks/tests -v
       # benchmarks/ is excluded in ruff.toml as "benchmarking scratch";

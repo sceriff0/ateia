@@ -78,10 +78,12 @@ baseline:
                                       # memory_mode=custom, which registration_param_grid pins where it varies it.
   reg_valis_max_non_rigid_dim: null   # VALIS non-rigid registration size (px). null = from memory_mode
                                       # (high -> 4096). Same custom-only rule as above.
-  reg_micro_reg: 2                    # pipeline default: micro-registration DEPTH (0=none | 1=micro-rigid |
-                                      # 2=+micro non-rigid). nextflow.config ships 2 ("default MAX"); this
-                                      # baseline previously claimed 0 was the default, which made the
-                                      # 'baseline' run cheaper AND less accurate than the shipped config.
+  reg_micro_reg: 1                    # pipeline default: micro-registration DEPTH (0=none | 1=micro-rigid |
+                                      # 2=+micro non-rigid). nextflow.config ships 1 (micro-rigid only) as of
+                                      # :wrench: 25a232e; it shipped 2 before that, and this baseline shipped
+                                      # 0 before THAT -- which made the 'baseline' run cheaper AND less
+                                      # accurate than the shipped config. The baseline must BE the shipped
+                                      # config, so this tracks nextflow.config and nothing else.
                                       # Replaces the old boolean skip_micro_registration (removed on main);
                                       # crossed with memory_mode by registration_param_grid.
   reg_tiled_mode: high                # STARE cost/accuracy tier (high|medium|low|custom), pipeline default.
@@ -95,11 +97,12 @@ baseline:
                                       # registration_method_grid crosses it, pinning reg_tiled_mode=custom.
   reg_tiled_gate_tre: 1.0             # STARE per-tile non-rigid refine gate (px), pipeline default. Only live for
                                       # tiled runs; declared for column uniformity (crossed by registration_method_grid).
-  reg_tiled_frontend: orb             # STARE COARSE global-alignment front-end, pipeline default. orb | sift |
-                                      # fourier_mellin | disk_lightglue. Only live for tiled runs; declared here
-                                      # (like reg_tiled_tile above) for column uniformity — inert at this baseline
-                                      # cell (registration_method=valis). Swept by registration_method_grid.tiled
-                                      # below, which pins registration_method=tiled and so makes it live.
+  # reg_tiled_frontend is GONE, not merely unswept. :fire: 5f7f986 deleted the
+  # ORB/SIFT/Fourier-Mellin front-ends and the param that selected them; COARSE is now
+  # unconditionally DISK+LightGlue (bin/utils/coarse_align.py::estimate_rigid is a thin
+  # reshape over _frontend_disk_lightglue). A baseline entry here would name nothing in
+  # nextflow.config, which is what test_project_sweep_baseline_matches_pipeline_defaults
+  # exists to catch.
   n_register_images: 2                # 1 reference + 1 moving (the classic pair)
   reg_qc: 2                           # pipeline default: staged registration QC ON — segments DAPI nuclei,
                                       # fixes correspondence at the rigid stage, re-measures dice_matched +
@@ -344,28 +347,38 @@ registration_method_grid:
     # STARE's counterpart to VALIS's reg_max_image_dim: the resolution the GLOBAL M0 transform is
     # solved at. Both are the dominant runtime-and-accuracy axis of their method, so sweeping one
     # and not the other would compare a TUNED VALIS against an UNTUNED STARE. Brackets the default
-    # 4096 in both directions, mirroring reg_max_image_dim's [2000, 4000, 8000] around its 4000.
+    # in both directions, mirroring reg_max_image_dim's [2000, 4000, 8000] around its 4000.
     #
-    # COST NOTE: ORB is superlinear in thumbnail area — measured 48 s at a 1024 px thumbnail and
-    # 255 s at 2048 px on deliberately corner-dense synthetic input, i.e. roughly 5x per doubling.
-    # 8192 is therefore the walltime risk on this axis (TILED_COARSE has 2 h x task.attempt from
-    # process_low). Drop the 8192 point if these runs start hitting the wall; memory is NOT the
-    # concern — peak is flat across this axis (~0.9 GB) by construction.
-    reg_tiled_coarse_max_dim: [2048, 4096, 8192]   # M0 anchor thumbnail, longest side (px)
-    # COARSE global-alignment front-end (bin/utils/coarse_align.py). orb is today's default; sift and
-    # fourier_mellin cost NO new dependency — both already ship in scikit-image — so they bracket
-    # disk_lightglue, the learned DISK+LightGlue matcher, and keep the comparison honest about what
-    # torch actually buys. This belongs in this per-method grid, not a flat OFAT axis: frontend is
-    # read only when registration_method=tiled, and a flat run off the VALIS baseline would silently
-    # measure nothing at full run cost (the dead-axis trap test_project_sweep_has_no_dead_axes guards
-    # against for reg_tiled_tile/reg_tiled_gate_tre/reg_tiled_coarse_max_dim above).
+    # RE-BASED [2048, 4096, 8192] -> [1024, 2048, 4096] when the shipped default moved 4096 -> 2048
+    # (RegPresets.STARE.high.coarse_max_dim). The old list no longer bracketed the default DOWNWARD
+    # at all -- 2048 was its minimum -- so it measured only the expensive half of the curve and
+    # test_project_stare_resolution_axis_mirrors_the_valis_one failed on exactly that.
     #
-    # disk_lightglue is DELIBERATELY EXCLUDED from this list. It needs the separate stare-ml container
-    # (torch + kornia), so it cannot share this sweep's single execution profile, and its matching body
-    # still raises NotImplementedError (coarse_align.py::_frontend_disk_lightglue) — a sweep cell that
-    # cannot run is worse than an absent one, since conf/modules.config's errorStrategy 'ignore' branch
-    # can drop the resulting failure without failing the run, leaving a gap that looks like data. Add it
-    # here (with -profile stare_ml) once the matching body lands.
+    # COST NOTE — THE BINDING CONSTRAINT IS NOW MEMORY, NOT WALLTIME, and this replaces the old
+    # ORB note (48 s @ 1024 px, 255 s @ 2048 px, peak flat at ~0.9 GB). COARSE is DISK now: a U-Net
+    # whose activation memory is linear in thumbnail AREA. Measured on the pinned stack, 3.03 GB at
+    # 512 px and 8.78 GB at 1024 px, i.e. GB ~= 1.1 + 7.3*Mpx -- which puts 4096 px at ~123 GB and
+    # is precisely why the shipped tier dropped to 2048. TILED_COARSE's memory request derives from
+    # this same column, so the 4096 cell ASKS for ~123 GB and is then clamped by params.max_memory;
+    # on a site whose ceiling is below that it will OOM-retry up the ramp and then fail. Drop the
+    # 4096 point (leaving no upward bracket, so relax the guard with it) if that is your cluster.
+    # 8192 would ask ~490 GB and is not a runnable cell on any site here, which is why it is gone.
+    reg_tiled_coarse_max_dim: [1024, 2048, 4096]   # M0 anchor thumbnail, longest side (px)
+    # THE COARSE FRONT-END AXIS IS GONE, and cannot come back in this form.
     #
-    # COST NOTE: crosses with the three axes above, TRIPLING this grid from 27 to 81 runs.
-    reg_tiled_frontend: [orb, sift, fourier_mellin]
+    # It read: reg_tiled_frontend: [orb, sift, fourier_mellin], crossing the three axes above and
+    # tripling this grid from 27 to 81 runs. Its stated purpose was to bracket disk_lightglue --
+    # then excluded, because it needed a separate stare-ml container and its matching body still
+    # raised NotImplementedError -- against two front-ends that "cost NO new dependency".
+    #
+    # Every premise of that has inverted. :fire: 5f7f986 deleted the ORB/SIFT/Fourier-Mellin
+    # front-ends AND the reg_tiled_frontend param; :package: 0f4c649 folded torch+kornia and the
+    # DISK/LightGlue weights into the :tiled image, so there is no stare-ml container to be outside
+    # of (containers/stare-ml/ is deleted) and no NotImplementedError to wait on. COARSE is now
+    # unconditionally DISK+LightGlue. The axis has ONE value, which is not an axis.
+    #
+    # What that costs this benchmark: there is no longer any front-end comparison, so this sweep
+    # cannot say what the learned matcher bought over the classical ones. That question is now
+    # answerable only against pipeline history, not by a cell in this grid.
+    #
+    # The 81 -> 27 run count that follows is why docs/benchmarks_real.md's totals were re-derived.

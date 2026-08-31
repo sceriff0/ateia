@@ -28,7 +28,7 @@ def test_score_pair_produces_a_complete_row(tmp_path):
                   physics_params={"photobleach": {"factor": 0.9},
                                   "blank_regions": {"fraction": 0.3}})
     row = score_pair(pair, tmp_path / "work", method="tiled", run_id="unit",
-                     tile=256, halo=64, upsample=10, max_error=0.99)
+                     tile=256, halo=64, upsample=10, max_error=0.99, max_dim=1024)
     assert set(row) == set(ACCURACY_COLUMNS)
     assert row["epe_mean_px"] is not None
     assert row["gate_precision"] is not None
@@ -58,7 +58,7 @@ def test_the_same_seed_scores_identically(tmp_path):
                       crop_source=SyntheticCropSource(), physics_params={})
         rows.append(score_pair(pair, tmp_path / f"w_{name}", method="tiled",
                                run_id="unit", tile=256, halo=64, upsample=10,
-                               max_error=0.99))
+                               max_error=0.99, max_dim=1024))
     assert rows[0]["epe_mean_px"] == rows[1]["epe_mean_px"]
     assert rows[0]["param_hash"] == rows[1]["param_hash"]
 
@@ -119,7 +119,7 @@ def test_score_pair_raises_on_tile_mismatch(tmp_path):
                   crop_source=SyntheticCropSource(), physics_params={})
     with pytest.raises(ValueError, match="tile"):
         score_pair(pair, tmp_path / "work", method="tiled", run_id="unit",
-                   tile=128, halo=64, upsample=10, max_error=0.99)
+                   tile=128, halo=64, upsample=10, max_error=0.99, max_dim=1024)
 
 
 class _FakeSlide:
@@ -232,7 +232,7 @@ def test_score_pair_without_transform_raises_for_non_tiled_methods(tmp_path, met
                   crop_source=SyntheticCropSource(), physics_params={})
     with pytest.raises(ValueError, match="transform_path"):
         score_pair(pair, tmp_path / "work", method=method, run_id="unit",
-                   tile=256, halo=64, upsample=10, max_error=0.99)
+                   tile=256, halo=64, upsample=10, max_error=0.99, max_dim=1024)
 
 
 def test_score_pair_tiled_without_transform_still_uses_run_stare(tmp_path):
@@ -243,7 +243,7 @@ def test_score_pair_tiled_without_transform_still_uses_run_stare(tmp_path):
     generate_pair(pair, (1024, 1024), seed=62, tile=256,
                   crop_source=SyntheticCropSource(), physics_params={})
     row = score_pair(pair, tmp_path / "work", method="tiled", run_id="unit",
-                     tile=256, halo=64, upsample=10, max_error=0.99)
+                     tile=256, halo=64, upsample=10, max_error=0.99, max_dim=1024)
     assert row["epe_mean_px"] is not None
     # run_stare's per-control JSONs are available, so the gate ROC is real,
     # not the empty-default a transform_path-based score gets.
@@ -272,7 +272,7 @@ def test_score_pair_uses_the_manifest_predictor_when_a_transform_is_given(
     manifest = _write_stub_manifest(tmp_path / "manifest.json", dx=5.0, dy=3.0)
 
     row = score_pair(pair, tmp_path / "work", method=method, run_id="unit",
-                     tile=256, halo=64, upsample=10, max_error=0.99,
+                     tile=256, halo=64, upsample=10, max_error=0.99, max_dim=1024,
                      transform_path=str(manifest))
     assert row["method"] == method
     assert row["epe_mean_px"] is not None
@@ -309,7 +309,7 @@ def test_score_pair_with_transform_reports_gate_as_unmeasured_not_zero(tmp_path)
     manifest = _write_stub_manifest(tmp_path / "manifest.json", dx=5.0, dy=3.0)
 
     row = score_pair(pair, tmp_path / "work", method="ashlar", run_id="unit",
-                     tile=256, halo=64, upsample=10, max_error=0.99,
+                     tile=256, halo=64, upsample=10, max_error=0.99, max_dim=1024,
                      transform_path=str(manifest))
     assert row["gate_recall"] is None
     assert row["gate_auc"] is None
@@ -402,12 +402,12 @@ def test_published_controls_reproduce_the_in_process_gate_exactly(tmp_path):
 
     work = tmp_path / "work"
     in_process = score_pair(pair, work, method="tiled", run_id="unit",
-                            tile=256, halo=64, upsample=10, max_error=0.99)
+                            tile=256, halo=64, upsample=10, max_error=0.99, max_dim=1024)
 
     published = _publish_controls(work, tmp_path / "controls")
     from_published = score_pair(
         pair, tmp_path / "work2", method="tiled", run_id="unit",
-        tile=256, halo=64, upsample=10, max_error=0.99,
+        tile=256, halo=64, upsample=10, max_error=0.99, max_dim=1024,
         transform_path=str(work / "manifest.json"),
         controls_path=str(published),
     )
@@ -437,7 +437,7 @@ def test_controls_are_refused_for_a_non_stare_backend(tmp_path):
 
     with pytest.raises(ValueError, match="STARE"):
         score_pair(pair, tmp_path / "work", method="ashlar", run_id="unit",
-                   tile=256, halo=64, upsample=10, max_error=0.99,
+                   tile=256, halo=64, upsample=10, max_error=0.99, max_dim=1024,
                    transform_path=str(manifest), controls_path=str(controls))
 
 
@@ -457,5 +457,5 @@ def test_an_empty_controls_directory_raises_rather_than_scoring_zero(tmp_path):
 
     with pytest.raises(ValueError, match="no \\*_ctrl.json"):
         score_pair(pair, tmp_path / "work", method="tiled", run_id="unit",
-                   tile=256, halo=64, upsample=10, max_error=0.99,
+                   tile=256, halo=64, upsample=10, max_error=0.99, max_dim=1024,
                    transform_path=str(manifest), controls_path=str(empty))

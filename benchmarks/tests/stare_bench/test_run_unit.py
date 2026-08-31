@@ -42,7 +42,7 @@ def affine_pair(tmp_path_factory):
 def test_run_stare_produces_a_manifest_and_controls(pair, tmp_path):
     pair_dir, _ = pair
     got = run_stare(pair_dir, tmp_path, tile=256, halo=64, upsample=10,
-                    max_error=0.99)
+                    max_error=0.99, max_dim=1024)
     assert got["manifest"].exists()
     assert len(got["controls"]) == 16
     assert all("error" in c and "mov_fg" in c for c in got["controls"])
@@ -61,7 +61,7 @@ def test_predictor_recovers_the_injected_displacement(affine_pair, tmp_path):
     """
     pair_dir, truth = affine_pair
     got = run_stare(pair_dir, tmp_path, tile=256, halo=64, upsample=10,
-                    max_error=0.99)
+                    max_error=0.99, max_dim=1024)
     predict = predict_from_manifest(got["manifest"])
 
     # A dense grid over the image, not two hand-picked points: the amplitude
@@ -103,7 +103,7 @@ def test_random_fourier_case_runs_and_records_its_ratio(pair, tmp_path, capsys):
     """
     pair_dir, truth = pair
     got = run_stare(pair_dir, tmp_path, tile=256, halo=64, upsample=10,
-                    max_error=0.99)
+                    max_error=0.99, max_dim=1024)
     assert len(got["controls"]) == 16
 
     predict = predict_from_manifest(got["manifest"])
@@ -136,6 +136,6 @@ def _truth_disp(truth, xy):
 def test_cost_is_reported(pair, tmp_path):
     pair_dir, _ = pair
     got = run_stare(pair_dir, tmp_path, tile=256, halo=64, upsample=10,
-                    max_error=0.99)
+                    max_error=0.99, max_dim=1024)
     assert got["cost"]["wall_s"] > 0
     assert got["cost"]["peak_rss_gb"] > 0

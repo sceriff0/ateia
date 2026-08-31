@@ -446,14 +446,22 @@ NOT_SWEPT = {
         "last task has finished."),
 
     # --- site / scheduler. Properties of the cluster, not of the pipeline. ---
-    # max_cpus and max_memory USED to be excused here. They are no longer params at all:
-    # nextflow.config declares neither, and nf-schema's `required` list refuses a run that
-    # supplies neither, because a resource ceiling is a claim about someone else's hardware
-    # and guessing high fails as an OOM-kill hours in. The SWEEP_PROFILE carries them --
-    # `docker,local` by default, `singularity,ieo` on the cluster -- and NOT benchmark.config,
-    # because a `-c` file overrides a profile's params and would clobber the site ceiling. An
-    # excuse for a param that no longer exists is indistinguishable from a deliberate coverage
-    # gap, so these two go.
+    # max_cpus and max_memory ARE params again, and are excused rather than swept.
+    # This note previously said they were "no longer params at all"; that was true of the
+    # window in which they were undeclared, and stopped being true at :bug: 90bfdbe
+    # ("Declare the resource ceilings null so schema and params agree"). They are now
+    # DECLARED NULL in nextflow.config (:396-397) and listed in nf-schema's `required`,
+    # so a run must still supply them -- the rejection message is identical, only the
+    # mechanism moved from "undeclared" to "declared null + required".
+    #
+    # The reason they are not swept is unchanged and is the same one max_time carries: a
+    # resource ceiling is a claim about someone else's hardware, and varying it benchmarks
+    # the machine rather than the pipeline. They are supplied by the SWEEP_PROFILE
+    # (`docker,local` by default, `singularity,ieo` on the cluster) and NOT by
+    # benchmark.config, because a `-c` file overrides a profile's params and would clobber
+    # the site ceiling.
+    "max_cpus": "resourceLimits clamp — a site ceiling; varying it benchmarks the machine",
+    "max_memory": "resourceLimits clamp — a site ceiling; varying it benchmarks the machine",
     "max_time": "resourceLimits clamp — a site ceiling; varying it benchmarks the machine",
     "max_forks": (
         "cluster concurrency, not pipeline cost. It caps how many tasks of one process run "
